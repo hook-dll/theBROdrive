@@ -36,6 +36,38 @@ const GRAIN_WAVELENGTH = 7;
 const OUTCROP_WAVELENGTH = 170;
 const OUTCROP_THRESHOLD = 0.42;
 
+/**
+ * The basin rim: where the desert stops being flat and starts climbing out.
+ *
+ * The world needs an edge, and the honest options are an invisible wall, a kill
+ * plane, or terrain you cannot drive up. This is the third: past
+ * `RIM_START` the ground lifts into an escarpment that tops out beyond the solid
+ * band, so the road runs along the floor of a basin whose walls are visible from
+ * the tarmac and unclimbable long before the collider ends.
+ *
+ * A rim rather than rough ground is deliberate: the terrain mesh out there is
+ * sampled every few tens of metres, so any short-wavelength roughness would alias
+ * into nothing (or into launch ramps). A monotone lift is representable at any
+ * resolution, reads as landscape, and its slope is exactly what the profile says.
+ */
+export const RIM_START = 400;
+/** Lateral distance where the rim reaches full height. Past the solid band. */
+const RIM_FULL = 750;
+/** Height of the rim above the basin floor, metres. */
+const RIM_HEIGHT = 120;
+
+/**
+ * Rim height added at a lateral distance. Smoothstep, so the foot of the rim is a
+ * gentle bank (no lip to launch off) and the middle third is the steep face: with
+ * the constants above the steepest point is around 33 degrees, past what a car can
+ * pull with a finite grip budget and enough to defeat a run-up.
+ */
+function rimHeight(lateralDistance: number): number {
+  if (lateralDistance <= RIM_START) return 0;
+  const t0 = Math.min(1, (lateralDistance - RIM_START) / (RIM_FULL - RIM_START));
+  return RIM_HEIGHT * t0 * t0 * (3 - 2 * t0);
+}
+
 export class Terrain {
   private readonly duneNoise: Noise2D;
   private readonly rippleNoise: Noise2D;
@@ -96,8 +128,58 @@ export class Terrain {
     // Relief expressed relative to the centreline keeps the seam continuous: as
     // dist approaches CORRIDOR_INNER the added relief tends to zero from both sides.
     const centre = this.road.sampleAt(p.s);
-    const delta = this.relief(x, z) - this.relief(centre.x, centre.z);
-    return p.height - ROAD_SINK * (1 - t) + delta * t;
+    return this.blend(x, z, centre.x, centre.z, p.height, dist, t);
+  }
+
+  /**
+   * Height for a point whose road frame is already known.
+   *
+   * Grid builders generate their points FROM the road frame (an `s` row and a
+   * lateral column), so making them call `heightAt` throws that away and pays for
+   * two road projections per vertex — measured at ~16 us a vertex, which is most of
+   * a chunk's build time. Here the caller passes the frame it already has: the
+   * centreline point for the row (one `sampleAt` per row, not per vertex) and the
+   * column's lateral offset. Same formula as `heightAt`, no search.
+   */
+  heightFromFrame(
+    x: number,
+    z: number,
+    lateral: number,
+    centreX: number,
+    centreZ: number,
+    centreHeight: number,
+  ): number {
+    const dist = Math.abs(lateral);
+    if (dist <= CORRIDOR_INNER) return centreHeight - ROAD_SINK;
+
+    const t0 = Math.min(1, (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER));
+    const t = t0 * t0 * (3 - 2 * t0);
+    return this.blend(x, z, centreX, centreZ, centreHeight, dist, t);
+  }
+
+  /**
+   * Shared tail of both height paths: corridor floor, open desert relief, and the
+   * basin rim. Kept in one place because the grid builders' frame-based path and the
+   * general query path MUST agree exactly — a difference here is a car floating
+   * above, or sunk into, the ground it is drawn on.
+   */
+  private blend(
+    x: number,
+    z: number,
+    centreX: number,
+    centreZ: number,
+    centreHeight: number,
+    dist: number,
+    t: number,
+  ): number {
+    const delta = this.relief(x, z) - this.relief(centreX, centreZ);
+    return centreHeight - ROAD_SINK * (1 - t) + delta * t + rimHeight(dist);
+  }
+
+  /** `surfaceAt` for a caller that already knows the lateral offset. */
+  surfaceFromFrame(x: number, z: number, lateral: number): SurfaceType {
+    if (Math.abs(lateral) <= CORRIDOR_INNER + VERGE_WIDTH) return SurfaceType.Gravel;
+    return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
 
   /** Surface material of the open ground at a point. The road itself is separate. */

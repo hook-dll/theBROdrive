@@ -669,6 +669,23 @@ export class Vehicle {
     outQuat.slerpQuaternions(this.prevQuat, this.stepQuat, alpha);
   }
 
+  /**
+   * Places the chassis upright and at rest at a world position. For the
+   * fall-out-of-world rescue only: velocities are cleared so the car does not
+   * arrive carrying the speed of its fall, and the interpolation snapshots are
+   * re-primed so the renderer does not draw a streak from wherever it fell to.
+   */
+  rescueTo(x: number, y: number, z: number, heading: number): void {
+    this.chassisBody.setTranslation({ x, y, z }, true);
+    this.chassisBody.setRotation(
+      { x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) },
+      true,
+    );
+    this.chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.snapshotPrimed = false;
+  }
+
   syncVisuals(alpha: number): void {
     const controller = this.controller;
     if (!controller) return;

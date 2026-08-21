@@ -2,32 +2,53 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { NODE_SPACING, type Road } from './road';
-import { CORRIDOR_INNER } from './terrain';
+import { CORRIDOR_INNER, RIM_START } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
 
 /**
  * Desert either side of the road.
  *
- * The visible mesh is a road-aligned (s, lateral) grid so it hugs the road exactly,
- * with lateral spacing growing geometrically (fine at the verge, coarse at the
- * horizon). Physics is an axis-aligned Rapier heightfield covering the near band —
- * enough ground to drive off-road on, and no colliders beyond it. Rapier
- * heightfields are axis-aligned and centred on their body translation, and their
- * heights are column-major with rows along local Z and columns along local X, so
- * the fill ordering below is load-bearing.
+ * One road-aligned (s, lateral) grid serves as both the visible mesh and — out to
+ * `PHYSICS_LATERAL` — the collider, so what you see is exactly what the wheels
+ * feel, with no second sampling pass and no seam between a physics surface and a
+ * drawn one. Lateral spacing grows geometrically: metres at the verge, hundreds of
+ * metres at the horizon, which is what lets the vista reach kilometres for a few
+ * hundred triangles.
+ *
+ * The bands, outward from the centreline:
+ *   - to `PHYSICS_LATERAL`: drawn and solid. Fine at the verge, progressively
+ *     coarser, and (see `terrain.ts`) progressively steeper past
+ *     `HOSTILE_LATERAL_START`, so leaving the road becomes hard work rather than
+ *     hitting an invisible wall.
+ *   - to `FAR_LATERAL`: drawn only. Distant landscape; nothing to collide with out
+ *     there because nothing can reach it.
+ * Beyond that the fog ramp (main.ts) and the sky dome close the view.
  */
 
-/** How far out the visible desert reaches, each side of the road. */
-const FAR_LATERAL = 220;
+/**
+ * How far out the visible desert reaches, each side of the road. Chosen against the
+ * fog: with the off-road haze ramp (main.ts) nothing beyond this resolves, so
+ * drawing further only costs triangles on a weak GPU.
+ */
+const FAR_LATERAL = 1500;
+/**
+ * How far out the ground is solid, each side of the road. The relief turns
+ * genuinely impassable before this, so the edge is reached by choice, not by
+ * surprise — and `main.ts` catches anything that gets past it anyway.
+ */
+const PHYSICS_LATERAL = 600;
 /** Lateral spacing growth factor; resolution falls off away from the road. */
 const LATERAL_RATIO = 1.35;
 /** Visible mesh sampling step along the road. Must divide CHUNK_LENGTH. */
 const S_STEP = 8;
 
-/** How far either side of the road the physics heightfield reaches. */
-const NEAR_BAND = 60;
-/** Physics heightfield cell size in metres. */
-const HEIGHTFIELD_CELL = 2;
+/**
+ * Maximum lateral ring spacing across the rim. Small enough that the escarpment is
+ * several facets tall — it is the one piece of far terrain the player looks AT
+ * rather than past — and applied only there, so the flat basin and the vista keep
+ * their cheap geometric spacing.
+ */
+const RIM_RING_SPACING = 60;
 
 /** Surface albedos pre-converted to the linear working colour space. */
 const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
@@ -46,6 +67,22 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
   metalness: 0,
 });
 
+/**
+ * One chunk's terrain grid: the drawn mesh plus the raw grid it was built from, so
+ * the collider can be indexed straight off the same vertices.
+ */
+interface BuiltTerrain {
+  readonly group: THREE.Group;
+  readonly geometry: THREE.BufferGeometry;
+  /** Interleaved xyz, row-major: `positions[(si * laterals.length + li) * 3]`. */
+  readonly positions: Float32Array;
+  /** Signed lateral offset of each grid column, ascending. */
+  readonly laterals: readonly number[];
+  readonly sCount: number;
+  /** True for chunks off either end of the road, where there is no road quad. */
+  readonly isApron: boolean;
+}
+
 export class TerrainMeshProvider implements ChunkProvider {
   readonly id = 'terrain';
 
@@ -57,15 +94,15 @@ export class TerrainMeshProvider implements ChunkProvider {
     const sStart = ctx.chunkIndex * CHUNK_LENGTH;
     const sEnd = (ctx.chunkIndex + 1) * CHUNK_LENGTH;
 
-    const { group, geometry } = this.buildVisual(ctx, sStart, sEnd);
+    const built = this.buildVisual(ctx, sStart, sEnd);
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
 
     if (ctx.hasPhysics) {
-      this.buildHeightfield(ctx, sStart, sEnd, bodies, colliders);
+      this.addCollider(ctx, built, bodies, colliders);
     }
 
-    return { group, bodies, colliders, dispose: () => geometry.dispose() };
+    return { group: built.group, bodies, colliders, dispose: () => built.geometry.dispose() };
   }
 
   /**
@@ -92,19 +129,26 @@ export class TerrainMeshProvider implements ChunkProvider {
     return out;
   }
 
-  private buildVisual(
-    ctx: ChunkContext,
-    sStart: number,
-    sEnd: number,
-  ): { group: THREE.Group; geometry: THREE.BufferGeometry } {
+  private buildVisual(ctx: ChunkContext, sStart: number, sEnd: number): BuiltTerrain {
     const { road, terrain } = ctx;
 
     const isApron = sStart < 0 || sEnd > road.length;
 
+    // Geometric lateral rings — metres at the verge, hundreds at the horizon — with
+    // two exceptions. `PHYSICS_LATERAL` is forced in as an exact ring so the
+    // collider ends on a shared row of vertices (the solid ground and the drawn
+    // ground then agree there to the bit rather than meeting mid-quad), and across
+    // the rim the spacing is capped: the escarpment climbs 120 m over 350 m of
+    // lateral distance, and at the unconstrained spacing out there it would be two
+    // facets wide and read as a folded sheet.
     const magnitudes: number[] = [CORRIDOR_INNER];
     let m = CORRIDOR_INNER;
     while (m < FAR_LATERAL) {
-      m = Math.min(m * LATERAL_RATIO, FAR_LATERAL);
+      const step = m >= RIM_START - RIM_RING_SPACING && m < PHYSICS_LATERAL
+        ? Math.min(m * LATERAL_RATIO - m, RIM_RING_SPACING)
+        : m * LATERAL_RATIO - m;
+      const next = Math.min(m + step, FAR_LATERAL);
+      m = m < PHYSICS_LATERAL && next > PHYSICS_LATERAL ? PHYSICS_LATERAL : next;
       if (m - magnitudes[magnitudes.length - 1]! < 1) break;
       magnitudes.push(m);
     }
@@ -125,16 +169,28 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     for (let si = 0; si < sCount; si++) {
       const s = sStart + si * S_STEP;
-      const hint = Math.min(Math.max(s, 0), road.length);
+      // The row's centreline frame, sampled once. Every vertex in the row already
+      // knows its own lateral offset, so the terrain never has to project back.
+      const centre = road.sampleAt(Math.min(Math.max(s, 0), road.length));
+      this.offsetPoint(road, s, 0, point);
+      const centreX = point.x;
+      const centreZ = point.z;
       for (let li = 0; li < latCount; li++) {
         const lateral = laterals[li]!;
         this.offsetPoint(road, s, lateral, point);
         const vi = si * latCount + li;
         positions[vi * 3] = point.x;
-        positions[vi * 3 + 1] = terrain.heightAt(point.x, point.z, hint);
+        positions[vi * 3 + 1] = terrain.heightFromFrame(
+          point.x,
+          point.z,
+          lateral,
+          centreX,
+          centreZ,
+          centre.y,
+        );
         positions[vi * 3 + 2] = point.z;
 
-        const surfaceColor = SURFACE_LINEAR[terrain.surfaceAt(point.x, point.z, hint)]!;
+        const surfaceColor = SURFACE_LINEAR[terrain.surfaceFromFrame(point.x, point.z, lateral)]!;
         colors[vi * 3] = surfaceColor.r;
         colors[vi * 3 + 1] = surfaceColor.g;
         colors[vi * 3 + 2] = surfaceColor.b;
@@ -166,84 +222,81 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.setIndex(new THREE.BufferAttribute(Uint32Array.from(index), 1));
     geometry.computeVertexNormals();
 
-    return { group: new THREE.Group().add(new THREE.Mesh(geometry, terrainMaterial)), geometry };
+    return {
+      group: new THREE.Group().add(new THREE.Mesh(geometry, terrainMaterial)),
+      geometry,
+      positions,
+      laterals,
+      sCount,
+      isApron,
+    };
   }
 
-  private buildHeightfield(
+  /**
+   * Solid ground, built from the visible grid's own vertices out to
+   * `PHYSICS_LATERAL`.
+   *
+   * Reusing the drawn vertices is the whole trick: the collider costs no extra
+   * terrain sampling (the expensive part is `heightAt`, already paid), it can never
+   * disagree with what is on screen, and because the rings are geometric it is
+   * detailed at the verge and cheap far out — a few hundred triangles for 600 m of
+   * driveable desert either side. The previous axis-aligned heightfield sampled the
+   * terrain a second time on its own 2 m lattice, which cost more than the mesh and
+   * still only reached 60 m.
+   */
+  private addCollider(
     ctx: ChunkContext,
-    sStart: number,
-    sEnd: number,
+    built: BuiltTerrain,
     bodies: RAPIER.RigidBody[],
     colliders: RAPIER.Collider[],
   ): void {
-    const { road, terrain, physics } = ctx;
+    const { laterals, positions, sCount, isApron } = built;
+    const latCount = laterals.length;
 
-    // Centreline samples over the chunk: used for the road AABB and, per grid
-    // point, to seed the road projection so the corridor sink lands exactly.
-    const nSamples = Math.round((sEnd - sStart) / NODE_SPACING) + 1;
-    const csx = new Float64Array(nSamples);
-    const csz = new Float64Array(nSamples);
-    const css = new Float64Array(nSamples);
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    const point = { x: 0, y: 0, z: 0 };
-    for (let k = 0; k < nSamples; k++) {
-      const s = sStart + k * NODE_SPACING;
-      this.offsetPoint(road, s, 0, point);
-      csx[k] = point.x;
-      csz[k] = point.z;
-      css[k] = Math.min(Math.max(s, 0), road.length);
-      if (point.x < minX) minX = point.x;
-      if (point.x > maxX) maxX = point.x;
-      if (point.z < minZ) minZ = point.z;
-      if (point.z > maxZ) maxZ = point.z;
-    }
+    // Contiguous block of rings within the solid band; the ring list is sorted and
+    // symmetric, so this is a slice, not a filter.
+    let first = 0;
+    while (first < latCount && laterals[first]! < -PHYSICS_LATERAL) first++;
+    let last = latCount - 1;
+    while (last > 0 && laterals[last]! > PHYSICS_LATERAL) last--;
+    if (last - first < 1) return;
 
-    minX -= NEAR_BAND;
-    maxX += NEAR_BAND;
-    minZ -= NEAR_BAND;
-    maxZ += NEAR_BAND;
-
-    const ncolsX = Math.max(1, Math.ceil((maxX - minX) / HEIGHTFIELD_CELL));
-    const nrowsZ = Math.max(1, Math.ceil((maxZ - minZ) / HEIGHTFIELD_CELL));
-    const widthX = ncolsX * HEIGHTFIELD_CELL;
-    const widthZ = nrowsZ * HEIGHTFIELD_CELL;
-
-    // Column-major heights over an (nrowsZ+1) x (ncolsX+1) grid: the X index is
-    // the column, the Z index the row, so `heights[z + x * (nrowsZ + 1)]`.
-    const heights = new Float32Array((ncolsX + 1) * (nrowsZ + 1));
-
-    for (let cx = 0; cx <= ncolsX; cx++) {
-      const x = minX + cx * HEIGHTFIELD_CELL;
-      for (let cz = 0; cz <= nrowsZ; cz++) {
-        const z = minZ + cz * HEIGHTFIELD_CELL;
-        // Seed the projection with the nearest centreline sample: within ~2 m of
-        // the true s, so the corridor classification never misfires near the road.
-        let best = 0;
-        let bestD = Infinity;
-        for (let k = 0; k < nSamples; k++) {
-          const dx = csx[k]! - x;
-          const dz = csz[k]! - z;
-          const d = dx * dx + dz * dz;
-          if (d < bestD) {
-            bestD = d;
-            best = k;
-          }
-        }
-        heights[cz + cx * (nrowsZ + 1)] = terrain.heightAt(x, z, css[best]!);
+    // Compact the band's vertices into their own array. Handing Rapier the whole
+    // grid and indexing only part of it looks tempting, but a trimesh's AABB spans
+    // every vertex it was given: the collider would claim a kilometres-wide box in
+    // the broad phase and every query in the world would test against it. Measured:
+    // 32 ms/frame with the full array, 14 ms with this copy.
+    const bandCount = last - first + 1;
+    const vertices = new Float32Array(sCount * bandCount * 3);
+    for (let si = 0; si < sCount; si++) {
+      for (let li = first; li <= last; li++) {
+        const src = (si * latCount + li) * 3;
+        const dst = (si * bandCount + (li - first)) * 3;
+        vertices[dst] = positions[src]!;
+        vertices[dst + 1] = positions[src + 1]!;
+        vertices[dst + 2] = positions[src + 2]!;
       }
     }
 
-    // The body translation is the centre of the axis-aligned grid; scale.y = 1
-    // because heights are already world-space metres.
-    const collider = physics.addHeightfield(
-      nrowsZ,
-      ncolsX,
-      heights,
-      { x: widthX, y: 1, z: widthZ },
-      { x: (minX + maxX) / 2, y: 0, z: (minZ + maxZ) / 2 },
+    const index: number[] = [];
+    for (let si = 0; si < sCount - 1; si++) {
+      for (let li = first; li < last; li++) {
+        // Same rule as the visible grid: in-range, the road's own trimesh owns the
+        // corridor quad, so leaving it out here keeps the two from fighting over
+        // the same wheel ray.
+        if (!isApron && laterals[li]! < 0 && laterals[li + 1]! > 0) continue;
+        const a = si * bandCount + (li - first);
+        const b = a + bandCount;
+        const c = a + 1;
+        const d = b + 1;
+        index.push(a, b, c, b, d, c);
+      }
+    }
+    if (index.length === 0) return;
+
+    const collider = ctx.physics.addStaticTrimesh(
+      vertices,
+      Uint32Array.from(index),
       SurfaceType.Sand,
     );
     colliders.push(collider);

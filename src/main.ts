@@ -46,17 +46,39 @@ import { Vehicle } from './vehicle/vehicle';
  */
 
 /**
- * A followed position further than this from the current arclength forces a full
- * unhinted road projection. Wider than any per-tick movement, narrower than the
- * hinted search window's reach.
+ * Lateral distance from the road beyond which a followed position is treated as
+ * teleported and re-homed with a full unhinted projection. Comfortably outside the
+ * drawn world (vista 1500 m), so ordinary off-road driving never pays for it.
  */
-const ACTIVE_S_REHOME_DISTANCE = 150;
+const ACTIVE_S_REHOME_LATERAL = 2000;
 /** How far ahead of the view a spawned car is placed, metres. */
 const SPAWN_AHEAD_DISTANCE = 6;
 /** Height above the eye the spawn ground probe starts from. */
 const SPAWN_PROBE_HEIGHT = 3;
 /** Extra clearance under a spawned chassis so it settles onto its suspension. */
 const SPAWN_WHEEL_CLEARANCE = 0.35;
+
+/**
+ * Off-road haze ramp, metres of lateral distance from the road centreline. Starts
+ * where the coarse ground band begins and saturates where it ends, so the far
+ * desert reads as haze closing in rather than as a terrain edge.
+ */
+const FOG_RAMP_START = 150;
+const FOG_RAMP_END = 600;
+/** Fog density multiplier at full ramp. */
+const FOG_RAMP_MAX_SCALE = 3.2;
+/**
+ * How far below the terrain a body must be before it counts as fallen out of the
+ * world. Deeper than any legitimate dip (the corridor sinks 0.16 m and a pothole
+ * 0.07 m) and than a chassis half-height, so normal driving can never trigger it.
+ */
+const RESCUE_FALL_DEPTH = 6;
+/**
+ * Height above the road a rescued car is dropped from. Must clear the chassis
+ * half-height plus its suspension travel: dropped flush, the chassis starts
+ * intersecting the road's thin trimesh and the solver pushes it straight through.
+ */
+const RESCUE_LIFT = 1.6;
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
 
@@ -305,23 +327,46 @@ async function boot(): Promise<void> {
       }
     }
 
-    // Normally the car moves a few metres per tick, so the previous arclength is a
-    // perfect hint and the projection is a couple of samples. But a hinted search is
-    // local, so any discontinuity (a debug reposition, or a restored save placing the
-    // car far from the last hint) would silently strand the streamer at the old
-    // arclength and drop the car through unbuilt ground. Detect the jump and pay for
-    // one full sweep.
+    // A hinted projection stays correct for as long as the car moves continuously,
+    // and the hint is only ever stranded by a discontinuity: a restored save, a
+    // debug reposition, a rescue. Judging that by raw distance from the last
+    // centreline sample used to be safe when the world was 60 m wide, but the desert
+    // is now driveable to 600 m either side, so a legitimate excursion looked like a
+    // jump and bought an unhinted sweep — which, on a road that wanders back through
+    // its own neighbourhood over 400 km, can latch onto a segment kilometres away and
+    // stream the wrong chunks out from under the car. The hinted result's own lateral
+    // distance is the honest test: no legal position is further out than the vista.
     if (driving) {
       const t = driving.chassis.translation();
-      const near = road.sampleAt(activeS);
-      const jumped =
-        (near.x - t.x) ** 2 + (near.z - t.z) ** 2 > ACTIVE_S_REHOME_DISTANCE ** 2;
-      activeS = jumped ? road.project(t.x, t.z).s : road.project(t.x, t.z, activeS).s;
+      const p = road.project(t.x, t.z, activeS);
+      activeS = Math.abs(p.lateral) > ACTIVE_S_REHOME_LATERAL ? road.project(t.x, t.z).s : p.s;
     } else {
       activeS = player.s;
     }
     streamer.update(activeS);
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
+
+    // Rescue. Ground only exists out to the coarse physics band, and a determined
+    // player can still leave it (or clip through a seam) and fall forever. Rather
+    // than an invisible wall, catch anything that has dropped well below the
+    // terrain it should be standing on and put it back on the road: the desert
+    // gets harder to cross the further out you go, and if you beat it anyway the
+    // world hands you back instead of deleting you.
+    if (driving) {
+      const t = driving.chassis.translation();
+      if (t.y < terrain.heightAt(t.x, t.z, activeS) - RESCUE_FALL_DEPTH) {
+        const home = road.sampleAt(activeS);
+        driving.rescueTo(home.x, home.y + RESCUE_LIFT, home.z, home.heading);
+        hud.setToast('towed back to the road');
+      }
+    } else {
+      const p = player.position;
+      if (p.y < terrain.heightAt(p.x, p.z, activeS) - RESCUE_FALL_DEPTH) {
+        const home = road.sampleAt(activeS);
+        player.teleport(home.x, home.y, home.z);
+        hud.setToast('walked back to the road');
+      }
+    }
 
     recordTimer += dt;
     if (recordTimer >= RECORD_INTERVAL) {
@@ -382,6 +427,16 @@ async function boot(): Promise<void> {
 
     const cam = renderer.camera.position;
     sky.update(s.timeOfDay, activeS, cam.x, cam.y, cam.z);
+
+    // Off-road haze. `sky.update` sets the fog density for the time of day; this
+    // multiplies it by how far the view has strayed from the road, so the desert
+    // closes in as you leave and the far bands dissolve into haze instead of
+    // ending at a visible edge. Ramp starts where the coarse ground begins and
+    // saturates where it runs out, and it is a view effect only: nothing about
+    // the simulation changes.
+    const offRoad = Math.abs(road.project(cam.x, cam.z, activeS).lateral);
+    const hazeT = Math.min(1, Math.max(0, (offRoad - FOG_RAMP_START) / (FOG_RAMP_END - FOG_RAMP_START)));
+    renderer.fog.density *= 1 + hazeT * hazeT * (FOG_RAMP_MAX_SCALE - 1);
 
     // Night signal: reuse the sky's existing threshold (the same one the lamps
     // and headlights key off) rather than re-deriving dusk from timeOfDay. Lamps
