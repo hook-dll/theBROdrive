@@ -60,8 +60,17 @@ const WIRE_RADIUS = 0.012; // thin enough to read as a wire, thick enough to res
 // the fixtures nearest the player.
 const LAMP_COLOR = 0xffc37a;
 const LAMP_DISTANCE = 34;
-const LAMP_POINT = 42; // PointLight intensity at full night (physical units, decay 2)
+// PointLight intensity at full night (physical units, decay 2). Sized so the pool
+// reaches across the near lane from a head hung at the asphalt edge, ~6 m up.
+const LAMP_POINT = 60;
 const LAMP_EMISSIVE = 2.2; // emissive intensity at full night
+/**
+ * How far the concrete lamp arm reaches from its pole, metres. The poles stand at
+ * POLE_LATERAL = -6 and the shoulder's outer edge is at -4.7, so 2.4 hangs the
+ * head at lateral -3.6: over the gravel, a foot short of the asphalt edge, which
+ * is where the light pool wants to sit to cover the near lane.
+ */
+const LAMP_ARM_REACH = 2.4;
 
 // Signs.
 const SIGN_WIDTH = 2.4;
@@ -485,10 +494,27 @@ interface PolePose {
   height: number;
 }
 
-/** Local (un-rotated) position of the lamp head for an era, or null if it has none. */
+/**
+ * Timber-era lamp head, hung from an outrigger under the road-side crossarm tip.
+ * X = 2.1 puts the head at lateral -3.9 from a pole at POLE_LATERAL = -6: right at
+ * the asphalt edge (-3.3 plus the paint), which is the only way a 6 m mast with an
+ * inverse-square falloff actually lights the near lane rather than the gravel.
+ */
+const TIMBER_LAMP_LOCAL: readonly [number, number, number] = [2.1, 5.95, 0];
+
+/**
+ * Local (un-rotated) position of the lamp head for an era, or null if it has none.
+ *
+ * +X is LEFT of travel and the poles stand right of the road, so a positive X
+ * reaches over the carriageway. The concrete arm reaches `LAMP_ARM_REACH` from a
+ * pole at POLE_LATERAL = -6, leaving the head just inside the shoulder edge —
+ * where a real streetlight hangs — so its pool of light lands on the asphalt.
+ */
 function lampLocal(era: PoleEra, hasCrossarm: boolean): [number, number, number] | null {
-  if (era === 'timber') return hasCrossarm ? [-0.5, 5.3, 0] : null;
-  if (era === 'concrete') return [-1.5, 8.2, 0];
+  if (era === 'timber') {
+    return hasCrossarm ? [TIMBER_LAMP_LOCAL[0], TIMBER_LAMP_LOCAL[1], TIMBER_LAMP_LOCAL[2]] : null;
+  }
+  if (era === 'concrete') return [LAMP_ARM_REACH, 8.2, 0];
   return null;
 }
 
@@ -536,8 +562,10 @@ function describePole(road: Road, terrain: Terrain, seed: number, s: number, ind
   const collapsed = d > 0.72 && h2 < ((d - 0.72) / 0.28) * 0.9;
   const leanAngle = collapsed ? Math.PI * 0.5 : d * 0.42 * (0.5 + h3);
 
-  // Crossarms (and concrete lamp arms) are oriented toward the road: local X is
-  // aligned with the right-hand normal, so the arm/toward-road side points back.
+  // `twist` spins the pole about +Y so its local axes follow the road: rotating by
+  // the heading maps local +X onto (cos h, 0, -sin h), which is `offsetPoint`'s
+  // LEFT-of-travel normal. Everything mounted on an arm therefore uses positive X
+  // to lean over the road (see `lampLocal`).
   const jitter = (h4 - 0.5) * 0.14;
   const twist = sample.heading + (cond.era === 'lattice' ? Math.PI * 0.25 : 0) + jitter;
 
@@ -610,7 +638,22 @@ function timberCrossarm(): THREE.BufferGeometry {
     arm.translate(0, 6.1, 0);
     const ins1 = new THREE.CylinderGeometry(0.04, 0.05, 0.18, 5, 1).translate(-0.5, 6.24, 0);
     const ins2 = new THREE.CylinderGeometry(0.04, 0.05, 0.18, 5, 1).translate(0.5, 6.24, 0);
-    _timberCrossarm = mergeGeometries([arm, ins1, ins2]);
+    // Outrigger + drop bracket carrying the lamp head out over the carriageway.
+    // +X is the road side (see `lampLocal`); the crossarm alone only reaches 0.85,
+    // which left the head above the gravel, so the pool of light missed the lane
+    // it exists to light. The outrigger takes it to TIMBER_LAMP_LOCAL[0].
+    const outrigger = cylinderBetween(
+      new THREE.Vector3(0.8, 6.08, 0),
+      new THREE.Vector3(TIMBER_LAMP_LOCAL[0], 5.95, 0),
+      0.04,
+      5,
+    );
+    const drop = new THREE.CylinderGeometry(0.035, 0.035, 0.42, 5, 1).translate(
+      TIMBER_LAMP_LOCAL[0],
+      TIMBER_LAMP_LOCAL[1] + 0.21,
+      0,
+    );
+    _timberCrossarm = mergeGeometries([arm, ins1, ins2, outrigger, drop]);
   }
   return _timberCrossarm;
 }
@@ -658,10 +701,14 @@ function concreteColumn(): THREE.BufferGeometry {
   if (!_concreteColumn) {
     const col = new THREE.CylinderGeometry(0.12, 0.3, 9.0, 10, 1).translate(0, 4.5, 0);
     // Curved lamp arm sweeping out toward the road and down to the lamp head.
+    // Local +X is LEFT of travel (see `applyPoleRotation`); the pole line stands
+    // to the RIGHT of the road at POLE_LATERAL, so the arm must reach along +X to
+    // hang its head over the carriageway. It used to sweep to -X, which put every
+    // lamp on the desert side and lit the sand instead of the asphalt.
     const curve = new THREE.QuadraticBezierCurve3(
       new THREE.Vector3(0, 8.8, 0),
-      new THREE.Vector3(-0.7, 8.95, 0),
-      new THREE.Vector3(-1.5, 8.2, 0),
+      new THREE.Vector3(0.9, 8.95, 0),
+      new THREE.Vector3(LAMP_ARM_REACH, 8.2, 0),
     );
     const arm = new THREE.TubeGeometry(curve, 12, 0.06, 6, false);
     _concreteColumn = mergeGeometries([col, arm]);

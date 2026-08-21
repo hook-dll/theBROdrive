@@ -518,7 +518,47 @@ export const BODIES: readonly BodyDef[] = [
       relaxation: 0.9,
       maxForce: 12000,
     },
-    slots: slotsFor(0.85, 2.25, -0.42, 0.62, 0.09, 0.16),
+    // Hand-placed rather than `slotsFor`: the sedan's shell (render/partmesh.ts)
+    // provides a real aperture or mounting face for every bolt-on, so each slot
+    // is tied to that geometry. The four wheel slots keep the values the generic
+    // layout produced (track 1.54, wheelbase 3.26) because they are suspension
+    // mounts, i.e. handling tuning, not styling.
+    slots: [
+      { id: 'wheel_fl', kind: 'wheel', pos: [-0.77, -0.42, 1.63] },
+      { id: 'wheel_fr', kind: 'wheel', pos: [0.77, -0.42, 1.63] },
+      { id: 'wheel_rl', kind: 'wheel', pos: [-0.77, -0.42, -1.63] },
+      { id: 'wheel_rr', kind: 'wheel', pos: [0.77, -0.42, -1.63] },
+      // Engine bay: block under the bonnet aperture, its intake 50 mm clear of
+      // the lid's underside; battery outboard of the block on the left inner wing.
+      { id: 'engine', kind: 'engine', pos: [0, -0.3, 1.58], essential: true },
+      { id: 'radiator', kind: 'radiator', pos: [0, -0.22, 2.06], essential: true },
+      { id: 'battery', kind: 'battery', pos: [-0.58, -0.24, 1.3], essential: true },
+      // Gearbox sits on the tunnel behind the firewall, lever between the seats.
+      { id: 'gearbox', kind: 'gearbox', pos: [0, -0.13, 0.62], essential: true },
+      { id: 'fuel_tank', kind: 'fuel_tank', pos: [0, -0.22, -1.72], essential: true },
+      // Seats stand on the floor pan; backs clear the roof lining by 130 mm.
+      { id: 'seat_driver', kind: 'seat', pos: [-0.38, -0.36, -0.2], essential: true },
+      { id: 'seat_passenger', kind: 'seat', pos: [0.38, -0.36, -0.2] },
+      // Doors fill the aperture between rocker and cant rail, skin flush with the
+      // flanks; the +-90 deg yaw turns the panel's canonical -Z face outboard.
+      { id: 'door_l', kind: 'door', pos: [-0.785, 0.135, 0.225], yaw: Math.PI * 0.5 },
+      { id: 'door_r', kind: 'door', pos: [0.785, 0.135, 0.225], yaw: -Math.PI * 0.5 },
+      // Lids drop into their frames, proud of the rails by 5 mm.
+      { id: 'hood', kind: 'hood', pos: [0, 0.12, 1.5] },
+      { id: 'trunk', kind: 'trunk', pos: [0, 0.12, -1.55] },
+      // Round mirrors stand on the front wing tops, as on the period cars this
+      // shell is drawn from, where they clear the door glass entirely.
+      { id: 'mirror_l', kind: 'mirror', pos: [-0.72, 0.144, 1.35], yaw: 0.3 },
+      { id: 'mirror_r', kind: 'mirror', pos: [0.72, 0.144, 1.35], yaw: -0.3 },
+      // Bumpers (1.6 m) span the 1.64 m nose and tail faces, resting on the valances.
+      { id: 'bumper_f', kind: 'bumper', pos: [0, -0.34, 2.21] },
+      { id: 'bumper_r', kind: 'bumper', pos: [0, -0.34, -2.21] },
+      // Lamps bolt onto the nose cheeks either side of the grille.
+      { id: 'headlight_l', kind: 'headlight', pos: [-0.62, -0.13, 2.19] },
+      { id: 'headlight_r', kind: 'headlight', pos: [0.62, -0.13, 2.19] },
+      // Pipe runs under the floor pan and exits below the rear valance.
+      { id: 'exhaust', kind: 'exhaust', pos: [0.32, -0.54, -1.6] },
+    ],
   },
   {
     id: 'body_wagon',
