@@ -1,9 +1,11 @@
 import * as THREE from 'three';
-import { InputReader, type InputFrame } from './core/input';
+import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
+import { TIME_OF_DAY_PRESETS } from './game/settings';
+import { spawnAssembledCar } from './game/spawn';
 import { Inventory } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
@@ -13,6 +15,7 @@ import { Player } from './player/player';
 import { BirdFlock } from './agents/birds';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
+import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { SlotGhosts } from './render/slotghosts';
 import { ChunkStreamer } from './world/chunks';
@@ -29,7 +32,7 @@ import { RoadMeshProvider } from './world/roadmesh';
 import { Terrain } from './world/terrain';
 import { TerrainMeshProvider } from './world/terrainmesh';
 import { Hud } from './ui/hud';
-import { MainMenu } from './ui/menu';
+import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
 import { Vehicle } from './vehicle/vehicle';
 
@@ -42,14 +45,18 @@ import { Vehicle } from './vehicle/vehicle';
  * save (a new game materialises its loot as it generates it).
  */
 
-/** In-game seconds per real second. 1 gives a full day every DAY_LENGTH seconds. */
-const TIME_SCALE = 1;
 /**
  * A followed position further than this from the current arclength forces a full
  * unhinted road projection. Wider than any per-tick movement, narrower than the
  * hinted search window's reach.
  */
 const ACTIVE_S_REHOME_DISTANCE = 150;
+/** How far ahead of the view a spawned car is placed, metres. */
+const SPAWN_AHEAD_DISTANCE = 6;
+/** Height above the eye the spawn ground probe starts from. */
+const SPAWN_PROBE_HEIGHT = 3;
+/** Extra clearance under a spawned chassis so it settles onto its suspension. */
+const SPAWN_WHEEL_CLEARANCE = 0.35;
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
 
@@ -90,6 +97,10 @@ async function boot(): Promise<void> {
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose));
+
+  // Point lights are budgeted per frame (see LightBudget); constructed before the
+  // first chunk build so the budget's first scan sees chunk 0's lamps.
+  const lightBudget = new LightBudget(renderer.scene);
 
   let initialYaw = 0;
   const player = new Player(physics, world);
@@ -164,6 +175,7 @@ async function boot(): Promise<void> {
   if (import.meta.env.DEV) {
     (window as unknown as Record<string, unknown>)['__bro'] = {
       world,
+      renderer,
       physics,
       interaction,
       loose,
@@ -197,6 +209,22 @@ async function boot(): Promise<void> {
   };
 
   let lastInput: InputFrame = input.sample(0);
+  /**
+   * The camera is a render-rate system, but every fixed step drains the reader's
+   * look/zoom deltas. With more than one step per frame (any time the frame rate
+   * dips below the fixed rate) the last step's frame carries almost none of the
+   * mouse motion, and with zero steps it carries a stale one — so the deltas are
+   * summed across the frame's steps here and handed to the camera, then cleared,
+   * exactly once per rendered frame.
+   */
+  const cameraInput: InputFrame = emptyInput();
+  let lookYawAccum = 0;
+  let lookPitchAccum = 0;
+  let zoomAccum = 0;
+  // Re-centre is a tap, so it must survive the same multi-step frame problem as the
+  // look deltas above: a press seen by a non-final fixed step would otherwise be
+  // overwritten by the last step's frame before the camera ever sees it.
+  let recenterAccum = false;
   let recordTimer = 0;
   let paused = false;
   let lightsOn = false;
@@ -207,11 +235,18 @@ async function boot(): Promise<void> {
   const fixedUpdate = (dt: number): void => {
     const f = input.sample(dt);
     lastInput = f;
+    lookYawAccum += f.lookYaw;
+    lookPitchAccum += f.lookPitch;
+    zoomAccum += f.zoomDelta;
+    recenterAccum ||= f.recenterCamera;
 
     const s = world.state;
     world.apply({
       t: 'time',
-      timeOfDay: s.timeOfDay + dt * TIME_SCALE,
+      // The day length is a setting, so the clock rate is derived from it rather
+      // than a constant: DAY_LENGTH in-game seconds must elapse over the player's
+      // chosen number of real minutes.
+      timeOfDay: s.timeOfDay + (dt * DAY_LENGTH) / (s.settings.dayCycleMinutes * 60),
       playedSeconds: s.playedSeconds + dt,
     });
 
@@ -237,6 +272,11 @@ async function boot(): Promise<void> {
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
     physics.step();
+
+    // Latch the post-step transforms so the renderer can interpolate between the
+    // last two steps instead of snapping to the newest one.
+    for (const vehicle of vehicles.values()) vehicle.postStep();
+    player.postStep();
 
     // Item selection: the number row wins over the cycle keys when both arrive in
     // the same tick, since a direct pick is the more specific intent.
@@ -290,29 +330,32 @@ async function boot(): Promise<void> {
     }
   };
 
-  const render = (_alpha: number, frameDt: number): void => {
+  // Reused for the interpolated chassis pose handed to the camera each frame.
+  const targetPos = new THREE.Vector3();
+  const targetQuat = new THREE.Quaternion();
+
+  const render = (alpha: number, frameDt: number): void => {
     const s = world.state;
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
-    for (const vehicle of vehicles.values()) vehicle.syncVisuals();
+    for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     loose.syncVisuals();
 
     if (driving) {
-      const t = driving.chassis.translation();
-      const r = driving.chassis.rotation();
+      driving.interpolatedTransform(alpha, targetPos, targetQuat);
       const eyePoint = body(s.cars[drivingId!]!.bodyId).eyePoint;
-      target.x = t.x;
-      target.y = t.y;
-      target.z = t.z;
-      target.qx = r.x;
-      target.qy = r.y;
-      target.qz = r.z;
-      target.qw = r.w;
+      target.x = targetPos.x;
+      target.y = targetPos.y;
+      target.z = targetPos.z;
+      target.qx = targetQuat.x;
+      target.qy = targetQuat.y;
+      target.qz = targetQuat.z;
+      target.qw = targetQuat.w;
       target.speedKmh = driving.speedKmh;
       target.eyeOffset = eyePoint;
     } else {
-      const p = player.position;
+      const p = player.interpolatedPosition(alpha);
       target.x = p.x;
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
       // position; `player.position` is the capsule centre and would double up.
@@ -326,10 +369,27 @@ async function boot(): Promise<void> {
       target.eyeOffset = [0, 0, 0];
     }
 
-    camera.update(frameDt, lastInput, target, driving === null);
+    Object.assign(cameraInput, lastInput);
+    cameraInput.lookYaw = lookYawAccum;
+    cameraInput.lookPitch = lookPitchAccum;
+    cameraInput.zoomDelta = zoomAccum;
+    cameraInput.recenterCamera = recenterAccum;
+    lookYawAccum = 0;
+    lookPitchAccum = 0;
+    zoomAccum = 0;
+    recenterAccum = false;
+    camera.update(frameDt, cameraInput, target, driving === null);
 
     const cam = renderer.camera.position;
     sky.update(s.timeOfDay, activeS, cam.x, cam.y, cam.z);
+
+    // Night signal: reuse the sky's existing threshold (the same one the lamps
+    // and headlights key off) rather than re-deriving dusk from timeOfDay. Lamps
+    // follow the camera so the lit pools track what is on screen; the budget then
+    // caps how many point lights actually render.
+    const night = sky.isNight ? 1 : 0;
+    streamer.setLamps(night, cam.x, cam.z);
+    lightBudget.update(cam.x, cam.y, cam.z, night, frameDt);
 
     if (driving) {
       const stats = driving.stats;
@@ -379,11 +439,58 @@ async function boot(): Promise<void> {
       frameDt,
     );
 
+    // Resolution is a render-time concern: measure the frame that just ended and
+    // adjust the buffer before drawing so this frame pays the new cost.
+    renderer.adaptResolution(frameDt);
     renderer.render();
   };
 
   const loop = new GameLoop({ fixedUpdate, render });
   loop.start();
+
+  /**
+   * The pause overlay's window on the game. Settings live in world state (so a save
+   * carries them), which is why every mutation routes through `world.apply` here
+   * rather than being held in the menu: the menu is a view, not an owner.
+   */
+  const pauseHooks: PauseHooks = {
+    settings: () => world.state.settings,
+    applySettings: (next) => {
+      world.apply({ t: 'settings', settings: next });
+      // The reader caches an effective key table, so a rebind must be pushed to it;
+      // nothing else re-reads the bindings. The gearbox mode and day length are read
+      // from state every tick and need no push.
+      input.setKeyBindings(world.state.settings.keyBindings);
+    },
+    applyTimePreset: (preset) => {
+      world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
+    },
+    spawnVehicle: (request) => {
+      // Put the car on the ground ahead of the view, not at the player's feet: a
+      // chassis spawned inside the player (or inside the car being driven) would be
+      // resolved by the solver as an explosion.
+      const eye = camera.eyePosition;
+      const dir = camera.eyeDirection;
+      const flat = Math.hypot(dir.x, dir.z) || 1;
+      const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
+      const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
+      const ground = physics.raycast(
+        { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
+        { x: 0, y: -1, z: 0 },
+        SPAWN_PROBE_HEIGHT + 12,
+        player.rigidBody,
+      );
+      const groundY = ground ? ground.point.y : eye.y;
+      const def = body(request.bodyId);
+      // Half the chassis height plus the suspension's rest travel, so it settles
+      // onto its wheels instead of dropping through them.
+      const y = groundY + def.halfExtents[1] + SPAWN_WHEEL_CLEARANCE;
+      const heading = Math.atan2(dir.x / flat, dir.z / flat);
+      const car = spawnAssembledCar(world, request, dropX, y, dropZ, heading);
+      spawnVehicle(car);
+      hud.setToast(`spawned ${def.label}`);
+    },
+  };
 
   // Pause is deliberately outside InputReader: it must work without pointer lock.
   window.addEventListener('keydown', (e) => {
@@ -392,7 +499,7 @@ async function boot(): Promise<void> {
     loop.stop();
     void (async () => {
       const s = world.state;
-      const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 });
+      const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
       if (action === 'save') {
         await saves.save(`slot-${s.seed}`, `${body(Object.values(s.cars)[0]?.bodyId ?? 'body_sedan').label} @ ${(s.player.s / 1000).toFixed(1)} km`, s);
         hud.setToast('saved');

@@ -746,7 +746,7 @@ function nearestTwo(pts: readonly LampPos[], nx: number, nz: number): [LampPos |
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
-  build(ctx: ChunkContext): ChunkContent & { setLamps(on: number, nearX: number, nearZ: number): void } {
+  build(ctx: ChunkContext): ChunkContent {
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
@@ -815,6 +815,11 @@ export class PoleProvider implements ChunkProvider {
 
     const lampA = new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2);
     const lampB = new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2);
+    // Born dark: the LightBudget (src/render/lights.ts) is the only thing that
+    // ever enables point lights, so a chunk added between its re-scans must not
+    // leak a visible light into the frame.
+    lampA.visible = false;
+    lampB.visible = false;
     group.add(lampA, lampB);
 
     return {
@@ -834,6 +839,13 @@ export class PoleProvider implements ChunkProvider {
        */
       setLamps(on: number, nearX: number, nearZ: number): void {
         matLampLit.emissiveIntensity = on * LAMP_EMISSIVE;
+        if (on === 0) {
+          // Day: no fixtures to pick, and the budget keeps the lights invisible
+          // anyway — just drop the intensities.
+          lampA.intensity = 0;
+          lampB.intensity = 0;
+          return;
+        }
         const [n1, n2] = nearestTwo(workingLamps, nearX, nearZ);
         lampA.intensity = n1 ? on * LAMP_POINT : 0;
         lampA.position.set(n1 ? n1.x : 0, n1 ? n1.y : -1000, n1 ? n1.z : 0);

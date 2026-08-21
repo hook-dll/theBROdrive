@@ -66,6 +66,12 @@ const OVER_REV_BRAKE_GAIN = 0.2;
 /** Automatic shift points, as fractions of redline. The wide gap is hysteresis. */
 const UP_SHIFT_RPM_FRACTION = 0.8;
 const DOWN_SHIFT_RPM_FRACTION = 0.4;
+/**
+ * An upshift must leave the taller gear at least this multiple of idle rpm, or the
+ * box would immediately hunt back down. 1.25 keeps a real margin without blocking
+ * the tall top gears on a heavy truck.
+ */
+const UP_SHIFT_IDLE_MARGIN = 1.25;
 /** Throttle at which an automatic in neutral engages first gear. */
 const AUTO_ENGAGE_THROTTLE = 0.12;
 
@@ -164,7 +170,13 @@ export class Drivetrain {
     return String(this.gear);
   }
 
-  /** Manual shift: -1 down, +1 up. Reverse sits below neutral; neutral below 1. */
+  /**
+   * Manual shift: -1 down, +1 up. Reverse sits below neutral; neutral below 1.
+   * With driver assist active this is the +/- gate of a real automatic: the
+   * request applies immediately and stays authoritative while the shift is in
+   * progress (shiftTimer), after which the next automatic decision may override
+   * it — intended, not a fight.
+   */
   shift(direction: number): void {
     if (this.gearbox == null || direction === 0) return;
     const n = this.gearbox.ratios.length;
@@ -197,11 +209,21 @@ export class Drivetrain {
     return normalised * e.peakTorqueNm * this.efficiency;
   }
 
+  /**
+   * Advance the simulation by dt. `autoShift` is the driver's gearbox-mode
+   * preference (the settings value), passed per call rather than stored: it is
+   * player input that can change at any tick boundary, not vehicle hardware, so
+   * a per-call argument keeps this class's behaviour fully determined by each
+   * call — an AI driver or a replay cannot forget to configure it, and there is
+   * no second configuration channel beside the fitted parts (reconfigure). The
+   * decision itself is the OR of hardware and driver: see the gate below.
+   */
   update(
     dt: number,
     throttle: number,
     wheelAngularSpeed: number,
     wheelRadius: number,
+    autoShift: boolean,
   ): DrivetrainOutput {
     // wheelRadius is unused here: torque is converted to a wheel force by the
     // caller through wheelTorqueToForce(); the parameter keeps the API uniform.
@@ -215,8 +237,12 @@ export class Drivetrain {
     const engine = this.engine;
     const gearbox = this.gearbox;
 
-    if (gearbox && gearbox.automatic && this.shiftTimer <= 0) {
-      this.automaticShift(engine, gearbox, demand);
+    // The gearbox shifts itself when it is physically automatic OR the driver
+    // asked for the assist (settings gearbox mode). Hardware wins: a physically
+    // automatic gearbox keeps shifting even in manual mode — the assist only
+    // ever ADDS automatic behaviour, never removes it.
+    if (gearbox && (gearbox.automatic || autoShift) && this.shiftTimer <= 0) {
+      this.automaticShift(engine, gearbox, demand, wheelAngularSpeed);
     }
 
     // --- Crank speed ---
@@ -338,7 +364,22 @@ export class Drivetrain {
     return this.rpmValue;
   }
 
-  private automaticShift(engine: EngineSpec | null, gearbox: GearboxSpec, throttle: number): void {
+  /**
+   * Automatic gear selection.
+   *
+   * Decisions are made on the rpm the crank WOULD see at the current wheel speed
+   * in a given gear, never on `rpmValue`. Through a shift (and on the tick that
+   * ends one) the clutch is open and `rpmValue` is the free-revving crank, which
+   * at full throttle sits above the upshift threshold no matter how slowly the
+   * car is moving: deciding on it walked a standing car straight up through every
+   * gear and left it unable to pull away at all.
+   */
+  private automaticShift(
+    engine: EngineSpec | null,
+    gearbox: GearboxSpec,
+    throttle: number,
+    wheelAngularSpeed: number,
+  ): void {
     if (engine == null) return;
     const n = gearbox.ratios.length;
 
@@ -349,11 +390,23 @@ export class Drivetrain {
       return;
     }
 
-    if (this.gear < n && this.rpmValue > engine.redlineRpm * UP_SHIFT_RPM_FRACTION) {
-      this.setGear(this.gear + 1);
-    } else if (this.gear > 1 && this.rpmValue < engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION) {
+    const wheelAbs = Math.abs(wheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC;
+    const current = wheelAbs * Math.abs(this.ratioOfGear(this.gear));
+
+    if (this.gear < n && current > engine.redlineRpm * UP_SHIFT_RPM_FRACTION) {
+      // Never upshift into a gear that cannot pull: the taller gear must still
+      // leave the engine clear of idle, or the box would hunt straight back down.
+      const next = wheelAbs * Math.abs(this.ratioOfGear(this.gear + 1));
+      if (next > engine.idleRpm * UP_SHIFT_IDLE_MARGIN) this.setGear(this.gear + 1);
+    } else if (this.gear > 1 && current < engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION) {
       this.setGear(this.gear - 1);
     }
+  }
+
+  /** Ratio of an arbitrary forward gear; `gearRatio()` only knows the current one. */
+  private ratioOfGear(gear: number): number {
+    if (this.gearbox == null || gear < 1) return 0;
+    return this.gearbox.ratios[gear - 1] ?? 0;
   }
 
   private idleFuelRateLps(engine: EngineSpec): number {

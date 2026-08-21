@@ -23,16 +23,88 @@ const GRAVITY = 9.81;
 
 // ---------------------------------------------------------------------------
 // Steering tuning.
+//
+// Three stages shape the wheel angle, each fixing one piece of the "unnaturally
+// railed" feel:
+//  1. The input axis is shaped with a power law (STEER_INPUT_EXPONENT), so small
+//     deflections command disproportionately small angles and response grows
+//     progressively toward full lock.
+//  2. The available lock falls off with speed on the t^k curve below: full lock
+//     up to STEER_FULL_LOCK_KMH (parking and low-speed manoeuvres), then a fast
+//     collapse right above it (k < 1) to about a third of the lock at 40 km/h,
+//     and a gentle slide down to the floor — at 100 km/h only 15% of the parking
+//     lock remains, so corrections are small by construction.
+//  3. The steer angle is rate-limited by speed: it can swing to full lock in ~0.1 s
+//     at parking speed but takes ~0.5 s at highway speed, so a sudden full-lock
+//     input cannot snap the front wheels when it would hurt.
 // ---------------------------------------------------------------------------
 
-/** Max rate of steering-angle change (rad/s), so the wheel cannot snap. */
-const STEER_RATE_RAD_S = 3.5;
+/** Steering input shaping exponent: |s|^p with p>1 compresses small deflections. */
+const STEER_INPUT_EXPONENT = 1.7;
+/** Max rate of steering-angle change at parking speed (rad/s). */
+const STEER_RATE_PARK_RAD_S = 5.0;
+/** Max rate of steering-angle change at highway speed (rad/s). */
+const STEER_RATE_HIGHWAY_RAD_S = 1.1;
 /** Below this speed (km/h) the full steering lock is available. */
-const STEER_FULL_LOCK_KMH = 10;
-/** At this speed (km/h) steering falls to ~1/3 of full lock. */
+const STEER_FULL_LOCK_KMH = 20;
+/** At this speed (km/h) steering reaches its reduced floor. */
 const STEER_REDUCED_KMH = 100;
 /** Fraction of full lock retained at STEER_REDUCED_KMH. */
-const STEER_HIGH_SPEED_FRACTION = 1 / 3;
+const STEER_HIGH_SPEED_FRACTION = 0.15;
+/**
+ * Shape of the lock-vs-speed curve: fraction = 1 - (1-floor) * t^k with
+ * t = 0..1 across STEER_FULL_LOCK_KMH..STEER_REDUCED_KMH. With k < 1 the lock
+ * collapses fast just above the full-lock speed (0.46 at 25 km/h, 0.32 at
+ * 40 km/h) and creeps down gently from there; measured against the grip cap
+ * this keeps a 20 km/h U-turn at ~6 m while a 40 km/h full lock commands only
+ * ~0.65 g, so the player must slow down for tight work.
+ */
+const STEER_LOCK_CURVE = 0.161;
+/** Same curve shape drives the rate-limit blend between the two speeds above. */
+const STEER_RATE_CURVE = 1.6;
+
+// ---------------------------------------------------------------------------
+// Lateral grip budget.
+//
+// Rapier's ray-cast wheels generate lateral force two ways (verified against the
+// installed 0.20.0 sources): a soft constraint cancels the chassis' lateral
+// velocity at each contact point and is then scaled by the wheel's
+// `side_friction_stiffness` (a gain: 1 = near-kinematic rail), and the combined
+// forward+side impulse is clipped to a friction cone
+//     maxImp = wheel_suspension_force * dt * friction_slip
+// where the suspension force already scales with the chassis mass and that
+// wheel's load. So `friction_slip` is the per-wheel grip budget: exceeding it
+// scales both impulses down (skid) instead of letting the car follow the wheels
+// exactly. The forward impulse counts only half in the cone check, so drive and
+// brake keep ~2x headroom before sliding; that is what makes the budget act as
+// a *lateral* cap.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of the surface's frictionSlip that acts as the lateral grip budget.
+ * Asphalt's 2.6 becomes ~1.05, i.e. peak cornering of about 1 g for a light car
+ * instead of the railed 2.1-2.4 g measured before — tyres simply do not hold
+ * that, and exceeding the budget now sheds speed instead of snapping direction.
+ */
+const LATERAL_GRIP_FRACTION = 0.4;
+/** Chassis mass (kg) at which the grip budget is unscaled. */
+const GRIP_REFERENCE_MASS = 1100;
+/**
+ * The budget scales with (reference/mass)^GRIP_MASS_EXPONENT: a laden truck or
+ * bus gets a smaller budget per kilogram, so it corners worse than a hatchback
+ * even though its tyres carry more load — road tyres are sized to the chassis,
+ * not scaled with it.
+ */
+const GRIP_MASS_EXPONENT = 0.3;
+/**
+ * Lateral constraint gain applied to the surface's sideFriction. Below 1, the
+ * wheels stop cancelling all lateral velocity every tick: slip builds
+ * progressively with yaw rate (understeer) instead of an instant direction
+ * change. 0.8 is firm enough that a 40-60 km/h corner at ~0.6-0.9 g holds only
+ * ~2-4° of slip and a 20 km/h U-turn still closes to ~6 m, while staying well
+ * below the 1.0 rail.
+ */
+const SIDE_FRICTION_GAIN = 0.8;
 
 // ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
@@ -160,6 +232,19 @@ export class Vehicle {
   // Render-frame scratch.
   private readonly pos = new THREE.Vector3();
   private readonly quat = new THREE.Quaternion();
+
+  // Fixed-step transform snapshots for render interpolation. The simulation steps
+  // at exactly 60 Hz while frames arrive whenever the GPU is done, so a frame that
+  // draws the newest physics transform draws a body that has advanced by 1, 2 or 3
+  // steps since the last frame — the car visibly surges and stalls even though the
+  // physics is perfectly regular. Rendering between the last two steps at the
+  // loop's leftover-accumulator alpha turns that staircase back into constant
+  // velocity, at the cost of being one step (16.7 ms) behind the sim.
+  private readonly prevPos = new THREE.Vector3();
+  private readonly prevQuat = new THREE.Quaternion();
+  private readonly stepPos = new THREE.Vector3();
+  private readonly stepQuat = new THREE.Quaternion();
+  private snapshotPrimed = false;
 
   constructor(physics: PhysicsWorld, world: GameWorld, carState: CarState, scene: THREE.Scene) {
     this.physics = physics;
@@ -357,11 +442,20 @@ export class Vehicle {
 
     const fwd = this.forwardSpeedMps();
 
-    // Manual shift request (automatics auto-shift inside the drivetrain).
+    // Manual shift request; with driver assist on this is a +/- gate — the
+    // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
     const throttle = stats.drivable && this.localFuel > 0 ? input.throttle : 0;
-    const drive = this.drivetrain.update(dt, throttle, fwd / this.drivenRadius, this.drivenRadius);
+    // The settings gearbox mode rides along as driver assist; a physically
+    // automatic gearbox shifts regardless (hardware wins, see Drivetrain).
+    const drive = this.drivetrain.update(
+      dt,
+      throttle,
+      fwd / this.drivenRadius,
+      this.drivenRadius,
+      this.world.state.settings.gearboxMode === 'automatic',
+    );
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
@@ -374,7 +468,7 @@ export class Vehicle {
       }
     }
 
-    // Steering: speed-scaled and rate-limited so the wheel cannot snap.
+    // Steering: shaped input, speed-scaled lock and a speed-scaled rate limit.
     //
     // The negation converts our basis into Rapier's steering sign. Forward is +Z and
     // the axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle
@@ -382,10 +476,21 @@ export class Vehicle {
     // right". Measured: without this negation, holding right rotated the car +1.74
     // rad (left) over two seconds.
     const speedKmh = Math.abs(fwd) * 3.6;
-    const speedFactor =
-      1 - (1 - STEER_HIGH_SPEED_FRACTION) * clamp((speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH), 0, 1);
-    const targetSteer = -input.steer * this.def.steerLock * speedFactor;
-    const maxDelta = STEER_RATE_RAD_S * dt;
+    const steerT = clamp(
+      (speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
+      0,
+      1,
+    );
+    const steerInput =
+      Math.sign(input.steer) * Math.pow(Math.abs(input.steer), STEER_INPUT_EXPONENT);
+    // fraction = 1 - (1-floor) * t^k: full lock up to STEER_FULL_LOCK_KMH, then a
+    // fast collapse right above it and a gentle slide to the floor.
+    const speedFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(steerT, STEER_LOCK_CURVE);
+    const targetSteer = -steerInput * this.def.steerLock * speedFactor;
+    const steerRate =
+      STEER_RATE_HIGHWAY_RAD_S +
+      (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) * Math.pow(1 - steerT, STEER_RATE_CURVE);
+    const maxDelta = steerRate * dt;
     this.steerAngle += clamp(targetSteer - this.steerAngle, -maxDelta, maxDelta);
 
     // Brake impulses (N·s), distributed so the total matches the target decel.
@@ -405,14 +510,18 @@ export class Vehicle {
     let rollingResistanceSum = 0;
     let contactCount = 0;
     let drivenContactCount = 0;
+    // Same for every wheel: the lateral grip budget (see constants above). The
+    // cone cap is mass-scaled so heavy vehicles corner worse per kilogram.
+    const gripBudgetFactor =
+      stats.wheelGrip * LATERAL_GRIP_FRACTION * Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
 
     for (const w of this.wheels) {
       // Surface under this wheel drives traction and rolling resistance.
       const ground = controller.wheelGroundObject(w.index);
       const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
 
-      controller.setWheelFrictionSlip(w.index, surface.frictionSlip * stats.wheelGrip);
-      controller.setWheelSideFrictionStiffness(w.index, surface.sideFriction);
+      controller.setWheelFrictionSlip(w.index, surface.frictionSlip * gripBudgetFactor);
+      controller.setWheelSideFrictionStiffness(w.index, surface.sideFriction * SIDE_FRICTION_GAIN);
 
       const axleShare = w.isFront ? frontShare : rearShare;
       const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
@@ -528,15 +637,48 @@ export class Vehicle {
     }
   }
 
-  syncVisuals(): void {
+  /**
+   * Latches the chassis transform after the physics step that produced it. Must be
+   * called once per fixed step, after `physics.step()` — never from render, whose
+   * rate is unrelated.
+   */
+  postStep(): void {
+    if (!this.snapshotPrimed) {
+      // First step (or first after a spawn): both ends of the interpolation are the
+      // current transform, so the car does not lerp in from the origin.
+      this.chassisBody.translation(this.stepPos);
+      this.chassisBody.rotation(this.stepQuat);
+      this.prevPos.copy(this.stepPos);
+      this.prevQuat.copy(this.stepQuat);
+      this.snapshotPrimed = true;
+      return;
+    }
+    this.prevPos.copy(this.stepPos);
+    this.prevQuat.copy(this.stepQuat);
+    this.chassisBody.translation(this.stepPos);
+    this.chassisBody.rotation(this.stepQuat);
+  }
+
+  /**
+   * Chassis transform at render time, interpolated between the last two fixed
+   * steps. The camera target and the car's own visuals must read exactly the same
+   * pose, or the camera chases a car that is drawn somewhere else.
+   */
+  interpolatedTransform(alpha: number, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
+    outPos.lerpVectors(this.prevPos, this.stepPos, alpha);
+    outQuat.slerpQuaternions(this.prevQuat, this.stepQuat, alpha);
+  }
+
+  syncVisuals(alpha: number): void {
     const controller = this.controller;
     if (!controller) return;
 
-    this.chassisBody.translation(this.pos);
-    this.chassisBody.rotation(this.quat);
+    this.interpolatedTransform(alpha, this.pos, this.quat);
     this.rootGroup.position.copy(this.pos);
     this.rootGroup.quaternion.copy(this.quat);
 
+    // Wheels are chassis-local: suspension travel and spin are small, smooth and
+    // already snapped to the same step, so they need no second interpolation.
     for (const w of this.wheels) {
       const cp = controller.wheelChassisConnectionPointCs(w.index, w.scratchCp);
       const susp = controller.wheelSuspensionLength(w.index);
@@ -603,7 +745,7 @@ export class Vehicle {
   }
 
   private buildBodyAndParts(): void {
-    const bodyMesh = createBodyMesh(this.def.id);
+    const bodyMesh = createBodyMesh(this.def.id, this.car.paintColor);
     bodyMesh.name = 'body';
     this.rootGroup.add(bodyMesh);
 

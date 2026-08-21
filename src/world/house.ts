@@ -448,17 +448,21 @@ export class HomesteadProvider implements ChunkProvider {
       visual(bctx, [ [Math.min(r1x, r2x) - 0.04, refGround + 1.0, Math.min(r1z, r2z) - 0.04], [Math.max(r1x, r2x) + 0.04, refGround + 1.08, Math.max(r1z, r2z) + 0.04] ], fenceMat);
     }
 
-    // --- Lights: modest, left for the caller to switch by name at night ---
+    // --- Lights: modest pools at the garage door. Born dark; the LightBudget
+    // (src/render/lights.ts) enables them only at night and only while the
+    // homestead is within the light cutoff of the camera. ---
     const [glx, glz] = L.toWorld((GARAGE_DOOR_U + GARAGE_BACK_U) / 2, (GARAGE_V0 + GARAGE_V1) / 2);
     const garageLight = new THREE.PointLight(0xffd9a0, 8, 16, 2);
     garageLight.position.set(glx, fy + 2.3, glz);
     garageLight.name = 'garageLight';
+    garageLight.visible = false;
     group.add(garageLight);
 
     const [dlx, dlz] = L.toWorld(GARAGE_DOOR_U + 0.4, (GARAGE_V0 + GARAGE_V1) / 2);
     const doorLight = new THREE.PointLight(0xffe0b0, 7, 12, 2);
     doorLight.position.set(dlx, fy + 2.5, dlz);
     doorLight.name = 'doorLight';
+    doorLight.visible = false;
     group.add(doorLight);
 
     // --- Physics ---
@@ -565,6 +569,7 @@ export function createStartingCar(world: GameWorld): CarState {
   return {
     id: 'car:start',
     bodyId: def.id,
+    paintColor: def.stockPaintColor,
     slots,
     fuelLitres,
     odometer: 0,

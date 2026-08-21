@@ -616,3 +616,207 @@ body {
 .menu-pause .menu-panel {
   max-width: 380px;
 }
+
+/* Sub-screens (settings, spawn vehicle) need more room than the pause column. */
+.menu-pause .menu-panel.menu-panel-wide {
+  max-width: 540px;
+}
+
+/* Generic button row for toggle groups: gearbox, time-of-day, condition. */
+.menu-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.menu-toggle-row .menu-button {
+  flex: 1;
+  min-width: 88px;
+}
+
+.menu-button.is-selected {
+  border-color: var(--hud-fg);
+  background: rgba(70, 59, 40, 0.9);
+  font-weight: 700;
+}
+
+/* Day-cycle length stepper: - value +. */
+.menu-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-stepper .menu-button {
+  flex: 0 0 auto;
+  min-width: 46px;
+  padding: 6px 10px;
+}
+
+.menu-stepper-value {
+  flex: 1;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Settings feedback line: neutral info, alarm for rejected bindings. */
+.menu-note {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--hud-fg-dim);
+  min-height: 1em;
+}
+
+.menu-note.is-alarm {
+  color: var(--hud-alarm);
+}
+
+/* Scrollable key-binding rows. */
+.menu-bindings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--hud-border);
+  background: rgba(12, 10, 7, 0.5);
+  padding: 6px;
+}
+
+.menu-binding {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: rgba(18, 15, 11, 0.6);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg);
+  padding: 7px 10px;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.menu-binding:hover,
+.menu-binding:focus-visible {
+  border-color: var(--hud-fg);
+  outline: none;
+}
+
+.menu-binding.is-capturing {
+  border-color: var(--hud-fg);
+  background: rgba(70, 59, 40, 0.9);
+}
+
+.menu-binding-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-binding-keys {
+  color: var(--hud-fg-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.menu-binding.is-capturing .menu-binding-keys {
+  color: var(--hud-fg);
+  font-style: italic;
+}
+
+/* Spawn vehicle screen: body list and paint swatches. */
+.menu-body-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--hud-border);
+  background: rgba(12, 10, 7, 0.5);
+  padding: 6px;
+}
+
+.menu-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: rgba(18, 15, 11, 0.6);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg);
+  padding: 8px 10px;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.menu-body:hover,
+.menu-body:focus-visible {
+  border-color: var(--hud-fg);
+  outline: none;
+}
+
+.menu-body.is-selected {
+  border-color: var(--hud-fg);
+  background: rgba(70, 59, 40, 0.9);
+  font-weight: 700;
+}
+
+.menu-body-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-body-class {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+  border: 1px solid var(--hud-border);
+  padding: 2px 6px;
+}
+
+.menu-body.is-selected .menu-body-class {
+  color: var(--hud-fg);
+}
+
+.menu-paints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.menu-paint {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--hud-border);
+  cursor: pointer;
+  outline: none;
+}
+
+.menu-paint:hover {
+  border-color: var(--hud-fg);
+}
+
+.menu-paint:focus-visible {
+  outline: 1px solid var(--hud-fg);
+  outline-offset: 2px;
+}
+
+.menu-paint.is-selected {
+  border: 2px solid var(--hud-fg);
+}

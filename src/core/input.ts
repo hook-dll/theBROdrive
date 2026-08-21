@@ -19,8 +19,12 @@ export interface InputFrame {
   /** Toggle intents, consumed once by the system that handles them. */
   toggleLights: boolean;
   cycleCamera: boolean;
+  /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
+  recenterCamera: boolean;
   enterExit: boolean;
   interact: boolean;
+  /** Drop the held item in front of the player: tap, consumed once by interaction. */
+  dropItem: boolean;
   /** Primary use of the held item: scrub, pour, fire. Held, not tapped. */
   usePrimary: boolean;
   /** Secondary use: aim down sights, precision placement. */
@@ -50,8 +54,10 @@ export function emptyInput(): InputFrame {
     shift: 0,
     toggleLights: false,
     cycleCamera: false,
+    recenterCamera: false,
     enterExit: false,
     interact: false,
+    dropItem: false,
     usePrimary: false,
     useSecondary: false,
     cycleItem: 0,
@@ -66,23 +72,63 @@ export function emptyInput(): InputFrame {
   };
 }
 
-const KEY_BINDINGS = {
-  throttle: ['KeyW', 'ArrowUp'],
-  brake: ['KeyS', 'ArrowDown'],
-  left: ['KeyA', 'ArrowLeft'],
-  right: ['KeyD', 'ArrowRight'],
-  handbrake: ['Space'],
-  shiftUp: ['KeyR'],
-  shiftDown: ['KeyF'],
-  lights: ['KeyL'],
-  camera: ['KeyC'],
-  enterExit: ['KeyG'],
-  interact: ['KeyE'],
-  jump: ['Space'],
-  sprint: ['ShiftLeft', 'ShiftRight'],
-  itemNext: ['KeyX'],
-  itemPrev: ['KeyZ'],
-} as const;
+/**
+ * Every remappable action, in display order. This is the single source of truth
+ * for the settings screen (labels + defaults) and for the effective bindings
+ * (InputReader resolves overrides against it). Escape is deliberately absent:
+ * it is the pause key, handled outside InputReader, and can never be rebound.
+ * The mouse buttons are equally fixed — they map straight to
+ * usePrimary/useSecondary and are not actions.
+ */
+export const BINDABLE_ACTIONS: readonly {
+  id: string;
+  label: string;
+  defaultKeys: readonly string[];
+}[] = [
+  { id: 'throttle', label: 'Throttle', defaultKeys: ['KeyW', 'ArrowUp'] },
+  { id: 'brake', label: 'Brake', defaultKeys: ['KeyS', 'ArrowDown'] },
+  { id: 'left', label: 'Steer left', defaultKeys: ['KeyA', 'ArrowLeft'] },
+  { id: 'right', label: 'Steer right', defaultKeys: ['KeyD', 'ArrowRight'] },
+  { id: 'handbrake', label: 'Handbrake', defaultKeys: ['Space'] },
+  { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyR'] },
+  { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyF'] },
+  { id: 'lights', label: 'Toggle lights', defaultKeys: ['KeyL'] },
+  { id: 'camera', label: 'Cycle camera', defaultKeys: ['KeyC'] },
+  { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
+  { id: 'enterExit', label: 'Enter / exit car', defaultKeys: ['KeyG'] },
+  { id: 'interact', label: 'Interact', defaultKeys: ['KeyE'] },
+  { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
+  { id: 'jump', label: 'Jump', defaultKeys: ['Space'] },
+  { id: 'sprint', label: 'Sprint', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
+  { id: 'itemNext', label: 'Next item', defaultKeys: ['KeyX'] },
+  { id: 'itemPrev', label: 'Previous item', defaultKeys: ['KeyZ'] },
+];
+
+/** Effective binding table with no overrides applied. Shared, never mutated. */
+const DEFAULT_BINDINGS: Record<string, readonly string[]> = {};
+for (const action of BINDABLE_ACTIONS) DEFAULT_BINDINGS[action.id] = action.defaultKeys;
+
+/**
+ * The effective keys for one action: the override when it has usable keys,
+ * otherwise the default. Escape is the pause key (handled outside InputReader)
+ * and the mouse buttons are the fixed usePrimary/useSecondary actions, so
+ * neither can ever appear in a binding; a bad override degrades to the default
+ * rather than silently unbinding the action.
+ */
+function resolveKeys(
+  override: readonly string[] | undefined,
+  defaults: readonly string[],
+): readonly string[] {
+  if (!override || override.length === 0) return defaults;
+  let cleaned: string[] | null = null;
+  for (const code of override) {
+    if (code !== 'Escape' && !code.startsWith('Mouse')) {
+      if (cleaned === null) cleaned = [];
+      cleaned.push(code);
+    }
+  }
+  return cleaned !== null && cleaned.length > 0 ? cleaned : defaults;
+}
 
 /** Seconds for a digital key to ramp an analogue axis from 0 to 1. */
 const AXIS_RISE = 0.18;
@@ -103,6 +149,12 @@ export class InputReader {
   private pitchDelta = 0;
   private wheelDelta = 0;
   private locked = false;
+  /**
+   * Effective action -> key list for this reader. Precomputed at construction
+   * and on setKeyBindings so the hot path (sample) only reads arrays — it never
+   * builds or merges anything per tick.
+   */
+  private keys: Record<string, readonly string[]> = DEFAULT_BINDINGS;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -204,36 +256,52 @@ export class InputReader {
   }
 
   /**
+   * Replaces the effective bindings with the given overrides; actions without
+   * an override keep their defaults. Called once at startup and whenever the
+   * settings change, never in the hot path: the resolved table is rebuilt here
+   * so sample() stays allocation-free with dynamic bindings.
+   */
+  setKeyBindings(overrides: Record<string, readonly string[]>): void {
+    const next: Record<string, readonly string[]> = {};
+    for (const action of BINDABLE_ACTIONS) {
+      next[action.id] = resolveKeys(overrides[action.id], action.defaultKeys);
+    }
+    this.keys = next;
+  }
+
+  /**
    * Produces the frame for this tick. Mutates and returns an internal object, so
    * callers must not retain it across ticks.
    */
   sample(dt: number): InputFrame {
     const f = this.frame;
 
-    const wantThrottle = this.anyHeld(KEY_BINDINGS.throttle) ? 1 : 0;
-    const wantBrake = this.anyHeld(KEY_BINDINGS.brake) ? 1 : 0;
+    const wantThrottle = this.anyHeld(this.keys.throttle) ? 1 : 0;
+    const wantBrake = this.anyHeld(this.keys.brake) ? 1 : 0;
     f.throttle +=
       (wantThrottle - f.throttle) * Math.min(1, dt / (wantThrottle > 0 ? AXIS_RISE : AXIS_FALL));
     f.brake += (wantBrake - f.brake) * Math.min(1, dt / (wantBrake > 0 ? AXIS_RISE : AXIS_FALL));
 
     const wantSteer =
-      (this.anyHeld(KEY_BINDINGS.right) ? 1 : 0) - (this.anyHeld(KEY_BINDINGS.left) ? 1 : 0);
+      (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     f.steer +=
       (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
 
-    f.handbrake = this.anyHeld(KEY_BINDINGS.handbrake);
+    f.handbrake = this.anyHeld(this.keys.handbrake);
     f.shift =
-      (this.anyPressed(KEY_BINDINGS.shiftUp) ? 1 : 0) -
-      (this.anyPressed(KEY_BINDINGS.shiftDown) ? 1 : 0);
-    f.toggleLights = this.anyPressed(KEY_BINDINGS.lights);
-    f.cycleCamera = this.anyPressed(KEY_BINDINGS.camera);
-    f.enterExit = this.anyPressed(KEY_BINDINGS.enterExit);
-    f.interact = this.anyPressed(KEY_BINDINGS.interact);
+      (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
+      (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
+    f.toggleLights = this.anyPressed(this.keys.lights);
+    f.cycleCamera = this.anyPressed(this.keys.camera);
+    f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
+    f.enterExit = this.anyPressed(this.keys.enterExit);
+    f.interact = this.anyPressed(this.keys.interact);
+    f.dropItem = this.anyPressed(this.keys.drop);
     f.usePrimary = this.held.has('Mouse0');
     f.useSecondary = this.held.has('Mouse2');
     f.cycleItem =
-      (this.anyPressed(KEY_BINDINGS.itemNext) ? 1 : 0) -
-      (this.anyPressed(KEY_BINDINGS.itemPrev) ? 1 : 0);
+      (this.anyPressed(this.keys.itemNext) ? 1 : 0) -
+      (this.anyPressed(this.keys.itemPrev) ? 1 : 0);
 
     // Number row 1..8 picks an inventory slot directly. Digit codes are contiguous,
     // and the numpad row is accepted too so either hand works.
@@ -244,11 +312,11 @@ export class InputReader {
         break;
       }
     }
-    f.moveX = (this.anyHeld(KEY_BINDINGS.right) ? 1 : 0) - (this.anyHeld(KEY_BINDINGS.left) ? 1 : 0);
+    f.moveX = (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     f.moveZ =
-      (this.anyHeld(KEY_BINDINGS.throttle) ? 1 : 0) - (this.anyHeld(KEY_BINDINGS.brake) ? 1 : 0);
-    f.jump = this.anyPressed(KEY_BINDINGS.jump);
-    f.sprint = this.anyHeld(KEY_BINDINGS.sprint);
+      (this.anyHeld(this.keys.throttle) ? 1 : 0) - (this.anyHeld(this.keys.brake) ? 1 : 0);
+    f.jump = this.anyPressed(this.keys.jump);
+    f.sprint = this.anyHeld(this.keys.sprint);
 
     f.lookYaw = this.yawDelta;
     f.lookPitch = this.pitchDelta;

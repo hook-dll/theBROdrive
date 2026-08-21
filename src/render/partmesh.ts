@@ -40,7 +40,11 @@ function cachedGeo(key: string, build: () => THREE.BufferGeometry): THREE.Buffer
 type MaterialSpec =
   | { kind: 'cond'; color: number; metalness: number; roughness: number }
   | { kind: 'flat'; color: number; roughness: number }
-  | { kind: 'glass'; color: number; roughness: number };
+  | { kind: 'glass'; color: number; roughness: number }
+  // Body shell paint: the colour is per-car (from CarState.paintColor) and only
+  // resolved when the mesh instance is built, so one cached blueprint serves
+  // every colour. metalness/roughness stay body-fixed finish characteristics.
+  | { kind: 'paint'; color: number; metalness: number; roughness: number };
 
 const cond = (color: number, metalness = 0.85, roughness = 0.4): MaterialSpec => ({
   kind: 'cond', color, metalness, roughness,
@@ -48,10 +52,14 @@ const cond = (color: number, metalness = 0.85, roughness = 0.4): MaterialSpec =>
 const flat = (color: number, roughness = 0.6): MaterialSpec => ({ kind: 'flat', color, roughness });
 const glass = (color: number, roughness = 0.06): MaterialSpec => ({ kind: 'glass', color, roughness });
 
-function resolveMaterial(spec: MaterialSpec): THREE.Material {
+function resolveMaterial(spec: MaterialSpec, paintColor?: number): THREE.Material {
   switch (spec.kind) {
     case 'cond':
       return makeConditionMaterial(spec.color, spec.metalness, spec.roughness);
+    case 'paint':
+      // The car's colour overrides the stock default; both share one template key
+      // space, so repaints never accumulate blueprint entries.
+      return makeConditionMaterial(paintColor ?? spec.color, spec.metalness, spec.roughness);
     case 'flat':
       return makeFlatMaterial(spec.color, spec.roughness);
     case 'glass': {
@@ -119,10 +127,10 @@ class MeshBuilder {
   }
 }
 
-function buildGroup(instructions: readonly Instruction[]): THREE.Group {
+function buildGroup(instructions: readonly Instruction[], paintColor?: number): THREE.Group {
   const group = new THREE.Group();
   for (const ins of instructions) {
-    const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material));
+    const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material, paintColor));
     mesh.position.set(ins.position[0], ins.position[1], ins.position[2]);
     mesh.rotation.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]);
     mesh.scale.set(ins.scale[0], ins.scale[1], ins.scale[2]);
@@ -510,14 +518,26 @@ function wheelFloor(bd: BodyDef): number {
   return -0.45;
 }
 
-function bodyPaint(id: string): MaterialSpec {
-  switch (id) {
-    case 'body_sedan': return cond(0x8a3a2e, 0.55, 0.4);
-    case 'body_wagon': return cond(0x5a6b4a, 0.55, 0.42);
-    case 'body_hatch': return cond(0x9a8a3a, 0.5, 0.42);
-    case 'body_pickup': return cond(0x4a5a72, 0.55, 0.4);
-    case 'body_bus': return cond(0x7a5230, 0.5, 0.45);
-    default: return cond(0x8a8a8a, 0.55, 0.4);
+/**
+ * Body shell finish: paint colour (stock, overridden per car at build time) plus
+ * the body-fixed metalness/roughness. Material accounting for a fleet of N cars
+ * in M distinct colours: each painted box still gets its own condition-material
+ * clone per car (that is how dirt/rust stay per-instance), so per-car body
+ * material count is unchanged by colour — O(N) instances overall. The shared
+ * template cache gains at most one entry per (paintColor, metalness, roughness)
+ * tuple actually in use, i.e. ≤ 5·M for the five bodies' fixed finishes, and the
+ * compiled program count stays exactly 1 (CONDITION_PROGRAM_KEY). No per-colour
+ * blueprints: instructions carry the parametric 'paint' spec.
+ */
+function bodyPaint(bd: BodyDef): MaterialSpec {
+  const stock = bd.stockPaintColor;
+  switch (bd.id) {
+    case 'body_sedan': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
+    case 'body_wagon': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.42 };
+    case 'body_hatch': return { kind: 'paint', color: stock, metalness: 0.5, roughness: 0.42 };
+    case 'body_pickup': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
+    case 'body_bus': return { kind: 'paint', color: stock, metalness: 0.5, roughness: 0.45 };
+    default: return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
   }
 }
 
@@ -547,7 +567,7 @@ function sedan(b: MeshBuilder, bd: BodyDef): void {
   const roof = bd.halfExtents[1];
   const hz = bd.halfExtents[2];
   const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd.id);
+  const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
   const belt = 0.0;
@@ -570,7 +590,7 @@ function wagon(b: MeshBuilder, bd: BodyDef): void {
   const roof = bd.halfExtents[1];
   const hz = bd.halfExtents[2];
   const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd.id);
+  const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
   const belt = 0.0;
@@ -592,7 +612,7 @@ function hatch(b: MeshBuilder, bd: BodyDef): void {
   const roof = bd.halfExtents[1];
   const hz = bd.halfExtents[2];
   const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd.id);
+  const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
   const belt = 0.0;
@@ -614,7 +634,7 @@ function pickup(b: MeshBuilder, bd: BodyDef): void {
   const roof = bd.halfExtents[1];
   const hz = bd.halfExtents[2];
   const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd.id);
+  const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
   const belt = 0.1;
@@ -646,7 +666,7 @@ function bus(b: MeshBuilder, bd: BodyDef): void {
   const roof = bd.halfExtents[1];
   const hz = bd.halfExtents[2];
   const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd.id);
+  const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
   const belt = 0.35;
@@ -819,9 +839,13 @@ export function createPartMesh(variantId: string): THREE.Object3D {
   return buildGroup(blueprint(variantId).instructions);
 }
 
-/** The bare body shell, origin at the body centre. */
-export function createBodyMesh(bodyId: string): THREE.Object3D {
-  return buildGroup(bodyBlueprint(body(bodyId)).instructions);
+/**
+ * The bare body shell, origin at the body centre. `paintColor` (0xRRGGBB) paints
+ * the shell; when omitted the body's stock colour is used, which keeps the POI
+ * wreck shells (no CarState) on their factory finish.
+ */
+export function createBodyMesh(bodyId: string, paintColor?: number): THREE.Object3D {
+  return buildGroup(bodyBlueprint(body(bodyId)).instructions, paintColor);
 }
 
 /** Collider half-extents for a part, derived from its built geometry's bounds. */

@@ -317,7 +317,11 @@ export class Sky {
     this.sunLight = new THREE.DirectionalLight(0xffffff, 3.0);
     this.sunLight.castShadow = true;
     const shadow = this.sunLight.shadow;
-    shadow.mapSize.set(2048, 2048);
+    // 1024 on iGPU-class hardware: the 180 m frustum still resolves ~17 cm/texel,
+    // and the renderer's PCF filter softens the larger texels into a stylised
+    // blur. 2048 doubles the depth-pass fill cost for detail that never reads at
+    // this camera scale.
+    shadow.mapSize.set(1024, 1024);
     shadow.camera.near = 40;
     shadow.camera.far = SUN_DISTANCE + 300;
     shadow.camera.left = -90;
