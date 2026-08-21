@@ -1,0 +1,618 @@
+/* ------------------------------------------------------------------ *
+ *  the BRO drive — HUD and menu styles                               *
+ *  Worn, analogue desert-junker aesthetic: warm off-white, dark       *
+ *  translucent panels, no pure black/white, no glassy gradients.      *
+ * ------------------------------------------------------------------ */
+
+:root {
+  --hud-fg: #e8ddc4;                 /* warm off-white */
+  --hud-fg-dim: #b0a68c;             /* muted warm grey */
+  --hud-panel: rgba(26, 22, 15, 0.72);
+  --hud-panel-strong: rgba(22, 18, 12, 0.92);
+  --hud-panel-soft: rgba(16, 13, 9, 0.55);
+  --hud-border: rgba(232, 221, 196, 0.28);
+  --hud-alarm: #e07a4a;              /* warm rust, legible on sand and night */
+  --hud-alarm-strong: #d4552f;
+  --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #14100b;
+}
+
+/* The renderer manages the drawing buffer; CSS owns the display size. */
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Overlay above the canvas. Non-interactive by default; interactive elements
+   below re-enable pointer events on themselves or a wrapping container. */
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  font-family: var(--hud-font);
+  color: var(--hud-fg);
+  user-select: none;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------------ *
+ *  HUD                                                               *
+ * ------------------------------------------------------------------ */
+
+.hud-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+.hud-crosshair::before,
+.hud-crosshair::after {
+  content: '';
+  position: absolute;
+  background: var(--hud-fg);
+}
+
+.hud-crosshair::before {
+  left: 0;
+  top: 8px;
+  width: 18px;
+  height: 2px;
+}
+
+.hud-crosshair::after {
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 18px;
+}
+
+.hud-crosshair-dot {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  background: var(--hud-fg);
+}
+
+.hud-crosshair.is-dim {
+  opacity: 0.32;
+}
+
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 16px);
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--hud-fg);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 7px 14px;
+  pointer-events: none;
+}
+
+.hud-driving {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.hud-speed {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1;
+}
+
+.hud-speed-value {
+  font-size: 54px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(20, 16, 10, 0.85), 0 2px 10px rgba(20, 16, 10, 0.55);
+}
+
+.hud-speed-unit {
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  color: var(--hud-fg-dim);
+}
+
+.hud-gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 10px 14px;
+}
+
+.hud-tach {
+  display: block;
+}
+
+.hud-tach-track {
+  fill: none;
+  stroke: var(--hud-panel-soft);
+  stroke-width: 8;
+}
+
+.hud-tach-redline {
+  fill: none;
+  stroke: var(--hud-alarm);
+  stroke-width: 8;
+}
+
+.hud-tach-value {
+  fill: none;
+  stroke: var(--hud-fg);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.hud-tach-needle {
+  stroke: var(--hud-fg);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.hud-gear {
+  font-size: 34px;
+  font-weight: 700;
+  min-width: 1.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-fuel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 92px;
+}
+
+.hud-fuel-bar {
+  height: 10px;
+  background: var(--hud-panel-soft);
+  border: 1px solid var(--hud-border);
+  overflow: hidden;
+}
+
+.hud-fuel-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--hud-fg);
+  transition: width 0.12s linear;
+}
+
+.hud-fuel-text {
+  font-size: 12px;
+  text-align: right;
+  letter-spacing: 0.06em;
+  color: var(--hud-fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-fuel.is-alarm .hud-fuel-fill {
+  background: var(--hud-alarm);
+}
+
+.hud-fuel.is-alarm .hud-fuel-text {
+  color: var(--hud-alarm);
+  font-weight: 700;
+}
+
+.hud-engine-off {
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--hud-alarm);
+  font-weight: 700;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-alarm);
+  padding: 4px 10px;
+}
+
+.hud-warnings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.hud-warning {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--hud-alarm);
+  background: var(--hud-panel);
+  border-left: 2px solid var(--hud-alarm);
+  padding: 3px 8px;
+}
+
+.hud-inventory {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.hud-inv-items {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 60vw;
+}
+
+.hud-inv-slot {
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg-dim);
+  padding: 5px 10px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.hud-inv-slot.is-selected {
+  color: var(--hud-fg);
+  border-color: var(--hud-fg);
+  background: rgba(44, 37, 25, 0.88);
+}
+
+/* Slot number badge. Dim by default so it reads as a hint, not a label. */
+.hud-inv-key {
+  display: inline-block;
+  min-width: 11px;
+  margin-right: 6px;
+  text-align: center;
+  font-size: 10px;
+  opacity: 0.55;
+  border: 1px solid var(--hud-border);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.hud-inv-slot.is-selected .hud-inv-key {
+  opacity: 1;
+  border-color: var(--hud-fg);
+}
+
+.hud-inv-mass {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--hud-fg-dim);
+  background: var(--hud-panel);
+  padding: 3px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-inv-mass.is-alarm {
+  color: var(--hud-alarm);
+  border: 1px solid var(--hud-alarm);
+}
+
+.hud-travel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.hud-odometer {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-record {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--hud-fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-clock {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-toasts {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.hud-toast {
+  background: var(--hud-panel);
+  color: var(--hud-fg);
+  border: 1px solid var(--hud-border);
+  padding: 8px 16px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.hud-toast-leaving {
+  opacity: 0;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Menu (title screen and pause overlay)                             *
+ * ------------------------------------------------------------------ */
+
+.menu {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 10, 7, 0.62);
+  font-family: var(--hud-font);
+  color: var(--hud-fg);
+}
+
+.menu-panel {
+  background: var(--hud-panel-strong);
+  border: 1px solid var(--hud-border);
+  padding: 26px 30px;
+  width: 92vw;
+  max-width: 460px;
+  max-height: 86vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.menu-title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.menu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.menu-label {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+}
+
+.menu-input {
+  pointer-events: auto;
+  background: rgba(12, 10, 7, 0.7);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg);
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  letter-spacing: 0.03em;
+  user-select: text;
+  outline: none;
+}
+
+.menu-input::placeholder {
+  color: rgba(232, 221, 196, 0.38);
+}
+
+.menu-input:focus {
+  border-color: var(--hud-fg);
+}
+
+.menu-button {
+  pointer-events: auto;
+  background: rgba(40, 33, 22, 0.9);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg);
+  padding: 10px 14px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.menu-button:hover,
+.menu-button:focus {
+  border-color: var(--hud-fg);
+  background: rgba(54, 45, 30, 0.95);
+  outline: none;
+}
+
+.menu-button:focus-visible {
+  outline: 1px solid var(--hud-fg);
+  outline-offset: 2px;
+}
+
+.menu-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menu-button.menu-primary {
+  border-color: var(--hud-fg);
+  background: rgba(70, 59, 40, 0.9);
+  font-weight: 700;
+}
+
+.menu-saves {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-heading {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+}
+
+.menu-saves-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(18, 15, 11, 0.6);
+  border: 1px solid var(--hud-border);
+  padding: 8px 10px;
+}
+
+.menu-save-name {
+  font-weight: 700;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.menu-save-meta {
+  flex: 1;
+  font-size: 11px;
+  color: var(--hud-fg-dim);
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-save-load,
+.menu-save-delete {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.menu-save-delete {
+  color: var(--hud-alarm);
+  border-color: rgba(224, 122, 74, 0.5);
+}
+
+.menu-save-empty {
+  font-size: 12px;
+  color: var(--hud-fg-dim);
+  font-style: italic;
+  padding: 6px 2px;
+}
+
+.menu-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-code-row {
+  display: flex;
+  gap: 6px;
+}
+
+.menu-code-row .menu-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-error {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--hud-alarm);
+  min-height: 1em;
+}
+
+.menu-seed-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(12, 10, 7, 0.7);
+  border: 1px solid var(--hud-border);
+  padding: 10px 12px;
+}
+
+.menu-seed-label {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+}
+
+.menu-seed-value {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+  cursor: text;
+}
+
+.menu-pause-km {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--hud-fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-pause .menu-panel {
+  max-width: 380px;
+}
