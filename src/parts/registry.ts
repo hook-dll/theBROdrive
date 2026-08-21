@@ -541,23 +541,23 @@ export const BODIES: readonly BodyDef[] = [
       { id: 'seat_passenger', kind: 'seat', pos: [0.38, -0.36, -0.2] },
       // Doors fill the aperture between rocker and cant rail, skin flush with the
       // flanks; the +-90 deg yaw turns the panel's canonical -Z face outboard.
-      { id: 'door_l', kind: 'door', pos: [-0.785, 0.135, 0.225], yaw: Math.PI * 0.5 },
-      { id: 'door_r', kind: 'door', pos: [0.785, 0.135, 0.225], yaw: -Math.PI * 0.5 },
+      { id: 'door_l', kind: 'door', pos: [-0.785, 0.195, 0.225], yaw: Math.PI * 0.5 },
+      { id: 'door_r', kind: 'door', pos: [0.785, 0.195, 0.225], yaw: -Math.PI * 0.5 },
       // Lids drop into their frames, proud of the rails by 5 mm.
-      { id: 'hood', kind: 'hood', pos: [0, 0.12, 1.5] },
-      { id: 'trunk', kind: 'trunk', pos: [0, 0.12, -1.55] },
+      { id: 'hood', kind: 'hood', pos: [0, 0.179, 1.5] },
+      { id: 'trunk', kind: 'trunk', pos: [0, 0.179, -1.64] },
       // Round mirrors stand on the front wing tops, as on the period cars this
       // shell is drawn from, where they clear the door glass entirely.
-      { id: 'mirror_l', kind: 'mirror', pos: [-0.72, 0.144, 1.35], yaw: 0.3 },
-      { id: 'mirror_r', kind: 'mirror', pos: [0.72, 0.144, 1.35], yaw: -0.3 },
+      { id: 'mirror_l', kind: 'mirror', pos: [-0.72, 0.204, 1.35], yaw: 0.3 },
+      { id: 'mirror_r', kind: 'mirror', pos: [0.72, 0.204, 1.35], yaw: -0.3 },
       // Bumpers (1.6 m) span the 1.64 m nose and tail faces, resting on the valances.
       { id: 'bumper_f', kind: 'bumper', pos: [0, -0.34, 2.21] },
       { id: 'bumper_r', kind: 'bumper', pos: [0, -0.34, -2.21] },
       // Lamps bolt onto the nose cheeks either side of the grille.
-      { id: 'headlight_l', kind: 'headlight', pos: [-0.62, -0.13, 2.19] },
-      { id: 'headlight_r', kind: 'headlight', pos: [0.62, -0.13, 2.19] },
+      { id: 'headlight_l', kind: 'headlight', pos: [-0.62, -0.1, 2.19] },
+      { id: 'headlight_r', kind: 'headlight', pos: [0.62, -0.1, 2.19] },
       // Pipe runs under the floor pan and exits below the rear valance.
-      { id: 'exhaust', kind: 'exhaust', pos: [0.32, -0.54, -1.6] },
+      { id: 'exhaust', kind: 'exhaust', pos: [0.32, -0.6, -1.6] },
     ],
   },
   {

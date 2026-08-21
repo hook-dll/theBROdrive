@@ -589,6 +589,9 @@ function sedan(b: MeshBuilder, bd: BodyDef): void {
   const paint = bodyPaint(bd);
   const inner = cond(0x2e3236, 0.6, 0.7);
   const gls = glass(0xa8ccd4, 0.06);
+  // Tail lamp lens: a flat material so it stays bright when the shell is in
+  // shadow, which is the only way an unlit box reads as a lamp.
+  const lens = flat(0xc02a1e, 0.25);
 
   // Axle reference, read from the wheel slots so shell and slots cannot drift.
   let ax = 0.77;
@@ -606,17 +609,28 @@ function sedan(b: MeshBuilder, bd: BodyDef): void {
   // underside, so the glass line lands at CANT - 0.416. Bonnet, wing tops, boot
   // deck and window sills all sit on that one line, which is what makes the
   // shoulder read as a single continuous surface instead of a stack of trays.
-  const ROCKER = -0.6; // bottom of the visible bodywork between the arches
-  const CANT = 0.56; // roof underside == top of the door aperture
-  const ROOF = 0.62; // roof skin top (== the collider's top face)
+  //
+  // The roof skin tops out 0.06 above the collider's top face. The shell already
+  // reaches outside that box at the wheels, bumpers and mirrors; buying 0.06 of
+  // extra glass height here is what stops the greenhouse looking squashed under
+  // a tall lower body, and 0.06 on a 1.24 m box changes no handling.
+  const ROCKER = -0.56; // bottom of the visible bodywork between the arches
+  const CANT = 0.62; // roof underside == top of the door aperture
+  const ROOF = 0.68; // roof skin top
   const WAIST = CANT - 0.416; // top of the lower body, bottom of every window
   const DOOR_BOT = CANT - 0.85; // rocker top: where the door panel ends
   const SIDE = 0.79; // flank panel centre plane (outer skin at 0.82)
   const CROWN = ax + 0.075; // fender centre plane: clears a 0.20 m wide tyre
-  const ARCH = 0.47; // arch opening radius: tyre 0.35 + travel headroom
+  // Arch opening radius, measured against the tyre rather than guessed: the lip's
+  // inner surface ends up 54 mm above a 0.35 m tyre at rest, which reads as a
+  // wheel in a wing instead of a wheel in a hole (0.47 left a 124 mm hole). The
+  // cost is that the tyre kisses the lip past ~54 mm of bump travel, out of 170
+  // available; on tarmac it never gets there, over desert whoops it will.
+  const ARCH = 0.45;
   const NOSE = 2.13; // nose/tail face centre plane (outer face at 2.16)
   const RAIL = WAIST - 0.0475; // bonnet/boot frame rail centre (0.095 deep)
   const XRAIL = WAIST - 0.05; // cowl / cross-rail centre (0.10 deep)
+  const OPEN = az - ARCH; // where the arch openings start, fore and aft
 
   // Door aperture, matched to door_std (0.95 x 0.85) so the panel fills it.
   const DOOR_F = 0.7;
@@ -631,14 +645,20 @@ function sedan(b: MeshBuilder, bd: BodyDef): void {
   for (const s of [-1, 1] as const) {
     const side = s < 0 ? 'l' : 'r';
     b.box(`sedan_rocker_${side}`, 0.06, DOOR_BOT - ROCKER, 0.95, paint, [s * SIDE, (ROCKER + DOOR_BOT) / 2, doorMid]);
-    b.box(`sedan_flank_f_${side}`, 0.06, WAIST - ROCKER, 1.16 - DOOR_F, paint, [s * SIDE, (ROCKER + WAIST) / 2, (1.16 + DOOR_F) / 2]);
-    b.box(`sedan_flank_r_${side}`, 0.06, WAIST - ROCKER, DOOR_R + 1.16, paint, [s * SIDE, (ROCKER + WAIST) / 2, (DOOR_R - 1.16) / 2]);
+    b.box(`sedan_flank_f_${side}`, 0.06, WAIST - ROCKER, OPEN - DOOR_F, paint, [s * SIDE, (ROCKER + WAIST) / 2, (OPEN + DOOR_F) / 2]);
+    b.box(`sedan_flank_r_${side}`, 0.06, WAIST - ROCKER, DOOR_R + OPEN, paint, [s * SIDE, (ROCKER + WAIST) / 2, (DOOR_R - OPEN) / 2]);
 
     // Fender crowns: proud of the flanks, from the arch roof up to the waist.
     const crownH = WAIST - (hub + ARCH);
     const crownY = (WAIST + hub + ARCH) / 2;
     b.box(`sedan_wing_${side}`, 0.07, crownH, ARCH * 2, paint, [s * CROWN, crownY, az]);
     b.box(`sedan_quarter_${side}`, 0.07, crownH, ARCH * 2, paint, [s * CROWN, crownY, -az]);
+
+    // Inner arch liners, just inboard of the tyre and spanning the lip's own
+    // half-hoop: without them each opening is a hole straight through the car
+    // and the wheel reads as floating in a void.
+    b.box(`sedan_liner_f_${side}`, 0.04, ARCH, ARCH * 2, inner, [s * (ax - 0.12), hub + ARCH / 2, az]);
+    b.box(`sedan_liner_r_${side}`, 0.04, ARCH, ARCH * 2, inner, [s * (ax - 0.12), hub + ARCH / 2, -az]);
   }
 
   // ---- arch lips: half-hoops around where the tyre actually sits ----
@@ -659,31 +679,34 @@ function sedan(b: MeshBuilder, bd: BodyDef): void {
   b.box('sedan_bonnet_front', 1.64, 0.1, 0.1, paint, [0, XRAIL, 2.11]);
   b.box('sedan_cowl', 1.64, 0.1, 0.1, paint, [0, XRAIL, 0.95]);
 
-  // ---- tail: face, boot frame and a lip over the rear edge ----
-  b.box('sedan_tail', 1.64, 0.484, 0.06, paint, [0, -0.198, -NOSE]);
-  b.box('sedan_deck_rail_l', 0.2, 0.095, 1.01, paint, [-0.72, RAIL, -1.555]);
-  b.box('sedan_deck_rail_r', 0.2, 0.095, 1.01, paint, [0.72, RAIL, -1.555]);
-  b.box('sedan_deck_front', 1.64, 0.1, 0.1, paint, [0, XRAIL, -1.0]);
+  // ---- tail: face down to the valance line, boot frame, lip, lamps ----
+  b.box('sedan_tail', 1.64, XRAIL - 0.05 + 0.52, 0.06, paint, [0, (XRAIL - 0.05 - 0.52) / 2, -NOSE]);
+  b.box('sedan_deck_rail_l', 0.2, 0.095, 0.84, paint, [-0.72, RAIL, -1.64]);
+  b.box('sedan_deck_rail_r', 0.2, 0.095, 0.84, paint, [0.72, RAIL, -1.64]);
+  b.box('sedan_deck_front', 1.64, 0.1, 0.1, paint, [0, XRAIL, -1.17]);
   b.box('sedan_deck_lip', 1.64, 0.15, 0.1, paint, [0, WAIST - 0.025, -2.11]);
+  b.box('sedan_lamp_l', 0.24, 0.14, 0.06, lens, [-0.58, -0.06, -2.19]);
+  b.box('sedan_lamp_r', 0.24, 0.14, 0.06, lens, [0.58, -0.06, -2.19]);
 
   // ---- cabin: formal roofline, raked screen, vertical rear glass ----
   const glassH = CANT - WAIST;
   const glassY = (CANT + WAIST) / 2;
-  // Roof skin covers the pillars (which sit at +-0.81) and stops 0.12 ahead of
-  // the windscreen's top edge, giving the period brow over the screen.
-  b.box('sedan_roof', 1.62, ROOF - CANT, 1.84, paint, [0, (CANT + ROOF) / 2, -0.08]);
-  b.box('sedan_apillar_l', 0.09, glassH, 0.2, paint, [-0.775, glassY, 0.8]);
-  b.box('sedan_apillar_r', 0.09, glassH, 0.2, paint, [0.775, glassY, 0.8]);
+  // Roof skin is 20 mm wider than the flanks so its edge reads as a drip rail
+  // instead of a box dropped on a narrower cabin, and stops 0.12 ahead of the
+  // windscreen's top edge, giving the period brow over the screen.
+  b.box('sedan_roof', 1.66, ROOF - CANT, 2.01, paint, [0, (CANT + ROOF) / 2, -0.165]);
+  b.box('sedan_apillar_l', 0.09, glassH, 0.2, paint, [-0.785, glassY, 0.8]);
+  b.box('sedan_apillar_r', 0.09, glassH, 0.2, paint, [0.785, glassY, 0.8]);
   // Wide body-colour sail panel rather than a stick C-pillar: with only two doors
   // a blind rear quarter is what stops the cabin reading as a bus greenhouse.
-  b.box('sedan_sail_l', 0.06, glassH, 0.445, paint, [-0.79, glassY, -0.7725]);
-  b.box('sedan_sail_r', 0.06, glassH, 0.445, paint, [0.79, glassY, -0.7725]);
+  b.box('sedan_sail_l', 0.06, glassH, 0.485, paint, [-0.79, glassY, -0.9225]);
+  b.box('sedan_sail_r', 0.06, glassH, 0.485, paint, [0.79, glassY, -0.9225]);
   // Windscreen: 0.18 m of rake over the glass height, cowl top to roof edge.
   const rake = Math.atan2(0.18, glassH);
   b.box('sedan_screen', 1.44, Math.hypot(0.18, glassH), 0.035, gls, [0, glassY, 0.81], [-rake, 0, 0]);
-  b.box('sedan_rearwin', 1.56, glassH, 0.035, gls, [0, glassY, -0.95]);
-  b.box('sedan_qglass_l', 0.03, glassH - 0.004, 0.27, gls, [-0.805, glassY, -0.415]);
-  b.box('sedan_qglass_r', 0.03, glassH - 0.004, 0.27, gls, [0.805, glassY, -0.415]);
+  b.box('sedan_rearwin', 1.56, glassH, 0.035, gls, [0, glassY, -1.12]);
+  b.box('sedan_qglass_l', 0.03, glassH - 0.004, 0.4, gls, [-0.805, glassY, -0.48]);
+  b.box('sedan_qglass_r', 0.03, glassH - 0.004, 0.4, gls, [0.805, glassY, -0.48]);
 }
 
 function wagon(b: MeshBuilder, bd: BodyDef): void {
