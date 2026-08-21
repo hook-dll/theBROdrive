@@ -33,6 +33,15 @@ const LOOK_AHEAD = 12;
  */
 const SPRING_OMEGA = 12;
 /**
+ * Re-centre ease rate (rad/s). A deliberate snap behind the car, but `exp`
+ * decay eases in and out instead of teleporting — same frame-rate-independent
+ * form as SPRING_OMEGA. Faster than the follow spring so a keypress reads as
+ * instant, not as the camera slowly slinking around.
+ */
+const RECENTER_OMEGA = 8;
+/** Yaw/pitch error (rad) below which a re-centre counts as done (~0.06 deg). */
+const RECENTER_EPSILON = 1e-3;
+/**
  * Log-distance added per wheel notch. Distance is `exp(logDistance)`, so a
  * notch always multiplies distance by a fixed factor. That is the only way one
  * gesture can span 1.5 m to 300 m with even perceptual speed — linear zoom over
@@ -105,6 +114,8 @@ export class CameraRig {
 
   private bobTime = 0;
   private shakeTime = 0;
+  /** True while a V re-centre ease runs; cancelled by any mouse look. */
+  private recentering = false;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -169,6 +180,32 @@ export class CameraRig {
     // *decreases* yaw. Hence the subtraction — getting this sign wrong inverts look.
     this.yawValue -= input.lookYaw;
     this.pitch = clamp(this.pitch + input.lookPitch, -PITCH_LIMIT, PITCH_LIMIT);
+
+    // Re-centre (V): ease yaw/pitch back to 0 so chase/orbit lands directly
+    // behind the car. Same exp(-omega*dt) decay the springs use — frame-rate
+    // independent, never overshoots. Two conditions cancel an in-progress ease:
+    // live mouse look (an ease must never fight the player; the press frame's
+    // own deltas were already applied above, and any *further* motion stops it)
+    // and a remaining error below RECENTER_EPSILON. On foot yaw is the movement
+    // basis (WASD is camera-relative, see player.ts), so there re-centre only
+    // levels the horizon — snapping foot yaw would spin the player under them.
+    if (this.recentering && (input.lookYaw !== 0 || input.lookPitch !== 0)) {
+      this.recentering = false;
+    }
+    if (input.recenterCamera) this.recentering = true;
+    if (this.recentering) {
+      const k = 1 - Math.exp(-RECENTER_OMEGA * d);
+      this.pitch += (0 - this.pitch) * k;
+      if (!onFoot) this.yawValue += (0 - this.yawValue) * k;
+      const settled =
+        Math.abs(this.pitch) < RECENTER_EPSILON &&
+        (onFoot || Math.abs(this.yawValue) < RECENTER_EPSILON);
+      if (settled) {
+        this.pitch = 0;
+        if (!onFoot) this.yawValue = 0;
+        this.recentering = false;
+      }
+    }
 
     // Wobble phases. Bob only advances while moving, so it freezes at rest.
     const moveMag = Math.min(1, Math.hypot(input.moveX, input.moveZ));
@@ -274,14 +311,21 @@ export class CameraRig {
     _vB.set(target.x, target.y, target.z).addScaledVector(_vC, lead);
 
     // Arm direction: behind the car, orbit by yaw, then elevate by pitch.
-    // Negate yaw so yaw increase (mouse right) orbits the camera to the right.
+    // The arm points FROM the car TO the camera, i.e. it is the negation of the
+    // view direction. The free-look cameras build the view as (sin y, cos y),
+    // where yaw increase (mouse left) swings the view left — `update` subtracts
+    // lookYaw for exactly that reason. So here the view must rotate by -yaw
+    // (`R(-yaw)` applied to the car's forward), and the arm is that view
+    // negated: arm = -R(-yaw)*fh. Mirroring the components of `lookVector`
+    // blindly would orbit the camera the wrong way round the car and invert
+    // left/right in chase/orbit, which is exactly the bug this sign pair fixes.
     const sy = Math.sin(this.yawValue);
     const cy = Math.cos(this.yawValue);
     const armPitch = this.pitch + ORBIT_PITCH_BASE;
     const ca = Math.cos(armPitch);
     const sa = Math.sin(armPitch);
-    const armHx = -fhx * cy + fhz * sy;
-    const armHz = -fhx * sy - fhz * cy;
+    const armHx = -fhx * cy - fhz * sy;
+    const armHz = fhx * sy - fhz * cy;
     _vD.set(armHx * ca, sa, armHz * ca);
 
     _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance));

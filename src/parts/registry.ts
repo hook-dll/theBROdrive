@@ -134,6 +134,8 @@ export interface BodyDef {
   readonly id: string;
   readonly label: string;
   readonly bodyClass: BodyClass;
+  /** Factory paint as 0xRRGGBB. Old saves and bare shells fall back to it. */
+  readonly stockPaintColor: number;
   /** Mass of the bare shell with every part stripped, kg. */
   readonly shellMass: number;
   /** Half-extents of the chassis box collider, metres. */
@@ -501,6 +503,7 @@ export const BODIES: readonly BodyDef[] = [
     id: 'body_sedan',
     label: 'old sedan',
     bodyClass: 'car',
+    stockPaintColor: 0x8a3a2e,
     shellMass: 610,
     halfExtents: [0.85, 0.62, 2.25],
     comOffset: [0, -0.32, -0.1],
@@ -521,6 +524,7 @@ export const BODIES: readonly BodyDef[] = [
     id: 'body_wagon',
     label: 'estate wagon',
     bodyClass: 'car',
+    stockPaintColor: 0x5a6b4a,
     shellMass: 690,
     halfExtents: [0.88, 0.68, 2.4],
     comOffset: [0, -0.3, -0.16],
@@ -541,6 +545,7 @@ export const BODIES: readonly BodyDef[] = [
     id: 'body_hatch',
     label: 'small hatchback',
     bodyClass: 'car',
+    stockPaintColor: 0x9a8a3a,
     shellMass: 480,
     halfExtents: [0.78, 0.6, 1.85],
     comOffset: [0, -0.28, 0.12],
@@ -561,6 +566,7 @@ export const BODIES: readonly BodyDef[] = [
     id: 'body_pickup',
     label: 'flatbed truck',
     bodyClass: 'truck',
+    stockPaintColor: 0x4a5a72,
     shellMass: 1450,
     halfExtents: [1.1, 0.95, 3.1],
     comOffset: [0, -0.42, -0.2],
@@ -581,6 +587,7 @@ export const BODIES: readonly BodyDef[] = [
     id: 'body_bus',
     label: 'service bus',
     bodyClass: 'bus',
+    stockPaintColor: 0x7a5230,
     shellMass: 3200,
     halfExtents: [1.25, 1.55, 5.2],
     comOffset: [0, -0.75, -0.3],

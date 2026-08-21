@@ -2,6 +2,12 @@ import type { SaveBackend, SaveMeta } from '../save/save';
 import { parseSeed, decodeSaveCode, encodeSaveCode } from '../save/save';
 import { newWorldState } from '../game/state';
 import type { WorldState } from '../game/state';
+import { BINDABLE_ACTIONS } from '../core/input';
+import { DAY_CYCLE_MAX_MINUTES, DAY_CYCLE_MIN_MINUTES, TIME_OF_DAY_PRESETS } from '../game/settings';
+import type { Settings, TimeOfDayPreset } from '../game/settings';
+import { PAINT_COLORS } from '../game/spawn';
+import type { SpawnRequest } from '../game/spawn';
+import { BODIES } from '../parts/registry';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -73,6 +79,43 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** What the player chose on the pause overlay. */
+export type PauseAction = 'resume' | 'save' | 'quit';
+
+/** Everything the pause overlay needs from the game; wired by main. */
+export interface PauseHooks {
+  settings: () => Settings;
+  /** Persist a complete settings object; main pushes it through world.apply. */
+  applySettings: (next: Settings) => void;
+  /** Apply a time-of-day preset immediately; not part of persisted settings. */
+  applyTimePreset: (preset: TimeOfDayPreset) => void;
+  /** Record a freshly assembled, fully fuelled car into the world. */
+  spawnVehicle: (request: SpawnRequest) => void;
+}
+
+/** Condition presets for a spawned car, best first. */
+const CONDITION_STEPS: readonly { label: string; value: number }[] = [
+  { label: 'Pristine', value: 1 },
+  { label: 'Used', value: 0.67 },
+  { label: 'Rough', value: 0.33 },
+  { label: 'Wreck', value: 0 },
+];
+
+/** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
+function formatKey(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Numpad ${code.slice(6)}`;
+  if (code === 'Mouse0') return 'LMB';
+  if (code === 'Mouse2') return 'RMB';
+  return code.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+/** 0xRRGGBB to the CSS colour string the paint swatches need. */
+function cssColor(value: number): string {
+  return `#${value.toString(16).padStart(6, '0')}`;
 }
 
 export class MainMenu {
@@ -216,80 +259,447 @@ export class MainMenu {
     });
   }
 
-  showPause(info: { seed: number; km: number }): Promise<'resume' | 'save' | 'quit'> {
+  /**
+   * Pause overlay with Settings and Spawn Vehicle sub-screens. One window
+   * keydown listener serves the whole pause: it routes Escape by screen and
+   * runs key-capture for rebinding. Element listeners live on the overlay, so
+   * removePause (which drops the overlay) releases everything except that one
+   * window listener, which pauseCleanup removes.
+   */
+  showPause(info: { seed: number; km: number }, hooks: PauseHooks): Promise<PauseAction> {
     this.removePause();
     return new Promise((resolve) => {
       const overlay = el('div', 'menu menu-pause');
       const panel = el('div', 'menu-panel');
       overlay.appendChild(panel);
-
-      const title = el('h1', 'menu-title');
-      title.textContent = 'Paused';
-      panel.appendChild(title);
-
-      const seedBox = el('div', 'menu-seed-display');
-      const seedLabel = el('span', 'menu-seed-label');
-      seedLabel.textContent = 'Seed';
-      const seedValue = el('span', 'menu-seed-value');
-      seedValue.textContent = String(info.seed);
-      const seedCopy = button('menu-button', 'Copy');
-      seedBox.append(seedLabel, seedValue, seedCopy);
-      panel.appendChild(seedBox);
-
-      const kmText = el('div', 'menu-pause-km');
-      kmText.textContent = `Travelled ${info.km.toFixed(1)} km`;
-      panel.appendChild(kmText);
-
-      const resumeBtn = button('menu-button menu-primary', 'Resume');
-      const saveBtn = button('menu-button', 'Save');
-      const exportBtn = button('menu-button', 'Export Save Code');
-      const quitBtn = button('menu-button', 'Quit');
-      panel.append(resumeBtn, saveBtn, exportBtn, quitBtn);
-
       this.root.appendChild(overlay);
       this.pauseOverlay = overlay;
 
       let settled = false;
-      const finish = (action: 'resume' | 'save' | 'quit'): void => {
+      const finish = (action: PauseAction): void => {
         if (settled) return;
         settled = true;
         this.removePause();
         resolve(action);
       };
 
+      // Working copy of the player's settings. hooks.settings() hands out the
+      // authoritative object: it is copied on entry, never mutated here, and
+      // every change pushes a complete Settings object back through
+      // hooks.applySettings (keyBindings re-copied so the applied map is ours).
+      const base = hooks.settings();
+      const settings: Settings = {
+        gearboxMode: base.gearboxMode,
+        dayCycleMinutes: base.dayCycleMinutes,
+        keyBindings: { ...base.keyBindings },
+      };
+      const apply = (): void => {
+        hooks.applySettings({
+          gearboxMode: settings.gearboxMode,
+          dayCycleMinutes: settings.dayCycleMinutes,
+          keyBindings: { ...settings.keyBindings },
+        });
+      };
+
+      /** Label of the first other action bound to `code`, or null. */
+      const holderOf = (code: string, exceptActionId: string): string | null => {
+        for (const action of BINDABLE_ACTIONS) {
+          if (
+            action.id !== exceptActionId &&
+            (settings.keyBindings[action.id] ?? action.defaultKeys).includes(code)
+          ) {
+            return action.label;
+          }
+        }
+        return null;
+      };
+
+      type Screen = 'main' | 'settings' | 'spawn';
+      let screen: Screen = 'main';
+      /** Action id waiting for a key in capture mode; only set on settings. */
+      let capturingActionId: string | null = null;
+      /** Feedback line on the settings screen; null while not on settings. */
+      let note: HTMLElement | null = null;
+      /** Bindings list on the settings screen; null while not on settings. */
+      let bindingsList: HTMLElement | null = null;
+
+      const clearNote = (): void => {
+        if (!note) return;
+        note.textContent = '';
+        note.classList.remove('is-alarm');
+      };
+
+      const renderBindings = (): void => {
+        if (!bindingsList) return;
+        bindingsList.textContent = '';
+        for (const action of BINDABLE_ACTIONS) {
+          const row = button('menu-binding', '');
+          const labelSpan = el('span', 'menu-binding-label');
+          labelSpan.textContent = action.label;
+          const keysSpan = el('span', 'menu-binding-keys');
+          if (capturingActionId === action.id) {
+            row.classList.add('is-capturing');
+            keysSpan.textContent = 'press a key…';
+          } else {
+            keysSpan.textContent = (settings.keyBindings[action.id] ?? action.defaultKeys)
+              .map(formatKey)
+              .join(' / ');
+          }
+          row.append(labelSpan, keysSpan);
+          row.addEventListener('click', () => {
+            // Clicking the armed row again disarms it; clicking any other row
+            // moves capture there.
+            capturingActionId = capturingActionId === action.id ? null : action.id;
+            clearNote();
+            renderBindings();
+          });
+          bindingsList.appendChild(row);
+        }
+      };
+
+      const showScreen = (next: Screen): void => {
+        screen = next;
+        if (next !== 'settings') {
+          // Leaving settings disarms capture and drops the references to its
+          // elements; both are rebuilt from scratch on the next visit.
+          capturingActionId = null;
+          note = null;
+          bindingsList = null;
+        }
+        panel.classList.toggle('menu-panel-wide', next !== 'main');
+        if (next === 'main') renderMain();
+        else if (next === 'settings') renderSettings();
+        else renderSpawn();
+      };
+
       const onKey = (ev: KeyboardEvent): void => {
+        if (screen === 'settings' && capturingActionId !== null) {
+          // Capture mode: the next keydown becomes the binding. Modifier chords
+          // stay with the browser (same rule as InputReader) and Escape cancels
+          // without closing the menu.
+          if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+          ev.preventDefault();
+          if (ev.code === 'Escape') {
+            capturingActionId = null;
+            clearNote();
+            renderBindings();
+            return;
+          }
+          const action = BINDABLE_ACTIONS.find((a) => a.id === capturingActionId);
+          if (!action) return;
+          const holder = holderOf(ev.code, action.id);
+          if (holder) {
+            // Reject rather than clobber: say who already owns the key.
+            if (note) {
+              note.textContent = `"${formatKey(ev.code)}" is bound to ${holder}`;
+              note.classList.add('is-alarm');
+            }
+            return;
+          }
+          settings.keyBindings[action.id] = [ev.code];
+          apply();
+          capturingActionId = null;
+          clearNote();
+          renderBindings();
+          return;
+        }
         if (ev.key === 'Escape') {
           ev.preventDefault();
-          finish('resume');
+          if (screen === 'main') finish('resume');
+          else showScreen('main');
         }
       };
       window.addEventListener('keydown', onKey);
       this.pauseCleanup = () => window.removeEventListener('keydown', onKey);
 
-      resumeBtn.addEventListener('click', () => finish('resume'));
-      saveBtn.addEventListener('click', () => finish('save'));
-      quitBtn.addEventListener('click', () => finish('quit'));
+      const renderMain = (): void => {
+        panel.textContent = '';
 
-      seedCopy.addEventListener('click', () => {
-        void copyText(String(info.seed)).then((ok) => {
-          seedCopy.textContent = ok ? 'Copied' : 'Copy failed';
-          window.setTimeout(() => {
-            seedCopy.textContent = 'Copy';
-          }, 1500);
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Paused';
+        panel.appendChild(title);
+
+        const seedBox = el('div', 'menu-seed-display');
+        const seedLabel = el('span', 'menu-seed-label');
+        seedLabel.textContent = 'Seed';
+        const seedValue = el('span', 'menu-seed-value');
+        seedValue.textContent = String(info.seed);
+        const seedCopy = button('menu-button', 'Copy');
+        seedBox.append(seedLabel, seedValue, seedCopy);
+        panel.appendChild(seedBox);
+
+        const kmText = el('div', 'menu-pause-km');
+        kmText.textContent = `Travelled ${info.km.toFixed(1)} km`;
+        panel.appendChild(kmText);
+
+        const resumeBtn = button('menu-button menu-primary', 'Resume');
+        const settingsBtn = button('menu-button', 'Settings');
+        const spawnBtn = button('menu-button', 'Spawn Vehicle');
+        const saveBtn = button('menu-button', 'Save');
+        const exportBtn = button('menu-button', 'Export Save Code');
+        const quitBtn = button('menu-button', 'Quit');
+        panel.append(resumeBtn, settingsBtn, spawnBtn, saveBtn, exportBtn, quitBtn);
+
+        resumeBtn.addEventListener('click', () => finish('resume'));
+        settingsBtn.addEventListener('click', () => showScreen('settings'));
+        spawnBtn.addEventListener('click', () => showScreen('spawn'));
+        saveBtn.addEventListener('click', () => finish('save'));
+        quitBtn.addEventListener('click', () => finish('quit'));
+
+        seedCopy.addEventListener('click', () => {
+          void copyText(String(info.seed)).then((ok) => {
+            seedCopy.textContent = ok ? 'Copied' : 'Copy failed';
+            window.setTimeout(() => {
+              seedCopy.textContent = 'Copy';
+            }, 1500);
+          });
         });
-      });
 
-      exportBtn.addEventListener('click', () => {
-        const code = encodeSaveCode(buildExportState(info.seed, info.km));
-        void copyText(code).then((ok) => {
-          exportBtn.textContent = ok ? 'Copied' : 'Copy failed';
-          window.setTimeout(() => {
-            exportBtn.textContent = 'Export Save Code';
-          }, 1500);
+        exportBtn.addEventListener('click', () => {
+          const code = encodeSaveCode(buildExportState(info.seed, info.km));
+          void copyText(code).then((ok) => {
+            exportBtn.textContent = ok ? 'Copied' : 'Copy failed';
+            window.setTimeout(() => {
+              exportBtn.textContent = 'Export Save Code';
+            }, 1500);
+          });
         });
-      });
 
-      resumeBtn.focus();
+        resumeBtn.focus();
+      };
+
+      const renderSettings = (): void => {
+        panel.textContent = '';
+
+        const backBtn = button('menu-button', 'Back');
+        backBtn.addEventListener('click', () => showScreen('main'));
+        panel.appendChild(backBtn);
+
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Settings';
+        panel.appendChild(title);
+
+        // Gearbox: a two-way toggle; the active side is re-painted in place so
+        // focus is not disturbed on every change.
+        const gearField = el('div', 'menu-field');
+        const gearLabel = el('label', 'menu-label');
+        gearLabel.textContent = 'Gearbox';
+        const gearRow = el('div', 'menu-toggle-row');
+        const manualBtn = button('menu-button', 'Manual');
+        const autoBtn = button('menu-button', 'Automatic');
+        const paintGearbox = (): void => {
+          manualBtn.classList.toggle('is-selected', settings.gearboxMode === 'manual');
+          autoBtn.classList.toggle('is-selected', settings.gearboxMode === 'automatic');
+        };
+        paintGearbox();
+        manualBtn.addEventListener('click', () => {
+          settings.gearboxMode = 'manual';
+          paintGearbox();
+          apply();
+        });
+        autoBtn.addEventListener('click', () => {
+          settings.gearboxMode = 'automatic';
+          paintGearbox();
+          apply();
+        });
+        gearRow.append(manualBtn, autoBtn);
+        gearField.append(gearLabel, gearRow);
+        panel.appendChild(gearField);
+
+        // Time of day: presets apply immediately through their own hook and are
+        // not part of the persisted settings object.
+        const todField = el('div', 'menu-field');
+        const todLabel = el('label', 'menu-label');
+        todLabel.textContent = 'Time of Day';
+        const presetRow = el('div', 'menu-toggle-row');
+        for (const preset of Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]) {
+          const presetBtn = button('menu-button', preset.charAt(0).toUpperCase() + preset.slice(1));
+          presetBtn.addEventListener('click', () => {
+            hooks.applyTimePreset(preset);
+            if (note) {
+              note.textContent = `${presetBtn.textContent} applied`;
+              note.classList.remove('is-alarm');
+            }
+          });
+          presetRow.appendChild(presetBtn);
+        }
+        todField.append(todLabel, presetRow);
+        panel.appendChild(todField);
+
+        // Day/night cycle length in real minutes, clamped to the contract's
+        // bounds; the stepper disables at either end instead of wrapping.
+        const cycleField = el('div', 'menu-field');
+        const cycleLabel = el('label', 'menu-label');
+        cycleLabel.textContent = 'Day Cycle Length';
+        const stepper = el('div', 'menu-stepper');
+        const minusBtn = button('menu-button', '-');
+        const cycleValue = el('span', 'menu-stepper-value');
+        const plusBtn = button('menu-button', '+');
+        const paintCycle = (): void => {
+          cycleValue.textContent = `${settings.dayCycleMinutes} min`;
+          minusBtn.disabled = settings.dayCycleMinutes <= DAY_CYCLE_MIN_MINUTES;
+          plusBtn.disabled = settings.dayCycleMinutes >= DAY_CYCLE_MAX_MINUTES;
+        };
+        paintCycle();
+        minusBtn.addEventListener('click', () => {
+          settings.dayCycleMinutes = Math.max(
+            DAY_CYCLE_MIN_MINUTES,
+            settings.dayCycleMinutes - 1,
+          );
+          paintCycle();
+          apply();
+        });
+        plusBtn.addEventListener('click', () => {
+          settings.dayCycleMinutes = Math.min(
+            DAY_CYCLE_MAX_MINUTES,
+            settings.dayCycleMinutes + 1,
+          );
+          paintCycle();
+          apply();
+        });
+        stepper.append(minusBtn, cycleValue, plusBtn);
+        cycleField.append(cycleLabel, stepper);
+        panel.appendChild(cycleField);
+
+        // Key bindings: one row per action; click a row to arm capture.
+        const bindField = el('div', 'menu-field');
+        const bindLabel = el('label', 'menu-label');
+        bindLabel.textContent = 'Key Bindings';
+        bindingsList = el('div', 'menu-bindings');
+        bindField.append(bindLabel, bindingsList);
+        panel.appendChild(bindField);
+
+        const resetBtn = button('menu-button', 'Reset to Defaults');
+        resetBtn.addEventListener('click', () => {
+          settings.keyBindings = {};
+          apply();
+          clearNote();
+          renderBindings();
+        });
+        panel.appendChild(resetBtn);
+
+        note = el('div', 'menu-note');
+        panel.appendChild(note);
+
+        renderBindings();
+
+        backBtn.focus();
+      };
+
+      // Spawn selections reset per pause, so every visit starts at the first
+      // body, first paint, factory-fresh condition.
+      let spawnBodyId = BODIES[0].id;
+      let spawnPaint = PAINT_COLORS[0].value;
+      let spawnCondition = 1;
+
+      const renderSpawn = (): void => {
+        panel.textContent = '';
+
+        const backBtn = button('menu-button', 'Back');
+        backBtn.addEventListener('click', () => showScreen('main'));
+        panel.appendChild(backBtn);
+
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Spawn Vehicle';
+        panel.appendChild(title);
+
+        const bodyField = el('div', 'menu-field');
+        const bodyLabel = el('label', 'menu-label');
+        bodyLabel.textContent = 'Body';
+        const bodyList = el('div', 'menu-body-list');
+        const paintBodies = (): void => {
+          bodyList.textContent = '';
+          for (const def of BODIES) {
+            const row = button('menu-body', '');
+            const name = el('span', 'menu-body-label');
+            name.textContent = def.label;
+            const cls = el('span', 'menu-body-class');
+            cls.textContent = def.bodyClass;
+            row.append(name, cls);
+            if (def.id === spawnBodyId) row.classList.add('is-selected');
+            row.addEventListener('click', () => {
+              spawnBodyId = def.id;
+              paintBodies();
+              paintNote();
+            });
+            bodyList.appendChild(row);
+          }
+        };
+        paintBodies();
+        bodyField.append(bodyLabel, bodyList);
+        panel.appendChild(bodyField);
+
+        const paintField = el('div', 'menu-field');
+        const paintLabel = el('label', 'menu-label');
+        paintLabel.textContent = 'Paint';
+        const paintRow = el('div', 'menu-paints');
+        const paintSwatches = (): void => {
+          paintRow.textContent = '';
+          for (const color of PAINT_COLORS) {
+            const swatch = button('menu-paint', '');
+            swatch.style.background = cssColor(color.value);
+            swatch.title = color.label;
+            swatch.setAttribute('aria-label', color.label);
+            if (color.value === spawnPaint) swatch.classList.add('is-selected');
+            swatch.addEventListener('click', () => {
+              spawnPaint = color.value;
+              paintSwatches();
+              paintNote();
+            });
+            paintRow.appendChild(swatch);
+          }
+        };
+        paintSwatches();
+        paintField.append(paintLabel, paintRow);
+        panel.appendChild(paintField);
+
+        const condField = el('div', 'menu-field');
+        const condLabel = el('label', 'menu-label');
+        condLabel.textContent = 'Condition';
+        const condRow = el('div', 'menu-toggle-row');
+        const paintCond = (): void => {
+          condRow.textContent = '';
+          for (const step of CONDITION_STEPS) {
+            const stepBtn = button('menu-button', step.label);
+            if (step.value === spawnCondition) stepBtn.classList.add('is-selected');
+            stepBtn.addEventListener('click', () => {
+              spawnCondition = step.value;
+              paintCond();
+              paintNote();
+            });
+            condRow.appendChild(stepBtn);
+          }
+        };
+        paintCond();
+        condField.append(condLabel, condRow);
+        panel.appendChild(condField);
+
+        const spawnNote = el('div', 'menu-note');
+        const paintNote = (): void => {
+          const def = BODIES.find((b) => b.id === spawnBodyId);
+          const paint = PAINT_COLORS.find((c) => c.value === spawnPaint);
+          spawnNote.textContent =
+            `${def ? `${def.label} (${def.bodyClass})` : spawnBodyId} · ` +
+            `${paint ? paint.label : '?'} · condition ${spawnCondition.toFixed(2)}`;
+        };
+        paintNote();
+        panel.appendChild(spawnNote);
+
+        const confirmBtn = button('menu-button menu-primary', 'Spawn');
+        confirmBtn.addEventListener('click', () => {
+          hooks.spawnVehicle({
+            bodyId: spawnBodyId,
+            paintColor: spawnPaint,
+            condition: spawnCondition,
+          });
+          finish('resume');
+        });
+        panel.appendChild(confirmBtn);
+
+        backBtn.focus();
+      };
+
+      showScreen('main');
     });
   }
 

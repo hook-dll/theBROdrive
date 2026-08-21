@@ -13,6 +13,13 @@ import type { Player } from './player';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
+/** How far in front of the eye a dropped item materialises. */
+const DROP_DISTANCE = 1.2;
+/**
+ * A drop is pulled back to this short of whatever the view ray hits, so dropping
+ * into a wall cannot embed the item; MIN_HIT_TOI below floors the result.
+ */
+const DROP_WALL_MARGIN = 0.15;
 /** Distance from the eye to a car's centre at which entering it is offered. */
 const VEHICLE_RANGE = 3.5;
 /** A filled slot is picked for REMOVAL when the aim ray passes within this of it. */
@@ -101,6 +108,7 @@ export class Interaction {
   private player: Player | null = null;
   private prevInteract = false;
   private prevEnterExit = false;
+  private prevDrop = false;
   private conditionEmitTimer = 0;
 
   /** The slot id under the crosshair on the last resolve, for ghost previews. */
@@ -135,8 +143,10 @@ export class Interaction {
   ): { prompt: string | null } {
     const interactPressed = input.interact && !this.prevInteract;
     const enterExitPressed = input.enterExit && !this.prevEnterExit;
+    const dropPressed = input.dropItem && !this.prevDrop;
     this.prevInteract = input.interact;
     this.prevEnterExit = input.enterExit;
+    this.prevDrop = input.dropItem;
 
     if (this.world.state.player.drivingCarId) {
       if (enterExitPressed) this.tryExit();
@@ -149,6 +159,9 @@ export class Interaction {
     if (input.usePrimary) this.usePrimary(dt, resolved);
     if (interactPressed) this.interact(resolved);
     if (enterExitPressed) this.tryEnter(resolved);
+    // Deliberately after the driving early-return above: dropping while seated is a
+    // no-op, the item stays in the inventory.
+    if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
 
     return { prompt };
   }
@@ -457,6 +470,45 @@ export class Interaction {
       else if (held?.type === 'part') this.attach(t.carId, slot, held.part, resolved);
       return;
     }
+  }
+
+  /**
+   * Drops the held item 1.2 m down the view ray, pulled back to just short of any
+   * geometry the ray hits first so a drop aimed at a wall cannot spawn inside it.
+   * The player's capsule is excluded exactly as the aim ray does: the eye origin
+   * sits inside it, and its zero-distance self-hit would collapse the drop point
+   * onto the eye.
+   */
+  private drop(
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+  ): void {
+    const held = this.inventory.held;
+    if (!held) return;
+    const dirLen = Math.hypot(dirX, dirY, dirZ) || 1;
+    const dx = dirX / dirLen;
+    const dy = dirY / dirLen;
+    const dz = dirZ / dirLen;
+
+    const hit = this.physics.raycast(
+      { x: eyeX, y: eyeY, z: eyeZ },
+      { x: dx, y: dy, z: dz },
+      DROP_DISTANCE,
+      this.player?.rigidBody,
+    );
+    // The floor is the same self-hit guard the aim ray uses: never spawn nearer to
+    // the eye than a real target could be, even with a wall at arm's length.
+    const dist = hit ? Math.max(hit.toi - DROP_WALL_MARGIN, MIN_HIT_TOI) : DROP_DISTANCE;
+
+    // Remove from the inventory first so a dropped item can never be double-held,
+    // then materialise it; spawn/spawnItem record state before building the body.
+    this.inventory.remove(held.id);
+    if (held.type === 'part') this.loose.spawn(held.part, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
+    else this.loose.spawnItem(held, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
   }
 
   private attach(carId: string, slot: SlotDef, part: PartInstance, resolved: Resolved): void {

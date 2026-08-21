@@ -60,6 +60,12 @@ export interface ChunkContent {
    * physics bodies (the streamer already does that via `bodies`).
    */
   dispose?: () => void;
+  /**
+   * Night-time lamp state for providers that own lamps. Called from the render
+   * loop with the shared night factor (0..1, from the sky) and the camera
+   * position; providers without lamps simply omit it.
+   */
+  setLamps?(on: number, nearX: number, nearZ: number): void;
 }
 
 export interface ChunkProvider {
@@ -98,8 +104,17 @@ export class ChunkStreamer {
     this.providers.push(provider);
   }
 
-  update(playerS: number): void {
-    const clamped = Math.min(Math.max(playerS, 0), this.road.length);
+  /**
+   * Push the shared night state into every live chunk that owns lamps. Cheap:
+   * each provider does its own nearest-fixture selection over per-chunk lists.
+   */
+  setLamps(on: number, nearX: number, nearZ: number): void {
+    for (const chunk of this.built.values()) {
+      for (const content of chunk.contents) content.setLamps?.(on, nearX, nearZ);
+    }
+  }
+
+  update(playerS: number): void {    const clamped = Math.min(Math.max(playerS, 0), this.road.length);
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
     // Chunks may leave the road's own range: negative indices apron the desert
     // behind s = 0 and indices past the end apron the road's termination. The

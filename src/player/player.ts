@@ -66,6 +66,13 @@ export class Player {
   private readonly moveScratch = { x: 0, y: 0, z: 0 };
   private readonly appliedScratch = { x: 0, y: 0, z: 0 };
   private readonly posScratch = { x: 0, y: 0, z: 0 };
+  // Fixed-step position snapshots, for the same reason as the car: the camera and
+  // the eye must move at constant velocity between steps, not jump by however many
+  // steps happened to run before this frame.
+  private readonly prevStep = { x: 0, y: 0, z: 0 };
+  private readonly curStep = { x: 0, y: 0, z: 0 };
+  private readonly interp = { x: 0, y: 0, z: 0 };
+  private snapshotPrimed = false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -110,6 +117,39 @@ export class Player {
     return { x: t.x, y: t.y, z: t.z };
   }
 
+  /**
+   * Latches the capsule position after the physics step that moved it. Call once
+   * per fixed step, after `physics.step()`.
+   */
+  postStep(): void {
+    const t = this.body.translation(this.posScratch);
+    if (!this.snapshotPrimed) {
+      this.prevStep.x = t.x;
+      this.prevStep.y = t.y;
+      this.prevStep.z = t.z;
+      this.snapshotPrimed = true;
+    } else {
+      this.prevStep.x = this.curStep.x;
+      this.prevStep.y = this.curStep.y;
+      this.prevStep.z = this.curStep.z;
+    }
+    this.curStep.x = t.x;
+    this.curStep.y = t.y;
+    this.curStep.z = t.z;
+  }
+
+  /**
+   * Capsule centre at render time, interpolated between the last two fixed steps.
+   * Returns an internal buffer; callers must not retain it across frames.
+   */
+  interpolatedPosition(alpha: number): { x: number; y: number; z: number } {
+    const p = this.interp;
+    p.x = this.prevStep.x + (this.curStep.x - this.prevStep.x) * alpha;
+    p.y = this.prevStep.y + (this.curStep.y - this.prevStep.y) * alpha;
+    p.z = this.prevStep.z + (this.curStep.z - this.prevStep.z) * alpha;
+    return p;
+  }
+
   /** Maintained arclength along the road. */
   get s(): number {
     return this.arcS;
@@ -151,6 +191,9 @@ export class Player {
   teleport(x: number, y: number, z: number): void {
     this.body.setTranslation({ x, y: y + Player.FEET_OFFSET, z }, true);
     this.verticalVelocity = 0;
+    // A teleport is a discontinuity: interpolating across it would fly the camera
+    // from the old spot to the new one over a frame.
+    this.snapshotPrimed = false;
     if (!this.road) return;
     const near = this.road.sampleAt(this.arcS);
     const driftSq = (near.x - x) ** 2 + (near.z - z) ** 2;

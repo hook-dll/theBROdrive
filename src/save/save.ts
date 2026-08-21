@@ -1,6 +1,8 @@
 import { hash } from '../core/rng';
+import { body } from '../parts/registry';
 import { newWorldState } from '../game/state';
 import type { CarState, PlayerState, WorldState } from '../game/state';
+import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
 
@@ -303,6 +305,9 @@ export function migrateState(raw: unknown): WorldState {
     timeOfDay: numOr(obj.timeOfDay, defaults.timeOfDay),
     playedSeconds: numOr(obj.playedSeconds, defaults.playedSeconds),
     recordS: numOr(obj.recordS, defaults.recordS),
+    // A save written before settings existed has no field here; sanitizeSettings
+    // accepts anything (including undefined) and yields a valid Settings.
+    settings: sanitizeSettings(obj.settings),
     player,
     cars,
     looseParts,
@@ -315,6 +320,16 @@ export function migrateState(raw: unknown): WorldState {
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
   if (typeof raw.bodyId !== 'string') throw new Error(`Save data is malformed: car "${raw.id}" is missing a bodyId`);
+
+  // Saves predating paint carry no colour; fall back to the body's stock paint.
+  // An unknown body id is already unrecoverable further down (body mesh build
+  // throws), so a neutral grey here beats crashing the load path.
+  let stockPaint = 0x8a8a8a;
+  try {
+    stockPaint = body(raw.bodyId).stockPaintColor;
+  } catch {
+    // Unknown body id: keep the neutral fallback.
+  }
 
   const slots: Record<string, PartInstance> = {};
   const rawSlots = raw.slots;
@@ -329,6 +344,7 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   return {
     id: raw.id,
     bodyId: raw.bodyId,
+    paintColor: numOr(raw.paintColor, stockPaint),
     slots,
     fuelLitres: numOr(raw.fuelLitres, 0),
     odometer: numOr(raw.odometer, 0),

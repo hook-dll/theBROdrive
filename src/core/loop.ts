@@ -66,6 +66,9 @@ export class GameLoop {
     // fast-forwarding through it, which would teleport the car.
     if (this.accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) this.accumulator = 0;
 
-    this.callbacks.render(this.accumulator / FIXED_DT, frameDt);
+    // Alpha is a fraction of one step. It can only exceed 1 when the step budget
+    // ran out with time still owed; clamping keeps the renderer from extrapolating
+    // past the newest transform, which would show the car ahead of where it is.
+    this.callbacks.render(Math.min(1, this.accumulator / FIXED_DT), frameDt);
   };
 }

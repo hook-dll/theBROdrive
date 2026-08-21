@@ -1,6 +1,8 @@
 import { hash } from '../core/rng';
 import type { Item } from '../items/items';
 import type { PartInstance, SlotId } from '../parts/registry';
+import { DEFAULT_SETTINGS } from './settings';
+import type { Settings } from './settings';
 
 /**
  * Authoritative, serialisable game state, plus the single API for mutating it.
@@ -18,6 +20,8 @@ export interface CarState {
   readonly id: string;
   /** Body definition id from the parts registry. */
   readonly bodyId: string;
+  /** Body paint as 0xRRGGBB; old saves default to the body's stock colour. */
+  readonly paintColor: number;
   /** Slot id -> fitted part, or absent when empty. */
   readonly slots: Record<string, PartInstance>;
   fuelLitres: number;
@@ -54,6 +58,8 @@ export interface WorldState {
   playedSeconds: number;
   /** Furthest arclength ever reached, for the personal-record monument. */
   recordS: number;
+  /** Player preferences; defaulted on load so old saves keep working. */
+  settings: Settings;
   player: PlayerState;
   cars: Record<string, CarState>;
   /** Parts lying loose in the world, keyed by part id. */
@@ -76,6 +82,8 @@ export interface WorldState {
 
 export type WorldDelta =
   | { t: 'time'; timeOfDay: number; playedSeconds: number }
+  | { t: 'time_of_day'; timeOfDay: number }
+  | { t: 'settings'; settings: Settings }
   | { t: 'player_move'; x: number; y: number; z: number; yaw: number; pitch: number; s: number }
   | { t: 'enter_car'; carId: string }
   | { t: 'exit_car' }
@@ -103,6 +111,7 @@ export function newWorldState(seed: number): WorldState {
     timeOfDay: DAY_LENGTH * 0.36,
     playedSeconds: 0,
     recordS: 0,
+    settings: DEFAULT_SETTINGS,
     player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null },
     cars: {},
     looseParts: {},
@@ -154,6 +163,17 @@ export class GameWorld {
       case 'time':
         s.timeOfDay = delta.timeOfDay % DAY_LENGTH;
         s.playedSeconds = delta.playedSeconds;
+        break;
+      case 'time_of_day':
+        // An explicit clock jump (settings presets), kept separate from 'time',
+        // the loop's per-tick advance: a jump repositions the sun without
+        // counting played seconds, and nothing may re-derive it from 'time'.
+        s.timeOfDay = delta.timeOfDay % DAY_LENGTH;
+        break;
+      case 'settings':
+        // Wholesale replacement: the pause menu edits preferences as a unit and
+        // settings is never mutated field-by-field, so no merge is needed.
+        s.settings = delta.settings;
         break;
       case 'car_add':
         s.cars[delta.car.id] = delta.car;

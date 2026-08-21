@@ -291,7 +291,11 @@ export class Hud {
   private rebuildInventory(items: readonly Item[]): void {
     this.invSlotsEl.textContent = '';
     this.invSlots = [];
-    this.invItems = items;
+    // Snapshot, not the live array: setInventory's dirty test compares length and
+    // per-slot content against this, so aliasing `inventory.all` (which mutates in
+    // place on add/remove) would make every length check compare the array to
+    // itself and a removal could leave its slot on screen forever.
+    this.invItems = items.slice();
     this.invLabels = [];
     this.invSelected = -1;
     for (let i = 0; i < items.length; i++) {
