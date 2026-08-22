@@ -329,7 +329,10 @@ for (const file of process.argv.slice(2)) {
     const { min, max, models, geometries, measured } = measure(file);
     const size = [0, 1, 2].map((c) => max[c] - min[c]);
     console.log(
-      `${file}  L ${size[2].toFixed(3)}  W ${size[0].toFixed(3)}  H ${size[1].toFixed(3)}  (${models} models, ${geometries} geometries, ${measured} measured)`,
+      `${file}  X ${size[0].toFixed(3)}  Y ${size[1].toFixed(3)}  Z ${size[2].toFixed(3)}` +
+        `  (min ${min.map((v) => v.toFixed(2)).join(',')})` +
+        `  (max ${max.map((v) => v.toFixed(2)).join(',')})` +
+        `  [${models} models, ${geometries} geoms]`,
     );
   } catch (e) {
     console.error(`${file}: ERROR: ${e.message}`);
