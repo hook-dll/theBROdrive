@@ -33,17 +33,18 @@
  *
  *     OBJ `vt` puts its origin at the BOTTOM-left of the image; glTF/three.js
  *     sample TEXCOORD_0 with the origin at the TOP-left, so V must be flipped
- *     on the way out. This was proven, not assumed: `tools/_uvcheck.mjs` (see
- *     git history) decoded `Wheel/wheel.png` with `zlib.inflateSync` and
- *     sampled it at the wheel sidewall's disc-centre UV, which every sidewall
- *     face's fan agrees is (u=0.479, v=0.593) in raw OBJ space. The bright rim
- *     hub in the texture (its brightest-pixel centroid) sits at (u=0.487,
- *     v=0.419). Passing V through un-flipped samples (0.479, 0.593) -- 0.174
- *     away from the hub, off in the black tyre band. Flipping samples (0.479,
- *     1-0.593=0.407) -- 0.012 from the hub, i.e. dead centre. All three vendored
- *     packs (PSX/GGBot, DeJunes, Quaternius) are Blender OBJ exports with the
- *     same MTL header ("# Blender ... MTL File"), so the flip is applied
- *     unconditionally; there is no per-pack CLI flag because no pack disagrees.
+ *     on the way out. This was proven, not assumed, with a throwaway pixel-
+ *     sampling check against `Wheel/wheel.png` (decoded with `zlib.inflateSync`,
+ *     no deps): every one of the wheel sidewall's octagon faces agrees, via
+ *     barycentric interpolation, that the disc's rotation-axis centre sits at
+ *     raw OBJ uv (0.479, 0.593); the texture's bright-rim hub (its brightest-
+ *     pixel centroid) sits at (0.487, 0.419). Passing V through un-flipped
+ *     samples (0.479, 0.593) -- 0.174 off from the hub, landing in the black
+ *     tyre band instead. Flipping samples (0.479, 1-0.593=0.407) -- 0.012 from
+ *     the hub, i.e. dead centre on the bright rim. All three vendored packs
+ *     (PSX/GGBot, DeJunes, Quaternius) are Blender OBJ exports ("# Blender ...
+ *     MTL File"), so the flip is applied unconditionally; there is no per-pack
+ *     CLI flag because no pack's evidence disagreed with this one.
  *
  * A file with a single object and no wheel objects (e.g. a body-only car, or a
  * standalone wheel mesh) converts fine: only the nodes that exist are emitted, and
