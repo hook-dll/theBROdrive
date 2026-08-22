@@ -57,6 +57,12 @@ const FRAME_SMOOTHING = 0.1;
  * 1080p buffer the peak offset is exactly this many pixels.
  */
 const HAZE_AMPLITUDE_PX = 3.4;
+/**
+ * Animation speed multiplier. Amplitude and vertical distribution are independent,
+ * so this makes the air churn faster without making the image bend further or
+ * spreading shimmer into the sky.
+ */
+const HAZE_SPEED = 2.4;
 
 /**
  * How the shimmer is distributed, in screen heights measured from the horizon.
@@ -257,7 +263,7 @@ export class Renderer {
   };
 
   render(): void {
-    this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
+    this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
     this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
     // Pass 1: draw the scene into the target — the same final sRGB pixels the
     // canvas would have received, since tone mapping and colour conversion stay
