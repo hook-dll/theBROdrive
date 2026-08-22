@@ -11,7 +11,9 @@
  *   2. a car has all four wheel nodes or none — a partial wheel set is rejected;
  *   3. every wheel node's bounding box is wheel-shaped (X extent smaller than Y and
  *      Z, with Y and Z within 15% of each other);
- *   4. left/right wheel centres have opposite X signs.
+ *   4. left/right wheel centres have opposite X signs;
+ *   5. every textured primitive's TEXCOORD_0 min/max lies within [0,1] (a sign
+ *      the OBJ->glTF V-flip was applied correctly, see tools/obj-to-glb.mjs).
  *
  * It then prints the per-file measurement table (length/width/height in model
  * units, wheel radius, wheelbase, track) and, for body-only files, the body's Y
@@ -245,6 +247,41 @@ for (const file of files) {
   if (hasWheel) {
     row.wheelRadius = (wheelBox.max[1] - wheelBox.min[1]) / 2;
   }
+
+  // TEXCOORD_0 sanity: every primitive whose material carries a baseColorTexture
+  // (i.e. every "textured" primitive) must have UVs whose min/max lie within
+  // [0,1] -- the sign the OBJ->glTF V-flip (see tools/obj-to-glb.mjs) was applied
+  // and not double-applied or skipped.
+  const EPS = 1e-4;
+  let uvMin = [Infinity, Infinity];
+  let uvMax = [-Infinity, -Infinity];
+  let hasTexturedUV = false;
+  for (const mesh of json.meshes) {
+    for (const prim of mesh.primitives) {
+      const mat = prim.material !== undefined ? json.materials[prim.material] : null;
+      const textured = Boolean(mat?.pbrMetallicRoughness?.baseColorTexture);
+      if (!textured || prim.attributes.TEXCOORD_0 === undefined) continue;
+      hasTexturedUV = true;
+      for (const [u, v] of decodeAccessor(json, bin, prim.attributes.TEXCOORD_0)) {
+        if (u < uvMin[0]) uvMin[0] = u;
+        if (v < uvMin[1]) uvMin[1] = v;
+        if (u > uvMax[0]) uvMax[0] = u;
+        if (v > uvMax[1]) uvMax[1] = v;
+      }
+    }
+  }
+  if (hasTexturedUV) {
+    const outOfRange =
+      uvMin[0] < -EPS || uvMin[1] < -EPS || uvMax[0] > 1 + EPS || uvMax[1] > 1 + EPS;
+    if (outOfRange) {
+      failures++;
+      console.error(
+        `${stem}: TEXCOORD_0 out of [0,1] -- min (${uvMin[0].toFixed(4)}, ${uvMin[1].toFixed(4)}) max (${uvMax[0].toFixed(4)}, ${uvMax[1].toFixed(4)})`,
+      );
+    }
+    row.uvMin = uvMin;
+    row.uvMax = uvMax;
+  }
   rows.push(row);
 }
 
@@ -275,6 +312,17 @@ if (standalone.length) {
   console.log('Standalone wheel models (radius, model units):');
   for (const r of standalone) {
     console.log(`  ${r.stem.padEnd(11)} r ${r.wheelRadius.toFixed(3)}`);
+  }
+  console.log('');
+}
+
+const textured = rows.filter((r) => r.uvMin);
+if (textured.length) {
+  console.log('Textured GLBs (TEXCOORD_0 min/max, model UV units):');
+  for (const r of textured) {
+    console.log(
+      `  ${r.stem.padEnd(11)} min (${r.uvMin[0].toFixed(3)}, ${r.uvMin[1].toFixed(3)})  max (${r.uvMax[0].toFixed(3)}, ${r.uvMax[1].toFixed(3)})`,
+    );
   }
   console.log('');
 }
