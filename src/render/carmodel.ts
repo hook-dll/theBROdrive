@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { proceduralCarScene } from './proceduralcars';
 import { CAR_MODELS, carModel, type CarModelDef, type GizmoAnchorDef } from '../vehicle/carmodels';
 
 /** Wheel node names in the kit, mapped to the ids the vehicle and saves use. */
@@ -126,14 +127,21 @@ let gltf: GLTFLoader | null = null;
 let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
 
+/** Models built in code rather than loaded (see render/proceduralcars.ts). */
+const PROCEDURAL_SCHEME = 'procedural://';
+
 /**
- * Loads one model file as a scene graph, picking the loader from the extension.
+ * Produces one model's scene graph, picking the source from its URL.
  *
- * FBX is here because two of the vendored packs ship only FBX. It costs nothing to
- * support: those models are body-only (see `separateWheels`), so nothing downstream
- * cares which loader produced the graph.
+ * Three sources, one contract: a `procedural://` id is built in code, `.fbx` goes
+ * through FBXLoader (two vendored packs ship only FBX), anything else is glTF.
+ * Downstream — measurement, wheels, anchors, the hood camera — cannot tell which,
+ * which is what lets a generated car sit in the catalogue next to a bought one.
  */
 async function loadScene(file: string): Promise<THREE.Group> {
+  if (file.startsWith(PROCEDURAL_SCHEME)) {
+    return proceduralCarScene(file.slice(PROCEDURAL_SCHEME.length));
+  }
   if (file.toLowerCase().endsWith('.fbx')) {
     fbx ??= new FBXLoader();
     return await fbx.loadAsync(file);
@@ -214,21 +222,42 @@ function takeOwnWheels(
     // would pull the track in by the width of a tyre either side — 0.72 m instead
     // of 1.02 m on the sedan, which handles like a tippy shopping trolley.
     const centre = box.getCenter(new THREE.Vector3());
-    // The wheel is a cylinder about local X; its radius is half the Y extent.
-    radii.set(id, ((box.max.y - box.min.y) / 2) * s);
+    // Radius from the disc's own bounds, measured across whichever pair of axes is
+    // the wheel's face. The axle is the SHORTEST extent — some packs model a wheel
+    // about X, some about Z — so taking half of the largest extent is what makes
+    // this independent of the modeller's axis convention.
+    const extents = [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
+    radii.set(id, (Math.max(...extents) / 2) * s);
     positions.set(id, centre.clone().multiplyScalar(s));
 
     // With the mount moved to the centre, the mesh has to move the other way, or it
     // would be drawn a tyre-width outboard of the wheel the physics simulates.
-    // Wrapping it keeps the node's own geometry untouched and shared.
+    //
+    // The node's own ROTATION is kept. The vehicle spins the wrapper about X and
+    // steers it about Y; zeroing the authored rotation (as this used to) laid the
+    // DeJunes wheels flat, because their discs are modelled about a different axis
+    // and only their own transform stands them up.
     const offset = centre.sub(node.position);
     node.removeFromParent();
     node.position.set(-offset.x, -offset.y, -offset.z);
-    node.rotation.set(0, 0, 0);
+    node.updateMatrix();
+
+    // The vehicle spins a wheel about X and steers it about Y, so the wheel's axle
+    // has to BE X. Packs disagree: Kenney models the disc about X, the DeJunes FBX
+    // wheels about another axis, and zeroing their authored rotation (as this used
+    // to) laid them flat like dinner plates. So the authored transform is kept and
+    // an alignment group turns whichever axis is the axle onto X — mesh and its
+    // centring offset rotate together, so the wheel stays centred on its mount.
+    const align = new THREE.Group();
+    align.add(node);
+    const axle = extents.indexOf(Math.min(...extents));
+    if (axle === 1) align.rotation.z = Math.PI / 2; // axle along Y
+    else if (axle === 2) align.rotation.y = Math.PI / 2; // axle along Z
+
     const wrapper = new THREE.Group();
     wrapper.name = id;
     wrapper.scale.setScalar(s);
-    wrapper.add(node);
+    wrapper.add(align);
     prepareMaterials(wrapper);
     objects.set(id, wrapper);
   }
