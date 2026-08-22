@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
+import { CAMERA_BASE_FOV } from '../core/renderer';
 
 export type CameraMode = 'foot' | 'interior' | 'chase' | 'orbit';
 
@@ -56,8 +57,18 @@ const CHASE_MAX = 14;
 const ORBIT_PITCH_BASE = 0.22;
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
-const BASE_FOV = 68;
-const MAX_FOV = 82;
+/**
+ * Resting FOV, shared with the initial camera in renderer.ts so the two cannot
+ * disagree. 65 degrees on foot and in the car, matching The Long Drive.
+ */
+const BASE_FOV = CAMERA_BASE_FOV;
+/**
+ * Speed-widened ceiling. Kept at the same +14 degrees over the resting value that
+ * it was before, so lowering the base changes where the camera sits at rest without
+ * altering how much the view stretches when moving. Drop this to BASE_FOV to switch
+ * the speed effect off entirely.
+ */
+const MAX_FOV = BASE_FOV + 14;
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
@@ -71,7 +82,40 @@ const LEAD_FADE_END = 30;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
 const SHAKE_MAX = 0.012;
-const ROLL_STEER = 0.06;
+/**
+ * Interior g-force sway tuning. The eye must stay inside the cabin at all
+ * times, so this is a small bounded offset from the body's fixed `eyePoint`
+ * — never an integration of velocity or acceleration, which is what could
+ * walk the eye out through the back of the cabin under sustained throttle.
+ * Acceleration (not velocity) drives it because that is what inertia
+ * actually is: a car holding a steady 100 km/h has zero g-force on the
+ * driver, so keying the sway off speed/velocity would keep swaying on a
+ * flat-out cruise and has no natural zero to decay back to; acceleration is
+ * exactly zero at rest and at constant speed, which is what makes the
+ * offset settle to zero instead of drifting.
+ */
+/** Sway offset clamp, metres, in any axis. About one seat-cushion's worth of
+ *  lean — enough to read as weight transfer, never enough to reach the
+ *  headrest or leave the cabin (the bug this replaces). */
+const SWAY_MAX = 0.06;
+/** Sway low-pass time constant, seconds. Long enough to smooth a kerb strike
+ *  or gear-shift jolt out of the finite-differenced accel estimate; short
+ *  enough that a real swerve or hard brake is still felt within a couple of
+ *  frames. */
+const SWAY_TAU = 0.2;
+const SWAY_OMEGA = 1 / SWAY_TAU;
+/** Acceleration, m/s^2, that fully saturates the clamp: ~0.5-0.6 g, i.e. a
+ *  hard brake or a hard launch in this game's tuning. Ordinary hard driving
+ *  should reach the full bounded sway, not require motorsport-grade g-force
+ *  to ever be felt. */
+const SWAY_ACCEL_FULL = 6;
+const SWAY_GAIN = SWAY_MAX / SWAY_ACCEL_FULL;
+/** Counter-roll clamp, radians (~2.9 deg) — a few degrees of bank into hard
+ *  cornering, same "never reads as nausea" ceiling the old steer-based roll
+ *  used. Driven by the same lateral-g estimate as the eye sway rather than
+ *  steering angle, so holding full lock while parked doesn't lean the cabin. */
+const SWAY_ROLL_MAX = 0.05;
+const SWAY_ROLL_GAIN = SWAY_ROLL_MAX / SWAY_ACCEL_FULL;
 
 const LOG_MIN = Math.log(DIST_MIN);
 const LOG_MAX = Math.log(DIST_MAX);
@@ -116,6 +160,23 @@ export class CameraRig {
   private shakeTime = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
   private recentering = false;
+
+  /**
+   * Interior sway state: previous frame's chassis position/local speeds for
+   * the finite-difference accel estimate, the low-pass-filtered accel, and
+   * the resulting bounded roll. `swayPrimed` skips the first post-reset
+   * frame so a fresh finite difference is never taken against a stale (or
+   * just-reset) previous position.
+   */
+  private readonly swayPrevPos = new THREE.Vector3();
+  private swayPrevFwdSpeed = 0;
+  private swayPrevLatSpeed = 0;
+  private swayAccelLong = 0;
+  private swayAccelLat = 0;
+  private swayRoll = 0;
+  private swayPrimed = false;
+  /** True while the driving view was 'interior' last frame; edge-detects entry. */
+  private wasInterior = false;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -227,12 +288,19 @@ export class CameraRig {
 
     const mode: CameraMode = onFoot ? 'foot' : this._mode;
 
+    // Entering interior view — whether by stepping into the car or cycling
+    // views back to it — must start the sway from a clean zero. Otherwise a
+    // finite-difference position from seconds ago (or a different vehicle)
+    // turns into a single spurious velocity spike on the first frame back.
+    if (mode === 'interior' && !this.wasInterior) this.resetSway(target);
+    this.wasInterior = mode === 'interior';
+
     switch (mode) {
       case 'foot':
         this.desiredFoot(target, moveMag);
         break;
       case 'interior':
-        this.desiredInterior(target);
+        this.desiredInterior(target, d);
         break;
       case 'chase':
         this.desiredArm(target);
@@ -243,16 +311,30 @@ export class CameraRig {
         break;
     }
 
-    const k = 1 - Math.exp(-SPRING_OMEGA * d);
-    this.eye.lerp(_vA, k);
-    this.lookAt.lerp(_vB, k);
+    // The hood camera is BOLTED to the car, so it must not be sprung toward its
+    // desired pose: a first-order follow at SPRING_OMEGA lags by v/omega, which is
+    // a metre at 45 km/h and 2.5 m at highway speed — enough for the eye to sink
+    // back through the windscreen into the cabin and to swim forward under braking.
+    // Its softness comes from the bounded g-sway and shake instead. Every other
+    // mode is a camera following the car through the air, and does spring.
+    if (mode === 'interior') {
+      this.eye.copy(_vA);
+      this.lookAt.copy(_vB);
+    } else {
+      const k = 1 - Math.exp(-SPRING_OMEGA * d);
+      this.eye.lerp(_vA, k);
+      this.lookAt.lerp(_vB, k);
+    }
 
     _mA.lookAt(this.eye, this.lookAt, _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
     if (mode === 'interior') {
-      // A tiny roll against the steer: the cabin banks like a real car leaning
-      // outward in a corner. Kept small so it never reads as nausea.
-      _qB.setFromAxisAngle(_FORWARD, -input.steer * ROLL_STEER);
+      // Counter-roll from the same lateral g-force estimate as the eye sway
+      // (see desiredInterior): the cabin banks a few degrees into hard
+      // cornering, the way real body roll leans the driver outward. Driven
+      // by measured lateral accel rather than steering angle so holding full
+      // lock at parking speed doesn't lean the view at all.
+      _qB.setFromAxisAngle(_FORWARD, this.swayRoll);
       this.camera.quaternion.multiply(_qB);
     }
     this.camera.position.copy(this.eye);
@@ -269,10 +351,49 @@ export class CameraRig {
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
   }
 
-  private desiredInterior(target: CameraTarget): void {
+  private desiredInterior(target: CameraTarget, dt: number): void {
     _qA.set(target.qx, target.qy, target.qz, target.qw);
     _vC.set(target.eyeOffset[0], target.eyeOffset[1], target.eyeOffset[2]).applyQuaternion(_qA);
     _vA.set(target.x, target.y, target.z).add(_vC);
+
+    // G-force sway: a bounded offset around the fixed eye point above,
+    // derived from the chassis' own finite-differenced acceleration — see
+    // the SWAY_* block for why acceleration (not velocity) drives this.
+    // World velocity from the position delta, then rotated into the body
+    // frame (conjugate of a unit quaternion is its inverse) so it splits
+    // cleanly into forward and lateral components.
+    _vD.set(
+      target.x - this.swayPrevPos.x,
+      target.y - this.swayPrevPos.y,
+      target.z - this.swayPrevPos.z,
+    ).divideScalar(dt);
+    this.swayPrevPos.set(target.x, target.y, target.z);
+    _qB.copy(_qA).conjugate();
+    _vD.applyQuaternion(_qB);
+    const fwdSpeed = _vD.z;
+    const latSpeed = _vD.x;
+
+    if (this.swayPrimed) {
+      const rawLong = (fwdSpeed - this.swayPrevFwdSpeed) / dt;
+      const rawLat = (latSpeed - this.swayPrevLatSpeed) / dt;
+      const k = 1 - Math.exp(-SWAY_OMEGA * dt);
+      this.swayAccelLong += (rawLong - this.swayAccelLong) * k;
+      this.swayAccelLat += (rawLat - this.swayAccelLat) * k;
+    } else {
+      this.swayPrimed = true; // first frame after a reset: nothing to difference against yet
+    }
+    this.swayPrevFwdSpeed = fwdSpeed;
+    this.swayPrevLatSpeed = latSpeed;
+
+    // Offset opposes the car's acceleration, like a body pressed back into
+    // its seat under throttle or thrown sideways under braking/cornering.
+    // The clamp below is the guarantee: however large swayAccelLong/Lat get,
+    // the offset added to the eye can never exceed SWAY_MAX.
+    const offsetZ = clamp(-this.swayAccelLong * SWAY_GAIN, -SWAY_MAX, SWAY_MAX);
+    const offsetX = clamp(-this.swayAccelLat * SWAY_GAIN, -SWAY_MAX, SWAY_MAX);
+    this.swayRoll = clamp(-this.swayAccelLat * SWAY_ROLL_GAIN, -SWAY_ROLL_MAX, SWAY_ROLL_MAX);
+    _vD.set(offsetX, 0, offsetZ).applyQuaternion(_qA);
+    _vA.add(_vD);
 
     // Speed-scaled shake from incommensurate sines: pseudo-random, never a throb.
     const amp = SHAKE_MAX * clamp(target.speedKmh / FOV_FULL_SPEED, 0, 1);
@@ -285,6 +406,22 @@ export class CameraRig {
     this.lookVector(_vC);
     _vD.copy(_vC).applyQuaternion(_qA);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
+  }
+
+  /**
+   * Clears the interior sway's running state. Called whenever the driving
+   * view enters 'interior' — stepping into the car or cycling views back to
+   * it — so a finite-difference position from long ago (or a different
+   * vehicle) never turns into a one-frame velocity spike.
+   */
+  private resetSway(target: CameraTarget): void {
+    this.swayPrevPos.set(target.x, target.y, target.z);
+    this.swayPrevFwdSpeed = 0;
+    this.swayPrevLatSpeed = 0;
+    this.swayAccelLong = 0;
+    this.swayAccelLat = 0;
+    this.swayRoll = 0;
+    this.swayPrimed = false;
   }
 
   private desiredArm(target: CameraTarget): void {

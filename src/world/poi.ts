@@ -6,20 +6,20 @@ import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
 import type { GameWorld } from '../game/state';
 import {
-  BODIES,
   ENGINE_VARIANTS,
   GEARBOX_VARIANTS,
   TANK_VARIANTS,
   WHEEL_VARIANTS,
   variantsOfKind,
-  type BodyDef,
   type FuelType,
   type PartInstance,
+  type PartKind,
   type PartVariant,
 } from '../parts/registry';
 import type { FuelCanItem, ToolItem, ToolKind } from '../items/items';
-import { makeFlatMaterial, setCondition } from '../render/materials';
-import { createBodyMesh } from '../render/partmesh';
+import { makeFlatMaterial } from '../render/materials';
+import { carModelMeasure, createStaticCarModel } from '../render/carmodel';
+import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 
@@ -372,7 +372,8 @@ function buildPoi(
   if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
 
-/** One to three derelict shells with a partial slot fill of strippable parts. */
+/** One to three derelict complete models, half-sunk and scattered, each shedding a
+ *  handful of gizmos. */
 function buildWrecks(
   ctx: ChunkContext,
   poi: Poi,
@@ -387,8 +388,8 @@ function buildWrecks(
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
 
   for (let w = 0; w < count; w++) {
-    const def: BodyDef = pick(BODIES, poi.variantSeed, w, 10);
-    const half = def.halfExtents;
+    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
+    const half = carModelMeasure(def.id).halfExtents;
 
     // Scatter around the anchor, half-sunk, some facing the wrong way.
     const sDelta = (hash01(poi.variantSeed, w, 11) - 0.5) * 16;
@@ -407,13 +408,10 @@ function buildWrecks(
     const originY = p.y + half[1] - sink;
     const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch);
 
-    const shell = createBodyMesh(def.id);
+    // A complete static model. It must already be preloaded — the lead preloads the
+    // whole catalogue before any chunk is built, so no guard is needed here.
+    const shell = createStaticCarModel(def.id);
     setFromMatrix(shell, matrix);
-    setCondition(
-      shell,
-      0.35 + hash01(poi.variantSeed, w, 19) * 0.45,
-      0.4 + hash01(poi.variantSeed, w, 20) * 0.55,
-    );
     group.add(shell);
 
     // A box approximates the shell well enough for a solid, non-drivable obstacle.
@@ -426,39 +424,47 @@ function buildWrecks(
       colliders,
     );
 
-    if (shouldLoot) spawnWreckParts(ctx, poi, loose, def, matrix, w, counter);
+    if (shouldLoot) spawnWreckGizmos(ctx, poi, loose, def, matrix, w, counter);
   }
 }
 
+/** Gizmo kinds a wreck can shed. Cosmetic junk, filtered by the wreck's own body
+ *  class below so nothing spawns that could not have come off it. */
+const WRECK_GIZMO_KINDS: readonly PartKind[] = [
+  'door', 'hood', 'trunk', 'mirror', 'bumper', 'headlight',
+  'dashboard', 'seat', 'exhaust', 'battery', 'radiator', 'wheel',
+];
+
 /**
- * Strippable parts from a wreck's partial slot fill. We cannot own a real slot map
- * (that lives with Vehicle's module), so each fitted part is spawned as a loose
- * dynamic part at its slot point; LoosePartField registers it in `looseParts` and
- * the interaction system removes it on pickup. Parts spawn slightly above the slot
- * and settle, so a part that starts inside the shell pops out instead of jittering.
+ * Gizmos shed by a derelict wreck. There is no slot map anymore — the model is
+ * complete — so instead of walking slots this makes a fixed, deterministic number
+ * of rolls and leaves roughly half empty, then drops each picked gizmo just clear
+ * of the shell and above the ground so it settles instead of jittering inside.
  */
-function spawnWreckParts(
+function spawnWreckGizmos(
   ctx: ChunkContext,
   poi: Poi,
   loose: LoosePartField,
-  def: BodyDef,
+  def: CarModelDef,
   matrix: THREE.Matrix4,
   w: number,
   counter: LootCounter,
 ): void {
-  for (let si = 0; si < def.slots.length; si++) {
-    const slot = def.slots[si];
-    // Roughly half the slots stay empty, so no wreck is ever fully stocked.
-    if (hash01(poi.variantSeed, w, 60, si) > 0.5) continue;
-    const options = variantsOfKind(slot.kind, def.bodyClass);
+  const rolls = 3 + Math.floor(hash01(poi.variantSeed, w, 60) * 6); // 3..8 rolls
+  for (let i = 0; i < rolls; i++) {
+    if (hash01(poi.variantSeed, w, 61, i) > 0.5) continue;
+    const kind = pick(WRECK_GIZMO_KINDS, poi.variantSeed, w, 62, i);
+    const options = variantsOfKind(kind, def.bodyClass);
     if (options.length === 0) continue;
-    const v = pick(options, poi.variantSeed, w, 61, si);
+    const v = pick(options, poi.variantSeed, w, 63, i);
     const part = makePart(ctx.world, poi, v.id, 0, counter);
-    const wp = new THREE.Vector3(slot.pos[0], slot.pos[1], slot.pos[2]).applyMatrix4(matrix);
+    // Scatter around the wreck's footprint, just clear of the shell.
+    const dx = (hash01(poi.variantSeed, w, 64, i) - 0.5) * 4;
+    const dz = (hash01(poi.variantSeed, w, 65, i) - 0.5) * 4;
+    const wp = new THREE.Vector3(dx, 0.25, dz).applyMatrix4(matrix);
     loose.spawn(part, wp.x, wp.y + 0.12, wp.z);
   }
 }
-
 function buildGasStop(
   ctx: ChunkContext,
   poi: Poi,

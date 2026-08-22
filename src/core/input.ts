@@ -21,8 +21,10 @@ export interface InputFrame {
   cycleCamera: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
   recenterCamera: boolean;
-  enterExit: boolean;
+  /** Enter/exit the car (entry needs an open or removed door): tap, consumed once by interaction. */
   interact: boolean;
+  /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
+  mount: boolean;
   /** Drop the held item in front of the player: tap, consumed once by interaction. */
   dropItem: boolean;
   /** Primary use of the held item: scrub, pour, fire. Held, not tapped. */
@@ -55,8 +57,8 @@ export function emptyInput(): InputFrame {
     toggleLights: false,
     cycleCamera: false,
     recenterCamera: false,
-    enterExit: false,
     interact: false,
+    mount: false,
     dropItem: false,
     usePrimary: false,
     useSecondary: false,
@@ -90,18 +92,23 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'left', label: 'Steer left', defaultKeys: ['KeyA', 'ArrowLeft'] },
   { id: 'right', label: 'Steer right', defaultKeys: ['KeyD', 'ArrowRight'] },
   { id: 'handbrake', label: 'Handbrake', defaultKeys: ['Space'] },
-  { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyR'] },
-  { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyF'] },
+  // Gears sit next to the steering hand on X and Z. The mouse wheel is deliberately
+  // NOT a gear lever: it is the chase camera's zoom, and sharing it made zooming
+  // while driving impossible.
+  { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
+  { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
   { id: 'lights', label: 'Toggle lights', defaultKeys: ['KeyL'] },
   { id: 'camera', label: 'Cycle camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
-  { id: 'enterExit', label: 'Enter / exit car', defaultKeys: ['KeyG'] },
   { id: 'interact', label: 'Interact', defaultKeys: ['KeyE'] },
+  { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
   { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
   { id: 'jump', label: 'Jump', defaultKeys: ['Space'] },
   { id: 'sprint', label: 'Sprint', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
-  { id: 'itemNext', label: 'Next item', defaultKeys: ['KeyX'] },
-  { id: 'itemPrev', label: 'Previous item', defaultKeys: ['KeyZ'] },
+  // X and Z are the gearbox; item cycling moves to the bracket keys, which nothing
+  // else uses and which stay reachable from the movement hand.
+  { id: 'itemNext', label: 'Next item', defaultKeys: ['BracketRight'] },
+  { id: 'itemPrev', label: 'Previous item', defaultKeys: ['BracketLeft'] },
 ];
 
 /** Effective binding table with no overrides applied. Shared, never mutated. */
@@ -239,6 +246,12 @@ export class InputReader {
     // Normalise across deltaMode (pixels vs lines vs pages) so trackpads agree.
     const scale = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 10 : 1 / 100;
     this.wheelDelta += e.deltaY * scale;
+    // A notch is also bindable as a pseudo-key, for anyone who does want gears or
+    // another tap action on the wheel. Nothing binds it by default (the wheel is
+    // the camera's zoom). It is a tap, never a hold: the browser gives discrete
+    // events with no release, so it goes in `pressed` and never in `held`.
+    if (e.deltaY < 0) this.pressed.add('WheelUp');
+    else if (e.deltaY > 0) this.pressed.add('WheelDown');
   };
 
   get pointerLocked(): boolean {
@@ -294,8 +307,8 @@ export class InputReader {
     f.toggleLights = this.anyPressed(this.keys.lights);
     f.cycleCamera = this.anyPressed(this.keys.camera);
     f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
-    f.enterExit = this.anyPressed(this.keys.enterExit);
     f.interact = this.anyPressed(this.keys.interact);
+    f.mount = this.anyPressed(this.keys.mount);
     f.dropItem = this.anyPressed(this.keys.drop);
     f.usePrimary = this.held.has('Mouse0');
     f.useSecondary = this.held.has('Mouse2');

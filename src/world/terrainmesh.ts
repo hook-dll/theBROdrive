@@ -187,6 +187,7 @@ export class TerrainMeshProvider implements ChunkProvider {
           centreX,
           centreZ,
           centre.y,
+          s,
         );
         positions[vi * 3 + 2] = point.z;
 

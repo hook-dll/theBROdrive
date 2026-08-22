@@ -2,10 +2,19 @@
  * The drivable car: a Rapier dynamic chassis + ray-cast wheels + the drivetrain
  * simulation, with Three.js meshes as pure derived views.
  *
+ * The car itself is ONE complete model (vehicle/carmodels.ts): its collider,
+ * suspension mounts and wheel radii are measured off the GLB in
+ * render/carmodel.ts, and its engine, gearbox and mass come from the model's
+ * catalogue entry. Nothing has to be bolted on for it to drive.
+ *
+ * Parts survive only as *gizmos*: cosmetic things found in the world, mounted at
+ * the model's anchor points (`CarState.gizmos`, keyed by anchor id). They add mass
+ * and looks, never capability.
+ *
  * Ownership rules (see game/state.ts): the authoritative state lives in
- * `GameWorld` / `CarState`. This class reads `carState.slots` for part layout,
- * reads/writes the chassis rigid body (the physics-derived view), and emits
- * throttled deltas through `world.apply`. It never mutates `CarState` directly.
+ * `GameWorld` / `CarState`. This class reads `carState.gizmos`, reads/writes the
+ * chassis rigid body (the physics-derived view), and emits throttled deltas
+ * through `world.apply`. It never mutates `CarState` directly.
  */
 
 import * as THREE from 'three';
@@ -13,10 +22,12 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import type { CarState, GameWorld } from '../game/state';
-import { body, computeCarStats, variant } from '../parts/registry';
-import type { BodyDef, CarStats, PartInstance, SlotDef, SlotId } from '../parts/registry';
+import { variant } from '../parts/registry';
+import type { CarStats, PartInstance } from '../parts/registry';
+import { carModel, modelEngine, modelGearbox, type CarModelDef } from './carmodels';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
-import { createBodyMesh, createPartMesh } from '../render/partmesh';
+import { carModelMeasure, createCarModel, type CarModelMeasure } from '../render/carmodel';
+import { createPartMesh } from '../render/partmesh';
 import { setCondition } from '../render/materials';
 
 const GRAVITY = 9.81;
@@ -105,6 +116,22 @@ const GRIP_MASS_EXPONENT = 0.3;
  * below the 1.0 rail.
  */
 const SIDE_FRICTION_GAIN = 0.8;
+/**
+ * Speed-dependent lateral grip falloff. Below LATERAL_GRIP_FALLOFF_START_MPS the
+ * car corners exactly as before; above it the lateral constraint gain is scaled
+ * down on a smoothstep toward 1 - LATERAL_GRIP_MAX_LOSS. This makes the car
+ * progressively more nervous with speed (a corner that holds at 60 km/h starts
+ * to wash out near 140 km/h) while parking and low-speed manoeuvring are
+ * untouched. The falloff scales only the lateral (side-friction) channel, so
+ * drive, brake and steering are unaffected, and a straight line carries no
+ * lateral slip to amplify — so it cannot introduce straight-line wander.
+ */
+/** Speed (m/s) below which lateral grip is untouched (~72 km/h). */
+const LATERAL_GRIP_FALLOFF_START_MPS = 20;
+/** Speed (m/s) at which the falloff reaches its full loss (~144 km/h). */
+const LATERAL_GRIP_FALLOFF_END_MPS = 40;
+/** Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all). */
+const LATERAL_GRIP_MAX_LOSS = 0.25;
 
 // ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
@@ -117,8 +144,55 @@ const SIDE_FRICTION_GAIN = 0.8;
 const FOOT_BRAKE_DECEL = 9.0;
 /** Rear bias for the foot brake (0..1). More on the rear, like a real car. */
 const FOOT_BRAKE_REAR_BIAS = 0.55;
-/** Handbrake deceleration target, rear wheels only. */
-const HANDBRAKE_DECEL = 6.0;
+/**
+ * Handbrake: a cable that LOCKS the rear wheels, not a second foot brake.
+ *
+ * The old 6 m/s² rear-only target was quieter than the foot brake and read as
+ * "the handbrake does nothing": at 60 km/h it shaved a couple of km/h and the
+ * car kept tracking straight. A locked wheel is instead an impulse ceiling far
+ * above what the tyre can transmit, so the rear simply stops rotating and the
+ * friction cone (see the grip note above) does the rest.
+ */
+const HANDBRAKE_DECEL = 30.0;
+/**
+ * Lateral grip left on a locked rear axle. A sliding tyre carries far less side
+ * force than a rolling one, and this is what turns the handbrake into a
+ * handbrake: the tail steps out instead of the car braking in a straight line.
+ */
+const HANDBRAKE_SIDE_GRIP = 0.3;
+/**
+ * Ride height, as geometry rather than a fudge factor.
+ *
+ * Target: with the car settled on its springs, the BOTTOM OF THE BODY sits level
+ * with the CENTRE OF THE WHEELS — a kerb's worth of clearance, and what these
+ * bodies look right at. Since the wheel hangs `rest - sag` below its mount, that
+ * target is `mount_y = restLength - staticSag - halfHeight`.
+ *
+ * But that target alone is wrong for packs whose body box runs down to a low skirt
+ * or a modelled underbody: applying it to them lifts the shell off its own arches
+ * onto stilts. So the lift is capped at RIDE_LIFT_MAX above the stance the artist
+ * drew (`wheelCentre + rest - sag`, which reproduces the model exactly), and every
+ * pack ends up either at the target or a hand's width above its own drawing —
+ * whichever is lower.
+ *
+ * Only Y comes from this; track and wheelbase always come from the model.
+ */
+const RIDE_LIFT_MAX = 0.15;
+/**
+ * Static spring compression, metres. Rapier's ray-cast suspension force is
+ * `stiffness * (rest - length) * chassis_mass`, i.e. the rate is per kilogram, so
+ * one wheel carrying a quarter of the weight settles at `g / (4 * stiffness)`
+ * regardless of how heavy the vehicle is. That is what makes the pre-compensation
+ * above closed-form instead of a per-model number to tune.
+ */
+function staticSag(stiffness: number): number {
+  return GRAVITY / (4 * stiffness);
+}
+/**
+ * Holding deceleration for a parked car, m/s². Low enough that a shove still
+ * rolls it, high enough that it does not creep down a dune on its own.
+ */
+const PARK_BRAKE_DECEL = 4.0;
 
 // ---------------------------------------------------------------------------
 // Aerodynamic drag: 0.5 * rho * Cd * A, with A = 4 * hx * hy (frontal area).
@@ -171,22 +245,36 @@ interface WheelVisual {
   index: number;
   isFront: boolean;
   radius: number;
-  part: PartInstance;
   mesh: THREE.Object3D;
   /** Reused per-frame buffer for wheelChassisConnectionPointCs. */
   scratchCp: { x: number; y: number; z: number };
 }
 
-interface PartVisual {
+/** A gizmo mounted at one of the model's anchors. Cosmetic mass, nothing more. */
+interface GizmoVisual {
   part: PartInstance;
   mesh: THREE.Object3D;
 }
+
+/**
+ * Centre of mass, as fractions of the measured chassis box: dropped well below the
+ * box centre and pushed slightly rearward, which is what keeps a tall van from
+ * tipping and a light tail from stepping out. Measured per model rather than
+ * authored, so a firetruck and a kart both get a sane one.
+ */
+const COM_DROP_FRACTION = 0.45;
+const COM_REARWARD_FRACTION = 0.05;
+
+/** Headlight placement as fractions of the chassis box (x of half-width, y of height). */
+const HEADLIGHT_X_FRACTION = 0.62;
+const HEADLIGHT_Y_FRACTION = 0.28;
 
 export class Vehicle {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
   private readonly car: CarState;
-  private readonly def: BodyDef;
+  private readonly model: CarModelDef;
+  private readonly measure: CarModelMeasure;
   private readonly scene: THREE.Scene;
 
   private readonly chassisBody: RAPIER.RigidBody;
@@ -198,7 +286,9 @@ export class Vehicle {
   private readonly rootGroup = new THREE.Group();
 
   private wheels: WheelVisual[] = [];
-  private parts: PartVisual[] = [];
+  private gizmos: GizmoVisual[] = [];
+  /** Wheel objects taken from the instantiated model, keyed by wheel id. */
+  private readonly wheelMeshes = new Map<string, THREE.Object3D>();
   private headlights: THREE.SpotLight[] = [];
   private lightsOnFlag = false;
 
@@ -251,9 +341,10 @@ export class Vehicle {
     this.world = world;
     this.car = carState;
     this.scene = scene;
-    this.def = body(carState.bodyId);
+    this.model = carModel(carState.modelId);
+    this.measure = carModelMeasure(carState.modelId);
 
-    const half = this.def.halfExtents;
+    const half = this.measure.halfExtents;
     // Frontal area 4·hx·hy; 0.5·ρ·Cd collapses to the constant below.
     this.dragCoeff = 0.5 * AIR_DENSITY * DRAG_CD * (4 * half[0] * half[1]);
 
@@ -281,14 +372,14 @@ export class Vehicle {
     this.drivetrain = new Drivetrain(
       this.statsValue.engine,
       this.statsValue.gearbox,
-      this.def.rearDriveBias,
+      this.model.rearDriveBias,
       this.statsValue.engineEfficiency,
     );
 
     this.localFuel = carState.fuelLitres;
     this.lastAuthFuel = carState.fuelLitres;
 
-    this.rebuildFromSlots();
+    this.rebuild();
   }
 
   get stats(): CarStats {
@@ -301,6 +392,21 @@ export class Vehicle {
 
   get root(): THREE.Object3D {
     return this.rootGroup;
+  }
+
+  /** The catalogue entry behind this car. */
+  get modelDef(): CarModelDef {
+    return this.model;
+  }
+
+  /** Measurements taken off the model's GLB (chassis-local metres). */
+  get modelMeasure(): CarModelMeasure {
+    return this.measure;
+  }
+
+  /** Hood-camera eye in chassis-local metres, for the in-car view. */
+  get eyePoint(): readonly [number, number, number] {
+    return this.measure.eyePoint;
   }
 
   get rpm(): number {
@@ -328,15 +434,15 @@ export class Vehicle {
     for (const light of this.headlights) light.visible = on;
   }
 
-  /** Rebuilds stats, drivetrain, controller and meshes from the current slots. */
-  rebuildFromSlots(): void {
+  /** Rebuilds stats, drivetrain, controller and meshes from the model and its gizmos. */
+  rebuild(): void {
     if (this.controller) {
       this.controller.free();
       this.controller = null;
     }
     this.clearVisuals();
     this.wheels = [];
-    this.parts = [];
+    this.gizmos = [];
     this.headlights = [];
     this.steerAngle = 0;
     this.frontWheelCount = 0;
@@ -350,10 +456,10 @@ export class Vehicle {
 
     this.drivetrain.reconfigure(stats.engine, stats.gearbox, stats.engineEfficiency);
 
-    // Parts change the mass; re-apply so the CoG stays low and rearward.
+    // Gizmos change the mass; re-apply so the CoG stays low and rearward.
     this.applyChassisMass(stats.mass);
 
-    this.buildBodyAndParts();
+    this.buildVisuals();
 
     const rapier = this.physics.rapier;
     this.controller = new rapier.DynamicRayCastVehicleController(
@@ -366,51 +472,59 @@ export class Vehicle {
     this.controller.indexUpAxis = 1;
     this.controller.setIndexForwardAxis = 2;
 
-    const frontShare = 1 - this.def.rearDriveBias;
-    const rearShare = this.def.rearDriveBias;
-    const suspension = this.def.suspension;
+    const frontShare = 1 - this.model.rearDriveBias;
+    const rearShare = this.model.rearDriveBias;
+    const suspension = this.model.suspension;
 
-    for (const slot of this.def.slots) {
-      if (slot.kind !== 'wheel') continue;
-      const part = this.partAt(slot.id);
-      if (!part) continue;
-      const v = variant(part.variantId);
-      if (!v.wheel) continue;
+    // Ride height (see RIDE_LIFT_MAX above). `hangs` is how far below its mount a
+    // settled wheel sits; `target` puts the body's underside on the wheel centres,
+    // and `stance` reproduces the model's own drawing. Take whichever is lower —
+    // i.e. never lift a body more than RIDE_LIFT_MAX off its own arches. X and Z
+    // always stay where the model put its wheels.
+    const hangs = suspension.restLength - staticSag(suspension.stiffness);
+    const target = hangs - this.measure.halfExtents[1];
+    const stance = hangs + this.measure.wheels[0].pos[1];
+    const mountY = Math.max(target, stance - RIDE_LIFT_MAX);
 
-      const isFront = slot.pos[2] > 0;
-      const radius = v.wheel.radius;
+    for (const wheel of this.measure.wheels) {
       const index = this.controller.numWheels();
 
       this.controller.addWheel(
-        { x: slot.pos[0], y: slot.pos[1], z: slot.pos[2] },
+        { x: wheel.pos[0], y: mountY, z: wheel.pos[2] },
         { x: 0, y: -1, z: 0 },
         { x: -1, y: 0, z: 0 },
         suspension.restLength,
-        radius,
+        wheel.radius,
       );
 
       // Rapier's ray-cast suspension multiplies the spring force by the chassis
       // mass internally (`force * chassis_mass` in update_suspension), so the
-      // registry's rate is *per kilogram* of chassis mass. Passing it through
-      // unchanged is what makes a laden bus and a bare hatchback settle at the
-      // same static sag; scaling it again here would double-apply mass and make
-      // heavy vehicles ride rigid. The force ceiling is absolute and likewise
-      // passed through unchanged.
+      // catalogue's rate is *per kilogram* of chassis mass. Passing it through
+      // unchanged is what makes a laden firetruck and a kart settle at the same
+      // static sag; scaling it again here would double-apply mass and make heavy
+      // vehicles ride rigid. The force ceiling is absolute and likewise passed
+      // through unchanged.
       this.controller.setWheelSuspensionStiffness(index, suspension.stiffness);
       this.controller.setWheelSuspensionCompression(index, suspension.compression);
       this.controller.setWheelSuspensionRelaxation(index, suspension.relaxation);
       this.controller.setWheelMaxSuspensionTravel(index, suspension.maxTravel);
       this.controller.setWheelMaxSuspensionForce(index, suspension.maxForce);
 
-      const mesh = createPartMesh(part.variantId);
-      mesh.name = slot.id;
+      const mesh = this.wheelMeshes.get(wheel.id);
+      if (!mesh) throw new Error(`Car model "${this.model.id}" is missing wheel ${wheel.id}`);
+      mesh.name = wheel.id;
       mesh.rotation.order = 'YXZ';
-      setCondition(mesh, part.dirt, part.rust);
       this.rootGroup.add(mesh);
 
-      this.wheels.push({ index, isFront, radius, part, mesh, scratchCp: { x: 0, y: 0, z: 0 } });
+      this.wheels.push({
+        index,
+        isFront: wheel.isFront,
+        radius: wheel.radius,
+        mesh,
+        scratchCp: { x: 0, y: 0, z: 0 },
+      });
 
-      if (isFront) {
+      if (wheel.isFront) {
         this.frontWheelCount++;
         if (frontShare > 0) this.frontDrivenCount++;
       } else {
@@ -420,13 +534,53 @@ export class Vehicle {
     }
 
     // Wheel-angular-speed input uses the primary driven axle's radius.
-    const primaryRear = this.def.rearDriveBias >= 0.5;
+    const primaryRear = this.model.rearDriveBias >= 0.5;
     if (primaryRear && this.rearWheelCount > 0) {
       this.drivenRadius = this.averageWheelRadius(false);
     } else if (this.frontWheelCount > 0) {
       this.drivenRadius = this.averageWheelRadius(true);
     }
   }
+
+  /**
+   * Suspension-only step for a car nobody is driving.
+   *
+   * Rapier's ray-cast suspension is not a constraint that persists between steps —
+   * it is a force recomputed inside `updateVehicle`, and it is the *only* thing
+   * holding the chassis off the ground. A vehicle that never gets `updateVehicle`
+   * therefore has no springs at all: gravity pulls the chassis down until its own
+   * box collider lands on the terrain, and because the wheel meshes are positioned
+   * chassis-locally at `connectionPoint - suspensionLength`, they end up buried
+   * under the road while the body sits on its belly. That was exactly the "parked
+   * car lies on its floor" bug, and it applied to every car the moment the player
+   * stepped out of it.
+   *
+   * So every vehicle is stepped every tick. The driven one goes through
+   * `fixedUpdate`; the rest come through here, which does the minimum: no engine
+   * force, no steering, and enough brake to hold the car still on a slope.
+   *
+   * Cost is four ray-casts per parked car per step, which is what a parked car
+   * standing on its wheels is worth.
+   */
+  settle(dt: number): void {
+    const controller = this.controller;
+    if (!controller) return;
+
+    const n = this.wheels.length;
+    if (n === 0) return;
+
+    // Parking brake: same impulse units as the foot brake (see the braking note
+    // above), spread over every wheel. Sized to hold, not to stop.
+    const impulse = (PARK_BRAKE_DECEL * this.statsValue.mass * dt) / n;
+    for (const w of this.wheels) {
+      controller.setWheelEngineForce(w.index, 0);
+      controller.setWheelSteering(w.index, 0);
+      controller.setWheelBrake(w.index, impulse);
+    }
+
+    controller.updateVehicle(dt);
+  }
+
 
   fixedUpdate(dt: number, input: InputFrame): void {
     const controller = this.controller;
@@ -446,7 +600,7 @@ export class Vehicle {
     // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
-    const throttle = stats.drivable && this.localFuel > 0 ? input.throttle : 0;
+    const throttle = this.localFuel > 0 ? input.throttle : 0;
     // The settings gearbox mode rides along as driver assist; a physically
     // automatic gearbox shifts regardless (hardware wins, see Drivetrain).
     const drive = this.drivetrain.update(
@@ -486,7 +640,7 @@ export class Vehicle {
     // fraction = 1 - (1-floor) * t^k: full lock up to STEER_FULL_LOCK_KMH, then a
     // fast collapse right above it and a gentle slide to the floor.
     const speedFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(steerT, STEER_LOCK_CURVE);
-    const targetSteer = -steerInput * this.def.steerLock * speedFactor;
+    const targetSteer = -steerInput * this.model.steerLock * speedFactor;
     const steerRate =
       STEER_RATE_HIGHWAY_RAD_S +
       (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) * Math.pow(1 - steerT, STEER_RATE_CURVE);
@@ -495,8 +649,8 @@ export class Vehicle {
 
     // Brake impulses (N·s), distributed so the total matches the target decel.
     const mass = stats.mass;
-    const frontShare = 1 - this.def.rearDriveBias;
-    const rearShare = this.def.rearDriveBias;
+    const frontShare = 1 - this.model.rearDriveBias;
+    const rearShare = this.model.rearDriveBias;
     const brakeFrontShare = 1 - FOOT_BRAKE_REAR_BIAS;
     const brakeRearShare = FOOT_BRAKE_REAR_BIAS;
     const brakeDenom =
@@ -515,13 +669,36 @@ export class Vehicle {
     const gripBudgetFactor =
       stats.wheelGrip * LATERAL_GRIP_FRACTION * Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
 
+    // Speed-dependent lateral grip (see constants above). Below the start speed
+    // the smoothstep evaluates to exactly 0, so the factor is exactly 1 and
+    // low-speed handling is untouched; above it the factor falls smoothly to
+    // 1 - LATERAL_GRIP_MAX_LOSS. The smoothstep's zero slope at both ends keeps
+    // the transition kink-free, so grip never changes abruptly.
+    const lateralGripT = clamp(
+      (Math.abs(fwd) - LATERAL_GRIP_FALLOFF_START_MPS) /
+        (LATERAL_GRIP_FALLOFF_END_MPS - LATERAL_GRIP_FALLOFF_START_MPS),
+      0,
+      1,
+    );
+    const lateralGripFactor =
+      1 - LATERAL_GRIP_MAX_LOSS * lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
+
     for (const w of this.wheels) {
       // Surface under this wheel drives traction and rolling resistance.
       const ground = controller.wheelGroundObject(w.index);
       const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
 
+      // A locked rear tyre slides: it keeps its longitudinal cone but sheds most of
+      // its side force, which is what makes the handbrake rotate the car.
+      const locked = input.handbrake && !w.isFront;
       controller.setWheelFrictionSlip(w.index, surface.frictionSlip * gripBudgetFactor);
-      controller.setWheelSideFrictionStiffness(w.index, surface.sideFriction * SIDE_FRICTION_GAIN);
+      controller.setWheelSideFrictionStiffness(
+        w.index,
+        surface.sideFriction *
+          SIDE_FRICTION_GAIN *
+          lateralGripFactor *
+          (locked ? HANDBRAKE_SIDE_GRIP : 1),
+      );
 
       const axleShare = w.isFront ? frontShare : rearShare;
       const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
@@ -703,12 +880,11 @@ export class Vehicle {
       const steer = controller.wheelSteering(w.index);
       if (cp) w.mesh.position.set(cp.x, cp.y - (susp ?? 0), cp.z);
       w.mesh.rotation.set((spin ?? 0) % TWO_PI, steer ?? 0, 0);
-      setCondition(w.mesh, w.part.dirt, w.part.rust);
     }
 
-    for (const p of this.parts) {
-      setCondition(p.mesh, p.part.dirt, p.part.rust);
-    }
+    // Gizmos are bolted to the shell: they never move relative to it, so all they
+    // need per frame is their condition, which a scrubbing player can change.
+    for (const g of this.gizmos) setCondition(g.mesh, g.part.dirt, g.part.rust);
   }
 
   dispose(): void {
@@ -725,20 +901,35 @@ export class Vehicle {
   // Internals.
   // ---------------------------------------------------------------------------
 
+  /**
+   * Stats of a complete vehicle. The model IS the car: it always has its engine,
+   * its gearbox, its tank and its four wheels, so nothing here can be "missing"
+   * and a car is never undrivable. Gizmos only add mass.
+   */
   private computeStats(): CarStats {
-    const slotMap = new Map<SlotId, PartInstance | null>();
-    for (const slot of this.def.slots) {
-      slotMap.set(slot.id, this.partAt(slot.id));
-    }
-    return computeCarStats(this.def, slotMap);
+    const engine = modelEngine(this.model);
+    let mass = this.model.mass;
+    for (const part of Object.values(this.gizmoParts())) mass += variant(part.variantId).mass;
+
+    return {
+      mass,
+      engine,
+      gearbox: modelGearbox(this.model),
+      engineEfficiency: 1,
+      fuel: engine.fuel,
+      tankCapacity: this.model.tankLitres,
+      wheelCount: this.measure.wheels.length,
+      wheelGrip: this.model.wheelGrip,
+      hasHeadlights: true,
+    };
   }
-  private partAt(slotId: SlotId): PartInstance | null {
-    const slots = this.car.slots as Record<string, PartInstance | undefined>;
-    return slots[slotId] ?? null;
+
+  private gizmoParts(): Record<string, PartInstance> {
+    return this.car.gizmos ?? {};
   }
 
   private applyChassisMass(mass: number): void {
-    const half = this.def.halfExtents;
+    const half = this.measure.halfExtents;
     const hx = half[0];
     const hy = half[1];
     const hz = half[2];
@@ -748,10 +939,9 @@ export class Vehicle {
       y: (mass / 3) * (hx * hx + hz * hz),
       z: (mass / 3) * (hx * hx + hy * hy),
     };
-    const com = this.def.comOffset;
     this.chassisBody.setAdditionalMassProperties(
       mass,
-      { x: com[0], y: com[1], z: com[2] },
+      { x: 0, y: -COM_DROP_FRACTION * hy, z: -COM_REARWARD_FRACTION * hz },
       inertia,
       { x: 0, y: 0, z: 0, w: 1 },
       false,
@@ -761,42 +951,46 @@ export class Vehicle {
     this.chassisBody.recomputeMassPropertiesFromColliders();
   }
 
-  private buildBodyAndParts(): void {
-    const bodyMesh = createBodyMesh(this.def.id, this.car.paintColor);
-    bodyMesh.name = 'body';
-    this.rootGroup.add(bodyMesh);
+  /**
+   * Instantiates the model: body into the chassis group, wheels held aside for
+   * `rebuild` to register with the controller, gizmos onto their anchors.
+   */
+  private buildVisuals(): void {
+    const instance = createCarModel(this.model.id);
+    this.rootGroup.add(instance.body);
 
-    for (const slot of this.def.slots) {
-      if (slot.kind === 'wheel' || slot.kind === 'headlight') continue;
-      const part = this.partAt(slot.id);
-      if (!part) continue;
-      this.addPartMesh(slot, part);
+    this.wheelMeshes.clear();
+    for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
+
+    const anchors = new Map(this.measure.anchors.map((a) => [a.id, a]));
+    for (const [anchorId, part] of Object.entries(this.gizmoParts())) {
+      const anchor = anchors.get(anchorId);
+      if (!anchor) continue; // a gizmo saved against an anchor this model lacks
+      const mesh = createPartMesh(part.variantId);
+      mesh.name = anchorId;
+      mesh.position.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
+      mesh.rotation.y = anchor.yaw;
+      setCondition(mesh, part.dirt, part.rust);
+      this.rootGroup.add(mesh);
+      this.gizmos.push({ part, mesh });
     }
 
-    if (this.statsValue.hasHeadlights) this.buildHeadlights();
+    this.buildHeadlights();
   }
 
-  private addPartMesh(slot: SlotDef, part: PartInstance): void {
-    const mesh = createPartMesh(part.variantId);
-    mesh.name = slot.id;
-    mesh.position.set(slot.pos[0], slot.pos[1], slot.pos[2]);
-    if (slot.yaw) mesh.rotation.y = slot.yaw;
-    setCondition(mesh, part.dirt, part.rust);
-    this.rootGroup.add(mesh);
-    this.parts.push({ part, mesh });
-  }
-
+  /**
+   * Two spotlights at the front corners of the measured chassis box. The model
+   * already draws its lamps; these are what makes them light the road.
+   */
   private buildHeadlights(): void {
-    for (const slot of this.def.slots) {
-      if (slot.kind !== 'headlight') continue;
-      const part = this.partAt(slot.id);
-      if (!part) continue;
-
-      this.addPartMesh(slot, part);
-
+    const half = this.measure.halfExtents;
+    const y = -half[1] + HEADLIGHT_Y_FRACTION * 2 * half[1];
+    const z = half[2];
+    for (const sign of [-1, 1]) {
+      const x = sign * HEADLIGHT_X_FRACTION * half[0];
       const light = new THREE.SpotLight(0xfff2d8, 120, 80, 0.55, 0.5, 1.5);
-      light.position.set(slot.pos[0], slot.pos[1], slot.pos[2]);
-      light.target.position.set(slot.pos[0], slot.pos[1], slot.pos[2] + 8);
+      light.position.set(x, y, z);
+      light.target.position.set(x, y, z + 8);
       light.castShadow = false;
       light.visible = this.lightsOnFlag;
       this.rootGroup.add(light.target);
@@ -805,21 +999,15 @@ export class Vehicle {
     }
   }
 
+  /**
+   * Detaches every visual without disposing anything: model geometry, model
+   * materials and gizmo geometry are all owned by their caches (render/carmodel.ts,
+   * render/partmesh.ts) and shared with every other instance in the world, so
+   * disposing here would blank out other cars.
+   */
   private clearVisuals(): void {
-    const children = this.rootGroup.children.slice();
-    for (const child of children) {
-      this.rootGroup.remove(child);
-      child.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (mesh.geometry) mesh.geometry.dispose();
-        const material = mesh.material;
-        if (Array.isArray(material)) {
-          for (const m of material) m.dispose();
-        } else if (material) {
-          material.dispose();
-        }
-      });
-    }
+    for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
+    this.wheelMeshes.clear();
   }
 
   private forwardSpeedMps(): number {

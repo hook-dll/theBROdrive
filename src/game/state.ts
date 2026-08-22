@@ -1,6 +1,6 @@
 import { hash } from '../core/rng';
 import type { Item } from '../items/items';
-import type { PartInstance, SlotId } from '../parts/registry';
+import type { PartInstance } from '../parts/registry';
 import { DEFAULT_SETTINGS } from './settings';
 import type { Settings } from './settings';
 
@@ -18,12 +18,10 @@ import type { Settings } from './settings';
 
 export interface CarState {
   readonly id: string;
-  /** Body definition id from the parts registry. */
-  readonly bodyId: string;
-  /** Body paint as 0xRRGGBB; old saves default to the body's stock colour. */
-  readonly paintColor: number;
-  /** Slot id -> fitted part, or absent when empty. */
-  readonly slots: Record<string, PartInstance>;
+  /** Complete car model id from the catalogue (vehicle/carmodels.ts). */
+  readonly modelId: string;
+  /** Anchor id -> mounted gizmo, or absent when the anchor is bare. */
+  readonly gizmos: Record<string, PartInstance>;
   fuelLitres: number;
   /** Metres travelled by this specific car. */
   odometer: number;
@@ -91,8 +89,8 @@ export type WorldDelta =
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number }
-  | { t: 'part_attach'; carId: string; slot: SlotId; part: PartInstance }
-  | { t: 'part_detach'; carId: string; slot: SlotId }
+  | { t: 'gizmo_attach'; carId: string; anchor: string; part: PartInstance }
+  | { t: 'gizmo_detach'; carId: string; anchor: string }
   | { t: 'part_drop'; part: PartInstance; x: number; y: number; z: number }
   | { t: 'part_pickup'; partId: string }
   | { t: 'part_condition'; partId: string; dirt: number; rust: number }
@@ -215,14 +213,14 @@ export class GameWorld {
         if (car) car.fuelLitres = Math.max(0, delta.litres);
         break;
       }
-      case 'part_attach': {
+      case 'gizmo_attach': {
         const car = s.cars[delta.carId];
-        if (car) car.slots[delta.slot] = delta.part;
+        if (car) car.gizmos[delta.anchor] = delta.part;
         break;
       }
-      case 'part_detach': {
+      case 'gizmo_detach': {
         const car = s.cars[delta.carId];
-        if (car) delete car.slots[delta.slot];
+        if (car) delete car.gizmos[delta.anchor];
         break;
       }
       case 'part_drop':
@@ -245,7 +243,7 @@ export class GameWorld {
           break;
         }
         for (const car of Object.values(s.cars)) {
-          for (const part of Object.values(car.slots)) {
+          for (const part of Object.values(car.gizmos)) {
             if (part.id === delta.partId) {
               part.dirt = delta.dirt;
               part.rust = delta.rust;

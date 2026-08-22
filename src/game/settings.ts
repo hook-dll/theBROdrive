@@ -33,7 +33,9 @@ export const DAY_CYCLE_MAX_MINUTES = 128;
 const DEFAULT_DAY_CYCLE_MINUTES = 24;
 
 export const DEFAULT_SETTINGS: Settings = {
-  gearboxMode: 'manual',
+  // Automatic by default: the gearbox is driver assist, not the game. Shifting by
+  // hand stays one wheel notch away for anyone who wants it.
+  gearboxMode: 'automatic',
   dayCycleMinutes: DEFAULT_DAY_CYCLE_MINUTES,
   // Absent entries mean "use the default binding", so the empty record is the
   // correct default: it can never diverge from BINDABLE_ACTIONS. Shared by

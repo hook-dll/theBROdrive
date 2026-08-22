@@ -17,7 +17,6 @@ export interface DrivingReadout {
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
-  warnings: readonly string[];
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -225,8 +224,6 @@ export class Hud {
     this.setText(this.fuelText, `${readout.fuelLitres.toFixed(1)} L`);
 
     this.setVisible(this.engineOffEl, !readout.engineRunning);
-
-    this.updateWarnings(readout.warnings);
   }
 
   private updateTach(rpm: number, redlineRpm: number): void {
@@ -240,19 +237,6 @@ export class Hud {
     const tip = polar(CX, CY, NEEDLE_R, deg);
     this.setAttr(this.tachNeedle, 'x2', tip.x.toFixed(2));
     this.setAttr(this.tachNeedle, 'y2', tip.y.toFixed(2));
-  }
-
-  private updateWarnings(warnings: readonly string[]): void {
-    const sig = warnings.join('\n');
-    if (sig === this.warningsSignature) return;
-    this.warningsSignature = sig;
-    this.warningsEl.textContent = '';
-    this.setVisible(this.warningsEl, warnings.length > 0);
-    for (const w of warnings) {
-      const node = el('div', 'hud-warning');
-      node.textContent = w;
-      this.warningsEl.appendChild(node);
-    }
   }
 
   setPrompt(text: string | null): void {

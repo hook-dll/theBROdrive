@@ -100,6 +100,23 @@ float condFbm( vec3 p ) {
     + condNoise( p * 7.3 + 29.0 ) * 0.15;
 }
 
+/**
+ * Rust distribution, sampled once and shared by the shading hook and the normal
+ * hook so the pitting and the colour can never disagree.
+ *   x = rust coverage, 0..1, before the uRust scale
+ *   y = the coarse mottle, which the dirt term also needs for its pits
+ */
+vec2 condRust( vec3 p ) {
+  float mottle = condFbm( p * 1.5 ) * 0.5 + 0.5;
+  float fine = condNoise( p * 9.0 + 7.0 ) * 0.5 + 0.5;
+  return vec2( smoothstep( 0.28, 0.82, mottle ) * ( 0.4 + 0.6 * fine ), mottle );
+}
+
+// Finite-difference step for the rust height field, metres: the scale of a pit.
+#define COND_PIT_EPS 0.035
+// How hard the pits tilt the normal. Above ~0.03 the relief reads as noise.
+#define COND_PIT_DEPTH 0.015
+
 #include <map_pars_fragment>`;
 
 // Injected after the stock roughness/metalness factors are computed but before the
@@ -111,23 +128,58 @@ const CONDITION_BODY = `
 {
   vec3 condP = vCondWorldPos;
   vec3 condN = normalize( vCondWorldNormal );
-  float condMottle = condFbm( condP * 1.5 ) * 0.5 + 0.5;
-  float condFine = condNoise( condP * 9.0 + 7.0 ) * 0.5 + 0.5;
+  vec2 condR = condRust( condP );
 
   // Rust eats into the base colour in mottled patches, kills shine and metalness.
-  float rustMask = uRust * smoothstep( 0.28, 0.82, condMottle ) * ( 0.4 + 0.6 * condFine );
+  float rustMask = uRust * condR.x;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.46, 0.21, 0.09 ), rustMask );
+  // Deep pits darken further. Colour alone cannot fake depth, but paired with the
+  // relief from the normal hook it is what makes scale look like scale.
+  diffuseColor.rgb *= 1.0 - 0.35 * rustMask * ( 1.0 - smoothstep( 0.35, 0.95, condR.y ) );
   roughnessFactor = mix( roughnessFactor, 0.97, rustMask );
   metalnessFactor = mix( metalnessFactor, 0.0, rustMask );
 
   // Dirt settles on upward faces and pools in the pits of the rust mottle.
   float condUp = saturate( condN.y );
-  float condPit = 1.0 - smoothstep( 0.2, 0.9, condMottle );
+  float condPit = 1.0 - smoothstep( 0.2, 0.9, condR.y );
   float dustMask = uDirt * ( 0.3 + 0.7 * condUp ) * ( 0.45 + 0.55 * condPit );
   float condLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
   vec3 dustColor = mix( vec3( condLum ), vec3( 0.72, 0.66, 0.55 ), 0.5 );
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
+}`;
+
+/**
+ * Rust relief.
+ *
+ * Injected at the normal stage — before the BRDF consumes the normal — so pitted
+ * steel catches the light unevenly instead of reading as a flat brown decal.
+ * Tinting alone was the whole reason rust looked painted on rather than eaten in.
+ *
+ * The height field is the same `condRust` coverage the colour uses, differenced
+ * in world space. The gradient is projected onto the surface first, so a height
+ * field can only tilt the normal, never flip it through the geometry.
+ *
+ * Cost is three extra `condRust` evaluations, gated on a uniform: the branch is
+ * coherent across a whole draw call, so a pristine part pays nothing for it.
+ */
+const CONDITION_NORMAL = `
+#include <normal_fragment_maps>
+
+if ( uRust > 0.001 ) {
+  vec3 condNP = vCondWorldPos;
+  float condH = condRust( condNP ).x;
+  vec3 condGrad = vec3(
+    condRust( condNP + vec3( COND_PIT_EPS, 0.0, 0.0 ) ).x - condH,
+    condRust( condNP + vec3( 0.0, COND_PIT_EPS, 0.0 ) ).x - condH,
+    condRust( condNP + vec3( 0.0, 0.0, COND_PIT_EPS ) ).x - condH
+  ) / COND_PIT_EPS;
+  vec3 condWN = normalize( vCondWorldNormal );
+  condGrad -= condWN * dot( condGrad, condWN );
+  // The normal is in view space by this point, so the world-space gradient has
+  // to be rotated into view space before it can perturb it.
+  vec3 condVG = ( viewMatrix * vec4( condGrad, 0.0 ) ).xyz;
+  normal = normalize( normal - condVG * uRust * COND_PIT_DEPTH );
 }`;
 
 /**
@@ -146,6 +198,7 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
   shader.fragmentShader = shader.fragmentShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
     .replace('#include <map_pars_fragment>', CONDITION_PARS)
+    .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
     .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
 }
 

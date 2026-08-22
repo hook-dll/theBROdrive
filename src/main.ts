@@ -5,11 +5,12 @@ import { PhysicsWorld } from './core/physics';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { TIME_OF_DAY_PRESETS } from './game/settings';
-import { spawnAssembledCar } from './game/spawn';
+import { spawnCarState } from './game/spawn';
 import { Inventory } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { body } from './parts/registry';
+import { carModelMeasure, preloadCarModels } from './render/carmodel';
+import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { Player } from './player/player';
 import { BirdFlock } from './agents/birds';
@@ -17,13 +18,13 @@ import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
-import { SlotGhosts } from './render/slotghosts';
+import { AnchorGhosts } from './render/slotghosts';
 import { ChunkStreamer } from './world/chunks';
 import {
   HomesteadProvider,
   createStartingCar,
   homesteadSpawn,
-  scatterStartingParts,
+  scatterStartingGizmos,
 } from './world/house';
 import { PoiProvider } from './world/poi';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
@@ -100,16 +101,21 @@ async function boot(): Promise<void> {
   const terrain = new Terrain(world.seed, road);
   // Physics must exist before any provider or field that creates a collider.
   const physics = await PhysicsWorld.create();
+  // Every car's collider, suspension geometry and wheel radii are measured off its
+  // GLB, so the whole catalogue is loaded before anything builds a vehicle, a wreck
+  // or the starting car. ~5 MB from the same origin; there is no later moment where
+  // a half-loaded catalogue would be useful.
+  await preloadCarModels();
   const renderer = new Renderer(canvas);
   const input = new InputReader(canvas);
   const hud = new Hud(uiRoot);
-  const sky = new Sky(renderer.scene, renderer.fog);
+  const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer);
   const inventory = new Inventory();
   const loose = new LoosePartField(physics, world, renderer.scene);
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
-  const slotGhosts = new SlotGhosts(renderer.scene);
+  const anchorGhosts = new AnchorGhosts(renderer.scene);
 
   const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene);
   streamer.register(new RoadMeshProvider(world.seed));
@@ -131,7 +137,6 @@ async function boot(): Promise<void> {
   const vehicles = new Map<string, Vehicle>();
   const spawnVehicle = (car: CarState): Vehicle => {
     const vehicle = new Vehicle(physics, world, car, renderer.scene);
-    vehicle.rebuildFromSlots();
     vehicles.set(car.id, vehicle);
     return vehicle;
   };
@@ -152,8 +157,7 @@ async function boot(): Promise<void> {
   if (loadedFromSave) {
     loose.restoreFromState();
   } else {
-    const car = Object.values(world.state.cars)[0];
-    if (car) scatterStartingParts(world, loose, car.bodyId);
+    scatterStartingGizmos(world, loose);
   }
 
   for (const car of Object.values(world.state.cars)) spawnVehicle(car);
@@ -290,6 +294,14 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.setMode('foot');
     }
 
+    // Every other car still needs its suspension solved, or it has no springs at
+    // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
+    // that is never stepped sinks onto its own chassis collider and its wheels end
+    // up under the road. `settle` does the suspension and a holding brake only.
+    for (const [id, vehicle] of vehicles) {
+      if (id !== drivingId) vehicle.settle(dt);
+    }
+
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
@@ -389,7 +401,7 @@ async function boot(): Promise<void> {
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);
-      const eyePoint = body(s.cars[drivingId!]!.bodyId).eyePoint;
+      const eyePoint = driving.eyePoint;
       target.x = targetPos.x;
       target.y = targetPos.y;
       target.z = targetPos.z;
@@ -448,16 +460,14 @@ async function boot(): Promise<void> {
 
     if (driving) {
       const stats = driving.stats;
-      const warnings = stats.drivable ? [] : stats.missing.map((slot) => `missing ${slot}`);
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,
-        redlineRpm: stats.engine?.redlineRpm ?? 6000,
+        redlineRpm: stats.engine.redlineRpm,
         gearLabel: driving.gearLabel,
         fuelLitres: s.cars[drivingId!]?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
         engineRunning: driving.engineRunning,
-        warnings,
       });
     } else {
       hud.setDriving(null);
@@ -481,22 +491,23 @@ async function boot(): Promise<void> {
       speedKmh: target.speedKmh,
     });
 
-    // Ghosts are an on-foot assembly aid; while driving there is nothing to fit, and
-    // `interaction.lastSlotTarget` is stale because slot resolution is skipped.
+    // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
+    // `interaction.lastAnchorTarget` is stale because anchor resolution is skipped.
     const ghost = driving ? null : activeCar();
     const ghostCar = ghost ? s.cars[ghost.id] : undefined;
-    slotGhosts.update(
+    anchorGhosts.update(
       ghostCar && ghost ? ghost.vehicle : null,
-      body(ghostCar ? ghostCar.bodyId : 'body_sedan'),
-      ghostCar ? ghostCar.slots : {},
+      ghost ? ghost.vehicle.modelMeasure.anchors : [],
+      ghostCar ? ghostCar.gizmos : {},
       held && held.type === 'part' ? held.part.variantId : null,
-      interaction.lastSlotTarget,
+      interaction.lastAnchorTarget,
       frameDt,
     );
 
     // Resolution is a render-time concern: measure the frame that just ended and
     // adjust the buffer before drawing so this frame pays the new cost.
     renderer.adaptResolution(frameDt);
+    renderer.setHazeStrength(sky.dayFactor);
     renderer.render();
   };
 
@@ -536,14 +547,15 @@ async function boot(): Promise<void> {
         player.rigidBody,
       );
       const groundY = ground ? ground.point.y : eye.y;
-      const def = body(request.bodyId);
-      // Half the chassis height plus the suspension's rest travel, so it settles
-      // onto its wheels instead of dropping through them.
-      const y = groundY + def.halfExtents[1] + SPAWN_WHEEL_CLEARANCE;
+      const measure = carModelMeasure(request.modelId);
+      // The measured distance from the chassis centre down to the model's own
+      // ground-level origin, plus a little slack, so the car settles onto its
+      // wheels instead of dropping through them.
+      const y = groundY + measure.spawnHeight + SPAWN_WHEEL_CLEARANCE;
       const heading = Math.atan2(dir.x / flat, dir.z / flat);
-      const car = spawnAssembledCar(world, request, dropX, y, dropZ, heading);
+      const car = spawnCarState(world, request, dropX, y, dropZ, heading);
       spawnVehicle(car);
-      hud.setToast(`spawned ${def.label}`);
+      hud.setToast(`spawned ${carModel(request.modelId).label}`);
     },
   };
 
@@ -556,7 +568,8 @@ async function boot(): Promise<void> {
       const s = world.state;
       const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
       if (action === 'save') {
-        await saves.save(`slot-${s.seed}`, `${body(Object.values(s.cars)[0]?.bodyId ?? 'body_sedan').label} @ ${(s.player.s / 1000).toFixed(1)} km`, s);
+        const label = carModel(Object.values(s.cars)[0]?.modelId ?? DEFAULT_CAR_MODEL_ID).label;
+        await saves.save(`slot-${s.seed}`, `${label} @ ${(s.player.s / 1000).toFixed(1)} km`, s);
         hud.setToast('saved');
       }
       menu.hidePause();

@@ -27,3 +27,11 @@ pnpm-debug.log*
 
 # Vite cache
 .vite/
+
+# Raw asset-pack downloads. Only the converted, vendored copies under
+# public/models/ belong in the repo; these are the originals they came from
+# (see tools/obj-to-glb.mjs).
+Realistic Car Pack*/
+PSX_Style_Cars*/
+PSX_Style_Cars*.zip
+DeJunes/
