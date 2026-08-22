@@ -29,9 +29,21 @@
  *     roughnessFactor 0.6).
  *   - `map_Kd` -> a `baseColorTexture` referencing the PNG by URI (the file is
  *     copied next to the GLB; the URI is its basename). When any face carries
- *     `vt` texture coordinates, TEXCOORD_0 is emitted. Blender writes OBJ `vt`
- *     with a top-left origin already (v = 1 - internal_v), which matches glTF, so
- *     V is passed through un-flipped.
+ *     `vt` texture coordinates, TEXCOORD_0 is emitted as `(u, 1 - v)`.
+ *
+ *     OBJ `vt` puts its origin at the BOTTOM-left of the image; glTF/three.js
+ *     sample TEXCOORD_0 with the origin at the TOP-left, so V must be flipped
+ *     on the way out. This was proven, not assumed: `tools/_uvcheck.mjs` (see
+ *     git history) decoded `Wheel/wheel.png` with `zlib.inflateSync` and
+ *     sampled it at the wheel sidewall's disc-centre UV, which every sidewall
+ *     face's fan agrees is (u=0.479, v=0.593) in raw OBJ space. The bright rim
+ *     hub in the texture (its brightest-pixel centroid) sits at (u=0.487,
+ *     v=0.419). Passing V through un-flipped samples (0.479, 0.593) -- 0.174
+ *     away from the hub, off in the black tyre band. Flipping samples (0.479,
+ *     1-0.593=0.407) -- 0.012 from the hub, i.e. dead centre. All three vendored
+ *     packs (PSX/GGBot, DeJunes, Quaternius) are Blender OBJ exports with the
+ *     same MTL header ("# Blender ... MTL File"), so the flip is applied
+ *     unconditionally; there is no per-pack CLI flag because no pack disagrees.
  *
  * A file with a single object and no wheel objects (e.g. a body-only car, or a
  * standalone wheel mesh) converts fine: only the nodes that exist are emitted, and
@@ -218,6 +230,8 @@ function buildPrimitive(tris, positions, normals, uvs) {
   const idx = [];
   let min = [Infinity, Infinity, Infinity];
   let max = [-Infinity, -Infinity, -Infinity];
+  let uvMin = [Infinity, Infinity];
+  let uvMax = [-Infinity, -Infinity];
 
   const P = (pi) => [
     positions[pi * 3],
@@ -259,7 +273,16 @@ function buildPrimitive(tris, positions, normals, uvs) {
         pos.push(x, y, z);
         nrm.push(normals[ni * 3], normals[ni * 3 + 1], normals[ni * 3 + 2]);
         if (hasUV) {
-          uv.push(ti >= 0 ? uvs[ti * 2] : 0, ti >= 0 ? uvs[ti * 2 + 1] : 0);
+          // Flip V: OBJ `vt` origin is bottom-left, glTF/three.js sample
+          // TEXCOORD_0 with the origin top-left (see the header comment for the
+          // pixel-sampling evidence).
+          const u = ti >= 0 ? uvs[ti * 2] : 0;
+          const v = ti >= 0 ? 1 - uvs[ti * 2 + 1] : 0;
+          uv.push(u, v);
+          if (u < uvMin[0]) uvMin[0] = u;
+          if (v < uvMin[1]) uvMin[1] = v;
+          if (u > uvMax[0]) uvMax[0] = u;
+          if (v > uvMax[1]) uvMax[1] = v;
         }
         if (x < min[0]) min[0] = x;
         if (y < min[1]) min[1] = y;
@@ -281,6 +304,8 @@ function buildPrimitive(tris, positions, normals, uvs) {
     normals: Float32Array.from(nrm),
     uvs: hasUV ? Float32Array.from(uv) : null,
     hasUV,
+    uvMin: hasUV ? uvMin : null,
+    uvMax: hasUV ? uvMax : null,
     indices,
     vertexCount,
     min,
@@ -370,7 +395,7 @@ function buildGlb(builtNodes, materials) {
       if (prim.hasUV) {
         attributes.TEXCOORD_0 = addAccessor(
           5126, 'VEC2', prim.vertexCount, prim.uvs,
-          null, null, 34962,
+          prim.uvMin, prim.uvMax, 34962,
         );
       }
       const indexComponent = prim.indices instanceof Uint16Array ? 5123 : 5125;

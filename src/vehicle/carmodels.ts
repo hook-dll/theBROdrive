@@ -48,48 +48,56 @@ const KART_SCALE = 1.05;
 
 /* ---- suspension presets ----
  *
- * Rates are per kilogram of chassis mass (see Vehicle). `restLength` is the
- * geometric offset between the wheel centre and its mount, not a ride-height
- * knob: Vehicle places the mount `restLength` above the wheel centre the model
- * drew, so at full extension the car stands exactly as the artist built it and
- * everything below that is spring sag. Softer springs therefore sit lower, which
- * is the stance these bodies want — they are drawn with the wheels tucked well
- * inside the arches.
+ * Rates are per kilogram of chassis mass (see Vehicle), so the same numbers suit a
+ * kart and a firetruck. `restLength` is a geometric offset, not a ride-height knob:
+ * Vehicle derives the mount from the body box and the static sag (see the ride
+ * height rule there), so changing a rate changes how the car MOVES, not how high it
+ * stands.
+ *
+ * Two things bound how soft these can be:
+ *  - static sag is `g / (4 * stiffness)`, so 15 sagged 164 mm — most of a car's
+ *    whole travel — and the body wallowed onto its bump stops under load;
+ *  - `maxTravel` is also DROOP, and a wheel is drawn at its full droop the moment
+ *    it unloads. With 200 mm of it, lifting the front under acceleration dropped
+ *    the front wheels through the road surface. That is the artefact behind
+ *    "wheels get under road a bit on accelerating".
+ * Hence firmer rates and shorter travel: ~100 mm of sag on a car and 120 mm of
+ * droop, which still soaks up the desert without letting a wheel leave the arch.
  */
 
 const SUSP_CAR: SuspensionTuning = {
   restLength: 0.3,
-  maxTravel: 0.2,
-  stiffness: 15,
-  compression: 0.75,
-  relaxation: 1.0,
+  maxTravel: 0.12,
+  stiffness: 24,
+  compression: 0.9,
+  relaxation: 1.2,
   maxForce: 26000,
 };
 
 const SUSP_SPORT: SuspensionTuning = {
   restLength: 0.24,
-  maxTravel: 0.15,
-  stiffness: 21,
-  compression: 0.9,
-  relaxation: 1.2,
+  maxTravel: 0.1,
+  stiffness: 32,
+  compression: 1.0,
+  relaxation: 1.35,
   maxForce: 30000,
 };
 
 const SUSP_TRUCK: SuspensionTuning = {
   restLength: 0.36,
-  maxTravel: 0.26,
-  stiffness: 13,
-  compression: 0.7,
-  relaxation: 0.95,
+  maxTravel: 0.16,
+  stiffness: 20,
+  compression: 0.85,
+  relaxation: 1.15,
   maxForce: 42000,
 };
 
 const SUSP_KART: SuspensionTuning = {
   restLength: 0.14,
-  maxTravel: 0.1,
-  stiffness: 26,
-  compression: 1.0,
-  relaxation: 1.3,
+  maxTravel: 0.07,
+  stiffness: 38,
+  compression: 1.1,
+  relaxation: 1.4,
   maxForce: 12000,
 };
 
@@ -189,9 +197,14 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<CarModelDef, 'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors'> & {
   /** Model file name within the pack directory named by `dir`. */
-  readonly glb: string;
+  readonly glb?: string;
   /** Pack directory; defaults to the Kenney kit. */
   readonly dir?: string;
+  /**
+   * Id of a car built in code (render/proceduralcars.ts) instead of loaded. Set
+   * this OR `glb`, never both.
+   */
+  readonly procedural?: string;
   readonly scale?: number;
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
@@ -961,12 +974,63 @@ const ENTRIES: readonly Entry[] = [
   // plus three FBX models loaded as they shipped. Also body-only.
   // -------------------------------------------------------------------------
   ...DEJUNES_CARS,
+
+  // -------------------------------------------------------------------------
+  // Built in code (render/proceduralcars.ts). Same contract as any pack: a body
+  // and four named wheels, drawn in metres, so they are measured and driven by
+  // exactly the same path. Their scale is 1 because they are authored life-size.
+  // -------------------------------------------------------------------------
+  {
+    id: 'proc_wedge',
+    label: 'Group-B wedge',
+    procedural: 'wedge',
+    bodyClass: 'car',
+    mass: 980,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 1.22,
+    scale: 1,
+    suspension: SUSP_SPORT,
+    steerLock: 0.62,
+    rearDriveBias: 0.5,
+  },
+  {
+    id: 'proc_streamliner',
+    label: 'streamliner',
+    procedural: 'streamliner',
+    bodyClass: 'car',
+    mass: 1520,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 65,
+    wheelGrip: 0.88,
+    scale: 1,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+  },
+  {
+    id: 'proc_dune_runner',
+    label: 'dune runner',
+    procedural: 'dunerunner',
+    bodyClass: 'car',
+    mass: 720,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 90,
+    wheelGrip: 1.3,
+    scale: 1,
+    suspension: SUSP_TRUCK,
+    steerLock: 0.72,
+    rearDriveBias: 1,
+    viewFrac: [0, 0.86, 0.92],
+  },
 ];
 
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
-  file: `${e.dir ?? KIT}/${e.glb}`,
+  file: e.procedural ? `procedural://${e.procedural}` : `${e.dir ?? KIT}/${e.glb}`,
   textureFile: e.textureFile,
   separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
