@@ -5,9 +5,8 @@ import type { WorldState } from '../game/state';
 import { BINDABLE_ACTIONS } from '../core/input';
 import { DAY_CYCLE_MAX_MINUTES, DAY_CYCLE_MIN_MINUTES, TIME_OF_DAY_PRESETS } from '../game/settings';
 import type { Settings, TimeOfDayPreset } from '../game/settings';
-import { PAINT_COLORS } from '../game/spawn';
 import type { SpawnRequest } from '../game/spawn';
-import { BODIES } from '../parts/registry';
+import { CAR_MODELS } from '../vehicle/carmodels';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -95,14 +94,6 @@ export interface PauseHooks {
   spawnVehicle: (request: SpawnRequest) => void;
 }
 
-/** Condition presets for a spawned car, best first. */
-const CONDITION_STEPS: readonly { label: string; value: number }[] = [
-  { label: 'Pristine', value: 1 },
-  { label: 'Used', value: 0.67 },
-  { label: 'Rough', value: 0.33 },
-  { label: 'Wreck', value: 0 },
-];
-
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
 function formatKey(code: string): string {
   if (code.startsWith('Key')) return code.slice(3);
@@ -111,11 +102,6 @@ function formatKey(code: string): string {
   if (code === 'Mouse0') return 'LMB';
   if (code === 'Mouse2') return 'RMB';
   return code.replace(/([a-z])([A-Z])/g, '$1 $2');
-}
-
-/** 0xRRGGBB to the CSS colour string the paint swatches need. */
-function cssColor(value: number): string {
-  return `#${value.toString(16).padStart(6, '0')}`;
 }
 
 export class MainMenu {
@@ -586,11 +572,8 @@ export class MainMenu {
         backBtn.focus();
       };
 
-      // Spawn selections reset per pause, so every visit starts at the first
-      // body, first paint, factory-fresh condition.
-      let spawnBodyId = BODIES[0].id;
-      let spawnPaint = PAINT_COLORS[0].value;
-      let spawnCondition = 1;
+      // Spawn selection resets per pause, so every visit starts at the first model.
+      let spawnModelId = CAR_MODELS[0].id;
 
       const renderSpawn = (): void => {
         panel.textContent = '';
@@ -603,95 +586,43 @@ export class MainMenu {
         title.textContent = 'Spawn Vehicle';
         panel.appendChild(title);
 
-        const bodyField = el('div', 'menu-field');
-        const bodyLabel = el('label', 'menu-label');
-        bodyLabel.textContent = 'Body';
-        const bodyList = el('div', 'menu-body-list');
-        const paintBodies = (): void => {
-          bodyList.textContent = '';
-          for (const def of BODIES) {
+        const modelField = el('div', 'menu-field');
+        const modelLabel = el('label', 'menu-label');
+        modelLabel.textContent = 'Model';
+        const modelList = el('div', 'menu-body-list');
+        const paintModels = (): void => {
+          modelList.textContent = '';
+          for (const def of CAR_MODELS) {
             const row = button('menu-body', '');
             const name = el('span', 'menu-body-label');
             name.textContent = def.label;
             const cls = el('span', 'menu-body-class');
             cls.textContent = def.bodyClass;
             row.append(name, cls);
-            if (def.id === spawnBodyId) row.classList.add('is-selected');
+            if (def.id === spawnModelId) row.classList.add('is-selected');
             row.addEventListener('click', () => {
-              spawnBodyId = def.id;
-              paintBodies();
+              spawnModelId = def.id;
+              paintModels();
               paintNote();
             });
-            bodyList.appendChild(row);
+            modelList.appendChild(row);
           }
         };
-        paintBodies();
-        bodyField.append(bodyLabel, bodyList);
-        panel.appendChild(bodyField);
-
-        const paintField = el('div', 'menu-field');
-        const paintLabel = el('label', 'menu-label');
-        paintLabel.textContent = 'Paint';
-        const paintRow = el('div', 'menu-paints');
-        const paintSwatches = (): void => {
-          paintRow.textContent = '';
-          for (const color of PAINT_COLORS) {
-            const swatch = button('menu-paint', '');
-            swatch.style.background = cssColor(color.value);
-            swatch.title = color.label;
-            swatch.setAttribute('aria-label', color.label);
-            if (color.value === spawnPaint) swatch.classList.add('is-selected');
-            swatch.addEventListener('click', () => {
-              spawnPaint = color.value;
-              paintSwatches();
-              paintNote();
-            });
-            paintRow.appendChild(swatch);
-          }
-        };
-        paintSwatches();
-        paintField.append(paintLabel, paintRow);
-        panel.appendChild(paintField);
-
-        const condField = el('div', 'menu-field');
-        const condLabel = el('label', 'menu-label');
-        condLabel.textContent = 'Condition';
-        const condRow = el('div', 'menu-toggle-row');
-        const paintCond = (): void => {
-          condRow.textContent = '';
-          for (const step of CONDITION_STEPS) {
-            const stepBtn = button('menu-button', step.label);
-            if (step.value === spawnCondition) stepBtn.classList.add('is-selected');
-            stepBtn.addEventListener('click', () => {
-              spawnCondition = step.value;
-              paintCond();
-              paintNote();
-            });
-            condRow.appendChild(stepBtn);
-          }
-        };
-        paintCond();
-        condField.append(condLabel, condRow);
-        panel.appendChild(condField);
+        paintModels();
+        modelField.append(modelLabel, modelList);
+        panel.appendChild(modelField);
 
         const spawnNote = el('div', 'menu-note');
         const paintNote = (): void => {
-          const def = BODIES.find((b) => b.id === spawnBodyId);
-          const paint = PAINT_COLORS.find((c) => c.value === spawnPaint);
-          spawnNote.textContent =
-            `${def ? `${def.label} (${def.bodyClass})` : spawnBodyId} · ` +
-            `${paint ? paint.label : '?'} · condition ${spawnCondition.toFixed(2)}`;
+          const def = CAR_MODELS.find((m) => m.id === spawnModelId);
+          spawnNote.textContent = def ? `${def.label} (${def.bodyClass})` : spawnModelId;
         };
         paintNote();
         panel.appendChild(spawnNote);
 
         const confirmBtn = button('menu-button menu-primary', 'Spawn');
         confirmBtn.addEventListener('click', () => {
-          hooks.spawnVehicle({
-            bodyId: spawnBodyId,
-            paintColor: spawnPaint,
-            condition: spawnCondition,
-          });
+          hooks.spawnVehicle({ modelId: spawnModelId });
           finish('resume');
         });
         panel.appendChild(confirmBtn);

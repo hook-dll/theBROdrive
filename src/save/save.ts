@@ -1,10 +1,10 @@
 import { hash } from '../core/rng';
-import { body } from '../parts/registry';
 import { newWorldState } from '../game/state';
 import type { CarState, PlayerState, WorldState } from '../game/state';
 import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
+import { DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -205,7 +205,11 @@ export class IndexedDbSaves implements SaveBackend {
 // ---------------------------------------------------------------------------
 
 /** Version tag prefixing every code; identifies the format for `decodeSaveCode`. */
-const CODE_TAG = 'BRO1.';
+const CODE_TAG = 'BRO2.';
+
+/** Every tag `decodeSaveCode` accepts, newest first. Older tags stay decodable so
+ * a pre-cutover code still loads; its car simply falls back to the default model. */
+const CODE_TAGS: readonly string[] = [CODE_TAG, 'BRO1.'];
 
 /**
  * Encodes a state to a pasteable string: JSON -> UTF-8 bytes -> base64url.
@@ -214,7 +218,7 @@ const CODE_TAG = 'BRO1.';
  * remain synchronous per the public signature, so a compact non-stream encoding
  * is used instead. That is a deliberate tradeoff and a cheap one — a save is only
  * the player's mutations, already small. If a compressed variant is ever added,
- * it must carry its own tag (e.g. `BRO1C.`) so decoding stays unambiguous.
+ * it must carry its own tag (e.g. `BRO2C.`) so decoding stays unambiguous.
  */
 export function encodeSaveCode(state: WorldState): string {
   const json = JSON.stringify(state);
@@ -224,10 +228,12 @@ export function encodeSaveCode(state: WorldState): string {
 
 /** Decodes a save code, validating the tag, payload and resulting structure. */
 export function decodeSaveCode(code: string): WorldState {
-  if (typeof code !== 'string' || !code.startsWith(CODE_TAG)) {
+  if (typeof code !== 'string') {
     throw new Error('Save code is malformed: missing version tag');
   }
-  const payload = code.slice(CODE_TAG.length);
+  const tag = CODE_TAGS.find((t) => code.startsWith(t));
+  if (tag === undefined) throw new Error('Save code is malformed: missing version tag');
+  const payload = code.slice(tag.length);
   if (payload.length === 0) throw new Error('Save code is malformed: empty payload');
 
   let bytes: Uint8Array;
@@ -319,33 +325,29 @@ export function migrateState(raw: unknown): WorldState {
 
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
-  if (typeof raw.bodyId !== 'string') throw new Error(`Save data is malformed: car "${raw.id}" is missing a bodyId`);
 
-  // Saves predating paint carry no colour; fall back to the body's stock paint.
-  // An unknown body id is already unrecoverable further down (body mesh build
-  // throws), so a neutral grey here beats crashing the load path.
-  let stockPaint = 0x8a8a8a;
-  try {
-    stockPaint = body(raw.bodyId).stockPaintColor;
-  } catch {
-    // Unknown body id: keep the neutral fallback.
-  }
+  // A pre-cutover save carries a bodyId and a part layout that has no meaning
+  // against a finished model, so it is not translated part-for-part: the car
+  // becomes the default model with no gizmos.
+  const modelId = typeof raw.modelId === 'string' && hasCarModel(raw.modelId)
+    ? raw.modelId
+    : DEFAULT_CAR_MODEL_ID;
 
-  const slots: Record<string, PartInstance> = {};
-  const rawSlots = raw.slots;
-  // Slots are optional on very old saves; a non-object slots value is treated as
-  // empty rather than fatal.
-  if (typeof rawSlots === 'object' && rawSlots !== null && !Array.isArray(rawSlots)) {
-    for (const [slot, value] of Object.entries(rawSlots as Record<string, unknown>)) {
-      slots[slot] = migratePart(value, `car "${raw.id}" slot "${slot}"`);
+  const gizmos: Record<string, PartInstance> = {};
+  const rawGizmos = raw.gizmos;
+  // Gizmos are absent on pre-cutover saves; a missing or non-object value is
+  // treated as empty rather than fatal. An anchor the model does not have is
+  // dropped harmlessly by the vehicle, so it is not validated here.
+  if (typeof rawGizmos === 'object' && rawGizmos !== null && !Array.isArray(rawGizmos)) {
+    for (const [anchor, value] of Object.entries(rawGizmos as Record<string, unknown>)) {
+      gizmos[anchor] = migratePart(value, `car "${raw.id}" gizmo "${anchor}"`);
     }
   }
 
   return {
     id: raw.id,
-    bodyId: raw.bodyId,
-    paintColor: numOr(raw.paintColor, stockPaint),
-    slots,
+    modelId,
+    gizmos,
     fuelLitres: numOr(raw.fuelLitres, 0),
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),

@@ -1,20 +1,21 @@
 /**
- * Procedural meshes for every part, body shell and carried item in the game.
+ * Procedural meshes for every part and carried item in the game.
  *
  * Everything is built from primitives — no external assets, no textures. Geometry is
  * built once per logical form and cached; each create* call returns a fresh Object3D
  * that shares the cached BufferGeometry but gets its own materials, so every instance
  * can hold independent dirt/rust.
  *
+ * Car bodies are complete, authored GLB models (see render/carmodel.ts); this module
+ * only builds the cosmetic parts and held items.
+ *
  * Origin conventions (load-bearing for the Vehicle and LoosePartField):
- *  - a part's origin is its slot mount point, in body-local +X right / +Y up / +Z forward;
- *  - a wheel's origin is the wheel centre with the axle along local +X;
- *  - a body's origin is the body centre, matching BodyDef.halfExtents.
+ *  - a part's origin is its mount point, in +X right / +Y up / +Z forward;
+ *  - a wheel's origin is the wheel centre with the axle along local +X.
  */
-
 import * as THREE from 'three';
-import { body, variant } from '../parts/registry';
-import type { BodyDef, EngineSpec, PartVariant, WheelSpec } from '../parts/registry';
+import { variant } from '../parts/registry';
+import type { EngineSpec, PartVariant, WheelSpec } from '../parts/registry';
 import type { Item, QuarryItem, ToolKind, WeaponKind } from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 
@@ -40,11 +41,7 @@ function cachedGeo(key: string, build: () => THREE.BufferGeometry): THREE.Buffer
 type MaterialSpec =
   | { kind: 'cond'; color: number; metalness: number; roughness: number }
   | { kind: 'flat'; color: number; roughness: number }
-  | { kind: 'glass'; color: number; roughness: number }
-  // Body shell paint: the colour is per-car (from CarState.paintColor) and only
-  // resolved when the mesh instance is built, so one cached blueprint serves
-  // every colour. metalness/roughness stay body-fixed finish characteristics.
-  | { kind: 'paint'; color: number; metalness: number; roughness: number };
+  | { kind: 'glass'; color: number; roughness: number };
 
 const cond = (color: number, metalness = 0.85, roughness = 0.4): MaterialSpec => ({
   kind: 'cond', color, metalness, roughness,
@@ -52,14 +49,10 @@ const cond = (color: number, metalness = 0.85, roughness = 0.4): MaterialSpec =>
 const flat = (color: number, roughness = 0.6): MaterialSpec => ({ kind: 'flat', color, roughness });
 const glass = (color: number, roughness = 0.06): MaterialSpec => ({ kind: 'glass', color, roughness });
 
-function resolveMaterial(spec: MaterialSpec, paintColor?: number): THREE.Material {
+function resolveMaterial(spec: MaterialSpec): THREE.Material {
   switch (spec.kind) {
     case 'cond':
       return makeConditionMaterial(spec.color, spec.metalness, spec.roughness);
-    case 'paint':
-      // The car's colour overrides the stock default; both share one template key
-      // space, so repaints never accumulate blueprint entries.
-      return makeConditionMaterial(paintColor ?? spec.color, spec.metalness, spec.roughness);
     case 'flat':
       return makeFlatMaterial(spec.color, spec.roughness);
     case 'glass': {
@@ -127,10 +120,10 @@ class MeshBuilder {
   }
 }
 
-function buildGroup(instructions: readonly Instruction[], paintColor?: number): THREE.Group {
+function buildGroup(instructions: readonly Instruction[]): THREE.Group {
   const group = new THREE.Group();
   for (const ins of instructions) {
-    const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material, paintColor));
+    const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material));
     mesh.position.set(ins.position[0], ins.position[1], ins.position[2]);
     mesh.rotation.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]);
     mesh.scale.set(ins.scale[0], ins.scale[1], ins.scale[2]);
@@ -210,6 +203,7 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
     case 'radiator': return buildRadiator(b, v);
     case 'headlight': return buildHeadlight(b, v);
     case 'exhaust': return buildExhaust(b, v);
+    case 'dashboard': return buildDashboard(b, v);
   }
 }
 
@@ -220,6 +214,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
   switch (v.id) {
     case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
+    // The 1.2: same architecture as the 1.6 but visibly a smaller block.
+    case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
     case 'engine_v8_5000': return buildV8(b);
     case 'engine_d4_2000': return buildInline(b, spec, 1.18, true);
     case 'engine_d6_6600': return buildInline(b, spec, 1.62, true);
@@ -308,6 +304,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
   let fins = false;
   switch (v.id) {
     case 'gearbox_manual4': scale = 1.0; manual = true; fins = false; break;
+    // Small four-speed: the estate's own box, noticeably shorter than the 5-speed.
+    case 'gearbox_lada_4': scale = 0.92; manual = true; fins = false; break;
     case 'gearbox_manual5': scale = 1.15; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
     case 'gearbox_truck6': scale = 1.5; manual = true; fins = true; break;
@@ -379,6 +377,7 @@ function buildTank(b: MeshBuilder, v: PartVariant): void {
   let w: number, h: number, d: number;
   switch (v.id) {
     case 'tank_40': w = 0.5; h = 0.24; d = 0.62; break;
+    case 'tank_lada_39': w = 0.62; h = 0.2; d = 0.5; break;
     case 'tank_65': w = 0.6; h = 0.28; d = 0.78; break;
     case 'tank_140': w = 1.05; h = 0.4; d = 0.55; break;
     default: throw new Error(`unhandled tank variant: ${v.id}`);
@@ -393,6 +392,11 @@ function buildTank(b: MeshBuilder, v: PartVariant): void {
 
 // ----------------------------- trim -----------------------------
 
+/**
+ * The generic flat-panel door.
+ *
+ * Canonical face is -Z; the mount's ±90° yaw turns it onto the flank.
+ */
 function buildDoor(b: MeshBuilder, v: PartVariant): void {
   const panel = cond(0x9aa3ab, 0.85, 0.4);
   const gls = glass(0xa8ccd4, 0.06);
@@ -402,36 +406,106 @@ function buildDoor(b: MeshBuilder, v: PartVariant): void {
   const h = id === 'door_truck' ? 1.05 : 0.85;
   const d = 0.06;
 
-  // Canonical face is -Z; the slot's ±90° yaw turns it onto the body side.
   b.box(`${id}_panel`, w, h, d, panel, [0, 0, 0]);
   b.box(`${id}_glass`, w * 0.78, h * 0.42, d * 0.4, gls, [0, h * 0.22, -d * 0.45]);
   b.box(`${id}_handle`, 0.16, 0.04, d * 0.8, handle, [w * 0.15, -h * 0.02, -d * 0.6]);
 }
 
+/**
+ * Dashboards. Wide and shallow, sitting in front of the driver's eye.
+ *
+ * Origin is the mount point; the binnacle stands above it and the fascia runs
+ * forward, so the part reads correctly from the interior camera.
+ */
+function buildDashboard(b: MeshBuilder, v: PartVariant): void {
+  const id = v.id;
+  const dark = flat(0x24262a, 0.85);
+  const dial = flat(0xd8d2c4, 0.4);
+  const chrome = cond(0xc6ccd2, 0.95, 0.2);
+  const wheelMat = flat(0x1b1d20, 0.7);
+
+  let w = 1.32;
+  let depth = 0.26;
+  let binnacle = true;
+  let wheelR = 0.19;
+  switch (id) {
+    case 'dash_std': w = 1.32; depth = 0.26; wheelR = 0.19; break;
+    case 'dash_truck': w = 1.6; depth = 0.32; wheelR = 0.23; break;
+    // Flat plastic shelf with a single binnacle: the real 2102 fascia.
+    case 'dash_lada': w = 1.36; depth = 0.22; wheelR = 0.185; break;
+    // Competition car: bare bulkhead, gauges on a plate, no padding at all.
+    case 'dash_rally': w = 1.1; depth = 0.14; binnacle = false; wheelR = 0.16; break;
+    default: break;
+  }
+
+  b.box(`${id}_fascia`, w, 0.14, depth, dark, [0, 0, -depth / 2]);
+  b.box(`${id}_top`, w, 0.035, depth * 0.9, dark, [0, 0.085, -depth / 2]);
+  if (binnacle) {
+    b.box(`${id}_binnacle`, 0.42, 0.16, 0.14, dark, [-w * 0.22, 0.1, -0.09]);
+    b.cylinder(`${id}_dial_big`, 0.07, 0.07, 0.02, 16, dial, [-w * 0.28, 0.1, -0.02], AXIS_Z);
+    b.cylinder(`${id}_dial_small`, 0.045, 0.045, 0.02, 14, dial, [-w * 0.13, 0.1, -0.02], AXIS_Z);
+  } else {
+    b.box(`${id}_gauge_plate`, 0.36, 0.12, 0.02, chrome, [-w * 0.2, 0.09, -0.02]);
+    for (let i = 0; i < 3; i++) {
+      b.cylinder(`${id}_gauge_${i}`, 0.035, 0.035, 0.018, 12, dial, [-w * 0.2 + (i - 1) * 0.1, 0.09, -0.03], AXIS_Z);
+    }
+  }
+  // Glovebox lid on the passenger side, and the wheel on its column.
+  b.box(`${id}_glovebox`, w * 0.3, 0.1, 0.02, dark, [w * 0.26, -0.01, -0.01]);
+  b.cylinder(`${id}_column`, 0.022, 0.022, 0.2, 8, dark, [-w * 0.21, 0.02, 0.08], [0.5, 0, 0]);
+  b.torus(`${id}_wheel`, wheelR, 0.016, 6, 18, wheelMat, [-w * 0.21, 0.09, 0.16], [1.15, 0, 0]);
+}
+
 function buildHood(b: MeshBuilder, v: PartVariant): void {
   const panel = cond(0x9aa3ab, 0.85, 0.4);
   const id = v.id;
-  const w = id === 'hood_truck' ? 1.5 : 1.3;
-  const d = id === 'hood_truck' ? 1.35 : 1.0;
+  // The estate's bonnet is narrower and longer than the generic lid, and carries
+  // the two pressed swages the real one has.
+  const w = id === 'hood_truck' ? 1.5 : id === 'hood_lada' ? 1.42 : 1.3;
+  const d = id === 'hood_truck' ? 1.35 : id === 'hood_lada' ? 0.88 : 1.0;
   b.box(`${id}_panel`, w, 0.05, d, panel, [0, 0, 0]);
+  if (id === 'hood_lada') {
+    for (const s of [-1, 1] as const) {
+      b.box(`${id}_swage_${s < 0 ? 'l' : 'r'}`, 0.05, 0.018, d * 0.82, panel, [s * 0.3, 0.032, 0]);
+    }
+  }
 }
 
 function buildTrunk(b: MeshBuilder, v: PartVariant): void {
   const panel = cond(0x9aa3ab, 0.85, 0.4);
+  if (v.id === 'trunk_lada') {
+    // A tailgate, not a boot lid: taller than it is deep, with the glass in it.
+    const gls = glass(0xa8ccd4, 0.06);
+    const chrome = cond(0xc6ccd2, 0.95, 0.2);
+    b.box('trunk_lada_panel', 1.34, 0.3, 0.05, panel, [0, -0.2, 0]);
+    b.box('trunk_lada_frame', 1.34, 0.42, 0.04, panel, [0, 0.17, 0]);
+    b.box('trunk_lada_glass', 1.2, 0.34, 0.02, gls, [0, 0.17, -0.02]);
+    b.box('trunk_lada_handle', 0.16, 0.035, 0.04, chrome, [0, -0.06, -0.04]);
+    return;
+  }
   b.box(`${v.id}_panel`, 1.25, 0.05, 0.75, panel, [0, 0, 0]);
 }
 
 function buildSeat(b: MeshBuilder, v: PartVariant): void {
-  const fabric = flat(0x3a3f45, 0.9);
-  const frame = cond(0x23262a, 0.6, 0.6);
   const id = v.id;
-  const w = id === 'seat_bench' ? 1.0 : 0.52;
+  const isLada = id === 'seat_lada';
+  // Period Soviet vinyl: warmer and shinier than the generic cloth.
+  const fabric = isLada ? flat(0x6a5a48, 0.6) : flat(0x3a3f45, 0.9);
+  const frame = cond(0x23262a, 0.6, 0.6);
+  const w = id === 'seat_bench' ? 1.0 : isLada ? 0.5 : 0.52;
 
   b.box(`${id}_cushion`, w, 0.12, 0.5, fabric, [0, 0.12, 0.04]);
-  b.box(`${id}_back`, w, 0.62, 0.12, fabric, [0, 0.42, -0.2]);
+  b.box(`${id}_back`, w, isLada ? 0.54 : 0.62, 0.12, fabric, [0, isLada ? 0.38 : 0.42, -0.2]);
   if (id === 'seat_bucket') {
     b.box(`${id}_bolster_l`, 0.08, 0.1, 0.5, fabric, [-w / 2 - 0.02, 0.12, 0.04]);
     b.box(`${id}_bolster_r`, 0.08, 0.1, 0.5, fabric, [w / 2 + 0.02, 0.12, 0.04]);
+  }
+  if (isLada) {
+    // Separate headrest on two posts, as on the 2102's front seats.
+    b.box(`${id}_headrest`, w * 0.62, 0.11, 0.1, fabric, [0, 0.75, -0.19]);
+    for (const s of [-1, 1] as const) {
+      b.cylinder(`${id}_post_${s < 0 ? 'l' : 'r'}`, 0.012, 0.012, 0.08, 6, frame, [s * w * 0.2, 0.68, -0.19]);
+    }
   }
   b.box(`${id}_rail1`, 0.04, 0.05, 0.5, frame, [-w * 0.35, 0.02, 0]);
   b.box(`${id}_rail2`, 0.04, 0.05, 0.5, frame, [w * 0.35, 0.02, 0]);
@@ -440,20 +514,45 @@ function buildSeat(b: MeshBuilder, v: PartVariant): void {
 function buildMirror(b: MeshBuilder, v: PartVariant): void {
   const chrome = cond(0xdadde2, 1.0, 0.12);
   const face = flat(0x9fb6c4, 0.08);
+
+  if (v.id === 'mirror_lada') {
+    // The Zhiguli wing mirror is not a round pod on a post: it is a small upright
+    // chrome housing, taller than it is wide, on a short cranked arm that stands off
+    // the wing. The glass faces rearward (-Z), which the mount's yaw then toes in.
+    b.cylinder('mirror_lada_foot', 0.016, 0.02, 0.03, 10, chrome, [0, 0.015, 0]);
+    // Cranked arm: up off the wing, then outboard to carry the head clear of the
+    // A-pillar so the driver can actually see past it.
+    b.cylinder('mirror_lada_arm', 0.011, 0.011, 0.075, 8, chrome, [0, 0.055, 0], [0, 0, 0.35]);
+    b.box('mirror_lada_head', 0.035, 0.105, 0.055, chrome, [-0.026, 0.115, 0]);
+    b.box('mirror_lada_glass', 0.012, 0.088, 0.042, face, [-0.04, 0.115, -0.006]);
+    return;
+  }
+
   b.cylinder(`${v.id}_stalk`, 0.02, 0.02, 0.1, 8, chrome, [0, 0.05, 0]);
   b.torus(`${v.id}_ring`, 0.09, 0.015, 8, 24, chrome, [0, 0.13, 0]);
   b.cylinder(`${v.id}_face`, 0.075, 0.075, 0.012, 20, face, [0, 0.13, 0], AXIS_Z);
 }
 
 function buildBumper(b: MeshBuilder, v: PartVariant): void {
-  const mat = v.id === 'bumper_chrome' ? cond(0xdadde2, 1.0, 0.12) : cond(0x4a4f55, 0.85, 0.5);
   const id = v.id;
-  const w = id === 'bumper_chrome' ? 1.6 : 2.0;
-  const h = id === 'bumper_chrome' ? 0.12 : 0.2;
+  const isLada = id === 'bumper_lada';
+  const chrome = cond(0xdadde2, 1.0, 0.12);
+  const mat = id === 'bumper_chrome' || isLada ? chrome : cond(0x4a4f55, 0.85, 0.5);
+  const w = id === 'bumper_chrome' ? 1.6 : isLada ? 1.5 : 2.0;
+  const h = id === 'bumper_chrome' ? 0.12 : isLada ? 0.1 : 0.2;
+
   b.box(`${id}_bar`, w, h, 0.1, mat, [0, 0, 0]);
   if (id === 'bumper_steel') {
     b.box(`${id}_strut_l`, 0.06, h, 0.3, mat, [-w * 0.4, 0, -0.12]);
     b.box(`${id}_strut_r`, 0.06, h, 0.3, mat, [w * 0.4, 0, -0.12]);
+  }
+  if (isLada) {
+    // Thin chrome blade on two stalks, with the overriders the period car wore.
+    for (const s of [-1, 1] as const) {
+      const side = s < 0 ? 'l' : 'r';
+      b.box(`${id}_stalk_${side}`, 0.05, h * 0.8, 0.16, mat, [s * w * 0.32, 0, -0.1]);
+      b.box(`${id}_over_${side}`, 0.07, h * 1.7, 0.12, mat, [s * w * 0.24, 0.01, 0.02]);
+    }
   }
 }
 
@@ -488,363 +587,24 @@ function buildHeadlight(b: MeshBuilder, v: PartVariant): void {
 
 function buildExhaust(b: MeshBuilder, v: PartVariant): void {
   const steel = cond(0x6f747a, 0.85, 0.5);
+
+  if (v.id === 'exhaust_lada') {
+    // Flat oval silencer rather than the generic fat cylinder. A 0.09 m radius
+    // drum hangs 90 mm below its mount, which on a car with 170 mm of clearance
+    // put the exhaust lower than the chassis itself and made it scrape on
+    // everything. A 70 mm deep box tucks under the floor pan and stays above the
+    // collider's underside, which is what the real car's pressed silencer does.
+    b.cylinder('exhaust_lada_pipe', 0.028, 0.028, 0.66, 10, steel, [0, 0.01, 0.16], AXIS_Z);
+    b.box('exhaust_lada_muffler', 0.17, 0.07, 0.36, steel, [0, 0, -0.3]);
+    b.box('exhaust_lada_muffler_end_f', 0.13, 0.055, 0.03, steel, [0, 0, -0.115]);
+    b.box('exhaust_lada_muffler_end_r', 0.13, 0.055, 0.03, steel, [0, 0, -0.485]);
+    b.cylinder('exhaust_lada_tail', 0.026, 0.026, 0.16, 10, steel, [0, 0.008, -0.56], AXIS_Z);
+    return;
+  }
+
   b.cylinder(`${v.id}_pipe`, 0.04, 0.04, 0.7, 12, steel, [0, 0, 0.1], AXIS_Z);
   b.cylinder(`${v.id}_muffler`, 0.09, 0.09, 0.32, 16, steel, [0, 0, -0.35], AXIS_Z);
   b.cylinder(`${v.id}_tail`, 0.035, 0.035, 0.14, 10, steel, [0, 0, -0.55], AXIS_Z);
-}
-
-// ---------------------------------------------------------------------------
-// Body shells
-// ---------------------------------------------------------------------------
-
-const bodyBlueprintCache = new Map<string, Blueprint>();
-
-function bodyBlueprint(bd: BodyDef): Blueprint {
-  let bp = bodyBlueprintCache.get(bd.id);
-  if (bp === undefined) {
-    const builder = new MeshBuilder();
-    buildBody(builder, bd);
-    const instructions = builder.instructions;
-    bp = { instructions, halfExtents: halfExtentsOf(instructions) };
-    bodyBlueprintCache.set(bd.id, bp);
-  }
-  return bp;
-}
-
-function wheelFloor(bd: BodyDef): number {
-  for (const slot of bd.slots) {
-    if (slot.id === 'wheel_fl') return slot.pos[1];
-  }
-  return -0.45;
-}
-
-/**
- * Body shell finish: paint colour (stock, overridden per car at build time) plus
- * the body-fixed metalness/roughness. Material accounting for a fleet of N cars
- * in M distinct colours: each painted box still gets its own condition-material
- * clone per car (that is how dirt/rust stay per-instance), so per-car body
- * material count is unchanged by colour — O(N) instances overall. The shared
- * template cache gains at most one entry per (paintColor, metalness, roughness)
- * tuple actually in use, i.e. ≤ 5·M for the five bodies' fixed finishes, and the
- * compiled program count stays exactly 1 (CONDITION_PROGRAM_KEY). No per-colour
- * blueprints: instructions carry the parametric 'paint' spec.
- */
-function bodyPaint(bd: BodyDef): MaterialSpec {
-  const stock = bd.stockPaintColor;
-  switch (bd.id) {
-    case 'body_sedan': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
-    case 'body_wagon': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.42 };
-    case 'body_hatch': return { kind: 'paint', color: stock, metalness: 0.5, roughness: 0.42 };
-    case 'body_pickup': return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
-    case 'body_bus': return { kind: 'paint', color: stock, metalness: 0.5, roughness: 0.45 };
-    default: return { kind: 'paint', color: stock, metalness: 0.55, roughness: 0.4 };
-  }
-}
-
-/** Fender arches over the four wheel slots, implying the openings. */
-function addArches(b: MeshBuilder, bd: BodyDef, floor: number, archR: number, mat: MaterialSpec): void {
-  const wx = bd.halfExtents[0] - 0.08;
-  const wz = bd.halfExtents[2] - 0.62;
-  const spots: ReadonlyArray<readonly [number, number]> = [[-wx, wz], [wx, wz], [-wx, -wz], [wx, -wz]];
-  spots.forEach(([x, z], i) => {
-    b.torus(`arch_${bd.id}_${i}`, archR, 0.045, 8, 24, mat, [x, floor, z], [0, Math.PI / 2, 0], ONE, Math.PI);
-  });
-}
-
-function buildBody(b: MeshBuilder, bd: BodyDef): void {
-  switch (bd.id) {
-    case 'body_sedan': return sedan(b, bd);
-    case 'body_wagon': return wagon(b, bd);
-    case 'body_hatch': return hatch(b, bd);
-    case 'body_pickup': return pickup(b, bd);
-    case 'body_bus': return bus(b, bd);
-    default: throw new Error(`unknown body: ${bd.id}`);
-  }
-}
-
-/**
- * Static suspension sag of the sedan, metres: how far below its slot (the spring's
- * upper mount) a wheel hangs on a settled car. `Vehicle.syncVisuals` places a
- * wheel mesh at `connectionPoint.y - suspensionLength`, and on flat tarmac the
- * ray-cast controller holds `suspensionLength` at 0.25 for this body's mass and
- * spring rate (measured, all four corners within 0.013 of each other). The wheel
- * arches are therefore cut around `slotY - SEDAN_SAG`, not around the slot, which
- * is what puts the tyres *inside* the fenders instead of 250 mm below them.
- */
-const SEDAN_SAG = 0.25;
-
-/**
- * Old sedan: a deliberate three-box shell.
- *
- * Everything is driven off four levels that hold all the way round the car —
- * rocker bottom, waist (top of the lower body / bottom of the glass), roof
- * underside (which is also the door aperture's top edge) and roof top — plus the
- * axle line for the arches. The bolt-on panels each get a real aperture in the
- * shell to sit in: a door opening between rocker and cant rail, a bonnet and boot
- * opening framed by side rails, a nose face with a grille cut-out for the
- * radiator and flat cheeks for the headlamps, and fender crowns that stand proud
- * of the flanks so the wheels live inside them.
- */
-function sedan(b: MeshBuilder, bd: BodyDef): void {
-  const paint = bodyPaint(bd);
-  const inner = cond(0x2e3236, 0.6, 0.7);
-  const gls = glass(0xa8ccd4, 0.06);
-  // Tail lamp lens: a flat material so it stays bright when the shell is in
-  // shadow, which is the only way an unlit box reads as a lamp.
-  const lens = flat(0xc02a1e, 0.25);
-
-  // Axle reference, read from the wheel slots so shell and slots cannot drift.
-  let ax = 0.77;
-  let az = 1.63;
-  for (const slot of bd.slots) {
-    if (slot.id === 'wheel_fl') {
-      ax = -slot.pos[0];
-      az = slot.pos[2];
-    }
-  }
-  const hub = wheelFloor(bd) - SEDAN_SAG; // wheel centre on a settled car
-
-  // Levels. WAIST is fixed by the door: door_std is 0.85 tall with its glass
-  // starting 0.434 above its bottom edge, and the aperture's top edge is the roof
-  // underside, so the glass line lands at CANT - 0.416. Bonnet, wing tops, boot
-  // deck and window sills all sit on that one line, which is what makes the
-  // shoulder read as a single continuous surface instead of a stack of trays.
-  //
-  // The roof skin tops out 0.06 above the collider's top face. The shell already
-  // reaches outside that box at the wheels, bumpers and mirrors; buying 0.06 of
-  // extra glass height here is what stops the greenhouse looking squashed under
-  // a tall lower body, and 0.06 on a 1.24 m box changes no handling.
-  const ROCKER = -0.56; // bottom of the visible bodywork between the arches
-  const CANT = 0.62; // roof underside == top of the door aperture
-  const ROOF = 0.68; // roof skin top
-  const WAIST = CANT - 0.416; // top of the lower body, bottom of every window
-  const DOOR_BOT = CANT - 0.85; // rocker top: where the door panel ends
-  const SIDE = 0.79; // flank panel centre plane (outer skin at 0.82)
-  const CROWN = ax + 0.075; // fender centre plane: clears a 0.20 m wide tyre
-  // Arch opening radius, measured against the tyre rather than guessed: the lip's
-  // inner surface ends up 54 mm above a 0.35 m tyre at rest, which reads as a
-  // wheel in a wing instead of a wheel in a hole (0.47 left a 124 mm hole). The
-  // cost is that the tyre kisses the lip past ~54 mm of bump travel, out of 170
-  // available; on tarmac it never gets there, over desert whoops it will.
-  const ARCH = 0.45;
-  const NOSE = 2.13; // nose/tail face centre plane (outer face at 2.16)
-  const RAIL = WAIST - 0.0475; // bonnet/boot frame rail centre (0.095 deep)
-  const XRAIL = WAIST - 0.05; // cowl / cross-rail centre (0.10 deep)
-  const OPEN = az - ARCH; // where the arch openings start, fore and aft
-
-  // Door aperture, matched to door_std (0.95 x 0.85) so the panel fills it.
-  const DOOR_F = 0.7;
-  const DOOR_R = -0.25;
-  const doorMid = (DOOR_F + DOOR_R) / 2;
-
-  // ---- underbody and bulkhead (never painted: this is bare interior steel) ----
-  b.box('sedan_floor', 1.52, 0.08, 4.04, inner, [0, -0.4, 0]);
-  b.box('sedan_firewall', 1.52, 0.42, 0.06, inner, [0, -0.15, 1.03]);
-
-  // ---- flanks: rocker under the door, panels fore and aft of the aperture ----
-  for (const s of [-1, 1] as const) {
-    const side = s < 0 ? 'l' : 'r';
-    b.box(`sedan_rocker_${side}`, 0.06, DOOR_BOT - ROCKER, 0.95, paint, [s * SIDE, (ROCKER + DOOR_BOT) / 2, doorMid]);
-    b.box(`sedan_flank_f_${side}`, 0.06, WAIST - ROCKER, OPEN - DOOR_F, paint, [s * SIDE, (ROCKER + WAIST) / 2, (OPEN + DOOR_F) / 2]);
-    b.box(`sedan_flank_r_${side}`, 0.06, WAIST - ROCKER, DOOR_R + OPEN, paint, [s * SIDE, (ROCKER + WAIST) / 2, (DOOR_R - OPEN) / 2]);
-
-    // Fender crowns: proud of the flanks, from the arch roof up to the waist.
-    const crownH = WAIST - (hub + ARCH);
-    const crownY = (WAIST + hub + ARCH) / 2;
-    b.box(`sedan_wing_${side}`, 0.07, crownH, ARCH * 2, paint, [s * CROWN, crownY, az]);
-    b.box(`sedan_quarter_${side}`, 0.07, crownH, ARCH * 2, paint, [s * CROWN, crownY, -az]);
-
-    // Inner arch liners, just inboard of the tyre and spanning the lip's own
-    // half-hoop: without them each opening is a hole straight through the car
-    // and the wheel reads as floating in a void.
-    b.box(`sedan_liner_f_${side}`, 0.04, ARCH, ARCH * 2, inner, [s * (ax - 0.12), hub + ARCH / 2, az]);
-    b.box(`sedan_liner_r_${side}`, 0.04, ARCH, ARCH * 2, inner, [s * (ax - 0.12), hub + ARCH / 2, -az]);
-  }
-
-  // ---- arch lips: half-hoops around where the tyre actually sits ----
-  for (const [i, [x, z]] of ([[-CROWN, az], [CROWN, az], [-CROWN, -az], [CROWN, -az]] as const).entries()) {
-    b.torus(`sedan_arch_${i}`, ARCH, 0.05, 6, 12, paint, [x, hub, z], [0, Math.PI / 2, 0], ONE, Math.PI);
-  }
-
-  // ---- nose: cheeks either side of a grille cut-out, valance underneath ----
-  const cheekH = XRAIL - 0.05 + 0.3;
-  const cheekY = (XRAIL - 0.05 - 0.3) / 2;
-  b.box('sedan_nose_l', 0.34, cheekH, 0.06, paint, [-0.65, cheekY, NOSE]);
-  b.box('sedan_nose_r', 0.34, cheekH, 0.06, paint, [0.65, cheekY, NOSE]);
-  b.box('sedan_valance_f', 1.64, 0.22, 0.06, paint, [0, -0.41, NOSE]);
-
-  // ---- bonnet frame: two side rails, a front cross rail and the cowl ----
-  b.box('sedan_bonnet_rail_l', 0.2, 0.095, 1.08, paint, [-0.72, RAIL, 1.52]);
-  b.box('sedan_bonnet_rail_r', 0.2, 0.095, 1.08, paint, [0.72, RAIL, 1.52]);
-  b.box('sedan_bonnet_front', 1.64, 0.1, 0.1, paint, [0, XRAIL, 2.11]);
-  b.box('sedan_cowl', 1.64, 0.1, 0.1, paint, [0, XRAIL, 0.95]);
-
-  // ---- tail: face down to the valance line, boot frame, lip, lamps ----
-  b.box('sedan_tail', 1.64, XRAIL - 0.05 + 0.52, 0.06, paint, [0, (XRAIL - 0.05 - 0.52) / 2, -NOSE]);
-  b.box('sedan_deck_rail_l', 0.2, 0.095, 0.84, paint, [-0.72, RAIL, -1.64]);
-  b.box('sedan_deck_rail_r', 0.2, 0.095, 0.84, paint, [0.72, RAIL, -1.64]);
-  b.box('sedan_deck_front', 1.64, 0.1, 0.1, paint, [0, XRAIL, -1.17]);
-  b.box('sedan_deck_lip', 1.64, 0.15, 0.1, paint, [0, WAIST - 0.025, -2.11]);
-  b.box('sedan_lamp_l', 0.24, 0.14, 0.06, lens, [-0.58, -0.06, -2.19]);
-  b.box('sedan_lamp_r', 0.24, 0.14, 0.06, lens, [0.58, -0.06, -2.19]);
-
-  // ---- cabin: formal roofline, raked screen, vertical rear glass ----
-  const glassH = CANT - WAIST;
-  const glassY = (CANT + WAIST) / 2;
-  // Roof skin is 20 mm wider than the flanks so its edge reads as a drip rail
-  // instead of a box dropped on a narrower cabin, and stops 0.12 ahead of the
-  // windscreen's top edge, giving the period brow over the screen.
-  b.box('sedan_roof', 1.66, ROOF - CANT, 2.01, paint, [0, (CANT + ROOF) / 2, -0.165]);
-  b.box('sedan_apillar_l', 0.09, glassH, 0.2, paint, [-0.785, glassY, 0.8]);
-  b.box('sedan_apillar_r', 0.09, glassH, 0.2, paint, [0.785, glassY, 0.8]);
-  // Wide body-colour sail panel rather than a stick C-pillar: with only two doors
-  // a blind rear quarter is what stops the cabin reading as a bus greenhouse.
-  b.box('sedan_sail_l', 0.06, glassH, 0.485, paint, [-0.79, glassY, -0.9225]);
-  b.box('sedan_sail_r', 0.06, glassH, 0.485, paint, [0.79, glassY, -0.9225]);
-  // Windscreen: 0.18 m of rake over the glass height, cowl top to roof edge.
-  const rake = Math.atan2(0.18, glassH);
-  b.box('sedan_screen', 1.44, Math.hypot(0.18, glassH), 0.035, gls, [0, glassY, 0.81], [-rake, 0, 0]);
-  b.box('sedan_rearwin', 1.56, glassH, 0.035, gls, [0, glassY, -1.12]);
-  b.box('sedan_qglass_l', 0.03, glassH - 0.004, 0.4, gls, [-0.805, glassY, -0.48]);
-  b.box('sedan_qglass_r', 0.03, glassH - 0.004, 0.4, gls, [0.805, glassY, -0.48]);
-}
-
-function wagon(b: MeshBuilder, bd: BodyDef): void {
-  const hx = bd.halfExtents[0];
-  const roof = bd.halfExtents[1];
-  const hz = bd.halfExtents[2];
-  const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd);
-  const inner = cond(0x2e3236, 0.6, 0.7);
-  const gls = glass(0xa8ccd4, 0.06);
-  const belt = 0.0;
-  const w = hx * 2;
-
-  b.box('wagon_floor', w - 0.12, 0.06, hz * 2 - 0.2, inner, [0, floor + 0.03, 0]);
-  b.box('wagon_firewall', w - 0.16, belt - floor, 0.05, inner, [0, (floor + belt) / 2, hz - 1.0]);
-  b.box('wagon_sill_l', 0.08, belt - floor, hz * 2 - 0.5, paint, [-hx + 0.04, (floor + belt) / 2, 0]);
-  b.box('wagon_sill_r', 0.08, belt - floor, hz * 2 - 0.5, paint, [hx - 0.04, (floor + belt) / 2, 0]);
-  b.box('wagon_hooddeck', w - 0.2, 0.06, 0.55, paint, [0, 0.06, hz - 0.6]);
-
-  // long greenhouse running nearly to the tail
-  greenhouse(b, 'wagon', w - 0.22, belt, roof, 0.7, -hz + 0.6, paint, gls);
-  addArches(b, bd, floor, 0.44, paint);
-}
-
-function hatch(b: MeshBuilder, bd: BodyDef): void {
-  const hx = bd.halfExtents[0];
-  const roof = bd.halfExtents[1];
-  const hz = bd.halfExtents[2];
-  const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd);
-  const inner = cond(0x2e3236, 0.6, 0.7);
-  const gls = glass(0xa8ccd4, 0.06);
-  const belt = 0.0;
-  const w = hx * 2;
-
-  b.box('hatch_floor', w - 0.12, 0.06, hz * 2 - 0.2, inner, [0, floor + 0.03, 0]);
-  b.box('hatch_firewall', w - 0.16, belt - floor, 0.05, inner, [0, (floor + belt) / 2, hz - 0.85]);
-  b.box('hatch_sill_l', 0.08, belt - floor, hz * 2 - 0.5, paint, [-hx + 0.04, (floor + belt) / 2, 0]);
-  b.box('hatch_sill_r', 0.08, belt - floor, hz * 2 - 0.5, paint, [hx - 0.04, (floor + belt) / 2, 0]);
-  b.box('hatch_hooddeck', w - 0.2, 0.06, 0.45, paint, [0, 0.06, hz - 0.5]);
-
-  // short, tall greenhouse with a steep rear hatch
-  greenhouse(b, 'hatch', w - 0.22, belt, roof, 0.6, -hz + 0.55, paint, gls);
-  addArches(b, bd, floor, 0.4, paint);
-}
-
-function pickup(b: MeshBuilder, bd: BodyDef): void {
-  const hx = bd.halfExtents[0];
-  const roof = bd.halfExtents[1];
-  const hz = bd.halfExtents[2];
-  const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd);
-  const inner = cond(0x2e3236, 0.6, 0.7);
-  const gls = glass(0xa8ccd4, 0.06);
-  const belt = 0.1;
-  const w = hx * 2;
-
-  // cab occupies the front ~40%; the bed is open behind it
-  const cabZ = hz * 0.45;
-  b.box('pickup_floor', w - 0.12, 0.08, hz * 2 - 0.2, inner, [0, floor + 0.04, 0]);
-  b.box('pickup_firewall', w - 0.16, belt - floor, 0.05, inner, [0, (floor + belt) / 2, cabZ + 0.25]);
-  b.box('pickup_backwall', w - 0.16, belt - floor, 0.05, inner, [0, (floor + belt) / 2, cabZ - 0.6]);
-  b.box('pickup_sill_l', 0.1, belt - floor, hz * 2 - 0.5, paint, [-hx + 0.05, (floor + belt) / 2, 0]);
-  b.box('pickup_sill_r', 0.1, belt - floor, hz * 2 - 0.5, paint, [hx - 0.05, (floor + belt) / 2, 0]);
-  b.box('pickup_hooddeck', w - 0.24, 0.1, 1.0, paint, [0, belt + 0.06, cabZ + 0.65]);
-
-  // cab greenhouse over the front half
-  greenhouse(b, 'pickup', w - 0.24, belt, roof, cabZ + 0.25, cabZ - 0.6, paint, gls);
-
-  // open bed: floor + side walls + tailgate (no roof)
-  b.box('pickup_bed', w - 0.24, 0.06, hz * 2 - cabZ * 2 - 0.4, inner, [0, floor + 0.12, -cabZ - 0.2]);
-  b.box('pickup_bed_l', 0.08, 0.4, hz * 2 - cabZ * 2 - 0.4, paint, [-hx + 0.05, floor + 0.32, -cabZ - 0.2]);
-  b.box('pickup_bed_r', 0.08, 0.4, hz * 2 - cabZ * 2 - 0.4, paint, [hx - 0.05, floor + 0.32, -cabZ - 0.2]);
-  b.box('pickup_tailgate', w - 0.24, 0.4, 0.06, paint, [0, floor + 0.32, -hz + 0.06]);
-
-  addArches(b, bd, floor, 0.55, paint);
-}
-
-function bus(b: MeshBuilder, bd: BodyDef): void {
-  const hx = bd.halfExtents[0];
-  const roof = bd.halfExtents[1];
-  const hz = bd.halfExtents[2];
-  const floor = wheelFloor(bd);
-  const paint = bodyPaint(bd);
-  const inner = cond(0x2e3236, 0.6, 0.7);
-  const gls = glass(0xa8ccd4, 0.06);
-  const belt = 0.35;
-  const w = hx * 2;
-
-  b.box('bus_floor', w - 0.16, 0.1, hz * 2 - 0.3, inner, [0, floor + 0.05, 0]);
-  b.box('bus_firewall', w - 0.2, belt - floor, 0.08, inner, [0, (floor + belt) / 2, hz - 0.6]);
-  b.box('bus_sill_l', 0.1, belt - floor, hz * 2 - 0.5, paint, [-hx + 0.05, (floor + belt) / 2, 0]);
-  b.box('bus_sill_r', 0.1, belt - floor, hz * 2 - 0.5, paint, [hx - 0.05, (floor + belt) / 2, 0]);
-
-  // long, tall greenhouse with a pillar every ~1.3 m
-  const gz = hz * 2 - 1.2;
-  const mid = 0;
-  b.box('bus_roof', w - 0.16, 0.06, gz, paint, [0, roof - 0.03, mid]);
-  const px = w / 2 - 0.06;
-  b.box('bus_glass_l', 0.03, roof - belt - 0.05, gz - 0.08, gls, [-px, (belt + roof) / 2, mid]);
-  b.box('bus_glass_r', 0.03, roof - belt - 0.05, gz - 0.08, gls, [px, (belt + roof) / 2, mid]);
-  const pillars = 6;
-  for (let i = 0; i <= pillars; i++) {
-    const z = (i / pillars - 0.5) * gz;
-    b.box(`bus_pillar_l_${i}`, 0.08, roof - belt, 0.08, paint, [-px, (belt + roof) / 2, z]);
-    b.box(`bus_pillar_r_${i}`, 0.08, roof - belt, 0.08, paint, [px, (belt + roof) / 2, z]);
-  }
-  b.box('bus_windshield', w - 0.2, roof - belt - 0.05, 0.04, gls, [0, (belt + roof) / 2, gz / 2]);
-
-  addArches(b, bd, floor, 0.62, paint);
-}
-
-/** Cabin greenhouse: roof, four pillars and glass, between belt and roof. */
-function greenhouse(
-  b: MeshBuilder,
-  id: string,
-  w: number,
-  belt: number,
-  roof: number,
-  zFront: number,
-  zRear: number,
-  paint: MaterialSpec,
-  gls: MaterialSpec,
-): void {
-  const h = roof - belt;
-  const mid = (zFront + zRear) / 2;
-  const depth = zFront - zRear;
-  const px = w / 2 - 0.05;
-
-  b.box(`${id}_roof`, w, 0.05, depth, paint, [0, roof - 0.03, mid]);
-  b.box(`${id}_pl`, 0.08, h, 0.08, paint, [-px, (belt + roof) / 2, zRear]);
-  b.box(`${id}_pr`, 0.08, h, 0.08, paint, [px, (belt + roof) / 2, zRear]);
-  b.box(`${id}_al`, 0.08, h, 0.08, paint, [-px, (belt + roof) / 2, zFront]);
-  b.box(`${id}_ar`, 0.08, h, 0.08, paint, [px, (belt + roof) / 2, zFront]);
-  b.box(`${id}_glassl`, 0.03, h - 0.06, depth, gls, [-px, (belt + roof) / 2, mid]);
-  b.box(`${id}_glassr`, 0.03, h - 0.06, depth, gls, [px, (belt + roof) / 2, mid]);
-  b.box(`${id}_windshield`, w - 0.12, h - 0.06, 0.03, gls, [0, (belt + roof) / 2, zFront + 0.01]);
-  b.box(`${id}_rearwin`, w - 0.12, h - 0.06, 0.03, gls, [0, (belt + roof) / 2, zRear - 0.01]);
 }
 
 // ---------------------------------------------------------------------------
@@ -963,15 +723,6 @@ export function createPartMesh(variantId: string): THREE.Object3D {
   return buildGroup(blueprint(variantId).instructions);
 }
 
-/**
- * The bare body shell, origin at the body centre. `paintColor` (0xRRGGBB) paints
- * the shell; when omitted the body's stock colour is used, which keeps the POI
- * wreck shells (no CarState) on their factory finish.
- */
-export function createBodyMesh(bodyId: string, paintColor?: number): THREE.Object3D {
-  return buildGroup(bodyBlueprint(body(bodyId)).instructions, paintColor);
-}
-
 /** Collider half-extents for a part, derived from its built geometry's bounds. */
 export function partHalfExtents(variantId: string): { x: number; y: number; z: number } {
   return blueprint(variantId).halfExtents;
@@ -1004,6 +755,5 @@ export function disposeMeshCache(): void {
   for (const geometry of geometryCache.values()) geometry.dispose();
   geometryCache.clear();
   blueprintCache.clear();
-  bodyBlueprintCache.clear();
   itemBlueprintCache.clear();
 }

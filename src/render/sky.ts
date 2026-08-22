@@ -44,11 +44,14 @@ const SOUTH_TILT = 0.45;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
-const STAR_COUNT = 4000;
+/** Field density: ~10k vertices is still one draw call on a shared material, but
+ *  dense enough that the night sky reads as a star field rather than a scatter. */
+const STAR_COUNT = 10000;
 /** Seed for the star field. Fixed so the sky is identical every session. */
 const STAR_SEED = 0x5ca11ab1;
-/** Fibonacci candidates filtered into a band give a deterministic galactic plane. */
-const BAND_CANDIDATES = 9000;
+/** Fibonacci candidates filtered into a band give a deterministic galactic plane.
+ *  Held at 2.25x STAR_COUNT so the band stays ~2.25x denser than the field. */
+const BAND_CANDIDATES = 22500;
 /** Half-width of the band in `dot(dir, normal)` space (~7.5 degrees). */
 const BAND_HALF_WIDTH = 0.13;
 
@@ -123,6 +126,29 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
+/**
+ * Linear-radiance twin of SKY_FRAGMENT, used only for the environment probe.
+ *
+ * The visible dome ends with `tonemapping_fragment` + `colorspace_fragment` so it
+ * matches the scene's ACES + sRGB output exactly. An environment map must carry
+ * *linear radiance* instead: feeding it display-referred sRGB would tonemap the
+ * sky once into the probe and again when the reflection is shaded, which reads as
+ * washed-out, low-contrast chrome. Derived by deleting those two includes from
+ * the one source above, so the gradient, sun disc and glow can never drift apart.
+ */
+const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
+  .replace('#include <tonemapping_fragment>', '')
+  .replace('#include <colorspace_fragment>', '');
+
+/**
+ * Sun-elevation change, radians, that forces an environment rebake. A bake is a
+ * cubemap render plus the roughness convolution — far too costly per frame — and
+ * the dome's appearance is a function of sun elevation alone, so stepping the
+ * probe gives ~70 bakes across a full day/night cycle with no visible stepping
+ * in the reflections.
+ */
+const ENV_BAKE_STEP = 0.03;
 
 /** Shared by the star field and the galactic band (band passes uDens01 = 1). */
 const STAR_VERTEX = /* glsl */ `
@@ -239,6 +265,15 @@ export class Sky {
   private readonly sunLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
 
+  // --- Environment probe: what makes metal read as metal (see refreshEnvironment) ---
+  private readonly pmrem: THREE.PMREMGenerator;
+  /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
+  private readonly envScene = new THREE.Scene();
+  private readonly envMaterial: THREE.ShaderMaterial;
+  private envTarget: THREE.WebGLRenderTarget | null = null;
+  /** Sun elevation the live probe was baked at. NaN forces a bake on frame one. */
+  private envBakedElevation = Number.NaN;
+
   // --- Dome shader uniforms (typed references; mutated in place each frame) ---
   private readonly uSunDir = new THREE.Vector3(0, 1, 0);
   private readonly uMoonDir = new THREE.Vector3(0, -1, 0);
@@ -269,9 +304,10 @@ export class Sky {
 
   private sunElevation = -1.0; // radians; starts below the horizon (night)
 
-  constructor(scene: THREE.Scene, fog: THREE.FogExp2) {
+  constructor(scene: THREE.Scene, fog: THREE.FogExp2, webgl: THREE.WebGLRenderer) {
     this.scene = scene;
     this.fog = fog;
+    this.pmrem = new THREE.PMREMGenerator(webgl);
 
     // --- Sky dome ---
     const domeGeometry = new THREE.SphereGeometry(DOME_RADIUS, 48, 24);
@@ -298,6 +334,21 @@ export class Sky {
     this.dome.renderOrder = -10;
     this.dome.frustumCulled = false;
     this.root.add(this.dome);
+
+    // --- Environment probe dome: same geometry and uniform objects as the
+    // visible dome, so the probe tracks the time of day for free. Only the
+    // fragment shader differs (linear radiance, see SKY_FRAGMENT_LINEAR).
+    this.envMaterial = new THREE.ShaderMaterial({
+      vertexShader: SKY_VERTEX,
+      fragmentShader: SKY_FRAGMENT_LINEAR,
+      uniforms: domeMaterial.uniforms,
+      side: THREE.BackSide,
+      depthWrite: false,
+      depthTest: false,
+    });
+    const envDome = new THREE.Mesh(domeGeometry, this.envMaterial);
+    envDome.frustumCulled = false;
+    this.envScene.add(envDome);
 
     // --- Stars ---
     this.starPoints = this.buildStars();
@@ -567,7 +618,10 @@ export class Sky {
     this.uMoonAmount.value = night;
 
     // --- Stars & band ---
-    const starFade = smoothstep(0.1, -0.1, this.sunElevation); // 0 by day, 1 at night
+    // Keep the field full through the night and down to the horizon, fading it
+    // only as the sun climbs clear of it, so stars read at dusk and dawn instead
+    // of vanishing around +-6 deg of elevation (the old 0.1 / -0.1 pair).
+    const starFade = smoothstep(0.35, -0.05, this.sunElevation); // 0 only under a high sun, 1 at night
     this.uStarOpacity.value = starFade;
     this.uStarDens.value = Math.min(1, Math.max(0, (g.starDensity - 1) / 3.5));
     this.uBandOpacity.value = starFade * g.galaxy;
@@ -598,9 +652,13 @@ export class Sky {
     }
     this.sunLight.color.copy(this._lightColor);
 
-    // Hemisphere bounce: sky tint above, warm sand below. Strong by day so
-    // shadowed faces read as sun-warmed mid-tones; collapsing to a faint cool
-    // moon fill at night so headlights and lamps stay the real illumination.
+    // Hemisphere bounce: sky tint above, warm sand below. Halved against the
+    // pre-probe value because `scene.environment` now supplies real sky
+    // irradiance to every standard material — running both at full strength
+    // double-counts the ambient and flattens exactly the shading the probe was
+    // added to recover. The hemisphere still earns its place: it keeps the warm
+    // ground bounce on downward faces that a sky-only probe under-lights, and it
+    // is what stops shadowed panels going to a dead flat tone.
     this._hemiSky.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.02, 0.0)
       .lerp(C_DAY_HORIZON, 0.4)
@@ -608,7 +666,9 @@ export class Sky {
     this._hemiGround.copy(C_GROUND).lerp(C_NIGHT_GROUND, night);
     this.hemiLight.color.copy(this._hemiSky);
     this.hemiLight.groundColor.copy(this._hemiGround);
-    this.hemiLight.intensity = 0.06 + 2.4 * day;
+    this.hemiLight.intensity = 0.04 + 1.15 * day;
+
+    this.refreshEnvironment();
 
     // --- Reposition the sky with the camera ---
     this.root.position.set(cameraX, cameraY, cameraZ);
@@ -623,6 +683,35 @@ export class Sky {
     this.sunLight.target.updateMatrixWorld();
   }
 
+  /**
+   * Rebake the environment probe when the sun has moved enough to matter.
+   *
+   * This is the single reason painted metal reads as metal. A
+   * MeshStandardMaterial takes almost all of a metal's response from *indirect
+   * specular*, which is sampled from `scene.environment`; with no probe, a
+   * metalness-0.55 body panel loses ~45% of its diffuse to the metal term and
+   * gets nothing back, leaving only the sun's narrow specular lobe. That is the
+   * flat, dead look — and it means raising `metalness` without a probe makes
+   * panels worse, not shinier.
+   *
+   * Baking the game's own dome rather than importing an HDRI keeps the
+   * reflection locked to the current sky (sunset paint goes orange for free) and
+   * keeps the project asset-free, which is the same constraint the procedural
+   * meshes are built under.
+   */
+  private refreshEnvironment(): void {
+    if (Math.abs(this.sunElevation - this.envBakedElevation) < ENV_BAKE_STEP) return;
+    this.envBakedElevation = this.sunElevation;
+
+    const previous = this.envTarget;
+    // near/far must bracket the dome; it is the only thing in the probe scene.
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0, 1, DOME_RADIUS * 2);
+    this.scene.environment = this.envTarget.texture;
+    // fromScene allocates a fresh target per call, so the day cycle leaks a
+    // cubemap per bake unless the previous one is released here.
+    if (previous !== null) previous.dispose();
+  }
+
   /** Unit vector pointing toward the sun. Live internal vector — do not retain across frames. */
   get sunDirection(): { x: number; y: number; z: number } {
     return this._sunDir;
@@ -631,6 +720,17 @@ export class Sky {
   get isNight(): boolean {
     return this.sunElevation < NIGHT_ELEVATION;
   }
+
+  /**
+   * How "day" the sun position reads, 0..1. Drives the daytime-only heat haze:
+   * zero at night and through the dawn/dusk dip, one under a clear daytime sun.
+   * Reuses the same curve as the update loop's day/night sky blend, so the haze
+   * disappears exactly when the sky goes dark.
+   */
+  get dayFactor(): number {
+    return smoothstep(-0.12, 0.3, this.sunElevation);
+  }
+
 
   dispose(): void {
     this.scene.remove(this.root);
@@ -648,5 +748,10 @@ export class Sky {
 
     this.auroraGeometry.dispose();
     for (const m of this.auroraMaterials) m.dispose();
+
+    this.scene.environment = null;
+    this.envMaterial.dispose();
+    if (this.envTarget !== null) this.envTarget.dispose();
+    this.pmrem.dispose();
   }
 }

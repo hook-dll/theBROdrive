@@ -4,8 +4,8 @@ import type { GameWorld } from '../game/state';
 import type { InputFrame } from '../core/input';
 import type { Inventory, Item, PartItem, FuelCanItem, ToolKind } from '../items/items';
 import { itemLabel, itemMass } from '../items/items';
-import type { PartInstance, PartKind, SlotId, SlotDef } from '../parts/registry';
-import { applyBrush, applySponge, body, variant, RUST_CLEAN_EPSILON, BRUSH_DIRT_FLOOR } from '../parts/registry';
+import type { PartInstance } from '../parts/registry';
+import { applyBrush, applySponge, variant, RUST_CLEAN_EPSILON, BRUSH_DIRT_FLOOR } from '../parts/registry';
 import type { LoosePartField } from '../parts/loose';
 import type { Vehicle } from '../vehicle/vehicle';
 import { setCondition } from '../render/materials';
@@ -22,20 +22,19 @@ const DROP_DISTANCE = 1.2;
 const DROP_WALL_MARGIN = 0.15;
 /** Distance from the eye to a car's centre at which entering it is offered. */
 const VEHICLE_RANGE = 3.5;
-/** A filled slot is picked for REMOVAL when the aim ray passes within this of it. */
-const SLOT_PICK_RADIUS = 0.6;
+/** A filled anchor is picked for REMOVAL when the aim ray passes within this of it. */
+const ANCHOR_PICK_RADIUS = 0.6;
 /**
- * Reach and forgiveness for FITTING the part you are holding.
+ * Reach and forgiveness for MOUNTING the gizmo you are holding.
  *
- * Deliberately more generous than removal picking, and than `RAY_RANGE`. Slots are
+ * Deliberately more generous than removal picking, and than `RAY_RANGE`. Anchors are
  * picked by proximity to the aim ray rather than by a physics hit, so range is not a
- * line-of-sight question — and measurement showed the battery slot on a wagon sits
- * 2.64 m from a comfortably-standing eye, i.e. it was being rejected by 4 cm while
- * incompatible slots nearer the crosshair won instead. The car is already gated by
- * `VEHICLE_RANGE`, so matching it here costs nothing and makes assembly feel fair.
+ * line-of-sight question — the player aims at a spot on the shell, not through a
+ * collider. The car is already gated by `VEHICLE_RANGE`, so matching it here costs
+ * nothing and makes mounting feel fair.
  */
-const SLOT_FIT_RADIUS = 0.85;
-const SLOT_FIT_RANGE = VEHICLE_RANGE;
+const ANCHOR_FIT_RADIUS = 0.85;
+const ANCHOR_FIT_RANGE = VEHICLE_RANGE;
 /** Condition deltas are throttled; the visual updates every tick regardless. */
 const CONDITION_EMIT_INTERVAL = 0.25;
 /** Fuel poured per second from a held can. */
@@ -54,7 +53,7 @@ type Target =
   | { kind: 'none' }
   | { kind: 'loose-part'; partId: string }
   | { kind: 'loose-item'; itemId: string }
-  | { kind: 'slot'; carId: string; slotId: SlotId };
+  | { kind: 'anchor'; carId: string; anchorId: string };
 
 interface Resolved {
   target: Target;
@@ -75,44 +74,15 @@ function scrubLabel(part: PartInstance): string {
   return 'grime';
 }
 
-/** Short kind-derived location for the "… fits …" hint. */
-function slotLocation(kind: PartKind): string {
-  switch (kind) {
-    case 'engine':
-    case 'battery':
-    case 'radiator':
-      return 'in the engine bay';
-    case 'gearbox':
-    case 'fuel_tank':
-    case 'exhaust':
-      return 'under the car';
-    case 'wheel':
-      return 'in a wheel arch';
-    case 'door':
-      return 'on a door hinge';
-    case 'hood':
-      return 'on the bonnet';
-    case 'trunk':
-      return 'on the tailgate';
-    case 'seat':
-      return 'in the cabin';
-    case 'mirror':
-      return 'on a door';
-    case 'bumper':
-      return 'on the front or rear';
-    case 'headlight':
-      return 'in the front';
-  }
-}
 export class Interaction {
   private player: Player | null = null;
   private prevInteract = false;
-  private prevEnterExit = false;
+  private prevMount = false;
   private prevDrop = false;
   private conditionEmitTimer = 0;
 
-  /** The slot id under the crosshair on the last resolve, for ghost previews. */
-  public lastSlotTarget: SlotId | null = null;
+  /** The anchor id under the crosshair on the last resolve, for ghost previews. */
+  public lastAnchorTarget: string | null = null;
 
   private readonly tScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
@@ -142,23 +112,23 @@ export class Interaction {
     dirZ: number,
   ): { prompt: string | null } {
     const interactPressed = input.interact && !this.prevInteract;
-    const enterExitPressed = input.enterExit && !this.prevEnterExit;
+    const mountPressed = input.mount && !this.prevMount;
     const dropPressed = input.dropItem && !this.prevDrop;
     this.prevInteract = input.interact;
-    this.prevEnterExit = input.enterExit;
+    this.prevMount = input.mount;
     this.prevDrop = input.dropItem;
 
     if (this.world.state.player.drivingCarId) {
-      if (enterExitPressed) this.tryExit();
-      return { prompt: '[G] exit' };
+      if (interactPressed) this.tryExit();
+      return { prompt: '[E] exit' };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
     const prompt = this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
-    if (interactPressed) this.interact(resolved);
-    if (enterExitPressed) this.tryEnter(resolved);
+    if (mountPressed) this.mount(resolved);
+    if (interactPressed) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -183,14 +153,14 @@ export class Interaction {
     let target: Target = { kind: 'none' };
     // Written here rather than derived from `target` afterwards: TypeScript narrows
     // `target` to its initial `{ kind: 'none' }` literal and will not widen it back
-    // for a closure assignment, so any later `target.kind === 'slot'` test is a type
-    // error. `next` is an un-narrowed parameter, so the test is valid inside `keep`.
-    this.lastSlotTarget = null;
+    // for a closure assignment, so any later `target.kind === 'anchor'` test is a
+    // type error. `next` is an un-narrowed parameter, so the test is valid inside `keep`.
+    this.lastAnchorTarget = null;
     const keep = (dist: number, next: Target): void => {
       if (dist < bestDist) {
         bestDist = dist;
         target = next;
-        this.lastSlotTarget = next.kind === 'slot' ? next.slotId : null;
+        this.lastAnchorTarget = next.kind === 'anchor' ? next.anchorId : null;
       }
     };
 
@@ -216,8 +186,8 @@ export class Interaction {
       }
     }
 
-    // Slots have no colliders (empty sockets must be aimable), so project the ray
-    // against each slot's world position instead.
+    // Anchors have no colliders (a bare mount must be aimable), so project the ray
+    // against each anchor's world position instead.
     let vehicle: Vehicle | null = null;
     let carId: string | null = null;
     let vehicleDist = Infinity;
@@ -229,29 +199,26 @@ export class Interaction {
       vehicle.chassis.rotation(this.qScratch);
       vehicleDist = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ);
 
-      const def = body(this.world.state.cars[carId].bodyId);
-      const fitted = this.world.state.cars[carId].slots;
+      const anchors = vehicle.modelMeasure.anchors;
+      const gizmos = this.world.state.cars[carId].gizmos;
       const held = this.inventory.held;
       const heldPart = held?.type === 'part' ? held.part : null;
-      const heldVariant = heldPart ? variant(heldPart.variantId) : null;
-      const canFitHere = heldVariant ? heldVariant.fits.includes(def.bodyClass) : false;
 
-      // A slot is only a candidate for something the player can actually DO: fit the
-      // held part into an empty compatible socket, or pull a fitted part out. Letting
-      // every slot compete is what produced "wrong slot (needs bumper)" while the
-      // socket the player was aiming at sat just out of range.
+      // An anchor is only a candidate for something the player can actually DO: mount
+      // the held part into an empty anchor, or pull a mounted gizmo out. Gizmos are
+      // junk, not fitted parts, so an empty anchor accepts whatever is held.
       let bestFitAlong = Infinity;
       let bestFit: Target | null = null;
       let bestRemoveAlong = Infinity;
       let bestRemove: Target | null = null;
 
-      for (const slot of def.slots) {
-        const isFilled = fitted[slot.id] !== undefined;
-        const fittable = !isFilled && canFitHere && heldVariant?.kind === slot.kind;
+      for (const anchor of anchors) {
+        const isFilled = gizmos[anchor.id] !== undefined;
+        const fittable = !isFilled && heldPart !== null;
         const removable = isFilled;
         if (!fittable && !removable) continue;
 
-        this.vScratch.set(slot.pos[0], slot.pos[1], slot.pos[2]).applyQuaternion(this.qScratch);
+        this.vScratch.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]).applyQuaternion(this.qScratch);
         const rx = this.vScratch.x + t.x - eyeX;
         const ry = this.vScratch.y + t.y - eyeY;
         const rz = this.vScratch.z + t.z - eyeZ;
@@ -262,27 +229,27 @@ export class Interaction {
         const perpZ = rz - dz * along;
         const perpSq = perpX * perpX + perpY * perpY + perpZ * perpZ;
 
-        if (fittable && along <= SLOT_FIT_RANGE && perpSq < SLOT_FIT_RADIUS * SLOT_FIT_RADIUS) {
+        if (fittable && along <= ANCHOR_FIT_RANGE && perpSq < ANCHOR_FIT_RADIUS * ANCHOR_FIT_RADIUS) {
           if (along < bestFitAlong) {
             bestFitAlong = along;
-            bestFit = { kind: 'slot', carId, slotId: slot.id };
+            bestFit = { kind: 'anchor', carId, anchorId: anchor.id };
           }
         }
-        if (removable && along <= RAY_RANGE && perpSq < SLOT_PICK_RADIUS * SLOT_PICK_RADIUS) {
+        if (removable && along <= RAY_RANGE && perpSq < ANCHOR_PICK_RADIUS * ANCHOR_PICK_RADIUS) {
           if (along < bestRemoveAlong) {
             bestRemoveAlong = along;
-            bestRemove = { kind: 'slot', carId, slotId: slot.id };
+            bestRemove = { kind: 'anchor', carId, anchorId: anchor.id };
           }
         }
       }
 
-      // Fitting wins: if the player is holding a part that goes somewhere in reach,
+      // Mounting wins: if the player is holding a part that goes somewhere in reach,
       // that is unambiguously the intent.
       if (bestFit) keep(bestFitAlong, bestFit);
       else if (bestRemove) keep(bestRemoveAlong, bestRemove);
     }
 
-    // `lastSlotTarget` was already recorded by `keep`.
+    // `lastAnchorTarget` was already recorded by `keep`.
     return { target, vehicle, carId, vehicleDist };
   }
 
@@ -318,32 +285,32 @@ export class Interaction {
       if (toolPrompt) return toolPrompt;
       const label = variant(part.variantId).label;
       if (variant(part.variantId).mass + this.inventory.carriedMass > this.inventory.massLimit) {
-        return `[E] pick up ${label} — too heavy`;
+        return `[F] pick up ${label} — too heavy`;
       }
-      return `[E] pick up ${conditionPrefix(part)}${label}`;
+      return `[F] pick up ${conditionPrefix(part)}${label}`;
     }
 
     if (t.kind === 'loose-item') {
       const item = this.world.state.looseItems[t.itemId]?.item;
       if (!item) return null;
       if (itemMass(item) + this.inventory.carriedMass > this.inventory.massLimit) {
-        return `[E] pick up ${itemLabel(item)} — too heavy`;
+        return `[F] pick up ${itemLabel(item)} — too heavy`;
       }
-      return `[E] pick up ${itemLabel(item)}`;
+      return `[F] pick up ${itemLabel(item)}`;
     }
 
-    if (t.kind === 'slot') {
+    if (t.kind === 'anchor') {
       const car = this.world.state.cars[t.carId];
       if (!car) return null;
-      const def = body(car.bodyId);
-      const slot = def.slots.find((s) => s.id === t.slotId);
-      if (!slot) return null;
-      const fitted = car.slots[t.slotId];
+      const anchor = resolved.vehicle?.modelMeasure.anchors.find((a) => a.id === t.anchorId);
+      if (!anchor) return null;
+      const fitted = car.gizmos[t.anchorId];
 
-      // The fuel filler is the fuel_tank mount; a held can pours there.
-      if (slot.id === 'fuel_tank' && held?.type === 'fuel_can') {
+      // The car is complete, so any anchor doubles as the filler neck: pour wherever
+      // the player is aiming rather than hunting a dedicated fuel_tank mount.
+      if (held?.type === 'fuel_can') {
         const stats = resolved.vehicle?.stats;
-        if (stats && stats.tankCapacity <= 0) return '[LMB] pour — no fuel tank fitted';
+        if (stats && stats.tankCapacity <= 0) return '[LMB] pour — no fuel tank';
         if (stats?.fuel && held.fuel !== stats.fuel) {
           return `[LMB] pour ${held.fuel} — wrong fuel (needs ${stats.fuel})`;
         }
@@ -355,35 +322,21 @@ export class Interaction {
         if (toolPrompt) return toolPrompt;
         const label = variant(fitted.variantId).label;
         if (variant(fitted.variantId).mass + this.inventory.carriedMass > this.inventory.massLimit) {
-          return `[E] remove ${label} — too heavy`;
+          return `[F] remove ${label} — too heavy`;
         }
-        return `[E] remove ${label}`;
+        return `[F] remove ${label}`;
       }
 
       if (held?.type === 'part') {
         const v = variant(held.part.variantId);
-        if (v.kind !== slot.kind) return `[E] fit ${v.label} — wrong slot (needs ${slot.kind})`;
-        if (!v.fits.includes(def.bodyClass)) return `[E] fit ${v.label} — doesn't fit ${def.label}`;
-        return `[E] fit ${v.label}`;
+        return `[F] mount ${v.label}`;
       }
     }
 
-    // No specific target: if a held part belongs in the nearby car, say where.
-    if (held?.type === 'part' && resolved.vehicle && resolved.carId && resolved.vehicleDist < VEHICLE_RANGE) {
-      const car = this.world.state.cars[resolved.carId];
-      const def = car ? body(car.bodyId) : null;
-      if (def) {
-        const v = variant(held.part.variantId);
-        if (v.fits.includes(def.bodyClass)) {
-          const slot = def.slots.find((s) => s.kind === v.kind);
-          if (slot) return `${v.label} fits ${slotLocation(slot.kind)}`;
-        }
-      }
-    }
-
-    // No specific target: offer entering when a drivable car is close enough.
-    if (resolved.vehicle && resolved.carId && resolved.vehicle.stats.drivable && resolved.vehicleDist < VEHICLE_RANGE) {
-      return '[G] enter car';
+    // No specific target: the model's doors are baked into the shell, so a nearby
+    // car is always enterable from any side.
+    if (resolved.vehicle && resolved.carId && resolved.vehicleDist < VEHICLE_RANGE) {
+      return '[E] enter car';
     }
     return null;
   }
@@ -395,7 +348,7 @@ export class Interaction {
       if (part.rust > RUST_CLEAN_EPSILON) return '[LMB] sponge — needs the brush first';
       return '[LMB] polish';
     }
-    return null; // wrench: no continuous action; the [E] prompt flows through.
+    return null; // wrench: no continuous action; the [F] prompt flows through.
   }
 
   private usePrimary(dt: number, resolved: Resolved): void {
@@ -426,7 +379,7 @@ export class Interaction {
 
   private pourFuel(dt: number, can: FuelCanItem, resolved: Resolved): void {
     const t = resolved.target;
-    if (t.kind !== 'slot' || t.slotId !== 'fuel_tank') return;
+    if (t.kind !== 'anchor') return;
     const car = this.world.state.cars[t.carId];
     const stats = resolved.vehicle?.stats;
     if (!car || !stats || stats.tankCapacity <= 0) return;
@@ -441,7 +394,7 @@ export class Interaction {
     this.world.apply({ t: 'car_fuel', carId: t.carId, litres: target });
   }
 
-  private interact(resolved: Resolved): void {
+  private mount(resolved: Resolved): void {
     const t = resolved.target;
     const held = this.inventory.held;
 
@@ -460,14 +413,14 @@ export class Interaction {
       return;
     }
 
-    if (t.kind === 'slot') {
+    if (t.kind === 'anchor') {
       const car = this.world.state.cars[t.carId];
       if (!car || !resolved.vehicle) return;
-      const slot = body(car.bodyId).slots.find((s) => s.id === t.slotId);
-      if (!slot) return;
-      const fitted = car.slots[t.slotId];
-      if (fitted) this.detach(t.carId, slot.id, fitted, resolved);
-      else if (held?.type === 'part') this.attach(t.carId, slot, held.part, resolved);
+      const anchor = resolved.vehicle.modelMeasure.anchors.find((a) => a.id === t.anchorId);
+      if (!anchor) return;
+      const fitted = car.gizmos[t.anchorId];
+      if (fitted) this.detach(t.carId, t.anchorId, fitted, resolved);
+      else if (held?.type === 'part') this.attach(t.carId, t.anchorId, held.part, resolved);
       return;
     }
   }
@@ -511,37 +464,34 @@ export class Interaction {
     else this.loose.spawnItem(held, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
   }
 
-  private attach(carId: string, slot: SlotDef, part: PartInstance, resolved: Resolved): void {
+  private attach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
     const car = this.world.state.cars[carId];
     if (!car || !resolved.vehicle) return;
-    const v = variant(part.variantId);
-    if (v.kind !== slot.kind) return;
-    if (!v.fits.includes(body(car.bodyId).bodyClass)) return;
-    this.world.apply({ t: 'part_attach', carId, slot: slot.id, part });
+    // Gizmos are junk, not fitted parts: any part mounts on any anchor.
+    this.world.apply({ t: 'gizmo_attach', carId, anchor: anchorId, part });
     this.inventory.remove(part.id);
-    resolved.vehicle.rebuildFromSlots();
+    resolved.vehicle.rebuild();
   }
 
-  private detach(carId: string, slotId: SlotId, part: PartInstance, resolved: Resolved): void {
-    // Never pull the seat out from under the driver while seated.
-    if (slotId === 'seat_driver' && this.world.state.player.drivingCarId === carId) return;
+  private detach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
     if (!resolved.vehicle) return;
-    this.world.apply({ t: 'part_detach', carId, slot: slotId });
-    const item: PartItem = { type: 'part', id: part.id, part };
-    if (this.inventory.add(item)) {
-      resolved.vehicle.rebuildFromSlots();
-    } else {
-      // Can't carry it — bolt it back rather than destroying the part.
-      this.world.apply({ t: 'part_attach', carId, slot: slotId, part });
-    }
+    const anchor = resolved.vehicle.modelMeasure.anchors.find((a) => a.id === anchorId);
+    if (!anchor) return; // a gizmo saved against an anchor this model lacks
+    const t = resolved.vehicle.chassis.translation(this.tScratch);
+    resolved.vehicle.chassis.rotation(this.qScratch);
+    this.vScratch.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]).applyQuaternion(this.qScratch);
+    this.world.apply({ t: 'gizmo_detach', carId, anchor: anchorId });
+    // Drop the removed gizmo into the loose field at its anchor's world position.
+    this.loose.spawn(part, this.vScratch.x + t.x, this.vScratch.y + t.y, this.vScratch.z + t.z);
+    resolved.vehicle.rebuild();
   }
 
   private targetPart(resolved: Resolved): PartInstance | null {
     const t = resolved.target;
     if (t.kind === 'loose-part') return this.world.state.looseParts[t.partId]?.part ?? null;
-    if (t.kind === 'slot') {
+    if (t.kind === 'anchor') {
       const car = this.world.state.cars[t.carId];
-      return car ? (car.slots[t.slotId] ?? null) : null;
+      return car ? (car.gizmos[t.anchorId] ?? null) : null;
     }
     return null;
   }
@@ -553,17 +503,15 @@ export class Interaction {
       if (mesh) setCondition(mesh, part.dirt, part.rust);
       return;
     }
-    if (t.kind === 'slot' && resolved.vehicle) {
-      // Fitted part: update by slot name when the vehicle exposes it; otherwise the
-      // vehicle's own syncVisuals reflects the state next render frame.
-      const mesh = resolved.vehicle.root.getObjectByName(t.slotId);
+    if (t.kind === 'anchor' && resolved.vehicle) {
+      // Mounted gizmo: its mesh is named by anchor id inside the vehicle root.
+      const mesh = resolved.vehicle.root.getObjectByName(t.anchorId);
       if (mesh) setCondition(mesh, part.dirt, part.rust);
     }
   }
 
   private tryEnter(resolved: Resolved): void {
     if (!resolved.vehicle || !resolved.carId) return;
-    if (!resolved.vehicle.stats.drivable) return;
     if (resolved.vehicleDist >= VEHICLE_RANGE) return;
     this.world.apply({ t: 'enter_car', carId: resolved.carId });
     this.player?.setEnabled(false);
@@ -588,20 +536,16 @@ export class Interaction {
   ): { x: number; y: number; z: number } | null {
     const car = this.world.state.cars[carId];
     if (!car) return null;
-    const def = body(car.bodyId);
-    const door = def.slots.find((s) => s.id === 'door_l');
-    if (!door) return null;
+    const measure = vehicle.modelMeasure;
     const chassis = vehicle.chassis;
     const t = chassis.translation(this.tScratch);
     chassis.rotation(this.qScratch);
 
-    // World position of the left door, stepped a further 1.1 m outward.
-    this.vScratch.set(door.pos[0], door.pos[1], door.pos[2]).applyQuaternion(this.qScratch);
-    const doorX = this.vScratch.x + t.x;
-    const doorZ = this.vScratch.z + t.z;
-    this.vScratch.set(-1, 0, 0).applyQuaternion(this.qScratch);
-    const exitX = doorX + this.vScratch.x * 1.1;
-    const exitZ = doorZ + this.vScratch.z * 1.1;
+    // The left flank is a featureless shell with baked doors, so exit at the
+    // measured left edge stepped a further 1.1 m outward.
+    this.vScratch.set(-measure.halfExtents[0] - 1.1, 0, 0).applyQuaternion(this.qScratch);
+    const exitX = t.x + this.vScratch.x;
+    const exitZ = t.z + this.vScratch.z;
 
     // Ground check so exiting never drops the player inside geometry. Exclude the
     // player's own capsule for the same reason as the aim ray: it is about to be
@@ -612,7 +556,7 @@ export class Interaction {
       6,
       this.player?.rigidBody,
     );
-    const groundY = ground ? ground.point.y : t.y - def.halfExtents[1];
+    const groundY = ground ? ground.point.y : t.y - measure.halfExtents[1];
     return { x: exitX, y: groundY, z: exitZ };
   }
 }
