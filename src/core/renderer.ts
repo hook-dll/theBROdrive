@@ -52,11 +52,14 @@ const FRAME_SMOOTHING = 0.1;
 // ---------------------------------------------------------------------------
 
 /**
- * Heat-haze warp amplitude in pixels. The fragment shader normalises it by the
- * real buffer height, so the shimmer is the same size at every resolution: at a
- * 1080p buffer the peak offset is exactly this many pixels.
+ * Heat-haze warp amplitude in pixels at a 1080p buffer; the shader normalises by
+ * the real buffer height so the shimmer is the same size at every resolution.
+ *
+ * Small on purpose. Real shimmer displaces an edge by a pixel or two — it reads as
+ * a boiling, unstable edge, not as bending. Anything larger turns the desert into
+ * water.
  */
-const HAZE_AMPLITUDE_PX = 3.4;
+const HAZE_AMPLITUDE_PX = 1.7;
 /**
  * Animation speed multiplier. Amplitude and vertical distribution are independent,
  * so this makes the air churn faster without making the image bend further or
@@ -121,40 +124,54 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   /**
-   * Rising, irregular refraction cells — no texture lookup.
+   * Rising refraction cells — no texture lookup.
    *
-   * Constant phase in uv.y * frequency - t * speed moves towards larger Y as
-   * time advances: upward on screen. Both displacement components are functions of
-   * those rising phases, so cells travel through the layer instead of every row
-   * wobbling in place. Different frequencies/speeds prevent a repeating conveyor
-   * belt; X-dependent phase bends the columns into turbulent plumes.
+   * Cell SIZE is what separates shimmer from a wobbling lens. These are expressed
+   * as fractions of frame height and are deliberately small: at 1080p the coarsest
+   * is ~50 px and the finest ~18 px. The previous version ran a ~220 px primary
+   * wave, which is why it read as rolling water rather than hot air.
+   *
+   * Phase is (uv.y - t * rise) * (TAU / cell), so a cell of constant phase travels
+   * upward at exactly that rise, in frame-heights per second of shader time. Smaller
+   * eddies churn faster, as they do in the real convective layer, and the three
+   * scales beating against each other keep it from looking like a conveyor belt.
+   * X-dependent phase shears the columns so they are plumes, not stripes.
    */
   vec2 hazeWarp(vec2 uv, float t) {
-    float riseA = uv.y * 31.0 - t * 2.5;
-    float riseB = uv.y * 17.0 - t * 1.35;
-    float riseC = uv.y * 43.0 - t * 3.1;
+    const float TAU = 6.2831853;
+    const float CELL_A = 0.048;
+    const float CELL_B = 0.029;
+    const float CELL_C = 0.017;
+    const float RISE_A = 0.075;
+    const float RISE_B = 0.115;
+    const float RISE_C = 0.17;
 
-    float x = sin(riseA + uv.x * 13.0) * 0.55
-            + sin(riseB - uv.x * 21.0) * 0.3
-            + sin(riseC + uv.x * 7.0) * 0.15;
-    float y = cos(riseA + uv.x * 19.0)
-            + cos(riseB - uv.x * 11.0) * 0.55
-            + sin(riseC + uv.x * 29.0) * 0.3;
-    return vec2(x, y) * 0.54;
+    float pa = (uv.y - t * RISE_A) * (TAU / CELL_A);
+    float pb = (uv.y - t * RISE_B) * (TAU / CELL_B);
+    float pc = (uv.y - t * RISE_C) * (TAU / CELL_C);
+
+    float shearA = uv.x * (TAU / 0.22);
+    float shearB = uv.x * (TAU / 0.13);
+    float shearC = uv.x * (TAU / 0.08);
+
+    float y = sin(pa + shearA) * 0.6
+            + sin(pb - shearB) * 0.28
+            + sin(pc + shearC) * 0.12;
+    float x = sin(pa - shearB) * 0.5
+            + sin(pc + shearA) * 0.5;
+    return vec2(x, y);
   }
 
   void main() {
-    // Cells of hot air are smaller and churn faster close to the ground, and the
-    // long sight-lines near the horizon stack more of them on top of each other.
-    // Scaling the warp's frequency and speed with that depth is what stops the
-    // whole frame shimmering in lockstep like one sheet of glass.
+    // Cells are smaller and churn faster close to the ground, and the long
+    // sight-lines near the horizon stack more of them along one ray. Scaling with
+    // depth stops the whole frame shimmering in lockstep like one sheet of glass.
     float groundness = clamp((uHorizon - vUv.y) / uGroundFalloff, 0.0, 1.0);
-    float scale = mix(1.0, 1.7, groundness);
-    vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.35, groundness));
-    // Rising air bends a sight-line up and down far more than it does sideways, so
-    // the vertical term carries the effect and the horizontal one only stops it
-    // looking like a venetian blind.
-    warp.x *= 0.45;
+    float scale = mix(1.0, 1.3, groundness);
+    vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.25, groundness));
+    // Rising air bends a sight-line up and down far more than sideways; the
+    // horizontal term only exists so columns do not look like a venetian blind.
+    warp.x *= 0.25;
     // At uStrength = 0 the offset vanishes and the sample is the untouched
     // texel — a pure passthrough.
     vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
