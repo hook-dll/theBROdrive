@@ -1,17 +1,17 @@
 /**
  * The car catalogue: complete, authored 3D models.
  *
- * The old concept built a car out of parts and generated its shell procedurally.
- * That is gone. A car is now ONE finished model (Kenney Car Kit, CC0 — see
- * public/models/kenney-car-kit/LICENSE.txt) whose geometry is authoritative:
+ * The old concept built a car out of attachable parts. That is gone. A car is now
+ * ONE finished model — imported or built in render/proceduralcars.ts — whose
+ * geometry is authoritative:
  *
  *  - the chassis collider comes from the model's `body` bounding box,
- *  - the four suspension mounts come from the model's `wheel-*` node positions,
- *  - each wheel's radius comes from that wheel node's own bounds,
+ *  - suspension mounts come from its wheel nodes (or authored body-box fractions
+ *    for packs that ship a shared wheel separately),
+ *  - each wheel's radius comes from that wheel model's own bounds,
  *
- * all measured at load time in render/carmodel.ts. Nothing in this file repeats a
- * dimension the artist already committed to in the GLB; what lives here is only
- * what geometry cannot say: mass, drivetrain, springs and how far the thing steers.
+ * all measured at load time in render/carmodel.ts. This catalogue holds only what
+ * geometry cannot say: mass, drivetrain, springs and steering.
  *
  * Parts still exist, but only as *gizmos*: cosmetic things found in the world and
  * bolted onto anchor points (see `gizmoAnchors` and the anchor derivation in
@@ -24,27 +24,16 @@ import { variant } from '../parts/registry';
 /**
  * Vendored packs, all free and credited in a LICENSE file beside their models.
  *
- *  - KENNEY: Kenney Car Kit, CC0. Stylised, own wheels, one colormap atlas.
- *  - QUATERNIUS: Quaternius Realistic Car Pack, CC0. Real-world metres, own
- *    wheels, flat per-material colours (converted from OBJ by tools/obj-to-glb.mjs).
+ *  - QUATERNIUS: Realistic Car Pack, CC0, real-world metres and own wheels.
+ *  - PSX: GGBotNet PSX Style Cars, CC0, shared wheel and texture liveries.
+ *  - DEJUNES: free-use low-poly cars, OBJ/GLB and FBX.
+ *
+ * Generated cars use the `procedural://` scheme and live in
+ * render/proceduralcars.ts rather than a directory.
  */
-const KIT = '/models/kenney-car-kit';
 const QUATERNIUS = '/models/quaternius-cars';
 const PSX = '/models/psx-cars';
 const DEJUNES = '/models/dejunes';
-
-/**
- * Model units to metres.
- *
- * The kit is stylised-stubby: its sedan is 2.55 long on a 1.5 m width, where a real
- * saloon is 4.4 on 1.8. Scaling by *length* would give 2.6 m wide cartoons on 0.5 m
- * wheels, so the kit is scaled by width instead: 1.2 puts the track, the body width
- * and the wheels (0.36 m radius) on real-car numbers and leaves the cars short,
- * which is the kit's own proportion and reads as deliberate.
- */
-const CAR_SCALE = 1.2;
-const TRUCK_SCALE = 1.3;
-const KART_SCALE = 1.05;
 
 /* ---- suspension presets ----
  *
@@ -96,20 +85,11 @@ const SUSP_TRUCK: SuspensionTuning = {
   maxForce: 42000,
 };
 
-const SUSP_KART: SuspensionTuning = {
-  restLength: 0.16,
-  maxTravel: 0.13,
-  stiffness: 38,
-  compression: 1.1,
-  relaxation: 1.4,
-  maxForce: 12000,
-};
-
 /**
  * A mount point for a gizmo, in model space (metres, origin on the ground between
- * the wheels — the GLB's own origin). Positions are fractions of the measured body
- * box rather than absolutes, so one table serves a kart and a firetruck; the
- * fractions are resolved against real bounds in render/carmodel.ts.
+ * the wheels — the model's own origin). Positions are fractions of the measured
+ * body box rather than absolutes, so one table serves every body; the fractions are
+ * resolved against real bounds in render/carmodel.ts.
  */
 export interface GizmoAnchorDef {
   readonly id: string;
@@ -128,15 +108,6 @@ const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
   { id: 'gizmo_flank_r', label: 'right flank', frac: [-0.95, 0.45, -0.1], yaw: -Math.PI / 2 },
 ];
 
-/** Open-bed vehicles get a load area instead of a tail shelf. */
-const BED_ANCHORS: readonly GizmoAnchorDef[] = [
-  { id: 'gizmo_roof', label: 'cab roof', frac: [0, 1, 0.35] },
-  { id: 'gizmo_nose', label: 'bonnet', frac: [0, 0.62, 0.82] },
-  { id: 'gizmo_bed_f', label: 'front of bed', frac: [0, 0.5, -0.25] },
-  { id: 'gizmo_bed_r', label: 'rear of bed', frac: [0, 0.5, -0.7] },
-  { id: 'gizmo_flank_l', label: 'left flank', frac: [0.95, 0.45, -0.1], yaw: Math.PI / 2 },
-  { id: 'gizmo_flank_r', label: 'right flank', frac: [-0.95, 0.45, -0.1], yaw: -Math.PI / 2 },
-];
 
 export interface CarModelDef {
   /** Stable id; appears in save files. */
@@ -202,7 +173,7 @@ export interface CarModelDef {
 type Entry = Omit<CarModelDef, 'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors'> & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb?: string;
-  /** Pack directory; defaults to the Kenney kit. */
+  /** Directory containing `glb`; required for imported models. */
   readonly dir?: string;
   /**
    * Id of a car built in code (render/proceduralcars.ts) instead of loaded. Set
@@ -232,8 +203,6 @@ type Entry = Omit<CarModelDef, 'file' | 'scale' | 'suspension' | 'viewFrac' | 'g
 const VIEW_CAR: readonly [number, number, number] = [0, 0.78, 0.96];
 /** A cab-forward truck has almost no bonnet: sit high, right at the front face. */
 const VIEW_CAB: readonly [number, number, number] = [0, 0.9, 0.96];
-/** A kart is an open shell; the camera rides just over its nose cone. */
-const VIEW_KART: readonly [number, number, number] = [0, 0.9, 0.9];
 
 /**
  * Axle placement for the body-only packs, as fractions of the measured body box.
@@ -522,334 +491,6 @@ const DEJUNES_CARS: readonly Entry[] = [
 ];
 
 const ENTRIES: readonly Entry[] = [
-  // ---- road cars -----------------------------------------------------------
-  {
-    id: 'car_sedan',
-    label: 'sedan',
-    glb: 'sedan.glb',
-    bodyClass: 'car',
-    mass: 1180,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 45,
-    wheelGrip: 1.0,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'car_sedan_sports',
-    label: 'sports sedan',
-    glb: 'sedan-sports.glb',
-    bodyClass: 'car',
-    mass: 1060,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 55,
-    wheelGrip: 1.1,
-    suspension: SUSP_SPORT,
-    steerLock: 0.62,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'car_hatchback_sports',
-    label: 'sports hatchback',
-    glb: 'hatchback-sports.glb',
-    bodyClass: 'car',
-    mass: 980,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 42,
-    wheelGrip: 1.08,
-    suspension: SUSP_SPORT,
-    steerLock: 0.64,
-    rearDriveBias: 0,
-  },
-  {
-    id: 'car_taxi',
-    label: 'taxi',
-    glb: 'taxi.glb',
-    bodyClass: 'car',
-    mass: 1290,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 60,
-    wheelGrip: 0.95,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'car_police',
-    label: 'police cruiser',
-    glb: 'police.glb',
-    bodyClass: 'car',
-    mass: 1420,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 70,
-    wheelGrip: 1.06,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'car_suv',
-    label: 'SUV',
-    glb: 'suv.glb',
-    bodyClass: 'car',
-    mass: 1650,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.05,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.56,
-    rearDriveBias: 0.5,
-  },
-  {
-    id: 'car_suv_luxury',
-    label: 'luxury SUV',
-    glb: 'suv-luxury.glb',
-    bodyClass: 'car',
-    mass: 1880,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 85,
-    wheelGrip: 1.02,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.54,
-    rearDriveBias: 0.5,
-  },
-  {
-    id: 'car_van',
-    label: 'van',
-    glb: 'van.glb',
-    bodyClass: 'car',
-    mass: 1720,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 75,
-    wheelGrip: 0.92,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.52,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-  },
-  // ---- race ----------------------------------------------------------------
-  {
-    id: 'car_race',
-    label: 'race car',
-    glb: 'race.glb',
-    bodyClass: 'car',
-    mass: 760,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    wheelGrip: 1.35,
-    suspension: SUSP_SPORT,
-    steerLock: 0.55,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAR,
-  },
-  {
-    id: 'car_race_future',
-    label: 'concept racer',
-    glb: 'race-future.glb',
-    bodyClass: 'car',
-    mass: 820,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 60,
-    wheelGrip: 1.4,
-    suspension: SUSP_SPORT,
-    steerLock: 0.55,
-    rearDriveBias: 0.5,
-    viewFrac: VIEW_CAR,
-  },
-  // ---- working vehicles ----------------------------------------------------
-  {
-    id: 'car_truck',
-    label: 'flatnose truck',
-    glb: 'truck.glb',
-    bodyClass: 'truck',
-    mass: 3400,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 140,
-    wheelGrip: 0.98,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.48,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  {
-    id: 'car_truck_flat',
-    label: 'flatbed truck',
-    glb: 'truck-flat.glb',
-    bodyClass: 'truck',
-    mass: 3100,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 140,
-    wheelGrip: 0.98,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.48,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  {
-    id: 'car_delivery',
-    label: 'delivery box van',
-    glb: 'delivery.glb',
-    bodyClass: 'truck',
-    mass: 2900,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 100,
-    wheelGrip: 0.9,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-  },
-  {
-    id: 'car_delivery_flat',
-    label: 'flatbed delivery',
-    glb: 'delivery-flat.glb',
-    bodyClass: 'truck',
-    mass: 2600,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 100,
-    wheelGrip: 0.9,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  {
-    id: 'car_ambulance',
-    label: 'ambulance',
-    glb: 'ambulance.glb',
-    bodyClass: 'truck',
-    mass: 3000,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 110,
-    wheelGrip: 1.0,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-  },
-  {
-    id: 'car_firetruck',
-    label: 'fire engine',
-    glb: 'firetruck.glb',
-    bodyClass: 'truck',
-    mass: 4600,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 160,
-    wheelGrip: 1.0,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.46,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-  },
-  {
-    id: 'car_garbage_truck',
-    label: 'garbage truck',
-    glb: 'garbage-truck.glb',
-    bodyClass: 'truck',
-    mass: 5200,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 160,
-    wheelGrip: 0.95,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.44,
-    rearDriveBias: 1,
-    viewFrac: VIEW_CAB,
-  },
-  // ---- tractors: slow, torquey, four-wheel drive ----------------------------
-  {
-    id: 'car_tractor',
-    label: 'tractor',
-    glb: 'tractor.glb',
-    bodyClass: 'truck',
-    mass: 2800,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 80,
-    wheelGrip: 1.25,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.75,
-    rearDriveBias: 0.5,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  {
-    id: 'car_tractor_shovel',
-    label: 'shovel tractor',
-    glb: 'tractor-shovel.glb',
-    bodyClass: 'truck',
-    mass: 3300,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 80,
-    wheelGrip: 1.25,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.75,
-    rearDriveBias: 0.5,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  {
-    id: 'car_tractor_police',
-    label: 'police tractor',
-    glb: 'tractor-police.glb',
-    bodyClass: 'truck',
-    mass: 2850,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 80,
-    wheelGrip: 1.25,
-    scale: TRUCK_SCALE,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.75,
-    rearDriveBias: 0.5,
-    viewFrac: VIEW_CAB,
-    gizmoAnchors: BED_ANCHORS,
-  },
-  // ---- karts: the whole reason the kit ships five of them ------------------
-  ...(['oobi', 'oodi', 'ooli', 'oopi', 'oozi'] as const).map((name, i) => ({
-    id: `car_kart_${name}`,
-    label: `kart ${name}`,
-    glb: `kart-${name}.glb`,
-    bodyClass: 'car' as BodyClass,
-    mass: 220 + i * 6,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 12,
-    wheelGrip: 1.3,
-    scale: KART_SCALE,
-    suspension: SUSP_KART,
-    steerLock: 0.7,
-    rearDriveBias: 1,
-    viewFrac: VIEW_KART,
-  })),
-
   // -------------------------------------------------------------------------
   // Quaternius Realistic Car Pack (CC0). Modelled in real-world metres — a
   // 4.22 m sedan on a 2.44 m wheelbase with 0.26 m wheels — so these take no
@@ -1031,15 +672,23 @@ const ENTRIES: readonly Entry[] = [
   },
 ];
 
+function entryFile(entry: Entry): string {
+  if (entry.procedural) return `procedural://${entry.procedural}`;
+  if (!entry.dir || !entry.glb) {
+    throw new Error(`Car catalogue entry "${entry.id}" has no model source`);
+  }
+  return `${entry.dir}/${entry.glb}`;
+}
+
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
-  file: e.procedural ? `procedural://${e.procedural}` : `${e.dir ?? KIT}/${e.glb}`,
+  file: entryFile(e),
   textureFile: e.textureFile,
   separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
   bodyClass: e.bodyClass,
-  scale: e.scale ?? CAR_SCALE,
+  scale: e.scale ?? 1,
   mass: e.mass,
   engineId: e.engineId,
   gearboxId: e.gearboxId,
@@ -1055,7 +704,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
 const BY_ID = new Map(CAR_MODELS.map((m) => [m.id, m]));
 
 /** The model a new game starts in and every fallback resolves to. */
-export const DEFAULT_CAR_MODEL_ID = 'car_sedan';
+export const DEFAULT_CAR_MODEL_ID = 'car_q_normal1';
 
 export function carModel(id: string): CarModelDef {
   const m = BY_ID.get(id);
