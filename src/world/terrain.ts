@@ -39,32 +39,41 @@ const OUTCROP_THRESHOLD = 0.42;
  * The basin rim: where the desert stops being flat and starts climbing out.
  *
  * The world needs an edge, and the honest options are an invisible wall, a kill
- * plane, or terrain you cannot drive up. This is the third: past
- * `RIM_START` the ground lifts into an escarpment that tops out beyond the solid
- * band, so the road runs along the floor of a basin whose walls are visible from
- * the tarmac and unclimbable long before the collider ends.
+ * plane, or terrain you cannot drive up. This is the third: past `RIM_START` the
+ * ground lifts into an escarpment that tops out beyond the solid band, so the road
+ * runs along the floor of a basin whose walls are visible from the tarmac and
+ * unclimbable long before the collider ends.
  *
- * A rim rather than rough ground is deliberate: the terrain mesh out there is
- * sampled every few tens of metres, so any short-wavelength roughness would alias
- * into nothing (or into launch ramps). A monotone lift is representable at any
- * resolution, reads as landscape, and its slope is exactly what the profile says.
+ * It is a RIDGE, not a plateau, and that distinction is the whole reason this looks
+ * like landscape instead of a bug. A rim that climbs to full height and then stays
+ * there puts a horizontal plane a hundred metres above the player, stretching to
+ * the draw distance: from inside the basin its top surface covers the entire sky
+ * above its near edge, and because the mesh is sampled every few tens of metres out
+ * there it arrives as one enormous flat brown slab with straight edges. So past the
+ * crest the ground falls away again, and the crest itself is modulated by the dune
+ * field so the skyline is ragged rather than a drawn line.
+ *
+ * The lift stays monotone up to the crest for the same reason it always did: at
+ * that sampling density any short-wavelength roughness would alias into nothing, or
+ * into launch ramps.
  */
 export const RIM_START = 400;
-/** Lateral distance where the rim reaches full height. Past the solid band. */
-const RIM_FULL = 750;
-/** Height of the rim above the basin floor, metres. */
-const RIM_HEIGHT = 120;
+/** Lateral distance where the rim reaches its crest. Past the solid band. */
+const RIM_FULL = 780;
+/** Height of the crest above the basin floor, metres. */
+const RIM_HEIGHT = 78;
+/** Lateral distance by which the far slope has fallen back to its floor fraction. */
+const RIM_FAR = 1400;
+/** Fraction of crest height the ground keeps out at RIM_FAR. */
+const RIM_FAR_FRACTION = 0.25;
+/** Crest height varies by this fraction of RIM_HEIGHT along the ridge. */
+const RIM_RAGGED = 0.28;
+/** Wavelength of that variation, metres. Long: a skyline, not a saw. */
+const RIM_RAGGED_WAVELENGTH = 900;
 
-/**
- * Rim height added at a lateral distance. Smoothstep, so the foot of the rim is a
- * gentle bank (no lip to launch off) and the middle third is the steep face: with
- * the constants above the steepest point is around 33 degrees, past what a car can
- * pull with a finite grip budget and enough to defeat a run-up.
- */
-function rimHeight(lateralDistance: number): number {
-  if (lateralDistance <= RIM_START) return 0;
-  const t0 = Math.min(1, (lateralDistance - RIM_START) / (RIM_FULL - RIM_START));
-  return RIM_HEIGHT * t0 * t0 * (3 - 2 * t0);
+function smoothstep01(t: number): number {
+  const c = t < 0 ? 0 : t > 1 ? 1 : t;
+  return c * c * (3 - 2 * c);
 }
 
 export class Terrain {
@@ -178,8 +187,35 @@ export class Terrain {
     t: number,
   ): number {
     const delta = this.relief(x, z) - this.relief(centreX, centreZ);
-    const outer = centreHeight + delta + rimHeight(dist);
+    const outer = centreHeight + delta + this.rimHeight(dist, x, z);
     return inner + (outer - inner) * t;
+  }
+
+  /**
+   * Height the basin rim adds at a lateral distance (see the RIM_* block above).
+   *
+   * Climbs from nothing at RIM_START to a crest at RIM_FULL — the steep face in the
+   * middle third is around 25 degrees, past what a car can pull with a finite grip
+   * budget — then falls away towards RIM_FAR so the far side reads as the back of a
+   * ridge rather than the top of a table. The crest height is modulated by the dune
+   * field at a long wavelength, which is what keeps the skyline from being a ruled
+   * line drawn across the view.
+   */
+  private rimHeight(dist: number, x: number, z: number): number {
+    if (dist <= RIM_START) return 0;
+
+    const ragged =
+      1 +
+      RIM_RAGGED *
+        this.duneNoise.at(x / RIM_RAGGED_WAVELENGTH, z / RIM_RAGGED_WAVELENGTH);
+    const crest = RIM_HEIGHT * ragged;
+
+    const rise = smoothstep01((dist - RIM_START) / (RIM_FULL - RIM_START));
+    const fall =
+      dist <= RIM_FULL
+        ? 1
+        : 1 - (1 - RIM_FAR_FRACTION) * smoothstep01((dist - RIM_FULL) / (RIM_FAR - RIM_FULL));
+    return crest * rise * fall;
   }
 
   /**
