@@ -44,11 +44,19 @@ const S_STEP = 8;
 
 /**
  * Maximum lateral ring spacing across the rim. Small enough that the escarpment is
- * several facets tall — it is the one piece of far terrain the player looks AT
- * rather than past — and applied only there, so the flat basin and the vista keep
- * their cheap geometric spacing.
+ * drawn as a slope rather than a fold: the face climbs its full height over a few
+ * hundred metres, and at the unconstrained geometric spacing out there it would be
+ * two facets wide.
  */
 const RIM_RING_SPACING = 60;
+/**
+ * Ring spacing from the end of the solid band out to the draw distance. Coarser
+ * than the face — nothing beyond is drivable and the fog is eating it — but capped
+ * all the same, because the ridge crest and its far slope live out here and the
+ * geometric progression alone would step straight over them, which is exactly how
+ * a ridge turns into one enormous flat facet across the sky.
+ */
+const RIM_FAR_RING_SPACING = 150;
 
 /** Surface albedos pre-converted to the linear working colour space. */
 const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
@@ -144,9 +152,12 @@ export class TerrainMeshProvider implements ChunkProvider {
     const magnitudes: number[] = [CORRIDOR_INNER];
     let m = CORRIDOR_INNER;
     while (m < FAR_LATERAL) {
-      const step = m >= RIM_START - RIM_RING_SPACING && m < PHYSICS_LATERAL
-        ? Math.min(m * LATERAL_RATIO - m, RIM_RING_SPACING)
-        : m * LATERAL_RATIO - m;
+      const geometric = m * LATERAL_RATIO - m;
+      const cap =
+        m >= RIM_START - RIM_RING_SPACING && m < PHYSICS_LATERAL
+          ? RIM_RING_SPACING
+          : RIM_FAR_RING_SPACING;
+      const step = Math.min(geometric, cap);
       const next = Math.min(m + step, FAR_LATERAL);
       m = m < PHYSICS_LATERAL && next > PHYSICS_LATERAL ? PHYSICS_LATERAL : next;
       if (m - magnitudes[magnitudes.length - 1]! < 1) break;

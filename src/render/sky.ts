@@ -22,10 +22,18 @@ import { hash01 } from '../core/rng';
 // Placement constants
 // ---------------------------------------------------------------------------
 
-/** Dome radius. Inside the 4 km far plane, so it never clips; re-centred each frame. */
-const DOME_RADIUS = 1500;
+/**
+ * Dome radius. It has to sit OUTSIDE the terrain's draw distance, not level with
+ * it: the dome is re-centred on the camera every frame and drawn as a solid
+ * inside-out sphere, so ground further from the camera than this gets occluded by
+ * it — and since terrain chunks stretch far up and down the road, that showed as a
+ * hard curved edge cutting across the distant desert. 3 km clears the 1.5 km
+ * lateral reach plus a couple of chunks of road, and still sits inside the 4 km far
+ * plane.
+ */
+const DOME_RADIUS = 3000;
 /** Stars sit just inside the dome so they layer over the gradient, not behind it. */
-const STAR_RADIUS = 1400;
+const STAR_RADIUS = DOME_RADIUS * 0.93;
 /** Aurora curtains live in front of the stars, well inside the dome. */
 const AURORA_DISTANCE = 800;
 /** Offset of the directional light along its direction; brackets the shadow frustum. */
