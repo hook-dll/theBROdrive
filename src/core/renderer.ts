@@ -120,17 +120,27 @@ const HAZE_FRAGMENT = /* glsl */ `
     return exp(-abs(d) / falloff) * smoothstep(0.0, uForegroundFade, y);
   }
 
-  // Cheap animated 2D warp from summed sines — no texture lookups. Each axis
-  // sums three terms and divides by their maximum magnitude, so the result
-  // stays within roughly [-1, 1].
+  /**
+   * Rising, irregular refraction cells — no texture lookup.
+   *
+   * Constant phase in uv.y * frequency - t * speed moves towards larger Y as
+   * time advances: upward on screen. Both displacement components are functions of
+   * those rising phases, so cells travel through the layer instead of every row
+   * wobbling in place. Different frequencies/speeds prevent a repeating conveyor
+   * belt; X-dependent phase bends the columns into turbulent plumes.
+   */
   vec2 hazeWarp(vec2 uv, float t) {
-    float x = sin(uv.y * 23.0 + t * 1.3)
-            + sin(uv.y * 11.0 - t * 0.7) * 0.6
-            + sin(uv.x * 17.0 + t * 0.9) * 0.4;
-    float y = cos(uv.x * 19.0 + t * 1.1)
-            + cos(uv.y * 13.0 + t * 0.8) * 0.6
-            + cos(uv.x * 7.0  - t * 0.6) * 0.4;
-    return vec2(x, y) * 0.5;
+    float riseA = uv.y * 31.0 - t * 2.5;
+    float riseB = uv.y * 17.0 - t * 1.35;
+    float riseC = uv.y * 43.0 - t * 3.1;
+
+    float x = sin(riseA + uv.x * 13.0) * 0.55
+            + sin(riseB - uv.x * 21.0) * 0.3
+            + sin(riseC + uv.x * 7.0) * 0.15;
+    float y = cos(riseA + uv.x * 19.0)
+            + cos(riseB - uv.x * 11.0) * 0.55
+            + sin(riseC + uv.x * 29.0) * 0.3;
+    return vec2(x, y) * 0.54;
   }
 
   void main() {
