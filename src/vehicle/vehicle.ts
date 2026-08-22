@@ -195,6 +195,74 @@ function staticSag(stiffness: number): number {
 const PARK_BRAKE_DECEL = 4.0;
 
 // ---------------------------------------------------------------------------
+// Body attitude: why a car that squats under power does not lean in a corner.
+//
+// Rapier's ray-cast vehicle is a port of Bullet's, and Bullet deliberately throws
+// the roll couple away: the side-friction impulse is applied with its vertical
+// lever arm scaled almost to nothing (Bullet calls it "roll influence", default
+// 0.1), because an arcade vehicle that can trip over its own grip is worse than
+// one that never leans. Rapier does not expose that knob at all — the API has
+// stiffness, compression, relaxation, travel, friction slip and side friction, and
+// nothing about roll.
+//
+// Longitudinal impulses are NOT treated that way, which is exactly the asymmetry
+// you can see: the nose lifts under power and the tail squats, while the same car
+// corners flat as a table. The fix is to put the missing moment back by hand —
+// lateral acceleration times mass times the height of the centre of mass above the
+// contact plane, applied about the car's own forward axis. The suspension then
+// resists it the way it already resists pitch, because rolling the body shortens
+// the outer springs' raycasts and they push back. Nothing here fakes a lean angle;
+// it restores the force that produces one.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of the physical roll couple to restore.
+ *
+ * NOT 1. The ray-cast suspension has almost no roll stiffness of its own — its
+ * springs push along vertical rays at the mounts, and it has no anti-roll bar to
+ * model — so feeding in the whole moment simply tips the car over: measured at
+ * gain 1, a 33 km/h turn rolled the body to 81 degrees and put it on its side.
+ * A third of the moment reads as a real, weighted lean without ever threatening
+ * to trip a car that the rest of the model cannot catch.
+ */
+const ROLL_COUPLE_GAIN = 0.34;
+/**
+ * Low-pass time constant for the lateral-acceleration estimate, seconds. The
+ * estimate differences body-frame velocity, so a kerb strike or a one-frame solver
+ * correction shows up as a huge spike; smoothing over ~60 ms keeps a real corner
+ * intact and throws the spikes away.
+ */
+const ROLL_ACCEL_TAU = 0.06;
+/** Ceiling on the restored couple, in g of lateral acceleration. */
+const ROLL_ACCEL_MAX = 12;
+/**
+ * Lean angle, degrees, at which the couple has faded to nothing. Past this the car
+ * is already leaning harder than any road car does, and continuing to push is how
+ * a lean becomes a rollover.
+ */
+const ROLL_LIMIT_DEG = 8;
+/**
+ * Roll-rate damping, as a fraction of roll inertia per second. Stands in for the
+ * dampers' contribution about the roll axis, which the ray-cast model does not
+ * produce, and is what stops the restored couple ringing.
+ */
+const ROLL_RATE_DAMPING = 2.2;
+
+/**
+ * Inertia gains over a uniform solid box.
+ *
+ * A car is not a uniform box: its engine hangs off one end, its tank and boot off
+ * the other, and the body box we measure is shorter than the real overhangs. A
+ * solid-box tensor therefore under-states pitch and yaw inertia by roughly half —
+ * which is why the nose rose so eagerly under power. Real saloons sit near a
+ * pitch/yaw radius of gyration of 0.3-0.35 of wheelbase; these gains bring the box
+ * up to that without pretending to model mass distribution properly.
+ */
+const INERTIA_PITCH_YAW_GAIN = 2.2;
+/** Roll inertia is closer to a box's, since mass is not spread across the width. */
+const INERTIA_ROLL_GAIN = 1.25;
+
+// ---------------------------------------------------------------------------
 // Aerodynamic drag: 0.5 * rho * Cd * A, with A = 4 * hx * hy (frontal area).
 // This is what limits top speed by power instead of a magic speed cap.
 // ---------------------------------------------------------------------------
@@ -263,7 +331,7 @@ interface GizmoVisual {
  * authored, so a firetruck and a kart both get a sane one.
  */
 const COM_DROP_FRACTION = 0.45;
-const COM_REARWARD_FRACTION = 0.05;
+const COM_REARWARD_FRACTION = 0.02;
 
 /** Headlight placement as fractions of the chassis box (x of half-width, y of height). */
 const HEADLIGHT_X_FRACTION = 0.62;
@@ -319,6 +387,15 @@ export class Vehicle {
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
+  private readonly invRotationScratch = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly localVelScratch = { x: 0, y: 0, z: 0 };
+  private readonly localAngScratch = { x: 0, y: 0, z: 0 };
+  private readonly leanScratch = { x: 0, y: 0, z: 0 };
+  // Roll-couple state: low-passed lateral acceleration and its lever arm.
+  private prevLatVel = 0;
+  private rollAccel = 0;
+  private rollPrimed = false;
+  private rollLeverArm = 0.5;
   // Render-frame scratch.
   private readonly pos = new THREE.Vector3();
   private readonly quat = new THREE.Quaternion();
@@ -496,6 +573,14 @@ export class Vehicle {
     const target = hangs - this.measure.halfExtents[1];
     const stance = hangs + this.measure.wheels[0].pos[1];
     const mountY = Math.max(target, stance - RIDE_LIFT_MAX);
+
+    // Roll lever: how far the centre of mass sits above the tyre contact plane.
+    // The contact plane is one radius below where a settled wheel centre ends up
+    // (`mountY - hangs`), and the centre of mass is the same offset applied in
+    // applyChassisMass. This is the arm the missing roll couple acts on.
+    const comY = -COM_DROP_FRACTION * this.measure.halfExtents[1];
+    const contactY = mountY - hangs - this.measure.wheels[0].radius;
+    this.rollLeverArm = Math.max(0.1, comY - contactY);
 
     for (const wheel of this.measure.wheels) {
       const index = this.controller.numWheels();
@@ -745,6 +830,8 @@ export class Vehicle {
 
     controller.updateVehicle(dt);
 
+    this.applyRollCouple(dt, mass, contactCount);
+
     // Rolling resistance (∝ weight) + quadratic aerodynamic drag, opposing
     // horizontal motion. Drag always applies; rolling resistance fades with the
     // fraction of wheels still on the ground.
@@ -939,16 +1026,96 @@ export class Vehicle {
     return this.car.gizmos ?? {};
   }
 
+  /**
+   * Puts the cornering roll couple back (see the ROLL_COUPLE_GAIN note above).
+   *
+   * Lateral acceleration is measured in the car's own frame, and it needs BOTH
+   * terms: the change in body-frame sideways velocity *and* the centripetal term
+   * `yawRate * forwardSpeed`. Differencing alone reads ~0 in a steady circle —
+   * body-frame sideways velocity is constant there while the world velocity vector
+   * swings around — so a car would lean into a corner and then stand back up
+   * mid-bend. With the centripetal term it holds its lean as long as it holds the
+   * radius, which is what a real one does.
+   *
+   * The result is low-passed, clamped, and applied as a torque impulse about the
+   * car's forward axis with the centre of mass' height above the contact plane as
+   * the lever. Sign follows the physics: accelerating towards +X (left) rolls the
+   * body to the right, a positive rotation about +Z.
+   *
+   * Skipped with no wheel on the ground — an airborne car has nothing to lean
+   * against.
+   */
+  private applyRollCouple(dt: number, mass: number, contactCount: number): void {
+    this.chassisBody.linvel(this.linvel);
+    this.chassisBody.rotation(this.rotationScratch);
+
+    // Body-frame velocity: rotate the world velocity by the inverse rotation.
+    this.invRotationScratch.x = -this.rotationScratch.x;
+    this.invRotationScratch.y = -this.rotationScratch.y;
+    this.invRotationScratch.z = -this.rotationScratch.z;
+    this.invRotationScratch.w = this.rotationScratch.w;
+    rotateVector(
+      this.localVelScratch,
+      this.invRotationScratch,
+      this.linvel.x,
+      this.linvel.y,
+      this.linvel.z,
+    );
+    const latVel = this.localVelScratch.x;
+    const fwdVel = this.localVelScratch.z;
+
+    // Yaw rate in the body frame, for the centripetal term.
+    const angvel = this.chassisBody.angvel();
+    rotateVector(this.localAngScratch, this.invRotationScratch, angvel.x, angvel.y, angvel.z);
+    const yawRate = this.localAngScratch.y;
+
+    if (!this.rollPrimed) {
+      this.rollPrimed = true;
+      this.prevLatVel = latVel;
+      return;
+    }
+    const rawAccel = (latVel - this.prevLatVel) / dt + yawRate * fwdVel;
+    this.prevLatVel = latVel;
+    const k = 1 - Math.exp(-dt / ROLL_ACCEL_TAU);
+    this.rollAccel += (rawAccel - this.rollAccel) * k;
+
+    if (contactCount === 0) return;
+
+    // Current lean: the body's own left axis tilted out of horizontal. Positive
+    // means the left side is up, i.e. the car is leaning right.
+    rotateVector(this.leanScratch, this.rotationScratch, 1, 0, 0);
+    const leanSin = clamp(this.leanScratch.y, -1, 1);
+    const limitSin = Math.sin((ROLL_LIMIT_DEG * Math.PI) / 180);
+    const accel = clamp(this.rollAccel, -ROLL_ACCEL_MAX * GRAVITY, ROLL_ACCEL_MAX * GRAVITY);
+
+    // Fade the couple out as the lean approaches the limit, but only in the
+    // direction that would deepen it: a car already leaning hard must still be able
+    // to be pushed back upright by the opposite corner.
+    const deepening = Math.sign(accel) === Math.sign(leanSin) || leanSin === 0;
+    const fade = deepening ? Math.max(0, 1 - Math.abs(leanSin) / limitSin) : 1;
+
+    const half = this.measure.halfExtents;
+    const rollInertia = INERTIA_ROLL_GAIN * (mass / 3) * (half[0] * half[0] + half[1] * half[1]);
+    const rollRate = this.localAngScratch.z;
+    const torque =
+      (mass * accel * this.rollLeverArm * ROLL_COUPLE_GAIN * fade -
+        rollInertia * ROLL_RATE_DAMPING * rollRate) *
+      dt;
+    rotateVector(this.forceScratch, this.rotationScratch, 0, 0, torque);
+    this.chassisBody.applyTorqueImpulse(this.forceScratch, true);
+  }
+
   private applyChassisMass(mass: number): void {
     const half = this.measure.halfExtents;
     const hx = half[0];
     const hy = half[1];
     const hz = half[2];
-    // Solid-box principal inertias about the centre, scaled by mass.
+    // Solid-box principal inertias about the centre, scaled by mass and then by the
+    // gains above: x is pitch, y is yaw, z is roll.
     const inertia = {
-      x: (mass / 3) * (hy * hy + hz * hz),
-      y: (mass / 3) * (hx * hx + hz * hz),
-      z: (mass / 3) * (hx * hx + hy * hy),
+      x: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (hy * hy + hz * hz),
+      y: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (hx * hx + hz * hz),
+      z: INERTIA_ROLL_GAIN * (mass / 3) * (hx * hx + hy * hy),
     };
     this.chassisBody.setAdditionalMassProperties(
       mass,
