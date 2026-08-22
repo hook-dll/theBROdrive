@@ -58,6 +58,22 @@ const RIM_RING_SPACING = 60;
  */
 const RIM_FAR_RING_SPACING = 150;
 
+/**
+ * Fold guard for road-relative terrain.
+ *
+ * A lateral row offsets each road sample along that sample's normal. On a curve,
+ * normals converge on the inside and diverge on the outside; far enough away the
+ * inside offset reaches a cusp and runs BACKWARDS. Indexing across that cusp makes
+ * a kilometres-wide inverted triangle that sweeps over the road and closes the sky
+ * as chunks stream.
+ *
+ * Valid longitudinal edges must still point along the centreline tangent and may
+ * not grow absurdly relative to the centre row's own step. Both tests are derived
+ * from the generated geometry, so they are independent of seed and kilometre.
+ */
+const FOLD_MIN_FORWARD_COS = 0.04;
+const FOLD_MAX_EDGE_RATIO = 18;
+
 /** Surface albedos pre-converted to the linear working colour space. */
 const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
   [SurfaceType.Asphalt]: new THREE.Color(SURFACES[SurfaceType.Asphalt].color),
@@ -87,6 +103,12 @@ interface BuiltTerrain {
   /** Signed lateral offset of each grid column, ascending. */
   readonly laterals: readonly number[];
   readonly sCount: number;
+  /**
+   * One byte per visual grid cell: 1 when both longitudinal edges stay
+   * forward-facing and bounded, 0 when the road-normal parameterisation folded.
+   * Reused by the collider so drawn and solid terrain cannot disagree.
+   */
+  readonly validCells: Uint8Array;
   /** True for chunks off either end of the road, where there is no road quad. */
   readonly isApron: boolean;
 }
@@ -209,13 +231,61 @@ export class TerrainMeshProvider implements ChunkProvider {
       }
     }
 
-    // Index grid. The single quad spanning the road (the gap between the last
-    // negative and first positive lateral) is skipped only in-range, where the
-    // road mesh covers it; the apron has no road, so there it must be filled or
-    // the corridor would read as a void trench.
+    /**
+     * Mark cells whose road-normal parameterisation is still one-to-one.
+     *
+     * The tangent is measured at the corridor midpoint (average of the ±inner
+     * rings). At every lateral column, the longitudinal edge must point broadly in
+     * that same direction and stay within a bounded multiple of its length. Once an
+     * inside offset reaches its curvature cusp the dot becomes negative; a far
+     * outside edge can instead become hundreds of metres long. Either means the
+     * cell is a fold, not terrain, and must have no triangles.
+     */
+    const validCells = new Uint8Array((sCount - 1) * (latCount - 1));
+    const leftCentre = magnitudes.length - 1;
+    const rightCentre = magnitudes.length;
+    const xz = (vi: number): readonly [number, number] => [
+      positions[vi * 3]!,
+      positions[vi * 3 + 2]!,
+    ];
+    for (let si = 0; si < sCount - 1; si++) {
+      const row0 = si * latCount;
+      const row1 = row0 + latCount;
+      const lc0 = xz(row0 + leftCentre);
+      const rc0 = xz(row0 + rightCentre);
+      const lc1 = xz(row1 + leftCentre);
+      const rc1 = xz(row1 + rightCentre);
+      const tx = (lc1[0] + rc1[0] - lc0[0] - rc0[0]) * 0.5;
+      const tz = (lc1[1] + rc1[1] - lc0[1] - rc0[1]) * 0.5;
+      const centreLength = Math.hypot(tx, tz);
+
+      const edgeValid = (li: number): boolean => {
+        const a = xz(row0 + li);
+        const b = xz(row1 + li);
+        const ex = b[0] - a[0];
+        const ez = b[1] - a[1];
+        const length = Math.hypot(ex, ez);
+        if (centreLength < 1e-6 || length < 1e-6) return false;
+        const forwardCos = (ex * tx + ez * tz) / (length * centreLength);
+        return (
+          forwardCos >= FOLD_MIN_FORWARD_COS &&
+          length <= centreLength * FOLD_MAX_EDGE_RATIO
+        );
+      };
+
+      for (let li = 0; li < latCount - 1; li++) {
+        if (isApron || (edgeValid(li) && edgeValid(li + 1))) {
+          validCells[si * (latCount - 1) + li] = 1;
+        }
+      }
+    }
+
+    // Index only valid cells. The single quad spanning the road is also skipped
+    // in-range, where the road mesh owns it; the apron has no road, so it is filled.
     const index: number[] = [];
     for (let si = 0; si < sCount - 1; si++) {
       for (let li = 0; li < latCount - 1; li++) {
+        if (validCells[si * (latCount - 1) + li] === 0) continue;
         const here = laterals[li]!;
         const next = laterals[li + 1]!;
         if (!isApron && here < 0 && next > 0) continue;
@@ -240,6 +310,7 @@ export class TerrainMeshProvider implements ChunkProvider {
       positions,
       laterals,
       sCount,
+      validCells,
       isApron,
     };
   }
@@ -262,7 +333,7 @@ export class TerrainMeshProvider implements ChunkProvider {
     bodies: RAPIER.RigidBody[],
     colliders: RAPIER.Collider[],
   ): void {
-    const { laterals, positions, sCount, isApron } = built;
+    const { laterals, positions, sCount, validCells, isApron } = built;
     const latCount = laterals.length;
 
     // Contiguous block of rings within the solid band; the ring list is sorted and
@@ -293,6 +364,7 @@ export class TerrainMeshProvider implements ChunkProvider {
     const index: number[] = [];
     for (let si = 0; si < sCount - 1; si++) {
       for (let li = first; li < last; li++) {
+        if (validCells[si * (latCount - 1) + li] === 0) continue;
         // Same rule as the visible grid: in-range, the road's own trimesh owns the
         // corridor quad, so leaving it out here keeps the two from fighting over
         // the same wheel ray.
