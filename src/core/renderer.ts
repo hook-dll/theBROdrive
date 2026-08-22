@@ -56,7 +56,27 @@ const FRAME_SMOOTHING = 0.1;
  * real buffer height, so the shimmer is the same size at every resolution: at a
  * 1080p buffer the peak offset is exactly this many pixels.
  */
-const HAZE_AMPLITUDE_PX = 3;
+const HAZE_AMPLITUDE_PX = 3.4;
+
+/**
+ * How the shimmer is distributed, in screen heights measured from the horizon.
+ *
+ * Real heat haze lives in the shallow layer of hot air sitting on the ground, and
+ * what you see at a given screen row is how far a sight-line travels *inside* that
+ * layer. Just below the horizon a ray skims along it for hundreds of metres, so
+ * that is where the shimmer is strongest; looking further down means looking at
+ * ground closer to you through a shorter slice of hot air, so it weakens; and above
+ * the horizon a ray climbs out of the layer almost immediately, so the sky is
+ * nearly still. A fixed screen-space band — which is what this used to be — spreads
+ * the effect evenly and reads as a wobbling lens instead of hot ground.
+ */
+const HAZE_SKY_FALLOFF = 0.055;
+const HAZE_GROUND_FALLOFF = 0.3;
+/**
+ * The near foreground is seen through a thin slice of air (and is mostly the car's
+ * own bonnet), so the bottom of the frame fades out rather than shimmering.
+ */
+const HAZE_FOREGROUND_FADE = 0.22;
 
 /** Fullscreen triangle: three clip-space vertices, one corner padded to cover
  *  the whole frame. `uv` carries the screen UV (0 = bottom, 1 = top). */
@@ -75,13 +95,23 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uTime;
   uniform float uStrength;
   uniform float uAmplitude;
+  uniform float uHorizon;
+  uniform float uSkyFalloff;
+  uniform float uGroundFalloff;
+  uniform float uForegroundFade;
 
   varying vec2 vUv;
 
-  // Peaks across the horizon band and fades to nothing at the very bottom (the
-  // bonnet) and the top of the sky, so only the shimmer-prone middle wobbles.
-  float horizonWindow(float y) {
-    return smoothstep(0.0, 0.35, y) * (1.0 - smoothstep(0.65, 1.0, y));
+  /**
+   * Weight of the hot-air layer at a screen row: peaks at the horizon, decays
+   * quickly upward into the sky and gently downward across the near ground. The
+   * horizon comes in as a uniform, so the band follows the camera's pitch instead
+   * of sitting in the middle of the frame whichever way the driver is looking.
+   */
+  float hotLayer(float y) {
+    float d = y - uHorizon;
+    float falloff = d > 0.0 ? uSkyFalloff : uGroundFalloff;
+    return exp(-abs(d) / falloff) * smoothstep(0.0, uForegroundFade, y);
   }
 
   // Cheap animated 2D warp from summed sines — no texture lookups. Each axis
@@ -98,10 +128,20 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    vec2 warp = hazeWarp(vUv, uTime);
+    // Cells of hot air are smaller and churn faster close to the ground, and the
+    // long sight-lines near the horizon stack more of them on top of each other.
+    // Scaling the warp's frequency and speed with that depth is what stops the
+    // whole frame shimmering in lockstep like one sheet of glass.
+    float groundness = clamp((uHorizon - vUv.y) / uGroundFalloff, 0.0, 1.0);
+    float scale = mix(1.0, 1.7, groundness);
+    vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.35, groundness));
+    // Rising air bends a sight-line up and down far more than it does sideways, so
+    // the vertical term carries the effect and the horizontal one only stops it
+    // looking like a venetian blind.
+    warp.x *= 0.45;
     // At uStrength = 0 the offset vanishes and the sample is the untouched
     // texel — a pure passthrough.
-    vec2 offset = warp * uStrength * horizonWindow(vUv.y) * (uAmplitude / uResolution.y);
+    vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
     vec2 uv = clamp(vUv + offset, 0.0, 1.0);
     gl_FragColor = texture2D(tDiffuse, uv);
   }
@@ -124,6 +164,8 @@ export class Renderer {
   private readonly hazeGeometry: THREE.BufferGeometry;
   /** Reused scratch vector for the drawing-buffer size. */
   private readonly _drawSize = new THREE.Vector2();
+  /** Reused scratch for the camera's forward vector (horizon tracking). */
+  private readonly _forward = new THREE.Vector3();
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -174,6 +216,10 @@ export class Renderer {
         uTime: { value: 0 },
         uStrength: { value: 0 },
         uAmplitude: { value: HAZE_AMPLITUDE_PX },
+        uHorizon: { value: 0.5 },
+        uSkyFalloff: { value: HAZE_SKY_FALLOFF },
+        uGroundFalloff: { value: HAZE_GROUND_FALLOFF },
+        uForegroundFade: { value: HAZE_FOREGROUND_FADE },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -212,6 +258,7 @@ export class Renderer {
 
   render(): void {
     this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
+    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
     // Pass 1: draw the scene into the target — the same final sRGB pixels the
     // canvas would have received, since tone mapping and colour conversion stay
     // untouched on the renderer.
@@ -220,6 +267,24 @@ export class Renderer {
     // Pass 2: copy the target back to the canvas through the haze shader.
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.hazeScene, this.hazeCamera);
+  }
+
+  /**
+   * Screen-space `uv.y` of the true horizon (0 = bottom of frame, 1 = top).
+   *
+   * A horizontal sight-line lands at NDC y = -tan(pitch) / tan(fovY / 2): look up
+   * and the horizon slides down the frame, look down and it climbs. Reading it off
+   * the camera's own forward vector rather than tracking pitch separately keeps it
+   * correct through the camera rig's roll and spring, and clamping a little way
+   * outside the frame keeps the falloff sensible when the horizon is off-screen.
+   */
+  private horizonScreenY(): number {
+    this.camera.getWorldDirection(this._forward);
+    const horizontal = Math.hypot(this._forward.x, this._forward.z);
+    const pitch = Math.atan2(this._forward.y, horizontal);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
+    const ndc = -Math.tan(pitch) / Math.tan(halfFov);
+    return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
   }
 
   /**
