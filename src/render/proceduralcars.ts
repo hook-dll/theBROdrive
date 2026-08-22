@@ -266,14 +266,20 @@ function wheelGroup(
   b.add(shoulder, RUBBER);
 
   if (tread) {
-    // Chunky blocks standing proud of the carcass, alternating across the tread.
+    // Chunky blocks alternating across the tread. Their outer face sits exactly ON
+    // the tyre's outside diameter, never beyond it: the loader measures a wheel's
+    // radius from its bounds and hands that to the physics, so a lug standing proud
+    // would make the simulated tyre bigger than the drawn one and the car would
+    // ride on air.
     for (let i = 0; i < segments; i++) {
       const a = (i / segments) * Math.PI * 2;
-      const lug = box(width * 0.42, radius * 0.16, radius * 0.34);
+      const lugHeight = radius * 0.16;
+      const seat = radius - lugHeight / 2;
+      const lug = box(width * 0.42, lugHeight, radius * 0.34);
       const t = at(
         (i % 2 === 0 ? 1 : -1) * width * 0.22,
-        Math.sin(a) * radius,
-        Math.cos(a) * radius,
+        Math.sin(a) * seat,
+        Math.cos(a) * seat,
         [-a, 0, 0],
       );
       b.add(lug, RUBBER, t);

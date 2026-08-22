@@ -358,8 +358,19 @@ export class Vehicle {
 
     // The chassis box carries zero collider mass; all mass and the low/rearward
     // centre of gravity come from setAdditionalMassProperties in rebuild().
+    //
+    // Its FLOOR is raised to the wheel-centre line rather than the bottom of the
+    // body box. A car's underside must not touch down before its tyres do: with the
+    // full box, anything with a high floor and a tall silhouette — the buggy, with
+    // its roll cage — grounded its collider on a dune crest, the solver held the
+    // chassis up, and the ray-cast wheels kept reaching for terrain that was now
+    // above their contact point. On screen that is a car whose wheels sink into the
+    // road, which is exactly what it looked like.
+    const floor = Math.max(-half[1], this.measure.wheels[0].pos[1]);
+    const colliderHalfY = (half[1] - floor) / 2;
     physics.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(half[0], half[1], half[2])
+      RAPIER.ColliderDesc.cuboid(half[0], colliderHalfY, half[2])
+        .setTranslation(0, floor + colliderHalfY, 0)
         .setDensity(0)
         .setFriction(0.4)
         .setRestitution(0.05),

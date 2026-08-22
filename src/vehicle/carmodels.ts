@@ -54,20 +54,24 @@ const KART_SCALE = 1.05;
  * height rule there), so changing a rate changes how the car MOVES, not how high it
  * stands.
  *
- * Two things bound how soft these can be:
- *  - static sag is `g / (4 * stiffness)`, so 15 sagged 164 mm — most of a car's
- *    whole travel — and the body wallowed onto its bump stops under load;
- *  - `maxTravel` is also DROOP, and a wheel is drawn at its full droop the moment
- *    it unloads. With 200 mm of it, lifting the front under acceleration dropped
- *    the front wheels through the road surface. That is the artefact behind
- *    "wheels get under road a bit on accelerating".
- * Hence firmer rates and shorter travel: ~100 mm of sag on a car and 120 mm of
- * droop, which still soaks up the desert without letting a wheel leave the arch.
+ * The load-bearing relationship is TRAVEL vs SAG, and getting it wrong is what put
+ * wheels through the road. Rapier clamps the spring to `rest ± maxTravel`; once a
+ * bump needs more compression than that, the wheel is *drawn* at the clamp while
+ * the ground is higher up, and the tyre visibly sinks into the road. Static sag is
+ * `g / (4 * stiffness)`, so the spring must have several times that in reserve:
+ *
+ *   stiffness 15 -> sag 164 mm against 200 mm of travel: 36 mm of reserve, sank on
+ *                   any dip or weight transfer.
+ *   stiffness 24 -> sag 102 mm against 240 mm: 138 mm of reserve, which is a kerb
+ *                   strike's worth and never bottoms in ordinary desert driving.
+ *
+ * Droop (the same number, extending) only affects an airborne wheel hanging low,
+ * which is what an airborne wheel should do — it was never the sinking.
  */
 
 const SUSP_CAR: SuspensionTuning = {
   restLength: 0.3,
-  maxTravel: 0.12,
+  maxTravel: 0.24,
   stiffness: 24,
   compression: 0.9,
   relaxation: 1.2,
@@ -75,8 +79,8 @@ const SUSP_CAR: SuspensionTuning = {
 };
 
 const SUSP_SPORT: SuspensionTuning = {
-  restLength: 0.24,
-  maxTravel: 0.1,
+  restLength: 0.28,
+  maxTravel: 0.24,
   stiffness: 32,
   compression: 1.0,
   relaxation: 1.35,
@@ -84,8 +88,8 @@ const SUSP_SPORT: SuspensionTuning = {
 };
 
 const SUSP_TRUCK: SuspensionTuning = {
-  restLength: 0.36,
-  maxTravel: 0.16,
+  restLength: 0.38,
+  maxTravel: 0.3,
   stiffness: 20,
   compression: 0.85,
   relaxation: 1.15,
@@ -93,8 +97,8 @@ const SUSP_TRUCK: SuspensionTuning = {
 };
 
 const SUSP_KART: SuspensionTuning = {
-  restLength: 0.14,
-  maxTravel: 0.07,
+  restLength: 0.16,
+  maxTravel: 0.13,
   stiffness: 38,
   compression: 1.1,
   relaxation: 1.4,
