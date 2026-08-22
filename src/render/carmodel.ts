@@ -216,11 +216,10 @@ function takeOwnWheels(
     const node = scene.getObjectByName(nodeName);
     if (!node) continue;
     const box = boundsOf(node);
-    // The suspension mount is the wheel's own CENTRE, not its node origin. In the
-    // Kenney kit the node sits on the wheel's inner face (the left front wheel's
-    // mesh runs from -0.05 to +0.30 across its axle), so mounting at the origin
-    // would pull the track in by the width of a tyre either side — 0.72 m instead
-    // of 1.02 m on the sedan, which handles like a tippy shopping trolley.
+    // The suspension mount is the wheel's own CENTRE, not its node origin. Several
+    // exporters put a node on the tyre's inner face rather than on its axle plane;
+    // mounting there pulls the track in by a tyre width on both sides and makes a
+    // perfectly good body handle like a tippy shopping trolley.
     const centre = box.getCenter(new THREE.Vector3());
     // Radius from the disc's own bounds, measured across whichever pair of axes is
     // the wheel's face. The axle is the SHORTEST extent — some packs model a wheel
@@ -243,9 +242,8 @@ function takeOwnWheels(
     node.updateMatrix();
 
     // The vehicle spins a wheel about X and steers it about Y, so the wheel's axle
-    // has to BE X. Packs disagree: Kenney models the disc about X, the DeJunes FBX
-    // wheels about another axis, and zeroing their authored rotation (as this used
-    // to) laid them flat like dinner plates. So the authored transform is kept and
+    // has to BE X. Packs disagree on the authored axis; zeroing that transform laid
+    // the DeJunes wheels flat like dinner plates. The authored transform is kept and
     // an alignment group turns whichever axis is the axle onto X — mesh and its
     // centring offset rotate together, so the wheel stays centred on its mount.
     const align = new THREE.Group();
