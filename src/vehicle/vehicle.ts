@@ -1238,7 +1238,12 @@ export class Vehicle {
       // enough to resist gravity on the road network; a locked foot brake otherwise
       // replaces the pedal's rolling demand.
       if (input.handbrake) brakeImpulse = parkingBrakePerWheel;
-      else if (locked) brakeImpulse = lockPerWheel;
+      // A lock can only ever COST grip, never add brake. Substituting the sliding
+      // demand outright let it exceed the pedal's own: a front wheel with 38% of the
+      // torque was handed the full four-wheel sliding share the moment it slipped,
+      // which held it locked on its own (bench: frontLock 0.57 on a car whose fronts
+      // should never have locked at that demand).
+      else if (locked) brakeImpulse = Math.min(brakeImpulse, lockPerWheel);
       controller.setWheelBrake(w.index, brakeImpulse);
 
       // Drive torque -> engine force (Newtons), signed by gear (reverse < 0). Zero
