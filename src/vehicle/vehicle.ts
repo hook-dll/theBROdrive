@@ -352,21 +352,34 @@ const LOCKED_SIDE_GRIP = 0.22;
 /**
  * Ride height, as geometry rather than a fudge factor.
  *
- * Target: with the car settled on its springs, the BOTTOM OF THE BODY sits level
- * with the CENTRE OF THE WHEELS — a kerb's worth of clearance, and what these
- * bodies look right at. Since the wheel hangs `rest - sag` below its mount, that
- * target is `mount_y = restLength - staticSag - halfHeight`.
+ * Two rules, and a body ends up at whichever leaves it LOWER:
  *
- * But that target alone is wrong for packs whose body box runs down to a low skirt
- * or a modelled underbody: applying it to them lifts the shell off its own arches
- * onto stilts. So the lift is capped at RIDE_LIFT_MAX above the stance the artist
- * drew (`wheelCentre + rest - sag`, which reproduces the model exactly), and every
- * pack ends up either at the target or a hand's width above its own drawing —
- * whichever is lower.
+ *  - the TARGET, which puts the body's underside a little below the centre of the
+ *    wheels. Since the wheel hangs `rest - sag` below its mount, that is
+ *    `mount_y = restLength - staticSag - halfHeight + RIDE_TARGET_DROP`.
+ *  - the artist's own STANCE (`wheelCentre + rest - sag`, which reproduces the
+ *    model exactly), never lifted by more than RIDE_LIFT_MAX. Without that cap, a
+ *    pack whose body box runs down to a low skirt or a modelled underbody gets put
+ *    on stilts.
+ *
+ * RIDE_TARGET_DROP is not cosmetic tuning; it fixes a measured artefact. With the
+ * target at exactly the wheel centres, every body the target rule caught sat with
+ * its whole underside one wheel-radius off the ground — measured 0.248 m, 0.260 m
+ * and 0.327 m of clearance, which is precisely each car's own tyre radius. That is
+ * the whole Quaternius pack, and on those bodies it reads as a car on stilts with
+ * its tyres hanging out of the arches. The packs that land on the stance cap
+ * instead (DeJunes, PSX) sit at 0.11-0.29 m and already look right, so this must
+ * move the target and not the cap.
+ *
+ * 0.05 m brings the Quaternius saloons to ~0.21 m, between the DeJunes compact's
+ * 0.11 m and its taxi's 0.29 m, and leaves every stance-capped body untouched. A
+ * real car's sills do sit below hub height, so this is also the more honest target.
  *
  * Only Y comes from this; track and wheelbase always come from the model.
  */
 const RIDE_LIFT_MAX = 0.15;
+/** How far below the wheel centres the target puts the body's underside, metres. */
+const RIDE_TARGET_DROP = 0.05;
 /**
  * Static spring compression, metres. Rapier's ray-cast suspension force is
  * `stiffness * (rest - length) * chassis_mass`, i.e. the rate is per kilogram, so
@@ -902,7 +915,7 @@ export class Vehicle {
     // i.e. never lift a body more than RIDE_LIFT_MAX off its own arches. X and Z
     // always stay where the model put its wheels.
     const hangs = suspension.restLength - staticSag(suspension.stiffness);
-    const target = hangs - this.measure.halfExtents[1];
+    const target = hangs - this.measure.halfExtents[1] + RIDE_TARGET_DROP;
     const stance = hangs + this.measure.wheels[0].pos[1];
     const mountY = Math.max(target, stance - RIDE_LIFT_MAX);
 
