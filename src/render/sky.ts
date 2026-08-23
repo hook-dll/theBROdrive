@@ -81,13 +81,21 @@ const BASE_FOG_DENSITY = 0.00035;
  */
 const STAR_COUNT = 14000;
 /**
- * Size taper for the brightest stars. Below the knee, size stays linear in
- * brightness — the small and medium stars are the ones that read as stars, so they
- * are left exactly as they were. Above it, growth is cut to the taper, which brings
- * the biggest down from 3.65 px to 2.96 px without touching anything below.
+ * Star size: min, max, and how sharply size is weighted toward the small end.
+ *
+ * The knee this replaces only capped the top of the range, it did not make the top
+ * RARE — measured on the built buffer, 24% of stars still landed in the largest
+ * bucket, because brightness itself is only squared and 31% of the field sits above
+ * the knee. So the map is convex instead: size = min + range · b^exponent, which
+ * leaves the great majority of stars near the floor and thins the tail properly.
+ *
+ * At exponent 2.5 the field comes out ~1.2 px for a typical star, ~6% above 2.3 px,
+ * and a hard maximum of 2.6 px — down from 3.65 px originally and 2.96 px at the
+ * knee. A big star is now something to notice rather than the texture of the sky.
  */
-const STAR_SIZE_KNEE = 0.55;
-const STAR_SIZE_TAPER = 0.45;
+const STAR_SIZE_MIN = 1.15;
+const STAR_SIZE_MAX = 2.6;
+const STAR_SIZE_EXPONENT = 2.5;
 /** Seed for the star field. Fixed so the sky is identical every session. */
 const STAR_SEED = 0x5ca11ab1;
 /**
@@ -496,9 +504,8 @@ export class Sky {
       brights[i] = b;
       // Bright stars appear at low density; faint ones fill in as it rises.
       thresholds[i] = 1.0 - b;
-      const sizeShape =
-        b <= STAR_SIZE_KNEE ? b : STAR_SIZE_KNEE + (b - STAR_SIZE_KNEE) * STAR_SIZE_TAPER;
-      sizes[i] = 0.85 + sizeShape * 2.8;
+      sizes[i] =
+        STAR_SIZE_MIN + (STAR_SIZE_MAX - STAR_SIZE_MIN) * Math.pow(b, STAR_SIZE_EXPONENT);
 
       // Colour. Almost every star is white with only a hint of blue in it — the
       // eye reads a night sky as white, and the previous split (28% of the field
