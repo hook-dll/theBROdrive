@@ -106,9 +106,26 @@ const STAR_SEED = 0x5ca11ab1;
 const STAR_TINTED_FRACTION = 0.01;
 /** Fraction of stars that scintillate at all; the rest are rock steady. */
 const STAR_TWINKLE_FRACTION = 0.3;
-/** Scintillation amplitude range, as a fraction of the star's own brightness. */
-const STAR_TWINKLE_MIN = 0.1;
-const STAR_TWINKLE_MAX = 0.34;
+/**
+ * Scintillation amplitude range, as a fraction of the star's own brightness.
+ *
+ * These were 0.10-0.34 and the effect was invisible. Three things were wrong at
+ * once and all three are worth recording, because each on its own looks harmless:
+ *
+ *  - the amplitude scaled by nearness to the HORIZON, which is physically right and
+ *    exactly wrong here: looking straight up is how anyone examines a star field,
+ *    and at the zenith the factor is ~0, so the part of the sky under scrutiny had
+ *    no twinkle at all. It now keeps STAR_TWINKLE_ZENITH_FLOOR of its amplitude
+ *    overhead and still shimmers hardest low down.
+ *  - the amplitude itself was too small to see: a typical twinkler is a faint star
+ *    at alpha ~0.35, and ±0.16 of that is a fraction of one dim pixel.
+ *  - the two sines ran at 0.37 and 0.59 Hz, slow enough to read as "steady" rather
+ *    than as a shimmer. Real scintillation is a few hertz.
+ */
+const STAR_TWINKLE_MIN = 0.35;
+const STAR_TWINKLE_MAX = 0.75;
+/** Amplitude kept at the zenith, where there is least air to twinkle through. */
+const STAR_TWINKLE_ZENITH_FLOOR = 0.45;
 /**
  * The galactic plane is deliberately NOT thinned with the field: the band is what
  * makes the sky look like a galaxy seen edge-on, and it reads as dust rather than
@@ -233,15 +250,21 @@ void main() {
   vBright = aBright;
   vThresh = aThresh;
 
-  // Scintillation. Two incommensurate sines so it never settles into a visible
-  // pulse, and it modulates SIZE as well as brightness: the brightest stars are
-  // already clipped at full alpha, so on those the size is the only channel with
-  // anywhere left to go. aTwinkle is zero for most stars.
+  // Scintillation, in ALPHA only. Two incommensurate sines at a few hertz, so it
+  // shimmers rather than pulses and never settles into a visible loop.
+  //
+  // It used to modulate gl_PointSize too, on the reasoning that a bright star's
+  // core is clipped at full alpha and size was the only channel left. That was the
+  // wrong channel: point size rasterises to WHOLE pixels, and these stars are
+  // 1.2-2.6 px, so an oscillating size renders as the same single pixel and then
+  // jumps a whole one. It read as a dropped frame rather than as a shimmer. Alpha
+  // is continuous at any size, so all of the effect lives there; on a clipped star
+  // only the dimming half shows, which is still a smooth shimmer.
   float ph = aPhase * 6.2831853;
-  float shimmer = 0.62 * sin(uTime * 2.30 + ph) + 0.38 * sin(uTime * 3.70 + ph * 1.7);
+  float shimmer = 0.62 * sin(uTime * 7.00 + ph) + 0.38 * sin(uTime * 11.00 + ph * 1.7);
   vTwinkle = 1.0 + aTwinkle * shimmer;
 
-  gl_PointSize = aSize * uPixelRatio * (1.0 + 0.35 * aTwinkle * shimmer);
+  gl_PointSize = aSize * uPixelRatio;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -531,14 +554,16 @@ export class Sky {
       }
 
       // Scintillation is atmospheric, so it belongs to stars seen through the most
-      // air: amplitude scales with how near the horizon a star sits, and only a
-      // minority get any at all. The rest are steady, which is what makes the ones
-      // that do shimmer read as shimmering.
+      // air — but never to the point of vanishing overhead, which is where anyone
+      // examining the sky is actually looking. Only a minority twinkle at all; the
+      // rest are rock steady, and that contrast is what makes the movers read.
       const horizon = 1 - Math.abs(this._dir.y);
+      const air = STAR_TWINKLE_ZENITH_FLOOR + (1 - STAR_TWINKLE_ZENITH_FLOOR) * horizon;
       twinkles[i] =
         hash01(STAR_SEED, i, 5) < STAR_TWINKLE_FRACTION
-          ? STAR_TWINKLE_MIN +
-            (STAR_TWINKLE_MAX - STAR_TWINKLE_MIN) * hash01(STAR_SEED, i, 8) * horizon
+          ? (STAR_TWINKLE_MIN +
+              (STAR_TWINKLE_MAX - STAR_TWINKLE_MIN) * hash01(STAR_SEED, i, 8)) *
+            air
           : 0;
       phases[i] = hash01(STAR_SEED, i, 6);
     }
