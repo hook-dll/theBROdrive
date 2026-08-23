@@ -28,10 +28,53 @@ export const ROAD_LENGTH = 400_000;
 const MIN_CORNER_RADIUS = 170;
 /** Distance over which curvature varies. Long = sweeping, short = twitchy. */
 const CURVATURE_WAVELENGTH = 520;
-/** Steepest grade as a fraction (0.055 = 5.5%). */
-const MAX_GRADE = 0.055;
-/** Distance over which elevation varies. Long = gradual, infrequent hills. */
-const GRADE_WAVELENGTH = 1400;
+/**
+ * Elevation, in three layers, because one noise band cannot be both "a hill you
+ * crest" and "country that is flat for a while".
+ *
+ * Two rounds of tuning happened here, and the second is the important one. The
+ * original was a single 1400 m band at 5.5% max: ~4 m of relief over a kilometre,
+ * which is not level but reads as dead flat. Widening it to three bands at 10% max
+ * got the relief up (230 m over 60 km) yet still looked flat from the seat, because
+ * what the driver actually sees is the GRADE UNDER THE BONNET, not the total
+ * relief, and a mean of 2% is a third of a degree of pitch.
+ *
+ * So the bands are sized by what they do to the view instead:
+ *
+ *  - ROLL, 340 m crest to crest, is the band you feel. At 340 m and 9% the road
+ *    rises about 5 m between trough and crest — more than eye height, so the far
+ *    side genuinely disappears — and a crest arrives every ten seconds at 90 km/h.
+ *  - SWELL, 3 km, is the landscape: tens of metres of rise and fall that the
+ *    rolling band sits on, so hills are not a corrugation on a table.
+ *  - HILLINESS gates both over 8 km, so a seed gives hill country here and open
+ *    basin there, and crossing between them takes minutes of driving.
+ *
+ * MAX_GRADE bounds the sum of the two bands. 12% is steep for a real two-lane and
+ * deliberately at the edge of what this catalogue pulls: measured in-game, the
+ * saloon climbs a sustained 9% at 55-70 km/h in third and needs second only past
+ * 11%. Anything gentler than this does not read as hills at all.
+ */
+const MAX_GRADE = 0.12;
+/** Rolling band: crest-to-crest distance of the hills you actually drive over. */
+const GRADE_ROLL_WAVELENGTH = 340;
+/** Its share of the grade budget. */
+const GRADE_ROLL_WEIGHT = 0.95;
+/** Swell band: the long rise and fall the rolling band rides on. */
+const GRADE_SWELL_WAVELENGTH = 3000;
+const GRADE_SWELL_WEIGHT = 0.5;
+/**
+ * Amplification applied to the summed bands before clamping (see `gradeAt`). Value
+ * noise clusters near zero; without this the road's mean grade is a third of a
+ * degree.
+ */
+const GRADE_GAIN = 2.1;
+/** How far you drive before flat country becomes hill country, metres. */
+const HILLINESS_WAVELENGTH = 8000;
+/**
+ * Grade fraction kept in the flattest country. Not small: even the flat stretches
+ * should breathe, or the contrast makes them read as broken rather than flat.
+ */
+const HILLINESS_FLOOR = 0.42;
 /** First stretch out of the house is dead straight and flat, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
 
@@ -64,6 +107,8 @@ export class Road {
 
   private readonly curveNoise: Noise1D;
   private readonly gradeNoise: Noise1D;
+  private readonly swellNoise: Noise1D;
+  private readonly hillNoise: Noise1D;
 
   // Parallel arrays of integrated nodes; index i corresponds to s = i * NODE_SPACING.
   private readonly xs: number[] = [0];
@@ -75,6 +120,8 @@ export class Road {
     this.seed = seed >>> 0;
     this.curveNoise = new Noise1D(this.seed ^ 0x9e3779b9);
     this.gradeNoise = new Noise1D(this.seed ^ 0x85ebca6b);
+    this.swellNoise = new Noise1D(this.seed ^ 0xc2b2ae3d);
+    this.hillNoise = new Noise1D(this.seed ^ 0x27d4eb2f);
   }
 
   /**
@@ -86,10 +133,36 @@ export class Road {
     return (this.curveNoise.fbm(s / CURVATURE_WAVELENGTH, 3, 2.1, 0.42) / MIN_CORNER_RADIUS) * ramp;
   }
 
-  /** Grade at arclength s, dy/ds. Also ramped in over the runout. */
+  /**
+   * How hilly the country is at `s`, 0..1. Its own noise band, an order of
+   * magnitude longer than the hills it gates, so the landscape has regions.
+   */
+  hillinessAt(s: number): number {
+    const n = this.hillNoise.fbm(s / HILLINESS_WAVELENGTH, 2, 2, 0.5);
+    // Value noise clusters near zero, so widen before clamping or almost every
+    // stretch lands mid-scale and the regions all feel the same.
+    const t0 = Math.min(1, Math.max(0, 0.5 + n * 1.35));
+    const t = t0 * t0 * (3 - 2 * t0);
+    return HILLINESS_FLOOR + (1 - HILLINESS_FLOOR) * t;
+  }
+
+  /**
+   * Grade at arclength s, dy/ds. Rolling band plus long swell, amplified, clamped,
+   * gated by hilliness and ramped in over the runout.
+   *
+   * GRADE_GAIN is why this reads as hills. Value-noise fbm spends almost all its
+   * time near zero — the raw sum averages about 0.3 of its own range — so feeding
+   * it straight into MAX_GRADE produced a mean grade of 2% and a road that measured
+   * hilly and looked flat. Amplifying and then clamping trades the rare peak for
+   * sustained climbs and descents at real gradients, which is what a road through
+   * hills actually is: long pulls at a steady 8%, not a sine wave.
+   */
   gradeAt(s: number): number {
     const ramp = Math.min(1, Math.max(0, (s - STRAIGHT_RUNOUT) / (STRAIGHT_RUNOUT * 2)));
-    return this.gradeNoise.fbm(s / GRADE_WAVELENGTH, 2, 2.3, 0.35) * MAX_GRADE * ramp;
+    const roll = this.gradeNoise.fbm(s / GRADE_ROLL_WAVELENGTH, 3, 2.1, 0.45) * GRADE_ROLL_WEIGHT;
+    const swell = this.swellNoise.fbm(s / GRADE_SWELL_WAVELENGTH, 2, 2, 0.5) * GRADE_SWELL_WEIGHT;
+    const shape = Math.min(1, Math.max(-1, (roll + swell) * GRADE_GAIN));
+    return shape * MAX_GRADE * this.hillinessAt(s) * ramp;
   }
 
   /** Integrates nodes forward until index `target` exists. Cheap and idempotent. */

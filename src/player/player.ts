@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { PhysicsWorld } from '../core/physics';
+import { FIXED_DT, type PhysicsWorld } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import type { GameWorld } from '../game/state';
 import type { Road } from '../world/road';
@@ -160,6 +160,19 @@ export class Player {
   }
 
   /**
+   * Horizontal speed over the last fixed step, m/s. Derived from the step
+   * snapshots rather than the requested velocity, so it reports what the character
+   * controller actually achieved — walking into a wall is standing still, which is
+   * exactly what the footstep audio needs to know.
+   */
+  get groundSpeed(): number {
+    if (!this.snapshotPrimed) return 0;
+    const dx = this.curStep.x - this.prevStep.x;
+    const dz = this.curStep.z - this.prevStep.z;
+    return Math.hypot(dx, dz) / FIXED_DT;
+  }
+
+  /**
    * The kinematic capsule body, so collision queries (interaction rays, camera
    * occlusion) can exclude the player's own body. The eye origin sits inside the
    * capsule, and `castRayAndGetNormal(..., solid = true)` reports a zero-distance
@@ -189,11 +202,24 @@ export class Player {
    * one unhinted sweep — rare, and the only correct option.
    */
   teleport(x: number, y: number, z: number): void {
-    this.body.setTranslation({ x, y: y + Player.FEET_OFFSET, z }, true);
+    const cy = y + Player.FEET_OFFSET;
+    this.body.setTranslation({ x, y: cy, z }, true);
     this.verticalVelocity = 0;
-    // A teleport is a discontinuity: interpolating across it would fly the camera
-    // from the old spot to the new one over a frame.
-    this.snapshotPrimed = false;
+    // A teleport is a discontinuity: the fixed-step render interpolation reads
+    // prevStep/curStep, and those are only refreshed by postStep() *after* the
+    // next physics step. Car exit and rescue both run later in their fixed step
+    // than postStep() does, so leaving the old snapshots in place would keep
+    // them at the entry/fall spot for the rest of that step — the camera snaps
+    // to the stale spot and then the foot spring flies it across the gap, the
+    // "slide" seen when stepping out of a car. Seed both snapshots to the new
+    // capsule centre now so the very next rendered frame draws the player here.
+    this.prevStep.x = x;
+    this.prevStep.y = cy;
+    this.prevStep.z = z;
+    this.curStep.x = x;
+    this.curStep.y = cy;
+    this.curStep.z = z;
+    this.snapshotPrimed = true;
     if (!this.road) return;
     const near = this.road.sampleAt(this.arcS);
     const driftSq = (near.x - x) ** 2 + (near.z - z) ** 2;

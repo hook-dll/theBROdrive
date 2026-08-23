@@ -43,6 +43,29 @@ const SUN_DISTANCE = 240;
 const NIGHT_ELEVATION = -0.08;
 
 /**
+ * Shadow length control, because a physically correct low sun draws nonsense.
+ *
+ * A shadow's length is the caster's height over tan(elevation), so at 3 degrees a
+ * 1.7 m player throws a 32 m shadow and a car throws sixty metres of dark smear —
+ * far larger than the thing casting it, streaked across the whole foreground, and
+ * blurred by the shadow map's 18 cm texels into an unreadable blob. That is the
+ * "shadow is sometimes enormous" everyone notices around dawn and dusk.
+ *
+ * Two limits, in preference order:
+ *
+ *  - The shadow-casting DIRECTION never drops below SHADOW_MIN_ELEVATION, while the
+ *    sun's own position, colour and disc stay exactly where they were. Shadows keep
+ *    pointing the right way and stop growing past about four times the caster's
+ *    height. Cheating the direction rather than the light is what preserves the
+ *    golden-hour colour and the raking shading that make the hour worth having.
+ *  - Below SHADOW_FADE_ELEVATION the shadows fade out entirely (three's
+ *    `shadow.intensity`), so the last of the mismatch between a clamped shadow and a
+ *    horizon sun disappears into dusk instead of standing out in it.
+ */
+const SHADOW_MIN_ELEVATION = 0.26;
+const SHADOW_FADE_ELEVATION = 0.12;
+
+/**
  * The sun's great circle is tilted this far off the east-west vertical plane, so
  * the noon sun sits south of the zenith rather than dead overhead — northern
  * hemisphere long-shadow feel, and it keeps the light from pointing straight down.
@@ -52,14 +75,12 @@ const SOUTH_TILT = 0.45;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
-/** Field density: ~10k vertices is still one draw call on a shared material, but
- *  dense enough that the night sky reads as a star field rather than a scatter. */
-const STAR_COUNT = 10000;
+/** 20k stars remain one draw call and give the night sky a dense, visible field. */
+const STAR_COUNT = 20000;
 /** Seed for the star field. Fixed so the sky is identical every session. */
 const STAR_SEED = 0x5ca11ab1;
-/** Fibonacci candidates filtered into a band give a deterministic galactic plane.
- *  Held at 2.25x STAR_COUNT so the band stays ~2.25x denser than the field. */
-const BAND_CANDIDATES = 22500;
+/** Keep the galactic plane at the same relative density as the doubled field. */
+const BAND_CANDIDATES = 45000;
 /** Half-width of the band in `dot(dir, normal)` space (~7.5 degrees). */
 const BAND_HALF_WIDTH = 0.13;
 
@@ -192,7 +213,7 @@ void main() {
   // Density fades each star in past its own threshold rather than rebuilding
   // the buffer: at starDensity 1 only the bright ones show, at 4.5 all do.
   float vis = smoothstep(vThresh - 0.08, vThresh + 0.08, uDens01);
-  float a = vBright * vis * uOpacity * mask;
+  float a = min(1.0, vBright * 1.75 * vis * uOpacity * mask);
   if (a < 0.004) discard;
 
   gl_FragColor = vec4(vColor, a);
@@ -300,6 +321,8 @@ export class Sky {
   // --- Scratch state, reused every frame (no allocation in the hot path) ---
   private readonly _sunDir = new THREE.Vector3();
   private readonly _lightDir = new THREE.Vector3();
+  /** Light direction with its elevation clamped, for the shadow camera only. */
+  private readonly _shadowDir = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
   private readonly _zenith = new THREE.Color();
   private readonly _horizon = new THREE.Color();
@@ -426,7 +449,7 @@ export class Sky {
       brights[i] = b;
       // Bright stars appear at low density; faint ones fill in as it rises.
       thresholds[i] = 1.0 - b;
-      sizes[i] = 0.7 + b * 2.0;
+      sizes[i] = 0.85 + b * 2.8;
 
       const t = hash01(STAR_SEED, i, 4);
       if (t < 0.72) {
@@ -626,12 +649,11 @@ export class Sky {
     this.uMoonAmount.value = night;
 
     // --- Stars & band ---
-    // Keep the field full through the night and down to the horizon, fading it
-    // only as the sun climbs clear of it, so stars read at dusk and dawn instead
-    // of vanishing around +-6 deg of elevation (the old 0.1 / -0.1 pair).
-    const starFade = smoothstep(0.35, -0.05, this.sunElevation); // 0 only under a high sun, 1 at night
+    // Stars remain through dusk and down to the horizon. The base desert has a
+    // dense field; distance from civilisation fills the remaining faint stars.
+    const starFade = smoothstep(0.35, -0.05, this.sunElevation);
     this.uStarOpacity.value = starFade;
-    this.uStarDens.value = Math.min(1, Math.max(0, (g.starDensity - 1) / 3.5));
+    this.uStarDens.value = Math.min(1, 0.45 + Math.max(0, (g.starDensity - 1) / 6.5));
     this.uBandOpacity.value = starFade * g.galaxy;
 
     // --- Aurora (skip the draw entirely when the gradient is zero) ---
@@ -686,7 +708,27 @@ export class Sky {
     // metres away and the shadow camera no longer looks at you, so shadows
     // vanish. Follow the camera every frame to keep shadows alive anywhere.
     this._targetPos.set(cameraX, cameraY, cameraZ);
-    this.sunLight.position.copy(this._lightDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
+
+    // Shadow direction: the light's own direction, with its elevation lifted to
+    // SHADOW_MIN_ELEVATION so a horizon sun cannot stretch every shadow across the
+    // whole frame (see the constants). Azimuth is untouched, so shadows still fall
+    // away from the sun; only their length is capped. The light's POSITION is what
+    // three derives the shadow direction from, so this is the one place to do it —
+    // the disc, colour and intensity above are all left alone.
+    const dir = this._lightDir;
+    const horizontal = Math.hypot(dir.x, dir.z);
+    const elevation = Math.atan2(dir.y, horizontal);
+    if (elevation < SHADOW_MIN_ELEVATION && horizontal > 1e-4) {
+      const flat = Math.cos(SHADOW_MIN_ELEVATION) / horizontal;
+      this._shadowDir.set(dir.x * flat, Math.sin(SHADOW_MIN_ELEVATION), dir.z * flat);
+    } else {
+      this._shadowDir.copy(dir);
+    }
+    this.sunLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
+    // Fade the whole shadow out as the true sun sinks: at that point the ground is
+    // in general shade anyway, and a clamped shadow under a horizon sun is the one
+    // case where the cheat above would be visible.
+    this.sunLight.shadow.intensity = smoothstep(0, SHADOW_FADE_ELEVATION, Math.abs(this.sunElevation));
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
   }

@@ -49,39 +49,64 @@ const DEJUNES = '/models/dejunes';
  * the ground is higher up, and the tyre visibly sinks into the road. Static sag is
  * `g / (4 * stiffness)`, so the spring must have several times that in reserve:
  *
- *   stiffness 15 -> sag 164 mm against 200 mm of travel: 36 mm of reserve, sank on
- *                   any dip or weight transfer.
- *   stiffness 24 -> sag 102 mm against 240 mm: 138 mm of reserve, which is a kerb
- *                   strike's worth and never bottoms in ordinary desert driving.
+ *   stiffness 15 -> sag 164 mm; with only 200 mm of travel that left 36 mm of
+ *                   reserve and sank on any dip or weight transfer.
+ *   stiffness 17 -> sag 144 mm against 300 mm: 156 mm of reserve, a kerb strike's
+ *                   worth, and it never bottoms in ordinary desert driving.
  *
  * Droop (the same number, extending) only affects an airborne wheel hanging low,
  * which is what an airborne wheel should do — it was never the sinking.
+ *
+ * ---- the era ----
+ *
+ * These are 1960s-80s springs: SOFT, on dampers past their best. The rates came
+ * down and the travel went UP to pay for the extra sag, per the rule above — a soft
+ * spring that bottoms out is a hard spring at the worst possible moment.
+ *
+ * ---- damping is not optional ----
+ *
+ * `compression` and `relaxation` are damping coefficients in 1/s, and Rapier scales
+ * both by chassis mass exactly like the spring rate, so what matters is their size
+ * against CRITICAL damping, which is `2 * sqrt(stiffness)`. That is the number to
+ * think in, and ignoring it is how this file ended up with a pogo stick: 0.62 against
+ * a critical 8.25 is SEVEN PERCENT damped, and a 0.7 Hz body mode at 7% rings for
+ * three seconds. Measured on the bench, a 0.3 m drop took 3.0 s to stop moving, so
+ * on dune terrain the car simply never stopped moving.
+ *
+ * These are set as a fraction of critical instead: 0.35 in compression, 0.45 in
+ * rebound (real dampers are rebound-biased, which is what stops a soft spring
+ * throwing the body back up after a bump). Soft and floaty, still period — but it
+ * settles, and the bench says a drop is over in well under a second.
  */
 
 const SUSP_CAR: SuspensionTuning = {
   restLength: 0.3,
-  maxTravel: 0.24,
-  stiffness: 24,
-  compression: 0.9,
-  relaxation: 1.2,
+  maxTravel: 0.3,
+  stiffness: 17,
+  // Critical damping at k=17 is 8.25; these are 0.35 and 0.45 of it.
+  compression: 2.9,
+  relaxation: 3.7,
   maxForce: 26000,
 };
 
+/** "Sport" in this era means a firm saloon, not a modern chassis. */
 const SUSP_SPORT: SuspensionTuning = {
   restLength: 0.28,
-  maxTravel: 0.24,
-  stiffness: 32,
-  compression: 1.0,
-  relaxation: 1.35,
+  maxTravel: 0.26,
+  stiffness: 24,
+  // Critical damping at k=24 is 9.8.
+  compression: 3.6,
+  relaxation: 4.6,
   maxForce: 30000,
 };
 
 const SUSP_TRUCK: SuspensionTuning = {
   restLength: 0.38,
-  maxTravel: 0.3,
-  stiffness: 20,
-  compression: 0.85,
-  relaxation: 1.15,
+  maxTravel: 0.36,
+  stiffness: 15,
+  // Critical damping at k=15 is 7.75.
+  compression: 2.7,
+  relaxation: 3.5,
   maxForce: 42000,
 };
 
@@ -147,6 +172,21 @@ export interface CarModelDef {
   readonly bodyClass: BodyClass;
   /** Uniform model-units-to-metres scale. */
   readonly scale: number;
+  /**
+   * Yaw applied to the imported model before it is measured, radians.
+   *
+   * The game drives toward +Z, so a model authored nose-first down -Z arrives
+   * back to front: it drove in reverse, its hood camera looked out of the boot and
+   * its front axle steered from the rear. Two of the DeJunes bodies are authored
+   * that way (`Math.PI` below), which nothing in the file declares — a body is just
+   * a mesh, and only looking at it tells you which end the lights are on.
+   *
+   * It is applied before measurement rather than at draw time on purpose. Every
+   * derived quantity — the chassis box, which axle is the front one, the gizmo
+   * anchors, the hood camera — comes out of the measured geometry, so rotating the
+   * geometry first is what keeps all of them agreeing with each other.
+   */
+  readonly yaw?: number;
   /** Kerb mass, kg. Complete vehicle — there are no parts left to add to it. */
   readonly mass: number;
   /** Engine and gearbox, by part-variant id, so the specs live in one table. */
@@ -167,10 +207,24 @@ export interface CarModelDef {
    */
   readonly viewFrac: readonly [number, number, number];
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
+  /**
+   * Whether the player may spawn this model from the pause menu or the touch CAR
+   * button. False does NOT remove it from the world: the PSX pack stays in the
+   * wreck fields and roadside debris, where its flat-shaded, low-detail bodies are
+   * exactly right for something half-buried in sand and never looked at closely.
+   * What they are not is a car anyone would choose to drive when the rest of the
+   * catalogue is available, so they are off the menu and still in the desert.
+   */
+  readonly spawnable: boolean;
 }
 
 /** Shared defaults; every entry below states only what makes it itself. */
-type Entry = Omit<CarModelDef, 'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors'> & {
+type Entry = Omit<
+  CarModelDef,
+  'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors' | 'spawnable'
+> & {
+  /** Absent means spawnable: only the debris-only packs say otherwise. */
+  readonly spawnable?: boolean;
   /** Model file name within the pack directory named by `dir`. */
   readonly glb?: string;
   /** Directory containing `glb`; required for imported models. */
@@ -382,9 +436,16 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
 ];
 
-/** One entry per body, plus one per extra livery over the same geometry. */
+/**
+ * One entry per body, plus one per extra livery over the same geometry.
+ *
+ * The whole pack is `spawnable: false`: these are the wrecks in the desert, not
+ * showroom stock. Every one of them still loads, drives and can be driven if the
+ * player digs one out — they are simply off the spawn menu.
+ */
 const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
   const base: Entry = {
+    spawnable: false,
     id: spec.id,
     label: spec.label,
     dir: PSX,
@@ -416,6 +477,20 @@ const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
  * DeJunes. `car.glb` is the converted OBJ (2.53 long, so scaled up); the wheel is
  * the pack's own. The FBX models it ships alongside are loaded straight from the
  * files the author published.
+ *
+ * ---- scale ----
+ *
+ * These bodies are drawn CHUNKY: the taxi is 561 units long on 251 wide, a 2.24:1
+ * footprint where a real saloon is 2.6:1, and the sports car is 2.03:1. Scaling
+ * them to a believable LENGTH therefore made them 2.1-2.2 m wide and 1.6-1.7 m
+ * tall — wider than the Quaternius SUV and half a metre taller than its saloon,
+ * which is the "too huge" everyone saw: side by side the excess reads as width and
+ * height, not length.
+ *
+ * So they are scaled to WIDTH instead, 1.95 m across (the two with mirrors measure
+ * mirror to mirror, so their bodies land near the 1.81 m Quaternius saloon), and
+ * length falls out at 3.96-4.36 m. Heights come down to 1.43-1.56 m, inside the
+ * pack range they park next to.
  */
 const DEJUNES_CARS: readonly Entry[] = [
   {
@@ -423,6 +498,8 @@ const DEJUNES_CARS: readonly Entry[] = [
     label: 'DeJunes compact',
     dir: DEJUNES,
     glb: 'car.glb',
+    // Authored nose-first down -Z: its taillights were leading the way.
+    yaw: Math.PI,
     bodyClass: 'car',
     mass: 1060,
     engineId: 'engine_i4_1600',
@@ -435,20 +512,29 @@ const DEJUNES_CARS: readonly Entry[] = [
     separateWheels: { file: `${DEJUNES}/wheel.glb`, ...PSX_AXLES },
   },
   // The FBX trio ships in centimetres (its bodies measure 337-561 units long), so
-  // the scales here are that conversion plus a nudge to a believable length. They
+  // the scales here are that conversion plus the width fit described above. They
   // carry their own wheels under the modeller's names, hence `detectWheels`.
+  //
+  // Textures: each FBX names its own maps per material. The taxi's resolve (it ships
+  // `paintjob.png` for the body and `paintjob_plate.png` for the plate, and the
+  // loader finds both beside the model), so it needs no `textureFile` — overriding
+  // it with one map was what put body paint on the number plate. `car.fbx` asks for
+  // a `Paintjob2.png` the pack never shipped, so its paint slot IS overridden, with
+  // one of the five liveries it did ship.
   {
     id: 'dj_sports',
     label: 'DeJunes sports car',
     dir: DEJUNES,
     glb: 'porsche.fbx',
+    // Also authored nose-first down -Z; the spoiler was out front.
+    yaw: Math.PI,
     bodyClass: 'car',
     mass: 1240,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_manual5',
     tankLitres: 62,
     wheelGrip: 1.18,
-    scale: 0.0131,
+    scale: 0.01175,
     suspension: SUSP_SPORT,
     steerLock: 0.58,
     rearDriveBias: 1,
@@ -459,14 +545,13 @@ const DEJUNES_CARS: readonly Entry[] = [
     label: 'DeJunes taxi',
     dir: DEJUNES,
     glb: 'taxi.fbx',
-    textureFile: `${DEJUNES}/paintjob.png`,
     bodyClass: 'car',
     mass: 1340,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_auto3',
     tankLitres: 60,
     wheelGrip: 0.98,
-    scale: 0.0084,
+    scale: 0.00777,
     steerLock: 0.58,
     rearDriveBias: 1,
     detectWheels: true,
@@ -483,7 +568,7 @@ const DEJUNES_CARS: readonly Entry[] = [
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
     wheelGrip: 1.05,
-    scale: 0.0088,
+    scale: 0.00777,
     steerLock: 0.58,
     rearDriveBias: 1,
     detectWheels: true,
@@ -689,6 +774,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   detectWheels: e.detectWheels,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
+  yaw: e.yaw,
   mass: e.mass,
   engineId: e.engineId,
   gearboxId: e.gearboxId,
@@ -699,7 +785,17 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   rearDriveBias: e.rearDriveBias,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
+  spawnable: e.spawnable ?? true,
 }));
+
+/**
+ * What the player may spawn. Everything else in `CAR_MODELS` still generates: wreck
+ * fields, roadside debris and POI scenery all draw from the full catalogue, so the
+ * PSX bodies keep appearing in the desert without being on the menu.
+ */
+export const SPAWNABLE_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
+  (m) => m.spawnable,
+);
 
 const BY_ID = new Map(CAR_MODELS.map((m) => [m.id, m]));
 

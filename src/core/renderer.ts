@@ -87,6 +87,22 @@ const HAZE_GROUND_FALLOFF = 0.3;
  */
 const HAZE_FOREGROUND_FADE = 0.22;
 
+// ---------------------------------------------------------------------------
+// Ink outlines: the second half of the drawn-landscape look, in the same pass.
+// ---------------------------------------------------------------------------
+
+/**
+ * How dark an outline gets, 0 = off. The line is drawn by scaling the pixel's own
+ * colour down rather than compositing black, so a line across sand stays sand.
+ */
+const INK_STRENGTH = 0.6;
+/**
+ * Relative luminance gradient that counts as an edge. Low enough to catch a dune
+ * against the sky and the ground's own shading bands, high enough that the road's
+ * aggregate texture and the stipple are not outlined dot by dot.
+ */
+const INK_THRESHOLD = 0.14;
+
 /** Fullscreen triangle: three clip-space vertices, one corner padded to cover
  *  the whole frame. `uv` carries the screen UV (0 = bottom, 1 = top). */
 const HAZE_VERTEX = /* glsl */ `
@@ -108,6 +124,8 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uSkyFalloff;
   uniform float uGroundFalloff;
   uniform float uForegroundFade;
+  uniform float uInkStrength;
+  uniform float uInkThreshold;
 
   varying vec2 vUv;
 
@@ -162,6 +180,40 @@ const HAZE_FRAGMENT = /* glsl */ `
     return vec2(x, y);
   }
 
+  /**
+   * Ink outline strength at a pixel, from the colour gradient around it.
+   *
+   * A Sobel on the already-shaded image, not on a depth buffer, and deliberately:
+   * the ground's own shading is banded (render/comic.ts), so its band boundaries ARE
+   * the strata edges a pen would draw, and a colour edge detector inks both those and
+   * every silhouette in one pass. It also survives MSAA, which sampling a depth
+   * texture alongside a multisampled colour target does not.
+   *
+   * Full RGB distance rather than luminance: a tan dune against a blue sky is a
+   * enormous HUE step and barely a brightness one, so a luminance-only detector left
+   * the one edge that matters most — the skyline — undrawn.
+   *
+   * Taps are a pixel and a half out, so the line lands on the edge itself rather than
+   * on the antialiasing gradient beside it.
+   */
+  float inkEdge(vec2 uv, vec2 texel) {
+    vec2 d = texel * 1.5;
+    vec3 c  = texture2D(tDiffuse, uv).rgb;
+    vec3 cx = texture2D(tDiffuse, uv + vec2(d.x, 0.0)).rgb;
+    vec3 cX = texture2D(tDiffuse, uv - vec2(d.x, 0.0)).rgb;
+    vec3 cy = texture2D(tDiffuse, uv + vec2(0.0, d.y)).rgb;
+    vec3 cY = texture2D(tDiffuse, uv - vec2(0.0, d.y)).rgb;
+    // Central differences rather than a full 3x3 kernel: four taps instead of
+    // eight, and on a banded image the diagonals add nothing but cost.
+    float grad = max(length(cx - cX), length(cy - cY));
+    // Relative, not absolute: a step of 0.05 matters in the shaded side of a dune
+    // and is invisible across bright sand, so it is measured against local
+    // brightness.
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float rel = grad / max(0.18, lum);
+    return smoothstep(uInkThreshold, uInkThreshold * 2.6, rel);
+  }
+
   void main() {
     // Cells are smaller and churn faster close to the ground, and the long
     // sight-lines near the horizon stack more of them along one ray. Scaling with
@@ -176,7 +228,18 @@ const HAZE_FRAGMENT = /* glsl */ `
     // texel — a pure passthrough.
     vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
     vec2 uv = clamp(vUv + offset, 0.0, 1.0);
-    gl_FragColor = texture2D(tDiffuse, uv);
+    vec4 color = texture2D(tDiffuse, uv);
+
+    // Ink is ground treatment. Rendering it only below the horizon leaves the sky
+    // (including every star point) outside the outline pass by construction.
+    if (uInkStrength > 0.0 && vUv.y <= uHorizon) {
+      float ink = inkEdge(uv, 1.0 / uResolution) * uInkStrength;
+      // The line is the surface's own colour driven down, not a black overlay:
+      // black lines on sand read as dirt, dark-sand lines read as ink.
+      color.rgb = mix(color.rgb, color.rgb * 0.34, ink);
+    }
+
+    gl_FragColor = color;
   }
 `;
 
@@ -253,6 +316,8 @@ export class Renderer {
         uSkyFalloff: { value: HAZE_SKY_FALLOFF },
         uGroundFalloff: { value: HAZE_GROUND_FALLOFF },
         uForegroundFade: { value: HAZE_FOREGROUND_FADE },
+        uInkStrength: { value: INK_STRENGTH },
+        uInkThreshold: { value: INK_THRESHOLD },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();

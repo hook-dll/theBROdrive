@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:http": "vite --mode http",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit"
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.185.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "typescript": "^5.9.2",
     "vite": "^8.2.2"
   }

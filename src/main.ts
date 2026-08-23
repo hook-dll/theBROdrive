@@ -9,6 +9,7 @@ import { spawnCarState } from './game/spawn';
 import { Inventory } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
+import { TouchControls } from './core/touch';
 import { carModelMeasure, preloadCarModels } from './render/carmodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -36,6 +37,7 @@ import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
 import { Vehicle } from './vehicle/vehicle';
+import { GameAudio } from './audio/gameaudio';
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -108,7 +110,14 @@ async function boot(): Promise<void> {
   await preloadCarModels();
   const renderer = new Renderer(canvas);
   const input = new InputReader(canvas);
+  input.setKeyBindings(world.state.settings.keyBindings);
+  input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   const hud = new Hud(uiRoot);
+  // Audio is created before anything can make a noise and lives for the session:
+  // its context starts suspended and the first click/keypress resumes it, so no
+  // caller ever has to ask whether sound is available yet.
+  const audio = new GameAudio();
+  audio.applySettings(world.state.settings);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer);
   const inventory = new Inventory();
   const loose = new LoosePartField(physics, world, renderer.scene);
@@ -211,6 +220,7 @@ async function boot(): Promise<void> {
       camera,
       inventory,
       vehicles,
+      audio,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -253,7 +263,6 @@ async function boot(): Promise<void> {
   let recenterAccum = false;
   let recordTimer = 0;
   let paused = false;
-  let lightsOn = false;
   let prompt: string | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = world.state.player.s;
@@ -283,10 +292,7 @@ async function boot(): Promise<void> {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
       driving.fixedUpdate(dt, f);
-      if (f.toggleLights) {
-        lightsOn = !lightsOn;
-        driving.setLights(lightsOn);
-      }
+      if (f.toggleLights) driving.cycleHeadlights();
       if (f.cycleCamera) camera.cycleDriving();
     } else {
       player.setEnabled(true);
@@ -319,23 +325,41 @@ async function boot(): Promise<void> {
 
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
-    prompt = interaction.fixedUpdate(dt, f, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z).prompt;
+    const interacted = interaction.fixedUpdate(dt, f, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z);
+    prompt = interacted.prompt;
+    if (interacted.sound) audio.foley(interacted.sound);
+    audio.setContinuous(interacted.continuous);
+    // Footsteps come off the character controller's achieved speed, so they stop
+    // when the player does — including walking into a wall. Seated, there is no
+    // capsule moving and the voice is silent by construction.
+    audio.updateFoot(dt, driving ? 0 : player.groundSpeed, player.grounded);
+
+    // Radio: a car fitting, so the keys only do anything from the seat.
+    if (driving) {
+      if (f.radioToggle) hud.setToast(audio.toggleRadio());
+      if (f.radioNext) hud.setToast(audio.nextStation());
+    }
 
     // Shooting: the held item decides. A kill only enters the inventory if it fits,
     // so a full pack means the bird is lost rather than silently teleported in.
     const held = inventory.held;
     if (held && held.type === 'weapon' && f.usePrimary) {
       const shot = weapons.tryFire(held, f.useSecondary, eye, dir, birds, inventory, dt);
-      if (shot.result === 'fired' && shot.hit) {
-        const added = inventory.add({
-          type: 'quarry',
-          id: world.runtimePartId(),
-          species: shot.hit.species,
-          mass: shot.hit.mass,
-        });
-        hud.setToast(added ? `bagged a ${shot.hit.species}` : 'too heavy to carry');
+      if (shot.result === 'fired') {
+        audio.gunshot();
+        if (shot.hit) {
+          const added = inventory.add({
+            type: 'quarry',
+            id: world.runtimePartId(),
+            species: shot.hit.species,
+            mass: shot.hit.mass,
+          });
+          hud.setToast(added ? `bagged a ${shot.hit.species}` : 'too heavy to carry');
+        }
       } else if (shot.result === 'empty') {
+        audio.dryFire();
         weapons.reload(held, inventory);
+        audio.reload();
       }
     }
 
@@ -450,13 +474,21 @@ async function boot(): Promise<void> {
     const hazeT = Math.min(1, Math.max(0, (offRoad - FOG_RAMP_START) / (FOG_RAMP_END - FOG_RAMP_START)));
     renderer.fog.density *= 1 + hazeT * hazeT * (FOG_RAMP_MAX_SCALE - 1);
 
-    // Night signal: reuse the sky's existing threshold (the same one the lamps
-    // and headlights key off) rather than re-deriving dusk from timeOfDay. Lamps
-    // follow the camera so the lit pools track what is on screen; the budget then
-    // caps how many point lights actually render.
+    // Night lamps expose exactly three lit pools ahead and three behind the view.
+    // The renderer keeps six persistent slots, so crossing a lamp boundary does not
+    // change its light-shader permutation or hitch the frame.
     const night = sky.isNight ? 1 : 0;
     streamer.setLamps(night, cam.x, cam.z);
-    lightBudget.update(cam.x, cam.y, cam.z, night, frameDt);
+    const lampDirection = camera.eyeDirection;
+    lightBudget.update(
+      cam.x,
+      cam.y,
+      cam.z,
+      lampDirection.x,
+      lampDirection.z,
+      night,
+      streamer.lampRevision,
+    );
 
     if (driving) {
       const stats = driving.stats;
@@ -468,10 +500,17 @@ async function boot(): Promise<void> {
         fuelLitres: s.cars[drivingId!]?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
         engineRunning: driving.engineRunning,
+        handbrake: lastInput.handbrake,
       });
     } else {
       hud.setDriving(null);
     }
+
+    // Car audio follows the camera, not the simulation: whether the shell is
+    // between the listener and the noise is what decides how the engine, wind and
+    // tyres are filtered, and that is a view question.
+    audio.updateDriving(driving ? driving.audio : null, camera.mode === 'interior');
+    hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
     hud.setInventory(
@@ -523,14 +562,15 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     applySettings: (next) => {
       world.apply({ t: 'settings', settings: next });
-      // The reader caches an effective key table, so a rebind must be pushed to it;
-      // nothing else re-reads the bindings. The gearbox mode and day length are read
-      // from state every tick and need no push.
+      // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
+      input.setMouseSensitivity(world.state.settings.mouseSensitivity);
+      audio.applySettings(world.state.settings);
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
+    exportState: () => world.state,
     spawnVehicle: (request) => {
       // Put the car on the ground ahead of the view, not at the player's feet: a
       // chassis spawned inside the player (or inside the car being driven) would be
@@ -559,11 +599,18 @@ async function boot(): Promise<void> {
     },
   };
 
-  // Pause is deliberately outside InputReader: it must work without pointer lock.
-  window.addEventListener('keydown', (e) => {
-    if (e.code !== 'Escape' || paused) return;
+  /**
+   * Opens the pause overlay. Called by the Escape key and by the touch MENU button —
+   * deliberately outside InputReader, because it must work without pointer lock and
+   * while the fixed-step loop is stopped.
+   */
+  const openPause = (): void => {
+    if (paused) return;
     paused = true;
     loop.stop();
+    // Silence everything behind the overlay, radio included: the loop is stopped,
+    // so nothing would update the voices and they would hold their last value.
+    audio.setPaused(true);
     void (async () => {
       const s = world.state;
       const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
@@ -574,10 +621,31 @@ async function boot(): Promise<void> {
       }
       menu.hidePause();
       paused = false;
+      audio.setPaused(false);
       if (action !== 'quit') loop.start();
       else window.location.reload();
     })();
+  };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') openPause();
   });
+
+  // Touch: the overlay builds itself on the first touch, so this costs a listener
+  // and nothing else on a desktop. The CAR button spawns another of whatever the
+  // player is in — a phone has no room for the pause menu's picker and "another one
+  // of these" is the useful default — but only if that model is on the player's
+  // list. Sitting in a dug-out PSX wreck must not turn the button into a wreck
+  // dispenser, so anything debris-only falls back to the default car.
+  const touch = new TouchControls(uiRoot, canvas, {
+    spawnVehicle: () => {
+      const active = activeCar()?.vehicle.modelDef;
+      const modelId = active?.spawnable ? active.id : DEFAULT_CAR_MODEL_ID;
+      pauseHooks.spawnVehicle({ modelId });
+    },
+    pause: openPause,
+  });
+  input.attachTouch(touch);
 }
 
 

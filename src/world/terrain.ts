@@ -121,6 +121,37 @@ export class Terrain {
   }
 
   /**
+   * Open-desert relief at a point: dunes, ripples, grain and outcrops, with no road
+   * in it. Public because the far terrain mesh adds it per vertex to an anchor it
+   * interpolates on a coarse lattice (see `farAnchor`), which keeps the fine detail
+   * while paying for the expensive road projection only every few tens of metres.
+   */
+  reliefAt(x: number, z: number): number {
+    return this.relief(x, z);
+  }
+
+  /**
+   * The ROAD-derived part of open-desert height at a point, i.e. everything in
+   * `blend`'s `outer` except the relief itself: the centreline anchor, minus the
+   * relief at that anchor, plus the basin rim.
+   *
+   * `outer = farAnchor(...) + reliefAt(x, z)` exactly, so a caller past
+   * CORRIDOR_OUTER can split the height in two and treat the parts differently.
+   * This part is smooth over tens of metres — it is the road's own elevation and a
+   * smoothstepped rim — which is what makes interpolating it safe.
+   */
+  farAnchor(
+    x: number,
+    z: number,
+    centreX: number,
+    centreZ: number,
+    centreHeight: number,
+    dist: number,
+  ): number {
+    return centreHeight - this.relief(centreX, centreZ) + this.rimHeight(dist, x, z);
+  }
+
+  /**
    * Ground height at a world position.
    *
    * `hintS` is the caller's last known arclength; pass it for anything queried per

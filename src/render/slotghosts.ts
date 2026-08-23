@@ -1,21 +1,22 @@
 /**
- * Ghost previews and empty-anchor hints for the car the player is decorating.
+ * Ghost previews of the part in your hands, at every empty anchor on a car.
  *
- * A bare anchor is invisible until something is mounted on it, so a player cannot
- * tell where a gizmo goes. `AnchorGhosts` draws two kinds of translucent overlay,
- * both parented under the car's own scene group so they inherit its transform for
- * free:
+ * A bare anchor is invisible until something is mounted on it, so while the player
+ * is holding a part, a translucent copy of THAT part floats at every anchor it could
+ * go on; the one under the crosshair is brighter and pulses gently.
  *
- *  - When a part is held, a translucent copy of that part floats at every empty
- *    anchor; the anchor currently under the crosshair is brighter and pulses
- *    gently.
- *  - Otherwise, a small ring marks every empty anchor, so the mount points are
- *    discoverable even before the player has picked anything up.
+ * Nothing is drawn when nothing is held. There used to be a second mode — a small
+ * ring on every empty anchor, always on, so the mount points were discoverable
+ * before picking anything up — and it was wrong: every car in the world wore a
+ * constellation of circles at all times, which is UI clutter pretending to be
+ * scenery. The mount points announce themselves the moment they are relevant, which
+ * is when you have something to mount, and the interaction prompt names the anchor
+ * once you aim at it.
  *
- * Meshes are reused across frames: the set is rebuilt only when the held part,
- * the empty-anchor set or the vehicle changes, and the pulse is a material-opacity
+ * Meshes are reused across frames: the set is rebuilt only when the held part, the
+ * empty-anchor set or the vehicle changes, and the pulse is a material-opacity
  * tweak, never a rebuild. Ghost geometry comes from partmesh's shared cache and is
- * never disposed here; only this module's own materials and geometry are.
+ * never disposed here; only this module's own materials are.
  */
 import * as THREE from 'three';
 import type { PartInstance } from '../parts/registry';
@@ -23,7 +24,7 @@ import type { GizmoAnchor } from '../render/carmodel';
 import { createPartMesh } from './partmesh';
 import type { Vehicle } from '../vehicle/vehicle';
 
-type Mode = 'ghost' | 'marker' | 'none';
+type Mode = 'ghost' | 'none';
 
 /** Drawn after opaque geometry and most transparents, so previews show through. */
 const RENDER_ORDER = 900;
@@ -35,13 +36,6 @@ const TARGET_BASE_OPACITY = 0.45;
 const TARGET_PULSE_AMPLITUDE = 0.3;
 /** Radians/second; a gentle ~0.8 Hz pulse. */
 const PULSE_RATE = 5;
-
-const MARKER_COLOR = 0xffd27a;
-const MARKER_OPACITY = 0.26;
-const MARKER_RADIUS = 0.16;
-const MARKER_TUBE = 0.02;
-/** How far the hint ring floats above its anchor. */
-const MARKER_LIFT = 0.12;
 
 function makeGhostMaterial(color: number, opacity: number): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
@@ -66,8 +60,6 @@ export class AnchorGhosts {
 
   private ghostMaterial!: THREE.MeshBasicMaterial;
   private targetMaterial!: THREE.MeshBasicMaterial;
-  private markerMaterial!: THREE.MeshBasicMaterial;
-  private markerGeometry!: THREE.TorusGeometry;
 
   private mode: Mode = 'none';
   private setMask = 0;
@@ -121,26 +113,24 @@ export class AnchorGhosts {
       this.targetedAnchorId = null;
     }
 
-    // Gizmos are junk, not fitted parts: a held part previews at every empty
-    // anchor, and empty anchors are marked whenever nothing is held.
-    const heldPart = heldVariantId !== null;
+    // Nothing held, nothing drawn. Gizmos are junk rather than fitted parts, so any
+    // empty anchor takes whatever is in hand and every one of them previews it.
     let ghostMask = 0;
-    let markerMask = 0;
-    for (let i = 0; i < anchors.length; i++) {
-      const anchor = anchors[i];
-      if (gizmos[anchor.id] !== undefined) continue;
-      if (heldPart) ghostMask |= 1 << i;
-      else markerMask |= 1 << i;
+    if (heldVariantId !== null) {
+      for (let i = 0; i < anchors.length; i++) {
+        if (gizmos[anchors[i].id] !== undefined) continue;
+        ghostMask |= 1 << i;
+      }
     }
-    const mode: Mode = ghostMask !== 0 ? 'ghost' : markerMask !== 0 ? 'marker' : 'none';
-    const mask = mode === 'ghost' ? ghostMask : markerMask;
+    const mode: Mode = ghostMask !== 0 ? 'ghost' : 'none';
 
-    const rebuilt = this.mode !== mode || this.setMask !== mask || this.heldVariantId !== heldVariantId;
+    const rebuilt =
+      this.mode !== mode || this.setMask !== ghostMask || this.heldVariantId !== heldVariantId;
     if (rebuilt) {
       this.mode = mode;
-      this.setMask = mask;
+      this.setMask = ghostMask;
       this.heldVariantId = heldVariantId;
-      this.rebuild(anchors, heldVariantId, mode, mask);
+      this.rebuild(anchors, heldVariantId, ghostMask);
     }
 
     const retargeted = this.targetedAnchorId !== targetedAnchorId;
@@ -164,34 +154,22 @@ export class AnchorGhosts {
   // Internals
   // ---------------------------------------------------------------------------
 
-  private rebuild(anchors: readonly GizmoAnchor[], heldVariantId: string | null, mode: Mode, mask: number): void {
+  private rebuild(anchors: readonly GizmoAnchor[], heldVariantId: string | null, mask: number): void {
     this.clearGroup();
+    if (heldVariantId === null) return;
 
-    if (mode === 'ghost') {
-      for (let i = 0; i < anchors.length; i++) {
-        if ((mask & (1 << i)) === 0) continue;
-        const anchor = anchors[i];
-        const mesh = createPartMesh(heldVariantId!);
-        mesh.position.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
-        if (anchor.yaw) mesh.rotation.y = anchor.yaw;
-        mesh.name = `ghost:${anchor.id}`;
-        mesh.userData.anchorId = anchor.id;
-        this.root.add(mesh);
-      }
-      // Materials, shadow/raycast flags and render order are applied by
-      // applyTargetHighlight immediately after the rebuild.
-    } else if (mode === 'marker') {
-      for (let i = 0; i < anchors.length; i++) {
-        if ((mask & (1 << i)) === 0) continue;
-        const anchor = anchors[i];
-        const marker = new THREE.Mesh(this.markerGeometry, this.markerMaterial);
-        marker.position.set(anchor.pos[0], anchor.pos[1] + MARKER_LIFT, anchor.pos[2]);
-        if (anchor.yaw) marker.rotation.y = anchor.yaw;
-        marker.name = `ghost-marker:${anchor.id}`;
-        this.styleGroup(marker, this.markerMaterial);
-        this.root.add(marker);
-      }
+    for (let i = 0; i < anchors.length; i++) {
+      if ((mask & (1 << i)) === 0) continue;
+      const anchor = anchors[i];
+      const mesh = createPartMesh(heldVariantId);
+      mesh.position.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
+      if (anchor.yaw) mesh.rotation.y = anchor.yaw;
+      mesh.name = `ghost:${anchor.id}`;
+      mesh.userData.anchorId = anchor.id;
+      this.root.add(mesh);
     }
+    // Materials, shadow/raycast flags and render order are applied by
+    // applyTargetHighlight immediately after the rebuild.
   }
 
   private applyTargetHighlight(targetedAnchorId: string | null): void {
@@ -227,15 +205,10 @@ export class AnchorGhosts {
   private createResources(): void {
     this.ghostMaterial = makeGhostMaterial(GHOST_COLOR, GHOST_OPACITY);
     this.targetMaterial = makeGhostMaterial(TARGET_COLOR, TARGET_BASE_OPACITY);
-    this.markerMaterial = makeGhostMaterial(MARKER_COLOR, MARKER_OPACITY);
-    this.markerGeometry = new THREE.TorusGeometry(MARKER_RADIUS, MARKER_TUBE, 8, 32);
-    this.markerGeometry.rotateX(-Math.PI / 2);
   }
 
   private disposeOwnedResources(): void {
     this.ghostMaterial?.dispose();
     this.targetMaterial?.dispose();
-    this.markerMaterial?.dispose();
-    this.markerGeometry?.dispose();
   }
 }

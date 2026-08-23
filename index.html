@@ -2,13 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `user-scalable=no` and `viewport-fit=cover`: a driving game cannot have the
+         page pinch-zoom under the player's thumbs, and the canvas should reach into
+         the notch area rather than sit in a letterbox. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#14100b" />
+    <!-- iOS: run full-screen from the home screen, with a dark status bar. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>the BRO drive</title>
     <link rel="stylesheet" href="/src/ui/hud.css" />
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
+    <!-- Shown by CSS alone, on touch devices in portrait (see hud.css). Markup lives
+         here rather than in JS so it is on screen before the bundle has parsed: the
+         first thing a phone player sees is "turn me", not a blank canvas. -->
+    <div id="rotate-hint">
+      <div class="rotate-glyph"></div>
+      <div class="rotate-text">turn your device</div>
+      <div class="rotate-sub">
+        the BRO drive is played in landscape · tilt to steer, right half to go, left half to
+        back off
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

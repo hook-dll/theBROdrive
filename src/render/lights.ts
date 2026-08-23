@@ -1,113 +1,154 @@
 import * as THREE from 'three';
 
 /**
- * GPU light budget.
+ * GPU street-light budget.
  *
- * Forward rendering evaluates every visible light for every fragment, and the
- * compiled shader program is specialised on the number of lights present — so
- * the 28 point lights the streamer keeps alive (two per pole chunk plus the
- * homestead pair) cost 28 per-fragment evaluations even when most of them are
- * intensity 0 or hundreds of metres away. Setting `light.visible = false`
- * removes a light from three.js's render traversal entirely: it drops out of
- * both the per-fragment loop and the compiled program, which is the whole point
- * of this class.
- *
- * The scene graph is re-scanned at most a few times per second (point lights
- * only ever come from streamed chunks, and every light is born invisible — see
- * the chunk providers — so an unscanned light is simply not lit); the per-frame
- * work is distance compares over that cached array.
+ * Lamp chunks expose invisible PointLight markers. This class copies the nearest
+ * six marker states into six persistent renderer lights: three in front of the
+ * view and three behind it. Their count stays fixed for an entire night, so Three
+ * compiles the point-light shader once at dusk instead of recompiling whenever a
+ * streamed lamp crosses the old nearest-light boundary.
  */
 
-/** Point lights kept on at night. Four covers the homestead pair plus the two
- * nearest lamp pools in one frame; beyond ~5 the per-fragment cost buys nothing
- * the eye can resolve, and every extra light also inflates the compiled program. */
-const MAX_POINT_LIGHTS = 4;
-/** Lights beyond this are never enabled — their decay spheres (34 m lamps, 16 m
- * house lights) cannot reach the camera's view from further away. */
-const CUTOFF_DISTANCE = 45;
+/** Three pools ahead and three behind the player. */
+const STREETLIGHT_SLOT_COUNT = 6;
+const LIGHTS_PER_DIRECTION = STREETLIGHT_SLOT_COUNT / 2;
+/** Three concrete-era poles can be ~255 m away. */
+const CUTOFF_DISTANCE = 300;
 const CUTOFF_DISTANCE_SQ = CUTOFF_DISTANCE * CUTOFF_DISTANCE;
-/** Seconds between scene re-scans. The chunk streamer is the only point-light
- * source, so this is a safety net rather than a hot path. */
-const RE_SCAN_INTERVAL = 0.5;
 
 export class LightBudget {
-  private readonly scene: THREE.Scene;
-  /** Cached point lights, refreshed by `rescan`. Never rebuilt per frame. */
-  private readonly points: THREE.PointLight[] = [];
-  /** Squared camera distance per cached light, this frame. Reused, no GC. */
+  /** Invisible source markers from streamed chunks and the homestead. */
+  private readonly sources: THREE.PointLight[] = [];
+  /** The only point lights the renderer ever sees at night. */
+  private readonly slots: THREE.PointLight[] = [];
   private readonly distSq: number[] = [];
-  /** Selection marks for this frame (1 = enabled). Reused. */
+  /** World positions mirror source markers without allocating during selection. */
+  private readonly sourceWorld: THREE.Vector3[] = [];
   private chosen = new Uint8Array(0);
-  /** 0 forces a re-scan on the first update, so lights built before the render
-   * loop starts are picked up immediately. */
-  private scanTimer = 0;
+  private sourceRevision = -1;
+  private slotsVisible = false;
 
-  constructor(scene: THREE.Scene) {
-    this.scene = scene;
+  constructor(private readonly scene: THREE.Scene) {
+    for (let i = 0; i < STREETLIGHT_SLOT_COUNT; i++) {
+      const slot = new THREE.PointLight(0xffc37a, 0, 46, 2);
+      slot.visible = false;
+      slot.userData.lightBudgetSlot = true;
+      this.slots.push(slot);
+      scene.add(slot);
+    }
   }
 
-  /** Re-collect the point-light list. Called by the periodic timer (and by the
-   * caller on chunk changes), never per frame. */
-  rescan(): void {
-    this.points.length = 0;
-    this.scene.traverse((obj) => {
-      if ((obj as THREE.PointLight).isPointLight) this.points.push(obj as THREE.PointLight);
+  /** Called only after chunks are added or removed, never as a periodic traversal. */
+  private rescan(revision: number): void {
+    if (revision === this.sourceRevision) return;
+    this.sourceRevision = revision;
+    this.sources.length = 0;
+    this.scene.traverse((object) => {
+      const point = object as THREE.PointLight;
+      if (point.isPointLight && point.userData.lightBudgetSlot !== true) this.sources.push(point);
     });
   }
 
   /**
-   * Per-frame budget. `nightFactor` is the existing day/night signal
-   * (Sky.isNight, 0 or 1): while the sun is up no point light is visible at all,
-   * leaving only the sun and the hemisphere in the fragment loop. At night only
-   * the `MAX_POINT_LIGHTS` nearest lit lights within the cutoff stay enabled — a
-   * light with intensity 0 (a lamp with no working fixture nearby) would cost
-   * the loop and show nothing, so it is never chosen.
+   * Updates the fixed streetlight slots. Source markers stay invisible and are
+   * never counted by Three's forward-light shader.
    */
-  update(x: number, y: number, z: number, nightFactor: number, dt: number): void {
-    this.scanTimer -= dt;
-    if (this.scanTimer <= 0) {
-      this.scanTimer = RE_SCAN_INTERVAL;
-      this.rescan();
+  update(
+    x: number,
+    y: number,
+    z: number,
+    forwardX: number,
+    forwardZ: number,
+    nightFactor: number,
+    sourceRevision: number,
+  ): void {
+    this.rescan(sourceRevision);
+
+    const night = nightFactor > 0;
+    if (this.slotsVisible !== night) {
+      this.slotsVisible = night;
+      for (const slot of this.slots) slot.visible = night;
+    }
+    if (!night) {
+      for (const slot of this.slots) {
+        if (slot.intensity !== 0) slot.intensity = 0;
+      }
+      return;
     }
 
-    const count = this.points.length;
-    if (count === 0) return;
+    const count = this.sources.length;
     if (this.chosen.length < count) this.chosen = new Uint8Array(count);
-
-    // Distance pass over the cached array — the only per-frame scene work.
     if (this.distSq.length < count) this.distSq.length = count;
+    while (this.sourceWorld.length < count) this.sourceWorld.push(new THREE.Vector3());
+
+    const viewLength = Math.hypot(forwardX, forwardZ);
+    const fx = viewLength > 1e-4 ? forwardX / viewLength : 0;
+    const fz = viewLength > 1e-4 ? forwardZ / viewLength : 1;
     for (let i = 0; i < count; i++) {
-      const p = this.points[i].position;
-      const dx = p.x - x;
-      const dy = p.y - y;
-      const dz = p.z - z;
+      this.sources[i].getWorldPosition(this.sourceWorld[i]);
+      const world = this.sourceWorld[i];
+      const dx = world.x - x;
+      const dy = world.y - y;
+      const dz = world.z - z;
       this.distSq[i] = dx * dx + dy * dy + dz * dz;
     }
 
-    if (nightFactor > 0) {
-      // Greedy nearest-first selection: N×count compares on ≤30 lights is nothing.
-      for (let k = 0; k < MAX_POINT_LIGHTS; k++) {
+    let slotIndex = 0;
+    for (let direction = 0; direction < 2; direction++) {
+      const front = direction === 0;
+      for (let k = 0; k < LIGHTS_PER_DIRECTION; k++) {
         let best = -1;
-        let bestD = CUTOFF_DISTANCE_SQ;
+        let bestDistance = CUTOFF_DISTANCE_SQ;
         for (let i = 0; i < count; i++) {
-          if (this.chosen[i] !== 0 || this.points[i].intensity <= 0) continue;
-          const d = this.distSq[i];
-          if (d <= bestD) {
-            bestD = d;
+          const source = this.sources[i];
+          if (this.chosen[i] !== 0 || source.intensity <= 0) continue;
+          const world = this.sourceWorld[i];
+          const dot = (world.x - x) * fx + (world.z - z) * fz;
+          if ((front ? dot >= 0 : dot < 0) && this.distSq[i] <= bestDistance) {
+            bestDistance = this.distSq[i];
             best = i;
           }
         }
-        if (best < 0) break;
-        this.chosen[best] = 1;
+        if (best >= 0) this.assignSlot(slotIndex++, best);
       }
     }
 
-    // Apply visibility, writing only what changed.
-    for (let i = 0; i < count; i++) {
-      const want = nightFactor > 0 && this.chosen[i] === 1;
-      const light = this.points[i];
-      if (light.visible !== want) light.visible = want;
-      if (this.chosen[i] !== 0) this.chosen[i] = 0;
+    // At an end of the road or in a sparse stretch one direction may have fewer
+    // lamps. Fill remaining slots with the closest eligible fixtures instead.
+    while (slotIndex < STREETLIGHT_SLOT_COUNT) {
+      let best = -1;
+      let bestDistance = CUTOFF_DISTANCE_SQ;
+      for (let i = 0; i < count; i++) {
+        if (this.chosen[i] !== 0 || this.sources[i].intensity <= 0) continue;
+        if (this.distSq[i] <= bestDistance) {
+          bestDistance = this.distSq[i];
+          best = i;
+        }
+      }
+      this.assignSlot(slotIndex++, best);
     }
+
+    for (let i = 0; i < count; i++) this.chosen[i] = 0;
+  }
+
+  private assignSlot(slotIndex: number, sourceIndex: number): void {
+    const slot = this.slots[slotIndex];
+    const source = sourceIndex >= 0 ? this.sources[sourceIndex] : null;
+    if (sourceIndex >= 0) this.chosen[sourceIndex] = 1;
+    const intensity = source?.intensity ?? 0;
+    if (slot.intensity !== intensity) slot.intensity = intensity;
+    if (!source) return;
+    const world = this.sourceWorld[sourceIndex];
+    if (
+      slot.position.x !== world.x ||
+      slot.position.y !== world.y ||
+      slot.position.z !== world.z
+    ) {
+      slot.position.copy(world);
+    }
+    if (slot.distance !== source.distance) slot.distance = source.distance;
+    if (slot.decay !== source.decay) slot.decay = source.decay;
+    if (!slot.color.equals(source.color)) slot.color.copy(source.color);
   }
 }

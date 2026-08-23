@@ -9,6 +9,7 @@ import { applyBrush, applySponge, variant, RUST_CLEAN_EPSILON, BRUSH_DIRT_FLOOR 
 import type { LoosePartField } from '../parts/loose';
 import type { Vehicle } from '../vehicle/vehicle';
 import { setCondition } from '../render/materials';
+import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 
 /** How far the eye ray reaches for picking. */
@@ -55,10 +56,23 @@ type Target =
   | { kind: 'loose-item'; itemId: string }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
+/**
+ * What one tick of interaction produced: the prompt to draw, at most one
+ * discrete sound (a pickup, a door, a bolt going in) and whichever continuous
+ * action is being held (scrubbing, pouring). The sounds are reported rather than
+ * played here — Interaction owns the world, not the audio device.
+ */
+export interface InteractionResult {
+  prompt: string | null;
+  sound: FoleyEvent | null;
+  continuous: FoleyContinuous;
+}
+
 interface Resolved {
   target: Target;
   vehicle: Vehicle | null;
   carId: string | null;
+  /** Distance from the eye to the car's chassis centre, metres. */
   vehicleDist: number;
 }
 
@@ -87,6 +101,9 @@ export class Interaction {
   private readonly tScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
   private readonly vScratch = new THREE.Vector3();
+  /** This tick's discrete sound and held action; reset at the top of every tick. */
+  private sound: FoleyEvent | null = null;
+  private continuous: FoleyContinuous = null;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -110,17 +127,19 @@ export class Interaction {
     dirX: number,
     dirY: number,
     dirZ: number,
-  ): { prompt: string | null } {
+  ): InteractionResult {
     const interactPressed = input.interact && !this.prevInteract;
     const mountPressed = input.mount && !this.prevMount;
     const dropPressed = input.dropItem && !this.prevDrop;
     this.prevInteract = input.interact;
     this.prevMount = input.mount;
     this.prevDrop = input.dropItem;
+    this.sound = null;
+    this.continuous = null;
 
     if (this.world.state.player.drivingCarId) {
       if (interactPressed) this.tryExit();
-      return { prompt: '[E] exit' };
+      return { prompt: null, sound: this.sound, continuous: null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -133,7 +152,7 @@ export class Interaction {
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
 
-    return { prompt };
+    return { prompt, sound: this.sound, continuous: this.continuous };
   }
 
   private resolve(
@@ -333,11 +352,8 @@ export class Interaction {
       }
     }
 
-    // No specific target: the model's doors are baked into the shell, so a nearby
-    // car is always enterable from any side.
-    if (resolved.vehicle && resolved.carId && resolved.vehicleDist < VEHICLE_RANGE) {
-      return '[E] enter car';
-    }
+    // Car entry remains bound to the interaction key, but vehicle prompts are
+    // deliberately absent to keep the driving/on-foot HUD free of enter hints.
     return null;
   }
 
@@ -369,6 +385,7 @@ export class Interaction {
     } else {
       return; // wrench does nothing continuous.
     }
+    this.continuous = 'scrub';
     this.applyConditionVisual(resolved, part);
     this.conditionEmitTimer += dt;
     if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
@@ -391,6 +408,7 @@ export class Interaction {
     const poured = target - car.fuelLitres;
     if (poured <= 0) return; // tank full
     can.litres -= poured;
+    this.continuous = 'pour';
     this.world.apply({ t: 'car_fuel', carId: t.carId, litres: target });
   }
 
@@ -402,14 +420,26 @@ export class Interaction {
       const loose = this.world.state.looseParts[t.partId];
       if (!loose) return;
       const item: PartItem = { type: 'part', id: loose.part.id, part: loose.part };
-      if (this.inventory.add(item)) this.loose.remove(loose.part.id);
+      // A refused pickup is as informative as a successful one: it is the only
+      // feedback that the pack is full, besides the prompt already saying so.
+      if (this.inventory.add(item)) {
+        this.loose.remove(loose.part.id);
+        this.sound = 'pickup';
+      } else {
+        this.sound = 'refused';
+      }
       return;
     }
 
     if (t.kind === 'loose-item') {
       const loose = this.world.state.looseItems[t.itemId];
       if (!loose) return;
-      if (this.inventory.add(loose.item)) this.loose.remove(loose.item.id);
+      if (this.inventory.add(loose.item)) {
+        this.loose.remove(loose.item.id);
+        this.sound = 'pickup';
+      } else {
+        this.sound = 'refused';
+      }
       return;
     }
 
@@ -462,6 +492,7 @@ export class Interaction {
     this.inventory.remove(held.id);
     if (held.type === 'part') this.loose.spawn(held.part, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
     else this.loose.spawnItem(held, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
+    this.sound = 'drop';
   }
 
   private attach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
@@ -471,6 +502,7 @@ export class Interaction {
     this.world.apply({ t: 'gizmo_attach', carId, anchor: anchorId, part });
     this.inventory.remove(part.id);
     resolved.vehicle.rebuild();
+    this.sound = 'mount';
   }
 
   private detach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
@@ -484,6 +516,7 @@ export class Interaction {
     // Drop the removed gizmo into the loose field at its anchor's world position.
     this.loose.spawn(part, this.vScratch.x + t.x, this.vScratch.y + t.y, this.vScratch.z + t.z);
     resolved.vehicle.rebuild();
+    this.sound = 'detach';
   }
 
   private targetPart(resolved: Resolved): PartInstance | null {
@@ -515,6 +548,7 @@ export class Interaction {
     if (resolved.vehicleDist >= VEHICLE_RANGE) return;
     this.world.apply({ t: 'enter_car', carId: resolved.carId });
     this.player?.setEnabled(false);
+    this.sound = 'enter-car';
   }
 
   private tryExit(): void {
@@ -523,6 +557,7 @@ export class Interaction {
     const vehicle = this.getVehicle();
     if (!vehicle) return;
     this.world.apply({ t: 'exit_car' });
+    this.sound = 'exit-car';
     const exit = this.computeExitPosition(carId, vehicle);
     if (this.player) {
       this.player.setEnabled(true);

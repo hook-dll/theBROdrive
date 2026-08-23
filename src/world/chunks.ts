@@ -89,6 +89,8 @@ export class ChunkStreamer {
   private readonly built = new Map<number, BuiltChunk>();
   private readonly buildQueue: number[] = [];
   private readonly lastChunkIndex: number;
+  /** Increments only when scene-owned lamp sources are added or removed. */
+  private lightRevision = 0;
 
   constructor(
     private readonly road: Road,
@@ -102,6 +104,10 @@ export class ChunkStreamer {
 
   register(provider: ChunkProvider): void {
     this.providers.push(provider);
+  }
+
+  get lampRevision(): number {
+    return this.lightRevision;
   }
 
   /**
@@ -131,6 +137,7 @@ export class ChunkStreamer {
       const needsPhysics = Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
       if (!wanted || chunk.hasPhysics !== needsPhysics) {
         this.teardown(chunk);
+        this.lightRevision++;
         this.built.delete(index);
       }
     }
@@ -182,6 +189,7 @@ export class ChunkStreamer {
       }
     }
     this.built.set(index, { index, hasPhysics, contents });
+    this.lightRevision++;
   }
 
   private teardown(chunk: BuiltChunk): void {

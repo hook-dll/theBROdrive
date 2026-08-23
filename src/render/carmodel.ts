@@ -151,22 +151,84 @@ async function loadScene(file: string): Promise<THREE.Group> {
 }
 
 /**
- * Repaints a subtree with one base-colour texture.
+ * Repaints a subtree's PAINT material with one base-colour texture.
  *
  * Packs that ship several liveries for the same body (the PSX cars, DeJunes'
  * paintjobs) become several catalogue entries over one geometry file, so the
  * material is cloned per entry and only its map differs — the geometry is still
  * shared between them.
+ *
+ * Which material is "the paint" is not a guess: these models are authored with one
+ * textured slot for the painted panels and flat-coloured slots for everything else
+ * (`Windows`, `Grill`, `Tyre`, `Light Red`, ...), so a material that ALREADY has a
+ * map is a livery slot and a material without one is a part colour. Overriding
+ * every material instead — which is what this used to do, by cloning `material[0]`
+ * onto each mesh — is what wrecked the DeJunes cars: their bodies are single meshes
+ * with up to 56 material groups, so glass, chrome, lights and tyres all collapsed
+ * into one slot and the body paintjob was stretched over their UVs.
+ *
+ * Materials are cloned once per source material, not once per mesh, so slots shared
+ * between meshes stay one material and one draw call's worth of state.
  */
 function applyTexture(root: THREE.Object3D, map: THREE.Texture): void {
+  const meshes: THREE.Mesh[] = [];
+  let textured = false;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    const source = Array.isArray(child.material) ? child.material[0] : child.material;
-    const material = (source as THREE.MeshStandardMaterial).clone();
+    meshes.push(child);
+    for (const m of materialsOf(child)) {
+      if ((m as THREE.MeshStandardMaterial).map) textured = true;
+    }
+  });
+
+  // A body with no textured slot at all (an untextured export) has nothing to
+  // identify as paint, so the livery goes on everything — which is right for the
+  // single-material bodies that case describes.
+  const clones = new Map<THREE.Material, THREE.Material>();
+  const repaint = (source: THREE.Material): THREE.Material => {
+    const existing = clones.get(source);
+    if (existing) return existing;
+    const standard = source as THREE.MeshStandardMaterial;
+    if (textured && !standard.map) {
+      clones.set(source, source);
+      return source;
+    }
+    const material = standard.clone();
     material.map = map;
     material.color.setRGB(1, 1, 1);
     material.needsUpdate = true;
-    child.material = material;
+    clones.set(source, material);
+    return material;
+  };
+
+  for (const mesh of meshes) {
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(repaint)
+      : repaint(mesh.material);
+  }
+}
+
+function materialsOf(mesh: THREE.Mesh): readonly THREE.Material[] {
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
+/**
+ * Sampling for the pack-supplied maps (the DeJunes FBX models carry their own
+ * body and number-plate textures, one per material, which the loader resolves from
+ * the model's own directory).
+ *
+ * Same treatment as the catalogue's own liveries below: these are paint maps with a
+ * few dozen pixels per panel, and smoothing them turns the liveries to mush.
+ */
+function tuneMaps(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    for (const material of materialsOf(child)) {
+      const map = (material as THREE.MeshStandardMaterial).map;
+      if (!map) continue;
+      map.colorSpace = THREE.SRGBColorSpace;
+      map.magFilter = THREE.NearestFilter;
+    }
   });
 }
 
@@ -329,8 +391,31 @@ function buildSeparateWheels(
   return { objects, positions, radii };
 }
 
+/**
+ * Turns a model that was authored facing the wrong way (`def.yaw`).
+ *
+ * The rotation is baked into the scene's TOP-LEVEL CHILDREN — each one's position
+ * and orientation — rather than set on the root. Setting it on the root would be
+ * one line, and wrong: `takeOwnWheels` below mixes a wheel's world-space centre
+ * with its own local `position` to re-centre the mesh on its axle, and detaching
+ * that node from a rotated parent drops the rotation, so the mesh would be drawn
+ * a wheelbase away from the suspension that carries it. Baking the turn into the
+ * children leaves every node's local frame already correct, which is also what
+ * keeps `renameDetectedWheels` — it reads the sign of Z to decide which axle is
+ * the front one — from labelling the car back to front.
+ */
+function applyModelYaw(scene: THREE.Group, yaw: number): void {
+  const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+  for (const child of scene.children) {
+    child.position.applyQuaternion(turn);
+    child.quaternion.premultiply(turn);
+  }
+  scene.updateMatrixWorld(true);
+}
+
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
+  if (def.yaw) applyModelYaw(scene, def.yaw);
   scene.updateMatrixWorld(true);
   const s = def.scale;
 
@@ -447,9 +532,15 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
         // These are PSX-era paint maps: a few dozen pixels per panel. Smoothing them
         // turns the liveries to mush, so they are sampled nearest, like the era.
         map.magFilter = THREE.NearestFilter;
-        map.flipY = false;
+        // V origin follows the FORMAT, not the pack. glTF UVs are top-down, so a
+        // glTF livery needs no flip; FBX (and the OBJ the FBX models were authored
+        // beside) counts V from the bottom, which is what TextureLoader's default
+        // flip already produces. Flipping those anyway sampled the map upside down —
+        // roof paint on the sills, plate stripe through the bumper.
+        map.flipY = def.file.toLowerCase().endsWith('.fbx');
         applyTexture(scene, map);
       }
+      tuneMaps(scene);
       templates.set(def.id, buildTemplate(def, scene));
     }),
   );
