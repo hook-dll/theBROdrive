@@ -69,17 +69,6 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
-function formatClock(timeOfDay: number): string {
-  // One in-game day is DAY_LENGTH seconds across 24 hours, so an in-game minute
-  // is one real second: hours = floor(t / 60), minutes = t % 60.
-  let t = Math.floor(timeOfDay) % DAY_LENGTH;
-  if (t < 0) t += DAY_LENGTH;
-  const hours = Math.floor(t / 60) % 24;
-  const minutes = t % 60;
-  const h = hours < 10 ? `0${hours}` : `${hours}`;
-  const m = minutes < 10 ? `0${minutes}` : `${minutes}`;
-  return `${h}:${m}`;
-}
 
 export class Hud {
   private readonly tops: HTMLElement[] = [];
@@ -101,14 +90,14 @@ export class Hud {
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly odometerEl: HTMLElement;
-  private readonly recordEl: HTMLElement;
-  private readonly clockEl: HTMLElement;
+  private readonly clockNeedle: SVGLineElement;
   private readonly toastEl: HTMLElement;
   private readonly radioEl: HTMLElement;
 
   private tachDeg = -1;
   private speedDeg = -1;
   private fuelDeg = -1;
+  private clockDeg = -1;
   private warningsSignature = '';
   private invSlots: HTMLElement[] = [];
   private invItems: readonly Item[] = [];
@@ -133,10 +122,17 @@ export class Hud {
     this.speedValue = speed.value;
     this.speedNeedle = speed.needle;
 
+    this.odometerEl = el('div', 'hud-odometer');
+    const speedCluster = el('div', 'hud-speed-cluster');
+    speedCluster.append(speed.svg, this.odometerEl);
+
     const fuel = this.buildDial('hud-fuel', false, true);
     this.fuelEl = fuel.svg;
     this.fuelValue = fuel.value;
     this.fuelNeedle = fuel.needle;
+
+    const clock = this.buildClock();
+    this.clockNeedle = clock.needle;
 
     this.gearEl = el('div', 'hud-gear');
 
@@ -153,7 +149,7 @@ export class Hud {
     this.warningsEl = el('div', 'hud-warnings is-hidden');
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, speed.svg, fuel.svg, indicators);
+    gaugeRow.append(tach.svg, speedCluster, fuel.svg, clock.svg, indicators);
 
     this.drivingCluster.append(
       gaugeRow,
@@ -168,13 +164,28 @@ export class Hud {
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
     const inventoryEl = el('div', 'hud-inventory');
-    inventoryEl.append(this.invMassEl, this.invSlotsEl);
+    inventoryEl.append(this.invSlotsEl);
 
-    this.odometerEl = el('div', 'hud-odometer');
-    this.recordEl = el('div', 'hud-record');
-    this.clockEl = el('div', 'hud-clock');
-    const travelEl = el('div', 'hud-travel');
-    travelEl.append(this.odometerEl, this.recordEl, this.clockEl);
+    const controlsToggle = document.createElement('button');
+    controlsToggle.type = 'button';
+    controlsToggle.className = 'hud-controls-toggle';
+    controlsToggle.textContent = 'SHOW CONTROLS';
+    controlsToggle.setAttribute('aria-controls', 'hud-controls-panel');
+    controlsToggle.setAttribute('aria-expanded', 'false');
+
+    const controlsPanel = el('div', 'hud-controls-panel is-hidden');
+    controlsPanel.id = 'hud-controls-panel';
+    for (const text of ['WASD / ARROWS — MOVE', 'C — VIEW · V — REVIEW', 'E — DO', 'T — NTS RADIO']) {
+      const line = el('div', 'hud-controls-line');
+      line.textContent = text;
+      controlsPanel.appendChild(line);
+    }
+    controlsToggle.addEventListener('click', () => {
+      const visible = controlsPanel.classList.contains('is-hidden');
+      controlsPanel.classList.toggle('is-hidden', !visible);
+      controlsToggle.textContent = visible ? 'HIDE CONTROLS' : 'SHOW CONTROLS';
+      controlsToggle.setAttribute('aria-expanded', String(visible));
+    });
 
     this.toastEl = el('div', 'hud-toasts');
 
@@ -183,7 +194,8 @@ export class Hud {
       this.promptEl,
       this.drivingCluster,
       inventoryEl,
-      travelEl,
+      controlsToggle,
+      controlsPanel,
       this.radioEl,
       this.toastEl,
     ];
@@ -216,6 +228,18 @@ export class Hud {
       svg.appendChild(redlineArc);
     }
 
+    if (fuelIcon) {
+      // Same threshold treatment as the tachometer's redline: it lives on the
+      // track beneath the value arc, never painted over the filled gauge.
+      const lowFuelArc = svgEl('path');
+      lowFuelArc.setAttribute('class', 'hud-dial-redline');
+      lowFuelArc.setAttribute(
+        'd',
+        arcPath(CX, CY, R, START_ANGLE, START_ANGLE + FUEL_ALARM_FRACTION * SWEEP_ANGLE),
+      );
+      svg.appendChild(lowFuelArc);
+    }
+
     const value = svgEl('path');
     value.setAttribute('class', 'hud-dial-value');
     value.setAttribute('d', '');
@@ -235,6 +259,29 @@ export class Hud {
     svg.appendChild(needle);
 
     return { svg, value, needle };
+  }
+
+  /** A numberless single-hand clock, using the dashboard dial palette. */
+  private buildClock(): { svg: SVGSVGElement; needle: SVGLineElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', 'hud-dial hud-clock-dial');
+    svg.setAttribute('viewBox', `0 0 ${TACH_SIZE} ${TACH_SIZE}`);
+    svg.setAttribute('width', String(TACH_SIZE));
+    svg.setAttribute('height', String(TACH_SIZE));
+
+    const track = svgEl('circle');
+    track.setAttribute('class', 'hud-dial-track');
+    track.setAttribute('cx', String(CX));
+    track.setAttribute('cy', String(CY));
+    track.setAttribute('r', String(R));
+    svg.appendChild(track);
+
+    const needle = svgEl('line');
+    needle.setAttribute('class', 'hud-dial-needle');
+    needle.setAttribute('x1', String(CX));
+    needle.setAttribute('y1', String(CY));
+    svg.appendChild(needle);
+    return { svg, needle };
   }
 
   setDriving(readout: DrivingReadout | null): void {
@@ -270,6 +317,7 @@ export class Hud {
       this.fuelDeg,
       this.fuelValue,
       this.fuelNeedle,
+      FUEL_ALARM_FRACTION,
     );
     this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
 
@@ -289,12 +337,14 @@ export class Hud {
     previousDeg: number,
     valuePath: SVGPathElement,
     needle: SVGLineElement,
+    valueStartFraction = 0,
   ): number {
     const fraction = Math.min(Math.max(value / max, 0), 1);
     const deg = START_ANGLE + fraction * SWEEP_ANGLE;
     const rounded = Math.round(deg * 10) / 10;
     if (rounded === previousDeg) return previousDeg;
-    this.setAttr(valuePath, 'd', fraction < 0.004 ? '' : arcPath(CX, CY, R, START_ANGLE, deg));
+    const startDeg = START_ANGLE + valueStartFraction * SWEEP_ANGLE;
+    this.setAttr(valuePath, 'd', fraction <= valueStartFraction ? '' : arcPath(CX, CY, R, startDeg, deg));
     const tip = polar(CX, CY, NEEDLE_R, deg);
     this.setAttr(needle, 'x2', tip.x.toFixed(2));
     this.setAttr(needle, 'y2', tip.y.toFixed(2));
@@ -364,10 +414,17 @@ export class Hud {
     }
   }
 
-  setTravel(km: number, recordKm: number, timeOfDay: number): void {
-    this.setText(this.odometerEl, `${km.toFixed(1)} km`);
-    this.setText(this.recordEl, `RECORD ${recordKm.toFixed(1)} km`);
-    this.setText(this.clockEl, formatClock(timeOfDay));
+  setTravel(km: number, timeOfDay: number): void {
+    this.setText(this.odometerEl, `TRIP ${km.toFixed(1)} km`);
+    const halfDay = DAY_LENGTH * 0.5;
+    const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
+    const deg = -90 + fraction * 360;
+    const rounded = Math.round(deg * 10) / 10;
+    if (rounded === this.clockDeg) return;
+    this.clockDeg = rounded;
+    const tip = polar(CX, CY, NEEDLE_R, deg);
+    this.setAttr(this.clockNeedle, 'x2', tip.x.toFixed(2));
+    this.setAttr(this.clockNeedle, 'y2', tip.y.toFixed(2));
   }
 
   setToast(text: string): void {

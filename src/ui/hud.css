@@ -118,6 +118,22 @@ body {
   height: 120px;
 }
 
+.hud-speed-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hud-odometer {
+  margin-top: -12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--hud-fg-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .hud-dial-track {
   fill: none;
   stroke: var(--hud-panel-soft);
@@ -149,8 +165,9 @@ body {
 
 .hud-fuel.is-alarm .hud-dial-value,
 .hud-fuel.is-alarm .hud-dial-needle {
-  stroke: var(--hud-alarm);
+  stroke: var(--hud-alarm-strong);
 }
+
 
 .hud-indicators {
   display: flex;
@@ -279,38 +296,51 @@ body {
   border: 1px solid var(--hud-alarm);
 }
 
-.hud-travel {
+.hud-controls-toggle {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  cursor: pointer;
+  color: var(--hud-fg);
   background: var(--hud-panel);
   border: 1px solid var(--hud-border);
-  padding: 8px 12px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.hud-controls-toggle:hover,
+.hud-controls-toggle:focus-visible {
+  border-color: var(--hud-fg);
+  outline: none;
+}
+
+.hud-controls-panel {
+  position: absolute;
+  bottom: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 212px;
+  padding: 10px 16px;
+  color: var(--hud-fg);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
   pointer-events: none;
 }
 
-.hud-odometer {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  font-variant-numeric: tabular-nums;
-}
-
-.hud-record {
+.hud-controls-line {
   font-size: 11px;
   letter-spacing: 0.08em;
-  color: var(--hud-fg-dim);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.hud-clock {
-  font-size: 13px;
-  letter-spacing: 0.1em;
-  font-variant-numeric: tabular-nums;
-}
 
 .hud-radio {
   position: absolute;
@@ -791,10 +821,8 @@ body {
  *  Touch controls (phones and tablets)                               *
  *                                                                    *
  *  Built by core/touch.ts on the first touch, so a desktop never      *
- *  renders any of this. Buttons are large and warm-outlined to match  *
- *  the HUD; the pedal and look ZONES are invisible because the whole  *
- *  screen is the control surface — drawing boxes over the desert       *
- *  would be UI clutter for something the thumbs learn in one corner.  *
+ *  renders any of this. Pedals and look zones stay invisible; a       *
+ *  horizontal steering slider is the explicit HTTP-safe analogue axis.*
  * ------------------------------------------------------------------ */
 
 .touch-ui {
@@ -845,6 +873,17 @@ body {
   opacity: 1;
   background: var(--hud-panel-strong);
   border-color: var(--hud-fg);
+}
+
+.touch-steering {
+  position: fixed;
+  left: 50%;
+  bottom: calc(48px + env(safe-area-inset-bottom));
+  width: min(58vw, 340px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  accent-color: var(--hud-fg);
+  touch-action: none;
 }
 
 .touch-hint {

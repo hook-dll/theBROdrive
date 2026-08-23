@@ -519,7 +519,7 @@ async function boot(): Promise<void> {
       inventory.carriedMass,
       inventory.massLimit,
     );
-    hud.setTravel(activeS / 1000, s.recordS / 1000, s.timeOfDay);
+    hud.setTravel(activeS / 1000, s.timeOfDay);
 
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
