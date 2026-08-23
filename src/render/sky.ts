@@ -75,8 +75,19 @@ const SOUTH_TILT = 0.45;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
-/** 20k stars remain one draw call and give the night sky a dense, visible field. */
-const STAR_COUNT = 20000;
+/**
+ * 14k stars: still one draw call and still a dense field, thinned back from 20k
+ * because at that count the sky was closer to a texture than to a sky.
+ */
+const STAR_COUNT = 14000;
+/**
+ * Size taper for the brightest stars. Below the knee, size stays linear in
+ * brightness — the small and medium stars are the ones that read as stars, so they
+ * are left exactly as they were. Above it, growth is cut to the taper, which brings
+ * the biggest down from 3.65 px to 2.96 px without touching anything below.
+ */
+const STAR_SIZE_KNEE = 0.55;
+const STAR_SIZE_TAPER = 0.45;
 /** Seed for the star field. Fixed so the sky is identical every session. */
 const STAR_SEED = 0x5ca11ab1;
 /**
@@ -90,7 +101,11 @@ const STAR_TWINKLE_FRACTION = 0.3;
 /** Scintillation amplitude range, as a fraction of the star's own brightness. */
 const STAR_TWINKLE_MIN = 0.1;
 const STAR_TWINKLE_MAX = 0.34;
-/** Keep the galactic plane at the same relative density as the doubled field. */
+/**
+ * The galactic plane is deliberately NOT thinned with the field: the band is what
+ * makes the sky look like a galaxy seen edge-on, and it reads as dust rather than
+ * as stars. Leaving it dense while the field came down 30% lets it stand out more.
+ */
 const BAND_CANDIDATES = 45000;
 /** Half-width of the band in `dot(dir, normal)` space (~7.5 degrees). */
 const BAND_HALF_WIDTH = 0.13;
@@ -481,7 +496,9 @@ export class Sky {
       brights[i] = b;
       // Bright stars appear at low density; faint ones fill in as it rises.
       thresholds[i] = 1.0 - b;
-      sizes[i] = 0.85 + b * 2.8;
+      const sizeShape =
+        b <= STAR_SIZE_KNEE ? b : STAR_SIZE_KNEE + (b - STAR_SIZE_KNEE) * STAR_SIZE_TAPER;
+      sizes[i] = 0.85 + sizeShape * 2.8;
 
       // Colour. Almost every star is white with only a hint of blue in it — the
       // eye reads a night sky as white, and the previous split (28% of the field
