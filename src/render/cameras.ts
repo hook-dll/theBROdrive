@@ -58,6 +58,18 @@ const ORBIT_PITCH_BASE = 0.22;
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
 /**
+ * Ground clearance for the chase/orbit eye, metres, and the probe that finds the
+ * ground beneath it.
+ *
+ * The probe starts just above the CAR (see liftAboveGround) and must stay under
+ * any roof the car can drive under — the garage's walls are 2.7 m, so half a metre
+ * over the body's own origin is the headroom this can afford. It reaches well down
+ * so the arm can hang out over a dune's lee side and still find the sand.
+ */
+const GROUND_CLEARANCE = 0.45;
+const GROUND_PROBE_UP = 0.5;
+const GROUND_PROBE_DOWN = 40;
+/**
  * Resting FOV, shared with the initial camera in renderer.ts so the two cannot
  * disagree. 65 degrees on foot and in the car, matching The Long Drive.
  */
@@ -305,9 +317,11 @@ export class CameraRig {
       case 'chase':
         this.desiredArm(target);
         this.applyOcclusion(target);
+        this.liftAboveGround(target);
         break;
       case 'orbit':
         this.desiredArm(target);
+        this.liftAboveGround(target);
         break;
     }
 
@@ -497,6 +511,47 @@ export class CameraRig {
     if (hit.toi > OCCLUSION_SKIN) {
       _vA.addScaledVector(_vC, hit.toi - OCCLUSION_SKIN);
     }
+  }
+
+  /**
+   * Keeps the eye above the ground under it.
+   *
+   * `applyOcclusion` cannot do this: it casts along the arm TOWARD the car and
+   * pulls the eye forward, so an eye that has dipped under the terrain gets pulled
+   * to just under the terrain — still below it, and now looking out through the
+   * inside of the ground. Pitching the chase camera down under the car did exactly
+   * that, and the whole desert turned into a see-through shell.
+   *
+   * The probe therefore runs straight DOWN, which is the only direction that
+   * answers "how low may I be here" — but it starts at the CAR's height, not above
+   * the camera. Starting above the camera reads whatever is overhead as the floor:
+   * measured in the garage, it found the roof and reported the ground 2.7 m above
+   * the car, which would have flung the camera up through it. The car is known to
+   * be standing in the space the camera belongs to, so its height is the one honest
+   * place to start.
+   *
+   * Only fixed bodies count: the car and the loose parts are things to look at, not
+   * floors to stand on. If the probe finds nothing — the camera is out past a crest
+   * where the ground rises above the car — there is nothing to clamp to, and the
+   * occlusion cast above has already dealt with that case.
+   */
+  private liftAboveGround(target: CameraTarget): void {
+    _rayOrigin.x = _vA.x;
+    _rayOrigin.y = target.y + GROUND_PROBE_UP;
+    _rayOrigin.z = _vA.z;
+    _rayDir.x = 0;
+    _rayDir.y = -1;
+    _rayDir.z = 0;
+
+    const hit = this.physics.raycast(_rayOrigin, _rayDir, GROUND_PROBE_UP + GROUND_PROBE_DOWN);
+    if (!hit) return;
+
+    const collider = this.physics.world.getCollider(hit.colliderHandle);
+    const body = collider.parent();
+    if (body != null && !body.isFixed()) return;
+
+    const floor = _rayOrigin.y - hit.toi + GROUND_CLEARANCE;
+    if (_vA.y < floor) _vA.y = floor;
   }
 
   private updateFov(speedKmh: number, dt: number): void {
