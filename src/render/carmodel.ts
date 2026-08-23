@@ -413,6 +413,16 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
   scene.updateMatrixWorld(true);
 }
 
+/**
+ * Cosmetic ride-height correction, metres: how far the body drops relative to the
+ * wheels. Every catalogue body sits a hand's width too tall — the tyre tops ride
+ * 3-5 cm clear of the arch lips instead of tucking under them, so the cars read as
+ * standing on stilts. Raising each wheel's mount (its chassis-local Y) by this much
+ * drops the body by the same amount; the collider floor keys off the same mount and
+ * follows it up, so the belly keeps its clearance and only the stance changes.
+ */
+const RIDE_DROP_M = 0.04;
+
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   if (def.yaw) applyModelYaw(scene, def.yaw);
@@ -448,9 +458,12 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const parts = own ?? buildSeparateWheels(def, bodyBox);
   const wheels: WheelMeasure[] = [];
   for (const [, id] of WHEEL_NODES) {
+    const p = toLocal(parts.positions.get(id)!);
     wheels.push({
       id,
-      pos: toLocal(parts.positions.get(id)!),
+      // RIDE_DROP_M lifts the mount in chassis space, which drops the body by the
+      // same amount once the suspension settles onto its (unchanged) tyres.
+      pos: [p[0], p[1] + RIDE_DROP_M, p[2]],
       radius: parts.radii.get(id)!,
       isFront: id === 'wheel_fl' || id === 'wheel_fr',
     });

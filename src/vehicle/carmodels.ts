@@ -524,7 +524,10 @@ const DEJUNES_CARS: readonly Entry[] = [
     scale: 1.74,
     steerLock: 0.6,
     rearDriveBias: 0,
-    separateWheels: { file: `${DEJUNES}/wheel.glb`, ...PSX_AXLES },
+    // Its arches sit closer together than the PSX saloons the shared fractions were
+    // matched to: at -0.66 the rear axle lands ~17 cm behind this body's rear arch.
+    // -0.582 puts the rear wheel back under the arch (measured off car.glb).
+    separateWheels: { file: `${DEJUNES}/wheel.glb`, frontZFrac: 0.6, rearZFrac: -0.582, trackFrac: 0.78 },
   },
   // The FBX trio ships in centimetres (its bodies measure 337-561 units long), so
   // the scales here are that conversion plus the width fit described above. They
