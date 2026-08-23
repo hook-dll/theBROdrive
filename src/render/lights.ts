@@ -5,9 +5,14 @@ import * as THREE from 'three';
  *
  * Lamp chunks expose invisible PointLight markers. This class copies the nearest
  * six marker states into six persistent renderer lights: three in front of the
- * view and three behind it. Their count stays fixed for an entire night, so Three
- * compiles the point-light shader once at dusk instead of recompiling whenever a
- * streamed lamp crosses the old nearest-light boundary.
+ * view and three behind it.
+ *
+ * The six slots stay visible for the whole session and are lit by intensity alone
+ * (zero by day, `LAMP_POINT` at night). Three.js keys each material's shader on the
+ * count of *visible* point lights, so toggling the slots' `visible` at dusk changed
+ * that key 0 -> 6 and recompiled every lit material in a single frame — the
+ * measured evening hitch. Keeping the count constant compiles the point-light
+ * permutation once, at startup, and dusk becomes a plain uniform write.
  */
 
 /** Three pools ahead and three behind the player. */
@@ -20,19 +25,17 @@ const CUTOFF_DISTANCE_SQ = CUTOFF_DISTANCE * CUTOFF_DISTANCE;
 export class LightBudget {
   /** Invisible source markers from streamed chunks and the homestead. */
   private readonly sources: THREE.PointLight[] = [];
-  /** The only point lights the renderer ever sees at night. */
+  /** The only point lights the renderer ever sees; lit by intensity, never toggled. */
   private readonly slots: THREE.PointLight[] = [];
   private readonly distSq: number[] = [];
   /** World positions mirror source markers without allocating during selection. */
   private readonly sourceWorld: THREE.Vector3[] = [];
   private chosen = new Uint8Array(0);
   private sourceRevision = -1;
-  private slotsVisible = false;
 
   constructor(private readonly scene: THREE.Scene) {
     for (let i = 0; i < STREETLIGHT_SLOT_COUNT; i++) {
       const slot = new THREE.PointLight(0xffc37a, 0, 46, 2);
-      slot.visible = false;
       slot.userData.lightBudgetSlot = true;
       this.slots.push(slot);
       scene.add(slot);
@@ -66,10 +69,6 @@ export class LightBudget {
     this.rescan(sourceRevision);
 
     const night = nightFactor > 0;
-    if (this.slotsVisible !== night) {
-      this.slotsVisible = night;
-      for (const slot of this.slots) slot.visible = night;
-    }
     if (!night) {
       for (const slot of this.slots) {
         if (slot.intensity !== 0) slot.intensity = 0;

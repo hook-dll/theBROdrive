@@ -232,7 +232,7 @@ const REAR_AXLE_SIDE_GRIP = 0.94;
  * axle still fills its cone at this demand, which is the part that matters — mid
  * corner it doubles the car's curvature (bench: trailYawGain 1.2-2.1).
  */
-const FOOT_BRAKE_DECEL = 7.0;
+const FOOT_BRAKE_DECEL = 9.6;
 /**
  * Rear bias for the foot brake (0..1).
  *
@@ -326,17 +326,27 @@ const LOCK_SLIP_RATIO = -0.5;
 /** Load low-pass (s): ray-cast suspension force is spiky over collider seams. */
 const WHEEL_LOAD_TAU = 0.04;
 /**
- * Fraction of the equalising torque the contact applies per step (~50 ms to close
- * a slip). The tyre carcass is not a rigid coupling; without this the wheel snaps
- * to road speed in one step.
+ * Slip ratio at which a tyre makes its peak longitudinal force.
+ *
+ * The curve is F = μN · 2u/(1+u²) with u = slip/PEAK: linear off zero, peaking at
+ * exactly u = 1, then decaying like 1/u. That decay IS sliding friction, so a
+ * locked wheel now stops the car less well than one held at optimal slip because
+ * of the curve's shape rather than because a constant said so. The old model could
+ * not express it — Rapier's cone clipped force without ever letting a tyre slide,
+ * so locking had to be given a deliberately weaker deceleration demand
+ * (LOCKED_DECEL 5.6 against the pedal's 7.0) to stop it being a free upgrade.
+ *
+ * 0.12 is a period cross-ply on asphalt; a radial peaks earlier and sharper.
  */
-const CONTACT_RELAXATION = 0.35;
+const PEAK_SLIP_RATIO = 0.12;
 /**
- * Deceleration (m/s²) a locked, sliding tyre delivers: ~0.57 g against the 0.71 g
- * FOOT_BRAKE_DECEL demands of a rolling one. The ratio is roughly the real
- * sliding-to-peak friction ratio for a period cross-ply.
+ * Force a fully sliding tyre keeps, as a fraction of its peak. This is why ABS
+ * exists: locking costs about a quarter of the grip, and it is now that ratio
+ * doing the work rather than a separate locked-deceleration constant.
  */
-const LOCKED_DECEL = 5.6;
+const SLIDING_GRIP_FRACTION = 0.75;
+/** How quickly the sliding plateau is reached, in units of PEAK_SLIP_RATIO. */
+const SLIDE_CURVE_GAIN = 1.5;
 /** Lateral grip left on a locked, sliding tyre. */
 const LOCKED_SIDE_GRIP = 0.22;
 /**
@@ -667,6 +677,8 @@ export class Vehicle {
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
+  /** Per-wheel tyre impulse, applied at the contact patch. */
+  private readonly tyreImpulse = { x: 0, y: 0, z: 0 };
   private readonly invRotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly localVelScratch = { x: 0, y: 0, z: 0 };
   private readonly localAngScratch = { x: 0, y: 0, z: 0 };
@@ -1137,7 +1149,9 @@ export class Vehicle {
     // and not against a firm pedal.
     const appliedTorque = this.appliedDriveTorqueNm * (1 - brake);
 
-    // Brake impulses (N·s), distributed so the total matches the target decel.
+    // Brake FORCES (N) at the contact, distributed so the total matches the target
+    // deceleration. They are demands: the tyre model decides what is delivered, and
+    // a demand past what the contact can transmit is what locks the wheel.
     const mass = stats.mass;
     const frontShare = 1 - this.model.rearDriveBias;
     const rearShare = this.model.rearDriveBias;
@@ -1145,10 +1159,9 @@ export class Vehicle {
     const brakeRearShare = FOOT_BRAKE_REAR_BIAS;
     const brakeDenom =
       this.frontWheelCount * brakeFrontShare + this.rearWheelCount * brakeRearShare;
-    const footBrakeBase = brakeDenom > 0 ? (FOOT_BRAKE_DECEL * mass * dt) / brakeDenom : 0;
-    const lockPerWheel = (LOCKED_DECEL * mass * dt) / Math.max(1, this.wheels.length);
-    const parkingBrakePerWheel = input.handbrake
-      ? (PARK_BRAKE_DECEL * mass * dt) / Math.max(1, this.wheels.length)
+    const footBrakeForce = brakeDenom > 0 ? (FOOT_BRAKE_DECEL * mass) / brakeDenom : 0;
+    const parkingBrakeForce = input.handbrake
+      ? (PARK_BRAKE_DECEL * mass) / Math.max(1, this.wheels.length)
       : 0;
 
     const wheelCount = this.wheels.length;
@@ -1217,45 +1230,22 @@ export class Vehicle {
       const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
       const driven = axleShare > 0 && axleCount > 0;
 
-      // Brakes first, because the two channels are not independent: Rapier's
-      // vehicle controller (a Bullet port) computes a wheel's longitudinal impulse
-      // as `engine_force * dt` whenever that force is non-zero, and only falls back
-      // to the braking branch when it is exactly zero. So a wheel carrying ANY
-      // drive force silently brakes with nothing at all — which is what made a
-      // braked car keep its speed while its wheels were drawn locked: the driven
-      // axle contributed zero retardation and the pedal only ever got the other
-      // axle's share of the bias.
-      //
-      // Foot brake is rear-biased; the lock impulse replaces it on a locked wheel.
-      // Engine braking is applied separately as a chassis impulse below — routing
-      // it through setWheelBrake saturates at the same ceiling, so every gear would
-      // brake the same.
-      let brakeImpulse = 0;
-      if (brake > 0) {
-        brakeImpulse += brake * footBrakeBase * (w.isFront ? brakeFrontShare : brakeRearShare);
-      }
-      // A latched parking brake takes precedence across every wheel and is strong
-      // enough to resist gravity on the road network; a locked foot brake otherwise
-      // replaces the pedal's rolling demand.
-      if (input.handbrake) brakeImpulse = parkingBrakePerWheel;
-      // A lock can only ever COST grip, never add brake. Substituting the sliding
-      // demand outright let it exceed the pedal's own: a front wheel with 38% of the
-      // torque was handed the full four-wheel sliding share the moment it slipped,
-      // which held it locked on its own (bench: frontLock 0.57 on a car whose fronts
-      // should never have locked at that demand).
-      else if (locked) brakeImpulse = Math.min(brakeImpulse, lockPerWheel);
-      controller.setWheelBrake(w.index, brakeImpulse);
+      // Rapier applies NO longitudinal force any more: both of its channels are
+      // zeroed and the tyre model in updateWheelDynamics owns drive and brake. Its
+      // engine-force path could never brake and drive the same wheel anyway (a
+      // Bullet port: any non-zero engine force skips the braking branch outright),
+      // and its cone only ever scaled force down — it could not represent a tyre
+      // past its peak, which is exactly what a locked or spinning one is.
+      let brakeForce = brake > 0 ? brake * footBrakeForce * (w.isFront ? brakeFrontShare : brakeRearShare) : 0;
+      // A latched parking cable takes precedence across every wheel: it is strong
+      // enough to hold the car on this road network's grades.
+      if (input.handbrake) brakeForce = parkingBrakeForce;
 
-      // Drive torque -> engine force (Newtons), signed by gear (reverse < 0). Zero
-      // on any braked wheel, per the branch above: the brake wins the contact.
-      let wheelTorque = 0;
-      if (driven && brakeImpulse <= 0) wheelTorque = (appliedTorque * axleShare) / axleCount;
-      controller.setWheelEngineForce(w.index, wheelTorqueToForce(wheelTorque, w.radius));
+      controller.setWheelBrake(w.index, 0);
+      controller.setWheelEngineForce(w.index, 0);
 
-      // Handed to the wheel-rotation integrator below: it is the mismatch between
-      // these demands and what the contact can transmit that stalls or spins a wheel.
-      w.driveTorqueNm = wheelTorque;
-      w.brakeForceN = dt > 0 ? brakeImpulse / dt : 0;
+      w.driveTorqueNm = driven ? (appliedTorque * axleShare) / axleCount : 0;
+      w.brakeForceN = brakeForce;
       w.frictionSlip = frictionSlip;
 
       controller.setWheelSteering(w.index, w.isFront ? this.steerAngle : 0);
@@ -1275,31 +1265,15 @@ export class Vehicle {
     // actually transmit, so lock-up and wheelspin are outcomes, not timers.
     this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip);
 
-    // Slide measurement, after the step that resolved the contacts: how much of each
-    // tyre's friction cone the longitudinal channel ate. Rapier counts the forward
-    // impulse at half against the cone, so the same half applies here. Evaluated
-    // every step, so grip returns on its own the moment the pedal eases or the
-    // wheelspin stops and the tyre is back inside its cone.
-    const slideBlend = dt / (SLIDE_TAU + dt);
-    const speedAbs = Math.abs(fwd);
+    // Slide, lock and the friction-circle usage that costs a working tyre its side
+    // grip are all computed inside updateWheelDynamics now, from the tyre's own
+    // force against its own capacity. Rapier's forward impulse used to stand in for
+    // that, and with its longitudinal channel zeroed it reads zero. What is left
+    // here is the per-axle mean the audio layer voices.
     let frontSlideSum = 0;
     let rearSlideSum = 0;
+    const speedAbs = Math.abs(fwd);
     for (const w of this.wheels) {
-      let target = 0;
-      if (speedAbs > SLIDE_MIN_MPS && controller.wheelIsInContact(w.index)) {
-        const load = controller.wheelSuspensionForce(w.index) ?? 0;
-        const cone = load * dt * w.frictionSlip;
-        if (cone > 0) {
-          const used = 0.5 * Math.abs(controller.wheelForwardImpulse(w.index) ?? 0);
-          const share = used / cone;
-          target = clamp(
-            (share - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD),
-            0,
-            1,
-          );
-        }
-      }
-      w.slideT += (target - w.slideT) * slideBlend;
       // A locked wheel is sliding by definition; no need to infer it from the cone.
       const reported = w.locked && speedAbs > SLIDE_MIN_MPS ? 1 : w.slideT;
       if (w.isFront) frontSlideSum += reported;
@@ -1511,13 +1485,16 @@ export class Vehicle {
   /**
    * Wheel rotational dynamics: the state whose absence made lock-up a timer.
    *
-   * Rapier still applies the chassis' longitudinal impulse; what lives here is the
-   * wheel itself. Drive torque spins it up, brake torque slows it (but can never
-   * drive it backwards), and the contact patch pulls it toward free rolling with a
-   * torque capped by the tyre's friction budget. Exceed that cap on the brake and
-   * the wheel stalls; exceed it on the throttle and it spins — up to the ceiling the
-   * engaged gear allows, because a driven wheel is geared to a crank that has a
-   * redline.
+   * The tyre owns longitudinal force. Drive torque spins the wheel up, brake torque
+   * slows it (never past a standstill), and the contact makes a force from the SLIP
+   * that results — peaking at PEAK_SLIP_RATIO and decaying past it, so a locked or
+   * spinning tyre transmits less than one held at optimal slip. That force is what
+   * accelerates and stops the car: it is applied to the chassis at the contact
+   * point, which also gives the pitch couple (dive and squat) for free.
+   *
+   * The wheel's own equation is solved with the contact force linearised and taken
+   * implicitly. It has to be: at 60 Hz the explicit gain is ~20-50, so an explicit
+   * step oscillates and then explodes.
    */
   private updateWheelDynamics(dt: number, wheelGrip: number, tyreGrip: number): void {
     const controller = this.controller;
@@ -1525,6 +1502,7 @@ export class Vehicle {
 
     this.chassisBody.rotation(this.rotationScratch);
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
+    const slideBlend = dt / (SLIDE_TAU + dt);
 
     const spinCeiling = this.drivetrain.maxDrivenWheelSpinRadS;
 
@@ -1564,24 +1542,62 @@ export class Vehicle {
       if (Math.abs(spin) <= brakeDelta) spin = 0;
       else spin -= Math.sign(spin) * brakeDelta;
 
+      let longitudinalForce = 0;
       if (w.loadN > 0) {
         const ground = controller.wheelGroundObject(w.index);
         const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
-        const capacity =
-          surface.frictionSlip *
-          LONGITUDINAL_GRIP_FRACTION *
-          wheelGrip *
-          tyreGrip *
-          w.loadN *
-          w.radius;
-        // Relaxation, not a snap. Equalising wheel and road speed in one step made
-        // slip binary (exactly 0 while gripping, large once saturated) and left a
-        // step change in crank speed on the way out of a slide, which the automatic
-        // read as an upshift and then immediately unread — measured as 1-2-1 hunting
-        // after every wheelspin. A real carcass takes a few centimetres of rolling
-        // to build its slip, so the contact torque is applied over ~50 ms instead.
-        const needed = (inertia * (contactSpeed / w.radius - spin)) / dt;
-        spin += (dt * clamp(needed * CONTACT_RELAXATION, -capacity, capacity)) / inertia;
+        const capacityN =
+          surface.frictionSlip * LONGITUDINAL_GRIP_FRACTION * wheelGrip * tyreGrip * w.loadN;
+        const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
+
+        // Shape: a peak that decays to a SLIDING PLATEAU, not to nothing.
+        //
+        // The first version was the tidy 2u/(1+u²), which decays like 1/u. Measured,
+        // that car could not pull away at all (0 km/h after 20 s of full throttle): a
+        // standing start runs slip ≈ 3, i.e. u ≈ 25, where that curve delivers 8% of
+        // the tyre's grip. A sliding tyre keeps roughly three quarters of its peak,
+        // so the plateau term carries the force once the peak term has decayed.
+        const slipOf = (omega: number): number => (omega * w.radius - contactSpeed) / reference;
+        const forceOf = (slip: number): number => {
+          const u = slip / PEAK_SLIP_RATIO;
+          const peak = (2 * u) / (1 + u * u);
+          const slide = Math.tanh(SLIDE_CURVE_GAIN * u);
+          return capacityN * ((1 - SLIDING_GRIP_FRACTION) * peak + SLIDING_GRIP_FRACTION * slide);
+        };
+
+        // Damping uses the curve's own slope, clamped to the rising side: past the
+        // peak it goes negative, and feeding that back drives the wheel away from
+        // equilibrium instead of toward it.
+        const u0 = slipOf(spin) / PEAK_SLIP_RATIO;
+        const th = Math.tanh(SLIDE_CURVE_GAIN * u0);
+        const slopeU =
+          (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u0 * u0)) / ((1 + u0 * u0) * (1 + u0 * u0))) +
+          SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th);
+        const stiffness =
+          (capacityN * Math.max(0, slopeU) * w.radius) / (PEAK_SLIP_RATIO * reference);
+
+        const spin0 = spin;
+        const force0 = forceOf(slipOf(spin0));
+        let delta = -(dt * force0 * w.radius) / (inertia + dt * stiffness * w.radius);
+
+        // Friction reduces sliding; it never reverses it within one step. Without
+        // this projection the wheel shot straight past synchronous speed every tick
+        // — once the tyre is past its peak the damping slope is zero, so nothing held
+        // the step back — and the force alternated sign from tick to tick. Measured
+        // like that: 23.8 km/h after twenty seconds of full throttle, and 0.06 g of
+        // braking.
+        const toSync = contactSpeed / w.radius - spin0;
+        delta =
+          delta >= 0 ? Math.min(delta, Math.max(0, toSync)) : Math.max(delta, Math.min(0, toSync));
+
+        // Read the force back OUT of the wheel's actual change: whatever torque the
+        // contact took from the wheel is what the tyre put into the road. That keeps
+        // action and reaction equal on the step the projection binds — which is
+        // exactly the step where a gripping tyre is transmitting everything the
+        // engine sent it, and where deriving the force from the post-step slip would
+        // instead report zero.
+        longitudinalForce = clamp((-inertia * delta) / (dt * w.radius), -capacityN, capacityN);
+        spin = spin0 - (longitudinalForce * dt * w.radius) / inertia;
       }
 
       // Geared to the engine, so it cannot outrun the engine's redline.
@@ -1594,6 +1610,25 @@ export class Vehicle {
       w.slipRatio = (spin * w.radius - contactSpeed) / reference;
       // Only a moving car can have a locked wheel; a stopped one is just stopped.
       w.locked = Math.abs(contactSpeed) > SLIDE_MIN_MPS && w.slipRatio <= LOCK_SLIP_RATIO;
+
+      // Drive the chassis with it, at the contact patch.
+      if (longitudinalForce !== 0) {
+        const impulse = longitudinalForce * dt;
+        this.tyreImpulse.x = w.forwardDir.x * impulse;
+        this.tyreImpulse.y = w.forwardDir.y * impulse;
+        this.tyreImpulse.z = w.forwardDir.z * impulse;
+        this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, w.contactPoint, false);
+      }
+
+      // Friction-circle usage, which is what costs a working tyre its side grip.
+      // Measured off the tyre's own force against its own capacity now, instead of
+      // inferred from how much of Rapier's cone its forward impulse had eaten.
+      const usage = w.loadN > 0 ? Math.abs(w.slipRatio) / PEAK_SLIP_RATIO : 0;
+      const slideTarget =
+        Math.abs(contactSpeed) > SLIDE_MIN_MPS
+          ? clamp((usage - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD), 0, 1)
+          : 0;
+      w.slideT += (slideTarget - w.slideT) * slideBlend;
     }
   }
 
