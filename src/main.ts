@@ -293,6 +293,10 @@ async function boot(): Promise<void> {
       player.setEnabled(false);
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
+      if (f.cycleTyres) {
+        driving.cycleTyreCompound();
+        hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);
+      }
       if (f.cycleCamera) camera.cycleDriving();
     } else {
       player.setEnabled(true);

@@ -237,6 +237,7 @@ export class Drivetrain {
     wheelRadius: number,
     autoShift: boolean,
     reverseRequested: boolean,
+    forwardDemand: number,
   ): DrivetrainOutput {
 
     dt = dt > 0 ? dt : 0;
@@ -252,7 +253,15 @@ export class Drivetrain {
     // automatic gearbox keeps shifting even in manual mode — the assist only
     // ever ADDS automatic behaviour, never removes it.
     if (gearbox && (gearbox.automatic || autoShift) && this.shiftTimer <= 0) {
-      this.automaticShift(engine, gearbox, demand, wheelAngularSpeed, wheelRadius, reverseRequested);
+      this.automaticShift(
+        engine,
+        gearbox,
+        demand,
+        clamp(forwardDemand, 0, 1),
+        wheelAngularSpeed,
+        wheelRadius,
+        reverseRequested,
+      );
     }
 
     // --- Crank speed ---
@@ -388,6 +397,7 @@ export class Drivetrain {
     engine: EngineSpec | null,
     gearbox: GearboxSpec,
     throttle: number,
+    forwardDemand: number,
     wheelAngularSpeed: number,
     wheelRadius: number,
     reverseRequested: boolean,
@@ -399,14 +409,17 @@ export class Drivetrain {
     // Pedals request a direction rather than a permanent gear selection. The
     // backward command remains the service brake until the car has stopped; only
     // then can the box engage reverse. Forward does the symmetric R -> 1 change.
+    //
+    // `forwardDemand` is independent of delivered throttle: while braking a
+    // reversing car it stays non-zero so the selector can leave reverse at rest.
     if (this.gear === GEAR_REVERSE) {
-      if (!reverseRequested && throttle > AUTO_ENGAGE_THROTTLE && atRest) this.setGear(1);
+      if (!reverseRequested && forwardDemand > AUTO_ENGAGE_THROTTLE && atRest) this.setGear(1);
       return;
     }
     if (this.gear === GEAR_NEUTRAL) {
       if (!atRest) return;
       if (reverseRequested) this.setGear(GEAR_REVERSE);
-      else if (throttle > AUTO_ENGAGE_THROTTLE) this.setGear(1);
+      else if (forwardDemand > AUTO_ENGAGE_THROTTLE) this.setGear(1);
       return;
     }
     if (reverseRequested && atRest) {

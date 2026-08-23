@@ -175,10 +175,13 @@ export class Hud {
 
     const controlsPanel = el('div', 'hud-controls-panel is-hidden');
     controlsPanel.id = 'hud-controls-panel';
-    for (const text of ['WASD / ARROWS — MOVE', 'C — VIEW · V — REVIEW', 'E — DO', 'T — NTS RADIO']) {
-      const line = el('div', 'hud-controls-line');
-      line.textContent = text;
-      controlsPanel.appendChild(line);
+    for (const text of [
+      'WASD / ARROWS — MOVE',
+      'C — VIEW · V — REVIEW',
+      'E — DO',
+      'O — TYRES',
+      'T — NTS RADIO',
+    ]) {
     }
     controlsToggle.addEventListener('click', () => {
       const visible = controlsPanel.classList.contains('is-hidden');

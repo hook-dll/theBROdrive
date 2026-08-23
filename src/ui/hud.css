@@ -740,6 +740,15 @@ body {
   padding: 6px;
 }
 
+.menu-body-group {
+  padding: 8px 4px 2px;
+  color: var(--hud-fg-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .menu-body {
   display: flex;
   align-items: center;
