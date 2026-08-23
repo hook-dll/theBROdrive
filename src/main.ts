@@ -325,7 +325,17 @@ async function boot(): Promise<void> {
 
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
-    const interacted = interaction.fixedUpdate(dt, f, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z);
+    const interacted = interaction.fixedUpdate(
+      dt,
+      f,
+      eye.x,
+      eye.y,
+      eye.z,
+      dir.x,
+      dir.y,
+      dir.z,
+      activeS,
+    );
     prompt = interacted.prompt;
     if (interacted.sound) audio.foley(interacted.sound);
     audio.setContinuous(interacted.continuous);

@@ -193,15 +193,11 @@ export class Player {
   /**
    * Teleports the player so their feet rest at (x, y, z).
    *
-   * The arclength hint must be re-established here, and a hinted projection only
-   * searches locally. That is fine for a short hop, but not when the player steps
-   * out of a car 100 km down the road: `arcS` is frozen at wherever they got in,
-   * because the on-foot update does not run while seated. A local search from a
-   * stale hint would return nonsense, streaming the wrong chunks and dropping the
-   * player through the world. So when the destination is far from the hint, pay for
-   * one unhinted sweep — rare, and the only correct option.
+   * A vehicle exit supplies its already-tracked road arclength. That is more
+   * reliable than projecting an exit point in XZ where a distant road loop can
+   * overlap the current one and select the wrong branch.
    */
-  teleport(x: number, y: number, z: number): void {
+  teleport(x: number, y: number, z: number, knownRoadS?: number): void {
     const cy = y + Player.FEET_OFFSET;
     this.body.setTranslation({ x, y: cy, z }, true);
     this.verticalVelocity = 0;
@@ -221,6 +217,10 @@ export class Player {
     this.curStep.z = z;
     this.snapshotPrimed = true;
     if (!this.road) return;
+    if (knownRoadS !== undefined) {
+      this.arcS = Math.min(this.road.length, Math.max(0, knownRoadS));
+      return;
+    }
     const near = this.road.sampleAt(this.arcS);
     const driftSq = (near.x - x) ** 2 + (near.z - z) ** 2;
     this.arcS =
