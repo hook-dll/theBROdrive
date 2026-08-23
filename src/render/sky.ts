@@ -79,6 +79,17 @@ const BASE_FOG_DENSITY = 0.00035;
 const STAR_COUNT = 20000;
 /** Seed for the star field. Fixed so the sky is identical every session. */
 const STAR_SEED = 0x5ca11ab1;
+/**
+ * Fraction of stars that get a real colour instead of white. Kept this low
+ * deliberately: a night sky reads as white, and a coloured star is meant to be a
+ * find. Split red / yellow / green inside the branch below.
+ */
+const STAR_TINTED_FRACTION = 0.01;
+/** Fraction of stars that scintillate at all; the rest are rock steady. */
+const STAR_TWINKLE_FRACTION = 0.3;
+/** Scintillation amplitude range, as a fraction of the star's own brightness. */
+const STAR_TWINKLE_MIN = 0.1;
+const STAR_TWINKLE_MAX = 0.34;
 /** Keep the galactic plane at the same relative density as the doubled field. */
 const BAND_CANDIDATES = 45000;
 /** Half-width of the band in `dot(dir, normal)` space (~7.5 degrees). */
@@ -185,16 +196,29 @@ attribute float aSize;
 attribute float aBright;
 attribute float aThresh;
 attribute vec3 aColor;
+attribute float aTwinkle;
+attribute float aPhase;
 uniform float uPixelRatio;
+uniform float uTime;
 varying float vBright;
 varying float vThresh;
 varying vec3 vColor;
+varying float vTwinkle;
 
 void main() {
   vColor = aColor;
   vBright = aBright;
   vThresh = aThresh;
-  gl_PointSize = aSize * uPixelRatio;
+
+  // Scintillation. Two incommensurate sines so it never settles into a visible
+  // pulse, and it modulates SIZE as well as brightness: the brightest stars are
+  // already clipped at full alpha, so on those the size is the only channel with
+  // anywhere left to go. aTwinkle is zero for most stars.
+  float ph = aPhase * 6.2831853;
+  float shimmer = 0.62 * sin(uTime * 2.30 + ph) + 0.38 * sin(uTime * 3.70 + ph * 1.7);
+  vTwinkle = 1.0 + aTwinkle * shimmer;
+
+  gl_PointSize = aSize * uPixelRatio * (1.0 + 0.35 * aTwinkle * shimmer);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -205,6 +229,7 @@ uniform float uDens01;
 varying float vBright;
 varying float vThresh;
 varying vec3 vColor;
+varying float vTwinkle;
 
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
@@ -213,7 +238,7 @@ void main() {
   // Density fades each star in past its own threshold rather than rebuilding
   // the buffer: at starDensity 1 only the bright ones show, at 4.5 all do.
   float vis = smoothstep(vThresh - 0.08, vThresh + 0.08, uDens01);
-  float a = min(1.0, vBright * 1.75 * vis * uOpacity * mask);
+  float a = min(1.0, vBright * vTwinkle * 1.75 * vis * uOpacity * mask);
   if (a < 0.004) discard;
 
   gl_FragColor = vec4(vColor, a);
@@ -317,6 +342,11 @@ export class Sky {
   private readonly uStarOpacity = { value: 0 };
   private readonly uStarDens = { value: 0 };
   private readonly uBandOpacity = { value: 0 };
+  /**
+   * Shared by the star field and the band, so both scintillate on one clock. Wraps
+   * well inside float precision; the shimmer is two sines and cannot tell.
+   */
+  private readonly uStarTime = { value: 0 };
 
   // --- Scratch state, reused every frame (no allocation in the hot path) ---
   private readonly _sunDir = new THREE.Vector3();
@@ -431,6 +461,8 @@ export class Sky {
     const sizes = new Float32Array(STAR_COUNT);
     const brights = new Float32Array(STAR_COUNT);
     const thresholds = new Float32Array(STAR_COUNT);
+    const twinkles = new Float32Array(STAR_COUNT);
+    const phases = new Float32Array(STAR_COUNT);
 
     for (let i = 0; i < STAR_COUNT; i++) {
       fibonacciDir(i, STAR_COUNT, this._dir);
@@ -451,14 +483,40 @@ export class Sky {
       thresholds[i] = 1.0 - b;
       sizes[i] = 0.85 + b * 2.8;
 
+      // Colour. Almost every star is white with only a hint of blue in it — the
+      // eye reads a night sky as white, and the previous split (28% of the field
+      // strongly warm or strongly blue) made it read as confetti. The hint varies
+      // per star so the field is not one flat colour.
       const t = hash01(STAR_SEED, i, 4);
-      if (t < 0.72) {
-        colors[i * 3] = 0.95; colors[i * 3 + 1] = 0.97; colors[i * 3 + 2] = 1.0;
-      } else if (t < 0.9) {
-        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.87; colors[i * 3 + 2] = 0.7;
+      if (t < 1 - STAR_TINTED_FRACTION) {
+        const blue = hash01(STAR_SEED, i, 7);
+        colors[i * 3] = 0.94 + blue * 0.05;
+        colors[i * 3 + 1] = 0.96 + blue * 0.035;
+        colors[i * 3 + 2] = 1.0;
       } else {
-        colors[i * 3] = 0.72; colors[i * 3 + 1] = 0.83; colors[i * 3 + 2] = 1.0;
+        // The rare ones, and they are rare on purpose: a red supergiant or a
+        // yellow giant is a landmark you learn the sky by, not a texture.
+        const pick = (t - (1 - STAR_TINTED_FRACTION)) / STAR_TINTED_FRACTION;
+        if (pick < 0.4) {
+          colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.55; colors[i * 3 + 2] = 0.42;
+        } else if (pick < 0.8) {
+          colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.84; colors[i * 3 + 2] = 0.52;
+        } else {
+          colors[i * 3] = 0.66; colors[i * 3 + 1] = 1.0; colors[i * 3 + 2] = 0.74;
+        }
       }
+
+      // Scintillation is atmospheric, so it belongs to stars seen through the most
+      // air: amplitude scales with how near the horizon a star sits, and only a
+      // minority get any at all. The rest are steady, which is what makes the ones
+      // that do shimmer read as shimmering.
+      const horizon = 1 - Math.abs(this._dir.y);
+      twinkles[i] =
+        hash01(STAR_SEED, i, 5) < STAR_TWINKLE_FRACTION
+          ? STAR_TWINKLE_MIN +
+            (STAR_TWINKLE_MAX - STAR_TWINKLE_MIN) * hash01(STAR_SEED, i, 8) * horizon
+          : 0;
+      phases[i] = hash01(STAR_SEED, i, 6);
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -467,6 +525,8 @@ export class Sky {
     geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute('aBright', new THREE.BufferAttribute(brights, 1));
     geometry.setAttribute('aThresh', new THREE.BufferAttribute(thresholds, 1));
+    geometry.setAttribute('aTwinkle', new THREE.BufferAttribute(twinkles, 1));
+    geometry.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
 
     const material = new THREE.ShaderMaterial({
       vertexShader: STAR_VERTEX,
@@ -475,6 +535,7 @@ export class Sky {
         uOpacity: this.uStarOpacity,
         uDens01: this.uStarDens,
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+        uTime: this.uStarTime,
       },
       transparent: true,
       depthWrite: false,
@@ -502,6 +563,8 @@ export class Sky {
     const sizes = new Float32Array(count);
     const brights = new Float32Array(count);
     const thresholds = new Float32Array(count);
+    const twinkles = new Float32Array(count);
+    const phases = new Float32Array(count);
 
     for (let i = 0; i < count; i++) {
       const dx = kept[i * 3], dy = kept[i * 3 + 1], dz = kept[i * 3 + 2];
@@ -516,6 +579,11 @@ export class Sky {
       colors[i * 3] = 0.7 + hash01(STAR_SEED, 0x3, i) * 0.15;
       colors[i * 3 + 1] = 0.78 + hash01(STAR_SEED, 0x4, i) * 0.12;
       colors[i * 3 + 2] = 1.0;
+      // The band shares the star shader, so it must carry the same attributes.
+      // A gentle shimmer on a third of the dust makes the plane look grainy and
+      // alive rather than printed on.
+      twinkles[i] = hash01(STAR_SEED, 0x5, i) < 0.33 ? 0.12 : 0;
+      phases[i] = hash01(STAR_SEED, 0x6, i);
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -524,6 +592,8 @@ export class Sky {
     geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute('aBright', new THREE.BufferAttribute(brights, 1));
     geometry.setAttribute('aThresh', new THREE.BufferAttribute(thresholds, 1));
+    geometry.setAttribute('aTwinkle', new THREE.BufferAttribute(twinkles, 1));
+    geometry.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
 
     const material = new THREE.ShaderMaterial({
       vertexShader: STAR_VERTEX,
@@ -532,6 +602,7 @@ export class Sky {
         uOpacity: this.uBandOpacity,
         uDens01: { value: 1 },
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+        uTime: this.uStarTime,
       },
       transparent: true,
       depthWrite: false,
@@ -655,6 +726,7 @@ export class Sky {
     this.uStarOpacity.value = starFade;
     this.uStarDens.value = Math.min(1, 0.45 + Math.max(0, (g.starDensity - 1) / 6.5));
     this.uBandOpacity.value = starFade * g.galaxy;
+    this.uStarTime.value = (performance.now() * 0.001) % 3600;
 
     // --- Aurora (skip the draw entirely when the gradient is zero) ---
     const auroraVisible = g.aurora > 0.001;
