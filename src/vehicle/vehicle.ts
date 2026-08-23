@@ -1556,6 +1556,7 @@ export class Vehicle {
       else spin -= Math.sign(spin) * brakeDelta;
 
       let longitudinalForce = 0;
+      let gripUsage = 0;
       if (w.loadN > 0) {
         const ground = controller.wheelGroundObject(w.index);
         const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
@@ -1611,6 +1612,7 @@ export class Vehicle {
         // instead report zero.
         longitudinalForce = clamp((-inertia * delta) / (dt * w.radius), -capacityN, capacityN);
         spin = spin0 - (longitudinalForce * dt * w.radius) / inertia;
+        gripUsage = Math.abs(longitudinalForce) / capacityN;
       }
 
       // Geared to the engine, so it cannot outrun the engine's redline.
@@ -1633,13 +1635,20 @@ export class Vehicle {
         this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, w.contactPoint, false);
       }
 
-      // Friction-circle usage, which is what costs a working tyre its side grip.
-      // Measured off the tyre's own force against its own capacity now, instead of
-      // inferred from how much of Rapier's cone its forward impulse had eaten.
-      const usage = w.loadN > 0 ? Math.abs(w.slipRatio) / PEAK_SLIP_RATIO : 0;
+      // Friction-circle usage: how much of THIS tyre's force capacity the
+      // longitudinal channel is eating, which is what it has no longer got left for
+      // cornering.
+      //
+      // It must be a force ratio. The first version divided slip by PEAK_SLIP_RATIO,
+      // which is unbounded and reads 1.0 at a slip of 0.12 — and a car at full
+      // throttle cruises at 0.28-0.34. So every driven wheel sat pinned at "fully
+      // sliding" whenever the throttle was open, cutting its side grip to
+      // SLIDE_SIDE_GRIP and never giving it back. On a rear-driven car that is the
+      // tail letting go the moment you use the engine, with no recovery: reported as
+      // the fastback going straight on and refusing to steer at speed.
       const slideTarget =
         Math.abs(contactSpeed) > SLIDE_MIN_MPS
-          ? clamp((usage - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD), 0, 1)
+          ? clamp((gripUsage - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD), 0, 1)
           : 0;
       w.slideT += (slideTarget - w.slideT) * slideBlend;
     }
