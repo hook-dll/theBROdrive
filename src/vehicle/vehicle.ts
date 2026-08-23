@@ -372,8 +372,8 @@ function staticSag(stiffness: number): number {
 const PARK_BRAKE_DECEL = 12.0;
 /** Below this ground speed a braked car becomes a physically fixed parked car. */
 const PARK_HOLD_SPEED_MPS = 0.12;
-/** Residual forward creep treated as stopped when an automatic reverses out. */
-const AUTO_REVERSE_RELEASE_MPS = 0.08;
+/** Residual motion treated as stopped before an automatic changes drive direction. */
+const AUTO_DIRECTION_RELEASE_MPS = 0.08;
 
 // ---------------------------------------------------------------------------
 // Body attitude: why a car that squats under power does not lean in a corner.
@@ -581,6 +581,16 @@ const HEADLIGHT_Y_FRACTION = 0.28;
 
 type HeadlightMode = 'off' | 'low' | 'high';
 
+/**
+ * Compound factor applied uniformly to the lateral response and friction budget
+ * of every wheel. Standard is the established handling baseline.
+ */
+const TYRE_COMPOUNDS = [
+  { label: 'bald', grip: 0.55 },
+  { label: 'standard', grip: 1 },
+  { label: 'sport', grip: 1.35 },
+] as const;
+
 export class Vehicle {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
@@ -603,6 +613,8 @@ export class Vehicle {
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
   private headlights: THREE.SpotLight[] = [];
   private headlightMode: HeadlightMode = 'off';
+  /** One selected compound for every wheel; standard preserves existing handling. */
+  private tyreCompoundIndex = 1;
 
   private readonly dragCoeff: number;
 
@@ -787,6 +799,10 @@ export class Vehicle {
     return this.drivetrain.gearLabel;
   }
 
+  get tyreCompoundLabel(): string {
+    return TYRE_COMPOUNDS[this.tyreCompoundIndex].label;
+  }
+
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
@@ -809,6 +825,11 @@ export class Vehicle {
     this.headlightMode =
       this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
     this.applyHeadlightMode();
+  }
+
+  /** Bald -> standard -> sport -> bald, applied to every wheel on the next step. */
+  cycleTyreCompound(): void {
+    this.tyreCompoundIndex = (this.tyreCompoundIndex + 1) % TYRE_COMPOUNDS.length;
   }
 
   /** Rebuilds stats, drivetrain, controller and meshes from the model and its gizmos. */
@@ -996,17 +1017,24 @@ export class Vehicle {
     // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
-    // In automatic mode the backward pedal remains a service brake until the car
-    // is stopped. Contact solvers can leave a blocked car with a few centimetres per
-    // second of positive residual velocity, so a small forward-creep allowance is
-    // required; exact-zero gating leaves reverse selected but the brake latched.
+    // The pedal opposite the current travel direction remains the service brake
+    // until the car is nearly stopped. In particular, W must not feed torque
+    // through an engaged reverse gear while it is still rolling backward.
     const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
+    const brakingForDirectionChange =
+      automatic &&
+      ((input.reverse && fwd > AUTO_DIRECTION_RELEASE_MPS) ||
+        (!input.reverse && fwd < -AUTO_DIRECTION_RELEASE_MPS));
     const reverseDrive =
       automatic &&
       input.reverse &&
-      fwd <= AUTO_REVERSE_RELEASE_MPS &&
+      fwd <= AUTO_DIRECTION_RELEASE_MPS &&
       this.drivetrain.isReverseDriveEngaged;
-    const throttleInput = reverseDrive ? input.brake : input.throttle;
+    const throttleInput = reverseDrive
+      ? input.brake
+      : brakingForDirectionChange
+        ? 0
+        : input.throttle;
     const throttle = this.localFuel > 0 ? throttleInput : 0;
     const drive = this.drivetrain.update(
       dt,
@@ -1015,8 +1043,11 @@ export class Vehicle {
       this.drivenRadius,
       automatic,
       input.reverse,
+      input.throttle,
     );
-    const brake = reverseDrive ? 0 : input.brake;
+    const brake = reverseDrive
+      ? 0
+      : Math.max(input.brake, brakingForDirectionChange ? input.throttle : 0);
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
@@ -1114,8 +1145,12 @@ export class Vehicle {
     let drivenContactCount = 0;
     // Same for every wheel: the lateral grip budget (see constants above). The
     // cone cap is mass-scaled so heavy vehicles corner worse per kilogram.
+    const tyreGrip = TYRE_COMPOUNDS[this.tyreCompoundIndex].grip;
     const gripBudgetFactor =
-      stats.wheelGrip * LATERAL_GRIP_FRACTION * Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
+      stats.wheelGrip *
+      tyreGrip *
+      LATERAL_GRIP_FRACTION *
+      Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
 
     // Speed-dependent lateral grip (see constants above). Below the start speed
     // the smoothstep evaluates to exactly 0, so the factor is exactly 1 and
@@ -1156,7 +1191,12 @@ export class Vehicle {
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       controller.setWheelSideFrictionStiffness(
         w.index,
-        surface.sideFriction * SIDE_FRICTION_GAIN * lateralGripFactor * axleGrip * slideGrip,
+        surface.sideFriction *
+          tyreGrip *
+          SIDE_FRICTION_GAIN *
+          lateralGripFactor *
+          axleGrip *
+          slideGrip,
       );
 
       const axleShare = w.isFront ? frontShare : rearShare;

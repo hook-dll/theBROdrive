@@ -48,6 +48,20 @@ function formatPlayed(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+type DriveLayout = 'FWD' | 'RWD' | 'AWD';
+
+const DRIVE_LAYOUTS: readonly { readonly id: DriveLayout; readonly label: string }[] = [
+  { id: 'FWD', label: 'FWD — front-wheel drive' },
+  { id: 'RWD', label: 'RWD — rear-wheel drive' },
+  { id: 'AWD', label: 'AWD — all-wheel drive' },
+];
+
+function driveLayout(rearDriveBias: number): DriveLayout {
+  if (rearDriveBias <= 0) return 'FWD';
+  if (rearDriveBias >= 1) return 'RWD';
+  return 'AWD';
+}
+
 async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -660,20 +674,31 @@ export class MainMenu {
         const modelList = el('div', 'menu-body-list');
         const paintModels = (): void => {
           modelList.textContent = '';
-          for (const def of SPAWNABLE_CAR_MODELS) {
-            const row = button('menu-body', '');
-            const name = el('span', 'menu-body-label');
-            name.textContent = def.label;
-            const cls = el('span', 'menu-body-class');
-            cls.textContent = def.bodyClass;
-            row.append(name, cls);
-            if (def.id === spawnModelId) row.classList.add('is-selected');
-            row.addEventListener('click', () => {
-              spawnModelId = def.id;
-              paintModels();
-              paintNote();
-            });
-            modelList.appendChild(row);
+          for (const layout of DRIVE_LAYOUTS) {
+            const models = SPAWNABLE_CAR_MODELS.filter(
+              (def) => driveLayout(def.rearDriveBias) === layout.id,
+            );
+            if (models.length === 0) continue;
+
+            const heading = el('div', 'menu-body-group');
+            heading.textContent = layout.label;
+            modelList.appendChild(heading);
+
+            for (const def of models) {
+              const row = button('menu-body', '');
+              const name = el('span', 'menu-body-label');
+              name.textContent = def.label;
+              const cls = el('span', 'menu-body-class');
+              cls.textContent = def.bodyClass;
+              row.append(name, cls);
+              if (def.id === spawnModelId) row.classList.add('is-selected');
+              row.addEventListener('click', () => {
+                spawnModelId = def.id;
+                paintModels();
+                paintNote();
+              });
+              modelList.appendChild(row);
+            }
           }
         };
         paintModels();

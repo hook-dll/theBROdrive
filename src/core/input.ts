@@ -23,6 +23,8 @@ export interface InputFrame {
   /** Toggle intents, consumed once by the system that handles them. */
   toggleLights: boolean;
   cycleCamera: boolean;
+  /** Cycle the all-wheel tyre compound while driving. */
+  cycleTyres: boolean;
   /** Switch the car radio on/off, and step to the next station: taps, consumed by audio. */
   radioToggle: boolean;
   radioNext: boolean;
@@ -64,6 +66,7 @@ export function emptyInput(): InputFrame {
     shift: 0,
     toggleLights: false,
     cycleCamera: false,
+    cycleTyres: false,
     radioToggle: false,
     radioNext: false,
     recenterCamera: false,
@@ -108,6 +111,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
+  { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'camera', label: 'Cycle camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
@@ -366,6 +370,7 @@ export class InputReader {
       (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
     f.toggleLights = this.anyPressed(this.keys.lights);
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
+    f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
     f.radioToggle = this.anyPressed(this.keys.radio);
     f.radioNext = this.anyPressed(this.keys.radioStation);
