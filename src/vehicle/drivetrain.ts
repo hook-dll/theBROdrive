@@ -183,6 +183,23 @@ export class Drivetrain {
   }
 
   /**
+   * Wheel speed (rad/s) the engaged gear allows before the engine would pass its
+   * redline, or Infinity when nothing is driving the wheel (neutral, mid-shift, no
+   * gearbox). A driven wheel is geared to the crank, so this is the hard ceiling on
+   * how fast it can be spun up no matter how little grip the tyre has — which is
+   * what bounds wheelspin instead of letting a slipping wheel run away.
+   */
+  get maxDrivenWheelSpinRadS(): number {
+    const gearbox = this.gearbox;
+    const engine = this.engine;
+    if (gearbox == null || engine == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
+      return Infinity;
+    }
+    const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
+    return total > 0 ? engine.redlineRpm / RPM_PER_RAD_PER_SEC / total : Infinity;
+  }
+
+  /**
    * Manual shift: -1 down, +1 up. Reverse sits below neutral; neutral below 1.
    * With driver assist active this is the +/- gate of a real automatic: the
    * request applies immediately and stays authoritative while the shift is in
