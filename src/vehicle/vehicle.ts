@@ -1624,9 +1624,9 @@ export class Vehicle {
     const z = half[2];
     for (const sign of [-1, 1]) {
       const x = sign * HEADLIGHT_X_FRACTION * half[0];
-      const light = new THREE.SpotLight(0xfff2d8, 0, 72, 0.52, 0.68, 1.5);
+      const light = new THREE.SpotLight(0xfff2d8, 0, 144, 0.52, 0.68, 1.5);
       light.position.set(x, y, z);
-      light.target.position.set(x, y - 0.9, z + 13);
+      light.target.position.set(x, y - 1.8, z + 26);
       light.castShadow = false;
       light.visible = true;
       this.rootGroup.add(light.target);
@@ -1640,11 +1640,11 @@ export class Vehicle {
     const low = this.headlightMode === 'low';
     const high = this.headlightMode === 'high';
     const intensity = low ? 110 : high ? 210 : 0;
-    const distance = high ? 130 : 72;
+    const distance = high ? 260 : 144;
     const angle = high ? 0.34 : 0.52;
     const penumbra = high ? 0.45 : 0.68;
-    const targetDistance = high ? 28 : 13;
-    const targetDrop = high ? 0.45 : 0.9;
+    const targetDistance = high ? 56 : 26;
+    const targetDrop = high ? 0.9 : 1.8;
     for (const light of this.headlights) {
       light.intensity = intensity;
       light.distance = distance;

@@ -127,6 +127,7 @@ export class Interaction {
     dirX: number,
     dirY: number,
     dirZ: number,
+    roadS: number,
   ): InteractionResult {
     const interactPressed = input.interact && !this.prevInteract;
     const mountPressed = input.mount && !this.prevMount;
@@ -138,7 +139,7 @@ export class Interaction {
     this.continuous = null;
 
     if (this.world.state.player.drivingCarId) {
-      if (interactPressed) this.tryExit();
+      if (interactPressed) this.tryExit(roadS);
       return { prompt: null, sound: this.sound, continuous: null };
     }
 
@@ -551,7 +552,7 @@ export class Interaction {
     this.sound = 'enter-car';
   }
 
-  private tryExit(): void {
+  private tryExit(roadS: number): void {
     const carId = this.world.state.player.drivingCarId;
     if (!carId) return;
     const vehicle = this.getVehicle();
@@ -561,7 +562,7 @@ export class Interaction {
     const exit = this.computeExitPosition(carId, vehicle);
     if (this.player) {
       this.player.setEnabled(true);
-      if (exit) this.player.teleport(exit.x, exit.y, exit.z);
+      if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);
     }
   }
 
