@@ -1167,20 +1167,20 @@ export class MonumentProvider implements ChunkProvider {
     const colliders: RAPIER.Collider[] = [];
     const disposables: Disposable[] = [];
 
-    const recordS = ctx.world.state.recordS;
+    // Personal-record markers were a tall white obelisk with an inset plaque. They
+    // clutter a resumed save exactly where the player stopped, so record distance
+    // remains state-only and no longer creates a world monument.
     const monuments = monumentsBetween(
       ctx.world.seed,
       ctx.sStart,
       ctx.sEnd,
-      recordS > 0 ? recordS : undefined,
     );
 
     for (const m of monuments) {
       // Round monuments sit exactly on 20 km boundaries, which are also chunk
       // boundaries (100 chunks), so `monumentsBetween`'s inclusive upper bound
-      // would build them twice; half-open dedupe fixes that. The personal-record
-      // marker is already ranged (sStart, sEnd] by gradient, so leave it alone.
-      if (m.kind !== 'personal_record' && (m.s < ctx.sStart || m.s >= ctx.sEnd)) continue;
+      // would build them twice; half-open dedupe fixes that.
+      if (m.s < ctx.sStart || m.s >= ctx.sEnd) continue;
       const p = ctx.road.offsetPoint(m.s, m.lateral);
       const groundY = ctx.terrain.heightAt(p.x, p.z, m.s);
       const heading = ctx.road.sampleAt(m.s).heading;

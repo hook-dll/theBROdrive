@@ -192,9 +192,9 @@ export class InputReader {
   private keys: Record<string, readonly string[]> = DEFAULT_BINDINGS;
 
   /**
-   * Touch and tilt source, when one exists. Merged in `sample` rather than read by
-   * gameplay: a phone's throttle has to arrive as the same `InputFrame` field a
-   * keyboard's does, or every consumer grows a second code path.
+   * Touch source, when one exists. Merged in `sample` rather than read by gameplay:
+   * a phone's pedals and steering slider arrive through the same `InputFrame` fields
+   * as keyboard controls.
    */
   private touch: TouchControls | null = null;
 
@@ -350,12 +350,11 @@ export class InputReader {
     );
     f.reverse = reverseHeld;
 
-    // Tilt steering is already an analogue axis, so it is the TARGET the same
-    // smoothing runs toward — not a replacement for it. Without the smoothing the
-    // accelerometer's own jitter arrives at the steering rack.
+    // The touch steering slider is already analogue, so it supplies the same
+    // target the normal steering smoothing follows.
     const keySteer =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
-    const wantSteer = keySteer !== 0 || !touch?.tilting ? keySteer : touch.steer;
+    const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
     f.steer +=
       (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
 

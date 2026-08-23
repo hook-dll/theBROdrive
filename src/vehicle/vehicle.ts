@@ -994,10 +994,18 @@ export class Vehicle {
     // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
-    const throttle = this.localFuel > 0 ? input.throttle : 0;
-    // Automatic drive interprets the backward command as a reverse request at
-    // rest, while keeping it as a service brake until reverse has fully engaged.
+    // In automatic mode the backward pedal remains a service brake until the car
+    // has actually stopped. Only a settled reverse gear with non-positive forward
+    // speed turns that pedal into reverse throttle; switching earlier let a slow
+    // forward roll bypass the brake and feel like the car was sliding.
     const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
+    const reverseDrive =
+      automatic &&
+      input.reverse &&
+      fwd <= 0 &&
+      this.drivetrain.isReverseDriveEngaged;
+    const throttleInput = reverseDrive ? input.brake : input.throttle;
+    const throttle = this.localFuel > 0 ? throttleInput : 0;
     const drive = this.drivetrain.update(
       dt,
       throttle,
@@ -1006,7 +1014,7 @@ export class Vehicle {
       automatic,
       input.reverse,
     );
-    const brake = automatic && input.reverse && this.drivetrain.isReverseDriveEngaged ? 0 : input.brake;
+    const brake = reverseDrive ? 0 : input.brake;
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
