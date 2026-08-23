@@ -33,46 +33,110 @@ import { setCondition } from '../render/materials';
 const GRAVITY = 9.81;
 
 // ---------------------------------------------------------------------------
+// THE ERA
+//
+// These cars are 1960s-1980s and not the good ones: a worn recirculating-ball
+// box, bias-ply tyres, soft springs on weak dampers, a live rear axle, drums at
+// the back and no electronics of any kind. Everything in this file that reads as
+// "vague", "slow" or "unforgiving" is a named period mechanism rather than a
+// difficulty knob, and each one is commented where it is defined:
+//
+//   STEER_PLAY_RAD          worn steering box: free play before the tyres move
+//   DRIVELINE_LAG_S         driveline slack and compliance: torque arrives late
+//   REAR_AXLE_SIDE_GRIP     live rear axle on leaf springs: the tail lets go first
+//   BRAKE_LOCK_*            no ABS: a locked wheel is measured, not scripted
+//   LATERAL_GRIP_*          bias-ply tyres: low peak, and it falls away with speed
+//   ROLL_*, SUSP_* presets  soft springs, weak dampers, real body roll
+//
+// What is deliberately NOT modelled: brake fade, axle tramp, and bump-steer. They
+// belong to the era too, but each needs state the driver cannot see or predict,
+// and an unpredictable car is not the same thing as a demanding one.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Steering tuning.
 //
-// Three stages shape the wheel angle, each fixing one piece of the "unnaturally
-// railed" feel:
+// Four stages shape the wheel angle:
 //  1. The input axis is shaped with a power law (STEER_INPUT_EXPONENT), so small
 //     deflections command disproportionately small angles and response grows
 //     progressively toward full lock.
-//  2. The available lock falls off with speed on the t^k curve below: full lock
-//     up to STEER_FULL_LOCK_KMH (parking and low-speed manoeuvres), then a fast
-//     collapse right above it (k < 1) to about a third of the lock at 40 km/h,
-//     and a gentle slide down to the floor — at 100 km/h only 15% of the parking
-//     lock remains, so corrections are small by construction.
-//  3. The steer angle is rate-limited by speed: it can swing to full lock in ~0.1 s
-//     at parking speed but takes ~0.5 s at highway speed, so a sudden full-lock
-//     input cannot snap the front wheels when it would hurt.
+//  2. The available lock falls off with speed on the t^k curve below. This is
+//     geometry and tyre reality, not an electronic nanny: it keeps a fixed lock
+//     from asking a bias-ply tyre for a slip angle it cannot make. The floor is
+//     deliberately high (STEER_HIGH_SPEED_FRACTION), because a period car will
+//     absolutely let you ask for more than it can do at speed.
+//  3. The steer angle is rate-limited by speed: a slow box (~4.5 turns lock to
+//     lock) cannot be flicked, which is what makes an evasive manoeuvre a
+//     commitment rather than a reflex.
+//  4. The result passes through STEER_PLAY_RAD of backlash, so the tyres do
+//     nothing until the box takes up its slack — vagueness on centre, and a
+//     double helping of it on every reversal.
 // ---------------------------------------------------------------------------
 
+
 /** Steering input shaping exponent: |s|^p with p>1 compresses small deflections. */
-const STEER_INPUT_EXPONENT = 1.7;
+const STEER_INPUT_EXPONENT = 1.35;
 /** Max rate of steering-angle change at parking speed (rad/s). */
-const STEER_RATE_PARK_RAD_S = 5.0;
+const STEER_RATE_PARK_RAD_S = 3.4;
 /** Max rate of steering-angle change at highway speed (rad/s). */
-const STEER_RATE_HIGHWAY_RAD_S = 1.1;
+const STEER_RATE_HIGHWAY_RAD_S = 0.95;
 /** Below this speed (km/h) the full steering lock is available. */
 const STEER_FULL_LOCK_KMH = 20;
 /** At this speed (km/h) steering reaches its reduced floor. */
 const STEER_REDUCED_KMH = 100;
-/** Fraction of full lock retained at STEER_REDUCED_KMH. */
-const STEER_HIGH_SPEED_FRACTION = 0.15;
+/**
+ * Fraction of full lock retained at STEER_REDUCED_KMH. Was 0.15, which quietly
+ * did the job of a stability program: the car simply refused to be asked for a
+ * bad angle. At 0.42 the driver keeps the authority to provoke a slide, and the
+ * slow rack below is what stops it being a twitch.
+ */
+const STEER_HIGH_SPEED_FRACTION = 0.42;
 /**
  * Shape of the lock-vs-speed curve: fraction = 1 - (1-floor) * t^k with
- * t = 0..1 across STEER_FULL_LOCK_KMH..STEER_REDUCED_KMH. With k < 1 the lock
- * collapses fast just above the full-lock speed (0.46 at 25 km/h, 0.32 at
- * 40 km/h) and creeps down gently from there; measured against the grip cap
- * this keeps a 20 km/h U-turn at ~6 m while a 40 km/h full lock commands only
- * ~0.65 g, so the player must slow down for tight work.
+ * t = (kmh - full)/(reduced - full). k < 1 front-loads the loss just above the
+ * full-lock speed and then flattens out.
  */
 const STEER_LOCK_CURVE = 0.161;
 /** Same curve shape drives the rate-limit blend between the two speeds above. */
 const STEER_RATE_CURVE = 1.6;
+/**
+ * Steering-box free play, radians at the ROAD WHEEL.
+ *
+ * A worn recirculating-ball box has 20-30° of slack at the steering wheel, which is
+ * about a degree at the tyre. Implemented as a backlash operator on the commanded
+ * angle: the tyres do not move until the command leaves the play window, so the
+ * first bit of every input does nothing and a reversal costs 2x the play before
+ * anything happens. That is the "delay between input and response", and unlike a
+ * time delay it is honest, because holding an angle still holds it.
+ *
+ * 0.018 rad (1°) costs the first ~12% of stick travel at 80 km/h.
+ */
+const STEER_PLAY_RAD = 0.018;
+/**
+ * Caster self-centring inside the play window, rad/s.
+ *
+ * Backlash ALONE is not a steering system, and shipping it without this was the bug
+ * that made the cars impossible to hold in a straight line: with the wheel centred
+ * the command is zero, but the tyres are free anywhere inside the window, so they
+ * stayed wherever the last input left them. A degree of residual steer never
+ * cancels — the car just kept turning. The bench measured 8-11° of heading still
+ * being wound on AFTER the steering was released, which is exactly the weave.
+ *
+ * A real front axle does not do that: caster trail and steering-axis inclination
+ * mean the road pushes the tyres back to straight, and the slack gets taken up in
+ * the direction of load rather than left hanging. So inside the window the angle
+ * bleeds toward zero. Holding a steady input then parks the tyres at
+ * `command - play` (slack taken up, the trailing edge of the window) and releasing
+ * returns them to straight, while a reversal still has to cross the whole 2x play.
+ */
+const STEER_CASTER_RETURN_RAD_S = 2.0;
+/**
+ * Driveline slack and compliance, seconds. A leaf-sprung live axle on worn U-joints
+ * does not deliver torque the instant the pedal moves: the slack takes up, the
+ * shaft winds, and then the car goes. A first-order lag on the applied wheel torque
+ * is the whole of it — no fake clunk, and it costs one float of state.
+ */
+const DRIVELINE_LAG_S = 0.1;
 
 // ---------------------------------------------------------------------------
 // Lateral grip budget.
@@ -93,11 +157,12 @@ const STEER_RATE_CURVE = 1.6;
 
 /**
  * Fraction of the surface's frictionSlip that acts as the lateral grip budget.
- * Asphalt's 2.6 becomes ~1.05, i.e. peak cornering of about 1 g for a light car
- * instead of the railed 2.1-2.4 g measured before — tyres simply do not hold
- * that, and exceeding the budget now sheds speed instead of snapping direction.
+ *
+ * Bias-ply, not radials. 0.4 gave a ~1 g peak, which is a modern tyre on a good
+ * road; a period cross-ply on a 1970s road surface is 0.7-0.8 g, and it gives up
+ * progressively rather than at a cliff edge.
  */
-const LATERAL_GRIP_FRACTION = 0.4;
+const LATERAL_GRIP_FRACTION = 0.33;
 /** Chassis mass (kg) at which the grip budget is unscaled. */
 const GRIP_REFERENCE_MASS = 1100;
 /**
@@ -110,28 +175,39 @@ const GRIP_MASS_EXPONENT = 0.3;
 /**
  * Lateral constraint gain applied to the surface's sideFriction. Below 1, the
  * wheels stop cancelling all lateral velocity every tick: slip builds
- * progressively with yaw rate (understeer) instead of an instant direction
- * change. 0.8 is firm enough that a 40-60 km/h corner at ~0.6-0.9 g holds only
- * ~2-4° of slip and a 20 km/h U-turn still closes to ~6 m, while staying well
- * below the 1.0 rail.
+ * progressively with yaw rate (understeer) instead of an instant direction change.
+ * 0.7 is a period car's vagueness: a 40-60 km/h corner runs 4-6° of slip, so the
+ * car is always working and never railed, and the driver is steering the slip
+ * rather than the wheels.
  */
-const SIDE_FRICTION_GAIN = 0.8;
+const SIDE_FRICTION_GAIN = 0.7;
 /**
  * Speed-dependent lateral grip falloff. Below LATERAL_GRIP_FALLOFF_START_MPS the
- * car corners exactly as before; above it the lateral constraint gain is scaled
- * down on a smoothstep toward 1 - LATERAL_GRIP_MAX_LOSS. This makes the car
- * progressively more nervous with speed (a corner that holds at 60 km/h starts
- * to wash out near 140 km/h) while parking and low-speed manoeuvring are
- * untouched. The falloff scales only the lateral (side-friction) channel, so
- * drive, brake and steering are unaffected, and a straight line carries no
- * lateral slip to amplify — so it cannot introduce straight-line wander.
+ * lateral gain is untouched; above it it is scaled down on a smoothstep toward
+ * 1 - LATERAL_GRIP_MAX_LOSS. The falloff scales only the lateral (side-friction)
+ * channel, so drive, brake and steering are unaffected, and a straight line
+ * carries no lateral slip to amplify — so it cannot introduce straight-line
+ * wander.
+ *
+ * Bias-ply carcasses squirm and heat, and they lose cornering force with speed far
+ * earlier than a radial does, so the falloff starts at town speeds (~50 km/h) and
+ * takes a third of the grip by 144 km/h.
  */
-/** Speed (m/s) below which lateral grip is untouched (~72 km/h). */
-const LATERAL_GRIP_FALLOFF_START_MPS = 20;
+const LATERAL_GRIP_FALLOFF_START_MPS = 14;
 /** Speed (m/s) at which the falloff reaches its full loss (~144 km/h). */
 const LATERAL_GRIP_FALLOFF_END_MPS = 40;
 /** Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all). */
-const LATERAL_GRIP_MAX_LOSS = 0.25;
+const LATERAL_GRIP_MAX_LOSS = 0.34;
+/**
+ * Rear-axle lateral grip, as a fraction of the front's.
+ *
+ * A live axle on leaf springs steers itself under roll and load: the axle tramps,
+ * the springs wind up, and the outer tyre runs at a slip angle the driver never
+ * asked for. With the rear brake bias and the mostly-RWD catalogue, this 6% is what
+ * makes the TAIL the end that goes first — the car has to be driven, not aimed, and
+ * it will not catch itself.
+ */
+const REAR_AXLE_SIDE_GRIP = 0.94;
 
 // ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
@@ -140,26 +216,127 @@ const LATERAL_GRIP_MAX_LOSS = 0.25;
 // needs the impulse `a * mass * dt / n`.
 // ---------------------------------------------------------------------------
 
-/** Foot-brake deceleration target (m/s²), ~0.9 g. */
-const FOOT_BRAKE_DECEL = 9.0;
-/** Rear bias for the foot brake (0..1). More on the rear, like a real car. */
-const FOOT_BRAKE_REAR_BIAS = 0.55;
 /**
- * Handbrake: a cable that LOCKS the rear wheels, not a second foot brake.
+ * Foot-brake pedal DEMAND (m/s²), not an achievement.
  *
- * The old 6 m/s² rear-only target was quieter than the foot brake and read as
- * "the handbrake does nothing": at 60 km/h it shaved a couple of km/h and the
- * car kept tracking straight. A locked wheel is instead an impulse ceiling far
- * above what the tyre can transmit, so the rear simply stops rotating and the
- * friction cone (see the grip note above) does the rest.
+ * A master cylinder pushes the same pressure through the same shoes whatever the
+ * axle load is doing, so this is what the pedal ASKS for; the friction cone decides
+ * what each tyre delivers, and a tyre asked for more than its cone allows is a tyre
+ * that has stopped cornering (see the friction-circle note below).
+ *
+ * 7.0 is chosen so that the ACHIEVED figure is period-correct: measured on the
+ * bench, the cars stop from 100 km/h in 47-52 m at 0.76-0.87 g mean (the mean
+ * exceeds the demand because engine braking, drag and rolling resistance are all
+ * on top of it). For scale: a 9.5 demand gave 39-45 m, better than a modern car,
+ * and a 6.6 demand gave 75-112 m once the rear tyres started saturating. The rear
+ * axle still fills its cone at this demand, which is the part that matters — mid
+ * corner it doubles the car's curvature (bench: trailYawGain 1.2-2.1).
  */
-const HANDBRAKE_DECEL = 30.0;
+const FOOT_BRAKE_DECEL = 7.0;
 /**
- * Lateral grip left on a locked rear axle. A sliding tyre carries far less side
- * force than a rolling one, and this is what turns the handbrake into a
- * handbrake: the tail steps out instead of the car braking in a straight line.
+ * Rear bias for the foot brake (0..1).
+ *
+ * Discs at the front, drums at the back, and no proportioning valve to keep them
+ * honest under load transfer. 0.62 sends more torque to the axle that is UNLOADING
+ * under braking, which is exactly the period failure mode: the rears run out of grip
+ * first and the car tries to swap ends. With the slide detection below, this is "the
+ * lack of ABS made emergency braking almost an art".
  */
-const HANDBRAKE_SIDE_GRIP = 0.3;
+const FOOT_BRAKE_REAR_BIAS = 0.62;
+/**
+ * No-ABS, no-traction-control slide detection: the friction circle, measured.
+ *
+ * There is no guessing and no scripted threshold on pedal force here. Rapier clips
+ * each wheel's impulse to a cone sized by that wheel's own suspension load,
+ *
+ *     cone = suspensionForce * dt * frictionSlip
+ *
+ * and the longitudinal impulse counts half against it. How much of that cone the
+ * braking or driving force is eating is therefore exactly "how close is this tyre to
+ * letting go", and a tyre spending its budget on stopping has nothing left to spend
+ * on cornering. That is the friction circle, and it is the whole mechanism.
+ *
+ * Two earlier attempts are worth recording, because both looked like they worked:
+ *
+ *  - Watching `wheelRotation` for a stalled wheel. Never fired (0.01 through a
+ *    full-pedal stop from 100 km/h): the cone scales the force down, so an
+ *    over-braked tyre keeps rotating instead of locking.
+ *  - Comparing delivered impulse against the brake demand. This measured the DRIVE
+ *    bias, not the brake: every FWD car reported its front axle sliding and every
+ *    RWD car its rear, regardless of brake balance, because a driven wheel's net
+ *    impulse carries engine torque too.
+ *
+ * Only the longitudinal share is used. The side impulse is deliberately left out:
+ * feeding the channel this modulates back into its own input is a loop, and the
+ * lateral falloff above already handles cornering grip.
+ *
+ * The consequence is the era's: the rear axle has 62% of the brake torque and the
+ * lighter load, so its cone is the first to fill and the tail is the first to go.
+ * Easing the pedal puts the tyre back inside its cone and the grip returns with it,
+ * which is cadence braking, learned the same way it was learned then. Under power it
+ * cuts the same way, which is a rear axle that spins up and steps out — no traction
+ * control, because there was none.
+ */
+/** Below this speed (m/s) slide is not evaluated: a stopped wheel is just stopped. */
+const SLIDE_MIN_MPS = 2.5;
+/** Cone fraction the longitudinal channel may eat before side grip starts to go. */
+const SLIDE_CONE_THRESHOLD = 0.55;
+/** Lateral grip retained by a fully sliding wheel. */
+const SLIDE_SIDE_GRIP = 0.35;
+/** Smoothing for the slide estimate, seconds. Long enough to ignore one bad step. */
+const SLIDE_TAU = 0.05;
+/**
+ * Locking the wheels: the discrete end of "no ABS".
+ *
+ * The friction circle above is the PROGRESSIVE part — a tyre gradually running out
+ * of grip. This is the other half, and it is what a driver of one of these actually
+ * had to manage: stand on the pedal long enough and the wheels stop turning
+ * altogether. Two locks, deliberately different:
+ *
+ *  - The FOOT brake locks every wheel, but only after LOCK_HOLD_S of continuous
+ *    application. Stab-and-release keeps them turning; a panicked hard press does
+ *    not. That is cadence braking as a mechanic rather than as a lecture, and
+ *    releasing the pedal at all resets the timer.
+ *  - The HANDBRAKE locks the rear axle the instant it is pulled. No timer: it is a
+ *    cable pulling shoes onto drums, and it either locks them or it does not.
+ *
+ * A lock does three things: it drops the wheel's longitudinal demand to
+ * LOCKED_DECEL, it cuts side grip to LOCKED_SIDE_GRIP, and it freezes the drawn
+ * spin. The last one matters because Rapier will not stall a wheel for us (the cone
+ * scales the brake force down instead), and the wheel the player is looking at has
+ * to be the wheel the simulation says is locked; the spin is a pure view of
+ * `wheelRotation`, so the view is where the freeze belongs.
+ *
+ * LOCKED_DECEL is LOWER than the rolling demand, and that direction is the whole
+ * point. A sliding tyre has less grip than one at optimal slip — that is the entire
+ * reason ABS was invented. The first attempt here gave a locked wheel an impulse
+ * "far past anything the contact can transmit" and let the friction cone sort it
+ * out, which made locking a straight upgrade: 35-38 m from 100 km/h at up to 2.2 g,
+ * better than a modern car, and it taught the player to stamp on the pedal.
+ *
+ * What cadence braking is worth here, measured from 100 km/h, is worth being precise
+ * about rather than romantic: pedal held flat 53.9 m, a tight cadence (1.0 s on,
+ * 0.12 s off, never reaching the timer) 53.3 m, a loose pump (0.9 s on, 0.25 s off)
+ * 57.8 m. So the technique buys a little distance and only if the releases are
+ * short — release too long and the dead time costs more than the lock does. Its real
+ * payoff is the other column: rolling tyres still steer, and locked ones do not.
+ *
+ * The rest follows from the physics rather than being written in: a locked front
+ * axle carries no side force, so the car stops steering and ploughs straight; a
+ * locked rear axle carries none either, so the tail comes round.
+ */
+/** Continuous foot-brake time (s) before the wheels stop turning. */
+const LOCK_HOLD_S = 1.2;
+/** Below this brake input the pedal counts as released and the timer resets. */
+const LOCK_RELEASE_INPUT = 0.15;
+/**
+ * Deceleration (m/s²) a locked, sliding tyre delivers: ~0.57 g against the 0.71 g
+ * FOOT_BRAKE_DECEL demands of a rolling one. The ratio is roughly the real
+ * sliding-to-peak friction ratio for a period cross-ply.
+ */
+const LOCKED_DECEL = 5.6;
+/** Lateral grip left on a locked, sliding tyre. */
+const LOCKED_SIDE_GRIP = 0.22;
 /**
  * Ride height, as geometry rather than a fudge factor.
  *
@@ -189,10 +366,12 @@ function staticSag(stiffness: number): number {
   return GRAVITY / (4 * stiffness);
 }
 /**
- * Holding deceleration for a parked car, m/s². Low enough that a shove still
- * rolls it, high enough that it does not creep down a dune on its own.
+ * Static holding deceleration for a parked car, m/s². Applied across all four
+ * wheels so a braked car remains at rest on any drivable road grade.
  */
-const PARK_BRAKE_DECEL = 4.0;
+const PARK_BRAKE_DECEL = 12.0;
+/** Below this ground speed a braked car becomes a physically fixed parked car. */
+const PARK_HOLD_SPEED_MPS = 0.12;
 
 // ---------------------------------------------------------------------------
 // Body attitude: why a car that squats under power does not lean in a corner.
@@ -222,10 +401,15 @@ const PARK_BRAKE_DECEL = 4.0;
  * springs push along vertical rays at the mounts, and it has no anti-roll bar to
  * model — so feeding in the whole moment simply tips the car over: measured at
  * gain 1, a 33 km/h turn rolled the body to 81 degrees and put it on its side.
- * A third of the moment reads as a real, weighted lean without ever threatening
- * to trip a car that the rest of the model cannot catch.
+ *
+ * 0.62, not the old 0.34, because these are period springs now: at 0.34 the softened
+ * suspension still only leant 4° at 0.73 g on the bench, which is a modern car's
+ * body control on 1970s springs. 0.62 lands 3° for the low-slung sports car and up
+ * to 6.6° for the tall van — the body visibly takes a set and the tall bodies lean
+ * hardest, which is the right ordering. The bench confirms it never approaches
+ * ROLL_LIMIT_DEG or lifts a wheel in a full-lock 60 km/h turn.
  */
-const ROLL_COUPLE_GAIN = 0.34;
+const ROLL_COUPLE_GAIN = 0.62;
 /**
  * Low-pass time constant for the lateral-acceleration estimate, seconds. The
  * estimate differences body-frame velocity, so a kerb strike or a one-frame solver
@@ -240,13 +424,18 @@ const ROLL_ACCEL_MAX = 12;
  * is already leaning harder than any road car does, and continuing to push is how
  * a lean becomes a rollover.
  */
-const ROLL_LIMIT_DEG = 8;
+const ROLL_LIMIT_DEG = 11;
 /**
  * Roll-rate damping, as a fraction of roll inertia per second. Stands in for the
  * dampers' contribution about the roll axis, which the ray-cast model does not
  * produce, and is what stops the restored couple ringing.
+ *
+ * 1.5 was too little once the springs were softened: the body kept rocking after the
+ * corner was over, which reads as a car that cannot be placed rather than a car that
+ * leans. 2.6 lets it take a set and hold it. The wallow that belongs to the era is
+ * in the spring rates and the vertical damping, not in an undamped roll axis.
  */
-const ROLL_RATE_DAMPING = 2.2;
+const ROLL_RATE_DAMPING = 2.6;
 
 /**
  * Inertia gains over a uniform solid box.
@@ -258,9 +447,9 @@ const ROLL_RATE_DAMPING = 2.2;
  * pitch/yaw radius of gyration of 0.3-0.35 of wheelbase; these gains bring the box
  * up to that without pretending to model mass distribution properly.
  */
-const INERTIA_PITCH_YAW_GAIN = 2.2;
+const INERTIA_PITCH_YAW_GAIN = 2.55;
 /** Roll inertia is closer to a box's, since mass is not spread across the width. */
-const INERTIA_ROLL_GAIN = 1.25;
+const INERTIA_ROLL_GAIN = 1.35;
 
 // ---------------------------------------------------------------------------
 // Aerodynamic drag: 0.5 * rho * Cd * A, with A = 4 * hx * hy (frontal area).
@@ -316,12 +505,63 @@ interface WheelVisual {
   mesh: THREE.Object3D;
   /** Reused per-frame buffer for wheelChassisConnectionPointCs. */
   scratchCp: { x: number; y: number; z: number };
+  /** Friction-slip budget set for this wheel this step, i.e. its cone size. */
+  frictionSlip: number;
+  /** Smoothed slide amount, 0 = inside the friction cone, 1 = fully saturated. */
+  slideT: number;
+  /** Locked this step: brake held past LOCK_HOLD_S, or the handbrake on a rear. */
+  locked: boolean;
+  /**
+   * Spin actually DRAWN, radians. Integrated here rather than read straight from
+   * `wheelRotation` because a locked wheel has to look locked: Rapier keeps
+   * advancing its rotation (the cone scales the brake force down instead of
+   * stalling the wheel), so the view has to stop it.
+   */
+  drawnSpin: number;
+  /** Previous `wheelRotation`, to turn its absolute value into a per-step delta. */
+  prevSpin: number;
 }
 
 /** A gizmo mounted at one of the model's anchors. Cosmetic mass, nothing more. */
 interface GizmoVisual {
   part: PartInstance;
   mesh: THREE.Object3D;
+}
+
+/**
+ * Everything the audio layer needs to voice this car, written in place once per
+ * fixed step. It is telemetry, not a sound description: the simulation reports
+ * rpm, load, slip and surface, and src/audio/vehicleaudio.ts decides what that
+ * sounds like. Nothing here is allocated per tick.
+ */
+export interface VehicleAudioState {
+  rpm: number;
+  idleRpm: number;
+  redlineRpm: number;
+  cylinders: number;
+  /** Applied throttle, 0..1 — already zeroed by an empty tank. */
+  throttle: number;
+  brake: number;
+  handbrake: boolean;
+  /** Signed forward speed, m/s. */
+  forwardMps: number;
+  engineRunning: boolean;
+  gearLabel: string;
+  /** Wheels on the ground / total wheels. */
+  wheelContactFraction: number;
+  /** Mean micro-bump amplitude of the surfaces under the loaded wheels, metres. */
+  surfaceRoughness: number;
+  /** Body-frame sideways speed, m/s: the tyres' side slip. */
+  lateralSlipMps: number;
+  /** Downward speed killed by the ground this step, m/s. 0 when nothing landed. */
+  landingImpactMps: number;
+  /**
+   * Mean lock-up per axle, 0..1 (see BRAKE_LOCK_* above). A tyre dragged along
+   * without turning howls even in a straight line, which lateral slip alone never
+   * reports — so the skid voice needs this to sound a no-ABS stop.
+   */
+  frontLockT: number;
+  rearLockT: number;
 }
 
 /**
@@ -336,6 +576,8 @@ const COM_REARWARD_FRACTION = 0.02;
 /** Headlight placement as fractions of the chassis box (x of half-width, y of height). */
 const HEADLIGHT_X_FRACTION = 0.62;
 const HEADLIGHT_Y_FRACTION = 0.28;
+
+type HeadlightMode = 'off' | 'low' | 'high';
 
 export class Vehicle {
   private readonly physics: PhysicsWorld;
@@ -358,7 +600,7 @@ export class Vehicle {
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
   private headlights: THREE.SpotLight[] = [];
-  private lightsOnFlag = false;
+  private headlightMode: HeadlightMode = 'off';
 
   private readonly dragCoeff: number;
 
@@ -369,8 +611,24 @@ export class Vehicle {
   private rearDrivenCount = 0;
   private drivenRadius = 0.35;
 
-  // Steering state (rate-limited).
+  // Steering state. `steerCommand` is what the box has been turned to (rate
+  // limited); `steerAngle` is what the tyres are actually at, which lags it by the
+  // backlash in STEER_PLAY_RAD.
+  private steerCommand = 0;
   private steerAngle = 0;
+  /** Driveline torque actually reaching the wheels, lagged by DRIVELINE_LAG_S. */
+  private appliedDriveTorqueNm = 0;
+  /** Seconds the foot brake has been held without release, for the lock timer. */
+  private brakeHeldS = 0;
+  /**
+   * Parking hold is armed by the fixed update and applied after Rapier has stepped.
+   * Freezing after the step removes the tiny gravity displacement that a ray-cast
+   * wheel brake otherwise accumulates while a car is stopped on a slope.
+   */
+  private parkingHoldRequested = false;
+  private parkingHoldActive = false;
+  private readonly parkingHoldPos = { x: 0, y: 0, z: 0 };
+  private readonly parkingHoldRot = { x: 0, y: 0, z: 0, w: 1 };
 
   // Fuel: a local mirror of car.fuelLitres, resynced on external changes.
   private localFuel: number;
@@ -396,6 +654,28 @@ export class Vehicle {
   private rollAccel = 0;
   private rollPrimed = false;
   private rollLeverArm = 0.5;
+  // Audio telemetry, written every fixed step and read by the audio layer at frame
+  // rate. One object for the life of the vehicle; never reallocated.
+  private readonly audioState: VehicleAudioState = {
+    rpm: 0,
+    idleRpm: 0,
+    redlineRpm: 1,
+    cylinders: 4,
+    throttle: 0,
+    brake: 0,
+    handbrake: false,
+    forwardMps: 0,
+    engineRunning: false,
+    gearLabel: 'N',
+    wheelContactFraction: 0,
+    surfaceRoughness: 0,
+    lateralSlipMps: 0,
+    landingImpactMps: 0,
+    frontLockT: 0,
+    rearLockT: 0,
+  };
+  /** Previous step's vertical velocity, for detecting a landing. */
+  private prevVerticalVel = 0;
   // Render-frame scratch.
   private readonly pos = new THREE.Vector3();
   private readonly quat = new THREE.Quaternion();
@@ -513,13 +793,20 @@ export class Vehicle {
     return this.statsValue.engine != null && this.localFuel > 0;
   }
 
-  get lightsOn(): boolean {
-    return this.lightsOnFlag;
+  /**
+   * Live audio telemetry. Returns the vehicle's own buffer, refreshed each fixed
+   * step: callers read it and must not retain or mutate it.
+   */
+  get audio(): VehicleAudioState {
+    return this.audioState;
   }
 
-  setLights(on: boolean): void {
-    this.lightsOnFlag = on;
-    for (const light of this.headlights) light.visible = on;
+
+  /** Off -> dipped beam -> high beam -> off. */
+  cycleHeadlights(): void {
+    this.headlightMode =
+      this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
+    this.applyHeadlightMode();
   }
 
   /** Rebuilds stats, drivetrain, controller and meshes from the model and its gizmos. */
@@ -532,7 +819,10 @@ export class Vehicle {
     this.wheels = [];
     this.gizmos = [];
     this.headlights = [];
+    this.steerCommand = 0;
     this.steerAngle = 0;
+    this.appliedDriveTorqueNm = 0;
+    this.brakeHeldS = 0;
     this.frontWheelCount = 0;
     this.rearWheelCount = 0;
     this.frontDrivenCount = 0;
@@ -618,6 +908,11 @@ export class Vehicle {
         radius: wheel.radius,
         mesh,
         scratchCp: { x: 0, y: 0, z: 0 },
+        frictionSlip: 0,
+        slideT: 0,
+        locked: false,
+        drawnSpin: 0,
+        prevSpin: 0,
       });
 
       if (wheel.isFront) {
@@ -663,6 +958,7 @@ export class Vehicle {
     if (!controller) return;
 
     const n = this.wheels.length;
+    this.parkingHoldRequested = true;
     if (n === 0) return;
 
     // Parking brake: same impulse units as the foot brake (see the braking note
@@ -691,21 +987,26 @@ export class Vehicle {
     }
 
     const fwd = this.forwardSpeedMps();
+    this.parkingHoldRequested =
+      input.handbrake && (this.parkingHoldActive || Math.abs(fwd) < PARK_HOLD_SPEED_MPS);
 
     // Manual shift request; with driver assist on this is a +/- gate — the
     // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
     const throttle = this.localFuel > 0 ? input.throttle : 0;
-    // The settings gearbox mode rides along as driver assist; a physically
-    // automatic gearbox shifts regardless (hardware wins, see Drivetrain).
+    // Automatic drive interprets the backward command as a reverse request at
+    // rest, while keeping it as a service brake until reverse has fully engaged.
+    const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
     const drive = this.drivetrain.update(
       dt,
       throttle,
       fwd / this.drivenRadius,
       this.drivenRadius,
-      this.world.state.settings.gearboxMode === 'automatic',
+      automatic,
+      input.reverse,
     );
+    const brake = automatic && input.reverse && this.drivetrain.isReverseDriveEngaged ? 0 : input.brake;
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
@@ -718,7 +1019,8 @@ export class Vehicle {
       }
     }
 
-    // Steering: shaped input, speed-scaled lock and a speed-scaled rate limit.
+    // Steering: shaped input, speed-scaled lock, a speed-scaled rate limit and the
+    // steering box's own free play.
     //
     // The negation converts our basis into Rapier's steering sign. Forward is +Z and
     // the axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle
@@ -741,7 +1043,37 @@ export class Vehicle {
       STEER_RATE_HIGHWAY_RAD_S +
       (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) * Math.pow(1 - steerT, STEER_RATE_CURVE);
     const maxDelta = steerRate * dt;
-    this.steerAngle += clamp(targetSteer - this.steerAngle, -maxDelta, maxDelta);
+    this.steerCommand += clamp(targetSteer - this.steerCommand, -maxDelta, maxDelta);
+
+    // Caster first, then backlash. Inside the window the tyres are not held by the
+    // box at all, so the road returns them toward straight
+    // (STEER_CASTER_RETURN_RAD_S); the backlash operator then drags them out of the
+    // window whenever the command has moved beyond it. Order matters: centring
+    // before the operator means a held input settles on the window's trailing edge
+    // (slack taken up in the direction of load) instead of drifting off it.
+    const caster = STEER_CASTER_RETURN_RAD_S * dt;
+    this.steerAngle -= clamp(this.steerAngle, -caster, caster);
+    if (this.steerCommand > this.steerAngle + STEER_PLAY_RAD) {
+      this.steerAngle = this.steerCommand - STEER_PLAY_RAD;
+    } else if (this.steerCommand < this.steerAngle - STEER_PLAY_RAD) {
+      this.steerAngle = this.steerCommand + STEER_PLAY_RAD;
+    }
+
+    // Driveline slack and compliance: torque arrives late (DRIVELINE_LAG_S). One
+    // pole, so a stab of throttle builds over ~0.3 s instead of hitting the tyres
+    // on the same tick the pedal moved.
+    const driveBlend = dt / (DRIVELINE_LAG_S + dt);
+    this.appliedDriveTorqueNm += (drive.driveTorqueNm - this.appliedDriveTorqueNm) * driveBlend;
+    // The brake pedal overrides what is left of the drive.
+    //
+    // With the throttle shut the drivetrain still hands out idle torque, and through
+    // a low gear that is hundreds of Nm at the wheel. Braking against it wrecked the
+    // stop: the driven axle's brake force was cancelled to the point that the RWD
+    // cars needed 86 m from 100 km/h instead of 60, and their rear tyres never even
+    // reached their friction limit, so a rear-biased brake could not step the tail
+    // out. Real cars do creep against the brakes at idle in gear, but not at speed
+    // and not against a firm pedal.
+    const appliedTorque = this.appliedDriveTorqueNm * (1 - brake);
 
     // Brake impulses (N·s), distributed so the total matches the target decel.
     const mass = stats.mass;
@@ -752,12 +1084,22 @@ export class Vehicle {
     const brakeDenom =
       this.frontWheelCount * brakeFrontShare + this.rearWheelCount * brakeRearShare;
     const footBrakeBase = brakeDenom > 0 ? (FOOT_BRAKE_DECEL * mass * dt) / brakeDenom : 0;
-    const handbrakePerRear =
-      this.rearWheelCount > 0 ? (HANDBRAKE_DECEL * mass * dt) / this.rearWheelCount : 0;
+    const lockPerWheel = (LOCKED_DECEL * mass * dt) / Math.max(1, this.wheels.length);
+    const parkingBrakePerWheel = input.handbrake
+      ? (PARK_BRAKE_DECEL * mass * dt) / Math.max(1, this.wheels.length)
+      : 0;
+
+    // Foot-brake lock timer: continuous application only. Any real release (below
+    // LOCK_RELEASE_INPUT) puts the wheels back on the road, which is what makes
+    // pumping the pedal the technique it was.
+    if (brake > LOCK_RELEASE_INPUT) this.brakeHeldS += dt;
+    else this.brakeHeldS = 0;
+    const footLocked = this.brakeHeldS >= LOCK_HOLD_S;
 
     const wheelCount = this.wheels.length;
     const totalDrivenCount = this.frontDrivenCount + this.rearDrivenCount;
     let rollingResistanceSum = 0;
+    let roughnessSum = 0;
     let contactCount = 0;
     let drivenContactCount = 0;
     // Same for every wheel: the lateral grip budget (see constants above). The
@@ -784,51 +1126,112 @@ export class Vehicle {
       const ground = controller.wheelGroundObject(w.index);
       const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
 
-      // A locked rear tyre slides: it keeps its longitudinal cone but sheds most of
-      // its side force, which is what makes the handbrake rotate the car.
-      const locked = input.handbrake && !w.isFront;
-      controller.setWheelFrictionSlip(w.index, surface.frictionSlip * gripBudgetFactor);
+      // A tyre spending its friction budget on stopping or accelerating has none
+      // left for cornering (see the friction-circle note above). The rear parking
+      // cable still marks the rear wheels locked for tyre visuals and skid audio.
+      // Holding force itself is distributed across every wheel below, because a
+      // rear-only cable cannot reliably hold the vehicle's mass on this game's
+      // steep, uneven roads.
+      const handbraked = input.handbrake && !w.isFront;
+      const coneGrip = 1 - w.slideT * (1 - SLIDE_SIDE_GRIP);
+      // Locked: the parking cable is immediate; the foot brake earns a lock after
+      // being held for its threshold.
+      const locked = handbraked || footLocked;
+      const slideGrip = locked ? Math.min(LOCKED_SIDE_GRIP, coneGrip) : coneGrip;
+      w.locked = locked;
+      // The rear axle is a live axle on leaf springs and never had the front's
+      // cornering power (REAR_AXLE_SIDE_GRIP).
+      const axleGrip = w.isFront ? 1 : REAR_AXLE_SIDE_GRIP;
+      const frictionSlip = surface.frictionSlip * gripBudgetFactor;
+      controller.setWheelFrictionSlip(w.index, frictionSlip);
       controller.setWheelSideFrictionStiffness(
         w.index,
-        surface.sideFriction *
-          SIDE_FRICTION_GAIN *
-          lateralGripFactor *
-          (locked ? HANDBRAKE_SIDE_GRIP : 1),
+        surface.sideFriction * SIDE_FRICTION_GAIN * lateralGripFactor * axleGrip * slideGrip,
       );
 
       const axleShare = w.isFront ? frontShare : rearShare;
       const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
       const driven = axleShare > 0 && axleCount > 0;
 
-      // Drive torque -> engine force (Newtons), signed by gear (reverse < 0).
+      // Brakes first, because the two channels are not independent: Rapier's
+      // vehicle controller (a Bullet port) computes a wheel's longitudinal impulse
+      // as `engine_force * dt` whenever that force is non-zero, and only falls back
+      // to the braking branch when it is exactly zero. So a wheel carrying ANY
+      // drive force silently brakes with nothing at all — which is what made a
+      // braked car keep its speed while its wheels were drawn locked: the driven
+      // axle contributed zero retardation and the pedal only ever got the other
+      // axle's share of the bias.
+      //
+      // Foot brake is rear-biased; the lock impulse replaces it on a locked wheel.
+      // Engine braking is applied separately as a chassis impulse below — routing
+      // it through setWheelBrake saturates at the same ceiling, so every gear would
+      // brake the same.
+      let brakeImpulse = 0;
+      if (brake > 0) {
+        brakeImpulse += brake * footBrakeBase * (w.isFront ? brakeFrontShare : brakeRearShare);
+      }
+      // A latched parking brake takes precedence across every wheel and is strong
+      // enough to resist gravity on the road network; a locked foot brake otherwise
+      // replaces the pedal's rolling demand.
+      if (input.handbrake) brakeImpulse = parkingBrakePerWheel;
+      else if (locked) brakeImpulse = lockPerWheel;
+      controller.setWheelBrake(w.index, brakeImpulse);
+
+      // Drive torque -> engine force (Newtons), signed by gear (reverse < 0). Zero
+      // on any braked wheel, per the branch above: the brake wins the contact.
       let engineForce = 0;
-      if (driven) {
-        engineForce = wheelTorqueToForce((drive.driveTorqueNm * axleShare) / axleCount, w.radius);
+      if (driven && brakeImpulse <= 0) {
+        engineForce = wheelTorqueToForce((appliedTorque * axleShare) / axleCount, w.radius);
       }
       controller.setWheelEngineForce(w.index, engineForce);
 
-      // Brakes: foot (rear-biased) + handbrake (rear). Engine braking is applied
-      // separately as a chassis impulse below — routing it through setWheelBrake
-      // saturates at the tyre-lockup impulse, so every gear would brake the same.
-      let brakeImpulse = 0;
-      if (input.brake > 0) {
-        brakeImpulse += input.brake * footBrakeBase * (w.isFront ? brakeFrontShare : brakeRearShare);
-      }
-      if (input.handbrake && !w.isFront) {
-        brakeImpulse += handbrakePerRear;
-      }
-      controller.setWheelBrake(w.index, brakeImpulse);
+      w.frictionSlip = frictionSlip;
 
       controller.setWheelSteering(w.index, w.isFront ? this.steerAngle : 0);
 
       if (ground) {
         contactCount++;
         rollingResistanceSum += surface.rollingResistance;
+        roughnessSum += surface.roughness;
         if (driven) drivenContactCount++;
       }
     }
 
     controller.updateVehicle(dt);
+
+    // Slide measurement, after the step that resolved the contacts: how much of each
+    // tyre's friction cone the longitudinal channel ate. Rapier counts the forward
+    // impulse at half against the cone, so the same half applies here. Evaluated
+    // every step, so grip returns on its own the moment the pedal eases or the
+    // wheelspin stops and the tyre is back inside its cone.
+    const slideBlend = dt / (SLIDE_TAU + dt);
+    const speedAbs = Math.abs(fwd);
+    let frontSlideSum = 0;
+    let rearSlideSum = 0;
+    for (const w of this.wheels) {
+      let target = 0;
+      if (speedAbs > SLIDE_MIN_MPS && controller.wheelIsInContact(w.index)) {
+        const load = controller.wheelSuspensionForce(w.index) ?? 0;
+        const cone = load * dt * w.frictionSlip;
+        if (cone > 0) {
+          const used = 0.5 * Math.abs(controller.wheelForwardImpulse(w.index) ?? 0);
+          const share = used / cone;
+          target = clamp(
+            (share - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD),
+            0,
+            1,
+          );
+        }
+      }
+      w.slideT += (target - w.slideT) * slideBlend;
+      // A locked wheel is sliding by definition; no need to infer it from the cone.
+      const reported = w.locked && speedAbs > SLIDE_MIN_MPS ? 1 : w.slideT;
+      if (w.isFront) frontSlideSum += reported;
+      else rearSlideSum += reported;
+    }
+    this.audioState.frontLockT =
+      this.frontWheelCount > 0 ? frontSlideSum / this.frontWheelCount : 0;
+    this.audioState.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
 
     this.applyRollCouple(dt, mass, contactCount);
 
@@ -880,6 +1283,31 @@ export class Vehicle {
       this.chassisBody.applyImpulse(this.forceScratch, false);
     }
 
+    // Audio telemetry. Written after the vehicle step and the roll couple, so the
+    // slip and contact numbers describe the tick that just ran; `localVelScratch`
+    // holds the body-frame velocity applyRollCouple already computed, so the side
+    // slip costs nothing extra. A landing is however much downward speed the
+    // ground took away this step, which is exactly what should be heard as a thump.
+    const audio = this.audioState;
+    const engine = stats.engine;
+    audio.rpm = this.drivetrain.rpm;
+    audio.idleRpm = engine ? engine.idleRpm : 0;
+    audio.redlineRpm = engine ? engine.redlineRpm : 1;
+    audio.cylinders = engine ? engine.cylinders : 4;
+    audio.throttle = throttle;
+    audio.brake = brake;
+    audio.handbrake = input.handbrake;
+    audio.forwardMps = fwd;
+    audio.engineRunning = this.engineRunning;
+    audio.gearLabel = this.drivetrain.gearLabel;
+    audio.wheelContactFraction = wheelCount > 0 ? contactCount / wheelCount : 0;
+    audio.surfaceRoughness = contactCount > 0 ? roughnessSum / contactCount : 0;
+    audio.lateralSlipMps = Math.abs(this.localVelScratch.x);
+    const vy = this.linvel.y;
+    audio.landingImpactMps =
+      contactCount > 0 ? Math.max(0, -this.prevVerticalVel - Math.max(0, -vy)) : 0;
+    this.prevVerticalVel = vy;
+
     // Odometer: metres travelled forward this tick, emitted in throttled batches.
     if (fwd > 0) {
       this.odoAccum += fwd * dt;
@@ -918,6 +1346,21 @@ export class Vehicle {
    * rate is unrelated.
    */
   postStep(): void {
+    if (this.parkingHoldRequested) {
+      if (!this.parkingHoldActive) {
+        this.chassisBody.translation(this.parkingHoldPos);
+        this.chassisBody.rotation(this.parkingHoldRot);
+        this.parkingHoldActive = true;
+      } else {
+        this.chassisBody.setTranslation(this.parkingHoldPos, true);
+        this.chassisBody.setRotation(this.parkingHoldRot, true);
+        this.chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        this.chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    } else {
+      this.parkingHoldActive = false;
+    }
+
     if (!this.snapshotPrimed) {
       // First step (or first after a spawn): both ends of the interpolation are the
       // current transform, so the car does not lerp in from the origin.
@@ -974,10 +1417,14 @@ export class Vehicle {
     for (const w of this.wheels) {
       const cp = controller.wheelChassisConnectionPointCs(w.index, w.scratchCp);
       const susp = controller.wheelSuspensionLength(w.index);
-      const spin = controller.wheelRotation(w.index);
+      const spin = controller.wheelRotation(w.index) ?? w.prevSpin;
       const steer = controller.wheelSteering(w.index);
+      // A locked wheel is drawn stopped. Rapier keeps integrating its rotation
+      // regardless, so the delta is accumulated only while the wheel is turning.
+      if (!w.locked) w.drawnSpin += spin - w.prevSpin;
+      w.prevSpin = spin;
       if (cp) w.mesh.position.set(cp.x, cp.y - (susp ?? 0), cp.z);
-      w.mesh.rotation.set((spin ?? 0) % TWO_PI, steer ?? 0, 0);
+      w.mesh.rotation.set(w.drawnSpin % TWO_PI, steer ?? 0, 0);
     }
 
     // Gizmos are bolted to the shell: they never move relative to it, so all they
@@ -1157,8 +1604,9 @@ export class Vehicle {
   }
 
   /**
-   * Two spotlights at the front corners of the measured chassis box. The model
-   * already draws its lamps; these are what makes them light the road.
+   * Two persistent spotlights at the front corners of the measured chassis box.
+   * They remain renderer-visible at zero intensity while off, which keeps Three's
+   * spotlight shader permutation stable when the driver changes beam mode.
    */
   private buildHeadlights(): void {
     const half = this.measure.halfExtents;
@@ -1166,14 +1614,37 @@ export class Vehicle {
     const z = half[2];
     for (const sign of [-1, 1]) {
       const x = sign * HEADLIGHT_X_FRACTION * half[0];
-      const light = new THREE.SpotLight(0xfff2d8, 120, 80, 0.55, 0.5, 1.5);
+      const light = new THREE.SpotLight(0xfff2d8, 0, 72, 0.52, 0.68, 1.5);
       light.position.set(x, y, z);
-      light.target.position.set(x, y, z + 8);
+      light.target.position.set(x, y - 0.9, z + 13);
       light.castShadow = false;
-      light.visible = this.lightsOnFlag;
+      light.visible = true;
       this.rootGroup.add(light.target);
       this.rootGroup.add(light);
       this.headlights.push(light);
+    }
+    this.applyHeadlightMode();
+  }
+
+  private applyHeadlightMode(): void {
+    const low = this.headlightMode === 'low';
+    const high = this.headlightMode === 'high';
+    const intensity = low ? 110 : high ? 210 : 0;
+    const distance = high ? 130 : 72;
+    const angle = high ? 0.34 : 0.52;
+    const penumbra = high ? 0.45 : 0.68;
+    const targetDistance = high ? 28 : 13;
+    const targetDrop = high ? 0.45 : 0.9;
+    for (const light of this.headlights) {
+      light.intensity = intensity;
+      light.distance = distance;
+      light.angle = angle;
+      light.penumbra = penumbra;
+      light.target.position.set(
+        light.position.x,
+        light.position.y - targetDrop,
+        light.position.z + targetDistance,
+      );
     }
   }
 

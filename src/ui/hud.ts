@@ -17,6 +17,8 @@ export interface DrivingReadout {
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
+  /** Parking brake state. Keyboard and touch controls both latch it. */
+  handbrake: boolean;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -34,8 +36,10 @@ const END_ANGLE = START_ANGLE + SWEEP_ANGLE; // 405 == 45, bottom-right
 
 /** The redline zone occupies the top 15% of the dial; the full scale is scaled to suit. */
 const REDLINE_FRACTION = 0.85;
-/** Fuel fraction below which the gauge reads as an alarm. */
+/** Fuel fraction below which the analogue gauge reads as an alarm. */
 const FUEL_ALARM_FRACTION = 0.12;
+/** Analogue speedometer limit. Faster vehicles pin gracefully at the dial end. */
+const SPEEDOMETER_MAX_KMH = 160;
 /** Carried-mass fraction of the limit at which the readout turns alarming. */
 const MASS_ALARM_FRACTION = 0.9;
 
@@ -83,14 +87,16 @@ export class Hud {
   private readonly crosshairEl: HTMLElement;
   private readonly promptEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
-  private readonly speedValue: HTMLElement;
   private readonly tachValue: SVGPathElement;
   private readonly tachNeedle: SVGLineElement;
+  private readonly speedValue: SVGPathElement;
+  private readonly speedNeedle: SVGLineElement;
   private readonly gearEl: HTMLElement;
-  private readonly fuelEl: HTMLElement;
-  private readonly fuelFill: HTMLElement;
-  private readonly fuelText: HTMLElement;
+  private readonly fuelEl: SVGSVGElement;
+  private readonly fuelValue: SVGPathElement;
+  private readonly fuelNeedle: SVGLineElement;
   private readonly engineOffEl: HTMLElement;
+  private readonly handbrakeEl: HTMLElement;
   private readonly warningsEl: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
@@ -98,8 +104,11 @@ export class Hud {
   private readonly recordEl: HTMLElement;
   private readonly clockEl: HTMLElement;
   private readonly toastEl: HTMLElement;
+  private readonly radioEl: HTMLElement;
 
   private tachDeg = -1;
+  private speedDeg = -1;
+  private fuelDeg = -1;
   private warningsSignature = '';
   private invSlots: HTMLElement[] = [];
   private invItems: readonly Item[] = [];
@@ -111,30 +120,32 @@ export class Hud {
 
   constructor(root: HTMLElement) {
     this.crosshairEl = el('div', 'hud-crosshair');
-    this.crosshairEl.appendChild(el('span', 'hud-crosshair-dot'));
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
 
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
-    const speedEl = el('div', 'hud-speed');
-    this.speedValue = el('span', 'hud-speed-value');
-    const speedUnit = el('span', 'hud-speed-unit');
-    speedUnit.textContent = 'km/h';
-    speedEl.append(this.speedValue, speedUnit);
-
-    const tach = this.buildTach();
+    const tach = this.buildDial('hud-tach', true);
     this.tachValue = tach.value;
     this.tachNeedle = tach.needle;
 
+    const speed = this.buildDial('hud-speedometer');
+    this.speedValue = speed.value;
+    this.speedNeedle = speed.needle;
+
+    const fuel = this.buildDial('hud-fuel', false, true);
+    this.fuelEl = fuel.svg;
+    this.fuelValue = fuel.value;
+    this.fuelNeedle = fuel.needle;
+
     this.gearEl = el('div', 'hud-gear');
 
-    this.fuelEl = el('div', 'hud-fuel');
-    this.fuelFill = el('div', 'hud-fuel-fill');
-    const fuelBar = el('div', 'hud-fuel-bar');
-    fuelBar.appendChild(this.fuelFill);
-    this.fuelText = el('span', 'hud-fuel-text');
-    this.fuelEl.append(fuelBar, this.fuelText);
+    // This cell is always present, so turning the brake on cannot widen or move
+    // the dashboard. Only the red parking glyph changes state.
+    this.handbrakeEl = el('div', 'hud-handbrake');
+    this.handbrakeEl.textContent = 'P';
+    const indicators = el('div', 'hud-indicators');
+    indicators.append(this.gearEl, this.handbrakeEl);
 
     this.engineOffEl = el('div', 'hud-engine-off is-hidden');
     this.engineOffEl.textContent = 'ENGINE OFF';
@@ -142,9 +153,17 @@ export class Hud {
     this.warningsEl = el('div', 'hud-warnings is-hidden');
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, this.gearEl, this.fuelEl);
+    gaugeRow.append(tach.svg, speed.svg, fuel.svg, indicators);
 
-    this.drivingCluster.append(speedEl, gaugeRow, this.engineOffEl, this.warningsEl);
+    this.drivingCluster.append(
+      gaugeRow,
+      this.engineOffEl,
+      this.warningsEl,
+    );
+
+    // The radio sits under the driving cluster: it only exists in the car, and it
+    // is the one readout that is about the world outside rather than the machine.
+    this.radioEl = el('div', 'hud-radio is-hidden');
 
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
@@ -165,38 +184,52 @@ export class Hud {
       this.drivingCluster,
       inventoryEl,
       travelEl,
+      this.radioEl,
       this.toastEl,
     ];
     root.append(...this.tops);
   }
 
-  private buildTach(): { svg: SVGSVGElement; value: SVGPathElement; needle: SVGLineElement } {
+  private buildDial(
+    className: string,
+    redline = false,
+    fuelIcon = false,
+  ): { svg: SVGSVGElement; value: SVGPathElement; needle: SVGLineElement } {
     const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-tach');
+    svg.setAttribute('class', `hud-dial ${className}`);
     svg.setAttribute('viewBox', `0 0 ${TACH_SIZE} ${TACH_SIZE}`);
     svg.setAttribute('width', String(TACH_SIZE));
     svg.setAttribute('height', String(TACH_SIZE));
 
     const track = svgEl('path');
-    track.setAttribute('class', 'hud-tach-track');
+    track.setAttribute('class', 'hud-dial-track');
     track.setAttribute('d', arcPath(CX, CY, R, START_ANGLE, END_ANGLE));
     svg.appendChild(track);
 
-    const redline = svgEl('path');
-    redline.setAttribute('class', 'hud-tach-redline');
-    redline.setAttribute(
-      'd',
-      arcPath(CX, CY, R, START_ANGLE + REDLINE_FRACTION * SWEEP_ANGLE, END_ANGLE),
-    );
-    svg.appendChild(redline);
+    if (redline) {
+      const redlineArc = svgEl('path');
+      redlineArc.setAttribute('class', 'hud-dial-redline');
+      redlineArc.setAttribute(
+        'd',
+        arcPath(CX, CY, R, START_ANGLE + REDLINE_FRACTION * SWEEP_ANGLE, END_ANGLE),
+      );
+      svg.appendChild(redlineArc);
+    }
 
     const value = svgEl('path');
-    value.setAttribute('class', 'hud-tach-value');
+    value.setAttribute('class', 'hud-dial-value');
     value.setAttribute('d', '');
     svg.appendChild(value);
 
+    if (fuelIcon) {
+      const icon = svgEl('path');
+      icon.setAttribute('class', 'hud-fuel-icon');
+      icon.setAttribute('d', 'M47 43 H64 V79 H47 Z M51 48 H60 V60 H51 Z M64 49 H69 Q73 49 73 54 V70 Q73 75 68 75 H66 V71 H68 Q69 71 69 69 V54 Q69 53 67 53 H64 Z');
+      svg.appendChild(icon);
+    }
+
     const needle = svgEl('line');
-    needle.setAttribute('class', 'hud-tach-needle');
+    needle.setAttribute('class', 'hud-dial-needle');
     needle.setAttribute('x1', String(CX));
     needle.setAttribute('y1', String(CY));
     svg.appendChild(needle);
@@ -207,36 +240,65 @@ export class Hud {
   setDriving(readout: DrivingReadout | null): void {
     if (readout === null) {
       this.setVisible(this.drivingCluster, false);
+      this.setVisible(this.crosshairEl, true);
       return;
     }
     this.setVisible(this.drivingCluster, true);
+    this.setVisible(this.crosshairEl, false);
 
-    this.setText(this.speedValue, String(Math.round(readout.speedKmh)));
-
-    this.updateTach(readout.rpm, readout.redlineRpm);
+    this.tachDeg = this.updateDial(
+      readout.rpm,
+      Math.max(readout.redlineRpm / REDLINE_FRACTION, 1),
+      this.tachDeg,
+      this.tachValue,
+      this.tachNeedle,
+    );
+    this.speedDeg = this.updateDial(
+      Math.abs(readout.speedKmh),
+      SPEEDOMETER_MAX_KMH,
+      this.speedDeg,
+      this.speedValue,
+      this.speedNeedle,
+    );
 
     this.setText(this.gearEl, readout.gearLabel);
 
-    const frac = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
-    const pct = (Math.min(Math.max(frac, 0), 1) * 100).toFixed(1);
-    this.setStyle(this.fuelFill, 'width', `${pct}%`);
-    this.fuelEl.classList.toggle('is-alarm', frac < FUEL_ALARM_FRACTION);
-    this.setText(this.fuelText, `${readout.fuelLitres.toFixed(1)} L`);
+    const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
+    this.fuelDeg = this.updateDial(
+      fuelFraction,
+      1,
+      this.fuelDeg,
+      this.fuelValue,
+      this.fuelNeedle,
+    );
+    this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
 
     this.setVisible(this.engineOffEl, !readout.engineRunning);
+    this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
   }
 
-  private updateTach(rpm: number, redlineRpm: number): void {
-    const maxRpm = Math.max(redlineRpm / REDLINE_FRACTION, 1);
-    const frac = Math.min(Math.max(rpm / maxRpm, 0), 1);
-    const deg = START_ANGLE + frac * SWEEP_ANGLE;
+  /** Radio line, or null when the radio has nothing to say (not in a car). */
+  setRadio(text: string | null): void {
+    this.setVisible(this.radioEl, text !== null);
+    if (text !== null) this.setText(this.radioEl, text);
+  }
+
+  private updateDial(
+    value: number,
+    max: number,
+    previousDeg: number,
+    valuePath: SVGPathElement,
+    needle: SVGLineElement,
+  ): number {
+    const fraction = Math.min(Math.max(value / max, 0), 1);
+    const deg = START_ANGLE + fraction * SWEEP_ANGLE;
     const rounded = Math.round(deg * 10) / 10;
-    if (rounded === this.tachDeg) return;
-    this.tachDeg = rounded;
-    this.setAttr(this.tachValue, 'd', frac < 0.004 ? '' : arcPath(CX, CY, R, START_ANGLE, deg));
+    if (rounded === previousDeg) return previousDeg;
+    this.setAttr(valuePath, 'd', fraction < 0.004 ? '' : arcPath(CX, CY, R, START_ANGLE, deg));
     const tip = polar(CX, CY, NEEDLE_R, deg);
-    this.setAttr(this.tachNeedle, 'x2', tip.x.toFixed(2));
-    this.setAttr(this.tachNeedle, 'y2', tip.y.toFixed(2));
+    this.setAttr(needle, 'x2', tip.x.toFixed(2));
+    this.setAttr(needle, 'y2', tip.y.toFixed(2));
+    return rounded;
   }
 
   setPrompt(text: string | null): void {
@@ -354,11 +416,8 @@ export class Hud {
     if (node.getAttribute(name) !== value) node.setAttribute(name, value);
   }
 
-  private setStyle(node: HTMLElement, prop: string, value: string): void {
-    if (node.style.getPropertyValue(prop) !== value) node.style.setProperty(prop, value);
-  }
-
   private setVisible(node: HTMLElement, visible: boolean): void {
     node.classList.toggle('is-hidden', !visible);
   }
+
 }

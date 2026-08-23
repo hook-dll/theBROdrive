@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
+import { applyComicShading } from './comic';
 
 /** Per-instance condition uniforms, keyed by material so setCondition can write them cheaply. */
 interface ConditionUniforms {
@@ -231,12 +232,22 @@ export function makeConditionMaterial(
   return material;
 }
 
-/** Plain MeshStandardMaterial for scenery and non-condition surfaces. Shared + cached. */
+/**
+ * Plain MeshStandardMaterial for scenery and non-condition surfaces. Shared + cached.
+ *
+ * Banded like the ground (render/comic.ts), with the ground's contours and stipple
+ * turned off: a rock or a pole wants the same hard terminator as the dune behind it,
+ * or it reads as a smooth object pasted onto a drawn landscape. The post pass inks
+ * its silhouette either way.
+ */
 export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStandardMaterial {
   const key = flatKey(color, roughness);
   let material = flatCache.get(key);
   if (material === undefined) {
-    material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+    material = applyComicShading(
+      new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 }),
+      { contourStrength: 0, stippleStrength: 0 },
+    );
     flatCache.set(key, material);
   }
   return material;

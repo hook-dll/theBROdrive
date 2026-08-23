@@ -54,16 +54,14 @@ const POLE_HEIGHT: Record<PoleEra, number> = {
   none: 0,
 };
 const WIRE_RADIUS = 0.012; // thin enough to read as a wire, thick enough to resolve
-// Lamps: one emissive material for every working fixture, plus at most two real
-// PointLights per chunk. Hundreds of PointLights would destroy the frame rate,
-// so the emissive fake carries the distant glow and the two lights only cover
-// the fixtures nearest the player.
+// Lamps: every working fixture shares one emissive material. Three lightweight
+// source markers per chunk describe nearby real fixtures; LightBudget turns the
+// nearest six markers into the only six rendered PointLights.
 const LAMP_COLOR = 0xffc37a;
-const LAMP_DISTANCE = 34;
-// PointLight intensity at full night (physical units, decay 2). Sized so the pool
-// reaches across the near lane from a head hung at the asphalt edge, ~6 m up.
-const LAMP_POINT = 60;
-const LAMP_EMISSIVE = 2.2; // emissive intensity at full night
+const LAMP_DISTANCE = 46;
+// Brighter warm pools at full night. The renderer keeps only six real lights.
+const LAMP_POINT = 90;
+const LAMP_EMISSIVE = 2.8;
 /**
  * How far the concrete lamp arm reaches from its pole, metres. The poles stand at
  * POLE_LATERAL = -6 and the shoulder's outer edge is at -4.7, so 2.4 hangs the
@@ -103,6 +101,15 @@ const matLampLit = new THREE.MeshStandardMaterial({
   emissive: LAMP_COLOR,
   emissiveIntensity: 0,
 });
+
+let lampEmissiveIntensity = -1;
+
+function setLampEmission(on: number): void {
+  const intensity = on * LAMP_EMISSIVE;
+  if (lampEmissiveIntensity === intensity) return;
+  lampEmissiveIntensity = intensity;
+  matLampLit.emissiveIntensity = intensity;
+}
 const matLampDead = new THREE.MeshStandardMaterial({ color: 0x3a3835, roughness: 0.6, metalness: 0.2 });
 const matChrome = new THREE.MeshStandardMaterial({
   color: 0xd8d8d8,
@@ -770,24 +777,44 @@ class CatenaryCurve extends THREE.Curve<THREE.Vector3> {
 
 type LampPos = { x: number; y: number; z: number };
 
-function nearestTwo(pts: readonly LampPos[], nx: number, nz: number): [LampPos | null, LampPos | null] {
-  let best: LampPos | null = null;
-  let bestD = Infinity;
+function setLampSource(light: THREE.PointLight, pos: LampPos | null, on: number): void {
+  const intensity = pos ? on * LAMP_POINT : 0;
+  if (light.intensity !== intensity) light.intensity = intensity;
+  if (pos && (light.position.x !== pos.x || light.position.y !== pos.y || light.position.z !== pos.z)) {
+    light.position.set(pos.x, pos.y, pos.z);
+  }
+}
+
+/** Selects source fixtures without allocating during the render loop. */
+function setNearestLampSources(
+  points: readonly LampPos[],
+  nearX: number,
+  nearZ: number,
+  on: number,
+  sources: readonly THREE.PointLight[],
+): void {
+  let first: LampPos | null = null;
   let second: LampPos | null = null;
+  let third: LampPos | null = null;
+  let firstD = Infinity;
   let secondD = Infinity;
-  for (const p of pts) {
-    const d = (p.x - nx) ** 2 + (p.z - nz) ** 2;
-    if (d < bestD) {
-      second = best;
-      secondD = bestD;
-      best = p;
-      bestD = d;
+  let thirdD = Infinity;
+  for (const point of points) {
+    const d = (point.x - nearX) ** 2 + (point.z - nearZ) ** 2;
+    if (d < firstD) {
+      third = second; thirdD = secondD;
+      second = first; secondD = firstD;
+      first = point; firstD = d;
     } else if (d < secondD) {
-      second = p;
-      secondD = d;
+      third = second; thirdD = secondD;
+      second = point; secondD = d;
+    } else if (d < thirdD) {
+      third = point; thirdD = d;
     }
   }
-  return [best, second];
+  setLampSource(sources[0], first, on);
+  setLampSource(sources[1], second, on);
+  setLampSource(sources[2], third, on);
 }
 
 export class PoleProvider implements ChunkProvider {
@@ -860,14 +887,18 @@ export class PoleProvider implements ChunkProvider {
       group.add(new THREE.Mesh(wireGeo, matWire));
     }
 
-    const lampA = new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2);
-    const lampB = new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2);
-    // Born dark: the LightBudget (src/render/lights.ts) is the only thing that
-    // ever enables point lights, so a chunk added between its re-scans must not
-    // leak a visible light into the frame.
-    lampA.visible = false;
-    lampB.visible = false;
-    group.add(lampA, lampB);
+    const lampSources = [
+      new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2),
+      new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2),
+      new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2),
+    ];
+    for (const source of lampSources) {
+      // These are data sources for LightBudget, not renderer lights. Keeping them
+      // invisible prevents chunk streaming from changing Three's point-light shader.
+      source.visible = false;
+      source.userData.lightBudgetSource = true;
+      group.add(source);
+    }
 
     return {
       group,
@@ -875,29 +906,15 @@ export class PoleProvider implements ChunkProvider {
       colliders,
       dispose: () => {
         for (const g of wireGeos) g.dispose();
-        lampA.dispose();
-        lampB.dispose();
+        for (const source of lampSources) source.dispose();
       },
       /**
-       * Switch this chunk's lamps on at night. `on` is 0..1. The emissive fake
-       * lights every working fixture via one shared material (no per-lamp light),
-       * while the two real PointLights are reused for the fixtures nearest to
-       * (nearX, nearZ).
+       * Emissive fixtures are cheap at any distance; the provider only updates its
+       * three nearest source markers. LightBudget owns the six rendered light slots.
        */
       setLamps(on: number, nearX: number, nearZ: number): void {
-        matLampLit.emissiveIntensity = on * LAMP_EMISSIVE;
-        if (on === 0) {
-          // Day: no fixtures to pick, and the budget keeps the lights invisible
-          // anyway — just drop the intensities.
-          lampA.intensity = 0;
-          lampB.intensity = 0;
-          return;
-        }
-        const [n1, n2] = nearestTwo(workingLamps, nearX, nearZ);
-        lampA.intensity = n1 ? on * LAMP_POINT : 0;
-        lampA.position.set(n1 ? n1.x : 0, n1 ? n1.y : -1000, n1 ? n1.z : 0);
-        lampB.intensity = n2 ? on * LAMP_POINT : 0;
-        lampB.position.set(n2 ? n2.x : 0, n2 ? n2.y : -1000, n2 ? n2.z : 0);
+        setLampEmission(on);
+        setNearestLampSources(workingLamps, nearX, nearZ, on, lampSources);
       },
     };
   }

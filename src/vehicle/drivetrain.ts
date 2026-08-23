@@ -72,8 +72,10 @@ const DOWN_SHIFT_RPM_FRACTION = 0.4;
  * the tall top gears on a heavy truck.
  */
 const UP_SHIFT_IDLE_MARGIN = 1.25;
-/** Throttle at which an automatic in neutral engages first gear. */
+/** Throttle at which an automatic in neutral or reverse engages first gear. */
 const AUTO_ENGAGE_THROTTLE = 0.12;
+/** Forward speed below which an automatic may safely change drive direction. */
+const AUTO_DIRECTION_CHANGE_MPS = 0.25;
 
 /** Flywheel time constants: cranks rev up quickly and fall back more slowly. */
 const FLYWHEEL_UP_TAU = 0.12;
@@ -170,6 +172,16 @@ export class Drivetrain {
     return String(this.gear);
   }
 
+  /** True when the fitted transmission shifts itself regardless of player assist. */
+  get isPhysicallyAutomatic(): boolean {
+    return this.gearbox?.automatic === true;
+  }
+
+  /** Reverse is selected and its shift interruption has fully elapsed. */
+  get isReverseDriveEngaged(): boolean {
+    return this.gear === GEAR_REVERSE && this.shiftTimer <= 0;
+  }
+
   /**
    * Manual shift: -1 down, +1 up. Reverse sits below neutral; neutral below 1.
    * With driver assist active this is the +/- gate of a real automatic: the
@@ -224,10 +236,8 @@ export class Drivetrain {
     wheelAngularSpeed: number,
     wheelRadius: number,
     autoShift: boolean,
+    reverseRequested: boolean,
   ): DrivetrainOutput {
-    // wheelRadius is unused here: torque is converted to a wheel force by the
-    // caller through wheelTorqueToForce(); the parameter keeps the API uniform.
-    void wheelRadius;
 
     dt = dt > 0 ? dt : 0;
     const demand = clamp(throttle, 0, 1);
@@ -242,7 +252,7 @@ export class Drivetrain {
     // automatic gearbox keeps shifting even in manual mode — the assist only
     // ever ADDS automatic behaviour, never removes it.
     if (gearbox && (gearbox.automatic || autoShift) && this.shiftTimer <= 0) {
-      this.automaticShift(engine, gearbox, demand, wheelAngularSpeed);
+      this.automaticShift(engine, gearbox, demand, wheelAngularSpeed, wheelRadius, reverseRequested);
     }
 
     // --- Crank speed ---
@@ -379,14 +389,28 @@ export class Drivetrain {
     gearbox: GearboxSpec,
     throttle: number,
     wheelAngularSpeed: number,
+    wheelRadius: number,
+    reverseRequested: boolean,
   ): void {
     if (engine == null) return;
     const n = gearbox.ratios.length;
+    const atRest = Math.abs(wheelAngularSpeed * wheelRadius) <= AUTO_DIRECTION_CHANGE_MPS;
 
-    // Neutral auto-engages drive when the driver asks for power; reverse is
-    // always a manual selection and is never auto-picked.
-    if (this.gear <= GEAR_NEUTRAL) {
-      if (this.gear === GEAR_NEUTRAL && throttle > AUTO_ENGAGE_THROTTLE) this.setGear(1);
+    // Pedals request a direction rather than a permanent gear selection. The
+    // backward command remains the service brake until the car has stopped; only
+    // then can the box engage reverse. Forward does the symmetric R -> 1 change.
+    if (this.gear === GEAR_REVERSE) {
+      if (!reverseRequested && throttle > AUTO_ENGAGE_THROTTLE && atRest) this.setGear(1);
+      return;
+    }
+    if (this.gear === GEAR_NEUTRAL) {
+      if (!atRest) return;
+      if (reverseRequested) this.setGear(GEAR_REVERSE);
+      else if (throttle > AUTO_ENGAGE_THROTTLE) this.setGear(1);
+      return;
+    }
+    if (reverseRequested && atRest) {
+      this.setGear(GEAR_REVERSE);
       return;
     }
 

@@ -63,42 +63,14 @@ body {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 18px;
-  height: 18px;
+  width: 10px;
+  height: 10px;
   transform: translate(-50%, -50%);
+  border: 1.5px solid var(--hud-fg);
+  border-radius: 50%;
   pointer-events: none;
   opacity: 1;
   transition: opacity 0.15s ease;
-}
-
-.hud-crosshair::before,
-.hud-crosshair::after {
-  content: '';
-  position: absolute;
-  background: var(--hud-fg);
-}
-
-.hud-crosshair::before {
-  left: 0;
-  top: 8px;
-  width: 18px;
-  height: 2px;
-}
-
-.hud-crosshair::after {
-  left: 8px;
-  top: 0;
-  width: 2px;
-  height: 18px;
-}
-
-.hud-crosshair-dot {
-  position: absolute;
-  left: 7px;
-  top: 7px;
-  width: 4px;
-  height: 4px;
-  background: var(--hud-fg);
 }
 
 .hud-crosshair.is-dim {
@@ -122,8 +94,8 @@ body {
 
 .hud-driving {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
+  right: 22px;
+  bottom: 24px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -131,108 +103,87 @@ body {
   pointer-events: none;
 }
 
-.hud-speed {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  line-height: 1;
-}
-
-.hud-speed-value {
-  font-size: 54px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 0 rgba(20, 16, 10, 0.85), 0 2px 10px rgba(20, 16, 10, 0.55);
-}
-
-.hud-speed-unit {
-  font-size: 15px;
-  letter-spacing: 0.1em;
-  color: var(--hud-fg-dim);
-}
-
 .hud-gauge-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 4px;
   background: var(--hud-panel);
   border: 1px solid var(--hud-border);
-  padding: 10px 14px;
+  padding: 8px 10px;
 }
 
-.hud-tach {
+.hud-dial {
   display: block;
+  width: 120px;
+  height: 120px;
 }
 
-.hud-tach-track {
+.hud-dial-track {
   fill: none;
   stroke: var(--hud-panel-soft);
   stroke-width: 8;
 }
 
-.hud-tach-redline {
+.hud-dial-redline {
   fill: none;
   stroke: var(--hud-alarm);
   stroke-width: 8;
 }
 
-.hud-tach-value {
+.hud-dial-value {
   fill: none;
   stroke: var(--hud-fg);
   stroke-width: 8;
   stroke-linecap: round;
 }
 
-.hud-tach-needle {
+.hud-dial-needle {
   stroke: var(--hud-fg);
   stroke-width: 2;
   stroke-linecap: round;
 }
 
+.hud-fuel-icon {
+  fill: var(--hud-fg-dim);
+}
+
+.hud-fuel.is-alarm .hud-dial-value,
+.hud-fuel.is-alarm .hud-dial-needle {
+  stroke: var(--hud-alarm);
+}
+
+.hud-indicators {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 28px;
+}
+
 .hud-gear {
-  font-size: 34px;
-  font-weight: 700;
   min-width: 1.2em;
+  font-size: 30px;
+  font-weight: 700;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-.hud-fuel {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 92px;
-}
-
-.hud-fuel-bar {
-  height: 10px;
-  background: var(--hud-panel-soft);
-  border: 1px solid var(--hud-border);
-  overflow: hidden;
-}
-
-.hud-fuel-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--hud-fg);
-  transition: width 0.12s linear;
-}
-
-.hud-fuel-text {
-  font-size: 12px;
-  text-align: right;
-  letter-spacing: 0.06em;
-  color: var(--hud-fg-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.hud-fuel.is-alarm .hud-fuel-fill {
-  background: var(--hud-alarm);
-}
-
-.hud-fuel.is-alarm .hud-fuel-text {
+/* Always takes its dashboard cell. Only its illumination changes. */
+.hud-handbrake {
+  width: 22px;
+  height: 24px;
   color: var(--hud-alarm);
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 24px;
+  text-align: center;
+  opacity: 0.16;
+}
+
+.hud-handbrake.is-active {
+  opacity: 1;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
 }
 
 .hud-engine-off {
@@ -359,6 +310,19 @@ body {
   font-size: 13px;
   letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
+}
+
+.hud-radio {
+  position: absolute;
+  right: 18px;
+  bottom: 232px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--hud-fg-dim);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 5px 10px;
+  pointer-events: none;
 }
 
 .hud-toasts {
@@ -640,23 +604,25 @@ body {
   font-weight: 700;
 }
 
-/* Day-cycle length stepper: - value +. */
-.menu-stepper {
+.menu-slider-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-.menu-stepper .menu-button {
-  flex: 0 0 auto;
-  min-width: 46px;
-  padding: 6px 10px;
-}
-
-.menu-stepper-value {
+.menu-slider {
   flex: 1;
-  text-align: center;
-  font-size: 16px;
+  min-width: 0;
+  accent-color: var(--hud-fg);
+  cursor: pointer;
+}
+
+.menu-slider-value {
+  flex: 0 0 72px;
+  width: 72px;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.05em;
   font-variant-numeric: tabular-nums;
@@ -819,4 +785,150 @@ body {
 
 .menu-paint.is-selected {
   border: 2px solid var(--hud-fg);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Touch controls (phones and tablets)                               *
+ *                                                                    *
+ *  Built by core/touch.ts on the first touch, so a desktop never      *
+ *  renders any of this. Buttons are large and warm-outlined to match  *
+ *  the HUD; the pedal and look ZONES are invisible because the whole  *
+ *  screen is the control surface — drawing boxes over the desert       *
+ *  would be UI clutter for something the thumbs learn in one corner.  *
+ * ------------------------------------------------------------------ */
+
+.touch-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* One row of small rectangles along the top edge. The bottom corners are where
+   the thumbs live (pedals left and right, look drag in the middle), so anything
+   placed down there gets pressed by accident; the top edge is the only region a
+   two-thumb grip never touches. Half-opaque so the desert still reads through. */
+.touch-row {
+  position: fixed;
+  top: calc(6px + env(safe-area-inset-top));
+  right: calc(8px + env(safe-area-inset-right));
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.touch-btn {
+  pointer-events: auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--hud-border);
+  border-radius: 3px;
+  background: var(--hud-panel);
+  color: var(--hud-fg);
+  font-family: var(--hud-font);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.5;
+  /* No tap highlight, no selection, no double-tap zoom. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  user-select: none;
+}
+
+/* Pressed buttons come to full strength: the only feedback a finger covering the
+   button can still see is the edge of it. */
+.touch-btn.is-down {
+  opacity: 1;
+  background: var(--hud-panel-strong);
+  border-color: var(--hud-fg);
+}
+
+.touch-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg-dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  max-width: 74vw;
+  opacity: 0.5;
+  transition: opacity 1.2s ease;
+}
+
+.touch-hint.is-faded {
+  opacity: 0;
+}
+
+/* The "tilt does not work here" message is not a hint to fade out. */
+.touch-hint.is-warning {
+  opacity: 0.85;
+  color: var(--hud-alarm);
+  border-color: var(--hud-alarm);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Rotate-your-device hint                                           *
+ *                                                                    *
+ *  Pure CSS, so it cannot get out of step with the real orientation:  *
+ *  a coarse pointer (touch) in portrait gets a full-screen cover, and *
+ *  it disappears the moment the device is turned. The game keeps      *
+ *  running underneath — the cover is advice, not a pause.             *
+ * ------------------------------------------------------------------ */
+
+#rotate-hint {
+  display: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-hint {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    background: rgba(16, 13, 9, 0.94);
+    color: var(--hud-fg);
+    font-family: var(--hud-font);
+    text-align: center;
+    pointer-events: auto;
+  }
+
+  #rotate-hint .rotate-glyph {
+    width: 84px;
+    height: 132px;
+    border: 2px solid var(--hud-fg);
+    border-radius: 10px;
+    animation: rotate-nudge 2.4s ease-in-out infinite;
+  }
+
+  #rotate-hint .rotate-text {
+    font-size: 15px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  #rotate-hint .rotate-sub {
+    font-size: 12px;
+    color: var(--hud-fg-dim);
+    letter-spacing: 0.08em;
+    max-width: 22em;
+  }
+}
+
+@keyframes rotate-nudge {
+  0%, 40% { transform: rotate(0deg); }
+  70%, 100% { transform: rotate(-90deg); }
 }

@@ -18,12 +18,31 @@ export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
   dayCycleMinutes: number;
+  /**
+   * Mouse-look radians per CSS pixel. Stored as a preference so pointer lock has
+   * the same feel across sessions.
+   */
+  mouseSensitivity: number;
+  /**
+   * Volume of the synthesised game audio (engine, wind, tyres, foley), 0..1. The
+   * radio has its own, because it is broadcast material at whatever level the
+   * station mastered it and balancing it against the car is a taste decision.
+   */
+  masterVolume: number;
+  /** Car-radio volume, 0..1. */
+  radioVolume: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
 export const DAY_CYCLE_MAX_MINUTES = 128;
+
+export const DEFAULT_MASTER_VOLUME = 0.8;
+export const DEFAULT_RADIO_VOLUME = 0.6;
+export const DEFAULT_MOUSE_SENSITIVITY = 0.0022;
+export const MOUSE_SENSITIVITY_MIN = 0.0004;
+export const MOUSE_SENSITIVITY_MAX = 0.006;
 
 /**
  * Default day length in real minutes. 24 matches state.ts's DAY_LENGTH
@@ -37,6 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // hand stays one wheel notch away for anyone who wants it.
   gearboxMode: 'automatic',
   dayCycleMinutes: DEFAULT_DAY_CYCLE_MINUTES,
+  mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
+  masterVolume: DEFAULT_MASTER_VOLUME,
+  radioVolume: DEFAULT_RADIO_VOLUME,
   // Absent entries mean "use the default binding", so the empty record is the
   // correct default: it can never diverge from BINDABLE_ACTIONS. Shared by
   // design — Settings objects are replaced wholesale through world.apply
@@ -92,11 +114,26 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? obj.dayCycleMinutes
       : DEFAULT_DAY_CYCLE_MINUTES;
 
+  const sensitivityRaw =
+    typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
+      ? obj.mouseSensitivity
+      : DEFAULT_MOUSE_SENSITIVITY;
+
+  // A missing volume means an old save from before there was any sound: it gets
+  // the default, not silence.
+  const volume = (value: unknown, fallback: number): number =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.min(1, Math.max(0, value))
+      : fallback;
+
   const settings: Settings = {
     // Anything that is not exactly the automatic string is manual: the
     // historical mode, and the safe fallback for garbage input.
     gearboxMode: obj.gearboxMode === 'automatic' ? 'automatic' : 'manual',
     dayCycleMinutes: Math.min(DAY_CYCLE_MAX_MINUTES, Math.max(DAY_CYCLE_MIN_MINUTES, dayCycleRaw)),
+    mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
+    masterVolume: volume(obj.masterVolume, DEFAULT_MASTER_VOLUME),
+    radioVolume: volume(obj.radioVolume, DEFAULT_RADIO_VOLUME),
     keyBindings: {},
   };
 

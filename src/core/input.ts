@@ -6,11 +6,15 @@
  * indistinguishable from a local one (see NETPLAY notes in world/road.ts).
  */
 
+import type { TouchControls } from './touch';
+
 export interface InputFrame {
   /** 0..1 */
   throttle: number;
   /** 0..1 */
   brake: number;
+  /** Player is holding the backward command; automatic drive uses it for reverse at rest. */
+  reverse: boolean;
   /** -1 (left) .. 1 (right) */
   steer: number;
   handbrake: boolean;
@@ -19,6 +23,9 @@ export interface InputFrame {
   /** Toggle intents, consumed once by the system that handles them. */
   toggleLights: boolean;
   cycleCamera: boolean;
+  /** Switch the car radio on/off, and step to the next station: taps, consumed by audio. */
+  radioToggle: boolean;
+  radioNext: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
   recenterCamera: boolean;
   /** Enter/exit the car (entry needs an open or removed door): tap, consumed once by interaction. */
@@ -51,11 +58,14 @@ export function emptyInput(): InputFrame {
   return {
     throttle: 0,
     brake: 0,
+    reverse: false,
     steer: 0,
     handbrake: false,
     shift: 0,
     toggleLights: false,
     cycleCamera: false,
+    radioToggle: false,
+    radioNext: false,
     recenterCamera: false,
     interact: false,
     mount: false,
@@ -91,15 +101,18 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'brake', label: 'Brake', defaultKeys: ['KeyS', 'ArrowDown'] },
   { id: 'left', label: 'Steer left', defaultKeys: ['KeyA', 'ArrowLeft'] },
   { id: 'right', label: 'Steer right', defaultKeys: ['KeyD', 'ArrowRight'] },
-  { id: 'handbrake', label: 'Handbrake', defaultKeys: ['Space'] },
+  { id: 'handbrake', label: 'Toggle handbrake', defaultKeys: ['Space'] },
   // Gears sit next to the steering hand on X and Z. The mouse wheel is deliberately
   // NOT a gear lever: it is the chase camera's zoom, and sharing it made zooming
   // while driving impossible.
   { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
-  { id: 'lights', label: 'Toggle lights', defaultKeys: ['KeyL'] },
+  { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
   { id: 'camera', label: 'Cycle camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
+  // The radio is a car fitting, so it sits on the driving hand's side of the board.
+  { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },
+  { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
   { id: 'interact', label: 'Interact', defaultKeys: ['KeyE'] },
   { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
   { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
@@ -143,6 +156,19 @@ const AXIS_FALL = 0.3;
 const STEER_RISE = 0.25;
 /** Steering self-centres faster than the player releases, as a real wheel does. */
 const STEER_RETURN = 0.55;
+/**
+ * Exponential smoothing only ever ASYMPTOTES to its target, so a released pedal
+ * keeps a residue like 1e-9 forever and a floored one never quite reads 1. Both
+ * matter downstream: the vehicle turns "any throttle at all" into a wheel engine
+ * force, and Rapier's vehicle controller ignores a wheel's brake entirely on any
+ * wheel whose engine force is non-zero. Snapping inside this window makes off
+ * mean off and floored mean floored.
+ */
+const AXIS_SNAP = 1e-3;
+
+function snapAxis(value: number, target: number): number {
+  return Math.abs(target - value) <= AXIS_SNAP ? target : value;
+}
 
 /**
  * Reads browser input into an `InputFrame`. Owns pointer lock and the analogue
@@ -156,6 +182,8 @@ export class InputReader {
   private pitchDelta = 0;
   private wheelDelta = 0;
   private locked = false;
+  /** Desktop parking brake state. Changed only by a new key press, never key hold. */
+  private keyboardHandbrake = false;
   /**
    * Effective action -> key list for this reader. Precomputed at construction
    * and on setKeyBindings so the hot path (sample) only reads arrays — it never
@@ -163,9 +191,16 @@ export class InputReader {
    */
   private keys: Record<string, readonly string[]> = DEFAULT_BINDINGS;
 
+  /**
+   * Touch and tilt source, when one exists. Merged in `sample` rather than read by
+   * gameplay: a phone's throttle has to arrive as the same `InputFrame` field a
+   * keyboard's does, or every consumer grows a second code path.
+   */
+  private touch: TouchControls | null = null;
+
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly mouseSensitivity = 0.0022,
+    private mouseSensitivity = 0.0022,
   ) {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
@@ -176,6 +211,16 @@ export class InputReader {
     window.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu);
+  }
+
+  /** Attaches the touch overlay's state as a second input source. */
+  attachTouch(touch: TouchControls): void {
+    this.touch = touch;
+  }
+
+  /** Pointer-look gain in radians per CSS pixel. */
+  setMouseSensitivity(sensitivity: number): void {
+    this.mouseSensitivity = Math.max(0.0001, sensitivity);
   }
 
   dispose(): void {
@@ -288,27 +333,45 @@ export class InputReader {
    */
   sample(dt: number): InputFrame {
     const f = this.frame;
+    // One source of truth per axis: a touch pedal counts exactly as much as the key
+    // it stands in for, so the rest of this function does not care which was used.
+    const touch = this.touch?.input;
+    const wantThrottle = this.anyHeld(this.keys.throttle) || touch?.forward ? 1 : 0;
+    const reverseHeld = this.anyHeld(this.keys.brake) || touch?.backward === true;
+    const wantBrake = reverseHeld ? 1 : 0;
+    f.throttle = snapAxis(
+      f.throttle +
+        (wantThrottle - f.throttle) * Math.min(1, dt / (wantThrottle > 0 ? AXIS_RISE : AXIS_FALL)),
+      wantThrottle,
+    );
+    f.brake = snapAxis(
+      f.brake + (wantBrake - f.brake) * Math.min(1, dt / (wantBrake > 0 ? AXIS_RISE : AXIS_FALL)),
+      wantBrake,
+    );
+    f.reverse = reverseHeld;
 
-    const wantThrottle = this.anyHeld(this.keys.throttle) ? 1 : 0;
-    const wantBrake = this.anyHeld(this.keys.brake) ? 1 : 0;
-    f.throttle +=
-      (wantThrottle - f.throttle) * Math.min(1, dt / (wantThrottle > 0 ? AXIS_RISE : AXIS_FALL));
-    f.brake += (wantBrake - f.brake) * Math.min(1, dt / (wantBrake > 0 ? AXIS_RISE : AXIS_FALL));
-
-    const wantSteer =
+    // Tilt steering is already an analogue axis, so it is the TARGET the same
+    // smoothing runs toward — not a replacement for it. Without the smoothing the
+    // accelerometer's own jitter arrives at the steering rack.
+    const keySteer =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
+    const wantSteer = keySteer !== 0 || !touch?.tilting ? keySteer : touch.steer;
     f.steer +=
       (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
 
-    f.handbrake = this.anyHeld(this.keys.handbrake);
+    const taps = this.touch?.consumeTaps();
+    if (this.anyPressed(this.keys.handbrake)) this.keyboardHandbrake = !this.keyboardHandbrake;
+    f.handbrake = this.keyboardHandbrake || touch?.handbrake === true;
     f.shift =
       (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
       (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
     f.toggleLights = this.anyPressed(this.keys.lights);
-    f.cycleCamera = this.anyPressed(this.keys.camera);
+    f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
-    f.interact = this.anyPressed(this.keys.interact);
-    f.mount = this.anyPressed(this.keys.mount);
+    f.radioToggle = this.anyPressed(this.keys.radio);
+    f.radioNext = this.anyPressed(this.keys.radioStation);
+    f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
+    f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
     f.dropItem = this.anyPressed(this.keys.drop);
     f.usePrimary = this.held.has('Mouse0');
     f.useSecondary = this.held.has('Mouse2');
@@ -325,14 +388,19 @@ export class InputReader {
         break;
       }
     }
+    // On foot the same two zones walk forward and back; strafing stays a keyboard
+    // move, and the view (which is what "forward" is relative to) comes from the
+    // look drag.
     f.moveX = (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     f.moveZ =
-      (this.anyHeld(this.keys.throttle) ? 1 : 0) - (this.anyHeld(this.keys.brake) ? 1 : 0);
+      (this.anyHeld(this.keys.throttle) || touch?.forward ? 1 : 0) -
+      (this.anyHeld(this.keys.brake) || touch?.backward ? 1 : 0);
     f.jump = this.anyPressed(this.keys.jump);
     f.sprint = this.anyHeld(this.keys.sprint);
 
-    f.lookYaw = this.yawDelta;
-    f.lookPitch = this.pitchDelta;
+    const drag = this.touch?.consumeLook();
+    f.lookYaw = this.yawDelta + (drag?.yaw ?? 0);
+    f.lookPitch = this.pitchDelta + (drag?.pitch ?? 0);
     f.zoomDelta = this.wheelDelta;
     this.yawDelta = 0;
     this.pitchDelta = 0;

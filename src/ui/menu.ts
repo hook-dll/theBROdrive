@@ -1,12 +1,18 @@
 import type { SaveBackend, SaveMeta } from '../save/save';
 import { parseSeed, decodeSaveCode, encodeSaveCode } from '../save/save';
-import { newWorldState } from '../game/state';
 import type { WorldState } from '../game/state';
 import { BINDABLE_ACTIONS } from '../core/input';
-import { DAY_CYCLE_MAX_MINUTES, DAY_CYCLE_MIN_MINUTES, TIME_OF_DAY_PRESETS } from '../game/settings';
+import {
+  DAY_CYCLE_MAX_MINUTES,
+  DAY_CYCLE_MIN_MINUTES,
+  DEFAULT_MOUSE_SENSITIVITY,
+  MOUSE_SENSITIVITY_MAX,
+  MOUSE_SENSITIVITY_MIN,
+  TIME_OF_DAY_PRESETS,
+} from '../game/settings';
 import type { Settings, TimeOfDayPreset } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
-import { CAR_MODELS } from '../vehicle/carmodels';
+import { SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -40,17 +46,6 @@ function formatPlayed(seconds: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-function buildExportState(seed: number, km: number): WorldState {
-  // The pause overlay only holds seed + distance, so the exported code captures
-  // exactly what can be recovered here: a fresh state at this seed with the
-  // personal record and current arclength restored to the travelled distance.
-  const state = newWorldState(seed);
-  const metres = Math.round(km * 1000);
-  state.recordS = metres;
-  state.player.s = metres;
-  return state;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -92,6 +87,16 @@ export interface PauseHooks {
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /** Record a freshly assembled, fully fuelled car into the world. */
   spawnVehicle: (request: SpawnRequest) => void;
+  /**
+   * The LIVE world state, for "Export Save Code".
+   *
+   * This used to be rebuilt from the two numbers the overlay happens to display
+   * (seed and distance) via `newWorldState`, which meant the exported code was a
+   * fresh game at that seed: the car, its fitted parts and fuel, the time of day,
+   * every dropped part and looted POI were all silently dropped, even though the
+   * codec round-trips a whole state. The overlay is handed the real object now.
+   */
+  exportState: () => WorldState;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -277,12 +282,18 @@ export class MainMenu {
       const settings: Settings = {
         gearboxMode: base.gearboxMode,
         dayCycleMinutes: base.dayCycleMinutes,
+        mouseSensitivity: base.mouseSensitivity,
+        masterVolume: base.masterVolume,
+        radioVolume: base.radioVolume,
         keyBindings: { ...base.keyBindings },
       };
       const apply = (): void => {
         hooks.applySettings({
           gearboxMode: settings.gearboxMode,
           dayCycleMinutes: settings.dayCycleMinutes,
+          mouseSensitivity: settings.mouseSensitivity,
+          masterVolume: settings.masterVolume,
+          radioVolume: settings.radioVolume,
           keyBindings: { ...settings.keyBindings },
         });
       };
@@ -442,7 +453,7 @@ export class MainMenu {
         });
 
         exportBtn.addEventListener('click', () => {
-          const code = encodeSaveCode(buildExportState(info.seed, info.km));
+          const code = encodeSaveCode(hooks.exportState());
           void copyText(code).then((ok) => {
             exportBtn.textContent = ok ? 'Copied' : 'Copy failed';
             window.setTimeout(() => {
@@ -512,40 +523,97 @@ export class MainMenu {
         todField.append(todLabel, presetRow);
         panel.appendChild(todField);
 
-        // Day/night cycle length in real minutes, clamped to the contract's
-        // bounds; the stepper disables at either end instead of wrapping.
-        const cycleField = el('div', 'menu-field');
-        const cycleLabel = el('label', 'menu-label');
-        cycleLabel.textContent = 'Day Cycle Length';
-        const stepper = el('div', 'menu-stepper');
-        const minusBtn = button('menu-button', '-');
-        const cycleValue = el('span', 'menu-stepper-value');
-        const plusBtn = button('menu-button', '+');
-        const paintCycle = (): void => {
-          cycleValue.textContent = `${settings.dayCycleMinutes} min`;
-          minusBtn.disabled = settings.dayCycleMinutes <= DAY_CYCLE_MIN_MINUTES;
-          plusBtn.disabled = settings.dayCycleMinutes >= DAY_CYCLE_MAX_MINUTES;
+        const sliderField = (
+          label: string,
+          min: number,
+          max: number,
+          step: number,
+          get: () => number,
+          format: (value: number) => string,
+          set: (value: number) => void,
+        ): HTMLElement => {
+          const field = el('div', 'menu-field');
+          const fieldLabel = el('label', 'menu-label');
+          fieldLabel.textContent = label;
+          const sliderId = `settings-${label.toLowerCase().replaceAll(' ', '-')}`;
+          fieldLabel.setAttribute('for', sliderId);
+          const row = el('div', 'menu-slider-row');
+          const slider = document.createElement('input');
+          slider.type = 'range';
+          slider.id = sliderId;
+          slider.className = 'menu-slider';
+          slider.min = String(min);
+          slider.max = String(max);
+          slider.step = String(step);
+          slider.value = String(get());
+          const value = el('output', 'menu-slider-value');
+          const paint = (): void => {
+            slider.value = String(get());
+            value.textContent = format(get());
+          };
+          slider.addEventListener('input', () => {
+            set(slider.valueAsNumber);
+            paint();
+            apply();
+          });
+          paint();
+          row.append(slider, value);
+          field.append(fieldLabel, row);
+          return field;
         };
-        paintCycle();
-        minusBtn.addEventListener('click', () => {
-          settings.dayCycleMinutes = Math.max(
+
+        panel.appendChild(
+          sliderField(
+            'Day Cycle Length',
             DAY_CYCLE_MIN_MINUTES,
-            settings.dayCycleMinutes - 1,
-          );
-          paintCycle();
-          apply();
-        });
-        plusBtn.addEventListener('click', () => {
-          settings.dayCycleMinutes = Math.min(
             DAY_CYCLE_MAX_MINUTES,
-            settings.dayCycleMinutes + 1,
-          );
-          paintCycle();
-          apply();
-        });
-        stepper.append(minusBtn, cycleValue, plusBtn);
-        cycleField.append(cycleLabel, stepper);
-        panel.appendChild(cycleField);
+            1,
+            () => settings.dayCycleMinutes,
+            (value) => `${Math.round(value)} min`,
+            (value) => {
+              settings.dayCycleMinutes = value;
+            },
+          ),
+        );
+        panel.appendChild(
+          sliderField(
+            'Mouse Look Sensitivity',
+            MOUSE_SENSITIVITY_MIN,
+            MOUSE_SENSITIVITY_MAX,
+            0.0001,
+            () => settings.mouseSensitivity,
+            (value) => `${Math.round((value / DEFAULT_MOUSE_SENSITIVITY) * 100)}%`,
+            (value) => {
+              settings.mouseSensitivity = value;
+            },
+          ),
+        );
+        panel.appendChild(
+          sliderField(
+            'Sound Volume',
+            0,
+            1,
+            0.01,
+            () => settings.masterVolume,
+            (value) => `${Math.round(value * 100)}%`,
+            (value) => {
+              settings.masterVolume = value;
+            },
+          ),
+        );
+        panel.appendChild(
+          sliderField(
+            'Radio Volume',
+            0,
+            1,
+            0.01,
+            () => settings.radioVolume,
+            (value) => `${Math.round(value * 100)}%`,
+            (value) => {
+              settings.radioVolume = value;
+            },
+          ),
+        );
 
         // Key bindings: one row per action; click a row to arm capture.
         const bindField = el('div', 'menu-field');
@@ -573,7 +641,7 @@ export class MainMenu {
       };
 
       // Spawn selection resets per pause, so every visit starts at the first model.
-      let spawnModelId = CAR_MODELS[0].id;
+      let spawnModelId = SPAWNABLE_CAR_MODELS[0].id;
 
       const renderSpawn = (): void => {
         panel.textContent = '';
@@ -592,7 +660,7 @@ export class MainMenu {
         const modelList = el('div', 'menu-body-list');
         const paintModels = (): void => {
           modelList.textContent = '';
-          for (const def of CAR_MODELS) {
+          for (const def of SPAWNABLE_CAR_MODELS) {
             const row = button('menu-body', '');
             const name = el('span', 'menu-body-label');
             name.textContent = def.label;
@@ -614,7 +682,7 @@ export class MainMenu {
 
         const spawnNote = el('div', 'menu-note');
         const paintNote = (): void => {
-          const def = CAR_MODELS.find((m) => m.id === spawnModelId);
+          const def = SPAWNABLE_CAR_MODELS.find((m) => m.id === spawnModelId);
           spawnNote.textContent = def ? `${def.label} (${def.bodyClass})` : spawnModelId;
         };
         paintNote();
