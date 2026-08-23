@@ -100,6 +100,21 @@ const SUSP_SPORT: SuspensionTuning = {
   maxForce: 30000,
 };
 
+/**
+ * The V8 fastback has enough launch torque to expose pitch oscillation that the
+ * shared sport preset intentionally leaves in. A modest spring/damper increase
+ * keeps its nose and tail from seesawing without turning it into a rigid track car;
+ * the shorter rest length drops the visual and physical ride height by 3 cm.
+ */
+const SUSP_FASTBACK: SuspensionTuning = {
+  restLength: 0.25,
+  maxTravel: 0.22,
+  stiffness: 28,
+  compression: 4.2,
+  relaxation: 5.8,
+  maxForce: 32000,
+};
+
 const SUSP_TRUCK: SuspensionTuning = {
   restLength: 0.38,
   maxTravel: 0.36,
@@ -640,7 +655,7 @@ const ENTRIES: readonly Entry[] = [
     tankLitres: 65,
     wheelGrip: 1.15,
     scale: 1,
-    suspension: SUSP_SPORT,
+    suspension: SUSP_FASTBACK,
     steerLock: 0.58,
     rearDriveBias: 1,
   },

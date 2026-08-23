@@ -372,6 +372,8 @@ function staticSag(stiffness: number): number {
 const PARK_BRAKE_DECEL = 12.0;
 /** Below this ground speed a braked car becomes a physically fixed parked car. */
 const PARK_HOLD_SPEED_MPS = 0.12;
+/** Residual forward creep treated as stopped when an automatic reverses out. */
+const AUTO_REVERSE_RELEASE_MPS = 0.08;
 
 // ---------------------------------------------------------------------------
 // Body attitude: why a car that squats under power does not lean in a corner.
@@ -995,14 +997,14 @@ export class Vehicle {
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
     // In automatic mode the backward pedal remains a service brake until the car
-    // has actually stopped. Only a settled reverse gear with non-positive forward
-    // speed turns that pedal into reverse throttle; switching earlier let a slow
-    // forward roll bypass the brake and feel like the car was sliding.
+    // is stopped. Contact solvers can leave a blocked car with a few centimetres per
+    // second of positive residual velocity, so a small forward-creep allowance is
+    // required; exact-zero gating leaves reverse selected but the brake latched.
     const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
     const reverseDrive =
       automatic &&
       input.reverse &&
-      fwd <= 0 &&
+      fwd <= AUTO_REVERSE_RELEASE_MPS &&
       this.drivetrain.isReverseDriveEngaged;
     const throttleInput = reverseDrive ? input.brake : input.throttle;
     const throttle = this.localFuel > 0 ? throttleInput : 0;
