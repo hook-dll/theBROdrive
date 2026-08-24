@@ -398,6 +398,32 @@ function staticSag(stiffness: number): number {
 const PARK_BRAKE_DECEL = 12.0;
 /** Below this ground speed a braked car becomes a physically fixed parked car. */
 const PARK_HOLD_SPEED_MPS = 0.12;
+/**
+ * Being shouldered by the player, in four numbers.
+ *
+ * The target is a car that feels like a car: it moves, and it is obviously not worth
+ * moving far. `SHOVE_SPEED_CAP` is a slow walk, and `SHOVE_RAMP_SECONDS` is how long
+ * leaning on it takes to get there — a second and a half, so the first moment of contact
+ * does nothing perceptible and the motion builds. Together they cap the acceleration at
+ * `0.4 / 1.5 = 0.27 m/s2`, which against a 1200 kg saloon is 320 N of shove: a person
+ * pushing hard, and 45 times less than the parking brake it has to work against, which is
+ * why `SHOVE_BRAKE_FRACTION` exists.
+ *
+ * `SHOVE_RELEASE_SECONDS` is how long a car stays shovable after the last push. It has to
+ * outlast one fixed step so the hold does not re-latch between contacts, and has to be
+ * short enough that letting go stops the car: at a fifth of a second the weakened brake
+ * has the car down from 0.4 m/s in about the same time the hold takes to come back.
+ */
+const SHOVE_SPEED_CAP = 0.4;
+const SHOVE_RAMP_SECONDS = 1.5;
+const SHOVE_RELEASE_SECONDS = 0.2;
+/**
+ * Fraction of the parking brake left on while a car is being shoved. Not zero: with the
+ * brake off entirely a shoved car on any grade rolls away, which is a different game. At a
+ * quarter it still stops itself the moment the push ends but no longer swallows the shove
+ * whole.
+ */
+const SHOVE_BRAKE_FRACTION = 0.25;
 /** Residual motion treated as stopped before an automatic changes drive direction. */
 const AUTO_DIRECTION_RELEASE_MPS = 0.08;
 
@@ -713,6 +739,11 @@ export class Vehicle {
    */
   private parkingHoldRequested = false;
   private parkingHoldActive = false;
+  /**
+   * Seconds of shove left before the parking hold re-latches. Counted down in `settle`,
+   * so it only ever matters on a car nobody is driving.
+   */
+  private shoveTimer = 0;
   /**
    * Service-brake demand from the last driven step, 0..1. Read by a coupled
    * trailer so its brakes come on with the car's pedal.
@@ -1129,7 +1160,15 @@ export class Vehicle {
     if (!controller) return;
 
     const n = this.wheels.length;
-    this.parkingHoldRequested = true;
+    // Being shoved suspends the hold, not the brake. The hold is a teleport — it
+    // re-places the chassis at `parkingHoldPos` every step — so with it active no
+    // impulse from anywhere can move the car at all: the push would be silently
+    // undone one tick later, which is exactly what a player leaning on a parked car
+    // used to see. The brake stays on, weakened, which is what makes the car creep
+    // rather than slide and stop the moment the shoulder comes off it.
+    const shoved = this.shoveTimer > 0;
+    if (shoved) this.shoveTimer = Math.max(0, this.shoveTimer - dt);
+    this.parkingHoldRequested = !shoved;
     // Nobody is driving, so there is no pedal. A trailer left coupled to a parked
     // car holds on its own brakes (uncoupled or not, it is not being towed).
     this.serviceBrakeCommand = 0;
@@ -1137,7 +1176,8 @@ export class Vehicle {
 
     // Parking brake: same impulse units as the foot brake (see the braking note
     // above), spread over every wheel. Sized to hold, not to stop.
-    const impulse = (PARK_BRAKE_DECEL * this.statsValue.mass * dt) / n;
+    const decel = shoved ? PARK_BRAKE_DECEL * SHOVE_BRAKE_FRACTION : PARK_BRAKE_DECEL;
+    const impulse = (decel * this.statsValue.mass * dt) / n;
     for (const w of this.wheels) {
       controller.setWheelEngineForce(w.index, 0);
       controller.setWheelSteering(w.index, 0);
@@ -1145,6 +1185,45 @@ export class Vehicle {
     }
 
     controller.updateVehicle(dt);
+  }
+
+  /**
+   * Somebody is leaning on this car. Push it, grudgingly.
+   *
+   * `Shoveable`, implemented for the player's character controller (player.ts). It is a
+   * REQUEST rather than an impulse applied from outside for one reason: a parked car pins
+   * its own chassis every step, and only the car can lift that pin. It also owns the
+   * arithmetic, which wants the car's mass — a 1200 kg hatchback and a 7 t truck should
+   * both creep, not one be immovable and the other slide.
+   *
+   * The cap is a target SPEED, not a force: it takes the velocity the body already has
+   * along the push axis and only supplies the impulse needed to close the gap to
+   * SHOVE_SPEED_CAP, scaled so that gap closes over SHOVE_RAMP_SECONDS. That is what makes
+   * the same call reasonable on a parked saloon and harmless on a wreck: nothing can be
+   * accelerated past a walking shove however long it is leaned on.
+   */
+  shove(dirX: number, dirZ: number, seconds: number): void {
+    const len = Math.hypot(dirX, dirZ);
+    if (len < 1e-4 || seconds <= 0) return;
+    const nx = dirX / len;
+    const nz = dirZ / len;
+
+    const v = this.chassisBody.linvel();
+    const along = v.x * nx + v.z * nz;
+    const gap = SHOVE_SPEED_CAP - along;
+    // Already going that way at least as fast as a shove can push: nothing to add. This
+    // is also what stops a shove helping a rolling car along indefinitely.
+    if (gap <= 0) {
+      this.shoveTimer = SHOVE_RELEASE_SECONDS;
+      return;
+    }
+
+    const mass = this.statsValue.mass;
+    const impulse = Math.min(gap, (SHOVE_SPEED_CAP * seconds) / SHOVE_RAMP_SECONDS) * mass;
+    // Horizontal only. A player walking into a bumper must never lift a car or press it
+    // into the ground, and the wheel ray-casts are unforgiving about both.
+    this.chassisBody.applyImpulse({ x: nx * impulse, y: 0, z: nz * impulse }, true);
+    this.shoveTimer = SHOVE_RELEASE_SECONDS;
   }
 
   /**
