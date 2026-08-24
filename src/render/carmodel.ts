@@ -585,20 +585,29 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     });
   }
 
-  // Fractional anchor/eye resolution: x of half-width, y through the body's height
-  // (0 = floor, 1 = roof), z of half-length — all in the model's own space first,
-  // then moved into chassis-local space by the same offset as everything else.
-  const resolveFrac = (frac: readonly [number, number, number]): THREE.Vector3 =>
-    new THREE.Vector3(
-      frac[0] * half.x,
-      bodyBox.min.y + frac[1] * (bodyBox.max.y - bodyBox.min.y),
-      frac[2] * half.z,
-    );
+  // Fractional anchor/eye resolution, straight into CHASSIS-LOCAL metres: x of
+  // half-width, y through the body's height (0 = floor, 1 = roof), z of half-length.
+  //
+  // Chassis-local is the only frame these can be resolved in. Resolving them in the
+  // model's OWN space and subtracting `centre` afterwards — which is what this did —
+  // silently broke every pack-extracted body: a pack lays its vehicles out in a
+  // showroom row, so such a body's box is centred metres away from the model origin,
+  // and `frac * half` measured from that origin came out one row-offset wrong. The
+  // low-poly saloon's hood camera landed 6.8 m BEHIND its own boot (inside the car,
+  // looking at the back of the rear seats), the bus's 15 m ahead of its nose, and
+  // every gizmo anchor on all 21 bodies went with them. Quaternius and the
+  // procedural cars are authored about their own origin, which is why they were the
+  // only ones that looked right.
+  const resolveFrac = (frac: readonly [number, number, number]): [number, number, number] => [
+    frac[0] * half.x,
+    (frac[1] * 2 - 1) * half.y,
+    frac[2] * half.z,
+  ];
 
   const anchors: GizmoAnchor[] = def.gizmoAnchors.map((a: GizmoAnchorDef) => ({
     id: a.id,
     label: a.label,
-    pos: toLocal(resolveFrac(a.frac)),
+    pos: resolveFrac(a.frac),
     yaw: a.yaw ?? 0,
   }));
 
@@ -612,7 +621,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
-    eyePoint: toLocal(resolveFrac(def.viewFrac)),
+    eyePoint: resolveFrac(def.viewFrac),
     anchors,
     visualOffset: [-centre.x, -centre.y, -centre.z],
     spawnHeight: centre.y,

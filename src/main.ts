@@ -42,7 +42,12 @@ import { WreckField } from './world/wrecks';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
-import { TrailerField, TRAILER_MODEL_FIT, TRAILER_SPAWN_HEIGHT } from './vehicle/trailer';
+import {
+  TrailerField,
+  TRAILER_HALF_LENGTH,
+  TRAILER_MODEL_FIT,
+  TRAILER_SPAWN_HEIGHT,
+} from './vehicle/trailer';
 import { Vehicle, type WheelSprayState } from './vehicle/vehicle';
 import { GameAudio } from './audio/gameaudio';
 
@@ -61,8 +66,15 @@ import { GameAudio } from './audio/gameaudio';
  * drawn world (vista 1500 m), so ordinary off-road driving never pays for it.
  */
 const ACTIVE_S_REHOME_LATERAL = 2000;
-/** How far ahead of the view a spawned car is placed, metres. */
-const SPAWN_AHEAD_DISTANCE = 6;
+/**
+ * Gap between the player and the NEAR END of a spawned vehicle, metres.
+ *
+ * A gap, not a centre distance: the drop point is this plus the model's own
+ * half-length, because a fixed 6 m centre distance is measured from the middle of a
+ * body that may be 16 m long, which spawned the low-poly semi straight through the
+ * player and left them stuck inside its box while the solver tried to push them out.
+ */
+const SPAWN_AHEAD_GAP = 6;
 /** Height above the eye the spawn ground probe starts from. */
 const SPAWN_PROBE_HEIGHT = 3;
 /** Extra clearance under a spawned chassis so it settles onto its suspension. */
@@ -748,8 +760,13 @@ async function boot(): Promise<void> {
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;
-    const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
-    const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
+    const measure = carModelMeasure(request.modelId);
+    // Spawned nose-in ahead of the player, so the drop point is a gap plus the
+    // body's own half-length: the semi is 12 m long and its middle has to be 6 m
+    // further out than a hatchback's.
+    const ahead = SPAWN_AHEAD_GAP + measure.halfExtents[2];
+    const dropX = eye.x + (dir.x / flat) * ahead;
+    const dropZ = eye.z + (dir.z / flat) * ahead;
     const ground = physics.raycast(
       { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
       { x: 0, y: -1, z: 0 },
@@ -757,7 +774,7 @@ async function boot(): Promise<void> {
       player.rigidBody,
     );
     const groundY = ground ? ground.point.y : eye.y;
-    const measure = carModelMeasure(request.modelId);
+
     // The measured distance from the chassis centre down to the model's own
     // ground-level origin, plus a little slack, so the car settles onto its
     // wheels instead of dropping through them.
@@ -777,8 +794,9 @@ async function boot(): Promise<void> {
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;
-    const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
-    const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
+    const ahead = SPAWN_AHEAD_GAP + TRAILER_HALF_LENGTH;
+    const dropX = eye.x + (dir.x / flat) * ahead;
+    const dropZ = eye.z + (dir.z / flat) * ahead;
     const ground = physics.raycast(
       { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
       { x: 0, y: -1, z: 0 },

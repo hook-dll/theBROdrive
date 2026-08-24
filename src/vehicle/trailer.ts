@@ -164,6 +164,9 @@ export const TRAILER_MODEL_FIT: TrailerFit = {
  */
 export const TRAILER_SPAWN_HEIGHT = BED_HALF[1] + WHEEL_RADIUS;
 
+/** Bed half-length, metres: what a spawn has to clear to land behind the player. */
+export const TRAILER_HALF_LENGTH = BED_HALF[2];
+
 /**
  * The prop stand under the drawbar, and why a trailer needs one.
  *
