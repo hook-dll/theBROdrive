@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GraphicsQuality } from '../game/settings';
 
 /**
  * Renderer, scene and camera ownership.
@@ -26,13 +27,82 @@ export const CAMERA_NEAR = 0.08;
 export const CAMERA_BASE_FOV = 65;
 
 /**
- * Resolution cap, as a devicePixelRatio multiplier. A 4K laptop reports DPR 2,
- * but on an N100-class iGPU a 2x buffer is pure fill-rate waste; 1.5 keeps the
- * image crisp while `adaptResolution` does the real cost control below.
+ * Resolution cap per tier, as a devicePixelRatio multiplier.
+ *
+ * `acceptable` never supersamples: on an N100-class iGPU even a 1.5x buffer is
+ * fill-rate the machine does not have. `standard` allows a mild 1.5x. `blessing`
+ * renders at twice the device ratio and lets the driver downsample, which is real
+ * supersampling — on a 4K panel that is a 4x pixel count over native, so it is
+ * strictly for a machine with headroom to burn.
  */
-const MAX_PIXEL_RATIO = 1.5;
-/** Adaptive floor: never below 60% of the cap, so the UI stays readable. */
-const MIN_PIXEL_SCALE = 0.6;
+const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
+  acceptable: 1,
+  standard: 1.5,
+  blessing: 2,
+};
+/**
+ * Multisampling on the scene target.
+ *
+ * This is the single most expensive thing in the frame on a weak iGPU: measured on
+ * an Intel N100 / UHD Graphics at 1152x720, dropping the 4x resolve took the frame
+ * from 22.9 ms to 17.2 ms — 25% of the whole frame for edge smoothing. 2x saved
+ * almost nothing (21.8 ms), so the low tier turns it off outright rather than
+ * paying most of the cost for half the benefit.
+ *
+ * `blessing` keeps 4x on top of supersampling. The two are not redundant: MSAA
+ * smooths geometry edges, and downsampling a larger buffer is what fixes the ink
+ * outlines and the stipple, which are per-PIXEL shader effects that multisampling
+ * cannot see.
+ */
+const SCENE_SAMPLES: Record<GraphicsQuality, number> = {
+  acceptable: 0,
+  standard: 4,
+  blessing: 4,
+};
+/**
+ * Hard sanity bound on the adaptive scale, as a fraction of the cap. Not a quality
+ * decision — the real floor is MIN_ABSOLUTE_PIXEL_RATIO below. This only stops a
+ * runaway controller asking for a postage stamp.
+ *
+ * It used to be 0.6 and doubled as the quality floor, on the reasoning that the UI
+ * had to stay readable. That reasoning was wrong: the HUD and menus are DOM and CSS
+ * (see ui/hud.css), so the canvas resolution has no bearing on text legibility at
+ * all — and the clamp was actively preventing the low tier from reaching a
+ * resolution a weak iGPU can hold.
+ */
+const MIN_PIXEL_SCALE = 0.25;
+/**
+ * Adaptive floor in ABSOLUTE device pixels, per tier. This is the real quality
+ * floor, and it has to be absolute rather than a fraction of the cap.
+ *
+ * The fraction alone produced the "sharp on my 4K at home, blurry on the 1080p at
+ * work" report: a 4K panel reports DPR 2, so the cap is 1.5 and 60% of it is still
+ * 0.9 device pixels — a downscale nobody notices. A 1080p panel reports DPR 1, so
+ * the cap is 1.0 and the same 60% is 0.6 device pixels, on the screen that had none
+ * to spare. Same setting, two very different images.
+ *
+ * The tiers want opposite things, which is the point of having them. Measured on an
+ * Intel N100 / UHD Graphics in a 1920x935 window, parked, counting frames over
+ * 50 ms out of 110:
+ *
+ *   pixel ratio   buffer      median   90th pct   slow frames
+ *   1.00          1920x935    37.6 ms  147.2 ms   43
+ *   0.60          1152x561    13.7 ms   67.7 ms   19
+ *   0.30           576x280    13.5 ms   18.0 ms    0
+ *
+ * The median barely moves — that is vsync — while the 90th percentile collapses.
+ * This is what the judder was: not slow frames, but one frame in five missing its
+ * deadline. 0.35 is chosen to sit just above the point where every frame lands.
+ *
+ * `blessing` floors at 1.5, i.e. still above native on a DPR-1 screen. The point of
+ * that tier is supersampling, so letting the controller quietly walk it down to
+ * native would leave the setting doing nothing while claiming otherwise.
+ */
+const MIN_ABSOLUTE_PIXEL_RATIO: Record<GraphicsQuality, number> = {
+  acceptable: 0.35,
+  standard: 0.9,
+  blessing: 1.5,
+};
 /** Resolution steps (applied at most once per CHANGE_COOLDOWN seconds). */
 const SCALE_STEP_DOWN = 0.8;
 const SCALE_STEP_UP = 1.05;
@@ -64,8 +134,13 @@ const HAZE_AMPLITUDE_PX = 1.7;
  * Animation speed multiplier. Amplitude and vertical distribution are independent,
  * so this makes the air churn faster without making the image bend further or
  * spreading shimmer into the sky.
+ *
+ * 2.4 was too quick: real heat shimmer over asphalt is a slow boil you notice by
+ * staring at it, not a current that flows. At 2.4 the whole band visibly streamed,
+ * and the eye reads speed here as WIND rather than as heat — the wrong cue for
+ * still desert air.
  */
-const HAZE_SPEED = 2.4;
+const HAZE_SPEED = 1.1;
 
 /**
  * How the shimmer is distributed, in screen heights measured from the horizon.
@@ -264,13 +339,30 @@ export class Renderer {
   private readonly _forward = new THREE.Vector3();
 
 
-  constructor(canvas: HTMLCanvasElement) {
+  /**
+   * The tier's cap, resolved against this display once. `adaptResolution` scales
+   * THIS, not the raw cap: basing it on the cap meant that on any display below
+   * the cap (a DPR 1.25 monitor, say) the controller's own "reduced" ratios were
+   * still larger than the native ratio the constructor had chosen, so the first
+   * step down quietly asked the weakest machines to draw MORE pixels.
+   */
+  private basePixelRatio: number;
+  private quality: GraphicsQuality;
+
+  constructor(canvas: HTMLCanvasElement, quality: GraphicsQuality = 'standard') {
+    this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      // NOT antialiased. Every scene pixel is drawn into `hazeTarget` (which does
+      // its own multisampling per tier); the default framebuffer only ever
+      // receives the fullscreen triangle, which has no interior edges to smooth.
+      // A multisampled backbuffer here is an allocation and a resolve per frame
+      // for an image that cannot differ by one pixel.
+      antialias: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = true;
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
     // noise at this shadow resolution; plain PCF is visually near-identical and
@@ -292,9 +384,10 @@ export class Renderer {
 
     // The scene first renders into this target (sRGB, so it holds the exact
     // display-ready pixels the canvas would have received), then a fullscreen
-    // pass warps and copies it back. `samples` preserves the canvas MSAA that
-    // moving off the default framebuffer would otherwise throw away.
-    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { samples: 4 });
+    // pass warps and copies it back. `samples` is where this frame's edge
+    // smoothing happens, since the canvas itself is no longer multisampled — and
+    // it is the tier's most expensive single knob (see SCENE_SAMPLES).
+    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { samples: SCENE_SAMPLES[quality] });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 
     this.hazeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -426,19 +519,48 @@ export class Renderer {
     const now = performance.now();
     if (now - this.lastScaleChange < CHANGE_COOLDOWN * 1000) return;
 
-    const over = this.smoothedFrameMs > SLOW_FRAME_MS && this.pixelScale > MIN_PIXEL_SCALE;
+    // The effective floor is whichever of the two is higher: a fraction of this
+    // display's cap, or the absolute device-pixel floor. On a low-DPR screen the
+    // absolute one wins, which is what stops 1080p being softened twice as far as
+    // 4K for the same setting.
+    const floor = Math.min(
+      1,
+      Math.max(MIN_PIXEL_SCALE, MIN_ABSOLUTE_PIXEL_RATIO[this.quality] / this.basePixelRatio),
+    );
+    const over = this.smoothedFrameMs > SLOW_FRAME_MS && this.pixelScale > floor;
     const under = this.smoothedFrameMs < FAST_FRAME_MS && this.pixelScale < 1;
     if (!over && !under) return;
 
     this.pixelScale = Math.min(
       1,
-      Math.max(MIN_PIXEL_SCALE, this.pixelScale * (over ? SCALE_STEP_DOWN : SCALE_STEP_UP)),
+      Math.max(floor, this.pixelScale * (over ? SCALE_STEP_DOWN : SCALE_STEP_UP)),
     );
     this.lastScaleChange = now;
     // setPixelRatio re-sizes the drawing buffer around the current CSS size, so
     // the canvas layout never moves when the resolution changes.
-    this.renderer.setPixelRatio(MAX_PIXEL_RATIO * this.pixelScale);
+    this.renderer.setPixelRatio(this.basePixelRatio * this.pixelScale);
     this.resizeHazeTarget();
+  }
 
+  /**
+   * Switches rendering tier in place, from the pause menu, with no reload.
+   *
+   * Multisampling is baked into the render target's allocation, so the count is
+   * written and the target disposed: Three reallocates it on the next bind. The
+   * adaptive scale is reset to 1 because the new tier's cap is a different number
+   * of pixels, and a scale carried over from the old one would start the
+   * controller somewhere it never chose.
+   */
+  setQuality(quality: GraphicsQuality): void {
+    if (quality === this.quality) return;
+    this.quality = quality;
+    this.hazeTarget.samples = SCENE_SAMPLES[quality];
+    this.hazeTarget.dispose();
+    this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
+    this.pixelScale = 1;
+    this.lastScaleChange = -Infinity;
+    this.smoothedFrameMs = 1000 / 60;
+    this.renderer.setPixelRatio(this.basePixelRatio);
+    this.resizeHazeTarget();
   }
 }

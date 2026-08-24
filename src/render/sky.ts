@@ -175,6 +175,11 @@ uniform vec3 uSunColor;
 uniform vec3 uSunGlowColor;
 uniform float uSunGlowIntensity;
 uniform float uMoonAmount;
+/**
+ * How strongly the sky away from the sun is pulled down, 0..1. Peaks when the sun
+ * is near the horizon and is zero at midday and through the night.
+ */
+uniform float uAntiSolar;
 
 varying vec3 vDir;
 
@@ -185,9 +190,37 @@ void main() {
   // Zenith-to-horizon gradient; the pow keeps most of the blue band high.
   vec3 col = mix(uHorizon, uZenith, pow(h, 0.62));
 
+  float sd = dot(dir, uSunDir);
+
+  // Anti-solar darkening.
+  //
+  // The gradient above is a function of ELEVATION only, so without this the horizon
+  // is equally bright all the way around the compass and turning your back on a
+  // sunset looks the same as facing it. The sun's own terms below cannot fix that:
+  // they are additive and clamped to the solar hemisphere by max(sd, 0.0), so they
+  // brighten one side and never darken the other.
+  //
+  // What is missing is that a sunset's glow is scattered light from a low sun, and
+  // the sky opposite has none of it — it is already night down there, which is why
+  // the anti-twilight arch is a deep blue-grey. So the far horizon is mixed toward
+  // the ZENITH colour (already the darker, cooler end of this time of day's
+  // palette) rather than being multiplied down, which would leave a muddy brown
+  // instead of a cold one.
+  //
+  //  - "away" is 0 at the sun and 1 at the anti-solar point; squaring it keeps the
+  //    transition broad and centred behind you rather than a visible edge.
+  //  - "lowBand" confines the effect to the horizon, so the zenith is untouched
+  //    and the two hemispheres still meet seamlessly overhead.
+  //  - uAntiSolar switches the whole thing off away from dawn and dusk.
+  // pow 1.5 rather than a square: the darkening reaches further round toward the
+  // sides, so the transition is a slow wash across the whole back half of the sky
+  // instead of a patch centred behind you.
+  float away = pow(max(-sd, 0.0), 1.5);
+  float lowBand = 1.0 - smoothstep(0.0, 0.45, h);
+  col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
+
   // Sun disc plus a broad additive glow (a Rayleigh-ish halo that reads as
   // atmospheric scatter without pulling in a full scattering model).
-  float sd = dot(dir, uSunDir);
   float disc = smoothstep(0.99925, 0.99975, sd);
   float glow = pow(max(sd, 0.0), 6.0) * 0.45 + pow(max(sd, 0.0), 48.0) * 1.5;
   col += uSunColor * disc * 2.0;
@@ -244,11 +277,16 @@ varying float vBright;
 varying float vThresh;
 varying vec3 vColor;
 varying float vTwinkle;
+varying float vAlt;
 
 void main() {
   vColor = aColor;
   vBright = aBright;
   vThresh = aThresh;
+  // Altitude above the horizon, 0 at the horizon and 1 at the zenith. The dome is
+  // only ever translated to the camera (never rotated), so the star's own
+  // direction IS its altitude and no matrix is needed.
+  vAlt = normalize(position).y;
 
   // Scintillation, in ALPHA only. Two incommensurate sines at a few hertz, so it
   // shimmers rather than pulses and never settles into a visible loop.
@@ -272,10 +310,16 @@ void main() {
 const STAR_FRAGMENT = /* glsl */ `
 uniform float uOpacity;
 uniform float uDens01;
+/**
+ * How bright the sky near the horizon is: 1 through dusk and dawn, 0 once the sky
+ * is properly dark. Only the extinction below is scaled by it.
+ */
+uniform float uTwilight;
 varying float vBright;
 varying float vThresh;
 varying vec3 vColor;
 varying float vTwinkle;
+varying float vAlt;
 
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
@@ -284,7 +328,22 @@ void main() {
   // Density fades each star in past its own threshold rather than rebuilding
   // the buffer: at starDensity 1 only the bright ones show, at 4.5 all do.
   float vis = smoothstep(vThresh - 0.08, vThresh + 0.08, uDens01);
-  float a = min(1.0, vBright * vTwinkle * 1.75 * vis * uOpacity * mask);
+
+  // Horizon extinction, and ONLY while the horizon is bright.
+  //
+  // A star seen a degree above the horizon is looked at through ~38 airmasses and
+  // sits against the brightest part of a twilight sky, so in reality it is not
+  // there to be seen. Drawing it anyway also collided with the ink pass: outlines
+  // are applied by scaling a pixel's own colour, which is invisible against a dark
+  // sky but a clearly drawn ring against a bright one — the reported "some stars
+  // near the horizon have outlines". Fading them out where the sky is bright fixes
+  // the artefact at its source and is the more honest sky.
+  //
+  // Deep night is left exactly as authored (stars all the way down to the horizon):
+  // uTwilight is 0 there, so this whole term collapses to 1.
+  float extinction = mix(1.0, smoothstep(0.0, 0.16, vAlt), uTwilight);
+
+  float a = min(1.0, vBright * vTwinkle * 1.75 * vis * uOpacity * extinction * mask);
   if (a < 0.004) discard;
 
   gl_FragColor = vec4(vColor, a);
@@ -383,11 +442,23 @@ export class Sky {
   private readonly uSunGlowColor = new THREE.Color();
   private readonly uSunGlowIntensity = { value: 0 };
   private readonly uMoonAmount = { value: 0 };
+  /**
+   * Anti-solar darkening weight. Peaks with the sun on the horizon and falls to
+   * zero both at midday (when the sky genuinely is even all round) and once night
+   * has fallen (when there is no glow left to be asymmetric about).
+   */
+  private readonly uAntiSolar = { value: 0 };
 
   // --- Star / band uniforms ---
   private readonly uStarOpacity = { value: 0 };
   private readonly uStarDens = { value: 0 };
   private readonly uBandOpacity = { value: 0 };
+  /**
+   * Twilight weight for the stars' horizon extinction: 1 while the sky near the
+   * horizon is still lit, 0 once it is dark. Shared by the field and the band so
+   * the two cannot disagree about where the horizon glow ends.
+   */
+  private readonly uStarTwilight = { value: 0 };
   /**
    * Shared by the star field and the band, so both scintillate on one clock. Wraps
    * well inside float precision; the shimmer is two sines and cannot tell.
@@ -430,6 +501,7 @@ export class Sky {
         uSunGlowColor: { value: this.uSunGlowColor },
         uSunGlowIntensity: this.uSunGlowIntensity,
         uMoonAmount: this.uMoonAmount,
+        uAntiSolar: this.uAntiSolar,
       },
       side: THREE.BackSide,
       // The sky is the backdrop: draw first, never write depth, never test it,
@@ -585,6 +657,7 @@ export class Sky {
         uDens01: this.uStarDens,
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
         uTime: this.uStarTime,
+        uTwilight: this.uStarTwilight,
       },
       transparent: true,
       depthWrite: false,
@@ -652,6 +725,7 @@ export class Sky {
         uDens01: { value: 1 },
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
         uTime: this.uStarTime,
+        uTwilight: this.uStarTwilight,
       },
       transparent: true,
       depthWrite: false,
@@ -767,6 +841,9 @@ export class Sky {
     this.uSunGlowColor.copy(this._sunGlow);
     this.uSunGlowIntensity.value = sunGlowIntensity;
     this.uMoonAmount.value = night;
+    // Peaks at |elevation| 0 — the sun on the horizon, when the glow is entirely
+    // one-sided — and gone by ~31 degrees up or down.
+    this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
 
     // --- Stars & band ---
     // Stars remain through dusk and down to the horizon. The base desert has a
@@ -776,6 +853,11 @@ export class Sky {
     this.uStarDens.value = Math.min(1, 0.45 + Math.max(0, (g.starDensity - 1) / 6.5));
     this.uBandOpacity.value = starFade * g.galaxy;
     this.uStarTime.value = (performance.now() * 0.001) % 3600;
+    // Bright horizon: fully on from sunset until the sky has properly darkened
+    // (-0.30 rad is a shade past nautical dusk), off through the night. This is the
+    // window in which a star drawn at the horizon reads as an artefact rather than
+    // as a star — see the extinction note in STAR_FRAGMENT.
+    this.uStarTwilight.value = smoothstep(-0.3, -0.1, this.sunElevation);
 
     // --- Aurora (skip the draw entirely when the gradient is zero) ---
     const auroraVisible = g.aurora > 0.001;

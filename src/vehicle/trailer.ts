@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import type { GameWorld, TrailerState } from '../game/state';
-import type { Vehicle } from './vehicle';
+import type { Vehicle, WheelSprayState } from './vehicle';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
 
 /**
@@ -50,6 +50,52 @@ const DRAWBAR_MIN = 0.9;
 export const TRAILER_TARE_KG = 320;
 /** Most it will carry, kg. Enough to ruin the handling of a 900 kg car. */
 export const TRAILER_CAPACITY_KG = 700;
+
+/**
+ * Trailer brakes, and why a trailer needs its own.
+ *
+ * Without them a trailer is two free-rolling wheels: park it on any grade and it
+ * rolls away, and under tow the car's brakes have to stop the trailer's mass too,
+ * through the ball, which is what shunts a car around when it slows.
+ *
+ * These are in the same units as the car's (see the braking note in vehicle.ts):
+ * Rapier's `setWheelBrake` takes a maximum braking IMPULSE (N·s), so holding a
+ * deceleration `a` across `n` wheels for one step needs `a * mass * dt / n` each.
+ * Sizing them off the trailer's OWN mass is the point of a braked trailer: it
+ * stops itself instead of leaning on the tow ball.
+ */
+const SERVICE_BRAKE_DECEL = 9.6;
+/**
+ * Parking deceleration. Larger than the service brake because it has one job —
+ * hold on any grade the road network can produce — and, unlike a moving stop, it
+ * never has to share the tyre with cornering.
+ */
+const PARK_BRAKE_DECEL = 12.0;
+/**
+ * Rolling resistance, m/s². Always present on a coupled trailer, and the reason
+ * the drawbar stops juddering.
+ *
+ * A trailer with literally zero longitudinal contact force is a mass on the end of
+ * a spherical joint with NOTHING to damp it: the joint's positional error is
+ * corrected softly over several steps, and with no ground friction in the loop that
+ * correction rings instead of settling. Measured live at 60-90 km/h, unbraked, as
+ * the distance between the ball's two anchor points (which should be coincident):
+ *
+ *   rolling resistance      mean error     95th pct
+ *   0 (free-wheeling)         82 mm         401 mm
+ *   0.2 m/s²                  27 mm         176 mm
+ *   0.8 m/s²                  64 mm         321 mm
+ *
+ * So it is not "more is better": 0.2 damps the ringing, while 0.8 is enough retard
+ * to start its own stick-slip against the tyre model. The same measurement is why
+ * the effect was reported as juddering under power but rock-steady on the brakes —
+ * braking locks the wheels, which is this damping taken to its limit (95th
+ * percentile error on the brakes: 0.2 mm).
+ *
+ * 0.2 m/s² is ~2% of weight, the right order for an unloaded box trailer on rough
+ * asphalt, and costs 0.02 g of drag — under a km/h of top speed.
+ */
+const ROLLING_RESISTANCE_DECEL = 0.2;
 
 /**
  * Suspension, in the same per-kilogram units the car catalogue uses — see the
@@ -145,10 +191,88 @@ const CRATE_CENTRE_Y = BED_HALF[1] + CRATE_HALF[1];
 /** Wheel spin is kept inside one turn, so a long haul cannot lose float precision. */
 const TWO_PI = Math.PI * 2;
 
+/**
+ * Hitch drift correction.
+ *
+ * A tow ball does not stretch, but a spherical impulse joint does. Measured live at
+ * 46-76 km/h, inside the fixed step, as the distance between the ball's two anchor
+ * points (which are the same point by definition):
+ *
+ *   median            0.00006 m   <- exact almost always
+ *   90th percentile   0.180 m
+ *   99th percentile   0.403 m
+ *   worst             0.874 m     <- 17% of steps over 0.10 m
+ *
+ * That is the reported judder, and it is not a convergence problem: quadrupling
+ * `numSolverIterations` moved the 90th percentile only from 0.249 m to 0.197 m, and
+ * Rapier pulls joint POSITION error back softly over many steps with no ERP knob
+ * exposed for joints. It is also why the trailer was steady under braking (locked
+ * wheels stop the drift accumulating) and why rolling resistance alone only cut the
+ * mean: neither addresses recovery.
+ *
+ * So the coupling is enforced directly after each step: cancel the relative speed
+ * at the ball along the error, with equal and opposite impulses so momentum is
+ * conserved and nothing is pumped, then move both bodies back together, split
+ * inverse to mass so the pair's centre of mass is preserved. The joint still owns
+ * all three rotations — this only removes stretch, which the ball never had.
+ *
+ * Correcting POSITION alone was tried first and was visibly wrong in a way worth
+ * recording: the trailer stopped juddering against the car and the whole car-trailer
+ * pair started juddering together instead, because every uncorrected velocity
+ * mismatch was left for the solver to react to on the next step.
+ */
+const HITCH_TOLERANCE = 0.002;
+/**
+ * Above this the coupling is not drifting, something has been teleported — a save
+ * being loaded, the fall-out-of-world rescue, a dev spawn. Yanking the car toward a
+ * trailer that is half a world away is how you launch both into the sky, so the
+ * correction stands down and lets `hitchTo` re-seat the pair instead.
+ */
+const HITCH_MAX_CORRECTION = 1.5;
+
+
+/**
+ * Rotates a body-local offset into world axes by a quaternion, returning plain
+ * numbers. Allocation-free at the call sites that matter is not worth a scratch
+ * object here: `enforceHitch` needs two of these live at the same time, and the
+ * shared `vScratch` cannot hold both.
+ */
+function rotateLocal(
+  p: { x: number; y: number; z: number },
+  q: { x: number; y: number; z: number; w: number },
+): { x: number; y: number; z: number } {
+  const tx = 2 * (q.y * p.z - q.z * p.y);
+  const ty = 2 * (q.z * p.x - q.x * p.z);
+  const tz = 2 * (q.x * p.y - q.y * p.x);
+  return {
+    x: p.x + q.w * tx + (q.y * tz - q.z * ty),
+    y: p.y + q.w * ty + (q.z * tx - q.x * tz),
+    z: p.z + q.w * tz + (q.x * ty - q.y * tx),
+  };
+}
+
 const matSteel = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.6, metalness: 0.5 });
 const matCrate = new THREE.MeshStandardMaterial({ color: 0x8a6238, roughness: 0.9, metalness: 0 });
+/** Trailer local forward, for turning body rotation into a world heading. */
+const FORWARD_LOCAL = { x: 0, y: 0, z: 1 } as const;
+/**
+ * Slip-speed floor, m/s. Mirrors main.ts's SPRAY_REF_SPEED and the tyre model's
+ * reference: without it a stationary trailer with turning wheels reports infinite
+ * slip.
+ */
+const SPRAY_SLIP_REFERENCE = 1.5;
 
 export class Trailer {
+  /**
+   * One spray report per wheel, written in place every fixed step and read by the
+   * renderer's dust pool. Mirrors Vehicle's contract exactly so the emitter cannot
+   * tell a trailer wheel from a car wheel.
+   */
+  private readonly sprayStates: WheelSprayState[] = [];
+  /** Reused contact-point receiver, so the spray refresh never allocates. */
+  private readonly contactScratch = { x: 0, y: 0, z: 0 };
+  /** Previous wheel rotation (rad), for differentiating into a spin rate. */
+  private readonly prevWheelRotation: number[] = [];
   private readonly body: RAPIER.RigidBody;
   private readonly controller: RAPIER.DynamicRayCastVehicleController;
   private readonly root = new THREE.Group();
@@ -163,6 +287,13 @@ export class Trailer {
   private joint: RAPIER.ImpulseJoint | null = null;
   /** Drawbar length of the current coupling, for the visual and for re-hitching. */
   private drawbarLength = DRAWBAR_MIN;
+  /**
+   * The towing chassis and both local anchors, held only while coupled. Needed by
+   * `enforceHitch`, which runs every step and must not re-derive the geometry.
+   */
+  private hitchBody: RAPIER.RigidBody | null = null;
+  private carAnchor: { x: number; y: number; z: number } | null = null;
+  private trailerAnchor: { x: number; y: number; z: number } | null = null;
 
   /** Render interpolation snapshots, mirroring Vehicle's scheme. */
   private readonly prevPos = new THREE.Vector3();
@@ -236,6 +367,23 @@ export class Trailer {
       this.controller.setWheelSuspensionRelaxation(index, SUSPENSION.relaxation);
       this.controller.setWheelMaxSuspensionTravel(index, SUSPENSION.maxTravel);
       this.controller.setWheelMaxSuspensionForce(index, SUSPENSION.maxForce);
+      // Pre-allocated alongside the wheel, so the per-step refresh never allocates.
+      this.sprayStates.push({
+        contactX: 0,
+        contactY: 0,
+        contactZ: 0,
+        forwardX: 0,
+        forwardZ: 1,
+        // A trailer wheel is never driven. The emitter no longer gates on this
+        // (dust comes from SLIP, which is the whole reason a braked trailer throws
+        // sand), but the field is part of the shared contract.
+        driven: false,
+        dust: 0,
+        slipRatio: 0,
+        slideT: 0,
+        forwardSpeed: 0,
+      });
+      this.prevWheelRotation.push(0);
     }
 
     // --- Visuals -----------------------------------------------------------
@@ -391,6 +539,12 @@ export class Trailer {
       this.body,
       true,
     );
+    // Kept for the post-step hitch correction below: the body on the other end and
+    // both local anchors, so the coupling can be checked every step without
+    // re-deriving the geometry or reaching back into the Vehicle.
+    this.hitchBody = vehicle.chassis;
+    this.carAnchor = carAnchor;
+    this.trailerAnchor = trailerAnchor;
     // The drawbar reaches under the car's tail; without this the two colliders
     // fight the joint and the trailer jitters against the bumper.
     this.joint.setContactsEnabled(false);
@@ -412,6 +566,11 @@ export class Trailer {
       this.physics.world.removeImpulseJoint(this.joint, true);
       this.joint = null;
     }
+    // The correction must stop the instant the coupling does, or it would keep
+    // dragging a dropped trailer toward a car that has driven away.
+    this.hitchBody = null;
+    this.carAnchor = null;
+    this.trailerAnchor = null;
     this.setPropStand(true);
     if (this.state.hitchedTo !== null) {
       this.world.apply({ t: 'trailer_hitch', trailerId: this.state.id, carId: null });
@@ -424,14 +583,171 @@ export class Trailer {
   }
 
   /**
-   * Suspension step. Unlike a car there is no driven and undriven case: a trailer
-   * is always just springs and grip, whether it is being towed or standing.
+   * Suspension and brakes.
+   *
+   * `carBrake` is the towing car's SERVICE brake demand, 0..1 — the pedal, not the
+   * handbrake. A real light trailer's brakes are actuated by the drawbar, so they
+   * come on with the car's and let go with it; mirroring the pedal is that
+   * behaviour without inventing an overrun mechanism the player cannot see.
+   *
+   * Uncoupled, the brakes are simply ON. That is the whole answer to a trailer
+   * parked on a grade rolling away: a real one is left with its handbrake wound on,
+   * and since a trailer with no car attached is by definition parked, there is no
+   * state to track and nothing for the player to remember. Dropping a trailer
+   * therefore leaves it exactly where it was dropped.
    */
-  fixedUpdate(dt: number): void {
+  fixedUpdate(dt: number, carBrake = 0): void {
+    const wheels = this.controller.numWheels();
+    if (wheels > 0) {
+      // Coupled: the pedal, but never less than rolling resistance — the tyres are
+      // always dragging a little, and that little is what keeps the ball quiet.
+      const decel = this.coupled
+        ? Math.max(
+            ROLLING_RESISTANCE_DECEL,
+            Math.min(1, Math.max(0, carBrake)) * SERVICE_BRAKE_DECEL,
+          )
+        : PARK_BRAKE_DECEL;
+      // Impulse per wheel for this step: see the brake note at the top of the file.
+      const impulse = (decel * this.massKg * dt) / wheels;
+      for (let i = 0; i < wheels; i++) this.controller.setWheelBrake(i, impulse);
+    }
     this.controller.updateVehicle(dt);
+    this.refreshSpray(dt);
+  }
+
+  /**
+   * Copies per-wheel contact, slip and surface data into `sprayStates` for the dust
+   * pool. Never allocates.
+   *
+   * A trailer wheel has no drive and no tyre model of its own, so its slip is
+   * differentiated from Rapier's own integrated wheel rotation: the controller
+   * spins a rolling wheel from the contact point's speed, and a braked one stops
+   * turning, so `omega*r - v` is exactly the slip that throws sand. That is the
+   * same quantity the car reports, arrived at from the other direction.
+   */
+  private refreshSpray(dt: number): void {
+    const n = this.sprayStates.length;
+    if (n === 0 || dt <= 0) return;
+    const rot = this.body.rotation();
+    // Trailer forward is its local +Z (the drawbar points forward along +Z).
+    const fwd = rotateLocal(FORWARD_LOCAL, rot);
+    const fLen = Math.hypot(fwd.x, fwd.z) || 1;
+    const fx = fwd.x / fLen;
+    const fz = fwd.z / fLen;
+    const lv = this.body.linvel();
+    const forwardSpeed = lv.x * fx + lv.z * fz;
+
+    for (let i = 0; i < n; i++) {
+      const s = this.sprayStates[i];
+      const spin = ((this.controller.wheelRotation(i) ?? 0) - this.prevWheelRotation[i]) / dt;
+      this.prevWheelRotation[i] = this.controller.wheelRotation(i) ?? 0;
+
+      if (!this.controller.wheelIsInContact(i)) {
+        s.dust = 0;
+        s.slipRatio = 0;
+        s.slideT = 0;
+        continue;
+      }
+      const cp = this.controller.wheelContactPoint(i, this.contactScratch);
+      if (cp) {
+        s.contactX = cp.x;
+        s.contactY = cp.y;
+        s.contactZ = cp.z;
+      }
+      s.forwardX = fx;
+      s.forwardZ = fz;
+      s.forwardSpeed = forwardSpeed;
+      const ground = this.controller.wheelGroundObject(i);
+      s.dust = this.physics.surfaces.lookup(ground ? ground.handle : null).dust;
+      const reference = Math.max(Math.abs(forwardSpeed), SPRAY_SLIP_REFERENCE);
+      s.slipRatio = (spin * WHEEL_RADIUS - forwardSpeed) / reference;
+      // No friction circle to report: a trailer tyre is only ever sliding
+      // longitudinally (locked) or dragged sideways, and the longitudinal term
+      // above already carries the locked case.
+      s.slideT = 0;
+    }
+  }
+
+  /** One spray report per wheel; same contract as Vehicle's. */
+  get wheelSpray(): readonly WheelSprayState[] {
+    return this.sprayStates;
+  }
+
+  /**
+   * Pulls the drawbar eye back onto the tow ball. See HITCH_TOLERANCE above for the
+   * measurements and for why the joint alone is not enough.
+   *
+   * Runs after the step and before the render snapshots are latched, so the drawn
+   * pose is the corrected one and there is no visual seam.
+   */
+  private enforceHitch(): void {
+    const car = this.hitchBody;
+    const ca = this.carAnchor;
+    const ta = this.trailerAnchor;
+    if (!this.joint || !car || !ca || !ta) return;
+
+    const ct = car.translation();
+    const cr = car.rotation();
+    const tt = this.body.translation();
+    const trot = this.body.rotation();
+
+    // Both anchors in world space. The rotated offsets are kept as plain numbers
+    // rather than in the shared scratch vectors, because both are needed at once
+    // (the velocity terms below use omega x r for each end).
+    const bl = rotateLocal(ca, cr);
+    const ballX = ct.x + bl.x, ballY = ct.y + bl.y, ballZ = ct.z + bl.z;
+    const el = rotateLocal(ta, trot);
+    const eyeX = tt.x + el.x, eyeY = tt.y + el.y, eyeZ = tt.z + el.z;
+
+    const dx = ballX - eyeX, dy = ballY - eyeY, dz = ballZ - eyeZ;
+    const err = Math.hypot(dx, dy, dz);
+    if (err <= HITCH_TOLERANCE || err > HITCH_MAX_CORRECTION) return;
+
+    const mC = car.mass();
+    const mT = this.body.mass();
+    if (!(mC > 0) || !(mT > 0)) return;
+
+    // Everything below moves the TRAILER and never the car.
+    //
+    // Sharing the correction between both bodies was tried, mass-weighted, with
+    // equal and opposite impulses so momentum was conserved. It was much worse:
+    // the pair juddered together, harder the faster you went. Two reasons, and both
+    // matter more than the momentum bookkeeping. The car is what the camera is
+    // locked to, so a millimetre of car correction is more visible than a
+    // centimetre of trailer correction; and the car is simultaneously being driven
+    // by its own tyre model, which reacts to being moved, so the two fought and the
+    // exchange grew with speed.
+    //
+    // Leaving the car alone is also the better physics of the two. The reaction a
+    // 320 kg trailer's drift would put through the ball is small next to a 1240 kg
+    // car on four loaded tyres, and the real load transfer — tongue weight, the
+    // trailer braking the car — still goes through the joint, which is untouched.
+    const nx = dx / err, ny = dy / err, nz = dz / err;
+    const cv = car.linvel(), cw = car.angvel();
+    const tv = this.body.linvel(), tw = this.body.angvel();
+    // Velocity at each anchor: v + omega x r.
+    const vbx = cv.x + (cw.y * bl.z - cw.z * bl.y);
+    const vby = cv.y + (cw.z * bl.x - cw.x * bl.z);
+    const vbz = cv.z + (cw.x * bl.y - cw.y * bl.x);
+    const vex = tv.x + (tw.y * el.z - tw.z * el.y);
+    const vey = tv.y + (tw.z * el.x - tw.x * el.z);
+    const vez = tv.z + (tw.x * el.y - tw.y * el.x);
+    // Drift RATE along the error. Cancelling it is what stops the correction from
+    // being re-earned every step, which is the difference between a coupling that
+    // settles and one that rings.
+    const vRel = (vbx - vex) * nx + (vby - vey) * ny + (vbz - vez) * nz;
+    if (Number.isFinite(vRel) && vRel !== 0) {
+      this.body.setLinvel(
+        { x: tv.x + nx * vRel, y: tv.y + ny * vRel, z: tv.z + nz * vRel },
+        true,
+      );
+    }
+
+    this.body.setTranslation({ x: tt.x + dx, y: tt.y + dy, z: tt.z + dz }, true);
   }
 
   postStep(): void {
+    this.enforceHitch();
     const t = this.body.translation();
     const r = this.body.rotation();
     if (!this.snapshotPrimed) {
@@ -579,6 +895,18 @@ export class TrailerField {
    * composition root, not here.
    */
   restoreFromState(vehicleFor: (carId: string) => Vehicle | null): void {
+    // Which trailer was coupled to which car, read BEFORE anything is torn down.
+    //
+    // This has to be snapshotted first: `dispose` calls `unhitch`, and `unhitch`
+    // records the uncoupling into authoritative state. Tearing the old trailers
+    // down therefore erased the very couplings this method is about to restore, so
+    // loading a save always dropped the trailer you were towing — it came back
+    // standing on its prop stand a few metres behind the car.
+    const couplings: Record<string, string> = {};
+    for (const state of Object.values(this.world.state.trailers)) {
+      if (state.hitchedTo !== null) couplings[state.id] = state.hitchedTo;
+    }
+
     for (const trailer of this.trailers.values()) trailer.dispose();
     this.trailers.clear();
     this.colliderToTrailerId.clear();
@@ -587,13 +915,12 @@ export class TrailerField {
       this.materialise(state);
     }
     // Second pass: a coupling needs both ends to exist.
-    for (const state of Object.values(this.world.state.trailers)) {
-      if (state.hitchedTo === null) continue;
-      const trailer = this.trailers.get(state.id);
-      const vehicle = vehicleFor(state.hitchedTo);
+    for (const [trailerId, carId] of Object.entries(couplings)) {
+      const trailer = this.trailers.get(trailerId);
+      const vehicle = vehicleFor(carId);
       // A save whose towing car has gone leaves the trailer standing where it is
       // rather than refusing to load.
-      if (trailer && vehicle) trailer.hitchTo(vehicle, state.hitchedTo);
+      if (trailer && vehicle) trailer.hitchTo(vehicle, carId);
       else if (trailer) trailer.unhitch();
     }
   }
@@ -614,9 +941,18 @@ export class TrailerField {
     return null;
   }
 
-  /** Suspension step for every trailer, towed or standing. */
-  fixedUpdate(dt: number): void {
-    for (const trailer of this.trailers.values()) trailer.fixedUpdate(dt);
+  /**
+   * Suspension and brake step for every trailer, towed or standing.
+   *
+   * `brakeForCar` reports a car's service-brake demand (0..1) by id. It is a lookup
+   * rather than a single number because each coupled trailer follows the pedal of
+   * the car it is actually attached to, not the one the player happens to be in.
+   */
+  fixedUpdate(dt: number, brakeForCar: (carId: string) => number): void {
+    for (const trailer of this.trailers.values()) {
+      const carId = trailer.hitchedTo;
+      trailer.fixedUpdate(dt, carId === null ? 0 : brakeForCar(carId));
+    }
   }
 
   postStep(): void {
@@ -625,6 +961,17 @@ export class TrailerField {
 
   syncVisuals(alpha: number): void {
     for (const trailer of this.trailers.values()) trailer.syncVisuals(alpha);
+  }
+
+  /**
+   * Visits every trailer wheel's spray report. A callback rather than a collected
+   * array so nothing allocates per frame; trailers are few and the dust emitter is
+   * the only caller.
+   */
+  forEachSpray(visit: (state: WheelSprayState) => void): void {
+    for (const trailer of this.trailers.values()) {
+      for (const state of trailer.wheelSpray) visit(state);
+    }
   }
 
   /** Records every trailer's pose, so a save puts them all back. */
