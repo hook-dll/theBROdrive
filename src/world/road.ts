@@ -1,15 +1,29 @@
 import { Noise1D } from '../core/rng';
+import { Landscape } from './landscape';
 
 /**
  * The road is the spine of the world.
  *
- * It is generated as an arclength-parameterised curve: curvature and grade are
- * smooth noise functions of distance travelled, integrated forward from the house
- * at s = 0. Everything else in the world (terrain height, chunk streaming, prop
- * placement, save games) is indexed by that same `s`, not by world XZ.
+ * It is generated as an arclength-parameterised curve. Curvature is a smooth noise
+ * function of distance travelled and the centreline is integrated forward from the
+ * house at s = 0; elevation is not the road's own at all, but the `Landscape` field's
+ * value under the centreline. Everything else in the world (terrain height, chunk
+ * streaming, prop placement, save games) is indexed by that same `s`, not by world
+ * XZ.
  *
  * Consequences worth knowing:
  *  - "turns often but smoothly" is one curvature amplitude, not authored geometry
+ *  - the road's grade is whatever the landscape does along its tangent; there is no
+ *    grade noise, and no elevation state that could drift
+ *  - heading is the integral of that curvature, so it random-walks: over 400 km the
+ *    road winds through several full turns and passes close to its own path. That
+ *    used to matter enormously, because the desert took its height from the nearest
+ *    pass of the road and two passes were hundreds of metres apart in altitude. It
+ *    no longer does: both passes sit on the same landscape, at the same height, and
+ *    the streamer never has two branches loaded at once (they are kilometres apart in
+ *    `s`, and only ±1200 m is alive). Bounding the heading to forbid the crossing
+ *    outright was tried and reverted — it doubled the direction-change rate to keep
+ *    the corner radius, because bounded heading cannot sustain a curvature
  *  - the road has a real end at `length`, reached only after a very long drive
  *  - integration is sequential from s = 0, so nodes are built lazily and cached
  *  - generation is pure: same seed, same road, on any machine (see NETPLAY notes)
@@ -25,57 +39,10 @@ export const NODE_SPACING = 4;
 export const ROAD_LENGTH = 400_000;
 
 /** Tightest corner radius in metres. Sets the curvature amplitude. */
-const MIN_CORNER_RADIUS = 170;
+export const MIN_CORNER_RADIUS = 170;
 /** Distance over which curvature varies. Long = sweeping, short = twitchy. */
 const CURVATURE_WAVELENGTH = 520;
-/**
- * Elevation, in three layers, because one noise band cannot be both "a hill you
- * crest" and "country that is flat for a while".
- *
- * Two rounds of tuning happened here, and the second is the important one. The
- * original was a single 1400 m band at 5.5% max: ~4 m of relief over a kilometre,
- * which is not level but reads as dead flat. Widening it to three bands at 10% max
- * got the relief up (230 m over 60 km) yet still looked flat from the seat, because
- * what the driver actually sees is the GRADE UNDER THE BONNET, not the total
- * relief, and a mean of 2% is a third of a degree of pitch.
- *
- * So the bands are sized by what they do to the view instead:
- *
- *  - ROLL, 340 m crest to crest, is the band you feel. At 340 m and 9% the road
- *    rises about 5 m between trough and crest — more than eye height, so the far
- *    side genuinely disappears — and a crest arrives every ten seconds at 90 km/h.
- *  - SWELL, 3 km, is the landscape: tens of metres of rise and fall that the
- *    rolling band sits on, so hills are not a corrugation on a table.
- *  - HILLINESS gates both over 8 km, so a seed gives hill country here and open
- *    basin there, and crossing between them takes minutes of driving.
- *
- * MAX_GRADE bounds the sum of the two bands. 12% is steep for a real two-lane and
- * deliberately at the edge of what this catalogue pulls: measured in-game, the
- * saloon climbs a sustained 9% at 55-70 km/h in third and needs second only past
- * 11%. Anything gentler than this does not read as hills at all.
- */
-const MAX_GRADE = 0.12;
-/** Rolling band: crest-to-crest distance of the hills you actually drive over. */
-const GRADE_ROLL_WAVELENGTH = 340;
-/** Its share of the grade budget. */
-const GRADE_ROLL_WEIGHT = 0.95;
-/** Swell band: the long rise and fall the rolling band rides on. */
-const GRADE_SWELL_WAVELENGTH = 3000;
-const GRADE_SWELL_WEIGHT = 0.5;
-/**
- * Amplification applied to the summed bands before clamping (see `gradeAt`). Value
- * noise clusters near zero; without this the road's mean grade is a third of a
- * degree.
- */
-const GRADE_GAIN = 2.1;
-/** How far you drive before flat country becomes hill country, metres. */
-const HILLINESS_WAVELENGTH = 8000;
-/**
- * Grade fraction kept in the flattest country. Not small: even the flat stretches
- * should breathe, or the contrast makes them read as broken rather than flat.
- */
-const HILLINESS_FLOOR = 0.42;
-/** First stretch out of the house is dead straight and flat, for the garage exit. */
+/** First stretch out of the house is dead straight, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
 
 export interface RoadSample {
@@ -105,10 +72,10 @@ export class Road {
   readonly length = ROAD_LENGTH;
   readonly seed: number;
 
+  /** The elevation field the road lies on. Public: the terrain reads the same one. */
+  readonly landscape: Landscape;
+
   private readonly curveNoise: Noise1D;
-  private readonly gradeNoise: Noise1D;
-  private readonly swellNoise: Noise1D;
-  private readonly hillNoise: Noise1D;
 
   // Parallel arrays of integrated nodes; index i corresponds to s = i * NODE_SPACING.
   private readonly xs: number[] = [0];
@@ -118,10 +85,8 @@ export class Road {
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
+    this.landscape = new Landscape(this.seed);
     this.curveNoise = new Noise1D(this.seed ^ 0x9e3779b9);
-    this.gradeNoise = new Noise1D(this.seed ^ 0x85ebca6b);
-    this.swellNoise = new Noise1D(this.seed ^ 0xc2b2ae3d);
-    this.hillNoise = new Noise1D(this.seed ^ 0x27d4eb2f);
   }
 
   /**
@@ -134,48 +99,33 @@ export class Road {
   }
 
   /**
-   * How hilly the country is at `s`, 0..1. Its own noise band, an order of
-   * magnitude longer than the hills it gates, so the landscape has regions.
+   * How hilly the country is at `s`, 0..1. Delegates to the landscape, because
+   * hilliness is a property of the ground the road crosses, not of the arclength.
    */
   hillinessAt(s: number): number {
-    const n = this.hillNoise.fbm(s / HILLINESS_WAVELENGTH, 2, 2, 0.5);
-    // Value noise clusters near zero, so widen before clamping or almost every
-    // stretch lands mid-scale and the regions all feel the same.
-    const t0 = Math.min(1, Math.max(0, 0.5 + n * 1.35));
-    const t = t0 * t0 * (3 - 2 * t0);
-    return HILLINESS_FLOOR + (1 - HILLINESS_FLOOR) * t;
+    const c = this.sampleAt(s);
+    return this.landscape.hillinessAt(c.x, c.z);
   }
 
   /**
-   * Grade at arclength s, dy/ds. Rolling band plus long swell, amplified, clamped,
-   * gated by hilliness and ramped in over the runout.
+   * Integrates nodes forward until index `target` exists. Cheap and idempotent.
    *
-   * GRADE_GAIN is why this reads as hills. Value-noise fbm spends almost all its
-   * time near zero — the raw sum averages about 0.3 of its own range — so feeding
-   * it straight into MAX_GRADE produced a mean grade of 2% and a road that measured
-   * hilly and looked flat. Amplifying and then clamping trades the rare peak for
-   * sustained climbs and descents at real gradients, which is what a road through
-   * hills actually is: long pulls at a steady 8%, not a sine wave.
+   * Only XZ is integrated. Elevation is READ from the landscape at the node's own
+   * position, so it carries no state and cannot drift: two nodes over the same
+   * ground are at the same height whatever their arclength.
    */
-  gradeAt(s: number): number {
-    const ramp = Math.min(1, Math.max(0, (s - STRAIGHT_RUNOUT) / (STRAIGHT_RUNOUT * 2)));
-    const roll = this.gradeNoise.fbm(s / GRADE_ROLL_WAVELENGTH, 3, 2.1, 0.45) * GRADE_ROLL_WEIGHT;
-    const swell = this.swellNoise.fbm(s / GRADE_SWELL_WAVELENGTH, 2, 2, 0.5) * GRADE_SWELL_WEIGHT;
-    const shape = Math.min(1, Math.max(-1, (roll + swell) * GRADE_GAIN));
-    return shape * MAX_GRADE * this.hillinessAt(s) * ramp;
-  }
-
-  /** Integrates nodes forward until index `target` exists. Cheap and idempotent. */
   private ensureIndex(target: number): void {
     for (let i = this.xs.length - 1; i < target; i++) {
-      // Midpoint rule: sampling curvature and grade at the segment centre keeps the
-      // integrated heading second-order accurate, which matters over 100k nodes.
+      // Midpoint rule: sampling curvature at the segment centre keeps the integrated
+      // heading second-order accurate, which matters over 100k nodes.
       const sMid = i * NODE_SPACING + NODE_SPACING * 0.5;
       const heading = this.headings[i]! + this.curvatureAt(sMid) * NODE_SPACING;
       const midHeading = (this.headings[i]! + heading) * 0.5;
-      this.xs.push(this.xs[i]! + Math.sin(midHeading) * NODE_SPACING);
-      this.zs.push(this.zs[i]! + Math.cos(midHeading) * NODE_SPACING);
-      this.ys.push(this.ys[i]! + this.gradeAt(sMid) * NODE_SPACING);
+      const x = this.xs[i]! + Math.sin(midHeading) * NODE_SPACING;
+      const z = this.zs[i]! + Math.cos(midHeading) * NODE_SPACING;
+      this.xs.push(x);
+      this.zs.push(z);
+      this.ys.push(this.landscape.heightAt(x, z));
       this.headings.push(heading);
     }
   }
@@ -219,7 +169,10 @@ export class Road {
         b1 * this.zs[i + 1]! +
         m1 * Math.cos(h1) * NODE_SPACING,
       heading: h0 + (h1 - h0) * t,
-      grade: this.gradeAt(clamped),
+      // The grade the driver actually rides: the slope of the interpolated y, which
+      // is linear across the segment. Differencing the nodes is therefore exact,
+      // where re-evaluating the landscape here would not match the geometry.
+      grade: (this.ys[i + 1]! - this.ys[i]!) / NODE_SPACING,
       curvature: this.curvatureAt(clamped),
     };
   }

@@ -1,11 +1,12 @@
 /**
  * The homestead: the player's first five minutes, told without a word of text.
  *
- * A small house with an attached open-fronted garage sits beside the road's
- * guaranteed-flat runout (`STRAIGHT_RUNOUT` in road.ts keeps s ∈ [0, 260] dead
- * straight, level and heading 0). Inside the garage sits the starter car — a
- * complete model — and a handful of cosmetic gizmos, the brush, sponge and a jerry
- * can lie within arm's reach.
+ * A small house with an attached open-fronted garage sits beside the road's runout
+ * (`STRAIGHT_RUNOUT` in road.ts keeps s ∈ [0, 260] dead straight and heading 0, and
+ * `HOME_FLAT_RADIUS` in landscape.ts keeps the ground under the footprint level to
+ * within a tenth of a metre). Inside the garage sits the starter car — a complete
+ * model — and a handful of cosmetic gizmos, the brush, sponge and a jerry can lie
+ * within arm's reach.
  *
  * Everything here is pure geometry derived from the seed, never a texture or a
  * prefab, and never `Math.random` — the same seed rebuilds the same homestead,
@@ -62,9 +63,12 @@ const HOUSE_V1 = 3.6;
 const HOUSE_WALL_H = 2.9;
 
 const WALL_T = 0.14;
-const SLAB_THICK = 0.15;
+const SLAB_THICK = 0.45;
 /** The concrete pad tops this far above the highest terrain under it, so the
- *  heightfield can never poke through the floor. */
+ *  heightfield can never poke through the floor. The slab is thick enough that the
+ *  LOWEST corner of the footprint still has concrete below the sand: the runout is
+ *  level to a tenth of a metre, not exactly, since the landscape's long bands keep
+ *  their slope everywhere (see landscape.ts). */
 const SLAB_LIFT = 0.12;
 
 /** Gravel driveway: a filled wedge from the garage door down to the asphalt edge. */
@@ -286,7 +290,10 @@ function windowOnV(
  * The runout is axis-aligned, so near = -x, far = +x, lo = -z, hi = +z.
  */
 function drivewayData(L: HomesteadLayout): { verts: number[]; tris: number[] } {
-  const base = Math.min(L.floorY, L.roadY) - 0.15;
+  // Buried as deep as the slab, for the same reason: the ground beside the runout is
+  // level to a tenth of a metre rather than exactly, so a shallow wedge shows its
+  // underside on the low side.
+  const base = Math.min(L.floorY, L.roadY) - SLAB_THICK;
   const top0 = L.floorY;
   const top1 = L.roadY;
   const corners: V3[] = [

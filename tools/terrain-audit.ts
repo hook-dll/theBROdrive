@@ -11,6 +11,10 @@
  *   giant      an edge longer than `EDGE_LIMIT` metres, i.e. a triangle that
  *              spans a sizeable fraction of the visible world
  *
+ * It also reports the steepest edge in the DRAWN surface, which is the honest test
+ * for cliffs: `tools/relief-probe.ts` measures the height field, but the mesh is what
+ * the player sees and the collider is built from its vertices. Split at RIM_START,
+ * because the escarpment is deliberately steep and the basin floor is not.
  * Node-only; Rapier is never touched because colliders are skipped.
  *
  *   npx tsx tools/terrain-audit.ts
@@ -22,7 +26,7 @@ import type { BufferGeometry } from 'three';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { Road } from '../src/world/road';
-import { Terrain } from '../src/world/terrain';
+import { RIM_START, Terrain } from '../src/world/terrain';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
 
 /** Longest / shortest edge past which a triangle is a sliver, not terrain. */
@@ -51,6 +55,12 @@ export interface AuditResult {
   slivers: number;
   giants: number;
   worst: BadTriangle[];
+  /** Steepest mesh edge inside RIM_START of lateral offset: the basin floor. */
+  floorSlope: number;
+  floorAtLateralM: number;
+  /** Steepest mesh edge anywhere in the drawn fan, escarpment included. */
+  fanSlope: number;
+  fanAtLateralM: number;
 }
 
 function fakeContext(chunkIndex: number, road: Road, terrain: Terrain): ChunkContext {
@@ -74,6 +84,10 @@ export function auditTerrain(seed: number, fromChunk: number, toChunk: number): 
   let slivers = 0;
   let giants = 0;
   const worst: BadTriangle[] = [];
+  let floorSlope = 0;
+  let floorAt = 0;
+  let fanSlope = 0;
+  let fanAt = 0;
 
   for (let chunkIndex = fromChunk; chunkIndex <= toChunk; chunkIndex++) {
     const content = provider.build(fakeContext(chunkIndex, road, terrain));
@@ -116,6 +130,32 @@ export function auditTerrain(seed: number, fromChunk: number, toChunk: number): 
       const shortest = Math.max(1e-6, Math.min(...e));
       const aspect = longest / shortest;
 
+      // Steepest of the three edges, and where it sits relative to the road. The
+      // lateral offset is measured at the centroid; a triangle is at most 150 m
+      // across out there, so it cannot straddle RIM_START by enough to matter.
+      let edgeSlope = 0;
+      for (let n = 0; n < 3; n++) {
+        const m = (n + 1) % 3;
+        const run = Math.hypot(px[m]! - px[n]!, pz[m]! - pz[n]!);
+        if (run < 1e-6) continue;
+        const rise = Math.abs(py[m]! - py[n]!) / run;
+        if (rise > edgeSlope) edgeSlope = rise;
+      }
+      const centroidLateral = Math.abs(
+        road.project(
+          (px[0]! + px[1]! + px[2]!) / 3,
+          (pz[0]! + pz[1]! + pz[2]!) / 3,
+          chunkIndex * CHUNK_LENGTH,
+        ).lateral,
+      );
+      if (edgeSlope > fanSlope) {
+        fanSlope = edgeSlope;
+        fanAt = centroidLateral;
+      }
+      if (centroidLateral <= RIM_START && edgeSlope > floorSlope) {
+        floorSlope = edgeSlope;
+        floorAt = centroidLateral;
+      }
       let kind: BadTriangle['kind'] | null = null;
       if (signs[k] !== 0 && signs[k] !== convention) kind = 'inverted';
       else if (longest > EDGE_LIMIT) kind = 'giant';
@@ -148,7 +188,19 @@ export function auditTerrain(seed: number, fromChunk: number, toChunk: number): 
   }
 
   worst.sort((p, q) => q.longestEdgeM - p.longestEdgeM);
-  return { seed, chunks: toChunk - fromChunk + 1, triangles, inverted, slivers, giants, worst: worst.slice(0, 12) };
+  return {
+    seed,
+    chunks: toChunk - fromChunk + 1,
+    triangles,
+    inverted,
+    slivers,
+    giants,
+    worst: worst.slice(0, 12),
+    floorSlope: +floorSlope.toFixed(3),
+    floorAtLateralM: +floorAt.toFixed(0),
+    fanSlope: +fanSlope.toFixed(3),
+    fanAtLateralM: +fanAt.toFixed(0),
+  };
 }
 
 const seeds = [1337, 42, 7, 90210];
@@ -156,6 +208,10 @@ for (const seed of seeds) {
   const r = auditTerrain(seed, 120, 145);
   console.log(
     `seed ${seed}: ${r.triangles} tris over ${r.chunks} chunks -> inverted ${r.inverted}, slivers ${r.slivers}, giants ${r.giants}`,
+  );
+  console.log(
+    `   steepest mesh edge: basin floor ${(r.floorSlope * 100).toFixed(0)}% at lateral ${r.floorAtLateralM} m, ` +
+      `whole fan ${(r.fanSlope * 100).toFixed(0)}% at lateral ${r.fanAtLateralM} m`,
   );
   for (const w of r.worst.slice(0, 6)) {
     console.log(

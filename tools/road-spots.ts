@@ -22,13 +22,15 @@ interface Spot {
 }
 
 const spots: Spot[] = [];
+const gradeAt = (s: number): number => road.sampleAt(s).grade;
+
 for (let s = 1000; s <= 40_000; s += 20) {
-  const g = road.gradeAt(s);
-  if (g < 0.07) continue;
+  const g = gradeAt(s);
+  if (g < 0.05) continue;
   // Distance to the next crest, and how far the road falls in the 400 m after it.
   let crest = -1;
   for (let d = 20; d <= 400; d += 20) {
-    if (road.gradeAt(s + d) < 0) {
+    if (gradeAt(s + d) < 0) {
       crest = d;
       break;
     }
