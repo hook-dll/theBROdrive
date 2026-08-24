@@ -4,19 +4,43 @@ import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 
 /**
- * Terrain height is *derived from* the road, never independent of it.
+ * Terrain height is the `Landscape` field plus bounded dune relief. The road is not
+ * in it — the road lies on the same field (see road.ts), which is what makes the two
+ * agree without either one deriving from the other.
  *
- * Inside the corridor the ground is the road surface itself (banking and surface
- * field included), sampled through the same shared function the road ribbon uses,
- * so the shoulder meets the verge flush. Outside, dune relief is added as a
- * *difference* from the relief at the corresponding centreline point, which keeps
- * the blend continuous — no ridge or cliff at the corridor boundary.
+ * That is a reversal. Terrain height used to BE the road's: the ground took the
+ * elevation of the nearest centreline point, plus relief expressed as a difference
+ * from the relief at that point. It is a tempting construction, and it guarantees a
+ * flush corridor, but it also guarantees that wherever the nearest-centreline map
+ * folds — every corner tighter than its own offset distance, every fold, every
+ * self-crossing — the ground STEPS by the altitude difference between two passes of
+ * a road whose altitude was a random walk. landscape.ts has the measurements.
+ *
+ * What survives is the corridor: inside `CORRIDOR_INNER` the ground is the road
+ * surface itself (banking and surface field included), sampled through the same
+ * shared function the road ribbon uses, so the shoulder meets the verge flush. From
+ * there out to `CORRIDOR_OUTER` it smoothsteps into the open field. The seam is
+ * continuous because the road's own elevation IS the field's, so the two ends of the
+ * blend differ only by camber and centimetre-scale surface detail.
  */
 
 /** Ground inside this lateral distance is pure road corridor. */
 export const CORRIDOR_INNER = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
 /** Beyond this lateral distance the terrain is open desert. */
 export const CORRIDOR_OUTER = 30;
+/**
+ * Lateral distance over which dune relief fades in, metres.
+ *
+ * Relief is an ABSOLUTE height now, not a difference from the centreline's own
+ * relief, because a difference is a road-frame quantity and road-frame quantities
+ * step where the frame folds — the whole disease landscape.ts describes. But the road
+ * still has to sit on the ground rather than in a trench, so at the shoulder the
+ * relief must be zero, and the only position-pure way to get that is to fade it in
+ * with distance from the road. Do it over the corridor's own 25 m and a 17 m dune
+ * arrives as a 70% bank; over this distance it arrives as a graded verge, which is
+ * what a road cut through dunes actually looks like.
+ */
+const RELIEF_FULL = 130;
 
 /** Width of the gravel verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
@@ -121,34 +145,21 @@ export class Terrain {
   }
 
   /**
-   * Open-desert relief at a point: dunes, ripples, grain and outcrops, with no road
-   * in it. Public because the far terrain mesh adds it per vertex to an anchor it
-   * interpolates on a coarse lattice (see `farAnchor`), which keeps the fine detail
-   * while paying for the expensive road projection only every few tens of metres.
-   */
-  reliefAt(x: number, z: number): number {
-    return this.relief(x, z);
-  }
-
-  /**
-   * The ROAD-derived part of open-desert height at a point, i.e. everything in
-   * `blend`'s `outer` except the relief itself: the centreline anchor, minus the
-   * relief at that anchor, plus the basin rim.
+   * Open-desert height at a point: the landscape field, dune relief graded in with
+   * distance from the road, and the basin rim.
    *
-   * `outer = farAnchor(...) + reliefAt(x, z)` exactly, so a caller past
-   * CORRIDOR_OUTER can split the height in two and treat the parts differently.
-   * This part is smooth over tens of metres — it is the road's own elevation and a
-   * smoothstepped rim — which is what makes interpolating it safe.
+   * Public because the far terrain mesh calls it directly. It is a pure function of
+   * position and `dist`, so every chunk that reaches the same ground computes the
+   * same height — the property that used to need an interpolated anchor lattice and
+   * a two-branch blend to approximate, and now falls out of the construction.
    */
-  farAnchor(
-    x: number,
-    z: number,
-    centreX: number,
-    centreZ: number,
-    centreHeight: number,
-    dist: number,
-  ): number {
-    return centreHeight - this.relief(centreX, centreZ) + this.rimHeight(dist, x, z);
+  openHeight(x: number, z: number, dist: number): number {
+    const verge = smoothstep01((dist - CORRIDOR_INNER) / (RELIEF_FULL - CORRIDOR_INNER));
+    return (
+      this.road.landscape.heightAt(x, z) +
+      this.relief(x, z) * verge +
+      this.rimHeight(dist, x, z)
+    );
   }
 
   /**
@@ -156,6 +167,16 @@ export class Terrain {
    *
    * `hintS` is the caller's last known arclength; pass it for anything queried per
    * frame, since the underlying road projection is a search.
+   *
+   * NOT the surface that is drawn or collided past a few tens of metres of lateral
+   * offset, and the difference is the rim. `Road.project` refines from the hint, so
+   * where the road folds back it can settle on either of two local minima and the
+   * distance it returns jumps — which past RIM_START jumps the rim with it.
+   * `TerrainMeshProvider` avoids that by interpolating a GLOBAL nearest-branch
+   * distance off an absolute lattice, and the mesh's own vertices are what the
+   * collider is built from. Everything that queries this far off the road (the
+   * rescue check, bird cruise altitude) only wants a number within a few metres;
+   * props scatter stays inside 42 m, where the rim is zero and the two agree.
    */
   heightAt(x: number, z: number, hintS?: number): number {
     const p = this.road.project(x, z, hintS);
@@ -166,71 +187,46 @@ export class Terrain {
     const t0 = Math.min(1, (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER));
     const t = t0 * t0 * (3 - 2 * t0);
 
-    // Relief expressed relative to the centreline keeps the seam continuous: as
-    // dist approaches CORRIDOR_INNER the added relief tends to zero from both sides.
-    const centre = this.road.sampleAt(p.s);
+    // The seam is continuous because the shoulder anchor and the open field meet at
+    // the same elevation: the road's own y is this field's value at the centreline.
     const inner = this.shoulderHeight(p.s, Math.sign(p.lateral));
-    return this.blend(x, z, centre.x, centre.z, p.height, inner, dist, t);
+    return inner + (this.openHeight(x, z, dist) - inner) * t;
   }
 
   /**
    * Height for a point whose road frame is already known.
    *
    * Grid builders generate their points FROM the road frame (an `s` row and a
-   * lateral column), so making them call `heightAt` throws that away and pays for
-   * two road projections per vertex — measured at ~16 us a vertex, which is most of
-   * a chunk's build time. Here the caller passes the frame it already has: the
-   * centreline point for the row (one `sampleAt` per row, not per vertex) and the
-   * column's lateral offset. Same formula as `heightAt`, no search.
+   * lateral column), so making them call `heightAt` throws that away and pays for a
+   * road projection per vertex — measured at ~16 us a vertex, which is most of a
+   * chunk's build time. Here the caller passes the column's lateral offset and the
+   * row's arclength. Same formula as `heightAt`, no search.
    */
-  heightFromFrame(
-    x: number,
-    z: number,
-    lateral: number,
-    centreX: number,
-    centreZ: number,
-    centreHeight: number,
-    s: number,
-  ): number {
+  heightFromFrame(x: number, z: number, lateral: number, s: number): number {
     const dist = Math.abs(lateral);
     if (dist <= CORRIDOR_INNER) return roadSurfaceY(this.road, this.field, s, lateral, x, z);
 
     const t0 = Math.min(1, (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER));
     const t = t0 * t0 * (3 - 2 * t0);
     const inner = this.shoulderHeight(s, Math.sign(lateral));
-    return this.blend(x, z, centreX, centreZ, centreHeight, inner, dist, t);
-  }
-
-  /**
-   * Shared tail of both height paths: the shoulder anchor, open desert relief, and
-   * the basin rim. Kept in one place because the grid builders' frame-based path
-   * and the general query path MUST agree exactly — a difference here is a car
-   * floating above, or sunk into, the ground it is drawn on.
-   */
-  private blend(
-    x: number,
-    z: number,
-    centreX: number,
-    centreZ: number,
-    centreHeight: number,
-    inner: number,
-    dist: number,
-    t: number,
-  ): number {
-    const delta = this.relief(x, z) - this.relief(centreX, centreZ);
-    const outer = centreHeight + delta + this.rimHeight(dist, x, z);
-    return inner + (outer - inner) * t;
+    return inner + (this.openHeight(x, z, dist) - inner) * t;
   }
 
   /**
    * Height the basin rim adds at a lateral distance (see the RIM_* block above).
    *
-   * Climbs from nothing at RIM_START to a crest at RIM_FULL — the steep face in the
-   * middle third is around 25 degrees, past what a car can pull with a finite grip
-   * budget — then falls away towards RIM_FAR so the far side reads as the back of a
-   * ridge rather than the top of a table. The crest height is modulated by the dune
-   * field at a long wavelength, which is what keeps the skyline from being a ruled
-   * line drawn across the view.
+   * Climbs from nothing at RIM_START to a crest at RIM_FULL, then falls away towards
+   * RIM_FAR so the far side reads as the back of a ridge rather than the top of a
+   * table. The crest height is modulated by the dune field at a long wavelength,
+   * which is what keeps the skyline from being a ruled line drawn across the view.
+   *
+   * It is now the steepest and tallest thing in the world by a wide margin, which is
+   * intentional but worth stating plainly: `tools/relief-probe.ts` measures 28-39
+   * degrees on its face against 13-16 for the basin floor, and 78-100 m of crest
+   * against the floor's ~50 m of variation over 3 km. That is the point — the world
+   * needs an edge a car cannot pull — but if the basin walls ever read as a canyon
+   * rather than as a horizon, RIM_HEIGHT and RIM_START are the two knobs, and nothing
+   * else in the terrain depends on them.
    */
   private rimHeight(dist: number, x: number, z: number): number {
     if (dist <= RIM_START) return 0;

@@ -45,6 +45,40 @@ export function hash01(...ints: number[]): number {
   return hash(...ints) / 4294967296;
 }
 
+/**
+ * `hash01` for a fixed two or three integers, without the rest-parameter arrays.
+ *
+ * Identical output to `hash01(a, b)` / `hash01(a, b, c)` — same mixer, unrolled, and
+ * checked equal over a few thousand inputs — and that equality is the point: the
+ * variadic form allocates TWO arrays per call (one for `hash01`'s own rest parameter,
+ * one to spread into `hash`), and every lattice corner of every noise band is one
+ * call. The road integrates 100k nodes eagerly the first time a chunk asks for the
+ * coarse road index, so that churn lands in one frame. Measured with
+ * tools/terrain-perf.ts: chunk build mean 11.37 ms and worst 222.72 ms through the
+ * variadic form, 3.66 ms and 39.03 ms through these.
+ */
+function fold(h: number, v: number): number {
+  const m = Math.imul(h ^ (v | 0), 0x01000193);
+  return (m << 13) | (m >>> 19);
+}
+
+function avalanche(h: number): number {
+  let x = h ^ (h >>> 16);
+  x = Math.imul(x, 0x85ebca6b);
+  x ^= x >>> 13;
+  x = Math.imul(x, 0xc2b2ae35);
+  x ^= x >>> 16;
+  return (x >>> 0) / 4294967296;
+}
+
+export function hashUnit2(a: number, b: number): number {
+  return avalanche(fold(fold(0x811c9dc5, a), b));
+}
+
+export function hashUnit3(a: number, b: number, c: number): number {
+  return avalanche(fold(fold(fold(0x811c9dc5, a), b), c));
+}
+
 /** Quintic smoothstep, the standard Perlin fade. C2-continuous. */
 function fade(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -69,8 +103,8 @@ export class Noise1D {
   at(x: number): number {
     const i = Math.floor(x);
     // Interpolation of lattice values in [-1,1] gives smooth, zero-mean noise.
-    const g0 = hash01(this.seed, i) * 2 - 1;
-    const g1 = hash01(this.seed, i + 1) * 2 - 1;
+    const g0 = hashUnit2(this.seed, i) * 2 - 1;
+    const g1 = hashUnit2(this.seed, i + 1) * 2 - 1;
     return lerp(g0, g1, fade(x - i));
   }
 
@@ -99,7 +133,7 @@ export class Noise2D {
   }
 
   private grad(ix: number, iy: number): number {
-    return hash01(this.seed, ix, iy) * 2 - 1;
+    return hashUnit3(this.seed, ix, iy) * 2 - 1;
   }
 
   at(x: number, y: number): number {
