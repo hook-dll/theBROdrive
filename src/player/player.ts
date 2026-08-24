@@ -39,8 +39,39 @@ const TERMINAL_VELOCITY = 30;
  */
 const TELEPORT_REHOME_DISTANCE = 150;
 
+/**
+ * How fast a leaned-on dynamic body is allowed to get (m/s). A shove is a
+ * TARGET SPEED, not a force: a raw force that creeps a 1200 kg car is ~320 N,
+ * which launches a 5 kg jerry can at over 60 m/s. Capping the *speed* means the
+ * same lean nudges a can and creeps a truck alike. 0.4 m/s is a fast walking
+ * elbow — the car is plainly heavy and only grudgingly gives ground. At walk
+ * speed (3.4 m/s) the car read as weightless and was flung like the cans.
+ */
+const PUSH_TARGET_SPEED = 0.4;
+/**
+ * Seconds of leaning to reach `PUSH_TARGET_SPEED` from rest, ignoring the body's
+ * own rolling resistance. 1.5 s makes the first moments nearly motionless — the
+ * car resists, then slowly yields — which is what "heavy" feels like. 0.2 s felt
+ * like an elastic shove, not a push.
+ */
+const PUSH_RAMP_SECONDS = 1.5;
+/** Acceleration a lean applies to ANY dynamic body: the target spread over the ramp. */
+const PUSH_ACCEL = PUSH_TARGET_SPEED / PUSH_RAMP_SECONDS;
+
 function clamp(value: number, lo: number, hi: number): number {
   return value < lo ? lo : value > hi ? hi : value;
+}
+
+/**
+ * A body the player can shove that owns its own response to the push. A parked
+ * car pins its chassis every step — its parking hold re-teleports it and zeroes
+ * its velocity after Rapier has stepped — so only the car itself can lift that
+ * and creep; an impulse applied from outside is silently undone one tick later.
+ * Owned bodies answer a shove request instead. Bodies with no owner (loose
+ * parts, jerry cans, wrecks) fall through to the direct impulse below.
+ */
+export interface Shoveable {
+  shove(dirX: number, dirZ: number, seconds: number): void;
 }
 
 export class Player {
@@ -63,6 +94,8 @@ export class Player {
   private enabled = true;
   private emitTimer = 0;
 
+  /** Maps a struck body's handle to its owner, or null; null gets a direct impulse. */
+  private shoveLookup: (bodyHandle: number) => Shoveable | null = () => null;
   private readonly moveScratch = { x: 0, y: 0, z: 0 };
   private readonly appliedScratch = { x: 0, y: 0, z: 0 };
   private readonly posScratch = { x: 0, y: 0, z: 0 };
@@ -72,6 +105,10 @@ export class Player {
   private readonly prevStep = { x: 0, y: 0, z: 0 };
   private readonly curStep = { x: 0, y: 0, z: 0 };
   private readonly interp = { x: 0, y: 0, z: 0 };
+  // Shove scratch, reused every fixed step (see the push loop in fixedUpdate).
+  private readonly pushCollision = new RAPIER.CharacterCollision();
+  private readonly pushImpulse = { x: 0, y: 0, z: 0 };
+  private readonly bodyVelScratch = { x: 0, y: 0, z: 0 };
   private snapshotPrimed = false;
 
   constructor(
@@ -79,14 +116,27 @@ export class Player {
     private readonly world: GameWorld,
   ) {
     this.controller = physics.world.createCharacterController(0.01);
-    // Push dynamic bodies (cars) when walking into them, with a plausible mass.
-    this.controller.setApplyImpulsesToDynamicBodies(true);
-    this.controller.setCharacterMass(75);
+    // The built-in impulse path is off: it derives its impulse from the tiny
+    // `offset` gap the shape cast stops short by, not from the player's momentum,
+    // and it drives whatever it hits toward the character's full velocity with no
+    // mass-scaled cap — so a jerry can launches at walk speed. The explicit shove
+    // in `fixedUpdate` replaces it; leaving it on would count every push twice.
+    this.controller.setApplyImpulsesToDynamicBodies(false);
     this.controller.enableAutostep(STEP_HEIGHT, 0.2, true);
     this.controller.setMaxSlopeClimbAngle(MAX_SLOPE_CLIMB);
     this.controller.setMinSlopeSlideAngle(MIN_SLOPE_SLIDE);
     this.controller.setSlideEnabled(true);
     this.controller.enableSnapToGround(0.3);
+
+    // `computedCollision` reuses whatever Vector objects are already on the
+    // collision scratch, so pre-fill them once and the push loop allocates
+    // nothing per step.
+    this.pushCollision.normal1 = { x: 0, y: 0, z: 0 };
+    this.pushCollision.normal2 = { x: 0, y: 0, z: 0 };
+    this.pushCollision.translationDeltaApplied = { x: 0, y: 0, z: 0 };
+    this.pushCollision.translationDeltaRemaining = { x: 0, y: 0, z: 0 };
+    this.pushCollision.witness1 = { x: 0, y: 0, z: 0 };
+    this.pushCollision.witness2 = { x: 0, y: 0, z: 0 };
 
     const p = world.state.player;
     this.body = physics.world.createRigidBody(
@@ -109,6 +159,15 @@ export class Player {
   /** `carriedMass / massLimit` from the inventory; slows movement when heavy. */
   setCarriedRatio(ratio: number): void {
     this.carryRatio = clamp(ratio, 0, 1);
+  }
+
+  /**
+   * Installs the lookup mapping a struck body's handle to its `Shoveable` owner.
+   * Defaults to null (no owner), so this file stands alone and every dynamic body
+   * gets the direct impulse; `main.ts` wires cars and any other owned body in.
+   */
+  setShoveLookup(lookup: (bodyHandle: number) => Shoveable | null): void {
+    this.shoveLookup = lookup;
   }
 
   /** Capsule centre, in world space. */
@@ -273,6 +332,60 @@ export class Player {
     mv.z = moveZ * dt;
 
     this.controller.computeColliderMovement(this.collider, mv);
+
+    // Shove the dynamic bodies the capsule is leaning into. The controller's
+    // built-in impulse path is off (see the constructor); this is the only push,
+    // driven explicitly so the speed can be capped per body.
+    const numCollisions = this.controller.numComputedCollisions();
+    for (let i = 0; i < numCollisions; i++) {
+      const collision = this.controller.computedCollision(i, this.pushCollision);
+      if (!collision) continue;
+      const body = collision.collider?.parent();
+      if (!body || !body.isDynamic()) continue;
+
+      // Push axis is opposite the contact normal, flattened: a bumper is shoved
+      // sideways, never lifted or pressed into the road.
+      const ax = -collision.normal1.x;
+      const az = -collision.normal1.z;
+      const axisLen = Math.hypot(ax, az);
+      if (axisLen < 1e-4) continue; // vertical face (roof / ground): nothing to shove
+      const px = ax / axisLen;
+      const pz = az / axisLen;
+
+      // Only while actually moving into the body: standing still or sliding
+      // along it reports a collision but must not push.
+      const approach = moveX * px + moveZ * pz;
+      if (approach <= 0) continue;
+
+      // Owned bodies (cars) answer a shove request: they know their own mass and
+      // lift their own parking hold, which no outside impulse could move.
+      const owner = this.shoveLookup(body.handle);
+      if (owner) {
+        owner.shove(px, pz, dt);
+        continue;
+      }
+
+      // No owner: push it directly. Cap the body's speed along the push axis.
+      // Only the impulse needed to approach PUSH_TARGET_SPEED is applied, so a
+      // light body is nudged, never launched, and a body already rolling faster
+      // is left alone.
+      body.linvel(this.bodyVelScratch);
+      const speedAlongAxis = this.bodyVelScratch.x * px + this.bodyVelScratch.z * pz;
+      if (speedAlongAxis >= PUSH_TARGET_SPEED) continue;
+      const dv = Math.min(PUSH_ACCEL * dt, PUSH_TARGET_SPEED - speedAlongAxis);
+
+      // Impulse = mass * Δv: the force scales with the struck body's mass, so a
+      // heavy truck and a light hatchback creep at the same rate instead of the
+      // truck being immovable and the hatchback flying.
+      const impulse = body.mass() * dv;
+      this.pushImpulse.x = px * impulse;
+      this.pushImpulse.y = 0;
+      this.pushImpulse.z = pz * impulse;
+      // wakeUp = true: loose parts and jerry cans spawn asleep and ignore
+      // impulses until woken.
+      body.applyImpulse(this.pushImpulse, true);
+    }
+
     const applied = this.controller.computedMovement(this.appliedScratch);
     const pos = this.body.translation(this.posScratch);
     this.body.setNextKinematicTranslation({
