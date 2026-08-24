@@ -13,8 +13,8 @@
  *
  * It also reports the steepest edge in the DRAWN surface, which is the honest test
  * for cliffs: `tools/relief-probe.ts` measures the height field, but the mesh is what
- * the player sees and the collider is built from its vertices. Split at RIM_START,
- * because the escarpment is deliberately steep and the basin floor is not.
+ * the player sees and the collider is built from its vertices. Split at FLOOR_LATERAL,
+ * because the berm is deliberately steep and the basin floor is not.
  * Node-only; Rapier is never touched because colliders are skipped.
  *
  *   npx tsx tools/terrain-audit.ts
@@ -26,11 +26,23 @@ import type { BufferGeometry } from 'three';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { Road } from '../src/world/road';
-import { RIM_START, Terrain } from '../src/world/terrain';
+import { RoadDistance } from '../src/world/roaddistance';
+import { Terrain } from '../src/world/terrain';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
 
 /** Longest / shortest edge past which a triangle is a sliver, not terrain. */
 const ASPECT_LIMIT = 40;
+/**
+ * Shortest edge, metres, whose rise/run counts as a surface slope. See `edgeSlope`.
+ */
+const SLOPE_MIN_RUN = 12;
+/**
+ * Lateral offset inside which ground counts as basin floor. Comfortably short of
+ * `BERM_START` rather than equal to it: a triangle centred just inside the berm's foot has
+ * a corner on the rise, and reporting the bank's gradient as the floor's makes the one
+ * number this tool exists for meaningless. Matches tools/relief-probe.ts.
+ */
+const FLOOR_LATERAL = 400;
 /** Edge length (m) past which a triangle spans the world rather than sitting in it. */
 const EDGE_LIMIT = 900;
 
@@ -55,10 +67,10 @@ export interface AuditResult {
   slivers: number;
   giants: number;
   worst: BadTriangle[];
-  /** Steepest mesh edge inside RIM_START of lateral offset: the basin floor. */
+  /** Steepest mesh edge inside FLOOR_LATERAL of lateral offset: the basin floor. */
   floorSlope: number;
   floorAtLateralM: number;
-  /** Steepest mesh edge anywhere in the drawn fan, escarpment included. */
+  /** Steepest mesh edge anywhere in the drawn fan, the berm included. */
   fanSlope: number;
   fanAtLateralM: number;
 }
@@ -77,7 +89,7 @@ function fakeContext(chunkIndex: number, road: Road, terrain: Terrain): ChunkCon
 export function auditTerrain(seed: number, fromChunk: number, toChunk: number): AuditResult {
   const road = new Road(seed);
   const terrain = new Terrain(seed, road);
-  const provider = new TerrainMeshProvider();
+  const provider = new TerrainMeshProvider(new RoadDistance(road));
 
   let triangles = 0;
   let inverted = 0;
@@ -132,12 +144,18 @@ export function auditTerrain(seed: number, fromChunk: number, toChunk: number): 
 
       // Steepest of the three edges, and where it sits relative to the road. The
       // lateral offset is measured at the centroid; a triangle is at most 150 m
-      // across out there, so it cannot straddle RIM_START by enough to matter.
+      // across out there, so it cannot straddle FLOOR_LATERAL by enough to matter.
+      //
+      // Edges shorter than SLOPE_MIN_RUN are skipped, and that is not a fudge: on the
+      // inside of a curve the longitudinal edge collapses to a couple of metres while the
+      // lateral one stays hundreds, so its rise/run reports a wall where the SURFACE is a
+      // gentle ramp. Reading 54% at 1496 m of lateral offset on seed 90210 was one of
+      // those, and it is a property of the tessellation the sliver count already tracks.
       let edgeSlope = 0;
       for (let n = 0; n < 3; n++) {
         const m = (n + 1) % 3;
         const run = Math.hypot(px[m]! - px[n]!, pz[m]! - pz[n]!);
-        if (run < 1e-6) continue;
+        if (run < SLOPE_MIN_RUN) continue;
         const rise = Math.abs(py[m]! - py[n]!) / run;
         if (rise > edgeSlope) edgeSlope = rise;
       }
@@ -152,7 +170,7 @@ export function auditTerrain(seed: number, fromChunk: number, toChunk: number): 
         fanSlope = edgeSlope;
         fanAt = centroidLateral;
       }
-      if (centroidLateral <= RIM_START && edgeSlope > floorSlope) {
+      if (centroidLateral <= FLOOR_LATERAL && edgeSlope > floorSlope) {
         floorSlope = edgeSlope;
         floorAt = centroidLateral;
       }

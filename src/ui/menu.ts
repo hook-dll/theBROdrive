@@ -10,7 +10,7 @@ import {
   MOUSE_SENSITIVITY_MIN,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
-import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
+import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
 import type { FluidKind } from '../items/items';
@@ -111,6 +111,8 @@ export interface PauseHooks {
   applySettings: (next: Settings) => void;
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
+  /** Apply a view-distance tier immediately; main pushes it to the renderer. */
+  applyViewDistance: (v: ViewDistance) => void;
   /**
    * Record a fully fuelled car into the world.
    *
@@ -334,6 +336,7 @@ export class MainMenu {
         radioVolume: base.radioVolume,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
+        viewDistance: base.viewDistance,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -344,6 +347,7 @@ export class MainMenu {
           radioVolume: settings.radioVolume,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
+          viewDistance: settings.viewDistance,
         });
       };
 
@@ -630,6 +634,44 @@ export class MainMenu {
         }
         gfxField.append(gfxLabel, gfxRow);
         panel.appendChild(gfxField);
+
+        // View distance: a three-way toggle like the graphics tier, applied live
+        // — the renderer stretches the far plane in place, so the horizon shifts
+        // behind the pause panel. Vast says plainly that it is expensive.
+        const VD_TIERS: readonly { id: ViewDistance; label: string; note: string }[] = [
+          { id: 'near', label: 'Near (1.5 km)', note: 'Near (1.5 km): the authored horizon. Cheapest.' },
+          { id: 'far', label: 'Far (8 km)', note: 'Far (8 km): a deep horizon. Needs a GPU with headroom.' },
+          { id: 'vast', label: 'Vast (25 km)', note: 'Vast (25 km): extravagant. Expensive — for fast GPUs.' },
+        ];
+        const vdField = el('div', 'menu-field');
+        const vdLabel = el('label', 'menu-label');
+        vdLabel.textContent = 'View Distance';
+        const vdRow = el('div', 'menu-toggle-row');
+        const vdButtons = VD_TIERS.map((tier) => {
+          const btn = button('menu-button', tier.label);
+          vdRow.appendChild(btn);
+          return { tier, btn };
+        });
+        const paintVd = (): void => {
+          for (const { tier, btn } of vdButtons) {
+            btn.classList.toggle('is-selected', settings.viewDistance === tier.id);
+          }
+        };
+        paintVd();
+        for (const { tier, btn } of vdButtons) {
+          btn.addEventListener('click', () => {
+            settings.viewDistance = tier.id;
+            paintVd();
+            apply();
+            hooks.applyViewDistance(tier.id);
+            if (note) {
+              note.textContent = tier.note;
+              note.classList.remove('is-alarm');
+            }
+          });
+        }
+        vdField.append(vdLabel, vdRow);
+        panel.appendChild(vdField);
 
         // Time of day: presets apply immediately through their own hook and are
         // not part of the persisted settings object.

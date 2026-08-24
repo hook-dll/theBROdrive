@@ -5,7 +5,7 @@ import { PhysicsWorld } from './core/physics';
 import { SURFACES } from './core/surfaces';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
-import { TIME_OF_DAY_PRESETS } from './game/settings';
+import { TIME_OF_DAY_PRESETS, VIEW_DISTANCE_FOG_SCALE, VIEW_DISTANCE_METRES } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
 import { Inventory, type FluidKind, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
@@ -23,6 +23,7 @@ import { HeldItemView } from './render/held';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { AnchorGhosts } from './render/slotghosts';
+import { VistaMesh } from './render/vista';
 import { WheelSpray } from './render/wheelspray';
 import { createStickerMesh } from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
@@ -37,6 +38,7 @@ import { FreightField } from './world/freight';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road } from './world/road';
 import { RoadMeshProvider } from './world/roadmesh';
+import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
 import { WreckField } from './world/wrecks';
@@ -204,9 +206,22 @@ async function boot(): Promise<void> {
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene);
 
+  // The nearest-road-distance field is shared, not owned: the chunked terrain and the
+  // vista both derive the world's edge from it, and two copies could round the same
+  // ground differently and put a seam on the horizon.
+  const roadDistance = new RoadDistance(road);
+  const vista = new VistaMesh(renderer.scene, terrain, roadDistance);
+  // A save carries the tier it was played at, so apply it before the first frame
+  // rather than waiting for someone to open the pause menu.
+  {
+    const metres = VIEW_DISTANCE_METRES[world.state.settings.viewDistance];
+    renderer.setViewDistance(metres);
+    vista.setViewDistance(metres);
+  }
+
   const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene);
   streamer.register(new RoadMeshProvider(world.seed));
-  streamer.register(new TerrainMeshProvider());
+  streamer.register(new TerrainMeshProvider(roadDistance));
   streamer.register(new HomesteadProvider());
   streamer.register(new ScatterProvider());
   streamer.register(new PoleProvider());
@@ -227,6 +242,25 @@ async function boot(): Promise<void> {
     vehicles.set(car.id, vehicle);
     return vehicle;
   };
+
+  /**
+   * Which vehicle a struck rigid body belongs to, for the player's shove.
+   *
+   * A linear scan over the live vehicles, which is a handful: the streamer only keeps
+   * cars near the camera, and this runs at most once per fixed step and only while the
+   * capsule is actually pressed into something dynamic. A handle map would have to be
+   * maintained through every spawn, despawn and rebuild for no measurable gain.
+   *
+   * Bodies with no owner here — loose parts, jerry cans, wreck shells — get the player's
+   * direct impulse instead, which is the right answer for them: nothing pins them, so
+   * nothing has to lift a pin.
+   */
+  player.setShoveLookup((bodyHandle) => {
+    for (const vehicle of vehicles.values()) {
+      if (vehicle.chassis.handle === bodyHandle) return vehicle;
+    }
+    return null;
+  });
 
   if (!loadedFromSave) {
     const car = createStartingCar(world);
@@ -339,6 +373,7 @@ async function boot(): Promise<void> {
     (window as unknown as Record<string, unknown>)['__bro'] = {
       world,
       renderer,
+      vista,
       physics,
       interaction,
       input,
@@ -708,6 +743,15 @@ async function boot(): Promise<void> {
     const offRoad = Math.abs(road.project(cam.x, cam.z, activeS).lateral);
     const hazeT = Math.min(1, Math.max(0, (offRoad - FOG_RAMP_START) / (FOG_RAMP_END - FOG_RAMP_START)));
     renderer.fog.density *= 1 + hazeT * hazeT * (FOG_RAMP_MAX_SCALE - 1);
+    // Then thin the whole thing for the chosen draw distance. The exponential fog is
+    // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
+    // is all there is and hides the vista completely when there is more: at the 'vast'
+    // scale factor a 25 km range still fades, it just fades over 25 km.
+    renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.viewDistance];
+
+    // The disc only rebuilds when the camera has left the patch it was built for, so
+    // this is a pair of comparisons on most frames.
+    vista.update(cam.x, cam.z);
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
@@ -926,6 +970,15 @@ async function boot(): Promise<void> {
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
+    },
+    // The draw distance moves three things at once: the far plane (and, at the top
+    // tier, the near plane with it), the fog thinning applied every frame in `render`,
+    // and how far the vista disc reaches. Applied here rather than read per frame
+    // because two of the three are one-off state on objects that already exist.
+    applyViewDistance: (tier) => {
+      const metres = VIEW_DISTANCE_METRES[tier];
+      renderer.setViewDistance(metres);
+      vista.setViewDistance(metres);
     },
     exportState: () => world.state,
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards

@@ -25,6 +25,7 @@ import type { BufferGeometry } from 'three';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { Road } from '../src/world/road';
+import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
 
@@ -32,8 +33,14 @@ import { TerrainMeshProvider } from '../src/world/terrainmesh';
 const VISUAL_RADIUS = 6;
 /** XZ bucket size, metres. Coarser than the near rings, finer than the far ones. */
 const BUCKET = 25;
-/** Vertical spread inside one bucket that counts as two surfaces, metres. */
+/** Height a bucket may disagree by, once the surface's own slope is allowed for. */
 const SPREAD_LIMIT = 8;
+/**
+ * Height per metre of horizontal separation that a single continuous surface is allowed.
+ * The steepest thing in the drawn world is the berm's face at 69% (tools/terrain-audit.ts),
+ * so anything under that could be one surface and anything over it cannot.
+ */
+const SURFACE_SLOPE_ALLOWANCE = 0.7;
 
 export interface OverlapReport {
   seed: number;
@@ -64,7 +71,7 @@ function fakeContext(chunkIndex: number, road: Road, terrain: Terrain): ChunkCon
 export function overlapAt(seed: number, cameraS: number): OverlapReport {
   const road = new Road(seed);
   const terrain = new Terrain(seed, road);
-  const provider = new TerrainMeshProvider();
+  const provider = new TerrainMeshProvider(new RoadDistance(road));
   interface Bucket {
     chunks: Set<number>;
     minY: number;
@@ -122,7 +129,7 @@ export function overlapAt(seed: number, cameraS: number): OverlapReport {
   for (const b of buckets.values()) {
     if (b.chunks.size < 2) continue;
     report.sharedBuckets++;
-    const spread = b.maxY - b.minY;
+    const spread = crossChunkResidual(b.verts);
     if (spread <= SPREAD_LIMIT) continue;
     report.conflicts++;
     const dist = Math.hypot(b.x - centre.x, b.z - centre.z);
@@ -133,16 +140,20 @@ export function overlapAt(seed: number, cameraS: number): OverlapReport {
       report.worstDistFromCameraM = +dist.toFixed(0);
     }
   }
-
   // Worst offender in detail: which chunks, which heights, and how far each vertex
   // really is from the road. Brute-force nearest s, because Road.project's coarse
   // sweep is not trustworthy for a point half a kilometre off a wandering road.
   let worst: Bucket | null = null;
+  let worstResidual = 0;
   for (const b of buckets.values()) {
     if (b.chunks.size < 2) continue;
-    if (!worst || b.maxY - b.minY > worst.maxY - worst.minY) worst = b;
+    const residual = crossChunkResidual(b.verts);
+    if (!worst || residual > worstResidual) {
+      worst = b;
+      worstResidual = residual;
+    }
   }
-  if (worst && worst.maxY - worst.minY > SPREAD_LIMIT) {
+  if (worst && worstResidual > SPREAD_LIMIT) {
     const trueFrame = (x: number, z: number): { s: number; lateral: number } => {
       let bestS = 0;
       let bestD = Infinity;
@@ -165,6 +176,35 @@ export function overlapAt(seed: number, cameraS: number): OverlapReport {
     }
   }
   return report;
+}
+
+/**
+ * Worst genuine disagreement between two chunks over the same ground, metres.
+ *
+ * Not the bucket's vertical spread, which is what this measured first and which stopped
+ * meaning anything the moment the world's edge became a 34-degree bank: a single continuous
+ * surface at that gradient rises 17 m across a 25 m bucket, so every bucket on the berm
+ * reported a conflict and the number the tool exists to produce became noise. The berm
+ * buckets it flagged held vertices from two chunks agreeing to the decimetre at identical
+ * XZ — there was nothing wrong with them at all.
+ *
+ * So it compares vertices from DIFFERENT chunks pairwise and subtracts the height the
+ * surface is entitled to over the horizontal distance between them. What is left is the
+ * part no slope explains, which is the part that draws as a sheet in the sky.
+ */
+function crossChunkResidual(verts: readonly { c: number; x: number; y: number; z: number }[]): number {
+  let worst = 0;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i]!;
+    for (let j = i + 1; j < verts.length; j++) {
+      const b = verts[j]!;
+      if (a.c === b.c) continue;
+      const run = Math.hypot(a.x - b.x, a.z - b.z);
+      const residual = Math.abs(a.y - b.y) - run * SURFACE_SLOPE_ALLOWANCE;
+      if (residual > worst) worst = residual;
+    }
+  }
+  return worst;
 }
 
 for (const seed of [1337, 42, 7]) {

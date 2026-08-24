@@ -28,6 +28,46 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  */
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 
+/**
+ * View-distance tier. Three points on one axis: how far the desert is drawn
+ * before the fog dissolves it. None of it touches the simulation, so a save
+ * plays identically at any of them.
+ *
+ *  - `near`: 1.5 km, the authored horizon and the cheapest tier. It is what the
+ *    game already drew before the setting existed.
+ *  - `far`: 8 km, for a machine that can afford a deep horizon.
+ *  - `vast`: 25 km, deliberately extravagant. An immersive horizon is a thing a
+ *    player should be able to spend a machine on, and this is the top of that
+ *    ladder; it is the most expensive tier by a wide margin because the far
+ *    plane, and therefore the depth budget, must stretch to match.
+ *
+ * The fog scales below are why the tiers work at all (see
+ * VIEW_DISTANCE_FOG_SCALE): the fog is exponential and tuned so the world
+ * dissolves at ~1.5 km, so a wider draw distance without a matching thinning of
+ * the fog draws nothing new.
+ */
+export type ViewDistance = 'near' | 'far' | 'vast';
+
+/** Draw distance per tier, metres from the player. */
+export const VIEW_DISTANCE_METRES: Record<ViewDistance, number> = {
+  near: 1500,
+  far: 8000,
+  vast: 25000,
+};
+
+/**
+ * Fog-density multiplier per tier. The fog is `FogExp2` — exponential — and
+ * tuned so the world dissolves into the haze at ~1.5 km at density 1. A wider
+ * draw distance without a matching thinning of the fog draws desert the fog has
+ * already hidden, so each tier thins the fog to keep its horizon resolving
+ * rather than turning into a haze wall a little further away.
+ */
+export const VIEW_DISTANCE_FOG_SCALE: Record<ViewDistance, number> = {
+  near: 1,
+  far: 0.42,
+  vast: 0.16,
+};
+
 export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
@@ -52,6 +92,12 @@ export interface Settings {
    * here with the rest so it survives a reload like every other choice.
    */
   graphicsQuality: GraphicsQuality;
+  /**
+   * How far the desert is drawn. A machine preference like `graphicsQuality`,
+   * but stored here with the rest so it survives a reload like every other
+   * choice.
+   */
+  viewDistance: ViewDistance;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
@@ -87,6 +133,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // capable machine or leaves a weak one stuttering, and the pause menu is one
   // key away.
   graphicsQuality: 'standard',
+  // The authored horizon. Like `graphicsQuality`, nothing auto-detects the GPU;
+  // the pause menu is one key away and the near tier is the safe floor.
+  viewDistance: 'near',
 };
 
 /**
@@ -164,6 +213,10 @@ export function sanitizeSettings(raw: unknown): Settings {
       obj.graphicsQuality === 'acceptable' || obj.graphicsQuality === 'blessing'
         ? obj.graphicsQuality
         : 'standard',
+    // Anything unrecognised is near, so an old save (which has no such field)
+    // keeps the horizon it was made with.
+    viewDistance:
+      obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
   };
 
   const rawBindings = obj.keyBindings;
