@@ -1,10 +1,17 @@
 import { hash } from '../core/rng';
 import { newWorldState } from '../game/state';
-import type { CarState, PlayerState, WorldState } from '../game/state';
+import type {
+  CarState,
+  JobState,
+  PlayerState,
+  StickerState,
+  TrailerState,
+  WorldState,
+} from '../game/state';
 import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
-import { DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
+import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -276,10 +283,16 @@ export function migrateState(raw: unknown): WorldState {
   const carsRaw = recordField(obj.cars, 'cars');
   const loosePartsRaw = recordField(obj.looseParts, 'looseParts');
   const looseItemsRaw = recordField(obj.looseItems, 'looseItems');
+  const trailersRaw = recordField(obj.trailers, 'trailers');
 
   const seed = seedRaw >>> 0;
   const defaults = newWorldState(seed);
   const dp = defaults.player;
+
+  // A save written before the pack was persisted has no `carried`; an empty pack is
+  // the honest reading of that, and matches what those saves loaded as before.
+  const carriedRaw = Array.isArray(playerRaw.carried) ? playerRaw.carried : [];
+  const carried: Item[] = carriedRaw.map((value, i) => migrateItem(value, `carried slot ${i}`));
 
   const player: PlayerState = {
     x: numOr(playerRaw.x, dp.x),
@@ -289,11 +302,21 @@ export function migrateState(raw: unknown): WorldState {
     pitch: numOr(playerRaw.pitch, dp.pitch),
     s: numOr(playerRaw.s, dp.s),
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
+    carried,
+    carriedSelected: Math.min(
+      Math.max(0, Math.trunc(numOr(playerRaw.carriedSelected, 0))),
+      Math.max(0, carried.length - 1),
+    ),
   };
 
   const cars: Record<string, CarState> = {};
   for (const [id, value] of Object.entries(carsRaw)) {
     cars[id] = migrateCar(asRecord(value, `car "${id}"`));
+  }
+
+  const trailers: Record<string, TrailerState> = {};
+  for (const [id, value] of Object.entries(trailersRaw)) {
+    trailers[id] = migrateTrailer(asRecord(value, `trailer "${id}"`));
   }
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
@@ -316,10 +339,54 @@ export function migrateState(raw: unknown): WorldState {
     settings: sanitizeSettings(obj.settings),
     player,
     cars,
+    trailers,
     looseParts,
     looseItems,
     lootedPois: migrateNumberArray(obj.lootedPois),
-    consumedParts: migrateStringArray(obj.consumedParts),
+    // Absent in a save written before wrecks could be revived; an empty list is
+    // correct for those — nothing had been dug out yet.
+    revivedWrecks: migrateStringArray(obj.revivedWrecks),
+    job: migrateJob(obj.job),
+    stickersUnplaced: Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0))),
+    deliveredPois: migrateNumberArray(obj.deliveredPois),
+  };
+}
+
+/**
+ * The accepted haul. A job whose slots are not both finite integers is dropped:
+ * the cargo is already on the trailer either way, and a job pointing at nowhere
+ * would light no sign and never complete.
+ */
+function migrateJob(raw: unknown): JobState | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const fromPoi = numOr(obj.fromPoi, -1);
+  const toPoi = numOr(obj.toPoi, -1);
+  if (fromPoi < 0 || toPoi < 0) return null;
+  return {
+    fromPoi: Math.trunc(fromPoi),
+    toPoi: Math.trunc(toPoi),
+    cargoKg: Math.max(0, numOr(obj.cargoKg, 0)),
+  };
+}
+
+function migrateTrailer(raw: Record<string, unknown>): TrailerState {
+  if (typeof raw.id !== 'string') {
+    throw new Error('Save data is malformed: trailer is missing an id');
+  }
+  return {
+    id: raw.id,
+    // A dangling car id would leave a trailer coupled to nothing; the caller
+    // re-hitches from this field, and an unknown car simply leaves it standing.
+    hitchedTo: typeof raw.hitchedTo === 'string' ? raw.hitchedTo : null,
+    cargoKg: Math.max(0, numOr(raw.cargoKg, 0)),
+    x: numOr(raw.x, 0),
+    y: numOr(raw.y, 0),
+    z: numOr(raw.z, 0),
+    qx: numOr(raw.qx, 0),
+    qy: numOr(raw.qy, 0),
+    qz: numOr(raw.qz, 0),
+    qw: numOr(raw.qw, 1),
   };
 }
 
@@ -344,11 +411,55 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     }
   }
 
+  // Stickers are the car's whole history, so a malformed one is dropped rather than
+  // failing the load: losing a mark is bad, losing the save is worse.
+  const stickers: StickerState[] = [];
+  if (Array.isArray(raw.stickers)) {
+    for (const value of raw.stickers) {
+      if (typeof value !== 'object' || value === null) continue;
+      const s = value as Record<string, unknown>;
+      if (typeof s.kind !== 'string') continue;
+      stickers.push({
+        kind: s.kind,
+        x: numOr(s.x, 0),
+        y: numOr(s.y, 0),
+        z: numOr(s.z, 0),
+        nx: numOr(s.nx, 0),
+        ny: numOr(s.ny, 1),
+        nz: numOr(s.nz, 0),
+        roll: numOr(s.roll, 0),
+      });
+    }
+  }
+
+  // Reservoirs and boot cells are absent on every save written before fluids
+  // existed. Those cars load with EMPTY reservoirs on purpose rather than full:
+  // arriving at a mysteriously dry engine is a smaller surprise than the game
+  // silently gifting fluids it never tracked, and the first can fixes it.
+  const storageCells = hasCarModel(modelId) ? carModel(modelId).storageCells : 0;
+  const storage = new Array<Item | null>(storageCells).fill(null);
+  if (Array.isArray(raw.storage)) {
+    for (let i = 0; i < Math.min(raw.storage.length, storageCells); i++) {
+      const cell = raw.storage[i];
+      // A null cell is normal, not a fault; anything malformed is dropped.
+      if (cell === null || cell === undefined) continue;
+      try {
+        storage[i] = migrateItem(cell, `car "${raw.id}" boot cell ${i}`);
+      } catch {
+        storage[i] = null;
+      }
+    }
+  }
+
   return {
     id: raw.id,
     modelId,
     gizmos,
+    stickers,
     fuelLitres: numOr(raw.fuelLitres, 0),
+    coolantLitres: Math.max(0, numOr(raw.coolantLitres, 0)),
+    oilLitres: Math.max(0, numOr(raw.oilLitres, 0)),
+    storage,
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),
@@ -370,7 +481,6 @@ function migratePart(raw: unknown, where: string): PartInstance {
     variantId: obj.variantId,
     dirt: numOr(obj.dirt, 0),
     rust: numOr(obj.rust, 0),
-    wear: numOr(obj.wear, 0),
   };
 }
 
@@ -407,12 +517,21 @@ function migrateItem(raw: unknown, where: string): Item {
     }
     case 'part':
       return { type: 'part', id: obj.id, part: migratePart(obj.part, `item at ${where}`) };
-    case 'fuel_can': {
-      const fuel = obj.fuel;
-      if (fuel !== 'petrol' && fuel !== 'diesel') {
-        throw new Error(`Save data is malformed: item at ${where} has an invalid fuel`);
+    // `fuel_can` is the pre-fluids tag. Petrol and diesel were the only two kinds
+    // then, so an old can maps straight across and keeps its contents.
+    case 'fuel_can':
+    case 'fluid_can': {
+      const fluid = obj.type === 'fuel_can' ? obj.fuel : obj.fluid;
+      if (fluid !== 'petrol' && fluid !== 'diesel' && fluid !== 'coolant' && fluid !== 'oil') {
+        throw new Error(`Save data is malformed: item at ${where} has an invalid fluid`);
       }
-      return { type: 'fuel_can', id: obj.id, fuel, capacity: numOr(obj.capacity, 0), litres: numOr(obj.litres, 0) };
+      return {
+        type: 'fluid_can',
+        id: obj.id,
+        fluid,
+        capacity: numOr(obj.capacity, 0),
+        litres: numOr(obj.litres, 0),
+      };
     }
     case 'weapon': {
       const weapon = obj.weapon;

@@ -459,15 +459,16 @@ export function variantsOfKind(kind: PartKind, bodyClass?: BodyClass): PartVaria
 /**
  * A physical part in the world.
  *
- * `dirt`, `rust` and `wear` are all 0..1. Dirt and rust are cosmetic-plus-penalty
- * and can be cleaned; wear is permanent and only fixed by finding a better part.
+ * `dirt` and `rust` are both 0..1 and purely cosmetic: they drive the shading in
+ * `render/materials.ts` and nothing else. There is deliberately no permanent
+ * `wear` axis and no performance penalty — a part's condition is something you
+ * look at, never something you maintain. This game is a drive, not a workshop.
  */
 export interface PartInstance {
   readonly id: string;
   readonly variantId: string;
   dirt: number;
   rust: number;
-  wear: number;
 }
 
 /** Coarse dirt a brush can shift; below this only a sponge helps. */
@@ -511,10 +512,47 @@ export function applySponge(part: PartInstance, dt: number): boolean {
   return changed;
 }
 
-/** 0 = ruined, 1 = factory fresh. Drives both shading and performance penalties. */
-export function conditionScore(part: PartInstance): number {
-  return Math.max(0, 1 - (part.dirt * 0.25 + part.rust * 0.5 + part.wear * 0.35));
+/**
+ * Coolant and oil capacity for an engine, litres.
+ *
+ * Derived from cylinder count rather than authored per engine: a bigger engine
+ * holds more of both, and the relationship is close enough to linear that a table
+ * would only be six numbers restating this. Real four-cylinders of the era carry
+ * roughly 6-7 L of coolant and 4 L of oil, which is what these land on.
+ */
+export function coolantCapacity(engine: EngineSpec): number {
+  return 2.2 + engine.cylinders * 1.15;
 }
+
+export function oilCapacity(engine: EngineSpec): number {
+  return 1.4 + engine.cylinders * 0.65;
+}
+
+/**
+ * Litres per hour of engine running that each fluid seeps away.
+ *
+ * These are NOT realistic — a sound engine loses neither. They are tuned so that a
+ * full charge lasts roughly 150 km of cruising, which at 90 km/h is about an hour
+ * and a half of driving:
+ *
+ *   4-cyl   6.8 L coolant / 4.0 L oil  ->  ~144 km / ~171 km
+ *   6-cyl   9.1 L / 5.3 L              ->  ~193 km / ~227 km
+ *   V8     11.4 L / 6.6 L              ->  ~241 km / ~283 km
+ *
+ * Deliberately expressed as an ABSOLUTE distance rather than a fraction of
+ * ROAD_LENGTH. Tying it to the road's total length was the first attempt and it was
+ * wrong twice over: it made the rates silently depend on a constant that has
+ * nothing to do with engines, and it would rescale the whole mechanic if the road
+ * ever grew — a longer road should mean MORE stops, not rarer ones. 150 km is a
+ * number a player can hold in their head, and POIs sit every 1.2 km, so a top-up is
+ * always reachable without it becoming a chore.
+ *
+ * Capacity scales with cylinder count while the rate is flat, so a big engine is
+ * more self-sufficient between stops and pays for it at the fuel pump instead.
+ * That asymmetry is intentional.
+ */
+export const COOLANT_LOSS_LPH = 4.25;
+export const OIL_LOSS_LPH = 2.1;
 
 /**
  * What the physics and HUD need from a car. Every field is a property of the
@@ -526,8 +564,6 @@ export interface CarStats {
   readonly mass: number;
   readonly engine: EngineSpec;
   readonly gearbox: GearboxSpec;
-  /** Engine output multiplier. Kept for wear/tuning; 1 on a stock model. */
-  readonly engineEfficiency: number;
   readonly fuel: FuelType;
   readonly tankCapacity: number;
   readonly wheelCount: number;

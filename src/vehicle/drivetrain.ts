@@ -120,7 +120,6 @@ export class Drivetrain {
 
   private engine: EngineSpec | null = null;
   private gearbox: GearboxSpec | null = null;
-  private efficiency = 1;
 
   private gear = GEAR_NEUTRAL;
   private rpmValue = 0;
@@ -129,24 +128,18 @@ export class Drivetrain {
   /** Litres/second burned while idling in neutral. */
   private idleBurnLps = 0;
 
-  constructor(
-    engine: EngineSpec | null,
-    gearbox: GearboxSpec | null,
-    rearDriveBias: number,
-    efficiency: number,
-  ) {
+  constructor(engine: EngineSpec | null, gearbox: GearboxSpec | null, rearDriveBias: number) {
     this.rearDriveBias = rearDriveBias;
-    this.reconfigure(engine, gearbox, efficiency);
+    this.reconfigure(engine, gearbox);
   }
 
   /**
    * Swap the engine/gearbox in place so a part change does not allocate a new
    * object (and so the Vehicle can keep one drivetrain for its lifetime).
    */
-  reconfigure(engine: EngineSpec | null, gearbox: GearboxSpec | null, efficiency: number): void {
+  reconfigure(engine: EngineSpec | null, gearbox: GearboxSpec | null): void {
     this.engine = engine;
     this.gearbox = gearbox;
-    this.efficiency = efficiency;
 
     if (engine) {
       this.rpmValue = clamp(this.rpmValue, engine.idleRpm, engine.redlineRpm);
@@ -216,9 +209,9 @@ export class Drivetrain {
   }
 
   /**
-   * Normalised torque shape (already scaled by peak torque and efficiency):
-   * rises from idle to a peak, falls gently toward the redline, then cuts
-   * completely at the redline so the engine can never be fuelled past it.
+   * Normalised torque shape, scaled by peak torque: rises from idle to a peak,
+   * falls gently toward the redline, then cuts completely at the redline so the
+   * engine can never be fuelled past it.
    */
   torqueCurve(rpm: number): number {
     const e = this.engine;
@@ -235,7 +228,7 @@ export class Drivetrain {
       normalised = 1 - (1 - REDLINE_TORQUE_FRACTION) * t;
     }
 
-    return normalised * e.peakTorqueNm * this.efficiency;
+    return normalised * e.peakTorqueNm;
   }
 
   /**

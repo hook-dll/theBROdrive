@@ -12,7 +12,8 @@ import {
 } from '../game/settings';
 import type { Settings, TimeOfDayPreset } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
-import { SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
+import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
+import type { FluidKind } from '../items/items';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -54,6 +55,17 @@ const DRIVE_LAYOUTS: readonly { readonly id: DriveLayout; readonly label: string
   { id: 'FWD', label: 'FWD — front-wheel drive' },
   { id: 'RWD', label: 'RWD — rear-wheel drive' },
   { id: 'AWD', label: 'AWD — all-wheel drive' },
+];
+
+/**
+ * What the dev fluid dispenser offers. Capacities mirror `FLUID_STOCK` in
+ * world/poi.ts so a dev-spawned can behaves exactly like a found one.
+ */
+const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: number }[] = [
+  { fluid: 'petrol', capacity: 20 },
+  { fluid: 'diesel', capacity: 20 },
+  { fluid: 'coolant', capacity: 5 },
+  { fluid: 'oil', capacity: 5 },
 ];
 
 function driveLayout(rearDriveBias: number): DriveLayout {
@@ -99,8 +111,29 @@ export interface PauseHooks {
   applySettings: (next: Settings) => void;
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
-  /** Record a freshly assembled, fully fuelled car into the world. */
-  spawnVehicle: (request: SpawnRequest) => void;
+  /**
+   * Record a fully fuelled car into the world.
+   *
+   * Optional, and absent in a production build. Cars are meant to be found in the
+   * world and kept: stickers earned by hauling are permanent and do not follow the
+   * player to another vehicle, which is worth nothing if a fresh, full-tanked car
+   * is one keypress away. It survives as a development tool only — when the hook
+   * is absent the button and its whole screen are never built.
+   */
+  spawnVehicle?: (request: SpawnRequest) => void;
+  /**
+   * Drop a trailer into the world. Same dev-only reasoning as `spawnVehicle`: a
+   * trailer is meant to be found at a gas stop and left at the destination, and a
+   * free one on demand makes the whole hauling loop optional. Optional, and absent
+   * in a production build — when the hook is absent the button is never built.
+   */
+  spawnTrailer?: () => void;
+  /**
+   * Drops a full can of one fluid at the player's feet. Dev-only for the same
+   * reason as the others: found cans are the whole supply economy, and a dispenser
+   * would delete the reason to stop anywhere.
+   */
+  spawnFluid?: (fluid: FluidKind, capacity: number) => void;
   /**
    * The LIVE world state, for "Export Save Code".
    *
@@ -325,7 +358,7 @@ export class MainMenu {
         return null;
       };
 
-      type Screen = 'main' | 'settings' | 'spawn';
+      type Screen = 'main' | 'settings' | 'spawn' | 'fluid';
       let screen: Screen = 'main';
       /** Action id waiting for a key in capture mode; only set on settings. */
       let capturingActionId: string | null = null;
@@ -380,7 +413,8 @@ export class MainMenu {
         panel.classList.toggle('menu-panel-wide', next !== 'main');
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
-        else renderSpawn();
+        else if (next === 'fluid') renderFluid?.();
+        else renderSpawn?.();
       };
 
       const onKey = (ev: KeyboardEvent): void => {
@@ -445,15 +479,41 @@ export class MainMenu {
 
         const resumeBtn = button('menu-button menu-primary', 'Resume');
         const settingsBtn = button('menu-button', 'Settings');
-        const spawnBtn = button('menu-button', 'Spawn Vehicle');
         const saveBtn = button('menu-button', 'Save');
         const exportBtn = button('menu-button', 'Export Save Code');
         const quitBtn = button('menu-button', 'Quit');
-        panel.append(resumeBtn, settingsBtn, spawnBtn, saveBtn, exportBtn, quitBtn);
+        panel.append(resumeBtn, settingsBtn);
+        // Dev only, and labelled so a screenshot of it is never mistaken for the
+        // shipping menu. `import.meta.env.DEV` is tested first so the branch folds
+        // to a constant false in a production build and the label goes with it.
+        if (import.meta.env.DEV && hooks.spawnVehicle) {
+          const spawnBtn = button('menu-button', 'Spawn Vehicle (dev)');
+          spawnBtn.addEventListener('click', () => showScreen('spawn'));
+          panel.appendChild(spawnBtn);
+        }
+        // Same dev-only fold as the car spawn: there is exactly one trailer, so no
+        // picker screen — the button is the whole surface, and it only exists when
+        // the hook does.
+        if (import.meta.env.DEV && hooks.spawnTrailer) {
+          const trailerBtn = button('menu-button', 'Spawn Trailer (dev)');
+          trailerBtn.addEventListener('click', () => {
+            hooks.spawnTrailer?.();
+            finish('resume');
+          });
+          panel.appendChild(trailerBtn);
+        }
+        // Fluids get a picker because there are four of them and testing the pour
+        // mechanic means reaching for a specific one — a diesel can to prove a
+        // petrol engine refuses it, a coolant can to watch the warning lamp clear.
+        if (import.meta.env.DEV && hooks.spawnFluid) {
+          const fluidBtn = button('menu-button', 'Spawn Fluid (dev)');
+          fluidBtn.addEventListener('click', () => showScreen('fluid'));
+          panel.appendChild(fluidBtn);
+        }
+        panel.append(saveBtn, exportBtn, quitBtn);
 
         resumeBtn.addEventListener('click', () => finish('resume'));
         settingsBtn.addEventListener('click', () => showScreen('settings'));
-        spawnBtn.addEventListener('click', () => showScreen('spawn'));
         saveBtn.addEventListener('click', () => finish('save'));
         quitBtn.addEventListener('click', () => finish('quit'));
 
@@ -657,7 +717,12 @@ export class MainMenu {
       // Spawn selection resets per pause, so every visit starts at the first model.
       let spawnModelId = SPAWNABLE_CAR_MODELS[0].id;
 
-      const renderSpawn = (): void => {
+      // The screen itself is unconditional; only the reference below is gated, so
+      // the body keeps its indentation and `import.meta.env.DEV` still folds to a
+      // constant. In production `renderSpawn` is null, `renderSpawnScreen` becomes
+      // unreferenced, and the minifier drops the screen, its labels and
+      // `SPAWNABLE_CAR_MODELS` together.
+      const renderSpawnScreen = (): void => {
         panel.textContent = '';
 
         const backBtn = button('menu-button', 'Back');
@@ -688,9 +753,22 @@ export class MainMenu {
               const row = button('menu-body', '');
               const name = el('span', 'menu-body-label');
               name.textContent = def.label;
+              row.append(name);
+
+              // Fuel badge. Only diesels are marked: petrol is the default across
+              // the catalogue, so badging every petrol car would be twenty chips
+              // saying nothing. What matters is spotting the handful that will
+              // refuse a petrol can, before you drive one into the desert.
+              if (modelEngine(def).fuel === 'diesel') {
+                const fuel = el('span', 'menu-body-fuel');
+                fuel.textContent = 'D';
+                fuel.title = 'diesel';
+                row.append(fuel);
+              }
+
               const cls = el('span', 'menu-body-class');
               cls.textContent = def.bodyClass;
-              row.append(name, cls);
+              row.append(cls);
               if (def.id === spawnModelId) row.classList.add('is-selected');
               row.addEventListener('click', () => {
                 spawnModelId = def.id;
@@ -708,20 +786,78 @@ export class MainMenu {
         const spawnNote = el('div', 'menu-note');
         const paintNote = (): void => {
           const def = SPAWNABLE_CAR_MODELS.find((m) => m.id === spawnModelId);
-          spawnNote.textContent = def ? `${def.label} (${def.bodyClass})` : spawnModelId;
+          if (!def) {
+            spawnNote.textContent = spawnModelId;
+            return;
+          }
+          // The note spells the fuel out in full, since 'D' is only legible once
+          // you already know what it means.
+          const fuel = modelEngine(def).fuel;
+          spawnNote.textContent = `${def.label} (${def.bodyClass}, ${fuel})`;
         };
         paintNote();
         panel.appendChild(spawnNote);
 
         const confirmBtn = button('menu-button menu-primary', 'Spawn');
         confirmBtn.addEventListener('click', () => {
-          hooks.spawnVehicle({ modelId: spawnModelId });
+          hooks.spawnVehicle?.({ modelId: spawnModelId });
           finish('resume');
         });
         panel.appendChild(confirmBtn);
 
         backBtn.focus();
       };
+      const renderSpawn: (() => void) | null = import.meta.env.DEV ? renderSpawnScreen : null;
+
+      /**
+       * Dev fluid dispenser. One row per fluid, each spawning a FULL can at the
+       * player's feet, because the point is testing the pour and a part-full can
+       * just means pouring twice.
+       *
+       * Capacities mirror what a gas stop stocks (see FLUID_STOCK in world/poi.ts):
+       * fuel in 20 L jerrycans, engine fluids in 5 L bottles.
+       */
+      const renderFluidScreen = (): void => {
+        panel.textContent = '';
+
+        const backBtn = button('menu-button', 'Back');
+        backBtn.addEventListener('click', () => showScreen('main'));
+        panel.appendChild(backBtn);
+
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Spawn Fluid';
+        panel.appendChild(title);
+
+        const list = el('div', 'menu-body-list');
+        for (const spec of DEV_FLUIDS) {
+          const row = button('menu-body', '');
+          const name = el('span', 'menu-body-label');
+          name.textContent = spec.fluid;
+          row.append(name);
+          if (spec.fluid === 'diesel') {
+            const badge = el('span', 'menu-body-fuel');
+            badge.textContent = 'D';
+            badge.title = 'diesel';
+            row.append(badge);
+          }
+          const cap = el('span', 'menu-body-class');
+          cap.textContent = `${spec.capacity} L`;
+          row.append(cap);
+          row.addEventListener('click', () => {
+            hooks.spawnFluid?.(spec.fluid, spec.capacity);
+            finish('resume');
+          });
+          list.appendChild(row);
+        }
+        panel.appendChild(list);
+
+        const note = el('div', 'menu-note');
+        note.textContent = 'a full can drops at your feet';
+        panel.appendChild(note);
+
+        backBtn.focus();
+      };
+      const renderFluid: (() => void) | null = import.meta.env.DEV ? renderFluidScreen : null;
 
       showScreen('main');
     });

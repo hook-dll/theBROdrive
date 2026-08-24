@@ -5,12 +5,14 @@ import { PhysicsWorld } from './core/physics';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { TIME_OF_DAY_PRESETS } from './game/settings';
-import { spawnCarState } from './game/spawn';
-import { Inventory } from './items/items';
+import { spawnCarState, type SpawnRequest } from './game/spawn';
+import { Inventory, type FluidKind, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
+import { coolantCapacity, oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
 import { carModelMeasure, preloadCarModels } from './render/carmodel';
+import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { Player } from './player/player';
@@ -20,6 +22,8 @@ import { HeldItemView } from './render/held';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { AnchorGhosts } from './render/slotghosts';
+import { WheelSpray } from './render/wheelspray';
+import { createStickerMesh } from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
 import {
   HomesteadProvider,
@@ -28,14 +32,17 @@ import {
   scatterStartingGizmos,
 } from './world/house';
 import { PoiProvider } from './world/poi';
+import { FreightField } from './world/freight';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road } from './world/road';
 import { RoadMeshProvider } from './world/roadmesh';
 import { Terrain } from './world/terrain';
 import { TerrainMeshProvider } from './world/terrainmesh';
+import { WreckField } from './world/wrecks';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
+import { TrailerField, TRAILER_MODEL_FIT, TRAILER_SPAWN_HEIGHT } from './vehicle/trailer';
 import { Vehicle } from './vehicle/vehicle';
 import { GameAudio } from './audio/gameaudio';
 
@@ -84,6 +91,13 @@ const RESCUE_FALL_DEPTH = 6;
 const RESCUE_LIFT = 1.6;
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
+/**
+ * Slip-speed floor for spray strength, m/s. Mirrors the tyre model's
+ * SLIP_REFERENCE_MPS: a slip ratio is (ωr − v)/ref, so a wheel's surface speed
+ * ωr ≈ v + slip·ref. Without the floor a held burnout (wheels spinning, chassis
+ * still) reads zero speed and throws no tail.
+ */
+const SPRAY_REF_SPEED = 1.5;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -108,6 +122,9 @@ async function boot(): Promise<void> {
   // or the starting car. ~5 MB from the same origin; there is no later moment where
   // a half-loaded catalogue would be useful.
   await preloadCarModels();
+  // The trailer's GLB is fitted to the trailer's fixed physics before the first
+  // trailer can materialise (a POI or a loaded save), exactly like the cars.
+  await preloadTrailerModel(TRAILER_MODEL_FIT);
   const renderer = new Renderer(canvas);
   const input = new InputReader(canvas);
   input.setKeyBindings(world.state.settings.keyBindings);
@@ -120,11 +137,34 @@ async function boot(): Promise<void> {
   audio.applySettings(world.state.settings);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer);
   const inventory = new Inventory();
+  // The pack mirrors itself into state on every structural change, so a save taken
+  // at any moment carries what the player is holding. Registered before anything can
+  // put an item in it (the starting scatter and POI loot both run below).
+  inventory.setListener(() => {
+    // `selectedIndex` is -1 on an empty pack, a HUD convention; state stores a
+    // plain slot index, so it is floored here rather than at every reader.
+    world.apply({
+      t: 'inventory',
+      items: inventory.all,
+      selected: Math.max(0, inventory.selectedIndex),
+    });
+  });
   const loose = new LoosePartField(physics, world, renderer.scene);
+  // Cars are found, not spawned: the wreck-field registry is the supply, and it is
+  // created before any chunk builds so the first POI can register into it.
+  const wrecks = new WreckField(physics, world);
+  // Trailers are world objects like cars, not chunk scenery: they move, so they
+  // must outlive the chunk they were found standing in.
+  const trailerField = new TrailerField(physics, world, renderer.scene);
+  // Freight: a sign at every stop, pallets where the seed says there is a load.
+  const freight = new FreightField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   const anchorGhosts = new AnchorGhosts(renderer.scene);
+  // Sand/gravel spray lives for the session like the other view systems; its
+  // pool ages every frame and only the driven car flings into it.
+  const wheelSpray = new WheelSpray(renderer.scene);
 
   const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene);
   streamer.register(new RoadMeshProvider(world.seed));
@@ -133,7 +173,7 @@ async function boot(): Promise<void> {
   streamer.register(new ScatterProvider());
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose));
+  streamer.register(new PoiProvider(loose, wrecks, trailerField, freight));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -165,11 +205,29 @@ async function boot(): Promise<void> {
 
   if (loadedFromSave) {
     loose.restoreFromState();
+    // After `restoreFromState`, which rebuilds the world's loose items: a carried
+    // item is by definition absent from those maps, so the two cannot collide.
+    inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
   } else {
     scatterStartingGizmos(world, loose);
   }
 
   for (const car of Object.values(world.state.cars)) spawnVehicle(car);
+
+  // Saved stickers ride the car's own render group, so nothing but the group has to
+  // know they exist — including the interpolation the car already does.
+  for (const car of Object.values(world.state.cars)) {
+    const vehicle = vehicles.get(car.id);
+    if (!vehicle) continue;
+    for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
+  }
+
+  // Trailers after the cars, and only on a loaded save: a coupling needs the towing
+  // Vehicle to already exist, and a new game materialises its trailers from the POIs
+  // that generate them.
+  if (loadedFromSave) {
+    trailerField.restoreFromState((carId) => vehicles.get(carId) ?? null);
+  }
 
   /**
    * Nearest car to the player, or the one being driven. Returns the id alongside the
@@ -196,10 +254,42 @@ async function boot(): Promise<void> {
     return best;
   };
 
-  const activeVehicle = (): Vehicle | null => activeCar()?.vehicle ?? null;
-
-  const interaction = new Interaction(physics, world, inventory, loose, activeVehicle);
+  const interaction = new Interaction(
+    physics,
+    world,
+    inventory,
+    loose,
+    wrecks,
+    trailerField,
+    freight,
+    () => {
+      const active = activeCar();
+      return active ? { carId: active.id, vehicle: active.vehicle } : null;
+    },
+    (car) => {
+      spawnVehicle(car);
+      hud.setToast(`${carModel(car.modelId).label} — it runs. tank is dry.`);
+    },
+    (carId, sticker) => {
+      const vehicle = vehicles.get(carId);
+      if (vehicle) vehicle.root.add(createStickerMesh(sticker));
+    },
+  );
   interaction.attachPlayer(player);
+
+  // Freight has no HUD of its own — the job lives on a signpost and the payment on
+  // the bodywork — so the only feedback it needs is the moment each thing happens.
+  // Riding the delta stream keeps that out of the interaction code entirely.
+  world.onDelta((delta) => {
+    if (delta.t === 'job_accept') {
+      hud.setToast(`${delta.job.cargoKg} kg aboard — look for the lit sign`);
+    } else if (delta.t === 'job_complete') {
+      hud.setToast('delivered — one sticker earned');
+    } else if (delta.t === 'sticker_place') {
+      const left = world.state.stickersUnplaced;
+      hud.setToast(left > 0 ? `stuck on — ${left} left to place` : 'stuck on');
+    }
+  });
 
   const camera = new CameraRig(renderer.camera, physics);
   camera.setMode('foot');
@@ -213,7 +303,11 @@ async function boot(): Promise<void> {
       renderer,
       physics,
       interaction,
+      input,
       loose,
+      freight,
+      trailers: trailerField,
+      wrecks,
       road,
       terrain,
       player,
@@ -264,6 +358,8 @@ async function boot(): Promise<void> {
   let recordTimer = 0;
   let paused = false;
   let prompt: string | null = null;
+  /** Boot cells under the crosshair, or null. Set by the interaction tick. */
+  let boot: readonly (Item | null)[] | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = world.state.player.s;
 
@@ -300,6 +396,11 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.cycleDriving();
     } else {
       player.setEnabled(true);
+      // The pack's weight is a movement input like any other, so it is pushed every
+      // tick rather than on inventory change: `add`/`remove` are not the only things
+      // that move the number (a fuel can drains as it pours, ammo stacks shrink as
+      // they are fired), and there is no cheaper honest place to notice that.
+      player.setCarriedRatio(inventory.carriedMass / inventory.massLimit);
       player.fixedUpdate(dt, f, camera.yaw);
       if (f.cycleCamera) camera.setMode('foot');
     }
@@ -312,6 +413,10 @@ async function boot(): Promise<void> {
       if (id !== drivingId) vehicle.settle(dt);
     }
 
+    // Trailers get the same treatment for the same reason: their springs only exist
+    // inside `updateVehicle`, towed or standing.
+    trailerField.fixedUpdate(dt);
+
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
@@ -320,6 +425,7 @@ async function boot(): Promise<void> {
     // Latch the post-step transforms so the renderer can interpolate between the
     // last two steps instead of snapping to the newest one.
     for (const vehicle of vehicles.values()) vehicle.postStep();
+    trailerField.postStep();
     player.postStep();
 
     // Item selection: the number row wins over the cycle keys when both arrive in
@@ -341,6 +447,7 @@ async function boot(): Promise<void> {
       activeS,
     );
     prompt = interacted.prompt;
+    boot = interacted.boot;
     if (interacted.sound) audio.foley(interacted.sound);
     audio.setContinuous(interacted.continuous);
     // Footsteps come off the character controller's achieved speed, so they stop
@@ -422,6 +529,9 @@ async function boot(): Promise<void> {
     if (recordTimer >= RECORD_INTERVAL) {
       recordTimer = 0;
       if (activeS > s.recordS) world.apply({ t: 'record', s: activeS });
+      // Trailers have no delta of their own for motion — a towed one moves every
+      // tick — so their poses ride the same cadence as the record marker.
+      trailerField.pushTransforms();
     }
   };
 
@@ -436,6 +546,33 @@ async function boot(): Promise<void> {
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     loose.syncVisuals();
+    trailerField.syncVisuals(alpha);
+
+    // Sand and gravel spray from the driven car's wheels. The pool ages every
+    // frame (a tail left behind when the player steps out still settles); only
+    // the driven car flings new motes, and nothing is flung on sealed roads.
+    wheelSpray.update(frameDt);
+    if (driving) {
+      for (const ws of driving.wheelSpray) {
+        if (!ws.driven || ws.dust <= 0) continue;
+        const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
+        // A tyre flings at its surface speed, not the chassis'. Chassis speed
+        // reads zero during a held burnout (wheels spinning, car stationary), so
+        // floor it at the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
+        const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
+        const strength = ws.dust * slip * speed;
+        if (strength <= 0) continue;
+        wheelSpray.emit(
+          ws.contactX,
+          ws.contactY,
+          ws.contactZ,
+          ws.forwardX,
+          ws.forwardZ,
+          strength,
+          frameDt,
+        );
+      }
+    }
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);
@@ -506,13 +643,18 @@ async function boot(): Promise<void> {
 
     if (driving) {
       const stats = driving.stats;
+      const car = s.cars[drivingId!];
+      const coolantCap = coolantCapacity(stats.engine);
+      const oilCap = oilCapacity(stats.engine);
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,
         redlineRpm: stats.engine.redlineRpm,
         gearLabel: driving.gearLabel,
-        fuelLitres: s.cars[drivingId!]?.fuelLitres ?? 0,
+        fuelLitres: car?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
+        coolantFraction: coolantCap > 0 ? (car?.coolantLitres ?? 0) / coolantCap : 1,
+        oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         handbrake: lastInput.handbrake,
       });
@@ -527,6 +669,7 @@ async function boot(): Promise<void> {
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
+    hud.setBoot(boot);
     hud.setInventory(
       inventory.all,
       inventory.selectedIndex,
@@ -568,6 +711,111 @@ async function boot(): Promise<void> {
   loop.start();
 
   /**
+   * The dev spawn tool behind `PauseHooks.spawnVehicle`. Defined unconditionally so
+   * it typechecks in both builds; referenced only under `import.meta.env.DEV`, which
+   * is how the bundler drops it from a production build.
+   */
+  const devSpawnVehicle = (request: SpawnRequest): void => {
+    // Put the car on the ground ahead of the view, not at the player's feet: a
+    // chassis spawned inside the player (or inside the car being driven) would be
+    // resolved by the solver as an explosion.
+    const eye = camera.eyePosition;
+    const dir = camera.eyeDirection;
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
+    const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
+    const ground = physics.raycast(
+      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
+      { x: 0, y: -1, z: 0 },
+      SPAWN_PROBE_HEIGHT + 12,
+      player.rigidBody,
+    );
+    const groundY = ground ? ground.point.y : eye.y;
+    const measure = carModelMeasure(request.modelId);
+    // The measured distance from the chassis centre down to the model's own
+    // ground-level origin, plus a little slack, so the car settles onto its
+    // wheels instead of dropping through them.
+    const y = groundY + measure.spawnHeight + SPAWN_WHEEL_CLEARANCE;
+    const heading = Math.atan2(dir.x / flat, dir.z / flat);
+    const car = spawnCarState(world, request, dropX, y, dropZ, heading);
+    spawnVehicle(car);
+    hud.setToast(`spawned ${carModel(request.modelId).label}`);
+  };
+
+  /**
+   * The dev spawn tool behind `PauseHooks.spawnTrailer`. Mirrors `devSpawnVehicle`:
+   * dropped ahead of the view on a ground raycast, clear of the player and any car
+   * so the solver cannot resolve a trailer spawned inside a chassis as an explosion.
+   */
+  const devSpawnTrailer = (): void => {
+    const eye = camera.eyePosition;
+    const dir = camera.eyeDirection;
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
+    const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
+    const ground = physics.raycast(
+      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
+      { x: 0, y: -1, z: 0 },
+      SPAWN_PROBE_HEIGHT + 12,
+      player.rigidBody,
+    );
+    const groundY = ground ? ground.point.y : eye.y;
+    const y = groundY + TRAILER_SPAWN_HEIGHT + SPAWN_WHEEL_CLEARANCE;
+    const heading = Math.atan2(dir.x / flat, dir.z / flat);
+    const half = heading / 2;
+    trailerField.spawn({
+      id: world.runtimePartId(),
+      hitchedTo: null,
+      cargoKg: 0,
+      x: dropX,
+      y,
+      z: dropZ,
+      qx: 0,
+      qy: Math.sin(half),
+      qz: 0,
+      qw: Math.cos(half),
+    });
+    hud.setToast('spawned trailer');
+  };
+
+  /**
+   * The dev fluid dispenser behind `PauseHooks.spawnFluid`.
+   *
+   * Dropped just in front of the player rather than out on the ground raycast the
+   * vehicle spawns use: a can is a pickup, and the useful thing is to have it in
+   * reach immediately. It goes through `loose.spawnItem` like every found can, so
+   * it records into state and can be picked up, stowed and poured identically —
+   * a dev can with a private code path would test the wrong thing.
+   */
+  const devSpawnFluid = (fluid: FluidKind, capacity: number): void => {
+    const eye = camera.eyePosition;
+    const dir = camera.eyeDirection;
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const dropX = eye.x + (dir.x / flat) * 1.2;
+    const dropZ = eye.z + (dir.z / flat) * 1.2;
+    const ground = physics.raycast(
+      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
+      { x: 0, y: -1, z: 0 },
+      SPAWN_PROBE_HEIGHT + 12,
+      player.rigidBody,
+    );
+    const groundY = ground ? ground.point.y : eye.y;
+    loose.spawnItem(
+      {
+        type: 'fluid_can',
+        id: world.runtimePartId(),
+        fluid,
+        capacity,
+        litres: capacity,
+      },
+      dropX,
+      groundY + 0.3,
+      dropZ,
+    );
+    hud.setToast(`spawned ${capacity} L of ${fluid}`);
+  };
+
+  /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
    * rather than being held in the menu: the menu is a view, not an owner.
@@ -585,32 +833,18 @@ async function boot(): Promise<void> {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
     exportState: () => world.state,
-    spawnVehicle: (request) => {
-      // Put the car on the ground ahead of the view, not at the player's feet: a
-      // chassis spawned inside the player (or inside the car being driven) would be
-      // resolved by the solver as an explosion.
-      const eye = camera.eyePosition;
-      const dir = camera.eyeDirection;
-      const flat = Math.hypot(dir.x, dir.z) || 1;
-      const dropX = eye.x + (dir.x / flat) * SPAWN_AHEAD_DISTANCE;
-      const dropZ = eye.z + (dir.z / flat) * SPAWN_AHEAD_DISTANCE;
-      const ground = physics.raycast(
-        { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
-        { x: 0, y: -1, z: 0 },
-        SPAWN_PROBE_HEIGHT + 12,
-        player.rigidBody,
-      );
-      const groundY = ground ? ground.point.y : eye.y;
-      const measure = carModelMeasure(request.modelId);
-      // The measured distance from the chassis centre down to the model's own
-      // ground-level origin, plus a little slack, so the car settles onto its
-      // wheels instead of dropping through them.
-      const y = groundY + measure.spawnHeight + SPAWN_WHEEL_CLEARANCE;
-      const heading = Math.atan2(dir.x / flat, dir.z / flat);
-      const car = spawnCarState(world, request, dropX, y, dropZ, heading);
-      spawnVehicle(car);
-      hud.setToast(`spawned ${carModel(request.modelId).label}`);
-    },
+    // Dev only. Cars are meant to be found in the world and kept — sticker rewards
+    // are permanent and do not transfer between vehicles, which is worth nothing if
+    // a fully fuelled replacement is two clicks away. `import.meta.env.DEV` is a
+    // compile-time constant, so a production build drops the closure, the pause
+    // screen that calls it, and the touch CAR button together.
+    spawnVehicle: import.meta.env.DEV ? devSpawnVehicle : undefined,
+    // Same fold as the car spawn; the trailer button and its closure both vanish
+    // from a production build.
+    spawnTrailer: import.meta.env.DEV ? devSpawnTrailer : undefined,
+    // Same fold again: cans found in the desert are the whole supply economy, so a
+    // dispenser exists only while developing.
+    spawnFluid: import.meta.env.DEV ? devSpawnFluid : undefined,
   };
 
   /**
@@ -646,17 +880,21 @@ async function boot(): Promise<void> {
   });
 
   // Touch: the overlay builds itself on the first touch, so this costs a listener
-  // and nothing else on a desktop. The CAR button spawns another of whatever the
-  // player is in — a phone has no room for the pause menu's picker and "another one
-  // of these" is the useful default — but only if that model is on the player's
-  // list. Sitting in a dug-out PSX wreck must not turn the button into a wreck
-  // dispenser, so anything debris-only falls back to the default car.
+  // and nothing else on a desktop. The CAR button is the dev spawn tool's phone
+  // equivalent and disappears with it in a production build: it spawns another of
+  // whatever the player is in, since a phone has no room for the pause menu's
+  // picker and "another one of these" is the useful default — but only if that
+  // model is on the player's list. Sitting in a dug-out PSX wreck must not turn the
+  // button into a wreck dispenser, so anything debris-only falls back to the
+  // default car.
   const touch = new TouchControls(uiRoot, canvas, {
-    spawnVehicle: () => {
-      const active = activeCar()?.vehicle.modelDef;
-      const modelId = active?.spawnable ? active.id : DEFAULT_CAR_MODEL_ID;
-      pauseHooks.spawnVehicle({ modelId });
-    },
+    spawnVehicle: import.meta.env.DEV
+      ? () => {
+          const active = activeCar()?.vehicle.modelDef;
+          const modelId = active?.spawnable ? active.id : DEFAULT_CAR_MODEL_ID;
+          devSpawnVehicle({ modelId });
+        }
+      : undefined,
     pause: openPause,
   });
   input.attachTouch(touch);

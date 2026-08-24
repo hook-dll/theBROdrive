@@ -8,6 +8,8 @@
  */
 
 import { carModel } from '../vehicle/carmodels';
+import { coolantCapacity, oilCapacity, variant } from '../parts/registry';
+import type { Item } from '../items/items';
 import type { CarState, GameWorld } from './state';
 
 /** What the pause menu chose to spawn: a complete model catalogue id. */
@@ -28,6 +30,7 @@ export function spawnCarState(
   heading: number,
 ): CarState {
   const def = carModel(request.modelId);
+  const engine = variant(def.engineId).engine;
   const half = heading / 2;
   const car: CarState = {
     // Runtime ids come from the world's own counter, shared with runtime parts,
@@ -35,9 +38,15 @@ export function spawnCarState(
     id: world.runtimePartId(),
     modelId: request.modelId,
     gizmos: {},
+    stickers: [],
     // A complete model has no parts to age; fuel is its only fillable resource,
-    // so a spawn leaves the showroom with a full tank.
+    // so a spawn leaves the showroom with a full tank — and full of both the
+    // fluids it needs, because this is a dev tool and a dry one would just be a
+    // chore before every test.
     fuelLitres: def.tankLitres,
+    coolantLitres: engine ? coolantCapacity(engine) : 0,
+    oilLitres: engine ? oilCapacity(engine) : 0,
+    storage: new Array<Item | null>(def.storageCells).fill(null),
     odometer: 0,
     x,
     y,

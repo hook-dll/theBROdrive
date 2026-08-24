@@ -17,6 +17,13 @@ export interface DrivingReadout {
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
+  /**
+   * Coolant and oil as fractions of capacity. These have no dial: they sit still
+   * for tens of minutes and then matter suddenly, which is a warning lamp's job,
+   * not a gauge's.
+   */
+  coolantFraction: number;
+  oilFraction: number;
   /** Parking brake state. Keyboard and touch controls both latch it. */
   handbrake: boolean;
 }
@@ -38,6 +45,12 @@ const END_ANGLE = START_ANGLE + SWEEP_ANGLE; // 405 == 45, bottom-right
 const REDLINE_FRACTION = 0.85;
 /** Fuel fraction below which the analogue gauge reads as an alarm. */
 const FUEL_ALARM_FRACTION = 0.12;
+/**
+ * Coolant/oil fraction below which the warning lamp lights. Higher than the fuel
+ * alarm because these are not fixable at the roadside from a jerrycan you happen
+ * to be carrying — you want warning early enough to plan a stop around it.
+ */
+const FLUID_ALARM_FRACTION = 0.25;
 /** Analogue speedometer limit. Faster vehicles pin gracefully at the dial end. */
 const SPEEDOMETER_MAX_KMH = 160;
 /** Carried-mass fraction of the limit at which the readout turns alarming. */
@@ -80,6 +93,7 @@ export class Hud {
   private readonly tachNeedle: SVGLineElement;
   private readonly speedValue: SVGPathElement;
   private readonly speedNeedle: SVGLineElement;
+  private readonly bootEl: HTMLElement;
   private readonly gearEl: HTMLElement;
   private readonly fuelEl: SVGSVGElement;
   private readonly fuelValue: SVGPathElement;
@@ -92,6 +106,7 @@ export class Hud {
   private readonly odometerEl: HTMLElement;
   private readonly clockNeedle: SVGLineElement;
   private readonly toastEl: HTMLElement;
+  private bootSignature = '';
   private readonly radioEl: HTMLElement;
 
   private tachDeg = -1;
@@ -176,12 +191,20 @@ export class Hud {
     const controlsPanel = el('div', 'hud-controls-panel is-hidden');
     controlsPanel.id = 'hud-controls-panel';
     for (const text of [
-      'WASD / ARROWS — MOVE',
-      'C — VIEW · V — REVIEW',
-      'E — DO',
-      'O — TYRES',
-      'T — NTS RADIO',
+      'WASD / ARROWS — MOVE · STEER',
+      'SHIFT — SPRINT · SPACE — JUMP / HANDBRAKE',
+      'X / Z — SHIFT UP / DOWN',
+      'E — ENTER / EXIT CAR',
+      'F — PICK UP / MOUNT · Q — DROP',
+      'MOUSE1 — USE · MOUSE2 — AIM',
+      '[ / ] — CYCLE ITEM · 1-8 — SLOT',
+      'C — CAMERA · V — RECENTRE',
+      'L — HEADLIGHTS · O — TYRES',
+      'R — RADIO · T — STATION',
     ]) {
+      const line = el('div', 'hud-controls-line');
+      line.textContent = text;
+      controlsPanel.append(line);
     }
     controlsToggle.addEventListener('click', () => {
       const visible = controlsPanel.classList.contains('is-hidden');
@@ -191,12 +214,14 @@ export class Hud {
     });
 
     this.toastEl = el('div', 'hud-toasts');
+    this.bootEl = el('div', 'hud-boot is-hidden');
 
     this.tops = [
       this.crosshairEl,
       this.promptEl,
       this.drivingCluster,
       inventoryEl,
+      this.bootEl,
       controlsToggle,
       controlsPanel,
       this.radioEl,
@@ -324,6 +349,21 @@ export class Hud {
     );
     this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
 
+    // Warning lamps. Built as a single string and diff-guarded, because this is in
+    // the render path and the usual state of it is "unchanged for ten minutes".
+    const warnings: string[] = [];
+    if (readout.coolantFraction < FLUID_ALARM_FRACTION) {
+      warnings.push(readout.coolantFraction <= 0 ? 'NO COOLANT' : 'COOLANT LOW');
+    }
+    if (readout.oilFraction < FLUID_ALARM_FRACTION) {
+      warnings.push(readout.oilFraction <= 0 ? 'NO OIL' : 'OIL LOW');
+    }
+    const signature = warnings.join(' · ');
+    if (signature !== this.warningsSignature) {
+      this.warningsSignature = signature;
+      this.warningsEl.textContent = signature;
+      this.setVisible(this.warningsEl, signature.length > 0);
+    }
     this.setVisible(this.engineOffEl, !readout.engineRunning);
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
   }
@@ -385,6 +425,39 @@ export class Hud {
 
     this.setText(this.invMassEl, `${carriedMass.toFixed(1)} / ${massLimit.toFixed(0)} kg`);
     this.invMassEl.classList.toggle('is-alarm', carriedMass > massLimit * MASS_ALARM_FRACTION);
+  }
+
+  /**
+   * Boot contents while the player is looking into one, null otherwise.
+   *
+   * A flat list of cells, empty ones included, so the capacity is visible without a
+   * number: three boxes with one thing in them reads as "two spare" at a glance.
+   * Rebuilt only when the signature changes, since this sits in the render path and
+   * usually has nothing to say.
+   */
+  setBoot(cells: readonly (Item | null)[] | null): void {
+    if (cells === null) {
+      if (this.bootSignature !== '') {
+        this.bootSignature = '';
+        this.setVisible(this.bootEl, false);
+      }
+      return;
+    }
+    const signature = cells.map((cell) => (cell ? itemLabel(cell) : '')).join('|');
+    if (signature === this.bootSignature) return;
+    this.bootSignature = signature;
+
+    this.bootEl.textContent = '';
+    const title = el('div', 'hud-boot-title');
+    const used = cells.filter((cell) => cell !== null).length;
+    title.textContent = `BOOT ${used}/${cells.length}`;
+    this.bootEl.append(title);
+    for (const cell of cells) {
+      const node = el('div', cell ? 'hud-boot-cell' : 'hud-boot-cell is-empty');
+      node.textContent = cell ? itemLabel(cell) : '—';
+      this.bootEl.append(node);
+    }
+    this.setVisible(this.bootEl, true);
   }
 
   private rebuildInventory(items: readonly Item[]): void {

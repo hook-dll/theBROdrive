@@ -79,10 +79,21 @@ const SIGN_CENTRE_Y = 1.9; // sign centre height above the ground
 // Shared materials (never disposed; they live for the whole session)
 // ---------------------------------------------------------------------------
 
-const matCactus = new THREE.MeshStandardMaterial({ color: 0x5f7a4a, roughness: 0.95, metalness: 0 });
+// Desert palette. Two deliberate departures from the obvious choice:
+//
+//  - Boulders are sandstone, not the grey-brown of `SURFACES[Rock]`. Sharing the
+//    ground's albedo made every scattered rock read as a chip of the surface it
+//    happened to sit on — grey litter — instead of warm mass catching the same low
+//    sun as the dunes. It is intentionally warmer than gravel (0x7a6c56) and darker
+//    than sand (0xbf9f6b), so a boulder reads against both.
+//  - Only the saguaro is green, and barely: a desiccated sage rather than leaf. The
+//    barrel form gets its own dry khaki, because at 0.8-1.7 scale it is a low round
+//    blob, and in green it reads as a lawn shrub that wandered into the desert.
+const matCactus = new THREE.MeshStandardMaterial({ color: 0x6d7d5c, roughness: 0.95, metalness: 0 });
+const matScrub = new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 });
 const matDeadStick = new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 });
 const matRock = new THREE.MeshStandardMaterial({
-  color: SURFACES[SurfaceType.Rock].color,
+  color: 0x9a7550,
   roughness: 0.98,
   metalness: 0,
 });
@@ -118,8 +129,6 @@ const matChrome = new THREE.MeshStandardMaterial({
   emissive: 0x202020,
   emissiveIntensity: 0.6,
 });
-const matWhite = new THREE.MeshStandardMaterial({ color: 0xefe9dc, roughness: 0.5, metalness: 0.05 });
-const matGold = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 1.0 });
 const matSignPost = new THREE.MeshStandardMaterial({ color: 0x5a5a5e, roughness: 0.7, metalness: 0.4 });
 const matRust = new THREE.MeshStandardMaterial({ color: 0x6b4a32, roughness: 0.85, metalness: 0.25 });
 
@@ -212,7 +221,7 @@ function cactusForms(): PropForm[] {
   if (!_cactusForms) {
     _cactusForms = [
       { geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', rotate3d: false, minScale: 0.75, maxScale: 1.35 },
-      { geometry: buildBarrel(), material: matCactus, baseRadius: 0.34, height: 0.55, collider: 'none', rotate3d: false, minScale: 0.8, maxScale: 1.7 },
+      { geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'none', rotate3d: false, minScale: 0.8, maxScale: 1.7 },
       { geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'none', rotate3d: false, minScale: 0.7, maxScale: 1.5 },
     ];
   }
@@ -960,8 +969,6 @@ type Disposable = { dispose(): void };
 // Shared monument geometries (never disposed).
 const unitIcosaGeo = new THREE.IcosahedronGeometry(1, 1);
 const shrinePostGeo = new THREE.CylinderGeometry(0.12, 0.16, 1.5, 8, 1).translate(0, 0.75, 0);
-const obeliskGeo = new THREE.CylinderGeometry(0.14, 0.42, 3.0, 4, 1).translate(0, 1.5, 0);
-const topperGeo = new THREE.SphereGeometry(0.13, 10, 8);
 const wreckPostGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.6, 6, 1).translate(0, 0.8, 0);
 const ornamentGeos: readonly THREE.BufferGeometry[] = [
   new THREE.SphereGeometry(0.09, 10, 8),
@@ -1130,34 +1137,6 @@ function buildWrecked(b: MonumentBuild): void {
   }
 }
 
-function buildPersonalRecord(b: MonumentBuild): void {
-  const g = new THREE.Group();
-  g.position.set(b.x, b.y, b.z);
-
-  // White obelisk with a gold cap — the only monument about the player, so it
-  // reads as deliberately distinct from the weathered stone and rust everywhere.
-  g.add(new THREE.Mesh(obeliskGeo, matWhite));
-  const topper = new THREE.Mesh(topperGeo, matGold);
-  topper.position.y = 3.08;
-  g.add(topper);
-
-  const tex = makeSignTexture(b.m.text, 512, 160, '#efe9dc', '#3a2e24');
-  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.05 });
-  b.disposables.push(tex, mat);
-  const plaqueGeo = new THREE.PlaneGeometry(0.72, 0.24);
-  b.disposables.push(plaqueGeo);
-  const plaque = new THREE.Mesh(plaqueGeo, mat);
-  plaque.position.y = 1.15;
-  plaque.rotation.y = b.heading + Math.PI;
-  g.add(plaque);
-
-  b.group.add(g);
-
-  if (b.ctx.hasPhysics) {
-    addStatic(b.ctx, b.bodies, b.colliders, b.x, b.y + 1.5, b.z, RAPIER.ColliderDesc.cuboid(0.4, 1.5, 0.4), SurfaceType.Concrete);
-  }
-}
-
 export class MonumentProvider implements ChunkProvider {
   readonly id = 'monuments';
 
@@ -1168,13 +1147,10 @@ export class MonumentProvider implements ChunkProvider {
     const disposables: Disposable[] = [];
 
     // Personal-record markers were a tall white obelisk with an inset plaque. They
-    // clutter a resumed save exactly where the player stopped, so record distance
-    // remains state-only and no longer creates a world monument.
-    const monuments = monumentsBetween(
-      ctx.world.seed,
-      ctx.sStart,
-      ctx.sEnd,
-    );
+    // cluttered a resumed save exactly where the player stopped, so the builder and
+    // the monument kind are both gone: distance reached is recorded on the car, in
+    // stickers earned by hauling.
+    const monuments = monumentsBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
 
     for (const m of monuments) {
       // Round monuments sit exactly on 20 km boundaries, which are also chunk
@@ -1198,9 +1174,6 @@ export class MonumentProvider implements ChunkProvider {
           break;
         case 'wrecked_marker':
           buildWrecked(b);
-          break;
-        case 'personal_record':
-          buildPersonalRecord(b);
           break;
       }
     }
