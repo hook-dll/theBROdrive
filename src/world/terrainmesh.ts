@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { NODE_SPACING, type Road } from './road';
-import { CORRIDOR_INNER, RIM_START, type Terrain } from './terrain';
+import { RoadDistance } from './roaddistance';
+import { BERM_CREST, BERM_FADE, BERM_START, CORRIDOR_INNER, type Terrain } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
 
 /**
@@ -27,15 +28,16 @@ import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider 
  */
 
 /**
- * How far out the visible desert reaches, each side of the road. Chosen against the
- * fog: with the off-road haze ramp (main.ts) nothing beyond this resolves, so
- * drawing further only costs triangles on a weak GPU.
+ * How far out this mesh reaches, each side of the road. Chosen against the fog: at the
+ * default view distance nothing beyond it resolves, so drawing further only costs
+ * triangles on a weak GPU. Exported because the vista starts where this stops, and
+ * because a view distance no larger than this needs no vista at all.
  */
-const FAR_LATERAL = 1500;
+export const NEAR_TERRAIN_REACH = 1500;
 /**
- * How far out the ground is solid, each side of the road. The relief turns
- * genuinely impassable before this, so the edge is reached by choice, not by
- * surprise — and `main.ts` catches anything that gets past it anyway.
+ * How far out the ground is solid, each side of the road. The berm turns genuinely
+ * unclimbable before this, so the edge is reached by choice, not by surprise — and
+ * `main.ts` catches anything that gets past it anyway.
  */
 const PHYSICS_LATERAL = 600;
 /** Lateral spacing growth factor; resolution falls off away from the road. */
@@ -63,20 +65,24 @@ const ROAD_SEAM_DROP = 0.015;
 export const TERRAIN_COLLIDER_SURFACE = SurfaceType.Sand;
 
 /**
- * Maximum lateral ring spacing across the rim. Small enough that the escarpment is
- * drawn as a slope rather than a fold: the face climbs its full height over a few
- * hundred metres, and at the unconstrained geometric spacing out there it would be
- * two facets wide.
+ * Ring spacing across the berm's face, metres. It climbs its 22 m over 70 m of lateral
+ * distance, so this puts three rings on the face; at the unconstrained geometric spacing
+ * out there the whole thing would be one facet and a 31-degree wall would draw as a
+ * gentle ramp.
  */
-const RIM_RING_SPACING = 60;
+const BERM_RING_SPACING = 24;
 /**
- * Ring spacing from the end of the solid band out to the draw distance. Coarser
- * than the face — nothing beyond is drivable and the fog is eating it — but capped
- * all the same, because the ridge crest and its far slope live out here and the
- * geometric progression alone would step straight over them, which is exactly how
- * a ridge turns into one enormous flat facet across the sky.
+ * Ring spacing across the berm's back, out to where it has faded away. Coarser than the
+ * face — nothing past the crest is drivable — but still capped, because the fade is the
+ * part that has to read as the back of a bank rather than as a step.
  */
-const RIM_FAR_RING_SPACING = 150;
+const BERM_BACK_RING_SPACING = 90;
+/**
+ * Ring spacing from there out to this mesh's own draw distance. Everything past
+ * FAR_LATERAL belongs to the vista (render/vista.ts), which has its own, much coarser,
+ * rings.
+ */
+const OUTER_RING_SPACING = 150;
 
 /**
  * Fold guard for road-relative terrain.
@@ -109,21 +115,20 @@ const FOLD_MAX_EDGE_RATIO = 18;
  * the height field simply was not a function of position.
  *
  * It is one now. `Terrain.openHeight` is the landscape field plus dune relief plus
- * the rim, and only the rim needs anything road-relative at all: the distance to the
- * nearest branch. So what this provider still owes the desert is much smaller than
- * it was — a distance, not an elevation — and the two-branch height blend that used
- * to ramp between two passes' altitudes is gone with the altitudes.
+ * the world's edge, and only that edge needs anything road-relative at all: the
+ * distance to the nearest branch. So what this provider still owes the desert is much
+ * smaller than it was — a distance, not an elevation — and the two-branch height blend
+ * that used to ramp between two passes' altitudes is gone with the altitudes. The
+ * distance itself now lives in `RoadDistance`, shared with the vista mesh, because the
+ * two must agree about it or the horizon has a seam in it.
  *
  * Two rules remain, and both are needed:
  *
- *  1. GLOBAL SEARCH, ABSOLUTE LATTICE. The nearest branch is looked for over the
- *     WHOLE road, and the result is interpolated on an absolute 50 m world lattice
- *     cached on the provider. Both properties are load-bearing: a per-chunk window
- *     gave each chunk a different "nearest" for the same ground (the branch nearest
- *     a patch of desert is routinely kilometres away in arclength), and a per-chunk
- *     lattice let two chunks round the same point differently. Distance is
- *     1-Lipschitz and the rim is flat below 400 m, so interpolating it is safe where
- *     interpolating an elevation was not.
+ *  1. GLOBAL SEARCH, ABSOLUTE LATTICE. Both properties live in `RoadDistance` and both
+ *     are load-bearing: a per-chunk window gave each chunk a different "nearest" for
+ *     the same ground (the branch nearest a patch of desert is routinely kilometres
+ *     away in arclength), and a per-chunk lattice let two chunks round the same point
+ *     differently.
  *  2. BOUNDED OWNERSHIP. A cell yields to a chunk within OWN_YIELD_CHUNKS that is
  *     genuinely nearer, so coincident sheets are not drawn twice — but never to one
  *     further away than that, because the streamer's window would not contain it and
@@ -133,33 +138,25 @@ const FOLD_MAX_EDGE_RATIO = 18;
  * The near-road frame path is kept and cross-faded into the world path over
  * WORLD_HEIGHT_START..FULL. Inside the corridor the shoulder vertex MUST equal the
  * road ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m
- * the two paths are the same arithmetic (the rim is zero that close in), so the fade
+ * the two paths are the same arithmetic (the berm is zero that close in), so the fade
  * is between values that agree, and it stays as the guarantee that they must.
  */
 /** Lateral offset where height starts blending from frame-derived to position-derived. */
 const WORLD_HEIGHT_START = 30;
 /** Lateral offset past which height is purely a function of world position. */
 const WORLD_HEIGHT_FULL = 60;
-/** Spacing of the fine centreline lattice, metres: the distance field's resolution. */
-const OWN_SAMPLE_STEP = 20;
-/** Spacing of the whole-road coarse index, metres. */
-const COARSE_STEP = 200;
-/** Coarse samples per bounding circle, for pruning the global search. */
-const COARSE_SEGMENT = 16;
-/** Cached fine samples before the cache is dropped (values are position-pure). */
-const FINE_CACHE_LIMIT = 40_000;
-/** Cached distance nodes before the cache is dropped. */
-const DIST_CACHE_LIMIT = 200_000;
-/** Lattice-index packing for the distance cache keys. */
-const NODE_BIAS = 4_194_304;
-const NODE_STRIDE = 8_388_608;
 /**
- * Spacing of the absolute world lattice the nearest-branch distance is interpolated
- * on, metres. Small enough that the rim's own curvature is captured (its steep face
- * turns over ~130 m), large enough that a chunk's 3 km fan costs a few hundred
- * searches.
+ * Spacing of the absolute world lattice this provider reads the nearest-branch distance
+ * on, metres. Small enough that the berm's own rise is captured (140 m of lateral
+ * distance), large enough that a chunk's 3 km fan costs a few hundred searches. The
+ * vista asks the same field for a much coarser one.
  */
-const DIST_NODE = 50;
+const DIST_LATTICE = 50;
+/**
+ * Slack in the ownership test, metres. Sized against the lattice the owner comes from,
+ * for the reason the OWN_TOLERANCE comment below gives.
+ */
+const OWN_SAMPLE_STEP = 20;
 /**
  * How many chunks away, in arclength, a cell may yield ownership to. Small, because
  * the streamer only keeps a window of chunks around the camera: yielding outside
@@ -186,9 +183,15 @@ const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
   [SurfaceType.Concrete]: new THREE.Color(SURFACES[SurfaceType.Concrete].color),
 };
 
-// Keep comic contours and stipple, but leave diffuse light and shadow colour
-// untouched so the desert responds to lamps and moonlight exactly like the road.
-const terrainMaterial = applyComicShading(
+/**
+ * Keep comic contours and stipple, but leave diffuse light and shadow colour untouched so
+ * the desert responds to lamps and moonlight exactly like the road.
+ *
+ * Exported because the vista mesh draws the same ground and must therefore be the same
+ * material: a second one, however carefully matched, drifts the moment either is tuned,
+ * and the seam between near desert and far desert is the one place a mismatch is obvious.
+ */
+export const TERRAIN_MATERIAL = applyComicShading(
   new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.93,
@@ -222,198 +225,20 @@ interface BuiltTerrain {
 export class TerrainMeshProvider implements ChunkProvider {
   readonly id = 'terrain';
 
-  // --- nearest-branch machinery, shared by every chunk this provider builds -----
-  //
-  // All of it is keyed on ABSOLUTE arclength or ABSOLUTE world lattice indices and
-  // searched over the WHOLE road, never over a window around the chunk being built.
-  // That is the load-bearing property: the answer for a given piece of ground must
-  // not depend on which chunk happens to be asking, or the two answers differ and
-  // one of them draws as a sheet in the sky.
-  /** Coarse index of the entire road: one sample every COARSE_STEP metres. */
-  private coarseS: Float64Array | null = null;
-  private coarseX = new Float64Array(0);
-  private coarseZ = new Float64Array(0);
-  /** Bounding circles over runs of COARSE_SEGMENT coarse samples, for pruning. */
-  private coarseSegX = new Float64Array(0);
-  private coarseSegZ = new Float64Array(0);
-  private coarseSegR = new Float64Array(0);
-  /** Fine centreline samples at absolute multiples of OWN_SAMPLE_STEP, cached. */
-  private readonly fine = new Map<number, { x: number; z: number }>();
-  /** Nearest-branch distance at each lattice node, and the branch owning it. */
-  private readonly dists = new Map<number, number>();
-  private readonly owners = new Map<number, number>();
-  /** Scratch for the nearest-branch result; the builders are allocation-free. */
-  private readonly near = { best: 0, bestDist: 0 };
-
   /**
-   * Indexes the whole road once, coarsely.
-   *
-   * 2001 samples over 400 km, measured at 30 ms including the road's own node
-   * integration, paid once when the first chunk is built. The alternative — a window
-   * of road around each chunk — is what made distant chunks disagree: the branch
-   * nearest a patch of desert is often kilometres away in arclength, so a windowed
-   * search gives each chunk a different "nearest" and therefore a different height.
+   * The shared nearest-road-distance field. Injected rather than owned, because the
+   * vista mesh reads the same one: two independent copies would index the road twice
+   * and, worse, could round the same ground differently.
    */
-  private ensureCoarse(road: Road): void {
-    if (this.coarseS) return;
-    const count = Math.floor(road.length / COARSE_STEP) + 1;
-    const s = new Float64Array(count);
-    const x = new Float64Array(count);
-    const z = new Float64Array(count);
-    for (let k = 0; k < count; k++) {
-      const sk = k * COARSE_STEP;
-      const c = road.sampleAt(sk);
-      s[k] = sk;
-      x[k] = c.x;
-      z[k] = c.z;
-    }
-    const segs = Math.ceil(count / COARSE_SEGMENT);
-    const segX = new Float64Array(segs);
-    const segZ = new Float64Array(segs);
-    const segR = new Float64Array(segs);
-    for (let g = 0; g < segs; g++) {
-      const from = g * COARSE_SEGMENT;
-      const to = Math.min(count, from + COARSE_SEGMENT);
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let k = from; k < to; k++) {
-        minX = Math.min(minX, x[k]!);
-        maxX = Math.max(maxX, x[k]!);
-        minZ = Math.min(minZ, z[k]!);
-        maxZ = Math.max(maxZ, z[k]!);
-      }
-      segX[g] = (minX + maxX) * 0.5;
-      segZ[g] = (minZ + maxZ) * 0.5;
-      segR[g] = Math.hypot(maxX - minX, maxZ - minZ) * 0.5;
-    }
-    this.coarseS = s;
-    this.coarseX = x;
-    this.coarseZ = z;
-    this.coarseSegX = segX;
-    this.coarseSegZ = segZ;
-    this.coarseSegR = segR;
-  }
-
-  /** A fine centreline sample at `index * OWN_SAMPLE_STEP`, cached across chunks. */
-  private fineSample(road: Road, index: number): { x: number; z: number } {
-    const hit = this.fine.get(index);
-    if (hit) return hit;
-    const s = Math.min(Math.max(index * OWN_SAMPLE_STEP, 0), road.length);
-    const c = road.sampleAt(s);
-    const sample = { x: c.x, z: c.z };
-    if (this.fine.size > FINE_CACHE_LIMIT) this.fine.clear();
-    this.fine.set(index, sample);
-    return sample;
-  }
-
-  /**
-   * The road branch nearest a world XZ, written into `this.near` as a fine-sample
-   * index and a distance.
-   *
-   * Coarse pass over the whole road with circle pruning, then a fine pass over the
-   * 20 m samples around the coarse winner. There used to be a second pass looking for
-   * the nearest OTHER branch, because two passes of the road claimed the desert
-   * between them at two different elevations and the nearer one alone left a cliff.
-   * Elevation no longer comes from the road, so the second branch has nothing left to
-   * say: the ground between two passes is simply the landscape between them.
-   */
-  private nearestBranch(road: Road, x: number, z: number): void {
-    this.ensureCoarse(road);
-    const cs = this.coarseS!;
-    const segs = this.coarseSegR.length;
-
-    let bestK = 0;
-    let bestD = Infinity;
-    for (let g = 0; g < segs; g++) {
-      const bound = Math.hypot(this.coarseSegX[g]! - x, this.coarseSegZ[g]! - z) - this.coarseSegR[g]!;
-      if (bound > 0 && bound * bound >= bestD) continue;
-      const from = g * COARSE_SEGMENT;
-      const to = Math.min(cs.length, from + COARSE_SEGMENT);
-      for (let k = from; k < to; k++) {
-        const dx = this.coarseX[k]! - x;
-        const dz = this.coarseZ[k]! - z;
-        const d = dx * dx + dz * dz;
-        if (d < bestD) {
-          bestD = d;
-          bestK = k;
-        }
-      }
-    }
-
-    this.near.best = this.refine(road, x, z, cs[bestK]!);
-    const bestSample = this.fineSample(road, this.near.best);
-    this.near.bestDist = Math.hypot(bestSample.x - x, bestSample.z - z);
-  }
-
-  /** Nearest fine-sample index within one coarse step of `aroundS`. */
-  private refine(road: Road, x: number, z: number, aroundS: number): number {
-    const span = Math.ceil(COARSE_STEP / OWN_SAMPLE_STEP);
-    const centre = Math.round(aroundS / OWN_SAMPLE_STEP);
-    let bestIndex = centre;
-    let bestD = Infinity;
-    for (let i = centre - span; i <= centre + span; i++) {
-      const sample = this.fineSample(road, i);
-      const dx = sample.x - x;
-      const dz = sample.z - z;
-      const d = dx * dx + dz * dz;
-      if (d < bestD) {
-        bestD = d;
-        bestIndex = i;
-      }
-    }
-    return bestIndex;
-  }
-
-  /**
-   * The interpolation node at absolute lattice indices (ix, iz): the distance to the
-   * nearest road branch, and which branch that is. Cached, so a node shared by
-   * several chunks is computed once and — the point of all this — has one value.
-   */
-  private distNode(road: Road, ix: number, iz: number): number {
-    const key = (ix + NODE_BIAS) * NODE_STRIDE + (iz + NODE_BIAS);
-    const hit = this.dists.get(key);
-    if (hit !== undefined) return hit;
-
-    this.nearestBranch(road, ix * DIST_NODE, iz * DIST_NODE);
-    if (this.dists.size > DIST_CACHE_LIMIT) {
-      // Values are a pure function of position, so dropping them is free: anything
-      // needed again is recomputed identically.
-      this.dists.clear();
-      this.owners.clear();
-    }
-    this.dists.set(key, this.near.bestDist);
-    this.owners.set(key, this.near.best * OWN_SAMPLE_STEP);
-    return this.near.bestDist;
-  }
+  constructor(private readonly roadDistance: RoadDistance) {}
 
   /**
    * Desert height at a world position: `Terrain.openHeight` with the nearest-branch
    * distance interpolated off the lattice. A pure function of x and z, which is what
    * makes every chunk agree.
    */
-  private worldHeight(road: Road, terrain: Terrain, x: number, z: number): number {
-    const fx = x / DIST_NODE;
-    const fz = z / DIST_NODE;
-    const ix = Math.floor(fx);
-    const iz = Math.floor(fz);
-    const tx = fx - ix;
-    const tz = fz - iz;
-    const a = this.distNode(road, ix, iz);
-    const b = this.distNode(road, ix + 1, iz);
-    const c = this.distNode(road, ix, iz + 1);
-    const d = this.distNode(road, ix + 1, iz + 1);
-    const dist = a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
-    return terrain.openHeight(x, z, dist);
-  }
-
-  /** Arclength of the road branch owning the ground at a point. */
-  private ownerAt(road: Road, x: number, z: number): number {
-    const ix = Math.round(x / DIST_NODE);
-    const iz = Math.round(z / DIST_NODE);
-    this.distNode(road, ix, iz);
-    return this.owners.get((ix + NODE_BIAS) * NODE_STRIDE + (iz + NODE_BIAS)) ?? 0;
+  private worldHeight(terrain: Terrain, x: number, z: number): number {
+    return terrain.openHeight(x, z, this.roadDistance.distAt(x, z, DIST_LATTICE));
   }
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -473,19 +298,26 @@ export class TerrainMeshProvider implements ChunkProvider {
     // facets wide and read as a folded sheet.
     const magnitudes: number[] = [TERRAIN_INNER];
     let m = CORRIDOR_INNER;
-    while (m < FAR_LATERAL) {
+    while (m < NEAR_TERRAIN_REACH) {
       const geometric = m * LATERAL_RATIO - m;
+      // Three caps, because the berm has three parts: an unclimbable face that must be
+      // resolved, a back slope that must not step, and open ground past it that the vista
+      // takes over.
       const cap =
-        m >= RIM_START - RIM_RING_SPACING && m < PHYSICS_LATERAL
-          ? RIM_RING_SPACING
-          : RIM_FAR_RING_SPACING;
+        m >= BERM_START - BERM_RING_SPACING && m < BERM_CREST
+          ? BERM_RING_SPACING
+          : m < BERM_FADE
+            ? BERM_BACK_RING_SPACING
+            : OUTER_RING_SPACING;
       const step = Math.min(geometric, cap);
-      const next = Math.min(m + step, FAR_LATERAL);
+      const next = Math.min(m + step, NEAR_TERRAIN_REACH);
       m = m < PHYSICS_LATERAL && next > PHYSICS_LATERAL ? PHYSICS_LATERAL : next;
       if (m - magnitudes[magnitudes.length - 1]! < 1) break;
       magnitudes.push(m);
     }
-    if (magnitudes[magnitudes.length - 1]! < FAR_LATERAL) magnitudes.push(FAR_LATERAL);
+    if (magnitudes[magnitudes.length - 1]! < NEAR_TERRAIN_REACH) {
+      magnitudes.push(NEAR_TERRAIN_REACH);
+    }
 
     const laterals: number[] = [];
     for (let i = magnitudes.length - 1; i >= 0; i--) laterals.push(-magnitudes[i]!);
@@ -521,10 +353,10 @@ export class TerrainMeshProvider implements ChunkProvider {
         if (frameWeight >= 1) {
           y = terrain.heightFromFrame(point.x, point.z, lateral, s);
         } else if (frameWeight <= 0) {
-          y = this.worldHeight(road, terrain, point.x, point.z);
+          y = this.worldHeight(terrain, point.x, point.z);
         } else {
           const frameY = terrain.heightFromFrame(point.x, point.z, lateral, s);
-          const world = this.worldHeight(road, terrain, point.x, point.z);
+          const world = this.worldHeight(terrain, point.x, point.z);
           y = world + (frameY - world) * frameWeight;
         }
         if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
@@ -579,7 +411,7 @@ export class TerrainMeshProvider implements ChunkProvider {
       const d = xz(row1 + li + 1);
       const cx = (a[0] + b[0] + c[0] + d[0]) * 0.25;
       const cz = (a[1] + b[1] + c[1] + d[1]) * 0.25;
-      const owner = this.ownerAt(road, cx, cz);
+      const owner = this.roadDistance.ownerAt(cx, cz, DIST_LATTICE);
       if (owner >= sStart && owner < sEnd) return true;
       // Yield ONLY to a neighbour that is certain to be loaded whenever this chunk
       // is. Yielding to a chunk kilometres away in arclength leaves a hole instead of
@@ -587,7 +419,7 @@ export class TerrainMeshProvider implements ChunkProvider {
       // where the road doubles back the true owner is often outside it. A hole reads
       // as a pale wedge with sky behind it — the same class of artefact by the
       // opposite mistake. Anything further away is simply drawn twice, at the same
-      // height, because the anchor lattice is absolute.
+      // height, because the distance lattice is absolute.
       const ownerChunk = Math.floor(owner / CHUNK_LENGTH);
       const thisChunk = Math.floor(sStart / CHUNK_LENGTH);
       if (Math.abs(ownerChunk - thisChunk) > OWN_YIELD_CHUNKS) return true;
@@ -659,7 +491,7 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.computeVertexNormals();
 
     return {
-      group: new THREE.Group().add(new THREE.Mesh(geometry, terrainMaterial)),
+      group: new THREE.Group().add(new THREE.Mesh(geometry, TERRAIN_MATERIAL)),
       geometry,
       positions,
       laterals,

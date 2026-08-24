@@ -163,15 +163,58 @@ export const MAX_SLOPE =
 /** Total half-range of the field, metres: no ground is further than this from datum. */
 export const MAX_RELIEF = BANDS.reduce((sum, b) => sum + b.amplitude, 0);
 
+/**
+ * The mountains, which are NOT part of `heightAt` and are the reason the horizon has
+ * anything on it.
+ *
+ * The bands above are sized so a car can drive anywhere in them, which caps them at
+ * around 140 m of half-range. That is the right answer for ground you drive on and the
+ * wrong one for ground you look at: 140 m at 20 km subtends a fifth of a degree, so a
+ * desert built only from them has a horizon that is a straight line however far you can
+ * see. What makes a vista is landforms measured in thousands of metres.
+ *
+ * So they live in their own field, and `Terrain` only lets them in past a couple of
+ * kilometres of lateral distance from the road (see MOUNTAIN_START there). That gating is
+ * the whole trick: the drivable band never sees them, so nothing about the road's grade or
+ * the desert's slope budget changes, while everything past the collider's edge gets a
+ * mountain range to be a horizon.
+ *
+ * `MOUNTAIN_THRESHOLD` is what makes them a RANGE rather than a plateau. Without it the
+ * field's mean is half its amplitude, so the whole world lifts 700 m and the horizon is a
+ * straight line again, just higher up. Cutting the low end away leaves plain between the
+ * ranges, and smoothstepping rather than clamping the cut keeps the foot of each range a
+ * curve rather than a crease.
+ */
+const MOUNTAIN_BANDS: readonly { readonly amplitude: number; readonly wavelength: number }[] = [
+  /**
+   * The ranges themselves. A crest every ~7 km, 1.3 km at the peak.
+   *
+   * The wavelength is set by how often you should be able to SEE one, not by geology. At
+   * 20 km the ranges were 10 km apart and half the world was plain, so the nearest one was
+   * routinely twenty kilometres off, where 1.4 km subtends three degrees and reads as a
+   * pale swell rather than as mountains. At 14 km there is usually something inside ten,
+   * where the same height is eight degrees.
+   */
+  { amplitude: 1300, wavelength: 14_000 },
+  /** Spurs and saddles, so a range is not one smooth mound. */
+  { amplitude: 340, wavelength: 5000 },
+];
+/** Field value below which there is no mountain at all. Fraction of the band's range. */
+const MOUNTAIN_THRESHOLD = 0.15;
+
+/** Tallest the mountain field can reach, metres. */
+export const MAX_MOUNTAIN = MOUNTAIN_BANDS.reduce((sum, b) => sum + b.amplitude, 0);
+
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
   return c * c * (3 - 2 * c);
 }
 
 export class Landscape {
-  /** One hash tag per band, plus one for hilliness. */
+  /** One hash tag per band, plus hilliness and the mountains. */
   private readonly tags: readonly number[];
   private readonly hillTag: number;
+  private readonly mountainTags: readonly number[];
   /** Field value at the origin, subtracted so the homestead sits at y = 0. */
   private readonly datum: number;
 
@@ -179,8 +222,28 @@ export class Landscape {
     const base = seed >>> 0;
     this.tags = BANDS.map((_, i) => (base ^ 0x7f4a7c15) + i * 0x9e3779b9);
     this.hillTag = base ^ 0x1b873593;
+    this.mountainTags = MOUNTAIN_BANDS.map((_, i) => (base ^ 0x2545f491) + i * 0x85ebca6b);
     this.datum = 0;
     this.datum = this.heightAt(0, 0);
+  }
+
+  /**
+   * Height of the mountain field at a point, metres, 0 on the plain between ranges.
+   *
+   * Not added to `heightAt` and not part of MAX_SLOPE: this is scenery, and `Terrain`
+   * decides where it is allowed to exist. Read the MOUNTAIN_BANDS block for why it is a
+   * separate field at all.
+   */
+  mountainAt(x: number, z: number): number {
+    let h = 0;
+    for (let i = 0; i < MOUNTAIN_BANDS.length; i++) {
+      const b = MOUNTAIN_BANDS[i]!;
+      const n = band(this.mountainTags[i]!, x / b.wavelength, z / b.wavelength);
+      // The band is in [-1, 1]; take the top of that range and stretch it back to a
+      // full 0..1, so a range rises out of plain instead of the plain rising with it.
+      h += b.amplitude * smoothstep01((n - MOUNTAIN_THRESHOLD) / (1 - MOUNTAIN_THRESHOLD));
+    }
+    return h;
   }
 
   /**

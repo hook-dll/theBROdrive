@@ -60,40 +60,67 @@ const OUTCROP_WAVELENGTH = 170;
 const OUTCROP_THRESHOLD = 0.42;
 
 /**
- * The basin rim: where the desert stops being flat and starts climbing out.
+ * The world's edge, in two pieces that do two different jobs.
  *
- * The world needs an edge, and the honest options are an invisible wall, a kill
- * plane, or terrain you cannot drive up. This is the third: past `RIM_START` the
- * ground lifts into an escarpment that tops out beyond the solid band, so the road
- * runs along the floor of a basin whose walls are visible from the tarmac and
- * unclimbable long before the collider ends.
+ * THE BERM is the bank. The solid ground stops at `PHYSICS_LATERAL` (600 m,
+ * terrainmesh.ts) and something has to discourage driving off it. This is a short steep
+ * rise just inside that edge, cresting just outside it, so a car meets its worst gradient
+ * while it still has ground under it.
  *
- * It is a RIDGE, not a plateau, and that distinction is the whole reason this looks
- * like landscape instead of a bug. A rim that climbs to full height and then stays
- * there puts a horizontal plane a hundred metres above the player, stretching to
- * the draw distance: from inside the basin its top surface covers the entire sky
- * above its near edge, and because the mesh is sampled every few tens of metres out
- * there it arrives as one enormous flat brown slab with straight edges. So past the
- * crest the ground falls away again, and the crest itself is modulated by the dune
- * field so the skyline is ragged rather than a drawn line.
+ * It is DELIBERATELY LOW, and that is the whole change from the escarpment it replaces.
+ * That was 78-100 m tall starting 400 m out, and from the driver's seat it covered
+ * everything below ten degrees of elevation: a basin wall a few hundred metres away was
+ * the entire horizon, and the desert read as a corridor rather than as somewhere vast. At
+ * 26 m and 580 m out this one subtends about three degrees.
  *
- * The lift stays monotone up to the crest for the same reason it always did: at
- * that sampling density any short-wavelength roughness would alias into nothing, or
- * into launch ramps.
+ * THE HONEST COST, measured: the old escarpment was un-crestable, and this is only very
+ * hard. Driven straight at it flat out from 400 m of run-up, the starting saloon reached
+ * the crest at 32 km/h having lost 26 km/h on the face, crossed the collider's edge and
+ * was towed back to the road by `main.ts`. So the guarantee changed from "you cannot leave
+ * the world" to "leaving it takes a deliberate run and puts you back on the road". That is
+ * the price of the horizon, and `BERM_HEIGHT` is the one constant that buys it back.
+ *
+ * THE MOUNTAINS are the horizon, and they are what a low bank buys. `Landscape.mountainAt`
+ * carries ranges over a kilometre tall; this ramps them in from `MOUNTAIN_START` so the
+ * drivable band never contains any of them and the slope budget in landscape.ts is
+ * untouched.
+ *
+ * The arithmetic that makes the pair work: the berm crest sits at about three degrees of
+ * elevation from the road, so anything taller than `tan(3 deg) * range` clears it — 630 m
+ * at 12 km, 1310 m at 25 km, both inside what the mountain field reaches. Raise the berm
+ * and you lose the far horizon first and the near one after.
  */
-export const RIM_START = 400;
-/** Lateral distance where the rim reaches its crest. Past the solid band. */
-const RIM_FULL = 780;
-/** Height of the crest above the basin floor, metres. */
-const RIM_HEIGHT = 78;
-/** Lateral distance by which the far slope has fallen back to its floor fraction. */
-const RIM_FAR = 1400;
-/** Fraction of crest height the ground keeps out at RIM_FAR. */
-const RIM_FAR_FRACTION = 0.25;
-/** Crest height varies by this fraction of RIM_HEIGHT along the ridge. */
-const RIM_RAGGED = 0.28;
+export const BERM_START = 545;
+/** Lateral distance where the berm reaches its crest. Just past the solid band's edge. */
+export const BERM_CREST = 620;
+/**
+ * Height of the crest above the basin floor, metres. With the 75 m face above it the peak
+ * gradient is `HEIGHT * ragged * 1.5 / run`, about 68% or 34 degrees. The first attempt
+ * spread 22 m over 140 m and measured 20 degrees, which a car on sand pulls up without
+ * noticing.
+ */
+const BERM_HEIGHT = 26;
+/** Lateral distance by which the berm has fallen back to nothing. */
+export const BERM_FADE = 1100;
+/** Crest height varies by this fraction of BERM_HEIGHT along the bank. */
+const BERM_RAGGED = 0.3;
 /** Wavelength of that variation, metres. Long: a skyline, not a saw. */
-const RIM_RAGGED_WAVELENGTH = 900;
+const BERM_RAGGED_WAVELENGTH = 900;
+/**
+ * Lateral distance at which the mountains start, and the distance over which they reach
+ * full height. `BERM_FADE` must stay below the start: between the two the ground is the
+ * plain landscape, and nothing about the world's edge is left standing for the mountains
+ * to have to be taller than.
+ *
+ * The ramp was 14 km first and that was the wrong answer visually: it put every range
+ * inside sixteen kilometres at a fraction of its height, so a 1400 m range at 8 km drew
+ * 490 m tall and the horizon read as a low plateau band rather than as mountains. At 7 km
+ * a range is full height by 9.5 km, where 1.4 km subtends eight degrees. The cost is the
+ * ramp's own gradient — `amplitude * 1.5 / ramp`, about 30% — which is a mountain's foot
+ * slope, several kilometres outside anything solid.
+ */
+const MOUNTAIN_START = 2500;
+const MOUNTAIN_RAMP = 7000;
 
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -158,8 +185,21 @@ export class Terrain {
     return (
       this.road.landscape.heightAt(x, z) +
       this.relief(x, z) * verge +
-      this.rimHeight(dist, x, z)
+      this.surroundHeight(dist, x, z)
     );
+  }
+
+  /**
+   * Ground height with the dune relief left out: the landscape and the world's edge only.
+   *
+   * For the vista mesh, past a few kilometres. Relief is four fractal noise fields and
+   * about sixty percent of a height sample's cost, and at that range its 9 m dunes are
+   * well under a pixel — spending most of the build budget on detail that quantises away.
+   * Inside that range the vista uses `openHeight` like everything else, because it has to
+   * agree with the chunked mesh where the two overlap.
+   */
+  baseHeight(x: number, z: number, dist: number): number {
+    return this.road.landscape.heightAt(x, z) + this.surroundHeight(dist, x, z);
   }
 
   /**
@@ -169,9 +209,9 @@ export class Terrain {
    * frame, since the underlying road projection is a search.
    *
    * NOT the surface that is drawn or collided past a few tens of metres of lateral
-   * offset, and the difference is the rim. `Road.project` refines from the hint, so
+   * offset, and the difference is the berm. `Road.project` refines from the hint, so
    * where the road folds back it can settle on either of two local minima and the
-   * distance it returns jumps — which past RIM_START jumps the rim with it.
+   * distance it returns jumps — which past BERM_START jumps the berm with it.
    * `TerrainMeshProvider` avoids that by interpolating a GLOBAL nearest-branch
    * distance off an absolute lattice, and the mesh's own vertices are what the
    * collider is built from. Everything that queries this far off the road (the
@@ -213,36 +253,35 @@ export class Terrain {
   }
 
   /**
-   * Height the basin rim adds at a lateral distance (see the RIM_* block above).
+   * Height the world's edge adds at a lateral distance: the berm, then the mountains
+   * (see the BERM_* / MOUNTAIN_* block above).
    *
-   * Climbs from nothing at RIM_START to a crest at RIM_FULL, then falls away towards
-   * RIM_FAR so the far side reads as the back of a ridge rather than the top of a
-   * table. The crest height is modulated by the dune field at a long wavelength,
-   * which is what keeps the skyline from being a ruled line drawn across the view.
+   * The berm climbs from nothing at BERM_START to its crest at BERM_CREST, then falls all
+   * the way back to zero by BERM_FADE — all the way, not to a fraction of the crest as the
+   * escarpment this replaces did, because anything it leaves standing out there is
+   * something the mountains have to be taller than. Its crest is modulated by the dune
+   * field at a long wavelength, which is what keeps the bank from being a ruled line drawn
+   * across the view.
    *
-   * It is now the steepest and tallest thing in the world by a wide margin, which is
-   * intentional but worth stating plainly: `tools/relief-probe.ts` measures 28-39
-   * degrees on its face against 13-16 for the basin floor, and 78-100 m of crest
-   * against the floor's ~50 m of variation over 3 km. That is the point — the world
-   * needs an edge a car cannot pull — but if the basin walls ever read as a canyon
-   * rather than as a horizon, RIM_HEIGHT and RIM_START are the two knobs, and nothing
-   * else in the terrain depends on them.
+   * The mountains then ramp in over 14 km. `dist` reaches this from two places: the mesh
+   * builders interpolate it on a lattice, and `heightAt` gets it from a local road
+   * projection that can jump where the road folds. Both are why the ramp is long.
    */
-  private rimHeight(dist: number, x: number, z: number): number {
-    if (dist <= RIM_START) return 0;
-
-    const ragged =
-      1 +
-      RIM_RAGGED *
-        this.duneNoise.at(x / RIM_RAGGED_WAVELENGTH, z / RIM_RAGGED_WAVELENGTH);
-    const crest = RIM_HEIGHT * ragged;
-
-    const rise = smoothstep01((dist - RIM_START) / (RIM_FULL - RIM_START));
-    const fall =
-      dist <= RIM_FULL
-        ? 1
-        : 1 - (1 - RIM_FAR_FRACTION) * smoothstep01((dist - RIM_FULL) / (RIM_FAR - RIM_FULL));
-    return crest * rise * fall;
+  private surroundHeight(dist: number, x: number, z: number): number {
+    let h = 0;
+    if (dist > BERM_START && dist < BERM_FADE) {
+      const ragged =
+        1 + BERM_RAGGED * this.duneNoise.at(x / BERM_RAGGED_WAVELENGTH, z / BERM_RAGGED_WAVELENGTH);
+      const rise = smoothstep01((dist - BERM_START) / (BERM_CREST - BERM_START));
+      const fall = 1 - smoothstep01((dist - BERM_CREST) / (BERM_FADE - BERM_CREST));
+      h += BERM_HEIGHT * ragged * rise * fall;
+    }
+    if (dist > MOUNTAIN_START) {
+      h +=
+        this.road.landscape.mountainAt(x, z) *
+        smoothstep01((dist - MOUNTAIN_START) / MOUNTAIN_RAMP);
+    }
+    return h;
   }
 
   /**

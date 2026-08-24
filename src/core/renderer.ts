@@ -10,9 +10,39 @@ import type { GraphicsQuality } from '../game/settings';
  * the middle distance or leaves the horizon looking like a flat card.
  */
 
-/** Far plane in metres. Must exceed the maximum camera distance by a wide margin. */
+/**
+ * Far-plane floor in metres. The sky dome (DOME_RADIUS = 3000 in render/sky.ts)
+ * and the far-orbit camera (DIST_MAX = 300 in render/cameras.ts) both need at
+ * least this much reach, so `setViewDistance` never drops below it: the drawn
+ * horizon may shrink, but the dome and the orbit arm must keep resolving.
+ */
 export const CAMERA_FAR = 4000;
+/**
+ * Near-plane floor in metres. As close as geometry may come to the hood camera
+ * without being clipped — the in-car eye rides on the nose of the car (see
+ * VIEW_CAR in vehicle/carmodels.ts), so the bonnet passes just beneath it.
+ * `setViewDistance` only ever raises this, never lowers it.
+ */
 export const CAMERA_NEAR = 0.08;
+
+/**
+ * How far the free-look orbit camera may stand from the car (DIST_MAX in
+ * render/cameras.ts). The far plane is measured from the camera, not the car,
+ * so it must clear the draw distance by at least this much or the orbit camera
+ * clips the far edge of the desert it can still see past the car.
+ */
+const ORBIT_MARGIN = 300;
+
+/**
+ * Ceiling on the far/near ratio. A perspective camera spends its depth
+ * precision on a 1/z budget and the near plane fixes how much of that budget
+ * the near region (the car's own panels) receives, so when the far plane
+ * stretches out for `vast` the near plane must rise with it or the panels lose
+ * the depth resolution they had at the default 4 km far plane. 160000 is the
+ * ratio, held well under the ~200000:1 point beyond which a 16-bit depth
+ * buffer starts to z-fight on the panels, rather than sitting on that bound.
+ */
+const MAX_DEPTH_RATIO = 160000;
 
 /**
  * Resting vertical field of view, degrees, for every camera mode — on foot and in
@@ -562,5 +592,22 @@ export class Renderer {
     this.smoothedFrameMs = 1000 / 60;
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
+  }
+
+  /**
+   * Sets the draw distance in place, from the pause menu, with no reload.
+   *
+   * The far plane clears the draw distance by ORBIT_MARGIN (the far plane is
+   * measured from the camera, which can stand that far past the car on the far
+   * side of the desert it is looking at) and never drops below CAMERA_FAR, the
+   * floor the sky dome and the orbit camera both depend on. The near plane rises
+   * with it so the far/near ratio — and therefore the depth resolution spent on
+   * the car up close — stays bounded; see MAX_DEPTH_RATIO.
+   */
+  setViewDistance(metres: number): void {
+    const far = Math.max(CAMERA_FAR, metres + ORBIT_MARGIN);
+    this.camera.far = far;
+    this.camera.near = Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
+    this.camera.updateProjectionMatrix();
   }
 }
