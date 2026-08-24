@@ -29,11 +29,17 @@ pnpm-debug.log*
 # Vite cache
 .vite/
 
-# Raw asset-pack downloads. Only the converted, vendored copies under
-# public/models/ belong in the repo; these are the originals they came from
-# (see tools/obj-to-glb.mjs).
-Realistic Car Pack*/
-PSX_Style_Cars*/
-PSX_Style_Cars*.zip
-DeJunes/
-new_glb_carpacks_to_try/
+# Raw asset-pack downloads, at the REPO ROOT only. Only the converted, vendored
+# copies under public/models/ belong in the repo; these are the originals they
+# came from (see tools/obj-to-glb.mjs).
+#
+# The leading slash is load-bearing. Unanchored, `DeJunes/` matches a directory of
+# that name at ANY depth — and Git's ignore matching is case-insensitive wherever
+# core.ignorecase is on (the default on Windows and macOS), so it also swallowed
+# the vendored `public/models/dejunes/`. Four catalogue entries load their models
+# from there, so a fresh clone threw on the first car it tried to measure.
+/Realistic Car Pack*/
+/PSX_Style_Cars*/
+/PSX_Style_Cars*.zip
+/DeJunes/
+/new_glb_carpacks_to_try/
