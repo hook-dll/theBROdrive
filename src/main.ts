@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
+import { SURFACES } from './core/surfaces';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { TIME_OF_DAY_PRESETS } from './game/settings';
@@ -37,7 +38,7 @@ import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road } from './world/road';
 import { RoadMeshProvider } from './world/roadmesh';
 import { Terrain } from './world/terrain';
-import { TerrainMeshProvider } from './world/terrainmesh';
+import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
 import { WreckField } from './world/wrecks';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
@@ -111,7 +112,7 @@ const RECORD_INTERVAL = 2;
  */
 const SPRAY_REF_SPEED = 1.5;
 /**
- * Slip below which a wheel throws no dust.
+ * Slip below which a wheel throws nothing.
  *
  * A tyre rolling honestly still reports a small non-zero slip ratio — that is how
  * the tyre model makes force at all — so without a floor every wheel would trickle
@@ -119,6 +120,15 @@ const SPRAY_REF_SPEED = 1.5;
  * locked or spinning wheel reaches.
  */
 const SPRAY_MIN_SLIP = 0.06;
+/**
+ * How much visible material a smoking tyre yields against a digging one.
+ *
+ * `SurfaceProps.dust` and `.smoke` say WHICH of the two a surface produces; this says
+ * how much less there is of the second. A wheel scrubbing on asphalt makes a thin
+ * wisp, a wheel spinning in sand makes a rooster tail, and the difference is close to
+ * an order of magnitude once the emitter's own lower smoke rate is applied on top.
+ */
+const SPRAY_SMOKE_YIELD = 0.4;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -568,26 +578,62 @@ async function boot(): Promise<void> {
   const targetQuat = new THREE.Quaternion();
 
   /**
-   * Throws dust from one wheel's contact patch, if that wheel is working hard
-   * enough on a loose enough surface to raise any.
+   * Throws spray from one wheel's contact patch: grit off loose ground, tyre smoke off
+   * sealed ground, nothing at all if the wheel is not working or not touching
+   * anything.
    *
    * Shared by the car and by trailers, which is the point: what throws sand is a
    * tyre SLIPPING, not a tyre being driven. This used to require non-zero drive
    * torque, which silently excluded every case where a wheel works hardest without
    * being powered — braking, a locked wheel under the handbrake, a tyre dragged
    * sideways, and a trailer's wheels at all times.
+   *
+   * WHAT THE WHEEL IS STANDING ON is resolved the way the ground is DRAWN, not the way
+   * it is collided, and off the road those differ. A terrain chunk is one trimesh
+   * registered as sand (`TERRAIN_COLLIDER_SURFACE`) even though its fan covers gravel
+   * verge, sand and rock outcrops, so taking the collider's word for it threw sand off
+   * visibly grey rock. `Terrain.surfaceFromFrame` is the same function that colours
+   * those vertices, so asking it here makes the spray match the ground under it. The
+   * road ribbon and every piece of scenery keep their own registration, which is why
+   * this only overrides the terrain's answer: a wheel on the homestead's concrete pad
+   * must not start throwing desert.
+   *
+   * The surface then decides both how much comes off and what it is. `raise` is the
+   * dust and smoke channels summed with smoke discounted, so it scales the mote count
+   * and the throw; `mix` is smoke's share of that sum, so it is what the emitter
+   * interpolates its profile along. On asphalt (dust 0, smoke 1) the mix is 1 and the
+   * raise is 0.4: grey, sparse, and it goes nowhere. On open sand (dust 1, smoke 0)
+   * both are exactly what they were before this existed.
    */
   const emitSpray = (ws: WheelSprayState, frameDt: number): void => {
-    if (ws.dust <= 0) return;
+    if (!ws.inContact) return;
     const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
     if (slip <= SPRAY_MIN_SLIP) return;
+
+    let surface = ws.surface;
+    if (surface === TERRAIN_COLLIDER_SURFACE) {
+      const p = road.project(ws.contactX, ws.contactZ, activeS);
+      surface = terrain.surfaceFromFrame(ws.contactX, ws.contactZ, p.lateral);
+    }
+    const props = SURFACES[surface];
+
     // A tyre flings at its surface speed, not the chassis'. Chassis speed reads
     // zero during a held burnout (wheels spinning, car stationary), so floor it at
     // the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
     const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
-    const strength = ws.dust * slip * speed;
+    const raise = props.dust + props.smoke * SPRAY_SMOKE_YIELD;
+    const strength = raise * slip * speed;
     if (strength <= 0) return;
-    wheelSpray.emit(ws.contactX, ws.contactY, ws.contactZ, ws.forwardX, ws.forwardZ, strength, frameDt);
+    wheelSpray.emit(
+      ws.contactX,
+      ws.contactY,
+      ws.contactZ,
+      ws.forwardX,
+      ws.forwardZ,
+      strength,
+      (props.smoke * SPRAY_SMOKE_YIELD) / raise,
+      frameDt,
+    );
   };
 
   const render = (alpha: number, frameDt: number): void => {

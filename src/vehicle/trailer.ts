@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
+import { SurfaceType } from '../core/surfaces';
 import type { GameWorld, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
@@ -377,11 +378,8 @@ export class Trailer {
         contactZ: 0,
         forwardX: 0,
         forwardZ: 1,
-        // A trailer wheel is never driven. The emitter no longer gates on this
-        // (dust comes from SLIP, which is the whole reason a braked trailer throws
-        // sand), but the field is part of the shared contract.
-        driven: false,
-        dust: 0,
+        inContact: false,
+        surface: SurfaceType.Asphalt,
         slipRatio: 0,
         slideT: 0,
         forwardSpeed: 0,
@@ -646,11 +644,12 @@ export class Trailer {
       this.prevWheelRotation[i] = this.controller.wheelRotation(i) ?? 0;
 
       if (!this.controller.wheelIsInContact(i)) {
-        s.dust = 0;
+        s.inContact = false;
         s.slipRatio = 0;
         s.slideT = 0;
         continue;
       }
+      s.inContact = true;
       const cp = this.controller.wheelContactPoint(i, this.contactScratch);
       if (cp) {
         s.contactX = cp.x;
@@ -661,7 +660,7 @@ export class Trailer {
       s.forwardZ = fz;
       s.forwardSpeed = forwardSpeed;
       const ground = this.controller.wheelGroundObject(i);
-      s.dust = this.physics.surfaces.lookup(ground ? ground.handle : null).dust;
+      s.surface = this.physics.surfaces.lookupType(ground ? ground.handle : null);
       const reference = Math.max(Math.abs(forwardSpeed), SPRAY_SLIP_REFERENCE);
       s.slipRatio = (spin * WHEEL_RADIUS - forwardSpeed) / reference;
       // No friction circle to report: a trailer tyre is only ever sliding

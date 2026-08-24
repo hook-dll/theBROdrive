@@ -28,8 +28,21 @@ export interface SurfaceProps {
   readonly roughness: number;
   /** Base albedo for the surface material. */
   readonly color: number;
-  /** Dust intensity when a wheel slips on it. */
+  /**
+   * How much LOOSE MATERIAL a slipping wheel throws off this surface. Drives both
+   * the count and the colour of the wheel spray: this is sand and grit, and it is
+   * the ground's own material leaving the ground.
+   */
   readonly dust: number;
+  /**
+   * How much a slipping wheel SMOKES on this surface. The complementary channel:
+   * rubber boiling off a tyre that is being dragged across something hard, which is
+   * grey-white, sparse, and goes nowhere. A sealed road raises no dust at all and is
+   * where a tyre smokes most; sand is the reverse, because a wheel on sand digs
+   * instead of scrubbing. The two are not normalised — `dust + smoke` is under 1 on
+   * gravel and rock, where a scrubbing tyre does neither well.
+   */
+  readonly smoke: number;
 }
 
 export const SURFACES: Record<SurfaceType, SurfaceProps> = {
@@ -41,6 +54,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.012,
     color: 0x3a3a3d,
     dust: 0.0,
+    smoke: 1.0,
   },
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
@@ -50,6 +64,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.045,
     color: 0x46433f,
     dust: 0.1,
+    smoke: 0.85,
   },
   [SurfaceType.Gravel]: {
     label: 'gravel',
@@ -59,6 +74,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.07,
     color: 0x7a6c56,
     dust: 0.6,
+    smoke: 0.15,
   },
   [SurfaceType.Sand]: {
     label: 'sand',
@@ -68,6 +84,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.05,
     color: 0xbf9f6b,
     dust: 1.0,
+    smoke: 0.0,
   },
   [SurfaceType.Rock]: {
     label: 'rock',
@@ -77,6 +94,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.13,
     color: 0x6b6257,
     dust: 0.25,
+    smoke: 0.5,
   },
   [SurfaceType.Concrete]: {
     label: 'concrete',
@@ -86,6 +104,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.006,
     color: 0x9a978f,
     dust: 0.0,
+    smoke: 1.0,
   },
 };
 
@@ -105,13 +124,17 @@ export class SurfaceRegistry {
     this.byHandle.delete(colliderHandle);
   }
 
-  /** Unknown colliders read as asphalt so a missing registration cannot strand the car. */
-  lookup(colliderHandle: number | null | undefined): SurfaceProps {
-    if (colliderHandle == null) return SURFACES[SurfaceType.Asphalt];
-    return SURFACES[this.byHandle.get(colliderHandle) ?? SurfaceType.Asphalt];
+  /**
+   * Registered type of a collider. Unknown colliders read as asphalt so a missing
+   * registration cannot strand the car.
+   */
+  lookupType(colliderHandle: number | null | undefined): SurfaceType {
+    if (colliderHandle == null) return SurfaceType.Asphalt;
+    return this.byHandle.get(colliderHandle) ?? SurfaceType.Asphalt;
   }
 
-  get size(): number {
-    return this.byHandle.size;
+  /** Driving characteristics of a collider's registered surface. */
+  lookup(colliderHandle: number | null | undefined): SurfaceProps {
+    return SURFACES[this.lookupType(colliderHandle)];
   }
 }
