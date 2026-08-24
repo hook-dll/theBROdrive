@@ -655,11 +655,27 @@ const DEJUNES_CARS: readonly Entry[] = [
  * at the same buffer — the file is parsed once and its GPU resources are never
  * duplicated (the loader caches the parsed scene by file URL).
  *
- * The bodies are drawn ~1.1-1.4x life size (the saloon measures 5.23 m before
- * scaling), so each is scaled to a believable length: the saloon lands at 4.71 m,
- * the bus at 11.65 m. The pack is deliberately CHUNKY — every car body is 2.8 m
- * wide — and that is the point: these are the flat-shaded "not the good ones" that
- * read as half-buried desert wrecks and small-town runabouts, not showroom stock.
+ * ---- scale: fitted to the Quaternius footprint ----
+ *
+ * The pack is drawn CHUNKY. Its car bodies are all 2.81 m wide on 5.0-6.1 m of
+ * length — a 1.9:1 footprint where the Quaternius saloon is 4.22 x 1.81, i.e.
+ * 2.3:1 — so no uniform scale can match a real car in both directions. Fitting
+ * LENGTH (what this file used to do) was the wrong half to pick: the saloon landed
+ * at a believable 4.71 m and 2.53 m WIDE, half a metre wider than the Quaternius
+ * SUV, and the whole pack read as monster trucks parked next to normal cars.
+ *
+ * So each body is fitted by FOOTPRINT AREA instead: `scale = sqrt(target L*W /
+ * raw L*W)` against a target taken from the vehicle it is meant to be (the
+ * Quaternius saloon's 4.22 x 1.81 for a saloon, real-world figures for the classes
+ * that pack has none of). Area splits the mismatch between the two axes, so the
+ * saloon lands at 3.85 x 2.07 — a little short and a little wide of the Quaternius
+ * saloon instead of a lot wider — and every body in the pack now parks in the same
+ * size band as the rest of the catalogue: cars 3.3-4.9 m long and 1.76-2.36 m wide,
+ * the semi 11.7 m, the bus 9.9 m. They still LOOK chunky, which is the point; they
+ * are no longer a different scale of world.
+ *
+ * The targets and the arithmetic are in `tools/lowpoly-fit.mjs`; re-run it after
+ * touching a target and paste the scale it prints.
  *
  * Drivetrain follows the fleet's diesel weighting (see the gas-stop stock): the
  * heavy, low-revving four — Bus, Truck, truck-with-trailer, Firetruck — take the
@@ -692,7 +708,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_monster_truck',
     label: 'low-poly monster truck',
     packNode: 'Monster Truck',
-    scale: 0.9,
+    scale: 0.812, // fits 4.6 x 2.30 m
     mass: 4200,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_manual5',
@@ -712,7 +728,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_suv',
     label: 'low-poly SUV',
     packNode: 'SUV',
-    scale: 0.97,
+    scale: 0.798, // fits 4.4 x 2.05 m
     mass: 1780,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_manual5',
@@ -727,7 +743,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_pickup',
     label: 'low-poly pickup',
     packNode: 'Pickup',
-    scale: 1.02,
+    scale: 0.84, // fits 5.0 x 2.00 m
     mass: 1550,
     engineId: 'engine_d4_2000',
     gearboxId: 'gearbox_manual5',
@@ -744,7 +760,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_hatchback',
     label: 'low-poly hatchback',
     packNode: 'Hatchback',
-    scale: 0.8,
+    scale: 0.653, // fits 3.6 x 1.70 m
     mass: 980,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
@@ -758,7 +774,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_sedan',
     label: 'low-poly sedan',
     packNode: 'Sedan',
-    scale: 0.9,
+    scale: 0.735, // fits 4.3 x 1.85 m
     mass: 1250,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
@@ -771,7 +787,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_muscle',
     label: 'low-poly muscle',
     packNode: 'Muscle',
-    scale: 0.81,
+    scale: 0.724, // fits 4.7 x 1.90 m
     mass: 1350,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_manual5',
@@ -786,7 +802,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_muscle_2',
     label: 'low-poly muscle 2',
     packNode: 'Muscle 2',
-    scale: 0.81,
+    scale: 0.724, // fits 4.7 x 1.90 m
     mass: 1380,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_manual5',
@@ -801,7 +817,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_van',
     label: 'low-poly van',
     packNode: 'Van',
-    scale: 0.85,
+    scale: 0.758, // fits 4.9 x 1.95 m
     mass: 1750,
     engineId: 'engine_d4_2000',
     gearboxId: 'gearbox_manual5',
@@ -816,7 +832,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_ambulance',
     label: 'low-poly ambulance',
     packNode: 'Ambulance',
-    scale: 1.0,
+    scale: 0.826, // fits 5.4 x 2.10 m
     mass: 2100,
     engineId: 'engine_d4_2000',
     gearboxId: 'gearbox_manual5',
@@ -835,7 +851,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_truck',
     label: 'low-poly truck',
     packNode: 'Truck',
-    scale: 1.2,
+    scale: 0.931, // fits 6.5 x 2.45 m
     mass: 4200,
     engineId: 'engine_d6_6600',
     gearboxId: 'gearbox_truck6',
@@ -854,7 +870,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_truck_trailer',
     label: 'low-poly truck with trailer',
     packNode: 'Truck with trailer',
-    scale: 1.2,
+    scale: 0.874, // fits 14.0 x 2.50 m
     mass: 6800,
     engineId: 'engine_d6_6600',
     gearboxId: 'gearbox_truck6',
@@ -869,7 +885,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_bus',
     label: 'low-poly bus',
     packNode: 'Bus',
-    scale: 0.85,
+    scale: 0.719, // fits 10.8 x 2.50 m
     mass: 9500,
     engineId: 'engine_d6_6600',
     gearboxId: 'gearbox_truck6',
@@ -884,7 +900,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_firetruck',
     label: 'low-poly firetruck',
     packNode: 'Firetruck',
-    scale: 0.94,
+    scale: 0.771, // fits 7.8 x 2.50 m
     mass: 7800,
     engineId: 'engine_d6_6600',
     gearboxId: 'gearbox_truck6',
@@ -902,7 +918,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_limousine',
     label: 'low-poly limousine',
     packNode: 'Limousine',
-    scale: 0.83,
+    scale: 0.655, // fits 6.5 x 1.90 m
     mass: 2100,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_auto3',
@@ -917,7 +933,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_police_sedan',
     label: 'low-poly police sedan',
     packNode: 'Police Sedan',
-    scale: 0.9,
+    scale: 0.735, // fits 4.3 x 1.85 m
     mass: 1320,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_auto3',
@@ -930,7 +946,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_police_suv',
     label: 'low-poly police SUV',
     packNode: 'Police SUV',
-    scale: 0.97,
+    scale: 0.798, // fits 4.4 x 2.05 m
     mass: 1900,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_auto3',
@@ -945,7 +961,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_police_muscle',
     label: 'low-poly police muscle',
     packNode: 'Police Muscle',
-    scale: 0.81,
+    scale: 0.724, // fits 4.7 x 1.90 m
     mass: 1420,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_auto3',
@@ -960,7 +976,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_police_sports',
     label: 'low-poly police sports',
     packNode: 'Police Sports',
-    scale: 0.77,
+    scale: 0.708, // fits 4.2 x 1.80 m
     mass: 1380,
     engineId: 'engine_v8_5000',
     gearboxId: 'gearbox_auto3',
@@ -975,7 +991,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_roadster',
     label: 'low-poly roadster',
     packNode: 'Roadster',
-    scale: 0.75,
+    scale: 0.667, // fits 3.9 x 1.72 m
     mass: 980,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
@@ -991,7 +1007,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_sports',
     label: 'low-poly sports car',
     packNode: 'Sports',
-    scale: 0.77,
+    scale: 0.708, // fits 4.2 x 1.80 m
     mass: 1150,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_manual5',
@@ -1006,7 +1022,7 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     id: 'lp_taxi',
     label: 'low-poly taxi',
     packNode: 'Taxi',
-    scale: 0.9,
+    scale: 0.735, // fits 4.3 x 1.85 m
     mass: 1320,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_auto3',
