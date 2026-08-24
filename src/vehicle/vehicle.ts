@@ -21,6 +21,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import type { InputFrame } from '../core/input';
+import { SURFACES, SurfaceType } from '../core/surfaces';
 import type { CarState, GameWorld } from '../game/state';
 import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, PartInstance } from '../parts/registry';
@@ -534,8 +535,10 @@ interface WheelVisual {
   scratchCp: { x: number; y: number; z: number };
   /** Friction-slip budget set for this wheel this step, i.e. its cone size. */
   frictionSlip: number;
-  /** Surface dust under this wheel this step (0 = sealed road); read by the spray. */
-  groundDust: number;
+  /** Registered surface under this wheel this step; read by the spray. */
+  groundSurface: SurfaceType;
+  /** Did this wheel find a collider this step? Read by the spray. */
+  grounded: boolean;
   /** Smoothed slide amount, 0 = inside the friction cone, 1 = fully saturated. */
   slideT: number;
   /** Locked and sliding: emergent from the wheel's rotation, or the handbrake on a rear. */
@@ -614,10 +617,19 @@ export interface WheelSprayState {
   /** Wheel-plane forward direction in world space (x, z), unit length. */
   forwardX: number;
   forwardZ: number;
-  /** Drive torque reached this wheel this tick AND it sits on a driven axle. */
-  driven: boolean;
-  /** Dust intensity of the surface under this wheel (0 = sealed road). */
-  dust: number;
+  /**
+   * Is this wheel touching anything? A wheel in the air reports whatever slip its
+   * free spin produces, and `surface` falls back to asphalt when there is no
+   * collider — which is a SMOKING surface, so without this a launched car would
+   * trail smoke through the air.
+   */
+  inContact: boolean;
+  /**
+   * Registered surface of the collider under this wheel. The spray reads it to
+   * decide between thrown grit and tyre smoke; see `emitSpray` in main.ts, which
+   * refines it against the terrain's own surface field off the road.
+   */
+  surface: SurfaceType;
   /** Longitudinal slip ratio this tick. */
   slipRatio: number;
   /** Friction-circle saturation, 0..1. */
@@ -1041,7 +1053,8 @@ export class Vehicle {
         mesh,
         scratchCp: { x: 0, y: 0, z: 0 },
         frictionSlip: 0,
-        groundDust: 0,
+        groundSurface: SurfaceType.Asphalt,
+        grounded: false,
         slideT: 0,
         locked: false,
         spinRadS: 0,
@@ -1074,8 +1087,8 @@ export class Vehicle {
         contactZ: 0,
         forwardX: 0,
         forwardZ: 1,
-        driven: false,
-        dust: 0,
+        inContact: false,
+        surface: SurfaceType.Asphalt,
         slipRatio: 0,
         slideT: 0,
         forwardSpeed: 0,
@@ -1348,9 +1361,12 @@ export class Vehicle {
       1 - LATERAL_GRIP_MAX_LOSS * lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
 
     for (const w of this.wheels) {
-      // Surface under this wheel drives traction and rolling resistance.
+      // Surface under this wheel drives traction and rolling resistance. The type is
+      // kept alongside its properties because the spray needs the identity, not just
+      // the numbers.
       const ground = controller.wheelGroundObject(w.index);
-      const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
+      const surfaceType = this.physics.surfaces.lookupType(ground ? ground.handle : null);
+      const surface = SURFACES[surfaceType];
 
       // A tyre spending its friction budget on stopping or accelerating has none
       // left for cornering (see the friction-circle note above). The rear parking
@@ -1401,7 +1417,8 @@ export class Vehicle {
       w.driveTorqueNm = driven ? (appliedTorque * axleShare) / axleCount : 0;
       w.brakeForceN = brakeForce;
       w.frictionSlip = frictionSlip;
-      w.groundDust = surface.dust;
+      w.groundSurface = surfaceType;
+      w.grounded = ground !== null;
 
       controller.setWheelSteering(w.index, w.isFront ? this.steerAngle : 0);
 
@@ -1822,11 +1839,8 @@ export class Vehicle {
       s.contactZ = w.contactPoint.z;
       s.forwardX = w.forwardDir.x;
       s.forwardZ = w.forwardDir.z;
-      // "Driven" means torque actually reached this wheel this tick. A wheel on
-      // a driven axle reads zero drive torque while coasting (engine braking is
-      // reported separately) or braking, so it throws nothing then.
-      s.driven = w.driveTorqueNm !== 0;
-      s.dust = w.groundDust;
+      s.inContact = w.grounded;
+      s.surface = w.groundSurface;
       s.slipRatio = w.slipRatio;
       s.slideT = w.slideT;
       s.forwardSpeed = forwardSpeed;
