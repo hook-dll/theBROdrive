@@ -43,7 +43,7 @@ import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
 import { TrailerField, TRAILER_MODEL_FIT, TRAILER_SPAWN_HEIGHT } from './vehicle/trailer';
-import { Vehicle } from './vehicle/vehicle';
+import { Vehicle, type WheelSprayState } from './vehicle/vehicle';
 import { GameAudio } from './audio/gameaudio';
 
 /**
@@ -98,6 +98,15 @@ const RECORD_INTERVAL = 2;
  * still) reads zero speed and throws no tail.
  */
 const SPRAY_REF_SPEED = 1.5;
+/**
+ * Slip below which a wheel throws no dust.
+ *
+ * A tyre rolling honestly still reports a small non-zero slip ratio — that is how
+ * the tyre model makes force at all — so without a floor every wheel would trickle
+ * motes down every straight. 0.06 is above that noise and well below the slip a
+ * locked or spinning wheel reaches.
+ */
+const SPRAY_MIN_SLIP = 0.06;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -125,7 +134,14 @@ async function boot(): Promise<void> {
   // The trailer's GLB is fitted to the trailer's fixed physics before the first
   // trailer can materialise (a POI or a loaded save), exactly like the cars.
   await preloadTrailerModel(TRAILER_MODEL_FIT);
-  const renderer = new Renderer(canvas);
+  const renderer = new Renderer(canvas, world.state.settings.graphicsQuality);
+  /**
+   * Rendered-frame counter. The chunk streamer is driven from the fixed step,
+   * which can run several times per frame, so it needs to know which calls belong
+   * to the same frame to cap its build work per frame rather than per call.
+   * Incremented in `render`, which the loop calls exactly once a frame.
+   */
+  let frameId = 0;
   const input = new InputReader(canvas);
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
@@ -177,7 +193,7 @@ async function boot(): Promise<void> {
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
-  const lightBudget = new LightBudget(renderer.scene);
+  const lightBudget = new LightBudget(renderer.scene, world.state.settings.graphicsQuality);
 
   let initialYaw = 0;
   const player = new Player(physics, world);
@@ -201,7 +217,7 @@ async function boot(): Promise<void> {
   }
 
   // Build chunk 0 before scattering: the parts need the garage floor beneath them.
-  streamer.update(world.state.player.s);
+  streamer.update(world.state.player.s, frameId);
 
   if (loadedFromSave) {
     loose.restoreFromState();
@@ -415,7 +431,7 @@ async function boot(): Promise<void> {
 
     // Trailers get the same treatment for the same reason: their springs only exist
     // inside `updateVehicle`, towed or standing.
-    trailerField.fixedUpdate(dt);
+    trailerField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
 
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
@@ -500,7 +516,7 @@ async function boot(): Promise<void> {
     } else {
       activeS = player.s;
     }
-    streamer.update(activeS);
+    streamer.update(activeS, frameId);
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
 
     // Rescue. Ground only exists out to the coarse physics band, and a determined
@@ -539,7 +555,31 @@ async function boot(): Promise<void> {
   const targetPos = new THREE.Vector3();
   const targetQuat = new THREE.Quaternion();
 
+  /**
+   * Throws dust from one wheel's contact patch, if that wheel is working hard
+   * enough on a loose enough surface to raise any.
+   *
+   * Shared by the car and by trailers, which is the point: what throws sand is a
+   * tyre SLIPPING, not a tyre being driven. This used to require non-zero drive
+   * torque, which silently excluded every case where a wheel works hardest without
+   * being powered — braking, a locked wheel under the handbrake, a tyre dragged
+   * sideways, and a trailer's wheels at all times.
+   */
+  const emitSpray = (ws: WheelSprayState, frameDt: number): void => {
+    if (ws.dust <= 0) return;
+    const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
+    if (slip <= SPRAY_MIN_SLIP) return;
+    // A tyre flings at its surface speed, not the chassis'. Chassis speed reads
+    // zero during a held burnout (wheels spinning, car stationary), so floor it at
+    // the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
+    const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
+    const strength = ws.dust * slip * speed;
+    if (strength <= 0) return;
+    wheelSpray.emit(ws.contactX, ws.contactY, ws.contactZ, ws.forwardX, ws.forwardZ, strength, frameDt);
+  };
+
   const render = (alpha: number, frameDt: number): void => {
+    frameId++;
     const s = world.state;
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
@@ -548,31 +588,17 @@ async function boot(): Promise<void> {
     loose.syncVisuals();
     trailerField.syncVisuals(alpha);
 
-    // Sand and gravel spray from the driven car's wheels. The pool ages every
-    // frame (a tail left behind when the player steps out still settles); only
-    // the driven car flings new motes, and nothing is flung on sealed roads.
+    // Sand and gravel spray. The pool ages every frame (a tail left behind when the
+    // player steps out still settles), and nothing is flung on sealed roads.
+    //
+    // Fed by the driven car AND by every trailer: a braked or dragged trailer wheel
+    // ploughs through sand exactly like a locked car wheel does, and reports the
+    // same WheelSprayState, so one emitter serves both.
     wheelSpray.update(frameDt);
     if (driving) {
-      for (const ws of driving.wheelSpray) {
-        if (!ws.driven || ws.dust <= 0) continue;
-        const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
-        // A tyre flings at its surface speed, not the chassis'. Chassis speed
-        // reads zero during a held burnout (wheels spinning, car stationary), so
-        // floor it at the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
-        const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
-        const strength = ws.dust * slip * speed;
-        if (strength <= 0) continue;
-        wheelSpray.emit(
-          ws.contactX,
-          ws.contactY,
-          ws.contactZ,
-          ws.forwardX,
-          ws.forwardZ,
-          strength,
-          frameDt,
-        );
-      }
+      for (const ws of driving.wheelSpray) emitSpray(ws, frameDt);
     }
+    trailerField.forEachSpray((ws) => emitSpray(ws, frameDt));
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);
@@ -828,6 +854,11 @@ async function boot(): Promise<void> {
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       audio.applySettings(world.state.settings);
+      // The renderer can retier in place (multisampling and the resolution cap);
+      // the lamp-slot count cannot, since those lights are already in the scene
+      // and changing their number would recompile every lit material. It picks the
+      // new tier up on the next load, which the menu says out loud.
+      renderer.setQuality(world.state.settings.graphicsQuality);
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });

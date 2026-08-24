@@ -23,8 +23,22 @@ export const CHUNK_LENGTH = 200;
 const VISUAL_RADIUS = 6;
 /** Chunks that carry physics colliders either side of the player. */
 const PHYSICS_RADIUS = 2;
-/** Max chunks built per update, so crossing a boundary never hitches. */
-const BUILD_BUDGET = 2;
+/**
+ * Chunks built per FRAME, not per call.
+ *
+ * `update` is driven from the fixed step, which runs several times in one frame
+ * whenever the machine is behind — so a per-call budget multiplies by the step
+ * count exactly when the machine can least afford it. At 27 fps that is 2-3 calls
+ * a frame, and a budget of 2 let a single boundary crossing build up to six
+ * chunks back to back: measured as a 654 ms task on an N100, which is both the
+ * INP score and the lurch felt every ~7 s at speed (200 m per chunk).
+ *
+ * One chunk per frame is the honest cap. A chunk build is monolithic (terrain fan,
+ * road ribbon, scatter colliders) so it cannot be split, but nothing requires two
+ * of them to land in the same frame: the queue is rebuilt nearest-first every call
+ * and VISUAL_RADIUS is 6 chunks of lead, i.e. 1.2 km of road ahead.
+ */
+const BUILD_BUDGET = 1;
 
 export interface ChunkContext {
   chunkIndex: number;
@@ -91,6 +105,10 @@ export class ChunkStreamer {
   private readonly lastChunkIndex: number;
   /** Increments only when scene-owned lamp sources are added or removed. */
   private lightRevision = 0;
+  /** Frame the current build budget belongs to; -1 = no frame seen yet. */
+  private buildFrame = -1;
+  /** Builds still allowed inside `buildFrame`. */
+  private frameBuildBudget = 0;
 
   constructor(
     private readonly road: Road,
@@ -120,7 +138,12 @@ export class ChunkStreamer {
     }
   }
 
-  update(playerS: number): void {    const clamped = Math.min(Math.max(playerS, 0), this.road.length);
+  /**
+   * `frameId` must change once per rendered frame and stay equal across every
+   * fixed step within it; that is what makes BUILD_BUDGET a per-frame cap.
+   */
+  update(playerS: number, frameId: number): void {
+    const clamped = Math.min(Math.max(playerS, 0), this.road.length);
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
     // Chunks may leave the road's own range: negative indices apron the desert
     // behind s = 0 and indices past the end apron the road's termination. The
@@ -154,12 +177,15 @@ export class ChunkStreamer {
       }
     }
 
-    let budget = BUILD_BUDGET;
-    while (budget > 0 && this.buildQueue.length > 0) {
+    if (frameId !== this.buildFrame) {
+      this.buildFrame = frameId;
+      this.frameBuildBudget = BUILD_BUDGET;
+    }
+    while (this.frameBuildBudget > 0 && this.buildQueue.length > 0) {
       const index = this.buildQueue.shift()!;
       if (this.built.has(index)) continue;
       this.build(index, Math.abs(index - playerChunk) <= PHYSICS_RADIUS);
-      budget--;
+      this.frameBuildBudget--;
     }
   }
 

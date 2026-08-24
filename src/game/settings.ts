@@ -13,6 +13,20 @@ import { BINDABLE_ACTIONS } from '../core/input';
 
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
+/**
+ * Rendering tier. Three points on one axis: how many pixels the scene is drawn at,
+ * whether its edges are multisampled, and how many streetlamps are lit. None of it
+ * touches the simulation, so a save plays identically under any of them.
+ *
+ *  - `acceptable`: for weak integrated GPUs. Measured on an Intel N100 / UHD
+ *    Graphics, this is the difference between one frame in five missing its
+ *    deadline and none of them doing so.
+ *  - `standard`: the authored look, native resolution, edges smoothed.
+ *  - `blessing`: for a machine with pixels to spare. Renders ABOVE native and
+ *    downsamples, which is the one thing that genuinely removes aliasing from the
+ *    ink outlines and the far dune ridges rather than merely softening it.
+ */
+export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 
 export interface Settings {
   gearboxMode: GearboxMode;
@@ -33,6 +47,11 @@ export interface Settings {
   radioVolume: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;
+  /**
+   * Rendering tier. A device preference rather than a taste one, but it lives
+   * here with the rest so it survives a reload like every other choice.
+   */
+  graphicsQuality: GraphicsQuality;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
@@ -64,6 +83,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // design — Settings objects are replaced wholesale through world.apply
   // deltas, never mutated in place.
   keyBindings: {},
+  // The authored look. Nothing auto-detects the GPU: guessing wrong either robs a
+  // capable machine or leaves a weak one stuttering, and the pause menu is one
+  // key away.
+  graphicsQuality: 'standard',
 };
 
 /**
@@ -135,6 +158,12 @@ export function sanitizeSettings(raw: unknown): Settings {
     masterVolume: volume(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     radioVolume: volume(obj.radioVolume, DEFAULT_RADIO_VOLUME),
     keyBindings: {},
+    // Anything unrecognised is standard, so an old save (which has no such field)
+    // keeps the look it was made with.
+    graphicsQuality:
+      obj.graphicsQuality === 'acceptable' || obj.graphicsQuality === 'blessing'
+        ? obj.graphicsQuality
+        : 'standard',
   };
 
   const rawBindings = obj.keyBindings;

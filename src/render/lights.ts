@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GraphicsQuality } from '../game/settings';
 
 /**
  * GPU street-light budget.
@@ -15,9 +16,25 @@ import * as THREE from 'three';
  * permutation once, at startup, and dusk becomes a plain uniform write.
  */
 
-/** Three pools ahead and three behind the player. */
-const STREETLIGHT_SLOT_COUNT = 6;
-const LIGHTS_PER_DIRECTION = STREETLIGHT_SLOT_COUNT / 2;
+/**
+ * Lit lamp slots, per rendering tier — half ahead of the view, half behind.
+ *
+ * These slots are the scene's ONLY visible point lights, and every lit fragment
+ * in the world evaluates all of them whether or not they are shining. Measured on
+ * an Intel N100 / UHD Graphics that is 4.5 ms a frame for six, in broad daylight,
+ * with every one of them at zero intensity. The count cannot be reduced at dawn
+ * (see the recompile note above), so the low tier simply keeps fewer: two lit
+ * pools, one each way, which is a dimmer night rather than a different one.
+ *
+ * `blessing` gets eight — four each way — so a lit road recedes further ahead of
+ * you before the pools stop. It is the same per-pixel cost story in reverse: a
+ * machine with fill rate to spare can afford two more lights everywhere.
+ */
+const STREETLIGHT_SLOT_COUNT: Record<GraphicsQuality, number> = {
+  acceptable: 2,
+  standard: 6,
+  blessing: 8,
+};
 /** Three concrete-era poles can be ~255 m away. */
 const CUTOFF_DISTANCE = 300;
 const CUTOFF_DISTANCE_SQ = CUTOFF_DISTANCE * CUTOFF_DISTANCE;
@@ -32,9 +49,17 @@ export class LightBudget {
   private readonly sourceWorld: THREE.Vector3[] = [];
   private chosen = new Uint8Array(0);
   private sourceRevision = -1;
+  /** Lit slots this session. Fixed at construction: see STREETLIGHT_SLOT_COUNT. */
+  private readonly slotCount: number;
+  private readonly lightsPerDirection: number;
 
-  constructor(private readonly scene: THREE.Scene) {
-    for (let i = 0; i < STREETLIGHT_SLOT_COUNT; i++) {
+  constructor(
+    private readonly scene: THREE.Scene,
+    quality: GraphicsQuality = 'standard',
+  ) {
+    this.slotCount = STREETLIGHT_SLOT_COUNT[quality];
+    this.lightsPerDirection = this.slotCount / 2;
+    for (let i = 0; i < this.slotCount; i++) {
       const slot = new THREE.PointLight(0xffc37a, 0, 46, 2);
       slot.userData.lightBudgetSlot = true;
       this.slots.push(slot);
@@ -96,7 +121,7 @@ export class LightBudget {
     let slotIndex = 0;
     for (let direction = 0; direction < 2; direction++) {
       const front = direction === 0;
-      for (let k = 0; k < LIGHTS_PER_DIRECTION; k++) {
+      for (let k = 0; k < this.lightsPerDirection; k++) {
         let best = -1;
         let bestDistance = CUTOFF_DISTANCE_SQ;
         for (let i = 0; i < count; i++) {
@@ -115,7 +140,7 @@ export class LightBudget {
 
     // At an end of the road or in a sparse stretch one direction may have fewer
     // lamps. Fill remaining slots with the closest eligible fixtures instead.
-    while (slotIndex < STREETLIGHT_SLOT_COUNT) {
+    while (slotIndex < this.slotCount) {
       let best = -1;
       let bestDistance = CUTOFF_DISTANCE_SQ;
       for (let i = 0; i < count; i++) {

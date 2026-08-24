@@ -10,7 +10,7 @@ import {
   MOUSE_SENSITIVITY_MIN,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
-import type { Settings, TimeOfDayPreset } from '../game/settings';
+import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
 import type { FluidKind } from '../items/items';
@@ -333,6 +333,7 @@ export class MainMenu {
         masterVolume: base.masterVolume,
         radioVolume: base.radioVolume,
         keyBindings: { ...base.keyBindings },
+        graphicsQuality: base.graphicsQuality,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -342,6 +343,7 @@ export class MainMenu {
           masterVolume: settings.masterVolume,
           radioVolume: settings.radioVolume,
           keyBindings: { ...settings.keyBindings },
+          graphicsQuality: settings.graphicsQuality,
         });
       };
 
@@ -576,6 +578,58 @@ export class MainMenu {
         gearRow.append(manualBtn, autoBtn);
         gearField.append(gearLabel, gearRow);
         panel.appendChild(gearField);
+
+        // Graphics tier: a three-way toggle, cheapest first so the row reads as one
+        // axis. Applied live — the renderer swaps multisampling and the resolution
+        // cap in place, so the effect is visible behind the pause panel.
+        const GFX_TIERS: readonly { id: GraphicsQuality; label: string; note: string }[] = [
+          {
+            id: 'acceptable',
+            label: 'Acceptable',
+            note: 'Acceptable: lowest resolution, no edge smoothing. For weak integrated GPUs.',
+          },
+          {
+            id: 'standard',
+            label: 'Standard',
+            note: 'Standard: native resolution with edge smoothing. The authored look.',
+          },
+          {
+            id: 'blessing',
+            label: 'Blessing',
+            note: 'Blessing: renders above native and downsamples. Needs a GPU with headroom.',
+          },
+        ];
+        const gfxField = el('div', 'menu-field');
+        const gfxLabel = el('label', 'menu-label');
+        gfxLabel.textContent = 'Graphics';
+        const gfxRow = el('div', 'menu-toggle-row');
+        const gfxButtons = GFX_TIERS.map((tier) => {
+          const btn = button('menu-button', tier.label);
+          gfxRow.appendChild(btn);
+          return { tier, btn };
+        });
+        const paintGfx = (): void => {
+          for (const { tier, btn } of gfxButtons) {
+            btn.classList.toggle('is-selected', settings.graphicsQuality === tier.id);
+          }
+        };
+        paintGfx();
+        for (const { tier, btn } of gfxButtons) {
+          btn.addEventListener('click', () => {
+            settings.graphicsQuality = tier.id;
+            paintGfx();
+            apply();
+            if (note) {
+              // The lamp-slot count is fixed when the scene's lights are built, so
+              // that part of the tier only takes effect on the next load. Say so
+              // rather than letting it look like the toggle half-worked.
+              note.textContent = `${tier.note} Restart for the full effect.`;
+              note.classList.remove('is-alarm');
+            }
+          });
+        }
+        gfxField.append(gfxLabel, gfxRow);
+        panel.appendChild(gfxField);
 
         // Time of day: presets apply immediately through their own hook and are
         // not part of the persisted settings object.

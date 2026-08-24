@@ -701,6 +701,11 @@ export class Vehicle {
    */
   private parkingHoldRequested = false;
   private parkingHoldActive = false;
+  /**
+   * Service-brake demand from the last driven step, 0..1. Read by a coupled
+   * trailer so its brakes come on with the car's pedal.
+   */
+  private serviceBrakeCommand = 0;
   private readonly parkingHoldPos = { x: 0, y: 0, z: 0 };
   private readonly parkingHoldRot = { x: 0, y: 0, z: 0, w: 1 };
 
@@ -1112,6 +1117,9 @@ export class Vehicle {
 
     const n = this.wheels.length;
     this.parkingHoldRequested = true;
+    // Nobody is driving, so there is no pedal. A trailer left coupled to a parked
+    // car holds on its own brakes (uncoupled or not, it is not being towed).
+    this.serviceBrakeCommand = 0;
     if (n === 0) return;
 
     // Parking brake: same impulse units as the foot brake (see the braking note
@@ -1124,6 +1132,14 @@ export class Vehicle {
     }
 
     controller.updateVehicle(dt);
+  }
+
+  /**
+   * Service-brake demand, 0..1 — the pedal only, never the handbrake. Exposed so a
+   * coupled trailer's brakes can follow the car that is towing it.
+   */
+  get brakeCommand(): number {
+    return this.serviceBrakeCommand;
   }
 
 
@@ -1486,6 +1502,10 @@ export class Vehicle {
     audio.cylinders = engine ? engine.cylinders : 4;
     audio.throttle = throttle;
     audio.brake = brake;
+    // Same number a coupled trailer's brakes follow (see vehicle/trailer.ts). It is
+    // the SERVICE brake only: the handbrake is the driver's own parking decision
+    // and does not reach down the drawbar.
+    this.serviceBrakeCommand = brake;
     audio.handbrake = input.handbrake;
     audio.forwardMps = fwd;
     audio.engineRunning = this.engineRunning;

@@ -62,13 +62,26 @@ export class GameLoop {
       steps++;
     }
 
-    // After a stall (tab switch, chunk build) discard the backlog instead of
-    // fast-forwarding through it, which would teleport the car.
-    if (this.accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) this.accumulator = 0;
+    // A frame that used its whole step budget and still owes time cannot pay the
+    // debt off later: the machine is not keeping up, and carrying the remainder
+    // only defers it. Carrying it was visible, not merely untidy — leftover above
+    // one step pins the render alpha at 1 (see below), so the car is drawn at the
+    // newest step for as long as the debt lasts, and then snaps back to
+    // mid-interval the frame the loop catches up. At 100 km/h one step is 0.46 m,
+    // so that snap is a third of a metre of backwards motion: the forward-backward
+    // twitch reported on slow hardware. Dropping the debt here means a stall costs
+    // simulated time (the world briefly runs slow) but never rendered continuity.
+    //
+    // The old threshold only discarded a backlog once it exceeded the whole budget,
+    // which is the worst of both: every stall short of that still lurched.
+    if (steps === MAX_STEPS_PER_FRAME && this.accumulator > FIXED_DT) {
+      this.accumulator = 0;
+    }
 
-    // Alpha is a fraction of one step. It can only exceed 1 when the step budget
-    // ran out with time still owed; clamping keeps the renderer from extrapolating
-    // past the newest transform, which would show the car ahead of where it is.
-    this.callbacks.render(Math.min(1, this.accumulator / FIXED_DT), frameDt);
+    // Alpha is a fraction of one step, and is now always a true fraction: the
+    // clamp above is what guarantees the accumulator is below one step here, so
+    // the renderer interpolates strictly between the last two states and never
+    // sits pinned at the newest one.
+    this.callbacks.render(this.accumulator / FIXED_DT, frameDt);
   };
 }
