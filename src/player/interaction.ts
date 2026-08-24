@@ -42,6 +42,16 @@ const DROP_DISTANCE = 1.2;
 const DROP_WALL_MARGIN = 0.15;
 /** Distance from the eye to a car's centre at which entering it is offered. */
 const VEHICLE_RANGE = 3.5;
+/**
+ * Fastest a seated player may still step out of a moving car, in km/h. Five is
+ * walking pace, so a permitted exit reads as stepping out rather than the car
+ * being snapped to a halt under you, and it sits above the creep a car makes on
+ * an idling clutch on a grade, so a car rolling gently downhill can still be
+ * left. `speedKmh` is already absolute, so fast reversing refuses too.
+ */
+const EXIT_SPEED_LIMIT_KMH = 5;
+/** Refusal shown while the driver holds interact above the exit speed. */
+const EXIT_REFUSED_PROMPT = 'slow down to step out';
 /** A filled anchor is picked for REMOVAL when the aim ray passes within this of it. */
 const ANCHOR_PICK_RADIUS = 0.6;
 /**
@@ -257,8 +267,12 @@ export class Interaction {
     this.continuous = null;
 
     if (this.world.state.player.drivingCarId) {
-      if (interactPressed) this.tryExit(roadS);
-      return { prompt: null, sound: this.sound, continuous: null, boot: null };
+      // Exit is edge-triggered, but a refusal stays up while the key is held so
+      // the prompt is visible instead of a single-tick flicker.
+      let prompt: string | null = null;
+      if (interactPressed) prompt = this.tryExit(roadS);
+      else if (input.interact) prompt = this.exitRefused();
+      return { prompt, sound: this.sound, continuous: null, boot: null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -971,11 +985,24 @@ export class Interaction {
     this.sound = 'enter-car';
   }
 
-  private tryExit(roadS: number): void {
-    const carId = this.world.state.player.drivingCarId;
-    if (!carId) return;
+  /**
+   * The refusal prompt when the driven car is moving too fast to step out, else
+   * null. `speedKmh` is absolute, so this covers reversing at speed as well as
+   * driving forward. Kept separate from `tryExit` so a held key re-asks the gate
+   * without re-running the exit itself, which stays edge-triggered.
+   */
+  private exitRefused(): string | null {
     const active = this.getVehicle();
-    if (!active) return;
+    if (!active) return null;
+    return active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH ? EXIT_REFUSED_PROMPT : null;
+  }
+
+  private tryExit(roadS: number): string | null {
+    const carId = this.world.state.player.drivingCarId;
+    if (!carId) return null;
+    const active = this.getVehicle();
+    if (!active) return null;
+    if (active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return EXIT_REFUSED_PROMPT;
     this.world.apply({ t: 'exit_car' });
     this.sound = 'exit-car';
     const exit = this.computeExitPosition(carId, active.vehicle);
@@ -983,6 +1010,7 @@ export class Interaction {
       this.player.setEnabled(true);
       if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);
     }
+    return null;
   }
 
   private computeExitPosition(
