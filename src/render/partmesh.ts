@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant, WheelSpec } from '../parts/registry';
-import type { Item, QuarryItem, ToolKind, WeaponKind } from '../items/items';
+import type { FluidKind, Item, QuarryItem, ToolKind, WeaponKind } from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 
 // ---------------------------------------------------------------------------
@@ -654,8 +654,18 @@ function wrench(b: MeshBuilder): void {
   b.torus('wrench_end2', 0.05, 0.016, 6, 16, steel, [0, 0, -0.12], ZERO, ONE, Math.PI * 1.2);
 }
 
-function buildFuelCanInto(b: MeshBuilder, fuel: 'petrol' | 'diesel'): void {
-  const color = fuel === 'petrol' ? 0xb03a2e : 0xc9a227;
+/**
+ * Colour-codes the can by fluid, the way a workshop shelf does: red petrol, yellow
+ * diesel, and the two engine fluids in the colours those bottles actually come in —
+ * green coolant, dark blue-black oil. It is the only way to tell four identical
+ * cans apart at a glance in the inventory strip.
+ */
+function buildFluidCanInto(b: MeshBuilder, fluid: FluidKind): void {
+  const color =
+    fluid === 'petrol' ? 0xb03a2e
+    : fluid === 'diesel' ? 0xc9a227
+    : fluid === 'coolant' ? 0x2e7d5b
+    : 0x2b2f3a;
   const metal = cond(color, 0.7, 0.4);
   const cap = flat(0x23262a, 0.6);
   b.box('fuel_body', 0.34, 0.24, 0.16, metal, [0, 0, 0]);
@@ -735,8 +745,10 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createPartMesh(item.part.variantId);
     case 'tool':
       return buildGroup(itemBlueprint(`tool_${item.tool}`, (b) => buildToolInto(b, item.tool)).instructions);
-    case 'fuel_can':
-      return buildGroup(itemBlueprint(`fuel_${item.fuel}`, (b) => buildFuelCanInto(b, item.fuel)).instructions);
+    case 'fluid_can':
+      return buildGroup(
+        itemBlueprint(`fluid_${item.fluid}`, (b) => buildFluidCanInto(b, item.fluid)).instructions,
+      );
     case 'weapon':
       return buildGroup(itemBlueprint(`weapon_${item.weapon}`, (b) => buildWeaponInto(b, item.weapon)).instructions);
     case 'ammo':

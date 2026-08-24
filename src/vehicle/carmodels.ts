@@ -27,6 +27,8 @@ import { variant } from '../parts/registry';
  *  - QUATERNIUS: Realistic Car Pack, CC0, real-world metres and own wheels.
  *  - PSX: GGBotNet PSX Style Cars, CC0, shared wheel and texture liveries.
  *  - DEJUNES: free-use low-poly cars, OBJ/GLB and FBX.
+ *  - LOWPOLY: RgsDev Free Low Poly Vehicles Pack, CC-BY-4.0, 21 bodies sharing
+ *    one GLB (flat colours, no textures).
  *
  * Generated cars use the `procedural://` scheme and live in
  * render/proceduralcars.ts rather than a directory.
@@ -34,6 +36,7 @@ import { variant } from '../parts/registry';
 const QUATERNIUS = '/models/quaternius-cars';
 const PSX = '/models/psx-cars';
 const DEJUNES = '/models/dejunes';
+const LOWPOLY = '/models/lowpoly-pack';
 
 /* ---- suspension presets ----
  *
@@ -184,6 +187,13 @@ export interface CarModelDef {
    * and renames them, instead of borrowing a wheel from another file.
    */
   readonly detectWheels?: boolean;
+  /**
+   * Body node to extract when several vehicles share one pack file. Absent means
+   * the whole scene is the vehicle.
+   */
+  readonly packNode?: string;
+  /** Wheel node name prefix within a pack file; absent means `packNode`. */
+  readonly packWheelPrefix?: string;
   readonly bodyClass: BodyClass;
   /** Uniform model-units-to-metres scale. */
   readonly scale: number;
@@ -231,12 +241,22 @@ export interface CarModelDef {
    * catalogue is available, so they are off the menu and still in the desert.
    */
   readonly spawnable: boolean;
+  /**
+   * Boot cells: how many loose items this body can carry for you.
+   *
+   * Authored rather than derived from the measured box, because what matters is the
+   * SHAPE of the load space and no bounding box knows that. A fastback and a wagon
+   * of identical footprint carry very different amounts, and an open buggy carries
+   * almost nothing. Defaulted by body class below; every entry that is not an
+   * ordinary saloon states its own.
+   */
+  readonly storageCells: number;
 }
 
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors' | 'spawnable'
+  'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors' | 'spawnable' | 'storageCells'
 > & {
   /** Absent means spawnable: only the debris-only packs say otherwise. */
   readonly spawnable?: boolean;
@@ -253,6 +273,23 @@ type Entry = Omit<
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
   readonly gizmoAnchors?: readonly GizmoAnchorDef[];
+  /** Absent takes the body class's default; see STORAGE_BY_CLASS. */
+  readonly storageCells?: number;
+};
+
+/**
+ * Boot cells by body class, for entries that do not state their own.
+ *
+ * A plain saloon is the default case at three. Anything lower, longer or open
+ * overrides downward; wagons, pickups and vans override upward. The numbers are
+ * deliberately small: the boot is somewhere to leave a spare can and a tool, not a
+ * second inventory, and a large number would turn every car into a warehouse and
+ * delete the 95 kg carry limit's whole reason to exist.
+ */
+const STORAGE_BY_CLASS: Record<BodyClass, number> = {
+  car: 3,
+  truck: 6,
+  bus: 8,
 };
 
 /**
@@ -301,6 +338,7 @@ interface PsxSpec {
   readonly rearDriveBias?: number;
   /** Extra liveries: label suffix -> texture file, all sharing this body. */
   readonly liveries?: readonly (readonly [string, string])[];
+  readonly storageCells?: number;
 }
 
 const PSX_SPECS: readonly PsxSpec[] = [
@@ -321,6 +359,7 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
   {
     id: 'psx_coupe',
+    storageCells: 2,
     label: 'PSX coupe',
     glb: 'Car2.glb',
     scale: 0.68,
@@ -337,6 +376,7 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
   {
     id: 'psx_hatch',
+    storageCells: 2,
     label: 'PSX hatchback',
     glb: 'Car3.glb',
     scale: 0.78,
@@ -351,6 +391,7 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
   {
     id: 'psx_wagon',
+    storageCells: 4,
     label: 'PSX estate',
     glb: 'Car4.glb',
     scale: 0.72,
@@ -403,6 +444,7 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
   {
     id: 'psx_pickup',
+    storageCells: 4,
     label: 'PSX pickup',
     glb: 'Car6.glb',
     scale: 0.7,
@@ -415,6 +457,7 @@ const PSX_SPECS: readonly PsxSpec[] = [
   },
   {
     id: 'psx_van',
+    storageCells: 5,
     label: 'PSX van',
     glb: 'Car7.glb',
     scale: 0.76,
@@ -466,6 +509,7 @@ const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
     dir: PSX,
     glb: spec.glb,
     bodyClass: spec.bodyClass ?? 'car',
+    storageCells: spec.storageCells,
     mass: spec.mass,
     engineId: spec.engineId,
     gearboxId: spec.gearboxId,
@@ -510,6 +554,7 @@ const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
 const DEJUNES_CARS: readonly Entry[] = [
   {
     id: 'dj_compact',
+    storageCells: 2,
     label: 'DeJunes compact',
     dir: DEJUNES,
     glb: 'car.glb',
@@ -541,6 +586,7 @@ const DEJUNES_CARS: readonly Entry[] = [
   // one of the five liveries it did ship.
   {
     id: 'dj_sports',
+    storageCells: 2,
     label: 'DeJunes sports car',
     dir: DEJUNES,
     glb: 'porsche.fbx',
@@ -576,6 +622,7 @@ const DEJUNES_CARS: readonly Entry[] = [
   },
   {
     id: 'dj_lowpoly',
+    storageCells: 2,
     label: 'DeJunes coupe',
     dir: DEJUNES,
     glb: 'car.fbx',
@@ -592,6 +639,405 @@ const DEJUNES_CARS: readonly Entry[] = [
     detectWheels: true,
   },
 ];
+
+/**
+ * RgsDev "Free Low Poly Vehicles Pack" (Sketchfab, CC-BY-4.0 — attribution beside
+ * vehicles.glb). 21 finished bodies in ONE GLB sharing ONE material set: the pack
+ * is 21 flat baseColorFactor colours and zero images, so there is no livery to
+ * repaint and no per-entry material cloning ever happens.
+ *
+ * The 21 bodies sit in a showroom row inside that one scene, each a named node
+ * with its own world transform, so an entry names the node to extract (`packNode`)
+ * and the loader pulls that subtree plus its four `<name> wheel …` siblings into a
+ * fresh group before measurement (render/carmodel.ts). Geometry and materials stay
+ * shared across all 21 because extraction clones Object3D nodes with `clone(true)`,
+ * which copies every transform but leaves each BufferGeometry and Material pointing
+ * at the same buffer — the file is parsed once and its GPU resources are never
+ * duplicated (the loader caches the parsed scene by file URL).
+ *
+ * The bodies are drawn ~1.1-1.4x life size (the saloon measures 5.23 m before
+ * scaling), so each is scaled to a believable length: the saloon lands at 4.71 m,
+ * the bus at 11.65 m. The pack is deliberately CHUNKY — every car body is 2.8 m
+ * wide — and that is the point: these are the flat-shaded "not the good ones" that
+ * read as half-buried desert wrecks and small-town runabouts, not showroom stock.
+ *
+ * Drivetrain follows the fleet's diesel weighting (see the gas-stop stock): the
+ * heavy, low-revving four — Bus, Truck, truck-with-trailer, Firetruck — take the
+ * 6.6 diesel, the three working vehicles — Pickup, Van, Ambulance — the 2.0 diesel,
+ * and everything car-shaped stays petrol. Seven diesels in twenty-one is a third,
+ * exactly the mix the fluid stock is weighted for.
+ */
+interface LowPolySpec {
+  readonly id: string;
+  readonly label: string;
+  /** Node name inside vehicles.glb, also the `<name> wheel …` prefix. */
+  readonly packNode: string;
+  readonly scale: number;
+  readonly mass: number;
+  readonly engineId: string;
+  readonly gearboxId: string;
+  readonly tankLitres: number;
+  readonly wheelGrip: number;
+  readonly steerLock: number;
+  readonly rearDriveBias: number;
+  readonly bodyClass?: BodyClass;
+  readonly suspension?: SuspensionTuning;
+  readonly storageCells?: number;
+  readonly spawnable?: boolean;
+  readonly viewFrac?: readonly [number, number, number];
+}
+
+const LOWPOLY_SPECS: readonly LowPolySpec[] = [
+  {
+    id: 'lp_monster_truck',
+    label: 'low-poly monster truck',
+    packNode: 'Monster Truck',
+    scale: 0.9,
+    mass: 4200,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 120,
+    wheelGrip: 1.2,
+    steerLock: 0.56,
+    rearDriveBias: 0.5,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+    // A show toy, not a boot: the load space is a driver's lap at best.
+    storageCells: 1,
+    // Giant 1.9 m wheels on a 4.9 m body read as a sideshow, not road stock. It
+    // stays in the desert as scenery but is never something the player chooses.
+    spawnable: false,
+  },
+  {
+    id: 'lp_suv',
+    label: 'low-poly SUV',
+    packNode: 'SUV',
+    scale: 0.97,
+    mass: 1780,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 80,
+    wheelGrip: 1.05,
+    steerLock: 0.56,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    storageCells: 4,
+  },
+  {
+    id: 'lp_pickup',
+    label: 'low-poly pickup',
+    packNode: 'Pickup',
+    scale: 1.02,
+    mass: 1550,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 1.0,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+    // Open bed carries less than a box, more than a boot.
+    storageCells: 4,
+  },
+  {
+    id: 'lp_hatchback',
+    label: 'low-poly hatchback',
+    packNode: 'Hatchback',
+    scale: 0.8,
+    mass: 980,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 42,
+    wheelGrip: 0.98,
+    steerLock: 0.64,
+    rearDriveBias: 0,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_sedan',
+    label: 'low-poly sedan',
+    packNode: 'Sedan',
+    scale: 0.9,
+    mass: 1250,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 55,
+    wheelGrip: 0.95,
+    steerLock: 0.6,
+    rearDriveBias: 0,
+  },
+  {
+    id: 'lp_muscle',
+    label: 'low-poly muscle',
+    packNode: 'Muscle',
+    scale: 0.81,
+    mass: 1350,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.08,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_muscle_2',
+    label: 'low-poly muscle 2',
+    packNode: 'Muscle 2',
+    scale: 0.81,
+    mass: 1380,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.08,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_van',
+    label: 'low-poly van',
+    packNode: 'Van',
+    scale: 0.85,
+    mass: 1750,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 75,
+    wheelGrip: 0.9,
+    steerLock: 0.56,
+    rearDriveBias: 0,
+    suspension: SUSP_TRUCK,
+    storageCells: 5,
+  },
+  {
+    id: 'lp_ambulance',
+    label: 'low-poly ambulance',
+    packNode: 'Ambulance',
+    scale: 1.0,
+    mass: 2100,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 85,
+    wheelGrip: 0.9,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+    // A patient bay, not a cargo hold: it carries less than the bare box it is.
+    storageCells: 5,
+    // Bonneted like the van, so it keeps the hood camera despite truck class.
+    viewFrac: VIEW_CAR,
+  },
+  {
+    id: 'lp_truck',
+    label: 'low-poly truck',
+    packNode: 'Truck',
+    scale: 1.2,
+    mass: 4200,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 130,
+    wheelGrip: 0.88,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+  },
+  {
+    // Twelve wheels, four that drive: this is a semi, not a car. The loader takes
+    // the front pair plus the LEADING rear pair (the truck's own axles) as the
+    // driven four and leaves the trailing tandem and the trailer's three bogies
+    // bolted to the body — see the "extra axles" note in render/carmodel.ts.
+    id: 'lp_truck_trailer',
+    label: 'low-poly truck with trailer',
+    packNode: 'Truck with trailer',
+    scale: 1.2,
+    mass: 6800,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 150,
+    wheelGrip: 0.85,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+  },
+  {
+    id: 'lp_bus',
+    label: 'low-poly bus',
+    packNode: 'Bus',
+    scale: 0.85,
+    mass: 9500,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 220,
+    wheelGrip: 0.85,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+    bodyClass: 'bus',
+    suspension: SUSP_TRUCK,
+  },
+  {
+    id: 'lp_firetruck',
+    label: 'low-poly firetruck',
+    packNode: 'Firetruck',
+    scale: 0.94,
+    mass: 7800,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 150,
+    wheelGrip: 0.85,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+    bodyClass: 'truck',
+    suspension: SUSP_TRUCK,
+    // Municipal machinery, not personal transport: it belongs parked at a station
+    // or abandoned in the sand, not on the spawn menu.
+    spawnable: false,
+  },
+  {
+    id: 'lp_limousine',
+    label: 'low-poly limousine',
+    packNode: 'Limousine',
+    scale: 0.83,
+    mass: 2100,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 85,
+    wheelGrip: 0.95,
+    steerLock: 0.5,
+    rearDriveBias: 1,
+    // A long body, not a big boot: the stretch carries passengers, not cargo.
+    storageCells: 4,
+  },
+  {
+    id: 'lp_police_sedan',
+    label: 'low-poly police sedan',
+    packNode: 'Police Sedan',
+    scale: 0.9,
+    mass: 1320,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 70,
+    wheelGrip: 1.0,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+  },
+  {
+    id: 'lp_police_suv',
+    label: 'low-poly police SUV',
+    packNode: 'Police SUV',
+    scale: 0.97,
+    mass: 1900,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 85,
+    wheelGrip: 1.05,
+    steerLock: 0.56,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    storageCells: 4,
+  },
+  {
+    id: 'lp_police_muscle',
+    label: 'low-poly police muscle',
+    packNode: 'Police Muscle',
+    scale: 0.81,
+    mass: 1420,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 70,
+    wheelGrip: 1.1,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_police_sports',
+    label: 'low-poly police sports',
+    packNode: 'Police Sports',
+    scale: 0.77,
+    mass: 1380,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 65,
+    wheelGrip: 1.12,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_roadster',
+    label: 'low-poly roadster',
+    packNode: 'Roadster',
+    scale: 0.75,
+    mass: 980,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 60,
+    wheelGrip: 1.05,
+    steerLock: 0.62,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    // Two seats and a scuttle, nothing more to put things in.
+    storageCells: 1,
+  },
+  {
+    id: 'lp_sports',
+    label: 'low-poly sports car',
+    packNode: 'Sports',
+    scale: 0.77,
+    mass: 1150,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.1,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 2,
+  },
+  {
+    id: 'lp_taxi',
+    label: 'low-poly taxi',
+    packNode: 'Taxi',
+    scale: 0.9,
+    mass: 1320,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 60,
+    wheelGrip: 0.95,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+  },
+];
+
+/** One entry per body; the pack file, its extraction and the defaults are shared. */
+const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
+  id: spec.id,
+  label: spec.label,
+  dir: LOWPOLY,
+  glb: 'vehicles.glb',
+  packNode: spec.packNode,
+  bodyClass: spec.bodyClass ?? 'car',
+  storageCells: spec.storageCells,
+  mass: spec.mass,
+  engineId: spec.engineId,
+  gearboxId: spec.gearboxId,
+  tankLitres: spec.tankLitres,
+  wheelGrip: spec.wheelGrip,
+  scale: spec.scale,
+  suspension: spec.suspension,
+  steerLock: spec.steerLock,
+  rearDriveBias: spec.rearDriveBias,
+  spawnable: spec.spawnable ?? true,
+  viewFrac: spec.viewFrac,
+}));
 
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
@@ -617,6 +1063,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     id: 'car_q_normal2',
+    storageCells: 2,
     label: 'city hatch',
     dir: QUATERNIUS,
     glb: 'NormalCar2.glb',
@@ -632,6 +1079,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     id: 'car_q_sports',
+    storageCells: 2,
     label: 'coupe',
     dir: QUATERNIUS,
     glb: 'SportsCar.glb',
@@ -648,6 +1096,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     id: 'car_q_sports2',
+    storageCells: 2,
     label: 'fastback',
     dir: QUATERNIUS,
     glb: 'SportsCar2.glb',
@@ -664,6 +1113,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     id: 'car_q_suv',
+    storageCells: 4,
     label: 'off-roader',
     dir: QUATERNIUS,
     glb: 'SUV.glb',
@@ -724,12 +1174,19 @@ const ENTRIES: readonly Entry[] = [
   ...DEJUNES_CARS,
 
   // -------------------------------------------------------------------------
+  // RgsDev Free Low Poly Vehicles Pack (CC-BY-4.0). 21 bodies in one GLB, each
+  // extracted by `packNode`; flat colours, no textures, shared geometry.
+  // -------------------------------------------------------------------------
+  ...LOWPOLY_CARS,
+
+  // -------------------------------------------------------------------------
   // Built in code (render/proceduralcars.ts). Same contract as any pack: a body
   // and four named wheels, drawn in metres, so they are measured and driven by
   // exactly the same path. Their scale is 1 because they are authored life-size.
   // -------------------------------------------------------------------------
   {
     id: 'proc_wedge',
+    storageCells: 2,
     label: 'Group-B wedge',
     procedural: 'wedge',
     bodyClass: 'car',
@@ -759,6 +1216,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     id: 'proc_dune_runner',
+    storageCells: 1,
     label: 'dune runner',
     procedural: 'dunerunner',
     bodyClass: 'car',
@@ -790,6 +1248,8 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   textureFile: e.textureFile,
   separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
+  packNode: e.packNode,
+  packWheelPrefix: e.packWheelPrefix,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
   yaw: e.yaw,
@@ -804,6 +1264,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   spawnable: e.spawnable ?? true,
+  storageCells: e.storageCells ?? STORAGE_BY_CLASS[e.bodyClass],
 }));
 
 /**

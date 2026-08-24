@@ -165,8 +165,7 @@ export type MonumentKind =
   | 'distance_sign'
   | 'ornament_shrine'
   | 'cairn'
-  | 'wrecked_marker'
-  | 'personal_record';
+  | 'wrecked_marker';
 
 export interface Monument {
   /** Arclength of the monument. */
@@ -187,15 +186,12 @@ const MONUMENT_INTERVAL = 20_000;
  * Monuments at fixed round distances, so their spacing is legible: passing one
  * means a specific number of kilometres, not an arbitrary landmark.
  *
- * `personalRecordS` places a marker at the player's own furthest previous point,
- * which is the only piece of state this module accepts.
+ * Pure in (seed, fromS, toS): no game state reaches this. A personal-record
+ * marker used to be grafted on here from `recordS`, which put a monument to the
+ * player exactly where a resumed save left off. Distance travelled is now
+ * recorded on the car itself, in stickers earned by hauling.
  */
-export function monumentsBetween(
-  seed: number,
-  fromS: number,
-  toS: number,
-  personalRecordS?: number,
-): Monument[] {
+export function monumentsBetween(seed: number, fromS: number, toS: number): Monument[] {
   const result: Monument[] = [];
   const firstIndex = Math.ceil(fromS / MONUMENT_INTERVAL);
   const lastIndex = Math.floor(toS / MONUMENT_INTERVAL);
@@ -221,16 +217,6 @@ export function monumentsBetween(
       kind,
       variantSeed: (seed ^ (i * 0x9e3779b9)) >>> 0,
       text: kind === 'distance_sign' ? `${km} km` : '',
-    });
-  }
-
-  if (personalRecordS !== undefined && personalRecordS > fromS && personalRecordS <= toS) {
-    result.push({
-      s: personalRecordS,
-      lateral: -5.8,
-      kind: 'personal_record',
-      variantSeed: seed >>> 0,
-      text: `${(personalRecordS / 1000).toFixed(1)} km`,
     });
   }
 

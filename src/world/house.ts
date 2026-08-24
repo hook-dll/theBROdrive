@@ -19,6 +19,8 @@ import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
 import {
+  coolantCapacity,
+  oilCapacity,
   variantsOfKind,
   type PartKind,
   type PartInstance,
@@ -28,6 +30,7 @@ import { carModelMeasure } from '../render/carmodel';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
+import type { Item } from '../items/items';
 
 type V3 = [number, number, number];
 
@@ -507,7 +510,6 @@ function makePart(world: GameWorld, domain: string, index: number, variantId: st
     variantId,
     dirt: hash01(world.seed, index, 0x11d),
     rust: hash01(world.seed, index, 0x1a7) * 0.65,
-    wear: hash01(world.seed, index, 0x1eb) * 0.5,
   };
 }
 
@@ -545,9 +547,15 @@ export function createStartingCar(world: GameWorld): CarState {
   const L = layout(road, terrain);
 
   const def = carModel(DEFAULT_CAR_MODEL_ID);
+  const engine = modelEngine(def);
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
   const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
+  // Coolant and oil start part-used on the same deterministic principle: the car
+  // has been sitting in a shed, not prepped. Enough to set off on, not enough to
+  // finish on, which is what makes the first can worth picking up.
+  const coolantLitres = coolantCapacity(engine) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
+  const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
   const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
   const carV = (GARAGE_V0 + GARAGE_V1) / 2;
@@ -561,7 +569,11 @@ export function createStartingCar(world: GameWorld): CarState {
     id: 'car:start',
     modelId: DEFAULT_CAR_MODEL_ID,
     gizmos: {},
+    stickers: [],
     fuelLitres,
+    coolantLitres,
+    oilLitres,
+    storage: new Array<Item | null>(def.storageCells).fill(null),
     odometer: 0,
     x: cx,
     y: carY,
@@ -673,9 +685,9 @@ export function scatterStartingGizmos(world: GameWorld, loose: LoosePartField): 
   const canSpot = itemSpot(L, 2, world.seed);
   loose.spawnItem(
     {
-      type: 'fuel_can',
+      type: 'fluid_can',
       id: world.generatedPartId('home_item', 0, 2),
-      fuel: modelEngine(carModel(DEFAULT_CAR_MODEL_ID)).fuel,
+      fluid: modelEngine(carModel(DEFAULT_CAR_MODEL_ID)).fuel,
       capacity: 20,
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },

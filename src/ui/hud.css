@@ -13,6 +13,10 @@
   --hud-border: rgba(232, 221, 196, 0.28);
   --hud-alarm: #e07a4a;              /* warm rust, legible on sand and night */
   --hud-alarm-strong: #d4552f;
+  /* Diesel marker. Deliberately the same yellow the diesel CAN is painted in
+     (0xc9a227 in render/partmesh.ts), so the badge in the spawner and the can
+     lying on a forecourt teach each other. */
+  --hud-diesel: #c9a227;
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -275,6 +279,47 @@ body {
   border: 1px solid var(--hud-border);
   border-radius: 2px;
   padding: 0 2px;
+}
+
+/* Boot cells. Sits above the carried strip, on the same centreline, so putting a
+   thing from one into the other is a short vertical glance. */
+.hud-boot {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  max-width: 60vw;
+  padding: 8px 12px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  pointer-events: none;
+}
+
+.hud-boot-title {
+  width: 100%;
+  text-align: center;
+  color: var(--hud-fg);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.hud-boot-cell {
+  border: 1px solid var(--hud-border);
+  color: var(--hud-fg);
+  padding: 4px 9px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+/* An empty cell still draws, so the boot's capacity is visible without a count. */
+.hud-boot-cell.is-empty {
+  color: var(--hud-fg-dim);
+  opacity: 0.5;
 }
 
 .hud-inv-slot.is-selected .hud-inv-key {
@@ -796,6 +841,22 @@ body {
 
 .menu-body.is-selected .menu-body-class {
   color: var(--hud-fg);
+}
+
+/* Diesel badge. Same chip geometry as the body class beside it, but warm and
+   filled rather than dim and outlined: it is the one thing in the row that
+   changes which cans you can pour, so it should catch the eye first. */
+.menu-body-fuel {
+  flex: 0 0 auto;
+  min-width: 18px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #1d1810;
+  background: var(--hud-diesel);
+  border: 1px solid var(--hud-diesel);
+  padding: 2px 5px;
 }
 
 .menu-paints {

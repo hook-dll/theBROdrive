@@ -12,6 +12,15 @@ import { variant } from '../parts/registry';
 export type ToolKind = 'brush' | 'sponge' | 'wrench';
 export type WeaponKind = 'rifle' | 'shotgun';
 
+/**
+ * Everything that can be poured into a car.
+ *
+ * One union rather than "fuel" plus a special case each for the others: the pour
+ * mechanic is identical for all four, and the only thing the kind decides is which
+ * reservoir it goes into. Petrol and diesel additionally have to match the engine.
+ */
+export type FluidKind = 'petrol' | 'diesel' | 'coolant' | 'oil';
+
 export interface ToolItem {
   readonly type: 'tool';
   readonly id: string;
@@ -26,10 +35,10 @@ export interface PartItem {
   readonly part: PartInstance;
 }
 
-export interface FuelCanItem {
-  readonly type: 'fuel_can';
+export interface FluidCanItem {
+  readonly type: 'fluid_can';
   readonly id: string;
-  readonly fuel: 'petrol' | 'diesel';
+  readonly fluid: FluidKind;
   readonly capacity: number;
   /** Litres currently inside. */
   litres: number;
@@ -64,7 +73,18 @@ export interface QuarryItem {
   readonly mass: number;
 }
 
-export type Item = ToolItem | PartItem | FuelCanItem | WeaponItem | AmmoItem | QuarryItem;
+export type Item = ToolItem | PartItem | FluidCanItem | WeaponItem | AmmoItem | QuarryItem;
+
+/**
+ * Density, kg/litre. Petrol and diesel are the light ones; coolant is basically
+ * water with glycol in it and oil is a shade under water.
+ */
+const FLUID_DENSITY: Record<FluidKind, number> = {
+  petrol: 0.75,
+  diesel: 0.84,
+  coolant: 1.07,
+  oil: 0.87,
+};
 
 /** Display name for the HUD and interaction prompts. */
 export function itemLabel(item: Item): string {
@@ -73,8 +93,8 @@ export function itemLabel(item: Item): string {
       return item.tool;
     case 'part':
       return variant(item.part.variantId).label;
-    case 'fuel_can':
-      return `${item.fuel} can (${item.litres.toFixed(0)} L)`;
+    case 'fluid_can':
+      return `${item.fluid} can (${item.litres.toFixed(0)} L)`;
     case 'weapon':
       return `${item.weapon} (${item.loaded}/${item.magazine})`;
     case 'ammo':
@@ -91,9 +111,9 @@ export function itemMass(item: Item): number {
       return 1.2;
     case 'part':
       return variant(item.part.variantId).mass;
-    case 'fuel_can':
-      // Empty can plus roughly 0.75 kg per litre of fuel.
-      return 2.5 + item.litres * 0.75;
+    case 'fluid_can':
+      // Empty can plus the fluid's own weight.
+      return 2.5 + item.litres * FLUID_DENSITY[item.fluid];
     case 'weapon':
       return item.weapon === 'shotgun' ? 3.4 : 4.1;
     case 'ammo':
@@ -105,7 +125,7 @@ export function itemMass(item: Item): number {
 
 /** True while the item's primary action can be held down continuously. */
 export function isContinuousUse(item: Item): boolean {
-  return item.type === 'tool' || item.type === 'fuel_can';
+  return item.type === 'tool' || item.type === 'fluid_can';
 }
 
 /**
@@ -113,12 +133,36 @@ export function isContinuousUse(item: Item): boolean {
  *
  * Capacity is by mass, not slot count, so hauling an engine genuinely costs you.
  * Ordering is stable, because the HUD and the item-cycle key both index into it.
+ *
+ * The pack is authoritative here rather than in `WorldState`, so every structural
+ * change reports through `onChange` and the owner mirrors it into state for saving.
+ * Only structure is reported: per-item fields (ammo counts, can litres, tool
+ * integrity) are mutated in place, and the mirror holds the same object references,
+ * so those ride along without a notification of their own.
  */
 export class Inventory {
   private readonly items: Item[] = [];
   private selected = 0;
+  private listener: (() => void) | null = null;
 
   constructor(readonly massLimit = 95) {}
+
+  /** Called after every add, removal or selection change. */
+  setListener(listener: (() => void) | null): void {
+    this.listener = listener;
+  }
+
+  /**
+   * Replaces the whole pack from a loaded save. Silent: the caller already holds
+   * the state this would write back, and notifying would be a redundant round trip.
+   */
+  restore(items: readonly Item[], selected: number): void {
+    this.items.length = 0;
+    this.items.push(...items);
+    this.selected = this.items.length === 0
+      ? 0
+      : Math.min(Math.max(0, Math.trunc(selected)), this.items.length - 1);
+  }
 
   get all(): readonly Item[] {
     return this.items;
@@ -148,6 +192,7 @@ export class Inventory {
     const soleHeavyHaul = this.items.length === 0 && mass > this.massLimit;
     if (!soleHeavyHaul && this.carriedMass + mass > this.massLimit) return false;
     this.items.push(item);
+    this.listener?.();
     return true;
   }
 
@@ -157,6 +202,7 @@ export class Inventory {
     const [removed] = this.items.splice(index, 1);
     // Keep the selection in range after the array shrinks.
     if (this.selected >= this.items.length) this.selected = Math.max(0, this.items.length - 1);
+    this.listener?.();
     return removed ?? null;
   }
 
@@ -170,12 +216,18 @@ export class Inventory {
       return;
     }
     const n = this.items.length;
-    this.selected = (((this.selected + direction) % n) + n) % n;
+    const next = (((this.selected + direction) % n) + n) % n;
+    if (next === this.selected) return;
+    this.selected = next;
+    this.listener?.();
   }
 
   select(id: string): void {
     const index = this.items.findIndex((i) => i.id === id);
-    if (index >= 0) this.selected = index;
+    if (index >= 0 && index !== this.selected) {
+      this.selected = index;
+      this.listener?.();
+    }
   }
 
   /** Index of the held item, or -1 when empty. The HUD highlights this slot. */
@@ -188,6 +240,9 @@ export class Inventory {
    * pressing 6 with four items should do nothing, not jump to the last item.
    */
   selectIndex(index: number): void {
-    if (index >= 0 && index < this.items.length) this.selected = index;
+    if (index >= 0 && index < this.items.length && index !== this.selected) {
+      this.selected = index;
+      this.listener?.();
+    }
   }
 }

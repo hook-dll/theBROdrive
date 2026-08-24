@@ -32,6 +32,7 @@ import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
 
 export interface BenchResult {
   id: string;
@@ -161,12 +162,22 @@ interface Rig {
   vehicle: Vehicle;
   scene: THREE.Scene;
   input: InputFrame;
+  /** Coupled trailer, when the run is a towing run. */
+  trailer: Trailer | null;
 }
 
+/**
+ * Builds the bench rig, optionally towing.
+ *
+ * `trailerCargoKg` non-null couples a trailer with that load on it. The trailer
+ * goes through the same drawbar hitch the game uses, so what the bench measures is
+ * the real constraint and the real tongue weight, not an approximation of them.
+ */
 async function makeRig(
   modelId: string,
   ground: (physics: PhysicsWorld) => void = addGround,
   settleWithHandbrake = false,
+  trailerCargoKg: number | null = null,
 ): Promise<Rig> {
   const physics = await PhysicsWorld.create();
   ground(physics);
@@ -177,12 +188,37 @@ async function makeRig(
   const vehicle = new Vehicle(physics, world, state, scene);
   const input = emptyInput();
   input.handbrake = settleWithHandbrake;
-  const rig: Rig = { physics, vehicle, scene, input };
-  // Let it settle onto its springs before anything is measured.
-  for (let i = 0; i < 180; i++) {
+
+  let trailer: Trailer | null = null;
+  if (trailerCargoKg !== null) {
+    const trailerState = {
+      id: 'bench:trailer',
+      hitchedTo: null,
+      cargoKg: 0,
+      x: state.x,
+      y: state.y,
+      z: state.z - 6,
+      qx: 0,
+      qy: 0,
+      qz: 0,
+      qw: 1,
+    };
+    world.state.trailers[trailerState.id] = trailerState;
+    trailer = new Trailer(physics, world, trailerState, scene);
+    trailer.setCargo(trailerCargoKg);
+    trailer.hitchTo(vehicle, state.id);
+  }
+
+  const rig: Rig = { physics, vehicle, scene, input, trailer };
+  // Let it settle onto its springs before anything is measured. A towed rig needs
+  // longer: the drawbar has to straighten and both bodies have to stop bobbing.
+  const settleSteps = trailer ? 420 : 180;
+  for (let i = 0; i < settleSteps; i++) {
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
+    rig.trailer?.fixedUpdate(FIXED_DT);
     rig.physics.step();
     rig.vehicle.postStep();
+    rig.trailer?.postStep();
   }
   return rig;
 }
@@ -192,8 +228,10 @@ function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFrame) => v
   for (let i = 0; i < steps; i++) {
     shape(i * FIXED_DT, rig.input);
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
+    rig.trailer?.fixedUpdate(FIXED_DT);
     rig.physics.step();
     rig.vehicle.postStep();
+    rig.trailer?.postStep();
   }
 }
 
@@ -205,7 +243,16 @@ function slipAngleDeg(v: Vehicle): number {
   return (Math.atan2(Math.abs(s.lateralSlipMps), fwd) * 180) / Math.PI;
 }
 
-export async function benchOne(modelId: string): Promise<BenchResult> {
+/**
+ * Every metric for one car. `towKg` non-null runs the whole sheet while towing a
+ * loaded trailer, which is the only honest way to read the handling cost of
+ * freight: hitch load lands on the rear axle through the joint, and the brake and
+ * grip budgets are sized from the CAR's mass alone.
+ */
+export async function benchOne(
+  modelId: string,
+  towKg: number | null = null,
+): Promise<BenchResult> {
   const out: BenchResult = {
     id: modelId,
     to100s: null,
@@ -247,7 +294,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   // read exactly -halfHeight for every car). The chassis body's own translation is
   // authoritative, and the measured half-height turns it into a ground clearance.
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     const y = rig.vehicle.chassis.translation().y;
     out.rideHeightM = +(y - rig.vehicle.modelMeasure.halfExtents[1]).toFixed(3);
     rig.vehicle.dispose();
@@ -255,7 +302,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
 
   // --- acceleration ---------------------------------------------------------
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     let t = 0;
     let reached: number | null = null;
     drive(rig, 20, (_, f) => {
@@ -272,7 +319,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
 
   // --- braking from 100 km/h ------------------------------------------------
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 30, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 100 ? 1 : 0;
     });
@@ -320,7 +367,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
 
   // --- skidpad: hold ~60 km/h at full steer, measure what it actually pulls --
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 20, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 60 ? 1 : 0;
     });
@@ -358,7 +405,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   // of the dead zone.
   {
     for (const amount of [0.08, 0.12, 0.17, 0.25, 0.35, 0.5]) {
-      const rig = await makeRig(modelId);
+      const rig = await makeRig(modelId, addGround, false, towKg);
       drive(rig, 25, (_, f) => {
         f.throttle = rig.vehicle.speedKmh < 80 ? 1 : 0;
       });
@@ -391,7 +438,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   {
     const rates: number[] = [];
     for (const braking of [false, true]) {
-      const rig = await makeRig(modelId);
+      const rig = await makeRig(modelId, addGround, false, towKg);
       drive(rig, 22, (_, f) => {
         f.throttle = rig.vehicle.speedKmh < 70 ? 1 : 0;
       });
@@ -438,7 +485,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   // suspension oscillating on its own, because there is nothing to excite it: a
   // well-damped car is a flat line and a pogo stick is not.
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 20, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 60 ? 1 : 0;
     });
@@ -461,7 +508,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
 
   // --- settle: drop it and see how long the body keeps moving ---------------
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     const body = rig.vehicle.chassis;
     const p = body.translation();
     body.setTranslation({ x: p.x, y: p.y + 0.3, z: p.z }, true);
@@ -488,7 +535,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   // and its own body movement keeps turning after the input is gone, which is the
   // overshoot measured here.
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 25, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 80 ? 1 : 0;
     });
@@ -518,7 +565,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   // slide. The handbrake must lock the REAR axle on the very first step it is pulled
   // and leave the front alone.
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 24, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 90 ? 1 : 0;
     });
@@ -535,7 +582,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
     rig.vehicle.dispose();
   }
   {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 24, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 90 ? 1 : 0;
     });
@@ -559,7 +606,7 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
     [0.9, 0.25, 'pumpedBrakeDistM'],
     [1.0, 0.12, 'cadenceBrakeDistM'],
   ] as const) {
-    const rig = await makeRig(modelId);
+    const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 30, (_, f) => {
       f.throttle = rig.vehicle.speedKmh < 100 ? 1 : 0;
     });
@@ -586,12 +633,30 @@ export async function benchOne(modelId: string): Promise<BenchResult> {
   return out;
 }
 
-export async function runBench(ids?: readonly string[]): Promise<BenchResult[]> {
+export async function runBench(
+  ids?: readonly string[],
+  towKg: number | null = null,
+): Promise<BenchResult[]> {
   const list = ids ?? CAR_MODELS.map((d) => d.id);
   await preloadCarModels(list);
   const results: BenchResult[] = [];
-  for (const id of list) results.push(await benchOne(id));
+  for (const id of list) results.push(await benchOne(id, towKg));
   return results;
+}
+
+/**
+ * Side-by-side sheet for one car, solo against towing. Prints the deltas that
+ * matter when re-tuning suspension for a trailer: braking distance, steady-state
+ * lateral grip and body roll.
+ */
+export async function benchTowing(
+  modelId: string,
+  cargoKg = 650,
+): Promise<{ solo: BenchResult; towing: BenchResult; tareKg: number }> {
+  await preloadCarModels([modelId]);
+  const solo = await benchOne(modelId, null);
+  const towing = await benchOne(modelId, cargoKg);
+  return { solo, towing, tareKg: TRAILER_TARE_KG };
 }
 
 /**

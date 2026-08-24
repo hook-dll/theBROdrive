@@ -1,0 +1,8 @@
+Free Low Poly Vehicles Pack by RgsDev
+Source: https://sketchfab.com/3d-models/free-low-poly-vehicles-pack-cb7640039e7a40679a53be705ebff50e
+Author: RgsDev (https://sketchfab.com/rgsdev)
+
+License: Creative Commons Attribution 4.0 International (CC-BY-4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+21 vehicles in one GLB (vehicles.glb), flat baseColorFactor colours, no textures.

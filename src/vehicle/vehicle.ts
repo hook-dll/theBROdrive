@@ -22,7 +22,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import type { CarState, GameWorld } from '../game/state';
-import { variant } from '../parts/registry';
+import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, PartInstance } from '../parts/registry';
 import { carModel, modelEngine, modelGearbox, type CarModelDef } from './carmodels';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
@@ -534,6 +534,8 @@ interface WheelVisual {
   scratchCp: { x: number; y: number; z: number };
   /** Friction-slip budget set for this wheel this step, i.e. its cone size. */
   frictionSlip: number;
+  /** Surface dust under this wheel this step (0 = sealed road); read by the spray. */
+  groundDust: number;
   /** Smoothed slide amount, 0 = inside the friction cone, 1 = fully saturated. */
   slideT: number;
   /** Locked and sliding: emergent from the wheel's rotation, or the handbrake on a rear. */
@@ -600,6 +602,31 @@ export interface VehicleAudioState {
 }
 
 /**
+ * Per-wheel telemetry the renderer's sand/gravel spray reads each frame: where
+ * the tyre is, which way it points and how hard it is disturbing the ground.
+ * Written in place once per fixed step; nothing here is allocated per tick.
+ */
+export interface WheelSprayState {
+  /** World-space contact patch position, metres. */
+  contactX: number;
+  contactY: number;
+  contactZ: number;
+  /** Wheel-plane forward direction in world space (x, z), unit length. */
+  forwardX: number;
+  forwardZ: number;
+  /** Drive torque reached this wheel this tick AND it sits on a driven axle. */
+  driven: boolean;
+  /** Dust intensity of the surface under this wheel (0 = sealed road). */
+  dust: number;
+  /** Longitudinal slip ratio this tick. */
+  slipRatio: number;
+  /** Friction-circle saturation, 0..1. */
+  slideT: number;
+  /** Chassis forward speed, m/s (signed). */
+  forwardSpeed: number;
+}
+
+/**
  * Centre of mass, as fractions of the measured chassis box: dropped well below the
  * box centre and pushed slightly rearward, which is what keeps a tall van from
  * tipping and a light tail from stepping out. Measured per model rather than
@@ -641,6 +668,8 @@ export class Vehicle {
   private readonly rootGroup = new THREE.Group();
 
   private wheels: WheelVisual[] = [];
+  /** One spray report per wheel, written in place every fixed step. */
+  private wheelSprayStates: WheelSprayState[] = [];
   private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
@@ -679,6 +708,17 @@ export class Vehicle {
   private localFuel: number;
   private lastAuthFuel: number;
   private fuelEmitTimer = 0;
+  /**
+   * Coolant and oil, mirrored locally for the same reason fuel is: the authoritative
+   * value is in state, but a per-tick round trip through `world.apply` for a number
+   * that changes in the fourth decimal place is waste. Resynced whenever something
+   * external (a poured can) moves the authority.
+   */
+  private localCoolant: number;
+  private localOil: number;
+  private lastAuthCoolant: number;
+  private lastAuthOil: number;
+  private fluidEmitTimer = 0;
 
   // Odometer and transform emission.
   private odoAccum = 0;
@@ -701,6 +741,16 @@ export class Vehicle {
   private rollAccel = 0;
   private rollPrimed = false;
   private rollLeverArm = 0.5;
+  /**
+   * The tyre contact plane in chassis-local metres: where the ground is when the
+   * car is standing on its own suspension. Set by `rebuild` from the mount it
+   * actually gives Rapier, which is NOT the mount the model measured (see the ride
+   * height rule above), so this is the only honest answer to "how high off the
+   * ground is this point on the car" — which is exactly what bolting a tow ball to
+   * an arbitrary body needs. Anything deriving a height from `measure.wheels[].pos`
+   * instead is out by the ride-height correction, up to RIDE_LIFT_MAX.
+   */
+  private contactPlaneY = -0.5;
   // Audio telemetry, written every fixed step and read by the audio layer at frame
   // rate. One object for the life of the vehicle; never reallocated.
   private readonly audioState: VehicleAudioState = {
@@ -788,11 +838,14 @@ export class Vehicle {
       this.statsValue.engine,
       this.statsValue.gearbox,
       this.model.rearDriveBias,
-      this.statsValue.engineEfficiency,
     );
 
     this.localFuel = carState.fuelLitres;
     this.lastAuthFuel = carState.fuelLitres;
+    this.localCoolant = carState.coolantLitres;
+    this.lastAuthCoolant = carState.coolantLitres;
+    this.localOil = carState.oilLitres;
+    this.lastAuthOil = carState.oilLitres;
 
     this.rebuild();
   }
@@ -817,6 +870,16 @@ export class Vehicle {
   /** Measurements taken off the model's GLB (chassis-local metres). */
   get modelMeasure(): CarModelMeasure {
     return this.measure;
+  }
+
+  /**
+   * Where the ground is in chassis-local metres when this car stands on its own
+   * suspension (see `contactPlaneY`). Anything mounted at a real-world height off
+   * the road — the trailer's tow ball — measures from here, not from the model's
+   * measured wheel mounts.
+   */
+  get contactPlaneLocalY(): number {
+    return this.contactPlaneY;
   }
 
   /** Hood-camera eye in chassis-local metres, for the in-car view. */
@@ -852,6 +915,14 @@ export class Vehicle {
     return this.audioState;
   }
 
+  /**
+   * Live per-wheel spray telemetry. Returns the vehicle's own buffer, refreshed
+   * each fixed step: callers read it and must not retain or mutate it. Parked
+   * cars are never refreshed, but only the driven car is ever asked.
+   */
+  get wheelSpray(): readonly WheelSprayState[] {
+    return this.wheelSprayStates;
+  }
 
   /** Off -> dipped beam -> high beam -> off. */
   cycleHeadlights(): void {
@@ -887,7 +958,7 @@ export class Vehicle {
     this.statsValue = this.computeStats();
     const stats = this.statsValue;
 
-    this.drivetrain.reconfigure(stats.engine, stats.gearbox, stats.engineEfficiency);
+    this.drivetrain.reconfigure(stats.engine, stats.gearbox);
 
     // Gizmos change the mass; re-apply so the CoG stays low and rearward.
     this.applyChassisMass(stats.mass);
@@ -926,6 +997,7 @@ export class Vehicle {
     const comY = -COM_DROP_FRACTION * this.measure.halfExtents[1];
     const contactY = mountY - hangs - this.measure.wheels[0].radius;
     this.rollLeverArm = Math.max(0.1, comY - contactY);
+    this.contactPlaneY = contactY;
 
     for (const wheel of this.measure.wheels) {
       const index = this.controller.numWheels();
@@ -964,6 +1036,7 @@ export class Vehicle {
         mesh,
         scratchCp: { x: 0, y: 0, z: 0 },
         frictionSlip: 0,
+        groundDust: 0,
         slideT: 0,
         locked: false,
         spinRadS: 0,
@@ -984,6 +1057,24 @@ export class Vehicle {
         this.rearWheelCount++;
         if (rearShare > 0) this.rearDrivenCount++;
       }
+    }
+
+    // One spray report per wheel, filled in place every fixed step (never
+    // reallocated); sized here so it tracks the wheel count through a rebuild.
+    this.wheelSprayStates = [];
+    for (let i = 0; i < this.wheels.length; i++) {
+      this.wheelSprayStates.push({
+        contactX: 0,
+        contactY: 0,
+        contactZ: 0,
+        forwardX: 0,
+        forwardZ: 1,
+        driven: false,
+        dust: 0,
+        slipRatio: 0,
+        slideT: 0,
+        forwardSpeed: 0,
+      });
     }
 
     // Wheel-angular-speed input uses the primary driven axle's radius.
@@ -1042,10 +1133,18 @@ export class Vehicle {
 
     const stats = this.statsValue;
 
-    // Resync fuel if an external system (refuelling) changed the authoritative value.
+    // Resync if an external system (pouring a can) changed the authoritative value.
     if (this.car.fuelLitres !== this.lastAuthFuel) {
       this.localFuel = this.car.fuelLitres;
       this.lastAuthFuel = this.car.fuelLitres;
+    }
+    if (this.car.coolantLitres !== this.lastAuthCoolant) {
+      this.localCoolant = this.car.coolantLitres;
+      this.lastAuthCoolant = this.car.coolantLitres;
+    }
+    if (this.car.oilLitres !== this.lastAuthOil) {
+      this.localOil = this.car.oilLitres;
+      this.lastAuthOil = this.car.oilLitres;
     }
 
     const fwd = this.forwardSpeedMps();
@@ -1103,6 +1202,32 @@ export class Vehicle {
         this.fuelEmitTimer = 0;
         this.lastAuthFuel = this.localFuel;
         this.world.apply({ t: 'car_fuel', carId: this.car.id, litres: this.localFuel });
+      }
+    }
+
+    // Coolant and oil seep while the engine turns. They are not consumed by work
+    // like fuel is — the rate is flat per running second, which is why this sits
+    // outside the fuel-burn branch and only asks whether the engine is alive.
+    //
+    // Mirrored locally and emitted on the same throttled cadence as fuel, for the
+    // same reason: a delta per tick for a number that moves by 0.0004 L would be
+    // three hundred pointless state writes a second.
+    if (this.engineRunning) {
+      const perSecond = 1 / 3600;
+      this.localCoolant = Math.max(0, this.localCoolant - COOLANT_LOSS_LPH * perSecond * dt);
+      this.localOil = Math.max(0, this.localOil - OIL_LOSS_LPH * perSecond * dt);
+      this.fluidEmitTimer += dt;
+      if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {
+        this.fluidEmitTimer = 0;
+        this.lastAuthCoolant = this.localCoolant;
+        this.lastAuthOil = this.localOil;
+        this.world.apply({
+          t: 'car_fluid',
+          carId: this.car.id,
+          fluid: 'coolant',
+          litres: this.localCoolant,
+        });
+        this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
       }
     }
 
@@ -1260,6 +1385,7 @@ export class Vehicle {
       w.driveTorqueNm = driven ? (appliedTorque * axleShare) / axleCount : 0;
       w.brakeForceN = brakeForce;
       w.frictionSlip = frictionSlip;
+      w.groundDust = surface.dust;
 
       controller.setWheelSteering(w.index, w.isFront ? this.steerAngle : 0);
 
@@ -1277,6 +1403,7 @@ export class Vehicle {
     // integrated from its own drive and brake torque against what its contact can
     // actually transmit, so lock-up and wheelspin are outcomes, not timers.
     this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip);
+    this.refreshWheelSpray(fwd);
 
     // Slide, lock and the friction-circle usage that costs a working tyre its side
     // grip are all computed inside updateWheelDynamics now, from the tyre's own
@@ -1469,6 +1596,11 @@ export class Vehicle {
       w.slipRatio = 0;
       w.locked = false;
     }
+    // Release the parking hold, or this does nothing at all on a car nobody is
+    // driving: `postStep` re-teleports a held chassis to `parkingHoldPos` every
+    // step, so the move would be silently undone one tick later. Clearing the flag
+    // makes the next `postStep` re-latch the hold at wherever we just put it.
+    this.parkingHoldActive = false;
     this.snapshotPrimed = false;
   }
 
@@ -1654,6 +1786,33 @@ export class Vehicle {
     }
   }
 
+  /**
+   * Copies the per-wheel contact, slip and surface data the renderer's sand and
+   * gravel spray needs into the pre-allocated `wheelSprayStates`. Runs once per
+   * fixed step, after `updateWheelDynamics` has finalised slipRatio/slideT, and
+   * never allocates.
+   */
+  private refreshWheelSpray(forwardSpeed: number): void {
+    const n = this.wheels.length;
+    for (let i = 0; i < n; i++) {
+      const w = this.wheels[i];
+      const s = this.wheelSprayStates[i];
+      s.contactX = w.contactPoint.x;
+      s.contactY = w.contactPoint.y;
+      s.contactZ = w.contactPoint.z;
+      s.forwardX = w.forwardDir.x;
+      s.forwardZ = w.forwardDir.z;
+      // "Driven" means torque actually reached this wheel this tick. A wheel on
+      // a driven axle reads zero drive torque while coasting (engine braking is
+      // reported separately) or braking, so it throws nothing then.
+      s.driven = w.driveTorqueNm !== 0;
+      s.dust = w.groundDust;
+      s.slipRatio = w.slipRatio;
+      s.slideT = w.slideT;
+      s.forwardSpeed = forwardSpeed;
+    }
+  }
+
   dispose(): void {
     if (this.controller) {
       this.controller.free();
@@ -1682,7 +1841,6 @@ export class Vehicle {
       mass,
       engine,
       gearbox: modelGearbox(this.model),
-      engineEfficiency: 1,
       fuel: engine.fuel,
       tankCapacity: this.model.tankLitres,
       wheelCount: this.measure.wheels.length,

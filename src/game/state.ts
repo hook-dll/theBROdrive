@@ -16,13 +16,66 @@ import type { Settings } from './settings';
  * Nothing here may reference a Three.js object or a Rapier handle.
  */
 
+/**
+ * A sticker on a car's bodywork: the record of one completed haul.
+ *
+ * Position and normal are in the car's own local space, taken from where the player
+ * aimed on the actual mesh, so it survives a save and stays exactly where it was
+ * put. There is deliberately no removal delta — a sticker cannot be scratched off,
+ * and it does not follow the player to another car. The car IS the save file.
+ */
+export interface StickerState {
+  /** Sticker design id, from the built-in pack. */
+  readonly kind: string;
+  /** Contact point, car-local metres. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Surface normal at the contact point, car-local and unit length. */
+  readonly nx: number;
+  readonly ny: number;
+  readonly nz: number;
+  /** Spin about the normal, radians, from where the player was standing. */
+  readonly roll: number;
+}
+
+/**
+ * The haul in progress. At most one, and that is a design constraint, not a
+ * simplification: the destination is communicated by a single lit sign with no
+ * number and no name on it, so two simultaneous destinations would be
+ * indistinguishable.
+ */
+export interface JobState {
+  readonly fromPoi: number;
+  readonly toPoi: number;
+  readonly cargoKg: number;
+}
+
 export interface CarState {
   readonly id: string;
   /** Complete car model id from the catalogue (vehicle/carmodels.ts). */
   readonly modelId: string;
   /** Anchor id -> mounted gizmo, or absent when the anchor is bare. */
   readonly gizmos: Record<string, PartInstance>;
+  /** Earned stickers, in the order they were placed. Append-only, permanent. */
+  readonly stickers: StickerState[];
   fuelLitres: number;
+  /**
+   * Coolant and oil in the engine, litres.
+   *
+   * Unlike fuel these are not consumed by driving — an old engine SEEPS them, and
+   * that is the whole mechanic: a slow drift downward that eventually makes you
+   * stop and look for a can. Capacities come from the engine's cylinder count (see
+   * `coolantCapacity` / `oilCapacity` in parts/registry.ts) rather than a table,
+   * because a bigger engine holding more of both needs no authoring.
+   */
+  coolantLitres: number;
+  oilLitres: number;
+  /**
+   * Boot cells. `null` is an empty cell; the array's LENGTH is the car's capacity,
+   * fixed at spawn from the model, so a save carries the layout it was created with.
+   */
+  readonly storage: (Item | null)[];
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -46,6 +99,37 @@ export interface PlayerState {
   s: number;
   /** Car the player is currently driving, or null when on foot. */
   drivingCarId: string | null;
+  /**
+   * The pack, in slot order. `Inventory` is authoritative in-session and mirrors
+   * itself here through the `inventory` delta; this array holds the same item
+   * objects, so in-place changes (ammo counts, can litres) need no delta.
+   */
+  carried: Item[];
+  /** Index into `carried` of the held item; clamped on restore. */
+  carriedSelected: number;
+}
+
+/**
+ * A towed trailer. Not a car: no engine, no gearbox, no driver — a bed on two
+ * wheels that follows whatever is pulling it and makes that car handle worse.
+ *
+ * Trailers are taken and left, never owned: one stands at a gas stop, you couple
+ * it, you drop it at the destination. `hitchedTo` is the whole coupling state.
+ */
+export interface TrailerState {
+  readonly id: string;
+  /** Car id it is coupled to, or null when standing on its own. */
+  hitchedTo: string | null;
+  /** Mass on the bed, kg. Zero when empty. */
+  cargoKg: number;
+  x: number;
+  y: number;
+  z: number;
+  /** Quaternion. */
+  qx: number;
+  qy: number;
+  qz: number;
+  qw: number;
 }
 
 export interface WorldState {
@@ -60,6 +144,8 @@ export interface WorldState {
   settings: Settings;
   player: PlayerState;
   cars: Record<string, CarState>;
+  /** Trailers standing in the world or coupled to a car, keyed by trailer id. */
+  trailers: Record<string, TrailerState>;
   /** Parts lying loose in the world, keyed by part id. */
   looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }>;
   /**
@@ -74,8 +160,24 @@ export interface WorldState {
    * POI restocking itself every time its chunk reloads.
    */
   lootedPois: number[];
-  /** Part ids consumed or destroyed, so generators skip them. */
-  consumedParts: string[];
+  /**
+   * Ids of derelicts the player has brought back to life with a wrench. The car
+   * itself lives in `cars` from that moment on; this list is what stops the POI
+   * rebuilding the static shell on top of it every time the chunk reloads.
+   */
+  revivedWrecks: string[];
+  /**
+   * The haul in progress, or null. One at a time by design: the destination is a
+   * single lit sign with no text on it, and two would be indistinguishable.
+   */
+  job: JobState | null;
+  /**
+   * Stickers earned but not yet stuck on. Deliveries pay in these; placing one is a
+   * separate, deliberate act, so finishing a run with a pocketful is legal.
+   */
+  stickersUnplaced: number;
+  /** POI slots already delivered to, so a stop cannot be farmed twice. */
+  deliveredPois: number[];
 }
 
 export type WorldDelta =
@@ -89,6 +191,12 @@ export type WorldDelta =
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number }
+  | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
+  | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
+  | { t: 'trailer_add'; trailer: TrailerState }
+  | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
+  | { t: 'trailer_hitch'; trailerId: string; carId: string | null }
+  | { t: 'trailer_cargo'; trailerId: string; cargoKg: number }
   | { t: 'gizmo_attach'; carId: string; anchor: string; part: PartInstance }
   | { t: 'gizmo_detach'; carId: string; anchor: string }
   | { t: 'part_drop'; part: PartInstance; x: number; y: number; z: number }
@@ -97,10 +205,22 @@ export type WorldDelta =
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
   | { t: 'poi_looted'; poiIndex: number }
+  | { t: 'job_accept'; job: JobState }
+  | { t: 'job_complete'; poiIndex: number }
+  | { t: 'job_abandon' }
+  | { t: 'sticker_place'; carId: string; sticker: StickerState }
+  | { t: 'wreck_revived'; wreckId: string }
+  | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'record'; s: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
+
+/**
+ * Prefix marking an id minted at runtime rather than derived from the seed. The
+ * `GameWorld` constructor scans for it to resume the counter past a loaded save.
+ */
+const RUNTIME_ID_PREFIX = 'rt:';
 
 export function newWorldState(seed: number): WorldState {
   return {
@@ -110,12 +230,16 @@ export function newWorldState(seed: number): WorldState {
     playedSeconds: 0,
     recordS: 0,
     settings: DEFAULT_SETTINGS,
-    player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null },
+    player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null, carried: [], carriedSelected: 0 },
     cars: {},
+    trailers: {},
     looseParts: {},
     looseItems: {},
     lootedPois: [],
-    consumedParts: [],
+    revivedWrecks: [],
+    job: null,
+    stickersUnplaced: 0,
+    deliveredPois: [],
   };
 }
 
@@ -132,8 +256,23 @@ export class GameWorld {
 
   constructor(state: WorldState) {
     this.state = state;
-    // Continue part ids past anything already in the save, so ids stay unique.
-    this.partCounter = Object.keys(state.looseParts).length + state.consumedParts.length + 1;
+    // Continue runtime ids past anything already in the save, or a reloaded game
+    // hands out an id something is still holding. Counting collections is not
+    // enough — the pack persists across a save and its items keep their `rt:`
+    // ids — so the highest id actually present is what the counter resumes from.
+    let highest = 0;
+    const bump = (id: string): void => {
+      if (!id.startsWith(RUNTIME_ID_PREFIX)) return;
+      const n = Number.parseInt(id.slice(RUNTIME_ID_PREFIX.length), 36);
+      if (Number.isFinite(n) && n >= highest) highest = n + 1;
+    };
+    for (const id of Object.keys(state.looseParts)) bump(id);
+    for (const id of Object.keys(state.looseItems)) bump(id);
+    for (const item of state.player.carried) bump(item.id);
+    for (const car of Object.values(state.cars)) {
+      for (const part of Object.values(car.gizmos)) bump(part.id);
+    }
+    this.partCounter = highest;
   }
 
   get seed(): number {
@@ -152,7 +291,7 @@ export class GameWorld {
 
   /** Unique id for parts created at runtime, e.g. spawned by the player. */
   runtimePartId(): string {
-    return `rt:${(this.partCounter++).toString(36)}`;
+    return `${RUNTIME_ID_PREFIX}${(this.partCounter++).toString(36)}`;
   }
 
   apply(delta: WorldDelta): void {
@@ -213,6 +352,49 @@ export class GameWorld {
         if (car) car.fuelLitres = Math.max(0, delta.litres);
         break;
       }
+      case 'car_fluid': {
+        const car = s.cars[delta.carId];
+        if (!car) break;
+        const level = Math.max(0, delta.litres);
+        if (delta.fluid === 'coolant') car.coolantLitres = level;
+        else car.oilLitres = level;
+        break;
+      }
+      case 'car_storage': {
+        const car = s.cars[delta.carId];
+        // Out-of-range cells are ignored rather than growing the array: capacity is
+        // the model's, fixed when the car was created.
+        if (car && delta.cell >= 0 && delta.cell < car.storage.length) {
+          car.storage[delta.cell] = delta.item;
+        }
+        break;
+      }
+      case 'trailer_add':
+        s.trailers[delta.trailer.id] = delta.trailer;
+        break;
+      case 'trailer_transform': {
+        const trailer = s.trailers[delta.trailerId];
+        if (trailer) {
+          trailer.x = delta.x;
+          trailer.y = delta.y;
+          trailer.z = delta.z;
+          trailer.qx = delta.qx;
+          trailer.qy = delta.qy;
+          trailer.qz = delta.qz;
+          trailer.qw = delta.qw;
+        }
+        break;
+      }
+      case 'trailer_hitch': {
+        const trailer = s.trailers[delta.trailerId];
+        if (trailer) trailer.hitchedTo = delta.carId;
+        break;
+      }
+      case 'trailer_cargo': {
+        const trailer = s.trailers[delta.trailerId];
+        if (trailer) trailer.cargoKg = Math.max(0, delta.cargoKg);
+        break;
+      }
       case 'gizmo_attach': {
         const car = s.cars[delta.carId];
         if (car) car.gizmos[delta.anchor] = delta.part;
@@ -260,6 +442,46 @@ export class GameWorld {
         break;
       case 'poi_looted':
         if (!s.lootedPois.includes(delta.poiIndex)) s.lootedPois.push(delta.poiIndex);
+        break;
+      case 'wreck_revived':
+        if (!s.revivedWrecks.includes(delta.wreckId)) s.revivedWrecks.push(delta.wreckId);
+        break;
+      case 'job_accept':
+        s.job = delta.job;
+        break;
+      case 'job_complete': {
+        // The sticker is minted here, not on placement: the reward is earned by
+        // arriving, and where it goes on the car is a separate decision.
+        //
+        // Both ends are recorded as cleared. The destination stops a stop being
+        // delivered to twice; the ORIGIN is what stops the same pallet being hauled
+        // again and again, which it otherwise would be the moment `job` went null.
+        const origin = s.job?.fromPoi ?? -1;
+        s.job = null;
+        s.stickersUnplaced += 1;
+        for (const index of [delta.poiIndex, origin]) {
+          if (index >= 0 && !s.deliveredPois.includes(index)) s.deliveredPois.push(index);
+        }
+        break;
+      }
+      case 'job_abandon':
+        s.job = null;
+        break;
+      case 'sticker_place': {
+        const car = s.cars[delta.carId];
+        if (car && s.stickersUnplaced > 0) {
+          car.stickers.push(delta.sticker);
+          s.stickersUnplaced -= 1;
+        }
+        break;
+      }
+      case 'inventory':
+        // Copy the array, share the items. The slot order must not alias the live
+        // pack (it mutates in place, and a save snapshot taken mid-frame would see
+        // a half-spliced array), but the item objects are deliberately the same
+        // ones so per-item field changes are already persisted.
+        s.player.carried = delta.items.slice();
+        s.player.carriedSelected = delta.selected;
         break;
       case 'record':
         // Monotonic: the personal-record marker must never move backwards.

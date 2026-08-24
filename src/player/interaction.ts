@@ -1,13 +1,32 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
-import type { GameWorld } from '../game/state';
+import type { CarState, GameWorld, StickerState } from '../game/state';
 import type { InputFrame } from '../core/input';
-import type { Inventory, Item, PartItem, FuelCanItem, ToolKind } from '../items/items';
+import type {
+  Inventory,
+  Item,
+  PartItem,
+  FluidCanItem,
+  FluidKind,
+  ToolKind,
+} from '../items/items';
 import { itemLabel, itemMass } from '../items/items';
-import type { PartInstance } from '../parts/registry';
-import { applyBrush, applySponge, variant, RUST_CLEAN_EPSILON, BRUSH_DIRT_FLOOR } from '../parts/registry';
+import type { CarStats, PartInstance } from '../parts/registry';
+import {
+  applyBrush,
+  applySponge,
+  coolantCapacity,
+  oilCapacity,
+  variant,
+  RUST_CLEAN_EPSILON,
+  BRUSH_DIRT_FLOOR,
+} from '../parts/registry';
 import type { LoosePartField } from '../parts/loose';
+import type { WreckField } from '../world/wrecks';
 import type { Vehicle } from '../vehicle/vehicle';
+import { jobAt, type FreightField } from '../world/freight';
+import type { TrailerField } from '../vehicle/trailer';
+import { carModel } from '../vehicle/carmodels';
 import { setCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
@@ -41,12 +60,23 @@ const CONDITION_EMIT_INTERVAL = 0.25;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
 /**
+ * How far the towing car may be from the player while coupling a trailer. Generous
+ * on purpose: you stand at the drawbar, and the car you are hooking to is a whole
+ * car-length away by definition.
+ */
+const HITCH_CAR_RANGE = 9;
+/**
+ * The only sticker design so far: a five-pointed star, one per completed haul.
+ * Named rather than hardcoded at the call site so a pack of designs can be added
+ * without touching the placement path or the save format.
+ */
+const STICKER_KIND = 'star';
+/**
  * Hits closer than this are treated as "no hit". The eye origin sits inside the
  * player's own capsule, and `castRayAndGetNormal(..., solid = true)` returns an
  * immediate zero-distance self-hit when the ray is not told to exclude that body.
  * Resolving that self-hit to a valid target is what made the bug invisible, so a
- * near-zero `toi` is now a programming error that degrades to a miss, never a
- * phantom pickup.
+ * floor is applied here rather than trusting the exclusion alone.
  */
 const MIN_HIT_TOI = 0.05;
 
@@ -54,6 +84,12 @@ type Target =
   | { kind: 'none' }
   | { kind: 'loose-part'; partId: string }
   | { kind: 'loose-item'; itemId: string }
+  | { kind: 'revivable-wreck'; wreckId: string }
+  | { kind: 'trailer'; trailerId: string }
+  | { kind: 'pallet'; poiIndex: number }
+  | { kind: 'freight-sign'; poiIndex: number }
+  | { kind: 'boot'; carId: string }
+  | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
 /**
@@ -65,7 +101,75 @@ type Target =
 export interface InteractionResult {
   prompt: string | null;
   sound: FoleyEvent | null;
+  /** The held action running this tick, for the audio layer's continuous voices. */
   continuous: FoleyContinuous;
+  /**
+   * Boot contents while the player is looking into one, else null. Reported rather
+   * than drawn here for the same reason the sounds are: this class owns the world,
+   * not the screen.
+   */
+  boot: readonly (Item | null)[] | null;
+}
+
+const FLUID_POUR_RATE = 1.2;
+/**
+ * How close you have to stand to a car to pour into it. Comfortably more than the
+ * 2.6 m aim ray, because pouring is not aimed: you walk up to the car, not to a
+ * spot on it.
+ */
+const POUR_RANGE = 4.2;
+/** Within this many litres of capacity a reservoir reads as full. */
+const FLUID_FULL_EPSILON = 0.05;
+/**
+ * Reach and forgiveness for the boot. Generous: it is a region the size of a car's
+ * tail, not a point, and the player stands behind the car looking at it rather than
+ * aiming at a latch.
+ */
+const BOOT_RANGE = 3.2;
+const BOOT_PICK_RADIUS = 0.95;
+
+/**
+ * The most recently stowed item in a boot, with its cell.
+ *
+ * Last in, first out. A boot is a hole you drop things into, not a shelf you index,
+ * and searching backwards is what makes "put the can in, take the can out" work
+ * without the player ever choosing a slot.
+ */
+function lastStowed(car: CarState): { cell: number; item: Item } | null {
+  for (let i = car.storage.length - 1; i >= 0; i--) {
+    const item = car.storage[i];
+    if (item) return { cell: i, item };
+  }
+  return null;
+}
+
+/**
+ * Which reservoir a fluid goes into on this car, with its current level and size.
+ *
+ * Null means this car cannot take that fluid at all — the only case being petrol
+ * into a diesel or the reverse. Coolant and oil fit every engine, so they never
+ * fail; a can of the wrong fuel is the one mistake the game lets you make and then
+ * refuses.
+ */
+function fluidTarget(
+  car: CarState,
+  stats: CarStats,
+  fluid: FluidKind,
+): { label: string; level: number; capacity: number } | null {
+  switch (fluid) {
+    case 'petrol':
+    case 'diesel':
+      if (stats.tankCapacity <= 0 || stats.fuel !== fluid) return null;
+      return { label: 'tank', level: car.fuelLitres, capacity: stats.tankCapacity };
+    case 'coolant':
+      return {
+        label: 'coolant',
+        level: car.coolantLitres,
+        capacity: coolantCapacity(stats.engine),
+      };
+    case 'oil':
+      return { label: 'oil', level: car.oilLitres, capacity: oilCapacity(stats.engine) };
+  }
 }
 
 interface Resolved {
@@ -104,13 +208,27 @@ export class Interaction {
   /** This tick's discrete sound and held action; reset at the top of every tick. */
   private sound: FoleyEvent | null = null;
   private continuous: FoleyContinuous = null;
+  /** Scene-graph raycaster and scratch, for picking real bodywork. */
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly rayOrigin = new THREE.Vector3();
+  private readonly rayDir = new THREE.Vector3();
+  private readonly qBody = new THREE.Quaternion();
+  private readonly hits: THREE.Intersection[] = [];
 
   constructor(
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly inventory: Inventory,
     private readonly loose: LoosePartField,
-    private readonly getVehicle: () => Vehicle | null,
+    private readonly wrecks: WreckField,
+    private readonly trailers: TrailerField,
+    private readonly freight: FreightField,
+    /** The car in reach, WITH its id. Never re-derive the id from geometry. */
+    private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
+    /** Materialises a freed car; the composition root owns the Vehicle map. */
+    private readonly onCarFreed: (car: CarState) => void,
+    /** Draws a newly placed sticker; the renderer owns the decal meshes. */
+    private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
   ) {}
 
   /** Gives interaction a handle on the on-foot character, so enter/exit can move it. */
@@ -140,7 +258,7 @@ export class Interaction {
 
     if (this.world.state.player.drivingCarId) {
       if (interactPressed) this.tryExit(roadS);
-      return { prompt: null, sound: this.sound, continuous: null };
+      return { prompt: null, sound: this.sound, continuous: null, boot: null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -153,7 +271,13 @@ export class Interaction {
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
 
-    return { prompt, sound: this.sound, continuous: this.continuous };
+    // Resolved AFTER the actions above, so stowing or taking is reflected in the
+    // same frame the player sees rather than one behind.
+    const boot =
+      resolved.target.kind === 'boot'
+        ? (this.world.state.cars[resolved.target.carId]?.storage ?? null)
+        : null;
+    return { prompt, sound: this.sound, continuous: this.continuous, boot };
   }
 
   private resolve(
@@ -198,12 +322,22 @@ export class Interaction {
       this.player?.rigidBody,
     );
     if (hit && hit.toi >= MIN_HIT_TOI) {
-      const partId = this.loose.partIdForCollider(hit.colliderHandle);
+      // One physics hit, six possible owners. Each map is keyed by collider handle,
+      // so the whole chain is a handful of hash lookups on the aim ray's hit.
+      const h = hit.colliderHandle;
+      const partId = this.loose.partIdForCollider(h);
+      const itemId = partId ? null : this.loose.itemIdForCollider(h);
+      const wreckId = partId || itemId ? null : this.wrecks.wreckIdForCollider(h);
+      const trailerId = partId || itemId || wreckId ? null : this.trailers.trailerIdForCollider(h);
+      const claimed = partId || itemId || wreckId || trailerId;
+      const palletPoi = claimed ? null : this.freight.palletPoiForCollider(h);
+      const signPoi = claimed || palletPoi !== null ? null : this.freight.signPoiForCollider(h);
       if (partId) keep(hit.toi, { kind: 'loose-part', partId });
-      else {
-        const itemId = this.loose.itemIdForCollider(hit.colliderHandle);
-        if (itemId) keep(hit.toi, { kind: 'loose-item', itemId });
-      }
+      else if (itemId) keep(hit.toi, { kind: 'loose-item', itemId });
+      else if (wreckId) keep(hit.toi, { kind: 'revivable-wreck', wreckId });
+      else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
+      else if (palletPoi !== null) keep(hit.toi, { kind: 'pallet', poiIndex: palletPoi });
+      else if (signPoi !== null) keep(hit.toi, { kind: 'freight-sign', poiIndex: signPoi });
     }
 
     // Anchors have no colliders (a bare mount must be aimable), so project the ray
@@ -220,7 +354,8 @@ export class Interaction {
       vehicleDist = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ);
 
       const anchors = vehicle.modelMeasure.anchors;
-      const gizmos = this.world.state.cars[carId].gizmos;
+      const carState = this.world.state.cars[carId];
+      const gizmos = carState.gizmos;
       const held = this.inventory.held;
       const heldPart = held?.type === 'part' ? held.part : null;
 
@@ -267,31 +402,98 @@ export class Interaction {
       // that is unambiguously the intent.
       if (bestFit) keep(bestFitAlong, bestFit);
       else if (bestRemove) keep(bestRemoveAlong, bestRemove);
+
+      // The boot. Picked like an anchor rather than by a collider, because the boot
+      // is not a modelled object on any of these shells — it is a REGION: the rear
+      // face of the measured body box, at about waist height. Standing behind the
+      // car and looking at its tail is the entire gesture, and it needs no openable
+      // door and no new geometry.
+      if (carState.storage.length > 0) {
+        const half = vehicle.modelMeasure.halfExtents;
+        this.vScratch.set(0, -half[1] * 0.1, -half[2]).applyQuaternion(this.qScratch);
+        const bx = this.vScratch.x + t.x - eyeX;
+        const by = this.vScratch.y + t.y - eyeY;
+        const bz = this.vScratch.z + t.z - eyeZ;
+        const along = bx * dx + by * dy + bz * dz;
+        if (along > 0 && along <= BOOT_RANGE) {
+          const px = bx - dx * along;
+          const py = by - dy * along;
+          const pz = bz - dz * along;
+          if (px * px + py * py + pz * pz < BOOT_PICK_RADIUS * BOOT_PICK_RADIUS) {
+            keep(along, { kind: 'boot', carId });
+          }
+        }
+      }
+
+      // Bodywork, for sticking a sticker on. Deliberately a MESH raycast rather
+      // than the physics hit: the chassis collider is a box with its floor raised to
+      // the wheel centres, so a collider hit would place stickers in mid-air off the
+      // real silhouette. Only offered when there is actually a sticker to place, so
+      // it never competes with a mount or a fuel pour.
+      if (this.world.state.stickersUnplaced > 0 && vehicleDist <= VEHICLE_RANGE) {
+        const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
+        if (surface) keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
+      }
     }
 
     // `lastAnchorTarget` was already recorded by `keep`.
     return { target, vehicle, carId, vehicleDist };
   }
 
-  /** The `getVehicle()` result, paired with the state car it wraps. */
-  private targetVehicle(): { carId: string; vehicle: Vehicle } | null {
-    const vehicle = this.getVehicle();
-    if (!vehicle) return null;
-    const driving = this.world.state.player.drivingCarId;
-    if (driving) return { carId: driving, vehicle };
-    // On foot, identify the wrapped car by matching the chassis to its state entry.
-    const t = vehicle.chassis.translation(this.tScratch);
-    let bestId: string | null = null;
-    let bestD = Infinity;
-    for (const id of Object.keys(this.world.state.cars)) {
-      const car = this.world.state.cars[id]!;
-      const d = (car.x - t.x) ** 2 + (car.z - t.z) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        bestId = id;
-      }
+  /**
+   * Nearest point on a car's drawn bodywork along the aim ray, in the car's own
+   * local space.
+   *
+   * Three.js raycasting rather than Rapier: the physics chassis is a single box, and
+   * a sticker placed on a box would float off the bonnet of anything with a shape.
+   * The scene graph has the real triangles, so it is the only thing that can answer
+   * "where exactly is the player pointing on this car".
+   */
+  private pickBody(
+    vehicle: Vehicle,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): { distance: number; local: { point: THREE.Vector3; normal: THREE.Vector3 } } | null {
+    this.raycaster.set(this.rayOrigin.set(eyeX, eyeY, eyeZ), this.rayDir.set(dx, dy, dz));
+    this.raycaster.far = VEHICLE_RANGE;
+    this.hits.length = 0;
+    this.raycaster.intersectObject(vehicle.root, true, this.hits);
+    for (const hit of this.hits) {
+      // Wheels are not bodywork, and a sticker on a rotating wheel would smear.
+      if (/^wheel_/.test(hit.object.name)) continue;
+      if (!hit.face) continue;
+      const point = vehicle.root.worldToLocal(hit.point.clone());
+      // Face normals are in the hit object's local space; take them to world and
+      // then into the car's frame, so a normal on a rotated sub-mesh is still right.
+      const normal = hit.face.normal
+        .clone()
+        .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld))
+        .normalize();
+      vehicle.root.getWorldQuaternion(this.qBody);
+      normal.applyQuaternion(this.qBody.invert()).normalize();
+      this.hits.length = 0;
+      return { distance: hit.distance, local: { point, normal } };
     }
-    return bestId ? { carId: bestId, vehicle } : null;
+    this.hits.length = 0;
+    return null;
+  }
+
+  /**
+   * The car interaction is aimed at, with its id.
+   *
+   * The id comes from the caller, which already knows it. It used to be recovered
+   * here by matching the live chassis position against every `CarState`'s SAVED
+   * transform — which is correct only while those two agree. They do not agree for
+   * any car moved without a `car_transform` delta, and the failure is silent and
+   * nasty: `resolved.vehicle` is the right car while `resolved.carId` names a
+   * different one, so a trailer coupled to the car in front of you reads as absent.
+   */
+  private targetVehicle(): { carId: string; vehicle: Vehicle } | null {
+    return this.getVehicle();
   }
 
   private promptFor(resolved: Resolved): string | null {
@@ -319,6 +521,68 @@ export class Interaction {
       return `[F] pick up ${itemLabel(item)}`;
     }
 
+    if (t.kind === 'revivable-wreck') {
+      const label = this.wrecks.labelFor(t.wreckId);
+      if (!label) return null;
+      if (held?.type !== 'tool' || held.tool !== 'wrench') {
+        return `${label} — might still run, with a wrench`;
+      }
+      const pct = Math.round(this.wrecks.progressOf(t.wreckId) * 100);
+      return pct > 0 ? `[LMB] freeing ${label} — ${pct}%` : `[LMB] free the ${label}`;
+    }
+
+    if (t.kind === 'pallet') {
+      const job = jobAt(this.world.state.seed, t.poiIndex);
+      if (!job) return null;
+      const km = (job.distanceM / 1000).toFixed(0);
+      if (this.world.state.job) return `${job.cargoKg} kg — already hauling`;
+      const trailer = resolved.carId ? this.trailers.hitchedTo(resolved.carId) : null;
+      if (!trailer) return `${job.cargoKg} kg, ${km} km down the road — needs a trailer`;
+      if (trailer.cargoKg > 0) return `${job.cargoKg} kg — your trailer is loaded`;
+      return `[F] load ${job.cargoKg} kg — ${km} km down the road`;
+    }
+
+    if (t.kind === 'freight-sign') {
+      const job = this.world.state.job;
+      if (!job || job.toPoi !== t.poiIndex) return null;
+      const trailer = resolved.carId ? this.trailers.hitchedTo(resolved.carId) : null;
+      if (!trailer || trailer.cargoKg <= 0) return 'this is the place — bring the load';
+      return `[F] deliver ${Math.round(trailer.cargoKg)} kg`;
+    }
+
+    if (t.kind === 'boot') {
+      const car = this.world.state.cars[t.carId];
+      if (!car) return null;
+      const used = car.storage.filter((cell) => cell !== null).length;
+      const total = car.storage.length;
+      if (held) {
+        if (used >= total) return `boot full — ${used}/${total}`;
+        return `[F] stow ${itemLabel(held)} — boot ${used}/${total}`;
+      }
+      const top = lastStowed(car);
+      if (!top) return `boot empty — ${total} cells`;
+      return `[F] take ${itemLabel(top.item)} — boot ${used}/${total}`;
+    }
+
+    if (t.kind === 'car-body') {
+      const spare = this.world.state.stickersUnplaced;
+      if (spare <= 0) return null;
+      return `[F] stick it on — ${spare} to place`;
+    }
+
+    if (t.kind === 'trailer') {
+      const trailer = this.trailers.get(t.trailerId);
+      if (!trailer) return null;
+      const load = trailer.cargoKg > 0 ? ` — ${Math.round(trailer.cargoKg)} kg aboard` : ' — empty';
+      if (trailer.hitchedTo !== null) return `[F] unhitch trailer${load}`;
+      if (!resolved.carId || !resolved.vehicle || resolved.vehicleDist > HITCH_CAR_RANGE) {
+        return `trailer${load} — bring a car alongside`;
+      }
+      const already = this.trailers.hitchedTo(resolved.carId);
+      if (already && already.id !== t.trailerId) return 'that car is already towing';
+      return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
+    }
+
     if (t.kind === 'anchor') {
       const car = this.world.state.cars[t.carId];
       if (!car) return null;
@@ -326,17 +590,8 @@ export class Interaction {
       if (!anchor) return null;
       const fitted = car.gizmos[t.anchorId];
 
-      // The car is complete, so any anchor doubles as the filler neck: pour wherever
-      // the player is aiming rather than hunting a dedicated fuel_tank mount.
-      if (held?.type === 'fuel_can') {
-        const stats = resolved.vehicle?.stats;
-        if (stats && stats.tankCapacity <= 0) return '[LMB] pour — no fuel tank';
-        if (stats?.fuel && held.fuel !== stats.fuel) {
-          return `[LMB] pour ${held.fuel} — wrong fuel (needs ${stats.fuel})`;
-        }
-        return `[LMB] pour ${held.fuel}`;
-      }
-
+      // Pouring is no longer aimed at anything: see the fluid-can branch at the end
+      // of this method. Standing near the car with a can is the whole gesture.
       if (fitted) {
         const toolPrompt = this.toolPrompt(held, fitted);
         if (toolPrompt) return toolPrompt;
@@ -353,9 +608,37 @@ export class Interaction {
       }
     }
 
+    // Pouring: proximity, not aim. Holding a can anywhere near a car offers the
+    // transfer, because hunting for a filler neck on a low-poly shell that has no
+    // modelled filler neck is busywork. It sits last so anything specific under the
+    // crosshair — a loose part, a pallet, a trailer — still wins.
+    if (held?.type === 'fluid_can' && resolved.vehicle && resolved.carId) {
+      if (resolved.vehicleDist > POUR_RANGE) return null;
+      return this.pourPrompt(held, resolved.carId, resolved.vehicle);
+    }
+
     // Car entry remains bound to the interaction key, but vehicle prompts are
     // deliberately absent to keep the driving/on-foot HUD free of enter hints.
     return null;
+  }
+
+  /**
+   * What pouring this can into this car would do, or why it would not.
+   *
+   * The fluid decides the reservoir with no ambiguity, so there is no picker and no
+   * mode: coolant goes in the coolant, oil in the oil, and petrol or diesel in the
+   * tank if the engine takes that one.
+   */
+  private pourPrompt(can: FluidCanItem, carId: string, vehicle: Vehicle): string | null {
+    const car = this.world.state.cars[carId];
+    if (!car) return null;
+    if (can.litres <= 0) return `${can.fluid} can — empty`;
+    const target = fluidTarget(car, vehicle.stats, can.fluid);
+    if (!target) return `[LMB] pour ${can.fluid} — this engine takes ${vehicle.stats.fuel}`;
+    if (target.level >= target.capacity - FLUID_FULL_EPSILON) {
+      return `${target.label} full — ${target.capacity.toFixed(1)} L`;
+    }
+    return `[LMB] pour ${can.fluid} — ${target.label} ${target.level.toFixed(1)}/${target.capacity.toFixed(1)} L`;
   }
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
@@ -371,8 +654,26 @@ export class Interaction {
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
     if (!held) return;
-    if (held.type === 'tool') this.scrub(dt, held.tool, resolved);
-    else if (held.type === 'fuel_can') this.pourFuel(dt, held, resolved);
+    if (held.type === 'tool') {
+      // The wrench is the one tool that acts on something other than a part, so it
+      // branches before `scrub` rather than inside it.
+      if (held.tool === 'wrench') this.wrench(dt, resolved);
+      else this.scrub(dt, held.tool, resolved);
+    } else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
+  }
+
+  /**
+   * Works a derelict loose. The whole car supply of the game is this method: there
+   * is no spawn menu, so every vehicle after the first is one the player freed.
+   */
+  private wrench(dt: number, resolved: Resolved): void {
+    const t = resolved.target;
+    if (t.kind !== 'revivable-wreck') return;
+    this.continuous = 'scrub';
+    const car = this.wrecks.advance(t.wreckId, dt);
+    if (!car) return;
+    this.onCarFreed(car);
+    this.sound = 'mount';
   }
 
   private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {
@@ -395,22 +696,37 @@ export class Interaction {
     }
   }
 
-  private pourFuel(dt: number, can: FuelCanItem, resolved: Resolved): void {
-    const t = resolved.target;
-    if (t.kind !== 'anchor') return;
-    const car = this.world.state.cars[t.carId];
-    const stats = resolved.vehicle?.stats;
-    if (!car || !stats || stats.tankCapacity <= 0) return;
-    if (stats.fuel && can.fuel !== stats.fuel) return;
+  /**
+   * Pours whatever is in the held can into whatever reservoir it belongs in.
+   *
+   * Gated on distance to the car, not on what the crosshair is over: you walk up
+   * with the can and hold the button. One code path for all four fluids, because
+   * the only thing the kind changes is which number goes up.
+   */
+  private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
+    const carId = resolved.carId;
+    const vehicle = resolved.vehicle;
+    if (!carId || !vehicle || resolved.vehicleDist > POUR_RANGE) return;
     if (can.litres <= 0) return;
+    const car = this.world.state.cars[carId];
+    if (!car) return;
 
-    const amount = Math.min(FUEL_POUR_RATE * dt, can.litres);
-    const target = Math.min(car.fuelLitres + amount, stats.tankCapacity);
-    const poured = target - car.fuelLitres;
-    if (poured <= 0) return; // tank full
+    const target = fluidTarget(car, vehicle.stats, can.fluid);
+    if (!target) return;
+
+    const room = target.capacity - target.level;
+    if (room <= FLUID_FULL_EPSILON) return;
+    const poured = Math.min(FLUID_POUR_RATE * dt, can.litres, room);
+    if (poured <= 0) return;
+
     can.litres -= poured;
     this.continuous = 'pour';
-    this.world.apply({ t: 'car_fuel', carId: t.carId, litres: target });
+    const level = target.level + poured;
+    if (can.fluid === 'petrol' || can.fluid === 'diesel') {
+      this.world.apply({ t: 'car_fuel', carId, litres: level });
+    } else {
+      this.world.apply({ t: 'car_fluid', carId, fluid: can.fluid, litres: level });
+    }
   }
 
   private mount(resolved: Resolved): void {
@@ -441,6 +757,109 @@ export class Interaction {
       } else {
         this.sound = 'refused';
       }
+      return;
+    }
+
+    if (t.kind === 'trailer') {
+      const trailer = this.trailers.get(t.trailerId);
+      if (!trailer) return;
+      if (trailer.hitchedTo !== null) {
+        trailer.unhitch();
+        this.sound = 'drop';
+        return;
+      }
+      // One trailer per car: a second coupling on the same rear axle would put two
+      // joints on one anchor and the solver would fight itself.
+      if (!resolved.carId || !resolved.vehicle || resolved.vehicleDist > HITCH_CAR_RANGE) return;
+      if (this.trailers.hitchedTo(resolved.carId)) return;
+      trailer.hitchTo(resolved.vehicle, resolved.carId);
+      this.sound = 'mount';
+      return;
+    }
+
+    // Accepting a haul. The job is recorded and the destination's sign lights on the
+    // next frame's lamp push — no chunk rebuild, nothing else to tell the player.
+    if (t.kind === 'pallet') {
+      if (this.world.state.job) return;
+      const job = jobAt(this.world.state.seed, t.poiIndex);
+      if (!job || !resolved.carId) return;
+      const trailer = this.trailers.hitchedTo(resolved.carId);
+      if (!trailer || trailer.cargoKg > 0) return;
+      trailer.setCargo(job.cargoKg);
+      this.world.apply({
+        t: 'job_accept',
+        job: { fromPoi: job.fromPoi, toPoi: job.toPoi, cargoKg: job.cargoKg },
+      });
+      this.freight.takePallet(t.poiIndex);
+      this.sound = 'mount';
+      return;
+    }
+
+    // Delivering. The sign is both the marker and the receiver: one object doing
+    // both jobs is why this system needs no UI at all.
+    if (t.kind === 'freight-sign') {
+      const job = this.world.state.job;
+      if (!job || job.toPoi !== t.poiIndex || !resolved.carId) return;
+      const trailer = this.trailers.hitchedTo(resolved.carId);
+      if (!trailer || trailer.cargoKg <= 0) return;
+      trailer.setCargo(0);
+      this.world.apply({ t: 'job_complete', poiIndex: t.poiIndex });
+      this.sound = 'mount';
+      return;
+    }
+
+    // The boot. One key does both directions, decided by whether your hands are
+    // full: holding something stows it, holding nothing takes the last thing back
+    // out. That is what lets the whole feature exist without a grid, a cursor or a
+    // modal screen — the prompt line already says what will happen.
+    if (t.kind === 'boot') {
+      const car = this.world.state.cars[t.carId];
+      if (!car) return;
+      if (held) {
+        const cell = car.storage.indexOf(null);
+        if (cell < 0) {
+          this.sound = 'refused';
+          return;
+        }
+        this.inventory.remove(held.id);
+        this.world.apply({ t: 'car_storage', carId: t.carId, cell, item: held });
+        this.sound = 'drop';
+        return;
+      }
+      const top = lastStowed(car);
+      if (!top) return;
+      // Refused rather than silently dropped: a boot item that vanished because the
+      // pack was full would be the worst possible outcome of pressing one key.
+      if (!this.inventory.add(top.item)) {
+        this.sound = 'refused';
+        return;
+      }
+      this.world.apply({ t: 'car_storage', carId: t.carId, cell: top.cell, item: null });
+      this.sound = 'pickup';
+      return;
+    }
+
+    // Placing a sticker. Permanent by design: no removal path exists anywhere, and
+    // it stays with this car if the player ever drives another.
+    if (t.kind === 'car-body') {
+      if (this.world.state.stickersUnplaced <= 0) return;
+      const car = this.world.state.cars[t.carId];
+      if (!car) return;
+      const sticker: StickerState = {
+        kind: STICKER_KIND,
+        x: t.point.x,
+        y: t.point.y,
+        z: t.point.z,
+        nx: t.normal.x,
+        ny: t.normal.y,
+        nz: t.normal.z,
+        // Spin from where the player happened to be standing, so a bonnet full of
+        // them reads as hand-applied rather than stamped.
+        roll: Math.atan2(t.normal.x, t.normal.z),
+      };
+      this.world.apply({ t: 'sticker_place', carId: t.carId, sticker });
+      this.onStickerPlaced(t.carId, sticker);
+      this.sound = 'mount';
       return;
     }
 
@@ -555,11 +974,11 @@ export class Interaction {
   private tryExit(roadS: number): void {
     const carId = this.world.state.player.drivingCarId;
     if (!carId) return;
-    const vehicle = this.getVehicle();
-    if (!vehicle) return;
+    const active = this.getVehicle();
+    if (!active) return;
     this.world.apply({ t: 'exit_car' });
     this.sound = 'exit-car';
-    const exit = this.computeExitPosition(carId, vehicle);
+    const exit = this.computeExitPosition(carId, active.vehicle);
     if (this.player) {
       this.player.setEnabled(true);
       if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);

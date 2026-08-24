@@ -6,12 +6,15 @@ import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
 import type { GameWorld } from '../game/state';
 import type { FuelType } from '../parts/registry';
-import type { FuelCanItem, ToolItem, ToolKind } from '../items/items';
+import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
 import { makeFlatMaterial } from '../render/materials';
 import { carModelMeasure, createStaticCarModel } from '../render/carmodel';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
+import type { WreckField } from './wrecks';
+import { jobAt, type FreightField } from './freight';
+import type { TrailerField } from '../vehicle/trailer';
 
 /**
  * Points of interest: the roadside stops that give the drive a reason to continue.
@@ -90,6 +93,36 @@ export function poisBetween(seed: number, fromS: number, toS: number): Poi[] {
   }
   return result;
 }
+
+/**
+ * The POI at a given slot, or null when that slot is empty desert. Same rolls as
+ * `poisBetween`, factored out so the freight system can resolve a destination slot
+ * without sampling a whole stretch of road.
+ */
+export function poiAt(seed: number, index: number): Poi | null {
+  if (index < 1) return null;
+  const s = index * POI_SPACING;
+  if (s <= 0 || s > ROAD_LENGTH) return null;
+  if (hash01(seed, POI_DOMAIN, index) >= POI_OCCUPANCY) return null;
+
+  const kindRoll = hash01(seed, POI_DOMAIN, index, 1);
+  let kind: PoiKind;
+  if (kindRoll < KIND_WRECK) kind = 'roadside_wrecks';
+  else if (kindRoll < KIND_GAS) kind = 'gas_stop';
+  else if (kindRoll < KIND_CAMP) kind = 'camp';
+  else kind = 'workshop';
+
+  const side = hash01(seed, POI_DOMAIN, index, 2) < 0.5 ? -1 : 1;
+  return {
+    index,
+    s,
+    lateral: side * (12 + hash01(seed, POI_DOMAIN, index, 3) * 28),
+    kind,
+    variantSeed: hash(seed, POI_DOMAIN, index, 4),
+  };
+}
+
+export { POI_SPACING };
 
 /** Running sub-index so every generated part/item in a POI gets a distinct id. */
 interface LootCounter {
@@ -195,6 +228,10 @@ function geometryToTrimesh(
  * Static collider for a primitive. The streamer owns cleanup: it walks the returned
  * `bodies` array and calls `physics.removeBody`, which forgets the surface and
  * removes the fixed body plus its collider.
+ *
+ * Returns the collider so a caller that needs to identify it later (a revivable
+ * wreck, which must be recognised when the aim ray hits it) can register the
+ * handle. Null when the chunk carries no physics.
  */
 function addStaticCollider(
   ctx: ChunkContext,
@@ -203,13 +240,14 @@ function addStaticCollider(
   surface: SurfaceType,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-): void {
-  if (!ctx.hasPhysics) return;
+): RAPIER.Collider | null {
+  if (!ctx.hasPhysics) return null;
   const t = geometryToTrimesh(geometry, matrix);
   const collider = ctx.physics.addStaticTrimesh(t.vertices, t.indices, surface);
   colliders.push(collider);
   const parent = collider.parent();
   if (parent) bodies.push(parent);
+  return collider;
 }
 
 /** Visual mesh + matching static collider, sharing one (unmutated) geometry. */
@@ -245,16 +283,58 @@ function addVisual(
   group.add(mesh);
 }
 
-function makeFuelCan(
+function makeFluidCan(
   world: GameWorld,
   poi: Poi,
-  fuel: FuelType,
+  fluid: FluidKind,
   litres: number,
   capacity: number,
   counter: LootCounter,
-): FuelCanItem {
+): FluidCanItem {
   const sub = counter.sub++;
-  return { type: 'fuel_can', id: world.generatedPartId('poi_item', poi.index, sub), fuel, capacity, litres };
+  return {
+    type: 'fluid_can',
+    id: world.generatedPartId('poi_item', poi.index, sub),
+    fluid,
+    capacity,
+    litres,
+  };
+}
+
+/**
+ * What a gas stop stocks, by weight.
+ *
+ * Fuel dominates because fuel is the pressure the player feels every minute;
+ * coolant and oil are the ones they only think about every 150 km or so, so they
+ * turn up often enough to be findable and rarely enough to be worth a detour. Small
+ * cans for the engine fluids, because that is how they are sold.
+ *
+ * The petrol/diesel split is matched to the CATALOGUE, not chosen for flavour. Of
+ * the 24 bodies, 4 run on diesel — the PSX estate, van and box truck, and the
+ * Quaternius off-roader — so roughly one car in six is a diesel. Cars are found
+ * rather than spawned now, and the wreck pool draws from the whole catalogue, so
+ * that one-in-six is the real exposure a player has.
+ *
+ * The first cut had diesel at 0.26 against petrol's 0.40, which oversupplied it
+ * about two to one: a quarter of every can in the desert would have been unusable
+ * to five players out of six. The split below leaves diesel a slight surplus over
+ * its share of the fleet, so a diesel driver is not starved by bad luck, without
+ * littering the road with cans nobody can pour.
+ */
+const FLUID_STOCK: readonly { fluid: FluidKind; weight: number; capacity: number }[] = [
+  { fluid: 'petrol', weight: 0.5, capacity: 20 },
+  { fluid: 'diesel', weight: 0.15, capacity: 20 },
+  { fluid: 'coolant', weight: 0.19, capacity: 5 },
+  { fluid: 'oil', weight: 0.16, capacity: 5 },
+];
+
+function pickFluid(roll: number): { fluid: FluidKind; capacity: number } {
+  let acc = 0;
+  for (const entry of FLUID_STOCK) {
+    acc += entry.weight;
+    if (roll < acc) return entry;
+  }
+  return FLUID_STOCK[0];
 }
 
 function makeTool(
@@ -290,17 +370,21 @@ function buildPoi(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
+  disposables: Disposable[],
   loose: LoosePartField,
+  wrecks: WreckField,
+  trailers: TrailerField,
+  freight: FreightField,
 ): void {
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
 
   switch (poi.kind) {
     case 'roadside_wrecks':
-      buildWrecks(ctx, poi, group, bodies, colliders);
+      buildWrecks(ctx, poi, group, bodies, colliders, wrecks);
       break;
     case 'gas_stop':
-      buildGasStop(ctx, poi, group, bodies, colliders, loose, counter, shouldLoot);
+      buildGasStop(ctx, poi, group, bodies, colliders, loose, trailers, counter, shouldLoot);
       break;
     case 'workshop':
       buildWorkshop(ctx, poi, group, bodies, colliders, loose, counter, shouldLoot);
@@ -310,25 +394,226 @@ function buildPoi(
       break;
   }
 
+  buildFreight(ctx, poi, group, bodies, colliders, disposables, freight);
+
   // Record that this POI's loot is now materialised. The flag alone is the whole
   // idempotency guard across chunk promotion / unload / reload.
   if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
 
-/** One to three derelict complete models, half-sunk and scattered as static scenery. */
+// ---------------------------------------------------------------------------
+// Freight furniture: the destination sign every stop carries, and the pallet
+// waiting at the ones with a load to move.
+// ---------------------------------------------------------------------------
+
+const SIGN_POST_HEIGHT = 2.5;
+const SIGN_PANEL = 1.05;
+/** Lateral offset from the POI anchor, toward the road. */
+const SIGN_LATERAL = -5.5;
+const PALLET_HALF: readonly [number, number, number] = [0.7, 0.45, 1.1];
+
+/**
+ * The trailer pictogram. Drawn rather than authored so the sign carries no text in
+ * any language: a box on two wheels behind a hitch is the only thing the player
+ * needs to read, and it means the same thing at 200 m as it does at 2 m.
+ */
+let _signTexture: THREE.CanvasTexture | null = null;
+function trailerSignTexture(): THREE.CanvasTexture {
+  if (_signTexture) return _signTexture;
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const g = canvas.getContext('2d');
+  if (!g) throw new Error('2D canvas unavailable for the freight sign');
+
+  g.fillStyle = '#1d2b22';
+  g.fillRect(0, 0, size, size);
+  g.strokeStyle = '#e8dcc4';
+  g.lineWidth = 8;
+  g.strokeRect(14, 14, size - 28, size - 28);
+
+  g.fillStyle = '#e8dcc4';
+  // Bed.
+  g.fillRect(70, 96, 130, 62);
+  // Drawbar and hitch eye.
+  g.fillRect(40, 132, 34, 10);
+  g.beginPath();
+  g.arc(40, 137, 12, 0, Math.PI * 2);
+  g.fill();
+  // Wheels.
+  for (const cx of [104, 168]) {
+    g.beginPath();
+    g.arc(cx, 172, 20, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = '#1d2b22';
+  for (const cx of [104, 168]) {
+    g.beginPath();
+    g.arc(cx, 172, 8, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  _signTexture = tex;
+  return tex;
+}
+
+/**
+ * One sign per stop, plus a pallet where there is freight waiting.
+ *
+ * The sign is built at every POI on purpose. If only destinations had signs, the
+ * mere presence of one would give the answer away and the lighting would be
+ * decoration; a road lined with dark frames means the lit one is genuinely
+ * information.
+ *
+ * The panel material is per-POI rather than shared, because exactly one of them
+ * lights at a time — a module-level material could only light all or none.
+ */
+function buildFreight(
+  ctx: ChunkContext,
+  poi: Poi,
+  group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+  disposables: Disposable[],
+  freight: FreightField,
+): void {
+  const a = anchorXZ(ctx, poi);
+  const base = placeAt(ctx, poi, a, SIGN_LATERAL, 0, a.heading);
+
+  const postGeo = new THREE.CylinderGeometry(0.07, 0.09, SIGN_POST_HEIGHT, 6);
+  disposables.push(postGeo);
+  addStaticMesh(
+    ctx,
+    postGeo,
+    makeFlatMaterial(0x4a4640, 0.7),
+    poseMatrix(base.x, base.y + SIGN_POST_HEIGHT / 2, base.z, a.heading, 0, 0),
+    SurfaceType.Concrete,
+    group,
+    bodies,
+    colliders,
+  );
+
+  const panelGeo = new THREE.BoxGeometry(SIGN_PANEL, SIGN_PANEL, 0.08);
+  const panelMat = new THREE.MeshStandardMaterial({
+    map: trailerSignTexture(),
+    roughness: 0.55,
+    metalness: 0.05,
+    emissive: 0xffe6a8,
+    emissiveIntensity: 0,
+  });
+  disposables.push(panelGeo, panelMat);
+  const panelMatrix = poseMatrix(
+    base.x,
+    base.y + SIGN_POST_HEIGHT + SIGN_PANEL / 2 - 0.2,
+    base.z,
+    // Face across the road, so it reads from a car coming up on it.
+    a.heading + Math.PI / 2,
+    0,
+    0,
+  );
+  const panel = new THREE.Mesh(panelGeo, panelMat);
+  setFromMatrix(panel, panelMatrix);
+  group.add(panel);
+  const panelCollider = addStaticCollider(
+    ctx,
+    panelGeo,
+    panelMatrix,
+    SurfaceType.Concrete,
+    bodies,
+    colliders,
+  );
+
+  // A data source for LightBudget, not a rendered light: kept invisible so chunk
+  // streaming never changes Three's point-light shader permutation.
+  const light = new THREE.PointLight(0xffe6a8, 0, 34, 2);
+  light.position.set(base.x, base.y + SIGN_POST_HEIGHT, base.z);
+  light.visible = false;
+  light.userData.lightBudgetSource = true;
+  group.add(light);
+
+  freight.registerSign(poi.index, panelMat, light, panelCollider?.handle ?? null, bodies);
+
+  // The pallet: present only where the seed says there is a load, the player is not
+  // already carrying one from here, and this stop has not been cleared before.
+  const job = jobAt(ctx.world.seed, poi.index);
+  if (!job) return;
+  const s = ctx.world.state;
+  const taken = s.job !== null && s.job.fromPoi === poi.index;
+  if (taken || s.deliveredPois.includes(poi.index)) return;
+
+  const palletGeo = new THREE.BoxGeometry(PALLET_HALF[0] * 2, PALLET_HALF[1] * 2, PALLET_HALF[2] * 2);
+  disposables.push(palletGeo);
+  const spot = placeAt(ctx, poi, a, 2.6, 3.4, a.heading);
+  const palletMatrix = poseMatrix(
+    spot.x,
+    spot.y + PALLET_HALF[1],
+    spot.z,
+    a.heading + hash01(poi.variantSeed, 0x9a) * 0.4,
+    0,
+    0,
+  );
+  const pallet = new THREE.Mesh(palletGeo, makeFlatMaterial(0x8a6238, 0.9));
+  setFromMatrix(pallet, palletMatrix);
+  pallet.castShadow = true;
+  group.add(pallet);
+  const palletCollider = addStaticCollider(
+    ctx,
+    palletGeo,
+    palletMatrix,
+    SurfaceType.Concrete,
+    bodies,
+    colliders,
+  );
+  freight.registerPallet(poi.index, pallet, palletCollider?.handle ?? null, bodies);
+}
+
+/**
+ * Fraction of wreck fields that hide one derelict still worth a wrench. Cars are
+ * the scarcest thing in the game now that nothing spawns them, and a runner behind
+ * every third pile of scrap is the difference between scavenging and shopping.
+ */
+const REVIVABLE_FIELD_CHANCE = 0.34;
+/** Domain tag for the revivable roll, distinct from the placement stream. */
+const REVIVE_DOMAIN = 0x52455631; // 'REV1'
+
+/**
+ * One to three derelict complete models, half-sunk and scattered as static scenery.
+ *
+ * Some fields hide exactly one that can be revived. It is posed apart from the
+ * others — upright, barely sunk, facing along the road — so it reads as a car that
+ * stopped rather than a car that died, and the player can tell from the roadside
+ * whether a field is worth walking into. Once revived it is a real car in state and
+ * this skips its shell for good.
+ */
 function buildWrecks(
   ctx: ChunkContext,
   poi: Poi,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
+  wrecks: WreckField,
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
 
+  // Which slot (if any) is the runner. Rolled once per field so a field never has
+  // two, and off the REVIVE domain so adding this did not reshuffle the scenery.
+  const hasRunner = hash01(poi.variantSeed, REVIVE_DOMAIN, 0) < REVIVABLE_FIELD_CHANCE;
+  const runnerSlot = hasRunner ? Math.floor(hash01(poi.variantSeed, REVIVE_DOMAIN, 1) * count) : -1;
+
   for (let w = 0; w < count; w++) {
     const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
     const half = carModelMeasure(def.id).halfExtents;
+    const isRunner = w === runnerSlot;
+    const wreckId = `wreck:${poi.index}:${w}`;
+
+    // Driven away in an earlier session: the car is in `cars` and the shell must
+    // not come back on top of it.
+    if (isRunner && ctx.world.state.revivedWrecks.includes(wreckId)) continue;
 
     // Scatter around the anchor, half-sunk, some facing the wrong way.
     const sDelta = (hash01(poi.variantSeed, w, 11) - 0.5) * 16;
@@ -337,12 +622,16 @@ function buildWrecks(
 
     const yawRoll = hash01(poi.variantSeed, w, 13);
     let yaw = anchor.heading + (hash01(poi.variantSeed, w, 14) - 0.5) * 0.6;
-    if (yawRoll < 0.32) yaw += Math.PI; // wrong way round
-    else if (yawRoll > 0.82) yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
+    if (!isRunner) {
+      if (yawRoll < 0.32) yaw += Math.PI; // wrong way round
+      else if (yawRoll > 0.82) yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
+    }
 
-    const sink = 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
-    const roll = (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3;
-    const pitch = (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
+    // The runner sits level and on its wheels. A sunk, rolled shell would drop a
+    // revived chassis into the ground and the solver would fire it into the sky.
+    const sink = isRunner ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
+    const roll = isRunner ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3;
+    const pitch = isRunner ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
 
     const originY = p.y + half[1] - sink;
     const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch);
@@ -354,7 +643,7 @@ function buildWrecks(
     group.add(shell);
 
     // A box approximates the shell well enough for a solid, non-drivable obstacle.
-    addStaticCollider(
+    const collider = addStaticCollider(
       ctx,
       new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
       matrix,
@@ -362,8 +651,26 @@ function buildWrecks(
       bodies,
       colliders,
     );
+
+    // No collider means a scenery-only chunk outside the physics band; there is
+    // nothing to aim a wrench at out there, so registration waits for promotion.
+    const body = collider?.parent();
+    if (isRunner && collider && body) {
+      wrecks.register(
+        { id: wreckId, modelId: def.id, x: p.x, y: originY, z: p.z, yaw },
+        shell,
+        body,
+        collider,
+        bodies,
+      );
+    }
   }
 }
+
+/** Fraction of gas stops with a trailer standing on the forecourt. */
+const TRAILER_STOP_CHANCE = 0.45;
+/** Domain tag for the trailer roll. */
+const TRAILER_DOMAIN = 0x54524c31; // 'TRL1'
 
 function buildGasStop(
   ctx: ChunkContext,
@@ -372,6 +679,7 @@ function buildGasStop(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   loose: LoosePartField,
+  trailers: TrailerField,
   counter: LootCounter,
   shouldLoot: boolean,
 ): void {
@@ -461,12 +769,15 @@ function buildGasStop(
   );
 
   if (shouldLoot) {
-    // Fuel is the whole point of a gas stop: a handful of petrol/diesel cans.
-    const n = 2 + Math.floor(hash01(poi.variantSeed, 30) * 4); // 2..5
+    // Fuel is the whole point of a gas stop, but a forecourt also carries the
+    // engine fluids: the same stop that gets you moving is where you top up.
+    const n = 3 + Math.floor(hash01(poi.variantSeed, 30) * 4); // 3..6
     for (let i = 0; i < n; i++) {
-      const fuel: FuelType = hash01(poi.variantSeed, 31, i) < 0.6 ? 'petrol' : 'diesel';
-      const litres = 12 + Math.floor(hash01(poi.variantSeed, 32, i) * 9); // 12..20 L
-      const can = makeFuelCan(ctx.world, poi, fuel, litres, 20, counter);
+      const stock = pickFluid(hash01(poi.variantSeed, 31, i));
+      // Cans are found part-used, never factory-sealed. A 20 L fuel can holds
+      // 12-20 L; a 5 L fluid can holds 3-5.
+      const litres = Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
+      const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
       const c = placeAt(
         ctx,
         poi,
@@ -476,6 +787,28 @@ function buildGasStop(
         yaw,
       );
       loose.spawnItem(can, c.x, c.y + 0.2, c.z);
+    }
+
+    // A trailer on the forecourt. Take one, leave one: they are never owned, so
+    // this records a world object rather than giving the player a possession, and
+    // the `shouldLoot` gate is what stops the stop growing a new one every reload.
+    if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) < TRAILER_STOP_CHANCE) {
+      const spot = placeAt(ctx, poi, a, 6.4, -1.2, yaw);
+      const half = yaw / 2;
+      trailers.spawn({
+        id: `trailer:${poi.index}`,
+        hitchedTo: null,
+        cargoKg: 0,
+        x: spot.x,
+        // Clear of the ground so it drops onto its own suspension rather than
+        // starting inside the terrain trimesh.
+        y: spot.y + 0.9,
+        z: spot.z,
+        qx: 0,
+        qy: Math.sin(half),
+        qz: 0,
+        qw: Math.cos(half),
+      });
     }
   }
 }
@@ -652,15 +985,35 @@ function buildCamp(
   }
 }
 
+/** Anything with a `dispose`, for per-chunk textures, materials and geometries. */
+interface Disposable {
+  dispose(): void;
+}
+
 /**
  * Builds every POI inside a chunk. Scenery is always built; loot is generated once
  * per POI (guarded by `lootedPois`) and its dynamic bodies are owned by
  * `LoosePartField`, not by the chunk — so chunk unload never tears loot down.
+ *
+ * Two pieces of POI content have an identity outside the chunk and register for it:
+ * a revivable wreck (so the aim ray can name it) and the freight sign and pallet
+ * (so the aim ray can name them, and so the destination sign can be lit). `dispose`
+ * drops both, keyed on this chunk's own body array.
+ *
+ * `setLamps` is where the destination sign lights. It is the per-frame push the
+ * streamer already makes to every live chunk, which is why a job starting or
+ * finishing needs no chunk rebuild: nothing about the world's *structure* changed,
+ * only which panel is glowing.
  */
 export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
 
-  constructor(private readonly loose: LoosePartField) {}
+  constructor(
+    private readonly loose: LoosePartField,
+    private readonly wrecks: WreckField,
+    private readonly trailers: TrailerField,
+    private readonly freight: FreightField,
+  ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
     const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
@@ -670,11 +1023,36 @@ export class PoiProvider implements ChunkProvider {
     group.name = 'poi';
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
+    const disposables: Disposable[] = [];
 
     for (const poi of pois) {
-      buildPoi(ctx, poi, group, bodies, colliders, this.loose);
+      buildPoi(
+        ctx,
+        poi,
+        group,
+        bodies,
+        colliders,
+        disposables,
+        this.loose,
+        this.wrecks,
+        this.trailers,
+        this.freight,
+      );
     }
 
-    return { group, bodies, colliders };
+    const wrecks = this.wrecks;
+    const freight = this.freight;
+    const world = ctx.world;
+    return {
+      group,
+      bodies,
+      colliders,
+      setLamps: (on) => freight.updateSigns(on, world.state.job?.toPoi ?? null),
+      dispose: () => {
+        wrecks.forgetChunk(bodies);
+        freight.forgetChunk(bodies);
+        for (const d of disposables) d.dispose();
+      },
+    };
   }
 }

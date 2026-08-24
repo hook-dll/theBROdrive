@@ -123,6 +123,13 @@ interface Template {
 }
 
 const templates = new Map<string, Template>();
+/**
+ * Parsed scenes for multi-vehicle pack files, keyed by URL. Several catalogue
+ * entries share one GLB (the low-poly pack holds 21 bodies in one file), so the
+ * file is parsed once and each entry extracts its own subtree from the cached
+ * scene rather than re-parsing the buffer per vehicle.
+ */
+const packScenes = new Map<string, THREE.Group>();
 let gltf: GLTFLoader | null = null;
 let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
@@ -414,6 +421,115 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
 }
 
 /**
+ * Pulls one vehicle out of a shared pack scene into a fresh group at the origin.
+ *
+ * A pack ships several bodies in ONE scene, laid out in a showroom row, so each
+ * body and its wheels are siblings whose own transforms encode both their size and
+ * their place in that row. The fresh group must therefore re-root each node at its
+ * WORLD transform, not its local one: copying `matrixWorld` into `matrix` (with
+ * auto-update off) makes every node land where it really is, relative to the
+ * others, while the group itself stays at the origin for `buildTemplate` to
+ * centre and scale.
+ *
+ * Geometry and materials stay SHARED across the pack's entries because extraction
+ * uses `clone(true)`, which deep-copies Object3D transforms but leaves every
+ * BufferGeometry and Material as the same object the pack scene holds — one parse,
+ * one buffer, one material set, no GPU resources duplicated per vehicle.
+ */
+function extractPackVehicle(pack: THREE.Group, def: CarModelDef): THREE.Group {
+  const group = new THREE.Group();
+  group.name = def.id;
+  pack.updateMatrixWorld(true);
+
+  const bodyName = def.packNode;
+  if (!bodyName) throw new Error(`Car model "${def.id}" has no packNode`);
+  const prefix = def.packWheelPrefix ?? bodyName;
+
+  // The four nodes the vehicle controller drives, pack suffix -> kit node name
+  // (the `wheel-{front,back}-{left,right}` names WHEEL_NODES reads below).
+  const DRIVEN: readonly (readonly [string, string])[] = [
+    ['front left', 'wheel-front-left'],
+    ['front right', 'wheel-front-right'],
+    ['rear left', 'wheel-back-left'],
+    ['rear right', 'wheel-back-right'],
+  ];
+
+  // Re-rooting DECOMPOSES the world matrix into the clone's own position,
+  // quaternion and scale rather than copying it into `matrix` with
+  // `matrixAutoUpdate` off. Copying the matrix leaves a node whose `matrix` says
+  // one thing and whose `position`/`scale` still say what they said inside the
+  // pack's row — and `takeOwnWheels` below mixes the two: it measures a wheel's
+  // centre in this group's space and then writes `node.position` + `updateMatrix()`
+  // to re-centre the mesh, which recomposes the matrix from the STALE local
+  // rotation and scale. On this pack that meant every wheel drawn at 100x size a
+  // kilometre off, because its pack-local scale is 100 against a 0.01 root.
+  // Decomposing keeps local TRS and world transform the same thing, so every
+  // consumer downstream (measurement, re-centring, `applyModelYaw`) is reading the
+  // frame it thinks it is. glTF nodes are pure TRS, so there is no skew to lose.
+  const move = (source: THREE.Object3D): THREE.Object3D => {
+    const clone = source.clone(true);
+    source.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
+    clone.updateMatrix();
+    group.add(clone);
+    return clone;
+  };
+
+  const body = findPackNode(pack, bodyName);
+  if (!body) throw new Error(`Pack "${def.file}" has no body node "${bodyName}"`);
+  move(body);
+
+  const drivenNames = new Set<string>();
+  for (const [suffix, target] of DRIVEN) {
+    const name = `${prefix} wheel ${suffix}`;
+    drivenNames.add(packName(name));
+    const wheel = findPackNode(pack, name);
+    if (!wheel) throw new Error(`Pack "${def.file}" body "${bodyName}" is missing wheel "${name}"`);
+    move(wheel).name = target;
+  }
+
+  // Extra axles ride as body geometry. `Truck` has a tandem rear pair and
+  // `Truck with trailer` carries TWELVE wheels — the truck's two rear axles plus
+  // the trailer's three bogies — while the vehicle controller owns exactly four.
+  // Rather than drop the rest (a half-wheeled trailer) or fake them as driven
+  // (the controller cannot), every other `<prefix> wheel …` SIBLING is moved into
+  // the group unchanged: it renders, measures and moves with the body, it is just
+  // never steered or spun. Siblings are scanned, not the whole tree, so a wheel
+  // node's own `…_tires` / `…_wheels` mesh children are not picked up twice.
+  const wheelPrefix = packName(`${prefix} wheel `);
+  const siblings = body.parent?.children ?? [];
+  for (const sibling of siblings) {
+    if (sibling.name.startsWith(wheelPrefix) && !drivenNames.has(sibling.name)) {
+      move(sibling);
+    }
+  }
+
+  return group;
+}
+
+/**
+ * The name three.js will actually give a glTF node.
+ *
+ * `GLTFLoader` runs every node name through `PropertyBinding.sanitizeNodeName`,
+ * which turns whitespace into underscores and strips `[ ] . : /` — so the pack's
+ * `Monster Truck wheel front right` arrives in the scene graph as
+ * `Monster_Truck_wheel_front_right`, and a lookup by the name printed in the file
+ * finds nothing at all. That is exactly how this failed the first time.
+ *
+ * The catalogue deliberately still spells `packNode` the way the ASSET spells it,
+ * because that is what a person reads when they open the GLB; the translation
+ * belongs here, once, rather than as pre-mangled strings in 21 entries.
+ */
+function packName(name: string): string {
+  return name.replace(/\s/g, '_').replace(/[[\].:/]/g, '');
+}
+
+function findPackNode(pack: THREE.Group, name: string): THREE.Object3D | undefined {
+  // Try the sanitised form first (what three.js produces), then the raw name, so
+  // this keeps working if a future three release stops mangling names.
+  return pack.getObjectByName(packName(name)) ?? pack.getObjectByName(name);
+}
+
+/**
  * Cosmetic ride-height correction, metres: how far the body drops relative to the
  * wheels. Every catalogue body sits a hand's width too tall — the tyre tops ride
  * 3-5 cm clear of the arch lips instead of tucking under them, so the cars read as
@@ -534,26 +650,51 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
     }),
   );
 
+
+  // Shared pack files, same idea as the shared wheels above: 21 entries can point
+  // at ONE GLB, so it is parsed once and each entry extracts its own subtree from
+  // the cached scene (extractPackVehicle) instead of re-parsing the buffer per
+  // vehicle. The pack ships no texture maps — 21 flat baseColorFactor materials —
+  // so there is no livery to apply or map to tune; materials stay the shared
+  // originals across every entry.
+  const packFiles = new Set<string>();
+  for (const def of defs) {
+    if (def.packNode && !packScenes.has(def.file)) packFiles.add(def.file);
+  }
+  await Promise.all(
+    [...packFiles].map(async (file) => {
+      packScenes.set(file, await loadScene(file));
+    }),
+  );
   await Promise.all(
     defs.map(async (def) => {
       if (templates.has(def.id)) return;
-      const scene = await loadScene(def.file);
-      if (def.textureFile) {
-        textures ??= new THREE.TextureLoader();
-        const map = await textures.loadAsync(def.textureFile);
-        map.colorSpace = THREE.SRGBColorSpace;
-        // These are PSX-era paint maps: a few dozen pixels per panel. Smoothing them
-        // turns the liveries to mush, so they are sampled nearest, like the era.
-        map.magFilter = THREE.NearestFilter;
-        // V origin follows the FORMAT, not the pack. glTF UVs are top-down, so a
-        // glTF livery needs no flip; FBX (and the OBJ the FBX models were authored
-        // beside) counts V from the bottom, which is what TextureLoader's default
-        // flip already produces. Flipping those anyway sampled the map upside down —
-        // roof paint on the sills, plate stripe through the bumper.
-        map.flipY = def.file.toLowerCase().endsWith('.fbx');
-        applyTexture(scene, map);
+      let scene: THREE.Group;
+      if (def.packNode) {
+        const pack = packScenes.get(def.file);
+        if (!pack) throw new Error(`Pack "${def.file}" was not preloaded`);
+        scene = extractPackVehicle(pack, def);
+      } else {
+        scene = await loadScene(def.file);
+        if (def.textureFile) {
+          textures ??= new THREE.TextureLoader();
+          const map = await textures.loadAsync(def.textureFile);
+          map.colorSpace = THREE.SRGBColorSpace;
+          // These are PSX-era paint maps: a few dozen pixels per panel. Smoothing
+          // them turns the liveries to mush, so they are sampled nearest, like the
+          // era.
+          map.magFilter = THREE.NearestFilter;
+          // V origin follows the FORMAT, not the pack. glTF UVs are top-down, so a
+          // glTF livery needs no flip; FBX (and the OBJ the FBX models were
+          // authored beside) counts V from the bottom, which is what
+          // TextureLoader's default flip already produces. Flipping those anyway
+          // sampled the map upside down — roof paint on the sills, plate stripe
+          // through the bumper.
+          map.flipY = def.file.toLowerCase().endsWith('.fbx');
+          applyTexture(scene, map);
+        }
+        tuneMaps(scene);
       }
-      tuneMaps(scene);
       templates.set(def.id, buildTemplate(def, scene));
     }),
   );
@@ -605,7 +746,6 @@ export function createStaticCarModel(id: string): THREE.Object3D {
   return group;
 }
 
-/** Releases every loaded template. Call on teardown. */
 export function disposeCarModelCache(): void {
   const seenGeometry = new Set<THREE.BufferGeometry>();
   const seenMaterial = new Set<THREE.Material>();
@@ -630,4 +770,9 @@ export function disposeCarModelCache(): void {
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
   templates.clear();
+  // The cached pack scenes share geometry and materials with the templates just
+  // disposed, so they go through the SAME dedup sets — a buffer freed by the
+  // templates would otherwise be freed a second time here.
+  for (const pack of packScenes.values()) dispose(pack);
+  packScenes.clear();
 }

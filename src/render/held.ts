@@ -182,7 +182,7 @@ export class HeldItemView {
         if (use) this.scrubPhase += d * 9;
         roll += Math.sin(this.scrubPhase) * 0.12 * this.useT;
       }
-    } else if (item.type === 'fuel_can') {
+    } else if (item.type === 'fluid_can') {
       // Tip forward and pour, with a slight slosh.
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       const pour = this.useT;

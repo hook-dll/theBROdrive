@@ -38,8 +38,12 @@ export interface TouchState {
 }
 
 interface TouchHooks {
-  /** Spawn button: the overlay has no catalogue, so main decides what to spawn. */
-  readonly spawnVehicle: () => void;
+  /**
+   * Spawn button: the overlay has no catalogue, so main decides what to spawn.
+   * Optional and dev-only — see `PauseHooks.spawnVehicle`. Absent hook means the
+   * 'car' button is never built, so the row is one narrower on a phone.
+   */
+  readonly spawnVehicle?: () => void;
   /** Pause button: same overlay the Escape key opens. */
   readonly pause: () => void;
 }
@@ -240,7 +244,7 @@ export class TouchControls {
     row.appendChild(this.makeButton('mount', 'pickup'));
     row.appendChild(this.makeButton('handbrake', 'brake'));
     row.appendChild(this.makeButton('camera', 'view'));
-    row.appendChild(this.makeButton('spawn', 'car'));
+    if (this.hooks.spawnVehicle) row.appendChild(this.makeButton('spawn', 'car'));
     row.appendChild(this.makeButton('pause', 'menu'));
     overlay.appendChild(row);
 
@@ -323,7 +327,7 @@ export class TouchControls {
         // Handled by the latch above; never reached.
         break;
       case 'spawn':
-        this.hooks.spawnVehicle();
+        this.hooks.spawnVehicle?.();
         break;
       case 'pause':
         this.hooks.pause();
