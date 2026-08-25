@@ -136,6 +136,14 @@ export interface WorldState {
   readonly seed: number;
   /** Seconds since midnight of the in-game clock. */
   timeOfDay: number;
+  /**
+   * Whole in-game days elapsed. Bumped when `timeOfDay` wraps past midnight, which
+   * makes it the only monotonic clock in the state — `timeOfDay` itself is wrapped
+   * and `playedSeconds` counts real time at whatever day length the player chose.
+   * The sky's twilight moods key off it, so a sunrise looks the same every time you
+   * reload into it and different from yesterday's.
+   */
+  dayIndex: number;
   /** Total real seconds played, for the save list. */
   playedSeconds: number;
   /** Furthest arclength ever reached, for the personal-record monument. */
@@ -228,6 +236,7 @@ export function newWorldState(seed: number): WorldState {
     // Start mid-morning: the garage should be lit on a new game.
     timeOfDay: DAY_LENGTH * 0.36,
     playedSeconds: 0,
+    dayIndex: 0,
     recordS: 0,
     settings: DEFAULT_SETTINGS,
     player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null, carried: [], carriedSelected: 0 },
@@ -297,10 +306,16 @@ export class GameWorld {
   apply(delta: WorldDelta): void {
     const s = this.state;
     switch (delta.t) {
-      case 'time':
-        s.timeOfDay = delta.timeOfDay % DAY_LENGTH;
+      case 'time': {
+        const wrapped = delta.timeOfDay % DAY_LENGTH;
+        // Midnight crossed: the clock went backwards because it wrapped, not because
+        // anything jumped it (a jump is 'time_of_day', below, and deliberately does
+        // not advance the calendar).
+        if (wrapped < s.timeOfDay) s.dayIndex++;
+        s.timeOfDay = wrapped;
         s.playedSeconds = delta.playedSeconds;
         break;
+      }
       case 'time_of_day':
         // An explicit clock jump (settings presets), kept separate from 'time',
         // the loop's per-tick advance: a jump repositions the sun without

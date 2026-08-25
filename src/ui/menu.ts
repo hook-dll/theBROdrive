@@ -42,6 +42,61 @@ function button(cls: string, label: string): HTMLButtonElement {
   return node;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Stroked 24x24 glyphs, as raw path data.
+ *
+ * Inline paths rather than an icon font or image files: they inherit `currentColor`,
+ * so a selected control's glyph brightens with its text for free, and there is
+ * nothing to load, cache or fail. Every glyph is strokes only (no fills) at a single
+ * width, which is what keeps sixteen unrelated shapes looking like one set.
+ *
+ * They exist to carry the AXIS of a control at a glance — three bars for a quality
+ * tier, three receding ridges for a horizon, a sun climbing and setting for the time
+ * of day. The words next to them confirm; the shapes are what you navigate by.
+ */
+const ICONS: Record<string, readonly string[]> = {
+  drive: [
+    'M3 16l2-6h14l2 6v2h-3M3 18v-2M8 18h8',
+    'M8 18a1.6 1.6 0 1 0-3.2 0 1.6 1.6 0 0 0 3.2 0z',
+    'M19.2 18a1.6 1.6 0 1 0-3.2 0 1.6 1.6 0 0 0 3.2 0z',
+  ],
+  display: ['M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z', 'M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z'],
+  sound: ['M4 9h3l5-4v14l-5-4H4z', 'M16 9.5a4 4 0 0 1 0 5'],
+  controls: ['M3 7h18v10H3z', 'M6 11h1M9 11h1M12 11h1M15 11h1M18 11h1M8 14h8'],
+  manual: ['M12 20V9', 'M12 9l-4-4M12 9l4-4', 'M13.6 7.4a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0z'],
+  auto: ['M13 3l-6 10h4l-1 8 7-12h-4z'],
+  keys: ['M3 7h18v10H3z', 'M7 11h1M11 11h1M15 11h1M9 14h6'],
+  mouse: ['M9 3h6a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', 'M12 7v4'],
+  gfx1: ['M5 18v-3'],
+  gfx2: ['M5 18v-3M12 18v-7'],
+  gfx3: ['M5 18v-3M12 18v-7M19 18v-11'],
+  horizon1: ['M3 16h18'],
+  horizon2: ['M3 16h18M6 12h12'],
+  horizon3: ['M3 16h18M6 12h12M9 8h6'],
+  morning: ['M15 15a3 3 0 1 0-6 0', 'M3 18h18', 'M12 7v3M9.5 9.5 11 11M14.5 9.5 13 11'],
+  noon: ['M15.5 12a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z', 'M12 3v2M12 19v2M3 12h2M19 12h2'],
+  evening: ['M15 15a3 3 0 1 0-6 0', 'M3 18h18', 'M12 10V7M10.5 8.5 12 10l1.5-1.5'],
+  midnight: ['M15 3a8 8 0 1 0 5.6 9.6A6.4 6.4 0 0 1 15 3z'],
+  clock: ['M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z', 'M12 7.5V12l3 2'],
+  radio: ['M3 10h18v9H3z', 'M8 6.5l9-2.5', 'M7 14h4', 'M17 14h.01'],
+};
+
+/** One glyph, sized by CSS. Decorative: the control's own text is the label. */
+function icon(name: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'menu-icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ICONS[name] ?? []) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
 function formatPlayed(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
@@ -337,6 +392,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
+        mouseSteering: base.mouseSteering,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -348,6 +404,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
+          mouseSteering: settings.mouseSteering,
         });
       };
 
@@ -366,6 +423,12 @@ export class MainMenu {
 
       type Screen = 'main' | 'settings' | 'spawn' | 'fluid';
       let screen: Screen = 'main';
+      /**
+       * Settings section, remembered across visits: someone adjusting the horizon
+       * comes back to the horizon, not to the top of a list.
+       */
+      type SettingsTab = 'drive' | 'display' | 'sound' | 'controls';
+      let settingsTab: SettingsTab = 'drive';
       /** Action id waiting for a key in capture mode; only set on settings. */
       let capturingActionId: string | null = null;
       /** Feedback line on the settings screen; null while not on settings. */
@@ -389,11 +452,18 @@ export class MainMenu {
           const keysSpan = el('span', 'menu-binding-keys');
           if (capturingActionId === action.id) {
             row.classList.add('is-capturing');
-            keysSpan.textContent = 'press a key…';
+            const waiting = el('span', 'menu-keycap is-waiting');
+            waiting.textContent = 'press a key';
+            keysSpan.appendChild(waiting);
           } else {
-            keysSpan.textContent = (settings.keyBindings[action.id] ?? action.defaultKeys)
-              .map(formatKey)
-              .join(' / ');
+            // One cap per key, not a slash-joined string: a boxed glyph is read as a
+            // key without being parsed as a sentence, which is the whole point of a
+            // twenty-row list nobody wants to read.
+            for (const code of settings.keyBindings[action.id] ?? action.defaultKeys) {
+              const cap = el('kbd', 'menu-keycap');
+              cap.textContent = formatKey(code);
+              keysSpan.appendChild(cap);
+            }
           }
           row.append(labelSpan, keysSpan);
           row.addEventListener('click', () => {
@@ -417,6 +487,8 @@ export class MainMenu {
           bindingsList = null;
         }
         panel.classList.toggle('menu-panel-wide', next !== 'main');
+        // Settings is the one screen that is two columns wide.
+        panel.classList.toggle('menu-panel-settings', next === 'settings');
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
         else if (next === 'fluid') renderFluid?.();
@@ -545,156 +617,120 @@ export class MainMenu {
         resumeBtn.focus();
       };
 
+      /**
+       * Settings, as four short sections behind an icon rail.
+       *
+       * What this replaces was one flat column: nine controls and twenty key bindings
+       * in a single scroll, every row the same shape, and every option's explanatory
+       * sentence on screen at once. It could only be read, never scanned.
+       *
+       * Three rules do the work here:
+       *  - Sections, so driving settings are not adjacent to volume sliders.
+       *  - ONE hint line, at a fixed height, describing whatever is hovered, focused
+       *    or selected. Nine sentences become one, and the layout never jumps when it
+       *    changes.
+       *  - A glyph per option, carrying the axis (bars for quality, receding ridges
+       *    for a horizon, the sun's height for time) so the row is scannable.
+       *
+       * Nothing here previews live. The whole loop — simulation and renderer — is
+       * stopped while the overlay is up, so a graphics or horizon change cannot be
+       * seen until Resume. An earlier version faded the panel to "show" the effect,
+       * which showed a frozen frame and taught the player nothing.
+       */
       const renderSettings = (): void => {
         panel.textContent = '';
 
-        const backBtn = button('menu-button', 'Back');
+        const head = el('div', 'menu-settings-head');
+        const backBtn = button('menu-button menu-back', 'Back');
         backBtn.addEventListener('click', () => showScreen('main'));
-        panel.appendChild(backBtn);
-
         const title = el('h1', 'menu-title');
         title.textContent = 'Settings';
-        panel.appendChild(title);
+        head.append(backBtn, title);
+        panel.appendChild(head);
 
-        // Gearbox: a two-way toggle; the active side is re-painted in place so
-        // focus is not disturbed on every change.
-        const gearField = el('div', 'menu-field');
-        const gearLabel = el('label', 'menu-label');
-        gearLabel.textContent = 'Gearbox';
-        const gearRow = el('div', 'menu-toggle-row');
-        const manualBtn = button('menu-button', 'Manual');
-        const autoBtn = button('menu-button', 'Automatic');
-        const paintGearbox = (): void => {
-          manualBtn.classList.toggle('is-selected', settings.gearboxMode === 'manual');
-          autoBtn.classList.toggle('is-selected', settings.gearboxMode === 'automatic');
+        const layout = el('div', 'menu-settings');
+        const rail = el('div', 'menu-rail');
+        const pane = el('div', 'menu-pane');
+        layout.append(rail, pane);
+        panel.appendChild(layout);
+
+        // The hint line doubles as the rebinding conflict line (`note`), so a
+        // rejected key lands where the player is already looking.
+        note = el('div', 'menu-note menu-hint');
+        panel.appendChild(note);
+
+        const setHint = (text: string): void => {
+          if (!note) return;
+          note.textContent = text;
+          note.classList.remove('is-alarm');
         };
-        paintGearbox();
-        manualBtn.addEventListener('click', () => {
-          settings.gearboxMode = 'manual';
-          paintGearbox();
-          apply();
-        });
-        autoBtn.addEventListener('click', () => {
-          settings.gearboxMode = 'automatic';
-          paintGearbox();
-          apply();
-        });
-        gearRow.append(manualBtn, autoBtn);
-        gearField.append(gearLabel, gearRow);
-        panel.appendChild(gearField);
 
-        // Graphics tier: a three-way toggle, cheapest first so the row reads as one
-        // axis. Applied live — the renderer swaps multisampling and the resolution
-        // cap in place, so the effect is visible behind the pause panel.
-        const GFX_TIERS: readonly { id: GraphicsQuality; label: string; note: string }[] = [
-          {
-            id: 'acceptable',
-            label: 'Acceptable',
-            note: 'Acceptable: lowest resolution, no edge smoothing. For weak integrated GPUs.',
-          },
-          {
-            id: 'standard',
-            label: 'Standard',
-            note: 'Standard: native resolution with edge smoothing. The authored look.',
-          },
-          {
-            id: 'blessing',
-            label: 'Blessing',
-            note: 'Blessing: renders above native and downsamples. Needs a GPU with headroom.',
-          },
-        ];
-        const gfxField = el('div', 'menu-field');
-        const gfxLabel = el('label', 'menu-label');
-        gfxLabel.textContent = 'Graphics';
-        const gfxRow = el('div', 'menu-toggle-row');
-        const gfxButtons = GFX_TIERS.map((tier) => {
-          const btn = button('menu-button', tier.label);
-          gfxRow.appendChild(btn);
-          return { tier, btn };
-        });
-        const paintGfx = (): void => {
-          for (const { tier, btn } of gfxButtons) {
-            btn.classList.toggle('is-selected', settings.graphicsQuality === tier.id);
+        /**
+         * One option of a segmented control. `active`/`pick` rather than a generic
+         * value type: some rows select persisted state, and the time-of-day row
+         * selects nothing at all (it fires and forgets), and both are the same widget.
+         */
+        interface SegOption {
+          readonly label: string;
+          readonly icon: string;
+          readonly hint: string;
+          readonly active: () => boolean;
+          readonly pick: () => void;
+        }
+
+        const segmented = (labelText: string, options: readonly SegOption[]): HTMLElement => {
+          const field = el('div', 'menu-field');
+          const fieldHead = el('div', 'menu-field-head');
+          const label = el('span', 'menu-label');
+          label.textContent = labelText;
+          fieldHead.append(label);
+          const row = el('div', 'menu-seg');
+          const buttons = options.map((option) => {
+            const btn = button('menu-seg-btn', '');
+            const text = el('span', 'menu-seg-label');
+            text.textContent = option.label;
+            btn.append(icon(option.icon), text);
+            row.appendChild(btn);
+            return { option, btn };
+          });
+          const selectedHint = (): string =>
+            options.find((o) => o.active())?.hint ?? options[0]?.hint ?? '';
+          const paint = (): void => {
+            for (const { option, btn } of buttons) {
+              btn.classList.toggle('is-selected', option.active());
+            }
+          };
+          for (const [index, entry] of buttons.entries()) {
+            entry.btn.addEventListener('click', () => {
+              entry.option.pick();
+              paint();
+              setHint(entry.option.hint);
+            });
+            // Hover and focus preview their own option's hint; leaving restores the
+            // selected one, so the line always describes something real.
+            entry.btn.addEventListener('pointerenter', () => setHint(entry.option.hint));
+            entry.btn.addEventListener('focus', () => setHint(entry.option.hint));
+            entry.btn.addEventListener('blur', () => setHint(selectedHint()));
+            entry.btn.addEventListener('keydown', (ev) => {
+              // Left/right walks the row, the way a segmented control should: the
+              // whole screen is reachable without a mouse.
+              const step = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0;
+              if (step === 0) return;
+              ev.preventDefault();
+              const next = buttons[(index + step + buttons.length) % buttons.length];
+              next.btn.focus();
+            });
           }
+          paint();
+          row.addEventListener('pointerleave', () => setHint(selectedHint()));
+          field.append(fieldHead, row);
+          return field;
         };
-        paintGfx();
-        for (const { tier, btn } of gfxButtons) {
-          btn.addEventListener('click', () => {
-            settings.graphicsQuality = tier.id;
-            paintGfx();
-            apply();
-            if (note) {
-              // The lamp-slot count is fixed when the scene's lights are built, so
-              // that part of the tier only takes effect on the next load. Say so
-              // rather than letting it look like the toggle half-worked.
-              note.textContent = `${tier.note} Restart for the full effect.`;
-              note.classList.remove('is-alarm');
-            }
-          });
-        }
-        gfxField.append(gfxLabel, gfxRow);
-        panel.appendChild(gfxField);
-
-        // View distance: a three-way toggle like the graphics tier, applied live
-        // — the renderer stretches the far plane in place, so the horizon shifts
-        // behind the pause panel. Vast says plainly that it is expensive.
-        const VD_TIERS: readonly { id: ViewDistance; label: string; note: string }[] = [
-          { id: 'near', label: 'Near (1.5 km)', note: 'Near (1.5 km): the authored horizon. Cheapest.' },
-          { id: 'far', label: 'Far (8 km)', note: 'Far (8 km): a deep horizon. Needs a GPU with headroom.' },
-          { id: 'vast', label: 'Vast (25 km)', note: 'Vast (25 km): extravagant. Expensive — for fast GPUs.' },
-        ];
-        const vdField = el('div', 'menu-field');
-        const vdLabel = el('label', 'menu-label');
-        vdLabel.textContent = 'View Distance';
-        const vdRow = el('div', 'menu-toggle-row');
-        const vdButtons = VD_TIERS.map((tier) => {
-          const btn = button('menu-button', tier.label);
-          vdRow.appendChild(btn);
-          return { tier, btn };
-        });
-        const paintVd = (): void => {
-          for (const { tier, btn } of vdButtons) {
-            btn.classList.toggle('is-selected', settings.viewDistance === tier.id);
-          }
-        };
-        paintVd();
-        for (const { tier, btn } of vdButtons) {
-          btn.addEventListener('click', () => {
-            settings.viewDistance = tier.id;
-            paintVd();
-            apply();
-            hooks.applyViewDistance(tier.id);
-            if (note) {
-              note.textContent = tier.note;
-              note.classList.remove('is-alarm');
-            }
-          });
-        }
-        vdField.append(vdLabel, vdRow);
-        panel.appendChild(vdField);
-
-        // Time of day: presets apply immediately through their own hook and are
-        // not part of the persisted settings object.
-        const todField = el('div', 'menu-field');
-        const todLabel = el('label', 'menu-label');
-        todLabel.textContent = 'Time of Day';
-        const presetRow = el('div', 'menu-toggle-row');
-        for (const preset of Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]) {
-          const presetBtn = button('menu-button', preset.charAt(0).toUpperCase() + preset.slice(1));
-          presetBtn.addEventListener('click', () => {
-            hooks.applyTimePreset(preset);
-            if (note) {
-              note.textContent = `${presetBtn.textContent} applied`;
-              note.classList.remove('is-alarm');
-            }
-          });
-          presetRow.appendChild(presetBtn);
-        }
-        todField.append(todLabel, presetRow);
-        panel.appendChild(todField);
 
         const sliderField = (
-          label: string,
+          labelText: string,
+          iconName: string,
+          hint: string,
           min: number,
           max: number,
           step: number,
@@ -703,11 +739,15 @@ export class MainMenu {
           set: (value: number) => void,
         ): HTMLElement => {
           const field = el('div', 'menu-field');
-          const fieldLabel = el('label', 'menu-label');
-          fieldLabel.textContent = label;
-          const sliderId = `settings-${label.toLowerCase().replaceAll(' ', '-')}`;
-          fieldLabel.setAttribute('for', sliderId);
-          const row = el('div', 'menu-slider-row');
+          const fieldHead = el('div', 'menu-field-head');
+          const sliderId = `settings-${labelText.toLowerCase().replaceAll(' ', '-')}`;
+          const label = el('label', 'menu-label');
+          label.textContent = labelText;
+          label.setAttribute('for', sliderId);
+          // The value rides in the head as a chip instead of taking its own column,
+          // which is what let four sliders become four scannable rows.
+          const chip = el('output', 'menu-chip');
+          fieldHead.append(icon(iconName), label, chip);
           const slider = document.createElement('input');
           slider.type = 'range';
           slider.id = sliderId;
@@ -715,98 +755,311 @@ export class MainMenu {
           slider.min = String(min);
           slider.max = String(max);
           slider.step = String(step);
-          slider.value = String(get());
-          const value = el('output', 'menu-slider-value');
           const paint = (): void => {
             slider.value = String(get());
-            value.textContent = format(get());
+            chip.textContent = format(get());
           };
           slider.addEventListener('input', () => {
             set(slider.valueAsNumber);
             paint();
             apply();
           });
+          slider.addEventListener('pointerenter', () => setHint(hint));
+          slider.addEventListener('focus', () => setHint(hint));
           paint();
-          row.append(slider, value);
-          field.append(fieldLabel, row);
+          field.append(fieldHead, slider);
           return field;
         };
 
-        panel.appendChild(
-          sliderField(
-            'Day Cycle Length',
-            DAY_CYCLE_MIN_MINUTES,
-            DAY_CYCLE_MAX_MINUTES,
-            1,
-            () => settings.dayCycleMinutes,
-            (value) => `${Math.round(value)} min`,
-            (value) => {
-              settings.dayCycleMinutes = value;
-            },
-          ),
-        );
-        panel.appendChild(
-          sliderField(
-            'Mouse Look Sensitivity',
-            MOUSE_SENSITIVITY_MIN,
-            MOUSE_SENSITIVITY_MAX,
-            0.0001,
-            () => settings.mouseSensitivity,
-            (value) => `${Math.round((value / DEFAULT_MOUSE_SENSITIVITY) * 100)}%`,
-            (value) => {
-              settings.mouseSensitivity = value;
-            },
-          ),
-        );
-        panel.appendChild(
-          sliderField(
-            'Sound Volume',
-            0,
-            1,
-            0.01,
-            () => settings.masterVolume,
-            (value) => `${Math.round(value * 100)}%`,
-            (value) => {
-              settings.masterVolume = value;
-            },
-          ),
-        );
-        panel.appendChild(
-          sliderField(
-            'Radio Volume',
-            0,
-            1,
-            0.01,
-            () => settings.radioVolume,
-            (value) => `${Math.round(value * 100)}%`,
-            (value) => {
-              settings.radioVolume = value;
-            },
-          ),
-        );
+        const renderDrive = (): void => {
+          pane.append(
+            segmented('Gearbox', [
+              {
+                label: 'Manual',
+                icon: 'manual',
+                hint: 'Four speeds and a clutch you do not have to think about. X and Z shift.',
+                active: () => settings.gearboxMode === 'manual',
+                pick: () => {
+                  settings.gearboxMode = 'manual';
+                  apply();
+                },
+              },
+              {
+                label: 'Automatic',
+                icon: 'auto',
+                hint: 'The box shifts for you. X and Z still override it.',
+                active: () => settings.gearboxMode === 'automatic',
+                pick: () => {
+                  settings.gearboxMode = 'automatic';
+                  apply();
+                },
+              },
+            ]),
+            segmented('Steering', [
+              {
+                label: 'Keys',
+                icon: 'keys',
+                hint: 'A and D steer. The mouse is the camera.',
+                active: () => !settings.mouseSteering,
+                pick: () => {
+                  settings.mouseSteering = false;
+                  apply();
+                },
+              },
+              {
+                label: 'Mouse',
+                icon: 'mouse',
+                hint: 'Mouse steers, left button throttle, right brake. Hold the wheel-press to look around.',
+                active: () => settings.mouseSteering,
+                pick: () => {
+                  settings.mouseSteering = true;
+                  apply();
+                },
+              },
+            ]),
+          );
+        };
 
-        // Key bindings: one row per action; click a row to arm capture.
-        const bindField = el('div', 'menu-field');
-        const bindLabel = el('label', 'menu-label');
-        bindLabel.textContent = 'Key Bindings';
-        bindingsList = el('div', 'menu-bindings');
-        bindField.append(bindLabel, bindingsList);
-        panel.appendChild(bindField);
+        const renderDisplay = (): void => {
+          // Nothing here previews: the simulation and the renderer are both stopped
+          // while the pause overlay is up, so graphics and horizon changes are only
+          // seen after Resume. Saying so in the hint is honest; fading the panel to
+          // show a frozen frame was not.
+          pane.append(
+            segmented('Graphics', [
+              {
+                label: 'Acceptable',
+                icon: 'gfx1',
+                hint: 'Lowest resolution, no edge smoothing. For weak integrated GPUs. Applies on resume.',
+                active: () => settings.graphicsQuality === 'acceptable',
+                pick: () => {
+                  settings.graphicsQuality = 'acceptable';
+                  apply();
+                },
+              },
+              {
+                label: 'Standard',
+                icon: 'gfx2',
+                hint: 'Native resolution with edge smoothing. The authored look. Applies on resume.',
+                active: () => settings.graphicsQuality === 'standard',
+                pick: () => {
+                  settings.graphicsQuality = 'standard';
+                  apply();
+                },
+              },
+              {
+                label: 'Blessing',
+                icon: 'gfx3',
+                hint: 'Renders above native and downsamples. Needs headroom. Applies on resume.',
+                active: () => settings.graphicsQuality === 'blessing',
+                pick: () => {
+                  settings.graphicsQuality = 'blessing';
+                  apply();
+                },
+              },
+            ]),
+            segmented('Horizon', [
+              {
+                label: '1.5 km',
+                icon: 'horizon1',
+                hint: 'Near: the authored horizon, and the cheapest. Applies on resume.',
+                active: () => settings.viewDistance === 'near',
+                pick: () => {
+                  settings.viewDistance = 'near';
+                  apply();
+                  hooks.applyViewDistance('near');
+                },
+              },
+              {
+                label: '8 km',
+                icon: 'horizon2',
+                hint: 'Far: a deep horizon with real ranges in it. Needs a GPU with headroom.',
+                active: () => settings.viewDistance === 'far',
+                pick: () => {
+                  settings.viewDistance = 'far';
+                  apply();
+                  hooks.applyViewDistance('far');
+                },
+              },
+              {
+                label: '25 km',
+                icon: 'horizon3',
+                hint: 'Vast: extravagant, and priced accordingly. For fast GPUs.',
+                active: () => settings.viewDistance === 'vast',
+                pick: () => {
+                  settings.viewDistance = 'vast';
+                  apply();
+                  hooks.applyViewDistance('vast');
+                },
+              },
+            ]),
+            segmented(
+              'Time of Day',
+              (Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]).map((preset) => ({
+                label: preset.charAt(0).toUpperCase() + preset.slice(1),
+                icon: preset,
+                hint: `Move the sun to ${preset}. The clock keeps running from there.`,
+                // A preset is an action, not a state: nothing here is ever "current".
+                active: () => false,
+                pick: () => hooks.applyTimePreset(preset),
+              })),
+            ),
+            sliderField(
+              'Day Length',
+              'clock',
+              'Real minutes for one full day and night.',
+              DAY_CYCLE_MIN_MINUTES,
+              DAY_CYCLE_MAX_MINUTES,
+              1,
+              () => settings.dayCycleMinutes,
+              (value) => `${Math.round(value)} min`,
+              (value) => {
+                settings.dayCycleMinutes = value;
+              },
+            ),
+          );
+        };
 
-        const resetBtn = button('menu-button', 'Reset to Defaults');
-        resetBtn.addEventListener('click', () => {
-          settings.keyBindings = {};
-          apply();
-          clearNote();
+        const renderSound = (): void => {
+          pane.append(
+            sliderField(
+              'Game Sound',
+              'sound',
+              'Engine, wind, tyres and foley. The radio has its own.',
+              0,
+              1,
+              0.01,
+              () => settings.masterVolume,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.masterVolume = value;
+              },
+            ),
+            sliderField(
+              'Radio',
+              'radio',
+              'Broadcast material, at whatever level the station mastered it.',
+              0,
+              1,
+              0.01,
+              () => settings.radioVolume,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.radioVolume = value;
+              },
+            ),
+          );
+        };
+
+        const renderControls = (): void => {
+          pane.appendChild(
+            sliderField(
+              'Mouse Look',
+              'mouse',
+              'Pointer sensitivity for looking around. Mouse steering has its own fixed gain.',
+              MOUSE_SENSITIVITY_MIN,
+              MOUSE_SENSITIVITY_MAX,
+              0.0001,
+              () => settings.mouseSensitivity,
+              (value) => `${Math.round((value / DEFAULT_MOUSE_SENSITIVITY) * 100)}%`,
+              (value) => {
+                settings.mouseSensitivity = value;
+              },
+            ),
+          );
+
+          const bindField = el('div', 'menu-field');
+          const bindHead = el('div', 'menu-field-head');
+          const bindLabel = el('span', 'menu-label');
+          bindLabel.textContent = 'Key Bindings';
+          const resetBtn = button('menu-button menu-reset', 'Reset');
+          resetBtn.addEventListener('click', () => {
+            settings.keyBindings = {};
+            apply();
+            setHint('Every binding is back to its default.');
+            renderBindings();
+          });
+          bindHead.append(icon('controls'), bindLabel, resetBtn);
+          // Two columns: the list is 5% of the visits and was 70% of the height.
+          bindingsList = el('div', 'menu-bindings');
+          bindField.append(bindHead, bindingsList);
+          pane.appendChild(bindField);
           renderBindings();
+        };
+
+        const TABS: readonly {
+          readonly id: SettingsTab;
+          readonly label: string;
+          readonly icon: string;
+          readonly hint: string;
+          readonly render: () => void;
+        }[] = [
+          {
+            id: 'drive',
+            label: 'Drive',
+            icon: 'drive',
+            hint: 'How the car is driven.',
+            render: renderDrive,
+          },
+          {
+            id: 'display',
+            label: 'Display',
+            icon: 'display',
+            hint: 'What is drawn, how far, and at what time of day.',
+            render: renderDisplay,
+          },
+          {
+            id: 'sound',
+            label: 'Sound',
+            icon: 'sound',
+            hint: 'Levels for the car and the radio.',
+            render: renderSound,
+          },
+          {
+            id: 'controls',
+            label: 'Controls',
+            icon: 'controls',
+            hint: 'The mouse, and every key.',
+            render: renderControls,
+          },
+        ];
+
+        const railButtons = TABS.map((tab) => {
+          const btn = button('menu-rail-btn', '');
+          const text = el('span', 'menu-rail-label');
+          text.textContent = tab.label;
+          btn.append(icon(tab.icon), text);
+          rail.appendChild(btn);
+          return { tab, btn };
         });
-        panel.appendChild(resetBtn);
 
-        note = el('div', 'menu-note');
-        panel.appendChild(note);
+        const showTab = (id: SettingsTab): void => {
+          settingsTab = id;
+          // Capture cannot survive leaving the section that owns it.
+          capturingActionId = null;
+          bindingsList = null;
+          pane.textContent = '';
+          for (const { tab, btn } of railButtons) {
+            btn.classList.toggle('is-selected', tab.id === id);
+          }
+          const active = TABS.find((t) => t.id === id) ?? TABS[0];
+          active.render();
+          setHint(active.hint);
+        };
 
-        renderBindings();
+        for (const [index, entry] of railButtons.entries()) {
+          entry.btn.addEventListener('click', () => showTab(entry.tab.id));
+          entry.btn.addEventListener('keydown', (ev) => {
+            const step = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+            if (step === 0) return;
+            ev.preventDefault();
+            const next = railButtons[(index + step + railButtons.length) % railButtons.length];
+            next.btn.focus();
+            showTab(next.tab.id);
+          });
+        }
 
+        showTab(settingsTab);
         backBtn.focus();
       };
 

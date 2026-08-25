@@ -98,6 +98,13 @@ export interface Settings {
    * choice.
    */
   viewDistance: ViewDistance;
+  /**
+   * Steer the car with horizontal mouse movement. Off by default: the keyboard is
+   * the control everyone arrives expecting, and a mouse that suddenly steers is a
+   * car in a ditch. Holding the right button hands the mouse back to the camera
+   * without disturbing the wheel.
+   */
+  mouseSteering: boolean;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
@@ -136,6 +143,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // The authored horizon. Like `graphicsQuality`, nothing auto-detects the GPU;
   // the pause menu is one key away and the near tier is the safe floor.
   viewDistance: 'near',
+  // Off by default; M switches it on, and the pause menu remembers which.
+  mouseSteering: false,
 };
 
 /**
@@ -217,6 +226,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     // keeps the horizon it was made with.
     viewDistance:
       obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
+    // Anything but an explicit true is off, which is what an old save (no such
+    // field) should get: nothing surprising happens the first time you drive it.
+    mouseSteering: obj.mouseSteering === true,
   };
 
   const rawBindings = obj.keyBindings;

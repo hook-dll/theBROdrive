@@ -333,6 +333,9 @@ export function migrateState(raw: unknown): WorldState {
     seed,
     timeOfDay: numOr(obj.timeOfDay, defaults.timeOfDay),
     playedSeconds: numOr(obj.playedSeconds, defaults.playedSeconds),
+    // Absent in a save written before the sky had per-day twilight moods; day zero
+    // is correct for those.
+    dayIndex: Math.max(0, Math.floor(numOr(obj.dayIndex, defaults.dayIndex))),
     recordS: numOr(obj.recordS, defaults.recordS),
     // A save written before settings existed has no field here; sanitizeSettings
     // accepts anything (including undefined) and yields a valid Settings.

@@ -457,6 +457,21 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
+    // Mouse steering is a preference, so M edits the settings rather than a local
+    // flag: it survives a reload, and the pause menu and the key agree because they
+    // are the same state. The reader is told "on AND driving", so the same mouse
+    // still looks around freely on foot without the player switching anything.
+    if (f.toggleMouseSteer) {
+      const on = !s.settings.mouseSteering;
+      world.apply({ t: 'settings', settings: { ...s.settings, mouseSteering: on } });
+      hud.setToast(
+        on
+          ? 'mouse drive on — left throttle, right brake, wheel-press to look'
+          : 'mouse drive off',
+      );
+    }
+    input.setMouseSteering(s.settings.mouseSteering && driving !== null);
+
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
@@ -732,7 +747,7 @@ async function boot(): Promise<void> {
     camera.update(frameDt, cameraInput, target, driving === null);
 
     const cam = renderer.camera.position;
-    sky.update(s.timeOfDay, activeS, cam.x, cam.y, cam.z);
+    sky.update(s.timeOfDay, s.dayIndex, activeS, cam.x, cam.y, cam.z);
 
     // Off-road haze. `sky.update` sets the fog density for the time of day; this
     // multiplies it by how far the view has strayed from the road, so the desert
@@ -785,6 +800,7 @@ async function boot(): Promise<void> {
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         handbrake: lastInput.handbrake,
+        tcsActive: driving.tcsActive,
       });
     } else {
       hud.setDriving(null);
