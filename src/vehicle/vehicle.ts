@@ -197,8 +197,16 @@ const SIDE_FRICTION_GAIN = 0.7;
 const LATERAL_GRIP_FALLOFF_START_MPS = 14;
 /** Speed (m/s) at which the falloff reaches its full loss (~144 km/h). */
 const LATERAL_GRIP_FALLOFF_END_MPS = 40;
-/** Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all). */
-const LATERAL_GRIP_MAX_LOSS = 0.34;
+/**
+ * Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all).
+ *
+ * This is the lever that makes the car's instability SPEED-TRIGGERED rather than
+ * always-on, which is the whole target feel: planted in a straight line, honest
+ * through a slow curve, and something you have to catch once you have carried too
+ * much speed into it. 0.42 means a third-gear corner is still a corner and a
+ * flat-out one has lost nearly half its cornering force.
+ */
+const LATERAL_GRIP_MAX_LOSS = 0.42;
 /**
  * Rear-axle lateral grip, as a fraction of the front's.
  *
@@ -208,7 +216,7 @@ const LATERAL_GRIP_MAX_LOSS = 0.34;
  * makes the TAIL the end that goes first — the car has to be driven, not aimed, and
  * it will not catch itself.
  */
-const REAR_AXLE_SIDE_GRIP = 0.94;
+const REAR_AXLE_SIDE_GRIP = 0.89;
 
 // ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
@@ -218,22 +226,44 @@ const REAR_AXLE_SIDE_GRIP = 0.94;
 // ---------------------------------------------------------------------------
 
 /**
- * Foot-brake pedal DEMAND (m/s²), not an achievement.
- *
- * A master cylinder pushes the same pressure through the same shoes whatever the
- * axle load is doing, so this is what the pedal ASKS for; the friction cone decides
- * what each tyre delivers, and a tyre asked for more than its cone allows is a tyre
- * that has stopped cornering (see the friction-circle note below).
- *
- * 7.0 is chosen so that the ACHIEVED figure is period-correct: measured on the
- * bench, the cars stop from 100 km/h in 47-52 m at 0.76-0.87 g mean (the mean
- * exceeds the demand because engine braking, drag and rolling resistance are all
- * on top of it). For scale: a 9.5 demand gave 39-45 m, better than a modern car,
- * and a 6.6 demand gave 75-112 m once the rear tyres started saturating. The rear
- * axle still fills its cone at this demand, which is the part that matters — mid
- * corner it doubles the car's curvature (bench: trailYawGain 1.2-2.1).
+ * Foot-brake pedal ceiling (m/s²): the most the hydraulics can ask for at full
+ * pedal, before the tyres get a say. It only binds where grip is plentiful — a
+ * high-wheelGrip car on clean asphalt on the experimental2 compound reaches
+ * 1.2 · 1.1 · 0.988 = 1.30 g of capacity — and is what stops that combination
+ * out-braking a modern car outright.
  */
-const FOOT_BRAKE_DECEL = 9.6;
+const FOOT_BRAKE_MAX_DECEL = 13.0;
+/**
+ * Fraction of the vehicle's MEASURED total longitudinal capacity that a floored
+ * pedal asks for. The pedal negotiates with the tyres instead of shouting one
+ * number at them.
+ *
+ * What this replaces: a flat 9.6 m/s² demand, identical on every surface, every
+ * compound and every load. That one number could only be right for one case, and
+ * the case it was tuned for was a standard-tyre car on asphalt. Everywhere else it
+ * was wrong in a way the player felt as an absence of control:
+ *
+ *  - Gravel (capacity 0.51 g) and sand (0.36 g) were asked for 0.98 g, so the wheels
+ *    locked on contact with the pedal. Braking off-road was lock or nothing, with no
+ *    modulation in between.
+ *  - Sport tyres were a cornering upgrade only: the pedal never asked for more than
+ *    standard already delivered, so the extra 35% of longitudinal grip was unusable.
+ *  - Load was ignored. A laden truck stopped no better than an empty one, and a wheel
+ *    unloading over a crest was asked for exactly as much as one carrying the corner.
+ *
+ * Calibration is preserved rather than re-tuned: asphalt on standard tyres has a
+ * capacity of 2.6 · 0.38 = 0.988 g, so 0.99 of it is 9.59 m/s² — the old constant to
+ * within a rounding error. The established baseline stops the same.
+ *
+ * It is deliberately an AGGREGATE, summed over the vehicle, not a per-wheel
+ * allocation. Per-wheel negotiation would be an anti-lock brake the era never had:
+ * no wheel would ever be over-asked, so nothing would ever lock, and cadence braking
+ * would stop being a mechanism. Sized against the total and then split on the fixed
+ * FOOT_BRAKE_REAR_BIAS below, the light rear axle is still asked for more than its
+ * own share of the grip, so the rears still fill their cone first and the tail still
+ * comes round. That is the whole character of the brake, and it survives.
+ */
+const FOOT_BRAKE_GRIP_RATIO = 0.99;
 /**
  * Rear bias for the foot brake (0..1).
  *
@@ -282,10 +312,27 @@ const FOOT_BRAKE_REAR_BIAS = 0.62;
 const SLIDE_MIN_MPS = 2.5;
 /** Cone fraction the longitudinal channel may eat before side grip starts to go. */
 const SLIDE_CONE_THRESHOLD = 0.55;
-/** Lateral grip retained by a fully sliding wheel. */
-const SLIDE_SIDE_GRIP = 0.35;
-/** Smoothing for the slide estimate, seconds. Long enough to ignore one bad step. */
-const SLIDE_TAU = 0.05;
+/**
+ * Lateral grip retained by a fully sliding wheel.
+ *
+ * This number IS catchability. A sliding tyre that keeps 45% of its side force is a
+ * car that has stepped out but is still listening: the slide develops, the driver
+ * has something to steer against, and lifting or unwinding puts it back. Set it low
+ * and a slide is an announcement that the corner is already lost.
+ */
+const SLIDE_SIDE_GRIP = 0.45;
+/**
+ * Slide smoothing, seconds — deliberately asymmetric.
+ *
+ * Grip is slow to leave and quick to return. That asymmetry is what makes a car
+ * fightable rather than merely loose: the onset is gradual enough to read and react
+ * to, and the recovery is prompt enough that the correction you make is rewarded on
+ * the same corner rather than two beats later. Symmetric smoothing gives you either
+ * a snap you cannot see coming (short) or a slide that keeps sliding after you have
+ * already fixed it (long).
+ */
+const SLIDE_ONSET_TAU = 0.09;
+const SLIDE_RECOVER_TAU = 0.04;
 /**
  * Locking the wheels, and spinning them up: measured, not scripted.
  *
@@ -350,6 +397,61 @@ const SLIDING_GRIP_FRACTION = 0.75;
 const SLIDE_CURVE_GAIN = 1.5;
 /** Lateral grip left on a locked, sliding tyre. */
 const LOCKED_SIDE_GRIP = 0.22;
+
+/**
+ * Traction control: the driver aid that used to masquerade as a tyre compound.
+ *
+ * `sport` was never a compound. Its only felt benefit was unsticking a car bogged in
+ * sand or gravel, which is not what rubber does — it is what slip control does, and
+ * it was doing it by silently handing out 35% more cornering grip as well. So the
+ * mechanism is now what it always was: when a driven wheel spins up past the slip
+ * where the tyre makes its peak force, the torque going to it is cut back until it
+ * is near that peak again. Nothing is added; a wheel is stopped from wasting what it
+ * already has on the sliding side of the curve.
+ *
+ * It is always armed and entirely automatic, because that is what it is for: no
+ * player would ever choose to be past the peak. The dashboard lamp is the honest
+ * part — it lights only while torque is actually being cut, so the player learns
+ * where the surface runs out rather than being told about it.
+ *
+ * The threshold is a slip SPEED, not a slip ratio, and that distinction is the
+ * whole difference between an aid and a trap.
+ *
+ * A slip ratio is (ωr − v)/max(|v|, SLIP_REFERENCE_MPS), and that denominator is
+ * floored at 1.5 m/s so it stays finite at rest. At a standstill, then, a wheel
+ * creeping round at 0.5 m/s of surface speed already reads a ratio of 0.33 — nearly
+ * three times PEAK_SLIP_RATIO — so a ratio-based TCS pins itself at full cut the
+ * instant you touch the throttle from rest. That is not a hypothetical: it is why a
+ * coupe nosed into a pole on a slight grade could not reverse out with the lamp lit.
+ * A standing start legitimately runs a slip ratio around 3; that is how a tyre makes
+ * force at all.
+ *
+ * So the wheel is judged on how much faster its contact patch is moving than the
+ * road, in m/s: TCS_SLIP_FLOOR_MPS is tolerated regardless of road speed, and above
+ * a walking pace the allowance grows with speed until it is the same peak-slip ratio
+ * the tyre model uses. On top of that the system has NO authority below
+ * TCS_AUTHORITY_START_MPS and full authority only above TCS_AUTHORITY_FULL_MPS, so
+ * digging, rocking and reversing out of somewhere are always the driver's to do with
+ * the whole engine. An aid that can strand the car is worse than no aid.
+ */
+const TCS_SLIP_FLOOR_MPS = 2.2;
+/** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
+const TCS_SLIP_BAND_MPS = 1.8;
+/** Road speed (m/s) below which TCS may not cut at all, and above which it may cut fully. */
+const TCS_AUTHORITY_START_MPS = 1.0;
+const TCS_AUTHORITY_FULL_MPS = 3.5;
+/** Most of a wheel's drive torque TCS may take away. Never all of it: a bogged car still digs. */
+const TCS_MAX_CUT = 0.85;
+/** Cut smoothing, seconds: quick to intervene, slower to hand the torque back. */
+const TCS_ATTACK_TAU = 0.03;
+const TCS_RELEASE_TAU = 0.12;
+/** Cut fraction above which the dashboard lamp counts the system as working. */
+const TCS_LAMP_THRESHOLD = 0.05;
+/**
+ * Minimum time (s) the lamp stays lit once lit. A single-step intervention is real
+ * but invisible at 60 Hz; a lamp that flickers for one frame teaches nothing.
+ */
+const TCS_LAMP_HOLD_S = 0.35;
 /**
  * Ride height, as geometry rather than a fudge factor.
  *
@@ -567,6 +669,8 @@ interface WheelVisual {
   grounded: boolean;
   /** Smoothed slide amount, 0 = inside the friction cone, 1 = fully saturated. */
   slideT: number;
+  /** Smoothed TCS torque cut on this wheel, 0 = none, 1 = all of it. */
+  tcsCut: number;
   /** Locked and sliding: emergent from the wheel's rotation, or the handbrake on a rear. */
   locked: boolean;
   /** Physical wheel speed (rad/s), integrated by updateWheelDynamics. */
@@ -677,16 +781,94 @@ const COM_REARWARD_FRACTION = 0.02;
 const HEADLIGHT_X_FRACTION = 0.62;
 const HEADLIGHT_Y_FRACTION = 0.28;
 
+/**
+ * Beam geometry per mode, and the arithmetic behind the numbers.
+ *
+ * Both modes were doubled in GROUND FOOTPRINT — twice as wide and twice as long as
+ * the pool they used to throw — which is not the same as doubling the two obvious
+ * fields, so each half of that is derived rather than typed:
+ *
+ * WIDTH. The lit width at range r is 2·r·tan(angle), so a footprint twice as wide
+ * needs tan(angle') = 2·tan(angle), NOT angle' = 2·angle. Doubling the angle itself
+ * overshoots badly at these half-angles and, past 45°, runs out of cone before it
+ * runs out of width:
+ *   low   tan 0.52 = 0.573 -> 1.145 -> 0.853 rad (49°, was 30°)
+ *   high  tan 0.34 = 0.354 -> 0.708 -> 0.616 rad (35°, was 19°)
+ * Spot intensity is candela, not lumens spread over the cone, so widening does not
+ * dim what was already lit: the extra width is added, not traded for.
+ *
+ * LENGTH. Two things bound it and both have to move or nothing changes.
+ *  - Where the beam AXIS meets the ground, which is targetDistance · (h / targetDrop)
+ *    for a lamp h above the road. Only the drop/distance RATIO is a direction, so
+ *    halving targetDrop doubles the reach and leaves the aim vector's forward
+ *    component alone.
+ *  - `distance`, Three's cutoff, whose window term (1 - (d/cutoff)^4)² pulls the far
+ *    end of the beam to nothing well before the cutoff itself. Doubling reach without
+ *    doubling cutoff just moves the axis into the part of the falloff that has
+ *    already been extinguished.
+ * Intensity is deliberately unchanged: the inverse-power term still applies, so the
+ * new far end is dimmer than the old one was — which is what a longer beam looks
+ * like. Raising intensity to compensate would blow out the near field instead.
+ */
+interface HeadlightBeam {
+  readonly intensity: number;
+  readonly distance: number;
+  readonly angle: number;
+  readonly penumbra: number;
+  readonly targetDistance: number;
+  readonly targetDrop: number;
+}
+
+const HEADLIGHT_LOW: HeadlightBeam = {
+  intensity: 110,
+  distance: 288,
+  angle: 0.853,
+  penumbra: 0.68,
+  targetDistance: 26,
+  targetDrop: 0.9,
+};
+
+const HEADLIGHT_HIGH: HeadlightBeam = {
+  intensity: 210,
+  distance: 520,
+  angle: 0.616,
+  penumbra: 0.45,
+  targetDistance: 56,
+  targetDrop: 0.45,
+};
+
 type HeadlightMode = 'off' | 'low' | 'high';
 
 /**
- * Compound factor applied uniformly to the lateral response and friction budget
- * of every wheel. Standard is the established handling baseline.
+ * Per-compound factors for every wheel. Standard is the established handling
+ * baseline (both 1).
+ *
+ * The two channels are deliberately separate, because they are separate physics:
+ *
+ *  - `grip` scales the FORCE CEILING at both ends of the tyre: the longitudinal
+ *    capacity in `updateWheelDynamics` (drive and brake) and Rapier's friction cone,
+ *    which with the longitudinal channels zeroed is the lateral force ceiling. It is
+ *    how much the tyre can ultimately do.
+ *  - `side` scales only `sideFrictionStiffness`, the GAIN of the lateral
+ *    velocity-cancelling constraint: how much slip angle the tyre needs before it
+ *    develops that force. It is how quickly the tyre responds, not how hard it holds.
+ *
+ * `experimental` is the combination that has no real-world compound behind it: a
+ * standard ceiling reached lazily. Ultimate cornering grip, braking and traction are
+ * untouched; the steering goes vague and the car has to be given time to take a set.
+ * `experimental2` takes that further than any real tyre would — a ceiling slightly
+ * ABOVE standard, reached at three times the slip angle — which is the pure form of
+ * "loose but never lost": there is more grip there than a standard tyre has, and the
+ * car makes you work for every newton of it.
+ *
+ * There is no `sport`. What it did on the surfaces where it was felt is traction
+ * control, and it is now traction control (see the TCS constants above).
  */
 const TYRE_COMPOUNDS = [
-  { label: 'bald', grip: 0.55 },
-  { label: 'standard', grip: 1 },
-  { label: 'sport', grip: 1.35 },
+  { label: 'bald', grip: 0.55, side: 0.55 },
+  { label: 'standard', grip: 1, side: 1 },
+  { label: 'experimental', grip: 1, side: 0.55 },
+  { label: 'experimental2', grip: 1.1, side: 0.3 },
 ] as const;
 
 export class Vehicle {
@@ -715,6 +897,13 @@ export class Vehicle {
   private headlightMode: HeadlightMode = 'off';
   /** One selected compound for every wheel; standard preserves existing handling. */
   private tyreCompoundIndex = 1;
+
+  /**
+   * Seconds the TCS dashboard lamp still owes the player. Set whenever the system
+   * actually cuts torque, counted down every step, so the lamp reports work done
+   * rather than a system merely being fitted.
+   */
+  private tcsLampS = 0;
 
   private readonly dragCoeff: number;
 
@@ -947,6 +1136,14 @@ export class Vehicle {
     return TYRE_COMPOUNDS[this.tyreCompoundIndex].label;
   }
 
+  /**
+   * Is traction control cutting torque right now? Drives the dashboard lamp, and
+   * nothing else: the aid itself is unconditional.
+   */
+  get tcsActive(): boolean {
+    return this.tcsLampS > 0;
+  }
+
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
@@ -979,7 +1176,10 @@ export class Vehicle {
     this.applyHeadlightMode();
   }
 
-  /** Bald -> standard -> sport -> bald, applied to every wheel on the next step. */
+  /**
+   * Bald -> standard -> experimental -> experimental2 -> bald, applied to every wheel
+   * on the next step. Not persisted: a reload or a change of car is back on standard.
+   */
   cycleTyreCompound(): void {
     this.tyreCompoundIndex = (this.tyreCompoundIndex + 1) % TYRE_COMPOUNDS.length;
   }
@@ -1087,6 +1287,7 @@ export class Vehicle {
         groundSurface: SurfaceType.Asphalt,
         grounded: false,
         slideT: 0,
+        tcsCut: 0,
         locked: false,
         spinRadS: 0,
         drawnSpin: 0,
@@ -1405,7 +1606,37 @@ export class Vehicle {
     const brakeRearShare = FOOT_BRAKE_REAR_BIAS;
     const brakeDenom =
       this.frontWheelCount * brakeFrontShare + this.rearWheelCount * brakeRearShare;
-    const footBrakeForce = brakeDenom > 0 ? (FOOT_BRAKE_DECEL * mass) / brakeDenom : 0;
+
+    // Compound first: the pedal's demand is sized against the grip the tyres have,
+    // so it has to know which tyres are fitted before it can ask for anything.
+    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    const tyreGrip = compound.grip;
+
+    // Total longitudinal capacity the vehicle is standing on, in newtons: the same
+    // per-wheel capacity the tyre model uses in updateWheelDynamics, summed.
+    //
+    // Both inputs are one step old — `loadN` is the low-passed suspension force from
+    // the last step and `groundSurface` was resolved in the last wheel pass — which is
+    // 16 ms of lag on a quantity that barely moves (the sum is near mg whatever the
+    // car is doing). Reading it here rather than mid-pass keeps ONE demand for the
+    // whole vehicle, which is what preserves the brake bias as the thing that decides
+    // which axle lets go. Airborne wheels contribute nothing, so a car with its wheels
+    // off the ground has no brakes to over-ask with.
+    let brakeCapacityN = 0;
+    for (const w of this.wheels) {
+      if (!w.grounded) continue;
+      brakeCapacityN +=
+        SURFACES[w.groundSurface].frictionSlip *
+        LONGITUDINAL_GRIP_FRACTION *
+        stats.wheelGrip *
+        tyreGrip *
+        w.loadN;
+    }
+    const footBrakeDemandN = Math.min(
+      FOOT_BRAKE_MAX_DECEL * mass,
+      FOOT_BRAKE_GRIP_RATIO * brakeCapacityN,
+    );
+    const footBrakeForce = brakeDenom > 0 ? footBrakeDemandN / brakeDenom : 0;
     const parkingBrakeForce = input.handbrake
       ? (PARK_BRAKE_DECEL * mass) / Math.max(1, this.wheels.length)
       : 0;
@@ -1418,7 +1649,6 @@ export class Vehicle {
     let drivenContactCount = 0;
     // Same for every wheel: the lateral grip budget (see constants above). The
     // cone cap is mass-scaled so heavy vehicles corner worse per kilogram.
-    const tyreGrip = TYRE_COMPOUNDS[this.tyreCompoundIndex].grip;
     const gripBudgetFactor =
       stats.wheelGrip *
       tyreGrip *
@@ -1468,7 +1698,7 @@ export class Vehicle {
       controller.setWheelSideFrictionStiffness(
         w.index,
         surface.sideFriction *
-          tyreGrip *
+          compound.side *
           SIDE_FRICTION_GAIN *
           lateralGripFactor *
           axleGrip *
@@ -1763,7 +1993,12 @@ export class Vehicle {
 
     this.chassisBody.rotation(this.rotationScratch);
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
-    const slideBlend = dt / (SLIDE_TAU + dt);
+    // Grip leaves slowly and comes back quickly: see SLIDE_ONSET_TAU.
+    const slideOnsetBlend = dt / (SLIDE_ONSET_TAU + dt);
+    const slideRecoverBlend = dt / (SLIDE_RECOVER_TAU + dt);
+    const tcsAttackBlend = dt / (TCS_ATTACK_TAU + dt);
+    const tcsReleaseBlend = dt / (TCS_RELEASE_TAU + dt);
+    this.tcsLampS = Math.max(0, this.tcsLampS - dt);
 
     const spinCeiling = this.drivetrain.maxDrivenWheelSpinRadS;
 
@@ -1797,7 +2032,39 @@ export class Vehicle {
       const wheelMass = WHEEL_MASS_KG * (w.radius / WHEEL_REFERENCE_RADIUS) ** 2;
       const inertia = 0.5 * wheelMass * w.radius * w.radius;
 
-      let spin = w.spinRadS + (dt * w.driveTorqueNm) / inertia;
+      // Traction control, measured from this wheel's OWN pre-step slip SPEED: how
+      // much faster its contact patch is moving than the road, in m/s. Signed by the
+      // commanded torque, which is what keeps this a traction aid and not an
+      // accidental ABS — a wheel locking under the brakes slips the other way
+      // relative to its drive torque and is left alone.
+      //
+      // The allowance is the larger of a fixed floor and the tyre model's own peak
+      // slip at this road speed, and the whole cut is then scaled by an authority
+      // that is zero at walking pace. Below that the driver has every newton the
+      // engine makes, which is what it takes to reverse off a pole on a grade.
+      const slipSpeed =
+        (w.spinRadS * w.radius - contactSpeed) * (w.driveTorqueNm >= 0 ? 1 : -1);
+      const allowance = Math.max(
+        TCS_SLIP_FLOOR_MPS,
+        PEAK_SLIP_RATIO * Math.abs(contactSpeed),
+      );
+      const authority = clamp(
+        (Math.abs(contactSpeed) - TCS_AUTHORITY_START_MPS) /
+          (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
+        0,
+        1,
+      );
+      const cutTarget =
+        driven && inContact && w.driveTorqueNm !== 0
+          ? Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
+            TCS_MAX_CUT *
+            authority
+          : 0;
+      w.tcsCut +=
+        (cutTarget - w.tcsCut) * (cutTarget > w.tcsCut ? tcsAttackBlend : tcsReleaseBlend);
+      if (w.tcsCut > TCS_LAMP_THRESHOLD) this.tcsLampS = TCS_LAMP_HOLD_S;
+
+      let spin = w.spinRadS + (dt * w.driveTorqueNm * (1 - w.tcsCut)) / inertia;
 
       const brakeDelta = (dt * w.brakeForceN * w.radius) / inertia;
       if (Math.abs(spin) <= brakeDelta) spin = 0;
@@ -1898,7 +2165,9 @@ export class Vehicle {
         Math.abs(contactSpeed) > SLIDE_MIN_MPS
           ? clamp((gripUsage - SLIDE_CONE_THRESHOLD) / (1 - SLIDE_CONE_THRESHOLD), 0, 1)
           : 0;
-      w.slideT += (slideTarget - w.slideT) * slideBlend;
+      w.slideT +=
+        (slideTarget - w.slideT) *
+        (slideTarget > w.slideT ? slideOnsetBlend : slideRecoverBlend);
     }
   }
 
@@ -2107,9 +2376,18 @@ export class Vehicle {
     const z = half[2];
     for (const sign of [-1, 1]) {
       const x = sign * HEADLIGHT_X_FRACTION * half[0];
-      const light = new THREE.SpotLight(0xfff2d8, 0, 144, 0.52, 0.68, 1.5);
+      // Placeholder geometry only: applyHeadlightMode below sets every one of these
+      // from HEADLIGHT_LOW/HIGH before the first frame.
+      const light = new THREE.SpotLight(
+        0xfff2d8,
+        0,
+        HEADLIGHT_LOW.distance,
+        HEADLIGHT_LOW.angle,
+        HEADLIGHT_LOW.penumbra,
+        1.5,
+      );
       light.position.set(x, y, z);
-      light.target.position.set(x, y - 1.8, z + 26);
+      light.target.position.set(x, y - HEADLIGHT_LOW.targetDrop, z + HEADLIGHT_LOW.targetDistance);
       light.castShadow = false;
       light.visible = true;
       this.rootGroup.add(light.target);
@@ -2120,23 +2398,24 @@ export class Vehicle {
   }
 
   private applyHeadlightMode(): void {
-    const low = this.headlightMode === 'low';
-    const high = this.headlightMode === 'high';
-    const intensity = low ? 110 : high ? 210 : 0;
-    const distance = high ? 260 : 144;
-    const angle = high ? 0.34 : 0.52;
-    const penumbra = high ? 0.45 : 0.68;
-    const targetDistance = high ? 56 : 26;
-    const targetDrop = high ? 0.9 : 1.8;
+    const beam =
+      this.headlightMode === 'high'
+        ? HEADLIGHT_HIGH
+        : this.headlightMode === 'low'
+          ? HEADLIGHT_LOW
+          : null;
     for (const light of this.headlights) {
-      light.intensity = intensity;
-      light.distance = distance;
-      light.angle = angle;
-      light.penumbra = penumbra;
+      // Off keeps the beam geometry of the low mode and only kills the intensity, so
+      // Three's spotlight shader permutation never changes when the driver switches.
+      const shape = beam ?? HEADLIGHT_LOW;
+      light.intensity = beam ? beam.intensity : 0;
+      light.distance = shape.distance;
+      light.angle = shape.angle;
+      light.penumbra = shape.penumbra;
       light.target.position.set(
         light.position.x,
-        light.position.y - targetDrop,
-        light.position.z + targetDistance,
+        light.position.y - shape.targetDrop,
+        light.position.z + shape.targetDistance,
       );
     }
   }

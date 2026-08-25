@@ -32,7 +32,14 @@ import { hash01 } from '../core/rng';
  * plane.
  */
 const DOME_RADIUS = 3000;
-/** Stars sit just inside the dome so they layer over the gradient, not behind it. */
+/**
+ * Stars sit just inside the dome so they layer over the gradient, not behind it.
+ *
+ * These radii are for LAYOUT ONLY and say nothing about occlusion: both the star
+ * shader and the aurora shader pin their depth to the far plane (gl_Position.z = w),
+ * because the drawn terrain reaches far past this shell on the longer view-distance
+ * tiers. See the note in STAR_VERTEX.
+ */
 const STAR_RADIUS = DOME_RADIUS * 0.93;
 /** Aurora curtains live in front of the stars, well inside the dome. */
 const AURORA_DISTANCE = 800;
@@ -145,11 +152,154 @@ const C_NIGHT_ZENITH = new THREE.Color().setStyle('#03040a');
 const C_NIGHT_HORIZON = new THREE.Color().setStyle('#0d1424');
 const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
 const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
-const C_SUNSET = new THREE.Color().setStyle('#ff6a38');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
 const C_GROUND = new THREE.Color().setStyle('#d8a45c'); // warm ochre sand bounce
 const C_NIGHT_GROUND = new THREE.Color().setStyle('#0a0c14');
+
+// ---------------------------------------------------------------------------
+// Twilight moods
+// ---------------------------------------------------------------------------
+
+/**
+ * Five dawn/dusk palettes, one picked per twilight.
+ *
+ * The old sky had exactly one sunset — C_SUNSET, a single orange — so every morning
+ * and every evening of a 900 km drive were the same two minutes of colour. Real
+ * twilights differ because the air differs: how much water is in it, how high the
+ * dust is, whether there is cloud aloft catching light the horizon has already lost.
+ * None of that is simulated here, so it is authored: five plausible skies, chosen
+ * deterministically per event, blended so nothing ever pops.
+ *
+ * Each mood owns four things, and all four matter — swapping only the horizon colour
+ * reads as a filter rather than as a different evening:
+ *
+ *  - `horizon`: the band the sun sets into, and (via `fog.color`) the colour the far
+ *    desert dissolves into. The dominant impression.
+ *  - `glow` and `glowScale`: the halo around the disc. A humid sky throws a wide soft
+ *    glow; cold clean air barely glows at all.
+ *  - `zenith` and `zenithWeight`: how far up the twilight reaches. This is what makes
+ *    'rose' feel like a different SKY rather than a different sunset, because the
+ *    colour is overhead as well as on the horizon.
+ *  - `widthScale`: how long the whole thing lasts, as a multiplier on the elevation
+ *    window. Dust already widens twilight; this lets a mood be brief and sharp or
+ *    drawn out.
+ *
+ * The progression gradient still multiplies all of it: km 900's dust reddens and
+ * lengthens whichever mood came up, so late-run twilights are recognisably late-run
+ * whatever the roll.
+ */
+interface TwilightMood {
+  readonly label: string;
+  readonly horizon: THREE.Color;
+  readonly glow: THREE.Color;
+  readonly glowScale: number;
+  readonly zenith: THREE.Color;
+  readonly zenithWeight: number;
+  readonly widthScale: number;
+}
+
+const TWILIGHT_MOODS: readonly TwilightMood[] = [
+  {
+    // The desert default: dust-fired orange-red, hard and brief. This is the sky the
+    // game had, kept as one of five so nothing familiar is lost.
+    label: 'ember',
+    horizon: new THREE.Color().setStyle('#ff6a38'),
+    glow: new THREE.Color().setStyle('#ff6a38'),
+    glowScale: 1,
+    zenith: new THREE.Color().setStyle('#3f5f9c'),
+    zenithWeight: 0.12,
+    widthScale: 1,
+  },
+  {
+    // Clean, humid air: a soft peach horizon under a lilac sky, no hard edge
+    // anywhere. The glow is wide and weak because the light is scattered, not fired.
+    label: 'peach',
+    horizon: new THREE.Color().setStyle('#ffb48a'),
+    glow: new THREE.Color().setStyle('#ffd0a8'),
+    glowScale: 0.72,
+    zenith: new THREE.Color().setStyle('#8f7fb8'),
+    zenithWeight: 0.3,
+    widthScale: 1.25,
+  },
+  {
+    // A hot, hazy day burning out: brassy gold on the horizon, the glow doing most
+    // of the work, and a long slow fade because the haze holds the light.
+    label: 'gold',
+    horizon: new THREE.Color().setStyle('#ffb02e'),
+    glow: new THREE.Color().setStyle('#ffcf5e'),
+    glowScale: 1.35,
+    zenith: new THREE.Color().setStyle('#5a6f9e'),
+    zenithWeight: 0.16,
+    widthScale: 1.4,
+  },
+  {
+    // High cloud catching light the ground has lost: magenta-rose low down, violet
+    // well overhead. The one mood that colours the whole dome.
+    label: 'rose',
+    horizon: new THREE.Color().setStyle('#f0577f'),
+    glow: new THREE.Color().setStyle('#ff7ea0'),
+    glowScale: 0.9,
+    zenith: new THREE.Color().setStyle('#6a4d97'),
+    zenithWeight: 0.42,
+    widthScale: 1.1,
+  },
+  {
+    // Cold clean morning: almost no colour at all, a thin copper line on a grey-blue
+    // sky. Rare-feeling because it is the one that refuses to perform.
+    label: 'ash',
+    horizon: new THREE.Color().setStyle('#b98a6d'),
+    glow: new THREE.Color().setStyle('#e0a882'),
+    glowScale: 0.45,
+    zenith: new THREE.Color().setStyle('#44577a'),
+    zenithWeight: 0.2,
+    widthScale: 0.78,
+  },
+];
+
+/**
+ * Seed for mood selection. Fixed for the same reason STAR_SEED is: the sky must be
+ * reproducible, so reloading into a sunrise gives you back the sunrise you saved in.
+ */
+const MOOD_SEED = 0x5eed10ad;
+
+/**
+ * Fraction of a half-day over which one mood hands over to the next.
+ *
+ * Handover happens at noon and at midnight — the two moments the twilight weight is
+ * exactly zero — so this window only exists to keep the sun's own glow colour from
+ * stepping at midday, where it still carries 0.22 of intensity. A quarter of a
+ * half-day is hours of game time for a colour nobody can point at.
+ */
+const MOOD_BLEND = 0.25;
+
+/**
+ * Raw mood roll for one twilight event. `event` counts half-days: even is the
+ * morning of `event/2`, odd is that evening.
+ */
+function moodRoll(event: number): number {
+  return Math.min(
+    TWILIGHT_MOODS.length - 1,
+    Math.floor(hash01(MOOD_SEED, event, 0x11) * TWILIGHT_MOODS.length),
+  );
+}
+
+/**
+ * Mood for one twilight event, with immediate repeats pushed off.
+ *
+ * A raw 1-in-5 roll repeats about a fifth of the time, and two identical skies in a
+ * row is exactly the complaint this exists to answer — it reads as "the sky never
+ * changes" even when it does. Comparing against the previous event's RAW roll keeps
+ * this a pure function of the event number (no recursion, no stored history); a
+ * repeat can still slip through when the previous event was itself pushed off, which
+ * is rare enough to be texture rather than a pattern.
+ */
+function moodFor(event: number): TwilightMood {
+  const roll = moodRoll(event);
+  if (roll !== moodRoll(event - 1)) return TWILIGHT_MOODS[roll]!;
+  const step = 1 + Math.floor(hash01(MOOD_SEED, event, 0x12) * (TWILIGHT_MOODS.length - 1));
+  return TWILIGHT_MOODS[(roll + step) % TWILIGHT_MOODS.length]!;
+}
 
 // ---------------------------------------------------------------------------
 // Shaders
@@ -304,6 +454,25 @@ void main() {
 
   gl_PointSize = aSize * uPixelRatio;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  // Pin the star to the FAR PLANE in depth, whatever its geometric radius is.
+  //
+  // The shell sits at STAR_RADIUS (2.79 km). The drawn terrain does not: the vista
+  // disc reaches the view-distance setting, which is 8 km on the far tier and 25 km
+  // on the vast one. So a mountain 6 km out is genuinely FARTHER than the star
+  // shell, wins nothing in the depth test, and the star is drawn on top of the
+  // mountain — the reported stars-over-the-far-ranges.
+  //
+  // Moving the shell out instead does not work. The far plane is only
+  // viewDistance + 300 m, so on the vast tier the shell would have ~100 m of room
+  // between the terrain and the clip plane, and one depth step out there is ~240 m
+  // with a 24-bit buffer and a 0.16 m near plane. The separation would be finer than
+  // the depth buffer can represent and the stars would z-fight with the ranges.
+  //
+  // z = w puts the star at normalised depth 1.0: the cleared depth buffer is also
+  // 1.0 and the default LessEqual test passes, so empty sky still shows stars,
+  // while ANY geometry that has written depth is in front of them. The dome behind
+  // them writes no depth at all, so the sky gradient is unaffected.
+  gl_Position.z = gl_Position.w;
 }
 `;
 
@@ -365,6 +534,10 @@ void main() {
           + 0.55 * sin(p.y * 0.046 - uTime * 0.19 + uPhase * 3.1415927);
   p.x += w * 16.0;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  // Same depth pin as the stars, and needed harder: the curtains hang at
+  // AURORA_DISTANCE (800 m), so without it every range past the first kilometre is
+  // painted over by an aurora that is supposed to be behind it.
+  gl_Position.z = gl_Position.w;
 }
 `;
 
@@ -475,6 +648,10 @@ export class Sky {
   private readonly _horizon = new THREE.Color();
   private readonly _sunColor = new THREE.Color();
   private readonly _sunGlow = new THREE.Color();
+  /** This twilight's mood, already blended out of the neighbouring two. */
+  private readonly _moodHorizon = new THREE.Color();
+  private readonly _moodGlow = new THREE.Color();
+  private readonly _moodZenith = new THREE.Color();
   private readonly _lightColor = new THREE.Color();
   private readonly _hemiSky = new THREE.Color();
   private readonly _hemiGround = new THREE.Color();
@@ -787,7 +964,14 @@ export class Sky {
     }
   }
 
-  update(timeOfDay: number, s: number, cameraX: number, cameraY: number, cameraZ: number): void {
+  update(
+    timeOfDay: number,
+    dayIndex: number,
+    s: number,
+    cameraX: number,
+    cameraY: number,
+    cameraZ: number,
+  ): void {
     const g = skyGradientAt(s);
 
     const dayFrac = (((timeOfDay % DAY_LENGTH) + DAY_LENGTH) % DAY_LENGTH) / DAY_LENGTH;
@@ -803,30 +987,56 @@ export class Sky {
     );
     this.sunElevation = Math.asin(this._sunDir.y);
 
+    // --- Twilight mood ---
+    // Half-day events: even is this day's morning, odd is its evening. The boundary
+    // between them is noon (and midnight), which is exactly where `sunset` below is
+    // zero — so a mood only ever changes hands while none of it is being shown.
+    const event = dayIndex * 2 + (dayFrac < 0.5 ? 0 : 1);
+    const eventT = dayFrac < 0.5 ? dayFrac * 2 : (dayFrac - 0.5) * 2;
+    const moodBlend = smoothstep(0, MOOD_BLEND, eventT);
+    const prevMood = moodFor(event - 1);
+    const mood = moodFor(event);
+    this._moodHorizon.copy(prevMood.horizon).lerp(mood.horizon, moodBlend);
+    this._moodGlow.copy(prevMood.glow).lerp(mood.glow, moodBlend);
+    this._moodZenith.copy(prevMood.zenith).lerp(mood.zenith, moodBlend);
+    const moodGlowScale =
+      prevMood.glowScale + (mood.glowScale - prevMood.glowScale) * moodBlend;
+    const moodZenithWeight =
+      prevMood.zenithWeight + (mood.zenithWeight - prevMood.zenithWeight) * moodBlend;
+    const moodWidthScale =
+      prevMood.widthScale + (mood.widthScale - prevMood.widthScale) * moodBlend;
+
     // Day/night factors.
     const day = smoothstep(-0.12, 0.3, this.sunElevation);
     const night = smoothstep(0.02, -0.4, this.sunElevation);
-    // 1 while the sun is near the horizon, widening with dust (longer sunsets).
-    const sunset = 1 - smoothstep(0.02, 0.4 + 0.55 * g.dust, Math.abs(this.sunElevation));
+    // 1 while the sun is near the horizon, widening with dust (longer sunsets) and
+    // with the mood: some evenings are brief and hard, others hold on for an hour.
+    const sunset =
+      1 -
+      smoothstep(0.02, (0.4 + 0.55 * g.dust) * moodWidthScale, Math.abs(this.sunElevation));
 
     // --- Sky colours ---
     // Zenith: day blue, nudged away from familiar blue by skyHueShift, fading to
-    // night navy. The 0.5 scale keeps the hue drift perceptible only by recall.
+    // night navy, then pulled toward the mood's own upper colour while the sun is
+    // near the horizon. That last term is what makes a mood a SKY rather than a
+    // filter on the horizon line.
     this._zenith.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.02, 0.0)
-      .lerp(C_NIGHT_ZENITH, night);
+      .lerp(C_NIGHT_ZENITH, night)
+      .lerp(this._moodZenith, sunset * moodZenithWeight);
 
-    // Horizon: day/night base, warm sunset glow (reddened by dust), then a
+    // Horizon: day/night base, this twilight's own band (reddened by dust), then a
     // dust-driven turbid tan so the horizon mutes as the air thickens.
     this._horizon.copy(C_DAY_HORIZON).lerp(C_NIGHT_HORIZON, night);
-    this._horizon.lerp(C_SUNSET, sunset * (0.45 + 0.55 * g.dust));
+    this._horizon.lerp(this._moodHorizon, sunset * (0.45 + 0.55 * g.dust));
     this._horizon.lerp(C_TURBID, g.dust * 0.35 * day);
 
     // Sun disc: warm at low angle, white overhead.
     this._sunColor.copy(C_SUN_LOW).lerp(C_SUN_HIGH, smoothstep(0.0, 0.55, this.sunElevation));
-    this._sunGlow.copy(C_SUNSET);
+    this._sunGlow.copy(this._moodGlow);
     const sunGlowIntensity =
-      sunset * (0.9 + 1.6 * g.dust) + smoothstep(0.0, 0.6, this.sunElevation) * 0.22;
+      sunset * (0.9 + 1.6 * g.dust) * moodGlowScale +
+      smoothstep(0.0, 0.6, this.sunElevation) * 0.22;
 
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     this.fog.color.copy(this._horizon);

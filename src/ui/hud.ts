@@ -26,6 +26,11 @@ export interface DrivingReadout {
   oilFraction: number;
   /** Parking brake state. Keyboard and touch controls both latch it. */
   handbrake: boolean;
+  /**
+   * Is traction control cutting drive torque this frame? The lamp is lit only while
+   * the aid is doing something, which is what makes it teach where the grip ran out.
+   */
+  tcsActive: boolean;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -100,6 +105,7 @@ export class Hud {
   private readonly fuelNeedle: SVGLineElement;
   private readonly engineOffEl: HTMLElement;
   private readonly handbrakeEl: HTMLElement;
+  private readonly tcsEl: HTMLElement;
   private readonly warningsEl: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
@@ -151,12 +157,14 @@ export class Hud {
 
     this.gearEl = el('div', 'hud-gear');
 
-    // This cell is always present, so turning the brake on cannot widen or move
-    // the dashboard. Only the red parking glyph changes state.
+    // Both of these cells are always present, so an indicator lighting up cannot
+    // widen or move the dashboard. Only their illumination changes.
     this.handbrakeEl = el('div', 'hud-handbrake');
     this.handbrakeEl.textContent = 'P';
+    this.tcsEl = el('div', 'hud-tcs');
+    this.tcsEl.textContent = 'TCS';
     const indicators = el('div', 'hud-indicators');
-    indicators.append(this.gearEl, this.handbrakeEl);
+    indicators.append(this.gearEl, this.handbrakeEl, this.tcsEl);
 
     this.engineOffEl = el('div', 'hud-engine-off is-hidden');
     this.engineOffEl.textContent = 'ENGINE OFF';
@@ -366,6 +374,7 @@ export class Hud {
     }
     this.setVisible(this.engineOffEl, !readout.engineRunning);
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
+    this.tcsEl.classList.toggle('is-active', readout.tcsActive);
   }
 
   /** Radio line, or null when the radio has nothing to say (not in a car). */

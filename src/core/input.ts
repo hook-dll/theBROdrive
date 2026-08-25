@@ -54,6 +54,13 @@ export interface InputFrame {
   lookPitch: number;
   /** Wheel notches since the last frame. Positive zooms out. */
   zoomDelta: number;
+  /** Toggle mouse steering: tap, consumed once by the settings owner. */
+  toggleMouseSteer: boolean;
+  /**
+   * Is the mouse currently steering the car? Not an intent — a report, so the HUD
+   * can say so and the camera knows why its yaw stopped moving.
+   */
+  mouseSteering: boolean;
 }
 
 export function emptyInput(): InputFrame {
@@ -84,6 +91,8 @@ export function emptyInput(): InputFrame {
     lookYaw: 0,
     lookPitch: 0,
     zoomDelta: 0,
+    toggleMouseSteer: false,
+    mouseSteering: false,
   };
 }
 
@@ -112,6 +121,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
+  { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
   { id: 'camera', label: 'Cycle camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
@@ -175,6 +185,43 @@ function snapAxis(value: number, target: number): number {
 }
 
 /**
+ * Mouse steering: virtual-wheel travel per CSS pixel of horizontal mouse movement.
+ *
+ * Deliberately NOT scaled by the look sensitivity. They are different jobs — one
+ * aims a camera, the other holds a car in a lane — and sharing a slider means every
+ * player who likes a fast view also gets a car that darts.
+ *
+ * 0.0016 is ~625 px from centre to full lock: a deliberate arm movement rather than
+ * a wrist flick, which is what makes a long drive restful instead of a series of
+ * corrections. The steering rack's own rate limit (STEER_RATE_* in vehicle.ts) still
+ * applies on top.
+ */
+const MOUSE_STEER_GAIN = 0.0016;
+/**
+ * Exponent on the virtual wheel's own travel.
+ *
+ * The accumulator stays LINEAR — it has to, or the idle return and the keyboard
+ * handover would both fight the curve — and the exponent is applied on the way out.
+ * At 2.0 the first tenth of the wheel is a hundredth of the lock, so the small
+ * corrections that hold a lane are nearly free, while full lock is still full lock
+ * at the end of the same sweep.
+ *
+ * This is the difference between "the car twitches when I breathe" and a car you can
+ * aim down a straight with your hand resting on the desk.
+ */
+const MOUSE_STEER_EXPO = 2.0;
+/**
+ * Time constant, seconds, for the virtual wheel drifting back to centre while the
+ * mouse is NOT moving.
+ *
+ * Only while idle: a mouse has no springs and no self-centring, so without this a
+ * lifted hand leaves the car cornering forever, and with it applied unconditionally
+ * you would be fighting the wheel every time you held a long bend. Idle-only means
+ * the wheel is yours while you are steering and straightens when you let go.
+ */
+const MOUSE_STEER_IDLE_RETURN_S = 1.2;
+
+/**
  * Reads browser input into an `InputFrame`. Owns pointer lock and the analogue
  * smoothing of digital keys; owns no game state.
  */
@@ -188,6 +235,15 @@ export class InputReader {
   private locked = false;
   /** Desktop parking brake state. Changed only by a new key press, never key hold. */
   private keyboardHandbrake = false;
+  /**
+   * Raw horizontal mouse travel in CSS pixels since the last sample, kept apart from
+   * `yawDelta` because steering must not inherit the look sensitivity.
+   */
+  private rawDX = 0;
+  /** Is mouse steering switched on AND applicable (set by the game, not the device)? */
+  private mouseSteerEnabled = false;
+  /** Virtual steering-wheel position, -1..1. Survives between frames; that is the point. */
+  private mouseWheel = 0;
   /**
    * Effective action -> key list for this reader. Precomputed at construction
    * and on setKeyBindings so the hot path (sample) only reads arrays — it never
@@ -227,6 +283,16 @@ export class InputReader {
     this.mouseSensitivity = Math.max(0.0001, sensitivity);
   }
 
+  /**
+   * Switches mouse steering on or off. The GAME owns this, not the device: it is on
+   * only while the preference is set and the player is actually driving, so the same
+   * mouse still looks around freely on foot.
+   */
+  setMouseSteering(enabled: boolean): void {
+    if (!enabled) this.mouseWheel = 0;
+    this.mouseSteerEnabled = enabled;
+  }
+
   dispose(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
@@ -261,17 +327,22 @@ export class InputReader {
       void this.canvas.requestPointerLock();
       return;
     }
+    // Middle button: the browser's autoscroll would otherwise fire on press.
+    if (e.button === 1) e.preventDefault();
     if (e.button === 0) this.held.add('Mouse0');
+    if (e.button === 1) this.held.add('Mouse1');
     if (e.button === 2) this.held.add('Mouse2');
   };
 
   private onMouseUp = (e: MouseEvent): void => {
     if (e.button === 0) this.held.delete('Mouse0');
+    if (e.button === 1) this.held.delete('Mouse1');
     if (e.button === 2) this.held.delete('Mouse2');
   };
 
   private onContextMenu = (e: MouseEvent): void => {
-    // Right mouse is aim-down-sights; the browser menu must not steal it.
+    // Right mouse aims on foot and brakes while mouse-steering; either way the
+    // browser menu must not steal it.
     e.preventDefault();
   };
 
@@ -287,6 +358,7 @@ export class InputReader {
     // their own basis; see CameraRig, where turning right *decreases* yaw because
     // forward is (sin y, cos y) and right is therefore (-cos y, sin y).
     this.yawDelta += e.movementX * this.mouseSensitivity;
+    this.rawDX += e.movementX;
     this.pitchDelta -= e.movementY * this.mouseSensitivity;
   };
 
@@ -339,9 +411,17 @@ export class InputReader {
     const f = this.frame;
     // One source of truth per axis: a touch pedal counts exactly as much as the key
     // it stands in for, so the rest of this function does not care which was used.
+    //
+    // In mouse-steering mode the mouse is the whole car: left button is the throttle,
+    // right is the brake, and the middle button (held) hands the mouse back to the
+    // camera. That is a complete set of controls for one hand — the point of the mode
+    // is that a long drive needs nothing else.
     const touch = this.touch?.input;
-    const wantThrottle = this.anyHeld(this.keys.throttle) || touch?.forward ? 1 : 0;
-    const reverseHeld = this.anyHeld(this.keys.brake) || touch?.backward === true;
+    const mouseDrive = this.mouseSteerEnabled;
+    const mouseThrottle = mouseDrive && this.held.has('Mouse0');
+    const mouseBrake = mouseDrive && this.held.has('Mouse2');
+    const wantThrottle = this.anyHeld(this.keys.throttle) || touch?.forward || mouseThrottle ? 1 : 0;
+    const reverseHeld = this.anyHeld(this.keys.brake) || touch?.backward === true || mouseBrake;
     const wantBrake = reverseHeld ? 1 : 0;
     f.throttle = snapAxis(
       f.throttle +
@@ -354,13 +434,44 @@ export class InputReader {
     );
     f.reverse = reverseHeld;
 
-    // The touch steering slider is already analogue, so it supplies the same
-    // target the normal steering smoothing follows.
+    // Holding the MIDDLE button (wheel press) hands the mouse back to the camera and
+    // FREEZES the wheel where it is, so the car holds its line while the driver looks
+    // around. It is the middle button because the other two are now the pedals.
+    const lookOverride = this.held.has('Mouse1');
+    const steerWithMouse = mouseDrive && !lookOverride;
+    if (steerWithMouse) {
+      const next = this.mouseWheel + this.rawDX * MOUSE_STEER_GAIN;
+      this.mouseWheel = next < -1 ? -1 : next > 1 ? 1 : next;
+      if (this.rawDX === 0) {
+        this.mouseWheel -= this.mouseWheel * Math.min(1, dt / MOUSE_STEER_IDLE_RETURN_S);
+      }
+    }
+
     const keySteer =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
-    const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
-    f.steer +=
-      (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
+    if (mouseDrive && keySteer === 0) {
+      // The virtual wheel is already an analogue position, so it IS the steer axis;
+      // the digital-key smoothing below would only add lag to an input whose whole
+      // appeal is that it has none. The exponent is applied HERE, on the way out, so
+      // the stored wheel stays linear for the idle return and the keyboard handover.
+      const w = this.mouseWheel;
+      const shaped = Math.sign(w) * Math.abs(w) ** MOUSE_STEER_EXPO;
+      f.steer = snapAxis(shaped, 0);
+    } else {
+      // The touch steering slider is already analogue, so it supplies the same
+      // target the normal steering smoothing follows.
+      const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
+      f.steer +=
+        (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
+      // Keys win while they are held; handing back to the mouse must not snap the
+      // wheel. The stored wheel is linear, so it takes the INVERSE of the curve to
+      // stand where the keys left the car.
+      if (mouseDrive) {
+        f.steer = snapAxis(f.steer, 0);
+        this.mouseWheel = Math.sign(f.steer) * Math.abs(f.steer) ** (1 / MOUSE_STEER_EXPO);
+      }
+    }
+    f.mouseSteering = steerWithMouse;
 
     const taps = this.touch?.consumeTaps();
     if (this.anyPressed(this.keys.handbrake)) this.keyboardHandbrake = !this.keyboardHandbrake;
@@ -371,14 +482,18 @@ export class InputReader {
     f.toggleLights = this.anyPressed(this.keys.lights);
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.cycleTyres = this.anyPressed(this.keys.tyres);
+    f.toggleMouseSteer = this.anyPressed(this.keys.mouseSteer);
     f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
     f.radioToggle = this.anyPressed(this.keys.radio);
     f.radioNext = this.anyPressed(this.keys.radioStation);
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
     f.dropItem = this.anyPressed(this.keys.drop);
-    f.usePrimary = this.held.has('Mouse0');
-    f.useSecondary = this.held.has('Mouse2');
+    // Both buttons are pedals while mouse-steering, so they must not also fire or
+    // aim the held item. `mouseSteerEnabled` is only ever set while driving, so on
+    // foot this is exactly the old behaviour.
+    f.usePrimary = !mouseDrive && this.held.has('Mouse0');
+    f.useSecondary = !mouseDrive && this.held.has('Mouse2');
     f.cycleItem =
       (this.anyPressed(this.keys.itemNext) ? 1 : 0) -
       (this.anyPressed(this.keys.itemPrev) ? 1 : 0);
@@ -403,11 +518,14 @@ export class InputReader {
     f.sprint = this.anyHeld(this.keys.sprint);
 
     const drag = this.touch?.consumeLook();
-    f.lookYaw = this.yawDelta + (drag?.yaw ?? 0);
-    f.lookPitch = this.pitchDelta + (drag?.pitch ?? 0);
+    // While the mouse is steering it is not looking: feeding both would spin the
+    // camera every time the driver corrected the car. Mouse2 gives the view back.
+    f.lookYaw = steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0);
+    f.lookPitch = steerWithMouse ? drag?.pitch ?? 0 : this.pitchDelta + (drag?.pitch ?? 0);
     f.zoomDelta = this.wheelDelta;
     this.yawDelta = 0;
     this.pitchDelta = 0;
+    this.rawDX = 0;
     this.wheelDelta = 0;
     this.pressed.clear();
     return f;
