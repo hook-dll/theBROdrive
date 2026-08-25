@@ -207,6 +207,23 @@ body {
   text-shadow: 0 0 8px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
 }
 
+/* Amber, not rust: an aid reporting work, not a fault. Same always-present cell. */
+.hud-tcs {
+  width: 28px;
+  color: var(--hud-diesel);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 14px;
+  text-align: center;
+  opacity: 0.16;
+}
+
+.hud-tcs.is-active {
+  opacity: 1;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--hud-diesel) 75%, transparent);
+}
+
 .hud-engine-off {
   font-size: 13px;
   letter-spacing: 0.22em;
@@ -431,6 +448,29 @@ body {
  *  Menu (title screen and pause overlay)                             *
  * ------------------------------------------------------------------ */
 
+/* The menu is not the HUD, and it is not a dark-glass panel either.
+ *
+ * It is the workshop manual for the car you are driving — but printed on CARBON
+ * stock, not bone: white paper over a night desert is a lamp in the face, and this
+ * game is played in the dark half the time. So the language is a printed document
+ * (monospace stencil heads, hairline rules, numbered sections, dotted leaders,
+ * stamped keycaps, cut corners, ruler scales) executed in warm bone marks on near
+ * black. It shares the HUD's palette exactly, so it belongs to this game, while the
+ * document grammar keeps it from looking like every other dark panel.
+ *
+ * The rules that keep it coherent:
+ *  - Structure is monospace, uppercase, widely tracked. Prose is the HUD sans.
+ *  - Selection is a STAMP: the mark colour fills the cell and the text knocks out
+ *    of it, with a rust rule under. Never a glow, never a tint.
+ *  - One heavy frame per sheet; everything inside is a hairline or a dotted rule.
+ *  - Nothing is rounded — corners are cut, like a stamped plate.
+ *  - Body text is bone on near-black (about 13:1). Nothing readable is dim.
+ *
+ * Sizes are deliberately generous: this is a driving game played at a desk, the
+ * overlay owns the screen while it is up, and there is no reason for a 460 px
+ * column with 11 px labels when a 1040 px sheet reads at a glance.
+ */
+
 .menu {
   position: fixed;
   inset: 0;
@@ -439,171 +479,248 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(12, 10, 7, 0.62);
+  background:
+    radial-gradient(120% 90% at 50% 45%, rgba(10, 8, 5, 0.55), rgba(4, 3, 2, 0.88));
   font-family: var(--hud-font);
-  color: var(--hud-fg);
+  color: var(--menu-ink);
+  --menu-stock: #191410;
+  --menu-stock-2: #221b14;
+  --menu-ink: #ecdfc2;
+  /* Only ever used for LABELS, never for anything you have to read as a sentence.
+     ~6.5:1 on the stock, so it is quiet without being grey mush. */
+  --menu-ink-dim: #b3a488;
+  --menu-rule: rgba(236, 223, 194, 0.24);
+  --menu-accent: #e2703a;
+  --menu-mono: 'Courier New', ui-monospace, 'DejaVu Sans Mono', monospace;
 }
 
 .menu-panel {
-  background: var(--hud-panel-strong);
-  border: 1px solid var(--hud-border);
-  padding: 26px 30px;
+  position: relative;
+  background-color: var(--menu-stock);
+  /* Paper tooth, not a dot pattern: bone specks at 4% on a 5 px grid, plus a slow
+     diagonal shading so the sheet is not a flat swatch. */
+  background-image:
+    radial-gradient(rgba(236, 223, 194, 0.05) 0.6px, transparent 0.7px),
+    linear-gradient(168deg, rgba(236, 223, 194, 0.05), rgba(0, 0, 0, 0.22));
+  background-size: 5px 5px, 100% 100%;
+  border: 1px solid rgba(236, 223, 194, 0.55);
+  box-shadow:
+    inset 0 0 0 1px rgba(236, 223, 194, 0.1),
+    0 24px 60px rgba(0, 0, 0, 0.6);
+  clip-path: polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px);
+  padding: 34px 40px 28px;
   width: 92vw;
-  max-width: 460px;
-  max-height: 86vh;
+  max-width: 560px;
+  max-height: 92vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 22px;
+}
+
+/* Sheet number, in the bottom margin. Decoration with a job: it says "page". */
+.menu-panel::after {
+  content: 'FORM 12-A';
+  position: absolute;
+  left: 40px;
+  bottom: 8px;
+  font-family: var(--menu-mono);
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  color: rgba(236, 223, 194, 0.28);
+  pointer-events: none;
 }
 
 .menu-title {
+  font-family: var(--menu-mono);
   font-size: 30px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  text-align: center;
+  text-align: left;
+  color: var(--menu-ink);
+  margin: 0;
+  padding-bottom: 12px;
+  border-bottom: 3px double var(--menu-ink);
 }
 
 .menu-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 9px;
 }
 
 .menu-label {
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-family: var(--menu-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--hud-fg-dim);
+  color: var(--menu-ink-dim);
 }
 
+/* Form field, not a text box: a ruled line you type on. */
 .menu-input {
   pointer-events: auto;
-  background: rgba(12, 10, 7, 0.7);
-  border: 1px solid var(--hud-border);
-  color: var(--hud-fg);
-  padding: 8px 10px;
-  font-size: 14px;
-  font-family: inherit;
-  letter-spacing: 0.03em;
-  user-select: text;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--menu-ink);
+  color: var(--menu-ink);
+  font-family: var(--menu-mono);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  padding: 9px 4px;
   outline: none;
 }
 
 .menu-input::placeholder {
-  color: rgba(232, 221, 196, 0.38);
+  color: rgba(236, 223, 194, 0.35);
+  font-style: italic;
 }
 
 .menu-input:focus {
-  border-color: var(--hud-fg);
+  border-bottom-width: 2px;
+  border-bottom-color: var(--menu-accent);
+  background: rgba(236, 223, 194, 0.06);
 }
 
+/* Stamped plate: outline at rest, filled when it is the thing you want. */
 .menu-button {
   pointer-events: auto;
-  background: rgba(40, 33, 22, 0.9);
-  border: 1px solid var(--hud-border);
-  color: var(--hud-fg);
-  padding: 10px 14px;
-  font-size: 14px;
-  letter-spacing: 0.08em;
+  background: transparent;
+  border: 1px solid var(--menu-ink);
+  color: var(--menu-ink);
+  font-family: var(--menu-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
+  padding: 13px 18px;
   cursor: pointer;
-  font-family: inherit;
+  transition: background-color 90ms linear, color 90ms linear;
 }
 
 .menu-button:hover,
 .menu-button:focus {
-  border-color: var(--hud-fg);
-  background: rgba(54, 45, 30, 0.95);
+  background: var(--menu-ink);
+  color: var(--menu-stock);
   outline: none;
 }
 
 .menu-button:focus-visible {
-  outline: 1px solid var(--hud-fg);
-  outline-offset: 2px;
+  outline: 1px solid var(--menu-accent);
+  outline-offset: 3px;
 }
 
 .menu-button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: default;
 }
 
-.menu-button.menu-primary {
-  border-color: var(--hud-fg);
-  background: rgba(70, 59, 40, 0.9);
-  font-weight: 700;
+.menu-button:disabled:hover {
+  background: transparent;
+  color: var(--menu-ink);
 }
 
-.menu-saves {
+.menu-button.menu-primary {
+  background: var(--menu-ink);
+  color: var(--menu-stock);
+  font-size: 15px;
+  padding: 15px 18px;
+}
+
+.menu-button.menu-primary:hover,
+.menu-button.menu-primary:focus {
+  background: var(--menu-accent);
+  border-color: var(--menu-accent);
+  color: var(--menu-stock);
+}
+
+.menu-button.is-selected {
+  background: var(--menu-ink);
+  color: var(--menu-stock);
+}
+
+.menu-saves,
+.menu-code {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 .menu-heading {
+  font-family: var(--menu-mono);
   font-size: 12px;
-  letter-spacing: 0.2em;
+  font-weight: 700;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--hud-fg-dim);
+  color: var(--menu-ink-dim);
+  border-bottom: 1px solid var(--menu-rule);
+  padding-bottom: 6px;
 }
 
 .menu-saves-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
+/* Contents-page row: name, then figures, on a dotted leader. */
 .menu-save {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(18, 15, 11, 0.6);
-  border: 1px solid var(--hud-border);
-  padding: 8px 10px;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px dotted var(--menu-rule);
 }
 
 .menu-save-name {
+  font-family: var(--menu-mono);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
+  letter-spacing: 0.05em;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu-save-meta {
   flex: 1;
-  font-size: 11px;
-  color: var(--hud-fg-dim);
-  letter-spacing: 0.03em;
+  font-family: var(--menu-mono);
+  font-size: 12px;
+  color: var(--menu-ink-dim);
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .menu-save-load,
 .menu-save-delete {
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .menu-save-delete {
-  color: var(--hud-alarm);
-  border-color: rgba(224, 122, 74, 0.5);
+  color: var(--menu-accent);
+  border-color: var(--menu-accent);
+}
+
+.menu-save-delete:hover,
+.menu-save-delete:focus {
+  background: var(--menu-accent);
+  color: var(--menu-stock);
 }
 
 .menu-save-empty {
-  font-size: 12px;
-  color: var(--hud-fg-dim);
+  font-size: 14px;
+  color: var(--menu-ink-dim);
   font-style: italic;
-  padding: 6px 2px;
-}
-
-.menu-code {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  padding: 6px 0;
 }
 
 .menu-code-row {
   display: flex;
-  gap: 6px;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .menu-code-row .menu-input {
@@ -611,120 +728,355 @@ body {
   min-width: 0;
 }
 
+/* Rejected, in the accent, in the margin voice. */
 .menu-error {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--hud-alarm);
-  min-height: 1em;
+  font-family: var(--menu-mono);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--menu-accent);
+  border-left: 2px solid var(--menu-accent);
+  padding-left: 10px;
 }
 
 .menu-seed-display {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(12, 10, 7, 0.7);
-  border: 1px solid var(--hud-border);
-  padding: 10px 12px;
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px dotted var(--menu-rule);
+  padding-bottom: 8px;
 }
 
 .menu-seed-label {
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-family: var(--menu-mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--hud-fg-dim);
+  color: var(--menu-ink-dim);
 }
 
 .menu-seed-value {
   flex: 1;
-  font-size: 18px;
+  font-family: var(--menu-mono);
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
-  user-select: text;
-  cursor: text;
 }
 
 .menu-pause-km {
+  font-family: var(--menu-mono);
   font-size: 13px;
-  letter-spacing: 0.08em;
-  text-align: center;
-  color: var(--hud-fg-dim);
-  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--menu-ink-dim);
+  text-align: left;
 }
 
 .menu-pause .menu-panel {
-  max-width: 380px;
+  max-width: 440px;
 }
 
-/* Sub-screens (settings, spawn vehicle) need more room than the pause column. */
+/* Sub-screens (spawn vehicle, fluids) need more room than the pause column. */
 .menu-pause .menu-panel.menu-panel-wide {
-  max-width: 540px;
+  max-width: 680px;
 }
 
-/* Generic button row for toggle groups: gearbox, time-of-day, condition. */
-.menu-toggle-row {
+/* Settings is two columns wide and owns the screen while it is up. */
+.menu-pause .menu-panel.menu-panel-settings {
+  max-width: 1040px;
+}
+
+/* ---------------------------------------------------------------------------
+   Settings: numbered rail + section pane + one hint line.
+   --------------------------------------------------------------------------- */
+
+.menu-settings-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: stretch;
+  gap: 18px;
+  border-bottom: 3px double var(--menu-ink);
+  padding-bottom: 12px;
 }
 
-.menu-toggle-row .menu-button {
+.menu-settings-head .menu-title {
   flex: 1;
-  min-width: 88px;
+  border-bottom: none;
+  padding-bottom: 0;
+  align-self: flex-end;
 }
 
-.menu-button.is-selected {
-  border-color: var(--hud-fg);
-  background: rgba(70, 59, 40, 0.9);
-  font-weight: 700;
+.menu-button.menu-back {
+  flex: 0 0 auto;
+  padding: 9px 16px;
+  font-size: 12px;
 }
 
-.menu-slider-row {
+.menu-settings {
+  display: grid;
+  grid-template-columns: 236px 1fr;
+  gap: 36px;
+  align-items: start;
+  min-height: 520px;
+}
+
+/* Table of contents, numbered by CSS so the markup carries no numbering. */
+.menu-rail {
+  counter-reset: menu-section;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--menu-ink);
+  padding-right: 22px;
+}
+
+.menu-rail-btn {
+  pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.menu-slider {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--hud-fg);
+  gap: 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted var(--menu-rule);
+  color: var(--menu-ink-dim);
+  font-family: var(--menu-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 16px 12px;
   cursor: pointer;
 }
 
-.menu-slider-value {
-  flex: 0 0 72px;
-  width: 72px;
-  white-space: nowrap;
-  text-align: right;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  font-variant-numeric: tabular-nums;
+.menu-rail-btn::before {
+  counter-increment: menu-section;
+  content: counter(menu-section, decimal-leading-zero);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
 }
 
-/* Settings feedback line: neutral info, alarm for rejected bindings. */
+.menu-rail-btn:hover,
+.menu-rail-btn:focus-visible {
+  color: var(--menu-ink);
+  background: rgba(236, 223, 194, 0.08);
+  outline: none;
+}
+
+/* The current section is stamped, and carries a rust tab into the pane. */
+.menu-rail-btn.is-selected {
+  background: var(--menu-ink);
+  color: var(--menu-stock);
+  box-shadow: inset -4px 0 0 var(--menu-accent);
+}
+
+.menu-rail-btn .menu-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.menu-rail-label {
+  min-width: 0;
+}
+
+.menu-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  min-width: 0;
+}
+
+/* Label, and whatever belongs on the same line as it: a value, a Reset. */
+.menu-field-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--menu-rule);
+  padding-bottom: 5px;
+}
+
+.menu-field-head .menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-icon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Figures, in the accent: the one thing on the row that is a measurement. */
+.menu-chip {
+  flex: 0 0 auto;
+  min-width: 68px;
+  text-align: right;
+  font-family: var(--menu-mono);
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--menu-accent);
+}
+
+.menu-button.menu-reset {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+/* Switch bank: one hairline box, hairline dividers, and the live position
+   stamped. No gaps — it reads as one instrument, not three buttons. */
+.menu-seg {
+  display: flex;
+  border: 1px solid var(--menu-ink);
+}
+
+.menu-seg-btn {
+  pointer-events: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--menu-rule);
+  color: var(--menu-ink-dim);
+  font-family: var(--menu-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 18px 10px 15px;
+  cursor: pointer;
+}
+
+.menu-seg-btn .menu-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.menu-seg-btn:first-child {
+  border-left: none;
+}
+
+.menu-seg-btn:hover,
+.menu-seg-btn:focus-visible {
+  color: var(--menu-ink);
+  background: rgba(236, 223, 194, 0.08);
+  outline: none;
+}
+
+.menu-seg-btn.is-selected {
+  background: var(--menu-ink);
+  color: var(--menu-stock);
+  box-shadow: inset 0 -4px 0 var(--menu-accent);
+}
+
+.menu-seg-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Marginal note: one line, fixed height, hanging off a rule. Prose, so this is
+   the one place that uses the sans — and it is full brightness, not dim. */
+.menu-hint {
+  min-height: 3em;
+  border-top: 1px solid var(--menu-ink);
+  padding-top: 12px;
+}
+
 .menu-note {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--hud-fg-dim);
-  min-height: 1em;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  color: var(--menu-ink);
+  line-height: 1.45;
+}
+
+.menu-note::before {
+  content: '— ';
+  color: var(--menu-ink-dim);
 }
 
 .menu-note.is-alarm {
-  color: var(--hud-alarm);
+  color: var(--menu-accent);
+  font-weight: 700;
 }
 
-/* Scrollable key-binding rows. */
+/* Measuring scale, not a slider: ticks along a ruled baseline, ink pointer. */
+.menu-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 30px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.menu-slider::-webkit-slider-runnable-track {
+  height: 30px;
+  background:
+    repeating-linear-gradient(90deg, var(--menu-rule) 0 1px, transparent 1px 12px)
+      left bottom / 100% 11px no-repeat,
+    linear-gradient(var(--menu-ink), var(--menu-ink)) left bottom / 100% 1px no-repeat;
+}
+
+.menu-slider::-moz-range-track {
+  height: 30px;
+  background:
+    repeating-linear-gradient(90deg, var(--menu-rule) 0 1px, transparent 1px 12px)
+      left bottom / 100% 11px no-repeat,
+    linear-gradient(var(--menu-ink), var(--menu-ink)) left bottom / 100% 1px no-repeat;
+}
+
+.menu-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 27px;
+  margin-top: 1px;
+  border: none;
+  background: var(--menu-ink);
+  /* Downward pointer: it indicates a place on the scale, not a knob riding it. */
+  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
+}
+
+.menu-slider::-moz-range-thumb {
+  width: 14px;
+  height: 27px;
+  border: none;
+  border-radius: 0;
+  background: var(--menu-ink);
+  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
+}
+
+.menu-slider:hover::-webkit-slider-thumb,
+.menu-slider:focus-visible::-webkit-slider-thumb {
+  background: var(--menu-accent);
+}
+
+.menu-slider:hover::-moz-range-thumb,
+.menu-slider:focus-visible::-moz-range-thumb {
+  background: var(--menu-accent);
+}
+
+/* Key bindings: a two-column index, dotted leaders, stamped caps. */
 .menu-bindings {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 220px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 32px;
+  max-height: 336px;
   overflow-y: auto;
-  border: 1px solid var(--hud-border);
-  background: rgba(12, 10, 7, 0.5);
-  padding: 6px;
+  padding-right: 6px;
 }
 
 .menu-binding {
@@ -733,25 +1085,26 @@ body {
   gap: 10px;
   width: 100%;
   text-align: left;
-  background: rgba(18, 15, 11, 0.6);
-  border: 1px solid var(--hud-border);
-  color: var(--hud-fg);
-  padding: 7px 10px;
-  font-size: 13px;
-  letter-spacing: 0.03em;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted var(--menu-rule);
+  color: var(--menu-ink);
+  padding: 9px 4px;
   font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
 .menu-binding:hover,
 .menu-binding:focus-visible {
-  border-color: var(--hud-fg);
+  background: rgba(236, 223, 194, 0.08);
   outline: none;
 }
 
 .menu-binding.is-capturing {
-  border-color: var(--hud-fg);
-  background: rgba(70, 59, 40, 0.9);
+  background: rgba(226, 112, 58, 0.16);
+  box-shadow: inset 3px 0 0 var(--menu-accent);
 }
 
 .menu-binding-label {
@@ -763,63 +1116,95 @@ body {
 }
 
 .menu-binding-keys {
-  color: var(--hud-fg-dim);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
 }
 
-.menu-binding.is-capturing .menu-binding-keys {
-  color: var(--hud-fg);
+/* Stamped cap: bone outline, heavier bottom rule, raised stock inside. */
+.menu-keycap {
+  display: inline-block;
+  min-width: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--menu-ink);
+  border-bottom-width: 3px;
+  background: var(--menu-stock-2);
+  color: var(--menu-ink);
+  font-family: var(--menu-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.menu-keycap.is-waiting {
+  color: var(--menu-accent);
+  border-color: var(--menu-accent);
+  background: transparent;
   font-style: italic;
+  font-weight: 400;
+  text-transform: none;
 }
 
-/* Spawn vehicle screen: body list and paint swatches. */
+/* Legacy toggle row, still used by the dev spawn screens. */
+.menu-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.menu-toggle-row .menu-button {
+  flex: 1;
+  min-width: 96px;
+}
+
+/* Spawn vehicle screen: parts-catalogue rows and paint chips. */
 .menu-body-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
+  max-height: 300px;
   overflow-y: auto;
-  border: 1px solid var(--hud-border);
-  background: rgba(12, 10, 7, 0.5);
-  padding: 6px;
+  border-top: 1px solid var(--menu-rule);
 }
 
 .menu-body-group {
-  padding: 8px 4px 2px;
-  color: var(--hud-fg-dim);
-  font-size: 11px;
+  padding: 14px 2px 4px;
+  color: var(--menu-ink-dim);
+  font-family: var(--menu-mono);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .menu-body {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  background: rgba(18, 15, 11, 0.6);
-  border: 1px solid var(--hud-border);
-  color: var(--hud-fg);
-  padding: 8px 10px;
-  font-size: 14px;
-  letter-spacing: 0.03em;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted var(--menu-rule);
+  color: var(--menu-ink);
+  padding: 10px 4px;
+  font-size: 15px;
+  letter-spacing: 0.01em;
   font-family: inherit;
   cursor: pointer;
 }
 
 .menu-body:hover,
 .menu-body:focus-visible {
-  border-color: var(--hud-fg);
+  background: rgba(236, 223, 194, 0.08);
   outline: none;
 }
 
 .menu-body.is-selected {
-  border-color: var(--hud-fg);
-  background: rgba(70, 59, 40, 0.9);
-  font-weight: 700;
+  background: var(--menu-ink);
+  color: var(--menu-stock);
 }
 
 .menu-body-label {
@@ -831,27 +1216,29 @@ body {
 }
 
 .menu-body-class {
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-family: var(--menu-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--hud-fg-dim);
-  border: 1px solid var(--hud-border);
-  padding: 2px 6px;
+  color: var(--menu-ink-dim);
+  border: 1px solid var(--menu-rule);
+  padding: 2px 7px;
 }
 
 .menu-body.is-selected .menu-body-class {
-  color: var(--hud-fg);
+  color: var(--menu-stock);
+  border-color: var(--menu-stock);
 }
 
-/* Diesel badge. Same chip geometry as the body class beside it, but warm and
-   filled rather than dim and outlined: it is the one thing in the row that
-   changes which cans you can pour, so it should catch the eye first. */
+/* Diesel badge: the one thing in the row that changes which cans you can pour,
+   so it is filled while its neighbour is outlined. */
 .menu-body-fuel {
   flex: 0 0 auto;
   min-width: 18px;
   text-align: center;
-  font-size: 10px;
-  font-weight: 600;
+  font-family: var(--menu-mono);
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   color: #1d1810;
   background: var(--hud-diesel);
@@ -866,25 +1253,27 @@ body {
 }
 
 .menu-paint {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   padding: 0;
-  border: 1px solid var(--hud-border);
+  border: 1px solid var(--menu-ink);
   cursor: pointer;
   outline: none;
 }
 
 .menu-paint:hover {
-  border-color: var(--hud-fg);
+  box-shadow: inset 0 0 0 2px var(--menu-stock);
 }
 
 .menu-paint:focus-visible {
-  outline: 1px solid var(--hud-fg);
-  outline-offset: 2px;
+  outline: 1px solid var(--menu-accent);
+  outline-offset: 3px;
 }
 
 .menu-paint.is-selected {
-  border: 2px solid var(--hud-fg);
+  box-shadow:
+    inset 0 0 0 2px var(--menu-stock),
+    0 0 0 2px var(--menu-accent);
 }
 
 /* ------------------------------------------------------------------ *
