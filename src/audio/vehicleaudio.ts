@@ -21,8 +21,10 @@
  *    on the ground. Sand hisses, asphalt hums, gravel rattles — all one voice.
  *  - Skid. A separate, much harder noise band gated on lateral slip, so a
  *    handbrake turn or a lost rear end squeals under the roll noise.
- *  - Brakes. Pad hiss plus a high squeal that only exists while braking hard, and
- *    which fades out as the car stops, the way a real one does.
+ *  - Brakes. A narrow low-mid pad rub, pulsed once per wheel revolution, which
+ *    fades as the car stops and hands over to the skid voice as the wheels lock.
+ *    Explicitly NOT a broadband hiss and explicitly not a pitched squeal: see the
+ *    brake note below for what each of those sounded like.
  *
  * One-shots: gear engagement clunk, suspension/landing thump, engine start.
  */
@@ -54,11 +56,56 @@ const SKID_START_MPS = 1.6;
 const SKID_FULL_MPS = 7;
 const SKID_GAIN = 0.42;
 
-/** Brake squeal only exists between these speeds (m/s): it dies as the car stops. */
-const SQUEAL_MIN_MPS = 1.2;
-const SQUEAL_FULL_MPS = 6;
-const SQUEAL_GAIN = 0.1;
-const BRAKE_HISS_GAIN = 0.12;
+/**
+ * Brakes.
+ *
+ * A braking car does NOT hiss. The voice this replaced was a wide (Q 0.8) noise
+ * band at 3.2 kHz held open by pedal pressure, which is the exact recipe for a hair
+ * dryer: broadband air, flat envelope, no mechanism. What is here instead is the
+ * one thing a drum/disc car of this era actually makes audible from the driver's
+ * seat: a RUB. Pad dragged over a rotor — low-mid, narrow, dull, friction against
+ * iron rather than air through a nozzle — amplitude-pulsed once per wheel
+ * revolution, because no rotor is perfectly flat and no shoe sits perfectly even.
+ * That per-revolution pulse is the single cue that says "brake" instead of "fan",
+ * and it slows audibly as the car slows.
+ *
+ * There is deliberately NO SQUEAL voice. A pitched pad resonance was tried at
+ * several frequencies and levels and never stopped sounding synthetic: a squeal is
+ * a near-tone, and a near-tone that the simulation cannot make appear and vanish
+ * for physical reasons (pad wear, moisture, temperature, none of which are
+ * modelled) reads as a siren tied to the pedal. The rub alone carries the braking.
+ *
+ * The rub is suppressed as the wheels lock: a locked wheel is not rubbing, and the
+ * tyre takes over the noise, so it hands off to the skid voice instead of stacking
+ * on top of it.
+ */
+/** The rub exists between these speeds (m/s): it dies as the car stops. */
+const BRAKE_MIN_MPS = 1.2;
+const BRAKE_FULL_MPS = 6;
+
+/** Pad rub: narrow (Q 6) low-mid friction, rising slightly with speed. */
+const RUB_GAIN = 0.055;
+const RUB_FREQ_SLOW = 420;
+const RUB_FREQ_FAST = 780;
+const RUB_Q = 6;
+/**
+ * Tone cap over the rub. Iron rubbing iron inside a wheel, behind a wheelarch, has
+ * no content up where a hiss lives; the corner keeps the noise band's skirt out of
+ * hair-dryer territory even at full pedal.
+ */
+const BRAKE_LP_HZ = 1900;
+
+/**
+ * Nominal loaded tyre radius (m) used only to turn road speed into a ROTOR RATE for
+ * the per-revolution pulse. Every car in the catalogue sits within a few cm of this,
+ * and the pulse is a rhythm cue, not a pitch — a 10% radius error is inaudible.
+ */
+const ROTOR_RADIUS_M = 0.31;
+/** Pulse rate is clamped: below ~1.5 Hz it reads as a fault, above ~26 Hz as a tone. */
+const ROTOR_RATE_MIN_HZ = 1.5;
+const ROTOR_RATE_MAX_HZ = 26;
+/** Depth of the per-revolution amplitude pulse, 0..1. */
+const RUB_PULSE_DEPTH = 0.55;
 
 const ENGINE_GAIN_IDLE = 0.11;
 const ENGINE_GAIN_LOAD = 0.2;
@@ -99,9 +146,10 @@ export class VehicleAudio {
   private readonly tyreGain: GainNode;
   private readonly skidFilter: BiquadFilterNode;
   private readonly skidGain: GainNode;
-  private readonly squealOsc: OscillatorNode;
-  private readonly squealGain: GainNode;
-  private readonly brakeHissGain: GainNode;
+  private readonly rubFilter: BiquadFilterNode;
+  private readonly rubGain: GainNode;
+  /** Rotor-rate LFO driving the rub's per-revolution pulse. */
+  private readonly rotorLfo: OscillatorNode;
 
   private readonly sources: AudioBufferSourceNode[] = [];
 
@@ -193,22 +241,36 @@ export class VehicleAudio {
     this.skidFilter.connect(this.skidGain).connect(this.out);
 
     // --- brakes -------------------------------------------------------------
-    const hiss = ctx.createBiquadFilter();
-    hiss.type = 'bandpass';
-    hiss.frequency.value = 3200;
-    hiss.Q.value = 0.8;
-    this.brakeHissGain = ctx.createGain();
-    this.brakeHissGain.gain.value = 0;
-    this.addNoise(hiss);
-    hiss.connect(this.brakeHissGain).connect(this.out);
+    // Tone cap over the rub: nothing from inside a wheel arrives with hiss on it.
+    const brakeLowpass = ctx.createBiquadFilter();
+    brakeLowpass.type = 'lowpass';
+    brakeLowpass.frequency.value = BRAKE_LP_HZ;
+    brakeLowpass.Q.value = 0.7;
+    brakeLowpass.connect(this.out);
 
-    this.squealOsc = ctx.createOscillator();
-    this.squealOsc.type = 'triangle';
-    this.squealOsc.frequency.value = 2350;
-    this.squealGain = ctx.createGain();
-    this.squealGain.gain.value = 0;
-    this.squealOsc.connect(this.squealGain).connect(this.out);
-    this.squealOsc.start();
+    // The rotor LFO is applied MULTIPLICATIVELY, through a tremolo stage inside the
+    // rub's own path, so silence stays silent: modulating the level gain additively
+    // would leak the pulse through a released pedal.
+    this.rotorLfo = ctx.createOscillator();
+    this.rotorLfo.type = 'sine';
+    this.rotorLfo.frequency.value = ROTOR_RATE_MIN_HZ;
+
+    const rubTremolo = ctx.createGain();
+    rubTremolo.gain.value = 1;
+    const rubDepth = ctx.createGain();
+    rubDepth.gain.value = RUB_PULSE_DEPTH;
+    this.rotorLfo.connect(rubDepth).connect(rubTremolo.gain);
+
+    this.rubFilter = ctx.createBiquadFilter();
+    this.rubFilter.type = 'bandpass';
+    this.rubFilter.frequency.value = RUB_FREQ_SLOW;
+    this.rubFilter.Q.value = RUB_Q;
+    this.rubGain = ctx.createGain();
+    this.rubGain.gain.value = 0;
+    this.addNoise(this.rubFilter);
+    this.rubFilter.connect(rubTremolo).connect(this.rubGain).connect(brakeLowpass);
+
+    this.rotorLfo.start();
   }
 
   private addNoise(destination: AudioNode): void {
@@ -316,13 +378,34 @@ export class VehicleAudio {
       0.05,
     );
 
+    // --- brakes -------------------------------------------------------------
     const brake = clamp01(state.brake + (state.handbrake ? 0.7 : 0));
-    const squealT = clamp01((speed - SQUEAL_MIN_MPS) / (SQUEAL_FULL_MPS - SQUEAL_MIN_MPS));
-    // Squeal rises as the car slows through the band and vanishes at a standstill:
-    // it is the pad grabbing, not a siren tied to speed.
-    ramp(this.squealGain.gain, brake * brake * squealT * (1 - 0.5 * windT) * SQUEAL_GAIN, now, 0.05);
-    ramp(this.brakeHissGain.gain, brake * squealT * BRAKE_HISS_GAIN, now, 0.06);
-    this.squealOsc.frequency.setTargetAtTime(2100 + 700 * squealT, now, 0.08);
+    const moving = clamp01((speed - BRAKE_MIN_MPS) / (BRAKE_FULL_MPS - BRAKE_MIN_MPS));
+    // Wheel revolutions per second: the rhythm the rub pulses at, so a car slowing
+    // to a stop slows its brake noise down with it instead of holding one flat
+    // band open.
+    const rotorHz = Math.min(
+      ROTOR_RATE_MAX_HZ,
+      Math.max(ROTOR_RATE_MIN_HZ, speed / (2 * Math.PI * ROTOR_RADIUS_M)),
+    );
+    this.rotorLfo.frequency.setTargetAtTime(rotorHz, now, 0.12);
+
+    // Locked wheels mean the pad has stopped rubbing and the tyre is doing the
+    // noise: hand over to the skid voice rather than sounding both.
+    const unlocked = 1 - lockT;
+
+    // Pad rub, present whenever the pedal is down and the wheels still turn.
+    this.rubFilter.frequency.setTargetAtTime(
+      RUB_FREQ_SLOW + (RUB_FREQ_FAST - RUB_FREQ_SLOW) * moving,
+      now,
+      0.1,
+    );
+    ramp(
+      this.rubGain.gain,
+      brake * moving * unlocked * state.wheelContactFraction * RUB_GAIN * (interior ? 0.8 : 1),
+      now,
+      0.06,
+    );
 
     // --- one-shots ----------------------------------------------------------
     if (state.gearLabel !== this.lastGearLabel) {
@@ -365,7 +448,7 @@ export class VehicleAudio {
     this.sources.length = 0;
     this.fireOsc.stop();
     this.bodyOsc.stop();
-    this.squealOsc.stop();
+    this.rotorLfo.stop();
     this.out.disconnect();
   }
 }

@@ -123,6 +123,28 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // The GAZ-21/24's own engine: a lazy, low-revving 2.4 litre four making
+    // 70-95 hp depending on the year — what a Volga actually had, not the 2.8 six
+    // it was borrowing. Peak torque arrives at 2200 rpm and the redline is only
+    // 4500, because a period Volga pulled from idle and ran out of breath early.
+    id: 'engine_i4_2445',
+    kind: 'engine',
+    label: '2.4 inline-four',
+    mass: 165,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 52,
+      peakTorqueNm: 167,
+      torquePeakRpm: 2200,
+      redlineRpm: 4500,
+      idleRpm: 700,
+      bsfc: 0.34,
+      brakingCoeff: 0.068,
+      cylinders: 4,
+    },
+  },
+  {
     id: 'engine_i6_2800',
     kind: 'engine',
     label: '2.8 inline-six',

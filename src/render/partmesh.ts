@@ -216,6 +216,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
     // The 1.2: same architecture as the 1.6 but visibly a smaller block.
     case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
+    // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
+    case 'engine_i4_2445': return buildInline(b, spec, 1.09, false);
     case 'engine_v8_5000': return buildV8(b);
     case 'engine_d4_2000': return buildInline(b, spec, 1.18, true);
     case 'engine_d6_6600': return buildInline(b, spec, 1.62, true);

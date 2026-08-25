@@ -219,6 +219,82 @@ const LATERAL_GRIP_MAX_LOSS = 0.42;
 const REAR_AXLE_SIDE_GRIP = 0.89;
 
 // ---------------------------------------------------------------------------
+// Slip angle: the difference between a car that PLOUGHS and one you can catch.
+//
+// Everything above this block loses grip for LONGITUDINAL reasons — the friction
+// cone eaten by drive or brake force (SLIDE_*), a locked wheel (LOCKED_SIDE_GRIP).
+// A pure cornering breakaway has neither: lift off mid-bend, turn in too hard, and
+// the tyres are barely using their longitudinal channel at all. Before this, the
+// only thing that limited such a corner was Rapier clipping the side impulse at the
+// cone, which is a CEILING, not a curve: side force rose linearly with slip until
+// it hit a wall, so the car understeered wide with a dead front end and the tail
+// never came round on its own.
+//
+// A real tyre makes its peak side force at a few degrees of slip angle, then gives
+// force back as slip grows — but it gives back to a PLATEAU, not to zero. That
+// plateau is precisely the property being modelled here, because it is what makes a
+// slide something you can fight:
+//
+//   - Below the peak angle nothing at all changes. Straight lines and gentle
+//     curves run at 1-3 degrees, so ordinary driving is untouched.
+//   - Past the peak the axle sheds side force smoothly, so the break is felt
+//     building instead of arriving.
+//   - Past the full angle it stops shedding. There is still real force under the
+//     car at 30 degrees of slip, which is what a correction has to work against.
+//
+// The REAR peaks earlier and falls to a lower plateau than the front. That single
+// asymmetry is what puts the tail out first and leaves the front with enough grip
+// to steer with while it is out — a car that loses both ends together cannot be
+// caught by anybody, and one that loses only the front just washes wide.
+// ---------------------------------------------------------------------------
+
+/** Slip angle (deg) where each axle makes peak side force. Below this: no change. */
+const SLIP_PEAK_FRONT_DEG = 8;
+const SLIP_PEAK_REAR_DEG = 6;
+/** Slip angle (deg) by which the fade is complete and the plateau has been reached. */
+const SLIP_FULL_FRONT_DEG = 26;
+const SLIP_FULL_REAR_DEG = 22;
+/**
+ * Side grip retained on the plateau, as a fraction of the axle's peak.
+ *
+ * The gap between these two numbers IS the catchable window: the front keeps 0.80
+ * of its cornering power at any slip angle, the rear 0.62, so a car sideways still
+ * points where it is steered and still has a rear axle to hook up again. Closing
+ * the gap makes it inert; widening it turns every slide into a spin.
+ */
+const SLIP_PLATEAU_FRONT = 0.8;
+const SLIP_PLATEAU_REAR = 0.62;
+/** Contact speed (m/s) floor in the slip-angle denominator, to keep it finite at rest. */
+const SLIP_ANGLE_REF_MPS = 2;
+/**
+ * Extra share of the high-speed lateral loss (LATERAL_GRIP_MAX_LOSS) applied to the
+ * REAR axle only. 1 = both axles lose the same, which is what it used to be, and
+ * which made speed cost stability nothing: the car simply cornered less hard the
+ * faster it went, evenly, and stayed stubbornly neutral doing it. Above 1 the tail
+ * is the end that speed takes away from, so a bend taken 20 km/h too fast is
+ * genuinely a different, edgier car than the same bend taken properly.
+ */
+const REAR_SPEED_LOSS_GAIN = 1.32;
+
+/**
+ * Countersteer authority, and why the steering limiter has to step out of the way.
+ *
+ * STEER_HIGH_SPEED_FRACTION and STEER_RATE_HIGHWAY_RAD_S exist to stop the car
+ * being twitchy at speed, and they do their job — but they are a FICTION. A real
+ * steering box gives its full lock at any road speed and a real driver's hands move
+ * as fast as the situation needs. Left in place during a slide they act as a
+ * stability program in reverse: the one moment the driver needs a lot of lock, fast,
+ * is the moment they are allowed the least of it, and the slide is uncatchable for
+ * reasons that exist nowhere in the car.
+ *
+ * So the limiter is faded out by the REAR axle's own slip angle. This adds no force
+ * and no correction — it hands back lock and hand-speed the mechanism always had,
+ * exactly while the tail is out, and takes them away again as the car straightens.
+ */
+const COUNTERSTEER_RELEASE_START_DEG = 7;
+const COUNTERSTEER_RELEASE_FULL_DEG = 18;
+
+// ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
 // a force: internally `rolling_friction` is clamped to that impulse. To brake
 // the whole chassis at `a` m/s² across `n` wheels for one `dt` step, each wheel
@@ -973,6 +1049,14 @@ export class Vehicle {
   private readonly localVelScratch = { x: 0, y: 0, z: 0 };
   private readonly localAngScratch = { x: 0, y: 0, z: 0 };
   private readonly leanScratch = { x: 0, y: 0, z: 0 };
+  private readonly wheelRightScratch = { x: 0, y: 0, z: 0 };
+  /**
+   * Rear-axle slip angle (radians, unsigned) measured on the previous step. Read one
+   * tick later by the steering limiter, which runs before the wheels are looked at:
+   * at 60 Hz that is 17 ms of lag on a signal that takes tenths of a second to
+   * build, and it is what keeps this a single-pass update instead of two.
+   */
+  private rearSlipRad = 0;
   // Roll-couple state: low-passed lateral acceleration and its lever arm.
   private prevLatVel = 0;
   private rollAccel = 0;
@@ -1556,13 +1640,25 @@ export class Vehicle {
     );
     const steerInput =
       Math.sign(input.steer) * Math.pow(Math.abs(input.steer), STEER_INPUT_EXPONENT);
+    // How far out is the tail? (See the countersteer note above.) Both the lock
+    // ceiling and the rate limit are faded back toward their parking-speed values by
+    // this, so a driver catching a slide has the lock and the hand-speed the car
+    // physically has, and loses them again as the slide is gathered up.
+    const slideRelease = clamp(
+      ((this.rearSlipRad * 180) / Math.PI - COUNTERSTEER_RELEASE_START_DEG) /
+        (COUNTERSTEER_RELEASE_FULL_DEG - COUNTERSTEER_RELEASE_START_DEG),
+      0,
+      1,
+    );
     // fraction = 1 - (1-floor) * t^k: full lock up to STEER_FULL_LOCK_KMH, then a
     // fast collapse right above it and a gentle slide to the floor.
     const speedFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(steerT, STEER_LOCK_CURVE);
-    const targetSteer = -steerInput * this.model.steerLock * speedFactor;
+    const targetSteer =
+      -steerInput * this.model.steerLock * (speedFactor + (1 - speedFactor) * slideRelease);
     const steerRate =
       STEER_RATE_HIGHWAY_RAD_S +
-      (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) * Math.pow(1 - steerT, STEER_RATE_CURVE);
+      (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) *
+        Math.max(Math.pow(1 - steerT, STEER_RATE_CURVE), slideRelease);
     const maxDelta = steerRate * dt;
     this.steerCommand += clamp(targetSteer - this.steerCommand, -maxDelta, maxDelta);
 
@@ -1666,8 +1762,20 @@ export class Vehicle {
       0,
       1,
     );
-    const lateralGripFactor =
-      1 - LATERAL_GRIP_MAX_LOSS * lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
+    // The loss is split by axle: the rear sheds REAR_SPEED_LOSS_GAIN times as much
+    // of it, so speed does not just cost cornering power, it costs STABILITY.
+    const speedLossT = lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
+    const lateralGripFront = 1 - LATERAL_GRIP_MAX_LOSS * speedLossT;
+    const lateralGripRear = Math.max(
+      0.2,
+      1 - LATERAL_GRIP_MAX_LOSS * REAR_SPEED_LOSS_GAIN * speedLossT,
+    );
+
+    // Slip angles are read off the CONTACT PATCH velocity measured on the previous
+    // step (updateWheelDynamics fills `contactVel`/`forwardDir`), so the whole
+    // curve costs one dot product and one atan per wheel and no extra ray casts.
+    this.chassisBody.rotation(this.rotationScratch);
+    let rearSlipMax = 0;
 
     for (const w of this.wheels) {
       // Surface under this wheel drives traction and rolling resistance. The type is
@@ -1693,6 +1801,41 @@ export class Vehicle {
       // The rear axle is a live axle on leaf springs and never had the front's
       // cornering power (REAR_AXLE_SIDE_GRIP).
       const axleGrip = w.isFront ? 1 : REAR_AXLE_SIDE_GRIP;
+
+      // Slip angle of this tyre: the angle between where the contact patch is going
+      // and where the wheel is pointing. The wheel's own right-hand direction is the
+      // chassis' +X yawed by this wheel's steering angle, so a steered front wheel is
+      // measured in ITS plane, not the body's — which is the difference between
+      // "the car is sideways" and "the tyre is slipping".
+      const steer = w.isFront ? this.steerAngle : 0;
+      rotateVector(
+        this.wheelRightScratch,
+        this.rotationScratch,
+        Math.cos(steer),
+        0,
+        -Math.sin(steer),
+      );
+      const latSpeed =
+        w.contactVel.x * this.wheelRightScratch.x +
+        w.contactVel.y * this.wheelRightScratch.y +
+        w.contactVel.z * this.wheelRightScratch.z;
+      const fwdSpeed =
+        w.contactVel.x * w.forwardDir.x +
+        w.contactVel.y * w.forwardDir.y +
+        w.contactVel.z * w.forwardDir.z;
+      const slipRad = Math.atan2(
+        Math.abs(latSpeed),
+        Math.max(Math.abs(fwdSpeed), SLIP_ANGLE_REF_MPS),
+      );
+      if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, slipRad);
+
+      // Peak, then a smooth fade to the plateau. Below the peak this is exactly 1.
+      const peakDeg = w.isFront ? SLIP_PEAK_FRONT_DEG : SLIP_PEAK_REAR_DEG;
+      const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
+      const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
+      const fadeT = clamp(((slipRad * 180) / Math.PI - peakDeg) / (fullDeg - peakDeg), 0, 1);
+      const slipGrip = 1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT);
+
       const frictionSlip = surface.frictionSlip * gripBudgetFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       controller.setWheelSideFrictionStiffness(
@@ -1700,8 +1843,9 @@ export class Vehicle {
         surface.sideFriction *
           compound.side *
           SIDE_FRICTION_GAIN *
-          lateralGripFactor *
+          (w.isFront ? lateralGripFront : lateralGripRear) *
           axleGrip *
+          slipGrip *
           slideGrip,
       );
 
@@ -1738,6 +1882,8 @@ export class Vehicle {
         if (driven) drivenContactCount++;
       }
     }
+    // Handed to next step's steering limiter (see the countersteer note above).
+    this.rearSlipRad = rearSlipMax;
 
     controller.updateVehicle(dt);
 
