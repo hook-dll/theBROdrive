@@ -37,6 +37,7 @@ const QUATERNIUS = '/models/quaternius-cars';
 const PSX = '/models/psx-cars';
 const DEJUNES = '/models/dejunes';
 const LOWPOLY = '/models/lowpoly-pack';
+const SOVIET = '/models/soviet';
 
 /* ---- suspension presets ----
  *
@@ -90,6 +91,27 @@ const SUSP_CAR: SuspensionTuning = {
   compression: 2.9,
   relaxation: 3.7,
   maxForce: 26000,
+};
+/**
+ * SOFT: what the Soviet saloons ride on. A 1960s-70s car that leans and takes a
+ * set slowly — and that body roll IS the load transfer, which is what makes its
+ * breakaway progressive instead of sudden. Softer still would just wash the front
+ * end out; the roll is the point.
+ *
+ * Rates are per kg of chassis mass (see the block above). sag = 9.81 / (4 * 15)
+ * = 164 mm against 340 mm of travel = 176 mm of reserve, a kerb strike's worth
+ * that never bottoms in ordinary driving. Critical damping is 2 * sqrt(15) =
+ * 7.75, so 2.5 compression is 0.32 of it and 3.25 relaxation is 0.42 —
+ * rebound-biased, which is what stops a soft spring throwing the body back up.
+ */
+const SUSP_SOFT: SuspensionTuning = {
+  restLength: 0.33,
+  maxTravel: 0.34,
+  stiffness: 15,
+  // Critical damping at k=15 is 7.75.
+  compression: 2.5,
+  relaxation: 3.25,
+  maxForce: 25000,
 };
 
 /** "Sport" in this era means a firm saloon, not a modern chassis. */
@@ -1055,6 +1077,294 @@ const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
   viewFrac: spec.viewFrac,
 }));
 
+/**
+ * Low Poly Soviet Car Pack — fifteen bodies, one FBX each, and the only pack in
+ * the catalogue that is about the same cars this game is already about.
+ *
+ * They needed no conversion and no simplification. Every one is 4.0k-5.8k triangles
+ * (the DeJunes bodies are heavier), modelled in real-world proportions, nose-first
+ * down +Z the way this game drives, and carrying its own four wheels as separate
+ * meshes — so `detectWheels` finds them by shape and the whole pack lands on the
+ * standard path. FBXLoader reports them in centimetres, hence `scale: 0.01`.
+ *
+ * Colour is UV, not material: each body's UVs point into a region of the pack's
+ * shared `albedo.png` palette, and the pack ships one FBX per colour. One colour per
+ * model is vendored — a Volga is white because a Volga was white — and `textureFile`
+ * hands the same 16 KB atlas to all fifteen.
+ *
+ * Figures are the real cars': the Zhiguli line runs the 1.2 that already exists as a
+ * part (`engine_lada_1200`, authored from the 2101), the 1.5-1.6 cars step up to the
+ * generic 1.6, the Samaras are front-wheel drive on five speeds, and both Nivas are
+ * 4WD on truck springs because that is what a Niva is for.
+ */
+interface SovietSpec {
+  readonly id: string;
+  readonly label: string;
+  readonly file: string;
+  readonly mass: number;
+  readonly engineId: string;
+  readonly gearboxId: string;
+  readonly tankLitres: number;
+  readonly wheelGrip: number;
+  readonly steerLock: number;
+  readonly rearDriveBias: number;
+  readonly suspension?: SuspensionTuning;
+  readonly storageCells?: number;
+}
+
+/*
+ * The grip ladder runs backwards from every other pack on purpose: these are
+ * cross-ply-era cars, not modern tyres. The RWD classics sit lowest (0.88-0.94)
+ * because their tyres and geometry predate radials; the front-drive Samaras step
+ * up to 0.96 because they are a decade newer and run radials; the rally 2105
+ * (1.04) is the one somebody built to corner; and the Nivas stay low (0.90-0.92)
+ * on grip but claw it back with four-wheel drive.
+ */
+const SOVIET_SPECS: readonly SovietSpec[] = [
+  {
+    // GAZ-21 Volga: 2.4 litre, 70 hp, three-speed column shift, and 1.5 tonnes of
+    // chrome. It now runs its own lazy 2.4 four (`engine_i4_2445`) instead of
+    // borrowing the 2.8 six; the four-speed stands in for the column change.
+    id: 'sv_gaz21',
+    label: 'GAZ-21 Volga',
+    file: 'gz21.fbx',
+    mass: 1460,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 60,
+    wheelGrip: 0.88,
+    steerLock: 0.52,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // GAZ-24 Volga: the same idea fifteen years later, 95 hp and slightly lighter.
+    id: 'sv_gaz24',
+    label: 'GAZ-24 Volga',
+    file: 'gz24.fbx',
+    mass: 1420,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 55,
+    wheelGrip: 0.90,
+    steerLock: 0.54,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // VAZ-2101, the Zhiguli. 1.2 litre, 62 hp, 955 kg: the car the parts bin's
+    // `engine_lada_1200` was authored from, finally attached to its own body.
+    id: 'sv_vaz2101',
+    label: 'VAZ-2101 Zhiguli',
+    file: 'vz01.fbx',
+    mass: 985,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.90,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // VAZ-2102: the 2101 as an estate. Same running gear, a boot you can sleep in.
+    id: 'sv_vaz2102',
+    label: 'VAZ-2102 estate',
+    file: 'vz02.fbx',
+    mass: 1030,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.90,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+    storageCells: 5,
+  },
+  {
+    // VAZ-2103: 1.5 litre, twin headlights, the "luxury" one.
+    id: 'sv_vaz2103',
+    label: 'VAZ-2103',
+    file: 'vz03.fbx',
+    mass: 1030,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.92,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // VAZ-2104: the 2105's estate. The workhorse of the line.
+    id: 'sv_vaz2104',
+    label: 'VAZ-2104 estate',
+    file: 'vz04.fbx',
+    mass: 1060,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.90,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+    storageCells: 5,
+  },
+  {
+    // VAZ-2105: square lights, 1.3 litre, the one everyone's uncle had.
+    id: 'sv_vaz2105',
+    label: 'VAZ-2105',
+    file: 'vz05.fbx',
+    mass: 995,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.92,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // The pack's rally 2105: stripes, spot lamps, and 7 cm more ride height than its
+    // showroom twin. Sport springs and more grip, because somebody built it for this.
+    id: 'sv_vaz2105r',
+    label: 'VAZ-2105 rally',
+    file: 'vz05r.fbx',
+    mass: 960,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 39,
+    wheelGrip: 1.04,
+    steerLock: 0.64,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    storageCells: 1,
+  },
+  {
+    // VAZ-2106: 1.6 litre, 78 hp. The fastest of the classic saloons.
+    id: 'sv_vaz2106',
+    label: 'VAZ-2106',
+    file: 'vz06.fbx',
+    mass: 1035,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 39,
+    wheelGrip: 0.94,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // VAZ-2107: the 2105 with a grille that thinks it is a Mercedes.
+    id: 'sv_vaz2107',
+    label: 'VAZ-2107',
+    file: 'vz07.fbx',
+    mass: 1060,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 39,
+    wheelGrip: 0.94,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+  },
+  {
+    // VAZ-2108 Sputnik: the break with everything above it — front-wheel drive,
+    // five speeds, three doors, 900 kg. Steers like a different decade.
+    id: 'sv_vaz2108',
+    label: 'VAZ-2108 Sputnik',
+    file: 'vz08.fbx',
+    mass: 945,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 43,
+    wheelGrip: 0.96,
+    steerLock: 0.64,
+    rearDriveBias: 0,
+    storageCells: 2,
+  },
+  {
+    // VAZ-2109: the five-door Samara.
+    id: 'sv_vaz2109',
+    label: 'VAZ-2109 Samara',
+    file: 'vz09.fbx',
+    mass: 970,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 43,
+    wheelGrip: 0.96,
+    steerLock: 0.64,
+    rearDriveBias: 0,
+    storageCells: 3,
+  },
+  {
+    // VAZ-21099: the Samara with a boot grafted on, and 16 cm longer for it.
+    id: 'sv_vaz21099',
+    label: 'VAZ-21099',
+    file: 'vz099.fbx',
+    mass: 985,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 43,
+    wheelGrip: 0.96,
+    steerLock: 0.62,
+    rearDriveBias: 0,
+  },
+  {
+    // VAZ-2121 Niva: 1.6 litre, permanent four-wheel drive, a locking centre diff
+    // and 22 cm of clearance. The one car in the catalogue built for this desert.
+    id: 'sv_niva',
+    label: 'VAZ-2121 Niva',
+    file: 'vz21.fbx',
+    mass: 1210,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 42,
+    wheelGrip: 0.92,
+    steerLock: 0.62,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    storageCells: 4,
+  },
+  {
+    // VAZ-2131: the Niva stretched to five doors. Same drivetrain, 43 cm more of it.
+    id: 'sv_niva_long',
+    label: 'VAZ-2131 Niva',
+    file: 'vz31.fbx',
+    mass: 1285,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 42,
+    wheelGrip: 0.90,
+    steerLock: 0.6,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    storageCells: 6,
+  },
+];
+
+/** One entry per body; the pack's scale, palette and wheel detection are shared. */
+const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
+  id: spec.id,
+  label: spec.label,
+  dir: SOVIET,
+  glb: spec.file,
+  textureFile: `${SOVIET}/albedo.png`,
+  detectWheels: true,
+  bodyClass: 'car',
+  storageCells: spec.storageCells,
+  mass: spec.mass,
+  engineId: spec.engineId,
+  gearboxId: spec.gearboxId,
+  tankLitres: spec.tankLitres,
+  wheelGrip: spec.wheelGrip,
+  // FBXLoader reports this pack in centimetres; the models are life-size.
+  scale: 0.01,
+  suspension: spec.suspension,
+  steerLock: spec.steerLock,
+  rearDriveBias: spec.rearDriveBias,
+}));
+
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   // Quaternius Realistic Car Pack (CC0). Modelled in real-world metres — a
@@ -1194,6 +1504,13 @@ const ENTRIES: readonly Entry[] = [
   // extracted by `packNode`; flat colours, no textures, shared geometry.
   // -------------------------------------------------------------------------
   ...LOWPOLY_CARS,
+
+  // -------------------------------------------------------------------------
+  // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
+  // its own wheels (found by shape) and taking its colour from the pack's shared
+  // palette atlas. Life-size in centimetres, nose-first down +Z, 4-6k triangles.
+  // -------------------------------------------------------------------------
+  ...SOVIET_CARS,
 
   // -------------------------------------------------------------------------
   // Built in code (render/proceduralcars.ts). Same contract as any pack: a body
