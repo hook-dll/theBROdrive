@@ -17,17 +17,13 @@ import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
  * resist sideways motion, so the thing tracks behind you, and when it stops
  * tracking you feel it in the car.
  *
- * The hitch is the interesting design decision. No car model in the catalogue has
- * a tow hook, and finding a bumper on an arbitrary GLB is guesswork — but every
- * car's REAR AXLE is measured off its mesh (`modelMeasure.wheels`, `isFront` false),
- * so that is the anchor. The trailer then grows a drawbar long enough to clear
- * whatever hangs behind that axle:
+ * The hitch sits just behind the measured rear face of the towing car. Car models
+ * are centred on their measured body bounds, so `-halfExtents.z` is the exact rear
+ * edge for every pack; `COUPLER_OFFSET` leaves the tow ball in free air.
  *
- *     drawbar = (halfExtents.z + rearAxleZ) + HITCH_GAP        [rear overhang + gap]
- *
- * which is computed per coupling, so a long-tailed van and a stubby coupe both get
- * a hitch that sits in free air behind them instead of inside their own bodywork.
- * The drawbar mesh is scaled to match, so the visual never lies about the joint.
+ * The trailer keeps one fixed physical drawbar. Its visual begins at the fitted
+ * model's actual forward edge rather than the larger physics bed box, so there is
+ * no empty seam between the shaft and the authored trailer body.
  *
  * Coupling is a spherical impulse joint: three free rotations, no relative
  * translation. That is a tow ball, and it gives yaw (following), pitch (cresting a
@@ -44,10 +40,10 @@ const AXLE_Z = -0.2;
 const TRACK_HALF = 0.95;
 /** Tow-ball height above the ground, metres. Ordinary for a light trailer. */
 const HITCH_HEIGHT = 0.45;
-/** Clearance between the car's rear face and the bed's front face, metres. */
-const HITCH_GAP = 0.35;
-/** Shortest drawbar, for cars with almost no rear overhang. */
-const DRAWBAR_MIN = 0.9;
+/** Tow ball behind the measured rear face of the car, metres. */
+const COUPLER_OFFSET = 0.12;
+/** Physical distance from the trailer bed collider to the tow ball, metres. */
+const DRAWBAR_LENGTH = 0.9;
 /** Empty mass, kg. */
 export const TRAILER_TARE_KG = 320;
 /** Most it will carry, kg. Enough to ruin the handling of a 900 kg car. */
@@ -290,8 +286,8 @@ export class Trailer implements Rebasable {
   private readonly disposables: THREE.BufferGeometry[] = [];
 
   private joint: RAPIER.ImpulseJoint | null = null;
-  /** Drawbar length of the current coupling, for the visual and for re-hitching. */
-  private drawbarLength = DRAWBAR_MIN;
+  /** Forward edge of the fitted trailer body, where the visual drawbar begins. */
+  private readonly drawbarMountZ: number;
   /**
    * The towing chassis and both local anchors, held only while coupled. Needed by
    * `enforceHitch`, which runs every step and must not re-derive the geometry.
@@ -399,6 +395,7 @@ export class Trailer implements Rebasable {
     // own geometry of their own.
     const model = createTrailerModel();
     this.root.add(model.body);
+    this.drawbarMountZ = model.drawbarMountZ;
 
     // Unit-length bar along +Z, scaled per coupling so the drawn tongue always
     // reaches exactly to the joint.
@@ -439,7 +436,7 @@ export class Trailer implements Rebasable {
 
     scene.add(this.root);
 
-    this.setDrawbarVisual(DRAWBAR_MIN);
+    this.setDrawbarVisual();
     // A trailer restored from a save may already be coupled; the second pass in
     // TrailerField re-hitches it, but until then the stand matches its state.
     this.setPropStand(this.state.hitchedTo === null);
@@ -483,7 +480,7 @@ export class Trailer implements Rebasable {
   }
 
   /**
-   * Couples to a car, computing the drawbar from that car's own measurements and
+   * Couples to a car at a tow ball just behind that model's measured rear face,
    * teleporting the trailer into place first.
    *
    * The teleport is not cosmetic: a spherical joint whose anchors start metres
@@ -494,28 +491,20 @@ export class Trailer implements Rebasable {
     this.unhitch();
 
     const measure = vehicle.modelMeasure;
-    const rear = measure.wheels.filter((w) => !w.isFront);
-    if (rear.length === 0) return;
-    let rearZ = 0;
-    for (const w of rear) rearZ += w.pos[2];
-    rearZ /= rear.length;
 
-    // Rear overhang: how much bodywork sits behind the axle we are hooking to.
-    const overhang = Math.max(0, measure.halfExtents[2] + rearZ);
-    this.drawbarLength = Math.max(DRAWBAR_MIN, overhang + HITCH_GAP);
-
-    // Tow-ball height. Both ends measure HITCH_HEIGHT up from THEIR OWN settled
-    // ground plane, which is the only way a ball on one body and a socket on
-    // another end up at the same height — and a coupling whose two anchors sit at
-    // different heights is a spherical joint holding the drawbar up or down, i.e. a
-    // trailer that stands nose-up on level ground.
-    //
-    // The car's plane comes from `contactPlaneLocalY`, not from its measured wheel
-    // mounts: Vehicle corrects a model's ride height when it builds the suspension
-    // (RIDE_LIFT_MAX, up to 0.15 m), so `wheels[].pos[1] - radius` is not where that
-    // car's tyres actually meet the road. Using it is what tilted the trailer.
-    const carAnchor = { x: 0, y: vehicle.contactPlaneLocalY + HITCH_HEIGHT, z: rearZ };
-    const trailerAnchor = { x: 0, y: HITCH_LOCAL_Y, z: BED_HALF[2] + this.drawbarLength };
+    // Car models are centred on their body bounds by render/carmodel.ts. Negative Z
+    // is the rear, so this puts the ball just outside the bumper instead of under
+    // the body at the rear axle.
+    const carAnchor = {
+      x: 0,
+      y: vehicle.contactPlaneLocalY + HITCH_HEIGHT,
+      z: -measure.halfExtents[2] - COUPLER_OFFSET,
+    };
+    const trailerAnchor = {
+      x: 0,
+      y: HITCH_LOCAL_Y,
+      z: BED_HALF[2] + DRAWBAR_LENGTH,
+    };
 
     // Place the trailer so its anchor already coincides with the car's, facing the
     // same way. The car's rotation carries pitch and roll too, so a car parked on a
@@ -556,11 +545,12 @@ export class Trailer implements Rebasable {
     this.hitchBody = vehicle.chassis;
     this.carAnchor = carAnchor;
     this.trailerAnchor = trailerAnchor;
-    // The drawbar reaches under the car's tail; without this the two colliders
-    // fight the joint and the trailer jitters against the bumper.
-    this.joint.setContactsEnabled(false);
+    // The shaft has no collider, but the car and trailer bodies do. Their initial
+    // spacing now clears the bumper, so contacts can stay enabled and prevent the
+    // car from passing through the trailer during a jackknife or reversing impact.
+    this.joint.setContactsEnabled(true);
 
-    this.setDrawbarVisual(this.drawbarLength);
+    this.setDrawbarVisual();
     // Stand wound up: the ball has the nose weight now.
     this.setPropStand(false);
     this.world.apply({ t: 'trailer_hitch', trailerId: this.state.id, carId });
@@ -850,10 +840,12 @@ export class Trailer implements Rebasable {
     for (const geo of this.disposables) geo.dispose();
   }
 
-  /** Stretches the drawn tongue to the coupling's real length. */
-  private setDrawbarVisual(length: number): void {
+  /** Bridges the fitted body's real front edge to the tow-ball anchor. */
+  private setDrawbarVisual(): void {
+    const hitchZ = BED_HALF[2] + DRAWBAR_LENGTH;
+    const length = Math.max(0.05, hitchZ - this.drawbarMountZ);
     this.drawbar.scale.z = length;
-    this.drawbar.position.set(0, HITCH_LOCAL_Y, BED_HALF[2] + length / 2);
+    this.drawbar.position.set(0, HITCH_LOCAL_Y, (this.drawbarMountZ + hitchZ) / 2);
   }
 
   /**

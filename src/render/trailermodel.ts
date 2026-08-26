@@ -55,6 +55,8 @@ export interface TrailerModelInstance {
   readonly leftWheel: THREE.Mesh;
   /** The wheel that sits at -X (right); already mirrored about X. */
   readonly rightWheel: THREE.Mesh;
+  /** Forward edge of the authored body, where the procedural drawbar begins. */
+  readonly drawbarMountZ: number;
 }
 
 interface Template {
@@ -62,6 +64,8 @@ interface Template {
   /** One centred wheel geometry (axle along X, radius = fit.wheelRadius). */
   readonly wheel: THREE.BufferGeometry;
   readonly material: THREE.Material;
+  /** Forward edge of the fitted body in trailer-local +Z. */
+  readonly drawbarMountZ: number;
 }
 
 let gltf: GLTFLoader | null = null;
@@ -214,6 +218,11 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
   const body = mergeGeometries(bodyGeometries);
   if (!body) throw new Error('Trailer model: body merge failed (incompatible attributes)');
   body.applyMatrix4(fitMatrix);
+  body.computeBoundingBox();
+  const drawbarMountZ = body.boundingBox?.max.z;
+  if (drawbarMountZ === undefined || !Number.isFinite(drawbarMountZ)) {
+    throw new Error('Trailer model: fitted body has no forward bound');
+  }
 
   // The GLB ships three PBR maps (base colour, normal, occlusion+metal-roughness),
   // but this renderer flat-shades with base colour only — comic banding and an ink
@@ -252,7 +261,7 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
     child.geometry.dispose();
   });
 
-  template = { body, wheel: left, material };
+  template = { body, wheel: left, material, drawbarMountZ };
 }
 
 /** A fresh trailer visual, sharing geometry and material with every other trailer. */
@@ -270,5 +279,5 @@ export function createTrailerModel(): TrailerModelInstance {
   rightWheel.castShadow = true;
   rightWheel.scale.x = -1; // the authored half is the left wheel
 
-  return { body, leftWheel, rightWheel };
+  return { body, leftWheel, rightWheel, drawbarMountZ: t.drawbarMountZ };
 }
