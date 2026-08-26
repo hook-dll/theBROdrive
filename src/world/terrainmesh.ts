@@ -2,9 +2,16 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
-import { NODE_SPACING, type Road } from './road';
+import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
-import { BERM_CREST, BERM_FADE, BERM_START, CORRIDOR_INNER, type Terrain } from './terrain';
+import {
+  BERM_CREST,
+  BERM_FADE,
+  BERM_START,
+  CORRIDOR_INNER,
+  DETAIL_REACH,
+  type Terrain,
+} from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
 import { desertPaletteAt } from './gradient';
 
@@ -43,8 +50,51 @@ export const NEAR_TERRAIN_REACH = 1500;
 const PHYSICS_LATERAL = 600;
 /** Lateral spacing growth factor; resolution falls off away from the road. */
 const LATERAL_RATIO = 1.35;
-/** Visible mesh sampling step along the road. Must divide CHUNK_LENGTH. */
+/**
+ * FIELD LATTICE step along the road, metres. Must divide CHUNK_LENGTH.
+ *
+ * This is where the expensive part of the terrain is sampled: four fractal fields and
+ * a landscape lookup, about 1 us a vertex. Eight metres is what that budget buys over
+ * a 3 km fan, and it sets a 20 m floor on the wavelength the coarse bands may carry
+ * (see GRAIN_WAVELENGTH in terrain.ts).
+ */
 const S_STEP = 8;
+/**
+ * Longitudinal sub-samples per field-lattice row inside `DETAIL_REACH`.
+ *
+ * The near desert is drawn and collided on the refined grid instead of on the field
+ * lattice, and that is the whole reason the desert can have chop and holes in it: a
+ * refined vertex's base height is BILINEARLY INTERPOLATED off the field lattice rather
+ * than resampled from it, so it costs one lerp instead of five noise fields, and only
+ * `Terrain.detailAt` — one two-octave field plus one lookup — is evaluated per vertex.
+ *
+ * An INTEGER subdivision, and that is load-bearing rather than tidy. The refined grid's
+ * outermost column sits on the `DETAIL_REACH` ring and has to reproduce the coarse edge
+ * it stitches to, which it only does if every field row is also a refined row: at 2.5 m
+ * against an 8 m lattice the refined column chorded across the coarse polyline's kinks
+ * and left a 23 mm crack at the seam, measured by tools/desert-ride.ts. At an integer
+ * ratio every third refined row IS the coarse row and the two in between lie exactly on
+ * the segment joining them.
+ *
+ * Three gives 2.67 m, which gives the detail layer's shortest octave (7 m) 2.6 samples
+ * per wavelength — the same ratio the road's own collider gives its shortest bump
+ * (3.33 m over a 1.333 m step), and the same reason: below it a wave reaches the trimesh
+ * as seed-dependent spikes instead of as the shape it is.
+ */
+const FINE_SUBDIVISIONS = 3;
+/** Refined grid step, metres, longitudinal and lateral alike. */
+const FINE_STEP = S_STEP / FINE_SUBDIVISIONS;
+/**
+ * Cap on the field lattice's own ring spacing inside `DETAIL_REACH`, metres.
+ *
+ * The refined grid interpolates the field lattice, so the lattice's lateral spacing is
+ * what limits the BASE under the chop: at the unconstrained 1.35 ratio the rings are
+ * 25 m apart by 70 m out, which chords the 23.6 m ripple octave into a straight line.
+ * Twelve metres costs three extra rings a side — 156 field samples a chunk, about
+ * 0.16 ms — and keeps every coarse band the lattice claims to carry resolved right out
+ * to the seam.
+ */
+const DETAIL_RING_CAP = 12;
 /** Terrain tucks 8 cm below the shoulder, covering numerical seam cracks. */
 const ROAD_SEAM_OVERLAP = 0.08;
 const TERRAIN_INNER = CORRIDOR_INNER - ROAD_SEAM_OVERLAP;
@@ -185,6 +235,58 @@ const rockLinear = new THREE.Color();
 const gravelLinear = new THREE.Color();
 
 /**
+ * One arclength row's road frame: the centreline point, and the unit vector a lateral
+ * offset is measured along. Reused per row, so no row allocates.
+ *
+ * `Road.offsetPoint` clamps `s` to the road's extent, which would collapse every apron
+ * sample onto the boundary frame and flatten the apron to nothing. Beyond either end
+ * the boundary frame is continued linearly instead — constant heading and height —
+ * which is exact for the straight, flat runout behind s = 0 and a deliberate straight
+ * continuation past the road's end. In range this is identical to `road.offsetPoint`.
+ *
+ * Per ROW rather than per vertex, which is the change from `offsetPoint`. Every vertex
+ * in a row shares this frame, and `road.sampleAt` is a node lookup plus an
+ * interpolation at 0.17 us — paid a hundred times over per row of the refined grid if
+ * it is asked once per vertex.
+ */
+const rowFrame = { x: 0, z: 0, lateralX: 0, lateralZ: 0 };
+
+function setRowFrame(road: Road, s: number): void {
+  const c = road.sampleAt(s);
+  const ds = s - c.s;
+  const sinHeading = Math.sin(c.heading);
+  const cosHeading = Math.cos(c.heading);
+  rowFrame.x = c.x + sinHeading * ds;
+  rowFrame.z = c.z + cosHeading * ds;
+  rowFrame.lateralX = cosHeading;
+  rowFrame.lateralZ = -sinHeading;
+}
+
+/**
+ * One component of a refined vertex, bilinearly interpolated out of the four field
+ * vertices bracketing it. `base` indices are into the interleaved position array and
+ * already carry the component offset.
+ *
+ * All three components go through here, and they have to agree exactly: a weight of 1
+ * must reproduce the field vertex bit for bit in x and z as well as in y, or the refined
+ * grid stops being a subdivision of the field quads and the seam opens up. `a + (b - a)
+ * * 1` does that; `a * (1 - t) + b * t` does not.
+ */
+function bilinear(
+  positions: Float32Array,
+  nearInner: number,
+  nearOuter: number,
+  farInner: number,
+  farOuter: number,
+  across: number,
+  along: number,
+): number {
+  const near = positions[nearInner]! + (positions[nearOuter]! - positions[nearInner]!) * across;
+  const far = positions[farInner]! + (positions[farOuter]! - positions[farInner]!) * across;
+  return near + (far - near) * along;
+}
+
+/**
  * Keep comic contours and stipple, but leave diffuse light and shadow colour untouched so
  * the desert responds to lamps and moonlight exactly like the road.
  *
@@ -202,25 +304,25 @@ export const TERRAIN_MATERIAL = applyComicShading(
 );
 
 /**
- * One chunk's terrain grid: the drawn mesh plus the raw grid it was built from, so
- * the collider can be indexed straight off the same vertices.
+ * One chunk's terrain, as two grids sharing one vertex buffer: the sparse FIELD
+ * LATTICE (geometric rings, `S_STEP` rows) where the height field is actually
+ * sampled, followed by the REFINED GRID that draws and collides the near desert off
+ * an interpolation of it.
+ *
+ * The collider is filtered straight out of the drawn triangle list rather than
+ * re-derived from the grids, so solid ground cannot disagree with what is on screen
+ * about folds, ownership or the corridor quad — every one of those decisions was
+ * already made when `index` was written.
  */
 interface BuiltTerrain {
   readonly group: THREE.Group;
   readonly geometry: THREE.BufferGeometry;
-  /** Interleaved xyz, row-major: `positions[(si * laterals.length + li) * 3]`. */
+  /** Interleaved xyz for every vertex of both grids, origin-relative. */
   readonly positions: Float32Array;
-  /** Signed lateral offset of each grid column, ascending. */
-  readonly laterals: readonly number[];
-  readonly sCount: number;
-  /**
-   * One byte per visual grid cell: 1 when both longitudinal edges stay
-   * forward-facing and bounded, 0 when the road-normal parameterisation folded.
-   * Reused by the collider so drawn and solid terrain cannot disagree.
-   */
-  readonly validCells: Uint8Array;
-  /** True for chunks off either end of the road, where there is no road quad. */
-  readonly isApron: boolean;
+  /** Signed lateral offset of the column each vertex sits on. */
+  readonly lateralOf: Float32Array;
+  /** The drawn triangles: folds, unowned ground and the road quad already removed. */
+  readonly index: Uint32Array;
 }
 
 export class TerrainMeshProvider implements ChunkProvider {
@@ -234,12 +336,16 @@ export class TerrainMeshProvider implements ChunkProvider {
   constructor(private readonly roadDistance: RoadDistance) {}
 
   /**
-   * Desert height at a world position: `Terrain.openHeight` with the nearest-branch
+   * Desert BASE height at a world position: `Terrain.openBase` with the nearest-branch
    * distance interpolated off the lattice. A pure function of x and z, which is what
    * makes every chunk agree.
+   *
+   * Base and not `openHeight` because the detail layer belongs to the refined grid
+   * alone: sampling it here as well would both alias it onto the 8 m lattice and
+   * double it under every refined vertex.
    */
-  private worldHeight(terrain: Terrain, x: number, z: number): number {
-    return terrain.openHeight(x, z, this.roadDistance.distAt(x, z, DIST_LATTICE));
+  private worldBase(terrain: Terrain, x: number, z: number): number {
+    return terrain.openBase(x, z, this.roadDistance.distAt(x, z, DIST_LATTICE));
   }
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -261,30 +367,6 @@ export class TerrainMeshProvider implements ChunkProvider {
     return { group: built.group, bodies, colliders, dispose: () => built.geometry.dispose() };
   }
 
-  /**
-   * Terrain-sampling offset from the road centreline.
-   *
-   * `Road.offsetPoint` clamps `s` to the road's extent, which would collapse every
-   * apron sample onto the boundary frame and flatten the apron to nothing. Beyond
-   * either end we instead continue the boundary frame linearly — constant heading
-   * and height — which is exact for the straight, flat runout behind s = 0 and a
-   * deliberate straight continuation past the road's end. In-range this is
-   * identical to `road.offsetPoint`.
-   */
-  private offsetPoint(
-    road: Road,
-    s: number,
-    lateral: number,
-    out: { x: number; y: number; z: number },
-  ): { x: number; y: number; z: number } {
-    const c = road.sampleAt(s);
-    const ds = s - c.s;
-    out.x = c.x + Math.sin(c.heading) * ds + Math.cos(c.heading) * lateral;
-    out.y = c.y;
-    out.z = c.z + Math.cos(c.heading) * ds - Math.sin(c.heading) * lateral;
-    return out;
-  }
-
   private buildVisual(ctx: ChunkContext, sStart: number, sEnd: number): BuiltTerrain {
     const { road, terrain } = ctx;
     // The floating origin, frozen at build time: every height and surface sample
@@ -296,28 +378,26 @@ export class TerrainMeshProvider implements ChunkProvider {
     const isApron = sStart < 0 || sEnd > road.length;
 
     // Geometric lateral rings — metres at the verge, hundreds at the horizon — with
-    // two exceptions. `PHYSICS_LATERAL` is forced in as an exact ring so the
-    // collider ends on a shared row of vertices (the solid ground and the drawn
-    // ground then agree there to the bit rather than meeting mid-quad), and across
-    // the rim the spacing is capped: the escarpment climbs 120 m over 350 m of
-    // lateral distance, and at the unconstrained spacing out there it would be two
-    // facets wide and read as a folded sheet.
+    // exceptions, because a pure ratio puts rings where nothing needs them and none
+    // where something does. Inside `DETAIL_REACH` the spacing is capped so the refined
+    // grid has a resolved base to interpolate; across the berm's face it is capped so
+    // the escarpment is not two facets wide; and `DETAIL_REACH` and `PHYSICS_LATERAL`
+    // are forced in as exact rings, because the refined grid stitches onto the first
+    // and the collider ends on the second — both need a shared row of vertices rather
+    // than a meeting mid-quad.
     const magnitudes: number[] = [TERRAIN_INNER];
     let m = CORRIDOR_INNER;
     while (m < NEAR_TERRAIN_REACH) {
       const geometric = m * LATERAL_RATIO - m;
-      // Three caps, because the berm has three parts: an unclimbable face that must be
-      // resolved, a back slope that must not step, and open ground past it that the vista
-      // takes over.
       const cap =
-        m >= BERM_START - BERM_RING_SPACING && m < BERM_CREST
-          ? BERM_RING_SPACING
-          : m < BERM_FADE
-            ? BERM_BACK_RING_SPACING
-            : OUTER_RING_SPACING;
-      const step = Math.min(geometric, cap);
-      const next = Math.min(m + step, NEAR_TERRAIN_REACH);
-      m = m < PHYSICS_LATERAL && next > PHYSICS_LATERAL ? PHYSICS_LATERAL : next;
+        m < DETAIL_REACH ? DETAIL_RING_CAP
+        : m >= BERM_START - BERM_RING_SPACING && m < BERM_CREST ? BERM_RING_SPACING
+        : m < BERM_FADE ? BERM_BACK_RING_SPACING
+        : OUTER_RING_SPACING;
+      let next = Math.min(m + Math.min(geometric, cap), NEAR_TERRAIN_REACH);
+      if (m < DETAIL_REACH && next > DETAIL_REACH) next = DETAIL_REACH;
+      else if (m < PHYSICS_LATERAL && next > PHYSICS_LATERAL) next = PHYSICS_LATERAL;
+      m = next;
       if (m - magnitudes[magnitudes.length - 1]! < 1) break;
       magnitudes.push(m);
     }
@@ -331,12 +411,32 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     const sCount = Math.round((sEnd - sStart) / S_STEP) + 1;
     const latCount = laterals.length;
-    const vertexCount = sCount * latCount;
+    const fieldCount = sCount * latCount;
 
+    // The refined grid's own columns: uniform `FINE_STEP` from the shoulder out to
+    // `DETAIL_REACH`, with the spacing divided evenly into the span rather than
+    // stepped off the shoulder, which would leave a sliver column at the far end.
+    // Its innermost column is the same TERRAIN_INNER ring the field lattice starts on,
+    // so the tuck under the road ribbon is inherited rather than re-derived.
+    const fineSteps = Math.round((DETAIL_REACH - CORRIDOR_INNER) / FINE_STEP);
+    const fineSpacing = (DETAIL_REACH - CORRIDOR_INNER) / fineSteps;
+    const fineMagnitudes: number[] = [TERRAIN_INNER];
+    for (let i = 1; i < fineSteps; i++) fineMagnitudes.push(CORRIDOR_INNER + i * fineSpacing);
+    // Assigned, not accumulated: `CORRIDOR_INNER + fineSteps * fineSpacing` lands an
+    // ulp off 80, and an outermost column an ulp outside the ring it is supposed to BE
+    // is a column with no ring to reproduce.
+    fineMagnitudes.push(DETAIL_REACH);
+
+    const fineLaterals: number[] = [];
+    for (let i = fineMagnitudes.length - 1; i >= 0; i--) fineLaterals.push(-fineMagnitudes[i]!);
+    for (let i = 0; i < fineMagnitudes.length; i++) fineLaterals.push(fineMagnitudes[i]!);
+    const fineCount = fineLaterals.length;
+    const fineRows = (sCount - 1) * FINE_SUBDIVISIONS + 1;
+
+    const vertexCount = fieldCount + fineRows * fineCount;
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
-
-    const point = { x: 0, y: 0, z: 0 };
+    const lateralOf = new Float32Array(vertexCount);
 
     for (let si = 0; si < sCount; si++) {
       const s = sStart + si * S_STEP;
@@ -347,11 +447,17 @@ export class TerrainMeshProvider implements ChunkProvider {
       sandLinear.setHex(palette.sand);
       rockLinear.setHex(palette.rock);
       gravelLinear.setHex(palette.gravel);
+      setRowFrame(road, s);
+      const originX = rowFrame.x;
+      const originZ = rowFrame.z;
+      const stepX = rowFrame.lateralX;
+      const stepZ = rowFrame.lateralZ;
       // Every vertex in the row already knows its own lateral offset, so the terrain
       // never has to project back to the centreline to find its frame.
       for (let li = 0; li < latCount; li++) {
         const lateral = laterals[li]!;
-        this.offsetPoint(road, s, lateral, point);
+        const px = originX + stepX * lateral;
+        const pz = originZ + stepZ * lateral;
         const vi = si * latCount + li;
         // Terrain overlaps the road's shoulder slightly and samples the same road
         // surface there. The tiny downward bias is beneath the ribbon, closing the
@@ -364,20 +470,21 @@ export class TerrainMeshProvider implements ChunkProvider {
         const frameWeight = isApron ? 1 : 1 - blend * blend * (3 - 2 * blend);
         let y: number;
         if (frameWeight >= 1) {
-          y = terrain.heightFromFrame(point.x, point.z, lateral, s);
+          y = terrain.baseFromFrame(px, pz, lateral, s);
         } else if (frameWeight <= 0) {
-          y = this.worldHeight(terrain, point.x, point.z);
+          y = this.worldBase(terrain, px, pz);
         } else {
-          const frameY = terrain.heightFromFrame(point.x, point.z, lateral, s);
-          const world = this.worldHeight(terrain, point.x, point.z);
+          const frameY = terrain.baseFromFrame(px, pz, lateral, s);
+          const world = this.worldBase(terrain, px, pz);
           y = world + (frameY - world) * frameWeight;
         }
         if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
-        positions[vi * 3] = point.x - ox;
+        positions[vi * 3] = px - ox;
         positions[vi * 3 + 1] = y;
-        positions[vi * 3 + 2] = point.z - oz;
+        positions[vi * 3 + 2] = pz - oz;
+        lateralOf[vi] = lateral;
 
-        const surface = terrain.surfaceFromFrame(point.x, point.z, lateral);
+        const surface = terrain.surfaceFromFrame(px, pz, lateral);
         const surfaceColor =
           surface === SurfaceType.Rock ? rockLinear
           : surface === SurfaceType.Gravel ? gravelLinear
@@ -487,52 +594,180 @@ export class TerrainMeshProvider implements ChunkProvider {
       }
     }
 
+    /**
+     * Where each refined column and row sits in the field lattice: the pair of rings
+     * (or rows) it lies between and how far across. Computed once, because every
+     * refined vertex in a column shares its column bracket and every one in a row
+     * shares its row bracket — which is what reduces a refined vertex to four loads
+     * and three lerps.
+     *
+     * Both lists ascend, so one walk finds every bracket. A refined column landing
+     * exactly on a ring gets weight 1 on that ring, and `a + (b - a) * 1` recovers `b`
+     * exactly in floating point — which is what makes the outermost refined column
+     * reproduce the coarse vertex it stitches to bit for bit, and the seam watertight.
+     */
+    const columnLow = new Int32Array(fineCount);
+    const columnWeight = new Float64Array(fineCount);
+    for (let c = 0, li = 0; c < fineCount; c++) {
+      const lateral = fineLaterals[c]!;
+      while (li < latCount - 2 && laterals[li + 1]! < lateral) li++;
+      const span = laterals[li + 1]! - laterals[li]!;
+      columnLow[c] = li;
+      columnWeight[c] = span > 0 ? Math.min(1, Math.max(0, (lateral - laterals[li]!) / span)) : 0;
+    }
+
+    // Which field cell each refined cell inherits its validity from. Folding and
+    // ownership are questions about an 8 m patch of ground answered off a 50 m
+    // distance lattice, so re-asking them per refined cell would multiply the one
+    // genuinely expensive part of the cell loop by sixteen and change no answer.
+    const cellColumn = new Int32Array(fineCount > 0 ? fineCount - 1 : 0);
+    for (let c = 0, li = 0; c + 1 < fineCount; c++) {
+      const mid = (fineLaterals[c]! + fineLaterals[c + 1]!) * 0.5;
+      while (li < latCount - 2 && laterals[li + 1]! <= mid) li++;
+      cellColumn[c] = li;
+    }
+
+    // Row brackets, straight out of the integer subdivision rather than divided back
+    // out of a distance: every FINE_SUBDIVISIONS-th refined row is a field row, gets
+    // weight 0 on it, and reproduces it exactly.
+    const rowLow = new Int32Array(fineRows);
+    const rowWeight = new Float64Array(fineRows);
+    for (let j = 0; j < fineRows; j++) {
+      const low = Math.min(sCount - 2, Math.floor(j / FINE_SUBDIVISIONS));
+      rowLow[j] = low;
+      rowWeight[j] = (j - low * FINE_SUBDIVISIONS) / FINE_SUBDIVISIONS;
+    }
+
+    // X AND Z ARE INTERPOLATED TOO, not re-derived from the road frame, and that is the
+    // second half of the seam contract. A refined column follows the curved offset line
+    // if its positions come from `setRowFrame`, while the coarse edge it stitches to is
+    // the straight chord between two field rows — so on a 170 m corner the two part
+    // company by the chord's sagitta, about 11 mm, and leave a hairline slot in the
+    // ground and in the collider. Interpolating position makes the refined grid a
+    // subdivision of the field quads rather than a resampling of the road, which is
+    // watertight by construction; the 11 mm of curve fidelity it gives up over an 8 m
+    // span is invisible and was never in the coarse mesh either.
+    for (let j = 0; j < fineRows; j++) {
+      const palette = desertPaletteAt(sStart + j * FINE_STEP);
+      sandLinear.setHex(palette.sand);
+      rockLinear.setHex(palette.rock);
+      gravelLinear.setHex(palette.gravel);
+      const nearRow = rowLow[j]! * latCount;
+      const farRow = nearRow + latCount;
+      const alongWeight = rowWeight[j]!;
+      const rowBase = fieldCount + j * fineCount;
+      for (let c = 0; c < fineCount; c++) {
+        const lateral = fineLaterals[c]!;
+        const low = columnLow[c]!;
+        const across = columnWeight[c]!;
+        const nearInner = (nearRow + low) * 3;
+        const nearOuter = (nearRow + low + 1) * 3;
+        const farInner = (farRow + low) * 3;
+        const farOuter = (farRow + low + 1) * 3;
+
+        const vi = rowBase + c;
+        const x =
+          bilinear(positions, nearInner, nearOuter, farInner, farOuter, across, alongWeight);
+        const y =
+          bilinear(positions, nearInner + 1, nearOuter + 1, farInner + 1, farOuter + 1, across, alongWeight);
+        const z =
+          bilinear(positions, nearInner + 2, nearOuter + 2, farInner + 2, farOuter + 2, across, alongWeight);
+        const px = x + ox;
+        const pz = z + oz;
+        positions[vi * 3] = x;
+        // The height alone carries the detail layer, and it is added AFTER the
+        // interpolation: interpolating a coarsely sampled detail term is what aliases
+        // it, which is the whole reason this grid exists.
+        positions[vi * 3 + 1] = y + terrain.detailAt(px, pz, Math.abs(lateral));
+        positions[vi * 3 + 2] = z;
+        lateralOf[vi] = lateral;
+
+        const surface = terrain.surfaceFromFrame(px, pz, lateral);
+        const surfaceColor =
+          surface === SurfaceType.Rock ? rockLinear
+          : surface === SurfaceType.Gravel ? gravelLinear
+          : sandLinear;
+        colors[vi * 3] = surfaceColor.r;
+        colors[vi * 3 + 1] = surfaceColor.g;
+        colors[vi * 3 + 2] = surfaceColor.b;
+      }
+    }
+
     // Index only valid cells. The single quad spanning the road is also skipped
     // in-range, where the road mesh owns it; the apron has no road, so it is filled.
-    const index: number[] = [];
+    // Everything inside `DETAIL_REACH` is left to the refined grid, so the two never
+    // draw the same ground — and because DETAIL_REACH is a forced ring, "inside" is an
+    // exact test on both of a cell's edges rather than a straddle.
+    const maxTriangles =
+      (sCount - 1) * (latCount - 1) * 2 + (fineRows - 1) * (fineCount - 1) * 2;
+    const index = new Uint32Array(maxTriangles * 3);
+    let written = 0;
     for (let si = 0; si < sCount - 1; si++) {
       for (let li = 0; li < latCount - 1; li++) {
         if (validCells[si * (latCount - 1) + li] === 0) continue;
         const here = laterals[li]!;
         const next = laterals[li + 1]!;
-        if (!isApron && here < 0 && next > 0) continue;
+        if (Math.abs(here) <= DETAIL_REACH && Math.abs(next) <= DETAIL_REACH) continue;
 
         const a = si * latCount + li;
         const b = a + latCount;
         const c = a + 1;
         const d = b + 1;
-        index.push(a, b, c, b, d, c);
+        index[written++] = a;
+        index[written++] = b;
+        index[written++] = c;
+        index[written++] = b;
+        index[written++] = d;
+        index[written++] = c;
       }
     }
+    for (let j = 0; j + 1 < fineRows; j++) {
+      const validRow = rowLow[j]! * (latCount - 1);
+      const rowBase = fieldCount + j * fineCount;
+      for (let c = 0; c + 1 < fineCount; c++) {
+        if (validCells[validRow + cellColumn[c]!] === 0) continue;
+        const here = fineLaterals[c]!;
+        const next = fineLaterals[c + 1]!;
+        if (!isApron && here < 0 && next > 0) continue;
+
+        const a = rowBase + c;
+        const b = a + fineCount;
+        const cc = a + 1;
+        const d = b + 1;
+        index[written++] = a;
+        index[written++] = b;
+        index[written++] = cc;
+        index[written++] = b;
+        index[written++] = d;
+        index[written++] = cc;
+      }
+    }
+    const drawn = index.subarray(0, written);
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setIndex(new THREE.BufferAttribute(Uint32Array.from(index), 1));
+    geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
     geometry.computeVertexNormals();
 
     return {
       group: new THREE.Group().add(new THREE.Mesh(geometry, TERRAIN_MATERIAL)),
       geometry,
       positions,
-      laterals,
-      sCount,
-      validCells,
-      isApron,
+      lateralOf,
+      index: drawn,
     };
   }
 
   /**
-   * Solid ground, built from the visible grid's own vertices out to
-   * `PHYSICS_LATERAL`.
+   * Solid ground: the drawn triangles that lie inside `PHYSICS_LATERAL`.
    *
-   * Reusing the drawn vertices is the whole trick: the collider costs no extra
-   * terrain sampling (the expensive part is `heightAt`, already paid), it can never
-   * disagree with what is on screen, and because the rings are geometric it is
-   * detailed at the verge and cheap far out — a few hundred triangles for 600 m of
-   * driveable desert either side. The previous axis-aligned heightfield sampled the
-   * terrain a second time on its own 2 m lattice, which cost more than the mesh and
-   * still only reached 60 m.
+   * Filtering the DRAWN list is the whole trick. The collider costs no extra terrain
+   * sampling (the expensive part is already paid), and it cannot disagree with what is
+   * on screen about folds, ownership, the corridor quad or the refined grid, because it
+   * never re-decides any of them — it only drops what is too far out to stand on. The
+   * previous axis-aligned heightfield sampled the terrain a second time on its own 2 m
+   * lattice, which cost more than the mesh and still only reached 60 m.
    */
   private addCollider(
     ctx: ChunkContext,
@@ -540,56 +775,51 @@ export class TerrainMeshProvider implements ChunkProvider {
     bodies: RAPIER.RigidBody[],
     colliders: RAPIER.Collider[],
   ): void {
-    const { laterals, positions, sCount, validCells, isApron } = built;
-    const latCount = laterals.length;
+    const { positions, lateralOf, index } = built;
 
-    // Contiguous block of rings within the solid band; the ring list is sorted and
-    // symmetric, so this is a slice, not a filter.
-    let first = 0;
-    while (first < latCount && laterals[first]! < -PHYSICS_LATERAL) first++;
-    let last = latCount - 1;
-    while (last > 0 && laterals[last]! > PHYSICS_LATERAL) last--;
-    if (last - first < 1) return;
-
-    // Compact the band's vertices into their own array. Handing Rapier the whole
-    // grid and indexing only part of it looks tempting, but a trimesh's AABB spans
-    // every vertex it was given: the collider would claim a kilometres-wide box in
-    // the broad phase and every query in the world would test against it. Measured:
+    // Compact the kept triangles' vertices into their own array. Handing Rapier the
+    // whole buffer and indexing only part of it looks tempting, but a trimesh's AABB
+    // spans every vertex it was given: the collider would claim a kilometres-wide box
+    // in the broad phase and every query in the world would test against it. Measured:
     // 32 ms/frame with the full array, 14 ms with this copy.
-    const bandCount = last - first + 1;
-    const vertices = new Float32Array(sCount * bandCount * 3);
-    for (let si = 0; si < sCount; si++) {
-      for (let li = first; li <= last; li++) {
-        const src = (si * latCount + li) * 3;
-        const dst = (si * bandCount + (li - first)) * 3;
-        vertices[dst] = positions[src]!;
-        vertices[dst + 1] = positions[src + 1]!;
-        vertices[dst + 2] = positions[src + 2]!;
+    const remap = new Int32Array(positions.length / 3).fill(-1);
+    const kept = new Uint32Array(index.length);
+    let written = 0;
+    let used = 0;
+    for (let t = 0; t + 2 < index.length; t += 3) {
+      const a = index[t]!;
+      const b = index[t + 1]!;
+      const c = index[t + 2]!;
+      if (
+        Math.abs(lateralOf[a]!) > PHYSICS_LATERAL ||
+        Math.abs(lateralOf[b]!) > PHYSICS_LATERAL ||
+        Math.abs(lateralOf[c]!) > PHYSICS_LATERAL
+      ) {
+        continue;
       }
+      if (remap[a]! < 0) remap[a] = used++;
+      if (remap[b]! < 0) remap[b] = used++;
+      if (remap[c]! < 0) remap[c] = used++;
+      kept[written++] = remap[a]!;
+      kept[written++] = remap[b]!;
+      kept[written++] = remap[c]!;
     }
+    if (written === 0) return;
 
-    const index: number[] = [];
-    for (let si = 0; si < sCount - 1; si++) {
-      for (let li = first; li < last; li++) {
-        if (validCells[si * (latCount - 1) + li] === 0) continue;
-        // Same rule as the visible grid: in-range, the road's own trimesh owns the
-        // corridor quad, so leaving it out here keeps the two from fighting over
-        // the same wheel ray.
-        if (!isApron && laterals[li]! < 0 && laterals[li + 1]! > 0) continue;
-        const a = si * bandCount + (li - first);
-        const b = a + bandCount;
-        const c = a + 1;
-        const d = b + 1;
-        index.push(a, b, c, b, d, c);
-      }
+    const vertices = new Float32Array(used * 3);
+    for (let v = 0; v < remap.length; v++) {
+      const dst = remap[v]!;
+      if (dst < 0) continue;
+      vertices[dst * 3] = positions[v * 3]!;
+      vertices[dst * 3 + 1] = positions[v * 3 + 1]!;
+      vertices[dst * 3 + 2] = positions[v * 3 + 2]!;
     }
-    if (index.length === 0) return;
 
     // `vertices` is copied verbatim from the already-relative `positions` above, so
     // the trimesh receives origin-relative vertices — no second subtraction here.
     const collider = ctx.physics.addStaticTrimesh(
       vertices,
-      Uint32Array.from(index),
+      kept.subarray(0, written),
       TERRAIN_COLLIDER_SURFACE,
     );
     colliders.push(collider);

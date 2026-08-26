@@ -101,8 +101,13 @@ const FOG_RAMP_END = 600;
 const FOG_RAMP_MAX_SCALE = 3.2;
 /**
  * How far below the terrain a body must be before it counts as fallen out of the
- * world. Deeper than any legitimate dip (the corridor sinks 0.16 m and a pothole
- * 0.07 m) and than a chassis half-height, so normal driving can never trigger it.
+ * world. Deeper than any legitimate dip (the road corridor sinks 0.16 m, a road
+ * pothole 0.07 m, and a desert scoop 1.7 m at its worst — see `Terrain.detailAt`) and
+ * than a chassis half-height, so normal driving can never trigger it.
+ *
+ * Note the margin is against the DIP, not against the terrain sample: the rescue check
+ * compares to `terrain.heightAt`, which carries the desert's detail layer itself, so a
+ * car sitting in a scoop is measured against the scoop's own floor.
  */
 const RESCUE_FALL_DEPTH = 6;
 /**

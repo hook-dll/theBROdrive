@@ -83,6 +83,12 @@ function fakeContext(chunkIndex: number, road: Road, terrain: Terrain): ChunkCon
     road,
     terrain,
     hasPhysics: false,
+    // Not optional: providers subtract these from every f32 coordinate they write, so
+    // leaving them undefined poisons the whole vertex buffer with NaN — and a NaN fold
+    // test rejects every cell, which is how this tool came to report a flawless zero
+    // triangles over 26 chunks.
+    originX: 0,
+    originZ: 0,
   } as unknown as ChunkContext;
 }
 
