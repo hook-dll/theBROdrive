@@ -123,6 +123,10 @@ const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: numbe
   { fluid: 'oil', capacity: 5 },
 ];
 
+export type DevSpawnItemRequest =
+  | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
+  | { readonly type: 'bubble_gum' };
+
 function driveLayout(rearDriveBias: number): DriveLayout {
   if (rearDriveBias <= 0) return 'FWD';
   if (rearDriveBias >= 1) return 'RWD';
@@ -186,11 +190,10 @@ export interface PauseHooks {
    */
   spawnTrailer?: () => void;
   /**
-   * Drops a full can of one fluid at the player's feet. Dev-only for the same
-   * reason as the others: found cans are the whole supply economy, and a dispenser
-   * would delete the reason to stop anywhere.
+   * Drops a normal world item at the player's feet. Dev-only: the picker exists to
+   * exercise fluid cans and bubble-gum packs without bypassing pickup physics.
    */
-  spawnFluid?: (fluid: FluidKind, capacity: number) => void;
+  spawnItem?: (request: DevSpawnItemRequest) => void;
   /**
    * The LIVE world state, for "Export Save Code".
    *
@@ -421,7 +424,7 @@ export class MainMenu {
         return null;
       };
 
-      type Screen = 'main' | 'settings' | 'spawn' | 'fluid';
+      type Screen = 'main' | 'settings' | 'spawn' | 'item';
       let screen: Screen = 'main';
       /**
        * Settings section, remembered across visits: someone adjusting the horizon
@@ -491,7 +494,7 @@ export class MainMenu {
         panel.classList.toggle('menu-panel-settings', next === 'settings');
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
-        else if (next === 'fluid') renderFluid?.();
+        else if (next === 'item') renderItem?.();
         else renderSpawn?.();
       };
 
@@ -580,13 +583,11 @@ export class MainMenu {
           });
           panel.appendChild(trailerBtn);
         }
-        // Fluids get a picker because there are four of them and testing the pour
-        // mechanic means reaching for a specific one — a diesel can to prove a
-        // petrol engine refuses it, a coolant can to watch the warning lamp clear.
-        if (import.meta.env.DEV && hooks.spawnFluid) {
-          const fluidBtn = button('menu-button', 'Spawn Fluid (dev)');
-          fluidBtn.addEventListener('click', () => showScreen('fluid'));
-          panel.appendChild(fluidBtn);
+        // World items share one picker: fluid cans plus the five-charge gum pack.
+        if (import.meta.env.DEV && hooks.spawnItem) {
+          const itemBtn = button('menu-button', 'Spawn Item (dev)');
+          itemBtn.addEventListener('click', () => showScreen('item'));
+          panel.appendChild(itemBtn);
         }
         panel.append(saveBtn, exportBtn, quitBtn);
 
@@ -1159,14 +1160,10 @@ export class MainMenu {
       const renderSpawn: (() => void) | null = import.meta.env.DEV ? renderSpawnScreen : null;
 
       /**
-       * Dev fluid dispenser. One row per fluid, each spawning a FULL can at the
-       * player's feet, because the point is testing the pour and a part-full can
-       * just means pouring twice.
-       *
-       * Capacities mirror what a gas stop stocks (see FLUID_STOCK in world/poi.ts):
-       * fuel in 20 L jerrycans, engine fluids in 5 L bottles.
+       * Dev item dispenser. Fluid capacities mirror gas-stop stock; bubble gum uses
+       * the same five-charge pack found there. Every row drops a real world pickup.
        */
-      const renderFluidScreen = (): void => {
+      const renderItemScreen = (): void => {
         panel.textContent = '';
 
         const backBtn = button('menu-button', 'Back');
@@ -1174,7 +1171,7 @@ export class MainMenu {
         panel.appendChild(backBtn);
 
         const title = el('h1', 'menu-title');
-        title.textContent = 'Spawn Fluid';
+        title.textContent = 'Spawn Item';
         panel.appendChild(title);
 
         const list = el('div', 'menu-body-list');
@@ -1193,20 +1190,32 @@ export class MainMenu {
           cap.textContent = `${spec.capacity} L`;
           row.append(cap);
           row.addEventListener('click', () => {
-            hooks.spawnFluid?.(spec.fluid, spec.capacity);
+            hooks.spawnItem?.({ type: 'fluid_can', fluid: spec.fluid, capacity: spec.capacity });
             finish('resume');
           });
           list.appendChild(row);
         }
+
+        const gumRow = button('menu-body', '');
+        const gumName = el('span', 'menu-body-label');
+        gumName.textContent = 'bubble gum pack';
+        const gumCount = el('span', 'menu-body-class');
+        gumCount.textContent = '5 charges';
+        gumRow.append(gumName, gumCount);
+        gumRow.addEventListener('click', () => {
+          hooks.spawnItem?.({ type: 'bubble_gum' });
+          finish('resume');
+        });
+        list.appendChild(gumRow);
         panel.appendChild(list);
 
         const note = el('div', 'menu-note');
-        note.textContent = 'a full can drops at your feet';
+        note.textContent = 'a full can or gum pack drops at your feet';
         panel.appendChild(note);
 
         backBtn.focus();
       };
-      const renderFluid: (() => void) | null = import.meta.env.DEV ? renderFluidScreen : null;
+      const renderItem: (() => void) | null = import.meta.env.DEV ? renderItemScreen : null;
 
       showScreen('main');
     });

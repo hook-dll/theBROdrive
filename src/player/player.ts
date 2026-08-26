@@ -97,6 +97,20 @@ export class Player implements Rebasable {
 
   /** Maps a struck body's handle to its owner, or null; null gets a direct impulse. */
   private shoveLookup: (bodyHandle: number) => Shoveable | null = () => null;
+  /**
+   * Contact fallback for owned bodies at character-controller autostep edges.
+   * Returns the body handle it shoved so the computed-collision path does not
+   * apply the same request twice.
+   */
+  private nearbyShove: (
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+    moveX: number,
+    moveZ: number,
+    seconds: number,
+  ) => number | null = () => null;
   private readonly moveScratch = { x: 0, y: 0, z: 0 };
   private readonly appliedScratch = { x: 0, y: 0, z: 0 };
   private readonly posScratch = { x: 0, y: 0, z: 0 };
@@ -176,6 +190,20 @@ export class Player implements Rebasable {
    */
   setShoveLookup(lookup: (bodyHandle: number) => Shoveable | null): void {
     this.shoveLookup = lookup;
+  }
+
+  setNearbyShove(
+    shove: (
+      x: number,
+      y: number,
+      z: number,
+      radius: number,
+      moveX: number,
+      moveZ: number,
+      seconds: number,
+    ) => number | null,
+  ): void {
+    this.nearbyShove = shove;
   }
 
   /**
@@ -371,6 +399,23 @@ export class Player implements Rebasable {
     mv.y = this.verticalVelocity * dt;
     mv.z = moveZ * dt;
 
+    // The raised rear edge of some chassis boxes is eligible for autostep, which
+    // can omit it from computedCollision even though the capsule is pressed against
+    // the boot. Let the vehicle OBB provide that one missing contact report.
+    let nearbyShovedHandle: number | null = null;
+    if (moveX * moveX + moveZ * moveZ > 1e-8) {
+      const p = this.body.translation(this.posScratch);
+      nearbyShovedHandle = this.nearbyShove(
+        p.x,
+        p.y,
+        p.z,
+        CAPSULE_RADIUS + 0.03,
+        moveX,
+        moveZ,
+        dt,
+      );
+    }
+
     this.controller.computeColliderMovement(this.collider, mv);
 
     // Shove the dynamic bodies the capsule is leaning into. The controller's
@@ -396,6 +441,7 @@ export class Player implements Rebasable {
       // along it reports a collision but must not push.
       const approach = moveX * px + moveZ * pz;
       if (approach <= 0) continue;
+      if (body.handle === nearbyShovedHandle) continue;
 
       // Owned bodies (cars) answer a shove request: they know their own mass and
       // lift their own parking hold, which no outside impulse could move.

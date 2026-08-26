@@ -829,6 +829,21 @@ function buildGasStop(
       loose.spawnItem(can, c.x, c.y + 0.2, c.z);
     }
 
+    // The roadside-only rescue resource: one sealed five-piece pack per gas stop.
+    // It sits by the attendant shack, not in the general POI loot tables.
+    const gumSpot = placeAt(ctx, poi, a, 2.6, -0.7, yaw);
+    const gumSub = counter.sub++;
+    loose.spawnItem(
+      {
+        type: 'bubble_gum',
+        id: ctx.world.generatedPartId('poi_item', poi.index, gumSub),
+        charges: 5,
+      },
+      gumSpot.x,
+      gumSpot.y + 0.18,
+      gumSpot.z,
+    );
+
     // A trailer on the forecourt. Take one, leave one: they are never owned, so
     // this records a world object rather than giving the player a possession, and
     // the `shouldLoot` gate is what stops the stop growing a new one every reload.

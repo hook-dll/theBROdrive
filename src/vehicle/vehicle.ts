@@ -1243,6 +1243,9 @@ export class Vehicle implements Rebasable {
   // Render-frame scratch.
   private readonly pos = new THREE.Vector3();
   private readonly quat = new THREE.Quaternion();
+  /** Shared scratch for player-contact and bubble-flip queries. */
+  private readonly contactPoint = new THREE.Vector3();
+  private readonly contactNormal = new THREE.Vector3();
 
   // Fixed-step transform snapshots for render interpolation. The simulation steps
   // at exactly 60 Hz while frames arrive whenever the GPU is done, so a frame that
@@ -1678,6 +1681,107 @@ export class Vehicle implements Rebasable {
     // into the ground, and the wheel ray-casts are unforgiving about both.
     this.chassisBody.applyImpulse({ x: nx * impulse, y: 0, z: nz * impulse }, true);
     this.shoveTimer = SHOVE_RELEASE_SECONDS;
+  }
+
+  /**
+   * Push fallback for the player's capsule. Character-controller collision reports
+   * can disappear at a raised rear edge when autostep owns the contact; testing the
+   * same capsule sphere against the chassis OBB keeps the boot side shoulderable.
+   * Returns true only while the player is touching and moving into the body.
+   */
+  tryShoveFromSphere(
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+    moveX: number,
+    moveZ: number,
+    seconds: number,
+  ): boolean {
+    if (!this.sphereTouchesBody(x, y, z, radius)) return false;
+    const pushX = -this.contactNormal.x;
+    const pushZ = -this.contactNormal.z;
+    if (moveX * pushX + moveZ * pushZ <= 0) return false;
+    this.shove(pushX, pushZ, seconds);
+    return true;
+  }
+
+  /** True when a world-space sphere touches the chassis body box. */
+  touchesSphere(x: number, y: number, z: number, radius: number): boolean {
+    return this.sphereTouchesBody(x, y, z, radius);
+  }
+
+  /**
+   * Toggles the car between wheels-down and roof-down while preserving its heading.
+   * The expanding bubble hides this deliberately cheap teleport; snapping is more
+   * reliable than an impulse on dunes and cannot leave a heavy bus balanced on edge.
+   */
+  flipOver(): void {
+    const rotation = this.chassisBody.rotation();
+    const forward = this.contactPoint
+      .set(0, 0, 1)
+      .applyQuaternion(this.quat.set(rotation.x, rotation.y, rotation.z, rotation.w));
+    const heading = Math.atan2(forward.x, forward.z);
+    const halfHeading = heading * 0.5;
+    const sin = Math.sin(halfHeading);
+    const cos = Math.cos(halfHeading);
+    const upY = 1 - 2 * (rotation.x * rotation.x + rotation.z * rotation.z);
+    const t = this.chassisBody.translation();
+    const lift = Math.max(0.65, this.measure.halfExtents[1] * 1.25);
+
+    this.chassisBody.setTranslation({ x: t.x, y: t.y + lift, z: t.z }, true);
+    this.chassisBody.setRotation(
+      upY >= 0
+        ? { x: sin, y: 0, z: cos, w: 0 }
+        : { x: 0, y: sin, z: 0, w: cos },
+      true,
+    );
+    this.chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.parkingHoldRequested = false;
+    this.parkingHoldActive = false;
+    this.shoveTimer = SHOVE_RELEASE_SECONDS;
+    this.snapshotPrimed = false;
+  }
+
+  /**
+   * Sphere/OBB overlap in chassis-local space. On success `contactNormal` points
+   * horizontally out of the car toward the sphere and is reused by the shove path.
+   */
+  private sphereTouchesBody(x: number, y: number, z: number, radius: number): boolean {
+    const t = this.chassisBody.translation();
+    const r = this.chassisBody.rotation();
+    this.quat.set(r.x, r.y, r.z, r.w).invert();
+    const local = this.contactPoint.set(x - t.x, y - t.y, z - t.z).applyQuaternion(this.quat);
+    const half = this.measure.halfExtents;
+    const floor = Math.max(-half[1], this.measure.wheels[0].pos[1]);
+    const closestX = clamp(local.x, -half[0], half[0]);
+    const closestY = clamp(local.y, floor, half[1]);
+    const closestZ = clamp(local.z, -half[2], half[2]);
+    const dx = local.x - closestX;
+    const dy = local.y - closestY;
+    const dz = local.z - closestZ;
+    if (dx * dx + dy * dy + dz * dz > radius * radius) return false;
+
+    let nx = dx;
+    let nz = dz;
+    if (nx * nx + nz * nz < 1e-8) {
+      const gapX = half[0] - Math.abs(local.x);
+      const gapZ = half[2] - Math.abs(local.z);
+      if (gapX < gapZ) nx = local.x < 0 ? -1 : 1;
+      else nz = local.z < 0 ? -1 : 1;
+    }
+    const horizontalLength = Math.hypot(nx, nz);
+    if (horizontalLength < 1e-4) return false;
+    this.contactNormal
+      .set(nx / horizontalLength, 0, nz / horizontalLength)
+      .applyQuaternion(this.quat.invert());
+    const worldHorizontalLength = Math.hypot(this.contactNormal.x, this.contactNormal.z);
+    if (worldHorizontalLength < 1e-4) return false;
+    this.contactNormal.x /= worldHorizontalLength;
+    this.contactNormal.y = 0;
+    this.contactNormal.z /= worldHorizontalLength;
+    return true;
   }
 
   /**
