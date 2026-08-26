@@ -58,10 +58,13 @@ export class PhysicsWorld {
    * ONE pass over all bodies rather than a conversion at each of the two dozen places
    * a body's position is set. That is deliberate: the failure mode of missing a site is
    * a piece of the world that teleports a kilometre sideways, and the only way to be
-   * sure is to not have a list. Rapier's own state needs nothing else — the ray-cast
-   * suspension is a force recomputed inside `updateVehicle` every step, and contact
-   * manifolds are rebuilt from collider positions, so translating everything at once
-   * is invisible to the solver.
+   * sure is to not have a list.
+   *
+   * `setTranslation` does not immediately propagate the new body poses into Rapier's
+   * collider/query acceleration structure — that normally happens inside `world.step`.
+   * The ray-cast vehicle controller runs BEFORE the next step, so the propagation at
+   * the end of this method is mandatory: suspension must query road and terrain at their
+   * rebased positions, not at AABBs still expressed in the old origin.
    *
    * Velocities are untouched on purpose: a change of origin is not a motion. Kinematic
    * bodies are included, but anything holding its own copy of a target position must
@@ -81,6 +84,15 @@ export class PhysicsWorld {
       shifted.z = t.z - dz;
       body.setTranslation(shifted, false);
     });
+    // The vehicle controller ray-casts before the next world step. Make every shifted
+    // collider queryable at its new position now, rather than letting one tick of
+    // suspension see the old broad-phase AABBs.
+    //
+    // The controller also owns a wheel contact point cache which this public API cannot
+    // invalidate. Vehicle.rebase handles that separately by omitting one custom
+    // tyre-force pass while updateVehicle refreshes the cache; applying a normal tyre
+    // impulse at the stale point was the distance-triggered invisible bump.
+    this.world.propagateModifiedBodyPositionsToColliders();
   }
 
   /**

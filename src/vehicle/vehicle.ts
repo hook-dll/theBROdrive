@@ -1180,6 +1180,22 @@ export class Vehicle implements Rebasable {
    * build, and it is what keeps this a single-pass update instead of two.
    */
   private rearSlipRad = 0;
+  /**
+   * Custom tyre-force passes suppressed after the floating origin moves.
+   *
+   * Rapier's vehicle controller caches each wheel's world-space contact point and
+   * refreshes it one controller update AFTER a body teleport. The floating origin is
+   * such a teleport. On the first tick after a rebase, `updateWheelDynamics` therefore
+   * received a point still expressed in the old origin and applied an ordinary tyre
+   * impulse roughly one kilometre from the chassis: measured angular velocity jumped
+   * from 0.05 to 19.8 rad/s inside that method alone — the distance-triggered
+   * "invisible bump" that could spin a car in place.
+   *
+   * Suspension still updates on that tick, which refreshes the controller's contact
+   * cache. Suppressing one 16.7 ms custom tyre pass is imperceptible and means the next
+   * one applies at a contact point beside the wheel rather than a kilometre away.
+   */
+  private skipTyreDynamicsSteps = 0;
   // Roll-couple state: low-passed lateral acceleration and its lever arm.
   private prevLatVel = 0;
   private rollAccel = 0;
@@ -2057,7 +2073,17 @@ export class Vehicle implements Rebasable {
     // Wheel rotation, before the telemetry pass that reads it: each wheel is
     // integrated from its own drive and brake torque against what its contact can
     // actually transmit, so lock-up and wheelspin are outcomes, not timers.
-    this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip);
+    //
+    // One pass is deliberately omitted after a floating-origin rebase; see
+    // `skipTyreDynamicsSteps`. `longitudinalForceSum` must be cleared on that path or
+    // anti-pitch would reuse the previous tick's force even though no tyre force was
+    // applied this tick.
+    if (this.skipTyreDynamicsSteps > 0) {
+      this.skipTyreDynamicsSteps--;
+      this.longitudinalForceSum = 0;
+    } else {
+      this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip);
+    }
     this.refreshWheelSpray(fwd);
 
     // Slide, lock and the friction-circle usage that costs a working tyre its side
@@ -2251,6 +2277,14 @@ export class Vehicle implements Rebasable {
     this.prevPos.z -= shift.dz;
     this.stepPos.x -= shift.dx;
     this.stepPos.z -= shift.dz;
+    // The wheel contact scratch is in the same relative world frame as the chassis.
+    // Shift the last good value for spray telemetry, then omit the first custom tyre
+    // pass while Rapier refreshes its own internal copy (see the field comment).
+    for (const wheel of this.wheels) {
+      wheel.contactPoint.x -= shift.dx;
+      wheel.contactPoint.z -= shift.dz;
+    }
+    this.skipTyreDynamicsSteps = Math.max(this.skipTyreDynamicsSteps, 1);
   }
 
   /**
