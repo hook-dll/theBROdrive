@@ -726,6 +726,13 @@ function buildQuarryInto(b: MeshBuilder): void {
   b.box('quarry_tail', 0.1, 0.02, 0.12, feather, [0, 0.1, -0.18], [-0.3, 0, 0]);
 }
 
+function buildBubbleGumInto(b: MeshBuilder): void {
+  const wrapper = flat(0xe86a9a, 0.45);
+  const gum = flat(0xf5a4bd, 0.65);
+  b.box('bubble_gum_wrapper', 0.13, 0.018, 0.07, wrapper, [0, 0, 0]);
+  b.box('bubble_gum_piece', 0.055, 0.024, 0.045, gum, [0, 0.018, 0]);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -761,6 +768,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       mesh.scale.setScalar(s);
       return mesh;
     }
+    case 'bubble_gum':
+      return buildGroup(itemBlueprint('bubble_gum', (b) => buildBubbleGumInto(b)).instructions);
   }
 }
 

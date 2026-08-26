@@ -719,5 +719,6 @@ export function scatterStartingGizmos(world: GameWorld, loose: LoosePartField): 
     },
     canSpot[0], canSpot[1], canSpot[2],
   );
+
 }
 

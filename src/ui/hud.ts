@@ -114,6 +114,8 @@ export class Hud {
   private readonly toastEl: HTMLElement;
   private bootSignature = '';
   private readonly radioEl: HTMLElement;
+  private readonly gumBubbleEl: HTMLElement;
+  private gumBubbleProgress = -1;
 
   private tachDeg = -1;
   private speedDeg = -1;
@@ -223,6 +225,7 @@ export class Hud {
 
     this.toastEl = el('div', 'hud-toasts');
     this.bootEl = el('div', 'hud-boot is-hidden');
+    this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
 
     this.tops = [
       this.crosshairEl,
@@ -234,6 +237,7 @@ export class Hud {
       controlsPanel,
       this.radioEl,
       this.toastEl,
+      this.gumBubbleEl,
     ];
     root.append(...this.tops);
   }
@@ -485,6 +489,23 @@ export class Hud {
       this.bootEl.append(node);
     }
     this.setVisible(this.bootEl, true);
+  }
+
+  /**
+   * One composited DOM circle, deliberately cheaper than transparent geometry in
+   * the 3D scene. It grows for the full five-second use and then disappears.
+   */
+  setBubbleGum(active: boolean, progress: number): void {
+    this.setVisible(this.gumBubbleEl, active);
+    if (!active) {
+      this.gumBubbleProgress = -1;
+      return;
+    }
+    const p = Math.min(Math.max(progress, 0), 1);
+    const rounded = Math.round(p * 1000) / 1000;
+    if (rounded === this.gumBubbleProgress) return;
+    this.gumBubbleProgress = rounded;
+    this.gumBubbleEl.style.setProperty('--gum-grow', String(rounded));
   }
 
   private rebuildInventory(items: readonly Item[]): void {

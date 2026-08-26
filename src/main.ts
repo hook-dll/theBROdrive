@@ -13,7 +13,7 @@ import {
   storeSettings,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
-import { Inventory, type FluidKind, type Item } from './items/items';
+import { Inventory, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { coolantCapacity, oilCapacity } from './parts/registry';
@@ -51,7 +51,7 @@ import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
 import { Hud } from './ui/hud';
-import { MainMenu, type PauseHooks } from './ui/menu';
+import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
 import {
   TrailerField,
@@ -138,6 +138,9 @@ const SPRAY_MIN_SLIP = 0.06;
  * an order of magnitude once the emitter's own lower smoke rate is applied on top.
  */
 const SPRAY_SMOKE_YIELD = 0.4;
+/** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
+const GUM_GROW_SECONDS = 5;
+const GUM_FLIP_RADIUS = 0.5;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -299,6 +302,15 @@ async function boot(): Promise<void> {
   player.setShoveLookup((bodyHandle) => {
     for (const vehicle of vehicles.values()) {
       if (vehicle.chassis.handle === bodyHandle) return vehicle;
+    }
+    return null;
+  });
+
+  player.setNearbyShove((x, y, z, radius, moveX, moveZ, seconds) => {
+    for (const vehicle of vehicles.values()) {
+      if (vehicle.tryShoveFromSphere(x, y, z, radius, moveX, moveZ, seconds)) {
+        return vehicle.chassis.handle;
+      }
     }
     return null;
   });
@@ -482,6 +494,9 @@ async function boot(): Promise<void> {
   let boot: readonly (Item | null)[] | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = world.state.player.s;
+  let gumActive = false;
+  let gumTimer = 0;
+  let gumUseHeld = false;
 
   const fixedUpdate = (dt: number): void => {
     const f = input.sample(dt);
@@ -587,6 +602,39 @@ async function boot(): Promise<void> {
     // the same tick, since a direct pick is the more specific intent.
     if (f.selectSlot > 0) inventory.selectIndex(f.selectSlot - 1);
     else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
+
+    // One charge is consumed immediately; its translucent screen-space bubble
+    // then grows continuously for five seconds before the covered-frame flip.
+    const gum = inventory.held;
+    const gumPressed = f.usePrimary && !gumUseHeld;
+    gumUseHeld = f.usePrimary;
+    if (!driving && !gumActive && gum?.type === 'bubble_gum' && gumPressed) {
+      gum.charges -= 1;
+      if (gum.charges <= 0) inventory.remove(gum.id);
+      gumActive = true;
+      gumTimer = 0;
+    }
+    if (gumActive) {
+      gumTimer += dt;
+      if (gumTimer >= GUM_GROW_SECONDS) {
+        const p = player.position;
+        let nearest: Vehicle | null = null;
+        let nearestDistSq = Infinity;
+        for (const vehicle of vehicles.values()) {
+          if (!vehicle.touchesSphere(p.x, p.y, p.z, GUM_FLIP_RADIUS)) continue;
+          const t = vehicle.chassis.translation();
+          const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+          if (distSq < nearestDistSq) {
+            nearest = vehicle;
+            nearestDistSq = distSq;
+          }
+        }
+        nearest?.flipOver();
+        hud.setToast(nearest ? 'POP — car flipped' : 'POP — no car close enough');
+        gumActive = false;
+        gumTimer = 0;
+      }
+    }
 
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
@@ -934,6 +982,7 @@ async function boot(): Promise<void> {
       inventory.carriedMass,
       inventory.massLimit,
     );
+    hud.setBubbleGum(gumActive, gumTimer / GUM_GROW_SECONDS);
     hud.setTravel(activeS / 1000, s.timeOfDay);
 
     // Viewmodel and slot previews are pure views of existing state, so they update
@@ -1044,15 +1093,14 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * The dev fluid dispenser behind `PauseHooks.spawnFluid`.
+   * The dev item dispenser behind `PauseHooks.spawnItem`.
    *
    * Dropped just in front of the player rather than out on the ground raycast the
-   * vehicle spawns use: a can is a pickup, and the useful thing is to have it in
-   * reach immediately. It goes through `loose.spawnItem` like every found can, so
-   * it records into state and can be picked up, stowed and poured identically —
-   * a dev can with a private code path would test the wrong thing.
+   * vehicle spawns use: these are pickups, and the useful thing is to have one in
+   * reach immediately. They go through `loose.spawnItem` like found stock, so the
+   * dev picker exercises the real pickup, storage and use paths.
    */
-  const devSpawnFluid = (fluid: FluidKind, capacity: number): void => {
+  const devSpawnItem = (request: DevSpawnItemRequest): void => {
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;
@@ -1065,19 +1113,26 @@ async function boot(): Promise<void> {
       player.rigidBody,
     );
     const groundY = ground ? ground.point.y : eye.y;
-    loose.spawnItem(
-      {
-        type: 'fluid_can',
-        id: world.runtimePartId(),
-        fluid,
-        capacity,
-        litres: capacity,
-      },
-      dropX + origin.x,
-      groundY + 0.3,
-      dropZ + origin.z,
+    const item: Item =
+      request.type === 'fluid_can'
+        ? {
+            type: 'fluid_can',
+            id: world.runtimePartId(),
+            fluid: request.fluid,
+            capacity: request.capacity,
+            litres: request.capacity,
+          }
+        : {
+            type: 'bubble_gum',
+            id: world.runtimePartId(),
+            charges: 5,
+          };
+    loose.spawnItem(item, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
+    hud.setToast(
+      request.type === 'fluid_can'
+        ? `spawned ${request.capacity} L of ${request.fluid}`
+        : 'spawned bubble gum x5',
     );
-    hud.setToast(`spawned ${capacity} L of ${fluid}`);
   };
 
   /**
@@ -1121,9 +1176,9 @@ async function boot(): Promise<void> {
     // Same fold as the car spawn; the trailer button and its closure both vanish
     // from a production build.
     spawnTrailer: import.meta.env.DEV ? devSpawnTrailer : undefined,
-    // Same fold again: cans found in the desert are the whole supply economy, so a
-    // dispenser exists only while developing.
-    spawnFluid: import.meta.env.DEV ? devSpawnFluid : undefined,
+    // Same fold again: found consumables are the whole supply economy, so the
+    // item dispenser exists only while developing.
+    spawnItem: import.meta.env.DEV ? devSpawnItem : undefined,
   };
 
   /**

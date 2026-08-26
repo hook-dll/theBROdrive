@@ -73,7 +73,21 @@ export interface QuarryItem {
   readonly mass: number;
 }
 
-export type Item = ToolItem | PartItem | FluidCanItem | WeaponItem | AmmoItem | QuarryItem;
+export interface BubbleGumItem {
+  readonly type: 'bubble_gum';
+  readonly id: string;
+  /** Remaining pieces in this pack. A fresh gas-station pack contains five. */
+  charges: number;
+}
+
+export type Item =
+  | ToolItem
+  | PartItem
+  | FluidCanItem
+  | WeaponItem
+  | AmmoItem
+  | QuarryItem
+  | BubbleGumItem;
 
 /**
  * Density, kg/litre. Petrol and diesel are the light ones; coolant is basically
@@ -101,6 +115,8 @@ export function itemLabel(item: Item): string {
       return `${item.forWeapon} rounds x${item.count}`;
     case 'quarry':
       return item.species;
+    case 'bubble_gum':
+      return `bubble gum x${item.charges}`;
   }
 }
 
@@ -120,6 +136,8 @@ export function itemMass(item: Item): number {
       return item.count * 0.024;
     case 'quarry':
       return item.mass;
+    case 'bubble_gum':
+      return 0.02;
   }
 }
 

@@ -566,6 +566,12 @@ function migrateItem(raw: unknown, where: string): Item {
     }
     case 'quarry':
       return { type: 'quarry', id: obj.id, species: typeof obj.species === 'string' ? obj.species : 'unknown', mass: numOr(obj.mass, 0) };
+    case 'bubble_gum':
+      return {
+        type: 'bubble_gum',
+        id: obj.id,
+        charges: Math.min(5, Math.max(1, Math.trunc(numOr(obj.charges, 5)))),
+      };
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);
   }
