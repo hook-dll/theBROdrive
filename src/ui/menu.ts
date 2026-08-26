@@ -220,11 +220,14 @@ export class MainMenu {
   private pauseOverlay: HTMLElement | null = null;
   private pauseCleanup: (() => void) | null = null;
 
-  constructor(private readonly root: HTMLElement) {}
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly loading: HTMLElement,
+  ) {}
 
   async show(backend: SaveBackend): Promise<{ seed: number; state: WorldState | null }> {
     return new Promise((resolve) => {
-      const overlay = el('div', 'menu');
+      const overlay = el('div', 'menu menu-title-screen');
       const panel = el('div', 'menu-panel');
       overlay.appendChild(panel);
 
@@ -265,11 +268,13 @@ export class MainMenu {
       panel.appendChild(codeSection);
 
       this.root.appendChild(overlay);
+      this.loading.classList.add('is-hidden');
 
       let settled = false;
       const finish = (result: { seed: number; state: WorldState | null }): void => {
         if (settled) return;
         settled = true;
+        this.loading.classList.remove('is-hidden');
         overlay.remove();
         resolve(result);
       };

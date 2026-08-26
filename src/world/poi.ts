@@ -14,6 +14,7 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import { jobAt, type FreightField } from './freight';
 import type { TrailerField } from '../vehicle/trailer';
+import type { WreckTrunkField } from './wrecktrunks';
 
 /**
  * Points of interest: the roadside stops that give the drive a reason to continue.
@@ -382,13 +383,15 @@ function buildPoi(
   loose: LoosePartField,
   trailers: TrailerField,
   freight: FreightField,
+  wreckTrunks: WreckTrunkField,
+  registeredWrecks: string[],
 ): void {
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
 
   switch (poi.kind) {
     case 'roadside_wrecks':
-      buildWrecks(ctx, poi, group, bodies, colliders);
+      buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks);
       break;
     case 'gas_stop':
       buildGasStop(ctx, poi, group, bodies, colliders, loose, trailers, counter, shouldLoot);
@@ -637,6 +640,8 @@ function buildWrecks(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
+  wreckTrunks: WreckTrunkField,
+  registeredWrecks: string[],
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
@@ -694,7 +699,7 @@ function buildWrecks(
     group.add(shell);
 
     // A box approximates a static shell well enough for a solid obstacle.
-    addStaticCollider(
+    const collider = addStaticCollider(
       ctx,
       new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
       matrix,
@@ -702,6 +707,21 @@ function buildWrecks(
       bodies,
       colliders,
     );
+    if (!isWorkingCar && collider) {
+      wreckTrunks.register({
+        id: carId,
+        modelId: def.id,
+        x: p.x,
+        y: originY,
+        z: p.z,
+        qx: shell.quaternion.x,
+        qy: shell.quaternion.y,
+        qz: shell.quaternion.z,
+        qw: shell.quaternion.w,
+        halfExtents: half,
+      });
+      registeredWrecks.push(carId);
+    }
   }
 }
 
@@ -1070,6 +1090,7 @@ export class PoiProvider implements ChunkProvider {
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly freight: FreightField,
+    private readonly wreckTrunks: WreckTrunkField,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1081,6 +1102,7 @@ export class PoiProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const disposables: Disposable[] = [];
+    const registeredWrecks: string[] = [];
 
     for (const poi of pois) {
       buildPoi(
@@ -1093,6 +1115,8 @@ export class PoiProvider implements ChunkProvider {
         this.loose,
         this.trailers,
         this.freight,
+        this.wreckTrunks,
+        registeredWrecks,
       );
     }
 
@@ -1105,6 +1129,7 @@ export class PoiProvider implements ChunkProvider {
       setLamps: (on) => freight.updateSigns(on, world.state.job?.toPoi ?? null),
       dispose: () => {
         freight.forgetChunk(bodies);
+        this.wreckTrunks.forget(registeredWrecks);
         for (const d of disposables) d.dispose();
       },
     };

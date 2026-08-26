@@ -1,5 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { FIXED_DT, type PhysicsWorld } from '../core/physics';
+import { SurfaceType } from '../core/surfaces';
 import type { InputFrame } from '../core/input';
 import type { GameWorld } from '../game/state';
 import type { Road } from '../world/road';
@@ -92,6 +93,7 @@ export class Player implements Rebasable {
   private pitch = 0;
   private arcS = 0;
   private groundedFlag = false;
+  private groundSurfaceFlag = SurfaceType.Asphalt;
   private enabled = true;
   private emitTimer = 0;
 
@@ -281,6 +283,11 @@ export class Player implements Rebasable {
     return this.groundedFlag;
   }
 
+  /** Registered material of the collider currently supporting the capsule. */
+  get groundSurface(): SurfaceType {
+    return this.groundSurfaceFlag;
+  }
+
   /**
    * Horizontal speed over the last fixed step, m/s. Derived from the step
    * snapshots rather than the requested velocity, so it reports what the character
@@ -422,10 +429,19 @@ export class Player implements Rebasable {
     // built-in impulse path is off (see the constructor); this is the only push,
     // driven explicitly so the speed can be capped per body.
     const numCollisions = this.controller.numComputedCollisions();
+    let supportNormalY = 0;
+    let supportHandle: number | null = null;
     for (let i = 0; i < numCollisions; i++) {
       const collision = this.controller.computedCollision(i, this.pushCollision);
       if (!collision) continue;
-      const body = collision.collider?.parent();
+      const collider = collision.collider;
+      // normal1 points out of the struck collider. The strongest upward normal is
+      // the support under the capsule; walls and ceilings cannot win this test.
+      if (collider && collision.normal1.y > supportNormalY) {
+        supportNormalY = collision.normal1.y;
+        supportHandle = collider.handle;
+      }
+      const body = collider?.parent();
       if (!body || !body.isDynamic()) continue;
 
       // Push axis is opposite the contact normal, flattened: a bumper is shoved
@@ -483,6 +499,9 @@ export class Player implements Rebasable {
     });
 
     this.groundedFlag = this.controller.computedGrounded();
+    if (this.groundedFlag && supportHandle !== null) {
+      this.groundSurfaceFlag = this.physics.surfaces.lookupType(supportHandle);
+    }
 
     const ox = this.origin.x;
     const oz = this.origin.z;

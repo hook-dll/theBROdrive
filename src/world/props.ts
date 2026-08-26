@@ -250,9 +250,12 @@ function buildDeadStick(): THREE.BufferGeometry {
   const trunk = new THREE.CylinderGeometry(0.025, 0.06, 1.7, 5, 1);
   trunk.translate(0, 0.85, 0);
   trunk.rotateZ(0.1);
-  const branch = new THREE.CylinderGeometry(0.015, 0.015, 0.5, 4, 1);
-  branch.rotateZ(Math.PI / 2 - 0.4);
-  branch.translate(0.28, 1.4, 0);
+
+  // The branch grows out of the leaned trunk at y ~= 1.32. Its old centre was
+  // eighteen centimetres too far right, leaving a visible air gap at the joint.
+  const branch = new THREE.CylinderGeometry(0.014, 0.025, 0.5, 4, 1);
+  branch.rotateZ(-(Math.PI / 2 - 0.4));
+  branch.translate(0.1, 1.42, 0);
   return mergeGeometries([trunk, branch]);
 }
 
@@ -295,8 +298,8 @@ function sandForms(): PropForm[] {
     _sandForms = [
       { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35 },
       { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7 },
-      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'none', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
-      { id: 'trunk', geometry: buildFallenTrunk(), material: matDeadStick, baseRadius: 0.42, height: 0.5, collider: 'box', colliderHalf: [1.55, 0.24, 0.26], sink: 0.25, rotate3d: false, minScale: 0.8, maxScale: 1.45 },
+      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
+      { id: 'trunk', geometry: buildFallenTrunk(), material: matDeadStick, baseRadius: 0.42, height: 0.5, collider: 'box', colliderHalf: [1.55, 0.45, 0.28], sink: 0.25, rotate3d: false, minScale: 0.8, maxScale: 1.45 },
       { id: 'scrub', geometry: buildScrub(), material: matScrub, baseRadius: 0.42, height: 0.45, collider: 'none', sink: 0.3, rotate3d: false, minScale: 0.7, maxScale: 1.6 },
     ];
   }

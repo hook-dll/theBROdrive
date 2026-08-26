@@ -32,13 +32,12 @@ import type { BreakableProp, PropPiece } from './props';
  */
 const MAX_PIECES = 48;
 /**
- * Speed (m/s) below which a hit breaks nothing.
- *
- * Below it the static collider still holds, so leaning on a cactus at a crawl pushes
- * against it exactly as before. Deliberate: parking against a plant should not demolish
- * it, and a car rolling to a stop should not scythe a line through the desert.
+ * Minimum movement needed to distinguish a vehicle pressing into a plant from one
+ * parked beside it. The old 2.6 m/s gate left the static cactus collider solid below
+ * 9.4 km/h. This epsilon rejects only parked-body velocity noise; any deliberate creep
+ * reaches the shared break path.
  */
-const BREAK_SPEED_MPS = 2.6;
+const BREAK_SPEED_MPS = 0.01;
 /**
  * Fraction of the impactor's velocity a piece leaves with, plus the sideways and upward
  * kick that turns a shunt into a burst.

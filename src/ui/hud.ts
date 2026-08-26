@@ -98,7 +98,6 @@ export class Hud {
   private readonly tachNeedle: SVGLineElement;
   private readonly speedValue: SVGPathElement;
   private readonly speedNeedle: SVGLineElement;
-  private readonly bootEl: HTMLElement;
   private readonly gearEl: HTMLElement;
   private readonly fuelEl: SVGSVGElement;
   private readonly fuelValue: SVGPathElement;
@@ -112,7 +111,6 @@ export class Hud {
   private readonly odometerEl: HTMLElement;
   private readonly clockNeedle: SVGLineElement;
   private readonly toastEl: HTMLElement;
-  private bootSignature = '';
   private readonly radioEl: HTMLElement;
   private readonly gumBubbleEl: HTMLElement;
   private gumBubbleProgress = -1;
@@ -224,7 +222,6 @@ export class Hud {
     });
 
     this.toastEl = el('div', 'hud-toasts');
-    this.bootEl = el('div', 'hud-boot is-hidden');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
 
     this.tops = [
@@ -232,7 +229,6 @@ export class Hud {
       this.promptEl,
       this.drivingCluster,
       inventoryEl,
-      this.bootEl,
       controlsToggle,
       controlsPanel,
       this.radioEl,
@@ -458,42 +454,11 @@ export class Hud {
     this.invMassEl.classList.toggle('is-alarm', carriedMass > massLimit * MASS_ALARM_FRACTION);
   }
 
-  /**
-   * Boot contents while the player is looking into one, null otherwise.
-   *
-   * A flat list of cells, empty ones included, so the capacity is visible without a
-   * number: three boxes with one thing in them reads as "two spare" at a glance.
-   * Rebuilt only when the signature changes, since this sits in the render path and
-   * usually has nothing to say.
-   */
-  setBoot(cells: readonly (Item | null)[] | null): void {
-    if (cells === null) {
-      if (this.bootSignature !== '') {
-        this.bootSignature = '';
-        this.setVisible(this.bootEl, false);
-      }
-      return;
-    }
-    const signature = cells.map((cell) => (cell ? itemLabel(cell) : '')).join('|');
-    if (signature === this.bootSignature) return;
-    this.bootSignature = signature;
-
-    this.bootEl.textContent = '';
-    const title = el('div', 'hud-boot-title');
-    const used = cells.filter((cell) => cell !== null).length;
-    title.textContent = `BOOT ${used}/${cells.length}`;
-    this.bootEl.append(title);
-    for (const cell of cells) {
-      const node = el('div', cell ? 'hud-boot-cell' : 'hud-boot-cell is-empty');
-      node.textContent = cell ? itemLabel(cell) : '—';
-      this.bootEl.append(node);
-    }
-    this.setVisible(this.bootEl, true);
-  }
 
   /**
    * One composited DOM circle, deliberately cheaper than transparent geometry in
-   * the 3D scene. It grows for the full five-second use and then disappears.
+   * the 3D scene. Main keeps it hidden while chewing, then drives its five-second
+   * growth from zero to the covered-frame pop.
    */
   setBubbleGum(active: boolean, progress: number): void {
     this.setVisible(this.gumBubbleEl, active);

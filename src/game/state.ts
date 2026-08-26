@@ -1,6 +1,7 @@
 import { hash } from '../core/rng';
 import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
+import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { DEFAULT_SETTINGS } from './settings';
 import type { Settings } from './settings';
 
@@ -152,6 +153,8 @@ export interface WorldState {
   settings: Settings;
   player: PlayerState;
   cars: Record<string, CarState>;
+  /** Persistent contents of deterministic static wreck trunks, keyed by wreck id. */
+  wreckStorage: Record<string, (Item | null)[]>;
   /** Trailers standing in the world or coupled to a car, keyed by trailer id. */
   trailers: Record<string, TrailerState>;
   /** Parts lying loose in the world, keyed by part id. */
@@ -205,6 +208,7 @@ export type WorldDelta =
   | { t: 'car_fuel'; carId: string; litres: number }
   | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
+  | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'trailer_hitch'; trailerId: string; carId: string | null }
@@ -245,6 +249,7 @@ export function newWorldState(seed: number): WorldState {
     settings: DEFAULT_SETTINGS,
     player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null, carried: [], carriedSelected: 0 },
     cars: {},
+    wreckStorage: {},
     trailers: {},
     looseParts: {},
     looseItems: {},
@@ -286,6 +291,11 @@ export class GameWorld {
       bump(car.id);
       for (const part of Object.values(car.gizmos)) bump(part.id);
       for (const item of car.storage) {
+        if (item) bump(item.id);
+      }
+    }
+    for (const storage of Object.values(state.wreckStorage)) {
+      for (const item of storage) {
         if (item) bump(item.id);
       }
     }
@@ -391,6 +401,14 @@ export class GameWorld {
         if (car && delta.cell >= 0 && delta.cell < car.storage.length) {
           car.storage[delta.cell] = delta.item;
         }
+        break;
+      }
+      case 'wreck_storage': {
+        if (delta.cell < 0 || delta.cell >= TRUNK_CELL_COUNT) break;
+        const storage =
+          s.wreckStorage[delta.wreckId] ??
+          (s.wreckStorage[delta.wreckId] = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null));
+        storage[delta.cell] = delta.item;
         break;
       }
       case 'trailer_add':

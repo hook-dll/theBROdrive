@@ -14,8 +14,9 @@
  * Nothing here is part of the game bundle.
  */
 
-import type { InstancedMesh } from 'three';
+import * as THREE from 'three';
 import { PhysicsWorld } from '../src/core/physics';
+import { SurfaceType } from '../src/core/surfaces';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { Road } from '../src/world/road';
@@ -56,6 +57,14 @@ let totalInstances = 0;
 let totalTriangles = 0;
 let buildMs = 0;
 const lateralHistogram = new Map<number, number>();
+let deadStickCount = 0;
+let deadStickHits = 0;
+let trunkCount = 0;
+let trunkHits = 0;
+const instanceMatrix = new THREE.Matrix4();
+const instancePosition = new THREE.Vector3();
+const instanceScale = new THREE.Vector3();
+const geometrySize = new THREE.Vector3();
 
 for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
   const ctx = {
@@ -74,16 +83,19 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
   const t0 = performance.now();
   const content = provider.build(ctx);
   buildMs += performance.now() - t0;
+  physics.step();
   chunks++;
   colliderCount += content.colliders?.length ?? 0;
-  for (const body of content.bodies ?? []) physics.world.removeRigidBody(body);
-
   for (const child of content.group.children) {
     // Every scatter child is an InstancedMesh; `children` is typed as the Object3D
     // base, which cannot express that.
     const mesh = child as unknown as InstancedMesh;
     const index = mesh.geometry.getIndex();
     const triangles = ((index ? index.count : mesh.geometry.getAttribute('position').count) / 3) * mesh.count;
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.boundingBox!.getSize(geometrySize);
+    const isDeadStick = geometrySize.y > 1.5 && geometrySize.x < 0.7;
+    const isTrunk = geometrySize.x > 2.5 && geometrySize.y < 1;
     const key = `${mesh.geometry.getAttribute('position').count}v`;
     const stat = perForm.get(key) ?? { instances: 0, triangles: 0 };
     stat.instances += mesh.count;
@@ -100,8 +112,33 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
       const lateral = Math.abs(road.project(x, z, chunkIndex * CHUNK_LENGTH).lateral);
       const bucket = Math.floor(lateral / 50) * 50;
       lateralHistogram.set(bucket, (lateralHistogram.get(bucket) ?? 0) + 1);
+      if (isDeadStick || isTrunk) {
+        instanceMatrix.fromArray(mesh.instanceMatrix.array, i * 16);
+        instancePosition.setFromMatrixPosition(instanceMatrix);
+        instanceScale.setFromMatrixScale(instanceMatrix);
+        const scale = instanceScale.x;
+        if (isDeadStick) {
+          deadStickCount++;
+          const hit = physics.raycast(
+            { x: instancePosition.x - 0.5 * scale, y: instancePosition.y + 0.75 * scale, z: instancePosition.z },
+            { x: 1, y: 0, z: 0 },
+            scale,
+          );
+          if (hit && physics.surfaces.lookupType(hit.colliderHandle) === SurfaceType.Rock) deadStickHits++;
+        } else {
+          trunkCount++;
+          const hit = physics.raycast(
+            { x: instancePosition.x, y: instancePosition.y + 2 * scale, z: instancePosition.z },
+            { x: 0, y: -1, z: 0 },
+            3 * scale,
+          );
+          if (hit && physics.surfaces.lookupType(hit.colliderHandle) === SurfaceType.Rock) trunkHits++;
+        }
+      }
     }
+
   }
+  for (const body of content.bodies ?? []) physics.world.removeRigidBody(body);
   content.dispose?.();
 }
 
@@ -128,3 +165,14 @@ for (const bucket of [...lateralHistogram.keys()].sort((a, b) => a - b)) {
       `${perChunk.toFixed(1).padStart(6)} /chunk  ${'#'.repeat(Math.max(1, Math.round(perChunk)))}`,
   );
 }
+
+const woodOk =
+  deadStickCount > 0 &&
+  trunkCount > 0 &&
+  deadStickHits === deadStickCount &&
+  trunkHits === trunkCount;
+console.log(
+  `  wooden prop collision: dead sticks ${deadStickHits}/${deadStickCount}, ` +
+    `fallen trunks ${trunkHits}/${trunkCount}`,
+);
+if (!woodOk) process.exitCode = 1;

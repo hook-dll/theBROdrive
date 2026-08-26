@@ -8,11 +8,12 @@
  * without every caller learning to check first.
  */
 
+import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer } from './mixer';
 import { VehicleAudio } from './vehicleaudio';
-import { Foley, type FoleyContinuous, type FoleyEvent } from './foley';
+import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio } from './radio';
 
 export class GameAudio {
@@ -43,8 +44,8 @@ export class GameAudio {
   }
 
   /** Per-frame on-foot audio. Silent while seated (speed 0, grounded). */
-  updateFoot(dt: number, speedMps: number, grounded: boolean): void {
-    this.foleyVoices.updateWalk(dt, speedMps, grounded);
+  updateFoot(dt: number, speedMps: number, grounded: boolean, surface: SurfaceType): void {
+    this.foleyVoices.updateWalk(dt, speedMps, grounded, surface);
   }
 
   foley(event: FoleyEvent): void {
@@ -53,6 +54,14 @@ export class GameAudio {
 
   setContinuous(action: FoleyContinuous): void {
     this.foleyVoices.setContinuous(action);
+  }
+
+  updateBubbleGum(dt: number, phase: BubbleGumAudioPhase): void {
+    this.foleyVoices.updateBubbleGum(dt, phase);
+  }
+
+  bubbleGumPop(): void {
+    this.foleyVoices.bubbleGumPop();
   }
 
   gunshot(): void {

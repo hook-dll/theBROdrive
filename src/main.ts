@@ -26,6 +26,7 @@ import { Player } from './player/player';
 import { BirdFlock } from './agents/birds';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
+import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { AnchorGhosts } from './render/slotghosts';
@@ -37,7 +38,7 @@ import {
   HomesteadProvider,
   createStartingCar,
   homesteadSpawn,
-  scatterStartingGizmos,
+  spawnStartingFuelCan,
 } from './world/house';
 import { PoiProvider } from './world/poi';
 import { FreightField } from './world/freight';
@@ -45,6 +46,7 @@ import { DebrisField, type Impactor } from './world/debris';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
+import { WreckTrunkField } from './world/wrecktrunks';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -60,14 +62,15 @@ import {
   TRAILER_SPAWN_HEIGHT,
 } from './vehicle/trailer';
 import { Vehicle, type WheelSprayState } from './vehicle/vehicle';
+import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio } from './audio/gameaudio';
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
  *
  * Ordering here is load-bearing in three places, each marked below: physics before
- * anything that builds colliders, chunk 0 before the starting parts are scattered
- * (they need the garage floor to rest on), and `restoreFromState` only on a loaded
+ * anything that builds colliders, chunk 0 before the starting fuel can is placed
+ * (it needs the garage floor to rest on), and `restoreFromState` only on a loaded
  * save (a new game materialises its loot as it generates it).
  */
 
@@ -139,18 +142,25 @@ const SPRAY_MIN_SLIP = 0.06;
  */
 const SPRAY_SMOKE_YIELD = 0.4;
 /** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
+const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
+const GUM_USE_SECONDS = GUM_CHEW_SECONDS + GUM_GROW_SECONDS;
 const GUM_FLIP_RADIUS = 0.5;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
   const uiRoot = document.getElementById('ui');
-  if (!(canvas instanceof HTMLCanvasElement) || !(uiRoot instanceof HTMLElement)) {
-    throw new Error('index.html is missing #game or #ui');
+  const loading = document.getElementById('launch-loading');
+  if (
+    !(canvas instanceof HTMLCanvasElement) ||
+    !(uiRoot instanceof HTMLElement) ||
+    !(loading instanceof HTMLElement)
+  ) {
+    throw new Error('index.html is missing #game, #ui or #launch-loading');
   }
 
   const saves = new IndexedDbSaves();
-  const menu = new MainMenu(uiRoot);
+  const menu = new MainMenu(uiRoot, loading);
   const chosen = await menu.show(saves);
 
   const loadedFromSave = chosen.state !== null;
@@ -231,9 +241,11 @@ async function boot(): Promise<void> {
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
   // Freight: a sign at every stop, pallets where the seed says there is a load.
   const freight = new FreightField();
+  const wreckTrunks = new WreckTrunkField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
+  const trunkView = new TrunkView(renderer.scene);
   const anchorGhosts = new AnchorGhosts(renderer.scene);
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
@@ -268,7 +280,7 @@ async function boot(): Promise<void> {
   streamer.register(new ScatterProvider(roadDistance, debris));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, freight));
+  streamer.register(new PoiProvider(loose, trailerField, freight, wreckTrunks));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -325,7 +337,7 @@ async function boot(): Promise<void> {
     initialYaw = spawn.yaw;
   }
 
-  // Build chunk 0 before scattering: the parts need the garage floor beneath them.
+  // Build chunk 0 before placing the fuel can: it needs the garage floor beneath it.
   streamer.update(world.state.player.s, frameId);
 
   if (loadedFromSave) {
@@ -334,7 +346,7 @@ async function boot(): Promise<void> {
     // item is by definition absent from those maps, so the two cannot collide.
     inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
   } else {
-    scatterStartingGizmos(world, loose);
+    spawnStartingFuelCan(world, loose);
   }
 
   for (const car of Object.values(world.state.cars)) spawnVehicle(car);
@@ -391,6 +403,7 @@ async function boot(): Promise<void> {
     loose,
     trailerField,
     freight,
+    wreckTrunks,
     () => {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
@@ -490,8 +503,8 @@ async function boot(): Promise<void> {
   let recordTimer = 0;
   let paused = false;
   let prompt: string | null = null;
-  /** Boot cells under the crosshair, or null. Set by the interaction tick. */
-  let boot: readonly (Item | null)[] | null = null;
+  /** Trunk grid under the crosshair, or null. Set by the interaction tick. */
+  let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = world.state.player.s;
   let gumActive = false;
@@ -603,8 +616,8 @@ async function boot(): Promise<void> {
     if (f.selectSlot > 0) inventory.selectIndex(f.selectSlot - 1);
     else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
 
-    // One charge is consumed immediately; its translucent screen-space bubble
-    // then grows continuously for five seconds before the covered-frame flip.
+    // One charge is consumed immediately. Three seconds of chewing come first;
+    // only then does the screen-space bubble grow for five seconds before popping.
     const gum = inventory.held;
     const gumPressed = f.usePrimary && !gumUseHeld;
     gumUseHeld = f.usePrimary;
@@ -616,7 +629,7 @@ async function boot(): Promise<void> {
     }
     if (gumActive) {
       gumTimer += dt;
-      if (gumTimer >= GUM_GROW_SECONDS) {
+      if (gumTimer >= GUM_USE_SECONDS) {
         const p = player.position;
         let nearest: Vehicle | null = null;
         let nearestDistSq = Infinity;
@@ -630,6 +643,7 @@ async function boot(): Promise<void> {
           }
         }
         nearest?.flipOver();
+        audio.bubbleGumPop();
         hud.setToast(nearest ? 'POP — car flipped' : 'POP — no car close enough');
         gumActive = false;
         gumTimer = 0;
@@ -653,10 +667,14 @@ async function boot(): Promise<void> {
     boot = interacted.boot;
     if (interacted.sound) audio.foley(interacted.sound);
     audio.setContinuous(interacted.continuous);
-    // Footsteps come off the character controller's achieved speed, so they stop
-    // when the player does — including walking into a wall. Seated, there is no
-    // capsule moving and the voice is silent by construction.
-    audio.updateFoot(dt, driving ? 0 : player.groundSpeed, player.grounded);
+    audio.updateBubbleGum(
+      dt,
+      gumActive ? (gumTimer < GUM_CHEW_SECONDS ? 'chew' : 'blow') : 'idle',
+    );
+    // Footsteps come off the character controller's achieved speed and supporting
+    // collider, so they stop at a wall and change timbre at the road/desert seam.
+    // Seated, there is no capsule moving and the voice is silent by construction.
+    audio.updateFoot(dt, driving ? 0 : player.groundSpeed, player.grounded, player.groundSurface);
 
     // Radio: a car fitting, so the keys only do anything from the seat.
     if (driving) {
@@ -975,14 +993,21 @@ async function boot(): Promise<void> {
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
-    hud.setBoot(boot);
+    trunkView.update(
+      boot,
+      boot?.owner === 'car' ? (vehicles.get(boot.id) ?? null) : null,
+      boot?.owner === 'wreck' ? wreckTrunks.get(boot.id) : null,
+      alpha,
+      origin,
+    );
     hud.setInventory(
       inventory.all,
       inventory.selectedIndex,
       inventory.carriedMass,
       inventory.massLimit,
     );
-    hud.setBubbleGum(gumActive, gumTimer / GUM_GROW_SECONDS);
+    const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
+    hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
     hud.setTravel(activeS / 1000, s.timeOfDay);
 
     // Viewmodel and slot previews are pure views of existing state, so they update
@@ -1015,6 +1040,7 @@ async function boot(): Promise<void> {
   };
 
   const loop = new GameLoop({ fixedUpdate, render });
+  loading.classList.add('is-hidden');
   loop.start();
 
   /**
