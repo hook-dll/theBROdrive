@@ -52,6 +52,58 @@ export class PhysicsWorld {
   }
 
   /**
+   * Shifts every rigid body in the world by `-shift`, re-expressing the whole
+   * simulation in a moved floating origin (see `world/origin.ts`).
+   *
+   * ONE pass over all bodies rather than a conversion at each of the two dozen places
+   * a body's position is set. That is deliberate: the failure mode of missing a site is
+   * a piece of the world that teleports a kilometre sideways, and the only way to be
+   * sure is to not have a list. Rapier's own state needs nothing else — the ray-cast
+   * suspension is a force recomputed inside `updateVehicle` every step, and contact
+   * manifolds are rebuilt from collider positions, so translating everything at once
+   * is invisible to the solver.
+   *
+   * Velocities are untouched on purpose: a change of origin is not a motion. Kinematic
+   * bodies are included, but anything holding its own copy of a target position must
+   * still shift that copy, which is what `Rebasable` is for.
+   *
+   * MUST be called between `step()` and the post-step transform latches. Between a
+   * body's `translation()` read and its matching `setTranslation` write, the shift
+   * would read as a kilometre of drift — the trailer's hitch guard would treat it as
+   * a teleport and fight it.
+   */
+  rebase(dx: number, dz: number): void {
+    const shifted = { x: 0, y: 0, z: 0 };
+    this.world.bodies.forEach((body) => {
+      const t = body.translation();
+      shifted.x = t.x - dx;
+      shifted.y = t.y;
+      shifted.z = t.z - dz;
+      body.setTranslation(shifted, false);
+    });
+  }
+
+  /**
+   * Largest horizontal distance from the origin any rigid body currently sits at.
+   *
+   * The completeness net for the floating origin. Every body is supposed to hold a
+   * position relative to an origin that is never more than `REBASE_RADIUS` away, so
+   * this should stay in the low thousands of metres forever. A site that still writes
+   * an absolute coordinate shows up here as a number in the tens of thousands the
+   * moment it is created, which is a far more reliable check than auditing call sites
+   * by hand. Cheap enough to assert in a dev build, and used by tools/origin-drift.ts.
+   */
+  maxBodyDistance(): number {
+    let worst = 0;
+    this.world.bodies.forEach((body) => {
+      const t = body.translation();
+      const d = Math.hypot(t.x, t.z);
+      if (d > worst) worst = d;
+    });
+    return worst;
+  }
+
+  /**
    * Static triangle mesh, used for the road ribbon and buildings.
    *
    * `vertices` is a flat xyz array and `indices` a flat triangle list. Registering

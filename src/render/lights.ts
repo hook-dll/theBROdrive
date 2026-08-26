@@ -109,6 +109,14 @@ export class LightBudget {
     const viewLength = Math.hypot(forwardX, forwardZ);
     const fx = viewLength > 1e-4 ? forwardX / viewLength : 0;
     const fz = viewLength > 1e-4 ? forwardZ / viewLength : 1;
+    // Both sides of every distance below are RELATIVE, so no origin conversion
+    // belongs here. `x/y/z` are the relative camera (renderer.camera.position),
+    // and each source marker's `getWorldPosition` resolves against the relative
+    // scene graph — the lamp markers live in streamed chunks whose meshes the
+    // streamer has already shifted to the relative frame. The same holds for
+    // `assignSlot`'s `slot.position.copy(world)`: a THREE light and its source
+    // marker are both scene-graph objects, so copying one world position into the
+    // other is relative throughout. No absolute leak.
     for (let i = 0; i < count; i++) {
       this.sources[i].getWorldPosition(this.sourceWorld[i]);
       const world = this.sourceWorld[i];

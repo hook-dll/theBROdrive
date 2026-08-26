@@ -4,6 +4,7 @@ import type { PhysicsWorld } from '../core/physics';
 import type { GameWorld } from '../game/state';
 import type { Road } from './road';
 import type { Terrain } from './terrain';
+import type { WorldOrigin } from './origin';
 
 /**
  * World streaming spine.
@@ -50,6 +51,21 @@ export interface ChunkContext {
   world: GameWorld;
   /** False for far scenery: skip colliders and physics-only work. */
   hasPhysics: boolean;
+  /**
+   * The floating origin at the moment this chunk is built (see `world/origin.ts`).
+   *
+   * Every vertex a provider writes into a `Float32Array`, and every position it hands
+   * to Rapier, MUST have these subtracted: f32 cannot hold an absolute coordinate this
+   * far from (0, 0) without quantising the road surface into steps. Providers keep
+   * sampling the road, the terrain and every noise field at ABSOLUTE coordinates — the
+   * subtraction happens only where the number is about to be stored in f32.
+   *
+   * A snapshot, not a live reference, and deliberately so: it is the frame this
+   * chunk's geometry is expressed in for as long as the chunk lives, and the streamer
+   * corrects for any later origin move by shifting the chunk's group.
+   */
+  originX: number;
+  originZ: number;
 }
 
 export interface ChunkContent {
@@ -96,6 +112,14 @@ interface BuiltChunk {
   index: number;
   hasPhysics: boolean;
   contents: ChunkContent[];
+  /**
+   * The origin this chunk's vertices were written relative to. Kept per chunk rather
+   * than assumed to be the current one, because a rebase can happen while chunks
+   * built under the previous origin are still alive — that is the normal case, since
+   * a rebase never rebuilds anything.
+   */
+  originX: number;
+  originZ: number;
 }
 
 export class ChunkStreamer {
@@ -116,6 +140,7 @@ export class ChunkStreamer {
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly scene: THREE.Scene,
+    private readonly origin: WorldOrigin,
   ) {
     this.lastChunkIndex = Math.floor((road.length - 1) / CHUNK_LENGTH);
   }
@@ -195,6 +220,8 @@ export class ChunkStreamer {
     // (`sEnd <= sStart`), which is what makes the road/prop/POI/monument/homestead
     // providers return nothing there. The terrain provider derives its apron extent
     // from `chunkIndex` instead, so it still builds in those chunks.
+    const originX = this.origin.x;
+    const originZ = this.origin.z;
     const ctx: ChunkContext = {
       chunkIndex: index,
       sStart: Math.max(0, index * CHUNK_LENGTH),
@@ -204,18 +231,47 @@ export class ChunkStreamer {
       physics: this.physics,
       world: this.world,
       hasPhysics,
+      originX,
+      originZ,
     };
 
     const contents: ChunkContent[] = [];
     for (const provider of this.providers) {
       const content = provider.build(ctx);
       if (content) {
+        // A chunk built before the last rebase is expressed in the origin of its own
+        // build, so its group carries the difference. Zero in the common case.
+        content.group.position.x = originX - this.origin.x;
+        content.group.position.z = originZ - this.origin.z;
         this.scene.add(content.group);
         contents.push(content);
       }
     }
-    this.built.set(index, { index, hasPhysics, contents });
+    this.built.set(index, { index, hasPhysics, contents, originX, originZ });
     this.lightRevision++;
+  }
+
+  /**
+   * Re-expresses every live chunk after the floating origin has moved.
+   *
+   * Nothing is rebuilt and nothing needs to be. A chunk's vertices are relative to the
+   * origin it was built under, so the whole chunk is correct up to a constant offset,
+   * and the offset is exactly what a group position is for. Thirteen groups, two
+   * numbers each.
+   *
+   * Rebuilding instead was the first design and it is much worse: `BUILD_BUDGET` is one
+   * chunk per frame, so dropping the visual radius would leave a hole in the world for
+   * thirteen frames every kilometre driven. The colliders come along for free because
+   * `PhysicsWorld.rebase` shifts every rigid body in the same pass, including the fixed
+   * bodies these chunks' trimeshes hang off.
+   */
+  rebase(): void {
+    for (const chunk of this.built.values()) {
+      for (const content of chunk.contents) {
+        content.group.position.x = chunk.originX - this.origin.x;
+        content.group.position.z = chunk.originZ - this.origin.z;
+      }
+    }
   }
 
   private teardown(chunk: BuiltChunk): void {

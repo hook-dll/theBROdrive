@@ -195,12 +195,18 @@ interface BuildCtx {
   gravel: TrimeshAcc;
   geos: THREE.BufferGeometry[];
   L: HomesteadLayout;
+  /** The chunk's floating origin; every f32/Rapier write subtracts these. */
+  ox: number;
+  oz: number;
 }
 
 /** Solid box: visual + collider. */
 function solid(ctx: BuildCtx, box: [V3, V3], acc: TrimeshAcc, material: THREE.Material): void {
   visual(ctx, box, material);
-  acc.addBox(box[0], box[1]);
+  acc.addBox(
+    [box[0][0] - ctx.ox, box[0][1], box[0][2] - ctx.oz],
+    [box[1][0] - ctx.ox, box[1][1], box[1][2] - ctx.oz],
+  );
 }
 
 /** Visual-only box (glass, frames, fence, jack stands). */
@@ -208,7 +214,7 @@ function visual(ctx: BuildCtx, box: [V3, V3], material: THREE.Material): void {
   const [min, max] = box;
   const geo = new THREE.BoxGeometry(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
   const mesh = new THREE.Mesh(geo, material);
-  mesh.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+  mesh.position.set((min[0] + max[0]) / 2 - ctx.ox, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2 - ctx.oz);
   ctx.group.add(mesh);
   ctx.geos.push(geo);
 }
@@ -227,11 +233,14 @@ function cylinder(
 ): void {
   const geo = new THREE.CylinderGeometry(radius, radius, height, segments);
   const mesh = new THREE.Mesh(geo, material);
-  mesh.position.set(cx, cy, cz);
+  mesh.position.set(cx - ctx.ox, cy, cz - ctx.oz);
   ctx.group.add(mesh);
   ctx.geos.push(geo);
   if (acc) {
-    acc.addBox([cx - radius, cy - height / 2, cz - radius], [cx + radius, cy + height / 2, cz + radius]);
+    acc.addBox(
+      [cx - radius - ctx.ox, cy - height / 2, cz - radius - ctx.oz],
+      [cx + radius - ctx.ox, cy + height / 2, cz + radius - ctx.oz],
+    );
   }
 }
 
@@ -329,13 +338,15 @@ export class HomesteadProvider implements ChunkProvider {
     if (ctx.chunkIndex !== 0) return null;
 
     const L = layout(ctx.road, ctx.terrain);
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
     const group = new THREE.Group();
     const concrete = new TrimeshAcc();
     const gravel = new TrimeshAcc();
     const geos: THREE.BufferGeometry[] = [];
     const mats: THREE.Material[] = [];
 
-    const bctx: BuildCtx = { group, concrete, gravel, geos, L };
+    const bctx: BuildCtx = { group, concrete, gravel, geos, L, ox, oz };
 
     const mat = (color: number, o: { metalness?: number; roughness?: number; transparent?: boolean; opacity?: number } = {}) => {
       const m = new THREE.MeshStandardMaterial({
@@ -388,6 +399,14 @@ export class HomesteadProvider implements ChunkProvider {
     // --- Driveway (gravel wedge, ramps flush to the road) ---
     {
       const { verts, tris } = drivewayData(L);
+      // Rebase the shared vertex set ONCE: `verts` feeds both the driveway mesh's
+      // Float32BufferAttribute and, via `gravel`, the trimesh collider below. A
+      // second subtraction in either consumer would offset the shell from its
+      // collider.
+      for (let i = 0; i < verts.length; i += 3) {
+        verts[i] -= ox;
+        verts[i + 2] -= oz;
+      }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       geo.setIndex(tris);
@@ -463,14 +482,14 @@ export class HomesteadProvider implements ChunkProvider {
     // homestead is within the light cutoff of the camera. ---
     const [glx, glz] = L.toWorld((GARAGE_DOOR_U + GARAGE_BACK_U) / 2, (GARAGE_V0 + GARAGE_V1) / 2);
     const garageLight = new THREE.PointLight(0xffd9a0, 8, 16, 2);
-    garageLight.position.set(glx, fy + 2.3, glz);
+    garageLight.position.set(glx - ox, fy + 2.3, glz - oz);
     garageLight.name = 'garageLight';
     garageLight.visible = false;
     group.add(garageLight);
 
     const [dlx, dlz] = L.toWorld(GARAGE_DOOR_U + 0.4, (GARAGE_V0 + GARAGE_V1) / 2);
     const doorLight = new THREE.PointLight(0xffe0b0, 7, 12, 2);
-    doorLight.position.set(dlx, fy + 2.5, dlz);
+    doorLight.position.set(dlx - ox, fy + 2.5, dlz - oz);
     doorLight.name = 'doorLight';
     doorLight.visible = false;
     group.add(doorLight);

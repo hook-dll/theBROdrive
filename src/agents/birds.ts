@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
+import { WorldOrigin, type RebaseShift } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 
@@ -244,11 +245,22 @@ export class BirdFlock {
   private hasLastPlayer = false;
   private playerSpeed = 0;
 
-  constructor(scene: THREE.Scene, road: Road, terrain: Terrain, seed: number) {
+  constructor(
+    scene: THREE.Scene,
+    road: Road,
+    terrain: Terrain,
+    seed: number,
+    private readonly origin: WorldOrigin,
+  ) {
     this.scene = scene;
     this.road = road;
     this.terrain = terrain;
     this.seed = seed >>> 0;
+    // Bird positions are RELATIVE (instance matrices and falling meshes are f32),
+    // so a rebase must shift every one of them — and the cached player position used
+    // for the speed estimate — by the frame step. Register here; the flock lives for
+    // the whole session, which is the register() contract.
+    origin.register(this);
 
     const instGeometry = buildBirdGeometry();
     this.phaseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS), 1);
@@ -331,6 +343,38 @@ export class BirdFlock {
     }
   }
 
+  /**
+   * Rebasable: every cached position here is RELATIVE and must shift with the frame
+   * step. Heights (`y`, `perchY`, `landY`, `lastPy`) are vertical and never touch the
+   * origin, so they stay. Falling corpses shift their own mesh positions too rather
+   * than waiting for the next `tickFalling`, so a rebase never renders one out of
+   * step. The instance matrices are rebuilt every frame in `syncMeshes` from these
+   * shifted positions and need nothing here. The speed-estimate cache (`lastPx`/`lastPz`)
+   * is a cached relative position, so it shifts as well.
+   */
+  rebase(shift: RebaseShift): void {
+    for (let i = 0; i < this.activeCount; i++) {
+      const b = this.birds[i]!;
+      b.x -= shift.dx;
+      b.z -= shift.dz;
+      b.perchX -= shift.dx;
+      b.perchZ -= shift.dz;
+      b.circleX -= shift.dx;
+      b.circleZ -= shift.dz;
+      b.landX -= shift.dx;
+      b.landZ -= shift.dz;
+    }
+    for (const f of this.falling) {
+      if (!f.active) continue;
+      f.x -= shift.dx;
+      f.z -= shift.dz;
+      f.mesh.position.x -= shift.dx;
+      f.mesh.position.z -= shift.dz;
+    }
+    this.lastPx -= shift.dx;
+    this.lastPz -= shift.dz;
+  }
+
   update(dt: number, playerS: number, px: number, py: number, pz: number): void {
     // Player speed estimate drives the alert radius (foot vs car).
     if (this.hasLastPlayer && dt > 0) {
@@ -374,6 +418,11 @@ export class BirdFlock {
     this.tickFalling(dt);
   }
 
+  /**
+   * Hit test against a ray from the camera. Both sides are RELATIVE: the ray origin
+   * comes from `camera.eyePosition` (relative) and the birds hold relative positions,
+   * so `b.x - ox` below never mixes frames and needs no origin conversion.
+   */
   tryHit(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxRange: number): BirdHit | null {
     const len = Math.hypot(dx, dy, dz);
     if (len < 1e-6) return null;
@@ -492,6 +541,12 @@ export class BirdFlock {
     this.road.offsetPoint(s, lateral, this.scratchPerch);
     const groundY = this.terrain.heightAt(this.scratchPerch.x, this.scratchPerch.z, s);
     const perchY = groundY + perchHeight;
+    // `road.offsetPoint` is ABSOLUTE (the road is the absolute f64 frame), but a
+    // bird's stored position is RELATIVE (its instance matrix is f32). Subtract the
+    // origin once here so every bird in the group is born relative; `groundY` and
+    // `perchY` are heights and never touch the origin.
+    const ox = this.origin.x;
+    const oz = this.origin.z;
 
     for (let k = 0; k < count; k++) {
       if (this.activeCount >= MAX_BIRDS) break;
@@ -499,7 +554,7 @@ export class BirdFlock {
       const jz = (hash01(seed, g, k, SALT_JITTER + 1) - 0.5) * 0.9;
       const b = this.birds[this.activeCount]!;
       this.activeCount++;
-      this.initBird(b, g, s, species, this.scratchPerch.x + jx, this.scratchPerch.z + jz, groundY, perchY, k);
+      this.initBird(b, g, s, species, this.scratchPerch.x + jx - ox, this.scratchPerch.z + jz - oz, groundY, perchY, k);
     }
   }
 
@@ -696,7 +751,10 @@ export class BirdFlock {
     b.vx = Math.sin(b.yaw) * sp.cruiseSpeed;
     b.vz = Math.cos(b.yaw) * sp.cruiseSpeed;
 
-    const ground = this.terrain.heightAt(b.x, b.z, b.sHint);
+    // `terrain.heightAt` is ABSOLUTE but `b` holds RELATIVE positions, so add the
+    // origin here; every other use of `b.x/b.z` (steering, integration) is
+    // relative-to-relative and stays frame-consistent.
+    const ground = this.terrain.heightAt(b.x + this.origin.x, b.z + this.origin.z, b.sHint);
     const targetY = ground + sp.cruiseAlt;
     b.vy = clamp((targetY - b.y) * 1.5, -sp.cruiseSpeed * 0.6, sp.cruiseSpeed * 0.6);
 
@@ -753,7 +811,8 @@ export class BirdFlock {
     b.y += b.vy * dt;
     b.z += b.vz * dt;
 
-    const ground = this.terrain.heightAt(b.x, b.z, b.sHint);
+    // ABSOLUTE field, RELATIVE bird — add the origin (see `fly`).
+    const ground = this.terrain.heightAt(b.x + this.origin.x, b.z + this.origin.z, b.sHint);
     if (b.y < ground + MIN_CLEARANCE) b.y = ground + MIN_CLEARANCE;
   }
 
@@ -836,7 +895,8 @@ export class BirdFlock {
       f.ry += f.spinY * dt;
       f.rz += f.spinZ * dt;
 
-      const ground = this.terrain.heightAt(f.x, f.z, f.sHint);
+      // ABSOLUTE field, RELATIVE corpse — add the origin (see `fly`).
+      const ground = this.terrain.heightAt(f.x + this.origin.x, f.z + this.origin.z, f.sHint);
       if (f.y <= ground + 0.1 || f.life <= 0) {
         f.active = false;
         f.mesh.visible = false;

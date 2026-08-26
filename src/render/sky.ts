@@ -147,7 +147,16 @@ const BAND_HALF_WIDTH = 0.13;
 // ---------------------------------------------------------------------------
 
 const C_DAY_ZENITH = new THREE.Color().setStyle('#4d8ede');
-const C_DAY_HORIZON = new THREE.Color().setStyle('#d7e5f3');
+/**
+ * The pale band the daytime sky fades to at the horizon, and — because `fog.color`
+ * copies it — the colour the far desert dissolves into.
+ *
+ * Taken off a reference screenshot of the genre's own noon sky, where the horizon band
+ * is very nearly white with a cyan bias and the saturated blue stays up high. It was
+ * `#d7e5f3`: the same idea a shade duller and greener. The reference reads cleaner
+ * because there is more cyan in it and it is brighter.
+ */
+const C_DAY_HORIZON = new THREE.Color().setStyle('#d5eefd');
 const C_NIGHT_ZENITH = new THREE.Color().setStyle('#03040a');
 const C_NIGHT_HORIZON = new THREE.Color().setStyle('#0d1424');
 const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
@@ -330,8 +339,57 @@ uniform float uMoonAmount;
  * is near the horizon and is zero at midday and through the night.
  */
 uniform float uAntiSolar;
+/** Fraction of the sky the cirrus deck covers, 0..1. */
+uniform float uCloudCover;
+/** Overall visibility of the deck: 1 in daylight, 0 in deep night. */
+uniform float uCloudAmount;
+/** Seconds, wrapped. Drifts the deck downwind. */
+uniform float uCloudTime;
 
 varying vec3 vDir;
+
+/**
+ * CIRRUS, procedurally, inside the dome fragment.
+ *
+ * No geometry and no draw call, which buys three things beyond the cost. It cannot be
+ * outlined: the ink pass works on object edges, and a cloud shaded into the dome's own
+ * fragment has none, where a billboard layer would have come back ringed in ink. It
+ * cannot break the fog seam, because the deck is faded out before it reaches the
+ * horizon band that the fog colour is copied from. And it is in the environment probe
+ * for free, since the probe shares this shader — so an overcast sky genuinely lights
+ * the car slightly differently.
+ *
+ * What it cannot do: occlude stars. The dome writes no depth and the star field is
+ * separate geometry, so a night cloud would have stars shining through it. Rather than
+ * fake that, uCloudAmount fades the deck out as night falls — which is close to
+ * honest anyway, since unlit cirrus over a desert is not visible.
+ */
+float cloudHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float cloudNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(cloudHash(i), cloudHash(i + vec2(1.0, 0.0)), u.x),
+    mix(cloudHash(i + vec2(0.0, 1.0)), cloudHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+/** Four octaves. Enough for a fibrous edge; a fifth is invisible at this scale. */
+float cloudFbm(vec2 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  for (int k = 0; k < 4; k++) {
+    sum += amp * cloudNoise(p);
+    p *= 2.03;
+    amp *= 0.5;
+  }
+  return sum;
+}
 
 void main() {
   vec3 dir = normalize(vDir);
@@ -368,6 +426,55 @@ void main() {
   float away = pow(max(-sd, 0.0), 1.5);
   float lowBand = 1.0 - smoothstep(0.0, 0.45, h);
   col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
+
+  // --- Cirrus deck -----------------------------------------------------------
+  //
+  // The view ray is intersected with a flat plane at unit height: dir.xz / dir.y is
+  // the standard cloud-plane parameterisation, and it is what gives the deck
+  // perspective for nothing. Wisps overhead are broad and round; the same wisps
+  // toward the horizon compress into long streaks, which is exactly how a high deck
+  // looks and is the whole reason not to just paint noise on the dome directly.
+  //
+  // dir.y is floored because the projection diverges at the horizon: the uv goes to
+  // infinity, the noise goes to hash grain, and the result is a shimmering band. The
+  // floor bounds the frequency and the fade below hides where it bites.
+  float deckY = max(dir.y, 0.06);
+  vec2 cuv = dir.xz / deckY;
+
+  // Near-isotropic scale before the noise. The old 0.55 / 2.1 squash dragged every
+  // feature along the other axis into combed filaments; the small difference kept
+  // here is only enough to stop the deck reading as a tiled repeat. The drift is
+  // slow and on x, so the deck still slides sideways like a high wind deck should.
+  vec2 combed = cuv * vec2(0.75, 0.9) + vec2(uCloudTime * 0.0035, 0.0);
+  float n = cloudFbm(combed);
+
+  // Multiply by a second sample at half the frequency instead of domain-warping.
+  // The old warp smeared the weave into filaments; a coarse factor that drops low
+  // punches real holes and, where it stays high, lets the fine noise through, so
+  // the deck breaks into isolated rounded puffs with clear sky between them.
+  n *= cloudFbm(combed * 0.5);
+
+  // Cover is a threshold on the noise, so raising it does not fade cloud in
+  // everywhere at once — it grows the patches outward from where cloud already is,
+  // which is how a sky actually fills in. The multiply above cuts the field's
+  // values to about 0.4 of their former size, so the band is re-scaled by that same
+  // 0.4 and narrowed so the deck reads as separate spots rather than one soft veil.
+  float edge = 1.0 - uCloudCover;
+  float deck = smoothstep(edge * 0.4, edge * 0.4 + 0.20, n);
+
+  // Out before the horizon band, which must stay pure gradient: the fog colour is
+  // copied from it, and a cloud reaching down into it would put a hard line along
+  // the join where the far desert dissolves into the sky.
+  deck *= smoothstep(0.02, 0.22, dir.y);
+  deck *= uCloudAmount;
+
+  // Cirrus is ice: bright, and it takes its colour from the sun rather than owning
+  // one. Toward the sun it is lit through and nearly white; away from it, it settles
+  // to the pale horizon tone. That single term is also what makes the deck catch a
+  // low sun and go gold at dusk, with no second palette to author or keep in step.
+  float lit = 0.45 + 0.55 * max(sd, 0.0);
+  vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
+  col = mix(col, cloudCol, deck);
 
   // Sun disc plus a broad additive glow (a Rayleigh-ish halo that reads as
   // atmospheric scatter without pulling in a full scattering model).
@@ -621,6 +728,16 @@ export class Sky {
    * has fallen (when there is no glow left to be asymmetric about).
    */
   private readonly uAntiSolar = { value: 0 };
+  /** Fraction of sky the cirrus deck covers; straight from the sky gradient. */
+  private readonly uCloudCover = { value: 0 };
+  /**
+   * Overall deck visibility. Falls to zero as night lands, because the dome cannot
+   * depth-test against the star field and so cannot occlude a star — see the note in
+   * SKY_FRAGMENT.
+   */
+  private readonly uCloudAmount = { value: 0 };
+  /** Deck drift clock, seconds, wrapped well inside float precision. */
+  private readonly uCloudTime = { value: 0 };
 
   // --- Star / band uniforms ---
   private readonly uStarOpacity = { value: 0 };
@@ -679,6 +796,9 @@ export class Sky {
         uSunGlowIntensity: this.uSunGlowIntensity,
         uMoonAmount: this.uMoonAmount,
         uAntiSolar: this.uAntiSolar,
+        uCloudCover: this.uCloudCover,
+        uCloudAmount: this.uCloudAmount,
+        uCloudTime: this.uCloudTime,
       },
       side: THREE.BackSide,
       // The sky is the backdrop: draw first, never write depth, never test it,
@@ -1055,6 +1175,15 @@ export class Sky {
     // one-sided — and gone by ~31 degrees up or down.
     this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
 
+    // --- Cirrus deck ---
+    // Cover comes from the sky gradient (weather, on a 400 km cycle). Visibility is
+    // held through dusk — a lit deck at sunset is the best the sky ever looks — and
+    // gone by the time `night` reaches 1, past nautical dusk, because the dome cannot
+    // occlude a star.
+    this.uCloudCover.value = g.cloudCover;
+    this.uCloudAmount.value = 1 - night;
+    this.uCloudTime.value = (performance.now() * 0.001) % 3600;
+
     // --- Stars & band ---
     // Stars remain through dusk and down to the horizon. The base desert has a
     // dense field; distance from civilisation fills the remaining faint stars.
@@ -1114,6 +1243,16 @@ export class Sky {
     this.refreshEnvironment();
 
     // --- Reposition the sky with the camera ---
+    //
+    // The origin makes every scene-graph position RELATIVE, and the camera is no
+    // exception: `cameraX/Y/Z` here are the relative eye straight off
+    // `renderer.camera.position`. The sky must stay relative too, so the root, the
+    // sun light and its shadow target below are all written with those same relative
+    // coordinates and nothing in this block adds or subtracts the origin. The stars
+    // and the aurora are children of `root` positioned as direction × radius about
+    // its local origin (buildStars/buildBand/buildAurora), so they are camera-relative
+    // by construction and must never be rebased or re-anchored. `skyGradientAt(s)`
+    // takes an arclength, immune to the origin, and is deliberately left alone.
     this.root.position.set(cameraX, cameraY, cameraZ);
 
     // The classic shadow bug: a DirectionalLight's shadow frustum is defined

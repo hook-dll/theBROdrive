@@ -3,6 +3,7 @@ import { FIXED_DT, type PhysicsWorld } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import type { GameWorld } from '../game/state';
 import type { Road } from '../world/road';
+import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 
 /**
  * The on-foot player, a kinematic character controller over a capsule collider.
@@ -74,7 +75,7 @@ export interface Shoveable {
   shove(dirX: number, dirZ: number, seconds: number): void;
 }
 
-export class Player {
+export class Player implements Rebasable {
   /** Eye height above the capsule centre, metres. */
   static readonly EYE_OFFSET = 0.7;
   /** Distance from the capsule centre down to the feet, metres. */
@@ -114,6 +115,7 @@ export class Player {
   constructor(
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
+    private readonly origin: WorldOrigin,
   ) {
     this.controller = physics.world.createCharacterController(0.01);
     // The built-in impulse path is off: it derives its impulse from the tiny
@@ -139,8 +141,13 @@ export class Player {
     this.pushCollision.witness2 = { x: 0, y: 0, z: 0 };
 
     const p = world.state.player;
+    // `p.x/z` are absolute (from the save); Rapier holds relative positions.
     this.body = physics.world.createRigidBody(
-      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z),
+      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
+        p.x - this.origin.x,
+        p.y,
+        p.z - this.origin.z,
+      ),
     );
     this.collider = physics.world.createCollider(
       RAPIER.ColliderDesc.capsule(CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS),
@@ -149,6 +156,7 @@ export class Player {
     this.arcS = p.s;
     this.yaw = p.yaw;
     this.pitch = p.pitch;
+    this.origin.register(this);
   }
 
   /** The shared `Road` instance, needed to maintain the arclength `s`. */
@@ -170,10 +178,24 @@ export class Player {
     this.shoveLookup = lookup;
   }
 
-  /** Capsule centre, in world space. */
+  /**
+   * Capsule centre, RELATIVE to the floating origin. Use this for anything compared
+   * against a Rapier body or written into the relative scene graph; `absolutePosition`
+   * is the same point in absolute world coordinates.
+   */
   get position(): { x: number; y: number; z: number } {
     const t = this.body.translation(this.posScratch);
     return { x: t.x, y: t.y, z: t.z };
+  }
+
+  /**
+   * Capsule centre in ABSOLUTE world coordinates, for consumers that sample the
+   * world (terrain height, rescue). `position` stays relative so nobody has to
+   * un-rebase a Rapier translation to do a distance check against a body.
+   */
+  get absolutePosition(): { x: number; y: number; z: number } {
+    const t = this.body.translation(this.posScratch);
+    return { x: t.x + this.origin.x, y: t.y, z: t.z + this.origin.z };
   }
 
   /**
@@ -207,6 +229,19 @@ export class Player {
     p.y = this.prevStep.y + (this.curStep.y - this.prevStep.y) * alpha;
     p.z = this.prevStep.z + (this.curStep.z - this.prevStep.z) * alpha;
     return p;
+  }
+
+  /**
+   * Shifts the fixed-step interpolation snapshots when the floating origin moves.
+   * `prevStep`/`curStep` are relative positions held across steps; if they are not
+   * shifted the renderer lerps the capsule across the whole origin step for a frame.
+   * `arcS` is an arclength and is deliberately left alone.
+   */
+  rebase(shift: RebaseShift): void {
+    this.prevStep.x -= shift.dx;
+    this.prevStep.z -= shift.dz;
+    this.curStep.x -= shift.dx;
+    this.curStep.z -= shift.dz;
   }
 
   /** Maintained arclength along the road. */
@@ -257,8 +292,13 @@ export class Player {
    * overlap the current one and select the wrong branch.
    */
   teleport(x: number, y: number, z: number, knownRoadS?: number): void {
+    // x/z arrive absolute (spawn, rescue, car exit). Rapier and the step snapshots
+    // hold relative positions, so rebase them here; the road projection below still
+    // samples absolute coordinates.
     const cy = y + Player.FEET_OFFSET;
-    this.body.setTranslation({ x, y: cy, z }, true);
+    const rx = x - this.origin.x;
+    const rz = z - this.origin.z;
+    this.body.setTranslation({ x: rx, y: cy, z: rz }, true);
     this.verticalVelocity = 0;
     // A teleport is a discontinuity: the fixed-step render interpolation reads
     // prevStep/curStep, and those are only refreshed by postStep() *after* the
@@ -268,12 +308,12 @@ export class Player {
     // to the stale spot and then the foot spring flies it across the gap, the
     // "slide" seen when stepping out of a car. Seed both snapshots to the new
     // capsule centre now so the very next rendered frame draws the player here.
-    this.prevStep.x = x;
+    this.prevStep.x = rx;
     this.prevStep.y = cy;
-    this.prevStep.z = z;
-    this.curStep.x = x;
+    this.prevStep.z = rz;
+    this.curStep.x = rx;
     this.curStep.y = cy;
-    this.curStep.z = z;
+    this.curStep.z = rz;
     this.snapshotPrimed = true;
     if (!this.road) return;
     if (knownRoadS !== undefined) {
@@ -386,6 +426,8 @@ export class Player {
       body.applyImpulse(this.pushImpulse, true);
     }
 
+    // `pos` is the relative capsule centre; `applied` is a relative per-step
+    // displacement, so this read-then-write pair needs no origin conversion.
     const applied = this.controller.computedMovement(this.appliedScratch);
     const pos = this.body.translation(this.posScratch);
     this.body.setNextKinematicTranslation({
@@ -396,19 +438,23 @@ export class Player {
 
     this.groundedFlag = this.controller.computedGrounded();
 
+    const ox = this.origin.x;
+    const oz = this.origin.z;
     if (this.road) {
+      // The road samples absolute world coordinates; `pos` is relative.
       // Always pass the previous arc hint: without it, project sweeps the road.
-      this.arcS = this.road.project(pos.x, pos.z, this.arcS).s;
+      this.arcS = this.road.project(pos.x + ox, pos.z + oz, this.arcS).s;
     }
 
     this.emitTimer += dt;
     if (this.emitTimer >= MOVE_EMIT_INTERVAL) {
       this.emitTimer = 0;
+      // The save stores absolute world coordinates; add the origin back here.
       this.world.apply({
         t: 'player_move',
-        x: pos.x,
+        x: pos.x + ox,
         y: pos.y,
-        z: pos.z,
+        z: pos.z + oz,
         yaw: this.yaw,
         pitch: this.pitch,
         s: this.arcS,

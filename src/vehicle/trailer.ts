@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
+import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { SurfaceType } from '../core/surfaces';
 import type { GameWorld, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
@@ -266,7 +267,7 @@ const FORWARD_LOCAL = { x: 0, y: 0, z: 1 } as const;
  */
 const SPRAY_SLIP_REFERENCE = 1.5;
 
-export class Trailer {
+export class Trailer implements Rebasable {
   /**
    * One spray report per wheel, written in place every fixed step and read by the
    * renderer's dust pool. Mirrors Vehicle's contract exactly so the emitter cannot
@@ -314,9 +315,11 @@ export class Trailer {
     private readonly world: GameWorld,
     private readonly state: TrailerState,
     private readonly scene: THREE.Scene,
+    private readonly origin: WorldOrigin,
   ) {
+    // `state.x/z` are absolute (from the save); Rapier holds relative positions.
     const desc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(state.x, state.y, state.z)
+      .setTranslation(state.x - this.origin.x, state.y, state.z - this.origin.z)
       .setRotation({ x: state.qx, y: state.qy, z: state.qz, w: state.qw })
       .setAngularDamping(0.2)
       .setCanSleep(false);
@@ -376,6 +379,8 @@ export class Trailer {
         contactX: 0,
         contactY: 0,
         contactZ: 0,
+        absoluteContactX: 0,
+        absoluteContactZ: 0,
         forwardX: 0,
         forwardZ: 1,
         inContact: false,
@@ -440,6 +445,7 @@ export class Trailer {
     this.setPropStand(this.state.hitchedTo === null);
     this.applyMass();
     this.syncVisuals(1);
+    this.origin.register(this);
   }
 
   get id(): string {
@@ -514,6 +520,10 @@ export class Trailer {
     // Place the trailer so its anchor already coincides with the car's, facing the
     // same way. The car's rotation carries pitch and roll too, so a car parked on a
     // slope gets a trailer on the same slope rather than one buried in the hill.
+    //
+    // `vehicle.chassis.translation()` is RELATIVE (Rapier's frame), so `origin`
+    // below is relative too and this placement needs no origin conversion: it is
+    // car-relative geometry, not a world coordinate read in from a save.
     const t = vehicle.chassis.translation();
     const r = vehicle.chassis.rotation();
     this.qScratch.set(r.x, r.y, r.z, r.w);
@@ -527,8 +537,8 @@ export class Trailer {
       trailerAnchor.z,
     ).applyQuaternion(this.qScratch);
     const origin = anchorWorld.clone().sub(backFromAnchor);
-
     this.body.setTranslation({ x: origin.x, y: origin.y, z: origin.z }, true);
+
     this.body.setRotation({ x: r.x, y: r.y, z: r.z, w: r.w }, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -655,6 +665,8 @@ export class Trailer {
         s.contactX = cp.x;
         s.contactY = cp.y;
         s.contactZ = cp.z;
+        s.absoluteContactX = cp.x + this.origin.x;
+        s.absoluteContactZ = cp.z + this.origin.z;
       }
       s.forwardX = fx;
       s.forwardZ = fz;
@@ -687,6 +699,12 @@ export class Trailer {
     const ca = this.carAnchor;
     const ta = this.trailerAnchor;
     if (!this.joint || !car || !ca || !ta) return;
+
+    // BOTH translations below are in Rapier's relative frame, so the ball/eye
+    // difference needs no origin conversion: subtracting the same (unused) origin
+    // from each would cancel out. A 1 km origin step must never land inside this
+    // read-then-write pair, which is why `PhysicsWorld.rebase` runs between the
+    // physics step and this post-step correction rather than inside it.
 
     const ct = car.translation();
     const cr = car.rotation();
@@ -798,17 +816,30 @@ export class Trailer {
   pushTransform(): void {
     const t = this.body.translation();
     const r = this.body.rotation();
+    // The save stores absolute world coordinates; `t` is relative.
     this.world.apply({
       t: 'trailer_transform',
       trailerId: this.state.id,
-      x: t.x,
+      x: t.x + this.origin.x,
       y: t.y,
-      z: t.z,
+      z: t.z + this.origin.z,
       qx: r.x,
       qy: r.y,
       qz: r.z,
       qw: r.w,
     });
+  }
+
+  /**
+   * Shifts the fixed-step interpolation snapshots when the floating origin moves.
+   * `prevPos`/`stepPos` are relative positions held across steps; without this the
+   * renderer lerps the trailer across the whole origin step for one frame.
+   */
+  rebase(shift: RebaseShift): void {
+    this.prevPos.x -= shift.dx;
+    this.prevPos.z -= shift.dz;
+    this.stepPos.x -= shift.dx;
+    this.stepPos.z -= shift.dz;
   }
 
   dispose(): void {
@@ -882,6 +913,7 @@ export class TrailerField {
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly scene: THREE.Scene,
+    private readonly origin: WorldOrigin,
   ) {}
 
   /** Records a trailer into state and materialises it. Idempotent per id. */
@@ -982,7 +1014,7 @@ export class TrailerField {
   }
 
   private materialise(state: TrailerState): Trailer {
-    const trailer = new Trailer(this.physics, this.world, state, this.scene);
+    const trailer = new Trailer(this.physics, this.world, state, this.scene, this.origin);
     this.trailers.set(state.id, trailer);
     const body = trailer.rigidBody;
     for (let i = 0; i < body.numColliders(); i++) {

@@ -245,3 +245,46 @@ export function sanitizeSettings(raw: unknown): Settings {
   }
   return settings;
 }
+
+/**
+ * Where preferences live BETWEEN drives, and why that is not the save file.
+ *
+ * `Settings` is stored inside `WorldState`, so it travels in the save — which is
+ * right for the ones that describe a playthrough (gearbox mode, day length) and
+ * wrong for every one that describes the MACHINE. Graphics quality and view
+ * distance are properties of the GPU in front of the player, not of a drive, and
+ * putting them in the save meant starting a new drive silently reset them to
+ * `standard`/`near`: set them once, start a fresh drive, and they were gone.
+ *
+ * So they are mirrored here as well, keyed per browser rather than per save. On
+ * load this copy wins over whatever the save carried, because the machine has not
+ * changed since the last session and the save may be years old or from another
+ * computer entirely.
+ *
+ * Everything goes through `sanitizeSettings` on the way out, which already accepts
+ * arbitrary JSON — so a corrupted or hand-edited entry degrades to defaults instead
+ * of breaking the boot. Nothing here throws: a browser with storage disabled or a
+ * full quota simply gets the old per-save behaviour back.
+ */
+const SETTINGS_KEY = 'brodrive-settings-v1';
+
+/** The stored preferences, or null if there are none or they cannot be read. */
+export function loadStoredSettings(): Settings | null {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw === null) return null;
+    return sanitizeSettings(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/** Mirrors preferences to browser storage. Called on every settings change. */
+export function storeSettings(settings: Settings): void {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Storage disabled or full. Preferences still apply for this session; they
+    // just will not outlive it, which is exactly the old behaviour.
+  }
+}

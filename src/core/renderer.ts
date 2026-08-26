@@ -185,12 +185,32 @@ const HAZE_SPEED = 1.1;
  * the effect evenly and reads as a wobbling lens instead of hot ground.
  */
 const HAZE_SKY_FALLOFF = 0.055;
-const HAZE_GROUND_FALLOFF = 0.3;
 /**
- * The near foreground is seen through a thin slice of air (and is mostly the car's
- * own bonnet), so the bottom of the frame fades out rather than shimmering.
+ * Ground distance, metres, at which the shimmer begins. Nothing closer than this
+ * shimmers at all.
+ *
+ * This used to be two screen-space numbers — a 0.3-screen-height exponential below
+ * the horizon and a 0.22 fade at the very bottom — and screen space is the wrong
+ * space for it. A band 30% of the frame tall reaches right down onto ground a few
+ * metres from the bumper, so near rocks, the verge and the car's own bonnet all
+ * boiled, which is not what hot air does: you are looking at them through a couple
+ * of metres of it, not a couple of hundred.
+ *
+ * Below the horizon a screen row IS a ground distance — a ray depressed by atan(h/D)
+ * from an eye h above the ground lands at distance D — so the onset can be stated in
+ * metres and converted per frame from the camera's own height and field of view (see
+ * `groundCutUv`). At a 2 m eye and a 50 degree vertical field that puts the cut about
+ * 2% of the frame below the horizon, which is why real shimmer reads as a thin
+ * unstable strip in the far distance rather than a wobbling lens over everything.
  */
-const HAZE_FOREGROUND_FADE = 0.22;
+const HAZE_MIN_DISTANCE_M = 100;
+/**
+ * Screen-height scale over which the warp CELLS grow and speed up below the horizon.
+ * Purely a texture variation so the frame does not shimmer in lockstep like one sheet
+ * of glass, and deliberately not tied to the distance cut above: it is about the look
+ * of the cells, not about where the effect applies.
+ */
+const HAZE_CELL_DEPTH_SCALE = 0.3;
 
 // ---------------------------------------------------------------------------
 // Ink outlines: the second half of the drawn-landscape look, in the same pass.
@@ -227,23 +247,30 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uAmplitude;
   uniform float uHorizon;
   uniform float uSkyFalloff;
-  uniform float uGroundFalloff;
-  uniform float uForegroundFade;
+  uniform float uGroundCut;
+  uniform float uCellDepth;
   uniform float uInkStrength;
   uniform float uInkThreshold;
 
   varying vec2 vUv;
 
   /**
-   * Weight of the hot-air layer at a screen row: peaks at the horizon, decays
-   * quickly upward into the sky and gently downward across the near ground. The
-   * horizon comes in as a uniform, so the band follows the camera's pitch instead
-   * of sitting in the middle of the frame whichever way the driver is looking.
+   * Weight of the hot-air layer at a screen row.
+   *
+   * ABOVE the horizon a sight-line climbs out of the shallow hot layer almost at
+   * once, so the sky is nearly still: a fast exponential decay.
+   *
+   * BELOW the horizon the screen row is a ground DISTANCE, and that is what this now
+   * keys on. uGroundCut is the row at which the ground is HAZE_MIN_DISTANCE_M away,
+   * computed per frame from the camera's height and field of view, so everything
+   * nearer than that fades to nothing. The previous version decayed over a fixed
+   * fraction of the frame instead, which reached down onto ground a few metres away
+   * and boiled the verge and the bonnet along with the horizon.
    */
   float hotLayer(float y) {
     float d = y - uHorizon;
-    float falloff = d > 0.0 ? uSkyFalloff : uGroundFalloff;
-    return exp(-abs(d) / falloff) * smoothstep(0.0, uForegroundFade, y);
+    if (d > 0.0) return exp(-d / uSkyFalloff);
+    return 1.0 - smoothstep(uGroundCut * 0.25, uGroundCut, -d);
   }
 
   /**
@@ -323,7 +350,7 @@ const HAZE_FRAGMENT = /* glsl */ `
     // Cells are smaller and churn faster close to the ground, and the long
     // sight-lines near the horizon stack more of them along one ray. Scaling with
     // depth stops the whole frame shimmering in lockstep like one sheet of glass.
-    float groundness = clamp((uHorizon - vUv.y) / uGroundFalloff, 0.0, 1.0);
+    float groundness = clamp((uHorizon - vUv.y) / uCellDepth, 0.0, 1.0);
     float scale = mix(1.0, 1.3, groundness);
     vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.25, groundness));
     // Rising air bends a sight-line up and down far more than sideways; the
@@ -367,6 +394,11 @@ export class Renderer {
   private readonly _drawSize = new THREE.Vector2();
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
+  /**
+   * Camera height above the ground, metres, for the haze distance cut. Defaulted to a
+   * standing eye so the very first frame is sensible before the loop has supplied one.
+   */
+  private hazeEyeHeight = 1.6;
 
 
   /**
@@ -437,8 +469,8 @@ export class Renderer {
         uAmplitude: { value: HAZE_AMPLITUDE_PX },
         uHorizon: { value: 0.5 },
         uSkyFalloff: { value: HAZE_SKY_FALLOFF },
-        uGroundFalloff: { value: HAZE_GROUND_FALLOFF },
-        uForegroundFade: { value: HAZE_FOREGROUND_FADE },
+        uGroundCut: { value: 0.02 },
+        uCellDepth: { value: HAZE_CELL_DEPTH_SCALE },
         uInkStrength: { value: INK_STRENGTH },
         uInkThreshold: { value: INK_THRESHOLD },
       },
@@ -480,6 +512,7 @@ export class Renderer {
   render(): void {
     this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
     this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
+    this.hazeMaterial.uniforms.uGroundCut.value = this.groundCutUv();
     // Pass 1: draw the scene into the target — the same final sRGB pixels the
     // canvas would have received, since tone mapping and colour conversion stay
     // untouched on the renderer.
@@ -506,6 +539,37 @@ export class Renderer {
     const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
     const ndc = -Math.tan(pitch) / Math.tan(halfFov);
     return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
+  }
+
+  /**
+   * Screen offset below the horizon, in UV, at which the ground is
+   * HAZE_MIN_DISTANCE_M away. Everything below that row is nearer than the onset and
+   * gets no shimmer.
+   *
+   * A ray depressed by `theta` from an eye `h` above the ground meets it at
+   * `D = h / tan(theta)`, so the onset angle is `atan(h / D)` and its screen offset is
+   * that angle's tangent measured against the half-field's. Linearising about the
+   * horizon like this is exact enough for a stylised effect and, unlike a depth
+   * texture, costs nothing and survives multisampling — which is the same reason the
+   * ink pass works off colour gradients (see `inkEdge`).
+   *
+   * The eye height is clamped to a floor because the camera can legitimately sit
+   * below the ground it is looking at, on a crest or inside a dip, and a zero or
+   * negative height would collapse the band to nothing and switch the effect off.
+   */
+  private groundCutUv(): number {
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
+    const h = Math.max(0.4, this.hazeEyeHeight);
+    return 0.5 * (h / HAZE_MIN_DISTANCE_M) / Math.tan(halfFov);
+  }
+
+  /**
+   * How far the camera is above the ground it is looking across, metres. Supplied by
+   * the composition root, which is the only thing that knows both the camera and the
+   * terrain; the renderer converts it into the distance cut above.
+   */
+  setHazeEyeHeight(metres: number): void {
+    this.hazeEyeHeight = metres;
   }
 
   /**

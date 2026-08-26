@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import { CAMERA_BASE_FOV } from '../core/renderer';
+import { WorldOrigin, type RebaseShift } from '../world/origin';
 
 export type CameraMode = 'foot' | 'interior' | 'chase' | 'orbit';
 
@@ -193,7 +194,31 @@ export class CameraRig {
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly physics: PhysicsWorld,
-  ) {}
+    origin: WorldOrigin,
+  ) {
+    // The eye, its look target and the interior sway's previous-frame position are
+    // all cached RELATIVE positions that survive across frames. A rebase shifts the
+    // whole frame by -dx/-dz, so each must shift too, or the camera lags the world
+    // (the spring would ease a 1 km step over ~300 ms, the car flying off-screen)
+    // and the sway's finite difference would read the step as one giant velocity
+    // spike. Register here; the rig lives for the whole session, which is exactly
+    // the register() contract.
+    origin.register(this);
+  }
+
+  /**
+   * Rebasable: shift every relative position this rig keeps across frames by the
+   * frame step, so the camera stays glued to the world and the sway's finite
+   * difference keeps seeing real velocities. Y is a height, untouched by the origin.
+   */
+  rebase(shift: RebaseShift): void {
+    this.eye.x -= shift.dx;
+    this.eye.z -= shift.dz;
+    this.lookAt.x -= shift.dx;
+    this.lookAt.z -= shift.dz;
+    this.swayPrevPos.x -= shift.dx;
+    this.swayPrevPos.z -= shift.dz;
+  }
 
   get mode(): CameraMode {
     return this.onFoot ? 'foot' : this._mode;
@@ -351,6 +376,13 @@ export class CameraRig {
       _qB.setFromAxisAngle(_FORWARD, this.swayRoll);
       this.camera.quaternion.multiply(_qB);
     }
+    // The camera sits in the relative scene graph, so its position is the relative
+    // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
+    // from `target` (the car's or player's transform, already relative), and on a
+    // rebase `rebase()` shifts eye/lookAt/swayPrevPos by the same frame step as the
+    // bodies, so this copy stays correct with no conversion. `eyePosition` and
+    // `eyeDirection` expose that same relative eye to interaction and spawn code,
+    // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
 
     this.updateFov(target.speedKmh, d);
@@ -472,7 +504,16 @@ export class CameraRig {
     // left/right in chase/orbit, which is exactly the bug this sign pair fixes.
     const sy = Math.sin(this.yawValue);
     const cy = Math.cos(this.yawValue);
-    const armPitch = this.pitch + ORBIT_PITCH_BASE;
+    // Pitch is SUBTRACTED here, and that sign is the difference between the two
+    // camera families agreeing about which way is down.
+    //
+    // A free-look camera turns the view: positive pitch tilts the view up, so mouse-up
+    // shows sky. An orbit camera cannot turn its view — it always points at the car —
+    // so the same intent has to be expressed by moving the CAMERA the other way: to
+    // tilt the view down you go UP and look down on the roof. Adding pitch did the
+    // opposite of that, which is why mouse-up used to show the roof and mouse-down the
+    // sky, inverted against the on-foot camera in the same game.
+    const armPitch = ORBIT_PITCH_BASE - this.pitch;
     const ca = Math.cos(armPitch);
     const sa = Math.sin(armPitch);
     const armHx = -fhx * cy - fhz * sy;
@@ -495,6 +536,10 @@ export class CameraRig {
     if (dist < 1e-6) return;
     _vC.divideScalar(dist);
 
+    // `_vA` (the desired eye) is RELATIVE — it is built from the relative `target`
+    // in desiredArm — and Rapier's bodies live in the same relative frame, so the
+    // ray origin, the direction and the collider it may hit all agree with no
+    // origin conversion. The same holds for the ground probe below.
     _rayOrigin.x = _vA.x;
     _rayOrigin.y = _vA.y;
     _rayOrigin.z = _vA.z;

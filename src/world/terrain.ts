@@ -48,12 +48,38 @@ const VERGE_WIDTH = 3.5;
 /** Big dune amplitude and wavelength. */
 const DUNE_AMPLITUDE = 7.5;
 const DUNE_WAVELENGTH = 240;
-/** Secondary ripples riding on the dunes. */
-const RIPPLE_AMPLITUDE = 1.1;
+/**
+ * Secondary ripples riding on the dunes. Two octaves — 52 m and its 23.6 m
+ * harmonic (lacunarity 2.2) — so both sit above the terrain mesh's 20 m
+ * resolution floor and resolve as real slopes, not alias noise. Up from 1.1 m
+ * so the verge reads as washboard instead of smooth sand, while staying well
+ * under the 7.5 m dunes so the ripple still reads as texture ON the dune
+ * rather than as the dune itself. Peak slope it adds is 17.8% in the absolute
+ * worst case and ~4.8% typically.
+ */
+const RIPPLE_AMPLITUDE = 1.8;
 const RIPPLE_WAVELENGTH = 52;
-/** Fine grain, mostly so headlights have something to catch at night. */
-const GRAIN_AMPLITUDE = 0.16;
-const GRAIN_WAVELENGTH = 7;
+/**
+ * Fine grain: the shortest wave the terrain mesh can represent, and the one
+ * that used to alias.
+ *
+ * The mesh samples along the road at S_STEP = 8 m, so a wave needs at least
+ * 2.5 samples per wavelength to resolve as a shape — 20 m — exactly the ratio
+ * the road's own collider uses for its 3.33 m shortest bump against its
+ * 1.333 m step. The old 7 m grain sat below that floor: at ~1.1 samples per
+ * wavelength the collider saw seed-dependent spikes, not the intended ground.
+ * At 20 m the amplitude below actually reaches the trimesh as geometry.
+ *
+ * 0.5 m is more than 5x the road's asphalt bump (0.09 m) and more than 3x
+ * cracked asphalt (0.16 m), so the open desert shakes the car harder than the
+ * road at the same speed even though its shortest wave is longer — it trades
+ * the road's wheel-frequency buzz for bigger body-frequency pitch. Peak slope
+ * it adds is 0.5 * 3.75 / 20 = 9.4% in the absolute worst case (full-range
+ * lattice corners under the quintic fade's 1.875 peak), ~2.5% typically: a
+ * firm washboard, not a launch ramp.
+ */
+const GRAIN_AMPLITUDE = 0.5;
+const GRAIN_WAVELENGTH = 20;
 
 /** Rock outcrops appear where this field exceeds the threshold. */
 const OUTCROP_WAVELENGTH = 170;

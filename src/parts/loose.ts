@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
+import { WorldOrigin } from '../world/origin';
 import type { GameWorld } from '../game/state';
 import type { PartInstance } from './registry';
 import { variant } from './registry';
@@ -35,15 +36,23 @@ export class LoosePartField {
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly scene: THREE.Scene,
+    private readonly origin: WorldOrigin,
   ) {}
 
-  /** Records a part into state and materialises its body + visual. Idempotent per id. */
+  /**
+   * Records a part into state and materialises its body + visual. Idempotent per id.
+   * `x, y, z` are ABSOLUTE world coordinates: they go straight into the save delta,
+   * and the body/mesh below rebase them into the relative physics frame.
+   */
   spawn(part: PartInstance, x: number, y: number, z: number): void {
     this.world.apply({ t: 'part_drop', part, x, y, z });
     if (!this.parts.has(part.id)) this.materialisePart(part, x, y, z);
   }
 
-  /** Records a non-part pickup (tool, fuel can, weapon, ammo, quarry) and materialises it. */
+  /**
+   * Records a non-part pickup (tool, fuel can, weapon, ammo, quarry) and materialises
+   * it. `x, y, z` are ABSOLUTE, exactly as `spawn`'s are.
+   */
   spawnItem(item: Item, x: number, y: number, z: number): void {
     this.world.apply({ t: 'item_drop', item, x, y, z });
     if (!this.items.has(item.id)) this.materialiseItem(item, x, y, z);
@@ -139,14 +148,18 @@ export class LoosePartField {
 
   private materialisePart(part: PartInstance, x: number, y: number, z: number): void {
     const half = partHalfExtents(part.variantId);
+    // x/z are absolute; Rapier and the scene graph hold positions relative to the
+    // floating origin, so subtract it once before the body AND the mesh.
+    const rx = x - this.origin.x;
+    const rz = z - this.origin.z;
     const { body, collider } = this.physics.addDynamicBox(
       { x: half.x, y: half.y, z: half.z },
-      { x, y, z },
+      { x: rx, y, z: rz },
       variant(part.variantId).mass,
     );
     const mesh = createPartMesh(part.variantId);
     setCondition(mesh, part.dirt, part.rust);
-    mesh.position.set(x, y, z);
+    mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
     this.parts.set(part.id, { body, collider, mesh });
     this.colliderToPartId.set(collider.handle, part.id);
@@ -165,8 +178,11 @@ export class LoosePartField {
       y: Math.max(size.y * 0.5, 0.04),
       z: Math.max(size.z * 0.5, 0.04),
     };
-    const { body, collider } = this.physics.addDynamicBox(half, { x, y, z }, itemMass(item));
-    mesh.position.set(x, y, z);
+    // x/z are absolute; subtract the origin once before the body AND the mesh.
+    const rx = x - this.origin.x;
+    const rz = z - this.origin.z;
+    const { body, collider } = this.physics.addDynamicBox(half, { x: rx, y, z: rz }, itemMass(item));
+    mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
     this.items.set(item.id, { body, collider, mesh });
     this.colliderToItemId.set(collider.handle, item.id);

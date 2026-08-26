@@ -30,6 +30,7 @@ import { carModel } from '../vehicle/carmodels';
 import { setCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
+import type { WorldOrigin } from '../world/origin';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -239,6 +240,12 @@ export class Interaction {
     private readonly onCarFreed: (car: CarState) => void,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
     private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
+    /**
+     * The floating origin. Interaction straddles both frames by nature: its rays go
+     * into Rapier (relative) while the things it drops and teleports are saved world
+     * positions (absolute). See `world/origin.ts`.
+     */
+    private readonly origin: WorldOrigin,
   ) {}
 
   /** Gives interaction a handle on the on-foot character, so enter/exit can move it. */
@@ -924,8 +931,13 @@ export class Interaction {
     // Remove from the inventory first so a dropped item can never be double-held,
     // then materialise it; spawn/spawnItem record state before building the body.
     this.inventory.remove(held.id);
-    if (held.type === 'part') this.loose.spawn(held.part, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
-    else this.loose.spawnItem(held, eyeX + dx * dist, eyeY + dy * dist, eyeZ + dz * dist);
+    // The eye is in the scene's relative frame; the loose field stores absolute,
+    // saved positions.
+    const dropX = eyeX + dx * dist + this.origin.x;
+    const dropY = eyeY + dy * dist;
+    const dropZ = eyeZ + dz * dist + this.origin.z;
+    if (held.type === 'part') this.loose.spawn(held.part, dropX, dropY, dropZ);
+    else this.loose.spawnItem(held, dropX, dropY, dropZ);
     this.sound = 'drop';
   }
 
@@ -948,7 +960,14 @@ export class Interaction {
     this.vScratch.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]).applyQuaternion(this.qScratch);
     this.world.apply({ t: 'gizmo_detach', carId, anchor: anchorId });
     // Drop the removed gizmo into the loose field at its anchor's world position.
-    this.loose.spawn(part, this.vScratch.x + t.x, this.vScratch.y + t.y, this.vScratch.z + t.z);
+    // `t` is a relative chassis translation and `loose.spawn` stores an absolute,
+    // saved position, so the origin goes back on.
+    this.loose.spawn(
+      part,
+      this.vScratch.x + t.x + this.origin.x,
+      this.vScratch.y + t.y,
+      this.vScratch.z + t.z + this.origin.z,
+    );
     resolved.vehicle.rebuild();
     this.sound = 'detach';
   }
@@ -1033,6 +1052,11 @@ export class Interaction {
     // Ground check so exiting never drops the player inside geometry. Exclude the
     // player's own capsule for the same reason as the aim ray: it is about to be
     // placed at this spot, so it must never count as the ground.
+    //
+    // The ray is RELATIVE: `exitX`/`exitZ` came off a chassis translation, and Rapier
+    // is the relative frame. The RETURN is absolute, because `Player.teleport` takes a
+    // world position — so the origin goes back on here and nowhere else, which keeps
+    // the ray and the teleport each in the frame it needs.
     const ground = this.physics.raycast(
       { x: exitX, y: t.y + 2, z: exitZ },
       { x: 0, y: -1, z: 0 },
@@ -1040,6 +1064,6 @@ export class Interaction {
       this.player?.rigidBody,
     );
     const groundY = ground ? ground.point.y : t.y - measure.halfExtents[1];
-    return { x: exitX, y: groundY, z: exitZ };
+    return { x: exitX + this.origin.x, y: groundY, z: exitZ + this.origin.z };
   }
 }
