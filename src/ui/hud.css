@@ -163,6 +163,18 @@ body {
   stroke-linecap: round;
 }
 
+.hud-clock-tick {
+  stroke: var(--hud-fg);
+  stroke-width: 1;
+  stroke-linecap: round;
+  opacity: 0.48;
+}
+
+.hud-clock-tick.is-quarter {
+  stroke-width: 1.35;
+  opacity: 0.7;
+}
+
 .hud-fuel-icon {
   fill: var(--hud-fg-dim);
 }
