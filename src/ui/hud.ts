@@ -312,6 +312,24 @@ export class Hud {
     track.setAttribute('r', String(R));
     svg.appendChild(track);
 
+    // Twelve numberless hour marks, inside the thick outer track so they read as
+    // printing on the face rather than as teeth on its rim. Quarter-hours are only
+    // two viewBox units longer: enough to orient the eye immediately, not enough to
+    // turn a tiny dashboard clock into a labelled wall clock.
+    for (let hour = 0; hour < 12; hour++) {
+      const deg = hour * 30 - 90; // 12 o'clock is straight up in SVG coordinates.
+      const quarter = hour % 3 === 0;
+      const inner = polar(CX, CY, quarter ? R - 15 : R - 12, deg);
+      const outer = polar(CX, CY, R - 7, deg);
+      const tick = svgEl('line');
+      tick.setAttribute('class', quarter ? 'hud-clock-tick is-quarter' : 'hud-clock-tick');
+      tick.setAttribute('x1', inner.x.toFixed(2));
+      tick.setAttribute('y1', inner.y.toFixed(2));
+      tick.setAttribute('x2', outer.x.toFixed(2));
+      tick.setAttribute('y2', outer.y.toFixed(2));
+      svg.appendChild(tick);
+    }
+
     const needle = svgEl('line');
     needle.setAttribute('class', 'hud-dial-needle');
     needle.setAttribute('x1', String(CX));

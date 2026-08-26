@@ -483,10 +483,24 @@ void main() {
   col += uSunColor * disc * 2.0;
   col += uSunGlowColor * glow * uSunGlowIntensity;
 
-  // Moon: a dim cool disc opposite the sun, faded in only at night.
+  // Moon: an OPAQUE warm-white body with limb shading and a broad, weak halo.
+  //
+  // It is reflected sunlight, not a dim blue emitter: mix replaces the sky under
+  // the disc instead of adding a translucent tint to it, while the halo is additive
+  // scattered light and therefore genuinely transparent. Stars are a separate point
+  // layer rendered in front of the dome, so STAR_FRAGMENT masks this same angular
+  // disc explicitly; RGB opacity alone cannot hide them.
   float md = dot(dir, uMoonDir);
-  float mdisc = smoothstep(0.99955, 0.99985, md);
-  col += vec3(0.66, 0.74, 0.94) * mdisc * uMoonAmount * 0.6;
+  float mdisc = smoothstep(0.99945, 0.99982, md);
+  float mcore = smoothstep(0.99958, 0.99994, md);
+  vec3 moonSurface = mix(vec3(0.70, 0.72, 0.70), vec3(1.10, 1.03, 0.86), mcore);
+  col = mix(col, moonSurface, mdisc * uMoonAmount);
+
+  // About a five-degree optical halo around a roughly two-degree disc. Weak enough
+  // that the moon remains a thing with an edge, strong enough to lift the nearby sky
+  // and read as bright rather than as a flat decal.
+  float mhalo = smoothstep(0.9950, 0.99955, md) * (1.0 - mdisc);
+  col += vec3(0.72, 0.80, 1.00) * mhalo * uMoonAmount * 0.24;
 
   gl_FragColor = vec4(col, 1.0);
 
@@ -535,15 +549,17 @@ varying float vThresh;
 varying vec3 vColor;
 varying float vTwinkle;
 varying float vAlt;
+/** Unit sky direction, for masking stars behind the opaque moon disc. */
+varying vec3 vSkyDir;
 
 void main() {
   vColor = aColor;
   vBright = aBright;
   vThresh = aThresh;
-  // Altitude above the horizon, 0 at the horizon and 1 at the zenith. The dome is
-  // only ever translated to the camera (never rotated), so the star's own
-  // direction IS its altitude and no matrix is needed.
-  vAlt = normalize(position).y;
+  // Altitude and full sky direction. The dome/star root is only translated to the
+  // camera (never rotated), so normalised model position IS a world sky direction.
+  vSkyDir = normalize(position);
+  vAlt = vSkyDir.y;
 
   // Scintillation, in ALPHA only. Two incommensurate sines at a few hertz, so it
   // shimmers rather than pulses and never settles into a visible loop.
@@ -586,6 +602,8 @@ void main() {
 const STAR_FRAGMENT = /* glsl */ `
 uniform float uOpacity;
 uniform float uDens01;
+uniform vec3 uMoonDir;
+uniform float uMoonAmount;
 /**
  * How bright the sky near the horizon is: 1 through dusk and dawn, 0 once the sky
  * is properly dark. Only the extinction below is scaled by it.
@@ -596,6 +614,7 @@ varying float vThresh;
 varying vec3 vColor;
 varying float vTwinkle;
 varying float vAlt;
+varying vec3 vSkyDir;
 
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
@@ -619,8 +638,17 @@ void main() {
   // uTwilight is 0 there, so this whole term collapses to 1.
   float extinction = mix(1.0, smoothstep(0.0, 0.16, vAlt), uTwilight);
 
-  float a = min(1.0, vBright * vTwinkle * 1.75 * vis * uOpacity * extinction * mask);
-  if (a < 0.004) discard;
+  // The moon is painted into the dome, while stars are a separate point layer in
+  // front of it — so an RGB "opaque" moon alone can never hide a star. Mask the
+  // moon's angular disc here, a hair wider than the visible limb so antialiased star
+  // points cannot leak through its edge. The halo remains transparent to stars, as
+  // scattered light should be.
+  float moonDisc = smoothstep(0.99945, 0.99972, dot(normalize(vSkyDir), uMoonDir));
+  float moonOcclusion = moonDisc * uMoonAmount;
+
+  float a =
+    min(1.0, vBright * vTwinkle * 1.75 * vis * uOpacity * extinction * mask) *
+    (1.0 - moonOcclusion);
 
   gl_FragColor = vec4(vColor, a);
   #include <colorspace_fragment>
@@ -955,6 +983,8 @@ export class Sky {
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
         uTime: this.uStarTime,
         uTwilight: this.uStarTwilight,
+        uMoonDir: { value: this.uMoonDir },
+        uMoonAmount: this.uMoonAmount,
       },
       transparent: true,
       depthWrite: false,
@@ -1023,6 +1053,8 @@ export class Sky {
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
         uTime: this.uStarTime,
         uTwilight: this.uStarTwilight,
+        uMoonDir: { value: this.uMoonDir },
+        uMoonAmount: this.uMoonAmount,
       },
       transparent: true,
       depthWrite: false,
