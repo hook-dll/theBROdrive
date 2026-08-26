@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
-import type { Road } from '../world/road';
+import { ROAD_HALF_WIDTH, type Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 
 /**
@@ -44,6 +44,10 @@ const MAX_FALLING = 8;
 
 /** Minimum clearance kept above the terrain while flying. */
 const MIN_CLEARANCE = 1.4;
+/** Distance from the perch (m) inside which a landing bird may drop below that
+ *  clearance to actually reach it. Short enough that the ground it descends over is
+ *  the perch's own patch of road. */
+const LAND_FLARE = 4;
 /** Birds are kept within this horizontal distance of their perch, so the road
  *  projection hint (the group's arclength) never goes stale. */
 const HOME_RADIUS = 60;
@@ -76,13 +80,29 @@ const SALT_AIR = 0xf7a2;
 const SALT_YAW = 0x1803;
 const SALT_BUDGET = 0x2944;
 
-// Perch geometry — *approximations* of the pole line and cacti, never reads of
-// another task's chunk content. Birds only need a plausible resting spot.
-const POLE_LATERAL = 6.5;
-const POLE_HEIGHT = 6.4;
-const CACTUS_MIN_LATERAL = 34;
-const CACTUS_SPREAD = 60;
-const CACTUS_HEIGHT = 2.3;
+// Perches. Birds rest ON THE ROAD, and the reason is exactness rather than romance.
+//
+// They used to rest on *approximations* of the pole line and the cacti — a height and
+// a lateral offset that a pole or a cactus would plausibly have, deliberately never
+// reading another provider's chunk content. The trouble is that a plausible perch is
+// not a perch: the pole line runs down ONE side at a fixed 6 m and only every few
+// dozen metres, and the cactus scatter puts a plant roughly once per thousand square
+// metres, so a bird placed at "cactus height, 34 to 94 m out" was almost never on a
+// cactus. It was sitting on nothing, six or two metres up, which is exactly what it
+// looked like.
+//
+// The road is the one surface in the world whose height is known EXACTLY at an
+// arbitrary point — `heightFromFrame` inside the corridor returns `roadSurfaceY`, the
+// same function the ribbon's own vertices come from, camber, bumps and potholes
+// included. A bird standing on it cannot hover, and a flock scattering off the asphalt
+// as a car comes is worth more than one perched on scenery that is not there.
+/** Widest lateral offset a bird stands at: on the asphalt, clear of the shoulder. */
+const PERCH_LATERAL = ROAD_HALF_WIDTH - 0.5;
+/** Metres of road a flock is strung along, so it is a scatter and not a line. */
+const PERCH_S_SPREAD = 7;
+/** Belly clearance above the surface. The geometry's belly sits 0.02 below its own
+ *  origin, so this is the difference between standing on the road and standing in it. */
+const PERCH_STAND = 0.04;
 
 // ---------------------------------------------------------------------------
 // Species
@@ -99,7 +119,6 @@ interface SpeciesDef {
   readonly cruiseAlt: number;
   readonly flapRate: number;
   readonly behavior: 'wander' | 'circle';
-  readonly perch: 'pole' | 'cactus' | 'mixed';
   readonly minCount: number;
   readonly maxCount: number;
   readonly flightBudget: number;
@@ -112,19 +131,19 @@ interface SpeciesDef {
 const SPECIES: readonly SpeciesDef[] = [
   {
     name: 'crow', mass: 0.45, scale: 0.9, color: 0x2f2a24,
-    cruiseSpeed: 9, cruiseAlt: 16, flapRate: 10, behavior: 'wander', perch: 'pole',
+    cruiseSpeed: 9, cruiseAlt: 16, flapRate: 10, behavior: 'wander',
     minCount: 2, maxCount: 5, flightBudget: 24, turnRate: 2.2, bankGain: 0.35,
     climbRate: 5, airborneBias: 0.35,
   },
   {
     name: 'vulture', mass: 9.2, scale: 2.6, color: 0x262019,
-    cruiseSpeed: 7, cruiseAlt: 55, flapRate: 2.6, behavior: 'circle', perch: 'mixed',
+    cruiseSpeed: 7, cruiseAlt: 55, flapRate: 2.6, behavior: 'circle',
     minCount: 1, maxCount: 3, flightBudget: 120, turnRate: 0.7, bankGain: 0.6,
     climbRate: 2.5, airborneBias: 0.85,
   },
   {
     name: 'sparrow', mass: 0.03, scale: 0.38, color: 0x7a6542,
-    cruiseSpeed: 11, cruiseAlt: 10, flapRate: 16, behavior: 'wander', perch: 'cactus',
+    cruiseSpeed: 11, cruiseAlt: 10, flapRate: 16, behavior: 'wander',
     minCount: 3, maxCount: 6, flightBudget: 16, turnRate: 3.4, bankGain: 0.28,
     climbRate: 6, airborneBias: 0.3,
   },
@@ -524,37 +543,42 @@ export class BirdFlock {
     const count =
       species.minCount +
       Math.floor(hash01(seed, g, SALT_COUNT) * (species.maxCount - species.minCount + 1));
-    const perchKind =
-      species.perch === 'pole'
-        ? 'pole'
-        : species.perch === 'cactus'
-          ? 'cactus'
-          : hash01(seed, g, SALT_OFFSET) < 0.5
-            ? 'pole'
-            : 'cactus';
-    const lateral =
-      perchKind === 'pole'
-        ? side * (POLE_LATERAL + hash01(seed, g, SALT_OFFSET) * 1.5)
-        : side * (CACTUS_MIN_LATERAL + hash01(seed, g, SALT_OFFSET) * CACTUS_SPREAD);
-    const perchHeight = perchKind === 'pole' ? POLE_HEIGHT : CACTUS_HEIGHT;
-
-    this.road.offsetPoint(s, lateral, this.scratchPerch);
-    const groundY = this.terrain.heightAt(this.scratchPerch.x, this.scratchPerch.z, s);
-    const perchY = groundY + perchHeight;
     // `road.offsetPoint` is ABSOLUTE (the road is the absolute f64 frame), but a
     // bird's stored position is RELATIVE (its instance matrix is f32). Subtract the
-    // origin once here so every bird in the group is born relative; `groundY` and
-    // `perchY` are heights and never touch the origin.
+    // origin once here so every bird in the group is born relative; the heights are
+    // heights and never touch the origin.
     const ox = this.origin.x;
     const oz = this.origin.z;
 
     for (let k = 0; k < count; k++) {
       if (this.activeCount >= MAX_BIRDS) break;
-      const jx = (hash01(seed, g, k, SALT_JITTER) - 0.5) * 0.9;
-      const jz = (hash01(seed, g, k, SALT_JITTER + 1) - 0.5) * 0.9;
+      // Each bird gets its OWN road frame point rather than a jittered copy of the
+      // group's. The road is cambered and has bumps and potholes in it, so a bird two
+      // metres away is standing at a different height; one shared height would leave
+      // half a flock hovering and the other half sunk, which is the bug this replaces
+      // in miniature.
+      const bs = s + (hash01(seed, g, k, SALT_JITTER) - 0.5) * PERCH_S_SPREAD;
+      const lateral = side * PERCH_LATERAL * hash01(seed, g, k, SALT_OFFSET);
+      this.road.offsetPoint(bs, lateral, this.scratchPerch);
+      const surfaceY = this.terrain.heightFromFrame(
+        this.scratchPerch.x,
+        this.scratchPerch.z,
+        lateral,
+        bs,
+      );
       const b = this.birds[this.activeCount]!;
       this.activeCount++;
-      this.initBird(b, g, s, species, this.scratchPerch.x + jx - ox, this.scratchPerch.z + jz - oz, groundY, perchY, k);
+      this.initBird(
+        b,
+        g,
+        s,
+        species,
+        this.scratchPerch.x - ox,
+        this.scratchPerch.z - oz,
+        surfaceY,
+        surfaceY + PERCH_STAND,
+        k,
+      );
     }
   }
 
@@ -812,8 +836,17 @@ export class BirdFlock {
     b.z += b.vz * dt;
 
     // ABSOLUTE field, RELATIVE bird — add the origin (see `fly`).
+    //
+    // The flying floor CANNOT apply all the way in. It is there to stop a bird flying
+    // into a dune, but a landing bird is trying to reach the ground, and clamping it to
+    // `MIN_CLEARANCE` above the terrain the whole way meant it could never close the
+    // last 1.4 m to a perch lower than that: it hovered at the clamp, still in
+    // `landing`, forever. The old cactus and pole perches were 2.3 m and 6.4 m up and
+    // so cleared it by accident. Inside the flare the floor is the perch itself, which
+    // is on the road and therefore cannot be inside anything.
     const ground = this.terrain.heightAt(b.x + this.origin.x, b.z + this.origin.z, b.sHint);
-    if (b.y < ground + MIN_CLEARANCE) b.y = ground + MIN_CLEARANCE;
+    const floor = dist < LAND_FLARE ? b.landY : Math.max(b.landY, ground + MIN_CLEARANCE);
+    if (b.y < floor) b.y = floor;
   }
 
   private startleNear(ox: number, oy: number, oz: number): void {
