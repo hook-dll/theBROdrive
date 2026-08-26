@@ -78,7 +78,37 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Sand]: {
     label: 'sand',
-    frictionSlip: 0.95,
+    /**
+     * FORWARD traction, and the highest of the loose surfaces on purpose — higher than
+     * gravel, which reads wrong until you ask what the tyre is doing. A tyre on gravel
+     * shears a thin layer of stones over hardpan. A tyre on sand sinks in and builds a
+     * wedge of material ahead of the contact patch, and pushes against that. Forward,
+     * sand gives; sideways it gives up completely, which is what `sideFriction` says.
+     *
+     * The number is set by a budget, not by feel: `frictionSlip *
+     * LONGITUDINAL_GRIP_FRACTION` is the longitudinal mu, and the grade a stopped car
+     * can pull away on is `(mu * drivenShare - rollingResistance) / (1 -/+ mu * h/L)`.
+     * At the old 0.95 that was ELEVEN PERCENT for a two-wheel-drive saloon, which is
+     * the whole reason the desert had to be glass: the dune field's own peak slope was
+     * 7%, just under it, and the moment the near desert got chop and scoops in it (see
+     * `Terrain.detailAt`) a car that stopped could only reverse back out of its own
+     * tracks. Measured by tools/desert-ride.ts: 6.7% of every (spot, heading) pair in
+     * the near desert was a direction a stopped car could not pull away in. At 1.35 the
+     * budget is 20% and that falls to 0.7%.
+     *
+     * It also restores a capability the game lost. The `sport` tyre compound used to
+     * hand out 35% more longitudinal grip, and the surface where anyone noticed was
+     * sand; when that became traction control (see TYRE_COMPOUNDS in vehicle.ts) the
+     * sand traction went with it, because TCS adds nothing — it only stops a wheel
+     * wasting what it already makes. There is nothing for it to un-waste when the tyre
+     * is simply out of grip, which is why the lamp lights and the car stays put.
+     *
+     * The side effect is honest and intended: the friction cone is also the lateral
+     * ceiling, so ultimate cornering grip on sand rises with it. `sideFriction` at 0.42
+     * still builds that force lazily, so sand still washes wide and still slides — it
+     * just no longer runs out of road-going traction on a one-in-eight slope.
+     */
+    frictionSlip: 1.35,
     sideFriction: 0.42,
     rollingResistance: 0.075,
     roughness: 0.05,

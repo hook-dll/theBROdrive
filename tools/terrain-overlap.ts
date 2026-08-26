@@ -65,6 +65,10 @@ function fakeContext(chunkIndex: number, road: Road, terrain: Terrain): ChunkCon
     road,
     terrain,
     hasPhysics: false,
+    // Providers subtract these from every f32 coordinate they write; leaving them
+    // undefined makes the whole vertex buffer NaN and every check below vacuous.
+    originX: 0,
+    originZ: 0,
   } as unknown as ChunkContext;
 }
 
