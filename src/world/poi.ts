@@ -4,15 +4,14 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
-import type { GameWorld } from '../game/state';
-import type { FuelType } from '../parts/registry';
+import type { CarState, GameWorld } from '../game/state';
+import { coolantCapacity, oilCapacity, variant, type FuelType } from '../parts/registry';
 import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
 import { makeFlatMaterial } from '../render/materials';
 import { carModelMeasure, createStaticCarModel } from '../render/carmodel';
-import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
+import { CAR_MODELS, SPAWNABLE_CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
-import type { WreckField } from './wrecks';
 import { jobAt, type FreightField } from './freight';
 import type { TrailerField } from '../vehicle/trailer';
 
@@ -381,7 +380,6 @@ function buildPoi(
   colliders: RAPIER.Collider[],
   disposables: Disposable[],
   loose: LoosePartField,
-  wrecks: WreckField,
   trailers: TrailerField,
   freight: FreightField,
 ): void {
@@ -390,7 +388,7 @@ function buildPoi(
 
   switch (poi.kind) {
     case 'roadside_wrecks':
-      buildWrecks(ctx, poi, group, bodies, colliders, wrecks);
+      buildWrecks(ctx, poi, group, bodies, colliders);
       break;
     case 'gas_stop':
       buildGasStop(ctx, poi, group, bodies, colliders, loose, trailers, counter, shouldLoot);
@@ -587,22 +585,51 @@ function buildFreight(
 }
 
 /**
- * Fraction of wreck fields that hide one derelict still worth a wrench. Cars are
- * the scarcest thing in the game now that nothing spawns them, and a runner behind
- * every third pile of scrap is the difference between scavenging and shopping.
+ * Fraction of roadside wreck fields containing one working car. The roll is per
+ * field, not per shell: most stops are wrecks only, while roughly one in three has
+ * exactly one roadworthy car parked among them.
  */
-const REVIVABLE_FIELD_CHANCE = 0.34;
-/** Domain tag for the revivable roll, distinct from the placement stream. */
-const REVIVE_DOMAIN = 0x52455631; // 'REV1'
+const WORKING_CAR_CHANCE = 0.34;
+/** Domain tag for the working-car roll, distinct from the placement stream. */
+const WORKING_CAR_DOMAIN = 0x52554e31; // 'RUN1'
+
+function makeWorkingCar(
+  ctx: ChunkContext,
+  poi: Poi,
+  slot: number,
+  def: CarModelDef,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+): CarState {
+  const engine = variant(def.engineId).engine;
+  const halfYaw = yaw / 2;
+  return {
+    id: ctx.world.generatedPartId('poi-car', poi.index, slot),
+    modelId: def.id,
+    gizmos: {},
+    stickers: [],
+    // Enough fuel to make the find immediately useful, but not a free full tank.
+    fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
+    coolantLitres: engine ? coolantCapacity(engine) : 0,
+    oilLitres: engine ? oilCapacity(engine) : 0,
+    storage: new Array(def.storageCells).fill(null),
+    odometer: Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 4) * 240_000),
+    x,
+    y,
+    z,
+    qx: 0,
+    qy: Math.sin(halfYaw),
+    qz: 0,
+    qw: Math.cos(halfYaw),
+  };
+}
 
 /**
- * One to three derelict complete models, half-sunk and scattered as static scenery.
- *
- * Some fields hide exactly one that can be revived. It is posed apart from the
- * others — upright, barely sunk, facing along the road — so it reads as a car that
- * stopped rather than a car that died, and the player can tell from the roadside
- * whether a field is worth walking into. Once revived it is a real car in state and
- * this skips its shell for good.
+ * One to three complete models scattered through a roadside wreck field. Every
+ * shell draws from the full catalogue. Rarely, one upright slot instead becomes a
+ * working car drawn only from the Quaternius and Soviet roadworthy pool.
  */
 function buildWrecks(
   ctx: ChunkContext,
@@ -610,57 +637,64 @@ function buildWrecks(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  wrecks: WreckField,
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
   const oz = ctx.originZ;
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
 
-  // Which slot (if any) is the runner. Rolled once per field so a field never has
-  // two, and off the REVIVE domain so adding this did not reshuffle the scenery.
-  const hasRunner = hash01(poi.variantSeed, REVIVE_DOMAIN, 0) < REVIVABLE_FIELD_CHANCE;
-  const runnerSlot = hasRunner ? Math.floor(hash01(poi.variantSeed, REVIVE_DOMAIN, 1) * count) : -1;
+  const hasWorkingCar =
+    hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 0) < WORKING_CAR_CHANCE;
+  const workingSlot = hasWorkingCar
+    ? Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 1) * count)
+    : -1;
 
   for (let w = 0; w < count; w++) {
-    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
+    const isWorkingCar = w === workingSlot;
+    const pool = isWorkingCar ? SPAWNABLE_CAR_MODELS : CAR_MODELS;
+    const def: CarModelDef = pick(pool, poi.variantSeed, w, 10);
     const half = carModelMeasure(def.id).halfExtents;
-    const isRunner = w === runnerSlot;
-    const wreckId = `wreck:${poi.index}:${w}`;
+    const carId = ctx.world.generatedPartId('poi-car', poi.index, w);
 
-    // Driven away in an earlier session: the car is in `cars` and the shell must
-    // not come back on top of it.
-    if (isRunner && ctx.world.state.revivedWrecks.includes(wreckId)) continue;
+    // A generated working car stays in world state after it is driven away. Never
+    // rebuild a shell or a second car at its original POI.
+    if (isWorkingCar && ctx.world.state.cars[carId]) continue;
 
-    // Scatter around the anchor, half-sunk, some facing the wrong way.
     const sDelta = (hash01(poi.variantSeed, w, 11) - 0.5) * 16;
     const latDelta = (hash01(poi.variantSeed, w, 12) - 0.5) * 12;
     const p = groundPoint(ctx, poi, sDelta, latDelta);
 
     const yawRoll = hash01(poi.variantSeed, w, 13);
     let yaw = anchor.heading + (hash01(poi.variantSeed, w, 14) - 0.5) * 0.6;
-    if (!isRunner) {
-      if (yawRoll < 0.32) yaw += Math.PI; // wrong way round
-      else if (yawRoll > 0.82) yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
+    if (!isWorkingCar) {
+      if (yawRoll < 0.32) yaw += Math.PI;
+      else if (yawRoll > 0.82) {
+        yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
+      }
     }
 
-    // The runner sits level and on its wheels. A sunk, rolled shell would drop a
-    // revived chassis into the ground and the solver would fire it into the sky.
-    const sink = isRunner ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
-    const roll = isRunner ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3;
-    const pitch = isRunner ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
-
+    const sink = isWorkingCar ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
+    const roll = isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3;
+    const pitch = isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
     const originY = p.y + half[1] - sink;
-    const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
 
-    // A complete static model. It must already be preloaded — the lead preloads the
-    // whole catalogue before any chunk is built, so no guard is needed here.
+    // Distant scenery shows the future working car as an upright static model.
+    // Promotion into the physics band replaces it with a real Vehicle.
+    if (isWorkingCar && ctx.hasPhysics) {
+      ctx.world.apply({
+        t: 'car_add',
+        car: makeWorkingCar(ctx, poi, w, def, p.x, originY, p.z, yaw),
+      });
+      continue;
+    }
+
+    const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
     const shell = createStaticCarModel(def.id);
     setFromMatrix(shell, matrix);
     group.add(shell);
 
-    // A box approximates the shell well enough for a solid, non-drivable obstacle.
-    const collider = addStaticCollider(
+    // A box approximates a static shell well enough for a solid obstacle.
+    addStaticCollider(
       ctx,
       new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
       matrix,
@@ -668,19 +702,6 @@ function buildWrecks(
       bodies,
       colliders,
     );
-
-    // No collider means a scenery-only chunk outside the physics band; there is
-    // nothing to aim a wrench at out there, so registration waits for promotion.
-    const body = collider?.parent();
-    if (isRunner && collider && body) {
-      wrecks.register(
-        { id: wreckId, modelId: def.id, x: p.x, y: originY, z: p.z, yaw },
-        shell,
-        body,
-        collider,
-        bodies,
-      );
-    }
   }
 }
 
@@ -1018,10 +1039,9 @@ interface Disposable {
  * per POI (guarded by `lootedPois`) and its dynamic bodies are owned by
  * `LoosePartField`, not by the chunk — so chunk unload never tears loot down.
  *
- * Two pieces of POI content have an identity outside the chunk and register for it:
- * a revivable wreck (so the aim ray can name it) and the freight sign and pallet
- * (so the aim ray can name them, and so the destination sign can be lit). `dispose`
- * drops both, keyed on this chunk's own body array.
+ * The freight sign and pallet have identities outside the chunk so the aim ray can
+ * name them and the destination sign can be lit. `dispose` drops those registrations,
+ * keyed on this chunk's own body array.
  *
  * `setLamps` is where the destination sign lights. It is the per-frame push the
  * streamer already makes to every live chunk, which is why a job starting or
@@ -1033,7 +1053,6 @@ export class PoiProvider implements ChunkProvider {
 
   constructor(
     private readonly loose: LoosePartField,
-    private readonly wrecks: WreckField,
     private readonly trailers: TrailerField,
     private readonly freight: FreightField,
   ) {}
@@ -1057,13 +1076,11 @@ export class PoiProvider implements ChunkProvider {
         colliders,
         disposables,
         this.loose,
-        this.wrecks,
         this.trailers,
         this.freight,
       );
     }
 
-    const wrecks = this.wrecks;
     const freight = this.freight;
     const world = ctx.world;
     return {
@@ -1072,7 +1089,6 @@ export class PoiProvider implements ChunkProvider {
       colliders,
       setLamps: (on) => freight.updateSigns(on, world.state.job?.toPoi ?? null),
       dispose: () => {
-        wrecks.forgetChunk(bodies);
         freight.forgetChunk(bodies);
         for (const d of disposables) d.dispose();
       },

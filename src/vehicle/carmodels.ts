@@ -264,12 +264,9 @@ export interface CarModelDef {
   readonly viewFrac: readonly [number, number, number];
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
   /**
-   * Whether the player may spawn this model from the pause menu or the touch CAR
-   * button. False does NOT remove it from the world: the PSX pack stays in the
-   * wreck fields and roadside debris, where its flat-shaded, low-detail bodies are
-   * exactly right for something half-buried in sand and never looked at closely.
-   * What they are not is a car anyone would choose to drive when the rest of the
-   * catalogue is available, so they are off the menu and still in the desert.
+   * Whether this model belongs to a roadworthy pack. Only Quaternius and Soviet
+   * cars may appear as working vehicles or in the development spawn menu; every
+   * other model remains available to the static world-wreck pool.
    */
   readonly spawnable: boolean;
   /**
@@ -289,8 +286,6 @@ type Entry = Omit<
   CarModelDef,
   'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors' | 'spawnable' | 'storageCells'
 > & {
-  /** Absent means spawnable: only the debris-only packs say otherwise. */
-  readonly spawnable?: boolean;
   /** Model file name within the pack directory named by `dir`. */
   readonly glb?: string;
   /** Directory containing `glb`; required for imported models. */
@@ -528,13 +523,10 @@ const PSX_SPECS: readonly PsxSpec[] = [
 /**
  * One entry per body, plus one per extra livery over the same geometry.
  *
- * The whole pack is `spawnable: false`: these are the wrecks in the desert, not
- * showroom stock. Every one of them still loads, drives and can be driven if the
- * player digs one out — they are simply off the spawn menu.
+ * These models remain in the complete catalogue for static world wrecks.
  */
 const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
   const base: Entry = {
-    spawnable: false,
     id: spec.id,
     label: spec.label,
     dir: PSX,
@@ -730,7 +722,6 @@ interface LowPolySpec {
   readonly bodyClass?: BodyClass;
   readonly suspension?: SuspensionTuning;
   readonly storageCells?: number;
-  readonly spawnable?: boolean;
   readonly viewFrac?: readonly [number, number, number];
 }
 
@@ -753,7 +744,6 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     storageCells: 1,
     // Giant 1.9 m wheels on a 4.9 m body read as a sideshow, not road stock. It
     // stays in the desert as scenery but is never something the player chooses.
-    spawnable: false,
   },
   {
     id: 'lp_suv',
@@ -943,7 +933,6 @@ const LOWPOLY_SPECS: readonly LowPolySpec[] = [
     suspension: SUSP_TRUCK,
     // Municipal machinery, not personal transport: it belongs parked at a station
     // or abandoned in the sand, not on the spawn menu.
-    spawnable: false,
   },
   {
     id: 'lp_limousine',
@@ -1082,7 +1071,6 @@ const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
   suspension: spec.suspension,
   steerLock: spec.steerLock,
   rearDriveBias: spec.rearDriveBias,
-  spawnable: spec.spawnable ?? true,
   viewFrac: spec.viewFrac,
 }));
 
@@ -1605,14 +1593,14 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   rearDriveBias: e.rearDriveBias,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
-  spawnable: e.spawnable ?? true,
+  spawnable: e.dir === QUATERNIUS || e.dir === SOVIET,
   storageCells: e.storageCells ?? STORAGE_BY_CLASS[e.bodyClass],
 }));
 
 /**
- * What the player may spawn. Everything else in `CAR_MODELS` still generates: wreck
- * fields, roadside debris and POI scenery all draw from the full catalogue, so the
- * PSX bodies keep appearing in the desert without being on the menu.
+ * The only roadworthy model pool: Quaternius Realistic Car Pack and Low Poly
+ * Soviet Car Pack. It feeds both the development spawn menu and the rare working
+ * cars generated at POIs. `CAR_MODELS` remains the full static-wreck catalogue.
  */
 export const SPAWNABLE_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
   (m) => m.spawnable,
