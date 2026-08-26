@@ -60,6 +60,124 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
+ *  Launch cover                                                      *
+ * ------------------------------------------------------------------ */
+
+.launch-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--hud-fg);
+  font-family: var(--hud-font);
+}
+
+/* The title form and loading cover share one art-directed still. The oversized
+   pseudo-element gives the blur room to breathe without exposing soft edges. */
+.menu-title-screen::before,
+.launch-loading::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  z-index: -2;
+  background: url('../../optimized_bg.webp') center 48% / cover no-repeat;
+  filter: blur(5px);
+  transform: scale(1.025);
+}
+
+.menu-title-screen::after,
+.launch-loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(90% 75% at 50% 43%, rgba(10, 8, 5, 0.18), rgba(4, 3, 2, 0.66)),
+    linear-gradient(rgba(11, 9, 6, 0.18), rgba(11, 9, 6, 0.42));
+}
+
+/* A cheap instant stand-in for the trailer's real mesh: black cross-ply tyre,
+   five steel spokes and an off-centre valve so rotation remains readable. */
+.launch-wheel {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border: 12px solid #17130f;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 3deg,
+      #342c22 0deg 7deg,
+      #17130f 7deg 14deg
+    );
+  box-shadow:
+    inset 0 0 0 2px rgba(236, 223, 194, 0.15),
+    0 8px 22px rgba(0, 0, 0, 0.52);
+  animation: launch-wheel-spin 0.9s linear infinite;
+}
+
+.launch-wheel-rim {
+  position: absolute;
+  inset: 7px;
+  border: 3px solid #9d927d;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 8deg,
+      #aaa08a 0deg 9deg,
+      transparent 9deg 63deg,
+      #aaa08a 63deg 72deg
+    ),
+    #302a22;
+  box-shadow: inset 0 0 0 5px #1d1914;
+}
+
+.launch-wheel-rim::before {
+  content: '';
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  left: 50%;
+  top: 50%;
+  border: 3px solid #c0b49a;
+  border-radius: 50%;
+  background: #27221b;
+  transform: translate(-50%, -50%);
+}
+
+.launch-wheel-rim::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 11px;
+  left: 50%;
+  top: -8px;
+  border-radius: 1px;
+  background: #d0c3a5;
+}
+
+.launch-loading-text {
+  position: relative;
+  z-index: 1;
+  font-family: 'Courier New', ui-monospace, 'DejaVu Sans Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+
+@keyframes launch-wheel-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ------------------------------------------------------------------ *
  *  HUD                                                               *
  * ------------------------------------------------------------------ */
 
@@ -100,7 +218,7 @@ body {
   --gum-grow: 0;
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: calc(50% + 6vmin);
   z-index: 5;
   width: 150vmax;
   height: 150vmax;
@@ -331,46 +449,6 @@ body {
   padding: 0 2px;
 }
 
-/* Boot cells. Sits above the carried strip, on the same centreline, so putting a
-   thing from one into the other is a short vertical glance. */
-.hud-boot {
-  position: absolute;
-  left: 50%;
-  bottom: 96px;
-  transform: translateX(-50%);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 6px;
-  max-width: 60vw;
-  padding: 8px 12px;
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
-  pointer-events: none;
-}
-
-.hud-boot-title {
-  width: 100%;
-  text-align: center;
-  color: var(--hud-fg);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-}
-
-.hud-boot-cell {
-  border: 1px solid var(--hud-border);
-  color: var(--hud-fg);
-  padding: 4px 9px;
-  font-size: 12px;
-  letter-spacing: 0.03em;
-}
-
-/* An empty cell still draws, so the boot's capacity is visible without a count. */
-.hud-boot-cell.is-empty {
-  color: var(--hud-fg-dim);
-  opacity: 0.5;
-}
 
 .hud-inv-slot.is-selected .hud-inv-key {
   opacity: 1;
@@ -525,6 +603,12 @@ body {
   --menu-rule: rgba(236, 223, 194, 0.24);
   --menu-accent: #e2703a;
   --menu-mono: 'Courier New', ui-monospace, 'DejaVu Sans Mono', monospace;
+}
+
+.menu-title-screen {
+  overflow: hidden;
+  isolation: isolate;
+  background: none;
 }
 
 .menu-panel {

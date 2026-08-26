@@ -107,6 +107,7 @@ let registeredIds: number[] = [];
   check('breakables in a physics chunk', breakableCount > 0, `${breakableCount} registered`);
   check('none in a scenery-only chunk', farCount === 0, `${farCount} registered`);
   check('saguaro has pieces', (propPieces('saguaro')?.length ?? 0) === 5, `${propPieces('saguaro')?.length} pieces`);
+  check('barrel cactus has pieces', (propPieces('barrel')?.length ?? 0) === 3, `${propPieces('barrel')?.length} pieces`);
   check('boulders do not break', propPieces('boulder') === null, 'no pieces');
 }
 
@@ -160,7 +161,7 @@ if (!target) {
   const prop = target;
   const bodiesBefore = physics.world.bodies.len();
 
-  // A car arriving at the plant, nose on, at 40 km/h.
+  // A car barely pressing into the plant nose-on at 0.02 m/s.
   const impactor: Impactor = {
     x: prop.x,
     y: prop.y + 0.6,
@@ -171,15 +172,16 @@ if (!target) {
     halfLength: 2.1,
     vx: 0,
     vy: 0,
-    vz: 11.1,
+    vz: 0.02,
   };
 
-  // Too slow first: nothing may happen at a crawl.
-  debris.update({ ...impactor, vz: 1.0 });
-  check('a crawl breaks nothing', prop.collider.isEnabled(), 'collider still on');
+  // Resting beside a plant is harmless; any actual vehicle movement through it breaks.
+  debris.update({ ...impactor, vz: 0 });
+  check('a parked car breaks nothing', prop.collider.isEnabled(), 'collider still on');
 
   debris.update(impactor);
-  check('collider switched off', !prop.collider.isEnabled(), 'disabled');
+  check('a crawl switches collider off', !prop.collider.isEnabled(), 'disabled');
+
   check('recorded in state', world.state.flattenedProps.includes(prop.id), `id ${prop.id}`);
 
   const matrix = new THREE.Matrix4();

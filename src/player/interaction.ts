@@ -26,10 +26,23 @@ import type { Vehicle } from '../vehicle/vehicle';
 import { jobAt, type FreightField } from '../world/freight';
 import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
+import {
+  intersectTrunkGrid,
+  TRUNK_CELL_COUNT,
+  TRUNK_CELL_HEIGHT,
+  TRUNK_GRID_DEPTH,
+  TRUNK_ROWS,
+  trunkGridCentreY,
+  trunkGridWidth,
+  type TrunkGridRayHit,
+  type TrunkOwnerKind,
+  type TrunkViewState,
+} from '../vehicle/trunk';
 import { setCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
+import type { WreckTrunkField } from '../world/wrecktrunks';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -97,7 +110,7 @@ type Target =
   | { kind: 'trailer'; trailerId: string }
   | { kind: 'pallet'; poiIndex: number }
   | { kind: 'freight-sign'; poiIndex: number }
-  | { kind: 'boot'; carId: string }
+  | { kind: 'boot'; owner: TrunkOwnerKind; id: string; cell: number | null }
   | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
@@ -112,12 +125,8 @@ export interface InteractionResult {
   sound: FoleyEvent | null;
   /** The held action running this tick, for the audio layer's continuous voices. */
   continuous: FoleyContinuous;
-  /**
-   * Boot contents while the player is looking into one, else null. Reported rather
-   * than drawn here for the same reason the sounds are: this class owns the world,
-   * not the screen.
-   */
-  boot: readonly (Item | null)[] | null;
+  /** World-attached trunk grid while the player is looking at a car's rear. */
+  boot: TrunkViewState | null;
 }
 
 const FLUID_POUR_RATE = 1.2;
@@ -130,27 +139,18 @@ const POUR_RANGE = 4.2;
 /** Within this many litres of capacity a reservoir reads as full. */
 const FLUID_FULL_EPSILON = 0.05;
 /**
- * Reach and forgiveness for the boot. Generous: it is a region the size of a car's
- * tail, not a point, and the player stands behind the car looking at it rather than
- * aiming at a latch.
+ * Maximum eye-to-grid distance. Halved from 3.2 m so the trunk only opens when the
+ * player has deliberately walked up to the rear of the car.
  */
-const BOOT_RANGE = 3.2;
-const BOOT_PICK_RADIUS = 0.95;
-
+const BOOT_RANGE = 1.6;
 /**
- * The most recently stowed item in a boot, with its cell.
- *
- * Last in, first out. A boot is a hole you drop things into, not a shelf you index,
- * and searching backwards is what makes "put the can in, take the can out" work
- * without the player ever choosing a slot.
+ * Aim forgiveness outside the drawn grid. A rectangular margin preserves the old
+ * horizontal cutoff without the old circular region's oversized vertical reach.
  */
-function lastStowed(car: CarState): { cell: number; item: Item } | null {
-  for (let i = car.storage.length - 1; i >= 0; i--) {
-    const item = car.storage[i];
-    if (item) return { cell: i, item };
-  }
-  return null;
-}
+const BOOT_REVEAL_MARGIN = 0.15;
+
+const EMPTY_WRECK_TRUNK: readonly (Item | null)[] = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
+
 
 /**
  * Which reservoir a fluid goes into on this car, with its current level and size.
@@ -201,6 +201,30 @@ function scrubLabel(part: PartInstance): string {
   return 'grime';
 }
 
+export type TrunkCellAction = 'none' | 'refused' | 'stored' | 'retrieved';
+
+/**
+ * Moves one aimed cell between trunk and pack. Occupancy wins over held state:
+ * looking at an item retrieves that exact item even while another item is held.
+ */
+export function operateTrunkCell(
+  storage: readonly (Item | null)[],
+  cell: number,
+  held: Item | null,
+  inventory: Inventory,
+): { action: TrunkCellAction; item: Item | null } {
+  if (cell < 0 || cell >= storage.length) return { action: 'none', item: null };
+  const stored = storage[cell];
+  if (stored) {
+    if (!inventory.add(stored)) return { action: 'refused', item: stored };
+    return { action: 'retrieved', item: null };
+  }
+  if (!held) return { action: 'none', item: null };
+  const removed = inventory.remove(held.id);
+  if (!removed) return { action: 'none', item: null };
+  return { action: 'stored', item: removed };
+}
+
 export class Interaction {
   private player: Player | null = null;
   private prevInteract = false;
@@ -214,6 +238,14 @@ export class Interaction {
   private readonly tScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
   private readonly vScratch = new THREE.Vector3();
+  private readonly trunkEye = new THREE.Vector3();
+  private readonly trunkDirection = new THREE.Vector3();
+  private readonly trunkPosition = new THREE.Vector3();
+  private readonly trunkQuaternion = new THREE.Quaternion();
+  private readonly trunkInverse = new THREE.Quaternion();
+  private readonly trunkRayHit: TrunkGridRayHit = { cell: 0, distance: 0 };
+  private trunkPickedCell: number | null = null;
+  private trunkPickedDistance = Infinity;
   /** This tick's discrete sound and held action; reset at the top of every tick. */
   private sound: FoleyEvent | null = null;
   private continuous: FoleyContinuous = null;
@@ -231,6 +263,7 @@ export class Interaction {
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly freight: FreightField,
+    private readonly wreckTrunks: WreckTrunkField,
     /** The car in reach, WITH its id. Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
@@ -289,11 +322,69 @@ export class Interaction {
 
     // Resolved AFTER the actions above, so stowing or taking is reflected in the
     // same frame the player sees rather than one behind.
-    const boot =
-      resolved.target.kind === 'boot'
-        ? (this.world.state.cars[resolved.target.carId]?.storage ?? null)
-        : null;
+    let boot: TrunkViewState | null = null;
+    if (resolved.target.kind === 'boot') {
+      const cells = this.trunkStorage(resolved.target);
+      if (cells) {
+        boot = {
+          owner: resolved.target.owner,
+          id: resolved.target.id,
+          cells,
+          selectedCell: resolved.target.cell,
+        };
+      }
+    }
     return { prompt, sound: this.sound, continuous: this.continuous, boot };
+  }
+
+  private trunkStorage(target: Extract<Target, { kind: 'boot' }>): readonly (Item | null)[] | null {
+    if (target.owner === 'car') return this.world.state.cars[target.id]?.storage ?? null;
+    return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+  }
+
+  /**
+   * Resolves the same chassis-local grid the renderer draws. A narrowly padded
+   * rectangle reveals it before a precise cell is under the crosshair.
+   */
+  private pickTrunk(
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+    position: { readonly x: number; readonly y: number; readonly z: number },
+    quaternion: THREE.Quaternion,
+    halfExtents: readonly [number, number, number],
+  ): boolean {
+    this.trunkInverse.copy(quaternion).invert();
+    this.trunkEye.set(eyeX - position.x, eyeY - position.y, eyeZ - position.z).applyQuaternion(this.trunkInverse);
+    this.trunkDirection.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
+    if (
+      intersectTrunkGrid(this.trunkEye, this.trunkDirection, halfExtents, this.trunkRayHit) &&
+      this.trunkRayHit.distance <= BOOT_RANGE
+    ) {
+      this.trunkPickedCell = this.trunkRayHit.cell;
+      this.trunkPickedDistance = this.trunkRayHit.distance;
+      return true;
+    }
+
+    if (Math.abs(this.trunkDirection.z) < 1e-5) return false;
+    const planeZ = -halfExtents[2] - TRUNK_GRID_DEPTH;
+    const distance = (planeZ - this.trunkEye.z) / this.trunkDirection.z;
+    if (distance <= 0 || distance > BOOT_RANGE) return false;
+
+    const localX = this.trunkEye.x + this.trunkDirection.x * distance;
+    const localY = this.trunkEye.y + this.trunkDirection.y * distance;
+    const halfWidth = trunkGridWidth(halfExtents[0]) * 0.5 + BOOT_REVEAL_MARGIN;
+    const halfHeight = TRUNK_ROWS * TRUNK_CELL_HEIGHT * 0.5 + BOOT_REVEAL_MARGIN;
+    const centreY = trunkGridCentreY(halfExtents[1]);
+    if (Math.abs(localX) > halfWidth || Math.abs(localY - centreY) > halfHeight) {
+      return false;
+    }
+    this.trunkPickedCell = null;
+    this.trunkPickedDistance = distance;
+    return true;
   }
 
   private resolve(
@@ -417,26 +508,16 @@ export class Interaction {
       if (bestFit) keep(bestFitAlong, bestFit);
       else if (bestRemove) keep(bestRemoveAlong, bestRemove);
 
-      // The boot. Picked like an anchor rather than by a collider, because the boot
-      // is not a modelled object on any of these shells — it is a REGION: the rear
-      // face of the measured body box, at about waist height. Standing behind the
-      // car and looking at its tail is the entire gesture, and it needs no openable
-      // door and no new geometry.
-      if (carState.storage.length > 0) {
-        const half = vehicle.modelMeasure.halfExtents;
-        this.vScratch.set(0, -half[1] * 0.1, -half[2]).applyQuaternion(this.qScratch);
-        const bx = this.vScratch.x + t.x - eyeX;
-        const by = this.vScratch.y + t.y - eyeY;
-        const bz = this.vScratch.z + t.z - eyeZ;
-        const along = bx * dx + by * dy + bz * dz;
-        if (along > 0 && along <= BOOT_RANGE) {
-          const px = bx - dx * along;
-          const py = by - dy * along;
-          const pz = bz - dz * along;
-          if (px * px + py * py + pz * pz < BOOT_PICK_RADIUS * BOOT_PICK_RADIUS) {
-            keep(along, { kind: 'boot', carId });
-          }
-        }
+      // Looking at the broad rear region reveals the grid; intersecting its exact
+      // plane selects one of the eight cells.
+      const half = vehicle.modelMeasure.halfExtents;
+      if (this.pickTrunk(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, half)) {
+        keep(this.trunkPickedDistance, {
+          kind: 'boot',
+          owner: 'car',
+          id: carId,
+          cell: this.trunkPickedCell,
+        });
       }
 
       // Bodywork, for sticking a sticker on. Deliberately a MESH raycast rather
@@ -447,6 +528,31 @@ export class Interaction {
       if (this.world.state.stickersUnplaced > 0 && vehicleDist <= VEHICLE_RANGE) {
         const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
         if (surface) keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
+      }
+    }
+
+    for (const wreck of this.wreckTrunks.values()) {
+      this.trunkPosition.set(wreck.x - this.origin.x, wreck.y, wreck.z - this.origin.z);
+      this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
+      if (
+        this.pickTrunk(
+          eyeX,
+          eyeY,
+          eyeZ,
+          dx,
+          dy,
+          dz,
+          this.trunkPosition,
+          this.trunkQuaternion,
+          wreck.halfExtents,
+        )
+      ) {
+        keep(this.trunkPickedDistance, {
+          kind: 'boot',
+          owner: 'wreck',
+          id: wreck.id,
+          cell: this.trunkPickedCell,
+        });
       }
     }
 
@@ -556,17 +662,22 @@ export class Interaction {
     }
 
     if (t.kind === 'boot') {
-      const car = this.world.state.cars[t.carId];
-      if (!car) return null;
-      const used = car.storage.filter((cell) => cell !== null).length;
-      const total = car.storage.length;
-      if (held) {
-        if (used >= total) return `boot full — ${used}/${total}`;
-        return `[F] stow ${itemLabel(held)} — boot ${used}/${total}`;
+      const cells = this.trunkStorage(t);
+      if (!cells) return null;
+      let used = 0;
+      for (const cell of cells) {
+        if (cell) used++;
       }
-      const top = lastStowed(car);
-      if (!top) return `boot empty — ${total} cells`;
-      return `[F] take ${itemLabel(top.item)} — boot ${used}/${total}`;
+      if (t.cell === null) return `trunk ${used}/${cells.length}`;
+      const item = cells[t.cell];
+      if (item) {
+        if (itemMass(item) + this.inventory.carriedMass > this.inventory.massLimit) {
+          return `[F] take ${itemLabel(item)} — too heavy`;
+        }
+        return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
+      }
+      if (held) return `[F] stow ${itemLabel(held)} — cell ${t.cell + 1}`;
+      return `empty trunk cell ${t.cell + 1}`;
     }
 
     if (t.kind === 'car-body') {
@@ -795,34 +906,24 @@ export class Interaction {
       return;
     }
 
-    // The boot. One key does both directions, decided by whether your hands are
-    // full: holding something stows it, holding nothing takes the last thing back
-    // out. That is what lets the whole feature exist without a grid, a cursor or a
-    // modal screen — the prompt line already says what will happen.
+    // Occupied cells always retrieve; empty cells stow the held item. The aimed
+    // cell, not whether the player's hands are full, decides the direction.
     if (t.kind === 'boot') {
-      const car = this.world.state.cars[t.carId];
-      if (!car) return;
-      if (held) {
-        const cell = car.storage.indexOf(null);
-        if (cell < 0) {
-          this.sound = 'refused';
-          return;
-        }
-        this.inventory.remove(held.id);
-        this.world.apply({ t: 'car_storage', carId: t.carId, cell, item: held });
-        this.sound = 'drop';
-        return;
-      }
-      const top = lastStowed(car);
-      if (!top) return;
-      // Refused rather than silently dropped: a boot item that vanished because the
-      // pack was full would be the worst possible outcome of pressing one key.
-      if (!this.inventory.add(top.item)) {
+      if (t.cell === null) return;
+      const cells = this.trunkStorage(t);
+      if (!cells) return;
+      const result = operateTrunkCell(cells, t.cell, held, this.inventory);
+      if (result.action === 'refused') {
         this.sound = 'refused';
         return;
       }
-      this.world.apply({ t: 'car_storage', carId: t.carId, cell: top.cell, item: null });
-      this.sound = 'pickup';
+      if (result.action === 'none') return;
+      if (t.owner === 'car') {
+        this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });
+      } else {
+        this.world.apply({ t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item });
+      }
+      this.sound = result.action === 'retrieved' ? 'pickup' : 'drop';
       return;
     }
 

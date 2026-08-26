@@ -542,10 +542,11 @@ const LOCKED_SIDE_GRIP = 0.22;
  * So the wheel is judged on how much faster its contact patch is moving than the
  * road, in m/s: TCS_SLIP_FLOOR_MPS is tolerated regardless of road speed, and above
  * a walking pace the allowance grows with speed until it is the same peak-slip ratio
- * the tyre model uses. On top of that the system has NO authority below
- * TCS_AUTHORITY_START_MPS and full authority only above TCS_AUTHORITY_FULL_MPS, so
- * digging, rocking and reversing out of somewhere are always the driver's to do with
- * the whole engine. An aid that can strand the car is worse than no aid.
+ * the tyre model uses. Authority follows the VEHICLE'S forward speed, not one contact
+ * point's instantaneous velocity: at a steep pothole face chassis pitch can make that
+ * point nearly stationary even while the car is moving and the wheel is spinning.
+ * Below TCS_AUTHORITY_START_MPS the driver still keeps full authority for digging,
+ * rocking and reversing out.
  */
 const TCS_SLIP_FLOOR_MPS = 2.2;
 /** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
@@ -806,10 +807,11 @@ interface WheelVisual {
   driveTorqueNm: number;
   /** Brake force (N) commanded to this wheel this step. */
   brakeForceN: number;
-  /** Wheel-plane forward direction in world space; reused every step. */
+  /** Wheel forward tangent in world space; projected onto steep contact surfaces. */
   forwardDir: { x: number; y: number; z: number };
-  /** Contact point and its chassis-frame velocity; both reused every step. */
+  /** Contact point, normal and chassis-frame velocity; all reused every step. */
   contactPoint: { x: number; y: number; z: number };
+  contactNormal: { x: number; y: number; z: number };
   contactVel: { x: number; y: number; z: number };
 }
 
@@ -1551,6 +1553,7 @@ export class Vehicle implements Rebasable {
         brakeForceN: 0,
         forwardDir: { x: 0, y: 0, z: 1 },
         contactPoint: { x: 0, y: 0, z: 0 },
+        contactNormal: { x: 0, y: 1, z: 0 },
         contactVel: { x: 0, y: 0, z: 0 },
       });
 
@@ -2186,7 +2189,7 @@ export class Vehicle implements Rebasable {
       this.skipTyreDynamicsSteps--;
       this.longitudinalForceSum = 0;
     } else {
-      this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip);
+      this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip, fwd);
     }
     this.refreshWheelSpray(fwd);
 
@@ -2456,7 +2459,12 @@ export class Vehicle implements Rebasable {
    * implicitly. It has to be: at 60 Hz the explicit gain is ~20-50, so an explicit
    * step oscillates and then explodes.
    */
-  private updateWheelDynamics(dt: number, wheelGrip: number, tyreGrip: number): void {
+  private updateWheelDynamics(
+    dt: number,
+    wheelGrip: number,
+    tyreGrip: number,
+    vehicleForwardSpeed: number,
+  ): void {
     const controller = this.controller;
     if (!controller || dt <= 0) return;
     this.longitudinalForceSum = 0;
@@ -2482,6 +2490,26 @@ export class Vehicle implements Rebasable {
       const inContact = controller.wheelIsInContact(w.index);
       let contactSpeed = 0;
       if (inContact) {
+        // The rolling direction is the wheel plane projected onto the surface. On
+        // flat ground this is unchanged. On a steep pothole wall it gains the
+        // vertical component the contact patch actually travels along, preventing
+        // both slip and TCS from being measured in the wrong plane.
+        const normal = controller.wheelContactNormal(w.index, w.contactNormal);
+        if (normal) {
+          const normalComponent =
+            w.forwardDir.x * normal.x +
+            w.forwardDir.y * normal.y +
+            w.forwardDir.z * normal.z;
+          const tangentX = w.forwardDir.x - normal.x * normalComponent;
+          const tangentY = w.forwardDir.y - normal.y * normalComponent;
+          const tangentZ = w.forwardDir.z - normal.z * normalComponent;
+          const tangentLength = Math.hypot(tangentX, tangentY, tangentZ);
+          if (tangentLength > 1e-4) {
+            w.forwardDir.x = tangentX / tangentLength;
+            w.forwardDir.y = tangentY / tangentLength;
+            w.forwardDir.z = tangentZ / tangentLength;
+          }
+        }
         const cp = controller.wheelContactPoint(w.index, w.contactPoint);
         if (cp) {
           this.chassisBody.velocityAtPoint(cp, w.contactVel);
@@ -2509,9 +2537,10 @@ export class Vehicle implements Rebasable {
       // relative to its drive torque and is left alone.
       //
       // The allowance is the larger of a fixed floor and the tyre model's own peak
-      // slip at this road speed, and the whole cut is then scaled by an authority
-      // that is zero at walking pace. Below that the driver has every newton the
-      // engine makes, which is what it takes to reverse off a pole on a grade.
+      // slip at this contact's road speed. Authority is intentionally based on the
+      // chassis' forward speed instead: angular motion over a sharp pothole can make
+      // one contact point almost stationary, but it must not switch TCS off while the
+      // vehicle itself is moving.
       const slipSpeed =
         (w.spinRadS * w.radius - contactSpeed) * (w.driveTorqueNm >= 0 ? 1 : -1);
       const allowance = Math.max(
@@ -2519,7 +2548,7 @@ export class Vehicle implements Rebasable {
         PEAK_SLIP_RATIO * Math.abs(contactSpeed),
       );
       const authority = clamp(
-        (Math.abs(contactSpeed) - TCS_AUTHORITY_START_MPS) /
+        (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
           (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
         0,
         1,

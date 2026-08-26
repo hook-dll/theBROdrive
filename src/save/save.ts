@@ -12,6 +12,7 @@ import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
+import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -291,6 +292,7 @@ export function migrateState(raw: unknown): WorldState {
   const loosePartsRaw = recordField(obj.looseParts, 'looseParts');
   const looseItemsRaw = recordField(obj.looseItems, 'looseItems');
   const trailersRaw = recordField(obj.trailers, 'trailers');
+  const wreckStorageRaw = recordField(obj.wreckStorage, 'wreckStorage');
 
   const seed = seedRaw >>> 0;
   const defaults = newWorldState(seed);
@@ -326,6 +328,11 @@ export function migrateState(raw: unknown): WorldState {
     trailers[id] = migrateTrailer(asRecord(value, `trailer "${id}"`));
   }
 
+  const wreckStorage: Record<string, (Item | null)[]> = {};
+  for (const [id, value] of Object.entries(wreckStorageRaw)) {
+    wreckStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `wreck "${id}" trunk`);
+  }
+
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
   for (const [id, value] of Object.entries(loosePartsRaw)) {
     looseParts[id] = migrateLoosePart(asRecord(value, `loose part "${id}"`));
@@ -349,6 +356,7 @@ export function migrateState(raw: unknown): WorldState {
     settings: sanitizeSettings(obj.settings),
     player,
     cars,
+    wreckStorage,
     trailers,
     looseParts,
     looseItems,
@@ -398,6 +406,21 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   };
 }
 
+function migrateStorage(raw: unknown, cells: number, where: string): (Item | null)[] {
+  const storage = new Array<Item | null>(cells).fill(null);
+  if (!Array.isArray(raw)) return storage;
+  for (let i = 0; i < Math.min(raw.length, cells); i++) {
+    const cell = raw[i];
+    if (cell === null || cell === undefined) continue;
+    try {
+      storage[i] = migrateItem(cell, `${where} cell ${i}`);
+    } catch {
+      storage[i] = null;
+    }
+  }
+  return storage;
+}
+
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
 
@@ -445,19 +468,7 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   // arriving at a mysteriously dry engine is a smaller surprise than the game
   // silently gifting fluids it never tracked, and the first can fixes it.
   const storageCells = hasCarModel(modelId) ? carModel(modelId).storageCells : 0;
-  const storage = new Array<Item | null>(storageCells).fill(null);
-  if (Array.isArray(raw.storage)) {
-    for (let i = 0; i < Math.min(raw.storage.length, storageCells); i++) {
-      const cell = raw.storage[i];
-      // A null cell is normal, not a fault; anything malformed is dropped.
-      if (cell === null || cell === undefined) continue;
-      try {
-        storage[i] = migrateItem(cell, `car "${raw.id}" boot cell ${i}`);
-      } catch {
-        storage[i] = null;
-      }
-    }
-  }
+  const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
 
   return {
     id: raw.id,

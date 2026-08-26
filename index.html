@@ -20,6 +20,14 @@
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
+    <!-- Immediate launch cover: visible before the module graph or 3D assets load.
+         MainMenu hides it for the title form and restores it after a drive is chosen. -->
+    <div id="launch-loading" class="launch-loading" role="status" aria-label="Loading game">
+      <div class="launch-wheel" aria-hidden="true">
+        <div class="launch-wheel-rim"></div>
+      </div>
+      <div class="launch-loading-text">loading the road</div>
+    </div>
     <!-- Shown by CSS alone, on touch devices in portrait (see hud.css). Markup lives
          here rather than in JS so it is on screen before the bundle has parsed: the
          first thing a phone player sees is "turn me", not a blank canvas. -->

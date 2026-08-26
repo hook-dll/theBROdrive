@@ -5,26 +5,22 @@
  * (`STRAIGHT_RUNOUT` in road.ts keeps s ∈ [0, 260] dead straight and heading 0, and
  * `HOME_FLAT_RADIUS` in landscape.ts keeps the ground under the footprint level to
  * within a tenth of a metre). Inside the garage sits the starter car — a complete
- * model — and a handful of cosmetic gizmos, the brush, sponge and a jerry can lie
- * within arm's reach.
+ * model — and a jerry can lies within arm's reach.
  *
  * Everything here is pure geometry derived from the seed, never a texture or a
  * prefab, and never `Math.random` — the same seed rebuilds the same homestead,
- * car and gizmo scatter.
+ * car and fuel-can placement.
  */
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 
-import { hash01, pick } from '../core/rng';
+import { hash01 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
 import {
   coolantCapacity,
   oilCapacity,
-  variantsOfKind,
-  type PartKind,
-  type PartInstance,
 } from '../parts/registry';
 import { carModel, DEFAULT_CAR_MODEL_ID, modelEngine } from '../vehicle/carmodels';
 import { carModelMeasure } from '../render/carmodel';
@@ -529,15 +525,6 @@ export class HomesteadProvider implements ChunkProvider {
 // Starting car
 // ---------------------------------------------------------------------------
 
-/** Deterministic part instance with plausible condition, keyed off the seed. */
-function makePart(world: GameWorld, domain: string, index: number, variantId: string): PartInstance {
-  return {
-    id: world.generatedPartId(domain, index, 0),
-    variantId,
-    dirt: hash01(world.seed, index, 0x11d),
-    rust: hash01(world.seed, index, 0x1a7) * 0.65,
-  };
-}
 
 /**
  * Where a new game drops the player, and which way they face.
@@ -612,103 +599,30 @@ export function createStartingCar(world: GameWorld): CarState {
 }
 
 // ---------------------------------------------------------------------------
-// Gizmo scatter
+// Starting fuel can
 // ---------------------------------------------------------------------------
-
-/** The handful of gizmos a new game scatters around the homestead, one variant
- *  each, in anchor order. Cosmetic junk to bolt onto the car's anchors for looks. */
-const START_GIZMO_KINDS: readonly PartKind[] = [
-  'hood', 'trunk', 'door', 'mirror', 'bumper', 'headlight', 'dashboard', 'seat', 'exhaust',
-];
-
-/** Hand-placed homestead anchors for the gizmos above, in the same order. */
-const START_ANCHORS: readonly (readonly [number, number, number])[] = [
-  [12.0, -3.0, 0.3],    // hood      (yard floor)
-  [10.8, -3.0, 0.3],    // trunk     (yard floor)
-  [13.7, -3.1, 0.5],    // door      (yard, against house front)
-  [13.42, 0.75, 1.0],   // mirror    (workbench)
-  [9.4, -3.1, 0.28],    // bumper    (yard)
-  [13.74, 0.75, 1.0],   // headlight (workbench)
-  [13.2, 2.6, 1.02],    // dashboard (across the workbench)
-  [13.0, 4.6, 0.45],    // seat      (right strip, back)
-  [9.4, 1.55, 0.12],    // exhaust   (left strip)
-];
-
-/**
- * Where a scattered gizmo waits at the homestead.
- *
- * The table is indexed by position in `START_GIZMO_KINDS`. If the two lists ever
- * drift apart (a kind added without a matching anchor), the fallback below keeps
- * the overflow in a tidy yard row instead of killing world generation with an
- * `undefined` destructure.
- */
-function anchorFor(L: HomesteadLayout, index: number, seed: number): V3 {
-  const spot = START_ANCHORS[index];
-  if (spot === undefined) {
-    // Deterministic overflow row along the yard fence, two metres clear of the
-    // named spots so nothing lands inside the house.
-    const extra = index - START_ANCHORS.length;
-    const u = 8.6 - (extra % 4) * 0.7;
-    const v = -4.2 + Math.floor(extra / 4) * 0.8;
-    const [ox, oz] = L.toWorld(u, v);
-    return [ox, L.floorY + 0.3, oz];
-  }
-  const [u, v, yOff] = spot;
-  const ju = (hash01(seed, 0x90d, index) - 0.5) * 0.2;
-  const jv = (hash01(seed, 0x91d, index) - 0.5) * 0.2;
-  const [x, z] = L.toWorld(u + ju, v + jv);
-  return [x, L.floorY + yOff, z];
-}
-
-function itemSpot(L: HomesteadLayout, index: number, seed: number): V3 {
-  const spots: readonly (readonly [number, number, number])[] = [
-    [13.4, 1.6, 1.02],  // brush on the workbench
-    [13.56, 1.6, 1.02], // sponge on the workbench
-    [10.0, -1.8, 0.28], // fuel can in the yard, by the drums
-  ];
-  const [u, v, yOff] = spots[index]!;
-  const ju = (hash01(seed, 0x94d, index) - 0.5) * 0.2;
-  const jv = (hash01(seed, 0x95d, index) - 0.5) * 0.2;
+function fuelCanSpot(L: HomesteadLayout, seed: number): V3 {
+  const [u, v, yOff] = [10.0, -1.8, 0.28]; // yard, by the drums
+  const ju = (hash01(seed, 0x94d, 2) - 0.5) * 0.2;
+  const jv = (hash01(seed, 0x95d, 2) - 0.5) * 0.2;
   const [x, z] = L.toWorld(u + ju, v + jv);
   return [x, L.floorY + yOff, z];
 }
 
 /**
- * Scatters a handful of cosmetic gizmos plus the cleaning tools and a jerry can
- * of the starter car's fuel around the homestead.
+ * Places a jerry can of the starter car's fuel in the yard.
  *
- * Positions are hand-placed anchors (floor, walls, workbench) with a small
- * seed-derived jitter, so everything is always reachable and never inside a wall
- * or under the floor. Tools and the fuel can are first-class pickups, spawned via
- * `loose.spawnItem`; they are *not* pre-loaded into the player's inventory —
- * finding them on the bench is the introduction to cleaning and refuelling.
+ * The hand-placed position has a small seed-derived jitter, so the can remains
+ * reachable and never lands inside a wall or under the floor. It is not pre-loaded
+ * into the player's inventory — finding it introduces refuelling without cluttering
+ * the garage.
  */
-export function scatterStartingGizmos(world: GameWorld, loose: LoosePartField): void {
+export function spawnStartingFuelCan(world: GameWorld, loose: LoosePartField): void {
   const road = new Road(world.seed);
   const terrain = new Terrain(world.seed, road);
   const L = layout(road, terrain);
 
-  START_GIZMO_KINDS.forEach((kind, i) => {
-    const v = pick(variantsOfKind(kind, 'car'), world.seed, 0x5ca7, i);
-    const part = makePart(world, 'start', i, v.id);
-    const [x, y, z] = anchorFor(L, i, world.seed);
-    loose.spawn(part, x, y, z);
-  });
-
-  // Tools + fuel can as first-class world pickups (never `Math.random`).
-  const brushSpot = itemSpot(L, 0, world.seed);
-  loose.spawnItem(
-    { type: 'tool', id: world.generatedPartId('home_item', 0, 0), tool: 'brush', integrity: 1 },
-    brushSpot[0], brushSpot[1], brushSpot[2],
-  );
-
-  const spongeSpot = itemSpot(L, 1, world.seed);
-  loose.spawnItem(
-    { type: 'tool', id: world.generatedPartId('home_item', 0, 1), tool: 'sponge', integrity: 1 },
-    spongeSpot[0], spongeSpot[1], spongeSpot[2],
-  );
-
-  const canSpot = itemSpot(L, 2, world.seed);
+  const canSpot = fuelCanSpot(L, world.seed);
   loose.spawnItem(
     {
       type: 'fluid_can',
@@ -719,6 +633,5 @@ export function scatterStartingGizmos(world: GameWorld, loose: LoosePartField): 
     },
     canSpot[0], canSpot[1], canSpot[2],
   );
-
 }
 

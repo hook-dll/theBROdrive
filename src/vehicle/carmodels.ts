@@ -20,6 +20,7 @@
 
 import type { BodyClass, EngineSpec, GearboxSpec, SuspensionTuning } from '../parts/registry';
 import { variant } from '../parts/registry';
+import { TRUNK_CELL_COUNT } from './trunk';
 
 /**
  * Vendored packs, all free and credited in a LICENSE file beside their models.
@@ -269,15 +270,7 @@ export interface CarModelDef {
    * other model remains available to the static world-wreck pool.
    */
   readonly spawnable: boolean;
-  /**
-   * Boot cells: how many loose items this body can carry for you.
-   *
-   * Authored rather than derived from the measured box, because what matters is the
-   * SHAPE of the load space and no bounding box knows that. A fastback and a wagon
-   * of identical footprint carry very different amounts, and an open buggy carries
-   * almost nothing. Defaulted by body class below; every entry that is not an
-   * ordinary saloon states its own.
-   */
+  /** Every car body, roadworthy or wreck-only, carries the shared 4x2 trunk. */
   readonly storageCells: number;
 }
 
@@ -299,24 +292,10 @@ type Entry = Omit<
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
   readonly gizmoAnchors?: readonly GizmoAnchorDef[];
-  /** Absent takes the body class's default; see STORAGE_BY_CLASS. */
+  /** Legacy authored hint; the catalogue normalizer now gives every body eight cells. */
   readonly storageCells?: number;
 };
 
-/**
- * Boot cells by body class, for entries that do not state their own.
- *
- * A plain saloon is the default case at three. Anything lower, longer or open
- * overrides downward; wagons, pickups and vans override upward. The numbers are
- * deliberately small: the boot is somewhere to leave a spare can and a tool, not a
- * second inventory, and a large number would turn every car into a warehouse and
- * delete the 95 kg carry limit's whole reason to exist.
- */
-const STORAGE_BY_CLASS: Record<BodyClass, number> = {
-  car: 3,
-  truck: 6,
-  bus: 8,
-};
 
 /**
  * The in-car view is a HOOD camera: it rides on the very nose of the car, above and
@@ -1594,7 +1573,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   spawnable: e.dir === QUATERNIUS || e.dir === SOVIET,
-  storageCells: e.storageCells ?? STORAGE_BY_CLASS[e.bodyClass],
+  storageCells: TRUNK_CELL_COUNT,
 }));
 
 /**
