@@ -169,12 +169,6 @@ export interface WorldState {
    */
   lootedPois: number[];
   /**
-   * Ids of derelicts the player has brought back to life with a wrench. The car
-   * itself lives in `cars` from that moment on; this list is what stops the POI
-   * rebuilding the static shell on top of it every time the chunk reloads.
-   */
-  revivedWrecks: string[];
-  /**
    * The haul in progress, or null. One at a time by design: the destination is a
    * single lit sign with no text on it, and two would be indistinguishable.
    */
@@ -217,7 +211,6 @@ export type WorldDelta =
   | { t: 'job_complete'; poiIndex: number }
   | { t: 'job_abandon' }
   | { t: 'sticker_place'; carId: string; sticker: StickerState }
-  | { t: 'wreck_revived'; wreckId: string }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'record'; s: number };
 
@@ -245,7 +238,6 @@ export function newWorldState(seed: number): WorldState {
     looseParts: {},
     looseItems: {},
     lootedPois: [],
-    revivedWrecks: [],
     job: null,
     stickersUnplaced: 0,
     deliveredPois: [],
@@ -457,9 +449,6 @@ export class GameWorld {
         break;
       case 'poi_looted':
         if (!s.lootedPois.includes(delta.poiIndex)) s.lootedPois.push(delta.poiIndex);
-        break;
-      case 'wreck_revived':
-        if (!s.revivedWrecks.includes(delta.wreckId)) s.revivedWrecks.push(delta.wreckId);
         break;
       case 'job_accept':
         s.job = delta.job;

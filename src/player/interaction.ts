@@ -22,7 +22,6 @@ import {
   BRUSH_DIRT_FLOOR,
 } from '../parts/registry';
 import type { LoosePartField } from '../parts/loose';
-import type { WreckField } from '../world/wrecks';
 import type { Vehicle } from '../vehicle/vehicle';
 import { jobAt, type FreightField } from '../world/freight';
 import type { TrailerField } from '../vehicle/trailer';
@@ -95,7 +94,6 @@ type Target =
   | { kind: 'none' }
   | { kind: 'loose-part'; partId: string }
   | { kind: 'loose-item'; itemId: string }
-  | { kind: 'revivable-wreck'; wreckId: string }
   | { kind: 'trailer'; trailerId: string }
   | { kind: 'pallet'; poiIndex: number }
   | { kind: 'freight-sign'; poiIndex: number }
@@ -231,13 +229,10 @@ export class Interaction {
     private readonly world: GameWorld,
     private readonly inventory: Inventory,
     private readonly loose: LoosePartField,
-    private readonly wrecks: WreckField,
     private readonly trailers: TrailerField,
     private readonly freight: FreightField,
     /** The car in reach, WITH its id. Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
-    /** Materialises a freed car; the composition root owns the Vehicle map. */
-    private readonly onCarFreed: (car: CarState) => void,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
     private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
     /**
@@ -343,19 +338,17 @@ export class Interaction {
       this.player?.rigidBody,
     );
     if (hit && hit.toi >= MIN_HIT_TOI) {
-      // One physics hit, six possible owners. Each map is keyed by collider handle,
+      // One physics hit, five possible owners. Each map is keyed by collider handle,
       // so the whole chain is a handful of hash lookups on the aim ray's hit.
       const h = hit.colliderHandle;
       const partId = this.loose.partIdForCollider(h);
       const itemId = partId ? null : this.loose.itemIdForCollider(h);
-      const wreckId = partId || itemId ? null : this.wrecks.wreckIdForCollider(h);
-      const trailerId = partId || itemId || wreckId ? null : this.trailers.trailerIdForCollider(h);
-      const claimed = partId || itemId || wreckId || trailerId;
+      const trailerId = partId || itemId ? null : this.trailers.trailerIdForCollider(h);
+      const claimed = partId || itemId || trailerId;
       const palletPoi = claimed ? null : this.freight.palletPoiForCollider(h);
       const signPoi = claimed || palletPoi !== null ? null : this.freight.signPoiForCollider(h);
       if (partId) keep(hit.toi, { kind: 'loose-part', partId });
       else if (itemId) keep(hit.toi, { kind: 'loose-item', itemId });
-      else if (wreckId) keep(hit.toi, { kind: 'revivable-wreck', wreckId });
       else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
       else if (palletPoi !== null) keep(hit.toi, { kind: 'pallet', poiIndex: palletPoi });
       else if (signPoi !== null) keep(hit.toi, { kind: 'freight-sign', poiIndex: signPoi });
@@ -542,15 +535,6 @@ export class Interaction {
       return `[F] pick up ${itemLabel(item)}`;
     }
 
-    if (t.kind === 'revivable-wreck') {
-      const label = this.wrecks.labelFor(t.wreckId);
-      if (!label) return null;
-      if (held?.type !== 'tool' || held.tool !== 'wrench') {
-        return `${label} — might still run, with a wrench`;
-      }
-      const pct = Math.round(this.wrecks.progressOf(t.wreckId) * 100);
-      return pct > 0 ? `[LMB] freeing ${label} — ${pct}%` : `[LMB] free the ${label}`;
-    }
 
     if (t.kind === 'pallet') {
       const job = jobAt(this.world.state.seed, t.poiIndex);
@@ -675,26 +659,8 @@ export class Interaction {
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
     if (!held) return;
-    if (held.type === 'tool') {
-      // The wrench is the one tool that acts on something other than a part, so it
-      // branches before `scrub` rather than inside it.
-      if (held.tool === 'wrench') this.wrench(dt, resolved);
-      else this.scrub(dt, held.tool, resolved);
-    } else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
-  }
-
-  /**
-   * Works a derelict loose. The whole car supply of the game is this method: there
-   * is no spawn menu, so every vehicle after the first is one the player freed.
-   */
-  private wrench(dt: number, resolved: Resolved): void {
-    const t = resolved.target;
-    if (t.kind !== 'revivable-wreck') return;
-    this.continuous = 'scrub';
-    const car = this.wrecks.advance(t.wreckId, dt);
-    if (!car) return;
-    this.onCarFreed(car);
-    this.sound = 'mount';
+    if (held.type === 'tool') this.scrub(dt, held.tool, resolved);
+    else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
   }
 
   private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {

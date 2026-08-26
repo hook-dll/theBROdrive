@@ -49,7 +49,6 @@ import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
-import { WreckField } from './world/wrecks';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves } from './save/save';
@@ -224,9 +223,6 @@ async function boot(): Promise<void> {
     });
   });
   const loose = new LoosePartField(physics, world, renderer.scene, origin);
-  // Cars are found, not spawned: the wreck-field registry is the supply, and it is
-  // created before any chunk builds so the first POI can register into it.
-  const wrecks = new WreckField(physics, world);
   // Trailers are world objects like cars, not chunk scenery: they move, so they
   // must outlive the chunk they were found standing in.
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
@@ -260,7 +256,7 @@ async function boot(): Promise<void> {
   streamer.register(new ScatterProvider());
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, wrecks, trailerField, freight));
+  streamer.register(new PoiProvider(loose, trailerField, freight));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -272,6 +268,8 @@ async function boot(): Promise<void> {
 
   const vehicles = new Map<string, Vehicle>();
   const spawnVehicle = (car: CarState): Vehicle => {
+    const existing = vehicles.get(car.id);
+    if (existing) return existing;
     const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
     vehicles.set(car.id, vehicle);
     return vehicle;
@@ -319,6 +317,11 @@ async function boot(): Promise<void> {
   }
 
   for (const car of Object.values(world.state.cars)) spawnVehicle(car);
+  // POI working cars enter state when their chunk reaches the physics band. From
+  // then on every car-add delta must immediately gain its Vehicle runtime.
+  world.onDelta((delta) => {
+    if (delta.t === 'car_add') spawnVehicle(delta.car);
+  });
 
   // Saved stickers ride the car's own render group, so nothing but the group has to
   // know they exist — including the interpolation the car already does.
@@ -365,16 +368,11 @@ async function boot(): Promise<void> {
     world,
     inventory,
     loose,
-    wrecks,
     trailerField,
     freight,
     () => {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
-    },
-    (car) => {
-      spawnVehicle(car);
-      hud.setToast(`${carModel(car.modelId).label} — it runs. tank is dry.`);
     },
     (carId, sticker) => {
       const vehicle = vehicles.get(carId);
@@ -420,7 +418,6 @@ async function boot(): Promise<void> {
       loose,
       freight,
       trailers: trailerField,
-      wrecks,
       road,
       terrain,
       player,
@@ -977,8 +974,7 @@ async function boot(): Promise<void> {
     const heading = Math.atan2(dir.x / flat, dir.z / flat);
     // `dropX`/`dropZ` are relative — they came off the camera and fed a Rapier ray.
     // `spawnCarState` writes a saved `CarState`, which is absolute.
-    const car = spawnCarState(world, request, dropX + origin.x, y, dropZ + origin.z, heading);
-    spawnVehicle(car);
+    spawnCarState(world, request, dropX + origin.x, y, dropZ + origin.z, heading);
     hud.setToast(`spawned ${carModel(request.modelId).label}`);
   };
 

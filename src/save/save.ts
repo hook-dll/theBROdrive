@@ -346,9 +346,6 @@ export function migrateState(raw: unknown): WorldState {
     looseParts,
     looseItems,
     lootedPois: migrateNumberArray(obj.lootedPois),
-    // Absent in a save written before wrecks could be revived; an empty list is
-    // correct for those — nothing had been dug out yet.
-    revivedWrecks: migrateStringArray(obj.revivedWrecks),
     job: migrateJob(obj.job),
     stickersUnplaced: Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0))),
     deliveredPois: migrateNumberArray(obj.deliveredPois),
@@ -575,10 +572,6 @@ function migrateNumberArray(value: unknown): number[] {
   return out;
 }
 
-function migrateStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string');
-}
 
 // ---------------------------------------------------------------------------
 // Seed parsing
