@@ -8,9 +8,9 @@ import { buildSpine } from './roadspine';
  * land again on every session that does not hit the persisted cache. Here it lands
  * nowhere the player can see.
  *
- * The five tables go back as transferable buffers, so the 3.3 MB is moved rather than
- * structured-cloned. That also means this worker's copies are detached afterwards,
- * which is fine: it is done with them, and it is torn down immediately.
+ * The four tables go back as transferable buffers, so the payload is moved rather
+ * than structured-cloned. That also means this worker's copies are detached
+ * afterwards, which is fine: it is done with them and is torn down immediately.
  */
 
 export interface SpineRequest {
@@ -22,7 +22,6 @@ export interface SpineResponse {
   readonly length: number;
   readonly checkpointX: ArrayBuffer;
   readonly checkpointZ: ArrayBuffer;
-  readonly checkpointHeading: ArrayBuffer;
   readonly coarseX: ArrayBuffer;
   readonly coarseZ: ArrayBuffer;
 }
@@ -50,14 +49,12 @@ scope.onmessage = (event: MessageEvent<SpineRequest>) => {
     length: spine.length,
     checkpointX: spine.checkpointX.buffer as ArrayBuffer,
     checkpointZ: spine.checkpointZ.buffer as ArrayBuffer,
-    checkpointHeading: spine.checkpointHeading.buffer as ArrayBuffer,
     coarseX: spine.coarseX.buffer as ArrayBuffer,
     coarseZ: spine.coarseZ.buffer as ArrayBuffer,
   };
   scope.postMessage(response, [
     response.checkpointX,
     response.checkpointZ,
-    response.checkpointHeading,
     response.coarseX,
     response.coarseZ,
   ]);

@@ -32,7 +32,7 @@
  * Nothing here is part of the game bundle.
  */
 
-import { NODE_SPACING, RoadCurvature, stepNode, type NodeState } from '../src/world/roadcurve';
+import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
 import { buildSpine, CHECKPOINT_NODES, CHECKPOINT_SPACING, COARSE_SPACING } from '../src/world/roadspine';
 import { ROAD_LENGTH, Road } from '../src/world/road';
 import { REBASE_RADIUS } from '../src/world/origin';
@@ -133,14 +133,15 @@ function coarseCount(lengthM: number): number {
 }
 
 /**
- * Resident cost of a `lengthM` road: three checkpoint arrays and two coarse arrays
- * (all Float64Array, 8 B per entry) plus the fixed block cache.
+ * Resident cost of a `lengthM` road: two checkpoint arrays and two coarse arrays
+ * (all Float64Array, 8 B per entry) plus the fixed block cache. Heading stopped
+ * being checkpoint state when it became a pure function of arclength.
  */
 function residentBytes(lengthM: number): { checkpoints: number; coarse: number; bytes: number } {
   const lastNode = Math.floor(lengthM / NODE_SPACING);
   const checkpoints = Math.floor(lastNode / CHECKPOINT_NODES) + 1;
   const coarse = coarseCount(lengthM);
-  const bytes = (3 * checkpoints + 2 * coarse) * 8 + BLOCK_CACHE_BYTES;
+  const bytes = (2 * checkpoints + 2 * coarse) * 8 + BLOCK_CACHE_BYTES;
   return { checkpoints, coarse, bytes };
 }
 
@@ -177,17 +178,16 @@ function measureExtent(seed: number, lengthM: number): {
   const milestoneSteps = km.map((k) => (k * 1000) / NODE_SPACING);
   const milestones: MilestoneRow[] = km.map((m) => ({ km: m, maxAbs: 0, maxDist: 0, maxDistKm: 0 }));
 
-  // Hoisted: one mutable NodeState and no allocation inside the loop — stepNode mutates
-  // in place, which is the contract that makes a ten-million-step walk cheap.
-  const curvature = new RoadCurvature(seed);
-  const node: NodeState = { x: 0, z: 0, heading: 0 };
+  // Hoisted: one mutable NodeState and no allocation inside the loop.
+  const heading = new RoadHeading(seed);
+  const node: NodeState = { x: 0, z: 0 };
   let maxAbs = 0;
   let maxDist2 = 0;
   let maxDistS = 0;
   let mi = 0;
 
   for (let i = 0; i < steps; i++) {
-    stepNode(node, curvature, i);
+    stepNode(node, heading, i);
 
     const ax = node.x < 0 ? -node.x : node.x;
     const az = node.z < 0 ? -node.z : node.z;

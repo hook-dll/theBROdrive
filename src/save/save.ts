@@ -40,7 +40,7 @@ export interface SaveBackend {
 }
 
 const DB_NAME = 'thebrodrive-saves';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'saves';
 
 /** Record layout in IndexedDB: metadata beside a frozen snapshot of the state. */
@@ -74,11 +74,16 @@ export class IndexedDbSaves implements SaveBackend {
         reject(err instanceof Error ? new Error(`Failed to open save database: ${err.message}`) : new Error('Failed to open save database'));
         return;
       }
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
         const db = request.result;
-        if (!db.objectStoreNames.contains(STORE)) {
-          db.createObjectStore(STORE);
+        // Version 2 changes the road spine itself. Stored world positions from v1
+        // are not on that road and there is deliberately no migration: deleting
+        // and recreating the store makes the incompatibility explicit instead of
+        // loading a car into empty desert.
+        if (event.oldVersion > 0 && db.objectStoreNames.contains(STORE)) {
+          db.deleteObjectStore(STORE);
         }
+        db.createObjectStore(STORE);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => {
@@ -211,12 +216,14 @@ export class IndexedDbSaves implements SaveBackend {
 // Shareable save codes
 // ---------------------------------------------------------------------------
 
-/** Version tag prefixing every code; identifies the format for `decodeSaveCode`. */
-const CODE_TAG = 'BRO2.';
-
-/** Every tag `decodeSaveCode` accepts, newest first. Older tags stay decodable so
- * a pre-cutover code still loads; its car simply falls back to the default model. */
-const CODE_TAGS: readonly string[] = [CODE_TAG, 'BRO1.'];
+/**
+ * Version tag prefixing every code; identifies the road geometry as well as the
+ * state layout. BRO3 is a clean cutover to the non-self-intersecting spine. Older
+ * coordinates cannot be migrated honestly and are rejected rather than loaded off
+ * the road.
+ */
+const CODE_TAG = 'BRO3.';
+const CODE_TAGS: readonly string[] = [CODE_TAG];
 
 /**
  * Encodes a state to a pasteable string: JSON -> UTF-8 bytes -> base64url.

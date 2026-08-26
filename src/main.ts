@@ -72,12 +72,6 @@ import { GameAudio } from './audio/gameaudio';
  */
 
 /**
- * Lateral distance from the road beyond which a followed position is treated as
- * teleported and re-homed with a full unhinted projection. Comfortably outside the
- * drawn world (vista 1500 m), so ordinary off-road driving never pays for it.
- */
-const ACTIVE_S_REHOME_LATERAL = 2000;
-/**
  * Gap between the player and the NEAR END of a spawned vehicle, metres.
  *
  * A gap, not a centre distance: the drop point is this plus the model's own
@@ -645,22 +639,15 @@ async function boot(): Promise<void> {
       }
     }
 
-    // A hinted projection stays correct for as long as the car moves continuously,
-    // and the hint is only ever stranded by a discontinuity: a restored save, a
-    // debug reposition, a rescue. Judging that by raw distance from the last
-    // centreline sample used to be safe when the world was 60 m wide, but the desert
-    // is now driveable to 600 m either side, so a legitimate excursion looked like a
-    // jump and bought an unhinted sweep — which, on a road that wanders back through
-    // its own neighbourhood over 400 km, can latch onto a segment kilometres away and
-    // stream the wrong chunks out from under the car. The hinted result's own lateral
-    // distance is the honest test: no legal position is further out than the vista.
+    // The spine's heading stays within ±90 degrees now, so its +Z projection is
+    // strictly monotone and no distant branch can sit beside this one. A local hinted
+    // projection is therefore the complete answer during continuous driving; the
+    // expensive unhinted sweep this used to fall back to existed only to arbitrate
+    // self-overlapping passes.
     if (driving) {
-      // Absolute: `road.project` searches the centreline, which lives in world space.
-      // The chassis holds a relative position, so this is the one place per frame that
-      // conversion has to happen for the streaming anchor.
+      // Absolute: the road lives in world space while the chassis is relative.
       const t = driving.absoluteTranslation(originAnchor);
-      const p = road.project(t.x, t.z, activeS);
-      activeS = Math.abs(p.lateral) > ACTIVE_S_REHOME_LATERAL ? road.project(t.x, t.z).s : p.s;
+      activeS = road.project(t.x, t.z, activeS).s;
     } else {
       activeS = player.s;
     }

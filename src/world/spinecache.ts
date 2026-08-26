@@ -28,7 +28,6 @@ interface StoredSpine {
   readonly length: number;
   readonly checkpointX: ArrayBuffer;
   readonly checkpointZ: ArrayBuffer;
-  readonly checkpointHeading: ArrayBuffer;
   readonly coarseX: ArrayBuffer;
   readonly coarseZ: ArrayBuffer;
 }
@@ -91,7 +90,6 @@ function fromBuffers(stored: Omit<StoredSpine, 'format'>): RoadSpine {
     length: stored.length,
     checkpointX: new Float64Array(stored.checkpointX),
     checkpointZ: new Float64Array(stored.checkpointZ),
-    checkpointHeading: new Float64Array(stored.checkpointHeading),
     coarseX: new Float64Array(stored.coarseX),
     coarseZ: new Float64Array(stored.coarseZ),
   };
@@ -146,7 +144,6 @@ export async function loadSpine(seed: number, length: number): Promise<RoadSpine
       length: built.length,
       checkpointX: built.checkpointX.buffer as ArrayBuffer,
       checkpointZ: built.checkpointZ.buffer as ArrayBuffer,
-      checkpointHeading: built.checkpointHeading.buffer as ArrayBuffer,
       coarseX: built.coarseX.buffer as ArrayBuffer,
       coarseZ: built.coarseZ.buffer as ArrayBuffer,
     });
