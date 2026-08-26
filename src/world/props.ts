@@ -17,8 +17,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { hash01 } from '../core/rng';
 import { SURFACES, SurfaceType } from '../core/surfaces';
-import { ROAD_LENGTH } from './road';
-import { monumentsBetween, poleConditionAt } from './gradient';
+import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
 
 import type { Monument, PoleEra } from './gradient';
 import type { Road } from './road';
@@ -263,7 +262,14 @@ function leanRotation(angle: number, az: number): Rot {
   return { x: _q1.x, y: _q1.y, z: _q1.z, w: _q1.w };
 }
 
-/** Creates a static collider (own fixed body) and registers its surface. */
+/**
+ * Creates a static collider (own fixed body) and registers its surface.
+ *
+ * The one choke point for every scatter, pole and monument collider. Every caller
+ * passes an ABSOLUTE position (the road/terrain sample it was placed from); the
+ * origin subtraction happens here, once, so no caller can forget it and Rapier
+ * never holds an f32 quantised by an absolute coordinate.
+ */
 function addStatic(
   ctx: ChunkContext,
   bodies: RAPIER.RigidBody[],
@@ -275,7 +281,9 @@ function addStatic(
   surface: SurfaceType,
   rot?: Rot,
 ): void {
-  const body = ctx.physics.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z));
+  const body = ctx.physics.world.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(x - ctx.originX, y, z - ctx.originZ),
+  );
   if (rot) desc.setRotation(rot);
   const collider = ctx.physics.world.createCollider(desc, body);
   ctx.physics.surfaces.register(collider.handle, surface);
@@ -294,6 +302,8 @@ export class ScatterProvider implements ChunkProvider {
     const placements: ScatterPlacement[] = [];
 
     const seed = ctx.world.seed;
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
     const cellSStart = Math.floor(ctx.sStart / CELL_S);
     const cellSEnd = Math.floor(ctx.sEnd / CELL_S);
     const cellLMax = Math.ceil(MAX_LAT / CELL_L) + 1;
@@ -366,12 +376,12 @@ export class ScatterProvider implements ChunkProvider {
     }
     for (const [form, list] of byForm) {
       const mesh = new THREE.InstancedMesh(form.geometry, form.material, list.length);
-      // Instances live in absolute world space while the mesh stays at the origin,
-      // so three's geometry bounding-sphere cull would pop; disable it.
+      // Instances sit up to a chunk radius from the mesh's own origin, so three's
+      // geometry bounding-sphere cull would pop; disable it.
       mesh.frustumCulled = false;
       for (let i = 0; i < list.length; i++) {
         const pl = list[i];
-        _dummy.position.set(pl.x, pl.y, pl.z);
+        _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);
         _dummy.rotation.set(pl.rx, pl.ry, pl.rz);
         _dummy.scale.setScalar(pl.scale);
         _dummy.updateMatrix();
@@ -413,48 +423,10 @@ export class ScatterProvider implements ChunkProvider {
 // Poles: the roadside lamppost line
 // ===========================================================================
 
-interface EraSegment {
-  start: number;
-  end: number;
-  spacing: number;
-}
-
-/**
- * Era boundaries are fixed fractions of the road but not exported from
- * `gradient.ts`. Derive them once from `poleConditionAt` so pole placement has a
- * single source of truth (the era schedule in gradient) instead of a hardcoded
- * copy that could drift.
- */
-let _segments: EraSegment[] | null = null;
-function eraSegments(): EraSegment[] {
-  if (_segments) return _segments;
-  const segs: EraSegment[] = [];
-  let segStart = 0;
-  let segEra = poleConditionAt(0).era;
-  for (let probe = 1000; probe < ROAD_LENGTH; probe += 1000) {
-    const era = poleConditionAt(probe).era;
-    if (era !== segEra) {
-      let lo = probe - 1000;
-      let hi = probe;
-      for (let i = 0; i < 30; i++) {
-        const mid = (lo + hi) * 0.5;
-        if (poleConditionAt(mid).era === segEra) lo = mid;
-        else hi = mid;
-      }
-      segs.push({ start: segStart, end: hi, spacing: poleConditionAt(segStart).spacing });
-      segStart = hi;
-      segEra = era;
-    }
-  }
-  segs.push({ start: segStart, end: ROAD_LENGTH, spacing: poleConditionAt(segStart).spacing });
-  _segments = segs;
-  return segs;
-}
-
 /** s of the pole at a given global index, or null past the last pole. */
 function poleSByIndex(index: number): number | null {
   let remaining = index;
-  for (const seg of eraSegments()) {
+  for (const seg of poleEraSegments()) {
     const count = seg.spacing > 0 ? Math.floor((seg.end - seg.start) / seg.spacing) : 0;
     if (remaining < count) return seg.start + (remaining + 0.5) * seg.spacing;
     remaining -= count;
@@ -466,7 +438,7 @@ const POLE_EPS = 1e-6;
 /** Invokes cb(s, index) for every pole whose arclength lies in [sStart, sEnd). */
 function forEachPole(sStart: number, sEnd: number, cb: (s: number, index: number) => void): void {
   let indexBase = 0;
-  for (const seg of eraSegments()) {
+  for (const seg of poleEraSegments()) {
     const count = seg.spacing > 0 ? Math.floor((seg.end - seg.start) / seg.spacing) : 0;
     if (seg.end <= sStart) {
       indexBase += count;
@@ -794,11 +766,22 @@ function setLampSource(light: THREE.PointLight, pos: LampPos | null, on: number)
   }
 }
 
-/** Selects source fixtures without allocating during the render loop. */
+/**
+ * Selects source fixtures without allocating during the render loop.
+ *
+ * `points` are stored relative to this chunk's build origin (`ox`/`oz`), while
+ * `nearX`/`nearZ` is the live camera in the CURRENT origin's frame. The build
+ * origin is added back to each point so both sides of the comparison are
+ * absolute. A rebase moves the camera and the current origin together, but the
+ * stored entries stay put: they must NOT become `Rebasable`, or the group shift
+ * and a rebase would double-apply. The build origin already accounts for it.
+ */
 function setNearestLampSources(
   points: readonly LampPos[],
   nearX: number,
   nearZ: number,
+  ox: number,
+  oz: number,
   on: number,
   sources: readonly THREE.PointLight[],
 ): void {
@@ -809,7 +792,9 @@ function setNearestLampSources(
   let secondD = Infinity;
   let thirdD = Infinity;
   for (const point of points) {
-    const d = (point.x - nearX) ** 2 + (point.z - nearZ) ** 2;
+    const dx = point.x + ox - nearX;
+    const dz = point.z + oz - nearZ;
+    const d = dx * dx + dz * dz;
     if (d < firstD) {
       third = second; thirdD = secondD;
       second = first; secondD = firstD;
@@ -838,19 +823,25 @@ export class PoleProvider implements ChunkProvider {
     const poses: PolePose[] = [];
 
     const seed = ctx.world.seed;
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
 
     forEachPole(ctx.sStart, ctx.sEnd, (s, index) => {
       const pose = describePole(ctx.road, ctx.terrain, seed, s, index);
       poses.push(pose);
 
       const poleGroup = new THREE.Group();
-      poleGroup.position.set(pose.baseX, pose.baseY - (pose.collapsed ? 0.12 : 0), pose.baseZ);
+      poleGroup.position.set(pose.baseX - ox, pose.baseY - (pose.collapsed ? 0.12 : 0), pose.baseZ - oz);
       poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, poleGroup.quaternion);
       addPoleMeshes(poleGroup, pose);
       group.add(poleGroup);
 
       if (pose.hasLamp && pose.lampWorks) {
-        workingLamps.push({ x: pose.lampX, y: pose.lampY, z: pose.lampZ });
+        // Lamps are stored relative to the chunk origin: these positions also set
+        // the invisible source-marker PointLights (children of `group`), so they
+        // must be group-local. The distance test against the camera re-adds the
+        // captured build origin in `setLamps` (see `setNearestLampSources`).
+        workingLamps.push({ x: pose.lampX - ox, y: pose.lampY, z: pose.lampZ - oz });
       }
 
       // Upright poles are solid obstacles; collapsed ones lie flat and are skipped.
@@ -883,8 +874,8 @@ export class PoleProvider implements ChunkProvider {
       if (poleConditionAt(nextS).era !== pose.era) continue; // no span across era boundary
       const nextPose = describePole(ctx.road, ctx.terrain, seed, nextS, pose.index + 1);
       if (nextPose.collapsed) continue;
-      const a = new THREE.Vector3(pose.topX, pose.topY, pose.topZ);
-      const b = new THREE.Vector3(nextPose.topX, nextPose.topY, nextPose.topZ);
+      const a = new THREE.Vector3(pose.topX - ox, pose.topY, pose.topZ - oz);
+      const b = new THREE.Vector3(nextPose.topX - ox, nextPose.topY, nextPose.topZ - oz);
       const wireGeo = new THREE.TubeGeometry(
         new CatenaryCurve(a, b, a.distanceTo(b) * 0.03),
         20,
@@ -920,10 +911,14 @@ export class PoleProvider implements ChunkProvider {
       /**
        * Emissive fixtures are cheap at any distance; the provider only updates its
        * three nearest source markers. LightBudget owns the six rendered light slots.
+       *
+       * `nearX`/`nearZ` is ABSOLUTE (the live camera in the current origin's
+       * frame); the build origin `ox`/`oz` captured at build time bridges it to the
+       * build-origin-relative `workingLamps` below.
        */
       setLamps(on: number, nearX: number, nearZ: number): void {
         setLampEmission(on);
-        setNearestLampSources(workingLamps, nearX, nearZ, on, lampSources);
+        setNearestLampSources(workingLamps, nearX, nearZ, ox, oz, on, lampSources);
       },
     };
   }
@@ -991,8 +986,10 @@ interface MonumentBuild {
 }
 
 function buildDistanceSign(b: MonumentBuild): void {
+  const ox = b.ctx.originX;
+  const oz = b.ctx.originZ;
   const g = new THREE.Group();
-  g.position.set(b.x, b.y, b.z);
+  g.position.set(b.x - ox, b.y, b.z - oz);
   g.rotation.y = b.heading + Math.PI; // face oncoming traffic
 
   const tex = makeSignTexture(b.m.text, 1024, 384, '#0b5c30', '#ffffff');
@@ -1026,8 +1023,10 @@ function buildDistanceSign(b: MonumentBuild): void {
 }
 
 function buildShrine(b: MonumentBuild): void {
+  const ox = b.ctx.originX;
+  const oz = b.ctx.originZ;
   const g = new THREE.Group();
-  g.position.set(b.x, b.y, b.z);
+  g.position.set(b.x - ox, b.y, b.z - oz);
   g.rotation.y = hash01(b.m.variantSeed, 0) * Math.PI * 2;
 
   g.add(new THREE.Mesh(shrinePostGeo, matTimber));
@@ -1058,8 +1057,10 @@ function buildShrine(b: MonumentBuild): void {
 }
 
 function buildCairn(b: MonumentBuild): void {
+  const ox = b.ctx.originX;
+  const oz = b.ctx.originZ;
   const g = new THREE.Group();
-  g.position.set(b.x, b.y, b.z);
+  g.position.set(b.x - ox, b.y, b.z - oz);
   g.rotation.y = hash01(b.m.variantSeed, 0) * Math.PI * 2;
 
   // A deliberate stack of balanced stones: regular, flattened, decreasing.
@@ -1092,8 +1093,10 @@ function buildCairn(b: MonumentBuild): void {
 }
 
 function buildWrecked(b: MonumentBuild): void {
+  const ox = b.ctx.originX;
+  const oz = b.ctx.originZ;
   const g = new THREE.Group();
-  g.position.set(b.x, b.y, b.z);
+  g.position.set(b.x - ox, b.y, b.z - oz);
   g.rotation.y = b.heading + Math.PI + (hash01(b.m.variantSeed, 0) - 0.5) * 0.6;
 
   // Snapped lower stub, still planted.

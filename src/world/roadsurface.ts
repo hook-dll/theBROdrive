@@ -1,5 +1,5 @@
 import { hash01, Noise1D, Noise2D } from '../core/rng';
-import { SurfaceType, SURFACES } from '../core/surfaces';
+import { SurfaceType } from '../core/surfaces';
 import { NODE_SPACING, type Road } from './road';
 import { roadConditionAt } from './gradient';
 
@@ -32,32 +32,47 @@ export const SUB_DIVISIONS = 3;
 export const SURFACE_STEP = NODE_SPACING / SUB_DIVISIONS;
 
 /**
- * Short bump layer, two octaves: 8.3 m (the original wave) plus a 4.17 m octave.
- * 4-8 m is the band a car at 60-100 km/h actually feels as texture; nothing
- * shorter than ~3 m is representable at the 1.333 m vertex step, and 4.17 m keeps
- * a safe margin above that.
+ * Short bump layer, two octaves: 6.7 m plus a 3.33 m octave.
+ *
+ * Both were one octave lower (8.3 / 4.17 m). 8 m is long enough that a car at
+ * 60-100 km/h reads it as the road breathing rather than as texture — it arrives
+ * at 2-3 Hz, which is body-frequency, so the springs absorb it and the driver
+ * feels a wallow. 3-7 m arrives at 2.5-8 Hz: the band where the wheel starts
+ * working and the body starts being told about it. 3.33 m is 2.5 vertex steps, so
+ * it is the shortest wave the 1.333 m collider still resolves as a shape rather
+ * than as noise; anything shorter aliases into seed-dependent spikes.
  */
-const ROUGH_FREQ = 0.12;
-const ROUGH_FREQ_HI = 0.24;
-/** Relative amplitude of the 4.17 m octave. */
-const ROUGH_HI_GAIN = 0.55;
+const ROUGH_FREQ = 0.15;
+const ROUGH_FREQ_HI = 0.3;
+/** Relative amplitude of the 3.33 m octave. */
+const ROUGH_HI_GAIN = 0.6;
 /**
- * Bump amplitude on a maintained road, per surface type (m). Even a well-kept
- * road has texture — decay must add to a floor, not multiply zero. Cracked
- * asphalt is floored highest because broken tarmac is rutted; loose gravel stays
- * even until it degrades; concrete is the one genuinely smooth surface.
+ * Bump amplitude per surface type, metres. Constant along the whole road: the bump
+ * layer does NOT scale with decay.
+ *
+ * It used to. Amplitude was `floor + 0.5 * decay * surfaceRoughness`, which tied
+ * the road's texture to a progress curve — so the first hundred kilometres were
+ * near-glass and only the far end had any life in it. Decay still drives the things
+ * decay should drive (which surface you are on, how many potholes there are, the
+ * long undulation), but how bumpy a given surface feels is now a property of the
+ * material, not of how far you have driven. The first kilometre reads like the
+ * three-hundredth.
+ *
+ * These are 2x the previous floors. Cracked asphalt is highest because broken
+ * tarmac is rutted; loose gravel stays comparatively even; concrete is the one
+ * genuinely smooth surface. At 90 km/h the asphalt figure is a 0.9 m/s velocity
+ * step at the wheel on the sharpest slope change (tools/ride-bench.ts) — busy
+ * enough to keep both hands on the wheel, well short of anything that unloads a
+ * tyre.
  */
-const BUMP_FLOOR: Record<SurfaceType, number> = {
-  [SurfaceType.Asphalt]: 0.028,
-  [SurfaceType.CrackedAsphalt]: 0.052,
-  [SurfaceType.Gravel]: 0.024,
-  [SurfaceType.Sand]: 0.024,
-  [SurfaceType.Rock]: 0.03,
-  [SurfaceType.Concrete]: 0.008,
+const BUMP_AMP: Record<SurfaceType, number> = {
+  [SurfaceType.Asphalt]: 0.09,
+  [SurfaceType.CrackedAsphalt]: 0.16,
+  [SurfaceType.Gravel]: 0.08,
+  [SurfaceType.Sand]: 0.076,
+  [SurfaceType.Rock]: 0.1,
+  [SurfaceType.Concrete]: 0.028,
 };
-/** Decay-driven bump growth: adds `decay * roughness * BUMP_GAIN` metres on top of
- * the floor. */
-const BUMP_GAIN = 0.35;
 
 /** Long undulation: wavelength (m) of its first octave — gentle rolling, not hills. */
 const UND_WAVELENGTH = 30;
@@ -69,29 +84,48 @@ const UND_FLOOR = 0.35;
 /** Metres between pothole candidate slots. */
 const POTH_SLOT = 4;
 /** Per-slot occupancy at decay = 1, before the burst multiplier. */
-const POTH_DENSITY = 0.12;
+const POTH_DENSITY = 0.22;
 /**
  * Occupancy keeps this fraction even at decay = 0, so maintained asphalt still
- * throws the occasional patched hole (~1.5/km); quadratic decay growth stacks on
- * top of the floor.
+ * throws holes; quadratic decay growth stacks on top of the floor. Measured by
+ * tools/ride-bench.ts: a pristine stretch lands 1.4 holes/km in each wheel path
+ * (~10/km across the whole mat) and a ruined one 4.3/km per path. The old floor of
+ * 0.075 put ZERO holes in a wheel path over 3 km of the first 200 km of road —
+ * they were both too rare and centred off the lines a tyre tracks.
  */
-const POTH_DECAY_FLOOR = 0.075;
-/** Depth keeps this fraction of its cap even on pristine road (a patched hole). */
-const POTH_DEPTH_FLOOR = 0.15;
+const POTH_DECAY_FLOOR = 0.28;
+/**
+ * Depth keeps this fraction of its cap even on pristine road. High, because decay
+ * already controls how MANY holes there are; see `potholeAtSlot`.
+ */
+const POTH_DEPTH_FLOOR = 0.45;
 /** Pothole diameter range in metres. */
 const POTH_MIN_D = 0.4;
 const POTH_MAX_D = 1.2;
 /** Depth cap (m): never a hole deep enough to swallow a wheel. */
-const POTH_MAX_DEPTH = 0.07;
+const POTH_MAX_DEPTH = 0.11;
 /**
  * Depth/diameter cap. The cosine profile's steepest slope is pi*depth/diameter at
- * r = D/4; 0.13 keeps that under ~22 degrees, so a wheel never meets a kerb-like
- * wall. The mesh is even shallower: a pothole lands on one vertex, so the felt
- * slope is depth/1.333 m ≈ 3 degrees.
+ * r = D/4; 0.16 keeps that under ~27 degrees, so a wheel never meets a kerb-like
+ * wall. The mesh is much shallower again: a pothole spans one vertex row, so the
+ * felt ramp is depth/1.333 m — under 5 degrees even at the 0.11 m cap.
  */
-const POTH_SLOPE_CAP = 0.13;
-/** Lattice lines (m) a pothole may centre on; the lanes where wheels actually track. */
-const POTH_LATERALS: readonly number[] = [-2.2, -1.1, 0, 1.1, 2.2];
+const POTH_SLOPE_CAP = 0.16;
+/**
+ * Lateral lines (m) a pothole may centre on.
+ *
+ * These MUST be columns of the road mesh's own cross-section (roadmesh.ts
+ * LATERALS) or the profile's deepest point falls between vertices and is never
+ * sampled — the hole is drawn and collided shallower than it is. The old lattice
+ * (+/-1.1, +/-2.2) was on no column at all, and missed both wheel paths besides:
+ * a 0.4 m hole centred at 1.1 m does not reach a tyre tracking 0.85 m.
+ *
+ * +/-0.85 and +/-2.45 ARE the wheel paths (roadmesh.ts WHEEL_PATH_LATERALS), which
+ * is also where real holes form, because that is where the load is. +/-1.65 and 0
+ * are the unloaded crown and lane centre: holes there are seen and swerved around
+ * rather than hit, which is what stops the lattice reading as a rumble strip.
+ */
+const POTH_LATERALS: readonly number[] = [-2.45, -1.65, -0.85, 0, 0.85, 1.65, 2.45];
 
 // Hash tags keep each pothole property's random stream independent.
 const TAG_POTH_BURST = 0x50d4b7;
@@ -137,8 +171,12 @@ function potholeAtSlot(seed: number, slot: number, decay: number): Pothole | nul
   const decayFactor = POTH_DECAY_FLOOR + (1 - POTH_DECAY_FLOOR) * decay * decay;
   if (hash01(seed, slot, TAG_POTH_OCCUPANCY) >= POTH_DENSITY * decayFactor * burst) return null;
   const shape = potholeForSlot(seed, slot);
-  // A patched hole on pristine road is shallow but present; depth grows with decay.
-  const depthFactor = (POTH_DEPTH_FLOOR + (1 - POTH_DEPTH_FLOOR) * decay) * (0.5 + 0.5 * decay);
+  // Decay drives HOW MANY holes there are (above), not how shallow each one is. A
+  // hole in maintained tarmac is a hole — the old double taper (this factor times
+  // another `0.5 + 0.5 * decay`) left the early road's holes 10-20 mm deep, which
+  // at a 1.333 m vertex step is a wheel-sized ripple nobody feels. One taper, with
+  // a high floor: rare but real.
+  const depthFactor = POTH_DEPTH_FLOOR + (1 - POTH_DEPTH_FLOOR) * decay;
   const depth =
     Math.min(POTH_MAX_DEPTH, POTH_SLOPE_CAP * shape.diameter) *
     depthFactor *
@@ -187,8 +225,8 @@ export class SurfaceField {
   /**
    * Total displacement (m, positive up) at a road point. `x`/`z` are the point's
    * world position (the bump layer is 2D world noise), `decay` the road condition
-   * at this s, `surface` the surface type (drives both the bump floor and the
-   * decay-driven roughness growth).
+   * at this s (undulation and potholes only), `surface` the surface type, which is
+   * the bump layer's ONLY input besides the noise.
    */
   displacement(
     s: number,
@@ -201,9 +239,8 @@ export class SurfaceField {
     const und =
       UND_AMP * (UND_FLOOR + (1 - UND_FLOOR) * decay) *
       this.undulationNoise.fbm(s / UND_WAVELENGTH, 2, 2, 0.5);
-    // Floor keeps texture on maintained roads; decay adds material degradation.
-    const bumpAmp = BUMP_FLOOR[surface] + BUMP_GAIN * decay * SURFACES[surface].roughness;
-    const bump = bumpAmp * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
+    const bump =
+      BUMP_AMP[surface] * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
     return und + bump + potholeAt(this.seed, s, lateral, decay);
   }
 }

@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 
+import { desertPaletteAt } from '../world/gradient';
+import { WorldOrigin, type RebaseShift } from '../world/origin';
+
 /**
  * Cheap wheel spray: sand and grit thrown off loose ground, tyre smoke scrubbed off
  * sealed ground, and one pool of motes that does both.
@@ -157,6 +160,19 @@ void main() {
 }
 `;
 
+/**
+ * Scratch colour for the thrown sand, reused every frame so the palette-driven spray
+ * never allocates.
+ *
+ * The lift that separates the spray from the ground it came off now lives in the
+ * palette itself (`DesertPalette.spray`), not here. It used to be a lerp toward white
+ * in the linear working space, which brightens by moving all three channels toward
+ * each other — so it desaturated as it lifted, and the warm `#d29459` sand threw a
+ * neutral cream that did not look like that desert. The palette raises lightness in
+ * HSL instead and keeps hue and saturation, so thrown sand is the same sand.
+ */
+const spraySand = new THREE.Color();
+
 export class WheelSpray {
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material: THREE.ShaderMaterial;
@@ -186,7 +202,15 @@ export class WheelSpray {
   /** Fractional mote accumulator, so low emission rates still fire steadily. */
   private acc = 0;
 
-  constructor(private readonly scene: THREE.Scene) {
+  constructor(
+    private readonly scene: THREE.Scene,
+    origin: WorldOrigin,
+  ) {
+    // The mote positions are RELATIVE (the contact points from BodyOrigin are
+    // already relative, see emit), so on a rebase the live motes must be shifted by
+    // the frame step or a still-airborne tail streaks a kilometre across the screen
+    // for the rest of its sub-second life. Cheap: 400 slots, once per rebase.
+    origin.register(this);
     this.posAttr = new THREE.BufferAttribute(this.position, 3);
     this.posAttr.setUsage(THREE.DynamicDrawUsage);
     this.geometry.setAttribute('position', this.posAttr);
@@ -205,19 +229,18 @@ export class WheelSpray {
 
     // Airborne material, NOT the ground's own albedo.
     //
-    // Matching the sand exactly (0xbf9f6b) was the first attempt and it made the
-    // spray invisible: identical colour against an identical background, with the
-    // camera looking down at the same lit surface the motes came from. Real thrown
-    // dust reads LIGHTER than the ground it came off, because a suspended grain is
-    // lit from every side while packed sand is shadowed by its neighbours. So this
-    // is the sand hue lifted toward white.
+    // Matching the ground sand exactly was the first attempt and it made the spray
+    // invisible: identical colour against an identical background, with the camera
+    // looking down at the same lit surface the motes came from. Real thrown dust
+    // reads LIGHTER than the ground it came off, because a suspended grain is lit
+    // from every side while packed sand is shadowed by its neighbours. So the spray
+    // is the desert palette's sand lifted toward white (SPRAY_SAND_LIFT), re-sampled
+    // every frame from desertPaletteAt so it always matches the ground it came off.
     //
     // The smoke tone is the same argument run against the other background. Tyre
     // smoke over dark asphalt has to be pale to separate from it, but pure white
     // against a bright desert sky reads as a rendering error, so it is a cool grey
     // with the faintest blue in it — burnt rubber, not steam.
-    const sand = new THREE.Color(0xe0cca6);
-    sand.convertSRGBToLinear();
     const smoke = new THREE.Color(0xd2d3d8);
     smoke.convertSRGBToLinear();
 
@@ -225,7 +248,7 @@ export class WheelSpray {
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       uniforms: {
-        sandColor: { value: sand },
+        sandColor: { value: spraySand },
         smokeColor: { value: smoke },
         scale: { value: POINT_SCALE },
         pxMin: { value: POINT_PX_MIN },
@@ -241,6 +264,23 @@ export class WheelSpray {
     // so skip the stale-box frustum cull.
     this.points.frustumCulled = false;
     scene.add(this.points);
+  }
+
+  /**
+   * Rebasable: shift every live (and stale) mote's RELATIVE X/Z by the frame step.
+   * Y is a height, untouched. Skipping this would be defensible — a mote lives under
+   * a second, so a streak is barely a frame — but the shift is 400 subtractions once
+   * per rebase, far cheaper than the confusion it saves, and it keeps the pool's
+   * geometry bit-identical to what the next spawn writes.
+   */
+  rebase(shift: RebaseShift): void {
+    const position = this.position;
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const i3 = i * 3;
+      position[i3] -= shift.dx;
+      position[i3 + 2] -= shift.dz;
+    }
+    this.posAttr.needsUpdate = true;
   }
 
   /**
@@ -315,6 +355,10 @@ export class WheelSpray {
       this.velocity[i3 + 1] = up * (0.5 + 0.8 * Math.random());
       this.velocity[i3 + 2] = vz * s;
 
+      // `x/y/z` are the wheel contact point, already RELATIVE: BodyOrigin keeps
+      // `WheelSprayState.contact*` in the relative frame, and this Float32Array is
+      // relative too, so the write is frame-consistent with no origin subtraction.
+      // Do NOT add one here — that would double-rebase every mote off the wheel.
       this.position[i3] = x + (Math.random() - 0.5) * 0.08;
       this.position[i3 + 1] = y + 0.02 + Math.random() * 0.05;
       this.position[i3 + 2] = z + (Math.random() - 0.5) * 0.08;
@@ -343,7 +387,11 @@ export class WheelSpray {
    * rather than from constants, because the pool holds sand and smoke at the same
    * time — a car crossing from the verge onto the road has both in flight.
    */
-  update(dt: number): void {
+  update(dt: number, s: number): void {
+    // Re-tint to the thrown-sand colour of the ground at the player's distance, which
+    // the palette derives from that ground's own hue and saturation. Mutated in place,
+    // so the uniform never allocates.
+    spraySand.setHex(desertPaletteAt(s).spray);
     if (dt <= 0) return;
     for (let i = 0; i < POOL_SIZE; i++) {
       const life = this.life[i];

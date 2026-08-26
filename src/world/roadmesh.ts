@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
-import { roadConditionAt } from './gradient';
+import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
@@ -87,18 +87,25 @@ const PAINT_WEAR_WAVELENGTH = 11;
 /** Coverage below which a marking quad is not drawn at all. */
 const PAINT_GONE = 0.34;
 
-/** Surface albedos pre-converted to the linear working colour space. */
-const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
+/**
+ * Static albedos, pre-converted to the linear working colour space. Sand, rock and
+ * gravel are palette-driven (see `desertPaletteAt`), so only the sealed-lane
+ * surfaces remain here.
+ */
+const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
   [SurfaceType.Asphalt]: new THREE.Color(SURFACES[SurfaceType.Asphalt].color),
   [SurfaceType.CrackedAsphalt]: new THREE.Color(SURFACES[SurfaceType.CrackedAsphalt].color),
-  [SurfaceType.Gravel]: new THREE.Color(SURFACES[SurfaceType.Gravel].color),
-  [SurfaceType.Sand]: new THREE.Color(SURFACES[SurfaceType.Sand].color),
-  [SurfaceType.Rock]: new THREE.Color(SURFACES[SurfaceType.Rock].color),
   [SurfaceType.Concrete]: new THREE.Color(SURFACES[SurfaceType.Concrete].color),
 };
 
-const GRAVEL_LINEAR = SURFACE_LINEAR[SurfaceType.Gravel];
-const SAND_LINEAR = SURFACE_LINEAR[SurfaceType.Sand];
+/**
+ * Palette scratch colours, updated once per arclength row and reused across the
+ * row's vertices so no palette lookup allocates. Gravel (the shoulder and the dust
+ * that tints the mat) and sand (the drift) are palette-driven; rock never appears
+ * on the road ribbon.
+ */
+const gravelLinear = new THREE.Color();
+const sandLinear = new THREE.Color();
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
 
@@ -174,12 +181,20 @@ export class RoadMeshProvider implements ChunkProvider {
     const { sStart, sEnd, road, physics, hasPhysics } = ctx;
     if (sEnd <= sStart) return null;
     attachRoadTextures();
+    // The floating origin, frozen at build time. Sampling stays absolute — the road
+    // surface's 2D bump noise is a function of world position — and the subtraction
+    // happens only where a coordinate is about to live in f32.
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
 
     // One surface type per chunk drives the collider friction profile and the lane
     // colour; the bump floor and roughness growth come from the per-s condition
     // inside roadSurfaceY, keeping the drawn surface continuous across chunks.
     const surface = roadConditionAt((sStart + sEnd) / 2).surface;
-    const laneColor = SURFACE_LINEAR[surface];
+    // Sealed lanes keep their static albedo; a road decayed all the way to gravel
+    // takes the palette gravel (resolved per row, like the shoulder), so `laneBase`
+    // is null for that case.
+    const laneBase = SURFACE_LINEAR[surface] ?? null;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
     const latCount = LATERALS.length;
@@ -199,6 +214,11 @@ export class RoadMeshProvider implements ChunkProvider {
       // at the denser resolution.
       const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
       const cond = roadConditionAt(s);
+      // Palette colour is a function of arclength alone: sample once per row, so
+      // neighbouring chunks share the seam row and a rebuild is identical.
+      const palette = desertPaletteAt(s);
+      sandLinear.setHex(palette.sand);
+      gravelLinear.setHex(palette.gravel);
 
       for (let li = 0; li < latCount; li++) {
         const lateral = LATERALS[li]!;
@@ -208,9 +228,9 @@ export class RoadMeshProvider implements ChunkProvider {
         const y = roadSurfaceY(road, this.field, s, lateral, point.x, point.z);
 
         const vi = si * latCount + li;
-        positions[vi * 3] = point.x;
+        positions[vi * 3] = point.x - ox;
         positions[vi * 3 + 1] = y;
-        positions[vi * 3 + 2] = point.z;
+        positions[vi * 3 + 2] = point.z - oz;
 
         // Texture coordinates in world metres, so the grain has a fixed size and
         // does not stretch through corners or over the shoulder.
@@ -219,11 +239,11 @@ export class RoadMeshProvider implements ChunkProvider {
 
         const a = Math.abs(lateral);
         color.lerpColors(
-          a <= HW ? laneColor : GRAVEL_LINEAR,
-          SAND_LINEAR,
+          a <= HW ? (laneBase ?? gravelLinear) : gravelLinear,
+          sandLinear,
           sandFactor(a, cond.sandCover),
         );
-        if (a <= HW) this.weather(color, s, lateral, a, cond.decay);
+        if (a <= HW) this.weather(color, gravelLinear, s, lateral, a, cond.decay);
         color.multiplyScalar(textureGain);
         colors[vi * 3] = color.r;
         colors[vi * 3 + 1] = color.g;
@@ -262,13 +282,16 @@ export class RoadMeshProvider implements ChunkProvider {
     const disposables: THREE.BufferGeometry[] = [geometry];
 
     if (hasPhysics) {
+      // `positions` is already origin-relative (subtracted at the write site above);
+      // subtracting again here would double-apply the offset and drop the collider
+      // a whole chunk's origin away from the mesh.
       const collider = physics.addStaticTrimesh(positions, indices, surface);
       colliders.push(collider);
       const body = collider.parent();
       if (body) bodies.push(body);
     }
 
-    const markings = this.buildMarkings(road, sStart, sEnd, sCount, laneColor);
+    const markings = this.buildMarkings(road, sStart, sEnd, sCount, laneBase, ox, oz);
     if (markings) {
       group.add(markings);
       disposables.push(markings.geometry);
@@ -292,7 +315,14 @@ export class RoadMeshProvider implements ChunkProvider {
    * Everything scales with `decay` in the direction the desert takes it: an
    * abandoned road loses its polished tracks (nothing drives it) and gains dust.
    */
-  private weather(color: THREE.Color, s: number, lateral: number, a: number, decay: number): void {
+  private weather(
+    color: THREE.Color,
+    gravel: THREE.Color,
+    s: number,
+    lateral: number,
+    a: number,
+    decay: number,
+  ): void {
     // Distance to the nearest wheel path, as a 0..1 strength across its half-width.
     let track = 0;
     for (const centre of WHEEL_PATH_LATERALS) {
@@ -305,13 +335,13 @@ export class RoadMeshProvider implements ChunkProvider {
     const dust = (1 - smoothTrack) * DUST_LIGHTEN * (0.5 + decay);
 
     color.multiplyScalar(1 - polish + dust);
-    if (dust > 0) color.lerp(GRAVEL_LINEAR, dust * DUST_TINT);
+    if (dust > 0) color.lerp(gravel, dust * DUST_TINT);
 
     // Ravelled edge: the mat frays into the verge rather than ending at a line.
     const intoEdge = 1 - Math.min(1, (HW - a) / EDGE_RAVEL);
     if (intoEdge > 0) {
       const t = intoEdge * intoEdge;
-      color.lerp(GRAVEL_LINEAR, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
+      color.lerp(gravel, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
     }
 
     // Coarse mottling: patchy pours and old repairs at a scale the tiled texture
@@ -331,7 +361,9 @@ export class RoadMeshProvider implements ChunkProvider {
     sStart: number,
     sEnd: number,
     sCount: number,
-    laneColor: THREE.Color,
+    laneBase: THREE.Color | null,
+    ox: number,
+    oz: number,
   ): THREE.Mesh | null {
     const positions: number[] = [];
     const colors: number[] = [];
@@ -363,10 +395,12 @@ export class RoadMeshProvider implements ChunkProvider {
         );
         const coverage = markings * (0.72 + wear * 0.55);
         if (coverage < PAINT_GONE) continue;
-        color.lerpColors(laneColor, PAINT_LINEAR, Math.min(1, coverage));
+        // `laneBase` is null only for a gravel road, which has `markings` 0 at every
+        // step and so never reaches here.
+        color.lerpColors(laneBase!, PAINT_LINEAR, Math.min(1, coverage));
         this.emitMarkingQuad(
           road, line.lateral, s, s + SURFACE_STEP,
-          point, color, positions, colors,
+          ox, oz, point, color, positions, colors,
         );
       }
     }
@@ -385,6 +419,8 @@ export class RoadMeshProvider implements ChunkProvider {
     lateral: number,
     s0: number,
     s1: number,
+    ox: number,
+    oz: number,
     point: { x: number; y: number; z: number },
     color: THREE.Color,
     positions: number[],
@@ -393,13 +429,13 @@ export class RoadMeshProvider implements ChunkProvider {
     const l0 = lateral - MARKING_HALF_WIDTH;
     const l1 = lateral + MARKING_HALF_WIDTH;
     // Four corners [c00, c01, c10, c11]; emit triangles c00,c10,c01 and c10,c11,c01.
-    this.markingCorner(road, s0, l0, point);
+    this.markingCorner(road, s0, l0, ox, oz, point);
     const x00 = point.x; const y00 = point.y; const z00 = point.z;
-    this.markingCorner(road, s0, l1, point);
+    this.markingCorner(road, s0, l1, ox, oz, point);
     const x01 = point.x; const y01 = point.y; const z01 = point.z;
-    this.markingCorner(road, s1, l0, point);
+    this.markingCorner(road, s1, l0, ox, oz, point);
     const x10 = point.x; const y10 = point.y; const z10 = point.z;
-    this.markingCorner(road, s1, l1, point);
+    this.markingCorner(road, s1, l1, ox, oz, point);
     const x11 = point.x; const y11 = point.y; const z11 = point.z;
 
     const order = [0, 2, 1, 2, 3, 1];
@@ -416,9 +452,17 @@ export class RoadMeshProvider implements ChunkProvider {
     road: Road,
     s: number,
     lateral: number,
+    ox: number,
+    oz: number,
     out: { x: number; y: number; z: number },
   ): void {
+    // Absolute in, relative out: `roadSurfaceY` feeds the surface field's 2D bump
+    // noise with this point's world position, so it must see the absolute x/z. The
+    // subtraction happens only after the height is resolved, on the way into the
+    // marking's Float32Array.
     road.offsetPoint(s, lateral, out);
     out.y = roadSurfaceY(road, this.field, s, lateral, out.x, out.z) + MARKING_LIFT;
+    out.x -= ox;
+    out.z -= oz;
   }
 }

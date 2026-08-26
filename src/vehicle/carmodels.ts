@@ -86,10 +86,13 @@ const SOVIET = '/models/soviet';
 const SUSP_CAR: SuspensionTuning = {
   restLength: 0.3,
   maxTravel: 0.3,
-  stiffness: 17,
-  // Critical damping at k=17 is 8.25; these are 0.35 and 0.45 of it.
-  compression: 2.9,
-  relaxation: 3.7,
+  // 17 -> 20: sag falls from 144 mm to 123 mm against 300 mm of travel, so there is
+  // MORE reserve than before as well as less movement.
+  stiffness: 20,
+  // Critical damping at k=20 is 8.94; these are 0.35 and 0.45 of it, the same
+  // fractions as before the stiffening.
+  compression: 3.13,
+  relaxation: 4.02,
   maxForce: 26000,
 };
 /**
@@ -107,10 +110,16 @@ const SUSP_CAR: SuspensionTuning = {
 const SUSP_SOFT: SuspensionTuning = {
   restLength: 0.33,
   maxTravel: 0.34,
-  stiffness: 15,
-  // Critical damping at k=15 is 7.75.
-  compression: 2.5,
-  relaxation: 3.25,
+  // 15 was genuinely floaty: 164 mm of static sag, and a body that kept moving after
+  // the road had stopped. 18 brings sag to 136 mm against 340 mm of travel — still
+  // period-soft, still nothing like a modern car, but the wallow goes and weight
+  // transfer settles instead of drifting.
+  stiffness: 18,
+  // Critical damping at k=18 is 8.49; these are 0.32 and 0.42 of it, unchanged as
+  // FRACTIONS so the rebound bias that stops a soft spring throwing the body back up
+  // survives the stiffening.
+  compression: 2.72,
+  relaxation: 3.56,
   maxForce: 25000,
 };
 

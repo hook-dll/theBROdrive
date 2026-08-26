@@ -177,7 +177,14 @@ function groundPoint(
   return { x: p.x, y: ctx.terrain.heightAt(p.x, p.z, s), z: p.z };
 }
 
-/** Matrix from an upright-ish pose. `yaw` about Y, then `roll`/`pitch` tilts. */
+/**
+ * Matrix from an upright-ish pose. `yaw` about Y, then `roll`/`pitch` tilts.
+ *
+ * `x`/`z` are ABSOLUTE: the translation is written relative to `ox`/`oz`, so the
+ * matrix is already in the chunk's floating-origin frame when both the visual
+ * (`setFromMatrix`) and the collider (`geometryToTrimesh`) read it. The rebase
+ * happens here, once, never in either consumer.
+ */
 function poseMatrix(
   x: number,
   y: number,
@@ -185,9 +192,11 @@ function poseMatrix(
   yaw: number,
   roll: number,
   pitch: number,
+  ox: number,
+  oz: number,
 ): THREE.Matrix4 {
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ'));
-  return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1));
+  return new THREE.Matrix4().compose(new THREE.Vector3(x - ox, y, z - oz), q, new THREE.Vector3(1, 1, 1));
 }
 
 /** Apply a matrix's transform to an Object3D without mutating its geometry. */
@@ -482,6 +491,8 @@ function buildFreight(
   freight: FreightField,
 ): void {
   const a = anchorXZ(ctx, poi);
+  const ox = ctx.originX;
+  const oz = ctx.originZ;
   const base = placeAt(ctx, poi, a, SIGN_LATERAL, 0, a.heading);
 
   const postGeo = new THREE.CylinderGeometry(0.07, 0.09, SIGN_POST_HEIGHT, 6);
@@ -490,7 +501,7 @@ function buildFreight(
     ctx,
     postGeo,
     makeFlatMaterial(0x4a4640, 0.7),
-    poseMatrix(base.x, base.y + SIGN_POST_HEIGHT / 2, base.z, a.heading, 0, 0),
+    poseMatrix(base.x, base.y + SIGN_POST_HEIGHT / 2, base.z, a.heading, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -514,6 +525,8 @@ function buildFreight(
     a.heading + Math.PI / 2,
     0,
     0,
+    ox,
+    oz,
   );
   const panel = new THREE.Mesh(panelGeo, panelMat);
   setFromMatrix(panel, panelMatrix);
@@ -530,7 +543,7 @@ function buildFreight(
   // A data source for LightBudget, not a rendered light: kept invisible so chunk
   // streaming never changes Three's point-light shader permutation.
   const light = new THREE.PointLight(0xffe6a8, 0, 34, 2);
-  light.position.set(base.x, base.y + SIGN_POST_HEIGHT, base.z);
+  light.position.set(base.x - ox, base.y + SIGN_POST_HEIGHT, base.z - oz);
   light.visible = false;
   light.userData.lightBudgetSource = true;
   group.add(light);
@@ -555,6 +568,8 @@ function buildFreight(
     a.heading + hash01(poi.variantSeed, 0x9a) * 0.4,
     0,
     0,
+    ox,
+    oz,
   );
   const pallet = new THREE.Mesh(palletGeo, makeFlatMaterial(0x8a6238, 0.9));
   setFromMatrix(pallet, palletMatrix);
@@ -598,6 +613,8 @@ function buildWrecks(
   wrecks: WreckField,
 ): void {
   const anchor = anchorXZ(ctx, poi);
+  const ox = ctx.originX;
+  const oz = ctx.originZ;
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
 
   // Which slot (if any) is the runner. Rolled once per field so a field never has
@@ -634,7 +651,7 @@ function buildWrecks(
     const pitch = isRunner ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
 
     const originY = p.y + half[1] - sink;
-    const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch);
+    const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
 
     // A complete static model. It must already be preloaded — the lead preloads the
     // whole catalogue before any chunk is built, so no guard is needed here.
@@ -684,6 +701,8 @@ function buildGasStop(
   shouldLoot: boolean,
 ): void {
   const a = anchorXZ(ctx, poi);
+  const ox = ctx.originX;
+  const oz = ctx.originZ;
   const yaw = a.heading;
 
   // Canopy roof, spanning the road direction so it reads as a forecourt.
@@ -692,7 +711,7 @@ function buildGasStop(
     ctx,
     new THREE.BoxGeometry(9.6, 0.4, 6.2),
     makeFlatMaterial(0x8fa0ad, 0.8),
-    poseMatrix(roof.x, roof.y + 3.6, roof.z, yaw, 0, 0),
+    poseMatrix(roof.x, roof.y + 3.6, roof.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -710,7 +729,7 @@ function buildGasStop(
       ctx,
       new THREE.BoxGeometry(0.36, 3.6, 0.36),
       makeFlatMaterial(0x70757a, 0.85),
-      poseMatrix(post.x, post.y + 1.8, post.z, yaw, 0, 0),
+      poseMatrix(post.x, post.y + 1.8, post.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -726,7 +745,7 @@ function buildGasStop(
       ctx,
       new THREE.BoxGeometry(0.9, 1.5, 0.55),
       makeFlatMaterial(i === 0 ? 0xc23b2e : 0x2f6f3f, 0.6),
-      poseMatrix(pump.x, pump.y + 0.75, pump.z, yaw, 0, 0),
+      poseMatrix(pump.x, pump.y + 0.75, pump.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -737,7 +756,7 @@ function buildGasStop(
       ctx,
       new THREE.BoxGeometry(0.6, 0.35, 0.1),
       makeFlatMaterial(0x22252a, 0.5),
-      poseMatrix(face.x, face.y + 1.25, face.z, yaw, 0, 0),
+      poseMatrix(face.x, face.y + 1.25, face.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -751,7 +770,7 @@ function buildGasStop(
     ctx,
     new THREE.BoxGeometry(2.6, 2.2, 2.0),
     makeFlatMaterial(0x9a8f86, 0.9),
-    poseMatrix(shack.x, shack.y + 1.1, shack.z, yaw + 0.12, 0, 0),
+    poseMatrix(shack.x, shack.y + 1.1, shack.z, yaw + 0.12, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -761,7 +780,7 @@ function buildGasStop(
     ctx,
     new THREE.BoxGeometry(3.0, 0.18, 2.4),
     makeFlatMaterial(0x7d4a35, 0.85),
-    poseMatrix(shack.x, shack.y + 2.35, shack.z, yaw + 0.12, 0, 0),
+    poseMatrix(shack.x, shack.y + 2.35, shack.z, yaw + 0.12, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -824,6 +843,8 @@ function buildWorkshop(
   shouldLoot: boolean,
 ): void {
   const a = anchorXZ(ctx, poi);
+  const ox = ctx.originX;
+  const oz = ctx.originZ;
   const yaw = a.heading + (hash01(poi.variantSeed, 40) - 0.5) * 0.3;
 
   // Corrugated shed: body + overhanging roof.
@@ -832,7 +853,7 @@ function buildWorkshop(
     ctx,
     new THREE.BoxGeometry(4.6, 2.6, 3.4),
     makeFlatMaterial(0x8a8f94, 0.85),
-    poseMatrix(shed.x, shed.y + 1.3, shed.z, yaw, 0, 0),
+    poseMatrix(shed.x, shed.y + 1.3, shed.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -842,7 +863,7 @@ function buildWorkshop(
     ctx,
     new THREE.BoxGeometry(5.2, 0.2, 4.0),
     makeFlatMaterial(0x9a4a35, 0.9),
-    poseMatrix(shed.x, shed.y + 2.75, shed.z, yaw, 0, 0),
+    poseMatrix(shed.x, shed.y + 2.75, shed.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -853,7 +874,7 @@ function buildWorkshop(
   addVisual(
     new THREE.BoxGeometry(1.1, 2.0, 0.12),
     makeFlatMaterial(0x2a2a2a, 0.95),
-    poseMatrix(door.x, door.y + 1.0, door.z, yaw, 0, 0),
+    poseMatrix(door.x, door.y + 1.0, door.z, yaw, 0, 0, ox, oz),
     group,
   );
 
@@ -863,7 +884,7 @@ function buildWorkshop(
     ctx,
     new THREE.BoxGeometry(2.2, 0.12, 0.8),
     makeFlatMaterial(0x7a5230, 0.85),
-    poseMatrix(bench.x, bench.y + 0.85, bench.z, yaw, 0, 0),
+    poseMatrix(bench.x, bench.y + 0.85, bench.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -880,7 +901,7 @@ function buildWorkshop(
       ctx,
       new THREE.BoxGeometry(0.12, 0.85, 0.12),
       makeFlatMaterial(0x5d4326, 0.9),
-      poseMatrix(leg.x, leg.y + 0.42, leg.z, yaw, 0, 0),
+      poseMatrix(leg.x, leg.y + 0.42, leg.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -893,7 +914,7 @@ function buildWorkshop(
     addVisual(
       new THREE.BoxGeometry(0.5, 0.06, 0.06),
       makeFlatMaterial(0x3b3b3b, 0.6),
-      poseMatrix(t.x, t.y + 0.93, t.z, yaw, 0, hash01(poi.variantSeed, 45, i) * 0.4),
+      poseMatrix(t.x, t.y + 0.93, t.z, yaw, 0, hash01(poi.variantSeed, 45, i) * 0.4, ox, oz),
       group,
     );
   }
@@ -920,6 +941,8 @@ function buildCamp(
   shouldLoot: boolean,
 ): void {
   const a = anchorXZ(ctx, poi);
+  const ox = ctx.originX;
+  const oz = ctx.originZ;
   const yaw = a.heading + (hash01(poi.variantSeed, 80) - 0.5) * 0.5;
 
   // Teepee tent (visual only — cloth).
@@ -927,7 +950,7 @@ function buildCamp(
   addVisual(
     new THREE.ConeGeometry(2.1, 2.2, 6),
     makeFlatMaterial(0xc9b98a, 0.95),
-    poseMatrix(tent.x, tent.y + 1.1, tent.z, 0, 0, 0),
+    poseMatrix(tent.x, tent.y + 1.1, tent.z, 0, 0, 0, ox, oz),
     group,
   );
 
@@ -936,14 +959,14 @@ function buildCamp(
   addVisual(
     new THREE.TorusGeometry(0.8, 0.16, 6, 18),
     makeFlatMaterial(0x3a3a3a, 0.9),
-    poseMatrix(fire.x, fire.y + 0.12, fire.z, 0, 0, Math.PI / 2),
+    poseMatrix(fire.x, fire.y + 0.12, fire.z, 0, 0, Math.PI / 2, ox, oz),
     group,
   );
   for (let i = 0; i < 2; i++) {
     addVisual(
       new THREE.CylinderGeometry(0.08, 0.08, 0.9, 5),
       makeFlatMaterial(0x2a2018, 0.95),
-      poseMatrix(fire.x, fire.y + 0.1, fire.z, 0, 0, hash01(poi.variantSeed, 81, i) * Math.PI),
+      poseMatrix(fire.x, fire.y + 0.1, fire.z, 0, 0, hash01(poi.variantSeed, 81, i) * Math.PI, ox, oz),
       group,
     );
   }
@@ -962,7 +985,7 @@ function buildCamp(
       ctx,
       new THREE.BoxGeometry(0.7, 0.7, 0.7),
       makeFlatMaterial(0x8a6238, 0.9),
-      poseMatrix(c.x, c.y + 0.35, c.z, hash01(poi.variantSeed, 86, i) * Math.PI, 0, 0),
+      poseMatrix(c.x, c.y + 0.35, c.z, hash01(poi.variantSeed, 86, i) * Math.PI, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,

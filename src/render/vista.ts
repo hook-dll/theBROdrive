@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
-import { SURFACES, SurfaceType } from '../core/surfaces';
+import { desertPaletteAt } from '../world/gradient';
+import type { WorldOrigin } from '../world/origin';
 import type { RoadDistance } from '../world/roaddistance';
 import type { Terrain } from '../world/terrain';
 import { NEAR_TERRAIN_REACH, TERRAIN_MATERIAL } from '../world/terrainmesh';
@@ -121,8 +122,9 @@ const BIAS_FADE = 2600;
  */
 const ROCK_ALTITUDE = 260;
 
-const SAND_LINEAR = new THREE.Color(SURFACES[SurfaceType.Sand].color);
-const ROCK_LINEAR = new THREE.Color(SURFACES[SurfaceType.Rock].color);
+/** Palette scratch colours, set once per disc rebuild from `desertPaletteAt`. */
+const sandLinear = new THREE.Color();
+const rockLinear = new THREE.Color();
 
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -135,7 +137,14 @@ export class VistaMesh {
 
   /** Radius of the disc, metres. Set by the view-distance setting. */
   private outerRadius = 0;
-  /** Centre of the disc as last built; NaN until the first build. */
+  /**
+   * Centre of the disc as last built, in the RELATIVE frame; NaN until the first
+   * build. Kept relative on purpose: `update` receives the relative camera, and a
+   * rebase shifts that relative camera by a whole `REBASE_STEP` (at least 1000 m),
+   * which is always more than `REBUILD_STEP`, so the rebuild gate below trips on
+   * its own and the disc is rebuilt for the new origin with no explicit rebase
+   * handling and no `Rebasable` bookkeeping.
+   */
   private centreX = Number.NaN;
   private centreZ = Number.NaN;
 
@@ -149,6 +158,7 @@ export class VistaMesh {
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
     private readonly roadDistance: RoadDistance,
+    private readonly origin: WorldOrigin,
   ) {
     for (let a = 0; a < SECTORS; a++) {
       const theta = (a / SECTORS) * Math.PI * 2;
@@ -183,23 +193,35 @@ export class VistaMesh {
   }
 
   /** Rebuilds the disc if the camera has left the patch it was built for. */
-  update(cameraX: number, cameraZ: number): void {
+  update(cameraX: number, cameraZ: number, s: number): void {
     if (this.outerRadius <= 0) return;
     const snapX = Math.round(cameraX / REBUILD_STEP) * REBUILD_STEP;
     const snapZ = Math.round(cameraZ / REBUILD_STEP) * REBUILD_STEP;
     if (snapX === this.centreX && snapZ === this.centreZ) return;
     this.centreX = snapX;
     this.centreZ = snapZ;
-    this.build(snapX, snapZ);
+    this.build(snapX, snapZ, s);
   }
 
-  private build(cx: number, cz: number): void {
+  private build(cx: number, cz: number, s: number): void {
     const radii = this.radii;
     const rings = radii.length;
     const vertexCount = rings * SECTORS;
+    // The vertex positions written below are RELATIVE (`cx`/`cz` are the relative
+    // snapped camera centre), but the terrain and road-distance fields are ABSOLUTE
+    // functions of world position. Hoist the origin once so the per-vertex sampling
+    // adds it instead of re-reading a getter thousands of times per rebuild.
+    const ox = this.origin.x;
+    const oz = this.origin.z;
 
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
+    // The whole disc shares one palette sample, taken at the camera's arclength:
+    // the palette cycles over 4 000 km, so a single s across the disc is exact to
+    // the eye and matches the near desert at the horizon line.
+    const palette = desertPaletteAt(s);
+    sandLinear.setHex(palette.sand);
+    rockLinear.setHex(palette.rock);
 
     for (let r = 0; r < rings; r++) {
       const radius = radii[r]!;
@@ -213,12 +235,14 @@ export class VistaMesh {
         // The disc is centred on the CAMERA and the mountains are gated on distance from
         // the ROAD, so a vertex's ring radius is not its lateral offset and cannot be
         // substituted for it: driving 500 m off-road would otherwise walk the whole
-        // mountain range 500 m inward.
-        const dist = this.roadDistance.distAt(x, z, DIST_LATTICE);
+        // mountain range 500 m inward. The terrain and distance fields are ABSOLUTE,
+        // so sample them at the absolute position (`x + ox`) while the RELATIVE
+        // `x`/`z` go into the Float32Array below.
+        const dist = this.roadDistance.distAt(x + ox, z + oz, DIST_LATTICE);
         const y =
           (withRelief
-            ? this.terrain.openHeight(x, z, dist)
-            : this.terrain.baseHeight(x, z, dist)) - bias;
+            ? this.terrain.openHeight(x + ox, z + oz, dist)
+            : this.terrain.baseHeight(x + ox, z + oz, dist)) - bias;
 
         const vi = (r * SECTORS + a) * 3;
         positions[vi] = x;
@@ -226,9 +250,9 @@ export class VistaMesh {
         positions[vi + 2] = z;
 
         const rock = smoothstep01(y / ROCK_ALTITUDE);
-        colors[vi] = SAND_LINEAR.r + (ROCK_LINEAR.r - SAND_LINEAR.r) * rock;
-        colors[vi + 1] = SAND_LINEAR.g + (ROCK_LINEAR.g - SAND_LINEAR.g) * rock;
-        colors[vi + 2] = SAND_LINEAR.b + (ROCK_LINEAR.b - SAND_LINEAR.b) * rock;
+        colors[vi] = sandLinear.r + (rockLinear.r - sandLinear.r) * rock;
+        colors[vi + 1] = sandLinear.g + (rockLinear.g - sandLinear.g) * rock;
+        colors[vi + 2] = sandLinear.b + (rockLinear.b - sandLinear.b) * rock;
       }
     }
 

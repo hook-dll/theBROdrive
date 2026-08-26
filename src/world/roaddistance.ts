@@ -1,4 +1,5 @@
 import type { Road } from './road';
+import { COARSE_SPACING } from './roadspine';
 
 /**
  * How far any point in the world is from the nearest pass of the road, and which pass
@@ -17,10 +18,23 @@ import type { Road } from './road';
  * per-caller lattice lets two callers round the same point differently.
  */
 
-/** Spacing of the whole-road coarse index, metres. */
-const COARSE_STEP = 200;
-/** Coarse samples per bounding circle, for pruning the global search. */
-const COARSE_SEGMENT = 16;
+/**
+ * Spacing of the whole-road coarse index, metres. Taken from the spine rather than
+ * declared here: the spine's coarse table IS this index, so a second constant is a
+ * second thing to keep in step, and if the two ever disagreed every arclength this
+ * class reports would be wrong by the difference.
+ */
+const COARSE_STEP = COARSE_SPACING;
+/**
+ * Side of a spatial-grid cell, metres.
+ *
+ * The road is a curve, so it only occupies a thin ribbon of cells: at 2 km the whole
+ * 40 000 km centreline lands in roughly 20 000 occupied cells of about ten coarse
+ * samples each, and a query almost always resolves inside the first ring or two. Much
+ * smaller and the empty-cell bookkeeping dominates; much larger and each cell holds
+ * enough samples to be a linear scan again.
+ */
+const CELL_SIZE = 2000;
 /** Spacing of the fine centreline samples the coarse winner is refined against. */
 const FINE_STEP = 20;
 /** Cached fine samples before the cache is dropped (values are position-pure). */
@@ -40,14 +54,40 @@ interface Lattice {
 }
 
 export class RoadDistance {
-  /** Coarse index of the entire road: one sample every COARSE_STEP metres. */
+  /**
+   * Coarse index of the entire road: one sample every COARSE_STEP metres.
+   *
+   * `coarseX`/`coarseZ` are the spine's own arrays, aliased rather than copied — the
+   * spine already holds exactly these values and it outlives this class. The buffer
+   * type is left open because a spine restored from IndexedDB or moved out of the
+   * worker arrives as a view over a transferred buffer, not over a fresh one.
+   */
   private coarseS: Float64Array | null = null;
-  private coarseX = new Float64Array(0);
-  private coarseZ = new Float64Array(0);
-  /** Bounding circles over runs of COARSE_SEGMENT coarse samples, for pruning. */
-  private coarseSegX = new Float64Array(0);
-  private coarseSegZ = new Float64Array(0);
-  private coarseSegR = new Float64Array(0);
+  private coarseX: Float64Array<ArrayBufferLike> = new Float64Array(0);
+  private coarseZ: Float64Array<ArrayBufferLike> = new Float64Array(0);
+  /**
+   * Uniform spatial grid over the coarse samples, in CSR form: `cellStart[c]` is where
+   * cell `c`'s run of sample indices begins in `cellItems`.
+   *
+   * This replaced a list of bounding circles over runs of 16 consecutive samples, and
+   * the reason is scaling. Circle pruning still VISITS every run, so its cost is linear
+   * in road length: at 400 km that was 125 circles and free, and at 40 000 km it is
+   * 12 501 and a measured 0.907 ms for a single query. A terrain chunk touches hundreds
+   * of fresh lattice nodes, so that is hundreds of milliseconds in one frame — the
+   * sudden stutter, and a pure regression from making the road longer.
+   *
+   * A grid is keyed on ABSOLUTE world cells, so it keeps the property the whole class
+   * rests on: the answer is a function of position alone and every caller agrees. This
+   * is NOT a windowed search. It returns the same exhaustive nearest sample as before;
+   * it just stops walking road that cannot possibly win.
+   */
+  private cellSize = 0;
+  private cellMinX = 0;
+  private cellMinZ = 0;
+  private cellsX = 0;
+  private cellsZ = 0;
+  private cellStart = new Int32Array(0);
+  private cellItems = new Int32Array(0);
   /** Fine centreline samples at absolute multiples of FINE_STEP. */
   private readonly fine = new Map<number, { x: number; z: number }>();
   /**
@@ -134,52 +174,74 @@ export class RoadDistance {
   }
 
   /**
-   * Indexes the whole road once, coarsely.
+   * Indexes the whole road once, coarsely — by READING the spine, not by walking.
    *
-   * 2001 samples over 400 km, measured at 30 ms including the road's own node
-   * integration, paid once when the first caller asks.
+   * This used to call `road.sampleAt` at every coarse step: 2001 samples over 400 km,
+   * 30 ms including the road's own node integration. The integration was the problem,
+   * not the 30 ms. Sampling the whole road forced every node of it into memory, which
+   * is 320 MB and 2.1 s at 40 000 km and made a windowed node cache pointless — this
+   * one caller would fault the entire road in on the first query. The spine's coarse
+   * table holds exactly these positions, computed once by a single walk and persisted,
+   * so the index is now a copy of two flat arrays and forces no integration at all.
    */
   private ensureCoarse(): void {
     if (this.coarseS) return;
-    const road = this.road;
-    const count = Math.floor(road.length / COARSE_STEP) + 1;
+    const spine = this.road.spine;
+    const x = spine.coarseX;
+    const z = spine.coarseZ;
+    const count = x.length;
     const s = new Float64Array(count);
-    const x = new Float64Array(count);
-    const z = new Float64Array(count);
+    for (let k = 0; k < count; k++) s[k] = k * COARSE_STEP;
+
+    // Grid bounds from the samples themselves. The road wanders wherever its curvature
+    // takes it, so nothing else knows how far out it reaches.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
     for (let k = 0; k < count; k++) {
-      const sk = k * COARSE_STEP;
-      const c = road.sampleAt(sk);
-      s[k] = sk;
-      x[k] = c.x;
-      z[k] = c.z;
+      const px = x[k]!;
+      const pz = z[k]!;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (pz < minZ) minZ = pz;
+      if (pz > maxZ) maxZ = pz;
     }
-    const segs = Math.ceil(count / COARSE_SEGMENT);
-    const segX = new Float64Array(segs);
-    const segZ = new Float64Array(segs);
-    const segR = new Float64Array(segs);
-    for (let g = 0; g < segs; g++) {
-      const from = g * COARSE_SEGMENT;
-      const to = Math.min(count, from + COARSE_SEGMENT);
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let k = from; k < to; k++) {
-        minX = Math.min(minX, x[k]!);
-        maxX = Math.max(maxX, x[k]!);
-        minZ = Math.min(minZ, z[k]!);
-        maxZ = Math.max(maxZ, z[k]!);
-      }
-      segX[g] = (minX + maxX) * 0.5;
-      segZ[g] = (minZ + maxZ) * 0.5;
-      segR[g] = Math.hypot(maxX - minX, maxZ - minZ) * 0.5;
+    const cellMinX = Math.floor(minX / CELL_SIZE);
+    const cellMinZ = Math.floor(minZ / CELL_SIZE);
+    const cellsX = Math.floor(maxX / CELL_SIZE) - cellMinX + 1;
+    const cellsZ = Math.floor(maxZ / CELL_SIZE) - cellMinZ + 1;
+
+    // Counting sort into CSR. Two passes over the samples and one over the cells, so
+    // building the index is linear and allocates exactly twice.
+    const cellCount = cellsX * cellsZ;
+    const start = new Int32Array(cellCount + 1);
+    for (let k = 0; k < count; k++) {
+      const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
+      const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
+      start[cz * cellsX + cx + 1]++;
     }
+    for (let c = 0; c < cellCount; c++) start[c + 1] += start[c];
+    const items = new Int32Array(count);
+    const cursor = new Int32Array(cellCount);
+    for (let k = 0; k < count; k++) {
+      const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
+      const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
+      const c = cz * cellsX + cx;
+      items[start[c]! + cursor[c]!] = k;
+      cursor[c]!++;
+    }
+
     this.coarseS = s;
     this.coarseX = x;
     this.coarseZ = z;
-    this.coarseSegX = segX;
-    this.coarseSegZ = segZ;
-    this.coarseSegR = segR;
+    this.cellSize = CELL_SIZE;
+    this.cellMinX = cellMinX;
+    this.cellMinZ = cellMinZ;
+    this.cellsX = cellsX;
+    this.cellsZ = cellsZ;
+    this.cellStart = start;
+    this.cellItems = items;
   }
 
   /** A fine centreline sample at `index * FINE_STEP`, cached across callers. */
@@ -197,33 +259,68 @@ export class RoadDistance {
   /**
    * The road branch nearest a world XZ, written into `this.near`.
    *
-   * Coarse pass over the whole road with circle pruning, then a fine pass over the 20 m
-   * samples around the coarse winner. There used to be a second pass looking for the
-   * nearest OTHER branch, because two passes of the road claimed the desert between them
-   * at two different elevations and taking the nearer alone left a cliff. Elevation no
-   * longer comes from the road, so the second branch has nothing left to say: the ground
-   * between two passes is simply the landscape between them.
+   * Grid pass to find the nearest COARSE sample, then a fine pass over the 20 m samples
+   * around it. There used to be a second pass looking for the nearest OTHER branch,
+   * because two passes of the road claimed the desert between them at two different
+   * elevations and taking the nearer alone left a cliff. Elevation no longer comes from
+   * the road, so the second branch has nothing left to say: the ground between two
+   * passes is simply the landscape between them.
+   *
+   * The grid pass walks rings of cells outward from the query and stops as soon as the
+   * NEXT ring cannot contain anything closer. That bound is what makes this exact
+   * rather than approximate: a ring at radius r is everywhere at least (r - 1) cells
+   * away, so once that distance exceeds the best found, no unvisited cell can win. In
+   * practice it terminates on the first or second ring, because the road is a curve and
+   * the ground being asked about is nearly always beside it.
    */
   private nearestBranch(x: number, z: number): void {
     this.ensureCoarse();
     const cs = this.coarseS!;
-    const segs = this.coarseSegR.length;
+    const size = this.cellSize;
+    const cx = Math.floor(x / size) - this.cellMinX;
+    const cz = Math.floor(z / size) - this.cellMinZ;
+    const cellsX = this.cellsX;
+    const cellsZ = this.cellsZ;
+    const start = this.cellStart;
+    const items = this.cellItems;
 
     let bestK = 0;
     let bestD = Infinity;
-    for (let g = 0; g < segs; g++) {
-      const bound =
-        Math.hypot(this.coarseSegX[g]! - x, this.coarseSegZ[g]! - z) - this.coarseSegR[g]!;
-      if (bound > 0 && bound * bound >= bestD) continue;
-      const from = g * COARSE_SEGMENT;
-      const to = Math.min(cs.length, from + COARSE_SEGMENT);
-      for (let k = from; k < to; k++) {
-        const dx = this.coarseX[k]! - x;
-        const dz = this.coarseZ[k]! - z;
-        const d = dx * dx + dz * dz;
-        if (d < bestD) {
-          bestD = d;
-          bestK = k;
+    const maxRing = Math.max(cellsX, cellsZ);
+
+    for (let ring = 0; ring <= maxRing; ring++) {
+      // Everything in this ring and beyond is at least this far away. Checked BEFORE
+      // the ring is scanned, so a hit in ring 0 usually ends the search at ring 1.
+      if (ring > 0) {
+        const floorDist = (ring - 1) * size;
+        if (floorDist > 0 && floorDist * floorDist >= bestD) break;
+      }
+
+      const x0 = cx - ring;
+      const x1 = cx + ring;
+      const z0 = cz - ring;
+      const z1 = cz + ring;
+      for (let iz = z0; iz <= z1; iz++) {
+        if (iz < 0 || iz >= cellsZ) continue;
+        // Only the ring's perimeter is new; its interior was covered by earlier rings.
+        const edgeRow = iz === z0 || iz === z1;
+        const rowBase = iz * cellsX;
+        for (let ix = x0; ix <= x1; ix++) {
+          if (ix < 0 || ix >= cellsX) continue;
+          if (!edgeRow && ix !== x0 && ix !== x1) continue;
+          const c = rowBase + ix;
+          const from = start[c]!;
+          const to = start[c + 1]!;
+          for (let i = from; i < to; i++) {
+            const k = items[i]!;
+            const dx = this.coarseX[k]! - x;
+            const dz = this.coarseZ[k]! - z;
+            const d = dx * dx + dz * dz;
+            if (d < bestD) {
+              bestD = d;
+              bestK = k;
+            }
+          }
         }
       }
     }

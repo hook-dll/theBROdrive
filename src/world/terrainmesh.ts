@@ -1,11 +1,12 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { SurfaceType, SURFACES } from '../core/surfaces';
+import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { NODE_SPACING, type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import { BERM_CREST, BERM_FADE, BERM_START, CORRIDOR_INNER, type Terrain } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
+import { desertPaletteAt } from './gradient';
 
 /**
  * Desert either side of the road.
@@ -173,15 +174,15 @@ const OWN_YIELD_CHUNKS = 2;
  */
 const OWN_TOLERANCE = OWN_SAMPLE_STEP * 0.75;
 
-/** Surface albedos pre-converted to the linear working colour space. */
-const SURFACE_LINEAR: Record<SurfaceType, THREE.Color> = {
-  [SurfaceType.Asphalt]: new THREE.Color(SURFACES[SurfaceType.Asphalt].color),
-  [SurfaceType.CrackedAsphalt]: new THREE.Color(SURFACES[SurfaceType.CrackedAsphalt].color),
-  [SurfaceType.Gravel]: new THREE.Color(SURFACES[SurfaceType.Gravel].color),
-  [SurfaceType.Sand]: new THREE.Color(SURFACES[SurfaceType.Sand].color),
-  [SurfaceType.Rock]: new THREE.Color(SURFACES[SurfaceType.Rock].color),
-  [SurfaceType.Concrete]: new THREE.Color(SURFACES[SurfaceType.Concrete].color),
-};
+/**
+ * Palette scratch colours, reused for every arclength row so a palette lookup
+ * never allocates. The desert's sand, rock and gravel albedos come from
+ * `desertPaletteAt` rather than the static `SURFACES` table, so they track the
+ * colour cycle; asphalt, cracked asphalt and concrete never appear on terrain.
+ */
+const sandLinear = new THREE.Color();
+const rockLinear = new THREE.Color();
+const gravelLinear = new THREE.Color();
 
 /**
  * Keep comic contours and stipple, but leave diffuse light and shadow colour untouched so
@@ -286,6 +287,11 @@ export class TerrainMeshProvider implements ChunkProvider {
 
   private buildVisual(ctx: ChunkContext, sStart: number, sEnd: number): BuiltTerrain {
     const { road, terrain } = ctx;
+    // The floating origin, frozen at build time: every height and surface sample
+    // below stays absolute, and the subtraction happens only where a coordinate is
+    // written into f32.
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
 
     const isApron = sStart < 0 || sEnd > road.length;
 
@@ -334,6 +340,13 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     for (let si = 0; si < sCount; si++) {
       const s = sStart + si * S_STEP;
+      // Palette colour is a function of arclength alone, so sample it once per
+      // row and reuse it across every lateral column. Neighbouring chunks share
+      // the seam row's colour, and a chunk rebuilt after unloading is identical.
+      const palette = desertPaletteAt(s);
+      sandLinear.setHex(palette.sand);
+      rockLinear.setHex(palette.rock);
+      gravelLinear.setHex(palette.gravel);
       // Every vertex in the row already knows its own lateral offset, so the terrain
       // never has to project back to the centreline to find its frame.
       for (let li = 0; li < latCount; li++) {
@@ -360,11 +373,15 @@ export class TerrainMeshProvider implements ChunkProvider {
           y = world + (frameY - world) * frameWeight;
         }
         if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
-        positions[vi * 3] = point.x;
+        positions[vi * 3] = point.x - ox;
         positions[vi * 3 + 1] = y;
-        positions[vi * 3 + 2] = point.z;
+        positions[vi * 3 + 2] = point.z - oz;
 
-        const surfaceColor = SURFACE_LINEAR[terrain.surfaceFromFrame(point.x, point.z, lateral)]!;
+        const surface = terrain.surfaceFromFrame(point.x, point.z, lateral);
+        const surfaceColor =
+          surface === SurfaceType.Rock ? rockLinear
+          : surface === SurfaceType.Gravel ? gravelLinear
+          : sandLinear;
         colors[vi * 3] = surfaceColor.r;
         colors[vi * 3 + 1] = surfaceColor.g;
         colors[vi * 3 + 2] = surfaceColor.b;
@@ -384,9 +401,13 @@ export class TerrainMeshProvider implements ChunkProvider {
     const validCells = new Uint8Array((sCount - 1) * (latCount - 1));
     const leftCentre = magnitudes.length - 1;
     const rightCentre = magnitudes.length;
+    // Read back ABSOLUTE x/z. `positions` is origin-relative now, but the fold test
+    // and the ownership lattice both reason about world geometry: the edge/dot tests
+    // are differences (offset-invariant), while `ownerAt` is keyed on an absolute
+    // lattice and must see the true position. Re-adding the origin keeps both right.
     const xz = (vi: number): readonly [number, number] => [
-      positions[vi * 3]!,
-      positions[vi * 3 + 2]!,
+      positions[vi * 3]! + ox,
+      positions[vi * 3 + 2]! + oz,
     ];
 
     /**
@@ -564,6 +585,8 @@ export class TerrainMeshProvider implements ChunkProvider {
     }
     if (index.length === 0) return;
 
+    // `vertices` is copied verbatim from the already-relative `positions` above, so
+    // the trimesh receives origin-relative vertices — no second subtraction here.
     const collider = ctx.physics.addStaticTrimesh(
       vertices,
       Uint32Array.from(index),

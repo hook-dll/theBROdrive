@@ -19,7 +19,8 @@
 
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { PhysicsWorld } from '../core/physics';
+import type { PhysicsWorld, Vec3 } from '../core/physics';
+import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import type { InputFrame } from '../core/input';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import type { CarState, GameWorld } from '../game/state';
@@ -248,22 +249,37 @@ const REAR_AXLE_SIDE_GRIP = 0.89;
 // caught by anybody, and one that loses only the front just washes wide.
 // ---------------------------------------------------------------------------
 
-/** Slip angle (deg) where each axle makes peak side force. Below this: no change. */
+/**
+ * Slip angle (deg) where each axle makes peak side force, and the fraction it keeps
+ * once past it.
+ *
+ * THE REAR MATCHES THE FRONT PAST PEAK, and that is the difference between a slide
+ * you can catch and one you cannot. The rear used to peak at 6 degrees against the
+ * front's 8 and then fall to 0.62 against the front's 0.80 — earlier AND twice as
+ * far. Stack that on REAR_AXLE_SIDE_GRIP and REAR_SPEED_LOSS_GAIN and the yaw
+ * feedback is POSITIVE: more yaw gives more rear slip gives less rear grip gives more
+ * yaw. At 100 km/h and 15 degrees of slip the rear ended on ~0.48 of lateral gain
+ * against the front's ~0.72, so there was no restoring moment for a countersteer to
+ * work against and the only outcomes were a spin or a lucky lift.
+ *
+ * The character is preserved by MAGNITUDE, not by falloff, which is the right split:
+ * REAR_AXLE_SIDE_GRIP (0.89) and REAR_SPEED_LOSS_GAIN (1.32) are untouched, so the
+ * tail still lets go first and still lets go earlier the faster you are going. What it
+ * no longer does is keep letting go once it has gone — past peak it HOLDS, so a small
+ * countersteer produces real force and the car comes back.
+ *
+ * `SLIP_FULL_REAR_DEG` stays below the front's, so the rear reaches its plateau
+ * sooner. That keeps a trace of the old suddenness at the moment of breakaway without
+ * costing anything at the angles a save is made at.
+ */
 const SLIP_PEAK_FRONT_DEG = 8;
-const SLIP_PEAK_REAR_DEG = 6;
+const SLIP_PEAK_REAR_DEG = 8;
 /** Slip angle (deg) by which the fade is complete and the plateau has been reached. */
 const SLIP_FULL_FRONT_DEG = 26;
 const SLIP_FULL_REAR_DEG = 22;
-/**
- * Side grip retained on the plateau, as a fraction of the axle's peak.
- *
- * The gap between these two numbers IS the catchable window: the front keeps 0.80
- * of its cornering power at any slip angle, the rear 0.62, so a car sideways still
- * points where it is steered and still has a rear axle to hook up again. Closing
- * the gap makes it inert; widening it turns every slide into a spin.
- */
+/** Side grip retained on the plateau, as a fraction of the axle's peak. */
 const SLIP_PLATEAU_FRONT = 0.8;
-const SLIP_PLATEAU_REAR = 0.62;
+const SLIP_PLATEAU_REAR = 0.8;
 /** Contact speed (m/s) floor in the slip-angle denominator, to keep it finite at rest. */
 const SLIP_ANGLE_REF_MPS = 2;
 /**
@@ -344,12 +360,27 @@ const FOOT_BRAKE_GRIP_RATIO = 0.99;
  * Rear bias for the foot brake (0..1).
  *
  * Discs at the front, drums at the back, and no proportioning valve to keep them
- * honest under load transfer. 0.62 sends more torque to the axle that is UNLOADING
- * under braking, which is exactly the period failure mode: the rears run out of grip
- * first and the car tries to swap ends. With the slide detection below, this is "the
- * lack of ABS made emergency braking almost an art".
+ * honest under load transfer.
+ *
+ * It was 0.62 — more torque to the axle that UNLOADS under braking — which made the
+ * rears run out first and the car try to swap ends. That is a real period failure
+ * mode, but it cost two things that turned out to matter more. Total braking was
+ * capped by the grip of the LIGHT axle, so peak deceleration was poor and the front
+ * never gained enough load to dive: the missing nose-down attitude under brakes was a
+ * brake-bias symptom all along, not a spring one. And braking mid-slide — the
+ * instinctive reaction — pushed the rear further past its cone and turned a
+ * recoverable slide into a spin.
+ *
+ * 0.42 is period-correct front bias, and note the reason is LOAD TRANSFER, not static
+ * distribution: this chassis is very nearly 50/50 (see COM_REARWARD_FRACTION), but
+ * braking at 0.8 g moves about 17% of the car's weight forward regardless, so the
+ * front runs at ~65% of the load while being asked for 58% of the torque. The front
+ * gains grip exactly when it is asked to do more work, so deceleration rises and the
+ * nose dives properly. The rears still lock first — 42% of the torque on an axle
+ * carrying a third of the weight is still more than its share — just no longer a
+ * foregone conclusion.
  */
-const FOOT_BRAKE_REAR_BIAS = 0.62;
+const FOOT_BRAKE_REAR_BIAS = 0.42;
 /**
  * No-ABS, no-traction-control slide detection: the friction circle, measured.
  *
@@ -391,12 +422,18 @@ const SLIDE_CONE_THRESHOLD = 0.55;
 /**
  * Lateral grip retained by a fully sliding wheel.
  *
- * This number IS catchability. A sliding tyre that keeps 45% of its side force is a
- * car that has stepped out but is still listening: the slide develops, the driver
- * has something to steer against, and lifting or unwinding puts it back. Set it low
- * and a slide is an announcement that the corner is already lost.
+ * This number IS catchability. A sliding tyre that keeps most of its side force is a
+ * car that has stepped out but is still listening: the slide develops, the driver has
+ * something to steer against, and lifting or unwinding puts it back. Set it low and a
+ * slide is an announcement that the corner is already lost.
+ *
+ * Raised from 0.45, alongside giving the rear a plateau it can hold (see the slip
+ * angle block above). The two compound: a rear wheel that was both past peak AND
+ * saturating its cone used to keep 0.45 x 0.62 = 0.28 of its side grip, which is a car
+ * with no back axle at all. It now keeps 0.60 x 0.80 = 0.48, so a countersteer bites
+ * on a wheel that is genuinely sliding rather than merely on one that is about to.
  */
-const SLIDE_SIDE_GRIP = 0.45;
+const SLIDE_SIDE_GRIP = 0.6;
 /**
  * Slide smoothing, seconds — deliberately asymmetric.
  *
@@ -597,11 +634,19 @@ const SHOVE_RAMP_SECONDS = 1.5;
 const SHOVE_RELEASE_SECONDS = 0.2;
 /**
  * Fraction of the parking brake left on while a car is being shoved. Not zero: with the
- * brake off entirely a shoved car on any grade rolls away, which is a different game. At a
- * quarter it still stops itself the moment the push ends but no longer swallows the shove
- * whole.
+ * brake off entirely a shoved car on any grade rolls away, which is a different game.
+ *
+ * The first pass set this to a quarter, on the theory that 12 × 0.25 = 3 m/s² was "weak
+ * enough to lose to the shove". It is weaker than the full brake, but the shove it has to
+ * lose to is only 0.4 / 1.5 = 0.27 m/s² (320 N on a 1200 kg saloon), so 3 m/s² was eleven
+ * times the shove and cancelled it inside a single step: the car never moved. A shove can
+ * only win if the weakened brake is WEAKER than the shove itself, so this is sized just
+ * under half of it: 12 × 0.01 = 0.12 m/s² of holding, leaving ~0.15 m/s² of net creep.
+ * The hold (a teleport) re-latches 0.2 s after the shoulder comes off and stops the car
+ * properly, so this brake only has to keep it from rolling away on a gentle grade until
+ * then.
  */
-const SHOVE_BRAKE_FRACTION = 0.25;
+const SHOVE_BRAKE_FRACTION = 0.01;
 /** Residual motion treated as stopped before an automatic changes drive direction. */
 const AUTO_DIRECTION_RELEASE_MPS = 0.08;
 
@@ -816,10 +861,19 @@ export interface VehicleAudioState {
  * Written in place once per fixed step; nothing here is allocated per tick.
  */
 export interface WheelSprayState {
-  /** World-space contact patch position, metres. */
+  /**
+   * Contact patch position RELATIVE to the floating origin, metres — the same frame
+   * Rapier and the scene graph use, so `emitSpray` can drop it straight into the
+   * particle buffer. Consumers that sample the world (road projection, terrain
+   * surface) must use `absoluteContactX/Z` instead: sampling a noise field at a
+   * rebased coordinate silently changes the ground's shape.
+   */
   contactX: number;
   contactY: number;
   contactZ: number;
+  /** Contact patch position in ABSOLUTE world coordinates (X and Z; Y never shifts). */
+  absoluteContactX: number;
+  absoluteContactZ: number;
   /** Wheel-plane forward direction in world space (x, z), unit length. */
   forwardX: number;
   forwardZ: number;
@@ -843,6 +897,31 @@ export interface WheelSprayState {
   /** Chassis forward speed, m/s (signed). */
   forwardSpeed: number;
 }
+
+/**
+ * Anti-squat and anti-dive: the fraction of the longitudinal pitch couple that real
+ * suspension GEOMETRY carries through the links instead of through the springs.
+ *
+ * Rapier's ray-cast suspension has no geometry at all — no wishbones, no instant
+ * centre, no trailing-arm angle — so 100% of the couple goes into the springs and the
+ * nose rises under power like a speedboat. `INERTIA_PITCH_YAW_GAIN` was already raised
+ * to 2.55 in an earlier pass for exactly this complaint, but pitch inertia only makes
+ * the lift SLOWER: the body still travels the whole way, just less abruptly. The cause
+ * is a missing reaction path, not too little inertia.
+ *
+ * This is the same class of fix as `applyRollCouple`, and the mirror image of it.
+ * There, Bullet threw a moment away and it had to be put back; here the engine applies
+ * a moment in full that a real car resists mechanically, so a fraction is taken out.
+ *
+ * Real geometry runs 20-50% anti-squat and 20-40% anti-dive, and the two differ
+ * because the ends of the car are built differently — a live rear axle on trailing
+ * leaves has far more anti-squat available than a MacPherson front has anti-dive. The
+ * pair below sit inside those bands, deliberately at the low end: this removes the
+ * exaggeration, it does not iron the car flat. Squat and dive are how a driver reads
+ * weight transfer, and a car with no pitch at all feels like it is on rails.
+ */
+const ANTI_SQUAT_FRACTION = 0.38;
+const ANTI_DIVE_FRACTION = 0.26;
 
 /**
  * Centre of mass, as fractions of the measured chassis box: dropped well below the
@@ -893,24 +972,64 @@ interface HeadlightBeam {
   readonly penumbra: number;
   readonly targetDistance: number;
   readonly targetDrop: number;
+  /**
+   * Falloff exponent. Three's default is 2 — physical inverse-square — and 2 is why
+   * the beams read as a puddle at the bumper however wide or long the cone is set.
+   *
+   * The cone was already 98 degrees across on dipped beam, so "it does not spread"
+   * was never a width problem: it was that everything past ~10 m had been divided
+   * into nothing. Inverse-square is brutal over the distances a headlight has to
+   * cover — 30 m is 36 times dimmer than 5 m — so the far half of a correctly aimed
+   * beam is arithmetically present and visually absent.
+   *
+   * Lowering the exponent is the honest lever here rather than raising intensity,
+   * which the previous pass already noted "would blow out the near field instead".
+   * At 1.3, 30 m is only 11 times dimmer than 5 m rather than 36, which is what
+   * trebles the useful range.
+   *
+   * Intensity still has to come down, but not by as much as the first cut assumed.
+   * Brightness at range r is I / r^d, so dropping d from 2 to 1.3 brightens range r
+   * by r^0.7: ~1.6x at the 2 m bumper line, ~2.8x at 4.5 m, growing outward (the
+   * main beam's 1.25 is the same shape). The retune then divided I by 2.75x
+   * (110 to 40) and 2.8x (210 to 75) — roughly double the ~1.6x the near field had
+   * actually gained — so the beam came out dimmer, not the "a little brighter" the
+   * change intended. The values below restore half of that over-cut (×2), putting
+   * the near field a little ABOVE the old d=2 beam while the low decay keeps the
+   * reach.
+   */
+  readonly decay: number;
 }
 
+/**
+ * Dipped beam: a pool the driver reads the road surface from, out to five or six car
+ * lengths. Aimed to meet the ground around 30 m (targetDrop halved from 0.9), which is
+ * about where a real dipped beam is set, and still aimed DOWN so it lights tarmac
+ * rather than the horizon.
+ */
 const HEADLIGHT_LOW: HeadlightBeam = {
-  intensity: 110,
+  intensity: 80,
   distance: 288,
   angle: 0.853,
   penumbra: 0.68,
   targetDistance: 26,
-  targetDrop: 0.9,
+  targetDrop: 0.5,
+  decay: 1.3,
 };
 
+/**
+ * Main beam: reach rather than spread, ten to fifteen car lengths of usable road. The
+ * aim is unchanged — it already put the axis on the ground near 75 m — because the
+ * problem out there was never where the beam pointed, only that nothing survived the
+ * falloff to get there.
+ */
 const HEADLIGHT_HIGH: HeadlightBeam = {
-  intensity: 210,
+  intensity: 150,
   distance: 520,
   angle: 0.616,
   penumbra: 0.45,
   targetDistance: 56,
   targetDrop: 0.45,
+  decay: 1.25,
 };
 
 type HeadlightMode = 'off' | 'low' | 'high';
@@ -947,13 +1066,14 @@ const TYRE_COMPOUNDS = [
   { label: 'experimental2', grip: 1.1, side: 0.3 },
 ] as const;
 
-export class Vehicle {
+export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
   private readonly car: CarState;
   private readonly model: CarModelDef;
   private readonly measure: CarModelMeasure;
   private readonly scene: THREE.Scene;
+  private readonly origin: WorldOrigin;
 
   private readonly chassisBody: RAPIER.RigidBody;
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
@@ -1014,6 +1134,9 @@ export class Vehicle {
    * trailer so its brakes come on with the car's pedal.
    */
   private serviceBrakeCommand = 0;
+  // Relative (Rapier frame): read from the body when the hold first latches, then
+  // re-applied every step. Shifted by `rebase` alongside the interpolation
+  // snapshots, so a held car does not snap a kilometre when the origin moves.
   private readonly parkingHoldPos = { x: 0, y: 0, z: 0 };
   private readonly parkingHoldRot = { x: 0, y: 0, z: 0, w: 1 };
 
@@ -1063,6 +1186,13 @@ export class Vehicle {
   private rollPrimed = false;
   private rollLeverArm = 0.5;
   /**
+   * Total longitudinal tyre force applied to the chassis this step, newtons. Signed:
+   * positive drives, negative brakes. Summed in `updateWheelDynamics` and consumed by
+   * `applyAntiPitch`, which needs the force that was actually DELIVERED rather than
+   * the one the pedals asked for — the tyre model routinely delivers less.
+   */
+  private longitudinalForceSum = 0;
+  /**
    * The tyre contact plane in chassis-local metres: where the ground is when the
    * car is standing on its own suspension. Set by `rebuild` from the mount it
    * actually gives Rapier, which is NOT the mount the model measured (see the ride
@@ -1111,11 +1241,18 @@ export class Vehicle {
   private readonly stepQuat = new THREE.Quaternion();
   private snapshotPrimed = false;
 
-  constructor(physics: PhysicsWorld, world: GameWorld, carState: CarState, scene: THREE.Scene) {
+  constructor(
+    physics: PhysicsWorld,
+    world: GameWorld,
+    carState: CarState,
+    scene: THREE.Scene,
+    origin: WorldOrigin,
+  ) {
     this.physics = physics;
     this.world = world;
     this.car = carState;
     this.scene = scene;
+    this.origin = origin;
     this.model = carModel(carState.modelId);
     this.measure = carModelMeasure(carState.modelId);
 
@@ -1123,8 +1260,9 @@ export class Vehicle {
     // Frontal area 4·hx·hy; 0.5·ρ·Cd collapses to the constant below.
     this.dragCoeff = 0.5 * AIR_DENSITY * DRAG_CD * (4 * half[0] * half[1]);
 
+    // `carState.x/z` are absolute (from the save); Rapier holds relative positions.
     const desc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(carState.x, carState.y, carState.z)
+      .setTranslation(carState.x - this.origin.x, carState.y, carState.z - this.origin.z)
       .setRotation({ x: carState.qx, y: carState.qy, z: carState.qz, w: carState.qw })
       .setAngularDamping(CHASSIS_ANGULAR_DAMPING)
       .setCanSleep(false);
@@ -1167,8 +1305,8 @@ export class Vehicle {
     this.lastAuthCoolant = carState.coolantLitres;
     this.localOil = carState.oilLitres;
     this.lastAuthOil = carState.oilLitres;
-
     this.rebuild();
+    this.origin.register(this);
   }
 
   get stats(): CarStats {
@@ -1177,6 +1315,19 @@ export class Vehicle {
 
   get chassis(): RAPIER.RigidBody {
     return this.chassisBody;
+  }
+
+  /**
+   * Absolute chassis position, for consumers that sample the world (road projection,
+   * terrain height). Rapier holds the relative position; add the origin here so no
+   * caller does origin arithmetic on a body translation. `chassis.translation()` is
+   * the same point in the relative frame, for anything compared against a body.
+   */
+  absoluteTranslation(out: Vec3): Vec3 {
+    this.chassisBody.translation(out);
+    out.x += this.origin.x;
+    out.z += this.origin.z;
+    return out;
   }
 
   get root(): THREE.Object3D {
@@ -1401,6 +1552,8 @@ export class Vehicle {
         contactX: 0,
         contactY: 0,
         contactZ: 0,
+        absoluteContactX: 0,
+        absoluteContactZ: 0,
         forwardX: 0,
         forwardZ: 1,
         inContact: false,
@@ -1668,12 +1821,26 @@ export class Vehicle {
     // window whenever the command has moved beyond it. Order matters: centring
     // before the operator means a held input settles on the window's trailing edge
     // (slack taken up in the direction of load) instead of drifting off it.
+    //
+    // THE PLAY FADES OUT DURING A SLIDE, on the same `slideRelease` the lock ceiling
+    // and the rate limit use — and it is the most honest of the three. Catching a
+    // slide is a sequence of REVERSALS, and every reversal crosses the whole window:
+    // 1.03 degrees each way, so 2.06 degrees of dead travel per correction, arriving
+    // late every single time. That is a driver-induced oscillation generator, and it
+    // is exactly the rocking left and right that ends in the scenery.
+    //
+    // Physically it is also what a real box does. Backlash is only there when the
+    // gear teeth are unloaded; a driver countersteering against a sliding rear is
+    // holding the wheel hard against the load, so the slack is already taken up on
+    // that side and there is nothing to cross. The vagueness belongs to cruising on
+    // centre, which is where it is left untouched.
+    const play = STEER_PLAY_RAD * (1 - slideRelease);
     const caster = STEER_CASTER_RETURN_RAD_S * dt;
     this.steerAngle -= clamp(this.steerAngle, -caster, caster);
-    if (this.steerCommand > this.steerAngle + STEER_PLAY_RAD) {
-      this.steerAngle = this.steerCommand - STEER_PLAY_RAD;
-    } else if (this.steerCommand < this.steerAngle - STEER_PLAY_RAD) {
-      this.steerAngle = this.steerCommand + STEER_PLAY_RAD;
+    if (this.steerCommand > this.steerAngle + play) {
+      this.steerAngle = this.steerCommand - play;
+    } else if (this.steerCommand < this.steerAngle - play) {
+      this.steerAngle = this.steerCommand + play;
     }
 
     // Driveline slack and compliance: torque arrives late (DRIVELINE_LAG_S). One
@@ -1912,6 +2079,7 @@ export class Vehicle {
     this.audioState.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
 
     this.applyRollCouple(dt, mass, contactCount);
+    this.applyAntiPitch(dt, contactCount);
 
     // Rolling resistance (∝ weight) + quadratic aerodynamic drag, opposing
     // horizontal motion. Drag always applies; rolling resistance fades with the
@@ -2008,12 +2176,13 @@ export class Vehicle {
       this.transformEmitTimer = 0;
       this.chassisBody.translation(this.pos);
       this.chassisBody.rotation(this.quat);
+      // The save stores absolute world coordinates; `pos` is relative.
       this.world.apply({
         t: 'car_transform',
         carId: this.car.id,
-        x: this.pos.x,
+        x: this.pos.x + this.origin.x,
         y: this.pos.y,
-        z: this.pos.z,
+        z: this.pos.z + this.origin.z,
         qx: this.quat.x,
         qy: this.quat.y,
         qz: this.quat.z,
@@ -2070,13 +2239,29 @@ export class Vehicle {
   }
 
   /**
+   * Shifts every relative position this car caches across steps when the floating
+   * origin moves: the parking-hold latch and the interpolation snapshots. Without
+   * this the renderer lerps the chassis across the whole origin step for one frame,
+   * and a held car snaps a kilometre sideways the next `postStep`.
+   */
+  rebase(shift: RebaseShift): void {
+    this.parkingHoldPos.x -= shift.dx;
+    this.parkingHoldPos.z -= shift.dz;
+    this.prevPos.x -= shift.dx;
+    this.prevPos.z -= shift.dz;
+    this.stepPos.x -= shift.dx;
+    this.stepPos.z -= shift.dz;
+  }
+
+  /**
    * Places the chassis upright and at rest at a world position. For the
    * fall-out-of-world rescue only: velocities are cleared so the car does not
    * arrive carrying the speed of its fall, and the interpolation snapshots are
    * re-primed so the renderer does not draw a streak from wherever it fell to.
    */
   rescueTo(x: number, y: number, z: number, heading: number): void {
-    this.chassisBody.setTranslation({ x, y, z }, true);
+    // x/z arrive absolute (road.sampleAt); Rapier holds relative positions.
+    this.chassisBody.setTranslation({ x: x - this.origin.x, y, z: z - this.origin.z }, true);
     this.chassisBody.setRotation(
       { x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) },
       true,
@@ -2136,6 +2321,7 @@ export class Vehicle {
   private updateWheelDynamics(dt: number, wheelGrip: number, tyreGrip: number): void {
     const controller = this.controller;
     if (!controller || dt <= 0) return;
+    this.longitudinalForceSum = 0;
 
     this.chassisBody.rotation(this.rotationScratch);
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
@@ -2287,13 +2473,18 @@ export class Vehicle {
       // Only a moving car can have a locked wheel; a stopped one is just stopped.
       w.locked = Math.abs(contactSpeed) > SLIDE_MIN_MPS && w.slipRatio <= LOCK_SLIP_RATIO;
 
-      // Drive the chassis with it, at the contact patch.
+      // Drive the chassis with it, at the contact patch. Applying it there is what
+      // produces the pitch couple (dive and squat) for free — and, because Rapier has
+      // no suspension geometry to react any of it, produces ALL of it. `applyAntiPitch`
+      // below takes back the share real links would have carried, so the running total
+      // is accumulated here rather than recomputed from the pedals.
       if (longitudinalForce !== 0) {
         const impulse = longitudinalForce * dt;
         this.tyreImpulse.x = w.forwardDir.x * impulse;
         this.tyreImpulse.y = w.forwardDir.y * impulse;
         this.tyreImpulse.z = w.forwardDir.z * impulse;
         this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, w.contactPoint, false);
+        this.longitudinalForceSum += longitudinalForce;
       }
 
       // Friction-circle usage: how much of THIS tyre's force capacity the
@@ -2331,6 +2522,8 @@ export class Vehicle {
       s.contactX = w.contactPoint.x;
       s.contactY = w.contactPoint.y;
       s.contactZ = w.contactPoint.z;
+      s.absoluteContactX = w.contactPoint.x + this.origin.x;
+      s.absoluteContactZ = w.contactPoint.z + this.origin.z;
       s.forwardX = w.forwardDir.x;
       s.forwardZ = w.forwardDir.z;
       s.inContact = w.grounded;
@@ -2460,6 +2653,36 @@ export class Vehicle {
     this.chassisBody.applyTorqueImpulse(this.forceScratch, true);
   }
 
+  /**
+   * Takes back the share of the longitudinal pitch couple that real suspension
+   * geometry would carry through the links (see ANTI_SQUAT_FRACTION).
+   *
+   * The couple exists because the tyre force is applied at the CONTACT PATCH while the
+   * centre of mass is `rollLeverArm` above it: a forward force of F therefore makes a
+   * nose-up moment of F times that arm, and Rapier applies every newton of it to the
+   * springs because it has no wishbones to react any of it. Removing a fixed fraction
+   * is the whole model — it is what an anti-squat percentage MEANS, so there is nothing
+   * to tune beyond the two fractions.
+   *
+   * Sign: forward is body +Z and the contact patch is below the centre of mass, so a
+   * driving force gives a NEGATIVE moment about body +X (nose up). The correction is
+   * therefore positive about +X under power and negative under braking, which falls out
+   * of the sign of the force without a branch — only the FRACTION differs by direction,
+   * because a car has more anti-squat available at the back than anti-dive at the front.
+   *
+   * Skipped with nothing on the ground: an airborne car has no contact patch for the
+   * couple to have come from, so there is none to take back.
+   */
+  private applyAntiPitch(dt: number, contactCount: number): void {
+    if (contactCount === 0 || this.longitudinalForceSum === 0) return;
+    const fraction =
+      this.longitudinalForceSum >= 0 ? ANTI_SQUAT_FRACTION : ANTI_DIVE_FRACTION;
+    const torque = this.longitudinalForceSum * this.rollLeverArm * fraction * dt;
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.forceScratch, this.rotationScratch, torque, 0, 0);
+    this.chassisBody.applyTorqueImpulse(this.forceScratch, true);
+  }
+
   private applyChassisMass(mass: number): void {
     const half = this.measure.halfExtents;
     const hx = half[0];
@@ -2558,6 +2781,7 @@ export class Vehicle {
       light.distance = shape.distance;
       light.angle = shape.angle;
       light.penumbra = shape.penumbra;
+      light.decay = shape.decay;
       light.target.position.set(
         light.position.x,
         light.position.y - shape.targetDrop,

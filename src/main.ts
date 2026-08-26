@@ -5,7 +5,13 @@ import { PhysicsWorld } from './core/physics';
 import { SURFACES } from './core/surfaces';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
-import { TIME_OF_DAY_PRESETS, VIEW_DISTANCE_FOG_SCALE, VIEW_DISTANCE_METRES } from './game/settings';
+import {
+  TIME_OF_DAY_PRESETS,
+  VIEW_DISTANCE_FOG_SCALE,
+  VIEW_DISTANCE_METRES,
+  loadStoredSettings,
+  storeSettings,
+} from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
 import { Inventory, type FluidKind, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
@@ -36,7 +42,9 @@ import {
 import { PoiProvider } from './world/poi';
 import { FreightField } from './world/freight';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
-import { Road } from './world/road';
+import { Road, ROAD_LENGTH } from './world/road';
+import { WorldOrigin } from './world/origin';
+import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
@@ -146,8 +154,34 @@ async function boot(): Promise<void> {
   const loadedFromSave = chosen.state !== null;
   const world = new GameWorld(chosen.state ?? newWorldState(chosen.seed));
 
-  const road = new Road(world.seed);
+  // Machine preferences outrank whatever the save carried. Graphics quality and view
+  // distance describe the GPU in front of the player, not the drive, so a save made on
+  // another computer (or before the player last changed them) must not put them back.
+  // Applied HERE because the renderer and the light budget both read them below, and
+  // they only take a tier at construction. See game/settings.ts.
+  {
+    const stored = loadStoredSettings();
+    if (stored) world.apply({ t: 'settings', settings: stored });
+  }
+
+  // The spine (checkpoints + coarse index) is what makes a long road affordable: it
+  // is awaited here so the ten-million-step centreline walk never lands on the main
+  // thread, and it is cached per seed so only the first session on a seed pays for it
+  // at all. See world/spinecache.ts.
+  const road = new Road(world.seed, await loadSpine(world.seed, ROAD_LENGTH));
   const terrain = new Terrain(world.seed, road);
+  // The floating origin, before anything that could hold a position relative to it.
+  // Placed at the saved player position so the first frame is already local: a player
+  // resuming at 39 000 km must not spend one frame with the whole world 386 km out,
+  // which is exactly the f32 quantisation this exists to avoid. See world/origin.ts.
+  const origin = new WorldOrigin();
+  origin.reset(world.state.player.x, world.state.player.z);
+  /**
+   * Scratch for absolute-position reads off a rigid body. One object for the session:
+   * the rebase anchor, the streaming anchor and the rescue check all read a chassis
+   * position every fixed step, and none of them keeps it.
+   */
+  const originAnchor = { x: 0, y: 0, z: 0 };
   // Physics must exist before any provider or field that creates a collider.
   const physics = await PhysicsWorld.create();
   // Every car's collider, suspension geometry and wheel radii are measured off its
@@ -189,28 +223,28 @@ async function boot(): Promise<void> {
       selected: Math.max(0, inventory.selectedIndex),
     });
   });
-  const loose = new LoosePartField(physics, world, renderer.scene);
+  const loose = new LoosePartField(physics, world, renderer.scene, origin);
   // Cars are found, not spawned: the wreck-field registry is the supply, and it is
   // created before any chunk builds so the first POI can register into it.
   const wrecks = new WreckField(physics, world);
   // Trailers are world objects like cars, not chunk scenery: they move, so they
   // must outlive the chunk they were found standing in.
-  const trailerField = new TrailerField(physics, world, renderer.scene);
+  const trailerField = new TrailerField(physics, world, renderer.scene, origin);
   // Freight: a sign at every stop, pallets where the seed says there is a load.
   const freight = new FreightField();
-  const birds = new BirdFlock(renderer.scene, road, terrain, world.seed);
+  const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   const anchorGhosts = new AnchorGhosts(renderer.scene);
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
-  const wheelSpray = new WheelSpray(renderer.scene);
+  const wheelSpray = new WheelSpray(renderer.scene, origin);
 
   // The nearest-road-distance field is shared, not owned: the chunked terrain and the
   // vista both derive the world's edge from it, and two copies could round the same
   // ground differently and put a seam on the horizon.
   const roadDistance = new RoadDistance(road);
-  const vista = new VistaMesh(renderer.scene, terrain, roadDistance);
+  const vista = new VistaMesh(renderer.scene, terrain, roadDistance, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
@@ -219,7 +253,7 @@ async function boot(): Promise<void> {
     vista.setViewDistance(metres);
   }
 
-  const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene);
+  const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene, origin);
   streamer.register(new RoadMeshProvider(world.seed));
   streamer.register(new TerrainMeshProvider(roadDistance));
   streamer.register(new HomesteadProvider());
@@ -233,12 +267,12 @@ async function boot(): Promise<void> {
   const lightBudget = new LightBudget(renderer.scene, world.state.settings.graphicsQuality);
 
   let initialYaw = 0;
-  const player = new Player(physics, world);
+  const player = new Player(physics, world, origin);
   player.setRoad(road);
 
   const vehicles = new Map<string, Vehicle>();
   const spawnVehicle = (car: CarState): Vehicle => {
-    const vehicle = new Vehicle(physics, world, car, renderer.scene);
+    const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
     vehicles.set(car.id, vehicle);
     return vehicle;
   };
@@ -346,6 +380,7 @@ async function boot(): Promise<void> {
       const vehicle = vehicles.get(carId);
       if (vehicle) vehicle.root.add(createStickerMesh(sticker));
     },
+    origin,
   );
   interaction.attachPlayer(player);
 
@@ -360,10 +395,15 @@ async function boot(): Promise<void> {
     } else if (delta.t === 'sticker_place') {
       const left = world.state.stickersUnplaced;
       hud.setToast(left > 0 ? `stuck on — ${left} left to place` : 'stuck on');
+    } else if (delta.t === 'settings') {
+      // Every path that changes preferences goes through this delta — the pause menu,
+      // the mouse-steering hotkey, anything added later — so mirroring here is the one
+      // place it cannot be forgotten at a new call site.
+      storeSettings(delta.settings);
     }
   });
 
-  const camera = new CameraRig(renderer.camera, physics);
+  const camera = new CameraRig(renderer.camera, physics, origin);
   camera.setMode('foot');
   camera.setYaw(initialYaw);
 
@@ -388,6 +428,7 @@ async function boot(): Promise<void> {
       inventory,
       vehicles,
       audio,
+      origin,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -510,6 +551,26 @@ async function boot(): Promise<void> {
     // below then query the post-step world, so prompts match what is on screen.
     physics.step();
 
+    // FLOATING ORIGIN. Here and nowhere else: after the solver has run, before the
+    // post-step latches read a single transform. Everything downstream this frame —
+    // the interpolation snapshots, the camera, the HUD, the save deltas — then observes
+    // one origin, and no `translation()` read is ever separated from its matching
+    // `setTranslation` write by a kilometre. The trailer's hitch enforcement is the
+    // reason that matters: it has a 1.5 m drift guard, and a rebase landing inside its
+    // read/write pair would read as the trailer having teleported.
+    //
+    // The anchor is whatever the player is: the driven chassis, or the character on
+    // foot. Bodies hold RELATIVE positions, so the origin is added back to get the
+    // absolute position `advance` wants.
+    {
+      const anchor = driving ? driving.absoluteTranslation(originAnchor) : player.absolutePosition;
+      const shift = origin.advance(anchor.x, anchor.z);
+      if (shift) {
+        physics.rebase(shift.dx, shift.dz);
+        streamer.rebase();
+      }
+    }
+
     // Latch the post-step transforms so the renderer can interpolate between the
     // last two steps instead of snapping to the newest one.
     for (const vehicle of vehicles.values()) vehicle.postStep();
@@ -582,7 +643,10 @@ async function boot(): Promise<void> {
     // stream the wrong chunks out from under the car. The hinted result's own lateral
     // distance is the honest test: no legal position is further out than the vista.
     if (driving) {
-      const t = driving.chassis.translation();
+      // Absolute: `road.project` searches the centreline, which lives in world space.
+      // The chassis holds a relative position, so this is the one place per frame that
+      // conversion has to happen for the streaming anchor.
+      const t = driving.absoluteTranslation(originAnchor);
       const p = road.project(t.x, t.z, activeS);
       activeS = Math.abs(p.lateral) > ACTIVE_S_REHOME_LATERAL ? road.project(t.x, t.z).s : p.s;
     } else {
@@ -598,14 +662,17 @@ async function boot(): Promise<void> {
     // gets harder to cross the further out you go, and if you beat it anyway the
     // world hands you back instead of deleting you.
     if (driving) {
-      const t = driving.chassis.translation();
+      // Absolute: `terrain.heightAt` is the landscape field, sampled in world space.
+      // `rescueTo` takes absolute too — it is a teleport to a road position, and the
+      // road is the absolute frame.
+      const t = driving.absoluteTranslation(originAnchor);
       if (t.y < terrain.heightAt(t.x, t.z, activeS) - RESCUE_FALL_DEPTH) {
         const home = road.sampleAt(activeS);
         driving.rescueTo(home.x, home.y + RESCUE_LIFT, home.z, home.heading);
         hud.setToast('towed back to the road');
       }
     } else {
-      const p = player.position;
+      const p = player.absolutePosition;
       if (p.y < terrain.heightAt(p.x, p.z, activeS) - RESCUE_FALL_DEPTH) {
         const home = road.sampleAt(activeS);
         player.teleport(home.x, home.y, home.z);
@@ -662,8 +729,12 @@ async function boot(): Promise<void> {
 
     let surface = ws.surface;
     if (surface === TERRAIN_COLLIDER_SURFACE) {
-      const p = road.project(ws.contactX, ws.contactZ, activeS);
-      surface = terrain.surfaceFromFrame(ws.contactX, ws.contactZ, p.lateral);
+      // Two frames in three lines, which is why the spray state carries both. The road
+      // and the terrain's surface field are sampled ABSOLUTE; the mote buffer below is
+      // fed the RELATIVE contact, because it is scene geometry. Mixing them up puts the
+      // dust a kilometre from the tyre, or reports the wrong surface under it.
+      const p = road.project(ws.absoluteContactX, ws.absoluteContactZ, activeS);
+      surface = terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral);
     }
     const props = SURFACES[surface];
 
@@ -702,7 +773,7 @@ async function boot(): Promise<void> {
     // Fed by the driven car AND by every trailer: a braked or dragged trailer wheel
     // ploughs through sand exactly like a locked car wheel does, and reports the
     // same WheelSprayState, so one emitter serves both.
-    wheelSpray.update(frameDt);
+    wheelSpray.update(frameDt, activeS);
     if (driving) {
       for (const ws of driving.wheelSpray) emitSpray(ws, frameDt);
     }
@@ -755,7 +826,21 @@ async function boot(): Promise<void> {
     // ending at a visible edge. Ramp starts where the coarse ground begins and
     // saturates where it runs out, and it is a view effect only: nothing about
     // the simulation changes.
-    const offRoad = Math.abs(road.project(cam.x, cam.z, activeS).lateral);
+    // Absolute: the camera is in the scene's relative frame, `road.project` is not.
+    const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
+    const offRoad = Math.abs(camProjection.lateral);
+    // How far the eye is above the ground it is looking across, for the heat haze's
+    // distance onset (renderer.ts HAZE_MIN_DISTANCE_M). Reuses the projection the fog
+    // ramp above already needed, so `heightFromFrame` costs no second road search.
+    renderer.setHazeEyeHeight(
+      cam.y -
+        terrain.heightFromFrame(
+          cam.x + origin.x,
+          cam.z + origin.z,
+          camProjection.lateral,
+          camProjection.s,
+        ),
+    );
     const hazeT = Math.min(1, Math.max(0, (offRoad - FOG_RAMP_START) / (FOG_RAMP_END - FOG_RAMP_START)));
     renderer.fog.density *= 1 + hazeT * hazeT * (FOG_RAMP_MAX_SCALE - 1);
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
@@ -766,13 +851,17 @@ async function boot(): Promise<void> {
 
     // The disc only rebuilds when the camera has left the patch it was built for, so
     // this is a pair of comparisons on most frames.
-    vista.update(cam.x, cam.z);
+    vista.update(cam.x, cam.z, activeS);
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
     // change its light-shader permutation or hitch the frame.
     const night = sky.isNight ? 1 : 0;
-    streamer.setLamps(night, cam.x, cam.z);
+    // `setLamps` takes an ABSOLUTE camera position: the lamps it compares against were
+    // stored relative to the origin their chunk was BUILT under, which after a rebase
+    // is not the current one, so the chunk's own build origin is the bridge and only
+    // an absolute camera makes the two sides comparable. See props.ts setLamps.
+    streamer.setLamps(night, cam.x + origin.x, cam.z + origin.z);
     const lampDirection = camera.eyeDirection;
     lightBudget.update(
       cam.x,
@@ -886,7 +975,9 @@ async function boot(): Promise<void> {
     // wheels instead of dropping through them.
     const y = groundY + measure.spawnHeight + SPAWN_WHEEL_CLEARANCE;
     const heading = Math.atan2(dir.x / flat, dir.z / flat);
-    const car = spawnCarState(world, request, dropX, y, dropZ, heading);
+    // `dropX`/`dropZ` are relative — they came off the camera and fed a Rapier ray.
+    // `spawnCarState` writes a saved `CarState`, which is absolute.
+    const car = spawnCarState(world, request, dropX + origin.x, y, dropZ + origin.z, heading);
     spawnVehicle(car);
     hud.setToast(`spawned ${carModel(request.modelId).label}`);
   };
@@ -917,9 +1008,9 @@ async function boot(): Promise<void> {
       id: world.runtimePartId(),
       hitchedTo: null,
       cargoKg: 0,
-      x: dropX,
+      x: dropX + origin.x,
       y,
-      z: dropZ,
+      z: dropZ + origin.z,
       qx: 0,
       qy: Math.sin(half),
       qz: 0,
@@ -958,9 +1049,9 @@ async function boot(): Promise<void> {
         capacity,
         litres: capacity,
       },
-      dropX,
+      dropX + origin.x,
       groundY + 0.3,
-      dropZ,
+      dropZ + origin.z,
     );
     hud.setToast(`spawned ${capacity} L of ${fluid}`);
   };
