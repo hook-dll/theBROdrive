@@ -169,6 +169,16 @@ export interface WorldState {
    */
   lootedPois: number[];
   /**
+   * Scatter props knocked to pieces, by packed cell identity (`propCellId` in
+   * world/props.ts). Presence means "do not stand this one up again".
+   *
+   * The same guard `lootedPois` is, for the same reason: a chunk is rebuilt every time
+   * it crosses the physics radius, so without a record every cactus you flattened would
+   * be standing again the next time you drove past. Numbers rather than strings so it
+   * migrates through `migrateNumberArray` like every other index list in the save.
+   */
+  flattenedProps: number[];
+  /**
    * The haul in progress, or null. One at a time by design: the destination is a
    * single lit sign with no text on it, and two would be indistinguishable.
    */
@@ -207,6 +217,7 @@ export type WorldDelta =
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
   | { t: 'poi_looted'; poiIndex: number }
+  | { t: 'prop_flatten'; propId: number }
   | { t: 'job_accept'; job: JobState }
   | { t: 'job_complete'; poiIndex: number }
   | { t: 'job_abandon' }
@@ -238,6 +249,7 @@ export function newWorldState(seed: number): WorldState {
     looseParts: {},
     looseItems: {},
     lootedPois: [],
+    flattenedProps: [],
     job: null,
     stickersUnplaced: 0,
     deliveredPois: [],
@@ -454,6 +466,9 @@ export class GameWorld {
         break;
       case 'poi_looted':
         if (!s.lootedPois.includes(delta.poiIndex)) s.lootedPois.push(delta.poiIndex);
+        break;
+      case 'prop_flatten':
+        if (!s.flattenedProps.includes(delta.propId)) s.flattenedProps.push(delta.propId);
         break;
       case 'job_accept':
         s.job = delta.job;

@@ -346,6 +346,7 @@ export function migrateState(raw: unknown): WorldState {
     looseParts,
     looseItems,
     lootedPois: migrateNumberArray(obj.lootedPois),
+    flattenedProps: migrateNumberArray(obj.flattenedProps),
     job: migrateJob(obj.job),
     stickersUnplaced: Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0))),
     deliveredPois: migrateNumberArray(obj.deliveredPois),

@@ -41,6 +41,7 @@ import {
 } from './world/house';
 import { PoiProvider } from './world/poi';
 import { FreightField } from './world/freight';
+import { DebrisField, type Impactor } from './world/debris';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -245,6 +246,10 @@ async function boot(): Promise<void> {
   // vista both derive the world's edge from it, and two copies could round the same
   // ground differently and put a seam on the horizon.
   const roadDistance = new RoadDistance(road);
+  // Owns everything in the desert that can be knocked to pieces, and the pieces. Built
+  // before the streamer because `ScatterProvider` hands it every breakable prop it
+  // makes, and asks it which ones are already down.
+  const debris = new DebrisField(physics, world, renderer.scene, origin);
   const vista = new VistaMesh(renderer.scene, terrain, roadDistance, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
@@ -254,11 +259,16 @@ async function boot(): Promise<void> {
     vista.setViewDistance(metres);
   }
 
+  // Scratches for the impact test in the fixed step: never allocated per tick.
+  const impactForward = new THREE.Vector3();
+  const impactQuat = new THREE.Quaternion();
+  const impactor: Impactor = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, halfLength: 2, vx: 0, vy: 0, vz: 0 };
+
   const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene, origin);
   streamer.register(new RoadMeshProvider(world.seed));
   streamer.register(new TerrainMeshProvider(roadDistance));
   streamer.register(new HomesteadProvider());
-  streamer.register(new ScatterProvider());
+  streamer.register(new ScatterProvider(roadDistance, debris));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose, trailerField, freight));
@@ -682,6 +692,32 @@ async function boot(): Promise<void> {
       }
     }
 
+    // Props that come apart. The car is the only thing in the desert heavy enough to
+    // do it, so the impactor is the driven chassis: absolute centre, its own forward,
+    // the half extents measured off its model, and its world velocity. Filled in the
+    // FIXED step rather than per frame, because breaking is a physics event and must
+    // not happen twice for one step's worth of motion.
+    if (driving) {
+      const t = driving.absoluteTranslation(originAnchor);
+      const q = driving.chassis.rotation();
+      // Chassis-local +z is forward (render/carmodel.ts measures half-length on z).
+      impactForward.set(0, 0, 1).applyQuaternion(impactQuat.set(q.x, q.y, q.z, q.w));
+      const flat = Math.hypot(impactForward.x, impactForward.z) || 1;
+      const v = driving.chassis.linvel();
+      const half = driving.modelMeasure.halfExtents;
+      impactor.x = t.x;
+      impactor.y = t.y;
+      impactor.z = t.z;
+      impactor.fx = impactForward.x / flat;
+      impactor.fz = impactForward.z / flat;
+      impactor.halfWidth = half[0];
+      impactor.halfLength = half[2];
+      impactor.vx = v.x;
+      impactor.vy = v.y;
+      impactor.vz = v.z;
+      debris.update(impactor);
+    }
+
     recordTimer += dt;
     if (recordTimer >= RECORD_INTERVAL) {
       recordTimer = 0;
@@ -767,7 +803,7 @@ async function boot(): Promise<void> {
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     loose.syncVisuals();
-    trailerField.syncVisuals(alpha);
+    debris.syncVisuals();
 
     // Sand and gravel spray. The pool ages every frame (a tail left behind when the
     // player steps out still settles), and nothing is flung on sealed roads.

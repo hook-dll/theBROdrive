@@ -18,6 +18,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../core/rng';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
+import { drawnGroundY } from './terrainmesh';
+import { RoadDistance } from './roaddistance';
 
 import type { Monument, PoleEra } from './gradient';
 import type { Road } from './road';
@@ -33,11 +35,41 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 // through a cell.
 const TAG_SCATTER = 0x5ca17e2;
 const CELL_S = 6; // metres between candidate cells along the road
-const CELL_L = 5; // metres between candidate cells laterally
+const CELL_L = 6; // metres between candidate cells laterally
 const MIN_LAT = 9; // props stay off the corridor + gravel verge (~8.2 m)
-const MAX_LAT = 42; // and close enough to the road to actually be seen
-const ROCK_DENSITY = 0.15; // chance a rock-outcrop cell grows a boulder
-const CACTUS_DENSITY = 0.03; // chance a sand cell grows a cactus
+/**
+ * Lateral reach of the scatter, and where it starts thinning out.
+ *
+ * This was 42 m — "close enough to the road to actually be seen" — and the result was
+ * a hedge. Six hundred metres of driveable desert either side, and everything standing
+ * in it stood in the first seven percent of it, so leaving the road meant leaving the
+ * furniture behind and driving across a bare plain.
+ *
+ * Two things had to be fixed before the band could be widened, and neither was the
+ * band. Props were placed at `Terrain.heightAt`, which is the height FIELD; past the
+ * tight rings near the road the drawn mesh chords that field by metres, so a boulder
+ * at 200 m would have hovered or buried itself. They now stand on `drawnGroundY`, the
+ * mesh's own surface. And every candidate cell paid two road projections (12 us) before
+ * its occupancy roll was even looked at, which is what made 578 cells cost 6.5 ms; the
+ * roll is a hash, so it goes first and 90% of cells now cost nothing but that hash.
+ *
+ * `MAX_LAT` stops just inside `PHYSICS_LATERAL`: past that edge there is no collider,
+ * and a rock you can drive through is worse than no rock. The taper from `FULL_LAT`
+ * exists so the far edge is not a second hedge — a line of props running the length of
+ * the world at a fixed distance reads as a fence.
+ */
+const FULL_LAT = 300;
+const MAX_LAT = 560;
+/**
+ * Per-cell occupancy at full density, on rock outcrop and on open sand.
+ *
+ * Occupancy per cell, so it is an AREA density: these are the old 0.15/0.03 rescaled
+ * from the old 6x5 m cell to this 6x6 one, which keeps the desert as thick as it was
+ * beside the road and simply continues it outward. Outcrops carry five times what sand
+ * does, which is what makes a rock field read as a rock field.
+ */
+const ROCK_DENSITY = 0.18;
+const CACTUS_DENSITY = 0.036;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 
 // Poles run along the RIGHT-hand side of the road facing away from the house, as
@@ -147,6 +179,8 @@ const _v = new THREE.Vector3();
 // ===========================================================================
 
 interface PropForm {
+  /** Stable name: the debris field keys its piece geometries off this. */
+  readonly id: string;
   geometry: THREE.BufferGeometry;
   material: THREE.MeshStandardMaterial;
   /** Approximate radius (m) of the form at scale 1, for sinking and collision. */
@@ -154,6 +188,13 @@ interface PropForm {
   /** Vertical span (m) at scale 1, for capsule colliders. */
   height: number;
   collider: 'capsule' | 'box' | 'none';
+  /**
+   * Box half-extents at scale 1, in the form's own frame. Omitted for a form whose
+   * silhouette is roughly a ball, where a cube off `baseRadius` is honest and free.
+   */
+  readonly colliderHalf?: readonly [number, number, number];
+  /** Fraction of `baseRadius` the form is planted below the surface. */
+  sink: number;
   rotate3d: boolean;
   minScale: number;
   maxScale: number;
@@ -215,32 +256,179 @@ function buildDeadStick(): THREE.BufferGeometry {
   return mergeGeometries([trunk, branch]);
 }
 
-let _cactusForms: PropForm[] | null = null;
-function cactusForms(): PropForm[] {
-  if (!_cactusForms) {
-    _cactusForms = [
-      { geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', rotate3d: false, minScale: 0.75, maxScale: 1.35 },
-      { geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'none', rotate3d: false, minScale: 0.8, maxScale: 1.7 },
-      { geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'none', rotate3d: false, minScale: 0.7, maxScale: 1.5 },
+/**
+ * A fallen trunk: two tapered lengths meeting at a slight kink, with one stub branch.
+ *
+ * The desert needed something HORIZONTAL. Everything else in the scatter is a vertical
+ * or a lump, and over 600 m of ground that reads as a field of posts and pebbles; a log
+ * lying across the sand is the one silhouette that gives the eye a direction and the
+ * wheels something to climb rather than something to hit.
+ */
+function buildFallenTrunk(): THREE.BufferGeometry {
+  const butt = new THREE.CylinderGeometry(0.19, 0.24, 1.7, 6, 1);
+  butt.rotateZ(Math.PI / 2);
+  butt.translate(-0.8, 0.22, 0);
+  const tip = new THREE.CylinderGeometry(0.1, 0.19, 1.6, 6, 1);
+  tip.rotateZ(Math.PI / 2);
+  tip.rotateY(0.28);
+  tip.translate(0.75, 0.19, 0.22);
+  const stub = new THREE.CylinderGeometry(0.05, 0.07, 0.6, 5, 1);
+  stub.rotateZ(0.5);
+  stub.translate(-0.2, 0.5, -0.1);
+  return mergeGeometries([butt, tip, stub]);
+}
+
+/** A low scrub bush: three squashed lumps, so it clusters rather than domes. */
+function buildScrub(): THREE.BufferGeometry {
+  const lump = (r: number, x: number, y: number, z: number): THREE.BufferGeometry => {
+    const g = new THREE.IcosahedronGeometry(r, 0);
+    g.scale(1, 0.65, 1);
+    g.translate(x, y, z);
+    return g;
+  };
+  return mergeGeometries([lump(0.34, 0, 0.22, 0), lump(0.24, 0.28, 0.15, 0.1), lump(0.2, -0.2, 0.14, -0.22)]);
+}
+
+let _sandForms: PropForm[] | null = null;
+function sandForms(): PropForm[] {
+  if (!_sandForms) {
+    _sandForms = [
+      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35 },
+      { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7 },
+      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'none', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
+      { id: 'trunk', geometry: buildFallenTrunk(), material: matDeadStick, baseRadius: 0.42, height: 0.5, collider: 'box', colliderHalf: [1.55, 0.24, 0.26], sink: 0.25, rotate3d: false, minScale: 0.8, maxScale: 1.45 },
+      { id: 'scrub', geometry: buildScrub(), material: matScrub, baseRadius: 0.42, height: 0.45, collider: 'none', sink: 0.3, rotate3d: false, minScale: 0.7, maxScale: 1.6 },
     ];
   }
-  return _cactusForms;
+  return _sandForms;
 }
 
 let _rockForms: PropForm[] | null = null;
 function rockForms(): PropForm[] {
   if (!_rockForms) {
     _rockForms = [
-      { geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'box', rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'box', rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'box', rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'box', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9 },
     ];
   }
   return _rockForms;
 }
 
+/**
+ * A PIECE of a prop that comes apart: geometry, where it sits in the whole, and what
+ * it weighs.
+ *
+ * The pieces are not a decomposition of the prop's merged geometry — nothing here
+ * cuts a mesh at runtime. They are the SAME primitives the whole was built from, cut
+ * along the joints a real one would break at, each re-centred on its own origin so a
+ * rigid body can rotate about its middle instead of about the plant's foot. A saguaro
+ * is a trunk in three lifts and two arms, which is how they actually fail.
+ *
+ * Masses are deliberately not botanical. A real saguaro that size is most of a tonne,
+ * and a tonne of anything stops a car dead; these are set so the car walks through and
+ * the pieces leave properly, which is the whole point of breaking them.
+ */
+export interface PropPiece {
+  readonly geometry: THREE.BufferGeometry;
+  readonly material: THREE.MeshStandardMaterial;
+  /** Position in the form's own frame at scale 1. */
+  readonly offset: readonly [number, number, number];
+  /** Capsule collider at scale 1: half height, then radius. */
+  readonly capsule: readonly [number, number];
+  readonly mass: number;
+}
+
+function armPiece(mirror: number): THREE.BufferGeometry {
+  const stub = new THREE.CylinderGeometry(0.075, 0.075, 0.45, 6, 1);
+  stub.rotateZ(Math.PI / 2);
+  stub.translate(-0.2 * mirror, -0.22, 0);
+  const rise = new THREE.CylinderGeometry(0.07, 0.07, 0.86, 6, 1);
+  rise.translate(0, 0.2, 0);
+  return mergeGeometries([stub, rise]);
+}
+
+let _pieces: Record<string, readonly PropPiece[]> | null = null;
+
+/** Pieces for a form that comes apart, or null for one that does not. */
+export function propPieces(formId: string): readonly PropPiece[] | null {
+  if (!_pieces) {
+    const lump = (r: number): THREE.BufferGeometry => {
+      const g = new THREE.IcosahedronGeometry(r, 0);
+      g.scale(1, 0.8, 1);
+      return g;
+    };
+    _pieces = {
+      saguaro: [
+        { geometry: new THREE.CylinderGeometry(0.2, 0.225, 0.85, 8, 1), material: matCactus, offset: [0, 0.425, 0], capsule: [0.42, 0.21], mass: 26 },
+        { geometry: new THREE.CylinderGeometry(0.18, 0.2, 0.9, 8, 1), material: matCactus, offset: [0, 1.3, 0], capsule: [0.45, 0.19], mass: 19 },
+        { geometry: new THREE.CylinderGeometry(0.155, 0.18, 0.85, 8, 1), material: matCactus, offset: [0, 2.175, 0], capsule: [0.42, 0.17], mass: 15 },
+        { geometry: armPiece(1), material: matCactus, offset: [0.62, 1.72, 0], capsule: [0.43, 0.09], mass: 7 },
+        { geometry: armPiece(-1), material: matCactus, offset: [-0.62, 1.97, 0], capsule: [0.45, 0.09], mass: 7 },
+      ],
+      barrel: [
+        { geometry: lump(0.19), material: matScrub, offset: [0.1, 0.12, 0.05], capsule: [0.06, 0.16], mass: 4 },
+        { geometry: lump(0.17), material: matScrub, offset: [-0.12, 0.14, -0.08], capsule: [0.05, 0.14], mass: 3 },
+        { geometry: lump(0.15), material: matScrub, offset: [0.02, 0.3, -0.1], capsule: [0.05, 0.13], mass: 3 },
+      ],
+    };
+  }
+  return _pieces[formId] ?? null;
+}
+
+/**
+ * One standing prop that can be knocked to pieces, as handed to whoever owns the
+ * breaking. Absolute coordinates, because that is what a save and a debris body both
+ * want; the origin subtraction happens at the body.
+ */
+export interface BreakableProp {
+  /** Packed cell identity, stable forever for a seed. See `propCellId`. */
+  readonly id: number;
+  readonly pieces: readonly PropPiece[];
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly scale: number;
+  /** Radius (m) of the standing prop, for the impact test. */
+  readonly radius: number;
+  /** Height (m) of the standing prop, for the impact test. */
+  readonly height: number;
+  /** The instance to blank, and the collider to switch off, when it goes. */
+  readonly mesh: THREE.InstancedMesh;
+  readonly instance: number;
+  readonly collider: RAPIER.Collider;
+}
+
+/**
+ * Whoever owns breaking. Structural on purpose: `world/props.ts` describes the desert
+ * and must not depend on the debris field that animates it.
+ */
+export interface BreakableSink {
+  /** True if this prop is already down, so the chunk must not draw it standing. */
+  isBroken(id: number): boolean;
+  register(prop: BreakableProp): void;
+  /** Called when the chunk holding these goes away. */
+  forget(ids: readonly number[]): void;
+}
+
+/**
+ * Identity of a scatter cell, packed into one integer so it can live in a save's
+ * number array exactly like `lootedPois` does.
+ *
+ * `cl` spans a couple of hundred either side of nothing, so it is biased into the low
+ * byte and `cs` — which reaches seven million over a forty-thousand-kilometre road —
+ * takes the rest. The product stays far inside the exact-integer range of a double.
+ */
+export function propCellId(cs: number, cl: number): number {
+  return cs * 512 + (cl + 256);
+}
+
 interface ScatterPlacement {
   form: PropForm;
+  /** Packed cell identity; only meaningful for a form that can break. */
+  id: number;
   x: number;
   y: number;
   z: number;
@@ -249,6 +437,9 @@ interface ScatterPlacement {
   rz: number;
   scale: number;
   radius: number;
+  /** Filled in by the instancing pass, so a break can blank the right instance. */
+  mesh: THREE.InstancedMesh | null;
+  instance: number;
 }
 
 type Rot = { x: number; y: number; z: number; w: number };
@@ -280,7 +471,7 @@ function addStatic(
   desc: RAPIER.ColliderDesc,
   surface: SurfaceType,
   rot?: Rot,
-): void {
+): RAPIER.Collider {
   const body = ctx.physics.world.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(x - ctx.originX, y, z - ctx.originZ),
   );
@@ -289,10 +480,27 @@ function addStatic(
   ctx.physics.surfaces.register(collider.handle, surface);
   bodies.push(body);
   colliders.push(collider);
+  return collider;
 }
 
 export class ScatterProvider implements ChunkProvider {
   readonly id = 'scatter';
+
+  /**
+   * The shared nearest-road-distance field, needed only to reach `drawnGroundY`: props
+   * stand on the terrain mesh's own surface, and past 60 m of lateral offset that
+   * surface is a function of the distance to the nearest branch. Injected, not owned,
+   * for the reason terrainmesh.ts gives — two copies could round the same ground
+   * differently, and then a boulder would sit at a height the ground does not have.
+   */
+  constructor(
+    private readonly roadDistance: RoadDistance,
+    /**
+     * Whoever owns knocking props down, or nothing. Optional because the desert is
+     * fully described without it: with no sink every prop simply stands.
+     */
+    private readonly breakables?: BreakableSink,
+  ) {}
 
   build(ctx: ChunkContext): ChunkContent {
     const group = new THREE.Group();
@@ -300,6 +508,7 @@ export class ScatterProvider implements ChunkProvider {
     const colliders: RAPIER.Collider[] = [];
     const meshes: THREE.InstancedMesh[] = [];
     const placements: ScatterPlacement[] = [];
+    const registered: number[] = [];
 
     const seed = ctx.world.seed;
     const ox = ctx.originX;
@@ -312,34 +521,56 @@ export class ScatterProvider implements ChunkProvider {
       const centreS = (cs + 0.5) * CELL_S;
       if (centreS < ctx.sStart || centreS >= ctx.sEnd) continue;
       for (let cl = -cellLMax; cl <= cellLMax; cl++) {
+        // CHEAPEST TEST FIRST, and that ordering is the whole reason this can afford
+        // to sweep 600 m either side. The occupancy roll is one hash; the terrain
+        // samples below are hundreds of times more expensive. Rolling first throws
+        // away nine cells in ten before either is touched.
+        const roll = hash01(seed, TAG_SCATTER, cs, cl);
+        if (roll >= ROCK_DENSITY) continue;
+
         const centreL = (cl + 0.5) * CELL_L;
         if (Math.abs(centreL) < MIN_LAT) continue;
 
         // Jitter within the cell, then re-check the corridor/max bounds.
         const s = centreS + (hash01(seed, TAG_SCATTER, cs, cl, 1) - 0.5) * CELL_S;
         const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
-        if (Math.abs(lateral) < MIN_LAT || Math.abs(lateral) > MAX_LAT) continue;
+        const absLateral = Math.abs(lateral);
+        if (absLateral < MIN_LAT || absLateral > MAX_LAT) continue;
+
+        // Thin out towards the far edge so the scatter ends in a fringe rather than a
+        // fence line. Still only arithmetic: no sampling yet.
+        const t = Math.min(1, Math.max(0, (absLateral - FULL_LAT) / (MAX_LAT - FULL_LAT)));
+        const fade = 1 - t * t * (3 - 2 * t);
+        if (roll >= ROCK_DENSITY * fade) continue;
 
         const p = ctx.road.offsetPoint(s, lateral);
-        const surface = ctx.terrain.surfaceAt(p.x, p.z, s);
-        const groundY = ctx.terrain.heightAt(p.x, p.z, s);
+        // From the FRAME, not by projection: this cell was generated from (s, lateral),
+        // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
+        // counter already knows.
+        const surface = ctx.terrain.surfaceFromFrame(p.x, p.z, lateral);
 
-        // Correlation: cacti on sand, rocks concentrated on rock outcrops.
+        // Correlation: cacti and scrub on sand, rocks concentrated on rock outcrops.
         let forms: PropForm[];
         let density: number;
         if (surface === SurfaceType.Rock) {
           forms = rockForms();
           density = ROCK_DENSITY;
         } else if (surface === SurfaceType.Sand) {
-          forms = cactusForms();
+          forms = sandForms();
           density = CACTUS_DENSITY;
         } else {
           continue;
         }
+        if (roll >= density * fade) continue;
 
-        if (hash01(seed, TAG_SCATTER, cs, cl) >= density) continue;
+        const form = forms[Math.floor(hash01(seed, TAG_SCATTER, cs, cl, 3) * forms.length)]!;
 
-        const form = forms[Math.floor(hash01(seed, TAG_SCATTER, cs, cl, 3) * forms.length)];
+        // A prop already knocked down stays down. Same guard `lootedPois` is for a
+        // looted stop: the chunk is rebuilt every time it crosses the physics radius,
+        // and without this every rebuild would stand the cactus back up.
+        const id = propCellId(cs, cl);
+        if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
+
         const scale = form.minScale + hash01(seed, TAG_SCATTER, cs, cl, 4) * (form.maxScale - form.minScale);
         const radius = form.baseRadius * scale;
 
@@ -347,18 +578,23 @@ export class ScatterProvider implements ChunkProvider {
         const rx = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 6) * Math.PI * 2 : 0;
         const rz = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 7) * Math.PI * 2 : 0;
 
-        // Rocks sink a little so they read as planted; cacti sit on the surface.
-        const sink = surface === SurfaceType.Rock ? radius * 0.28 : 0;
+        // The one expensive sample, paid only by a prop that is actually going to
+        // exist: the height of the DRAWN ground, not of the height field (see
+        // `drawnGroundY`). Planting depth is the form's own.
+        const groundY = drawnGroundY(ctx.road, ctx.terrain, this.roadDistance, s, lateral);
         placements.push({
           form,
+          id,
           x: p.x,
-          y: groundY - sink,
+          y: groundY - radius * form.sink,
           z: p.z,
           rx,
           ry,
           rz,
           scale,
           radius,
+          mesh: null,
+          instance: 0,
         });
       }
     }
@@ -380,12 +616,14 @@ export class ScatterProvider implements ChunkProvider {
       // geometry bounding-sphere cull would pop; disable it.
       mesh.frustumCulled = false;
       for (let i = 0; i < list.length; i++) {
-        const pl = list[i];
+        const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);
         _dummy.rotation.set(pl.rx, pl.ry, pl.rz);
         _dummy.scale.setScalar(pl.scale);
         _dummy.updateMatrix();
         mesh.setMatrixAt(i, _dummy.matrix);
+        pl.mesh = mesh;
+        pl.instance = i;
       }
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
@@ -394,16 +632,58 @@ export class ScatterProvider implements ChunkProvider {
 
     if (ctx.hasPhysics) {
       for (const pl of placements) {
-        if (pl.form.collider === 'none') continue;
-        if (pl.form.collider === 'box') {
+        const form = pl.form;
+        if (form.collider === 'none') continue;
+        if (form.collider === 'box') {
+          if (form.colliderHalf) {
+            // A shaped box — the fallen trunk is three metres of one thing and a
+            // quarter-metre of another, so a cube around its radius would be a stump
+            // and a cube around its length a wall. Yawed with the form, because a log
+            // lying east-west is not the same obstacle as one lying north-south.
+            const [hx, hy, hz] = form.colliderHalf;
+            addStatic(
+              ctx,
+              bodies,
+              colliders,
+              pl.x,
+              pl.y + hy * pl.scale,
+              pl.z,
+              RAPIER.ColliderDesc.cuboid(hx * pl.scale, hy * pl.scale, hz * pl.scale),
+              SurfaceType.Rock,
+              yawRotation(pl.ry),
+            );
+            continue;
+          }
           if (pl.radius < ROCK_COLLIDER_MIN) continue; // pebbles: no collider
           const half = pl.radius * 0.72;
           addStatic(ctx, bodies, colliders, pl.x, pl.y + pl.radius * 0.4, pl.z, RAPIER.ColliderDesc.cuboid(half, half, half), SurfaceType.Rock);
         } else {
-          // Cactus trunk: an upright capsule sized to the shaft.
-          const halfHeight = pl.form.height * pl.scale * 0.42;
-          const rad = pl.form.baseRadius * pl.scale * 0.8;
-          addStatic(ctx, bodies, colliders, pl.x, pl.y + halfHeight, pl.z, RAPIER.ColliderDesc.capsule(halfHeight, rad), SurfaceType.Rock);
+          // Upright plant: a capsule sized to the shaft.
+          const halfHeight = form.height * pl.scale * 0.42;
+          const rad = form.baseRadius * pl.scale * 0.8;
+          const collider = addStatic(ctx, bodies, colliders, pl.x, pl.y + halfHeight, pl.z, RAPIER.ColliderDesc.capsule(halfHeight, rad), SurfaceType.Rock);
+
+          // Only a chunk with physics can be hit, and only a form with pieces can come
+          // apart. Registering needs the collider (to switch off) and the instance (to
+          // blank), which is why it happens here rather than at placement.
+          const pieces = propPieces(form.id);
+          if (pieces && this.breakables && pl.mesh) {
+            registered.push(pl.id);
+            this.breakables.register({
+              id: pl.id,
+              pieces,
+              x: pl.x,
+              y: pl.y,
+              z: pl.z,
+              yaw: pl.ry,
+              scale: pl.scale,
+              radius: rad,
+              height: form.height * pl.scale,
+              mesh: pl.mesh,
+              instance: pl.instance,
+              collider,
+            });
+          }
         }
       }
     }
@@ -414,6 +694,7 @@ export class ScatterProvider implements ChunkProvider {
       colliders,
       dispose: () => {
         for (const m of meshes) m.dispose();
+        if (registered.length > 0) this.breakables?.forget(registered);
       },
     };
   }

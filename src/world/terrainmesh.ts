@@ -325,6 +325,178 @@ interface BuiltTerrain {
   readonly index: Uint32Array;
 }
 
+/**
+ * The field lattice's lateral rings, memoised.
+ *
+ * A pure function of the constants above — every chunk in every seed has the same
+ * ring list — so it is built once and shared rather than rebuilt per chunk. That is
+ * also what lets `drawnGroundY` below sit on the exact same rings the builder uses
+ * instead of a second list that could drift from it.
+ *
+ * Geometric — metres at the verge, hundreds at the horizon — with exceptions, because
+ * a pure ratio puts rings where nothing needs them and none where something does.
+ * Inside `DETAIL_REACH` the spacing is capped so the refined grid has a resolved base
+ * to interpolate; across the berm's face it is capped so the escarpment is not two
+ * facets wide; and `DETAIL_REACH` and `PHYSICS_LATERAL` are forced in as exact rings,
+ * because the refined grid stitches onto the first and the collider ends on the second
+ * — both need a shared row of vertices rather than a meeting mid-quad.
+ */
+let _rings: { magnitudes: number[]; laterals: number[] } | null = null;
+
+function fieldRings(): { magnitudes: number[]; laterals: number[] } {
+  if (_rings) return _rings;
+  const magnitudes: number[] = [TERRAIN_INNER];
+  let m = CORRIDOR_INNER;
+  while (m < NEAR_TERRAIN_REACH) {
+    const geometric = m * LATERAL_RATIO - m;
+    const cap =
+      m < DETAIL_REACH ? DETAIL_RING_CAP
+      : m >= BERM_START - BERM_RING_SPACING && m < BERM_CREST ? BERM_RING_SPACING
+      : m < BERM_FADE ? BERM_BACK_RING_SPACING
+      : OUTER_RING_SPACING;
+    let next = Math.min(m + Math.min(geometric, cap), NEAR_TERRAIN_REACH);
+    if (m < DETAIL_REACH && next > DETAIL_REACH) next = DETAIL_REACH;
+    else if (m < PHYSICS_LATERAL && next > PHYSICS_LATERAL) next = PHYSICS_LATERAL;
+    m = next;
+    if (m - magnitudes[magnitudes.length - 1]! < 1) break;
+    magnitudes.push(m);
+  }
+  if (magnitudes[magnitudes.length - 1]! < NEAR_TERRAIN_REACH) {
+    magnitudes.push(NEAR_TERRAIN_REACH);
+  }
+
+  const laterals: number[] = [];
+  for (let i = magnitudes.length - 1; i >= 0; i--) laterals.push(-magnitudes[i]!);
+  for (let i = 0; i < magnitudes.length; i++) laterals.push(magnitudes[i]!);
+  _rings = { magnitudes, laterals };
+  return _rings;
+}
+
+/**
+ * Desert BASE height at a world position: `Terrain.openBase` with the nearest-branch
+ * distance interpolated off the lattice. A pure function of x and z, which is what
+ * makes every chunk agree.
+ *
+ * Base and not `openHeight` because the detail layer belongs to the refined grid
+ * alone: sampling it here as well would both alias it onto the 8 m lattice and double
+ * it under every refined vertex.
+ */
+function worldBase(terrain: Terrain, roadDistance: RoadDistance, x: number, z: number): number {
+  return terrain.openBase(x, z, roadDistance.distAt(x, z, DIST_LATTICE));
+}
+
+/**
+ * Height of ONE field-lattice vertex, and the only place that blend is written.
+ *
+ * The near-road frame path is cross-faded into the world path over
+ * WORLD_HEIGHT_START..FULL. Inside the corridor the shoulder vertex MUST equal the road
+ * ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m the two
+ * paths are the same arithmetic (the berm is zero that close in), so the fade is between
+ * values that agree, and it stays as the guarantee that they must.
+ *
+ * The last term is the seam tuck: terrain overlaps the road's shoulder slightly and
+ * samples the same road surface there, biased just under the ribbon so the floating
+ * pixel seam closes without a coplanar z-fight.
+ */
+function fieldHeight(
+  terrain: Terrain,
+  roadDistance: RoadDistance,
+  s: number,
+  lateral: number,
+  x: number,
+  z: number,
+  isApron: boolean,
+): number {
+  const absLateral = Math.abs(lateral);
+  const blend = Math.min(
+    1,
+    Math.max(0, (absLateral - WORLD_HEIGHT_START) / (WORLD_HEIGHT_FULL - WORLD_HEIGHT_START)),
+  );
+  const frameWeight = isApron ? 1 : 1 - blend * blend * (3 - 2 * blend);
+  let y: number;
+  if (frameWeight >= 1) {
+    y = terrain.baseFromFrame(x, z, lateral, s);
+  } else if (frameWeight <= 0) {
+    y = worldBase(terrain, roadDistance, x, z);
+  } else {
+    const frameY = terrain.baseFromFrame(x, z, lateral, s);
+    const world = worldBase(terrain, roadDistance, x, z);
+    y = world + (frameY - world) * frameWeight;
+  }
+  if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
+  return y;
+}
+
+/**
+ * Height of the DRAWN GROUND at a road-frame point: what stands on the desert must
+ * stand on the mesh, not on the field the mesh chords.
+ *
+ * The two are not the same surface and the gap is not small. Laterally the rings reach
+ * 90 m apart by a couple of hundred metres out, and a chord that long across the dune
+ * field misses the field it chords by `A * (2pi/lambda)^2 * W^2/8` — metres. Nothing
+ * noticed while the only thing referring to the ground was the ground; a boulder placed
+ * at `Terrain.heightAt` hovers or buries itself by that whole error, and THAT is what
+ * held the desert scatter to a 42 m band along the road where the rings are still tight.
+ *
+ * So this reproduces the mesh instead of approximating it: the same memoised rings, the
+ * same `fieldHeight` per corner, bilinear between them exactly as the refined grid
+ * interpolates, then the detail layer added on top exactly as the refined grid adds it.
+ * Inside `DETAIL_REACH` the answer is the refined grid's own surface to within its
+ * 2.67 m chord; outside, it is the coarse quad's surface to the bit.
+ *
+ * Costs four field samples, about 10 us. Anything placing hundreds of these per chunk
+ * should reject candidates BEFORE calling it.
+ */
+export function drawnGroundY(
+  road: Road,
+  terrain: Terrain,
+  roadDistance: RoadDistance,
+  s: number,
+  lateral: number,
+): number {
+  const { magnitudes } = fieldRings();
+  const absLateral = Math.abs(lateral);
+  const side = lateral < 0 ? -1 : 1;
+
+  // Ring bracket. The list is short and ascending, and a linear walk over ~30 entries
+  // beats a binary search's branches at this size.
+  let ri = 0;
+  while (ri < magnitudes.length - 2 && magnitudes[ri + 1]! < absLateral) ri++;
+  const inner = magnitudes[ri]!;
+  const outer = magnitudes[ri + 1]!;
+  const across = Math.min(1, Math.max(0, (absLateral - inner) / (outer - inner)));
+
+  // Row bracket, on the same absolute S_STEP lattice every chunk shares.
+  const row = Math.floor(s / S_STEP) * S_STEP;
+  const along = (s - row) / S_STEP;
+
+  // Apron is a per-CHUNK property in the builder, so ask the same question of the
+  // chunk this point falls in rather than of the point.
+  const chunk = Math.floor(s / CHUNK_LENGTH);
+  const isApron = chunk * CHUNK_LENGTH < 0 || (chunk + 1) * CHUNK_LENGTH > road.length;
+
+  let near = 0;
+  let far = 0;
+  for (let step = 0; step < 2; step++) {
+    const rowS = row + step * S_STEP;
+    setRowFrame(road, rowS);
+    const bx = rowFrame.x;
+    const bz = rowFrame.z;
+    const dx = rowFrame.lateralX;
+    const dz = rowFrame.lateralZ;
+    const innerLat = side * inner;
+    const outerLat = side * outer;
+    const innerY = fieldHeight(terrain, roadDistance, rowS, innerLat, bx + dx * innerLat, bz + dz * innerLat, isApron);
+    const outerY = fieldHeight(terrain, roadDistance, rowS, outerLat, bx + dx * outerLat, bz + dz * outerLat, isApron);
+    const value = innerY + (outerY - innerY) * across;
+    if (step === 0) near = value;
+    else far = value;
+  }
+
+  const p = road.offsetPoint(s, lateral);
+  return near + (far - near) * along + terrain.detailAt(p.x, p.z, absLateral);
+}
+
 export class TerrainMeshProvider implements ChunkProvider {
   readonly id = 'terrain';
 
@@ -334,19 +506,6 @@ export class TerrainMeshProvider implements ChunkProvider {
    * and, worse, could round the same ground differently.
    */
   constructor(private readonly roadDistance: RoadDistance) {}
-
-  /**
-   * Desert BASE height at a world position: `Terrain.openBase` with the nearest-branch
-   * distance interpolated off the lattice. A pure function of x and z, which is what
-   * makes every chunk agree.
-   *
-   * Base and not `openHeight` because the detail layer belongs to the refined grid
-   * alone: sampling it here as well would both alias it onto the 8 m lattice and
-   * double it under every refined vertex.
-   */
-  private worldBase(terrain: Terrain, x: number, z: number): number {
-    return terrain.openBase(x, z, this.roadDistance.distAt(x, z, DIST_LATTICE));
-  }
 
   build(ctx: ChunkContext): ChunkContent | null {
     // Every chunk owns a full CHUNK_LENGTH span, even outside the road: the
@@ -377,37 +536,7 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     const isApron = sStart < 0 || sEnd > road.length;
 
-    // Geometric lateral rings — metres at the verge, hundreds at the horizon — with
-    // exceptions, because a pure ratio puts rings where nothing needs them and none
-    // where something does. Inside `DETAIL_REACH` the spacing is capped so the refined
-    // grid has a resolved base to interpolate; across the berm's face it is capped so
-    // the escarpment is not two facets wide; and `DETAIL_REACH` and `PHYSICS_LATERAL`
-    // are forced in as exact rings, because the refined grid stitches onto the first
-    // and the collider ends on the second — both need a shared row of vertices rather
-    // than a meeting mid-quad.
-    const magnitudes: number[] = [TERRAIN_INNER];
-    let m = CORRIDOR_INNER;
-    while (m < NEAR_TERRAIN_REACH) {
-      const geometric = m * LATERAL_RATIO - m;
-      const cap =
-        m < DETAIL_REACH ? DETAIL_RING_CAP
-        : m >= BERM_START - BERM_RING_SPACING && m < BERM_CREST ? BERM_RING_SPACING
-        : m < BERM_FADE ? BERM_BACK_RING_SPACING
-        : OUTER_RING_SPACING;
-      let next = Math.min(m + Math.min(geometric, cap), NEAR_TERRAIN_REACH);
-      if (m < DETAIL_REACH && next > DETAIL_REACH) next = DETAIL_REACH;
-      else if (m < PHYSICS_LATERAL && next > PHYSICS_LATERAL) next = PHYSICS_LATERAL;
-      m = next;
-      if (m - magnitudes[magnitudes.length - 1]! < 1) break;
-      magnitudes.push(m);
-    }
-    if (magnitudes[magnitudes.length - 1]! < NEAR_TERRAIN_REACH) {
-      magnitudes.push(NEAR_TERRAIN_REACH);
-    }
-
-    const laterals: number[] = [];
-    for (let i = magnitudes.length - 1; i >= 0; i--) laterals.push(-magnitudes[i]!);
-    for (let i = 0; i < magnitudes.length; i++) laterals.push(magnitudes[i]!);
+    const { magnitudes, laterals } = fieldRings();
 
     const sCount = Math.round((sEnd - sStart) / S_STEP) + 1;
     const latCount = laterals.length;
@@ -459,26 +588,7 @@ export class TerrainMeshProvider implements ChunkProvider {
         const px = originX + stepX * lateral;
         const pz = originZ + stepZ * lateral;
         const vi = si * latCount + li;
-        // Terrain overlaps the road's shoulder slightly and samples the same road
-        // surface there. The tiny downward bias is beneath the ribbon, closing the
-        // floating pixel seam without a coplanar z-fight.
-        const absLateral = Math.abs(lateral);
-        const blend = Math.min(
-          1,
-          Math.max(0, (absLateral - WORLD_HEIGHT_START) / (WORLD_HEIGHT_FULL - WORLD_HEIGHT_START)),
-        );
-        const frameWeight = isApron ? 1 : 1 - blend * blend * (3 - 2 * blend);
-        let y: number;
-        if (frameWeight >= 1) {
-          y = terrain.baseFromFrame(px, pz, lateral, s);
-        } else if (frameWeight <= 0) {
-          y = this.worldBase(terrain, px, pz);
-        } else {
-          const frameY = terrain.baseFromFrame(px, pz, lateral, s);
-          const world = this.worldBase(terrain, px, pz);
-          y = world + (frameY - world) * frameWeight;
-        }
-        if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
+        const y = fieldHeight(terrain, this.roadDistance, s, lateral, px, pz, isApron);
         positions[vi * 3] = px - ox;
         positions[vi * 3 + 1] = y;
         positions[vi * 3 + 2] = pz - oz;
