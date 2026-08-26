@@ -271,8 +271,13 @@ export class GameWorld {
     for (const id of Object.keys(state.looseItems)) bump(id);
     for (const item of state.player.carried) bump(item.id);
     for (const car of Object.values(state.cars)) {
+      bump(car.id);
       for (const part of Object.values(car.gizmos)) bump(part.id);
+      for (const item of car.storage) {
+        if (item) bump(item.id);
+      }
     }
+    for (const trailer of Object.values(state.trailers)) bump(trailer.id);
     this.partCounter = highest;
   }
 
