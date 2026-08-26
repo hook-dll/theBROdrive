@@ -1,5 +1,5 @@
 import { Landscape } from './landscape';
-import { MIN_CORNER_RADIUS, NODE_SPACING, RoadCurvature, stepNode, type NodeState } from './roadcurve';
+import { MIN_CORNER_RADIUS, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
 import {
   buildSpine,
   CHECKPOINT_NODES,
@@ -10,35 +10,30 @@ import {
 /**
  * The road is the spine of the world.
  *
- * It is generated as an arclength-parameterised curve. Curvature is a smooth noise
- * function of distance travelled and the centreline is integrated forward from the
- * house at s = 0; elevation is not the road's own at all, but the `Landscape` field's
- * value under the centreline. Everything else in the world (terrain height, chunk
- * streaming, prop placement, save games) is indexed by that same `s`, not by world
- * XZ.
+ * It is an arclength-parameterised curve. A bounded, smooth heading is sampled at
+ * each segment midpoint and XZ is integrated forward from the house; elevation is
+ * not road state at all, but the `Landscape` field under the centreline. Everything
+ * else in the world is indexed by the same `s`.
  *
  * Consequences worth knowing:
- *  - "turns often but smoothly" is one curvature amplitude, not authored geometry
- *  - the road's grade is whatever the landscape does along its tangent; there is no
- *    grade noise, and no elevation state that could drift
- *  - heading is the integral of that curvature, so it random-walks: over 400 km the
- *    road winds through several full turns and passes close to its own path. That
- *    used to matter enormously, because the desert took its height from the nearest
- *    pass of the road and two passes were hundreds of metres apart in altitude. It
- *    no longer does: both passes sit on the same landscape, at the same height, and
- *    the streamer never has two branches loaded at once (they are kilometres apart in
- *    `s`, and only ±1200 m is alive). Bounding the heading to forbid the crossing
- *    outright was tried and reverted — it doubled the direction-change rate to keep
- *    the corner radius, because bounded heading cannot sustain a curvature
+ *  - the heading stays inside ±80 degrees of the trunk bearing, so the road's +Z
+ *    projection is strictly increasing and it cannot self-intersect
+ *  - route-scale noise supplies long sweepers; a separately gated short term buys
+ *    the occasional tight corner without spending the whole heading budget
+ *  - the road's grade is whatever the landscape does along its tangent; there is
+ *    no grade noise and no elevation state that could drift
  *  - the road has a real end at `length`, reached only after a very long drive
- *  - generation is pure: same seed, same road, on any machine (see NETPLAY notes)
+ *  - generation is pure: same seed, same road, on any machine
  *
- * NODES ARE NOT KEPT. They used to be: integration ran from s = 0 and every node it
- * touched stayed in four growing arrays, which is 320 MB and 2.1 s of blocking work
- * on a 40 000 km road, every session. Now the `RoadSpine` holds a checkpoint every
- * 10 km and this class keeps a small LRU of 10 km blocks replayed from them, so
- * memory is constant and no session ever integrates more than it is looking at. See
- * `roadspine.ts` for why that is bit-identical to the old sequential walk.
+ * An earlier bounded-heading attempt was tried and reverted because differentiating
+ * the shipped three-octave fbm made every octave nearly equal in curvature and
+ * tripled the direction-change rate. `roadcurve.ts` documents the two-term,
+ * low-gain construction that avoids repeating that failure, and
+ * `tools/road-selfcross.ts` enforces both feel and separation.
+ *
+ * NODES ARE NOT KEPT. The `RoadSpine` holds a position checkpoint every 10 km and
+ * this class keeps a small LRU of replayed 10 km blocks, so memory stays constant.
+ * Heading is analytic now and checkpoints no longer carry it.
  */
 
 export { NODE_SPACING, MIN_CORNER_RADIUS };
@@ -55,13 +50,13 @@ export const SHOULDER_WIDTH = 1.4;
  * It was 400 km, and raising it by a hundred times is not a constant change. Three
  * things had to be built first, and each one is load-bearing:
  *
- *  - THE SPINE (`roadspine.ts`). Node N of a random walk needs nodes 0..N-1, so the old
- *    design integrated from zero and kept everything: 10 million nodes, 320 MB and 2.1 s
- *    of blocking work at this length, paid EVERY session because it was never persisted.
- *    Checkpoints plus a block cache make it 3.9 MB and one 884 ms worker walk per seed.
- *  - THE FLOATING ORIGIN (`origin.ts`). The centreline strays 386 km from (0, 0) out
- *    here, where a float32 step is 46 mm and Rapier's suspension — which measures a gap
- *    between two large coordinates — quantises 200 mm of travel into four steps.
+ *  - THE SPINE (`roadspine.ts`). Ten million nodes cannot remain resident: the old
+ *    design kept every one, 320 MB and seconds of blocking work. Sparse position
+ *    checkpoints plus a block cache make it under 4 MB and one worker walk per seed.
+ *  - THE FLOATING ORIGIN (`origin.ts`). The traversing centreline finishes about
+ *    35 500 km from (0, 0), where a float32 step is metres and Rapier's suspension
+ *    would no longer exist. Every rendered and simulated coordinate is rebased into
+ *    the live few-kilometre frame before it touches f32.
  *  - DISTANCE-DRIVEN CONTENT (`gradient.ts`). Every gradient used to be a fraction of
  *    this constant, so raising it would have stretched the whole game a hundredfold:
  *    4000 km of flawless asphalt, one pole era for 5600 km. Road quality is now
@@ -125,7 +120,7 @@ export class Road {
   /** The elevation field the road lies on. Public: the terrain reads the same one. */
   readonly landscape: Landscape;
 
-  private readonly curve: RoadCurvature;
+  private readonly headingField: RoadHeading;
   private readonly lastNode: number;
 
   /** Checkpoint and coarse tables. Injected at load, or built on first use. */
@@ -134,7 +129,7 @@ export class Road {
   private readonly blocks: Block[] = [];
   private useClock = 0;
   /** Scratch node for block replay; never allocated per node. */
-  private readonly replay: NodeState = { x: 0, z: 0, heading: 0 };
+  private readonly replay: NodeState = { x: 0, z: 0 };
   /**
    * Arclengths of the coarse candidates a hintless `project` will refine. Preallocated
    * because rescue can fire on a fixed step, and capped at 16 because that is already
@@ -151,7 +146,7 @@ export class Road {
   constructor(seed: number, spine?: RoadSpine) {
     this.seed = seed >>> 0;
     this.landscape = new Landscape(this.seed);
-    this.curve = new RoadCurvature(this.seed);
+    this.headingField = new RoadHeading(this.seed);
     this.lastNode = Math.floor(this.length / NODE_SPACING);
     if (spine && spine.length !== this.length) {
       throw new Error(`Road spine is for a ${spine.length} m road, not ${this.length} m`);
@@ -170,7 +165,7 @@ export class Road {
    * road leaves the house straight, then blends into noise-driven corners.
    */
   curvatureAt(s: number): number {
-    return this.curve.at(s);
+    return this.headingField.curvatureAt(s);
   }
 
   /**
@@ -215,17 +210,16 @@ export class Road {
     const node = this.replay;
     node.x = spine.checkpointX[index]!;
     node.z = spine.checkpointZ[index]!;
-    node.heading = spine.checkpointHeading[index]!;
 
     victim.xs[0] = node.x;
     victim.zs[0] = node.z;
-    victim.headings[0] = node.heading;
+    victim.headings[0] = this.headingField.at(first * NODE_SPACING);
     victim.ys[0] = this.landscape.heightAt(node.x, node.z);
     for (let k = 1; k <= CHECKPOINT_NODES; k++) {
-      stepNode(node, this.curve, first + k - 1);
+      stepNode(node, this.headingField, first + k - 1);
       victim.xs[k] = node.x;
       victim.zs[k] = node.z;
-      victim.headings[k] = node.heading;
+      victim.headings[k] = this.headingField.at((first + k) * NODE_SPACING);
       victim.ys[k] = this.landscape.heightAt(node.x, node.z);
     }
 
@@ -278,10 +272,9 @@ export class Road {
         m1 * Math.cos(h1) * NODE_SPACING,
       heading: h0 + (h1 - h0) * t,
       // The grade the driver actually rides: the slope of the interpolated y, which
-      // is linear across the segment. Differencing the nodes is therefore exact,
-      // where re-evaluating the landscape here would not match the geometry.
+      // is linear across the segment. Differencing the nodes is therefore exact.
       grade: (y1 - y0) / NODE_SPACING,
-      curvature: this.curve.at(clamped),
+      curvature: this.headingField.curvatureAt(clamped),
     };
   }
 
@@ -317,21 +310,14 @@ export class Road {
    * hintless call also paid the entire integration. The coarse table is a flat scan of
    * doubles that were computed once, so the same answer costs no integration at all.
    *
-   * AND IT KEEPS SEVERAL CANDIDATES, which the sweep did not. The road random-walks
-   * and passes close to its own path, so "the nearest coarse SAMPLE" and "the branch
-   * holding the nearest POINT" are not always on the same branch: a sample 100 m along
-   * a distant branch can beat every sample on the branch you are actually standing on,
-   * whose own samples are up to half a coarse step away from you. Descending from that
-   * single winner then converges to the wrong branch and reports a lateral offset of
-   * tens of metres for a car sitting in its lane — measured on seed 1337 at s = 68 293,
-   * where the old single-winner search reported 50.7 m instead of 12 m.
-   *
-   * The fix is a bound rather than a guess. The true nearest point lies within half a
-   * coarse step of SOME sample, so that sample's distance is at most the true distance
-   * plus half a step; every branch that could hold the answer therefore has a sample
-   * within one full step of the best sample's distance. Keeping all of those and
-   * refining each is exhaustive up to the cap, which only binds where many branches
-   * converge on one point, and there any of them is a defensible answer.
+   * It keeps several candidates rather than trusting the single nearest sample.
+   * With the bounded-heading spine distant branches cannot converge anymore, so this
+   * is now a cheap robustness net rather than routine arbitration. The bound remains
+   * exact: the true nearest point lies within half a coarse step of some sample, so
+   * that sample's distance is at most the true distance plus half a step. Every
+   * candidate branch therefore has a sample within one full step of the best sample's
+   * distance. Refining all of those protects the query if the spacing or routing
+   * guarantee is changed again without reintroducing the historical single-winner bug.
    */
   project(x: number, z: number, hintS?: number): RoadProjection {
     let bestS: number;

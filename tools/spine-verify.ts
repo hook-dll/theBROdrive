@@ -21,7 +21,7 @@
  * Nothing here is part of the game bundle.
  */
 
-import { NODE_SPACING, RoadCurvature, stepNode, type NodeState } from '../src/world/roadcurve';
+import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
 import { Road, ROAD_LENGTH } from '../src/world/road';
 import { buildSpine, CHECKPOINT_NODES, CHECKPOINT_SPACING, COARSE_SPACING } from '../src/world/roadspine';
 
@@ -42,19 +42,18 @@ const fail = (message: string): void => {
 // does not, `buildSpine`'s bookkeeping is off by a node and every position downstream
 // is shifted.
 {
-  const curvature = new RoadCurvature(seed);
-  const node: NodeState = { x: 0, z: 0, heading: 0 };
+  const heading = new RoadHeading(seed);
+  const node: NodeState = { x: 0, z: 0 };
   const coarseStride = COARSE_SPACING / NODE_SPACING;
   let checkpointsChecked = 0;
   let coarseChecked = 0;
 
   for (let i = 1; i <= lastNode; i++) {
-    stepNode(node, curvature, i - 1);
+    stepNode(node, heading, i - 1);
     if (i % CHECKPOINT_NODES === 0) {
       const k = i / CHECKPOINT_NODES;
       if (spine.checkpointX[k] !== node.x) fail(`checkpoint ${k} x`);
       if (spine.checkpointZ[k] !== node.z) fail(`checkpoint ${k} z`);
-      if (spine.checkpointHeading[k] !== node.heading) fail(`checkpoint ${k} heading`);
       checkpointsChecked++;
     }
     if (i % coarseStride === 0) {
@@ -85,17 +84,17 @@ const fail = (message: string): void => {
 const VERIFY_SPAN = Math.min(ROAD_LENGTH, 2_000_000);
 {
   const road = new Road(seed, spine);
-  const curvature = new RoadCurvature(seed);
+  const heading = new RoadHeading(seed);
   const spanNodes = Math.floor(VERIFY_SPAN / NODE_SPACING);
   const xs = new Float64Array(spanNodes + 1);
   const zs = new Float64Array(spanNodes + 1);
   const hs = new Float64Array(spanNodes + 1);
-  const node: NodeState = { x: 0, z: 0, heading: 0 };
+  const node: NodeState = { x: 0, z: 0 };
   for (let i = 1; i <= spanNodes; i++) {
-    stepNode(node, curvature, i - 1);
+    stepNode(node, heading, i - 1);
     xs[i] = node.x;
     zs[i] = node.z;
-    hs[i] = node.heading;
+    hs[i] = heading.at(i * NODE_SPACING);
   }
 
   const landscape = road.landscape;
@@ -157,24 +156,22 @@ const VERIFY_SPAN = Math.min(ROAD_LENGTH, 2_000_000);
 // the walk passes them, so the memory cost is a single node.
 {
   const road = new Road(seed, spine);
-  const curvature = new RoadCurvature(seed);
+  const heading = new RoadHeading(seed);
   const landscape = road.landscape;
 
   // Deep targets, ascending, each landing mid-segment so the Hermite is exercised.
   const targets: number[] = [];
   for (let k = 1; k <= 12; k++) targets.push((ROAD_LENGTH * k) / 13 + 1234.5);
 
-  const node: NodeState = { x: 0, z: 0, heading: 0 };
+  const node: NodeState = { x: 0, z: 0 };
   let prevX = 0;
   let prevZ = 0;
-  let prevH = 0;
   let nextTarget = 0;
   let checked = 0;
   for (let i = 1; i <= lastNode && nextTarget < targets.length; i++) {
     prevX = node.x;
     prevZ = node.z;
-    prevH = node.heading;
-    stepNode(node, curvature, i - 1);
+    stepNode(node, heading, i - 1);
 
     // Node i-1 .. i is the segment [ (i-1)*NODE_SPACING, i*NODE_SPACING ].
     while (nextTarget < targets.length && targets[nextTarget]! < i * NODE_SPACING) {
@@ -186,10 +183,12 @@ const VERIFY_SPAN = Math.min(ROAD_LENGTH, 2_000_000);
       const m0 = t3 - 2 * t2 + t;
       const b1 = -2 * t3 + 3 * t2;
       const m1 = t3 - t2;
+      const h0 = heading.at((i - 1) * NODE_SPACING);
+      const h1 = heading.at(i * NODE_SPACING);
       const wantX =
-        b0 * prevX + m0 * Math.sin(prevH) * NODE_SPACING + b1 * node.x + m1 * Math.sin(node.heading) * NODE_SPACING;
+        b0 * prevX + m0 * Math.sin(h0) * NODE_SPACING + b1 * node.x + m1 * Math.sin(h1) * NODE_SPACING;
       const wantZ =
-        b0 * prevZ + m0 * Math.cos(prevH) * NODE_SPACING + b1 * node.z + m1 * Math.cos(node.heading) * NODE_SPACING;
+        b0 * prevZ + m0 * Math.cos(h0) * NODE_SPACING + b1 * node.z + m1 * Math.cos(h1) * NODE_SPACING;
       const y0 = landscape.heightAt(prevX, prevZ);
       const y1 = landscape.heightAt(node.x, node.z);
       const wantY = y0 + (y1 - y0) * t;
