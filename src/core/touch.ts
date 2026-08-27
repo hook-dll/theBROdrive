@@ -9,7 +9,7 @@
 /** Ignore small thumb motion around a stick's centre. */
 const STICK_DEAD_ZONE = 0.12;
 /** Camera rotation at full right-stick deflection, in radians per second. */
-const LOOK_SPEED = 1.4;
+const LOOK_SPEED = 1.0;
 /** Wheel-notch equivalent emitted per second at full zoom-fader deflection. */
 const ZOOM_SPEED = 1.2;
 
@@ -167,7 +167,7 @@ export class TouchControls {
   consumeLook(dt: number): { yaw: number; pitch: number } {
     return {
       yaw: this.lookX * LOOK_SPEED * dt,
-      pitch: -this.lookY * LOOK_SPEED * dt,
+      pitch: this.lookY * LOOK_SPEED * dt,
     };
   }
 

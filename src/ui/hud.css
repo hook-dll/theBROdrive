@@ -1366,7 +1366,7 @@ body {
   --touch-stick-size: clamp(108px, 30vh, 138px);
   --touch-button-size: clamp(44px, 12vh, 54px);
   --touch-edge-gap: clamp(48px, 8vw, 92px);
-  --touch-top-gap: calc(34px + env(safe-area-inset-top));
+  --touch-top-gap: calc(52px + env(safe-area-inset-top));
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -1413,10 +1413,12 @@ body {
 }
 
 .touch-stick--move {
-  left: calc(var(--touch-edge-gap) + env(safe-area-inset-left));
+  top: calc(var(--touch-top-gap) + 12px);
+  left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
 }
 
 .touch-stick--look {
+  top: calc(var(--touch-top-gap) + 12px);
   right: calc(var(--touch-edge-gap) + env(safe-area-inset-right));
 }
 
@@ -1445,7 +1447,7 @@ body {
 
 .touch-zoom-fader {
   position: fixed;
-  top: calc(var(--touch-top-gap) + 14px);
+  top: calc(var(--touch-top-gap) + 12px);
   right: calc(10px + env(safe-area-inset-right));
   width: 28px;
   height: calc(var(--touch-stick-size) - 28px);
@@ -1523,14 +1525,14 @@ body {
    a three-button triangle; the right adds V as the bottom of a four-button diamond. */
 .touch-buttons {
   position: fixed;
-  top: calc(var(--touch-top-gap) + var(--touch-stick-size) + 12px);
+  top: calc(var(--touch-top-gap) + var(--touch-stick-size) + 24px);
   width: var(--touch-stick-size);
   height: calc(var(--touch-button-size) * 1.95);
   pointer-events: none;
 }
 
 .touch-buttons--left {
-  left: calc(var(--touch-edge-gap) + env(safe-area-inset-left));
+  left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
 }
 
 .touch-buttons--right {
