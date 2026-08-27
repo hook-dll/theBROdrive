@@ -71,24 +71,11 @@ const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
   blessing: 2,
 };
 /**
- * Multisampling on the scene target.
- *
- * This is the single most expensive thing in the frame on a weak iGPU: measured on
- * an Intel N100 / UHD Graphics at 1152x720, dropping the 4x resolve took the frame
- * from 22.9 ms to 17.2 ms — 25% of the whole frame for edge smoothing. 2x saved
- * almost nothing (21.8 ms), so the low tier turns it off outright rather than
- * paying most of the cost for half the benefit.
- *
- * `blessing` keeps 4x on top of supersampling. The two are not redundant: MSAA
- * smooths geometry edges, and downsampling a larger buffer is what fixes the ink
- * outlines and the stipple, which are per-PIXEL shader effects that multisampling
- * cannot see.
+ * Four samples was the only useful multisampling level in measurement: 2x retained
+ * almost all of the cost. Whether it is enabled is an independent display setting;
+ * graphics tiers now control resolution and shadows only.
  */
-const SCENE_SAMPLES: Record<GraphicsQuality, number> = {
-  acceptable: 0,
-  standard: 4,
-  blessing: 4,
-};
+const MSAA_SAMPLES = 4;
 /**
  * Hard sanity bound on the adaptive scale, as a fraction of the cap. Not a quality
  * decision — the real floor is MIN_ABSOLUTE_PIXEL_RATIO below. This only stops a
@@ -411,13 +398,17 @@ export class Renderer {
   private basePixelRatio: number;
   private quality: GraphicsQuality;
 
-  constructor(canvas: HTMLCanvasElement, quality: GraphicsQuality = 'standard') {
+  constructor(
+    canvas: HTMLCanvasElement,
+    quality: GraphicsQuality = 'standard',
+    msaa = true,
+  ) {
     this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      // NOT antialiased. Every scene pixel is drawn into `hazeTarget` (which does
-      // its own multisampling per tier); the default framebuffer only ever
-      // receives the fullscreen triangle, which has no interior edges to smooth.
+      // NOT antialiased. Every scene pixel is drawn into `hazeTarget`, whose MSAA
+      // sample count is controlled independently; the default framebuffer only
+      // receives a fullscreen triangle with no interior geometry edges.
       // A multisampled backbuffer here is an allocation and a resolve per frame
       // for an image that cannot differ by one pixel.
       antialias: false,
@@ -444,12 +435,12 @@ export class Renderer {
     this.fog = new THREE.FogExp2(0xd8c39a, 0.00035);
     this.scene.fog = this.fog;
 
-    // The scene first renders into this target (sRGB, so it holds the exact
-    // display-ready pixels the canvas would have received), then a fullscreen
-    // pass warps and copies it back. `samples` is where this frame's edge
-    // smoothing happens, since the canvas itself is no longer multisampled — and
-    // it is the tier's most expensive single knob (see SCENE_SAMPLES).
-    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { samples: SCENE_SAMPLES[quality] });
+    // The scene first renders into this target, then a fullscreen pass warps and
+    // copies it back. The independent MSAA setting decides whether geometry edges
+    // receive four samples here.
+    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
+      samples: msaa ? MSAA_SAMPLES : 0,
+    });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 
     this.hazeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -637,25 +628,28 @@ export class Renderer {
   }
 
   /**
-   * Switches rendering tier in place, from the pause menu, with no reload.
-   *
-   * Multisampling is baked into the render target's allocation, so the count is
-   * written and the target disposed: Three reallocates it on the next bind. The
-   * adaptive scale is reset to 1 because the new tier's cap is a different number
-   * of pixels, and a scale carried over from the old one would start the
-   * controller somewhere it never chose.
+   * Switches the resolution/shadow tier in place. MSAA is deliberately untouched:
+   * it is an independent display preference.
    */
   setQuality(quality: GraphicsQuality): void {
     if (quality === this.quality) return;
     this.quality = quality;
-    this.hazeTarget.samples = SCENE_SAMPLES[quality];
-    this.hazeTarget.dispose();
+    this.renderer.shadowMap.enabled = quality !== 'acceptable';
     this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
     this.pixelScale = 1;
     this.lastScaleChange = -Infinity;
     this.smoothedFrameMs = 1000 / 60;
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
+  }
+
+  /** Changes scene-target multisampling without changing resolution quality. */
+  setMsaa(enabled: boolean): void {
+    const samples = enabled ? MSAA_SAMPLES : 0;
+    if (this.hazeTarget.samples === samples) return;
+    this.hazeTarget.samples = samples;
+    // Multisampling is allocation state; Three recreates the target on next bind.
+    this.hazeTarget.dispose();
   }
 
   /**

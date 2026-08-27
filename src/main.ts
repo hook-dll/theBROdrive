@@ -206,7 +206,11 @@ async function boot(): Promise<void> {
   // The trailer's GLB is fitted to the trailer's fixed physics before the first
   // trailer can materialise (a POI or a loaded save), exactly like the cars.
   await preloadTrailerModel(TRAILER_MODEL_FIT);
-  const renderer = new Renderer(canvas, world.state.settings.graphicsQuality);
+  const renderer = new Renderer(
+    canvas,
+    world.state.settings.graphicsQuality,
+    world.state.settings.msaa,
+  );
   /**
    * Rendered-frame counter. The chunk streamer is driven from the fixed step,
    * which can run several times per frame, so it needs to know which calls belong
@@ -1191,10 +1195,10 @@ async function boot(): Promise<void> {
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       audio.applySettings(world.state.settings);
-      // The renderer can retier in place (multisampling and the resolution cap);
-      // the lamp-slot count cannot, since those lights are already in the scene
-      // and changing their number would recompile every lit material. It picks the
-      // new tier up on the next load, which the menu says out loud.
+      renderer.setMsaa(world.state.settings.msaa);
+      // Resolution, shadows and MSAA update in place. The lamp-slot count cannot:
+      // changing visible-light count would recompile every lit material, so graphics
+      // quality changes that budget only on the next load.
       renderer.setQuality(world.state.settings.graphicsQuality);
     },
     applyTimePreset: (preset) => {

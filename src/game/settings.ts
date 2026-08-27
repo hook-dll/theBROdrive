@@ -103,6 +103,8 @@ export interface Settings {
    * same calibrated exposure is applied immediately instead of lagging behind.
    */
   eyeAdaptation: boolean;
+  /** Four-sample geometry-edge antialiasing on the scene render target. */
+  msaa: boolean;
   /**
    * Steer the car with horizontal mouse movement. Off by default: the keyboard is
    * the control everyone arrives expecting, and a mouse that suddenly steers is a
@@ -149,6 +151,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // the pause menu is one key away and the near tier is the safe floor.
   viewDistance: 'near',
   eyeAdaptation: true,
+  msaa: true,
   // Off by default; M switches it on, and the pause menu remembers which.
   mouseSteering: false,
 };
@@ -220,6 +223,11 @@ export function sanitizeSettings(raw: unknown): Settings {
       obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
     // Existing settings predate this choice and used adaptation, so missing means on.
     eyeAdaptation: obj.eyeAdaptation !== false,
+    // Preserve the old tier behavior once, then this becomes an independent choice.
+    msaa:
+      typeof obj.msaa === 'boolean'
+        ? obj.msaa
+        : obj.graphicsQuality !== 'acceptable',
     // Anything but an explicit true is off, which is what an old save (no such
     // field) should get: nothing surprising happens the first time you drive it.
     mouseSteering: obj.mouseSteering === true,

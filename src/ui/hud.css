@@ -574,6 +574,7 @@ body {
 
 .menu-panel {
   position: relative;
+  box-sizing: border-box;
   background-color: var(--menu-stock);
   /* Paper tooth, not a dot pattern: bone specks at 4% on a 5 px grid, plus a slow
      diagonal shading so the sheet is not a flat swatch. */
@@ -859,9 +860,15 @@ body {
   max-width: 680px;
 }
 
-/* Settings is two columns wide and owns the screen while it is up. */
+/* Settings fills the available viewport; its active pane scrolls independently. */
 .menu-pause .menu-panel.menu-panel-settings {
+  width: min(1040px, calc(100vw - 24px));
+  height: min(760px, calc(100dvh - 24px));
   max-width: 1040px;
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+  padding: clamp(18px, 4vh, 34px) clamp(18px, 4vw, 40px) 28px;
+  gap: clamp(12px, 2.5vh, 22px);
 }
 
 /* ---------------------------------------------------------------------------
@@ -891,10 +898,12 @@ body {
 
 .menu-settings {
   display: grid;
-  grid-template-columns: 236px 1fr;
-  gap: 36px;
-  align-items: start;
-  min-height: 520px;
+  grid-template-columns: minmax(160px, 236px) minmax(0, 1fr);
+  gap: clamp(16px, 3vw, 36px);
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Table of contents, numbered by CSS so the markup carries no numbering. */
@@ -904,6 +913,8 @@ body {
   flex-direction: column;
   border-right: 1px solid var(--menu-ink);
   padding-right: 22px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .menu-rail-btn {
@@ -959,8 +970,11 @@ body {
 .menu-pane {
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: clamp(14px, 3vh, 26px);
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 /* Label, and whatever belongs on the same line as it: a value, a Reset. */
@@ -1063,6 +1077,35 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .menu-pause .menu-panel.menu-panel-settings {
+    width: calc(100vw - 12px);
+    height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+    padding: 14px 14px 24px;
+  }
+
+  .menu-settings {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .menu-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--menu-ink);
+    padding-right: 0;
+  }
+
+  .menu-rail-btn {
+    flex: 0 0 auto;
+    padding: 10px;
+  }
 }
 
 /* Marginal note: one line, fixed height, hanging off a rule. Prose, so this is

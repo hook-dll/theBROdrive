@@ -397,7 +397,7 @@ void main() {
   // Disc edges are one-pixel derivative transitions. The old fixed dot-product
   // width was wider than the Moon itself and mixed its dark limb into nearby sky.
   float sunEdge = cos(uSunAngularRadius);
-  float sunAa = max(fwidth(sd) * 1.25, 0.0000001);
+  float sunAa = max(fwidth(sd) * 0.5, 0.0000001);
   float disc = smoothstep(sunEdge - sunAa, sunEdge + sunAa, sd);
   float glow = pow(max(sd, 0.0), 6.0) * 0.45 + pow(max(sd, 0.0), 48.0) * 1.5;
   col += uSunColor * disc * 2.0;
@@ -407,7 +407,7 @@ void main() {
   // comes from uSunDir, so the terminator automatically points toward the Sun.
   float md = dot(dir, uMoonDir);
   float moonEdge = cos(uMoonAngularRadius);
-  float moonAa = max(fwidth(md) * 1.25, 0.0000001);
+  float moonAa = max(fwidth(md) * 0.5, 0.0000001);
   float mdisc = smoothstep(moonEdge - moonAa, moonEdge + moonAa, md);
   vec3 moonOffset = (dir - uMoonDir * md) / max(sin(uMoonAngularRadius), 0.0001);
   float moonR2 = dot(moonOffset, moonOffset);

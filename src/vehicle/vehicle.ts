@@ -960,33 +960,30 @@ interface HeadlightBeam {
 }
 
 /**
- * Dipped beam: a pool the driver reads the road surface from, out to five or six car
- * lengths. Aimed to meet the ground around 30 m (targetDrop halved from 0.9), which is
- * about where a real dipped beam is set, and still aimed DOWN so it lights tarmac
- * rather than the horizon.
+ * Dipped beam: broad foreground light aimed to meet the ground at roughly half
+ * the previous range. Both its aim distance and attenuation cutoff are halved, so
+ * the cone does not merely point past a shorter cutoff.
  */
 const HEADLIGHT_LOW: HeadlightBeam = {
-  intensity: 10,
-  distance: 288,
+  intensity: 12.5,
+  distance: 144,
   angle: 0.853,
   penumbra: 0.68,
-  targetDistance: 26,
+  targetDistance: 13,
   targetDrop: 0.5,
   decay: 0.25,
 };
 
 /**
- * Main beam: reach rather than spread, ten to fifteen car lengths of usable road. The
- * aim is unchanged — it already put the axis on the ground near 75 m — because the
- * problem out there was never where the beam pointed, only that nothing survived the
- * falloff to get there.
+ * Main beam: narrower and longer than dipped beam, with both aim and cutoff halved
+ * from the previous long-distance tune.
  */
 const HEADLIGHT_HIGH: HeadlightBeam = {
-  intensity: 16,
-  distance: 520,
+  intensity: 20,
+  distance: 260,
   angle: 0.616,
   penumbra: 0.45,
-  targetDistance: 56,
+  targetDistance: 28,
   targetDrop: 0.45,
   decay: 0.2,
 };
