@@ -1196,8 +1196,8 @@ async function boot(): Promise<void> {
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards
     // are permanent and do not transfer between vehicles, which is worth nothing if
     // a fully fuelled replacement is two clicks away. `import.meta.env.DEV` is a
-    // compile-time constant, so a production build drops the closure, the pause
-    // screen that calls it, and the touch CAR button together.
+    // compile-time constant, so a production build drops the closure and the pause
+    // screen that calls it together.
     spawnVehicle: import.meta.env.DEV ? devSpawnVehicle : undefined,
     // Same fold as the car spawn; the trailer button and its closure both vanish
     // from a production build.
@@ -1208,9 +1208,9 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * Opens the pause overlay. Called by the Escape key and by the touch MENU button —
-   * deliberately outside InputReader, because it must work without pointer lock and
-   * while the fixed-step loop is stopped.
+   * Opens the pause overlay. Called by the Escape key and by the touch MENU button.
+   * It stays outside InputReader so it works without pointer lock and while the
+   * fixed-step loop is stopped.
    */
   const openPause = (): void => {
     if (paused) return;
@@ -1239,24 +1239,9 @@ async function boot(): Promise<void> {
     if (e.code === 'Escape') openPause();
   });
 
-  // Touch: the overlay builds itself on the first touch, so this costs a listener
-  // and nothing else on a desktop. The CAR button is the dev spawn tool's phone
-  // equivalent and disappears with it in a production build: it spawns another of
-  // whatever the player is in, since a phone has no room for the pause menu's
-  // picker and "another one of these" is the useful default — but only if that
-  // model is on the player's list. Sitting in a dug-out PSX wreck must not turn the
-  // button into a wreck dispenser, so anything debris-only falls back to the
-  // default car.
-  const touch = new TouchControls(uiRoot, canvas, {
-    spawnVehicle: import.meta.env.DEV
-      ? () => {
-          const active = activeCar()?.vehicle.modelDef;
-          const modelId = active?.spawnable ? active.id : DEFAULT_CAR_MODEL_ID;
-          devSpawnVehicle({ modelId });
-        }
-      : undefined,
-    pause: openPause,
-  });
+  // Touch: the overlay builds itself on the first canvas touch, so desktop pays
+  // only for the dormant listeners.
+  const touch = new TouchControls(uiRoot, canvas, { pause: openPause });
   input.attachTouch(touch);
 }
 

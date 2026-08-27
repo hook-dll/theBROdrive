@@ -180,46 +180,15 @@ export class Hud {
       this.warningsEl,
     );
 
-    // The radio sits under the driving cluster: it only exists in the car, and it
-    // is the one readout that is about the world outside rather than the machine.
+    // The radio is part of the driving dashboard and scales/moves with it.
     this.radioEl = el('div', 'hud-radio is-hidden');
+    this.drivingCluster.appendChild(this.radioEl);
 
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
     const inventoryEl = el('div', 'hud-inventory');
     inventoryEl.append(this.invSlotsEl);
 
-    const controlsToggle = document.createElement('button');
-    controlsToggle.type = 'button';
-    controlsToggle.className = 'hud-controls-toggle';
-    controlsToggle.textContent = 'SHOW CONTROLS';
-    controlsToggle.setAttribute('aria-controls', 'hud-controls-panel');
-    controlsToggle.setAttribute('aria-expanded', 'false');
-
-    const controlsPanel = el('div', 'hud-controls-panel is-hidden');
-    controlsPanel.id = 'hud-controls-panel';
-    for (const text of [
-      'WASD / ARROWS — MOVE · STEER',
-      'SHIFT — SPRINT · SPACE — JUMP / HANDBRAKE',
-      'X / Z — SHIFT UP / DOWN',
-      'E — ENTER / EXIT CAR',
-      'F — PICK UP / MOUNT · Q — DROP',
-      'MOUSE1 — USE · MOUSE2 — AIM',
-      '[ / ] — CYCLE ITEM · 1-8 — SLOT',
-      'C — CAMERA · V — RECENTRE',
-      'L — HEADLIGHTS · O — TYRES',
-      'R — RADIO · T — STATION',
-    ]) {
-      const line = el('div', 'hud-controls-line');
-      line.textContent = text;
-      controlsPanel.append(line);
-    }
-    controlsToggle.addEventListener('click', () => {
-      const visible = controlsPanel.classList.contains('is-hidden');
-      controlsPanel.classList.toggle('is-hidden', !visible);
-      controlsToggle.textContent = visible ? 'HIDE CONTROLS' : 'SHOW CONTROLS';
-      controlsToggle.setAttribute('aria-expanded', String(visible));
-    });
 
     this.toastEl = el('div', 'hud-toasts');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
@@ -229,9 +198,6 @@ export class Hud {
       this.promptEl,
       this.drivingCluster,
       inventoryEl,
-      controlsToggle,
-      controlsPanel,
-      this.radioEl,
       this.toastEl,
       this.gumBubbleEl,
     ];
