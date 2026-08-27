@@ -275,7 +275,9 @@ export class RoadMeshProvider implements ChunkProvider {
     geometry.computeVertexNormals();
 
     const group = new THREE.Group();
-    group.add(new THREE.Mesh(geometry, roadMaterial));
+    const roadMesh = new THREE.Mesh(geometry, roadMaterial);
+    roadMesh.receiveShadow = true;
+    group.add(roadMesh);
 
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];

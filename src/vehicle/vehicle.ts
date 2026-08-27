@@ -939,33 +939,14 @@ const HEADLIGHT_X_FRACTION = 0.62;
 const HEADLIGHT_Y_FRACTION = 0.28;
 
 /**
- * Beam geometry per mode, and the arithmetic behind the numbers.
+ * Beam geometry per mode.
  *
- * Both modes were doubled in GROUND FOOTPRINT — twice as wide and twice as long as
- * the pool they used to throw — which is not the same as doubling the two obvious
- * fields, so each half of that is derived rather than typed:
- *
- * WIDTH. The lit width at range r is 2·r·tan(angle), so a footprint twice as wide
- * needs tan(angle') = 2·tan(angle), NOT angle' = 2·angle. Doubling the angle itself
- * overshoots badly at these half-angles and, past 45°, runs out of cone before it
- * runs out of width:
- *   low   tan 0.52 = 0.573 -> 1.145 -> 0.853 rad (49°, was 30°)
- *   high  tan 0.34 = 0.354 -> 0.708 -> 0.616 rad (35°, was 19°)
- * Spot intensity is candela, not lumens spread over the cone, so widening does not
- * dim what was already lit: the extra width is added, not traded for.
- *
- * LENGTH. Two things bound it and both have to move or nothing changes.
- *  - Where the beam AXIS meets the ground, which is targetDistance · (h / targetDrop)
- *    for a lamp h above the road. Only the drop/distance RATIO is a direction, so
- *    halving targetDrop doubles the reach and leaves the aim vector's forward
- *    component alone.
- *  - `distance`, Three's cutoff, whose window term (1 - (d/cutoff)^4)² pulls the far
- *    end of the beam to nothing well before the cutoff itself. Doubling reach without
- *    doubling cutoff just moves the axis into the part of the falloff that has
- *    already been extinguished.
- * Intensity is deliberately unchanged: the inverse-power term still applies, so the
- * new far end is dimmer than the old one was — which is what a longer beam looks
- * like. Raising intensity to compensate would blow out the near field instead.
+ * A single inverse-power cone must cover both the bumper and the useful road
+ * distance. Even a 0.7 decay still made the foreground about five times brighter
+ * than terrain at 100 m. The deliberately shallow exponents below make the beam
+ * read like a shaped automotive projector rather than a bare inverse-square bulb:
+ * compared with the original tune, 5 m receives roughly two-thirds of the
+ * irradiance while 100–150 m receives several times as much. Cone, aim and cutoff remain unchanged.
  */
 interface HeadlightBeam {
   readonly intensity: number;
@@ -974,31 +955,7 @@ interface HeadlightBeam {
   readonly penumbra: number;
   readonly targetDistance: number;
   readonly targetDrop: number;
-  /**
-   * Falloff exponent. Three's default is 2 — physical inverse-square — and 2 is why
-   * the beams read as a puddle at the bumper however wide or long the cone is set.
-   *
-   * The cone was already 98 degrees across on dipped beam, so "it does not spread"
-   * was never a width problem: it was that everything past ~10 m had been divided
-   * into nothing. Inverse-square is brutal over the distances a headlight has to
-   * cover — 30 m is 36 times dimmer than 5 m — so the far half of a correctly aimed
-   * beam is arithmetically present and visually absent.
-   *
-   * Lowering the exponent is the honest lever here rather than raising intensity,
-   * which the previous pass already noted "would blow out the near field instead".
-   * At 1.3, 30 m is only 11 times dimmer than 5 m rather than 36, which is what
-   * trebles the useful range.
-   *
-   * Intensity still has to come down, but not by as much as the first cut assumed.
-   * Brightness at range r is I / r^d, so dropping d from 2 to 1.3 brightens range r
-   * by r^0.7: ~1.6x at the 2 m bumper line, ~2.8x at 4.5 m, growing outward (the
-   * main beam's 1.25 is the same shape). The retune then divided I by 2.75x
-   * (110 to 40) and 2.8x (210 to 75) — roughly double the ~1.6x the near field had
-   * actually gained — so the beam came out dimmer, not the "a little brighter" the
-   * change intended. The values below restore half of that over-cut (×2), putting
-   * the near field a little ABOVE the old d=2 beam while the low decay keeps the
-   * reach.
-   */
+  /** Exponent in Three's distance attenuation `intensity / distance^decay`. */
   readonly decay: number;
 }
 
@@ -1009,13 +966,13 @@ interface HeadlightBeam {
  * rather than the horizon.
  */
 const HEADLIGHT_LOW: HeadlightBeam = {
-  intensity: 80,
+  intensity: 10,
   distance: 288,
   angle: 0.853,
   penumbra: 0.68,
   targetDistance: 26,
   targetDrop: 0.5,
-  decay: 1.3,
+  decay: 0.25,
 };
 
 /**
@@ -1025,13 +982,13 @@ const HEADLIGHT_LOW: HeadlightBeam = {
  * falloff to get there.
  */
 const HEADLIGHT_HIGH: HeadlightBeam = {
-  intensity: 150,
+  intensity: 16,
   distance: 520,
   angle: 0.616,
   penumbra: 0.45,
   targetDistance: 56,
   targetDrop: 0.45,
-  decay: 1.25,
+  decay: 0.2,
 };
 
 type HeadlightMode = 'off' | 'low' | 'high';
@@ -1093,6 +1050,8 @@ export class Vehicle implements Rebasable {
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
   private headlights: THREE.SpotLight[] = [];
   private headlightMode: HeadlightMode = 'off';
+  /** Perceptual suppression under daylight; one at night, near zero at full day. */
+  private headlightEnvironmentFactor = 1;
   /** One selected compound for every wheel; standard preserves existing handling. */
   private tyreCompoundIndex = 1;
 
@@ -1429,6 +1388,13 @@ export class Vehicle implements Rebasable {
   cycleHeadlights(): void {
     this.headlightMode =
       this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
+    this.applyHeadlightMode();
+  }
+
+  setHeadlightEnvironmentFactor(factor: number): void {
+    const next = clamp(factor, 0, 1);
+    if (next === this.headlightEnvironmentFactor) return;
+    this.headlightEnvironmentFactor = next;
     this.applyHeadlightMode();
   }
 
@@ -2944,7 +2910,7 @@ export class Vehicle implements Rebasable {
       // Off keeps the beam geometry of the low mode and only kills the intensity, so
       // Three's spotlight shader permutation never changes when the driver switches.
       const shape = beam ?? HEADLIGHT_LOW;
-      light.intensity = beam ? beam.intensity : 0;
+      light.intensity = beam ? beam.intensity * this.headlightEnvironmentFactor : 0;
       light.distance = shape.distance;
       light.angle = shape.angle;
       light.penumbra = shape.penumbra;

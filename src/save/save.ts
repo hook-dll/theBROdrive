@@ -1,4 +1,5 @@
 import { hash } from '../core/rng';
+import { parseCalendarEpoch } from '../game/calendar';
 import { newWorldState } from '../game/state';
 import type {
   CarState,
@@ -287,6 +288,15 @@ export function migrateState(raw: unknown): WorldState {
   if (typeof seedRaw !== 'number' || !Number.isFinite(seedRaw)) {
     throw new Error('Save data is malformed: seed is missing or not a finite number');
   }
+  const calendarEpoch = obj.calendarEpoch;
+  if (typeof calendarEpoch !== 'string') {
+    throw new Error('Save data is incompatible: calendarEpoch is missing');
+  }
+  try {
+    parseCalendarEpoch(calendarEpoch);
+  } catch {
+    throw new Error('Save data is malformed: calendarEpoch is not a real ISO date');
+  }
   const playerRaw = asRecord(obj.player, 'player');
   const carsRaw = recordField(obj.cars, 'cars');
   const loosePartsRaw = recordField(obj.looseParts, 'looseParts');
@@ -345,6 +355,7 @@ export function migrateState(raw: unknown): WorldState {
 
   return {
     seed,
+    calendarEpoch,
     timeOfDay: numOr(obj.timeOfDay, defaults.timeOfDay),
     playedSeconds: numOr(obj.playedSeconds, defaults.playedSeconds),
     // Absent in a save written before the sky had per-day twilight moods; day zero

@@ -3,6 +3,7 @@ import type { Item } from '../items/items';
 import type { PartInstance } from '../parts/registry';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { DEFAULT_SETTINGS } from './settings';
+import { localSolarDateAt } from './calendar';
 import type { Settings } from './settings';
 
 /**
@@ -135,6 +136,8 @@ export interface TrailerState {
 
 export interface WorldState {
   readonly seed: number;
+  /** Real Laayoune local-solar date corresponding to dayIndex zero. */
+  readonly calendarEpoch: string;
   /** Seconds since midnight of the in-game clock. */
   timeOfDay: number;
   /**
@@ -241,6 +244,7 @@ const RUNTIME_ID_PREFIX = 'rt:';
 export function newWorldState(seed: number): WorldState {
   return {
     seed: seed >>> 0,
+    calendarEpoch: localSolarDateAt(),
     // Start mid-morning: the garage should be lit on a new game.
     timeOfDay: DAY_LENGTH * 0.36,
     playedSeconds: 0,
