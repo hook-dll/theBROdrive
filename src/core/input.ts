@@ -253,8 +253,8 @@ export class InputReader {
 
   /**
    * Touch source, when one exists. Merged in `sample` rather than read by gameplay:
-   * a phone's pedals and steering slider arrive through the same `InputFrame` fields
-   * as keyboard controls.
+   * a phone's analogue movement and look sticks arrive through the same
+   * `InputFrame` fields as keyboard and mouse controls.
    */
   private touch: TouchControls | null = null;
 
@@ -409,8 +409,8 @@ export class InputReader {
    */
   sample(dt: number): InputFrame {
     const f = this.frame;
-    // One source of truth per axis: a touch pedal counts exactly as much as the key
-    // it stands in for, so the rest of this function does not care which was used.
+    // One source of truth per axis: analogue touch-stick values and digital inputs
+    // meet here, so gameplay receives the same frame regardless of device.
     //
     // In mouse-steering mode the mouse is the whole car: left button is the throttle,
     // right is the brake, and the middle button (held) hands the mouse back to the
@@ -420,9 +420,19 @@ export class InputReader {
     const mouseDrive = this.mouseSteerEnabled;
     const mouseThrottle = mouseDrive && this.held.has('Mouse0');
     const mouseBrake = mouseDrive && this.held.has('Mouse2');
-    const wantThrottle = this.anyHeld(this.keys.throttle) || touch?.forward || mouseThrottle ? 1 : 0;
-    const reverseHeld = this.anyHeld(this.keys.brake) || touch?.backward === true || mouseBrake;
-    const wantBrake = reverseHeld ? 1 : 0;
+    const touchForward = touch?.forward ?? 0;
+    const touchBackward = touch?.backward ?? 0;
+    const wantThrottle = Math.max(
+      this.anyHeld(this.keys.throttle) ? 1 : 0,
+      touchForward,
+      mouseThrottle ? 1 : 0,
+    );
+    const wantBrake = Math.max(
+      this.anyHeld(this.keys.brake) ? 1 : 0,
+      touchBackward,
+      mouseBrake ? 1 : 0,
+    );
+    const reverseHeld = wantBrake > 0;
     f.throttle = snapAxis(
       f.throttle +
         (wantThrottle - f.throttle) * Math.min(1, dt / (wantThrottle > 0 ? AXIS_RISE : AXIS_FALL)),
@@ -458,8 +468,8 @@ export class InputReader {
       const shaped = Math.sign(w) * Math.abs(w) ** MOUSE_STEER_EXPO;
       f.steer = snapAxis(shaped, 0);
     } else {
-      // The touch steering slider is already analogue, so it supplies the same
-      // target the normal steering smoothing follows.
+      // The touch movement stick is already analogue, so it supplies the same target
+      // the normal steering smoothing follows.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steer +=
         (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
@@ -475,20 +485,21 @@ export class InputReader {
 
     const taps = this.touch?.consumeTaps();
     if (this.anyPressed(this.keys.handbrake)) this.keyboardHandbrake = !this.keyboardHandbrake;
-    f.handbrake = this.keyboardHandbrake || touch?.handbrake === true;
+    f.handbrake = this.keyboardHandbrake;
     f.shift =
       (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
       (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
-    f.toggleLights = this.anyPressed(this.keys.lights);
+    f.toggleLights = this.anyPressed(this.keys.lights) || taps?.lights === true;
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.toggleMouseSteer = this.anyPressed(this.keys.mouseSteer);
-    f.recenterCamera = this.anyPressed(this.keys.recenterCamera);
+    f.recenterCamera =
+      this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
     f.radioToggle = this.anyPressed(this.keys.radio);
-    f.radioNext = this.anyPressed(this.keys.radioStation);
+    f.radioNext = this.anyPressed(this.keys.radioStation) || taps?.radioNext === true;
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
-    f.dropItem = this.anyPressed(this.keys.drop);
+    f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
     // Both buttons are pedals while mouse-steering, so they must not also fire or
     // aim the held item. `mouseSteerEnabled` is only ever set while driving, so on
     // foot this is exactly the old behaviour.
@@ -507,22 +518,24 @@ export class InputReader {
         break;
       }
     }
-    // On foot the same two zones walk forward and back; strafing stays a keyboard
-    // move, and the view (which is what "forward" is relative to) comes from the
-    // look drag.
-    f.moveX = (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
-    f.moveZ =
-      (this.anyHeld(this.keys.throttle) || touch?.forward ? 1 : 0) -
-      (this.anyHeld(this.keys.brake) || touch?.backward ? 1 : 0);
+    // On foot the left stick supplies both camera-relative movement axes. Digital
+    // keys win only on the axis they currently hold.
+    const keyMoveX =
+      (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
+    const keyMoveZ =
+      (this.anyHeld(this.keys.throttle) ? 1 : 0) -
+      (this.anyHeld(this.keys.brake) ? 1 : 0);
+    f.moveX = keyMoveX !== 0 ? keyMoveX : touch?.steer ?? 0;
+    f.moveZ = keyMoveZ !== 0 ? keyMoveZ : touchForward - touchBackward;
     f.jump = this.anyPressed(this.keys.jump);
     f.sprint = this.anyHeld(this.keys.sprint);
 
-    const drag = this.touch?.consumeLook();
+    const drag = this.touch?.consumeLook(dt);
     // While the mouse is steering it is not looking: feeding both would spin the
     // camera every time the driver corrected the car. Mouse2 gives the view back.
     f.lookYaw = steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0);
     f.lookPitch = steerWithMouse ? drag?.pitch ?? 0 : this.pitchDelta + (drag?.pitch ?? 0);
-    f.zoomDelta = this.wheelDelta;
+    f.zoomDelta = this.wheelDelta + (this.touch?.consumeZoom(dt) ?? 0);
     this.yawDelta = 0;
     this.pitchDelta = 0;
     this.rawDX = 0;

@@ -2,9 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- `user-scalable=no` and `viewport-fit=cover`: a driving game cannot have the
-         page pinch-zoom under the player's thumbs, and the canvas should reach into
-         the notch area rather than sit in a letterbox. -->
+    <!-- Native 100% scale keeps the game and controls predictable across phones.
+         Zoom stays locked because a driving gesture must not resize the page. -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
@@ -35,8 +34,8 @@
       <div class="rotate-glyph"></div>
       <div class="rotate-text">turn your device</div>
       <div class="rotate-sub">
-        the BRO drive is played in landscape · tilt to steer, right half to go, left half to
-        back off
+        the BRO drive is played in landscape · left stick to move or drive · right stick to
+        look
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
