@@ -251,10 +251,12 @@ export class CameraRig {
     this.yawValue = yaw;
   }
 
-  /** interior -> chase -> orbit -> interior. Never snaps; the spring eases it. */
+  /**
+   * C toggles the two authored driving views. Orbit remains available by zooming
+   * outward from chase; pressing C from either external mode returns to the hood.
+   */
   cycleDriving(): void {
-    this._mode =
-      this._mode === 'interior' ? 'chase' : this._mode === 'chase' ? 'orbit' : 'interior';
+    this._mode = this._mode === 'interior' ? 'chase' : 'interior';
   }
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {

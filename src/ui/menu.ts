@@ -401,6 +401,7 @@ export class MainMenu {
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
         eyeAdaptation: base.eyeAdaptation,
+        msaa: base.msaa,
         mouseSteering: base.mouseSteering,
       };
       const apply = (): void => {
@@ -414,6 +415,7 @@ export class MainMenu {
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
           eyeAdaptation: settings.eyeAdaptation,
+          msaa: settings.msaa,
           mouseSteering: settings.mouseSteering,
         });
       };
@@ -838,7 +840,7 @@ export class MainMenu {
               {
                 label: 'Acceptable',
                 icon: 'gfx1',
-                hint: 'Lowest resolution, no edge smoothing. For weak integrated GPUs. Applies on resume.',
+                hint: 'Lowest resolution cap. For weak integrated GPUs. Applies on resume.',
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
@@ -848,7 +850,7 @@ export class MainMenu {
               {
                 label: 'Standard',
                 icon: 'gfx2',
-                hint: 'Native resolution with edge smoothing. The authored look. Applies on resume.',
+                hint: 'Native-resolution target and the authored detail level. Applies on resume.',
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
@@ -898,6 +900,28 @@ export class MainMenu {
                   settings.viewDistance = 'vast';
                   apply();
                   hooks.applyViewDistance('vast');
+                },
+              },
+            ]),
+            segmented('MSAA', [
+              {
+                label: 'On',
+                icon: 'gfx3',
+                hint: 'Four-sample smoothing for geometry edges. Expensive on integrated GPUs.',
+                active: () => settings.msaa,
+                pick: () => {
+                  settings.msaa = true;
+                  apply();
+                },
+              },
+              {
+                label: 'Off',
+                icon: 'gfx1',
+                hint: 'No multisampling. Resolution scaling and post-process outlines still apply.',
+                active: () => !settings.msaa,
+                pick: () => {
+                  settings.msaa = false;
+                  apply();
                 },
               },
             ]),
