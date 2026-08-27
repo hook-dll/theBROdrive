@@ -400,6 +400,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
+        eyeAdaptation: base.eyeAdaptation,
         mouseSteering: base.mouseSteering,
       };
       const apply = (): void => {
@@ -412,6 +413,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
+          eyeAdaptation: settings.eyeAdaptation,
           mouseSteering: settings.mouseSteering,
         });
       };
@@ -896,6 +898,28 @@ export class MainMenu {
                   settings.viewDistance = 'vast';
                   apply();
                   hooks.applyViewDistance('vast');
+                },
+              },
+            ]),
+            segmented('Eye Adaptation', [
+              {
+                label: 'On',
+                icon: 'display',
+                hint: 'Eyes ease between daylight and darkness over time.',
+                active: () => settings.eyeAdaptation,
+                pick: () => {
+                  settings.eyeAdaptation = true;
+                  apply();
+                },
+              },
+              {
+                label: 'Off',
+                icon: 'midnight',
+                hint: 'Apply the calibrated sky exposure immediately, without adaptation lag.',
+                active: () => !settings.eyeAdaptation,
+                pick: () => {
+                  settings.eyeAdaptation = false;
+                  apply();
                 },
               },
             ]),

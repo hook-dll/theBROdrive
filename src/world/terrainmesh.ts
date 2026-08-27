@@ -859,9 +859,13 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
     geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
+    mesh.receiveShadow = true;
+    const group = new THREE.Group();
+    group.add(mesh);
 
     return {
-      group: new THREE.Group().add(new THREE.Mesh(geometry, TERRAIN_MATERIAL)),
+      group,
       geometry,
       positions,
       lateralOf,

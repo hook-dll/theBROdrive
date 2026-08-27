@@ -425,7 +425,7 @@ export class Renderer {
     });
     this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
     this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = quality !== 'acceptable';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
     // noise at this shadow resolution; plain PCF is visually near-identical and
     // materially cheaper on a low-end iGPU.

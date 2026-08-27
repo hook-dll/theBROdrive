@@ -43,4 +43,8 @@ pnpm-debug.log*
 /PSX_Style_Cars*.zip
 /DeJunes/
 /new_glb_carpacks_to_try/
+
+# Reproducible astronomy catalogue inputs; the compact generated binary is vendored.
+/tycho2-mag8-source.tsv
+/tycho2-mag8-supplement.tsv
 /Low Poly Soviet Car Pack/

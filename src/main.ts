@@ -5,6 +5,7 @@ import { PhysicsWorld } from './core/physics';
 import { SURFACES } from './core/surfaces';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
+import { parseCalendarEpoch } from './game/calendar';
 import {
   TIME_OF_DAY_PRESETS,
   VIEW_DISTANCE_FOG_SCALE,
@@ -29,6 +30,7 @@ import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
+import { loadStarField } from './render/starcatalog';
 import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
 import { WheelSpray } from './render/wheelspray';
@@ -221,7 +223,8 @@ async function boot(): Promise<void> {
   // caller ever has to ask whether sound is available yet.
   const audio = new GameAudio();
   audio.applySettings(world.state.settings);
-  const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer);
+  const starField = await loadStarField(new Date(parseCalendarEpoch(world.state.calendarEpoch)));
+  const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
   // at any moment carries what the player is holding. Registered before anything can
@@ -909,7 +912,21 @@ async function boot(): Promise<void> {
     camera.update(frameDt, cameraInput, target, driving === null);
 
     const cam = renderer.camera.position;
-    sky.update(s.timeOfDay, s.dayIndex, activeS, cam.x, cam.y, cam.z);
+    sky.update(
+      s.calendarEpoch,
+      s.timeOfDay,
+      s.dayIndex,
+      activeS,
+      cam.x,
+      cam.y,
+      cam.z,
+      frameDt,
+      s.settings.eyeAdaptation,
+    );
+    const headlightVisibility = sky.artificialLightFactor;
+    for (const vehicle of vehicles.values()) {
+      vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
+    }
 
     // Off-road haze. `sky.update` sets the fog density for the time of day; this
     // multiplies it by how far the view has strayed from the road, so the desert

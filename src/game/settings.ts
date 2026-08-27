@@ -99,6 +99,11 @@ export interface Settings {
    */
   viewDistance: ViewDistance;
   /**
+   * Ease between bright- and dark-adapted celestial exposure. When disabled the
+   * same calibrated exposure is applied immediately instead of lagging behind.
+   */
+  eyeAdaptation: boolean;
+  /**
    * Steer the car with horizontal mouse movement. Off by default: the keyboard is
    * the control everyone arrives expecting, and a mouse that suddenly steers is a
    * car in a ditch. Holding the right button hands the mouse back to the camera
@@ -143,28 +148,15 @@ export const DEFAULT_SETTINGS: Settings = {
   // The authored horizon. Like `graphicsQuality`, nothing auto-detects the GPU;
   // the pause menu is one key away and the near tier is the safe floor.
   viewDistance: 'near',
+  eyeAdaptation: true,
   // Off by default; M switches it on, and the pause menu remembers which.
   mouseSteering: false,
 };
 
 /**
- * Fraction of the in-game day each preset maps to (0..1 of DAY_LENGTH).
- *
- * Chosen against the sun geometry in src/render/sky.ts:
- *   phase = (dayFrac - 0.25) * 2π
- *   sunElevation = asin(sin(phase) * cos(SOUTH_TILT))   // SOUTH_TILT = 0.45 rad
- *   isNight = sunElevation < NIGHT_ELEVATION (-0.08 rad)
- * so the sun crosses the horizon at dayFrac 0.25 (rise) and 0.75 (set), peaks
- * at 0.5 and bottoms out at 0.0.
- *   - noon:     0.50 -> elevation +64.2°, the apex; south of the zenith.
- *   - midnight: 0.00 -> elevation -64.2°, deep night: isNight is true and the
- *     star fade is fully in.
- *   - morning:  0.34 -> elevation +28.8°: full daylight (the day factor
- *     saturates at 0.3 rad) but the sun still low in the east with long
- *     shadows, and clearly earlier than the 0.36 (~35°) mid-morning start of a
- *     new game so the preset reads as a different time of day.
- *   - evening:  0.72 -> elevation +9.7° and falling: the sunset glow factor is
- *     ~0.66, so the horizon is warmly lit while isNight is still false.
+ * Fractions of the local mean-solar game clock. Astronomy is date-dependent, so
+ * these are camera-friendly clock presets rather than fixed celestial elevations:
+ * seasons and lunar phase remain untouched.
  */
 export const TIME_OF_DAY_PRESETS: Record<TimeOfDayPreset, number> = {
   morning: 0.34,
@@ -226,6 +218,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     // keeps the horizon it was made with.
     viewDistance:
       obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
+    // Existing settings predate this choice and used adaptation, so missing means on.
+    eyeAdaptation: obj.eyeAdaptation !== false,
     // Anything but an explicit true is off, which is what an old save (no such
     // field) should get: nothing surprising happens the first time you drive it.
     mouseSteering: obj.mouseSteering === true,
