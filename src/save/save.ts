@@ -43,20 +43,38 @@ export interface SaveBackend {
 }
 
 /**
- * Saves after every successful enter/exit delta. The microtask is load-bearing on
- * exit: Interaction emits `exit_car` before teleporting the on-foot player, and the
- * save must include that final exit position rather than the old hidden-player pose.
+ * Saves after vehicle entry/exit and discrete mutations made while on foot. The
+ * microtask is load-bearing: exit teleports the player and trunk transfers update
+ * inventory immediately before storage, so the save must observe the completed
+ * interaction rather than the first delta in it.
+ *
+ * `stateForSave` lets the runtime flush physics-owned car/trailer transforms and
+ * throttled vehicle values before the backend snapshots the serialisable state.
  */
 export function installVehicleAutosave(
   backend: Pick<SaveBackend, 'save'>,
   world: GameWorld,
+  stateForSave: () => WorldState,
   nameForState: (state: WorldState) => string,
   onError: (error: unknown) => void,
 ): () => void {
   return world.onDelta((delta) => {
-    if (delta.t !== 'enter_car' && delta.t !== 'exit_car') return;
+    switch (delta.t) {
+      case 'enter_car':
+      case 'exit_car':
+      case 'car_storage':
+      case 'wreck_storage':
+      case 'trailer_hitch':
+      case 'trailer_cargo':
+      case 'gizmo_attach':
+      case 'gizmo_detach':
+      case 'sticker_place':
+        break;
+      default:
+        return;
+    }
     queueMicrotask(() => {
-      const state = world.state;
+      const state = stateForSave();
       void backend
         .save(`slot-${state.seed}`, nameForState(state), state)
         .catch(onError);
