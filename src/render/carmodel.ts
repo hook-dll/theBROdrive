@@ -109,8 +109,6 @@ export interface CarModelMeasure {
   readonly anchors: readonly GizmoAnchor[];
   /** Where the model's own origin sits inside the chassis group. */
   readonly visualOffset: readonly [number, number, number];
-  /** Ground clearance below the chassis centre: how high to spawn the body. */
-  readonly spawnHeight: number;
 }
 
 interface Template {
@@ -123,6 +121,15 @@ interface Template {
 }
 
 const templates = new Map<string, Template>();
+
+/**
+ * One ready-to-attach instance of every loaded model. GLB parsing is already paid
+ * before play; cloning its scene graph was still first paid at a roadside POI or
+ * dev spawn, creating the multi-second hitch those paths exposed. These pools move
+ * that one-off CPU work behind the loading screen.
+ */
+const warmDrivingInstances = new Map<string, CarModelInstance>();
+const warmStaticInstances = new Map<string, THREE.Object3D>();
 /**
  * Parsed scenes for multi-vehicle pack files, keyed by URL. Several catalogue
  * entries share one GLB (the low-poly pack holds 21 bodies in one file), so the
@@ -624,7 +631,6 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     eyePoint: resolveFrac(def.viewFrac),
     anchors,
     visualOffset: [-centre.x, -centre.y, -centre.z],
-    spawnHeight: centre.y,
   };
 
   return { def, measure, body: scene, wheels: parts.objects };
@@ -720,6 +726,29 @@ export function carModelMeasure(id: string): CarModelMeasure {
   return template(id).measure;
 }
 
+/** Clear air below a newly-created car before gravity settles its suspension. */
+export const CAR_SPAWN_DROP_METRES = 0.75;
+
+/**
+ * Chassis-centre Y that leaves the complete visual—body and detached wheels—above
+ * the sampled ground. Model origins vary across packs, so neither `halfExtents.y`
+ * nor the authored origin is a reliable universal floor by itself.
+ *
+ * Open-world spawns use the default 0.75 m drop. Constrained interiors may request
+ * less clear air so the car cannot meet a ceiling before gravity can settle it.
+ */
+export function carSpawnYAboveGround(
+  measure: CarModelMeasure,
+  groundY: number,
+  dropMetres = CAR_SPAWN_DROP_METRES,
+): number {
+  let lowestLocalY = -measure.halfExtents[1];
+  for (const wheel of measure.wheels) {
+    lowestLocalY = Math.min(lowestLocalY, wheel.pos[1] - wheel.radius);
+  }
+  return groundY - lowestLocalY + Math.max(0, dropMetres);
+}
+
 export interface CarModelInstance {
   /** Body and fixed trim, positioned for a chassis-centred parent. */
   readonly body: THREE.Object3D;
@@ -727,9 +756,8 @@ export interface CarModelInstance {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
 }
 
-/** A fresh instance of a preloaded model, sharing geometry and materials. */
-export function createCarModel(id: string): CarModelInstance {
-  const t = template(id);
+/** Builds a fresh driving instance from a preloaded template. */
+function cloneDrivingModel(t: Template): CarModelInstance {
   const wheels = new Map<string, THREE.Object3D>();
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
@@ -737,11 +765,21 @@ export function createCarModel(id: string): CarModelInstance {
   return { body, wheels };
 }
 
+/** A fresh instance of a preloaded model, sharing geometry and materials. */
+export function createCarModel(id: string): CarModelInstance {
+  const warmed = warmDrivingInstances.get(id);
+  if (warmed) {
+    warmDrivingInstances.delete(id);
+    return warmed;
+  }
+  return cloneDrivingModel(template(id));
+}
+
 /**
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
  * model puts them. This is what wrecks and scenery cars use.
  */
-export function createStaticCarModel(id: string): THREE.Object3D {
+function cloneStaticModel(id: string): THREE.Object3D {
   const t = template(id);
   const group = new THREE.Group();
   group.name = id;
@@ -753,6 +791,49 @@ export function createStaticCarModel(id: string): THREE.Object3D {
     group.add(mesh);
   }
   return group;
+}
+
+/**
+ * Clones one driving and one static instance of each model while the loading screen
+ * is up, then compiles every car material against the live scene lights. Asset parse,
+ * scene-graph clone and GPU program compilation are therefore all paid before play;
+ * a POI entering view performs no first-use model work.
+ */
+export async function warmCarModelInstances(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+): Promise<void> {
+  const compileGroup = new THREE.Group();
+  compileGroup.position.z = -20;
+  scene.add(compileGroup);
+  for (let i = 0; i < CAR_MODELS.length; i++) {
+    const id = CAR_MODELS[i]!.id;
+    warmDrivingInstances.set(id, cloneDrivingModel(template(id)));
+    const staticModel = cloneStaticModel(id);
+    staticModel.traverse((object) => {
+      object.frustumCulled = false;
+    });
+    warmStaticInstances.set(id, staticModel);
+    compileGroup.add(staticModel);
+    if ((i & 1) === 1) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  }
+  await renderer.compileAsync(scene, camera);
+  scene.remove(compileGroup);
+  for (const model of warmStaticInstances.values()) compileGroup.remove(model);
+}
+
+/**
+ * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
+ * model puts them. This is what wrecks and scenery cars use.
+ */
+export function createStaticCarModel(id: string): THREE.Object3D {
+  const warmed = warmStaticInstances.get(id);
+  if (warmed) {
+    warmStaticInstances.delete(id);
+    return warmed;
+  }
+  return cloneStaticModel(id);
 }
 
 export function disposeCarModelCache(): void {
@@ -774,6 +855,8 @@ export function disposeCarModelCache(): void {
       }
     });
   };
+  warmDrivingInstances.clear();
+  warmStaticInstances.clear();
   for (const t of templates.values()) {
     dispose(t.body);
     for (const wheel of t.wheels.values()) dispose(wheel);

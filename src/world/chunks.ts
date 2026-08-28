@@ -108,10 +108,15 @@ export interface ChunkProvider {
   build(ctx: ChunkContext): ChunkContent | null;
 }
 
+interface BuiltContent {
+  readonly providerId: string;
+  readonly content: ChunkContent;
+}
+
 interface BuiltChunk {
   index: number;
   hasPhysics: boolean;
-  contents: ChunkContent[];
+  contents: BuiltContent[];
   /**
    * The origin this chunk's vertices were written relative to. Kept per chunk rather
    * than assumed to be the current one, because a rebase can happen while chunks
@@ -126,6 +131,8 @@ export class ChunkStreamer {
   private readonly providers: ChunkProvider[] = [];
   private readonly built = new Map<number, BuiltChunk>();
   private readonly buildQueue: number[] = [];
+  /** Provider contributions awaiting an amortized rebuild after a world setting changes. */
+  private readonly refreshQueue: { index: number; providerId: string }[] = [];
   private readonly lastChunkIndex: number;
   /** Increments only when scene-owned lamp sources are added or removed. */
   private lightRevision = 0;
@@ -159,8 +166,20 @@ export class ChunkStreamer {
    */
   setLamps(on: number, nearX: number, nearZ: number): void {
     for (const chunk of this.built.values()) {
-      for (const content of chunk.contents) content.setLamps?.(on, nearX, nearZ);
+      for (const entry of chunk.contents) entry.content.setLamps?.(on, nearX, nearZ);
     }
+  }
+
+  /**
+   * Rebuild one provider contribution per rendered frame. Repeated calls replace
+   * stale queued work, so dragging a settings slider applies only its final value.
+   */
+  refreshProvider(providerId: string): void {
+    if (!this.providers.some((provider) => provider.id === providerId)) return;
+    for (let i = this.refreshQueue.length - 1; i >= 0; i--) {
+      if (this.refreshQueue[i]!.providerId === providerId) this.refreshQueue.splice(i, 1);
+    }
+    for (const chunk of this.built.values()) this.refreshQueue.push({ index: chunk.index, providerId });
   }
 
   /**
@@ -206,6 +225,15 @@ export class ChunkStreamer {
       this.buildFrame = frameId;
       this.frameBuildBudget = BUILD_BUDGET;
     }
+    while (this.frameBuildBudget > 0 && this.refreshQueue.length > 0) {
+      const refresh = this.refreshQueue.shift()!;
+      const chunk = this.built.get(refresh.index);
+      const provider = this.providers.find((candidate) => candidate.id === refresh.providerId);
+      if (!chunk || !provider) continue;
+      this.replaceContribution(chunk, provider);
+      this.frameBuildBudget--;
+    }
+
     while (this.frameBuildBudget > 0 && this.buildQueue.length > 0) {
       const index = this.buildQueue.shift()!;
       if (this.built.has(index)) continue;
@@ -220,9 +248,53 @@ export class ChunkStreamer {
     // (`sEnd <= sStart`), which is what makes the road/prop/POI/monument/homestead
     // providers return nothing there. The terrain provider derives its apron extent
     // from `chunkIndex` instead, so it still builds in those chunks.
+    const ctx = this.context(index, hasPhysics);
+
+    const contents: BuiltContent[] = [];
+    for (const provider of this.providers) {
+      const content = provider.build(ctx);
+      if (content) {
+        this.attachContent(content, ctx.originX, ctx.originZ);
+        contents.push({ providerId: provider.id, content });
+      }
+    }
+    this.built.set(index, { index, hasPhysics, contents, originX: ctx.originX, originZ: ctx.originZ });
+    this.lightRevision++;
+  }
+
+  /** Rebuild one provider's current contribution for a live chunk. */
+  private replaceContribution(chunk: BuiltChunk, provider: ChunkProvider): void {
+    const current = chunk.contents.findIndex((entry) => entry.providerId === provider.id);
+    if (current >= 0) {
+      this.teardownContent(chunk.contents[current]!.content);
+      chunk.contents.splice(current, 1);
+    }
+    const ctx = this.context(chunk.index, chunk.hasPhysics);
+    const content = provider.build(ctx);
+    if (content) {
+      this.attachContent(content, ctx.originX, ctx.originZ);
+      chunk.contents.push({ providerId: provider.id, content });
+    }
+    this.lightRevision++;
+  }
+
+  /**
+   * Re-expresses every live chunk after the floating origin has moved. Chunk
+   * geometry remains in its original local frame; only its group offset changes.
+   */
+  rebase(): void {
+    for (const chunk of this.built.values()) {
+      for (const entry of chunk.contents) {
+        entry.content.group.position.x = chunk.originX - this.origin.x;
+        entry.content.group.position.z = chunk.originZ - this.origin.z;
+      }
+    }
+  }
+
+  private context(index: number, hasPhysics: boolean): ChunkContext {
     const originX = this.origin.x;
     const originZ = this.origin.z;
-    const ctx: ChunkContext = {
+    return {
       chunkIndex: index,
       sStart: Math.max(0, index * CHUNK_LENGTH),
       sEnd: Math.min((index + 1) * CHUNK_LENGTH, this.road.length),
@@ -234,60 +306,29 @@ export class ChunkStreamer {
       originX,
       originZ,
     };
-
-    const contents: ChunkContent[] = [];
-    for (const provider of this.providers) {
-      const content = provider.build(ctx);
-      if (content) {
-        // A chunk built before the last rebase is expressed in the origin of its own
-        // build, so its group carries the difference. Zero in the common case.
-        content.group.position.x = originX - this.origin.x;
-        content.group.position.z = originZ - this.origin.z;
-        this.scene.add(content.group);
-        contents.push(content);
-      }
-    }
-    this.built.set(index, { index, hasPhysics, contents, originX, originZ });
-    this.lightRevision++;
   }
 
-  /**
-   * Re-expresses every live chunk after the floating origin has moved.
-   *
-   * Nothing is rebuilt and nothing needs to be. A chunk's vertices are relative to the
-   * origin it was built under, so the whole chunk is correct up to a constant offset,
-   * and the offset is exactly what a group position is for. Thirteen groups, two
-   * numbers each.
-   *
-   * Rebuilding instead was the first design and it is much worse: `BUILD_BUDGET` is one
-   * chunk per frame, so dropping the visual radius would leave a hole in the world for
-   * thirteen frames every kilometre driven. The colliders come along for free because
-   * `PhysicsWorld.rebase` shifts every rigid body in the same pass, including the fixed
-   * bodies these chunks' trimeshes hang off.
-   */
-  rebase(): void {
-    for (const chunk of this.built.values()) {
-      for (const content of chunk.contents) {
-        content.group.position.x = chunk.originX - this.origin.x;
-        content.group.position.z = chunk.originZ - this.origin.z;
-      }
-    }
+  private attachContent(content: ChunkContent, originX: number, originZ: number): void {
+    content.group.position.x = originX - this.origin.x;
+    content.group.position.z = originZ - this.origin.z;
+    this.scene.add(content.group);
+  }
+
+  private teardownContent(content: ChunkContent): void {
+    this.scene.remove(content.group);
+    for (const body of content.bodies) this.physics.removeBody(body);
+    content.dispose?.();
   }
 
   private teardown(chunk: BuiltChunk): void {
-    for (const content of chunk.contents) {
-      this.scene.remove(content.group);
-      for (const body of content.bodies) this.physics.removeBody(body);
-      // The streamer disposes nothing else: geometry and materials are the
-      // provider's own (and often shared at module level across chunks), so each
-      // provider cleans up what it created inside `content.dispose()`.
-      content.dispose?.();
-    }
+    for (const entry of chunk.contents) this.teardownContent(entry.content);
   }
+
 
   dispose(): void {
     for (const [, chunk] of this.built) this.teardown(chunk);
     this.built.clear();
     this.buildQueue.length = 0;
+    this.refreshQueue.length = 0;
   }
 }

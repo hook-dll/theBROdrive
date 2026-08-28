@@ -57,68 +57,39 @@ const MAX_DEPTH_RATIO = 160000;
 export const CAMERA_BASE_FOV = 65;
 
 /**
- * Resolution cap per tier, as a devicePixelRatio multiplier.
+ * Internal-resolution scale relative to the display's native backing resolution.
  *
- * `acceptable` never supersamples: on an N100-class iGPU even a 1.5x buffer is
- * fill-rate the machine does not have. `standard` allows a mild 1.5x. `blessing`
- * renders at twice the device ratio and lets the driver downsample, which is real
- * supersampling — on a 4K panel that is a 4x pixel count over native, so it is
- * strictly for a machine with headroom to burn.
+ * The previous implementation used `min(devicePixelRatio, tierCap)`. That can
+ * never exceed native DPR, so Standard and Blessing were literally identical on
+ * common DPR-1 and DPR-1.25 displays. Tiers are multipliers instead:
+ * Acceptable is visibly cheaper, Standard is native, Blessing is 2x per axis.
  */
+const PIXEL_RATIO_SCALE: Record<GraphicsQuality, number> = {
+  acceptable: 0.6,
+  standard: 1,
+  blessing: 2,
+};
+/** Absolute guard against pathological browser DPR values and oversized targets. */
 const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
   acceptable: 1,
-  standard: 1.5,
-  blessing: 2,
+  standard: 2,
+  blessing: 3,
 };
 /**
  * Four samples was the only useful multisampling level in measurement: 2x retained
  * almost all of the cost. Whether it is enabled is an independent display setting;
- * graphics tiers now control resolution and shadows only.
+ * graphics tiers control resolution and shadows.
  */
 const MSAA_SAMPLES = 4;
 /**
- * Hard sanity bound on the adaptive scale, as a fraction of the cap. Not a quality
- * decision — the real floor is MIN_ABSOLUTE_PIXEL_RATIO below. This only stops a
- * runaway controller asking for a postage stamp.
- *
- * It used to be 0.6 and doubled as the quality floor, on the reasoning that the UI
- * had to stay readable. That reasoning was wrong: the HUD and menus are DOM and CSS
- * (see ui/hud.css), so the canvas resolution has no bearing on text legibility at
- * all — and the clamp was actively preventing the low tier from reaching a
- * resolution a weak iGPU can hold.
+ * Lowest adaptive fraction of each tier's target. Acceptable may trade resolution
+ * for frame time; Standard stays close to native. Blessing never adapts downward
+ * at all—selecting it explicitly means spending the GPU on supersampling.
  */
-const MIN_PIXEL_SCALE = 0.25;
-/**
- * Adaptive floor in ABSOLUTE device pixels, per tier. This is the real quality
- * floor, and it has to be absolute rather than a fraction of the cap.
- *
- * The fraction alone produced the "sharp on my 4K at home, blurry on the 1080p at
- * work" report: a 4K panel reports DPR 2, so the cap is 1.5 and 60% of it is still
- * 0.9 device pixels — a downscale nobody notices. A 1080p panel reports DPR 1, so
- * the cap is 1.0 and the same 60% is 0.6 device pixels, on the screen that had none
- * to spare. Same setting, two very different images.
- *
- * The tiers want opposite things, which is the point of having them. Measured on an
- * Intel N100 / UHD Graphics in a 1920x935 window, parked, counting frames over
- * 50 ms out of 110:
- *
- *   pixel ratio   buffer      median   90th pct   slow frames
- *   1.00          1920x935    37.6 ms  147.2 ms   43
- *   0.60          1152x561    13.7 ms   67.7 ms   19
- *   0.30           576x280    13.5 ms   18.0 ms    0
- *
- * The median barely moves — that is vsync — while the 90th percentile collapses.
- * This is what the judder was: not slow frames, but one frame in five missing its
- * deadline. 0.35 is chosen to sit just above the point where every frame lands.
- *
- * `blessing` floors at 1.5, i.e. still above native on a DPR-1 screen. The point of
- * that tier is supersampling, so letting the controller quietly walk it down to
- * native would leave the setting doing nothing while claiming otherwise.
- */
-const MIN_ABSOLUTE_PIXEL_RATIO: Record<GraphicsQuality, number> = {
-  acceptable: 0.35,
-  standard: 0.9,
-  blessing: 1.5,
+const MIN_PIXEL_SCALE: Record<GraphicsQuality, number> = {
+  acceptable: 0.5,
+  standard: 0.85,
+  blessing: 1,
 };
 /** Resolution steps (applied at most once per CHANGE_COOLDOWN seconds). */
 const SCALE_STEP_DOWN = 0.8;
@@ -148,16 +119,11 @@ const FRAME_SMOOTHING = 0.1;
  */
 const HAZE_AMPLITUDE_PX = 1.7;
 /**
- * Animation speed multiplier. Amplitude and vertical distribution are independent,
- * so this makes the air churn faster without making the image bend further or
- * spreading shimmer into the sky.
- *
- * 2.4 was too quick: real heat shimmer over asphalt is a slow boil you notice by
- * staring at it, not a current that flows. At 2.4 the whole band visibly streamed,
- * and the eye reads speed here as WIND rather than as heat — the wrong cue for
- * still desert air.
+ * Animation speed multiplier. Heat shimmer must move slowly enough to read as a
+ * local, rising disturbance rather than a current flowing across the landscape.
+ * The individual cell rises still differ below; this only slows their shared clock.
  */
-const HAZE_SPEED = 1.1;
+const HAZE_SPEED = 0.28;
 
 /**
  * How the shimmer is distributed, in screen heights measured from the horizon.
@@ -414,7 +380,7 @@ export class Renderer {
       antialias: false,
       powerPreference: 'high-performance',
     });
-    this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
+    this.basePixelRatio = this.pixelRatioFor(quality);
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
@@ -489,6 +455,13 @@ export class Renderer {
     this.renderer.dispose();
   }
 
+
+  private pixelRatioFor(quality: GraphicsQuality): number {
+    return Math.min(
+      window.devicePixelRatio * PIXEL_RATIO_SCALE[quality],
+      MAX_PIXEL_RATIO[quality],
+    );
+  }
 
   private resize = (): void => {
     const width = window.innerWidth;
@@ -600,18 +573,13 @@ export class Renderer {
    * in a few steps and never visibly oscillates.
    */
   adaptResolution(frameDt: number): void {
+    // Blessing is an explicit quality lock, not an adaptive performance target.
+    if (this.quality === 'blessing') return;
     this.smoothedFrameMs += (frameDt * 1000 - this.smoothedFrameMs) * FRAME_SMOOTHING;
     const now = performance.now();
     if (now - this.lastScaleChange < CHANGE_COOLDOWN * 1000) return;
 
-    // The effective floor is whichever of the two is higher: a fraction of this
-    // display's cap, or the absolute device-pixel floor. On a low-DPR screen the
-    // absolute one wins, which is what stops 1080p being softened twice as far as
-    // 4K for the same setting.
-    const floor = Math.min(
-      1,
-      Math.max(MIN_PIXEL_SCALE, MIN_ABSOLUTE_PIXEL_RATIO[this.quality] / this.basePixelRatio),
-    );
+    const floor = MIN_PIXEL_SCALE[this.quality];
     const over = this.smoothedFrameMs > SLOW_FRAME_MS && this.pixelScale > floor;
     const under = this.smoothedFrameMs < FAST_FRAME_MS && this.pixelScale < 1;
     if (!over && !under) return;
@@ -635,7 +603,7 @@ export class Renderer {
     if (quality === this.quality) return;
     this.quality = quality;
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
-    this.basePixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO[quality]);
+    this.basePixelRatio = this.pixelRatioFor(quality);
     this.pixelScale = 1;
     this.lastScaleChange = -Infinity;
     this.smoothedFrameMs = 1000 / 60;

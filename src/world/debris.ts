@@ -32,12 +32,11 @@ import type { BreakableProp, PropPiece } from './props';
  */
 const MAX_PIECES = 48;
 /**
- * Minimum movement needed to distinguish a vehicle pressing into a plant from one
- * parked beside it. The old 2.6 m/s gate left the static cactus collider solid below
- * 9.4 km/h. This epsilon rejects only parked-body velocity noise; any deliberate creep
- * reaches the shared break path.
+ * Contact geometry decides whether a plant breaks. This runs after Rapier's step,
+ * where a solid cactus may already have reduced chassis velocity to zero; gating on
+ * that post-collision velocity rejected the exact impacts this system handles.
  */
-const BREAK_SPEED_MPS = 0.01;
+const IMPACT_SKIN = 0.2;
 /**
  * Fraction of the impactor's velocity a piece leaves with, plus the sideways and upward
  * kick that turns a shunt into a burst.
@@ -91,11 +90,50 @@ const _offset = new THREE.Vector3();
 const _t = { x: 0, y: 0, z: 0 };
 const _r = { x: 0, y: 0, z: 0, w: 1 };
 
+/** Segment against an axis-aligned box, both in the chassis' current local XZ frame. */
+function segmentHitsBox(
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  halfX: number,
+  halfZ: number,
+): boolean {
+  let enter = 0;
+  let leave = 1;
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+
+  if (Math.abs(dx) < 1e-9) {
+    if (x0 < -halfX || x0 > halfX) return false;
+  } else {
+    let a = (-halfX - x0) / dx;
+    let b = (halfX - x0) / dx;
+    if (a > b) [a, b] = [b, a];
+    enter = Math.max(enter, a);
+    leave = Math.min(leave, b);
+    if (enter > leave) return false;
+  }
+
+  if (Math.abs(dz) < 1e-9) return z0 >= -halfZ && z0 <= halfZ;
+  let a = (-halfZ - z0) / dz;
+  let b = (halfZ - z0) / dz;
+  if (a > b) [a, b] = [b, a];
+  enter = Math.max(enter, a);
+  leave = Math.min(leave, b);
+  return enter <= leave;
+}
+
 export class DebrisField {
   private readonly standing = new Map<number, BreakableProp>();
   private readonly pieces: Piece[] = [];
   /** Mirror of `state.flattenedProps`, so a chunk build tests it in O(1). */
   private readonly broken = new Set<number>();
+  /** Previous fixed-step chassis centre, for continuous high-speed impact sweeps. */
+  private previousX = 0;
+  private previousY = 0;
+  private previousZ = 0;
+  private previousValid = false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -130,24 +168,45 @@ export class DebrisField {
    * bouncing off a capsule that then vanishes.
    */
   update(impactor: Impactor | null): void {
-    if (!impactor) return;
-    const speed = Math.hypot(impactor.vx, impactor.vz);
-    if (speed < BREAK_SPEED_MPS) return;
+    if (!impactor) {
+      this.previousValid = false;
+      return;
+    }
+    const prevX = this.previousValid ? this.previousX : impactor.x;
+    const prevY = this.previousValid ? this.previousY : impactor.y;
+    const prevZ = this.previousValid ? this.previousZ : impactor.z;
+    this.previousX = impactor.x;
+    this.previousY = impactor.y;
+    this.previousZ = impactor.z;
+    this.previousValid = true;
 
-    // Right of forward, so a world offset resolves into the car's own frame.
+    // Right of forward, so world offsets resolve into the car's current local frame.
     const rx = impactor.fz;
     const rz = -impactor.fx;
+    const travelX = prevX - impactor.x;
+    const travelZ = prevZ - impactor.z;
+    const startAlong = travelX * impactor.fx + travelZ * impactor.fz;
+    const startAcross = travelX * rx + travelZ * rz;
     for (const prop of this.standing.values()) {
       const dx = prop.x - impactor.x;
       const dz = prop.z - impactor.z;
       const along = dx * impactor.fx + dz * impactor.fz;
-      if (Math.abs(along) > impactor.halfLength + prop.radius) continue;
       const across = dx * rx + dz * rz;
-      if (Math.abs(across) > impactor.halfWidth + prop.radius) continue;
-      // Vertically the box has to reach the plant at all: one standing on a dune shelf
-      // above the roofline is not being hit by anything.
-      if (prop.y > impactor.y + prop.height) continue;
-      if (prop.y + prop.height < impactor.y - 1.5) continue;
+      // Sweep the whole chassis rectangle from its previous fixed-step centre to its
+      // current one. Testing only the end pose skipped narrow plants when a fast car
+      // crossed their entire diameter between simulation steps.
+      if (!segmentHitsBox(
+        startAlong - along,
+        startAcross - across,
+        -along,
+        -across,
+        impactor.halfLength + prop.radius + IMPACT_SKIN,
+        impactor.halfWidth + prop.radius + IMPACT_SKIN,
+      )) continue;
+      const minY = Math.min(prevY, impactor.y);
+      const maxY = Math.max(prevY, impactor.y);
+      if (prop.y > maxY + prop.height) continue;
+      if (prop.y + prop.height < minY - 1.5) continue;
       this.breakProp(prop, impactor);
     }
   }

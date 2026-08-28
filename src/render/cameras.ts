@@ -53,7 +53,7 @@ const ZOOM_SENSITIVITY = 0.25;
 const DIST_MIN = 1.5;
 const DIST_MAX = 300;
 /** Upper chase distance; zooming past it hands the arm over to orbit. */
-const CHASE_MAX = 14;
+const CHASE_MAX = 7;
 /** Constant elevation folded into the orbit pitch so the car hides no road. */
 const ORBIT_PITCH_BASE = 0.22;
 /** How far short of an occluder to stop the chase camera, metres. */
@@ -157,12 +157,16 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 export class CameraRig {
-  private _mode: CameraMode = 'foot';
+  /** Driving-view selection survives a trip on foot; `mode` reports foot while walking. */
+  private _mode: Exclude<CameraMode, 'foot'> = 'interior';
   private onFoot = true;
 
   private yawValue = 0;
   private pitch = 0;
   private logDistance = Math.log(6);
+  /** External driving look survives while the shared yaw/pitch fields drive the foot camera. */
+  private drivingYaw = 0;
+  private drivingPitch = 0;
 
   /** Smoothed camera state — the only values exposed to the outside world. */
   private readonly eye = new THREE.Vector3();
@@ -240,7 +244,9 @@ export class CameraRig {
   }
 
   setMode(mode: CameraMode): void {
-    this._mode = mode;
+    // Foot is derived from `onFoot`; retaining the driving selection is what makes
+    // a chase view, its orbit and its zoom still be there after re-entering a car.
+    if (mode !== 'foot') this._mode = mode;
   }
 
   /**
@@ -265,13 +271,20 @@ export class CameraRig {
     // Entering/exiting a vehicle is the one legitimate snap point: teleporting
     // between a cabin and a standing pose must not spring-in (a fly-through).
     if (onFoot !== this.onFoot) {
-      this.onFoot = onFoot;
       if (onFoot) {
-        this._mode = 'foot';
+        // `snapFoot` must reuse yaw/pitch for camera-relative walking, so retain the
+        // driving orbit first. Otherwise looking around on foot overwrites where the
+        // chase camera was aimed even though its zoom survives.
+        this.drivingYaw = this.yawValue;
+        this.drivingPitch = this.pitch;
+        this.onFoot = true;
         this.snapFoot(target);
       } else {
-        if (this._mode === 'foot') this._mode = 'interior';
-        this.snapInterior(target);
+        this.onFoot = false;
+        this.yawValue = this.drivingYaw;
+        this.pitch = this.drivingPitch;
+        if (this._mode === 'interior') this.snapInterior(target);
+        else this.snapArm(target);
       }
     }
 
@@ -635,15 +648,24 @@ export class CameraRig {
     this.fov = BASE_FOV;
   }
 
-  /** On entry: look straight ahead in the cabin; snap, don't fly through. */
+  /** Snap into the remembered interior heading; never fly through the cabin on entry. */
   private snapInterior(target: CameraTarget): void {
-    this.yawValue = 0;
-    this.pitch = 0;
     _qA.set(target.qx, target.qy, target.qz, target.qw);
     _vC.set(target.eyeOffset[0], target.eyeOffset[1], target.eyeOffset[2]).applyQuaternion(_qA);
     this.eye.set(target.x, target.y, target.z).add(_vC);
-    _vD.copy(_FORWARD).applyQuaternion(_qA);
+    this.lookVector(_vD);
+    _vD.applyQuaternion(_qA);
     this.lookAt.copy(this.eye).addScaledVector(_vD, LOOK_AHEAD);
+    this.fov = BASE_FOV;
+  }
+
+  /** Snap into the remembered chase/orbit pose on entry, preserving its arm exactly. */
+  private snapArm(target: CameraTarget): void {
+    this.desiredArm(target);
+    if (this._mode === 'chase') this.applyOcclusion(target);
+    this.liftAboveGround(target);
+    this.eye.copy(_vA);
+    this.lookAt.copy(_vB);
     this.fov = BASE_FOV;
   }
 }

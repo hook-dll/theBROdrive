@@ -75,8 +75,52 @@ export const DEFAULT_COMIC: ComicOptions = {
 };
 
 /** One program for every comic material, so they all share a compile. */
-const COMIC_PROGRAM_KEY = 'comic-ground-v1';
+const COMIC_PROGRAM_KEY = 'comic-ground-v2';
+const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v1';
+const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
+const DIRECT_CALL =
+  'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+const SLOPE_SPOT_HELPER = /* glsl */ `
+vec3 groundSlopeNormal( vec3 position, vec3 flatNormal ) {
+	vec3 slope = normalize( cross( dFdx( position ), dFdy( position ) ) );
+	return dot( slope, flatNormal ) < 0.0 ? -slope : slope;
+}
+`;
+const SLOPE_SPOT_CALL =
+  'RE_Direct( directLight, geometryPosition, groundSlopeNormal( geometryPosition, geometryNormal ), geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
 
+/**
+ * Ground uses authored upward normals for uniform sun colour. Spotlights need the
+ * real geometric slope, however: on an uphill face the car is below a world-up
+ * normal's horizon and Lambert rejects the beam completely. Replace only the spot
+ * loop's direct-light call with a derivative normal; sun and hemisphere stay flat.
+ *
+ * `onBeforeCompile` receives the shader before Three expands ShaderChunk includes,
+ * so patch the stock lighting chunk and splice it in at its include site.
+ */
+function patchGroundSpotNormal(fragmentShader: string): string {
+  const lightsChunk = THREE.ShaderChunk.lights_fragment_begin;
+  const spotLoop = lightsChunk.indexOf('#if ( NUM_SPOT_LIGHTS > 0 )');
+  const spotLoopEnd = lightsChunk.indexOf('#if ( NUM_DIR_LIGHTS > 0 )', spotLoop);
+  const directCall = spotLoop >= 0 ? lightsChunk.indexOf(DIRECT_CALL, spotLoop) : -1;
+  if (directCall < 0 || spotLoopEnd < 0 || directCall >= spotLoopEnd) {
+    throw new Error('Three spotlight shader layout changed');
+  }
+  const patchedLightsChunk =
+    lightsChunk.slice(0, directCall) +
+    SLOPE_SPOT_CALL +
+    lightsChunk.slice(directCall + DIRECT_CALL.length);
+  const include = fragmentShader.indexOf(LIGHTS_FRAGMENT_BEGIN);
+  if (include < 0) throw new Error('Three lighting include layout changed');
+  let patched =
+    fragmentShader.slice(0, include) +
+    patchedLightsChunk +
+    fragmentShader.slice(include + LIGHTS_FRAGMENT_BEGIN.length);
+  const main = patched.indexOf('void main() {');
+  if (main < 0) throw new Error('Three fragment main layout changed');
+  patched = patched.slice(0, main) + SLOPE_SPOT_HELPER + patched.slice(main);
+  return patched;
+}
 const VERTEX_PARS = /* glsl */ `
 varying vec3 vViewPosition;
 varying vec3 vComicWorld;
@@ -189,9 +233,11 @@ function patch(
     .replace('varying vec3 vViewPosition;', VERTEX_PARS)
     .replace('#include <worldpos_vertex>', VERTEX_HOOK);
 
-  shader.fragmentShader = shader.fragmentShader
-    .replace('varying vec3 vViewPosition;', FRAGMENT_PARS)
-    .replace('#include <tonemapping_fragment>', FRAGMENT_HOOK);
+  shader.fragmentShader = patchGroundSpotNormal(
+    shader.fragmentShader
+      .replace('varying vec3 vViewPosition;', FRAGMENT_PARS)
+      .replace('#include <tonemapping_fragment>', FRAGMENT_HOOK),
+  );
 }
 
 /**
@@ -215,5 +261,16 @@ export function applyComicShading(
   };
   material.onBeforeCompile = (shader) => patch(shader, uniforms);
   material.customProgramCacheKey = () => COMIC_PROGRAM_KEY;
+  return material;
+}
+
+/** Applies slope-correct spotlight response without the comic surface treatment. */
+export function applyGroundSpotlightNormals(
+  material: THREE.MeshStandardMaterial,
+): THREE.MeshStandardMaterial {
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = patchGroundSpotNormal(shader.fragmentShader);
+  };
+  material.customProgramCacheKey = () => GROUND_SPOT_PROGRAM_KEY;
   return material;
 }

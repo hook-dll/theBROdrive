@@ -124,7 +124,6 @@ const ROCK_ALTITUDE = 260;
 
 /** Palette scratch colours, set once per disc rebuild from `desertPaletteAt`. */
 const sandLinear = new THREE.Color();
-const rockLinear = new THREE.Color();
 
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -221,7 +220,6 @@ export class VistaMesh {
     // the eye and matches the near desert at the horizon line.
     const palette = desertPaletteAt(s);
     sandLinear.setHex(palette.sand);
-    rockLinear.setHex(palette.rock);
 
     for (let r = 0; r < rings; r++) {
       const radius = radii[r]!;
@@ -249,10 +247,9 @@ export class VistaMesh {
         positions[vi + 1] = y;
         positions[vi + 2] = z;
 
-        const rock = smoothstep01(y / ROCK_ALTITUDE);
-        colors[vi] = sandLinear.r + (rockLinear.r - sandLinear.r) * rock;
-        colors[vi + 1] = sandLinear.g + (rockLinear.g - sandLinear.g) * rock;
-        colors[vi + 2] = sandLinear.b + (rockLinear.b - sandLinear.b) * rock;
+        colors[vi] = sandLinear.r;
+        colors[vi + 1] = sandLinear.g;
+        colors[vi + 2] = sandLinear.b;
       }
     }
 
@@ -281,7 +278,9 @@ export class VistaMesh {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
-    geometry.computeVertexNormals();
+    const normals = new Float32Array(positions.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
     this.geometry?.dispose();
     this.geometry = geometry;

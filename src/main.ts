@@ -19,7 +19,12 @@ import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { coolantCapacity, oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
-import { carModelMeasure, preloadCarModels } from './render/carmodel';
+import {
+  carModelMeasure,
+  carSpawnYAboveGround,
+  preloadCarModels,
+  warmCarModelInstances,
+} from './render/carmodel';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -87,8 +92,8 @@ import { GameAudio } from './audio/gameaudio';
 const SPAWN_AHEAD_GAP = 6;
 /** Height above the eye the spawn ground probe starts from. */
 const SPAWN_PROBE_HEIGHT = 3;
-/** Extra clearance under a spawned chassis so it settles onto its suspension. */
-const SPAWN_WHEEL_CLEARANCE = 0.35;
+/** Trailer-only drop clearance; cars use model-aware `carSpawnYAboveGround`. */
+const TRAILER_DROP_CLEARANCE = 0.35;
 
 /**
  * Off-road haze ramp, metres of lateral distance from the road centreline. Starts
@@ -229,6 +234,9 @@ async function boot(): Promise<void> {
   audio.applySettings(world.state.settings);
   const starField = await loadStarField(new Date(parseCalendarEpoch(world.state.calendarEpoch)));
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  // Scene lights now exist, so warm both CPU instances and their exact live shader
+  // permutations before the loading cover leaves. POI streaming never pays first use.
+  await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
   // at any moment carries what the player is holding. Registered before anything can
@@ -457,7 +465,9 @@ async function boot(): Promise<void> {
       interaction,
       input,
       loose,
+      debris,
       freight,
+      sky,
       trailers: trailerField,
       road,
       terrain,
@@ -776,6 +786,10 @@ async function boot(): Promise<void> {
       impactor.vy = v.y;
       impactor.vz = v.z;
       debris.update(impactor);
+    } else {
+      // Do not sweep from the last driven car position across a period spent on foot
+      // (or across switching vehicles); that path was never travelled by one chassis.
+      debris.update(null);
     }
 
     recordTimer += dt;
@@ -862,6 +876,11 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
+    // Trailer physics advances and snapshots in the fixed step exactly like cars,
+    // but its scene root must also consume those snapshots every rendered frame.
+    // Without this call the rigid body and hitch moved while the GLB stayed forever
+    // at its constructor pose, leaving an invisible trailer attached to the car.
+    trailerField.syncVisuals(alpha);
     loose.syncVisuals();
     debris.syncVisuals();
 
@@ -1091,10 +1110,9 @@ async function boot(): Promise<void> {
     );
     const groundY = ground ? ground.point.y : eye.y;
 
-    // The measured distance from the chassis centre down to the model's own
-    // ground-level origin, plus a little slack, so the car settles onto its
-    // wheels instead of dropping through them.
-    const y = groundY + measure.spawnHeight + SPAWN_WHEEL_CLEARANCE;
+    // Keep the complete model clear of the surface. Gravity and the ray-cast
+    // suspension establish its real resting height after materialisation.
+    const y = carSpawnYAboveGround(measure, groundY);
     const heading = Math.atan2(dir.x / flat, dir.z / flat);
     // `dropX`/`dropZ` are relative — they came off the camera and fed a Rapier ray.
     // `spawnCarState` writes a saved `CarState`, which is absolute.
@@ -1121,7 +1139,7 @@ async function boot(): Promise<void> {
       player.rigidBody,
     );
     const groundY = ground ? ground.point.y : eye.y;
-    const y = groundY + TRAILER_SPAWN_HEIGHT + SPAWN_WHEEL_CLEARANCE;
+    const y = groundY + TRAILER_SPAWN_HEIGHT + TRAILER_DROP_CLEARANCE;
     const heading = Math.atan2(dir.x / flat, dir.z / flat);
     const half = heading / 2;
     trailerField.spawn({
@@ -1190,7 +1208,12 @@ async function boot(): Promise<void> {
   const pauseHooks: PauseHooks = {
     settings: () => world.state.settings,
     applySettings: (next) => {
+      const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
+      // POI chunks rebuild one at a time after Resume. That keeps a slider drag and
+      // a dense 500 m stop layout from turning the pause-menu interaction into a
+      // multi-second main-thread task.
+      if (world.state.settings.poiSpacingMetres !== poiSpacing) streamer.refreshProvider('poi');
       // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);

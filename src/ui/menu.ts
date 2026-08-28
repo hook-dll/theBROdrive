@@ -8,6 +8,9 @@ import {
   DEFAULT_MOUSE_SENSITIVITY,
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
+  POI_SPACING_MAX_METRES,
+  POI_SPACING_MIN_METRES,
+  POI_SPACING_STEP_METRES,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
 import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
@@ -65,6 +68,7 @@ const ICONS: Record<string, readonly string[]> = {
   display: ['M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z', 'M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z'],
   sound: ['M4 9h3l5-4v14l-5-4H4z', 'M16 9.5a4 4 0 0 1 0 5'],
   controls: ['M3 7h18v10H3z', 'M6 11h1M9 11h1M12 11h1M15 11h1M18 11h1M8 14h8'],
+  gameplay: ['M4 3v18', 'M4 5h12l-2 4 2 4H4z'],
   manual: ['M12 20V9', 'M12 9l-4-4M12 9l4-4', 'M13.6 7.4a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0z'],
   auto: ['M13 3l-6 10h4l-1 8 7-12h-4z'],
   keys: ['M3 7h18v10H3z', 'M7 11h1M11 11h1M15 11h1M9 14h6'],
@@ -394,6 +398,7 @@ export class MainMenu {
       const settings: Settings = {
         gearboxMode: base.gearboxMode,
         dayCycleMinutes: base.dayCycleMinutes,
+        poiSpacingMetres: base.poiSpacingMetres,
         mouseSensitivity: base.mouseSensitivity,
         masterVolume: base.masterVolume,
         radioVolume: base.radioVolume,
@@ -408,6 +413,7 @@ export class MainMenu {
         hooks.applySettings({
           gearboxMode: settings.gearboxMode,
           dayCycleMinutes: settings.dayCycleMinutes,
+          poiSpacingMetres: settings.poiSpacingMetres,
           mouseSensitivity: settings.mouseSensitivity,
           masterVolume: settings.masterVolume,
           radioVolume: settings.radioVolume,
@@ -439,7 +445,7 @@ export class MainMenu {
        * Settings section, remembered across visits: someone adjusting the horizon
        * comes back to the horizon, not to the top of a list.
        */
-      type SettingsTab = 'drive' | 'display' | 'sound' | 'controls';
+      type SettingsTab = 'drive' | 'display' | 'gameplay' | 'sound' | 'controls';
       let settingsTab: SettingsTab = 'drive';
       /** Action id waiting for a key in capture mode; only set on settings. */
       let capturingActionId: string | null = null;
@@ -840,7 +846,7 @@ export class MainMenu {
               {
                 label: 'Acceptable',
                 icon: 'gfx1',
-                hint: 'Lowest resolution cap. For weak integrated GPUs. Applies on resume.',
+                hint: 'Starts at 60% of native and may scale lower. For weak GPUs.',
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
@@ -850,7 +856,7 @@ export class MainMenu {
               {
                 label: 'Standard',
                 icon: 'gfx2',
-                hint: 'Native-resolution target and the authored detail level. Applies on resume.',
+                hint: 'Native resolution with adaptive protection for frame rate.',
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
@@ -860,7 +866,7 @@ export class MainMenu {
               {
                 label: 'Blessing',
                 icon: 'gfx3',
-                hint: 'Renders above native and downsamples. Needs headroom. Applies on resume.',
+                hint: 'Locks up to 2x native resolution per axis. No adaptive downscaling.',
                 active: () => settings.graphicsQuality === 'blessing',
                 pick: () => {
                   settings.graphicsQuality = 'blessing';
@@ -947,13 +953,17 @@ export class MainMenu {
                 },
               },
             ]),
+          );
+        };
+
+        const renderGameplay = (): void => {
+          pane.append(
             segmented(
               'Time of Day',
               (Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]).map((preset) => ({
                 label: preset.charAt(0).toUpperCase() + preset.slice(1),
                 icon: preset,
                 hint: `Move the sun to ${preset}. The clock keeps running from there.`,
-                // A preset is an action, not a state: nothing here is ever "current".
                 active: () => false,
                 pick: () => hooks.applyTimePreset(preset),
               })),
@@ -969,6 +979,19 @@ export class MainMenu {
               (value) => `${Math.round(value)} min`,
               (value) => {
                 settings.dayCycleMinutes = value;
+              },
+            ),
+            sliderField(
+              'POI Distance',
+              'gameplay',
+              'Metres between roadside stop slots. The current road rebuilds after Resume.',
+              POI_SPACING_MIN_METRES,
+              POI_SPACING_MAX_METRES,
+              POI_SPACING_STEP_METRES,
+              () => settings.poiSpacingMetres,
+              (value) => `${(value / 1000).toFixed(value < 1000 ? 1 : value % 1000 === 0 ? 0 : 1)} km`,
+              (value) => {
+                settings.poiSpacingMetres = value;
               },
             ),
           );
@@ -1059,8 +1082,15 @@ export class MainMenu {
             id: 'display',
             label: 'Display',
             icon: 'display',
-            hint: 'What is drawn, how far, and at what time of day.',
+            hint: 'What is drawn, and how far into the desert it reaches.',
             render: renderDisplay,
+          },
+          {
+            id: 'gameplay',
+            label: 'Gameplay',
+            icon: 'gameplay',
+            hint: 'Time flow and the spacing between roadside stops.',
+            render: renderGameplay,
           },
           {
             id: 'sound',

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
+import { applyGroundSpotlightNormals } from '../render/comic';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
@@ -112,11 +113,13 @@ const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
 // Shared across every chunk; never disposed by the streamer. The maps are built on
 // the first chunk build (they need a canvas, so not at module load) and the vertex
 // colours are divided by the albedo's mean so the surface keeps its old brightness.
-const roadMaterial = new THREE.MeshStandardMaterial({
-  vertexColors: true,
-  roughness: 0.93,
-  metalness: 0,
-});
+const roadMaterial = applyGroundSpotlightNormals(
+  new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.93,
+    metalness: 0,
+  }),
+);
 let textureGain = 1;
 let texturesAttached = false;
 
@@ -133,15 +136,17 @@ function attachRoadTextures(): void {
   textureGain = 1 / Math.max(0.2, mean);
 }
 
-const markingMaterial = new THREE.MeshStandardMaterial({
-  vertexColors: true,
-  roughness: 0.94,
-  metalness: 0,
-  // Markings sit 3 cm above the road; the offset keeps them from z-fighting.
-  polygonOffset: true,
-  polygonOffsetFactor: -1,
-  polygonOffsetUnits: -1,
-});
+const markingMaterial = applyGroundSpotlightNormals(
+  new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.94,
+    metalness: 0,
+    // Markings sit 3 cm above the road; the offset keeps them from z-fighting.
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  }),
+);
 
 /** Fraction of sand covering a point at |lateral| = a, given sandCover (0..1). */
 function sandFactor(a: number, sandCover: number): number {
@@ -272,11 +277,17 @@ export class RoadMeshProvider implements ChunkProvider {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    geometry.computeVertexNormals();
+    // The road and its shoulder use the same upward lighting basis as the desert.
+    // Actual slope normals made both read as a dark shadow strip on grades.
+    const normals = new Float32Array(positions.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
     const group = new THREE.Group();
     const roadMesh = new THREE.Mesh(geometry, roadMaterial);
-    roadMesh.receiveShadow = true;
+    // Match the desert: a moving shadow-map boundary must not turn the road and its
+    // shoulder into a dark strip through uniformly sunlit terrain.
+    roadMesh.receiveShadow = false;
     group.add(roadMesh);
 
     const bodies: RAPIER.RigidBody[] = [];
@@ -412,7 +423,9 @@ export class RoadMeshProvider implements ChunkProvider {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
-    geometry.computeVertexNormals();
+    const normals = new Float32Array(positions.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     return new THREE.Mesh(geometry, markingMaterial);
   }
 
