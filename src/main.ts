@@ -437,7 +437,17 @@ async function boot(): Promise<void> {
     const label = carModel(Object.values(state.cars)[0]?.modelId ?? DEFAULT_CAR_MODEL_ID).label;
     return `${label} @ ${(state.player.s / 1000).toFixed(1)} km`;
   };
-  installVehicleAutosave(saves, world, saveName, (error) => {
+  /**
+   * Physics bodies and throttled vehicle counters are runtime-authoritative between
+   * their normal state deltas. Flush them immediately before every manual save,
+   * export, or autosave; trunk cells already mutate `WorldState` synchronously.
+   */
+  const stateForSave = (): typeof world.state => {
+    for (const vehicle of vehicles.values()) vehicle.pushState();
+    trailerField.pushTransforms();
+    return world.state;
+  };
+  installVehicleAutosave(saves, world, stateForSave, saveName, (error) => {
     console.error('autosave failed', error);
     hud.setToast('autosave failed');
   });
@@ -1271,7 +1281,7 @@ async function boot(): Promise<void> {
       renderer.setViewDistance(metres);
       vista.setViewDistance(metres);
     },
-    exportState: () => world.state,
+    exportState: stateForSave,
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards
     // are permanent and do not transfer between vehicles, which is worth nothing if
     // a fully fuelled replacement is two clicks away. `import.meta.env.DEV` is a
@@ -1302,7 +1312,8 @@ async function boot(): Promise<void> {
       const s = world.state;
       const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
       if (action === 'save') {
-        await saves.save(`slot-${s.seed}`, saveName(s), s);
+        const state = stateForSave();
+        await saves.save(`slot-${state.seed}`, saveName(state), state);
         hud.setToast('saved');
       }
       menu.hidePause();

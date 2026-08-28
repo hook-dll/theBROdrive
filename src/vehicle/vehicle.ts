@@ -1782,6 +1782,70 @@ export class Vehicle implements Rebasable {
     return this.serviceBrakeCommand;
   }
 
+  /**
+   * Flushes every runtime-owned value into serialisable state before a save.
+   *
+   * External pours update `CarState` first and are accepted here instead of being
+   * overwritten by an older local mirror. Consumption goes the other direction:
+   * while the authoritative value still matches the last emitted value, the local
+   * mirror contains the newer level and is pushed now.
+   */
+  pushState(): void {
+    if (this.car.fuelLitres !== this.lastAuthFuel) {
+      this.localFuel = this.car.fuelLitres;
+    } else if (this.localFuel !== this.car.fuelLitres) {
+      this.world.apply({ t: 'car_fuel', carId: this.car.id, litres: this.localFuel });
+    }
+    this.lastAuthFuel = this.localFuel;
+    this.fuelEmitTimer = 0;
+
+    if (this.car.coolantLitres !== this.lastAuthCoolant) {
+      this.localCoolant = this.car.coolantLitres;
+    } else if (this.localCoolant !== this.car.coolantLitres) {
+      this.world.apply({
+        t: 'car_fluid',
+        carId: this.car.id,
+        fluid: 'coolant',
+        litres: this.localCoolant,
+      });
+    }
+    this.lastAuthCoolant = this.localCoolant;
+
+    if (this.car.oilLitres !== this.lastAuthOil) {
+      this.localOil = this.car.oilLitres;
+    } else if (this.localOil !== this.car.oilLitres) {
+      this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
+    }
+    this.lastAuthOil = this.localOil;
+    this.fluidEmitTimer = 0;
+
+    if (this.odoAccum > 0) {
+      this.world.apply({ t: 'car_odometer', carId: this.car.id, metres: this.odoAccum });
+      this.odoAccum = 0;
+    }
+    this.odoEmitTimer = 0;
+    this.pushTransform();
+  }
+
+  /** Pushes the current chassis pose into state immediately. */
+  pushTransform(): void {
+    this.transformEmitTimer = 0;
+    this.chassisBody.translation(this.pos);
+    this.chassisBody.rotation(this.quat);
+    // The save stores absolute world coordinates; `pos` is relative.
+    this.world.apply({
+      t: 'car_transform',
+      carId: this.car.id,
+      x: this.pos.x + this.origin.x,
+      y: this.pos.y,
+      z: this.pos.z + this.origin.z,
+      qx: this.quat.x,
+      qy: this.quat.y,
+      qz: this.quat.z,
+      qw: this.quat.w,
+    });
+  }
+
 
   fixedUpdate(dt: number, input: InputFrame): void {
     const controller = this.controller;
@@ -2294,23 +2358,7 @@ export class Vehicle implements Rebasable {
 
     // Transform deltas, a few times per second.
     this.transformEmitTimer += dt;
-    if (this.transformEmitTimer >= TRANSFORM_EMIT_INTERVAL) {
-      this.transformEmitTimer = 0;
-      this.chassisBody.translation(this.pos);
-      this.chassisBody.rotation(this.quat);
-      // The save stores absolute world coordinates; `pos` is relative.
-      this.world.apply({
-        t: 'car_transform',
-        carId: this.car.id,
-        x: this.pos.x + this.origin.x,
-        y: this.pos.y,
-        z: this.pos.z + this.origin.z,
-        qx: this.quat.x,
-        qy: this.quat.y,
-        qz: this.quat.z,
-        qw: this.quat.w,
-      });
-    }
+    if (this.transformEmitTimer >= TRANSFORM_EMIT_INTERVAL) this.pushTransform();
   }
 
   /**
