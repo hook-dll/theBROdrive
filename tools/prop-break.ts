@@ -1,9 +1,9 @@
 /**
  * tools/prop-break.ts
  *
- * Knocks a cactus down, end to end, with the REAL pieces: the real `ScatterProvider`
- * building a real chunk against a real Rapier world, the real `DebrisField` deciding
- * what got hit, and the real `GameWorld` recording it.
+ * Knocks a low dirt pile down, end to end, with the REAL pieces: the real
+ * `ScatterProvider` building a real chunk against a real Rapier world, the real
+ * `DebrisField` deciding what got hit, and the real `GameWorld` recording it.
  *
  * It checks the five things a break has to get right, none of which a screenshot can
  * show:
@@ -28,7 +28,7 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { DebrisField, type Impactor } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
-import { ScatterProvider, propPieces } from '../src/world/props';
+import { ScatterProvider, propPieces, type BreakableProp } from '../src/world/props';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
@@ -108,6 +108,7 @@ let registeredIds: number[] = [];
   check('none in a scenery-only chunk', farCount === 0, `${farCount} registered`);
   check('saguaro has pieces', (propPieces('saguaro')?.length ?? 0) === 5, `${propPieces('saguaro')?.length} pieces`);
   check('barrel cactus has pieces', (propPieces('barrel')?.length ?? 0) === 3, `${propPieces('barrel')?.length} pieces`);
+  check('dirt pile has pieces', (propPieces('scrub')?.length ?? 0) === 3, `${propPieces('scrub')?.length} pieces`);
   check('boulders do not break', propPieces('boulder') === null, 'no pieces');
 }
 
@@ -116,22 +117,12 @@ const content = buildChunk(true);
 
 // Find a standing breakable by asking the field itself: register a spy alongside so we
 // know one prop's full pose. Cheaper: rebuild through a capturing sink.
-let target: {
-  id: number;
-  x: number;
-  y: number;
-  z: number;
-  radius: number;
-  height: number;
-  collider: { isEnabled(): boolean };
-  mesh: THREE.InstancedMesh;
-  instance: number;
-} | null = null;
+let target: BreakableProp | null = null;
 {
   const capture = {
     isBroken: (id: number) => debris.isBroken(id),
-    register: (prop: typeof target) => {
-      if (!target) target = prop;
+    register: (prop: BreakableProp) => {
+      if (!target && prop.pieces === propPieces('scrub')) target = prop;
     },
     forget: () => {},
   };
@@ -150,7 +141,7 @@ let target: {
   } as unknown as ChunkContext);
   // Hand the captured prop to the real field, then throw the duplicate chunk's bodies
   // away — the prop's own collider is the one being tested, so it must stay.
-  if (target) debris.register(target as never);
+  if (target) debris.register(target);
   captured.dispose?.();
 }
 
@@ -161,7 +152,8 @@ if (!target) {
   const prop = target;
   const bodiesBefore = physics.world.bodies.len();
 
-  // A car barely pressing into the plant nose-on at 0.02 m/s.
+  // Contact breaks the pile even with no vehicle speed. There is deliberately no
+  // velocity threshold: a chassis already pressing into one must not leave it standing.
   const impactor: Impactor = {
     x: prop.x,
     y: prop.y + 0.6,
@@ -172,15 +164,12 @@ if (!target) {
     halfLength: 2.1,
     vx: 0,
     vy: 0,
-    vz: 0.02,
+    vz: 0,
   };
 
-  // Resting beside a plant is harmless; any actual vehicle movement through it breaks.
-  debris.update({ ...impactor, vz: 0 });
-  check('a parked car breaks nothing', prop.collider.isEnabled(), 'collider still on');
-
   debris.update(impactor);
-  check('a crawl switches collider off', !prop.collider.isEnabled(), 'disabled');
+  check('zero-speed contact disables pile', !prop.collider.isEnabled(), 'disabled');
+
 
   check('recorded in state', world.state.flattenedProps.includes(prop.id), `id ${prop.id}`);
 
@@ -190,7 +179,7 @@ if (!target) {
   check('instance blanked', scale.length() < 1e-6, `scale ${scale.length().toFixed(3)}`);
 
   const spawned = physics.world.bodies.len() - bodiesBefore;
-  check('pieces spawned', spawned === 5, `${spawned} bodies`);
+  check('three pile pieces spawned', spawned === 3, `${spawned} bodies`);
 
   // Fly: step the world and confirm the pieces moved off their spawn points.
   const before: [number, number, number][] = [];
@@ -202,7 +191,7 @@ if (!target) {
     const p = before[i]!;
     if (Math.hypot(c.position.x - p[0], c.position.y - p[1], c.position.z - p[2]) > 0.1) moved++;
   });
-  check('pieces left the plant', moved === 5, `${moved} of ${scene.children.length} moved`);
+  check('pile pieces leave on impact', moved === 3, `${moved} of ${scene.children.length} moved`);
 }
 
 // --- guard --------------------------------------------------------------------

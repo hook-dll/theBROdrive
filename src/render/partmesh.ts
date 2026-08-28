@@ -76,6 +76,7 @@ function resolveMaterial(spec: MaterialSpec): THREE.Material {
 type Vec3 = readonly [number, number, number];
 
 interface Instruction {
+  readonly name: string;
   readonly geometry: THREE.BufferGeometry;
   readonly material: MaterialSpec;
   readonly position: Vec3;
@@ -100,7 +101,7 @@ class MeshBuilder {
     rotation: Vec3 = ZERO,
     scale: Vec3 = ONE,
   ): void {
-    this.instructions.push({ geometry: cachedGeo(key, build), material, position, rotation, scale });
+    this.instructions.push({ name: key, geometry: cachedGeo(key, build), material, position, rotation, scale });
   }
 
   box(key: string, w: number, h: number, d: number, material: MaterialSpec, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE): void {
@@ -124,6 +125,7 @@ function buildGroup(instructions: readonly Instruction[]): THREE.Group {
   const group = new THREE.Group();
   for (const ins of instructions) {
     const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material));
+    mesh.name = ins.name;
     mesh.position.set(ins.position[0], ins.position[1], ins.position[2]);
     mesh.rotation.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]);
     mesh.scale.set(ins.scale[0], ins.scale[1], ins.scale[2]);
@@ -727,10 +729,25 @@ function buildQuarryInto(b: MeshBuilder): void {
 }
 
 function buildBubbleGumInto(b: MeshBuilder): void {
-  const wrapper = flat(0xe86a9a, 0.45);
-  const gum = flat(0xf5a4bd, 0.65);
-  b.box('bubble_gum_wrapper', 0.13, 0.018, 0.07, wrapper, [0, 0, 0]);
-  b.box('bubble_gum_piece', 0.055, 0.024, 0.045, gum, [0, 0.018, 0]);
+  const wrapper = flat(0xd94f83, 0.5);
+  const wrapperEdge = flat(0xf08ab0, 0.45);
+  const gum = flat(0xf7b0c8, 0.7);
+
+  // A shallow open wrapper with five separate sticks. Each stick has its own named
+  // mesh so the held view can remove exactly one at the mouth without rebuilding.
+  b.box('bubble_gum_wrapper', 0.2, 0.012, 0.105, wrapper, [0, 0, 0]);
+  b.box('bubble_gum_wrapper_left', 0.012, 0.026, 0.105, wrapperEdge, [-0.094, 0.013, 0]);
+  b.box('bubble_gum_wrapper_right', 0.012, 0.026, 0.105, wrapperEdge, [0.094, 0.013, 0]);
+  for (let i = 0; i < 5; i++) {
+    b.box(
+      `bubble_gum_piece_${i}`,
+      0.03,
+      0.024,
+      0.078,
+      gum,
+      [-0.068 + i * 0.034, 0.018, 0],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +762,16 @@ export function createPartMesh(variantId: string): THREE.Object3D {
 /** Collider half-extents for a part, derived from its built geometry's bounds. */
 export function partHalfExtents(variantId: string): { x: number; y: number; z: number } {
   return blueprint(variantId).halfExtents;
+}
+
+/** Sets how many individually modelled sticks remain visible in a bubble-gum pack. */
+export function setBubbleGumPieceCount(root: THREE.Object3D, charges: number): void {
+  const visible = Math.max(0, Math.min(5, Math.trunc(charges)));
+  root.traverse((object) => {
+    if (!object.name.startsWith('bubble_gum_piece_')) return;
+    const index = Number(object.name.slice('bubble_gum_piece_'.length));
+    object.visible = Number.isInteger(index) && index < visible;
+  });
 }
 
 /** A held/carried item mesh. Parts reuse createPartMesh; other items build from primitives. */
@@ -768,8 +795,11 @@ export function createItemMesh(item: Item): THREE.Object3D {
       mesh.scale.setScalar(s);
       return mesh;
     }
-    case 'bubble_gum':
-      return buildGroup(itemBlueprint('bubble_gum', (b) => buildBubbleGumInto(b)).instructions);
+    case 'bubble_gum': {
+      const mesh = buildGroup(itemBlueprint('bubble_gum', (b) => buildBubbleGumInto(b)).instructions);
+      setBubbleGumPieceCount(mesh, item.charges);
+      return mesh;
+    }
   }
 }
 

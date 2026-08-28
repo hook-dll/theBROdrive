@@ -481,6 +481,47 @@ export class Trailer implements Rebasable {
     return TRAILER_TARE_KG + this.state.cargoKg;
   }
 
+  /** True when a world-space sphere touches the trailer bed's oriented box. */
+  touchesSphere(x: number, y: number, z: number, radius: number): boolean {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    this.qScratch.set(r.x, r.y, r.z, r.w).invert();
+    const local = this.vScratch.set(x - t.x, y - t.y, z - t.z).applyQuaternion(this.qScratch);
+    const dx = Math.max(0, Math.abs(local.x) - BED_HALF[0]);
+    const dy = Math.max(0, Math.abs(local.y) - BED_HALF[1]);
+    const dz = Math.max(0, Math.abs(local.z) - BED_HALF[2]);
+    return dx * dx + dy * dy + dz * dz <= radius * radius;
+  }
+
+  /**
+   * Toggles the trailer between wheels-down and roof-down while preserving its
+   * heading. This intentionally mirrors Vehicle.flipOver: a snap is dependable on
+   * dunes, and the gum bubble hides the cheap rescue teleport.
+   */
+  flipOver(): void {
+    const rotation = this.body.rotation();
+    const forward = this.vScratch
+      .set(0, 0, 1)
+      .applyQuaternion(this.qScratch.set(rotation.x, rotation.y, rotation.z, rotation.w));
+    const heading = Math.atan2(forward.x, forward.z);
+    const halfHeading = heading * 0.5;
+    const sin = Math.sin(halfHeading);
+    const cos = Math.cos(halfHeading);
+    const upY = 1 - 2 * (rotation.x * rotation.x + rotation.z * rotation.z);
+    const t = this.body.translation();
+
+    this.body.setTranslation({ x: t.x, y: t.y + 0.65, z: t.z }, true);
+    this.body.setRotation(
+      upY >= 0
+        ? { x: sin, y: 0, z: cos, w: 0 }
+        : { x: 0, y: sin, z: 0, w: cos },
+      true,
+    );
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.snapshotPrimed = false;
+  }
+
   /**
    * Loads or empties the bed. Mass and centre of mass are the only things cargo
    * changes — there is no fragility, no lashing, no spoilage. A heavy load rides
@@ -968,6 +1009,11 @@ export class TrailerField {
 
   get(id: string): Trailer | null {
     return this.trailers.get(id) ?? null;
+  }
+
+  /** Visits each live trailer without allocating a temporary collection. */
+  forEach(visit: (trailer: Trailer) => void): void {
+    for (const trailer of this.trailers.values()) visit(trailer);
   }
 
   trailerIdForCollider(colliderHandle: number): string | null {

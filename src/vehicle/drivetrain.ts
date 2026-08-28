@@ -74,6 +74,8 @@ const DOWN_SHIFT_RPM_FRACTION = 0.4;
 const UP_SHIFT_IDLE_MARGIN = 1.25;
 /** Throttle at which an automatic in neutral or reverse engages first gear. */
 const AUTO_ENGAGE_THROTTLE = 0.12;
+/** Road speed below which neutral may engage drive while the car is still rolling. */
+const AUTO_NEUTRAL_ENGAGE_MPS = 2;
 /** Forward speed below which an automatic may safely change drive direction. */
 const AUTO_DIRECTION_CHANGE_MPS = 0.25;
 
@@ -414,11 +416,12 @@ export class Drivetrain {
   ): void {
     if (engine == null) return;
     const n = gearbox.ratios.length;
-    const atRest = Math.abs(wheelAngularSpeed * wheelRadius) <= AUTO_DIRECTION_CHANGE_MPS;
+    const roadSpeed = wheelAngularSpeed * wheelRadius;
+    const atRest = Math.abs(roadSpeed) <= AUTO_DIRECTION_CHANGE_MPS;
 
-    // Pedals request a direction rather than a permanent gear selection. The
-    // backward command remains the service brake until the car has stopped; only
-    // then can the box engage reverse. Forward does the symmetric R -> 1 change.
+    // Pedals request a direction rather than a permanent gear selection. An
+    // opposite engaged gear remains authoritative until the car has stopped.
+    // Neutral may take first during a slow roll because no direction is engaged.
     //
     // `forwardDemand` is independent of delivered throttle: while braking a
     // reversing car it stays non-zero so the selector can leave reverse at rest.
@@ -427,9 +430,14 @@ export class Drivetrain {
       return;
     }
     if (this.gear === GEAR_NEUTRAL) {
-      if (!atRest) return;
-      if (reverseRequested) this.setGear(GEAR_REVERSE);
-      else if (forwardDemand > AUTO_ENGAGE_THROTTLE) this.setGear(1);
+      if (reverseRequested) {
+        if (Math.abs(roadSpeed) <= AUTO_NEUTRAL_ENGAGE_MPS) this.setGear(GEAR_REVERSE);
+      } else if (
+        forwardDemand > AUTO_ENGAGE_THROTTLE &&
+        Math.abs(roadSpeed) <= AUTO_NEUTRAL_ENGAGE_MPS
+      ) {
+        this.setGear(1);
+      }
       return;
     }
     if (reverseRequested && atRest) {

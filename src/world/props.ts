@@ -1,6 +1,6 @@
 /**
- * Roadside props: sparse desert scatter (cacti + rocks), the pole line that runs
- * beside the road, and the distance monuments.
+ * Roadside props: sparse desert scatter (cacti + rocks), occasional hazards on the
+ * driving surface, the pole line beside the road, and the distance monuments.
  *
  * Every prop is a pure function of the integer seed via stateless hashing, so a
  * chunk builds identically whether it is generated in order or revisited later.
@@ -12,7 +12,7 @@
  */
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 
 import { hash01 } from '../core/rng';
@@ -22,7 +22,7 @@ import { drawnGroundY } from './terrainmesh';
 import { RoadDistance } from './roaddistance';
 
 import type { Monument, PoleEra } from './gradient';
-import type { Road } from './road';
+import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { Terrain } from './terrain';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 
@@ -34,6 +34,19 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 // follows the road rather than a world-aligned lattice and the road never cuts
 // through a cell.
 const TAG_SCATTER = 0x5ca17e2;
+const TAG_ROAD_PILE = 0x6a5a41;
+const TAG_ROAD_ROCK = 0x6a5a52;
+/** Each independent stream varies every consecutive gap inside this exact range. */
+const ROAD_HAZARD_GAP_MIN = 511;
+const ROAD_HAZARD_GAP_MAX = 1212;
+/**
+ * Two complementary gaps fill one cycle. If the first is `d`, the second is
+ * `min + max - d`, so both stay in range while any chunk can locate them directly.
+ */
+const ROAD_HAZARD_CYCLE = ROAD_HAZARD_GAP_MIN + ROAD_HAZARD_GAP_MAX;
+/** Keep the homestead and the player's first few bends clear. */
+const ROAD_HAZARD_START = 600;
+const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
 const CELL_L = 6; // metres between candidate cells laterally
 const MIN_LAT = 9; // props stay off the corridor + gravel verge (~8.2 m)
@@ -124,7 +137,7 @@ const matCactus = new THREE.MeshStandardMaterial({ color: 0x6d7d5c, roughness: 0
 const matScrub = new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 });
 const matDeadStick = new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 });
 const matRock = new THREE.MeshStandardMaterial({
-  color: 0x9a7550,
+  color: 0x815f42,
   roughness: 0.98,
   metalness: 0,
 });
@@ -170,6 +183,8 @@ const matRust = new THREE.MeshStandardMaterial({ color: 0x6b4a32, roughness: 0.8
 const _dummy = new THREE.Object3D();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _euler = new THREE.Euler();
+let _hullPoints = new Float32Array(0);
 const _axis = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -187,11 +202,8 @@ interface PropForm {
   baseRadius: number;
   /** Vertical span (m) at scale 1, for capsule colliders. */
   height: number;
-  collider: 'capsule' | 'box' | 'none';
-  /**
-   * Box half-extents at scale 1, in the form's own frame. Omitted for a form whose
-   * silhouette is roughly a ball, where a cube off `baseRadius` is honest and free.
-   */
+  collider: 'capsule' | 'box' | 'hull' | 'none';
+  /** Box half-extents at scale 1, in the form's own frame. Required by `box`. */
   readonly colliderHalf?: readonly [number, number, number];
   /** Fraction of `baseRadius` the form is planted below the surface. */
   sink: number;
@@ -201,8 +213,13 @@ interface PropForm {
 }
 
 function deformIcosahedron(seed: number, squashY: number): THREE.BufferGeometry {
-  // detail 1 (42 vertices) gives a lumpy-enough silhouette for a boulder.
-  const geo = new THREE.IcosahedronGeometry(1, 1);
+  // IcosahedronGeometry duplicates vertices along face/UV seams. Deforming those
+  // copies independently pulled adjacent triangles apart into literal holes, so weld
+  // the closed shell first and then move each shared vertex exactly once.
+  const source = new THREE.IcosahedronGeometry(1, 1);
+  source.deleteAttribute('normal');
+  source.deleteAttribute('uv');
+  const geo = mergeVertices(source);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const arr = pos.array as Float32Array;
   for (let i = 0; i < pos.count; i++) {
@@ -292,6 +309,23 @@ function buildScrub(): THREE.BufferGeometry {
   return mergeGeometries([lump(0.34, 0, 0.22, 0), lump(0.24, 0.28, 0.15, 0.1), lump(0.2, -0.2, 0.14, -0.22)]);
 }
 
+let _scrubForm: PropForm | null = null;
+function scrubForm(): PropForm {
+  _scrubForm ??= {
+    id: 'scrub',
+    geometry: buildScrub(),
+    material: matScrub,
+    baseRadius: 0.42,
+    height: 0.45,
+    collider: 'capsule',
+    sink: 0.3,
+    rotate3d: false,
+    minScale: 0.7,
+    maxScale: 1.6,
+  };
+  return _scrubForm;
+}
+
 let _sandForms: PropForm[] | null = null;
 function sandForms(): PropForm[] {
   if (!_sandForms) {
@@ -300,7 +334,7 @@ function sandForms(): PropForm[] {
       { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7 },
       { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
       { id: 'trunk', geometry: buildFallenTrunk(), material: matDeadStick, baseRadius: 0.42, height: 0.5, collider: 'box', colliderHalf: [1.55, 0.45, 0.28], sink: 0.25, rotate3d: false, minScale: 0.8, maxScale: 1.45 },
-      { id: 'scrub', geometry: buildScrub(), material: matScrub, baseRadius: 0.42, height: 0.45, collider: 'none', sink: 0.3, rotate3d: false, minScale: 0.7, maxScale: 1.6 },
+      scrubForm(),
     ];
   }
   return _sandForms;
@@ -310,10 +344,10 @@ let _rockForms: PropForm[] | null = null;
 function rockForms(): PropForm[] {
   if (!_rockForms) {
     _rockForms = [
-      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'box', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'box', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9 },
+      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
+      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'hull', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9 },
     ];
   }
   return _rockForms;
@@ -357,9 +391,9 @@ let _pieces: Record<string, readonly PropPiece[]> | null = null;
 /** Pieces for a form that comes apart, or null for one that does not. */
 export function propPieces(formId: string): readonly PropPiece[] | null {
   if (!_pieces) {
-    const lump = (r: number): THREE.BufferGeometry => {
+    const lump = (r: number, squashY = 0.8): THREE.BufferGeometry => {
       const g = new THREE.IcosahedronGeometry(r, 0);
-      g.scale(1, 0.8, 1);
+      g.scale(1, squashY, 1);
       return g;
     };
     _pieces = {
@@ -375,6 +409,11 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
         { geometry: lump(0.17), material: matScrub, offset: [-0.12, 0.14, -0.08], capsule: [0.05, 0.14], mass: 3 },
         { geometry: lump(0.15), material: matScrub, offset: [0.02, 0.3, -0.1], capsule: [0.05, 0.13], mass: 3 },
       ],
+      scrub: [
+        { geometry: lump(0.34, 0.65), material: matScrub, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4 },
+        { geometry: lump(0.24, 0.65), material: matScrub, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2 },
+        { geometry: lump(0.2, 0.65), material: matScrub, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2 },
+      ],
     };
   }
   return _pieces[formId] ?? null;
@@ -386,7 +425,7 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
  * want; the origin subtraction happens at the body.
  */
 export interface BreakableProp {
-  /** Packed cell identity, stable forever for a seed. See `propCellId`. */
+  /** Stable seed-derived identity: positive desert cell or negative road slot. */
   readonly id: number;
   readonly pieces: readonly PropPiece[];
   readonly x: number;
@@ -405,7 +444,7 @@ export interface BreakableProp {
 }
 
 /**
- * Whoever owns breaking. Structural on purpose: `world/props.ts` describes the desert
+ * Whoever owns breaking. Structural on purpose: `world/props.ts` describes scenery
  * and must not depend on the debris field that animates it.
  */
 export interface BreakableSink {
@@ -430,7 +469,7 @@ export function propCellId(cs: number, cl: number): number {
 
 interface ScatterPlacement {
   form: PropForm;
-  /** Packed cell identity; only meaningful for a form that can break. */
+  /** Stable prop identity; only meaningful for a form that can break. */
   id: number;
   x: number;
   y: number;
@@ -454,6 +493,31 @@ function yawRotation(yaw: number): Rot {
 function leanRotation(angle: number, az: number): Rot {
   _q1.setFromAxisAngle(_axis.set(Math.cos(az), 0, -Math.sin(az)), angle);
   return { x: _q1.x, y: _q1.y, z: _q1.z, w: _q1.w };
+}
+
+function eulerRotation(rx: number, ry: number, rz: number): Rot {
+  _q1.setFromEuler(_euler.set(rx, ry, rz));
+  return { x: _q1.x, y: _q1.y, z: _q1.z, w: _q1.w };
+}
+
+/**
+ * Builds a convex collider from the same local-space vertices as the visible rock.
+ * The scratch buffer is safe to reuse because `addStatic` creates the Rapier shape
+ * synchronously before the next placement is visited.
+ */
+function scaledHull(geometry: THREE.BufferGeometry, scale: number): RAPIER.ColliderDesc {
+  const position = geometry.getAttribute('position');
+  const length = position.count * 3;
+  if (_hullPoints.length !== length) _hullPoints = new Float32Array(length);
+  for (let i = 0; i < position.count; i++) {
+    const j = i * 3;
+    _hullPoints[j] = position.getX(i) * scale;
+    _hullPoints[j + 1] = position.getY(i) * scale;
+    _hullPoints[j + 2] = position.getZ(i) * scale;
+  }
+  const desc = RAPIER.ColliderDesc.convexHull(_hullPoints);
+  if (!desc) throw new Error('Rock geometry did not produce a convex hull collider');
+  return desc;
 }
 
 /**
@@ -602,6 +666,65 @@ export class ScatterProvider implements ChunkProvider {
       }
     }
 
+    // Dirt piles and solid rocks have independent deterministic streams. Each stream
+    // uses paired complementary gaps, which gives genuinely randomized 511..1212 m
+    // spacing without walking every previous hazard to locate an arbitrary chunk.
+    for (let kind = 0; kind < 2; kind++) {
+      const tag = kind === 0 ? TAG_ROAD_PILE : TAG_ROAD_ROCK;
+      const streamStart =
+        ROAD_HAZARD_START + hash01(seed, tag, 0x51a47) * ROAD_HAZARD_GAP_MAX;
+      const cycleStart = Math.max(0, Math.floor((ctx.sStart - streamStart) / ROAD_HAZARD_CYCLE) - 1);
+      const cycleEnd = Math.floor((ctx.sEnd - streamStart) / ROAD_HAZARD_CYCLE) + 1;
+
+      for (let cycle = cycleStart; cycle <= cycleEnd; cycle++) {
+        const firstGap =
+          ROAD_HAZARD_GAP_MIN +
+          hash01(seed, tag, cycle, 0) * (ROAD_HAZARD_GAP_MAX - ROAD_HAZARD_GAP_MIN);
+        for (let ordinal = 0; ordinal < 2; ordinal++) {
+          const s = streamStart + cycle * ROAD_HAZARD_CYCLE + (ordinal === 0 ? 0 : firstGap);
+          if (s < ctx.sStart || s >= ctx.sEnd) continue;
+
+          const candidate = cycle * 2 + ordinal;
+          let form: PropForm;
+          if (kind === 0) {
+            form = scrubForm();
+          } else {
+            const rocks = rockForms();
+            form = rocks[Math.floor(hash01(seed, tag, candidate, 1) * rocks.length)]!;
+          }
+
+          const scaleRoll = hash01(seed, tag, candidate, 2);
+          const scale = kind === 0 ? 0.9 + scaleRoll * 0.6 : 0.65 + scaleRoll * 0.7;
+          const radius = form.baseRadius * scale;
+          const lateralReach = Math.max(0, ROAD_HALF_WIDTH - radius - ROAD_HAZARD_EDGE_CLEARANCE);
+          const lateral = (hash01(seed, tag, candidate, 3) * 2 - 1) * lateralReach;
+          const p = ctx.road.offsetPoint(s, lateral);
+          const ry = hash01(seed, tag, candidate, 4) * Math.PI * 2;
+          const rx = form.rotate3d ? hash01(seed, tag, candidate, 5) * Math.PI * 2 : 0;
+          const rz = form.rotate3d ? hash01(seed, tag, candidate, 6) * Math.PI * 2 : 0;
+          // Even/odd negative ids keep the two streams disjoint from each other and
+          // from every positive desert-cell id.
+          const id = -1 - candidate * 2 - kind;
+          if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
+          const groundY = ctx.terrain.heightFromFrame(p.x, p.z, lateral, s);
+          placements.push({
+            form,
+            id,
+            x: p.x,
+            y: groundY - radius * form.sink,
+            z: p.z,
+            rx,
+            ry,
+            rz,
+            scale,
+            radius,
+            mesh: null,
+            instance: 0,
+          });
+        }
+      }
+    }
+
     // One InstancedMesh per form per chunk. The form geometry/material is shared
     // across chunks; only the instance buffers are per-chunk.
     const byForm = new Map<PropForm, ScatterPlacement[]>();
@@ -637,29 +760,38 @@ export class ScatterProvider implements ChunkProvider {
       for (const pl of placements) {
         const form = pl.form;
         if (form.collider === 'none') continue;
-        if (form.collider === 'box') {
-          if (form.colliderHalf) {
-            // A shaped box — the fallen trunk is three metres of one thing and a
-            // quarter-metre of another, so a cube around its radius would be a stump
-            // and a cube around its length a wall. Yawed with the form, because a log
-            // lying east-west is not the same obstacle as one lying north-south.
-            const [hx, hy, hz] = form.colliderHalf;
-            addStatic(
-              ctx,
-              bodies,
-              colliders,
-              pl.x,
-              pl.y + hy * pl.scale,
-              pl.z,
-              RAPIER.ColliderDesc.cuboid(hx * pl.scale, hy * pl.scale, hz * pl.scale),
-              SurfaceType.Rock,
-              yawRotation(pl.ry),
-            );
-            continue;
-          }
+        if (form.collider === 'hull') {
           if (pl.radius < ROCK_COLLIDER_MIN) continue; // pebbles: no collider
-          const half = pl.radius * 0.72;
-          addStatic(ctx, bodies, colliders, pl.x, pl.y + pl.radius * 0.4, pl.z, RAPIER.ColliderDesc.cuboid(half, half, half), SurfaceType.Rock);
+          addStatic(
+            ctx,
+            bodies,
+            colliders,
+            pl.x,
+            pl.y,
+            pl.z,
+            scaledHull(form.geometry, pl.scale),
+            SurfaceType.Rock,
+            eulerRotation(pl.rx, pl.ry, pl.rz),
+          );
+          continue;
+        }
+        if (form.collider === 'box') {
+          if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
+          // The fallen trunk is three metres of one thing and a quarter-metre of
+          // another, so a cube around its radius would be a stump and a cube around
+          // its length a wall. Yaw it with the visible form.
+          const [hx, hy, hz] = form.colliderHalf;
+          addStatic(
+            ctx,
+            bodies,
+            colliders,
+            pl.x,
+            pl.y + hy * pl.scale,
+            pl.z,
+            RAPIER.ColliderDesc.cuboid(hx * pl.scale, hy * pl.scale, hz * pl.scale),
+            SurfaceType.Rock,
+            yawRotation(pl.ry),
+          );
         } else {
           // Upright plant: a capsule sized to the shaft.
           const halfHeight = form.height * pl.scale * 0.42;
