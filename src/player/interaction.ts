@@ -643,7 +643,11 @@ export class Interaction {
 
 
     if (t.kind === 'pallet') {
-      const job = jobAt(this.world.state.seed, t.poiIndex);
+      const job = jobAt(
+        this.world.state.seed,
+        t.poiIndex,
+        this.world.state.settings.poiSpacingMetres,
+      );
       if (!job) return null;
       const km = (job.distanceM / 1000).toFixed(0);
       if (this.world.state.job) return `${job.cargoKg} kg — already hauling`;
@@ -879,7 +883,11 @@ export class Interaction {
     // next frame's lamp push — no chunk rebuild, nothing else to tell the player.
     if (t.kind === 'pallet') {
       if (this.world.state.job) return;
-      const job = jobAt(this.world.state.seed, t.poiIndex);
+      const job = jobAt(
+        this.world.state.seed,
+        t.poiIndex,
+        this.world.state.settings.poiSpacingMetres,
+      );
       if (!job || !resolved.carId) return;
       const trailer = this.trailers.hitchedTo(resolved.carId);
       if (!trailer || trailer.cargoKg > 0) return;

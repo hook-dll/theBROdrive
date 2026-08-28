@@ -23,7 +23,7 @@ import {
   oilCapacity,
 } from '../parts/registry';
 import { carModel, DEFAULT_CAR_MODEL_ID, modelEngine } from '../vehicle/carmodels';
-import { carModelMeasure } from '../render/carmodel';
+import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
@@ -51,6 +51,8 @@ const GARAGE_BACK_U = 14.0;
 const GARAGE_V0 = 0.4;
 const GARAGE_V1 = 5.4;
 const GARAGE_WALL_H = 2.7;
+/** Small free-fall inside the low garage; the open-world 0.75 m drop hits its roof. */
+const GARAGE_CAR_DROP_METRES = 0.08;
 
 /** House interior (shares the garage's back wall). */
 const HOUSE_BACK_U = 20.0;
@@ -572,7 +574,8 @@ export function createStartingCar(world: GameWorld): CarState {
 
   const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
   const carV = (GARAGE_V0 + GARAGE_V1) / 2;
-  const carY = L.floorY + carModelMeasure(DEFAULT_CAR_MODEL_ID).halfExtents[1] + 0.12;
+  const measure = carModelMeasure(DEFAULT_CAR_MODEL_ID);
+  const carY = carSpawnYAboveGround(measure, L.floorY, GARAGE_CAR_DROP_METRES);
   const [cx, cz] = L.toWorld(carU, carV);
   // Face the door: body +Z -> "toward the road" (-away), i.e. world +X here.
   const yaw = Math.atan2(-L.ax, -L.az);

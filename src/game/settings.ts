@@ -14,17 +14,15 @@ import { BINDABLE_ACTIONS } from '../core/input';
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
- * Rendering tier. Three points on one axis: how many pixels the scene is drawn at,
- * whether its edges are multisampled, and how many streetlamps are lit. None of it
- * touches the simulation, so a save plays identically under any of them.
+ * Rendering tier. Three deliberately separate internal-resolution targets; shadow
+ * and streetlight budgets follow the same low/standard/high ordering. MSAA remains
+ * an independent option.
  *
- *  - `acceptable`: for weak integrated GPUs. Measured on an Intel N100 / UHD
- *    Graphics, this is the difference between one frame in five missing its
- *    deadline and none of them doing so.
- *  - `standard`: the authored look, native resolution, edges smoothed.
- *  - `blessing`: for a machine with pixels to spare. Renders ABOVE native and
- *    downsamples, which is the one thing that genuinely removes aliasing from the
- *    ink outlines and the far dune ridges rather than merely softening it.
+ *  - `acceptable`: 60% of native and adaptive below that for weak integrated GPUs.
+ *  - `standard`: the authored look at native resolution.
+ *  - `blessing`: up to 2x native resolution per axis, locked against adaptive
+ *    downscaling. The final resolve into the display is supersampling, not a quality
+ *    reduction: four internal pixels contribute to each native pixel.
  */
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 
@@ -72,6 +70,8 @@ export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
   dayCycleMinutes: number;
+  /** Metres between POI slots. Clamped to 500..5000 in 100 m increments. */
+  poiSpacingMetres: number;
   /**
    * Mouse-look radians per CSS pixel. Stored as a preference so pointer lock has
    * the same feel across sessions.
@@ -116,6 +116,10 @@ export interface Settings {
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
 export const DAY_CYCLE_MAX_MINUTES = 128;
+export const POI_SPACING_MIN_METRES = 500;
+export const POI_SPACING_MAX_METRES = 5000;
+export const POI_SPACING_STEP_METRES = 100;
+export const DEFAULT_POI_SPACING_METRES = 1200;
 
 export const DEFAULT_MASTER_VOLUME = 0.8;
 export const DEFAULT_RADIO_VOLUME = 0.6;
@@ -135,6 +139,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // hand stays one wheel notch away for anyone who wants it.
   gearboxMode: 'automatic',
   dayCycleMinutes: DEFAULT_DAY_CYCLE_MINUTES,
+  poiSpacingMetres: DEFAULT_POI_SPACING_METRES,
   mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
   masterVolume: DEFAULT_MASTER_VOLUME,
   radioVolume: DEFAULT_RADIO_VOLUME,
@@ -189,6 +194,10 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.dayCycleMinutes === 'number' && Number.isFinite(obj.dayCycleMinutes)
       ? obj.dayCycleMinutes
       : DEFAULT_DAY_CYCLE_MINUTES;
+  const poiSpacingRaw =
+    typeof obj.poiSpacingMetres === 'number' && Number.isFinite(obj.poiSpacingMetres)
+      ? obj.poiSpacingMetres
+      : DEFAULT_POI_SPACING_METRES;
 
   const sensitivityRaw =
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
@@ -207,6 +216,11 @@ export function sanitizeSettings(raw: unknown): Settings {
     // historical mode, and the safe fallback for garbage input.
     gearboxMode: obj.gearboxMode === 'automatic' ? 'automatic' : 'manual',
     dayCycleMinutes: Math.min(DAY_CYCLE_MAX_MINUTES, Math.max(DAY_CYCLE_MIN_MINUTES, dayCycleRaw)),
+    poiSpacingMetres:
+      Math.round(
+        Math.min(POI_SPACING_MAX_METRES, Math.max(POI_SPACING_MIN_METRES, poiSpacingRaw)) /
+          POI_SPACING_STEP_METRES,
+      ) * POI_SPACING_STEP_METRES,
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
     masterVolume: volume(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     radioVolume: volume(obj.radioVolume, DEFAULT_RADIO_VOLUME),

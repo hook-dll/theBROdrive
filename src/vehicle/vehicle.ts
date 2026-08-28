@@ -937,6 +937,8 @@ const COM_REARWARD_FRACTION = 0.02;
 /** Headlight placement as fractions of the chassis box (x of half-width, y of height). */
 const HEADLIGHT_X_FRACTION = 0.62;
 const HEADLIGHT_Y_FRACTION = 0.28;
+/** Minimum real height of a lamp above the settled tyre contact plane. */
+const HEADLIGHT_MIN_HEIGHT = 0.65;
 
 /**
  * Beam geometry per mode.
@@ -957,6 +959,12 @@ interface HeadlightBeam {
   readonly targetDrop: number;
   /** Exponent in Three's distance attenuation `intensity / distance^decay`. */
   readonly decay: number;
+}
+
+interface HeadlightVisual {
+  readonly light: THREE.SpotLight;
+  /** Beam target in chassis-local coordinates, transformed explicitly every frame. */
+  readonly aimLocal: THREE.Vector3;
 }
 
 /**
@@ -1045,7 +1053,7 @@ export class Vehicle implements Rebasable {
   private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
-  private headlights: THREE.SpotLight[] = [];
+  private headlights: HeadlightVisual[] = [];
   private headlightMode: HeadlightMode = 'off';
   /** Perceptual suppression under daylight; one at night, near zero at full day. */
   private headlightEnvironmentFactor = 1;
@@ -1430,7 +1438,6 @@ export class Vehicle implements Rebasable {
     // Gizmos change the mass; re-apply so the CoG stays low and rearward.
     this.applyChassisMass(stats.mass);
 
-    this.buildVisuals();
 
     const rapier = this.physics.rapier;
     this.controller = new rapier.DynamicRayCastVehicleController(
@@ -1465,6 +1472,9 @@ export class Vehicle implements Rebasable {
     const contactY = mountY - hangs - this.measure.wheels[0].radius;
     this.rollLeverArm = Math.max(0.1, comY - contactY);
     this.contactPlaneY = contactY;
+    // Headlight height is measured from the settled contact plane, so a low skirt
+    // or oddly-centred model cannot put the light source below an uphill surface.
+    this.buildVisuals();
 
     for (const wheel of this.measure.wheels) {
       const index = this.controller.numWheels();
@@ -1585,13 +1595,14 @@ export class Vehicle implements Rebasable {
     const n = this.wheels.length;
     // Being shoved suspends the hold, not the brake. The hold is a teleport — it
     // re-places the chassis at `parkingHoldPos` every step — so with it active no
-    // impulse from anywhere can move the car at all: the push would be silently
-    // undone one tick later, which is exactly what a player leaning on a parked car
-    // used to see. The brake stays on, weakened, which is what makes the car creep
-    // rather than slide and stop the moment the shoulder comes off it.
+    // impulse from anywhere can move the car at all.
+    //
+    // Crucially, a newly spawned car is NOT held yet. The old unconditional request
+    // latched its first airborne transform before gravity could land it; every menu
+    // and POI spawn therefore remained floating forever.
     const shoved = this.shoveTimer > 0;
     if (shoved) this.shoveTimer = Math.max(0, this.shoveTimer - dt);
-    this.parkingHoldRequested = !shoved;
+    this.parkingHoldRequested = false;
     // Nobody is driving, so there is no pedal. A trailer left coupled to a parked
     // car holds on its own brakes (uncoupled or not, it is not being towed).
     this.serviceBrakeCommand = 0;
@@ -1608,6 +1619,19 @@ export class Vehicle implements Rebasable {
     }
 
     controller.updateVehicle(dt);
+    // Latch only after suspension contact and vertical settlement. Two contacts let
+    // a car parked across a crest hold normally; an already-held car remains held.
+    let contacts = 0;
+    for (const w of this.wheels) {
+      if (controller.wheelIsInContact(w.index)) contacts++;
+    }
+    const verticalSpeed = Math.abs(this.chassisBody.linvel().y);
+    this.parkingHoldRequested =
+      !shoved &&
+      (
+        this.parkingHoldActive ||
+        (this.snapshotPrimed && contacts >= 2 && verticalSpeed < PARK_HOLD_SPEED_MPS)
+      );
   }
 
   /**
@@ -2393,6 +2417,16 @@ export class Vehicle implements Rebasable {
     this.rootGroup.position.copy(this.pos);
     this.rootGroup.quaternion.copy(this.quat);
 
+    // SpotLight targets are scene-level objects. Transform their authored local aim
+    // through the same interpolated chassis quaternion as the shell so pitch and roll
+    // follow an uphill, downhill or cross-slope pose exactly.
+    for (const headlight of this.headlights) {
+      headlight.light.target.position
+        .copy(headlight.aimLocal)
+        .applyQuaternion(this.quat)
+        .add(this.pos);
+    }
+
     // Wheels are chassis-local: suspension travel and spin are small, smooth and
     // already snapped to the same step, so they need no second interpolation.
     for (const w of this.wheels) {
@@ -2871,7 +2905,8 @@ export class Vehicle implements Rebasable {
    */
   private buildHeadlights(): void {
     const half = this.measure.halfExtents;
-    const y = -half[1] + HEADLIGHT_Y_FRACTION * 2 * half[1];
+    const authoredY = -half[1] + HEADLIGHT_Y_FRACTION * 2 * half[1];
+    const y = Math.max(authoredY, this.contactPlaneY + HEADLIGHT_MIN_HEIGHT);
     const z = half[2];
     for (const sign of [-1, 1]) {
       const x = sign * HEADLIGHT_X_FRACTION * half[0];
@@ -2886,12 +2921,20 @@ export class Vehicle implements Rebasable {
         1.5,
       );
       light.position.set(x, y, z);
-      light.target.position.set(x, y - HEADLIGHT_LOW.targetDrop, z + HEADLIGHT_LOW.targetDistance);
       light.castShadow = false;
       light.visible = true;
-      this.rootGroup.add(light.target);
+      // A scene-level target avoids relying on nested target matrix update order.
+      // `syncVisuals` writes its world position from the interpolated chassis pose.
+      this.scene.add(light.target);
       this.rootGroup.add(light);
-      this.headlights.push(light);
+      this.headlights.push({
+        light,
+        aimLocal: new THREE.Vector3(
+          x,
+          y - HEADLIGHT_LOW.targetDrop,
+          z + HEADLIGHT_LOW.targetDistance,
+        ),
+      });
     }
     this.applyHeadlightMode();
   }
@@ -2903,7 +2946,8 @@ export class Vehicle implements Rebasable {
         : this.headlightMode === 'low'
           ? HEADLIGHT_LOW
           : null;
-    for (const light of this.headlights) {
+    for (const headlight of this.headlights) {
+      const light = headlight.light;
       // Off keeps the beam geometry of the low mode and only kills the intensity, so
       // Three's spotlight shader permutation never changes when the driver switches.
       const shape = beam ?? HEADLIGHT_LOW;
@@ -2912,7 +2956,7 @@ export class Vehicle implements Rebasable {
       light.angle = shape.angle;
       light.penumbra = shape.penumbra;
       light.decay = shape.decay;
-      light.target.position.set(
+      headlight.aimLocal.set(
         light.position.x,
         light.position.y - shape.targetDrop,
         light.position.z + shape.targetDistance,
@@ -2927,6 +2971,7 @@ export class Vehicle implements Rebasable {
    * disposing here would blank out other cars.
    */
   private clearVisuals(): void {
+    for (const headlight of this.headlights) this.scene.remove(headlight.light.target);
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.wheelMeshes.clear();
   }

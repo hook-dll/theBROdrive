@@ -38,7 +38,10 @@ void main() {
   vColor = aColor;
   gl_Position = projectionMatrix * mvPosition;
   gl_Position.z = gl_Position.w;
-  gl_PointSize = clamp(1.5 + max(0.0, 2.0 - observedMagnitude) * 0.48, 1.5, 4.2);
+  // At least three device pixels across. A 1.5 px point alternated between one and
+  // four covered pixels as the celestial sphere moved, making faint stars jump from
+  // black to full brightness. An integer-sized footprint keeps total energy stable.
+  gl_PointSize = clamp(3.0 + max(0.0, 2.0 - observedMagnitude) * 0.45, 3.0, 5.0);
 }
 `;
 
@@ -53,10 +56,11 @@ void main() {
   vec2 p = gl_PointCoord - 0.5;
   float r2 = dot(p, p);
   if (r2 > 0.25) discard;
-  float psf = exp(-r2 * 18.0);
-  // Pixel coverage, not catalogue flux, was the deep-night visibility bottleneck
-  // on low-resolution tiers. Preserve magnitude ratios while lifting the shared gain.
-  float energy = vFlux * uExposure * uSkyVisibility * 180.0;
+  float psf = exp(-r2 * 12.0);
+  // The wider footprint carries roughly three times the pixel area of the old
+  // 1.5 px point, so reduce per-pixel gain to retain catalogue brightness without
+  // restoring the saturated white/black flicker.
+  float energy = vFlux * uExposure * uSkyVisibility * 60.0;
   float alpha = min(1.0, energy * psf) * (1.0 - vMoonMask);
   if (alpha < 0.003) discard;
   gl_FragColor = vec4(vColor, alpha);

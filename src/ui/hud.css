@@ -1400,16 +1400,16 @@ body {
 /* ------------------------------------------------------------------ *
  *  Touch controls (phones and tablets)                               *
  *                                                                    *
- *  Built by core/touch.ts on first touch. Sticks sit high and inset   *
- *  like a handheld console; face buttons sit directly beneath each     *
- *  stick and a sprung camera fader occupies the right shoulder gap.    *
+ *  The driving sticks live low where thumbs naturally rest; face      *
+ *  buttons form two blocks immediately above them, and the camera     *
+ *  fader stays with the look thumb.                                  *
  * ------------------------------------------------------------------ */
 
 .touch-ui {
   --touch-stick-size: clamp(108px, 30vh, 138px);
   --touch-button-size: clamp(44px, 12vh, 54px);
   --touch-edge-gap: clamp(48px, 8vw, 92px);
-  --touch-top-gap: calc(52px + env(safe-area-inset-top));
+  --touch-bottom-gap: calc(32px + env(safe-area-inset-bottom));
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -1456,12 +1456,14 @@ body {
 }
 
 .touch-stick--move {
-  top: calc(var(--touch-top-gap) + 12px);
+  top: auto;
+  bottom: calc(var(--touch-bottom-gap) + 12px);
   left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
 }
 
 .touch-stick--look {
-  top: calc(var(--touch-top-gap) + 12px);
+  top: auto;
+  bottom: calc(var(--touch-bottom-gap) + 12px);
   right: calc(var(--touch-edge-gap) + env(safe-area-inset-right));
 }
 
@@ -1490,7 +1492,8 @@ body {
 
 .touch-zoom-fader {
   position: fixed;
-  top: calc(var(--touch-top-gap) + 12px);
+  top: auto;
+  bottom: calc(var(--touch-bottom-gap) + 12px);
   right: calc(10px + env(safe-area-inset-right));
   width: 28px;
   height: calc(var(--touch-stick-size) - 28px);
@@ -1564,11 +1567,12 @@ body {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.36);
   will-change: transform;
 }
-/* Handheld face clusters directly below their matching sticks. The left keeps
-   a three-button triangle; the right adds V as the bottom of a four-button diamond. */
+/* Face clusters sit above their matching sticks, leaving the low edge clear for
+   natural thumb reach and the device's gesture area. */
 .touch-buttons {
   position: fixed;
-  top: calc(var(--touch-top-gap) + var(--touch-stick-size) + 24px);
+  top: auto;
+  bottom: calc(var(--touch-bottom-gap) + var(--touch-stick-size) + 36px);
   width: var(--touch-stick-size);
   height: calc(var(--touch-button-size) * 1.95);
   pointer-events: none;

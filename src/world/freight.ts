@@ -46,8 +46,9 @@ const JOB_KINDS: readonly Poi['kind'][] = ['gas_stop', 'workshop'];
 const CARGO_MIN = 180;
 const CARGO_MAX = 700;
 /**
- * Haul length in POI slots. Four slots is ~4.8 km — long enough that you commit to
- * it, short enough that a dry tank is a setback rather than the end of the run.
+ * Haul length in POI slots. Four slots is roughly 4.8 km at the default spacing —
+ * long enough that you commit to it, short enough that a dry tank is a setback
+ * rather than the end of the run.
  */
 const HAUL_SLOTS_MIN = 4;
 const HAUL_SLOTS_MAX = 26;
@@ -59,18 +60,18 @@ const HAUL_SLOTS_MAX = 26;
  * occupancy is 55%, so a raw offset would half the time name empty desert, and a
  * sign standing in open sand with nothing behind it would read as a bug.
  */
-export function jobAt(seed: number, index: number): FreightJob | null {
-  const from = poiAt(seed, index);
+export function jobAt(seed: number, index: number, poiSpacing = POI_SPACING): FreightJob | null {
+  const from = poiAt(seed, index, poiSpacing);
   if (!from || !JOB_KINDS.includes(from.kind)) return null;
   if (hash01(seed, FREIGHT_DOMAIN, index) >= JOB_CHANCE) return null;
 
   const span = HAUL_SLOTS_MAX - HAUL_SLOTS_MIN;
   const wanted = index + HAUL_SLOTS_MIN + Math.floor(hash01(seed, FREIGHT_DOMAIN, index, 1) * span);
-  const lastSlot = Math.floor(ROAD_LENGTH / POI_SPACING);
+  const lastSlot = Math.floor(ROAD_LENGTH / poiSpacing);
 
   let to: Poi | null = null;
   for (let i = wanted; i <= lastSlot; i++) {
-    const candidate = poiAt(seed, i);
+    const candidate = poiAt(seed, i, poiSpacing);
     if (candidate) {
       to = candidate;
       break;

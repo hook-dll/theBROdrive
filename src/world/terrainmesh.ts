@@ -231,8 +231,6 @@ const OWN_TOLERANCE = OWN_SAMPLE_STEP * 0.75;
  * colour cycle; asphalt, cracked asphalt and concrete never appear on terrain.
  */
 const sandLinear = new THREE.Color();
-const rockLinear = new THREE.Color();
-const gravelLinear = new THREE.Color();
 
 /**
  * One arclength row's road frame: the centreline point, and the unit vector a lateral
@@ -574,8 +572,6 @@ export class TerrainMeshProvider implements ChunkProvider {
       // the seam row's colour, and a chunk rebuilt after unloading is identical.
       const palette = desertPaletteAt(s);
       sandLinear.setHex(palette.sand);
-      rockLinear.setHex(palette.rock);
-      gravelLinear.setHex(palette.gravel);
       setRowFrame(road, s);
       const originX = rowFrame.x;
       const originZ = rowFrame.z;
@@ -594,14 +590,12 @@ export class TerrainMeshProvider implements ChunkProvider {
         positions[vi * 3 + 2] = pz - oz;
         lateralOf[vi] = lateral;
 
-        const surface = terrain.surfaceFromFrame(px, pz, lateral);
-        const surfaceColor =
-          surface === SurfaceType.Rock ? rockLinear
-          : surface === SurfaceType.Gravel ? gravelLinear
-          : sandLinear;
-        colors[vi * 3] = surfaceColor.r;
-        colors[vi * 3 + 1] = surfaceColor.g;
-        colors[vi * 3 + 2] = surfaceColor.b;
+        // Visual desert is one consistently lit sand colour. Surface classification
+        // remains in Terrain for tyre grip and spray, but painting gravel verges and
+        // outcrops darker made them read as the shadow patches reported in play.
+        colors[vi * 3] = sandLinear.r;
+        colors[vi * 3 + 1] = sandLinear.g;
+        colors[vi * 3 + 2] = sandLinear.b;
       }
     }
 
@@ -760,8 +754,6 @@ export class TerrainMeshProvider implements ChunkProvider {
     for (let j = 0; j < fineRows; j++) {
       const palette = desertPaletteAt(sStart + j * FINE_STEP);
       sandLinear.setHex(palette.sand);
-      rockLinear.setHex(palette.rock);
-      gravelLinear.setHex(palette.gravel);
       const nearRow = rowLow[j]! * latCount;
       const farRow = nearRow + latCount;
       const alongWeight = rowWeight[j]!;
@@ -792,14 +784,9 @@ export class TerrainMeshProvider implements ChunkProvider {
         positions[vi * 3 + 2] = z;
         lateralOf[vi] = lateral;
 
-        const surface = terrain.surfaceFromFrame(px, pz, lateral);
-        const surfaceColor =
-          surface === SurfaceType.Rock ? rockLinear
-          : surface === SurfaceType.Gravel ? gravelLinear
-          : sandLinear;
-        colors[vi * 3] = surfaceColor.r;
-        colors[vi * 3 + 1] = surfaceColor.g;
-        colors[vi * 3 + 2] = surfaceColor.b;
+        colors[vi * 3] = sandLinear.r;
+        colors[vi * 3 + 1] = sandLinear.g;
+        colors[vi * 3 + 2] = sandLinear.b;
       }
     }
 
@@ -858,9 +845,17 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
-    geometry.computeVertexNormals();
+    // Upward normals keep direct sun uniform across the desert while preserving
+    // day/night and lamp lighting. Geometric slope normals were the remaining
+    // "shadow" patches after shadow-map reception was disabled.
+    const normals = new Float32Array(positions.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
-    mesh.receiveShadow = true;
+    // The shadow-map frustum moves with the camera. Receiving it made its edge read
+    // as kilometre-scale dark plates across otherwise sunlit sand, so terrain uses
+    // its direct/hemisphere light uniformly instead.
+    mesh.receiveShadow = false;
     const group = new THREE.Group();
     group.add(mesh);
 

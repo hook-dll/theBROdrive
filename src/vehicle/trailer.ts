@@ -156,9 +156,8 @@ export const TRAILER_MODEL_FIT: TrailerFit = {
 } as const;
 
 /**
- * How high the bed centre sits above the ground once settled — the trailer's
- * analogue of a car's measured `spawnHeight`, used by the dev spawn tool to drop it
- * onto its wheels instead of through them.
+ * How high the bed centre sits above ground before its additional drop clearance.
+ * The dev tool uses it to create the trailer in clear air above its wheels.
  */
 export const TRAILER_SPAWN_HEIGHT = BED_HALF[1] + WHEEL_RADIUS;
 
@@ -396,6 +395,22 @@ export class Trailer implements Rebasable {
     const model = createTrailerModel();
     this.root.add(model.body);
     this.drawbarMountZ = model.drawbarMountZ;
+
+    // The physical bed collider ends where the cargo box ends, while the action the
+    // player aims at is the coupler out on the tongue. A sensor along the procedural
+    // drawbar makes that visible geometry ray-pickable without letting a long narrow
+    // collision box snag the towing car or the road. TrailerField registers it with
+    // the same trailer id as the bed and prop colliders.
+    const hitchZ = BED_HALF[2] + DRAWBAR_LENGTH;
+    const drawbarStart = Math.min(this.drawbarMountZ, hitchZ);
+    const drawbarLength = Math.max(0.05, hitchZ - drawbarStart);
+    physics.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.14, 0.14, drawbarLength / 2)
+        .setTranslation(0, HITCH_LOCAL_Y, drawbarStart + drawbarLength / 2)
+        .setDensity(0)
+        .setSensor(true),
+      this.body,
+    );
 
     // Unit-length bar along +Z, scaled per coupling so the drawn tongue always
     // reaches exactly to the joint.

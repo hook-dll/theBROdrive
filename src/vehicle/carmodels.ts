@@ -1585,6 +1585,11 @@ export const SPAWNABLE_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
   (m) => m.spawnable,
 );
 
+/** Static wreck-only models, kept out of the roadworthy spawn pool by construction. */
+export const WRECK_ONLY_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
+  (model) => !model.spawnable,
+);
+
 const BY_ID = new Map(CAR_MODELS.map((m) => [m.id, m]));
 
 /** The model a new game starts in and every fallback resolves to. */

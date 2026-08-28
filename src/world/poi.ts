@@ -1,15 +1,23 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-
 import { hash, hash01, pick } from '../core/rng';
+import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
 import type { CarState, GameWorld } from '../game/state';
 import { coolantCapacity, oilCapacity, variant, type FuelType } from '../parts/registry';
 import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
 import { makeFlatMaterial } from '../render/materials';
-import { carModelMeasure, createStaticCarModel } from '../render/carmodel';
-import { CAR_MODELS, SPAWNABLE_CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
+import {
+  carModelMeasure,
+  carSpawnYAboveGround,
+  createStaticCarModel,
+} from '../render/carmodel';
+import {
+  SPAWNABLE_CAR_MODELS,
+  WRECK_ONLY_CAR_MODELS,
+  type CarModelDef,
+} from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import { jobAt, type FreightField } from './freight';
@@ -30,8 +38,8 @@ import type { WreckTrunkField } from './wrecktrunks';
  * the player already took is simply absent.
  */
 
-/** Metres of arclength between POI slots. */
-const POI_SPACING = 1200;
+/** Default metres of arclength between POI slots. */
+export const POI_SPACING = DEFAULT_POI_SPACING_METRES;
 /** Fraction of slots that contain a POI; the rest read as empty desert. */
 const POI_OCCUPANCY = 0.55;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
@@ -61,14 +69,19 @@ export interface Poi {
  * stable across sessions and directly usable as a `lootedPois` entry. Pure and
  * order-independent: no road or terrain sampling happens here.
  */
-export function poisBetween(seed: number, fromS: number, toS: number): Poi[] {
+export function poisBetween(
+  seed: number,
+  fromS: number,
+  toS: number,
+  spacing = POI_SPACING,
+): Poi[] {
   const result: Poi[] = [];
-  const firstIndex = Math.max(1, Math.ceil(fromS / POI_SPACING));
+  const firstIndex = Math.max(1, Math.ceil(fromS / spacing));
   // `toS - 1e-6` keeps a POI exactly on the upper boundary in the next chunk.
-  const lastIndex = Math.floor((toS - 1e-6) / POI_SPACING);
+  const lastIndex = Math.floor((toS - 1e-6) / spacing);
 
   for (let i = firstIndex; i <= lastIndex; i++) {
-    const s = i * POI_SPACING;
+    const s = i * spacing;
     if (s <= 0 || s > ROAD_LENGTH) continue;
 
     if (hash01(seed, POI_DOMAIN, i) >= POI_OCCUPANCY) continue;
@@ -99,9 +112,9 @@ export function poisBetween(seed: number, fromS: number, toS: number): Poi[] {
  * `poisBetween`, factored out so the freight system can resolve a destination slot
  * without sampling a whole stretch of road.
  */
-export function poiAt(seed: number, index: number): Poi | null {
+export function poiAt(seed: number, index: number, spacing = POI_SPACING): Poi | null {
   if (index < 1) return null;
-  const s = index * POI_SPACING;
+  const s = index * spacing;
   if (s <= 0 || s > ROAD_LENGTH) return null;
   if (hash01(seed, POI_DOMAIN, index) >= POI_OCCUPANCY) return null;
 
@@ -122,7 +135,6 @@ export function poiAt(seed: number, index: number): Poi | null {
   };
 }
 
-export { POI_SPACING };
 
 /** Running sub-index so every generated part/item in a POI gets a distinct id. */
 interface LootCounter {
@@ -553,7 +565,7 @@ function buildFreight(
 
   // The pallet: present only where the seed says there is a load, the player is not
   // already carrying one from here, and this stop has not been cleared before.
-  const job = jobAt(ctx.world.seed, poi.index);
+  const job = jobAt(ctx.world.seed, poi.index, ctx.world.state.settings.poiSpacingMetres);
   if (!job) return;
   const s = ctx.world.state;
   const taken = s.job !== null && s.job.fromPoi === poi.index;
@@ -656,9 +668,12 @@ function buildWrecks(
 
   for (let w = 0; w < count; w++) {
     const isWorkingCar = w === workingSlot;
-    const pool = isWorkingCar ? SPAWNABLE_CAR_MODELS : CAR_MODELS;
+    // Working finds are roadworthy; ordinary shells come from the wreck-only
+    // catalogue so the debris models cannot disappear behind random spawnable picks.
+    const pool = isWorkingCar ? SPAWNABLE_CAR_MODELS : WRECK_ONLY_CAR_MODELS;
     const def: CarModelDef = pick(pool, poi.variantSeed, w, 10);
-    const half = carModelMeasure(def.id).halfExtents;
+    const measure = carModelMeasure(def.id);
+    const half = measure.halfExtents;
     const carId = ctx.world.generatedPartId('poi-car', poi.index, w);
 
     // A generated working car stays in world state after it is driven away. Never
@@ -686,9 +701,12 @@ function buildWrecks(
     // Distant scenery shows the future working car as an upright static model.
     // Promotion into the physics band replaces it with a real Vehicle.
     if (isWorkingCar && ctx.hasPhysics) {
+      // The distant static preview stands on the terrain; promotion creates the
+      // physical car in clear air so gravity and suspension determine its ride height.
+      const spawnY = carSpawnYAboveGround(measure, p.y);
       ctx.world.apply({
         t: 'car_add',
-        car: makeWorkingCar(ctx, poi, w, def, p.x, originY, p.z, yaw),
+        car: makeWorkingCar(ctx, poi, w, def, p.x, spawnY, p.z, yaw),
       });
       continue;
     }
@@ -1094,8 +1112,12 @@ export class PoiProvider implements ChunkProvider {
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
-    const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
-    if (pois.length === 0) return null;
+    const pois = poisBetween(
+      ctx.world.seed,
+      ctx.sStart,
+      ctx.sEnd,
+      ctx.world.state.settings.poiSpacingMetres,
+    );
 
     const group = new THREE.Group();
     group.name = 'poi';

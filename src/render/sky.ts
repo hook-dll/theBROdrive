@@ -56,6 +56,8 @@ const SHADOW_MIN_ELEVATION = 0.26;
 const SHADOW_FADE_ELEVATION = 0.12;
 
 
+/** Deliberate presentation scale: the physically correct disc read too small in play. */
+const MOON_VISUAL_SCALE = 3;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
@@ -403,8 +405,10 @@ void main() {
   col += uSunColor * disc * 2.0;
   col += uSunGlowColor * glow * uSunGlowIntensity;
 
-  // Real lunar phase. The visible hemisphere faces -uMoonDir; illumination
-  // comes from uSunDir, so the terminator automatically points toward the Sun.
+  // Lunar phase from real Sun/Moon geometry. The near-side sphere normal faces
+  // -uMoonDir at disc centre; only points whose normal faces the Sun are visible.
+  // The old shader replaced the entire disc with a dark lunar colour first, so even
+  // its unlit hemisphere remained a complete circle and every phase read "full".
   float md = dot(dir, uMoonDir);
   float moonEdge = cos(uMoonAngularRadius);
   float moonAa = max(fwidth(md) * 0.5, 0.0000001);
@@ -413,9 +417,12 @@ void main() {
   float moonR2 = dot(moonOffset, moonOffset);
   float moonDepth = sqrt(max(0.0, 1.0 - moonR2));
   vec3 moonNormal = normalize(moonOffset - uMoonDir * moonDepth);
-  float moonLit = max(dot(moonNormal, uSunDir), 0.0);
-  vec3 moonSurface = vec3(0.82, 0.80, 0.72) * (0.018 + moonLit * uMoonSurfaceBrightness);
-  col = mix(col, moonSurface, mdisc * uMoonAmount);
+  float moonLambert = dot(moonNormal, uSunDir);
+  float phaseMask = smoothstep(-0.01, 0.02, moonLambert);
+  float moonLit = sqrt(max(moonLambert, 0.0));
+  vec3 moonSurface =
+    vec3(0.82, 0.80, 0.72) * (0.2 + moonLit * 0.8) * uMoonSurfaceBrightness;
+  col = mix(col, moonSurface, mdisc * phaseMask * uMoonAmount);
 
 
   gl_FragColor = vec4(col, 1.0);
@@ -718,7 +725,8 @@ export class Sky {
     this.uSunDir.copy(celestial.sun.direction);
     this.uMoonDir.copy(celestial.moon.direction);
     this.uSunAngularRadius.value = celestial.sun.angularRadiusRad;
-    this.uMoonAngularRadius.value = celestial.moon.angularRadiusRad;
+    const visibleMoonRadius = celestial.moon.angularRadiusRad * MOON_VISUAL_SCALE;
+    this.uMoonAngularRadius.value = visibleMoonRadius;
     const moonFlux = Math.pow(10, -0.4 * (celestial.moon.magnitude + 12.74));
     this.uMoonSurfaceBrightness.value = THREE.MathUtils.clamp(
       moonFlux / Math.max(0.01, celestial.moon.phaseFraction),
@@ -761,7 +769,7 @@ export class Sky {
       this.exposure / 18_000,
       starVisibility,
       celestial.moon.direction,
-      celestial.moon.angularRadiusRad,
+      visibleMoonRadius,
     );
     this.planetField.update(celestial, this.exposure / 18_000);
 
