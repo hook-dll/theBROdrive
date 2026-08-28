@@ -156,6 +156,19 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+function wrapAngle(angle: number): number {
+  const wrapped = angle % (Math.PI * 2);
+  return wrapped > Math.PI
+    ? wrapped - Math.PI * 2
+    : wrapped < -Math.PI
+      ? wrapped + Math.PI * 2
+      : wrapped;
+}
+
+function isExternalMode(mode: CameraMode): boolean {
+  return mode === 'chase' || mode === 'orbit';
+}
+
 export class CameraRig {
   /** Driving-view selection survives a trip on foot; `mode` reports foot while walking. */
   private _mode: Exclude<CameraMode, 'foot'> = 'interior';
@@ -164,9 +177,16 @@ export class CameraRig {
   private yawValue = 0;
   private pitch = 0;
   private logDistance = Math.log(6);
-  /** External driving look survives while the shared yaw/pitch fields drive the foot camera. */
+  /**
+   * Driving look survives while the shared yaw/pitch fields drive the foot camera.
+   * Yaw is body-local in interior mode and world-space in chase/orbit.
+   */
   private drivingYaw = 0;
   private drivingPitch = 0;
+  /** Last rendered mode, used to preserve heading across interior/exterior switches. */
+  private previousMode: CameraMode = 'foot';
+  /** Last non-vertical vehicle heading; used only for explicit view transitions/recentre. */
+  private vehicleYaw = 0;
 
   /** Smoothed camera state — the only values exposed to the outside world. */
   private readonly eye = new THREE.Vector3();
@@ -177,6 +197,8 @@ export class CameraRig {
   private shakeTime = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
   private recentering = false;
+  /** World-space heading captured when an external-camera re-centre begins. */
+  private recenterYaw = 0;
 
   /**
    * Interior sway state: previous frame's chassis position/local speeds for
@@ -288,34 +310,49 @@ export class CameraRig {
       }
     }
 
+    const inputMode: CameraMode = onFoot ? 'foot' : this._mode;
+    if (!onFoot) this.updateVehicleYaw(target);
+    // Interior yaw is relative to the body; external yaw is absolute. Convert only
+    // on an authored camera switch. Once outside, subsequent chassis rotation has
+    // no path back into yaw, including while the car tumbles.
+    if (this.previousMode === 'interior' && isExternalMode(inputMode)) {
+      this.yawValue = wrapAngle(this.vehicleYaw + this.yawValue);
+    } else if (isExternalMode(this.previousMode) && inputMode === 'interior') {
+      this.yawValue = wrapAngle(this.yawValue - this.vehicleYaw);
+    }
+
     // `input.lookYaw` is rightward mouse motion. Forward is (sin y, cos y) and up is
     // +Y, so right is forward x up = (-cos y, sin y): rotating rightward therefore
     // *decreases* yaw. Hence the subtraction — getting this sign wrong inverts look.
     this.yawValue -= input.lookYaw;
     this.pitch = clamp(this.pitch + input.lookPitch, -PITCH_LIMIT, PITCH_LIMIT);
 
-    // Re-centre (V): ease yaw/pitch back to 0 so chase/orbit lands directly
-    // behind the car. Same exp(-omega*dt) decay the springs use — frame-rate
-    // independent, never overshoots. Two conditions cancel an in-progress ease:
-    // live mouse look (an ease must never fight the player; the press frame's
-    // own deltas were already applied above, and any *further* motion stops it)
-    // and a remaining error below RECENTER_EPSILON. On foot yaw is the movement
-    // basis (WASD is camera-relative, see player.ts), so there re-centre only
-    // levels the horizon — snapping foot yaw would spin the player under them.
+    // Re-centre (V): level pitch and, in an external view, ease toward the
+    // vehicle heading captured on the press frame so the car lands directly ahead.
+    // It uses the same frame-rate-independent decay as the position springs and
+    // never overshoots. Live mouse look cancels it so the ease cannot fight the
+    // player; settling below RECENTER_EPSILON completes it. On foot yaw is the
+    // movement basis (WASD is camera-relative, see player.ts), so there re-centre
+    // only levels the horizon instead of spinning the player under them.
     if (this.recentering && (input.lookYaw !== 0 || input.lookPitch !== 0)) {
       this.recentering = false;
     }
-    if (input.recenterCamera) this.recentering = true;
+    if (input.recenterCamera) {
+      this.recentering = true;
+      // Capture once: even a re-centre in progress must not inherit a wreck's spin.
+      this.recenterYaw = isExternalMode(inputMode) ? this.vehicleYaw : 0;
+    }
     if (this.recentering) {
       const k = 1 - Math.exp(-RECENTER_OMEGA * d);
       this.pitch += (0 - this.pitch) * k;
-      if (!onFoot) this.yawValue += (0 - this.yawValue) * k;
+      if (!onFoot) this.yawValue += wrapAngle(this.recenterYaw - this.yawValue) * k;
+      const yawError = wrapAngle(this.recenterYaw - this.yawValue);
       const settled =
         Math.abs(this.pitch) < RECENTER_EPSILON &&
-        (onFoot || Math.abs(this.yawValue) < RECENTER_EPSILON);
+        (onFoot || Math.abs(yawError) < RECENTER_EPSILON);
       if (settled) {
         this.pitch = 0;
-        if (!onFoot) this.yawValue = 0;
+        if (!onFoot) this.yawValue = this.recenterYaw;
         this.recentering = false;
       }
     }
@@ -339,6 +376,7 @@ export class CameraRig {
     }
 
     const mode: CameraMode = onFoot ? 'foot' : this._mode;
+    this.previousMode = mode;
 
     // Entering interior view — whether by stepping into the car or cycling
     // views back to it — must start the sway from a clean zero. Otherwise a
@@ -485,55 +523,41 @@ export class CameraRig {
     this.swayPrimed = false;
   }
 
-  private desiredArm(target: CameraTarget): void {
+  /**
+   * Records a stable horizontal heading for explicit transitions. Near vertical,
+   * the projected forward vector has no meaningful yaw, so keep the last good one.
+   */
+  private updateVehicleYaw(target: CameraTarget): void {
     _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.copy(_FORWARD).applyQuaternion(_qA); // full 3D forward (includes grade)
-
-    // Horizontal forward so the orbit stays level while the car pitches.
-    let fhx = _vC.x;
-    let fhz = _vC.z;
-    const flen = Math.hypot(fhx, fhz);
-    if (flen > 1e-6) {
-      fhx /= flen;
-      fhz /= flen;
-    } else {
-      fhx = 0;
-      fhz = 1;
+    _vC.copy(_FORWARD).applyQuaternion(_qA);
+    if (Math.hypot(_vC.x, _vC.z) > 1e-6) {
+      this.vehicleYaw = Math.atan2(_vC.x, _vC.z);
     }
+  }
 
-    // Look-at leads the car in its direction of travel, fading out at parking
-    // speed so a stationary car doesn't keep the camera aimed past it.
+  private desiredArm(target: CameraTarget): void {
+    // External cameras use a WORLD-space view heading. The chassis contributes
+    // position and speed only: yaw, pitch and roll can change arbitrarily during a
+    // wreck without rotating the view. Mouse input is the sole continuous source
+    // of external-camera orientation.
+    const viewX = Math.sin(this.yawValue);
+    const viewZ = Math.cos(this.yawValue);
+
+    // Keep the speed lead, but put it along the camera's own heading rather than
+    // the vehicle's forward axis. This preserves the framing without reintroducing
+    // chassis rotation through the look-at point.
     const lead =
       Math.min(LEAD_MAX, target.speedKmh * LEAD_PER_KMH) *
       smoothstep(LEAD_FADE_START, LEAD_FADE_END, target.speedKmh);
-    _vB.set(target.x, target.y, target.z).addScaledVector(_vC, lead);
+    _vB.set(target.x + viewX * lead, target.y, target.z + viewZ * lead);
 
-    // Arm direction: behind the car, orbit by yaw, then elevate by pitch.
-    // The arm points FROM the car TO the camera, i.e. it is the negation of the
-    // view direction. The free-look cameras build the view as (sin y, cos y),
-    // where yaw increase (mouse left) swings the view left — `update` subtracts
-    // lookYaw for exactly that reason. So here the view must rotate by -yaw
-    // (`R(-yaw)` applied to the car's forward), and the arm is that view
-    // negated: arm = -R(-yaw)*fh. Mirroring the components of `lookVector`
-    // blindly would orbit the camera the wrong way round the car and invert
-    // left/right in chase/orbit, which is exactly the bug this sign pair fixes.
-    const sy = Math.sin(this.yawValue);
-    const cy = Math.cos(this.yawValue);
-    // Pitch is SUBTRACTED here, and that sign is the difference between the two
-    // camera families agreeing about which way is down.
-    //
-    // A free-look camera turns the view: positive pitch tilts the view up, so mouse-up
-    // shows sky. An orbit camera cannot turn its view — it always points at the car —
-    // so the same intent has to be expressed by moving the CAMERA the other way: to
-    // tilt the view down you go UP and look down on the roof. Adding pitch did the
-    // opposite of that, which is why mouse-up used to show the roof and mouse-down the
-    // sky, inverted against the on-foot camera in the same game.
+    // The arm points from the look target to the eye, opposite the view heading.
+    // Pitch moves an orbiting eye opposite the requested look direction: mouse-up
+    // lowers armPitch until the eye sits below the target and therefore looks up.
     const armPitch = ORBIT_PITCH_BASE - this.pitch;
     const ca = Math.cos(armPitch);
     const sa = Math.sin(armPitch);
-    const armHx = -fhx * cy - fhz * sy;
-    const armHz = fhx * sy - fhz * cy;
-    _vD.set(armHx * ca, sa, armHz * ca);
+    _vD.set(-viewX * ca, sa, -viewZ * ca);
 
     _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance));
   }
