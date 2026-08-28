@@ -1811,14 +1811,16 @@ export class Vehicle implements Rebasable {
     // request applies now and the next automatic decision may override it.
     if (input.shift !== 0) this.drivetrain.shift(input.shift);
 
-    // The pedal opposite the current travel direction remains the service brake
-    // until the car is nearly stopped. In particular, W must not feed torque
-    // through an engaged reverse gear while it is still rolling backward.
+    // The pedal opposite an ENGAGED drive direction remains the service brake
+    // until the car is nearly stopped. Neutral is different: drive may engage
+    // during a slow rollback so engine torque, rather than the brakes, arrests it.
     const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
     const brakingForDirectionChange =
       automatic &&
       ((input.reverse && fwd > AUTO_DIRECTION_RELEASE_MPS) ||
-        (!input.reverse && fwd < -AUTO_DIRECTION_RELEASE_MPS));
+        (!input.reverse &&
+          fwd < -AUTO_DIRECTION_RELEASE_MPS &&
+          this.drivetrain.isReverseDriveEngaged));
     const reverseDrive =
       automatic &&
       input.reverse &&

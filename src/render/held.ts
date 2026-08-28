@@ -12,7 +12,7 @@
  * `renderer.render()`.
  */
 import * as THREE from 'three';
-import { createItemMesh } from './partmesh';
+import { createItemMesh, setBubbleGumPieceCount } from './partmesh';
 import { setCondition } from './materials';
 import { itemMass } from '../items/items';
 import type { Item } from '../items/items';
@@ -72,6 +72,13 @@ const RECOIL_BACK = 0.06;
 const RECOIL_PITCH = 0.3;
 const RECOIL_LIFT = 0.012;
 
+/* ---- bubble-gum pack: one quick hand-to-mouth cycle at the start of chewing ---- */
+const GUM_DETACH_T = 0.45;
+const GUM_MOUTH_X = 0.025;
+const GUM_MOUTH_Y = -0.085;
+const GUM_MOUTH_Z = -0.13;
+const GUM_MOUTH_ROLL = 0.12;
+
 /* ---- module-level scratch: `update` must not allocate ---- */
 const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
@@ -119,22 +126,43 @@ export class HeldItemView {
     item: Item | null,
     mode: CameraMode,
     dt: number,
-    opts: { usePrimary: boolean; moveMag: number; speedKmh: number },
+    opts: {
+      usePrimary: boolean;
+      moveMag: number;
+      speedKmh: number;
+      /** Normalized pack-to-mouth cycle, or -1 while no gum-use animation is running. */
+      gumUseProgress: number;
+      /** Sticks left after the current use; the detached stick remains visible until the mouth. */
+      gumCharges: number;
+    },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
 
-    // The viewmodel only belongs in the first-person view.
-    if (item === null || mode !== 'foot') {
+    // A spent pack remains for the return half of its animation even though the
+    // inventory has already removed it. Likewise, do not replace it with the newly
+    // selected slot until the hand has come back from the mouth.
+    const gumAnimating =
+      opts.gumUseProgress >= 0 &&
+      opts.gumUseProgress <= 1 &&
+      this.heldType === 'bubble_gum' &&
+      this.mesh !== null;
+    if (mode !== 'foot' || (item === null && !gumAnimating)) {
       this.root.visible = false;
       this.resetMotion();
       return;
     }
 
-    // Rebuild only when the held item actually changes.
-    if (item.type !== this.heldType || item.id !== this.heldId) {
+    // Rebuild only when the held item actually changes. A gum pack in flight owns
+    // the hand until it returns, including the final use where the pack is gone.
+    if (
+      item !== null &&
+      !gumAnimating &&
+      (item.type !== this.heldType || item.id !== this.heldId)
+    ) {
       this.rebuild(item);
       this.resetMotion();
     }
+    if (!this.mesh) return;
 
     this.root.visible = true;
     this.root.position.copy(this.camera.position);
@@ -144,8 +172,10 @@ export class HeldItemView {
     const t = this.time;
 
     // Heavy items sink toward centre for a two-handed carry; light ones stay
-    // to the side, one-handed.
-    const h = this.heaviness(itemMass(item));
+    // to the side, one-handed. During the final gum use `item` may already be null,
+    // but the returning empty wrapper is still the same 20 g viewmodel.
+    const visibleMass = this.heldType === 'bubble_gum' ? 0.02 : item ? itemMass(item) : 0.02;
+    const h = this.heaviness(visibleMass);
     const baseX = LIGHT_X + (HEAVY_X - LIGHT_X) * h;
     const baseY = LIGHT_Y + (HEAVY_Y - LIGHT_Y) * h;
     const baseZ = -(HOLD_DIST_LIGHT + (HOLD_DIST_HEAVY - HOLD_DIST_LIGHT) * h);
@@ -167,9 +197,27 @@ export class HeldItemView {
       roll += Math.sin(this.bobPhase) * WALK_ROLL * mag;
     }
 
-    // Use animation, per item type.
+    // Use animation, per item type. Gum is driven by the full use action rather
+    // than the mouse being held: a click completes one deliberate mouth cycle.
     const use = opts.usePrimary;
-    if (item.type === 'tool') {
+    if (this.heldType === 'bubble_gum') {
+      const gumProgress = opts.gumUseProgress;
+      let pieceCount = item?.type === 'bubble_gum' ? item.charges : 0;
+      if (gumProgress >= 0 && gumProgress <= 1) {
+        pieceCount = opts.gumCharges + (gumProgress < GUM_DETACH_T ? 1 : 0);
+        const rawReach =
+          gumProgress < GUM_DETACH_T
+            ? gumProgress / GUM_DETACH_T
+            : (1 - gumProgress) / (1 - GUM_DETACH_T);
+        const clampedReach = Math.max(0, Math.min(1, rawReach));
+        const reach = clampedReach * clampedReach * (3 - 2 * clampedReach);
+        ox += (GUM_MOUTH_X - baseX) * reach;
+        oy += (GUM_MOUTH_Y - baseY) * reach;
+        oz += (GUM_MOUTH_Z - baseZ) * reach;
+        roll += GUM_MOUTH_ROLL * reach;
+      }
+      setBubbleGumPieceCount(this.mesh, pieceCount);
+    } else if (item?.type === 'tool') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       if (item.tool === 'brush' || item.tool === 'sponge') {
         // A visible back-and-forth scrubbing stroke.
@@ -182,7 +230,7 @@ export class HeldItemView {
         if (use) this.scrubPhase += d * 9;
         roll += Math.sin(this.scrubPhase) * 0.12 * this.useT;
       }
-    } else if (item.type === 'fluid_can') {
+    } else if (item?.type === 'fluid_can') {
       // Tip forward and pour, with a slight slosh.
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       const pour = this.useT;
@@ -190,7 +238,7 @@ export class HeldItemView {
       oy += pour * POUR_LIFT;
       if (pour > 0.01) this.scrubPhase += d * 10;
       roll += Math.sin(this.scrubPhase) * 0.02 * pour;
-    } else if (item.type === 'weapon') {
+    } else if (item?.type === 'weapon') {
       // Recoil kick: once on the trigger edge, then once per shot cycle.
       if (use && item.loaded > 0) {
         if (!this.prevUse || this.shotClock >= item.cycleTime) {

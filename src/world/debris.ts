@@ -32,8 +32,8 @@ import type { BreakableProp, PropPiece } from './props';
  */
 const MAX_PIECES = 48;
 /**
- * Contact geometry decides whether a plant breaks. This runs after Rapier's step,
- * where a solid cactus may already have reduced chassis velocity to zero; gating on
+ * Contact geometry decides whether a prop breaks. This runs after Rapier's step,
+ * where a solid obstacle may already have reduced chassis velocity to zero; gating on
  * that post-collision velocity rejected the exact impacts this system handles.
  */
 const IMPACT_SKIN = 0.2;
@@ -164,8 +164,8 @@ export class DebrisField {
    * events and needs no event queue threaded through the world step.
    *
    * Proximity, not contact, and deliberately a shade generous: the collider must go off
-   * just BEFORE the car reaches it, so the car walks through the plant rather than
-   * bouncing off a capsule that then vanishes.
+   * just BEFORE the car reaches it, so the car walks through a breakable prop rather
+   * than bouncing off a collider that then vanishes.
    */
   update(impactor: Impactor | null): void {
     if (!impactor) {
@@ -286,8 +286,8 @@ export class DebrisField {
     // A wheel that runs over a piece is on the piece, not on the sand under it.
     this.physics.surfaces.register(collider.handle, SurfaceType.Rock);
 
-    // Momentum out of the impact, plus a burst away from the plant's own axis and a
-    // lift. Radial in XZ, so the far side of the plant leaves the far way.
+    // Momentum out of the impact, plus a burst away from the prop's own axis and a
+    // lift. Radial in XZ, so the far side leaves the far way.
     const bx = _offset.x - impactor.fx * 0.2;
     const bz = _offset.z - impactor.fz * 0.2;
     const burst = Math.hypot(bx, bz) || 1;

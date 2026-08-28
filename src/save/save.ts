@@ -8,6 +8,7 @@ import type {
   StickerState,
   TrailerState,
   WorldState,
+  GameWorld,
 } from '../game/state';
 import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
@@ -39,6 +40,28 @@ export interface SaveBackend {
   load(id: string): Promise<WorldState | null>;
   save(id: string, name: string, state: WorldState): Promise<void>;
   remove(id: string): Promise<void>;
+}
+
+/**
+ * Saves after every successful enter/exit delta. The microtask is load-bearing on
+ * exit: Interaction emits `exit_car` before teleporting the on-foot player, and the
+ * save must include that final exit position rather than the old hidden-player pose.
+ */
+export function installVehicleAutosave(
+  backend: Pick<SaveBackend, 'save'>,
+  world: GameWorld,
+  nameForState: (state: WorldState) => string,
+  onError: (error: unknown) => void,
+): () => void {
+  return world.onDelta((delta) => {
+    if (delta.t !== 'enter_car' && delta.t !== 'exit_car') return;
+    queueMicrotask(() => {
+      const state = world.state;
+      void backend
+        .save(`slot-${state.seed}`, nameForState(state), state)
+        .catch(onError);
+    });
+  });
 }
 
 const DB_NAME = 'thebrodrive-saves';

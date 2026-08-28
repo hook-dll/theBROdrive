@@ -33,6 +33,7 @@ import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
+import { WorldOrigin } from '../src/world/origin';
 
 export interface BenchResult {
   id: string;
@@ -99,7 +100,11 @@ function carState(modelId: string): CarState {
     id: 'bench',
     modelId,
     gizmos: {},
+    stickers: [],
     fuelLitres: 40,
+    coolantLitres: 10,
+    oilLitres: 10,
+    storage: [],
     odometer: 0,
     x: 0,
     y: 1.2,
@@ -143,18 +148,29 @@ function addGround(physics: PhysicsWorld): void {
   );
 }
 
-/** A 20° asphalt incline: steeper than the game's normal roads. */
-function addSlopeGround(physics: PhysicsWorld): void {
+function addInclineGround(physics: PhysicsWorld, degrees: number): void {
+  const halfDepth = 30;
+  const rise = Math.tan((degrees * Math.PI) / 180) * halfDepth;
   physics.addStaticTrimesh(
     new Float32Array([
-      -30, -10.92, -30,
-      30, -10.92, -30,
-      -30, 10.92, 30,
-      30, 10.92, 30,
+      -30, -rise, -halfDepth,
+      30, -rise, -halfDepth,
+      -30, rise, halfDepth,
+      30, rise, halfDepth,
     ]),
     new Uint32Array([0, 1, 2, 2, 1, 3]),
     SurfaceType.Asphalt,
   );
+}
+
+/** A 20° asphalt incline: steeper than the game's normal roads. */
+function addSlopeGround(physics: PhysicsWorld): void {
+  addInclineGround(physics, 20);
+}
+
+/** A normal-road incline steep enough to produce an immediate neutral rollback. */
+function addRollbackGround(physics: PhysicsWorld): void {
+  addInclineGround(physics, 8);
 }
 
 interface Rig {
@@ -183,9 +199,10 @@ async function makeRig(
   ground(physics);
   const world = new GameWorld(newWorldState(1));
   const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
   const state = carState(modelId);
   world.state.cars[state.id] = state;
-  const vehicle = new Vehicle(physics, world, state, scene);
+  const vehicle = new Vehicle(physics, world, state, scene, origin);
   const input = emptyInput();
   input.handbrake = settleWithHandbrake;
 
@@ -204,7 +221,7 @@ async function makeRig(
       qw: 1,
     };
     world.state.trailers[trailerState.id] = trailerState;
-    trailer = new Trailer(physics, world, trailerState, scene);
+    trailer = new Trailer(physics, world, trailerState, scene, origin);
     trailer.setCargo(trailerCargoKg);
     trailer.hitchTo(vehicle, state.id);
   }
@@ -304,15 +321,15 @@ export async function benchOne(
   {
     const rig = await makeRig(modelId, addGround, false, towKg);
     let t = 0;
-    let reached: number | null = null;
+    let reached = -1;
     drive(rig, 20, (_, f) => {
       f.throttle = 1;
       f.brake = 0;
       f.steer = 0;
-      if (reached === null && rig.vehicle.speedKmh >= 100) reached = t;
+      if (reached < 0 && rig.vehicle.speedKmh >= 100) reached = t;
       t += FIXED_DT;
     });
-    out.to100s = reached === null ? null : +reached.toFixed(2);
+    out.to100s = reached < 0 ? null : +reached.toFixed(2);
     out.speedAfter20s = +rig.vehicle.speedKmh.toFixed(1);
     rig.vehicle.dispose();
   }
@@ -681,4 +698,99 @@ export async function runParkingSlopeCheck(modelId = 'psx_saloon'): Promise<numb
     throw new Error(`Parking brake drifted ${driftM.toFixed(3)} m on a 20° slope`);
   }
   return driftM;
+}
+
+/**
+ * Regression check for an automatic starting in neutral on an incline. Once a
+ * slow rollback has begun, throttle must engage first and drive the car uphill
+ * without requiring the chassis to stop before the gearbox responds.
+ */
+export async function runAutomaticRollbackCheck(
+  modelId = 'psx_cruiser',
+): Promise<{ rollbackMps: number; recoveryS: number; finalMps: number }> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(modelId, addRollbackGround, true);
+  const movingMps = 0.1;
+
+  drive(rig, 0.25, (_, input) => {
+    input.throttle = 0;
+    input.brake = 0;
+    input.steer = 0;
+    input.handbrake = false;
+  });
+  const rollbackMps = rig.vehicle.audio.forwardMps;
+  if (rollbackMps >= -movingMps) {
+    rig.vehicle.dispose();
+    throw new Error(`Rollback precondition was only ${rollbackMps.toFixed(2)} m/s`);
+  }
+
+  let recoveryS = -1;
+  drive(rig, 4, (t, input) => {
+    input.throttle = 1;
+    input.brake = 0;
+    input.steer = 0;
+    input.handbrake = false;
+    if (recoveryS < 0 && rig.vehicle.audio.forwardMps > movingMps) recoveryS = t;
+  });
+  const finalMps = rig.vehicle.audio.forwardMps;
+  rig.vehicle.dispose();
+
+  if (recoveryS < 0 || finalMps <= movingMps) {
+    throw new Error(
+      `Automatic failed to recover from ${rollbackMps.toFixed(2)} m/s rollback; ` +
+        `final speed ${finalMps.toFixed(2)} m/s`,
+    );
+  }
+  return {
+    rollbackMps: +rollbackMps.toFixed(2),
+    recoveryS: +recoveryS.toFixed(2),
+    finalMps: +finalMps.toFixed(2),
+  };
+}
+
+/**
+ * Regression check for selecting reverse from neutral while already rolling
+ * backward. The flat road isolates reverse torque from gravity.
+ */
+export async function runAutomaticNeutralReverseCheck(
+  modelId = 'psx_cruiser',
+): Promise<{ rollbackMps: number; engagementS: number; finalMps: number }> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(modelId);
+  rig.vehicle.chassis.setLinvel({ x: 0, y: 0, z: -0.5 }, true);
+
+  drive(rig, FIXED_DT, (_, input) => {
+    input.throttle = 0;
+    input.brake = 0;
+    input.reverse = false;
+  });
+  const rollbackMps = rig.vehicle.audio.forwardMps;
+
+  let engagementS = -1;
+  drive(rig, 2, (t, input) => {
+    input.throttle = 0;
+    input.brake = 1;
+    input.steer = 0;
+    input.handbrake = false;
+    input.reverse = true;
+    if (engagementS < 0 && rig.vehicle.gearLabel === 'R') engagementS = t;
+  });
+  const finalMps = rig.vehicle.audio.forwardMps;
+  const finalGear = rig.vehicle.gearLabel;
+  rig.vehicle.dispose();
+
+  if (rollbackMps >= -0.1) {
+    throw new Error(`Reverse rollback precondition was only ${rollbackMps.toFixed(2)} m/s`);
+  }
+  if (engagementS < 0 || finalGear !== 'R' || finalMps >= rollbackMps - 0.5) {
+    throw new Error(
+      `Automatic failed to drive backward from ${rollbackMps.toFixed(2)} m/s neutral roll; ` +
+        `gear ${finalGear}, final speed ${finalMps.toFixed(2)} m/s`,
+    );
+  }
+  return {
+    rollbackMps: +rollbackMps.toFixed(2),
+    engagementS: +engagementS.toFixed(2),
+    finalMps: +finalMps.toFixed(2),
+  };
 }

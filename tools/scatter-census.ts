@@ -15,11 +15,12 @@
  */
 
 import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
-import { Road } from '../src/world/road';
+import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import { ScatterProvider } from '../src/world/props';
@@ -61,10 +62,53 @@ let deadStickCount = 0;
 let deadStickHits = 0;
 let trunkCount = 0;
 let trunkHits = 0;
+let roadHazardCount = 0;
+let roadPileCount = 0;
+let roadRockCount = 0;
+let roadHazardHits = 0;
+let roadRockAligned = 0;
+const roadPileS: number[] = [];
+const roadRockS: number[] = [];
+const roadRockGeometries = new Set<THREE.BufferGeometry>();
+let roadPileBrightness = 0;
+let roadRockBrightness = 0;
 const instanceMatrix = new THREE.Matrix4();
 const instancePosition = new THREE.Vector3();
 const instanceScale = new THREE.Vector3();
+const instanceQuaternion = new THREE.Quaternion();
 const geometrySize = new THREE.Vector3();
+
+function openEdgeCount(geometry: THREE.BufferGeometry): number {
+  const index = geometry.getIndex();
+  if (!index) return Infinity;
+  const edges = new Map<string, number>();
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    for (const [u, v] of [[a, b], [b, c], [c, a]] as const) {
+      const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+      edges.set(key, (edges.get(key) ?? 0) + 1);
+    }
+  }
+  let open = 0;
+  for (const count of edges.values()) {
+    if (count !== 2) open++;
+  }
+  return open;
+}
+
+function measuredGaps(values: number[]): { min: number; max: number } {
+  values.sort((a, b) => a - b);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 1; i < values.length; i++) {
+    const gap = values[i]! - values[i - 1]!;
+    min = Math.min(min, gap);
+    max = Math.max(max, gap);
+  }
+  return { min, max };
+}
 
 for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
   const ctx = {
@@ -109,9 +153,59 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
       const m = mesh.instanceMatrix.array as unknown as Float32Array;
       const x = m[i * 16 + 12]!;
       const z = m[i * 16 + 14]!;
-      const lateral = Math.abs(road.project(x, z, chunkIndex * CHUNK_LENGTH).lateral);
+      const projection = road.project(x, z, chunkIndex * CHUNK_LENGTH);
+      const lateral = Math.abs(projection.lateral);
       const bucket = Math.floor(lateral / 50) * 50;
       lateralHistogram.set(bucket, (lateralHistogram.get(bucket) ?? 0) + 1);
+      if (lateral <= ROAD_HALF_WIDTH + 1e-3) {
+        roadHazardCount++;
+        const material = mesh.material as THREE.MeshStandardMaterial;
+        const brightness = material.color.r + material.color.g + material.color.b;
+        if (geometrySize.x < 1) {
+          roadPileCount++;
+          roadPileS.push(projection.s);
+          roadPileBrightness = brightness;
+        } else {
+          roadRockCount++;
+          roadRockS.push(projection.s);
+          roadRockGeometries.add(mesh.geometry);
+          roadRockBrightness = brightness;
+        }
+        instanceMatrix.fromArray(mesh.instanceMatrix.array, i * 16);
+        instanceMatrix.decompose(instancePosition, instanceQuaternion, instanceScale);
+        const scale = instanceScale.x;
+        if (geometrySize.x >= 1) {
+          let nearest: RAPIER.Collider | null = null;
+          let nearestDistanceSq = Infinity;
+          for (const collider of content.colliders ?? []) {
+            const colliderPosition = collider.translation();
+            const dx = colliderPosition.x - instancePosition.x;
+            const dy = colliderPosition.y - instancePosition.y;
+            const dz = colliderPosition.z - instancePosition.z;
+            const distanceSq = dx * dx + dy * dy + dz * dz;
+            if (distanceSq < nearestDistanceSq) {
+              nearest = collider;
+              nearestDistanceSq = distanceSq;
+            }
+          }
+          if (nearest && nearestDistanceSq < 1e-8 && nearest.shape.type === RAPIER.ShapeType.ConvexPolyhedron) {
+            const colliderRotation = nearest.rotation();
+            const rotationDot = Math.abs(
+              colliderRotation.x * instanceQuaternion.x +
+              colliderRotation.y * instanceQuaternion.y +
+              colliderRotation.z * instanceQuaternion.z +
+              colliderRotation.w * instanceQuaternion.w,
+            );
+            if (rotationDot > 1 - 1e-6) roadRockAligned++;
+          }
+        }
+        const hit = physics.raycast(
+          { x: instancePosition.x, y: instancePosition.y + geometrySize.y * scale + 1, z: instancePosition.z },
+          { x: 0, y: -1, z: 0 },
+          geometrySize.y * scale + 2,
+        );
+        if (hit && physics.surfaces.lookupType(hit.colliderHandle) === SurfaceType.Rock) roadHazardHits++;
+      }
       if (isDeadStick || isTrunk) {
         instanceMatrix.fromArray(mesh.instanceMatrix.array, i * 16);
         instancePosition.setFromMatrixPosition(instanceMatrix);
@@ -176,3 +270,33 @@ console.log(
     `fallen trunks ${trunkHits}/${trunkCount}`,
 );
 if (!woodOk) process.exitCode = 1;
+
+const pileGaps = measuredGaps(roadPileS);
+const rockGaps = measuredGaps(roadRockS);
+let rockOpenEdges = 0;
+for (const geometry of roadRockGeometries) rockOpenEdges += openEdgeCount(geometry);
+const roadHazardsOk =
+  roadPileCount >= 3 &&
+  roadRockCount >= 3 &&
+  roadRockAligned === roadRockCount &&
+  roadHazardHits === roadHazardCount &&
+  pileGaps.min >= 510.5 &&
+  pileGaps.max <= 1212.5 &&
+  rockGaps.min >= 510.5 &&
+  rockGaps.max <= 1212.5 &&
+  rockOpenEdges === 0 &&
+  roadRockBrightness < roadPileBrightness &&
+  roadHazardCount * 20 < totalInstances;
+console.log(
+  `  road hazards: ${roadHazardCount} total (${roadPileCount} piles, ${roadRockCount} rocks), ` +
+    `${roadHazardHits}/${roadHazardCount} collidable, ${roadRockAligned}/${roadRockCount} rock hulls aligned`,
+);
+console.log(
+  `    pile gaps ${pileGaps.min.toFixed(1)}..${pileGaps.max.toFixed(1)} m; ` +
+    `rock gaps ${rockGaps.min.toFixed(1)}..${rockGaps.max.toFixed(1)} m`,
+);
+console.log(
+  `    rock shell ${rockOpenEdges} open edges; brightness ` +
+    `${roadRockBrightness.toFixed(3)} < pile ${roadPileBrightness.toFixed(3)}`,
+);
+if (!roadHazardsOk) process.exitCode = 1;

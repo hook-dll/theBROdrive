@@ -61,7 +61,7 @@ import { Terrain } from './world/terrain';
 import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
-import { IndexedDbSaves } from './save/save';
+import { IndexedDbSaves, installVehicleAutosave } from './save/save';
 import {
   TrailerField,
   TRAILER_HALF_LENGTH,
@@ -153,6 +153,8 @@ const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
 const GUM_USE_SECONDS = GUM_CHEW_SECONDS + GUM_GROW_SECONDS;
 const GUM_FLIP_RADIUS = 0.5;
+/** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
+const GUM_PACK_ANIM_SECONDS = 1;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -270,9 +272,9 @@ async function boot(): Promise<void> {
   // vista both derive the world's edge from it, and two copies could round the same
   // ground differently and put a seam on the horizon.
   const roadDistance = new RoadDistance(road);
-  // Owns everything in the desert that can be knocked to pieces, and the pieces. Built
-  // before the streamer because `ScatterProvider` hands it every breakable prop it
-  // makes, and asks it which ones are already down.
+  // Owns every piece of scenery that can be knocked apart, and the resulting debris.
+  // Built before the streamer because `ScatterProvider` hands it every breakable prop
+  // it makes, and asks it which ones are already down.
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const vista = new VistaMesh(renderer.scene, terrain, roadDistance, origin);
   // A save carries the tier it was played at, so apply it before the first frame
@@ -431,6 +433,15 @@ async function boot(): Promise<void> {
   );
   interaction.attachPlayer(player);
 
+  const saveName = (state: typeof world.state): string => {
+    const label = carModel(Object.values(state.cars)[0]?.modelId ?? DEFAULT_CAR_MODEL_ID).label;
+    return `${label} @ ${(state.player.s / 1000).toFixed(1)} km`;
+  };
+  installVehicleAutosave(saves, world, saveName, (error) => {
+    console.error('autosave failed', error);
+    hud.setToast('autosave failed');
+  });
+
   // Freight has no HUD of its own — the job lives on a signpost and the payment on
   // the bodywork — so the only feedback it needs is the moment each thing happens.
   // Riding the delta stream keeps that out of the interaction code entirely.
@@ -526,6 +537,7 @@ async function boot(): Promise<void> {
   let activeS = world.state.player.s;
   let gumActive = false;
   let gumTimer = 0;
+  let gumPackCharges = 0;
   let gumUseHeld = false;
 
   const fixedUpdate = (dt: number): void => {
@@ -640,6 +652,7 @@ async function boot(): Promise<void> {
     gumUseHeld = f.usePrimary;
     if (!driving && !gumActive && gum?.type === 'bubble_gum' && gumPressed) {
       gum.charges -= 1;
+      gumPackCharges = Math.max(0, gum.charges);
       if (gum.charges <= 0) inventory.remove(gum.id);
       gumActive = true;
       gumTimer = 0;
@@ -648,7 +661,8 @@ async function boot(): Promise<void> {
       gumTimer += dt;
       if (gumTimer >= GUM_USE_SECONDS) {
         const p = player.position;
-        let nearest: Vehicle | null = null;
+        let nearest: { flipOver(): void } | null = null;
+        let nearestKind: 'car' | 'trailer' | null = null;
         let nearestDistSq = Infinity;
         for (const vehicle of vehicles.values()) {
           if (!vehicle.touchesSphere(p.x, p.y, p.z, GUM_FLIP_RADIUS)) continue;
@@ -656,12 +670,27 @@ async function boot(): Promise<void> {
           const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
           if (distSq < nearestDistSq) {
             nearest = vehicle;
+            nearestKind = 'car';
             nearestDistSq = distSq;
           }
         }
+        trailerField.forEach((trailer) => {
+          if (!trailer.touchesSphere(p.x, p.y, p.z, GUM_FLIP_RADIUS)) return;
+          const t = trailer.rigidBody.translation();
+          const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+          if (distSq < nearestDistSq) {
+            nearest = trailer;
+            nearestKind = 'trailer';
+            nearestDistSq = distSq;
+          }
+        });
         nearest?.flipOver();
         audio.bubbleGumPop();
-        hud.setToast(nearest ? 'POP — car flipped' : 'POP — no car close enough');
+        hud.setToast(
+          nearestKind === null
+            ? 'POP — no car or trailer close enough'
+            : `POP — ${nearestKind} flipped`,
+        );
         gumActive = false;
         gumTimer = 0;
       }
@@ -762,8 +791,8 @@ async function boot(): Promise<void> {
       }
     }
 
-    // Props that come apart. The car is the only thing in the desert heavy enough to
-    // do it, so the impactor is the driven chassis: absolute centre, its own forward,
+    // Props that come apart. The car is the only thing heavy enough to do it, so the
+    // impactor is the driven chassis: absolute centre, its own forward,
     // the half extents measured off its model, and its world velocity. Filled in the
     // FIXED step rather than per frame, because breaking is a physics event and must
     // not happen twice for one step's worth of motion.
@@ -1053,10 +1082,16 @@ async function boot(): Promise<void> {
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
     const held = inventory.held;
+    const gumUseProgress =
+      gumActive && gumTimer < GUM_PACK_ANIM_SECONDS
+        ? gumTimer / GUM_PACK_ANIM_SECONDS
+        : -1;
     heldView.update(held, camera.mode, frameDt, {
       usePrimary: lastInput.usePrimary,
       moveMag: Math.min(1, Math.hypot(lastInput.moveX, lastInput.moveZ)),
       speedKmh: target.speedKmh,
+      gumUseProgress,
+      gumCharges: gumPackCharges,
     });
 
     // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
@@ -1267,8 +1302,7 @@ async function boot(): Promise<void> {
       const s = world.state;
       const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
       if (action === 'save') {
-        const label = carModel(Object.values(s.cars)[0]?.modelId ?? DEFAULT_CAR_MODEL_ID).label;
-        await saves.save(`slot-${s.seed}`, `${label} @ ${(s.player.s / 1000).toFixed(1)} km`, s);
+        await saves.save(`slot-${s.seed}`, saveName(s), s);
         hud.setToast('saved');
       }
       menu.hidePause();
