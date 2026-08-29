@@ -345,43 +345,45 @@ export class Terrain {
   }
 
   /**
-   * Open-desert height at a point WITHOUT the fine detail layer: the landscape field,
-   * relief graded in with distance from the road, and the basin rim.
-   *
-   * This is what the terrain mesh samples on its coarse field lattice, and what the
-   * refined near grid interpolates before adding `detailAt`. Public for that reason
-   * alone. It is a pure function of position and `dist`, so every chunk that reaches
-   * the same ground computes the same height — the property that used to need an
-   * interpolated anchor lattice and a two-branch blend to approximate, and now falls
-   * out of the construction.
+   * Wheel-scale roughness for the player-centred tile lattice. Unlike `detailAt`,
+   * this never fades back out: the fine lattice follows the player, so there is no
+   * coarse driveable seam that requires the short wavelengths to reach zero.
    */
-  openBase(x: number, z: number, dist: number): number {
-    return (
-      this.road.landscape.heightAt(x, z) + this.relief(x, z, dist) + this.surroundHeight(dist, x, z)
-    );
+  private explorationDetailAt(x: number, z: number, dist: number): number {
+    if (dist <= CORRIDOR_INNER) return 0;
+    const fade = smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER));
+    let h =
+      this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2.0, 0.5) * CHOP_AMPLITUDE;
+    const pit = this.pitNoise.at(x / PIT_WAVELENGTH, z / PIT_WAVELENGTH);
+    if (pit > PIT_THRESHOLD) {
+      const t = (pit - PIT_THRESHOLD) / (1 - PIT_THRESHOLD);
+      h -= t * (2 - t) * PIT_DEPTH;
+    }
+    return h * fade;
   }
 
   /**
-   * Open-desert height at a point, detail layer included. What every consumer that
-   * wants "where is the ground" should ask: props stand on it, the rescue check
-   * measures against it, and the vista mesh samples it (out there the detail term is
-   * zero, so the two agree in the overlap by construction).
+   * Open-desert height without wheel-scale detail. This is now the driveable field:
+   * no berm and no road-distance mountain wall. Horizon mountains are applied only
+   * by `horizonHeight`, in the camera-centred vista where they remain unreachable.
    */
+  openBase(x: number, z: number, dist: number): number {
+    return this.road.landscape.heightAt(x, z) + this.relief(x, z, dist);
+  }
+
+  /** Legacy road-fan height, retaining its finite detail seam for tooling. */
   openHeight(x: number, z: number, dist: number): number {
     return this.openBase(x, z, dist) + this.detailAt(x, z, dist);
   }
 
-  /**
-   * Ground height with the dune relief left out: the landscape and the world's edge only.
-   *
-   * For the vista mesh, past a few kilometres. Relief is four fractal noise fields and
-   * about sixty percent of a height sample's cost, and at that range its 9 m dunes are
-   * well under a pixel — spending most of the build budget on detail that quantises away.
-   * Inside that range the vista uses `openHeight` like everything else, because it has to
-   * agree with the chunked mesh where the two overlap.
-   */
-  baseHeight(x: number, z: number, dist: number): number {
-    return this.road.landscape.heightAt(x, z) + this.surroundHeight(dist, x, z);
+  /** Fine open terrain used by the player-centred desert tiles. */
+  explorationHeight(x: number, z: number, dist: number): number {
+    return this.openBase(x, z, dist) + this.explorationDetailAt(x, z, dist);
+  }
+
+  /** Base landscape for distant meshes that deliberately omit dune relief. */
+  baseHeight(x: number, z: number, _dist: number): number {
+    return this.road.landscape.heightAt(x, z);
   }
 
   /**
@@ -432,7 +434,7 @@ export class Terrain {
     const p = this.road.project(x, z, hintS);
     const dist = Math.abs(p.lateral);
     if (dist <= CORRIDOR_INNER) return roadSurfaceY(this.road, this.field, p.s, p.lateral, x, z);
-    return this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral)) + this.detailAt(x, z, dist);
+    return this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral)) + this.explorationDetailAt(x, z, dist);
   }
 
   /**
@@ -453,39 +455,34 @@ export class Terrain {
     return this.gradedBase(x, z, dist, s, Math.sign(lateral));
   }
 
-  /** `baseFromFrame` with the detail layer, i.e. `heightAt` without the search. */
+  /** Fine driveable height for a caller that already owns the exact road frame. */
+  explorationHeightFromFrame(x: number, z: number, lateral: number, s: number): number {
+    return this.baseFromFrame(x, z, lateral, s) + this.explorationDetailAt(x, z, Math.abs(lateral));
+  }
+
+  /** Legacy finite-detail frame sample used by road-fan tooling. */
   heightFromFrame(x: number, z: number, lateral: number, s: number): number {
     return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral));
   }
 
   /**
-   * Height the world's edge adds at a lateral distance: the berm, then the mountains
-   * (see the BERM_* / MOUNTAIN_* block above).
-   *
-   * The berm climbs from nothing at BERM_START to its crest at BERM_CREST, then falls all
-   * the way back to zero by BERM_FADE — all the way, not to a fraction of the crest as the
-   * escarpment this replaces did, because anything it leaves standing out there is
-   * something the mountains have to be taller than. Its crest is modulated by the dune
-   * field at a long wavelength, which is what keeps the bank from being a ruled line drawn
-   * across the view.
-   *
-   * The mountains then ramp in over 14 km. `dist` reaches this from two places: the mesh
-   * builders interpolate it on a lattice, and `heightAt` gets it from a local road
-   * projection that can jump where the road folds. Both are why the ramp is long.
+   * Camera-centred horizon height. `distanceFromCamera` rather than distance from
+   * the road makes the mountain ranges permanent horizon scenery: driving toward
+   * one advances the vista and reveals another equally distant part of the field,
+   * while the local physical terrain remains the open landscape.
    */
-  private surroundHeight(dist: number, x: number, z: number): number {
-    let h = 0;
-    if (dist > BERM_START && dist < BERM_FADE) {
-      const ragged =
-        1 + BERM_RAGGED * this.duneNoise.at(x / BERM_RAGGED_WAVELENGTH, z / BERM_RAGGED_WAVELENGTH);
-      const rise = smoothstep01((dist - BERM_START) / (BERM_CREST - BERM_START));
-      const fall = 1 - smoothstep01((dist - BERM_CREST) / (BERM_FADE - BERM_CREST));
-      h += BERM_HEIGHT * ragged * rise * fall;
-    }
-    if (dist > MOUNTAIN_START) {
+  horizonHeight(
+    x: number,
+    z: number,
+    distanceFromCamera: number,
+    withRelief: boolean,
+  ): number {
+    let h = this.road.landscape.heightAt(x, z);
+    if (withRelief) h += this.relief(x, z, RELIEF_FULL);
+    if (distanceFromCamera > MOUNTAIN_START) {
       h +=
         this.road.landscape.mountainAt(x, z) *
-        smoothstep01((dist - MOUNTAIN_START) / MOUNTAIN_RAMP);
+        smoothstep01((distanceFromCamera - MOUNTAIN_START) / MOUNTAIN_RAMP);
     }
     return h;
   }
@@ -505,6 +502,11 @@ export class Terrain {
     if (Math.abs(lateral) <= CORRIDOR_INNER + VERGE_WIDTH) return SurfaceType.Gravel;
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
+  /** Surface material beyond the graded road corridor, without a road projection. */
+  openSurfaceAt(x: number, z: number): SurfaceType {
+    return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
+  }
+
 
   /** Surface material of the open ground at a point. The road itself is separate. */
   surfaceAt(x: number, z: number, hintS?: number): SurfaceType {

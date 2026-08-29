@@ -18,8 +18,6 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../core/rng';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
-import { drawnGroundY } from './terrainmesh';
-import { RoadDistance } from './roaddistance';
 
 import type { Monument, PoleEra } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
@@ -74,15 +72,12 @@ const MIN_LAT = 9; // props stay off the corridor + gravel verge (~8.2 m)
 const FULL_LAT = 300;
 const MAX_LAT = 560;
 /**
- * Per-cell occupancy at full density, on rock outcrop and on open sand.
- *
- * Occupancy per cell, so it is an AREA density: these are the old 0.15/0.03 rescaled
- * from the old 6x5 m cell to this 6x6 one, which keeps the desert as thick as it was
- * beside the road and simply continues it outward. Outcrops carry five times what sand
- * does, which is what makes a rock field read as a rock field.
+ * Roadside scatter is deliberately denser than the open tile field, but no longer
+ * saturates the whole 1.1 km strip. Four times fewer candidates preserves occasional
+ * rock fields and cacti while the player-centred tiles carry sparse landmarks forever.
  */
-const ROCK_DENSITY = 0.18;
-const CACTUS_DENSITY = 0.036;
+const ROCK_DENSITY = 0.045;
+const CACTUS_DENSITY = 0.009;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 
 // Poles run along the RIGHT-hand side of the road facing away from the house, as
@@ -211,6 +206,8 @@ interface PropForm {
   minScale: number;
   maxScale: number;
 }
+export type DesertPropForm = PropForm;
+
 
 function deformIcosahedron(seed: number, squashY: number): THREE.BufferGeometry {
   // IcosahedronGeometry duplicates vertices along face/UV seams. Deforming those
@@ -352,6 +349,11 @@ function rockForms(): PropForm[] {
   }
   return _rockForms;
 }
+/** Shared visual/collision forms for deterministic world-space desert scatter. */
+export function desertPropForms(surface: SurfaceType): readonly DesertPropForm[] {
+  return surface === SurfaceType.Rock ? rockForms() : sandForms();
+}
+
 
 /**
  * A PIECE of a prop that comes apart: geometry, where it sits in the whole, and what
@@ -554,20 +556,10 @@ export class ScatterProvider implements ChunkProvider {
   readonly id = 'scatter';
 
   /**
-   * The shared nearest-road-distance field, needed only to reach `drawnGroundY`: props
-   * stand on the terrain mesh's own surface, and past 60 m of lateral offset that
-   * surface is a function of the distance to the nearest branch. Injected, not owned,
-   * for the reason terrainmesh.ts gives — two copies could round the same ground
-   * differently, and then a boulder would sit at a height the ground does not have.
+   * Whoever owns knocking props down, or nothing. Optional because deterministic
+   * scatter remains a complete visual field without mutable breakage state.
    */
-  constructor(
-    private readonly roadDistance: RoadDistance,
-    /**
-     * Whoever owns knocking props down, or nothing. Optional because the desert is
-     * fully described without it: with no sink every prop simply stands.
-     */
-    private readonly breakables?: BreakableSink,
-  ) {}
+  constructor(private readonly breakables?: BreakableSink) {}
 
   build(ctx: ChunkContext): ChunkContent {
     const group = new THREE.Group();
@@ -645,10 +637,9 @@ export class ScatterProvider implements ChunkProvider {
         const rx = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 6) * Math.PI * 2 : 0;
         const rz = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 7) * Math.PI * 2 : 0;
 
-        // The one expensive sample, paid only by a prop that is actually going to
-        // exist: the height of the DRAWN ground, not of the height field (see
-        // `drawnGroundY`). Planting depth is the form's own.
-        const groundY = drawnGroundY(ctx.road, ctx.terrain, this.roadDistance, s, lateral);
+        // The player-centred fine lattice samples this exact world-space field. The
+        // road frame is already known here, so no nearest-road search is needed.
+        const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
         placements.push({
           form,
           id,

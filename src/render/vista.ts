@@ -2,36 +2,20 @@ import * as THREE from 'three';
 
 import { desertPaletteAt } from '../world/gradient';
 import type { WorldOrigin } from '../world/origin';
-import type { RoadDistance } from '../world/roaddistance';
 import type { Terrain } from '../world/terrain';
-import { NEAR_TERRAIN_REACH, TERRAIN_MATERIAL } from '../world/terrainmesh';
+import { TERRAIN_MATERIAL } from '../world/terrainmesh';
 
 /**
- * The distant desert: everything from the edge of the chunked terrain out to the horizon.
+ * The fine, player-centred desert tiles own the ground around the camera. This polar
+ * mesh begins inside their outer edge and carries only the distant view: concentric
+ * rings whose spacing grows with distance, about four thousand vertices for a
+ * twenty-five-kilometre disc.
  *
- * The chunked mesh cannot do this. It is parameterised on the ROAD — an arclength row and a
- * lateral column per vertex — and that parameterisation dies long before the horizon: on a
- * road with 170 m corners, offset lines at even a couple of kilometres have folded, which is
- * what the fold guard in terrainmesh.ts spends its time discarding. Past about 1.5 km the
- * only sane frame is the world's own.
- *
- * So this is a POLAR grid centred on the camera: concentric rings of `SECTORS` vertices,
- * radii growing geometrically until the spacing hits a cap. Polar is the right topology for
- * exactly one reason — resolution falls off with distance for free, so a ring 25 km out costs
- * the same as one 2 km out while covering forty times the ground. The whole thing is about
- * 4000 vertices for a fifty-kilometre disc, which is less than one chunk of near terrain.
- *
- * It samples `Terrain.openHeight`, the same function the chunked mesh samples, through the
- * same `RoadDistance`. That is what makes the two agree where they meet rather than merely
- * look similar: at any shared point they compute the identical height, and the only
- * difference left is tessellation — a 1.2 km triangle chording a dune field whose longest
- * wavelength is 240 m, which is under ten metres of error at a kilometre and a half away.
- *
- * What makes it worth drawing at all is `Landscape.mountainAt`, gated by lateral distance in
- * terrain.ts. Without mountains the far field is the drivable landscape, whose 140 m of
- * half-range subtends a fifth of a degree at 20 km: a straight horizon, however far you can
- * see. With them there are ranges over a kilometre tall out there, and a draw distance is
- * suddenly worth having.
+ * Mountains are deliberately camera-relative horizon scenery. `Terrain.horizonHeight`
+ * gates them on ring radius, not distance from the road, so leaving the road never turns
+ * a visual range into physical terrain: the vista advances and the ranges remain remote.
+ * Inside that gate it samples the same landscape and dune relief as the fine tiles; the
+ * overlap differs only by tessellation and the downward bias described below.
  */
 
 /**
@@ -86,31 +70,14 @@ const RELIEF_RADIUS = 3500;
  */
 const REBUILD_STEP = 250;
 
-/**
- * Lattice the road distance is interpolated on out here, metres.
- *
- * Coarse on purpose. The only thing distance feeds at this range is the mountains' 7 km
- * ramp, whose gradient is about 30%, so 300 m of interpolation error is 90 m of height —
- * under a degree at the four-to-nine kilometres where the ramp is steepest, and smooth,
- * because bilinear error is a gentle field rather than a seam. The near mesh's 50 m
- * lattice would be a million nodes over this disc, each one a global search over the road.
- */
-const DIST_LATTICE = 600;
 
 /**
- * How far the disc is sunk while the chunked mesh is still over it, metres, fading to
- * nothing by `BIAS_FADE`.
- *
- * In the overlap the chunked mesh must win. Both sample the same height function, so they
- * differ only by how their triangles chord it — but that difference has a sign at any
- * given pixel, and where the vista's coarser triangle chords ABOVE the near mesh's fine
- * one it pokes through as a ragged brown patch. Sinking the disc is the cheap fix, and 14 m
- * covers the chord error of a 900 m triangle across a dune field whose tallest band is
- * 10.5 m. The fade ends past 1500 m, where the near mesh has stopped and there is nothing
- * left to lose to.
+ * The fine square is guaranteed to reach 480 m from the camera. Sink the polar mesh
+ * just enough to prevent coarse triangles poking through in that overlap, then recover
+ * the exact shared field before the fine square can end.
  */
-const INNER_BIAS = 14;
-const BIAS_FADE = 2600;
+const INNER_BIAS = 2;
+const BIAS_FADE = 480;
 
 /**
  * Altitude, in metres above the ring's own base, over which distant ground reads as rock
@@ -156,7 +123,6 @@ export class VistaMesh {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
-    private readonly roadDistance: RoadDistance,
     private readonly origin: WorldOrigin,
   ) {
     for (let a = 0; a < SECTORS; a++) {
@@ -182,7 +148,7 @@ export class VistaMesh {
    * lowest view-distance tier wants: that tier is the world as it was before this existed.
    */
   setViewDistance(metres: number): void {
-    const outer = metres <= NEAR_TERRAIN_REACH ? 0 : metres;
+    const outer = metres <= INNER_RADIUS ? 0 : metres;
     if (outer === this.outerRadius) return;
     this.outerRadius = outer;
     this.mesh.visible = outer > 0;
@@ -206,10 +172,8 @@ export class VistaMesh {
     const radii = this.radii;
     const rings = radii.length;
     const vertexCount = rings * SECTORS;
-    // The vertex positions written below are RELATIVE (`cx`/`cz` are the relative
-    // snapped camera centre), but the terrain and road-distance fields are ABSOLUTE
-    // functions of world position. Hoist the origin once so the per-vertex sampling
-    // adds it instead of re-reading a getter thousands of times per rebuild.
+    // Vertices are stored relative to the floating origin, while every terrain field
+    // remains a function of absolute world coordinates.
     const ox = this.origin.x;
     const oz = this.origin.z;
 
@@ -230,17 +194,7 @@ export class VistaMesh {
       for (let a = 0; a < SECTORS; a++) {
         const x = cx + this.dirX[a]! * radius;
         const z = cz + this.dirZ[a]! * radius;
-        // The disc is centred on the CAMERA and the mountains are gated on distance from
-        // the ROAD, so a vertex's ring radius is not its lateral offset and cannot be
-        // substituted for it: driving 500 m off-road would otherwise walk the whole
-        // mountain range 500 m inward. The terrain and distance fields are ABSOLUTE,
-        // so sample them at the absolute position (`x + ox`) while the RELATIVE
-        // `x`/`z` go into the Float32Array below.
-        const dist = this.roadDistance.distAt(x + ox, z + oz, DIST_LATTICE);
-        const y =
-          (withRelief
-            ? this.terrain.openHeight(x + ox, z + oz, dist)
-            : this.terrain.baseHeight(x + ox, z + oz, dist)) - bias;
+        const y = this.terrain.horizonHeight(x + ox, z + oz, radius, withRelief) - bias;
 
         const vi = (r * SECTORS + a) * 3;
         positions[vi] = x;
