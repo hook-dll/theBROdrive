@@ -21,7 +21,6 @@ import { SurfaceType } from '../src/core/surfaces';
 import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
-import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import { ScatterProvider } from '../src/world/props';
 
@@ -43,8 +42,7 @@ const terrain = new Terrain(1337, road);
 for (let c = FROM_CHUNK - 4; c <= TO_CHUNK + 4; c++) {
   for (let k = 0; k < CHUNK_LENGTH; k += 8) road.sampleAt(c * CHUNK_LENGTH + k);
 }
-const roadDistance = new RoadDistance(road);
-const provider = new ScatterProvider(roadDistance);
+const provider = new ScatterProvider();
 let colliderCount = 0;
 
 interface FormStat {

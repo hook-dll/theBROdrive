@@ -86,12 +86,6 @@ const MAX_FOV = BASE_FOV + 14;
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
 const FOV_EPSILON = 0.01;
-/** Look-ahead lead per km/h; the look target drifts ahead of a fast car. */
-const LEAD_PER_KMH = 0.02;
-const LEAD_MAX = 6;
-/** Lead fades in across this speed band so parking doesn't yaw the camera. */
-const LEAD_FADE_START = 6;
-const LEAD_FADE_END = 30;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
 const SHAKE_MAX = 0.012;
@@ -151,10 +145,6 @@ function clamp(x: number, lo: number, hi: number): number {
   return x < lo ? lo : x > hi ? hi : x;
 }
 
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
 
 function wrapAngle(angle: number): number {
   const wrapped = angle % (Math.PI * 2);
@@ -407,15 +397,20 @@ export class CameraRig {
     // desired pose: a first-order follow at SPRING_OMEGA lags by v/omega, which is
     // a metre at 45 km/h and 2.5 m at highway speed — enough for the eye to sink
     // back through the windscreen into the cabin and to swim forward under braking.
-    // Its softness comes from the bounded g-sway and shake instead. Every other
-    // mode is a camera following the car through the air, and does spring.
+    // Its softness comes from the bounded g-sway and shake instead.
+    //
+    // External cameras spring only the eye. Their look point is the current,
+    // interpolated chassis centre: springing it by the same rule leaves it metres
+    // behind a fast car, visibly pinning the view to the rear rather than its centre.
+    // The foot camera still springs both ends of its view ray.
     if (mode === 'interior') {
       this.eye.copy(_vA);
       this.lookAt.copy(_vB);
     } else {
       const k = 1 - Math.exp(-SPRING_OMEGA * d);
       this.eye.lerp(_vA, k);
-      this.lookAt.lerp(_vB, k);
+      if (isExternalMode(mode)) this.lookAt.copy(_vB);
+      else this.lookAt.lerp(_vB, k);
     }
 
     _mA.lookAt(this.eye, this.lookAt, _UP);
@@ -543,13 +538,11 @@ export class CameraRig {
     const viewX = Math.sin(this.yawValue);
     const viewZ = Math.cos(this.yawValue);
 
-    // Keep the speed lead, but put it along the camera's own heading rather than
-    // the vehicle's forward axis. This preserves the framing without reintroducing
-    // chassis rotation through the look-at point.
-    const lead =
-      Math.min(LEAD_MAX, target.speedKmh * LEAD_PER_KMH) *
-      smoothstep(LEAD_FADE_START, LEAD_FADE_END, target.speedKmh);
-    _vB.set(target.x + viewX * lead, target.y, target.z + viewZ * lead);
+    // The chassis transform is the measured centre of the rendered model (see
+    // render/carmodel.ts). Keep that point at the centre of the view at every
+    // speed; leading the look target down the road made the chase camera appear
+    // to pivot around one end of the car instead of around the car itself.
+    _vB.set(target.x, target.y, target.z);
 
     // The arm points from the look target to the eye, opposite the view heading.
     // Pitch moves an orbiting eye opposite the requested look direction: mouse-up

@@ -41,6 +41,7 @@ import { VistaMesh } from './render/vista';
 import { WheelSpray } from './render/wheelspray';
 import { createStickerMesh } from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
+import { DesertTileStreamer } from './world/deserttiles';
 import {
   HomesteadProvider,
   createStartingCar,
@@ -58,7 +59,7 @@ import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
-import { TERRAIN_COLLIDER_SURFACE, TerrainMeshProvider } from './world/terrainmesh';
+import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
@@ -95,32 +96,6 @@ const SPAWN_PROBE_HEIGHT = 3;
 /** Trailer-only drop clearance; cars use model-aware `carSpawnYAboveGround`. */
 const TRAILER_DROP_CLEARANCE = 0.35;
 
-/**
- * Off-road haze ramp, metres of lateral distance from the road centreline. Starts
- * where the coarse ground band begins and saturates where it ends, so the far
- * desert reads as haze closing in rather than as a terrain edge.
- */
-const FOG_RAMP_START = 150;
-const FOG_RAMP_END = 600;
-/** Fog density multiplier at full ramp. */
-const FOG_RAMP_MAX_SCALE = 3.2;
-/**
- * How far below the terrain a body must be before it counts as fallen out of the
- * world. Deeper than any legitimate dip (the road corridor sinks 0.16 m, a road
- * pothole 0.07 m, and a desert scoop 1.7 m at its worst — see `Terrain.detailAt`) and
- * than a chassis half-height, so normal driving can never trigger it.
- *
- * Note the margin is against the DIP, not against the terrain sample: the rescue check
- * compares to `terrain.heightAt`, which carries the desert's detail layer itself, so a
- * car sitting in a scoop is measured against the scoop's own floor.
- */
-const RESCUE_FALL_DEPTH = 6;
-/**
- * Height above the road a rescued car is dropped from. Must clear the chassis
- * half-height plus its suspension travel: dropped flush, the chassis starts
- * intersecting the road's thin trimesh and the solver pushes it straight through.
- */
-const RESCUE_LIFT = 1.6;
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
 /**
@@ -268,15 +243,14 @@ async function boot(): Promise<void> {
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene, origin);
 
-  // The nearest-road-distance field is shared, not owned: the chunked terrain and the
-  // vista both derive the world's edge from it, and two copies could round the same
-  // ground differently and put a seam on the horizon.
+  // Shared exact nearest-road field: the tile streamer uses it to grade the open
+  // lattice into the road corridor without searching the full spine per vertex.
   const roadDistance = new RoadDistance(road);
   // Owns every piece of scenery that can be knocked apart, and the resulting debris.
   // Built before the streamer because `ScatterProvider` hands it every breakable prop
   // it makes, and asks it which ones are already down.
   const debris = new DebrisField(physics, world, renderer.scene, origin);
-  const vista = new VistaMesh(renderer.scene, terrain, roadDistance, origin);
+  const vista = new VistaMesh(renderer.scene, terrain, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
@@ -284,6 +258,16 @@ async function boot(): Promise<void> {
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
+  const desert = new DesertTileStreamer(
+    world.seed,
+    road,
+    terrain,
+    roadDistance,
+    physics,
+    renderer.scene,
+    origin,
+    debris,
+  );
 
   // Scratches for the impact test in the fixed step: never allocated per tick.
   const impactForward = new THREE.Vector3();
@@ -292,9 +276,8 @@ async function boot(): Promise<void> {
 
   const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene, origin);
   streamer.register(new RoadMeshProvider(world.seed));
-  streamer.register(new TerrainMeshProvider(roadDistance));
   streamer.register(new HomesteadProvider());
-  streamer.register(new ScatterProvider(roadDistance, debris));
+  streamer.register(new ScatterProvider(debris));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose, trailerField, freight, wreckTrunks));
@@ -354,8 +337,12 @@ async function boot(): Promise<void> {
     initialYaw = spawn.yaw;
   }
 
-  // Build chunk 0 before placing the fuel can: it needs the garage floor beneath it.
-  streamer.update(world.state.player.s, frameId);
+  // A save may begin anywhere off-road. Establish the local nine-tile physics patch
+  // before the loading cover leaves, then build road chunk 0 for the garage/fuel can.
+  const initialGround = player.absolutePosition;
+  const initialProjection = road.project(initialGround.x, initialGround.z, world.state.player.s);
+  desert.prime(initialGround.x, initialGround.z, initialProjection.lateral);
+  streamer.update(world.state.player.s, frameId, initialProjection.lateral);
 
   if (loadedFromSave) {
     loose.restoreFromState();
@@ -641,6 +628,7 @@ async function boot(): Promise<void> {
       if (shift) {
         physics.rebase(shift.dx, shift.dz);
         streamer.rebase();
+        desert.rebase();
       }
     }
 
@@ -766,40 +754,29 @@ async function boot(): Promise<void> {
     // projection is therefore the complete answer during continuous driving; the
     // expensive unhinted sweep this used to fall back to existed only to arbitrate
     // self-overlapping passes.
+    let desertX: number;
+    let desertZ: number;
+    let desertLateral: number;
     if (driving) {
-      // Absolute: the road lives in world space while the chassis is relative.
+      // Absolute: the road and desert tile keys both live in world space while the
+      // chassis is relative to the floating origin.
       const t = driving.absoluteTranslation(originAnchor);
-      activeS = road.project(t.x, t.z, activeS).s;
-    } else {
-      activeS = player.s;
-    }
-    streamer.update(activeS, frameId);
-    birds.update(dt, activeS, eye.x, eye.y, eye.z);
-
-    // Rescue. Ground only exists out to the coarse physics band, and a determined
-    // player can still leave it (or clip through a seam) and fall forever. Rather
-    // than an invisible wall, catch anything that has dropped well below the
-    // terrain it should be standing on and put it back on the road: the desert
-    // gets harder to cross the further out you go, and if you beat it anyway the
-    // world hands you back instead of deleting you.
-    if (driving) {
-      // Absolute: `terrain.heightAt` is the landscape field, sampled in world space.
-      // `rescueTo` takes absolute too — it is a teleport to a road position, and the
-      // road is the absolute frame.
-      const t = driving.absoluteTranslation(originAnchor);
-      if (t.y < terrain.heightAt(t.x, t.z, activeS) - RESCUE_FALL_DEPTH) {
-        const home = road.sampleAt(activeS);
-        driving.rescueTo(home.x, home.y + RESCUE_LIFT, home.z, home.heading);
-        hud.setToast('towed back to the road');
-      }
+      const projection = road.project(t.x, t.z, activeS);
+      activeS = projection.s;
+      desertX = t.x;
+      desertZ = t.z;
+      desertLateral = projection.lateral;
     } else {
       const p = player.absolutePosition;
-      if (p.y < terrain.heightAt(p.x, p.z, activeS) - RESCUE_FALL_DEPTH) {
-        const home = road.sampleAt(activeS);
-        player.teleport(home.x, home.y, home.z);
-        hud.setToast('walked back to the road');
-      }
+      const projection = road.project(p.x, p.z, player.s);
+      activeS = projection.s;
+      desertX = p.x;
+      desertZ = p.z;
+      desertLateral = projection.lateral;
     }
+    streamer.update(activeS, frameId, desertLateral);
+    desert.update(desertX, desertZ, desertLateral, frameId);
+    birds.update(dt, activeS, eye.x, eye.y, eye.z);
 
     // Props that come apart. The car is the only thing heavy enough to do it, so the
     // impactor is the driven chassis: absolute centre, its own forward,
@@ -856,15 +833,11 @@ async function boot(): Promise<void> {
    * being powered — braking, a locked wheel under the handbrake, a tyre dragged
    * sideways, and a trailer's wheels at all times.
    *
-   * WHAT THE WHEEL IS STANDING ON is resolved the way the ground is DRAWN, not the way
-   * it is collided, and off the road those differ. A terrain chunk is one trimesh
-   * registered as sand (`TERRAIN_COLLIDER_SURFACE`) even though its fan covers gravel
-   * verge, sand and rock outcrops, so taking the collider's word for it threw sand off
-   * visibly grey rock. `Terrain.surfaceFromFrame` is the same function that colours
-   * those vertices, so asking it here makes the spray match the ground under it. The
-   * road ribbon and every piece of scenery keep their own registration, which is why
-   * this only overrides the terrain's answer: a wheel on the homestead's concrete pad
-   * must not start throwing desert.
+   * WHAT THE WHEEL IS STANDING ON is resolved from the terrain field rather than the
+   * heightfield collider's single registration. Each tile collider is registered as
+   * sand, but the same geometry contains gravel verge and rock outcrops; querying
+   * `Terrain.surfaceFromFrame` keeps spray consistent with that field. The road ribbon
+   * and scenery retain their own registrations, so concrete and asphalt are untouched.
    *
    * The surface then decides both how much comes off and what it is. `raise` is the
    * dust and smoke channels summed with smoke discounted, so it scales the mote count
@@ -990,29 +963,18 @@ async function boot(): Promise<void> {
       vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
     }
 
-    // Off-road haze. `sky.update` sets the fog density for the time of day; this
-    // multiplies it by how far the view has strayed from the road, so the desert
-    // closes in as you leave and the far bands dissolve into haze instead of
-    // ending at a visible edge. Ramp starts where the coarse ground begins and
-    // saturates where it runs out, and it is a view effect only: nothing about
-    // the simulation changes.
-    // Absolute: the camera is in the scene's relative frame, `road.project` is not.
+    // Eye height for heat haze. The exact local road frame is still useful near the
+    // corridor; farther out the same terrain method is the player-centred fine field.
     const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
-    const offRoad = Math.abs(camProjection.lateral);
-    // How far the eye is above the ground it is looking across, for the heat haze's
-    // distance onset (renderer.ts HAZE_MIN_DISTANCE_M). Reuses the projection the fog
-    // ramp above already needed, so `heightFromFrame` costs no second road search.
     renderer.setHazeEyeHeight(
       cam.y -
-        terrain.heightFromFrame(
+        terrain.explorationHeightFromFrame(
           cam.x + origin.x,
           cam.z + origin.z,
           camProjection.lateral,
           camProjection.s,
         ),
     );
-    const hazeT = Math.min(1, Math.max(0, (offRoad - FOG_RAMP_START) / (FOG_RAMP_END - FOG_RAMP_START)));
-    renderer.fog.density *= 1 + hazeT * hazeT * (FOG_RAMP_MAX_SCALE - 1);
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
     // is all there is and hides the vista completely when there is more: at the 'vast'

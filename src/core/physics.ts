@@ -163,6 +163,16 @@ export class PhysicsWorld {
     return collider;
   }
 
+  /** Fixed sphere for sparse open-desert rocks. */
+  addStaticBall(radius: number, position: Vec3, surface: SurfaceType): RAPIER.Collider {
+    const bodyRef = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z),
+    );
+    const collider = this.world.createCollider(RAPIER.ColliderDesc.ball(radius), bodyRef);
+    this.surfaces.register(collider.handle, surface);
+    return collider;
+  }
+
   /** Dynamic box, used for loose parts and debris. */
   addDynamicBox(
     halfExtents: Vec3,

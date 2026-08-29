@@ -24,6 +24,8 @@ export const CHUNK_LENGTH = 200;
 const VISUAL_RADIUS = 6;
 /** Chunks that carry physics colliders either side of the player. */
 const PHYSICS_RADIUS = 2;
+/** Past this lateral distance road content carries no physics or prop colliders. */
+const ROAD_PHYSICS_REACH = 1200;
 /**
  * Chunks built per FRAME, not per call.
  *
@@ -186,13 +188,11 @@ export class ChunkStreamer {
    * `frameId` must change once per rendered frame and stay equal across every
    * fixed step within it; that is what makes BUILD_BUDGET a per-frame cap.
    */
-  update(playerS: number, frameId: number): void {
+  update(playerS: number, frameId: number, playerLateral = 0): void {
     const clamped = Math.min(Math.max(playerS, 0), this.road.length);
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
-    // Chunks may leave the road's own range: negative indices apron the desert
-    // behind s = 0 and indices past the end apron the road's termination. The
-    // terrain provider fills those; every other provider sees an empty road range
-    // (see `build`) and contributes nothing, exactly as if it had never run.
+    // Chunks may leave the road's own range: every road-owned provider sees an empty
+    // range and contributes nothing, while the independent desert tiles continue.
     const min = playerChunk - VISUAL_RADIUS;
     const max = playerChunk + VISUAL_RADIUS;
 
@@ -201,7 +201,9 @@ export class ChunkStreamer {
     // need its colliders added or dropped without leaving view).
     for (const [index, chunk] of this.built) {
       const wanted = index >= min && index <= max;
-      const needsPhysics = Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
+      const needsPhysics =
+        Math.abs(playerLateral) < ROAD_PHYSICS_REACH &&
+        Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
       if (!wanted || chunk.hasPhysics !== needsPhysics) {
         this.teardown(chunk);
         this.lightRevision++;
@@ -237,7 +239,11 @@ export class ChunkStreamer {
     while (this.frameBuildBudget > 0 && this.buildQueue.length > 0) {
       const index = this.buildQueue.shift()!;
       if (this.built.has(index)) continue;
-      this.build(index, Math.abs(index - playerChunk) <= PHYSICS_RADIUS);
+      this.build(
+        index,
+        Math.abs(playerLateral) < ROAD_PHYSICS_REACH &&
+          Math.abs(index - playerChunk) <= PHYSICS_RADIUS,
+      );
       this.frameBuildBudget--;
     }
   }

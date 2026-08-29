@@ -30,7 +30,6 @@ import { DebrisField, type Impactor } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
 import { ScatterProvider, propPieces, type BreakableProp } from '../src/world/props';
 import { Road } from '../src/world/road';
-import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 
 const SEED = 1337;
@@ -39,13 +38,12 @@ const CHUNK = 130;
 const physics = await PhysicsWorld.create();
 const road = new Road(SEED);
 const terrain = new Terrain(SEED, road);
-const roadDistance = new RoadDistance(road);
 const origin = new WorldOrigin();
 const world = new GameWorld(newWorldState(SEED));
 const scene = new THREE.Scene();
 
 const debris = new DebrisField(physics, world, scene, origin);
-const provider = new ScatterProvider(roadDistance, debris);
+const provider = new ScatterProvider(debris);
 
 function buildChunk(hasPhysics: boolean): ChunkContent {
   const ctx = {
@@ -79,7 +77,7 @@ let registeredIds: number[] = [];
     register: (prop: { id: number }) => registeredIds.push(prop.id),
     forget: () => {},
   };
-  const spyProvider = new ScatterProvider(roadDistance, spy);
+  const spyProvider = new ScatterProvider(spy);
   const ctx = (hasPhysics: boolean) =>
     ({
       chunkIndex: CHUNK,
@@ -126,7 +124,7 @@ let target: BreakableProp | null = null;
     },
     forget: () => {},
   };
-  const captureProvider = new ScatterProvider(roadDistance, capture);
+  const captureProvider = new ScatterProvider(capture);
   const captured = captureProvider.build({
     chunkIndex: CHUNK,
     sStart: CHUNK * CHUNK_LENGTH,
@@ -206,7 +204,7 @@ if (!target) {
     },
     forget: () => {},
   };
-  const rebuilt = new ScatterProvider(roadDistance, spy).build({
+  const rebuilt = new ScatterProvider(spy).build({
     chunkIndex: CHUNK,
     sStart: CHUNK * CHUNK_LENGTH,
     sEnd: (CHUNK + 1) * CHUNK_LENGTH,
