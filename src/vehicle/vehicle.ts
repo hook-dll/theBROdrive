@@ -24,13 +24,13 @@ import type { InputFrame } from '../core/input';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import type { CarState, GameWorld } from '../game/state';
 import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
-import type { CarStats, PartInstance } from '../parts/registry';
+import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import { carModel, modelEngine, modelGearbox, type CarModelDef } from './carmodels';
-import { bonnetCanRun, bonnetPart, engineFailureReason } from './bonnet';
+import { bonnetCanRun, bonnetPart, destroyedEngineSpec, engineFailureReason } from './bonnet';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
 import { carModelMeasure, createCarModel, type CarModelMeasure } from '../render/carmodel';
 import { createPartMesh } from '../render/partmesh';
-import { setCondition } from '../render/materials';
+import { setPartCondition } from '../render/materials';
 import type { VehicleLightRig } from '../render/vehiclelights';
 
 const GRAVITY = 9.81;
@@ -651,6 +651,8 @@ const SHOVE_RELEASE_SECONDS = 0.2;
 const SHOVE_BRAKE_FRACTION = 0.01;
 /** Residual motion treated as stopped before an automatic changes drive direction. */
 const AUTO_DIRECTION_RELEASE_MPS = 0.08;
+/** Hard road-speed ceiling for a catastrophically damaged but still running engine. */
+const DESTROYED_ENGINE_SPEED_CAP_MPS = 20 / 3.6;
 
 // ---------------------------------------------------------------------------
 // Body attitude: why a car that squats under power does not lean in a corner.
@@ -840,6 +842,7 @@ export interface VehicleAudioState {
   /** Signed forward speed, m/s. */
   forwardMps: number;
   engineRunning: boolean;
+  engineDestroyed: boolean;
   gearLabel: string;
   /** Wheels on the ground / total wheels. */
   wheelContactFraction: number;
@@ -1183,8 +1186,6 @@ export class Vehicle implements Rebasable {
   private lastAuthCoolant: number;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
-  /** Rebuild on the step after an engine destroys itself; never replace Rapier state mid-step. */
-  private serviceRebuildPending = false;
 
   // Odometer and transform emission.
   private odoAccum = 0;
@@ -1260,6 +1261,7 @@ export class Vehicle implements Rebasable {
     handbrake: false,
     forwardMps: 0,
     engineRunning: false,
+    engineDestroyed: false,
     gearLabel: 'N',
     wheelContactFraction: 0,
     surfaceRoughness: 0,
@@ -1342,9 +1344,8 @@ export class Vehicle implements Rebasable {
     this.scene.add(this.rootGroup);
 
     this.statsValue = this.computeStats();
-    const installedEngine = bonnetPart(this.car.bonnet, 0);
     this.drivetrain = new Drivetrain(
-      installedEngine ? variant(installedEngine.variantId).engine ?? null : null,
+      this.drivetrainEngine(),
       this.statsValue.gearbox,
       this.model.rearDriveBias,
     );
@@ -1437,6 +1438,10 @@ export class Vehicle implements Rebasable {
     return bonnetCanRun(this.car.bonnet, this.localFuel, this.car.fuelKind);
   }
 
+  get engineDestroyed(): boolean {
+    return bonnetPart(this.car.bonnet, 0)?.destroyed === true;
+  }
+
   /**
    * Live audio telemetry. Returns the vehicle's own buffer, refreshed each fixed
    * step: callers read it and must not retain or mutate it.
@@ -1508,15 +1513,10 @@ export class Vehicle implements Rebasable {
     this.statsValue = this.computeStats();
     const stats = this.statsValue;
 
-    const installedEngine = bonnetPart(this.car.bonnet, 0);
-    this.drivetrain.reconfigure(
-      installedEngine ? variant(installedEngine.variantId).engine ?? null : null,
-      stats.gearbox,
-    );
+    this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
 
-    // Gizmos change the mass; re-apply so the CoG stays low and rearward.
+    // Fitted parts change the drivetrain; gizmos still change only mass.
     this.applyChassisMass(stats.mass);
-
 
     const rapier = this.physics.rapier;
     this.controller = new rapier.DynamicRayCastVehicleController(
@@ -1935,10 +1935,6 @@ export class Vehicle implements Rebasable {
 
 
   fixedUpdate(dt: number, input: InputFrame): void {
-    if (this.serviceRebuildPending) {
-      this.serviceRebuildPending = false;
-      this.rebuild();
-    }
     const controller = this.controller;
     if (!controller) return;
 
@@ -1958,7 +1954,11 @@ export class Vehicle implements Rebasable {
       this.lastAuthOil = this.car.oilLitres;
     }
 
-    const fwd = this.forwardSpeedMps();
+    let fwd = this.forwardSpeedMps();
+    if (this.engineRunning && this.engineDestroyed && Math.abs(fwd) > DESTROYED_ENGINE_SPEED_CAP_MPS) {
+      this.capDestroyedEngineSpeed(fwd);
+      fwd = Math.sign(fwd) * DESTROYED_ENGINE_SPEED_CAP_MPS;
+    }
     this.parkingHoldRequested =
       input.handbrake && (this.parkingHoldActive || Math.abs(fwd) < PARK_HOLD_SPEED_MPS);
 
@@ -2029,16 +2029,22 @@ export class Vehicle implements Rebasable {
     // Mirrored locally and emitted on the same throttled cadence as fuel, for the
     // same reason: a delta per tick for a number that moves by 0.0004 L would be
     // three hundred pointless state writes a second.
-    // A dry running engine or one with no coolant reservoir destroys itself. The
-    // service part is removed permanently; fitting another engine is the repair.
+    // A dry intact engine becomes permanently destroyed. It remains fitted and
+    // running, but its drivetrain spec collapses to limp-home torque.
     const failure = this.engineRunning
       ? engineFailureReason(this.car.bonnet, this.localCoolant, this.localOil)
       : null;
     if (failure !== null) {
-      this.world.apply({ t: 'car_bonnet', carId: this.car.id, cell: 0, item: null });
-      this.drivetrain.reconfigure(null, stats.gearbox);
-      this.appliedDriveTorqueNm = 0;
-      this.serviceRebuildPending = true;
+      const engineItem = this.car.bonnet[0];
+      if (engineItem?.type === 'part') {
+        const destroyed = {
+          ...engineItem,
+          part: { ...engineItem.part, destroyed: true },
+        };
+        this.world.apply({ t: 'car_bonnet', carId: this.car.id, cell: 0, item: destroyed });
+        this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
+        this.appliedDriveTorqueNm = 0;
+      }
     }
 
     if (this.engineRunning) {
@@ -2442,6 +2448,7 @@ export class Vehicle implements Rebasable {
     audio.handbrake = input.handbrake;
     audio.forwardMps = fwd;
     audio.engineRunning = this.engineRunning;
+    audio.engineDestroyed = this.engineDestroyed;
     audio.gearLabel = this.drivetrain.gearLabel;
     audio.wheelContactFraction = wheelCount > 0 ? contactCount / wheelCount : 0;
     audio.surfaceRoughness = contactCount > 0 ? roughnessSum / contactCount : 0;
@@ -2589,7 +2596,7 @@ export class Vehicle implements Rebasable {
 
     // Gizmos are bolted to the shell: they never move relative to it, so all they
     // need per frame is their condition, which a scrubbing player can change.
-    for (const g of this.gizmos) setCondition(g.mesh, g.part.dirt, g.part.rust);
+    for (const g of this.gizmos) setPartCondition(g.mesh, g.part);
   }
 
   /**
@@ -3123,7 +3130,7 @@ export class Vehicle implements Rebasable {
       mesh.name = anchorId;
       mesh.position.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
       mesh.rotation.y = anchor.yaw;
-      setCondition(mesh, part.dirt, part.rust);
+      setPartCondition(mesh, part);
       this.rootGroup.add(mesh);
       this.gizmos.push({ part, mesh });
     }
@@ -3379,6 +3386,20 @@ export class Vehicle implements Rebasable {
     this.taillightBeamIntensity = 0;
     this.reverseLightBeamIntensity = 0;
     this.indicatorLit = false;
+  }
+
+  private drivetrainEngine(): EngineSpec | null {
+    const part = bonnetPart(this.car.bonnet, 0);
+    if (!part) return null;
+    const engine = variant(part.variantId).engine ?? null;
+    return engine && part.destroyed ? destroyedEngineSpec(engine) : engine;
+  }
+
+  private capDestroyedEngineSpeed(forwardMps: number): void {
+    const excess = forwardMps - Math.sign(forwardMps) * DESTROYED_ENGINE_SPEED_CAP_MPS;
+    this.linvel.x -= this.forwardScratch.x * excess;
+    this.linvel.z -= this.forwardScratch.z * excess;
+    this.chassisBody.setLinvel(this.linvel, true);
   }
 
   private forwardSpeedMps(): number {

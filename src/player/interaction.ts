@@ -45,7 +45,7 @@ import {
   bonnetSlotKind,
   BONNET_SLOT_KINDS,
 } from '../vehicle/bonnet';
-import { setCondition } from '../render/materials';
+import { setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
@@ -196,6 +196,7 @@ interface Resolved {
 }
 
 function conditionPrefix(part: PartInstance): string {
+  if (part.destroyed) return 'destroyed ';
   if (part.rust > 0.3) return 'rusty ';
   if (part.dirt > 0.3) return 'dirty ';
   return '';
@@ -1116,13 +1117,13 @@ export class Interaction {
     const t = resolved.target;
     if (t.kind === 'loose-part') {
       const mesh = this.loose.meshFor(t.partId);
-      if (mesh) setCondition(mesh, part.dirt, part.rust);
+      if (mesh) setPartCondition(mesh, part);
       return;
     }
     if (t.kind === 'anchor' && resolved.vehicle) {
       // Mounted gizmo: its mesh is named by anchor id inside the vehicle root.
       const mesh = resolved.vehicle.root.getObjectByName(t.anchorId);
-      if (mesh) setCondition(mesh, part.dirt, part.rust);
+      if (mesh) setPartCondition(mesh, part);
     }
   }
 

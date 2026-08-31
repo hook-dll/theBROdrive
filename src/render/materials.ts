@@ -253,6 +253,18 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
   return material;
 }
 
+/** Applies cosmetic wear, with irreversible engine destruction forced visibly burnt. */
+export function setPartCondition(
+  root: THREE.Object3D,
+  part: { readonly dirt: number; readonly rust: number; readonly destroyed?: boolean },
+): void {
+  setCondition(
+    root,
+    part.destroyed ? 1 : part.dirt,
+    part.destroyed ? 0.82 : part.rust,
+  );
+}
+
 /**
  * Writes dirt/rust onto every condition material in a subtree. Uniform writes only —
  * no shader rebuild — so it is safe to call every tick while the player scrubs a part.

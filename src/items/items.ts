@@ -105,8 +105,10 @@ export function itemLabel(item: Item): string {
   switch (item.type) {
     case 'tool':
       return item.tool;
-    case 'part':
-      return variant(item.part.variantId).label;
+    case 'part': {
+      const label = variant(item.part.variantId).label;
+      return item.part.destroyed ? `destroyed ${label}` : label;
+    }
     case 'fluid_can':
       return `${item.fluid} can (${item.litres.toFixed(0)} L)`;
     case 'weapon':

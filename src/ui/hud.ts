@@ -17,6 +17,7 @@ export interface DrivingReadout {
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
+  engineDestroyed: boolean;
   /**
    * Coolant and oil as fractions of capacity. These have no dial: they sit still
    * for tens of minutes and then matter suddenly, which is a warning lamp's job,
@@ -344,6 +345,7 @@ export class Hud {
     // Warning lamps. Built as a single string and diff-guarded, because this is in
     // the render path and the usual state of it is "unchanged for ten minutes".
     const warnings: string[] = [];
+    if (readout.engineDestroyed) warnings.push('ENGINE DESTROYED');
     if (readout.coolantFraction < FLUID_ALARM_FRACTION) {
       warnings.push(readout.coolantFraction <= 0 ? 'NO COOLANT' : 'COOLANT LOW');
     }

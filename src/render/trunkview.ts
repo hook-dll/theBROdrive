@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createItemMesh } from './partmesh';
+import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
   TRUNK_CELL_COUNT,
@@ -121,7 +122,11 @@ export class TrunkView {
       this.borders[cell]!.material = selected ? this.selectedBorderMaterial : this.borderMaterial;
     }
 
-    const itemSignature = view.cells.map((item) => item?.id ?? '').join('|');
+    const itemSignature = view.cells.map((item) =>
+      item?.type === 'part'
+        ? `${item.id}:${item.part.destroyed ? 1 : 0}:${item.part.dirt}:${item.part.rust}`
+        : item?.id ?? '',
+    ).join('|');
     if (itemSignature !== this.itemSignature) {
       this.itemSignature = itemSignature;
       this.rebuildItems(view, halfExtents);
@@ -156,6 +161,7 @@ export class TrunkView {
       const item = view.cells[cell];
       if (!item) continue;
       const mesh = createItemMesh(item);
+      if (item.type === 'part') setPartCondition(mesh, item.part);
       mesh.rotation.set(-0.22, 0.52, 0.08);
       mesh.updateMatrixWorld(true);
       _box.setFromObject(mesh).getSize(_size);

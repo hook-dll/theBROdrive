@@ -121,6 +121,9 @@ const LANDING_FULL_MPS = 6;
 
 /** Slew for continuous voices. The engine tracks fast; ambience is lazier. */
 const ENGINE_TAU = 0.03;
+const DESTROYED_METAL_GAIN = 0.16;
+const DESTROYED_METAL_FREQ_IDLE = 720;
+const DESTROYED_METAL_FREQ_REV = 1650;
 const AMBIENCE_TAU = 0.09;
 
 function clamp01(v: number): number {
@@ -137,6 +140,8 @@ export class VehicleAudio {
   private readonly intakeGain: GainNode;
   private readonly engineLowpass: BiquadFilterNode;
   private readonly engineGain: GainNode;
+  private readonly destroyedMetalFilter: BiquadFilterNode;
+  private readonly destroyedMetalGain: GainNode;
 
   // Ambience chains.
   private readonly windFilter: BiquadFilterNode;
@@ -202,6 +207,17 @@ export class VehicleAudio {
     this.intakeGain.gain.value = 0;
     this.addNoise(this.intakeFilter);
     this.intakeFilter.connect(this.intakeGain).connect(this.engineLowpass);
+
+    // A narrow, load-sensitive scrape/rattle layered over combustion when the
+    // fitted engine has catastrophically damaged internals.
+    this.destroyedMetalFilter = ctx.createBiquadFilter();
+    this.destroyedMetalFilter.type = 'bandpass';
+    this.destroyedMetalFilter.frequency.value = DESTROYED_METAL_FREQ_IDLE;
+    this.destroyedMetalFilter.Q.value = 3.2;
+    this.destroyedMetalGain = ctx.createGain();
+    this.destroyedMetalGain.gain.value = 0;
+    this.addNoise(this.destroyedMetalFilter);
+    this.destroyedMetalFilter.connect(this.destroyedMetalGain).connect(this.out);
 
     this.fireOsc.start();
     this.bodyOsc.start();
@@ -325,6 +341,20 @@ export class VehicleAudio {
       : 0;
     ramp(this.engineGain.gain, engineLevel, now, ENGINE_TAU);
     ramp(this.intakeGain.gain, running ? 0.07 + 0.43 * load : 0, now, ENGINE_TAU);
+    this.destroyedMetalFilter.frequency.setTargetAtTime(
+      DESTROYED_METAL_FREQ_IDLE +
+        (DESTROYED_METAL_FREQ_REV - DESTROYED_METAL_FREQ_IDLE) * rev,
+      now,
+      ENGINE_TAU,
+    );
+    ramp(
+      this.destroyedMetalGain.gain,
+      running && state.engineDestroyed
+        ? DESTROYED_METAL_GAIN * (0.45 + 0.55 * load) * (interior ? 0.8 : 1)
+        : 0,
+      now,
+      ENGINE_TAU,
+    );
     // Induction is broadband turbulence, not a fixed-pitch whistle. The existing
     // load-controlled intake noise supplies it instead of an oscillator.
 

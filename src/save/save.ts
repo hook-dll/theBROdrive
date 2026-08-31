@@ -64,6 +64,7 @@ export function installVehicleAutosave(
       case 'enter_car':
       case 'exit_car':
       case 'car_storage':
+      case 'car_bonnet':
       case 'wreck_storage':
       case 'trailer_hitch':
       case 'trailer_cargo':
@@ -568,6 +569,7 @@ function migratePart(raw: unknown, where: string): PartInstance {
     variantId: obj.variantId,
     dirt: numOr(obj.dirt, 0),
     rust: numOr(obj.rust, 0),
+    destroyed: obj.destroyed === true || undefined,
   };
 }
 
