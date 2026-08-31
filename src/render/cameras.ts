@@ -47,6 +47,8 @@ const RECENTER_EPSILON = 1e-3;
 const CHASE_RECENTER_IDLE_SECONDS = 6;
 /** Automatic horizontal return is gentler than the explicit V-key snap. */
 const CHASE_RECENTER_OMEGA = 2;
+/** Ignore sub-pixel touch jitter when deciding whether horizontal look is active. */
+const CHASE_LOOK_ACTIVITY_EPSILON = 1e-3;
 /**
  * Log-distance added per wheel notch. Distance is `exp(logDistance)`, so a
  * notch always multiplies distance by a fixed factor. That is the only way one
@@ -323,10 +325,12 @@ export class CameraRig {
     this.yawValue -= input.lookYaw;
     this.pitch = clamp(this.pitch + input.lookPitch, -PITCH_LIMIT, PITCH_LIMIT);
 
-    // Chase yaw stays where the player left it for six seconds after horizontal
-    // mouse input, then eases toward the live vehicle heading. Vertical look is
-    // independent: it neither recentres pitch nor postpones the horizontal return.
-    const horizontalLookActive = input.lookYaw !== 0;
+    // Chase yaw stays where the player left it for six seconds after meaningful
+    // horizontal input, then eases toward the live vehicle heading. Touchscreens
+    // can emit tiny coordinate noise after a drag; treating any non-zero float as
+    // activity lets that noise postpone recentering forever.
+    // Vertical look is independent: it neither recentres pitch nor resets this timer.
+    const horizontalLookActive = Math.abs(input.lookYaw) >= CHASE_LOOK_ACTIVITY_EPSILON;
     if (inputMode === 'chase') {
       this.chaseLookIdle = horizontalLookActive ? 0 : this.chaseLookIdle + d;
     } else {
