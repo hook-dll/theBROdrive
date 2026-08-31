@@ -26,6 +26,7 @@ globalThis.document = {
   }),
 };
 globalThis.self = globalThis;
+globalThis.window = { innerWidth: 1, innerHeight: 1 };
 globalThis.URL.createObjectURL ??= () => 'blob:stub';
 globalThis.URL.revokeObjectURL ??= () => {};
 import { readFileSync, readdirSync } from 'node:fs';

@@ -183,6 +183,20 @@ const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
   { id: 'gizmo_flank_r', label: 'right flank', frac: [-0.95, 0.45, -0.1], yaw: -Math.PI / 2 },
 ];
 
+/**
+ * Authored lamp selectors. A selector may name either a mesh node or its material;
+ * this covers FBX exports with separate lamp objects and GLBs with material-split
+ * body meshes without mutating either asset format.
+ */
+export interface VehicleLightsDef {
+  readonly headlights: readonly string[];
+  readonly taillights: readonly string[];
+  readonly reverseLights?: readonly string[];
+  readonly leftBlinkers?: readonly string[];
+  readonly rightBlinkers?: readonly string[];
+}
+
+
 
 export interface CarModelDef {
   /** Stable id; appears in save files. */
@@ -263,6 +277,8 @@ export interface CarModelDef {
    * render/carmodel.ts.
    */
   readonly viewFrac: readonly [number, number, number];
+  /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
+  readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
   /**
    * Whether this model belongs to a roadworthy pack. Only Quaternius and Soviet
@@ -277,7 +293,14 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'scale' | 'suspension' | 'viewFrac' | 'gizmoAnchors' | 'spawnable' | 'storageCells'
+  | 'file'
+  | 'scale'
+  | 'suspension'
+  | 'viewFrac'
+  | 'lights'
+  | 'gizmoAnchors'
+  | 'spawnable'
+  | 'storageCells'
 > & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb?: string;
@@ -291,6 +314,7 @@ type Entry = Omit<
   readonly scale?: number;
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
+  readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors?: readonly GizmoAnchorDef[];
   /** Legacy authored hint; the catalogue normalizer now gives every body eight cells. */
   readonly storageCells?: number;
@@ -1319,6 +1343,39 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   },
 ];
 
+function sovietLights(file: string): VehicleLightsDef {
+  const stem = file.slice(0, -4);
+  const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
+  const headlights = [prefix === '31' ? '31bodyhead;ights' : `${prefix}bodyheadlights`];
+  const taillights = [`${prefix}bodytaillights`];
+  const reverseLights = ['01', '02', '03'].includes(prefix)
+    ? undefined
+    : [`${prefix}bodyreverselights`];
+  if (prefix === 'g21') return { headlights, taillights, reverseLights };
+  if (prefix === 'g24') {
+    return {
+      headlights,
+      taillights,
+      reverseLights,
+      leftBlinkers: ['g24bodyfrontleftblinker', 'g24bodyrearleftblinker'],
+      rightBlinkers: ['g24bodyfrontrightblinker', 'g24bodyrearrightblinker'],
+    };
+  }
+  return {
+    headlights,
+    taillights,
+    reverseLights,
+    leftBlinkers: [`${prefix}bodyleftblinkers`],
+    rightBlinkers: [`${prefix}bodyrightblinkers`],
+  };
+}
+
+const QUATERNIUS_LIGHTS: VehicleLightsDef = {
+  headlights: ['Headlights'],
+  taillights: ['TailLights'],
+};
+
+
 /** One entry per body; the pack's scale, palette and wheel detection are shared. */
 const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   id: spec.id,
@@ -1326,6 +1383,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   dir: SOVIET,
   glb: spec.file,
   textureFile: `${SOVIET}/albedo.png`,
+  lights: sovietLights(spec.file),
   detectWheels: true,
   bodyClass: 'car',
   storageCells: spec.storageCells,
@@ -1571,6 +1629,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
+  lights: e.lights ?? (e.dir === QUATERNIUS ? QUATERNIUS_LIGHTS : undefined),
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   spawnable: e.dir === QUATERNIUS || e.dir === SOVIET,
   storageCells: TRUNK_CELL_COUNT,

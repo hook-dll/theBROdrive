@@ -22,6 +22,8 @@ export interface InputFrame {
   shift: number;
   /** Toggle intents, consumed once by the system that handles them. */
   toggleLights: boolean;
+  toggleLeftIndicator: boolean;
+  toggleRightIndicator: boolean;
   cycleCamera: boolean;
   /** Cycle the all-wheel tyre compound while driving. */
   cycleTyres: boolean;
@@ -72,6 +74,8 @@ export function emptyInput(): InputFrame {
     handbrake: false,
     shift: 0,
     toggleLights: false,
+    toggleLeftIndicator: false,
+    toggleRightIndicator: false,
     cycleCamera: false,
     cycleTyres: false,
     radioToggle: false,
@@ -120,6 +124,8 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
+  { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
+  { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
   { id: 'camera', label: 'Toggle hood / chase camera', defaultKeys: ['KeyC'] },
@@ -490,6 +496,8 @@ export class InputReader {
       (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
       (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
     f.toggleLights = this.anyPressed(this.keys.lights) || taps?.lights === true;
+    f.toggleLeftIndicator = this.anyPressed(this.keys.indicatorLeft);
+    f.toggleRightIndicator = this.anyPressed(this.keys.indicatorRight);
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.toggleMouseSteer = this.anyPressed(this.keys.mouseSteer);
