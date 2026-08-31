@@ -324,6 +324,7 @@ export class Interaction {
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     if (mountPressed) this.mount(resolved);
+    if (interactPressed) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
