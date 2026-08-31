@@ -147,21 +147,32 @@ const PROCEDURAL_SCHEME = 'procedural://';
 /**
  * Produces one model's scene graph, picking the source from its URL.
  *
- * Three sources, one contract: a `procedural://` id is built in code, `.fbx` goes
- * through FBXLoader (two vendored packs ship only FBX), anything else is glTF.
- * Downstream — measurement, wheels, anchors, the hood camera — cannot tell which,
- * which is what lets a generated car sit in the catalogue next to a bought one.
+ * Asset-file cameras and lights are authoring aids, never vehicle parts. Keeping
+ * them makes every spawned copy add another renderer light; the updated Soviet
+ * FBXs contain Blender scene lights, which overwhelmed the sun around each car.
  */
 async function loadScene(file: string): Promise<THREE.Group> {
   if (file.startsWith(PROCEDURAL_SCHEME)) {
     return proceduralCarScene(file.slice(PROCEDURAL_SCHEME.length));
   }
+
+  let scene: THREE.Group;
   if (file.toLowerCase().endsWith('.fbx')) {
     fbx ??= new FBXLoader();
-    return await fbx.loadAsync(file);
+    scene = await fbx.loadAsync(file);
+  } else {
+    gltf ??= new GLTFLoader();
+    scene = (await gltf.loadAsync(file)).scene;
   }
-  gltf ??= new GLTFLoader();
-  return (await gltf.loadAsync(file)).scene;
+
+  const authoringDevices: THREE.Object3D[] = [];
+  scene.traverse((node) => {
+    if (node instanceof THREE.Light || node instanceof THREE.Camera) {
+      authoringDevices.push(node);
+    }
+  });
+  for (const node of authoringDevices) node.removeFromParent();
+  return scene;
 }
 
 /**
