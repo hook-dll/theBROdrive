@@ -8,7 +8,7 @@ import { variant } from './registry';
 import type { Item } from '../items/items';
 import { itemMass } from '../items/items';
 import { createItemMesh, createPartMesh, partHalfExtents } from '../render/partmesh';
-import { setCondition } from '../render/materials';
+import { setPartCondition } from '../render/materials';
 
 /**
  * Every part and item lying loose in the world.
@@ -271,7 +271,7 @@ export class LoosePartField {
       variant(part.variantId).mass,
     );
     const mesh = createPartMesh(part.variantId);
-    setCondition(mesh, part.dirt, part.rust);
+    setPartCondition(mesh, part);
     mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
     this.parts.set(part.id, { body, collider, mesh });

@@ -496,16 +496,16 @@ export function variantsOfKind(kind: PartKind, bodyClass?: BodyClass): PartVaria
 /**
  * A physical part in the world.
  *
- * `dirt` and `rust` are both 0..1 and purely cosmetic: they drive the shading in
- * `render/materials.ts` and nothing else. There is deliberately no permanent
- * `wear` axis and no performance penalty — a part's condition is something you
- * look at, never something you maintain. This game is a drive, not a workshop.
+ * `dirt` and `rust` are cosmetic. `destroyed` is the single irreversible service
+ * state: only engines acquire it, and no cleaning tool clears it.
  */
 export interface PartInstance {
   readonly id: string;
   readonly variantId: string;
   dirt: number;
   rust: number;
+  /** Irreversible catastrophic engine damage. Replacement is the only repair. */
+  destroyed?: boolean;
 }
 
 /** Coarse dirt a brush can shift; below this only a sponge helps. */

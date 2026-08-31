@@ -1150,6 +1150,7 @@ async function boot(): Promise<void> {
         coolantFraction: coolantCap > 0 ? (car?.coolantLitres ?? 0) / coolantCap : 1,
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
+        engineDestroyed: driving.engineDestroyed,
         handbrake: lastInput.handbrake,
         tcsActive: driving.tcsActive,
       });

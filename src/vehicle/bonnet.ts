@@ -1,5 +1,5 @@
 import type { Item, PartItem } from '../items/items';
-import { variant, type BodyClass, type FuelType, type PartInstance } from '../parts/registry';
+import { variant, type BodyClass, type EngineSpec, type FuelType, type PartInstance } from '../parts/registry';
 
 /** Every car exposes the same four service positions, left to right. */
 export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'coolant_tank', 'fuel_tank'] as const;
@@ -79,6 +79,17 @@ export function bonnetCanRun(
   );
 }
 
+
+/** Catastrophic internals: barely enough crank torque to move, never repairable. */
+export function destroyedEngineSpec(engine: EngineSpec): EngineSpec {
+  return {
+    ...engine,
+    peakPowerKw: Math.min(engine.peakPowerKw * 0.08, 5),
+    peakTorqueNm: Math.min(engine.peakTorqueNm * 0.18, 24),
+    bsfc: engine.bsfc * 2.5,
+    brakingCoeff: Math.min(engine.brakingCoeff * 0.2, 0.02),
+  };
+}
 export type EngineFailureReason = 'coolant' | 'oil';
 
 /** Called only for a running engine; turbine presence intentionally has no bearing. */
@@ -87,6 +98,7 @@ export function engineFailureReason(
   coolantLitres: number,
   oilLitres: number,
 ): EngineFailureReason | null {
+  if (bonnetPart(cells, 0)?.destroyed) return null;
   if (bonnetPart(cells, 2) === null || coolantLitres <= 0) return 'coolant';
   if (oilLitres <= 0) return 'oil';
   return null;

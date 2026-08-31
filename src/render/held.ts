@@ -13,7 +13,7 @@
  */
 import * as THREE from 'three';
 import { createItemMesh, setBubbleGumPieceCount } from './partmesh';
-import { setCondition } from './materials';
+import { setPartCondition } from './materials';
 import { itemMass } from '../items/items';
 import type { Item } from '../items/items';
 import type { CameraMode } from './cameras';
@@ -272,7 +272,7 @@ export class HeldItemView {
 
     const mesh = createItemMesh(item);
     // A filthy part must look filthy in your hands, not just when bolted on.
-    if (item.type === 'part') setCondition(mesh, item.part.dirt, item.part.rust);
+    if (item.type === 'part') setPartCondition(mesh, item.part);
 
     // A viewmodel must neither cast onto the world nor receive the sun's shadow
     // map (which would read as a floating smudge).
