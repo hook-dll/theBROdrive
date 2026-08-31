@@ -10,12 +10,11 @@
  *    for packs that ship a shared wheel separately),
  *  - each wheel's radius comes from that wheel model's own bounds,
  *
- * all measured at load time in render/carmodel.ts. This catalogue holds only what
- * geometry cannot say: mass, drivetrain, springs and steering.
+ * all measured at load time in render/carmodel.ts. This catalogue holds geometry's
+ * defaults: mass, gearbox, original engine, tank capacity, springs and steering.
  *
- * Parts still exist, but only as *gizmos*: cosmetic things found in the world and
- * bolted onto anchor points (see `gizmoAnchors` and the anchor derivation in
- * render/carmodel.ts). They never make a car drivable — a complete model already is.
+ * Free-form anchor parts remain cosmetic. The separate four-cell bonnet service
+ * layout owns the removable engine, optional turbine, coolant tank and fuel tank.
  */
 
 import type { BodyClass, EngineSpec, GearboxSpec, SuspensionTuning } from '../parts/registry';

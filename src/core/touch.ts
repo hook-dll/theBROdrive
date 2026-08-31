@@ -1,15 +1,15 @@
 /**
- * Two-stick touch controls for phones and tablets.
+ * Wheel-and-pedal touch controls for phones and tablets.
  *
- * The left stick supplies movement on foot and throttle, brake and steering in a
- * vehicle. The right stick supplies a continuous look axis. Both are plain touch
- * controls, so they work without motion-sensor permission or HTTPS.
+ * The left wheel supplies steering or sideways movement. The two right pedals
+ * supply forward and backward movement. A drag anywhere outside the controls moves
+ * the camera.
  */
 
-/** Ignore small thumb motion around a stick's centre. */
-const STICK_DEAD_ZONE = 0.12;
-/** Camera rotation at full right-stick deflection, in radians per second. */
-const LOOK_SPEED = 1.0;
+/** Ignore tiny wheel drags around its resting position. */
+const WHEEL_DEAD_ZONE = 0.06;
+/** Camera rotation per screen pixel dragged. */
+const LOOK_RADIANS_PER_PIXEL = 0.0035;
 /** Wheel-notch equivalent emitted per second at full zoom-fader deflection. */
 const ZOOM_SPEED = 1.2;
 
@@ -30,7 +30,7 @@ export interface TouchState {
   readonly forward: number;
   /** Analogue brake/reverse command, 0..1. */
   readonly backward: number;
-  /** Left-stick horizontal axis, -1..1. */
+  /** Steering-wheel axis, -1..1. */
   readonly steer: number;
   /** True once touch controls own the steering axis. */
   readonly steeringActive: boolean;
@@ -49,17 +49,7 @@ interface TouchHooks {
   readonly pause: () => void;
 }
 
-type StickKind = 'move' | 'look';
-
-interface StickZone {
-  readonly kind: StickKind;
-  readonly knob: HTMLElement;
-  readonly centreX: number;
-  readonly centreY: number;
-  readonly travel: number;
-  x: number;
-  y: number;
-}
+type DrivePedal = 'forward' | 'backward';
 
 interface ButtonSpec {
   readonly id: TouchButton;
@@ -86,17 +76,21 @@ export class TouchControls {
 
   private overlay: HTMLElement | null = null;
   private hint: HTMLElement | null = null;
-  private movePad: HTMLElement | null = null;
-  private moveKnob: HTMLElement | null = null;
-  private lookPad: HTMLElement | null = null;
-  private lookKnob: HTMLElement | null = null;
+  private wheel: HTMLElement | null = null;
+  private wheelRim: HTMLElement | null = null;
+  private wheelTouchId: number | null = null;
+  private wheelStartX = 0;
+  private forwardPedal: HTMLButtonElement | null = null;
+  private backwardPedal: HTMLButtonElement | null = null;
+  private forwardTouchId: number | null = null;
+  private backwardTouchId: number | null = null;
   private fullscreenButton: HTMLButtonElement | null = null;
   private zoomFader: HTMLElement | null = null;
   private zoomThumb: HTMLElement | null = null;
   private zoomTouchId: number | null = null;
-  private readonly zones = new Map<number, StickZone>();
-  private lookX = 0;
-  private lookY = 0;
+  private cameraDrag: { id: number; x: number; y: number } | null = null;
+  private lookYaw = 0;
+  private lookPitch = 0;
   private zoomAxis = 0;
 
   private readonly state: TouchState & {
@@ -159,16 +153,17 @@ export class TouchControls {
   /** Release all analogue touch axes when the tab returns. */
   private onVisibility = (): void => {
     if (document.visibilityState !== 'visible') return;
-    this.releaseSticks();
+    this.releaseDriveControls();
+    this.releaseCameraDrag();
     this.releaseZoomFader();
   };
 
-  /** Converts the held right-stick direction into this simulation step's look delta. */
-  consumeLook(dt: number): { yaw: number; pitch: number } {
-    return {
-      yaw: this.lookX * LOOK_SPEED * dt,
-      pitch: this.lookY * LOOK_SPEED * dt,
-    };
+  /** Reads and clears camera rotation accumulated by free screen dragging. */
+  consumeLook(): { yaw: number; pitch: number } {
+    const look = { yaw: this.lookYaw, pitch: this.lookPitch };
+    this.lookYaw = 0;
+    this.lookPitch = 0;
+    return look;
   }
 
   /** Converts the held fader displacement into wheel-notch-equivalent zoom. */
@@ -206,124 +201,144 @@ export class TouchControls {
   }
 
   // ---------------------------------------------------------------------------
-  // Sticks
+  // Wheel, pedals and camera drag
   // ---------------------------------------------------------------------------
 
   private onTouchStart = (e: TouchEvent): void => {
     e.preventDefault();
     this.activate();
-    for (const touch of Array.from(e.changedTouches)) {
-      const zone = this.zoneFor(touch);
-      if (!zone) continue;
-      this.zones.set(touch.identifier, zone);
-      this.updateZone(zone, touch);
+    const touch = e.changedTouches.item(0);
+    if (touch && !this.cameraDrag) {
+      this.cameraDrag = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
     }
-    this.syncAxes();
   };
 
   private onTouchMove = (e: TouchEvent): void => {
     e.preventDefault();
     for (const touch of Array.from(e.changedTouches)) {
-      const zone = this.zones.get(touch.identifier);
-      if (zone) this.updateZone(zone, touch);
+      if (touch.identifier !== this.cameraDrag?.id) continue;
+      this.lookYaw += (touch.clientX - this.cameraDrag.x) * LOOK_RADIANS_PER_PIXEL;
+      this.lookPitch -= (touch.clientY - this.cameraDrag.y) * LOOK_RADIANS_PER_PIXEL;
+      this.cameraDrag.x = touch.clientX;
+      this.cameraDrag.y = touch.clientY;
     }
-    this.syncAxes();
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
     e.preventDefault();
     for (const touch of Array.from(e.changedTouches)) {
-      const zone = this.zones.get(touch.identifier);
-      if (!zone) continue;
-      this.resetKnob(zone);
-      this.zones.delete(touch.identifier);
+      if (touch.identifier === this.cameraDrag?.id) this.cameraDrag = null;
     }
-    this.syncAxes();
   };
 
-  /** Claims a stick only when the touch starts inside its visible circular base. */
-  private zoneFor(touch: Touch): StickZone | null {
-    const pads: readonly [StickKind, HTMLElement | null, HTMLElement | null][] = [
-      ['move', this.movePad, this.moveKnob],
-      ['look', this.lookPad, this.lookKnob],
-    ];
-    for (const [kind, pad, knob] of pads) {
-      if (!pad || !knob || this.hasZone(kind)) continue;
-      const rect = pad.getBoundingClientRect();
-      const centreX = rect.left + rect.width / 2;
-      const centreY = rect.top + rect.height / 2;
-      const dx = touch.clientX - centreX;
-      const dy = touch.clientY - centreY;
-      const radius = Math.min(rect.width, rect.height) / 2;
-      if (dx * dx + dy * dy > radius * radius) continue;
-      return {
-        kind,
-        knob,
-        centreX,
-        centreY,
-        travel: radius * 0.48,
-        x: 0,
-        y: 0,
-      };
+  private bindWheel(control: HTMLElement, rim: HTMLElement): void {
+    control.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.wheelTouchId !== null) return;
+        const touch = e.changedTouches.item(0);
+        if (!touch) return;
+        this.wheelTouchId = touch.identifier;
+        this.wheelStartX = touch.clientX;
+        control.classList.add('is-active');
+      },
+      { passive: false },
+    );
+    control.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const touch = this.touchWithId(e.changedTouches, this.wheelTouchId);
+        if (!touch) return;
+        const travel = Math.max(1, control.getBoundingClientRect().width * 0.42);
+        const raw = Math.max(-1, Math.min(1, (touch.clientX - this.wheelStartX) / travel));
+        const magnitude = Math.abs(raw);
+        this.state.steer =
+          magnitude <= WHEEL_DEAD_ZONE
+            ? 0
+            : Math.sign(raw) * ((magnitude - WHEEL_DEAD_ZONE) / (1 - WHEEL_DEAD_ZONE));
+        rim.style.transform = `rotate(${this.state.steer * 110}deg)`;
+      },
+      { passive: false },
+    );
+    const release = (e: TouchEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.touchWithId(e.changedTouches, this.wheelTouchId)) return;
+      this.releaseWheel();
+    };
+    control.addEventListener('touchend', release, { passive: false });
+    control.addEventListener('touchcancel', release, { passive: false });
+  }
+
+  private bindPedal(button: HTMLButtonElement, pedal: DrivePedal): void {
+    button.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.pedalTouchId(pedal) !== null) return;
+        const touch = e.changedTouches.item(0);
+        if (!touch) return;
+        this.setPedalTouchId(pedal, touch.identifier);
+        this.state[pedal] = 1;
+        button.classList.add('is-down');
+      },
+      { passive: false },
+    );
+    const release = (e: TouchEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.touchWithId(e.changedTouches, this.pedalTouchId(pedal))) return;
+      this.setPedalTouchId(pedal, null);
+      this.state[pedal] = 0;
+      button.classList.remove('is-down');
+    };
+    button.addEventListener('touchend', release, { passive: false });
+    button.addEventListener('touchcancel', release, { passive: false });
+  }
+
+  private touchWithId(touches: TouchList, id: number | null): Touch | null {
+    if (id === null) return null;
+    for (const touch of Array.from(touches)) {
+      if (touch.identifier === id) return touch;
     }
     return null;
   }
 
-  private hasZone(kind: StickKind): boolean {
-    for (const zone of this.zones.values()) {
-      if (zone.kind === kind) return true;
-    }
-    return false;
+  private pedalTouchId(pedal: DrivePedal): number | null {
+    return pedal === 'forward' ? this.forwardTouchId : this.backwardTouchId;
   }
 
-  private updateZone(zone: StickZone, touch: Touch): void {
-    const rawX = (touch.clientX - zone.centreX) / zone.travel;
-    const rawY = (zone.centreY - touch.clientY) / zone.travel;
-    const magnitude = Math.hypot(rawX, rawY);
-    if (magnitude <= STICK_DEAD_ZONE) {
-      zone.x = 0;
-      zone.y = 0;
-    } else {
-      const clamped = Math.min(1, magnitude);
-      const shaped = (clamped - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE);
-      zone.x = (rawX / magnitude) * shaped;
-      zone.y = (rawY / magnitude) * shaped;
-    }
-    zone.knob.style.transform =
-      `translate(-50%, -50%) translate(${zone.x * zone.travel}px, ${-zone.y * zone.travel}px)`;
-    zone.knob.parentElement?.classList.add('is-active');
+  private setPedalTouchId(pedal: DrivePedal, id: number | null): void {
+    if (pedal === 'forward') this.forwardTouchId = id;
+    else this.backwardTouchId = id;
   }
 
-  private resetKnob(zone: StickZone): void {
-    zone.knob.style.transform = '';
-    zone.knob.parentElement?.classList.remove('is-active');
+  private releaseWheel(): void {
+    this.wheelTouchId = null;
+    this.state.steer = 0;
+    this.wheel?.classList.remove('is-active');
+    this.wheelRim?.style.removeProperty('transform');
   }
 
-  private releaseSticks(): void {
-    for (const zone of this.zones.values()) this.resetKnob(zone);
-    this.zones.clear();
-    this.syncAxes();
+  private releaseDriveControls(): void {
+    this.releaseWheel();
+    this.forwardTouchId = null;
+    this.backwardTouchId = null;
+    this.state.forward = 0;
+    this.state.backward = 0;
+    this.forwardPedal?.classList.remove('is-down');
+    this.backwardPedal?.classList.remove('is-down');
   }
 
-  private syncAxes(): void {
-    let moveX = 0;
-    let moveY = 0;
-    let lookX = 0;
-    let lookY = 0;
-    for (const zone of this.zones.values()) {
-      if (zone.kind === 'move') {
-        moveX = zone.x;
-        moveY = zone.y;
-      } else {
-        lookX = zone.x;
-        lookY = zone.y;
-      }
-    }
-    this.state.steer = moveX;
-    this.state.forward = Math.max(0, moveY);
-    this.state.backward = Math.max(0, -moveY);
-    this.lookX = lookX;
-    this.lookY = lookY;
+  private releaseCameraDrag(): void {
+    this.cameraDrag = null;
+    this.lookYaw = 0;
+    this.lookPitch = 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -378,15 +393,17 @@ export class TouchControls {
     overlay.appendChild(leftButtons);
     overlay.appendChild(rightButtons);
 
-    const move = this.makeStick('move', 'MOVE / DRIVE');
-    this.movePad = move.pad;
-    this.moveKnob = move.knob;
-    overlay.appendChild(move.pad);
+    const wheel = this.makeWheel();
+    this.wheel = wheel.control;
+    this.wheelRim = wheel.rim;
+    overlay.appendChild(wheel.control);
 
-    const look = this.makeStick('look', 'LOOK');
-    this.lookPad = look.pad;
-    this.lookKnob = look.knob;
-    overlay.appendChild(look.pad);
+    const pedals = document.createElement('div');
+    pedals.className = 'touch-pedals';
+    this.backwardPedal = this.makePedal('backward', 'BACK / REV', '▼');
+    this.forwardPedal = this.makePedal('forward', 'FORWARD', '▲');
+    pedals.append(this.backwardPedal, this.forwardPedal);
+    overlay.appendChild(pedals);
 
     const zoomFader = this.makeZoomFader();
     this.zoomFader = zoomFader.fader;
@@ -395,7 +412,7 @@ export class TouchControls {
 
     this.hint = document.createElement('div');
     this.hint.className = 'touch-hint';
-    this.hint.textContent = 'left stick: move / drive · right stick: look';
+    this.hint.textContent = 'wheel: steer · pedals: forward / back · drag screen: look';
     overlay.appendChild(this.hint);
     window.setTimeout(() => this.hint?.classList.add('is-faded'), 5000);
 
@@ -403,15 +420,30 @@ export class TouchControls {
     this.overlay = overlay;
   }
 
-  private makeStick(kind: StickKind, label: string): { pad: HTMLElement; knob: HTMLElement } {
-    const pad = document.createElement('div');
-    pad.className = `touch-stick touch-stick--${kind}`;
-    pad.dataset.label = label;
-    pad.setAttribute('aria-hidden', 'true');
-    const knob = document.createElement('div');
-    knob.className = 'touch-stick-knob';
-    pad.appendChild(knob);
-    return { pad, knob };
+  private makeWheel(): { control: HTMLElement; rim: HTMLElement } {
+    const control = document.createElement('div');
+    control.className = 'touch-wheel';
+    control.setAttribute('aria-label', 'Steering wheel');
+    const rim = document.createElement('div');
+    rim.className = 'touch-wheel-rim';
+    rim.innerHTML =
+      '<span class="touch-wheel-spoke touch-wheel-spoke--left"></span>' +
+      '<span class="touch-wheel-spoke touch-wheel-spoke--right"></span>' +
+      '<span class="touch-wheel-spoke touch-wheel-spoke--bottom"></span>' +
+      '<span class="touch-wheel-hub"></span>';
+    control.appendChild(rim);
+    this.bindWheel(control, rim);
+    return { control, rim };
+  }
+
+  private makePedal(pedal: DrivePedal, label: string, glyph: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.className = `touch-pedal touch-pedal--${pedal}`;
+    button.type = 'button';
+    button.setAttribute('aria-label', label);
+    button.innerHTML = `<span class="touch-pedal-glyph">${glyph}</span><span>${label}</span>`;
+    this.bindPedal(button, pedal);
+    return button;
   }
 
   private makeZoomFader(): { fader: HTMLElement; thumb: HTMLElement } {

@@ -645,6 +645,8 @@ async function boot(): Promise<void> {
   let gumUseHeld = false;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
+  /** Vehicle whose live lamp state remains projected after the player exits. */
+  let lastExitedVehicleId: string | null = null;
 
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
@@ -667,7 +669,7 @@ async function boot(): Promise<void> {
 
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
-
+    if (driving) lastExitedVehicleId = drivingId;
     // Mouse steering is a preference, so M edits the settings rather than a local
     // flag: it survives a reload, and the pause menu and the key agree because they
     // are the same state. The reader is told "on AND driving", so the same mouse
@@ -1007,7 +1009,9 @@ async function boot(): Promise<void> {
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     vehicleLights.clear();
-    driving?.syncProjectedLights(vehicleLights);
+    const projectedVehicle =
+      driving ?? (lastExitedVehicleId ? (vehicles.get(lastExitedVehicleId) ?? null) : null);
+    projectedVehicle?.syncProjectedLights(vehicleLights);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever

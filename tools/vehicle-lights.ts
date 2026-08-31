@@ -212,8 +212,13 @@ async function run(): Promise<void> {
     );
 
     rig.clear();
-    assertRigState(scene, rig, identities, targets, visibility, 'on-foot clear');
-    check('on-foot clear: every projected intensity is zero', allZero(identities), identities.map((light) => light.intensity).join(', '));
+    vehicles[1].syncProjectedLights(rig);
+    assertRigState(scene, rig, identities, targets, visibility, 'on-foot last exited vehicle');
+    check(
+      'on-foot last exited vehicle: lights remain projected',
+      identities[0].intensity > 0 && identities[1].intensity > 0,
+      `${identities[0].intensity}, ${identities[1].intensity}`,
+    );
 
     while (vehicles.length > 0) vehicles.pop()!.dispose();
     assertRigState(scene, rig, identities, targets, visibility, 'vehicles disposed');

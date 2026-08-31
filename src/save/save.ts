@@ -12,7 +12,8 @@ import type {
 } from '../game/state';
 import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
-import type { PartInstance } from '../parts/registry';
+import { variant, type PartInstance } from '../parts/registry';
+import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 
@@ -521,16 +522,31 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   // silently gifting fluids it never tracked, and the first can fixes it.
   const storageCells = hasCarModel(modelId) ? carModel(modelId).storageCells : 0;
   const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
+  const def = carModel(modelId);
+  const defaultBonnet = createBonnetStorage(raw.id, def.engineId, def.bodyClass, def.tankLitres);
+  const bonnet = raw.bonnet === undefined
+    ? defaultBonnet
+    : normalizeBonnetStorage(migrateStorage(raw.bonnet, BONNET_SLOT_COUNT, `car "${raw.id}" bonnet`));
+  const savedFuelKind =
+    raw.fuelKind === 'petrol' || raw.fuelKind === 'diesel' || raw.fuelKind === 'mixed'
+      ? raw.fuelKind
+      : null;
+  const fuelLitres = Math.max(0, numOr(raw.fuelLitres, 0));
+  const fuelKind = fuelLitres > 0
+    ? savedFuelKind ?? variant(def.engineId).engine?.fuel ?? null
+    : null;
 
   return {
     id: raw.id,
     modelId,
     gizmos,
     stickers,
-    fuelLitres: numOr(raw.fuelLitres, 0),
+    fuelLitres,
+    fuelKind,
     coolantLitres: Math.max(0, numOr(raw.coolantLitres, 0)),
     oilLitres: Math.max(0, numOr(raw.oilLitres, 0)),
     storage,
+    bonnet,
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),

@@ -1,5 +1,5 @@
 /**
- * Cosmetic gizmos and the engine/gearbox spec tables.
+ * Physical service parts, cosmetic gizmos and drivetrain specification tables.
  *
  * Parts are *data*, never prefabs: a `PartInstance` is an id, a variant reference
  * and three condition scalars. Meshes, colliders and physics tuning are all derived
@@ -7,10 +7,9 @@
  * the player's hands, or be mounted as a cosmetic gizmo on a complete car model's
  * anchor point without changing representation.
  *
- * The car body itself is no longer assembled here: it is a complete, authored 3D
- * model (see vehicle/carmodels.ts). Parts are cosmetic junk bolted to its anchor
- * points; only the engine and gearbox variant tables below are still referenced by
- * the car catalogue, by id, for their drivetrain specs.
+ * The authored model remains the car body, but engine, turbine, coolant tank and
+ * fuel tank instances occupy typed bonnet cells and carry service capability.
+ * Everything mounted on free-form body anchors remains cosmetic.
  *
  * NETPLAY: every instance carries a stable string id, and nothing here references a
  * renderer object. Both are prerequisites for replication.
@@ -28,6 +27,8 @@ export type PartKind =
   | 'battery'
   | 'radiator'
   | 'fuel_tank'
+  | 'coolant_tank'
+  | 'turbine'
   | 'seat'
   | 'mirror'
   | 'bumper'
@@ -373,6 +374,20 @@ const TRIM_VARIANTS: readonly PartVariant[] = [
     kind: 'exhaust',
     label: 'exhaust',
     mass: 9,
+    fits: ['car', 'truck', 'bus'],
+  },
+  {
+    id: 'coolant_tank_standard',
+    kind: 'coolant_tank',
+    label: 'coolant tank',
+    mass: 9,
+    fits: ['car', 'truck', 'bus'],
+  },
+  {
+    id: 'turbine_standard',
+    kind: 'turbine',
+    label: 'turbocharger',
+    mass: 12,
     fits: ['car', 'truck', 'bus'],
   },
 ];

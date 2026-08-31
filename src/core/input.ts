@@ -259,8 +259,8 @@ export class InputReader {
 
   /**
    * Touch source, when one exists. Merged in `sample` rather than read by gameplay:
-   * a phone's analogue movement and look sticks arrive through the same
-   * `InputFrame` fields as keyboard and mouse controls.
+   * a phone's wheel, pedals and camera drag arrive through the same `InputFrame`
+   * fields as keyboard and mouse controls.
    */
   private touch: TouchControls | null = null;
 
@@ -415,8 +415,8 @@ export class InputReader {
    */
   sample(dt: number): InputFrame {
     const f = this.frame;
-    // One source of truth per axis: analogue touch-stick values and digital inputs
-    // meet here, so gameplay receives the same frame regardless of device.
+    // One source of truth per axis: touch-control values and digital inputs meet
+    // here, so gameplay receives the same frame regardless of device.
     //
     // In mouse-steering mode the mouse is the whole car: left button is the throttle,
     // right is the brake, and the middle button (held) hands the mouse back to the
@@ -474,8 +474,8 @@ export class InputReader {
       const shaped = Math.sign(w) * Math.abs(w) ** MOUSE_STEER_EXPO;
       f.steer = snapAxis(shaped, 0);
     } else {
-      // The touch movement stick is already analogue, so it supplies the same target
-      // the normal steering smoothing follows.
+      // The touch wheel is already analogue, so it supplies the same target the
+      // normal steering smoothing follows.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steer +=
         (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
@@ -526,8 +526,8 @@ export class InputReader {
         break;
       }
     }
-    // On foot the left stick supplies both camera-relative movement axes. Digital
-    // keys win only on the axis they currently hold.
+    // On foot the wheel supplies left/right and the pedals supply forward/backward.
+    // Digital keys win only on the axis they currently hold.
     const keyMoveX =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     const keyMoveZ =
@@ -538,7 +538,7 @@ export class InputReader {
     f.jump = this.anyPressed(this.keys.jump);
     f.sprint = this.anyHeld(this.keys.sprint);
 
-    const drag = this.touch?.consumeLook(dt);
+    const drag = this.touch?.consumeLook();
     // While the mouse is steering it is not looking: feeding both would spin the
     // camera every time the driver corrected the car. Mouse2 gives the view back.
     f.lookYaw = steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0);

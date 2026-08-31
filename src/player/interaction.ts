@@ -27,17 +27,24 @@ import { jobAt, type FreightField } from '../world/freight';
 import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
 import {
-  intersectTrunkGrid,
+  intersectStorageGrid,
   TRUNK_CELL_COUNT,
   TRUNK_CELL_HEIGHT,
   TRUNK_GRID_DEPTH,
-  TRUNK_ROWS,
-  trunkGridCentreY,
+  storageGridCentreY,
+  storageGridRows,
   trunkGridWidth,
+  type StorageOwnerKind,
+  type StorageSide,
   type TrunkGridRayHit,
-  type TrunkOwnerKind,
   type TrunkViewState,
 } from '../vehicle/trunk';
+import {
+  bonnetAccepts,
+  bonnetPart,
+  bonnetSlotKind,
+  BONNET_SLOT_KINDS,
+} from '../vehicle/bonnet';
 import { setCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
@@ -110,7 +117,7 @@ type Target =
   | { kind: 'trailer'; trailerId: string }
   | { kind: 'pallet'; poiIndex: number }
   | { kind: 'freight-sign'; poiIndex: number }
-  | { kind: 'boot'; owner: TrunkOwnerKind; id: string; cell: number | null }
+  | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
@@ -125,7 +132,7 @@ export interface InteractionResult {
   sound: FoleyEvent | null;
   /** The held action running this tick, for the audio layer's continuous voices. */
   continuous: FoleyContinuous;
-  /** World-attached trunk grid while the player is looking at a car's rear. */
+  /** World-attached storage grid while the player is looking into an opened compartment. */
   boot: TrunkViewState | null;
 }
 
@@ -149,16 +156,13 @@ const BOOT_RANGE = 1.6;
  */
 const BOOT_REVEAL_MARGIN = 0.15;
 
-const EMPTY_WRECK_TRUNK: readonly (Item | null)[] = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
-
+const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
+  new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
 
 /**
- * Which reservoir a fluid goes into on this car, with its current level and size.
- *
- * Null means this car cannot take that fluid at all — the only case being petrol
- * into a diesel or the reverse. Coolant and oil fit every engine, so they never
- * fail; a can of the wrong fuel is the one mistake the game lets you make and then
- * refuses.
+ * Which fitted reservoir a fluid goes into, with its current level and capacity.
+ * Fuel type is deliberately not filtered here: a wrong fill is accepted and then
+ * prevents the engine from running until the tank is removed and drained.
  */
 function fluidTarget(
   car: CarState,
@@ -168,15 +172,17 @@ function fluidTarget(
   switch (fluid) {
     case 'petrol':
     case 'diesel':
-      if (stats.tankCapacity <= 0 || stats.fuel !== fluid) return null;
+      if (!bonnetPart(car.bonnet, 3) || stats.tankCapacity <= 0) return null;
       return { label: 'tank', level: car.fuelLitres, capacity: stats.tankCapacity };
     case 'coolant':
+      if (!bonnetPart(car.bonnet, 2)) return null;
       return {
         label: 'coolant',
         level: car.coolantLitres,
         capacity: coolantCapacity(stats.engine),
       };
     case 'oil':
+      if (!bonnetPart(car.bonnet, 0)) return null;
       return { label: 'oil', level: car.oilLitres, capacity: oilCapacity(stats.engine) };
   }
 }
@@ -231,6 +237,7 @@ export class Interaction {
   private prevMount = false;
   private prevDrop = false;
   private conditionEmitTimer = 0;
+  private openStorage: { owner: StorageOwnerKind; side: StorageSide; id: string } | null = null;
 
   /** The anchor id under the crosshair on the last resolve, for ghost previews. */
   public lastAnchorTarget: string | null = null;
@@ -311,11 +318,11 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    if (resolved.target.kind !== 'storage') this.openStorage = null;
     const prompt = this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     if (mountPressed) this.mount(resolved);
-    if (interactPressed) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -323,11 +330,12 @@ export class Interaction {
     // Resolved AFTER the actions above, so stowing or taking is reflected in the
     // same frame the player sees rather than one behind.
     let boot: TrunkViewState | null = null;
-    if (resolved.target.kind === 'boot') {
-      const cells = this.trunkStorage(resolved.target);
+    if (resolved.target.kind === 'storage' && this.isStorageOpen(resolved.target)) {
+      const cells = this.storageCells(resolved.target);
       if (cells) {
         boot = {
           owner: resolved.target.owner,
+          side: resolved.target.side,
           id: resolved.target.id,
           cells,
           selectedCell: resolved.target.cell,
@@ -337,16 +345,22 @@ export class Interaction {
     return { prompt, sound: this.sound, continuous: this.continuous, boot };
   }
 
-  private trunkStorage(target: Extract<Target, { kind: 'boot' }>): readonly (Item | null)[] | null {
-    if (target.owner === 'car') return this.world.state.cars[target.id]?.storage ?? null;
-    return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+  private storageCells(target: Extract<Target, { kind: 'storage' }>): readonly (Item | null)[] | null {
+    if (target.owner === 'wreck') return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+    const car = this.world.state.cars[target.id];
+    return target.side === 'bonnet' ? car?.bonnet ?? null : car?.storage ?? null;
+  }
+
+  private isStorageOpen(target: Extract<Target, { kind: 'storage' }>): boolean {
+    const open = this.openStorage;
+    return open?.owner === target.owner && open.side === target.side && open.id === target.id;
   }
 
   /**
    * Resolves the same chassis-local grid the renderer draws. A narrowly padded
    * rectangle reveals it before a precise cell is under the crosshair.
    */
-  private pickTrunk(
+  private pickStorage(
     eyeX: number,
     eyeY: number,
     eyeZ: number,
@@ -356,12 +370,13 @@ export class Interaction {
     position: { readonly x: number; readonly y: number; readonly z: number },
     quaternion: THREE.Quaternion,
     halfExtents: readonly [number, number, number],
+    side: StorageSide,
   ): boolean {
     this.trunkInverse.copy(quaternion).invert();
     this.trunkEye.set(eyeX - position.x, eyeY - position.y, eyeZ - position.z).applyQuaternion(this.trunkInverse);
     this.trunkDirection.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
     if (
-      intersectTrunkGrid(this.trunkEye, this.trunkDirection, halfExtents, this.trunkRayHit) &&
+      intersectStorageGrid(this.trunkEye, this.trunkDirection, halfExtents, side, this.trunkRayHit) &&
       this.trunkRayHit.distance <= BOOT_RANGE
     ) {
       this.trunkPickedCell = this.trunkRayHit.cell;
@@ -370,15 +385,17 @@ export class Interaction {
     }
 
     if (Math.abs(this.trunkDirection.z) < 1e-5) return false;
-    const planeZ = -halfExtents[2] - TRUNK_GRID_DEPTH;
+    const planeZ = side === 'bonnet'
+      ? halfExtents[2] + TRUNK_GRID_DEPTH
+      : -halfExtents[2] - TRUNK_GRID_DEPTH;
     const distance = (planeZ - this.trunkEye.z) / this.trunkDirection.z;
     if (distance <= 0 || distance > BOOT_RANGE) return false;
 
     const localX = this.trunkEye.x + this.trunkDirection.x * distance;
     const localY = this.trunkEye.y + this.trunkDirection.y * distance;
     const halfWidth = trunkGridWidth(halfExtents[0]) * 0.5 + BOOT_REVEAL_MARGIN;
-    const halfHeight = TRUNK_ROWS * TRUNK_CELL_HEIGHT * 0.5 + BOOT_REVEAL_MARGIN;
-    const centreY = trunkGridCentreY(halfExtents[1]);
+    const halfHeight = storageGridRows(side) * TRUNK_CELL_HEIGHT * 0.5 + BOOT_REVEAL_MARGIN;
+    const centreY = storageGridCentreY(halfExtents[1]);
     if (Math.abs(localX) > halfWidth || Math.abs(localY - centreY) > halfHeight) {
       return false;
     }
@@ -508,16 +525,19 @@ export class Interaction {
       if (bestFit) keep(bestFitAlong, bestFit);
       else if (bestRemove) keep(bestRemoveAlong, bestRemove);
 
-      // Looking at the broad rear region reveals the grid; intersecting its exact
-      // plane selects one of the eight cells.
+      // Rear and front use the same deliberate close-range interaction. The nearer
+      // plane wins, so a long bus cannot expose both ends at once.
       const half = vehicle.modelMeasure.halfExtents;
-      if (this.pickTrunk(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, half)) {
-        keep(this.trunkPickedDistance, {
-          kind: 'boot',
-          owner: 'car',
-          id: carId,
-          cell: this.trunkPickedCell,
-        });
+      for (const side of ['trunk', 'bonnet'] as const) {
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, half, side)) {
+          keep(this.trunkPickedDistance, {
+            kind: 'storage',
+            owner: 'car',
+            side,
+            id: carId,
+            cell: this.trunkPickedCell,
+          });
+        }
       }
 
       // Bodywork, for sticking a sticker on. Deliberately a MESH raycast rather
@@ -535,7 +555,7 @@ export class Interaction {
       this.trunkPosition.set(wreck.x - this.origin.x, wreck.y, wreck.z - this.origin.z);
       this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
       if (
-        this.pickTrunk(
+        this.pickStorage(
           eyeX,
           eyeY,
           eyeZ,
@@ -545,11 +565,13 @@ export class Interaction {
           this.trunkPosition,
           this.trunkQuaternion,
           wreck.halfExtents,
+          'trunk',
         )
       ) {
         keep(this.trunkPickedDistance, {
-          kind: 'boot',
+          kind: 'storage',
           owner: 'wreck',
+          side: 'trunk',
           id: wreck.id,
           cell: this.trunkPickedCell,
         });
@@ -665,20 +687,30 @@ export class Interaction {
       return `[F] deliver ${Math.round(trailer.cargoKg)} kg`;
     }
 
-    if (t.kind === 'boot') {
-      const cells = this.trunkStorage(t);
+    if (t.kind === 'storage') {
+      const cells = this.storageCells(t);
       if (!cells) return null;
+      const label = t.side === 'bonnet' ? 'bonnet' : 'trunk';
+      if (!this.isStorageOpen(t)) return `[F] open ${label}`;
+
       let used = 0;
       for (const cell of cells) {
         if (cell) used++;
       }
-      if (t.cell === null) return `trunk ${used}/${cells.length}`;
+      if (t.cell === null) return `${label} ${used}/${cells.length}`;
       const item = cells[t.cell];
       if (item) {
         if (itemMass(item) + this.inventory.carriedMass > this.inventory.massLimit) {
           return `[F] take ${itemLabel(item)} — too heavy`;
         }
         return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
+      }
+      if (t.side === 'bonnet') {
+        const expected = bonnetSlotKind(t.cell);
+        const slotLabel = expected?.replace('_', ' ') ?? 'service';
+        if (!held) return `empty ${slotLabel} slot`;
+        if (!bonnetAccepts(t.cell, held)) return `${slotLabel} slot — wrong part`;
+        return `[F] install ${itemLabel(held)} — ${slotLabel} slot`;
       }
       if (held) return `[F] stow ${itemLabel(held)} — cell ${t.cell + 1}`;
       return `empty trunk cell ${t.cell + 1}`;
@@ -737,28 +769,30 @@ export class Interaction {
       return this.pourPrompt(held, resolved.carId, resolved.vehicle);
     }
 
-    // Car entry remains bound to the interaction key, but vehicle prompts are
-    // deliberately absent to keep the driving/on-foot HUD free of enter hints.
+    // Car entry remains bound to the interaction key; no enter hint is drawn.
     return null;
   }
 
   /**
    * What pouring this can into this car would do, or why it would not.
    *
-   * The fluid decides the reservoir with no ambiguity, so there is no picker and no
-   * mode: coolant goes in the coolant, oil in the oil, and petrol or diesel in the
-   * tank if the engine takes that one.
+   * Wrong fuel is accepted with an explicit warning; the resulting load cannot
+   * run the engine. Removing the tank drains it and provides the recovery path.
    */
   private pourPrompt(can: FluidCanItem, carId: string, vehicle: Vehicle): string | null {
     const car = this.world.state.cars[carId];
     if (!car) return null;
     if (can.litres <= 0) return `${can.fluid} can — empty`;
     const target = fluidTarget(car, vehicle.stats, can.fluid);
-    if (!target) return `[LMB] pour ${can.fluid} — this engine takes ${vehicle.stats.fuel}`;
+    if (!target) return `[LMB] pour ${can.fluid} — reservoir missing`;
     if (target.level >= target.capacity - FLUID_FULL_EPSILON) {
       return `${target.label} full — ${target.capacity.toFixed(1)} L`;
     }
-    return `[LMB] pour ${can.fluid} — ${target.label} ${target.level.toFixed(1)}/${target.capacity.toFixed(1)} L`;
+    const wrongFuel =
+      (can.fluid === 'petrol' || can.fluid === 'diesel') &&
+      (can.fluid !== vehicle.stats.fuel || (car.fuelKind !== null && car.fuelKind !== can.fluid));
+    const warning = wrongFuel ? ' — wrong fuel' : '';
+    return `[LMB] pour ${can.fluid} — ${target.label} ${target.level.toFixed(1)}/${target.capacity.toFixed(1)} L${warning}`;
   }
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
@@ -808,14 +842,12 @@ export class Interaction {
   private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
     const carId = resolved.carId;
     const vehicle = resolved.vehicle;
-    if (!carId || !vehicle || resolved.vehicleDist > POUR_RANGE) return;
-    if (can.litres <= 0) return;
+    if (!carId || !vehicle || resolved.vehicleDist > POUR_RANGE || can.litres <= 0) return;
     const car = this.world.state.cars[carId];
     if (!car) return;
 
     const target = fluidTarget(car, vehicle.stats, can.fluid);
     if (!target) return;
-
     const room = target.capacity - target.level;
     if (room <= FLUID_FULL_EPSILON) return;
     const poured = Math.min(FLUID_POUR_RATE * dt, can.litres, room);
@@ -825,7 +857,13 @@ export class Interaction {
     this.continuous = 'pour';
     const level = target.level + poured;
     if (can.fluid === 'petrol' || can.fluid === 'diesel') {
-      this.world.apply({ t: 'car_fuel', carId, litres: level });
+      const fuelKind =
+        target.level <= FLUID_FULL_EPSILON
+          ? can.fluid
+          : car.fuelKind === can.fluid
+            ? can.fluid
+            : 'mixed';
+      this.world.apply({ t: 'car_fuel', carId, litres: level, fuelKind });
     } else {
       this.world.apply({ t: 'car_fluid', carId, fluid: can.fluid, litres: level });
     }
@@ -914,22 +952,39 @@ export class Interaction {
       return;
     }
 
-    // Occupied cells always retrieve; empty cells stow the held item. The aimed
-    // cell, not whether the player's hands are full, decides the direction.
-    if (t.kind === 'boot') {
+    // The first press opens a compartment. Further presses operate its aimed cell.
+    if (t.kind === 'storage') {
+      if (!this.isStorageOpen(t)) {
+        this.openStorage = { owner: t.owner, side: t.side, id: t.id };
+        this.sound = 'mount';
+        return;
+      }
       if (t.cell === null) return;
-      const cells = this.trunkStorage(t);
+      const cells = this.storageCells(t);
       if (!cells) return;
+      if (t.side === 'bonnet' && !cells[t.cell] && !bonnetAccepts(t.cell, held)) {
+        this.sound = 'refused';
+        return;
+      }
       const result = operateTrunkCell(cells, t.cell, held, this.inventory);
       if (result.action === 'refused') {
         this.sound = 'refused';
         return;
       }
       if (result.action === 'none') return;
-      if (t.owner === 'car') {
-        this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });
-      } else {
+      if (t.owner === 'wreck') {
         this.world.apply({ t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item });
+      } else if (t.side === 'bonnet') {
+        this.world.apply({ t: 'car_bonnet', carId: t.id, cell: t.cell, item: result.item });
+        if (result.action === 'retrieved' && BONNET_SLOT_KINDS[t.cell] === 'coolant_tank') {
+          this.world.apply({ t: 'car_fluid', carId: t.id, fluid: 'coolant', litres: 0 });
+        }
+        if (result.action === 'retrieved' && BONNET_SLOT_KINDS[t.cell] === 'fuel_tank') {
+          this.world.apply({ t: 'car_fuel', carId: t.id, litres: 0, fuelKind: null });
+        }
+        resolved.vehicle?.rebuild();
+      } else {
+        this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });
       }
       this.sound = result.action === 'retrieved' ? 'pickup' : 'drop';
       return;
