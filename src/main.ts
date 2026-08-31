@@ -578,6 +578,8 @@ async function boot(): Promise<void> {
       player.setEnabled(false);
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
+      if (f.toggleLeftIndicator) driving.toggleIndicator('left');
+      if (f.toggleRightIndicator) driving.toggleIndicator('right');
       if (f.cycleTyres) {
         driving.cycleTyreCompound();
         hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);

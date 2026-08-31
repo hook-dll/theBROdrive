@@ -998,6 +998,16 @@ const HEADLIGHT_HIGH: HeadlightBeam = {
 
 type HeadlightMode = 'off' | 'low' | 'high';
 
+type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
+type IndicatorSide = 'off' | 'left' | 'right';
+
+const HEADLIGHT_EMISSIVE = 0xffffff;
+const TAILLIGHT_EMISSIVE = 0xff0000;
+const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
+const BLINKER_EMISSIVE = 0xff8a00;
+/** 90 flashes per minute, with equal on/off halves. */
+const BLINKER_PERIOD_S = 2 / 3;
+
 /**
  * Per-compound factors for every wheel. Standard is the established handling
  * baseline (both 1).
@@ -1057,6 +1067,17 @@ export class Vehicle implements Rebasable {
   private headlightMode: HeadlightMode = 'off';
   /** Perceptual suppression under daylight; one at night, near zero at full day. */
   private headlightEnvironmentFactor = 1;
+  private headlightLensMeshes: THREE.Mesh[] = [];
+  private readonly headlightLensMaterials: EmissiveMaterial[] = [];
+  private readonly taillightMaterials: EmissiveMaterial[] = [];
+  private readonly reverseLightMaterials: EmissiveMaterial[] = [];
+  private readonly leftBlinkerMaterials: EmissiveMaterial[] = [];
+  private readonly rightBlinkerMaterials: EmissiveMaterial[] = [];
+  private rearLightState = -1;
+  private reverseLightState = false;
+  private indicatorSide: IndicatorSide = 'off';
+  private indicatorElapsed = 0;
+  private indicatorLit = false;
   /** One selected compound for every wheel; standard preserves existing handling. */
   private tyreCompoundIndex = 1;
 
@@ -1100,6 +1121,8 @@ export class Vehicle implements Rebasable {
    * trailer so its brakes come on with the car's pedal.
    */
   private serviceBrakeCommand = 0;
+  /** Literal backward/brake control, retained while an automatic uses it as reverse throttle. */
+  private brakeLightCommand = 0;
   // Relative (Rapier frame): read from the body when the hold first latches, then
   // re-applied every step. Shifted by `rebase` alongside the interpolation
   // snapshots, so a held car does not snap a kilometre when the origin moves.
@@ -1394,6 +1417,13 @@ export class Vehicle implements Rebasable {
     this.headlightMode =
       this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
     this.applyHeadlightMode();
+    this.applyRearLightState();
+  }
+
+  toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
+    this.indicatorSide = this.indicatorSide === side ? 'off' : side;
+    this.indicatorElapsed = 0;
+    this.applyIndicatorState(this.indicatorSide !== 'off');
   }
 
   setHeadlightEnvironmentFactor(factor: number): void {
@@ -1606,6 +1636,8 @@ export class Vehicle implements Rebasable {
     // Nobody is driving, so there is no pedal. A trailer left coupled to a parked
     // car holds on its own brakes (uncoupled or not, it is not being towed).
     this.serviceBrakeCommand = 0;
+    this.brakeLightCommand = 0;
+    this.advanceIndicator(dt);
     if (n === 0) return;
 
     // Parking brake: same impulse units as the foot brake (see the braking note
@@ -1915,6 +1947,7 @@ export class Vehicle implements Rebasable {
     const brake = reverseDrive
       ? 0
       : Math.max(input.brake, brakingForDirectionChange ? input.throttle : 0);
+    this.brakeLightCommand = input.reverse ? 1 : 0;
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
@@ -2359,6 +2392,7 @@ export class Vehicle implements Rebasable {
     // Transform deltas, a few times per second.
     this.transformEmitTimer += dt;
     if (this.transformEmitTimer >= TRANSFORM_EMIT_INTERVAL) this.pushTransform();
+    this.advanceIndicator(dt);
   }
 
   /**
@@ -2476,6 +2510,7 @@ export class Vehicle implements Rebasable {
         .applyQuaternion(this.quat)
         .add(this.pos);
     }
+    this.applyRearLightState();
 
     // Wheels are chassis-local: suspension travel and spin are small, smooth and
     // already snapped to the same step, so they need no second interpolation.
@@ -2945,25 +2980,93 @@ export class Vehicle implements Rebasable {
       this.gizmos.push({ part, mesh });
     }
 
+    this.bindVehicleLights();
     this.buildHeadlights();
   }
 
+  private bindLampMaterials(
+    selectors: readonly string[] | undefined,
+    output: EmissiveMaterial[],
+  ): THREE.Mesh[] {
+    if (!selectors || selectors.length === 0) return [];
+    const wanted = new Set(selectors);
+    const meshes: THREE.Mesh[] = [];
+    this.rootGroup.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const nodeMatch = wanted.has(object.name);
+      let matched = false;
+      const bind = (source: THREE.Material): THREE.Material => {
+        if (!nodeMatch && !wanted.has(source.name)) return source;
+        matched = true;
+        if (
+          !(source instanceof THREE.MeshStandardMaterial) &&
+          !(source instanceof THREE.MeshPhongMaterial)
+        ) {
+          throw new Error(
+            `Car model "${this.model.id}" lamp material cannot emit light: ${source.name}`,
+          );
+        }
+        const material = source.clone();
+        material.emissive.setHex(0x000000);
+        material.emissiveIntensity = 0;
+        output.push(material);
+        return material;
+      };
+      object.material = Array.isArray(object.material)
+        ? object.material.map(bind)
+        : bind(object.material);
+      if (matched) meshes.push(object);
+    });
+    if (output.length === 0) {
+      throw new Error(
+        `Car model "${this.model.id}" is missing authored lamp selectors: ${selectors.join(', ')}`,
+      );
+    }
+    return meshes;
+  }
+
+  private bindVehicleLights(): void {
+    const lights = this.model.lights;
+    if (!lights) return;
+    this.headlightLensMeshes = this.bindLampMaterials(
+      lights.headlights,
+      this.headlightLensMaterials,
+    );
+    this.bindLampMaterials(lights.taillights, this.taillightMaterials);
+    this.bindLampMaterials(lights.reverseLights, this.reverseLightMaterials);
+    this.bindLampMaterials(lights.leftBlinkers, this.leftBlinkerMaterials);
+    this.bindLampMaterials(lights.rightBlinkers, this.rightBlinkerMaterials);
+    this.applyRearLightState();
+    this.applyIndicatorState(false);
+  }
+
   /**
-   * Two persistent spotlights at the front corners of the measured chassis box.
-   * They remain renderer-visible at zero intensity while off, which keeps Three's
-   * spotlight shader permutation stable when the driver changes beam mode.
+   * Two persistent spotlights placed at authored headlight bounds. Models without
+   * lamp metadata retain the measured-chassis fallback used by static/wreck packs.
    */
   private buildHeadlights(): void {
     const half = this.measure.halfExtents;
-    const authoredY = -half[1] + HEADLIGHT_Y_FRACTION * 2 * half[1];
-    const y = Math.max(authoredY, this.contactPlaneY + HEADLIGHT_MIN_HEIGHT);
-    const z = half[2];
+    let centreX = 0;
+    let halfWidth = HEADLIGHT_X_FRACTION * half[0];
+    let y = Math.max(
+      -half[1] + HEADLIGHT_Y_FRACTION * 2 * half[1],
+      this.contactPlaneY + HEADLIGHT_MIN_HEIGHT,
+    );
+    let z = half[2];
+    if (this.headlightLensMeshes.length > 0) {
+      this.rootGroup.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      for (const lens of this.headlightLensMeshes) box.expandByObject(lens);
+      const centre = box.getCenter(new THREE.Vector3());
+      centreX = centre.x;
+      halfWidth = Math.max(0.1, (box.max.x - box.min.x) * 0.325);
+      y = centre.y;
+      z = box.max.z;
+    }
     for (const sign of [-1, 1]) {
-      const x = sign * HEADLIGHT_X_FRACTION * half[0];
-      // Placeholder geometry only: applyHeadlightMode below sets every one of these
-      // from HEADLIGHT_LOW/HIGH before the first frame.
+      const x = centreX + sign * halfWidth;
       const light = new THREE.SpotLight(
-        0xfff2d8,
+        0xffffff,
         0,
         HEADLIGHT_LOW.distance,
         HEADLIGHT_LOW.angle,
@@ -2973,8 +3076,6 @@ export class Vehicle implements Rebasable {
       light.position.set(x, y, z);
       light.castShadow = false;
       light.visible = true;
-      // A scene-level target avoids relying on nested target matrix update order.
-      // `syncVisuals` writes its world position from the interpolated chassis pose.
       this.scene.add(light.target);
       this.rootGroup.add(light);
       this.headlights.push({
@@ -2998,8 +3099,6 @@ export class Vehicle implements Rebasable {
           : null;
     for (const headlight of this.headlights) {
       const light = headlight.light;
-      // Off keeps the beam geometry of the low mode and only kills the intensity, so
-      // Three's spotlight shader permutation never changes when the driver switches.
       const shape = beam ?? HEADLIGHT_LOW;
       light.intensity = beam ? beam.intensity * this.headlightEnvironmentFactor : 0;
       light.distance = shape.distance;
@@ -3012,18 +3111,74 @@ export class Vehicle implements Rebasable {
         light.position.z + shape.targetDistance,
       );
     }
+    const intensity = this.headlightMode === 'high' ? 3 : this.headlightMode === 'low' ? 2.4 : 0;
+    for (const material of this.headlightLensMaterials) {
+      material.emissive.setHex(intensity > 0 ? HEADLIGHT_EMISSIVE : 0x000000);
+      material.emissiveIntensity = intensity;
+    }
   }
 
-  /**
-   * Detaches every visual without disposing anything: model geometry, model
-   * materials and gizmo geometry are all owned by their caches (render/carmodel.ts,
-   * render/partmesh.ts) and shared with every other instance in the world, so
-   * disposing here would blank out other cars.
-   */
+  private applyRearLightState(): void {
+    const next =
+      this.brakeLightCommand > 0.03 ? 2 : this.headlightMode === 'off' ? 0 : 1;
+    if (next !== this.rearLightState) {
+      this.rearLightState = next;
+      const intensity = next === 2 ? 6 : next === 1 ? 0.55 : 0;
+      for (const material of this.taillightMaterials) {
+        material.emissive.setHex(intensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
+        material.emissiveIntensity = intensity;
+      }
+    }
+    const reversing = this.drivetrain.gearLabel === 'R';
+    if (reversing === this.reverseLightState) return;
+    this.reverseLightState = reversing;
+    for (const material of this.reverseLightMaterials) {
+      material.emissive.setHex(reversing ? REVERSE_LIGHT_EMISSIVE : 0x000000);
+      material.emissiveIntensity = reversing ? 4 : 0;
+    }
+  }
+
+  private applyIndicatorState(lit: boolean): void {
+    this.indicatorLit = lit;
+    const apply = (materials: readonly EmissiveMaterial[], active: boolean): void => {
+      for (const material of materials) {
+        material.emissive.setHex(active ? BLINKER_EMISSIVE : 0x000000);
+        material.emissiveIntensity = active ? 5 : 0;
+      }
+    };
+    apply(this.leftBlinkerMaterials, lit && this.indicatorSide === 'left');
+    apply(this.rightBlinkerMaterials, lit && this.indicatorSide === 'right');
+  }
+
+  private advanceIndicator(dt: number): void {
+    if (this.indicatorSide === 'off') {
+      if (this.indicatorLit) this.applyIndicatorState(false);
+      return;
+    }
+    this.indicatorElapsed = (this.indicatorElapsed + dt) % BLINKER_PERIOD_S;
+    const lit = this.indicatorElapsed < BLINKER_PERIOD_S * 0.5;
+    if (lit !== this.indicatorLit) this.applyIndicatorState(lit);
+  }
+
+  /** Releases per-instance lamp materials and detaches the model-owned visual tree. */
   private clearVisuals(): void {
     for (const headlight of this.headlights) this.scene.remove(headlight.light.target);
+    for (const material of this.headlightLensMaterials) material.dispose();
+    for (const material of this.taillightMaterials) material.dispose();
+    for (const material of this.reverseLightMaterials) material.dispose();
+    for (const material of this.leftBlinkerMaterials) material.dispose();
+    for (const material of this.rightBlinkerMaterials) material.dispose();
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.wheelMeshes.clear();
+    this.headlightLensMeshes = [];
+    this.headlightLensMaterials.length = 0;
+    this.taillightMaterials.length = 0;
+    this.reverseLightMaterials.length = 0;
+    this.leftBlinkerMaterials.length = 0;
+    this.rightBlinkerMaterials.length = 0;
+    this.rearLightState = -1;
+    this.reverseLightState = false;
+    this.indicatorLit = false;
   }
 
   private forwardSpeedMps(): number {
