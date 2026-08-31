@@ -961,7 +961,7 @@ interface HeadlightBeam {
   readonly decay: number;
 }
 
-interface HeadlightVisual {
+interface VehicleBeamVisual {
   readonly light: THREE.SpotLight;
   /** Beam target in chassis-local coordinates, transformed explicitly every frame. */
   readonly aimLocal: THREE.Vector3;
@@ -1005,6 +1005,26 @@ const HEADLIGHT_EMISSIVE = 0xffffff;
 const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
 const BLINKER_EMISSIVE = 0xff8a00;
+
+const TAILLIGHT_BEAM = {
+  distance: 6,
+  angle: 0.68,
+  penumbra: 0.78,
+  decay: 1.4,
+  targetDistance: 3.5,
+  targetDrop: 0.12,
+  runningIntensity: 0.35,
+  brakeIntensity: 1.6,
+} as const;
+const REVERSE_LIGHT_BEAM = {
+  distance: 10,
+  angle: 0.38,
+  penumbra: 0.62,
+  decay: 1.1,
+  targetDistance: 6,
+  targetDrop: 0.18,
+  intensity: 5.5,
+} as const;
 /** 90 flashes per minute, with equal on/off halves. */
 const BLINKER_PERIOD_S = 2 / 3;
 
@@ -1063,11 +1083,15 @@ export class Vehicle implements Rebasable {
   private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
-  private headlights: HeadlightVisual[] = [];
+  private headlights: VehicleBeamVisual[] = [];
+  private taillightBeams: VehicleBeamVisual[] = [];
+  private reverseLightBeams: VehicleBeamVisual[] = [];
   private headlightMode: HeadlightMode = 'off';
   /** Perceptual suppression under daylight; one at night, near zero at full day. */
   private headlightEnvironmentFactor = 1;
   private headlightLensMeshes: THREE.Mesh[] = [];
+  private taillightLensMeshes: THREE.Mesh[] = [];
+  private reverseLightLensMeshes: THREE.Mesh[] = [];
   private readonly headlightLensMaterials: EmissiveMaterial[] = [];
   private readonly taillightMaterials: EmissiveMaterial[] = [];
   private readonly reverseLightMaterials: EmissiveMaterial[] = [];
@@ -1947,7 +1971,10 @@ export class Vehicle implements Rebasable {
     const brake = reverseDrive
       ? 0
       : Math.max(input.brake, brakingForDirectionChange ? input.throttle : 0);
-    this.brakeLightCommand = input.reverse ? 1 : 0;
+    // S is a brake request in neutral/forward gears, but reverse throttle once R
+    // has engaged. The same physical key must not command propulsion and brake lamps.
+    this.brakeLightCommand =
+      this.drivetrain.gearLabel !== 'R' && input.reverse ? 1 : 0;
 
     // Consume fuel locally and emit throttled absolute deltas.
     if (drive.fuelBurnLitres > 0) {
@@ -2504,12 +2531,9 @@ export class Vehicle implements Rebasable {
     // SpotLight targets are scene-level objects. Transform their authored local aim
     // through the same interpolated chassis quaternion as the shell so pitch and roll
     // follow an uphill, downhill or cross-slope pose exactly.
-    for (const headlight of this.headlights) {
-      headlight.light.target.position
-        .copy(headlight.aimLocal)
-        .applyQuaternion(this.quat)
-        .add(this.pos);
-    }
+    this.syncBeamTargets(this.headlights);
+    this.syncBeamTargets(this.taillightBeams);
+    this.syncBeamTargets(this.reverseLightBeams);
     this.applyRearLightState();
 
     // Wheels are chassis-local: suspension travel and spin are small, smooth and
@@ -2525,6 +2549,15 @@ export class Vehicle implements Rebasable {
     // Gizmos are bolted to the shell: they never move relative to it, so all they
     // need per frame is their condition, which a scrubbing player can change.
     for (const g of this.gizmos) setCondition(g.mesh, g.part.dirt, g.part.rust);
+  }
+
+  private syncBeamTargets(beams: readonly VehicleBeamVisual[]): void {
+    for (const beam of beams) {
+      beam.light.target.position
+        .copy(beam.aimLocal)
+        .applyQuaternion(this.quat)
+        .add(this.pos);
+    }
   }
 
   /**
@@ -2982,6 +3015,19 @@ export class Vehicle implements Rebasable {
 
     this.bindVehicleLights();
     this.buildHeadlights();
+    this.buildRearLightBeams(
+      this.taillightLensMeshes,
+      TAILLIGHT_EMISSIVE,
+      TAILLIGHT_BEAM,
+      this.taillightBeams,
+    );
+    this.buildRearLightBeams(
+      this.reverseLightLensMeshes,
+      REVERSE_LIGHT_EMISSIVE,
+      REVERSE_LIGHT_BEAM,
+      this.reverseLightBeams,
+    );
+    this.applyRearLightState();
   }
 
   private bindLampMaterials(
@@ -3032,12 +3078,80 @@ export class Vehicle implements Rebasable {
       lights.headlights,
       this.headlightLensMaterials,
     );
-    this.bindLampMaterials(lights.taillights, this.taillightMaterials);
-    this.bindLampMaterials(lights.reverseLights, this.reverseLightMaterials);
+    this.taillightLensMeshes = this.bindLampMaterials(
+      lights.taillights,
+      this.taillightMaterials,
+    );
+    this.reverseLightLensMeshes = this.bindLampMaterials(
+      lights.reverseLights,
+      this.reverseLightMaterials,
+    );
     this.bindLampMaterials(lights.leftBlinkers, this.leftBlinkerMaterials);
     this.bindLampMaterials(lights.rightBlinkers, this.rightBlinkerMaterials);
-    this.applyRearLightState();
+    this.rearLightState = -1;
+    this.reverseLightState = false;
     this.applyIndicatorState(false);
+  }
+
+  private lampBounds(meshes: readonly THREE.Mesh[]): THREE.Box3 {
+    this.rootGroup.updateMatrixWorld(true);
+    const worldToRoot = this.rootGroup.matrixWorld.clone().invert();
+    const bounds = new THREE.Box3();
+    for (const mesh of meshes) {
+      mesh.geometry.computeBoundingBox();
+      const meshBounds = mesh.geometry.boundingBox;
+      if (!meshBounds) continue;
+      bounds.union(
+        meshBounds
+          .clone()
+          .applyMatrix4(worldToRoot.clone().multiply(mesh.matrixWorld)),
+      );
+    }
+    return bounds;
+  }
+
+  private buildRearLightBeams(
+    lenses: readonly THREE.Mesh[],
+    color: number,
+    shape: {
+      readonly distance: number;
+      readonly angle: number;
+      readonly penumbra: number;
+      readonly decay: number;
+      readonly targetDistance: number;
+      readonly targetDrop: number;
+    },
+    output: VehicleBeamVisual[],
+  ): void {
+    if (lenses.length === 0) return;
+    const box = this.lampBounds(lenses);
+    const centre = box.getCenter(new THREE.Vector3());
+    const halfWidth = Math.max(0.1, (box.max.x - box.min.x) * 0.325);
+    const z = box.min.z - 0.015;
+    for (const sign of [-1, 1]) {
+      const x = centre.x + sign * halfWidth;
+      const light = new THREE.SpotLight(
+        color,
+        0,
+        shape.distance,
+        shape.angle,
+        shape.penumbra,
+        shape.decay,
+      );
+      light.position.set(x, centre.y, z);
+      light.castShadow = false;
+      light.visible = false;
+      this.scene.add(light.target);
+      this.rootGroup.add(light);
+      output.push({
+        light,
+        aimLocal: new THREE.Vector3(
+          x,
+          centre.y - shape.targetDrop,
+          z - shape.targetDistance,
+        ),
+      });
+    }
   }
 
   /**
@@ -3054,9 +3168,7 @@ export class Vehicle implements Rebasable {
     );
     let z = half[2];
     if (this.headlightLensMeshes.length > 0) {
-      this.rootGroup.updateMatrixWorld(true);
-      const box = new THREE.Box3();
-      for (const lens of this.headlightLensMeshes) box.expandByObject(lens);
+      const box = this.lampBounds(this.headlightLensMeshes);
       const centre = box.getCenter(new THREE.Vector3());
       centreX = centre.x;
       halfWidth = Math.max(0.1, (box.max.x - box.min.x) * 0.325);
@@ -3128,6 +3240,16 @@ export class Vehicle implements Rebasable {
         material.emissive.setHex(intensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
         material.emissiveIntensity = intensity;
       }
+      const beamIntensity =
+        next === 2
+          ? TAILLIGHT_BEAM.brakeIntensity
+          : next === 1
+            ? TAILLIGHT_BEAM.runningIntensity
+            : 0;
+      for (const beam of this.taillightBeams) {
+        beam.light.intensity = beamIntensity;
+        beam.light.visible = beamIntensity > 0;
+      }
     }
     const reversing = this.drivetrain.gearLabel === 'R';
     if (reversing === this.reverseLightState) return;
@@ -3135,6 +3257,10 @@ export class Vehicle implements Rebasable {
     for (const material of this.reverseLightMaterials) {
       material.emissive.setHex(reversing ? REVERSE_LIGHT_EMISSIVE : 0x000000);
       material.emissiveIntensity = reversing ? 4 : 0;
+    }
+    for (const beam of this.reverseLightBeams) {
+      beam.light.intensity = reversing ? REVERSE_LIGHT_BEAM.intensity : 0;
+      beam.light.visible = reversing;
     }
   }
 
@@ -3162,7 +3288,9 @@ export class Vehicle implements Rebasable {
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */
   private clearVisuals(): void {
-    for (const headlight of this.headlights) this.scene.remove(headlight.light.target);
+    for (const beam of this.headlights) this.scene.remove(beam.light.target);
+    for (const beam of this.taillightBeams) this.scene.remove(beam.light.target);
+    for (const beam of this.reverseLightBeams) this.scene.remove(beam.light.target);
     for (const material of this.headlightLensMaterials) material.dispose();
     for (const material of this.taillightMaterials) material.dispose();
     for (const material of this.reverseLightMaterials) material.dispose();
@@ -3170,7 +3298,11 @@ export class Vehicle implements Rebasable {
     for (const material of this.rightBlinkerMaterials) material.dispose();
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.wheelMeshes.clear();
+    this.taillightBeams = [];
+    this.reverseLightBeams = [];
     this.headlightLensMeshes = [];
+    this.taillightLensMeshes = [];
+    this.reverseLightLensMeshes = [];
     this.headlightLensMaterials.length = 0;
     this.taillightMaterials.length = 0;
     this.reverseLightMaterials.length = 0;
