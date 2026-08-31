@@ -78,9 +78,8 @@ function horizontalDirection(azimuthDeg: number, altitudeDeg: number, out: THREE
   );
 }
 
-/** Kasten-Young optical air mass; infinity below the geometric horizon. */
+/** Kasten-Young optical air mass, extended smoothly for the horizon transition. */
 function airMass(altitudeDeg: number): number {
-  if (altitudeDeg <= -1) return Number.POSITIVE_INFINITY;
   const a = Math.max(-0.99, altitudeDeg);
   return 1 / (
     Math.sin(THREE.MathUtils.degToRad(a)) +
@@ -89,9 +88,16 @@ function airMass(altitudeDeg: number): number {
 }
 
 export function atmosphericTransmission(altitudeDeg: number): number {
-  if (altitudeDeg <= 0) return 0;
-  const mass = airMass(altitudeDeg);
-  return Math.pow(10, -0.4 * BASE_EXTINCTION_MAG * Math.max(0, mass - 1));
+  // Keep direct solar energy continuous across the horizon. A hard zero at 0°
+  // made the first visible ray jump from moonlight to a full low-sun contribution.
+  const horizon = smoothstep(-0.12, 0.08, altitudeDeg);
+  const mass = airMass(Math.max(0.01, altitudeDeg));
+  return horizon * Math.pow(10, -0.4 * BASE_EXTINCTION_MAG * Math.max(0, mass - 1));
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }
 
 function updateBody(body: ApparentBody, date: Date, observer: Observer): void {
@@ -135,13 +141,15 @@ export class AstronomySystem {
        0, 0, 0, 1,
     );
     const milliseconds = date.getTime();
-    if (Math.abs(milliseconds - this.lastUpdateMilliseconds) < 5_000) return frame;
-    this.lastUpdateMilliseconds = milliseconds;
     frame.date = date;
+    // Sun and Moon drive scene illumination and must be refreshed every frame.
+    // Planetary positions can retain their cheaper five-second cadence.
     updateBody(frame.sun, date, this.observer);
     updateBody(frame.moon, date, this.observer);
-    for (const planet of frame.planets) updateBody(planet, date, this.observer);
-
+    if (Math.abs(milliseconds - this.lastUpdateMilliseconds) >= 5_000) {
+      this.lastUpdateMilliseconds = milliseconds;
+      for (const planet of frame.planets) updateBody(planet, date, this.observer);
+    }
 
     const sunLux =
       SUN_REFERENCE_LUX *

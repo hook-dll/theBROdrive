@@ -2,14 +2,13 @@
  * The drivable car: a Rapier dynamic chassis + ray-cast wheels + the drivetrain
  * simulation, with Three.js meshes as pure derived views.
  *
- * The car itself is ONE complete model (vehicle/carmodels.ts): its collider,
- * suspension mounts and wheel radii are measured off the GLB in
- * render/carmodel.ts, and its engine, gearbox and mass come from the model's
- * catalogue entry. Nothing has to be bolted on for it to drive.
+ * The car itself is ONE complete visual and physics model (vehicle/carmodels.ts):
+ * collider, suspension mounts and wheel radii are measured from its geometry.
+ * Drivability comes from the four typed service cells under the bonnet: engine and
+ * fuel tank are required, coolant and oil protect the engine, turbine is optional.
  *
- * Parts survive only as *gizmos*: cosmetic things found in the world, mounted at
- * the model's anchor points (`CarState.gizmos`, keyed by anchor id). They add mass
- * and looks, never capability.
+ * Anchor gizmos remain cosmetic. They add mass and looks, never capability; unlike
+ * the bonnet cells they are not service fittings.
  *
  * Ownership rules (see game/state.ts): the authoritative state lives in
  * `GameWorld` / `CarState`. This class reads `carState.gizmos`, reads/writes the
@@ -27,6 +26,7 @@ import type { CarState, GameWorld } from '../game/state';
 import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, PartInstance } from '../parts/registry';
 import { carModel, modelEngine, modelGearbox, type CarModelDef } from './carmodels';
+import { bonnetCanRun, bonnetPart, engineFailureReason } from './bonnet';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
 import { carModelMeasure, createCarModel, type CarModelMeasure } from '../render/carmodel';
 import { createPartMesh } from '../render/partmesh';
@@ -1183,6 +1183,8 @@ export class Vehicle implements Rebasable {
   private lastAuthCoolant: number;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
+  /** Rebuild on the step after an engine destroys itself; never replace Rapier state mid-step. */
+  private serviceRebuildPending = false;
 
   // Odometer and transform emission.
   private odoAccum = 0;
@@ -1340,8 +1342,9 @@ export class Vehicle implements Rebasable {
     this.scene.add(this.rootGroup);
 
     this.statsValue = this.computeStats();
+    const installedEngine = bonnetPart(this.car.bonnet, 0);
     this.drivetrain = new Drivetrain(
-      this.statsValue.engine,
+      installedEngine ? variant(installedEngine.variantId).engine ?? null : null,
       this.statsValue.gearbox,
       this.model.rearDriveBias,
     );
@@ -1431,7 +1434,7 @@ export class Vehicle implements Rebasable {
   }
 
   get engineRunning(): boolean {
-    return this.statsValue.engine != null && this.localFuel > 0;
+    return bonnetCanRun(this.car.bonnet, this.localFuel, this.car.fuelKind);
   }
 
   /**
@@ -1505,7 +1508,11 @@ export class Vehicle implements Rebasable {
     this.statsValue = this.computeStats();
     const stats = this.statsValue;
 
-    this.drivetrain.reconfigure(stats.engine, stats.gearbox);
+    const installedEngine = bonnetPart(this.car.bonnet, 0);
+    this.drivetrain.reconfigure(
+      installedEngine ? variant(installedEngine.variantId).engine ?? null : null,
+      stats.gearbox,
+    );
 
     // Gizmos change the mass; re-apply so the CoG stays low and rearward.
     this.applyChassisMass(stats.mass);
@@ -1682,15 +1689,21 @@ export class Vehicle implements Rebasable {
     this.advanceIndicator(dt);
     if (n === 0) return;
 
+    // A parked car keeps the road-wheel angle it had when the driver stepped out.
+    // Do not feed zero here: that would visually straighten the car on the first
+    // parked tick and lose the driver's last steering position.
+    const parkedSteer = this.steerAngle;
     // Parking brake: same impulse units as the foot brake (see the braking note
     // above), spread over every wheel. Sized to hold, not to stop.
     const decel = shoved ? PARK_BRAKE_DECEL * SHOVE_BRAKE_FRACTION : PARK_BRAKE_DECEL;
     const impulse = (decel * this.statsValue.mass * dt) / n;
     for (const w of this.wheels) {
       controller.setWheelEngineForce(w.index, 0);
-      controller.setWheelSteering(w.index, 0);
+      controller.setWheelSteering(w.index, w.isFront ? parkedSteer : 0);
       controller.setWheelBrake(w.index, impulse);
     }
+    // Keep the controller's wheel pose aligned with the retained angle so the render
+    // path and the parked physics path observe the same state.
 
     controller.updateVehicle(dt);
     // Latch only after suspension contact and vertical settlement. Two contacts let
@@ -1922,6 +1935,10 @@ export class Vehicle implements Rebasable {
 
 
   fixedUpdate(dt: number, input: InputFrame): void {
+    if (this.serviceRebuildPending) {
+      this.serviceRebuildPending = false;
+      this.rebuild();
+    }
     const controller = this.controller;
     if (!controller) return;
 
@@ -1969,7 +1986,7 @@ export class Vehicle implements Rebasable {
       : brakingForDirectionChange
         ? 0
         : input.throttle;
-    const throttle = this.localFuel > 0 ? throttleInput : 0;
+    const throttle = this.engineRunning ? throttleInput : 0;
     // Crank speed comes from ROAD speed, not the wheel's own rotation. Gearing it to
     // the wheel is the physically complete answer, and it was measured: it bounds
     // wheelspin properly (a slipping tyre revs the engine out), but with thrust still
@@ -2012,6 +2029,18 @@ export class Vehicle implements Rebasable {
     // Mirrored locally and emitted on the same throttled cadence as fuel, for the
     // same reason: a delta per tick for a number that moves by 0.0004 L would be
     // three hundred pointless state writes a second.
+    // A dry running engine or one with no coolant reservoir destroys itself. The
+    // service part is removed permanently; fitting another engine is the repair.
+    const failure = this.engineRunning
+      ? engineFailureReason(this.car.bonnet, this.localCoolant, this.localOil)
+      : null;
+    if (failure !== null) {
+      this.world.apply({ t: 'car_bonnet', carId: this.car.id, cell: 0, item: null });
+      this.drivetrain.reconfigure(null, stats.gearbox);
+      this.appliedDriveTorqueNm = 0;
+      this.serviceRebuildPending = true;
+    }
+
     if (this.engineRunning) {
       const perSecond = 1 / 3600;
       this.localCoolant = Math.max(0, this.localCoolant - COOLANT_LOSS_LPH * perSecond * dt);
@@ -2565,7 +2594,8 @@ export class Vehicle implements Rebasable {
 
   /**
    * Projects this vehicle's local lamp mounts through its interpolated render pose
-   * into the shared renderer rig. Only the driven vehicle calls this.
+   * into the shared renderer rig. The game uses this for the driven vehicle and
+   * the last vehicle left behind, so its lights remain visible on foot.
    */
   syncProjectedLights(rig: VehicleLightRig): void {
     const headlightBeam =
@@ -2916,13 +2946,12 @@ export class Vehicle implements Rebasable {
   // Internals.
   // ---------------------------------------------------------------------------
 
-  /**
-   * Stats of a complete vehicle. The model IS the car: it always has its engine,
-   * its gearbox, its tank and its four wheels, so nothing here can be "missing"
-   * and a car is never undrivable. Gizmos only add mass.
-   */
+  /** Live drivetrain service parts override the catalogue defaults. */
   private computeStats(): CarStats {
-    const engine = modelEngine(this.model);
+    const installedEngine = bonnetPart(this.car.bonnet, 0);
+    const engine = installedEngine
+      ? variant(installedEngine.variantId).engine ?? modelEngine(this.model)
+      : modelEngine(this.model);
     let mass = this.model.mass;
     for (const part of Object.values(this.gizmoParts())) mass += variant(part.variantId).mass;
 

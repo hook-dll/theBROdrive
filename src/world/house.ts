@@ -28,6 +28,7 @@ import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import type { Item } from '../items/items';
+import { createBonnetStorage } from '../vehicle/bonnet';
 
 type V3 = [number, number, number];
 
@@ -587,9 +588,11 @@ export function createStartingCar(world: GameWorld): CarState {
     gizmos: {},
     stickers: [],
     fuelLitres,
+    fuelKind: engine.fuel,
     coolantLitres,
     oilLitres,
     storage: new Array<Item | null>(def.storageCells).fill(null),
+    bonnet: createBonnetStorage('car:start', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,
     x: cx,
     y: carY,

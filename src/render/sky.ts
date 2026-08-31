@@ -456,22 +456,19 @@ const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
   .replace('#include <colorspace_fragment>', '');
 
 /**
- * Sun-elevation change, radians, that makes an environment refresh due.
- *
- * The trigger is the sun's ANGLE, not the clock, which is what makes the cadence
- * follow the sky rather than the frame rate: it fires often through a dawn, where
- * elevation sweeps quickly and the reflections change most, and rarely at midday.
- * It also tracks the day-length setting for free, since a faster clock simply
- * crosses the step sooner.
+ * Sun-elevation change, radians, that makes an environment refresh due during
+ * ordinary daylight. The probe is deliberately cheaper to update there because
+ * its changes are hard to notice against a bright, stable scene.
  */
 const ENV_BAKE_STEP = 0.03;
 /**
- * Floor between completed noninitial bakes. Only a guard against pathological
- * cadence — the elevation step above is the real governor. A flat twenty-second
- * interval sat here once and starved exactly the case that needed bakes most: a
- * compressed twilight got one or two, so paint and chrome stepped through sunrise.
+ * Twilight probe cadence. The visible dome is continuous, but reflections and
+ * diffuse environment lighting use the last PMREM bake. Smaller twilight steps
+ * hide that otherwise obvious staircase without changing the analytic sky or sun.
  */
-const ENV_BAKE_INTERVAL_MS = 2_000;
+const ENV_TWILIGHT_BAKE_STEP = 0.006;
+/** Minimum time between completed PMREM bakes. */
+const ENV_BAKE_INTERVAL_MS = 750;
 
 
 // ---------------------------------------------------------------------------
@@ -873,9 +870,11 @@ export class Sky {
    */
   private refreshEnvironment(allowEnvironmentRefresh: boolean, nowMs: number): void {
     const isInitialBake = Number.isNaN(this.envBakedElevation);
+    const bakeStep =
+      Math.abs(this.sunElevation) < 0.35 ? ENV_TWILIGHT_BAKE_STEP : ENV_BAKE_STEP;
     if (
       !isInitialBake &&
-      Math.abs(this.sunElevation - this.envBakedElevation) >= ENV_BAKE_STEP
+      Math.abs(this.sunElevation - this.envBakedElevation) >= bakeStep
     ) {
       this.envBakePending = true;
     }

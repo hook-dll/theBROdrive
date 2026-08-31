@@ -5,7 +5,7 @@ import {
   TRUNK_CELL_COUNT,
   TRUNK_CELL_HEIGHT,
   TRUNK_COLUMNS,
-  trunkCellLocal,
+  storageCellLocal,
   trunkGridWidth,
   type TrunkViewState,
 } from '../vehicle/trunk';
@@ -58,7 +58,7 @@ export class TrunkView {
   private layoutSignature = '';
 
   constructor(private readonly scene: THREE.Scene) {
-    this.root.name = 'trunk-grid';
+    this.root.name = 'vehicle-storage-grid';
     this.root.visible = false;
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
       const panel = new THREE.Mesh(this.panelGeometry, this.panelMaterial);
@@ -105,15 +105,18 @@ export class TrunkView {
     this.root.visible = true;
     this.root.position.copy(this.posePosition);
     this.root.quaternion.copy(this.poseQuaternion);
-    const layoutSignature = `${halfExtents[0]}|${halfExtents[1]}|${halfExtents[2]}`;
+    const layoutSignature = `${view.side}|${halfExtents[0]}|${halfExtents[1]}|${halfExtents[2]}|${view.cells.length}`;
     if (layoutSignature !== this.layoutSignature) {
       this.layoutSignature = layoutSignature;
-      this.layout(halfExtents);
+      this.layout(halfExtents, view.side, view.cells.length);
       this.itemSignature = '';
     }
 
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-      const selected = cell === view.selectedCell;
+      const visible = cell < view.cells.length;
+      this.panels[cell]!.visible = visible;
+      this.borders[cell]!.visible = visible;
+      const selected = visible && cell === view.selectedCell;
       this.panels[cell]!.material = selected ? this.selectedPanelMaterial : this.panelMaterial;
       this.borders[cell]!.material = selected ? this.selectedBorderMaterial : this.borderMaterial;
     }
@@ -125,16 +128,22 @@ export class TrunkView {
     }
   }
 
-  private layout(halfExtents: readonly [number, number, number]): void {
+  private layout(
+    halfExtents: readonly [number, number, number],
+    side: TrunkViewState['side'],
+    cellCount: number,
+  ): void {
     const cellWidth = trunkGridWidth(halfExtents[0]) / TRUNK_COLUMNS;
-    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-      trunkCellLocal(cell, halfExtents, this.cellPosition);
+    for (let cell = 0; cell < cellCount; cell++) {
+      storageCellLocal(cell, halfExtents, side, this.cellPosition);
       const panel = this.panels[cell]!;
       panel.position.copy(this.cellPosition);
+      panel.rotation.y = side === 'bonnet' ? Math.PI : 0;
       panel.scale.set(cellWidth * CELL_INSET, TRUNK_CELL_HEIGHT * CELL_INSET, 1);
       const border = this.borders[cell]!;
       border.position.copy(this.cellPosition);
-      border.position.z -= 0.002;
+      border.position.z += side === 'bonnet' ? 0.002 : -0.002;
+      border.rotation.y = side === 'bonnet' ? Math.PI : 0;
       border.scale.set(cellWidth * CELL_INSET, TRUNK_CELL_HEIGHT * CELL_INSET, 1);
     }
   }
@@ -156,8 +165,8 @@ export class TrunkView {
       holder.add(mesh);
       const longest = Math.max(_size.x, _size.y, _size.z, 1e-4);
       holder.scale.setScalar(target / longest);
-      trunkCellLocal(cell, halfExtents, holder.position);
-      holder.position.z -= ITEM_FORWARD;
+      storageCellLocal(cell, halfExtents, view.side, holder.position);
+      holder.position.z += view.side === 'bonnet' ? ITEM_FORWARD : -ITEM_FORWARD;
       this.itemHolders.push(holder);
       this.root.add(holder);
     }

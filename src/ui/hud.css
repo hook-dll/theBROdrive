@@ -420,6 +420,17 @@ body {
   bottom: 150px;
 }
 
+@media (pointer: coarse) {
+  /* Mobile keeps the complete driving cluster but at half its desktop footprint. */
+  .hud-driving {
+    transform: translateX(-50%) scale(0.375);
+  }
+
+  .hud-driving:not(.is-hidden) ~ .hud-inventory {
+    bottom: 82px;
+  }
+}
+
 .hud-inv-items {
   display: flex;
   flex-wrap: wrap;
@@ -1400,13 +1411,14 @@ body {
 /* ------------------------------------------------------------------ *
  *  Touch controls (phones and tablets)                               *
  *                                                                    *
- *  The driving sticks live low where thumbs naturally rest; face      *
- *  buttons form two blocks immediately above them, and the camera     *
- *  fader stays with the look thumb.                                  *
+ *  A steering wheel and two pedals occupy the natural thumb zones.   *
+ *  Face buttons remain above them; open canvas is camera drag space.  *
  * ------------------------------------------------------------------ */
 
 .touch-ui {
-  --touch-stick-size: clamp(108px, 30vh, 138px);
+  --touch-drive-size: clamp(116px, 32vh, 142px);
+  --touch-pedal-bank-width: clamp(138px, 20vw, 174px);
+  --touch-pedal-height: clamp(80px, 24vh, 104px);
   --touch-button-size: clamp(44px, 12vh, 54px);
   --touch-edge-gap: clamp(48px, 8vw, 92px);
   --touch-bottom-gap: calc(32px + env(safe-area-inset-bottom));
@@ -1416,87 +1428,176 @@ body {
   z-index: 20;
 }
 
-.touch-stick {
+.touch-wheel {
   position: fixed;
-  top: var(--touch-top-gap);
-  width: var(--touch-stick-size);
-  height: var(--touch-stick-size);
-  border: 2px solid rgba(229, 220, 196, 0.5);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at center, rgba(229, 220, 196, 0.09) 0 9%, transparent 10%),
-    radial-gradient(circle at center, rgba(18, 15, 11, 0.42), rgba(18, 15, 11, 0.2) 68%),
-    repeating-radial-gradient(
-      circle at center,
-      transparent 0 24%,
-      rgba(229, 220, 196, 0.11) 25% 26%,
-      transparent 27% 100%
-    );
-  box-shadow:
-    inset 0 0 0 1px rgba(10, 8, 6, 0.5),
-    0 4px 14px rgba(0, 0, 0, 0.2);
-  opacity: 0.72;
-  transition: opacity 100ms ease, border-color 100ms ease;
+  left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
+  bottom: calc(var(--touch-bottom-gap) + 12px);
+  width: var(--touch-drive-size);
+  height: var(--touch-drive-size);
+  pointer-events: auto;
   touch-action: none;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.touch-stick::after {
-  content: attr(data-label);
+.touch-wheel::after {
+  content: 'STEER';
   position: absolute;
   left: 50%;
-  bottom: 10%;
+  bottom: -13px;
   transform: translateX(-50%);
-  color: rgba(229, 220, 196, 0.52);
+  color: rgba(229, 220, 196, 0.58);
   font-family: var(--hud-font);
-  font-size: 9px;
-  line-height: 1;
-  letter-spacing: 0.11em;
-  white-space: nowrap;
+  font-size: 8px;
+  letter-spacing: 0.14em;
 }
 
-.touch-stick--move {
-  top: auto;
-  bottom: calc(var(--touch-bottom-gap) + 12px);
-  left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
+.touch-wheel-rim {
+  position: absolute;
+  inset: 5%;
+  border: 8px solid rgba(229, 220, 196, 0.66);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(31, 27, 21, 0.76) 0 24%, transparent 25%),
+    radial-gradient(circle, transparent 0 64%, rgba(18, 15, 11, 0.5) 65% 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(8, 7, 5, 0.58),
+    0 4px 14px rgba(0, 0, 0, 0.3);
+  opacity: 0.82;
+  will-change: transform;
 }
 
-.touch-stick--look {
-  top: auto;
-  bottom: calc(var(--touch-bottom-gap) + 12px);
-  right: calc(var(--touch-edge-gap) + env(safe-area-inset-right));
+.touch-wheel-rim::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 4px;
+  height: 15px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--hud-diesel);
 }
 
-.touch-stick.is-active {
+.touch-wheel.is-active .touch-wheel-rim {
+  border-color: rgba(229, 220, 196, 0.92);
   opacity: 1;
-  border-color: rgba(229, 220, 196, 0.84);
 }
 
-.touch-stick-knob {
+.touch-wheel-spoke {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 44%;
-  height: 44%;
+  width: 37%;
+  height: 7px;
+  transform-origin: left center;
+  border-radius: 4px;
+  background: rgba(229, 220, 196, 0.66);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.touch-wheel-spoke--left {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.touch-wheel-spoke--right {
+  transform: translateY(-50%);
+}
+
+.touch-wheel-spoke--bottom {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.touch-wheel-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30%;
+  height: 30%;
   transform: translate(-50%, -50%);
-  border: 2px solid rgba(229, 220, 196, 0.7);
+  border: 3px solid rgba(229, 220, 196, 0.72);
   border-radius: 50%;
+  background: rgba(31, 27, 21, 0.96);
+  box-shadow: inset 0 0 0 2px rgba(8, 7, 5, 0.52);
+}
+
+.touch-pedals {
+  position: fixed;
+  right: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-right));
+  bottom: calc(var(--touch-bottom-gap) + 12px);
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  width: var(--touch-pedal-bank-width);
+  pointer-events: none;
+}
+
+.touch-pedal {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: var(--touch-pedal-height);
+  min-width: 0;
+  padding: 0;
+  border: 2px solid rgba(229, 220, 196, 0.62);
+  border-radius: 12px 12px 18px 18px;
   background:
-    radial-gradient(circle at 38% 34%, rgba(255, 250, 232, 0.28), transparent 28%),
-    rgba(35, 30, 23, 0.78);
+    repeating-linear-gradient(
+      to bottom,
+      rgba(229, 220, 196, 0.1) 0 2px,
+      transparent 2px 10px
+    ),
+    rgba(27, 23, 18, 0.8);
+  color: var(--hud-fg);
   box-shadow:
-    inset 0 0 0 2px rgba(8, 7, 5, 0.42),
-    0 3px 8px rgba(0, 0, 0, 0.34);
-  will-change: transform;
+    inset 0 -6px 0 rgba(0, 0, 0, 0.32),
+    0 5px 11px rgba(0, 0, 0, 0.28);
+  font-family: var(--hud-font);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.07em;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-pedal--forward {
+  border-color: rgba(244, 216, 135, 0.78);
+}
+
+.touch-pedal--backward {
+  height: calc(var(--touch-pedal-height) * 0.84);
+  border-color: rgba(205, 101, 78, 0.72);
+}
+
+.touch-pedal-glyph {
+  font-size: 24px;
+  line-height: 0.8;
+}
+
+.touch-pedal.is-down {
+  transform: translateY(4px) scale(0.97);
+  border-color: var(--hud-fg);
+  background-color: rgba(88, 66, 35, 0.9);
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.28),
+    0 1px 4px rgba(0, 0, 0, 0.24);
 }
 
 .touch-zoom-fader {
   position: fixed;
   top: auto;
   bottom: calc(var(--touch-bottom-gap) + 12px);
-  right: calc(10px + env(safe-area-inset-right));
+  right: calc(
+    var(--touch-edge-gap) + var(--touch-pedal-bank-width) + 6px +
+      env(safe-area-inset-right)
+  );
   width: 28px;
-  height: calc(var(--touch-stick-size) - 28px);
+  height: calc(var(--touch-drive-size) - 28px);
   border: 2px solid rgba(229, 220, 196, 0.5);
   border-radius: 6px;
   background:
@@ -1567,13 +1668,12 @@ body {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.36);
   will-change: transform;
 }
-/* Face clusters sit above their matching sticks, leaving the low edge clear for
-   natural thumb reach and the device's gesture area. */
+/* Face clusters sit above the driving controls, clear of the thumb zones. */
 .touch-buttons {
   position: fixed;
   top: auto;
-  bottom: calc(var(--touch-bottom-gap) + var(--touch-stick-size) + 36px);
-  width: var(--touch-stick-size);
+  bottom: calc(var(--touch-bottom-gap) + var(--touch-drive-size) + 36px);
+  width: var(--touch-drive-size);
   height: calc(var(--touch-button-size) * 1.95);
   pointer-events: none;
 }

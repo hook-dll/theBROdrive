@@ -1,6 +1,7 @@
 import { hash } from '../core/rng';
 import type { Item } from '../items/items';
-import type { PartInstance } from '../parts/registry';
+import type { FuelType, PartInstance } from '../parts/registry';
+import { BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { DEFAULT_SETTINGS } from './settings';
 import { localSolarDateAt } from './calendar';
@@ -62,6 +63,8 @@ export interface CarState {
   /** Earned stickers, in the order they were placed. Append-only, permanent. */
   readonly stickers: StickerState[];
   fuelLitres: number;
+  /** Fuel currently in the fitted tank; mixed or wrong fuel cannot run the engine. */
+  fuelKind: FuelType | 'mixed' | null;
   /**
    * Coolant and oil in the engine, litres.
    *
@@ -78,6 +81,8 @@ export interface CarState {
    * fixed at spawn from the model, so a save carries the layout it was created with.
    */
   readonly storage: (Item | null)[];
+  /** Four fixed, typed service cells under the bonnet. */
+  readonly bonnet: (Item | null)[];
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -208,7 +213,8 @@ export type WorldDelta =
   | { t: 'car_add'; car: CarState }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
-  | { t: 'car_fuel'; carId: string; litres: number }
+  | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
+  | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
@@ -387,7 +393,18 @@ export class GameWorld {
       }
       case 'car_fuel': {
         const car = s.cars[delta.carId];
-        if (car) car.fuelLitres = Math.max(0, delta.litres);
+        if (car) {
+          car.fuelLitres = Math.max(0, delta.litres);
+          if (delta.fuelKind !== undefined) car.fuelKind = delta.fuelKind;
+          if (car.fuelLitres === 0) car.fuelKind = null;
+        }
+        break;
+      }
+      case 'car_bonnet': {
+        const car = s.cars[delta.carId];
+        if (car && delta.cell >= 0 && delta.cell < BONNET_SLOT_COUNT) {
+          car.bonnet[delta.cell] = delta.item;
+        }
         break;
       }
       case 'car_fluid': {

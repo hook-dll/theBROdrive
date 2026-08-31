@@ -203,6 +203,8 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
     case 'bumper': return buildBumper(b, v);
     case 'battery': return buildBattery(b, v);
     case 'radiator': return buildRadiator(b, v);
+    case 'coolant_tank': return buildCoolantTank(b, v);
+    case 'turbine': return buildTurbine(b, v);
     case 'headlight': return buildHeadlight(b, v);
     case 'exhaust': return buildExhaust(b, v);
     case 'dashboard': return buildDashboard(b, v);
@@ -580,6 +582,22 @@ function buildRadiator(b: MeshBuilder, v: PartVariant): void {
   for (let i = -3; i <= 3; i++) {
     b.box(`${v.id}_fin_${i}`, 0.68, 0.04, 0.02, copper, [0, i * 0.055, 0.035]);
   }
+}
+
+function buildCoolantTank(b: MeshBuilder, v: PartVariant): void {
+  const plastic = cond(0xd7d2bd, 0.35, 0.65);
+  const cap = flat(0x2d4b6b, 0.55);
+  b.box(`${v.id}_reservoir`, 0.34, 0.42, 0.2, plastic, [0, 0, 0]);
+  b.cylinder(`${v.id}_neck`, 0.055, 0.055, 0.08, 12, plastic, [0.09, 0.25, 0]);
+  b.cylinder(`${v.id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.09, 0.305, 0]);
+}
+
+function buildTurbine(b: MeshBuilder, v: PartVariant): void {
+  const steel = cond(0x7b838b, 0.9, 0.3);
+  const dark = cond(0x34383d, 0.8, 0.5);
+  b.cylinder(`${v.id}_compressor`, 0.19, 0.19, 0.18, 20, steel, [0, 0, 0], AXIS_X);
+  b.cylinder(`${v.id}_hub`, 0.07, 0.07, 0.22, 16, dark, [0, 0, 0], AXIS_X);
+  b.cylinder(`${v.id}_inlet`, 0.09, 0.09, 0.2, 16, steel, [0.18, 0.08, 0], AXIS_Z);
 }
 
 function buildHeadlight(b: MeshBuilder, v: PartVariant): void {

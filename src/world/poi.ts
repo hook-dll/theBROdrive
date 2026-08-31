@@ -21,6 +21,7 @@ import {
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import { jobAt, type FreightField } from './freight';
+import { createBonnetStorage } from '../vehicle/bonnet';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
 
@@ -627,9 +628,16 @@ function makeWorkingCar(
     stickers: [],
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
+    fuelKind: engine?.fuel ?? null,
     coolantLitres: engine ? coolantCapacity(engine) : 0,
     oilLitres: engine ? oilCapacity(engine) : 0,
     storage: new Array(def.storageCells).fill(null),
+    bonnet: createBonnetStorage(
+      ctx.world.generatedPartId('poi-car', poi.index, slot),
+      def.engineId,
+      def.bodyClass,
+      def.tankLitres,
+    ),
     odometer: Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 4) * 240_000),
     x,
     y,
