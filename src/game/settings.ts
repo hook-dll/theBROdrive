@@ -98,11 +98,6 @@ export interface Settings {
    * choice.
    */
   viewDistance: ViewDistance;
-  /**
-   * Ease between bright- and dark-adapted celestial exposure. When disabled the
-   * same calibrated exposure is applied immediately instead of lagging behind.
-   */
-  eyeAdaptation: boolean;
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
   /**
@@ -155,7 +150,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // The authored horizon. Like `graphicsQuality`, nothing auto-detects the GPU;
   // the pause menu is one key away and the near tier is the safe floor.
   viewDistance: 'near',
-  eyeAdaptation: true,
   msaa: true,
   // Off by default; M switches it on, and the pause menu remembers which.
   mouseSteering: false,
@@ -235,8 +229,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     // keeps the horizon it was made with.
     viewDistance:
       obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
-    // Existing settings predate this choice and used adaptation, so missing means on.
-    eyeAdaptation: obj.eyeAdaptation !== false,
+    // `eyeAdaptation` lived here once and is deliberately not migrated: exposure is
+    // analytic now, so a stored preference has nothing left to select.
     // Preserve the old tier behavior once, then this becomes an independent choice.
     msaa:
       typeof obj.msaa === 'boolean'

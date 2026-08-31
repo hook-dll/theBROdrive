@@ -282,9 +282,12 @@ export class Trailer implements Rebasable {
   /** Prop stand: one collider and two meshes, all live only while uncoupled. */
   private readonly propCollider: RAPIER.Collider;
   private readonly propMeshes: THREE.Mesh[] = [];
+  private readonly unregisterOrigin: () => void;
+  /** Procedural geometries owned by this trailer rather than the shared model. */
   private readonly disposables: THREE.BufferGeometry[] = [];
 
   private joint: RAPIER.ImpulseJoint | null = null;
+  private disposed = false;
   /** Forward edge of the fitted trailer body, where the visual drawbar begins. */
   private readonly drawbarMountZ: number;
   /**
@@ -457,7 +460,7 @@ export class Trailer implements Rebasable {
     this.setPropStand(this.state.hitchedTo === null);
     this.applyMass();
     this.syncVisuals(1);
-    this.origin.register(this);
+    this.unregisterOrigin = this.origin.register(this);
   }
 
   get id(): string {
@@ -544,7 +547,16 @@ export class Trailer implements Rebasable {
    * standing where the constraint wants it before the joint exists.
    */
   hitchTo(vehicle: Vehicle, carId: string): void {
-    this.unhitch();
+    this.coupleTo(vehicle, carId, true);
+  }
+
+  /** Rebuilds a saved coupling without recording a duplicate hitch delta. */
+  restoreHitch(vehicle: Vehicle, carId: string): void {
+    this.coupleTo(vehicle, carId, false);
+  }
+
+  private coupleTo(vehicle: Vehicle, carId: string, recordHitch: boolean): void {
+    this.detachCoupling(recordHitch);
 
     const measure = vehicle.modelMeasure;
 
@@ -609,7 +621,9 @@ export class Trailer implements Rebasable {
     this.setDrawbarVisual();
     // Stand wound up: the ball has the nose weight now.
     this.setPropStand(false);
-    this.world.apply({ t: 'trailer_hitch', trailerId: this.state.id, carId });
+    if (recordHitch) {
+      this.world.apply({ t: 'trailer_hitch', trailerId: this.state.id, carId });
+    }
     this.pushTransform();
   }
 
@@ -619,6 +633,10 @@ export class Trailer implements Rebasable {
    * has nowhere else to go the moment the ball is gone.
    */
   unhitch(): void {
+    this.detachCoupling(true);
+  }
+
+  private detachCoupling(recordUnhitch: boolean): void {
     if (this.joint) {
       this.physics.world.removeImpulseJoint(this.joint, true);
       this.joint = null;
@@ -629,7 +647,7 @@ export class Trailer implements Rebasable {
     this.carAnchor = null;
     this.trailerAnchor = null;
     this.setPropStand(true);
-    if (this.state.hitchedTo !== null) {
+    if (recordUnhitch && this.state.hitchedTo !== null) {
       this.world.apply({ t: 'trailer_hitch', trailerId: this.state.id, carId: null });
     }
   }
@@ -889,7 +907,11 @@ export class Trailer implements Rebasable {
   }
 
   dispose(): void {
-    this.unhitch();
+    if (this.disposed) return;
+    this.disposed = true;
+
+    this.detachCoupling(false);
+    this.unregisterOrigin();
     this.controller.free();
     this.physics.removeBody(this.body);
     this.scene.remove(this.root);
@@ -964,6 +986,11 @@ export class TrailerField {
     private readonly origin: WorldOrigin,
   ) {}
 
+  /** The number of trailers with physics and visuals currently materialised. */
+  get liveCount(): number {
+    return this.trailers.size;
+  }
+
   /** Records a trailer into state and materialises it. Idempotent per id. */
   spawn(state: TrailerState): Trailer | null {
     if (this.trailers.has(state.id)) return this.trailers.get(state.id) ?? null;
@@ -977,33 +1004,79 @@ export class TrailerField {
    * composition root, not here.
    */
   restoreFromState(vehicleFor: (carId: string) => Vehicle | null): void {
-    // Which trailer was coupled to which car, read BEFORE anything is torn down.
-    //
-    // This has to be snapshotted first: `dispose` calls `unhitch`, and `unhitch`
-    // records the uncoupling into authoritative state. Tearing the old trailers
-    // down therefore erased the very couplings this method is about to restore, so
-    // loading a save always dropped the trailer you were towing — it came back
-    // standing on its prop stand a few metres behind the car.
-    const couplings: Record<string, string> = {};
-    for (const state of Object.values(this.world.state.trailers)) {
-      if (state.hitchedTo !== null) couplings[state.id] = state.hitchedTo;
-    }
-
-    for (const trailer of this.trailers.values()) trailer.dispose();
-    this.trailers.clear();
-    this.colliderToTrailerId.clear();
+    this.dispose();
 
     for (const state of Object.values(this.world.state.trailers)) {
       this.materialise(state);
     }
     // Second pass: a coupling needs both ends to exist.
-    for (const [trailerId, carId] of Object.entries(couplings)) {
-      const trailer = this.trailers.get(trailerId);
+    for (const trailer of this.trailers.values()) {
+      const carId = trailer.hitchedTo;
+      if (carId === null) continue;
       const vehicle = vehicleFor(carId);
       // A save whose towing car has gone leaves the trailer standing where it is
       // rather than refusing to load.
-      if (trailer && vehicle) trailer.hitchTo(vehicle, carId);
-      else if (trailer) trailer.unhitch();
+      if (vehicle) trailer.restoreHitch(vehicle, carId);
+      else trailer.unhitch();
+    }
+  }
+
+  /**
+   * Reconciles the runtime set with saved trailers around an absolute position.
+   * Coupled trailers follow their live towing vehicle rather than the player so a
+   * car cannot out-run its own drawbar. Standing trailers use separate radii to
+   * avoid repeatedly rebuilding at one boundary.
+   */
+  updateActive(
+    absoluteX: number,
+    absoluteZ: number,
+    vehicleFor: (carId: string) => Vehicle | null,
+    loadRadius: number,
+    unloadRadius: number,
+  ): void {
+    if (!(loadRadius >= 0) || !(loadRadius < unloadRadius)) {
+      throw new RangeError('TrailerField load radius must be non-negative and smaller than unload radius');
+    }
+    const loadRadiusSq = loadRadius * loadRadius;
+    const unloadRadiusSq = unloadRadius * unloadRadius;
+
+    for (const state of Object.values(this.world.state.trailers)) {
+      let trailer = this.trailers.get(state.id) ?? null;
+      const carId = state.hitchedTo;
+      const vehicle = carId === null ? null : vehicleFor(carId);
+
+      if (vehicle && carId !== null) {
+        if (!trailer) trailer = this.materialise(state);
+        if (!trailer.coupled) trailer.restoreHitch(vehicle, carId);
+        continue;
+      }
+
+      // Authoritative state says this trailer is not towed by a live car, so a
+      // surviving joint is stale: the towing body may already be gone, and the
+      // `coupled` guard below would otherwise pin the trailer alive forever.
+      // `unhitch` only records a delta when state still claims a coupling, so this
+      // is silent when state is what changed.
+      if (trailer?.coupled) trailer.unhitch();
+
+      // A live standing trailer's body may have moved since its last state snapshot.
+      // Use Rapier's current relative pose plus the floating-origin offset; dormant
+      // trailers have no body, so only those fall back to their saved absolute pose.
+      const position = trailer?.rigidBody.translation();
+      const x = position ? position.x + this.origin.x : state.x;
+      const z = position ? position.z + this.origin.z : state.z;
+      const dx = x - absoluteX;
+      const dz = z - absoluteZ;
+      const distanceSq = dx * dx + dz * dz;
+      if (!trailer) {
+        if (distanceSq <= loadRadiusSq) this.materialise(state);
+        continue;
+      }
+
+      // A joint owns a live physics relationship and must never be torn down by
+      // range streaming. In the normal path `vehicle` above keeps it alive.
+      if (!trailer.coupled && distanceSq > unloadRadiusSq) {
+        this.dematerialise(trailer);
+      }
     }
   }
 
@@ -1020,7 +1093,7 @@ export class TrailerField {
     return this.colliderToTrailerId.get(colliderHandle) ?? null;
   }
 
-  /** The trailer coupled to this car, if any. */
+  /** The live trailer coupled to this car, if any. */
   hitchedTo(carId: string): Trailer | null {
     for (const trailer of this.trailers.values()) {
       if (trailer.hitchedTo === carId) return trailer;
@@ -1029,7 +1102,7 @@ export class TrailerField {
   }
 
   /**
-   * Suspension and brake step for every trailer, towed or standing.
+   * Suspension and brake step for every live trailer, towed or standing.
    *
    * `brakeForCar` reports a car's service-brake demand (0..1) by id. It is a lookup
    * rather than a single number because each coupled trailer follows the pedal of
@@ -1051,9 +1124,9 @@ export class TrailerField {
   }
 
   /**
-   * Visits every trailer wheel's spray report. A callback rather than a collected
-   * array so nothing allocates per frame; trailers are few and the dust emitter is
-   * the only caller.
+   * Visits every live trailer wheel's spray report. A callback rather than a
+   * collected array so nothing allocates per frame; trailers are few and the dust
+   * emitter is the only caller.
    */
   forEachSpray(visit: (state: WheelSprayState) => void): void {
     for (const trailer of this.trailers.values()) {
@@ -1061,9 +1134,19 @@ export class TrailerField {
     }
   }
 
-  /** Records every trailer's pose, so a save puts them all back. */
+  /** Records every live trailer's pose, so a save puts them all back. */
   pushTransforms(): void {
     for (const trailer of this.trailers.values()) trailer.pushTransform();
+  }
+
+  /** Releases every derived runtime object while retaining authoritative state. */
+  dispose(): void {
+    for (const trailer of this.trailers.values()) {
+      this.removeColliderHandles(trailer);
+      trailer.dispose();
+    }
+    this.trailers.clear();
+    this.colliderToTrailerId.clear();
   }
 
   private materialise(state: TrailerState): Trailer {
@@ -1074,5 +1157,20 @@ export class TrailerField {
       this.colliderToTrailerId.set(body.collider(i).handle, state.id);
     }
     return trailer;
+  }
+
+  /** Flushes a standing trailer before dropping all non-authoritative runtime state. */
+  private dematerialise(trailer: Trailer): void {
+    trailer.pushTransform();
+    this.removeColliderHandles(trailer);
+    this.trailers.delete(trailer.id);
+    trailer.dispose();
+  }
+
+  private removeColliderHandles(trailer: Trailer): void {
+    const body = trailer.rigidBody;
+    for (let i = 0; i < body.numColliders(); i++) {
+      this.colliderToTrailerId.delete(body.collider(i).handle);
+    }
   }
 }

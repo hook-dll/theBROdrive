@@ -37,6 +37,16 @@ const LATERALS: readonly number[] = [
   0.4, 0.85, 1.2, 1.65, 2.0, 2.45, 2.9, HW, CORRIDOR_INNER,
 ];
 
+/**
+ * Longitudinal rows of quads per collider slab.
+ *
+ * The visible ribbon is one mesh, but its collider is built in slabs so no single
+ * `RAPIER.ColliderDesc.trimesh` call — an uninterruptible native BVH build — can
+ * own a frame. Fifteen rows is ~540 triangles, about a millisecond, which fits
+ * inside the streaming scheduler's slice with room for the surrounding work.
+ */
+const COLLIDER_SLAB_QUADS = 15;
+
 const MARKING_LIFT = 0.03;
 const MARKING_HALF_WIDTH = 0.12;
 const EDGE_LATERAL = HW - 0.4;
@@ -183,6 +193,13 @@ export class RoadMeshProvider implements ChunkProvider {
   }
 
   build(ctx: ChunkContext): ChunkContent | null {
+    const iterator = this.buildSteps(ctx);
+    let result = iterator.next();
+    while (!result.done) result = iterator.next();
+    return result.value;
+  }
+
+  *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
     const { sStart, sEnd, road, physics, hasPhysics } = ctx;
     if (sEnd <= sStart) return null;
     attachRoadTextures();
@@ -210,114 +227,165 @@ export class RoadMeshProvider implements ChunkProvider {
     const uvs = new Float32Array(vertexCount * 2);
     const indices = new Uint32Array((sCount - 1) * (latCount - 1) * 6);
 
-    const point = { x: 0, y: 0, z: 0 };
-    const color = new THREE.Color();
-
-    for (let si = 0; si < sCount; si++) {
-      // Endpoint-exact rows: si * (sEnd - sStart) / (sCount - 1) makes the shared
-      // boundary row bit-identical in both neighbours, keeping the seam watertight
-      // at the denser resolution.
-      const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
-      const cond = roadConditionAt(s);
-      // Palette colour is a function of arclength alone: sample once per row, so
-      // neighbouring chunks share the seam row and a rebuild is identical.
-      const palette = desertPaletteAt(s);
-      sandLinear.setHex(palette.sand);
-      gravelLinear.setHex(palette.gravel);
-
-      for (let li = 0; li < latCount; li++) {
-        const lateral = LATERALS[li]!;
-        road.offsetPoint(s, lateral, point);
-        // Shared height function: the terrain adopts this exact surface at the
-        // shoulder edge, so the road and verge stay flush.
-        const y = roadSurfaceY(road, this.field, s, lateral, point.x, point.z);
-
-        const vi = si * latCount + li;
-        positions[vi * 3] = point.x - ox;
-        positions[vi * 3 + 1] = y;
-        positions[vi * 3 + 2] = point.z - oz;
-
-        // Texture coordinates in world metres, so the grain has a fixed size and
-        // does not stretch through corners or over the shoulder.
-        uvs[vi * 2] = lateral / ROAD_TILE_METRES;
-        uvs[vi * 2 + 1] = s / ROAD_TILE_METRES;
-
-        const a = Math.abs(lateral);
-        color.lerpColors(
-          a <= HW ? (laneBase ?? gravelLinear) : gravelLinear,
-          sandLinear,
-          sandFactor(a, cond.sandCover),
-        );
-        if (a <= HW) this.weather(color, gravelLinear, s, lateral, a, cond.decay);
-        color.multiplyScalar(textureGain);
-        colors[vi * 3] = color.r;
-        colors[vi * 3 + 1] = color.g;
-        colors[vi * 3 + 2] = color.b;
-      }
-    }
-
-    let ii = 0;
-    for (let si = 0; si < sCount - 1; si++) {
-      for (let li = 0; li < latCount - 1; li++) {
-        const a = si * latCount + li;
-        const b = a + latCount;
-        const c = a + 1;
-        const d = b + 1;
-        indices[ii++] = a;
-        indices[ii++] = b;
-        indices[ii++] = c;
-        indices[ii++] = b;
-        indices[ii++] = d;
-        indices[ii++] = c;
-      }
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    // The road and its shoulder use the same upward lighting basis as the desert.
-    // Actual slope normals made both read as a dark shadow strip on grades.
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-
     const group = new THREE.Group();
-    const roadMesh = new THREE.Mesh(geometry, roadMaterial);
-    // Match the desert: a moving shadow-map boundary must not turn the road and its
-    // shoulder into a dark strip through uniformly sunlit terrain.
-    roadMesh.receiveShadow = false;
-    group.add(roadMesh);
-
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-    const disposables: THREE.BufferGeometry[] = [geometry];
+    const disposables: THREE.BufferGeometry[] = [];
+    let completed = false;
 
-    if (hasPhysics) {
-      // `positions` is already origin-relative (subtracted at the write site above);
-      // subtracting again here would double-apply the offset and drop the collider
-      // a whole chunk's origin away from the mesh.
-      const collider = physics.addStaticTrimesh(positions, indices, surface);
-      colliders.push(collider);
-      const body = collider.parent();
-      if (body) bodies.push(body);
-    }
+    try {
+      const point = { x: 0, y: 0, z: 0 };
+      const color = new THREE.Color();
 
-    const markings = this.buildMarkings(road, sStart, sEnd, sCount, laneBase, ox, oz);
-    if (markings) {
-      group.add(markings);
-      disposables.push(markings.geometry);
-    }
+      for (let si = 0; si < sCount; si++) {
+        // Endpoint-exact rows: si * (sEnd - sStart) / (sCount - 1) makes the shared
+        // boundary row bit-identical in both neighbours, keeping the seam watertight
+        // at the denser resolution.
+        const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        const cond = roadConditionAt(s);
+        // Palette colour is a function of arclength alone: sample once per row, so
+        // neighbouring chunks share the seam row and a rebuild is identical.
+        const palette = desertPaletteAt(s);
+        sandLinear.setHex(palette.sand);
+        gravelLinear.setHex(palette.gravel);
 
-    return {
-      group,
-      bodies,
-      colliders,
-      dispose: () => {
+        for (let li = 0; li < latCount; li++) {
+          const lateral = LATERALS[li]!;
+          road.offsetPoint(s, lateral, point);
+          // Shared height function: the terrain adopts this exact surface at the
+          // shoulder edge, so the road and verge stay flush.
+          const y = roadSurfaceY(road, this.field, s, lateral, point.x, point.z);
+
+          const vi = si * latCount + li;
+          positions[vi * 3] = point.x - ox;
+          positions[vi * 3 + 1] = y;
+          positions[vi * 3 + 2] = point.z - oz;
+
+          // Texture coordinates in world metres, so the grain has a fixed size and
+          // does not stretch through corners or over the shoulder.
+          uvs[vi * 2] = lateral / ROAD_TILE_METRES;
+          uvs[vi * 2 + 1] = s / ROAD_TILE_METRES;
+
+          const a = Math.abs(lateral);
+          color.lerpColors(
+            a <= HW ? (laneBase ?? gravelLinear) : gravelLinear,
+            sandLinear,
+            sandFactor(a, cond.sandCover),
+          );
+          if (a <= HW) this.weather(color, gravelLinear, s, lateral, a, cond.decay);
+          color.multiplyScalar(textureGain);
+          colors[vi * 3] = color.r;
+          colors[vi * 3 + 1] = color.g;
+          colors[vi * 3 + 2] = color.b;
+        }
+        yield;
+      }
+
+      let ii = 0;
+      for (let si = 0; si < sCount - 1; si++) {
+        for (let li = 0; li < latCount - 1; li++) {
+          const a = si * latCount + li;
+          const b = a + latCount;
+          const c = a + 1;
+          const d = b + 1;
+          indices[ii++] = a;
+          indices[ii++] = b;
+          indices[ii++] = c;
+          indices[ii++] = b;
+          indices[ii++] = d;
+          indices[ii++] = c;
+        }
+        yield;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      disposables.push(geometry);
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      // The road and its shoulder use the same upward lighting basis as the desert.
+      // Actual slope normals made both read as a dark shadow strip on grades.
+      const normals = new Float32Array(positions.length);
+      for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+      geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+
+      const roadMesh = new THREE.Mesh(geometry, roadMaterial);
+      // Match the desert: a moving shadow-map boundary must not turn the road and its
+      // shoulder into a dark strip through uniformly sunlit terrain.
+      roadMesh.receiveShadow = false;
+      group.add(roadMesh);
+      yield;
+
+      if (hasPhysics) {
+        // ONE TRIMESH PER SLAB, not one per chunk. Rapier builds a BVH inside
+        // `trimesh`, and for a whole 200 m chunk (5400 triangles) that is a single
+        // 10-50 ms native call no generator yield can interrupt — measured as the
+        // last remaining streaming hitch. Row slabs are the same vertices in the
+        // same order, so the collided surface is bit-identical; adjacent slabs share
+        // their boundary row, so there is no seam to fall through.
+        //
+        // `positions` is already origin-relative (subtracted at the write site
+        // above); subtracting again here would double-apply the offset and drop the
+        // collider a whole chunk's origin away from the mesh.
+        for (let q0 = 0; q0 < sCount - 1; q0 += COLLIDER_SLAB_QUADS) {
+          const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, sCount - 1);
+          const slabVertices = positions.subarray(q0 * latCount * 3, (q1 + 1) * latCount * 3);
+          const slabIndices = new Uint32Array((q1 - q0) * (latCount - 1) * 6);
+          let si2 = 0;
+          for (let si = q0; si < q1; si++) {
+            for (let li = 0; li < latCount - 1; li++) {
+              const a = (si - q0) * latCount + li;
+              const b = a + latCount;
+              const c = a + 1;
+              const d = b + 1;
+              slabIndices[si2++] = a;
+              slabIndices[si2++] = b;
+              slabIndices[si2++] = c;
+              slabIndices[si2++] = b;
+              slabIndices[si2++] = d;
+              slabIndices[si2++] = c;
+            }
+          }
+          const collider = physics.addStaticTrimesh(slabVertices, slabIndices, surface);
+          collider.setEnabled(false);
+          colliders.push(collider);
+          const body = collider.parent();
+          if (body) bodies.push(body);
+          yield;
+        }
+      }
+
+      const markings = yield* this.buildMarkingsSteps(
+        road, sStart, sEnd, sCount, laneBase, ox, oz,
+      );
+      if (markings) {
+        disposables.push(markings.geometry);
+        group.add(markings);
+      }
+      yield;
+
+      // Keep the trimesh out of physics while the incremental mesh is incomplete;
+      // hand it to Rapier only in the same completion call as the content.
+      for (const collider of colliders) collider.setEnabled(true);
+
+      completed = true;
+      return {
+        group,
+        bodies,
+        colliders,
+        dispose: () => {
+          for (const g of disposables) g.dispose();
+        },
+      };
+    } finally {
+      if (!completed) {
+        for (const body of bodies) physics.removeBody(body);
         for (const g of disposables) g.dispose();
-      },
-    };
+        group.removeFromParent();
+        group.clear();
+      }
+    }
   }
 
   /**
@@ -369,7 +437,7 @@ export class RoadMeshProvider implements ChunkProvider {
     color.multiplyScalar(1 + mottle * MOTTLE_AMOUNT * (0.7 + decay));
   }
 
-  private buildMarkings(
+  private *buildMarkingsSteps(
     road: Road,
     sStart: number,
     sEnd: number,
@@ -377,56 +445,69 @@ export class RoadMeshProvider implements ChunkProvider {
     laneBase: THREE.Color | null,
     ox: number,
     oz: number,
-  ): THREE.Mesh | null {
-    const positions: number[] = [];
-    const colors: number[] = [];
-    const point = { x: 0, y: 0, z: 0 };
-    const color = new THREE.Color();
+  ): Generator<void, THREE.Mesh | null> {
+    let geometry: THREE.BufferGeometry | null = null;
+    let completed = false;
 
-    // Marking quads are emitted per surface step (not per node) so their corners
-    // coincide with mesh vertices — a quad spanning a pothole or bump would
-    // otherwise float or cut through the road surface between its corners.
-    //
-    // Coverage is per quad rather than per chunk: paint does not fade uniformly, it
-    // survives in patches and is scrubbed off entirely where the traffic and the sand
-    // have worked on it. A quad below PAINT_GONE is not drawn at all, which leaves the
-    // gaps and half-dashes that say nobody has repainted this in decades.
-    for (let si = 0; si < sCount - 1; si++) {
-      const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
-      const markings = roadConditionAt(s).markings;
-      if (markings < MARKING_MIN) continue;
+    try {
+      const positions: number[] = [];
+      const colors: number[] = [];
+      const point = { x: 0, y: 0, z: 0 };
+      const color = new THREE.Color();
 
-      for (const line of MARKING_LINES) {
-        // Dashes are 4 m on / 4 m off; skip the odd 4 m blocks.
-        if (line.dashed && ((si / SUB_DIVISIONS) | 0) & 1) continue;
-        // Each line wears independently: the offset separates their noise streams.
-        const wear = this.paintNoise.fbm(
-          (s + line.lateral * 130) / PAINT_WEAR_WAVELENGTH,
-          2,
-          2.3,
-          0.5,
-        );
-        const coverage = markings * (0.72 + wear * 0.55);
-        if (coverage < PAINT_GONE) continue;
-        // `laneBase` is null only for a gravel road, which has `markings` 0 at every
-        // step and so never reaches here.
-        color.lerpColors(laneBase!, PAINT_LINEAR, Math.min(1, coverage));
-        this.emitMarkingQuad(
-          road, line.lateral, s, s + SURFACE_STEP,
-          ox, oz, point, color, positions, colors,
-        );
+      // Marking quads are emitted per surface step (not per node) so their corners
+      // coincide with mesh vertices — a quad spanning a pothole or bump would
+      // otherwise float or cut through the road surface between its corners.
+      //
+      // Coverage is per quad rather than per chunk: paint does not fade uniformly, it
+      // survives in patches and is scrubbed off entirely where the traffic and the sand
+      // have worked on it. A quad below PAINT_GONE is not drawn at all, which leaves the
+      // gaps and half-dashes that say nobody has repainted this in decades.
+      for (let si = 0; si < sCount - 1; si++) {
+        const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        const markings = roadConditionAt(s).markings;
+        if (markings >= MARKING_MIN) {
+          for (const line of MARKING_LINES) {
+            // Dashes are 4 m on / 4 m off; skip the odd 4 m blocks.
+            if (line.dashed && ((si / SUB_DIVISIONS) | 0) & 1) continue;
+            // Each line wears independently: the offset separates their noise streams.
+            const wear = this.paintNoise.fbm(
+              (s + line.lateral * 130) / PAINT_WEAR_WAVELENGTH,
+              2,
+              2.3,
+              0.5,
+            );
+            const coverage = markings * (0.72 + wear * 0.55);
+            if (coverage < PAINT_GONE) continue;
+            // `laneBase` is null only for a gravel road, which has `markings` 0 at every
+            // step and so never reaches here.
+            color.lerpColors(laneBase!, PAINT_LINEAR, Math.min(1, coverage));
+            this.emitMarkingQuad(
+              road, line.lateral, s, s + SURFACE_STEP,
+              ox, oz, point, color, positions, colors,
+            );
+          }
+        }
+        yield;
       }
+
+      if (positions.length === 0) {
+        completed = true;
+        return null;
+      }
+
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
+      const normals = new Float32Array(positions.length);
+      for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+      geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      const markings = new THREE.Mesh(geometry, markingMaterial);
+      completed = true;
+      return markings;
+    } finally {
+      if (!completed) geometry?.dispose();
     }
-
-    if (positions.length === 0) return null;
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    return new THREE.Mesh(geometry, markingMaterial);
   }
 
   private emitMarkingQuad(

@@ -5,17 +5,15 @@
  * `ScatterProvider` building a real chunk against a real Rapier world, the real
  * `DebrisField` deciding what got hit, and the real `GameWorld` recording it.
  *
- * It checks the five things a break has to get right, none of which a screenshot can
- * show:
+ * It checks the break transaction and lifecycle details that a screenshot cannot show:
  *
- *   registered   the chunk hands its breakable props over, and only from a chunk that
- *                carries physics — nothing far away can be hit
- *   transaction  the standing prop's instance is blanked and its collider switched off
- *                in the same step its pieces enter the world
- *   flight       the pieces are dynamic and actually leave, carrying the impact
- *   record       `state.flattenedProps` gets the cell id
- *   guard        a rebuilt chunk does NOT stand it back up, which is the whole reason
- *                the record exists
+ *   registered   only chunks with physics hand over breakable props
+ *   transaction  the standing instance and collider change with the break
+ *   flight       pieces carry the impact and leave their spawn transforms
+ *   retirement   moving/nearby, young, or briefly sleeping pieces cannot disappear;
+ *                distant, settled pieces release scene and physics ownership
+ *   record       `state.flattenedProps` survives debris retirement and chunk rebuilds
+ *   sweep + cap  a high-speed chassis still breaks props and debris never exceeds 48
  *
  *   npx tsx tools/prop-break.ts
  *
@@ -23,7 +21,7 @@
  */
 
 import * as THREE from 'three';
-import { PhysicsWorld } from '../src/core/physics';
+import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { DebrisField, type Impactor } from '../src/world/debris';
@@ -149,6 +147,16 @@ if (!target) {
 } else {
   const prop = target;
   const bodiesBefore = physics.world.bodies.len();
+  const existingBodies = new Set<number>();
+  physics.world.forEachRigidBody((body) => existingBodies.add(body.handle));
+
+  const advanceFixedSteps = (steps: number, observerX: number, observerZ: number): void => {
+    for (let i = 0; i < steps; i++) {
+      physics.step();
+      debris.update(null, FIXED_DT, observerX, observerZ);
+    }
+    debris.syncVisuals();
+  };
 
   // Contact breaks the pile even with no vehicle speed. There is deliberately no
   // velocity threshold: a chassis already pressing into one must not leave it standing.
@@ -165,10 +173,8 @@ if (!target) {
     vz: 0,
   };
 
-  debris.update(impactor);
+  debris.update(impactor, FIXED_DT, prop.x, prop.z);
   check('zero-speed contact disables pile', !prop.collider.isEnabled(), 'disabled');
-
-
   check('recorded in state', world.state.flattenedProps.includes(prop.id), `id ${prop.id}`);
 
   const matrix = new THREE.Matrix4();
@@ -178,6 +184,7 @@ if (!target) {
 
   const spawned = physics.world.bodies.len() - bodiesBefore;
   check('three pile pieces spawned', spawned === 3, `${spawned} bodies`);
+  check('live count tracks spawned pieces', debris.liveCount === 3, `${debris.liveCount} live`);
 
   // Fly: step the world and confirm the pieces moved off their spawn points.
   const before: [number, number, number][] = [];
@@ -190,6 +197,81 @@ if (!target) {
     if (Math.hypot(c.position.x - p[0], c.position.y - p[1], c.position.z - p[2]) > 0.1) moved++;
   });
   check('pile pieces leave on impact', moved === 3, `${moved} of ${scene.children.length} moved`);
+
+  // Moving pieces near the observer must remain. Then force Rapier's settled state so
+  // retirement timing is deterministic rather than dependent on a terrain landing.
+  advanceFixedSteps(60, prop.x, prop.z);
+  check(
+    'moving nearby pieces remain live',
+    debris.liveCount === 3 && physics.world.bodies.len() === bodiesBefore + 3,
+    `${debris.liveCount} live, ${physics.world.bodies.len() - bodiesBefore} added bodies`,
+  );
+  physics.world.forEachRigidBody((body) => {
+    if (!existingBodies.has(body.handle)) body.sleep();
+  });
+
+  advanceFixedSteps(90, prop.x, prop.z);
+  check('sleep gate delays retirement', debris.liveCount === 3, `${debris.liveCount} live after 1.5 s asleep`);
+  advanceFixedSteps(31, prop.x, prop.z);
+  check('age gate delays retirement', debris.liveCount === 3, `${debris.liveCount} live before age threshold`);
+  advanceFixedSteps(121, prop.x, prop.z);
+  check('aged nearby pieces remain live', debris.liveCount === 3, `${debris.liveCount} live after both time gates`);
+
+  // Walk the observer outward in small fixed-step increments. The nearby probe stays
+  // comfortably inside the retirement radius despite each piece's own flight path.
+  for (let distance = 10; distance <= 100; distance += 10) {
+    advanceFixedSteps(1, prop.x + distance, prop.z);
+  }
+  check('settled pieces remain inside 120 m', debris.liveCount === 3, `${debris.liveCount} live nearby`);
+  for (let distance = 101; distance <= 140; distance++) {
+    advanceFixedSteps(1, prop.x + distance, prop.z);
+  }
+  advanceFixedSteps(4, prop.x + 140, prop.z);
+  check('distant settled pieces retire', debris.liveCount === 0, `${debris.liveCount} live`);
+  check('retirement removes debris meshes', scene.children.length === 0, `${scene.children.length} scene meshes`);
+  check(
+    'retirement removes physics bodies',
+    physics.world.bodies.len() === bodiesBefore,
+    `${physics.world.bodies.len()} bodies, started at ${bodiesBefore}`,
+  );
+  check('flattened record outlives debris', world.state.flattenedProps.includes(prop.id), `id ${prop.id}`);
+  check('retired prop remains broken', debris.isBroken(prop.id), `id ${prop.id}`);
+
+  // A sweep across a narrow prop must break it even when neither fixed-step endpoint
+  // overlaps. This also proves the new update arguments preserve impact handling.
+  const sweptId = prop.id + 1_000_000;
+  const sweptProp: BreakableProp = { ...prop, id: sweptId };
+  debris.register(sweptProp);
+  debris.update(
+    { ...impactor, x: sweptProp.x - 5, y: sweptProp.y + 0.6, z: sweptProp.z, fx: 1, fz: 0 },
+    FIXED_DT,
+    sweptProp.x - 5,
+    sweptProp.z,
+  );
+  debris.update(
+    { ...impactor, x: sweptProp.x + 5, y: sweptProp.y + 0.6, z: sweptProp.z, fx: 1, fz: 0 },
+    FIXED_DT,
+    sweptProp.x + 5,
+    sweptProp.z,
+  );
+  check('high-speed sweep breaks prop', world.state.flattenedProps.includes(sweptId), `id ${sweptId}`);
+
+  // Repeated real-piece spawns must evict the oldest immediately rather than growing
+  // past the hard budget. The cloned records model distinct props while keeping the
+  // captured production piece geometry, materials, and collision setup.
+  const capBodiesBefore = physics.world.bodies.len();
+  const capLiveBefore = debris.liveCount;
+  for (let i = 0; i < 17; i++) {
+    const id = sweptId + i + 1;
+    debris.register({ ...prop, id });
+    debris.update({ ...impactor, x: prop.x, y: prop.y + 0.6, z: prop.z }, FIXED_DT, prop.x, prop.z);
+  }
+  check('hard debris cap holds', debris.liveCount === 48, `${debris.liveCount} live`);
+  check(
+    'cap evicts excess physics bodies',
+    physics.world.bodies.len() === capBodiesBefore + 48 - capLiveBefore,
+    `${physics.world.bodies.len() - capBodiesBefore} cap-test bodies after ${capLiveBefore} live`,
+  );
 }
 
 // --- guard --------------------------------------------------------------------

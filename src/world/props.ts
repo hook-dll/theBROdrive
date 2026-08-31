@@ -546,6 +546,7 @@ function addStatic(
   );
   if (rot) desc.setRotation(rot);
   const collider = ctx.physics.world.createCollider(desc, body);
+  collider.setEnabled(false);
   ctx.physics.surfaces.register(collider.handle, surface);
   bodies.push(body);
   colliders.push(collider);
@@ -559,9 +560,22 @@ export class ScatterProvider implements ChunkProvider {
    * Whoever owns knocking props down, or nothing. Optional because deterministic
    * scatter remains a complete visual field without mutable breakage state.
    */
-  constructor(private readonly breakables?: BreakableSink) {}
+  constructor(private readonly breakables?: BreakableSink) {
+    // Force all shared form and break-piece geometry to be created while providers
+    // are loading, never on a scheduler-owned build step.
+    const forms = [...sandForms(), ...rockForms()];
+    for (const form of forms) propPieces(form.id);
+  }
 
   build(ctx: ChunkContext): ChunkContent {
+    const iterator = this.buildSteps(ctx);
+    let result = iterator.next();
+    while (!result.done) result = iterator.next();
+    return result.value;
+  }
+
+  *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent> {
+    let completed = false;
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
@@ -569,91 +583,103 @@ export class ScatterProvider implements ChunkProvider {
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
 
+    try {
     const seed = ctx.world.seed;
     const ox = ctx.originX;
     const oz = ctx.originZ;
     const cellSStart = Math.floor(ctx.sStart / CELL_S);
     const cellSEnd = Math.floor(ctx.sEnd / CELL_S);
     const cellLMax = Math.ceil(MAX_LAT / CELL_L) + 1;
+    let occupancyCells = 0;
 
     for (let cs = cellSStart; cs <= cellSEnd; cs++) {
       const centreS = (cs + 0.5) * CELL_S;
       if (centreS < ctx.sStart || centreS >= ctx.sEnd) continue;
       for (let cl = -cellLMax; cl <= cellLMax; cl++) {
-        // CHEAPEST TEST FIRST, and that ordering is the whole reason this can afford
-        // to sweep 600 m either side. The occupancy roll is one hash; the terrain
-        // samples below are hundreds of times more expensive. Rolling first throws
-        // away nine cells in ten before either is touched.
-        const roll = hash01(seed, TAG_SCATTER, cs, cl);
-        if (roll >= ROCK_DENSITY) continue;
+        cell: {
+          // CHEAPEST TEST FIRST, and that ordering is the whole reason this can afford
+          // to sweep 600 m either side. The occupancy roll is one hash; the terrain
+          // samples below are hundreds of times more expensive. Rolling first throws
+          // away nine cells in ten before either is touched.
+          const roll = hash01(seed, TAG_SCATTER, cs, cl);
+          if (roll >= ROCK_DENSITY) break cell;
 
-        const centreL = (cl + 0.5) * CELL_L;
-        if (Math.abs(centreL) < MIN_LAT) continue;
+          const centreL = (cl + 0.5) * CELL_L;
+          if (Math.abs(centreL) < MIN_LAT) break cell;
 
-        // Jitter within the cell, then re-check the corridor/max bounds.
-        const s = centreS + (hash01(seed, TAG_SCATTER, cs, cl, 1) - 0.5) * CELL_S;
-        const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
-        const absLateral = Math.abs(lateral);
-        if (absLateral < MIN_LAT || absLateral > MAX_LAT) continue;
+          // Jitter within the cell, then re-check the corridor/max bounds.
+          const s = centreS + (hash01(seed, TAG_SCATTER, cs, cl, 1) - 0.5) * CELL_S;
+          const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
+          const absLateral = Math.abs(lateral);
+          if (absLateral < MIN_LAT || absLateral > MAX_LAT) break cell;
 
-        // Thin out towards the far edge so the scatter ends in a fringe rather than a
-        // fence line. Still only arithmetic: no sampling yet.
-        const t = Math.min(1, Math.max(0, (absLateral - FULL_LAT) / (MAX_LAT - FULL_LAT)));
-        const fade = 1 - t * t * (3 - 2 * t);
-        if (roll >= ROCK_DENSITY * fade) continue;
+          // Thin out towards the far edge so the scatter ends in a fringe rather than a
+          // fence line. Still only arithmetic: no sampling yet.
+          const t = Math.min(1, Math.max(0, (absLateral - FULL_LAT) / (MAX_LAT - FULL_LAT)));
+          const fade = 1 - t * t * (3 - 2 * t);
+          if (roll >= ROCK_DENSITY * fade) break cell;
 
-        const p = ctx.road.offsetPoint(s, lateral);
-        // From the FRAME, not by projection: this cell was generated from (s, lateral),
-        // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
-        // counter already knows.
-        const surface = ctx.terrain.surfaceFromFrame(p.x, p.z, lateral);
+          const p = ctx.road.offsetPoint(s, lateral);
+          // From the FRAME, not by projection: this cell was generated from (s, lateral),
+          // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
+          // counter already knows.
+          const surface = ctx.terrain.surfaceFromFrame(p.x, p.z, lateral);
 
-        // Correlation: cacti and scrub on sand, rocks concentrated on rock outcrops.
-        let forms: PropForm[];
-        let density: number;
-        if (surface === SurfaceType.Rock) {
-          forms = rockForms();
-          density = ROCK_DENSITY;
-        } else if (surface === SurfaceType.Sand) {
-          forms = sandForms();
-          density = CACTUS_DENSITY;
-        } else {
-          continue;
+          // Correlation: cacti and scrub on sand, rocks concentrated on rock outcrops.
+          let forms: PropForm[];
+          let density: number;
+          if (surface === SurfaceType.Rock) {
+            forms = rockForms();
+            density = ROCK_DENSITY;
+          } else if (surface === SurfaceType.Sand) {
+            forms = sandForms();
+            density = CACTUS_DENSITY;
+          } else {
+            break cell;
+          }
+          if (roll >= density * fade) break cell;
+
+          const form = forms[Math.floor(hash01(seed, TAG_SCATTER, cs, cl, 3) * forms.length)]!;
+
+          // A prop already knocked down stays down. Same guard `lootedPois` is for a
+          // looted stop: the chunk is rebuilt every time it crosses the physics radius,
+          // and without this every rebuild would stand the cactus back up.
+          const id = propCellId(cs, cl);
+          if (propPieces(form.id) && this.breakables?.isBroken(id)) break cell;
+
+          const scale = form.minScale + hash01(seed, TAG_SCATTER, cs, cl, 4) * (form.maxScale - form.minScale);
+          const radius = form.baseRadius * scale;
+
+          const ry = hash01(seed, TAG_SCATTER, cs, cl, 5) * Math.PI * 2;
+          const rx = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 6) * Math.PI * 2 : 0;
+          const rz = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 7) * Math.PI * 2 : 0;
+
+          // The player-centred fine lattice samples this exact world-space field. The
+          // road frame is already known here, so no nearest-road search is needed.
+          const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
+          placements.push({
+            form,
+            id,
+            x: p.x,
+            y: groundY - radius * form.sink,
+            z: p.z,
+            rx,
+            ry,
+            rz,
+            scale,
+            radius,
+            mesh: null,
+            instance: 0,
+          });
         }
-        if (roll >= density * fade) continue;
-
-        const form = forms[Math.floor(hash01(seed, TAG_SCATTER, cs, cl, 3) * forms.length)]!;
-
-        // A prop already knocked down stays down. Same guard `lootedPois` is for a
-        // looted stop: the chunk is rebuilt every time it crosses the physics radius,
-        // and without this every rebuild would stand the cactus back up.
-        const id = propCellId(cs, cl);
-        if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
-
-        const scale = form.minScale + hash01(seed, TAG_SCATTER, cs, cl, 4) * (form.maxScale - form.minScale);
-        const radius = form.baseRadius * scale;
-
-        const ry = hash01(seed, TAG_SCATTER, cs, cl, 5) * Math.PI * 2;
-        const rx = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 6) * Math.PI * 2 : 0;
-        const rz = form.rotate3d ? hash01(seed, TAG_SCATTER, cs, cl, 7) * Math.PI * 2 : 0;
-
-        // The player-centred fine lattice samples this exact world-space field. The
-        // road frame is already known here, so no nearest-road search is needed.
-        const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
-        placements.push({
-          form,
-          id,
-          x: p.x,
-          y: groundY - radius * form.sink,
-          z: p.z,
-          rx,
-          ry,
-          rz,
-          scale,
-          radius,
-          mesh: null,
-          instance: 0,
-        });
+        if (++occupancyCells >= 8) {
+          occupancyCells = 0;
+          yield;
+        }
+      }
+      if (occupancyCells > 0) {
+        occupancyCells = 0;
+        yield;
       }
     }
 
@@ -714,6 +740,7 @@ export class ScatterProvider implements ChunkProvider {
           });
         }
       }
+      yield;
     }
 
     // One InstancedMesh per form per chunk. The form geometry/material is shared
@@ -745,75 +772,90 @@ export class ScatterProvider implements ChunkProvider {
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
       meshes.push(mesh);
+      yield;
     }
 
     if (ctx.hasPhysics) {
       for (const pl of placements) {
         const form = pl.form;
-        if (form.collider === 'none') continue;
-        if (form.collider === 'hull') {
-          if (pl.radius < ROCK_COLLIDER_MIN) continue; // pebbles: no collider
-          addStatic(
-            ctx,
-            bodies,
-            colliders,
-            pl.x,
-            pl.y,
-            pl.z,
-            scaledHull(form.geometry, pl.scale),
-            SurfaceType.Rock,
-            eulerRotation(pl.rx, pl.ry, pl.rz),
-          );
-          continue;
-        }
-        if (form.collider === 'box') {
-          if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
-          // The fallen trunk is three metres of one thing and a quarter-metre of
-          // another, so a cube around its radius would be a stump and a cube around
-          // its length a wall. Yaw it with the visible form.
-          const [hx, hy, hz] = form.colliderHalf;
-          addStatic(
-            ctx,
-            bodies,
-            colliders,
-            pl.x,
-            pl.y + hy * pl.scale,
-            pl.z,
-            RAPIER.ColliderDesc.cuboid(hx * pl.scale, hy * pl.scale, hz * pl.scale),
-            SurfaceType.Rock,
-            yawRotation(pl.ry),
-          );
-        } else {
-          // Upright plant: a capsule sized to the shaft.
-          const halfHeight = form.height * pl.scale * 0.42;
-          const rad = form.baseRadius * pl.scale * 0.8;
-          const collider = addStatic(ctx, bodies, colliders, pl.x, pl.y + halfHeight, pl.z, RAPIER.ColliderDesc.capsule(halfHeight, rad), SurfaceType.Rock);
+        if (form.collider !== 'none' && !(form.collider === 'hull' && pl.radius < ROCK_COLLIDER_MIN)) {
+          if (form.collider === 'hull') {
+            addStatic(
+              ctx,
+              bodies,
+              colliders,
+              pl.x,
+              pl.y,
+              pl.z,
+              scaledHull(form.geometry, pl.scale),
+              SurfaceType.Rock,
+              eulerRotation(pl.rx, pl.ry, pl.rz),
+            );
+          } else if (form.collider === 'box') {
+            if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
+            // The fallen trunk is three metres of one thing and a quarter-metre of
+            // another, so a cube around its radius would be a stump and a cube around
+            // its length a wall. Yaw it with the visible form.
+            const [hx, hy, hz] = form.colliderHalf;
+            addStatic(
+              ctx,
+              bodies,
+              colliders,
+              pl.x,
+              pl.y + hy * pl.scale,
+              pl.z,
+              RAPIER.ColliderDesc.cuboid(hx * pl.scale, hy * pl.scale, hz * pl.scale),
+              SurfaceType.Rock,
+              yawRotation(pl.ry),
+            );
+          } else {
+            // Upright plant: a capsule sized to the shaft.
+            const halfHeight = form.height * pl.scale * 0.42;
+            const rad = form.baseRadius * pl.scale * 0.8;
+            const collider = addStatic(
+              ctx,
+              bodies,
+              colliders,
+              pl.x,
+              pl.y + halfHeight,
+              pl.z,
+              RAPIER.ColliderDesc.capsule(halfHeight, rad),
+              SurfaceType.Rock,
+            );
 
-          // Only a chunk with physics can be hit, and only a form with pieces can come
-          // apart. Registering needs the collider (to switch off) and the instance (to
-          // blank), which is why it happens here rather than at placement.
-          const pieces = propPieces(form.id);
-          if (pieces && this.breakables && pl.mesh) {
-            registered.push(pl.id);
-            this.breakables.register({
-              id: pl.id,
-              pieces,
-              x: pl.x,
-              y: pl.y,
-              z: pl.z,
-              yaw: pl.ry,
-              scale: pl.scale,
-              radius: rad,
-              height: form.height * pl.scale,
-              mesh: pl.mesh,
-              instance: pl.instance,
-              collider,
-            });
+            // Only a chunk with physics can be hit, and only a form with pieces can come
+            // apart. Registering needs the collider (to switch off) and the instance (to
+            // blank), which is why it happens here rather than at placement.
+            const pieces = propPieces(form.id);
+            if (pieces && this.breakables && pl.mesh) {
+              registered.push(pl.id);
+              this.breakables.register({
+                id: pl.id,
+                pieces,
+                x: pl.x,
+                y: pl.y,
+                z: pl.z,
+                yaw: pl.ry,
+                scale: pl.scale,
+                radius: rad,
+                height: form.height * pl.scale,
+                mesh: pl.mesh,
+                instance: pl.instance,
+                collider,
+              });
+            }
           }
         }
+        yield;
       }
     }
 
+    // Incremental colliders remain out of the simulation until every visual mesh and
+    // breakable registration is ready. Enable them in the same completion call that
+    // hands the content to ChunkStreamer.
+    for (const collider of colliders) collider.setEnabled(true);
+
+    completed = true;
     return {
       group,
       bodies,
@@ -823,7 +865,16 @@ export class ScatterProvider implements ChunkProvider {
         if (registered.length > 0) this.breakables?.forget(registered);
       },
     };
+  } finally {
+    if (!completed) {
+      for (const body of bodies) ctx.physics.removeBody(body);
+      for (const m of meshes) m.dispose();
+      if (registered.length > 0) this.breakables?.forget(registered);
+      group.clear();
+    }
   }
+
+}
 }
 
 // ===========================================================================

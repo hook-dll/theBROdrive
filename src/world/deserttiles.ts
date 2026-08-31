@@ -2,9 +2,8 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 
 import type { PhysicsWorld } from '../core/physics';
-import { SurfaceType } from '../core/surfaces';
 import { hash01 } from '../core/rng';
-import { desertPaletteAt } from './gradient';
+import { SurfaceType } from '../core/surfaces';
 import type { WorldOrigin } from './origin';
 import {
   desertPropForms,
@@ -14,7 +13,21 @@ import {
 } from './props';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
-import { CORRIDOR_OUTER, type Terrain } from './terrain';
+import type { Terrain } from './terrain';
+import {
+  DESERT_TILE_CELLS,
+  DESERT_TILE_SIZE,
+  DESERT_TILE_STEP as TILE_STEP,
+  DESERT_TILE_VERTS as TILE_VERTS,
+  desertTileDataTransfers,
+  generateDesertTileData,
+  type DesertTileData,
+} from './deserttiledata';
+import type {
+  DesertTileWorkerRequest,
+  DesertTileWorkerResponse,
+} from './deserttileworker';
+import type { WorldWorkScheduler } from './workqueue';
 import { TERRAIN_COLLIDER_SURFACE, TERRAIN_MATERIAL } from './terrainmesh';
 
 /**
@@ -36,21 +49,22 @@ import { TERRAIN_COLLIDER_SURFACE, TERRAIN_MATERIAL } from './terrainmesh';
  *    the camera-centred vista owns everything beyond the fine visual square.
  */
 
-export const DESERT_TILE_SIZE = 240;
-export const DESERT_TILE_CELLS = 80;
-const TILE_VERTS = DESERT_TILE_CELLS + 1;
-const TILE_STEP = DESERT_TILE_SIZE / DESERT_TILE_CELLS;
+export { DESERT_TILE_CELLS, DESERT_TILE_SIZE } from './deserttiledata';
+
 const VISUAL_RADIUS = 2;
 const PHYSICS_RADIUS = 1;
-const DIST_LATTICE = 20;
-const EXACT_DISTANCE_GATE = CORRIDOR_OUTER + DIST_LATTICE * 2;
-const FULL_RELIEF_DISTANCE = 200;
 /** Past this player-to-road distance no live tile can intersect the corridor. */
 const ROAD_QUERY_CUTOFF = 900;
 const PROP_TAG = 0x44535254;
 const MAX_TILE_PROPS = 5;
 const TILE_PROP_ID_BASE = 1_000_000;
 const ROCK_COLLIDER_MIN = 0.55;
+/**
+ * Spare tile buffer sets held for reuse. One row of the visual ring plus a little
+ * slack: enough that a boundary crossing never has to allocate, few enough that the
+ * spares cost less than a megabyte.
+ */
+const RECYCLED_TILE_LIMIT = 12;
 const instanceScratch = new THREE.Object3D();
 let hullPoints = new Float32Array(0);
 
@@ -79,8 +93,14 @@ interface DesertTile {
   readonly geometry: THREE.BufferGeometry;
   readonly meshes: readonly THREE.InstancedMesh[];
   readonly heights: Float32Array;
+  /**
+   * The buffer set backing `heights`, `geometry` and the collider, kept so teardown
+   * can hand it back to the worker instead of to the collector.
+   */
+  readonly data: DesertTileData;
   readonly props: readonly DesertPropPlacement[];
   readonly registered: number[];
+  readonly farFromRoad: boolean;
   bodies: RAPIER.RigidBody[];
   hasPhysics: boolean;
 }
@@ -89,10 +109,6 @@ function tileKey(tx: number, tz: number): string {
   return `${tx},${tz}`;
 }
 
-function smoothstep01(value: number): number {
-  const t = value < 0 ? 0 : value > 1 ? 1 : value;
-  return t * t * (3 - 2 * t);
-}
 
 /** Bilinear height on the tile's exact regular lattice. */
 function heightFromTile(heights: Float32Array, localX: number, localZ: number): number {
@@ -120,12 +136,56 @@ function tilePropId(tx: number, tz: number, index: number): number {
 }
 
 
+interface TileWork {
+  readonly tx: number;
+  readonly tz: number;
+  readonly key: string;
+  readonly physics: boolean;
+  readonly visual: boolean;
+  readonly score: number;
+}
+
+interface ReadyTileData {
+  readonly data: DesertTileData;
+  readonly farFromRoad: boolean;
+}
+
+interface ActiveTileRequest {
+  readonly id: number;
+  readonly key: string;
+  readonly farFromRoad: boolean;
+}
+
+export type DesertTileWorkerFactory = () => Worker | null;
+
 export class DesertTileStreamer {
   private readonly tiles = new Map<string, DesertTile>();
+  private readonly wanted = new Map<string, TileWork>();
+  private readonly readyData = new Map<string, ReadyTileData>();
+  private worker: Worker | null = null;
+  private workerReady = false;
+  private activeRequest: ActiveTileRequest | null = null;
+  private nextRequestId = 0;
   private buildFrame = -1;
+  private degradedBuildFrame = -1;
   private lastX = Number.NaN;
   private lastZ = Number.NaN;
   private farFromRoad = false;
+  private disposed = false;
+  /**
+   * Tile buffers reclaimed from torn-down tiles, waiting to be written over.
+   *
+   * Tile geometry is the largest thing this system churns: ~413 KB per tile, five
+   * tiles per row crossing. Left to the collector that is the last remaining source
+   * of streaming hitches — measured as pauses landing on whichever scheduler job
+   * happened to be running, and scaling with GC pressure rather than with work.
+   * A set enters this list only after its tile is out of `tiles`, out of the scene,
+   * and its geometry disposed, so nothing live can observe the overwrite.
+   *
+   * Bounded because the live set is bounded: more than a row of spares is memory
+   * held for no reason.
+   */
+  private readonly recycled: DesertTileData[] = [];
 
   constructor(
     private readonly seed: number,
@@ -135,40 +195,66 @@ export class DesertTileStreamer {
     private readonly physics: PhysicsWorld,
     private readonly scene: THREE.Scene,
     private readonly origin: WorldOrigin,
-    private readonly breakables?: BreakableSink,
-  ) {}
+    private readonly breakables: BreakableSink | undefined,
+    private readonly scheduler: WorldWorkScheduler,
+    private readonly workerFactory?: DesertTileWorkerFactory,
+  ) {
+    this.worker = this.createWorker();
+  }
+
 
   /**
    * Establishes solid ground before the loading cover leaves. Nine tiles are the only
-   * synchronous batch in normal play; later crossings are prefetched one operation per
-   * frame. A save may start anywhere in the desert, so road collision cannot substitute
-   * for this initial patch.
+   * synchronous batch in normal play; every later non-current tile is worker-built.
    */
   prime(x: number, z: number, roadLateral: number): void {
-    this.farFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
+    if (this.disposed) return;
+    const nextFarFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
     const centreTx = Math.floor(x / DESERT_TILE_SIZE);
     const centreTz = Math.floor(z / DESERT_TILE_SIZE);
+    if (nextFarFromRoad !== this.farFromRoad) {
+      this.farFromRoad = nextFarFromRoad;
+      this.invalidateGenerationMode(centreTx, centreTz);
+    }
     for (let dz = -PHYSICS_RADIUS; dz <= PHYSICS_RADIUS; dz++) {
       for (let dx = -PHYSICS_RADIUS; dx <= PHYSICS_RADIUS; dx++) {
-        this.build(centreTx + dx, centreTz + dz, true);
+        this.buildSynchronously(centreTx + dx, centreTz + dz, true);
       }
     }
     this.lastX = x;
     this.lastZ = z;
+    this.syncPendingState();
   }
 
-  /** One bounded streaming operation per rendered frame, except emergency current-tile fill. */
+  /**
+   * Keeps the physical three-by-three square complete immediately, while visual data
+   * and non-current physics are attached only from staged worker results.
+   */
   update(x: number, z: number, roadLateral: number, frameId: number): void {
-    this.farFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
+    if (this.disposed) return;
+    const nextFarFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
+    const modeChanged = nextFarFromRoad !== this.farFromRoad;
+    this.farFromRoad = nextFarFromRoad;
     const centreTx = Math.floor(x / DESERT_TILE_SIZE);
     const centreTz = Math.floor(z / DESERT_TILE_SIZE);
     const currentKey = tileKey(centreTx, centreTz);
+    if (modeChanged) this.invalidateGenerationMode(centreTx, centreTz);
 
-    // Teleports and extreme stalls may outrun prefetch. Ground under the player is an
-    // invariant, so this one operation is allowed to bypass the ordinary frame budget.
+    // A teleport can beat the worker. This is the only post-prime synchronous terrain
+    // generation path, and it exists solely to keep solid ground under the player.
     const current = this.tiles.get(currentKey);
-    if (!current) this.build(centreTx, centreTz, true);
-    else if (!current.hasPhysics) this.promote(current);
+    if (!current) {
+      const staged = this.readyData.get(currentKey);
+      if (staged && staged.farFromRoad === this.desiredModeForTile(centreTx, centreTz)) {
+        this.readyData.delete(currentKey);
+        this.promote(this.attach(centreTx, centreTz, staged.data, staged.farFromRoad));
+      } else {
+        if (staged) this.discardStaged(currentKey, staged);
+        this.buildSynchronously(centreTx, centreTz, true);
+      }
+    } else if (!current.hasPhysics) {
+      this.promote(current);
+    }
 
     for (const [key, tile] of this.tiles) {
       const dx = Math.abs(tile.tx - centreTx);
@@ -181,42 +267,28 @@ export class DesertTileStreamer {
       }
     }
 
-    if (frameId === this.buildFrame) {
+    if (frameId !== this.buildFrame) {
+      const moveX = Number.isFinite(this.lastX) ? x - this.lastX : 0;
+      const moveZ = Number.isFinite(this.lastZ) ? z - this.lastZ : 0;
+      const moveLength = Math.hypot(moveX, moveZ);
+      const dirX = moveLength > 1e-6 ? moveX / moveLength : 0;
+      const dirZ = moveLength > 1e-6 ? moveZ / moveLength : 0;
+      this.buildWantedSet(centreTx, centreTz, dirX, dirZ);
+      this.dropUnwantedData();
+      if (this.worker) this.pumpWorker();
+      else this.pumpDegraded(frameId);
+      this.buildFrame = frameId;
       this.lastX = x;
       this.lastZ = z;
-      return;
+    } else if (modeChanged) {
+      // A mode transition can happen between fixed updates sharing one render frame.
+      // Reuse the existing wanted set, but never leave the invalidated queue idle.
+      if (this.worker) this.pumpWorker();
+      else this.pumpDegraded(frameId);
     }
-    this.buildFrame = frameId;
 
-    const moveX = Number.isFinite(this.lastX) ? x - this.lastX : 0;
-    const moveZ = Number.isFinite(this.lastZ) ? z - this.lastZ : 0;
-    const moveLength = Math.hypot(moveX, moveZ);
-    const dirX = moveLength > 1e-6 ? moveX / moveLength : 0;
-    const dirZ = moveLength > 1e-6 ? moveZ / moveLength : 0;
-
-    const work: { tx: number; tz: number; physics: boolean; score: number; tile?: DesertTile }[] = [];
-    for (let dz = -VISUAL_RADIUS; dz <= VISUAL_RADIUS; dz++) {
-      for (let dx = -VISUAL_RADIUS; dx <= VISUAL_RADIUS; dx++) {
-        const tx = centreTx + dx;
-        const tz = centreTz + dz;
-        const key = tileKey(tx, tz);
-        const tile = this.tiles.get(key);
-        const needsPhysics = Math.abs(dx) <= PHYSICS_RADIUS && Math.abs(dz) <= PHYSICS_RADIUS;
-        if (tile && (!needsPhysics || tile.hasPhysics)) continue;
-        // Physics first, then nearest, with movement direction breaking equal-distance
-        // ties so the row in front of a fast vehicle becomes solid before the rear row.
-        const ahead = dx * dirX + dz * dirZ;
-        const score = (needsPhysics ? -100 : 0) + dx * dx + dz * dz - ahead * 0.1;
-        work.push({ tx, tz, physics: needsPhysics, score, tile });
-      }
-    }
-    work.sort((a, b) => a.score - b.score);
-    const next = work[0];
-    if (next?.tile) this.promote(next.tile);
-    else if (next) this.build(next.tx, next.tz, next.physics);
-
-    this.lastX = x;
-    this.lastZ = z;
+    this.applyOneStagedUnit(frameId);
+    this.syncPendingState();
   }
 
   /** Re-express visual groups after PhysicsWorld has shifted every rigid body. */
@@ -225,6 +297,21 @@ export class DesertTileStreamer {
       tile.group.position.x = tile.centreX - this.origin.x;
       tile.group.position.z = tile.centreZ - this.origin.z;
     }
+  }
+
+  /** Releases the worker and every tile-owned Three/Rapier resource. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.worker?.terminate();
+    this.worker = null;
+    this.workerReady = false;
+    this.activeRequest = null;
+    this.wanted.clear();
+    this.readyData.clear();
+    for (const tile of this.tiles.values()) this.teardown(tile);
+    this.tiles.clear();
+    this.scheduler.setPending('desert', false);
   }
 
   get visualTileCount(): number {
@@ -254,86 +341,49 @@ export class DesertTileStreamer {
     return this.tiles.get(tileKey(Math.floor(x / DESERT_TILE_SIZE), Math.floor(z / DESERT_TILE_SIZE)))?.hasPhysics ?? false;
   }
 
-  private build(tx: number, tz: number, withPhysics: boolean): void {
+  private buildSynchronously(tx: number, tz: number, withPhysics: boolean): void {
     const key = tileKey(tx, tz);
     const existing = this.tiles.get(key);
     if (existing) {
-      if (withPhysics && !existing.hasPhysics) this.promote(existing);
-      return;
+      if (existing.farFromRoad !== this.desiredModeForTile(tx, tz)) {
+        this.teardown(existing);
+        this.tiles.delete(key);
+      } else {
+        if (withPhysics && !existing.hasPhysics) this.promote(existing);
+        return;
+      }
     }
+
+    const farFromRoad = this.desiredModeForTile(tx, tz);
+    const data = generateDesertTileData(
+      {
+        seed: this.seed,
+        road: this.road,
+        terrain: this.terrain,
+        roadDistance: this.roadDistance,
+      },
+      tx,
+      tz,
+      farFromRoad,
+      this.recycled.pop(),
+    );
+    const tile = this.attach(tx, tz, data, farFromRoad);
+    if (withPhysics) this.promote(tile);
+  }
+
+  /** Creates scene/physics-ready objects over worker-owned typed arrays without copying them. */
+  private attach(tx: number, tz: number, data: DesertTileData, farFromRoad: boolean): DesertTile {
+    const key = tileKey(tx, tz);
+    const existing = this.tiles.get(key);
+    if (existing) return existing;
 
     const centreX = (tx + 0.5) * DESERT_TILE_SIZE;
     const centreZ = (tz + 0.5) * DESERT_TILE_SIZE;
-    const startX = tx * DESERT_TILE_SIZE;
-    const startZ = tz * DESERT_TILE_SIZE;
-    const vertexCount = TILE_VERTS * TILE_VERTS;
-    const heights = new Float32Array(vertexCount);
-    const positions = new Float32Array(vertexCount * 3);
-    const normals = new Float32Array(vertexCount * 3);
-    const colors = new Float32Array(vertexCount * 3);
-    const paletteDistance = this.farFromRoad
-      ? Math.abs(centreZ)
-      : this.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
-    const palette = new THREE.Color(desertPaletteAt(paletteDistance).sand);
-
-    for (let ix = 0; ix < TILE_VERTS; ix++) {
-      const worldX = startX + ix * TILE_STEP;
-      for (let iz = 0; iz < TILE_VERTS; iz++) {
-        const worldZ = startZ + iz * TILE_STEP;
-        const vi = ix * TILE_VERTS + iz;
-        const y = this.groundHeight(worldX, worldZ);
-        heights[vi] = y;
-        positions[vi * 3] = worldX - centreX;
-        positions[vi * 3 + 1] = y;
-        positions[vi * 3 + 2] = worldZ - centreZ;
-        colors[vi * 3] = palette.r;
-        colors[vi * 3 + 1] = palette.g;
-        colors[vi * 3 + 2] = palette.b;
-      }
-    }
-
-    for (let ix = 0; ix < TILE_VERTS; ix++) {
-      const x0 = Math.max(0, ix - 1);
-      const x1 = Math.min(DESERT_TILE_CELLS, ix + 1);
-      for (let iz = 0; iz < TILE_VERTS; iz++) {
-        const z0 = Math.max(0, iz - 1);
-        const z1 = Math.min(DESERT_TILE_CELLS, iz + 1);
-        const dhx =
-          (heights[x1 * TILE_VERTS + iz]! - heights[x0 * TILE_VERTS + iz]!) /
-          ((x1 - x0) * TILE_STEP);
-        const dhz =
-          (heights[ix * TILE_VERTS + z1]! - heights[ix * TILE_VERTS + z0]!) /
-          ((z1 - z0) * TILE_STEP);
-        const length = Math.hypot(dhx, 1, dhz);
-        const ni = (ix * TILE_VERTS + iz) * 3;
-        normals[ni] = -dhx / length;
-        normals[ni + 1] = 1 / length;
-        normals[ni + 2] = -dhz / length;
-      }
-    }
-
-    const indices = new Uint32Array(DESERT_TILE_CELLS * DESERT_TILE_CELLS * 6);
-    let io = 0;
-    for (let ix = 0; ix < DESERT_TILE_CELLS; ix++) {
-      for (let iz = 0; iz < DESERT_TILE_CELLS; iz++) {
-        const a = ix * TILE_VERTS + iz;
-        const b = (ix + 1) * TILE_VERTS + iz;
-        const c = a + 1;
-        const d = b + 1;
-        indices[io++] = a;
-        indices[io++] = c;
-        indices[io++] = b;
-        indices[io++] = b;
-        indices[io++] = c;
-        indices[io++] = d;
-      }
-    }
-
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const group = new THREE.Group();
     group.position.set(centreX - this.origin.x, 0, centreZ - this.origin.z);
@@ -342,7 +392,13 @@ export class DesertTileStreamer {
     mesh.castShadow = false;
     group.add(mesh);
 
-    const { props, meshes } = this.buildProps(tx, tz, startX, startZ, heights, group);
+    const { props, meshes } = this.buildProps(
+      tx,
+      tz,
+      data.heights,
+      data.propSurfaces,
+      group,
+    );
     this.scene.add(group);
 
     const tile: DesertTile = {
@@ -354,58 +410,35 @@ export class DesertTileStreamer {
       group,
       geometry,
       meshes,
-      heights,
+      heights: data.heights,
+      data,
       props,
       registered: [],
+      farFromRoad,
       bodies: [],
       hasPhysics: false,
     };
     this.tiles.set(key, tile);
-    if (withPhysics) this.promote(tile);
+    return tile;
   }
 
-  /**
-   * Precise only in the road transition, cheap everywhere else. Once the player is
-   * farther than the complete live square can reach, tiles use the fully developed
-   * open field without touching the whole-road spatial index. Lateral travel therefore
-   * stays constant-time no matter how intentionally lost the player becomes.
-   */
-  private groundHeight(x: number, z: number): number {
-    if (this.farFromRoad) return this.terrain.explorationHeight(x, z, FULL_RELIEF_DISTANCE);
-    const approximate = this.roadDistance.distAt(x, z, DIST_LATTICE);
-    if (approximate >= EXACT_DISTANCE_GATE) return this.terrain.explorationHeight(x, z, approximate);
-
-    const hint = this.roadDistance.ownerAt(x, z, DIST_LATTICE);
-    const projection = this.road.project(x, z, hint);
-    const dist = Math.abs(projection.lateral);
-    const y = this.terrain.explorationHeightFromFrame(x, z, projection.lateral, projection.s);
-    // The road ribbon owns the visible/contact surface in the corridor. Keeping desert
-    // ten centimetres underneath prevents z-fighting and gives Rapier one first hit,
-    // while the smooth fade leaves no ledge at the edge of the graded verge.
-    const underRoad = 0.1 * (1 - smoothstep01(dist / CORRIDOR_OUTER));
-    return y - underRoad;
-  }
 
   private buildProps(
     tx: number,
     tz: number,
-    startX: number,
-    startZ: number,
     heights: Float32Array,
+    propSurfaces: Uint8Array,
     group: THREE.Group,
   ): { props: readonly DesertPropPlacement[]; meshes: readonly THREE.InstancedMesh[] } {
     const requested = 2 + Math.floor(hash01(this.seed, PROP_TAG, tx, tz) * 4);
     const props: DesertPropPlacement[] = [];
     for (let i = 0; i < requested; i++) {
+      const surface = propSurfaces[i]!;
+      if (surface === 0) continue;
+
       const localX = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 1) * 0.84) * DESERT_TILE_SIZE;
       const localZ = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 2) * 0.84) * DESERT_TILE_SIZE;
-      const worldX = startX + localX;
-      const worldZ = startZ + localZ;
-      // Roadside scatter already owns the corridor. Once the complete live square is
-      // known to be far away, skip the global distance query entirely.
-      if (!this.farFromRoad && this.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;
-
-      const forms = desertPropForms(this.terrain.openSurfaceAt(worldX, worldZ));
+      const forms = desertPropForms(surface as SurfaceType);
       const form = forms[Math.floor(hash01(this.seed, PROP_TAG, tx, tz, i, 3) * forms.length)]!;
       const id = tilePropId(tx, tz, i);
       if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
@@ -457,6 +490,336 @@ export class DesertTileStreamer {
       meshes.push(instances);
     }
     return { props, meshes };
+  }
+
+  private desiredModeForTile(_tx: number, _tz: number): boolean {
+    return this.farFromRoad;
+  }
+
+  private invalidateGenerationMode(centreTx: number, centreTz: number): void {
+    const desired = this.desiredModeForTile(centreTx, centreTz);
+    if (this.activeRequest && this.activeRequest.farFromRoad !== desired) {
+      // The worker cannot cancel a transferred request. Dropping its identity makes
+      // the eventual response harmless; the replacement receives a new request id.
+      this.activeRequest = null;
+    }
+    for (const [key, staged] of this.readyData) {
+      if (staged.farFromRoad !== desired) this.discardStaged(key, staged);
+    }
+    for (const [key, tile] of this.tiles) {
+      if (tile.farFromRoad === desired) continue;
+      const dx = Math.abs(tile.tx - centreTx);
+      const dz = Math.abs(tile.tz - centreTz);
+      if (dx > VISUAL_RADIUS || dz > VISUAL_RADIUS) continue;
+      this.teardown(tile);
+      this.tiles.delete(key);
+    }
+  }
+
+  private createWorker(): Worker | null {
+    if (!this.workerFactory && typeof Worker === 'undefined') return null;
+    let worker: Worker | null = null;
+    try {
+      const candidate = this.workerFactory
+        ? this.workerFactory()
+        : new Worker(new URL('./deserttileworker.ts', import.meta.url), { type: 'module' });
+      if (!candidate) return null;
+      worker = candidate;
+      candidate.onmessage = (event: MessageEvent<DesertTileWorkerResponse>) => {
+        this.handleWorkerMessage(candidate, event);
+      };
+      candidate.onerror = () => this.failWorker(candidate);
+      candidate.onmessageerror = () => this.failWorker(candidate);
+      const request: DesertTileWorkerRequest = {
+        type: 'init',
+        seed: this.seed,
+        spine: this.road.spine,
+      };
+      candidate.postMessage(request);
+      return candidate;
+    } catch {
+      worker?.terminate();
+      return null;
+    }
+  }
+
+  private handleWorkerMessage(
+    worker: Worker,
+    event: MessageEvent<DesertTileWorkerResponse>,
+  ): void {
+    if (this.disposed || worker !== this.worker) return;
+    const response = event.data;
+    if (response.type === 'ready') {
+      this.workerReady = true;
+      this.pumpWorker();
+      this.syncPendingState();
+      return;
+    }
+
+    const active = this.activeRequest;
+    const key = tileKey(response.tx, response.tz);
+    if (!active || active.id !== response.requestId || active.key !== key) return;
+    this.activeRequest = null;
+    const desired = this.desiredModeForTile(response.tx, response.tz);
+    if (
+      active.farFromRoad === desired &&
+      this.wanted.has(key) &&
+      !this.tiles.has(key)
+    ) {
+      this.readyData.set(key, { data: response.data, farFromRoad: active.farFromRoad });
+    }
+    this.pumpWorker();
+    this.syncPendingState();
+  }
+
+  private failWorker(worker: Worker): void {
+    if (worker !== this.worker) return;
+    worker.terminate();
+    this.worker = null;
+    this.workerReady = false;
+    this.activeRequest = null;
+    this.syncPendingState();
+  }
+
+  private buildWantedSet(centreTx: number, centreTz: number, dirX: number, dirZ: number): void {
+    this.wanted.clear();
+    for (let dz = -VISUAL_RADIUS; dz <= VISUAL_RADIUS; dz++) {
+      for (let dx = -VISUAL_RADIUS; dx <= VISUAL_RADIUS; dx++) {
+        const physics = Math.abs(dx) <= PHYSICS_RADIUS && Math.abs(dz) <= PHYSICS_RADIUS;
+        const ahead = dx * dirX + dz * dirZ;
+        this.addWanted(
+          centreTx + dx,
+          centreTz + dz,
+          physics,
+          true,
+          (physics ? -100 : 0) + dx * dx + dz * dz - ahead * 0.1,
+        );
+      }
+    }
+
+    // Keep one whole row of tile *data* beyond the visual square. A diagonal drive
+    // still selects only its dominant cardinal component, so prefetch remains bounded.
+    if (Math.abs(dirX) >= Math.abs(dirZ) && Math.abs(dirX) > 1e-6) {
+      const step = dirX < 0 ? -1 : 1;
+      for (let dz = -VISUAL_RADIUS; dz <= VISUAL_RADIUS; dz++) {
+        this.addWanted(
+          centreTx + step * (VISUAL_RADIUS + 1),
+          centreTz + dz,
+          false,
+          false,
+          -50 + dz * dz,
+        );
+      }
+    } else if (Math.abs(dirZ) > 1e-6) {
+      const step = dirZ < 0 ? -1 : 1;
+      for (let dx = -VISUAL_RADIUS; dx <= VISUAL_RADIUS; dx++) {
+        this.addWanted(
+          centreTx + dx,
+          centreTz + step * (VISUAL_RADIUS + 1),
+          false,
+          false,
+          -50 + dx * dx,
+        );
+      }
+    }
+  }
+
+  private addWanted(
+    tx: number,
+    tz: number,
+    physics: boolean,
+    visual: boolean,
+    score: number,
+  ): void {
+    const key = tileKey(tx, tz);
+    const existing = this.wanted.get(key);
+    if (!existing) {
+      this.wanted.set(key, { tx, tz, key, physics, visual, score });
+      return;
+    }
+
+    const upgradedPhysics = physics && !existing.physics;
+    const upgradedVisual = visual && !existing.visual;
+    if (!upgradedPhysics && !upgradedVisual && score >= existing.score) return;
+    this.wanted.set(key, {
+      tx,
+      tz,
+      key,
+      physics: existing.physics || physics,
+      visual: existing.visual || visual,
+      score: Math.min(existing.score, score),
+    });
+  }
+
+  private dropUnwantedData(): void {
+    for (const [key, staged] of this.readyData) {
+      const work = this.wanted.get(key);
+      if (
+        !work ||
+        this.tiles.has(key) ||
+        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
+      ) {
+        this.discardStaged(key, staged);
+      }
+    }
+  }
+
+  private nextUnpreparedWork(): TileWork | null {
+    let next: TileWork | null = null;
+    for (const work of this.wanted.values()) {
+      if (this.tiles.has(work.key) || this.readyData.has(work.key)) continue;
+      if (!next || work.score < next.score) next = work;
+    }
+    return next;
+  }
+
+  /** Sends only one job at a time so an old visual fill cannot block a new forward row. */
+  private pumpWorker(): void {
+    if (!this.worker || !this.workerReady || this.activeRequest) return;
+    const next = this.nextUnpreparedWork();
+    if (!next) return;
+
+    const requestId = ++this.nextRequestId;
+    const farFromRoad = this.desiredModeForTile(next.tx, next.tz);
+    this.activeRequest = { id: requestId, key: next.key, farFromRoad };
+    const request: DesertTileWorkerRequest = {
+      type: 'tile',
+      requestId,
+      tx: next.tx,
+      tz: next.tz,
+      farFromRoad,
+      recycle: this.recycled.pop(),
+    };
+    // The buffers are MOVED, not shared: after this call the main thread holds
+    // detached views and the worker owns the memory until it posts the tile back.
+    this.worker.postMessage(
+      request,
+      request.recycle ? desertTileDataTransfers(request.recycle) : [],
+    );
+  }
+
+  /**
+   * Worker failure leaves generation available rather than stranding the wanted ring.
+   * The data build remains frame-budgeted; attachment and promotion take their usual
+   * separate scheduler-gated path below.
+   */
+  private pumpDegraded(frameId: number): void {
+    if (this.worker || this.degradedBuildFrame === frameId) return;
+    const work = this.nextUnpreparedWork();
+    if (!work) return;
+    if (
+      this.scheduler.tryRun(frameId, 'desert-generate-degraded', () => {
+        const farFromRoad = this.desiredModeForTile(work.tx, work.tz);
+        const data = generateDesertTileData(
+          {
+            seed: this.seed,
+            road: this.road,
+            terrain: this.terrain,
+            roadDistance: this.roadDistance,
+          },
+          work.tx,
+          work.tz,
+          farFromRoad,
+          this.recycled.pop(),
+        );
+        if (
+          this.wanted.has(work.key) &&
+          !this.tiles.has(work.key) &&
+          farFromRoad === this.desiredModeForTile(work.tx, work.tz)
+        ) {
+          this.readyData.set(work.key, { data, farFromRoad });
+        }
+      })
+    ) {
+      this.degradedBuildFrame = frameId;
+    }
+  }
+
+  private applyOneStagedUnit(frameId: number): void {
+    let promote: DesertTile | null = null;
+    for (const work of this.wanted.values()) {
+      if (!work.physics) continue;
+      const tile = this.tiles.get(work.key);
+      if (!tile || tile.hasPhysics) continue;
+      if (tile.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
+        this.teardown(tile);
+        this.tiles.delete(work.key);
+        continue;
+      }
+      if (!promote || work.score < this.wanted.get(promote.key)!.score) promote = tile;
+    }
+    if (promote) {
+      const tile = promote;
+      this.scheduler.tryRun(frameId, 'desert-promote', () => {
+        this.promote(tile);
+      });
+      return;
+    }
+
+    let attach: TileWork | null = null;
+    for (const work of this.wanted.values()) {
+      const staged = this.readyData.get(work.key);
+      if (!work.visual || this.tiles.has(work.key) || !staged) continue;
+      if (staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
+        this.discardStaged(work.key, staged);
+        continue;
+      }
+      if (!attach || work.score < attach.score) attach = work;
+    }
+    if (!attach) return;
+    const work = attach;
+    this.scheduler.tryRun(frameId, 'desert-attach', () => {
+      const staged = this.readyData.get(work.key);
+      if (
+        !staged ||
+        !work.visual ||
+        this.tiles.has(work.key) ||
+        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
+      ) {
+        if (staged && staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
+          this.discardStaged(work.key, staged);
+          if (this.worker) this.pumpWorker();
+        }
+        return;
+      }
+      this.readyData.delete(work.key);
+      this.attach(work.tx, work.tz, staged.data, staged.farFromRoad);
+    });
+  }
+
+  private syncPendingState(): void {
+    let pending = this.activeRequest !== null;
+    for (const work of this.wanted.values()) {
+      const tile = this.tiles.get(work.key);
+      if (
+        tile &&
+        tile.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
+      ) {
+        pending = true;
+        break;
+      }
+      if (work.physics && tile && !tile.hasPhysics) {
+        pending = true;
+        break;
+      }
+      const staged = this.readyData.get(work.key);
+      if (
+        staged &&
+        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
+      ) {
+        pending = true;
+        break;
+      }
+      if (work.visual && !tile && staged) {
+        pending = true;
+        break;
+      }
+      if (!tile && !staged) {
+        pending = true;
+        break;
+      }
+    }
+    this.scheduler.setPending('desert', pending);
   }
 
   private promote(tile: DesertTile): void {
@@ -568,6 +931,26 @@ export class DesertTileStreamer {
     this.scene.remove(tile.group);
     tile.geometry.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
+    // Every caller drops the tile from `tiles` around this call, and the geometry
+    // above is gone, so nothing can read these buffers again: they are free to be
+    // written over by the next tile the worker builds.
+    this.reclaim(tile.data);
+  }
 
+  /**
+   * Drops staged data nobody wants any more and keeps its buffers.
+   *
+   * Staged data is owned by nothing else — it has not been attached to a geometry
+   * yet — so a discard is exactly the case where recycling is free.
+   */
+  private discardStaged(key: string, staged: ReadyTileData): void {
+    this.readyData.delete(key);
+    this.reclaim(staged.data);
+  }
+
+  /** Returns a buffer set to the free list, or lets it go when the list is full. */
+  private reclaim(data: DesertTileData): void {
+    if (this.disposed || this.recycled.length >= RECYCLED_TILE_LIMIT) return;
+    this.recycled.push(data);
   }
 }

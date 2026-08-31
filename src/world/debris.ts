@@ -23,14 +23,18 @@ import type { BreakableProp, PropPiece } from './props';
  */
 
 /**
- * Live pieces allowed at once.
- *
  * A saguaro is five, so this is nine cacti of wreckage lying about before the oldest
- * goes. There is no timer: a piece that has come to rest is scenery, and scenery that
- * evaporates while you look at it is worse than scenery that eventually gets recycled.
- * Settled bodies sleep, so the standing cost is a body in the broad phase.
+ * goes. Settled pieces retire once they are both old enough and well outside the
+ * observer's view, keeping nearby wreckage intact without permanently growing the
+ * broad phase.
  */
 const MAX_PIECES = 48;
+/** A piece must have survived this long before distance-based retirement. */
+const RETIRE_MIN_AGE_SECONDS = 4;
+/** A piece must be continuously asleep this long before distance-based retirement. */
+const RETIRE_MIN_SLEEP_SECONDS = 2;
+/** Keep settled debris around the observer; pieces use absolute world coordinates. */
+const RETIRE_DISTANCE_METRES = 120;
 /**
  * Contact geometry decides whether a prop breaks. This runs after Rapier's step,
  * where a solid obstacle may already have reduced chassis velocity to zero; gating on
@@ -79,6 +83,8 @@ export interface Impactor {
 interface Piece {
   readonly body: RAPIER.RigidBody;
   readonly mesh: THREE.Mesh;
+  age: number;
+  sleepingSeconds: number;
 }
 
 /** Zero-scale matrix: what a blanked instance gets. Written once, reused forever. */
@@ -148,6 +154,10 @@ export class DebrisField {
     return this.broken.has(id);
   }
 
+  get liveCount(): number {
+    return this.pieces.length;
+  }
+
   register(prop: BreakableProp): void {
     this.standing.set(prop.id, prop);
   }
@@ -167,7 +177,32 @@ export class DebrisField {
    * just BEFORE the car reaches it, so the car walks through a breakable prop rather
    * than bouncing off a collider that then vanishes.
    */
-  update(impactor: Impactor | null): void {
+  update(
+    impactor: Impactor | null,
+    dt: number,
+    observerAbsoluteX: number,
+    observerAbsoluteZ: number,
+  ): void {
+    for (let index = this.pieces.length - 1; index >= 0; index--) {
+      const piece = this.pieces[index];
+      piece.age += dt;
+      piece.sleepingSeconds = piece.body.isSleeping()
+        ? piece.sleepingSeconds + dt
+        : 0;
+      if (
+        piece.age < RETIRE_MIN_AGE_SECONDS ||
+        piece.sleepingSeconds < RETIRE_MIN_SLEEP_SECONDS
+      ) continue;
+
+      const translation = piece.body.translation(_t);
+      const dx = translation.x + this.origin.x - observerAbsoluteX;
+      const dz = translation.z + this.origin.z - observerAbsoluteZ;
+      if (dx * dx + dz * dz <= RETIRE_DISTANCE_METRES * RETIRE_DISTANCE_METRES) continue;
+
+      this.removePiece(piece);
+      this.pieces.splice(index, 1);
+    }
+
     if (!impactor) {
       this.previousValid = false;
       return;
@@ -315,6 +350,6 @@ export class DebrisField {
     mesh.receiveShadow = true;
     this.scene.add(mesh);
 
-    this.pieces.push({ body, mesh });
+    this.pieces.push({ body, mesh, age: 0, sleepingSeconds: 0 });
   }
 }

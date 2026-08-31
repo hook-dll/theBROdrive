@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GraphicsQuality } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
 import { skyGradientAt } from '../world/gradient';
 import { hash01 } from '../core/rng';
@@ -31,6 +32,12 @@ const SUN_DISTANCE = 240;
 
 /** Sun elevation (radians) below this counts as night for headlight/lamp logic. */
 const NIGHT_ELEVATION = -0.08;
+/**
+ * Sun elevation (radians) at which roadside lamps reach full output. Eight degrees
+ * below the horizon: the end of civil twilight, where a lamp finally out-lights
+ * the sky. Above the horizon they are off; between the two they ramp.
+ */
+const LAMP_FULL_ELEVATION = -0.14;
 
 /**
  * Shadow length control, because a physically correct low sun draws nonsense.
@@ -449,13 +456,22 @@ const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
   .replace('#include <colorspace_fragment>', '');
 
 /**
- * Sun-elevation change, radians, that forces an environment rebake. A bake is a
- * cubemap render plus the roughness convolution — far too costly per frame — and
- * the dome's appearance is a function of sun elevation alone, so stepping the
- * probe gives ~70 bakes across a full day/night cycle with no visible stepping
- * in the reflections.
+ * Sun-elevation change, radians, that makes an environment refresh due.
+ *
+ * The trigger is the sun's ANGLE, not the clock, which is what makes the cadence
+ * follow the sky rather than the frame rate: it fires often through a dawn, where
+ * elevation sweeps quickly and the reflections change most, and rarely at midday.
+ * It also tracks the day-length setting for free, since a faster clock simply
+ * crosses the step sooner.
  */
 const ENV_BAKE_STEP = 0.03;
+/**
+ * Floor between completed noninitial bakes. Only a guard against pathological
+ * cadence — the elevation step above is the real governor. A flat twenty-second
+ * interval sat here once and starved exactly the case that needed bakes most: a
+ * compressed twilight got one or two, so paint and chrome stepped through sunrise.
+ */
+const ENV_BAKE_INTERVAL_MS = 2_000;
 
 
 // ---------------------------------------------------------------------------
@@ -494,8 +510,16 @@ export class Sky {
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
   private readonly envMaterial: THREE.ShaderMaterial;
   private envTarget: THREE.WebGLRenderTarget | null = null;
-  /** Sun elevation the live probe was baked at. NaN forces a bake on frame one. */
+  /** Sun elevation the live probe was baked at. NaN marks the initial bake. */
   private envBakedElevation = Number.NaN;
+  /** A crossed elevation threshold waits here until an idle frame can bake it. */
+  private envBakePending = true;
+  /** Time of the last completed bake, used only after the initial bake. */
+  private envLastBakeMs = Number.NEGATIVE_INFINITY;
+  private environmentSize = 128;
+
+  /** True only for the update that successfully replaced the environment target. */
+  private didBakeEnvironment = false;
 
   // --- Dome shader uniforms (typed references; mutated in place each frame) ---
   private readonly uSunDir = new THREE.Vector3(0, 1, 0);
@@ -648,9 +672,9 @@ export class Sky {
     cameraX: number,
     cameraY: number,
     cameraZ: number,
-    frameDt: number,
-    eyeAdaptation: boolean,
+    allowEnvironmentRefresh = true,
   ): void {
+    this.didBakeEnvironment = false;
     const g = skyGradientAt(s);
     const celestial = this.astronomy.update(calendarEpoch, dayIndex, timeOfDay);
     this._sunDir.copy(celestial.sun.direction);
@@ -751,18 +775,22 @@ export class Sky {
     this.uCloudTime.value = (performance.now() * 0.001) % 3600;
 
     // --- Photometric exposure and real catalogue stars ---
+    //
+    // No temporal adaptation. The exposure IS the analytic answer for the current
+    // illuminance, applied the moment the illuminance changes.
+    //
+    // Easing it used to be the "eye adaptation" setting, and over an uninterrupted
+    // cycle it bought nothing: illuminance is already a smooth function of sun
+    // elevation, so the eased value only ever lagged the correct one — by up to
+    // twelve seconds of a twilight that lasts about thirty at the default clock.
+    // Worse, a jump to another time of day teleports the illuminance but not the
+    // eased exposure, so a night exposure briefly met full daylight and whited the
+    // screen out. There is no interior, tunnel or muzzle flash here for adaptation
+    // to earn its keep on, so the lag was the only thing it reliably delivered.
     const sceneIlluminance =
       celestial.keyIlluminanceLux / 40_000 +
       celestial.diffuseIlluminanceLux / 10_000;
-    const targetExposure = THREE.MathUtils.clamp(5 / Math.max(sceneIlluminance, 0.000001), 0.8, 25_000);
-    // Temporal adaptation changes only celestial exposure; legacy lamps keep their calibration.
-    if (eyeAdaptation) {
-      const adaptationSeconds = targetExposure > this.exposure ? 12 : 1.5;
-      const adaptation = 1 - Math.exp(-Math.max(0, frameDt) / adaptationSeconds);
-      this.exposure += (targetExposure - this.exposure) * adaptation;
-    } else {
-      this.exposure = targetExposure;
-    }
+    this.exposure = THREE.MathUtils.clamp(5 / Math.max(sceneIlluminance, 0.000001), 0.8, 25_000);
     const starVisibility = smoothstep(0.12, -0.12, this.sunElevation);
     this.starField.update(
       celestial.equatorialToWorld,
@@ -795,7 +823,7 @@ export class Sky {
     this.hemiLight.groundColor.copy(this._hemiGround);
     this.hemiLight.intensity = (celestial.diffuseIlluminanceLux / 10_000) * this.exposure;
 
-    this.refreshEnvironment();
+    this.refreshEnvironment(allowEnvironmentRefresh, performance.now());
 
     // --- Reposition the sky with the camera ---
     //
@@ -840,32 +868,52 @@ export class Sky {
   }
 
   /**
-   * Rebake the environment probe when the sun has moved enough to matter.
-   *
-   * This is the single reason painted metal reads as metal. A
-   * MeshStandardMaterial takes almost all of a metal's response from *indirect
-   * specular*, which is sampled from `scene.environment`; with no probe, a
-   * metalness-0.55 body panel loses ~45% of its diffuse to the metal term and
-   * gets nothing back, leaving only the sun's narrow specular lobe. That is the
-   * flat, dead look — and it means raising `metalness` without a probe makes
-   * panels worse, not shinier.
-   *
-   * Baking the game's own dome rather than importing an HDRI keeps the
-   * reflection locked to the current sky (sunset paint goes orange for free) and
-   * keeps the project asset-free, which is the same constraint the procedural
-   * meshes are built under.
+   * Marks significant solar changes as due, then replaces the live probe only
+   * when the caller has left the frame idle enough for a PMREM render.
    */
-  private refreshEnvironment(): void {
-    if (Math.abs(this.sunElevation - this.envBakedElevation) < ENV_BAKE_STEP) return;
-    this.envBakedElevation = this.sunElevation;
+  private refreshEnvironment(allowEnvironmentRefresh: boolean, nowMs: number): void {
+    const isInitialBake = Number.isNaN(this.envBakedElevation);
+    if (
+      !isInitialBake &&
+      Math.abs(this.sunElevation - this.envBakedElevation) >= ENV_BAKE_STEP
+    ) {
+      this.envBakePending = true;
+    }
+    if (
+      !allowEnvironmentRefresh ||
+      !this.envBakePending ||
+      (!isInitialBake && nowMs - this.envLastBakeMs < ENV_BAKE_INTERVAL_MS)
+    ) {
+      return;
+    }
 
+    // Keep the old target live until PMREM has fully produced a replacement.
+    const nextTarget = this.pmrem.fromScene(
+      this.envScene,
+      0,
+      1,
+      DOME_RADIUS * 2,
+      { size: this.environmentSize },
+    );
     const previous = this.envTarget;
-    // near/far must bracket the dome; it is the only thing in the probe scene.
-    this.envTarget = this.pmrem.fromScene(this.envScene, 0, 1, DOME_RADIUS * 2);
-    this.scene.environment = this.envTarget.texture;
-    // fromScene allocates a fresh target per call, so the day cycle leaks a
-    // cubemap per bake unless the previous one is released here.
+    this.envTarget = nextTarget;
+    this.scene.environment = nextTarget.texture;
+    this.envBakedElevation = this.sunElevation;
+    this.envLastBakeMs = nowMs;
+    this.envBakePending = false;
+    this.didBakeEnvironment = true;
     if (previous !== null) previous.dispose();
+  }
+
+  /**
+   * Chooses the PMREM resolution for the next due bake without making one due.
+   */
+  setEnvironmentQuality(quality: GraphicsQuality): void {
+    this.environmentSize = quality === 'acceptable' ? 64 : 128;
+  }
+
+  get didBakeEnvironmentThisFrame(): boolean {
+    return this.didBakeEnvironment;
   }
 
   /** Unit vector pointing toward the sun. Live internal vector — do not retain across frames. */
@@ -875,6 +923,23 @@ export class Sky {
 
   get isNight(): boolean {
     return this.sunElevation < NIGHT_ELEVATION;
+  }
+
+  /**
+   * How lit the roadside lamps should be, 0..1.
+   *
+   * `isNight` is a threshold and has to stay one — a lamp either counts as on for
+   * gameplay or it does not. What it cannot do is drive the LOOK: switching every
+   * lamp in view within one frame is the most conspicuous step in the whole dusk,
+   * and `setLamps` already takes a continuous factor for emissive and point
+   * intensity, so the binary was thrown away for nothing.
+   *
+   * The band runs from the geometric horizon to roughly eight degrees below it,
+   * which is about where civil twilight gives out and a lamp starts contributing
+   * more than the sky does.
+   */
+  get lampFactor(): number {
+    return smoothstep(0, LAMP_FULL_ELEVATION, this.sunElevation);
   }
 
   /**

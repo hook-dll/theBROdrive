@@ -81,7 +81,7 @@ export interface Rebasable {
 export class WorldOrigin {
   private ox = 0;
   private oz = 0;
-  private readonly listeners: Rebasable[] = [];
+  private readonly listeners = new Set<{ listener: Rebasable; active: boolean }>();
 
   /** Absolute X of the current origin. Relative = absolute - this. */
   get x(): number {
@@ -94,12 +94,18 @@ export class WorldOrigin {
   }
 
   /**
-   * Registers something that must be shifted on every rebase. There is no removal:
-   * the things that hold relative state across a rebase — the car, the trailer, the
-   * player, the spray field — live for the whole session.
+   * Registers something that must be shifted on every rebase. The returned disposer
+   * is safe to call repeatedly, so transient streamed runtimes can release their
+   * listener with their bodies and meshes.
    */
-  register(listener: Rebasable): void {
-    this.listeners.push(listener);
+  register(listener: Rebasable): () => void {
+    const registration = { listener, active: true };
+    this.listeners.add(registration);
+    return () => {
+      if (!registration.active) return;
+      registration.active = false;
+      this.listeners.delete(registration);
+    };
   }
 
   /**
@@ -134,7 +140,11 @@ export class WorldOrigin {
 
     this.ox = nextX;
     this.oz = nextZ;
-    for (const listener of this.listeners) listener.rebase(shift);
+    // Snapshot registrations: a callback may dispose itself or another listener
+    // without skipping an unrelated callback or receiving a second notification.
+    for (const registration of [...this.listeners]) {
+      if (registration.active) registration.listener.rebase(shift);
+    }
     return shift;
   }
 }
