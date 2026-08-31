@@ -43,8 +43,8 @@ const SPRING_OMEGA = 12;
 const RECENTER_OMEGA = 8;
 /** Yaw/pitch error (rad) below which a re-centre counts as done (~0.06 deg). */
 const RECENTER_EPSILON = 1e-3;
-/** Chase view waits this long after the last look input before steering behind the car. */
-const CHASE_RECENTER_IDLE_SECONDS = 10;
+/** Chase view waits this long after the last horizontal look input before following the car. */
+const CHASE_RECENTER_IDLE_SECONDS = 6;
 /** Automatic horizontal return is gentler than the explicit V-key snap. */
 const CHASE_RECENTER_OMEGA = 2;
 /**
@@ -193,7 +193,7 @@ export class CameraRig {
   private recentering = false;
   /** World-space heading captured when an external-camera re-centre begins. */
   private recenterYaw = 0;
-  /** Seconds since the last chase-camera yaw or pitch input. */
+  /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
 
   /**
@@ -323,12 +323,12 @@ export class CameraRig {
     this.yawValue -= input.lookYaw;
     this.pitch = clamp(this.pitch + input.lookPitch, -PITCH_LIMIT, PITCH_LIMIT);
 
-    // Chase free-look stays exactly where the player left it for ten seconds. After
-    // that, only world-space yaw eases toward the live vehicle heading; pitch is not
-    // touched, so a deliberately high or low chase angle remains selected.
-    const lookActive = input.lookYaw !== 0 || input.lookPitch !== 0;
+    // Chase yaw stays where the player left it for six seconds after horizontal
+    // mouse input, then eases toward the live vehicle heading. Vertical look is
+    // independent: it neither recentres pitch nor postpones the horizontal return.
+    const horizontalLookActive = input.lookYaw !== 0;
     if (inputMode === 'chase') {
-      this.chaseLookIdle = lookActive ? 0 : this.chaseLookIdle + d;
+      this.chaseLookIdle = horizontalLookActive ? 0 : this.chaseLookIdle + d;
     } else {
       this.chaseLookIdle = 0;
     }
