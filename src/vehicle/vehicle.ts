@@ -31,6 +31,7 @@ import { Drivetrain, wheelTorqueToForce } from './drivetrain';
 import { carModelMeasure, createCarModel, type CarModelMeasure } from '../render/carmodel';
 import { createPartMesh } from '../render/partmesh';
 import { setCondition } from '../render/materials';
+import type { VehicleLightRig } from '../render/vehiclelights';
 
 const GRAVITY = 9.81;
 
@@ -961,10 +962,17 @@ interface HeadlightBeam {
   readonly decay: number;
 }
 
-interface VehicleBeamVisual {
-  readonly light: THREE.SpotLight;
-  /** Beam target in chassis-local coordinates, transformed explicitly every frame. */
+interface VehicleBeamMount {
+  /** Source and aim in chassis-local coordinates. */
+  readonly sourceLocal: THREE.Vector3;
   readonly aimLocal: THREE.Vector3;
+}
+
+interface ProjectedBeamShape {
+  readonly distance: number;
+  readonly angle: number;
+  readonly penumbra: number;
+  readonly decay: number;
 }
 
 /**
@@ -1068,6 +1076,10 @@ export class Vehicle implements Rebasable {
   private readonly measure: CarModelMeasure;
   private readonly scene: THREE.Scene;
   private readonly origin: WorldOrigin;
+  /** Removes this runtime from floating-origin notifications when it despawns. */
+  private originDisposer: (() => void) | null = null;
+  private disposed = false;
+
 
   private readonly chassisBody: RAPIER.RigidBody;
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
@@ -1083,12 +1095,11 @@ export class Vehicle implements Rebasable {
   private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
-  private headlights: VehicleBeamVisual[] = [];
-  private taillightBeams: VehicleBeamVisual[] = [];
-  private reverseLightBeams: VehicleBeamVisual[] = [];
-  private headlightMode: HeadlightMode = 'off';
-  /** Perceptual suppression under daylight; one at night, near zero at full day. */
+  private headlightMounts: VehicleBeamMount[] = [];
+  private taillightMounts: VehicleBeamMount[] = [];
+  private reverseLightMounts: VehicleBeamMount[] = [];
   private headlightEnvironmentFactor = 1;
+  private headlightMode: HeadlightMode = 'off';
   private headlightLensMeshes: THREE.Mesh[] = [];
   private taillightLensMeshes: THREE.Mesh[] = [];
   private reverseLightLensMeshes: THREE.Mesh[] = [];
@@ -1101,6 +1112,10 @@ export class Vehicle implements Rebasable {
   private reverseLightState = false;
   private indicatorSide: IndicatorSide = 'off';
   private indicatorElapsed = 0;
+  private taillightBeamIntensity = 0;
+  private reverseLightBeamIntensity = 0;
+  private readonly projectedLightSource = new THREE.Vector3();
+  private readonly projectedLightTarget = new THREE.Vector3();
   private indicatorLit = false;
   /** One selected compound for every wheel; standard preserves existing handling. */
   private tyreCompoundIndex = 1;
@@ -1338,7 +1353,7 @@ export class Vehicle implements Rebasable {
     this.localOil = carState.oilLitres;
     this.lastAuthOil = carState.oilLitres;
     this.rebuild();
-    this.origin.register(this);
+    this.originDisposer = this.origin.register(this);
   }
 
   get stats(): CarStats {
@@ -1475,7 +1490,9 @@ export class Vehicle implements Rebasable {
     this.clearVisuals();
     this.wheels = [];
     this.gizmos = [];
-    this.headlights = [];
+    this.headlightMounts = [];
+    this.taillightMounts = [];
+    this.reverseLightMounts = [];
     this.steerCommand = 0;
     this.steerAngle = 0;
     this.appliedDriveTorqueNm = 0;
@@ -2529,12 +2546,6 @@ export class Vehicle implements Rebasable {
     this.rootGroup.position.copy(this.pos);
     this.rootGroup.quaternion.copy(this.quat);
 
-    // SpotLight targets are scene-level objects. Transform their authored local aim
-    // through the same interpolated chassis quaternion as the shell so pitch and roll
-    // follow an uphill, downhill or cross-slope pose exactly.
-    this.syncBeamTargets(this.headlights);
-    this.syncBeamTargets(this.taillightBeams);
-    this.syncBeamTargets(this.reverseLightBeams);
     this.applyRearLightState();
 
     // Wheels are chassis-local: suspension travel and spin are small, smooth and
@@ -2552,13 +2563,82 @@ export class Vehicle implements Rebasable {
     for (const g of this.gizmos) setCondition(g.mesh, g.part.dirt, g.part.rust);
   }
 
-  private syncBeamTargets(beams: readonly VehicleBeamVisual[]): void {
-    for (const beam of beams) {
-      beam.light.target.position
-        .copy(beam.aimLocal)
-        .applyQuaternion(this.quat)
-        .add(this.pos);
+  /**
+   * Projects this vehicle's local lamp mounts through its interpolated render pose
+   * into the shared renderer rig. Only the driven vehicle calls this.
+   */
+  syncProjectedLights(rig: VehicleLightRig): void {
+    const headlightBeam =
+      this.headlightMode === 'high'
+        ? HEADLIGHT_HIGH
+        : this.headlightMode === 'low'
+          ? HEADLIGHT_LOW
+          : HEADLIGHT_LOW;
+    const headlightIntensity =
+      this.headlightMode === 'off' ? 0 : headlightBeam.intensity * this.headlightEnvironmentFactor;
+    for (let i = 0; i < 2; i++) {
+      this.syncProjectedBeam(
+        rig,
+        i,
+        this.headlightMounts[i],
+        HEADLIGHT_EMISSIVE,
+        headlightIntensity,
+        headlightBeam,
+      );
+      this.syncProjectedBeam(
+        rig,
+        i + 2,
+        this.taillightMounts[i],
+        TAILLIGHT_EMISSIVE,
+        this.taillightBeamIntensity,
+        TAILLIGHT_BEAM,
+      );
+      this.syncProjectedBeam(
+        rig,
+        i + 4,
+        this.reverseLightMounts[i],
+        REVERSE_LIGHT_EMISSIVE,
+        this.reverseLightBeamIntensity,
+        REVERSE_LIGHT_BEAM,
+      );
     }
+  }
+
+  private syncProjectedBeam(
+    rig: VehicleLightRig,
+    slot: number,
+    mount: VehicleBeamMount | undefined,
+    color: THREE.ColorRepresentation,
+    intensity: number,
+    shape: ProjectedBeamShape,
+  ): void {
+    const sourceWorld = this.projectedLightSource;
+    const targetWorld = this.projectedLightTarget;
+    if (mount) {
+      sourceWorld
+        .copy(mount.sourceLocal)
+        .applyQuaternion(this.rootGroup.quaternion)
+        .add(this.rootGroup.position);
+      targetWorld
+        .copy(mount.aimLocal)
+        .applyQuaternion(this.rootGroup.quaternion)
+        .add(this.rootGroup.position);
+    } else {
+      sourceWorld.set(0, 0, 0);
+      targetWorld.set(0, 0, 0);
+      intensity = 0;
+    }
+    rig.setBeam(
+      slot,
+      sourceWorld,
+      targetWorld,
+      color,
+      intensity,
+      shape.distance,
+      shape.angle,
+      shape.penumbra,
+      shape.decay,
+    );
   }
 
   /**
@@ -2818,6 +2898,11 @@ export class Vehicle implements Rebasable {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    this.originDisposer?.();
+    this.originDisposer = null;
     if (this.controller) {
       this.controller.free();
       this.controller = null;
@@ -3015,18 +3100,12 @@ export class Vehicle implements Rebasable {
     }
 
     this.bindVehicleLights();
-    this.buildHeadlights();
-    this.buildRearLightBeams(
-      this.taillightLensMeshes,
-      TAILLIGHT_EMISSIVE,
-      TAILLIGHT_BEAM,
-      this.taillightBeams,
-    );
-    this.buildRearLightBeams(
+    this.buildHeadlightMounts();
+    this.buildRearLightMounts(this.taillightLensMeshes, TAILLIGHT_BEAM, this.taillightMounts);
+    this.buildRearLightMounts(
       this.reverseLightLensMeshes,
-      REVERSE_LIGHT_EMISSIVE,
       REVERSE_LIGHT_BEAM,
-      this.reverseLightBeams,
+      this.reverseLightMounts,
     );
     this.applyRearLightState();
   }
@@ -3111,18 +3190,13 @@ export class Vehicle implements Rebasable {
     return bounds;
   }
 
-  private buildRearLightBeams(
+  private buildRearLightMounts(
     lenses: readonly THREE.Mesh[],
-    color: number,
     shape: {
-      readonly distance: number;
-      readonly angle: number;
-      readonly penumbra: number;
-      readonly decay: number;
       readonly targetDistance: number;
       readonly targetDrop: number;
     },
-    output: VehicleBeamVisual[],
+    output: VehicleBeamMount[],
   ): void {
     if (lenses.length === 0) return;
     const box = this.lampBounds(lenses);
@@ -3131,21 +3205,8 @@ export class Vehicle implements Rebasable {
     const z = box.min.z - 0.015;
     for (const sign of [-1, 1]) {
       const x = centre.x + sign * halfWidth;
-      const light = new THREE.SpotLight(
-        color,
-        0,
-        shape.distance,
-        shape.angle,
-        shape.penumbra,
-        shape.decay,
-      );
-      light.position.set(x, centre.y, z);
-      light.castShadow = false;
-      light.visible = false;
-      this.scene.add(light.target);
-      this.rootGroup.add(light);
       output.push({
-        light,
+        sourceLocal: new THREE.Vector3(x, centre.y, z),
         aimLocal: new THREE.Vector3(
           x,
           centre.y - shape.targetDrop,
@@ -3156,10 +3217,10 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Two persistent spotlights placed at authored headlight bounds. Models without
+   * Headlight mounts follow authored lamp bounds when available. Models without
    * lamp metadata retain the measured-chassis fallback used by static/wreck packs.
    */
-  private buildHeadlights(): void {
+  private buildHeadlightMounts(): void {
     const half = this.measure.halfExtents;
     let centreX = 0;
     let halfWidth = HEADLIGHT_X_FRACTION * half[0];
@@ -3178,21 +3239,8 @@ export class Vehicle implements Rebasable {
     }
     for (const sign of [-1, 1]) {
       const x = centreX + sign * halfWidth;
-      const light = new THREE.SpotLight(
-        0xffffff,
-        0,
-        HEADLIGHT_LOW.distance,
-        HEADLIGHT_LOW.angle,
-        HEADLIGHT_LOW.penumbra,
-        1.5,
-      );
-      light.position.set(x, y, z);
-      light.castShadow = false;
-      light.visible = true;
-      this.scene.add(light.target);
-      this.rootGroup.add(light);
-      this.headlights.push({
-        light,
+      this.headlightMounts.push({
+        sourceLocal: new THREE.Vector3(x, y, z),
         aimLocal: new THREE.Vector3(
           x,
           y - HEADLIGHT_LOW.targetDrop,
@@ -3210,18 +3258,12 @@ export class Vehicle implements Rebasable {
         : this.headlightMode === 'low'
           ? HEADLIGHT_LOW
           : null;
-    for (const headlight of this.headlights) {
-      const light = headlight.light;
-      const shape = beam ?? HEADLIGHT_LOW;
-      light.intensity = beam ? beam.intensity * this.headlightEnvironmentFactor : 0;
-      light.distance = shape.distance;
-      light.angle = shape.angle;
-      light.penumbra = shape.penumbra;
-      light.decay = shape.decay;
+    const shape = beam ?? HEADLIGHT_LOW;
+    for (const headlight of this.headlightMounts) {
       headlight.aimLocal.set(
-        light.position.x,
-        light.position.y - shape.targetDrop,
-        light.position.z + shape.targetDistance,
+        headlight.sourceLocal.x,
+        headlight.sourceLocal.y - shape.targetDrop,
+        headlight.sourceLocal.z + shape.targetDistance,
       );
     }
     const intensity = this.headlightMode === 'high' ? 3 : this.headlightMode === 'low' ? 2.4 : 0;
@@ -3247,11 +3289,7 @@ export class Vehicle implements Rebasable {
           : next === 1
             ? TAILLIGHT_BEAM.runningIntensity
             : 0;
-      const beamIntensity = authoredBeamIntensity * this.headlightEnvironmentFactor;
-      for (const beam of this.taillightBeams) {
-        beam.light.intensity = beamIntensity;
-        beam.light.visible = beamIntensity > 0;
-      }
+      this.taillightBeamIntensity = authoredBeamIntensity * this.headlightEnvironmentFactor;
     }
     const reversing = this.drivetrain.gearLabel === 'R';
     if (!force && reversing === this.reverseLightState) return;
@@ -3260,13 +3298,9 @@ export class Vehicle implements Rebasable {
       material.emissive.setHex(reversing ? REVERSE_LIGHT_EMISSIVE : 0x000000);
       material.emissiveIntensity = reversing ? 4 : 0;
     }
-    const beamIntensity = reversing
+    this.reverseLightBeamIntensity = reversing
       ? REVERSE_LIGHT_BEAM.intensity * this.headlightEnvironmentFactor
       : 0;
-    for (const beam of this.reverseLightBeams) {
-      beam.light.intensity = beamIntensity;
-      beam.light.visible = beamIntensity > 0;
-    }
   }
 
   private applyIndicatorState(lit: boolean): void {
@@ -3293,9 +3327,6 @@ export class Vehicle implements Rebasable {
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */
   private clearVisuals(): void {
-    for (const beam of this.headlights) this.scene.remove(beam.light.target);
-    for (const beam of this.taillightBeams) this.scene.remove(beam.light.target);
-    for (const beam of this.reverseLightBeams) this.scene.remove(beam.light.target);
     for (const material of this.headlightLensMaterials) material.dispose();
     for (const material of this.taillightMaterials) material.dispose();
     for (const material of this.reverseLightMaterials) material.dispose();
@@ -3303,8 +3334,9 @@ export class Vehicle implements Rebasable {
     for (const material of this.rightBlinkerMaterials) material.dispose();
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.wheelMeshes.clear();
-    this.taillightBeams = [];
-    this.reverseLightBeams = [];
+    this.headlightMounts = [];
+    this.taillightMounts = [];
+    this.reverseLightMounts = [];
     this.headlightLensMeshes = [];
     this.taillightLensMeshes = [];
     this.reverseLightLensMeshes = [];
@@ -3315,6 +3347,8 @@ export class Vehicle implements Rebasable {
     this.rightBlinkerMaterials.length = 0;
     this.rearLightState = -1;
     this.reverseLightState = false;
+    this.taillightBeamIntensity = 0;
+    this.reverseLightBeamIntensity = 0;
     this.indicatorLit = false;
   }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { AdaptiveResolutionController } from './adaptivequality';
 import type { GraphicsQuality } from '../game/settings';
 
 /**
@@ -81,30 +82,6 @@ const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
  * graphics tiers control resolution and shadows.
  */
 const MSAA_SAMPLES = 4;
-/**
- * Lowest adaptive fraction of each tier's target. Acceptable may trade resolution
- * for frame time; Standard stays close to native. Blessing never adapts downward
- * at all—selecting it explicitly means spending the GPU on supersampling.
- */
-const MIN_PIXEL_SCALE: Record<GraphicsQuality, number> = {
-  acceptable: 0.5,
-  standard: 0.85,
-  blessing: 1,
-};
-/** Resolution steps (applied at most once per CHANGE_COOLDOWN seconds). */
-const SCALE_STEP_DOWN = 0.8;
-const SCALE_STEP_UP = 1.05;
-/**
- * Smoothed frame times that count as "over budget" / "comfortable" (ms). The
- * 6 ms deadband between them is the hysteresis that stops the controller from
- * hunting around the 60 fps target (~16.7 ms).
- */
-const SLOW_FRAME_MS = 19;
-const FAST_FRAME_MS = 13;
-/** Minimum seconds between resolution changes. */
-const CHANGE_COOLDOWN = 1.0;
-/** Frame-time smoothing weight (EMA): ~160 ms time constant at 60 fps. */
-const FRAME_SMOOTHING = 0.1;
 // ---------------------------------------------------------------------------
 // Heat haze: a two-pass post effect (see Renderer.render).
 // ---------------------------------------------------------------------------
@@ -300,19 +277,24 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    // Cells are smaller and churn faster close to the ground, and the long
-    // sight-lines near the horizon stack more of them along one ray. Scaling with
-    // depth stops the whole frame shimmering in lockstep like one sheet of glass.
-    float groundness = clamp((uHorizon - vUv.y) / uCellDepth, 0.0, 1.0);
-    float scale = mix(1.0, 1.3, groundness);
-    vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.25, groundness));
-    // Rising air bends a sight-line up and down far more than sideways; the
-    // horizontal term only exists so columns do not look like a venetian blind.
-    warp.x *= 0.25;
-    // At uStrength = 0 the offset vanishes and the sample is the untouched
-    // texel — a pure passthrough.
-    vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
-    vec2 uv = clamp(vUv + offset, 0.0, 1.0);
+    // The warp is skipped outright when the shimmer is off — a uniform branch, so
+    // every fragment in the draw takes the same side and the trig below is simply
+    // not issued. That is what lets the cheapest tier keep this pass for its
+    // outlines and its colour handling without paying for heat haze.
+    vec2 uv = vUv;
+    if (uStrength > 0.0) {
+      // Cells are smaller and churn faster close to the ground, and the long
+      // sight-lines near the horizon stack more of them along one ray. Scaling with
+      // depth stops the whole frame shimmering in lockstep like one sheet of glass.
+      float groundness = clamp((uHorizon - vUv.y) / uCellDepth, 0.0, 1.0);
+      float scale = mix(1.0, 1.3, groundness);
+      vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.25, groundness));
+      // Rising air bends a sight-line up and down far more than sideways; the
+      // horizontal term only exists so columns do not look like a venetian blind.
+      warp.x *= 0.25;
+      vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
+      uv = clamp(vUv + offset, 0.0, 1.0);
+    }
     vec4 color = texture2D(tDiffuse, uv);
 
     // Ink is ground treatment. Rendering it only below the horizon leaves the sky
@@ -328,6 +310,19 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 `;
 
+const MAX_PENDING_GPU_QUERIES = 8;
+
+interface GpuTimerQueryExtension {
+  readonly TIME_ELAPSED_EXT: number;
+  readonly GPU_DISJOINT_EXT: number;
+}
+
+interface PendingGpuQuery {
+  readonly query: WebGLQuery;
+  readonly eligible: boolean;
+}
+
+
 
 export class Renderer {
   readonly renderer: THREE.WebGLRenderer;
@@ -335,7 +330,7 @@ export class Renderer {
   readonly camera: THREE.PerspectiveCamera;
   readonly fog: THREE.FogExp2;
   // --- Heat-haze post pass ---
-  /** Scene-pass target; the fullscreen pass samples this texture. */
+  /** Scene-pass target; the fullscreen pass samples this texture outside acceptable. */
   private readonly hazeTarget: THREE.WebGLRenderTarget;
   /** Tiny scene holding the fullscreen triangle. */
   private readonly hazeScene = new THREE.Scene();
@@ -363,6 +358,13 @@ export class Renderer {
    */
   private basePixelRatio: number;
   private quality: GraphicsQuality;
+  private readonly adaptiveResolution: AdaptiveResolutionController;
+  private readonly timerQueryGl: WebGL2RenderingContext | null;
+  private readonly timerQueryExt: GpuTimerQueryExtension | null;
+  private readonly pendingGpuQueries: PendingGpuQuery[] = [];
+  private readonly completedGpuSamples: number[] = [];
+  private readonly completedGpuSampleEligibility: boolean[] = [];
+  private queryEligible = false;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -372,14 +374,28 @@ export class Renderer {
     this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      // NOT antialiased. Every scene pixel is drawn into `hazeTarget`, whose MSAA
-      // sample count is controlled independently; the default framebuffer only
-      // receives a fullscreen triangle with no interior geometry edges.
-      // A multisampled backbuffer here is an allocation and a resolve per frame
-      // for an image that cannot differ by one pixel.
+      // NOT antialiased. Standard and Blessing draw scene pixels into
+      // `hazeTarget`, whose MSAA sample count is controlled independently;
+      // acceptable draws directly to the default framebuffer. A multisampled
+      // backbuffer would allocate and resolve an image that cannot differ by one
+      // pixel after the fullscreen pass.
       antialias: false,
       powerPreference: 'high-performance',
     });
+    this.adaptiveResolution = new AdaptiveResolutionController(quality);
+    const context = this.renderer.getContext();
+    if (
+      typeof WebGL2RenderingContext !== 'undefined'
+      && context instanceof WebGL2RenderingContext
+    ) {
+      this.timerQueryGl = context;
+      this.timerQueryExt = context.getExtension(
+        'EXT_disjoint_timer_query_webgl2',
+      ) as GpuTimerQueryExtension | null;
+    } else {
+      this.timerQueryGl = null;
+      this.timerQueryExt = null;
+    }
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
@@ -401,9 +417,9 @@ export class Renderer {
     this.fog = new THREE.FogExp2(0xd8c39a, 0.00035);
     this.scene.fog = this.fog;
 
-    // The scene first renders into this target, then a fullscreen pass warps and
-    // copies it back. The independent MSAA setting decides whether geometry edges
-    // receive four samples here.
+    // Standard and Blessing render into this target, then a fullscreen pass warps
+    // and copies it back. Acceptable keeps it at 1×1 and bypasses the pass.
+    // The independent MSAA setting decides geometry-edge samples for those tiers.
     this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
       samples: msaa ? MSAA_SAMPLES : 0,
     });
@@ -449,6 +465,7 @@ export class Renderer {
 
   dispose(): void {
     window.removeEventListener('resize', this.resize);
+    this.disposeGpuQueries();
     this.hazeTarget.dispose();
     this.hazeMaterial.dispose();
     this.hazeGeometry.dispose();
@@ -474,17 +491,31 @@ export class Renderer {
   };
 
   render(): void {
-    this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
-    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
-    this.hazeMaterial.uniforms.uGroundCut.value = this.groundCutUv();
-    // Pass 1: draw the scene into the target — the same final sRGB pixels the
-    // canvas would have received, since tone mapping and colour conversion stay
-    // untouched on the renderer.
-    this.renderer.setRenderTarget(this.hazeTarget);
-    this.renderer.render(this.scene, this.camera);
-    // Pass 2: copy the target back to the canvas through the haze shader.
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.hazeScene, this.hazeCamera);
+    this.pollGpuQueries();
+    const query = this.beginGpuTimerQuery();
+    try {
+      this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
+      this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
+      this.hazeMaterial.uniforms.uGroundCut.value = this.groundCutUv();
+      // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
+      //
+      // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
+      // (linear) into a render target — only the canvas gets `outputColorSpace` —
+      // and pass 2 copies those texels through untouched, so the frame reaches the
+      // display linear-encoded and roughly a gamma darker than a direct render.
+      // The whole game is lit and painted against that image.
+      //
+      // So this is deliberate, not an oversight: skipping the pass on the cheapest
+      // tier made it the only correctly encoded tier, which read as washed out
+      // beside the other two. Acceptable keeps the pass and drops the WARP instead
+      // (see `setHazeStrength`), which is where the cost actually was.
+      this.renderer.setRenderTarget(this.hazeTarget);
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.hazeScene, this.hazeCamera);
+    } finally {
+      if (query !== null) this.endGpuTimerQuery();
+    }
   }
 
   /**
@@ -537,18 +568,20 @@ export class Renderer {
   }
 
   /**
-   * Heat-haze strength, clamped to 0..1. At zero the fullscreen pass is a pure
-   * passthrough, so the image matches a direct render exactly.
+   * Heat-haze strength, clamped to 0..1, and always zero on the cheapest tier.
+   *
+   * The warp is the expensive half of this pass — layered trig per pixel — while
+   * the outlines are four taps and the copy is one. Acceptable pays the copy and
+   * the outlines, which is what the drawn look is made of, and skips the shimmer:
+   * at zero strength the shader branches past the warp on a uniform every fragment
+   * agrees on, so the branch is free.
    */
   setHazeStrength(strength: number): void {
-    this.hazeMaterial.uniforms.uStrength.value = Math.min(1, Math.max(0, strength));
+    const wanted = this.quality === 'acceptable' ? 0 : strength;
+    this.hazeMaterial.uniforms.uStrength.value = Math.min(1, Math.max(0, wanted));
   }
 
-  /**
-   * Size the scene-pass target to the actual drawing buffer (CSS size × pixel
-   * ratio). Called from both the resize handler and the adaptive-resolution
-   * controller — the only two places the buffer size can change.
-   */
+  /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */
   private resizeHazeTarget(): void {
     this.renderer.getDrawingBufferSize(this._drawSize);
     this.hazeTarget.setSize(this._drawSize.x, this._drawSize.y);
@@ -558,41 +591,104 @@ export class Renderer {
 
   // --- Adaptive resolution ---
 
-  /** Current multiplier on the capped base ratio (1 = cap, floor = MIN_PIXEL_SCALE). */
-  private pixelScale = 1;
-  /** EMA of frame time in ms. */
-  private smoothedFrameMs = 1000 / 60;
-  /** `performance.now()` at the last resolution change; -Infinity = never. */
-  private lastScaleChange = -Infinity;
-
   /**
-   * Called once per frame from the render loop. Smooths the frame time, then —
-   * only when the smoothed time has been over/under budget and the cooldown has
-   * elapsed — nudges the pixel ratio one step toward the floor or the cap. The
-   * cooldown plus the deadband between thresholds means the controller settles
-   * in a few steps and never visibly oscillates.
+   * Incorporates completed GPU timer results using this frame's safety policy.
+   * With no completed GPU result (including unsupported/disjoint queries), the
+   * controller gets a null sample and intentionally retains its current scale.
    */
-  adaptResolution(frameDt: number): void {
-    // Blessing is an explicit quality lock, not an adaptive performance target.
-    if (this.quality === 'blessing') return;
-    this.smoothedFrameMs += (frameDt * 1000 - this.smoothedFrameMs) * FRAME_SMOOTHING;
+  adaptResolution(eligible: boolean, allowUpscale: boolean): void {
+    this.queryEligible = eligible;
     const now = performance.now();
-    if (now - this.lastScaleChange < CHANGE_COOLDOWN * 1000) return;
+    let changed = false;
 
-    const floor = MIN_PIXEL_SCALE[this.quality];
-    const over = this.smoothedFrameMs > SLOW_FRAME_MS && this.pixelScale > floor;
-    const under = this.smoothedFrameMs < FAST_FRAME_MS && this.pixelScale < 1;
-    if (!over && !under) return;
+    if (this.completedGpuSamples.length === 0) {
+      changed = this.adaptiveResolution.sample(null, eligible, allowUpscale, now) !== null;
+    } else {
+      while (this.completedGpuSamples.length > 0) {
+        const gpuMs = this.completedGpuSamples.shift();
+        const sampleEligible = this.completedGpuSampleEligibility.shift();
+        if (gpuMs === undefined || sampleEligible === undefined) break;
+        changed = this.adaptiveResolution.sample(
+          gpuMs,
+          eligible && sampleEligible,
+          allowUpscale,
+          now,
+        ) !== null || changed;
+      }
+    }
 
-    this.pixelScale = Math.min(
-      1,
-      Math.max(floor, this.pixelScale * (over ? SCALE_STEP_DOWN : SCALE_STEP_UP)),
-    );
-    this.lastScaleChange = now;
+    if (!changed) return;
     // setPixelRatio re-sizes the drawing buffer around the current CSS size, so
     // the canvas layout never moves when the resolution changes.
-    this.renderer.setPixelRatio(this.basePixelRatio * this.pixelScale);
+    this.renderer.setPixelRatio(this.basePixelRatio * this.adaptiveResolution.scale);
     this.resizeHazeTarget();
+  }
+
+  private beginGpuTimerQuery(): WebGLQuery | null {
+    const gl = this.timerQueryGl;
+    const ext = this.timerQueryExt;
+    if (gl === null || ext === null || this.pendingGpuQueries.length >= MAX_PENDING_GPU_QUERIES) {
+      return null;
+    }
+
+    const query = gl.createQuery();
+    if (query === null) return null;
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+    this.pendingGpuQueries.push({
+      query,
+      eligible: this.queryEligible,
+    });
+    return query;
+  }
+
+  private endGpuTimerQuery(): void {
+    const gl = this.timerQueryGl;
+    const ext = this.timerQueryExt;
+    if (gl !== null && ext !== null) gl.endQuery(ext.TIME_ELAPSED_EXT);
+  }
+
+  /** Non-blockingly collects completed GPU timings in submission order. */
+  private pollGpuQueries(): void {
+    const gl = this.timerQueryGl;
+    const ext = this.timerQueryExt;
+    if (gl === null || ext === null) return;
+
+    if (gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+      this.disposeGpuQueries();
+      return;
+    }
+
+    while (this.pendingGpuQueries.length > 0) {
+      const pending = this.pendingGpuQueries[0];
+      if (!gl.getQueryParameter(pending.query, gl.QUERY_RESULT_AVAILABLE)) return;
+      if (gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+        this.disposeGpuQueries();
+        return;
+      }
+
+      this.pendingGpuQueries.shift();
+      const result = gl.getQueryParameter(pending.query, gl.QUERY_RESULT);
+      const gpuMs = typeof result === 'number' ? result / 1_000_000 : Number.NaN;
+      gl.deleteQuery(pending.query);
+      if (!Number.isFinite(gpuMs) || gpuMs < 0) continue;
+      if (this.completedGpuSamples.length === MAX_PENDING_GPU_QUERIES) {
+        this.completedGpuSamples.shift();
+        this.completedGpuSampleEligibility.shift();
+      }
+      this.completedGpuSamples.push(gpuMs);
+      this.completedGpuSampleEligibility.push(pending.eligible);
+    }
+  }
+
+  private disposeGpuQueries(): void {
+    if (this.timerQueryGl !== null) {
+      for (const { query } of this.pendingGpuQueries) {
+        this.timerQueryGl.deleteQuery(query);
+      }
+    }
+    this.pendingGpuQueries.length = 0;
+    this.completedGpuSamples.length = 0;
+    this.completedGpuSampleEligibility.length = 0;
   }
 
   /**
@@ -602,11 +698,10 @@ export class Renderer {
   setQuality(quality: GraphicsQuality): void {
     if (quality === this.quality) return;
     this.quality = quality;
+    this.adaptiveResolution.setQuality(quality);
+    this.disposeGpuQueries();
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
     this.basePixelRatio = this.pixelRatioFor(quality);
-    this.pixelScale = 1;
-    this.lastScaleChange = -Infinity;
-    this.smoothedFrameMs = 1000 / 60;
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
   }

@@ -38,7 +38,9 @@ import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
+import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
+import { VehicleLightRig } from './render/vehiclelights';
 import { createStickerMesh } from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -59,6 +61,7 @@ import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
+import { WorldWorkScheduler } from './world/workqueue';
 import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
@@ -78,8 +81,8 @@ import { GameAudio } from './audio/gameaudio';
  *
  * Ordering here is load-bearing in three places, each marked below: physics before
  * anything that builds colliders, chunk 0 before the starting fuel can is placed
- * (it needs the garage floor to rest on), and `restoreFromState` only on a loaded
- * save (a new game materialises its loot as it generates it).
+ * (it needs the garage floor to rest on), and active-set reconciliation after the
+ * carried inventory has been restored.
  */
 
 /**
@@ -95,6 +98,14 @@ const SPAWN_AHEAD_GAP = 6;
 const SPAWN_PROBE_HEIGHT = 3;
 /** Trailer-only drop clearance; cars use model-aware `carSpawnYAboveGround`. */
 const TRAILER_DROP_CLEARANCE = 0.35;
+/**
+ * Objects enter the active physics/render world at the smaller radius and leave at
+ * the larger one. The gap prevents lifetime churn at the streaming boundary.
+ */
+const ACTIVE_LOAD_RADIUS = 800;
+const ACTIVE_UNLOAD_RADIUS = 1000;
+const ACTIVE_LOAD_RADIUS_SQUARED = ACTIVE_LOAD_RADIUS * ACTIVE_LOAD_RADIUS;
+const ACTIVE_UNLOAD_RADIUS_SQUARED = ACTIVE_UNLOAD_RADIUS * ACTIVE_UNLOAD_RADIUS;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
@@ -167,11 +178,16 @@ async function boot(): Promise<void> {
   const road = new Road(world.seed, await loadSpine(world.seed, ROAD_LENGTH));
   const terrain = new Terrain(world.seed, road);
   // The floating origin, before anything that could hold a position relative to it.
-  // Placed at the saved player position so the first frame is already local: a player
-  // resuming at 39 000 km must not spend one frame with the whole world 386 km out,
-  // which is exactly the f32 quantisation this exists to avoid. See world/origin.ts.
+  // A saved driver may be far from the capsule position last recorded when they got
+  // in, so start at the driven car when there is one. The first frame is then already
+  // local around the active player/driven-car anchor.
+  const savedDrivenCarId = world.state.player.drivingCarId;
+  const savedDrivenCar = savedDrivenCarId ? (world.state.cars[savedDrivenCarId] ?? null) : null;
   const origin = new WorldOrigin();
-  origin.reset(world.state.player.x, world.state.player.z);
+  origin.reset(
+    savedDrivenCar?.x ?? world.state.player.x,
+    savedDrivenCar?.z ?? world.state.player.z,
+  );
   /**
    * Scratch for absolute-position reads off a rigid body. One object for the session:
    * the rebase anchor, the streaming anchor and the rescue check all read a chassis
@@ -193,6 +209,10 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
     world.state.settings.msaa,
   );
+  const vehicleLights = new VehicleLightRig(renderer.scene);
+  // Road texture canvases are one-time CPU work; create them under the loading cover
+  // rather than letting RoadMeshProvider charge the first streamed road chunk.
+  roadTextures();
   /**
    * Rendered-frame counter. The chunk streamer is driven from the fixed step,
    * which can run several times per frame, so it needs to know which calls belong
@@ -211,6 +231,7 @@ async function boot(): Promise<void> {
   audio.applySettings(world.state.settings);
   const starField = await loadStarField(new Date(parseCalendarEpoch(world.state.calendarEpoch)));
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  sky.setEnvironmentQuality(world.state.settings.graphicsQuality);
   // Scene lights now exist, so warm both CPU instances and their exact live shader
   // permutations before the loading cover leaves. POI streaming never pays first use.
   await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
@@ -258,6 +279,7 @@ async function boot(): Promise<void> {
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
+  const worldWork = new WorldWorkScheduler(3);
   const desert = new DesertTileStreamer(
     world.seed,
     road,
@@ -267,6 +289,7 @@ async function boot(): Promise<void> {
     renderer.scene,
     origin,
     debris,
+    worldWork,
   );
 
   // Scratches for the impact test in the fixed step: never allocated per tick.
@@ -274,7 +297,15 @@ async function boot(): Promise<void> {
   const impactQuat = new THREE.Quaternion();
   const impactor: Impactor = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, halfLength: 2, vx: 0, vy: 0, vz: 0 };
 
-  const streamer = new ChunkStreamer(road, terrain, physics, world, renderer.scene, origin);
+  const streamer = new ChunkStreamer(
+    road,
+    terrain,
+    physics,
+    world,
+    renderer.scene,
+    origin,
+    worldWork,
+  );
   streamer.register(new RoadMeshProvider(world.seed));
   streamer.register(new HomesteadProvider());
   streamer.register(new ScatterProvider(debris));
@@ -291,12 +322,80 @@ async function boot(): Promise<void> {
   player.setRoad(road);
 
   const vehicles = new Map<string, Vehicle>();
-  const spawnVehicle = (car: CarState): Vehicle => {
+  const materializeVehicle = (car: CarState): Vehicle => {
     const existing = vehicles.get(car.id);
     if (existing) return existing;
     const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
     vehicles.set(car.id, vehicle);
+    for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
     return vehicle;
+  };
+
+  const trailerVehicleFor = (carId: string): Vehicle | null => vehicles.get(carId) ?? null;
+  const activeWorldAnchor = (): { x: number; y: number; z: number } => {
+    const drivingId = world.state.player.drivingCarId;
+    if (drivingId) {
+      const driving = vehicles.get(drivingId);
+      if (driving) return driving.absoluteTranslation(originAnchor);
+      const saved = world.state.cars[drivingId];
+      if (saved) return saved;
+    }
+    return player.absolutePosition;
+  };
+  const withinRadius = (
+    x: number,
+    z: number,
+    anchorX: number,
+    anchorZ: number,
+    radiusSquared: number,
+  ): boolean => {
+    const dx = x - anchorX;
+    const dz = z - anchorZ;
+    return dx * dx + dz * dz <= radiusSquared;
+  };
+  const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
+    const drivingId = world.state.player.drivingCarId;
+    const cars = world.state.cars;
+    // Couplings are authoritative state, not derived runtime links. Materialise every
+    // towing body before TrailerField runs so no hitch can outlive its car.
+    const towingCarIds = new Set<string>();
+    for (const trailer of Object.values(world.state.trailers)) {
+      if (trailer.hitchedTo !== null) towingCarIds.add(trailer.hitchedTo);
+    }
+    for (const id in cars) {
+      const car = cars[id];
+      const vehicle = vehicles.get(id);
+      const isTowingCar = towingCarIds.has(id);
+      if (vehicle) {
+        if (id === drivingId || isTowingCar) continue;
+        const position = vehicle.absoluteTranslation(originAnchor);
+        if (!withinRadius(
+          position.x,
+          position.z,
+          anchorX,
+          anchorZ,
+          ACTIVE_UNLOAD_RADIUS_SQUARED,
+        )) {
+          vehicle.pushState();
+          vehicle.dispose();
+          vehicles.delete(id);
+        }
+      } else if (
+        id === drivingId ||
+        isTowingCar ||
+        withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED)
+      ) {
+        materializeVehicle(car);
+      }
+    }
+    trailerField.updateActive(
+      anchorX,
+      anchorZ,
+      trailerVehicleFor,
+      ACTIVE_LOAD_RADIUS,
+      ACTIVE_UNLOAD_RADIUS,
+    );
+    loose.updateActive(anchorX, anchorZ, ACTIVE_LOAD_RADIUS, ACTIVE_UNLOAD_RADIUS);
   };
 
   /**
@@ -337,43 +436,47 @@ async function boot(): Promise<void> {
     initialYaw = spawn.yaw;
   }
 
-  // A save may begin anywhere off-road. Establish the local nine-tile physics patch
-  // before the loading cover leaves, then build road chunk 0 for the garage/fuel can.
-  const initialGround = player.absolutePosition;
+  // A save may leave the player capsule behind the car they were driving. Establish
+  // the local nine-tile desert physics patch and synchronously build the current road
+  // chunk before the loading cover leaves, so starter bodies have solid support.
+  const initialGround = savedDrivenCar ?? player.absolutePosition;
   const initialProjection = road.project(initialGround.x, initialGround.z, world.state.player.s);
+  worldWork.beginFrame(frameId);
   desert.prime(initialGround.x, initialGround.z, initialProjection.lateral);
-  streamer.update(world.state.player.s, frameId, initialProjection.lateral);
+  streamer.prime(initialProjection.s, initialProjection.lateral);
 
   if (loadedFromSave) {
-    loose.restoreFromState();
-    // After `restoreFromState`, which rebuilds the world's loose items: a carried
-    // item is by definition absent from those maps, so the two cannot collide.
+    // Restore the carried item before active-set reconciliation materialises nearby
+    // loose state: carried items are absent from the loose maps, so the two cannot
+    // collide.
     inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
   } else {
     spawnStartingFuelCan(world, loose);
   }
 
-  for (const car of Object.values(world.state.cars)) spawnVehicle(car);
-  // POI working cars enter state when their chunk reaches the physics band. From
-  // then on every car-add delta must immediately gain its Vehicle runtime.
+  // POI working cars enter state when their chunk reaches the physics band. A new
+  // runtime exists immediately only if the car belongs in the current active set.
   world.onDelta((delta) => {
-    if (delta.t === 'car_add') spawnVehicle(delta.car);
+    if (delta.t !== 'car_add') return;
+    const anchor = activeWorldAnchor();
+    if (
+      delta.car.id === world.state.player.drivingCarId ||
+      withinRadius(
+        delta.car.x,
+        delta.car.z,
+        anchor.x,
+        anchor.z,
+        ACTIVE_LOAD_RADIUS_SQUARED,
+      )
+    ) {
+      materializeVehicle(delta.car);
+    }
   });
 
-  // Saved stickers ride the car's own render group, so nothing but the group has to
-  // know they exist — including the interpolation the car already does.
-  for (const car of Object.values(world.state.cars)) {
-    const vehicle = vehicles.get(car.id);
-    if (!vehicle) continue;
-    for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
-  }
-
-  // Trailers after the cars, and only on a loaded save: a coupling needs the towing
-  // Vehicle to already exist, and a new game materialises its trailers from the POIs
-  // that generate them.
-  if (loadedFromSave) {
-    trailerField.restoreFromState((carId) => vehicles.get(carId) ?? null);
-  }
+  // The driven car is selected unconditionally by reconciliation; trailers run
+  // afterwards so their saved hitches can resolve, then loose state follows.
+  const initialActiveAnchor = activeWorldAnchor();
+  reconcileActiveWorld(initialActiveAnchor.x, initialActiveAnchor.z);
 
   /**
    * Nearest car to the player, or the one being driven. Returns the id alongside the
@@ -485,6 +588,10 @@ async function boot(): Promise<void> {
       vehicles,
       audio,
       origin,
+      vehicleLights,
+      worldWork,
+      streamer,
+      desert,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -531,13 +638,16 @@ async function boot(): Promise<void> {
   /** Trunk grid under the crosshair, or null. Set by the interaction tick. */
   let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
-  let activeS = world.state.player.s;
+  let activeS = initialProjection.s;
   let gumActive = false;
   let gumTimer = 0;
   let gumPackCharges = 0;
   let gumUseHeld = false;
+  /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
+  let rebasedThisFrame = false;
 
   const fixedUpdate = (dt: number): void => {
+    worldWork.beginFrame(frameId);
     const f = input.sample(dt);
     lastInput = f;
     lookYawAccum += f.lookYaw;
@@ -625,13 +735,19 @@ async function boot(): Promise<void> {
     // foot. Bodies hold RELATIVE positions, so the origin is added back to get the
     // absolute position `advance` wants.
     {
-      const anchor = driving ? driving.absoluteTranslation(originAnchor) : player.absolutePosition;
+      const anchor = activeWorldAnchor();
       const shift = origin.advance(anchor.x, anchor.z);
       if (shift) {
         physics.rebase(shift.dx, shift.dz);
         streamer.rebase();
         desert.rebase();
+        rebasedThisFrame = true;
       }
+
+      // Lifetime changes follow the solve and any origin shift, never interrupting
+      // controller/hitch writes. Cars resolve first, then their trailers, then loose
+      // objects so a live coupling is available to the trailer field.
+      reconcileActiveWorld(anchor.x, anchor.z);
     }
 
     // Latch the post-step transforms so the renderer can interpolate between the
@@ -803,11 +919,11 @@ async function boot(): Promise<void> {
       impactor.vx = v.x;
       impactor.vy = v.y;
       impactor.vz = v.z;
-      debris.update(impactor);
+      debris.update(impactor, dt, desertX, desertZ);
     } else {
       // Do not sweep from the last driven car position across a period spent on foot
       // (or across switching vehicles); that path was never travelled by one chassis.
-      debris.update(null);
+      debris.update(null, dt, desertX, desertZ);
     }
 
     recordTimer += dt;
@@ -890,6 +1006,8 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
+    vehicleLights.clear();
+    driving?.syncProjectedLights(vehicleLights);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -957,8 +1075,7 @@ async function boot(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
-      frameDt,
-      s.settings.eyeAdaptation,
+      !worldWork.hasPending && !worldWork.workedThisFrame && !rebasedThisFrame,
     );
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
@@ -990,7 +1107,14 @@ async function boot(): Promise<void> {
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
     // change its light-shader permutation or hitch the frame.
-    const night = sky.isNight ? 1 : 0;
+    //
+    // The factor is a RAMP across the twilight band, not `isNight`. Both consumers
+    // scale intensity by it — `setLamps` for emissive and point output, and the
+    // budget by copying each chosen source's own intensity — so the lamps now come
+    // up over the dusk instead of every one in view switching within a frame. The
+    // slot count is unchanged at either end, so the shader permutation still never
+    // moves.
+    const night = sky.lampFactor;
     // `setLamps` takes an ABSOLUTE camera position: the lamps it compares against were
     // stored relative to the origin their chunk was BUILT under, which after a rebase
     // is not the current one, so the chunk's own build origin is the bridge and only
@@ -1081,9 +1205,17 @@ async function boot(): Promise<void> {
       frameDt,
     );
 
-    // Resolution is a render-time concern: measure the frame that just ended and
-    // adjust the buffer before drawing so this frame pays the new cost.
-    renderer.adaptResolution(frameDt);
+    // Resolution tracks only idle GPU work. Streaming, origin rebases, and PMREM
+    // rebakes are CPU/probe hitches rather than evidence that the scene needs less
+    // resolution; changing quality from those frames would make the controller chase
+    // unrelated work.
+    const adaptationEligible =
+      !worldWork.hasPending &&
+      !worldWork.workedThisFrame &&
+      !rebasedThisFrame &&
+      !sky.didBakeEnvironmentThisFrame;
+    renderer.adaptResolution(adaptationEligible, driving === null);
+    rebasedThisFrame = false;
     renderer.setHazeStrength(sky.dayFactor);
     renderer.render();
   };
@@ -1232,6 +1364,7 @@ async function boot(): Promise<void> {
       // changing visible-light count would recompile every lit material, so graphics
       // quality changes that budget only on the next load.
       renderer.setQuality(world.state.settings.graphicsQuality);
+      sky.setEnvironmentQuality(world.state.settings.graphicsQuality);
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });

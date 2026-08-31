@@ -405,7 +405,6 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
-        eyeAdaptation: base.eyeAdaptation,
         msaa: base.msaa,
         mouseSteering: base.mouseSteering,
       };
@@ -420,7 +419,6 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
-          eyeAdaptation: settings.eyeAdaptation,
           msaa: settings.msaa,
           mouseSteering: settings.mouseSteering,
         });
@@ -927,28 +925,6 @@ export class MainMenu {
                 active: () => !settings.msaa,
                 pick: () => {
                   settings.msaa = false;
-                  apply();
-                },
-              },
-            ]),
-            segmented('Eye Adaptation', [
-              {
-                label: 'On',
-                icon: 'display',
-                hint: 'Eyes ease between daylight and darkness over time.',
-                active: () => settings.eyeAdaptation,
-                pick: () => {
-                  settings.eyeAdaptation = true;
-                  apply();
-                },
-              },
-              {
-                label: 'Off',
-                icon: 'midnight',
-                hint: 'Apply the calibrated sky exposure immediately, without adaptation lag.',
-                active: () => !settings.eyeAdaptation,
-                pick: () => {
-                  settings.eyeAdaptation = false;
                   apply();
                 },
               },
