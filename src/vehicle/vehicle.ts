@@ -1013,8 +1013,8 @@ const TAILLIGHT_BEAM = {
   decay: 1.4,
   targetDistance: 3.5,
   targetDrop: 0.12,
-  runningIntensity: 0.35,
-  brakeIntensity: 1.6,
+  runningIntensity: 6,
+  brakeIntensity: 24,
 } as const;
 const REVERSE_LIGHT_BEAM = {
   distance: 10,
@@ -1023,7 +1023,7 @@ const REVERSE_LIGHT_BEAM = {
   decay: 1.1,
   targetDistance: 6,
   targetDrop: 0.18,
-  intensity: 5.5,
+  intensity: 24,
 } as const;
 /** 90 flashes per minute, with equal on/off halves. */
 const BLINKER_PERIOD_S = 2 / 3;
@@ -1455,6 +1455,7 @@ export class Vehicle implements Rebasable {
     if (next === this.headlightEnvironmentFactor) return;
     this.headlightEnvironmentFactor = next;
     this.applyHeadlightMode();
+    this.applyRearLightState(true);
   }
 
   /**
@@ -3230,37 +3231,41 @@ export class Vehicle implements Rebasable {
     }
   }
 
-  private applyRearLightState(): void {
+  private applyRearLightState(force = false): void {
     const next =
       this.brakeLightCommand > 0.03 ? 2 : this.headlightMode === 'off' ? 0 : 1;
-    if (next !== this.rearLightState) {
+    if (force || next !== this.rearLightState) {
       this.rearLightState = next;
       const intensity = next === 2 ? 6 : next === 1 ? 0.55 : 0;
       for (const material of this.taillightMaterials) {
         material.emissive.setHex(intensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
         material.emissiveIntensity = intensity;
       }
-      const beamIntensity =
+      const authoredBeamIntensity =
         next === 2
           ? TAILLIGHT_BEAM.brakeIntensity
           : next === 1
             ? TAILLIGHT_BEAM.runningIntensity
             : 0;
+      const beamIntensity = authoredBeamIntensity * this.headlightEnvironmentFactor;
       for (const beam of this.taillightBeams) {
         beam.light.intensity = beamIntensity;
         beam.light.visible = beamIntensity > 0;
       }
     }
     const reversing = this.drivetrain.gearLabel === 'R';
-    if (reversing === this.reverseLightState) return;
+    if (!force && reversing === this.reverseLightState) return;
     this.reverseLightState = reversing;
     for (const material of this.reverseLightMaterials) {
       material.emissive.setHex(reversing ? REVERSE_LIGHT_EMISSIVE : 0x000000);
       material.emissiveIntensity = reversing ? 4 : 0;
     }
+    const beamIntensity = reversing
+      ? REVERSE_LIGHT_BEAM.intensity * this.headlightEnvironmentFactor
+      : 0;
     for (const beam of this.reverseLightBeams) {
-      beam.light.intensity = reversing ? REVERSE_LIGHT_BEAM.intensity : 0;
-      beam.light.visible = reversing;
+      beam.light.intensity = beamIntensity;
+      beam.light.visible = beamIntensity > 0;
     }
   }
 
