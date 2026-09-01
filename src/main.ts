@@ -14,7 +14,7 @@ import {
   storeSettings,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
-import { Inventory, type Item } from './items/items';
+import { Inventory, itemLabel, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { coolantCapacity, oilCapacity } from './parts/registry';
@@ -643,6 +643,9 @@ async function boot(): Promise<void> {
   let gumTimer = 0;
   let gumPackCharges = 0;
   let gumUseHeld = false;
+  /** Held devices are edge-toggled by F and reset when their item leaves the hand. */
+  let binocularsActive = false;
+  let torchlightActive = false;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
   /** Vehicle whose live lamp state remains projected after the player exits. */
@@ -762,6 +765,37 @@ async function boot(): Promise<void> {
     // the same tick, since a direct pick is the more specific intent.
     if (f.selectSlot > 0) inventory.selectIndex(f.selectSlot - 1);
     else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
+
+    // E owns held-item toggles/equipping. F remains the physical world action,
+    // including vehicle entry, so using an item can never also touch the aimed car.
+    const heldAfterSelection = inventory.held;
+    if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
+    if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
+    if (driving === null && f.useHeld && heldAfterSelection?.type === 'binoculars') {
+      binocularsActive = !binocularsActive;
+    } else if (driving === null && f.useHeld && heldAfterSelection?.type === 'torchlight') {
+      torchlightActive = !torchlightActive;
+    }
+    if (f.useHeld && heldAfterSelection?.type === 'sun_shades') {
+      const previous = s.player.wornSunShades;
+      const next = inventory.remove(heldAfterSelection.id);
+      if (next?.type === 'sun_shades') {
+        if (previous !== null) inventory.add(previous);
+        world.apply({ t: 'wearable', shades: next });
+        hud.setToast(`${next.tint} sun shades on — G to remove`);
+      }
+    }
+    if (f.removeWearable && s.player.wornSunShades !== null) {
+      const worn = s.player.wornSunShades;
+      world.apply({ t: 'wearable', shades: null });
+      if (inventory.add(worn)) {
+        hud.setToast(`${worn.tint} sun shades removed`);
+      } else {
+        const p = player.position;
+        loose.spawnItem(worn, p.x + origin.x, p.y, p.z + origin.z);
+        hud.setToast(`${worn.tint} sun shades removed — pack full, dropped`);
+      }
+    }
 
     // One charge is consumed immediately. Three seconds of chewing come first;
     // only then does the screen-space bubble grow for five seconds before popping.
@@ -1068,6 +1102,11 @@ async function boot(): Promise<void> {
     lookPitchAccum = 0;
     zoomAccum = 0;
     recenterAccum = false;
+    const usingBinoculars =
+      driving === null && inventory.held?.type === 'binoculars' && binocularsActive;
+    const usingTorchlight =
+      driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
+    camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
 
     const cam = renderer.camera.position;
@@ -1189,8 +1228,14 @@ async function boot(): Promise<void> {
       gumActive && gumTimer < GUM_PACK_ANIM_SECONDS
         ? gumTimer / GUM_PACK_ANIM_SECONDS
         : -1;
+    const heldUse =
+      held?.type === 'binoculars'
+        ? usingBinoculars
+        : held?.type === 'torchlight'
+          ? usingTorchlight
+          : lastInput.usePrimary;
     heldView.update(held, camera.mode, frameDt, {
-      usePrimary: lastInput.usePrimary,
+      usePrimary: heldUse,
       moveMag: Math.min(1, Math.hypot(lastInput.moveX, lastInput.moveZ)),
       speedKmh: target.speedKmh,
       gumUseProgress,
@@ -1222,6 +1267,11 @@ async function boot(): Promise<void> {
     renderer.adaptResolution(adaptationEligible, driving === null);
     rebasedThisFrame = false;
     renderer.setHazeStrength(sky.dayFactor);
+    renderer.setItemViewEffects(
+      s.player.wornSunShades?.tint ?? null,
+      usingBinoculars,
+      usingTorchlight,
+    );
     renderer.render();
   };
 
@@ -1324,26 +1374,32 @@ async function boot(): Promise<void> {
       player.rigidBody,
     );
     const groundY = ground ? ground.point.y : eye.y;
-    const item: Item =
-      request.type === 'fluid_can'
-        ? {
-            type: 'fluid_can',
-            id: world.runtimePartId(),
-            fluid: request.fluid,
-            capacity: request.capacity,
-            litres: request.capacity,
-          }
-        : {
-            type: 'bubble_gum',
-            id: world.runtimePartId(),
-            charges: 5,
-          };
+    let item: Item;
+    switch (request.type) {
+      case 'fluid_can':
+        item = {
+          type: 'fluid_can',
+          id: world.runtimePartId(),
+          fluid: request.fluid,
+          capacity: request.capacity,
+          litres: request.capacity,
+        };
+        break;
+      case 'bubble_gum':
+        item = { type: 'bubble_gum', id: world.runtimePartId(), charges: 5 };
+        break;
+      case 'binoculars':
+        item = { type: 'binoculars', id: world.runtimePartId() };
+        break;
+      case 'torchlight':
+        item = { type: 'torchlight', id: world.runtimePartId() };
+        break;
+      case 'sun_shades':
+        item = { type: 'sun_shades', id: world.runtimePartId(), tint: request.tint };
+        break;
+    }
     loose.spawnItem(item, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
-    hud.setToast(
-      request.type === 'fluid_can'
-        ? `spawned ${request.capacity} L of ${request.fluid}`
-        : 'spawned bubble gum x5',
-    );
+    hud.setToast(`spawned ${itemLabel(item)}`);
   };
 
   /**

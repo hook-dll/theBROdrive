@@ -36,8 +36,12 @@ export interface InputFrame {
   interact: boolean;
   /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
   mount: boolean;
+  /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
+  useHeld: boolean;
   /** Drop the held item in front of the player: tap, consumed once by interaction. */
   dropItem: boolean;
+  /** Remove the currently worn item: tap, consumed by the wearable owner. */
+  removeWearable: boolean;
   /** Primary use of the held item: scrub, pour, fire. Held, not tapped. */
   usePrimary: boolean;
   /** Secondary use: aim down sights, precision placement. */
@@ -83,7 +87,9 @@ export function emptyInput(): InputFrame {
     recenterCamera: false,
     interact: false,
     mount: false,
+    useHeld: false,
     dropItem: false,
+    removeWearable: false,
     usePrimary: false,
     useSecondary: false,
     cycleItem: 0,
@@ -133,9 +139,11 @@ export const BINDABLE_ACTIONS: readonly {
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },
   { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
-  { id: 'interact', label: 'Interact', defaultKeys: ['KeyE'] },
+  { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
+  { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
   { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
   { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
+  { id: 'removeWearable', label: 'Remove worn item', defaultKeys: ['KeyG'] },
   { id: 'jump', label: 'Jump', defaultKeys: ['Space'] },
   { id: 'sprint', label: 'Sprint', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
   // X and Z are the gearbox; item cycling moves to the bracket keys, which nothing
@@ -507,7 +515,9 @@ export class InputReader {
     f.radioNext = this.anyPressed(this.keys.radioStation) || taps?.radioNext === true;
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
+    f.useHeld = this.anyPressed(this.keys.useHeld);
     f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
+    f.removeWearable = this.anyPressed(this.keys.removeWearable);
     // Both buttons are pedals while mouse-steering, so they must not also fire or
     // aim the held item. `mouseSteerEnabled` is only ever set while driving, so on
     // foot this is exactly the old behaviour.

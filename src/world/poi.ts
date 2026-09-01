@@ -625,6 +625,9 @@ function makeWorkingCar(
     id: ctx.world.generatedPartId('poi-car', poi.index, slot),
     modelId: def.id,
     gizmos: {},
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     stickers: [],
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),

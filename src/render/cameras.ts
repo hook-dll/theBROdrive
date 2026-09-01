@@ -91,6 +91,8 @@ const MAX_FOV = BASE_FOV + 14;
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
+/** Ten-power binoculars: magnification is the resting FOV divided by ten. */
+const BINOCULAR_FOV = BASE_FOV / 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
@@ -198,6 +200,7 @@ export class CameraRig {
   /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
 
+  private binoculars = false;
   /**
    * Interior sway state: previous frame's chassis position/local speeds for
    * the finite-difference accel estimate, the low-pass-filtered accel, and
@@ -261,6 +264,10 @@ export class CameraRig {
   get eyeDirection(): { x: number; y: number; z: number } {
     _vC.subVectors(this.lookAt, this.eye).normalize();
     return { x: _vC.x, y: _vC.y, z: _vC.z };
+  }
+
+  setBinoculars(active: boolean): void {
+    this.binoculars = active;
   }
 
   setMode(mode: CameraMode): void {
@@ -666,8 +673,9 @@ export class CameraRig {
   }
 
   private updateFov(speedKmh: number, dt: number): void {
-    const targetFov =
+    const normalFov =
       BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
+    const targetFov = this.binoculars ? BINOCULAR_FOV : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
     // Only touch the projection matrix when the value actually moved; calling
     // updateProjectionMatrix every frame is needless CPU for a slow-changing value.

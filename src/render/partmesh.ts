@@ -16,7 +16,14 @@
 import * as THREE from 'three';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant, WheelSpec } from '../parts/registry';
-import type { FluidKind, Item, QuarryItem, ToolKind, WeaponKind } from '../items/items';
+import type {
+  FluidKind,
+  Item,
+  QuarryItem,
+  ShadeTint,
+  ToolKind,
+  WeaponKind,
+} from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 
 // ---------------------------------------------------------------------------
@@ -768,6 +775,42 @@ function buildBubbleGumInto(b: MeshBuilder): void {
   }
 }
 
+function buildBinocularsInto(b: MeshBuilder): void {
+  const body = flat(0x252824, 0.75);
+  const rim = cond(0x444942, 0.65, 0.3);
+  const glass = flat(0x263d42, 0.35);
+  for (const x of [-0.065, 0.065]) {
+    b.cylinder('binocular_body', 0.047, 0.058, 0.18, 12, body, [x, 0, 0], AXIS_Z);
+    b.cylinder('binocular_rim', 0.061, 0.061, 0.018, 12, rim, [x, 0, 0.095], AXIS_Z);
+    b.cylinder('binocular_glass', 0.052, 0.052, 0.006, 12, glass, [x, 0, 0.106], AXIS_Z);
+  }
+  b.box('binocular_bridge', 0.09, 0.035, 0.08, body, [0, 0, 0]);
+  b.cylinder('binocular_focus', 0.018, 0.018, 0.05, 10, rim, [0, 0.045, 0], AXIS_Z);
+}
+
+function buildTorchlightInto(b: MeshBuilder): void {
+  const body = flat(0x343836, 0.7);
+  const metal = cond(0x737a76, 0.55, 0.65);
+  const lens = flat(0xfff1bd, 0.25);
+  b.cylinder('torch_body', 0.035, 0.042, 0.23, 12, body, [0, 0, 0], AXIS_Z);
+  b.cylinder('torch_head', 0.07, 0.045, 0.08, 12, metal, [0, 0, 0.155], AXIS_Z);
+  b.cylinder('torch_lens', 0.058, 0.058, 0.008, 12, lens, [0, 0, 0.2], AXIS_Z);
+  b.box('torch_switch', 0.025, 0.012, 0.045, metal, [0, 0.04, 0.015]);
+}
+
+function buildSunShadesInto(b: MeshBuilder, tint: ShadeTint): void {
+  const frame = flat(0x28251f, 0.65);
+  const lensColor = tint === 'green' ? 0x416a42 : tint === 'yellow' ? 0xb78e32 : 0x8b3934;
+  const lens = flat(lensColor, 0.35);
+  for (const x of [-0.052, 0.052]) {
+    b.box('shade_lens', 0.092, 0.054, 0.008, lens, [x, 0, 0]);
+  }
+  b.box('shade_bridge', 0.022, 0.012, 0.014, frame, [0, 0.01, 0]);
+  b.box('shade_top', 0.205, 0.012, 0.014, frame, [0, 0.034, 0]);
+  b.box('shade_arm_l', 0.012, 0.014, 0.16, frame, [-0.105, 0.025, -0.075]);
+  b.box('shade_arm_r', 0.012, 0.014, 0.16, frame, [0.105, 0.025, -0.075]);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -818,6 +861,14 @@ export function createItemMesh(item: Item): THREE.Object3D {
       setBubbleGumPieceCount(mesh, item.charges);
       return mesh;
     }
+    case 'binoculars':
+      return buildGroup(itemBlueprint('binoculars', buildBinocularsInto).instructions);
+    case 'torchlight':
+      return buildGroup(itemBlueprint('torchlight', buildTorchlightInto).instructions);
+    case 'sun_shades':
+      return buildGroup(
+        itemBlueprint(`sun_shades_${item.tint}`, (b) => buildSunShadesInto(b, item.tint)).instructions,
+      );
   }
 }
 

@@ -16,7 +16,7 @@ import {
 import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
-import type { FluidKind } from '../items/items';
+import type { FluidKind, ShadeTint } from '../items/items';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -129,7 +129,10 @@ const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: numbe
 
 export type DevSpawnItemRequest =
   | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
-  | { readonly type: 'bubble_gum' };
+  | { readonly type: 'bubble_gum' }
+  | { readonly type: 'binoculars' }
+  | { readonly type: 'torchlight' }
+  | { readonly type: 'sun_shades'; readonly tint: ShadeTint };
 
 function driveLayout(rearDriveBias: number): DriveLayout {
   if (rearDriveBias <= 0) return 'FWD';
@@ -424,11 +427,19 @@ export class MainMenu {
         });
       };
 
-      /** Label of the first other action bound to `code`, or null. */
+      /**
+       * Label of the first other action bound to `code`, or null. Two actions may
+       * deliberately share a key only when both declare it as a default; F uses
+       * that context-sensitive exception for world manipulation and vehicle entry.
+       */
       const holderOf = (code: string, exceptActionId: string): string | null => {
+        const except = BINDABLE_ACTIONS.find((action) => action.id === exceptActionId);
         for (const action of BINDABLE_ACTIONS) {
+          const intentionalSharedDefault =
+            except?.defaultKeys.includes(code) === true && action.defaultKeys.includes(code);
           if (
             action.id !== exceptActionId &&
+            !intentionalSharedDefault &&
             (settings.keyBindings[action.id] ?? action.defaultKeys).includes(code)
           ) {
             return action.label;
@@ -1266,10 +1277,35 @@ export class MainMenu {
           finish('resume');
         });
         list.appendChild(gumRow);
+
+        const equipment: readonly {
+          readonly label: string;
+          readonly detail: string;
+          readonly request: DevSpawnItemRequest;
+        }[] = [
+          { label: 'binoculars', detail: 'E toggle · 10x', request: { type: 'binoculars' } },
+          { label: 'torchlight', detail: 'E toggle beam', request: { type: 'torchlight' } },
+          { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
+          { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
+          { label: 'red sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'red' } },
+        ];
+        for (const spec of equipment) {
+          const row = button('menu-body', '');
+          const name = el('span', 'menu-body-label');
+          name.textContent = spec.label;
+          const detail = el('span', 'menu-body-class');
+          detail.textContent = spec.detail;
+          row.append(name, detail);
+          row.addEventListener('click', () => {
+            hooks.spawnItem?.(spec.request);
+            finish('resume');
+          });
+          list.appendChild(row);
+        }
         panel.appendChild(list);
 
         const note = el('div', 'menu-note');
-        note.textContent = 'a full can or gum pack drops at your feet';
+        note.textContent = 'selected item drops at your feet';
         panel.appendChild(note);
 
         backBtn.focus();

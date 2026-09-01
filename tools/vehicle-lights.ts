@@ -12,6 +12,8 @@ import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { disposeCarModelCache, preloadCarModels } from '../src/render/carmodel';
 import { VehicleLightRig } from '../src/render/vehiclelights';
 import { Vehicle } from '../src/vehicle/vehicle';
+import { carModel } from '../src/vehicle/carmodels';
+import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { WorldOrigin } from '../src/world/origin';
 
 class BunProgressEvent extends Event implements ProgressEvent {
@@ -44,8 +46,16 @@ function carState(index: number): CarState {
     modelId: MODEL_ID,
     gizmos: {},
     stickers: [],
-    fuelLitres: 40,
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     coolantLitres: 10,
+    bonnet: createBonnetStorage(
+      `vehicle-lights:${index}`,
+      carModel(MODEL_ID).engineId,
+      carModel(MODEL_ID).bodyClass,
+      carModel(MODEL_ID).tankLitres,
+    ),
     oilLitres: 10,
     storage: [],
     odometer: 0,
@@ -188,7 +198,12 @@ async function run(): Promise<void> {
       identities[0].intensity > 0 && identities[1].intensity > 0,
       `${identities[0].intensity}, ${identities[1].intensity}`,
     );
-
+    check(
+      'first active vehicle: light state is persisted',
+      world.state.cars['vehicle-lights:0']?.headlightMode === 'low' &&
+        world.state.cars['vehicle-lights:0']?.taillightsOn === true,
+      JSON.stringify(world.state.cars['vehicle-lights:0']),
+    );
     const secondDriver = vehicles[1];
     secondDriver.syncVisuals(1);
     rig.clear();
@@ -221,6 +236,7 @@ async function run(): Promise<void> {
     );
 
     while (vehicles.length > 0) vehicles.pop()!.dispose();
+    rig.clear();
     assertRigState(scene, rig, identities, targets, visibility, 'vehicles disposed');
     check('vehicles disposed: every rig slot remains dark', allZero(identities), identities.map((light) => light.intensity).join(', '));
 

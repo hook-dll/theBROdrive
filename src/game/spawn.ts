@@ -44,6 +44,9 @@ export function spawnCarState(
     modelId: request.modelId,
     gizmos: {},
     stickers: [],
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     // A complete model has no parts to age; fuel is its only fillable resource,
     // so a spawn leaves the showroom with a full tank — and full of both the
     // fluids it needs, because this is a dev tool and a dry one would just be a

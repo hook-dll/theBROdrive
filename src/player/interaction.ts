@@ -310,8 +310,8 @@ export class Interaction {
     this.continuous = null;
 
     if (this.world.state.player.drivingCarId) {
-      // Exit is edge-triggered, but a refusal stays up while the key is held so
-      // the prompt is visible instead of a single-tick flicker.
+      // Successful exit is self-evident. Only a refused moving exit needs a prompt,
+      // and it stays visible while F is held rather than flashing for one tick.
       let prompt: string | null = null;
       if (interactPressed) prompt = this.tryExit(roadS);
       else if (input.interact) prompt = this.exitRefused();
@@ -323,8 +323,9 @@ export class Interaction {
     const prompt = this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
-    if (mountPressed) this.mount(resolved);
-    if (interactPressed) this.tryEnter(resolved);
+    const worldActionPressed = mountPressed && this.mountHasPriority(resolved.target);
+    if (worldActionPressed) this.mount(resolved);
+    if (interactPressed && !worldActionPressed) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -542,14 +543,17 @@ export class Interaction {
         }
       }
 
-      // Bodywork, for sticking a sticker on. Deliberately a MESH raycast rather
-      // than the physics hit: the chassis collider is a box with its floor raised to
-      // the wheel centres, so a collider hit would place stickers in mid-air off the
-      // real silhouette. Only offered when there is actually a sticker to place, so
-      // it never competes with a mount or a fuel pour.
-      if (this.world.state.stickersUnplaced > 0 && vehicleDist <= VEHICLE_RANGE) {
+      // Bodywork supplies the "looking at the car" target used by vehicle entry.
+      // Specific anchors/storage keep priority when there is no sticker to place;
+      // with a sticker available, the nearest real surface competes as before.
+      if (vehicleDist <= VEHICLE_RANGE) {
         const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
-        if (surface) keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
+        if (
+          surface &&
+          (this.world.state.stickersUnplaced > 0 || bestDist === Infinity)
+        ) {
+          keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
+        }
       }
     }
 
@@ -640,6 +644,17 @@ export class Interaction {
     return this.getVehicle();
   }
 
+  /**
+   * F is both vehicle entry and world manipulation by default. A specific aimed
+   * target wins. Looking at plain car body enters it; that body only becomes a
+   * world-manipulation target while there is a sticker to place.
+   */
+  private mountHasPriority(target: Target): boolean {
+    if (target.kind === 'none') return false;
+    if (target.kind === 'car-body') return this.world.state.stickersUnplaced > 0;
+    return true;
+  }
+
   private promptFor(resolved: Resolved): string | null {
     const held = this.inventory.held;
     const t = resolved.target;
@@ -718,10 +733,8 @@ export class Interaction {
       return `empty trunk cell ${t.cell + 1}`;
     }
 
-    if (t.kind === 'car-body') {
-      const spare = this.world.state.stickersUnplaced;
-      if (spare <= 0) return null;
-      return `[F] stick it on — ${spare} to place`;
+    if (t.kind === 'car-body' && this.world.state.stickersUnplaced > 0) {
+      return `[F] stick it on — ${this.world.state.stickersUnplaced} to place`;
     }
 
     if (t.kind === 'trailer') {
@@ -771,7 +784,15 @@ export class Interaction {
       return this.pourPrompt(held, resolved.carId, resolved.vehicle);
     }
 
-    // Car entry remains bound to the interaction key; no enter hint is drawn.
+    if (
+      t.kind === 'car-body' &&
+      resolved.vehicle &&
+      resolved.carId &&
+      resolved.vehicleDist < VEHICLE_RANGE
+    ) {
+      const car = this.world.state.cars[resolved.carId];
+      return car ? `[F] enter ${carModel(car.modelId).label}` : '[F] enter vehicle';
+    }
     return null;
   }
 
@@ -1130,7 +1151,11 @@ export class Interaction {
 
   private tryEnter(resolved: Resolved): void {
     if (!resolved.vehicle || !resolved.carId) return;
-    if (resolved.vehicleDist >= VEHICLE_RANGE) return;
+    if (
+      resolved.target.kind !== 'car-body' ||
+      resolved.target.carId !== resolved.carId ||
+      resolved.vehicleDist >= VEHICLE_RANGE
+    ) return;
     this.world.apply({ t: 'enter_car', carId: resolved.carId });
     this.player?.setEnabled(false);
     this.sound = 'enter-car';
