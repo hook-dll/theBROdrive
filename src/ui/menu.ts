@@ -202,6 +202,14 @@ export interface PauseHooks {
    */
   spawnItem?: (request: DevSpawnItemRequest) => void;
   /**
+   * Flips the driven car — or, on foot, the nearest car or trailer — back onto its
+   * wheels. Dev-only: the shipping recovery for a car on its roof is a bubble-gum
+   * charge chewed next to it, which costs a consumable and takes eight seconds, and
+   * a free instant righting from the pause menu would retire that item. When the
+   * hook is absent the button is never built.
+   */
+  flipVehicle?: () => void;
+  /**
    * The LIVE world state, for "Export Save Code".
    *
    * This used to be rebuilt from the two numbers the overlay happens to display
@@ -612,6 +620,16 @@ export class MainMenu {
           const itemBtn = button('menu-button', 'Spawn Item (dev)');
           itemBtn.addEventListener('click', () => showScreen('item'));
           panel.appendChild(itemBtn);
+        }
+        // No picker for this one either: the target is whatever the player is in or
+        // standing next to, decided by main, so the button is the whole surface.
+        if (import.meta.env.DEV && hooks.flipVehicle) {
+          const flipBtn = button('menu-button', 'Flip Car (dev)');
+          flipBtn.addEventListener('click', () => {
+            hooks.flipVehicle?.();
+            finish('resume');
+          });
+          panel.appendChild(flipBtn);
         }
         panel.append(saveBtn, exportBtn, quitBtn);
 
