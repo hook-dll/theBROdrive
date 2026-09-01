@@ -201,23 +201,45 @@ const LATERAL_GRIP_FALLOFF_END_MPS = 40;
 /**
  * Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all).
  *
- * This is the lever that makes the car's instability SPEED-TRIGGERED rather than
- * always-on, which is the whole target feel: planted in a straight line, honest
- * through a slow curve, and something you have to catch once you have carried too
- * much speed into it. 0.42 means a third-gear corner is still a corner and a
- * flat-out one has lost nearly half its cornering force.
+ * This is the lever that makes instability SPEED-TRIGGERED rather than always-on:
+ * planted in a straight line, honest through a slow curve, and something to catch
+ * once too much speed has been carried in.
+ *
+ * Cut from 0.42 with the whole reason it existed inverted. Against Rapier's
+ * velocity-cancelling constraint, shedding grip could not make the car floaty: an
+ * infinitely stiff axle at 58% of its capacity is still infinitely stiff, so the
+ * number only decided WHEN the rail let go. Against a real curve it removes
+ * CORNERING STIFFNESS too, and that is what a car sliding "as if on an air cushion"
+ * at speed is: reported from play, along with the rear stepping out slightly and
+ * constantly in FWD and RWD alike, because the rear sheds REAR_SPEED_LOSS_GAIN more
+ * of it than the front.
+ *
+ * There is a third symptom the same number caused, and it is the one that proves the
+ * mechanism: TOP SPEED DROPPED. Side force acts perpendicular to the WHEEL, not to
+ * the car's path, so a tyre carrying a slip angle spends `Fy · sin(alpha)` of it
+ * pointing backwards. That is cornering drag, and it is real — but with soft tyres
+ * the straight-line slip needed to hold a camber runs a few degrees, and a few
+ * degrees of a 0.85 g tyre is several hundred newtons of it. On the same order as the
+ * aerodynamic drag the top speed is set by.
+ *
+ * 0.18 keeps the character — a flat-out corner has meaningfully less grip than a
+ * third-gear one — without paying for it in stiffness the car needs everywhere.
  */
-const LATERAL_GRIP_MAX_LOSS = 0.42;
+const LATERAL_GRIP_MAX_LOSS = 0.18;
 /**
  * Rear-axle lateral grip, as a fraction of the front's.
  *
- * A live axle on leaf springs steers itself under roll and load: the axle tramps,
- * the springs wind up, and the outer tyre runs at a slip angle the driver never
- * asked for. With the rear brake bias and the mostly-RWD catalogue, this 6% is what
- * makes the TAIL the end that goes first — the car has to be driven, not aimed, and
- * it will not catch itself.
+ * A live axle on leaf springs steers itself under roll and load: the axle tramps, the
+ * springs wind up, and the outer tyre runs at a slip angle the driver never asked for.
+ *
+ * 0.95, not 0.89. The old figure was authored to make the tail the end that goes, back
+ * when nothing else could: the constraint model had no load transfer worth the name and
+ * no combined-slip trade, so balance had to be written in by hand. Both exist now —
+ * mu(Fz) means the loaded outer tyre gives up first and the friction ellipse means a
+ * driven rear spends its side grip on power — so the authored deficit is stacked on top
+ * of emergent ones, and the stack was the rear sliding in every corner in every car.
  */
-const REAR_AXLE_SIDE_GRIP = 0.89;
+const REAR_AXLE_SIDE_GRIP = 0.95;
 
 // ---------------------------------------------------------------------------
 // Slip angle: the difference between a car that PLOUGHS and one you can catch.
@@ -296,6 +318,24 @@ const REAR_AXLE_SIDE_GRIP = 0.89;
  */
 const SLIP_PEAK_FRONT_DEG = 8;
 const SLIP_PEAK_REAR_DEG = 6;
+/**
+ * Sharpness of the rise to peak: `tanh(k · a/a_peak) / tanh(k)`.
+ *
+ * A quarter sine was the first shape, and it is too soft where a tyre is stiffest. A
+ * real carcass does most of its work in the first degree or two and then rounds over;
+ * a sine spreads the same rise evenly across the whole approach, so the car floated
+ * around centre and needed real slip to hold a camber — which is both the "air
+ * cushion" feel reported from play and, through cornering drag, the lost top speed.
+ *
+ * At k = 2.2 the initial slope is 2.2/tanh(2.2) ≈ 2.28 against the sine's 1.57, so
+ * the tyre is about 45% stiffer in the degrees ordinary driving lives in, with the
+ * peak, the plateau and the ultimate capacity all exactly where they were. The slip a
+ * given corner runs comes down with it: 0.7 g now arrives at about 4.3 degrees rather
+ * than 5, still inside the 4-6 the model is built around.
+ */
+const SLIP_CURVE_SHARPNESS = 2.2;
+/** `tanh(k)`, so the shape normalises to exactly 1 at the peak without a per-wheel call. */
+const TANH_SHARPNESS = Math.tanh(SLIP_CURVE_SHARPNESS);
 /** Slip angle (deg) by which the fade is complete and the plateau has been reached. */
 const SLIP_FULL_FRONT_DEG = 26;
 const SLIP_FULL_REAR_DEG = 22;
@@ -557,8 +597,18 @@ const LONGITUDINAL_GRIP_FRACTION = 0.38;
 const SLIP_REFERENCE_MPS = 1.5;
 /** Slip ratio at or below which a wheel counts as locked and sliding. */
 const LOCK_SLIP_RATIO = -0.5;
-/** Load low-pass (s): ray-cast suspension force is spiky over collider seams. */
-const WHEEL_LOAD_TAU = 0.04;
+/**
+ * Load low-pass, seconds: the ray-cast suspension force is spiky over collider seams,
+ * and a spike is not a load.
+ *
+ * Halved to 0.02 — about one and a half fixed steps, so a single-step seam artefact is
+ * still swallowed while a real bump is not. What it was smoothing away is the point of
+ * a rough road: capacity is proportional to load, so a wheel going light over a crest
+ * SHOULD lose its grip and hand the driver a moment to catch, and at 0.04 s that
+ * moment was averaged into the two steps either side of it. Reported from play as
+ * uneven surfaces having stopped providing any thrill at speed.
+ */
+const WHEEL_LOAD_TAU = 0.02;
 /**
  * Slip ratio at which a tyre makes its peak longitudinal force.
  *
@@ -2626,7 +2676,8 @@ export class Vehicle implements Rebasable {
       const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
       const slipDeg = (w.slipAngleRad * 180) / Math.PI;
       const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
-      const risen = Math.sin((Math.PI / 2) * Math.min(slipDeg / peakDeg, 1));
+      const risen =
+        Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
       const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
 
       // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
