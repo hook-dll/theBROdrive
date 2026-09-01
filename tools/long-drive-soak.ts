@@ -12,6 +12,7 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { WorldWorkScheduler } from '../src/world/workqueue';
+import { installDocumentShim } from './domshim';
 
 const SEED = 1337;
 const START_S = 1_000;
@@ -83,110 +84,7 @@ function assertSteadyStatePlateau(
   }
 }
 
-interface SoakImageData {
-  readonly data: Uint8ClampedArray;
-  readonly width: number;
-  readonly height: number;
-}
-
-interface SoakCanvasContext {
-  filter: string;
-  fillStyle: string;
-  font: string;
-  lineCap: CanvasLineCap;
-  lineJoin: CanvasLineJoin;
-  lineWidth: number;
-  strokeStyle: string;
-  textAlign: CanvasTextAlign;
-  textBaseline: CanvasTextBaseline;
-  createImageData(width: number, height: number): SoakImageData;
-  putImageData(imageData: SoakImageData, x: number, y: number): void;
-  getImageData(x: number, y: number, width: number, height: number): SoakImageData;
-  beginPath(): void;
-  moveTo(x: number, y: number): void;
-  lineTo(x: number, y: number): void;
-  stroke(): void;
-  strokeRect(x: number, y: number, width: number, height: number): void;
-  fillText(text: string, x: number, y: number, maxWidth?: number): void;
-  save(): void;
-  restore(): void;
-  translate(x: number, y: number): void;
-  fillRect(x: number, y: number, width: number, height: number): void;
-}
-
-class SoakCanvas {
-  width = 300;
-  height = 150;
-  #pixels = new Uint8ClampedArray();
-
-  readonly context: SoakCanvasContext = {
-    filter: 'none',
-    fillStyle: '',
-    font: '',
-    lineCap: 'butt',
-    lineJoin: 'miter',
-    lineWidth: 1,
-    strokeStyle: '',
-    textAlign: 'start',
-    textBaseline: 'alphabetic',
-    createImageData: (width, height) => ({
-      data: new Uint8ClampedArray(width * height * 4),
-      width,
-      height,
-    }),
-    putImageData: (imageData, x, y) => {
-      if (x !== 0 || y !== 0 || imageData.width !== this.width || imageData.height !== this.height) {
-        throw new Error('soak canvas only supports full-canvas image data');
-      }
-      this.#pixels = imageData.data;
-    },
-    getImageData: (x, y, width, height) => {
-      if (x !== 0 || y !== 0 || width !== this.width || height !== this.height) {
-        throw new Error('soak canvas only supports full-canvas image data');
-      }
-      return { data: this.#pixels, width, height };
-    },
-    beginPath: () => {},
-    moveTo: () => {},
-    lineTo: () => {},
-    stroke: () => {},
-    strokeRect: () => {},
-    fillText: () => {},
-    save: () => {},
-    restore: () => {},
-    translate: () => {},
-    fillRect: () => {},
-  };
-
-  getContext(contextId: string): SoakCanvasContext | null {
-    if (contextId !== '2d') return null;
-    return this.context;
-  }
-}
-
-function installSoakDocumentShim(): () => void {
-  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  const documentShim: Pick<Document, 'createElement'> = {
-    createElement: ((tagName: string): HTMLCanvasElement => {
-      if (tagName !== 'canvas') throw new Error(`soak document cannot create <${tagName}>`);
-      return new SoakCanvas() as unknown as HTMLCanvasElement;
-    }) as Document['createElement'],
-  };
-  Object.defineProperty(globalThis, 'document', {
-    configurable: true,
-    value: documentShim,
-    writable: true,
-  });
-  return () => {
-    if (previousDocument) {
-      Object.defineProperty(globalThis, 'document', previousDocument);
-    } else {
-      Reflect.deleteProperty(globalThis, 'document');
-    }
-  };
-}
-
-const restoreDocument = installSoakDocumentShim();
+const restoreDocument = installDocumentShim();
 // Match production boot: texture canvas generation is a loading-phase cost, not
 // scheduler work charged to the first streamed road chunk.
 roadTextures();

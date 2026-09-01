@@ -125,6 +125,11 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
   const t0 = performance.now();
   const content = provider.build(ctx);
   buildMs += performance.now() - t0;
+  // Providers hand over DISABLED colliders; `ChunkStreamer.attachContent` is what
+  // switches them on when the contribution lands (see ChunkContent.colliders). This
+  // tool drives the provider directly, so it has to do the streamer's job before any
+  // ray can hit anything.
+  for (const collider of content.colliders) collider.setEnabled(true);
   physics.step();
   chunks++;
   colliderCount += content.colliders?.length ?? 0;

@@ -65,7 +65,16 @@ export interface ChunkContent {
    * collider constructors return only the collider, not the body.
    */
   bodies: RAPIER.RigidBody[];
-  /** Informational; the streamer removes via `bodies`, never this array. */
+  /**
+   * Every collider this chunk created, in the order it created them.
+   *
+   * The streamer removes via `bodies`, never this array — but it does ENABLE via
+   * this array. Providers build colliders disabled and hand them over here; the
+   * streamer switches them on in `attachContent`, i.e. in the same call that puts
+   * the chunk's visuals in the scene. A provider therefore cannot leak a live
+   * collider from a half-built chunk, and — the bug this replaced — cannot forget
+   * to switch its own colliders on either.
+   */
   colliders: RAPIER.Collider[];
   /**
    * Provider-specific cleanup for everything the provider created and owns.
@@ -577,6 +586,10 @@ export class ChunkStreamer {
     content.group.position.x = originX - this.origin.x;
     content.group.position.z = originZ - this.origin.z;
     this.scene.add(content.group);
+    // The one place a chunk's colliders join the simulation. Incremental providers
+    // yield mid-build, so a collider created early must not be solid until the mesh
+    // and any breakable registration that names it exist.
+    for (const collider of content.colliders) collider.setEnabled(true);
   }
 
   private teardownContent(content: ChunkContent): boolean {

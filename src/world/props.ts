@@ -529,6 +529,10 @@ function scaledHull(geometry: THREE.BufferGeometry, scale: number): RAPIER.Colli
  * passes an ABSOLUTE position (the road/terrain sample it was placed from); the
  * origin subtraction happens here, once, so no caller can forget it and Rapier
  * never holds an f32 quantised by an absolute coordinate.
+ *
+ * Returns a DISABLED collider: `ChunkStreamer.attachContent` switches on everything
+ * in `ChunkContent.colliders` when the contribution lands. Poles and monuments were
+ * silently non-solid for exactly as long as that was each provider's own job.
  */
 function addStatic(
   ctx: ChunkContext,
@@ -850,11 +854,9 @@ export class ScatterProvider implements ChunkProvider {
       }
     }
 
-    // Incremental colliders remain out of the simulation until every visual mesh and
-    // breakable registration is ready. Enable them in the same completion call that
-    // hands the content to ChunkStreamer.
-    for (const collider of colliders) collider.setEnabled(true);
-
+    // Colliders are created disabled and switched on by ChunkStreamer once this
+    // contribution is attached, after every mesh and breakable registration exists
+    // (see ChunkContent.colliders).
     completed = true;
     return {
       group,
