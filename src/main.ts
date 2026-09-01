@@ -140,6 +140,12 @@ const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
 const GUM_USE_SECONDS = GUM_CHEW_SECONDS + GUM_GROW_SECONDS;
 const GUM_FLIP_RADIUS = 0.5;
+/**
+ * Reach of the dev pause-menu flip, metres, measured from the player to a body
+ * centre. Wide enough to right a car from wherever you got out of it, and short
+ * enough that it cannot reach past one wreck to another at a gas stop.
+ */
+const DEV_FLIP_RADIUS = 12;
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
 
@@ -1409,6 +1415,57 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * The dev righting tool behind `PauseHooks.flipVehicle`.
+   *
+   * Seated, it targets the car being driven — no proximity test can be wrong about
+   * that one. On foot it takes the nearest car or trailer within `DEV_FLIP_RADIUS`,
+   * which is deliberately looser than the gum's `GUM_FLIP_RADIUS` contact test: the
+   * gum is a consumable the player has to walk up to and chew, this is a button.
+   * Both end in the same `flipOver`, so a dev flip and a popped bubble leave the
+   * vehicle in exactly the same state.
+   */
+  const devFlipVehicle = (): void => {
+    // `world.state.player.drivingCarId`, NOT `activeCar()`: that helper falls back to
+    // the nearest car with no distance limit, so on foot it would right a car a
+    // kilometre away and never consider a trailer.
+    const drivingId = world.state.player.drivingCarId;
+    const driven = drivingId ? vehicles.get(drivingId) : undefined;
+    if (driven) {
+      driven.flipOver();
+      hud.setToast('flipped the car you are driving');
+      return;
+    }
+    const p = player.position;
+    let nearest: { flipOver(): void } | null = null;
+    let nearestKind: 'car' | 'trailer' | null = null;
+    let nearestDistSq = DEV_FLIP_RADIUS * DEV_FLIP_RADIUS;
+    for (const vehicle of vehicles.values()) {
+      const t = vehicle.chassis.translation();
+      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+      if (distSq < nearestDistSq) {
+        nearest = vehicle;
+        nearestKind = 'car';
+        nearestDistSq = distSq;
+      }
+    }
+    trailerField.forEach((trailer) => {
+      const t = trailer.rigidBody.translation();
+      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+      if (distSq < nearestDistSq) {
+        nearest = trailer;
+        nearestKind = 'trailer';
+        nearestDistSq = distSq;
+      }
+    });
+    nearest?.flipOver();
+    hud.setToast(
+      nearestKind === null
+        ? `no car or trailer within ${DEV_FLIP_RADIUS} m`
+        : `flipped the nearest ${nearestKind}`,
+    );
+  };
+
+  /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
    * rather than being held in the menu: the menu is a view, not an owner.
@@ -1458,6 +1515,9 @@ async function boot(): Promise<void> {
     // Same fold again: found consumables are the whole supply economy, so the
     // item dispenser exists only while developing.
     spawnItem: import.meta.env.DEV ? devSpawnItem : undefined,
+    // Same fold once more: righting a rolled car is what a gum charge is FOR, so the
+    // free instant version is a development tool and nothing else.
+    flipVehicle: import.meta.env.DEV ? devFlipVehicle : undefined,
   };
 
   /**
