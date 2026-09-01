@@ -217,6 +217,22 @@ export class HeldItemView {
         roll += GUM_MOUTH_ROLL * reach;
       }
       setBubbleGumPieceCount(this.mesh, pieceCount);
+    } else if (item?.type === 'binoculars') {
+      this.useT = ramp(this.useT, use, USE_RAMP * 1.5, d);
+      // Once the ocular mask is live the physical model is behind the player's
+      // eyes; drawing its barrels over the magnified view is both wrong and noisy.
+      this.mesh.visible = !use;
+      pitch -= TILT_PITCH;
+      yaw += Math.PI - TILT_YAW;
+      roll -= TILT_ROLL;
+    } else if (item?.type === 'torchlight') {
+      this.useT = ramp(this.useT, use, USE_RAMP, d);
+      // Item primitives point down local +Z; camera forward is local -Z.
+      pitch -= TILT_PITCH;
+      yaw += Math.PI - TILT_YAW;
+      roll -= TILT_ROLL;
+      oy += this.useT * 0.035;
+      pitch += this.useT * 0.08;
     } else if (item?.type === 'tool') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       if (item.tool === 'brush' || item.tool === 'sponge') {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AdaptiveResolutionController } from './adaptivequality';
 import type { GraphicsQuality } from '../game/settings';
+import type { ShadeTint } from '../items/items';
 
 /**
  * Renderer, scene and camera ownership.
@@ -181,6 +182,9 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uCellDepth;
   uniform float uInkStrength;
   uniform float uInkThreshold;
+  uniform vec3 uViewTint;
+  uniform float uViewTintStrength;
+  uniform float uBinoculars;
 
   varying vec2 vUv;
 
@@ -306,6 +310,18 @@ const HAZE_FRAGMENT = /* glsl */ `
       color.rgb = mix(color.rgb, color.rgb * 0.34, ink);
     }
 
+    // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
+    // retained channels stay bright while the others are absorbed.
+    color.rgb *= mix(vec3(1.0), uViewTint, uViewTintStrength);
+
+    // Two separated circular ocular fields. Aspect correction makes lensUv square;
+    // the small overlap preserves binocular fusion without reading as one wide oval.
+    vec2 lensUv = vec2((vUv.x - 0.5) * uResolution.x / uResolution.y, vUv.y - 0.5);
+    float leftEye = 1.0 - smoothstep(0.335, 0.35, length(lensUv - vec2(-0.27, 0.0)));
+    float rightEye = 1.0 - smoothstep(0.335, 0.35, length(lensUv - vec2(0.27, 0.0)));
+    float ocular = max(leftEye, rightEye);
+    color.rgb *= mix(1.0, ocular, uBinoculars);
+
     gl_FragColor = color;
   }
 `;
@@ -347,6 +363,9 @@ export class Renderer {
    * standing eye so the very first frame is sensible before the loop has supplied one.
    */
   private hazeEyeHeight = 1.6;
+  /** Hand torch projected from the rendered eye; disabled rather than recreated. */
+  private readonly torchLight: THREE.SpotLight;
+  private readonly torchTarget = new THREE.Object3D();
 
 
   /**
@@ -446,6 +465,9 @@ export class Renderer {
         uCellDepth: { value: HAZE_CELL_DEPTH_SCALE },
         uInkStrength: { value: INK_STRENGTH },
         uInkThreshold: { value: INK_THRESHOLD },
+        uViewTint: { value: new THREE.Color(1, 1, 1) },
+        uViewTintStrength: { value: 0 },
+        uBinoculars: { value: 0 },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -458,6 +480,12 @@ export class Renderer {
     hazeMesh.frustumCulled = false; // clip-space triangle spans far outside the frustum
     this.hazeScene.add(hazeMesh);
 
+    this.torchLight = new THREE.SpotLight(0xffedbd, 150, 65, 0.32, 0.58, 1.7);
+    this.torchLight.visible = false;
+    this.torchLight.castShadow = false;
+    this.torchLight.target = this.torchTarget;
+    this.scene.add(this.torchLight, this.torchTarget);
+
 
     this.resize();
     window.addEventListener('resize', this.resize);
@@ -469,9 +497,30 @@ export class Renderer {
     this.hazeTarget.dispose();
     this.hazeMaterial.dispose();
     this.hazeGeometry.dispose();
+    this.scene.remove(this.torchLight, this.torchTarget);
+    this.torchLight.dispose();
     this.renderer.dispose();
   }
 
+
+  /** Updates inexpensive player-held/worn view effects without allocating. */
+  setItemViewEffects(shades: ShadeTint | null, binoculars: boolean, torchlight: boolean): void {
+    const tint = this.hazeMaterial.uniforms.uViewTint.value as THREE.Color;
+    if (shades === 'green') tint.setRGB(0.56, 0.86, 0.52);
+    else if (shades === 'yellow') tint.setRGB(0.95, 0.78, 0.42);
+    else if (shades === 'red') tint.setRGB(0.88, 0.42, 0.35);
+    else tint.setRGB(1, 1, 1);
+    this.hazeMaterial.uniforms.uViewTintStrength.value = shades === null ? 0 : 0.72;
+    this.hazeMaterial.uniforms.uBinoculars.value = binoculars ? 1 : 0;
+
+    this.torchLight.visible = torchlight;
+    if (torchlight) {
+      this.torchLight.position.copy(this.camera.position);
+      this.camera.getWorldDirection(this._forward);
+      this.torchTarget.position.copy(this.camera.position).addScaledVector(this._forward, 25);
+      this.torchTarget.updateMatrixWorld();
+    }
+  }
 
   private pixelRatioFor(quality: GraphicsQuality): number {
     return Math.min(

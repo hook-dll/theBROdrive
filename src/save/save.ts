@@ -3,6 +3,7 @@ import { parseCalendarEpoch } from '../game/calendar';
 import { newWorldState } from '../game/state';
 import type {
   CarState,
+  HeadlightMode,
   JobState,
   PlayerState,
   StickerState,
@@ -65,6 +66,7 @@ export function installVehicleAutosave(
       case 'exit_car':
       case 'car_storage':
       case 'car_bonnet':
+      case 'car_lights':
       case 'wreck_storage':
       case 'trailer_hitch':
       case 'trailer_cargo':
@@ -355,6 +357,11 @@ export function migrateState(raw: unknown): WorldState {
   // the honest reading of that, and matches what those saves loaded as before.
   const carriedRaw = Array.isArray(playerRaw.carried) ? playerRaw.carried : [];
   const carried: Item[] = carriedRaw.map((value, i) => migrateItem(value, `carried slot ${i}`));
+  const wornRaw = playerRaw.wornSunShades;
+  const wornItem = wornRaw == null ? null : migrateItem(wornRaw, 'worn sun shades');
+  if (wornItem !== null && wornItem.type !== 'sun_shades') {
+    throw new Error('Save data is malformed: worn item is not sun shades');
+  }
 
   const player: PlayerState = {
     x: numOr(playerRaw.x, dp.x),
@@ -369,6 +376,7 @@ export function migrateState(raw: unknown): WorldState {
       Math.max(0, Math.trunc(numOr(playerRaw.carriedSelected, 0))),
       Math.max(0, carried.length - 1),
     ),
+    wornSunShades: wornItem,
   };
 
   const cars: Record<string, CarState> = {};
@@ -537,11 +545,19 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     ? savedFuelKind ?? variant(def.engineId).engine?.fuel ?? null
     : null;
 
+  const headlightMode: HeadlightMode =
+    raw.headlightMode === 'low' || raw.headlightMode === 'high' ? raw.headlightMode : 'off';
+  const taillightsOn = raw.taillightsOn === true;
+  const reverseLightsOn = raw.reverseLightsOn === true;
+
   return {
     id: raw.id,
     modelId,
     gizmos,
     stickers,
+    headlightMode,
+    taillightsOn,
+    reverseLightsOn,
     fuelLitres,
     fuelKind,
     coolantLitres: Math.max(0, numOr(raw.coolantLitres, 0)),
@@ -653,6 +669,17 @@ function migrateItem(raw: unknown, where: string): Item {
         id: obj.id,
         charges: Math.min(5, Math.max(1, Math.trunc(numOr(obj.charges, 5)))),
       };
+    case 'binoculars':
+      return { type: 'binoculars', id: obj.id };
+    case 'torchlight':
+      return { type: 'torchlight', id: obj.id };
+    case 'sun_shades': {
+      const tint = obj.tint;
+      if (tint !== 'green' && tint !== 'yellow' && tint !== 'red') {
+        throw new Error(`Save data is malformed: item at ${where} has an invalid shade tint`);
+      }
+      return { type: 'sun_shades', id: obj.id, tint };
+    }
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);
   }

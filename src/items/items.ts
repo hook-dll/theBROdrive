@@ -11,6 +11,7 @@ import { variant } from '../parts/registry';
 
 export type ToolKind = 'brush' | 'sponge' | 'wrench';
 export type WeaponKind = 'rifle' | 'shotgun';
+export type ShadeTint = 'green' | 'yellow' | 'red';
 
 /**
  * Everything that can be poured into a car.
@@ -80,6 +81,22 @@ export interface BubbleGumItem {
   charges: number;
 }
 
+export interface BinocularItem {
+  readonly type: 'binoculars';
+  readonly id: string;
+}
+
+export interface TorchlightItem {
+  readonly type: 'torchlight';
+  readonly id: string;
+}
+
+export interface SunShadesItem {
+  readonly type: 'sun_shades';
+  readonly id: string;
+  readonly tint: ShadeTint;
+}
+
 export type Item =
   | ToolItem
   | PartItem
@@ -87,7 +104,10 @@ export type Item =
   | WeaponItem
   | AmmoItem
   | QuarryItem
-  | BubbleGumItem;
+  | BubbleGumItem
+  | BinocularItem
+  | TorchlightItem
+  | SunShadesItem;
 
 /**
  * Density, kg/litre. Petrol and diesel are the light ones; coolant is basically
@@ -119,6 +139,12 @@ export function itemLabel(item: Item): string {
       return item.species;
     case 'bubble_gum':
       return `bubble gum x${item.charges}`;
+    case 'binoculars':
+      return 'binoculars';
+    case 'torchlight':
+      return 'torchlight';
+    case 'sun_shades':
+      return `${item.tint} sun shades`;
   }
 }
 
@@ -140,6 +166,12 @@ export function itemMass(item: Item): number {
       return item.mass;
     case 'bubble_gum':
       return 0.02;
+    case 'binoculars':
+      return 0.75;
+    case 'torchlight':
+      return 0.45;
+    case 'sun_shades':
+      return 0.08;
   }
 }
 

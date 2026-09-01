@@ -1102,10 +1102,12 @@ export class Vehicle implements Rebasable {
   private taillightMounts: VehicleBeamMount[] = [];
   private reverseLightMounts: VehicleBeamMount[] = [];
   private headlightEnvironmentFactor = 1;
-  private headlightMode: HeadlightMode = 'off';
+  private headlightMode: HeadlightMode;
   private headlightLensMeshes: THREE.Mesh[] = [];
   private taillightLensMeshes: THREE.Mesh[] = [];
   private reverseLightLensMeshes: THREE.Mesh[] = [];
+  /** Keep a loaded lamp snapshot visible until the first simulation step re-evaluates it. */
+  private restoredLightStatePending = true;
   private readonly headlightLensMaterials: EmissiveMaterial[] = [];
   private readonly taillightMaterials: EmissiveMaterial[] = [];
   private readonly reverseLightMaterials: EmissiveMaterial[] = [];
@@ -1306,6 +1308,7 @@ export class Vehicle implements Rebasable {
     this.origin = origin;
     this.model = carModel(carState.modelId);
     this.measure = carModelMeasure(carState.modelId);
+    this.headlightMode = carState.headlightMode;
 
     const half = this.measure.halfExtents;
     // Frontal area 4·hx·hy; 0.5·ρ·Cd collapses to the constant below.
@@ -1461,12 +1464,13 @@ export class Vehicle implements Rebasable {
 
   /** Off -> dipped beam -> high beam -> off. */
   cycleHeadlights(): void {
+    this.restoredLightStatePending = false;
     this.headlightMode =
       this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
     this.applyHeadlightMode();
     this.applyRearLightState();
+    this.pushLightState();
   }
-
   toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
     this.indicatorSide = this.indicatorSide === side ? 'off' : side;
     this.indicatorElapsed = 0;
@@ -1670,6 +1674,7 @@ export class Vehicle implements Rebasable {
   settle(dt: number): void {
     const controller = this.controller;
     if (!controller) return;
+    this.restoredLightStatePending = false;
 
     const n = this.wheels.length;
     // Being shoved suspends the hold, not the brake. The hold is a teleport — it
@@ -1912,6 +1917,9 @@ export class Vehicle implements Rebasable {
     }
     this.odoEmitTimer = 0;
     this.pushTransform();
+    this.restoredLightStatePending = false;
+    this.applyRearLightState();
+    this.pushLightState();
   }
 
   /** Pushes the current chassis pose into state immediately. */
@@ -1933,10 +1941,29 @@ export class Vehicle implements Rebasable {
     });
   }
 
+  private pushLightState(): void {
+    const taillightsOn = this.rearLightState > 0;
+    const reverseLightsOn = this.reverseLightState;
+    if (
+      this.car.headlightMode === this.headlightMode &&
+      this.car.taillightsOn === taillightsOn &&
+      this.car.reverseLightsOn === reverseLightsOn
+    ) {
+      return;
+    }
+    this.world.apply({
+      t: 'car_lights',
+      carId: this.car.id,
+      headlightMode: this.headlightMode,
+      taillightsOn,
+      reverseLightsOn,
+    });
+  }
 
   fixedUpdate(dt: number, input: InputFrame): void {
     const controller = this.controller;
     if (!controller) return;
+    this.restoredLightStatePending = false;
 
     const stats = this.statsValue;
 
@@ -3310,8 +3337,13 @@ export class Vehicle implements Rebasable {
   }
 
   private applyRearLightState(force = false): void {
-    const next =
-      this.brakeLightCommand > 0.03 ? 2 : this.headlightMode === 'off' ? 0 : 1;
+    const next = this.restoredLightStatePending
+      ? (this.car.taillightsOn ? 1 : 0)
+      : this.brakeLightCommand > 0.03
+        ? 2
+        : this.headlightMode === 'off'
+          ? 0
+          : 1;
     if (force || next !== this.rearLightState) {
       this.rearLightState = next;
       const intensity = next === 2 ? 6 : next === 1 ? 0.55 : 0;
@@ -3327,7 +3359,9 @@ export class Vehicle implements Rebasable {
             : 0;
       this.taillightBeamIntensity = authoredBeamIntensity * this.headlightEnvironmentFactor;
     }
-    const reversing = this.drivetrain.gearLabel === 'R';
+    const reversing = this.restoredLightStatePending
+      ? this.car.reverseLightsOn
+      : this.drivetrain.gearLabel === 'R';
     if (!force && reversing === this.reverseLightState) return;
     this.reverseLightState = reversing;
     for (const material of this.reverseLightMaterials) {

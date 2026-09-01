@@ -23,6 +23,9 @@ initial.cars['car:test'] = {
   modelId: DEFAULT_CAR_MODEL_ID,
   gizmos: {},
   stickers: [],
+  headlightMode: 'off',
+  taillightsOn: false,
+  reverseLightsOn: false,
   fuelLitres: 20,
   coolantLitres: 4,
   oilLitres: 3,
@@ -134,6 +137,21 @@ check('save code keeps car pose', roundTrip.cars['car:test']?.x === 104, `x ${ro
 check('save code keeps trailer state', roundTrip.trailers['trailer:test']?.x === 204 && roundTrip.trailers['trailer:test']?.hitchedTo === 'car:test', `x ${roundTrip.trailers['trailer:test']?.x}, hitch ${roundTrip.trailers['trailer:test']?.hitchedTo}`);
 
 stop();
+world.apply({
+  t: 'car_lights',
+  carId: 'car:test',
+  headlightMode: 'high',
+  taillightsOn: true,
+  reverseLightsOn: true,
+});
+const lightRoundTrip = decodeSaveCode(encodeSaveCode(world.state));
+check(
+  'save code keeps all lamp states',
+  lightRoundTrip.cars['car:test']?.headlightMode === 'high' &&
+    lightRoundTrip.cars['car:test']?.taillightsOn === true &&
+    lightRoundTrip.cars['car:test']?.reverseLightsOn === true,
+  JSON.stringify(lightRoundTrip.cars['car:test']),
+);
 world.apply({ t: 'enter_car', carId: 'car:test' });
 await Promise.resolve();
 check('unsubscribe stops autosaves', calls.length === 4, `${calls.length} writes`);

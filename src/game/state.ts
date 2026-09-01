@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import type { Item } from '../items/items';
+import type { Item, SunShadesItem } from '../items/items';
 import type { FuelType, PartInstance } from '../parts/registry';
 import { BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -54,6 +54,8 @@ export interface JobState {
   readonly cargoKg: number;
 }
 
+export type HeadlightMode = 'off' | 'low' | 'high';
+
 export interface CarState {
   readonly id: string;
   /** Complete car model id from the catalogue (vehicle/carmodels.ts). */
@@ -62,6 +64,12 @@ export interface CarState {
   readonly gizmos: Record<string, PartInstance>;
   /** Earned stickers, in the order they were placed. Append-only, permanent. */
   readonly stickers: StickerState[];
+  /** Dipped/high-beam selection, persisted independently of the day/night clock. */
+  headlightMode: HeadlightMode;
+  /** Last rendered tail-lamp state, including a brake-light flash. */
+  taillightsOn: boolean;
+  /** Last rendered reverse-lamp state. */
+  reverseLightsOn: boolean;
   fuelLitres: number;
   /** Fuel currently in the fitted tank; mixed or wrong fuel cannot run the engine. */
   fuelKind: FuelType | 'mixed' | null;
@@ -114,6 +122,8 @@ export interface PlayerState {
   carried: Item[];
   /** Index into `carried` of the held item; clamped on restore. */
   carriedSelected: number;
+  /** Shades currently on the player's face; absent from the carried pack while worn. */
+  wornSunShades: SunShadesItem | null;
 }
 
 /**
@@ -214,6 +224,7 @@ export type WorldDelta =
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
+  | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
@@ -236,6 +247,7 @@ export type WorldDelta =
   | { t: 'job_abandon' }
   | { t: 'sticker_place'; carId: string; sticker: StickerState }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
+  | { t: 'wearable'; shades: SunShadesItem | null }
   | { t: 'record'; s: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
@@ -257,7 +269,18 @@ export function newWorldState(seed: number): WorldState {
     dayIndex: 0,
     recordS: 0,
     settings: DEFAULT_SETTINGS,
-    player: { x: 0, y: 1.7, z: -14, yaw: 0, pitch: 0, s: 0, drivingCarId: null, carried: [], carriedSelected: 0 },
+    player: {
+      x: 0,
+      y: 1.7,
+      z: -14,
+      yaw: 0,
+      pitch: 0,
+      s: 0,
+      drivingCarId: null,
+      carried: [],
+      carriedSelected: 0,
+      wornSunShades: null,
+    },
     cars: {},
     wreckStorage: {},
     trailers: {},
@@ -297,6 +320,7 @@ export class GameWorld {
     for (const id of Object.keys(state.looseParts)) bump(id);
     for (const id of Object.keys(state.looseItems)) bump(id);
     for (const item of state.player.carried) bump(item.id);
+    if (state.player.wornSunShades) bump(state.player.wornSunShades.id);
     for (const car of Object.values(state.cars)) {
       bump(car.id);
       for (const part of Object.values(car.gizmos)) bump(part.id);
@@ -389,6 +413,15 @@ export class GameWorld {
       case 'car_odometer': {
         const car = s.cars[delta.carId];
         if (car) car.odometer += delta.metres;
+        break;
+      }
+      case 'car_lights': {
+        const car = s.cars[delta.carId];
+        if (car) {
+          car.headlightMode = delta.headlightMode;
+          car.taillightsOn = delta.taillightsOn;
+          car.reverseLightsOn = delta.reverseLightsOn;
+        }
         break;
       }
       case 'car_fuel': {
@@ -545,6 +578,9 @@ export class GameWorld {
         // ones so per-item field changes are already persisted.
         s.player.carried = delta.items.slice();
         s.player.carriedSelected = delta.selected;
+        break;
+      case 'wearable':
+        s.player.wornSunShades = delta.shades;
         break;
       case 'record':
         // Monotonic: the personal-record marker must never move backwards.
