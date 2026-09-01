@@ -10,8 +10,8 @@ import type {
   FluidKind,
   ToolKind,
 } from '../items/items';
-import { itemLabel, itemMass } from '../items/items';
-import type { CarStats, PartInstance } from '../parts/registry';
+import { itemLabel } from '../items/items';
+import type { CarStats, FuelType, PartInstance } from '../parts/registry';
 import {
   applyBrush,
   applySponge,
@@ -137,13 +137,12 @@ export interface InteractionResult {
   boot: TrunkViewState | null;
 }
 
-const FLUID_POUR_RATE = 1.2;
 /**
- * How close you have to stand to a car to pour into it. Comfortably more than the
- * 2.6 m aim ray, because pouring is not aimed: you walk up to the car, not to a
- * spot on it.
+ * Litres a second a can transfers. Pouring is aimed at the fitted part that owns
+ * the reservoir, inside an opened bonnet, so the grid's own `BOOT_RANGE` is the
+ * whole proximity rule: there is no separate pour distance.
  */
-const POUR_RANGE = 4.2;
+const FLUID_POUR_RATE = 1.2;
 /** Within this many litres of capacity a reservoir reads as full. */
 const FLUID_FULL_EPSILON = 0.05;
 /**
@@ -161,30 +160,78 @@ const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
   new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
 
 /**
- * Which fitted reservoir a fluid goes into, with its current level and capacity.
- * Fuel type is deliberately not filtered here: a wrong fill is accepted and then
- * prevents the engine from running until the tank is removed and drained.
+ * A serviceable reservoir, resolved from the bonnet slot the crosshair is on.
+ *
+ * Levels are read and filled through the FITTED PART that holds them — the engine
+ * for oil, the coolant tank, the fuel tank — so what the bonnet tells you is
+ * exactly what a can can pour into. A missing part has no reservoir at all, which
+ * is also why removing a tank drains it.
  */
-function fluidTarget(
-  car: CarState,
-  stats: CarStats,
-  fluid: FluidKind,
-): { label: string; level: number; capacity: number } | null {
-  switch (fluid) {
-    case 'petrol':
-    case 'diesel':
-      if (!bonnetPart(car.bonnet, 3) || stats.tankCapacity <= 0) return null;
-      return { label: 'tank', level: car.fuelLitres, capacity: stats.tankCapacity };
-    case 'coolant':
-      if (!bonnetPart(car.bonnet, 2)) return null;
+interface Reservoir {
+  /** What the readout calls it: 'oil', 'coolant', or the fuel actually in the tank. */
+  readonly label: string;
+  readonly level: number;
+  readonly capacity: number;
+  /**
+   * The fluid this reservoir is for. A fuel tank still ACCEPTS the other fuel —
+   * mis-fuelling is a mistake the game lets you make and then warns about — while
+   * oil and coolant accept nothing else.
+   */
+  readonly wants: FluidKind;
+}
+
+/** Narrowing guard: the two fluids a fuel tank takes, as opposed to oil or coolant. */
+function isFuel(fluid: FluidKind): fluid is FuelType {
+  return fluid === 'petrol' || fluid === 'diesel';
+}
+
+function reservoirAccepts(reservoir: Reservoir, fluid: FluidKind): boolean {
+  return isFuel(reservoir.wants) ? isFuel(fluid) : fluid === reservoir.wants;
+}
+
+/** `oil 3.2/4.0 L`, or `oil full — 4.0 L` once topping up would do nothing. */
+function fillReadout(reservoir: Reservoir): string {
+  if (reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) {
+    return `${reservoir.label} full — ${reservoir.capacity.toFixed(1)} L`;
+  }
+  return `${reservoir.label} ${reservoir.level.toFixed(1)}/${reservoir.capacity.toFixed(1)} L`;
+}
+
+/**
+ * The reservoir serviced through one bonnet slot, or null when that slot holds no
+ * part, is the turbine position, or the model has no capacity for it.
+ *
+ * A dry tank is labelled with the fuel the ENGINE wants rather than "fuel": an
+ * empty tank on a diesel reads `diesel 0.0/55.0 L`, which answers "what do I go
+ * and fetch" at a glance.
+ */
+function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoir | null {
+  if (!bonnetPart(car.bonnet, cell)) return null;
+  switch (bonnetSlotKind(cell)) {
+    case 'engine': {
+      const capacity = oilCapacity(stats.engine);
+      return capacity > 0
+        ? { label: 'oil', level: car.oilLitres, capacity, wants: 'oil' }
+        : null;
+    }
+    case 'coolant_tank': {
+      const capacity = coolantCapacity(stats.engine);
+      return capacity > 0
+        ? { label: 'coolant', level: car.coolantLitres, capacity, wants: 'coolant' }
+        : null;
+    }
+    case 'fuel_tank': {
+      if (stats.tankCapacity <= 0) return null;
+      const label = car.fuelKind === 'mixed' ? 'mixed fuel' : (car.fuelKind ?? stats.fuel);
       return {
-        label: 'coolant',
-        level: car.coolantLitres,
-        capacity: coolantCapacity(stats.engine),
+        label,
+        level: car.fuelLitres,
+        capacity: stats.tankCapacity,
+        wants: stats.fuel,
       };
-    case 'oil':
-      if (!bonnetPart(car.bonnet, 0)) return null;
-      return { label: 'oil', level: car.oilLitres, capacity: oilCapacity(stats.engine) };
+    }
+    default:
+      return null;
   }
 }
 
@@ -669,19 +716,12 @@ export class Interaction {
       if (!part) return null;
       const toolPrompt = this.toolPrompt(held, part);
       if (toolPrompt) return toolPrompt;
-      const label = variant(part.variantId).label;
-      if (variant(part.variantId).mass + this.inventory.carriedMass > this.inventory.massLimit) {
-        return `[F] pick up ${label} — too heavy`;
-      }
-      return `[F] pick up ${conditionPrefix(part)}${label}`;
+      return `[F] pick up ${conditionPrefix(part)}${variant(part.variantId).label}`;
     }
 
     if (t.kind === 'loose-item') {
       const item = this.world.state.looseItems[t.itemId]?.item;
       if (!item) return null;
-      if (itemMass(item) + this.inventory.carriedMass > this.inventory.massLimit) {
-        return `[F] pick up ${itemLabel(item)} — too heavy`;
-      }
       return `[F] pick up ${itemLabel(item)}`;
     }
 
@@ -722,8 +762,13 @@ export class Interaction {
       if (t.cell === null) return `${label} ${used}/${cells.length}`;
       const item = cells[t.cell];
       if (item) {
-        if (itemMass(item) + this.inventory.carriedMass > this.inventory.massLimit) {
-          return `[F] take ${itemLabel(item)} — too heavy`;
+        // A fitted engine, coolant tank or fuel tank reports what it is holding.
+        // Same resolution the pour uses, so the number you read is the number a can
+        // fills — and holding one turns the readout into the pour offer itself.
+        const reservoir = this.aimedReservoir(resolved);
+        if (reservoir) {
+          if (held?.type === 'fluid_can') return this.pourPrompt(held, reservoir);
+          return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}`;
         }
         return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
       }
@@ -762,16 +807,10 @@ export class Interaction {
       if (!anchor) return null;
       const fitted = car.gizmos[t.anchorId];
 
-      // Pouring is no longer aimed at anything: see the fluid-can branch at the end
-      // of this method. Standing near the car with a can is the whole gesture.
       if (fitted) {
         const toolPrompt = this.toolPrompt(held, fitted);
         if (toolPrompt) return toolPrompt;
-        const label = variant(fitted.variantId).label;
-        if (variant(fitted.variantId).mass + this.inventory.carriedMass > this.inventory.massLimit) {
-          return `[F] remove ${label} — too heavy`;
-        }
-        return `[F] remove ${label}`;
+        return `[F] remove ${variant(fitted.variantId).label}`;
       }
 
       if (held?.type === 'part') {
@@ -780,14 +819,6 @@ export class Interaction {
       }
     }
 
-    // Pouring: proximity, not aim. Holding a can anywhere near a car offers the
-    // transfer, because hunting for a filler neck on a low-poly shell that has no
-    // modelled filler neck is busywork. It sits last so anything specific under the
-    // crosshair — a loose part, a pallet, a trailer — still wins.
-    if (held?.type === 'fluid_can' && resolved.vehicle && resolved.carId) {
-      if (resolved.vehicleDist > POUR_RANGE) return null;
-      return this.pourPrompt(held, resolved.carId, resolved.vehicle);
-    }
 
     if (
       t.kind === 'car-body' &&
@@ -802,25 +833,43 @@ export class Interaction {
   }
 
   /**
-   * What pouring this can into this car would do, or why it would not.
-   *
-   * Wrong fuel is accepted with an explicit warning; the resulting load cannot
-   * run the engine. Removing the tank drains it and provides the recovery path.
+   * The reservoir under the crosshair: a fitted engine, coolant tank or fuel tank
+   * in an OPENED bonnet. Both the level readout and the pour resolve through this
+   * one method, so the two can never disagree about which tank you are looking at.
    */
-  private pourPrompt(can: FluidCanItem, carId: string, vehicle: Vehicle): string | null {
-    const car = this.world.state.cars[carId];
-    if (!car) return null;
-    if (can.litres <= 0) return `${can.fluid} can — empty`;
-    const target = fluidTarget(car, vehicle.stats, can.fluid);
-    if (!target) return `[LMB] pour ${can.fluid} — reservoir missing`;
-    if (target.level >= target.capacity - FLUID_FULL_EPSILON) {
-      return `${target.label} full — ${target.capacity.toFixed(1)} L`;
+  private aimedReservoir(resolved: Resolved): (Reservoir & { readonly carId: string }) | null {
+    const t = resolved.target;
+    if (t.kind !== 'storage' || t.side !== 'bonnet' || t.owner !== 'car' || t.cell === null) {
+      return null;
     }
-    const wrongFuel =
-      (can.fluid === 'petrol' || can.fluid === 'diesel') &&
-      (can.fluid !== vehicle.stats.fuel || (car.fuelKind !== null && car.fuelKind !== can.fluid));
-    const warning = wrongFuel ? ' — wrong fuel' : '';
-    return `[LMB] pour ${can.fluid} — ${target.label} ${target.level.toFixed(1)}/${target.capacity.toFixed(1)} L${warning}`;
+    if (!this.isStorageOpen(t) || !resolved.vehicle) return null;
+    const car = this.world.state.cars[t.id];
+    if (!car) return null;
+    const reservoir = bonnetReservoir(car, resolved.vehicle.stats, t.cell);
+    return reservoir ? { ...reservoir, carId: t.id } : null;
+  }
+
+  /**
+   * What pouring this can into the aimed reservoir would do, or why it would not.
+   *
+   * Wrong fuel is accepted with an explicit warning; the resulting load cannot run
+   * the engine. Removing the tank drains it and provides the recovery path. Oil and
+   * coolant have no such forgiveness — they are simply the wrong reservoir.
+   *
+   * An empty can drops to the bare level readout rather than announcing itself. The
+   * can's own litres are already on the inventory slot, and the tank is not the
+   * place to report them: what the bonnet is for is how much is in the CAR.
+   */
+  private pourPrompt(can: FluidCanItem, reservoir: Reservoir): string {
+    if (!reservoirAccepts(reservoir, can.fluid)) {
+      return `${fillReadout(reservoir)} — ${can.fluid} does not go in there`;
+    }
+    // Nothing to pour, or nowhere to put it: the level is the whole answer.
+    if (can.litres <= 0 || reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) {
+      return fillReadout(reservoir);
+    }
+    const warning = can.fluid === reservoir.wants ? '' : ' — wrong fuel';
+    return `[LMB] pour ${can.fluid} — ${fillReadout(reservoir)}${warning}`;
   }
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
@@ -861,38 +910,45 @@ export class Interaction {
   }
 
   /**
-   * Pours whatever is in the held can into whatever reservoir it belongs in.
+   * Pours the held can into the reservoir the crosshair is on.
    *
-   * Gated on distance to the car, not on what the crosshair is over: you walk up
-   * with the can and hold the button. One code path for all four fluids, because
-   * the only thing the kind changes is which number goes up.
+   * Aimed at the fitted part, not the car: you open the bonnet, look at the engine,
+   * the coolant tank or the fuel tank, and hold the button. That makes the filling
+   * gesture the same object as the level readout, and it is why an empty slot takes
+   * nothing — there is no reservoir without the part that holds it.
+   *
+   * One code path for all four fluids. The kind decides only which number goes up,
+   * and whether a mis-fuel contaminates the tank.
    */
   private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
-    const carId = resolved.carId;
-    const vehicle = resolved.vehicle;
-    if (!carId || !vehicle || resolved.vehicleDist > POUR_RANGE || can.litres <= 0) return;
-    const car = this.world.state.cars[carId];
+    if (can.litres <= 0) return;
+    const reservoir = this.aimedReservoir(resolved);
+    if (!reservoir || !reservoirAccepts(reservoir, can.fluid)) return;
+    const car = this.world.state.cars[reservoir.carId];
     if (!car) return;
 
-    const target = fluidTarget(car, vehicle.stats, can.fluid);
-    if (!target) return;
-    const room = target.capacity - target.level;
+    const room = reservoir.capacity - reservoir.level;
     if (room <= FLUID_FULL_EPSILON) return;
     const poured = Math.min(FLUID_POUR_RATE * dt, can.litres, room);
     if (poured <= 0) return;
 
     can.litres -= poured;
     this.continuous = 'pour';
-    const level = target.level + poured;
-    if (can.fluid === 'petrol' || can.fluid === 'diesel') {
+    const level = reservoir.level + poured;
+    const carId = reservoir.carId;
+    if (isFuel(can.fluid)) {
+      // The can is fuel and the reservoir accepted it, so this is the fuel tank.
+      // A dry tank takes the identity of whatever went in first; anything else on
+      // top of a different fuel is a mixture the engine will refuse to run on.
       const fuelKind =
-        target.level <= FLUID_FULL_EPSILON
+        reservoir.level <= FLUID_FULL_EPSILON
           ? can.fluid
           : car.fuelKind === can.fluid
             ? can.fluid
             : 'mixed';
       this.world.apply({ t: 'car_fuel', carId, litres: level, fuelKind });
     } else {
+      // Oil and coolant accept nothing but themselves, so the can names the channel.
       this.world.apply({ t: 'car_fluid', carId, fluid: can.fluid, litres: level });
     }
   }
