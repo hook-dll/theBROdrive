@@ -365,10 +365,8 @@ export class RoadMeshProvider implements ChunkProvider {
       }
       yield;
 
-      // Keep the trimesh out of physics while the incremental mesh is incomplete;
-      // hand it to Rapier only in the same completion call as the content.
-      for (const collider of colliders) collider.setEnabled(true);
-
+      // The trimeshes are created disabled and switched on by ChunkStreamer once the
+      // whole contribution is attached (see ChunkContent.colliders).
       completed = true;
       return {
         group,

@@ -137,6 +137,12 @@ let target: BreakableProp | null = null;
   } as unknown as ChunkContext);
   // Hand the captured prop to the real field, then throw the duplicate chunk's bodies
   // away — the prop's own collider is the one being tested, so it must stay.
+  //
+  // Enabling it first is not decoration: providers return DISABLED colliders and
+  // `ChunkStreamer.attachContent` is what switches them on in the game (see
+  // ChunkContent.colliders). Without that step the "contact disables the pile" check
+  // below passes against a collider that was never live.
+  for (const collider of captured.colliders) collider.setEnabled(true);
   if (target) debris.register(target);
   captured.dispose?.();
 }
