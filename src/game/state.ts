@@ -19,6 +19,11 @@ import type { Settings } from './settings';
  * Nothing here may reference a Three.js object or a Rapier handle.
  */
 
+/** Fractions written by both an accumulating simulation and a cleaning tool. */
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
 /**
  * A sticker on a car's bodywork: the record of one completed haul.
  *
@@ -91,6 +96,19 @@ export interface CarState {
   readonly storage: (Item | null)[];
   /** Four fixed, typed service cells under the bonnet. */
   readonly bonnet: (Item | null)[];
+  /**
+   * Cosmetic body condition of the SHELL, 0..1 each, distinct from the per-part
+   * `dirt`/`rust` a `PartInstance` carries: those describe a component that can be
+   * removed and carried around, these describe the car.
+   *
+   * `dirt` is raised by driving — how fast depends on what the tyres are throwing
+   * up (see `SURFACES[].dust`) — and taken off with the brush and sponge that
+   * already clean parts. `scratches` are raised by impacts and never fully undone:
+   * polishing takes them back to a floor, not to zero, because a repaint is not a
+   * thing this game has.
+   */
+  dirt: number;
+  scratches: number;
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -225,6 +243,7 @@ export type WorldDelta =
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
+  | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
@@ -421,6 +440,17 @@ export class GameWorld {
           car.headlightMode = delta.headlightMode;
           car.taillightsOn = delta.taillightsOn;
           car.reverseLightsOn = delta.reverseLightsOn;
+        }
+        break;
+      }
+      case 'car_body_condition': {
+        const car = s.cars[delta.carId];
+        if (car) {
+          // Clamped here rather than trusted from the caller: the shader reads these
+          // as fractions, and both an accumulating simulation and a cleaning tool
+          // write them.
+          car.dirt = clamp01(delta.dirt);
+          car.scratches = clamp01(delta.scratches);
         }
         break;
       }

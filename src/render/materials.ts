@@ -11,10 +11,11 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { applyComicShading } from './comic';
 
-/** Per-instance condition uniforms, keyed by material so setCondition can write them cheaply. */
+/** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
   readonly dirt: { value: number };
   readonly rust: { value: number };
+  readonly scratches?: { value: number };
 }
 
 /**
@@ -23,6 +24,7 @@ interface ConditionUniforms {
  * compiled program is holding. A WeakMap keeps the objects alive for exactly as long
  * as the material, and lets setCondition write values even before first render.
  */
+const carBodyUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
 const conditionUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
 
 /** Templates keyed by parameter tuple. They are only ever cloned, never rendered. */
@@ -42,6 +44,9 @@ function flatKey(color: number, roughness: number): string {
 /** Stable program cache key for every condition material. */
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
+/** Body paint adds scratch wear while remaining a single shader permutation. */
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v2';
+
 // ---------------------------------------------------------------------------
 // GLSL patch
 // ---------------------------------------------------------------------------
@@ -59,18 +64,24 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 const VERTEX_VARYING =
   'varying vec3 vViewPosition;\n' +
   'varying vec3 vCondWorldPos;\n' +
-  'varying vec3 vCondWorldNormal;';
+  'varying vec3 vCondWorldNormal;\n' +
+  'varying vec3 vCondLocalPos;\n' +
+  'varying vec3 vCondLocalNormal;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
 // exact world transform for the normal (no inverse-transpose required).
 const WORLD_POS_HOOK =
   '#include <worldpos_vertex>\n' +
   '\tvCondWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n' +
-  '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;';
+  '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;\n' +
+  '\tvCondLocalPos = transformed;\n' +
+  '\tvCondLocalNormal = objectNormal;';
 
 const CONDITION_PARS = `
 uniform float uDirt;
 uniform float uRust;
+uniform float uScratches;
+
 
 
 float condHash( vec3 p ) {
@@ -151,6 +162,44 @@ const CONDITION_BODY = `
 }`;
 
 /**
+ * Painted shells share the part dust distribution, with a lower-flank term for road
+ * spray. Scratch coordinates stay mesh-local so a moving/floating-origin car does
+ * not make its damage crawl across the paint.
+ */
+const CAR_BODY_CONDITION_BODY = `
+#include <metalnessmap_fragment>
+
+{
+  vec3 condP = vCondWorldPos;
+  vec3 condN = normalize( vCondWorldNormal );
+  vec2 condR = condRust( condP );
+  float condUp = saturate( condN.y );
+  float condPit = 1.0 - smoothstep( 0.2, 0.9, condR.y );
+  float condLower = 1.0 - smoothstep( 0.25, 1.15, vCondLocalPos.y );
+  float dustMask = uDirt * max(
+    ( 0.3 + 0.7 * condUp ) * ( 0.45 + 0.55 * condPit ),
+    condLower * ( 0.45 + 0.35 * condPit )
+  );
+  float condLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+  vec3 dustColor = mix( vec3( condLum ), vec3( 0.72, 0.66, 0.55 ), 0.5 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
+  roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
+
+  vec3 scratchP = vCondLocalPos;
+  float scratchLine = 1.0 - smoothstep(
+    0.025, 0.075,
+    abs( fract( scratchP.y * 15.0 + condNoise( scratchP * 4.0 ) * 0.35 ) - 0.5 )
+  );
+  float scratchEdge = smoothstep( 0.5, 0.82, condFbm( scratchP * 5.5 + 19.0 ) );
+  float scratchLower = 1.0 - smoothstep( 0.35, 1.25, scratchP.y );
+  float scratchMask = uScratches * scratchLine * scratchEdge * ( 0.25 + 0.75 * scratchLower );
+  // Paint wear exposes a dull primer, never the brown oxide reserved for steel parts.
+  diffuseColor.rgb = mix( diffuseColor.rgb, mix( diffuseColor.rgb, vec3( 0.68 ), 0.55 ), scratchMask );
+  roughnessFactor = mix( roughnessFactor, 0.9, scratchMask );
+  metalnessFactor = mix( metalnessFactor, 0.0, scratchMask );
+}`;
+
+/**
  * Rust relief.
  *
  * Injected at the normal stage — before the BRDF consumes the normal — so pitted
@@ -191,6 +240,7 @@ if ( uRust > 0.001 ) {
 function patchConditionShader(shader: WebGLProgramParametersWithUniforms, uniforms: ConditionUniforms): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uRust = uniforms.rust;
+  shader.uniforms.uScratches = uniforms.scratches ?? { value: 0 };
 
   shader.vertexShader = shader.vertexShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
@@ -201,6 +251,26 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
     .replace('#include <map_pars_fragment>', CONDITION_PARS)
     .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
     .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
+}
+
+/** Binds the shell-only scratch hook without changing any shared source material. */
+function patchCarBodyShader(
+  shader: WebGLProgramParametersWithUniforms,
+  uniforms: ConditionUniforms,
+): void {
+  shader.uniforms.uDirt = uniforms.dirt;
+  shader.uniforms.uRust = uniforms.rust;
+  shader.uniforms.uScratches = uniforms.scratches!;
+
+  shader.vertexShader = shader.vertexShader
+    .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
+    .replace('#include <worldpos_vertex>', WORLD_POS_HOOK);
+
+  shader.fragmentShader = shader.fragmentShader
+    .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
+    .replace('#include <map_pars_fragment>', CONDITION_PARS)
+    .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
+    .replace('#include <metalnessmap_fragment>', CAR_BODY_CONDITION_BODY);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,11 +316,59 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
   if (material === undefined) {
     material = applyComicShading(
       new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 }),
+
       { contourStrength: 0, stippleStrength: 0 },
     );
     flatCache.set(key, material);
   }
   return material;
+}
+/**
+ * Clones one eligible paint slot for a car instance and gives it independent body
+ * condition uniforms. The source remains untouched for every other car sharing it.
+ */
+export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Material {
+  const material = source.clone();
+  if (!(material instanceof THREE.MeshStandardMaterial)) return material;
+
+  const uniforms: ConditionUniforms = {
+    dirt: { value: 0 },
+    rust: { value: 0 },
+    scratches: { value: 0 },
+  };
+  carBodyUniforms.set(material, uniforms);
+  material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
+  material.customProgramCacheKey = () => CAR_BODY_PROGRAM_KEY;
+  return material;
+}
+
+/**
+ * Writes cosmetic shell condition for one car. Only paint materials made by
+ * makeCarBodyConditionMaterial are in the weak map, so trim in the same subtree is
+ * skipped without relying on names or material colours.
+ */
+export function setCarBodyCondition(
+  carRoot: THREE.Object3D,
+  dirt: number,
+  scratches: number,
+): void {
+  carRoot.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const material = mesh.material as THREE.Material | THREE.Material[];
+    if (Array.isArray(material)) {
+      for (const m of material) writeCarBodyCondition(m, dirt, scratches);
+    } else {
+      writeCarBodyCondition(material, dirt, scratches);
+    }
+  });
+}
+
+function writeCarBodyCondition(material: THREE.Material, dirt: number, scratches: number): void {
+  const uniforms = carBodyUniforms.get(material);
+  if (uniforms === undefined) return;
+  uniforms.dirt.value = dirt;
+  uniforms.scratches!.value = scratches;
 }
 
 /** Applies cosmetic wear, with irreversible engine destruction forced visibly burnt. */

@@ -590,6 +590,10 @@ export function createStartingCar(world: GameWorld): CarState {
     headlightMode: 'off',
     taillightsOn: false,
     reverseLightsOn: false,
+    // It has been standing in a shut garage, not in a showroom. Enough dust to read
+    // as stored, no damage: the player's first wash is a tutorial nobody has to write.
+    dirt: 0.4,
+    scratches: 0,
     fuelLitres,
     fuelKind: engine.fuel,
     coolantLitres,

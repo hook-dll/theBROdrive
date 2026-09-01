@@ -20,6 +20,7 @@ import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
 
 import type { Monument, PoleEra } from './gradient';
+import { HazardIndex } from './hazards';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { Terrain } from './terrain';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
@@ -480,6 +481,11 @@ interface ScatterPlacement {
   ry: number;
   rz: number;
   scale: number;
+  /** Road-frame coordinates for an asphalt obstacle; zero for ordinary scatter. */
+  roadS: number;
+  roadLateral: number;
+  /** True only for the deterministic obstacle streams placed on asphalt. */
+  roadHazard: boolean;
   radius: number;
   /** Filled in by the instancing pass, so a break can blank the right instance. */
   mesh: THREE.InstancedMesh | null;
@@ -564,9 +570,10 @@ export class ScatterProvider implements ChunkProvider {
    * Whoever owns knocking props down, or nothing. Optional because deterministic
    * scatter remains a complete visual field without mutable breakage state.
    */
-  constructor(private readonly breakables?: BreakableSink) {
-    // Force all shared form and break-piece geometry to be created while providers
-    // are loading, never on a scheduler-owned build step.
+  constructor(
+    private readonly breakables?: BreakableSink,
+    private readonly hazards?: HazardIndex,
+  ) {
     const forms = [...sandForms(), ...rockForms()];
     for (const form of forms) propPieces(form.id);
   }
@@ -584,6 +591,7 @@ export class ScatterProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const meshes: THREE.InstancedMesh[] = [];
+    const hazardChunkKey = `scatter:${ctx.chunkIndex}`;
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
 
@@ -671,8 +679,11 @@ export class ScatterProvider implements ChunkProvider {
             ry,
             rz,
             scale,
+            roadS: 0,
+            roadLateral: 0,
             radius,
             mesh: null,
+            roadHazard: false,
             instance: 0,
           });
         }
@@ -738,7 +749,10 @@ export class ScatterProvider implements ChunkProvider {
             ry,
             rz,
             scale,
+            roadS: s,
+            roadLateral: lateral,
             radius,
+            roadHazard: true,
             mesh: null,
             instance: 0,
           });
@@ -782,6 +796,8 @@ export class ScatterProvider implements ChunkProvider {
     if (ctx.hasPhysics) {
       for (const pl of placements) {
         const form = pl.form;
+        let hazardRadius = 0;
+        let breakable = false;
         if (form.collider !== 'none' && !(form.collider === 'hull' && pl.radius < ROCK_COLLIDER_MIN)) {
           if (form.collider === 'hull') {
             addStatic(
@@ -795,11 +811,12 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               eulerRotation(pl.rx, pl.ry, pl.rz),
             );
+            // The hull is constructed from these vertices, so its scaled bounding sphere
+            // is a conservative radius of the collision shape, not a placement guess.
+            form.geometry.computeBoundingSphere();
+            hazardRadius = (form.geometry.boundingSphere?.radius ?? 0) * pl.scale;
           } else if (form.collider === 'box') {
             if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
-            // The fallen trunk is three metres of one thing and a quarter-metre of
-            // another, so a cube around its radius would be a stump and a cube around
-            // its length a wall. Yaw it with the visible form.
             const [hx, hy, hz] = form.colliderHalf;
             addStatic(
               ctx,
@@ -812,8 +829,8 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               yawRotation(pl.ry),
             );
+            hazardRadius = Math.hypot(hx, hz) * pl.scale;
           } else {
-            // Upright plant: a capsule sized to the shaft.
             const halfHeight = form.height * pl.scale * 0.42;
             const rad = form.baseRadius * pl.scale * 0.8;
             const collider = addStatic(
@@ -826,11 +843,9 @@ export class ScatterProvider implements ChunkProvider {
               RAPIER.ColliderDesc.capsule(halfHeight, rad),
               SurfaceType.Rock,
             );
-
-            // Only a chunk with physics can be hit, and only a form with pieces can come
-            // apart. Registering needs the collider (to switch off) and the instance (to
-            // blank), which is why it happens here rather than at placement.
+            hazardRadius = rad;
             const pieces = propPieces(form.id);
+            breakable = pieces !== null;
             if (pieces && this.breakables && pl.mesh) {
               registered.push(pl.id);
               this.breakables.register({
@@ -850,6 +865,14 @@ export class ScatterProvider implements ChunkProvider {
             }
           }
         }
+        if (pl.roadHazard && hazardRadius > 0) {
+          this.hazards?.add(hazardChunkKey, {
+            s: pl.roadS,
+            lateral: pl.roadLateral,
+            radius: hazardRadius,
+            breakable,
+          });
+        }
         yield;
       }
     }
@@ -865,6 +888,7 @@ export class ScatterProvider implements ChunkProvider {
       dispose: () => {
         for (const m of meshes) m.dispose();
         if (registered.length > 0) this.breakables?.forget(registered);
+        this.hazards?.forget(hazardChunkKey);
       },
     };
   } finally {
@@ -872,6 +896,7 @@ export class ScatterProvider implements ChunkProvider {
       for (const body of bodies) ctx.physics.removeBody(body);
       for (const m of meshes) m.dispose();
       if (registered.length > 0) this.breakables?.forget(registered);
+      this.hazards?.forget(hazardChunkKey);
       group.clear();
     }
   }
