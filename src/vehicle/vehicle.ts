@@ -272,8 +272,30 @@ const REAR_AXLE_SIDE_GRIP = 0.89;
  * sooner. That keeps a trace of the old suddenness at the moment of breakaway without
  * costing anything at the angles a save is made at.
  */
+/**
+ * PEAK ANGLE IS CORNERING STIFFNESS, now that the curve makes a real force.
+ *
+ * The shape rises as a quarter sine to its peak, so a smaller peak angle means a
+ * steeper rise: the axle builds its side force in fewer degrees. That is exactly
+ * cornering stiffness, and the RATIO of the two axles' stiffness is what decides
+ * whether a car is stable in a straight line or wags its tail.
+ *
+ * The rear peaks EARLIER than the front (6 against 8 degrees). Reported from play
+ * with both at 8: the rear end wagged slowly from side to side "like swatting flies
+ * with it". That is the classic yaw limit cycle of a car whose rear axle is softer
+ * than its front — the rear was carrying REAR_AXLE_SIDE_GRIP and REAR_SPEED_LOSS_GAIN
+ * against an identical stiffness, so every yaw disturbance grew a little before the
+ * tyres caught it. A constraint could not show this: cancelling lateral velocity
+ * outright is infinitely stiff and an infinitely stiff axle cannot oscillate, which
+ * is why the deficit was invisible for as long as Rapier owned the channel.
+ *
+ * Stiffer at the rear and still LOWER in ultimate capacity is the combination that
+ * gives both halves of the target: understeer gradient positive in normal driving, so
+ * the car tracks; the rear the first to reach its peak and let go, so the tail is
+ * still the end that goes when the corner is overcooked.
+ */
 const SLIP_PEAK_FRONT_DEG = 8;
-const SLIP_PEAK_REAR_DEG = 8;
+const SLIP_PEAK_REAR_DEG = 6;
 /** Slip angle (deg) by which the fade is complete and the plateau has been reached. */
 const SLIP_FULL_FRONT_DEG = 26;
 const SLIP_FULL_REAR_DEG = 22;
@@ -284,13 +306,15 @@ const SLIP_PLATEAU_REAR = 0.8;
 const SLIP_ANGLE_REF_MPS = 2;
 /**
  * Extra share of the high-speed lateral loss (LATERAL_GRIP_MAX_LOSS) applied to the
- * REAR axle only. 1 = both axles lose the same, which is what it used to be, and
- * which made speed cost stability nothing: the car simply cornered less hard the
- * faster it went, evenly, and stayed stubbornly neutral doing it. Above 1 the tail
- * is the end that speed takes away from, so a bend taken 20 km/h too fast is
- * genuinely a different, edgier car than the same bend taken properly.
+ * REAR axle only. 1 = both axles lose the same; above 1 the tail is the end that speed
+ * takes away from, so a bend taken 20 km/h too fast is an edgier car.
+ *
+ * Reduced from 1.32 with the same report. Against a constraint this only made the car
+ * turn in more keenly at speed; against a real force it removes rear stiffness exactly
+ * where the aerodynamic and yaw disturbances are largest, which is where the wag was
+ * worst. 1.15 keeps the character and stops paying for it with stability.
  */
-const REAR_SPEED_LOSS_GAIN = 1.32;
+const REAR_SPEED_LOSS_GAIN = 1.15;
 /**
  * Peak lateral μ on dry asphalt, as a coefficient of the tyre's normal load.
  *
@@ -318,6 +342,29 @@ const LATERAL_MU = 0.85;
  */
 const LATERAL_STATIC_SPEED_MPS = 1.4;
 
+/**
+ * Pneumatic trail, metres: how far BEHIND the contact centre a slipping tyre's side
+ * force actually acts.
+ *
+ * This is the term the model never had, and its absence is the other half of the tail
+ * wag. A real tyre's contact patch loads up towards its rear as it slips, so the side
+ * force arrives with a lever about the vertical axis and produces a moment that
+ * opposes the slip. Summed over four wheels that moment is the car's principal source
+ * of YAW DAMPING — it is what makes a disturbed car settle rather than hunt, and it is
+ * why a real steering wheel pulls itself straight.
+ *
+ * Rapier's constraint model made it unnecessary to notice: a velocity-cancelling
+ * constraint is its own damper. A curve is not, so the moment has to be put back, the
+ * same way `applyRollCouple` and `applyAntiPitch` put back moments this vehicle
+ * controller drops.
+ *
+ * 0.045 m is a period cross-ply at moderate slip. It is deliberately NOT scaled down
+ * as slip grows (real trail collapses past the peak, which is the wheel going light in
+ * your hands): that collapse is exactly the destabilising part, there is no
+ * force-feedback wheel here to feel it in, and the file's own countersteer notes are
+ * about keeping a slide catchable rather than making it snap.
+ */
+const PNEUMATIC_TRAIL_M = 0.045;
 /**
  * Countersteer authority, and why the steering limiter has to step out of the way.
  *
@@ -1359,6 +1406,8 @@ export class Vehicle implements Rebasable {
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
+  /** Aligning moment summed over the wheels this step, N·m·s about world up. */
+  private alignTorqueImpulse = 0;
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
   /** Per-wheel tyre impulse, applied at the contact patch. */
   private readonly tyreImpulse = { x: 0, y: 0, z: 0 };
@@ -2661,6 +2710,9 @@ export class Vehicle implements Rebasable {
       this.skipTyreDynamicsSteps--;
       this.longitudinalForceSum = 0;
       this.ownTyreCapacityN = 0;
+      // No tyre pass ran, so no aligning moment was earned. Leaving a stale one would
+      // apply the previous tick's yaw damping to a step that had no tyre forces at all.
+      this.alignTorqueImpulse = 0;
     } else {
       this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip, fwd);
     }
@@ -3372,6 +3424,12 @@ export class Vehicle implements Rebasable {
           this.lateralPoint.y = this.chassisBody.translation().y;
           this.lateralPoint.z = w.contactPoint.z;
           this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, this.lateralPoint, false);
+          // Aligning moment. The force acts PNEUMATIC_TRAIL_M behind the contact
+          // centre, so it carries a moment about the vertical of exactly
+          // -trail * impulse — the cross product collapses to that because forward and
+          // right are orthogonal unit vectors in the ground plane. Summed over the
+          // wheels this is the car's yaw damping.
+          this.alignTorqueImpulse -= PNEUMATIC_TRAIL_M * impulse;
         }
       }
 
@@ -3393,6 +3451,18 @@ export class Vehicle implements Rebasable {
       w.slideT +=
         (slideTarget - w.slideT) *
         (slideTarget > w.slideT ? slideOnsetBlend : slideRecoverBlend);
+    }
+
+    // One torque impulse for the whole axle set. Applied after the loop so the four
+    // aligning moments are summed rather than four separate solver touches, and about
+    // WORLD up rather than the body's: at any lean the yaw axis a car is disturbed
+    // about is the vertical one, not its own tilted Y.
+    if (this.alignTorqueImpulse !== 0) {
+      this.forceScratch.x = 0;
+      this.forceScratch.y = this.alignTorqueImpulse;
+      this.forceScratch.z = 0;
+      this.chassisBody.applyTorqueImpulse(this.forceScratch, false);
+      this.alignTorqueImpulse = 0;
     }
   }
 
