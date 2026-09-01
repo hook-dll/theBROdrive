@@ -23,6 +23,14 @@ const SUN_REFERENCE_MAG = -26.74;
 const SUN_REFERENCE_LUX = 120_000;
 const FULL_MOON_REFERENCE_MAG = -12.74;
 const FULL_MOON_REFERENCE_LUX = 0.25;
+/** Broad hand-off band: one key light rotates from Moon to Sun through twilight. */
+const SUN_KEY_BLEND_START_DEG = -2;
+const SUN_KEY_BLEND_END_DEG = 3;
+/** Sky illumination present before the direct solar disc clears the horizon. */
+const TWILIGHT_DIFFUSE_LUX = 2_000;
+const KEY_IDENTITY_ROTATION = new THREE.Quaternion();
+const KEY_TARGET_ROTATION = new THREE.Quaternion();
+const KEY_BLEND_ROTATION = new THREE.Quaternion();
 
 export const PLANET_BODIES = [
   Body.Mercury,
@@ -41,7 +49,6 @@ export interface ApparentBody {
   azimuthDeg: number;
   magnitude: number;
   angularRadiusRad: number;
-  phaseFraction: number;
 }
 
 export class CelestialFrame {
@@ -50,6 +57,8 @@ export class CelestialFrame {
   readonly planets = PLANET_BODIES.map(makeBody);
   readonly equatorialToWorld = new THREE.Matrix4();
   readonly keyDirection = new THREE.Vector3(0, 1, 0);
+  /** Smooth share of the shadow key coming from the Sun, 0..1. */
+  keySunWeight = 0;
   keyIlluminanceLux = 0;
   diffuseIlluminanceLux = 0;
   date = new Date(0);
@@ -63,7 +72,6 @@ function makeBody(body: Body): ApparentBody {
     azimuthDeg: 0,
     magnitude: 99,
     angularRadiusRad: 0,
-    phaseFraction: 0,
   };
 }
 
@@ -88,9 +96,10 @@ function airMass(altitudeDeg: number): number {
 }
 
 export function atmosphericTransmission(altitudeDeg: number): number {
-  // Keep direct solar energy continuous across the horizon. A hard zero at 0°
-  // made the first visible ray jump from moonlight to a full low-sun contribution.
-  const horizon = smoothstep(-0.12, 0.08, altitudeDeg);
+  // Refraction, the solar disc's finite diameter and sky scattering make sunrise a
+  // band, not an event at altitude zero. The old -0.12..0.08 degree gate packed the
+  // entire direct-light onset into under a second at the default clock.
+  const horizon = smoothstep(-1.5, 3, altitudeDeg);
   const mass = airMass(Math.max(0.01, altitudeDeg));
   return horizon * Math.pow(10, -0.4 * BASE_EXTINCTION_MAG * Math.max(0, mass - 1));
 }
@@ -107,7 +116,6 @@ function updateBody(body: ApparentBody, date: Date, observer: Observer): void {
   body.altitudeDeg = horizontal.altitude;
   body.azimuthDeg = horizontal.azimuth;
   body.magnitude = illumination.mag;
-  body.phaseFraction = illumination.phase_fraction;
   horizontalDirection(horizontal.azimuth, horizontal.altitude, body.direction);
 
   if (body.body === Body.Sun) {
@@ -159,15 +167,30 @@ export class AstronomySystem {
       FULL_MOON_REFERENCE_LUX *
       Math.pow(10, -0.4 * (frame.moon.magnitude - FULL_MOON_REFERENCE_MAG)) *
       atmosphericTransmission(frame.moon.altitudeDeg);
+    // Rotate the single shadow key across a broad twilight band. Normalizing a
+    // linear direction blend is singular when Sun and Moon are opposite: at equal
+    // weights its vector collapses toward zero, then flips at the horizon. A
+    // quaternion slerp follows a unit-length arc and cannot produce that step.
+    frame.keySunWeight = smoothstep(
+      SUN_KEY_BLEND_START_DEG,
+      SUN_KEY_BLEND_END_DEG,
+      frame.sun.altitudeDeg,
+    );
+    KEY_TARGET_ROTATION.setFromUnitVectors(frame.moon.direction, frame.sun.direction);
+    KEY_BLEND_ROTATION.slerpQuaternions(
+      KEY_IDENTITY_ROTATION,
+      KEY_TARGET_ROTATION,
+      frame.keySunWeight,
+    );
+    frame.keyDirection.copy(frame.moon.direction).applyQuaternion(KEY_BLEND_ROTATION).normalize();
+    frame.keyIlluminanceLux = Math.max(sunLux, moonLux);
 
-    if (sunLux >= moonLux) {
-      frame.keyDirection.copy(frame.sun.direction);
-      frame.keyIlluminanceLux = sunLux;
-    } else {
-      frame.keyDirection.copy(frame.moon.direction);
-      frame.keyIlluminanceLux = moonLux;
-    }
-    frame.diffuseIlluminanceLux = sunLux * 0.16 + moonLux * 0.2 + 0.001;
+    // Civil-twilight sky bounce begins well before the direct disc. Previously
+    // diffuse light was only a fraction of direct sunLux, so the whole environment
+    // remained at moon level until the narrow horizon transmission gate opened.
+    const twilight = smoothstep(-6, 6, frame.sun.altitudeDeg);
+    frame.diffuseIlluminanceLux =
+      sunLux * 0.16 + moonLux * 0.2 + twilight * TWILIGHT_DIFFUSE_LUX + 0.001;
     return frame;
   }
 }

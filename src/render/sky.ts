@@ -63,8 +63,33 @@ const SHADOW_MIN_ELEVATION = 0.26;
 const SHADOW_FADE_ELEVATION = 0.12;
 
 
-/** Deliberate presentation scale: the physically correct disc read too small in play. */
+/** Deliberate presentation scale: physical lunar disc is too small in play. */
 const MOON_VISUAL_SCALE = 3;
+/**
+ * Display-referred radiance of sunlit lunar regolith, day and night, in the same
+ * authored units as the palette below.
+ *
+ * Sunlit regolith does not change brightness with phase — the shader's photometric
+ * function carries every angle-dependent term per pixel — so the only thing these
+ * two numbers encode is EXPOSURE, and the dome has none of its own. Three disables
+ * tone mapping for anything drawn into a render target, and renderer.ts always
+ * draws the scene into one, so `col` in the dome shader reaches the display
+ * verbatim and clamps at 1. That is the same reason the palette carries a night
+ * sky a thousand times darker than its day sky rather than one exposure stop:
+ * adaptation is authored in, not computed. The Moon has to be authored the same
+ * way, and the two ends are set by what the display can still show:
+ *
+ *  - day: a daylight sky is already at 0.75 in blue, so the disc has about 0.65 of
+ *    headroom before it flattens into a white hole. At this value the crescent's
+ *    bright limb saturates blue only, which is exactly what makes it read white
+ *    against blue while red and green keep the maria and the terminator gradient.
+ *  - night: the full disc's highlands land just under 1, so a full Moon is white
+ *    and dazzling while the maria stay a clear half-tone below it.
+ */
+const MOON_RADIANCE_DAY = 0.75;
+const MOON_RADIANCE_NIGHT = 1.15;
+/** The Sun stays proportionally correct in astronomy but reads better 1.5x in play. */
+const SUN_VISUAL_SCALE = 1.5;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
@@ -252,7 +277,9 @@ void main() {
 const SKY_FRAGMENT = /* glsl */ `
 uniform float uSunAngularRadius;
 uniform float uMoonAngularRadius;
-uniform float uMoonSurfaceBrightness;
+/** Radiance of sunlit lunar regolith, in the dome's own display-referred units. */
+uniform float uMoonRadiance;
+uniform sampler2D uMoonTexture;
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
 uniform vec3 uZenith;
@@ -316,6 +343,38 @@ float cloudFbm(vec2 p) {
     amp *= 0.5;
   }
   return sum;
+}
+
+/** Disc-plane coordinates in a world-up tangent basis, stable as the camera moves. */
+vec2 moonTextureUv(vec3 offset) {
+  vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), uMoonDir) + vec3(0.00001, 0.0, 0.0));
+  vec3 up = cross(uMoonDir, right);
+  return vec2(dot(offset, right), dot(offset, up));
+}
+
+
+/**
+ * McEwen's lunar-Lambert photometric function.
+ *
+ * Regolith is not Lambertian, and that difference is most of what makes a Moon
+ * look like the Moon. It is a porous, strongly backscattering powder: a full Moon
+ * reads as a flat, evenly lit disc rather than a shaded ball, and a crescent keeps
+ * bright horns that taper to points.
+ *
+ * mu0 = cos(incidence), mu = cos(emission). The Lommel-Seeliger ratio
+ * mu0/(mu0 + mu) is what saves the horns: they lie against the limb, where mu -> 0,
+ * so the ratio stays near one however grazing the sunlight is there. A plain
+ * Lambert cos() fades them out instead and leaves a bright cap around the sub-solar
+ * limb — a parachute canopy, not a crescent. McEwen's weight l runs between the
+ * two: one at zero phase, falling as the phase angle opens, which is what gives a
+ * crescent's terminator its gradual fade into shadow.
+ */
+float lunarLambert(float mu0, float mu, float phaseAngle) {
+  // exp(-g / 60deg) tracks McEwen (1991) to within 0.05 across 0..90 degrees
+  // (0.607 vs 0.608 at 30, 0.223 vs 0.186 at 90) and, unlike his cubic fit, stays
+  // positive beyond 100 degrees — which is where every daylight crescent lives.
+  float l = exp(-phaseAngle * 0.9549);
+  return 2.0 * l * mu0 / max(mu0 + mu, 0.0001) + (1.0 - l) * mu0;
 }
 
 void main() {
@@ -412,30 +471,79 @@ void main() {
   col += uSunColor * disc * 2.0;
   col += uSunGlowColor * glow * uSunGlowIntensity;
 
-  // Lunar phase from real Sun/Moon geometry. The near-side sphere normal faces
-  // -uMoonDir at disc centre; only points whose normal faces the Sun are visible.
-  // The old shader replaced the entire disc with a dark lunar colour first, so even
-  // its unlit hemisphere remained a complete circle and every phase read "full".
+  // --- Moon ------------------------------------------------------------------
+  //
+  // Composited ADDITIVELY, which is the whole reason the daytime Moon works. The
+  // Moon sits beyond the atmosphere, so what reaches the eye is lunar radiance
+  // PLUS the airlight of the entire column in front of it — and that airlight is
+  // the sky colour already in col. Mixing toward a "moon colour" instead claims
+  // the disc REPLACES the sky, and against a bright sky that can only produce a
+  // grey stone darker than its surroundings. Three things the blend had to author,
+  // and got wrong, then fall out of the physics for nothing:
+  //
+  //  - the disc can only ever be brighter than the sky around it, never grey;
+  //  - the unlit side is exactly sky, so it vanishes in daylight and returns as
+  //    earthshine at night, with no day/night presence term to tune;
+  //  - the daylight pedestal compresses the maria's contrast by itself, so the
+  //    rock needs one albedo rather than a night palette and a day palette.
   float md = dot(dir, uMoonDir);
   float moonEdge = cos(uMoonAngularRadius);
   float moonAa = max(fwidth(md) * 0.5, 0.0000001);
   float mdisc = smoothstep(moonEdge - moonAa, moonEdge + moonAa, md);
+
+  // Disc-plane offset in lunar radii, then the near-side sphere point under it.
   vec3 moonOffset = (dir - uMoonDir * md) / max(sin(uMoonAngularRadius), 0.0001);
-  float moonR2 = dot(moonOffset, moonOffset);
-  float moonDepth = sqrt(max(0.0, 1.0 - moonR2));
-  vec3 moonNormal = normalize(moonOffset - uMoonDir * moonDepth);
-  float moonLambert = dot(moonNormal, uSunDir);
-  float phaseMask = smoothstep(-0.01, 0.02, moonLambert);
-  float moonLit = sqrt(max(moonLambert, 0.0));
-  vec3 moonSurface =
-    vec3(0.82, 0.80, 0.72) * (0.2 + moonLit * 0.8) * uMoonSurfaceBrightness;
-  col = mix(col, moonSurface, mdisc * phaseMask * uMoonAmount);
+  // cos(emission): one at disc centre, zero at the limb. It falls as a square
+  // root, so one pixel inside the limb of a binocular-sized disc it is already
+  // about 0.4 — that is how far into a crescent the limb term reaches.
+  float mu = sqrt(max(0.0, 1.0 - dot(moonOffset, moonOffset)));
+  // Near-side normal, unit length by construction: -uMoonDir at disc centre.
+  vec3 moonNormal = moonOffset - uMoonDir * mu;
+  float mu0 = max(dot(moonNormal, uSunDir), 0.0);
+  // Phase angle at the Moon. The Sun is far enough away that the elongation
+  // measured here at the eye is its supplement to within a tenth of a degree.
+  float cosPhase = -dot(uSunDir, uMoonDir);
+  float sunlit = lunarLambert(mu0, mu, acos(clamp(cosPhase, -1.0, 1.0)));
+  // No terminator feather. Brightness reaches the terminator as a linear ramp in
+  // mu0, which is both the honest fade and already antialiased; the fixed 0.03
+  // smoothstep it replaces was wider than a thin crescent is, and smeared one into
+  // a blob several times its true size.
+
+  // Earthshine, the ashen light on the unlit side. The Earth's phase as seen from
+  // the Moon is the complement of the Moon's own, so this peaks exactly when the
+  // crescent is thinnest — which is when the ashen light really is visible.
+  // Centre-weighted, the Earth being behind the eye. It needs no daylight
+  // cut-off: at this level the additive composite loses it against a lit sky.
+  float earthshine = (0.5 - 0.5 * cosPhase) * 0.015 * (0.35 + mu * 0.65);
+
+  // Orthographic inverse onto the equirectangular map; the near hemisphere spans
+  // half of it, so u stays inside 0.25..0.75. Longitude compresses without bound
+  // toward the limb, which is what the texture's anisotropic filtering is for —
+  // isotropic mipmapping answers that footprint by averaging latitude as well and
+  // hands back the mean grey of the whole map, right where the crescent lives.
+  vec2 moonPlane = moonTextureUv(moonOffset);
+  vec2 moonMapUv = vec2(
+    0.5 + atan(moonPlane.x, mu) / 6.28318530718,
+    0.5 + asin(clamp(moonPlane.y, -1.0, 1.0)) / 3.14159265359
+  );
+  // The map is a near-neutral grey photograph, but regolith is not neutral: the
+  // Moon's B-V is about 0.27 magnitudes redder than sunlight, roughly a quarter
+  // less blue for the same green. Restoring that is what turns the ivory of a high
+  // full Moon back on — and, in daylight, it is the only thing that can, because
+  // an additive disc inherits the sky's blue pedestal and a neutral albedo can
+  // only ever land somewhere on the blue side of white.
+  vec3 lunarAlbedo = texture2D(uMoonTexture, moonMapUv).rgb * vec3(1.10, 1.0, 0.84);
+  col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
 
 
   gl_FragColor = vec4(col, 1.0);
 
-  // Match the scene's ACES + sRGB output exactly, so this horizon colour and
-  // the fog colour (set from the same linear value) are pixel-identical.
+  // The correct terminator for a dome drawn straight to the canvas, and kept for
+  // that reason — but INERT on the path renderer.ts actually uses. Three compiles
+  // tone mapping out of anything drawn into a render target, and the colour-space
+  // conversion is the identity into a linear one, so the colour above reaches the
+  // display verbatim and clamps at 1. That is why this whole shader, palette and
+  // Moon alike, is authored display-referred rather than in radiance.
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -463,12 +571,13 @@ const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
 const ENV_BAKE_STEP = 0.03;
 /**
  * Twilight probe cadence. The visible dome is continuous, but reflections and
- * diffuse environment lighting use the last PMREM bake. Smaller twilight steps
- * hide that otherwise obvious staircase without changing the analytic sky or sun.
+ * diffuse environment lighting use the last PMREM bake. A tighter threshold and
+ * cadence keep the baked probe within a barely visible radiance delta while the
+ * sun crosses the horizon.
  */
-const ENV_TWILIGHT_BAKE_STEP = 0.006;
+const ENV_TWILIGHT_BAKE_STEP = 0.002;
 /** Minimum time between completed PMREM bakes. */
-const ENV_BAKE_INTERVAL_MS = 750;
+const ENV_BAKE_INTERVAL_MS = 350;
 
 
 // ---------------------------------------------------------------------------
@@ -498,6 +607,8 @@ export class Sky {
   private readonly planetField = new PlanetField();
   private readonly sunLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
+  /** Solar System Scope lunar map, CC BY 4.0; attribution is in LICENSE. */
+  private readonly moonTexture: THREE.Texture;
   private readonly astronomy = new AstronomySystem();
   private exposure = 1;
 
@@ -529,7 +640,7 @@ export class Sky {
   private readonly uMoonAmount = { value: 0 };
   private readonly uSunAngularRadius = { value: 0.00465 };
   private readonly uMoonAngularRadius = { value: 0.0045 };
-  private readonly uMoonSurfaceBrightness = { value: 1 };
+  private readonly uMoonRadiance = { value: MOON_RADIANCE_DAY };
   /**
    * Anti-solar darkening weight. Peaks with the sun on the horizon and falls to
    * zero both at midday (when the sky genuinely is even all round) and once night
@@ -574,6 +685,22 @@ export class Sky {
     webgl: THREE.WebGLRenderer,
     starField: StarField,
   ) {
+    this.moonTexture = new THREE.TextureLoader().load('/data/moon.jpg');
+    // Raw sampling: the map is a display-referred photograph of the Moon, and its
+    // sRGB numbers used directly as reflectance land close to the contrast the eye
+    // reports. The true linear albedo map is a far harsher 4:1 maria-to-highland
+    // step than anyone has ever seen looking up.
+    this.moonTexture.colorSpace = THREE.NoColorSpace;
+    this.moonTexture.wrapS = THREE.RepeatWrapping;
+    this.moonTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    this.moonTexture.magFilter = THREE.LinearFilter;
+    // The disc's orthographic-to-equirectangular mapping compresses lunar
+    // longitude without bound toward the limb, which is precisely where a crescent
+    // lives. Isotropic mipmapping answers that footprint by averaging latitude
+    // along with it and returns the mean grey of the whole map; anisotropic
+    // filtering averages only the axis that is actually compressed, so the maria
+    // survive into the horns.
+    this.moonTexture.anisotropy = webgl.capabilities.getMaxAnisotropy();
     this.scene = scene;
     this.fog = fog;
     this.pmrem = new THREE.PMREMGenerator(webgl);
@@ -591,10 +718,11 @@ export class Sky {
         uSunColor: { value: this.uSunColor },
         uSunGlowColor: { value: this.uSunGlowColor },
         uSunGlowIntensity: this.uSunGlowIntensity,
+        uMoonTexture: { value: this.moonTexture },
         uMoonAmount: this.uMoonAmount,
         uSunAngularRadius: this.uSunAngularRadius,
         uMoonAngularRadius: this.uMoonAngularRadius,
-        uMoonSurfaceBrightness: this.uMoonSurfaceBrightness,
+        uMoonRadiance: this.uMoonRadiance,
         uAntiSolar: this.uAntiSolar,
         uCloudCover: this.uCloudCover,
         uCloudAmount: this.uCloudAmount,
@@ -737,7 +865,6 @@ export class Sky {
       authoredSunGlow,
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
     );
-
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     this.fog.color.copy(this._horizon);
     this.fog.density = BASE_FOG_DENSITY * g.haze;
@@ -745,15 +872,14 @@ export class Sky {
     // --- Dome uniforms ---
     this.uSunDir.copy(celestial.sun.direction);
     this.uMoonDir.copy(celestial.moon.direction);
-    this.uSunAngularRadius.value = celestial.sun.angularRadiusRad;
+    this.uSunAngularRadius.value = celestial.sun.angularRadiusRad * SUN_VISUAL_SCALE;
     const visibleMoonRadius = celestial.moon.angularRadiusRad * MOON_VISUAL_SCALE;
     this.uMoonAngularRadius.value = visibleMoonRadius;
-    const moonFlux = Math.pow(10, -0.4 * (celestial.moon.magnitude + 12.74));
-    this.uMoonSurfaceBrightness.value = THREE.MathUtils.clamp(
-      moonFlux / Math.max(0.01, celestial.moon.phaseFraction),
-      0.2,
-      2,
-    );
+    // The disc's authored exposure rides the SAME night factor as the palette, so
+    // the Moon and the sky it sits in are always adapted to each other. See
+    // MOON_RADIANCE_DAY/NIGHT for why the dome has to carry adaptation at all.
+    this.uMoonRadiance.value =
+      MOON_RADIANCE_DAY + (MOON_RADIANCE_NIGHT - MOON_RADIANCE_DAY) * night;
     this.uZenith.copy(this._zenith);
     this.uHorizon.copy(this._horizon);
     this.uSunColor.copy(this._sunColor);
@@ -798,14 +924,10 @@ export class Sky {
     );
     this.planetField.update(celestial, this.exposure / 18_000);
 
-    // One shadow-casting key light. Sun wins whenever direct sunlight exists;
-    // otherwise the same fixed shader slot follows the real Moon.
+    // One shadow-casting key light. Astronomy blends the Sun/Moon direction and
+    // exposes the same blend for colour, so the horizon hand-off cannot step.
     this._lightDir.copy(celestial.keyDirection);
-    this._lightColor.copy(
-      celestial.sun.altitudeDeg > 0 && celestial.keyDirection.equals(celestial.sun.direction)
-        ? this._sunColor
-        : C_MOON,
-    );
+    this._lightColor.copy(C_MOON).lerp(this._sunColor, celestial.keySunWeight);
     this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure;
     this.sunLight.color.copy(this._lightColor);
 
@@ -969,6 +1091,7 @@ export class Sky {
 
     this.dome.geometry.dispose();
     (this.dome.material as THREE.ShaderMaterial).dispose();
+    this.moonTexture.dispose();
 
     this.starField.dispose();
     this.planetField.dispose();
