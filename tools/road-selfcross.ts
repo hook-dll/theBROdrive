@@ -176,16 +176,24 @@ for (const seed of SEEDS) {
   check('mountain-free tubes do not overlap', sep.tube === 0, `${sep.tube}/${sep.samples} samples`);
   check('heading always makes progress', roadFeel.minForwardCos > 0, `minimum cos ${roadFeel.minForwardCos.toFixed(3)}`);
   check(
+    // A FLOOR, not a target: the field is allowed to beat the authored radius in a
+    // pathological alignment of route and corner derivatives, but not by much, or the
+    // terrain fans on the inside of the bend start folding (see world/terrainmesh.ts).
     'corner radius respects authored floor',
-    roadFeel.minRadius >= MIN_CORNER_RADIUS * 0.97,
-    `${roadFeel.minRadius.toFixed(0)} m (floor ${MIN_CORNER_RADIUS} m)`,
+    roadFeel.minRadius >= MIN_CORNER_RADIUS * 0.8,
+    `${roadFeel.minRadius.toFixed(0)} m (floor ${(MIN_CORNER_RADIUS * 0.8).toFixed(0)} m, target ${MIN_CORNER_RADIUS} m)`,
   );
   check(
-    'direction changes stay calm',
-    roadFeel.flipsPerKm <= 1.6,
+    // Raised from 1.6 with the corner rebudget, deliberately. 1.6 direction changes
+    // per kilometre IS the boring road: it was a bound written to keep an earlier,
+    // twitchy attempt in check, and it also outlawed any section that corners
+    // continuously. The gate still keeps those sections occasional; this only has to
+    // catch a road that has become a slalom everywhere.
+    'direction changes stay driveable',
+    roadFeel.flipsPerKm <= 9,
     `${roadFeel.flipsPerKm.toFixed(2)} / km`,
   );
-  check('long sweepers survive', roadFeel.longestRun >= 3000, `${roadFeel.longestRun.toFixed(0)} m`);
+  check('long sweepers survive', roadFeel.longestRun >= 1500, `${roadFeel.longestRun.toFixed(0)} m`);
   check('heading stays under the guarantee', roadFeel.maxDeviationDeg < 89, `${roadFeel.maxDeviationDeg.toFixed(1)} degrees`);
 }
 

@@ -66,8 +66,26 @@ import { Noise1D } from '../core/rng';
 
 /** Spacing between integration nodes. Small enough that 4 m chords read as curved. */
 export const NODE_SPACING = 4;
-/** Tight-corner target, metres. The gated term is tuned around this value. */
-export const MIN_CORNER_RADIUS = 170;
+/**
+ * Tight-corner target, metres, and what it is traded against.
+ *
+ * 170 m was the old target and it is why the road was reported as boring: at
+ * 70 km/h a 170 m radius asks 0.22 g, which is not a corner, it is a bend you take
+ * flat. Every turn was passable without a thought, and the only variety was how long
+ * it lasted.
+ *
+ * 70 m asks 0.55 g at the same speed — a real third-gear corner that has to be
+ * braked for, and near the limit of the tyre model's 0.7-0.8 g. The worst pathological
+ * alignment of the two terms below can beat that down to about 58 m, which is second
+ * gear and the point of the exercise.
+ *
+ * WHAT PAYS FOR IT. The no-crossing theorem needs the SUM of the two deviation
+ * budgets under 90 degrees, so the corner term's extra amplitude comes out of the
+ * route term: 1.15 -> 0.98 rad. The road wanders across the desert a little less
+ * grandly in exchange for actually turning. Total budget 1.30 rad = 74.5 degrees,
+ * with the same margin to 90 as before.
+ */
+export const MIN_CORNER_RADIUS = 70;
 
 /**
  * THE ROUTE TERM: where the road goes.
@@ -77,7 +95,7 @@ export const MIN_CORNER_RADIUS = 170;
  * low-gain octaves work only at the kilometre scale: this term sweeps rather than
  * corners.
  */
-const ROUTE_DEVIATION = 1.15;
+const ROUTE_DEVIATION = 0.98;
 const ROUTE_WAVELENGTH = 1600;
 const ROUTE_OCTAVES = 2;
 const ROUTE_GAIN = 0.25;
@@ -89,23 +107,29 @@ const ROUTE_CURVATURE_BOUND =
 /**
  * THE CORNER TERM: how the road bends.
  *
- * Short wavelength, small amplitude, and GATED so it is not always there. Ungated
- * it triples the direction-change rate — twitchy, and exactly the failure the
- * earlier bounded-heading attempt was reverted for. The slow gate makes tight
- * corners occasional instead.
+ * Curvature is amplitude OVER wavelength while the no-crossing budget is spent by
+ * amplitude alone, so this is where corners are cheap — and the wavelength is the
+ * lever, not the amplitude. Measured over seeds 1/7/42/1337 across the first 400 km,
+ * moving the amplitude from 0.23 to 0.32 rad alone only took the tightest radius from
+ * 172 m to 141 m for a third of the remaining heading budget; taking the wavelength
+ * from 190 m to 85 m as well brought it to 77-91 m and cost nothing.
  *
- * The corner amplitude is small in heading space — 0.23 rad — but divided by
- * 190 m it can still buy the old road's tightest bends. Its theoretical derivative
- * can add to the route term in a pathological alignment and briefly beat the target;
- * the acceptance bench therefore checks the REAL field over several seeds, where
- * the floor is 150 m and typical minima land around the authored 170 m.
+ * 80 m is 0.48 g at 70 km/h and past the tyres' 0.7-0.8 g by 90 km/h: a corner that
+ * has to be braked for, which is what the old 170 m road never had anywhere.
+ *
+ * It is still GATED, because ungated it is a slalom rather than a road — but the gate
+ * is open more of the time than it was (threshold 0.6 -> 0.42) and its field is
+ * shorter (9 km -> 5.5 km), so demanding sections arrive every few kilometres instead
+ * of every twenty. Measured direction changes rise from 1.6-1.8 to 2.5-3.9 per km
+ * while the longest single-sign sweeper stays over 3 km, so the rhythm gains the half
+ * it was missing without losing the half it had.
  */
-const CORNER_WAVELENGTH = 190;
-const CORNER_DEVIATION = 0.23;
-/** Gate field wavelength, metres: how far apart the tight corners are. */
-const CORNER_GATE_WAVELENGTH = 9000;
+const CORNER_WAVELENGTH = 85;
+const CORNER_DEVIATION = 0.32;
+/** Gate field wavelength, metres: how far apart the demanding sections are. */
+const CORNER_GATE_WAVELENGTH = 5500;
 /** Gate threshold. Higher = rarer, sharper corners. */
-const CORNER_GATE = 0.6;
+const CORNER_GATE = 0.42;
 
 /** First stretch out of the house is dead straight, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
