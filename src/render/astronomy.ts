@@ -26,8 +26,36 @@ const FULL_MOON_REFERENCE_LUX = 0.25;
 /** Broad hand-off band: one key light rotates from Moon to Sun through twilight. */
 const SUN_KEY_BLEND_START_DEG = -2;
 const SUN_KEY_BLEND_END_DEG = 3;
-/** Sky illumination present before the direct solar disc clears the horizon. */
-const TWILIGHT_DIFFUSE_LUX = 2_000;
+/**
+ * Twilight sky illuminance, as horizontal lux, at the moment the Sun's centre
+ * touches the horizon. Roughly the measured clear-sky figure for sunset.
+ */
+const TWILIGHT_HORIZON_LUX = 400;
+/**
+ * Degrees of solar depression per e-fold of that sky light.
+ *
+ * Twilight decays close to exponentially with the Sun's depth below the horizon:
+ * about 400 lux at the geometric horizon, 3 lux at the end of civil twilight
+ * (-6 degrees), a hundredth of a lux around nautical (-12), and nothing that
+ * outshines the stars by astronomical (-18). 1.26 degrees per e-fold is the fit
+ * through those anchors.
+ *
+ * WHY AN EXPONENTIAL AND NOT A smoothstep: this term IS the entire sky bounce
+ * once the direct disc is gone, and a smoothstep hits EXACTLY ZERO at its lower
+ * edge. It used to, at -6 degrees, and below that the only diffuse light left was
+ * a 0.001 lux epsilon. The exposure below divides by that illuminance, so the
+ * scene held full brightness right up to -6 degrees and then fell off a cliff
+ * inside the quarter-degree the smoothstep needed to reach zero -- under a second
+ * of any day length, which is why the step looked identical however slow the
+ * clock was set. An exponential has no lower edge to fall off.
+ */
+const TWILIGHT_DECAY_DEG = 1.26;
+/**
+ * Airglow, zodiacal light and integrated starlight: what a moonless desert sky
+ * still puts on the ground. Small, but a real floor rather than an epsilon, so
+ * the illuminance this module reports is never a number picked to avoid a divide.
+ */
+const NIGHT_SKY_LUX = 0.002;
 const KEY_IDENTITY_ROTATION = new THREE.Quaternion();
 const KEY_TARGET_ROTATION = new THREE.Quaternion();
 const KEY_BLEND_ROTATION = new THREE.Quaternion();
@@ -183,14 +211,31 @@ export class AstronomySystem {
       frame.keySunWeight,
     );
     frame.keyDirection.copy(frame.moon.direction).applyQuaternion(KEY_BLEND_ROTATION).normalize();
-    frame.keyIlluminanceLux = Math.max(sunLux, moonLux);
+    // The key's BRIGHTNESS rides the same weight as its direction and, in sky.ts,
+    // its colour — so one number describes the whole hand-over and the three can
+    // never disagree. `Math.max` used to pick the brighter of the two instead,
+    // which is a corner wherever they cross: the Sun overtakes a full Moon at
+    // about 1.2 degrees of depression, and there the key's output stepped by an
+    // order of magnitude between one frame and the next while its direction and
+    // colour were still the Moon's.
+    frame.keyIlluminanceLux = moonLux + (sunLux - moonLux) * frame.keySunWeight;
 
-    // Civil-twilight sky bounce begins well before the direct disc. Previously
-    // diffuse light was only a fraction of direct sunLux, so the whole environment
-    // remained at moon level until the narrow horizon transmission gate opened.
-    const twilight = smoothstep(-6, 6, frame.sun.altitudeDeg);
+    // Sky bounce. Three sources, all continuous in solar altitude, because the
+    // exposure downstream is a reciprocal of their sum and inherits every kink:
+    //
+    //  - the daylight sky, a fixed share of the direct beam it scatters;
+    //  - moonlight scattered the same way;
+    //  - twilight, decaying exponentially with solar depression and pinned above
+    //    the horizon, where the beam term has already taken over as the larger of
+    //    the two (1400 lux against 400 by three degrees up).
+    //
+    // Plus the night-sky floor, which is what the sum settles on once the Sun is
+    // deep enough that nothing else contributes.
+    const twilightLux =
+      TWILIGHT_HORIZON_LUX *
+      Math.exp(Math.min(frame.sun.altitudeDeg, 0) / TWILIGHT_DECAY_DEG);
     frame.diffuseIlluminanceLux =
-      sunLux * 0.16 + moonLux * 0.2 + twilight * TWILIGHT_DIFFUSE_LUX + 0.001;
+      sunLux * 0.16 + moonLux * 0.2 + twilightLux + NIGHT_SKY_LUX;
     return frame;
   }
 }

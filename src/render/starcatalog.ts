@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import type { GraphicsQuality } from '../game/settings';
 
-const CATALOG_URL = '/data/tycho2-mag8.bin';
+const CATALOG_URL = '/data/tycho2.bin';
 const MAGIC = 'TBR1';
 const RECORD_FLOATS = 6;
 const RECORD_BYTES = RECORD_FLOATS * 4;
@@ -8,6 +9,28 @@ const J2000_MILLISECONDS = Date.UTC(2000, 0, 1, 12);
 const JULIAN_YEAR_MILLISECONDS = 365.25 * 86_400_000;
 const MAS_TO_RAD = Math.PI / (180 * 3_600_000);
 const STAR_RADIUS = 2790;
+
+/**
+ * How deep each tier's sky goes, as a limiting visual magnitude.
+ *
+ * The catalogue file is SORTED BY MAGNITUDE, so a limit is a prefix of it and a
+ * tier change is one `setDrawRange` — no refetch, no rebuilt buffers, no shader
+ * recompile, and the switch lands on the next frame rather than the next load.
+ * Everything past the prefix is still resident on the GPU, which is the point:
+ * the whole file is uploaded once and the draw range decides how much sky is
+ * spent per frame.
+ *
+ * Magnitude 8 is naked-eye-plus: about 45,600 stars, the deepest a Tycho-2 cut
+ * stays cheap at. `blessing` runs to 8.5, which is where this data's photometry
+ * is still colour-complete (see tools/build-star-catalog.mjs) and which adds
+ * roughly 32,000 more — the faint grain between the constellations that makes a
+ * desert sky read as crowded rather than plotted.
+ */
+const MAGNITUDE_LIMIT: Record<GraphicsQuality, number> = {
+  acceptable: 8,
+  standard: 8,
+  blessing: 8.5,
+};
 
 const STAR_VERTEX = /* glsl */ `
 attribute vec3 aColor;
@@ -97,8 +120,14 @@ function blackbodyColor(bv: number, out: THREE.Color): void {
 export class StarField {
   readonly points: THREE.Points;
   private readonly material: THREE.ShaderMaterial;
+  /**
+   * Magnitude of each star, in file order. Kept because the draw range for a tier
+   * is found by searching it, and the search has to be exact: an off-by-one prefix
+   * silently drops a star from the sky or draws one the tier did not ask for.
+   */
+  private readonly sortedMagnitudes: Float32Array;
 
-  constructor(buffer: ArrayBuffer, epoch: Date) {
+  constructor(buffer: ArrayBuffer, epoch: Date, quality: GraphicsQuality) {
     const view = new DataView(buffer);
     const magic = String.fromCharCode(...new Uint8Array(buffer, 0, 4));
     if (magic !== MAGIC) throw new Error(`Unsupported star catalogue: ${magic}`);
@@ -120,6 +149,10 @@ export class StarField {
       const pmDec = view.getFloat32(offset, true); offset += 4;
       const magnitude = view.getFloat32(offset, true); offset += 4;
       const bv = view.getFloat32(offset, true); offset += 4;
+      // The prefix trick below is only a magnitude cut if the file is ordered.
+      if (i > 0 && magnitude < magnitudes[i - 1]) {
+        throw new Error('Star catalogue is not sorted by magnitude');
+      }
       dec += pmDec * years * MAS_TO_RAD;
       ra += (pmRa * years * MAS_TO_RAD) / Math.max(0.01, Math.cos(dec));
       const cosDec = Math.cos(dec);
@@ -132,6 +165,7 @@ export class StarField {
       colors[i * 3 + 2] = color.b;
       magnitudes[i] = magnitude;
     }
+    this.sortedMagnitudes = magnitudes;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -155,6 +189,32 @@ export class StarField {
     this.points.frustumCulled = false;
     this.points.renderOrder = -8;
     this.points.matrixAutoUpdate = false;
+    this.setQuality(quality);
+  }
+
+  /**
+   * Chooses how faint this tier's sky goes. Every star stays resident; only the
+   * draw range moves, so this is a per-frame-cost change and nothing else — safe
+   * to call from the settings menu with the sky already on screen.
+   */
+  setQuality(quality: GraphicsQuality): void {
+    const limit = MAGNITUDE_LIMIT[quality];
+    const magnitudes = this.sortedMagnitudes;
+    // Upper bound of the prefix, by bisection: the count of stars at or brighter
+    // than the limit. Two tiers share a limit, so this runs at most twice a session.
+    let low = 0;
+    let high = magnitudes.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (magnitudes[mid] <= limit) low = mid + 1;
+      else high = mid;
+    }
+    this.points.geometry.setDrawRange(0, low);
+  }
+
+  /** Stars the current tier draws. Read by tools and the dev hook, not the loop. */
+  get drawnCount(): number {
+    return this.points.geometry.drawRange.count;
   }
 
   update(
@@ -178,8 +238,11 @@ export class StarField {
   }
 }
 
-export async function loadStarField(epoch: Date): Promise<StarField> {
+export async function loadStarField(
+  epoch: Date,
+  quality: GraphicsQuality,
+): Promise<StarField> {
   const response = await fetch(CATALOG_URL);
   if (!response.ok) throw new Error(`Star catalogue failed to load: HTTP ${response.status}`);
-  return new StarField(await response.arrayBuffer(), epoch);
+  return new StarField(await response.arrayBuffer(), epoch, quality);
 }
