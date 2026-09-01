@@ -267,6 +267,12 @@ function prepareMaterials(root: THREE.Object3D): void {
     if (!(child instanceof THREE.Mesh)) return;
     child.castShadow = true;
     child.receiveShadow = true;
+    // A pack that authored `doubleSided: true` would otherwise store its LIT face in
+    // the sun's depth map (three flips FrontSide to BackSide for the depth pass but
+    // leaves DoubleSide alone) and every panel would test against its own depth. The
+    // bias that used to hide that was wide enough to eat the car's contact shadow;
+    // it is 2 cm now, so the invariant is stated here instead — see render/sky.ts.
+    for (const material of materialsOf(child)) material.shadowSide = THREE.BackSide;
   });
 }
 

@@ -774,8 +774,27 @@ export class Sky {
     shadow.camera.right = 90;
     shadow.camera.top = 90;
     shadow.camera.bottom = -90;
-    shadow.bias = -0.0004;
-    shadow.normalBias = 0.05;
+    // BIAS IS MEASURED IN METRES ALONG THE LIGHT RAY, and `shadow.bias` is a
+    // fraction of the camera's depth range: over `near`..`far` (500 m) the old
+    // -0.0004 was 20 cm, and `normalBias` added 5 cm more with the sun overhead.
+    //
+    // Twenty-five centimetres is a CAR'S GROUND CLEARANCE. Three renders the back
+    // faces of a caster into the depth map (`shadowSide`, and see the note in
+    // render/proceduralcars.ts), so the depth stored under a car is its UNDERBODY,
+    // and the sand under it sits 0.11-0.29 m further from the light depending on the
+    // model. The bias therefore declared most of that sand lit: the car's contact
+    // shadow was eaten away wherever the dune relief closed the gap, and the surviving
+    // patches followed the desert tile's 3 m lattice — the diagonally striped, torn
+    // shadow, worst with the sun high and gone by dusk (the gap the bias has to beat
+    // is the clearance divided by sin(elevation)).
+    //
+    // 2 cm + 2 cm is all a CLOSED caster needs: its far face is metres behind its
+    // lit face, so the comparison has nothing to resolve but float noise, and the
+    // shadow-coordinate interpolation is exact for an orthographic light across a
+    // planar triangle. Nothing that receives this map casts into it from an open
+    // sheet, which is the one case that would want the old slack.
+    shadow.bias = -0.00004;
+    shadow.normalBias = 0.02;
     shadow.camera.updateProjectionMatrix();
     scene.add(this.sunLight);
     // The target must be in the scene graph for its matrixWorld to update.
