@@ -83,54 +83,76 @@ const SOVIET = '/models/soviet';
  * settles, and the bench says a drop is over in well under a second.
  */
 
+/*
+ * ---- WHY THESE WENT UP, and the number that matters ----
+ *
+ * Rapier's rate is per kilogram, so the body's natural frequency is simply
+ * `sqrt(stiffness) / 2pi` — no mass in it. At the old rates that was 0.71 Hz for the
+ * base car and 0.67 Hz for the Soviet saloons. A 1970s saloon is 1.0-1.4 Hz; 0.7 Hz is
+ * a 1960s American land yacht on its worst day, and it has a consequence nobody
+ * intended: the road's own geometry stops reaching the driver.
+ *
+ * The collider carries bumps of 90-160 mm amplitude at 3.3 and 6.7 m wavelengths
+ * (see world/roadsurface.ts). At 90 km/h a 3.3 m wave excites the body at 7.6 Hz. A
+ * spring isolates everything above its own frequency by the square of the ratio, so at
+ * 0.71 Hz the body sees about one percent of it: the car floats over a road that is
+ * physically quite rough. Reported from play as imperfections being "almost completely
+ * absorbed, even on passenger cars", and as sliding "as if on an air cushion".
+ *
+ * Raising the rates to period-correct frequencies (0.81-1.25 Hz) moves the isolation
+ * corner up by a factor of two, which is a factor of four in transmitted amplitude,
+ * and shortens static sag enough to reduce travel with it — a soft spring that
+ * bottoms out is a hard spring at the worst possible moment, so the reserve is kept.
+ *
+ * Damping is set as a FRACTION OF CRITICAL (`2 * sqrt(stiffness)`) as before, and
+ * deliberately a little lower than it was: period dampers were poor, and the body
+ * moving is the information the driver is asking for. Rebound stays biased above
+ * compression, which is what stops a bump throwing the body back up.
+ */
+
 const SUSP_CAR: SuspensionTuning = {
   restLength: 0.3,
-  maxTravel: 0.3,
-  // 17 -> 20: sag falls from 144 mm to 123 mm against 300 mm of travel, so there is
-  // MORE reserve than before as well as less movement.
-  stiffness: 20,
-  // Critical damping at k=20 is 8.94; these are 0.35 and 0.45 of it, the same
-  // fractions as before the stiffening.
-  compression: 3.13,
-  relaxation: 4.02,
+  // Sag is 9.81/(4*38) = 65 mm, so 175 mm of reserve remains in 240 mm of travel —
+  // more than the 177 mm the old 300 mm / 123 mm sag pairing left.
+  maxTravel: 0.24,
+  /** 0.98 Hz. */
+  stiffness: 38,
+  // Critical damping at k=38 is 12.33; these are 0.28 and 0.38 of it.
+  compression: 3.45,
+  relaxation: 4.69,
   maxForce: 26000,
 };
 /**
  * SOFT: what the Soviet saloons ride on. A 1960s-70s car that leans and takes a
  * set slowly — and that body roll IS the load transfer, which is what makes its
- * breakaway progressive instead of sudden. Softer still would just wash the front
- * end out; the roll is the point.
+ * breakaway progressive instead of sudden.
  *
- * Rates are per kg of chassis mass (see the block above). sag = 9.81 / (4 * 15)
- * = 164 mm against 340 mm of travel = 176 mm of reserve, a kerb strike's worth
- * that never bottoms in ordinary driving. Critical damping is 2 * sqrt(15) =
- * 7.75, so 2.5 compression is 0.32 of it and 3.25 relaxation is 0.42 —
- * rebound-biased, which is what stops a soft spring throwing the body back up.
+ * Still the softest thing in the catalogue after the truck, and still the one that
+ * wallows; 0.87 Hz against a modern car's 1.5 leaves plenty of period character. Sag
+ * 82 mm, reserve 178 mm.
  */
 const SUSP_SOFT: SuspensionTuning = {
   restLength: 0.33,
-  maxTravel: 0.34,
-  // 15 was genuinely floaty: 164 mm of static sag, and a body that kept moving after
-  // the road had stopped. 18 brings sag to 136 mm against 340 mm of travel — still
-  // period-soft, still nothing like a modern car, but the wallow goes and weight
-  // transfer settles instead of drifting.
-  stiffness: 18,
-  // Critical damping at k=18 is 8.49; these are 0.32 and 0.42 of it, unchanged as
-  // FRACTIONS so the rebound bias that stops a soft spring throwing the body back up
-  // survives the stiffening.
-  compression: 2.72,
-  relaxation: 3.56,
+  maxTravel: 0.26,
+  /** 0.87 Hz. */
+  stiffness: 30,
+  // Critical damping at k=30 is 10.95; these are 0.28 and 0.38 of it — the least
+  // damped in the catalogue, which is the wallow these cars are supposed to have.
+  compression: 3.07,
+  relaxation: 4.16,
   maxForce: 25000,
 };
 
 /** "Sport" in this era means a firm saloon, not a modern chassis. */
 const SUSP_SPORT: SuspensionTuning = {
   restLength: 0.28,
-  maxTravel: 0.26,
-  stiffness: 24,
-  // Critical damping at k=24 is 9.8.
-  compression: 3.6,
-  relaxation: 4.6,
+  maxTravel: 0.2,
+  /** 1.15 Hz. */
+  stiffness: 52,
+  // Critical damping at k=52 is 14.42; 0.30 and 0.39 of it — a firmer car is also a
+  // better damped one, but only slightly, and never a modern one.
+  compression: 4.33,
+  relaxation: 5.62,
   maxForce: 30000,
 };
 
@@ -142,20 +164,25 @@ const SUSP_SPORT: SuspensionTuning = {
  */
 const SUSP_FASTBACK: SuspensionTuning = {
   restLength: 0.25,
-  maxTravel: 0.22,
-  stiffness: 28,
-  compression: 4.2,
-  relaxation: 5.8,
+  maxTravel: 0.18,
+  /** 1.25 Hz, the firmest in the catalogue. */
+  stiffness: 62,
+  // Critical damping at k=62 is 15.75; 0.32 and 0.42 of it.
+  compression: 5.04,
+  relaxation: 6.62,
   maxForce: 32000,
 };
 
 const SUSP_TRUCK: SuspensionTuning = {
   restLength: 0.38,
-  maxTravel: 0.36,
-  stiffness: 15,
-  // Critical damping at k=15 is 7.75.
-  compression: 2.7,
-  relaxation: 3.5,
+  // Longest travel and lowest frequency, unladen: a leaf-sprung truck rides badly
+  // empty and settles when loaded, and this is the empty half of that.
+  maxTravel: 0.3,
+  /** 0.81 Hz. */
+  stiffness: 26,
+  // Critical damping at k=26 is 10.20; 0.26 and 0.36 of it — the worst dampers here.
+  compression: 2.65,
+  relaxation: 3.67,
   maxForce: 42000,
 };
 
