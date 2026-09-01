@@ -513,6 +513,38 @@ const SLIDE_CURVE_GAIN = 1.5;
 const LOCKED_SIDE_GRIP = 0.22;
 
 /**
+ * Relaxation length: how far the tyre must ROLL before its carcass has built the
+ * side force a new slip angle asks for, metres.
+ *
+ * Without it the side-force curve is read at the geometric slip angle, which changes
+ * the instant the wheel is turned — so grip appeared and vanished on the frame the
+ * input did, and small corrections felt like a switch rather than a load coming on.
+ * A bias-ply carcass is slow: 0.45 m is roughly one wheel revolution, so at 25 m/s
+ * the lag is ~18 ms (about one step) and in a car-park manoeuvre it is most of a
+ * second. Distance-based, not time-based, which is the point — a stationary wheel
+ * builds nothing however long it is held over.
+ */
+const TYRE_RELAXATION_LENGTH_M = 0.45;
+/**
+ * Load sensitivity of μ: how much grip a tyre LOSES per unit of extra load.
+ *
+ * A tyre's coefficient falls as it is pressed harder, which is the mechanism behind
+ * every weight-transfer effect worth having. Without it capacity was exactly linear
+ * in load, so transferring load between two wheels moved grip around without ever
+ * costing any: the balance of the car could only be authored (see
+ * REAR_AXLE_SIDE_GRIP) and never emerged from what the car was doing.
+ *
+ * μ scales as 1 - k·(Fz/Fz_static - 1), so it is EXACTLY 1 at the static load and
+ * the calibrated straight-line figures are untouched. 0.18 is a mild period value:
+ * an outer tyre carrying 1.6x its static load keeps 89% of its μ, so a hard corner
+ * loses a few per cent of total grip and the loaded end gives up first.
+ */
+const LOAD_SENSITIVITY = 0.18;
+/** Floor on the load-sensitivity factor, so an airborne-then-slammed wheel stays sane. */
+const LOAD_SENSITIVITY_MIN = 0.55;
+const LOAD_SENSITIVITY_MAX = 1.35;
+
+/**
  * Traction control: the driver aid that used to masquerade as a tyre compound.
  *
  * `sport` was never a compound. Its only felt benefit was unsticking a car bogged in
@@ -751,6 +783,29 @@ const TRANSFORM_EMIT_INTERVAL = 0.25;
 const ODOMETER_EMIT_INTERVAL = 0.5;
 const FUEL_EMIT_INTERVAL = 0.5;
 
+/**
+ * Cosmetic shell wear is emitted with the other slow-moving vehicle values; half a
+ * second keeps the state stream coarse while still making a wash visible promptly.
+ */
+const BODY_CONDITION_EMIT_INTERVAL = 0.5;
+/**
+ * Four rolling tyres cover 400 km of tyre-track over 100 km of road, so sand
+ * (`dust = 1`) reaches full dirt after roughly 100 km; a 2x slip/slide multiplier
+ * makes a digging wheel throw visibly more material without fouling a car in 1 km.
+ */
+const BODY_DIRT_TYRE_METRES_TO_FULL = 400_000;
+/** A kerb nudge is under this unexplained loss; shell scratches start above it. */
+const SCRATCH_IMPACT_THRESHOLD_MPS = 2.5;
+/** Each m/s above the scratch threshold adds this much shell damage. */
+const SCRATCH_PER_SEVERITY_MPS = 0.025;
+/** One collision cannot add more than this much cosmetic damage. */
+const SCRATCH_PER_IMPACT_CAP = 0.12;
+/**
+ * Suspension and solver noise are below 0.35 m/s once the tyres' force ceiling is
+ * removed; keeping that margin stops ordinary road seams becoming collision signals.
+ */
+const IMPACT_UNEXPLAINED_FLOOR_MPS = 0.35;
+
 const TWO_PI = Math.PI * 2;
 
 /** Rotates v by quaternion q into `out`, in place. */
@@ -806,6 +861,16 @@ interface WheelVisual {
   slipRatio: number;
   /** Low-passed normal load (N) reported by the suspension. */
   loadN: number;
+  /**
+   * Slip angle the CARCASS has actually built, radians, lagged behind the geometric
+   * one by the relaxation length. This is the angle the side-force curve is read at.
+   */
+  slipAngleRad: number;
+  /**
+   * Share of this tyre's longitudinal capacity the last step spent, 0..1. Feeds the
+   * friction ellipse that decides what is left for cornering.
+   */
+  gripUsage: number;
   /** Drive torque (N·m) commanded to this wheel this step. */
   driveTorqueNm: number;
   /** Brake force (N) commanded to this wheel this step. */
@@ -837,6 +902,7 @@ export interface VehicleAudioState {
   cylinders: number;
   /** Applied throttle, 0..1 — already zeroed by an empty tank. */
   throttle: number;
+
   brake: number;
   handbrake: boolean;
   /** Signed forward speed, m/s. */
@@ -859,6 +925,19 @@ export interface VehicleAudioState {
    */
   frontLockT: number;
   rearLockT: number;
+}
+
+/**
+ * A collision the chassis velocity change cannot be explained by its own tyres and
+ * drag. Direction points from the object into the chassis, in chassis-local space.
+ */
+export interface VehicleImpact {
+  /** Speed the chassis lost this step that its own tyre and drag forces cannot explain, m/s. */
+  readonly severityMps: number;
+  /** Unit direction the blow came FROM, in chassis-local space (+Z forward, +X right, +Y up). */
+  readonly localX: number;
+  readonly localY: number;
+  readonly localZ: number;
 }
 
 /**
@@ -1186,6 +1265,14 @@ export class Vehicle implements Rebasable {
   private localCoolant: number;
   private localOil: number;
   private lastAuthCoolant: number;
+
+  // Cosmetic shell condition is mirrored locally so dust and impacts do not write
+  // authoritative state every 16.7 ms; washing resyncs through the same authority check.
+  private localBodyDirt: number;
+  private localBodyScratches: number;
+  private lastAuthBodyDirt: number;
+  private lastAuthBodyScratches: number;
+  private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
 
@@ -1196,6 +1283,21 @@ export class Vehicle implements Rebasable {
 
   // Scratch buffers reused across fixedUpdate (no per-tick allocation).
   private readonly linvel = { x: 0, y: 0, z: 0 };
+
+  /**
+   * The prior controller pass's maximum legitimate deceleration. It bounds tyres
+   * plus rolling/aero drag before the next solver result is classified as a blow.
+   */
+  private ownTyreCapacityN = 0;
+  private ownDragRollingDeltaMps = 0;
+  private previousStepContactCount = 0;
+  private impactVelocityPrimed = false;
+  private readonly previousStepLinvel = { x: 0, y: 0, z: 0 };
+  private readonly stepStartLinvel = { x: 0, y: 0, z: 0 };
+  private previousOwnTyreCapacityN = 0;
+  private previousOwnDragRollingDeltaMps = 0;
+  private impactThisStep = false;
+  private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
@@ -1357,6 +1459,10 @@ export class Vehicle implements Rebasable {
     this.lastAuthFuel = carState.fuelLitres;
     this.localCoolant = carState.coolantLitres;
     this.lastAuthCoolant = carState.coolantLitres;
+    this.localBodyDirt = clamp(carState.dirt, 0, 1);
+    this.lastAuthBodyDirt = this.localBodyDirt;
+    this.localBodyScratches = clamp(carState.scratches, 0, 1);
+    this.lastAuthBodyScratches = this.localBodyScratches;
     this.localOil = carState.oilLitres;
     this.lastAuthOil = carState.oilLitres;
     this.rebuild();
@@ -1369,6 +1475,21 @@ export class Vehicle implements Rebasable {
 
   get chassis(): RAPIER.RigidBody {
     return this.chassisBody;
+  }
+
+  /** Non-null only during the fixed step that classified the previous solve as a collision. */
+  get lastImpact(): VehicleImpact | null {
+    return this.impactThisStep ? this.impactState : null;
+  }
+
+  /** Live cosmetic shell dirt, including unflushed fixed-step accumulation. */
+  get bodyDirt(): number {
+    return this.localBodyDirt;
+  }
+
+  /** Live cosmetic shell scratches, including unflushed fixed-step accumulation. */
+  get bodyScratches(): number {
+    return this.localBodyScratches;
   }
 
   /**
@@ -1599,6 +1720,8 @@ export class Vehicle implements Rebasable {
         groundSurface: SurfaceType.Asphalt,
         grounded: false,
         slideT: 0,
+        slipAngleRad: 0,
+        gripUsage: 0,
         tcsCut: 0,
         locked: false,
         spinRadS: 0,
@@ -1675,6 +1798,10 @@ export class Vehicle implements Rebasable {
     const controller = this.controller;
     if (!controller) return;
     this.restoredLightStatePending = false;
+    // Nobody is driving this one, so no step of its own explains its velocity. Leaving
+    // the impact detector primed across that gap would report the whole standing
+    // interval as one collision the moment the player got back in.
+    this.impactVelocityPrimed = false;
 
     const n = this.wheels.length;
     // Being shoved suspends the hold, not the brake. The hold is a teleport — it
@@ -1898,6 +2025,7 @@ export class Vehicle implements Rebasable {
         t: 'car_fluid',
         carId: this.car.id,
         fluid: 'coolant',
+
         litres: this.localCoolant,
       });
     }
@@ -1910,6 +2038,27 @@ export class Vehicle implements Rebasable {
     }
     this.lastAuthOil = this.localOil;
     this.fluidEmitTimer = 0;
+
+    if (
+      this.car.dirt !== this.lastAuthBodyDirt ||
+      this.car.scratches !== this.lastAuthBodyScratches
+    ) {
+      this.localBodyDirt = clamp(this.car.dirt, 0, 1);
+      this.localBodyScratches = clamp(this.car.scratches, 0, 1);
+    } else if (
+      this.localBodyDirt !== this.car.dirt ||
+      this.localBodyScratches !== this.car.scratches
+    ) {
+      this.world.apply({
+        t: 'car_body_condition',
+        carId: this.car.id,
+        dirt: this.localBodyDirt,
+        scratches: this.localBodyScratches,
+      });
+    }
+    this.lastAuthBodyDirt = this.localBodyDirt;
+    this.lastAuthBodyScratches = this.localBodyScratches;
+    this.bodyConditionEmitTimer = 0;
 
     if (this.odoAccum > 0) {
       this.world.apply({ t: 'car_odometer', carId: this.car.id, metres: this.odoAccum });
@@ -1981,7 +2130,23 @@ export class Vehicle implements Rebasable {
       this.lastAuthOil = this.car.oilLitres;
     }
 
+    if (
+      this.car.dirt !== this.lastAuthBodyDirt ||
+      this.car.scratches !== this.lastAuthBodyScratches
+    ) {
+      this.localBodyDirt = clamp(this.car.dirt, 0, 1);
+      this.localBodyScratches = clamp(this.car.scratches, 0, 1);
+      this.lastAuthBodyDirt = this.localBodyDirt;
+      this.lastAuthBodyScratches = this.localBodyScratches;
+    }
+
+    // The solver runs between fixedUpdate calls. Sampling here therefore compares
+    // its completed result against the velocity cached before the prior solve.
+    this.chassisBody.linvel(this.stepStartLinvel);
+    this.impactThisStep = false;
+
     let fwd = this.forwardSpeedMps();
+    let bodyConditionChanged = false;
     if (this.engineRunning && this.engineDestroyed && Math.abs(fwd) > DESTROYED_ENGINE_SPEED_CAP_MPS) {
       this.capDestroyedEngineSpeed(fwd);
       fwd = Math.sign(fwd) * DESTROYED_ENGINE_SPEED_CAP_MPS;
@@ -2233,6 +2398,10 @@ export class Vehicle implements Rebasable {
       tyreGrip *
       LATERAL_GRIP_FRACTION *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
+    // The load μ(Fz) is measured against: this car standing still, evenly. Nothing
+    // about it is per-wheel, so a heavier car does not get a free grip advantage from
+    // sitting harder on its tyres — that is what GRIP_MASS_EXPONENT above is for.
+    const staticWheelLoadN = Math.max(1, (mass * 9.81) / Math.max(1, this.wheels.length));
 
     // Speed-dependent lateral grip (see constants above). Below the start speed
     // the smoothstep evaluates to exactly 0, so the factor is exactly 1 and
@@ -2275,7 +2444,19 @@ export class Vehicle implements Rebasable {
       // rear-only cable cannot reliably hold the vehicle's mass on this game's
       // steep, uneven roads.
       const handbraked = input.handbrake && !w.isFront;
-      const coneGrip = 1 - w.slideT * (1 - SLIDE_SIDE_GRIP);
+      // FRICTION ELLIPSE, from the share of its longitudinal capacity this tyre spent
+      // last step. What it replaces was a lagged threshold: nothing happened until the
+      // longitudinal channel had eaten 55% of the cone, and then side grip fell on a
+      // time constant rather than on the force. So half-throttle cost a tyre nothing
+      // at all, and the loss, once it came, arrived on a schedule instead of on the
+      // pedal. sqrt(1 - u²) is the real trade and it starts trading immediately.
+      //
+      // The floor is SLIDE_SIDE_GRIP, so a fully saturated tyre lands exactly where
+      // the tuned model left it — a slide still keeps enough side force to be caught
+      // (see that constant). Only the approach changed, and it changed to continuous.
+      // `slideT` is untouched: it still drives skid audio, spray and tyre visuals.
+      const usage = clamp(w.gripUsage, 0, 1);
+      const coneGrip = Math.max(SLIDE_SIDE_GRIP, Math.sqrt(Math.max(0, 1 - usage * usage)));
       // Locked: the parking cable is immediate, because it is a cable pulling shoes
       // onto drums. The foot brake earns its lock from the wheel's own rotation,
       // measured by updateWheelDynamics after the step that delivered the torque.
@@ -2310,16 +2491,35 @@ export class Vehicle implements Rebasable {
         Math.abs(latSpeed),
         Math.max(Math.abs(fwdSpeed), SLIP_ANGLE_REF_MPS),
       );
-      if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, slipRad);
+      // Relaxation: the carcass follows the geometric angle over a rolling DISTANCE,
+      // so the blend is per metre travelled and a parked wheel builds nothing.
+      const rollDistance = Math.abs(fwdSpeed) * dt;
+      w.slipAngleRad +=
+        (slipRad - w.slipAngleRad) * (1 - Math.exp(-rollDistance / TYRE_RELAXATION_LENGTH_M));
+      // The limiter reads the BUILT angle, not the geometric one: countersteer has to
+      // respond to the slide the tyres are actually carrying.
+      if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
 
       // Peak, then a smooth fade to the plateau. Below the peak this is exactly 1.
       const peakDeg = w.isFront ? SLIP_PEAK_FRONT_DEG : SLIP_PEAK_REAR_DEG;
       const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
       const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
-      const fadeT = clamp(((slipRad * 180) / Math.PI - peakDeg) / (fullDeg - peakDeg), 0, 1);
+      const fadeT = clamp(
+        ((w.slipAngleRad * 180) / Math.PI - peakDeg) / (fullDeg - peakDeg),
+        0,
+        1,
+      );
       const slipGrip = 1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT);
 
-      const frictionSlip = surface.frictionSlip * gripBudgetFactor;
+      // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
+      // calibrated straight-line figures stand and only TRANSFER changes anything.
+      const loadFactor = clamp(
+        1 - LOAD_SENSITIVITY * (w.loadN / staticWheelLoadN - 1),
+        LOAD_SENSITIVITY_MIN,
+        LOAD_SENSITIVITY_MAX,
+      );
+
+      const frictionSlip = surface.frictionSlip * gripBudgetFactor * loadFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       controller.setWheelSideFrictionStiffness(
         w.index,
@@ -2329,7 +2529,8 @@ export class Vehicle implements Rebasable {
           (w.isFront ? lateralGripFront : lateralGripRear) *
           axleGrip *
           slipGrip *
-          slideGrip,
+          slideGrip *
+          loadFactor,
       );
 
       const axleShare = w.isFront ? frontShare : rearShare;
@@ -2381,10 +2582,29 @@ export class Vehicle implements Rebasable {
     if (this.skipTyreDynamicsSteps > 0) {
       this.skipTyreDynamicsSteps--;
       this.longitudinalForceSum = 0;
+      this.ownTyreCapacityN = 0;
     } else {
       this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip, fwd);
     }
     this.refreshWheelSpray(fwd);
+
+    // Each grounded wheel contributes its travelled tyre-track on its reported
+    // surface. A spinning or sliding contact carries more loose material up the
+    // body than a rolling one, hence the bounded slip multiplier in the scale above.
+    const wheelDistance = Math.abs(fwd) * dt;
+    let dirtGain = 0;
+    for (const w of this.wheels) {
+      if (!w.grounded) continue;
+      dirtGain +=
+        (wheelDistance *
+          SURFACES[w.groundSurface].dust *
+          (1 + clamp(Math.abs(w.slipRatio), 0, 2) + w.slideT)) /
+        BODY_DIRT_TYRE_METRES_TO_FULL;
+    }
+    if (dirtGain > 0) {
+      this.localBodyDirt = clamp(this.localBodyDirt + dirtGain, 0, 1);
+      bodyConditionChanged = true;
+    }
 
     // Slide, lock and the friction-circle usage that costs a working tyre its side
     // grip are all computed inside updateWheelDynamics now, from the tyre's own
@@ -2415,6 +2635,7 @@ export class Vehicle implements Rebasable {
     // persistent — a force added here would be re-applied on every subsequent step
     // until `resetForces`, so adding one per tick accumulates without bound and
     // strangles the car to a standstill within a couple of seconds.
+    this.ownDragRollingDeltaMps = 0;
     this.chassisBody.linvel(this.linvel);
     const hSpeedSq = this.linvel.x * this.linvel.x + this.linvel.z * this.linvel.z;
     const hSpeed = Math.sqrt(hSpeedSq);
@@ -2424,6 +2645,7 @@ export class Vehicle implements Rebasable {
         const rr = rollingResistanceSum / contactCount;
         retarding += rr * mass * GRAVITY * (contactCount / wheelCount);
       }
+      const dragRollingForce = retarding;
 
       // Engine braking: closed-throttle crank drag carried through the gearbox
       // to a wheel force, applied as a longitudinal chassis impulse — the same
@@ -2448,6 +2670,7 @@ export class Vehicle implements Rebasable {
       // Never let one tick's retarding impulse reverse the car; cap it at the
       // impulse that would bring horizontal motion exactly to rest.
       const impulse = Math.min(retarding * dt, hSpeed * mass);
+      this.ownDragRollingDeltaMps = Math.min(dragRollingForce * dt, impulse) / mass;
       const inv = 1 / hSpeed;
       this.forceScratch.x = -impulse * this.linvel.x * inv;
       this.forceScratch.y = 0;
@@ -2485,6 +2708,63 @@ export class Vehicle implements Rebasable {
       contactCount > 0 ? Math.max(0, -this.prevVerticalVel - Math.max(0, -vy)) : 0;
     this.prevVerticalVel = vy;
 
+    // What hit the car, derived rather than asked for: Rapier has no event queue here
+    // (see core/physics.ts), and the vertical channel above already shows that a
+    // velocity delta across one solve is a usable signal.
+    //
+    // HORIZONTAL ONLY, and that is the load-bearing decision. A suspension absorbing
+    // a landing puts several m/s of legitimate vertical delta through the chassis
+    // that no tyre or drag term explains, so including Y reported every touchdown as
+    // a crash — measured: an ordinary drop scratched the paint. Collisions with rocks,
+    // walls and other cars are horizontal; potholes and landings are vertical and
+    // belong to `landingImpactMps`. Gravity leaves the equation with the same stroke.
+    //
+    // The allowance is what the car itself could have done: every contacting tyre's
+    // full longitudinal capacity plus the drag and rolling-resistance impulse actually
+    // applied. On asphalt that is around 0.17 m/s a step, so hard cornering (Rapier's
+    // lateral constraint, ~0.15 m/s a step at 0.9 g) stays under it and a shunt does
+    // not.
+    if (this.impactVelocityPrimed && this.previousStepContactCount > 0 && contactCount > 0) {
+      const deltaX = this.stepStartLinvel.x - this.previousStepLinvel.x;
+      const deltaZ = this.stepStartLinvel.z - this.previousStepLinvel.z;
+      const deltaMps = Math.hypot(deltaX, deltaZ);
+      const ownDeltaMps =
+        (this.previousOwnTyreCapacityN * dt) / mass + this.previousOwnDragRollingDeltaMps;
+      const severityMps = deltaMps - ownDeltaMps - IMPACT_UNEXPLAINED_FLOOR_MPS;
+      if (severityMps > 0 && deltaMps > 1e-4) {
+        this.chassisBody.rotation(this.rotationScratch);
+        this.invRotationScratch.x = -this.rotationScratch.x;
+        this.invRotationScratch.y = -this.rotationScratch.y;
+        this.invRotationScratch.z = -this.rotationScratch.z;
+        this.invRotationScratch.w = this.rotationScratch.w;
+        // The blow came FROM the direction the velocity change points away from.
+        rotateVector(
+          this.localVelScratch,
+          this.invRotationScratch,
+          -deltaX / deltaMps,
+          0,
+          -deltaZ / deltaMps,
+        );
+        this.impactState.severityMps = severityMps;
+        this.impactState.localX = this.localVelScratch.x;
+        this.impactState.localY = this.localVelScratch.y;
+        this.impactState.localZ = this.localVelScratch.z;
+        this.impactThisStep = true;
+
+        // Above 2.5 m/s, 0.025 per unexplained m/s reaches 0.12 at 7.3 m/s;
+        // capping there keeps even a high-speed single crash below a full repaint.
+        const scratchGain = Math.min(
+          SCRATCH_PER_IMPACT_CAP,
+          Math.max(0, severityMps - SCRATCH_IMPACT_THRESHOLD_MPS) *
+            SCRATCH_PER_SEVERITY_MPS,
+        );
+        if (scratchGain > 0) {
+          this.localBodyScratches = clamp(this.localBodyScratches + scratchGain, 0, 1);
+          bodyConditionChanged = true;
+        }
+      }
+    }
+
     // Odometer: metres travelled forward this tick, emitted in throttled batches.
     if (fwd > 0) {
       this.odoAccum += fwd * dt;
@@ -2496,6 +2776,35 @@ export class Vehicle implements Rebasable {
         if (metres > 0) this.world.apply({ t: 'car_odometer', carId: this.car.id, metres });
       }
     }
+
+    if (bodyConditionChanged) this.bodyConditionEmitTimer += dt;
+    if (
+      this.bodyConditionEmitTimer >= BODY_CONDITION_EMIT_INTERVAL &&
+      (this.localBodyDirt !== this.car.dirt || this.localBodyScratches !== this.car.scratches)
+    ) {
+      this.bodyConditionEmitTimer = 0;
+      this.lastAuthBodyDirt = this.localBodyDirt;
+      this.lastAuthBodyScratches = this.localBodyScratches;
+      this.world.apply({
+        t: 'car_body_condition',
+        carId: this.car.id,
+        dirt: this.localBodyDirt,
+        scratches: this.localBodyScratches,
+      });
+    }
+
+    // Cache before the next Rapier solve; fixedUpdate is the controller half of the
+    // fixed step, and the following call begins after physics has advanced the body.
+    //
+    // `previousStepLinvel` is read AFTER this method's own impulses (drag, rolling
+    // resistance, the tyre forces) have gone in, so the delta the next step measures
+    // is exactly what the SOLVER did: gravity, contacts, and Rapier's lateral
+    // constraint. That is the only quantity a collision can hide in.
+    this.previousOwnTyreCapacityN = this.ownTyreCapacityN;
+    this.previousOwnDragRollingDeltaMps = this.ownDragRollingDeltaMps;
+    this.chassisBody.linvel(this.previousStepLinvel);
+    this.previousStepContactCount = contactCount;
+    this.impactVelocityPrimed = true;
 
     // Transform deltas, a few times per second.
     this.transformEmitTimer += dt;
@@ -2593,6 +2902,7 @@ export class Vehicle implements Rebasable {
       w.slipRatio = 0;
       w.locked = false;
     }
+    this.impactVelocityPrimed = false;
     // Release the parking hold, or this does nothing at all on a car nobody is
     // driving: `postStep` re-teleports a held chassis to `parkingHoldPos` every
     // step, so the move would be silently undone one tick later. Clearing the flag
@@ -2725,6 +3035,7 @@ export class Vehicle implements Rebasable {
     const controller = this.controller;
     if (!controller || dt <= 0) return;
     this.longitudinalForceSum = 0;
+    this.ownTyreCapacityN = 0;
 
     this.chassisBody.rotation(this.rotationScratch);
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
@@ -2831,8 +3142,26 @@ export class Vehicle implements Rebasable {
       if (w.loadN > 0) {
         const ground = controller.wheelGroundObject(w.index);
         const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
+        // μ(Fz) again, and it MUST be the same factor the lateral channel uses or the
+        // two axes would disagree about how much grip this tyre has. Reference load is
+        // the car's own static share, so an evenly loaded car is exactly as it was.
+        const staticWheelLoadN = Math.max(
+          1,
+          (this.statsValue.mass * 9.81) / Math.max(1, this.wheels.length),
+        );
+        const loadFactor = clamp(
+          1 - LOAD_SENSITIVITY * (w.loadN / staticWheelLoadN - 1),
+          LOAD_SENSITIVITY_MIN,
+          LOAD_SENSITIVITY_MAX,
+        );
         const capacityN =
-          surface.frictionSlip * LONGITUDINAL_GRIP_FRACTION * wheelGrip * tyreGrip * w.loadN;
+          surface.frictionSlip *
+          LONGITUDINAL_GRIP_FRACTION *
+          wheelGrip *
+          tyreGrip *
+          loadFactor *
+          w.loadN;
+        if (inContact) this.ownTyreCapacityN += capacityN;
         const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
 
         // Shape: a peak that decays to a SLIDING PLATEAU, not to nothing.
@@ -2891,6 +3220,10 @@ export class Vehicle implements Rebasable {
 
       w.spinRadS = spin;
       w.drawnSpin += spin * dt;
+      // The next step's friction ellipse reads this. Published raw: the ellipse is a
+      // force trade, and lagging it here would put a time constant back into the one
+      // relationship that should be instantaneous.
+      w.gripUsage = gripUsage;
 
       const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
       w.slipRatio = (spin * w.radius - contactSpeed) / reference;

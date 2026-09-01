@@ -56,6 +56,9 @@ import { DebrisField, type Impactor } from './world/debris';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
+import { HazardIndex } from './world/hazards';
+import { Autopilot } from './vehicle/autopilot';
+import { setCarBodyCondition } from './render/materials';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
@@ -280,6 +283,7 @@ async function boot(): Promise<void> {
   // Built before the streamer because `ScatterProvider` hands it every breakable prop
   // it makes, and asks it which ones are already down.
   const debris = new DebrisField(physics, world, renderer.scene, origin);
+  const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
@@ -317,7 +321,10 @@ async function boot(): Promise<void> {
   );
   streamer.register(new RoadMeshProvider(world.seed));
   streamer.register(new HomesteadProvider());
-  streamer.register(new ScatterProvider(debris));
+  // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
+  // is what lets the autopilot know a dirt pile from a rock without a physics query:
+  // the generator already knew, and this is the only place that knowledge survives.
+  streamer.register(new ScatterProvider(debris, hazards));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose, trailerField, freight, wreckTrunks));
@@ -574,6 +581,10 @@ async function boot(): Promise<void> {
   camera.setMode('foot');
   camera.setYaw(initialYaw);
 
+  // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre, TCS and
+  // steering rule the human drives under applies to it unchanged.
+  const autopilot = new Autopilot(road, hazards, physics);
+
   // Dev-only inspection hook. Lets a browser session read simulation state without
   // exporting it into the game's own API surface.
   if (import.meta.env.DEV) {
@@ -704,6 +715,19 @@ async function boot(): Promise<void> {
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
+      // The autopilot OVERWRITES the driving intents in this frame before the vehicle
+      // reads them, and leaves the frame untouched when disengaged — so releasing it
+      // hands control back on the very next tick with nothing to unwind. Toggling is
+      // read here rather than inside the autopilot so the toast and the state agree.
+      if (f.toggleAutopilot) {
+        autopilot.setEngaged(!autopilot.engaged);
+        hud.setToast(autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off');
+      }
+      if (f.cycleAutopilotMode) {
+        autopilot.setMode(autopilot.mode === 'sleeper' ? 'frantic' : 'sleeper');
+        hud.setToast(`autopilot: ${autopilot.mode}`);
+      }
+      if (autopilot.engaged) autopilot.drive(dt, driving, f, origin.x, origin.z);
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
@@ -715,6 +739,9 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.cycleDriving();
     } else {
       player.setEnabled(true);
+      // Stepping out drops it. Re-entering a car and finding it drive itself is a
+      // surprise nobody asked for.
+      autopilot.setEngaged(false);
       // The pack's weight is a movement input like any other, so it is pushed every
       // tick rather than on inventory change: `add`/`remove` are not the only things
       // that move the number (a fuel can drains as it pours, ammo stacks shrink as
@@ -1054,7 +1081,13 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
-    for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
+    for (const vehicle of vehicles.values()) {
+      vehicle.syncVisuals(alpha);
+      // Dirt and scratches are read from the vehicle's LIVE accumulators, not from the
+      // batched save state: the deltas land twice a second, and a wash under the
+      // player's own brush has to show up on the frame it happens.
+      setCarBodyCondition(vehicle.root, vehicle.bodyDirt, vehicle.bodyScratches);
+    }
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever

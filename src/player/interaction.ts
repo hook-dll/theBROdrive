@@ -46,7 +46,7 @@ import {
   BONNET_SLOT_KINDS,
   hasServiceSlot,
 } from '../vehicle/bonnet';
-import { setPartCondition } from '../render/materials';
+import { setCarBodyCondition, setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
@@ -88,6 +88,20 @@ const ANCHOR_FIT_RADIUS = 0.85;
 const ANCHOR_FIT_RANGE = VEHICLE_RANGE;
 /** Condition deltas are throttled; the visual updates every tick regardless. */
 const CONDITION_EMIT_INTERVAL = 0.25;
+/**
+ * A body brush follows the removable-parts fiction: 0.55/s removes loose dirt, but
+ * its bristles leave a 22% road film for the sponge to lift.
+ */
+const BODY_BRUSH_DIRT_RATE = 0.55;
+/** The sponge shifts dirt as fast as it does on parts, so the two clean together. */
+const BODY_SPONGE_DIRT_RATE = 0.7;
+/**
+ * Polishing removes 12 percentage points of visible scuffing per second, slow enough
+ * that a battered 55% shell takes nearly four seconds to improve. It stops at 8%:
+ * wax hides surface marks but cannot repaint worn paint.
+ */
+const BODY_SPONGE_SCRATCH_RATE = 0.12;
+const BODY_SCRATCH_FLOOR = 0.08;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
 /**
@@ -596,14 +610,13 @@ export class Interaction {
       }
 
       // Bodywork supplies the "looking at the car" target used by vehicle entry.
-      // Specific anchors/storage keep priority when there is no sticker to place;
-      // with a sticker available, the nearest real surface competes as before.
+      // A held cleaning tool needs the same real-surface target as a sticker, while
+      // anchors/storage still win for every other held item and bare-handed entry.
+      const washingBody =
+        held?.type === 'tool' && (held.tool === 'brush' || held.tool === 'sponge');
       if (vehicleDist <= VEHICLE_RANGE) {
         const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
-        if (
-          surface &&
-          (this.world.state.stickersUnplaced > 0 || bestDist === Infinity)
-        ) {
+        if (surface && (washingBody || this.world.state.stickersUnplaced > 0 || bestDist === Infinity)) {
           keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
         }
       }
@@ -783,8 +796,14 @@ export class Interaction {
       return `empty trunk cell ${t.cell + 1}`;
     }
 
-    if (t.kind === 'car-body' && this.world.state.stickersUnplaced > 0) {
-      return `[F] stick it on — ${this.world.state.stickersUnplaced} to place`;
+    if (t.kind === 'car-body') {
+      const car = this.world.state.cars[t.carId];
+      if (!car) return null;
+      const bodyPrompt = this.bodyToolPrompt(held, car);
+      if (bodyPrompt) return bodyPrompt;
+      if (this.world.state.stickersUnplaced > 0) {
+        return `[F] stick it on — ${this.world.state.stickersUnplaced} to place`;
+      }
     }
 
     if (t.kind === 'trailer') {
@@ -882,6 +901,29 @@ export class Interaction {
     return null; // wrench: no continuous action; the [F] prompt flows through.
   }
 
+  /**
+   * Body-condition readouts use whole percentages: one short HUD line is easier to
+   * scan than two 0..1 fractions, while retaining enough precision for a cosmetic
+   * condition that moves by only 0.55 or 0.70 per second.
+   */
+  private bodyToolPrompt(held: Item | null, car: CarState): string | null {
+    if (held?.type !== 'tool' || (held.tool !== 'brush' && held.tool !== 'sponge')) return null;
+    const dirtFraction = Math.min(1, Math.max(0, car.dirt));
+    const scratchFraction = Math.min(1, Math.max(0, car.scratches));
+    const dirt = Math.round(dirtFraction * 100);
+    const scratches = Math.round(scratchFraction * 100);
+    if (dirtFraction <= 0 && scratchFraction <= BODY_SCRATCH_FLOOR) {
+      return 'body clean and polished';
+    }
+    if (held.tool === 'brush') {
+      if (dirtFraction <= BRUSH_DIRT_FLOOR) {
+        return `body ${dirt}% dirt, ${scratches}% scratched — needs sponge`;
+      }
+      return `[LMB] scrub — body ${dirt}% dirt, ${scratches}% scratched`;
+    }
+    return `[LMB] sponge — body ${dirt}% dirt, ${scratches}% scratched`;
+  }
+
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
     if (!held) return;
@@ -890,6 +932,10 @@ export class Interaction {
   }
 
   private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {
+    if (resolved.target.kind === 'car-body') {
+      this.scrubBody(dt, tool, resolved);
+      return;
+    }
     const part = this.targetPart(resolved);
     if (!part) return;
     if (tool === 'brush') {
@@ -906,6 +952,50 @@ export class Interaction {
     if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
       this.conditionEmitTimer = 0;
       this.world.apply({ t: 'part_condition', partId: part.id, dirt: part.dirt, rust: part.rust });
+    }
+  }
+
+  /**
+   * Cleans the permanent shell condition, with the same quarter-second delta cadence
+   * as parts. The material still receives every successful stroke, otherwise a held
+   * sponge would visibly update in distracting 0.25-second jumps.
+   */
+  private scrubBody(dt: number, tool: ToolKind, resolved: Resolved): void {
+    const t = resolved.target;
+    if (t.kind !== 'car-body' || !resolved.vehicle) return;
+    const car = this.world.state.cars[t.carId];
+    if (!car) return;
+
+    const oldDirt = car.dirt;
+    const oldScratches = car.scratches;
+    const dirt = Math.min(1, Math.max(0, oldDirt));
+    const scratches = Math.min(1, Math.max(0, oldScratches));
+    if (tool === 'brush') {
+      // Like `applyBrush`, the floor limits cleaning without making a cleaner shell dirtier.
+      car.dirt = Math.max(Math.min(dirt, BRUSH_DIRT_FLOOR), dirt - BODY_BRUSH_DIRT_RATE * dt);
+      car.scratches = scratches;
+    } else if (tool === 'sponge') {
+      car.dirt = Math.max(0, dirt - BODY_SPONGE_DIRT_RATE * dt);
+      car.scratches = Math.max(
+        Math.min(scratches, BODY_SCRATCH_FLOOR),
+        scratches - BODY_SPONGE_SCRATCH_RATE * dt,
+      );
+    } else {
+      return; // wrench has no continuous body action.
+    }
+    if (car.dirt === oldDirt && car.scratches === oldScratches) return;
+
+    this.continuous = 'scrub';
+    setCarBodyCondition(resolved.vehicle.root, car.dirt, car.scratches);
+    this.conditionEmitTimer += dt;
+    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
+      this.conditionEmitTimer = 0;
+      this.world.apply({
+        t: 'car_body_condition',
+        carId: t.carId,
+        dirt: car.dirt,
+        scratches: car.scratches,
+      });
     }
   }
 

@@ -564,6 +564,11 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     oilLitres: Math.max(0, numOr(raw.oilLitres, 0)),
     storage,
     bonnet,
+    // Absent on every save written before the body had a condition. A car loaded
+    // from one of those arrives clean rather than randomly weathered: the player
+    // parked it, the game just was not looking.
+    dirt: clamp01(numOr(raw.dirt, 0)),
+    scratches: clamp01(numOr(raw.scratches, 0)),
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),
@@ -742,6 +747,11 @@ function recordField(value: unknown, what: string): Record<string, unknown> {
 /** The value if it is a finite number, otherwise the fallback. */
 function numOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** Body-condition fractions; a hand-edited or older save may hold anything. */
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {

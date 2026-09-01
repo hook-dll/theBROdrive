@@ -629,6 +629,10 @@ function makeWorkingCar(
     taillightsOn: false,
     reverseLightsOn: false,
     stickers: [],
+    // A roadside find, weathered by however long it stood there. Scratched enough to
+    // say somebody else drove it badly, not enough to look like salvage.
+    dirt: 0.7 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 7) * 0.25,
+    scratches: 0.25 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 8) * 0.3,
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
     fuelKind: engine?.fuel ?? null,

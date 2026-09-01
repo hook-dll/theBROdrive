@@ -19,7 +19,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { proceduralCarScene } from './proceduralcars';
+import { makeCarBodyConditionMaterial } from './materials';
+import { isProceduralCarPaintMaterial, proceduralCarScene } from './proceduralcars';
 import { CAR_MODELS, carModel, type CarModelDef, type GizmoAnchorDef } from '../vehicle/carmodels';
 
 /** Wheel node names in the kit, mapped to the ids the vehicle and saves use. */
@@ -173,6 +174,52 @@ async function loadScene(file: string): Promise<THREE.Group> {
   });
   for (const node of authoringDevices) node.removeFromParent();
   return scene;
+}
+
+/**
+ * Gives each driving car independent condition uniforms while preserving the exact
+ * livery slot rule: textured packs paint every already-mapped slot; untextured
+ * procedural shells name their paint finish explicitly. One clone per shared source
+ * material keeps DeJunes' multi-group body slots sharing state and draw calls.
+ */
+function cloneCarBodyPaintMaterials(root: THREE.Object3D): void {
+  const meshes: THREE.Mesh[] = [];
+  let hasLiverySlots = false;
+  let hasExplicitPaintSlots = false;
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    meshes.push(child);
+    for (const material of materialsOf(child)) {
+      if ((material as THREE.MeshStandardMaterial).map) hasLiverySlots = true;
+      if (isProceduralCarPaintMaterial(material)) hasExplicitPaintSlots = true;
+    }
+  });
+
+  const clones = new Map<THREE.Material, THREE.Material>();
+  const paint = (source: THREE.Material): THREE.Material => {
+    const existing = clones.get(source);
+    if (existing) return existing;
+    const standard = source as THREE.MeshStandardMaterial;
+    const isPaint = hasLiverySlots
+      ? Boolean(standard.map)
+      : hasExplicitPaintSlots
+        ? isProceduralCarPaintMaterial(source)
+        // This is the livery path's established fallback for a one-material export.
+        : true;
+    if (!isPaint) {
+      clones.set(source, source);
+      return source;
+    }
+    const material = makeCarBodyConditionMaterial(source);
+    clones.set(source, material);
+    return material;
+  };
+
+  for (const mesh of meshes) {
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(paint)
+      : paint(mesh.material);
+  }
 }
 
 /**
@@ -773,11 +820,11 @@ export interface CarModelInstance {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
 }
 
-/** Builds a fresh driving instance from a preloaded template. */
 function cloneDrivingModel(t: Template): CarModelInstance {
   const wheels = new Map<string, THREE.Object3D>();
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
+  cloneCarBodyPaintMaterials(body);
   body.name = 'body';
   return { body, wheels };
 }
@@ -822,11 +869,15 @@ export async function warmCarModelInstances(
   camera: THREE.Camera,
 ): Promise<void> {
   const compileGroup = new THREE.Group();
+  const drivingBodies: THREE.Object3D[] = [];
   compileGroup.position.z = -20;
   scene.add(compileGroup);
   for (let i = 0; i < CAR_MODELS.length; i++) {
     const id = CAR_MODELS[i]!.id;
-    warmDrivingInstances.set(id, cloneDrivingModel(template(id)));
+    const drivingModel = cloneDrivingModel(template(id));
+    warmDrivingInstances.set(id, drivingModel);
+    drivingBodies.push(drivingModel.body);
+    compileGroup.add(drivingModel.body);
     const staticModel = cloneStaticModel(id);
     staticModel.traverse((object) => {
       object.frustumCulled = false;
@@ -838,6 +889,7 @@ export async function warmCarModelInstances(
   await renderer.compileAsync(scene, camera);
   scene.remove(compileGroup);
   for (const model of warmStaticInstances.values()) compileGroup.remove(model);
+  for (const body of drivingBodies) compileGroup.remove(body);
 }
 
 /**

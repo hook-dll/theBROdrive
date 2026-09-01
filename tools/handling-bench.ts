@@ -31,7 +31,10 @@ import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
-import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
+import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { variant } from '../src/parts/registry';
+import type { Item } from '../src/items/items';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -95,16 +98,30 @@ export interface BenchResult {
   cadenceBrakeDistM: number;
 }
 
+/**
+ * A roadworthy bench car. The bonnet cells and fuel kind are not decoration: the
+ * vehicle's stats read the fitted engine through them, and a car with an empty
+ * bonnet has no engine to bench.
+ */
 function carState(modelId: string): CarState {
+  const def = carModel(modelId);
+  const engine = variant(def.engineId).engine;
   return {
     id: 'bench',
     modelId,
     gizmos: {},
     stickers: [],
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     fuelLitres: 40,
+    fuelKind: engine?.fuel ?? null,
+    dirt: 0,
+    scratches: 0,
     coolantLitres: 10,
     oilLitres: 10,
-    storage: [],
+    storage: new Array<Item | null>(def.storageCells).fill(null),
+    bonnet: createBonnetStorage('bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,
     x: 0,
     y: 1.2,
