@@ -175,15 +175,14 @@ const GRIP_REFERENCE_MASS = 1100;
  * not scaled with it.
  */
 const GRIP_MASS_EXPONENT = 0.3;
-/**
- * Lateral constraint gain applied to the surface's sideFriction. Below 1, the
- * wheels stop cancelling all lateral velocity every tick: slip builds
- * progressively with yaw rate (understeer) instead of an instant direction change.
- * 0.7 is a period car's vagueness: a 40-60 km/h corner runs 4-6° of slip, so the
- * car is always working and never railed, and the driver is steering the slip
- * rather than the wheels.
+/*
+ * There was a SIDE_FRICTION_GAIN here: 0.7, the gain on Rapier's lateral constraint,
+ * documented as "a period car's vagueness — a 40-60 km/h corner runs 4-6 degrees of
+ * slip". It never did. A velocity-cancelling constraint has no curve under it, so the
+ * measured figure was 1.2-1.4 degrees whatever this number was, and the gain only
+ * decided how hard the rail was. LATERAL_MU and the slip-angle curve now produce that
+ * slip for real, so the knob is gone rather than left to imply something it never did.
  */
-const SIDE_FRICTION_GAIN = 0.7;
 /**
  * Speed-dependent lateral grip falloff. Below LATERAL_GRIP_FALLOFF_START_MPS the
  * lateral gain is untouched; above it it is scaled down on a smoothstep toward
@@ -292,6 +291,32 @@ const SLIP_ANGLE_REF_MPS = 2;
  * genuinely a different, edgier car than the same bend taken properly.
  */
 const REAR_SPEED_LOSS_GAIN = 1.32;
+/**
+ * Peak lateral μ on dry asphalt, as a coefficient of the tyre's normal load.
+ *
+ * This is a real coefficient now, not a constraint gain: side force is
+ * `LATERAL_MU · surface.sideFriction · load · shape(slip angle)`, so 0.85 means an
+ * evenly loaded car makes 0.85 g at the peak angle before any of the authored
+ * losses below (speed falloff, rear axle, slide, load sensitivity) are applied. A
+ * period cross-ply on a 1970s road is 0.7-0.8 g in steady state, which is where the
+ * losses put it.
+ *
+ * Why the number matters more than it looks: with the curve peaking at
+ * SLIP_PEAK_*_DEG, the slip angle a corner actually runs is set by the RATIO of
+ * demand to this coefficient. At 0.7 g a tyre needs 0.82 of its peak, which the
+ * quarter-sine reaches at 0.63 of the peak angle — about five degrees. That is the
+ * 4-6 degrees the slip-angle block has always claimed and Rapier's constraint never
+ * delivered: it ran 1.2-1.4 degrees, because a velocity-cancelling constraint has no
+ * curve under it at all.
+ */
+const LATERAL_MU = 0.85;
+/**
+ * Forward speed (m/s) below which a tyre may spend its whole lateral capacity on
+ * holding rather than on a slip-angle curve. A shade under walking pace: fast enough
+ * that parking, kerbing and creeping on a camber behave like rubber on tarmac,
+ * slow enough that it can never help a moving car corner.
+ */
+const LATERAL_STATIC_SPEED_MPS = 1.4;
 
 /**
  * Countersteer authority, and why the steering limiter has to step out of the way.
@@ -578,8 +603,21 @@ const LOAD_SENSITIVITY_MAX = 1.35;
  * the tyre model uses. Authority follows the VEHICLE'S forward speed, not one contact
  * point's instantaneous velocity: at a steep pothole face chassis pitch can make that
  * point nearly stationary even while the car is moving and the wheel is spinning.
- * Below TCS_AUTHORITY_START_MPS the driver still keeps full authority for digging,
- * rocking and reversing out.
+ * Below TCS_AUTHORITY_START_MPS the driver keeps full authority for digging, rocking
+ * and reversing out.
+ *
+ * EXCEPT WHEN THE WHEEL IS PLAINLY JUST POLISHING. Road speed alone was the whole
+ * authority test, and it disabled the system exactly where it was invented for:
+ * nose up a steep grade, the car crawls below walking pace, the driven wheels spin
+ * freely, and TCS sat switched off watching them. Reported from play, and it is the
+ * same failure the `sport` compound used to paper over — "unsticking a car bogged in
+ * sand" is this case.
+ *
+ * A second authority path therefore opens on SLIP SPEED alone. Digging and rocking
+ * run a couple of m/s of slip; a wheel turning TCS_STUCK_SLIP_MPS faster than the
+ * ground it is standing on is not being driven, it is being wasted. Sign is still
+ * taken from the commanded torque, so a locked wheel under braking and a car
+ * deliberately reversing out are both untouched.
  */
 const TCS_SLIP_FLOOR_MPS = 2.2;
 /** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
@@ -587,6 +625,13 @@ const TCS_SLIP_BAND_MPS = 1.8;
 /** Road speed (m/s) below which TCS may not cut at all, and above which it may cut fully. */
 const TCS_AUTHORITY_START_MPS = 1.0;
 const TCS_AUTHORITY_FULL_MPS = 3.5;
+/**
+ * Slip speed (m/s) at which TCS takes authority whatever the road speed, and the band
+ * over which that authority arrives. Above the floor a wheel is spinning several
+ * times faster than a rocking or digging one ever does.
+ */
+const TCS_STUCK_SLIP_MPS = 5.5;
+const TCS_STUCK_BAND_MPS = 3;
 /** Most of a wheel's drive torque TCS may take away. Never all of it: a bogged car still digs. */
 const TCS_MAX_CUT = 0.85;
 /** Cut smoothing, seconds: quick to intervene, slower to hand the torque back. */
@@ -871,6 +916,18 @@ interface WheelVisual {
    * friction ellipse that decides what is left for cornering.
    */
   gripUsage: number;
+  /**
+   * Lateral force capacity (N) and the fraction of it this tyre's built slip angle
+   * asks for, plus the wheel-plane right vector and the contact's sideways speed.
+   * Resolved in the setup pass and consumed by the tyre pass, so neither recomputes
+   * the other's geometry.
+   */
+  lateralCapacityN: number;
+  lateralShape: number;
+  lateralRightX: number;
+  lateralRightY: number;
+  lateralRightZ: number;
+  lateralSpeed: number;
   /** Drive torque (N·m) commanded to this wheel this step. */
   driveTorqueNm: number;
   /** Brake force (N) commanded to this wheel this step. */
@@ -1299,6 +1356,8 @@ export class Vehicle implements Rebasable {
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
+  /** Reused application point for the lateral impulse; see the note where it is used. */
+  private readonly lateralPoint = { x: 0, y: 0, z: 0 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
   /** Per-wheel tyre impulse, applied at the contact patch. */
@@ -1728,6 +1787,12 @@ export class Vehicle implements Rebasable {
         drawnSpin: 0,
         slipRatio: 0,
         loadN: 0,
+        lateralCapacityN: 0,
+        lateralShape: 0,
+        lateralRightX: 1,
+        lateralRightY: 0,
+        lateralRightZ: 0,
+        lateralSpeed: 0,
         driveTorqueNm: 0,
         brakeForceN: 0,
         forwardDir: { x: 0, y: 0, z: 1 },
@@ -2391,12 +2456,21 @@ export class Vehicle implements Rebasable {
     let roughnessSum = 0;
     let contactCount = 0;
     let drivenContactCount = 0;
-    // Same for every wheel: the lateral grip budget (see constants above). The
-    // cone cap is mass-scaled so heavy vehicles corner worse per kilogram.
+    // Same for every wheel. `gripBudgetFactor` sizes Rapier's own cone, which now
+    // bounds nothing it applies — its lateral and longitudinal channels are both
+    // switched off — but the number is still what the spray and audio read as this
+    // tyre's budget, so it keeps its meaning.
     const gripBudgetFactor =
       stats.wheelGrip *
       tyreGrip *
       LATERAL_GRIP_FRACTION *
+      Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
+    // The real lateral coefficient. Mass-scaled for the same reason the cone was:
+    // road tyres are sized to the chassis, not scaled with it, so a laden truck
+    // corners worse per kilogram than a hatchback.
+    const lateralMu =
+      LATERAL_MU *
+      stats.wheelGrip *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
     // The load μ(Fz) is measured against: this car standing still, evenly. Nothing
     // about it is per-wheel, so a heavier car does not get a free grip advantage from
@@ -2444,24 +2518,17 @@ export class Vehicle implements Rebasable {
       // rear-only cable cannot reliably hold the vehicle's mass on this game's
       // steep, uneven roads.
       const handbraked = input.handbrake && !w.isFront;
-      // FRICTION ELLIPSE, from the share of its longitudinal capacity this tyre spent
-      // last step. What it replaces was a lagged threshold: nothing happened until the
-      // longitudinal channel had eaten 55% of the cone, and then side grip fell on a
-      // time constant rather than on the force. So half-throttle cost a tyre nothing
-      // at all, and the loss, once it came, arrived on a schedule instead of on the
-      // pedal. sqrt(1 - u²) is the real trade and it starts trading immediately.
-      //
-      // The floor is SLIDE_SIDE_GRIP, so a fully saturated tyre lands exactly where
-      // the tuned model left it — a slide still keeps enough side force to be caught
-      // (see that constant). Only the approach changed, and it changed to continuous.
-      // `slideT` is untouched: it still drives skid audio, spray and tyre visuals.
-      const usage = clamp(w.gripUsage, 0, 1);
-      const coneGrip = Math.max(SLIDE_SIDE_GRIP, Math.sqrt(Math.max(0, 1 - usage * usage)));
       // Locked: the parking cable is immediate, because it is a cable pulling shoes
       // onto drums. The foot brake earns its lock from the wheel's own rotation,
       // measured by updateWheelDynamics after the step that delivered the torque.
+      //
+      // The friction ellipse is NOT applied here. It used to be — a cone reduction
+      // computed from last step's longitudinal usage, folded into the constraint gain
+      // — but the lateral force is now built in the tyre pass, which applies the
+      // ellipse against the force it is computing on the same tick. Leaving it here
+      // too charged a tyre twice for one shared budget.
       const locked = handbraked || w.locked;
-      const slideGrip = locked ? Math.min(LOCKED_SIDE_GRIP, coneGrip) : coneGrip;
+      const lockGrip = locked ? LOCKED_SIDE_GRIP : 1;
       // The rear axle is a live axle on leaf springs and never had the front's
       // cornering power (REAR_AXLE_SIDE_GRIP).
       const axleGrip = w.isFront ? 1 : REAR_AXLE_SIDE_GRIP;
@@ -2500,16 +2567,18 @@ export class Vehicle implements Rebasable {
       // respond to the slide the tyres are actually carrying.
       if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
 
-      // Peak, then a smooth fade to the plateau. Below the peak this is exactly 1.
+      // The side-force CURVE, read at the built angle: rising as a quarter sine to a
+      // peak at the axle's peak angle, then fading to its plateau. This is the shape
+      // that decides how much slip the car runs, and it is why the number comes out
+      // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
+      // which the sine reaches around five degrees.
       const peakDeg = w.isFront ? SLIP_PEAK_FRONT_DEG : SLIP_PEAK_REAR_DEG;
       const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
       const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
-      const fadeT = clamp(
-        ((w.slipAngleRad * 180) / Math.PI - peakDeg) / (fullDeg - peakDeg),
-        0,
-        1,
-      );
-      const slipGrip = 1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT);
+      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
+      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
+      const risen = Math.sin((Math.PI / 2) * Math.min(slipDeg / peakDeg, 1));
+      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
 
       // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
       // calibrated straight-line figures stand and only TRANSFER changes anything.
@@ -2521,17 +2590,26 @@ export class Vehicle implements Rebasable {
 
       const frictionSlip = surface.frictionSlip * gripBudgetFactor * loadFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
-      controller.setWheelSideFrictionStiffness(
-        w.index,
+      // ZERO. Rapier's lateral channel is a velocity-cancelling constraint scaled by
+      // this gain, and a constraint is a ceiling with no curve under it: side force
+      // rose linearly with slip until it hit the cone, so the car ran 1.2-1.4 degrees
+      // of slip at the limit where the model's own constants say 4-6. Everything the
+      // authored pipeline used to feed into this gain now sizes a real force below.
+      controller.setWheelSideFrictionStiffness(w.index, 0);
+      w.lateralCapacityN =
+        lateralMu *
         surface.sideFriction *
-          compound.side *
-          SIDE_FRICTION_GAIN *
-          (w.isFront ? lateralGripFront : lateralGripRear) *
-          axleGrip *
-          slipGrip *
-          slideGrip *
-          loadFactor,
-      );
+        compound.side *
+        (w.isFront ? lateralGripFront : lateralGripRear) *
+        axleGrip *
+        lockGrip *
+        loadFactor *
+        w.loadN;
+      w.lateralShape = shape;
+      w.lateralRightX = this.wheelRightScratch.x;
+      w.lateralRightY = this.wheelRightScratch.y;
+      w.lateralRightZ = this.wheelRightScratch.z;
+      w.lateralSpeed = latSpeed;
 
       const axleShare = w.isFront ? frontShare : rearShare;
       const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
@@ -3115,12 +3193,13 @@ export class Vehicle implements Rebasable {
         TCS_SLIP_FLOOR_MPS,
         PEAK_SLIP_RATIO * Math.abs(contactSpeed),
       );
-      const authority = clamp(
+      // Two authority paths, whichever grants more: road speed, and slip speed alone.
+      // The second is what rescues a climb — see the note on TCS_STUCK_SLIP_MPS.
+      const speedAuthority =
         (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
-          (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
-        0,
-        1,
-      );
+        (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS);
+      const stuckAuthority = (slipSpeed - TCS_STUCK_SLIP_MPS) / TCS_STUCK_BAND_MPS;
+      const authority = clamp(Math.max(speedAuthority, stuckAuthority), 0, 1);
       const cutTarget =
         driven && inContact && w.driveTorqueNm !== 0
           ? Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
@@ -3242,6 +3321,58 @@ export class Vehicle implements Rebasable {
         this.tyreImpulse.z = w.forwardDir.z * impulse;
         this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, w.contactPoint, false);
         this.longitudinalForceSum += longitudinalForce;
+      }
+
+      // LATERAL FORCE, ours now. Three things decide it: the capacity the setup pass
+      // sized from load and surface, the slip-angle curve read at the BUILT angle, and
+      // what the longitudinal channel has left over — a real friction ellipse on this
+      // tyre's own usage, so drive and brake take their share of one budget.
+      //
+      // The ellipse keeps SLIDE_SIDE_GRIP as a floor. A tyre that has spent everything
+      // on stopping does not become a castor: that floor IS catchability (see the
+      // constant), and it is the one place the shape is deliberately not the physics.
+      //
+      // Applied at the contact patch's POSITION but at the centre of mass' HEIGHT, and
+      // that is deliberate. The yaw geometry is what matters for balance and it is
+      // exact either way; the roll lever is not, because this suspension has almost no
+      // roll stiffness of its own — measured, the full moment at the patch rolled a
+      // 33 km/h turn to 81 degrees and laid the car on its side. Roll therefore stays
+      // with the calibrated couple in `applyRollCouple`, which exists for exactly this
+      // reason and is now the only thing supplying it.
+      if (inContact && w.lateralCapacityN > 0) {
+        const ellipse = Math.max(
+          SLIDE_SIDE_GRIP,
+          Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)),
+        );
+        const capacityImpulse = w.lateralCapacityN * ellipse * dt;
+        const curveImpulse = capacityImpulse * w.lateralShape;
+        // Friction opposes the slip and never reverses it inside one step: cap the
+        // impulse at what brings this contact's sideways speed exactly to zero, with
+        // the wheel's share of the mass taken from the load it is carrying. Without
+        // that cap a stiff tyre at 60 Hz overshoots and the car shivers on its axles.
+        const shareMass = w.loadN / GRAVITY;
+        const stopImpulse = Math.abs(w.lateralSpeed) * shareMass;
+        // STATIC HOLD. A slip-angle curve is a rolling tyre's law, and a car at
+        // walking pace is not rolling enough to have one: the angle collapses, the
+        // curve asks for almost nothing, and the car creeps sideways down a camber —
+        // which Rapier's velocity-cancelling constraint used to prevent for free.
+        // Below LATERAL_STATIC_SPEED_MPS the tyre is therefore allowed to spend its
+        // whole remaining capacity on simply stopping the slide, which is what static
+        // friction does. It is still bounded by that capacity, so a hard enough shove
+        // still slides the car.
+        const staticBlend = clamp(1 - Math.abs(contactSpeed) / LATERAL_STATIC_SPEED_MPS, 0, 1);
+        const staticImpulse = Math.min(capacityImpulse, stopImpulse) * staticBlend;
+        const magnitude = Math.min(stopImpulse, Math.max(curveImpulse, staticImpulse));
+        const impulse = -Math.sign(w.lateralSpeed) * magnitude;
+        if (impulse !== 0) {
+          this.tyreImpulse.x = w.lateralRightX * impulse;
+          this.tyreImpulse.y = w.lateralRightY * impulse;
+          this.tyreImpulse.z = w.lateralRightZ * impulse;
+          this.lateralPoint.x = w.contactPoint.x;
+          this.lateralPoint.y = this.chassisBody.translation().y;
+          this.lateralPoint.z = w.contactPoint.z;
+          this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, this.lateralPoint, false);
+        }
       }
 
       // Friction-circle usage: how much of THIS tyre's force capacity the

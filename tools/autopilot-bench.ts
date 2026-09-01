@@ -238,6 +238,135 @@ async function driveHazard(
   return { minDistance, speedAtClosest, minSpeedNear, approachGap, approachSpeed, worstLateral, passed, rig, chunk };
 }
 
+interface LitterMetrics {
+  lineSignChangesPerKm: number;
+  lineDirectionReversalsPerKm: number;
+  steerRms: number;
+  worstSteer: number;
+  worstLateral: number;
+  meanSpeed: number;
+  progress: number;
+  monotonic: boolean;
+}
+
+function litteredHazards(): RoadHazard[] {
+  const hazards: RoadHazard[] = [];
+  // ScatterProvider places about one in-asphalt prop at a time: 30–60 m leaves only
+  // 1.5–3 seconds between them at cruise, matching that live-road density.
+  const laterals = [0, -2.9, 2.9, -1.35, 1.35, 0, 2.7, -2.7, 0.75, -0.75];
+  let s = START_S + 120;
+  for (let i = 0; s < START_S + 1_800; i++) {
+    // The index pattern is deliberately fixed: centre rocks demand a detour, verge
+    // rocks exercise corridor rejection, and dirt piles cover the breakable variant.
+    hazards.push({
+      s,
+      lateral: laterals[i % laterals.length],
+      radius: 0.6 + ((i * 7) % 13) / 10,
+      breakable: i % 3 === 1,
+    });
+    s += 30 + ((i * 17 + 11) % 31);
+  }
+  return hazards;
+}
+
+async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
+  const rig = await makeRig();
+  rig.autopilot.setMode(mode);
+  rig.autopilot.setEngaged(true);
+  const chunk = 'autopilot-bench-littered-road';
+  for (const hazard of litteredHazards()) rig.hazards.add(chunk, hazard);
+
+  let previousS = START_S;
+  let startS = 0;
+  let monotonic = true;
+  let sumSteerSq = 0;
+  let worstSteer = 0;
+  let worstLateral = 0;
+  let sumSpeed = 0;
+  let samples = 0;
+  let previousLine = 0;
+  let previousLineSign = 0;
+  let previousDirection = 0;
+  let lineSignChanges = 0;
+  let lineDirectionReversals = 0;
+  // `appliedLateral` is the controller's rate-limited commanded line. Reading it
+  // here, rather than inferring it from chassis motion, catches a target that flips
+  // faster than the vehicle can respond.
+  const commandedLine = rig.autopilot as unknown as { appliedLateral: number };
+  for (let i = 0; i < Math.ceil(180 / FIXED_DT); i++) {
+    step(rig);
+    const pos = rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    const p = rig.road.project(pos.x, pos.z, previousS);
+    if (i === 0) startS = p.s;
+    if (p.s + 0.03 < previousS) monotonic = false;
+    previousS = p.s;
+
+    const line = commandedLine.appliedLateral;
+    const lineSign = Math.abs(line) > 0.15 ? Math.sign(line) : 0;
+    if (lineSign && previousLineSign && lineSign !== previousLineSign) lineSignChanges++;
+    if (lineSign) previousLineSign = lineSign;
+    const delta = line - previousLine;
+    const direction = Math.abs(delta) > 1e-4 ? Math.sign(delta) : 0;
+    if (direction && previousDirection && direction !== previousDirection) lineDirectionReversals++;
+    if (direction) previousDirection = direction;
+    previousLine = line;
+
+    const steer = Math.abs(rig.input.steer);
+    sumSteerSq += steer * steer;
+    worstSteer = Math.max(worstSteer, steer);
+    worstLateral = Math.max(worstLateral, Math.abs(p.lateral));
+    sumSpeed += speed(rig.vehicle);
+    samples++;
+    if (p.s >= START_S + 1_800) break;
+  }
+  const progress = previousS - startS;
+  return {
+    lineSignChangesPerKm: lineSignChanges / Math.max(progress / 1000, 0.001),
+    lineDirectionReversalsPerKm: lineDirectionReversals / Math.max(progress / 1000, 0.001),
+    steerRms: Math.sqrt(sumSteerSq / samples),
+    worstSteer,
+    worstLateral,
+    meanSpeed: sumSpeed / samples,
+    progress,
+    monotonic,
+  };
+}
+
+async function checkLitteredRoad(): Promise<void> {
+  for (const mode of ['sleeper', 'frantic'] as const) {
+    const result = await driveLitteredRoad(mode);
+    const config = MODES[mode];
+    // With 20+ hazards/km, a stable plan may make one outward-and-return movement per
+    // hazard but must not repeatedly flip between them; 30 reversals/km is no more
+    // than one commanded-line reversal every 33 m.
+    check(
+      `${mode}: littered road does not swerve`,
+      result.lineSignChangesPerKm <= 30 && result.lineDirectionReversalsPerKm <= 30,
+      `${result.lineSignChangesPerKm.toFixed(1)} line sign changes/km, ${result.lineDirectionReversalsPerKm.toFixed(1)} direction reversals/km (one direction change every ${(1000 / Math.max(result.lineDirectionReversalsPerKm, 0.001)).toFixed(0)} m)`,
+    );
+    // Full lock is 1.0; RMS below 0.45 leaves clear margin from the saw-tooth steering
+    // a player feels even if the chassis happens to remain close to the centreline.
+    check(
+      `${mode}: littered road steering stays modest`,
+      result.steerRms <= 0.45,
+      `RMS |steer| ${result.steerRms.toFixed(3)}, worst ${result.worstSteer.toFixed(3)} (full lock 1.000)`,
+    );
+    check(
+      `${mode}: littered road stays on road`,
+      result.worstLateral <= ROAD_HALF_WIDTH + SHOULDER_WIDTH,
+      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${(ROAD_HALF_WIDTH + SHOULDER_WIDTH).toFixed(2)} m edge`,
+    );
+    check(
+      `${mode}: littered road makes progress`,
+      result.monotonic &&
+        result.progress >= 1_800 - 5 &&
+        result.meanSpeed >= config.cruise * 0.55 &&
+        result.meanSpeed <= config.cruise * 1.15,
+      `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}, ${result.meanSpeed.toFixed(2)} m/s vs ${config.cruise.toFixed(0)} m/s target`,
+    );
+  }
+}
+
 async function checkHazards(): Promise<void> {
   // A rock the width of the lane's centre: passable, but only by moving over.
   const rock = await driveHazard({ s: START_S + 300, lateral: 0, radius: 1.2, breakable: false }, 100);
@@ -305,6 +434,7 @@ async function run(): Promise<void> {
     check(`${mode}: slows for tightest corner`, result.tightSpeed <= cornerLimit + 3, `radius ${result.tightRadius.toFixed(1)} m, ${result.tightSpeed.toFixed(2)} m/s vs ${cornerLimit.toFixed(2)} m/s limit`);
   }
   check('frantic is materially faster than sleeper', frantic.meanSpeed >= sleeper.meanSpeed + 3, `${frantic.meanSpeed.toFixed(2)} vs ${sleeper.meanSpeed.toFixed(2)} m/s`);
+  await checkLitteredRoad();
   await checkHazards();
   if (failures) process.exitCode = 1;
 }

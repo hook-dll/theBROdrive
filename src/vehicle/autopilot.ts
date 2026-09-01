@@ -68,6 +68,12 @@ const CAR_HALF_WIDTH_M = 1.05;
  */
 const AVOID_HYSTERESIS_M = 0.4;
 const BLOCK_CORRIDOR_FRACTION = 0.8;
+/**
+ * Metres the commanded line may move per metre travelled. 0.09 spends about 40 m of
+ * road moving a full lane across, which is what a driver does when they see a rock
+ * early — and slow enough that a replan cannot present the loop with a step.
+ */
+const LINE_SHIFT_PER_METRE = 0.09;
 const STOPPED_MPS = 0.35;
 const REVERSE_AFTER_S = 1.4;
 const REVERSE_FOR_S = 1.1;
@@ -82,20 +88,42 @@ export class Autopilot {
   private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
   private dynamicDistance = Infinity;
+  /**
+   * The hazard currently being avoided and the line chosen for it.
+   *
+   * Latched, and that is the whole point. Replanning every tick made the car swerve
+   * continuously on a real road: in-asphalt scatter is frequent, so the NEAREST
+   * hazard changed every few seconds, the side preference flipped with it, and the
+   * moment one was passed the target snapped back to the centreline — into the line
+   * of the next one. A plan is kept until its hazard is behind the car.
+   */
+  private plannedHazard: RoadHazard | null = null;
+  private plannedLateral = 0;
+  /** Line actually commanded, rate-limited toward `plannedLateral`. */
+  private appliedLateral = 0;
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
+  /** Car lateral at the time of the scan; a hazard off to one side is not a hazard. */
+  private scanLateral = 0;
   private readonly visitHazard = (hazard: RoadHazard): void => {
+    if (hazard.breakable) return;
     const distance = hazard.s - this.hintS;
-    if (distance < this.hazardDistance) {
-      this.hazard = hazard;
-      this.hazardDistance = distance;
-    }
+    if (distance >= this.hazardDistance) return;
+    // Only hazards whose footprint overlaps the corridor the car is in, or the one it
+    // would be in on the centreline. A rock sitting on the far verge needs no line.
+    const reach = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
+    const inCurrentPath = Math.abs(hazard.lateral - this.scanLateral) < reach;
+    const inCentrePath = Math.abs(hazard.lateral) < reach;
+    if (!inCurrentPath && !inCentrePath) return;
+    this.hazard = hazard;
+    this.hazardDistance = distance;
   };
   /** Clears the nearest-hazard result before a scan. See the note in `drive`. */
-  private beginHazardScan(): void {
+  private beginHazardScan(lateral: number): void {
     this.hazard = null;
     this.hazardDistance = Infinity;
+    this.scanLateral = lateral;
   }
 
 
@@ -132,10 +160,7 @@ export class Autopilot {
     const heading = Math.atan2(forwardX, forwardZ);
     const headingError = wrapAngle(target.heading - heading);
 
-    // The scan resets inside a method rather than here: clearing `this.hazard` in
-    // this scope narrows it to `null` for the rest of the method, and the closure
-    // that fills it back in is invisible to that analysis.
-    this.beginHazardScan();
+    this.beginHazardScan(projection.lateral);
     this.hazards.forEachAhead(
       this.hintS,
       Math.max(lookahead + 8, config.brakeLead + (speed * speed) / (2 * config.brakeAccel)),
@@ -143,11 +168,20 @@ export class Autopilot {
     );
     this.dynamicDistance = this.dynamicObstacleDistance(vehicle, originX, originZ);
 
-    let desiredLateral = 0;
     let obstacleDistance = this.dynamicDistance;
     let mustStop = this.dynamicDistance < 4;
+
+    // Retire a plan whose hazard is behind the car, keep one whose hazard is still
+    // ahead, and only replan when something NEARER turns up. Without the latch the
+    // nearest-hazard answer changes every few seconds on a real road and the car
+    // swerves for each change; with it, one hazard produces one line.
+    const planned = this.plannedHazard;
+    if (planned && planned.s - planned.radius < this.hintS) {
+      this.plannedHazard = null;
+      this.plannedLateral = 0;
+    }
     const hazard = this.hazard;
-    if (hazard && !hazard.breakable) {
+    if (hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
       // Pick a line past it, then decide about braking SEPARATELY. Measured, the two
       // used to be one: the hazard fed the braking-distance limiter unconditionally,
       // so the car planned a detour, drove to it, and still crawled to a halt 18 m
@@ -159,16 +193,17 @@ export class Autopilot {
       // 1.2 m rock plus the full comfort margin put the car 0.35 m past the asphalt
       // edge, off the road mesh, and 22 m into the desert. The shoulder is a last
       // resort before stopping, not the first thing the margin eats.
+      //
+      // The hysteresis rung is not cosmetic either. A line at EXACTLY `bodyClearance`
+      // sits on the same threshold the corridor test below uses, and the two
+      // deadlocked: the car braked because the rock was in its corridor, reached the
+      // line at 2.20 m against a 2.25 m threshold, and sat there forever — stopped,
+      // so no steering authority to finish the move, and still "blocked" so no
+      // throttle.
       const bodyClearance = hazard.radius + CAR_HALF_WIDTH_M;
       const asphaltEdge = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M;
       const shoulderEdge = ROAD_HALF_WIDTH + SHOULDER_WIDTH - CAR_HALF_WIDTH_M;
       let line: number | null = null;
-      // Rungs: comfortable, then merely clear-with-hysteresis, then bare clearance.
-      // The hysteresis rung is not cosmetic. A line at EXACTLY `bodyClearance` sits on
-      // the same threshold the corridor test below uses, and the two deadlocked: the
-      // car braked because the rock was in its corridor, reached the line at 2.20 m
-      // against a 2.25 m threshold, and then sat there forever — stopped, so no
-      // steering authority to finish the move, and still "blocked" so no throttle.
       for (const clearance of [
         bodyClearance + config.hazardMargin,
         bodyClearance + AVOID_HYSTERESIS_M,
@@ -180,25 +215,38 @@ export class Autopilot {
           const leftFits = left <= edge;
           const rightFits = right >= -edge;
           if (!leftFits && !rightFits) continue;
-          // Whichever side needs the smaller move, so a hazard on the verge is passed
-          // without crossing the whole road to do it.
+          // Whichever side needs the smaller move from the line already being held,
+          // so a hazard on the verge is passed without crossing the whole road and a
+          // plan in progress is not thrown away for its mirror image.
           line =
             leftFits &&
-            (!rightFits ||
-              Math.abs(left - projection.lateral) <= Math.abs(right - projection.lateral))
+            (!rightFits || Math.abs(left - this.appliedLateral) <= Math.abs(right - this.appliedLateral))
               ? left
               : right;
           break;
         }
         if (line !== null) break;
       }
-      if (line === null) mustStop = true;
-      else desiredLateral = line;
-      // Braking applies only while the hazard is still inside the car's corridor, and
-      // that corridor is deliberately NARROWER than any line the ladder picks.
-      if (Math.abs(projection.lateral - hazard.lateral) < bodyClearance * BLOCK_CORRIDOR_FRACTION) {
-        obstacleDistance = Math.min(obstacleDistance, this.hazardDistance - hazard.radius);
+      if (line === null) {
+        mustStop = true;
+      } else {
+        this.plannedHazard = hazard;
+        this.plannedLateral = line;
       }
+    }
+
+    // Ease onto the planned line instead of jumping to it: a step change in the target
+    // is a step change in cross-track error, and Stanley answers that with lock.
+    const lineRate = LINE_SHIFT_PER_METRE * Math.max(speed * dt, 0);
+    this.appliedLateral += clamp(this.plannedLateral - this.appliedLateral, -lineRate, lineRate);
+    const desiredLateral = this.appliedLateral;
+
+    const blocking =
+      this.plannedHazard !== null &&
+      Math.abs(projection.lateral - this.plannedHazard.lateral) <
+        (this.plannedHazard.radius + CAR_HALF_WIDTH_M) * BLOCK_CORRIDOR_FRACTION;
+    if (blocking && this.plannedHazard) {
+      obstacleDistance = Math.min(obstacleDistance, this.plannedHazard.s - this.hintS - this.plannedHazard.radius);
     }
 
     const lateralError = projection.lateral - desiredLateral;
