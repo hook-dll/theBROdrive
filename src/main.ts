@@ -655,8 +655,12 @@ async function boot(): Promise<void> {
   let torchlightActive = false;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
-  /** Vehicle whose live lamp state remains projected after the player exits. */
-  let lastExitedVehicleId: string | null = null;
+  /**
+   * Reused per-frame scratch: the live vehicles with a lamp on, in the order the
+   * light rig is offered them. A field, not a local, so the render loop allocates
+   * nothing for the common case of one lit car.
+   */
+  const litVehicles: Vehicle[] = [];
 
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
@@ -679,7 +683,7 @@ async function boot(): Promise<void> {
 
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
-    if (driving) lastExitedVehicleId = drivingId;
+
     // Mouse steering is a preference, so M edits the settings rather than a local
     // flag: it survives a reload, and the pause menu and the key agree because they
     // are the same state. The reader is told "on AND driving", so the same mouse
@@ -1049,10 +1053,6 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
-    vehicleLights.clear();
-    const projectedVehicle =
-      driving ?? (lastExitedVehicleId ? (vehicles.get(lastExitedVehicleId) ?? null) : null);
-    projectedVehicle?.syncProjectedLights(vehicleLights);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -1131,6 +1131,28 @@ async function boot(): Promise<void> {
     for (const vehicle of vehicles.values()) {
       vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
     }
+
+    // Every lit lamp in the active world casts its beam, not just the driven car's.
+    //
+    // This runs AFTER the environment factor above, because that factor is a
+    // multiplier on the beam intensities the rig is about to read; projecting first
+    // spent a frame on yesterday's twilight. The offer order is the priority order
+    // the rig allocates in — driven car first, then nearest to the camera — so the
+    // only beams a full pool can refuse are the farthest ones.
+    litVehicles.length = 0;
+    for (const vehicle of vehicles.values()) {
+      if (vehicle.hasLitLamps) litVehicles.push(vehicle);
+    }
+    if (litVehicles.length > 1) {
+      litVehicles.sort(
+        (a, b) =>
+          (a === driving ? -1 : a.root.position.distanceToSquared(cam)) -
+          (b === driving ? -1 : b.root.position.distanceToSquared(cam)),
+      );
+    }
+    vehicleLights.beginFrame();
+    for (const vehicle of litVehicles) vehicle.syncProjectedLights(vehicleLights);
+    vehicleLights.endFrame();
 
     // Eye height for heat haze. The exact local road frame is still useful near the
     // corridor; farther out the same terrain method is the player-centred fine field.

@@ -2627,39 +2627,45 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Projects this vehicle's local lamp mounts through its interpolated render pose
-   * into the shared renderer rig. The game uses this for the driven vehicle and
-   * the last vehicle left behind, so its lights remain visible on foot.
+   * True while any lamp on this vehicle is emitting. Lets the caller skip dark
+   * vehicles entirely and order the lit ones before they claim rig slots.
+   */
+  get hasLitLamps(): boolean {
+    return (
+      (this.headlightMode !== 'off' && this.headlightEnvironmentFactor > 0) ||
+      this.taillightBeamIntensity > 0 ||
+      this.reverseLightBeamIntensity > 0
+    );
+  }
+
+  /**
+   * Offers this vehicle's LIT lamps to the shared rig, projected from local mounts
+   * through the interpolated render pose. Called for every live vehicle, not just
+   * the driven one: a lamp that is on casts a beam whoever left it on, so a
+   * restored save and a car abandoned with its headlights burning both light the
+   * ground. Dark lamps are offered nothing and cost no slot.
    */
   syncProjectedLights(rig: VehicleLightRig): void {
-    const headlightBeam =
-      this.headlightMode === 'high'
-        ? HEADLIGHT_HIGH
-        : this.headlightMode === 'low'
-          ? HEADLIGHT_LOW
-          : HEADLIGHT_LOW;
+    const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
     const headlightIntensity =
       this.headlightMode === 'off' ? 0 : headlightBeam.intensity * this.headlightEnvironmentFactor;
     for (let i = 0; i < 2; i++) {
-      this.syncProjectedBeam(
+      this.projectBeam(
         rig,
-        i,
         this.headlightMounts[i],
         HEADLIGHT_EMISSIVE,
         headlightIntensity,
         headlightBeam,
       );
-      this.syncProjectedBeam(
+      this.projectBeam(
         rig,
-        i + 2,
         this.taillightMounts[i],
         TAILLIGHT_EMISSIVE,
         this.taillightBeamIntensity,
         TAILLIGHT_BEAM,
       );
-      this.syncProjectedBeam(
+      this.projectBeam(
         rig,
-        i + 4,
         this.reverseLightMounts[i],
         REVERSE_LIGHT_EMISSIVE,
         this.reverseLightBeamIntensity,
@@ -2668,32 +2674,23 @@ export class Vehicle implements Rebasable {
     }
   }
 
-  private syncProjectedBeam(
+  private projectBeam(
     rig: VehicleLightRig,
-    slot: number,
     mount: VehicleBeamMount | undefined,
     color: THREE.ColorRepresentation,
     intensity: number,
     shape: ProjectedBeamShape,
   ): void {
-    const sourceWorld = this.projectedLightSource;
-    const targetWorld = this.projectedLightTarget;
-    if (mount) {
-      sourceWorld
-        .copy(mount.sourceLocal)
-        .applyQuaternion(this.rootGroup.quaternion)
-        .add(this.rootGroup.position);
-      targetWorld
-        .copy(mount.aimLocal)
-        .applyQuaternion(this.rootGroup.quaternion)
-        .add(this.rootGroup.position);
-    } else {
-      sourceWorld.set(0, 0, 0);
-      targetWorld.set(0, 0, 0);
-      intensity = 0;
-    }
-    rig.setBeam(
-      slot,
+    if (!mount || !(intensity > 0)) return;
+    const sourceWorld = this.projectedLightSource
+      .copy(mount.sourceLocal)
+      .applyQuaternion(this.rootGroup.quaternion)
+      .add(this.rootGroup.position);
+    const targetWorld = this.projectedLightTarget
+      .copy(mount.aimLocal)
+      .applyQuaternion(this.rootGroup.quaternion)
+      .add(this.rootGroup.position);
+    rig.addBeam(
       sourceWorld,
       targetWorld,
       color,
