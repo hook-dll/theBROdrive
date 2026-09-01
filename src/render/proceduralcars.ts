@@ -49,7 +49,16 @@ function mat(finish: Finish): THREE.MeshStandardMaterial {
       transparent: (finish.opacity ?? 1) < 1,
       opacity: finish.opacity ?? 1,
       flatShading: true,
+      // DoubleSide because a few lofted parts are thin enough to be seen from
+      // inside, and their winding is not worth auditing one at a time.
       side: THREE.DoubleSide,
+      // But NOT double-sided in the depth pass. Three maps FrontSide to BackSide for
+      // shadow casting and leaves DoubleSide alone, which would store this hull's LIT
+      // face in the shadow map — a surface then tests against its own depth, and only
+      // a fat bias hides the result. The bias is 2 cm now (see render/sky.ts), so say
+      // it explicitly: the far face goes in the map, exactly as it does for the glTF
+      // packs, and a closed body cannot shadow itself at all.
+      shadowSide: THREE.BackSide,
     });
     if (finish.glow) {
       m.emissive = new THREE.Color(finish.color);

@@ -245,6 +245,11 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
     metalness: 0.05,
     roughness: 0.9,
     side: THREE.DoubleSide,
+    // Same reason as the procedural car bodies (render/proceduralcars.ts): DoubleSide
+    // is the only side value three does NOT flip for the depth pass, which would put
+    // this body's lit face in the shadow map and make it test against itself. The
+    // sun's bias is 2 cm (render/sky.ts) and does not cover that.
+    shadowSide: THREE.BackSide,
   });
   if (baseColorMap) {
     material.map = baseColorMap;
