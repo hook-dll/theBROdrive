@@ -44,6 +44,7 @@ import {
   bonnetPart,
   bonnetSlotKind,
   BONNET_SLOT_KINDS,
+  hasServiceSlot,
 } from '../vehicle/bonnet';
 import { setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
@@ -482,11 +483,15 @@ export class Interaction {
       const carState = this.world.state.cars[carId];
       const gizmos = carState.gizmos;
       const held = this.inventory.held;
-      const heldPart = held?.type === 'part' ? held.part : null;
+      // A part with a bonnet slot is not gizmo junk: see `hasServiceSlot`. Resolved
+      // once per tick rather than per anchor — it is a table lookup, but the answer
+      // cannot differ between two anchors on the same car.
+      const heldPart =
+        held?.type === 'part' && !hasServiceSlot(held.part.variantId) ? held.part : null;
 
       // An anchor is only a candidate for something the player can actually DO: mount
       // the held part into an empty anchor, or pull a mounted gizmo out. Gizmos are
-      // junk, not fitted parts, so an empty anchor accepts whatever is held.
+      // junk, not fitted parts, so an empty anchor accepts whatever junk is held.
       let bestFitAlong = Infinity;
       let bestFit: Target | null = null;
       let bestRemoveAlong = Infinity;
@@ -1097,7 +1102,9 @@ export class Interaction {
   private attach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
     const car = this.world.state.cars[carId];
     if (!car || !resolved.vehicle) return;
-    // Gizmos are junk, not fitted parts: any part mounts on any anchor.
+    // Gizmos are junk, not fitted parts: any anchor takes any junk. Which parts count
+    // as junk is decided in `resolve` — a part with a bonnet slot never reaches here,
+    // because an empty anchor is not a candidate target while one is held.
     this.world.apply({ t: 'gizmo_attach', carId, anchor: anchorId, part });
     this.inventory.remove(part.id);
     resolved.vehicle.rebuild();

@@ -114,7 +114,9 @@ export class AnchorGhosts {
     }
 
     // Nothing held, nothing drawn. Gizmos are junk rather than fitted parts, so any
-    // empty anchor takes whatever is in hand and every one of them previews it.
+    // empty anchor takes whatever junk is in hand and every one of them previews it.
+    // `heldVariantId` is already null for a part with a service slot: main.ts applies
+    // `hasServiceSlot` so an engine is not offered eleven places it cannot go.
     let ghostMask = 0;
     if (heldVariantId !== null) {
       for (let i = 0; i < anchors.length; i++) {
