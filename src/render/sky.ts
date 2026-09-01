@@ -93,6 +93,28 @@ const SUN_VISUAL_SCALE = 1.5;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
+/**
+ * Total display-referred light the key and the sky bounce are exposed to between
+ * them. The two lights below are written as their share of the real illuminance
+ * times this exposure, so under full adaptation they always sum to it and only
+ * their SPLIT — and the palette they are tinted with — carries the time of day.
+ */
+export const EXPOSURE_TARGET = 5;
+/**
+ * How dark the eye stops following, expressed as the illuminance it stops
+ * dividing by. Below this the exposure levels off instead of climbing, so the
+ * scene finally starts to go dark rather than staying at EXPOSURE_TARGET forever.
+ *
+ * It is ADDED to the illuminance rather than imposed as a clamp on the exposure,
+ * and that is the whole point. A clamp is a corner: above it the scene is pinned
+ * at full brightness, below it brightness tracks illuminance one for one, and the
+ * hand-over is a slope that goes from flat to a 20%-a-second fall in the width of
+ * one frame. Adding a floor to the denominator gives the same limit — the maximum
+ * exposure is still EXPOSURE_TARGET / ADAPTATION_FLOOR, which is what the star
+ * field's brightness is calibrated against — with no corner anywhere on the curve.
+ */
+export const ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
+
 
 // ---------------------------------------------------------------------------
 // Palette (authored as sRGB hex; THREE converts to linear working space)
@@ -932,7 +954,7 @@ export class Sky {
     const sceneIlluminance =
       celestial.keyIlluminanceLux / 40_000 +
       celestial.diffuseIlluminanceLux / 10_000;
-    this.exposure = THREE.MathUtils.clamp(5 / Math.max(sceneIlluminance, 0.000001), 0.8, 25_000);
+    this.exposure = EXPOSURE_TARGET / (sceneIlluminance + ADAPTATION_FLOOR);
     const starVisibility = smoothstep(0.12, -0.12, this.sunElevation);
     this.starField.update(
       celestial.equatorialToWorld,
@@ -1046,10 +1068,13 @@ export class Sky {
   }
 
   /**
-   * Chooses the PMREM resolution for the next due bake without making one due.
+   * Applies a rendering tier to everything overhead: the PMREM resolution the next
+   * due bake will use (without making one due), and how faint the star catalogue
+   * is drawn to. Both take effect without a reload.
    */
-  setEnvironmentQuality(quality: GraphicsQuality): void {
+  setQuality(quality: GraphicsQuality): void {
     this.environmentSize = quality === 'acceptable' ? 64 : 128;
+    this.starField.setQuality(quality);
   }
 
   get didBakeEnvironmentThisFrame(): boolean {

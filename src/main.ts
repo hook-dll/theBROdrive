@@ -236,9 +236,11 @@ async function boot(): Promise<void> {
   // caller ever has to ask whether sound is available yet.
   const audio = new GameAudio();
   audio.applySettings(world.state.settings);
-  const starField = await loadStarField(new Date(parseCalendarEpoch(world.state.calendarEpoch)));
+  const starField = await loadStarField(
+    new Date(parseCalendarEpoch(world.state.calendarEpoch)),
+    world.state.settings.graphicsQuality,
+  );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
-  sky.setEnvironmentQuality(world.state.settings.graphicsQuality);
   // Scene lights now exist, so warm both CPU instances and their exact live shader
   // permutations before the loading cover leaves. POI streaming never pays first use.
   await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
@@ -1506,11 +1508,12 @@ async function boot(): Promise<void> {
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setMsaa(world.state.settings.msaa);
-      // Resolution, shadows and MSAA update in place. The lamp-slot count cannot:
-      // changing visible-light count would recompile every lit material, so graphics
-      // quality changes that budget only on the next load.
+      // Resolution, shadows, MSAA and the sky (probe resolution and star depth)
+      // update in place. The lamp-slot count cannot: changing visible-light count
+      // would recompile every lit material, so graphics quality changes that
+      // budget only on the next load.
       renderer.setQuality(world.state.settings.graphicsQuality);
-      sky.setEnvironmentQuality(world.state.settings.graphicsQuality);
+      sky.setQuality(world.state.settings.graphicsQuality);
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
