@@ -66,6 +66,7 @@ import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
+import { hasServiceSlot } from './vehicle/bonnet';
 import {
   TrailerField,
   TRAILER_HALF_LENGTH,
@@ -1250,7 +1251,12 @@ async function boot(): Promise<void> {
       ghostCar && ghost ? ghost.vehicle : null,
       ghost ? ghost.vehicle.modelMeasure.anchors : [],
       ghostCar ? ghostCar.gizmos : {},
-      held && held.type === 'part' ? held.part.variantId : null,
+      // Same rule the interaction resolve uses (`hasServiceSlot`): an engine, turbine,
+      // coolant tank or fuel tank cannot be mounted on a cosmetic anchor, so it must
+      // not be previewed on one either. Its home is a bonnet slot.
+      held && held.type === 'part' && !hasServiceSlot(held.part.variantId)
+        ? held.part.variantId
+        : null,
       interaction.lastAnchorTarget,
       frameDt,
     );

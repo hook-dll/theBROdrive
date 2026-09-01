@@ -22,6 +22,21 @@ export function bonnetAccepts(cell: number, item: Item | null): item is PartItem
   return variant(item.part.variantId).kind === bonnetSlotKind(cell);
 }
 
+/**
+ * True when this part has a SERVICE HOME on the car and is therefore not junk.
+ *
+ * The cosmetic anchors (`GizmoAnchor`, render/carmodel.ts) accept any part, because
+ * a mirror or a bumper has nowhere else to go and hanging one off the roof is the
+ * point. An ENGINE is not that: it belongs in a bonnet slot, so previewing it at
+ * every anchor on the car — bonnet, flanks, roof — advertised eleven wrong places to
+ * put it and one right one that is not an anchor at all. The four kinds a bonnet slot
+ * takes are excluded from anchor mounting for exactly that reason; nothing else is.
+ */
+export function hasServiceSlot(variantId: string): boolean {
+  const kind = variant(variantId).kind;
+  return BONNET_SLOT_KINDS.some((slot) => slot === kind);
+}
+
 function servicePart(carId: string, suffix: string, variantId: string): PartItem {
   return {
     type: 'part',
