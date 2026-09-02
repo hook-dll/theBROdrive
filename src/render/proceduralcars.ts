@@ -28,18 +28,21 @@ import * as THREE from 'three';
  * ------------------------------------------------------------------------- */
 
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
+const bodyPaintMaterials = new WeakSet<THREE.Material>();
 
 interface Finish {
   readonly color: number;
   readonly metalness?: number;
   readonly roughness?: number;
   readonly opacity?: number;
+  /** Identifies painted shell slots when an untextured procedural model is cloned. */
+  readonly bodyPaint?: boolean;
   /** Emissive strength for lamps, so they read as lit at dusk. */
   readonly glow?: number;
 }
 
 function mat(finish: Finish): THREE.MeshStandardMaterial {
-  const key = `${finish.color}:${finish.metalness ?? 0}:${finish.roughness ?? 0.6}:${finish.opacity ?? 1}:${finish.glow ?? 0}`;
+  const key = `${finish.color}:${finish.metalness ?? 0}:${finish.roughness ?? 0.6}:${finish.opacity ?? 1}:${finish.bodyPaint ? 1 : 0}:${finish.glow ?? 0}`;
   let m = materialCache.get(key);
   if (!m) {
     m = new THREE.MeshStandardMaterial({
@@ -65,8 +68,14 @@ function mat(finish: Finish): THREE.MeshStandardMaterial {
       m.emissiveIntensity = finish.glow;
     }
     materialCache.set(key, m);
+    if (finish.bodyPaint) bodyPaintMaterials.add(m);
   }
   return m;
+}
+
+/** Procedural shells have no livery map, so their authored paint finish is explicit. */
+export function isProceduralCarPaintMaterial(material: THREE.Material): boolean {
+  return bodyPaintMaterials.has(material);
 }
 
 const CHROME = { color: 0xd8dde2, metalness: 0.95, roughness: 0.22 };
@@ -322,8 +331,8 @@ function wheelGroup(
  * glasshouse cut straight off the top and a wing you could serve dinner on.
  * ------------------------------------------------------------------------- */
 
-const WEDGE_PAINT = { color: 0xe8e4dc, metalness: 0.45, roughness: 0.38 };
-const WEDGE_ACCENT = { color: 0xc8341f, roughness: 0.45 };
+const WEDGE_PAINT = { color: 0xe8e4dc, metalness: 0.45, roughness: 0.38, bodyPaint: true };
+const WEDGE_ACCENT = { color: 0xc8341f, roughness: 0.45, bodyPaint: true };
 
 function wedge(): THREE.Group {
   const b = builder('body');
@@ -415,7 +424,7 @@ function wedge(): THREE.Group {
  * fenders swallowing the wheels, split screen, boat tail, far too much chrome.
  * ------------------------------------------------------------------------- */
 
-const STREAM_PAINT = { color: 0x1d4536, metalness: 0.55, roughness: 0.3 };
+const STREAM_PAINT = { color: 0x1d4536, metalness: 0.55, roughness: 0.3, bodyPaint: true };
 const STREAM_TRIM = { color: 0xd9cfae, roughness: 0.5 };
 
 function streamliner(): THREE.Group {

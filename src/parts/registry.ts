@@ -89,19 +89,25 @@ export interface PartVariant {
   readonly fits: readonly BodyClass[];
 }
 
+/**
+ * A suspension setup in the units it is designed in, not the units Rapier wants.
+ * `Vehicle.rebuild` converts (see `wheelSpringRate` in vehicle/carmodels.ts); the
+ * conversion needs each axle's share of the weight, which is why nothing here is a
+ * spring rate.
+ */
 export interface SuspensionTuning {
-  /** Rest length of the spring, metres. */
-  readonly restLength: number;
-  /** Travel either side of rest before it bottoms out. */
-  readonly maxTravel: number;
-  /** Spring rate. Tuned against body mass, not absolute. */
-  readonly stiffness: number;
-  /** Damping while compressing. */
-  readonly compression: number;
-  /** Damping while extending. Higher stops float and wallow. */
-  readonly relaxation: number;
-  /** Force ceiling, so a hard landing cannot launch the car. */
-  readonly maxForce: number;
+  /** Front-axle heave frequency, Hz. A 1970s saloon is 1.0-1.4. */
+  readonly frontHz: number;
+  /** Rear-axle heave frequency, Hz. Normally 10-20% above the front (flat ride). */
+  readonly rearHz: number;
+  /** Damping while compressing, as a fraction of critical. Real cars: 0.2-0.3. */
+  readonly compressionRatio: number;
+  /** Damping while extending. Rebound-biased, 0.35-0.5, or a soft spring pogos. */
+  readonly reboundRatio: number;
+  /** Compression available past static sag before the bump stop shuts, metres. */
+  readonly bumpTravel: number;
+  /** Clear air under the body, metres. Saloon 0.13-0.18, working vehicle 0.20-0.24. */
+  readonly rideHeight: number;
 }
 
 export const ENGINE_VARIANTS: readonly PartVariant[] = [

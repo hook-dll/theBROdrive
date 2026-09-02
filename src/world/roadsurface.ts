@@ -1,6 +1,6 @@
 import { hash01, Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { NODE_SPACING, type Road } from './road';
+import { NODE_SPACING, ROAD_HALF_WIDTH, type Road } from './road';
 import { roadConditionAt } from './gradient';
 
 /**
@@ -34,52 +34,57 @@ export const SURFACE_STEP = NODE_SPACING / SUB_DIVISIONS;
 /**
  * Short bump layer, two octaves: 6.7 m plus a 3.33 m octave.
  *
- * Both were one octave lower (8.3 / 4.17 m). 8 m is long enough that a car at
- * 60-100 km/h reads it as the road breathing rather than as texture — it arrives
- * at 2-3 Hz, which is body-frequency, so the springs absorb it and the driver
- * feels a wallow. 3-7 m arrives at 2.5-8 Hz: the band where the wheel starts
- * working and the body starts being told about it. 3.33 m is 2.5 vertex steps, so
- * it is the shortest wave the 1.333 m collider still resolves as a shape rather
- * than as noise; anything shorter aliases into seed-dependent spikes.
+ * The collider and the mesh share these samples, and the collider is flat between
+ * vertex rows SURFACE_STEP apart — so what a WHEEL gets from this layer is not the
+ * smooth wave, it is a slope change at every row. `tools/ride-bench.ts` measures the
+ * vertical velocity step that produces (the kick), and that is the number these
+ * amplitudes have to be set by.
+ *
+ * ---- why they came down by a factor of four ----
+ *
+ * At 110 mm on asphalt the measured profile was 36-63 mm RMS with a 99th-percentile
+ * kick of 1.0-1.6 m/s and a worst case of 2.9 m/s at 90 km/h. For scale, the pothole
+ * cap two blocks below exists to keep the worst SINGLE HOLE on the road under
+ * 2.8 m/s — so the ordinary road surface was hitting as hard as a pothole, several
+ * times a second. Measured consequences with a real car (tools/surface-feel.ts): 0.95 g
+ * RMS of vertical acceleration at 90 km/h, a car unable to hold 90 at all, and a top
+ * speed 20 km/h below the same friction on flat ground. A real asphalt highway runs
+ * 2-8 mm RMS over this band; this was an ISO class E farm track drawn as a highway.
+ *
+ * It was also self-reinforcing: a road that rough forces stiff springs to keep the
+ * body on the ground, and stiff springs are what stopped the car feeling anything at
+ * all (see carmodels.ts). Cutting the waviness is what pays for the soft springs.
+ *
+ * The road is not smooth now — the long undulation below, the edge break, the
+ * potholes and the sub-collider texture in core/surfaces.ts all remain, and each is a
+ * different band. What went away is a metre-scale wave nobody would build a road with.
  */
 const ROUGH_FREQ = 0.15;
 const ROUGH_FREQ_HI = 0.3;
 /** Relative amplitude of the 3.33 m octave. */
-const ROUGH_HI_GAIN = 0.6;
-/**
- * Bump amplitude per surface type, metres. Constant along the whole road: the bump
- * layer does NOT scale with decay.
- *
- * It used to. Amplitude was `floor + 0.5 * decay * surfaceRoughness`, which tied
- * the road's texture to a progress curve — so the first hundred kilometres were
- * near-glass and only the far end had any life in it. Decay still drives the things
- * decay should drive (which surface you are on, how many potholes there are, the
- * long undulation), but how bumpy a given surface feels is now a property of the
- * material, not of how far you have driven. The first kilometre reads like the
- * three-hundredth.
- *
- * These are 2x the previous floors. Cracked asphalt is highest because broken
- * tarmac is rutted; loose gravel stays comparatively even; concrete is the one
- * genuinely smooth surface. At 90 km/h the asphalt figure is a 0.9 m/s velocity
- * step at the wheel on the sharpest slope change (tools/ride-bench.ts) — busy
- * enough to keep both hands on the wheel, well short of anything that unloads a
- * tyre.
- */
+const ROUGH_HI_GAIN = 0.78;
+/** Bump amplitude per surface type, metres. */
 const BUMP_AMP: Record<SurfaceType, number> = {
-  [SurfaceType.Asphalt]: 0.09,
-  [SurfaceType.CrackedAsphalt]: 0.16,
-  [SurfaceType.Gravel]: 0.08,
-  [SurfaceType.Sand]: 0.076,
-  [SurfaceType.Rock]: 0.1,
-  [SurfaceType.Concrete]: 0.028,
+  [SurfaceType.Asphalt]: 0.028,
+  [SurfaceType.CrackedAsphalt]: 0.075,
+  // The loose surfaces keep more of it: a gravel track and a rock shelf really are
+  // this uneven at a few metres of wavelength, and it is what makes them read as a
+  // track rather than a painted road.
+  [SurfaceType.Gravel]: 0.06,
+  [SurfaceType.Sand]: 0.05,
+  [SurfaceType.Rock]: 0.09,
+  [SurfaceType.Concrete]: 0.014,
 };
 
-/** Long undulation: wavelength (m) of its first octave — gentle rolling, not hills. */
+/** Long undulation: broad enough to pitch the car over a visible rise and fall. */
 const UND_WAVELENGTH = 30;
-/** Undulation amplitude at decay = 1 (m). */
-const UND_AMP = 0.024;
+/** Long undulation amplitude at decay = 1 (m). */
+const UND_AMP = 0.04;
 /** Fraction of the amplitude kept even on pristine road; glass is boring. */
 const UND_FLOOR = 0.35;
+/** Physical breakup across the outer asphalt strip. Zero at both strip boundaries. */
+const EDGE_BREAK_WIDTH = 0.8;
+const EDGE_BREAK_DEPTH = 0.075;
 
 /** Metres between pothole candidate slots. */
 const POTH_SLOT = 4;
@@ -100,30 +105,43 @@ const POTH_DECAY_FLOOR = 0.28;
  */
 const POTH_DEPTH_FLOOR = 0.45;
 /** Pothole diameter range in metres. */
-const POTH_MIN_D = 0.4;
-const POTH_MAX_D = 1.2;
-/** Depth cap (m): never a hole deep enough to swallow a wheel. */
-const POTH_MAX_DEPTH = 0.11;
+const POTH_MIN_D = 0.8;
+const POTH_MAX_D = 2.0;
 /**
- * Depth/diameter cap. The cosine profile's steepest slope is pi*depth/diameter at
- * r = D/4; 0.16 keeps that under ~27 degrees, so a wheel never meets a kerb-like
- * wall. The mesh is much shallower again: a pothole spans one vertex row, so the
- * felt ramp is depth/1.333 m — under 5 degrees even at the 0.11 m cap.
+ * Steepest ramp, as a gradient, that a pothole is allowed to present to a WHEEL.
+ *
+ * The wheel never meets the analytic cosine bowl. It meets the trimesh, which is flat
+ * between vertex rows SURFACE_STEP apart, and no hole in this catalogue is as wide as
+ * two of those rows — so every one of them is rendered as a single-row V-notch of the
+ * full depth, whatever its nominal diameter. The horizontal distance the tyre climbs
+ * out over is therefore `max(radius, SURFACE_STEP)`, and the vertical velocity step it
+ * delivers is `2 · ramp · speed`, which is what the suspension is actually hit with
+ * (tools/ride-bench.ts calls it the kick).
+ *
+ * At 0.16 m of depth that ramp was 0.12 and a 90 km/h wheel took a 5.5 m/s kick —
+ * enough to throw the whole car off the ground. Measured on the real collider with a
+ * real car (tools/surface-feel.ts): driven wheels below a third of their static load
+ * for half the run, all four unloaded at a time, traction control lit for 68% of a
+ * standing start, and 0-100 km/h taking 14.8 s against 8.6 s on flat asphalt of the
+ * same friction. That is not a rough road, it is a jump ramp every few hundred metres.
+ *
+ * 0.055 puts the worst kick at 2.8 m/s at 90 km/h, just above the bump layer's own
+ * 2.2 — so a hole is still the hardest single thing on the road and still audibly a
+ * hole, but the tyre stays on the ground and keeps making force.
  */
-const POTH_SLOPE_CAP = 0.16;
+const POTH_MAX_RAMP = 0.055;
+/**
+ * Absolute depth ceiling (m), so a hole wide enough to escape the ramp cap is still
+ * never a wheel-swallowing trench.
+ */
+const POTH_MAX_DEPTH = 0.12;
 /**
  * Lateral lines (m) a pothole may centre on.
  *
  * These MUST be columns of the road mesh's own cross-section (roadmesh.ts
- * LATERALS) or the profile's deepest point falls between vertices and is never
- * sampled — the hole is drawn and collided shallower than it is. The old lattice
- * (+/-1.1, +/-2.2) was on no column at all, and missed both wheel paths besides:
- * a 0.4 m hole centred at 1.1 m does not reach a tyre tracking 0.85 m.
- *
- * +/-0.85 and +/-2.45 ARE the wheel paths (roadmesh.ts WHEEL_PATH_LATERALS), which
- * is also where real holes form, because that is where the load is. +/-1.65 and 0
- * are the unloaded crown and lane centre: holes there are seen and swerved around
- * rather than hit, which is what stops the lattice reading as a rumble strip.
+ * LATERALS), so the deeper point is sampled by the collider. Wheel paths and the
+ * spaces between them are both eligible: a driver can choose a line, not just absorb
+ * a rumble strip.
  */
 const POTH_LATERALS: readonly number[] = [-2.45, -1.65, -0.85, 0, 0.85, 1.65, 2.45];
 
@@ -177,8 +195,11 @@ function potholeAtSlot(seed: number, slot: number, decay: number): Pothole | nul
   // at a 1.333 m vertex step is a wheel-sized ripple nobody feels. One taper, with
   // a high floor: rare but real.
   const depthFactor = POTH_DEPTH_FLOOR + (1 - POTH_DEPTH_FLOOR) * decay;
+  // The climb-out is over the hole's radius, or over one collider row when the hole is
+  // narrower than the lattice can resolve — which, at these diameters, is all of them.
+  const reach = Math.max(shape.diameter * 0.5, SURFACE_STEP);
   const depth =
-    Math.min(POTH_MAX_DEPTH, POTH_SLOPE_CAP * shape.diameter) *
+    Math.min(POTH_MAX_DEPTH, POTH_MAX_RAMP * reach) *
     depthFactor *
     (0.5 + 0.5 * hash01(seed, slot, TAG_POTH_DEPTH));
   return { s: shape.s, lateral: shape.lateral, diameter: shape.diameter, depth };
@@ -241,7 +262,16 @@ export class SurfaceField {
       this.undulationNoise.fbm(s / UND_WAVELENGTH, 2, 2, 0.5);
     const bump =
       BUMP_AMP[surface] * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
-    return und + bump + potholeAt(this.seed, s, lateral, decay);
+    const edgeT = Math.max(
+      0,
+      Math.min(1, (Math.abs(lateral) - (ROAD_HALF_WIDTH - EDGE_BREAK_WIDTH)) / EDGE_BREAK_WIDTH),
+    );
+    const edgeBreak =
+      EDGE_BREAK_DEPTH *
+      decay *
+      Math.sin(Math.PI * edgeT) *
+      Math.max(0, this.bumpNoise.at(x * 0.08 + 19.7, z * 0.08 - 7.3));
+    return und + bump - edgeBreak + potholeAt(this.seed, s, lateral, decay);
   }
 }
 

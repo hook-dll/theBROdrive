@@ -95,7 +95,7 @@ const FINE_STEP = S_STEP / FINE_SUBDIVISIONS;
  * to the seam.
  */
 const DETAIL_RING_CAP = 12;
-/** Terrain tucks 8 cm below the shoulder, covering numerical seam cracks. */
+/** Terrain tucks 8 cm beneath the asphalt edge, covering numerical seam cracks. */
 const ROAD_SEAM_OVERLAP = 0.08;
 const TERRAIN_INNER = CORRIDOR_INNER - ROAD_SEAM_OVERLAP;
 /** Keep overlapped terrain below the road ribbon to prevent z-fighting. */
@@ -154,43 +154,20 @@ const FOLD_MAX_EDGE_RATIO = 18;
 /**
  * One piece of ground, one height.
  *
- * The fold guard above only makes a chunk's own fan locally one-to-one. It cannot
- * see the real problem, which is GLOBAL: every chunk fans terrain out to
- * FAR_LATERAL either side of ITS OWN 200 m of road, the streamer keeps chunks alive
- * 1200 m of road each way, and the road turns on radii as tight as 170 m. So chunks
- * routinely fan across each other — and a chunk's height at a point used to be
- * anchored to ITS centreline and ITS lateral offset, so the same ground got two
- * answers, differing by the rim term (78 m) plus the hill each frame sat on. The
- * loser hangs in the air: those were the brown beams, lines and slabs in the
- * mid-distance, and no amount of tuning the rim profile could remove them, because
- * the height field simply was not a function of position.
+ * Every streamed road chunk fans outward from its own centreline span, so tight
+ * bends make neighbouring fans overlap. Their heights are now sampled from the
+ * same absolute field; overlap is therefore harmless compared with omission.
  *
- * It is one now. `Terrain.openHeight` is the landscape field plus dune relief plus
- * the world's edge, and only that edge needs anything road-relative at all: the
- * distance to the nearest branch. So what this provider still owes the desert is much
- * smaller than it was — a distance, not an elevation — and the two-branch height blend
- * that used to ramp between two passes' altitudes is gone with the altitudes. The
- * distance itself now lives in `RoadDistance`, shared with the vista mesh, because the
- * two must agree about it or the horizon has a seam in it.
+ * Do not assign exclusive ownership to one streamed chunk. Streaming order cannot
+ * guarantee that the chosen neighbour is attached in the same frame, and a pair of
+ * ownership decisions can reject both sides of a boundary. Either case exposes the
+ * sky as a pale wedge. Duplicate coverage may cost depth overdraw, but it preserves
+ * the stronger invariant: every valid patch of ground is drawn.
  *
- * Two rules remain, and both are needed:
- *
- *  1. GLOBAL SEARCH, ABSOLUTE LATTICE. Both properties live in `RoadDistance` and both
- *     are load-bearing: a per-chunk window gave each chunk a different "nearest" for
- *     the same ground (the branch nearest a patch of desert is routinely kilometres
- *     away in arclength), and a per-chunk lattice let two chunks round the same point
- *     differently.
- *  2. BOUNDED OWNERSHIP. A cell yields to a chunk within OWN_YIELD_CHUNKS that is
- *     genuinely nearer, so coincident sheets are not drawn twice — but never to one
- *     further away than that, because the streamer's window would not contain it and
- *     the ground would go undrawn. That mistake looks like pale wedges with sky
- *     behind them; it is the same artefact reached from the other side.
- *
- * The near-road frame path is kept and cross-faded into the world path over
- * WORLD_HEIGHT_START..FULL. Inside the corridor the shoulder vertex MUST equal the
- * road ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m
- * the two paths are the same arithmetic (the berm is zero that close in), so the fade
- * is between values that agree, and it stays as the guarantee that they must.
+ * The fold guard still rejects cells whose own road-normal parameterisation has
+ * inverted. Other overlapping fans and the camera-centred vista cover those cells.
+ * Near the road, frame-derived height is cross-faded into the absolute field over
+ * WORLD_HEIGHT_START..FULL so the asphalt edge remains bit-identical to the terrain.
  */
 /** Lateral offset where height starts blending from frame-derived to position-derived. */
 const WORLD_HEIGHT_START = 30;
@@ -203,26 +180,6 @@ const WORLD_HEIGHT_FULL = 60;
  * vista asks the same field for a much coarser one.
  */
 const DIST_LATTICE = 50;
-/**
- * Slack in the ownership test, metres. Sized against the lattice the owner comes from,
- * for the reason the OWN_TOLERANCE comment below gives.
- */
-const OWN_SAMPLE_STEP = 20;
-/**
- * How many chunks away, in arclength, a cell may yield ownership to. Small, because
- * the streamer only keeps a window of chunks around the camera: yielding outside
- * that window leaves nothing drawn at all.
- */
-const OWN_YIELD_CHUNKS = 2;
-/**
- * Slack in the ownership test, metres.
- *
- * A cell also keeps its ground when its OWN row is as near as the best lattice
- * sample, within a lattice step. Without this the cell straddling a chunk boundary
- * resolves to the neighbour's first sample and both chunks drop it, which drew a
- * bare strip across the whole desert every 200 m.
- */
-const OWN_TOLERANCE = OWN_SAMPLE_STEP * 0.75;
 
 /**
  * Palette scratch colours, reused for every arclength row so a palette lookup
@@ -285,8 +242,9 @@ function bilinear(
 }
 
 /**
- * Keep comic contours and stipple, but leave diffuse light and shadow colour untouched so
- * the desert responds to lamps and moonlight exactly like the road.
+ * Shared near/far desert material. Physical normals and the live key light choose the
+ * lee side; a restrained relief re-ramp keeps broad dune shading visible after sky fill,
+ * haze and tone mapping without a terrain shadow map or another draw.
  *
  * Exported because the vista mesh draws the same ground and must therefore be the same
  * material: a second one, however carefully matched, drifts the moment either is tuned,
@@ -298,7 +256,7 @@ export const TERRAIN_MATERIAL = applyComicShading(
     roughness: 0.93,
     metalness: 0,
   }),
-  { lightingStrength: 0, shadowWarmth: 0 },
+  { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0.28 },
 );
 
 /**
@@ -387,12 +345,12 @@ function worldBase(terrain: Terrain, roadDistance: RoadDistance, x: number, z: n
  * Height of ONE field-lattice vertex, and the only place that blend is written.
  *
  * The near-road frame path is cross-faded into the world path over
- * WORLD_HEIGHT_START..FULL. Inside the corridor the shoulder vertex MUST equal the road
+ * WORLD_HEIGHT_START..FULL. Inside the corridor the road-edge vertex MUST equal the
  * ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m the two
  * paths are the same arithmetic (the berm is zero that close in), so the fade is between
  * values that agree, and it stays as the guarantee that they must.
  *
- * The last term is the seam tuck: terrain overlaps the road's shoulder slightly and
+ * The last term is the seam tuck: terrain overlaps the asphalt edge slightly and
  * samples the same road surface there, biased just under the ribbon so the floating
  * pixel seam closes without a coplanar z-fight.
  */
@@ -540,9 +498,9 @@ export class TerrainMeshProvider implements ChunkProvider {
     const latCount = laterals.length;
     const fieldCount = sCount * latCount;
 
-    // The refined grid's own columns: uniform `FINE_STEP` from the shoulder out to
+    // The refined grid's own columns: uniform `FINE_STEP` from the road edge out to
     // `DETAIL_REACH`, with the spacing divided evenly into the span rather than
-    // stepped off the shoulder, which would leave a sliver column at the far end.
+    // stepped off the edge, which would leave a sliver column at the far end.
     // Its innermost column is the same TERRAIN_INNER ring the field lattice starts on,
     // so the tuck under the road ribbon is inherited rather than re-derived.
     const fineSteps = Math.round((DETAIL_REACH - CORRIDOR_INNER) / FINE_STEP);
@@ -612,54 +570,14 @@ export class TerrainMeshProvider implements ChunkProvider {
     const validCells = new Uint8Array((sCount - 1) * (latCount - 1));
     const leftCentre = magnitudes.length - 1;
     const rightCentre = magnitudes.length;
-    // Read back ABSOLUTE x/z. `positions` is origin-relative now, but the fold test
-    // and the ownership lattice both reason about world geometry: the edge/dot tests
-    // are differences (offset-invariant), while `ownerAt` is keyed on an absolute
-    // lattice and must see the true position. Re-adding the origin keeps both right.
+    // Read back absolute x/z. Positions are origin-relative, while the fold test
+    // reasons about world geometry; re-adding the origin keeps it invariant across
+    // floating-origin rebases.
     const xz = (vi: number): readonly [number, number] => [
       positions[vi * 3]! + ox,
       positions[vi * 3 + 2]! + oz,
     ];
 
-    /**
-     * Does this chunk own the ground under the cell at (row0..row1, li..li+1)?
-     *
-     * Judged at the cell centre against the SAME lattice the heights come from: the
-     * owning branch's arclength must fall in this chunk's span, half-open so ground
-     * resolving exactly to a boundary belongs to the following chunk only. Every
-     * chunk asks the same question of the same lattice, so each piece of desert is
-     * drawn once and only once — which is what stops distant fans stacking up.
-     *
-     * The second clause is OWN_TOLERANCE: a cell whose OWN row is as near the ground
-     * as the owning branch keeps it regardless. That is what the cell straddling a
-     * chunk boundary needs — its centre resolves to the neighbour's first sample, and
-     * without the clause neither chunk would draw it and the desert would carry a
-     * bare strip every 200 m.
-     */
-    const ownsCell = (row0: number, row1: number, li: number, rowCentre: readonly [number, number]): boolean => {
-      const a = xz(row0 + li);
-      const b = xz(row1 + li);
-      const c = xz(row0 + li + 1);
-      const d = xz(row1 + li + 1);
-      const cx = (a[0] + b[0] + c[0] + d[0]) * 0.25;
-      const cz = (a[1] + b[1] + c[1] + d[1]) * 0.25;
-      const owner = this.roadDistance.ownerAt(cx, cz, DIST_LATTICE);
-      if (owner >= sStart && owner < sEnd) return true;
-      // Yield ONLY to a neighbour that is certain to be loaded whenever this chunk
-      // is. Yielding to a chunk kilometres away in arclength leaves a hole instead of
-      // a duplicate: the streamer keeps a window of chunks around the camera, and
-      // where the road doubles back the true owner is often outside it. A hole reads
-      // as a pale wedge with sky behind it — the same class of artefact by the
-      // opposite mistake. Anything further away is simply drawn twice, at the same
-      // height, because the distance lattice is absolute.
-      const ownerChunk = Math.floor(owner / CHUNK_LENGTH);
-      const thisChunk = Math.floor(sStart / CHUNK_LENGTH);
-      if (Math.abs(ownerChunk - thisChunk) > OWN_YIELD_CHUNKS) return true;
-      const ownerPoint = road.sampleAt(Math.min(Math.max(owner, 0), road.length));
-      const best = Math.hypot(cx - ownerPoint.x, cz - ownerPoint.z);
-      const own = Math.hypot(cx - rowCentre[0], cz - rowCentre[1]);
-      return own <= best + OWN_TOLERANCE;
-    };
     for (let si = 0; si < sCount - 1; si++) {
       const row0 = si * latCount;
       const row1 = row0 + latCount;
@@ -670,12 +588,6 @@ export class TerrainMeshProvider implements ChunkProvider {
       const tx = (lc1[0] + rc1[0] - lc0[0] - rc0[0]) * 0.5;
       const tz = (lc1[1] + rc1[1] - lc0[1] - rc0[1]) * 0.5;
       const centreLength = Math.hypot(tx, tz);
-      // The cell's own centreline reference: the midpoint of the two rows' road
-      // centres, i.e. the road point this cell was actually generated from.
-      const rowCentre: readonly [number, number] = [
-        (lc0[0] + rc0[0] + lc1[0] + rc1[0]) * 0.25,
-        (lc0[1] + rc0[1] + lc1[1] + rc1[1]) * 0.25,
-      ];
 
       const edgeValid = (li: number): boolean => {
         const a = xz(row0 + li);
@@ -693,7 +605,6 @@ export class TerrainMeshProvider implements ChunkProvider {
 
       for (let li = 0; li < latCount - 1; li++) {
         if (!isApron && !(edgeValid(li) && edgeValid(li + 1))) continue;
-        if (!isApron && !ownsCell(row0, row1, li, rowCentre)) continue;
         validCells[si * (latCount - 1) + li] = 1;
       }
     }
@@ -845,12 +756,10 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
-    // Upward normals keep direct sun uniform across the desert while preserving
-    // day/night and lamp lighting. Geometric slope normals were the remaining
-    // "shadow" patches after shadow-map reception was disabled.
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    // Real slope normals are necessary for broad dunes to retain their volume once
+    // their silhouette is below the horizon. The mesh does not cast or receive the
+    // sun shadow map, so these normals produce only honest directional lighting.
+    geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
     // The shadow-map frustum moves with the camera. Receiving it made its edge read
     // as kilometre-scale dark plates across otherwise sunlit sand, so terrain uses

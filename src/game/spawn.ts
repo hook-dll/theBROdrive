@@ -47,6 +47,10 @@ export function spawnCarState(
     headlightMode: 'off',
     taillightsOn: false,
     reverseLightsOn: false,
+    // Straight out of the showroom: the dev spawn is the one car in the world with
+    // no history behind it.
+    dirt: 0,
+    scratches: 0,
     // A complete model has no parts to age; fuel is its only fillable resource,
     // so a spawn leaves the showroom with a full tank — and full of both the
     // fluids it needs, because this is a dev tool and a dry one would just be a

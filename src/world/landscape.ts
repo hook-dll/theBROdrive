@@ -32,12 +32,11 @@ import { hashUnit3 } from '../core/rng';
  * along the road's own tangent, and the open desert is this field plus bounded dune
  * relief.
  *
- * The bands are spread over two decades of wavelength. The 36 km band carries most
- * of the altitude and almost none of the slope, which is what buys back the long
- * sustained pulls the random walk used to give: 70 m of climb spread over kilometres
- * reads as a landform, not as a wall. The 420 m band carries little altitude and most
- * of the slope, which is what a driver actually feels — the crest count and the brow
- * height come from there.
+ * The bands are spread over two decades of wavelength. The 45 km band carries most
+ * of the altitude and almost none of the slope, which gives the road long cinematic
+ * climbs and descents. The 2.5 km band supplies the sustained grade a driver feels;
+ * the 420 m band still supplies crests and brows without turning the route into an
+ * obstacle course.
  */
 
 /**
@@ -116,14 +115,14 @@ interface Band {
 }
 
 const BANDS: readonly Band[] = [
-  /** Continental: the altitude of the region. Almost all height, almost no slope. */
-  { amplitude: 72, wavelength: 36_000, hilliness: false, home: false },
-  /** Regional: basins and divides, a quarter-hour of driving across. */
-  { amplitude: 36, wavelength: 9000, hilliness: false, home: false },
-  /** Hills: the climb that lasts a minute and needs a gear. */
-  { amplitude: 24, wavelength: 1800, hilliness: true, home: true },
-  /** Rolls: the crest-and-dip rhythm under the bonnet, a crest every ~200 m. */
-  { amplitude: 10.5, wavelength: 420, hilliness: false, home: true },
+  /** Continental: broad altitude changes, almost no slope. */
+  { amplitude: 110, wavelength: 45_000, hilliness: false, home: false },
+  /** Regional: basins and divides, several minutes of driving across. */
+  { amplitude: 55, wavelength: 10_000, hilliness: false, home: false },
+  /** Hills: a climb or descent that lasts long enough to choose a gear. */
+  { amplitude: 42, wavelength: 2500, hilliness: true, home: true },
+  /** Rolls: the crest-and-dip rhythm under the bonnet. */
+  { amplitude: 12, wavelength: 420, hilliness: false, home: true },
 ];
 
 /** How far you drive before flat country becomes hill country, metres. */

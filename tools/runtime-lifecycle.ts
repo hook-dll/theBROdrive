@@ -71,6 +71,8 @@ function carState(): CarState {
     gizmos: {},
     stickers: [],
     fuelLitres: 40,
+    dirt: 0,
+    scratches: 0,
     coolantLitres: 10,
     oilLitres: 10,
     storage: [],

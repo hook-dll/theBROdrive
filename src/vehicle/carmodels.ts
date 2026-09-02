@@ -41,123 +41,191 @@ const SOVIET = '/models/soviet';
 
 /* ---- suspension presets ----
  *
- * Rates are per kilogram of chassis mass (see Vehicle), so the same numbers suit a
- * kart and a firetruck. `restLength` is a geometric offset, not a ride-height knob:
- * Vehicle derives the mount from the body box and the static sag (see the ride
- * height rule there), so changing a rate changes how the car MOVES, not how high it
- * stands.
+ * Written in the four numbers a chassis engineer actually uses — ride frequency,
+ * damping ratio, bump travel and ride height — because the numbers Rapier wants are
+ * derivable from those and the reverse is not. `Vehicle.rebuild` does that
+ * conversion (see `wheelSpringRate` below); nothing in this file is a raw rate any
+ * more.
  *
- * The load-bearing relationship is TRAVEL vs SAG, and getting it wrong is what put
- * wheels through the road. Rapier clamps the spring to `rest ± maxTravel`; once a
- * bump needs more compression than that, the wheel is *drawn* at the clamp while
- * the ground is higher up, and the tyre visibly sinks into the road. Static sag is
- * `g / (4 * stiffness)`, so the spring must have several times that in reserve:
+ * ---- the algebra that was wrong, and what it cost ----
  *
- *   stiffness 15 -> sag 164 mm; with only 200 mm of travel that left 36 mm of
- *                   reserve and sank on any dip or weight transfer.
- *   stiffness 17 -> sag 144 mm against 300 mm: 156 mm of reserve, a kerb strike's
- *                   worth, and it never bottoms in ordinary desert driving.
+ * Rapier's ray-cast spring force is `stiffness * compression * chassis_mass`, i.e.
+ * the rate is per kilogram of the WHOLE chassis. The body's heave mode therefore
+ * stands on all four of those springs at once:
  *
- * Droop (the same number, extending) only affects an airborne wheel hanging low,
- * which is what an airborne wheel should do — it was never the sinking.
+ *     K_total = 4 * k * m     omega = sqrt(K_total / m) = 2 * sqrt(k)
  *
- * ---- the era ----
+ * This file used to divide by 2*pi after taking `sqrt(k)` alone, missing the factor
+ * of two, and every comment in it was wrong by an octave: the "1.06 Hz" saloon was
+ * really 2.11 Hz, the "0.87 Hz" truck 1.74 Hz, the "1.33 Hz" fastback 2.66 Hz. The
+ * whole catalogue rode between a modern sports car and a racing car, and the same
+ * slip put damping at 0.45 and 0.63 of critical rather than the 0.23/0.31 the
+ * comments claimed — stiff AND over-damped, which is exactly the "too stiff for no
+ * reason" the ride reads as.
  *
- * These are 1960s-80s springs: SOFT, on dampers past their best. The rates came
- * down and the travel went UP to pay for the extra sag, per the rule above — a soft
- * spring that bottoms out is a hard spring at the worst possible moment.
+ * The critical-damping figure is `2 * sqrt(k * cornerShare)`, and `suspension-probe.ts`
+ * checks all of this against a bare Rapier controller so the octave cannot come back.
  *
- * ---- damping is not optional ----
+ * ---- what a period car actually is ----
  *
- * `compression` and `relaxation` are damping coefficients in 1/s, and Rapier scales
- * both by chassis mass exactly like the spring rate, so what matters is their size
- * against CRITICAL damping, which is `2 * sqrt(stiffness)`. That is the number to
- * think in, and ignoring it is how this file ended up with a pogo stick: 0.62 against
- * a critical 8.25 is SEVEN PERCENT damped, and a 0.7 Hz body mode at 7% rings for
- * three seconds. Measured on the bench, a 0.3 m drop took 3.0 s to stop moving, so
- * on dune terrain the car simply never stopped moving.
+ * A 1970s saloon runs 1.0-1.3 Hz at the front with the rear 10-20% higher (a rear
+ * that rings slightly faster than the front makes the two ends come back into phase
+ * as the car drives over a bump instead of pitching — the flat-ride rule, and the
+ * reason no real car is sprung evenly). Damping is 0.2-0.3 of critical in
+ * compression and 0.35-0.5 in rebound; a rebound-biased damper is what stops a soft
+ * spring throwing the body back up. An unladen leaf-sprung pickup is the odd one
+ * out: its rear springs are sized for a payload it is not carrying, so it hops.
  *
- * These are set as a fraction of critical instead: 0.35 in compression, 0.45 in
- * rebound (real dampers are rebound-biased, which is what stops a soft spring
- * throwing the body back up after a bump). Soft and floaty, still period — but it
- * settles, and the bench says a drop is over in well under a second.
+ * ---- travel, and why a soft spring needs it ----
+ *
+ * Static deflection follows from the frequency alone: `sag = g / omega^2`, which is
+ * 188 mm at 1.15 Hz and 73 mm at 1.85 Hz. Rapier clamps the spring at
+ * `rest +/- maxTravel` and a clamp is a rigid stop, so `Vehicle` sizes the travel as
+ * `sag + bumpTravel` and puts a progressive bump stop in front of the clamp; the
+ * numbers below are that bump travel, not the total.
+ *
+ * Droop is not a knob: a linear spring extends until it reaches free length, so the
+ * available droop is exactly the sag. That is real, and it is why a soft car lifts
+ * an inside wheel further.
  */
 
-const SUSP_CAR: SuspensionTuning = {
-  restLength: 0.3,
-  maxTravel: 0.3,
-  // 17 -> 20: sag falls from 144 mm to 123 mm against 300 mm of travel, so there is
-  // MORE reserve than before as well as less movement.
-  stiffness: 20,
-  // Critical damping at k=20 is 8.94; these are 0.35 and 0.45 of it, the same
-  // fractions as before the stiffening.
-  compression: 3.13,
-  relaxation: 4.02,
-  maxForce: 26000,
-};
+/** Body heave frequency (Hz) of a per-kilogram rate at a corner carrying `share`. */
+export function heaveFrequencyHz(stiffness: number, share: number): number {
+  return Math.sqrt(stiffness / share) / (2 * Math.PI);
+}
+
 /**
- * SOFT: what the Soviet saloons ride on. A 1960s-70s car that leans and takes a
- * set slowly — and that body roll IS the load transfer, which is what makes its
- * breakaway progressive instead of sudden. Softer still would just wash the front
- * end out; the roll is the point.
+ * The per-kilogram rate that puts a corner carrying `share` of the mass at `hz`.
+ * Inverse of `heaveFrequencyHz`; `share` is that wheel's fraction of the sprung
+ * weight, so a front-heavy car's front springs come out stiffer for the same
+ * frequency, which is what real spring rates do.
+ */
+export function wheelSpringRate(hz: number, share: number): number {
+  const omega = 2 * Math.PI * hz;
+  return omega * omega * share;
+}
+
+/** The per-kilogram damping coefficient for `ratio` of critical at that corner. */
+export function wheelDampingRate(hz: number, ratio: number, share: number): number {
+  return 2 * ratio * (2 * Math.PI * hz) * share;
+}
+
+/** Fraction of critical damping a per-kilogram coefficient represents. */
+export function suspensionDampingRatio(
+  stiffness: number,
+  damping: number,
+  share: number,
+): number {
+  return damping / (2 * Math.sqrt(stiffness * share));
+}
+
+/** Static spring compression (m) at a given ride frequency. Load cancels out. */
+export function staticSagM(hz: number): number {
+  const omega = 2 * Math.PI * hz;
+  return 9.81 / (omega * omega);
+}
+
+/**
+ * The everyday saloon: 1.15 Hz front, 1.32 Hz rear. Sag 188/143 mm, and a soft
+ * damper that lets the body take a set before it comes back.
+ */
+const SUSP_CAR: SuspensionTuning = {
+  frontHz: 1.15,
+  rearHz: 1.32,
+  compressionRatio: 0.26,
+  reboundRatio: 0.42,
+  bumpTravel: 0.09,
+  rideHeight: 0.16,
+};
+
+/**
+ * SOFT: what the Soviet saloons ride on. The softest car in the catalogue and the
+ * least damped, so it leans, wallows and takes its set slowly — and that motion IS
+ * the load transfer, which is what makes its breakaway progressive.
  *
- * Rates are per kg of chassis mass (see the block above). sag = 9.81 / (4 * 15)
- * = 164 mm against 340 mm of travel = 176 mm of reserve, a kerb strike's worth
- * that never bottoms in ordinary driving. Critical damping is 2 * sqrt(15) =
- * 7.75, so 2.5 compression is 0.32 of it and 3.25 relaxation is 0.42 —
- * rebound-biased, which is what stops a soft spring throwing the body back up.
+ * The softness is in the SPRINGS only. Ride height stays at the saloon figure: a
+ * Zhiguli sits at a normal car's clearance, and the extra sag a soft spring needs is
+ * paid for out of travel (see the travel note above), never out of stance.
  */
 const SUSP_SOFT: SuspensionTuning = {
-  restLength: 0.33,
-  maxTravel: 0.34,
-  // 15 was genuinely floaty: 164 mm of static sag, and a body that kept moving after
-  // the road had stopped. 18 brings sag to 136 mm against 340 mm of travel — still
-  // period-soft, still nothing like a modern car, but the wallow goes and weight
-  // transfer settles instead of drifting.
-  stiffness: 18,
-  // Critical damping at k=18 is 8.49; these are 0.32 and 0.42 of it, unchanged as
-  // FRACTIONS so the rebound bias that stops a soft spring throwing the body back up
-  // survives the stiffening.
-  compression: 2.72,
-  relaxation: 3.56,
-  maxForce: 25000,
+  frontHz: 1.02,
+  rearHz: 1.18,
+  compressionRatio: 0.22,
+  reboundRatio: 0.36,
+  bumpTravel: 0.1,
+  rideHeight: 0.155,
 };
 
-/** "Sport" in this era means a firm saloon, not a modern chassis. */
+/** "Sport" in this era means a firm saloon on stiffer dampers, not a modern chassis. */
 const SUSP_SPORT: SuspensionTuning = {
-  restLength: 0.28,
-  maxTravel: 0.26,
-  stiffness: 24,
-  // Critical damping at k=24 is 9.8.
-  compression: 3.6,
-  relaxation: 4.6,
-  maxForce: 30000,
+  frontHz: 1.38,
+  rearHz: 1.55,
+  compressionRatio: 0.3,
+  reboundRatio: 0.46,
+  bumpTravel: 0.08,
+  rideHeight: 0.13,
 };
 
 /**
- * The V8 fastback has enough launch torque to expose pitch oscillation that the
- * shared sport preset intentionally leaves in. A modest spring/damper increase
- * keeps its nose and tail from seesawing without turning it into a rigid track car;
- * the shorter rest length drops the visual and physical ride height by 3 cm.
+ * The V8 fastback: the firmest and lowest thing here, because its launch torque
+ * will seesaw anything softer. Still 1.5 Hz rather than a track car's 2.5.
  */
 const SUSP_FASTBACK: SuspensionTuning = {
-  restLength: 0.25,
-  maxTravel: 0.22,
-  stiffness: 28,
-  compression: 4.2,
-  relaxation: 5.8,
-  maxForce: 32000,
+  frontHz: 1.5,
+  rearHz: 1.68,
+  compressionRatio: 0.32,
+  reboundRatio: 0.48,
+  bumpTravel: 0.075,
+  rideHeight: 0.12,
 };
 
+/**
+ * Unladen leaf-sprung working vehicle. The rear is sprung for a payload that is not
+ * in the bed, so it rings at 1.85 Hz against the front's 1.3 and skips over sharp
+ * bumps — the empty-pickup hop, and the reason the tail steps out on a rough bend.
+ */
 const SUSP_TRUCK: SuspensionTuning = {
-  restLength: 0.38,
-  maxTravel: 0.36,
-  stiffness: 15,
-  // Critical damping at k=15 is 7.75.
-  compression: 2.7,
-  relaxation: 3.5,
-  maxForce: 42000,
+  frontHz: 1.3,
+  rearHz: 1.85,
+  compressionRatio: 0.24,
+  reboundRatio: 0.38,
+  bumpTravel: 0.11,
+  rideHeight: 0.22,
 };
+
+/* ---- weight distribution ----
+ *
+ * Where the mass sits along the wheelbase, as a fraction on the FRONT axle. It is
+ * not a tuning knob: for a front-engined car it follows from the layout, and it is
+ * the single most load-bearing number in the car's balance, because every axle load,
+ * spring rate, load-sensitivity reference and transfer calculation is measured
+ * against it. `Vehicle` turns it into the chassis' centre of mass and each wheel's
+ * static load using the model's own axle positions.
+ *
+ * The figures are period kerb measurements:
+ *
+ *   front-engine RWD saloon      52-55% front   (engine ahead of the axle, live
+ *                                                axle and tank behind)
+ *   transverse FWD hatchback     60-63% front   (engine, box and diff all on the
+ *                                                front axle; nothing over the rear)
+ *   part-time 4WD wagon/off-road 55-57% front   (a transfer case adds mass amidships)
+ *   working vehicle, empty bed   56-58% front   (the payload it is sprung for is
+ *                                                not in it — the empty-pickup case)
+ *
+ * Nothing here is rear-engined: the catalogue has no rear-engine layout, and if one
+ * arrives it needs its own entry rather than a guess from its drive bias.
+ */
+export function frontWeightFraction(model: {
+  readonly rearDriveBias: number;
+  readonly bodyClass: BodyClass;
+}): number {
+  if (model.bodyClass === 'truck' || model.bodyClass === 'bus') return 0.57;
+  // Drive bias is the layout: 0 is transverse front-drive, 1 is a front engine
+  // driving the back axle, and a half is four-wheel drive with the mass amidships.
+  if (model.rearDriveBias <= 0.01) return 0.62;
+  if (model.rearDriveBias >= 0.99) return 0.53;
+  return 0.56;
+}
 
 /**
  * A mount point for a gizmo, in model space (metres, origin on the ground between
@@ -208,6 +276,18 @@ export interface CarModelDef {
    * geometry. Several catalogue entries can then share one model file.
    */
   readonly textureFile?: string;
+  /**
+   * Imported paint representation. Quaternius uses named flat-colour meshes; Soviet
+   * bodies select a solid swatch from their shared 9x2 atlas.
+   */
+  readonly paintStyle?: 'quaternius-flat' | 'soviet-atlas';
+  /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
+  readonly paintUvCell?: readonly [number, number];
+  /**
+   * Visual-only body lift as a fraction of wheel radius. Suspension, collider,
+   * centre of mass and wheel mounts remain unchanged.
+   */
+  readonly visualRideLiftWheelFraction?: number;
   /**
    * Set when the model has no wheels of its own: the wheels come from `file` below
    * and are mounted at fractions of the measured body box (see
@@ -1087,9 +1167,9 @@ const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
  * standard path. FBXLoader reports them in centimetres, hence `scale: 0.01`.
  *
  * Colour is UV, not material: each body's UVs point into a region of the pack's
- * shared `albedo.png` palette, and the pack ships one FBX per colour. One colour per
- * model is vendored — a Volga is white because a Volga was white — and `textureFile`
- * hands the same 16 KB atlas to all fifteen.
+ * shared `albedo.png` palette. The atlas is not one paint picture: it is eighteen
+ * solid swatches carrying paint, glass, chrome, lamp and trim colours. The renderer
+ * replaces only each body's paint swatch, leaving every functional colour intact.
  *
  * Figures are the real cars': the Zhiguli line runs the 1.2 that already exists as a
  * part (`engine_lada_1200`, authored from the 2101), the 1.5-1.6 cars step up to the
@@ -1109,6 +1189,7 @@ interface SovietSpec {
   readonly rearDriveBias: number;
   readonly suspension?: SuspensionTuning;
   readonly storageCells?: number;
+  readonly visualRideLiftWheelFraction?: number;
 }
 
 /*
@@ -1135,6 +1216,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.52,
     rearDriveBias: 1,
     suspension: SUSP_SOFT,
+    visualRideLiftWheelFraction: 1 / 6,
   },
   {
     // GAZ-24 Volga: the same idea fifteen years later, 95 hp and slightly lighter.
@@ -1342,6 +1424,30 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   },
 ];
 
+/**
+ * Body-paint swatch used by each Soviet FBX. The shared atlas also carries glass,
+ * chrome, lamps, tyres and interior colours; replacing the whole texture would tint
+ * those parts too. Recolouring only this UV cell preserves the rest of the authored
+ * palette and the rally car's decals.
+ */
+const SOVIET_PAINT_CELLS: Readonly<Record<string, readonly [number, number]>> = {
+  'gz21.fbx': [8, 1],
+  'gz24.fbx': [1, 0],
+  'vz01.fbx': [0, 0],
+  'vz02.fbx': [7, 0],
+  'vz03.fbx': [0, 1],
+  'vz04.fbx': [8, 1],
+  'vz05.fbx': [1, 0],
+  'vz05r.fbx': [7, 0],
+  'vz06.fbx': [0, 0],
+  'vz07.fbx': [2, 0],
+  'vz08.fbx': [8, 1],
+  'vz09.fbx': [4, 0],
+  'vz099.fbx': [6, 0],
+  'vz21.fbx': [7, 0],
+  'vz31.fbx': [0, 0],
+};
+
 function sovietLights(file: string): VehicleLightsDef {
   const stem = file.slice(0, -4);
   const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
@@ -1386,6 +1492,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   detectWheels: true,
   bodyClass: 'car',
   storageCells: spec.storageCells,
+  visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -1486,6 +1593,7 @@ const ENTRIES: readonly Entry[] = [
     suspension: SUSP_TRUCK,
     steerLock: 0.56,
     rearDriveBias: 0.5,
+    visualRideLiftWheelFraction: 1 / 6,
   },
   {
     id: 'car_q_taxi',
@@ -1612,6 +1720,14 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   label: e.label,
   file: entryFile(e),
   textureFile: e.textureFile,
+  paintStyle:
+    e.dir === QUATERNIUS
+      ? 'quaternius-flat'
+      : e.dir === SOVIET
+        ? 'soviet-atlas'
+        : undefined,
+  paintUvCell: e.dir === SOVIET && e.glb ? SOVIET_PAINT_CELLS[e.glb] : undefined,
+  visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
   separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
   packNode: e.packNode,

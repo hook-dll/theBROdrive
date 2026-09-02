@@ -62,6 +62,8 @@ export interface InputFrame {
   zoomDelta: number;
   /** Toggle mouse steering: tap, consumed once by the settings owner. */
   toggleMouseSteer: boolean;
+  /** Cycles autopilot: sleeper -> frantic -> off; edge-triggered. */
+  toggleAutopilot: boolean;
   /**
    * Is the mouse currently steering the car? Not an intent — a report, so the HUD
    * can say so and the camera knows why its yaw stopped moving.
@@ -98,6 +100,7 @@ export function emptyInput(): InputFrame {
     moveZ: 0,
     jump: false,
     sprint: false,
+    toggleAutopilot: false,
     lookYaw: 0,
     lookPitch: 0,
     zoomDelta: 0,
@@ -139,6 +142,7 @@ export const BINDABLE_ACTIONS: readonly {
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },
   { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
+  { id: 'autopilot', label: 'Autopilot: sleeper / frantic / off', defaultKeys: ['KeyP'] },
   { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
   { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
   { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
@@ -509,6 +513,7 @@ export class InputReader {
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.toggleMouseSteer = this.anyPressed(this.keys.mouseSteer);
+    f.toggleAutopilot = this.anyPressed(this.keys.autopilot);
     f.recenterCamera =
       this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
     f.radioToggle = this.anyPressed(this.keys.radio);
