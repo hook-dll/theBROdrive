@@ -113,11 +113,16 @@ const ROLLING_RESISTANCE_DECEL = 0.2;
  * still on the ground.
  */
 const SUSPENSION = {
+  // 1.27 Hz on two wheels: `sqrt(stiffness / cornerShare) / 2pi` with each wheel
+  // carrying half the mass, which is where an empty box trailer sits.
   stiffness: 32,
-  // Critical damping at k=32 is 11.31; these are 0.35 and 0.45 of it, the same
-  // compression/rebound split the cars use.
-  compression: 3.96,
-  relaxation: 5.09,
+  // Critical damping is `2 * sqrt(stiffness * cornerShare)` = 8.0, NOT `2 * sqrt(k)`:
+  // the share of the mass on the corner belongs in it, and leaving it out is the same
+  // octave slip the car catalogue had (see carmodels.ts). These are 0.30 and 0.45 of
+  // critical — the car's compression/rebound split — where the old pair, believed to
+  // be 0.35/0.45, were really 0.50/0.64 and bounced the hitch over every ripple.
+  compression: 2.4,
+  relaxation: 3.6,
   restLength: 0.3,
   maxTravel: 0.3,
   maxForce: 26000,

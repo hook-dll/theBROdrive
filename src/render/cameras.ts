@@ -96,7 +96,6 @@ const BINOCULAR_FOV = BASE_FOV / 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
-const SHAKE_MAX = 0.018;
 /**
  * Interior g-force sway tuning. The eye stays inside the cabin, but the camera now
  * also inherits the chassis' physical pitch and roll. This bounded offset is the
@@ -174,7 +173,6 @@ export class CameraRig {
   private fov = BASE_FOV;
 
   private bobTime = 0;
-  private shakeTime = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
   private recentering = false;
   /** World-space heading captured when an external-camera re-centre begins. */
@@ -373,7 +371,6 @@ export class CameraRig {
     // Wobble phases. Bob only advances while moving, so it freezes at rest.
     const moveMag = Math.min(1, Math.hypot(input.moveX, input.moveZ));
     if (moveMag > 1e-3) this.bobTime += d;
-    this.shakeTime += d;
 
     // Zoom drives the orbit arm only (foot and interior have no arm).
     const driving: CameraMode = onFoot ? 'foot' : this._mode;
@@ -520,12 +517,15 @@ export class CameraRig {
     _vD.set(offsetX, 0, offsetZ).applyQuaternion(_qA);
     _vA.add(_vD);
 
-    // Speed-scaled shake from incommensurate sines: pseudo-random, never a throb.
-    const amp = SHAKE_MAX * clamp(target.speedKmh / FOV_FULL_SPEED, 0, 1);
-    const t = this.shakeTime;
-    _vA.x += (Math.sin(t * 23.1) + Math.sin(t * 41.7) * 0.7) * amp * 0.5;
-    _vA.y += (Math.sin(t * 17.3) + Math.cos(t * 31.9) * 0.7) * amp;
-    _vA.z += (Math.cos(t * 19.7) + Math.sin(t * 37.3) * 0.7) * amp * 0.5;
+    // NO SYNTHETIC SHAKE. There used to be a speed-scaled sum of sines here, standing
+    // in for a road the physics could not feel: the collider is flat between vertex
+    // rows and sealed surfaces carried no sub-collider texture at all, so a smooth
+    // stretch of asphalt transmitted a measured 0.000 g and the view had to be shaken
+    // by hand to look like motion. The tyres now carry the road themselves (see the
+    // tyre block in vehicle/vehicle.ts, and `RoadTexture` in core/surfaces.ts) and this
+    // camera is bolted to the chassis, so what the eye does at speed is what the body
+    // does. A sine on top of that is noise uncorrelated with the ground, and it masks
+    // the signal a driver reads the surface from.
 
     // View direction = car orientation applied to the local look vector.
     this.lookVector(_vC);

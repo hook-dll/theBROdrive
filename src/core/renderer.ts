@@ -35,6 +35,11 @@ export const CAMERA_NEAR = 0.08;
  */
 const ORBIT_MARGIN = 300;
 
+/** Far plane shared by the camera and the vista that closes its ground horizon. */
+export function farPlaneForViewDistance(metres: number): number {
+  return Math.max(CAMERA_FAR, metres + ORBIT_MARGIN);
+}
+
 /**
  * Ceiling on the far/near ratio. A perspective camera spends its depth
  * precision on a 1/z budget and the near plane fixes how much of that budget
@@ -84,38 +89,134 @@ const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
  */
 const MSAA_SAMPLES = 4;
 // ---------------------------------------------------------------------------
-// Heat haze: a two-pass post effect (see Renderer.render).
+// Heat haze: refraction through the hot layer over the sand, as a post pass.
+//
+// Shimmer is not a screen effect that happens near the horizon. It is what a sight
+// line does when it spends a long way inside air whose refractive index is being
+// stirred by convection, and everything below follows from that one sentence:
+//
+//   WHERE     the hot air is a shallow slab lying on the ground. For each pixel the
+//             shader intersects that slab with the pixel's own world-space view ray
+//             and takes the LENGTH of the ray inside it. A steep ray leaves the slab
+//             at once and gets nothing, which is why the sky is still. A ray that
+//             grazes runs for hundreds of metres, which is why the horizon boils. A
+//             ray pointed down at the verge hits the ground in ten metres and gets
+//             almost nothing, which is why the ground under your feet is calm.
+//
+//             Nothing about this is measured in screen rows, and that is the point:
+//             the old version decayed from a computed horizon ROW, so pitching the
+//             camera slid the whole band across the world and rolling it left the
+//             band stubbornly horizontal. A path length through a slab is a property
+//             of the ray, so it is automatically right at any attitude.
+//
+//   HOW MUCH  deflections accumulate along the path, so amplitude grows with it and
+//             saturates. In ANGLE, not in pixels: converted through the live field of
+//             view, so zooming in with the binoculars magnifies the boil exactly as
+//             it magnifies everything else. The old fixed pixel amplitude did not,
+//             and read as a distortion filter welded to the screen.
+//
+//   OF WHAT   a field of convection cells sampled on a sphere of fixed radius around
+//             the eye — the "constant range around the player". A DIRECTION, not a
+//             position: pan, and the pattern stays over the same part of the desert,
+//             because that is what looking at the same air twice means. Translation
+//             is deliberately absent. The coherent part of the perturbation is set by
+//             the far half of the ray, hundreds of metres out, which does not change
+//             when the car moves thirty metres; letting position in would smear the
+//             field past the eye at v/cellSize — tens of Hz at road speed, which is
+//             scintillation, not shimmer. All the motion comes from the field's own
+//             convection, which is where a real one's comes from too.
 // ---------------------------------------------------------------------------
 
 /**
- * Heat-haze warp amplitude in pixels at a 1080p buffer; the shader normalises by
- * the real buffer height so the displacement is resolution-independent.
+ * Scale height of the hot air over the sand, metres.
  *
- * Nine pixels keeps the distortion obvious without tearing silhouettes too far.
- * The field below is made of broad, irregular cells rather than waves, so that
- * travel breaks edges into chunks instead of bending the horizon like a lens.
+ * NOT a hard-edged slab, and the difference matters. A slab clipped at head height is
+ * geometrically exact over a flat plane and useless over this desert: the sight line to
+ * a dune four hundred metres away and fifteen metres tall leaves a two-metre slab in
+ * the first hundred, so the one thing in the frame that should boil hardest would get
+ * nothing at all. Measured on the real pass (tools/haze-probe.ts), a hard slab put
+ * every last milliradian inside one degree of the horizon and left a razor line.
+ *
+ * So the air thins with height instead of stopping, `exp(-y / H)`, and the shader
+ * integrates that along the ray in closed form. Eight metres is the height over which
+ * "close to hot ground" stops being true out here — a few metres of genuinely
+ * superheated air, plus the tens of metres of relief the ground itself has, which is
+ * what keeps a distant dune crest inside the hot air all the way to the eye.
  */
-const HAZE_AMPLITUDE_PX = 9;
-/** Slow upward drift; individual grain scales still move at different rates. */
-const HAZE_SPEED = 0.34;
-
+const HAZE_SCALE_HEIGHT_M = 8.0;
 /**
- * Screen-height decay above the horizon. A broad shoulder keeps coarse grains
- * visible against the skyline, where refraction has enough contrast to read.
+ * Path length inside the layer, metres, at which the shimmer is fully developed.
+ *
+ * Deflections along a stirred path add as a random walk, so the honest law is
+ * `sqrt(L)`. It is not used raw. A random walk of tiny deflections is also a random
+ * walk of tiny CELLS, and the fine structure a short path accumulates averages itself
+ * away before it is large enough on screen to be seen at all — sqrt puts a fifth of
+ * full shimmer on ground twenty metres away, which nobody sees in reality. The onset
+ * below is therefore shaped: nothing for the first tens of metres, building through
+ * the middle distance, saturated at the horizon.
  */
-const HAZE_SKY_FALLOFF = 0.095;
+const HAZE_REF_PATH_M = 350;
 /**
- * Ground distance, metres, at which the shimmer begins. The per-frame projection
- * in `groundCutUv` turns this into a screen-space band from the horizon down to
- * roughly forty metres from the eye: far enough to remain heat haze, but deep
- * enough that the large cells are not cropped to an invisible sliver.
+ * Peak angular displacement, milliradians, at full development.
+ *
+ * Real desert shimmer moves a distant silhouette by a few to a few tens of arc minutes.
+ * Nine milliradians is thirty, at the far end of plausible and roughly twice what a
+ * photograph of a hot afternoon would measure, and the exaggeration is deliberate: it
+ * is the ONLY exaggeration here. The distribution over the frame, the growth with path
+ * length, the angular (not pixel) scaling and the temporal character are all left as the
+ * physics has them, and those are what the eye reads as heat — the amplitude only
+ * decides whether it is noticed at all. Measured on the real pass
+ * (tools/haze-probe.ts) the field averages a third of this, so the horizon band moves
+ * by two or three pixels at 1080p and peaks near seven.
  */
-const HAZE_MIN_DISTANCE_M = 40;
+const HAZE_ANGLE_MRAD = 9.0;
 /**
- * Screen-height scale over which cells grow and drift faster below the horizon,
- * preventing the hot layer from moving as one rigid sheet.
+ * Upward bias, milliradians at full development: the inferior mirage.
+ *
+ * Hot air below cool bends a ray upward, so distant ground appears RAISED and
+ * vertically squeezed toward the horizon — the effect that puts false water on a road
+ * and eats the wheels of a distant truck. Because the bias follows the same path
+ * length as the shimmer, near ground lifts less than far ground and the difference is
+ * the compression. Small, because all of the drama is in the gradient.
  */
-const HAZE_CELL_DEPTH_SCALE = 0.16;
+const HAZE_LIFT_MRAD = 2.2;
+/**
+ * Radius of the sphere the convection field is sampled on, metres, and the cell sizes
+ * on it.
+ *
+ * The pair sets the ANGULAR size of a cell — `size / range` — and that is the only
+ * thing the screen sees: 1.1 m at 20 m is 3.2 degrees, 0.45 m is 1.3. Both are broad,
+ * soft blobs rather than texture, which is what refraction through metre-scale eddies
+ * looks like.
+ */
+const HAZE_SAMPLE_RANGE_M = 20;
+const HAZE_CELL_BROAD_M = 1.1;
+const HAZE_CELL_FINE_M = 0.45;
+/**
+ * How fast each scale of the field rises, m/s. Convective plumes over hot ground climb
+ * at around a metre a second, and small eddies live and die faster than large ones —
+ * so the fine scale is given the quicker drift. Against the cell sizes above that is
+ * roughly 1 Hz of slow boil with 4 Hz of flicker inside it, which is the rate a real
+ * one flickers at.
+ */
+const HAZE_RISE_BROAD_MPS = 1.1;
+const HAZE_RISE_FINE_MPS = 1.9;
+/** Vertical stretch of the cells: rising plumes are taller than they are wide. */
+const HAZE_PLUME_STRETCH = 1.7;
+/** Share of the displacement that is lateral. Stratified air bends light vertically. */
+const HAZE_LATERAL_SHARE = 0.34;
+/**
+ * Floor on the camera's height above the sand, metres.
+ *
+ * The camera can legitimately sit level with or below the ground it is looking across
+ * — on a crest, inside a scoop, or with a bonnet view on a rise — and a zero or
+ * negative height would put the eye outside the hot layer looking in, which switches
+ * the effect off exactly where the desert is at its most open. Half a metre keeps the
+ * eye inside the layer whatever the terrain does under it.
+ */
+const HAZE_MIN_EYE_ABOVE_M = 0.5;
+/** Eye height assumed before the loop has supplied a real one: a standing player. */
+const DEFAULT_EYE_HEIGHT_M = 1.6;
 
 // ---------------------------------------------------------------------------
 // Ink outlines: the second half of the drawn-landscape look, in the same pass.
@@ -128,9 +229,15 @@ const HAZE_CELL_DEPTH_SCALE = 0.16;
  */
 const INK_THRESHOLD = 0.14;
 
-/** Fullscreen triangle: three clip-space vertices, one corner padded to cover
- *  the whole frame. `uv` carries the screen UV (0 = bottom, 1 = top). */
-const HAZE_VERTEX = /* glsl */ `
+/**
+ * Fullscreen triangle: three clip-space vertices, one corner padded to cover the whole
+ * frame. `uv` carries the screen UV (0 = bottom, 1 = top).
+ *
+ * Exported with the fragment shader below so tools/haze-probe.ts can measure the REAL
+ * pass rather than a copy of it. A heat haze whose claims are all geometric is worth
+ * checking geometrically, and a re-typed shader would only ever verify itself.
+ */
+export const HAZE_VERTEX = /* glsl */ `
   varying vec2 vUv;
 
   void main() {
@@ -139,17 +246,22 @@ const HAZE_VERTEX = /* glsl */ `
   }
 `;
 
-const HAZE_FRAGMENT = /* glsl */ `
+/**
+ * A number GLSL will accept as a float. The haze constants above are the single
+ * source of truth for both the shader and the CPU side, so they are compiled in
+ * rather than duplicated as literals or paid for as uniforms that never change.
+ */
+function glslFloat(value: number): string {
+  return Number.isInteger(value) ? `${value}.0` : String(value);
+}
+
+export const HAZE_FRAGMENT = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform vec2 uResolution;
   uniform float uTime;
   uniform float uStrength;
-  uniform float uAmplitude;
+  uniform float uEyeAbove;
   uniform float uHorizon;
-  uniform float uSkyFalloff;
-  uniform float uGroundCut;
-  uniform float uCellDepth;
-  uniform vec3 uHazeWorldPosition;
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
   uniform float uInkStrength;
@@ -158,54 +270,23 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uViewTintStrength;
   uniform float uBinoculars;
 
+  const float SCALE_HEIGHT_M = ${glslFloat(HAZE_SCALE_HEIGHT_M)};
+  const float REF_PATH_M = ${glslFloat(HAZE_REF_PATH_M)};
+  const float ANGLE_RAD = ${glslFloat(HAZE_ANGLE_MRAD / 1000)};
+  const float LIFT_RAD = ${glslFloat(HAZE_LIFT_MRAD / 1000)};
+  const float SAMPLE_RANGE_M = ${glslFloat(HAZE_SAMPLE_RANGE_M)};
+  const float CELL_BROAD = ${glslFloat(HAZE_CELL_BROAD_M)};
+  const float CELL_FINE = ${glslFloat(HAZE_CELL_FINE_M)};
+  const float RISE_BROAD = ${glslFloat(HAZE_RISE_BROAD_MPS)};
+  const float RISE_FINE = ${glslFloat(HAZE_RISE_FINE_MPS)};
+  const float PLUME_STRETCH = ${glslFloat(HAZE_PLUME_STRETCH)};
+  const float LATERAL_SHARE = ${glslFloat(HAZE_LATERAL_SHARE)};
+
   varying vec2 vUv;
 
   /**
-   * Weight of the hot-air layer at a screen row.
-   *
-   * ABOVE the horizon a sight-line climbs out of the shallow hot layer almost at
-   * once, so the sky is nearly still: a fast exponential decay.
-   *
-   * BELOW the horizon the screen row is a ground DISTANCE, and that is what this now
-   * keys on. uGroundCut is the row at which the ground is HAZE_MIN_DISTANCE_M away,
-   * computed per frame from the camera's height and field of view, so everything
-   * nearer than that fades to nothing. The previous version decayed over a fixed
-   * fraction of the frame instead, which reached down onto ground a few metres away
-   * and boiled the verge and the bonnet along with the horizon.
+   * World-space direction the pixel is looking along.
    */
-  float hotLayer(float y) {
-    float d = y - uHorizon;
-    if (d > 0.0) return exp(-d / uSkyFalloff);
-    return 1.0 - smoothstep(uGroundCut * 0.25, uGroundCut, -d);
-  }
-
-  /**
-   * Large, irregular refraction grains sampled in WORLD space. Reconstructing the
-   * view ray and sampling a fixed volume ahead of the eye makes the field stay in
-   * the desert while camera translation, yaw, pitch and roll move through it.
-   */
-  float cellHash(vec2 p) {
-    vec3 q = fract(vec3(p.xyx) * 0.1031);
-    q += dot(q, q.yzx + 33.33);
-    return fract((q.x + q.y) * q.z);
-  }
-
-  float coarseNoise(vec2 p) {
-    vec2 cell = floor(p);
-    vec2 f = fract(p);
-    // Hold most of each cell nearly flat, then turn quickly at the boundary.
-    vec2 blend = smoothstep(vec2(0.30), vec2(0.70), f);
-    float a = cellHash(cell);
-    float b = cellHash(cell + vec2(1.0, 0.0));
-    float c = cellHash(cell + vec2(0.0, 1.0));
-    float d = cellHash(cell + vec2(1.0, 1.0));
-    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
-  }
-
-  float coarseGrain(float noiseValue) {
-    return smoothstep(0.22, 0.78, noiseValue) * 2.0 - 1.0;
-  }
-
   vec3 worldRay(vec2 uv) {
     vec2 ndc = uv * 2.0 - 1.0;
     float aspect = uResolution.x / uResolution.y;
@@ -217,38 +298,91 @@ const HAZE_FRAGMENT = /* glsl */ `
     return normalize(uCameraRotation * cameraRay);
   }
 
-  vec2 hazeWarp(vec2 uv, float t, float groundness) {
-    // A fixed world-space slice 150–180 m away. The oblique projection mixes X/Z
-    // into the horizontal grain axis while retaining world Y as vertical, so the
-    // cells remain upright and stationary when the camera turns or rolls.
-    float sampleDistance = mix(180.0, 70.0, groundness);
-    // Heat is a distant atmospheric volume, not paint on the ground under the eye.
-    // Keep only subtle translational parallax so walking/driving speed does not add
-    // a second, much faster animation on top of the convection already in the field.
-    vec3 slowAnchor = uHazeWorldPosition * 0.12;
-    vec3 worldSample = slowAnchor + worldRay(uv) * sampleDistance;
-    vec2 p = vec2(
-      worldSample.x * 0.8192 + worldSample.z * 0.5736,
-      worldSample.y + worldSample.x * 0.07 - worldSample.z * 0.10
-    );
+  /**
+   * Effective length of hot air on this ray, metres: the integral of the air's own
+   * density profile along it.
+   *
+   * The hot air thins as exp(-y / H) above the sand, with y measured from the ground
+   * under the eye, so what the ray accumulates is the integral of that from the eye to
+   * wherever the ray ends. Both cases close in one exponential:
+   *
+   *   climbing   the ray never lands, and the tail integrates to  (H / dy)·e^(-y0/H)
+   *   descending it lands at y = 0, and the run integrates to  (H / |dy|)·(1 - e^(-y0/H))
+   *
+   * Level rays diverge, which is correct — they graze the hot air forever — so the
+   * result is clamped at REF_PATH_M, the distance past which the fog has taken the
+   * scene anyway.
+   *
+   * The near-zero guard on dy is not cosmetic: the level ray divides by it, and its
+   * path is the one that matters most.
+   */
+  float layerPath(vec3 dir) {
+    float dy = abs(dir.y) < 1e-4 ? (dir.y >= 0.0 ? 1e-4 : -1e-4) : dir.y;
+    float atEye = exp(-uEyeAbove / SCALE_HEIGHT_M);
+    float span = SCALE_HEIGHT_M / abs(dy);
+    float integral = dy > 0.0 ? span * atEye : span * (1.0 - atEye);
+    return clamp(integral, 0.0, REF_PATH_M);
+  }
 
-    // Physical cells of roughly 24, 13.5 and 7.2 metres resolve to the authored
-    // coarse screen sizes at the sample distance. Different world-space drift
-    // rates make the combined field continuously change shape rather than scroll
-    // one immutable texture past the eye.
-    float broad = coarseGrain(coarseNoise(
-      (p + vec2(t * 0.8, -t * 6.0)) / 24.0
-    ));
-    float medium = coarseGrain(coarseNoise(
-      (p + vec2(-t * 1.3, -t * 7.5)) / 13.5
-    ));
-    float detail = coarseGrain(coarseNoise(
-      (p + vec2(t * 2.1, -t * 9.0)) / 7.2
-    ));
+  /** Hash of an integer lattice point to [0, 1). */
+  float cellHash(vec3 p) {
+    vec3 q = fract(p * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.x + q.y + q.z) * q.z);
+  }
 
-    float x = broad * 0.42 - medium * 0.38 + detail * 0.20;
-    float y = broad * 0.60 + medium * 0.29 + detail * 0.11;
-    return vec2(x, y);
+  /**
+   * Smooth 3D value noise, in [-1, 1].
+   *
+   * THREE dimensions, where the previous version projected the sphere of view
+   * directions onto a plane and sampled 2D. That projection folds: two directions on
+   * opposite sides of the sky map to the same place, so panning far enough replayed
+   * the same cells mirrored. A field on a sphere has to be sampled in the space the
+   * sphere lives in.
+   */
+  float cellNoise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = p - i;
+    vec3 w = f * f * (3.0 - 2.0 * f);
+    float c000 = cellHash(i);
+    float c100 = cellHash(i + vec3(1.0, 0.0, 0.0));
+    float c010 = cellHash(i + vec3(0.0, 1.0, 0.0));
+    float c110 = cellHash(i + vec3(1.0, 1.0, 0.0));
+    float c001 = cellHash(i + vec3(0.0, 0.0, 1.0));
+    float c101 = cellHash(i + vec3(1.0, 0.0, 1.0));
+    float c011 = cellHash(i + vec3(0.0, 1.0, 1.0));
+    float c111 = cellHash(i + vec3(1.0, 1.0, 1.0));
+    float x00 = mix(c000, c100, w.x);
+    float x10 = mix(c010, c110, w.x);
+    float x01 = mix(c001, c101, w.x);
+    float x11 = mix(c011, c111, w.x);
+    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z) * 2.0 - 1.0;
+  }
+
+  /**
+   * The convection field, sampled on a sphere of fixed radius around the eye and
+   * animated by its own rise. Returns a displacement direction in (lateral, vertical),
+   * each roughly in [-1, 1].
+   *
+   * Cells are stretched vertically because a plume is: PLUME_STRETCH divides the
+   * vertical coordinate, so a cell reaches further up than across. The two scales
+   * climb at different speeds, so the sum keeps changing shape instead of scrolling a
+   * fixed pattern upward.
+   *
+   * The lateral channel reads the same field a long way off along x, which is cheaper
+   * than a second field and decorrelated at these cell sizes.
+   */
+  vec2 hazeWarp(vec3 dir) {
+    vec3 p = dir * SAMPLE_RANGE_M;
+    vec3 broadP = vec3(p.x, p.y / PLUME_STRETCH - uTime * RISE_BROAD, p.z) / CELL_BROAD;
+    vec3 fineP = vec3(p.x, p.y / PLUME_STRETCH - uTime * RISE_FINE, p.z) / CELL_FINE;
+    float broad = cellNoise(broadP);
+    float fine = cellNoise(fineP);
+    float vertical = broad * 0.72 + fine * 0.28;
+    float lateral =
+      cellNoise(broadP + vec3(37.2, 0.0, 11.7)) * 0.72 +
+      cellNoise(fineP + vec3(19.4, 0.0, 53.1)) * 0.28;
+    return vec2(lateral, vertical);
   }
 
   /**
@@ -286,26 +420,37 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    // The warp is skipped outright when shimmer is off. This is a uniform branch,
-    // so every fragment takes the same side and the procedural grains are not
-    // evaluated on the cheapest graphics tier.
+    // The warp is skipped outright when shimmer is off. This is a uniform branch, so
+    // every fragment takes the same side and the field is not evaluated at all on the
+    // cheapest graphics tier or at night.
     vec2 uv = vUv;
     float shimmerWeight = 0.0;
     float shimmerGrain = 0.0;
     if (uStrength > 0.0) {
-      float groundness = clamp((uHorizon - vUv.y) / uCellDepth, 0.0, 1.0);
-      vec2 warp = hazeWarp(vUv, uTime * mix(1.0, 1.3, groundness), groundness);
-      // Rising air bends vertically most, but enough lateral displacement remains
-      // to break long silhouettes into distinct coarse refraction cells.
-      warp.x *= 0.45;
-      shimmerWeight = uStrength * hotLayer(vUv.y);
+      vec3 dir = worldRay(vUv);
+      // Everything the pixel gets follows from how far its ray runs through hot air.
+      float path = layerPath(dir) / REF_PATH_M;
+      // Shaped onset rather than the raw random walk: see HAZE_REF_PATH_M.
+      shimmerWeight = uStrength * path * path * (3.0 - 2.0 * path);
+      vec2 warp = hazeWarp(dir);
       shimmerGrain = warp.y;
-      vec2 offset = warp * shimmerWeight * (uAmplitude / uResolution.y);
+
+      // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
+      // the frame height, and the same over the width with the aspect divided out —
+      // which is what makes the boil magnify correctly under the binoculars instead of
+      // staying a fixed number of pixels wide.
+      float aspect = uResolution.x / uResolution.y;
+      float perRadian = 0.5 / uTanHalfFov;
+      float vertical = warp.y * ANGLE_RAD - LIFT_RAD;
+      vec2 offset = vec2(
+        (warp.x * LATERAL_SHARE * ANGLE_RAD * perRadian) / aspect,
+        vertical * perRadian
+      ) * shimmerWeight;
       uv = clamp(vUv + offset, 0.0, 1.0);
     }
     vec4 color = texture2D(tDiffuse, uv);
-    // A faint density change keeps the large grains legible over flat sand or sky,
-    // where displacement alone has no nearby edge to reveal it.
+    // A faint density change keeps the cells legible over flat sand or open sky, where
+    // displacement alone has no nearby edge to reveal it.
     color.rgb *= 1.0 + shimmerGrain * shimmerWeight * 0.04;
 
     // Ink is ground treatment. Rendering it only below the horizon leaves the sky
@@ -365,13 +510,11 @@ export class Renderer {
   private readonly _drawSize = new THREE.Vector2();
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
-  /** Absolute camera position keeps haze stable across floating-origin rebases. */
-  private readonly _hazeWorldPosition = new THREE.Vector3();
   /**
    * Camera height above the ground, metres, for the haze distance cut. Defaulted to a
    * standing eye so the very first frame is sensible before the loop has supplied one.
    */
-  private hazeEyeHeight = 1.6;
+  private hazeEyeHeight = DEFAULT_EYE_HEIGHT_M;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -468,12 +611,8 @@ export class Renderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uTime: { value: 0 },
         uStrength: { value: 0 },
-        uAmplitude: { value: HAZE_AMPLITUDE_PX },
+        uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uHorizon: { value: 0.5 },
-        uSkyFalloff: { value: HAZE_SKY_FALLOFF },
-        uGroundCut: { value: 0.02 },
-        uCellDepth: { value: HAZE_CELL_DEPTH_SCALE },
-        uHazeWorldPosition: { value: this._hazeWorldPosition },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(CAMERA_BASE_FOV) / 2) },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -556,9 +695,14 @@ export class Renderer {
     this.pollGpuQueries();
     const query = this.beginGpuTimerQuery();
     try {
-      this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
+      // Seconds. The field's drift rates are metres per second in its own sampled
+      // space, so time here has to be real time and nothing else.
+      this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
       this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
-      this.hazeMaterial.uniforms.uGroundCut.value = this.groundCutUv();
+      this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
+        HAZE_MIN_EYE_ABOVE_M,
+        this.hazeEyeHeight,
+      );
       this.camera.updateWorldMatrix(true, false);
       (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
         this.camera.matrixWorld,
@@ -588,7 +732,8 @@ export class Renderer {
   }
 
   /**
-   * Screen-space `uv.y` of the true horizon (0 = bottom of frame, 1 = top).
+   * Screen-space `uv.y` of the true horizon (0 = bottom of frame, 1 = top). Used by
+   * the INK pass only — the shimmer works in world rays and needs no such row.
    *
    * A horizontal sight-line lands at NDC y = -tan(pitch) / tan(fovY / 2): look up
    * and the horizon slides down the frame, look down and it climbs. Reading it off
@@ -606,39 +751,12 @@ export class Renderer {
   }
 
   /**
-   * Screen offset below the horizon, in UV, at which the ground is
-   * HAZE_MIN_DISTANCE_M away. Everything below that row is nearer than the onset and
-   * gets no shimmer.
-   *
-   * A ray depressed by `theta` from an eye `h` above the ground meets it at
-   * `D = h / tan(theta)`, so the onset angle is `atan(h / D)` and its screen offset is
-   * that angle's tangent measured against the half-field's. Linearising about the
-   * horizon like this is exact enough for a stylised effect and, unlike a depth
-   * texture, costs nothing and survives multisampling — which is the same reason the
-   * ink pass works off colour gradients (see `inkEdge`).
-   *
-   * The eye height is clamped to a floor because the camera can legitimately sit
-   * below the ground it is looking at, on a crest or inside a dip, and a zero or
-   * negative height would collapse the band to nothing and switch the effect off.
-   */
-  private groundCutUv(): number {
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
-    const h = Math.max(0.4, this.hazeEyeHeight);
-    return 0.5 * (h / HAZE_MIN_DISTANCE_M) / Math.tan(halfFov);
-  }
-
-  /**
    * How far the camera is above the ground it is looking across, metres. Supplied by
    * the composition root, which is the only thing that knows both the camera and the
-   * terrain; the renderer converts it into the distance cut above.
+   * terrain; the shader turns it into the ray's path through the hot layer.
    */
   setHazeEyeHeight(metres: number): void {
     this.hazeEyeHeight = metres;
-  }
-
-  /** Absolute eye position used by the world-anchored procedural heat field. */
-  setHazeWorldPosition(x: number, y: number, z: number): void {
-    this._hazeWorldPosition.set(x, y, z);
   }
 
   /**
@@ -804,7 +922,7 @@ export class Renderer {
    * the car up close — stays bounded; see MAX_DEPTH_RATIO.
    */
   setViewDistance(metres: number): void {
-    const far = Math.max(CAMERA_FAR, metres + ORBIT_MARGIN);
+    const far = farPlaneForViewDistance(metres);
     this.camera.far = far;
     this.camera.near = Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
     this.camera.updateProjectionMatrix();

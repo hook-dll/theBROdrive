@@ -41,149 +41,191 @@ const SOVIET = '/models/soviet';
 
 /* ---- suspension presets ----
  *
- * Rates are per kilogram of chassis mass (see Vehicle), so the same numbers suit a
- * kart and a firetruck. `restLength` is a geometric offset, not a ride-height knob:
- * Vehicle derives the mount from the body box and the static sag (see the ride
- * height rule there), so changing a rate changes how the car MOVES, not how high it
- * stands.
+ * Written in the four numbers a chassis engineer actually uses — ride frequency,
+ * damping ratio, bump travel and ride height — because the numbers Rapier wants are
+ * derivable from those and the reverse is not. `Vehicle.rebuild` does that
+ * conversion (see `wheelSpringRate` below); nothing in this file is a raw rate any
+ * more.
  *
- * The load-bearing relationship is TRAVEL vs SAG, and getting it wrong is what put
- * wheels through the road. Rapier clamps the spring to `rest ± maxTravel`; once a
- * bump needs more compression than that, the wheel is *drawn* at the clamp while
- * the ground is higher up, and the tyre visibly sinks into the road. Static sag is
- * `g / (4 * stiffness)`, so the spring must have several times that in reserve:
+ * ---- the algebra that was wrong, and what it cost ----
  *
- *   stiffness 15 -> sag 164 mm; with only 200 mm of travel that left 36 mm of
- *                   reserve and sank on any dip or weight transfer.
- *   stiffness 17 -> sag 144 mm against 300 mm: 156 mm of reserve, a kerb strike's
- *                   worth, and it never bottoms in ordinary desert driving.
+ * Rapier's ray-cast spring force is `stiffness * compression * chassis_mass`, i.e.
+ * the rate is per kilogram of the WHOLE chassis. The body's heave mode therefore
+ * stands on all four of those springs at once:
  *
- * Droop (the same number, extending) only affects an airborne wheel hanging low,
- * which is what an airborne wheel should do — it was never the sinking.
+ *     K_total = 4 * k * m     omega = sqrt(K_total / m) = 2 * sqrt(k)
  *
- * ---- the era ----
+ * This file used to divide by 2*pi after taking `sqrt(k)` alone, missing the factor
+ * of two, and every comment in it was wrong by an octave: the "1.06 Hz" saloon was
+ * really 2.11 Hz, the "0.87 Hz" truck 1.74 Hz, the "1.33 Hz" fastback 2.66 Hz. The
+ * whole catalogue rode between a modern sports car and a racing car, and the same
+ * slip put damping at 0.45 and 0.63 of critical rather than the 0.23/0.31 the
+ * comments claimed — stiff AND over-damped, which is exactly the "too stiff for no
+ * reason" the ride reads as.
  *
- * These are 1960s-80s springs: SOFT, on dampers past their best. The rates came
- * down and the travel went UP to pay for the extra sag, per the rule above — a soft
- * spring that bottoms out is a hard spring at the worst possible moment.
+ * The critical-damping figure is `2 * sqrt(k * cornerShare)`, and `suspension-probe.ts`
+ * checks all of this against a bare Rapier controller so the octave cannot come back.
  *
- * ---- damping is not optional ----
+ * ---- what a period car actually is ----
  *
- * `compression` and `relaxation` are damping coefficients in 1/s, and Rapier scales
- * both by chassis mass exactly like the spring rate, so what matters is their size
- * against CRITICAL damping, which is `2 * sqrt(stiffness)`. That is the number to
- * think in, and ignoring it is how this file ended up with a pogo stick: 0.62 against
- * a critical 8.25 is SEVEN PERCENT damped, and a 0.7 Hz body mode at 7% rings for
- * three seconds. Measured on the bench, a 0.3 m drop took 3.0 s to stop moving, so
- * on dune terrain the car simply never stopped moving.
+ * A 1970s saloon runs 1.0-1.3 Hz at the front with the rear 10-20% higher (a rear
+ * that rings slightly faster than the front makes the two ends come back into phase
+ * as the car drives over a bump instead of pitching — the flat-ride rule, and the
+ * reason no real car is sprung evenly). Damping is 0.2-0.3 of critical in
+ * compression and 0.35-0.5 in rebound; a rebound-biased damper is what stops a soft
+ * spring throwing the body back up. An unladen leaf-sprung pickup is the odd one
+ * out: its rear springs are sized for a payload it is not carrying, so it hops.
  *
- * These are set as a fraction of critical instead: 0.35 in compression, 0.45 in
- * rebound (real dampers are rebound-biased, which is what stops a soft spring
- * throwing the body back up after a bump). Soft and floaty, still period — but it
- * settles, and the bench says a drop is over in well under a second.
+ * ---- travel, and why a soft spring needs it ----
+ *
+ * Static deflection follows from the frequency alone: `sag = g / omega^2`, which is
+ * 188 mm at 1.15 Hz and 73 mm at 1.85 Hz. Rapier clamps the spring at
+ * `rest +/- maxTravel` and a clamp is a rigid stop, so `Vehicle` sizes the travel as
+ * `sag + bumpTravel` and puts a progressive bump stop in front of the clamp; the
+ * numbers below are that bump travel, not the total.
+ *
+ * Droop is not a knob: a linear spring extends until it reaches free length, so the
+ * available droop is exactly the sag. That is real, and it is why a soft car lifts
+ * an inside wheel further.
  */
 
-/*
- * ---- WHY THESE WENT UP, and the number that matters ----
- *
- * Rapier's rate is per kilogram, so the body's natural frequency is simply
- * `sqrt(stiffness) / 2pi` — no mass in it. At the old rates that was 0.71 Hz for the
- * base car and 0.67 Hz for the Soviet saloons. A 1970s saloon is 1.0-1.4 Hz; 0.7 Hz is
- * a 1960s American land yacht on its worst day, and it has a consequence nobody
- * intended: the road's own geometry stops reaching the driver.
- *
- * The collider carries bumps of 90-160 mm amplitude at 3.3 and 6.7 m wavelengths
- * (see world/roadsurface.ts). At 90 km/h a 3.3 m wave excites the body at 7.6 Hz. A
- * spring isolates everything above its own frequency by the square of the ratio, so at
- * 0.71 Hz the body sees about one percent of it: the car floats over a road that is
- * physically quite rough. Reported from play as imperfections being "almost completely
- * absorbed, even on passenger cars", and as sliding "as if on an air cushion".
- *
- * Raising the rates to period-correct frequencies (0.87-1.33 Hz) moves the isolation
- * corner up by a factor of two, which is a factor of four in transmitted amplitude,
- * and shortens static sag enough to reduce travel with it — a soft spring that
- * bottoms out is a hard spring at the worst possible moment, so the reserve is kept.
- *
- * Damping stays deliberately below critical: the body should take a set, then sway
- * once or twice over a disturbance instead of snapping back to level. Rebound remains
- * above compression, so a pothole does not turn into an endless pogo.
- */
+/** Body heave frequency (Hz) of a per-kilogram rate at a corner carrying `share`. */
+export function heaveFrequencyHz(stiffness: number, share: number): number {
+  return Math.sqrt(stiffness / share) / (2 * Math.PI);
+}
 
-const SUSP_CAR: SuspensionTuning = {
-  restLength: 0.3,
-  // Sag is 9.81/(4*44) = 56 mm, so 184 mm of reserve remains in 240 mm of travel —
-  // more than the 177 mm the old 300 mm / 123 mm sag pairing left.
-  maxTravel: 0.24,
-  /** 1.06 Hz. */
-  stiffness: 44,
-  // Critical damping at k=44 is 13.27; these are 0.23 and 0.31 of it.
-  compression: 3.0,
-  relaxation: 4.15,
-  maxForce: 26000,
-};
 /**
- * SOFT: what the Soviet saloons ride on. A 1960s-70s car that leans and takes a
- * set slowly — and that body roll IS the load transfer, which is what makes its
- * breakaway progressive instead of sudden.
+ * The per-kilogram rate that puts a corner carrying `share` of the mass at `hz`.
+ * Inverse of `heaveFrequencyHz`; `share` is that wheel's fraction of the sprung
+ * weight, so a front-heavy car's front springs come out stiffer for the same
+ * frequency, which is what real spring rates do.
+ */
+export function wheelSpringRate(hz: number, share: number): number {
+  const omega = 2 * Math.PI * hz;
+  return omega * omega * share;
+}
+
+/** The per-kilogram damping coefficient for `ratio` of critical at that corner. */
+export function wheelDampingRate(hz: number, ratio: number, share: number): number {
+  return 2 * ratio * (2 * Math.PI * hz) * share;
+}
+
+/** Fraction of critical damping a per-kilogram coefficient represents. */
+export function suspensionDampingRatio(
+  stiffness: number,
+  damping: number,
+  share: number,
+): number {
+  return damping / (2 * Math.sqrt(stiffness * share));
+}
+
+/** Static spring compression (m) at a given ride frequency. Load cancels out. */
+export function staticSagM(hz: number): number {
+  const omega = 2 * Math.PI * hz;
+  return 9.81 / (omega * omega);
+}
+
+/**
+ * The everyday saloon: 1.15 Hz front, 1.32 Hz rear. Sag 188/143 mm, and a soft
+ * damper that lets the body take a set before it comes back.
+ */
+const SUSP_CAR: SuspensionTuning = {
+  frontHz: 1.15,
+  rearHz: 1.32,
+  compressionRatio: 0.26,
+  reboundRatio: 0.42,
+  bumpTravel: 0.09,
+  rideHeight: 0.16,
+};
+
+/**
+ * SOFT: what the Soviet saloons ride on. The softest car in the catalogue and the
+ * least damped, so it leans, wallows and takes its set slowly — and that motion IS
+ * the load transfer, which is what makes its breakaway progressive.
  *
- * Still the softest thing in the catalogue after the truck, and still the one that
- * wallows; 0.94 Hz against a modern car's 1.5 leaves plenty of period character. Sag
- * 70 mm, reserve 190 mm.
+ * The softness is in the SPRINGS only. Ride height stays at the saloon figure: a
+ * Zhiguli sits at a normal car's clearance, and the extra sag a soft spring needs is
+ * paid for out of travel (see the travel note above), never out of stance.
  */
 const SUSP_SOFT: SuspensionTuning = {
-  restLength: 0.33,
-  maxTravel: 0.26,
-  /** 0.94 Hz. */
-  stiffness: 35,
-  // Critical damping at k=35 is 11.83; these are 0.21 and 0.30 of it — the least
-  // damped in the catalogue, which is the wallow these cars are supposed to have.
-  compression: 2.45,
-  relaxation: 3.5,
-  maxForce: 25000,
+  frontHz: 1.02,
+  rearHz: 1.18,
+  compressionRatio: 0.22,
+  reboundRatio: 0.36,
+  bumpTravel: 0.1,
+  rideHeight: 0.155,
 };
 
-/** "Sport" in this era means a firm saloon, not a modern chassis. */
+/** "Sport" in this era means a firm saloon on stiffer dampers, not a modern chassis. */
 const SUSP_SPORT: SuspensionTuning = {
-  restLength: 0.28,
-  maxTravel: 0.2,
-  /** 1.23 Hz. */
-  stiffness: 60,
-  // Critical damping at k=60 is 15.49; 0.25 and 0.34 of it — a firmer car is also a
-  // better damped one, but it should still settle with a little attitude motion.
-  compression: 3.8,
-  relaxation: 5.2,
-  maxForce: 30000,
+  frontHz: 1.38,
+  rearHz: 1.55,
+  compressionRatio: 0.3,
+  reboundRatio: 0.46,
+  bumpTravel: 0.08,
+  rideHeight: 0.13,
 };
 
 /**
- * The V8 fastback has enough launch torque to expose pitch oscillation that the
- * shared sport preset intentionally leaves in. A modest spring/damper increase
- * keeps its nose and tail from seesawing without turning it into a rigid track car;
- * the shorter rest length drops the visual and physical ride height by 3 cm.
+ * The V8 fastback: the firmest and lowest thing here, because its launch torque
+ * will seesaw anything softer. Still 1.5 Hz rather than a track car's 2.5.
  */
 const SUSP_FASTBACK: SuspensionTuning = {
-  restLength: 0.25,
-  maxTravel: 0.18,
-  /** 1.33 Hz, the firmest in the catalogue. */
-  stiffness: 70,
-  // Critical damping at k=70 is 16.73; 0.26 and 0.36 of it.
-  compression: 4.4,
-  relaxation: 6.0,
-  maxForce: 32000,
+  frontHz: 1.5,
+  rearHz: 1.68,
+  compressionRatio: 0.32,
+  reboundRatio: 0.48,
+  bumpTravel: 0.075,
+  rideHeight: 0.12,
 };
 
+/**
+ * Unladen leaf-sprung working vehicle. The rear is sprung for a payload that is not
+ * in the bed, so it rings at 1.85 Hz against the front's 1.3 and skips over sharp
+ * bumps — the empty-pickup hop, and the reason the tail steps out on a rough bend.
+ */
 const SUSP_TRUCK: SuspensionTuning = {
-  restLength: 0.38,
-  // Longest travel and lowest frequency, unladen: a leaf-sprung truck rides badly
-  // empty and settles when loaded, and this is the empty half of that.
-  maxTravel: 0.3,
-  /** 0.87 Hz. */
-  stiffness: 30,
-  // Critical damping at k=30 is 10.95; 0.20 and 0.29 of it — the worst dampers here.
-  compression: 2.2,
-  relaxation: 3.2,
-  maxForce: 42000,
+  frontHz: 1.3,
+  rearHz: 1.85,
+  compressionRatio: 0.24,
+  reboundRatio: 0.38,
+  bumpTravel: 0.11,
+  rideHeight: 0.22,
 };
+
+/* ---- weight distribution ----
+ *
+ * Where the mass sits along the wheelbase, as a fraction on the FRONT axle. It is
+ * not a tuning knob: for a front-engined car it follows from the layout, and it is
+ * the single most load-bearing number in the car's balance, because every axle load,
+ * spring rate, load-sensitivity reference and transfer calculation is measured
+ * against it. `Vehicle` turns it into the chassis' centre of mass and each wheel's
+ * static load using the model's own axle positions.
+ *
+ * The figures are period kerb measurements:
+ *
+ *   front-engine RWD saloon      52-55% front   (engine ahead of the axle, live
+ *                                                axle and tank behind)
+ *   transverse FWD hatchback     60-63% front   (engine, box and diff all on the
+ *                                                front axle; nothing over the rear)
+ *   part-time 4WD wagon/off-road 55-57% front   (a transfer case adds mass amidships)
+ *   working vehicle, empty bed   56-58% front   (the payload it is sprung for is
+ *                                                not in it — the empty-pickup case)
+ *
+ * Nothing here is rear-engined: the catalogue has no rear-engine layout, and if one
+ * arrives it needs its own entry rather than a guess from its drive bias.
+ */
+export function frontWeightFraction(model: {
+  readonly rearDriveBias: number;
+  readonly bodyClass: BodyClass;
+}): number {
+  if (model.bodyClass === 'truck' || model.bodyClass === 'bus') return 0.57;
+  // Drive bias is the layout: 0 is transverse front-drive, 1 is a front engine
+  // driving the back axle, and a half is four-wheel drive with the mass amidships.
+  if (model.rearDriveBias <= 0.01) return 0.62;
+  if (model.rearDriveBias >= 0.99) return 0.53;
+  return 0.56;
+}
 
 /**
  * A mount point for a gizmo, in model space (metres, origin on the ground between
