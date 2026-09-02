@@ -169,6 +169,22 @@ const BOOT_RANGE = 1.6;
  * horizontal cutoff without the old circular region's oversized vertical reach.
  */
 const BOOT_REVEAL_MARGIN = 0.15;
+/**
+ * How far the player may walk from an opened compartment before it closes itself, as
+ * a multiple of `BOOT_RANGE`.
+ *
+ * The grid used to be tied to the AIM: it was drawn only while the resolve landed on
+ * that compartment, so a step back or a glance sideways closed it and the next look
+ * needed another [F]. Loading a boot is exactly the task that wants to look away —
+ * at the ground, at the part you are about to carry over — so the grid now survives
+ * the aim entirely and answers to distance alone.
+ *
+ * Doubling the reach rather than picking a new number keeps ONE distance in the
+ * design: `BOOT_RANGE` is how close you must be to open a compartment, and this is
+ * how far you must walk for it to give up on you. Reaching in still needs the aim,
+ * so nothing about operating a cell has changed.
+ */
+const GRID_PERSIST_RANGE = BOOT_RANGE * 2;
 
 const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
   new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
@@ -300,7 +316,20 @@ export class Interaction {
   private prevMount = false;
   private prevDrop = false;
   private conditionEmitTimer = 0;
-  private openStorage: { owner: StorageOwnerKind; side: StorageSide; id: string } | null = null;
+  /**
+   * The opened compartment, if any, with the ABSOLUTE world position of its grid
+   * centre. Absolute because it outlives the aim: the origin can rebase between the
+   * tick that opened it and the tick that measures whether the player has walked
+   * away, and a relative position would silently move the compartment with it.
+   */
+  private openStorage: {
+    owner: StorageOwnerKind;
+    side: StorageSide;
+    id: string;
+    x: number;
+    y: number;
+    z: number;
+  } | null = null;
 
   /** The anchor id under the crosshair on the last resolve, for ghost previews. */
   public lastAnchorTarget: string | null = null;
@@ -309,6 +338,8 @@ export class Interaction {
   private readonly qScratch = new THREE.Quaternion();
   private readonly vScratch = new THREE.Vector3();
   private readonly trunkEye = new THREE.Vector3();
+  /** Chassis-local grid offset, rotated into world space; see `storageGridCentre`. */
+  private readonly gridScratch = new THREE.Vector3();
   private readonly trunkDirection = new THREE.Vector3();
   private readonly trunkPosition = new THREE.Vector3();
   private readonly trunkQuaternion = new THREE.Quaternion();
@@ -372,6 +403,9 @@ export class Interaction {
     this.continuous = null;
 
     if (this.world.state.player.drivingCarId) {
+      // Sitting down closes whatever was open: the grid belongs to a player standing
+      // at the car, and a driver cannot reach into it.
+      this.openStorage = null;
       // Successful exit is self-evident. Only a refused moving exit needs a prompt,
       // and it stays visible while F is held rather than flashing for one tick.
       let prompt: string | null = null;
@@ -381,7 +415,7 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
-    if (resolved.target.kind !== 'storage') this.openStorage = null;
+    this.holdOpenStorage(resolved, eyeX, eyeY, eyeZ);
     const prompt = this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
@@ -394,31 +428,107 @@ export class Interaction {
 
     // Resolved AFTER the actions above, so stowing or taking is reflected in the
     // same frame the player sees rather than one behind.
+    //
+    // Drawn from `openStorage`, NOT from the aim: the compartment the player opened
+    // stays on screen while they look elsewhere, and closes itself only when they
+    // walk out of `GRID_PERSIST_RANGE`. Only the highlighted cell still follows the
+    // crosshair, because only reaching in needs the aim.
     let boot: TrunkViewState | null = null;
-    if (resolved.target.kind === 'storage' && this.isStorageOpen(resolved.target)) {
-      const cells = this.storageCells(resolved.target);
+    const open = this.openStorage;
+    if (open) {
+      const cells = this.storageCells(open);
       if (cells) {
+        const aimed = resolved.target.kind === 'storage' && this.isStorageOpen(resolved.target)
+          ? resolved.target.cell
+          : null;
         boot = {
-          owner: resolved.target.owner,
-          side: resolved.target.side,
-          id: resolved.target.id,
+          owner: open.owner,
+          side: open.side,
+          id: open.id,
           cells,
-          selectedCell: resolved.target.cell,
+          selectedCell: aimed,
         };
       }
     }
     return { prompt, sound: this.sound, continuous: this.continuous, boot };
   }
 
-  private storageCells(target: Extract<Target, { kind: 'storage' }>): readonly (Item | null)[] | null {
+  private storageCells(
+    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+  ): readonly (Item | null)[] | null {
     if (target.owner === 'wreck') return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
     const car = this.world.state.cars[target.id];
     return target.side === 'bonnet' ? car?.bonnet ?? null : car?.storage ?? null;
   }
 
-  private isStorageOpen(target: Extract<Target, { kind: 'storage' }>): boolean {
+  private isStorageOpen(
+    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+  ): boolean {
     const open = this.openStorage;
     return open?.owner === target.owner && open.side === target.side && open.id === target.id;
+  }
+
+  /**
+   * ABSOLUTE world centre of a compartment's grid: the same chassis-local plane
+   * `pickStorage` intersects, so "how far am I from the grid" is measured against the
+   * thing the player is actually looking at rather than the car's centre.
+   */
+  private storageGridCentre(
+    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+    vehicle: Vehicle | null,
+    out: THREE.Vector3,
+  ): boolean {
+    let half: readonly [number, number, number];
+    if (target.owner === 'wreck') {
+      const wreck = this.wreckTrunks.get(target.id);
+      if (!wreck) return false;
+      half = wreck.halfExtents;
+      this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
+      out.set(wreck.x, wreck.y, wreck.z);
+    } else {
+      if (!vehicle) return false;
+      half = vehicle.modelMeasure.halfExtents;
+      vehicle.chassis.rotation(this.trunkQuaternion);
+      const t = vehicle.chassis.translation(this.tScratch);
+      out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
+    }
+    const depth = half[2] + TRUNK_GRID_DEPTH;
+    this.gridScratch
+      .set(0, storageGridCentreY(half[1]), target.side === 'bonnet' ? depth : -depth)
+      .applyQuaternion(this.trunkQuaternion);
+    out.add(this.gridScratch);
+    return true;
+  }
+
+  /**
+   * Holds an opened compartment open across a wandering aim, and closes it once the
+   * player has walked `GRID_PERSIST_RANGE` from it.
+   *
+   * The anchor is refreshed on every tick the aim is back on the compartment, so a car
+   * that rolls takes its grid with it; between those ticks the last known position is
+   * what the distance is measured against, which is also what makes this work while
+   * the compartment is behind the player and resolves to nothing at all.
+   */
+  private holdOpenStorage(resolved: Resolved, eyeX: number, eyeY: number, eyeZ: number): void {
+    const open = this.openStorage;
+    if (!open) return;
+    const target = resolved.target;
+    if (
+      target.kind === 'storage' &&
+      this.isStorageOpen(target) &&
+      this.storageGridCentre(target, resolved.vehicle, this.vScratch)
+    ) {
+      open.x = this.vScratch.x;
+      open.y = this.vScratch.y;
+      open.z = this.vScratch.z;
+      return;
+    }
+    const dx = eyeX + this.origin.x - open.x;
+    const dy = eyeY - open.y;
+    const dz = eyeZ + this.origin.z - open.z;
+    if (dx * dx + dy * dy + dz * dz > GRID_PERSIST_RANGE * GRID_PERSIST_RANGE) {
+      this.openStorage = null;
+    }
   }
 
   /**
@@ -1129,7 +1239,18 @@ export class Interaction {
     // The first press opens a compartment. Further presses operate its aimed cell.
     if (t.kind === 'storage') {
       if (!this.isStorageOpen(t)) {
-        this.openStorage = { owner: t.owner, side: t.side, id: t.id };
+        // Located from the same transform the target was resolved against, so this
+        // cannot fail in practice; refusing to open rather than guessing a position
+        // keeps the persistence rule measuring a real compartment.
+        if (!this.storageGridCentre(t, resolved.vehicle, this.vScratch)) return;
+        this.openStorage = {
+          owner: t.owner,
+          side: t.side,
+          id: t.id,
+          x: this.vScratch.x,
+          y: this.vScratch.y,
+          z: this.vScratch.z,
+        };
         this.sound = 'mount';
         return;
       }
