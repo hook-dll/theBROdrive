@@ -276,6 +276,8 @@ export class Trailer implements Rebasable {
   private readonly sprayStates: WheelSprayState[] = [];
   /** Reused contact-point receiver, so the spray refresh never allocates. */
   private readonly contactScratch = { x: 0, y: 0, z: 0 };
+  /** Reused ground-normal receiver for terrain-conforming tyre tracks. */
+  private readonly normalScratch = { x: 0, y: 1, z: 0 };
   /** Previous wheel rotation (rad), for differentiating into a spin rate. */
   private readonly prevWheelRotation: number[] = [];
   private readonly body: RAPIER.RigidBody;
@@ -386,6 +388,9 @@ export class Trailer implements Rebasable {
         absoluteContactZ: 0,
         forwardX: 0,
         forwardZ: 1,
+        normalX: 0,
+        normalY: 1,
+        normalZ: 0,
         inContact: false,
         surface: SurfaceType.Asphalt,
         slipRatio: 0,
@@ -736,6 +741,12 @@ export class Trailer implements Rebasable {
         s.contactZ = cp.z;
         s.absoluteContactX = cp.x + this.origin.x;
         s.absoluteContactZ = cp.z + this.origin.z;
+      }
+      const normal = this.controller.wheelContactNormal(i, this.normalScratch);
+      if (normal) {
+        s.normalX = normal.x;
+        s.normalY = normal.y;
+        s.normalZ = normal.z;
       }
       s.forwardX = fx;
       s.forwardZ = fz;

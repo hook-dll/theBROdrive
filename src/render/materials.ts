@@ -52,10 +52,9 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /**
  * Body paint adds mesh-local dent relief in the same single shader permutation.
- * Version v4 invalidates v3 programs, whose fragment body still drew chalk-like
- * scratch lines under the same custom cache key.
+ * Version v5 widens the dent field; cached v4 programs retain the old lobe scale.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v4';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v5';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -157,17 +156,17 @@ vec2 condRust( vec3 p ) {
  * DENT DEPTH FIELD, in mesh-local metres, shared by the paint hook and the normal
  * hook so a dent's shading and its dulled paint can never disagree.
  *
- * Seven cells per metre puts the value-noise lobes at roughly 14 cm — a bumper
- * crease, not hail. The position-only shear breaks the lattice without a second
- * sample. The damage argument moves the threshold rather than the amplitude, so light
- * damage is a few isolated lobes and full damage lets neighbours meet into crumpled
- * panels.
+ * Six cells per metre puts the value-noise lobes at roughly 17 cm — large enough
+ * to read across a door or bumper without turning into broad panel warping. The
+ * position-only shear breaks the lattice without a second sample. The damage argument
+ * moves the threshold rather than the amplitude, so light damage is a few isolated lobes
+ * and full damage lets neighbours meet into crumpled panels.
  *
  * Weighting: lower flanks and the extremities of the shell, because that is where a
  * car collects damage and because a dent blanket over a roof reads as a texture.
  */
 float condDent( vec3 localP, float damage ) {
-  vec3 p = localP * 7.0;
+  vec3 p = localP * 6.0;
   p += vec3( p.z * 0.31, p.x * 0.19, p.y * 0.11 );
   float lobes = condNoise( p + 19.0 );
   float core = smoothstep( 0.82 - 0.32 * damage, 0.94 - 0.31 * damage, lobes );
@@ -187,11 +186,11 @@ float condDent( vec3 localP, float damage ) {
  * shipped chase camera, where a fully damaged car read as undamaged. Three extra taps
  * in mesh space cost the same at every zoom.
  *
- * 12 mm over a 14 cm lobe is a 17% slope: a pressed panel catching the sun on one
- * side. Twice that started to read as a rippled surface rather than as damage.
+ * 14 mm over a 17 cm lobe preserves the existing 8% relief slope while making each
+ * impact read a little larger. Twice that slope looked rippled rather than dented.
  */
-#define COND_DENT_EPS 0.045
-#define COND_DENT_DEPTH 0.012
+#define COND_DENT_EPS 0.052
+#define COND_DENT_DEPTH 0.014
 
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `

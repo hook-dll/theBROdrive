@@ -39,6 +39,11 @@ export interface ComicOptions {
   readonly lightingStrength: number;
   /** Amount of warm shadow tint, 0..1. */
   readonly shadowWarmth: number;
+  /**
+   * Extra lee-face contrast for broad terrain whose physical Lambert gradient is too
+   * gentle to survive haze and tone mapping. Follows the live directional light.
+   */
+  readonly reliefShadeStrength: number;
   /** Vertical spacing of the strata contours, metres. */
   readonly contourSpacing: number;
   /** How dark a contour line is, 0..1. */
@@ -67,6 +72,7 @@ export const DEFAULT_COMIC: ComicOptions = {
   bands: 5,
   lightingStrength: 0.55,
   shadowWarmth: 1,
+  reliefShadeStrength: 0,
   contourSpacing: 7,
   contourStrength: 0.22,
   stippleStrength: 0.28,
@@ -75,7 +81,7 @@ export const DEFAULT_COMIC: ComicOptions = {
 };
 
 /** One program for every comic material, so they all share a compile. */
-const COMIC_PROGRAM_KEY = 'comic-ground-v2';
+const COMIC_PROGRAM_KEY = 'comic-ground-v4';
 const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v1';
 const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
 const DIRECT_CALL =
@@ -138,6 +144,7 @@ varying vec3 vComicNormal;
 uniform float uComicBands;
 uniform float uComicLightingStrength;
 uniform float uComicShadowWarmth;
+uniform float uReliefShadeStrength;
 uniform float uContourSpacing;
 uniform float uContourStrength;
 uniform float uStippleStrength;
@@ -165,6 +172,29 @@ float comicStipple( vec2 world, float footprint ) {
   return 1.0 - smoothstep( radius - edge, radius + edge, d );
 }
 `;
+
+/**
+ * Broad dune faces only lose a few percent of Lambert light, which disappears once
+ * hemisphere fill, haze and tone mapping are added. Re-ramp that real light loss before
+ * fog is applied: the dark side still follows the live Sun/Moon and flat ground remains
+ * untouched, but no terrain shadow map or extra texture is required.
+ */
+const RELIEF_SHADE_HOOK = /* glsl */ `
+#if ( NUM_DIR_LIGHTS > 0 )
+  if ( uReliefShadeStrength > 0.0 ) {
+    vec3 flatNormal = normalize( ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz );
+    vec3 keyDirection = directionalLights[ 0 ].direction;
+    float flatLight = max( dot( flatNormal, keyDirection ), 0.0 );
+    float faceLight = max( dot( normal, keyDirection ), 0.0 );
+    float lightLoss = max( flatLight - faceLight, 0.0 ) / max( flatLight, 0.2 );
+    float slope = 1.0 - abs( normalize( vComicNormal ).y );
+    // A rational shoulder preserves the gradient across a long face. The old 6% cutoff
+    // saturated almost every lee normal and turned a whole dune into one dark polygon.
+    float lee = ( lightLoss / ( lightLoss + 0.22 ) ) * smoothstep( 0.0002, 0.02, slope );
+    outgoingLight *= 1.0 - lee * uReliefShadeStrength;
+  }
+#endif
+#include <opaque_fragment>`;
 
 /**
  * Applied where the lit colour exists but tone mapping has not yet run, so the
@@ -236,6 +266,7 @@ function patch(
   shader.fragmentShader = patchGroundSpotNormal(
     shader.fragmentShader
       .replace('varying vec3 vViewPosition;', FRAGMENT_PARS)
+      .replace('#include <opaque_fragment>', RELIEF_SHADE_HOOK)
       .replace('#include <tonemapping_fragment>', FRAGMENT_HOOK),
   );
 }
@@ -253,6 +284,7 @@ export function applyComicShading(
     uComicBands: { value: o.bands },
     uComicLightingStrength: { value: o.lightingStrength },
     uComicShadowWarmth: { value: o.shadowWarmth },
+    uReliefShadeStrength: { value: o.reliefShadeStrength },
     uContourSpacing: { value: o.contourSpacing },
     uContourStrength: { value: o.contourStrength },
     uStippleStrength: { value: o.stippleStrength },
