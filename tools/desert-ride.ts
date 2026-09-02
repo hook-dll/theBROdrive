@@ -494,7 +494,7 @@ for (const lateral of ALONG_LATERALS) {
     `standstill escape over ${grades.length} (spot, heading) pairs inside ${ESCAPE_LATERAL} m, ` +
       `worst footprint grade ${(worstGrade * 100).toFixed(0)}%:`,
   );
-  for (const frictionSlip of [sand.frictionSlip, 1.15, 1.35, 1.55]) {
+  for (const frictionSlip of new Set([sand.frictionSlip, 1.15, 1.35, 1.55])) {
     const mu = frictionSlip * LONGITUDINAL_GRIP_FRACTION;
     const line: string[] = [];
     for (const rearDriven of [true, false]) {
