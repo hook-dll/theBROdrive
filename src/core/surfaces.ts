@@ -59,9 +59,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
     frictionSlip: 2.2,
-    sideFriction: 0.88,
+    sideFriction: 0.84,
     rollingResistance: 0.018,
-    roughness: 0.045,
+    roughness: 0.06,
     color: 0x5a5550,
     dust: 0.1,
     smoke: 0.85,
@@ -69,9 +69,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Gravel]: {
     label: 'gravel',
     frictionSlip: 1.35,
-    sideFriction: 0.55,
+    sideFriction: 0.5,
     rollingResistance: 0.035,
-    roughness: 0.07,
+    roughness: 0.09,
     color: 0x7a6c56,
     dust: 0.6,
     smoke: 0.15,

@@ -232,9 +232,9 @@ export class VistaMesh {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    // Distant dune and hill faces need real directional-light response; world-up
+    // normals reduced every landform to a flat silhouette once it left the near tiles.
+    geometry.computeVertexNormals();
 
     this.geometry?.dispose();
     this.geometry = geometry;

@@ -51,9 +51,9 @@ const GRAVITY = 9.81;
 //   LATERAL_GRIP_*          bias-ply tyres: low peak, and it falls away with speed
 //   ROLL_*, SUSP_* presets  soft springs, weak dampers, real body roll
 //
-// What is deliberately NOT modelled: brake fade, axle tramp, and bump-steer. They
-// belong to the era too, but each needs state the driver cannot see or predict,
-// and an unpredictable car is not the same thing as a demanding one.
+// What is deliberately NOT modelled: brake fade and axle tramp. Bump-steer is
+// modelled below as a load-sensitive steering disturbance, because uneven ground and
+// a worn front end are part of the requested driving feel.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -80,9 +80,9 @@ const GRAVITY = 9.81;
 /** Steering input shaping exponent: |s|^p with p>1 compresses small deflections. */
 const STEER_INPUT_EXPONENT = 1.35;
 /** Max rate of steering-angle change at parking speed (rad/s). */
-const STEER_RATE_PARK_RAD_S = 3.4;
+const STEER_RATE_PARK_RAD_S = 2.8;
 /** Max rate of steering-angle change at highway speed (rad/s). */
-const STEER_RATE_HIGHWAY_RAD_S = 0.95;
+const STEER_RATE_HIGHWAY_RAD_S = 0.68;
 /** Below this speed (km/h) the full steering lock is available. */
 const STEER_FULL_LOCK_KMH = 20;
 /** At this speed (km/h) steering reaches its reduced floor. */
@@ -93,7 +93,7 @@ const STEER_REDUCED_KMH = 100;
  * bad angle. At 0.42 the driver keeps the authority to provoke a slide, and the
  * slow rack below is what stops it being a twitch.
  */
-const STEER_HIGH_SPEED_FRACTION = 0.42;
+const STEER_HIGH_SPEED_FRACTION = 0.5;
 /**
  * Shape of the lock-vs-speed curve: fraction = 1 - (1-floor) * t^k with
  * t = (kmh - full)/(reduced - full). k < 1 front-loads the loss just above the
@@ -114,7 +114,7 @@ const STEER_RATE_CURVE = 1.6;
  *
  * 0.018 rad (1°) costs the first ~12% of stick travel at 80 km/h.
  */
-const STEER_PLAY_RAD = 0.018;
+const STEER_PLAY_RAD = 0.024;
 /**
  * Caster self-centring inside the play window, rad/s.
  *
@@ -132,7 +132,16 @@ const STEER_PLAY_RAD = 0.018;
  * `command - play` (slack taken up, the trailing edge of the window) and releasing
  * returns them to straight, while a reversal still has to cross the whole 2x play.
  */
-const STEER_CASTER_RETURN_RAD_S = 2.0;
+const STEER_CASTER_RETURN_RAD_S = 1.2;
+/**
+ * Uneven-load steering disturbance. A worn front end does not keep both tie rods
+ * perfectly aligned when one wheel climbs a bump. The effect is driven by the actual
+ * left/right suspension-load difference, amplified by rough surfaces, and filtered so
+ * one collider triangle cannot teleport the steering wheel.
+ */
+const BUMP_STEER_MAX_RAD = 0.022;
+const BUMP_STEER_TAU = 0.09;
+const BUMP_STEER_FULL_ROUGHNESS = 0.045;
 /**
  * Driveline slack and compliance, seconds. A leaf-sprung live axle on worn U-joints
  * does not deliver torque the instant the pedal moves: the slack takes up, the
@@ -225,7 +234,7 @@ const LATERAL_GRIP_FALLOFF_END_MPS = 40;
  * 0.18 keeps the character — a flat-out corner has meaningfully less grip than a
  * third-gear one — without paying for it in stiffness the car needs everywhere.
  */
-const LATERAL_GRIP_MAX_LOSS = 0.18;
+const LATERAL_GRIP_MAX_LOSS = 0.26;
 /**
  * Rear-axle lateral grip, as a fraction of the front's.
  *
@@ -354,7 +363,7 @@ const SLIP_ANGLE_REF_MPS = 2;
  * where the aerodynamic and yaw disturbances are largest, which is where the wag was
  * worst. 1.15 keeps the character and stops paying for it with stability.
  */
-const REAR_SPEED_LOSS_GAIN = 1.15;
+const REAR_SPEED_LOSS_GAIN = 1.2;
 /**
  * Peak lateral μ on dry asphalt, as a coefficient of the tyre's normal load.
  *
@@ -608,7 +617,7 @@ const LOCK_SLIP_RATIO = -0.5;
  * moment was averaged into the two steps either side of it. Reported from play as
  * uneven surfaces having stopped providing any thrill at speed.
  */
-const WHEEL_LOAD_TAU = 0.02;
+const WHEEL_LOAD_TAU = 0.025;
 /**
  * Slip ratio at which a tyre makes its peak longitudinal force.
  *
@@ -661,9 +670,9 @@ const TYRE_RELAXATION_LENGTH_M = 0.45;
  * an outer tyre carrying 1.6x its static load keeps 89% of its μ, so a hard corner
  * loses a few per cent of total grip and the loaded end gives up first.
  */
-const LOAD_SENSITIVITY = 0.18;
+const LOAD_SENSITIVITY = 0.24;
 /** Floor on the load-sensitivity factor, so an airborne-then-slammed wheel stays sane. */
-const LOAD_SENSITIVITY_MIN = 0.55;
+const LOAD_SENSITIVITY_MIN = 0.5;
 const LOAD_SENSITIVITY_MAX = 1.35;
 
 /**
@@ -852,45 +861,28 @@ const DESTROYED_ENGINE_SPEED_CAP_MPS = 20 / 3.6;
 /**
  * Fraction of the physical roll couple to restore.
  *
- * NOT 1. The ray-cast suspension has almost no roll stiffness of its own — its
- * springs push along vertical rays at the mounts, and it has no anti-roll bar to
- * model — so feeding in the whole moment simply tips the car over: measured at
- * gain 1, a 33 km/h turn rolled the body to 81 degrees and put it on its side.
- *
- * 0.62, not the old 0.34, because these are period springs now: at 0.34 the softened
- * suspension still only leant 4° at 0.73 g on the bench, which is a modern car's
- * body control on 1970s springs. 0.62 lands 3° for the low-slung sports car and up
- * to 6.6° for the tall van — the body visibly takes a set and the tall bodies lean
- * hardest, which is the right ordering. The bench confirms it never approaches
- * ROLL_LIMIT_DEG or lifts a wheel in a full-lock 60 km/h turn.
+ * The ray-cast suspension has almost no roll stiffness of its own, so this restores
+ * enough of the missing cornering moment for an old car to lean without making grip
+ * itself an instant rollover switch. The larger gain and wider fade limit let the
+ * chassis visibly take a set before the tyres or an obstacle decide whether it stays
+ * upright.
  */
-const ROLL_COUPLE_GAIN = 0.62;
+const ROLL_COUPLE_GAIN = 0.78;
 /**
- * Low-pass time constant for the lateral-acceleration estimate, seconds. The
- * estimate differences body-frame velocity, so a kerb strike or a one-frame solver
- * correction shows up as a huge spike; smoothing over ~60 ms keeps a real corner
- * intact and throws the spikes away.
+ * Low-pass time constant for the lateral-acceleration estimate, seconds. The shorter
+ * window lets a bump or quick steering correction move the body before the next bend.
  */
-const ROLL_ACCEL_TAU = 0.06;
+const ROLL_ACCEL_TAU = 0.045;
 /** Ceiling on the restored couple, in g of lateral acceleration. */
 const ROLL_ACCEL_MAX = 12;
+/** Lean angle, degrees, at which the couple has faded to nothing. */
+const ROLL_LIMIT_DEG = 17;
 /**
- * Lean angle, degrees, at which the couple has faded to nothing. Past this the car
- * is already leaning harder than any road car does, and continuing to push is how
- * a lean becomes a rollover.
+ * Roll-rate damping, as a fraction of roll inertia per second. This is intentionally
+ * below the previous road-car value: the worn damper should take a set, then sway once
+ * or twice over a disturbance instead of pinning the body flat.
  */
-const ROLL_LIMIT_DEG = 11;
-/**
- * Roll-rate damping, as a fraction of roll inertia per second. Stands in for the
- * dampers' contribution about the roll axis, which the ray-cast model does not
- * produce, and is what stops the restored couple ringing.
- *
- * 1.5 was too little once the springs were softened: the body kept rocking after the
- * corner was over, which reads as a car that cannot be placed rather than a car that
- * leans. 2.6 lets it take a set and hold it. The wallow that belongs to the era is
- * in the spring rates and the vertical damping, not in an undamped roll axis.
- */
-const ROLL_RATE_DAMPING = 2.6;
+const ROLL_RATE_DAMPING = 1.45;
 
 /**
  * Inertia gains over a uniform solid box.
@@ -979,6 +971,8 @@ function rotateVector(
 interface WheelVisual {
   index: number;
   isFront: boolean;
+  /** Sign of the wheel's chassis-local lateral position; left=-1, right=+1. */
+  sideSign: number;
   radius: number;
   mesh: THREE.Object3D;
   /** Reused per-frame buffer for wheelChassisConnectionPointCs. */
@@ -1379,7 +1373,8 @@ export class Vehicle implements Rebasable {
   // backlash in STEER_PLAY_RAD.
   private steerCommand = 0;
   private steerAngle = 0;
-  /** Driveline torque actually reaching the wheels, lagged by DRIVELINE_LAG_S. */
+  /** Load-sensitive front bump-steer disturbance, filtered in fixedUpdate. */
+  private bumpSteerAngle = 0;
   private appliedDriveTorqueNm = 0;
   /**
    * Parking hold is armed by the fixed update and applied after Rapier has stepped.
@@ -1786,7 +1781,7 @@ export class Vehicle implements Rebasable {
     this.reverseLightMounts = [];
     this.steerCommand = 0;
     this.steerAngle = 0;
-    this.appliedDriveTorqueNm = 0;
+    this.bumpSteerAngle = 0;
     this.frontWheelCount = 0;
     this.rearWheelCount = 0;
     this.frontDrivenCount = 0;
@@ -1871,6 +1866,7 @@ export class Vehicle implements Rebasable {
       this.wheels.push({
         index,
         isFront: wheel.isFront,
+        sideSign: Math.sign(wheel.pos[0]) || 1,
         radius: wheel.radius,
         mesh,
         scratchCp: { x: 0, y: 0, z: 0 },
@@ -2431,6 +2427,7 @@ export class Vehicle implements Rebasable {
     // right". Measured: without this negation, holding right rotated the car +1.74
     // rad (left) over two seconds.
     const speedKmh = Math.abs(fwd) * 3.6;
+    this.updateBumpSteer(dt, speedKmh);
     const steerT = clamp(
       (speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
       0,
@@ -2637,7 +2634,7 @@ export class Vehicle implements Rebasable {
       // chassis' +X yawed by this wheel's steering angle, so a steered front wheel is
       // measured in ITS plane, not the body's — which is the difference between
       // "the car is sideways" and "the tyre is slipping".
-      const steer = w.isFront ? this.steerAngle : 0;
+      const steer = this.wheelSteerAngle(w);
       rotateVector(
         this.wheelRightScratch,
         this.rotationScratch,
@@ -2735,7 +2732,7 @@ export class Vehicle implements Rebasable {
       w.groundSurface = surfaceType;
       w.grounded = ground !== null;
 
-      controller.setWheelSteering(w.index, w.isFront ? this.steerAngle : 0);
+      controller.setWheelSteering(w.index, this.wheelSteerAngle(w));
 
       if (ground) {
         contactCount++;
@@ -3585,6 +3582,52 @@ export class Vehicle implements Rebasable {
 
   private gizmoParts(): Record<string, PartInstance> {
     return this.car.gizmos ?? {};
+  }
+
+  /**
+   * Returns the steering angle a wheel actually presents to the road. Bump-steer is
+   * asymmetric by wheel side; the rack angle remains the driver's commanded state.
+   */
+  private wheelSteerAngle(w: WheelVisual): number {
+    return w.isFront ? this.steerAngle + w.sideSign * this.bumpSteerAngle : 0;
+  }
+
+  /**
+   * Lets the road talk through the worn front end. A load difference across the front
+   * axle means one wheel has climbed or dropped relative to the other. The disturbance
+   * is stronger on rough surfaces and at speed, where a small toe change becomes a
+   * visible lateral lurch. It is filtered in time, not replaced with random steering,
+   * so the same pothole produces the same correction and a smooth road stays calm.
+   */
+  private updateBumpSteer(dt: number, speedKmh: number): void {
+    let leftLoad = 0;
+    let rightLoad = 0;
+    let roughness = 0;
+    let roughWheels = 0;
+    for (const w of this.wheels) {
+      if (!w.isFront) continue;
+      if (w.sideSign < 0) leftLoad += w.loadN;
+      else rightLoad += w.loadN;
+      if (w.grounded) {
+        roughness += SURFACES[w.groundSurface].roughness;
+        roughWheels++;
+      }
+    }
+
+    let target = 0;
+    if (roughWheels > 0) {
+      const staticWheelLoadN = Math.max(1, (this.statsValue.mass * GRAVITY) / this.wheels.length);
+      const loadImbalance = clamp((rightLoad - leftLoad) / staticWheelLoadN, -1, 1);
+      const roughFactor = clamp(
+        roughness / roughWheels / BUMP_STEER_FULL_ROUGHNESS,
+        0.25,
+        1.4,
+      );
+      const speedFactor = clamp((speedKmh - 12) / 73, 0, 1);
+      target = loadImbalance * BUMP_STEER_MAX_RAD * roughFactor * speedFactor;
+    }
+    const blend = 1 - Math.exp(-dt / BUMP_STEER_TAU);
+    this.bumpSteerAngle += (target - this.bumpSteerAngle) * blend;
   }
 
   /**

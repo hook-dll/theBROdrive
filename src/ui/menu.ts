@@ -76,6 +76,7 @@ const ICONS: Record<string, readonly string[]> = {
   gfx1: ['M5 18v-3'],
   gfx2: ['M5 18v-3M12 18v-7'],
   gfx3: ['M5 18v-3M12 18v-7M19 18v-11'],
+  ink: ['M4 20l4-1L19 8l-3-3L5 16z', 'M14 7l3 3', 'M8 19l-3-3'],
   horizon1: ['M3 16h18'],
   horizon2: ['M3 16h18M6 12h12'],
   horizon3: ['M3 16h18M6 12h12M9 8h6'],
@@ -417,6 +418,7 @@ export class MainMenu {
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
         msaa: base.msaa,
+        inkStrength: base.inkStrength,
         mouseSteering: base.mouseSteering,
       };
       const apply = (): void => {
@@ -431,6 +433,7 @@ export class MainMenu {
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
           msaa: settings.msaa,
+          inkStrength: settings.inkStrength,
           mouseSteering: settings.mouseSteering,
         });
       };
@@ -958,6 +961,19 @@ export class MainMenu {
                 },
               },
             ]),
+            sliderField(
+              'Ink',
+              'ink',
+              'Amount of drawn outline in the landscape shader. Applies on resume.',
+              0,
+              1,
+              0.05,
+              () => settings.inkStrength,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.inkStrength = value;
+              },
+            ),
           );
         };
 

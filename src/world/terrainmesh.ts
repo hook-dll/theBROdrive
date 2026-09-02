@@ -845,12 +845,10 @@ export class TerrainMeshProvider implements ChunkProvider {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
-    // Upward normals keep direct sun uniform across the desert while preserving
-    // day/night and lamp lighting. Geometric slope normals were the remaining
-    // "shadow" patches after shadow-map reception was disabled.
-    const normals = new Float32Array(positions.length);
-    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    // Real slope normals are necessary for broad dunes to retain their volume once
+    // their silhouette is below the horizon. The mesh does not cast or receive the
+    // sun shadow map, so these normals produce only honest directional lighting.
+    geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
     // The shadow-map frustum moves with the camera. Receiving it made its edge read
     // as kilometre-scale dark plates across otherwise sunlit sand, so terrain uses
