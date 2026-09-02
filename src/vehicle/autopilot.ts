@@ -74,7 +74,24 @@ const TURN_COAST_MIN_SPEED_MPS = 5;
  * early — and slow enough that a replan cannot present the loop with a step.
  */
 const LINE_SHIFT_PER_METRE = 0.09;
-const OFFROAD_RECOVERY_EDGE = ROAD_HALF_WIDTH;
+/**
+ * VERGE the autopilot is allowed to put a wheel on, metres beyond the asphalt.
+ *
+ * The road lost its gravel shoulders when it was narrowed to its old side markings,
+ * and taking the shoulder out of these two numbers with it was a mistake: the graded
+ * desert immediately outside the asphalt is solid drivable ground, but the planner
+ * treated the paint as a wall. A rock of 1.5 m radius near the centreline then had no
+ * detour that fitted, so `mustStop` latched and the car sat in front of it — measured
+ * by tools/autopilot-bench.ts, which went from a 17 m/s cruise to 1.1 m/s, and seen
+ * in play as an autopilot that stopped dead on an empty road.
+ *
+ * 1.2 m is one wheel plus a little: enough to squeeze past a boulder, not enough to
+ * count as leaving the road, and the terrain there is flush with the asphalt edge
+ * (world/terrain.ts) so a pass costs nothing but grip.
+ */
+const PASSING_VERGE_M = 1.2;
+const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE_M;
+const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
 const OFFROAD_SPEED_MPS = 8;
 const OFFROAD_BRAKE_MAX = 0.35;
@@ -206,7 +223,7 @@ export class Autopilot {
       // A full sleeper margin before the compact clearance pushed centre-lane rocks
       // to the road edge even when a modest lane change was enough.
       const bodyClearance = hazard.radius + CAR_HALF_WIDTH_M;
-      const roadEdge = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M;
+      const roadEdge = PASSING_EDGE - CAR_HALF_WIDTH_M;
       let line: number | null = null;
       const clearanceLevels = [
         bodyClearance + Math.min(config.hazardMargin, AVOID_HYSTERESIS_M),
