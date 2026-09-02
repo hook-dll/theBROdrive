@@ -203,6 +203,35 @@ for (const s of [0, 500, 1500, 3000, 5000]) {
 }
 
 // ---------------------------------------------------------------------------
+// The opening kilometres, district by district
+//
+// The bug this section exists for: with the surface derived from decay thresholds,
+// the first change landed at 5.0 km — the exact metre the garage ramp starts lifting
+// decay — the second near 10, and the third not for another eighty kilometres. A
+// surface change on a round number reads as a scripted event, and a district that
+// outlives the player's patience reads as a bug. Every boundary here should be an
+// untidy number and every run should be 5-7 km.
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('first surface changes (10 m resolution)');
+{
+  let previous = roadConditionAt(0).surface;
+  let start = 0;
+  let shown = 0;
+  for (let s = 10; s < 200_000 && shown < 12; s += 10) {
+    const surf = roadConditionAt(s).surface;
+    if (surf === previous) continue;
+    console.log(
+      `  ${(start / 1000).toFixed(2).padStart(7)} - ${(s / 1000).toFixed(2).padStart(7)} km   ` +
+        `${SURFACES[previous].label.padEnd(16)} ${((s - start) / 1000).toFixed(2).padStart(5)} km long`,
+    );
+    previous = surf;
+    start = s;
+    shown++;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Pole era schedule
 // ---------------------------------------------------------------------------
 console.log('');

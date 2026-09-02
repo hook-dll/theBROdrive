@@ -92,51 +92,218 @@ const GARAGE_RAMP_M = 25_000;
 const GARAGE_FLAT_M = 5000;
 
 /**
- * Wavelength of the concrete-slab field, metres. ~8 km makes a slab read as a long
- * run of old motorway — a few kilometres each, a relief after gravel — rather than
- * a driveway patch.
+ * SURFACE DISTRICTS: which MATERIAL the lanes are made of, and the fix for a road
+ * that changed surface twice and then held one for a hundred kilometres.
+ *
+ * THE OLD MODEL WAS THRESHOLDS ON DECAY, and that is why it failed. Surface was
+ * `decay < 0.38 ? asphalt : decay < 0.64 ? cracked : gravel`, so the material was a
+ * SLICE of a field whose regional envelope moves over 300 km. Wherever the envelope
+ * sat far from a threshold, the ±0.28 patch noise could not reach one and the surface
+ * could not change: measured on the shipped road, gravel held for 170 km and asphalt
+ * for 110 km. The first two changes then landed almost on top of the garage ramp —
+ * decay is held flat to 5 km and rises after it, so the first crossing of 0.38
+ * happened just past 5.0 km, which reads as a scripted event at a round number.
+ *
+ * So material is no longer derived from decay at all. The road is cut into DISTRICTS
+ * of 5-7 km, each district draws its own material, and decay keeps the job it is good
+ * at: how broken that material is (cracks, patches, bumps, sand cover, paint).
+ *
+ * Boundaries are `k * NOMINAL + jitter(k)` with the jitter bounded below half the
+ * nominal, which buys two things: a district's length is `NOMINAL + jitter(k+1) -
+ * jitter(k)`, i.e. 5-7 km and never a round number, and any `s` lies in district
+ * `floor(s / NOMINAL)` plus or minus one, so the lookup is three hashes and no search.
+ *
+ * The DRAW is weighted by the region, so a maintained district is probably sealed and
+ * an abandoned one is probably gravel — the regional character survives — but no
+ * region can suppress turnover, because every district draws again from a deck that
+ * EXCLUDES its predecessor's material. Adjacent districts therefore differ and a run
+ * of one surface is one district long.
+ *
+ * The chain has to start somewhere, and walking it back to the garage would make a
+ * height query O(distance). So districts are drawn in BLOCKS of four: inside a block
+ * the chain is exact, and the block's first district rejects the previous block's last
+ * as computed by an unchained pass over that block. Only every fourth boundary can
+ * therefore repeat a material, and a repeat is two districts (about 12 km), never a
+ * region. `tools/road-condition.ts` reports the run-length census that bounds it: the
+ * thresholds it replaces measured a 170 km run of gravel and a 110 km run of asphalt.
  */
-const SLAB_WAVELENGTH = 8000;
-
-/** Fixed seed for the slab field, independent of the decay fields, so a slab can
- * appear at any road quality. */
-const slabNoise = new Noise1D(0x6d18a2f3);
-
-/** Decay above which a concrete slab would read as a bug: a pristine slab in the
- * middle of a ruined region. Slabs only appear on maintained road. */
-const CONCRETE_DECAY_GATE = 0.55;
-
-/** Threshold on the slab field. Tuned so slabs cover roughly 8% of the road. */
-const SLAB_THRESHOLD = 0.58;
+const DISTRICT_NOMINAL_M = 6000;
+/** Peak-to-peak jitter of a boundary, metres: district lengths land in 5-7 km. */
+const DISTRICT_JITTER_M = 1000;
+/** Hash domain for the boundary jitter and the material draws. */
+const DISTRICT_TAG = 0x5ce7a1;
 
 /**
- * Surface-selection decay thresholds, retuned against the STATIONARY distribution.
+ * The materials a district can be made of, and how the region weights them.
  *
- * The old 0.22 / 0.62 were tuned for the monotonic p^2 ramp, where decay spent most
- * of the road low and so most of the road read "asphalt". Against a stationary
- * envelope centred near 0.45 they parked the bulk of the road in the middle band —
- * cracked asphalt, the roughest surface, at ~52%. Retuning so the mix lands near
- * asphalt ~30%, cracked ~35%, gravel ~25% keeps the bumpiest surface from
- * dominating a whole drive.
+ * Concrete has no field of its own any more. It used to be a separate 8 km noise
+ * gated on decay, which is one more thing to keep in step with the rest; as a deck
+ * member it inherits the district length and the regional weighting for free, and its
+ * share is now this weight rather than a threshold tuned against a distribution.
  */
-const ASPHALT_MAX_DECAY = 0.38;
-const CRACKED_MAX_DECAY = 0.64;
+const DISTRICT_SURFACES: readonly SurfaceType[] = [
+  SurfaceType.Asphalt,
+  SurfaceType.CrackedAsphalt,
+  SurfaceType.Gravel,
+  SurfaceType.Concrete,
+];
+
+/**
+ * Weights, in `DISTRICT_SURFACES` order, as a function of the region's mean decay.
+ *
+ * Asphalt and gravel are the ends of the same axis and cross over around a regional
+ * decay of 0.45; cracked asphalt is the everywhere surface and rises with decay;
+ * concrete is old maintained motorway, so it fades out as the region is abandoned.
+ * Tuned against the census in `tools/road-condition.ts` to land near asphalt 30%,
+ * cracked 35%, gravel 25%, concrete 10% — the mix the old thresholds were retuned for
+ * — so the bumpiest surface still never dominates a drive.
+ *
+ * Written into a module scratch array rather than returned: a block fill draws four
+ * times and `roadConditionAt` is called per road-mesh vertex row.
+ */
+const districtWeights = new Float64Array(4);
+
+function weighDistrict(regional: number): number {
+  districtWeights[0] = Math.max(0, 1.5 - 1.9 * regional);
+  districtWeights[1] = 0.3 + 0.45 * regional;
+  districtWeights[2] = Math.max(0, 1.5 * regional - 0.3);
+  districtWeights[3] = 0.24 * Math.max(0, 1 - 1.3 * regional);
+  return districtWeights[0]! + districtWeights[1]! + districtWeights[2]! + districtWeights[3]!;
+}
+
+/** Where district `k` begins, metres. */
+function districtStart(k: number): number {
+  return k * DISTRICT_NOMINAL_M + (hash01(DISTRICT_TAG, k) - 0.5) * DISTRICT_JITTER_M;
+}
+
+/**
+ * The district a distance falls in. The jitter is bounded well below the nominal
+ * length, so the answer is the nominal bucket or one of its neighbours and this stays
+ * three hashes rather than a search.
+ */
+function districtIndex(s: number): number {
+  const k = Math.floor(s / DISTRICT_NOMINAL_M);
+  if (s < districtStart(k)) return k - 1;
+  if (s >= districtStart(k + 1)) return k + 1;
+  return k;
+}
+
+/**
+ * Regional mean decay: the slow absolute-distance drift between maintained and
+ * abandoned districts. fbm (never a sine) so regions never repeat on a schedule.
+ */
+function regionalDecay(s: number): number {
+  const env = envelopeNoise.fbm(s / DECAY_ENVELOPE_WAVELENGTH, 2, 2.1, 0.5);
+  return 0.45 + env * 0.55;
+}
+
+/**
+ * One weighted draw for district `k`, with `exclude` removed from the deck (-1 for
+ * none). District 0 and anything before it is always sealed asphalt: it holds the
+ * garage opening, and it terminates the chain.
+ */
+function drawDistrict(k: number, regional: number, exclude: number): SurfaceType {
+  if (k <= 0) return SurfaceType.Asphalt;
+  let total = weighDistrict(regional);
+  if (exclude >= 0) {
+    for (let i = 0; i < DISTRICT_SURFACES.length; i++) {
+      if (DISTRICT_SURFACES[i] === exclude) {
+        total -= districtWeights[i]!;
+        districtWeights[i] = 0;
+      }
+    }
+  }
+  let pick = hash01(DISTRICT_TAG, k) * total;
+  for (let i = 0; i < DISTRICT_SURFACES.length; i++) {
+    pick -= districtWeights[i]!;
+    if (pick <= 0) return DISTRICT_SURFACES[i]!;
+  }
+  return SurfaceType.CrackedAsphalt;
+}
+
+/** Districts per drawn block. Four keeps the fill to four draws and one envelope. */
+const DISTRICTS_PER_BLOCK = 4;
+
+/**
+ * The regional weighting is sampled ONCE per block, at its centre, not once per
+ * district. The envelope's wavelength is 300 km and a block is 24 km, so the two
+ * differ by under a hundredth — and it turns four fbm evaluations into one.
+ */
+function blockRegional(b: number): number {
+  return regionalDecay((b + 0.5) * DISTRICTS_PER_BLOCK * DISTRICT_NOMINAL_M);
+}
+
+/**
+ * The last material of block `b`, drawn WITHOUT knowing what came before the block.
+ * This is the truncation that keeps the chain O(1): it is what the next block's first
+ * district rejects, and it is why one boundary in four can still repeat a material.
+ */
+function blockTail(b: number): SurfaceType {
+  const regional = blockRegional(b);
+  const first = b * DISTRICTS_PER_BLOCK;
+  let prev = -1;
+  let material = SurfaceType.Asphalt;
+  for (let i = 0; i < DISTRICTS_PER_BLOCK; i++) {
+    material = drawDistrict(first + i, regional, prev);
+    prev = material;
+  }
+  return material;
+}
+
+/**
+ * Materials of the four districts in one block, cached two blocks deep.
+ *
+ * The cache is not an optimisation of a slow function so much as of a REPEATED one:
+ * every road-mesh vertex row, every collider row and every terrain query near the road
+ * asks about the same block, and a two-slot cache makes all but the first free. It is
+ * safe to cache because a block is a pure function of its index — same seedless
+ * hashes, same answer, in the worker and on the main thread alike.
+ */
+const blockCache: [Int8Array, Int8Array] = [new Int8Array(4), new Int8Array(4)];
+const blockCacheIndex: [number, number] = [Number.NaN, Number.NaN];
+let blockCacheNext = 0;
+
+function blockMaterials(b: number): Int8Array {
+  if (blockCacheIndex[0] === b) return blockCache[0];
+  if (blockCacheIndex[1] === b) return blockCache[1];
+  const slot = blockCacheNext;
+  blockCacheNext = 1 - blockCacheNext;
+  const out = blockCache[slot]!;
+  const regional = blockRegional(b);
+  const first = b * DISTRICTS_PER_BLOCK;
+  let prev: number = b <= 0 ? SurfaceType.Asphalt : blockTail(b - 1);
+  for (let i = 0; i < DISTRICTS_PER_BLOCK; i++) {
+    const material = drawDistrict(first + i, regional, prev);
+    out[i] = material;
+    prev = material;
+  }
+  blockCacheIndex[slot] = b;
+  return out;
+}
+
+/** The material of district `k`. */
+function districtSurface(k: number): SurfaceType {
+  const b = Math.floor(k / DISTRICTS_PER_BLOCK);
+  return blockMaterials(b)[k - b * DISTRICTS_PER_BLOCK]! as SurfaceType;
+}
 
 /**
  * Road condition at a distance.
  *
- * Decay is STATIONARY in absolute distance, not a one-way ramp: a regional
- * envelope (a few hundred km of kept-up road, then a few hundred of abandoned) is
- * summed with the fine patch noise, so a pristine stretch is possible at 39 000 km
- * and a ruined one at 200 km. The garage ramp overrides the envelope for the first
- * three kilometres so the player always learns on a maintained road.
+ * Two independent things, and keeping them independent is the point:
+ *
+ *  - MATERIAL comes from the 5-7 km surface districts above, weighted by the region.
+ *  - DECAY is stationary in absolute distance, not a one-way ramp: the regional
+ *    envelope summed with fine patch noise, so a pristine stretch is possible at
+ *    39 000 km and a ruined one at 200 km. The garage ramp holds it pristine for the
+ *    first five kilometres and eases into the region by twenty-five, so the player
+ *    always learns the car on a maintained road.
+ *
+ * A gravel district at low decay is a well-kept gravel road and an asphalt district at
+ * high decay is a ruined one; both are things a desert road actually is, and neither
+ * was reachable while the material WAS a threshold on the decay.
  */
 export function roadConditionAt(s: number): RoadCondition {
-  // Regional envelope: slow, absolute-distance drift between maintained and
-  // abandoned districts. fbm (never a sine) so regions never repeat on a schedule.
-  const env = envelopeNoise.fbm(s / DECAY_ENVELOPE_WAVELENGTH, 2, 2.1, 0.5);
-  const regionalMean = 0.45 + env * 0.55;
-
   // Garage ramp: hold the regional mean at pristine for GARAGE_FLAT_M, then blend it
   // up to whatever the region says by GARAGE_RAMP_M. Cubic smoothstep, so the join is
   // C1 at both ends and there is no distance at which the road visibly steps.
@@ -145,30 +312,23 @@ export function roadConditionAt(s: number): RoadCondition {
     Math.max(0, (s - GARAGE_FLAT_M) / (GARAGE_RAMP_M - GARAGE_FLAT_M)),
   );
   const ramp = rampT * rampT * (3 - 2 * rampT);
-  const envelope = 0.05 + (regionalMean - 0.05) * ramp;
+  const envelope = 0.05 + (regionalDecay(s) - 0.05) * ramp;
 
-  // Fine patch: the existing 3-octave fbm, unchanged — it flips the surface every
-  // ~800 m and is already tuned.
+  // Fine patch: the existing 3-octave fbm, unchanged. It no longer moves the material
+  // (districts own that), so it is purely how broken this stretch is.
   const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.28;
 
   const decay = Math.min(1, Math.max(0, envelope + patch));
-
-  // Concrete slabs: their own independent field, so they can appear at any road
-  // quality below the gate.
-  const slab = slabNoise.at(s / SLAB_WAVELENGTH) > SLAB_THRESHOLD;
-
-  let surface: SurfaceType;
-  if (slab && decay < CONCRETE_DECAY_GATE) surface = SurfaceType.Concrete;
-  else if (decay < ASPHALT_MAX_DECAY) surface = SurfaceType.Asphalt;
-  else if (decay < CRACKED_MAX_DECAY) surface = SurfaceType.CrackedAsphalt;
-  else surface = SurfaceType.Gravel;
+  const surface = districtSurface(districtIndex(s));
 
   return {
     surface,
     decay,
     // Sand only starts drifting across the lanes once the surface is breaking up.
     sandCover: Math.min(0.85, Math.max(0, (decay - 0.45) * 1.6)),
-    markings: Math.max(0, 1 - decay * 1.9),
+    // Nothing paints an unsealed road, however well kept it is.
+    markings:
+      surface === SurfaceType.Gravel ? 0 : Math.max(0, 1 - decay * 1.9),
   };
 }
 
