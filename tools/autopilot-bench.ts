@@ -386,12 +386,14 @@ async function checkHazards(): Promise<void> {
     !wall.passed && wall.approachGap > 6 && wall.approachSpeed < 2,
     `stopped ${wall.approachGap.toFixed(2)} m short at ${wall.approachSpeed.toFixed(2)} m/s, passed=${wall.passed}`,
   );
-  // A dirt pile: driven through, lifting off but never stopping.
+  // A breakable prop is still a real road obstacle. Avoiding it keeps the car from
+  // taking an unnecessary physics hit; the breakable flag only means a human can
+  // destroy it, not that the autopilot should aim through it.
   const pile = await driveHazard({ s: START_S + 300, lateral: 0, radius: 1.2, breakable: true }, 100);
   check(
-    'breakable hazard is driven through without stopping',
-    pile.passed && pile.minSpeedNear > 1,
-    `passed=${pile.passed}, near-hazard minimum ${pile.minSpeedNear.toFixed(2)} m/s`,
+    'breakable hazard is cleared without driving through',
+    pile.passed && pile.minDistance >= 1.2 && pile.minSpeedNear > 1,
+    `passed=${pile.passed}, clearance ${pile.minDistance.toFixed(2)} m, near-hazard minimum ${pile.minSpeedNear.toFixed(2)} m/s`,
   );
   // Unloading the chunk must give the road back.
   wall.rig.hazards.forget(wall.chunk);

@@ -716,17 +716,21 @@ async function boot(): Promise<void> {
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
-      // The autopilot OVERWRITES the driving intents in this frame before the vehicle
-      // reads them, and leaves the frame untouched when disengaged — so releasing it
-      // hands control back on the very next tick with nothing to unwind. Toggling is
-      // read here rather than inside the autopilot so the toast and the state agree.
+      // One key cycles the complete driving state: sleeper -> frantic -> off.
+      // Keeping the transition here means the HUD, input handover and controller
+      // always observe the same state on the same fixed step.
       if (f.toggleAutopilot) {
-        autopilot.setEngaged(!autopilot.engaged);
-        hud.setToast(autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off');
-      }
-      if (f.cycleAutopilotMode) {
-        autopilot.setMode(autopilot.mode === 'sleeper' ? 'frantic' : 'sleeper');
-        hud.setToast(`autopilot: ${autopilot.mode}`);
+        if (!autopilot.engaged) {
+          autopilot.setMode('sleeper');
+          autopilot.setEngaged(true);
+        } else if (autopilot.mode === 'sleeper') {
+          autopilot.setMode('frantic');
+        } else {
+          autopilot.setEngaged(false);
+        }
+        hud.setToast(
+          autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
+        );
       }
       if (autopilot.engaged) autopilot.drive(dt, driving, f, origin.x, origin.z);
       driving.fixedUpdate(dt, f);
