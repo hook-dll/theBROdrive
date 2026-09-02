@@ -50,7 +50,7 @@ const allocationsAfter = field.allocationCount;
 if (worstLive > TUMBLEWEED_CAP) throw new Error(`cap failed: ${worstLive} > ${TUMBLEWEED_CAP}`);
 if (allocationsBefore !== allocationsAfter) throw new Error('pool allocation count changed during churn');
 console.log(`steps=${steps}`);
-console.log(`spawned=${field.spawnCount}`);
+console.log(`spawned=${field.spawnCount} (one weed per ${((steps * dt * 27) / 1000 / field.spawnCount).toFixed(2)} km of road)`);
 console.log(`worstLive=${worstLive}/${TUMBLEWEED_CAP}`);
 console.log(`updateUsPerStep=${((elapsedMs * 1000) / steps).toFixed(3)}`);
 console.log(`poolAllocations=${allocationsBefore}->${allocationsAfter} (steady-state spawn/retire: 0)`);
@@ -84,8 +84,17 @@ let hits = 0;
 let liveBeforeHit = 0;
 let liveAfterHit = 0;
 let burstsAtHit = 0;
-for (let step = 0; step < 6000 && hits === 0; step++) {
+// Weeds are now spawned once every few kilometres and only some crossings meet the
+// car at all, so waiting for a chance encounter proves nothing in bounded time. The
+// drive runs until the field has a weed, that weed is placed on the car's path, and
+// the strike is then a certainty rather than a lottery.
+let planted = false;
+for (let step = 0; step < 120_000 && hits === 0; step++) {
   impactor.z += impactor.vz * dt;
+  if (!planted && hitField.liveCount > 0) {
+    hitField.placeForBench(0, impactor.x, impactor.y, impactor.z + impactor.halfLength + 0.3);
+    planted = true;
+  }
   liveBeforeHit = hitField.liveCount;
   const hit = hitField.update(dt, impactor.z, impactor as never);
   if (hit.count > 0) {
@@ -94,9 +103,12 @@ for (let step = 0; step < 6000 && hits === 0; step++) {
     liveAfterHit = hitField.liveCount;
   }
 }
-if (hits === 0) throw new Error('a car driven down the road never met a tumbleweed');
+if (hits === 0) throw new Error('a weed placed on the path of the car was never struck');
 if (burstsAtHit !== hits) throw new Error(`hit did not emit its burst: ${burstsAtHit} for ${hits}`);
 if (liveAfterHit !== liveBeforeHit - hits) {
   throw new Error(`struck weed not retired: ${liveBeforeHit} -> ${liveAfterHit}`);
 }
-console.log(`hit at z=${impactor.z.toFixed(0)} m: hits=${hits} bursts=${burstsAtHit} live ${liveBeforeHit}->${liveAfterHit}`);
+console.log(
+  `first hit after ${(impactor.z / 1000).toFixed(2)} km: hits=${hits} bursts=${burstsAtHit} ` +
+    `live ${liveBeforeHit}->${liveAfterHit}`,
+);
