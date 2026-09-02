@@ -39,7 +39,7 @@ import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { WorldOrigin } from '../src/world/origin';
-import { ROAD_HALF_WIDTH, Road, SHOULDER_WIDTH } from '../src/world/road';
+import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { roadSurfaceY, SURFACE_STEP, SurfaceField } from '../src/world/roadsurface';
 import { Terrain } from '../src/world/terrain';
@@ -116,11 +116,9 @@ function carState(road: Road, lateral: number, groundY: number): CarState {
  * across every hole in the road and measures a surface the game does not have.
  */
 const RIBBON_LATERALS: readonly number[] = [
-  -(ROAD_HALF_WIDTH + SHOULDER_WIDTH),
-  -ROAD_HALF_WIDTH, -2.9, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
+  -ROAD_HALF_WIDTH, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
   0,
-  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, 2.9, ROAD_HALF_WIDTH,
-  ROAD_HALF_WIDTH + SHOULDER_WIDTH,
+  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, ROAD_HALF_WIDTH,
 ];
 
 function addRoadCollider(physics: PhysicsWorld, road: Road): void {

@@ -5,23 +5,22 @@ import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { desertPaletteAt, roadConditionAt } from './gradient';
-import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
+import { ROAD_HALF_WIDTH, type Road } from './road';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
- * The road ribbon: asphalt lanes with gravel shoulders, banked into corners and
- * displaced by a layered surface field — broad undulation, wheel-scale bumps,
- * broken asphalt edges and discrete potholes. Surface type owns ordinary bump
+ * The asphalt ribbon, banked into corners and displaced by a layered surface field —
+ * broad undulation, wheel-scale bumps, broken edges and discrete potholes. The desert
+ * terrain begins directly beneath each asphalt edge. Surface type owns ordinary bump
  * amplitude; decay increases undulation, edge breakup and pothole occurrence. The
  * same vertices feed the visible mesh and trimesh collider, so the car feels the
  * shape the driver sees.
  */
 
 const HW = ROAD_HALF_WIDTH;
-const SW = SHOULDER_WIDTH;
-/** Outer edge of the shoulder; matches terrain.ts CORRIDOR_INNER. */
-const CORRIDOR_INNER = HW + SW;
+/** Asphalt edge; matches terrain.ts CORRIDOR_INNER. */
+const CORRIDOR_INNER = HW;
 
 /**
  * Cross-section lateral offsets, left to right.
@@ -32,9 +31,9 @@ const CORRIDOR_INNER = HW + SW;
  * cannot resolve either. The extra columns cost ~6 vertices per row.
  */
 const LATERALS: readonly number[] = [
-  -CORRIDOR_INNER, -HW, -2.9, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
+  -HW, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
   0,
-  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, 2.9, HW, CORRIDOR_INNER,
+  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, HW,
 ];
 
 /**
@@ -49,7 +48,8 @@ const COLLIDER_SLAB_QUADS = 15;
 
 const MARKING_LIFT = 0.03;
 const MARKING_HALF_WIDTH = 0.12;
-const EDGE_LATERAL = HW - 0.4;
+/** Keep the full edge marking on the asphalt. */
+const EDGE_LATERAL = HW - MARKING_HALF_WIDTH;
 const MARKING_MIN = 0.03;
 
 /**
@@ -60,7 +60,7 @@ const MARKING_MIN = 0.03;
  *     so they are darker and smoother than the rest, and they are the single most
  *     recognisable feature of a used road. WHEEL_PATH_LATERALS are the strip
  *     centres: a 1.65 m track either side of each lane's centreline.
- *  2. A DUSTY CROWN AND SHOULDER EDGE. Between the wheel paths and out at the
+ *  2. A DUSTY CROWN AND ROAD EDGE. Between the wheel paths and out at the
  *     edges nothing sweeps the surface, so wind-blown dust settles and the bitumen
  *     bleaches: lighter, and browner, not just lighter.
  *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre is where the mat ravels and
@@ -111,9 +111,8 @@ const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
 
 /**
  * Palette scratch colours, updated once per arclength row and reused across the
- * row's vertices so no palette lookup allocates. Gravel (the shoulder and the dust
- * that tints the mat) and sand (the drift) are palette-driven; rock never appears
- * on the road ribbon.
+ * row's vertices so no palette lookup allocates. Gravel tints weathered asphalt;
+ * sand colours wind-blown cover at the edge.
  */
 const gravelLinear = new THREE.Color();
 const sandLinear = new THREE.Color();
@@ -213,9 +212,8 @@ export class RoadMeshProvider implements ChunkProvider {
     // colour; the bump floor and roughness growth come from the per-s condition
     // inside roadSurfaceY, keeping the drawn surface continuous across chunks.
     const surface = roadConditionAt((sStart + sEnd) / 2).surface;
-    // Sealed lanes keep their static albedo; a road decayed all the way to gravel
-    // takes the palette gravel (resolved per row, like the shoulder), so `laneBase`
-    // is null for that case.
+    // Sealed asphalt keeps its static albedo; a road decayed all the way to gravel
+    // takes the palette gravel, so `laneBase` is null for that case.
     const laneBase = SURFACE_LINEAR[surface] ?? null;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
@@ -252,8 +250,8 @@ export class RoadMeshProvider implements ChunkProvider {
         for (let li = 0; li < latCount; li++) {
           const lateral = LATERALS[li]!;
           road.offsetPoint(s, lateral, point);
-          // Shared height function: the terrain adopts this exact surface at the
-          // shoulder edge, so the road and verge stay flush.
+          // Shared height function: the desert terrain adopts this exact surface at
+          // the asphalt edge, so the two meshes stay flush.
           const y = roadSurfaceY(road, this.field, s, lateral, point.x, point.z);
 
           const vi = si * latCount + li;
@@ -262,7 +260,7 @@ export class RoadMeshProvider implements ChunkProvider {
           positions[vi * 3 + 2] = point.z - oz;
 
           // Texture coordinates in world metres, so the grain has a fixed size and
-          // does not stretch through corners or over the shoulder.
+          // does not stretch through corners.
           uvs[vi * 2] = lateral / ROAD_TILE_METRES;
           uvs[vi * 2 + 1] = s / ROAD_TILE_METRES;
 
@@ -304,16 +302,15 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-      // The road and its shoulder use the same upward lighting basis as the desert.
-      // Actual slope normals made both read as a dark shadow strip on grades.
+      // The road uses the same upward lighting basis as the desert. Actual slope
+      // normals made it read as a dark shadow strip on grades.
       const normals = new Float32Array(positions.length);
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
       const roadMesh = new THREE.Mesh(geometry, roadMaterial);
-      // Every lane surface and shoulder must receive the same vehicle shadow that
-      // the surrounding desert receives. The ribbon does not cast into the map, so
-      // enabling reception adds contact shadows without road self-shadow acne.
+      // The whole asphalt surface receives the same vehicle contact shadow as the
+      // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
       group.add(roadMesh);
       yield;

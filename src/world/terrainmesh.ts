@@ -95,7 +95,7 @@ const FINE_STEP = S_STEP / FINE_SUBDIVISIONS;
  * to the seam.
  */
 const DETAIL_RING_CAP = 12;
-/** Terrain tucks 8 cm below the shoulder, covering numerical seam cracks. */
+/** Terrain tucks 8 cm beneath the asphalt edge, covering numerical seam cracks. */
 const ROAD_SEAM_OVERLAP = 0.08;
 const TERRAIN_INNER = CORRIDOR_INNER - ROAD_SEAM_OVERLAP;
 /** Keep overlapped terrain below the road ribbon to prevent z-fighting. */
@@ -167,7 +167,7 @@ const FOLD_MAX_EDGE_RATIO = 18;
  * The fold guard still rejects cells whose own road-normal parameterisation has
  * inverted. Other overlapping fans and the camera-centred vista cover those cells.
  * Near the road, frame-derived height is cross-faded into the absolute field over
- * WORLD_HEIGHT_START..FULL so the shoulder remains bit-identical to the road.
+ * WORLD_HEIGHT_START..FULL so the asphalt edge remains bit-identical to the terrain.
  */
 /** Lateral offset where height starts blending from frame-derived to position-derived. */
 const WORLD_HEIGHT_START = 30;
@@ -344,12 +344,12 @@ function worldBase(terrain: Terrain, roadDistance: RoadDistance, x: number, z: n
  * Height of ONE field-lattice vertex, and the only place that blend is written.
  *
  * The near-road frame path is cross-faded into the world path over
- * WORLD_HEIGHT_START..FULL. Inside the corridor the shoulder vertex MUST equal the road
+ * WORLD_HEIGHT_START..FULL. Inside the corridor the road-edge vertex MUST equal the
  * ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m the two
  * paths are the same arithmetic (the berm is zero that close in), so the fade is between
  * values that agree, and it stays as the guarantee that they must.
  *
- * The last term is the seam tuck: terrain overlaps the road's shoulder slightly and
+ * The last term is the seam tuck: terrain overlaps the asphalt edge slightly and
  * samples the same road surface there, biased just under the ribbon so the floating
  * pixel seam closes without a coplanar z-fight.
  */
@@ -497,9 +497,9 @@ export class TerrainMeshProvider implements ChunkProvider {
     const latCount = laterals.length;
     const fieldCount = sCount * latCount;
 
-    // The refined grid's own columns: uniform `FINE_STEP` from the shoulder out to
+    // The refined grid's own columns: uniform `FINE_STEP` from the road edge out to
     // `DETAIL_REACH`, with the spacing divided evenly into the span rather than
-    // stepped off the shoulder, which would leave a sliver column at the far end.
+    // stepped off the edge, which would leave a sliver column at the far end.
     // Its innermost column is the same TERRAIN_INNER ring the field lattice starts on,
     // so the tuck under the road ribbon is inherited rather than re-derived.
     const fineSteps = Math.round((DETAIL_REACH - CORRIDOR_INNER) / FINE_STEP);
