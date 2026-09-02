@@ -279,17 +279,17 @@ const CAR_BODY_CONDITION_BODY = `
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 
   float dentMask = condDent( vCondLocalPos, uScratches );
-  // Paint response is deliberately secondary: the RELIEF in the normal hook carries
-  // the damage. Dulling plus a roughness pull is what a pressed panel does to a
-  // highlight; anything stronger reads as a painted-on mark, which is the exact
-  // failure of the chalk-line scratches this replaces.
-  diffuseColor.rgb *= 1.0 - 0.1 * dentMask;
-  roughnessFactor = mix( roughnessFactor, 0.88, dentMask * 0.35 );
+  // Paint response is now almost nothing, and that is the fix for "it looks like
+  // camouflage": a mask that tints or dulls reads as a PATTERN on the paint, however
+  // weak the tint, because the eye groups patches of colour long before it reads
+  // shading. All the damage is carried by the relief in the normal hook; the paint
+  // only loses a little gloss where the metal is stretched.
+  roughnessFactor = mix( roughnessFactor, 0.86, dentMask * 0.16 );
   // Bare primer only at high damage and only on the sharpest lobes, where folded
   // sheet actually loses its paint. The cap keeps it a hint, not a stripe.
-  float dentCrease = smoothstep( 0.55, 1.0, dentMask ) * smoothstep( 0.72, 1.0, uScratches );
+  float dentCrease = smoothstep( 0.7, 1.0, dentMask ) * smoothstep( 0.8, 1.0, uScratches );
   vec3 dentPrimer = condLum > 0.42 ? vec3( 0.18 ) : vec3( 0.58 );
-  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.06 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.025 );
 }`;
 
 /**
@@ -370,7 +370,11 @@ if ( uScratches > 0.001 ) {
     vCondAxisY * dentGrad.y +
     cross( vCondAxisX, vCondAxisY ) * dentGrad.z;
   vec3 dentVG = ( viewMatrix * vec4( dentWG, 0.0 ) ).xyz;
-  normal = normalize( normal - dentVG * COND_DENT_DEPTH );
+  // PLUS, not minus. The field is a DEPTH: the panel is pressed IN where the mask is
+  // high, so the surface falls away along the gradient and the normal leans with it.
+  // Subtracting made every dent a blister — convex lobes standing off the bodywork,
+  // which is what a plus sign costs you here.
+  normal = normalize( normal + dentVG * COND_DENT_DEPTH );
 }`;
 
 /**
