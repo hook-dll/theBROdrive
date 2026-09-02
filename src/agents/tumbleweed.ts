@@ -17,10 +17,20 @@ import type { WheelSpray } from '../render/wheelspray';
  * common over a 520 m road band, while its worst case is fixed before a frame begins.
  */
 
-/** Ten instances are visible enough at highway speed; more made the roadside read busy. */
-export const TUMBLEWEED_CAP = 10;
-/** Slots are sparse enough that the cap survives a run of favourable hashes. */
-const SLOT_SPACING = 58;
+/**
+ * Ten was budgeted for the WORST case and then the spacing below handed it the worst
+ * case constantly: a weed every ninety metres, six or seven live at any moment, the
+ * roadside permanently busy. A tumbleweed is an event, so the cap comes down with the
+ * rate — four is enough to cover a cluster and a straggler.
+ */
+export const TUMBLEWEED_CAP = 4;
+/**
+ * Metres between candidate slots, and the chance a slot is taken. Together they set
+ * the encounter rate: 400 m and one slot in eight is a weed about every 3.2 km, which
+ * is a couple of minutes of driving — rare enough that one crossing the road is worth
+ * looking at, instead of the parade the first cut staged (every 88 m).
+ */
+const SLOT_SPACING = 400;
 /**
  * How far ahead the band reaches, metres, and why it is not further.
  *
@@ -34,8 +44,8 @@ const SLOT_SPACING = 58;
 const AHEAD_METRES = 220;
 /** Keeping a short rear margin prevents pop-out at the chase camera edge. */
 const BEHIND_METRES = 160;
-/** A slot gets a weed two times in three; the cap is still the hard population bound. */
-const SLOT_CHANCE = 0.66;
+/** One slot in eight is taken; with SLOT_SPACING that is a weed about every 3.2 km. */
+const SLOT_CHANCE = 0.125;
 /**
  * STAGING: how far out on the verge a weed starts, so that its crossing and the car's
  * arrival coincide.
@@ -49,7 +59,7 @@ const SLOT_CHANCE = 0.66;
  * asphalt in front of the bumper, further than `STAGE_MAX` and it is a dot nobody
  * connects with the road.
  */
-const STAGE_JITTER = 0.55;
+const STAGE_JITTER = 0.35;
 const STAGE_MIN = 6;
 const STAGE_MAX = 70;
 /** Fallback closing speed while on foot, m/s: about the speed a car actually travels. */
@@ -57,8 +67,7 @@ const STAGE_DEFAULT_SPEED = 22;
 /**
  * A weed retires once it has rolled this far from where it started, whatever its slot
  * says. Without it a weed that has crossed and gone keeps its pool slot for the whole
- * width of the band, and the field thins to four or five live instead of the ten it is
- * budgeted for.
+ * width of the band, and the field thins out instead of covering its cap.
  */
 const TRAVEL_RETIRE_M = 110;
 /** Cactus sections are 0.85 m tall by 0.40–0.45 m across; this is their visual peer. */
@@ -131,6 +140,9 @@ export class TumbleweedField {
   /** Entity objects are created once in the constructor; spawning only overwrites them. */
   private readonly pooledAllocationCount = TUMBLEWEED_CAP;
   private spawnedCount = 0;
+  /** Slots recently drawn from, so a retired weed's slot cannot immediately refill. */
+  private readonly spentSlots = new Int32Array(8).fill(Number.MIN_SAFE_INTEGER);
+  private spentCursor = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -195,6 +207,23 @@ export class TumbleweedField {
   /** Bench-only count of slot activations; it distinguishes churn from object creation. */
   get spawnCount(): number { return this.spawnedCount; }
 
+  /**
+   * Moves a live weed, for `tools/tumbleweed-bench.ts` only.
+   *
+   * A test seam rather than a poked private: encounters are kilometres apart and only
+   * some of them meet the car, so the bench cannot wait for a chance strike to prove
+   * that a hit bursts and retires. It plants one instead.
+   */
+  placeForBench(index: number, x: number, y: number, z: number): void {
+    if (index >= this.activeCount) return;
+    const weed = this.weeds[index]!;
+    weed.x = x - this.origin.x;
+    weed.y = y;
+    weed.z = z - this.origin.z;
+    weed.originX = weed.x;
+    weed.originZ = weed.z;
+  }
+
 
   private spawnAndRetire(playerS: number, closingSpeed: number): void {
     const minSlot = Math.floor((playerS - BEHIND_METRES) / SLOT_SPACING);
@@ -212,12 +241,24 @@ export class TumbleweedField {
     }
   }
 
+  /**
+   * Is this slot taken, or was it recently spent?
+   *
+   * The spent ring is the fix for a weed that retires because it has rolled its
+   * `TRAVEL_RETIRE_M` while its slot is still inside the band: without it the slot
+   * immediately drew a fresh weed at the roadside, so a single slot produced a stream
+   * and the measured rate was a weed every 1.4 km instead of the 3.2 km the spacing
+   * and chance ask for. Eight entries covers every slot the band can hold.
+   */
   private hasSlot(slot: number): boolean {
     for (let i = 0; i < this.activeCount; i++) if (this.weeds[i]!.slot === slot) return true;
+    for (let i = 0; i < this.spentSlots.length; i++) if (this.spentSlots[i] === slot) return true;
     return false;
   }
 
   private spawn(slot: number, playerS: number, closingSpeed: number): void {
+    this.spentSlots[this.spentCursor] = slot;
+    this.spentCursor = (this.spentCursor + 1) % this.spentSlots.length;
     const weed = this.weeds[this.activeCount++]!;
     const s = (slot + 0.5 + (hash01(this.seed, slot, 0x7a12) - 0.5) * 0.7) * SLOT_SPACING;
     const road = this.road.sampleAt(s);
@@ -299,7 +340,11 @@ export class TumbleweedField {
     for (let i = 0; i < this.activeCount; i++) {
       const weed = this.weeds[i]!;
       const speed = Math.hypot(weed.vx, weed.vz);
-      if (speed > 1e-3) _axis.set(-weed.vz / speed, 0, weed.vx / speed);
+      // Axis = up x velocity, and the SIGN is the whole point: with the cross the
+      // other way round the ball turned backwards while travelling forwards, which
+      // reads instantly as wrong even at a glance. For travel along +X the axis is
+      // +Z, which carries the top of the ball forwards over the contact patch.
+      if (speed > 1e-3) _axis.set(weed.vz / speed, 0, -weed.vx / speed);
       else _axis.set(1, 0, 0);
       this.quaternion.setFromAxisAngle(_axis, weed.roll);
       this.matrix.compose(_position.set(weed.x, weed.y, weed.z), this.quaternion, this.scale);
