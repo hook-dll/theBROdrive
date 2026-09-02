@@ -30,6 +30,7 @@ import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { Player } from './player/player';
 import { BirdFlock } from './agents/birds';
+import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
@@ -276,6 +277,9 @@ async function boot(): Promise<void> {
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene, origin);
+  // Tumbleweeds share the spray ring so a hit can become dust without a second particle
+  // budget. Their own cap is ten fixed instances; they never enter road hazards.
+  const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -613,6 +617,7 @@ async function boot(): Promise<void> {
       worldWork,
       streamer,
       desert,
+      tumbleweeds,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -1001,10 +1006,18 @@ async function boot(): Promise<void> {
       impactor.vy = v.y;
       impactor.vz = v.z;
       debris.update(impactor, dt, desertX, desertZ);
+      const tumbleweedHit = tumbleweeds.update(dt, activeS, impactor);
+      if (tumbleweedHit.count > 0) {
+        // 45 N·s on a roughly 1.5 t chassis is a 0.03 m/s brush: comparable to a
+        // cactus slice's lightest debris contact, below the collision damage floor.
+        driving.chassis.applyImpulse({ x: impactor.fx * 45, y: 0, z: impactor.fz * 45 }, true);
+        audio.foley('drop');
+      }
     } else {
       // Do not sweep from the last driven car position across a period spent on foot
       // (or across switching vehicles); that path was never travelled by one chassis.
       debris.update(null, dt, desertX, desertZ);
+      tumbleweeds.update(dt, activeS, null);
     }
 
     recordTimer += dt;
