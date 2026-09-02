@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
-import { SURFACES } from './core/surfaces';
+import { SURFACES, SurfaceType } from './core/surfaces';
 import { Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -41,6 +41,7 @@ import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
+import { SandTyreTracks } from './render/tyretracks';
 import { VehicleLightRig } from './render/vehiclelights';
 import { createStickerMesh } from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
@@ -277,6 +278,9 @@ async function boot(): Promise<void> {
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene, origin);
+  // Ground marks use the same wheel telemetry as spray, but retain a bounded history
+  // in one pooled mesh instead of creating scene objects along the route.
+  const tyreTracks = new SandTyreTracks(renderer.scene, origin);
   // Tumbleweeds share the spray ring so a hit can become dust without a second particle
   // budget. Their own cap is ten fixed instances; they never enter road hazards.
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
@@ -1035,43 +1039,36 @@ async function boot(): Promise<void> {
   const targetQuat = new THREE.Quaternion();
 
   /**
-   * Throws spray from one wheel's contact patch: grit off loose ground, tyre smoke off
-   * sealed ground, nothing at all if the wheel is not working or not touching
-   * anything.
-   *
-   * Shared by the car and by trailers, which is the point: what throws sand is a
-   * tyre SLIPPING, not a tyre being driven. This used to require non-zero drive
-   * torque, which silently excluded every case where a wheel works hardest without
-   * being powered — braking, a locked wheel under the handbrake, a tyre dragged
-   * sideways, and a trailer's wheels at all times.
-   *
-   * WHAT THE WHEEL IS STANDING ON is resolved from the terrain field rather than the
-   * heightfield collider's single registration. Each tile collider is registered as
-   * sand, but the same geometry contains gravel verge and rock outcrops; querying
-   * `Terrain.surfaceFromFrame` keeps spray consistent with that field. The road ribbon
-   * and scenery retain their own registrations, so concrete and asphalt are untouched.
-   *
-   * The surface then decides both how much comes off and what it is. `raise` is the
-   * dust and smoke channels summed with smoke discounted, so it scales the mote count
-   * and the throw; `mix` is smoke's share of that sum, so it is what the emitter
-   * interpolates its profile along. On asphalt (dust 0, smoke 1) the mix is 1 and the
-   * raise is 0.4: grey, sparse, and it goes nowhere. On open sand (dust 1, smoke 0)
-   * both are exactly what they were before this existed.
+   * Resolves the exact surface beneath a terrain-collider contact. Tiles use one
+   * collider registration while their field still contains sand, gravel and rock.
    */
-  const emitSpray = (ws: WheelSprayState, frameDt: number): void => {
-    if (!ws.inContact) return;
+  const wheelSurface = (ws: WheelSprayState): SurfaceType => {
+    if (ws.surface !== TERRAIN_COLLIDER_SURFACE) return ws.surface;
+    const p = road.project(ws.absoluteContactX, ws.absoluteContactZ, activeS);
+    return terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral);
+  };
+
+  /**
+   * Leaves a pooled ground mark and throws spray from one wheel contact. Both effects
+   * share the resolved surface so terrain projection is paid once per wheel.
+   *
+   * Tracks accept honest rolling contact on sand; slip only widens and darkens them.
+   * Spray retains its slip floor, because a rolling tyre leaves a track without
+   * necessarily throwing material into the air.
+   */
+  const emitWheelEffects = (ws: WheelSprayState, frameDt: number): void => {
+    if (!ws.inContact) {
+      tyreTracks.sample(ws, false);
+      return;
+    }
+    const terrainContact = ws.surface === TERRAIN_COLLIDER_SURFACE;
+    const surface = wheelSurface(ws);
+    // The visible verge is the same loose ground mesh and should mark immediately at
+    // the asphalt edge; its finer gravel/sand classification remains relevant to spray.
+    tyreTracks.sample(ws, terrainContact);
     const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
     if (slip <= SPRAY_MIN_SLIP) return;
 
-    let surface = ws.surface;
-    if (surface === TERRAIN_COLLIDER_SURFACE) {
-      // Two frames in three lines, which is why the spray state carries both. The road
-      // and the terrain's surface field are sampled ABSOLUTE; the mote buffer below is
-      // fed the RELATIVE contact, because it is scene geometry. Mixing them up puts the
-      // dust a kilometre from the tyre, or reports the wrong surface under it.
-      const p = road.project(ws.absoluteContactX, ws.absoluteContactZ, activeS);
-      surface = terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral);
-    }
     const props = SURFACES[surface];
 
     // A tyre flings at its surface speed, not the chassis'. Chassis speed reads
@@ -1114,17 +1111,16 @@ async function boot(): Promise<void> {
     loose.syncVisuals();
     debris.syncVisuals();
 
-    // Sand and gravel spray. The pool ages every frame (a tail left behind when the
-    // player steps out still settles), and nothing is flung on sealed roads.
+    // Ground effects share one wheel report. Spray ages every frame; tracks retain the
+    // bounded recent route. Nothing is emitted on a surface whose profile rejects it.
     //
-    // Fed by the driven car AND by every trailer: a braked or dragged trailer wheel
-    // ploughs through sand exactly like a locked car wheel does, and reports the
-    // same WheelSprayState, so one emitter serves both.
+    // Fed by the driven car AND every trailer: an unpowered or locked trailer tyre can
+    // disturb sand exactly like a car tyre, and the shared state keeps both paths identical.
     wheelSpray.update(frameDt, activeS);
     if (driving) {
-      for (const ws of driving.wheelSpray) emitSpray(ws, frameDt);
+      for (const ws of driving.wheelSpray) emitWheelEffects(ws, frameDt);
     }
-    trailerField.forEachSpray((ws) => emitSpray(ws, frameDt));
+    trailerField.forEachSpray((ws) => emitWheelEffects(ws, frameDt));
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);

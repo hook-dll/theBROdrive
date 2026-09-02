@@ -242,8 +242,9 @@ function bilinear(
 }
 
 /**
- * Keep comic contours and stipple, but leave diffuse light and shadow colour untouched so
- * the desert responds to lamps and moonlight exactly like the road.
+ * Shared near/far desert material. Physical normals and the live key light choose the
+ * lee side; a restrained relief re-ramp keeps broad dune shading visible after sky fill,
+ * haze and tone mapping without a terrain shadow map or another draw.
  *
  * Exported because the vista mesh draws the same ground and must therefore be the same
  * material: a second one, however carefully matched, drifts the moment either is tuned,
@@ -255,7 +256,7 @@ export const TERRAIN_MATERIAL = applyComicShading(
     roughness: 0.93,
     metalness: 0,
   }),
-  { lightingStrength: 0, shadowWarmth: 0 },
+  { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0.28 },
 );
 
 /**

@@ -1282,9 +1282,9 @@ export interface VehicleImpact {
 }
 
 /**
- * Per-wheel telemetry the renderer's sand/gravel spray reads each frame: where
- * the tyre is, which way it points and how hard it is disturbing the ground.
- * Written in place once per fixed step; nothing here is allocated per tick.
+ * Per-wheel telemetry consumed by the pooled ground effects: where the tyre is, which
+ * way it points, the ground plane, and how hard it is disturbing that ground. Written
+ * in place once per fixed step; nothing here is allocated per tick.
  */
 export interface WheelSprayState {
   /**
@@ -1303,6 +1303,10 @@ export interface WheelSprayState {
   /** Wheel-plane forward direction in world space (x, z), unit length. */
   forwardX: number;
   forwardZ: number;
+  /** Terrain contact normal in world axes, unit length. */
+  normalX: number;
+  normalY: number;
+  normalZ: number;
   /**
    * Is this wheel touching anything? A wheel in the air reports whatever slip its
    * free spin produces, and `surface` falls back to asphalt when there is no
@@ -2212,6 +2216,9 @@ export class Vehicle implements Rebasable {
         absoluteContactZ: 0,
         forwardX: 0,
         forwardZ: 1,
+        normalX: 0,
+        normalY: 1,
+        normalZ: 0,
         inContact: false,
         surface: SurfaceType.Asphalt,
         slipRatio: 0,
@@ -3970,11 +3977,9 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Copies the per-wheel contact, slip and surface data the renderer's sand and
-   * gravel spray needs into the pre-allocated `wheelSprayStates`, and the per-wheel
-   * loads and travel into `wheelRideStates`. Runs once per fixed step, after
-   * `updateWheelDynamics` has finalised slipRatio/slideT and the suspension state,
-   * and never allocates.
+   * Copies per-wheel contact, orientation, slip and surface data into the pre-allocated
+   * ground-effect states, and load/travel into `wheelRideStates`. Runs once per fixed
+   * step after wheel dynamics finalise, and never allocates.
    */
   private refreshWheelSpray(forwardSpeed: number): void {
     const n = this.wheels.length;
@@ -3988,6 +3993,9 @@ export class Vehicle implements Rebasable {
       s.absoluteContactZ = w.contactPoint.z + this.origin.z;
       s.forwardX = w.forwardDir.x;
       s.forwardZ = w.forwardDir.z;
+      s.normalX = w.contactNormal.x;
+      s.normalY = w.contactNormal.y;
+      s.normalZ = w.contactNormal.z;
       s.inContact = w.grounded;
       s.surface = w.groundSurface;
       s.slipRatio = w.slipRatio;

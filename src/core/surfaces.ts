@@ -178,13 +178,15 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
      * matter. The previous 1.35 let a two-wheel-drive road car climb one-in-five sand
      * slopes from rest and made leaving the road too cheap.
      *
-     * Forward grip remains above the old 0.95 profile, which stranded 6.7% of sampled
-     * headings after dune detail was added. Side grip stays much lower than asphalt,
-     * so sand washes wide; rolling resistance supplies the sustained speed penalty.
+     * Forward grip remains high enough to preserve escapability; the distinction from
+     * the road is carried by a lower lateral coefficient and sustained bulldozing drag.
+     * The latter is deliberately stronger than the old 0.075: engine-limited cars could
+     * otherwise accelerate almost identically on asphalt and sand despite different
+     * peak tyre capacity.
      */
     frictionSlip: 1.15,
-    sideFriction: 0.42,
-    rollingResistance: 0.075,
+    sideFriction: 0.34,
+    rollingResistance: 0.095,
     roughness: 0.05,
     // Wind ripple, and the long hummocks under the geometry's own ~10 m corrugation
     // crests. Sand gives under load, so its ripple is softer than gravel's chatter
