@@ -43,6 +43,14 @@ const MODEL_ID = 'proc_wedge';
 const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;
+/**
+ * Metres of verge the planner may use, mirroring `PASSING_VERGE_M` in autopilot.ts,
+ * and how far past the asphalt this bench's ribbon is solid. The ribbon is wider than
+ * the allowance so a legitimate pass never lands on the collider's own edge.
+ */
+const PASSING_VERGE = 1.2;
+const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE;
+const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
 const MODES: Record<AutopilotMode, { cruise: number; lateralAccel: number }> = {
   sleeper: { cruise: 20, lateralAccel: 5.1 },
   frantic: { cruise: 28, lateralAccel: 6.7 },
@@ -79,9 +87,12 @@ function addRoadCollider(physics: PhysicsWorld, road: Road, from: number, to: nu
   for (let row = 0; row < rows; row++) {
     const s = Math.min(to, from + row * ROAD_STEP);
     for (let side = 0; side < 2; side++) {
-      // The road ribbon ends at this edge. The terrain collider overlaps it, so an
-      // avoidance excursion cannot drop the car through a numerical seam.
-      const lateral = side === 0 ? -ROAD_HALF_WIDTH : ROAD_HALF_WIDTH;
+      // The ribbon reaches PAST the asphalt on purpose. The autopilot is allowed a
+      // wheel on the verge to squeeze past a boulder (PASSING_VERGE_M in
+      // autopilot.ts), and in the game the desert collider is flush with the asphalt
+      // edge; a bench ribbon that stopped at the paint dropped every excursion into
+      // the void and reported it as an autopilot that could not hold a line.
+      const lateral = side === 0 ? -RIBBON_HALF_WIDTH : RIBBON_HALF_WIDTH;
       road.offsetPoint(s, lateral, point);
       const i = (row * 2 + side) * 3;
       vertices[i] = point.x;
@@ -352,8 +363,8 @@ async function checkLitteredRoad(): Promise<void> {
     );
     check(
       `${mode}: littered road stays on road`,
-      result.worstLateral <= ROAD_HALF_WIDTH,
-      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${ROAD_HALF_WIDTH.toFixed(2)} m edge`,
+      result.worstLateral <= PASSING_EDGE,
+      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${PASSING_EDGE.toFixed(2)} m edge`,
     );
     check(
       `${mode}: littered road makes progress`,
@@ -376,8 +387,8 @@ async function checkHazards(): Promise<void> {
   );
   check(
     'avoiding it does not put the car off the road',
-    rock.worstLateral <= ROAD_HALF_WIDTH,
-    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${ROAD_HALF_WIDTH.toFixed(2)} m edge`,
+    rock.worstLateral <= PASSING_EDGE,
+    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${PASSING_EDGE.toFixed(2)} m edge`,
   );
   const wall = await driveHazard({ s: START_S + 300, lateral: 0, radius: 6, breakable: false }, 100);
   check(
