@@ -88,7 +88,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Asphalt]: {
     label: 'asphalt',
     frictionSlip: 2.6,
-    sideFriction: 1.0,
+    // Road-only steering experiment: twice the previous lateral tyre force.
+    sideFriction: 2.0,
     rollingResistance: 0.013,
     roughness: 0.012,
     microRelief: 0,
@@ -101,7 +102,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
     frictionSlip: 2.2,
-    sideFriction: 0.84,
+    // Retains cracked asphalt's 84% relationship to sound asphalt.
+    sideFriction: 1.68,
     rollingResistance: 0.018,
     roughness: 0.06,
     microRelief: 0,
