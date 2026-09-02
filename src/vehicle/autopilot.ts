@@ -49,6 +49,8 @@ const STEER_LOCK_CURVE = 0.161;
  * differ between cars for no gain, and being slightly pessimistic is free.
  */
 const CAR_HALF_WIDTH_M = 1.05;
+/** Keeps the avoidance line until the whole vehicle has cleared the prop. */
+const CAR_HALF_LENGTH_M = 3;
 /**
  * Extra metres the middle avoidance rung asks for beyond bare body clearance, and the
  * fraction of that clearance the braking corridor is measured at. Together they
@@ -179,20 +181,22 @@ export class Autopilot {
       this.visitHazard,
     );
     this.dynamicDistance = this.dynamicObstacleDistance(vehicle, originX, originZ);
+    const hazard = this.hazard;
 
-    let obstacleDistance = this.dynamicDistance;
+    // Indexed road props are known much farther ahead than the short physics rays.
+    // Include their distance in the same braking envelope so steering has time to
+    // establish the detour before the car reaches the object.
+    const obstacleDistance = Math.min(this.dynamicDistance, this.hazardDistance);
     let mustStop = this.dynamicDistance < 4;
 
-    // Retire a plan whose hazard is behind the car, keep one whose hazard is still
-    // ahead, and only replan when something NEARER turns up. Without the latch the
-    // nearest-hazard answer changes every few seconds on a real road and the car
-    // swerves for each change; with it, one hazard produces one line.
+    // Retire only after the REAR of the car has passed the far edge of the prop.
+    // The old subtraction retired at the near edge, exactly while the car was
+    // alongside it, and centreline guidance then steered back through the obstacle.
     const planned = this.plannedHazard;
-    if (planned && planned.s - planned.radius < this.hintS) {
+    if (planned && planned.s + planned.radius + CAR_HALF_LENGTH_M < this.hintS) {
       this.plannedHazard = null;
       this.plannedLateral = 0;
     }
-    const hazard = this.hazard;
     if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
       // Pick the smallest safe detour first, then decide about braking separately.
       // A full sleeper margin before the compact clearance pushed centre-lane rocks
