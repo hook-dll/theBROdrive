@@ -15,6 +15,7 @@ interface ModeConfig {
   readonly lookaheadSpeed: number;
   readonly hazardMargin: number;
   readonly brakeLead: number;
+  readonly curveLead: number;
 }
 
 /**
@@ -23,8 +24,8 @@ interface ModeConfig {
  * Frantic remains faster through every curve while retaining a useful safety margin.
  */
 const MODES: Record<AutopilotMode, ModeConfig> = {
-  sleeper: { cruiseMps: 20, lateralAccel: 3.6, brakeAccel: 4.2, lookaheadBase: 11, lookaheadSpeed: 1.35, hazardMargin: 1.4, brakeLead: 18 },
-  frantic: { cruiseMps: 28, lateralAccel: 5.0, brakeAccel: 6.4, lookaheadBase: 9, lookaheadSpeed: 1.0, hazardMargin: 0.45, brakeLead: 7 },
+  sleeper: { cruiseMps: 20, lateralAccel: 3.6, brakeAccel: 4.2, lookaheadBase: 11, lookaheadSpeed: 1.35, hazardMargin: 1.4, brakeLead: 18, curveLead: 30 },
+  frantic: { cruiseMps: 28, lateralAccel: 5.0, brakeAccel: 6.4, lookaheadBase: 9, lookaheadSpeed: 1.0, hazardMargin: 0.45, brakeLead: 7, curveLead: 24 },
 };
 /**
  * Steering is geometric. `Vehicle` interprets input as a fraction of the model's
@@ -57,7 +58,7 @@ const CAR_HALF_WIDTH_M = 1.05;
 const AVOID_HYSTERESIS_M = 0.4;
 const BLOCK_CORRIDOR_FRACTION = 0.8;
 const CENTERLINE_PULL = 0.4;
-const TURN_CURVATURE_SAMPLES = 5;
+const TURN_CURVATURE_SAMPLES = 8;
 const TURN_COAST_CURVATURE = 0.004;
 const TURN_COAST_STEER = 0.12;
 const TURN_COAST_MIN_SPEED_MPS = 5;
@@ -256,12 +257,14 @@ export class Autopilot {
     // geometric angle is what reaches the tyres, not a command hidden inside slack.
     out.steer = steeringInputForWheelAngle(wheelAngle, vehicle.modelDef.steerLock, speed);
 
-    // Look beyond the waypoint for the bend's peak curvature. Sampling only the
-    // waypoint lets the car arrive at a turn at cruise speed when the turn begins
-    // just after that point.
+    // Look beyond the physical braking distance for the bend's peak curvature.
+    // `curveLead` provides setup distance before braking becomes mandatory; keeping
+    // it separate from obstacle `brakeLead` avoids making prop stops unnecessarily
+    // early. Extra samples retain roughly the old spatial resolution over the
+    // longer preview.
     const turnLookahead = Math.max(
       lookahead,
-      config.brakeLead + (speed * speed) / (2 * config.brakeAccel),
+      config.curveLead + config.brakeLead + (speed * speed) / (2 * config.brakeAccel),
     );
     let upcomingCurvature = Math.abs(target.curvature);
     for (let i = 1; i <= TURN_CURVATURE_SAMPLES; i++) {
