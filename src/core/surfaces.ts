@@ -52,6 +52,32 @@ export interface SurfaceProps {
    */
   readonly microRelief: number;
   /**
+   * Amplitude in metres of the MID sub-collider profile: the 3-6 m band, which on
+   * loose ground is hummock, whoop and the long side of track corrugation.
+   *
+   * It exists because of a resolution floor, exactly like `microRelief` and
+   * `texture`, but a different one. The shipped desert is a heightfield with 3 m
+   * cells (`deserttiles.ts`), so it cannot honestly carry anything under about 7.5 m
+   * of wavelength. Terrain geometry therefore stops at the ~10 m corrugation band in
+   * world/terrain.ts, and this carries the octaves below it: 5.5 m and 3.2 m are 3.0
+   * and 5.2 Hz at 60 km/h — primary ride and the bottom of secondary ride, the band a
+   * body HEAVES in rather than the one a tyre buzzes in.
+   *
+   * Centimetres here are not small. It reaches the body through the tyre and the
+   * unsprung mass like any bump (see the tyre block in vehicle.ts) and it costs grip
+   * while it does. Measured on an in-game excursion at 67 km/h, sand's 9 cm is worth
+   * about a third of the desert's body heave on its own; the terrain's corrugation is
+   * worth about the same, and together they take heave from 0.32 g rms to 0.71.
+   *
+   * It also never touches a vertex, which is the other half of why it is here: it
+   * cannot crumple a dune, so it is the knob to turn when the desert must feel rougher
+   * without the landscape changing shape at all.
+   *
+   * Zero for the sealed surfaces: a graded road has no hummocks. What a road has in
+   * this band is its own collider's 3.33 m bump octave.
+   */
+  readonly hummock: number;
+  /**
    * Amplitude in metres of the SHORT sub-collider profile: millimetres of chip, seam
    * and crack, isotropic, at a metre and a half of wavelength and under (see
    * `RoadTexture`).
@@ -93,6 +119,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.013,
     roughness: 0.012,
     microRelief: 0,
+    hummock: 0,
     // 6 mm of chip and seam: a well-kept sealed road, ISO class B/C territory.
     texture: 0.006,
     color: 0x505055,
@@ -107,6 +134,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.018,
     roughness: 0.06,
     microRelief: 0,
+    hummock: 0,
     // Crazing, patches and lifted edges. Nearly three times the sound asphalt.
     texture: 0.011,
     color: 0x5a5550,
@@ -119,7 +147,12 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     sideFriction: 0.5,
     rollingResistance: 0.035,
     roughness: 0.09,
-    microRelief: 0.007,
+    // Gravel is the ROUGHEST ground in the game, and it used to be quieter than sand:
+    // 7 mm against sand's 18. A graded track corrugates under its own traffic —
+    // washboard is the thing gravel is famous for — and stones do not deform under a
+    // tyre the way sand does.
+    microRelief: 0.026,
+    hummock: 0.045,
     texture: 0.008,
     color: 0x7a6c56,
     dust: 0.6,
@@ -153,7 +186,12 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     sideFriction: 0.42,
     rollingResistance: 0.075,
     roughness: 0.05,
-    microRelief: 0.018,
+    // Wind ripple, and the long hummocks under the geometry's own ~10 m corrugation
+    // crests. Sand gives under load, so its ripple is softer than gravel's chatter
+    // while its hummock band is the tallest: this is the surface an excursion is
+    // measured on (tools/desert-washboard.ts).
+    microRelief: 0.02,
+    hummock: 0.09,
     texture: 0.006,
     color: 0xbf9f6b,
     dust: 1.0,
@@ -165,7 +203,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     sideFriction: 0.8,
     rollingResistance: 0.022,
     roughness: 0.13,
-    microRelief: 0.02,
+    // Broken rock chatters rather than ripples, and a shelf is never flat.
+    microRelief: 0.024,
+    hummock: 0.05,
     texture: 0.014,
     color: 0x6b6257,
     dust: 0.25,
@@ -178,6 +218,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.012,
     roughness: 0.006,
     microRelief: 0,
+    hummock: 0,
     // Slabs are smoother than asphalt between their joints, and the joints are in
     // the collider's own rows rather than here.
     texture: 0.0025,
@@ -233,19 +274,62 @@ const LUMP_WAVELENGTH = 7.5;
 const RIPPLE_TURN_WAVELENGTH = 450;
 /** Radians the direction may swing either side of the world's prevailing wind. */
 const RIPPLE_TURN_RAD = 1.1;
+/**
+ * THE HUMMOCK BAND (`SurfaceProps.hummock`): the octave between the ripple above and
+ * the terrain's own 9 m corrugation in world/terrain.ts.
+ *
+ * 5.5 m and its 3.2 m harmonic. The upper end is set by the DESERT HEIGHTFIELD, not
+ * by the physics step: its cells are 3 m, so 7.5 m is the shortest wave geometry can
+ * carry, and everything below that has to arrive here or not at all. The lower end is
+ * the 60 Hz step's own 1.7 m floor, which both octaves clear at every speed the game
+ * reaches. At 60 km/h they land at 3.0 and 5.2 Hz: primary ride and the bottom of
+ * secondary ride, which is the band a body HEAVES in — the sway a car gets when it
+ * leaves the asphalt, as opposed to the buzz the 2.2 m ripple gives it.
+ *
+ * Anisotropic, on the same grain and the same bent direction field as the ripple, so
+ * the whole desert has ONE grain at every scale: cut across it and the car works,
+ * run with it and it settles. The coherence is longer than the ripple's because a
+ * hummock is a bigger landform than a ripple, and a crest that short would read as
+ * lumps rather than as a direction.
+ */
+const HUMMOCK_WAVELENGTH = 5.5;
+const HUMMOCK_SHORT_WAVELENGTH = 3.2;
+const HUMMOCK_SHORT_GAIN = 0.5;
+const HUMMOCK_COHERENCE = 22;
 
 export class MicroRelief {
   private readonly ripple: Noise2D;
   private readonly lump: Noise2D;
+  private readonly hummock: Noise2D;
   private readonly turn: Noise2D;
   /** The world's prevailing wind, radians; the turn field bends the grain around it. */
   private readonly wind: number;
+  /**
+   * The last `basis` result: distance across the ridges, and along them. Scratch
+   * rather than a returned pair because both fields below need it and this is called
+   * once per wheel per step.
+   */
+  private across = 0;
+  private along = 0;
 
   constructor(seed: number) {
     this.ripple = new Noise2D(seed ^ 0x7a11e5);
     this.lump = new Noise2D(seed ^ 0x1c3b09);
+    this.hummock = new Noise2D(seed ^ 0x5f2d4b);
     this.turn = new Noise2D(seed ^ 0x2f60d1);
     this.wind = hash01(seed, 0x1d) * Math.PI * 2;
+  }
+
+  /** Rotates a world position into the local grain direction, into the scratch pair. */
+  private basis(x: number, z: number): void {
+    const angle =
+      this.wind +
+      RIPPLE_TURN_RAD *
+        this.turn.at(x / RIPPLE_TURN_WAVELENGTH, z / RIPPLE_TURN_WAVELENGTH);
+    const acrossX = Math.cos(angle);
+    const acrossZ = Math.sin(angle);
+    this.across = x * acrossX + z * acrossZ;
+    this.along = z * acrossX - x * acrossZ;
   }
 
   /**
@@ -254,17 +338,25 @@ export class MicroRelief {
    * coordinate would silently change shape every time the floating origin moved.
    */
   at(x: number, z: number): number {
-    const angle =
-      this.wind +
-      RIPPLE_TURN_RAD *
-        this.turn.at(x / RIPPLE_TURN_WAVELENGTH, z / RIPPLE_TURN_WAVELENGTH);
-    const acrossX = Math.cos(angle);
-    const acrossZ = Math.sin(angle);
-    const across = x * acrossX + z * acrossZ;
-    const along = z * acrossX - x * acrossZ;
-    const ridges = this.ripple.at(across / RIPPLE_WAVELENGTH, along / RIPPLE_COHERENCE);
+    this.basis(x, z);
+    const ridges = this.ripple.at(this.across / RIPPLE_WAVELENGTH, this.along / RIPPLE_COHERENCE);
     const lumps = this.lump.at(x / LUMP_WAVELENGTH, z / LUMP_WAVELENGTH);
     return (ridges + LUMP_GAIN * lumps) / (1 + LUMP_GAIN);
+  }
+
+  /**
+   * The hummock band at an ABSOLUTE world position, in [-1, 1]; callers scale it by
+   * the surface's own `hummock`. Same grain as `at`, two octaves up in wavelength
+   * (see the constants above).
+   */
+  hummockAt(x: number, z: number): number {
+    this.basis(x, z);
+    const long = this.hummock.at(this.across / HUMMOCK_WAVELENGTH, this.along / HUMMOCK_COHERENCE);
+    const short = this.hummock.at(
+      this.across / HUMMOCK_SHORT_WAVELENGTH + 41.3,
+      this.along / HUMMOCK_COHERENCE - 17.9,
+    );
+    return (long + HUMMOCK_SHORT_GAIN * short) / (1 + HUMMOCK_SHORT_GAIN);
   }
 }
 

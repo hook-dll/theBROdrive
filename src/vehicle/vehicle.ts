@@ -3030,6 +3030,9 @@ export class Vehicle implements Rebasable {
       //
       //   microRelief  the desert's own wind-blown corrugation, centimetres, with a
       //                grain: crossing it hammers and running with it settles.
+      //   hummock      the 3-6 m band under the terrain heightfield's own 3 m cells:
+      //                the long swell a car HEAVES on once it leaves the asphalt, as
+      //                opposed to the buzz above. Loose surfaces only.
       //   texture      what a SEALED surface has instead — millimetres of chip and
       //                crack, isotropic, and the reason a road is not glass. Asphalt
       //                used to have exactly zero of this, which is why a smooth
@@ -3044,6 +3047,11 @@ export class Vehicle implements Rebasable {
         ground && w.grounded
           ? surface.microRelief *
               this.microRelief.at(
+                w.contactPoint.x + this.origin.x,
+                w.contactPoint.z + this.origin.z,
+              ) +
+            surface.hummock *
+              this.microRelief.hummockAt(
                 w.contactPoint.x + this.origin.x,
                 w.contactPoint.z + this.origin.z,
               ) +

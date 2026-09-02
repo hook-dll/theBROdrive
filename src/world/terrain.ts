@@ -70,12 +70,99 @@ const RIPPLE_WIDTH = 75;
 const RIPPLE_FULL = 55;
 
 /**
- * Fine driveable detail. Thirty centimetres over 20/10 m keeps off-road suspension
- * alive without covering every dune face in metre-high chop.
+ * THE FINE BAND: the ground the driver's spine reads.
+ *
+ * The shipped desert is the player-centred tile lattice (`deserttiles.ts`), a
+ * heightfield with 3 m cells, so nothing below about 7.5 m of wavelength can be
+ * geometry at all — below that it aliases into a seed lottery, and it belongs to the
+ * per-wheel profile in core/surfaces.ts instead (`microRelief`, `hummock`).
+ *
+ * Above that floor there are two layers:
+ *
+ *  1. CORRUGATION. Long-crested transverse ridges about 10 m apart, a hundred metres
+ *     of crest, a quarter of a metre tall. Ten metres is 1.7 Hz at 60 km/h and 2.5 at
+ *     90 — the primary-ride band, which is what "the car starts to sway and bounce"
+ *     actually means, and the band impact deleted when it cut the old isotropic chop
+ *     from 0.95 m to 0.3 m and threw the pits away.
+ *
+ *     It is ORGANISED rather than isotropic, and that is the whole design. The same
+ *     energy as isotropic FBM is the crumpled blanket this branch got rid of; laid out
+ *     as parallel ridges on the dune band's own axis, bent by `CORRUGATION_BEND` so
+ *     they are not a comb, it is a wind-ripple field — which is what a dune field
+ *     actually looks like. Hillshading the field at a low sun shows corduroy.
+ *
+ *     MEASURED, and worth knowing before tuning it: in the game's own renderer it is
+ *     invisible either way. `TERRAIN_MATERIAL` runs the comic ground shading over a
+ *     hemisphere plus one direct light, and a 2% slope over ten metres does not move
+ *     that shading at any hour — screenshots at 09:00 and 17:40 are indistinguishable
+ *     from the flat desert. So the ripple layout buys insurance rather than beauty,
+ *     and amplitude here is bounded by RIDE and ESCAPABILITY, not by looks.
+ *
+ *  2. CHOP. A little isotropic 20/10 m noise so the corrugation is not the only thing
+ *     in the band and the grain never reads as machined.
+ *
+ * WAVELENGTH IS TWICE THE CONSTANT. `Noise2D` interpolates between lattice values one
+ * unit apart, so a crest and the next trough are one unit and a full cycle is TWO:
+ * `CORRUGATION_SPACING = 5` is a ten-metre wave, not a five-metre one. The first cut
+ * of this band used 9 and produced an 18 m wave — half the intended excitation
+ * frequency and a third of the kick.
+ *
+ * `CORRUGATION_PATCH_*` is what keeps it from being a uniform texture: corrugation
+ * develops where wind has a fetch of loose sand, so its amplitude is modulated by a
+ * kilometre-scale field down to `CORRUGATION_PATCH_FLOOR`. Some flats hammer, some
+ * are quiet, and which is which is a property of the place.
+ *
+ * Numbers this band is set by, all at 60 km/h from `tools/desert-washboard.ts` and an
+ * in-game drive at 66-68 km/h:
+ *
+ *                         mesh kick rms/p99    body heave rms/p95 (g)
+ *   road (reference)        0.18-0.31 / 0.5-0.9      0.101 / -
+ *   desert before           0.095 / 0.32             0.317 / 0.61
+ *   desert now              0.300 / 1.09             0.707 / 1.38
  */
+const CORRUGATION_SPACING = 5;
+const CORRUGATION_COHERENCE = 48;
+const CORRUGATION_AMPLITUDE = 0.24;
+const CORRUGATION_BEND_WAVELENGTH = 420;
+const CORRUGATION_BEND = 26;
+const CORRUGATION_PATCH_LENGTH = 1500;
+const CORRUGATION_PATCH_WIDTH = 430;
+const CORRUGATION_PATCH_FLOOR = 0.4;
+
 const CHOP_WAVELENGTH = 20;
 const CHOP_AMPLITUDE = 0.3;
-const DETAIL_FADE_IN = 14;
+
+/**
+ * SCOOPS: the discrete events, and the reason an excursion has a worst moment rather
+ * than an average one. Blowout hollows a few metres across, carved where a smooth
+ * field crosses a threshold, so they are a pure function of world position rather
+ * than a lattice of identical dishes.
+ *
+ * THE FIELD IS FRACTAL AND THAT IS NOT DECORATION. A single value-noise octave
+ * thresholded on a square lattice draws SQUARE contours: hillshading the old
+ * construction showed rounded rectangles and L-shapes lying in the sand, axis-aligned
+ * across the whole world, which is exactly the machined look this branch set out to
+ * get rid of. Three octaves break the contour up into an outline nothing recognises
+ * as a lattice.
+ *
+ * Depth is bounded by ESCAPABILITY, not by looks: a scoop is the one part of this
+ * band that makes a basin, so it sets the worst grade a stopped car finds under its
+ * wheels. Sand's `frictionSlip` is 1.15 now (it was 1.35 when the old 0.55 m pits
+ * were measured), which buys a 15% pull-away grade for a two-wheel-drive saloon, so
+ * the depth came down with it and the threshold went up to make them sparser.
+ * `tools/desert-washboard.ts` reports the blocked/stranded census that bounds both.
+ */
+const SCOOP_WAVELENGTH = 26;
+const SCOOP_THRESHOLD = 0.5;
+const SCOOP_DEPTH = 0.32;
+
+/**
+ * Lateral distance at which the fine band is fully in. Short on purpose: the player
+ * feels this layer the moment two wheels are off the asphalt, and that is the whole
+ * reason it is split out of `relief` — the dunes have to arrive slowly, the
+ * corrugation does not.
+ */
+const DETAIL_FADE_IN = 10;
 const DETAIL_HOLD = 62;
 /**
  * The refined terrain grid ends here, so this layer must be exactly zero at the
@@ -171,6 +258,10 @@ export class Terrain {
   private readonly duneNoise: Noise2D;
   private readonly rippleNoise: Noise2D;
   private readonly chopNoise: Noise2D;
+  private readonly corrugationNoise: Noise2D;
+  private readonly corrugationBendNoise: Noise2D;
+  private readonly corrugationPatchNoise: Noise2D;
+  private readonly scoopNoise: Noise2D;
   private readonly outcropNoise: Noise2D;
   private readonly washNoise: Noise2D;
   private readonly field: SurfaceField;
@@ -182,6 +273,10 @@ export class Terrain {
     this.duneNoise = new Noise2D(seed ^ 0xc2b2ae35);
     this.rippleNoise = new Noise2D(seed ^ 0x27d4eb2f);
     this.chopNoise = new Noise2D(seed ^ 0x9e3779b9);
+    this.corrugationNoise = new Noise2D(seed ^ 0x165667b1);
+    this.corrugationBendNoise = new Noise2D(seed ^ 0x85ebca6b);
+    this.corrugationPatchNoise = new Noise2D(seed ^ 0xff51afd7);
+    this.scoopNoise = new Noise2D(seed ^ 0xc4ceb9fe);
     this.outcropNoise = new Noise2D(seed ^ 0xd3a2646c);
     this.washNoise = new Noise2D(seed ^ 0x94d049bb);
     this.field = new SurfaceField(seed);
@@ -268,8 +363,50 @@ export class Terrain {
   }
 
   /**
-   * Subtle wheel-scale desert texture for the road-aligned refined grid. It fades
-   * to exactly zero at both mesh seams; large-scale dune shape remains in `relief`.
+   * The fine band at a point, UNFADED: corrugation, chop and scoops (see the
+   * constants above). One function so the shipped tile lattice and the legacy road
+   * fan cannot carry different ground, and so the two fades below are the only
+   * difference between them.
+   */
+  private fineRelief(x: number, z: number): number {
+    // The dune band's own axis, so the ripples run WITH the ridges. `across` is the
+    // direction the crests are counted along; `along` is a crest's own length.
+    const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
+    const across = -x * DUNE_AXIS_Z + z * DUNE_AXIS_X;
+
+    // Bending `across` rather than rotating the basis buys the same curved crest
+    // lines for one noise sample and no trigonometry.
+    const bend =
+      this.corrugationBendNoise.at(
+        along / CORRUGATION_BEND_WAVELENGTH,
+        across / CORRUGATION_BEND_WAVELENGTH,
+      ) * CORRUGATION_BEND;
+    const patch = this.corrugationPatchNoise.at(
+      along / CORRUGATION_PATCH_LENGTH,
+      across / CORRUGATION_PATCH_WIDTH,
+    );
+    const strength =
+      CORRUGATION_PATCH_FLOOR + (1 - CORRUGATION_PATCH_FLOOR) * smoothstep01(patch * 0.5 + 0.5);
+    let h =
+      this.corrugationNoise.at((across + bend) / CORRUGATION_SPACING, along / CORRUGATION_COHERENCE) *
+      CORRUGATION_AMPLITUDE *
+      strength;
+
+    h += this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) * CHOP_AMPLITUDE;
+
+    // `t * (2 - t)` gives the hollow a flattish floor and steep walls instead of the
+    // cone a linear ramp leaves, so a wheel drops into it and climbs out again.
+    const scoop = this.scoopNoise.fbm(x / SCOOP_WAVELENGTH, z / SCOOP_WAVELENGTH, 3, 2.3, 0.5);
+    if (scoop > SCOOP_THRESHOLD) {
+      const t = (scoop - SCOOP_THRESHOLD) / (1 - SCOOP_THRESHOLD);
+      h -= t * (2 - t) * SCOOP_DEPTH;
+    }
+    return h;
+  }
+
+  /**
+   * The fine band for the legacy road-aligned refined grid. It fades to exactly zero
+   * at both of that mesh's seams; large-scale dune shape remains in `relief`.
    */
   detailAt(x: number, z: number, dist: number): number {
     if (dist <= CORRIDOR_INNER || dist >= DETAIL_REACH) return 0;
@@ -277,24 +414,14 @@ export class Terrain {
       smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER)) *
       (1 - smoothstep01((dist - DETAIL_HOLD) / (DETAIL_REACH - DETAIL_HOLD)));
     if (fade <= 0) return 0;
-    return (
-      this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) *
-      CHOP_AMPLITUDE *
-      fade
-    );
+    return this.fineRelief(x, z) * fade;
   }
 
-  /** Fine texture for the player-centred tile lattice, which has no outer seam. */
+  /** The fine band for the shipped tile lattice, which has no outer seam. */
   private explorationDetailAt(x: number, z: number, dist: number): number {
     if (dist <= CORRIDOR_INNER) return 0;
-    const fade = smoothstep01(
-      (dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER),
-    );
-    return (
-      this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) *
-      CHOP_AMPLITUDE *
-      fade
-    );
+    const fade = smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER));
+    return this.fineRelief(x, z) * fade;
   }
 
   /**
