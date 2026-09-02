@@ -50,8 +50,12 @@ function flatKey(color: number, roughness: number): string {
 /** Stable program cache key for every condition material. */
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
-/** Body paint adds scratch wear while remaining a single shader permutation. */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v3';
+/**
+ * Body paint adds mesh-local dent relief in the same single shader permutation.
+ * Version v4 invalidates v3 programs, whose fragment body still drew chalk-like
+ * scratch lines under the same custom cache key.
+ */
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v4';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -74,7 +78,14 @@ const VERTEX_VARYING =
   'varying vec3 vCondWorldPos;\n' +
   'varying vec3 vCondWorldNormal;\n' +
   'varying vec3 vCondLocalPos;\n' +
-  'varying vec3 vCondLocalNormal;';
+  'varying vec3 vCondLocalNormal;\n' +
+  // The mesh's own X and Y axes in world space. A mesh-local gradient (the dent
+  // relief) has to be rotated into world space to perturb a normal, and
+  // `modelMatrix` is declared by three.js in the VERTEX stage only — using it in the
+  // fragment shader silently fails to compile, which drops the whole body mesh from
+  // the frame. Two axes are enough: the third is their cross product.
+  'varying vec3 vCondAxisX;\n' +
+  'varying vec3 vCondAxisY;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
 // exact world transform for the normal (no inverse-transpose required).
@@ -83,7 +94,9 @@ const WORLD_POS_HOOK =
   '\tvCondWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n' +
   '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;\n' +
   '\tvCondLocalPos = transformed;\n' +
-  '\tvCondLocalNormal = objectNormal;';
+  '\tvCondLocalNormal = objectNormal;\n' +
+  '\tvCondAxisX = normalize( mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 ) );\n' +
+  '\tvCondAxisY = normalize( mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 ) );';
 
 const CONDITION_PARS = `
 uniform float uDirt;
@@ -140,6 +153,46 @@ vec2 condRust( vec3 p ) {
 // How hard the pits tilt the normal. Above ~0.03 the relief reads as noise.
 #define COND_PIT_DEPTH 0.015
 
+/**
+ * DENT DEPTH FIELD, in mesh-local metres, shared by the paint hook and the normal
+ * hook so a dent's shading and its dulled paint can never disagree.
+ *
+ * Seven cells per metre puts the value-noise lobes at roughly 14 cm — a bumper
+ * crease, not hail. The position-only shear breaks the lattice without a second
+ * sample. The damage argument moves the threshold rather than the amplitude, so light
+ * damage is a few isolated lobes and full damage lets neighbours meet into crumpled
+ * panels.
+ *
+ * Weighting: lower flanks and the extremities of the shell, because that is where a
+ * car collects damage and because a dent blanket over a roof reads as a texture.
+ */
+float condDent( vec3 localP, float damage ) {
+  vec3 p = localP * 7.0;
+  p += vec3( p.z * 0.31, p.x * 0.19, p.y * 0.11 );
+  float lobes = condNoise( p + 19.0 );
+  float core = smoothstep( 0.82 - 0.32 * damage, 0.94 - 0.31 * damage, lobes );
+  float lower = 1.0 - smoothstep( 0.35, 1.25, localP.y );
+  float extremity = smoothstep( 0.55, 1.55, max( abs( localP.x ), abs( localP.z ) ) );
+  return damage * core * ( 0.2 + 0.8 * max( lower, extremity ) );
+}
+
+/**
+ * Finite-difference step for the dent field, metres, and how deep a full-strength
+ * lobe presses in.
+ *
+ * THE GRADIENT IS ANALYTIC, NOT a screen derivative. Screen-space derivatives of a
+ * smooth mask shrink with the pixel footprint, so a dent that tilted the normal
+ * convincingly with
+ * the camera at the door vanished entirely at chase distance — measured on the
+ * shipped chase camera, where a fully damaged car read as undamaged. Three extra taps
+ * in mesh space cost the same at every zoom.
+ *
+ * 12 mm over a 14 cm lobe is a 17% slope: a pressed panel catching the sun on one
+ * side. Twice that started to read as a rippled surface rather than as damage.
+ */
+#define COND_DENT_EPS 0.045
+#define COND_DENT_DEPTH 0.012
+
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `
 uniform float uPalettePaint;
@@ -195,9 +248,16 @@ const CONDITION_BODY = `
 }`;
 
 /**
- * Painted shells share the part dust distribution, with a lower-flank term for road
- * spray. Scratch coordinates stay mesh-local so a moving/floating-origin car does
- * not make its damage crawl across the paint.
+ * Painted shells share the part dust distribution, with lower-flank road spray and
+ * dent relief. The dent field stays mesh-local so a moving/floating-origin car does
+ * not make collision damage crawl across its paint.
+ *
+ * The body colour hook evaluates the shared dent field once; the normal hook
+ * evaluates it four times (the value plus three finite differences), so the pair
+ * costs five base noise samples against the four the old line-based scratch hook
+ * spent on one `condNoise` plus a three-sample `condFbm`. The extra sample buys a
+ * gradient that does not change with the camera distance, which is what makes the
+ * damage visible at all from the chase seat.
  */
 const CAR_BODY_CONDITION_BODY = `
 #include <metalnessmap_fragment>
@@ -218,20 +278,18 @@ const CAR_BODY_CONDITION_BODY = `
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 
-  vec3 scratchP = vCondLocalPos;
-  float scratchLine = 1.0 - smoothstep(
-    0.025, 0.075,
-    abs( fract( scratchP.y * 15.0 + condNoise( scratchP * 4.0 ) * 0.35 ) - 0.5 )
-  );
-  float scratchEdge = smoothstep( 0.5, 0.82, condFbm( scratchP * 5.5 + 19.0 ) );
-  float scratchLower = 1.0 - smoothstep( 0.35, 1.25, scratchP.y );
-  float scratchMask = uScratches * scratchLine * scratchEdge * ( 0.25 + 0.75 * scratchLower );
-  // Contrast follows the underlying paint: dark primer on light paint, pale exposed
-  // primer on dark paint. A scratch therefore remains readable on every random colour.
-  vec3 scratchColor = condLum > 0.42 ? vec3( 0.035 ) : vec3( 0.92 );
-  diffuseColor.rgb = mix( diffuseColor.rgb, scratchColor, scratchMask * 0.92 );
-  roughnessFactor = mix( roughnessFactor, 0.9, scratchMask );
-  metalnessFactor = mix( metalnessFactor, 0.0, scratchMask );
+  float dentMask = condDent( vCondLocalPos, uScratches );
+  // Paint response is deliberately secondary: the RELIEF in the normal hook carries
+  // the damage. Dulling plus a roughness pull is what a pressed panel does to a
+  // highlight; anything stronger reads as a painted-on mark, which is the exact
+  // failure of the chalk-line scratches this replaces.
+  diffuseColor.rgb *= 1.0 - 0.1 * dentMask;
+  roughnessFactor = mix( roughnessFactor, 0.88, dentMask * 0.35 );
+  // Bare primer only at high damage and only on the sharpest lobes, where folded
+  // sheet actually loses its paint. The cap keeps it a hint, not a stripe.
+  float dentCrease = smoothstep( 0.55, 1.0, dentMask ) * smoothstep( 0.72, 1.0, uScratches );
+  vec3 dentPrimer = condLum > 0.42 ? vec3( 0.18 ) : vec3( 0.58 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.06 );
 }`;
 
 /**
@@ -268,6 +326,54 @@ if ( uRust > 0.001 ) {
 }`;
 
 /**
+ * Rust and dent relief.
+ *
+ * Both fields perturb the view-space normal before the BRDF, so their dominant cue is
+ * a shifted highlight rather than a paint mark. Both gradients are finite differences
+ * in the field's own space — world for rust, mesh-local for dents — and both then
+ * rotate into view space, because that is the space the normal is in by this point.
+ */
+const CAR_BODY_NORMAL = `
+#include <normal_fragment_maps>
+
+if ( uRust > 0.001 ) {
+  vec3 condNP = vCondWorldPos;
+  float condH = condRust( condNP ).x;
+  vec3 condGrad = vec3(
+    condRust( condNP + vec3( COND_PIT_EPS, 0.0, 0.0 ) ).x - condH,
+    condRust( condNP + vec3( 0.0, COND_PIT_EPS, 0.0 ) ).x - condH,
+    condRust( condNP + vec3( 0.0, 0.0, COND_PIT_EPS ) ).x - condH
+  ) / COND_PIT_EPS;
+  vec3 condWN = normalize( vCondWorldNormal );
+  condGrad -= condWN * dot( condGrad, condWN );
+  // The normal is in view space by this point, so the world-space gradient has
+  // to be rotated into view space before it can perturb it.
+  vec3 condVG = ( viewMatrix * vec4( condGrad, 0.0 ) ).xyz;
+  normal = normalize( normal - condVG * uRust * COND_PIT_DEPTH );
+}
+
+if ( uScratches > 0.001 ) {
+  float dentH = condDent( vCondLocalPos, uScratches );
+  vec3 dentGrad = vec3(
+    condDent( vCondLocalPos + vec3( COND_DENT_EPS, 0.0, 0.0 ), uScratches ) - dentH,
+    condDent( vCondLocalPos + vec3( 0.0, COND_DENT_EPS, 0.0 ), uScratches ) - dentH,
+    condDent( vCondLocalPos + vec3( 0.0, 0.0, COND_DENT_EPS ), uScratches ) - dentH
+  ) / COND_DENT_EPS;
+  // Only the part of the gradient that lies IN the surface tilts a normal; the
+  // component along it is the field getting deeper, not the panel sloping.
+  vec3 dentLN = normalize( vCondLocalNormal );
+  dentGrad -= dentLN * dot( dentGrad, dentLN );
+  // Local -> world through the mesh's own axes (see VERTEX_VARYING for why this is
+  // not the model matrix), then world -> view, the space this normal is in.
+  vec3 dentWG =
+    vCondAxisX * dentGrad.x +
+    vCondAxisY * dentGrad.y +
+    cross( vCondAxisX, vCondAxisY ) * dentGrad.z;
+  vec3 dentVG = ( viewMatrix * vec4( dentWG, 0.0 ) ).xyz;
+  normal = normalize( normal - dentVG * COND_DENT_DEPTH );
+}`;
+
+/**
  * Patches one material's shader, binding its own uniform objects. This runs once per
  * material (when it is first compiled); the program itself is shared because every
  * condition material reports the same customProgramCacheKey.
@@ -288,7 +394,7 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
     .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
 }
 
-/** Binds the shell-only scratch hook without changing any shared source material. */
+/** Binds the shell-only dent hook without changing any shared source material. */
 function patchCarBodyShader(
   shader: WebGLProgramParametersWithUniforms,
   uniforms: CarBodyUniforms,
@@ -308,7 +414,7 @@ function patchCarBodyShader(
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
     .replace('#include <map_pars_fragment>', CONDITION_PARS)
     .replace('#include <map_fragment>', CAR_PAINT_MAP)
-    .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
+    .replace('#include <normal_fragment_maps>', CAR_BODY_NORMAL)
     .replace('#include <metalnessmap_fragment>', CAR_BODY_CONDITION_BODY);
 }
 /** Cheap atlas recolouring for static cars; deliberately excludes dynamic wear. */
@@ -437,7 +543,7 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
 }
 /**
  * Clones a static Soviet paint slot with only its atlas-colour replacement. Static
- * scenery never accumulates wear, so running the body dirt/scratch FBM on every
+ * scenery never accumulates wear, so running the body dirt/dent noise on every
  * parked car wastes fragment work and can force the fixed-step loop into slow motion.
  */
 export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Material {
