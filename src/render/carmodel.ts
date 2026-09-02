@@ -19,7 +19,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { makeCarBodyConditionMaterial, setCarBodyPalettePaint } from './materials';
+import {
+  makeCarBodyConditionMaterial,
+  makeCarPalettePaintMaterial,
+  setCarBodyPalettePaint,
+} from './materials';
 import { isProceduralCarPaintMaterial, proceduralCarScene } from './proceduralcars';
 import { CAR_MODELS, carModel, type CarModelDef, type GizmoAnchorDef } from '../vehicle/carmodels';
 
@@ -260,6 +264,32 @@ function cloneCarBodyPaintMaterials(root: THREE.Object3D, def: CarModelDef): voi
       : eligible(mesh.material);
   }
 }
+/**
+ * Gives static random-colour cars independent paint without the dynamic body-wear
+ * shader. Parked cars never accumulate dirt or scratches; paying that FBM cost for
+ * each one can saturate an integrated GPU as POIs enter the scene.
+ */
+function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
+  if (!def.paintStyle) return;
+  const clones = new Map<THREE.Material, THREE.Material>();
+  const paint = (source: THREE.Material): THREE.Material => {
+    const existing = clones.get(source);
+    if (existing) return existing;
+    const material = def.paintStyle === 'soviet-atlas'
+      ? makeCarPalettePaintMaterial(source)
+      : source.clone();
+    clones.set(source, material);
+    return material;
+  };
+
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    child.material = Array.isArray(child.material)
+      ? child.material.map(paint)
+      : paint(child.material);
+  });
+}
+
 
 /** Writes one deterministic per-car colour into already-independent paint materials. */
 function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey: string): void {
@@ -917,7 +947,7 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   const group = new THREE.Group();
   group.name = id;
   const body = t.body.clone(true);
-  cloneCarBodyPaintMaterials(body, t.def);
+  cloneStaticPaintMaterials(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   group.add(body);

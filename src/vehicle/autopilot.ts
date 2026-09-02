@@ -18,42 +18,30 @@ interface ModeConfig {
 }
 
 /**
- * 0.7–0.8 g is the measured period-tyre envelope in Vehicle. Sleeper reserves it to
- * 0.52 g (about 70% of the low end); frantic uses 0.68 g (about 91%). The remainder
- * is deliberate room for grade, steering backlash and obstacle corrections.
+ * Period tyres can sustain more than this, but using roughly half their envelope
+ * gives the car time to settle before a bend instead of arriving on the limit.
+ * Frantic remains faster through every curve while retaining a useful safety margin.
  */
 const MODES: Record<AutopilotMode, ModeConfig> = {
-  sleeper: { cruiseMps: 20, lateralAccel: 5.1, brakeAccel: 4.2, lookaheadBase: 9, lookaheadSpeed: 1.3, hazardMargin: 1.4, brakeLead: 18 },
-  frantic: { cruiseMps: 28, lateralAccel: 6.7, brakeAccel: 6.4, lookaheadBase: 6, lookaheadSpeed: 0.95, hazardMargin: 0.45, brakeLead: 7 },
+  sleeper: { cruiseMps: 20, lateralAccel: 3.6, brakeAccel: 4.2, lookaheadBase: 11, lookaheadSpeed: 1.35, hazardMargin: 1.4, brakeLead: 18 },
+  frantic: { cruiseMps: 28, lateralAccel: 5.0, brakeAccel: 6.4, lookaheadBase: 9, lookaheadSpeed: 1.0, hazardMargin: 0.45, brakeLead: 7 },
 };
 /**
- * Stanley cross-track gain, and why it is not small.
- *
- * Measured: at 0.72 the controller settled 3.4 m off the centreline at 68 km/h and
- * STAYED there, holding a steady 0.13 of steering input. That is not an unstable
- * loop, it is a dead one — `tools/handling-bench.ts` reports a 0.17 input dead zone
- * (steering-box play plus the input exponent), so 0.13 commands exactly nothing and
- * the error it was correcting became the equilibrium.
- *
- * 3.4 raises the correction for a half-metre error at 20 m/s from 0.02 to 0.09, and
- * the slack compensation below carries what is left across the dead band. The atan
- * still saturates gracefully, so a large error asks for full lock and no more.
+ * Steering is geometric. `Vehicle` interprets input as a fraction of the model's
+ * steering lock, so a preview heading error cannot be sent directly as normalized
+ * input. Pure pursuit computes the curvature of a waypoint and converts it to the
+ * actual front-wheel angle before normalizing it.
  */
-const STANLEY_GAIN = 3.4;
-const STANLEY_SPEED_FLOOR = 2.5;
-/**
- * Input magnitude below which the steering box does nothing at all, as measured by
- * the handling bench. Every non-zero steer command is lifted over it: a human driver
- * learns to turn the wheel past the slack, and an autopilot that does not is a driver
- * with no hands below a tenth of lock.
- */
-const STEER_SLACK_INPUT = 0.18;
-/**
- * Command magnitude over which the slack lift fades in. Small enough that a real
- * correction is carried immediately, large enough that centimetre-scale errors do
- * not command a tenth of lock: at 20 m/s this is a cross-track error of ~0.3 m.
- */
-const STEER_SLACK_BLEND = 0.05;
+const DEFAULT_WHEELBASE_M = 2.6;
+const MIN_PURSUIT_DISTANCE_SQ = 9;
+// These mirror Vehicle's input-to-road-wheel path. Pure pursuit must cross the
+// steering-box play window without turning a small, valid curvature into full lock.
+const STEER_INPUT_EXPONENT = 1.35;
+const STEER_PLAY_RAD = 0.024;
+const STEER_FULL_LOCK_KMH = 20;
+const STEER_REDUCED_KMH = 100;
+const STEER_HIGH_SPEED_FRACTION = 0.5;
+const STEER_LOCK_CURVE = 0.161;
 /**
  * Half the widest catalogue body, metres, plus a little. Used only to decide whether
  * a hazard is in this car's corridor; a per-model figure would make the decision
@@ -68,15 +56,24 @@ const CAR_HALF_WIDTH_M = 1.05;
  */
 const AVOID_HYSTERESIS_M = 0.4;
 const BLOCK_CORRIDOR_FRACTION = 0.8;
+const CENTERLINE_PULL = 0.4;
+const TURN_CURVATURE_SAMPLES = 5;
+const TURN_COAST_CURVATURE = 0.004;
+const TURN_COAST_STEER = 0.12;
+const TURN_COAST_MIN_SPEED_MPS = 5;
 /**
  * Metres the commanded line may move per metre travelled. 0.09 spends about 40 m of
  * road moving a full lane across, which is what a driver does when they see a rock
  * early — and slow enough that a replan cannot present the loop with a step.
  */
 const LINE_SHIFT_PER_METRE = 0.09;
-const STOPPED_MPS = 0.35;
-const REVERSE_AFTER_S = 1.4;
-const REVERSE_FOR_S = 1.1;
+const OFFROAD_RECOVERY_EDGE = ROAD_HALF_WIDTH + SHOULDER_WIDTH * 0.75;
+const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
+const OFFROAD_SPEED_MPS = 8;
+const OFFROAD_BRAKE_MAX = 0.35;
+const STUCK_SPEED_MPS = 1 / 3.6;
+const STUCK_AFTER_S = 3;
+const RECOVERY_REVERSE_S = 2;
 const DYNAMIC_RANGE = 18;
 
 export class Autopilot {
@@ -85,6 +82,8 @@ export class Autopilot {
   private hintS = 0;
   private stoppedFor = 0;
   private reverseFor = 0;
+  /** Alternates when stuck on the centreline; off-centre recovery turns toward escape. */
+  private recoverySteer = 1;
   private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
   private dynamicDistance = Infinity;
@@ -107,15 +106,14 @@ export class Autopilot {
   /** Car lateral at the time of the scan; a hazard off to one side is not a hazard. */
   private scanLateral = 0;
   private readonly visitHazard = (hazard: RoadHazard): void => {
-    if (hazard.breakable) return;
     const distance = hazard.s - this.hintS;
     if (distance >= this.hazardDistance) return;
-    // Only hazards whose footprint overlaps the corridor the car is in, or the one it
-    // would be in on the centreline. A rock sitting on the far verge needs no line.
+    // The intended line matters as much as the current line: after avoiding one prop,
+    // the next prop may be on the detour rather than on the centreline.
     const reach = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
     const inCurrentPath = Math.abs(hazard.lateral - this.scanLateral) < reach;
-    const inCentrePath = Math.abs(hazard.lateral) < reach;
-    if (!inCurrentPath && !inCentrePath) return;
+    const inPlannedPath = Math.abs(hazard.lateral - this.plannedLateral) < reach;
+    if (!inCurrentPath && !inPlannedPath) return;
     this.hazard = hazard;
     this.hazardDistance = distance;
   };
@@ -141,15 +139,29 @@ export class Autopilot {
     this.engagedValue = engaged;
     this.stoppedFor = 0;
     this.reverseFor = 0;
+    if (!engaged) {
+      this.plannedHazard = null;
+      this.plannedLateral = 0;
+      this.appliedLateral = 0;
+    }
   }
 
-  /** Writes controls in-place. Stanley feedback avoids assuming Vehicle's shaped, rate-limited rack is linear. */
+  /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
     const config = MODES[this.modeValue];
     vehicle.absoluteTranslation(this.position);
     const projection = this.road.project(this.position.x, this.position.z, this.hintS);
     this.hintS = projection.s;
+    const offRoad = Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE;
+    if (offRoad) {
+      // A previous obstacle plan is no longer useful after an impact or flight into
+      // the desert. Road recovery takes priority and starts from the nearest safe
+      // road-edge line instead of trying to continue the old detour.
+      this.plannedHazard = null;
+      this.plannedLateral = 0;
+      this.appliedLateral = 0;
+    }
     const velocity = vehicle.chassis.linvel();
     const speed = Math.hypot(velocity.x, velocity.z);
     const lookahead = config.lookaheadBase + speed * config.lookaheadSpeed;
@@ -157,8 +169,7 @@ export class Autopilot {
     const rotation = vehicle.chassis.rotation();
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
     const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
-    const heading = Math.atan2(forwardX, forwardZ);
-    const headingError = wrapAngle(target.heading - heading);
+
 
     this.beginHazardScan(projection.lateral);
     this.hazards.forEachAhead(
@@ -181,51 +192,33 @@ export class Autopilot {
       this.plannedLateral = 0;
     }
     const hazard = this.hazard;
-    if (hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
-      // Pick a line past it, then decide about braking SEPARATELY. Measured, the two
-      // used to be one: the hazard fed the braking-distance limiter unconditionally,
-      // so the car planned a detour, drove to it, and still crawled to a halt 18 m
-      // short of a rock it was no longer pointed at. Braking is for a hazard that is
-      // still in the car's own corridor.
-      //
-      // The line is chosen down a LADDER, asphalt first. A line that spends the
-      // shoulder is a line that spends whatever is actually out there — measured, a
-      // 1.2 m rock plus the full comfort margin put the car 0.35 m past the asphalt
-      // edge, off the road mesh, and 22 m into the desert. The shoulder is a last
-      // resort before stopping, not the first thing the margin eats.
-      //
-      // The hysteresis rung is not cosmetic either. A line at EXACTLY `bodyClearance`
-      // sits on the same threshold the corridor test below uses, and the two
-      // deadlocked: the car braked because the rock was in its corridor, reached the
-      // line at 2.20 m against a 2.25 m threshold, and sat there forever — stopped,
-      // so no steering authority to finish the move, and still "blocked" so no
-      // throttle.
+    if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
+      // Pick the smallest safe detour first, then decide about braking separately.
+      // A full sleeper margin before the compact clearance pushed centre-lane rocks
+      // to the shoulder even when a modest lane change was enough.
       const bodyClearance = hazard.radius + CAR_HALF_WIDTH_M;
-      const asphaltEdge = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M;
       const shoulderEdge = ROAD_HALF_WIDTH + SHOULDER_WIDTH - CAR_HALF_WIDTH_M;
       let line: number | null = null;
-      for (const clearance of [
+      const clearanceLevels = [
+        bodyClearance + Math.min(config.hazardMargin, AVOID_HYSTERESIS_M),
         bodyClearance + config.hazardMargin,
-        bodyClearance + AVOID_HYSTERESIS_M,
         bodyClearance,
-      ]) {
-        for (const edge of [asphaltEdge, shoulderEdge]) {
-          const left = hazard.lateral + clearance;
-          const right = hazard.lateral - clearance;
-          const leftFits = left <= edge;
-          const rightFits = right >= -edge;
-          if (!leftFits && !rightFits) continue;
-          // Whichever side needs the smaller move from the line already being held,
-          // so a hazard on the verge is passed without crossing the whole road and a
-          // plan in progress is not thrown away for its mirror image.
-          line =
-            leftFits &&
-            (!rightFits || Math.abs(left - this.appliedLateral) <= Math.abs(right - this.appliedLateral))
-              ? left
-              : right;
-          break;
-        }
-        if (line !== null) break;
+      ];
+      for (const clearance of clearanceLevels) {
+        const left = hazard.lateral + clearance;
+        const right = hazard.lateral - clearance;
+        const leftFits = Math.abs(left) <= shoulderEdge;
+        const rightFits = Math.abs(right) <= shoulderEdge;
+        if (!leftFits && !rightFits) continue;
+        // Whichever side needs the smaller move from the line already being held,
+        // so a hazard on the verge is passed without crossing the whole road and a
+        // plan in progress is not thrown away for its mirror image.
+        line =
+          leftFits &&
+          (!rightFits || Math.abs(left - this.appliedLateral) <= Math.abs(right - this.appliedLateral))
+            ? left
+            : right;
+        break;
       }
       if (line === null) {
         mustStop = true;
@@ -235,55 +228,92 @@ export class Autopilot {
       }
     }
 
-    // Ease onto the planned line instead of jumping to it: a step change in the target
-    // is a step change in cross-track error, and Stanley answers that with lock.
+    // Ease onto the planned line instead of jumping to it. The waypoint itself is
+    // shifted by the rate-limited line, so obstacle avoidance and road following use
+    // one stable controller rather than fighting over the steering input.
     const lineRate = LINE_SHIFT_PER_METRE * Math.max(speed * dt, 0);
     this.appliedLateral += clamp(this.plannedLateral - this.appliedLateral, -lineRate, lineRate);
-    const desiredLateral = this.appliedLateral;
+    const targetLateral = offRoad
+      ? Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE
+      : this.plannedHazard === null
+        ? this.appliedLateral + clamp(-projection.lateral * CENTERLINE_PULL, -1.5, 1.5)
+        : this.appliedLateral;
+    const waypointX = target.x + Math.cos(target.heading) * targetLateral;
+    const waypointZ = target.z - Math.sin(target.heading) * targetLateral;
+    const relativeX = waypointX - this.position.x;
+    const relativeZ = waypointZ - this.position.z;
+    // Positive road lateral is the same signed side used by the vehicle's steering
+    // input after the vehicle applies its internal steering-angle negation.
+    const waypointRight = relativeX * forwardZ - relativeZ * forwardX;
+    const waypointDistanceSq = Math.max(
+      relativeX * relativeX + relativeZ * relativeZ,
+      MIN_PURSUIT_DISTANCE_SQ,
+    );
+    const pursuitCurvature = (2 * waypointRight) / waypointDistanceSq;
+    const wheelAngle = Math.atan(wheelbaseOf(vehicle) * pursuitCurvature);
+    // Vehicle applies its speed-dependent lock, input exponent and backlash after
+    // receiving this value. Pre-compensate those three stages so the requested
+    // geometric angle is what reaches the tyres, not a command hidden inside slack.
+    out.steer = steeringInputForWheelAngle(wheelAngle, vehicle.modelDef.steerLock, speed);
 
-    const blocking =
-      this.plannedHazard !== null &&
-      Math.abs(projection.lateral - this.plannedHazard.lateral) <
-        (this.plannedHazard.radius + CAR_HALF_WIDTH_M) * BLOCK_CORRIDOR_FRACTION;
-    if (blocking && this.plannedHazard) {
-      obstacleDistance = Math.min(obstacleDistance, this.plannedHazard.s - this.hintS - this.plannedHazard.radius);
+    // Look beyond the waypoint for the bend's peak curvature. Sampling only the
+    // waypoint lets the car arrive at a turn at cruise speed when the turn begins
+    // just after that point.
+    const turnLookahead = Math.max(
+      lookahead,
+      config.brakeLead + (speed * speed) / (2 * config.brakeAccel),
+    );
+    let upcomingCurvature = Math.abs(target.curvature);
+    for (let i = 1; i <= TURN_CURVATURE_SAMPLES; i++) {
+      upcomingCurvature = Math.max(
+        upcomingCurvature,
+        Math.abs(this.road.curvatureAt(this.hintS + (turnLookahead * i) / TURN_CURVATURE_SAMPLES)),
+      );
     }
-
-    const lateralError = projection.lateral - desiredLateral;
-    const stanley = Math.atan((STANLEY_GAIN * lateralError) / Math.max(speed, STANLEY_SPEED_FLOOR));
-    const curvatureInput = target.curvature * Math.max(3.4, Math.min(10, speed * 0.42));
-    // Input + is right while road lateral + is left, so both the heading error and the
-    // curvature feed-forward enter negated.
-    const command = clamp(stanley - headingError - curvatureInput, -1, 1);
-    // Slack compensation, applied LAST so nothing rescales it away. The lift fades in
-    // over a small window instead of switching on: a fixed offset on every non-zero
-    // command made a straight road dither between +/-0.18 lock, because a millimetre
-    // of cross-track error asked for the whole dead band. Faded, a tiny error asks for
-    // a tiny input (which the box swallows, correctly — the error is tiny) and a real
-    // one gets carried across the slack.
-    const magnitude = Math.abs(command);
-    const lift = Math.min(1, magnitude / STEER_SLACK_BLEND);
-    out.steer =
-      Math.sign(command) * (STEER_SLACK_INPUT * lift + (1 - STEER_SLACK_INPUT) * magnitude);
-
-    let targetSpeed = Math.min(config.cruiseMps, Math.sqrt(config.lateralAccel / Math.max(Math.abs(target.curvature), 1e-4)));
+    let targetSpeed = Math.min(
+      config.cruiseMps,
+      Math.sqrt(config.lateralAccel / Math.max(upcomingCurvature, 1e-4)),
+    );
     targetSpeed = Math.max(3, targetSpeed - Math.max(0, target.grade) * 4);
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
-    if (obstacleDistance < Infinity) targetSpeed = Math.min(targetSpeed, Math.sqrt(Math.max(0, 2 * config.brakeAccel * Math.max(0, obstacleDistance - config.brakeLead))));
+    if (obstacleDistance < Infinity) {
+      targetSpeed = Math.min(
+        targetSpeed,
+        Math.sqrt(Math.max(0, 2 * config.brakeAccel * Math.max(0, obstacleDistance - config.brakeLead))),
+      );
+    }
+    if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (mustStop) targetSpeed = 0;
 
-    if (speed < STOPPED_MPS && (mustStop || obstacleDistance < 2.5)) this.stoppedFor += dt;
-    else this.stoppedFor = 0;
-    if (this.stoppedFor >= REVERSE_AFTER_S) {
-      this.reverseFor = REVERSE_FOR_S;
+    // A failed forward attempt is different from normal corner braking: if the engine
+    // is asking for motion but the car remains under 1 km/h for several seconds, it is
+    // wedged, facing a prop, or resting on bad ground. Give it a deliberate recovery
+    // manoeuvre instead of continuing to feed throttle into the same failure.
+    const tryingToMove =
+      vehicle.engineRunning &&
+      targetSpeed > 1 &&
+      speed < STUCK_SPEED_MPS;
+    const blockedAtStandstill =
+      speed < STUCK_SPEED_MPS &&
+      (mustStop || obstacleDistance < 2.5);
+    if (tryingToMove || blockedAtStandstill) this.stoppedFor += dt;
+    else if (speed > STUCK_SPEED_MPS * 1.5 || targetSpeed <= 1) this.stoppedFor = 0;
+
+    if (this.stoppedFor >= STUCK_AFTER_S && this.reverseFor <= 0) {
+      this.reverseFor = RECOVERY_REVERSE_S;
       this.stoppedFor = 0;
+      const lateralSide = Math.sign(projection.lateral);
+      this.recoverySteer = lateralSide === 0 ? -this.recoverySteer : -lateralSide;
     }
     if (this.reverseFor > 0) {
       this.reverseFor -= dt;
       out.throttle = 0;
+      // In automatic mode, reverse=true selects R at rest and brake becomes reverse
+      // throttle on the following tick. The fixed two-second window gives the car time
+      // to pull its rear clear before forward demand is restored.
       out.brake = 0.72;
       out.reverse = true;
-      out.steer = -out.steer;
+      out.steer = this.recoverySteer * 0.75;
       out.handbrake = false;
       return;
     }
@@ -293,6 +323,22 @@ export class Autopilot {
     out.handbrake = false;
     out.throttle = speedError > 0 ? clamp(speedError / 4, 0.2, 1) : 0;
     out.brake = speedError < 0 ? clamp(-speedError / 4, 0, 1) : 0;
+    const enteringCurve =
+      upcomingCurvature >= TURN_COAST_CURVATURE ||
+      Math.abs(out.steer) >= TURN_COAST_STEER;
+    if (!offRoad && speed >= TURN_COAST_MIN_SPEED_MPS && enteringCurve) {
+      // Coast while setting up for and holding a bend. Braking still comes from the
+      // curvature-derived target speed above; this only prevents the engine from
+      // fighting that slowdown or adding speed while lateral grip is occupied.
+      out.throttle = 0;
+    }
+    if (offRoad && speed > OFFROAD_SPEED_MPS) {
+      out.throttle = 0;
+      out.brake = Math.max(
+        out.brake,
+        clamp((speed - OFFROAD_SPEED_MPS) / 6, 0.05, OFFROAD_BRAKE_MAX),
+      );
+    }
   }
 
   private dynamicObstacleDistance(vehicle: Vehicle, originX: number, originZ: number): number {
@@ -319,4 +365,34 @@ export class Autopilot {
 }
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
-function wrapAngle(angle: number): number { return Math.atan2(Math.sin(angle), Math.cos(angle)); }
+function wheelbaseOf(vehicle: Vehicle): number {
+  let frontZ = -Infinity;
+  let rearZ = Infinity;
+  for (const wheel of vehicle.modelMeasure.wheels) {
+    if (wheel.isFront) frontZ = Math.max(frontZ, wheel.pos[2]);
+    else rearZ = Math.min(rearZ, wheel.pos[2]);
+  }
+  return Number.isFinite(frontZ) && Number.isFinite(rearZ)
+    ? Math.max(frontZ - rearZ, 1.5)
+    : DEFAULT_WHEELBASE_M;
+}
+function steeringInputForWheelAngle(
+  wheelAngle: number,
+  modelSteerLock: number,
+  speedMps: number,
+): number {
+  const magnitude = Math.abs(wheelAngle);
+  if (magnitude <= STEER_PLAY_RAD * 0.55) return 0;
+  const speedKmh = speedMps * 3.6;
+  const speedT = clamp(
+    (speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
+    0,
+    1,
+  );
+  const lockFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(speedT, STEER_LOCK_CURVE);
+  const effectiveLock = Math.max(modelSteerLock * lockFactor, 0.1);
+  const targetAngle = Math.min(magnitude + STEER_PLAY_RAD, effectiveLock);
+  const normalized = Math.pow(targetAngle / effectiveLock, 1 / STEER_INPUT_EXPONENT);
+  // Vehicle negates normalized input when converting it to a wheel angle.
+  return clamp(-Math.sign(wheelAngle) * normalized, -1, 1);
+}

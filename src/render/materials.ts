@@ -52,6 +52,8 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /** Body paint adds scratch wear while remaining a single shader permutation. */
 const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v3';
+/** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
+const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
 // ---------------------------------------------------------------------------
 // GLSL patch
@@ -137,6 +139,12 @@ vec2 condRust( vec3 p ) {
 #define COND_PIT_EPS 0.035
 // How hard the pits tilt the normal. Above ~0.03 the relief reads as noise.
 #define COND_PIT_DEPTH 0.015
+
+#include <map_pars_fragment>`;
+const PALETTE_PAINT_PARS = `
+uniform float uPalettePaint;
+uniform vec3 uPalettePaintColor;
+uniform vec2 uPalettePaintCell;
 
 #include <map_pars_fragment>`;
 
@@ -303,6 +311,19 @@ function patchCarBodyShader(
     .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
     .replace('#include <metalnessmap_fragment>', CAR_BODY_CONDITION_BODY);
 }
+/** Cheap atlas recolouring for static cars; deliberately excludes dynamic wear. */
+function patchCarPaletteShader(
+  shader: WebGLProgramParametersWithUniforms,
+  uniforms: CarBodyUniforms,
+): void {
+  shader.uniforms.uPalettePaint = uniforms.palettePaint;
+  shader.uniforms.uPalettePaintColor = uniforms.paintColor;
+  shader.uniforms.uPalettePaintCell = uniforms.paintCell;
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <map_pars_fragment>', PALETTE_PAINT_PARS)
+    .replace('#include <map_fragment>', CAR_PAINT_MAP);
+}
+
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -355,11 +376,50 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
   return material;
 }
 /**
+ * FBXLoader still produces MeshPhongMaterial for the Soviet pack. The body shaders
+ * patch MeshStandardMaterial chunks, so merely cloning that legacy material leaves
+ * both palette paint and body wear inert. Convert only the selected paint slot;
+ * glass, lamps and trim keep their authored materials.
+ */
+function cloneCarPaintMaterial(source: THREE.Material): THREE.Material {
+  if (source instanceof THREE.MeshStandardMaterial) return source.clone();
+  if (!(source instanceof THREE.MeshPhongMaterial)) return source.clone();
+
+  const material = new THREE.MeshStandardMaterial({
+    color: source.color,
+    map: source.map,
+    emissive: source.emissive,
+    emissiveMap: source.emissiveMap,
+    normalMap: source.normalMap,
+    normalScale: source.normalScale,
+    aoMap: source.aoMap,
+    aoMapIntensity: source.aoMapIntensity,
+    alphaMap: source.alphaMap,
+    transparent: source.transparent,
+    opacity: source.opacity,
+    alphaTest: source.alphaTest,
+    side: source.side,
+    vertexColors: source.vertexColors,
+    roughness: 0.62,
+    metalness: 0.18,
+  });
+  material.name = source.name;
+  material.depthTest = source.depthTest;
+  material.depthWrite = source.depthWrite;
+  material.colorWrite = source.colorWrite;
+  material.blending = source.blending;
+  material.blendSrc = source.blendSrc;
+  material.blendDst = source.blendDst;
+  material.blendEquation = source.blendEquation;
+  return material;
+}
+
+/**
  * Clones one eligible paint slot for a car instance and gives it independent body
  * condition uniforms. The source remains untouched for every other car sharing it.
  */
 export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Material {
-  const material = source.clone();
+  const material = cloneCarPaintMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
   const uniforms: CarBodyUniforms = {
@@ -375,6 +435,29 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
   material.customProgramCacheKey = () => CAR_BODY_PROGRAM_KEY;
   return material;
 }
+/**
+ * Clones a static Soviet paint slot with only its atlas-colour replacement. Static
+ * scenery never accumulates wear, so running the body dirt/scratch FBM on every
+ * parked car wastes fragment work and can force the fixed-step loop into slow motion.
+ */
+export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Material {
+  const material = cloneCarPaintMaterial(source);
+  if (!(material instanceof THREE.MeshStandardMaterial)) return material;
+
+  const uniforms: CarBodyUniforms = {
+    dirt: { value: 0 },
+    rust: { value: 0 },
+    scratches: { value: 0 },
+    palettePaint: { value: 0 },
+    paintColor: { value: new THREE.Color() },
+    paintCell: { value: new THREE.Vector2() },
+  };
+  carBodyUniforms.set(material, uniforms);
+  material.onBeforeCompile = (shader) => patchCarPaletteShader(shader, uniforms);
+  material.customProgramCacheKey = () => CAR_PALETTE_PROGRAM_KEY;
+  return material;
+}
+
 
 /** Selects one Soviet atlas paint cell and its per-car replacement colour. */
 export function setCarBodyPalettePaint(

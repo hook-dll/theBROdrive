@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 
-import { hash01 } from '../core/rng';
+import { hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
@@ -22,8 +22,8 @@ import {
   coolantCapacity,
   oilCapacity,
 } from '../parts/registry';
-import { carModel, DEFAULT_CAR_MODEL_ID, modelEngine } from '../vehicle/carmodels';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
+import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
@@ -553,16 +553,16 @@ export function homesteadSpawn(
 }
 
 /**
- * Builds the starter car: the default complete model parked in the garage facing
- * the door, with no gizmos mounted yet. Fuel starts low but non-zero, clamped to
- * what the tank actually holds. Returns the state; the caller registers it.
+ * Builds the starter car: a deterministic seed-based pick from the Soviet and
+ * Quaternius roadworthy pool, parked in the garage facing the door with no gizmos
+ * mounted yet. Fuel starts low but non-zero, clamped to the selected tank.
  */
 export function createStartingCar(world: GameWorld): CarState {
   const road = new Road(world.seed);
   const terrain = new Terrain(world.seed, road);
   const L = layout(road, terrain);
 
-  const def = carModel(DEFAULT_CAR_MODEL_ID);
+  const def = pick(SPAWNABLE_CAR_MODELS, world.seed, 0x3f0);
   const engine = modelEngine(def);
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
@@ -575,7 +575,7 @@ export function createStartingCar(world: GameWorld): CarState {
 
   const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
   const carV = (GARAGE_V0 + GARAGE_V1) / 2;
-  const measure = carModelMeasure(DEFAULT_CAR_MODEL_ID);
+  const measure = carModelMeasure(def.id);
   const carY = carSpawnYAboveGround(measure, L.floorY, GARAGE_CAR_DROP_METRES);
   const [cx, cz] = L.toWorld(carU, carV);
   // Face the door: body +Z -> "toward the road" (-away), i.e. world +X here.
@@ -584,7 +584,7 @@ export function createStartingCar(world: GameWorld): CarState {
 
   return {
     id: 'car:start',
-    modelId: DEFAULT_CAR_MODEL_ID,
+    modelId: def.id,
     gizmos: {},
     stickers: [],
     headlightMode: 'off',
@@ -640,7 +640,7 @@ export function spawnStartingFuelCan(world: GameWorld, loose: LoosePartField): v
     {
       type: 'fluid_can',
       id: world.generatedPartId('home_item', 0, 2),
-      fluid: modelEngine(carModel(DEFAULT_CAR_MODEL_ID)).fuel,
+      fluid: modelEngine(pick(SPAWNABLE_CAR_MODELS, world.seed, 0x3f0)).fuel,
       capacity: 20,
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },
