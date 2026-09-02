@@ -159,27 +159,20 @@ const HAZE_REF_PATH_M = 350;
 /**
  * Peak angular displacement, milliradians, at full development.
  *
- * Real desert shimmer moves a distant silhouette by a few to a few tens of arc minutes.
- * Nine milliradians is thirty, at the far end of plausible and roughly twice what a
- * photograph of a hot afternoon would measure, and the exaggeration is deliberate: it
- * is the ONLY exaggeration here. The distribution over the frame, the growth with path
- * length, the angular (not pixel) scaling and the temporal character are all left as the
- * physics has them, and those are what the eye reads as heat — the amplitude only
- * decides whether it is noticed at all. Measured on the real pass
- * (tools/haze-probe.ts) the field averages a third of this, so the horizon band moves
- * by two or three pixels at 1080p and peaks near seven.
+ * Kept deliberately visible, but below the earlier exaggerated setting: measured on
+ * the real pass (tools/haze-probe.ts), the field averages a third of this, so the
+ * horizon moves by roughly two pixels at 1080p rather than reading as displaced
+ * patches of the image.
  */
-const HAZE_ANGLE_MRAD = 9.0;
+const HAZE_ANGLE_MRAD = 7.2;
 /**
  * Upward bias, milliradians at full development: the inferior mirage.
  *
  * Hot air below cool bends a ray upward, so distant ground appears RAISED and
- * vertically squeezed toward the horizon — the effect that puts false water on a road
- * and eats the wheels of a distant truck. Because the bias follows the same path
- * length as the shimmer, near ground lifts less than far ground and the difference is
- * the compression. Small, because all of the drama is in the gradient.
+ * vertically squeezed toward the horizon. It scales with the shimmer reduction above
+ * so the whole refractive movement becomes quieter without changing its shape.
  */
-const HAZE_LIFT_MRAD = 2.2;
+const HAZE_LIFT_MRAD = 1.76;
 /**
  * Radius of the sphere the convection field is sampled on, metres, and the cell sizes
  * on it.
@@ -364,13 +357,10 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * animated by its own rise. Returns a displacement direction in (lateral, vertical),
    * each roughly in [-1, 1].
    *
-   * Cells are stretched vertically because a plume is: PLUME_STRETCH divides the
-   * vertical coordinate, so a cell reaches further up than across. The two scales
-   * climb at different speeds, so the sum keeps changing shape instead of scrolling a
-   * fixed pattern upward.
-   *
-   * The lateral channel reads the same field a long way off along x, which is cheaper
-   * than a second field and decorrelated at these cell sizes.
+   * Cells are stretched vertically because a plume is. The same two decorrelated
+   * scales form both channels with different weights; evaluating two more 3D fields
+   * for the much smaller lateral component doubled the full-screen cost without adding
+   * visible structure.
    */
   vec2 hazeWarp(vec3 dir) {
     vec3 p = dir * SAMPLE_RANGE_M;
@@ -379,9 +369,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float broad = cellNoise(broadP);
     float fine = cellNoise(fineP);
     float vertical = broad * 0.72 + fine * 0.28;
-    float lateral =
-      cellNoise(broadP + vec3(37.2, 0.0, 11.7)) * 0.72 +
-      cellNoise(fineP + vec3(19.4, 0.0, 53.1)) * 0.28;
+    float lateral = broad * 0.28 - fine * 0.72;
     return vec2(lateral, vertical);
   }
 
@@ -425,7 +413,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // cheapest graphics tier or at night.
     vec2 uv = vUv;
     float shimmerWeight = 0.0;
-    float shimmerGrain = 0.0;
     if (uStrength > 0.0) {
       vec3 dir = worldRay(vUv);
       // Everything the pixel gets follows from how far its ray runs through hot air.
@@ -433,7 +420,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       // Shaped onset rather than the raw random walk: see HAZE_REF_PATH_M.
       shimmerWeight = uStrength * path * path * (3.0 - 2.0 * path);
       vec2 warp = hazeWarp(dir);
-      shimmerGrain = warp.y;
 
       // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
       // the frame height, and the same over the width with the aspect divided out —
@@ -449,9 +435,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       uv = clamp(vUv + offset, 0.0, 1.0);
     }
     vec4 color = texture2D(tDiffuse, uv);
-    // A faint density change keeps the cells legible over flat sand or open sky, where
-    // displacement alone has no nearby edge to reveal it.
-    color.rgb *= 1.0 + shimmerGrain * shimmerWeight * 0.04;
 
     // Ink is ground treatment. Rendering it only below the horizon leaves the sky
     // (including every star point) outside the outline pass by construction.

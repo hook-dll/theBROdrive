@@ -88,12 +88,8 @@ function makeProbe(): Probe {
       const i = (y * WIDTH + x) * 4;
       data[i] = (x + 0.5) / WIDTH;
       data[i + 1] = (y + 0.5) / HEIGHT;
-      // A REFERENCE CHANNEL, and the measurement does not work without it. The pass
-      // ends by scaling colour: a faint density term from the field, and on top of it
-      // the shades and binocular masks. Every one of those is a MULTIPLY, so reading
-      // the coordinate as R/B and G/B cancels all of them exactly, while reading R and
-      // G raw reports a 4% brightness change as a displacement — which, at a
-      // coordinate near 0.5, is three times the displacement being measured.
+      // A reference channel keeps the coordinate measurement independent of any
+      // later colour-only view treatment (such as shades or binocular masks).
       data[i + 2] = 1;
     }
   }

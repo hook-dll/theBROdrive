@@ -285,7 +285,7 @@ async function boot(): Promise<void> {
   // it makes, and asks it which ones are already down.
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
-  const vista = new VistaMesh(renderer.scene, terrain, origin);
+  const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {

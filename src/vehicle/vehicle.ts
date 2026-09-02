@@ -898,6 +898,10 @@ const BUMP_STOP_PEAK = 6;
 const RIDE_LIFT_MAX = 0.15;
 /** No body sits closer to the road than this, however low its box is drawn. */
 const RIDE_MIN_CLEARANCE = 0.075;
+/** Requested body lift, expressed as a fraction of the fitted tyre radius. This changes
+ * only the chosen static clearance; spring, damper, travel, tyre and wheel geometry stay
+ * untouched. */
+const CLEARANCE_WHEEL_RADIUS_FRACTION = 1 / 6;
 /**
  * How far above a settled wheel's centre its suspension mount is placed, metres.
  *
@@ -2068,11 +2072,13 @@ export class Vehicle implements Rebasable {
     // the lift cap. Nothing in it depends on a spring rate, which is the whole point —
     // softening the springs used to change how high the car stood.
     const halfHeight = this.measure.halfExtents[1];
-    const drawnClearance = this.measure.wheels[0].radius - this.measure.wheels[0].pos[1] - halfHeight;
-    const clearance = Math.max(
+    const referenceWheel = this.measure.wheels[0];
+    const drawnClearance = referenceWheel.radius - referenceWheel.pos[1] - halfHeight;
+    const baseClearance = Math.max(
       RIDE_MIN_CLEARANCE,
       Math.min(suspension.rideHeight, drawnClearance + RIDE_LIFT_MAX),
     );
+    const clearance = baseClearance + referenceWheel.radius * CLEARANCE_WHEEL_RADIUS_FRACTION;
     const contactY = -halfHeight - clearance;
 
     // Roll lever: how far the centre of mass sits above the tyre contact plane. This
