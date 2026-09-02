@@ -3,6 +3,7 @@ import { farPlaneForViewDistance } from '../core/renderer';
 
 import { desertPaletteAt } from '../world/gradient';
 import type { WorldOrigin } from '../world/origin';
+import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { TERRAIN_MATERIAL } from '../world/terrainmesh';
 
@@ -20,21 +21,13 @@ import { TERRAIN_MATERIAL } from '../world/terrainmesh';
  */
 
 /**
- * Inner radius, metres — deliberately far inside the chunked mesh rather than just inside
- * it.
- *
- * The obvious value is a little under the chunked mesh's own 1500 m reach, and it is not
- * enough. That mesh is not a solid sheet out there: its fold guard drops every cell whose
- * road-normal parameterisation has turned over, and on a 170 m corner at a kilometre and a
- * half of lateral offset that is a lot of cells. At the default view distance the fog eats
- * the gaps; thin the fog for a long view and they are windows onto the sky. Starting the
- * disc at 400 m puts it behind all of them, and behind the camera being far off-road when
- * the disc was last rebuilt, so the worst case is ground fourteen metres low.
- *
- * The rings this adds are the cheap ones — under two thousand vertices, all of them hidden
- * under the near mesh wherever it is intact.
+ * The vista is a fallback as well as horizon scenery. Its centre ring collapses to
+ * one point under the camera, so a worker-pending tile can never expose sky between
+ * the synchronous physical square and the distant disc. Only one coarse 0..400 m
+ * strip lives under the fine terrain; no dense polar rings are wasted there.
  */
-const INNER_RADIUS = 400;
+const INNER_RADIUS = 0;
+const FIRST_FULL_RING = 400;
 /**
  * Radial spacing growth, and the cap it grows into.
  *
@@ -46,6 +39,17 @@ const INNER_RADIUS = 400;
  */
 const RADIAL_RATIO = 1.13;
 const MAX_RING_SPACING = 900;
+/**
+ * The streamed road remains visible about 1.4 km each way. Inside this radius the
+ * distant underlay must stay beneath that road rather than use an unrelated open-
+ * desert height which can sit ten metres above it and erase patches as the camera moves.
+ */
+const ROAD_UNDERLAY_RADIUS = 1600;
+const ROAD_SAMPLE_STEP = 40;
+const ROAD_SAMPLE_CAPACITY = Math.ceil((ROAD_UNDERLAY_RADIUS * 2) / ROAD_SAMPLE_STEP) + 1;
+const ROAD_UNDERLAY_CORE = 45;
+const ROAD_UNDERLAY_FADE = 150;
+const ROAD_UNDERLAY_DROP = 0.75;
 /**
  * Vertices per ring. At 25 km this is a 980 m arc, which matches the radial cap, so the
  * triangles stay roughly isotropic where the detail is. Close in it is finer than it needs
@@ -72,11 +76,13 @@ const REBUILD_STEP = 250;
 
 
 /**
- * The fine square is guaranteed to reach 480 m from the camera. Sink the polar mesh
- * just enough to prevent coarse triangles poking through in that overlap, then recover
- * the exact shared field before the fine square can end.
+ * Sink the coarse centre well below the fine terrain it backs up. At 400 m the usual
+ * two-metre overlap is enough; inside it, the open vista field can differ from the
+ * road-graded surface by eleven metres, so the collapsed centre needs more burial.
  */
-const INNER_BIAS = 2;
+const CENTRE_BIAS = 16;
+const OVERLAP_BIAS = 2;
+const BIAS_HOLD_RADIUS = FIRST_FULL_RING;
 const BIAS_FADE = 480;
 
 /**
@@ -119,10 +125,17 @@ export class VistaMesh {
   /** Unit direction per sector, so a rebuild does no trigonometry. */
   private readonly dirX = new Float32Array(SECTORS);
   private readonly dirZ = new Float32Array(SECTORS);
+  /** Fixed-capacity road samples rebuilt with the vista; used only to keep its cheap
+   * underlay beneath the streamed road. */
+  private readonly roadX = new Float64Array(ROAD_SAMPLE_CAPACITY);
+  private readonly roadY = new Float64Array(ROAD_SAMPLE_CAPACITY);
+  private readonly roadZ = new Float64Array(ROAD_SAMPLE_CAPACITY);
+  private roadSampleCount = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
+    private readonly road: Road,
     private readonly origin: WorldOrigin,
   ) {
     for (let a = 0; a < SECTORS; a++) {
@@ -143,9 +156,8 @@ export class VistaMesh {
   }
 
   /**
-   * Extends the cheap polar ground to the camera's far plane, not merely to the
-   * nominal detail distance. Fog owns the final transition; ending geometry at the
-   * setting distance exposed the sky beneath raised dunes as a false terrain hole.
+   * Extends the cheap polar ground to the camera's far plane. Fog owns the final
+   * transition; the road-aware inner strip below owns the reported gaps.
    */
   setViewDistance(metres: number): void {
     const outer = metres <= INNER_RADIUS ? 0 : farPlaneForViewDistance(metres);
@@ -167,6 +179,96 @@ export class VistaMesh {
     this.centreZ = snapZ;
     this.build(snapX, snapZ, s);
   }
+  private prepareRoadUnderlay(s: number): void {
+    const from = Math.max(0, s - ROAD_UNDERLAY_RADIUS);
+    const to = Math.min(this.road.length, s + ROAD_UNDERLAY_RADIUS);
+    const count = Math.max(2, Math.ceil((to - from) / ROAD_SAMPLE_STEP) + 1);
+    this.roadSampleCount = Math.min(count, ROAD_SAMPLE_CAPACITY);
+    const denominator = Math.max(1, this.roadSampleCount - 1);
+    for (let i = 0; i < this.roadSampleCount; i++) {
+      const sampleS = from + ((to - from) * i) / denominator;
+      const sample = this.road.sampleAt(sampleS);
+      this.roadX[i] = sample.x;
+      this.roadZ[i] = sample.z;
+      this.roadY[i] = this.terrain.explorationHeightFromFrame(
+        sample.x,
+        sample.z,
+        0,
+        sample.s,
+      );
+    }
+  }
+
+  private biasAt(radius: number): number {
+    if (radius < BIAS_HOLD_RADIUS) {
+      const blend = smoothstep01(radius / BIAS_HOLD_RADIUS);
+      return CENTRE_BIAS + (OVERLAP_BIAS - CENTRE_BIAS) * blend;
+    }
+    return (
+      OVERLAP_BIAS *
+      (1 - smoothstep01((radius - BIAS_HOLD_RADIUS) / (BIAS_FADE - BIAS_HOLD_RADIUS)))
+    );
+  }
+
+  /**
+   * Lowers only vertices near the sampled road. Each road point maps to nearby polar
+   * rings and sectors, so the work scales with the narrow trough rather than testing
+   * every inner vertex against every road segment.
+   */
+  private lowerRoadUnderlay(
+    positions: Float32Array,
+    cx: number,
+    cz: number,
+    ox: number,
+    oz: number,
+  ): void {
+    const sampleSlack = ROAD_SAMPLE_STEP * 0.5;
+    const reach = ROAD_UNDERLAY_FADE + sampleSlack;
+    for (let i = 0; i < this.roadSampleCount; i++) {
+      const sx = this.roadX[i]! - ox;
+      const sz = this.roadZ[i]! - oz;
+      const dx = sx - cx;
+      const dz = sz - cz;
+      const sampleRadius = Math.hypot(dx, dz);
+      if (
+        sampleRadius < INNER_RADIUS - reach ||
+        sampleRadius > ROAD_UNDERLAY_RADIUS + reach
+      ) {
+        continue;
+      }
+      const theta = Math.atan2(dx, dz);
+      const centreSector = Math.round((theta / (Math.PI * 2)) * SECTORS);
+      for (let r = 0; r < this.radii.length; r++) {
+        const radius = this.radii[r]!;
+        if (
+          radius > ROAD_UNDERLAY_RADIUS ||
+          Math.abs(radius - sampleRadius) >= reach
+        ) {
+          continue;
+        }
+        const sectorReach =
+          Math.ceil((Math.asin(Math.min(1, reach / radius)) / (Math.PI * 2)) * SECTORS) + 1;
+        const bias = this.biasAt(radius);
+        const belowRoad = this.roadY[i]! - bias - ROAD_UNDERLAY_DROP;
+        for (let da = -sectorReach; da <= sectorReach; da++) {
+          const a = ((centreSector + da) % SECTORS + SECTORS) % SECTORS;
+          const vi = (r * SECTORS + a) * 3;
+          const vx = positions[vi]!;
+          const vz = positions[vi + 2]!;
+          const distance = Math.max(0, Math.hypot(vx - sx, vz - sz) - sampleSlack);
+          if (distance >= ROAD_UNDERLAY_FADE) continue;
+          const openY = positions[vi + 1]!;
+          if (belowRoad >= openY) continue;
+          const fade = smoothstep01(
+            (distance - ROAD_UNDERLAY_CORE) /
+              (ROAD_UNDERLAY_FADE - ROAD_UNDERLAY_CORE),
+          );
+          const lowered = belowRoad + (openY - belowRoad) * fade;
+          if (lowered < openY) positions[vi + 1] = lowered;
+        }
+      }
+    }
+  }
 
   private build(cx: number, cz: number, s: number): void {
     const radii = this.radii;
@@ -176,6 +278,7 @@ export class VistaMesh {
     // remains a function of absolute world coordinates.
     const ox = this.origin.x;
     const oz = this.origin.z;
+    this.prepareRoadUnderlay(s);
 
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
@@ -187,9 +290,7 @@ export class VistaMesh {
 
     for (let r = 0; r < rings; r++) {
       const radius = radii[r]!;
-      // Per ring, not per vertex: both only depend on how far out the ring is.
-      const bias =
-        INNER_BIAS * (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
+      const bias = this.biasAt(radius);
       const reliefWeight =
         1 - smoothstep01((radius - RELIEF_FADE_START) / (RELIEF_FADE_END - RELIEF_FADE_START));
       for (let a = 0; a < SECTORS; a++) {
@@ -207,6 +308,7 @@ export class VistaMesh {
         colors[vi + 2] = sandLinear.b;
       }
     }
+    this.lowerRoadUnderlay(positions, cx, cz, ox, oz);
 
     // Quads between consecutive rings, wrapping in the angular direction. Wrapping rather
     // than duplicating the seam column keeps the two sides of it numerically identical,
@@ -262,7 +364,12 @@ export class VistaMesh {
  */
 function ringRadii(outer: number): number[] {
   const radii = [INNER_RADIUS];
-  let r = INNER_RADIUS;
+  if (outer <= FIRST_FULL_RING) {
+    radii.push(outer);
+    return radii;
+  }
+  radii.push(FIRST_FULL_RING);
+  let r = FIRST_FULL_RING;
   while (r < outer) {
     r += Math.min(r * (RADIAL_RATIO - 1), MAX_RING_SPACING);
     if (r >= outer) break;
