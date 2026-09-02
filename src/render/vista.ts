@@ -20,14 +20,8 @@ import { TERRAIN_MATERIAL } from '../world/terrainmesh';
  * overlap differs only by tessellation and the downward bias described below.
  */
 
-/**
- * The vista is a fallback as well as horizon scenery. Its centre ring collapses to
- * one point under the camera, so a worker-pending tile can never expose sky between
- * the synchronous physical square and the distant disc. Only one coarse 0..400 m
- * strip lives under the fine terrain; no dense polar rings are wasted there.
- */
-const INNER_RADIUS = 0;
-const FIRST_FULL_RING = 400;
+/** The fine streamed tiles own the central 400 metres; the vista starts in their overlap. */
+const INNER_RADIUS = 400;
 /**
  * Radial spacing growth, and the cap it grows into.
  *
@@ -75,14 +69,8 @@ const RELIEF_FADE_END = 7000;
 const REBUILD_STEP = 250;
 
 
-/**
- * Sink the coarse centre well below the fine terrain it backs up. At 400 m the usual
- * two-metre overlap is enough; inside it, the open vista field can differ from the
- * road-graded surface by eleven metres, so the collapsed centre needs more burial.
- */
-const CENTRE_BIAS = 16;
-const OVERLAP_BIAS = 2;
-const BIAS_HOLD_RADIUS = FIRST_FULL_RING;
+/** Downward overlap bias, fading out over the first eighty metres of the vista. */
+const INNER_BIAS = 2;
 const BIAS_FADE = 480;
 
 /**
@@ -199,75 +187,39 @@ export class VistaMesh {
     }
   }
 
-  private biasAt(radius: number): number {
-    if (radius < BIAS_HOLD_RADIUS) {
-      const blend = smoothstep01(radius / BIAS_HOLD_RADIUS);
-      return CENTRE_BIAS + (OVERLAP_BIAS - CENTRE_BIAS) * blend;
-    }
-    return (
-      OVERLAP_BIAS *
-      (1 - smoothstep01((radius - BIAS_HOLD_RADIUS) / (BIAS_FADE - BIAS_HOLD_RADIUS)))
-    );
-  }
-
   /**
-   * Lowers only vertices near the sampled road. Each road point maps to nearby polar
-   * rings and sectors, so the work scales with the narrow trough rather than testing
-   * every inner vertex against every road segment.
+   * Smoothly buries a vista vertex beneath the closest sampled road segment. Segment
+   * distance matters here: lowering isolated vertices around isolated samples makes
+   * long triangles whose sides read as disappearing cones.
    */
-  private lowerRoadUnderlay(
-    positions: Float32Array,
-    cx: number,
-    cz: number,
-    ox: number,
-    oz: number,
-  ): void {
-    const sampleSlack = ROAD_SAMPLE_STEP * 0.5;
-    const reach = ROAD_UNDERLAY_FADE + sampleSlack;
-    for (let i = 0; i < this.roadSampleCount; i++) {
-      const sx = this.roadX[i]! - ox;
-      const sz = this.roadZ[i]! - oz;
-      const dx = sx - cx;
-      const dz = sz - cz;
-      const sampleRadius = Math.hypot(dx, dz);
-      if (
-        sampleRadius < INNER_RADIUS - reach ||
-        sampleRadius > ROAD_UNDERLAY_RADIUS + reach
-      ) {
-        continue;
-      }
-      const theta = Math.atan2(dx, dz);
-      const centreSector = Math.round((theta / (Math.PI * 2)) * SECTORS);
-      for (let r = 0; r < this.radii.length; r++) {
-        const radius = this.radii[r]!;
-        if (
-          radius > ROAD_UNDERLAY_RADIUS ||
-          Math.abs(radius - sampleRadius) >= reach
-        ) {
-          continue;
-        }
-        const sectorReach =
-          Math.ceil((Math.asin(Math.min(1, reach / radius)) / (Math.PI * 2)) * SECTORS) + 1;
-        const bias = this.biasAt(radius);
-        const belowRoad = this.roadY[i]! - bias - ROAD_UNDERLAY_DROP;
-        for (let da = -sectorReach; da <= sectorReach; da++) {
-          const a = ((centreSector + da) % SECTORS + SECTORS) % SECTORS;
-          const vi = (r * SECTORS + a) * 3;
-          const vx = positions[vi]!;
-          const vz = positions[vi + 2]!;
-          const distance = Math.max(0, Math.hypot(vx - sx, vz - sz) - sampleSlack);
-          if (distance >= ROAD_UNDERLAY_FADE) continue;
-          const openY = positions[vi + 1]!;
-          if (belowRoad >= openY) continue;
-          const fade = smoothstep01(
-            (distance - ROAD_UNDERLAY_CORE) /
-              (ROAD_UNDERLAY_FADE - ROAD_UNDERLAY_CORE),
-          );
-          const lowered = belowRoad + (openY - belowRoad) * fade;
-          if (lowered < openY) positions[vi + 1] = lowered;
-        }
-      }
+  private beneathRoad(x: number, z: number, openY: number, bias: number): number {
+    let closestDistanceSq = ROAD_UNDERLAY_FADE * ROAD_UNDERLAY_FADE;
+    let closestRoadY = 0;
+    for (let i = 0; i < this.roadSampleCount - 1; i++) {
+      const ax = this.roadX[i]!;
+      const az = this.roadZ[i]!;
+      const dx = this.roadX[i + 1]! - ax;
+      const dz = this.roadZ[i + 1]! - az;
+      const lengthSq = dx * dx + dz * dz;
+      const t =
+        lengthSq > 0
+          ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq))
+          : 0;
+      const nearestX = ax + dx * t;
+      const nearestZ = az + dz * t;
+      const distanceSq = (x - nearestX) ** 2 + (z - nearestZ) ** 2;
+      if (distanceSq >= closestDistanceSq) continue;
+      closestDistanceSq = distanceSq;
+      closestRoadY = this.roadY[i]! + (this.roadY[i + 1]! - this.roadY[i]!) * t;
     }
+    if (closestDistanceSq >= ROAD_UNDERLAY_FADE * ROAD_UNDERLAY_FADE) return openY;
+    const belowRoad = closestRoadY - bias - ROAD_UNDERLAY_DROP;
+    if (belowRoad >= openY) return openY;
+    const distance = Math.sqrt(closestDistanceSq);
+    const fade = smoothstep01(
+      (distance - ROAD_UNDERLAY_CORE) / (ROAD_UNDERLAY_FADE - ROAD_UNDERLAY_CORE),
+    );
+    return belowRoad + (openY - belowRoad) * fade;
   }
 
   private build(cx: number, cz: number, s: number): void {
@@ -290,13 +242,18 @@ export class VistaMesh {
 
     for (let r = 0; r < rings; r++) {
       const radius = radii[r]!;
-      const bias = this.biasAt(radius);
+      const bias =
+        INNER_BIAS *
+        (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
       const reliefWeight =
         1 - smoothstep01((radius - RELIEF_FADE_START) / (RELIEF_FADE_END - RELIEF_FADE_START));
       for (let a = 0; a < SECTORS; a++) {
         const x = cx + this.dirX[a]! * radius;
         const z = cz + this.dirZ[a]! * radius;
-        const y = this.terrain.horizonHeight(x + ox, z + oz, radius, reliefWeight) - bias;
+        let y = this.terrain.horizonHeight(x + ox, z + oz, radius, reliefWeight) - bias;
+        if (radius <= ROAD_UNDERLAY_RADIUS) {
+          y = this.beneathRoad(x + ox, z + oz, y, bias);
+        }
 
         const vi = (r * SECTORS + a) * 3;
         positions[vi] = x;
@@ -308,7 +265,6 @@ export class VistaMesh {
         colors[vi + 2] = sandLinear.b;
       }
     }
-    this.lowerRoadUnderlay(positions, cx, cz, ox, oz);
 
     // Quads between consecutive rings, wrapping in the angular direction. Wrapping rather
     // than duplicating the seam column keeps the two sides of it numerically identical,
@@ -364,12 +320,7 @@ export class VistaMesh {
  */
 function ringRadii(outer: number): number[] {
   const radii = [INNER_RADIUS];
-  if (outer <= FIRST_FULL_RING) {
-    radii.push(outer);
-    return radii;
-  }
-  radii.push(FIRST_FULL_RING);
-  let r = FIRST_FULL_RING;
+  let r = INNER_RADIUS;
   while (r < outer) {
     r += Math.min(r * (RADIAL_RATIO - 1), MAX_RING_SPACING);
     if (r >= outer) break;
