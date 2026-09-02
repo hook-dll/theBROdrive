@@ -727,7 +727,7 @@ function buildWrecks(
     }
 
     const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
-    const shell = createStaticCarModel(def.id);
+    const shell = createStaticCarModel(def.id, carId);
     setFromMatrix(shell, matrix);
     group.add(shell);
 

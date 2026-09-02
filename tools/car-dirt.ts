@@ -191,12 +191,12 @@ async function run(): Promise<void> {
     sand.rig.vehicle.bodyDirt > 0.0001 && asphalt.rig.vehicle.bodyDirt < sand.rig.vehicle.bodyDirt * 0.01,
     `sand=${sand.rig.vehicle.bodyDirt.toFixed(6)}, asphalt=${asphalt.rig.vehicle.bodyDirt.toFixed(6)}, tyre-metres=${sand.tyreMetres.toFixed(1)}`,
   );
-  // Four tyres nominally reach full dirt around 100 km; this broad 20–500 km band
-  // catches a unit-scale regression without rejecting ordinary wheel-slip variation.
+  // Four tyres nominally reach full dirt around 25 km; this 10–100 km band catches
+  // unit-scale regressions without making one short off-road excursion instantly opaque.
   check(
-    'sand rate is tens-to-hundreds of km, not instant',
-    metresToFull >= 20_000 && metresToFull <= 500_000,
-    `${(metresToFull / 1_000).toFixed(1)} km to full (asserted band 20–500 km)`,
+    'sand rate becomes visible within a drive, not instantly',
+    metresToFull >= 10_000 && metresToFull <= 100_000,
+    `${(metresToFull / 1_000).toFixed(1)} km to full (asserted band 10–100 km)`,
   );
 
   const sharedPhysics = await PhysicsWorld.create();

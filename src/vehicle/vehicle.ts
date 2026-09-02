@@ -1087,11 +1087,12 @@ const FUEL_EMIT_INTERVAL = 0.5;
  */
 const BODY_CONDITION_EMIT_INTERVAL = 0.5;
 /**
- * Four rolling tyres cover 400 km of tyre-track over 100 km of road, so sand
- * (`dust = 1`) reaches full dirt after roughly 100 km; a 2x slip/slide multiplier
- * makes a digging wheel throw visibly more material without fouling a car in 1 km.
+ * Four rolling tyres cover 100 km of tyre-track over 25 km of road, so sand
+ * (`dust = 1`) reaches full dirt after roughly 25 km. The first visible layer
+ * arrives within a couple of off-road kilometres, while a 2x slip/slide multiplier
+ * still makes a digging wheel throw more material.
  */
-const BODY_DIRT_TYRE_METRES_TO_FULL = 400_000;
+const BODY_DIRT_TYRE_METRES_TO_FULL = 100_000;
 /** A kerb nudge is under this unexplained loss; shell scratches start above it. */
 const SCRATCH_IMPACT_THRESHOLD_MPS = 2.5;
 /** Each m/s above the scratch threshold adds this much shell damage. */
@@ -4327,7 +4328,7 @@ export class Vehicle implements Rebasable {
    * `rebuild` to register with the controller, gizmos onto their anchors.
    */
   private buildVisuals(): void {
-    const instance = createCarModel(this.model.id);
+    const instance = createCarModel(this.model.id, this.car.id);
     this.rootGroup.add(instance.body);
 
     this.wheelMeshes.clear();

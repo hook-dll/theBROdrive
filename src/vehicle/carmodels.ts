@@ -277,6 +277,18 @@ export interface CarModelDef {
    */
   readonly textureFile?: string;
   /**
+   * Imported paint representation. Quaternius uses named flat-colour meshes; Soviet
+   * bodies select a solid swatch from their shared 9x2 atlas.
+   */
+  readonly paintStyle?: 'quaternius-flat' | 'soviet-atlas';
+  /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
+  readonly paintUvCell?: readonly [number, number];
+  /**
+   * Visual-only body lift as a fraction of wheel radius. Suspension, collider,
+   * centre of mass and wheel mounts remain unchanged.
+   */
+  readonly visualRideLiftWheelFraction?: number;
+  /**
    * Set when the model has no wheels of its own: the wheels come from `file` below
    * and are mounted at fractions of the measured body box (see
    * render/carmodel.ts). Packs that ship one wheel and many bodies need this —
@@ -1155,9 +1167,9 @@ const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
  * standard path. FBXLoader reports them in centimetres, hence `scale: 0.01`.
  *
  * Colour is UV, not material: each body's UVs point into a region of the pack's
- * shared `albedo.png` palette, and the pack ships one FBX per colour. One colour per
- * model is vendored — a Volga is white because a Volga was white — and `textureFile`
- * hands the same 16 KB atlas to all fifteen.
+ * shared `albedo.png` palette. The atlas is not one paint picture: it is eighteen
+ * solid swatches carrying paint, glass, chrome, lamp and trim colours. The renderer
+ * replaces only each body's paint swatch, leaving every functional colour intact.
  *
  * Figures are the real cars': the Zhiguli line runs the 1.2 that already exists as a
  * part (`engine_lada_1200`, authored from the 2101), the 1.5-1.6 cars step up to the
@@ -1177,6 +1189,7 @@ interface SovietSpec {
   readonly rearDriveBias: number;
   readonly suspension?: SuspensionTuning;
   readonly storageCells?: number;
+  readonly visualRideLiftWheelFraction?: number;
 }
 
 /*
@@ -1203,6 +1216,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.52,
     rearDriveBias: 1,
     suspension: SUSP_SOFT,
+    visualRideLiftWheelFraction: 1 / 6,
   },
   {
     // GAZ-24 Volga: the same idea fifteen years later, 95 hp and slightly lighter.
@@ -1410,6 +1424,30 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   },
 ];
 
+/**
+ * Body-paint swatch used by each Soviet FBX. The shared atlas also carries glass,
+ * chrome, lamps, tyres and interior colours; replacing the whole texture would tint
+ * those parts too. Recolouring only this UV cell preserves the rest of the authored
+ * palette and the rally car's decals.
+ */
+const SOVIET_PAINT_CELLS: Readonly<Record<string, readonly [number, number]>> = {
+  'gz21.fbx': [8, 1],
+  'gz24.fbx': [1, 0],
+  'vz01.fbx': [0, 0],
+  'vz02.fbx': [7, 0],
+  'vz03.fbx': [0, 1],
+  'vz04.fbx': [8, 1],
+  'vz05.fbx': [1, 0],
+  'vz05r.fbx': [7, 0],
+  'vz06.fbx': [0, 0],
+  'vz07.fbx': [2, 0],
+  'vz08.fbx': [8, 1],
+  'vz09.fbx': [4, 0],
+  'vz099.fbx': [6, 0],
+  'vz21.fbx': [7, 0],
+  'vz31.fbx': [0, 0],
+};
+
 function sovietLights(file: string): VehicleLightsDef {
   const stem = file.slice(0, -4);
   const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
@@ -1454,6 +1492,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   detectWheels: true,
   bodyClass: 'car',
   storageCells: spec.storageCells,
+  visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -1554,6 +1593,7 @@ const ENTRIES: readonly Entry[] = [
     suspension: SUSP_TRUCK,
     steerLock: 0.56,
     rearDriveBias: 0.5,
+    visualRideLiftWheelFraction: 1 / 6,
   },
   {
     id: 'car_q_taxi',
@@ -1680,6 +1720,14 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   label: e.label,
   file: entryFile(e),
   textureFile: e.textureFile,
+  paintStyle:
+    e.dir === QUATERNIUS
+      ? 'quaternius-flat'
+      : e.dir === SOVIET
+        ? 'soviet-atlas'
+        : undefined,
+  paintUvCell: e.dir === SOVIET && e.glb ? SOVIET_PAINT_CELLS[e.glb] : undefined,
+  visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
   separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
   packNode: e.packNode,
