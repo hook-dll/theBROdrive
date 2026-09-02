@@ -58,6 +58,10 @@ const CAR_HALF_LENGTH_M = 3;
  * braking, which is what stops the two from deadlocking.
  */
 const AVOID_HYSTERESIS_M = 0.4;
+/** A valid indexed detour must keep rolling or its rate-limited line can never finish. */
+const AVOIDANCE_CRAWL_MPS = 3.5;
+/** Physics rays begin ahead of the chassis, so their range differs from road-frame s. */
+const INDEXED_RAY_MATCH_M = 4;
 const BLOCK_CORRIDOR_FRACTION = 0.8;
 const CENTERLINE_PULL = 0.4;
 const TURN_CURVATURE_SAMPLES = 8;
@@ -232,6 +236,16 @@ export class Autopilot {
         this.plannedLateral = line;
       }
     }
+    const hasIndexedDetour = hazard !== null && this.plannedHazard === hazard;
+    const rayMatchesIndexedHazard =
+      hasIndexedDetour &&
+      this.dynamicDistance < Infinity &&
+      Math.abs(this.dynamicDistance - this.hazardDistance) <= INDEXED_RAY_MATCH_M;
+    if (rayMatchesIndexedHazard) {
+      // The short ray is seeing the same prop for which a clear line already exists.
+      // Do not convert a controlled crawl into a full stop before the lateral move.
+      mustStop = false;
+    }
 
     // Ease onto the planned line instead of jumping to it. The waypoint itself is
     // shifted by the rate-limited line, so obstacle avoidance and road following use
@@ -284,9 +298,15 @@ export class Autopilot {
     targetSpeed = Math.max(3, targetSpeed - Math.max(0, target.grade) * 4);
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
     if (obstacleDistance < Infinity) {
+      const brakingSpeed = Math.sqrt(
+        Math.max(0, 2 * config.brakeAccel * Math.max(0, obstacleDistance - config.brakeLead)),
+      );
+      const indexedDetourControlsSpeed =
+        hasIndexedDetour &&
+        (this.hazardDistance <= this.dynamicDistance || rayMatchesIndexedHazard);
       targetSpeed = Math.min(
         targetSpeed,
-        Math.sqrt(Math.max(0, 2 * config.brakeAccel * Math.max(0, obstacleDistance - config.brakeLead))),
+        indexedDetourControlsSpeed ? Math.max(AVOIDANCE_CRAWL_MPS, brakingSpeed) : brakingSpeed,
       );
     }
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
