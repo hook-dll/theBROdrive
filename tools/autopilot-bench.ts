@@ -23,7 +23,7 @@ import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
-import { ROAD_HALF_WIDTH, Road, SHOULDER_WIDTH } from '../src/world/road';
+import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 
 class BunProgressEvent extends Event implements ProgressEvent {
@@ -79,10 +79,9 @@ function addRoadCollider(physics: PhysicsWorld, road: Road, from: number, to: nu
   for (let row = 0; row < rows; row++) {
     const s = Math.min(to, from + row * ROAD_STEP);
     for (let side = 0; side < 2; side++) {
-      // Asphalt PLUS shoulder. The avoidance policy is allowed to use the shoulder as
-      // a last resort, so a ribbon that stops at the asphalt edge would drop the car
-      // into the void the first time it did — measured, 22 m off the road.
-      const lateral = side === 0 ? -(ROAD_HALF_WIDTH + SHOULDER_WIDTH) : ROAD_HALF_WIDTH + SHOULDER_WIDTH;
+      // The road ribbon ends at this edge. The terrain collider overlaps it, so an
+      // avoidance excursion cannot drop the car through a numerical seam.
+      const lateral = side === 0 ? -ROAD_HALF_WIDTH : ROAD_HALF_WIDTH;
       road.offsetPoint(s, lateral, point);
       const i = (row * 2 + side) * 3;
       vertices[i] = point.x;
@@ -353,8 +352,8 @@ async function checkLitteredRoad(): Promise<void> {
     );
     check(
       `${mode}: littered road stays on road`,
-      result.worstLateral <= ROAD_HALF_WIDTH + SHOULDER_WIDTH,
-      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${(ROAD_HALF_WIDTH + SHOULDER_WIDTH).toFixed(2)} m edge`,
+      result.worstLateral <= ROAD_HALF_WIDTH,
+      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${ROAD_HALF_WIDTH.toFixed(2)} m edge`,
     );
     check(
       `${mode}: littered road makes progress`,
@@ -377,8 +376,8 @@ async function checkHazards(): Promise<void> {
   );
   check(
     'avoiding it does not put the car off the road',
-    rock.worstLateral <= ROAD_HALF_WIDTH + SHOULDER_WIDTH,
-    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${(ROAD_HALF_WIDTH + SHOULDER_WIDTH).toFixed(2)} m edge`,
+    rock.worstLateral <= ROAD_HALF_WIDTH,
+    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${ROAD_HALF_WIDTH.toFixed(2)} m edge`,
   );
   const wall = await driveHazard({ s: START_S + 300, lateral: 0, radius: 6, breakable: false }, 100);
   check(

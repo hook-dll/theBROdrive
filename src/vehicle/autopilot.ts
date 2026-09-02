@@ -1,7 +1,7 @@
 /** Fixed-step road follower. Inputs remain ordinary InputFrame commands. */
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
-import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from '../world/road';
+import { ROAD_HALF_WIDTH, type Road } from '../world/road';
 import { HazardIndex, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
 
@@ -74,7 +74,7 @@ const TURN_COAST_MIN_SPEED_MPS = 5;
  * early — and slow enough that a replan cannot present the loop with a step.
  */
 const LINE_SHIFT_PER_METRE = 0.09;
-const OFFROAD_RECOVERY_EDGE = ROAD_HALF_WIDTH + SHOULDER_WIDTH * 0.75;
+const OFFROAD_RECOVERY_EDGE = ROAD_HALF_WIDTH;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
 const OFFROAD_SPEED_MPS = 8;
 const OFFROAD_BRAKE_MAX = 0.35;
@@ -204,9 +204,9 @@ export class Autopilot {
     if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
       // Pick the smallest safe detour first, then decide about braking separately.
       // A full sleeper margin before the compact clearance pushed centre-lane rocks
-      // to the shoulder even when a modest lane change was enough.
+      // to the road edge even when a modest lane change was enough.
       const bodyClearance = hazard.radius + CAR_HALF_WIDTH_M;
-      const shoulderEdge = ROAD_HALF_WIDTH + SHOULDER_WIDTH - CAR_HALF_WIDTH_M;
+      const roadEdge = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M;
       let line: number | null = null;
       const clearanceLevels = [
         bodyClearance + Math.min(config.hazardMargin, AVOID_HYSTERESIS_M),
@@ -216,11 +216,11 @@ export class Autopilot {
       for (const clearance of clearanceLevels) {
         const left = hazard.lateral + clearance;
         const right = hazard.lateral - clearance;
-        const leftFits = Math.abs(left) <= shoulderEdge;
-        const rightFits = Math.abs(right) <= shoulderEdge;
+        const leftFits = Math.abs(left) <= roadEdge;
+        const rightFits = Math.abs(right) <= roadEdge;
         if (!leftFits && !rightFits) continue;
         // Whichever side needs the smaller move from the line already being held,
-        // so a hazard on the verge is passed without crossing the whole road and a
+        // so an off-centre hazard is passed without crossing the whole road and a
         // plan in progress is not thrown away for its mirror image.
         line =
           leftFits &&

@@ -35,10 +35,8 @@ import {
 
 export { NODE_SPACING, MIN_CORNER_RADIUS };
 
-/** Half-width of the driving surface. 3.3 m gives two genuinely narrow lanes. */
-export const ROAD_HALF_WIDTH = 3.3;
-/** Gravel shoulder either side of the asphalt. */
-export const SHOULDER_WIDTH = 1.4;
+/** Half-width of the asphalt. 2.9 m puts each edge at the former side marking. */
+export const ROAD_HALF_WIDTH = 2.9;
 /**
  * Total road length in metres. Forty thousand kilometres — a circumnavigation, and at
  * 90 km/h about 450 hours of driving, so it is measured in sessions rather than in an

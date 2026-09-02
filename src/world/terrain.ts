@@ -1,6 +1,6 @@
 import { Noise2D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
+import { ROAD_HALF_WIDTH, type Road } from './road';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 
 /**
@@ -18,14 +18,14 @@ import { SurfaceField, roadSurfaceY } from './roadsurface';
  *
  * What survives is the corridor: inside `CORRIDOR_INNER` the ground is the road
  * surface itself (banking and surface field included), sampled through the same
- * shared function the road ribbon uses, so the shoulder meets the verge flush. From
- * there out to `CORRIDOR_OUTER` it smoothsteps into the open field. The seam is
- * continuous because the road's own elevation IS the field's, so the two ends of the
- * blend differ only by camber and centimetre-scale surface detail.
+ * shared function the road ribbon uses. At its edge the asphalt meets the desert
+ * terrain flush; from there to `CORRIDOR_OUTER` the ground smoothsteps into the open
+ * field. The road's own elevation is that field's, so the blend differs only by
+ * camber and centimetre-scale surface detail.
  */
 
-/** Ground inside this lateral distance is pure road corridor. */
-export const CORRIDOR_INNER = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
+/** Asphalt edge and inner boundary of the desert terrain. */
+export const CORRIDOR_INNER = ROAD_HALF_WIDTH;
 /** Beyond this lateral distance the terrain is open desert. */
 export const CORRIDOR_OUTER = 30;
 /**
@@ -322,24 +322,21 @@ export class Terrain {
   }
 
   /**
-   * The corridor grading, base only: the shoulder's own elevation smoothstepped out
-   * into the open field between `CORRIDOR_INNER` and `CORRIDOR_OUTER`.
+   * The corridor grading, base only: the road-edge elevation smoothstepped out into
+   * the open field between `CORRIDOR_INNER` and `CORRIDOR_OUTER`.
    *
-   * The seam is continuous because the shoulder anchor and the open field meet at the
-   * same elevation: the road's own y is this field's value at the centreline.
+   * The seam is continuous because the edge anchor and open field share the road's
+   * centreline field elevation.
    *
-   * Past `CORRIDOR_OUTER` it returns the open field directly rather than blending
-   * towards it with weight 1. That is not a shortcut, it is the same number — and it
-   * skips a `shoulderHeight`, which is a road offset point plus a full road-surface
-   * sample, measured at 0.7 us. Every terrain vertex outside 30 m used to pay it and
-   * throw it away.
+   * Past `CORRIDOR_OUTER` this returns the open field directly. That skips a
+   * `roadEdgeHeight` sample which would otherwise be computed and discarded.
    */
   private gradedBase(x: number, z: number, dist: number, s: number, side: number): number {
     const open = this.openBase(x, z, dist);
     if (dist >= CORRIDOR_OUTER) return open;
     const t0 = (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER);
     const t = t0 * t0 * (3 - 2 * t0);
-    const inner = this.shoulderHeight(s, side);
+    const inner = this.roadEdgeHeight(s, side);
     return inner + (open - inner) * t;
   }
 
@@ -360,7 +357,7 @@ export class Terrain {
    * props scatter stays inside 42 m, where the rim is zero and the two agree.
    *
    * The detail layer is added OUTSIDE the corridor grading, not inside the field it
-   * grades. Inside, the grading's own weight is 0.10 at ten metres off the shoulder,
+   * grades. Inside, the grading's own weight is 0.10 at ten metres off the road edge,
    * which is where the chop is most wanted and where it was being multiplied away.
    * `detailAt` is zero at `CORRIDOR_INNER` by its own fade, so the seam onto the
    * asphalt is continuous without the grading's help.
@@ -424,11 +421,10 @@ export class Terrain {
   }
 
   /**
-   * The road surface height at the shoulder edge on one side (`side` = ±1). This
-   * is the anchor the blend hangs off: at `dist = CORRIDOR_INNER` the terrain
-   * equals the road's shoulder vertex exactly, because both sample roadSurfaceY.
+   * Road-surface height at one asphalt edge (`side` = ±1). At
+   * `dist = CORRIDOR_INNER`, both road and desert meshes sample this exact value.
    */
-  private shoulderHeight(s: number, side: number): number {
+  private roadEdgeHeight(s: number, side: number): number {
     const p = this.road.offsetPoint(s, side * CORRIDOR_INNER);
     return roadSurfaceY(this.road, this.field, s, side * CORRIDOR_INNER, p.x, p.z);
   }
