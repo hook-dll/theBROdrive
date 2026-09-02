@@ -218,6 +218,7 @@ async function boot(): Promise<void> {
     canvas,
     world.state.settings.graphicsQuality,
     world.state.settings.msaa,
+    world.state.settings.inkStrength,
   );
   const vehicleLights = new VehicleLightRig(renderer.scene);
   // Road texture canvases are one-time CPU work; create them under the loading cover
@@ -1192,6 +1193,7 @@ async function boot(): Promise<void> {
     // Eye height for heat haze. The exact local road frame is still useful near the
     // corridor; farther out the same terrain method is the player-centred fine field.
     const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
+    renderer.setHazeWorldPosition(cam.x + origin.x, cam.y, cam.z + origin.z);
     renderer.setHazeEyeHeight(
       cam.y -
         terrain.explorationHeightFromFrame(
@@ -1541,6 +1543,7 @@ async function boot(): Promise<void> {
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setMsaa(world.state.settings.msaa);
+      renderer.setInkStrength(world.state.settings.inkStrength);
       // Resolution, shadows, MSAA and the sky (probe resolution and star depth)
       // update in place. The lamp-slot count cannot: changing visible-light count
       // would recompile every lit material, so graphics quality changes that

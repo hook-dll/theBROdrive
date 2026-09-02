@@ -11,11 +11,11 @@ import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
  * The road ribbon: asphalt lanes with gravel shoulders, banked into corners and
- * displaced by a layered surface field — a long undulation, a short bump layer and
- * discrete potholes, all scaled by the road's decay so maintained asphalt stays
- * nearly smooth while cracked and gravel stretches visibly rough up. The same
- * vertex positions feed both the visible mesh and the trimesh collider, so what
- * you see is what the wheels feel.
+ * displaced by a layered surface field — broad undulation, wheel-scale bumps,
+ * broken asphalt edges and discrete potholes. Surface type owns ordinary bump
+ * amplitude; decay increases undulation, edge breakup and pothole occurrence. The
+ * same vertices feed the visible mesh and trimesh collider, so the car feels the
+ * shape the driver sees.
  */
 
 const HW = ROAD_HALF_WIDTH;
@@ -311,9 +311,10 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
       const roadMesh = new THREE.Mesh(geometry, roadMaterial);
-      // Match the desert: a moving shadow-map boundary must not turn the road and its
-      // shoulder into a dark strip through uniformly sunlit terrain.
-      roadMesh.receiveShadow = false;
+      // Every lane surface and shoulder must receive the same vehicle shadow that
+      // the surrounding desert receives. The ribbon does not cast into the map, so
+      // enabling reception adds contact shadows without road self-shadow acne.
+      roadMesh.receiveShadow = true;
       group.add(roadMesh);
       yield;
 
@@ -501,6 +502,9 @@ export class RoadMeshProvider implements ChunkProvider {
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       const markings = new THREE.Mesh(geometry, markingMaterial);
+      // Keep painted lines inside the same vehicle shadow as the lane beneath them;
+      // otherwise their lifted quads remain bright and visually cut holes through it.
+      markings.receiveShadow = true;
       completed = true;
       return markings;
     } finally {

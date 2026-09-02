@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AdaptiveResolutionController } from './adaptivequality';
-import type { GraphicsQuality } from '../game/settings';
+import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
 /**
@@ -89,69 +89,38 @@ const MSAA_SAMPLES = 4;
 
 /**
  * Heat-haze warp amplitude in pixels at a 1080p buffer; the shader normalises by
- * the real buffer height so the shimmer is the same size at every resolution.
+ * the real buffer height so the displacement is resolution-independent.
  *
- * Small on purpose. Real shimmer displaces an edge by a pixel or two — it reads as
- * a boiling, unstable edge, not as bending. Anything larger turns the desert into
- * water.
+ * Nine pixels keeps the distortion obvious without tearing silhouettes too far.
+ * The field below is made of broad, irregular cells rather than waves, so that
+ * travel breaks edges into chunks instead of bending the horizon like a lens.
  */
-const HAZE_AMPLITUDE_PX = 1.7;
-/**
- * Animation speed multiplier. Heat shimmer must move slowly enough to read as a
- * local, rising disturbance rather than a current flowing across the landscape.
- * The individual cell rises still differ below; this only slows their shared clock.
- */
-const HAZE_SPEED = 0.28;
+const HAZE_AMPLITUDE_PX = 9;
+/** Slow upward drift; individual grain scales still move at different rates. */
+const HAZE_SPEED = 0.34;
 
 /**
- * How the shimmer is distributed, in screen heights measured from the horizon.
- *
- * Real heat haze lives in the shallow layer of hot air sitting on the ground, and
- * what you see at a given screen row is how far a sight-line travels *inside* that
- * layer. Just below the horizon a ray skims along it for hundreds of metres, so
- * that is where the shimmer is strongest; looking further down means looking at
- * ground closer to you through a shorter slice of hot air, so it weakens; and above
- * the horizon a ray climbs out of the layer almost immediately, so the sky is
- * nearly still. A fixed screen-space band — which is what this used to be — spreads
- * the effect evenly and reads as a wobbling lens instead of hot ground.
+ * Screen-height decay above the horizon. A broad shoulder keeps coarse grains
+ * visible against the skyline, where refraction has enough contrast to read.
  */
-const HAZE_SKY_FALLOFF = 0.055;
+const HAZE_SKY_FALLOFF = 0.095;
 /**
- * Ground distance, metres, at which the shimmer begins. Nothing closer than this
- * shimmers at all.
- *
- * This used to be two screen-space numbers — a 0.3-screen-height exponential below
- * the horizon and a 0.22 fade at the very bottom — and screen space is the wrong
- * space for it. A band 30% of the frame tall reaches right down onto ground a few
- * metres from the bumper, so near rocks, the verge and the car's own bonnet all
- * boiled, which is not what hot air does: you are looking at them through a couple
- * of metres of it, not a couple of hundred.
- *
- * Below the horizon a screen row IS a ground distance — a ray depressed by atan(h/D)
- * from an eye h above the ground lands at distance D — so the onset can be stated in
- * metres and converted per frame from the camera's own height and field of view (see
- * `groundCutUv`). At a 2 m eye and a 50 degree vertical field that puts the cut about
- * 2% of the frame below the horizon, which is why real shimmer reads as a thin
- * unstable strip in the far distance rather than a wobbling lens over everything.
+ * Ground distance, metres, at which the shimmer begins. The per-frame projection
+ * in `groundCutUv` turns this into a screen-space band from the horizon down to
+ * roughly forty metres from the eye: far enough to remain heat haze, but deep
+ * enough that the large cells are not cropped to an invisible sliver.
  */
-const HAZE_MIN_DISTANCE_M = 100;
+const HAZE_MIN_DISTANCE_M = 40;
 /**
- * Screen-height scale over which the warp CELLS grow and speed up below the horizon.
- * Purely a texture variation so the frame does not shimmer in lockstep like one sheet
- * of glass, and deliberately not tied to the distance cut above: it is about the look
- * of the cells, not about where the effect applies.
+ * Screen-height scale over which cells grow and drift faster below the horizon,
+ * preventing the hot layer from moving as one rigid sheet.
  */
-const HAZE_CELL_DEPTH_SCALE = 0.3;
+const HAZE_CELL_DEPTH_SCALE = 0.16;
 
 // ---------------------------------------------------------------------------
 // Ink outlines: the second half of the drawn-landscape look, in the same pass.
 // ---------------------------------------------------------------------------
 
-/**
- * How dark an outline gets, 0 = off. The line is drawn by scaling the pixel's own
- * colour down rather than compositing black, so a line across sand stays sand.
- */
-const INK_STRENGTH = 0.6;
 /**
  * Relative luminance gradient that counts as an edge. Low enough to catch a dune
  * against the sky and the ground's own shading bands, high enough that the road's
@@ -180,6 +149,9 @@ const HAZE_FRAGMENT = /* glsl */ `
   uniform float uSkyFalloff;
   uniform float uGroundCut;
   uniform float uCellDepth;
+  uniform vec3 uHazeWorldPosition;
+  uniform mat3 uCameraRotation;
+  uniform float uTanHalfFov;
   uniform float uInkStrength;
   uniform float uInkThreshold;
   uniform vec3 uViewTint;
@@ -208,41 +180,74 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   /**
-   * Rising refraction cells — no texture lookup.
-   *
-   * Cell SIZE is what separates shimmer from a wobbling lens. These are expressed
-   * as fractions of frame height and are deliberately small: at 1080p the coarsest
-   * is ~50 px and the finest ~18 px. The previous version ran a ~220 px primary
-   * wave, which is why it read as rolling water rather than hot air.
-   *
-   * Phase is (uv.y - t * rise) * (TAU / cell), so a cell of constant phase travels
-   * upward at exactly that rise, in frame-heights per second of shader time. Smaller
-   * eddies churn faster, as they do in the real convective layer, and the three
-   * scales beating against each other keep it from looking like a conveyor belt.
-   * X-dependent phase shears the columns so they are plumes, not stripes.
+   * Large, irregular refraction grains sampled in WORLD space. Reconstructing the
+   * view ray and sampling a fixed volume ahead of the eye makes the field stay in
+   * the desert while camera translation, yaw, pitch and roll move through it.
    */
-  vec2 hazeWarp(vec2 uv, float t) {
-    const float TAU = 6.2831853;
-    const float CELL_A = 0.048;
-    const float CELL_B = 0.029;
-    const float CELL_C = 0.017;
-    const float RISE_A = 0.075;
-    const float RISE_B = 0.115;
-    const float RISE_C = 0.17;
+  float cellHash(vec2 p) {
+    vec3 q = fract(vec3(p.xyx) * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.x + q.y) * q.z);
+  }
 
-    float pa = (uv.y - t * RISE_A) * (TAU / CELL_A);
-    float pb = (uv.y - t * RISE_B) * (TAU / CELL_B);
-    float pc = (uv.y - t * RISE_C) * (TAU / CELL_C);
+  float coarseNoise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    // Hold most of each cell nearly flat, then turn quickly at the boundary.
+    vec2 blend = smoothstep(vec2(0.30), vec2(0.70), f);
+    float a = cellHash(cell);
+    float b = cellHash(cell + vec2(1.0, 0.0));
+    float c = cellHash(cell + vec2(0.0, 1.0));
+    float d = cellHash(cell + vec2(1.0, 1.0));
+    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+  }
 
-    float shearA = uv.x * (TAU / 0.22);
-    float shearB = uv.x * (TAU / 0.13);
-    float shearC = uv.x * (TAU / 0.08);
+  float coarseGrain(float noiseValue) {
+    return smoothstep(0.22, 0.78, noiseValue) * 2.0 - 1.0;
+  }
 
-    float y = sin(pa + shearA) * 0.6
-            + sin(pb - shearB) * 0.28
-            + sin(pc + shearC) * 0.12;
-    float x = sin(pa - shearB) * 0.5
-            + sin(pc + shearA) * 0.5;
+  vec3 worldRay(vec2 uv) {
+    vec2 ndc = uv * 2.0 - 1.0;
+    float aspect = uResolution.x / uResolution.y;
+    vec3 cameraRay = normalize(vec3(
+      ndc.x * aspect * uTanHalfFov,
+      ndc.y * uTanHalfFov,
+      -1.0
+    ));
+    return normalize(uCameraRotation * cameraRay);
+  }
+
+  vec2 hazeWarp(vec2 uv, float t, float groundness) {
+    // A fixed world-space slice 150–180 m away. The oblique projection mixes X/Z
+    // into the horizontal grain axis while retaining world Y as vertical, so the
+    // cells remain upright and stationary when the camera turns or rolls.
+    float sampleDistance = mix(180.0, 70.0, groundness);
+    // Heat is a distant atmospheric volume, not paint on the ground under the eye.
+    // Keep only subtle translational parallax so walking/driving speed does not add
+    // a second, much faster animation on top of the convection already in the field.
+    vec3 slowAnchor = uHazeWorldPosition * 0.12;
+    vec3 worldSample = slowAnchor + worldRay(uv) * sampleDistance;
+    vec2 p = vec2(
+      worldSample.x * 0.8192 + worldSample.z * 0.5736,
+      worldSample.y + worldSample.x * 0.07 - worldSample.z * 0.10
+    );
+
+    // Physical cells of roughly 24, 13.5 and 7.2 metres resolve to the authored
+    // coarse screen sizes at the sample distance. Different world-space drift
+    // rates make the combined field continuously change shape rather than scroll
+    // one immutable texture past the eye.
+    float broad = coarseGrain(coarseNoise(
+      (p + vec2(t * 0.8, -t * 6.0)) / 24.0
+    ));
+    float medium = coarseGrain(coarseNoise(
+      (p + vec2(-t * 1.3, -t * 7.5)) / 13.5
+    ));
+    float detail = coarseGrain(coarseNoise(
+      (p + vec2(t * 2.1, -t * 9.0)) / 7.2
+    ));
+
+    float x = broad * 0.42 - medium * 0.38 + detail * 0.20;
+    float y = broad * 0.60 + medium * 0.29 + detail * 0.11;
     return vec2(x, y);
   }
 
@@ -281,25 +286,27 @@ const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    // The warp is skipped outright when the shimmer is off — a uniform branch, so
-    // every fragment in the draw takes the same side and the trig below is simply
-    // not issued. That is what lets the cheapest tier keep this pass for its
-    // outlines and its colour handling without paying for heat haze.
+    // The warp is skipped outright when shimmer is off. This is a uniform branch,
+    // so every fragment takes the same side and the procedural grains are not
+    // evaluated on the cheapest graphics tier.
     vec2 uv = vUv;
+    float shimmerWeight = 0.0;
+    float shimmerGrain = 0.0;
     if (uStrength > 0.0) {
-      // Cells are smaller and churn faster close to the ground, and the long
-      // sight-lines near the horizon stack more of them along one ray. Scaling with
-      // depth stops the whole frame shimmering in lockstep like one sheet of glass.
       float groundness = clamp((uHorizon - vUv.y) / uCellDepth, 0.0, 1.0);
-      float scale = mix(1.0, 1.3, groundness);
-      vec2 warp = hazeWarp(vUv * scale, uTime * mix(1.0, 1.25, groundness));
-      // Rising air bends a sight-line up and down far more than sideways; the
-      // horizontal term only exists so columns do not look like a venetian blind.
-      warp.x *= 0.25;
-      vec2 offset = warp * uStrength * hotLayer(vUv.y) * (uAmplitude / uResolution.y);
+      vec2 warp = hazeWarp(vUv, uTime * mix(1.0, 1.3, groundness), groundness);
+      // Rising air bends vertically most, but enough lateral displacement remains
+      // to break long silhouettes into distinct coarse refraction cells.
+      warp.x *= 0.45;
+      shimmerWeight = uStrength * hotLayer(vUv.y);
+      shimmerGrain = warp.y;
+      vec2 offset = warp * shimmerWeight * (uAmplitude / uResolution.y);
       uv = clamp(vUv + offset, 0.0, 1.0);
     }
     vec4 color = texture2D(tDiffuse, uv);
+    // A faint density change keeps the large grains legible over flat sand or sky,
+    // where displacement alone has no nearby edge to reveal it.
+    color.rgb *= 1.0 + shimmerGrain * shimmerWeight * 0.04;
 
     // Ink is ground treatment. Rendering it only below the horizon leaves the sky
     // (including every star point) outside the outline pass by construction.
@@ -346,7 +353,7 @@ export class Renderer {
   readonly camera: THREE.PerspectiveCamera;
   readonly fog: THREE.FogExp2;
   // --- Heat-haze post pass ---
-  /** Scene-pass target; the fullscreen pass samples this texture outside acceptable. */
+  /** Scene-pass target sampled by the fullscreen haze/ink pass on every tier. */
   private readonly hazeTarget: THREE.WebGLRenderTarget;
   /** Tiny scene holding the fullscreen triangle. */
   private readonly hazeScene = new THREE.Scene();
@@ -358,6 +365,8 @@ export class Renderer {
   private readonly _drawSize = new THREE.Vector2();
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
+  /** Absolute camera position keeps haze stable across floating-origin rebases. */
+  private readonly _hazeWorldPosition = new THREE.Vector3();
   /**
    * Camera height above the ground, metres, for the haze distance cut. Defaulted to a
    * standing eye so the very first frame is sensible before the loop has supplied one.
@@ -389,6 +398,7 @@ export class Renderer {
     canvas: HTMLCanvasElement,
     quality: GraphicsQuality = 'standard',
     msaa = true,
+    inkStrength = DEFAULT_INK_STRENGTH,
   ) {
     this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
@@ -436,9 +446,9 @@ export class Renderer {
     this.fog = new THREE.FogExp2(0xd8c39a, 0.00035);
     this.scene.fog = this.fog;
 
-    // Standard and Blessing render into this target, then a fullscreen pass warps
-    // and copies it back. Acceptable keeps it at 1×1 and bypasses the pass.
-    // The independent MSAA setting decides geometry-edge samples for those tiers.
+    // Every tier renders into this target, then uses the fullscreen pass for the
+    // authored colour handling and ink. Acceptable suppresses only the haze warp.
+    // The independent MSAA setting decides geometry-edge samples.
     this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
       samples: msaa ? MSAA_SAMPLES : 0,
     });
@@ -463,7 +473,10 @@ export class Renderer {
         uSkyFalloff: { value: HAZE_SKY_FALLOFF },
         uGroundCut: { value: 0.02 },
         uCellDepth: { value: HAZE_CELL_DEPTH_SCALE },
-        uInkStrength: { value: INK_STRENGTH },
+        uHazeWorldPosition: { value: this._hazeWorldPosition },
+        uCameraRotation: { value: new THREE.Matrix3() },
+        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(CAMERA_BASE_FOV) / 2) },
+        uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
@@ -546,6 +559,13 @@ export class Renderer {
       this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001 * HAZE_SPEED;
       this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
       this.hazeMaterial.uniforms.uGroundCut.value = this.groundCutUv();
+      this.camera.updateWorldMatrix(true, false);
+      (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
+        this.camera.matrixWorld,
+      );
+      this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
+        THREE.MathUtils.degToRad(this.camera.fov) / 2,
+      );
       // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
       //
       // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
@@ -616,14 +636,18 @@ export class Renderer {
     this.hazeEyeHeight = metres;
   }
 
+  /** Absolute eye position used by the world-anchored procedural heat field. */
+  setHazeWorldPosition(x: number, y: number, z: number): void {
+    this._hazeWorldPosition.set(x, y, z);
+  }
+
   /**
    * Heat-haze strength, clamped to 0..1, and always zero on the cheapest tier.
    *
-   * The warp is the expensive half of this pass — layered trig per pixel — while
-   * the outlines are four taps and the copy is one. Acceptable pays the copy and
-   * the outlines, which is what the drawn look is made of, and skips the shimmer:
+   * The procedural grains are the expensive half of this pass. Acceptable pays
+   * the copy and outlines, which define the drawn look, and skips the shimmer:
    * at zero strength the shader branches past the warp on a uniform every fragment
-   * agrees on, so the branch is free.
+   * agrees on.
    */
   setHazeStrength(strength: number): void {
     const wanted = this.quality === 'acceptable' ? 0 : strength;
@@ -762,6 +786,11 @@ export class Renderer {
     this.hazeTarget.samples = samples;
     // Multisampling is allocation state; Three recreates the target on next bind.
     this.hazeTarget.dispose();
+  }
+
+  /** Changes post-process outline opacity without rebuilding the shader pass. */
+  setInkStrength(strength: number): void {
+    this.hazeMaterial.uniforms.uInkStrength.value = Math.min(1, Math.max(0, strength));
   }
 
   /**

@@ -34,10 +34,10 @@ export const COARSE_SPACING = 200;
 /**
  * Format tag for the persisted cache. Bump on any change to the tables' MEANING —
  * which includes any change to the heading field, because a cached checkpoint is a
- * position the new field would not integrate to. 3: the corner rebudget in
- * roadcurve.ts (tighter, more frequent bends, less route deviation).
+ * position the new field would not integrate to. 5: replace gated corner noise with
+ * guaranteed, seeded turn sequences.
  */
-export const SPINE_FORMAT = 3;
+export const SPINE_FORMAT = 5;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

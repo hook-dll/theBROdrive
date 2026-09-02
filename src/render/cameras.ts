@@ -96,40 +96,22 @@ const BINOCULAR_FOV = BASE_FOV / 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
-const SHAKE_MAX = 0.012;
+const SHAKE_MAX = 0.018;
 /**
- * Interior g-force sway tuning. The eye must stay inside the cabin at all
- * times, so this is a small bounded offset from the body's fixed `eyePoint`
- * — never an integration of velocity or acceleration, which is what could
- * walk the eye out through the back of the cabin under sustained throttle.
- * Acceleration (not velocity) drives it because that is what inertia
- * actually is: a car holding a steady 100 km/h has zero g-force on the
- * driver, so keying the sway off speed/velocity would keep swaying on a
- * flat-out cruise and has no natural zero to decay back to; acceleration is
- * exactly zero at rest and at constant speed, which is what makes the
- * offset settle to zero instead of drifting.
+ * Interior g-force sway tuning. The eye stays inside the cabin, but the camera now
+ * also inherits the chassis' physical pitch and roll. This bounded offset is the
+ * driver's body moving in the seat, not a replacement for suspension motion.
  */
-/** Sway offset clamp, metres, in any axis. About one seat-cushion's worth of
- *  lean — enough to read as weight transfer, never enough to reach the
- *  headrest or leave the cabin (the bug this replaces). */
-const SWAY_MAX = 0.06;
-/** Sway low-pass time constant, seconds. Long enough to smooth a kerb strike
- *  or gear-shift jolt out of the finite-differenced accel estimate; short
- *  enough that a real swerve or hard brake is still felt within a couple of
- *  frames. */
-const SWAY_TAU = 0.2;
+/** Sway offset clamp, metres, in any axis. */
+const SWAY_MAX = 0.075;
+/** Sway low-pass time constant, seconds. */
+const SWAY_TAU = 0.16;
 const SWAY_OMEGA = 1 / SWAY_TAU;
-/** Acceleration, m/s^2, that fully saturates the clamp: ~0.5-0.6 g, i.e. a
- *  hard brake or a hard launch in this game's tuning. Ordinary hard driving
- *  should reach the full bounded sway, not require motorsport-grade g-force
- *  to ever be felt. */
+/** Acceleration, m/s^2, that fully saturates the clamp. */
 const SWAY_ACCEL_FULL = 6;
 const SWAY_GAIN = SWAY_MAX / SWAY_ACCEL_FULL;
-/** Counter-roll clamp, radians (~2.9 deg) — a few degrees of bank into hard
- *  cornering, same "never reads as nausea" ceiling the old steer-based roll
- *  used. Driven by the same lateral-g estimate as the eye sway rather than
- *  steering angle, so holding full lock while parked doesn't lean the cabin. */
-const SWAY_ROLL_MAX = 0.05;
+/** Small additional occupant counter-motion; chassis roll comes from target.q. */
+const SWAY_ROLL_MAX = 0.025;
 const SWAY_ROLL_GAIN = SWAY_ROLL_MAX / SWAY_ACCEL_FULL;
 
 const LOG_MIN = Math.log(DIST_MIN);
@@ -454,14 +436,22 @@ export class CameraRig {
       else this.lookAt.lerp(_vB, k);
     }
 
-    _mA.lookAt(this.eye, this.lookAt, _UP);
+    if (mode === 'interior') {
+      // The cockpit must inherit the chassis' actual roll. Looking at the road with
+      // world-up here silently levelled the cabin, making a physically rolling car
+      // feel glued to the road from the driver's seat.
+      _vC.copy(_UP).applyQuaternion(_qA);
+      _mA.lookAt(this.eye, this.lookAt, _vC);
+    } else {
+      _mA.lookAt(this.eye, this.lookAt, _UP);
+    }
+    // Rebuild from the current view every frame before applying occupant roll.
+    // Without this reset, `multiply` accumulated another roll forever: the camera
+    // inverted within seconds and made steering appear uncontrollable.
     this.camera.quaternion.setFromRotationMatrix(_mA);
     if (mode === 'interior') {
-      // Counter-roll from the same lateral g-force estimate as the eye sway
-      // (see desiredInterior): the cabin banks a few degrees into hard
-      // cornering, the way real body roll leans the driver outward. Driven
-      // by measured lateral accel rather than steering angle so holding full
-      // lock at parking speed doesn't lean the view at all.
+      // A small occupant response remains on top of the chassis attitude. It is much
+      // smaller than the body roll now that the camera no longer levels the cabin.
       _qB.setFromAxisAngle(_FORWARD, this.swayRoll);
       this.camera.quaternion.multiply(_qB);
     }
