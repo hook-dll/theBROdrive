@@ -19,7 +19,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { makeCarBodyConditionMaterial } from './materials';
+import { makeCarBodyConditionMaterial, setCarBodyPalettePaint } from './materials';
 import { isProceduralCarPaintMaterial, proceduralCarScene } from './proceduralcars';
 import { CAR_MODELS, carModel, type CarModelDef, type GizmoAnchorDef } from '../vehicle/carmodels';
 
@@ -176,13 +176,52 @@ async function loadScene(file: string): Promise<THREE.Group> {
   return scene;
 }
 
+/** Curated factory colours shared by the two roadworthy imported packs. */
+const CAR_PAINT_COLORS: readonly number[] = [
+  0x2f5f87, // deep blue
+  0x74a3bd, // powder blue
+  0x315f55, // dark teal
+  0x76917a, // sage
+  0x8b3f36, // oxide red
+  0xb9683f, // burnt orange
+  0xc5a548, // ochre
+  0xd6d0bc, // ivory
+  0x9c927b, // beige
+  0x6f5b78, // plum
+  0x697887, // slate
+  0x343a40, // charcoal
+];
+const paintScratch = new THREE.Color();
+
+/** Stable string avalanche: a saved/generated car keeps its colour across reloads. */
+function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
+  let h = 0x811c9dc5;
+  const key = `${modelId}:${appearanceKey}`;
+  for (let i = 0; i < key.length; i++) {
+    h = Math.imul(h ^ key.charCodeAt(i), 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return paintScratch.setHex(CAR_PAINT_COLORS[(h >>> 0) % CAR_PAINT_COLORS.length]!);
+}
+
+function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
+  if (def.paintStyle === 'soviet-atlas') return mesh.name.endsWith('body');
+  if (def.paintStyle === 'quaternius-flat') {
+    return mesh.name === 'body_1' || (def.id === 'car_q_sports' && mesh.name === 'body_2');
+  }
+  return false;
+}
+
 /**
- * Gives each driving car independent condition uniforms while preserving the exact
- * livery slot rule: textured packs paint every already-mapped slot; untextured
- * procedural shells name their paint finish explicitly. One clone per shared source
- * material keeps DeJunes' multi-group body slots sharing state and draw calls.
+ * Gives each car independent condition uniforms while preserving the exact paint
+ * slot. Random-colour packs identify paint by authored mesh name; textured livery
+ * packs use their mapped slot; procedural shells mark paint directly.
  */
-function cloneCarBodyPaintMaterials(root: THREE.Object3D): void {
+function cloneCarBodyPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
   const meshes: THREE.Mesh[] = [];
   let hasLiverySlots = false;
   let hasExplicitPaintSlots = false;
@@ -199,27 +238,45 @@ function cloneCarBodyPaintMaterials(root: THREE.Object3D): void {
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    const standard = source as THREE.MeshStandardMaterial;
-    const isPaint = hasLiverySlots
-      ? Boolean(standard.map)
-      : hasExplicitPaintSlots
-        ? isProceduralCarPaintMaterial(source)
-        // This is the livery path's established fallback for a one-material export.
-        : true;
-    if (!isPaint) {
-      clones.set(source, source);
-      return source;
-    }
     const material = makeCarBodyConditionMaterial(source);
     clones.set(source, material);
     return material;
   };
 
   for (const mesh of meshes) {
+    if (def.paintStyle && !isRandomPaintMesh(mesh, def)) continue;
+    const eligible = (source: THREE.Material): THREE.Material => {
+      if (def.paintStyle) return paint(source);
+      const standard = source as THREE.MeshStandardMaterial;
+      const isPaint = hasLiverySlots
+        ? Boolean(standard.map)
+        : hasExplicitPaintSlots
+          ? isProceduralCarPaintMaterial(source)
+          : true;
+      return isPaint ? paint(source) : source;
+    };
     mesh.material = Array.isArray(mesh.material)
-      ? mesh.material.map(paint)
-      : paint(mesh.material);
+      ? mesh.material.map(eligible)
+      : eligible(mesh.material);
   }
+}
+
+/** Writes one deterministic per-car colour into already-independent paint materials. */
+function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey: string): void {
+  if (!def.paintStyle) return;
+  const color = paintColorFor(def.id, appearanceKey);
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    for (const material of materialsOf(child)) {
+      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+      if (def.paintStyle === 'quaternius-flat') {
+        material.color.copy(color);
+        if (child.name === 'body_2') material.color.multiplyScalar(0.72);
+      } else if (def.paintUvCell) {
+        setCarBodyPalettePaint(material, color, def.paintUvCell);
+      }
+    }
+  });
 }
 
 /**
@@ -820,34 +877,49 @@ export interface CarModelInstance {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
 }
 
-function cloneDrivingModel(t: Template): CarModelInstance {
+function visualBodyLift(t: Template): number {
+  const fraction = t.def.visualRideLiftWheelFraction ?? 0;
+  if (fraction === 0) return 0;
+  let wheelRadius = 0;
+  for (const wheel of t.measure.wheels) wheelRadius = Math.max(wheelRadius, wheel.radius);
+  return wheelRadius * fraction;
+}
+
+function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const wheels = new Map<string, THREE.Object3D>();
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
-  cloneCarBodyPaintMaterials(body);
+  cloneCarBodyPaintMaterials(body, t.def);
+  applyRandomPaint(body, t.def, appearanceKey);
+  body.position.y += visualBodyLift(t);
   body.name = 'body';
   return { body, wheels };
 }
 
-/** A fresh instance of a preloaded model, sharing geometry and materials. */
-export function createCarModel(id: string): CarModelInstance {
+/** A fresh instance of a preloaded model, sharing geometry but owning its paint state. */
+export function createCarModel(id: string, appearanceKey = id): CarModelInstance {
+  const t = template(id);
   const warmed = warmDrivingInstances.get(id);
   if (warmed) {
     warmDrivingInstances.delete(id);
+    applyRandomPaint(warmed.body, t.def, appearanceKey);
     return warmed;
   }
-  return cloneDrivingModel(template(id));
+  return cloneDrivingModel(t, appearanceKey);
 }
 
 /**
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
  * model puts them. This is what wrecks and scenery cars use.
  */
-function cloneStaticModel(id: string): THREE.Object3D {
+function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   const t = template(id);
   const group = new THREE.Group();
   group.name = id;
   const body = t.body.clone(true);
+  cloneCarBodyPaintMaterials(body, t.def);
+  applyRandomPaint(body, t.def, appearanceKey);
+  body.position.y += visualBodyLift(t);
   group.add(body);
   for (const wheel of t.measure.wheels) {
     const mesh = t.wheels.get(wheel.id)!.clone(true);
@@ -896,13 +968,15 @@ export async function warmCarModelInstances(
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
  * model puts them. This is what wrecks and scenery cars use.
  */
-export function createStaticCarModel(id: string): THREE.Object3D {
+export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
+  const t = template(id);
   const warmed = warmStaticInstances.get(id);
   if (warmed) {
     warmStaticInstances.delete(id);
+    applyRandomPaint(warmed, t.def, appearanceKey);
     return warmed;
   }
-  return cloneStaticModel(id);
+  return cloneStaticModel(id, appearanceKey);
 }
 
 export function disposeCarModelCache(): void {

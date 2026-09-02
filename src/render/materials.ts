@@ -18,13 +18,19 @@ interface ConditionUniforms {
   readonly scratches?: { value: number };
 }
 
+interface CarBodyUniforms extends ConditionUniforms {
+  readonly palettePaint: { value: number };
+  readonly paintColor: { value: THREE.Color };
+  readonly paintCell: { value: THREE.Vector2 };
+}
+
 /**
  * Eager per-instance uniform objects. Kept OUT of material.userData because
  * Material.copy() JSON-round-trips userData, which would sever the references the
  * compiled program is holding. A WeakMap keeps the objects alive for exactly as long
  * as the material, and lets setCondition write values even before first render.
  */
-const carBodyUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
+const carBodyUniforms = new WeakMap<THREE.Material, CarBodyUniforms>();
 const conditionUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
 
 /** Templates keyed by parameter tuple. They are only ever cloned, never rendered. */
@@ -45,7 +51,7 @@ function flatKey(color: number, roughness: number): string {
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /** Body paint adds scratch wear while remaining a single shader permutation. */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v2';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v3';
 
 // ---------------------------------------------------------------------------
 // GLSL patch
@@ -81,6 +87,9 @@ const CONDITION_PARS = `
 uniform float uDirt;
 uniform float uRust;
 uniform float uScratches;
+uniform float uPalettePaint;
+uniform vec3 uPalettePaintColor;
+uniform vec2 uPalettePaintCell;
 
 
 
@@ -130,6 +139,22 @@ vec2 condRust( vec3 p ) {
 #define COND_PIT_DEPTH 0.015
 
 #include <map_pars_fragment>`;
+
+/**
+ * The Soviet atlas is a 9x2 sheet of flat colour swatches. Only the main body mesh
+ * receives this material, and only its authored paint cell is replaced; glass,
+ * chrome, lamps, wheels and rally decals keep their original cells.
+ */
+const CAR_PAINT_MAP = `
+#include <map_fragment>
+#ifdef USE_MAP
+if ( uPalettePaint > 0.5 ) {
+  vec2 carPaintCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
+  if ( all( equal( carPaintCell, uPalettePaintCell ) ) ) {
+    diffuseColor.rgb = uPalettePaintColor;
+  }
+}
+#endif`;
 
 // Injected after the stock roughness/metalness factors are computed but before the
 // BRDF consumes them, so we modify the *inputs* (diffuseColor, roughnessFactor,
@@ -193,8 +218,10 @@ const CAR_BODY_CONDITION_BODY = `
   float scratchEdge = smoothstep( 0.5, 0.82, condFbm( scratchP * 5.5 + 19.0 ) );
   float scratchLower = 1.0 - smoothstep( 0.35, 1.25, scratchP.y );
   float scratchMask = uScratches * scratchLine * scratchEdge * ( 0.25 + 0.75 * scratchLower );
-  // Paint wear exposes a dull primer, never the brown oxide reserved for steel parts.
-  diffuseColor.rgb = mix( diffuseColor.rgb, mix( diffuseColor.rgb, vec3( 0.68 ), 0.55 ), scratchMask );
+  // Contrast follows the underlying paint: dark primer on light paint, pale exposed
+  // primer on dark paint. A scratch therefore remains readable on every random colour.
+  vec3 scratchColor = condLum > 0.42 ? vec3( 0.035 ) : vec3( 0.92 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, scratchColor, scratchMask * 0.92 );
   roughnessFactor = mix( roughnessFactor, 0.9, scratchMask );
   metalnessFactor = mix( metalnessFactor, 0.0, scratchMask );
 }`;
@@ -256,11 +283,14 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
 /** Binds the shell-only scratch hook without changing any shared source material. */
 function patchCarBodyShader(
   shader: WebGLProgramParametersWithUniforms,
-  uniforms: ConditionUniforms,
+  uniforms: CarBodyUniforms,
 ): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uRust = uniforms.rust;
   shader.uniforms.uScratches = uniforms.scratches!;
+  shader.uniforms.uPalettePaint = uniforms.palettePaint;
+  shader.uniforms.uPalettePaintColor = uniforms.paintColor;
+  shader.uniforms.uPalettePaintCell = uniforms.paintCell;
 
   shader.vertexShader = shader.vertexShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
@@ -269,6 +299,7 @@ function patchCarBodyShader(
   shader.fragmentShader = shader.fragmentShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
     .replace('#include <map_pars_fragment>', CONDITION_PARS)
+    .replace('#include <map_fragment>', CAR_PAINT_MAP)
     .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
     .replace('#include <metalnessmap_fragment>', CAR_BODY_CONDITION_BODY);
 }
@@ -331,15 +362,31 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
   const material = source.clone();
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
-  const uniforms: ConditionUniforms = {
+  const uniforms: CarBodyUniforms = {
     dirt: { value: 0 },
     rust: { value: 0 },
     scratches: { value: 0 },
+    palettePaint: { value: 0 },
+    paintColor: { value: new THREE.Color() },
+    paintCell: { value: new THREE.Vector2() },
   };
   carBodyUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
   material.customProgramCacheKey = () => CAR_BODY_PROGRAM_KEY;
   return material;
+}
+
+/** Selects one Soviet atlas paint cell and its per-car replacement colour. */
+export function setCarBodyPalettePaint(
+  material: THREE.Material,
+  color: THREE.Color,
+  cell: readonly [number, number],
+): void {
+  const uniforms = carBodyUniforms.get(material);
+  if (uniforms === undefined) return;
+  uniforms.palettePaint.value = 1;
+  uniforms.paintColor.value.copy(color);
+  uniforms.paintCell.value.set(cell[0], cell[1]);
 }
 
 /**
