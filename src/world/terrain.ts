@@ -402,18 +402,19 @@ export class Terrain {
 
   /**
    * Camera-centred horizon height. `distanceFromCamera` rather than distance from
-   * the road makes the mountain ranges permanent horizon scenery: driving toward
-   * one advances the vista and reveals another equally distant part of the field,
-   * while the local physical terrain remains the open landscape.
+   * the road makes mountain ranges permanent horizon scenery. `reliefWeight` is a
+   * continuous vista fade; a boolean cutoff would turn a tall dune into a ring cliff.
    */
   horizonHeight(
     x: number,
     z: number,
     distanceFromCamera: number,
-    withRelief: boolean,
+    reliefWeight: number,
   ): number {
     let h = this.road.landscape.heightAt(x, z);
-    if (withRelief) h += this.relief(x, z, RELIEF_FULL);
+    if (reliefWeight > 0) {
+      h += this.relief(x, z, RELIEF_FULL) * Math.min(1, reliefWeight);
+    }
     if (distanceFromCamera > MOUNTAIN_START) {
       h +=
         this.road.landscape.mountainAt(x, z) *

@@ -116,6 +116,30 @@ export function wheelTorqueToForce(torqueNm: number, wheelRadius: number): numbe
   return wheelRadius > 0 ? torqueNm / wheelRadius : 0;
 }
 
+/**
+ * Rotating inertia of the crank, flywheel and clutch, kg·m², DERIVED rather than
+ * authored so a new engine variant needs no extra number.
+ *
+ * Peak torque is the size of an engine. For a four-stroke, torque is
+ * `BMEP · displacement / 4π`, and BMEP is roughly constant across a class of engine —
+ * about 8-10 bar for these naturally aspirated period units — so displacement in
+ * litres is close to `peakTorqueNm / TORQUE_PER_LITRE`. The catalogue agrees with
+ * itself on that: 125 N·m for the 1.6, 225 for the 2.8, 390 for the 5.0.
+ *
+ * Inertia is then a fixed clutch-and-input-shaft term plus a term that grows with
+ * displacement, which is what a bigger crank and a bigger flywheel are. The result
+ * lands 0.19 kg·m² for the small four and 0.47 for the truck diesel — the range real
+ * assemblies of this era occupy.
+ */
+const TORQUE_PER_LITRE = 80;
+const CRANK_INERTIA_BASE = 0.1;
+const CRANK_INERTIA_PER_LITRE = 0.055;
+
+function crankInertiaKgM2(engine: EngineSpec): number {
+  const litres = Math.max(0, engine.peakTorqueNm) / TORQUE_PER_LITRE;
+  return CRANK_INERTIA_BASE + CRANK_INERTIA_PER_LITRE * litres;
+}
+
 export class Drivetrain {
   /** Fixed by the body; kept for reference by callers that split axle torque. */
   readonly rearDriveBias: number;
@@ -192,6 +216,39 @@ export class Drivetrain {
     }
     const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
     return total > 0 ? engine.redlineRpm / RPM_PER_RAD_PER_SEC / total : Infinity;
+  }
+
+  /**
+   * Rotating inertia the CRANK adds to one driven wheel, kg·m², or 0 when the clutch
+   * is open (neutral, mid-shift, no gearbox).
+   *
+   * This is the term whose absence made a bumpy road undriveable. A driven wheel is
+   * not a free disc: it is bolted through the gears to a crankshaft and a flywheel,
+   * and gearing multiplies that inertia by the SQUARE of the ratio. Without it the
+   * only thing resisting drive torque was the wheel's own ~1.2 kg·m², so a first-gear
+   * 2000 N·m at the wheel spun it up 13 rad/s — nearly 5 m/s of slip — in a single
+   * 60 Hz step. Any dip in load (a pothole, a crest, a bump) was therefore an instant
+   * wheelspin, traction control cut 85% of the torque to answer it, and the car could
+   * not accelerate: measured on the real road collider, 0-100 km/h took 14.8 s
+   * against 8.6 s on a flat plane of the same asphalt, with the TCS lamp lit 68% of
+   * the run (tools/surface-feel.ts).
+   *
+   * `drivenWheels` is the divisor because that is how the torque is split. Through an
+   * open differential the crank speed is the MEAN of the driven wheel speeds, so the
+   * exact system is an n x n mass matrix: `I·k²/n²` on the diagonal and the same value
+   * off it. This returns the diagonal — the value that is exactly right for the case
+   * that matters, ONE wheel breaking away on its own — and leaves the coupling out, so
+   * a wheel is never restrained by inertia it does not really have.
+   */
+  drivenWheelInertiaKgM2(drivenWheels: number): number {
+    const gearbox = this.gearbox;
+    const engine = this.engine;
+    if (gearbox == null || engine == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
+      return 0;
+    }
+    if (drivenWheels <= 0) return 0;
+    const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
+    return (crankInertiaKgM2(engine) * total * total) / (drivenWheels * drivenWheels);
   }
 
   /**

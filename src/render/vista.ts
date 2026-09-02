@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { farPlaneForViewDistance } from '../core/renderer';
 
 import { desertPaletteAt } from '../world/gradient';
 import type { WorldOrigin } from '../world/origin';
@@ -52,13 +53,12 @@ const MAX_RING_SPACING = 900;
  */
 const SECTORS = 160;
 /**
- * Ring radius past which the dune relief is dropped (see `Terrain.baseHeight`).
- *
- * Comfortably outside the overlap with the chunked mesh, which ends at 1500 m: inside that
- * band the two MUST sample the identical function or the seam shows. Outside it, relief is
- * four fractal fields buying 9 m dunes at four kilometres, which is a third of a pixel.
+ * Dune relief remains full through the near terrain overlap, then fades
+ * continuously. The old boolean cutoff could drop the new fifty-metre dune field
+ * between adjacent rings and resemble a horizontal hole in the desert.
  */
-const RELIEF_RADIUS = 3500;
+const RELIEF_FADE_START = 2500;
+const RELIEF_FADE_END = 7000;
 
 /**
  * How far the camera moves before the disc is rebuilt, metres.
@@ -143,12 +143,12 @@ export class VistaMesh {
   }
 
   /**
-   * Sets the draw distance. `metres` at or below the chunked mesh's own reach turns the
-   * disc off entirely rather than drawing a degenerate ring of it, which is what the
-   * lowest view-distance tier wants: that tier is the world as it was before this existed.
+   * Extends the cheap polar ground to the camera's far plane, not merely to the
+   * nominal detail distance. Fog owns the final transition; ending geometry at the
+   * setting distance exposed the sky beneath raised dunes as a false terrain hole.
    */
   setViewDistance(metres: number): void {
-    const outer = metres <= INNER_RADIUS ? 0 : metres;
+    const outer = metres <= INNER_RADIUS ? 0 : farPlaneForViewDistance(metres);
     if (outer === this.outerRadius) return;
     this.outerRadius = outer;
     this.mesh.visible = outer > 0;
@@ -190,11 +190,12 @@ export class VistaMesh {
       // Per ring, not per vertex: both only depend on how far out the ring is.
       const bias =
         INNER_BIAS * (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
-      const withRelief = radius <= RELIEF_RADIUS;
+      const reliefWeight =
+        1 - smoothstep01((radius - RELIEF_FADE_START) / (RELIEF_FADE_END - RELIEF_FADE_START));
       for (let a = 0; a < SECTORS; a++) {
         const x = cx + this.dirX[a]! * radius;
         const z = cz + this.dirZ[a]! * radius;
-        const y = this.terrain.horizonHeight(x + ox, z + oz, radius, withRelief) - bias;
+        const y = this.terrain.horizonHeight(x + ox, z + oz, radius, reliefWeight) - bias;
 
         const vi = (r * SECTORS + a) * 3;
         positions[vi] = x;

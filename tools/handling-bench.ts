@@ -269,6 +269,31 @@ function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFrame) => v
   }
 }
 
+/**
+ * `drive`, but it stops as soon as `until` is true. For preconditions that are a
+ * STATE the car has to reach ("it is now rolling backwards") rather than a duration:
+ * a fixed window makes such a test depend on how quickly the springs settle, which is
+ * not what it is checking.
+ */
+function driveUntil(
+  rig: Rig,
+  seconds: number,
+  shape: (t: number, f: InputFrame) => void,
+  until: (t: number) => boolean,
+): boolean {
+  const steps = Math.round(seconds / FIXED_DT);
+  for (let i = 0; i < steps; i++) {
+    shape(i * FIXED_DT, rig.input);
+    rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
+    rig.trailer?.fixedUpdate(FIXED_DT);
+    rig.physics.step();
+    rig.vehicle.postStep();
+    rig.trailer?.postStep();
+    if (until(i * FIXED_DT)) return true;
+  }
+  return false;
+}
+
 /** Body-frame lateral speed / forward speed, in degrees. */
 function slipAngleDeg(v: Vehicle): number {
   const s = v.audio;
@@ -729,14 +754,25 @@ export async function runAutomaticRollbackCheck(
   const rig = await makeRig(modelId, addRollbackGround, true);
   const movingMps = 0.1;
 
-  drive(rig, 0.25, (_, input) => {
-    input.throttle = 0;
-    input.brake = 0;
-    input.steer = 0;
-    input.handbrake = false;
-  });
+  // Roll UNTIL it is rolling, and no further: the test is about a car that has JUST
+  // begun to creep backwards. The window used to be a fixed 0.25 s, which is not a
+  // property of the car under test but of how quickly the suspension settles after
+  // the parking brake lets go — and period-correct soft springs take longer over that
+  // than the old stiff ones did, so the precondition failed on a car that rolls back
+  // perfectly well. Two seconds without reaching a creep is still a hard failure.
+  const rolling = driveUntil(
+    rig,
+    2,
+    (_, input) => {
+      input.throttle = 0;
+      input.brake = 0;
+      input.steer = 0;
+      input.handbrake = false;
+    },
+    () => rig.vehicle.audio.forwardMps < -movingMps,
+  );
   const rollbackMps = rig.vehicle.audio.forwardMps;
-  if (rollbackMps >= -movingMps) {
+  if (!rolling) {
     rig.vehicle.dispose();
     throw new Error(`Rollback precondition was only ${rollbackMps.toFixed(2)} m/s`);
   }
