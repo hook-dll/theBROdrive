@@ -31,8 +31,13 @@ export const CHECKPOINT_SPACING = 10_000;
 /** Metres between coarse position samples. Matches `RoadDistance`'s own coarse step. */
 export const COARSE_SPACING = 200;
 
-/** Format tag for the persisted cache. Bump on any change to the tables' meaning. */
-export const SPINE_FORMAT = 2;
+/**
+ * Format tag for the persisted cache. Bump on any change to the tables' MEANING —
+ * which includes any change to the heading field, because a cached checkpoint is a
+ * position the new field would not integrate to. 5: replace gated corner noise with
+ * guaranteed, seeded turn sequences.
+ */
+export const SPINE_FORMAT = 5;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

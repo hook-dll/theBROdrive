@@ -16,20 +16,17 @@ import {
  * else in the world is indexed by the same `s`.
  *
  * Consequences worth knowing:
- *  - the heading stays inside ±80 degrees of the trunk bearing, so the road's +Z
+ *  - the heading stays below 90 degrees from the trunk bearing, so the road's +Z
  *    projection is strictly increasing and it cannot self-intersect
- *  - route-scale noise supplies long sweepers; a separately gated short term buys
- *    the occasional tight corner without spending the whole heading budget
+ *  - route-scale noise supplies broad sweepers; seeded turn sequences guarantee
+ *    regular 25-60 degree corners with straights between them
  *  - the road's grade is whatever the landscape does along its tangent; there is
  *    no grade noise and no elevation state that could drift
  *  - the road has a real end at `length`, reached only after a very long drive
  *  - generation is pure: same seed, same road, on any machine
  *
- * An earlier bounded-heading attempt was tried and reverted because differentiating
- * the shipped three-octave fbm made every octave nearly equal in curvature and
- * tripled the direction-change rate. `roadcurve.ts` documents the two-term,
- * low-gain construction that avoids repeating that failure, and
- * `tools/road-selfcross.ts` enforces both feel and separation.
+ * `roadcurve.ts` documents the heading budget and turn construction;
+ * `tools/road-selfcross.ts` enforces separation.
  *
  * NODES ARE NOT KEPT. The `RoadSpine` holds a position checkpoint every 10 km and
  * this class keeps a small LRU of replayed 10 km blocks, so memory stays constant.
@@ -38,10 +35,8 @@ import {
 
 export { NODE_SPACING, MIN_CORNER_RADIUS };
 
-/** Half-width of the driving surface. 3.3 m gives two genuinely narrow lanes. */
-export const ROAD_HALF_WIDTH = 3.3;
-/** Gravel shoulder either side of the asphalt. */
-export const SHOULDER_WIDTH = 1.4;
+/** Half-width of the asphalt. 2.9 m puts each edge at the former side marking. */
+export const ROAD_HALF_WIDTH = 2.9;
 /**
  * Total road length in metres. Forty thousand kilometres — a circumnavigation, and at
  * 90 km/h about 450 hours of driving, so it is measured in sessions rather than in an

@@ -1,6 +1,6 @@
 import { Noise2D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { ROAD_HALF_WIDTH, SHOULDER_WIDTH, type Road } from './road';
+import { ROAD_HALF_WIDTH, type Road } from './road';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 
 /**
@@ -18,171 +18,167 @@ import { SurfaceField, roadSurfaceY } from './roadsurface';
  *
  * What survives is the corridor: inside `CORRIDOR_INNER` the ground is the road
  * surface itself (banking and surface field included), sampled through the same
- * shared function the road ribbon uses, so the shoulder meets the verge flush. From
- * there out to `CORRIDOR_OUTER` it smoothsteps into the open field. The seam is
- * continuous because the road's own elevation IS the field's, so the two ends of the
- * blend differ only by camber and centimetre-scale surface detail.
+ * shared function the road ribbon uses. At its edge the asphalt meets the desert
+ * terrain flush; from there to `CORRIDOR_OUTER` the ground smoothsteps into the open
+ * field. The road's own elevation is that field's, so the blend differs only by
+ * camber and centimetre-scale surface detail.
  */
 
-/** Ground inside this lateral distance is pure road corridor. */
-export const CORRIDOR_INNER = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
+/** Asphalt edge and inner boundary of the desert terrain. */
+export const CORRIDOR_INNER = ROAD_HALF_WIDTH;
 /** Beyond this lateral distance the terrain is open desert. */
 export const CORRIDOR_OUTER = 30;
 /**
- * Lateral distance over which the DUNE band fades in, metres.
- *
- * Relief is an ABSOLUTE height now, not a difference from the centreline's own
- * relief, because a difference is a road-frame quantity and road-frame quantities
- * step where the frame folds — the whole disease landscape.ts describes. But the road
- * still has to sit on the ground rather than in a trench, so at the shoulder the
- * relief must be zero, and the only position-pure way to get that is to fade it in
- * with distance from the road. Do it over the corridor's own 25 m and a 17 m dune
- * arrives as a 70% bank; over this distance it arrives as a graded verge, which is
- * what a road cut through dunes actually looks like.
- *
- * ONE FADE PER BAND, not one fade for all of them. This distance is sized by the
- * TALLEST term, and applying it to the short ones as well is what kept the near
- * desert glassy: at 20 m off the shoulder it scales everything by 0.06, so the
- * ripple's 1.8 m arrived as 11 cm and the grain's 0.5 m as 3 cm. The first thirty
- * metres of desert — which is exactly where a car leaves the road — therefore had
- * almost no relief in it at all.
- *
- * Each band now fades over its own distance, sized so that the slope the FADE itself
- * adds stays a verge grade rather than a bank: the bound is `amplitude * 1.5 / span`,
- * which is 9.0% for the dunes, 6.7% for the ripples and 3.9% for the grain.
+ * Large dune relief fades in from the maintained road cut. The full-height point
+ * is deliberately broad: the tallest landforms can rise more than fifty metres,
+ * and introducing that height over the old 130 m span made the fade itself a bank.
  */
-const RELIEF_FULL = 130;
+const RELIEF_FULL = 200;
 
 /** Width of the gravel verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
 
-/** Big dune amplitude and wavelength. */
-const DUNE_AMPLITUDE = 7.5;
-const DUNE_WAVELENGTH = 240;
 /**
- * Secondary ripples riding on the dunes. Two octaves — 52 m and its 23.6 m
- * harmonic (lacunarity 2.2) — so both sit above the terrain mesh's coarse
- * resolution floor and resolve as real slopes, not alias noise. Up from 1.1 m
- * so the verge reads as washboard instead of smooth sand, while staying well
- * under the 7.5 m dunes so the ripple still reads as texture ON the dune
- * rather than as the dune itself. Peak slope it adds is 17.8% in the absolute
- * worst case and ~4.8% typically.
+ * Prevailing-wind basis for every dune band. Stretching noise along one fixed axis
+ * produces connected ridges and long lee faces; isotropic four-octave FBM produced
+ * the crumpled-blanket surface this replaces.
  */
-const RIPPLE_AMPLITUDE = 1.8;
-const RIPPLE_WAVELENGTH = 52;
-/** Lateral distance over which the ripple band reaches full amplitude. */
-const RIPPLE_FULL = 45;
-/**
- * Fine grain: the shortest wave the COARSE field lattice can represent.
- *
- * The field lattice samples along the road at S_STEP = 8 m, so a wave needs at
- * least 2.5 samples per wavelength to resolve as a shape — 20 m — exactly the
- * ratio the road's own collider uses for its 3.33 m shortest bump against its
- * 1.333 m step. The old 7 m grain sat below that floor: at ~1.1 samples per
- * wavelength the collider saw seed-dependent spikes, not the intended ground.
- *
- * Anything shorter than this belongs to `detailAt` below, which is sampled on the
- * refined near grid instead and is the layer that carries wheel-scale roughness.
- */
-const GRAIN_AMPLITUDE = 0.5;
-const GRAIN_WAVELENGTH = 20;
-/** Lateral distance over which the grain band reaches full amplitude. */
-const GRAIN_FULL = 24;
+const DUNE_AXIS_X = 0.8192;
+const DUNE_AXIS_Z = 0.5736;
+const DUNE_WARP_WAVELENGTH = 1600;
+const DUNE_WARP_AMPLITUDE = 180;
+
+/** Regional dune ridges: sparse, kilometre-long landforms visible from the road. */
+const MEGADUNE_AMPLITUDE = 34;
+const MEGADUNE_LENGTH = 1800;
+const MEGADUNE_WIDTH = 620;
+const MEGADUNE_THRESHOLD = -0.45;
+
+/** The smaller dune field riding between the regional ridges. */
+const DUNE_AMPLITUDE = 20;
+const DUNE_LENGTH = 850;
+const DUNE_WIDTH = 240;
+const DUNE_THRESHOLD = -0.35;
 
 /**
- * FINE DETAIL: the chop and the holes, and the one relief layer the coarse field
- * lattice is not allowed to carry.
- *
- * Everything above is sampled on the terrain mesh's field lattice — 8 m along the
- * road, geometric rings across it — and that lattice sets a 20 m floor on wavelength.
- * Twenty metres is a body-frequency wallow: at 60 km/h it is under one hertz, and no
- * amplitude makes it read as "rough". What makes ground feel rough is the wheel-rate
- * band, and the road already proves it — its worst bump is 16 cm on a 3.33 m octave,
- * and it is the thing the desert had to beat and did not.
- *
- * So `TerrainMeshProvider` refines the near desert to a uniform lattice (see
- * `DETAIL_REACH` / FINE_STEP there) and adds THIS on top of the interpolated coarse
- * field. The split is what makes it affordable: the coarse bands cost four fractal
- * fields a sample and stay on the sparse lattice, while the detail layer costs one
- * two-octave field plus one noise lookup and is the only thing paid for per refined
- * vertex.
- *
- * CHOP is the washboard: 13 m and its 6.5 m octave. 6.5 m against the 2.5 m refined
- * step is 2.6 samples per wavelength — the same ratio the road's shortest octave has
- * against its own step, so it reaches the trimesh as geometry rather than as spikes.
- *
- * PITS are the holes. Not the road's discrete cosine bowls: those are anchored to
- * vertex rows so their centres are sampled exactly, and a road-frame anchor is
- * precisely the construction the top of this file explains the desert cannot have.
- * Carving them out of a threshold crossing of a smooth field instead keeps the whole
- * layer a pure function of world position — chunks and branches agree on it by
- * construction — and the pits come out as irregular scoops 4-8 m across rather than
- * as a lattice of identical dishes.
+ * Low sand ripples provide a little surface scale without changing the silhouette.
+ * They are directional too; isotropic two-metre ripples were the visible crumpling.
  */
-const CHOP_WAVELENGTH = 14;
+const RIPPLE_AMPLITUDE = 0.55;
+const RIPPLE_LENGTH = 260;
+const RIPPLE_WIDTH = 75;
+const RIPPLE_FULL = 55;
+
 /**
- * Chop amplitude, metres.
+ * THE FINE BAND: the ground the driver's spine reads.
  *
- * Set by the KICK it produces, not by how it looks in a height plot:
- * `tools/desert-ride.ts` drags a wheel along the real trimesh and reports the
- * vertical-velocity step the suspension is hit with at every triangle edge, which is
- * the same number `tools/ride-bench.ts` reports for the road. The road at 60 km/h is
- * 0.22 m/s rms and 0.87 p99; the desert verge at this amplitude is about 0.85 and 3.3,
- * i.e. four times the road, which is where "leaves the road and it gets much rougher"
- * lands. Amplitude and kick are proportional at a fixed wavelength, so this is the one
- * knob for it.
+ * The shipped desert is the player-centred tile lattice (`deserttiles.ts`), a
+ * heightfield with 3 m cells, so nothing below about 7.5 m of wavelength can be
+ * geometry at all — below that it aliases into a seed lottery, and it belongs to the
+ * per-wheel profile in core/surfaces.ts instead (`microRelief`, `hummock`).
+ *
+ * Above that floor there are two layers:
+ *
+ *  1. CORRUGATION. Long-crested transverse ridges about 10 m apart, a hundred metres
+ *     of crest, a quarter of a metre tall. Ten metres is 1.7 Hz at 60 km/h and 2.5 at
+ *     90 — the primary-ride band, which is what "the car starts to sway and bounce"
+ *     actually means, and the band impact deleted when it cut the old isotropic chop
+ *     from 0.95 m to 0.3 m and threw the pits away.
+ *
+ *     It is ORGANISED rather than isotropic, and that is the whole design. The same
+ *     energy as isotropic FBM is the crumpled blanket this branch got rid of; laid out
+ *     as parallel ridges on the dune band's own axis, bent by `CORRUGATION_BEND` so
+ *     they are not a comb, it is a wind-ripple field — which is what a dune field
+ *     actually looks like. Hillshading the field at a low sun shows corduroy.
+ *
+ *     MEASURED, and worth knowing before tuning it: in the game's own renderer it is
+ *     invisible either way. `TERRAIN_MATERIAL` runs the comic ground shading over a
+ *     hemisphere plus one direct light, and a 2% slope over ten metres does not move
+ *     that shading at any hour — screenshots at 09:00 and 17:40 are indistinguishable
+ *     from the flat desert. So the ripple layout buys insurance rather than beauty,
+ *     and amplitude here is bounded by RIDE and ESCAPABILITY, not by looks.
+ *
+ *  2. CHOP. A little isotropic 20/10 m noise so the corrugation is not the only thing
+ *     in the band and the grain never reads as machined.
+ *
+ * WAVELENGTH IS TWICE THE CONSTANT. `Noise2D` interpolates between lattice values one
+ * unit apart, so a crest and the next trough are one unit and a full cycle is TWO:
+ * `CORRUGATION_SPACING = 5` is a ten-metre wave, not a five-metre one. The first cut
+ * of this band used 9 and produced an 18 m wave — half the intended excitation
+ * frequency and a third of the kick.
+ *
+ * `CORRUGATION_PATCH_*` is what keeps it from being a uniform texture: corrugation
+ * develops where wind has a fetch of loose sand, so its amplitude is modulated by a
+ * kilometre-scale field down to `CORRUGATION_PATCH_FLOOR`. Some flats hammer, some
+ * are quiet, and which is which is a property of the place.
+ *
+ * Numbers this band is set by, all at 60 km/h from `tools/desert-washboard.ts` and an
+ * in-game drive at 66-68 km/h:
+ *
+ *                         mesh kick rms/p99    body heave rms/p95 (g)
+ *   road (reference)        0.18-0.31 / 0.5-0.9      0.101 / -
+ *   desert before           0.095 / 0.32             0.317 / 0.61
+ *   desert now              0.300 / 1.09             0.707 / 1.38
  */
-const CHOP_AMPLITUDE = 0.95;
-/** Wavelength of the pit field, metres: the spacing scoops end up at. */
-const PIT_WAVELENGTH = 11;
-/** Field value above which a pit is carved. Higher = fewer, smaller holes. */
-const PIT_THRESHOLD = 0.42;
+const CORRUGATION_SPACING = 5;
+const CORRUGATION_COHERENCE = 48;
+const CORRUGATION_AMPLITUDE = 0.24;
+const CORRUGATION_BEND_WAVELENGTH = 420;
+const CORRUGATION_BEND = 26;
+const CORRUGATION_PATCH_LENGTH = 1500;
+const CORRUGATION_PATCH_WIDTH = 430;
+const CORRUGATION_PATCH_FLOOR = 0.4;
+
+const CHOP_WAVELENGTH = 20;
+const CHOP_AMPLITUDE = 0.3;
+
 /**
- * Depth of a fully developed pit, metres.
+ * SCOOPS: the discrete events, and the reason an excursion has a worst moment rather
+ * than an average one. Blowout hollows a few metres across, carved where a smooth
+ * field crosses a threshold, so they are a pure function of world position rather
+ * than a lattice of identical dishes.
  *
- * Bounded by escapability, not by looks. A scoop is the one part of this layer that
- * makes a BASIN — chop you cross, a hole you sit in — so it sets the worst grade a
- * stopped car ever finds under its wheels, and that has to stay inside what sand's
- * forward traction can pull away on (20% for a two-wheel-drive saloon; the budget is
- * derived in core/surfaces.ts). At 0.8 m the worst footprint grade in the near desert
- * measured 46% and 0.7% of all (spot, heading) pairs were a direction a stopped car
- * could not leave in. This is deep enough to drop a wheel into and swallow a sill, and
- * shallow enough that the way out is never steeper than the way in.
+ * THE FIELD IS FRACTAL AND THAT IS NOT DECORATION. A single value-noise octave
+ * thresholded on a square lattice draws SQUARE contours: hillshading the old
+ * construction showed rounded rectangles and L-shapes lying in the sand, axis-aligned
+ * across the whole world, which is exactly the machined look this branch set out to
+ * get rid of. Three octaves break the contour up into an outline nothing recognises
+ * as a lattice.
  *
- * The road's own cap is 0.11 m, for the opposite reason: a road is maintained.
+ * Depth is bounded by ESCAPABILITY, not by looks: a scoop is the one part of this
+ * band that makes a basin, so it sets the worst grade a stopped car finds under its
+ * wheels. Sand's `frictionSlip` is 1.15 now (it was 1.35 when the old 0.55 m pits
+ * were measured), which buys a 15% pull-away grade for a two-wheel-drive saloon, so
+ * the depth came down with it and the threshold went up to make them sparser.
+ * `tools/desert-washboard.ts` reports the blocked/stranded census that bounds both.
  */
-const PIT_DEPTH = 0.55;
+const SCOOP_WAVELENGTH = 26;
+const SCOOP_THRESHOLD = 0.5;
+const SCOOP_DEPTH = 0.32;
+
 /**
- * Lateral distance at which the detail layer is fully in, and the distance at which
- * it starts tapering back out.
- *
- * The fade-in is short — five metres past the shoulder — because the player feels this
- * layer the moment two wheels are off the asphalt, and that is the whole point of
- * splitting it out of `relief`: the dunes have to arrive slowly, the chop does not.
- * The cost is the slope the fade itself adds, `amplitude * 1.5 / span`, about 28% over
- * those five metres — steep for a verge, but it is a verge dropping into rough ground
- * rather than a bank, and the corridor grading under it is still nearly flat there.
- *
- * The fade-out is long, and for the opposite reason: it has to reach exactly zero at
- * `DETAIL_REACH`, and a short taper there would draw a smooth stripe eighty metres out
- * running the length of the world — which from the driver's seat reads as a second
- * road. Eighteen metres of taper is invisible.
+ * Lateral distance at which the fine band is fully in. Short on purpose: the player
+ * feels this layer the moment two wheels are off the asphalt, and that is the whole
+ * reason it is split out of `relief` — the dunes have to arrive slowly, the
+ * corrugation does not.
  */
 const DETAIL_FADE_IN = 10;
 const DETAIL_HOLD = 62;
 /**
- * Lateral distance at which the detail layer has faded to exactly zero.
- *
- * Exported because it is a CONTRACT with the terrain mesh, not a tuning knob: that is
- * where the refined near grid ends and stitches back onto the coarse rings, and a
- * non-zero detail term at the seam would be a crack. `TerrainMeshProvider` forces a
- * ring here for the same reason.
+ * The refined terrain grid ends here, so this layer must be exactly zero at the
+ * boundary to keep its collider and the coarse mesh watertight.
  */
 export const DETAIL_REACH = 80;
 
-/** Rock outcrops appear where this field exceeds the threshold. */
-const OUTCROP_WAVELENGTH = 170;
-const OUTCROP_THRESHOLD = 0.42;
+/** Sparse rock shelves and broad dry washes interrupt the sand without shredding it. */
+const OUTCROP_WAVELENGTH = 260;
+const OUTCROP_THRESHOLD = 0.56;
+const OUTCROP_AMPLITUDE = 7;
+const WASH_WAVELENGTH_X = 700;
+const WASH_WAVELENGTH_Z = 1600;
+const WASH_THRESHOLD = 0.48;
+const WASH_DEPTH = 4.5;
+const WASH_FULL = 220;
 
 /**
  * The world's edge, in two pieces that do two different jobs.
@@ -252,13 +248,22 @@ function smoothstep01(t: number): number {
   return c * c * (3 - 2 * c);
 }
 
+/** Converts a signed directional field into a sparse rounded dune above a flat floor. */
+function duneRise(value: number, threshold: number): number {
+  const t = smoothstep01((value - threshold) / (1 - threshold));
+  return t * t;
+}
+
 export class Terrain {
   private readonly duneNoise: Noise2D;
   private readonly rippleNoise: Noise2D;
-  private readonly grainNoise: Noise2D;
   private readonly chopNoise: Noise2D;
-  private readonly pitNoise: Noise2D;
+  private readonly corrugationNoise: Noise2D;
+  private readonly corrugationBendNoise: Noise2D;
+  private readonly corrugationPatchNoise: Noise2D;
+  private readonly scoopNoise: Noise2D;
   private readonly outcropNoise: Noise2D;
+  private readonly washNoise: Noise2D;
   private readonly field: SurfaceField;
 
   constructor(
@@ -267,10 +272,13 @@ export class Terrain {
   ) {
     this.duneNoise = new Noise2D(seed ^ 0xc2b2ae35);
     this.rippleNoise = new Noise2D(seed ^ 0x27d4eb2f);
-    this.grainNoise = new Noise2D(seed ^ 0x165667b1);
     this.chopNoise = new Noise2D(seed ^ 0x9e3779b9);
-    this.pitNoise = new Noise2D(seed ^ 0x85ebca6b);
+    this.corrugationNoise = new Noise2D(seed ^ 0x165667b1);
+    this.corrugationBendNoise = new Noise2D(seed ^ 0x85ebca6b);
+    this.corrugationPatchNoise = new Noise2D(seed ^ 0xff51afd7);
+    this.scoopNoise = new Noise2D(seed ^ 0xc4ceb9fe);
     this.outcropNoise = new Noise2D(seed ^ 0xd3a2646c);
+    this.washNoise = new Noise2D(seed ^ 0x94d049bb);
     this.field = new SurfaceField(seed);
   }
 
@@ -280,48 +288,125 @@ export class Terrain {
   }
 
   /**
-   * Open-desert relief at a point, ignoring the road entirely except for the per-band
-   * fades (see RELIEF_FULL). Only meaningful as a difference between two points — its
-   * absolute value is arbitrary.
+   * Open-desert landforms at a point. Every term is a pure function of world
+   * position; `dist` only grades the maintained corridor into the dune field.
    */
   private relief(x: number, z: number, dist: number): number {
-    const dune = smoothstep01((dist - CORRIDOR_INNER) / (RELIEF_FULL - CORRIDOR_INNER));
+    const duneFade = smoothstep01(
+      (dist - CORRIDOR_INNER) / (RELIEF_FULL - CORRIDOR_INNER),
+    );
+    const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
+    const across = -x * DUNE_AXIS_Z + z * DUNE_AXIS_X;
+    const warp =
+      this.rippleNoise.fbm(
+        along / DUNE_WARP_WAVELENGTH,
+        across / DUNE_WARP_WAVELENGTH,
+        2,
+        2,
+        0.45,
+      ) * DUNE_WARP_AMPLITUDE;
+    const warpedAcross = across + warp;
+
+    const megadune = duneRise(
+      this.duneNoise.fbm(
+        (along + 3100) / MEGADUNE_LENGTH,
+        (warpedAcross - 1900) / MEGADUNE_WIDTH,
+        2,
+        2,
+        0.42,
+      ),
+      MEGADUNE_THRESHOLD,
+    );
+    const dune = duneRise(
+      this.duneNoise.fbm(
+        (along - 1700) / DUNE_LENGTH,
+        (warpedAcross + 900) / DUNE_WIDTH,
+        2,
+        2.05,
+        0.4,
+      ),
+      DUNE_THRESHOLD,
+    );
     let h =
-      this.duneNoise.fbm(x / DUNE_WAVELENGTH, z / DUNE_WAVELENGTH, 4, 2.0, 0.5) *
-      DUNE_AMPLITUDE *
-      dune;
+      (megadune * MEGADUNE_AMPLITUDE + dune * DUNE_AMPLITUDE) *
+      duneFade;
+
     h +=
-      this.rippleNoise.fbm(x / RIPPLE_WAVELENGTH, z / RIPPLE_WAVELENGTH, 2, 2.2, 0.45) *
+      this.rippleNoise.fbm(
+        (along + 800) / RIPPLE_LENGTH,
+        (warpedAcross - 400) / RIPPLE_WIDTH,
+        2,
+        2,
+        0.35,
+      ) *
       RIPPLE_AMPLITUDE *
       smoothstep01((dist - CORRIDOR_INNER) / (RIPPLE_FULL - CORRIDOR_INNER));
-    h +=
-      this.grainNoise.at(x / GRAIN_WAVELENGTH, z / GRAIN_WAVELENGTH) *
-      GRAIN_AMPLITUDE *
-      smoothstep01((dist - CORRIDOR_INNER) / (GRAIN_FULL - CORRIDOR_INNER));
 
-    // Outcrops rise abruptly out of the sand rather than blending into it. They ride
-    // the dune fade because they are the tallest thing in the field, not the shortest.
     const outcrop = this.outcropAt(x, z);
     if (outcrop > OUTCROP_THRESHOLD) {
       const t = (outcrop - OUTCROP_THRESHOLD) / (1 - OUTCROP_THRESHOLD);
-      h += t * t * 9 * dune;
+      h += t * t * OUTCROP_AMPLITUDE * duneFade;
+    }
+    const wash = this.washNoise.fbm(
+      x / WASH_WAVELENGTH_X,
+      z / WASH_WAVELENGTH_Z,
+      2,
+      1.8,
+      0.55,
+    );
+    if (wash > WASH_THRESHOLD) {
+      const t = (wash - WASH_THRESHOLD) / (1 - WASH_THRESHOLD);
+      const washFade = smoothstep01((dist - CORRIDOR_INNER) / (WASH_FULL - CORRIDOR_INNER));
+      h -= t * t * WASH_DEPTH * washFade;
     }
     return h;
   }
 
   /**
-   * Wheel-scale desert roughness at a point: chop plus pits, faded in from the
-   * shoulder and back out to nothing by `DETAIL_REACH` (see the constants above).
-   *
-   * Split out of `relief` and out of `openBase` because it is the one band whose
-   * wavelength is below what the terrain mesh's coarse field lattice can carry. The
-   * mesh samples the coarse bands sparsely and interpolates them under the refined
-   * near grid; THIS it samples at every refined vertex. Add it to an interpolated
-   * coarse height, never to a coarsely sampled one, or it aliases into spikes.
-   *
-   * Exactly zero outside `CORRIDOR_INNER..DETAIL_REACH`, which is what lets the
-   * refined grid stitch onto the road ribbon at one end and the coarse rings at the
-   * other with no crack at either.
+   * The fine band at a point, UNFADED: corrugation, chop and scoops (see the
+   * constants above). One function so the shipped tile lattice and the legacy road
+   * fan cannot carry different ground, and so the two fades below are the only
+   * difference between them.
+   */
+  private fineRelief(x: number, z: number): number {
+    // The dune band's own axis, so the ripples run WITH the ridges. `across` is the
+    // direction the crests are counted along; `along` is a crest's own length.
+    const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
+    const across = -x * DUNE_AXIS_Z + z * DUNE_AXIS_X;
+
+    // Bending `across` rather than rotating the basis buys the same curved crest
+    // lines for one noise sample and no trigonometry.
+    const bend =
+      this.corrugationBendNoise.at(
+        along / CORRUGATION_BEND_WAVELENGTH,
+        across / CORRUGATION_BEND_WAVELENGTH,
+      ) * CORRUGATION_BEND;
+    const patch = this.corrugationPatchNoise.at(
+      along / CORRUGATION_PATCH_LENGTH,
+      across / CORRUGATION_PATCH_WIDTH,
+    );
+    const strength =
+      CORRUGATION_PATCH_FLOOR + (1 - CORRUGATION_PATCH_FLOOR) * smoothstep01(patch * 0.5 + 0.5);
+    let h =
+      this.corrugationNoise.at((across + bend) / CORRUGATION_SPACING, along / CORRUGATION_COHERENCE) *
+      CORRUGATION_AMPLITUDE *
+      strength;
+
+    h += this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) * CHOP_AMPLITUDE;
+
+    // `t * (2 - t)` gives the hollow a flattish floor and steep walls instead of the
+    // cone a linear ramp leaves, so a wheel drops into it and climbs out again.
+    const scoop = this.scoopNoise.fbm(x / SCOOP_WAVELENGTH, z / SCOOP_WAVELENGTH, 3, 2.3, 0.5);
+    if (scoop > SCOOP_THRESHOLD) {
+      const t = (scoop - SCOOP_THRESHOLD) / (1 - SCOOP_THRESHOLD);
+      h -= t * (2 - t) * SCOOP_DEPTH;
+    }
+    return h;
+  }
+
+  /**
+   * The fine band for the legacy road-aligned refined grid. It fades to exactly zero
+   * at both of that mesh's seams; large-scale dune shape remains in `relief`.
    */
   detailAt(x: number, z: number, dist: number): number {
     if (dist <= CORRIDOR_INNER || dist >= DETAIL_REACH) return 0;
@@ -329,37 +414,14 @@ export class Terrain {
       smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER)) *
       (1 - smoothstep01((dist - DETAIL_HOLD) / (DETAIL_REACH - DETAIL_HOLD)));
     if (fade <= 0) return 0;
-
-    let h =
-      this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2.0, 0.5) * CHOP_AMPLITUDE;
-
-    // A pit is the part of the field that pokes above the threshold, turned upside
-    // down. `t * (2 - t)` gives the scoop a flat-ish floor and steep walls instead of
-    // the cone a linear ramp would leave, so a wheel drops into it and climbs out.
-    const pit = this.pitNoise.at(x / PIT_WAVELENGTH, z / PIT_WAVELENGTH);
-    if (pit > PIT_THRESHOLD) {
-      const t = (pit - PIT_THRESHOLD) / (1 - PIT_THRESHOLD);
-      h -= t * (2 - t) * PIT_DEPTH;
-    }
-    return h * fade;
+    return this.fineRelief(x, z) * fade;
   }
 
-  /**
-   * Wheel-scale roughness for the player-centred tile lattice. Unlike `detailAt`,
-   * this never fades back out: the fine lattice follows the player, so there is no
-   * coarse driveable seam that requires the short wavelengths to reach zero.
-   */
+  /** The fine band for the shipped tile lattice, which has no outer seam. */
   private explorationDetailAt(x: number, z: number, dist: number): number {
     if (dist <= CORRIDOR_INNER) return 0;
     const fade = smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER));
-    let h =
-      this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2.0, 0.5) * CHOP_AMPLITUDE;
-    const pit = this.pitNoise.at(x / PIT_WAVELENGTH, z / PIT_WAVELENGTH);
-    if (pit > PIT_THRESHOLD) {
-      const t = (pit - PIT_THRESHOLD) / (1 - PIT_THRESHOLD);
-      h -= t * (2 - t) * PIT_DEPTH;
-    }
-    return h * fade;
+    return this.fineRelief(x, z) * fade;
   }
 
   /**
@@ -387,24 +449,21 @@ export class Terrain {
   }
 
   /**
-   * The corridor grading, base only: the shoulder's own elevation smoothstepped out
-   * into the open field between `CORRIDOR_INNER` and `CORRIDOR_OUTER`.
+   * The corridor grading, base only: the road-edge elevation smoothstepped out into
+   * the open field between `CORRIDOR_INNER` and `CORRIDOR_OUTER`.
    *
-   * The seam is continuous because the shoulder anchor and the open field meet at the
-   * same elevation: the road's own y is this field's value at the centreline.
+   * The seam is continuous because the edge anchor and open field share the road's
+   * centreline field elevation.
    *
-   * Past `CORRIDOR_OUTER` it returns the open field directly rather than blending
-   * towards it with weight 1. That is not a shortcut, it is the same number — and it
-   * skips a `shoulderHeight`, which is a road offset point plus a full road-surface
-   * sample, measured at 0.7 us. Every terrain vertex outside 30 m used to pay it and
-   * throw it away.
+   * Past `CORRIDOR_OUTER` this returns the open field directly. That skips a
+   * `roadEdgeHeight` sample which would otherwise be computed and discarded.
    */
   private gradedBase(x: number, z: number, dist: number, s: number, side: number): number {
     const open = this.openBase(x, z, dist);
     if (dist >= CORRIDOR_OUTER) return open;
     const t0 = (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER);
     const t = t0 * t0 * (3 - 2 * t0);
-    const inner = this.shoulderHeight(s, side);
+    const inner = this.roadEdgeHeight(s, side);
     return inner + (open - inner) * t;
   }
 
@@ -425,7 +484,7 @@ export class Terrain {
    * props scatter stays inside 42 m, where the rim is zero and the two agree.
    *
    * The detail layer is added OUTSIDE the corridor grading, not inside the field it
-   * grades. Inside, the grading's own weight is 0.10 at ten metres off the shoulder,
+   * grades. Inside, the grading's own weight is 0.10 at ten metres off the road edge,
    * which is where the chop is most wanted and where it was being multiplied away.
    * `detailAt` is zero at `CORRIDOR_INNER` by its own fade, so the seam onto the
    * asphalt is continuous without the grading's help.
@@ -467,18 +526,19 @@ export class Terrain {
 
   /**
    * Camera-centred horizon height. `distanceFromCamera` rather than distance from
-   * the road makes the mountain ranges permanent horizon scenery: driving toward
-   * one advances the vista and reveals another equally distant part of the field,
-   * while the local physical terrain remains the open landscape.
+   * the road makes mountain ranges permanent horizon scenery. `reliefWeight` is a
+   * continuous vista fade; a boolean cutoff would turn a tall dune into a ring cliff.
    */
   horizonHeight(
     x: number,
     z: number,
     distanceFromCamera: number,
-    withRelief: boolean,
+    reliefWeight: number,
   ): number {
     let h = this.road.landscape.heightAt(x, z);
-    if (withRelief) h += this.relief(x, z, RELIEF_FULL);
+    if (reliefWeight > 0) {
+      h += this.relief(x, z, RELIEF_FULL) * Math.min(1, reliefWeight);
+    }
     if (distanceFromCamera > MOUNTAIN_START) {
       h +=
         this.road.landscape.mountainAt(x, z) *
@@ -488,11 +548,10 @@ export class Terrain {
   }
 
   /**
-   * The road surface height at the shoulder edge on one side (`side` = ±1). This
-   * is the anchor the blend hangs off: at `dist = CORRIDOR_INNER` the terrain
-   * equals the road's shoulder vertex exactly, because both sample roadSurfaceY.
+   * Road-surface height at one asphalt edge (`side` = ±1). At
+   * `dist = CORRIDOR_INNER`, both road and desert meshes sample this exact value.
    */
-  private shoulderHeight(s: number, side: number): number {
+  private roadEdgeHeight(s: number, side: number): number {
     const p = this.road.offsetPoint(s, side * CORRIDOR_INNER);
     return roadSurfaceY(this.road, this.field, s, side * CORRIDOR_INNER, p.x, p.z);
   }

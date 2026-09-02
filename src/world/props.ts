@@ -20,6 +20,7 @@ import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
 
 import type { Monument, PoleEra } from './gradient';
+import { HazardIndex } from './hazards';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { Terrain } from './terrain';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
@@ -35,8 +36,8 @@ const TAG_SCATTER = 0x5ca17e2;
 const TAG_ROAD_PILE = 0x6a5a41;
 const TAG_ROAD_ROCK = 0x6a5a52;
 /** Each independent stream varies every consecutive gap inside this exact range. */
-const ROAD_HAZARD_GAP_MIN = 511;
-const ROAD_HAZARD_GAP_MAX = 1212;
+const ROAD_HAZARD_GAP_MIN = 1800;
+const ROAD_HAZARD_GAP_MAX = 4200;
 /**
  * Two complementary gaps fill one cycle. If the first is `d`, the second is
  * `min + max - d`, so both stay in range while any chunk can locate them directly.
@@ -323,6 +324,24 @@ function scrubForm(): PropForm {
   return _scrubForm;
 }
 
+let _trunkForm: PropForm | null = null;
+function trunkForm(): PropForm {
+  _trunkForm ??= {
+    id: 'trunk',
+    geometry: buildFallenTrunk(),
+    material: matDeadStick,
+    baseRadius: 0.42,
+    height: 0.5,
+    collider: 'box',
+    colliderHalf: [1.55, 0.45, 0.28],
+    sink: 0.25,
+    rotate3d: false,
+    minScale: 0.8,
+    maxScale: 1.45,
+  };
+  return _trunkForm;
+}
+
 let _sandForms: PropForm[] | null = null;
 function sandForms(): PropForm[] {
   if (!_sandForms) {
@@ -330,7 +349,7 @@ function sandForms(): PropForm[] {
       { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35 },
       { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7 },
       { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
-      { id: 'trunk', geometry: buildFallenTrunk(), material: matDeadStick, baseRadius: 0.42, height: 0.5, collider: 'box', colliderHalf: [1.55, 0.45, 0.28], sink: 0.25, rotate3d: false, minScale: 0.8, maxScale: 1.45 },
+      trunkForm(),
       scrubForm(),
     ];
   }
@@ -480,6 +499,11 @@ interface ScatterPlacement {
   ry: number;
   rz: number;
   scale: number;
+  /** Road-frame coordinates for an asphalt obstacle; zero for ordinary scatter. */
+  roadS: number;
+  roadLateral: number;
+  /** True only for the deterministic obstacle streams placed on asphalt. */
+  roadHazard: boolean;
   radius: number;
   /** Filled in by the instancing pass, so a break can blank the right instance. */
   mesh: THREE.InstancedMesh | null;
@@ -564,9 +588,10 @@ export class ScatterProvider implements ChunkProvider {
    * Whoever owns knocking props down, or nothing. Optional because deterministic
    * scatter remains a complete visual field without mutable breakage state.
    */
-  constructor(private readonly breakables?: BreakableSink) {
-    // Force all shared form and break-piece geometry to be created while providers
-    // are loading, never on a scheduler-owned build step.
+  constructor(
+    private readonly breakables?: BreakableSink,
+    private readonly hazards?: HazardIndex,
+  ) {
     const forms = [...sandForms(), ...rockForms()];
     for (const form of forms) propPieces(form.id);
   }
@@ -584,6 +609,7 @@ export class ScatterProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const meshes: THREE.InstancedMesh[] = [];
+    const hazardChunkKey = `scatter:${ctx.chunkIndex}`;
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
 
@@ -671,8 +697,11 @@ export class ScatterProvider implements ChunkProvider {
             ry,
             rz,
             scale,
+            roadS: 0,
+            roadLateral: 0,
             radius,
             mesh: null,
+            roadHazard: false,
             instance: 0,
           });
         }
@@ -687,9 +716,9 @@ export class ScatterProvider implements ChunkProvider {
       }
     }
 
-    // Dirt piles and solid rocks have independent deterministic streams. Each stream
-    // uses paired complementary gaps, which gives genuinely randomized 511..1212 m
-    // spacing without walking every previous hazard to locate an arbitrary chunk.
+    // Dirt piles, fallen trunks and solid rocks have independent deterministic
+    // streams. Complementary gaps keep hazards irregular without walking every
+    // previous placement to locate an arbitrary streamed chunk.
     for (let kind = 0; kind < 2; kind++) {
       const tag = kind === 0 ? TAG_ROAD_PILE : TAG_ROAD_ROCK;
       const streamStart =
@@ -704,11 +733,13 @@ export class ScatterProvider implements ChunkProvider {
         for (let ordinal = 0; ordinal < 2; ordinal++) {
           const s = streamStart + cycle * ROAD_HAZARD_CYCLE + (ordinal === 0 ? 0 : firstGap);
           if (s < ctx.sStart || s >= ctx.sEnd) continue;
-
           const candidate = cycle * 2 + ordinal;
           let form: PropForm;
+
           if (kind === 0) {
-            form = scrubForm();
+            // Most piles are low scrub; the occasional fallen trunk is the serious,
+            // visible trajectory choice that can unload a wheel or trip a car.
+            form = hash01(seed, tag, candidate, 7) < 0.22 ? trunkForm() : scrubForm();
           } else {
             const rocks = rockForms();
             form = rocks[Math.floor(hash01(seed, tag, candidate, 1) * rocks.length)]!;
@@ -738,7 +769,10 @@ export class ScatterProvider implements ChunkProvider {
             ry,
             rz,
             scale,
+            roadS: s,
+            roadLateral: lateral,
             radius,
+            roadHazard: true,
             mesh: null,
             instance: 0,
           });
@@ -782,6 +816,8 @@ export class ScatterProvider implements ChunkProvider {
     if (ctx.hasPhysics) {
       for (const pl of placements) {
         const form = pl.form;
+        let hazardRadius = 0;
+        let breakable = false;
         if (form.collider !== 'none' && !(form.collider === 'hull' && pl.radius < ROCK_COLLIDER_MIN)) {
           if (form.collider === 'hull') {
             addStatic(
@@ -795,11 +831,12 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               eulerRotation(pl.rx, pl.ry, pl.rz),
             );
+            // The hull is constructed from these vertices, so its scaled bounding sphere
+            // is a conservative radius of the collision shape, not a placement guess.
+            form.geometry.computeBoundingSphere();
+            hazardRadius = (form.geometry.boundingSphere?.radius ?? 0) * pl.scale;
           } else if (form.collider === 'box') {
             if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
-            // The fallen trunk is three metres of one thing and a quarter-metre of
-            // another, so a cube around its radius would be a stump and a cube around
-            // its length a wall. Yaw it with the visible form.
             const [hx, hy, hz] = form.colliderHalf;
             addStatic(
               ctx,
@@ -812,8 +849,8 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               yawRotation(pl.ry),
             );
+            hazardRadius = Math.hypot(hx, hz) * pl.scale;
           } else {
-            // Upright plant: a capsule sized to the shaft.
             const halfHeight = form.height * pl.scale * 0.42;
             const rad = form.baseRadius * pl.scale * 0.8;
             const collider = addStatic(
@@ -826,11 +863,9 @@ export class ScatterProvider implements ChunkProvider {
               RAPIER.ColliderDesc.capsule(halfHeight, rad),
               SurfaceType.Rock,
             );
-
-            // Only a chunk with physics can be hit, and only a form with pieces can come
-            // apart. Registering needs the collider (to switch off) and the instance (to
-            // blank), which is why it happens here rather than at placement.
+            hazardRadius = rad;
             const pieces = propPieces(form.id);
+            breakable = pieces !== null;
             if (pieces && this.breakables && pl.mesh) {
               registered.push(pl.id);
               this.breakables.register({
@@ -850,6 +885,14 @@ export class ScatterProvider implements ChunkProvider {
             }
           }
         }
+        if (pl.roadHazard && hazardRadius > 0) {
+          this.hazards?.add(hazardChunkKey, {
+            s: pl.roadS,
+            lateral: pl.roadLateral,
+            radius: hazardRadius,
+            breakable,
+          });
+        }
         yield;
       }
     }
@@ -865,6 +908,7 @@ export class ScatterProvider implements ChunkProvider {
       dispose: () => {
         for (const m of meshes) m.dispose();
         if (registered.length > 0) this.breakables?.forget(registered);
+        this.hazards?.forget(hazardChunkKey);
       },
     };
   } finally {
@@ -872,6 +916,7 @@ export class ScatterProvider implements ChunkProvider {
       for (const body of bodies) ctx.physics.removeBody(body);
       for (const m of meshes) m.dispose();
       if (registered.length > 0) this.breakables?.forget(registered);
+      this.hazards?.forget(hazardChunkKey);
       group.clear();
     }
   }

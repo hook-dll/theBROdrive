@@ -31,7 +31,10 @@ import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
-import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
+import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { variant } from '../src/parts/registry';
+import type { Item } from '../src/items/items';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -95,16 +98,30 @@ export interface BenchResult {
   cadenceBrakeDistM: number;
 }
 
+/**
+ * A roadworthy bench car. The bonnet cells and fuel kind are not decoration: the
+ * vehicle's stats read the fitted engine through them, and a car with an empty
+ * bonnet has no engine to bench.
+ */
 function carState(modelId: string): CarState {
+  const def = carModel(modelId);
+  const engine = variant(def.engineId).engine;
   return {
     id: 'bench',
     modelId,
     gizmos: {},
     stickers: [],
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     fuelLitres: 40,
+    fuelKind: engine?.fuel ?? null,
+    dirt: 0,
+    scratches: 0,
     coolantLitres: 10,
     oilLitres: 10,
-    storage: [],
+    storage: new Array<Item | null>(def.storageCells).fill(null),
+    bonnet: createBonnetStorage('bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,
     x: 0,
     y: 1.2,
@@ -250,6 +267,31 @@ function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFrame) => v
     rig.vehicle.postStep();
     rig.trailer?.postStep();
   }
+}
+
+/**
+ * `drive`, but it stops as soon as `until` is true. For preconditions that are a
+ * STATE the car has to reach ("it is now rolling backwards") rather than a duration:
+ * a fixed window makes such a test depend on how quickly the springs settle, which is
+ * not what it is checking.
+ */
+function driveUntil(
+  rig: Rig,
+  seconds: number,
+  shape: (t: number, f: InputFrame) => void,
+  until: (t: number) => boolean,
+): boolean {
+  const steps = Math.round(seconds / FIXED_DT);
+  for (let i = 0; i < steps; i++) {
+    shape(i * FIXED_DT, rig.input);
+    rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
+    rig.trailer?.fixedUpdate(FIXED_DT);
+    rig.physics.step();
+    rig.vehicle.postStep();
+    rig.trailer?.postStep();
+    if (until(i * FIXED_DT)) return true;
+  }
+  return false;
 }
 
 /** Body-frame lateral speed / forward speed, in degrees. */
@@ -712,14 +754,25 @@ export async function runAutomaticRollbackCheck(
   const rig = await makeRig(modelId, addRollbackGround, true);
   const movingMps = 0.1;
 
-  drive(rig, 0.25, (_, input) => {
-    input.throttle = 0;
-    input.brake = 0;
-    input.steer = 0;
-    input.handbrake = false;
-  });
+  // Roll UNTIL it is rolling, and no further: the test is about a car that has JUST
+  // begun to creep backwards. The window used to be a fixed 0.25 s, which is not a
+  // property of the car under test but of how quickly the suspension settles after
+  // the parking brake lets go — and period-correct soft springs take longer over that
+  // than the old stiff ones did, so the precondition failed on a car that rolls back
+  // perfectly well. Two seconds without reaching a creep is still a hard failure.
+  const rolling = driveUntil(
+    rig,
+    2,
+    (_, input) => {
+      input.throttle = 0;
+      input.brake = 0;
+      input.steer = 0;
+      input.handbrake = false;
+    },
+    () => rig.vehicle.audio.forwardMps < -movingMps,
+  );
   const rollbackMps = rig.vehicle.audio.forwardMps;
-  if (rollbackMps >= -movingMps) {
+  if (!rolling) {
     rig.vehicle.dispose();
     throw new Error(`Rollback precondition was only ${rollbackMps.toFixed(2)} m/s`);
   }

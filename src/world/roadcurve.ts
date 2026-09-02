@@ -1,4 +1,4 @@
-import { Noise1D } from '../core/rng';
+import { hashUnit2, Noise1D } from '../core/rng';
 
 /**
  * The road's heading field and the one node recurrence that integrates it.
@@ -36,8 +36,8 @@ import { Noise1D } from '../core/rng';
  *
  * So the heading itself is the bounded quantity:
  *
- *     heading(s) = ROUTE_DEVIATION * fbm(s / ROUTE_WAVELENGTH)   <- where it goes
- *                + corner(s) * noise(s / CORNER_WAVELENGTH)      <- how it bends
+ *     heading(s) = ROUTE_DEVIATION * fbm(s / ROUTE_WAVELENGTH)   <- broad sweep
+ *                + turnSequence(seed, s)                          <- actual corners
  *
  * and curvature is its derivative. Two consequences, and the first is a theorem:
  *
@@ -56,18 +56,30 @@ import { Noise1D } from '../core/rng';
  * only travel from -D to +D, so `sweeper length * curvature <= 2 * D`: a bounded road
  * cannot hold a tight radius for kilometres. The old road's 4.7 km single-sign runs
  * turned the heading through 557 degrees — those "long sweepers" WERE the corkscrew
- * that made it cross itself, and they cannot survive. What replaces them is the
- * two-term split below: the route term spends the deviation budget on where the road
- * goes, and a short-wavelength gated term buys tight corners almost free, because
- * budget is spent by amplitude while curvature is bought by amplitude over
- * wavelength. Measured against the old road, the direction-change rate and sweeper
- * length remain in the same order while the heading stays bounded.
+ * that made it cross itself, and they cannot survive.
+ *
+ * The replacement separates slow route sweep from authored turn sequences. The
+ * earlier gated-noise corner term could satisfy a minimum-radius probe at one tiny
+ * patch while remaining near zero through the kilometres a player actually saw.
+ * Alternating seeded bearings instead guarantee a meaningful heading change in every
+ * section, then hold that bearing long enough to leave a real straight or sweeper.
  */
 
 /** Spacing between integration nodes. Small enough that 4 m chords read as curved. */
 export const NODE_SPACING = 4;
-/** Tight-corner target, metres. The gated term is tuned around this value. */
-export const MIN_CORNER_RADIUS = 170;
+/**
+ * Tight-corner target, metres.
+ *
+ * Radius alone was the wrong goal. An 85 m curvature spike can make a probe happy
+ * while the road before and after it keeps almost the same bearing — exactly the
+ * straight aerial view reported from play. A turn now has TWO authored dimensions:
+ * 85-140 m peak radius and 25-60 degrees of accumulated heading change.
+ *
+ * The no-crossing theorem still owns the hard limit. Broad route sweep spends
+ * 0.95 rad and a turn bearing spends at most 0.52 rad, for 1.47 rad (84.2 degrees)
+ * total: below 90 degrees, so forward progress remains strictly positive.
+ */
+export const MIN_CORNER_RADIUS = 85;
 
 /**
  * THE ROUTE TERM: where the road goes.
@@ -77,35 +89,37 @@ export const MIN_CORNER_RADIUS = 170;
  * low-gain octaves work only at the kilometre scale: this term sweeps rather than
  * corners.
  */
-const ROUTE_DEVIATION = 1.15;
+const ROUTE_DEVIATION = 0.95;
 const ROUTE_WAVELENGTH = 1600;
 const ROUTE_OCTAVES = 2;
 const ROUTE_GAIN = 0.25;
-/** Worst curvature the route term can contribute, including its second octave. */
-const ROUTE_CURVATURE_BOUND =
-  (ROUTE_DEVIATION * 3.75 / ROUTE_WAVELENGTH) *
-  ((1 + ROUTE_GAIN * 2.1) / (1 + ROUTE_GAIN));
 
 /**
- * THE CORNER TERM: how the road bends.
+ * AUTHORED TURN SEQUENCES: a real change of bearing, not curvature noise.
  *
- * Short wavelength, small amplitude, and GATED so it is not always there. Ungated
- * it triples the direction-change rate — twitchy, and exactly the failure the
- * earlier bounded-heading attempt was reverted for. The slow gate makes tight
- * corners occasional instead.
+ * Each 1.7 km section transitions from one signed bearing to the opposite sign.
+ * Seeded magnitudes vary from 0.22 to 0.52 rad, so even the smallest transition is
+ * 0.44 rad / 25.2 degrees and the largest is 1.04 rad / 59.6 degrees. Alternating
+ * signs guarantee the turn; seeded timing, angle and radius stop the cadence reading
+ * like a metronome.
  *
- * The corner amplitude is small in heading space — 0.23 rad — but divided by
- * 190 m it can still buy the old road's tightest bends. Its theoretical derivative
- * can add to the route term in a pathological alignment and briefly beat the target;
- * the acceptance bench therefore checks the REAL field over several seeds, where
- * the floor is 150 m and typical minima land around the authored 170 m.
+ * A quintic smootherstep supplies entry, one peak-curvature apex and exit with zero
+ * curvature at both ends. Its maximum derivative is 1.875, so choosing transition
+ * length as `1.875 * headingChange * radius` makes the requested 85-140 m peak radius
+ * true by construction. The remaining section holds its new bearing as a straight or
+ * broad route-driven sweeper.
  */
-const CORNER_WAVELENGTH = 190;
-const CORNER_DEVIATION = 0.23;
-/** Gate field wavelength, metres: how far apart the tight corners are. */
-const CORNER_GATE_WAVELENGTH = 9000;
-/** Gate threshold. Higher = rarer, sharper corners. */
-const CORNER_GATE = 0.6;
+const TURN_SECTION_LENGTH = 1700;
+const TURN_MIN_HEADING = 0.22;
+const TURN_MAX_HEADING = 0.52;
+const TURN_START_MIN = 250;
+const TURN_START_MAX = 700;
+const TURN_RADIUS_MAX = 140;
+const SMOOTHERSTEP_MAX_SLOPE = 1.875;
+
+function smootherstep01(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
 
 /** First stretch out of the house is dead straight, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
@@ -121,39 +135,64 @@ const CURVATURE_STEP = NODE_SPACING * 0.5;
  * Heading at arclength s, radians, and its derivative.
  *
  * Ramped in over the runout so the road leaves the house on the trunk bearing — which
- * is heading zero, i.e. +Z — and then blends into the noise.
+ * is heading zero, i.e. +Z — and then blends into the full heading field.
  */
 export class RoadHeading {
   private readonly route: Noise1D;
-  private readonly corner: Noise1D;
-  private readonly gate: Noise1D;
+  private readonly turnMagnitudeSeed: number;
+  private readonly turnTimingSeed: number;
+  private readonly turnRadiusSeed: number;
+  private readonly turnParity: number;
 
   constructor(seed: number) {
     const s = seed >>> 0;
     this.route = new Noise1D(s ^ 0x9e3779b9);
-    this.corner = new Noise1D(s ^ 0x3c6ef372);
-    this.gate = new Noise1D(s ^ 0x85ebca6b);
+    this.turnMagnitudeSeed = (s ^ 0x3c6ef372) >>> 0;
+    this.turnTimingSeed = (s ^ 0x85ebca6b) >>> 0;
+    this.turnRadiusSeed = (s ^ 0xc2b2ae35) >>> 0;
+    this.turnParity = s & 1;
+  }
+
+  private turnTarget(section: number): number {
+    const magnitude =
+      TURN_MIN_HEADING +
+      (TURN_MAX_HEADING - TURN_MIN_HEADING) *
+        hashUnit2(this.turnMagnitudeSeed, section);
+    return ((section + this.turnParity) & 1) === 0 ? magnitude : -magnitude;
+  }
+
+  private turnAt(s: number): number {
+    const section = Math.floor(s / TURN_SECTION_LENGTH);
+    const local = s - section * TURN_SECTION_LENGTH;
+    const from = this.turnTarget(section - 1);
+    const to = this.turnTarget(section);
+    const start =
+      TURN_START_MIN +
+      (TURN_START_MAX - TURN_START_MIN) * hashUnit2(this.turnTimingSeed, section);
+    const radius =
+      MIN_CORNER_RADIUS +
+      (TURN_RADIUS_MAX - MIN_CORNER_RADIUS) * hashUnit2(this.turnRadiusSeed, section);
+    const length = SMOOTHERSTEP_MAX_SLOPE * Math.abs(to - from) * radius;
+
+    if (local <= start) return from;
+    if (local >= start + length) return to;
+    const blend = smootherstep01((local - start) / length);
+    return from + (to - from) * blend;
   }
 
   at(s: number): number {
     const ramp = Math.min(1, Math.max(0, (s - STRAIGHT_RUNOUT) / STRAIGHT_RUNOUT));
     const route =
       this.route.fbm(s / ROUTE_WAVELENGTH, ROUTE_OCTAVES, 2.1, ROUTE_GAIN) * ROUTE_DEVIATION;
-    // Gate in [0, 1]: the field's excess over the threshold, rescaled. Below it the
-    // corner term is exactly zero, so most of the road is pure route.
-    const open = Math.max(0, (this.gate.at(s / CORNER_GATE_WAVELENGTH) - CORNER_GATE)) /
-      (1 - CORNER_GATE);
-    const corner = open * CORNER_DEVIATION * this.corner.at(s / CORNER_WAVELENGTH);
-    return (route + corner) * ramp;
+    return (route + this.turnAt(s)) * ramp;
   }
 
   /**
    * Signed curvature, radians per metre, by central difference on the heading.
    *
-   * Differenced rather than differentiated analytically because the heading is a sum
-   * of three noise fields with a clamp and a ramp in it, and the analytic derivative
-   * of that is four more expressions to keep in step with `at`. The camber and the
-   * HUD are the only consumers and neither can tell the difference.
+   * Differenced rather than duplicated analytically because the heading combines the
+   * slow noise field, the runout clamp and seeded smootherstep transitions. Camber and
+   * the HUD are the only consumers and neither can tell the difference.
    */
   curvatureAt(s: number): number {
     return (this.at(s + CURVATURE_STEP) - this.at(s - CURVATURE_STEP)) / (2 * CURVATURE_STEP);

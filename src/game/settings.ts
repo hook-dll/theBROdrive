@@ -100,6 +100,8 @@ export interface Settings {
   viewDistance: ViewDistance;
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
+  /** Post-process landscape outline amount, 0..1. */
+  inkStrength: number;
   /**
    * Steer the car with horizontal mouse movement. Off by default: the keyboard is
    * the control everyone arrives expecting, and a mouse that suddenly steers is a
@@ -118,6 +120,7 @@ export const DEFAULT_POI_SPACING_METRES = 1200;
 
 export const DEFAULT_MASTER_VOLUME = 0.8;
 export const DEFAULT_RADIO_VOLUME = 0.6;
+export const DEFAULT_INK_STRENGTH = 0.2;
 export const DEFAULT_MOUSE_SENSITIVITY = 0.0022;
 export const MOUSE_SENSITIVITY_MIN = 0.0004;
 export const MOUSE_SENSITIVITY_MAX = 0.006;
@@ -151,6 +154,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // the pause menu is one key away and the near tier is the safe floor.
   viewDistance: 'near',
   msaa: true,
+  inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
   mouseSteering: false,
 };
@@ -198,9 +202,8 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? obj.mouseSensitivity
       : DEFAULT_MOUSE_SENSITIVITY;
 
-  // A missing volume means an old save from before there was any sound: it gets
-  // the default, not silence.
-  const volume = (value: unknown, fallback: number): number =>
+  // Missing unit-interval settings mean an old save: use the authored default.
+  const unitInterval = (value: unknown, fallback: number): number =>
     typeof value === 'number' && Number.isFinite(value)
       ? Math.min(1, Math.max(0, value))
       : fallback;
@@ -216,8 +219,9 @@ export function sanitizeSettings(raw: unknown): Settings {
           POI_SPACING_STEP_METRES,
       ) * POI_SPACING_STEP_METRES,
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
-    masterVolume: volume(obj.masterVolume, DEFAULT_MASTER_VOLUME),
-    radioVolume: volume(obj.radioVolume, DEFAULT_RADIO_VOLUME),
+    masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
+    radioVolume: unitInterval(obj.radioVolume, DEFAULT_RADIO_VOLUME),
+    inkStrength: unitInterval(obj.inkStrength, DEFAULT_INK_STRENGTH),
     keyBindings: {},
     // Anything unrecognised is standard, so an old save (which has no such field)
     // keeps the look it was made with.

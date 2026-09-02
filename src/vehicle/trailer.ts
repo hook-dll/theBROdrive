@@ -113,11 +113,16 @@ const ROLLING_RESISTANCE_DECEL = 0.2;
  * still on the ground.
  */
 const SUSPENSION = {
+  // 1.27 Hz on two wheels: `sqrt(stiffness / cornerShare) / 2pi` with each wheel
+  // carrying half the mass, which is where an empty box trailer sits.
   stiffness: 32,
-  // Critical damping at k=32 is 11.31; these are 0.35 and 0.45 of it, the same
-  // compression/rebound split the cars use.
-  compression: 3.96,
-  relaxation: 5.09,
+  // Critical damping is `2 * sqrt(stiffness * cornerShare)` = 8.0, NOT `2 * sqrt(k)`:
+  // the share of the mass on the corner belongs in it, and leaving it out is the same
+  // octave slip the car catalogue had (see carmodels.ts). These are 0.30 and 0.45 of
+  // critical — the car's compression/rebound split — where the old pair, believed to
+  // be 0.35/0.45, were really 0.50/0.64 and bounced the hitch over every ripple.
+  compression: 2.4,
+  relaxation: 3.6,
   restLength: 0.3,
   maxTravel: 0.3,
   maxForce: 26000,
@@ -271,6 +276,8 @@ export class Trailer implements Rebasable {
   private readonly sprayStates: WheelSprayState[] = [];
   /** Reused contact-point receiver, so the spray refresh never allocates. */
   private readonly contactScratch = { x: 0, y: 0, z: 0 };
+  /** Reused ground-normal receiver for terrain-conforming tyre tracks. */
+  private readonly normalScratch = { x: 0, y: 1, z: 0 };
   /** Previous wheel rotation (rad), for differentiating into a spin rate. */
   private readonly prevWheelRotation: number[] = [];
   private readonly body: RAPIER.RigidBody;
@@ -381,6 +388,9 @@ export class Trailer implements Rebasable {
         absoluteContactZ: 0,
         forwardX: 0,
         forwardZ: 1,
+        normalX: 0,
+        normalY: 1,
+        normalZ: 0,
         inContact: false,
         surface: SurfaceType.Asphalt,
         slipRatio: 0,
@@ -731,6 +741,12 @@ export class Trailer implements Rebasable {
         s.contactZ = cp.z;
         s.absoluteContactX = cp.x + this.origin.x;
         s.absoluteContactZ = cp.z + this.origin.z;
+      }
+      const normal = this.controller.wheelContactNormal(i, this.normalScratch);
+      if (normal) {
+        s.normalX = normal.x;
+        s.normalY = normal.y;
+        s.normalZ = normal.z;
       }
       s.forwardX = fx;
       s.forwardZ = fz;

@@ -381,6 +381,47 @@ export class WheelSpray {
   }
 
   /**
+   * A dry-brush impact uses the same ring, shader and rebase path as wheel spray.
+   * Fourteen motes are a visible burst without consuming the 400-slot pool; their
+   * forward bias is intentional — the car carries snapped twigs down-road, whereas a
+   * tyre's contact patch always throws behind it.
+   */
+  emitBurst(x: number, y: number, z: number, dirX: number, dirZ: number, speed: number): void {
+    const len = Math.hypot(dirX, dirZ) || 1;
+    const fx = dirX / len;
+    const fz = dirZ / len;
+    const count = 14;
+    const throwSpeed = Math.min(14, 4 + speed * 0.45);
+    for (let k = 0; k < count; k++) {
+      const i = this.cursor;
+      this.cursor = (i + 1) % POOL_SIZE;
+      const i3 = i * 3;
+      const angle = (Math.random() - 0.5) * 1.25;
+      const ca = Math.cos(angle);
+      const sa = Math.sin(angle);
+      this.velocity[i3] = (fx * ca - fz * sa) * throwSpeed * (0.55 + Math.random() * 0.7);
+      this.velocity[i3 + 1] = 1.1 + Math.random() * 2.5;
+      this.velocity[i3 + 2] = (fx * sa + fz * ca) * throwSpeed * (0.55 + Math.random() * 0.7);
+      this.position[i3] = x + (Math.random() - 0.5) * 0.3;
+      this.position[i3 + 1] = y + Math.random() * 0.25;
+      this.position[i3 + 2] = z + (Math.random() - 0.5) * 0.3;
+      this.life[i] = 0.55 + Math.random() * 0.45;
+      this.age[i] = 0;
+      this.spawnSize[i] = 0.12 + Math.random() * 0.22;
+      this.size[i] = this.spawnSize[i];
+      this.endSize[i] = 0.22;
+      this.spawnAlpha[i] = 0.9;
+      this.gravity[i] = DUST_GRAVITY;
+      this.alpha[i] = 0.9;
+      this.tint[i] = 0;
+    }
+    this.posAttr.needsUpdate = true;
+    this.sizeAttr.needsUpdate = true;
+    this.alphaAttr.needsUpdate = true;
+    this.tintAttr.needsUpdate = true;
+  }
+
+  /**
    * Advances every live mote: gravity, integration, then fade and size.
    *
    * Gravity, peak opacity and the end-of-life size all come from the mote's own slot
