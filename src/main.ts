@@ -39,6 +39,7 @@ import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
+import { DistantMirage } from './render/mirage';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
@@ -294,6 +295,7 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
+  const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
@@ -582,8 +584,8 @@ async function boot(): Promise<void> {
       hud.setToast(left > 0 ? `stuck on — ${left} left to place` : 'stuck on');
     } else if (delta.t === 'settings') {
       // Every path that changes preferences goes through this delta — the pause menu,
-      // the mouse-steering hotkey, anything added later — so mirroring here is the one
-      // place it cannot be forgotten at a new call site.
+      // the precise-control hotkey, anything added later — so mirroring here is the
+      // one place it cannot be forgotten at a new call site.
       storeSettings(delta.settings);
     }
   });
@@ -725,20 +727,19 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
-    // Mouse steering is a preference, so M edits the settings rather than a local
-    // flag: it survives a reload, and the pause menu and the key agree because they
-    // are the same state. The reader is told "on AND driving", so the same mouse
-    // still looks around freely on foot without the player switching anything.
-    if (f.toggleMouseSteer) {
-      const on = !s.settings.mouseSteering;
-      world.apply({ t: 'settings', settings: { ...s.settings, mouseSteering: on } });
+    // Precise control is a preference, so M edits settings rather than a local flag:
+    // the pause menu and hotkey always agree, and the held wheel survives save/load.
+    // The reader is enabled only while driving, leaving normal mouse look on foot.
+    if (f.togglePreciseSteer) {
+      const on = !s.settings.preciseSteering;
+      world.apply({ t: 'settings', settings: { ...s.settings, preciseSteering: on } });
       hud.setToast(
         on
-          ? 'mouse drive on — left throttle, right brake, wheel-press to look'
-          : 'mouse drive off',
+          ? 'precise control on — mouse or A/D holds the wheel'
+          : 'precise control off — steering self-centres',
       );
     }
-    input.setMouseSteering(s.settings.mouseSteering && driving !== null);
+    input.setPreciseSteering(s.settings.preciseSteering && driving !== null);
 
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
@@ -1242,10 +1243,6 @@ async function boot(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
-      driving === null &&
-        !worldWork.hasPending &&
-        !worldWork.workedThisFrame &&
-        !rebasedThisFrame,
     );
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
@@ -1295,6 +1292,9 @@ async function boot(): Promise<void> {
     // The disc only rebuilds when the camera has left the patch it was built for, so
     // this is a pair of comparisons on most frames.
     vista.update(cam.x, cam.z, activeS);
+    // A daylight-only middle-distance illusion. It never modifies Sky or Audio; the
+    // sky's computed daylight is only a visibility gate protecting the night view.
+    mirage.update(activeS, sky.dayFactor);
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
@@ -1425,10 +1425,9 @@ async function boot(): Promise<void> {
       frameDt,
     );
 
-    // GPU timer queries measure only the render submission, so CPU streaming work
-    // cannot contaminate them. Excluding every frame while the stream had pending
-    // work disabled adaptation throughout normal driving — exactly when sustained
-    // GPU overload needed it. Only a PMREM bake is a different GPU workload.
+    // GPU timer queries measure only render submission. The one startup PMREM bake
+    // is excluded because it is a different GPU workload; ordinary frames, including
+    // the whole day-night transition, remain eligible for adaptive resolution.
     const adaptationEligible = !sky.didBakeEnvironmentThisFrame;
     renderer.adaptResolution(adaptationEligible, driving === null);
     rebasedThisFrame = false;

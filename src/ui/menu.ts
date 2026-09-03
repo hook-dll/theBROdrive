@@ -419,7 +419,7 @@ export class MainMenu {
         viewDistance: base.viewDistance,
         msaa: base.msaa,
         inkStrength: base.inkStrength,
-        mouseSteering: base.mouseSteering,
+        preciseSteering: base.preciseSteering,
         interiorCameraOffset: base.interiorCameraOffset,
       };
       const apply = (): void => {
@@ -435,7 +435,7 @@ export class MainMenu {
           viewDistance: settings.viewDistance,
           msaa: settings.msaa,
           inkStrength: settings.inkStrength,
-          mouseSteering: settings.mouseSteering,
+          preciseSteering: settings.preciseSteering,
           interiorCameraOffset: settings.interiorCameraOffset,
         });
       };
@@ -845,22 +845,22 @@ export class MainMenu {
             ]),
             segmented('Steering', [
               {
-                label: 'Keys',
+                label: 'Standard',
                 icon: 'keys',
-                hint: 'A and D steer. The mouse is the camera.',
-                active: () => !settings.mouseSteering,
+                hint: 'A and D steer normally and return toward centre when released.',
+                active: () => !settings.preciseSteering,
                 pick: () => {
-                  settings.mouseSteering = false;
+                  settings.preciseSteering = false;
                   apply();
                 },
               },
               {
-                label: 'Mouse',
+                label: 'Precise',
                 icon: 'mouse',
-                hint: 'Mouse steers, left button throttle, right brake. Hold the wheel-press to look around.',
-                active: () => settings.mouseSteering,
+                hint: 'Mouse and A/D wind one linear wheel that stays put. Tap a key to trim; hold it to keep turning.',
+                active: () => settings.preciseSteering,
                 pick: () => {
-                  settings.mouseSteering = true;
+                  settings.preciseSteering = true;
                   apply();
                 },
               },
@@ -1056,7 +1056,7 @@ export class MainMenu {
             sliderField(
               'Mouse Look',
               'mouse',
-              'Pointer sensitivity for looking around. Mouse steering has its own fixed gain.',
+              'Pointer sensitivity for looking around. Precise control uses a fixed steering gain.',
               MOUSE_SENSITIVITY_MIN,
               MOUSE_SENSITIVITY_MAX,
               0.0001,

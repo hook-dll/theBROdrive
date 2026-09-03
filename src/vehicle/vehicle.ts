@@ -2833,8 +2833,9 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Steering: shaped input, speed-scaled lock, a speed-scaled rate limit and the
-    // steering box's own free play.
+    // Steering: precise control preserves its linear wheel axis; standard control
+    // uses the selected car's input curve. Both retain speed-scaled lock, the physical
+    // rack rate, steering-box play and caster return below.
     //
     // The negation converts our basis into Rapier's steering sign. Forward is +Z and
     // the axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle
@@ -2848,8 +2849,9 @@ export class Vehicle implements Rebasable {
       0,
       1,
     );
-    const steerInput =
-      Math.sign(input.steer) * Math.pow(Math.abs(input.steer), this.handling.steerInputExponent);
+    const steerInput = input.preciseSteering
+      ? input.steer
+      : Math.sign(input.steer) * Math.pow(Math.abs(input.steer), this.handling.steerInputExponent);
     // How far out is the tail? (See the countersteer note above.) Both the lock
     // ceiling and the rate limit are faded back toward their parking-speed values by
     // this, so a driver catching a slide has the lock and the hand-speed the car

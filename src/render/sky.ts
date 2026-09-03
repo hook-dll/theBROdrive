@@ -40,27 +40,16 @@ const NIGHT_ELEVATION = -0.08;
 const LAMP_FULL_ELEVATION = -0.14;
 
 /**
- * Shadow length control, because a physically correct low sun draws nonsense.
+ * Shadow direction is clamped only in the last few degrees above the horizon.
  *
- * A shadow's length is the caster's height over tan(elevation), so at 3 degrees a
- * 1.7 m player throws a 32 m shadow and a car throws sixty metres of dark smear —
- * far larger than the thing casting it, streaked across the whole foreground, and
- * blurred by the shadow map's 18 cm texels into an unreadable blob. That is the
- * "shadow is sometimes enormous" everyone notices around dawn and dusk.
- *
- * Two limits, in preference order:
- *
- *  - The shadow-casting DIRECTION never drops below SHADOW_MIN_ELEVATION, while the
- *    sun's own position, colour and disc stay exactly where they were. Shadows keep
- *    pointing the right way and stop growing past about four times the caster's
- *    height. Cheating the direction rather than the light is what preserves the
- *    golden-hour colour and the raking shading that make the hour worth having.
- *  - Below SHADOW_FADE_ELEVATION the shadows fade out entirely (three's
- *    `shadow.intensity`), so the last of the mismatch between a clamped shadow and a
- *    horizon sun disappears into dusk instead of standing out in it.
+ * A mathematically exact horizon light makes kilometre-long shadows that cannot fit
+ * the local shadow map. Holding the caster direction at roughly 3.5 degrees keeps the
+ * map finite while preserving the long, raking shadows that make dawn and sunset
+ * readable. Shadows fade only as the actual key reaches the horizon; golden hour is
+ * not faded away.
  */
-const SHADOW_MIN_ELEVATION = 0.26;
-const SHADOW_FADE_ELEVATION = 0.12;
+const SHADOW_MIN_ELEVATION = 0.06;
+const SHADOW_FADE_ELEVATION = 0.035;
 
 
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
@@ -88,8 +77,8 @@ const MOON_VISUAL_SCALE = 3;
  */
 const MOON_RADIANCE_DAY = 0.75;
 const MOON_RADIANCE_NIGHT = 1.15;
-/** The Sun stays proportionally correct in astronomy but reads better 1.5x in play. */
-const SUN_VISUAL_SCALE = 1.5;
+/** The enlarged disc is three times the physical angular radius: twice its prior size. */
+const SUN_VISUAL_SCALE = 3;
 /** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
 const BASE_FOG_DENSITY = 0.00035;
 
@@ -101,19 +90,23 @@ const BASE_FOG_DENSITY = 0.00035;
  */
 export const EXPOSURE_TARGET = 5;
 /**
- * How dark the eye stops following, expressed as the illuminance it stops
- * dividing by. Below this the exposure levels off instead of climbing, so the
- * scene finally starts to go dark rather than staying at EXPOSURE_TARGET forever.
+ * Soft floor under normalized scene illuminance. This is the limit of visual
+ * adaptation, not a numerical epsilon: `EXPOSURE_TARGET / ADAPTATION_FLOOR` is a
+ * maximum 50x exposure.
  *
- * It is ADDED to the illuminance rather than imposed as a clamp on the exposure,
- * and that is the whole point. A clamp is a corner: above it the scene is pinned
- * at full brightness, below it brightness tracks illuminance one for one, and the
- * hand-over is a slope that goes from flat to a 20%-a-second fall in the width of
- * one frame. Adding a floor to the denominator gives the same limit — the maximum
- * exposure is still EXPOSURE_TARGET / ADAPTATION_FLOOR, which is what the star
- * field's brightness is calibrated against — with no corner anywhere on the curve.
+ * The previous 25,000x maximum divided almost all real day-to-night variation back
+ * out of the lights. The desert retained essentially full daylight through civil
+ * twilight and stayed readable under 0.002 lux night-sky illumination. Fifty-fold
+ * adaptation preserves detail at sunset, then lets the world become genuinely dark.
+ * Adding the floor in the denominator keeps that transition smooth without a clamp.
  */
-export const ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
+export const ADAPTATION_FLOOR = 0.1;
+/**
+ * The sky's own dark adaptation remains exactly as authored. Stars and unresolved
+ * planets are display-space lights, not illumination cast onto the desert; coupling
+ * them to the ground exposure would erase the night sky while fixing the ground.
+ */
+const CELESTIAL_ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
 
 
 // ---------------------------------------------------------------------------
@@ -585,21 +578,6 @@ const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
   .replace('#include <tonemapping_fragment>', '')
   .replace('#include <colorspace_fragment>', '');
 
-/**
- * Sun-elevation change, radians, that makes an environment refresh due during
- * ordinary daylight. The probe is deliberately cheaper to update there because
- * its changes are hard to notice against a bright, stable scene.
- */
-const ENV_BAKE_STEP = 0.03;
-/**
- * Twilight probe cadence. The visible dome is continuous, but reflections and
- * diffuse environment lighting use the last PMREM bake. A tighter threshold and
- * cadence keep the baked probe within a barely visible radiance delta while the
- * sun crosses the horizon.
- */
-const ENV_TWILIGHT_BAKE_STEP = 0.002;
-/** Minimum time between completed PMREM bakes. */
-const ENV_BAKE_INTERVAL_MS = 350;
 
 
 // ---------------------------------------------------------------------------
@@ -640,13 +618,6 @@ export class Sky {
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
   private readonly envMaterial: THREE.ShaderMaterial;
   private envTarget: THREE.WebGLRenderTarget | null = null;
-  /** Sun elevation the live probe was baked at. NaN marks the initial bake. */
-  private envBakedElevation = Number.NaN;
-  /** A crossed elevation threshold waits here until an idle frame can bake it. */
-  private envBakePending = true;
-  /** Time of the last completed bake, used only after the initial bake. */
-  private envLastBakeMs = Number.NEGATIVE_INFINITY;
-  private environmentSize = 128;
 
   /** True only for the update that successfully replaced the environment target. */
   private didBakeEnvironment = false;
@@ -838,7 +809,6 @@ export class Sky {
     cameraX: number,
     cameraY: number,
     cameraZ: number,
-    allowEnvironmentRefresh = true,
   ): void {
     this.didBakeEnvironment = false;
     const g = skyGradientAt(s);
@@ -955,15 +925,25 @@ export class Sky {
       celestial.keyIlluminanceLux / 40_000 +
       celestial.diffuseIlluminanceLux / 10_000;
     this.exposure = EXPOSURE_TARGET / (sceneIlluminance + ADAPTATION_FLOOR);
+    const celestialExposure =
+      EXPOSURE_TARGET / (sceneIlluminance + CELESTIAL_ADAPTATION_FLOOR);
+    // The probe is intentionally baked once, then scaled continuously. Re-baking a
+    // PMREM through twilight caused recurrent main-thread/GPU stalls; leaving a bright
+    // daytime probe at full strength instead made night materials glow. The exposed
+    // light budget is the exact scalar both problems need.
+    this.scene.environmentIntensity = Math.min(
+      1,
+      (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
+    );
     const starVisibility = smoothstep(0.12, -0.12, this.sunElevation);
     this.starField.update(
       celestial.equatorialToWorld,
-      this.exposure / 18_000,
+      celestialExposure / 18_000,
       starVisibility,
       celestial.moon.direction,
       visibleMoonRadius,
     );
-    this.planetField.update(celestial, this.exposure / 18_000);
+    this.planetField.update(celestial, celestialExposure / 18_000);
 
     // One shadow-casting key light. Astronomy blends the Sun/Moon direction and
     // exposes the same blend for colour, so the horizon hand-off cannot step.
@@ -983,7 +963,7 @@ export class Sky {
     this.hemiLight.groundColor.copy(this._hemiGround);
     this.hemiLight.intensity = (celestial.diffuseIlluminanceLux / 10_000) * this.exposure;
 
-    this.refreshEnvironment(allowEnvironmentRefresh, performance.now());
+    this.refreshEnvironment();
 
     // --- Reposition the sky with the camera ---
     //
@@ -1028,53 +1008,24 @@ export class Sky {
   }
 
   /**
-   * Marks significant solar changes as due, then replaces the live probe on an idle
-   * frame. The initial probe is mandatory: a save may load directly into a vehicle,
-   * and postponing that bake would leave `scene.environment` null for the whole drive.
+   * Bakes the reflection probe once. Its intensity follows the analytic light budget
+   * every frame above; rebuilding the cubemap cannot add useful detail worth a hitch.
    */
-  private refreshEnvironment(allowEnvironmentRefresh: boolean, nowMs: number): void {
-    const isInitialBake = Number.isNaN(this.envBakedElevation);
-    const bakeStep =
-      Math.abs(this.sunElevation) < 0.35 ? ENV_TWILIGHT_BAKE_STEP : ENV_BAKE_STEP;
-    if (
-      !isInitialBake &&
-      Math.abs(this.sunElevation - this.envBakedElevation) >= bakeStep
-    ) {
-      this.envBakePending = true;
-    }
-    if (
-      (!isInitialBake && !allowEnvironmentRefresh) ||
-      !this.envBakePending ||
-      (!isInitialBake && nowMs - this.envLastBakeMs < ENV_BAKE_INTERVAL_MS)
-    ) {
-      return;
-    }
-
-    // Keep the old target live until PMREM has fully produced a replacement.
-    const nextTarget = this.pmrem.fromScene(
+  private refreshEnvironment(): void {
+    if (this.envTarget !== null) return;
+    this.envTarget = this.pmrem.fromScene(
       this.envScene,
       0,
       1,
       DOME_RADIUS * 2,
-      { size: this.environmentSize },
+      { size: 128 },
     );
-    const previous = this.envTarget;
-    this.envTarget = nextTarget;
-    this.scene.environment = nextTarget.texture;
-    this.envBakedElevation = this.sunElevation;
-    this.envLastBakeMs = nowMs;
-    this.envBakePending = false;
+    this.scene.environment = this.envTarget.texture;
     this.didBakeEnvironment = true;
-    if (previous !== null) previous.dispose();
   }
 
-  /**
-   * Applies a rendering tier to everything overhead: the PMREM resolution the next
-   * due bake will use (without making one due), and how faint the star catalogue
-   * is drawn to. Both take effect without a reload.
-   */
+  /** Applies the rendering tier to the catalogue star depth. */
   setQuality(quality: GraphicsQuality): void {
-    this.environmentSize = quality === 'acceptable' ? 64 : 128;
     this.starField.setQuality(quality);
   }
 

@@ -67,15 +67,12 @@ export interface InputFrame {
   lookPitch: number;
   /** Wheel notches since the last frame. Positive zooms out. */
   zoomDelta: number;
-  /** Toggle mouse steering: tap, consumed once by the settings owner. */
-  toggleMouseSteer: boolean;
+  /** Toggle precise control: tap, consumed once by the settings owner. */
+  togglePreciseSteer: boolean;
   /** Cycles autopilot: sleeper -> frantic -> off; edge-triggered. */
   toggleAutopilot: boolean;
-  /**
-   * Is the mouse currently steering the car? Not an intent — a report, so the HUD
-   * can say so and the camera knows why its yaw stopped moving.
-   */
-  mouseSteering: boolean;
+  /** Precise control owns a persistent, linear steering-wheel position this frame. */
+  preciseSteering: boolean;
 }
 
 export function emptyInput(): InputFrame {
@@ -116,8 +113,8 @@ export function emptyInput(): InputFrame {
     lookYaw: 0,
     lookPitch: 0,
     zoomDelta: 0,
-    toggleMouseSteer: false,
-    mouseSteering: false,
+    togglePreciseSteer: false,
+    preciseSteering: false,
   };
 }
 
@@ -148,7 +145,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
-  { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
+  { id: 'mouseSteer', label: 'Precise steering', defaultKeys: ['KeyM'] },
   { id: 'seatAdjust', label: 'Adjust interior camera seat', defaultKeys: ['KeyI'] },
   { id: 'interiorHeadMovement', label: 'Interior head movement', defaultKeys: ['KeyU'] },
   { id: 'camera', label: 'Toggle interior / chase camera', defaultKeys: ['KeyC'] },
@@ -218,32 +215,17 @@ function snapAxis(value: number, target: number): number {
 }
 
 /**
- * Mouse steering: virtual-wheel travel per CSS pixel of horizontal mouse movement.
- *
- * Deliberately independent of camera sensitivity. Roughly 900 px reaches full
- * virtual-wheel travel, preventing an ordinary wrist correction from asking the
- * rack for a large angle. The power curve below adds still more precision near
- * centre while preserving full lock at the end of the sweep.
+ * Precise-control wheel travel per CSS pixel. Roughly 900 px reaches full lock;
+ * mouse sensitivity remains independent so camera preference cannot change steering.
  */
-const MOUSE_STEER_GAIN = 0.0011;
+const PRECISE_MOUSE_GAIN = 0.0011;
 /**
- * Exponent on the virtual wheel's own travel.
+ * Virtual-wheel travel per second while A or D is held in precise mode.
  *
- * The accumulator stays linear for predictable return and keyboard handover; only
- * the emitted axis is curved. At 2.2, 20% wheel travel requests less than 3% steer,
- * giving mouse users a broad lane-holding region rather than an on/off centre.
+ * At 60 Hz one tick moves 0.0092 of the full wheel range: small enough for a tap to
+ * be a deliberate trim, while a hold winds from centre to full lock in 1.8 seconds.
  */
-const MOUSE_STEER_EXPO = 2.2;
-/**
- * Time constant, seconds, for the virtual wheel drifting back to centre while the
- * mouse is NOT moving.
- *
- * Only while idle: a mouse has no springs and no self-centring, so without this a
- * lifted hand leaves the car cornering forever, and with it applied unconditionally
- * you would be fighting the wheel every time you held a long bend. Idle-only means
- * the wheel is yours while you are steering and straightens when you let go.
- */
-const MOUSE_STEER_IDLE_RETURN_S = 1.2;
+const PRECISE_KEY_RATE = 0.55;
 
 /**
  * Reads browser input into an `InputFrame`. Owns pointer lock and the analogue
@@ -264,10 +246,13 @@ export class InputReader {
    * `yawDelta` because steering must not inherit the look sensitivity.
    */
   private rawDX = 0;
-  /** Is mouse steering switched on AND applicable (set by the game, not the device)? */
-  private mouseSteerEnabled = false;
-  /** Virtual steering-wheel position, -1..1. Survives between frames; that is the point. */
-  private mouseWheel = 0;
+  /** Is precise control switched on AND applicable (set by the game, not the device)? */
+  private preciseSteerEnabled = false;
+  /**
+   * Linear steering-wheel position, -1..1. Mouse and keyboard add to the same value;
+   * neither releasing a key nor stopping the mouse returns it toward centre.
+   */
+  private preciseWheel = 0;
   /**
    * Effective action -> key list for this reader. Precomputed at construction
    * and on setKeyBindings so the hot path (sample) only reads arrays — it never
@@ -308,13 +293,13 @@ export class InputReader {
   }
 
   /**
-   * Switches mouse steering on or off. The GAME owns this, not the device: it is on
+   * Switches precise control on or off. The GAME owns this, not the device: it is on
    * only while the preference is set and the player is actually driving, so the same
    * mouse still looks around freely on foot.
    */
-  setMouseSteering(enabled: boolean): void {
-    if (!enabled) this.mouseWheel = 0;
-    this.mouseSteerEnabled = enabled;
+  setPreciseSteering(enabled: boolean): void {
+    if (!enabled) this.preciseWheel = 0;
+    this.preciseSteerEnabled = enabled;
   }
 
   dispose(): void {
@@ -365,7 +350,7 @@ export class InputReader {
   };
 
   private onContextMenu = (e: MouseEvent): void => {
-    // Right mouse aims on foot and brakes while mouse-steering; either way the
+    // Right mouse aims on foot and brakes during precise control; either way the
     // browser menu must not steal it.
     e.preventDefault();
   };
@@ -436,14 +421,14 @@ export class InputReader {
     // One source of truth per axis: touch-control values and digital inputs meet
     // here, so gameplay receives the same frame regardless of device.
     //
-    // In mouse-steering mode the mouse is the whole car: left button is the throttle,
-    // right is the brake, and the middle button (held) hands the mouse back to the
-    // camera. That is a complete set of controls for one hand — the point of the mode
-    // is that a long drive needs nothing else.
+    // In precise mode mouse travel and A/D wind one persistent virtual wheel. The
+    // mouse can also drive one-handed: left button is throttle, right is brake, and
+    // holding the middle button hands motion back to the camera without moving the
+    // wheel. Keyboard and mouse are deliberately additive rather than exclusive.
     const touch = this.touch?.input;
-    const mouseDrive = this.mouseSteerEnabled;
-    const mouseThrottle = mouseDrive && this.held.has('Mouse0');
-    const mouseBrake = mouseDrive && this.held.has('Mouse2');
+    const preciseDrive = this.preciseSteerEnabled;
+    const mouseThrottle = preciseDrive && this.held.has('Mouse0');
+    const mouseBrake = preciseDrive && this.held.has('Mouse2');
     const touchForward = touch?.forward ?? 0;
     const touchBackward = touch?.backward ?? 0;
     const wantThrottle = Math.max(
@@ -468,44 +453,25 @@ export class InputReader {
     );
     f.reverse = reverseHeld;
 
-    // Holding the MIDDLE button (wheel press) hands the mouse back to the camera and
-    // FREEZES the wheel where it is, so the car holds its line while the driver looks
-    // around. It is the middle button because the other two are now the pedals.
+    // Middle-button look suppresses only mouse travel. A/D still turns the wheel, so
+    // looking into a bend never steals the keyboard half of the mixed control mode.
     const lookOverride = this.held.has('Mouse1');
-    const steerWithMouse = mouseDrive && !lookOverride;
-    if (steerWithMouse) {
-      const next = this.mouseWheel + this.rawDX * MOUSE_STEER_GAIN;
-      this.mouseWheel = next < -1 ? -1 : next > 1 ? 1 : next;
-      if (this.rawDX === 0) {
-        this.mouseWheel -= this.mouseWheel * Math.min(1, dt / MOUSE_STEER_IDLE_RETURN_S);
-      }
-    }
-
+    const steerWithMouse = preciseDrive && !lookOverride;
     const keySteer =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
-    if (mouseDrive && keySteer === 0) {
-      // The virtual wheel is already an analogue position, so it IS the steer axis;
-      // the digital-key smoothing below would only add lag to an input whose whole
-      // appeal is that it has none. The exponent is applied HERE, on the way out, so
-      // the stored wheel stays linear for the idle return and the keyboard handover.
-      const w = this.mouseWheel;
-      const shaped = Math.sign(w) * Math.abs(w) ** MOUSE_STEER_EXPO;
-      f.steer = snapAxis(shaped, 0);
+    if (preciseDrive) {
+      const mouseDelta = steerWithMouse ? this.rawDX * PRECISE_MOUSE_GAIN : 0;
+      const next = this.preciseWheel + mouseDelta + keySteer * PRECISE_KEY_RATE * dt;
+      this.preciseWheel = next < -1 ? -1 : next > 1 ? 1 : next;
+      f.steer = this.preciseWheel;
     } else {
       // The touch wheel is already analogue, so it supplies the same target the
       // normal steering smoothing follows.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steer +=
         (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
-      // Keys win while they are held; handing back to the mouse must not snap the
-      // wheel. The stored wheel is linear, so it takes the INVERSE of the curve to
-      // stand where the keys left the car.
-      if (mouseDrive) {
-        f.steer = snapAxis(f.steer, 0);
-        this.mouseWheel = Math.sign(f.steer) * Math.abs(f.steer) ** (1 / MOUSE_STEER_EXPO);
-      }
     }
-    f.mouseSteering = steerWithMouse;
+    f.preciseSteering = preciseDrive;
 
     const taps = this.touch?.consumeTaps();
     if (this.anyPressed(this.keys.handbrake)) this.keyboardHandbrake = !this.keyboardHandbrake;
@@ -520,6 +486,7 @@ export class InputReader {
     f.toggleSeatAdjust = this.anyPressed(this.keys.seatAdjust);
     f.toggleInteriorHeadMovement = this.anyPressed(this.keys.interiorHeadMovement);
     f.cycleTyres = this.anyPressed(this.keys.tyres);
+    f.togglePreciseSteer = this.anyPressed(this.keys.mouseSteer);
     f.toggleAutopilot = this.anyPressed(this.keys.autopilot);
     f.recenterCamera =
       this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
@@ -530,11 +497,11 @@ export class InputReader {
     f.useHeld = this.anyPressed(this.keys.useHeld);
     f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
     f.removeWearable = this.anyPressed(this.keys.removeWearable);
-    // Both buttons are pedals while mouse-steering, so they must not also fire or
-    // aim the held item. `mouseSteerEnabled` is only ever set while driving, so on
-    // foot this is exactly the old behaviour.
-    f.usePrimary = !mouseDrive && this.held.has('Mouse0');
-    f.useSecondary = !mouseDrive && this.held.has('Mouse2');
+    // Both buttons are pedals while precise control is active, so they must not also
+    // fire or aim the held item. The mode is enabled only while driving, so on foot
+    // this is exactly the ordinary behavior.
+    f.usePrimary = !preciseDrive && this.held.has('Mouse0');
+    f.useSecondary = !preciseDrive && this.held.has('Mouse2');
     f.cycleItem =
       (this.anyPressed(this.keys.itemNext) ? 1 : 0) -
       (this.anyPressed(this.keys.itemPrev) ? 1 : 0);

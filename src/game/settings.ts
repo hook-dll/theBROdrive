@@ -103,12 +103,11 @@ export interface Settings {
   /** Post-process landscape outline amount, 0..1. */
   inkStrength: number;
   /**
-   * Steer the car with horizontal mouse movement. Off by default: the keyboard is
-   * the control everyone arrives expecting, and a mouse that suddenly steers is a
-   * car in a ditch. Holding the right button hands the mouse back to the camera
-   * without disturbing the wheel.
+   * Persistent precise control: mouse travel and A/D move one linear virtual wheel
+   * that stays where the player leaves it. Off by default because standard steering
+   * is the familiar self-centering keyboard behavior.
    */
-  mouseSteering: boolean;
+  preciseSteering: boolean;
   /** Optional calibrated chassis-local interior camera position, in metres. */
   interiorCameraOffset: readonly [number, number, number] | null;
 }
@@ -158,7 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   msaa: true,
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
-  mouseSteering: false,
+  preciseSteering: false,
   interiorCameraOffset: null,
 };
 
@@ -250,9 +249,9 @@ export function sanitizeSettings(raw: unknown): Settings {
       typeof obj.msaa === 'boolean'
         ? obj.msaa
         : obj.graphicsQuality !== 'acceptable',
-    // Anything but an explicit true is off, which is what an old save (no such
-    // field) should get: nothing surprising happens the first time you drive it.
-    mouseSteering: obj.mouseSteering === true,
+    // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
+    // every newly sanitized Settings object writes only the truthful new field.
+    preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
     interiorCameraOffset,
   };
 
