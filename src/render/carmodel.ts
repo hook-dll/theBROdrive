@@ -350,6 +350,20 @@ function prepareDrivenInteriorFaces(root: THREE.Object3D): void {
       : twoSided(child.material);
   });
 }
+
+/**
+ * Soviet shells are authored as outward-facing skins. Their doors therefore
+ * vanished from the driver's side even though the same triangles were opaque from
+ * outside. Driven instances already own cloned paint materials, so making that
+ * shell two-sided fixes the cabin view without mutating shared/static materials.
+ */
+function prepareSovietShellFaces(root: THREE.Object3D, def: CarModelDef): void {
+  if (def.paintStyle !== 'soviet-atlas') return;
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    for (const material of materialsOf(child)) material.side = THREE.DoubleSide;
+  });
+}
 /** Gives static Stylized brake lenses the same red surface as driven vehicles. */
 function tintStaticStylizedTaillights(root: THREE.Object3D, def: CarModelDef): void {
   if (def.paintStyle !== 'stylized-palette') return;
@@ -1236,6 +1250,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const body = t.body.clone(true);
   cloneCarBodyPaintMaterials(body, t.def);
   prepareDrivenInteriorFaces(body);
+  prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   body.name = 'body';

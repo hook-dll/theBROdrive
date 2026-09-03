@@ -88,9 +88,12 @@ for (const m of meshes) {
 /**
  * The cabin volume: the glazed aperture, opened downward to the body floor and
  * inflated a little so a seat back touching the rear glass is not sliced off.
+ * Preserve the authored glass top before inflation: geometry above it is donor
+ * roof/lining, not portable cabin furniture.
  */
 const cabin = new THREE.Box3();
 for (const m of windows) cabin.union(new THREE.Box3().setFromObject(m, true));
+const glazingTop = cabin.max.y;
 cabin.min.y = bodyBox.min.y;
 cabin.expandByScalar(6);
 
@@ -142,11 +145,12 @@ function cut(mesh, keep) {
 const bodySize = bodyBox.getSize(new THREE.Vector3());
 const bodyCentre = bodyBox.getCenter(new THREE.Vector3());
 const interiorTriangle = (p, column) => {
-  if (!cabin.containsPoint(p)) return false;
+  if (!cabin.containsPoint(p) || p.y >= glazingTop) return false;
   if (column >= paintColumn && column < paintColumn + paintSpan) return false;
-  // Door cards sit against the donor shell. Reject that entire side band; Soviet
-  // bodies supply their own doors and keeping it is what made panels poke outside.
-  return Math.abs(p.x - bodyCentre.x) < bodySize.x * 0.36;
+  // Door cards and pillars sit against the donor shell. Reject the entire side
+  // band, narrowing it above the seat line where only pillars approach the glass.
+  const halfWidthFraction = relY(p) > 0.65 ? 0.25 : 0.36;
+  return Math.abs(p.x - bodyCentre.x) < bodySize.x * halfWidthFraction;
 };
 
 const relY = (p) => (p.y - bodyBox.min.y) / bodySize.y;
