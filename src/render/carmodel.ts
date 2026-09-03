@@ -899,29 +899,28 @@ const RIDE_DROP_M = 0.04;
 export const STEERING_WHEEL_NODE = 'steering_wheel';
 
 /**
- * How much of a hollow body's width a fitted cabin fills.
- *
- * The donor is a 2.12 m-wide Stylized saloon and the Soviet shells are 1.56 m, so
- * the cabin is always scaled DOWN. Width is the only fit constraint that matters:
- * it is what decides whether a seat pokes through a door, and the cabin is much
- * shorter than any body so length never binds. A little under full width leaves the
- * door cards inside the shell rather than in it.
+ * Cabins are extracted about the donor body's centre and retain that body's size
+ * in glTF extras. Fit each axis independently to the host shell: unlike the old
+ * width-only uniform scale, this closes the floor, dashboard and parcel-shelf gaps
+ * on short hatchbacks, long estates and tall SUVs without pushing trim through the
+ * doors. Small insets keep the useful geometry behind the Soviet shell.
  */
-const INTERIOR_WIDTH_FRACTION = 0.9;
-/**
- * Where the fitted cabin's own centre sits in the host body, as fractions of that
- * body's box: y through its height (0 = floor, 1 = roof) and z of half-length.
- *
- * Both are the donor's OWN measured numbers (tools/extract-interior.mjs reports
- * 0.4854 and -0.0975), which is the point: a cabin belongs at the same place in any
- * saloon, and a fraction carries that across bodies of different sizes. Aligning
- * the cabin's FLOOR to the body's floor instead — the obvious rule — puts it on the
- * underbody: a body box's lowest point is its sills, not the floor pan, and once the
- * cabin is scaled down to a narrower car it then sits a foot too low, with the
- * driver's eye level with the door handles.
- */
-const INTERIOR_Y_FRACTION = 0.485;
-const INTERIOR_Z_FRACTION = -0.1;
+const INTERIOR_FIT = new THREE.Vector3(0.9, 0.94, 0.94);
+
+function donorBodySize(root: THREE.Object3D): THREE.Vector3 | null {
+  let value: unknown;
+  root.traverse((child) => {
+    value ??= child.userData.donorBodySize;
+  });
+  if (
+    !Array.isArray(value) ||
+    value.length !== 3 ||
+    value.some((component) => typeof component !== 'number' || component <= 0)
+  ) {
+    return null;
+  }
+  return new THREE.Vector3(value[0], value[1], value[2]);
+}
 
 /**
  * Fits the cut cabin into a body that has none, sized and placed from that body's
@@ -935,22 +934,20 @@ function mountInterior(def: CarModelDef, scene: THREE.Group, bodyBox: THREE.Box3
   const source = interiorScenes.get(def.interior!.file);
   if (!source) throw new Error(`Interior "${def.interior!.file}" was not preloaded`);
   const kit = source.clone(true);
-  const kitBox = boundsOf(kit);
-  const kitWidth = kitBox.max.x - kitBox.min.x;
-  if (kitWidth <= 0) return;
+  const donorSize = donorBodySize(kit);
+  if (!donorSize) throw new Error(`Interior "${def.interior!.file}" has no donor body size`);
 
   const size = bodyBox.getSize(new THREE.Vector3());
   const centre = bodyBox.getCenter(new THREE.Vector3());
-  const fit = (size.x * INTERIOR_WIDTH_FRACTION) / kitWidth;
   const mount = new THREE.Group();
   mount.name = 'interior';
   mount.add(kit);
-  mount.scale.setScalar(fit / def.scale);
-  mount.position.set(
-    centre.x / def.scale,
-    (centre.y + (INTERIOR_Y_FRACTION * 2 - 1) * size.y * 0.5) / def.scale,
-    (centre.z + INTERIOR_Z_FRACTION * size.z * 0.5) / def.scale,
+  mount.scale.set(
+    (size.x * INTERIOR_FIT.x) / donorSize.x / def.scale,
+    (size.y * INTERIOR_FIT.y) / donorSize.y / def.scale,
+    (size.z * INTERIOR_FIT.z) / donorSize.z / def.scale,
   );
+  mount.position.copy(centre).multiplyScalar(1 / def.scale);
   scene.add(mount);
 }
 
