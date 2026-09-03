@@ -34,6 +34,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 const DIR = (process.argv[2] ?? 'public/models/stylized') + '/';
 
 function report(name, scene) {
@@ -66,7 +67,7 @@ function report(name, scene) {
 }
 
 const fbx = new FBXLoader();
-const gltf = new GLTFLoader();
+const gltf = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const logs = [];
 for (const f of readdirSync(DIR).sort()) {
   const ext = f.toLowerCase().slice(f.lastIndexOf('.'));

@@ -62,11 +62,11 @@ if (!donor || !out) {
 const paintColumn = Number(paintColumnArg ?? -1);
 const paintSpan = Number(spanArg ?? 2);
 
-const file = `public/models/stylized/${donor}.fbx`;
+const file = `Stylized Vehicles Pack/Models/Detailed/${donor}/${donor}.fbx`;
 const buf = readFileSync(file);
 const scene = new FBXLoader().parse(
   buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
-  'public/models/stylized/',
+  `Stylized Vehicles Pack/Models/Detailed/${donor}/`,
 );
 scene.updateMatrixWorld(true);
 
