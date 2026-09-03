@@ -152,6 +152,12 @@ const GUM_FLIP_RADIUS = 0.5;
  * enough that it cannot reach past one wreck to another at a gas stop.
  */
 const DEV_FLIP_RADIUS = 12;
+
+/**
+ * The terrain's complete drivable height range is bounded far above this line. A
+ * body below it has escaped the world rather than merely driving through a deep dune.
+ */
+const UNDERWORLD_Y = -400;
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
 
@@ -532,6 +538,45 @@ async function boot(): Promise<void> {
     return best;
   };
 
+  /**
+   * A failed terrain/collider edge case must not strand a session below the playable
+   * world. Use the fallen driven car as the anchor when present, put it back on the
+   * nearest road centreline, and place the player at the same road point.
+   */
+  const recoverUnderworld = (): void => {
+    const drivingId = world.state.player.drivingCarId;
+    const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
+    const playerPosition = player.absolutePosition;
+    const playerFallen = !Number.isFinite(playerPosition.y) || playerPosition.y < UNDERWORLD_Y;
+    let carPosition: { x: number; y: number; z: number } | null = null;
+    const carFallen = driving
+      ? (() => {
+          carPosition = driving.absoluteTranslation(originAnchor);
+          return !Number.isFinite(carPosition.y) || carPosition.y < UNDERWORLD_Y;
+        })()
+      : false;
+    if (!playerFallen && !carFallen) return;
+
+    const anchor = carFallen && carPosition ? carPosition : playerPosition;
+    const anchorX = Number.isFinite(anchor.x) ? anchor.x : world.state.player.x;
+    const anchorZ = Number.isFinite(anchor.z) ? anchor.z : world.state.player.z;
+    const projection = road.project(anchorX, anchorZ);
+    const roadPoint = road.sampleAt(projection.s);
+    if (carFallen && driving) {
+      driving.rescueTo(
+        roadPoint.x,
+        roadPoint.y - driving.contactPlaneLocalY,
+        roadPoint.z,
+        roadPoint.heading,
+      );
+      driving.pushTransform();
+    }
+    if (playerFallen || carFallen) {
+      player.teleport(roadPoint.x, roadPoint.y, roadPoint.z, projection.s);
+      player.pushState();
+    }
+  };
+
   const interaction = new Interaction(
     physics,
     world,
@@ -837,6 +882,10 @@ async function boot(): Promise<void> {
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
     physics.step();
+
+    // Recover only after Rapier has produced the escaped pose, before origin
+    // rebasing and interpolation latches can preserve that pose for another frame.
+    recoverUnderworld();
 
     // FLOATING ORIGIN. Here and nowhere else: after the solver has run, before the
     // post-step latches read a single transform. Everything downstream this frame —
