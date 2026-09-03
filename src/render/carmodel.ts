@@ -604,14 +604,22 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
   return new THREE.Box3().setFromObject(object, true);
 }
 
-function prepareMaterials(root: THREE.Object3D): void {
+/**
+ * Enables vehicle shadows without letting the normalized Stylized shell shadow
+ * itself. That pack's `chassis` is assembled from open, zero-thickness body panels:
+ * its shadow-map back faces occupy the same depth as the visible faces, producing
+ * the diagonal triangle bands seen across roofs and bonnets. The shell still casts
+ * onto the road; only receiving is disabled on that one mesh. Closed wheels,
+ * interior pieces and every Soviet body retain ordinary received shadows.
+ */
+function prepareMaterials(root: THREE.Object3D, stylized = false): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     // Glass is the one surface that must not cast: a window throws a pane-shaped
     // black slab across the interior and the ground, which is the shadow of a
     // wall, not of a window.
     child.castShadow = !materialsOf(child).includes(carGlassMaterial());
-    child.receiveShadow = true;
+    child.receiveShadow = !(stylized && child.name === 'chassis');
     // A pack that authored `doubleSided: true` would otherwise store its LIT face in
     // the sun's depth map (three flips FrontSide to BackSide for the depth pass but
     // leaves DoubleSide alone) and every panel would test against its own depth. The
@@ -867,7 +875,7 @@ function takeOwnWheels(
     wrapper.name = id;
     wrapper.scale.setScalar(s);
     wrapper.add(align);
-    prepareMaterials(wrapper);
+    prepareMaterials(wrapper, def.paintStyle === 'stylized-palette');
     objects.set(id, wrapper);
   }
 
@@ -1079,7 +1087,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
   scene.scale.setScalar(s);
   scene.position.set(-centre.x, -centre.y, -centre.z);
-  prepareMaterials(scene);
+  prepareMaterials(scene, def.paintStyle === 'stylized-palette');
   scene.updateMatrixWorld(true);
   const eyePoint = def.viewPoint
     ? [...def.viewPoint] as [number, number, number]
