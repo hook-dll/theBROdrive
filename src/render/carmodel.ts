@@ -605,26 +605,39 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
 }
 
 /**
- * Enables vehicle shadows without letting the normalized Stylized shell shadow
- * itself. That pack's `chassis` is assembled from open, zero-thickness body panels:
- * its shadow-map back faces occupy the same depth as the visible faces, producing
- * the diagonal triangle bands seen across roofs and bonnets. The shell still casts
- * onto the road; only receiving is disabled on that one mesh. Closed wheels,
- * interior pieces and every Soviet body retain ordinary received shadows.
+ * THE CAR SHADOW CONTRACT: bodywork casts and never receives; wheels do both.
+ *
+ * Both packs author bodywork as ZERO-THICKNESS panels, and a driven instance draws
+ * them DOUBLE-SIDED on purpose — the Soviet shell so its doors are opaque from the
+ * driver's seat (`prepareSovietShellFaces`), the normalized cabin so its roof, seats
+ * and door cards read from inside (`prepareDrivenInteriorFaces`). A double-sided
+ * panel is rasterized into the sun's depth map whichever way it faces, so it stores
+ * ITS OWN surface depth, and three flips the shading normal for a back-facing
+ * fragment — so the very same panel is also lit. It therefore shadows itself at any
+ * bias small enough to keep the car's contact shadow on the sand (2 cm; see
+ * render/sky.ts), which is the banding that appeared across roofs, bonnets and
+ * flanks when that bias was tightened.
+ *
+ * Measured in tools/shadowlab: dropping reception on the bodywork removes the bands
+ * and changes NOTHING else — the ground silhouette is unchanged because the panels
+ * still cast, and the cabin is already dark from the driver's seat with or without
+ * self-shadowing, because no sun reaches it through the shell.
+ *
+ * `bodywork` is a caller's fact, not a mesh-name test: `buildTemplate` passes the
+ * body scene and `takeOwnWheels` the wheel wrappers, so no pack, mesh name or
+ * cabin/shell split can slip past it.
  */
-function prepareMaterials(root: THREE.Object3D, stylized = false): void {
+function prepareMaterials(root: THREE.Object3D, bodywork: boolean): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     // Glass is the one surface that must not cast: a window throws a pane-shaped
     // black slab across the interior and the ground, which is the shadow of a
     // wall, not of a window.
     child.castShadow = !materialsOf(child).includes(carGlassMaterial());
-    child.receiveShadow = !(stylized && child.name === 'chassis');
-    // A pack that authored `doubleSided: true` would otherwise store its LIT face in
-    // the sun's depth map (three flips FrontSide to BackSide for the depth pass but
-    // leaves DoubleSide alone) and every panel would test against its own depth. The
-    // bias that used to hide that was wide enough to eat the car's contact shadow;
-    // it is 2 cm now, so the invariant is stated here instead — see render/sky.ts.
+    child.receiveShadow = !bodywork;
+    // Wheels are closed solids, so their lit face is culled from the depth map and
+    // the depth stored under them is metres away: they can receive safely, and a
+    // wheel darkening under its own arch is worth having.
     for (const material of materialsOf(child)) material.shadowSide = THREE.BackSide;
   });
 }
@@ -875,7 +888,7 @@ function takeOwnWheels(
     wrapper.name = id;
     wrapper.scale.setScalar(s);
     wrapper.add(align);
-    prepareMaterials(wrapper, def.paintStyle === 'stylized-palette');
+    prepareMaterials(wrapper, false);
     objects.set(id, wrapper);
   }
 
@@ -1087,7 +1100,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
   scene.scale.setScalar(s);
   scene.position.set(-centre.x, -centre.y, -centre.z);
-  prepareMaterials(scene, def.paintStyle === 'stylized-palette');
+  prepareMaterials(scene, true);
   scene.updateMatrixWorld(true);
   const eyePoint = def.viewPoint
     ? [...def.viewPoint] as [number, number, number]
