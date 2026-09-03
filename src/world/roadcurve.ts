@@ -95,9 +95,7 @@ const ROUTE_OCTAVES = 2;
 const ROUTE_GAIN = 0.25;
 
 /**
- * AUTHORED TURN SEQUENCES: a real change of bearing, not curvature noise.
- *
- * Each 1.7 km section transitions from one signed bearing to the opposite sign.
+ * Each 1.0 km section transitions from one signed bearing to the opposite sign.
  * Seeded magnitudes vary from 0.22 to 0.52 rad, so even the smallest transition is
  * 0.44 rad / 25.2 degrees and the largest is 1.04 rad / 59.6 degrees. Alternating
  * signs guarantee the turn; seeded timing, angle and radius stop the cadence reading
@@ -107,13 +105,14 @@ const ROUTE_GAIN = 0.25;
  * curvature at both ends. Its maximum derivative is 1.875, so choosing transition
  * length as `1.875 * headingChange * radius` makes the requested 85-140 m peak radius
  * true by construction. The remaining section holds its new bearing as a straight or
- * broad route-driven sweeper.
+ * broad route-driven sweeper; with the shorter sections, those straights are useful
+ * breathing room rather than the dominant character of the road.
  */
-const TURN_SECTION_LENGTH = 1700;
+const TURN_SECTION_LENGTH = 1000;
 const TURN_MIN_HEADING = 0.22;
 const TURN_MAX_HEADING = 0.52;
-const TURN_START_MIN = 250;
-const TURN_START_MAX = 700;
+const TURN_START_MIN = 120;
+const TURN_START_MAX = 300;
 const TURN_RADIUS_MAX = 140;
 const SMOOTHERSTEP_MAX_SLOPE = 1.875;
 
