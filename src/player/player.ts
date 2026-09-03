@@ -363,6 +363,20 @@ export class Player implements Rebasable {
         : this.road.project(x, z, this.arcS).s;
   }
 
+  /** Immediately mirrors a teleport into world state so the next save cannot revive it. */
+  pushState(): void {
+    const p = this.absolutePosition;
+    this.world.apply({
+      t: 'player_move',
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      s: this.arcS,
+    });
+  }
+
   fixedUpdate(dt: number, input: InputFrame, cameraYaw: number): void {
     if (!this.enabled) return;
 
