@@ -654,6 +654,72 @@ function makeWorkingCar(
 }
 
 /**
+ * Layout of one roadside wreck field.
+ *
+ * The old placement drew each body's offsets independently — ±8 m of arclength and
+ * ±6 m of lateral — which says nothing about where the previous body went, so two
+ * 4.6 m cars landing 1 m apart was a routine roll rather than bad luck. Three of
+ * them in a 16x12 m window collide most of the time, and a static shell is a solid
+ * box collider, so the result was a car standing inside another car.
+ *
+ * So a slot is now REJECTION-SAMPLED against the bodies already placed: candidates
+ * come off the same deterministic hash stream with the attempt index mixed in, and
+ * the first one that clears every neighbour by WRECK_CLEARANCE_M is taken. If no
+ * attempt clears — three lorries asked to share one field — the roomiest candidate
+ * wins, so a field always lays out and never loops.
+ *
+ * Separation uses each body's CIRCUMSCRIBED footprint radius, so the test holds at
+ * whatever yaw, roll and sink the slot draws afterwards. Distance is measured in
+ * (arclength, lateral) road coordinates; over a 25 m field the road's curvature
+ * moves that by centimetres.
+ *
+ * The whole field is laid out before anything is built, so a slot's position cannot
+ * depend on whether an earlier working car has already been driven away.
+ */
+const WRECK_CLEARANCE_M = 1.4;
+/** Metres of road the field is strung along, and its lateral spread. */
+const WRECK_S_SPREAD = 26;
+const WRECK_LAT_SPREAD = 12;
+/** Candidate draws per slot before the roomiest one is accepted. */
+const WRECK_PLACEMENT_ATTEMPTS = 12;
+
+export interface WreckSlot {
+  readonly def: CarModelDef;
+  /** Footprint radius, metres: yaw-independent, so the gap holds at any pose. */
+  readonly radius: number;
+  readonly sDelta: number;
+  readonly latDelta: number;
+}
+
+export function layOutWreckField(poi: Poi): WreckSlot[] {
+  const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
+  const slots: WreckSlot[] = [];
+
+  for (let w = 0; w < count; w++) {
+    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
+    const half = carModelMeasure(def.id).halfExtents;
+    const radius = Math.hypot(half[0], half[2]);
+    let chosen = { sDelta: 0, latDelta: 0, margin: -Infinity };
+
+    for (let attempt = 0; attempt < WRECK_PLACEMENT_ATTEMPTS; attempt++) {
+      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * WRECK_S_SPREAD;
+      const latDelta = (hash01(poi.variantSeed, w, 12, attempt) - 0.5) * WRECK_LAT_SPREAD;
+      let margin = Infinity;
+      for (const other of slots) {
+        const gap =
+          Math.hypot(sDelta - other.sDelta, latDelta - other.latDelta) - radius - other.radius;
+        if (gap < margin) margin = gap;
+      }
+      if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
+      if (margin >= WRECK_CLEARANCE_M) break;
+    }
+
+    slots.push({ def, radius, sDelta: chosen.sDelta, latDelta: chosen.latDelta });
+  }
+  return slots;
+}
+
+/**
  * One to three complete models scattered through a roadside wreck field, and rarely
  * one upright slot that is a working car instead of a shell. Both draw from the
  * whole catalogue: a wreck is a state a body is found in, not a class of body, so
@@ -671,7 +737,8 @@ function buildWrecks(
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
   const oz = ctx.originZ;
-  const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
+  const slots = layOutWreckField(poi);
+  const count = slots.length;
 
   const hasWorkingCar =
     hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 0) < WORKING_CAR_CHANCE;
@@ -681,7 +748,7 @@ function buildWrecks(
 
   for (let w = 0; w < count; w++) {
     const isWorkingCar = w === workingSlot;
-    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
+    const def = slots[w]!.def;
     const measure = carModelMeasure(def.id);
     const half = measure.halfExtents;
     const carId = ctx.world.generatedPartId('poi-car', poi.index, w);
@@ -690,8 +757,7 @@ function buildWrecks(
     // rebuild a shell or a second car at its original POI.
     if (isWorkingCar && ctx.world.state.cars[carId]) continue;
 
-    const sDelta = (hash01(poi.variantSeed, w, 11) - 0.5) * 16;
-    const latDelta = (hash01(poi.variantSeed, w, 12) - 0.5) * 12;
+    const { sDelta, latDelta } = slots[w]!;
     const p = groundPoint(ctx, poi, sDelta, latDelta);
 
     const yawRoll = hash01(poi.variantSeed, w, 13);
