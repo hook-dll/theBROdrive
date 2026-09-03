@@ -63,10 +63,15 @@ const ROUGH_FREQ = 0.15;
 const ROUGH_FREQ_HI = 0.3;
 /** Relative amplitude of the 3.33 m octave. */
 const ROUGH_HI_GAIN = 0.78;
-/** Bump amplitude per surface type, metres. */
+/**
+ * Bump amplitude per surface type, metres. Cracked asphalt stays rougher than the
+ * starting mat, but not by the old 2.7x: its 7.5 cm, 3.33 m octave made the
+ * character controller climb a faceted wave every few steps, so the road appeared
+ * to swim under an on-foot camera even though its texture and heat haze were static.
+ */
 const BUMP_AMP: Record<SurfaceType, number> = {
   [SurfaceType.Asphalt]: 0.028,
-  [SurfaceType.CrackedAsphalt]: 0.075,
+  [SurfaceType.CrackedAsphalt]: 0.04,
   // The loose surfaces keep more of it: a gravel track and a rock shelf really are
   // this uneven at a few metres of wavelength, and it is what makes them read as a
   // track rather than a painted road.

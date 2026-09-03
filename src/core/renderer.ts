@@ -157,6 +157,10 @@ const HAZE_SCALE_HEIGHT_M = 8.0;
  * the middle distance, saturated at the horizon.
  */
 const HAZE_REF_PATH_M = 350;
+/** Ground closer than this many metres remains completely free of shimmer. */
+const HAZE_NEAR_CLEAR_M = 30;
+/** Distance by which a descending sight line may receive its full path-based haze. */
+const HAZE_NEAR_FULL_M = 90;
 /**
  * Peak angular displacement, milliradians, at full development.
  *
@@ -266,6 +270,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
 
   const float SCALE_HEIGHT_M = ${glslFloat(HAZE_SCALE_HEIGHT_M)};
   const float REF_PATH_M = ${glslFloat(HAZE_REF_PATH_M)};
+  const float NEAR_CLEAR_M = ${glslFloat(HAZE_NEAR_CLEAR_M)};
+  const float NEAR_FULL_M = ${glslFloat(HAZE_NEAR_FULL_M)};
   const float ANGLE_RAD = ${glslFloat(HAZE_ANGLE_MRAD / 1000)};
   const float LIFT_RAD = ${glslFloat(HAZE_LIFT_MRAD / 1000)};
   const float SAMPLE_RANGE_M = ${glslFloat(HAZE_SAMPLE_RANGE_M)};
@@ -418,8 +424,18 @@ export const HAZE_FRAGMENT = /* glsl */ `
       vec3 dir = worldRay(vUv);
       // Everything the pixel gets follows from how far its ray runs through hot air.
       float path = layerPath(dir) / REF_PATH_M;
-      // Shaped onset rather than the raw random walk: see HAZE_REF_PATH_M.
-      shimmerWeight = uStrength * path * path * (3.0 - 2.0 * path);
+      // A standing player's foreground used to inherit a small but visible fraction
+      // of the horizon warp. A descending ray gives us its approximate ground-hit
+      // distance, so keep the road underfoot rigid and blend shimmer into the middle
+      // distance rather than making the whole ground plane swim.
+      float nearClear = 1.0;
+      if (dir.y < -1e-4) {
+        float groundDistance = uEyeAbove / -dir.y;
+        nearClear = smoothstep(NEAR_CLEAR_M, NEAR_FULL_M, groundDistance);
+      }
+      // Shaped atmospheric onset plus the explicit foreground clear zone.
+      shimmerWeight =
+        uStrength * path * path * (3.0 - 2.0 * path) * nearClear;
       vec2 warp = hazeWarp(dir);
 
       // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
