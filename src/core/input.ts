@@ -199,9 +199,10 @@ function resolveKeys(
 /** Seconds for a digital key to ramp an analogue axis from 0 to 1. */
 const AXIS_RISE = 0.18;
 const AXIS_FALL = 0.3;
-const STEER_RISE = 0.25;
-/** Steering self-centres faster than the player releases, as a real wheel does. */
-const STEER_RETURN = 0.55;
+/** A quick tap corrects a lane; a deliberate half-second hold approaches full lock. */
+const STEER_RISE = 0.45;
+/** Caster returns the input axis faster than it turns in, without snapping to centre. */
+const STEER_RETURN = 0.32;
 /**
  * Exponential smoothing only ever ASYMPTOTES to its target, so a released pedal
  * keeps a residue like 1e-9 forever and a floored one never quite reads 1. Both
@@ -219,29 +220,20 @@ function snapAxis(value: number, target: number): number {
 /**
  * Mouse steering: virtual-wheel travel per CSS pixel of horizontal mouse movement.
  *
- * Deliberately NOT scaled by the look sensitivity. They are different jobs — one
- * aims a camera, the other holds a car in a lane — and sharing a slider means every
- * player who likes a fast view also gets a car that darts.
- *
- * 0.0016 is ~625 px from centre to full lock: a deliberate arm movement rather than
- * a wrist flick, which is what makes a long drive restful instead of a series of
- * corrections. The steering rack's own rate limit (STEER_RATE_* in vehicle.ts) still
- * applies on top.
+ * Deliberately independent of camera sensitivity. Roughly 900 px reaches full
+ * virtual-wheel travel, preventing an ordinary wrist correction from asking the
+ * rack for a large angle. The power curve below adds still more precision near
+ * centre while preserving full lock at the end of the sweep.
  */
-const MOUSE_STEER_GAIN = 0.0016;
+const MOUSE_STEER_GAIN = 0.0011;
 /**
  * Exponent on the virtual wheel's own travel.
  *
- * The accumulator stays LINEAR — it has to, or the idle return and the keyboard
- * handover would both fight the curve — and the exponent is applied on the way out.
- * At 2.0 the first tenth of the wheel is a hundredth of the lock, so the small
- * corrections that hold a lane are nearly free, while full lock is still full lock
- * at the end of the same sweep.
- *
- * This is the difference between "the car twitches when I breathe" and a car you can
- * aim down a straight with your hand resting on the desk.
+ * The accumulator stays linear for predictable return and keyboard handover; only
+ * the emitted axis is curved. At 2.2, 20% wheel travel requests less than 3% steer,
+ * giving mouse users a broad lane-holding region rather than an on/off centre.
  */
-const MOUSE_STEER_EXPO = 2.0;
+const MOUSE_STEER_EXPO = 2.2;
 /**
  * Time constant, seconds, for the virtual wheel drifting back to centre while the
  * mouse is NOT moving.

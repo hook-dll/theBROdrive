@@ -1,17 +1,20 @@
 import type { GraphicsQuality } from '../game/settings';
 
 const MIN_SCALE: Record<GraphicsQuality, number> = {
-  acceptable: 0.5,
-  standard: 0.85,
-  blessing: 1,
+  acceptable: 0.4,
+  standard: 0.55,
+  blessing: 0.7,
 };
-const SLOW_GPU_MS = 19;
-const FAST_GPU_MS = 13;
-const SLOW_SAMPLE_COUNT = 24;
-const FAST_SAMPLE_COUNT = 120;
-const SCALE_STEP_DOWN = 0.8;
-const SCALE_STEP_UP = 1.05;
-const CHANGE_COOLDOWN_MS = 2_000;
+// Eleven milliseconds leaves real headroom under a 16.7 ms presentation interval.
+// The old 19 ms threshold reacted only after 60 Hz was already being missed, which
+// is why GPU-bound frames arrived as 16/24/32/48 ms multiples on fast displays.
+const SLOW_GPU_MS = 11;
+const FAST_GPU_MS = 7;
+const SLOW_SAMPLE_COUNT = 8;
+const FAST_SAMPLE_COUNT = 240;
+const SCALE_STEP_DOWN = 0.85;
+const SCALE_STEP_UP = 1.03;
+const CHANGE_COOLDOWN_MS = 1_500;
 
 /**
  * Applies conservative, GPU-measured dynamic-resolution adjustments for one quality
@@ -45,7 +48,7 @@ export class AdaptiveResolutionController {
     allowUpscale: boolean,
     nowMs: number,
   ): 'down' | 'up' | null {
-    if (gpuMs === null || !eligible || this.quality === 'blessing') {
+    if (gpuMs === null || !eligible) {
       this.resetStreaks();
       return null;
     }

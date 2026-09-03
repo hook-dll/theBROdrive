@@ -301,7 +301,9 @@ async function boot(): Promise<void> {
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
-  const worldWork = new WorldWorkScheduler(3);
+  // One streaming unit per rendered frame prevents road and desert attachment from
+  // stacking into the periodic 3-4 ms main-thread spikes visible on fast displays.
+  const worldWork = new WorldWorkScheduler(3, 1);
   const desert = new DesertTileStreamer(
     world.seed,
     road,
@@ -1020,8 +1022,16 @@ async function boot(): Promise<void> {
       desertZ = p.z;
       desertLateral = projection.lateral;
     }
-    streamer.update(activeS, frameId, desertLateral);
-    desert.update(desertX, desertZ, desertLateral, frameId);
+    // Fairly alternate first access to the one-job frame budget. Road remains first
+    // on one frame and desert on the next; an idle subsystem consumes nothing, so
+    // the other still proceeds without delay.
+    if ((frameId & 1) === 0) {
+      streamer.update(activeS, frameId, desertLateral);
+      desert.update(desertX, desertZ, desertLateral, frameId);
+    } else {
+      desert.update(desertX, desertZ, desertLateral, frameId);
+      streamer.update(activeS, frameId, desertLateral);
+    }
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
 
     // Props that come apart. The car is the only thing heavy enough to do it, so the
@@ -1217,7 +1227,10 @@ async function boot(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
-      !worldWork.hasPending && !worldWork.workedThisFrame && !rebasedThisFrame,
+      driving === null &&
+        !worldWork.hasPending &&
+        !worldWork.workedThisFrame &&
+        !rebasedThisFrame,
     );
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
@@ -1381,15 +1394,11 @@ async function boot(): Promise<void> {
       frameDt,
     );
 
-    // Resolution tracks only idle GPU work. Streaming, origin rebases, and PMREM
-    // rebakes are CPU/probe hitches rather than evidence that the scene needs less
-    // resolution; changing quality from those frames would make the controller chase
-    // unrelated work.
-    const adaptationEligible =
-      !worldWork.hasPending &&
-      !worldWork.workedThisFrame &&
-      !rebasedThisFrame &&
-      !sky.didBakeEnvironmentThisFrame;
+    // GPU timer queries measure only the render submission, so CPU streaming work
+    // cannot contaminate them. Excluding every frame while the stream had pending
+    // work disabled adaptation throughout normal driving — exactly when sustained
+    // GPU overload needed it. Only a PMREM bake is a different GPU workload.
+    const adaptationEligible = !sky.didBakeEnvironmentThisFrame;
     renderer.adaptResolution(adaptationEligible, driving === null);
     rebasedThisFrame = false;
     renderer.setHazeStrength(sky.dayFactor);

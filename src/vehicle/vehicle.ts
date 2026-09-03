@@ -81,28 +81,26 @@ const GRAVITY = 9.81;
 
 
 /** Steering input shaping exponent: |s|^p with p>1 compresses small deflections. */
-const STEER_INPUT_EXPONENT = 1.35;
+const STEER_INPUT_EXPONENT = 1.55;
 /** Max rate of steering-angle change at parking speed (rad/s). */
-const STEER_RATE_PARK_RAD_S = 2.8;
+const STEER_RATE_PARK_RAD_S = 2.0;
 /** Max rate of steering-angle change at highway speed (rad/s). */
-const STEER_RATE_HIGHWAY_RAD_S = 0.68;
+const STEER_RATE_HIGHWAY_RAD_S = 0.5;
 /** Below this speed (km/h) the full steering lock is available. */
 const STEER_FULL_LOCK_KMH = 20;
 /** At this speed (km/h) steering reaches its reduced floor. */
 const STEER_REDUCED_KMH = 100;
 /**
- * Fraction of full lock retained at STEER_REDUCED_KMH. Was 0.15, which quietly
- * did the job of a stability program: the car simply refused to be asked for a
- * bad angle. At 0.42 the driver keeps the authority to provoke a slide, and the
- * slow rack below is what stops it being a twitch.
+ * Fraction of full lock retained at STEER_REDUCED_KMH. Enough remains for an
+ * intentional slide, but an ordinary key tap cannot demand cornering lock at speed.
  */
-const STEER_HIGH_SPEED_FRACTION = 0.5;
+const STEER_HIGH_SPEED_FRACTION = 0.44;
 /**
- * Shape of the lock-vs-speed curve: fraction = 1 - (1-floor) * t^k with
- * t = (kmh - full)/(reduced - full). k < 1 front-loads the loss just above the
- * full-lock speed and then flattens out.
+ * Lock falls progressively with speed. The old 0.161 exponent discarded almost
+ * half the available steering by 50 km/h, so slowing before a turn barely changed
+ * wheel angle and felt like permanent understeer.
  */
-const STEER_LOCK_CURVE = 0.161;
+const STEER_LOCK_CURVE = 1.0;
 /** Same curve shape drives the rate-limit blend between the two speeds above. */
 const STEER_RATE_CURVE = 1.6;
 /**
@@ -307,28 +305,12 @@ const REAR_AXLE_SIDE_GRIP = 0.95;
  * costing anything at the angles a save is made at.
  */
 /**
- * PEAK ANGLE IS CORNERING STIFFNESS, now that the curve makes a real force.
- *
- * The shape rises as a quarter sine to its peak, so a smaller peak angle means a
- * steeper rise: the axle builds its side force in fewer degrees. That is exactly
- * cornering stiffness, and the RATIO of the two axles' stiffness is what decides
- * whether a car is stable in a straight line or wags its tail.
- *
- * The rear peaks EARLIER than the front (6 against 8 degrees). Reported from play
- * with both at 8: the rear end wagged slowly from side to side "like swatting flies
- * with it". That is the classic yaw limit cycle of a car whose rear axle is softer
- * than its front — the rear was carrying REAR_AXLE_SIDE_GRIP and REAR_SPEED_LOSS_GAIN
- * against an identical stiffness, so every yaw disturbance grew a little before the
- * tyres caught it. A constraint could not show this: cancelling lateral velocity
- * outright is infinitely stiff and an infinitely stiff axle cannot oscillate, which
- * is why the deficit was invisible for as long as Rapier owned the channel.
- *
- * Stiffer at the rear and still LOWER in ultimate capacity is the combination that
- * gives both halves of the target: understeer gradient positive in normal driving, so
- * the car tracks; the rear the first to reach its peak and let go, so the tail is
- * still the end that goes when the corner is overcooked.
+ * Peak slip angles encode axle cornering stiffness. Rear tyres remain slightly
+ * stiffer near centre for straight-line stability, but the old 8° front against 6°
+ * rear made the front roughly 25% softer and every car ploughed regardless of speed.
+ * A 6.6° front peak retains mild understeer without making it the only handling state.
  */
-const SLIP_PEAK_FRONT_DEG = 8;
+const SLIP_PEAK_FRONT_DEG = 6.6;
 const SLIP_PEAK_REAR_DEG = 6;
 /**
  * Sharpness of the rise to peak: `tanh(k · a/a_peak) / tanh(k)`.
@@ -354,6 +336,13 @@ const SLIP_FULL_REAR_DEG = 22;
 /** Side grip retained on the plateau, as a fraction of the axle's peak. */
 const SLIP_PLATEAU_FRONT = 0.8;
 const SLIP_PLATEAU_REAR = 0.8;
+/**
+ * Loose ground does not gain this extra resistance until a tyre is genuinely
+ * travelling sideways. Below the start it still has only its ordinary cornering
+ * coefficient; by the full speed it is ploughing a bank of material.
+ */
+const DEFORMATION_DRAG_START_MPS = 1.5;
+const DEFORMATION_DRAG_FULL_MPS = 8;
 /** Contact speed (m/s) floor in the slip-angle denominator, to keep it finite at rest. */
 const SLIP_ANGLE_REF_MPS = 2;
 /**
@@ -368,24 +357,12 @@ const SLIP_ANGLE_REF_MPS = 2;
  */
 const REAR_SPEED_LOSS_GAIN = 1.2;
 /**
- * Peak lateral μ on dry asphalt, as a coefficient of the tyre's normal load.
- *
- * This is a real coefficient now, not a constraint gain: side force is
- * `LATERAL_MU · surface.sideFriction · load · shape(slip angle)`, so 0.85 means an
- * evenly loaded car makes 0.85 g at the peak angle before any of the authored
- * losses below (speed falloff, rear axle, slide, load sensitivity) are applied. A
- * period cross-ply on a 1970s road is 0.7-0.8 g in steady state, which is where the
- * losses put it.
- *
- * Why the number matters more than it looks: with the curve peaking at
- * SLIP_PEAK_*_DEG, the slip angle a corner actually runs is set by the RATIO of
- * demand to this coefficient. At 0.7 g a tyre needs 0.82 of its peak, which the
- * quarter-sine reaches at 0.63 of the peak angle — about five degrees. That is the
- * 4-6 degrees the slip-angle block has always claimed and Rapier's constraint never
- * delivered: it ran 1.2-1.4 degrees, because a velocity-cancelling constraint has no
- * curve under it at all.
+ * Peak lateral coefficient on dry asphalt before load, speed and axle modifiers.
+ * Surface multipliers are normalized with asphalt = 1, so this carries the absolute
+ * road coefficient previously split between `LATERAL_MU` and asphalt's misleading
+ * `sideFriction: 2`.
  */
-const LATERAL_MU = 0.85;
+const LATERAL_MU = 1.7;
 /**
  * Forward speed (m/s) below which a tyre may spend its whole lateral capacity on
  * holding rather than on a slip-angle curve. A shade under walking pace: fast enough
@@ -483,59 +460,59 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     tyreRelaxationLength: 0.45,
   },
   road: {
-    steerInputExponent: 1.2,
-    steerRatePark: 3.6,
-    steerRateHighway: 1.05,
-    steerHighSpeedFraction: 0.56,
-    steerLockCurve: 0.22,
+    steerInputExponent: 1.5,
+    steerRatePark: 2.5,
+    steerRateHighway: 0.72,
+    steerHighSpeedFraction: 0.48,
+    steerLockCurve: 1.0,
     steerPlay: 0.006,
     casterReturn: 1.7,
     bumpSteer: 0.009,
     drivelineLag: 0.055,
     lateralGripFraction: 0.36,
-    lateralMu: 0.92,
+    lateralMu: 1.84,
     lateralGripMaxLoss: 0.13,
     rearSpeedLossGain: 1.05,
     rearAxleSideGrip: 0.985,
-    slipPeakFrontDeg: 6.5,
+    slipPeakFrontDeg: 5.9,
     slipPeakRearDeg: 5.5,
     tyreRelaxationLength: 0.28,
   },
   sport: {
-    steerInputExponent: 1.12,
-    steerRatePark: 4.5,
-    steerRateHighway: 1.45,
-    steerHighSpeedFraction: 0.62,
-    steerLockCurve: 0.28,
+    steerInputExponent: 1.45,
+    steerRatePark: 3.1,
+    steerRateHighway: 0.9,
+    steerHighSpeedFraction: 0.52,
+    steerLockCurve: 1.1,
     steerPlay: 0.003,
     casterReturn: 2.1,
     bumpSteer: 0.005,
     drivelineLag: 0.035,
     lateralGripFraction: 0.39,
-    lateralMu: 1.0,
+    lateralMu: 2.0,
     lateralGripMaxLoss: 0.08,
     rearSpeedLossGain: 1.02,
     rearAxleSideGrip: 0.99,
-    slipPeakFrontDeg: 5.5,
+    slipPeakFrontDeg: 5.25,
     slipPeakRearDeg: 5,
     tyreRelaxationLength: 0.2,
   },
   utility: {
-    steerInputExponent: 1.25,
-    steerRatePark: 3.1,
-    steerRateHighway: 0.82,
-    steerHighSpeedFraction: 0.52,
-    steerLockCurve: 0.18,
+    steerInputExponent: 1.5,
+    steerRatePark: 2.2,
+    steerRateHighway: 0.62,
+    steerHighSpeedFraction: 0.46,
+    steerLockCurve: 0.9,
     steerPlay: 0.012,
     casterReturn: 1.45,
     bumpSteer: 0.016,
     drivelineLag: 0.075,
     lateralGripFraction: 0.34,
-    lateralMu: 0.82,
+    lateralMu: 1.64,
     lateralGripMaxLoss: 0.18,
     rearSpeedLossGain: 1.1,
     rearAxleSideGrip: 0.97,
-    slipPeakFrontDeg: 7.5,
+    slipPeakFrontDeg: 7,
     slipPeakRearDeg: 6.5,
     tyreRelaxationLength: 0.38,
   },
@@ -4013,6 +3990,42 @@ export class Vehicle implements Rebasable {
           // right are orthogonal unit vectors in the ground plane. Summed over the
           // wheels this is the car's yaw damping.
           this.alignTorqueImpulse -= PNEUMATIC_TRAIL_M * impulse;
+        }
+
+        // LOOSE-SURFACE PLOUGHING. Cornering grip stays low on sand, but a tyre
+        // travelling substantially sideways builds a bank of material against its
+        // sidewall. That force is drag, not extra steering grip: it wakes only at
+        // large lateral speed and cannot reverse the slide within this step.
+        //
+        // Apply it at the real contact patch rather than the COM-height point above.
+        // The low application point is the trip mechanism of a broadside sand skid:
+        // the vehicle sheds energy quickly and the body can carry on over the tyres.
+        const deformationDrag = SURFACES[w.groundSurface].deformationDrag;
+        if (deformationDrag > 0 && magnitude < stopImpulse) {
+          const deformationT = clamp(
+            (Math.abs(w.lateralSpeed) - DEFORMATION_DRAG_START_MPS) /
+              (DEFORMATION_DRAG_FULL_MPS - DEFORMATION_DRAG_START_MPS),
+            0,
+            1,
+          );
+          const smoothDeformationT =
+            deformationT * deformationT * (3 - 2 * deformationT);
+          const deformationMagnitude = Math.min(
+            stopImpulse - magnitude,
+            w.loadN * deformationDrag * smoothDeformationT * dt,
+          );
+          const deformationImpulse =
+            -Math.sign(w.lateralSpeed) * deformationMagnitude;
+          if (deformationImpulse !== 0) {
+            this.tyreImpulse.x = w.lateralRightX * deformationImpulse;
+            this.tyreImpulse.y = w.lateralRightY * deformationImpulse;
+            this.tyreImpulse.z = w.lateralRightZ * deformationImpulse;
+            this.chassisBody.applyImpulseAtPoint(
+              this.tyreImpulse,
+              w.contactPoint,
+              false,
+            );
+          }
         }
       }
 

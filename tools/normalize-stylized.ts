@@ -26,7 +26,7 @@ import { basename, dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CAR_MODELS, type CarModelDef } from '../src/vehicle/carmodels';
 
 globalThis.document ??= {
@@ -122,12 +122,20 @@ function appendTriangle(
   bucket.triangles++;
 }
 
-function geometryOf(bucket: Bucket): THREE.BufferGeometry {
+/**
+ * Rebuilds one normalized mesh. The source pack stores flat face normals even on
+ * shallowly curved coachwork, exposing every triangulation edge as a dark wedge.
+ * Average only chassis faces meeting below 35 degrees: broad doors, wings, bonnet
+ * and roof become continuous while deliberate creases, panel breaks and lamp
+ * pockets retain their authored hard edges.
+ */
+function geometryOf(bucket: Bucket, smoothChassis: boolean): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.position, 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normal, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uv, 2));
-  const indexed = mergeVertices(geometry, 1e-4);
+  const withNormals = smoothChassis ? toCreasedNormals(geometry, THREE.MathUtils.degToRad(35)) : geometry;
+  const indexed = mergeVertices(withNormals, 1e-4);
   indexed.computeBoundingBox();
   indexed.computeBoundingSphere();
   return indexed;
@@ -138,7 +146,7 @@ function paletteMaterial(name = 'PixelColors'): THREE.MeshStandardMaterial {
 }
 
 function meshOf(name: OutputName, bucket: Bucket, material: THREE.Material): THREE.Mesh {
-  const mesh = new THREE.Mesh(geometryOf(bucket), material);
+  const mesh = new THREE.Mesh(geometryOf(bucket, name === 'chassis'), material);
   mesh.name = name;
   return mesh;
 }

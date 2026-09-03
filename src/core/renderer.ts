@@ -67,23 +67,21 @@ const MAX_DEPTH_RATIO = 160000;
 export const CAMERA_BASE_FOV = 65;
 
 /**
- * Internal-resolution scale relative to the display's native backing resolution.
- *
- * The previous implementation used `min(devicePixelRatio, tierCap)`. That can
- * never exceed native DPR, so Standard and Blessing were literally identical on
- * common DPR-1 and DPR-1.25 displays. Tiers are multipliers instead:
- * Acceptable is visibly cheaper, Standard is native, Blessing is 2x per axis.
+ * Internal-resolution scale relative to native backing resolution. Blessing keeps
+ * modest supersampling rather than the old 2x-per-axis target: combined with 4x
+ * MSAA and the fullscreen ink/haze pass that target shaded and resolved sixteen
+ * samples per display pixel, enough to miss presentation intervals even on a 4090.
  */
 const PIXEL_RATIO_SCALE: Record<GraphicsQuality, number> = {
   acceptable: 0.6,
   standard: 1,
-  blessing: 2,
+  blessing: 1.25,
 };
 /** Absolute guard against pathological browser DPR values and oversized targets. */
 const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
   acceptable: 1,
   standard: 2,
-  blessing: 3,
+  blessing: 2.5,
 };
 /**
  * Four samples was the only useful multisampling level in measurement: 2x retained

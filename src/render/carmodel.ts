@@ -448,20 +448,15 @@ function readPaletteImage(url: string, texture: THREE.Texture): void {
 }
 
 /**
- * One car's palette: the pack's own image with this body's coachwork ramp rebuilt
- * in `color`.
+ * One car's palette with its coachwork cells rebuilt as one factory colour.
  *
- * Each shade keeps its LUMINANCE RATIO against the ramp's key shade, which is what
- * carries the pack's hand-drawn shading into every factory colour: the key shade
- * becomes the colour asked for, brighter shades stay highlights, and the near-black
- * end of a long ramp — window rubbers, shut lines, shadow under a wing — stays
- * near-black instead of turning into a second body colour.
+ * The source ramp bakes broad light and dark bands into different polygons. Once
+ * the game supplies real lights and smooth normals those bands become false
+ * two-tone paint, not shading. Every coloured paint texel therefore receives the
+ * exact target colour; only the ramp's near-black cells remain authored because
+ * they carry shut lines, window rubbers and deep recesses rather than coachwork.
  *
- * Only the ramp is touched, so glass, chrome, lamps, decals and the tyres on the
- * detached wheels (which keep the pack's untouched material) are all preserved.
- *
- * Null when the palette could not be decoded — a headless bench, per
- * `readPaletteImage` — in which case the car keeps the pack's authored colour.
+ * Null when the palette cannot be decoded (headless geometry/physics benches).
  */
 function repaintedPalette(def: CarModelDef, color: THREE.Color): THREE.Texture | null {
   const url = def.textureFile;
@@ -485,10 +480,13 @@ function repaintedPalette(def: CarModelDef, color: THREE.Color): THREE.Texture |
   color.getRGB(paintRGB, THREE.SRGBColorSpace);
   const keyLuma = Math.max(1, paletteLuma(pixels, ramp.column, ramp.keyRow));
   for (let row = ramp.row; row < ramp.row + ramp.rows; row++) {
-    const factor = paletteLuma(pixels, ramp.column, row) / keyLuma;
-    const r = Math.min(255, Math.round(paintRGB.r * 255 * factor));
-    const g = Math.min(255, Math.round(paintRGB.g * 255 * factor));
-    const b = Math.min(255, Math.round(paintRGB.b * 255 * factor));
+    const relativeLuma = paletteLuma(pixels, ramp.column, row) / keyLuma;
+    // Keep only genuinely dark trim/recess cells. Every painted shade is flattened
+    // to one albedo and gets its brightness from scene lighting.
+    if (relativeLuma < 0.28) continue;
+    const r = Math.round(paintRGB.r * 255);
+    const g = Math.round(paintRGB.g * 255);
+    const b = Math.round(paintRGB.b * 255);
     for (let column = ramp.column; column < ramp.column + ramp.columns; column++) {
       const i = (row * source.width + column) * 4;
       pixels.data[i] = r;

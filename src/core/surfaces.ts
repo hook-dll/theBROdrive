@@ -20,12 +20,19 @@ export const enum SurfaceType {
 
 export interface SurfaceProps {
   readonly label: string;
-  /** Forward traction. Higher = tyre bites harder before slipping. */
+  /** Longitudinal grip relative to a normal dry-road tyre budget. */
   readonly frictionSlip: number;
-  /** Lateral grip multiplier. Low values let the tail step out. */
+  /** Lateral grip relative to dry asphalt, where asphalt is exactly 1. */
   readonly sideFriction: number;
   /** Speed-independent drag, as a fraction of vehicle weight. */
   readonly rollingResistance: number;
+  /**
+   * Extra lateral resistance from loose material piling against a tyre at large
+   * sideslip, as a fraction of wheel load. Unlike cornering grip, this is dormant
+   * while rolling normally and acts at the contact patch, so a broadside skid both
+   * sheds speed and can trip the vehicle.
+   */
+  readonly deformationDrag: number;
   /** Amplitude in metres of the micro-bumps baked into the collider mesh. */
   readonly roughness: number;
   /**
@@ -114,9 +121,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Asphalt]: {
     label: 'asphalt',
     frictionSlip: 2.6,
-    // Road-only steering experiment: twice the previous lateral tyre force.
-    sideFriction: 2.0,
+    sideFriction: 1.0,
     rollingResistance: 0.013,
+    deformationDrag: 0,
     roughness: 0.012,
     microRelief: 0,
     hummock: 0,
@@ -129,9 +136,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
     frictionSlip: 2.2,
-    // Retains cracked asphalt's 84% relationship to sound asphalt.
-    sideFriction: 1.68,
+    sideFriction: 0.84,
     rollingResistance: 0.018,
+    deformationDrag: 0,
     roughness: 0.06,
     microRelief: 0,
     hummock: 0,
@@ -144,8 +151,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Gravel]: {
     label: 'gravel',
     frictionSlip: 1.35,
-    sideFriction: 0.5,
+    sideFriction: 0.25,
     rollingResistance: 0.035,
+    deformationDrag: 0,
     roughness: 0.09,
     // Gravel is the ROUGHEST ground in the game, and it used to be quieter than sand:
     // 7 mm against sand's 18. A graded track corrugates under its own traffic —
@@ -161,32 +169,15 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Sand]: {
     label: 'sand',
     /**
-     * FORWARD traction, and the highest of the loose surfaces on purpose — higher than
-     * gravel, which reads wrong until you ask what the tyre is doing. A tyre on gravel
-     * shears a thin layer of stones over hardpan. A tyre on sand sinks in and builds a
-     * wedge of material ahead of the contact patch, and pushes against that. Forward,
-     * sand gives; sideways it gives up completely, which is what `sideFriction` says.
-     *
-     * The number is set by a reachability budget, not by making sand conveniently
-     * grippy: `frictionSlip * LONGITUDINAL_GRIP_FRACTION` is longitudinal mu, and a
-     * stopped car's pull-away grade is
-     * `(mu * drivenShare - rollingResistance) / (1 -/+ mu * h/L)`.
-     *
-     * At 1.15, tools/desert-ride.ts finds only 1.1% of sampled RWD headings and 1.7%
-     * of FWD headings blocked, with no sampled location stranded in every direction.
-     * That preserves deliberate exploration while making momentum and route choice
-     * matter. The previous 1.35 let a two-wheel-drive road car climb one-in-five sand
-     * slopes from rest and made leaving the road too cheap.
-     *
-     * Forward grip remains high enough to preserve escapability; the distinction from
-     * the road is carried by a lower lateral coefficient and sustained bulldozing drag.
-     * The latter is deliberately stronger than the old 0.075: engine-limited cars could
-     * otherwise accelerate almost identically on asphalt and sand despite different
-     * peak tyre capacity.
+     * Forward traction stays high enough that ordinary cars are not irrecoverably
+     * stranded between dunes. Lateral grip is a separate ratio: loose sand retains
+     * only a tenth of asphalt's cornering force, so leaving the road requires slow,
+     * momentum-conscious steering rather than behaving like a wide paved shoulder.
      */
     frictionSlip: 1.15,
-    sideFriction: 0.34,
+    sideFriction: 0.1,
     rollingResistance: 0.095,
+    deformationDrag: 0.55,
     roughness: 0.05,
     // Wind ripple, and the long hummocks under the geometry's own ~10 m corrugation
     // crests. Sand gives under load, so its ripple is softer than gravel's chatter
@@ -202,8 +193,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Rock]: {
     label: 'rock',
     frictionSlip: 2.1,
-    sideFriction: 0.8,
+    sideFriction: 0.4,
     rollingResistance: 0.022,
+    deformationDrag: 0,
     roughness: 0.13,
     // Broken rock chatters rather than ripples, and a shelf is never flat.
     microRelief: 0.024,
@@ -216,8 +208,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Concrete]: {
     label: 'concrete',
     frictionSlip: 2.5,
-    sideFriction: 0.98,
+    sideFriction: 0.96,
     rollingResistance: 0.012,
+    deformationDrag: 0,
     roughness: 0.006,
     microRelief: 0,
     hummock: 0,
