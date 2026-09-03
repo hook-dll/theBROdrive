@@ -13,10 +13,14 @@ import * as THREE from 'three';
  *
  * SHADER PERMUTATIONS. Three keys every lit material's program on the count of
  * *visible* lights, so changing that count recompiles the world (see the dusk hitch
- * documented in render/lights.ts). Two rules keep that off the frame budget:
+ * documented in render/lights.ts). Some GPU drivers also specialize the first
+ * executed program around an exactly-zero light contribution, causing a multi-
+ * second hitch when a slot first becomes nonzero. Two rules keep both costs off
+ * the driving frame:
  *
- *  - Slots are lit by INTENSITY alone. Unclaimed slots stay in the scene at zero,
- *    so cycling headlights, braking or driving away is a plain uniform write.
+ *  - Slots are lit by INTENSITY alone. Unclaimed slots stay in the scene at a
+ *    visually black, nonzero intensity, so cycling headlights, braking or driving
+ *    away remains a uniform write without a zero-to-lit driver specialization.
  *  - The pool only ever GROWS, and only when demand exceeds it. The initial block
  *    covers one fully lit car (two headlights, two tail lamps, two reversing lamps)
  *    — today's cost, unchanged for the overwhelmingly common case. A second lit car
@@ -28,6 +32,8 @@ import * as THREE from 'three';
 const INITIAL_SLOT_COUNT = 6;
 /** Growth granularity: one lamp pair, so a second lit car does not overshoot. */
 const GROWTH_BLOCK = 2;
+/** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
+const DORMANT_INTENSITY = 1e-8;
 /**
  * Hard ceiling. Beyond this the per-fragment cost of the forward-lighting loop is
  * indefensible on any machine, and a WebGL uniform budget is a real wall rather
@@ -95,9 +101,11 @@ export class VehicleLightRig {
     return true;
   }
 
-  /** Darkens every slot no lamp claimed this frame. */
+  /** Makes every unclaimed slot visually dark without returning to exact zero. */
   endFrame(): void {
-    for (let i = this.used; i < this.lights.length; i++) this.lights[i].intensity = 0;
+    for (let i = this.used; i < this.lights.length; i++) {
+      this.lights[i].intensity = DORMANT_INTENSITY;
+    }
   }
 
   clear(): void {
@@ -115,7 +123,7 @@ export class VehicleLightRig {
 
   private grow(count: number): void {
     for (let i = 0; i < count; i++) {
-      const light = new THREE.SpotLight(0xffffff, 0);
+      const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;
       this.scene.add(light, light.target);
       this.lights.push(light);

@@ -13,11 +13,7 @@ import {
   carSpawnYAboveGround,
   createStaticCarModel,
 } from '../render/carmodel';
-import {
-  SPAWNABLE_CAR_MODELS,
-  WRECK_ONLY_CAR_MODELS,
-  type CarModelDef,
-} from '../vehicle/carmodels';
+import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import { jobAt, type FreightField } from './freight';
@@ -332,10 +328,11 @@ function makeFluidCan(
  * cans for the engine fluids, because that is how they are sold.
  *
  * The petrol/diesel split is matched to the CATALOGUE, not chosen for flavour. Of
- * the 24 bodies, 4 run on diesel — the PSX estate, van and box truck, and the
- * Quaternius off-roader — so roughly one car in six is a diesel. Cars are found
- * rather than spawned now, and the wreck pool draws from the whole catalogue, so
- * that one-in-six is the real exposure a player has.
+ * the 46 bodies, 8 run on diesel — the two Land-Rover-shaped utilities, three of
+ * the five vans, the ambulance, the bullion van and the fire engine, plus the
+ * tractor unit — so roughly one car in six is a diesel. Cars are found rather than
+ * spawned, and the wreck pool draws from the whole catalogue, so that one-in-six is
+ * the real exposure a player has.
  *
  * The first cut had diesel at 0.26 against petrol's 0.40, which oversupplied it
  * about two to one: a quarter of every can in the desert would have been unusable
@@ -657,9 +654,10 @@ function makeWorkingCar(
 }
 
 /**
- * One to three complete models scattered through a roadside wreck field. Every
- * shell draws from the full catalogue. Rarely, one upright slot instead becomes a
- * working car drawn only from the Quaternius and Soviet roadworthy pool.
+ * One to three complete models scattered through a roadside wreck field, and rarely
+ * one upright slot that is a working car instead of a shell. Both draw from the
+ * whole catalogue: a wreck is a state a body is found in, not a class of body, so
+ * the same car you can drive is the one you find sunk in the sand beside it.
  */
 function buildWrecks(
   ctx: ChunkContext,
@@ -683,10 +681,7 @@ function buildWrecks(
 
   for (let w = 0; w < count; w++) {
     const isWorkingCar = w === workingSlot;
-    // Working finds are roadworthy; ordinary shells come from the wreck-only
-    // catalogue so the debris models cannot disappear behind random spawnable picks.
-    const pool = isWorkingCar ? SPAWNABLE_CAR_MODELS : WRECK_ONLY_CAR_MODELS;
-    const def: CarModelDef = pick(pool, poi.variantSeed, w, 10);
+    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
     const measure = carModelMeasure(def.id);
     const half = measure.halfExtents;
     const carId = ctx.world.generatedPartId('poi-car', poi.index, w);

@@ -30,7 +30,7 @@ import {
 installAssetShim();
 
 const ids = process.argv.slice(2);
-const DEFAULT_IDS = ['sv_vaz2101', 'psx_saloon', 'psx_cruiser', 'lp_pickup', 'proc_wedge'];
+const DEFAULT_IDS = ['sv_vaz2101', 'st_big_saloon', 'st_mid_engine_v8', 'st_v8_pickup', 'st_tractor_unit'];
 
 function pad(value: string | number, width: number): string {
   return String(value).padStart(width);

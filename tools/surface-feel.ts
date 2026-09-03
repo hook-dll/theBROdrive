@@ -44,6 +44,7 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { roadSurfaceY, SURFACE_STEP, SurfaceField } from '../src/world/roadsurface';
 import { Terrain } from '../src/world/terrain';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
+import { installAssetShim } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -57,9 +58,12 @@ class BunProgressEvent extends Event implements ProgressEvent {
   }
 }
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
+// Every catalogue model is an imported body now, so the bench loads real FBX files
+// off disk rather than building its car in code.
+installAssetShim();
 
 const SEED = 42;
-const MODEL_ID = 'proc_wedge';
+const MODEL_ID = 'st_mid_engine_v8';
 /** Chunk span driven. Matches desert-ride.ts so the two benches describe one place. */
 const FROM_CHUNK = 120;
 const TO_CHUNK = 126;

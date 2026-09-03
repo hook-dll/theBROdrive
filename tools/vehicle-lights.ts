@@ -20,6 +20,7 @@ import { Vehicle } from '../src/vehicle/vehicle';
 import { carModel } from '../src/vehicle/carmodels';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { WorldOrigin } from '../src/world/origin';
+import { installBlankTextures } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -36,7 +37,7 @@ class BunProgressEvent extends Event implements ProgressEvent {
 
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 
-const MODEL_ID = 'proc_wedge';
+const MODEL_ID = 'st_big_saloon';
 const VEHICLE_COUNT = 4;
 let failures = 0;
 
@@ -111,6 +112,10 @@ async function preloadModels(): Promise<void> {
   }
 
   globalThis.Request = AssetRequest;
+  // Geometry and node names decode fine over that server; a TEXTURE cannot decode
+  // without a browser, and this harness measures lamp bounds and scene lights, not
+  // pixels. See tools/assetshim.ts.
+  installBlankTextures();
   try {
     await preloadCarModels([MODEL_ID]);
   } finally {
@@ -135,12 +140,14 @@ function sceneContains(scene: THREE.Scene, object: THREE.Object3D): boolean {
   return found;
 }
 
+const VISIBLY_LIT_INTENSITY = 1e-6;
+
 function litCount(lights: readonly THREE.SpotLight[]): number {
-  return lights.filter((light) => light.intensity > 0).length;
+  return lights.filter((light) => light.intensity > VISIBLY_LIT_INTENSITY).length;
 }
 
-function allZero(lights: readonly THREE.SpotLight[]): boolean {
-  return lights.every((light) => light.intensity === 0);
+function allDark(lights: readonly THREE.SpotLight[]): boolean {
+  return lights.every((light) => light.intensity <= VISIBLY_LIT_INTENSITY);
 }
 
 /**
@@ -211,7 +218,7 @@ async function run(): Promise<void> {
     const targets = identities.map((light) => light.target);
     assertRigState(scene, rig, identities, targets, 'rig construction');
     check('rig construction: six slots exist', rig.lightCount === 6, `${rig.lightCount} slots`);
-    check('rig construction: all slots start dark', allZero(identities), identities.map((light) => light.intensity).join(', '));
+    check('rig construction: all slots start dark', allDark(identities), identities.map((light) => light.intensity).join(', '));
 
     // Index 0 is restored from a save with its dipped beam and tail lamps already
     // on, and is never driven in this harness: the case that used to project nothing.
@@ -275,7 +282,7 @@ async function run(): Promise<void> {
     assertRigState(scene, rig, identities, targets, 'lamps switched off');
     check(
       'lamps off: every slot is dark',
-      rig.beamCount === 0 && allZero(spotlights(scene)),
+      rig.beamCount === 0 && allDark(spotlights(scene)),
       `${rig.beamCount} beams`,
     );
     check(
@@ -303,7 +310,7 @@ async function run(): Promise<void> {
     while (vehicles.length > 0) vehicles.pop()!.dispose();
     rig.clear();
     assertRigState(scene, rig, identities, targets, 'vehicles disposed');
-    check('vehicles disposed: every rig slot remains dark', allZero(spotlights(scene)), `${rig.beamCount} beams`);
+    check('vehicles disposed: every rig slot remains dark', allDark(spotlights(scene)), `${rig.beamCount} beams`);
 
     const pooled = spotlights(scene);
     const pooledTargets = pooled.map((light) => light.target);

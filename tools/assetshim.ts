@@ -44,6 +44,25 @@ class BunProgressEvent extends Event implements ProgressEvent {
   }
 }
 
+/**
+ * Resolves every texture request to one blank texture.
+ *
+ * Decoding an image needs a browser: three's image path wants `self`, an `<img>`
+ * element and `createObjectURL`. Nothing a physics, geometry or light-rig tool
+ * measures reads a pixel, and `render/carmodel.ts` treats an undecodable palette as
+ * "leave the pack's authored colour alone", so a blank stands in for all of them.
+ */
+export function installBlankTextures(): void {
+  const blank = new THREE.Texture();
+  THREE.TextureLoader.prototype.load = function (
+    _url: string,
+    onLoad?: (texture: THREE.Texture) => void,
+  ): THREE.Texture {
+    onLoad?.(blank);
+    return blank;
+  };
+}
+
 /** Installs every shim the model loaders need. Idempotent. */
 export function installAssetShim(): void {
   if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
@@ -62,14 +81,7 @@ export function installAssetShim(): void {
     return upstream(input, init);
   }) as typeof fetch;
 
-  const blank = new THREE.Texture();
-  THREE.TextureLoader.prototype.load = function (
-    _url: string,
-    onLoad?: (texture: THREE.Texture) => void,
-  ): THREE.Texture {
-    onLoad?.(blank);
-    return blank;
-  };
+  installBlankTextures();
 
   const scope = globalThis as unknown as {
     self?: unknown;

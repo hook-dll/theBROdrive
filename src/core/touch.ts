@@ -65,7 +65,7 @@ const BUTTONS: readonly ButtonSpec[] = [
   { id: 'lights', key: 'L', label: 'Cycle headlights', side: 'left', position: 'lower-right' },
   { id: 'interact', key: 'E', label: 'Interact / enter / exit', side: 'right', position: 'top' },
   { id: 'mount', key: 'F', label: 'Pick up / mount', side: 'right', position: 'lower-left' },
-  { id: 'camera', key: 'C', label: 'Toggle hood / chase camera', side: 'right', position: 'lower-right' },
+  { id: 'camera', key: 'C', label: 'Toggle interior / chase camera', side: 'right', position: 'lower-right' },
   { id: 'recenter', key: 'V', label: 'Recenter view', side: 'right', position: 'bottom' },
 ];
 

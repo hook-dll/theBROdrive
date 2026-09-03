@@ -25,6 +25,7 @@ import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
+import { installAssetShim } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -38,8 +39,11 @@ class BunProgressEvent extends Event implements ProgressEvent {
   }
 }
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
+// Every catalogue model is an imported body now, so the bench loads real FBX files
+// off disk rather than building its car in code.
+installAssetShim();
 
-const MODEL_ID = 'proc_wedge';
+const MODEL_ID = 'st_mid_engine_v8';
 const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;
@@ -430,7 +434,7 @@ function checkHandover(): void {
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
-  console.log('autopilot bench: real Road surface collider, procedural wedge, fixed 60 Hz');
+  console.log('autopilot bench: real Road surface collider, mid-engined V8, fixed 60 Hz');
   checkHandover();
   const sleeper = await measureMode('sleeper');
   const frantic = await measureMode('frantic');

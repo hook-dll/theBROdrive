@@ -137,7 +137,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
-  { id: 'camera', label: 'Toggle hood / chase camera', defaultKeys: ['KeyC'] },
+  { id: 'camera', label: 'Toggle interior / chase camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },

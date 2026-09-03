@@ -23,7 +23,7 @@ import {
   oilCapacity,
 } from '../parts/registry';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
-import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
+import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
@@ -553,8 +553,8 @@ export function homesteadSpawn(
 }
 
 /**
- * Builds the starter car: a deterministic seed-based pick from the Soviet and
- * Quaternius roadworthy pool, parked in the garage facing the door with no gizmos
+ * Builds the starter car: a deterministic seed-based pick from the whole catalogue,
+ * parked in the garage facing the door with no gizmos
  * mounted yet. Fuel starts low but non-zero, clamped to the selected tank.
  */
 export function createStartingCar(world: GameWorld): CarState {
@@ -562,7 +562,7 @@ export function createStartingCar(world: GameWorld): CarState {
   const terrain = new Terrain(world.seed, road);
   const L = layout(road, terrain);
 
-  const def = pick(SPAWNABLE_CAR_MODELS, world.seed, 0x3f0);
+  const def = pick(CAR_MODELS, world.seed, 0x3f0);
   const engine = modelEngine(def);
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
@@ -640,7 +640,7 @@ export function spawnStartingFuelCan(world: GameWorld, loose: LoosePartField): v
     {
       type: 'fluid_can',
       id: world.generatedPartId('home_item', 0, 2),
-      fluid: modelEngine(pick(SPAWNABLE_CAR_MODELS, world.seed, 0x3f0)).fuel,
+      fluid: modelEngine(pick(CAR_MODELS, world.seed, 0x3f0)).fuel,
       capacity: 20,
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },

@@ -37,7 +37,12 @@ import {
 } from './carmodels';
 import { bonnetCanRun, bonnetPart, destroyedEngineSpec, engineFailureReason } from './bonnet';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
-import { carModelMeasure, createCarModel, type CarModelMeasure } from '../render/carmodel';
+import {
+  STEERING_WHEEL_NODE,
+  carModelMeasure,
+  createCarModel,
+  type CarModelMeasure,
+} from '../render/carmodel';
 import { createPartMesh } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
 import type { VehicleLightRig } from '../render/vehiclelights';
@@ -1107,6 +1112,16 @@ const IMPACT_UNEXPLAINED_FLOOR_MPS = 0.35;
 
 const TWO_PI = Math.PI * 2;
 
+/**
+ * Steering-wheel rim angle per radian of rack angle.
+ *
+ * A period car is about three turns lock to lock, so full lock at the tyres is most
+ * of a turn and a half at the rim. Against the catalogue's 0.5-0.6 rad locks, 11
+ * puts full lock near 380 degrees of rim — enough that ordinary steering visibly
+ * moves the wheel, without the rim becoming a blur in a corner.
+ */
+const STEERING_WHEEL_RATIO = 11;
+
 /** Rotates v by quaternion q into `out`, in place. */
 function rotateVector(
   out: { x: number; y: number; z: number },
@@ -1562,6 +1577,15 @@ export class Vehicle implements Rebasable {
   private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
+  /**
+   * The cabin's steering wheel, turned to match the rack every frame.
+   *
+   * `steeringWheelRest` is the node's AUTHORED rotation about its own axis, which
+   * the spin is added to rather than replacing: the wheel's rake lives in the same
+   * Euler and overwriting it lays the rim flat.
+   */
+  private steeringWheel: THREE.Object3D | null = null;
+  private steeringWheelRest = 0;
   private headlightMounts: VehicleBeamMount[] = [];
   private taillightMounts: VehicleBeamMount[] = [];
   private reverseLightMounts: VehicleBeamMount[] = [];
@@ -3476,6 +3500,19 @@ export class Vehicle implements Rebasable {
       w.mesh.rotation.set(w.drawnSpin % TWO_PI, steer ?? 0, 0);
     }
 
+    // The rim follows the RACK, not the input: it therefore carries the rate limit,
+    // the caster pull and the backlash the tyres carry, which is what makes it read
+    // as connected to them rather than to the key being held.
+    //
+    // Sign: `steerAngle` is positive to the LEFT, and the wheel's own axis (its
+    // node's local Y, before the rake in the same Euler) points back at the driver,
+    // so a positive rotation about it turns the rim anticlockwise as the driver sees
+    // it — left. The two agree, so the angle is added, not negated.
+    if (this.steeringWheel) {
+      this.steeringWheel.rotation.y =
+        this.steeringWheelRest + this.steerAngle * STEERING_WHEEL_RATIO;
+    }
+
     // Gizmos are bolted to the shell: they never move relative to it, so all they
     // need per frame is their condition, which a scrubbing player can change.
     for (const g of this.gizmos) setPartCondition(g.mesh, g.part);
@@ -4347,6 +4384,11 @@ export class Vehicle implements Rebasable {
     const instance = createCarModel(this.model.id, this.car.id);
     this.rootGroup.add(instance.body);
 
+    // The body subtree is cloned per vehicle, so this node belongs to this car and
+    // turning it cannot turn anybody else's wheel.
+    this.steeringWheel = instance.body.getObjectByName(STEERING_WHEEL_NODE) ?? null;
+    this.steeringWheelRest = this.steeringWheel?.rotation.y ?? 0;
+
     this.wheelMeshes.clear();
     for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
 
@@ -4605,6 +4647,8 @@ export class Vehicle implements Rebasable {
     for (const material of this.rightBlinkerMaterials) material.dispose();
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.wheelMeshes.clear();
+    this.steeringWheel = null;
+    this.steeringWheelRest = 0;
     this.headlightMounts = [];
     this.taillightMounts = [];
     this.reverseLightMounts = [];
