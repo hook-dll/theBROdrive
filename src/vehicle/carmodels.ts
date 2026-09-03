@@ -42,14 +42,12 @@ const STYLIZED = '/models/stylized';
  */
 const STYLIZED_PALETTE = `${STYLIZED}/PixelColors.png`;
 
-/**
- * The cabin cut out of the Stylized saloon, fitted to the Soviet shells. A four-seat
- * interior with a dash and a steering wheel, 734 triangles; see
- * tools/extract-interior.mjs for the cut.
- */
-const STYLIZED_INTERIOR = {
-  file: `${STYLIZED}/interior.glb`,
-  textureFile: STYLIZED_PALETTE,
+/** Glass-free, door-card-free cabin kits cut for each Soviet body family. */
+const SOVIET_INTERIORS = {
+  sedan: { file: `${STYLIZED}/interior-sedan.glb`, textureFile: STYLIZED_PALETTE },
+  wagon: { file: `${STYLIZED}/interior-wagon.glb`, textureFile: STYLIZED_PALETTE },
+  hatchback: { file: `${STYLIZED}/interior-hatchback.glb`, textureFile: STYLIZED_PALETTE },
+  suv: { file: `${STYLIZED}/interior-suv.glb`, textureFile: STYLIZED_PALETTE },
 } as const;
 
 /**
@@ -515,6 +513,28 @@ interface SovietSpec {
   readonly visualRideLiftWheelFraction?: number;
 }
 
+type SovietInteriorType = keyof typeof SOVIET_INTERIORS;
+
+/** Body-family mapping: estates retain their load floor, hatchbacks their compact
+ * rear shelf, and the taller Nivas use an upright utility cabin. */
+const SOVIET_INTERIOR_TYPES: Readonly<Record<string, SovietInteriorType>> = {
+  'gz21.fbx': 'sedan',
+  'gz24.fbx': 'sedan',
+  'vz01.fbx': 'sedan',
+  'vz02.fbx': 'wagon',
+  'vz03.fbx': 'sedan',
+  'vz04.fbx': 'wagon',
+  'vz05.fbx': 'sedan',
+  'vz05r.fbx': 'sedan',
+  'vz06.fbx': 'sedan',
+  'vz07.fbx': 'sedan',
+  'vz08.fbx': 'hatchback',
+  'vz09.fbx': 'hatchback',
+  'vz099.fbx': 'sedan',
+  'vz21.fbx': 'suv',
+  'vz31.fbx': 'suv',
+};
+
 /*
  * The grip ladder runs backwards from every other pack on purpose: these are
  * cross-ply-era cars, not modern tyres. The RWD classics sit lowest (0.88-0.94)
@@ -824,9 +844,9 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   // Every body in this pack draws its windows as a region of the one body mesh,
   // UV-mapped to the atlas's dark teal swatch. Measured on all fifteen.
   glassUvCell: [3, 1],
-  // These bodies are hollow shells, and see-through glass is what makes that
-  // obvious: a fitted cabin is what you look at through it.
-  interior: STYLIZED_INTERIOR,
+  // Each body family gets a componentized, glass-free cabin. The extractor removes
+  // donor door cards, which cannot agree with the Soviet shells' door apertures.
+  interior: SOVIET_INTERIORS[SOVIET_INTERIOR_TYPES[spec.file]],
   lights: sovietLights(spec.file),
   detectWheels: true,
   bodyClass: 'car',

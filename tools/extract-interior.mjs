@@ -2,23 +2,20 @@
 /**
  * tools/extract-interior.mjs
  *
- * Cuts the cabin out of a Stylized Vehicles Pack body and writes it as a standalone
- * GLB, so the Soviet cars — which are modelled as hollow shells with no interior at
- * all — can be given one.
+ * Cuts a componentized, glass-free cabin out of a Stylized Vehicles Pack body.
+ * Soviet shells use these cabins without inheriting the donor's windows or door
+ * cards. Seats, dashboard, floor/tunnel, shelves and steering wheel remain separate
+ * nodes so the runtime can fit the useful structure without stretching side trim
+ * through the host doors.
  *
- * The cabin is not an object in the donor file. That pack bakes seats, dash, floor
- * and roof lining into the same mesh as the outer shell, and only the steering wheel
- * is separate. So the cut is geometric: the window meshes define the cabin aperture,
- * everything of the body mesh inside that volume is interior, and the outer shell is
- * excluded by PALETTE COLUMN — a panel you can see from outside samples the body's
- * paint ramp, and nothing indoors does.
- *
- * Output is in metres about the donor body box's own centre, with the mount
- * fractions printed, so `render/carmodel.ts` can resolve it against any other body
- * box the same way it resolves the eye and the gizmo anchors.
+ * The donor's cabin is baked into its body mesh. Window bounds locate the glazed
+ * aperture; palette columns reject exterior paint; a conservative side cutoff
+ * rejects door cards. The remaining triangles are divided spatially into functional
+ * groups. Output coordinates are metres about the donor body centre and carry the
+ * donor body size as glTF extras for three-axis fitting in `render/carmodel.ts`.
  *
  * Usage: node tools/extract-interior.mjs <Donor> <out.glb> <paintColumn> [span]
- *   e.g. node tools/extract-interior.mjs Sedan1 public/models/stylized/interior.glb 24 2
+ *   e.g. node tools/extract-interior.mjs Sedan3 public/models/stylized/interior-sedan.glb 22 2
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import * as THREE from 'three';
@@ -142,22 +139,38 @@ function cut(mesh, keep) {
   return { geometry, triangles: kept.length };
 }
 
-const interior = cut(body, (p, column) => {
+const bodySize = bodyBox.getSize(new THREE.Vector3());
+const bodyCentre = bodyBox.getCenter(new THREE.Vector3());
+const interiorTriangle = (p, column) => {
   if (!cabin.containsPoint(p)) return false;
-  // A surface you can see from OUTSIDE wears the body's paint ramp; nothing in the
-  // cabin does. That is what separates the shell's inner face from the trim.
-  return !(column >= paintColumn && column < paintColumn + paintSpan);
-});
+  if (column >= paintColumn && column < paintColumn + paintSpan) return false;
+  // Door cards sit against the donor shell. Reject that entire side band; Soviet
+  // bodies supply their own doors and keeping it is what made panels poke outside.
+  return Math.abs(p.x - bodyCentre.x) < bodySize.x * 0.36;
+};
+
+const relY = (p) => (p.y - bodyBox.min.y) / bodySize.y;
+const relZ = (p) => (p.z - bodyCentre.z) / bodySize.z;
+const components = [
+  ['floor_tunnel', (p) => relY(p) < 0.38],
+  ['dashboard', (p) => relY(p) >= 0.38 && relZ(p) > 0.1],
+  ['rear_shelf', (p) => relY(p) >= 0.38 && relZ(p) < -0.28],
+  ['seats', (p) => relY(p) >= 0.38 && relZ(p) >= -0.28 && relZ(p) <= 0.1],
+].map(([name, region]) => [
+  name,
+  cut(body, (p, column) => interiorTriangle(p, column) && region(p)),
+]);
 
 // Metres, about the donor body box's own centre, so the mount is a pure offset. The
 // scale lives on the root node and the recentring on each child, which is what lets
 // the steering wheel keep its AUTHORED transform: its node origin is the steering
 // column's axis, and rotating the mesh about that node is the only way to spin the
 // rim in its own plane instead of orbiting it round the cabin.
-const centre = bodyBox.getCenter(new THREE.Vector3());
+const centre = bodyCentre;
 const group = new THREE.Group();
 group.name = 'interior';
 group.scale.setScalar(PACK_SCALE);
+group.userData.donorBodySize = bodySize.toArray().map((value) => value * PACK_SCALE);
 const material = new THREE.MeshStandardMaterial({
   // Deliberately NOT the pack's `PixelColors`: the renderer selects a Stylized
   // body's repaintable paint slot by that name, and a fitted cabin is trim, not
@@ -167,13 +180,14 @@ const material = new THREE.MeshStandardMaterial({
   metalness: 0.05,
 });
 
-const trim = new THREE.Mesh(interior.geometry, material);
-trim.name = 'interior_trim';
-// The body mesh's own transform is baked in, so its cut geometry only needs
-// recentring; there is no pivot on a floor pan worth keeping.
-trim.geometry.applyMatrix4(body.matrixWorld);
-trim.geometry.translate(-centre.x, -centre.y, -centre.z);
-group.add(trim);
+for (const [name, component] of components) {
+  if (component.triangles === 0) continue;
+  const mesh = new THREE.Mesh(component.geometry, material);
+  mesh.name = name;
+  mesh.geometry.applyMatrix4(body.matrixWorld);
+  mesh.geometry.translate(-centre.x, -centre.y, -centre.z);
+  group.add(mesh);
+}
 
 let wheelTriangles = 0;
 if (wheel) {
@@ -186,7 +200,7 @@ if (wheel) {
   group.add(mesh);
 }
 
-for (const child of group.children) child.geometry.computeBoundingBox();
+for (const child of group.children) child.geometry?.computeBoundingBox();
 group.updateMatrixWorld(true);
 
 const half = bodyBox.getSize(new THREE.Vector3()).multiplyScalar(0.5 * PACK_SCALE);
@@ -205,7 +219,7 @@ console.log(
       donor,
       out,
       bytes: glb.byteLength,
-      trimTriangles: interior.triangles,
+      trimTriangles: components.reduce((sum, [, component]) => sum + component.triangles, 0),
       wheelTriangles,
       donorHalfExtents: half.toArray().map(fmt),
       interiorSize: interiorBox.getSize(new THREE.Vector3()).toArray().map(fmt),
