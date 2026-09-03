@@ -1028,8 +1028,9 @@ export class Sky {
   }
 
   /**
-   * Marks significant solar changes as due, then replaces the live probe only
-   * when the caller has left the frame idle enough for a PMREM render.
+   * Marks significant solar changes as due, then replaces the live probe on an idle
+   * frame. The initial probe is mandatory: a save may load directly into a vehicle,
+   * and postponing that bake would leave `scene.environment` null for the whole drive.
    */
   private refreshEnvironment(allowEnvironmentRefresh: boolean, nowMs: number): void {
     const isInitialBake = Number.isNaN(this.envBakedElevation);
@@ -1042,7 +1043,7 @@ export class Sky {
       this.envBakePending = true;
     }
     if (
-      !allowEnvironmentRefresh ||
+      (!isInitialBake && !allowEnvironmentRefresh) ||
       !this.envBakePending ||
       (!isInitialBake && nowMs - this.envLastBakeMs < ENV_BAKE_INTERVAL_MS)
     ) {

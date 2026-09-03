@@ -433,13 +433,15 @@ export class ChunkStreamer {
   }
 
   /**
-   * Advance an incremental provider far enough to amortize cheap yields without
-   * allowing it to consume the scheduler's entire frame slice.
+   * Advance one incremental provider for at most a millisecond. The shared scheduler
+   * now admits one streaming job per rendered frame, so this slice must leave enough
+   * of a 144 Hz frame for physics and rendering instead of creating a periodic
+   * two-to-four millisecond main-thread ridge.
    */
   private advanceIncrementalProvider(
     active: ActiveProviderBuild,
   ): IteratorResult<void, ChunkContent | null> {
-    const deadline = performance.now() + 2;
+    const deadline = performance.now() + 1;
     let result = active.iterator.next();
     while (!result.done && performance.now() < deadline) {
       result = active.iterator.next();

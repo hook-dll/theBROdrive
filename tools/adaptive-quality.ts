@@ -42,70 +42,64 @@ function noActions(label: string, outcomes: readonly ResolutionAction[]): void {
 }
 
 function slowStep(controller: AdaptiveResolutionController, startMs: number, label: string): void {
-  noActions(`${label}: first 23 slow GPU samples`, samples(controller, 20, true, true, startMs, 23));
-  equal(`${label}: 24th slow GPU sample`, controller.sample(20, true, true, startMs + 23), 'down');
+  noActions(`${label}: first 7 slow GPU samples`, samples(controller, 12, true, true, startMs, 7));
+  equal(`${label}: 8th slow GPU sample`, controller.sample(12, true, true, startMs + 7), 'down');
 }
 
 function run(): void {
   const sustainedSlow = new AdaptiveResolutionController('standard');
-  noActions('sustained slow load: 23 samples do not step down', samples(sustainedSlow, 20, true, true, 10_000, 23));
+  noActions('sustained slow load: 7 samples do not step down', samples(sustainedSlow, 12, true, true, 10_000, 7));
   equal(
-    'sustained slow load: 24th sample steps down',
-    sustainedSlow.sample(20, true, true, 10_023),
+    'sustained slow load: 8th sample steps down',
+    sustainedSlow.sample(12, true, true, 10_007),
     'down',
   );
-  scaleIs('standard slow load clamps to its floor', sustainedSlow, 0.85);
+  scaleIs('standard slow load takes one conservative step', sustainedSlow, 0.85);
 
   const ineligibleReset = new AdaptiveResolutionController('standard');
-  noActions('ineligible reset: partial slow streak has no action', samples(ineligibleReset, 20, true, true, 20_000, 12));
-  equal('ineligible reset: excluded frame has no action', ineligibleReset.sample(20, false, true, 20_012), null);
-  noActions('ineligible reset: next 23 samples restart the streak', samples(ineligibleReset, 20, true, true, 20_013, 23));
-  equal('ineligible reset: restarted 24th sample steps down', ineligibleReset.sample(20, true, true, 20_036), 'down');
+  noActions('ineligible reset: partial slow streak has no action', samples(ineligibleReset, 12, true, true, 20_000, 4));
+  equal('ineligible reset: excluded frame has no action', ineligibleReset.sample(12, false, true, 20_004), null);
+  noActions('ineligible reset: next 7 samples restart the streak', samples(ineligibleReset, 12, true, true, 20_005, 7));
+  equal('ineligible reset: restarted 8th sample steps down', ineligibleReset.sample(12, true, true, 20_012), 'down');
 
   const nullReset = new AdaptiveResolutionController('standard');
-  noActions('null reset: partial slow streak has no action', samples(nullReset, 20, true, true, 30_000, 12));
-  equal('null reset: unavailable GPU duration has no action', nullReset.sample(null, true, true, 30_012), null);
-  noActions('null reset: next 23 samples restart the streak', samples(nullReset, 20, true, true, 30_013, 23));
-  equal('null reset: restarted 24th sample steps down', nullReset.sample(20, true, true, 30_036), 'down');
+  noActions('null reset: partial slow streak has no action', samples(nullReset, 12, true, true, 30_000, 4));
+  equal('null reset: unavailable GPU duration has no action', nullReset.sample(null, true, true, 30_004), null);
+  noActions('null reset: next 7 samples restart the streak', samples(nullReset, 12, true, true, 30_005, 7));
+  equal('null reset: restarted 8th sample steps down', nullReset.sample(12, true, true, 30_012), 'down');
 
   const cooldown = new AdaptiveResolutionController('acceptable');
   slowStep(cooldown, 40_000, 'cooldown: first sustained slow period');
-  scaleIs('cooldown: initial slow period lowers acceptable scale', cooldown, 0.8);
-  noActions('cooldown: immediate second sustained slow period is blocked', samples(cooldown, 20, true, true, 40_024, 24));
-  scaleIs('cooldown: blocked period preserves scale', cooldown, 0.8);
-  equal('cooldown: later eligible sample permits the pending reduction', cooldown.sample(20, true, true, 43_000), 'down');
-  scaleIs('cooldown: elapsed cooldown permits another reduction', cooldown, 0.64);
+  scaleIs('cooldown: initial slow period lowers acceptable scale', cooldown, 0.85);
+  noActions('cooldown: immediate second sustained slow period is blocked', samples(cooldown, 12, true, true, 40_008, 8));
+  scaleIs('cooldown: blocked period preserves scale', cooldown, 0.85);
+  equal('cooldown: later eligible sample permits the pending reduction', cooldown.sample(12, true, true, 42_000), 'down');
+  scaleIs('cooldown: elapsed cooldown permits another reduction', cooldown, 0.7224999999999999);
 
   const upscale = new AdaptiveResolutionController('standard');
   slowStep(upscale, 50_000, 'upscale: initial slow period');
-  noActions('upscale: first 119 fast samples do not step up', samples(upscale, 12, true, true, 53_000, 119));
-  equal('upscale: 120th fast sample steps up when allowed', upscale.sample(12, true, true, 53_119), 'up');
-  scaleIs('upscale: one step applies the 1.05 factor', upscale, 0.8925);
+  noActions('upscale: first 239 fast samples do not step up', samples(upscale, 6, true, true, 52_000, 239));
+  equal('upscale: 240th fast sample steps up when allowed', upscale.sample(6, true, true, 52_239), 'up');
+  scaleIs('upscale: one step applies the 1.03 factor', upscale, 0.8755);
 
   const driving = new AdaptiveResolutionController('standard');
   slowStep(driving, 60_000, 'driving: initial slow period');
-  noActions('driving: 120 fast samples cannot upscale while active', samples(driving, 12, true, false, 63_000, 120));
+  noActions('driving: 240 fast samples cannot upscale while active', samples(driving, 6, true, false, 62_000, 240));
   scaleIs('driving: active-driving policy preserves reduced scale', driving, 0.85);
-  equal('driving: allowing upscale admits the sustained fast evidence', driving.sample(12, true, true, 63_120), 'up');
+  equal('driving: allowing upscale admits the sustained fast evidence', driving.sample(6, true, true, 62_240), 'up');
 
   const acceptableFloor = new AdaptiveResolutionController('acceptable');
-  slowStep(acceptableFloor, 70_000, 'acceptable floor: first reduction');
-  slowStep(acceptableFloor, 73_000, 'acceptable floor: second reduction');
-  slowStep(acceptableFloor, 76_000, 'acceptable floor: third reduction');
-  slowStep(acceptableFloor, 79_000, 'acceptable floor: fourth reduction');
-  scaleIs('acceptable floor: repeated reductions clamp at 0.5', acceptableFloor, 0.5);
-  noActions('acceptable floor: sustained overload cannot go below floor', samples(acceptableFloor, 20, true, true, 82_000, 24));
-  scaleIs('acceptable floor: floor remains stable', acceptableFloor, 0.5);
+  for (let step = 0; step < 6; step++) slowStep(acceptableFloor, 70_000 + step * 2_000, `acceptable floor: reduction ${step + 1}`);
+  scaleIs('acceptable floor: repeated reductions clamp at 0.4', acceptableFloor, 0.4);
+  noActions('acceptable floor: sustained overload cannot go below floor', samples(acceptableFloor, 12, true, true, 84_000, 8));
 
   const standardFloor = new AdaptiveResolutionController('standard');
-  slowStep(standardFloor, 90_000, 'standard floor: initial reduction');
-  noActions('standard floor: sustained overload cannot go below floor', samples(standardFloor, 20, true, true, 93_000, 24));
-  scaleIs('standard floor: floor remains stable', standardFloor, 0.85);
+  for (let step = 0; step < 4; step++) slowStep(standardFloor, 90_000 + step * 2_000, `standard floor: reduction ${step + 1}`);
+  scaleIs('standard floor: repeated reductions clamp at 0.55', standardFloor, 0.55);
 
   const blessing = new AdaptiveResolutionController('blessing');
-  noActions('blessing: sustained slow GPU load never changes scale', samples(blessing, 20, true, true, 100_000, 24));
-  noActions('blessing: sustained fast GPU load never changes scale', samples(blessing, 12, true, true, 103_000, 120));
-  scaleIs('blessing: quality lock remains at full scale', blessing, 1);
+  slowStep(blessing, 100_000, 'blessing: sustained slow load');
+  scaleIs('blessing: adaptive protection remains available', blessing, 0.85);
 }
 
 run();

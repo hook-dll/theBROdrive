@@ -152,8 +152,8 @@ function leanDeg(q: { x: number; y: number; z: number; w: number }): number {
   const upY = 1 - 2 * (q.x * q.x + q.z * q.z);
   return (Math.acos(Math.max(-1, Math.min(1, upY))) * 180) / Math.PI;
 }
-/** A flat, infinite-enough asphalt plane. */
-function addGround(physics: PhysicsWorld): void {
+/** A flat, infinite-enough plane using the requested tyre surface. */
+function addGround(physics: PhysicsWorld, surface = SurfaceType.Asphalt): void {
   const heights = new Float32Array(4);
   physics.addHeightfield(
     1,
@@ -161,7 +161,7 @@ function addGround(physics: PhysicsWorld): void {
     heights,
     { x: 8000, y: 1, z: 8000 },
     { x: 0, y: 0, z: 0 },
-    SurfaceType.Asphalt,
+    surface,
   );
 }
 
@@ -690,6 +690,59 @@ export async function benchOne(
   }
 
   return out;
+}
+
+/**
+ * Focused surface check at one speed and steering input. Unlike the full bench,
+ * this is deliberately small enough to compare loose-surface tuning interactively.
+ */
+export async function runSurfaceCorneringCheck(
+  modelId = 'sv_vaz2101',
+  surface = SurfaceType.Asphalt,
+  targetSpeedKmh = 45,
+  steer = 0.5,
+): Promise<{
+  surface: SurfaceType;
+  speedKmh: number;
+  lateralG: number;
+  yawRateDegS: number;
+  radiusM: number;
+  slipDeg: number;
+}> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(modelId, (physics) => addGround(physics, surface));
+  drive(rig, 20, (_, input) => {
+    input.throttle = rig.vehicle.speedKmh < targetSpeedKmh ? 1 : 0;
+  });
+  let speedSum = 0;
+  let lateralGSum = 0;
+  let yawRateSum = 0;
+  let slipSum = 0;
+  let samples = 0;
+  drive(rig, 8, (time, input) => {
+    input.throttle = rig.vehicle.speedKmh < targetSpeedKmh ? 0.6 : 0;
+    input.steer = steer;
+    if (time > 4) {
+      const speed = Math.abs(rig.vehicle.audio.forwardMps);
+      const yawRate = Math.abs(rig.vehicle.chassis.angvel().y);
+      speedSum += speed * 3.6;
+      lateralGSum += (yawRate * speed) / 9.81;
+      yawRateSum += yawRate;
+      slipSum += slipAngleDeg(rig.vehicle);
+      samples++;
+    }
+  });
+  rig.vehicle.dispose();
+  const meanSpeedMps = samples ? speedSum / samples / 3.6 : 0;
+  const meanYawRate = samples ? yawRateSum / samples : 0;
+  return {
+    surface,
+    speedKmh: +(meanSpeedMps * 3.6).toFixed(1),
+    lateralG: samples ? +(lateralGSum / samples).toFixed(2) : 0,
+    yawRateDegS: +((meanYawRate * 180) / Math.PI).toFixed(1),
+    radiusM: meanYawRate > 0 ? +(meanSpeedMps / meanYawRate).toFixed(1) : 0,
+    slipDeg: samples ? +(slipSum / samples).toFixed(1) : 0,
+  };
 }
 
 export async function runBench(

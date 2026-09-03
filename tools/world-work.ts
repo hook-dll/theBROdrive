@@ -68,6 +68,29 @@ scheduler.beginFrame(FRAME_ID + 1);
 expect(scheduler.workedThisFrame, 'repeated next-frame beginFrame reset workedThisFrame');
 expect(scheduler.lastJobTag === DESERT_TAG, 'repeated next-frame beginFrame reset lastJobTag');
 
+const capped = new WorldWorkScheduler(BUDGET_MS, 1);
+let cappedRuns = 0;
+expect(
+  capped.tryRun(FRAME_ID, ROAD_TAG, () => {
+    cappedRuns++;
+  }),
+  'capped scheduler rejected its first frame job',
+);
+expect(
+  !capped.tryRun(FRAME_ID, DESERT_TAG, () => {
+    cappedRuns++;
+  }),
+  'capped scheduler admitted a second job in one frame',
+);
+expect(cappedRuns === 1, 'capped scheduler ran the wrong number of jobs');
+capped.beginFrame(FRAME_ID + 1);
+expect(
+  capped.tryRun(FRAME_ID + 1, DESERT_TAG, () => {
+    cappedRuns++;
+  }),
+  'capped scheduler did not reopen on the next frame',
+);
+
 console.log(
   `world work: ${roadRuns} road and ${desertRuns} desert jobs; ` +
     `road consumed ${consumedWorkMs.toFixed(3)} ms of a ${BUDGET_MS} ms shared budget; ` +

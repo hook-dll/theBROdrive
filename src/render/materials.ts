@@ -512,8 +512,10 @@ function cloneCarPaintMaterial(source: THREE.Material): THREE.Material {
     alphaTest: source.alphaTest,
     side: source.side,
     vertexColors: source.vertexColors,
-    roughness: 0.62,
-    metalness: 0.18,
+    // Match the clear-coated Stylized finish. The atlas supplies colour, not
+    // microsurface; the old 0.62 roughness made every Soviet panel read as primer.
+    roughness: 0.42,
+    metalness: 0.12,
   });
   material.name = source.name;
   material.depthTest = source.depthTest;

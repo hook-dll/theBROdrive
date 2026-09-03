@@ -10,24 +10,30 @@ export class WorldWorkScheduler {
   private activeFrame = Number.NaN;
   private worked = false;
   private workMs = 0;
+  private jobsRun = 0;
   private lastTag: string | null = null;
 
-  constructor(private readonly budgetMs = 3) {}
+  constructor(
+    private readonly budgetMs = 3,
+    private readonly maxJobsPerFrame = Number.POSITIVE_INFINITY,
+  ) {}
 
   beginFrame(frameId: number): void {
     if (frameId === this.activeFrame) return;
     this.activeFrame = frameId;
     this.worked = false;
     this.workMs = 0;
+    this.jobsRun = 0;
     this.lastTag = null;
   }
 
   tryRun(frameId: number, tag: string, work: () => void): boolean {
     this.beginFrame(frameId);
-    if (this.workMs >= this.budgetMs) return false;
+    if (this.workMs >= this.budgetMs || this.jobsRun >= this.maxJobsPerFrame) return false;
 
     const started = performance.now();
     this.worked = true;
+    this.jobsRun++;
     this.lastTag = tag;
     try {
       work();
