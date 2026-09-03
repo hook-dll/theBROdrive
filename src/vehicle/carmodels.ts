@@ -28,8 +28,8 @@ import { TRUNK_CELL_COUNT } from './trunk';
  *
  *  - SOVIET: Low Poly Soviet Car Pack. Fifteen FBX bodies in centimetres, each
  *    carrying its own wheels, colour taken from a shared 9x2 swatch atlas.
- *  - STYLIZED: Stylized Vehicles Pack. Thirty-one Unity FBX bodies, LOD0 only,
- *    with separate doors and wheels and colour taken from a 32x32 palette.
+ *  - STYLIZED: thirty-one detailed LOD0 sources normalized offline into compact
+ *    GLBs with one fixed chassis, one cabin and named animated parts.
  */
 const SOVIET = '/models/soviet';
 const STYLIZED = '/models/stylized';
@@ -273,11 +273,10 @@ const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
 ];
 
 /**
- * Authored lamp selectors. A selector names either a mesh node or a material; the
- * loader lifts a named material's triangles into their own mesh (see
- * `isolateLampMaterials` in render/carmodel.ts), so a pack that draws its lamps as
- * material groups on one body mesh and a pack that models each lamp separately both
- * arrive as the separate, individually measurable lenses the beam mounts need.
+ * Authored lamp selectors. A selector names a mesh node or material carrying one
+ * independently controlled lamp channel. Normalized models provide those meshes
+ * directly, so their bounds locate the light source without inspecting triangles
+ * or treating an entire body as one lens.
  */
 export interface VehicleLightsDef {
   readonly headlights: readonly string[];
@@ -387,15 +386,6 @@ export interface CarModelDef {
   readonly detectWheels?: boolean;
   /** Set instead of `detectWheels` when the pack names its wheels consistently. */
   readonly wheelNodes?: WheelNodeNames;
-  /**
-   * Nodes deleted at load because the game does not model what they are.
-   *
-   * The Stylized truck is a 6x4 tractor: a twin-axle rear bogie whose two wheel
-   * pairs sit 1.6 m apart along Z. Ray-cast suspension drives four wheels, and a
-   * wheel that never turns is worse on a moving vehicle than one that is not
-   * there, so the middle axle goes and the truck runs as the 4x2 its physics is.
-   */
-  readonly unusedNodes?: readonly string[];
   readonly bodyClass: BodyClass;
   /** Uniform model-units-to-metres scale. */
   readonly scale: number;
@@ -805,9 +795,8 @@ function sovietLights(file: string): VehicleLightsDef {
 }
 
 /**
- * The Stylized pack draws its lamps as material groups on the body mesh rather
- * than as separate objects, so every selector here is a MATERIAL name and the
- * loader lifts each one into its own mesh. The pack has no reversing lenses.
+ * The normalized Stylized models expose one mesh per independently controlled lamp
+ * channel. The source pack has no reversing lenses.
  */
 function stylizedLights(blinkers: boolean): VehicleLightsDef {
   const lights: VehicleLightsDef = {
@@ -849,29 +838,25 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
 }));
 
 /**
- * Stylized Vehicles Pack — thirty-one Unity FBX bodies, the detailed LOD0 of each.
+ * Stylized Vehicles Pack — thirty-one detailed LOD0 sources normalized offline by
+ * tools/normalize-stylized.ts.
  *
- * The pack ships four levels of detail per vehicle and a merged "combined" variant.
- * LOD0 detailed is the one used, because it is the only variant whose doors, windows
- * and interior are separate objects: the doors have to stay addressable to be
- * openable, and the combined variant throws them away.
+ * The source pack ships four levels of detail per vehicle. The unnumbered detailed
+ * model is Unity's first/highest LOD tier and supplies the retained chassis, wheels
+ * and complete cabin. The normalizer welds fixed doors and exterior trim into one
+ * chassis, cuts cabin geometry into one interior mesh, combines every window, and
+ * emits named wheels, steering wheel and lamp channels. glTF Transform then indexes,
+ * quantizes and Meshopt-compresses the GLB; the runtime does no FBX repair work.
  *
- * They arrive already agreeing with this game's conventions — nose down +Z, +X to
- * the left, origin on the ground between the wheels — so no yaw is needed and the
- * measured geometry can be trusted directly. What they do NOT agree with is scale:
- * FBXLoader reports them in centimetres at roughly 1.43x life size (its saloon is
- * 6.57 m long on 0.88 m wheels), so the pack scale is 0.007 rather than 0.01. That
- * lands the saloon at 4.60 m on a 2.48 m wheelbase, a 1.52 m track and 0.62 m
- * wheels, and every other body in believable proportion to it.
+ * Source coordinates already agree with the game — nose down +Z, +X to the left,
+ * origin on the ground between the wheels — so no yaw is needed. Source scale is
+ * roughly 1.43x life-size centimetres (the saloon is 6.57 m long on 0.88 m wheels),
+ * hence 0.007 rather than 0.01. That lands it at 4.60 m on a 2.48 m wheelbase,
+ * 1.52 m track and 0.62 m wheels.
  *
- * Two pack-wide traits need the loader's help, both handled from this table:
- *
- *  - WHEELS ARE NAMED, not shaped. `FL/FR/BL/BR` are consistent across all 31
- *    bodies, and shape detection actively fails here: a door is a near-circular
- *    disc TALLER than a wheel, so the four largest discs on a saloon are its doors.
- *  - LAMPS ARE MATERIALS, not meshes. Headlights, brake lights and both indicators
- *    are material groups of the body mesh, which the loader lifts into their own
- *    meshes so each lens can be measured and lit on its own.
+ * Every normalized output follows one scene contract: `wheel_fl/fr/rl/rr`,
+ * `steering_wheel`, `chassis`, `interior`, `glass`, and the applicable named lamp
+ * meshes. The truck's unused middle bogie is removed during normalization.
  */
 interface StylizedSpec {
   readonly id: string;
@@ -892,10 +877,6 @@ interface StylizedSpec {
   /** Set for the three supercars the pack gave no indicator lenses. */
   readonly noBlinkers?: boolean;
   readonly visualRideLiftWheelFraction?: number;
-  /** Nodes the game deletes rather than model; see `unusedNodes`. */
-  readonly unusedNodes?: readonly string[];
-  /** Rear wheel nodes, when they are not the usual `BL`/`BR`. */
-  readonly rearWheelNodes?: readonly [string, string];
 }
 
 /** Palette block: first column, columns spanned, first row, rows, and key shade. */
@@ -1387,31 +1368,27 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     rearDriveBias: 1,
     suspension: SUSP_TRUCK,
     paint: ramp(12, 2, 8, 8, 9),
-    unusedNodes: ['BL', 'BR'],
-    rearWheelNodes: ['BL2', 'BR2'],
   },
 ];
 
-/** One entry per body; scale, palette, wheel naming and lamp materials are shared. */
+/** One entry per normalized body; scale, palette, wheels and lamps are shared. */
 const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
-  const [rl, rr] = spec.rearWheelNodes ?? (['BL', 'BR'] as const);
   return {
     id: spec.id,
     label: spec.label,
     dir: STYLIZED,
-    glb: `${spec.file}.fbx`,
+    glb: `${spec.file}.glb`,
     textureFile: STYLIZED_PALETTE,
     paintStyle: 'stylized-palette',
     glassMaterial: 'Glass',
     paintRamp: spec.paint,
     lights: stylizedLights(spec.noBlinkers !== true),
     wheelNodes: {
-      wheel_fl: ['FL'],
-      wheel_fr: ['FR'],
-      wheel_rl: [rl],
-      wheel_rr: [rr],
+      wheel_fl: ['wheel_fl'],
+      wheel_fr: ['wheel_fr'],
+      wheel_rl: ['wheel_rl'],
+      wheel_rr: ['wheel_rr'],
     },
-    unusedNodes: spec.unusedNodes,
     bodyClass: spec.bodyClass ?? 'car',
     visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
     mass: spec.mass,
@@ -1436,9 +1413,9 @@ const ENTRIES: readonly Entry[] = [
   ...SOVIET_CARS,
 
   // -------------------------------------------------------------------------
-  // Stylized Vehicles Pack. Thirty-one Unity FBX bodies at detailed LOD0, each
-  // with named wheels, separate doors and windows, and lamps drawn as material
-  // groups the loader lifts into their own lenses.
+  // Stylized Vehicles Pack. Thirty-one detailed LOD0 sources normalized offline:
+  // fixed doors and trim form one chassis, with one cabin, one glass mesh, named
+  // animated wheels and one mesh per independently controlled lamp channel.
   // -------------------------------------------------------------------------
   ...STYLIZED_CARS,
 ];
@@ -1457,7 +1434,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
   detectWheels: e.detectWheels,
   wheelNodes: e.wheelNodes,
-  unusedNodes: e.unusedNodes,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
   yaw: e.yaw,

@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import {
   makeCarBodyConditionMaterial,
@@ -181,6 +182,11 @@ function fbxLoader(): FBXLoader {
   return fbx;
 }
 
+function gltfLoader(): GLTFLoader {
+  gltf ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  return gltf;
+}
+
 /**
  * Produces one model's scene graph, picking the source from its URL.
  *
@@ -189,13 +195,9 @@ function fbxLoader(): FBXLoader {
  * FBXs contain Blender scene lights, which overwhelmed the sun around each car.
  */
 async function loadScene(file: string): Promise<THREE.Group> {
-  let scene: THREE.Group;
-  if (file.toLowerCase().endsWith('.fbx')) {
-    scene = await fbxLoader().loadAsync(file);
-  } else {
-    gltf ??= new GLTFLoader();
-    scene = (await gltf.loadAsync(file)).scene;
-  }
+  const scene = file.toLowerCase().endsWith('.fbx')
+    ? await fbxLoader().loadAsync(file)
+    : (await gltfLoader().loadAsync(file)).scene;
 
   const authoringDevices: THREE.Object3D[] = [];
   scene.traverse((node) => {
@@ -460,19 +462,22 @@ function tunePaletteTexture(texture: THREE.Texture): void {
 }
 
 /**
- * Points a subtree's PAINT material at the pack's palette.
+ * Points a subtree's palette material at its pack's shared texture.
  *
- * Which material is "the paint" is not a guess: a body is authored with one
- * palette-mapped slot for its painted panels and flat-coloured slots for
- * everything else (glass, lamp lenses), so a material that ALREADY has a map is
- * the palette slot and a material without one is a part colour. A body with no
- * mapped slot at all — the Soviet FBXs, which reference no texture — has nothing
- * to distinguish, so its single material takes the palette.
+ * Normalized Stylized GLBs deliberately contain no embedded copy of the palette:
+ * only the material named `PixelColors` samples it. Their glass and independently
+ * controlled lamp materials stay flat until the runtime replaces or illuminates
+ * them. Legacy/Soviet inputs have no named mapped slot, so omitting `materialName`
+ * applies the texture to their available material as before.
  *
  * Materials are cloned once per source material, not once per mesh, so slots shared
  * between meshes stay one material and one draw call's worth of state.
  */
-function applyTexture(root: THREE.Object3D, map: THREE.Texture): void {
+function applyTexture(
+  root: THREE.Object3D,
+  map: THREE.Texture,
+  materialName?: string,
+): void {
   const meshes: THREE.Mesh[] = [];
   let textured = false;
   root.traverse((child) => {
@@ -488,7 +493,10 @@ function applyTexture(root: THREE.Object3D, map: THREE.Texture): void {
     const existing = clones.get(source);
     if (existing) return existing;
     const standard = source as THREE.MeshStandardMaterial;
-    if (textured && !standard.map) {
+    if (
+      (materialName && source.name !== materialName) ||
+      (!materialName && textured && !standard.map)
+    ) {
       clones.set(source, source);
       return source;
     }
@@ -690,91 +698,6 @@ function triangleRuns(
   return { matched, rest };
 }
 
-/**
- * Lifts each named lamp MATERIAL out of its host mesh into a mesh of its own.
- *
- * The Stylized pack draws headlights, brake lights and both indicators as material
- * groups of the body mesh, and lists those materials as unused slots on the doors
- * and windows besides. Binding lamps by material name against that (vehicle.ts,
- * `bindLampMaterials`) gives two wrong answers at once: the lens bounds come out as
- * the WHOLE body — so headlight beams start from the middle of the car — and the
- * doors match too, dragging their boxes into the union.
- *
- * Splitting fixes both at the source, and costs nothing to draw: a material group
- * was already its own draw call. Each lamp's triangles become one mesh named after
- * the material, a sibling sharing the host's transform, and the host is rebuilt
- * with only the groups it has left — which also drops every slot no geometry of its
- * own referenced, so the doors stop answering to `Headlights`.
- *
- * A pack that models its lamps as real objects (the Soviet FBXs) names those
- * objects in its selectors, matches no material here, and passes through untouched.
- */
-function isolateLampMaterials(scene: THREE.Group, def: CarModelDef): void {
-  const lights = def.lights;
-  if (!lights) return;
-  const wanted = new Set<string>([
-    ...lights.headlights,
-    ...lights.taillights,
-    ...(lights.reverseLights ?? []),
-    ...(lights.leftBlinkers ?? []),
-    ...(lights.rightBlinkers ?? []),
-  ]);
-
-  const meshes: THREE.Mesh[] = [];
-  scene.traverse((node) => {
-    if (node instanceof THREE.Mesh && Array.isArray(node.material)) meshes.push(node);
-  });
-
-  for (const mesh of meshes) {
-    const materials = mesh.material as THREE.Material[];
-    const groups = mesh.geometry.groups;
-    if (groups.length === 0) continue;
-
-    const byIndex = new Map<number, { start: number; count: number }[]>();
-    for (const group of groups) {
-      const index = group.materialIndex ?? 0;
-      const ranges = byIndex.get(index);
-      if (ranges) ranges.push({ start: group.start, count: group.count });
-      else byIndex.set(index, [{ start: group.start, count: group.count }]);
-    }
-
-    const kept: THREE.Material[] = [];
-    const keptGroups: { start: number; count: number; materialIndex: number }[] = [];
-    for (const [index, ranges] of byIndex) {
-      const material = materials[index];
-      if (!material) continue;
-      if (wanted.has(material.name)) {
-        const lens = new THREE.Mesh(subGeometry(mesh.geometry, ranges), material);
-        lens.name = material.name;
-        lens.position.copy(mesh.position);
-        lens.quaternion.copy(mesh.quaternion);
-        lens.scale.copy(mesh.scale);
-        mesh.parent?.add(lens);
-        continue;
-      }
-      const slot = kept.length;
-      kept.push(material);
-      for (const range of ranges) {
-        keptGroups.push({ start: range.start, count: range.count, materialIndex: slot });
-      }
-    }
-
-    if (kept.length === 0) {
-      // Nothing but lamps: the host has become an empty shell of its own children.
-      mesh.removeFromParent();
-      continue;
-    }
-    // The array form is kept even for a single surviving slot. Three only walks
-    // `geometry.groups` when the material IS an array; given one material it ignores
-    // them and draws the whole buffer — which still holds the lamp triangles just
-    // lifted out, so every lens would be drawn a second time in body paint.
-    mesh.material = kept;
-    mesh.geometry.clearGroups();
-    for (const group of keptGroups) {
-      mesh.geometry.addGroup(group.start, group.count, group.materialIndex);
-    }
-  }
-}
 
 /**
  * A new geometry holding only the vertices some draw ranges of `source` reference.
@@ -1019,10 +942,7 @@ const EYE_BEHIND_WHEEL_M = 0.38;
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   if (def.yaw) applyModelYaw(scene, def.yaw);
-  // Nodes the game does not model go before anything is measured, so they cannot
-  // widen the chassis box or be mistaken for running gear.
-  for (const name of def.unusedNodes ?? []) scene.getObjectByName(name)?.removeFromParent();
-  isolateLampMaterials(scene, def);
+  // Normalized assets already carry one mesh per independently controlled lamp.
   isolateGlass(scene, def);
   scene.updateMatrixWorld(true);
   const s = def.scale;
@@ -1146,9 +1066,8 @@ async function loadPalette(url: string, fbxSource: boolean): Promise<THREE.Textu
  *
  * Must finish before the first `Vehicle` is constructed: a vehicle's collider,
  * suspension and mass all come out of the measurement, so there is no meaningful
- * "not loaded yet" state for it to run in. The catalogue is ~10 MB of FBX in total
- * and loads from the same origin, which is why loading all of it up front is
- * cheaper than a streaming path nobody would otherwise need.
+ * \"not loaded yet\" state for it to run in. Compact normalized GLBs and the Soviet
+ * source FBXs are loaded eagerly behind the loading screen.
  */
 export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
@@ -1158,7 +1077,11 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const palettes = new Map<string, boolean>();
   for (const def of defs) {
     if (def.textureFile) {
-      palettes.set(def.textureFile, def.file.toLowerCase().endsWith('.fbx'));
+      // Normalized Stylized GLBs preserve their FBX-authored UV orientation.
+      palettes.set(
+        def.textureFile,
+        def.paintStyle === 'stylized-palette' || def.file.toLowerCase().endsWith('.fbx'),
+      );
     }
   }
   for (const def of defs) {
@@ -1190,7 +1113,13 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
     defs.map(async (def) => {
       if (templates.has(def.id)) return;
       const scene = await loadScene(def.file);
-      if (def.textureFile) applyTexture(scene, paletteTextures.get(def.textureFile)!);
+      if (def.textureFile) {
+        applyTexture(
+          scene,
+          paletteTextures.get(def.textureFile)!,
+          def.paintStyle === 'stylized-palette' ? STYLIZED_PAINT_MATERIAL : undefined,
+        );
+      }
       tuneMaps(scene);
       templates.set(def.id, buildTemplate(def, scene));
     }),
@@ -1381,5 +1310,7 @@ export function disposeCarModelCache(): void {
   for (const texture of repaintedPalettes.values()) texture.dispose();
   repaintedPalettes.clear();
   paletteImages.clear();
+  gltf = null;
+  fbx = null;
   glassMaterial = null;
 }
