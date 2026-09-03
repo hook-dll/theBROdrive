@@ -1,19 +1,13 @@
 /**
- * The car radio: two live NTS streams, audible only from the driver's seat.
+ * The car radio: two live NTS streams, audible from the car in the world.
  *
- * This is the one sound in the game that is not synthesised, and it deliberately
- * stays out of the WebAudio graph. Routing a cross-origin stream through a
- * MediaElementAudioSourceNode requires the server to opt in with CORS headers; a
- * stream that does not send them is silently muted forever. A bare
- * HTMLAudioElement has no such requirement, plays the same bytes, and gives us the
- * one control we actually need (volume). So the radio is its own output path, and
- * the mixer's master volume does not apply to it — it has its own setting.
- *
- * Off the seat it is not merely muted but paused: this is a live stream, and
- * keeping it connected while the player walks around a homestead is bandwidth
- * spent on audio nobody can hear. Re-entering the car reconnects, which is what a
- * live stream does anyway — there is no position to resume.
+ * The stream is routed through WebAudio so the car can be a real spatial source.
+ * The station endpoints provide anonymous media CORS on every redirect, which
+ * allows a panner and an exterior low-pass branch. The interior branch stays
+ * direct and full-range, so sitting in the car remains the same radio signal.
  */
+
+import { AudioMixer, ramp } from './mixer';
 
 export interface RadioStation {
   readonly label: string;
@@ -21,31 +15,81 @@ export interface RadioStation {
 }
 
 export const RADIO_STATIONS: readonly RadioStation[] = [
-  { label: 'NTS 1', url: 'https://stream-relay-geo.ntslive.net/stream' },
-  { label: 'NTS 2', url: 'https://stream-relay-geo.ntslive.net/stream2' },
+  { label: 'NTS 1', url: 'https://streams.radiomast.io/nts1' },
+  { label: 'NTS 2', url: 'https://streams.radiomast.io/nts2' },
 ];
+
+/** Listener and car positions in the renderer's current relative world frame. */
+export interface RadioSpatialState {
+  sourceX: number | null;
+  sourceY: number | null;
+  sourceZ: number | null;
+  listenerX: number;
+  listenerY: number;
+  listenerZ: number;
+  listenerQx: number;
+  listenerQy: number;
+  listenerQz: number;
+  listenerQw: number;
+}
 
 /** Delay before retrying a dropped stream, seconds. */
 const RETRY_DELAY_MS = 4000;
-
-type Status = 'connecting' | 'live' | 'offline';
+const SPATIAL_RAMP_SECONDS = 0.06;
+const EXTERIOR_CUTOFF_HZ = 3200;
 
 export class Radio {
   private readonly element: HTMLAudioElement;
+  private readonly mediaSource: MediaElementAudioSourceNode;
+  private readonly interiorGain: GainNode;
+  private readonly exteriorGain: GainNode;
+  private readonly exteriorMono: GainNode;
+  private readonly exteriorFilter: BiquadFilterNode;
+  private readonly panner: PannerNode;
   private stationIndex = 0;
   private on = false;
   private inCar = false;
+  private interior = true;
+  private sourceReady = false;
   private paused = false;
   private volume = 1;
   private status: Status = 'offline';
   private retryTimer = 0;
   private disposed = false;
 
-  constructor() {
+  constructor(private readonly mixer: AudioMixer) {
+    const ctx = mixer.ctx;
     this.element = new Audio();
+    // This must be set before a source URL is assigned. The station endpoints opt into it.
+    this.element.crossOrigin = 'anonymous';
     this.element.preload = 'none';
     // A live stream has no duration to seek in and no reason to loop.
     this.element.loop = false;
+
+    this.mediaSource = ctx.createMediaElementSource(this.element);
+    this.interiorGain = ctx.createGain();
+    this.interiorGain.gain.value = 1;
+    this.exteriorGain = ctx.createGain();
+    this.exteriorGain.gain.value = 0;
+    // A car is a single exterior source: collapse stereo before spatializing it.
+    // The speakers interpretation averages left and right into the mono channel.
+    this.exteriorMono = ctx.createGain();
+    this.exteriorMono.channelCount = 1;
+    this.exteriorMono.channelCountMode = 'explicit';
+    this.exteriorFilter = ctx.createBiquadFilter();
+    this.exteriorFilter.type = 'lowpass';
+    this.exteriorFilter.frequency.value = EXTERIOR_CUTOFF_HZ;
+    this.exteriorFilter.Q.value = 0.5;
+    this.panner = new PannerNode(ctx, {
+      panningModel: 'HRTF',
+      distanceModel: 'inverse',
+      refDistance: 3,
+      rolloffFactor: 0.7,
+      maxDistance: 180,
+    });
+    this.mediaSource.connect(this.interiorGain).connect(ctx.destination);
+    this.mediaSource.connect(this.exteriorMono).connect(this.exteriorFilter).connect(this.panner).connect(this.exteriorGain).connect(ctx.destination);
+
     this.element.addEventListener('playing', this.onPlaying);
     this.element.addEventListener('waiting', this.onWaiting);
     this.element.addEventListener('error', this.onError);
@@ -62,10 +106,7 @@ export class Radio {
     return RADIO_STATIONS[this.stationIndex]!;
   }
 
-  /**
-   * HUD line, or null when there is nothing to say: the radio is a car fitting, so
-   * on foot it is not merely off — it is not there.
-   */
+  /** HUD line, or null when the radio has no dashboard to report on. */
   get readout(): string | null {
     if (!this.inCar) return null;
     if (!this.on) return 'RADIO OFF';
@@ -91,11 +132,56 @@ export class Radio {
     return this.station;
   }
 
-  /** Driving or not. The only gate on whether the radio can be heard at all. */
+  /** Updates dashboard state; leaving the car does not stop its radio. */
   setInCar(inCar: boolean): void {
     if (this.inCar === inCar) return;
     this.inCar = inCar;
+    if (inCar) this.sourceReady = true;
     this.sync();
+  }
+
+  /** Crossfades the untouched cabin branch and muffled exterior branch. */
+  setInterior(interior: boolean): void {
+    if (this.interior === interior) return;
+    this.interior = interior;
+    const now = this.mixer.now;
+    ramp(this.interiorGain.gain, interior ? 1 : 0, now, SPATIAL_RAMP_SECONDS);
+    ramp(this.exteriorGain.gain, interior ? 0 : 1, now, SPATIAL_RAMP_SECONDS);
+  }
+
+  /** Updates the listener pose without allocating per frame. */
+  setListener(spatial: RadioSpatialState): void {
+    const listener = this.mixer.ctx.listener;
+    listener.positionX.value = spatial.listenerX;
+    listener.positionY.value = spatial.listenerY;
+    listener.positionZ.value = spatial.listenerZ;
+
+    const { listenerQx: x, listenerQy: y, listenerQz: z, listenerQw: w } = spatial;
+    // Camera local forward is -Z and local up is +Y.
+    listener.forwardX.value = -2 * (x * z + y * w);
+    listener.forwardY.value = 2 * (x * w - y * z);
+    listener.forwardZ.value = -1 + 2 * (x * x + y * y);
+    listener.upX.value = 2 * (x * y - z * w);
+    listener.upY.value = 1 - 2 * (x * x + z * z);
+    listener.upZ.value = 2 * (y * z + x * w);
+  }
+
+  /** Updates this car's source position when it is the driven car. */
+  setSourcePosition(x: number, y: number, z: number): void {
+    const now = this.mixer.now;
+    // The car is intentionally not snapped to the listener: PannerNode supplies
+    // both distance attenuation and left/right localization from this pose.
+    this.panner.positionX.setTargetAtTime(x, now, SPATIAL_RAMP_SECONDS);
+    this.panner.positionY.setTargetAtTime(y, now, SPATIAL_RAMP_SECONDS);
+    this.panner.positionZ.setTargetAtTime(z, now, SPATIAL_RAMP_SECONDS);
+  }
+
+  /** Updates the listener and, when supplied, this car's source pose. */
+  setSpatial(spatial: RadioSpatialState): void {
+    this.setListener(spatial);
+    if (spatial.sourceX !== null && spatial.sourceY !== null && spatial.sourceZ !== null) {
+      this.setSourcePosition(spatial.sourceX, spatial.sourceY, spatial.sourceZ);
+    }
   }
 
   setVolume(volume: number): void {
@@ -110,20 +196,18 @@ export class Radio {
     this.sync();
   }
 
-  /**
-   * Brings the element in line with the desired state. Everything above changes a
-   * flag and calls this, so there is exactly one place that decides whether the
-   * stream should be connected.
-   */
+  /** Brings the stream in line with its desired state. */
   private sync(): void {
     if (this.disposed) return;
-    const shouldPlay = this.on && this.inCar && !this.paused;
+    // sourceReady survives exit: the last car remains the radio's sound source while
+    // the player walks away. Only switching off, pausing, or never having entered a
+    // car tears down the live connection.
+    const shouldPlay = this.on && this.sourceReady && !this.paused;
 
     if (!shouldPlay) {
       this.clearRetry();
       this.element.pause();
-      // Dropping the source is what actually closes the connection; pausing a live
-      // stream leaves it buffering in the background.
+      // Dropping the source actually closes the live connection.
       this.element.removeAttribute('src');
       this.status = 'offline';
       return;
@@ -148,7 +232,7 @@ export class Radio {
     if (this.retryTimer !== 0 || this.disposed) return;
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = 0;
-      if (this.on && this.inCar && !this.paused) this.sync();
+      if (this.on && this.sourceReady && !this.paused) this.sync();
     }, RETRY_DELAY_MS);
   }
 
@@ -168,7 +252,7 @@ export class Radio {
   };
 
   private onError = (): void => {
-    if (!this.on || !this.inCar || this.paused) return;
+    if (!this.on || !this.sourceReady || this.paused) return;
     this.status = 'offline';
     this.scheduleRetry();
   };
@@ -186,3 +270,5 @@ export class Radio {
     this.element.removeAttribute('src');
   }
 }
+
+type Status = 'connecting' | 'live' | 'offline';

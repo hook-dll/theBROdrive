@@ -14,33 +14,69 @@ import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer } from './mixer';
 import { VehicleAudio } from './vehicleaudio';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
-import { Radio } from './radio';
+import { Radio, type RadioSpatialState } from './radio';
+export type { RadioSpatialState } from './radio';
 
 export class GameAudio {
   private readonly mixer = new AudioMixer();
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
-  private readonly radioDevice = new Radio();
+  private readonly radios = new Map<string, Radio>();
+  private activeRadioId: string | null = null;
+  private radioVolume = 1;
 
   applySettings(settings: Settings): void {
     this.mixer.setVolume(settings.masterVolume);
-    this.radioDevice.setVolume(settings.radioVolume);
+    this.radioVolume = settings.radioVolume;
+    for (const radio of this.radios.values()) radio.setVolume(this.radioVolume);
   }
 
   setPaused(paused: boolean): void {
     this.mixer.setPaused(paused);
-    this.radioDevice.setPaused(paused);
+    for (const radio of this.radios.values()) radio.setPaused(paused);
   }
 
   /**
-   * Per-frame car audio. `state` is null when the player is not driving, which
-   * fades the car voices out and switches the radio off the air — it is a car
-   * radio, and the seat is the only place it exists.
+   * Per-frame car audio. Every entered car owns its own radio stream; inactive
+   * radios remain spatial sources while the listener walks around the world.
    */
-  updateDriving(state: VehicleAudioState | null, interior: boolean): void {
+  updateDriving(
+    state: VehicleAudioState | null,
+    interior: boolean,
+    radioSpatial: RadioSpatialState,
+    radioCarId: string | null,
+  ): void {
     this.vehicle.setActive(state !== null);
     if (state) this.vehicle.update(state, interior);
-    this.radioDevice.setInCar(state !== null);
+    this.activeRadioId = radioCarId;
+
+    for (const [id, radio] of this.radios) {
+      radio.setListener(radioSpatial);
+      if (id === radioCarId) {
+        if (
+          radioSpatial.sourceX !== null &&
+          radioSpatial.sourceY !== null &&
+          radioSpatial.sourceZ !== null
+        ) {
+          radio.setSourcePosition(radioSpatial.sourceX, radioSpatial.sourceY, radioSpatial.sourceZ);
+        }
+        radio.setInterior(interior);
+        radio.setInCar(true);
+      } else {
+        radio.setInterior(false);
+        radio.setInCar(false);
+      }
+    }
+  }
+
+  private radioFor(carId: string): Radio {
+    let radio = this.radios.get(carId);
+    if (!radio) {
+      radio = new Radio(this.mixer);
+      radio.setVolume(this.radioVolume);
+      this.radios.set(carId, radio);
+    }
+    return radio;
   }
 
   /** Per-frame on-foot audio. Silent while seated (speed 0, grounded). */
@@ -76,25 +112,28 @@ export class GameAudio {
     this.foleyVoices.reload();
   }
 
-  /** Toggles the radio; returns the line to toast. */
-  toggleRadio(): string {
-    return this.radioDevice.toggle() ? `radio on — ${this.radioDevice.station.label}` : 'radio off';
+  /** Toggles the radio in the specified car; returns the line to toast. */
+  toggleRadio(carId: string): string {
+    const radio = this.radioFor(carId);
+    return radio.toggle() ? `radio on — ${radio.station.label}` : 'radio off';
   }
 
-  /** Next station; returns the line to toast. */
-  nextStation(): string {
-    return `radio — ${this.radioDevice.next().label}`;
+  /** Next station in the specified car; returns the line to toast. */
+  nextStation(carId: string): string {
+    const radio = this.radioFor(carId);
+    return `radio — ${radio.next().label}`;
   }
 
-  /** HUD line for the radio, or null when there is nothing to show. */
+  /** HUD line for the active car's radio, or null outside a car. */
   get radioReadout(): string | null {
-    return this.radioDevice.readout;
+    return this.activeRadioId ? (this.radios.get(this.activeRadioId)?.readout ?? null) : null;
   }
 
   dispose(): void {
     this.vehicle.dispose();
     this.foleyVoices.dispose();
-    this.radioDevice.dispose();
+    for (const radio of this.radios.values()) radio.dispose();
+    this.radios.clear();
     this.mixer.dispose();
   }
 }

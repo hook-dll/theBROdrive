@@ -80,7 +80,7 @@ import {
 } from './vehicle/trailer';
 import { Vehicle, type WheelSprayState } from './vehicle/vehicle';
 import type { TrunkViewState } from './vehicle/trunk';
-import { GameAudio } from './audio/gameaudio';
+import { GameAudio, type RadioSpatialState } from './audio/gameaudio';
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -688,6 +688,21 @@ async function boot(): Promise<void> {
    */
   const litVehicles: Vehicle[] = [];
 
+  // Reused radio pose. The radio keeps the last non-null source coordinates after
+  // exit, while the listener follows the camera every rendered frame.
+  const radioSpatial: RadioSpatialState = {
+    sourceX: null,
+    sourceY: null,
+    sourceZ: null,
+    listenerX: 0,
+    listenerY: 0,
+    listenerZ: 0,
+    listenerQx: 0,
+    listenerQy: 0,
+    listenerQz: 0,
+    listenerQw: 1,
+  };
+
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
     const f = input.sample(dt);
@@ -970,8 +985,8 @@ async function boot(): Promise<void> {
 
     // Radio: a car fitting, so the keys only do anything from the seat.
     if (driving) {
-      if (f.radioToggle) hud.setToast(audio.toggleRadio());
-      if (f.radioNext) hud.setToast(audio.nextStation());
+      if (f.radioToggle) hud.setToast(audio.toggleRadio(drivingId!));
+      if (f.radioNext) hud.setToast(audio.nextStation(drivingId!));
     }
 
     // Shooting: the held item decides. A kill only enters the inventory if it fits,
@@ -1333,8 +1348,24 @@ async function boot(): Promise<void> {
 
     // Car audio follows the camera, not the simulation: whether the shell is
     // between the listener and the noise is what decides how the engine, wind and
-    // tyres are filtered, and that is a view question.
-    audio.updateDriving(driving ? driving.audio : null, camera.mode === 'interior');
+    // tyres are filtered, and that is a view question. The radio additionally keeps
+    // its last car as a spatial source after the player steps out.
+    radioSpatial.sourceX = driving?.root.position.x ?? null;
+    radioSpatial.sourceY = driving?.root.position.y ?? null;
+    radioSpatial.sourceZ = driving?.root.position.z ?? null;
+    radioSpatial.listenerX = cam.x;
+    radioSpatial.listenerY = cam.y;
+    radioSpatial.listenerZ = cam.z;
+    radioSpatial.listenerQx = renderer.camera.quaternion.x;
+    radioSpatial.listenerQy = renderer.camera.quaternion.y;
+    radioSpatial.listenerQz = renderer.camera.quaternion.z;
+    radioSpatial.listenerQw = renderer.camera.quaternion.w;
+    audio.updateDriving(
+      driving ? driving.audio : null,
+      camera.mode === 'interior',
+      radioSpatial,
+      driving ? drivingId! : null,
+    );
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
