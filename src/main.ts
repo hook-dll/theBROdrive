@@ -1194,7 +1194,11 @@ async function boot(): Promise<void> {
       driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
     camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
-    hud.setSeatCalibration(camera.isSeatAdjusting, camera.interiorCoordinates);
+    hud.setSeatCalibration(
+      camera.isSeatAdjusting,
+      driving ? carModel(s.cars[drivingId!]?.modelId ?? DEFAULT_CAR_MODEL_ID).label : '',
+      camera.interiorCoordinates,
+    );
 
     const cam = renderer.camera.position;
     sky.update(

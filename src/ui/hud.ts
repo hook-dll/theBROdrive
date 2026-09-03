@@ -400,6 +400,7 @@ export class Hud {
   }
   setSeatCalibration(
     active: boolean,
+    carName: string,
     coordinates: { readonly x: number; readonly y: number; readonly z: number },
   ): void {
     this.setVisible(this.seatCalibrationEl, active);
@@ -408,8 +409,8 @@ export class Hud {
       return;
     }
     const signature =
-      `SEAT CALIBRATION · I to finish · WASDZX move\n` +
-      `LOCAL METRES · +X left · +Y up · +Z forward\n` +
+      `${carName}\n` +
+      `WS AD ZX\n` +
       `X ${coordinates.x.toFixed(3)}  Y ${coordinates.y.toFixed(3)}  Z ${coordinates.z.toFixed(3)}`;
     this.seatCalibrationSignature = signature;
     this.setText(this.seatCalibrationEl, signature);

@@ -49,6 +49,8 @@ const CHASE_RECENTER_IDLE_SECONDS = 6;
 const CHASE_RECENTER_OMEGA = 2;
 /** Ignore sub-pixel touch jitter when deciding whether horizontal look is active. */
 const CHASE_LOOK_ACTIVITY_EPSILON = 1e-3;
+/** Interior view starts returning forward after one second without mouse/touch look. */
+const INTERIOR_RECENTER_IDLE_SECONDS = 1;
 /**
  * Log-distance added per wheel notch. Distance is `exp(logDistance)`, so a
  * notch always multiplies distance by a fixed factor. That is the only way one
@@ -181,6 +183,8 @@ export class CameraRig {
   private recenterYaw = 0;
   /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
+  /** Seconds since the last interior-camera yaw or pitch input. */
+  private interiorLookIdle = 0;
   /** True while I enables interior seat calibration controls. */
   private seatAdjusting = false;
   /** Mutable chassis-local driver eye used while calibrating the interior camera. */
@@ -351,10 +355,17 @@ export class CameraRig {
     // activity lets that noise postpone recentering forever.
     // Vertical look is independent: it neither recentres pitch nor resets this timer.
     const horizontalLookActive = Math.abs(input.lookYaw) >= CHASE_LOOK_ACTIVITY_EPSILON;
+    const rotationLookActive =
+      horizontalLookActive || Math.abs(input.lookPitch) >= CHASE_LOOK_ACTIVITY_EPSILON;
     if (inputMode === 'chase') {
       this.chaseLookIdle = horizontalLookActive ? 0 : this.chaseLookIdle + d;
     } else {
       this.chaseLookIdle = 0;
+    }
+    if (inputMode === 'interior') {
+      this.interiorLookIdle = rotationLookActive ? 0 : this.interiorLookIdle + d;
+    } else {
+      this.interiorLookIdle = 0;
     }
 
     // Re-centre (V): level pitch and, in an external view, ease toward the
@@ -399,6 +410,26 @@ export class CameraRig {
         const k = 1 - Math.exp(-CHASE_RECENTER_OMEGA * d);
         this.yawValue = wrapAngle(this.yawValue + yawError * k);
       }
+    }
+    // The cabin view is body-local, so its rest pose is exactly zero yaw and pitch.
+    // After one second without rotation input, ease both axes forward. Any new look
+    // input resets the timer above before this block can act, so the return never
+    // fights the player.
+    if (
+      inputMode === 'interior' &&
+      !this.recentering &&
+      this.interiorLookIdle >= INTERIOR_RECENTER_IDLE_SECONDS
+    ) {
+      const yawError = wrapAngle(-this.yawValue);
+      const k = 1 - Math.exp(-RECENTER_OMEGA * d);
+      this.yawValue =
+        Math.abs(yawError) < RECENTER_EPSILON
+          ? 0
+          : wrapAngle(this.yawValue + yawError * k);
+      this.pitch =
+        Math.abs(this.pitch) < RECENTER_EPSILON
+          ? 0
+          : this.pitch + (0 - this.pitch) * k;
     }
 
     // Wobble phases. Bob only advances while moving, so it freezes at rest.

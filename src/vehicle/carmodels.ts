@@ -428,6 +428,8 @@ export interface CarModelDef {
    * render/carmodel.ts.
    */
   readonly viewFrac: readonly [number, number, number];
+  /** Exact chassis-local in-car camera point, overriding geometric measurement. */
+  readonly viewPoint?: readonly [number, number, number];
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
@@ -877,6 +879,7 @@ interface StylizedSpec {
   readonly steerLock: number;
   readonly rearDriveBias: number;
   readonly suspension?: SuspensionTuning;
+  readonly viewPoint?: readonly [number, number, number];
   /** This body's coachwork ramp in the 32x32 palette. */
   readonly paint: PalettePaintRamp;
   /** Set for the three supercars the pack gave no indicator lenses. */
@@ -1201,6 +1204,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     rearDriveBias: 1,
     suspension: SUSP_SPORT,
     paint: ramp(18, 2, 0, 16, 5),
+    viewPoint: [0.42, 0.274, 0.182],
   },
 
   // ---- SpecialCar1-5: service vehicles. Two saloons, an ambulance, a bullion
@@ -1406,6 +1410,7 @@ const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
     suspension: spec.suspension,
     steerLock: spec.steerLock,
     rearDriveBias: spec.rearDriveBias,
+    viewPoint: spec.viewPoint,
   } satisfies Entry;
 });
 
@@ -1451,6 +1456,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
+  viewPoint: e.viewPoint,
   lights: e.lights,
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   storageCells: TRUNK_CELL_COUNT,
