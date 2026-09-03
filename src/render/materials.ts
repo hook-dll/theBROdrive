@@ -52,9 +52,10 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /**
  * Body paint adds mesh-local dent relief in the same single shader permutation.
- * Version v5 widens the dent field; cached v4 programs retain the old lobe scale.
+ * Version v6 passes the complete local-to-world basis to avoid a fragment
+ * cross-product precision-loss path on D3D/ANGLE.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v5';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v6';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -78,13 +79,14 @@ const VERTEX_VARYING =
   'varying vec3 vCondWorldNormal;\n' +
   'varying vec3 vCondLocalPos;\n' +
   'varying vec3 vCondLocalNormal;\n' +
-  // The mesh's own X and Y axes in world space. A mesh-local gradient (the dent
-  // relief) has to be rotated into world space to perturb a normal, and
-  // `modelMatrix` is declared by three.js in the VERTEX stage only — using it in the
-  // fragment shader silently fails to compile, which drops the whole body mesh from
-  // the frame. Two axes are enough: the third is their cross product.
+  // The mesh's own X/Y/Z axes in world space. A mesh-local gradient (the dent
+  // relief) has to be rotated into world space to perturb a normal, and `modelMatrix`
+  // is declared by three.js in the VERTEX stage only — using it in the fragment shader
+  // silently fails to compile. Passing the complete basis also avoids a fragment
+  // cross-product subtracting nearly equal values on D3D/ANGLE.
   'varying vec3 vCondAxisX;\n' +
-  'varying vec3 vCondAxisY;';
+  'varying vec3 vCondAxisY;\n' +
+  'varying vec3 vCondAxisZ;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
 // exact world transform for the normal (no inverse-transpose required).
@@ -95,7 +97,8 @@ const WORLD_POS_HOOK =
   '\tvCondLocalPos = transformed;\n' +
   '\tvCondLocalNormal = objectNormal;\n' +
   '\tvCondAxisX = normalize( mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 ) );\n' +
-  '\tvCondAxisY = normalize( mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 ) );';
+  '\tvCondAxisY = normalize( mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 ) );\n' +
+  '\tvCondAxisZ = normalize( mat3( modelMatrix ) * vec3( 0.0, 0.0, 1.0 ) );';
 
 const CONDITION_PARS = `
 uniform float uDirt;
@@ -367,7 +370,7 @@ if ( uScratches > 0.001 ) {
   vec3 dentWG =
     vCondAxisX * dentGrad.x +
     vCondAxisY * dentGrad.y +
-    cross( vCondAxisX, vCondAxisY ) * dentGrad.z;
+    vCondAxisZ * dentGrad.z;
   vec3 dentVG = ( viewMatrix * vec4( dentWG, 0.0 ) ).xyz;
   // PLUS, not minus. The field is a DEPTH: the panel is pressed IN where the mask is
   // high, so the surface falls away along the gradient and the normal leans with it.

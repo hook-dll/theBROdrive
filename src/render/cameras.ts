@@ -116,6 +116,8 @@ const SWAY_ROLL_GAIN = SWAY_ROLL_MAX / SWAY_ACCEL_FULL;
 const LOG_MIN = Math.log(DIST_MIN);
 const LOG_MAX = Math.log(DIST_MAX);
 const LOG_CHASE_MAX = Math.log(CHASE_MAX);
+/** Interior seat calibration speed, metres per second while an axis is held. */
+const SEAT_ADJUST_SPEED = 0.6;
 
 /* ---- module-level scratch: `update()` must not allocate ---- */
 const _vA = new THREE.Vector3();
@@ -179,6 +181,11 @@ export class CameraRig {
   private recenterYaw = 0;
   /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
+  /** True while I enables interior seat calibration controls. */
+  private seatAdjusting = false;
+  /** Mutable chassis-local driver eye used while calibrating the interior camera. */
+  private readonly interiorOffset = new THREE.Vector3();
+  private savedInteriorOffset: readonly [number, number, number] | null = null;
 
   private binoculars = false;
   /**
@@ -230,7 +237,6 @@ export class CameraRig {
   get mode(): CameraMode {
     return this.onFoot ? 'foot' : this._mode;
   }
-
   /** On-foot view heading (0 = +Z, + = +X); drives camera-relative movement. */
   get yaw(): number {
     return this.yawValue;
@@ -238,6 +244,30 @@ export class CameraRig {
 
   get eyePosition(): { x: number; y: number; z: number } {
     return { x: this.eye.x, y: this.eye.y, z: this.eye.z };
+  }
+
+  /** True while the interior camera is in seat-adjustment mode. */
+  get isSeatAdjusting(): boolean {
+    return this.seatAdjusting;
+  }
+
+  /** Current chassis-local interior camera coordinates, in metres. */
+  get interiorCoordinates(): { x: number; y: number; z: number } {
+    return {
+      x: this.interiorOffset.x,
+      y: this.interiorOffset.y,
+      z: this.interiorOffset.z,
+    };
+  }
+
+  /** I toggles calibration only from the interior driving view. */
+  toggleSeatAdjusting(): void {
+    if (this.mode !== 'interior') return;
+    this.seatAdjusting = !this.seatAdjusting;
+  }
+  /** Applies the saved global calibration used instead of each model's authored eye. */
+  setInteriorCameraOffset(offset: readonly [number, number, number] | null): void {
+    this.savedInteriorOffset = offset;
   }
 
   /** Unit view direction of the *smoothed* camera, for interaction raycasts. */
@@ -254,6 +284,7 @@ export class CameraRig {
     // Foot is derived from `onFoot`; retaining the driving selection is what makes
     // a chase view, its orbit and its zoom still be there after re-entering a car.
     if (mode !== 'foot') this._mode = mode;
+    if (mode !== 'interior') this.seatAdjusting = false;
   }
 
   /**
@@ -270,6 +301,7 @@ export class CameraRig {
    */
   cycleDriving(): void {
     this._mode = this._mode === 'interior' ? 'chase' : 'interior';
+    if (this._mode !== 'interior') this.seatAdjusting = false;
   }
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {
@@ -279,6 +311,7 @@ export class CameraRig {
     // between a cabin and a standing pose must not spring-in (a fly-through).
     if (onFoot !== this.onFoot) {
       if (onFoot) {
+        this.seatAdjusting = false;
         // `snapFoot` must reuse yaw/pitch for camera-relative walking, so retain the
         // driving orbit first. Otherwise looking around on foot overwrites where the
         // chase camera was aimed even though its zoom survives.
@@ -400,7 +433,7 @@ export class CameraRig {
         this.desiredFoot(target, moveMag);
         break;
       case 'interior':
-        this.desiredInterior(target, d);
+        this.desiredInterior(target, d, input);
         break;
       case 'chase':
         this.desiredArm(target);
@@ -473,9 +506,14 @@ export class CameraRig {
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
   }
 
-  private desiredInterior(target: CameraTarget, dt: number): void {
+  private desiredInterior(target: CameraTarget, dt: number, input: InputFrame): void {
+    if (this.seatAdjusting) {
+      this.interiorOffset.x += input.seatMoveX * SEAT_ADJUST_SPEED * dt;
+      this.interiorOffset.y += input.seatMoveY * SEAT_ADJUST_SPEED * dt;
+      this.interiorOffset.z += input.seatMoveZ * SEAT_ADJUST_SPEED * dt;
+    }
     _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.set(target.eyeOffset[0], target.eyeOffset[1], target.eyeOffset[2]).applyQuaternion(_qA);
+    _vC.copy(this.interiorOffset).applyQuaternion(_qA);
     _vA.set(target.x, target.y, target.z).add(_vC);
 
     // G-force sway: a bounded offset around the fixed eye point above,
@@ -540,6 +578,8 @@ export class CameraRig {
    * vehicle) never turns into a one-frame velocity spike.
    */
   private resetSway(target: CameraTarget): void {
+    const offset = this.savedInteriorOffset ?? target.eyeOffset;
+    this.interiorOffset.set(offset[0], offset[1], offset[2]);
     this.swayPrevPos.set(target.x, target.y, target.z);
     this.swayPrevFwdSpeed = 0;
     this.swayPrevLatSpeed = 0;
@@ -689,7 +729,6 @@ export class CameraRig {
       this.yawValue = Math.atan2(_vC.x, _vC.z);
       this.pitch = Math.asin(clamp(_vC.y, -1, 1));
     } else {
-      this.yawValue = 0;
       this.pitch = 0;
     }
     this.eye.set(target.x, target.y + EYE_HEIGHT, target.z);
@@ -697,10 +736,11 @@ export class CameraRig {
     this.fov = BASE_FOV;
   }
 
-  /** Snap into the remembered interior heading; never fly through the cabin on entry. */
   private snapInterior(target: CameraTarget): void {
+    const offset = this.savedInteriorOffset ?? target.eyeOffset;
+    this.interiorOffset.set(offset[0], offset[1], offset[2]);
     _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.set(target.eyeOffset[0], target.eyeOffset[1], target.eyeOffset[2]).applyQuaternion(_qA);
+    _vC.copy(this.interiorOffset).applyQuaternion(_qA);
     this.eye.set(target.x, target.y, target.z).add(_vC);
     this.lookVector(_vD);
     _vD.applyQuaternion(_qA);

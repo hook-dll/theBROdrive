@@ -28,6 +28,8 @@ import {
 import {
   CAR_MODELS,
   STYLIZED_PAINT_MATERIAL,
+  STYLIZED_TAILLIGHT_COLOR,
+  STYLIZED_TAILLIGHT_MATERIAL,
   carModel,
   type CarModelDef,
   type GizmoAnchorDef,
@@ -321,6 +323,31 @@ function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void
     child.material = Array.isArray(child.material)
       ? child.material.map(eligible)
       : eligible(child.material);
+  });
+}
+/** Gives static Stylized brake lenses the same red surface as driven vehicles. */
+function tintStaticStylizedTaillights(root: THREE.Object3D, def: CarModelDef): void {
+  if (def.paintStyle !== 'stylized-palette') return;
+  const clones = new Map<THREE.Material, THREE.Material>();
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const tint = (source: THREE.Material): THREE.Material => {
+      if (source.name !== STYLIZED_TAILLIGHT_MATERIAL) return source;
+      const existing = clones.get(source);
+      if (existing) return existing;
+      const material = source.clone();
+      if (
+        material instanceof THREE.MeshStandardMaterial ||
+        material instanceof THREE.MeshPhongMaterial
+      ) {
+        material.color.setHex(STYLIZED_TAILLIGHT_COLOR);
+      }
+      clones.set(source, material);
+      return material;
+    };
+    child.material = Array.isArray(child.material)
+      ? child.material.map(tint)
+      : tint(child.material);
   });
 }
 
@@ -938,6 +965,8 @@ function driverEyePoint(scene: THREE.Group): [number, number, number] | null {
  */
 const EYE_ABOVE_WHEEL_M = 0.14;
 const EYE_BEHIND_WHEEL_M = 0.38;
+/** Global lift applied to every model's current authored/measured interior eye. */
+const INTERIOR_EYE_DEFAULT_LIFT_M = 0.2;
 
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
@@ -1016,6 +1045,8 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene);
   scene.updateMatrixWorld(true);
+  const eyePoint = driverEyePoint(scene) ?? resolveFrac(def.viewFrac);
+  eyePoint[1] += INTERIOR_EYE_DEFAULT_LIFT_M;
 
   // The model's origin is on the ground between the wheels, so the distance from
   // the chassis centre down to that origin is exactly the spawn clearance needed
@@ -1023,7 +1054,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
-    eyePoint: driverEyePoint(scene) ?? resolveFrac(def.viewFrac),
+    eyePoint,
     anchors,
     visualOffset: [-centre.x, -centre.y, -centre.z],
   };
@@ -1208,6 +1239,7 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   group.name = id;
   const body = t.body.clone(true);
   cloneStaticPaintMaterials(body, t.def);
+  tintStaticStylizedTaillights(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   group.add(body);

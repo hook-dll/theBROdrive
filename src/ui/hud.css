@@ -213,6 +213,23 @@ body {
   padding: 7px 14px;
   pointer-events: none;
 }
+.hud-seat-calibration {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  white-space: pre;
+  text-align: center;
+  font-family: 'Consolas', 'SFMono-Regular', monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--hud-fg);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 8px 12px;
+  pointer-events: none;
+}
 
 .hud-gum-bubble {
   --gum-grow: 0;

@@ -109,6 +109,8 @@ export interface Settings {
    * without disturbing the wheel.
    */
   mouseSteering: boolean;
+  /** Optional calibrated chassis-local interior camera position, in metres. */
+  interiorCameraOffset: readonly [number, number, number] | null;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
@@ -157,6 +159,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
   mouseSteering: false,
+  interiorCameraOffset: null,
 };
 
 /**
@@ -201,6 +204,13 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
       ? obj.mouseSensitivity
       : DEFAULT_MOUSE_SENSITIVITY;
+  const interiorOffsetRaw = obj.interiorCameraOffset;
+  const interiorCameraOffset =
+    Array.isArray(interiorOffsetRaw) &&
+    interiorOffsetRaw.length === 3 &&
+    interiorOffsetRaw.every((value) => typeof value === 'number' && Number.isFinite(value))
+      ? [interiorOffsetRaw[0]!, interiorOffsetRaw[1]!, interiorOffsetRaw[2]!] as const
+      : null;
 
   // Missing unit-interval settings mean an old save: use the authored default.
   const unitInterval = (value: unknown, fallback: number): number =>
@@ -243,6 +253,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Anything but an explicit true is off, which is what an old save (no such
     // field) should get: nothing surprising happens the first time you drive it.
     mouseSteering: obj.mouseSteering === true,
+    interiorCameraOffset,
   };
 
   const rawBindings = obj.keyBindings;
