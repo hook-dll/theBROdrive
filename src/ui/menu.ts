@@ -15,7 +15,7 @@ import {
 } from '../game/settings';
 import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
-import { modelEngine, SPAWNABLE_CAR_MODELS } from '../vehicle/carmodels';
+import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import type { FluidKind, ShadeTint } from '../items/items';
 
 /**
@@ -1169,13 +1169,13 @@ export class MainMenu {
       };
 
       // Spawn selection resets per pause, so every visit starts at the first model.
-      let spawnModelId = SPAWNABLE_CAR_MODELS[0].id;
+      let spawnModelId = CAR_MODELS[0].id;
 
       // The screen itself is unconditional; only the reference below is gated, so
       // the body keeps its indentation and `import.meta.env.DEV` still folds to a
       // constant. In production `renderSpawn` is null, `renderSpawnScreen` becomes
       // unreferenced, and the minifier drops the screen, its labels and
-      // `SPAWNABLE_CAR_MODELS` together.
+      // `CAR_MODELS` together.
       const renderSpawnScreen = (): void => {
         panel.textContent = '';
 
@@ -1194,7 +1194,7 @@ export class MainMenu {
         const paintModels = (): void => {
           modelList.textContent = '';
           for (const layout of DRIVE_LAYOUTS) {
-            const models = SPAWNABLE_CAR_MODELS.filter(
+            const models = CAR_MODELS.filter(
               (def) => driveLayout(def.rearDriveBias) === layout.id,
             );
             if (models.length === 0) continue;
@@ -1239,7 +1239,7 @@ export class MainMenu {
 
         const spawnNote = el('div', 'menu-note');
         const paintNote = (): void => {
-          const def = SPAWNABLE_CAR_MODELS.find((m) => m.id === spawnModelId);
+          const def = CAR_MODELS.find((m) => m.id === spawnModelId);
           if (!def) {
             spawnNote.textContent = spawnModelId;
             return;

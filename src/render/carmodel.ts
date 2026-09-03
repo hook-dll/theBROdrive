@@ -24,16 +24,30 @@ import {
   makeCarPalettePaintMaterial,
   setCarBodyPalettePaint,
 } from './materials';
-import { isProceduralCarPaintMaterial, proceduralCarScene } from './proceduralcars';
-import { CAR_MODELS, carModel, type CarModelDef, type GizmoAnchorDef } from '../vehicle/carmodels';
+import {
+  CAR_MODELS,
+  STYLIZED_PAINT_MATERIAL,
+  carModel,
+  type CarModelDef,
+  type GizmoAnchorDef,
+  type PalettePaintRamp,
+} from '../vehicle/carmodels';
 
-/** Wheel node names in the kit, mapped to the ids the vehicle and saves use. */
-const WHEEL_NODES: readonly (readonly [string, string])[] = [
-  ['wheel-front-left', 'wheel_fl'],
-  ['wheel-front-right', 'wheel_fr'],
-  ['wheel-back-left', 'wheel_rl'],
-  ['wheel-back-right', 'wheel_rr'],
-];
+/** The four wheels the vehicle controller drives, in the order it expects them. */
+const WHEEL_IDS = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'] as const;
+type WheelId = (typeof WHEEL_IDS)[number];
+
+/**
+ * Node names for a model whose wheels are found by SHAPE. `renameDetectedWheels`
+ * writes these, so a detected pack and a pack that names its own wheels reach
+ * `takeOwnWheels` looking identical.
+ */
+const DETECTED_WHEEL_NODES: Readonly<Record<WheelId, readonly string[]>> = {
+  wheel_fl: ['wheel-front-left'],
+  wheel_fr: ['wheel-front-right'],
+  wheel_rl: ['wheel-back-left'],
+  wheel_rr: ['wheel-back-right'],
+};
 
 /**
  * Finds a model's four wheels by SHAPE rather than by name, and renames them to the
@@ -46,8 +60,9 @@ const WHEEL_NODES: readonly (readonly [string, string])[] = [
  * other two axes) and is then assigned to a corner by the sign of its centre:
  * +X is left (the models face +Z), +Z is front.
  *
- * Returns false when the model does not yield exactly four, so the caller can fall
- * back to a shared wheel model instead of half-wheeling the car.
+ * Returns false when the model does not yield exactly four, which is a hard error
+ * for the caller: half-wheeling a car is worse than refusing to load it. A pack
+ * that names its wheels consistently sets `wheelNodes` and skips this entirely.
  */
 function renameDetectedWheels(scene: THREE.Group): boolean {
   const candidates: { node: THREE.Object3D; centre: THREE.Vector3 }[] = [];
@@ -135,19 +150,36 @@ const templates = new Map<string, Template>();
  */
 const warmDrivingInstances = new Map<string, CarModelInstance>();
 const warmStaticInstances = new Map<string, THREE.Object3D>();
-/**
- * Parsed scenes for multi-vehicle pack files, keyed by URL. Several catalogue
- * entries share one GLB (the low-poly pack holds 21 bodies in one file), so the
- * file is parsed once and each entry extracts its own subtree from the cached
- * scene rather than re-parsing the buffer per vehicle.
- */
-const packScenes = new Map<string, THREE.Group>();
 let gltf: GLTFLoader | null = null;
 let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
 
-/** Models built in code rather than loaded (see render/proceduralcars.ts). */
-const PROCEDURAL_SCHEME = 'procedural://';
+/**
+ * Redirects the Stylized pack's texture references from the PSD Unity ships to the
+ * PNG a browser can decode.
+ *
+ * Its FBX files name `PixelColors.psd` internally, with an absolute path from the
+ * artist's machine. FBXLoader takes the basename and asks for it beside the model,
+ * which no browser will decode, so the reference is rewritten to the converted PNG
+ * sitting at exactly that stem (tools/psd-to-png.mjs). Rewriting the request beats
+ * patching the reference inside 31 binary FBX files, and the catalogue names the
+ * same PNG as its `textureFile`, so the rewrite and the shared palette resolve to
+ * one URL and one fetch.
+ *
+ * The rewrite DELEGATES to the default manager rather than replacing it. Headless
+ * tools install their own modifier there to turn the game's root-absolute asset
+ * paths into file URLs (tools/assetshim.ts); resolving through it at request time
+ * composes with whatever they installed, in either install order.
+ */
+function fbxLoader(): FBXLoader {
+  if (fbx) return fbx;
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((url) =>
+    THREE.DefaultLoadingManager.resolveURL(url.replace(/\.psd$/i, '.png')),
+  );
+  fbx = new FBXLoader(manager);
+  return fbx;
+}
 
 /**
  * Produces one model's scene graph, picking the source from its URL.
@@ -157,14 +189,9 @@ const PROCEDURAL_SCHEME = 'procedural://';
  * FBXs contain Blender scene lights, which overwhelmed the sun around each car.
  */
 async function loadScene(file: string): Promise<THREE.Group> {
-  if (file.startsWith(PROCEDURAL_SCHEME)) {
-    return proceduralCarScene(file.slice(PROCEDURAL_SCHEME.length));
-  }
-
   let scene: THREE.Group;
   if (file.toLowerCase().endsWith('.fbx')) {
-    fbx ??= new FBXLoader();
-    scene = await fbx.loadAsync(file);
+    scene = await fbxLoader().loadAsync(file);
   } else {
     gltf ??= new GLTFLoader();
     scene = (await gltf.loadAsync(file)).scene;
@@ -180,7 +207,7 @@ async function loadScene(file: string): Promise<THREE.Group> {
   return scene;
 }
 
-/** Curated factory colours shared by the two roadworthy imported packs. */
+/** Curated factory colours shared by both imported packs. */
 const CAR_PAINT_COLORS: readonly number[] = [
   0x2f5f87, // deep blue
   0x74a3bd, // powder blue
@@ -212,32 +239,40 @@ function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
   return paintScratch.setHex(CAR_PAINT_COLORS[(h >>> 0) % CAR_PAINT_COLORS.length]!);
 }
 
+/**
+ * Whether a mesh carries any of its body's paint.
+ *
+ * Soviet bodies are one mesh each, named `<model>body`. Stylized bodies spread
+ * their paint over the shell, the four doors and the interior trim, every one of
+ * which uses the pack's single palette material — so the mesh is selected by what
+ * it is made of rather than by name, and the glass and lens meshes fall out.
+ */
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
   if (def.paintStyle === 'soviet-atlas') return mesh.name.endsWith('body');
-  if (def.paintStyle === 'quaternius-flat') {
-    return mesh.name === 'body_1' || (def.id === 'car_q_sports' && mesh.name === 'body_2');
+  if (def.paintStyle === 'stylized-palette') {
+    return materialsOf(mesh).some((material) => isPaintSlot(material, def));
   }
   return false;
 }
 
 /**
+ * Whether one material slot of a paint mesh is the paint itself.
+ *
+ * A Soviet body mesh has exactly one slot, so all of it is paint. A Stylized body
+ * mesh has six — palette, glass, and four lamp lenses — and only the palette slot
+ * may be repainted or weathered: rusting a headlight is not a thing.
+ */
+function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
+  if (def.paintStyle === 'stylized-palette') return material.name === STYLIZED_PAINT_MATERIAL;
+  return true;
+}
+
+/**
  * Gives each car independent condition uniforms while preserving the exact paint
- * slot. Random-colour packs identify paint by authored mesh name; textured livery
- * packs use their mapped slot; procedural shells mark paint directly.
+ * slot. Packs with a paint style name their paint; a pack without one is repainted
+ * whole, which is what its single-material bodies describe.
  */
 function cloneCarBodyPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
-  const meshes: THREE.Mesh[] = [];
-  let hasLiverySlots = false;
-  let hasExplicitPaintSlots = false;
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    meshes.push(child);
-    for (const material of materialsOf(child)) {
-      if ((material as THREE.MeshStandardMaterial).map) hasLiverySlots = true;
-      if (isProceduralCarPaintMaterial(material)) hasExplicitPaintSlots = true;
-    }
-  });
-
   const clones = new Map<THREE.Material, THREE.Material>();
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
@@ -247,27 +282,21 @@ function cloneCarBodyPaintMaterials(root: THREE.Object3D, def: CarModelDef): voi
     return material;
   };
 
-  for (const mesh of meshes) {
-    if (def.paintStyle && !isRandomPaintMesh(mesh, def)) continue;
-    const eligible = (source: THREE.Material): THREE.Material => {
-      if (def.paintStyle) return paint(source);
-      const standard = source as THREE.MeshStandardMaterial;
-      const isPaint = hasLiverySlots
-        ? Boolean(standard.map)
-        : hasExplicitPaintSlots
-          ? isProceduralCarPaintMaterial(source)
-          : true;
-      return isPaint ? paint(source) : source;
-    };
+  root.traverse((mesh) => {
+    if (!(mesh instanceof THREE.Mesh)) return;
+    if (def.paintStyle && !isRandomPaintMesh(mesh, def)) return;
+    const eligible = (source: THREE.Material): THREE.Material =>
+      isPaintSlot(source, def) ? paint(source) : source;
     mesh.material = Array.isArray(mesh.material)
       ? mesh.material.map(eligible)
       : eligible(mesh.material);
-  }
+  });
 }
+
 /**
- * Gives static random-colour cars independent paint without the dynamic body-wear
- * shader. Parked cars never accumulate dirt or scratches; paying that FBM cost for
- * each one can saturate an integrated GPU as POIs enter the scene.
+ * Gives static cars independent paint without the dynamic body-wear shader. Parked
+ * cars never accumulate dirt or scratches; paying that FBM cost for each one can
+ * saturate an integrated GPU as POIs enter the scene.
  */
 function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
   if (!def.paintStyle) return;
@@ -275,33 +304,39 @@ function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    const material = def.paintStyle === 'soviet-atlas'
-      ? makeCarPalettePaintMaterial(source)
-      : source.clone();
+    // Soviet paint needs its atlas cell swapped in the shader. Stylized paint needs
+    // no shader at all: its colour arrives as a rebuilt palette texture.
+    const material =
+      def.paintStyle === 'soviet-atlas' ? makeCarPalettePaintMaterial(source) : source.clone();
     clones.set(source, material);
     return material;
   };
 
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    const eligible = (source: THREE.Material): THREE.Material =>
+      isPaintSlot(source, def) ? paint(source) : source;
     child.material = Array.isArray(child.material)
-      ? child.material.map(paint)
-      : paint(child.material);
+      ? child.material.map(eligible)
+      : eligible(child.material);
   });
 }
-
 
 /** Writes one deterministic per-car colour into already-independent paint materials. */
 function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey: string): void {
   if (!def.paintStyle) return;
   const color = paintColorFor(def.id, appearanceKey);
+  const palette =
+    def.paintStyle === 'stylized-palette' ? repaintedPalette(def, color) : null;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
     for (const material of materialsOf(child)) {
       if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      if (def.paintStyle === 'quaternius-flat') {
-        material.color.copy(color);
-        if (child.name === 'body_2') material.color.multiplyScalar(0.72);
+      if (!isPaintSlot(material, def)) continue;
+      if (palette) {
+        if (material.map === palette) continue;
+        material.map = palette;
+        material.needsUpdate = true;
       } else if (def.paintUvCell) {
         setCarBodyPalettePaint(material, color, def.paintUvCell);
       }
@@ -310,21 +345,129 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
 }
 
 /**
- * Repaints a subtree's PAINT material with one base-colour texture.
+ * The pack palettes, decoded once so their ramps can be rebuilt in other colours.
  *
- * Packs that ship several liveries for the same body (the PSX cars, DeJunes'
- * paintjobs) become several catalogue entries over one geometry file, so the
- * material is cloned per entry and only its map differs — the geometry is still
- * shared between them.
+ * Keyed by texture URL rather than by model: the Stylized pack's thirty-one bodies
+ * share one 32x32 image, so it is decoded once for all of them.
+ */
+const paletteImages = new Map<string, ImageData>();
+/** Recoloured palettes, keyed by ramp and colour. At most one per colour per ramp. */
+const repaintedPalettes = new Map<string, THREE.Texture>();
+const paintRGB = { r: 0, g: 0, b: 0 };
+
+/**
+ * Decodes a loaded palette texture's pixels, so a ramp can be read and rebuilt.
  *
- * Which material is "the paint" is not a guess: these models are authored with one
- * textured slot for the painted panels and flat-coloured slots for everything else
- * (`Windows`, `Grill`, `Tyre`, `Light Red`, ...), so a material that ALREADY has a
- * map is a livery slot and a material without one is a part colour. Overriding
- * every material instead — which is what this used to do, by cloning `material[0]`
- * onto each mesh — is what wrecked the DeJunes cars: their bodies are single meshes
- * with up to 56 material groups, so glass, chrome, lights and tyres all collapsed
- * into one slot and the body paintjob was stretched over their UVs.
+ * A headless tool has neither a decoder nor a canvas, and the shared asset shim
+ * deliberately resolves every texture to one blank object (tools/assetshim.ts) —
+ * nothing a physics or geometry bench measures reads a pixel. So this records
+ * nothing rather than throwing, and repainting is skipped for the run: those cars
+ * keep the pack's authored colour, which no bench looks at.
+ */
+function readPaletteImage(url: string, texture: THREE.Texture): void {
+  if (paletteImages.has(url)) return;
+  if (typeof document === 'undefined') return;
+  // TextureLoader hands back an HTMLImageElement, which is what a 2D context draws.
+  const image = texture.image as HTMLImageElement | undefined;
+  if (!image?.width || !image.height) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+  ctx.drawImage(image, 0, 0);
+  paletteImages.set(url, ctx.getImageData(0, 0, canvas.width, canvas.height));
+}
+
+/**
+ * One car's palette: the pack's own image with this body's coachwork ramp rebuilt
+ * in `color`.
+ *
+ * Each shade keeps its LUMINANCE RATIO against the ramp's key shade, which is what
+ * carries the pack's hand-drawn shading into every factory colour: the key shade
+ * becomes the colour asked for, brighter shades stay highlights, and the near-black
+ * end of a long ramp — window rubbers, shut lines, shadow under a wing — stays
+ * near-black instead of turning into a second body colour.
+ *
+ * Only the ramp is touched, so glass, chrome, lamps, decals and the tyres on the
+ * detached wheels (which keep the pack's untouched material) are all preserved.
+ *
+ * Null when the palette could not be decoded — a headless bench, per
+ * `readPaletteImage` — in which case the car keeps the pack's authored colour.
+ */
+function repaintedPalette(def: CarModelDef, color: THREE.Color): THREE.Texture | null {
+  const url = def.textureFile;
+  const ramp = def.paintRamp;
+  if (!url || !ramp) throw new Error(`Car model "${def.id}" has no palette ramp to repaint`);
+  const source = paletteImages.get(url);
+  if (!source) return null;
+
+  const key = `${url}|${ramp.column},${ramp.columns},${ramp.row},${ramp.rows},${ramp.keyRow}|${color.getHexString(THREE.SRGBColorSpace)}`;
+  const cached = repaintedPalettes.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const pixels = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
+  // The palette is stored, sampled and blended in sRGB, so the target colour has to
+  // leave the renderer's linear working space before it is written into it.
+  color.getRGB(paintRGB, THREE.SRGBColorSpace);
+  const keyLuma = Math.max(1, paletteLuma(pixels, ramp.column, ramp.keyRow));
+  for (let row = ramp.row; row < ramp.row + ramp.rows; row++) {
+    const factor = paletteLuma(pixels, ramp.column, row) / keyLuma;
+    const r = Math.min(255, Math.round(paintRGB.r * 255 * factor));
+    const g = Math.min(255, Math.round(paintRGB.g * 255 * factor));
+    const b = Math.min(255, Math.round(paintRGB.b * 255 * factor));
+    for (let column = ramp.column; column < ramp.column + ramp.columns; column++) {
+      const i = (row * source.width + column) * 4;
+      pixels.data[i] = r;
+      pixels.data[i + 1] = g;
+      pixels.data[i + 2] = b;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  tunePaletteTexture(texture);
+  repaintedPalettes.set(key, texture);
+  return texture;
+}
+
+function paletteLuma(image: ImageData, column: number, row: number): number {
+  const i = (row * image.width + column) * 4;
+  return 0.299 * image.data[i]! + 0.587 * image.data[i + 1]! + 0.114 * image.data[i + 2]!;
+}
+
+/**
+ * Sampling for a palette atlas.
+ *
+ * Both packs paint by UV: a face points at one swatch of a small image, so there is
+ * no texture detail to filter and any filtering is pure damage. Nearest on BOTH
+ * directions matters — with the default mipmap chain a 32x32 palette averages four
+ * unrelated colours per level, so a car turned mud-coloured as it walked away from
+ * the camera. There is no aliasing cost to pay for it either: a face's UVs are
+ * constant across it, so minification has nothing to alias.
+ */
+function tunePaletteTexture(texture: THREE.Texture): void {
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+}
+
+/**
+ * Points a subtree's PAINT material at the pack's palette.
+ *
+ * Which material is "the paint" is not a guess: a body is authored with one
+ * palette-mapped slot for its painted panels and flat-coloured slots for
+ * everything else (glass, lamp lenses), so a material that ALREADY has a map is
+ * the palette slot and a material without one is a part colour. A body with no
+ * mapped slot at all — the Soviet FBXs, which reference no texture — has nothing
+ * to distinguish, so its single material takes the palette.
  *
  * Materials are cloned once per source material, not once per mesh, so slots shared
  * between meshes stay one material and one draw call's worth of state.
@@ -340,9 +483,6 @@ function applyTexture(root: THREE.Object3D, map: THREE.Texture): void {
     }
   });
 
-  // A body with no textured slot at all (an untextured export) has nothing to
-  // identify as paint, so the livery goes on everything — which is right for the
-  // single-material bodies that case describes.
   const clones = new Map<THREE.Material, THREE.Material>();
   const repaint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
@@ -371,22 +511,16 @@ function materialsOf(mesh: THREE.Mesh): readonly THREE.Material[] {
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 }
 
-/**
- * Sampling for the pack-supplied maps (the DeJunes FBX models carry their own
- * body and number-plate textures, one per material, which the loader resolves from
- * the model's own directory).
- *
- * Same treatment as the catalogue's own liveries below: these are paint maps with a
- * few dozen pixels per panel, and smoothing them turns the liveries to mush.
- */
+/** Applies palette sampling to whatever maps the pack resolved for itself. */
 function tuneMaps(root: THREE.Object3D): void {
+  const seen = new Set<THREE.Texture>();
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     for (const material of materialsOf(child)) {
       const map = (material as THREE.MeshStandardMaterial).map;
-      if (!map) continue;
-      map.colorSpace = THREE.SRGBColorSpace;
-      map.magFilter = THREE.NearestFilter;
+      if (!map || seen.has(map)) continue;
+      seen.add(map);
+      tunePaletteTexture(map);
     }
   });
 }
@@ -399,7 +533,10 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
 function prepareMaterials(root: THREE.Object3D): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = true;
+    // Glass is the one surface that must not cast: a window throws a pane-shaped
+    // black slab across the interior and the ground, which is the shadow of a
+    // wall, not of a window.
+    child.castShadow = !materialsOf(child).includes(carGlassMaterial());
     child.receiveShadow = true;
     // A pack that authored `doubleSided: true` would otherwise store its LIT face in
     // the sun's depth map (three flips FrontSide to BackSide for the depth pass but
@@ -410,14 +547,266 @@ function prepareMaterials(root: THREE.Object3D): void {
   });
 }
 
-/** A wheel model shared by every car that has no wheels of its own, plus its size. */
-interface WheelAsset {
-  readonly object: THREE.Object3D;
-  /** Radius in the wheel file's own units, before the car's scale. */
-  readonly rawRadius: number;
+/**
+ * The one window glass in the game, shared by every car of both packs.
+ *
+ * Shared rather than per-pack on purpose: glass is glass, and one material means
+ * one program, one draw state and one place to tune the tint. `depthWrite: false`
+ * because a window must not occlude what is behind it in the transparent pass —
+ * with depth writing on, the nearest pane wins the depth test and the cabin, the
+ * far windows and anything seen through the car vanish behind it.
+ */
+let glassMaterial: THREE.MeshStandardMaterial | null = null;
+
+function carGlassMaterial(): THREE.MeshStandardMaterial {
+  glassMaterial ??= new THREE.MeshStandardMaterial({
+    name: 'car-glass',
+    // A dark cold tint at low opacity: period glass is green-grey and thick, and
+    // anything clearer makes the cabin read as an open hole in the shell.
+    color: 0x18242a,
+    transparent: true,
+    opacity: 0.42,
+    roughness: 0.06,
+    metalness: 0,
+    // Both faces: from the driver's seat every window is seen from the inside.
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  return glassMaterial;
 }
 
-const wheelAssets = new Map<string, WheelAsset>();
+/**
+ * Makes a body's windows see-through, whichever way its pack drew them.
+ *
+ * `glassMaterial` names an authored material on separate window meshes (Stylized),
+ * and is a straight swap. `glassUvCell` is the harder case (Soviet): the windows
+ * are not objects at all, only the triangles of ONE body mesh whose UVs point at
+ * the atlas's glass swatch, so they are cut out into a mesh of their own and the
+ * host is left drawing everything else.
+ */
+function isolateGlass(scene: THREE.Group, def: CarModelDef): void {
+  if (def.glassMaterial) {
+    const wanted = def.glassMaterial;
+    scene.traverse((mesh) => {
+      if (!(mesh instanceof THREE.Mesh)) return;
+      const swap = (source: THREE.Material): THREE.Material =>
+        source.name === wanted ? carGlassMaterial() : source;
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(swap)
+        : swap(mesh.material);
+    });
+    return;
+  }
+
+  const cell = def.glassUvCell;
+  if (!cell) return;
+  const meshes: THREE.Mesh[] = [];
+  scene.traverse((node) => {
+    if (node instanceof THREE.Mesh) meshes.push(node);
+  });
+  for (const mesh of meshes) {
+    // Only a single-material host can be cut this way: on a multi-slot mesh the
+    // groups already partition the buffer and the glass would be a slot, not a
+    // region. Neither shipped pack does that, and guessing at it would be worse
+    // than leaving the body alone.
+    if (Array.isArray(mesh.material)) continue;
+    const uv = mesh.geometry.attributes.uv as THREE.BufferAttribute | undefined;
+    if (!uv) continue;
+    const glass = triangleRuns(mesh.geometry, (tri) => uvCellOf(mesh.geometry, tri, cell));
+    if (glass.matched.length === 0) continue;
+
+    const pane = new THREE.Mesh(subGeometry(mesh.geometry, glass.matched), carGlassMaterial());
+    pane.name = 'glass';
+    pane.position.copy(mesh.position);
+    pane.quaternion.copy(mesh.quaternion);
+    pane.scale.copy(mesh.scale);
+    mesh.parent?.add(pane);
+
+    // The host is REBUILT without the cut triangles rather than left drawing the
+    // gaps as groups. The glass is scattered through the buffer — the Zhiguli's
+    // 34 panes fall in 21 runs — so keeping the buffer would turn one body draw
+    // into twenty-one. One copy of a 2.4k-triangle body, once per model at load,
+    // buys back a single draw call on every car in the world.
+    const remainder = subGeometry(mesh.geometry, glass.rest);
+    mesh.geometry.dispose();
+    mesh.geometry = remainder;
+  }
+}
+
+/** Whether triangle `tri` samples the atlas cell `cell`, by its UV centroid. */
+function uvCellOf(
+  geometry: THREE.BufferGeometry,
+  tri: number,
+  cell: readonly [number, number],
+): boolean {
+  const uv = geometry.attributes.uv as THREE.BufferAttribute;
+  const index = geometry.index;
+  let u = 0;
+  let v = 0;
+  for (let c = 0; c < 3; c++) {
+    const vertex = index ? index.getX(tri * 3 + c) : tri * 3 + c;
+    u += uv.getX(vertex);
+    v += uv.getY(vertex);
+  }
+  return (
+    Math.floor((u / 3) * SOVIET_ATLAS_COLUMNS) === cell[0] &&
+    Math.floor((v / 3) * SOVIET_ATLAS_ROWS) === cell[1]
+  );
+}
+
+/** The Soviet pack's shared swatch atlas, in cells. */
+const SOVIET_ATLAS_COLUMNS = 9;
+const SOVIET_ATLAS_ROWS = 2;
+
+/**
+ * Splits a geometry's triangles into contiguous matching and non-matching draw
+ * ranges. Runs rather than per-triangle groups because authored regions are
+ * contiguous in the buffer: the Soviet glass comes out as a handful of ranges, not
+ * one per pane.
+ */
+function triangleRuns(
+  geometry: THREE.BufferGeometry,
+  matches: (tri: number) => boolean,
+): { matched: { start: number; count: number }[]; rest: { start: number; count: number }[] } {
+  const drawCount = geometry.index
+    ? geometry.index.count
+    : geometry.attributes.position.count;
+  const matched: { start: number; count: number }[] = [];
+  const rest: { start: number; count: number }[] = [];
+  let runStart = 0;
+  let runMatched = matches(0);
+  const flush = (end: number): void => {
+    if (end === runStart) return;
+    (runMatched ? matched : rest).push({ start: runStart, count: end - runStart });
+  };
+  for (let tri = 1; tri * 3 < drawCount; tri++) {
+    const hit = matches(tri);
+    if (hit === runMatched) continue;
+    flush(tri * 3);
+    runStart = tri * 3;
+    runMatched = hit;
+  }
+  flush(drawCount);
+  return { matched, rest };
+}
+
+/**
+ * Lifts each named lamp MATERIAL out of its host mesh into a mesh of its own.
+ *
+ * The Stylized pack draws headlights, brake lights and both indicators as material
+ * groups of the body mesh, and lists those materials as unused slots on the doors
+ * and windows besides. Binding lamps by material name against that (vehicle.ts,
+ * `bindLampMaterials`) gives two wrong answers at once: the lens bounds come out as
+ * the WHOLE body — so headlight beams start from the middle of the car — and the
+ * doors match too, dragging their boxes into the union.
+ *
+ * Splitting fixes both at the source, and costs nothing to draw: a material group
+ * was already its own draw call. Each lamp's triangles become one mesh named after
+ * the material, a sibling sharing the host's transform, and the host is rebuilt
+ * with only the groups it has left — which also drops every slot no geometry of its
+ * own referenced, so the doors stop answering to `Headlights`.
+ *
+ * A pack that models its lamps as real objects (the Soviet FBXs) names those
+ * objects in its selectors, matches no material here, and passes through untouched.
+ */
+function isolateLampMaterials(scene: THREE.Group, def: CarModelDef): void {
+  const lights = def.lights;
+  if (!lights) return;
+  const wanted = new Set<string>([
+    ...lights.headlights,
+    ...lights.taillights,
+    ...(lights.reverseLights ?? []),
+    ...(lights.leftBlinkers ?? []),
+    ...(lights.rightBlinkers ?? []),
+  ]);
+
+  const meshes: THREE.Mesh[] = [];
+  scene.traverse((node) => {
+    if (node instanceof THREE.Mesh && Array.isArray(node.material)) meshes.push(node);
+  });
+
+  for (const mesh of meshes) {
+    const materials = mesh.material as THREE.Material[];
+    const groups = mesh.geometry.groups;
+    if (groups.length === 0) continue;
+
+    const byIndex = new Map<number, { start: number; count: number }[]>();
+    for (const group of groups) {
+      const index = group.materialIndex ?? 0;
+      const ranges = byIndex.get(index);
+      if (ranges) ranges.push({ start: group.start, count: group.count });
+      else byIndex.set(index, [{ start: group.start, count: group.count }]);
+    }
+
+    const kept: THREE.Material[] = [];
+    const keptGroups: { start: number; count: number; materialIndex: number }[] = [];
+    for (const [index, ranges] of byIndex) {
+      const material = materials[index];
+      if (!material) continue;
+      if (wanted.has(material.name)) {
+        const lens = new THREE.Mesh(subGeometry(mesh.geometry, ranges), material);
+        lens.name = material.name;
+        lens.position.copy(mesh.position);
+        lens.quaternion.copy(mesh.quaternion);
+        lens.scale.copy(mesh.scale);
+        mesh.parent?.add(lens);
+        continue;
+      }
+      const slot = kept.length;
+      kept.push(material);
+      for (const range of ranges) {
+        keptGroups.push({ start: range.start, count: range.count, materialIndex: slot });
+      }
+    }
+
+    if (kept.length === 0) {
+      // Nothing but lamps: the host has become an empty shell of its own children.
+      mesh.removeFromParent();
+      continue;
+    }
+    // The array form is kept even for a single surviving slot. Three only walks
+    // `geometry.groups` when the material IS an array; given one material it ignores
+    // them and draws the whole buffer — which still holds the lamp triangles just
+    // lifted out, so every lens would be drawn a second time in body paint.
+    mesh.material = kept;
+    mesh.geometry.clearGroups();
+    for (const group of keptGroups) {
+      mesh.geometry.addGroup(group.start, group.count, group.materialIndex);
+    }
+  }
+}
+
+/**
+ * A new geometry holding only the vertices some draw ranges of `source` reference.
+ *
+ * The ranges are copied rather than aliased into the parent's buffer: a lamp is a
+ * handful of triangles, and an independent buffer is what lets the host geometry be
+ * disposed on its own.
+ */
+function subGeometry(
+  source: THREE.BufferGeometry,
+  ranges: readonly { start: number; count: number }[],
+): THREE.BufferGeometry {
+  const index = source.index;
+  const total = ranges.reduce((sum, range) => sum + range.count, 0);
+  const out = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(source.attributes)) {
+    const src = attribute as THREE.BufferAttribute;
+    const size = src.itemSize;
+    // `getComponent` rather than raw array reads: it denormalizes a quantized
+    // attribute, so a float copy is correct whatever the source buffer's type.
+    const data = new Float32Array(total * size);
+    let write = 0;
+    for (const range of ranges) {
+      for (let i = range.start; i < range.start + range.count; i++) {
+        const vertex = index ? index.getX(i) : i;
+        for (let c = 0; c < size; c++) data[write++] = src.getComponent(vertex, c);
+      }
+    }
+    out.setAttribute(name, new THREE.Float32BufferAttribute(data, size));
+  }
+  return out;
+}
 
 /**
  * Detaches the four wheel nodes of a model that carries its own wheels.
@@ -425,6 +814,9 @@ const wheelAssets = new Map<string, WheelAsset>();
  * They must be detached because the vehicle drives them itself: Rapier's ray-cast
  * suspension reports each wheel's position and spin every step, so a wheel parented
  * to the body would be dragged along by the body instead.
+ *
+ * A wheel may be several nodes (a hub plus a tyre); they are measured as one and
+ * detached into one wrapper, so they spin and steer together.
  */
 function takeOwnWheels(
   def: CarModelDef,
@@ -435,14 +827,19 @@ function takeOwnWheels(
   radii: Map<string, number>;
 } {
   const s = def.scale;
+  const names = def.wheelNodes ?? DETECTED_WHEEL_NODES;
   const objects = new Map<string, THREE.Object3D>();
   const positions = new Map<string, THREE.Vector3>();
   const radii = new Map<string, number>();
 
-  for (const [nodeName, id] of WHEEL_NODES) {
-    const node = scene.getObjectByName(nodeName);
-    if (!node) continue;
-    const box = boundsOf(node);
+  for (const id of WHEEL_IDS) {
+    const nodes = names[id]
+      .map((name) => scene.getObjectByName(name))
+      .filter((node): node is THREE.Object3D => node !== undefined);
+    if (nodes.length !== names[id].length) continue;
+
+    const box = new THREE.Box3();
+    for (const node of nodes) box.union(boundsOf(node));
     // The suspension mount is the wheel's own CENTRE, not its node origin. Several
     // exporters put a node on the tyre's inner face rather than on its axle plane;
     // mounting there pulls the track in by a tyre width on both sides and makes a
@@ -456,28 +853,26 @@ function takeOwnWheels(
     radii.set(id, (Math.max(...extents) / 2) * s);
     positions.set(id, centre.clone().multiplyScalar(s));
 
-    // With the mount moved to the centre, the mesh has to move the other way, or it
-    // would be drawn a tyre-width outboard of the wheel the physics simulates.
-    //
-    // The node's own ROTATION is kept. The vehicle spins the wrapper about X and
-    // steers it about Y; zeroing the authored rotation (as this used to) laid the
-    // DeJunes wheels flat, because their discs are modelled about a different axis
-    // and only their own transform stands them up.
-    const offset = centre.sub(node.position);
-    node.removeFromParent();
-    node.position.set(-offset.x, -offset.y, -offset.z);
-    node.updateMatrix();
-
     // The vehicle spins a wheel about X and steers it about Y, so the wheel's axle
-    // has to BE X. Packs disagree on the authored axis; zeroing that transform laid
-    // the DeJunes wheels flat like dinner plates. The authored transform is kept and
-    // an alignment group turns whichever axis is the axle onto X — mesh and its
-    // centring offset rotate together, so the wheel stays centred on its mount.
+    // has to BE X. Packs disagree on the authored axis, and zeroing the authored
+    // transform instead lays a wheel modelled about another axis flat like a dinner
+    // plate. The transform is kept and an alignment group turns whichever axis is
+    // the axle onto X — mesh and centring offset rotate together, so the wheel stays
+    // centred on its mount.
     const align = new THREE.Group();
-    align.add(node);
     const axle = extents.indexOf(Math.min(...extents));
     if (axle === 1) align.rotation.z = Math.PI / 2; // axle along Y
     else if (axle === 2) align.rotation.y = Math.PI / 2; // axle along Z
+
+    for (const node of nodes) {
+      // With the mount moved to the centre, the mesh has to move the other way, or
+      // it would be drawn a tyre-width outboard of the wheel physics simulates.
+      const local = node.position.clone().sub(centre);
+      node.removeFromParent();
+      node.position.copy(local);
+      node.updateMatrix();
+      align.add(node);
+    }
 
     const wrapper = new THREE.Group();
     wrapper.name = id;
@@ -487,71 +882,8 @@ function takeOwnWheels(
     objects.set(id, wrapper);
   }
 
-  if (objects.size !== WHEEL_NODES.length) {
-    throw new Error(
-      `Car model "${def.id}" has ${objects.size} of ${WHEEL_NODES.length} wheel nodes`,
-    );
-  }
-  return { objects, positions, radii };
-}
-
-/**
- * Builds the four wheels for a body-only model from a shared wheel file.
- *
- * Packs that ship one wheel and several bodies (the PSX cars, DeJunes) leave the
- * mounts unmeasurable — nothing in the body file says where an axle is. So they are
- * placed as fractions of the measured body box (`separateWheels`), with the wheel
- * centre exactly one radius above the body's lowest point, which is where the
- * ground is on any model drawn sitting on its wheels. The right-hand pair is
- * mirrored in X so a wheel modelled with a face and a back reads correctly on both
- * sides.
- */
-function buildSeparateWheels(
-  def: CarModelDef,
-  bodyBox: THREE.Box3,
-): {
-  objects: Map<string, THREE.Object3D>;
-  positions: Map<string, THREE.Vector3>;
-  radii: Map<string, number>;
-} {
-  const spec = def.separateWheels;
-  if (!spec) throw new Error(`Car model "${def.id}" has no separateWheels spec`);
-  const asset = wheelAssets.get(spec.file);
-  if (!asset) throw new Error(`Wheel model "${spec.file}" was not preloaded`);
-
-  const wheelScale = def.scale * (spec.radiusScale ?? 1);
-  const radius = asset.rawRadius * wheelScale;
-  // Fractions are measured from the body box's own CENTRE, not the model origin: a
-  // body drawn a little off-origin (most of these are) would otherwise get a
-  // lopsided track — 0.67 m on one side and 0.77 m on the other, measured on the
-  // PSX saloon before this.
-  const mid = bodyBox.getCenter(new THREE.Vector3());
-  const halfX = (bodyBox.max.x - bodyBox.min.x) / 2;
-  const halfZ = (bodyBox.max.z - bodyBox.min.z) / 2;
-  const y = bodyBox.min.y + radius;
-
-  const objects = new Map<string, THREE.Object3D>();
-  const positions = new Map<string, THREE.Vector3>();
-  const radii = new Map<string, number>();
-
-  for (const [id, sideX, zFrac] of [
-    ['wheel_fl', 1, spec.frontZFrac],
-    ['wheel_fr', -1, spec.frontZFrac],
-    ['wheel_rl', 1, spec.rearZFrac],
-    ['wheel_rr', -1, spec.rearZFrac],
-  ] as const) {
-    positions.set(
-      id,
-      new THREE.Vector3(mid.x + sideX * spec.trackFrac * halfX, y, mid.z + zFrac * halfZ),
-    );
-    radii.set(id, radius);
-
-    const wrapper = new THREE.Group();
-    wrapper.name = id;
-    wrapper.scale.set(sideX * wheelScale, wheelScale, wheelScale);
-    wrapper.add(asset.object.clone(true));
-    prepareMaterials(wrapper);
-    objects.set(id, wrapper);
+  if (objects.size !== WHEEL_IDS.length) {
+    throw new Error(`Car model "${def.id}" has ${objects.size} of ${WHEEL_IDS.length} wheels`);
   }
   return { objects, positions, radii };
 }
@@ -579,115 +911,6 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
 }
 
 /**
- * Pulls one vehicle out of a shared pack scene into a fresh group at the origin.
- *
- * A pack ships several bodies in ONE scene, laid out in a showroom row, so each
- * body and its wheels are siblings whose own transforms encode both their size and
- * their place in that row. The fresh group must therefore re-root each node at its
- * WORLD transform, not its local one: copying `matrixWorld` into `matrix` (with
- * auto-update off) makes every node land where it really is, relative to the
- * others, while the group itself stays at the origin for `buildTemplate` to
- * centre and scale.
- *
- * Geometry and materials stay SHARED across the pack's entries because extraction
- * uses `clone(true)`, which deep-copies Object3D transforms but leaves every
- * BufferGeometry and Material as the same object the pack scene holds — one parse,
- * one buffer, one material set, no GPU resources duplicated per vehicle.
- */
-function extractPackVehicle(pack: THREE.Group, def: CarModelDef): THREE.Group {
-  const group = new THREE.Group();
-  group.name = def.id;
-  pack.updateMatrixWorld(true);
-
-  const bodyName = def.packNode;
-  if (!bodyName) throw new Error(`Car model "${def.id}" has no packNode`);
-  const prefix = def.packWheelPrefix ?? bodyName;
-
-  // The four nodes the vehicle controller drives, pack suffix -> kit node name
-  // (the `wheel-{front,back}-{left,right}` names WHEEL_NODES reads below).
-  const DRIVEN: readonly (readonly [string, string])[] = [
-    ['front left', 'wheel-front-left'],
-    ['front right', 'wheel-front-right'],
-    ['rear left', 'wheel-back-left'],
-    ['rear right', 'wheel-back-right'],
-  ];
-
-  // Re-rooting DECOMPOSES the world matrix into the clone's own position,
-  // quaternion and scale rather than copying it into `matrix` with
-  // `matrixAutoUpdate` off. Copying the matrix leaves a node whose `matrix` says
-  // one thing and whose `position`/`scale` still say what they said inside the
-  // pack's row — and `takeOwnWheels` below mixes the two: it measures a wheel's
-  // centre in this group's space and then writes `node.position` + `updateMatrix()`
-  // to re-centre the mesh, which recomposes the matrix from the STALE local
-  // rotation and scale. On this pack that meant every wheel drawn at 100x size a
-  // kilometre off, because its pack-local scale is 100 against a 0.01 root.
-  // Decomposing keeps local TRS and world transform the same thing, so every
-  // consumer downstream (measurement, re-centring, `applyModelYaw`) is reading the
-  // frame it thinks it is. glTF nodes are pure TRS, so there is no skew to lose.
-  const move = (source: THREE.Object3D): THREE.Object3D => {
-    const clone = source.clone(true);
-    source.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
-    clone.updateMatrix();
-    group.add(clone);
-    return clone;
-  };
-
-  const body = findPackNode(pack, bodyName);
-  if (!body) throw new Error(`Pack "${def.file}" has no body node "${bodyName}"`);
-  move(body);
-
-  const drivenNames = new Set<string>();
-  for (const [suffix, target] of DRIVEN) {
-    const name = `${prefix} wheel ${suffix}`;
-    drivenNames.add(packName(name));
-    const wheel = findPackNode(pack, name);
-    if (!wheel) throw new Error(`Pack "${def.file}" body "${bodyName}" is missing wheel "${name}"`);
-    move(wheel).name = target;
-  }
-
-  // Extra axles ride as body geometry. `Truck` has a tandem rear pair and
-  // `Truck with trailer` carries TWELVE wheels — the truck's two rear axles plus
-  // the trailer's three bogies — while the vehicle controller owns exactly four.
-  // Rather than drop the rest (a half-wheeled trailer) or fake them as driven
-  // (the controller cannot), every other `<prefix> wheel …` SIBLING is moved into
-  // the group unchanged: it renders, measures and moves with the body, it is just
-  // never steered or spun. Siblings are scanned, not the whole tree, so a wheel
-  // node's own `…_tires` / `…_wheels` mesh children are not picked up twice.
-  const wheelPrefix = packName(`${prefix} wheel `);
-  const siblings = body.parent?.children ?? [];
-  for (const sibling of siblings) {
-    if (sibling.name.startsWith(wheelPrefix) && !drivenNames.has(sibling.name)) {
-      move(sibling);
-    }
-  }
-
-  return group;
-}
-
-/**
- * The name three.js will actually give a glTF node.
- *
- * `GLTFLoader` runs every node name through `PropertyBinding.sanitizeNodeName`,
- * which turns whitespace into underscores and strips `[ ] . : /` — so the pack's
- * `Monster Truck wheel front right` arrives in the scene graph as
- * `Monster_Truck_wheel_front_right`, and a lookup by the name printed in the file
- * finds nothing at all. That is exactly how this failed the first time.
- *
- * The catalogue deliberately still spells `packNode` the way the ASSET spells it,
- * because that is what a person reads when they open the GLB; the translation
- * belongs here, once, rather than as pre-mangled strings in 21 entries.
- */
-function packName(name: string): string {
-  return name.replace(/\s/g, '_').replace(/[[\].:/]/g, '');
-}
-
-function findPackNode(pack: THREE.Group, name: string): THREE.Object3D | undefined {
-  // Try the sanitised form first (what three.js produces), then the raw name, so
-  // this keeps working if a future three release stops mangling names.
-  return pack.getObjectByName(packName(name)) ?? pack.getObjectByName(name);
-}
-
-/**
  * Cosmetic ride-height correction, metres: how far the body drops relative to the
  * wheels. Every catalogue body sits a hand's width too tall — the tyre tops ride
  * 3-5 cm clear of the arch lips instead of tucking under them, so the cars read as
@@ -697,23 +920,123 @@ function findPackNode(pack: THREE.Group, name: string): THREE.Object3D | undefin
  */
 const RIDE_DROP_M = 0.04;
 
+/** The node every pack names its steering wheel, and the cut cabin keeps. */
+export const STEERING_WHEEL_NODE = 'steering_wheel';
+
+/**
+ * How much of a hollow body's width a fitted cabin fills.
+ *
+ * The donor is a 2.12 m-wide Stylized saloon and the Soviet shells are 1.56 m, so
+ * the cabin is always scaled DOWN. Width is the only fit constraint that matters:
+ * it is what decides whether a seat pokes through a door, and the cabin is much
+ * shorter than any body so length never binds. A little under full width leaves the
+ * door cards inside the shell rather than in it.
+ */
+const INTERIOR_WIDTH_FRACTION = 0.9;
+/**
+ * Where the fitted cabin's own centre sits in the host body, as fractions of that
+ * body's box: y through its height (0 = floor, 1 = roof) and z of half-length.
+ *
+ * Both are the donor's OWN measured numbers (tools/extract-interior.mjs reports
+ * 0.4854 and -0.0975), which is the point: a cabin belongs at the same place in any
+ * saloon, and a fraction carries that across bodies of different sizes. Aligning
+ * the cabin's FLOOR to the body's floor instead — the obvious rule — puts it on the
+ * underbody: a body box's lowest point is its sills, not the floor pan, and once the
+ * cabin is scaled down to a narrower car it then sits a foot too low, with the
+ * driver's eye level with the door handles.
+ */
+const INTERIOR_Y_FRACTION = 0.485;
+const INTERIOR_Z_FRACTION = -0.1;
+
+/**
+ * Fits the cut cabin into a body that has none, sized and placed from that body's
+ * own measured box.
+ *
+ * The kit arrives in METRES about its donor's body centre; the scene it is being
+ * added to is still in the model's own units and will be scaled by `def.scale`
+ * afterwards, so both the fit scale and the offset are divided back out by it.
+ */
+function mountInterior(def: CarModelDef, scene: THREE.Group, bodyBox: THREE.Box3): void {
+  const source = interiorScenes.get(def.interior!.file);
+  if (!source) throw new Error(`Interior "${def.interior!.file}" was not preloaded`);
+  const kit = source.clone(true);
+  const kitBox = boundsOf(kit);
+  const kitWidth = kitBox.max.x - kitBox.min.x;
+  if (kitWidth <= 0) return;
+
+  const size = bodyBox.getSize(new THREE.Vector3());
+  const centre = bodyBox.getCenter(new THREE.Vector3());
+  const fit = (size.x * INTERIOR_WIDTH_FRACTION) / kitWidth;
+  const mount = new THREE.Group();
+  mount.name = 'interior';
+  mount.add(kit);
+  mount.scale.setScalar(fit / def.scale);
+  mount.position.set(
+    centre.x / def.scale,
+    (centre.y + (INTERIOR_Y_FRACTION * 2 - 1) * size.y * 0.5) / def.scale,
+    (centre.z + INTERIOR_Z_FRACTION * size.z * 0.5) / def.scale,
+  );
+  scene.add(mount);
+}
+
+/**
+ * The driver's eye: behind the steering wheel and above its centre.
+ *
+ * Derived from the wheel rather than authored per model, because the wheel is the
+ * one thing in a cabin whose position IS the driver's position — it fixes which
+ * side the seat is on, how far back it sits and how high. Forty-six bodies would
+ * otherwise need forty-six hand-tuned fractions, and every one of them would be a
+ * guess at where a seat is.
+ *
+ * Called AFTER the scene has been scaled and re-centred, so the wheel's world
+ * transform is already the chassis-local frame in metres and needs no conversion —
+ * subtracting the body centre a second time here is what put the eye under the floor
+ * the first time round.
+ *
+ * Null for a body with no wheel at all, which falls back to the authored fraction.
+ */
+function driverEyePoint(scene: THREE.Group): [number, number, number] | null {
+  const wheel = scene.getObjectByName(STEERING_WHEEL_NODE);
+  if (!wheel) return null;
+  // Bounds, not the node origin: a steering column's origin sits at the dash end of
+  // the shaft, a good 12 cm ahead of the rim it is named for.
+  const rim = new THREE.Box3()
+    .setFromObject(wheel, true)
+    .getCenter(new THREE.Vector3());
+  return [rim.x, rim.y + EYE_ABOVE_WHEEL_M, rim.z - EYE_BEHIND_WHEEL_M];
+}
+
+/**
+ * The driver's eye relative to the steering wheel's centre, metres.
+ *
+ * A driver's eyes are roughly a hand's width above the rim and a third of a metre
+ * behind it — the gap between the wheel and the seat back. Any less and the rim
+ * fills the screen; any more and the eye leaves the seat and ends up in the back.
+ */
+const EYE_ABOVE_WHEEL_M = 0.14;
+const EYE_BEHIND_WHEEL_M = 0.38;
+
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   if (def.yaw) applyModelYaw(scene, def.yaw);
+  // Nodes the game does not model go before anything is measured, so they cannot
+  // widen the chassis box or be mistaken for running gear.
+  for (const name of def.unusedNodes ?? []) scene.getObjectByName(name)?.removeFromParent();
+  isolateLampMaterials(scene, def);
+  isolateGlass(scene, def);
   scene.updateMatrixWorld(true);
   const s = def.scale;
 
-  // A model's own wheels come out first, which is what leaves `body` behind as
-  // everything else. A body-only model keeps its whole scene and gets its wheels
-  // after the body box is known, because that box is what places them.
+  // The model's own wheels come out first, which is what leaves `body` behind as
+  // everything else.
   //
-  // `detectWheels` is for packs that carry wheels under their own naming (the FBX
-  // models): the four discs are found by shape and renamed to the convention before
+  // `detectWheels` is for packs that name their wheels whatever the modeller felt
+  // like: the four discs are found by shape and renamed to the convention before
   // the usual path runs, so nothing downstream needs to know the difference.
   if (def.detectWheels && !renameDetectedWheels(scene)) {
     throw new Error(`Car model "${def.id}": could not identify four wheels by shape`);
   }
-  const own = def.separateWheels ? null : takeOwnWheels(def, scene);
+  const parts = takeOwnWheels(def, scene);
 
   // Chassis box: the bounds of what is left, i.e. the body and its fixed trim.
   // Box3 has no scalar multiply, so the corners are scaled directly.
@@ -729,9 +1052,8 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     v.z - centre.z,
   ];
 
-  const parts = own ?? buildSeparateWheels(def, bodyBox);
   const wheels: WheelMeasure[] = [];
-  for (const [, id] of WHEEL_NODES) {
+  for (const id of WHEEL_IDS) {
     const p = toLocal(parts.positions.get(id)!);
     wheels.push({
       id,
@@ -748,14 +1070,10 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   //
   // Chassis-local is the only frame these can be resolved in. Resolving them in the
   // model's OWN space and subtracting `centre` afterwards — which is what this did —
-  // silently broke every pack-extracted body: a pack lays its vehicles out in a
-  // showroom row, so such a body's box is centred metres away from the model origin,
-  // and `frac * half` measured from that origin came out one row-offset wrong. The
-  // low-poly saloon's hood camera landed 6.8 m BEHIND its own boot (inside the car,
-  // looking at the back of the rear seats), the bus's 15 m ahead of its nose, and
-  // every gizmo anchor on all 21 bodies went with them. Quaternius and the
-  // procedural cars are authored about their own origin, which is why they were the
-  // only ones that looked right.
+  // silently broke every body whose box is not centred on its own origin: `frac *
+  // half` measured from the origin came out one offset wrong, and the fallback eye
+  // and every gizmo anchor went with it. Resolving in chassis space makes the
+  // fractions mean the same thing on all forty-six bodies.
   const resolveFrac = (frac: readonly [number, number, number]): [number, number, number] => [
     frac[0] * half.x,
     (frac[1] * 2 - 1) * half.y,
@@ -769,9 +1087,15 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     yaw: a.yaw ?? 0,
   }));
 
+  // The cabin is fitted AFTER the body box is known, because the box is what it is
+  // fitted to, and it deliberately does not widen that box: an interior cannot make
+  // a car bigger.
+  if (def.interior) mountInterior(def, scene, bodyBox);
+
   scene.scale.setScalar(s);
   scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene);
+  scene.updateMatrixWorld(true);
 
   // The model's origin is on the ground between the wheels, so the distance from
   // the chassis centre down to that origin is exactly the spawn clearance needed
@@ -779,7 +1103,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
-    eyePoint: resolveFrac(def.viewFrac),
+    eyePoint: driverEyePoint(scene) ?? resolveFrac(def.viewFrac),
     anchors,
     visualOffset: [-centre.x, -centre.y, -centre.z],
   };
@@ -787,80 +1111,87 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   return { def, measure, body: scene, wheels: parts.objects };
 }
 
+/** One shared palette per pack, loaded once and pointed at by every body in it. */
+const paletteTextures = new Map<string, THREE.Texture>();
+/**
+ * The fitted cabin, parsed once per asset. Every body that borrows it clones the
+ * same scene, so the geometry is one buffer however many cars carry it.
+ */
+const interiorScenes = new Map<string, THREE.Group>();
+
+/**
+ * Loads a pack's palette, tunes its sampling and decodes its pixels.
+ *
+ * The pixels are needed as well as the texture: repainting a Stylized body means
+ * rebuilding one ramp of this image, which cannot be read back off the GPU.
+ */
+async function loadPalette(url: string, fbxSource: boolean): Promise<THREE.Texture> {
+  const cached = paletteTextures.get(url);
+  if (cached) return cached;
+  textures ??= new THREE.TextureLoader();
+  const map = await textures.loadAsync(url);
+  // V origin follows the FORMAT, not the pack: glTF UVs are top-down and need no
+  // flip, while FBX counts V from the bottom, which is what TextureLoader's default
+  // flip already produces. Flipping an FBX pack's palette anyway samples it upside
+  // down — roof paint on the sills, tyre black across the glass.
+  map.flipY = fbxSource;
+  tunePaletteTexture(map);
+  readPaletteImage(url, map);
+  paletteTextures.set(url, map);
+  return map;
+}
+
 /**
  * Loads every model in `ids` (default: the whole catalogue) and measures it.
  *
  * Must finish before the first `Vehicle` is constructed: a vehicle's collider,
  * suspension and mass all come out of the measurement, so there is no meaningful
- * "not loaded yet" state for it to run in. The kit is ~5 MB of GLB in total and
- * loads from the same origin, which is why loading all of it up front is cheaper
- * than a streaming path nobody would otherwise need.
+ * "not loaded yet" state for it to run in. The catalogue is ~10 MB of FBX in total
+ * and loads from the same origin, which is why loading all of it up front is
+ * cheaper than a streaming path nobody would otherwise need.
  */
 export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
 
-  // Shared wheel files first: a body-only model cannot be measured until the wheel
-  // it borrows is known, because the wheel's radius is what puts its axle line at
-  // ground level.
-  const wheelFiles = new Set<string>();
+  // Palettes first, and once per pack rather than once per body: a body cannot be
+  // repainted until the image its ramp lives in has been decoded.
+  const palettes = new Map<string, boolean>();
   for (const def of defs) {
-    if (def.separateWheels && !wheelAssets.has(def.separateWheels.file)) {
-      wheelFiles.add(def.separateWheels.file);
+    if (def.textureFile) {
+      palettes.set(def.textureFile, def.file.toLowerCase().endsWith('.fbx'));
+    }
+  }
+  for (const def of defs) {
+    // The cabin is a glTF, but its UVs were CUT OUT of an FBX and never reoriented,
+    // so its palette is sampled the FBX way — same flip as the pack it came from,
+    // which is also what keeps one shared texture serving both.
+    if (def.interior) palettes.set(def.interior.textureFile, true);
+  }
+  await Promise.all([...palettes].map(([url, fbxSource]) => loadPalette(url, fbxSource)));
+
+  // The fitted cabin, once for every body that borrows it. It is measured against
+  // each body's box at template time, so one parse serves all fifteen.
+  const interiors = new Map<string, string>();
+  for (const def of defs) {
+    if (def.interior && !interiorScenes.has(def.interior.file)) {
+      interiors.set(def.interior.file, def.interior.textureFile);
     }
   }
   await Promise.all(
-    [...wheelFiles].map(async (file) => {
+    [...interiors].map(async ([file, textureFile]) => {
       const scene = await loadScene(file);
-      const box = boundsOf(scene);
-      wheelAssets.set(file, { object: scene, rawRadius: (box.max.y - box.min.y) / 2 });
+      applyTexture(scene, paletteTextures.get(textureFile)!);
+      tuneMaps(scene);
+      interiorScenes.set(file, scene);
     }),
   );
 
-
-  // Shared pack files, same idea as the shared wheels above: 21 entries can point
-  // at ONE GLB, so it is parsed once and each entry extracts its own subtree from
-  // the cached scene (extractPackVehicle) instead of re-parsing the buffer per
-  // vehicle. The pack ships no texture maps — 21 flat baseColorFactor materials —
-  // so there is no livery to apply or map to tune; materials stay the shared
-  // originals across every entry.
-  const packFiles = new Set<string>();
-  for (const def of defs) {
-    if (def.packNode && !packScenes.has(def.file)) packFiles.add(def.file);
-  }
-  await Promise.all(
-    [...packFiles].map(async (file) => {
-      packScenes.set(file, await loadScene(file));
-    }),
-  );
   await Promise.all(
     defs.map(async (def) => {
       if (templates.has(def.id)) return;
-      let scene: THREE.Group;
-      if (def.packNode) {
-        const pack = packScenes.get(def.file);
-        if (!pack) throw new Error(`Pack "${def.file}" was not preloaded`);
-        scene = extractPackVehicle(pack, def);
-      } else {
-        scene = await loadScene(def.file);
-        if (def.textureFile) {
-          textures ??= new THREE.TextureLoader();
-          const map = await textures.loadAsync(def.textureFile);
-          map.colorSpace = THREE.SRGBColorSpace;
-          // These are PSX-era paint maps: a few dozen pixels per panel. Smoothing
-          // them turns the liveries to mush, so they are sampled nearest, like the
-          // era.
-          map.magFilter = THREE.NearestFilter;
-          // V origin follows the FORMAT, not the pack. glTF UVs are top-down, so a
-          // glTF livery needs no flip; FBX (and the OBJ the FBX models were
-          // authored beside) counts V from the bottom, which is what
-          // TextureLoader's default flip already produces. Flipping those anyway
-          // sampled the map upside down — roof paint on the sills, plate stripe
-          // through the bumper.
-          map.flipY = def.file.toLowerCase().endsWith('.fbx');
-          applyTexture(scene, map);
-        }
-        tuneMaps(scene);
-      }
+      const scene = await loadScene(def.file);
+      if (def.textureFile) applyTexture(scene, paletteTextures.get(def.textureFile)!);
+      tuneMaps(scene);
       templates.set(def.id, buildTemplate(def, scene));
     }),
   );
@@ -1022,8 +1353,10 @@ export function disposeCarModelCache(): void {
       for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
         if (seenMaterial.has(material)) continue;
         seenMaterial.add(material);
-        const map = (material as THREE.MeshStandardMaterial).map;
-        map?.dispose();
+        // The map is NOT freed here. Every car texture is a pack palette shared by
+        // every body in that pack and by every recoloured copy of it, so it is
+        // released once below instead of by whichever car happened to be walked
+        // first.
         material.dispose();
       }
     });
@@ -1035,9 +1368,18 @@ export function disposeCarModelCache(): void {
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
   templates.clear();
-  // The cached pack scenes share geometry and materials with the templates just
-  // disposed, so they go through the SAME dedup sets — a buffer freed by the
-  // templates would otherwise be freed a second time here.
-  for (const pack of packScenes.values()) dispose(pack);
-  packScenes.clear();
+  // The cached cabin shares geometry and materials with the templates just walked,
+  // so it goes through the SAME dedup sets — a buffer freed there must not be freed
+  // a second time here.
+  for (const kit of interiorScenes.values()) dispose(kit);
+  interiorScenes.clear();
+  // Palettes are shared by every body in a pack and by every recoloured copy, so
+  // they are released here rather than through the per-material walk above, which
+  // would otherwise free one pack's palette on the first car that referenced it.
+  for (const texture of paletteTextures.values()) texture.dispose();
+  paletteTextures.clear();
+  for (const texture of repaintedPalettes.values()) texture.dispose();
+  repaintedPalettes.clear();
+  paletteImages.clear();
+  glassMaterial = null;
 }

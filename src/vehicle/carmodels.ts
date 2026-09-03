@@ -2,16 +2,18 @@
  * The car catalogue: complete, authored 3D models.
  *
  * The old concept built a car out of attachable parts. That is gone. A car is now
- * ONE finished model — imported or built in render/proceduralcars.ts — whose
- * geometry is authoritative:
+ * ONE finished imported model whose geometry is authoritative:
  *
  *  - the chassis collider comes from the model's `body` bounding box,
- *  - suspension mounts come from its wheel nodes (or authored body-box fractions
- *    for packs that ship a shared wheel separately),
- *  - each wheel's radius comes from that wheel model's own bounds,
+ *  - suspension mounts come from its wheel nodes,
+ *  - each wheel's radius comes from that wheel node's own bounds,
  *
  * all measured at load time in render/carmodel.ts. This catalogue holds geometry's
  * defaults: mass, gearbox, original engine, tank capacity, springs and steering.
+ *
+ * Every catalogue model is roadworthy. A wreck is a STATE a body is found in, not a
+ * class of body: the same forty-six models supply the player's car, the working
+ * cars generated at roadside stops, and the sunken shells scattered beside them.
  *
  * Free-form anchor parts remain cosmetic. The separate four-cell bonnet service
  * layout owns the removable engine, optional turbine, coolant tank and fuel tank.
@@ -22,22 +24,42 @@ import { variant } from '../parts/registry';
 import { TRUNK_CELL_COUNT } from './trunk';
 
 /**
- * Vendored packs, all free and credited in a LICENSE file beside their models.
+ * The two vendored packs, each credited beside its models.
  *
- *  - QUATERNIUS: Realistic Car Pack, CC0, real-world metres and own wheels.
- *  - PSX: GGBotNet PSX Style Cars, CC0, shared wheel and texture liveries.
- *  - DEJUNES: free-use low-poly cars, OBJ/GLB and FBX.
- *  - LOWPOLY: RgsDev Free Low Poly Vehicles Pack, CC-BY-4.0, 21 bodies sharing
- *    one GLB (flat colours, no textures).
- *
- * Generated cars use the `procedural://` scheme and live in
- * render/proceduralcars.ts rather than a directory.
+ *  - SOVIET: Low Poly Soviet Car Pack. Fifteen FBX bodies in centimetres, each
+ *    carrying its own wheels, colour taken from a shared 9x2 swatch atlas.
+ *  - STYLIZED: Stylized Vehicles Pack. Thirty-one Unity FBX bodies, LOD0 only,
+ *    with separate doors and wheels and colour taken from a 32x32 palette.
  */
-const QUATERNIUS = '/models/quaternius-cars';
-const PSX = '/models/psx-cars';
-const DEJUNES = '/models/dejunes';
-const LOWPOLY = '/models/lowpoly-pack';
 const SOVIET = '/models/soviet';
+const STYLIZED = '/models/stylized';
+
+/**
+ * The Stylized pack's palette, converted from the PSD it ships as (see
+ * tools/psd-to-png.mjs — no browser decodes PSD). It is a 32x32 image of vertical
+ * light-to-dark ramps: paint, glass, chrome, tyres, lamps and decals all live in
+ * it, and a body's UVs pick shades out of it rather than carrying a texture.
+ */
+const STYLIZED_PALETTE = `${STYLIZED}/PixelColors.png`;
+
+/**
+ * The cabin cut out of the Stylized saloon, fitted to the Soviet shells. A four-seat
+ * interior with a dash and a steering wheel, 734 triangles; see
+ * tools/extract-interior.mjs for the cut.
+ */
+const STYLIZED_INTERIOR = {
+  file: `${STYLIZED}/interior.glb`,
+  textureFile: STYLIZED_PALETTE,
+} as const;
+
+/**
+ * The pack's palette material, i.e. everything on a body that is not glass or a
+ * lamp lens. It is the slot the renderer repaints and weathers.
+ */
+export const STYLIZED_PAINT_MATERIAL = 'PixelColors';
+
+/** The pack's headlight material. Also the name the split lens mesh takes. */
+const STYLIZED_HEADLIGHT_MATERIAL = 'Headlights';
 
 /* ---- suspension presets ----
  *
@@ -251,9 +273,11 @@ const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
 ];
 
 /**
- * Authored lamp selectors. A selector may name either a mesh node or its material;
- * this covers FBX exports with separate lamp objects and GLBs with material-split
- * body meshes without mutating either asset format.
+ * Authored lamp selectors. A selector names either a mesh node or a material; the
+ * loader lifts a named material's triangles into their own mesh (see
+ * `isolateLampMaterials` in render/carmodel.ts), so a pack that draws its lamps as
+ * material groups on one body mesh and a pack that models each lamp separately both
+ * arrive as the separate, individually measurable lenses the beam mounts need.
  */
 export interface VehicleLightsDef {
   readonly headlights: readonly string[];
@@ -263,6 +287,43 @@ export interface VehicleLightsDef {
   readonly rightBlinkers?: readonly string[];
 }
 
+/**
+ * The model's own node names for the four wheels the vehicle drives, when the pack
+ * names them consistently. Naming them beats finding them by shape: the Stylized
+ * pack's doors are near-circular discs TALLER than its wheels, so shape detection
+ * mounts four doors as the running gear and the car drives on its own bodywork.
+ *
+ * A wheel may name several nodes for a body that draws one wheel as a hub plus a
+ * tyre; they are detached together and spin as one.
+ */
+export interface WheelNodeNames {
+  readonly wheel_fl: readonly string[];
+  readonly wheel_fr: readonly string[];
+  readonly wheel_rl: readonly string[];
+  readonly wheel_rr: readonly string[];
+}
+
+/**
+ * One colour's shades inside a pack's palette texture, as a block of texels.
+ *
+ * The Stylized pack paints by UV: a body's panels point at a column of a 32x32
+ * palette holding that colour light-to-dark, and its glass, chrome, tyres, lamps
+ * and decals point at other columns. Replacing the block — keeping each shade's
+ * luminance relative to `keyRow` — repaints the coachwork and nothing else, which
+ * is what lets one geometry file wear the catalogue's twelve factory colours.
+ *
+ * Rows are counted top-down, as the image is stored. Ramps are two columns wide
+ * wherever the pack duplicated them (a door may sample either column), so the span
+ * is authored rather than assumed.
+ */
+export interface PalettePaintRamp {
+  readonly column: number;
+  readonly columns: number;
+  readonly row: number;
+  readonly rows: number;
+  /** The shade that reads as the car's colour; the others scale from its luminance. */
+  readonly keyRow: number;
+}
 
 
 export interface CarModelDef {
@@ -272,53 +333,69 @@ export interface CarModelDef {
   /** Model URL (.glb or .fbx), served from public/. */
   readonly file: string;
   /**
-   * Base-colour texture URL, when the pack ships liveries separately from the
-   * geometry. Several catalogue entries can then share one model file.
+   * Base-colour texture URL, when the pack ships its palette separately from the
+   * geometry. Both packs do, so the map is loaded once per pack and shared.
    */
   readonly textureFile?: string;
   /**
-   * Imported paint representation. Quaternius uses named flat-colour meshes; Soviet
-   * bodies select a solid swatch from their shared 9x2 atlas.
+   * How this pack encodes body colour. Soviet bodies select a solid swatch from a
+   * shared 9x2 atlas, replaced in the fragment shader; Stylized bodies sample a
+   * light-to-dark ramp of a 32x32 palette, replaced by rebuilding that palette.
    */
-  readonly paintStyle?: 'quaternius-flat' | 'soviet-atlas';
+  readonly paintStyle?: 'soviet-atlas' | 'stylized-palette';
   /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
   readonly paintUvCell?: readonly [number, number];
+  /** The Stylized palette block holding this body's coachwork colour. */
+  readonly paintRamp?: PalettePaintRamp;
+  /**
+   * The window glass, which the two packs encode incompatibly.
+   *
+   * A Stylized body draws its windows as separate meshes sharing one authored
+   * `Glass` material, so naming that material is enough. A Soviet body has no
+   * window objects at all: its glass is a REGION OF ONE MESH whose UVs point at a
+   * single atlas swatch, so the loader has to cut those triangles out before it can
+   * make them see-through (`isolateGlass` in render/carmodel.ts).
+   *
+   * Set one or the other, never both.
+   */
+  readonly glassMaterial?: string;
+  readonly glassUvCell?: readonly [number, number];
+  /**
+   * A cabin fitted to a body that has none of its own.
+   *
+   * The Soviet bodies are hollow shells: with the glass now see-through you look
+   * straight through them. The Stylized pack bakes its seats, dash and floor into
+   * the same mesh as the outer shell, so the cabin was cut out of a donor body
+   * offline (tools/extract-interior.mjs) and is fitted here to each hollow body's
+   * own measured box.
+   */
+  readonly interior?: {
+    readonly file: string;
+    /** The donor pack's palette, which the cut cabin still samples. */
+    readonly textureFile: string;
+  };
   /**
    * Visual-only body lift as a fraction of wheel radius. Suspension, collider,
    * centre of mass and wheel mounts remain unchanged.
    */
   readonly visualRideLiftWheelFraction?: number;
   /**
-   * Set when the model has no wheels of its own: the wheels come from `file` below
-   * and are mounted at fractions of the measured body box (see
-   * render/carmodel.ts). Packs that ship one wheel and many bodies need this —
-   * nothing in such a body says where its axles are.
-   */
-  readonly separateWheels?: {
-    /** Wheel model URL, shared between every car that uses it. */
-    readonly file: string;
-    /** Front axle line, as a fraction of half-length (+Z is forward). */
-    readonly frontZFrac: number;
-    /** Rear axle line, as a fraction of half-length. */
-    readonly rearZFrac: number;
-    /** Wheel centre, as a fraction of half-width. */
-    readonly trackFrac: number;
-    /** Multiplies the wheel's measured size, for packs drawn at another scale. */
-    readonly radiusScale?: number;
-  };
-  /**
    * Set when the model carries its own wheels but under the modeller's names
    * (`Wheel_1`, `Cylinder006`, ...). The loader then finds the four discs by shape
-   * and renames them, instead of borrowing a wheel from another file.
+   * and renames them to the convention.
    */
   readonly detectWheels?: boolean;
+  /** Set instead of `detectWheels` when the pack names its wheels consistently. */
+  readonly wheelNodes?: WheelNodeNames;
   /**
-   * Body node to extract when several vehicles share one pack file. Absent means
-   * the whole scene is the vehicle.
+   * Nodes deleted at load because the game does not model what they are.
+   *
+   * The Stylized truck is a 6x4 tractor: a twin-axle rear bogie whose two wheel
+   * pairs sit 1.6 m apart along Z. Ray-cast suspension drives four wheels, and a
+   * wheel that never turns is worse on a moving vehicle than one that is not
+   * there, so the middle axle goes and the truck runs as the 4x2 its physics is.
    */
-  readonly packNode?: string;
-  /** Wheel node name prefix within a pack file; absent means `packNode`. */
-  readonly packWheelPrefix?: string;
+  readonly unusedNodes?: readonly string[];
   readonly bodyClass: BodyClass;
   /** Uniform model-units-to-metres scale. */
   readonly scale: number;
@@ -326,15 +403,15 @@ export interface CarModelDef {
    * Yaw applied to the imported model before it is measured, radians.
    *
    * The game drives toward +Z, so a model authored nose-first down -Z arrives
-   * back to front: it drove in reverse, its hood camera looked out of the boot and
-   * its front axle steered from the rear. Two of the DeJunes bodies are authored
-   * that way (`Math.PI` below), which nothing in the file declares — a body is just
-   * a mesh, and only looking at it tells you which end the lights are on.
+   * back to front: it drives in reverse, its driver looks out of the rear window and
+   * its front axle steers from the rear. Nothing in a model file declares which end
+   * the lights are on — a body is just a mesh — so this is authored per pack. Both
+   * shipped packs are nose-first down +Z and set nothing.
    *
    * It is applied before measurement rather than at draw time on purpose. Every
    * derived quantity — the chassis box, which axle is the front one, the gizmo
-   * anchors, the hood camera — comes out of the measured geometry, so rotating the
-   * geometry first is what keeps all of them agreeing with each other.
+   * anchors and the driver's eye — comes out of the measured geometry, so rotating
+   * the geometry first is what keeps all of them agreeing with each other.
    */
   readonly yaw?: number;
   /** Kerb mass, kg. Complete vehicle — there are no parts left to add to it. */
@@ -359,37 +436,19 @@ export interface CarModelDef {
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
-  /**
-   * Whether this model belongs to a roadworthy pack. Only Quaternius and Soviet
-   * cars may appear as working vehicles or in the development spawn menu; every
-   * other model remains available to the static world-wreck pool.
-   */
-  readonly spawnable: boolean;
-  /** Every car body, roadworthy or wreck-only, carries the shared 4x2 trunk. */
+  /** Every car body carries the shared 4x2 trunk. */
   readonly storageCells: number;
 }
 
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  | 'file'
-  | 'scale'
-  | 'suspension'
-  | 'viewFrac'
-  | 'lights'
-  | 'gizmoAnchors'
-  | 'spawnable'
-  | 'storageCells'
+  'file' | 'scale' | 'suspension' | 'viewFrac' | 'lights' | 'gizmoAnchors' | 'storageCells'
 > & {
   /** Model file name within the pack directory named by `dir`. */
-  readonly glb?: string;
-  /** Directory containing `glb`; required for imported models. */
-  readonly dir?: string;
-  /**
-   * Id of a car built in code (render/proceduralcars.ts) instead of loaded. Set
-   * this OR `glb`, never both.
-   */
-  readonly procedural?: string;
+  readonly glb: string;
+  /** Directory containing `glb`. */
+  readonly dir: string;
   readonly scale?: number;
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
@@ -401,767 +460,34 @@ type Entry = Omit<
 
 
 /**
- * The in-car view is a HOOD camera: it rides on the very nose of the car, above and
- * just behind the front edge, looking forward.
+ * FALLBACK in-car eye, as fractions of the body box, for a body with no steering
+ * wheel to sit behind.
  *
- * A true driver's-seat eye does not work with these models. Their windows are
- * painted geometry rather than glass, so from inside the cabin the shell is an
- * opaque box; the only way to see out was to hide the whole body, which left the
- * player floating with no car around them.
+ * The in-car view is a real driver's eye now: `driverEyePoint` in
+ * render/carmodel.ts derives it from the cabin's own steering wheel, which is the
+ * one thing in a car whose position IS the driver's — it fixes the side, the
+ * setback and the height, on all forty-six bodies, without a fraction being guessed
+ * at anywhere.
  *
- * The z fraction has to be near 1 (the front face of the body box), not halfway. At
- * 0.62 the eye still sits over the *engine bay* of a long-nosed body and the
- * bonnet's own bulge fills the frame — measured on screen with the Quaternius
- * saloon, whose 4.2 m body puts 0.62 of half-length a full metre behind its nose.
+ * It used to be a HOOD camera riding on the nose, because these packs' windows were
+ * opaque painted geometry and from inside the cabin the shell was a closed box. The
+ * glass is see-through now (`isolateGlass`) and the hollow Soviet shells have a
+ * fitted cabin, so the constraint that forced the eye onto the bonnet is gone.
+ *
+ * These fractions therefore only apply to a body that somehow has no wheel at all,
+ * and they keep the nose placement for exactly that case: an eye dropped into the
+ * middle of an empty shell sees nothing but its own roof.
  */
 const VIEW_CAR: readonly [number, number, number] = [0, 0.78, 0.96];
 /** A cab-forward truck has almost no bonnet: sit high, right at the front face. */
 const VIEW_CAB: readonly [number, number, number] = [0, 0.9, 0.96];
 
 /**
- * Axle placement for the body-only packs, as fractions of the measured body box.
- *
- * These are the numbers no file contains: a body modelled without wheels says
- * nothing about where its axles are, so the arches have to be matched by eye.
- * Front and rear are deliberately asymmetric — a road car's rear axle sits closer
- * to its tail than its front axle does to its nose.
- */
-const PSX_AXLES = { frontZFrac: 0.6, rearZFrac: -0.66, trackFrac: 0.78 } as const;
-
-/**
- * The PSX pack is modelled about 1.4x life size (its saloon is 6.15 long), so each
- * body is scaled to a believable length; the shared wheel comes down with it.
- */
-interface PsxSpec {
-  readonly id: string;
-  readonly label: string;
-  readonly glb: string;
-  readonly scale: number;
-  readonly mass: number;
-  readonly engineId: string;
-  readonly gearboxId: string;
-  readonly tankLitres: number;
-  readonly bodyClass?: BodyClass;
-  readonly suspension?: SuspensionTuning;
-  readonly rearDriveBias?: number;
-  /** Extra liveries: label suffix -> texture file, all sharing this body. */
-  readonly liveries?: readonly (readonly [string, string])[];
-  readonly storageCells?: number;
-}
-
-const PSX_SPECS: readonly PsxSpec[] = [
-  {
-    id: 'psx_saloon',
-    label: 'PSX saloon',
-    glb: 'Car.glb',
-    scale: 0.72,
-    mass: 1240,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 55,
-    liveries: [
-      ['blue', 'car_blue.png'],
-      ['grey', 'car_gray.png'],
-      ['red', 'car_red.png'],
-    ],
-  },
-  {
-    id: 'psx_coupe',
-    storageCells: 2,
-    label: 'PSX coupe',
-    glb: 'Car2.glb',
-    scale: 0.68,
-    mass: 1180,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    suspension: SUSP_SPORT,
-    rearDriveBias: 1,
-    liveries: [
-      ['black', 'car2_black.png'],
-      ['red', 'car2_red.png'],
-    ],
-  },
-  {
-    id: 'psx_hatch',
-    storageCells: 2,
-    label: 'PSX hatchback',
-    glb: 'Car3.glb',
-    scale: 0.78,
-    mass: 980,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 45,
-    liveries: [
-      ['red', 'car3_red.png'],
-      ['yellow', 'car3_yellow.png'],
-    ],
-  },
-  {
-    id: 'psx_wagon',
-    storageCells: 4,
-    label: 'PSX estate',
-    glb: 'Car4.glb',
-    scale: 0.72,
-    mass: 1420,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    liveries: [
-      ['grey', 'car4_grey.png'],
-      ['pale', 'car4_lightgrey.png'],
-      ['orange', 'car4_lightorange.png'],
-    ],
-  },
-  {
-    id: 'psx_cruiser',
-    label: 'PSX cruiser',
-    glb: 'Car5.glb',
-    scale: 0.63,
-    mass: 1520,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 75,
-    rearDriveBias: 1,
-    liveries: [
-      ['green', 'car5_green.png'],
-      ['grey', 'car5_grey.png'],
-    ],
-  },
-  {
-    id: 'psx_police',
-    label: 'PSX police cruiser',
-    glb: 'Car5_Police.glb',
-    scale: 0.63,
-    mass: 1580,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 75,
-    rearDriveBias: 1,
-    liveries: [['county', 'car5_police_la.png']],
-  },
-  {
-    id: 'psx_taxi',
-    label: 'PSX taxi',
-    glb: 'Car5_Taxi.glb',
-    scale: 0.63,
-    mass: 1540,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 75,
-  },
-  {
-    id: 'psx_pickup',
-    storageCells: 4,
-    label: 'PSX pickup',
-    glb: 'Car6.glb',
-    scale: 0.7,
-    mass: 1460,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    rearDriveBias: 1,
-    suspension: SUSP_TRUCK,
-  },
-  {
-    id: 'psx_van',
-    storageCells: 5,
-    label: 'PSX van',
-    glb: 'Car7.glb',
-    scale: 0.76,
-    mass: 1720,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 75,
-    suspension: SUSP_TRUCK,
-    liveries: [
-      ['black', 'car7_black.png'],
-      ['brown', 'car7_brown.png'],
-      ['green', 'car7_green.png'],
-      ['grey', 'car7_grey.png'],
-      ['red', 'car7_red.png'],
-    ],
-  },
-  {
-    id: 'psx_box_truck',
-    label: 'PSX box truck',
-    glb: 'Car8.glb',
-    scale: 0.64,
-    mass: 2600,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 110,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-    rearDriveBias: 1,
-    liveries: [
-      ['grey', 'Car8_grey.png'],
-      ['mail', 'Car8_mail.png'],
-      ['purple', 'Car8_purple.png'],
-    ],
-  },
-];
-
-/**
- * One entry per body, plus one per extra livery over the same geometry.
- *
- * These models remain in the complete catalogue for static world wrecks.
- */
-const PSX_CARS: readonly Entry[] = PSX_SPECS.flatMap((spec) => {
-  const base: Entry = {
-    id: spec.id,
-    label: spec.label,
-    dir: PSX,
-    glb: spec.glb,
-    bodyClass: spec.bodyClass ?? 'car',
-    storageCells: spec.storageCells,
-    mass: spec.mass,
-    engineId: spec.engineId,
-    gearboxId: spec.gearboxId,
-    tankLitres: spec.tankLitres,
-    wheelGrip: 1,
-    scale: spec.scale,
-    suspension: spec.suspension,
-    steerLock: 0.58,
-    rearDriveBias: spec.rearDriveBias ?? 0,
-    separateWheels: { file: `${PSX}/Wheel.glb`, ...PSX_AXLES },
-  };
-  return [
-    base,
-    ...(spec.liveries ?? []).map((livery) => ({
-      ...base,
-      id: `${spec.id}_${livery[0]}`,
-      label: `${spec.label} (${livery[0]})`,
-      textureFile: `${PSX}/${livery[1]}`,
-    })),
-  ];
-});
-
-/**
- * DeJunes. `car.glb` is the converted OBJ (2.53 long, so scaled up); the wheel is
- * the pack's own. The FBX models it ships alongside are loaded straight from the
- * files the author published.
- *
- * ---- scale ----
- *
- * These bodies are drawn CHUNKY: the taxi is 561 units long on 251 wide, a 2.24:1
- * footprint where a real saloon is 2.6:1, and the sports car is 2.03:1. Scaling
- * them to a believable LENGTH therefore made them 2.1-2.2 m wide and 1.6-1.7 m
- * tall — wider than the Quaternius SUV and half a metre taller than its saloon,
- * which is the "too huge" everyone saw: side by side the excess reads as width and
- * height, not length.
- *
- * So they are scaled to WIDTH instead, 1.95 m across (the two with mirrors measure
- * mirror to mirror, so their bodies land near the 1.81 m Quaternius saloon), and
- * length falls out at 3.96-4.36 m. Heights come down to 1.43-1.56 m, inside the
- * pack range they park next to.
- */
-const DEJUNES_CARS: readonly Entry[] = [
-  {
-    id: 'dj_compact',
-    storageCells: 2,
-    label: 'DeJunes compact',
-    dir: DEJUNES,
-    glb: 'car.glb',
-    // Authored nose-first down -Z: its taillights were leading the way.
-    yaw: Math.PI,
-    bodyClass: 'car',
-    mass: 1060,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 48,
-    wheelGrip: 1,
-    scale: 1.74,
-    steerLock: 0.6,
-    rearDriveBias: 0,
-    // Its arches sit closer together than the PSX saloons the shared fractions were
-    // matched to: at -0.66 the rear axle lands ~17 cm behind this body's rear arch.
-    // -0.582 puts the rear wheel back under the arch (measured off car.glb).
-    separateWheels: { file: `${DEJUNES}/wheel.glb`, frontZFrac: 0.6, rearZFrac: -0.582, trackFrac: 0.78 },
-  },
-  // The FBX trio ships in centimetres (its bodies measure 337-561 units long), so
-  // the scales here are that conversion plus the width fit described above. They
-  // carry their own wheels under the modeller's names, hence `detectWheels`.
-  //
-  // Textures: each FBX names its own maps per material. The taxi's resolve (it ships
-  // `paintjob.png` for the body and `paintjob_plate.png` for the plate, and the
-  // loader finds both beside the model), so it needs no `textureFile` — overriding
-  // it with one map was what put body paint on the number plate. `car.fbx` asks for
-  // a `Paintjob2.png` the pack never shipped, so its paint slot IS overridden, with
-  // one of the five liveries it did ship.
-  {
-    id: 'dj_sports',
-    storageCells: 2,
-    label: 'DeJunes sports car',
-    dir: DEJUNES,
-    glb: 'porsche.fbx',
-    // Also authored nose-first down -Z; the spoiler was out front.
-    yaw: Math.PI,
-    bodyClass: 'car',
-    mass: 1240,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 62,
-    wheelGrip: 1.18,
-    scale: 0.01175,
-    suspension: SUSP_SPORT,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    detectWheels: true,
-  },
-  {
-    id: 'dj_taxi',
-    label: 'DeJunes taxi',
-    dir: DEJUNES,
-    glb: 'taxi.fbx',
-    bodyClass: 'car',
-    mass: 1340,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 60,
-    wheelGrip: 0.98,
-    scale: 0.00777,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    detectWheels: true,
-  },
-  {
-    id: 'dj_lowpoly',
-    storageCells: 2,
-    label: 'DeJunes coupe',
-    dir: DEJUNES,
-    glb: 'car.fbx',
-    textureFile: `${DEJUNES}/paintjob_0.png`,
-    bodyClass: 'car',
-    mass: 1180,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 55,
-    wheelGrip: 1.05,
-    scale: 0.00777,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    detectWheels: true,
-  },
-];
-
-/**
- * RgsDev "Free Low Poly Vehicles Pack" (Sketchfab, CC-BY-4.0 — attribution beside
- * vehicles.glb). 21 finished bodies in ONE GLB sharing ONE material set: the pack
- * is 21 flat baseColorFactor colours and zero images, so there is no livery to
- * repaint and no per-entry material cloning ever happens.
- *
- * The 21 bodies sit in a showroom row inside that one scene, each a named node
- * with its own world transform, so an entry names the node to extract (`packNode`)
- * and the loader pulls that subtree plus its four `<name> wheel …` siblings into a
- * fresh group before measurement (render/carmodel.ts). Geometry and materials stay
- * shared across all 21 because extraction clones Object3D nodes with `clone(true)`,
- * which copies every transform but leaves each BufferGeometry and Material pointing
- * at the same buffer — the file is parsed once and its GPU resources are never
- * duplicated (the loader caches the parsed scene by file URL).
- *
- * ---- scale: fitted to the Quaternius footprint ----
- *
- * The pack is drawn CHUNKY. Its car bodies are all 2.81 m wide on 5.0-6.1 m of
- * length — a 1.9:1 footprint where the Quaternius saloon is 4.22 x 1.81, i.e.
- * 2.3:1 — so no uniform scale can match a real car in both directions. Fitting
- * LENGTH (what this file used to do) was the wrong half to pick: the saloon landed
- * at a believable 4.71 m and 2.53 m WIDE, half a metre wider than the Quaternius
- * SUV, and the whole pack read as monster trucks parked next to normal cars.
- *
- * So each body is fitted by FOOTPRINT AREA instead: `scale = sqrt(target L*W /
- * raw L*W)` against a target taken from the vehicle it is meant to be (the
- * Quaternius saloon's 4.22 x 1.81 for a saloon, real-world figures for the classes
- * that pack has none of). Area splits the mismatch between the two axes, so the
- * saloon lands at 3.85 x 2.07 — a little short and a little wide of the Quaternius
- * saloon instead of a lot wider — and every body in the pack now parks in the same
- * size band as the rest of the catalogue: cars 3.3-4.9 m long and 1.76-2.36 m wide,
- * the semi 11.7 m, the bus 9.9 m. They still LOOK chunky, which is the point; they
- * are no longer a different scale of world.
- *
- * The targets and the arithmetic are in `tools/lowpoly-fit.mjs`; re-run it after
- * touching a target and paste the scale it prints.
- *
- * Drivetrain follows the fleet's diesel weighting (see the gas-stop stock): the
- * heavy, low-revving four — Bus, Truck, truck-with-trailer, Firetruck — take the
- * 6.6 diesel, the three working vehicles — Pickup, Van, Ambulance — the 2.0 diesel,
- * and everything car-shaped stays petrol. Seven diesels in twenty-one is a third,
- * exactly the mix the fluid stock is weighted for.
- */
-interface LowPolySpec {
-  readonly id: string;
-  readonly label: string;
-  /** Node name inside vehicles.glb, also the `<name> wheel …` prefix. */
-  readonly packNode: string;
-  readonly scale: number;
-  readonly mass: number;
-  readonly engineId: string;
-  readonly gearboxId: string;
-  readonly tankLitres: number;
-  readonly wheelGrip: number;
-  readonly steerLock: number;
-  readonly rearDriveBias: number;
-  readonly bodyClass?: BodyClass;
-  readonly suspension?: SuspensionTuning;
-  readonly storageCells?: number;
-  readonly viewFrac?: readonly [number, number, number];
-}
-
-const LOWPOLY_SPECS: readonly LowPolySpec[] = [
-  {
-    id: 'lp_monster_truck',
-    label: 'low-poly monster truck',
-    packNode: 'Monster Truck',
-    scale: 0.812, // fits 4.6 x 2.30 m
-    mass: 4200,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 120,
-    wheelGrip: 1.2,
-    steerLock: 0.56,
-    rearDriveBias: 0.5,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-    // A show toy, not a boot: the load space is a driver's lap at best.
-    storageCells: 1,
-    // Giant 1.9 m wheels on a 4.9 m body read as a sideshow, not road stock. It
-    // stays in the desert as scenery but is never something the player chooses.
-  },
-  {
-    id: 'lp_suv',
-    label: 'low-poly SUV',
-    packNode: 'SUV',
-    scale: 0.798, // fits 4.4 x 2.05 m
-    mass: 1780,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 80,
-    wheelGrip: 1.05,
-    steerLock: 0.56,
-    rearDriveBias: 0.5,
-    suspension: SUSP_TRUCK,
-    storageCells: 4,
-  },
-  {
-    id: 'lp_pickup',
-    label: 'low-poly pickup',
-    packNode: 'Pickup',
-    scale: 0.84, // fits 5.0 x 2.00 m
-    mass: 1550,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.0,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-    // Open bed carries less than a box, more than a boot.
-    storageCells: 4,
-  },
-  {
-    id: 'lp_hatchback',
-    label: 'low-poly hatchback',
-    packNode: 'Hatchback',
-    scale: 0.653, // fits 3.6 x 1.70 m
-    mass: 980,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 42,
-    wheelGrip: 0.98,
-    steerLock: 0.64,
-    rearDriveBias: 0,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_sedan',
-    label: 'low-poly sedan',
-    packNode: 'Sedan',
-    scale: 0.735, // fits 4.3 x 1.85 m
-    mass: 1250,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 55,
-    wheelGrip: 0.95,
-    steerLock: 0.6,
-    rearDriveBias: 0,
-  },
-  {
-    id: 'lp_muscle',
-    label: 'low-poly muscle',
-    packNode: 'Muscle',
-    scale: 0.724, // fits 4.7 x 1.90 m
-    mass: 1350,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.08,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_muscle_2',
-    label: 'low-poly muscle 2',
-    packNode: 'Muscle 2',
-    scale: 0.724, // fits 4.7 x 1.90 m
-    mass: 1380,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.08,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_van',
-    label: 'low-poly van',
-    packNode: 'Van',
-    scale: 0.758, // fits 4.9 x 1.95 m
-    mass: 1750,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 75,
-    wheelGrip: 0.9,
-    steerLock: 0.56,
-    rearDriveBias: 0,
-    suspension: SUSP_TRUCK,
-    storageCells: 5,
-  },
-  {
-    id: 'lp_ambulance',
-    label: 'low-poly ambulance',
-    packNode: 'Ambulance',
-    scale: 0.826, // fits 5.4 x 2.10 m
-    mass: 2100,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 85,
-    wheelGrip: 0.9,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-    // A patient bay, not a cargo hold: it carries less than the bare box it is.
-    storageCells: 5,
-    // Bonneted like the van, so it keeps the hood camera despite truck class.
-    viewFrac: VIEW_CAR,
-  },
-  {
-    id: 'lp_truck',
-    label: 'low-poly truck',
-    packNode: 'Truck',
-    scale: 0.931, // fits 6.5 x 2.45 m
-    mass: 4200,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 130,
-    wheelGrip: 0.88,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-  },
-  {
-    // Twelve wheels, four that drive: this is a semi, not a car. The loader takes
-    // the front pair plus the LEADING rear pair (the truck's own axles) as the
-    // driven four and leaves the trailing tandem and the trailer's three bogies
-    // bolted to the body — see the "extra axles" note in render/carmodel.ts.
-    id: 'lp_truck_trailer',
-    label: 'low-poly truck with trailer',
-    packNode: 'Truck with trailer',
-    scale: 0.874, // fits 14.0 x 2.50 m
-    mass: 6800,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 150,
-    wheelGrip: 0.85,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-  },
-  {
-    id: 'lp_bus',
-    label: 'low-poly bus',
-    packNode: 'Bus',
-    scale: 0.719, // fits 10.8 x 2.50 m
-    mass: 9500,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 220,
-    wheelGrip: 0.85,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    bodyClass: 'bus',
-    suspension: SUSP_TRUCK,
-  },
-  {
-    id: 'lp_firetruck',
-    label: 'low-poly firetruck',
-    packNode: 'Firetruck',
-    scale: 0.771, // fits 7.8 x 2.50 m
-    mass: 7800,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 150,
-    wheelGrip: 0.85,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    bodyClass: 'truck',
-    suspension: SUSP_TRUCK,
-    // Municipal machinery, not personal transport: it belongs parked at a station
-    // or abandoned in the sand, not on the spawn menu.
-  },
-  {
-    id: 'lp_limousine',
-    label: 'low-poly limousine',
-    packNode: 'Limousine',
-    scale: 0.655, // fits 6.5 x 1.90 m
-    mass: 2100,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 85,
-    wheelGrip: 0.95,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-    // A long body, not a big boot: the stretch carries passengers, not cargo.
-    storageCells: 4,
-  },
-  {
-    id: 'lp_police_sedan',
-    label: 'low-poly police sedan',
-    packNode: 'Police Sedan',
-    scale: 0.735, // fits 4.3 x 1.85 m
-    mass: 1320,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 70,
-    wheelGrip: 1.0,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'lp_police_suv',
-    label: 'low-poly police SUV',
-    packNode: 'Police SUV',
-    scale: 0.798, // fits 4.4 x 2.05 m
-    mass: 1900,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 85,
-    wheelGrip: 1.05,
-    steerLock: 0.56,
-    rearDriveBias: 0.5,
-    suspension: SUSP_TRUCK,
-    storageCells: 4,
-  },
-  {
-    id: 'lp_police_muscle',
-    label: 'low-poly police muscle',
-    packNode: 'Police Muscle',
-    scale: 0.724, // fits 4.7 x 1.90 m
-    mass: 1420,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 70,
-    wheelGrip: 1.1,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_police_sports',
-    label: 'low-poly police sports',
-    packNode: 'Police Sports',
-    scale: 0.708, // fits 4.2 x 1.80 m
-    mass: 1380,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 65,
-    wheelGrip: 1.12,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_roadster',
-    label: 'low-poly roadster',
-    packNode: 'Roadster',
-    scale: 0.667, // fits 3.9 x 1.72 m
-    mass: 980,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    wheelGrip: 1.05,
-    steerLock: 0.62,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    // Two seats and a scuttle, nothing more to put things in.
-    storageCells: 1,
-  },
-  {
-    id: 'lp_sports',
-    label: 'low-poly sports car',
-    packNode: 'Sports',
-    scale: 0.708, // fits 4.2 x 1.80 m
-    mass: 1150,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.1,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    storageCells: 2,
-  },
-  {
-    id: 'lp_taxi',
-    label: 'low-poly taxi',
-    packNode: 'Taxi',
-    scale: 0.735, // fits 4.3 x 1.85 m
-    mass: 1320,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 60,
-    wheelGrip: 0.95,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-  },
-];
-
-/** One entry per body; the pack file, its extraction and the defaults are shared. */
-const LOWPOLY_CARS: readonly Entry[] = LOWPOLY_SPECS.map((spec) => ({
-  id: spec.id,
-  label: spec.label,
-  dir: LOWPOLY,
-  glb: 'vehicles.glb',
-  packNode: spec.packNode,
-  bodyClass: spec.bodyClass ?? 'car',
-  storageCells: spec.storageCells,
-  mass: spec.mass,
-  engineId: spec.engineId,
-  gearboxId: spec.gearboxId,
-  tankLitres: spec.tankLitres,
-  wheelGrip: spec.wheelGrip,
-  scale: spec.scale,
-  suspension: spec.suspension,
-  steerLock: spec.steerLock,
-  rearDriveBias: spec.rearDriveBias,
-  viewFrac: spec.viewFrac,
-}));
-
-/**
  * Low Poly Soviet Car Pack — fifteen bodies, one FBX each, and the only pack in
  * the catalogue that is about the same cars this game is already about.
  *
- * They needed no conversion and no simplification. Every one is 4.0k-5.8k triangles
- * (the DeJunes bodies are heavier), modelled in real-world proportions, nose-first
+ * They needed no conversion and no simplification. Every one is 4.0k-5.8k triangles,
+ * modelled in real-world proportions, nose-first
  * down +Z the way this game drives, and carrying its own four wheels as separate
  * meshes — so `detectWheels` finds them by shape and the whole pack lands on the
  * standard path. FBXLoader reports them in centimetres, hence `scale: 0.01`.
@@ -1435,7 +761,10 @@ const SOVIET_PAINT_CELLS: Readonly<Record<string, readonly [number, number]>> = 
   'gz24.fbx': [1, 0],
   'vz01.fbx': [0, 0],
   'vz02.fbx': [7, 0],
-  'vz03.fbx': [0, 1],
+  // Measured, not authored: this body's coachwork samples (4, 0), and the (0, 1)
+  // this used to name is the grey trim swatch — so recolouring it repainted the
+  // bumpers and left the car its factory dark blue.
+  'vz03.fbx': [4, 0],
   'vz04.fbx': [8, 1],
   'vz05.fbx': [1, 0],
   'vz05r.fbx': [7, 0],
@@ -1475,11 +804,19 @@ function sovietLights(file: string): VehicleLightsDef {
   };
 }
 
-const QUATERNIUS_LIGHTS: VehicleLightsDef = {
-  headlights: ['Headlights'],
-  taillights: ['TailLights'],
-};
-
+/**
+ * The Stylized pack draws its lamps as material groups on the body mesh rather
+ * than as separate objects, so every selector here is a MATERIAL name and the
+ * loader lifts each one into its own mesh. The pack has no reversing lenses.
+ */
+function stylizedLights(blinkers: boolean): VehicleLightsDef {
+  const lights: VehicleLightsDef = {
+    headlights: [STYLIZED_HEADLIGHT_MATERIAL],
+    taillights: ['BrakeLights'],
+  };
+  if (!blinkers) return lights;
+  return { ...lights, leftBlinkers: ['TurnLight_L'], rightBlinkers: ['TurnLight_R'] };
+}
 
 /** One entry per body; the pack's scale, palette and wheel detection are shared. */
 const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
@@ -1488,6 +825,12 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   dir: SOVIET,
   glb: spec.file,
   textureFile: `${SOVIET}/albedo.png`,
+  // Every body in this pack draws its windows as a region of the one body mesh,
+  // UV-mapped to the atlas's dark teal swatch. Measured on all fifteen.
+  glassUvCell: [3, 1],
+  // These bodies are hollow shells, and see-through glass is what makes that
+  // obvious: a fitted cabin is what you look at through it.
+  interior: STYLIZED_INTERIOR,
   lights: sovietLights(spec.file),
   detectWheels: true,
   bodyClass: 'car',
@@ -1505,147 +848,586 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   rearDriveBias: spec.rearDriveBias,
 }));
 
-const ENTRIES: readonly Entry[] = [
-  // -------------------------------------------------------------------------
-  // Quaternius Realistic Car Pack (CC0). Modelled in real-world metres — a
-  // 4.22 m sedan on a 2.44 m wheelbase with 0.26 m wheels — so these take no
-  // scaling at all, and they sit next to the stylised kit as the "sensible car"
-  // end of the collection.
-  // -------------------------------------------------------------------------
+/**
+ * Stylized Vehicles Pack — thirty-one Unity FBX bodies, the detailed LOD0 of each.
+ *
+ * The pack ships four levels of detail per vehicle and a merged "combined" variant.
+ * LOD0 detailed is the one used, because it is the only variant whose doors, windows
+ * and interior are separate objects: the doors have to stay addressable to be
+ * openable, and the combined variant throws them away.
+ *
+ * They arrive already agreeing with this game's conventions — nose down +Z, +X to
+ * the left, origin on the ground between the wheels — so no yaw is needed and the
+ * measured geometry can be trusted directly. What they do NOT agree with is scale:
+ * FBXLoader reports them in centimetres at roughly 1.43x life size (its saloon is
+ * 6.57 m long on 0.88 m wheels), so the pack scale is 0.007 rather than 0.01. That
+ * lands the saloon at 4.60 m on a 2.48 m wheelbase, a 1.52 m track and 0.62 m
+ * wheels, and every other body in believable proportion to it.
+ *
+ * Two pack-wide traits need the loader's help, both handled from this table:
+ *
+ *  - WHEELS ARE NAMED, not shaped. `FL/FR/BL/BR` are consistent across all 31
+ *    bodies, and shape detection actively fails here: a door is a near-circular
+ *    disc TALLER than a wheel, so the four largest discs on a saloon are its doors.
+ *  - LAMPS ARE MATERIALS, not meshes. Headlights, brake lights and both indicators
+ *    are material groups of the body mesh, which the loader lifts into their own
+ *    meshes so each lens can be measured and lit on its own.
+ */
+interface StylizedSpec {
+  readonly id: string;
+  readonly label: string;
+  /** File stem; the pack's own model name, kept so the asset is traceable. */
+  readonly file: string;
+  readonly bodyClass?: BodyClass;
+  readonly mass: number;
+  readonly engineId: string;
+  readonly gearboxId: string;
+  readonly tankLitres: number;
+  readonly wheelGrip: number;
+  readonly steerLock: number;
+  readonly rearDriveBias: number;
+  readonly suspension?: SuspensionTuning;
+  /** This body's coachwork ramp in the 32x32 palette. */
+  readonly paint: PalettePaintRamp;
+  /** Set for the three supercars the pack gave no indicator lenses. */
+  readonly noBlinkers?: boolean;
+  readonly visualRideLiftWheelFraction?: number;
+  /** Nodes the game deletes rather than model; see `unusedNodes`. */
+  readonly unusedNodes?: readonly string[];
+  /** Rear wheel nodes, when they are not the usual `BL`/`BR`. */
+  readonly rearWheelNodes?: readonly [string, string];
+}
+
+/** Palette block: first column, columns spanned, first row, rows, and key shade. */
+function ramp(
+  column: number,
+  columns: number,
+  row: number,
+  rows: number,
+  keyRow: number,
+): PalettePaintRamp {
+  return { column, columns, row, rows, keyRow };
+}
+
+/*
+ * Every ramp below was measured, not guessed: each body was rendered from five
+ * viewpoints with the palette cell index written out as colour, and the coachwork
+ * ramp is the block those renders actually show. A UV-area histogram does not
+ * answer this — these bodies carry more hidden interior and underside surface,
+ * mapped to the palette's greys, than they carry visible paint.
+ *
+ * Figures are read off the shapes: the muscle coupes get the V8 and the firm
+ * fastback springs, the utilities get four-wheel drive on truck springs, the vans
+ * and the three lorries get diesels and the crashbox, and the supercars get the
+ * highest grip in the catalogue.
+ */
+const STYLIZED_SPECS: readonly StylizedSpec[] = [
+  // ---- Car1-5: coupes and muscle. Long bonnets, rear drive, firm. ----
   {
-    id: 'car_q_normal1',
-    label: 'saloon',
-    dir: QUATERNIUS,
-    glb: 'NormalCar1.glb',
-    bodyClass: 'car',
-    mass: 1240,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 55,
-    wheelGrip: 1.0,
-    scale: 1,
-    steerLock: 0.6,
-    rearDriveBias: 0,
+    id: 'st_muscle_fastback',
+    label: 'muscle fastback',
+    file: 'Car1',
+    mass: 1520,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 80,
+    wheelGrip: 1.05,
+    steerLock: 0.55,
+    rearDriveBias: 1,
+    suspension: SUSP_FASTBACK,
+    paint: ramp(0, 2, 0, 12, 6),
   },
   {
-    id: 'car_q_normal2',
-    storageCells: 2,
-    label: 'city hatch',
-    dir: QUATERNIUS,
-    glb: 'NormalCar2.glb',
-    bodyClass: 'car',
-    mass: 940,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 40,
-    wheelGrip: 0.98,
-    scale: 1,
-    steerLock: 0.64,
-    rearDriveBias: 0,
+    id: 'st_muscle_coupe',
+    label: 'muscle coupe',
+    file: 'Car2',
+    mass: 1450,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 75,
+    wheelGrip: 1.06,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    suspension: SUSP_FASTBACK,
+    paint: ramp(5, 2, 0, 15, 5),
   },
   {
-    id: 'car_q_sports',
-    storageCells: 2,
-    label: 'coupe',
-    dir: QUATERNIUS,
-    glb: 'SportsCar.glb',
-    bodyClass: 'car',
-    mass: 1120,
+    id: 'st_skyline_coupe',
+    label: 'hardtop coupe',
+    file: 'Car3',
+    mass: 1180,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.04,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    paint: ramp(7, 2, 16, 15, 22),
+  },
+  {
+    id: 'st_fastback_six',
+    label: 'straight-six fastback',
+    file: 'Car4',
+    mass: 1080,
     engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_manual5',
     tankLitres: 60,
-    wheelGrip: 1.12,
-    scale: 1,
-    suspension: SUSP_SPORT,
+    wheelGrip: 1.08,
     steerLock: 0.6,
     rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    paint: ramp(12, 2, 16, 15, 21),
   },
   {
-    id: 'car_q_sports2',
-    storageCells: 2,
-    label: 'fastback',
-    dir: QUATERNIUS,
-    glb: 'SportsCar2.glb',
-    bodyClass: 'car',
-    mass: 1180,
-    engineId: 'engine_v8_5000',
+    // Boxy 80s rally homologation coupe: four-wheel drive is the whole point of it.
+    id: 'st_quattro_coupe',
+    label: 'rally coupe',
+    file: 'Car5',
+    mass: 1250,
+    engineId: 'engine_i6_2800',
     gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.15,
-    scale: 1,
-    suspension: SUSP_FASTBACK,
+    tankLitres: 70,
+    wheelGrip: 1.12,
     steerLock: 0.58,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'car_q_suv',
-    storageCells: 4,
-    label: 'off-roader',
-    dir: QUATERNIUS,
-    glb: 'SUV.glb',
-    bodyClass: 'car',
-    mass: 1780,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 80,
-    wheelGrip: 1.08,
-    scale: 1,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.56,
     rearDriveBias: 0.5,
+    suspension: SUSP_SPORT,
+    paint: ramp(3, 2, 0, 32, 8),
+  },
+
+  // ---- Jeep1-5: utilities. 4WD, truck springs, a visual lift on the short ones. ----
+  {
+    id: 'st_open_jeep',
+    label: 'open jeep',
+    file: 'Jeep1',
+    mass: 1180,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 55,
+    wheelGrip: 0.95,
+    steerLock: 0.66,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    paint: ramp(14, 2, 16, 10, 18),
     visualRideLiftWheelFraction: 1 / 6,
   },
   {
-    id: 'car_q_taxi',
-    label: 'city taxi',
-    dir: QUATERNIUS,
-    glb: 'Taxi.glb',
-    bodyClass: 'car',
-    mass: 1320,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 60,
-    wheelGrip: 0.96,
-    scale: 1,
+    id: 'st_v8_pickup',
+    label: 'V8 pickup',
+    file: 'Jeep2',
+    mass: 1780,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 80,
+    wheelGrip: 1.0,
     steerLock: 0.58,
-    rearDriveBias: 1,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    paint: ramp(18, 2, 16, 16, 18),
+    visualRideLiftWheelFraction: 1 / 6,
   },
   {
-    id: 'car_q_cop',
-    label: 'patrol car',
-    dir: QUATERNIUS,
-    glb: 'Cop.glb',
-    bodyClass: 'car',
-    mass: 1380,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 70,
-    wheelGrip: 1.06,
-    scale: 1,
+    id: 'st_short_landie',
+    label: 'short off-roader',
+    file: 'Jeep3',
+    mass: 1720,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 75,
+    wheelGrip: 0.98,
     steerLock: 0.6,
-    rearDriveBias: 1,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    paint: ramp(20, 2, 20, 9, 25),
+    visualRideLiftWheelFraction: 1 / 6,
+  },
+  {
+    id: 'st_wagon_4x4',
+    label: '4x4 estate',
+    file: 'Jeep4',
+    mass: 1690,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 80,
+    wheelGrip: 1.0,
+    steerLock: 0.58,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    paint: ramp(22, 2, 16, 16, 18),
+  },
+  {
+    id: 'st_kei_4x4',
+    label: 'small 4x4',
+    file: 'Jeep5',
+    mass: 1050,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 40,
+    wheelGrip: 0.94,
+    steerLock: 0.64,
+    rearDriveBias: 0.5,
+    suspension: SUSP_TRUCK,
+    paint: ramp(24, 2, 16, 16, 16),
+    visualRideLiftWheelFraction: 1 / 6,
   },
 
-  // -------------------------------------------------------------------------
-  // PSX Style Cars by GGBotNet (CC0). Textured, PSX-era bodies with no wheels of
-  // their own: they all borrow the pack's single Wheel model, mounted from the
-  // fractions in `PSX_AXLES` (see the separateWheels note in render/carmodel.ts).
-  // The pack is modelled at roughly 1.4x life size, hence PSX_SCALE.
-  // -------------------------------------------------------------------------
-  ...PSX_CARS,
+  // ---- MicroBus1-5: vans. Cab-forward, so the driver's eye sits at the screen. ----
+  {
+    // Rear-engined, rear-drive and softly sprung, like the bus it is drawn from.
+    id: 'st_split_bus',
+    label: 'split-screen bus',
+    file: 'MicroBus1',
+    bodyClass: 'bus',
+    mass: 1320,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 60,
+    wheelGrip: 0.9,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+    paint: ramp(26, 2, 16, 16, 18),
+  },
+  {
+    id: 'st_transporter',
+    label: 'transporter van',
+    file: 'MicroBus2',
+    bodyClass: 'bus',
+    mass: 1620,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 0.94,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    paint: ramp(28, 2, 16, 16, 17),
+  },
+  {
+    id: 'st_cabover_van',
+    label: 'cab-over van',
+    file: 'MicroBus3',
+    bodyClass: 'bus',
+    mass: 1480,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 60,
+    wheelGrip: 0.9,
+    steerLock: 0.62,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(28, 2, 0, 11, 0),
+  },
+  {
+    id: 'st_panel_van',
+    label: 'panel van',
+    file: 'MicroBus4',
+    bodyClass: 'bus',
+    mass: 1540,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 0.92,
+    steerLock: 0.6,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(27, 1, 0, 14, 0),
+  },
+  {
+    id: 'st_shag_van',
+    label: 'custom van',
+    file: 'MicroBus5',
+    bodyClass: 'bus',
+    mass: 1900,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 90,
+    wheelGrip: 0.95,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(30, 2, 0, 16, 5),
+  },
 
-  // -------------------------------------------------------------------------
-  // DeJunes (itch.io, "free for any kind of projects"). One converted OBJ body
-  // plus three FBX models loaded as they shipped. Also body-only.
-  // -------------------------------------------------------------------------
-  ...DEJUNES_CARS,
+  // ---- Sedan1-5: the everyday cars. ----
+  {
+    id: 'st_big_saloon',
+    label: 'big saloon',
+    file: 'Sedan1',
+    mass: 1420,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 65,
+    wheelGrip: 0.96,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+    paint: ramp(24, 2, 0, 16, 4),
+  },
+  {
+    id: 'st_estate',
+    label: 'family estate',
+    file: 'Sedan2',
+    mass: 1360,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 60,
+    wheelGrip: 0.96,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    paint: ramp(3, 2, 0, 32, 10),
+  },
+  {
+    id: 'st_compact_saloon',
+    label: 'compact saloon',
+    file: 'Sedan3',
+    mass: 1300,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 1.0,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+    paint: ramp(22, 2, 0, 16, 4),
+  },
+  {
+    id: 'st_repmobile',
+    label: 'rep saloon',
+    file: 'Sedan4',
+    mass: 1280,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 62,
+    wheelGrip: 0.98,
+    steerLock: 0.6,
+    rearDriveBias: 0,
+    paint: ramp(20, 2, 0, 16, 4),
+  },
+  {
+    id: 'st_sport_touring',
+    label: 'sport touring',
+    file: 'Sedan5',
+    mass: 1240,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.02,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    paint: ramp(18, 2, 0, 16, 5),
+  },
 
-  // -------------------------------------------------------------------------
-  // RgsDev Free Low Poly Vehicles Pack (CC-BY-4.0). 21 bodies in one GLB, each
-  // extracted by `packNode`; flat colours, no textures, shared geometry.
-  // -------------------------------------------------------------------------
-  ...LOWPOLY_CARS,
+  // ---- SpecialCar1-5: service vehicles. Two saloons, an ambulance, a bullion
+  // van and a fire engine. The three big ones are lorries: diesel, crashbox and
+  // truck springs, with the cab-forward driving position that comes with bodyClass.
+  {
+    id: 'st_patrol_car',
+    label: 'patrol car',
+    file: 'SpecialCar1',
+    mass: 1680,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 75,
+    wheelGrip: 1.06,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    paint: ramp(3, 2, 0, 32, 27),
+  },
+  {
+    id: 'st_city_taxi',
+    label: 'city taxi',
+    file: 'SpecialCar2',
+    mass: 1560,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_auto3',
+    tankLitres: 70,
+    wheelGrip: 0.96,
+    steerLock: 0.58,
+    rearDriveBias: 1,
+    suspension: SUSP_SOFT,
+    paint: ramp(16, 2, 0, 8, 3),
+  },
+  {
+    id: 'st_ambulance',
+    label: 'ambulance',
+    file: 'SpecialCar3',
+    bodyClass: 'truck',
+    mass: 3400,
+    engineId: 'engine_d4_2000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 90,
+    wheelGrip: 0.92,
+    steerLock: 0.52,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(0, 2, 16, 14, 20),
+  },
+  {
+    id: 'st_bullion_van',
+    label: 'bullion van',
+    file: 'SpecialCar4',
+    bodyClass: 'truck',
+    mass: 4600,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 120,
+    wheelGrip: 0.9,
+    steerLock: 0.52,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(3, 2, 0, 32, 11),
+  },
+  {
+    id: 'st_fire_engine',
+    label: 'fire engine',
+    file: 'SpecialCar5',
+    bodyClass: 'truck',
+    mass: 11000,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 240,
+    wheelGrip: 0.88,
+    steerLock: 0.48,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(3, 2, 0, 32, 2),
+  },
 
+  // ---- SportCar1-5: the supercars. Highest grip here; the first three were
+  // drawn without indicator lenses, which `noBlinkers` states rather than lets
+  // the lamp binder discover as a missing selector.
+  {
+    id: 'st_mid_engine_v8',
+    label: 'mid-engined V8',
+    file: 'SportCar1',
+    mass: 1620,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 80,
+    wheelGrip: 1.25,
+    steerLock: 0.54,
+    rearDriveBias: 0.5,
+    suspension: SUSP_FASTBACK,
+    paint: ramp(16, 2, 8, 6, 11),
+    noBlinkers: true,
+  },
+  {
+    id: 'st_hypercar',
+    label: 'hypercar',
+    file: 'SportCar2',
+    mass: 1900,
+    engineId: 'engine_v8_5000',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 100,
+    wheelGrip: 1.28,
+    steerLock: 0.52,
+    rearDriveBias: 0.5,
+    suspension: SUSP_FASTBACK,
+    paint: ramp(14, 2, 0, 5, 2),
+    noBlinkers: true,
+  },
+  {
+    id: 'st_wedge_sports',
+    label: 'wedge sports',
+    file: 'SportCar3',
+    mass: 1540,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 60,
+    wheelGrip: 1.2,
+    steerLock: 0.56,
+    rearDriveBias: 0.5,
+    suspension: SUSP_SPORT,
+    paint: ramp(3, 2, 0, 32, 13),
+    noBlinkers: true,
+  },
+  {
+    id: 'st_rear_engine_sports',
+    label: 'rear-engined sports',
+    file: 'SportCar4',
+    mass: 1320,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 65,
+    wheelGrip: 1.22,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    suspension: SUSP_FASTBACK,
+    paint: ramp(16, 2, 0, 8, 3),
+  },
+  {
+    id: 'st_turbo_coupe',
+    label: 'turbo coupe',
+    file: 'SportCar5',
+    mass: 1450,
+    engineId: 'engine_i6_2800',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 1.18,
+    steerLock: 0.56,
+    rearDriveBias: 1,
+    suspension: SUSP_SPORT,
+    paint: ramp(0, 2, 16, 14, 20),
+  },
+
+  {
+    // 6x4 tractor unit. Its middle axle is deleted and the rearmost pair drives,
+    // which puts the wheelbase at 3.47 m and leaves no wheel standing still.
+    id: 'st_tractor_unit',
+    label: 'tractor unit',
+    file: 'Truck1',
+    bodyClass: 'truck',
+    mass: 7800,
+    engineId: 'engine_d6_6600',
+    gearboxId: 'gearbox_truck6',
+    tankLitres: 300,
+    wheelGrip: 0.94,
+    steerLock: 0.46,
+    rearDriveBias: 1,
+    suspension: SUSP_TRUCK,
+    paint: ramp(12, 2, 8, 8, 9),
+    unusedNodes: ['BL', 'BR'],
+    rearWheelNodes: ['BL2', 'BR2'],
+  },
+];
+
+/** One entry per body; scale, palette, wheel naming and lamp materials are shared. */
+const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
+  const [rl, rr] = spec.rearWheelNodes ?? (['BL', 'BR'] as const);
+  return {
+    id: spec.id,
+    label: spec.label,
+    dir: STYLIZED,
+    glb: `${spec.file}.fbx`,
+    textureFile: STYLIZED_PALETTE,
+    paintStyle: 'stylized-palette',
+    glassMaterial: 'Glass',
+    paintRamp: spec.paint,
+    lights: stylizedLights(spec.noBlinkers !== true),
+    wheelNodes: {
+      wheel_fl: ['FL'],
+      wheel_fr: ['FR'],
+      wheel_rl: [rl],
+      wheel_rr: [rr],
+    },
+    unusedNodes: spec.unusedNodes,
+    bodyClass: spec.bodyClass ?? 'car',
+    visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
+    mass: spec.mass,
+    engineId: spec.engineId,
+    gearboxId: spec.gearboxId,
+    tankLitres: spec.tankLitres,
+    wheelGrip: spec.wheelGrip,
+    // Centimetres at about 1.43x life size; 0.007 puts the saloon at 4.6 m.
+    scale: 0.007,
+    suspension: spec.suspension,
+    steerLock: spec.steerLock,
+    rearDriveBias: spec.rearDriveBias,
+  } satisfies Entry;
+});
+
+const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
   // its own wheels (found by shape) and taking its colour from the pack's shared
@@ -1654,84 +1436,28 @@ const ENTRIES: readonly Entry[] = [
   ...SOVIET_CARS,
 
   // -------------------------------------------------------------------------
-  // Built in code (render/proceduralcars.ts). Same contract as any pack: a body
-  // and four named wheels, drawn in metres, so they are measured and driven by
-  // exactly the same path. Their scale is 1 because they are authored life-size.
+  // Stylized Vehicles Pack. Thirty-one Unity FBX bodies at detailed LOD0, each
+  // with named wheels, separate doors and windows, and lamps drawn as material
+  // groups the loader lifts into their own lenses.
   // -------------------------------------------------------------------------
-  {
-    id: 'proc_wedge',
-    storageCells: 2,
-    label: 'Group-B wedge',
-    procedural: 'wedge',
-    bodyClass: 'car',
-    mass: 980,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.22,
-    scale: 1,
-    suspension: SUSP_SPORT,
-    steerLock: 0.62,
-    rearDriveBias: 0.5,
-  },
-  {
-    id: 'proc_streamliner',
-    label: 'streamliner',
-    procedural: 'streamliner',
-    bodyClass: 'car',
-    mass: 1520,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 65,
-    wheelGrip: 0.88,
-    scale: 1,
-    steerLock: 0.5,
-    rearDriveBias: 1,
-  },
-  {
-    id: 'proc_dune_runner',
-    storageCells: 1,
-    label: 'dune runner',
-    procedural: 'dunerunner',
-    bodyClass: 'car',
-    mass: 720,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 90,
-    wheelGrip: 1.3,
-    scale: 1,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.72,
-    rearDriveBias: 1,
-    viewFrac: [0, 0.86, 0.92],
-  },
+  ...STYLIZED_CARS,
 ];
-
-function entryFile(entry: Entry): string {
-  if (entry.procedural) return `procedural://${entry.procedural}`;
-  if (!entry.dir || !entry.glb) {
-    throw new Error(`Car catalogue entry "${entry.id}" has no model source`);
-  }
-  return `${entry.dir}/${entry.glb}`;
-}
 
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
-  file: entryFile(e),
+  file: `${e.dir}/${e.glb}`,
   textureFile: e.textureFile,
-  paintStyle:
-    e.dir === QUATERNIUS
-      ? 'quaternius-flat'
-      : e.dir === SOVIET
-        ? 'soviet-atlas'
-        : undefined,
-  paintUvCell: e.dir === SOVIET && e.glb ? SOVIET_PAINT_CELLS[e.glb] : undefined,
+  paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
+  paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
+  paintRamp: e.paintRamp,
+  glassMaterial: e.glassMaterial,
+  glassUvCell: e.glassUvCell,
+  interior: e.interior,
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
-  separateWheels: e.separateWheels,
   detectWheels: e.detectWheels,
-  packNode: e.packNode,
-  packWheelPrefix: e.packWheelPrefix,
+  wheelNodes: e.wheelNodes,
+  unusedNodes: e.unusedNodes,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
   yaw: e.yaw,
@@ -1744,30 +1470,19 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
-  lights: e.lights ?? (e.dir === QUATERNIUS ? QUATERNIUS_LIGHTS : undefined),
+  lights: e.lights,
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
-  spawnable: e.dir === QUATERNIUS || e.dir === SOVIET,
   storageCells: TRUNK_CELL_COUNT,
 }));
 
-/**
- * The only roadworthy model pool: Quaternius Realistic Car Pack and Low Poly
- * Soviet Car Pack. It feeds both the development spawn menu and the rare working
- * cars generated at POIs. `CAR_MODELS` remains the full static-wreck catalogue.
- */
-export const SPAWNABLE_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
-  (m) => m.spawnable,
-);
-
-/** Static wreck-only models, kept out of the roadworthy spawn pool by construction. */
-export const WRECK_ONLY_CAR_MODELS: readonly CarModelDef[] = CAR_MODELS.filter(
-  (model) => !model.spawnable,
-);
-
 const BY_ID = new Map(CAR_MODELS.map((m) => [m.id, m]));
 
-/** The model a new game starts in and every fallback resolves to. */
-export const DEFAULT_CAR_MODEL_ID = 'car_q_normal1';
+/**
+ * The model a new game starts in and every unknown saved id resolves to. The
+ * Zhiguli: the cheapest, softest, most ordinary thing in the catalogue, and the
+ * one car this game is most about.
+ */
+export const DEFAULT_CAR_MODEL_ID = 'sv_vaz2101';
 
 export function carModel(id: string): CarModelDef {
   const m = BY_ID.get(id);

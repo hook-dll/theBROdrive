@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import { installAssetShim } from './assetshim';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { SurfaceType } from '../src/core/surfaces';
@@ -33,9 +34,11 @@ class BunProgressEvent extends Event implements ProgressEvent {
   }
 }
 
-if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
+// The catalogue is all imported models now, so this harness loads real FBX bodies
+// off disk rather than building one in code.
+installAssetShim();
 
-const MODEL_ID = 'proc_wedge';
+const MODEL_ID = 'st_big_saloon';
 const SETTLE_STEPS = 180;
 const DIRT_RUN_STEPS = 1_200;
 let failures = 0;

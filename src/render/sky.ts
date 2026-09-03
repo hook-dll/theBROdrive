@@ -802,7 +802,7 @@ export class Sky {
     //
     // Twenty-five centimetres is a CAR'S GROUND CLEARANCE. Three renders the back
     // faces of a caster into the depth map (`shadowSide`, and see the note in
-    // render/proceduralcars.ts), so the depth stored under a car is its UNDERBODY,
+    // render/carmodel.ts), so the depth stored under a car is its UNDERBODY,
     // and the sand under it sits 0.11-0.29 m further from the light depending on the
     // model. The bias therefore declared most of that sand lit: the car's contact
     // shadow was eaten away wherever the dune relief closed the gap, and the surviving

@@ -41,10 +41,10 @@
  *     pixel centroid) sits at (0.487, 0.419). Passing V through un-flipped
  *     samples (0.479, 0.593) -- 0.174 off from the hub, landing in the black
  *     tyre band instead. Flipping samples (0.479, 1-0.593=0.407) -- 0.012 from
- *     the hub, i.e. dead centre on the bright rim. All three vendored packs
- *     (PSX/GGBot, DeJunes, Quaternius) are Blender OBJ exports ("# Blender ...
- *     MTL File"), so the flip is applied unconditionally; there is no per-pack
- *     CLI flag because no pack's evidence disagreed with this one.
+ *     the hub, i.e. dead centre on the bright rim. The vendored OBJ packs this
+ *     was written for were Blender exports ("# Blender ... MTL File"), which is
+ *     why the flip is applied unconditionally; there is no per-pack CLI flag
+ *     because no pack's evidence ever disagreed with this one.
  *
  * A file with a single object and no wheel objects (e.g. a body-only car, or a
  * standalone wheel mesh) converts fine: only the nodes that exist are emitted, and

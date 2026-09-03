@@ -17,6 +17,7 @@ import { preloadTrailerModel } from '../src/render/trailermodel';
 import { TRAILER_MODEL_FIT, TrailerField } from '../src/vehicle/trailer';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin, type RebaseShift } from '../src/world/origin';
+import { installBlankTextures } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -40,7 +41,7 @@ const NEAR_CENTER = { x: 0, z: 0 };
 const HYSTERESIS_CENTER = { x: 1000, z: 0 };
 const FAR_CENTER = { x: 3000, z: 0 };
 const TOW_CAR_ID = 'lifecycle:tow';
-const TOW_MODEL_ID = 'proc_wedge';
+const TOW_MODEL_ID = 'st_v8_pickup';
 
 let failures = 0;
 
@@ -116,6 +117,9 @@ async function preloadModels(): Promise<void> {
   }
 
   globalThis.Request = AssetRequest;
+  // A TEXTURE cannot decode without a browser, and nothing here reads a pixel; the
+  // palette both packs paint from stands in blank. See tools/assetshim.ts.
+  installBlankTextures();
   try {
     await Promise.all([preloadTrailerModel(TRAILER_MODEL_FIT), preloadCarModels([TOW_MODEL_ID])]);
   } finally {

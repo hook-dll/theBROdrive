@@ -39,7 +39,7 @@ const WIND_HP_LOW = 140;
 const WIND_HP_HIGH = 480;
 const WIND_LP_LOW = 3000;
 const WIND_LP_HIGH = 1800;
-/** Hood and chase cameras share the same restrained wind level. */
+/** Interior and chase cameras share the same restrained wind level. */
 const WIND_GAIN = 0.16;
 
 /** Speed (m/s) at which tyre roll noise saturates. */

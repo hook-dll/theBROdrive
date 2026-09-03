@@ -14,16 +14,17 @@
  *    METRES is `|bias| * (far - near)`. Over 40..540 m the old -0.0004 was 20 cm.
  *  - `shadow.normalBias` pushes the receiver along its own normal, which for flat sand
  *    under a high sun is straight at the light: another `normalBias * sin(elevation)`.
- *  - Three renders a caster's BACK faces into the depth map (`shadowSide`, see
- *    render/proceduralcars.ts), so the depth stored under a car is its UNDERBODY. The
- *    sand beneath sits one GROUND CLEARANCE further from the light — 0.11 to 0.29 m
- *    across the shipped packs (see RIDE_LIFT_MAX in vehicle/vehicle.ts).
+ *  - Three renders a caster's BACK faces into the depth map (`shadowSide`, set in
+ *    `prepareMaterials` in render/carmodel.ts), so the depth stored under a car is
+ *    its UNDERBODY. The sand beneath sits one GROUND CLEARANCE further from the
+ *    light — 0.18 to 0.51 m across the two shipped packs, as the catalogue states it
+ *    rather than as the artist drew it (see RIDE_LIFT_MAX in vehicle/vehicle.ts).
  *  - Along the light ray that clearance is `gap / sin(elevation)`, so the sand is
  *    declared LIT — the shadow is erased — whenever
  *
  *        gap <= sin(elevation) * (|bias| * range + normalBias * sin(elevation))
  *
- * Twenty-five centimetres of slack against an eleven-centimetre gap erases the whole
+ * Twenty-five centimetres of slack against an eighteen-centimetre gap erases the whole
  * contact shadow; where the dune relief closes or opens the gap around the threshold it
  * erases PART of it, and the boundary follows the desert tile's 3 m lattice. That is
  * the diagonal striping, and it is worst at noon because the threshold scales with
@@ -46,13 +47,14 @@ const BIAS_BEFORE = -0.0004;
 const NORMAL_BIAS_BEFORE = 0.05;
 
 /**
- * Body-to-ground clearance of the shipped car packs, metres, from the measurements
- * quoted around RIDE_LIFT_MAX in vehicle/vehicle.ts.
+ * Body-to-ground clearance of the shipped cars, metres, as they SETTLE on their
+ * springs — the figure tools/suspension-probe.ts reports, not the drawn stance,
+ * because a low-drawn box is lifted to a stated clearance (RIDE_LIFT_MAX).
  */
 const CLEARANCES: readonly { readonly label: string; readonly metres: number }[] = [
-  { label: 'DeJunes compact', metres: 0.11 },
-  { label: 'Quaternius saloon', metres: 0.21 },
-  { label: 'DeJunes taxi', metres: 0.29 },
+  { label: 'mid-engined V8', metres: 0.18 },
+  { label: 'VAZ-2101 Zhiguli', metres: 0.2 },
+  { label: 'tractor unit', metres: 0.51 },
 ];
 
 const DEPTH_RANGE = SHADOW_FAR - SHADOW_NEAR;

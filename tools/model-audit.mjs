@@ -8,7 +8,8 @@
  * This is what the catalogue's scales and the per-part livery rule in
  * render/carmodel.ts were derived from: it shows which material of a body is the
  * paint slot (the one with a map) and which are part colours (glass, grill, lights,
- * tyres), and it gives the raw length/width a scale has to be fitted to.
+ * tyres), and it gives the raw length/width a scale has to be fitted to. By default it
+ * audits the Stylized Vehicles Pack.
  *
  * Usage: node tools/model-audit.mjs [public/models/<pack>]
  *
@@ -33,7 +34,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-const DIR = (process.argv[2] ?? 'public/models/dejunes') + '/';
+const DIR = (process.argv[2] ?? 'public/models/stylized') + '/';
 
 function report(name, scene) {
   scene.updateMatrixWorld(true);

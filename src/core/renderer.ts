@@ -20,10 +20,9 @@ import type { ShadeTint } from '../items/items';
  */
 export const CAMERA_FAR = 4000;
 /**
- * Near-plane floor in metres. As close as geometry may come to the hood camera
- * without being clipped — the in-car eye rides on the nose of the car (see
- * VIEW_CAR in vehicle/carmodels.ts), so the bonnet passes just beneath it.
- * `setViewDistance` only ever raises this, never lowers it.
+ * Near-plane floor in metres. It must clear the steering wheel and dashboard from
+ * the driver's eye without clipping either surface. `setViewDistance` only ever
+ * raises this, never lowers it.
  */
 export const CAMERA_NEAR = 0.08;
 

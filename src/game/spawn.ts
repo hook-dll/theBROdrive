@@ -31,9 +31,6 @@ export function spawnCarState(
   heading: number,
 ): CarState {
   const def = carModel(request.modelId);
-  if (!def.spawnable) {
-    throw new Error(`Car model "${request.modelId}" is wreck-only and cannot be spawned`);
-  }
   const engine = variant(def.engineId).engine;
   const half = heading / 2;
   const id = world.runtimePartId();

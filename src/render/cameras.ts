@@ -413,11 +413,11 @@ export class CameraRig {
         break;
     }
 
-    // The hood camera is BOLTED to the car, so it must not be sprung toward its
+    // The interior camera is BOLTED to the car, so it must not be sprung toward its
     // desired pose: a first-order follow at SPRING_OMEGA lags by v/omega, which is
-    // a metre at 45 km/h and 2.5 m at highway speed — enough for the eye to sink
-    // back through the windscreen into the cabin and to swim forward under braking.
-    // Its softness comes from the bounded g-sway and shake instead.
+    // a metre at 45 km/h and 2.5 m at highway speed — enough for the eye to leave
+    // the driver's seat under acceleration and braking. Its softness comes from the
+    // bounded g-sway and shake instead.
     //
     // External cameras spring only the eye. Their look point is the current,
     // interpolated chassis centre: springing it by the same rule leaves it metres

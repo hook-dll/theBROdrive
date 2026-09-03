@@ -1,6 +1,0 @@
-DeJunes — Low-poly vehicle pack
-Source: DeJunes on itch.io
-
-The pack's author states the models are "free for any kind of projects".
-No formal licence file is shipped with the download; this notice records the
-author's stated permission. See the DeJunes itch.io page for the current terms.
