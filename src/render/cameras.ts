@@ -94,6 +94,22 @@ const INTERIOR_NEAR = 0.035;
  * the speed effect off entirely.
  */
 const MAX_FOV = BASE_FOV + 14;
+/**
+ * Cockpit speed-widened ceiling.
+ *
+ * Perceived speed is optical FLOW, not velocity: a surface at lateral distance `d`
+ * sweeps the retina at `v/d`, so what a driver reads speed from is near geometry
+ * crossing the PERIPHERY — the verge, the shoulder, the posts. A narrow projection
+ * throws that periphery off-screen and leaves only the distant road, which barely
+ * moves, and that is the whole reason 120 km/h in the cabin reads like 70.
+ *
+ * The exterior views already widen (MAX_FOV); interior was pinned at INTERIOR_FOV
+ * and therefore carried no speed cue at all. The swing is +8 against the exterior's
+ * +14 because a cockpit pays for FOV twice: the dash, the pillars and the door cards
+ * sit within a metre of the eye, so widening stretches them, and INTERIOR_NEAR is
+ * 0.035 m precisely because they are that close.
+ */
+const INTERIOR_MAX_FOV = INTERIOR_FOV + 8;
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
@@ -772,10 +788,10 @@ export class CameraRig {
   }
 
   private updateFov(speedKmh: number, dt: number, mode: CameraMode): void {
+    const restFov = mode === 'interior' ? INTERIOR_FOV : BASE_FOV;
+    const wideFov = mode === 'interior' ? INTERIOR_MAX_FOV : MAX_FOV;
     const normalFov =
-      mode === 'interior'
-        ? INTERIOR_FOV
-        : BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
+      restFov + (wideFov - restFov) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
     const targetFov = this.binoculars ? BINOCULAR_FOV : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
     const targetNear =
