@@ -746,6 +746,14 @@ async function boot(): Promise<void> {
           );
         }
       }
+      if (f.toggleInteriorHeadMovement && camera.mode === 'interior') {
+        camera.toggleInteriorHeadMovement();
+        hud.setToast(
+          camera.isHeadMovementEnabled
+            ? 'interior head movement on'
+            : 'interior head movement off — fixed to seat point',
+        );
+      }
       const calibratingSeat = camera.isSeatAdjusting;
       // One key cycles the complete driving state: sleeper -> frantic -> off.
       // Keeping the transition here means the HUD, input handover and controller

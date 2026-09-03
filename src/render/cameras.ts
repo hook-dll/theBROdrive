@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
-import { CAMERA_BASE_FOV } from '../core/renderer';
+import { CAMERA_BASE_FOV, nearPlaneForFarPlane } from '../core/renderer';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
 export type CameraMode = 'foot' | 'interior' | 'chase' | 'orbit';
@@ -83,6 +83,10 @@ const GROUND_PROBE_DOWN = 40;
  * disagree. 65 degrees on foot and in the car, matching The Long Drive.
  */
 const BASE_FOV = CAMERA_BASE_FOV;
+/** Narrower cockpit projection avoids stretching nearby doors and roof pillars. */
+const INTERIOR_FOV = 60;
+/** Close cockpit surfaces must remain in front of the clipping plane. */
+const INTERIOR_NEAR = 0.035;
 /**
  * Speed-widened ceiling. Kept at the same +14 degrees over the resting value that
  * it was before, so lowering the base changes where the camera sits at rest without
@@ -103,14 +107,16 @@ const BOB_FREQ = 9;
  * also inherits the chassis' physical pitch and roll. This bounded offset is the
  * driver's body moving in the seat, not a replacement for suspension motion.
  */
-/** Sway offset clamp, metres, in any axis. */
-const SWAY_MAX = 0.075;
+/** Belted occupant travel, kept inside a conservative cabin-safe envelope. */
+const SWAY_LATERAL_MAX = 0.04;
+const SWAY_DEPTH_MAX = 0.05;
 /** Sway low-pass time constant, seconds. */
 const SWAY_TAU = 0.16;
 const SWAY_OMEGA = 1 / SWAY_TAU;
 /** Acceleration, m/s^2, that fully saturates the clamp. */
 const SWAY_ACCEL_FULL = 6;
-const SWAY_GAIN = SWAY_MAX / SWAY_ACCEL_FULL;
+const SWAY_LATERAL_GAIN = SWAY_LATERAL_MAX / SWAY_ACCEL_FULL;
+const SWAY_DEPTH_GAIN = SWAY_DEPTH_MAX / SWAY_ACCEL_FULL;
 /** Small additional occupant counter-motion; chassis roll comes from target.q. */
 const SWAY_ROLL_MAX = 0.025;
 const SWAY_ROLL_GAIN = SWAY_ROLL_MAX / SWAY_ACCEL_FULL;
@@ -190,6 +196,8 @@ export class CameraRig {
   /** Mutable chassis-local driver eye used while calibrating the interior camera. */
   private readonly interiorOffset = new THREE.Vector3();
   private savedInteriorOffset: readonly [number, number, number] | null = null;
+  /** U disables acceleration-driven occupant sway while retaining the chassis pose. */
+  private headMovementEnabled = true;
 
   private binoculars = false;
   /**
@@ -272,6 +280,19 @@ export class CameraRig {
   /** Applies the saved global calibration used instead of each model's authored eye. */
   setInteriorCameraOffset(offset: readonly [number, number, number] | null): void {
     this.savedInteriorOffset = offset;
+  }
+  get isHeadMovementEnabled(): boolean {
+    return this.headMovementEnabled;
+  }
+
+  /** U toggles occupant sway only from the interior driving view. */
+  toggleInteriorHeadMovement(): void {
+    if (this.mode !== 'interior') return;
+    this.headMovementEnabled = !this.headMovementEnabled;
+    this.swayAccelLong = 0;
+    this.swayAccelLat = 0;
+    this.swayRoll = 0;
+    this.swayPrimed = false;
   }
 
   /** Unit view direction of the *smoothed* camera, for interaction raycasts. */
@@ -525,7 +546,7 @@ export class CameraRig {
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
 
-    this.updateFov(target.speedKmh, d);
+    this.updateFov(target.speedKmh, d, mode);
   }
 
   /* ---- desired pose per mode; each writes _vA = eye, _vB = look-at ---- */
@@ -564,25 +585,42 @@ export class CameraRig {
     const fwdSpeed = _vD.z;
     const latSpeed = _vD.x;
 
-    if (this.swayPrimed) {
-      const rawLong = (fwdSpeed - this.swayPrevFwdSpeed) / dt;
-      const rawLat = (latSpeed - this.swayPrevLatSpeed) / dt;
-      const k = 1 - Math.exp(-SWAY_OMEGA * dt);
-      this.swayAccelLong += (rawLong - this.swayAccelLong) * k;
-      this.swayAccelLat += (rawLat - this.swayAccelLat) * k;
+    if (this.headMovementEnabled) {
+      if (this.swayPrimed) {
+        const rawLong = (fwdSpeed - this.swayPrevFwdSpeed) / dt;
+        const rawLat = (latSpeed - this.swayPrevLatSpeed) / dt;
+        const k = 1 - Math.exp(-SWAY_OMEGA * dt);
+        this.swayAccelLong += (rawLong - this.swayAccelLong) * k;
+        this.swayAccelLat += (rawLat - this.swayAccelLat) * k;
+      } else {
+        this.swayPrimed = true; // first frame after a reset: nothing to difference against yet
+      }
     } else {
-      this.swayPrimed = true; // first frame after a reset: nothing to difference against yet
+      this.swayAccelLong = 0;
+      this.swayAccelLat = 0;
+      this.swayRoll = 0;
+      this.swayPrimed = false;
     }
     this.swayPrevFwdSpeed = fwdSpeed;
     this.swayPrevLatSpeed = latSpeed;
 
     // Offset opposes the car's acceleration, like a body pressed back into
     // its seat under throttle or thrown sideways under braking/cornering.
-    // The clamp below is the guarantee: however large swayAccelLong/Lat get,
-    // the offset added to the eye can never exceed SWAY_MAX.
-    const offsetZ = clamp(-this.swayAccelLong * SWAY_GAIN, -SWAY_MAX, SWAY_MAX);
-    const offsetX = clamp(-this.swayAccelLat * SWAY_GAIN, -SWAY_MAX, SWAY_MAX);
-    this.swayRoll = clamp(-this.swayAccelLat * SWAY_ROLL_GAIN, -SWAY_ROLL_MAX, SWAY_ROLL_MAX);
+    // The per-axis clamps below guarantee that acceleration cannot carry the eye
+    // outside the conservative cabin-safe envelope.
+    const offsetZ = clamp(
+      -this.swayAccelLong * SWAY_DEPTH_GAIN,
+      -SWAY_DEPTH_MAX,
+      SWAY_DEPTH_MAX,
+    );
+    const offsetX = clamp(
+      -this.swayAccelLat * SWAY_LATERAL_GAIN,
+      -SWAY_LATERAL_MAX,
+      SWAY_LATERAL_MAX,
+    );
+    this.swayRoll = this.headMovementEnabled
+      ? clamp(-this.swayAccelLat * SWAY_ROLL_GAIN, -SWAY_ROLL_MAX, SWAY_ROLL_MAX)
+      : 0;
     _vD.set(offsetX, 0, offsetZ).applyQuaternion(_qA);
     _vA.add(_vD);
 
@@ -733,17 +771,25 @@ export class CameraRig {
     if (_vA.y < floor) _vA.y = floor;
   }
 
-  private updateFov(speedKmh: number, dt: number): void {
+  private updateFov(speedKmh: number, dt: number, mode: CameraMode): void {
     const normalFov =
-      BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
+      mode === 'interior'
+        ? INTERIOR_FOV
+        : BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
     const targetFov = this.binoculars ? BINOCULAR_FOV : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
-    // Only touch the projection matrix when the value actually moved; calling
-    // updateProjectionMatrix every frame is needless CPU for a slow-changing value.
+    const targetNear =
+      mode === 'interior' ? INTERIOR_NEAR : nearPlaneForFarPlane(this.camera.far);
+    let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
       this.camera.fov = this.fov;
-      this.camera.updateProjectionMatrix();
+      projectionChanged = true;
     }
+    if (this.camera.near !== targetNear) {
+      this.camera.near = targetNear;
+      projectionChanged = true;
+    }
+    if (projectionChanged) this.camera.updateProjectionMatrix();
   }
 
   /** Local-space look vector from yaw/pitch: 0 -> +Z, +pitch -> up, +yaw -> +X. */

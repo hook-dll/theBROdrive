@@ -27,6 +27,8 @@ export interface InputFrame {
   cycleCamera: boolean;
   /** Toggle interior-camera seat calibration; tap, consumed by CameraRig. */
   toggleSeatAdjust: boolean;
+  /** Toggle acceleration-driven interior head movement; tap, consumed by CameraRig. */
+  toggleInteriorHeadMovement: boolean;
   cycleTyres: boolean;
   /** Switch the car radio on/off, and step to the next station: taps, consumed by audio. */
   radioToggle: boolean;
@@ -89,6 +91,7 @@ export function emptyInput(): InputFrame {
     toggleRightIndicator: false,
     cycleCamera: false,
     toggleSeatAdjust: false,
+    toggleInteriorHeadMovement: false,
     cycleTyres: false,
     radioToggle: false,
     radioNext: false,
@@ -147,6 +150,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
   { id: 'seatAdjust', label: 'Adjust interior camera seat', defaultKeys: ['KeyI'] },
+  { id: 'interiorHeadMovement', label: 'Interior head movement', defaultKeys: ['KeyU'] },
   { id: 'camera', label: 'Toggle interior / chase camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
@@ -522,6 +526,7 @@ export class InputReader {
     f.toggleRightIndicator = this.anyPressed(this.keys.indicatorRight);
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.toggleSeatAdjust = this.anyPressed(this.keys.seatAdjust);
+    f.toggleInteriorHeadMovement = this.anyPressed(this.keys.interiorHeadMovement);
     f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.toggleAutopilot = this.anyPressed(this.keys.autopilot);
     f.recenterCamera =
