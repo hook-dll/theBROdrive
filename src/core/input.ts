@@ -25,7 +25,8 @@ export interface InputFrame {
   toggleLeftIndicator: boolean;
   toggleRightIndicator: boolean;
   cycleCamera: boolean;
-  /** Cycle the all-wheel tyre compound while driving. */
+  /** Toggle interior-camera seat calibration; tap, consumed by CameraRig. */
+  toggleSeatAdjust: boolean;
   cycleTyres: boolean;
   /** Switch the car radio on/off, and step to the next station: taps, consumed by audio. */
   radioToggle: boolean;
@@ -53,6 +54,10 @@ export interface InputFrame {
   /** On-foot movement, camera-relative. */
   moveX: number;
   moveZ: number;
+  /** Local interior-camera calibration axes while I mode is active. */
+  seatMoveX: number;
+  seatMoveY: number;
+  seatMoveZ: number;
   jump: boolean;
   sprint: boolean;
   /** Mouse look deltas in radians, accumulated since the last frame. */
@@ -83,6 +88,7 @@ export function emptyInput(): InputFrame {
     toggleLeftIndicator: false,
     toggleRightIndicator: false,
     cycleCamera: false,
+    toggleSeatAdjust: false,
     cycleTyres: false,
     radioToggle: false,
     radioNext: false,
@@ -98,6 +104,9 @@ export function emptyInput(): InputFrame {
     selectSlot: 0,
     moveX: 0,
     moveZ: 0,
+    seatMoveX: 0,
+    seatMoveY: 0,
+    seatMoveZ: 0,
     jump: false,
     sprint: false,
     toggleAutopilot: false,
@@ -137,6 +146,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'mouseSteer', label: 'Mouse steering', defaultKeys: ['KeyM'] },
+  { id: 'seatAdjust', label: 'Adjust interior camera seat', defaultKeys: ['KeyI'] },
   { id: 'camera', label: 'Toggle interior / chase camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
@@ -511,8 +521,8 @@ export class InputReader {
     f.toggleLeftIndicator = this.anyPressed(this.keys.indicatorLeft);
     f.toggleRightIndicator = this.anyPressed(this.keys.indicatorRight);
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
+    f.toggleSeatAdjust = this.anyPressed(this.keys.seatAdjust);
     f.cycleTyres = this.anyPressed(this.keys.tyres);
-    f.toggleMouseSteer = this.anyPressed(this.keys.mouseSteer);
     f.toggleAutopilot = this.anyPressed(this.keys.autopilot);
     f.recenterCamera =
       this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
@@ -550,6 +560,15 @@ export class InputReader {
       (this.anyHeld(this.keys.brake) ? 1 : 0);
     f.moveX = keyMoveX !== 0 ? keyMoveX : touch?.steer ?? 0;
     f.moveZ = keyMoveZ !== 0 ? keyMoveZ : touchForward - touchBackward;
+    // Calibration axes use the requested local signs: A is left (+X), W is up (+Y),
+    // and Z is forward depth (+Z). They remain available in the frame while normal
+    // driving controls are suppressed by the game only when I mode is active.
+    f.seatMoveX =
+      (this.anyHeld(this.keys.left) ? 1 : 0) - (this.anyHeld(this.keys.right) ? 1 : 0);
+    f.seatMoveY =
+      (this.anyHeld(this.keys.throttle) ? 1 : 0) - (this.anyHeld(this.keys.brake) ? 1 : 0);
+    f.seatMoveZ =
+      (this.anyHeld(this.keys.shiftDown) ? 1 : 0) - (this.anyHeld(this.keys.shiftUp) ? 1 : 0);
     f.jump = this.anyPressed(this.keys.jump);
     f.sprint = this.anyHeld(this.keys.sprint);
 

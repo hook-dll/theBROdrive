@@ -19,14 +19,15 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
-import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
+import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import type { CarState, GameWorld } from '../game/state';
 import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import {
   carModel,
+  STYLIZED_TAILLIGHT_COLOR,
   frontWeightFraction,
   modelEngine,
   modelGearbox,
@@ -1488,6 +1489,7 @@ type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
 type IndicatorSide = 'off' | 'left' | 'right';
 
 const HEADLIGHT_EMISSIVE = 0xffffff;
+/** Tail lenses are red even when unlit; braking only raises their red emission. */
 const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
 const BLINKER_EMISSIVE = 0xff8a00;
@@ -4468,6 +4470,11 @@ export class Vehicle implements Rebasable {
       lights.taillights,
       this.taillightMaterials,
     );
+    if (this.model.paintStyle === 'stylized-palette') {
+      for (const material of this.taillightMaterials) {
+        material.color.setHex(STYLIZED_TAILLIGHT_COLOR);
+      }
+    }
     this.reverseLightLensMeshes = this.bindLampMaterials(
       lights.reverseLights,
       this.reverseLightMaterials,

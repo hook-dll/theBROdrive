@@ -589,6 +589,7 @@ async function boot(): Promise<void> {
   const camera = new CameraRig(renderer.camera, physics, origin);
   camera.setMode('foot');
   camera.setYaw(initialYaw);
+  camera.setInteriorCameraOffset(world.state.settings.interiorCameraOffset);
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre, TCS and
   // steering rule the human drives under applies to it unchanged.
@@ -725,6 +726,27 @@ async function boot(): Promise<void> {
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
+      // Camera calibration owns the driving keys while enabled: the car must stay
+      // still while W/S/A/D/Z/X move the interior eye.
+      if (f.cycleCamera) camera.cycleDriving();
+      if (f.toggleSeatAdjust) {
+        const wasAdjusting = camera.isSeatAdjusting;
+        camera.toggleSeatAdjusting();
+        if (wasAdjusting && !camera.isSeatAdjusting) {
+          const coordinates = camera.interiorCoordinates;
+          const interiorCameraOffset = [coordinates.x, coordinates.y, coordinates.z] as const;
+          camera.setInteriorCameraOffset(interiorCameraOffset);
+          world.apply({
+            t: 'settings',
+            settings: { ...s.settings, interiorCameraOffset },
+          });
+          hud.setToast(
+            `interior camera saved · ${coordinates.x.toFixed(3)}, ` +
+            `${coordinates.y.toFixed(3)}, ${coordinates.z.toFixed(3)}`,
+          );
+        }
+      }
+      const calibratingSeat = camera.isSeatAdjusting;
       // One key cycles the complete driving state: sleeper -> frantic -> off.
       // Keeping the transition here means the HUD, input handover and controller
       // always observe the same state on the same fixed step.
@@ -741,7 +763,16 @@ async function boot(): Promise<void> {
           autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
         );
       }
-      if (autopilot.engaged) autopilot.drive(dt, driving, f, origin.x, origin.z);
+      if (autopilot.engaged && !calibratingSeat) {
+        autopilot.drive(dt, driving, f, origin.x, origin.z);
+      }
+      if (calibratingSeat) {
+        f.throttle = 0;
+        f.brake = 0;
+        f.reverse = false;
+        f.steer = 0;
+        f.shift = 0;
+      }
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
@@ -750,7 +781,6 @@ async function boot(): Promise<void> {
         driving.cycleTyreCompound();
         hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);
       }
-      if (f.cycleCamera) camera.cycleDriving();
     } else {
       player.setEnabled(true);
       // Stepping out drops it. Re-entering a car and finding it drive itself is a
@@ -1164,6 +1194,7 @@ async function boot(): Promise<void> {
       driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
     camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
+    hud.setSeatCalibration(camera.isSeatAdjusting, camera.interiorCoordinates);
 
     const cam = renderer.camera.position;
     sky.update(

@@ -420,6 +420,7 @@ export class MainMenu {
         msaa: base.msaa,
         inkStrength: base.inkStrength,
         mouseSteering: base.mouseSteering,
+        interiorCameraOffset: base.interiorCameraOffset,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -435,6 +436,7 @@ export class MainMenu {
           msaa: settings.msaa,
           inkStrength: settings.inkStrength,
           mouseSteering: settings.mouseSteering,
+          interiorCameraOffset: settings.interiorCameraOffset,
         });
       };
 

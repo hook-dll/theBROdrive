@@ -58,6 +58,11 @@ const STYLIZED_INTERIOR = {
  */
 export const STYLIZED_PAINT_MATERIAL = 'PixelColors';
 
+/** The normalized pack's rear brake-lens material. */
+export const STYLIZED_TAILLIGHT_MATERIAL = 'BrakeLights';
+/** Diffuse red retained when the stylized tail lens is not emitting. */
+export const STYLIZED_TAILLIGHT_COLOR = 0x7a0000;
+
 /** The pack's headlight material. Also the name the split lens mesh takes. */
 const STYLIZED_HEADLIGHT_MATERIAL = 'Headlights';
 
@@ -801,7 +806,7 @@ function sovietLights(file: string): VehicleLightsDef {
 function stylizedLights(blinkers: boolean): VehicleLightsDef {
   const lights: VehicleLightsDef = {
     headlights: [STYLIZED_HEADLIGHT_MATERIAL],
-    taillights: ['BrakeLights'],
+    taillights: [STYLIZED_TAILLIGHT_MATERIAL],
   };
   if (!blinkers) return lights;
   return { ...lights, leftBlinkers: ['TurnLight_L'], rightBlinkers: ['TurnLight_R'] };
