@@ -35,6 +35,7 @@ import {
   wheelDampingRate,
   wheelSpringRate,
   type CarModelDef,
+  type HandlingProfile,
 } from './carmodels';
 import { bonnetCanRun, bonnetPart, destroyedEngineSpec, engineFailureReason } from './bonnet';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
@@ -51,44 +52,31 @@ import type { VehicleLightRig } from '../render/vehiclelights';
 const GRAVITY = 9.81;
 
 // ---------------------------------------------------------------------------
-// THE ERA
+// MECHANICAL CHARACTER
 //
-// These cars are 1960s-1980s and not the good ones: a worn recirculating-ball
-// box, bias-ply tyres, soft springs on weak dampers, a live rear axle, drums at
-// the back and no electronics of any kind. Everything in this file that reads as
-// "vague", "slow" or "unforgiving" is a named period mechanism rather than a
-// difficulty knob, and each one is commented where it is defined:
+// The original Soviet cars are 1960s-1980s machinery: a worn
+// recirculating-ball box, bias-ply tyres, soft springs on weak dampers, a live rear
+// axle, drums at the back and no electronics. Those constants remain the `classic`
+// baseline below. Later Stylized cars select `road`, `sport` or `utility`, changing
+// only the mechanisms their represented chassis actually changes: steering rate and
+// play, driveline compliance, radial-tyre response, speed loss and axle balance.
 //
-//   STEER_PLAY_RAD          worn steering box: free play before the tyres move
-//   DRIVELINE_LAG_S         driveline slack and compliance: torque arrives late
-//   REAR_AXLE_SIDE_GRIP     live rear axle on leaf springs: the tail lets go first
-//   BRAKE_LOCK_*            no ABS: a locked wheel is measured, not scripted
-//   LATERAL_GRIP_*          bias-ply tyres: low peak, and it falls away with speed
-//   ROLL_*, SUSP_* presets  soft springs, weak dampers, real body roll
-//
-// What is deliberately NOT modelled: brake fade and axle tramp. Bump-steer is
-// modelled below as a load-sensitive steering disturbance, because uneven ground and
-// a worn front end are part of the requested driving feel.
+// Braking, surfaces, damage and suspension integration stay shared. This is one
+// vehicle model with data-driven construction, not a second physics path for an
+// asset pack.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Steering tuning.
 //
 // Four stages shape the wheel angle:
-//  1. The input axis is shaped with a power law (STEER_INPUT_EXPONENT), so small
-//     deflections command disproportionately small angles and response grows
-//     progressively toward full lock.
-//  2. The available lock falls off with speed on the t^k curve below. This is
-//     geometry and tyre reality, not an electronic nanny: it keeps a fixed lock
-//     from asking a bias-ply tyre for a slip angle it cannot make. The floor is
-//     deliberately high (STEER_HIGH_SPEED_FRACTION), because a period car will
-//     absolutely let you ask for more than it can do at speed.
-//  3. The steer angle is rate-limited by speed: a slow box (~4.5 turns lock to
-//     lock) cannot be flicked, which is what makes an evasive manoeuvre a
-//     commitment rather than a reflex.
-//  4. The result passes through STEER_PLAY_RAD of backlash, so the tyres do
-//     nothing until the box takes up its slack — vagueness on centre, and a
-//     double helping of it on every reversal.
+//  1. The profile shapes the input axis with a power law, progressively or directly.
+//  2. Available lock falls with speed; later steering retains more authority.
+//  3. Steering angle is rate-limited by the profile's rack or box speed.
+//  4. The result passes through the profile's mechanical backlash window.
+//
+// The constants immediately below are the established `classic` values. They feed
+// `HANDLING_PROFILES`; fixedUpdate reads only the selected immutable profile.
 // ---------------------------------------------------------------------------
 
 
@@ -446,6 +434,112 @@ const PNEUMATIC_TRAIL_M = 0.045;
  */
 const COUNTERSTEER_RELEASE_START_DEG = 7;
 const COUNTERSTEER_RELEASE_FULL_DEG = 18;
+
+/**
+ * Mechanical handling families. The Soviet catalogue stays on `classic`, preserving
+ * its slow recirculating-ball steering, cross-ply tyre response and live-axle balance.
+ * The Stylized pack spans later radial-tyred road cars, purpose-built sports cars
+ * and working 4x4/van/truck chassis; forcing all of them through that Soviet baseline
+ * is why visually modern cars felt delayed, vague and tail-light.
+ */
+interface HandlingTuning {
+  readonly steerInputExponent: number;
+  readonly steerRatePark: number;
+  readonly steerRateHighway: number;
+  readonly steerHighSpeedFraction: number;
+  readonly steerLockCurve: number;
+  readonly steerPlay: number;
+  readonly casterReturn: number;
+  readonly bumpSteer: number;
+  readonly drivelineLag: number;
+  readonly lateralGripFraction: number;
+  readonly lateralMu: number;
+  readonly lateralGripMaxLoss: number;
+  readonly rearSpeedLossGain: number;
+  readonly rearAxleSideGrip: number;
+  readonly slipPeakFrontDeg: number;
+  readonly slipPeakRearDeg: number;
+  readonly tyreRelaxationLength: number;
+}
+
+const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
+  classic: {
+    steerInputExponent: STEER_INPUT_EXPONENT,
+    steerRatePark: STEER_RATE_PARK_RAD_S,
+    steerRateHighway: STEER_RATE_HIGHWAY_RAD_S,
+    steerHighSpeedFraction: STEER_HIGH_SPEED_FRACTION,
+    steerLockCurve: STEER_LOCK_CURVE,
+    steerPlay: STEER_PLAY_RAD,
+    casterReturn: STEER_CASTER_RETURN_RAD_S,
+    bumpSteer: BUMP_STEER_MAX_RAD,
+    drivelineLag: DRIVELINE_LAG_S,
+    lateralGripFraction: LATERAL_GRIP_FRACTION,
+    lateralMu: LATERAL_MU,
+    lateralGripMaxLoss: LATERAL_GRIP_MAX_LOSS,
+    rearSpeedLossGain: REAR_SPEED_LOSS_GAIN,
+    rearAxleSideGrip: REAR_AXLE_SIDE_GRIP,
+    slipPeakFrontDeg: SLIP_PEAK_FRONT_DEG,
+    slipPeakRearDeg: SLIP_PEAK_REAR_DEG,
+    tyreRelaxationLength: 0.45,
+  },
+  road: {
+    steerInputExponent: 1.2,
+    steerRatePark: 3.6,
+    steerRateHighway: 1.05,
+    steerHighSpeedFraction: 0.56,
+    steerLockCurve: 0.22,
+    steerPlay: 0.006,
+    casterReturn: 1.7,
+    bumpSteer: 0.009,
+    drivelineLag: 0.055,
+    lateralGripFraction: 0.36,
+    lateralMu: 0.92,
+    lateralGripMaxLoss: 0.13,
+    rearSpeedLossGain: 1.05,
+    rearAxleSideGrip: 0.985,
+    slipPeakFrontDeg: 6.5,
+    slipPeakRearDeg: 5.5,
+    tyreRelaxationLength: 0.28,
+  },
+  sport: {
+    steerInputExponent: 1.12,
+    steerRatePark: 4.5,
+    steerRateHighway: 1.45,
+    steerHighSpeedFraction: 0.62,
+    steerLockCurve: 0.28,
+    steerPlay: 0.003,
+    casterReturn: 2.1,
+    bumpSteer: 0.005,
+    drivelineLag: 0.035,
+    lateralGripFraction: 0.39,
+    lateralMu: 1.0,
+    lateralGripMaxLoss: 0.08,
+    rearSpeedLossGain: 1.02,
+    rearAxleSideGrip: 0.99,
+    slipPeakFrontDeg: 5.5,
+    slipPeakRearDeg: 5,
+    tyreRelaxationLength: 0.2,
+  },
+  utility: {
+    steerInputExponent: 1.25,
+    steerRatePark: 3.1,
+    steerRateHighway: 0.82,
+    steerHighSpeedFraction: 0.52,
+    steerLockCurve: 0.18,
+    steerPlay: 0.012,
+    casterReturn: 1.45,
+    bumpSteer: 0.016,
+    drivelineLag: 0.075,
+    lateralGripFraction: 0.34,
+    lateralMu: 0.82,
+    lateralGripMaxLoss: 0.18,
+    rearSpeedLossGain: 1.1,
+    rearAxleSideGrip: 0.97,
+    slipPeakFrontDeg: 7.5,
+    slipPeakRearDeg: 6.5,
+    tyreRelaxationLength: 0.38,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
@@ -1550,6 +1644,8 @@ export class Vehicle implements Rebasable {
   private readonly world: GameWorld;
   private readonly car: CarState;
   private readonly model: CarModelDef;
+  /** Shared immutable tuning selected once from the catalogue's mechanical family. */
+  private readonly handling: HandlingTuning;
   private readonly measure: CarModelMeasure;
   /** Axle positions, wheel counts and weight distribution; measured once, in `measureAxles`. */
   private readonly axleGeometry: AxleGeometry;
@@ -1833,6 +1929,7 @@ export class Vehicle implements Rebasable {
     this.microRelief = new MicroRelief(world.seed);
     this.roadTexture = new RoadTexture(world.seed);
     this.model = carModel(carState.modelId);
+    this.handling = HANDLING_PROFILES[this.model.handlingProfile];
     this.measure = carModelMeasure(carState.modelId);
     this.axleGeometry = this.measureAxles();
     this.headlightMode = carState.headlightMode;
@@ -2775,7 +2872,7 @@ export class Vehicle implements Rebasable {
       1,
     );
     const steerInput =
-      Math.sign(input.steer) * Math.pow(Math.abs(input.steer), STEER_INPUT_EXPONENT);
+      Math.sign(input.steer) * Math.pow(Math.abs(input.steer), this.handling.steerInputExponent);
     // How far out is the tail? (See the countersteer note above.) Both the lock
     // ceiling and the rate limit are faded back toward their parking-speed values by
     // this, so a driver catching a slide has the lock and the hand-speed the car
@@ -2788,12 +2885,15 @@ export class Vehicle implements Rebasable {
     );
     // fraction = 1 - (1-floor) * t^k: full lock up to STEER_FULL_LOCK_KMH, then a
     // fast collapse right above it and a gentle slide to the floor.
-    const speedFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(steerT, STEER_LOCK_CURVE);
+    const speedFactor =
+      1 -
+      (1 - this.handling.steerHighSpeedFraction) *
+        Math.pow(steerT, this.handling.steerLockCurve);
     const targetSteer =
       -steerInput * this.model.steerLock * (speedFactor + (1 - speedFactor) * slideRelease);
     const steerRate =
-      STEER_RATE_HIGHWAY_RAD_S +
-      (STEER_RATE_PARK_RAD_S - STEER_RATE_HIGHWAY_RAD_S) *
+      this.handling.steerRateHighway +
+      (this.handling.steerRatePark - this.handling.steerRateHighway) *
         Math.max(Math.pow(1 - steerT, STEER_RATE_CURVE), slideRelease);
     const maxDelta = steerRate * dt;
     this.steerCommand += clamp(targetSteer - this.steerCommand, -maxDelta, maxDelta);
@@ -2817,8 +2917,8 @@ export class Vehicle implements Rebasable {
     // holding the wheel hard against the load, so the slack is already taken up on
     // that side and there is nothing to cross. The vagueness belongs to cruising on
     // centre, which is where it is left untouched.
-    const play = STEER_PLAY_RAD * (1 - slideRelease);
-    const caster = STEER_CASTER_RETURN_RAD_S * dt;
+    const play = this.handling.steerPlay * (1 - slideRelease);
+    const caster = this.handling.casterReturn * dt;
     this.steerAngle -= clamp(this.steerAngle, -caster, caster);
     if (this.steerCommand > this.steerAngle + play) {
       this.steerAngle = this.steerCommand - play;
@@ -2829,7 +2929,7 @@ export class Vehicle implements Rebasable {
     // Driveline slack and compliance: torque arrives late (DRIVELINE_LAG_S). One
     // pole, so a stab of throttle builds over ~0.3 s instead of hitting the tyres
     // on the same tick the pedal moved.
-    const driveBlend = dt / (DRIVELINE_LAG_S + dt);
+    const driveBlend = dt / (this.handling.drivelineLag + dt);
     this.appliedDriveTorqueNm += (drive.driveTorqueNm - this.appliedDriveTorqueNm) * driveBlend;
     // The brake pedal overrides what is left of the drive.
     //
@@ -2900,13 +3000,13 @@ export class Vehicle implements Rebasable {
     const gripBudgetFactor =
       stats.wheelGrip *
       tyreGrip *
-      LATERAL_GRIP_FRACTION *
+      this.handling.lateralGripFraction *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
     // The real lateral coefficient. Mass-scaled for the same reason the cone was:
     // road tyres are sized to the chassis, not scaled with it, so a laden truck
     // corners worse per kilogram than a hatchback.
     const lateralMu =
-      LATERAL_MU *
+      this.handling.lateralMu *
       stats.wheelGrip *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
     // The load μ(Fz) is measured against THIS WHEEL parked: `w.staticLoadN`, from the
@@ -2931,10 +3031,13 @@ export class Vehicle implements Rebasable {
     // The loss is split by axle: the rear sheds REAR_SPEED_LOSS_GAIN times as much
     // of it, so speed does not just cost cornering power, it costs STABILITY.
     const speedLossT = lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
-    const lateralGripFront = 1 - LATERAL_GRIP_MAX_LOSS * speedLossT;
+    const lateralGripFront = 1 - this.handling.lateralGripMaxLoss * speedLossT;
     const lateralGripRear = Math.max(
       0.2,
-      1 - LATERAL_GRIP_MAX_LOSS * REAR_SPEED_LOSS_GAIN * speedLossT,
+      1 -
+        this.handling.lateralGripMaxLoss *
+          this.handling.rearSpeedLossGain *
+          speedLossT,
     );
 
     // Slip angles are read off the CONTACT PATCH velocity measured on the previous
@@ -2971,7 +3074,7 @@ export class Vehicle implements Rebasable {
       const lockGrip = locked ? LOCKED_SIDE_GRIP : 1;
       // The rear axle is a live axle on leaf springs and never had the front's
       // cornering power (REAR_AXLE_SIDE_GRIP).
-      const axleGrip = w.isFront ? 1 : REAR_AXLE_SIDE_GRIP;
+      const axleGrip = w.isFront ? 1 : this.handling.rearAxleSideGrip;
 
       // Slip angle of this tyre: the angle between where the contact patch is going
       // and where the wheel is pointing. The wheel's own right-hand direction is the
@@ -3002,7 +3105,8 @@ export class Vehicle implements Rebasable {
       // so the blend is per metre travelled and a parked wheel builds nothing.
       const rollDistance = Math.abs(fwdSpeed) * dt;
       w.slipAngleRad +=
-        (slipRad - w.slipAngleRad) * (1 - Math.exp(-rollDistance / TYRE_RELAXATION_LENGTH_M));
+        (slipRad - w.slipAngleRad) *
+        (1 - Math.exp(-rollDistance / this.handling.tyreRelaxationLength));
       // The limiter reads the BUILT angle, not the geometric one: countersteer has to
       // respond to the slide the tyres are actually carrying.
       if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
@@ -3012,7 +3116,9 @@ export class Vehicle implements Rebasable {
       // that decides how much slip the car runs, and it is why the number comes out
       // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
       // which the sine reaches around five degrees.
-      const peakDeg = w.isFront ? SLIP_PEAK_FRONT_DEG : SLIP_PEAK_REAR_DEG;
+      const peakDeg = w.isFront
+        ? this.handling.slipPeakFrontDeg
+        : this.handling.slipPeakRearDeg;
       const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
       const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
       const slipDeg = (w.slipAngleRad * 180) / Math.PI;
@@ -4134,7 +4240,7 @@ export class Vehicle implements Rebasable {
         1.4,
       );
       const speedFactor = clamp((speedKmh - 12) / 73, 0, 1);
-      target = loadImbalance * BUMP_STEER_MAX_RAD * roughFactor * speedFactor;
+      target = loadImbalance * this.handling.bumpSteer * roughFactor * speedFactor;
     }
     const blend = 1 - Math.exp(-dt / BUMP_STEER_TAU);
     this.bumpSteerAngle += (target - this.bumpSteerAngle) * blend;

@@ -237,16 +237,20 @@ const SUSP_TRUCK: SuspensionTuning = {
  *   working vehicle, empty bed   56-58% front   (the payload it is sprung for is
  *                                                not in it — the empty-pickup case)
  *
- * Nothing here is rear-engined: the catalogue has no rear-engine layout, and if one
- * arrives it needs its own entry rather than a guess from its drive bias.
+ * `frontWeightShare` overrides those defaults for the Stylized shapes whose engine
+ * is visibly behind the cabin. Drive bias cannot distinguish a front-engine RWD car
+ * from a rear-engine one, and treating both as 53% front makes the latter rotate
+ * around an axle it does not actually load.
  */
 export function frontWeightFraction(model: {
   readonly rearDriveBias: number;
   readonly bodyClass: BodyClass;
+  readonly frontWeightShare?: number;
 }): number {
+  if (model.frontWeightShare !== undefined) return model.frontWeightShare;
   if (model.bodyClass === 'truck' || model.bodyClass === 'bus') return 0.57;
-  // Drive bias is the layout: 0 is transverse front-drive, 1 is a front engine
-  // driving the back axle, and a half is four-wheel drive with the mass amidships.
+  // Drive bias is the fallback layout: 0 is transverse front-drive, 1 is a front
+  // engine driving the back axle, and a half is four-wheel drive.
   if (model.rearDriveBias <= 0.01) return 0.62;
   if (model.rearDriveBias >= 0.99) return 0.53;
   return 0.56;
@@ -326,6 +330,9 @@ export interface PalettePaintRamp {
   /** The shade that reads as the car's colour; the others scale from its luminance. */
   readonly keyRow: number;
 }
+
+/** Mechanical era shared by cars with the same steering and tyre construction. */
+export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
 
 
 export interface CarModelDef {
@@ -421,6 +428,13 @@ export interface CarModelDef {
   /** Fraction of drive torque to the rear axle. 1 = RWD, 0 = FWD, 0.5 = 4WD. */
   readonly rearDriveBias: number;
   /**
+   * Steering, tyre and driveline character. `classic` preserves the Soviet model;
+   * later radial-tyred cars and working vehicles use their own mechanisms.
+   */
+  readonly handlingProfile: HandlingProfile;
+  /** Static share of kerb weight carried by the front axle, when layout needs an override. */
+  readonly frontWeightShare?: number;
+  /**
    * In-car camera, as fractions of the measured body box: x of half-width, y of
    * body height (0 = floor, 1 = roof), z of half-length. Resolved in
    * render/carmodel.ts.
@@ -438,7 +452,7 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'scale' | 'suspension' | 'viewFrac' | 'lights' | 'gizmoAnchors' | 'storageCells'
+  'file' | 'scale' | 'suspension' | 'viewFrac' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
 > & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb: string;
@@ -447,6 +461,7 @@ type Entry = Omit<
   readonly scale?: number;
   readonly suspension?: SuspensionTuning;
   readonly viewFrac?: readonly [number, number, number];
+  readonly handlingProfile?: HandlingProfile;
   readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors?: readonly GizmoAnchorDef[];
   /** Legacy authored hint; the catalogue normalizer now gives every body eight cells. */
@@ -898,6 +913,8 @@ interface StylizedSpec {
   readonly wheelGrip: number;
   readonly steerLock: number;
   readonly rearDriveBias: number;
+  readonly handlingProfile?: HandlingProfile;
+  readonly frontWeightShare?: number;
   readonly suspension?: SuspensionTuning;
   readonly viewPoint?: readonly [number, number, number];
   /** This body's coachwork ramp in the 32x32 palette. */
@@ -971,6 +988,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.04,
     steerLock: 0.58,
     rearDriveBias: 1,
+    handlingProfile: 'road',
     suspension: SUSP_SPORT,
     paint: ramp(7, 2, 16, 15, 22),
   },
@@ -985,6 +1003,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.08,
     steerLock: 0.6,
     rearDriveBias: 1,
+    handlingProfile: 'road',
     suspension: SUSP_SPORT,
     paint: ramp(12, 2, 16, 15, 21),
   },
@@ -1000,6 +1019,8 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.12,
     steerLock: 0.58,
     rearDriveBias: 0.5,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.59,
     suspension: SUSP_SPORT,
     paint: ramp(3, 2, 0, 32, 8),
   },
@@ -1016,6 +1037,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.95,
     steerLock: 0.66,
     rearDriveBias: 0.5,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(14, 2, 16, 10, 18),
     visualRideLiftWheelFraction: 1 / 6,
@@ -1031,6 +1053,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.0,
     steerLock: 0.58,
     rearDriveBias: 0.5,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(18, 2, 16, 16, 18),
     visualRideLiftWheelFraction: 1 / 6,
@@ -1046,6 +1069,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.98,
     steerLock: 0.6,
     rearDriveBias: 0.5,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(20, 2, 20, 9, 25),
     visualRideLiftWheelFraction: 1 / 6,
@@ -1061,6 +1085,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.0,
     steerLock: 0.58,
     rearDriveBias: 0.5,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(22, 2, 16, 16, 18),
   },
@@ -1075,6 +1100,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.94,
     steerLock: 0.64,
     rearDriveBias: 0.5,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(24, 2, 16, 16, 16),
     visualRideLiftWheelFraction: 1 / 6,
@@ -1094,6 +1120,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.9,
     steerLock: 0.6,
     rearDriveBias: 1,
+    frontWeightShare: 0.44,
     suspension: SUSP_SOFT,
     paint: ramp(26, 2, 16, 16, 18),
   },
@@ -1110,6 +1137,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.94,
     steerLock: 0.58,
     rearDriveBias: 0,
+    handlingProfile: 'utility',
     paint: ramp(28, 2, 16, 16, 17),
   },
   {
@@ -1125,6 +1153,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.9,
     steerLock: 0.62,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(28, 2, 0, 11, 0),
   },
@@ -1140,6 +1169,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.92,
     steerLock: 0.6,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(27, 1, 0, 14, 0),
   },
@@ -1185,6 +1215,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.96,
     steerLock: 0.58,
     rearDriveBias: 0,
+    handlingProfile: 'road',
     paint: ramp(3, 2, 0, 32, 10),
   },
   {
@@ -1198,6 +1229,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.0,
     steerLock: 0.58,
     rearDriveBias: 1,
+    handlingProfile: 'road',
     paint: ramp(22, 2, 0, 16, 4),
   },
   {
@@ -1211,6 +1243,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.98,
     steerLock: 0.6,
     rearDriveBias: 0,
+    handlingProfile: 'road',
     paint: ramp(20, 2, 0, 16, 4),
   },
   {
@@ -1224,6 +1257,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.02,
     steerLock: 0.58,
     rearDriveBias: 1,
+    handlingProfile: 'sport',
     suspension: SUSP_SPORT,
     paint: ramp(18, 2, 0, 16, 5),
     viewPoint: [0.42, 0.274, 0.182],
@@ -1272,6 +1306,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.92,
     steerLock: 0.52,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(0, 2, 16, 14, 20),
   },
@@ -1287,6 +1322,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.9,
     steerLock: 0.52,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(3, 2, 0, 32, 11),
   },
@@ -1302,6 +1338,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.88,
     steerLock: 0.48,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(3, 2, 0, 32, 2),
   },
@@ -1320,6 +1357,8 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.25,
     steerLock: 0.54,
     rearDriveBias: 0.5,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.44,
     suspension: SUSP_FASTBACK,
     paint: ramp(16, 2, 8, 6, 11),
     noBlinkers: true,
@@ -1335,6 +1374,8 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.28,
     steerLock: 0.52,
     rearDriveBias: 0.5,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.45,
     suspension: SUSP_FASTBACK,
     paint: ramp(14, 2, 0, 5, 2),
     noBlinkers: true,
@@ -1350,6 +1391,8 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.2,
     steerLock: 0.56,
     rearDriveBias: 0.5,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.43,
     suspension: SUSP_SPORT,
     paint: ramp(3, 2, 0, 32, 13),
     noBlinkers: true,
@@ -1365,6 +1408,8 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.22,
     steerLock: 0.56,
     rearDriveBias: 1,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.39,
     suspension: SUSP_FASTBACK,
     paint: ramp(16, 2, 0, 8, 3),
   },
@@ -1379,6 +1424,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 1.18,
     steerLock: 0.56,
     rearDriveBias: 1,
+    handlingProfile: 'sport',
     suspension: SUSP_SPORT,
     paint: ramp(0, 2, 16, 14, 20),
   },
@@ -1397,6 +1443,7 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     wheelGrip: 0.94,
     steerLock: 0.46,
     rearDriveBias: 1,
+    handlingProfile: 'utility',
     suspension: SUSP_TRUCK,
     paint: ramp(12, 2, 8, 8, 9),
   },
@@ -1432,6 +1479,8 @@ const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
     suspension: spec.suspension,
     steerLock: spec.steerLock,
     rearDriveBias: spec.rearDriveBias,
+    handlingProfile: spec.handlingProfile ?? 'classic',
+    frontWeightShare: spec.frontWeightShare,
     viewPoint: spec.viewPoint,
   } satisfies Entry;
 });
@@ -1477,6 +1526,8 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   suspension: e.suspension ?? SUSP_CAR,
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,
+  handlingProfile: e.handlingProfile ?? 'classic',
+  frontWeightShare: e.frontWeightShare,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   viewPoint: e.viewPoint,
   lights: e.lights,
