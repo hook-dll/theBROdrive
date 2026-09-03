@@ -325,6 +325,31 @@ function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void
       : eligible(child.material);
   });
 }
+/**
+ * Gives the driven cabin its own two-sided materials. Normalized interiors contain
+ * seats, dashboard, floor and door cards; Soviet fitted cabins use the same node.
+ * Their inward faces must remain visible when free-look points toward a nearby
+ * pillar or seat, without paying double-sided shading on the exterior shell.
+ */
+function prepareDrivenInteriorFaces(root: THREE.Object3D): void {
+  const interior = root.getObjectByName('interior');
+  if (!interior) return;
+  const clones = new Map<THREE.Material, THREE.Material>();
+  interior.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const twoSided = (source: THREE.Material): THREE.Material => {
+      const existing = clones.get(source);
+      if (existing) return existing;
+      const material = source.clone();
+      material.side = THREE.DoubleSide;
+      clones.set(source, material);
+      return material;
+    };
+    child.material = Array.isArray(child.material)
+      ? child.material.map(twoSided)
+      : twoSided(child.material);
+  });
+}
 /** Gives static Stylized brake lenses the same red surface as driven vehicles. */
 function tintStaticStylizedTaillights(root: THREE.Object3D, def: CarModelDef): void {
   if (def.paintStyle !== 'stylized-palette') return;
@@ -1213,6 +1238,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
   cloneCarBodyPaintMaterials(body, t.def);
+  prepareDrivenInteriorFaces(body);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   body.name = 'body';

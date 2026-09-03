@@ -25,6 +25,10 @@ export const CAMERA_FAR = 4000;
  * raises this, never lowers it.
  */
 export const CAMERA_NEAR = 0.08;
+/** Exterior-camera near plane for a configured far plane. */
+export function nearPlaneForFarPlane(far: number): number {
+  return Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
+}
 
 /**
  * How far the free-look orbit camera may stand from the car (DIST_MAX in
@@ -906,7 +910,7 @@ export class Renderer {
   setViewDistance(metres: number): void {
     const far = farPlaneForViewDistance(metres);
     this.camera.far = far;
-    this.camera.near = Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
+    this.camera.near = nearPlaneForFarPlane(far);
     this.camera.updateProjectionMatrix();
   }
 }

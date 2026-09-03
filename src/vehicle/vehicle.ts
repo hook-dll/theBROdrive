@@ -1114,14 +1114,11 @@ const IMPACT_UNEXPLAINED_FLOOR_MPS = 0.35;
 const TWO_PI = Math.PI * 2;
 
 /**
- * Steering-wheel rim angle per radian of rack angle.
- *
- * A period car is about three turns lock to lock, so full lock at the tyres is most
- * of a turn and a half at the rim. Against the catalogue's 0.5-0.6 rad locks, 11
- * puts full lock near 380 degrees of rim — enough that ordinary steering visibly
- * moves the wheel, without the rim becoming a blur in a corner.
+ * Authored steering-wheel travel: 970 degrees lock-to-lock, or 485 degrees from
+ * centre to either stop. Normalising by each model's tyre lock keeps the rim travel
+ * identical across the catalogue despite their different steering geometries.
  */
-const STEERING_WHEEL_RATIO = 11;
+const STEERING_WHEEL_HALF_LOCK_RAD = (485 * Math.PI) / 180;
 
 /** Rotates v by quaternion q into `out`, in place. */
 function rotateVector(
@@ -3502,17 +3499,18 @@ export class Vehicle implements Rebasable {
       w.mesh.rotation.set(w.drawnSpin % TWO_PI, steer ?? 0, 0);
     }
 
-    // The rim follows the RACK, not the input: it therefore carries the rate limit,
-    // the caster pull and the backlash the tyres carry, which is what makes it read
-    // as connected to them rather than to the key being held.
+    // The rim follows the steering-box command, before rack backlash: the driver
+    // turns the wheel even while play delays the tyres. Every model reaches the same
+    // authored 970-degree lock-to-lock rim travel despite different tyre locks.
     //
-    // Sign: `steerAngle` is positive to the LEFT, and the wheel's own axis (its
+    // Sign: `steerCommand` is positive to the LEFT, and the wheel's own axis (its
     // node's local Y, before the rake in the same Euler) points back at the driver,
     // so a positive rotation about it turns the rim anticlockwise as the driver sees
     // it — left. The two agree, so the angle is added, not negated.
     if (this.steeringWheel) {
       this.steeringWheel.rotation.y =
-        this.steeringWheelRest + this.steerAngle * STEERING_WHEEL_RATIO;
+        this.steeringWheelRest +
+        (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
 
     // Gizmos are bolted to the shell: they never move relative to it, so all they
