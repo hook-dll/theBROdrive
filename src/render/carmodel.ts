@@ -1045,8 +1045,10 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene);
   scene.updateMatrixWorld(true);
-  const eyePoint = driverEyePoint(scene) ?? resolveFrac(def.viewFrac);
-  eyePoint[1] += INTERIOR_EYE_DEFAULT_LIFT_M;
+  const eyePoint = def.viewPoint
+    ? [...def.viewPoint] as [number, number, number]
+    : driverEyePoint(scene) ?? resolveFrac(def.viewFrac);
+  if (!def.viewPoint) eyePoint[1] += INTERIOR_EYE_DEFAULT_LIFT_M;
 
   // The model's origin is on the ground between the wheels, so the distance from
   // the chassis centre down to that origin is exactly the spawn clearance needed
