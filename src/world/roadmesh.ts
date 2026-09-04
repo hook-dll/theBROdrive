@@ -208,13 +208,9 @@ export class RoadMeshProvider implements ChunkProvider {
     const ox = ctx.originX;
     const oz = ctx.originZ;
 
-    // One surface type per chunk drives the collider friction profile and the lane
-    // colour; the bump floor and roughness growth come from the per-s condition
-    // inside roadSurfaceY, keeping the drawn surface continuous across chunks.
+    // One surface type per chunk drives the collider friction profile. Visual colour
+    // is sampled per row below because a material-district boundary can cross a chunk.
     const surface = roadConditionAt((sStart + sEnd) / 2).surface;
-    // Sealed asphalt keeps its static albedo; a road decayed all the way to gravel
-    // takes the palette gravel, so `laneBase` is null for that case.
-    const laneBase = SURFACE_LINEAR[surface] ?? null;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
     const latCount = LATERALS.length;
@@ -241,6 +237,7 @@ export class RoadMeshProvider implements ChunkProvider {
         // at the denser resolution.
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
         const cond = roadConditionAt(s);
+        const laneBase = SURFACE_LINEAR[cond.surface] ?? null;
         // Palette colour is a function of arclength alone: sample once per row, so
         // neighbouring chunks share the seam row and a rebuild is identical.
         const palette = desertPaletteAt(s);
@@ -355,7 +352,7 @@ export class RoadMeshProvider implements ChunkProvider {
       }
 
       const markings = yield* this.buildMarkingsSteps(
-        road, sStart, sEnd, sCount, laneBase, ox, oz,
+        road, sStart, sEnd, sCount, ox, oz,
       );
       if (markings) {
         disposables.push(markings.geometry);
@@ -438,7 +435,6 @@ export class RoadMeshProvider implements ChunkProvider {
     sStart: number,
     sEnd: number,
     sCount: number,
-    laneBase: THREE.Color | null,
     ox: number,
     oz: number,
   ): Generator<void, THREE.Mesh | null> {
@@ -461,8 +457,12 @@ export class RoadMeshProvider implements ChunkProvider {
       // gaps and half-dashes that say nobody has repainted this in decades.
       for (let si = 0; si < sCount - 1; si++) {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
-        const markings = roadConditionAt(s).markings;
-        if (markings >= MARKING_MIN) {
+        const condition = roadConditionAt(s);
+        const laneBase = SURFACE_LINEAR[condition.surface];
+        // Paint eligibility and its underlying sealed material must come from the
+        // same point. A surface-district boundary can cross this chunk even though
+        // the collider uses the midpoint's dominant material.
+        if (condition.markings >= MARKING_MIN && laneBase) {
           for (const line of MARKING_LINES) {
             // Dashes are 4 m on / 4 m off; skip the odd 4 m blocks.
             if (line.dashed && ((si / SUB_DIVISIONS) | 0) & 1) continue;
@@ -473,11 +473,9 @@ export class RoadMeshProvider implements ChunkProvider {
               2.3,
               0.5,
             );
-            const coverage = markings * (0.72 + wear * 0.55);
+            const coverage = condition.markings * (0.72 + wear * 0.55);
             if (coverage < PAINT_GONE) continue;
-            // `laneBase` is null only for a gravel road, which has `markings` 0 at every
-            // step and so never reaches here.
-            color.lerpColors(laneBase!, PAINT_LINEAR, Math.min(1, coverage));
+            color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
             this.emitMarkingQuad(
               road, line.lateral, s, s + SURFACE_STEP,
               ox, oz, point, color, positions, colors,
