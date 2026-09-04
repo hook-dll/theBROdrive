@@ -15,7 +15,6 @@ import type { CarStats, FuelType, PartInstance } from '../parts/registry';
 import {
   applyBrush,
   applySponge,
-  waterCapacity,
   oilCapacity,
   variant,
   RUST_CLEAN_EPSILON,
@@ -43,9 +42,10 @@ import {
   bonnetAccepts,
   bonnetPart,
   bonnetSlotKind,
-  BONNET_SLOT_KINDS,
+  bonnetWaterCapacity,
   hasServiceSlot,
 } from '../vehicle/bonnet';
+import { radiatorFit } from '../vehicle/cooling';
 import { setCarBodyCondition, setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
@@ -247,7 +247,10 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
         : null;
     }
     case 'radiator': {
-      const capacity = waterCapacity(stats.engine);
+      // The capacity is the CORE's, not the engine's: fit a small radiator and the
+      // readout says how little water the car can now carry, which is the first
+      // visible consequence of a bad swap.
+      const capacity = bonnetWaterCapacity(car.bonnet);
       return capacity > 0
         ? { label: 'water', level: car.waterLitres, capacity, wants: 'water' }
         : null;
@@ -893,7 +896,12 @@ export class Interaction {
         const reservoir = this.aimedReservoir(resolved);
         if (reservoir) {
           if (held?.type === 'fluid_can') return this.pourPrompt(held, reservoir);
-          return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}`;
+          // A radiator that cannot hold this engine says so HERE, at the part, which
+          // is where a player looking for the cause of an overheat will look.
+          const fit =
+            bonnetSlotKind(t.cell) === 'radiator' ? resolved.vehicle?.coolingState.fit.warning : null;
+          const note = fit ? ` — ${fit}` : '';
+          return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}${note}`;
         }
         return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
       }
@@ -902,7 +910,15 @@ export class Interaction {
         const slotLabel = expected?.replace('_', ' ') ?? 'service';
         if (!held) return `empty ${slotLabel} slot`;
         if (!bonnetAccepts(t.cell, held)) return `${slotLabel} slot — wrong part`;
-        return `[F] install ${itemLabel(held)} — ${slotLabel} slot`;
+        // Fitting an undersized core is ALLOWED and warned about, never refused: the
+        // engine will run and then cook, and finding that out is the mechanic.
+        const engine = resolved.vehicle?.stats.engine;
+        const radiator = held.type === 'part' ? variant(held.part.variantId).radiator : undefined;
+        const install =
+          expected === 'radiator' && engine && radiator
+            ? radiatorFit(engine, radiator).warning
+            : null;
+        return `[F] install ${itemLabel(held)} — ${slotLabel} slot${install ? ` — ${install}` : ''}`;
       }
       if (held) return `[F] stow ${itemLabel(held)} — cell ${t.cell + 1}`;
       return `empty trunk cell ${t.cell + 1}`;

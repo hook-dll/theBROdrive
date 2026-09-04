@@ -18,6 +18,7 @@ import { encodeSaveCode, decodeSaveCode, migrateState } from '../src/save/save';
 import { preloadCarModels } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { carModel } from '../src/vehicle/carmodels';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -64,6 +65,7 @@ function conditionState(id: string, x = 0, z = 0, y = 1.2): CarState {
     scratches: 0,
     waterLitres: 10,
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: new Array(def.storageCells).fill(null),
     bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,

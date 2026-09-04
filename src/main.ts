@@ -17,7 +17,7 @@ import { spawnCarState, type SpawnRequest } from './game/spawn';
 import { Inventory, itemLabel, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { waterCapacity, oilCapacity } from './parts/registry';
+import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
 import {
   carModelMeasure,
@@ -72,7 +72,7 @@ import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
-import { hasServiceSlot } from './vehicle/bonnet';
+import { bonnetWaterCapacity, hasServiceSlot } from './vehicle/bonnet';
 import {
   TrailerField,
   TRAILER_HALF_LENGTH,
@@ -1375,7 +1375,7 @@ async function boot(): Promise<void> {
     if (driving) {
       const stats = driving.stats;
       const car = s.cars[drivingId!];
-      const waterCap = waterCapacity(stats.engine);
+      const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);
       const oilCap = oilCapacity(stats.engine);
       hud.setDriving({
         speedKmh: driving.speedKmh,
@@ -1384,7 +1384,10 @@ async function boot(): Promise<void> {
         gearLabel: driving.gearLabel,
         fuelLitres: car?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
-        waterFraction: waterCap > 0 ? (car?.waterLitres ?? 0) / waterCap : 1,
+        temperature: driving.engineTemperature,
+        // No radiator fitted means no capacity, and the lamp treats that as dry —
+        // which it is: there is nowhere for water to be.
+        waterFraction: waterCap > 0 ? (car?.waterLitres ?? 0) / waterCap : 0,
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,

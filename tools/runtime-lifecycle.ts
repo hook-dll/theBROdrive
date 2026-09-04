@@ -15,6 +15,9 @@ import { LoosePartField } from '../src/parts/loose';
 import { preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
 import { TRAILER_MODEL_FIT, TrailerField } from '../src/vehicle/trailer';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin, type RebaseShift } from '../src/world/origin';
 import { installBlankTextures } from './assetshim';
@@ -66,17 +69,27 @@ function samePosition(
 }
 
 function carState(): CarState {
+  const def = carModel(TOW_MODEL_ID);
   return {
     id: TOW_CAR_ID,
     modelId: TOW_MODEL_ID,
     gizmos: {},
     stickers: [],
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
     fuelLitres: 40,
+    fuelKind: def.bodyClass === 'car' ? 'petrol' : null,
     dirt: 0,
     scratches: 0,
     waterLitres: 10,
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: [],
+    // A CarState without its four bonnet cells is not a car: every service lookup
+    // indexes this array, so leaving it out crashed the harness before it reached a
+    // single assertion.
+    bonnet: createBonnetStorage(TOW_CAR_ID, def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,
     x: FAR_CENTER.x,
     y: 2,

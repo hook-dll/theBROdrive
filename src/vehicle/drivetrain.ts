@@ -268,13 +268,36 @@ export class Drivetrain {
   }
 
   /**
+   * Torque scale and rev ceiling imposed from outside, both 0..1.
+   *
+   * Only the cooling system writes these (see `Vehicle.fixedUpdate`), and they exist
+   * here rather than in the caller because torque and crank speed are produced here:
+   * scaling the delivered wheel torque afterwards would leave the fuel burn, the
+   * engine braking and the rev limit all describing an engine that is not the one
+   * making power.
+   */
+  private thermalPerformance = 1;
+  private thermalRevLimit = 1;
+
+  setThermalLimits(performance: number, revLimit: number): void {
+    this.thermalPerformance = clamp(Number.isFinite(performance) ? performance : 1, 0, 1);
+    this.thermalRevLimit = clamp(Number.isFinite(revLimit) ? revLimit : 1, 0.4, 1);
+  }
+
+  /**
    * Normalised torque shape, scaled by peak torque: rises from idle to a peak,
    * falls gently toward the redline, then cuts completely at the redline so the
    * engine can never be fuelled past it.
+   *
+   * The cut moves DOWN with the thermal rev limit, which is what makes an
+   * overheating engine refuse the last part of its rev range instead of simply
+   * making less torque everywhere: holding a boiling engine off the redline is the
+   * one thing that lets it cool while still moving the car.
    */
   torqueCurve(rpm: number): number {
     const e = this.engine;
-    if (e == null || rpm <= 0 || rpm >= e.redlineRpm) return 0;
+    const ceiling = e == null ? 0 : e.redlineRpm * this.thermalRevLimit;
+    if (e == null || rpm <= 0 || rpm >= ceiling) return 0;
 
     let normalised: number;
     if (rpm <= e.idleRpm) {
@@ -287,7 +310,7 @@ export class Drivetrain {
       normalised = 1 - (1 - REDLINE_TORQUE_FRACTION) * t;
     }
 
-    return normalised * e.peakTorqueNm;
+    return normalised * e.peakTorqueNm * this.thermalPerformance;
   }
 
   /**
@@ -445,8 +468,11 @@ export class Drivetrain {
 
   private freeRev(engine: EngineSpec, dt: number, throttle: number): number {
     // Target idles at closed throttle and approaches (but never reaches) the
-    // redline at full throttle.
-    const target = engine.idleRpm + throttle * (engine.redlineRpm * 0.95 - engine.idleRpm);
+    // redline at full throttle — or the thermal ceiling, when one is imposed, so a
+    // driver blipping a boiling engine in neutral cannot rev it past the limit the
+    // gears already respect.
+    const ceiling = engine.redlineRpm * this.thermalRevLimit * 0.95;
+    const target = engine.idleRpm + throttle * Math.max(0, ceiling - engine.idleRpm);
     const tau = target > this.rpmValue ? FLYWHEEL_UP_TAU : FLYWHEEL_DOWN_TAU;
     this.rpmValue += (target - this.rpmValue) * (1 - Math.exp(-dt / tau));
     return this.rpmValue;

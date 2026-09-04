@@ -22,8 +22,8 @@ import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import type { CarState, GameWorld } from '../game/state';
-import { variant, WATER_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
+import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
+import { variant, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import {
   carModel,
@@ -37,7 +37,19 @@ import {
   type CarModelDef,
   type HandlingProfile,
 } from './carmodels';
-import { bonnetCanRun, bonnetPart, destroyedEngineSpec, engineFailureReason } from './bonnet';
+import {
+  bonnetCanRun,
+  bonnetPart,
+  bonnetRadiator,
+  destroyedEngineSpec,
+  engineFailureReason,
+} from './bonnet';
+import {
+  EngineCoolingSystem,
+  ambientAirC,
+  type CoolingState,
+  type EngineTempReadout,
+} from './cooling';
 import { Drivetrain, wheelTorqueToForce } from './drivetrain';
 import {
   STEERING_WHEEL_NODE,
@@ -1754,6 +1766,23 @@ export class Vehicle implements Rebasable {
   private localWater: number;
   private localOil: number;
   private lastAuthWater: number;
+  /**
+   * The engine's cooling system: temperature, the fitted radiator, its water.
+   *
+   * One per Vehicle and therefore one per car, which is what keeps two cars'
+   * temperatures independent. `localTemp` mirrors it into authority on the fluid
+   * cadence exactly as water and oil do.
+   */
+  private readonly cooling: EngineCoolingSystem;
+  private localTemp: number;
+  private lastAuthTemp: number;
+  /**
+   * Latched at the critical temperature and released only once the engine is back
+   * below its warning line. Without the latch a critically hot engine would restart
+   * on the tick after it stalled, hunt against the temperature and sound like a
+   * misfire; with it, an overheat is a stop.
+   */
+  private overheatStalled = false;
 
   // Cosmetic shell condition is mirrored locally so dust and impacts do not write
   // authoritative state every 16.7 ms; washing resyncs through the same authority check.
@@ -1971,6 +2000,12 @@ export class Vehicle implements Rebasable {
     this.lastAuthBodyScratches = this.localBodyScratches;
     this.localOil = carState.oilLitres;
     this.lastAuthOil = carState.oilLitres;
+    this.localTemp = carState.engineTempC;
+    this.lastAuthTemp = carState.engineTempC;
+    // Seeded from authority before `rebuild` binds the radiator, so a car loaded
+    // hot is hot on its first tick rather than starting from a default and jumping.
+    this.cooling = new EngineCoolingSystem(carState.engineTempC);
+    this.cooling.setTemperature(carState.engineTempC);
     this.rebuild();
     this.originDisposer = this.origin.register(this);
   }
@@ -2064,8 +2099,26 @@ export class Vehicle implements Rebasable {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
 
+  /**
+   * The fuel/parts gate, plus the overheat stall. A critically hot engine is NOT
+   * running: it has nipped up on its own oil film and will not turn again until the
+   * coolant is back under the warning line, which is the only reason a temperature
+   * gauge is worth watching.
+   */
   get engineRunning(): boolean {
-    return bonnetCanRun(this.car.bonnet, this.localFuel, this.car.fuelKind);
+    return (
+      !this.overheatStalled && bonnetCanRun(this.car.bonnet, this.localFuel, this.car.fuelKind)
+    );
+  }
+
+  /** The live cooling state: dashboard readout, prompts and the harness read this. */
+  get coolingState(): CoolingState {
+    return this.cooling.getState();
+  }
+
+  /** What the dashboard paints, or null when no engine is fitted. */
+  get engineTemperature(): EngineTempReadout | null {
+    return this.cooling.readout();
   }
 
   get engineDestroyed(): boolean {
@@ -2154,6 +2207,14 @@ export class Vehicle implements Rebasable {
     const stats = this.statsValue;
 
     this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
+    // Rebinds the cooling hardware in the same breath as the drivetrain, because
+    // both answer to the same four bonnet cells: swapping the radiator or the engine
+    // takes effect on the next tick with no other bookkeeping. The water level is
+    // re-clamped through `setWater` because a smaller core cannot hold what a larger
+    // one did — the litres that do not fit are spilled, exactly as they would be.
+    this.cooling.configure(this.drivetrainEngine(), bonnetRadiator(this.car.bonnet));
+    this.cooling.setWater(this.localWater);
+    this.localWater = this.cooling.waterLitres;
 
     // Fitted parts change the drivetrain; gizmos still change only mass.
     this.applyChassisMass(stats.mass);
@@ -2385,6 +2446,26 @@ export class Vehicle implements Rebasable {
     // interval as one collision the moment the player got back in.
     this.impactVelocityPrimed = false;
 
+    // A parked car's engine cools toward air temperature. It is one arithmetic step
+    // per car per tick, and without it a car left hot would still be hot an hour
+    // later — and, worse, a car the player cooked and walked away from would never
+    // release its overheat stall.
+    this.cooling.setWater(this.localWater);
+    this.cooling.update(dt, {
+      load: 0,
+      revs: 0,
+      speedMps: 0,
+      ambientC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
+      engineRunning: false,
+    });
+    this.localTemp = this.cooling.temperature;
+    if (this.overheatStalled && !this.cooling.getState().overheating) this.overheatStalled = false;
+    this.fluidEmitTimer += dt;
+    if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {
+      this.fluidEmitTimer = 0;
+      this.lastAuthTemp = this.localTemp;
+      this.world.apply({ t: 'car_engine_temp', carId: this.car.id, celsius: this.localTemp });
+    }
     const n = this.wheels.length;
     // Being shoved suspends the hold, not the brake. The hold is a teleport — it
     // re-places the chassis at `parkingHoldPos` every step — so with it active no
@@ -2618,6 +2699,14 @@ export class Vehicle implements Rebasable {
       this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
     }
     this.lastAuthOil = this.localOil;
+
+    if (this.car.engineTempC !== this.lastAuthTemp) {
+      this.localTemp = this.car.engineTempC;
+      this.cooling.setTemperature(this.localTemp);
+    } else if (this.localTemp !== this.car.engineTempC) {
+      this.world.apply({ t: 'car_engine_temp', carId: this.car.id, celsius: this.localTemp });
+    }
+    this.lastAuthTemp = this.localTemp;
     this.fluidEmitTimer = 0;
 
     if (
@@ -2710,6 +2799,11 @@ export class Vehicle implements Rebasable {
       this.localOil = this.car.oilLitres;
       this.lastAuthOil = this.car.oilLitres;
     }
+    if (this.car.engineTempC !== this.lastAuthTemp) {
+      this.localTemp = this.car.engineTempC;
+      this.lastAuthTemp = this.car.engineTempC;
+      this.cooling.setTemperature(this.localTemp);
+    }
 
     if (
       this.car.dirt !== this.lastAuthBodyDirt ||
@@ -2795,21 +2889,73 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Water and oil seep while the engine turns. They are not consumed by work
-    // like fuel is — the rate is flat per running second, which is why this sits
-    // outside the fuel-burn branch and only asks whether the engine is alive.
+    // COOLING. The thermal model is a separate module (vehicle/cooling.ts) and this
+    // is its only driver: everything it needs about the car this tick is the four
+    // numbers below, so it can be exercised without a physics world.
+    //
+    // Ambient comes from the game clock rather than a weather system, which does not
+    // exist; `ambientAirC` documents why a cosine is enough.
+    this.cooling.setWater(this.localWater);
+    this.cooling.update(dt, {
+      load: throttle,
+      revs: stats.engine.redlineRpm > 0 ? this.drivetrain.rpm / stats.engine.redlineRpm : 0,
+      speedMps: fwd,
+      ambientC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
+      engineRunning: this.engineRunning,
+    });
+    this.localWater = this.cooling.waterLitres;
+    this.localTemp = this.cooling.temperature;
+    const cooling = this.cooling.getState();
+
+    // Heat reaches the drivetrain as a torque scale and a rev ceiling, applied at the
+    // one place torque is produced, so nothing else in the vehicle needs to know that
+    // temperature exists. A stalled-hot engine cannot be restarted until the coolant
+    // is back under the warning line: that latch is `overheatStalled`.
+    this.drivetrain.setThermalLimits(cooling.performance, cooling.revLimit);
+    if (cooling.critical) this.overheatStalled = true;
+    else if (this.overheatStalled && !cooling.overheating) this.overheatStalled = false;
+
+    // Oil seeps while the engine turns. It is not consumed by work like fuel is —
+    // the rate is flat per running second, which is why this only asks whether the
+    // engine is alive. Water is not here: the cooling system above owns its loss,
+    // because how fast water leaves depends on how hot the engine is being run.
     //
     // Mirrored locally and emitted on the same throttled cadence as fuel, for the
     // same reason: a delta per tick for a number that moves by 0.0004 L would be
     // three hundred pointless state writes a second.
-    // A dry intact engine becomes permanently destroyed. It remains fitted and
-    // running, but its drivetrain spec collapses to limp-home torque.
+    if (this.engineRunning) {
+      this.localOil = Math.max(0, this.localOil - (OIL_LOSS_LPH / 3600) * dt);
+    }
+    this.fluidEmitTimer += dt;
+    if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {
+      this.fluidEmitTimer = 0;
+      this.lastAuthWater = this.localWater;
+      this.lastAuthOil = this.localOil;
+      this.lastAuthTemp = this.localTemp;
+      this.world.apply({
+        t: 'car_fluid',
+        carId: this.car.id,
+        fluid: 'water',
+        litres: this.localWater,
+      });
+      this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
+      this.world.apply({
+        t: 'car_engine_temp',
+        carId: this.car.id,
+        celsius: this.localTemp,
+      });
+    }
+
+    // A dry SUMP destroys an intact engine outright, and so does an engine cooked
+    // past its maximum temperature for long enough (`takeSeizure`, consumed once so
+    // one seizure cannot be reported twice). It remains fitted and running, but its
+    // drivetrain spec collapses to limp-home torque.
     const failure = this.engineRunning
-      ? engineFailureReason(this.car.bonnet, this.localWater, this.localOil)
+      ? engineFailureReason(this.car.bonnet, this.localOil)
       : null;
-    if (failure !== null) {
+    if (failure !== null || this.cooling.takeSeizure()) {
       const engineItem = this.car.bonnet[0];
-      if (engineItem?.type === 'part') {
+      if (engineItem?.type === 'part' && !engineItem.part.destroyed) {
         const destroyed = {
           ...engineItem,
           part: { ...engineItem.part, destroyed: true },
@@ -2817,25 +2963,6 @@ export class Vehicle implements Rebasable {
         this.world.apply({ t: 'car_bonnet', carId: this.car.id, cell: 0, item: destroyed });
         this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
         this.appliedDriveTorqueNm = 0;
-      }
-    }
-
-    if (this.engineRunning) {
-      const perSecond = 1 / 3600;
-      this.localWater = Math.max(0, this.localWater - WATER_LOSS_LPH * perSecond * dt);
-      this.localOil = Math.max(0, this.localOil - OIL_LOSS_LPH * perSecond * dt);
-      this.fluidEmitTimer += dt;
-      if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {
-        this.fluidEmitTimer = 0;
-        this.lastAuthWater = this.localWater;
-        this.lastAuthOil = this.localOil;
-        this.world.apply({
-          t: 'car_fluid',
-          carId: this.car.id,
-          fluid: 'water',
-          litres: this.localWater,
-        });
-        this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
       }
     }
 

@@ -39,6 +39,7 @@ import {
   suspensionDampingRatio,
   wheelSpringRate,
 } from '../src/vehicle/carmodels';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -214,6 +215,7 @@ function carState(modelId: string, y: number): CarState {
     scratches: 0,
     waterLitres: 10,
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('suspension-probe', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,

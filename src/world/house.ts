@@ -18,17 +18,15 @@ import { hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
-import {
-  waterCapacity,
-  oilCapacity,
-} from '../parts/registry';
+import { oilCapacity } from '../parts/registry';
+import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
+import { COLD_SOAK_C } from '../vehicle/cooling';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import type { Item } from '../items/items';
-import { createBonnetStorage } from '../vehicle/bonnet';
 
 type V3 = [number, number, number];
 
@@ -567,10 +565,11 @@ export function createStartingCar(world: GameWorld): CarState {
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
   const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
+  const bonnet = createBonnetStorage('car:start', def.engineId, def.bodyClass, def.tankLitres);
   // Water and oil start part-used on the same deterministic principle: the car
   // has been sitting in a shed, not prepped. Enough to set off on, not enough to
   // finish on, which is what makes the first can worth picking up.
-  const waterLitres = waterCapacity(engine) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
+  const waterLitres = bonnetWaterCapacity(bonnet) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
   const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
@@ -598,8 +597,10 @@ export function createStartingCar(world: GameWorld): CarState {
     fuelKind: engine.fuel,
     waterLitres,
     oilLitres,
+    // Stood in a shut garage overnight: cold, whatever the afternoon outside is.
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('car:start', def.engineId, def.bodyClass, def.tankLitres),
+    bonnet,
     odometer: 0,
     x: cx,
     y: carY,

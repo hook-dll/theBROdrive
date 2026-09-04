@@ -3,6 +3,7 @@ import type { Item } from '../src/items/items';
 import { decodeSaveCode, encodeSaveCode, installVehicleAutosave } from '../src/save/save';
 import { DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../src/vehicle/trunk';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 
 interface SavedCall {
   id: string;
@@ -31,6 +32,7 @@ initial.cars['car:test'] = {
   scratches: 0,
   waterLitres: 4,
   oilLitres: 3,
+  engineTempC: COLD_SOAK_C,
   storage: new Array<Item | null>(TRUNK_CELL_COUNT).fill(null),
   odometer: 50,
   x: 0,

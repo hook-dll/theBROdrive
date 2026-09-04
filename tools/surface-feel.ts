@@ -36,6 +36,7 @@ import { variant } from '../src/parts/registry';
 import { preloadCarModels } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { carModel } from '../src/vehicle/carmodels';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { WorldOrigin } from '../src/world/origin';
@@ -99,6 +100,7 @@ function carState(road: Road, lateral: number, groundY: number): CarState {
     scratches: 0,
     waterLitres: 10,
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('surface-feel', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,

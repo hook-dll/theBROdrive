@@ -33,6 +33,7 @@ import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
 import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { variant } from '../src/parts/registry';
 import type { Item } from '../src/items/items';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
@@ -120,6 +121,7 @@ function carState(modelId: string): CarState {
     scratches: 0,
     waterLitres: 10,
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0,

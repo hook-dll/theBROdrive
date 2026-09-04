@@ -11,6 +11,7 @@ import type {
   WorldState,
   GameWorld,
 } from '../game/state';
+import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import type { Item } from '../items/items';
 import { variant, type PartInstance } from '../parts/registry';
@@ -564,6 +565,11 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     // radiator's water), so an old save keeps exactly what it had in it.
     waterLitres: Math.max(0, numOr(raw.waterLitres ?? raw.coolantLitres, 0)),
     oilLitres: Math.max(0, numOr(raw.oilLitres, 0)),
+    // Absent on every save written before the engine had a temperature. Those cars
+    // load COLD rather than at their operating temperature: a saved car has been
+    // parked, and a cold engine is both the safe assumption and the one the player
+    // can see is right on the gauge.
+    engineTempC: Math.min(400, Math.max(-60, numOr(raw.engineTempC, COLD_SOAK_C))),
     storage,
     bonnet,
     // Absent on every save written before the body had a condition. A car loaded

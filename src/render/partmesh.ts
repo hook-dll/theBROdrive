@@ -580,21 +580,76 @@ function buildBattery(b: MeshBuilder, v: PartVariant): void {
 }
 
 /**
- * The radiator, which is also the car's water container: the filler neck and cap on
- * the header tank are the only cue the player needs for where a can of water goes.
+ * Radiators range from the estate's narrow single-pass unit to a twin-pass copper
+ * core. Their origins all remain at the core centre so bonnet slots and previews
+ * can exchange classes without changing the established mount placement.
  */
 function buildRadiator(b: MeshBuilder, v: PartVariant): void {
+  const klass = v.radiator?.klass ?? 'standard';
+  const blackenedSteel = cond(0x2c3135, 0.7, 0.6);
+  const paintedSteel = cond(0x566068, 0.75, 0.5);
   const copper = cond(0xb87333, 0.9, 0.35);
-  const dark = cond(0x23262a, 0.5, 0.7);
+  const copperTank = cond(0x7f4d2c, 0.85, 0.45);
   const cap = flat(0x2d4b6b, 0.55);
-  b.box(`${v.id}_core`, 0.72, 0.5, 0.06, copper, [0, 0, 0]);
-  b.box(`${v.id}_top`, 0.72, 0.08, 0.1, dark, [0, 0.25, 0]);
-  b.box(`${v.id}_bot`, 0.72, 0.08, 0.1, dark, [0, -0.25, 0]);
-  for (let i = -3; i <= 3; i++) {
-    b.box(`${v.id}_fin_${i}`, 0.68, 0.04, 0.02, copper, [0, i * 0.055, 0.035]);
+  const id = v.id;
+
+  if (klass === 'small') {
+    // The 2102's narrow, single-pass core has fewer exposed cooling rows than the
+    // replacement unit, which keeps it recognisable without spending detail on a
+    // part that is deliberately the cheap cooling option.
+    b.box(`${id}_core`, 0.52, 0.38, 0.05, paintedSteel, [0, 0, 0]);
+    b.box(`${id}_top`, 0.52, 0.065, 0.085, blackenedSteel, [0, 0.19, 0]);
+    b.box(`${id}_bot`, 0.52, 0.065, 0.085, blackenedSteel, [0, -0.19, 0]);
+    for (let i = -1; i <= 2; i++) {
+      b.box(`${id}_fin_${i}`, 0.48, 0.035, 0.018, paintedSteel, [0, i * 0.07 - 0.035, 0.034]);
+    }
+    b.box(`${id}_mount`, 0.30, 0.035, 0.10, blackenedSteel, [0, -0.235, 0]);
+    b.cylinder(`${id}_inlet`, 0.038, 0.038, 0.11, 8, blackenedSteel, [-0.16, 0.215, 0.07], AXIS_Z);
+    b.cylinder(`${id}_outlet`, 0.038, 0.038, 0.11, 8, blackenedSteel, [0.16, -0.205, 0.07], AXIS_Z);
+    b.cylinder(`${id}_fan_mount`, 0.052, 0.052, 0.035, 8, blackenedSteel, [0, 0, -0.055], AXIS_Z);
+    b.cylinder(`${id}_neck`, 0.048, 0.048, 0.055, 10, blackenedSteel, [0.16, 0.24, 0]);
+    b.cylinder(`${id}_cap`, 0.058, 0.058, 0.03, 10, cap, [0.16, 0.2825, 0]);
+    return;
   }
-  b.cylinder(`${v.id}_neck`, 0.055, 0.055, 0.06, 12, dark, [0.24, 0.31, 0]);
-  b.cylinder(`${v.id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.24, 0.355, 0]);
+
+  if (klass === 'large') {
+    // Two separated slabs make the thick copper core read as a twin-pass unit from
+    // the side; the rear ring leaves the fan's clearance legible at inventory scale.
+    b.box(`${id}_core_front`, 0.92, 0.66, 0.055, copper, [0, 0, 0.0425]);
+    b.box(`${id}_core_rear`, 0.92, 0.66, 0.055, copperTank, [0, 0, -0.0425]);
+    b.box(`${id}_top`, 0.92, 0.10, 0.18, copperTank, [0, 0.33, 0]);
+    b.box(`${id}_bot`, 0.92, 0.10, 0.18, copperTank, [0, -0.33, 0]);
+    b.box(`${id}_tank_l`, 0.12, 0.60, 0.22, copperTank, [-0.46, 0, 0]);
+    b.box(`${id}_tank_r`, 0.12, 0.60, 0.22, copperTank, [0.46, 0, 0]);
+    for (let i = 0; i < 10; i++) {
+      b.box(`${id}_fin_${i}`, 0.84, 0.035, 0.024, copper, [0, (i / 9 - 0.5) * 0.54, 0.085]);
+    }
+    b.torus(`${id}_fan_shroud`, 0.19, 0.018, 8, 16, blackenedSteel, [0, 0, -0.095]);
+    b.box(`${id}_mount`, 0.50, 0.04, 0.16, copperTank, [0, -0.42, 0]);
+    b.cylinder(`${id}_inlet`, 0.055, 0.055, 0.14, 10, copperTank, [-0.30, 0.40, 0.12], AXIS_Z);
+    b.cylinder(`${id}_outlet`, 0.055, 0.055, 0.14, 10, copperTank, [0.30, -0.40, 0.12], AXIS_Z);
+    b.cylinder(`${id}_fan_mount`, 0.065, 0.065, 0.03, 10, blackenedSteel, [0, 0, -0.125], AXIS_Z);
+    b.cylinder(`${id}_neck`, 0.065, 0.065, 0.08, 12, copperTank, [0.30, 0.42, 0]);
+    b.cylinder(`${id}_cap`, 0.075, 0.075, 0.04, 12, cap, [0.30, 0.48, 0]);
+    return;
+  }
+
+  // The standard replacement preserves the original 0.72 x 0.5 x 0.06 core and
+  // seven fin rows, while side tanks distinguish it from the smaller single-pass unit.
+  b.box(`${id}_core`, 0.72, 0.5, 0.06, blackenedSteel, [0, 0, 0]);
+  b.box(`${id}_top`, 0.72, 0.08, 0.10, paintedSteel, [0, 0.25, 0]);
+  b.box(`${id}_bot`, 0.72, 0.08, 0.10, paintedSteel, [0, -0.25, 0]);
+  b.box(`${id}_tank_l`, 0.08, 0.44, 0.12, paintedSteel, [-0.36, 0, 0]);
+  b.box(`${id}_tank_r`, 0.08, 0.44, 0.12, paintedSteel, [0.36, 0, 0]);
+  for (let i = -3; i <= 3; i++) {
+    b.box(`${id}_fin_${i}`, 0.68, 0.04, 0.02, paintedSteel, [0, i * 0.055, 0.035]);
+  }
+  b.box(`${id}_mount`, 0.42, 0.04, 0.12, blackenedSteel, [0, -0.29, 0]);
+  b.cylinder(`${id}_inlet`, 0.045, 0.045, 0.12, 8, paintedSteel, [-0.24, 0.29, 0.08], AXIS_Z);
+  b.cylinder(`${id}_outlet`, 0.045, 0.045, 0.12, 8, paintedSteel, [0.24, -0.29, 0.08], AXIS_Z);
+  b.cylinder(`${id}_fan_mount`, 0.058, 0.058, 0.03, 8, blackenedSteel, [0, 0, -0.06], AXIS_Z);
+  b.cylinder(`${id}_neck`, 0.055, 0.055, 0.06, 12, paintedSteel, [0.24, 0.31, 0]);
+  b.cylinder(`${id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.24, 0.3575, 0]);
 }
 
 function buildTurbine(b: MeshBuilder, v: PartVariant): void {
