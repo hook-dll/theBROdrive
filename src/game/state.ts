@@ -1,7 +1,7 @@
 import { hash } from '../core/rng';
 import type { Item, SunShadesItem } from '../items/items';
 import type { FuelType, PartInstance } from '../parts/registry';
-import { BONNET_SLOT_COUNT } from '../vehicle/bonnet';
+import { bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { DEFAULT_SETTINGS } from './settings';
 import { localSolarDateAt } from './calendar';
@@ -79,15 +79,19 @@ export interface CarState {
   /** Fuel currently in the fitted tank; mixed or wrong fuel cannot run the engine. */
   fuelKind: FuelType | 'mixed' | null;
   /**
-   * Coolant and oil in the engine, litres.
+   * Water in the radiator and oil in the engine, litres.
    *
    * Unlike fuel these are not consumed by driving — an old engine SEEPS them, and
    * that is the whole mechanic: a slow drift downward that eventually makes you
    * stop and look for a can. Capacities come from the engine's cylinder count (see
-   * `coolantCapacity` / `oilCapacity` in parts/registry.ts) rather than a table,
+   * `waterCapacity` / `oilCapacity` in parts/registry.ts) rather than a table,
    * because a bigger engine holding more of both needs no authoring.
+   *
+   * These live on the CAR, not on the container part, because the running engine is
+   * what drains them. Detaching the container moves its share into the part (see the
+   * `car_bonnet` delta) so nothing is lost by carrying it around.
    */
-  coolantLitres: number;
+  waterLitres: number;
   oilLitres: number;
   /**
    * Boot cells. `null` is an empty cell; the array's LENGTH is the car's capacity,
@@ -245,7 +249,7 @@ export type WorldDelta =
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
-  | { t: 'car_fluid'; carId: string; fluid: 'coolant' | 'oil'; litres: number }
+  | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
   | { t: 'trailer_add'; trailer: TrailerState }
@@ -311,6 +315,79 @@ export function newWorldState(seed: number): WorldState {
     stickersUnplaced: 0,
     deliveredPois: [],
   };
+}
+
+/**
+ * Keeps a container's fluid WITH the container across a bonnet swap.
+ *
+ * The car owns the level while the part is fitted, so a removal has to pour it into
+ * the part and an installation has to pour it back out. This lives in the reducer
+ * rather than at the interaction site because that makes it unconditional: every
+ * path that swaps a bonnet cell goes through this delta. The old code instead zeroed
+ * the radiator and the fuel tank at ONE call site, which is why a full tank you
+ * unbolted came back dry and the engine's oil silently teleported to whatever engine
+ * you fitted next.
+ *
+ * Capacity is not enforced: a small radiator moved onto a big engine is simply
+ * under-filled, and the bonnet readout says so.
+ */
+function moveSlotFluid(
+  car: CarState,
+  cell: number,
+  outgoing: Item | null,
+  incoming: Item | null,
+): void {
+  const channel = bonnetSlotFluid(cell);
+  if (channel === null || outgoing === incoming) return;
+  // Same part id on both sides: the cell was EDITED in place, not swapped — an
+  // engine being marked destroyed re-applies this delta with a copy of itself. The
+  // container never left the car, so nothing may move. Without this an engine that
+  // cooked itself also lost every litre of oil it was holding.
+  if (
+    outgoing?.type === 'part' &&
+    incoming?.type === 'part' &&
+    outgoing.part.id === incoming.part.id
+  ) {
+    return;
+  }
+
+  // `bonnetAccepts` is the same gate installation uses, so a part that was never a
+  // container for THIS slot cannot be handed a level it has no business holding.
+  if (bonnetAccepts(cell, outgoing)) {
+    if (channel === 'fuel') {
+      // A MIXTURE is the one thing that does not travel. Nobody carries a tank of
+      // contaminated fuel about, and pulling the tank was already the documented
+      // recovery from a mis-fuel (see `pourPrompt` in player/interaction.ts) — if it
+      // came out with you, a mis-fuelled car would have no way back at all.
+      const contaminated = car.fuelKind === 'mixed';
+      outgoing.part.litres = contaminated ? 0 : car.fuelLitres;
+      outgoing.part.fuelKind = contaminated ? null : car.fuelKind;
+      car.fuelLitres = 0;
+      car.fuelKind = null;
+    } else if (channel === 'water') {
+      outgoing.part.litres = car.waterLitres;
+      car.waterLitres = 0;
+    } else {
+      outgoing.part.litres = car.oilLitres;
+      car.oilLitres = 0;
+    }
+  }
+
+  if (bonnetAccepts(cell, incoming)) {
+    const litres = Math.max(0, incoming.part.litres ?? 0);
+    if (channel === 'fuel') {
+      car.fuelLitres = litres;
+      car.fuelKind = litres > 0 ? incoming.part.fuelKind ?? null : null;
+      incoming.part.fuelKind = null;
+    } else if (channel === 'water') {
+      car.waterLitres = litres;
+    } else {
+      car.oilLitres = litres;
+    }
+    // Emptied on the way in: the fitted part's level is the CAR's now, and leaving a
+    // copy behind would double the fluid the next removal pours back out.
+    incoming.part.litres = 0;
+  }
 }
 
 /**
@@ -466,7 +543,9 @@ export class GameWorld {
       case 'car_bonnet': {
         const car = s.cars[delta.carId];
         if (car && delta.cell >= 0 && delta.cell < BONNET_SLOT_COUNT) {
+          const outgoing = car.bonnet[delta.cell];
           car.bonnet[delta.cell] = delta.item;
+          moveSlotFluid(car, delta.cell, outgoing, delta.item);
         }
         break;
       }
@@ -474,7 +553,7 @@ export class GameWorld {
         const car = s.cars[delta.carId];
         if (!car) break;
         const level = Math.max(0, delta.litres);
-        if (delta.fluid === 'coolant') car.coolantLitres = level;
+        if (delta.fluid === 'water') car.waterLitres = level;
         else car.oilLitres = level;
         break;
       }

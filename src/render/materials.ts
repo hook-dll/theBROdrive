@@ -52,10 +52,11 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /**
  * Body paint adds mesh-local dent relief in the same single shader permutation.
- * Version v6 passes the complete local-to-world basis to avoid a fragment
- * cross-product precision-loss path on D3D/ANGLE.
+ * Version v7 evaluates that relief in METRES: the packs are authored in
+ * centimetres (`scale` in vehicle/carmodels.ts), so a raw model-unit field put
+ * 100x the intended frequency on every real car and no dent was ever visible.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v6';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v7';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -86,7 +87,11 @@ const VERTEX_VARYING =
   // cross-product subtracting nearly equal values on D3D/ANGLE.
   'varying vec3 vCondAxisX;\n' +
   'varying vec3 vCondAxisY;\n' +
-  'varying vec3 vCondAxisZ;';
+  'varying vec3 vCondAxisZ;\n' +
+  // Model units to metres along each of those axes. The dent field is authored in
+  // metres — lobe size, flank weighting, finite-difference step — and the packs are
+  // authored in centimetres, so without this the field is 100x too fine to see.
+  'varying vec3 vCondScale;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
 // exact world transform for the normal (no inverse-transpose required).
@@ -96,9 +101,13 @@ const WORLD_POS_HOOK =
   '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;\n' +
   '\tvCondLocalPos = transformed;\n' +
   '\tvCondLocalNormal = objectNormal;\n' +
-  '\tvCondAxisX = normalize( mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 ) );\n' +
-  '\tvCondAxisY = normalize( mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 ) );\n' +
-  '\tvCondAxisZ = normalize( mat3( modelMatrix ) * vec3( 0.0, 0.0, 1.0 ) );';
+  '\tvec3 condAxX = mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 );\n' +
+  '\tvec3 condAxY = mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 );\n' +
+  '\tvec3 condAxZ = mat3( modelMatrix ) * vec3( 0.0, 0.0, 1.0 );\n' +
+  '\tvCondScale = vec3( length( condAxX ), length( condAxY ), length( condAxZ ) );\n' +
+  '\tvCondAxisX = condAxX / max( vCondScale.x, 1e-6 );\n' +
+  '\tvCondAxisY = condAxY / max( vCondScale.y, 1e-6 );\n' +
+  '\tvCondAxisZ = condAxZ / max( vCondScale.z, 1e-6 );';
 
 const CONDITION_PARS = `
 uniform float uDirt;
@@ -156,26 +165,35 @@ vec2 condRust( vec3 p ) {
 #define COND_PIT_DEPTH 0.015
 
 /**
- * DENT DEPTH FIELD, in mesh-local metres, shared by the paint hook and the normal
- * hook so a dent's shading and its dulled paint can never disagree.
+ * DENT DEPTH FIELD, in mesh-local METRES (see vCondScale), shared by the paint
+ * hook and the normal hook so a dent's shading and its dulled paint can never
+ * disagree.
  *
  * Six cells per metre puts the value-noise lobes at roughly 17 cm — large enough
  * to read across a door or bumper without turning into broad panel warping. The
- * position-only shear breaks the lattice without a second sample. The damage argument
- * moves the threshold rather than the amplitude, so light damage is a few isolated lobes
- * and full damage lets neighbours meet into crumpled panels.
+ * position-only shear breaks the lattice without a second sample.
+ *
+ * DEPTH AND COVERAGE ARE SEPARATE, and that is what makes a crash visible. Damage
+ * used to scale the amplitude directly, so the 0.12 a heavy shunt adds pressed the
+ * panel in by a tenth of a dent and the car looked untouched until it had been
+ * crashed a dozen times. A dent is a dent: the depth ramp saturates by the time one
+ * solid impact has landed, and further damage only spreads more lobes until
+ * neighbours meet into crumpled panels.
  *
  * Weighting: lower flanks and the extremities of the shell, because that is where a
- * car collects damage and because a dent blanket over a roof reads as a texture.
+ * car collects damage — but the floor is 0.35 rather than 0.2 so a roof or bonnet
+ * strike is not silently swallowed.
  */
-float condDent( vec3 localP, float damage ) {
-  vec3 p = localP * 6.0;
+float condDent( vec3 metreP, float damage ) {
+  vec3 p = metreP * 6.0;
   p += vec3( p.z * 0.31, p.x * 0.19, p.y * 0.11 );
   float lobes = condNoise( p + 19.0 );
-  float core = smoothstep( 0.82 - 0.32 * damage, 0.94 - 0.31 * damage, lobes );
-  float lower = 1.0 - smoothstep( 0.35, 1.25, localP.y );
-  float extremity = smoothstep( 0.55, 1.55, max( abs( localP.x ), abs( localP.z ) ) );
-  return damage * core * ( 0.2 + 0.8 * max( lower, extremity ) );
+  float spread = sqrt( damage );
+  float core = smoothstep( 0.80 - 0.46 * spread, 0.93 - 0.33 * spread, lobes );
+  float depth = smoothstep( 0.0, 0.2, damage );
+  float lower = 1.0 - smoothstep( 0.35, 1.25, metreP.y );
+  float extremity = smoothstep( 0.55, 1.55, max( abs( metreP.x ), abs( metreP.z ) ) );
+  return depth * core * ( 0.35 + 0.65 * max( lower, extremity ) );
 }
 
 /**
@@ -184,16 +202,16 @@ float condDent( vec3 localP, float damage ) {
  *
  * THE GRADIENT IS ANALYTIC, NOT a screen derivative. Screen-space derivatives of a
  * smooth mask shrink with the pixel footprint, so a dent that tilted the normal
- * convincingly with
- * the camera at the door vanished entirely at chase distance — measured on the
- * shipped chase camera, where a fully damaged car read as undamaged. Three extra taps
- * in mesh space cost the same at every zoom.
+ * convincingly with the camera at the door vanished entirely at chase distance —
+ * measured on the shipped chase camera, where a fully damaged car read as
+ * undamaged. Three extra taps in mesh space cost the same at every zoom.
  *
- * 14 mm over a 17 cm lobe preserves the existing 8% relief slope while making each
- * impact read a little larger. Twice that slope looked rippled rather than dented.
+ * 30 mm over a 17 cm lobe is an 18% relief slope. The old 14 mm was tuned when the
+ * amplitude also carried the damage level, so the two multiplied down to nothing;
+ * with the depth ramp above, this is the slope a folded panel actually has.
  */
 #define COND_DENT_EPS 0.052
-#define COND_DENT_DEPTH 0.014
+#define COND_DENT_DEPTH 0.030
 
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `
@@ -270,7 +288,8 @@ const CAR_BODY_CONDITION_BODY = `
   vec2 condR = condRust( condP );
   float condUp = saturate( condN.y );
   float condPit = 1.0 - smoothstep( 0.2, 0.9, condR.y );
-  float condLower = 1.0 - smoothstep( 0.25, 1.15, vCondLocalPos.y );
+  vec3 condMetreP = vCondLocalPos * vCondScale;
+  float condLower = 1.0 - smoothstep( 0.25, 1.15, condMetreP.y );
   float dustMask = uDirt * max(
     ( 0.3 + 0.7 * condUp ) * ( 0.45 + 0.55 * condPit ),
     condLower * ( 0.45 + 0.35 * condPit )
@@ -280,18 +299,20 @@ const CAR_BODY_CONDITION_BODY = `
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 
-  float dentMask = condDent( vCondLocalPos, uScratches );
-  // Paint response is now almost nothing, and that is the fix for "it looks like
-  // camouflage": a mask that tints or dulls reads as a PATTERN on the paint, however
-  // weak the tint, because the eye groups patches of colour long before it reads
-  // shading. All the damage is carried by the relief in the normal hook; the paint
-  // only loses a little gloss where the metal is stretched.
-  roughnessFactor = mix( roughnessFactor, 0.86, dentMask * 0.16 );
-  // Bare primer only at high damage and only on the sharpest lobes, where folded
-  // sheet actually loses its paint. The cap keeps it a hint, not a stripe.
-  float dentCrease = smoothstep( 0.7, 1.0, dentMask ) * smoothstep( 0.8, 1.0, uScratches );
+  float dentMask = condDent( condMetreP, uScratches );
+  // The relief in the normal hook still carries the shape; these three terms are
+  // what keep a dent readable when the light is flat or the highlight is elsewhere.
+  // Keep them all keyed to the SAME mask, so nothing can tint where nothing is bent
+  // — that was the old "camouflage" failure, a paint pattern with no relief under it.
+  roughnessFactor = mix( roughnessFactor, 0.9, dentMask * 0.4 );
+  // Occlusion in the fold. Squared so the shading stays on the deep centre of a
+  // lobe rather than washing the whole panel down a shade.
+  diffuseColor.rgb *= 1.0 - 0.2 * dentMask * dentMask;
+  // Bare primer on the sharpest lobes, where folded sheet actually loses its paint.
+  // Gated on damage so a single kerb scrape does not strip a panel.
+  float dentCrease = smoothstep( 0.55, 1.0, dentMask ) * smoothstep( 0.35, 0.9, uScratches );
   vec3 dentPrimer = condLum > 0.42 ? vec3( 0.18 ) : vec3( 0.58 );
-  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.025 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.3 );
 }`;
 
 /**
@@ -355,11 +376,15 @@ if ( uRust > 0.001 ) {
 }
 
 if ( uScratches > 0.001 ) {
-  float dentH = condDent( vCondLocalPos, uScratches );
+  // Mesh-local metres, not model units: the epsilon below is a real 52 mm step, and
+  // a centimetre-authored pack would otherwise difference the field 100x too finely
+  // and report a gradient of nearly zero.
+  vec3 dentP = vCondLocalPos * vCondScale;
+  float dentH = condDent( dentP, uScratches );
   vec3 dentGrad = vec3(
-    condDent( vCondLocalPos + vec3( COND_DENT_EPS, 0.0, 0.0 ), uScratches ) - dentH,
-    condDent( vCondLocalPos + vec3( 0.0, COND_DENT_EPS, 0.0 ), uScratches ) - dentH,
-    condDent( vCondLocalPos + vec3( 0.0, 0.0, COND_DENT_EPS ), uScratches ) - dentH
+    condDent( dentP + vec3( COND_DENT_EPS, 0.0, 0.0 ), uScratches ) - dentH,
+    condDent( dentP + vec3( 0.0, COND_DENT_EPS, 0.0 ), uScratches ) - dentH,
+    condDent( dentP + vec3( 0.0, 0.0, COND_DENT_EPS ), uScratches ) - dentH
   ) / COND_DENT_EPS;
   // Only the part of the gradient that lies IN the surface tilts a normal; the
   // component along it is the field getting deeper, not the panel sloping.

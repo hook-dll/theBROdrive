@@ -97,7 +97,7 @@ function carState(road: Road, lateral: number, groundY: number): CarState {
     fuelKind: engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
-    coolantLitres: 10,
+    waterLitres: 10,
     oilLitres: 10,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('surface-feel', def.engineId, def.bodyClass, def.tankLitres),

@@ -5,7 +5,7 @@
  * The car itself is ONE complete visual and physics model (vehicle/carmodels.ts):
  * collider, suspension mounts and wheel radii are measured from its geometry.
  * Drivability comes from the four typed service cells under the bonnet: engine and
- * fuel tank are required, coolant and oil protect the engine, turbine is optional.
+ * fuel tank are required, water and oil protect the engine, turbine is optional.
  *
  * Anchor gizmos remain cosmetic. They add mass and looks, never capability; unlike
  * the bonnet cells they are not service fittings.
@@ -23,7 +23,7 @@ import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import type { CarState, GameWorld } from '../game/state';
-import { variant, COOLANT_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
+import { variant, WATER_LOSS_LPH, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import {
   carModel,
@@ -1170,12 +1170,19 @@ const BODY_CONDITION_EMIT_INTERVAL = 0.5;
  * still makes a digging wheel throw more material.
  */
 const BODY_DIRT_TYRE_METRES_TO_FULL = 100_000;
-/** A kerb nudge is under this unexplained loss; shell scratches start above it. */
-const SCRATCH_IMPACT_THRESHOLD_MPS = 2.5;
-/** Each m/s above the scratch threshold adds this much shell damage. */
-const SCRATCH_PER_SEVERITY_MPS = 0.025;
+/** A kerb nudge is under this unexplained loss; shell damage starts above it. */
+const SCRATCH_IMPACT_THRESHOLD_MPS = 1.8;
+/**
+ * Each m/s above the threshold adds this much shell damage, up to one impact's cap.
+ *
+ * A 5 m/s shunt (18 km/h into a rock) now lands 0.19 rather than 0.06, and 0.2 is
+ * where the dent field's depth ramp saturates (`condDent` in render/materials.ts):
+ * one solid crash therefore leaves dents at full depth, and everything after it
+ * widens them. The old rates needed a dozen crashes to reach a visible mask.
+ */
+const SCRATCH_PER_SEVERITY_MPS = 0.06;
 /** One collision cannot add more than this much cosmetic damage. */
-const SCRATCH_PER_IMPACT_CAP = 0.12;
+const SCRATCH_PER_IMPACT_CAP = 0.3;
 /**
  * Suspension and solver noise are below 0.35 m/s once the tyres' force ceiling is
  * removed; keeping that margin stops ordinary road seams becoming collision signals.
@@ -1739,14 +1746,14 @@ export class Vehicle implements Rebasable {
   private lastAuthFuel: number;
   private fuelEmitTimer = 0;
   /**
-   * Coolant and oil, mirrored locally for the same reason fuel is: the authoritative
+   * Water and oil, mirrored locally for the same reason fuel is: the authoritative
    * value is in state, but a per-tick round trip through `world.apply` for a number
    * that changes in the fourth decimal place is waste. Resynced whenever something
-   * external (a poured can) moves the authority.
+   * external (a poured can, a swapped radiator) moves the authority.
    */
-  private localCoolant: number;
+  private localWater: number;
   private localOil: number;
-  private lastAuthCoolant: number;
+  private lastAuthWater: number;
 
   // Cosmetic shell condition is mirrored locally so dust and impacts do not write
   // authoritative state every 16.7 ms; washing resyncs through the same authority check.
@@ -1956,8 +1963,8 @@ export class Vehicle implements Rebasable {
 
     this.localFuel = carState.fuelLitres;
     this.lastAuthFuel = carState.fuelLitres;
-    this.localCoolant = carState.coolantLitres;
-    this.lastAuthCoolant = carState.coolantLitres;
+    this.localWater = carState.waterLitres;
+    this.lastAuthWater = carState.waterLitres;
     this.localBodyDirt = clamp(carState.dirt, 0, 1);
     this.lastAuthBodyDirt = this.localBodyDirt;
     this.localBodyScratches = clamp(carState.scratches, 0, 1);
@@ -2593,18 +2600,17 @@ export class Vehicle implements Rebasable {
     this.lastAuthFuel = this.localFuel;
     this.fuelEmitTimer = 0;
 
-    if (this.car.coolantLitres !== this.lastAuthCoolant) {
-      this.localCoolant = this.car.coolantLitres;
-    } else if (this.localCoolant !== this.car.coolantLitres) {
+    if (this.car.waterLitres !== this.lastAuthWater) {
+      this.localWater = this.car.waterLitres;
+    } else if (this.localWater !== this.car.waterLitres) {
       this.world.apply({
         t: 'car_fluid',
         carId: this.car.id,
-        fluid: 'coolant',
-
-        litres: this.localCoolant,
+        fluid: 'water',
+        litres: this.localWater,
       });
     }
-    this.lastAuthCoolant = this.localCoolant;
+    this.lastAuthWater = this.localWater;
 
     if (this.car.oilLitres !== this.lastAuthOil) {
       this.localOil = this.car.oilLitres;
@@ -2696,9 +2702,9 @@ export class Vehicle implements Rebasable {
       this.localFuel = this.car.fuelLitres;
       this.lastAuthFuel = this.car.fuelLitres;
     }
-    if (this.car.coolantLitres !== this.lastAuthCoolant) {
-      this.localCoolant = this.car.coolantLitres;
-      this.lastAuthCoolant = this.car.coolantLitres;
+    if (this.car.waterLitres !== this.lastAuthWater) {
+      this.localWater = this.car.waterLitres;
+      this.lastAuthWater = this.car.waterLitres;
     }
     if (this.car.oilLitres !== this.lastAuthOil) {
       this.localOil = this.car.oilLitres;
@@ -2789,7 +2795,7 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Coolant and oil seep while the engine turns. They are not consumed by work
+    // Water and oil seep while the engine turns. They are not consumed by work
     // like fuel is — the rate is flat per running second, which is why this sits
     // outside the fuel-burn branch and only asks whether the engine is alive.
     //
@@ -2799,7 +2805,7 @@ export class Vehicle implements Rebasable {
     // A dry intact engine becomes permanently destroyed. It remains fitted and
     // running, but its drivetrain spec collapses to limp-home torque.
     const failure = this.engineRunning
-      ? engineFailureReason(this.car.bonnet, this.localCoolant, this.localOil)
+      ? engineFailureReason(this.car.bonnet, this.localWater, this.localOil)
       : null;
     if (failure !== null) {
       const engineItem = this.car.bonnet[0];
@@ -2816,18 +2822,18 @@ export class Vehicle implements Rebasable {
 
     if (this.engineRunning) {
       const perSecond = 1 / 3600;
-      this.localCoolant = Math.max(0, this.localCoolant - COOLANT_LOSS_LPH * perSecond * dt);
+      this.localWater = Math.max(0, this.localWater - WATER_LOSS_LPH * perSecond * dt);
       this.localOil = Math.max(0, this.localOil - OIL_LOSS_LPH * perSecond * dt);
       this.fluidEmitTimer += dt;
       if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {
         this.fluidEmitTimer = 0;
-        this.lastAuthCoolant = this.localCoolant;
+        this.lastAuthWater = this.localWater;
         this.lastAuthOil = this.localOil;
         this.world.apply({
           t: 'car_fluid',
           carId: this.car.id,
-          fluid: 'coolant',
-          litres: this.localCoolant,
+          fluid: 'water',
+          litres: this.localWater,
         });
         this.world.apply({ t: 'car_fluid', carId: this.car.id, fluid: 'oil', litres: this.localOil });
       }
@@ -3404,7 +3410,7 @@ export class Vehicle implements Rebasable {
         this.impactState.localZ = this.localVelScratch.z;
         this.impactThisStep = true;
 
-        // Above 2.5 m/s, 0.025 per unexplained m/s reaches 0.12 at 7.3 m/s;
+        // Above 1.8 m/s, 0.06 per unexplained m/s reaches the 0.3 cap at 6.8 m/s;
         // capping there keeps even a high-speed single crash below a full repaint.
         const scratchGain = Math.min(
           SCRATCH_PER_IMPACT_CAP,

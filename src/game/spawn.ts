@@ -8,7 +8,7 @@
  */
 
 import { carModel } from '../vehicle/carmodels';
-import { coolantCapacity, oilCapacity, variant } from '../parts/registry';
+import { waterCapacity, oilCapacity, variant } from '../parts/registry';
 import type { Item } from '../items/items';
 import type { CarState, GameWorld } from './state';
 import { createBonnetStorage } from '../vehicle/bonnet';
@@ -54,7 +54,7 @@ export function spawnCarState(
     // chore before every test.
     fuelLitres: def.tankLitres,
     fuelKind: engine?.fuel ?? null,
-    coolantLitres: engine ? coolantCapacity(engine) : 0,
+    waterLitres: engine ? waterCapacity(engine) : 0,
     oilLitres: engine ? oilCapacity(engine) : 0,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres),

@@ -210,7 +210,6 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
     case 'bumper': return buildBumper(b, v);
     case 'battery': return buildBattery(b, v);
     case 'radiator': return buildRadiator(b, v);
-    case 'coolant_tank': return buildCoolantTank(b, v);
     case 'turbine': return buildTurbine(b, v);
     case 'headlight': return buildHeadlight(b, v);
     case 'exhaust': return buildExhaust(b, v);
@@ -580,23 +579,22 @@ function buildBattery(b: MeshBuilder, v: PartVariant): void {
   b.cylinder(`${id}_t2`, 0.025, 0.025, 0.03, 10, terminal, [w * 0.25, h, 0.05]);
 }
 
+/**
+ * The radiator, which is also the car's water container: the filler neck and cap on
+ * the header tank are the only cue the player needs for where a can of water goes.
+ */
 function buildRadiator(b: MeshBuilder, v: PartVariant): void {
   const copper = cond(0xb87333, 0.9, 0.35);
   const dark = cond(0x23262a, 0.5, 0.7);
+  const cap = flat(0x2d4b6b, 0.55);
   b.box(`${v.id}_core`, 0.72, 0.5, 0.06, copper, [0, 0, 0]);
   b.box(`${v.id}_top`, 0.72, 0.08, 0.1, dark, [0, 0.25, 0]);
   b.box(`${v.id}_bot`, 0.72, 0.08, 0.1, dark, [0, -0.25, 0]);
   for (let i = -3; i <= 3; i++) {
     b.box(`${v.id}_fin_${i}`, 0.68, 0.04, 0.02, copper, [0, i * 0.055, 0.035]);
   }
-}
-
-function buildCoolantTank(b: MeshBuilder, v: PartVariant): void {
-  const plastic = cond(0xd7d2bd, 0.35, 0.65);
-  const cap = flat(0x2d4b6b, 0.55);
-  b.box(`${v.id}_reservoir`, 0.34, 0.42, 0.2, plastic, [0, 0, 0]);
-  b.cylinder(`${v.id}_neck`, 0.055, 0.055, 0.08, 12, plastic, [0.09, 0.25, 0]);
-  b.cylinder(`${v.id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.09, 0.305, 0]);
+  b.cylinder(`${v.id}_neck`, 0.055, 0.055, 0.06, 12, dark, [0.24, 0.31, 0]);
+  b.cylinder(`${v.id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.24, 0.355, 0]);
 }
 
 function buildTurbine(b: MeshBuilder, v: PartVariant): void {
@@ -686,14 +684,14 @@ function wrench(b: MeshBuilder): void {
 /**
  * Colour-codes the can by fluid, the way a workshop shelf does: red petrol, yellow
  * diesel, and the two engine fluids in the colours those bottles actually come in —
- * green coolant, dark blue-black oil. It is the only way to tell four identical
- * cans apart at a glance in the inventory strip.
+ * blue water, dark blue-black oil. It is the only way to tell four identical cans
+ * apart at a glance in the inventory strip.
  */
 function buildFluidCanInto(b: MeshBuilder, fluid: FluidKind): void {
   const color =
     fluid === 'petrol' ? 0xb03a2e
     : fluid === 'diesel' ? 0xc9a227
-    : fluid === 'coolant' ? 0x2e7d5b
+    : fluid === 'water' ? 0x2f6fa8
     : 0x2b2f3a;
   const metal = cond(color, 0.7, 0.4);
   const cap = flat(0x23262a, 0.6);

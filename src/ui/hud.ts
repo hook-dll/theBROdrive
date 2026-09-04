@@ -19,11 +19,11 @@ export interface DrivingReadout {
   engineRunning: boolean;
   engineDestroyed: boolean;
   /**
-   * Coolant and oil as fractions of capacity. These have no dial: they sit still
+   * Water and oil as fractions of capacity. These have no dial: they sit still
    * for tens of minutes and then matter suddenly, which is a warning lamp's job,
    * not a gauge's.
    */
-  coolantFraction: number;
+  waterFraction: number;
   oilFraction: number;
   /** Parking brake state. Keyboard and touch controls both latch it. */
   handbrake: boolean;
@@ -52,7 +52,7 @@ const REDLINE_FRACTION = 0.85;
 /** Fuel fraction below which the analogue gauge reads as an alarm. */
 const FUEL_ALARM_FRACTION = 0.12;
 /**
- * Coolant/oil fraction below which the warning lamp lights. Higher than the fuel
+ * Water/oil fraction below which the warning lamp lights. Higher than the fuel
  * alarm because these are not fixable at the roadside from a jerrycan you happen
  * to be carrying — you want warning early enough to plan a stop around it.
  */
@@ -350,8 +350,8 @@ export class Hud {
     // the render path and the usual state of it is "unchanged for ten minutes".
     const warnings: string[] = [];
     if (readout.engineDestroyed) warnings.push('ENGINE DESTROYED');
-    if (readout.coolantFraction < FLUID_ALARM_FRACTION) {
-      warnings.push(readout.coolantFraction <= 0 ? 'NO COOLANT' : 'COOLANT LOW');
+    if (readout.waterFraction < FLUID_ALARM_FRACTION) {
+      warnings.push(readout.waterFraction <= 0 ? 'NO WATER' : 'WATER LOW');
     }
     if (readout.oilFraction < FLUID_ALARM_FRACTION) {
       warnings.push(readout.oilFraction <= 0 ? 'NO OIL' : 'OIL LOW');

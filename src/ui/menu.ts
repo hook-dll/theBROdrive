@@ -124,7 +124,7 @@ const DRIVE_LAYOUTS: readonly { readonly id: DriveLayout; readonly label: string
 const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: number }[] = [
   { fluid: 'petrol', capacity: 20 },
   { fluid: 'diesel', capacity: 20 },
-  { fluid: 'coolant', capacity: 5 },
+  { fluid: 'water', capacity: 5 },
   { fluid: 'oil', capacity: 5 },
 ];
 

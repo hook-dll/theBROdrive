@@ -16,7 +16,7 @@
  * cars generated at roadside stops, and the sunken shells scattered beside them.
  *
  * Free-form anchor parts remain cosmetic. The separate four-cell bonnet service
- * layout owns the removable engine, optional turbine, coolant tank and fuel tank.
+ * layout owns the removable engine, optional turbine, radiator and fuel tank.
  */
 
 import type { BodyClass, EngineSpec, GearboxSpec, SuspensionTuning } from '../parts/registry';

@@ -560,7 +560,9 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     reverseLightsOn,
     fuelLitres,
     fuelKind,
-    coolantLitres: Math.max(0, numOr(raw.coolantLitres, 0)),
+    // `coolantLitres` is the pre-rename tag for the same reservoir (now the
+    // radiator's water), so an old save keeps exactly what it had in it.
+    waterLitres: Math.max(0, numOr(raw.waterLitres ?? raw.coolantLitres, 0)),
     oilLitres: Math.max(0, numOr(raw.oilLitres, 0)),
     storage,
     bonnet,
@@ -580,17 +582,35 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   };
 }
 
+/**
+ * Legacy variant ids. The coolant tank became the radiator it always was, and
+ * `variant()` throws on an id it does not know — so an unmapped save would fail to
+ * load rather than lose one part.
+ */
+const LEGACY_VARIANT_IDS: Readonly<Record<string, string>> = {
+  coolant_tank_standard: 'radiator_standard',
+};
+
 function migratePart(raw: unknown, where: string): PartInstance {
   const obj = asRecord(raw, `part at ${where}`);
   if (typeof obj.id !== 'string' || typeof obj.variantId !== 'string') {
     throw new Error(`Save data is malformed: part at ${where} is missing id/variantId`);
   }
+  const fuelKind =
+    obj.fuelKind === 'petrol' || obj.fuelKind === 'diesel' || obj.fuelKind === 'mixed'
+      ? obj.fuelKind
+      : null;
+  const litres = Math.max(0, numOr(obj.litres, 0));
   return {
     id: obj.id,
-    variantId: obj.variantId,
+    variantId: LEGACY_VARIANT_IDS[obj.variantId] ?? obj.variantId,
     dirt: numOr(obj.dirt, 0),
     rust: numOr(obj.rust, 0),
     destroyed: obj.destroyed === true || undefined,
+    // Absent on every save written before a detached container held its fluid. Those
+    // parts load dry, which is what the old game modelled anyway.
+    litres,
+    fuelKind: litres > 0 ? fuelKind : null,
   };
 }
 
@@ -631,8 +651,10 @@ function migrateItem(raw: unknown, where: string): Item {
     // then, so an old can maps straight across and keeps its contents.
     case 'fuel_can':
     case 'fluid_can': {
-      const fluid = obj.type === 'fuel_can' ? obj.fuel : obj.fluid;
-      if (fluid !== 'petrol' && fluid !== 'diesel' && fluid !== 'coolant' && fluid !== 'oil') {
+      const saved = obj.type === 'fuel_can' ? obj.fuel : obj.fluid;
+      // `coolant` is the pre-rename tag for the same green can, now water.
+      const fluid = saved === 'coolant' ? 'water' : saved;
+      if (fluid !== 'petrol' && fluid !== 'diesel' && fluid !== 'water' && fluid !== 'oil') {
         throw new Error(`Save data is malformed: item at ${where} has an invalid fluid`);
       }
       return {

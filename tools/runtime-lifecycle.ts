@@ -74,7 +74,7 @@ function carState(): CarState {
     fuelLitres: 40,
     dirt: 0,
     scratches: 0,
-    coolantLitres: 10,
+    waterLitres: 10,
     oilLitres: 10,
     storage: [],
     odometer: 0,
