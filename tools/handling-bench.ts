@@ -44,6 +44,13 @@ export interface BenchResult {
   /** Seconds to 100 km/h, or null if it never got there. */
   to100s: number | null;
   speedAfter20s: number;
+  /** Sustained flat-out speed on level asphalt, km/h: the settled-window mean. */
+  topSpeedKmh: number;
+  /**
+   * Highest single-step speed seen during that same run. It should sit a shade
+   * above `topSpeedKmh`; far above means the chassis was thrown, not driven.
+   */
+  topSpeedSpikeKmh: number;
   /** Speed the braking test actually entered at, km/h. */
   brakeFromKmh: number;
   /** Braking distance from that speed to a standstill, metres. */
@@ -60,6 +67,15 @@ export interface BenchResult {
   skidpadG: number;
   skidpadSlipDeg: number;
   skidpadRollDeg: number;
+  /** Full-lock turning radius at low speed, metres. */
+  turnRadiusM: number;
+  /**
+   * Peak lateral acceleration the car SUSTAINS while cornering speed is raised at
+   * full lock, in g. Sampled only while the body is still following the circle
+   * (slip angle under `LIMIT_SLIP_CEILING_DEG`), because a spin has a huge yaw
+   * rate and would otherwise be recorded as enormous grip.
+   */
+  limitLateralG: number;
   /** Worst lean seen anywhere in the skidpad run. >45 means it went over. */
   maxLeanDeg: number;
   /** Yaw rate (deg/s) for a 12% steering input at 80 km/h: the play test. */
@@ -119,6 +135,7 @@ function carState(modelId: string): CarState {
     fuelKind: engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 10,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,
@@ -296,6 +313,19 @@ function driveUntil(
   return false;
 }
 
+/**
+ * Body slip angle past which a full-lock circle has stopped being a cornering
+ * measurement. A period car holds 4-8 degrees at its limit; 12 is generous room
+ * above that and still far below the 20-30 degrees of an actual slide.
+ */
+const LIMIT_SLIP_CEILING_DEG = 12;
+/** Fixed time for the full-lock entry transient to wash out before settle detection. */
+const LIMIT_ENTRY_S = 6;
+/** How long the car has to stay past that ceiling before it counts as let go. */
+const LIMIT_SLIDE_HOLD_S = 0.4;
+/** How long it has to hold under the ceiling before the circle counts as settled. */
+const LIMIT_SETTLE_S = 1.0;
+
 /** Body-frame lateral speed / forward speed, in degrees. */
 function slipAngleDeg(v: Vehicle): number {
   const s = v.audio;
@@ -318,6 +348,8 @@ export async function benchOne(
     id: modelId,
     to100s: null,
     speedAfter20s: 0,
+    topSpeedKmh: 0,
+    topSpeedSpikeKmh: 0,
     brakeFromKmh: 0,
     brakeDistM: 0,
     brakePeakG: 0,
@@ -328,6 +360,8 @@ export async function benchOne(
     skidpadG: 0,
     skidpadSlipDeg: 0,
     skidpadRollDeg: 0,
+    turnRadiusM: 0,
+    limitLateralG: 0,
     maxLeanDeg: 0,
     smallInputYawRate: 0,
     midInputYawRate: 0,
@@ -362,19 +396,85 @@ export async function benchOne(
   }
 
   // --- acceleration ---------------------------------------------------------
+  //
+  // 35 seconds, not 20: the slowest cars here need more than 20 s to see 100 km/h
+  // (a 62 hp Zhiguli's factory figure is 22 s and a Volga's is worse), and "never"
+  // for a car that takes 24 s says nothing about whether it matches the real one.
+  // `speedAfter20s` is still sampled at exactly 20 s.
   {
     const rig = await makeRig(modelId, addGround, false, towKg);
     let t = 0;
     let reached = -1;
-    drive(rig, 20, (_, f) => {
+    let at20 = 0;
+    drive(rig, 35, (_, f) => {
       f.throttle = 1;
       f.brake = 0;
       f.steer = 0;
       if (reached < 0 && rig.vehicle.speedKmh >= 100) reached = t;
+      if (at20 === 0 && t >= 20) at20 = rig.vehicle.speedKmh;
       t += FIXED_DT;
     });
     out.to100s = reached < 0 ? null : +reached.toFixed(2);
-    out.speedAfter20s = +rig.vehicle.speedKmh.toFixed(1);
+    out.speedAfter20s = +at20.toFixed(1);
+    rig.vehicle.dispose();
+  }
+
+  // --- top speed: wait for a level-road plateau -----------------------------
+  //
+  // Reported as the MEAN of the last window of HORIZONTAL speed, not the highest
+  // speed seen. Three things this guards against, all of which were observed:
+  //
+  //  - a maximum is not a top speed: one bad step becomes the record and stays.
+  //    `spikeKmh` keeps that number beside the mean instead of reporting it.
+  //  - `speedKmh` includes the vertical component, so a car that leaves the ground
+  //    reads faster the further it falls.
+  //  - `addGround` is 8 km square, i.e. 4 km of run. A car that needs more than
+  //    that drives off the edge and free-falls: the VAZ-2107 measured a 1213 km/h
+  //    "plateau" this way, which is terminal velocity, not fifth gear.
+  {
+    const rig = await makeRig(modelId, addGround, false, towKg);
+    const body = rig.vehicle.chassis;
+    const start = body.translation();
+    const groundY = start.y;
+    let windowStartKmh = 0;
+    let nextWindowS = 4;
+    let windowSum = 0;
+    let windowCount = 0;
+    let plateauKmh = 0;
+    let spikeKmh = 0;
+    driveUntil(
+      rig,
+      180,
+      (_, f) => {
+        f.throttle = 1;
+        f.brake = 0;
+        f.steer = 0;
+      },
+      (t) => {
+        const v = body.linvel();
+        const speed = Math.hypot(v.x, v.z) * 3.6;
+        spikeKmh = Math.max(spikeKmh, speed);
+        windowSum += speed;
+        windowCount++;
+        const p = body.translation();
+        // Off the plate, or fallen off it: the run is over, keep what it had.
+        if (Math.abs(p.x) > 3500 || Math.abs(p.z) > 3500 || p.y < groundY - 1) {
+          if (windowCount > 0) plateauKmh = windowSum / windowCount;
+          return true;
+        }
+        if (t < nextWindowS) return false;
+        const gain = speed - windowStartKmh;
+        plateauKmh = windowSum / windowCount;
+        windowSum = 0;
+        windowCount = 0;
+        windowStartKmh = speed;
+        nextWindowS += 4;
+        // Less than 0.15 km/h gained across a four-second window: flat out.
+        return gain < 0.15;
+      },
+    );
+    out.topSpeedKmh = +plateauKmh.toFixed(1);
+    out.topSpeedSpikeKmh = +spikeKmh.toFixed(1);
     rig.vehicle.dispose();
   }
 
@@ -455,6 +555,140 @@ export async function benchOne(
     out.skidpadG = n ? +(gSum / n).toFixed(2) : 0;
     out.skidpadSlipDeg = n ? +(slipSum / n).toFixed(1) : 0;
     out.skidpadRollDeg = n ? +(rollSum / n).toFixed(1) : 0;
+    rig.vehicle.dispose();
+  }
+
+  // --- turning circle: full lock at a factory-figure pace ------------------
+  {
+    const rig = await makeRig(modelId, addGround, false, towKg);
+    drive(rig, 15, (_, f) => {
+      f.throttle = rig.vehicle.speedKmh < 15 ? 1 : 0;
+      f.brake = 0;
+      f.steer = 0;
+    });
+    let radiusSum = 0;
+    let samples = 0;
+    drive(rig, 10, (t, f) => {
+      const speedKmh = rig.vehicle.speedKmh;
+      // This narrow governor keeps the circle in the 12–18 km/h band: at higher
+      // speeds the steering limiter deliberately fades away some of the lock.
+      f.throttle = speedKmh < 14 ? 0.35 : speedKmh > 16 ? 0 : 0.15;
+      f.brake = 0;
+      f.steer = 1;
+      if (t > 3) {
+        const forwardSpeed = Math.abs(rig.vehicle.audio.forwardMps);
+        const yawRate = Math.abs(rig.vehicle.chassis.angvel().y);
+        if (forwardSpeed > 1 && yawRate > 0.01) {
+          radiusSum += forwardSpeed / yawRate;
+          samples++;
+        }
+      }
+    });
+    // This is the radius; period turning-circle figures quote its diameter.
+    out.turnRadiusM = samples ? +(radiusSum / samples).toFixed(2) : 0;
+    rig.vehicle.dispose();
+  }
+
+  // --- lateral limit: increase speed around one full-lock circle ------------
+  //
+  // A CONSTANT-RADIUS test taken UP TO the breakaway, which is how a limit-grip
+  // figure is measured and the only window in which the number means grip. Two
+  // observed ways to get this wrong, both of them large:
+  //
+  //  - a spinning car has an enormous yaw rate, so `yawRate * speed` keeps reading
+  //    as "lateral g" long after the tyres have given up.
+  //  - the RECOVERY from that spin passes back through moderate slip angles with a
+  //    yaw rate that is still a spin's, and a slip-angle filter alone lets it
+  //    through: a VAZ-2101 that peaked at 0.79 g reported 0.99 g from the flick
+  //    after it let go.
+  //
+  // So the run ENDS at the first genuine breakaway, and the answer is the best
+  // half-second average up to that moment.
+  {
+    const rig = await makeRig(modelId, addGround, false, towKg);
+    drive(rig, 15, (_, f) => {
+      f.throttle = rig.vehicle.speedKmh < 20 ? 1 : 0;
+      f.brake = 0;
+      f.steer = 0;
+    });
+    const lateralWindow: number[] = [];
+    let lateralSum = 0;
+    let peakSustainedG = 0;
+    let slideSeconds = 0;
+    let settleSeconds = 0;
+    let settled = false;
+    const localVelocity = new THREE.Vector3();
+    const localAngularVelocity = new THREE.Vector3();
+    const inverseRotation = new THREE.Quaternion();
+    const readBodyKinematics = (): void => {
+      const rotation = rig.vehicle.chassis.rotation();
+      inverseRotation.set(-rotation.x, -rotation.y, -rotation.z, rotation.w);
+      const velocity = rig.vehicle.chassis.linvel();
+      localVelocity.set(velocity.x, velocity.y, velocity.z).applyQuaternion(inverseRotation);
+      const angular = rig.vehicle.chassis.angvel();
+      localAngularVelocity.set(angular.x, angular.y, angular.z).applyQuaternion(inverseRotation);
+    };
+    readBodyKinematics();
+    let previousLateralMps = localVelocity.x;
+    const windowSamples = Math.round(0.5 / FIXED_DT);
+    driveUntil(
+      rig,
+      25,
+      (t, f) => {
+        const targetKmh = 20 + t * 2;
+        // The slow 2 km/h/s target sweep reaches the tyre limit without a throttle
+        // jab; unlike the fixed-60 skidpad it records the best sustained cornering.
+        f.throttle = Math.max(0, Math.min(1, 0.2 + (targetKmh - rig.vehicle.speedKmh) * 0.08));
+        f.brake = 0;
+        f.steer = 1;
+      },
+      (t) => {
+        readBodyKinematics();
+        const lateralMps = localVelocity.x;
+        const lateralAccel =
+          (lateralMps - previousLateralMps) / FIXED_DT +
+          localAngularVelocity.y * localVelocity.z;
+        previousLateralMps = lateralMps;
+        const slipDeg = slipAngleDeg(rig.vehicle);
+        if (!settled) {
+          // ENTRY, not cornering. Full lock applied at 20 km/h asks for a radius
+          // no tyre will hold, so every car ploughs before it settles onto the
+          // circle it can actually carry. Give that transient six seconds, then
+          // require a full second under the real slip ceiling before sampling.
+          if (t <= LIMIT_ENTRY_S) return false;
+          settleSeconds =
+            slipDeg > LIMIT_SLIP_CEILING_DEG ? 0 : settleSeconds + FIXED_DT;
+          settled = settleSeconds >= LIMIT_SETTLE_S;
+          return false;
+        }
+        const sliding = slipDeg > LIMIT_SLIP_CEILING_DEG;
+        if (sliding) {
+          // One excursion is not a breakaway: a bump or a shift throws a slip
+          // transient that clears in a tenth of a second. The window is discarded
+          // on any excursion, and the run ends only once the car has been past the
+          // ceiling for LIMIT_SLIDE_HOLD_S.
+          lateralWindow.length = 0;
+          lateralSum = 0;
+          slideSeconds += FIXED_DT;
+          return slideSeconds >= LIMIT_SLIDE_HOLD_S;
+        }
+        slideSeconds = 0;
+        // Actual body-frame acceleration, not `yawRate * speed`: that shortcut is
+        // valid only in a perfectly steady circle and over-reports a live axle
+        // rotating into a slide. This is the same kinematic identity `Vehicle` uses
+        // to feed its roll couple: dv_lateral/dt + yawRate * v_forward.
+        const lateralG = Math.abs(lateralAccel) / 9.81;
+        lateralWindow.push(lateralG);
+        lateralSum += lateralG;
+        if (lateralWindow.length > windowSamples) lateralSum -= lateralWindow.shift()!;
+        // A half-second moving average rejects a physics-step spike as a "limit".
+        if (lateralWindow.length === windowSamples) {
+          peakSustainedG = Math.max(peakSustainedG, lateralSum / lateralWindow.length);
+        }
+        return false;
+      },
+    );
+    out.limitLateralG = +peakSustainedG.toFixed(2);
     rig.vehicle.dispose();
   }
 

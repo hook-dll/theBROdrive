@@ -224,10 +224,19 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
   switch (v.id) {
     case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
-    // The 1.2: same architecture as the 1.6 but visibly a smaller block.
+    // The Soviet fours, scaled by displacement against the 1.6 at 1.0.
     case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
+    case 'engine_lada_1300':
+    case 'engine_samara_1300': return buildInline(b, spec, 0.91, false);
+    case 'engine_lada_1500':
+    case 'engine_samara_1500': return buildInline(b, spec, 0.96, false);
+    case 'engine_lada_1600':
+    case 'engine_lada_rally':
+    case 'engine_niva_1600': return buildInline(b, spec, 1.0, false);
+    case 'engine_niva_1700': return buildInline(b, spec, 1.02, false);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
-    case 'engine_i4_2445': return buildInline(b, spec, 1.09, false);
+    case 'engine_zmz_21':
+    case 'engine_zmz_24': return buildInline(b, spec, 1.09, false);
     case 'engine_v8_5000': return buildV8(b);
     case 'engine_d4_2000': return buildInline(b, spec, 1.18, true);
     case 'engine_d6_6600': return buildInline(b, spec, 1.62, true);
@@ -319,6 +328,18 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     // Small four-speed: the estate's own box, noticeably shorter than the 5-speed.
     case 'gearbox_lada_4': scale = 0.92; manual = true; fins = false; break;
     case 'gearbox_manual5': scale = 1.15; manual = true; fins = false; break;
+    // The Soviet boxes: the classics' own casings, the Volga's longer three- and
+    // four-speeds, the Samara transaxle (which carries its final drive) and the
+    // Nivas, which carry a transfer case as well.
+    case 'gearbox_lada_4_tall':
+    case 'gearbox_lada_4_1600': scale = 0.92; manual = true; fins = false; break;
+    case 'gearbox_lada_5': scale = 1.0; manual = true; fins = false; break;
+    case 'gearbox_gaz_3': scale = 1.05; manual = true; fins = false; break;
+    case 'gearbox_gaz_4': scale = 1.1; manual = true; fins = false; break;
+    case 'gearbox_samara_5':
+    case 'gearbox_samara_5_tall': scale = 1.08; manual = true; fins = true; break;
+    case 'gearbox_niva_4': scale = 1.2; manual = true; fins = false; break;
+    case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
     case 'gearbox_truck6': scale = 1.5; manual = true; fins = true; break;
     default: throw new Error(`unhandled gearbox variant: ${v.id}`);

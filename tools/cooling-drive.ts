@@ -53,6 +53,7 @@ function carState(id: string, radiatorVariantId?: string, x = 0, z = 0): CarStat
     fuelKind: variant(def.engineId).engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 40,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,

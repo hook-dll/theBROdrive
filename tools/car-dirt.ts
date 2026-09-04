@@ -13,7 +13,12 @@ import { installAssetShim } from './assetshim';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
+import {
+  GameWorld,
+  MAX_BODY_DAMAGE_IMPACTS,
+  newWorldState,
+  type CarState,
+} from '../src/game/state';
 import { encodeSaveCode, decodeSaveCode, migrateState } from '../src/save/save';
 import { preloadCarModels } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
@@ -63,6 +68,7 @@ function conditionState(id: string, x = 0, z = 0, y = 1.2): CarState {
     fuelKind: 'petrol',
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 10,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,
@@ -153,7 +159,11 @@ function addObstacle(physics: PhysicsWorld, z: number): void {
  * into the obstacle is both the honest scenario and the only one whose strongest
  * impact is the collision.
  */
-async function crash(speedMps: number): Promise<{ scratches: number; impacts: Array<{ severity: number; localZ: number }> }> {
+async function crash(speedMps: number): Promise<{
+  rig: Rig;
+  scratches: number;
+  impacts: Array<{ severity: number; localZ: number }>;
+}> {
   const rig = await makeRig(`crash:${speedMps}`, SurfaceType.Asphalt);
   const start = rig.vehicle.chassis.translation();
   // Room to reach the target speed, then the wall. 20 m/s needs a few seconds.
@@ -170,17 +180,17 @@ async function crash(speedMps: number): Promise<{ scratches: number; impacts: Ar
     const impact = rig.vehicle.lastImpact;
     if (impact) impacts.push({ severity: impact.severityMps, localZ: impact.localZ });
   });
-  return { scratches: rig.vehicle.bodyScratches, impacts };
+  return { rig, scratches: rig.vehicle.bodyScratches, impacts };
 }
 
-async function freeFall(): Promise<number> {
+async function freeFall(): Promise<{ scratches: number; damage: number }> {
   const rig = await makeRig('free-fall', SurfaceType.Asphalt, 0, 0, 8);
   step(rig, 300, (_, input) => {
     input.throttle = 0;
     input.brake = 0;
     input.steer = 0;
   });
-  return rig.vehicle.bodyScratches;
+  return { scratches: rig.vehicle.bodyScratches, damage: rig.vehicle.bodyDamage.length };
 }
 
 async function run(): Promise<void> {
@@ -249,11 +259,14 @@ async function run(): Promise<void> {
   const legacyCar = (legacyRaw.cars as Record<string, Record<string, unknown>>)[sand.rig.state.id]!;
   delete legacyCar.dirt;
   delete legacyCar.scratches;
+  delete legacyCar.damage;
   const legacy = migrateState(legacyRaw);
   check(
     'old save without body-condition fields defaults clean',
-    legacy.cars[sand.rig.state.id]!.dirt === 0 && legacy.cars[sand.rig.state.id]!.scratches === 0,
-    `dirt=${legacy.cars[sand.rig.state.id]!.dirt}, scratches=${legacy.cars[sand.rig.state.id]!.scratches}`,
+    legacy.cars[sand.rig.state.id]!.dirt === 0 &&
+      legacy.cars[sand.rig.state.id]!.scratches === 0 &&
+      legacy.cars[sand.rig.state.id]!.damage.length === 0,
+    `dirt=${legacy.cars[sand.rig.state.id]!.dirt}, scratches=${legacy.cars[sand.rig.state.id]!.scratches}, damage=${legacy.cars[sand.rig.state.id]!.damage.length}`,
   );
 
   const hardCrash = await crash(20);
@@ -263,14 +276,65 @@ async function run(): Promise<void> {
     hardCrash.scratches > 0 && strongest.severity > 2.5 && strongest.localZ > 0.25,
     `scratches=${hardCrash.scratches.toFixed(6)}, severity=${strongest.severity.toFixed(3)}, localZ=${strongest.localZ.toFixed(3)}`,
   );
+  const localized = hardCrash.rig.vehicle.bodyDamage;
+  const strongestMark = localized.reduce(
+    (best, impact) => (impact.strength > best.strength ? impact : best),
+    localized[0]!,
+  );
+  check(
+    'hard impact creates a localized front-panel record',
+    localized.length > 0 &&
+      strongestMark.z > 0.5 &&
+      strongestMark.radius >= 0.18 &&
+      strongestMark.strength > 0,
+    `count=${localized.length}, point=(${strongestMark.x.toFixed(3)},${strongestMark.y.toFixed(3)},${strongestMark.z.toFixed(3)}), radius=${strongestMark.radius.toFixed(3)}, strength=${strongestMark.strength.toFixed(3)}, type=${strongestMark.type}`,
+  );
+  const crashRoundTrip = decodeSaveCode(encodeSaveCode(hardCrash.rig.world.state));
+  check(
+    'save-code round trip preserves localized impact records',
+    JSON.stringify(crashRoundTrip.cars[hardCrash.rig.state.id]!.damage) ===
+      JSON.stringify(hardCrash.rig.state.damage),
+    `${crashRoundTrip.cars[hardCrash.rig.state.id]!.damage.length} marks`,
+  );
+
+  const boundedState = conditionState('bounded');
+  const boundedWorld = new GameWorld(newWorldState(43));
+  boundedWorld.state.cars[boundedState.id] = boundedState;
+  for (let i = 0; i < MAX_BODY_DAMAGE_IMPACTS + 2; i++) {
+    boundedWorld.apply({
+      t: 'car_body_impact',
+      carId: boundedState.id,
+      impact: {
+        x: i,
+        y: 0,
+        z: 1,
+        nx: 0,
+        ny: 0,
+        nz: 1,
+        radius: 0.2,
+        strength: 0.5,
+        type: 'dent',
+        seed: i / (MAX_BODY_DAMAGE_IMPACTS + 2),
+      },
+    });
+  }
+  check(
+    'impact accumulation is bounded and retains newest marks',
+    boundedState.damage.length === MAX_BODY_DAMAGE_IMPACTS && boundedState.damage[0]!.x === 2,
+    `count=${boundedState.damage.length}, oldest-x=${boundedState.damage[0]!.x}`,
+  );
   const gentleCrash = await crash(1);
   check(
     'gentle obstacle roll does not scratch',
     gentleCrash.scratches === 0,
     `scratches=${gentleCrash.scratches.toFixed(6)}`,
   );
-  const fallScratches = await freeFall();
-  check('free fall and ordinary landing do not scratch', fallScratches === 0, `scratches=${fallScratches.toFixed(6)}`);
+  const fall = await freeFall();
+  check(
+    'free fall and ordinary landing do not damage the shell',
+    fall.scratches === 0 && fall.damage === 0,
+    `scratches=${fall.scratches.toFixed(6)}, damage=${fall.damage}`,
+  );
   const conditions = [sand.rig.vehicle, asphalt.rig.vehicle, moving, parked];
   check(
     'all live and persisted values stay clamped to 0..1',

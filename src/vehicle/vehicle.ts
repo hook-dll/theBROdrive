@@ -22,7 +22,15 @@ import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
+import {
+  DAY_LENGTH,
+  MAX_BODY_DAMAGE_IMPACTS,
+  type BodyDamageImpact,
+  type BodyDamageType,
+  type CarState,
+  type GameWorld,
+} from '../game/state';
+import { hashUnit3 } from '../core/rng';
 import { variant, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import {
@@ -1187,10 +1195,9 @@ const SCRATCH_IMPACT_THRESHOLD_MPS = 1.8;
 /**
  * Each m/s above the threshold adds this much shell damage, up to one impact's cap.
  *
- * A 5 m/s shunt (18 km/h into a rock) now lands 0.19 rather than 0.06, and 0.2 is
- * where the dent field's depth ramp saturates (`condDent` in render/materials.ts):
- * one solid crash therefore leaves dents at full depth, and everything after it
- * widens them. The old rates needed a dozen crashes to reach a visible mask.
+ * A 5 m/s shunt (18 km/h into a rock) lands 0.19 rather than the former 0.06.
+ * Localized mark depth is now carried by that impact's own normalized strength;
+ * this aggregate remains the cleaning/UI summary and cannot make global damage.
  */
 const SCRATCH_PER_SEVERITY_MPS = 0.06;
 /** One collision cannot add more than this much cosmetic damage. */
@@ -1653,6 +1660,7 @@ export class Vehicle implements Rebasable {
 
 
   private readonly chassisBody: RAPIER.RigidBody;
+  private readonly chassisCollider: RAPIER.Collider;
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
   private readonly drivetrain: Drivetrain;
 
@@ -1791,6 +1799,10 @@ export class Vehicle implements Rebasable {
   private lastAuthBodyDirt: number;
   private lastAuthBodyScratches: number;
   private bodyConditionEmitTimer = 0;
+  /** Persistent, localized marks mirrored separately from the aggregate UI condition. */
+  private readonly localBodyDamage: BodyDamageImpact[];
+  private readonly damageSeedBase: number;
+  private bodyImpactSerial = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
 
@@ -1816,6 +1828,10 @@ export class Vehicle implements Rebasable {
   private previousOwnDragRollingDeltaMps = 0;
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
+  private readonly impactContactWorld = { x: 0, y: 0, z: 0 };
+  private readonly impactContactNormal = { x: 0, y: 0, z: 0 };
+  private readonly impactContactLocal = { x: 0, y: 0, z: 0 };
+  private impactContactFound = false;
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
@@ -1948,8 +1964,14 @@ export class Vehicle implements Rebasable {
     this.headlightMode = carState.headlightMode;
 
     const half = this.measure.halfExtents;
-    // Frontal area 4·hx·hy; 0.5·ρ·Cd collapses to the constant below.
-    this.dragCoeff = 0.5 * AIR_DENSITY * DRAG_CD * (4 * half[0] * half[1]);
+    // Drag area is Cd·A, m². Authored where the real car's is known, because
+    // neither factor survives the fallback: the box is not the frontal area (it is
+    // the full width times full height, ~25% more than the real projection) and one
+    // shared DRAG_CD cannot cover a 1956 Volga and an aerodynamic 1984 hatchback.
+    // The two errors happen to cancel for a mid-70s saloon, which is the shape the
+    // fallback was calibrated on; everything boxier than that came out too slippery.
+    const dragArea = this.model.dragArea ?? DRAG_CD * (4 * half[0] * half[1]);
+    this.dragCoeff = 0.5 * AIR_DENSITY * dragArea;
 
     // `carState.x/z` are absolute (from the save); Rapier holds relative positions.
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -1972,7 +1994,7 @@ export class Vehicle implements Rebasable {
     // road, which is exactly what it looked like.
     const floor = Math.max(-half[1], this.measure.wheels[0].pos[1]);
     const colliderHalfY = (half[1] - floor) / 2;
-    physics.world.createCollider(
+    this.chassisCollider = physics.world.createCollider(
       RAPIER.ColliderDesc.cuboid(half[0], colliderHalfY, half[2])
         .setTranslation(0, floor + colliderHalfY, 0)
         .setDensity(0)
@@ -1998,6 +2020,28 @@ export class Vehicle implements Rebasable {
     this.lastAuthBodyDirt = this.localBodyDirt;
     this.localBodyScratches = clamp(carState.scratches, 0, 1);
     this.lastAuthBodyScratches = this.localBodyScratches;
+    this.localBodyDamage = carState.damage.slice(-MAX_BODY_DAMAGE_IMPACTS);
+    this.damageSeedBase = stringHash(carState.id);
+    this.bodyImpactSerial = this.localBodyDamage.length;
+    // Saves and procedural roadside cars created before localized marks only carry
+    // aggregate scratch severity. Materialize a few stable marks once so that history
+    // remains visible, then persist them through the same authority path as collisions.
+    if (this.localBodyDamage.length === 0 && this.localBodyScratches > 0) {
+      const legacyCount = Math.max(1, Math.min(4, Math.ceil(this.localBodyScratches * 4)));
+      for (let i = 0; i < legacyCount; i++) {
+        const seed = hashUnit3(this.damageSeedBase, i, 0x44454e54);
+        const angle = seed * TWO_PI;
+        const impact = this.makeBodyDamageImpact(
+          Math.sin(angle),
+          Math.cos(angle),
+          SCRATCH_IMPACT_THRESHOLD_MPS + 1 + this.localBodyScratches * 5,
+          seed,
+        );
+        this.localBodyDamage.push(impact);
+        this.world.apply({ t: 'car_body_impact', carId: this.car.id, impact });
+      }
+      this.bodyImpactSerial = this.localBodyDamage.length;
+    }
     this.localOil = carState.oilLitres;
     this.lastAuthOil = carState.oilLitres;
     this.localTemp = carState.engineTempC;
@@ -2031,6 +2075,84 @@ export class Vehicle implements Rebasable {
   /** Live cosmetic shell scratches, including unflushed fixed-step accumulation. */
   get bodyScratches(): number {
     return this.localBodyScratches;
+  }
+
+  /** Live, localized shell impacts, including a collision from the current fixed step. */
+  get bodyDamage(): readonly BodyDamageImpact[] {
+    return this.localBodyDamage;
+  }
+
+  private locateImpactContact(): void {
+    this.impactContactFound = false;
+    let strongestImpulse = 0;
+    this.physics.world.contactPairsWith(this.chassisCollider, (other) => {
+      this.physics.world.contactPair(this.chassisCollider, other, (manifold) => {
+        const normal = manifold.normal(this.impactContactNormal);
+        // The road manifold is vertical. Predominantly horizontal contacts identify
+        // the wall, rock or vehicle responsible for this unexplained velocity loss.
+        if (Math.abs(normal.y) > 0.72) return;
+        for (let i = 0; i < manifold.numContacts(); i++) {
+          const impulse = manifold.contactImpulse(i);
+          if (impulse <= strongestImpulse) continue;
+          const point = manifold.solverContactPoint(i, this.impactContactWorld);
+          if (point === null) continue;
+          strongestImpulse = impulse;
+          this.impactContactFound = true;
+          this.chassisBody.rotation(this.rotationScratch);
+          this.invRotationScratch.x = -this.rotationScratch.x;
+          this.invRotationScratch.y = -this.rotationScratch.y;
+          this.invRotationScratch.z = -this.rotationScratch.z;
+          this.invRotationScratch.w = this.rotationScratch.w;
+          const bodyPosition = this.chassisBody.translation();
+          rotateVector(
+            this.impactContactLocal,
+            this.invRotationScratch,
+            point.x - bodyPosition.x,
+            point.y - bodyPosition.y,
+            point.z - bodyPosition.z,
+          );
+        }
+      });
+    });
+  }
+
+  private makeBodyDamageImpact(
+    localX: number,
+    localZ: number,
+    severityMps: number,
+    seed: number,
+    useContactPoint = false,
+  ): BodyDamageImpact {
+    const directionLength = Math.hypot(localX, localZ);
+    const nx = directionLength > 1e-6 ? localX / directionLength : 0;
+    const nz = directionLength > 1e-6 ? localZ / directionLength : 1;
+    const half = this.measure.halfExtents;
+    const tx = Math.abs(nx) > 1e-5 ? half[0] / Math.abs(nx) : Number.POSITIVE_INFINITY;
+    const tz = Math.abs(nz) > 1e-5 ? half[2] / Math.abs(nz) : Number.POSITIVE_INFINITY;
+    const surfaceDistance = Math.min(tx, tz);
+    const contactX = useContactPoint && this.impactContactFound
+      ? clamp(this.impactContactLocal.x, -half[0], half[0])
+      : nx * surfaceDistance;
+    const contactY = useContactPoint && this.impactContactFound
+      ? clamp(this.impactContactLocal.y, -half[1], half[1])
+      : (seed - 0.45) * half[1] * 0.7;
+    const contactZ = useContactPoint && this.impactContactFound
+      ? clamp(this.impactContactLocal.z, -half[2], half[2])
+      : nz * surfaceDistance;
+    const type: BodyDamageType =
+      severityMps < 3.2 ? 'scratch' : severityMps < 5 ? 'chip' : severityMps < 8 ? 'dent' : 'heavy';
+    return {
+      x: contactX,
+      y: contactY,
+      z: contactZ,
+      nx,
+      ny: 0,
+      nz,
+      radius: clamp(0.14 + severityMps * 0.038, 0.18, 0.58),
+      strength: clamp((severityMps - SCRATCH_IMPACT_THRESHOLD_MPS) / 6, 0.18, 1),
+      type,
+      seed,
+    };
   }
 
   /**
@@ -3080,13 +3202,15 @@ export class Vehicle implements Rebasable {
     // whole vehicle, which is what preserves the brake bias as the thing that decides
     // which axle lets go. Airborne wheels contribute nothing, so a car with its wheels
     // off the ground has no brakes to over-ask with.
+    const longitudinalGrip =
+      stats.wheelGrip * (this.model.longitudinalGripScale ?? 1);
     let brakeCapacityN = 0;
     for (const w of this.wheels) {
       if (!w.grounded) continue;
       brakeCapacityN +=
         SURFACES[w.groundSurface].frictionSlip *
         LONGITUDINAL_GRIP_FRACTION *
-        stats.wheelGrip *
+        longitudinalGrip *
         tyreGrip *
         w.loadN;
     }
@@ -3110,7 +3234,7 @@ export class Vehicle implements Rebasable {
     // switched off — but the number is still what the spray and audio read as this
     // tyre's budget, so it keeps its meaning.
     const gripBudgetFactor =
-      stats.wheelGrip *
+      longitudinalGrip *
       tyreGrip *
       this.handling.lateralGripFraction *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
@@ -3369,7 +3493,7 @@ export class Vehicle implements Rebasable {
       // apply the previous tick's yaw damping to a step that had no tyre forces at all.
       this.alignTorqueImpulse = 0;
     } else {
-      this.updateWheelDynamics(dt, stats.wheelGrip, tyreGrip, fwd);
+      this.updateWheelDynamics(dt, longitudinalGrip, tyreGrip, fwd);
     }
     this.refreshWheelSpray(fwd);
 
@@ -3547,6 +3671,23 @@ export class Vehicle implements Rebasable {
         if (scratchGain > 0) {
           this.localBodyScratches = clamp(this.localBodyScratches + scratchGain, 0, 1);
           bodyConditionChanged = true;
+          const seed = hashUnit3(
+            this.damageSeedBase,
+            this.bodyImpactSerial++,
+            Math.round(severityMps * 1_000),
+          );
+          const impact = this.makeBodyDamageImpact(
+            this.impactState.localX,
+            this.impactState.localZ,
+            severityMps,
+            seed,
+            true,
+          );
+          if (this.localBodyDamage.length >= MAX_BODY_DAMAGE_IMPACTS) {
+            this.localBodyDamage.shift();
+          }
+          this.localBodyDamage.push(impact);
+          this.world.apply({ t: 'car_body_impact', carId: this.car.id, impact });
         }
       }
     }
@@ -3604,6 +3745,7 @@ export class Vehicle implements Rebasable {
    * rate is unrelated.
    */
   postStep(): void {
+    this.locateImpactContact();
     if (this.parkingHoldRequested) {
       if (!this.parkingHoldActive) {
         this.chassisBody.translation(this.parkingHoldPos);
@@ -4962,6 +5104,16 @@ export class Vehicle implements Rebasable {
     }
     return count > 0 ? sum / count : 0.35;
   }
+}
+
+/** Stable integer seed for a car id; evaluated only when its Vehicle is constructed. */
+function stringHash(value: string): number {
+  let result = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    result ^= value.charCodeAt(i);
+    result = Math.imul(result, 0x01000193);
+  }
+  return result >>> 0;
 }
 
 function clamp(v: number, lo: number, hi: number): number {

@@ -30,6 +30,7 @@ const car: CarState = {
   fuelLitres: 10,
   dirt: 0,
   scratches: 0,
+  damage: [],
   waterLitres: 4,
   oilLitres: 4,
   engineTempC: COLD_SOAK_C,

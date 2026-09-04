@@ -82,6 +82,7 @@ function carState(): CarState {
     fuelKind: def.bodyClass === 'car' ? 'petrol' : null,
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 10,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,

@@ -163,14 +163,136 @@ const SUSP_CAR: SuspensionTuning = {
   rideHeight: 0.16,
 };
 
-/**
- * SOFT: what the Soviet saloons ride on. The softest car in the catalogue and the
- * least damped, so it leans, wallows and takes its set slowly — and that motion IS
- * the load transfer, which is what makes its breakaway progressive.
+/* ---- the Soviet families ----
  *
- * The softness is in the SPRINGS only. Ride height stays at the saloon figure: a
- * Zhiguli sits at a normal car's clearance, and the extra sag a soft spring needs is
- * paid for out of travel (see the travel note above), never out of stance.
+ * One SOFT preset used to carry eleven cars, which is why they all rode the same:
+ * a Volga on leaf springs and 15-inch balloon tyres, a Fiat-derived Zhiguli, a
+ * MacPherson-strut Samara from 1984 and a long-travel Niva are four different
+ * chassis, and the ride frequency is where that difference lives.
+ *
+ * Every figure below is what the real suspension measures, and the ladder is the
+ * real one: the Volga is the softest thing in the catalogue, the Zhigulis sit at
+ * the period saloon norm, the payload-sprung estates ring hard at the back, the
+ * Samara is a decade newer and firmer at both ends, and the Niva trades frequency
+ * for travel rather than for softness.
+ */
+
+/*
+ * `Vehicle.rebuild` adds one sixth of the measured wheel radius to the catalogue's
+ * clearance before placing the contact plane. The Soviet numbers below are
+ * therefore BASE clearances, already reduced by that measured lift: the suspension
+ * probe then reads the real 190/174/165/170/150/220/205 mm under the body. Writing
+ * those real figures directly made every car sit 50-63 mm too high.
+ */
+
+/**
+ * GAZ-21: 0.95 Hz front on 240 mm of sag, a LEAF-sprung rear at 1.15 Hz, and
+ * lever-arm dampers that were marginal when new (0.18/0.30 of critical). It floats,
+ * takes a set slowly and keeps moving after the road has stopped — and that motion
+ * IS the load transfer, which is what makes its breakaway progressive and its
+ * cornering limit low. 190 mm of clearance, because it was built for Soviet roads.
+ */
+const SUSP_VOLGA_21: SuspensionTuning = {
+  frontHz: 0.95,
+  rearHz: 1.15,
+  compressionRatio: 0.18,
+  reboundRatio: 0.3,
+  bumpTravel: 0.1,
+  rideHeight: 0.127,
+};
+
+/** GAZ-24: the same layout fifteen years later, with dampers that work. */
+const SUSP_VOLGA_24: SuspensionTuning = {
+  frontHz: 1.0,
+  rearHz: 1.22,
+  compressionRatio: 0.2,
+  reboundRatio: 0.34,
+  bumpTravel: 0.1,
+  rideHeight: 0.112,
+};
+
+/**
+ * The Zhiguli saloons. Coils at both ends, a live rear axle on four links and a
+ * Panhard rod: a 1966 Fiat chassis, so FIRMER and better damped than anything else
+ * the USSR built in the sixties — 1.10 Hz front, 1.28 rear, and the flat-ride
+ * relationship between them that keeps it from pitching.
+ */
+const SUSP_ZHIGULI: SuspensionTuning = {
+  frontHz: 1.1,
+  rearHz: 1.28,
+  compressionRatio: 0.24,
+  reboundRatio: 0.38,
+  bumpTravel: 0.095,
+  rideHeight: 0.114,
+};
+
+/**
+ * The 2102/2104 estates: rear springs rated for 430 kg of cargo that is not in the
+ * back, so the tail rings at 1.55 Hz against the front's 1.10. Empty, it skips over
+ * sharp bumps and steps out on a rough bend — the same mechanism as the empty
+ * pickup, on a car that looks like a saloon.
+ */
+const SUSP_ZHIGULI_ESTATE: SuspensionTuning = {
+  frontHz: 1.1,
+  rearHz: 1.55,
+  compressionRatio: 0.24,
+  reboundRatio: 0.4,
+  bumpTravel: 0.09,
+  rideHeight: 0.12,
+};
+
+/**
+ * Samara: MacPherson struts in front, a trailing-arm torsion beam behind, and the
+ * first Soviet car with dampers matched to its springs. 1.30/1.55 Hz and 0.28/0.42
+ * of critical — firm for the pack, ordinary for 1984, and the reason it turns in
+ * instead of leaning first.
+ */
+const SUSP_SAMARA: SuspensionTuning = {
+  frontHz: 1.3,
+  rearHz: 1.55,
+  compressionRatio: 0.28,
+  reboundRatio: 0.42,
+  bumpTravel: 0.085,
+  rideHeight: 0.096,
+};
+
+/**
+ * Niva: coils on all four corners with 200 mm of wheel travel and 220 mm under the
+ * floor. It is NOT a leaf-sprung truck — that was the old tuning's mistake, and it
+ * gave the car a 1.85 Hz rear that hopped. A Niva's rear rings barely faster than
+ * its front (1.20 against 1.15) and pays for its ground clearance in TRAVEL, which
+ * is what lets it keep four tyres on a surface a saloon skates over.
+ */
+const SUSP_NIVA: SuspensionTuning = {
+  frontHz: 1.15,
+  rearHz: 1.2,
+  compressionRatio: 0.24,
+  reboundRatio: 0.4,
+  bumpTravel: 0.14,
+  rideHeight: 0.158,
+};
+
+/**
+ * The rally 2105: uprated springs, gas dampers, long travel and 5 cm of extra
+ * stance, because a rally car is raised, not lowered. 1.55/1.75 Hz.
+ */
+const SUSP_LADA_RALLY: SuspensionTuning = {
+  frontHz: 1.55,
+  rearHz: 1.75,
+  compressionRatio: 0.32,
+  reboundRatio: 0.48,
+  bumpTravel: 0.12,
+  rideHeight: 0.152,
+};
+
+/**
+ * SOFT: the rear-engined vans and buses, which are sprung for a load they are not
+ * carrying at the wrong end of the car. The least damped preset in the catalogue,
+ * so the body leans, wallows and takes its set slowly.
+ *
+ * It used to carry the entire Soviet pack as well. It no longer does: those cars
+ * have their own families above, because a leaf-sprung Volga, a Fiat-derived
+ * Zhiguli, a strut-front Samara and a long-travel Niva were never one spring rate.
  */
 const SUSP_SOFT: SuspensionTuning = {
   frontHz: 1.02,
@@ -422,6 +544,12 @@ export interface CarModelDef {
   readonly tankLitres: number;
   /** Tyre grip multiplier on the surface's friction. */
   readonly wheelGrip: number;
+  /**
+   * Longitudinal-only tyre-compound multiplier. Defaults to 1; a value above one
+   * gives a competition tyre more drive/brake authority without pretending its
+   * period lateral construction can pull the same coefficient.
+   */
+  readonly longitudinalGripScale?: number;
   readonly suspension: SuspensionTuning;
   /** Steering lock at the front axle, radians. */
   readonly steerLock: number;
@@ -434,6 +562,12 @@ export interface CarModelDef {
   readonly handlingProfile: HandlingProfile;
   /** Static share of kerb weight carried by the front axle, when layout needs an override. */
   readonly frontWeightShare?: number;
+  /**
+   * The body's drag area, Cd·A in m². Authored where the real car's is known; a
+   * body that omits it falls back to one shared Cd over its measured box, which
+   * only lands for a mid-seventies saloon shape (see `Vehicle`'s constructor).
+   */
+  readonly dragArea?: number;
   /**
    * In-car camera, as fractions of the measured body box: x of half-width, y of
    * body height (0 = floor, 1 = roof), z of half-length. Resolved in
@@ -500,30 +634,61 @@ const VIEW_CAB: readonly [number, number, number] = [0, 0.9, 0.96];
  * modelled in real-world proportions, nose-first
  * down +Z the way this game drives, and carrying its own four wheels as separate
  * meshes — so `detectWheels` finds them by shape and the whole pack lands on the
- * standard path. FBXLoader reports them in centimetres, hence `scale: 0.01`.
+ * standard path. FBXLoader reports them in centimetres.
  *
  * Colour is UV, not material: each body's UVs point into a region of the pack's
  * shared `albedo.png` palette. The atlas is not one paint picture: it is eighteen
  * solid swatches carrying paint, glass, chrome, lamp and trim colours. The renderer
  * replaces only each body's paint swatch, leaving every functional colour intact.
  *
- * Figures are the real cars': the Zhiguli line runs the 1.2 that already exists as a
- * part (`engine_lada_1200`, authored from the 2101), the 1.5-1.6 cars step up to the
- * generic 1.6, the Samaras are front-wheel drive on five speeds, and both Nivas are
- * 4WD on truck springs because that is what a Niva is for.
+ * ---- life-size, per body ----
+ *
+ * The pack is NOT uniformly scaled: at the flat 0.01 the whole pack used to share,
+ * a Zhiguli measured a 2.29 m wheelbase against the real 2.424, while the GAZ-24 and
+ * both Nivas came out oversize (2.93 against 2.80, 2.28 against 2.20). So each body
+ * carries its own `scale`, set from the real car's WHEELBASE, because that is the
+ * dimension every handling quantity is measured against: turn radius, load transfer,
+ * pitch lever and the axle positions the springs are rated at. Length then lands
+ * within 3% and rolling radius within a few percent for every body except the
+ * Samaras, whose wheels are drawn 8% oversize relative to their own bodies.
+ *
+ * What uniform scale CANNOT fix is track width: the modeller drew the Volgas too
+ * wide (1.63 m against 1.41 real) and the Zhigulis too narrow (1.29 against 1.35),
+ * and squashing a body on one axis to correct it would be visible. The consequence
+ * is honest and small: the Volgas resist roll slightly more than they should and the
+ * Zhigulis slightly less. It is not compensated for in the springs, because a spring
+ * rate is not a place to hide a geometry error.
+ *
+ * ---- everything else is the real car's ----
+ *
+ * Engines, gearboxes and final drives are the factory's, from the pack's own Soviet
+ * driveline table (parts/registry.ts). Masses are kerb masses, weight distribution
+ * is the factory axle split, `dragArea` is the body's real Cd·A, steering lock is
+ * derived from the published turning circle at each body's own measured wheelbase,
+ * and the grip ladder is what period tyres actually pull (see the note above the
+ * table).
  */
 interface SovietSpec {
   readonly id: string;
   readonly label: string;
   readonly file: string;
+  /** Model-units-to-metres, set from the real car's wheelbase. See the note above. */
+  readonly scale: number;
+  /** Kerb mass, kg, as delivered. */
   readonly mass: number;
   readonly engineId: string;
   readonly gearboxId: string;
   readonly tankLitres: number;
   readonly wheelGrip: number;
+  readonly longitudinalGripScale?: number;
   readonly steerLock: number;
   readonly rearDriveBias: number;
-  readonly suspension?: SuspensionTuning;
+  readonly handlingProfile?: HandlingProfile;
+  /** Factory front-axle share of the kerb mass. */
+  readonly frontWeightShare: number;
+  /** The real body's drag area, Cd·A in m². */
+  readonly dragArea: number;
+  readonly suspension: SuspensionTuning;
   readonly storageCells?: number;
   readonly visualRideLiftWheelFraction?: number;
 }
@@ -551,233 +716,336 @@ const SOVIET_INTERIOR_TYPES: Readonly<Record<string, SovietInteriorType>> = {
 };
 
 /*
- * The grip ladder runs backwards from every other pack on purpose: these are
- * cross-ply-era cars, not modern tyres. The RWD classics sit lowest (0.88-0.94)
- * because their tyres and geometry predate radials; the front-drive Samaras step
- * up to 0.96 because they are a decade newer and run radials; the rally 2105
- * (1.04) is the one somebody built to corner; and the Nivas stay low (0.90-0.92)
- * on grip but claw it back with four-wheel drive.
+ * ---- the grip ladder, and why it sits so far below 1.0 ----
+ *
+ * `wheelGrip` multiplies the profile's lateral coefficient and the longitudinal
+ * one together, so it is the tyre — and these are period Soviet tyres. What the
+ * real cars pull on dry asphalt, and what each figure below is calibrated to:
+ *
+ *   GAZ-21, 6.70-15 cross-ply          0.62 g   a tall, soft, hot-running carcass
+ *   GAZ-24, 7.35-14                    0.66 g
+ *   Zhiguli, 155/165-80R13 radial      0.70 g   Fiat-era radials, narrow
+ *   later classics, 165/80R13          0.72 g
+ *   Samara, 165/70R13                  0.78 g   a lower profile and a wider rim
+ *   Niva, 175/80R16 all-terrain        0.66 g   soft block tread, tall sidewall
+ *   rally 2105                         0.85 g   the only one built to corner
+ *
+ * The old ladder ran 0.88-1.04, which measured 0.89-1.04 g on the bench: a 1956
+ * Volga cornering like a modern hatchback, and — because the same number sets the
+ * brake capacity — stopping from 100 km/h in 51 m on drums. The figures below put
+ * the Volga's stop back around 60 m, which is what a period test recorded.
+ *
+ * The ORDER is unchanged and it still runs backwards from every other pack: these
+ * are the oldest cars in the catalogue, and the Samaras are the only ones with a
+ * decade of tyre development behind them.
+ *
+ * ---- steering lock ----
+ *
+ * Every `steerLock` is derived, not chosen: a factory turning radius is measured by
+ * the OUTER FRONT WHEEL, so the path radius of the car's centreline is that figure
+ * less half a track, and the bicycle-model lock that produces it at this body's own
+ * (now life-size) wheelbase is `atan(wheelbase / R) + steerPlay`. The play term is
+ * there because the classic profile's 0.024 rad of backlash is subtracted from the
+ * rack command before it reaches the tyre.
  */
 const SOVIET_SPECS: readonly SovietSpec[] = [
   {
-    // GAZ-21 Volga: 2.4 litre, 70 hp, three-speed column shift, and 1.5 tonnes of
-    // chrome. It now runs its own lazy 2.4 four (`engine_i4_2445`) instead of
-    // borrowing the 2.8 six; the four-speed stands in for the column change.
+    // GAZ-21 Volga: 2.445 litre, 70 hp at 4000, three speeds on the column, and
+    // 1.46 tonnes of chrome on cross-plies. Turning radius 6.3 m, top speed 130.
+    // Nothing about this car is quick, and its 0.48 rearward weight bias plus a
+    // 0.95 Hz front end is why it heaves onto its outside front tyre and stays
+    // there.
     id: 'sv_gaz21',
     label: 'GAZ-21 Volga',
     file: 'gz21.fbx',
+    scale: 0.010305,
     mass: 1460,
-    engineId: 'engine_i4_2445',
-    gearboxId: 'gearbox_manual4',
+    engineId: 'engine_zmz_21',
+    gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
-    wheelGrip: 0.88,
-    steerLock: 0.52,
+    wheelGrip: 0.522,
+    steerLock: 0.519,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.48,
+    dragArea: 1.05,
+    suspension: SUSP_VOLGA_21,
     visualRideLiftWheelFraction: 1 / 6,
   },
   {
-    // GAZ-24 Volga: the same idea fifteen years later, 95 hp and slightly lighter.
+    // GAZ-24 Volga: the same idea fifteen years later. 95 hp, four speeds on the
+    // floor, 145 km/h, and a 5.65 m turning radius on a longer wheelbase — so it
+    // needs MORE lock than the 21 to match it.
     id: 'sv_gaz24',
     label: 'GAZ-24 Volga',
     file: 'gz24.fbx',
+    scale: 0.009556,
     mass: 1420,
-    engineId: 'engine_i4_2445',
-    gearboxId: 'gearbox_manual4',
+    engineId: 'engine_zmz_24',
+    gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
-    wheelGrip: 0.90,
-    steerLock: 0.54,
+    wheelGrip: 0.6,
+    steerLock: 0.598,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.49,
+    dragArea: 1.0,
+    suspension: SUSP_VOLGA_24,
   },
   {
-    // VAZ-2101, the Zhiguli. 1.2 litre, 62 hp, 955 kg: the car the parts bin's
-    // `engine_lada_1200` was authored from, finally attached to its own body.
+    // VAZ-2101, the Zhiguli. 1.198 litre, 62 hp, 955 kg, 140 km/h at the redline in
+    // a direct fourth on a 4.30 axle. The default car, and the one everything else
+    // in this table is judged against.
     id: 'sv_vaz2101',
     label: 'VAZ-2101 Zhiguli',
     file: 'vz01.fbx',
-    mass: 985,
+    scale: 0.010585,
+    mass: 955,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: 0.90,
-    steerLock: 0.6,
+    wheelGrip: 0.558,
+    steerLock: 0.52,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.51,
+    dragArea: 0.82,
+    suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2102: the 2101 as an estate. Same running gear, a boot you can sleep in.
+    // VAZ-2102: the 2101 as an estate. Same running gear, 430 kg of payload rating
+    // in the back, and the empty-estate rear end that comes with it.
     id: 'sv_vaz2102',
     label: 'VAZ-2102 estate',
     file: 'vz02.fbx',
-    mass: 1030,
+    scale: 0.010632,
+    mass: 1010,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: 0.90,
-    steerLock: 0.6,
+    wheelGrip: 0.551,
+    steerLock: 0.522,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.5,
+    dragArea: 0.92,
+    suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
   {
-    // VAZ-2103: 1.5 litre, twin headlights, the "luxury" one.
+    // VAZ-2103: 1.452 litre, 71 hp, twin headlights, a tachometer and the 4.10 axle
+    // behind the close-ratio box. The fastest of the early saloons at 152 km/h.
     id: 'sv_vaz2103',
     label: 'VAZ-2103',
     file: 'vz03.fbx',
+    scale: 0.010632,
     mass: 1030,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_lada_4',
+    engineId: 'engine_lada_1500',
+    gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
-    wheelGrip: 0.92,
-    steerLock: 0.6,
+    wheelGrip: 0.574,
+    steerLock: 0.525,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.51,
+    dragArea: 0.82,
+    suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2104: the 2105's estate. The workhorse of the line.
+    // VAZ-2104: the 2105's estate on the 1.5. The workhorse of the line, and the
+    // heaviest of the classics.
     id: 'sv_vaz2104',
     label: 'VAZ-2104 estate',
     file: 'vz04.fbx',
-    mass: 1060,
-    engineId: 'engine_i4_1600',
+    scale: 0.010585,
+    mass: 1050,
+    engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: 0.90,
-    steerLock: 0.6,
+    wheelGrip: 0.56,
+    steerLock: 0.521,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.5,
+    dragArea: 0.92,
+    suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
   {
-    // VAZ-2105: square lights, 1.3 litre, the one everyone's uncle had.
+    // VAZ-2105: square lights, the belt-cam 1.3, 64 hp. The one everyone's uncle
+    // had, and mechanically the plainest car here.
     id: 'sv_vaz2105',
     label: 'VAZ-2105',
     file: 'vz05.fbx',
+    scale: 0.010632,
     mass: 995,
-    engineId: 'engine_lada_1200',
+    engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: 0.92,
-    steerLock: 0.6,
+    wheelGrip: 0.57,
+    steerLock: 0.522,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.51,
+    dragArea: 0.83,
+    suspension: SUSP_ZHIGULI,
   },
   {
-    // The pack's rally 2105: stripes, spot lamps, and 7 cm more ride height than its
-    // showroom twin. Sport springs and more grip, because somebody built it for this.
+    // The pack's rally 2105: stripes, spot lamps, twin Webers, a 6800 rpm limit and
+    // 5 cm of extra stance, because a rally car is RAISED. Its 1.6 has nothing
+    // below 3000 rpm and everything above it; the springs are the stiffest in the
+    // pack and it is the only Soviet body on the sport steering profile, because
+    // somebody rebuilt this one to be driven hard.
     id: 'sv_vaz2105r',
     label: 'VAZ-2105 rally',
     file: 'vz05r.fbx',
+    scale: 0.010632,
     mass: 960,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
+    engineId: 'engine_lada_rally',
+    gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
-    wheelGrip: 1.04,
-    steerLock: 0.64,
+    wheelGrip: 0.615,
+    // Homologation/rally compound: markedly better drive and braking than the
+    // cross-ply road tyre, without giving it modern steady-state lateral g.
+    longitudinalGripScale: 1.27,
+    steerLock: 0.508,
     rearDriveBias: 1,
-    suspension: SUSP_SPORT,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.52,
+    dragArea: 0.9,
+    suspension: SUSP_LADA_RALLY,
     storageCells: 1,
   },
   {
-    // VAZ-2106: 1.6 litre, 78 hp. The fastest of the classic saloons.
+    // VAZ-2106: 1.569 litre, 75 hp, and the 3.90 axle. 152 km/h, and the strongest
+    // pull of the classic saloons.
     id: 'sv_vaz2106',
     label: 'VAZ-2106',
     file: 'vz06.fbx',
+    scale: 0.010585,
     mass: 1035,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_lada_4',
+    engineId: 'engine_lada_1600',
+    gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
-    wheelGrip: 0.94,
-    steerLock: 0.6,
+    wheelGrip: 0.58,
+    steerLock: 0.52,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.51,
+    dragArea: 0.82,
+    suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2107: the 2105 with a grille that thinks it is a Mercedes.
+    // VAZ-2107: the 2105 with a grille that thinks it is a Mercedes, the 1.5 and
+    // the five-speed. Fifth is an 0.82 overdrive, so it is the relaxed one.
     id: 'sv_vaz2107',
     label: 'VAZ-2107',
     file: 'vz07.fbx',
-    mass: 1060,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
+    scale: 0.010632,
+    mass: 1050,
+    engineId: 'engine_lada_1500',
+    gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
-    wheelGrip: 0.94,
-    steerLock: 0.6,
+    wheelGrip: 0.582,
+    steerLock: 0.521,
     rearDriveBias: 1,
-    suspension: SUSP_SOFT,
+    frontWeightShare: 0.51,
+    dragArea: 0.84,
+    suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2108 Sputnik: the break with everything above it — front-wheel drive,
-    // five speeds, three doors, 900 kg. Steers like a different decade.
+    // VAZ-2108 Sputnik: the break with everything above it. Front-wheel drive on a
+    // transaxle, five speeds, MacPherson struts, rack-and-pinion steering, 900 kg
+    // and 62% of it over the front axle. It steers like a different decade because
+    // it is one, so it is the first Soviet body on the `road` profile.
     id: 'sv_vaz2108',
     label: 'VAZ-2108 Sputnik',
     file: 'vz08.fbx',
-    mass: 945,
-    engineId: 'engine_lada_1200',
-    gearboxId: 'gearbox_manual5',
+    scale: 0.010123,
+    mass: 900,
+    engineId: 'engine_samara_1300',
+    gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.96,
-    steerLock: 0.64,
+    wheelGrip: 0.65,
+    steerLock: 0.56,
     rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    dragArea: 0.72,
+    suspension: SUSP_SAMARA,
     storageCells: 2,
   },
   {
-    // VAZ-2109: the five-door Samara.
+    // VAZ-2109: the five-door Samara. Same running gear, 20 kg and a longer roof.
     id: 'sv_vaz2109',
     label: 'VAZ-2109 Samara',
     file: 'vz09.fbx',
-    mass: 970,
-    engineId: 'engine_lada_1200',
-    gearboxId: 'gearbox_manual5',
+    scale: 0.010123,
+    mass: 920,
+    engineId: 'engine_samara_1300',
+    gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.96,
-    steerLock: 0.64,
+    wheelGrip: 0.65,
+    steerLock: 0.56,
     rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.615,
+    dragArea: 0.72,
+    suspension: SUSP_SAMARA,
     storageCells: 3,
   },
   {
-    // VAZ-21099: the Samara with a boot grafted on, and 16 cm longer for it.
+    // VAZ-21099: the Samara with a boot grafted on, the 1.5 and the tall 3.706
+    // axle. 156 km/h makes it the fastest thing in the pack that was sold as one.
     id: 'sv_vaz21099',
     label: 'VAZ-21099',
     file: 'vz099.fbx',
-    mass: 985,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
+    scale: 0.010082,
+    mass: 960,
+    engineId: 'engine_samara_1500',
+    gearboxId: 'gearbox_samara_5_tall',
     tankLitres: 43,
-    wheelGrip: 0.96,
-    steerLock: 0.62,
+    wheelGrip: 0.65,
+    steerLock: 0.56,
     rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.6,
+    dragArea: 0.7,
+    suspension: SUSP_SAMARA,
   },
   {
-    // VAZ-2121 Niva: 1.6 litre, permanent four-wheel drive, a locking centre diff
-    // and 22 cm of clearance. The one car in the catalogue built for this desert.
+    // VAZ-2121 Niva: 1.6, 80 hp, permanent four-wheel drive through a locking centre
+    // diff, 220 mm of clearance and a 2.20 m wheelbase — the shortest in the pack.
+    // Its transfer case's high range is folded into the 4.68 final drive, so it is
+    // geared a fifth shorter than the 2106 it shares a block with: 132 km/h flat
+    // out, and it will pull away from anything here on a surface.
     id: 'sv_niva',
     label: 'VAZ-2121 Niva',
     file: 'vz21.fbx',
+    scale: 0.009649,
     mass: 1210,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
+    engineId: 'engine_niva_1600',
+    gearboxId: 'gearbox_niva_4',
     tankLitres: 42,
-    wheelGrip: 0.92,
-    steerLock: 0.62,
+    wheelGrip: 0.576,
+    steerLock: 0.482,
     rearDriveBias: 0.5,
-    suspension: SUSP_TRUCK,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.53,
+    dragArea: 1.3,
+    suspension: SUSP_NIVA,
     storageCells: 4,
   },
   {
-    // VAZ-2131: the Niva stretched to five doors. Same drivetrain, 43 cm more of it.
+    // VAZ-2131: the Niva stretched by half a metre, on the 1.7 and five speeds.
+    // 1.4 tonnes on the same springs, so it rolls more and stops worse.
     id: 'sv_niva_long',
     label: 'VAZ-2131 Niva',
     file: 'vz31.fbx',
-    mass: 1285,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
+    scale: 0.009783,
+    mass: 1400,
+    engineId: 'engine_niva_1700',
+    gearboxId: 'gearbox_niva_5',
     tankLitres: 42,
-    wheelGrip: 0.90,
-    steerLock: 0.6,
+    wheelGrip: 0.574,
+    steerLock: 0.498,
     rearDriveBias: 0.5,
-    suspension: SUSP_TRUCK,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.52,
+    dragArea: 1.2,
+    suspension: SUSP_NIVA,
     storageCells: 6,
   },
 ];
@@ -872,11 +1140,16 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   gearboxId: spec.gearboxId,
   tankLitres: spec.tankLitres,
   wheelGrip: spec.wheelGrip,
-  // FBXLoader reports this pack in centimetres; the models are life-size.
-  scale: 0.01,
+  longitudinalGripScale: spec.longitudinalGripScale,
+  // FBXLoader reports this pack in centimetres, and each body's factor makes that
+  // body life-size against the real car's wheelbase (see the pack note above).
+  scale: spec.scale,
   suspension: spec.suspension,
   steerLock: spec.steerLock,
   rearDriveBias: spec.rearDriveBias,
+  handlingProfile: spec.handlingProfile,
+  frontWeightShare: spec.frontWeightShare,
+  dragArea: spec.dragArea,
 }));
 
 /**
@@ -1523,11 +1796,13 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   gearboxId: e.gearboxId,
   tankLitres: e.tankLitres,
   wheelGrip: e.wheelGrip,
+  longitudinalGripScale: e.longitudinalGripScale,
   suspension: e.suspension ?? SUSP_CAR,
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,
   handlingProfile: e.handlingProfile ?? 'classic',
   frontWeightShare: e.frontWeightShare,
+  dragArea: e.dragArea,
   viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
   viewPoint: e.viewPoint,
   lights: e.lights,

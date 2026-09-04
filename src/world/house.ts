@@ -593,6 +593,7 @@ export function createStartingCar(world: GameWorld): CarState {
     // as stored, no damage: the player's first wash is a tutorial nobody has to write.
     dirt: 0.4,
     scratches: 0,
+    damage: [],
     fuelLitres,
     fuelKind: engine.fuel,
     waterLitres,
