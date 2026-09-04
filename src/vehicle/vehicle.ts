@@ -2084,7 +2084,10 @@ export class Vehicle implements Rebasable {
 
   private locateImpactContact(): void {
     this.impactContactFound = false;
-    let strongestImpulse = 0;
+    let impulseSum = 0;
+    let weightedX = 0;
+    let weightedY = 0;
+    let weightedZ = 0;
     this.physics.world.contactPairsWith(this.chassisCollider, (other) => {
       this.physics.world.contactPair(this.chassisCollider, other, (manifold) => {
         const normal = manifold.normal(this.impactContactNormal);
@@ -2093,27 +2096,36 @@ export class Vehicle implements Rebasable {
         if (Math.abs(normal.y) > 0.72) return;
         for (let i = 0; i < manifold.numContacts(); i++) {
           const impulse = manifold.contactImpulse(i);
-          if (impulse <= strongestImpulse) continue;
+          if (impulse <= 0) continue;
           const point = manifold.solverContactPoint(i, this.impactContactWorld);
           if (point === null) continue;
-          strongestImpulse = impulse;
-          this.impactContactFound = true;
-          this.chassisBody.rotation(this.rotationScratch);
-          this.invRotationScratch.x = -this.rotationScratch.x;
-          this.invRotationScratch.y = -this.rotationScratch.y;
-          this.invRotationScratch.z = -this.rotationScratch.z;
-          this.invRotationScratch.w = this.rotationScratch.w;
-          const bodyPosition = this.chassisBody.translation();
-          rotateVector(
-            this.impactContactLocal,
-            this.invRotationScratch,
-            point.x - bodyPosition.x,
-            point.y - bodyPosition.y,
-            point.z - bodyPosition.z,
-          );
+          impulseSum += impulse;
+          weightedX += point.x * impulse;
+          weightedY += point.y * impulse;
+          weightedZ += point.z * impulse;
         }
       });
     });
+    if (impulseSum <= 0) return;
+
+    // A flat wall produces four equal contacts. Taking the first/strongest one
+    // stamped every frontal crash onto a lower chassis corner where the paint shader
+    // has no pixels. The impulse-weighted centroid is the actual centre of the blow;
+    // a point obstacle still contributes its one real contact unchanged.
+    this.impactContactFound = true;
+    this.chassisBody.rotation(this.rotationScratch);
+    this.invRotationScratch.x = -this.rotationScratch.x;
+    this.invRotationScratch.y = -this.rotationScratch.y;
+    this.invRotationScratch.z = -this.rotationScratch.z;
+    this.invRotationScratch.w = this.rotationScratch.w;
+    const bodyPosition = this.chassisBody.translation();
+    rotateVector(
+      this.impactContactLocal,
+      this.invRotationScratch,
+      weightedX / impulseSum - bodyPosition.x,
+      weightedY / impulseSum - bodyPosition.y,
+      weightedZ / impulseSum - bodyPosition.z,
+    );
   }
 
   private makeBodyDamageImpact(
@@ -2148,7 +2160,7 @@ export class Vehicle implements Rebasable {
       nx,
       ny: 0,
       nz,
-      radius: clamp(0.14 + severityMps * 0.038, 0.18, 0.58),
+      radius: clamp(0.16 + severityMps * 0.05, 0.2, 0.72),
       strength: clamp((severityMps - SCRATCH_IMPACT_THRESHOLD_MPS) / 6, 0.18, 1),
       type,
       seed,

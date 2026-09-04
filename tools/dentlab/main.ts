@@ -14,6 +14,7 @@
  * high-speed crash (`SCRATCH_PER_IMPACT_CAP`, vehicle/vehicle.ts).
  */
 import * as THREE from 'three';
+import { CAR_MODELS } from '../../src/vehicle/carmodels';
 import { preloadCarModels, createCarModel, carModelMeasure } from '../../src/render/carmodel';
 import { setCarBodyCondition } from '../../src/render/materials';
 import type { BodyDamageImpact, BodyDamageType } from '../../src/game/state';
@@ -74,7 +75,9 @@ models.forEach((id, row) => {
     // Keep the paint identical across a row; the only changing variable is damage.
     const { body } = createCarModel(id, `${id}:dentlab`);
     body.position.set((col - (levels.length - 1) / 2) * 5.6, row * -2.4, 0);
-    body.rotation.y = Math.PI * 0.78;
+    // Show the +X/+Z surfaces used by previewImpacts; the previous three-quarter
+    // angle presented their undamaged opposite faces.
+    body.rotation.y = -Math.PI * 0.22;
     setCarBodyCondition(body, 0, damage, previewImpacts(id, damage));
     scene.add(body);
   }

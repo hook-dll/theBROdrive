@@ -217,7 +217,7 @@ void condDamage(
   for ( int i = 0; i < ${MAX_BODY_DAMAGE_IMPACTS}; i ++ ) {
     if ( i >= uDamageCount ) break;
     vec3 centre = uDamagePosRadius[i].xyz;
-    float radius = max( 0.05, uDamagePosRadius[i].w );
+    float radius = max( 0.05, uDamagePosRadius[i].w ) * 1.15;
     vec3 hitNormal = normalize( uDamageNormalStrength[i].xyz );
     float strength = saturate( uDamageNormalStrength[i].w );
     float type = uDamageMeta[i].x;
@@ -245,8 +245,10 @@ void condDamage(
       vec3( shaped / radius * 2.4, seed * 31.0 + float( i ) * 7.0 )
     );
     float radial = length( shaped ) / radius * mix( 0.86, 1.14, breakup );
-    float panel = ( 1.0 - smoothstep( radius * 0.22, radius * 0.58, abs( normalDistance ) ) )
-      * smoothstep( 0.08, 0.62, dot( normalize( worldN ), hitNormal ) );
+    // A collision folds the bordering panel too: allow the bonnet/wing tangent to
+    // a frontal blow, but reject the opposite side of the shell.
+    float panel = ( 1.0 - smoothstep( radius * 0.25, radius * 0.82, abs( normalDistance ) ) )
+      * smoothstep( -0.35, 0.35, dot( normalize( worldN ), hitNormal ) );
     float envelope = ( 1.0 - smoothstep( 0.80, 1.05, radial ) ) * panel;
 
     float isDent = 1.0 - step( 0.25, abs( type - 0.0 ) );
@@ -308,9 +310,8 @@ void condDamage(
     dentGradient += scratchAcross * sign( rv - wave ) * scratch * 0.8 / radius;
   }
 }
-
 /** Full-strength panel depression in metres. */
-#define COND_DENT_DEPTH 0.045
+#define COND_DENT_DEPTH 0.09
 
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `
@@ -412,11 +413,11 @@ const CAR_BODY_CONDITION_BODY = `
 
     // A dent reads as a dark pressed centre and a narrow light folded rim even
     // under flat light; the normal hook moves the real specular highlight.
-    diffuseColor.rgb *= 1.0 - 0.46 * dentCore * dentCore;
+    diffuseColor.rgb *= 1.0 - 0.68 * dentCore * dentCore;
     diffuseColor.rgb = mix(
       diffuseColor.rgb,
-      min( vec3( 1.0 ), diffuseColor.rgb * 1.55 + vec3( 0.06 ) ),
-      dentRim * 0.68
+      min( vec3( 1.0 ), diffuseColor.rgb * 1.75 + vec3( 0.09 ) ),
+      dentRim * 0.88
     );
     roughnessFactor = mix( roughnessFactor, 0.88, max( dentCore, dentRim ) * 0.7 );
 
@@ -633,8 +634,23 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
  * both palette paint and body wear inert. Convert only the selected paint slot;
  * glass, lamps and trim keep their authored materials.
  */
-function cloneCarPaintMaterial(source: THREE.Material): THREE.Material {
-  if (source instanceof THREE.MeshStandardMaterial) return source.clone();
+const CAR_PAINT_ROUGHNESS = 0.48;
+const CAR_PAINT_METALNESS = 0.38;
+
+/**
+ * Clones an authored paint slot with one shared metallic automotive finish.
+ * Both model packs now differ only in their colour/texture, not in their BRDF.
+ */
+export function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
+  if (source instanceof THREE.MeshStandardMaterial) {
+    const material = source.clone();
+    material.roughness = CAR_PAINT_ROUGHNESS;
+    material.metalness = CAR_PAINT_METALNESS;
+    material.roughnessMap = null;
+    material.metalnessMap = null;
+    material.envMapIntensity = 1;
+    return material;
+  }
   if (!(source instanceof THREE.MeshPhongMaterial)) return source.clone();
 
   const material = new THREE.MeshStandardMaterial({
@@ -652,10 +668,8 @@ function cloneCarPaintMaterial(source: THREE.Material): THREE.Material {
     alphaTest: source.alphaTest,
     side: source.side,
     vertexColors: source.vertexColors,
-    // Match the clear-coated Stylized finish. The atlas supplies colour, not
-    // microsurface; the old 0.62 roughness made every Soviet panel read as primer.
-    roughness: 0.42,
-    metalness: 0.12,
+    roughness: CAR_PAINT_ROUGHNESS,
+    metalness: CAR_PAINT_METALNESS,
   });
   material.name = source.name;
   material.depthTest = source.depthTest;
@@ -673,7 +687,7 @@ function cloneCarPaintMaterial(source: THREE.Material): THREE.Material {
  * condition uniforms. The source remains untouched for every other car sharing it.
  */
 export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Material {
-  const material = cloneCarPaintMaterial(source);
+  const material = makeCarPaintFinishMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
   const uniforms: CarBodyUniforms = {
@@ -705,7 +719,7 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
  * parked car wastes fragment work and can force the fixed-step loop into slow motion.
  */
 export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Material {
-  const material = cloneCarPaintMaterial(source);
+  const material = makeCarPaintFinishMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
   const uniforms: CarPaletteUniforms = {
