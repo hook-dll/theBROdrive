@@ -64,6 +64,7 @@ function carState(
     ...lamps,
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 10,
     bonnet: createBonnetStorage(
       `vehicle-lights:${index}`,

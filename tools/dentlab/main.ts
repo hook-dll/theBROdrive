@@ -1,27 +1,26 @@
 /**
  * Collision-dent viewer.
  *
- * Renders real preloaded car bodies side by side at a row of damage levels, which
- * is the only way to judge the dent field: it is a shader effect keyed to
- * `CarState.scratches`, and reaching a given level by crashing takes minutes.
+ * Renders real preloaded car bodies side by side with cumulative localized impacts.
+ * It exercises the same bounded records and body shader as live collisions, without
+ * spending minutes repeatedly driving into a wall.
  *
  * Serve the dev server and open `/tools/dentlab/`. Query parameters:
  *   model=st_big_saloon,sv_vaz2106   one row per model
- *   scratches=0,0.12,0.3,1           one column per damage level
+ *   damage=0,0.12,0.3,1              one column per aggregate damage level
  *   z=15                             camera distance, metres
  *
  * Damage 0.12 is roughly one moderate shunt and 0.3 is the cap for a single
- * high-speed crash (`SCRATCH_PER_IMPACT_CAP`, vehicle/vehicle.ts), so those two
- * columns are what the game actually shows a player who has hit something.
+ * high-speed crash (`SCRATCH_PER_IMPACT_CAP`, vehicle/vehicle.ts).
  */
 import * as THREE from 'three';
-import { preloadCarModels, createCarModel } from '../../src/render/carmodel';
+import { preloadCarModels, createCarModel, carModelMeasure } from '../../src/render/carmodel';
 import { setCarBodyCondition } from '../../src/render/materials';
-import { CAR_MODELS } from '../../src/vehicle/carmodels';
+import type { BodyDamageImpact, BodyDamageType } from '../../src/game/state';
 
 const params = new URLSearchParams(location.search);
 const requested = (params.get('model') ?? 'st_big_saloon,sv_vaz2106').split(',');
-const levels = (params.get('scratches') ?? '0,0.12,0.3,1').split(',').map(Number);
+const levels = (params.get('damage') ?? '0,0.12,0.3,1').split(',').map(Number);
 const distance = Number(params.get('z') ?? 15);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -42,22 +41,48 @@ const camera = new THREE.PerspectiveCamera(32, window.innerWidth / window.innerH
 const models = requested.filter((id) => CAR_MODELS.some((def) => def.id === id));
 await preloadCarModels(models);
 
+const PREVIEW_TYPES: readonly BodyDamageType[] = ['scratch', 'chip', 'dent', 'heavy'];
+
+function previewImpacts(id: string, damage: number): BodyDamageImpact[] {
+  if (!(damage > 0)) return [];
+  const half = carModelMeasure(id).halfExtents;
+  const count = Math.max(1, Math.min(4, Math.ceil(damage * 4)));
+  const strength = Math.min(1, Math.max(0.18, damage / 0.3));
+  const impacts: BodyDamageImpact[] = [];
+  for (let i = 0; i < count; i++) {
+    const side = i % 2 === 0;
+    const offset = (i - (count - 1) / 2) * 0.28;
+    impacts.push({
+      x: side ? half[0] : offset,
+      y: 0.04 + offset * 0.25,
+      z: side ? offset : half[2],
+      nx: side ? 1 : 0,
+      ny: 0,
+      nz: side ? 0 : 1,
+      radius: 0.24 + strength * 0.32,
+      strength,
+      type: PREVIEW_TYPES[Math.min(PREVIEW_TYPES.length - 1, i + count - 1)]!,
+      seed: (0.17 + i * 0.271 + damage * 0.113) % 1,
+    });
+  }
+  return impacts;
+}
+
 const rows: string[] = [];
 models.forEach((id, row) => {
   for (const [col, damage] of levels.entries()) {
-    // A distinct appearance key per cell, so the random paint does not repeat and
-    // hide a dent behind an identical highlight.
-    const { body } = createCarModel(id, `${id}:${damage}`);
+    // Keep the paint identical across a row; the only changing variable is damage.
+    const { body } = createCarModel(id, `${id}:dentlab`);
     body.position.set((col - (levels.length - 1) / 2) * 5.6, row * -2.4, 0);
     body.rotation.y = Math.PI * 0.78;
-    setCarBodyCondition(body, 0, damage);
+    setCarBodyCondition(body, 0, damage, previewImpacts(id, damage));
     scene.add(body);
   }
   rows.push(`${id}: ${levels.join('  ')}`);
 });
 
 const label = document.createElement('pre');
-label.textContent = `scratches left-to-right\n${rows.join('\n')}`;
+label.textContent = `damage left-to-right\n${rows.join('\n')}`;
 document.body.appendChild(label);
 
 camera.position.set(0, 1.4 - (models.length - 1) * 1.2, distance);

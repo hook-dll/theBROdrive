@@ -74,7 +74,7 @@ function carState(road: Road): CarState {
   return {
     id: 'autopilot-bench', modelId: MODEL_ID, gizmos: {}, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
-    fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0,
+    fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
     waterLitres: 10, oilLitres: 10,
     engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),

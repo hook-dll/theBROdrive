@@ -52,6 +52,13 @@ function rideRow(r: BenchResult): string {
   );
 }
 
+function roadLimitRow(r: BenchResult): string {
+  return (
+    `${r.id.padEnd(14)} ${pad(r.topSpeedKmh, 11)} ${pad(r.topSpeedSpikeKmh, 8)} ` +
+    `${pad(r.turnRadiusM, 10)} ${pad(r.limitLateralG, 9)}`
+  );
+}
+
 async function main(): Promise<void> {
   const results = await runBench(ids.length > 0 ? ids : DEFAULT_IDS);
 
@@ -67,6 +74,14 @@ async function main(): Promise<void> {
     'model             height  bounce      Hz  settle  skidpad    slip    roll    lean    yaw+',
   );
   for (const r of results) console.log(rideRow(r));
+
+  console.log('');
+  console.log('--- ride and cornering (flat-out and full-lock) ---');
+  console.log(
+    `${'model'.padEnd(14)} ${pad('top km/h', 11)} ${pad('spike', 8)} ` +
+      `${pad('radius m', 10)} ${pad('limit g', 9)}`,
+  );
+  for (const r of results) console.log(roadLimitRow(r));
 
   console.log('');
   console.log('--- regression checks ---');

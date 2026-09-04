@@ -98,6 +98,7 @@ function carState(road: Road, lateral: number, groundY: number): CarState {
     fuelKind: engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
+    damage: [],
     waterLitres: 10,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,

@@ -61,6 +61,32 @@ export interface JobState {
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
+/** Eight layered impacts keep the driven-car shader inside a low-end WebGL uniform budget. */
+export const MAX_BODY_DAMAGE_IMPACTS = 8;
+
+export type BodyDamageType = 'dent' | 'scratch' | 'chip' | 'heavy';
+
+/**
+ * One permanent, localized mark on the shell.
+ *
+ * Position and direction are chassis-local metres/unit vectors. World-space impact
+ * data would slide over a moving car and jump when the floating origin rebases, so
+ * the collision is converted once and this stable representation is what gets saved.
+ */
+export interface BodyDamageImpact {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly nx: number;
+  readonly ny: number;
+  readonly nz: number;
+  readonly radius: number;
+  readonly strength: number;
+  readonly type: BodyDamageType;
+  /** Stable random mask selection and rotation, 0..1. */
+  readonly seed: number;
+}
+
 export interface CarState {
   readonly id: string;
   /** Complete car model id from the catalogue (vehicle/carmodels.ts). */
@@ -124,6 +150,8 @@ export interface CarState {
    */
   dirt: number;
   scratches: number;
+  /** Localized, cumulative collision marks; oldest-first and bounded for real-time shading. */
+  readonly damage: BodyDamageImpact[];
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -259,6 +287,7 @@ export type WorldDelta =
   | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
+  | { t: 'car_body_impact'; carId: string; impact: BodyDamageImpact }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
@@ -540,6 +569,37 @@ export class GameWorld {
           // write them.
           car.dirt = clamp01(delta.dirt);
           car.scratches = clamp01(delta.scratches);
+        }
+        break;
+      }
+      case 'car_body_impact': {
+        const car = s.cars[delta.carId];
+        if (car) {
+          const impact = delta.impact;
+          const normalLength = Math.hypot(impact.nx, impact.ny, impact.nz);
+          if (
+            Number.isFinite(impact.x) &&
+            Number.isFinite(impact.y) &&
+            Number.isFinite(impact.z) &&
+            Number.isFinite(impact.radius) &&
+            Number.isFinite(impact.strength) &&
+            Number.isFinite(impact.seed) &&
+            normalLength > 1e-6
+          ) {
+            if (car.damage.length >= MAX_BODY_DAMAGE_IMPACTS) car.damage.shift();
+            car.damage.push({
+              x: impact.x,
+              y: impact.y,
+              z: impact.z,
+              nx: impact.nx / normalLength,
+              ny: impact.ny / normalLength,
+              nz: impact.nz / normalLength,
+              radius: Math.max(0.05, Math.min(1.5, impact.radius)),
+              strength: clamp01(impact.strength),
+              type: impact.type,
+              seed: clamp01(impact.seed),
+            });
+          }
         }
         break;
       }

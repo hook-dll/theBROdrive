@@ -1,8 +1,10 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { newWorldState } from '../game/state';
+import { MAX_BODY_DAMAGE_IMPACTS, newWorldState } from '../game/state';
 import type {
   CarState,
+  BodyDamageImpact,
+  BodyDamageType,
   HeadlightMode,
   JobState,
   PlayerState,
@@ -484,6 +486,38 @@ function migrateStorage(raw: unknown, cells: number, where: string): (Item | nul
   return storage;
 }
 
+function migrateBodyDamage(raw: unknown): BodyDamageImpact[] {
+  if (!Array.isArray(raw)) return [];
+  const damage: BodyDamageImpact[] = [];
+  for (const value of raw.slice(-MAX_BODY_DAMAGE_IMPACTS)) {
+    if (typeof value !== 'object' || value === null) continue;
+    const mark = value as Record<string, unknown>;
+    const type: BodyDamageType | null =
+      mark.type === 'dent' || mark.type === 'scratch' || mark.type === 'chip' || mark.type === 'heavy'
+        ? mark.type
+        : null;
+    if (type === null) continue;
+    const nx = numOr(mark.nx, 0);
+    const ny = numOr(mark.ny, 0);
+    const nz = numOr(mark.nz, 0);
+    const normalLength = Math.hypot(nx, ny, nz);
+    if (normalLength <= 1e-6) continue;
+    damage.push({
+      x: numOr(mark.x, 0),
+      y: numOr(mark.y, 0),
+      z: numOr(mark.z, 0),
+      nx: nx / normalLength,
+      ny: ny / normalLength,
+      nz: nz / normalLength,
+      radius: Math.max(0.05, Math.min(1.5, numOr(mark.radius, 0.2))),
+      strength: clamp01(numOr(mark.strength, 0)),
+      type,
+      seed: clamp01(numOr(mark.seed, 0.5)),
+    });
+  }
+  return damage;
+}
+
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
 
@@ -577,6 +611,7 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     // parked it, the game just was not looking.
     dirt: clamp01(numOr(raw.dirt, 0)),
     scratches: clamp01(numOr(raw.scratches, 0)),
+    damage: migrateBodyDamage(raw.damage),
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),

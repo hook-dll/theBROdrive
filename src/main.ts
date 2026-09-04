@@ -1211,10 +1211,14 @@ async function boot(): Promise<void> {
 
     for (const vehicle of vehicles.values()) {
       vehicle.syncVisuals(alpha);
-      // Dirt and scratches are read from the vehicle's LIVE accumulators, not from the
-      // batched save state: the deltas land twice a second, and a wash under the
-      // player's own brush has to show up on the frame it happens.
-      setCarBodyCondition(vehicle.root, vehicle.bodyDirt, vehicle.bodyScratches);
+      // Dirt and impact records are read from the Vehicle's live accumulators, not
+      // the batched save state: a collision or brush stroke must land this frame.
+      setCarBodyCondition(
+        vehicle.root,
+        vehicle.bodyDirt,
+        vehicle.bodyScratches,
+        vehicle.bodyDamage,
+      );
     }
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.

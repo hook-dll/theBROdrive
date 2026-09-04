@@ -10,6 +10,11 @@
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { applyComicShading } from './comic';
+import {
+  MAX_BODY_DAMAGE_IMPACTS,
+  type BodyDamageImpact,
+  type BodyDamageType,
+} from '../game/state';
 
 /** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
@@ -18,10 +23,21 @@ interface ConditionUniforms {
   readonly scratches?: { value: number };
 }
 
-interface CarBodyUniforms extends ConditionUniforms {
+interface CarPaletteUniforms extends ConditionUniforms {
   readonly palettePaint: { value: number };
   readonly paintColor: { value: THREE.Color };
   readonly paintCell: { value: THREE.Vector2 };
+}
+
+interface CarBodyUniforms extends CarPaletteUniforms {
+  readonly damageCount: { value: number };
+  readonly damagePosRadius: { value: THREE.Vector4[] };
+  readonly damageNormalStrength: { value: THREE.Vector4[] };
+  readonly damageMeta: { value: THREE.Vector4[] };
+}
+
+function hasDamageUniforms(uniforms: CarPaletteUniforms): uniforms is CarBodyUniforms {
+  return 'damageCount' in uniforms;
 }
 
 /**
@@ -30,8 +46,28 @@ interface CarBodyUniforms extends ConditionUniforms {
  * compiled program is holding. A WeakMap keeps the objects alive for exactly as long
  * as the material, and lets setCondition write values even before first render.
  */
-const carBodyUniforms = new WeakMap<THREE.Material, CarBodyUniforms>();
+const carBodyUniforms = new WeakMap<THREE.Material, CarPaletteUniforms>();
 const conditionUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
+
+const DAMAGE_TYPE_CODE: Readonly<Record<BodyDamageType, number>> = {
+  dent: 0,
+  scratch: 1,
+  chip: 2,
+  heavy: 3,
+};
+const damagePositionScratch = Array.from(
+  { length: MAX_BODY_DAMAGE_IMPACTS },
+  () => new THREE.Vector4(),
+);
+const damageNormalScratch = Array.from(
+  { length: MAX_BODY_DAMAGE_IMPACTS },
+  () => new THREE.Vector4(),
+);
+const damageMetaScratch = Array.from(
+  { length: MAX_BODY_DAMAGE_IMPACTS },
+  () => new THREE.Vector4(),
+);
+const damageVectorScratch = new THREE.Vector3();
 
 /** Templates keyed by parameter tuple. They are only ever cloned, never rendered. */
 const conditionTemplates = new Map<string, THREE.MeshStandardMaterial>();
@@ -51,12 +87,10 @@ function flatKey(color: number, roughness: number): string {
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 
 /**
- * Body paint adds mesh-local dent relief in the same single shader permutation.
- * Version v7 evaluates that relief in METRES: the packs are authored in
- * centimetres (`scale` in vehicle/carmodels.ts), so a raw model-unit field put
- * 100x the intended frequency on every real car and no dent was ever visible.
+ * Body paint layers a bounded set of localized dents, scratches and chips in one
+ * shader permutation. Bump this whenever its GLSL layout changes.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v7';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v8';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -79,18 +113,8 @@ const VERTEX_VARYING =
   'varying vec3 vCondWorldPos;\n' +
   'varying vec3 vCondWorldNormal;\n' +
   'varying vec3 vCondLocalPos;\n' +
-  'varying vec3 vCondLocalNormal;\n' +
-  // The mesh's own X/Y/Z axes in world space. A mesh-local gradient (the dent
-  // relief) has to be rotated into world space to perturb a normal, and `modelMatrix`
-  // is declared by three.js in the VERTEX stage only — using it in the fragment shader
-  // silently fails to compile. Passing the complete basis also avoids a fragment
-  // cross-product subtracting nearly equal values on D3D/ANGLE.
-  'varying vec3 vCondAxisX;\n' +
-  'varying vec3 vCondAxisY;\n' +
-  'varying vec3 vCondAxisZ;\n' +
-  // Model units to metres along each of those axes. The dent field is authored in
-  // metres — lobe size, flank weighting, finite-difference step — and the packs are
-  // authored in centimetres, so without this the field is 100x too fine to see.
+  // Model units to metres, retained for the lower-flank dirt mask. Impact positions
+  // are world-space uniforms and therefore need no per-fragment mesh basis.
   'varying vec3 vCondScale;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
@@ -100,14 +124,10 @@ const WORLD_POS_HOOK =
   '\tvCondWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n' +
   '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;\n' +
   '\tvCondLocalPos = transformed;\n' +
-  '\tvCondLocalNormal = objectNormal;\n' +
   '\tvec3 condAxX = mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 );\n' +
   '\tvec3 condAxY = mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 );\n' +
   '\tvec3 condAxZ = mat3( modelMatrix ) * vec3( 0.0, 0.0, 1.0 );\n' +
-  '\tvCondScale = vec3( length( condAxX ), length( condAxY ), length( condAxZ ) );\n' +
-  '\tvCondAxisX = condAxX / max( vCondScale.x, 1e-6 );\n' +
-  '\tvCondAxisY = condAxY / max( vCondScale.y, 1e-6 );\n' +
-  '\tvCondAxisZ = condAxZ / max( vCondScale.z, 1e-6 );';
+  '\tvCondScale = vec3( length( condAxX ), length( condAxY ), length( condAxZ ) );';
 
 const CONDITION_PARS = `
 uniform float uDirt;
@@ -116,6 +136,10 @@ uniform float uScratches;
 uniform float uPalettePaint;
 uniform vec3 uPalettePaintColor;
 uniform vec2 uPalettePaintCell;
+uniform int uDamageCount;
+uniform vec4 uDamagePosRadius[${MAX_BODY_DAMAGE_IMPACTS}];
+uniform vec4 uDamageNormalStrength[${MAX_BODY_DAMAGE_IMPACTS}];
+uniform vec4 uDamageMeta[${MAX_BODY_DAMAGE_IMPACTS}];
 
 
 
@@ -165,53 +189,128 @@ vec2 condRust( vec3 p ) {
 #define COND_PIT_DEPTH 0.015
 
 /**
- * DENT DEPTH FIELD, in mesh-local METRES (see vCondScale), shared by the paint
- * hook and the normal hook so a dent's shading and its dulled paint can never
- * disagree.
+ * LOCALIZED IMPACT FIELD.
  *
- * Six cells per metre puts the value-noise lobes at roughly 17 cm — large enough
- * to read across a door or bumper without turning into broad panel warping. The
- * position-only shear breaks the lattice without a second sample.
+ * Each record is a real collision point and direction transformed into world space
+ * by setCarBodyCondition. The fixed loop is the real-time budget: eight marks,
+ * two evaluations per painted fragment (material + normal), and one value-noise
+ * lookup per mark. Four seed bands alter aspect, rotation and mask breakup, giving
+ * the reference's 3–5 variations without texture fetches or shader permutations.
  *
- * DEPTH AND COVERAGE ARE SEPARATE, and that is what makes a crash visible. Damage
- * used to scale the amplitude directly, so the 0.12 a heavy shunt adds pressed the
- * panel in by a tenth of a dent and the car looked untouched until it had been
- * crashed a dozen times. A dent is a dent: the depth ramp saturates by the time one
- * solid impact has landed, and further damage only spreads more lobes until
- * neighbours meet into crumpled panels.
- *
- * Weighting: lower flanks and the extremities of the shell, because that is where a
- * car collects damage — but the floor is 0.35 rather than 0.2 so a roof or bonnet
- * strike is not silently swallowed.
+ * x/y/z/w of masks are dent centre, bright folded rim, scratch and exposed-paint
+ * chip. heavyMask adds localized grime/cracking only to severe impacts.
+ * dentGradient is analytic radial/scratch relief in world units; noise breaks the
+ * silhouette but is deliberately omitted from the gradient so it cannot turn a
+ * low-poly panel into sparkling normal noise.
  */
-float condDent( vec3 metreP, float damage ) {
-  vec3 p = metreP * 6.0;
-  p += vec3( p.z * 0.31, p.x * 0.19, p.y * 0.11 );
-  float lobes = condNoise( p + 19.0 );
-  float spread = sqrt( damage );
-  float core = smoothstep( 0.80 - 0.46 * spread, 0.93 - 0.33 * spread, lobes );
-  float depth = smoothstep( 0.0, 0.2, damage );
-  float lower = 1.0 - smoothstep( 0.35, 1.25, metreP.y );
-  float extremity = smoothstep( 0.55, 1.55, max( abs( metreP.x ), abs( metreP.z ) ) );
-  return depth * core * ( 0.35 + 0.65 * max( lower, extremity ) );
+void condDamage(
+  vec3 worldP,
+  vec3 worldN,
+  out vec4 masks,
+  out float heavyMask,
+  out vec3 dentGradient
+) {
+  masks = vec4( 0.0 );
+  heavyMask = 0.0;
+  dentGradient = vec3( 0.0 );
+
+  for ( int i = 0; i < ${MAX_BODY_DAMAGE_IMPACTS}; i ++ ) {
+    if ( i >= uDamageCount ) break;
+    vec3 centre = uDamagePosRadius[i].xyz;
+    float radius = max( 0.05, uDamagePosRadius[i].w );
+    vec3 hitNormal = normalize( uDamageNormalStrength[i].xyz );
+    float strength = saturate( uDamageNormalStrength[i].w );
+    float type = uDamageMeta[i].x;
+    float seed = uDamageMeta[i].y;
+
+    vec3 delta = worldP - centre;
+    float normalDistance = dot( delta, hitNormal );
+    vec3 tangentDelta = delta - hitNormal * normalDistance;
+    vec3 referenceAxis =
+      abs( hitNormal.y ) < 0.85 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
+    vec3 tangentX = normalize( cross( referenceAxis, hitNormal ) );
+    vec3 tangentY = normalize( cross( hitNormal, tangentX ) );
+    float u = dot( tangentDelta, tangentX );
+    float v = dot( tangentDelta, tangentY );
+
+    float angle = seed * 6.2831853 + type * 0.47;
+    float ca = cos( angle );
+    float sa = sin( angle );
+    float ru = ca * u - sa * v;
+    float rv = sa * u + ca * v;
+    float variation = floor( seed * 4.0 );
+    float aspect = mix( 0.78, 1.28, mod( variation, 2.0 ) );
+    vec2 shaped = vec2( ru * aspect, rv / aspect );
+    float breakup = condNoise(
+      vec3( shaped / radius * 2.4, seed * 31.0 + float( i ) * 7.0 )
+    );
+    float radial = length( shaped ) / radius * mix( 0.86, 1.14, breakup );
+    float panel = ( 1.0 - smoothstep( radius * 0.22, radius * 0.58, abs( normalDistance ) ) )
+      * smoothstep( 0.08, 0.62, dot( normalize( worldN ), hitNormal ) );
+    float envelope = ( 1.0 - smoothstep( 0.80, 1.05, radial ) ) * panel;
+
+    float isDent = 1.0 - step( 0.25, abs( type - 0.0 ) );
+    float isScratch = 1.0 - step( 0.25, abs( type - 1.0 ) );
+    float isChip = 1.0 - step( 0.25, abs( type - 2.0 ) );
+    float isHeavy = 1.0 - step( 0.25, abs( type - 3.0 ) );
+
+    // Every impact combines damage kinds; the enum controls their balance rather
+    // than selecting one sterile decal.
+    float dentWeight = 0.22 * isScratch + 0.38 * isChip + isDent + isHeavy;
+    float core = ( 1.0 - smoothstep( 0.06, 0.72, radial ) ) * envelope;
+    float rim = smoothstep( 0.34, 0.56, radial )
+      * ( 1.0 - smoothstep( 0.72, 0.96, radial ) ) * panel;
+
+    float wave = sin( ru / radius * 11.0 + seed * 19.0 ) * radius * 0.028;
+    float scratchLength = 1.0 - smoothstep( 0.55, 1.05, abs( ru ) / ( radius * 1.35 ) );
+    float scratchLine = ( 1.0 - smoothstep(
+      radius * 0.012,
+      radius * mix( 0.035, 0.058, mod( variation, 2.0 ) ),
+      abs( rv - wave )
+    ) ) * scratchLength * panel;
+    float secondScratch = ( 1.0 - smoothstep(
+      radius * 0.014,
+      radius * 0.045,
+      abs( rv + radius * 0.16 + wave * 0.7 )
+    ) ) * scratchLength * panel * isHeavy;
+    float scratch = max( scratchLine, secondScratch )
+      * ( isScratch + 0.28 * isChip + 0.18 * isDent + isHeavy );
+
+    float chipNoise = condNoise(
+      vec3( shaped / radius * 7.0 + vec2( seed * 5.0 ), seed * 53.0 )
+    );
+    float chip = ( 1.0 - smoothstep( 0.08, 0.76, radial ) )
+      * smoothstep( 0.48, 0.72, chipNoise ) * panel
+      * ( 0.18 * isScratch + isChip + 0.42 * isDent + isHeavy );
+    // Heavy impacts split paint along several irregular radial crack paths.
+    float crackAngle = atan( rv, ru );
+    float crackWave = abs( sin( crackAngle * 3.0 + seed * 23.0 + radial * 2.1 ) );
+    float crack = ( 1.0 - smoothstep( 0.025, 0.16, crackWave ) )
+      * smoothstep( 0.18, 0.34, radial )
+      * ( 1.0 - smoothstep( 0.72, 0.98, radial ) )
+      * panel * isHeavy;
+    scratch = max( scratch, crack );
+
+    float weightedStrength = strength * strength * ( 3.0 - 2.0 * strength );
+    core *= dentWeight * weightedStrength;
+    rim *= dentWeight * weightedStrength;
+    scratch *= weightedStrength;
+    chip *= weightedStrength;
+    masks = max( masks, vec4( core, rim, scratch, chip ) );
+    heavyMask = max( heavyMask, envelope * isHeavy * weightedStrength );
+
+    float tangentLength = length( tangentDelta );
+    vec3 radialDirection = tangentDelta / max( tangentLength, 1e-4 );
+    float flank = smoothstep( 0.16, 0.42, radial )
+      * ( 1.0 - smoothstep( 0.72, 0.98, radial ) );
+    dentGradient -= radialDirection * flank * dentWeight * weightedStrength / radius;
+    vec3 scratchAcross = -sa * tangentX + ca * tangentY;
+    dentGradient += scratchAcross * sign( rv - wave ) * scratch * 0.8 / radius;
+  }
 }
 
-/**
- * Finite-difference step for the dent field, metres, and how deep a full-strength
- * lobe presses in.
- *
- * THE GRADIENT IS ANALYTIC, NOT a screen derivative. Screen-space derivatives of a
- * smooth mask shrink with the pixel footprint, so a dent that tilted the normal
- * convincingly with the camera at the door vanished entirely at chase distance —
- * measured on the shipped chase camera, where a fully damaged car read as
- * undamaged. Three extra taps in mesh space cost the same at every zoom.
- *
- * 30 mm over a 17 cm lobe is an 18% relief slope. The old 14 mm was tuned when the
- * amplitude also carried the damage level, so the two multiplied down to nothing;
- * with the depth ramp above, this is the slope a folded panel actually has.
- */
-#define COND_DENT_EPS 0.052
-#define COND_DENT_DEPTH 0.030
+/** Full-strength panel depression in metres. */
+#define COND_DENT_DEPTH 0.045
 
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `
@@ -268,16 +367,9 @@ const CONDITION_BODY = `
 }`;
 
 /**
- * Painted shells share the part dust distribution, with lower-flank road spray and
- * dent relief. The dent field stays mesh-local so a moving/floating-origin car does
- * not make collision damage crawl across its paint.
- *
- * The body colour hook evaluates the shared dent field once; the normal hook
- * evaluates it four times (the value plus three finite differences), so the pair
- * costs five base noise samples against the four the old line-based scratch hook
- * spent on one `condNoise` plus a three-sample `condFbm`. The extra sample buys a
- * gradient that does not change with the camera distance, which is what makes the
- * damage visible at all from the chase seat.
+ * Painted shells keep road dirt and then layer damage at the exact impact points.
+ * Colour, roughness, metalness and normal relief consume the same masks: no detached
+ * camouflage patch can appear where the panel itself is still flat.
  */
 const CAR_BODY_CONDITION_BODY = `
 #include <metalnessmap_fragment>
@@ -299,20 +391,52 @@ const CAR_BODY_CONDITION_BODY = `
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 
-  float dentMask = condDent( condMetreP, uScratches );
-  // The relief in the normal hook still carries the shape; these three terms are
-  // what keep a dent readable when the light is flat or the highlight is elsewhere.
-  // Keep them all keyed to the SAME mask, so nothing can tint where nothing is bent
-  // — that was the old "camouflage" failure, a paint pattern with no relief under it.
-  roughnessFactor = mix( roughnessFactor, 0.9, dentMask * 0.4 );
-  // Occlusion in the fold. Squared so the shading stays on the deep centre of a
-  // lobe rather than washing the whole panel down a shade.
-  diffuseColor.rgb *= 1.0 - 0.2 * dentMask * dentMask;
-  // Bare primer on the sharpest lobes, where folded sheet actually loses its paint.
-  // Gated on damage so a single kerb scrape does not strip a panel.
-  float dentCrease = smoothstep( 0.55, 1.0, dentMask ) * smoothstep( 0.35, 0.9, uScratches );
-  vec3 dentPrimer = condLum > 0.42 ? vec3( 0.18 ) : vec3( 0.58 );
-  diffuseColor.rgb = mix( diffuseColor.rgb, dentPrimer, dentCrease * 0.3 );
+  if ( uDamageCount > 0 ) {
+    vec4 damageMasks;
+    float heavyMask;
+    vec3 unusedGradient;
+    condDamage( condP, condN, damageMasks, heavyMask, unusedGradient );
+    float damagePaintSurface = 1.0;
+    #ifdef USE_MAP
+      if ( uPalettePaint > 0.5 ) {
+        vec2 damageCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
+        damagePaintSurface = all( equal( damageCell, uPalettePaintCell ) ) ? 1.0 : 0.0;
+      }
+    #endif
+    damageMasks *= damagePaintSurface;
+    heavyMask *= damagePaintSurface;
+    float dentCore = damageMasks.x;
+    float dentRim = damageMasks.y;
+    float scratchMask = damageMasks.z;
+    float chipMask = damageMasks.w;
+
+    // A dent reads as a dark pressed centre and a narrow light folded rim even
+    // under flat light; the normal hook moves the real specular highlight.
+    diffuseColor.rgb *= 1.0 - 0.46 * dentCore * dentCore;
+    diffuseColor.rgb = mix(
+      diffuseColor.rgb,
+      min( vec3( 1.0 ), diffuseColor.rgb * 1.55 + vec3( 0.06 ) ),
+      dentRim * 0.68
+    );
+    roughnessFactor = mix( roughnessFactor, 0.88, max( dentCore, dentRim ) * 0.7 );
+
+    // Thin scratches and broken chip islands remove paint to dull bare steel.
+    // Metalness changes with colour and roughness; gray albedo alone is paint.
+    float exposedMetal = max(
+      max( chipMask, scratchMask * 0.86 ),
+      smoothstep( 0.58, 0.92, dentCore ) * 0.62
+    );
+    vec3 bareSteel = vec3( 0.24, 0.255, 0.27 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, bareSteel, exposedMetal * 0.92 );
+    roughnessFactor = mix( roughnessFactor, 0.62, exposedMetal * 0.78 );
+    metalnessFactor = mix( metalnessFactor, 0.72, exposedMetal * 0.72 );
+
+    // Heavy strikes hold dirt in the crushed pocket and crack paths. It remains
+    // local to that strike instead of becoming a full-body brown filter.
+    vec3 impactGrime = vec3( 0.16, 0.12, 0.085 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, impactGrime, heavyMask * 0.4 );
+    roughnessFactor = mix( roughnessFactor, 0.96, heavyMask * 0.45 );
+  }
 }`;
 
 /**
@@ -349,12 +473,9 @@ if ( uRust > 0.001 ) {
 }`;
 
 /**
- * Rust and dent relief.
- *
- * Both fields perturb the view-space normal before the BRDF, so their dominant cue is
- * a shifted highlight rather than a paint mark. Both gradients are finite differences
- * in the field's own space — world for rust, mesh-local for dents — and both then
- * rotate into view space, because that is the space the normal is in by this point.
+ * Rust and localized impact relief. Both perturb the view-space normal before the
+ * BRDF. Impact gradients are analytic in world metres, so dents keep the same depth
+ * from bonnet-close inspection to the chase camera without four extra field taps.
  */
 const CAR_BODY_NORMAL = `
 #include <normal_fragment_maps>
@@ -369,39 +490,29 @@ if ( uRust > 0.001 ) {
   ) / COND_PIT_EPS;
   vec3 condWN = normalize( vCondWorldNormal );
   condGrad -= condWN * dot( condGrad, condWN );
-  // The normal is in view space by this point, so the world-space gradient has
-  // to be rotated into view space before it can perturb it.
   vec3 condVG = ( viewMatrix * vec4( condGrad, 0.0 ) ).xyz;
   normal = normalize( normal - condVG * uRust * COND_PIT_DEPTH );
 }
 
-if ( uScratches > 0.001 ) {
-  // Mesh-local metres, not model units: the epsilon below is a real 52 mm step, and
-  // a centimetre-authored pack would otherwise difference the field 100x too finely
-  // and report a gradient of nearly zero.
-  vec3 dentP = vCondLocalPos * vCondScale;
-  float dentH = condDent( dentP, uScratches );
-  vec3 dentGrad = vec3(
-    condDent( dentP + vec3( COND_DENT_EPS, 0.0, 0.0 ), uScratches ) - dentH,
-    condDent( dentP + vec3( 0.0, COND_DENT_EPS, 0.0 ), uScratches ) - dentH,
-    condDent( dentP + vec3( 0.0, 0.0, COND_DENT_EPS ), uScratches ) - dentH
-  ) / COND_DENT_EPS;
-  // Only the part of the gradient that lies IN the surface tilts a normal; the
-  // component along it is the field getting deeper, not the panel sloping.
-  vec3 dentLN = normalize( vCondLocalNormal );
-  dentGrad -= dentLN * dot( dentGrad, dentLN );
-  // Local -> world through the mesh's own axes (see VERTEX_VARYING for why this is
-  // not the model matrix), then world -> view, the space this normal is in.
-  vec3 dentWG =
-    vCondAxisX * dentGrad.x +
-    vCondAxisY * dentGrad.y +
-    vCondAxisZ * dentGrad.z;
-  vec3 dentVG = ( viewMatrix * vec4( dentWG, 0.0 ) ).xyz;
-  // PLUS, not minus. The field is a DEPTH: the panel is pressed IN where the mask is
-  // high, so the surface falls away along the gradient and the normal leans with it.
-  // Subtracting made every dent a blister — convex lobes standing off the bodywork,
-  // which is what a plus sign costs you here.
-  normal = normalize( normal + dentVG * COND_DENT_DEPTH );
+if ( uDamageCount > 0 ) {
+  vec4 damageMasks;
+  float heavyMask;
+  vec3 damageGradient;
+  vec3 condWN = normalize( vCondWorldNormal );
+  condDamage( vCondWorldPos, condWN, damageMasks, heavyMask, damageGradient );
+  float damagePaintSurface = 1.0;
+  #ifdef USE_MAP
+    if ( uPalettePaint > 0.5 ) {
+      vec2 damageCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
+      damagePaintSurface = all( equal( damageCell, uPalettePaintCell ) ) ? 1.0 : 0.0;
+    }
+  #endif
+  damageGradient *= damagePaintSurface;
+  damageGradient -= condWN * dot( damageGradient, condWN );
+  vec3 damageVG = ( viewMatrix * vec4( damageGradient, 0.0 ) ).xyz;
+  // Positive gradient means depth increases into the panel; adding it makes the
+  // flanks lean inward. The scratch contribution adds a much finer raised edge.
+  normal = normalize( normal + damageVG * COND_DENT_DEPTH );
 }`;
 
 /**
@@ -436,6 +547,10 @@ function patchCarBodyShader(
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
+  shader.uniforms.uDamageCount = uniforms.damageCount;
+  shader.uniforms.uDamagePosRadius = uniforms.damagePosRadius;
+  shader.uniforms.uDamageNormalStrength = uniforms.damageNormalStrength;
+  shader.uniforms.uDamageMeta = uniforms.damageMeta;
 
   shader.vertexShader = shader.vertexShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
@@ -451,7 +566,7 @@ function patchCarBodyShader(
 /** Cheap atlas recolouring for static cars; deliberately excludes dynamic wear. */
 function patchCarPaletteShader(
   shader: WebGLProgramParametersWithUniforms,
-  uniforms: CarBodyUniforms,
+  uniforms: CarPaletteUniforms,
 ): void {
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
@@ -568,6 +683,16 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
+    damageCount: { value: 0 },
+    damagePosRadius: {
+      value: Array.from({ length: MAX_BODY_DAMAGE_IMPACTS }, () => new THREE.Vector4()),
+    },
+    damageNormalStrength: {
+      value: Array.from({ length: MAX_BODY_DAMAGE_IMPACTS }, () => new THREE.Vector4()),
+    },
+    damageMeta: {
+      value: Array.from({ length: MAX_BODY_DAMAGE_IMPACTS }, () => new THREE.Vector4()),
+    },
   };
   carBodyUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
@@ -583,7 +708,7 @@ export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Mater
   const material = cloneCarPaintMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
-  const uniforms: CarBodyUniforms = {
+  const uniforms: CarPaletteUniforms = {
     dirt: { value: 0 },
     rust: { value: 0 },
     scratches: { value: 0 },
@@ -620,24 +745,63 @@ export function setCarBodyCondition(
   carRoot: THREE.Object3D,
   dirt: number,
   scratches: number,
+  damage: readonly BodyDamageImpact[] = [],
 ): void {
+  const count = Math.min(damage.length, MAX_BODY_DAMAGE_IMPACTS);
+  const first = damage.length - count;
+  for (let i = 0; i < count; i++) {
+    const impact = damage[first + i]!;
+    damageVectorScratch
+      .set(impact.x, impact.y, impact.z)
+      .applyQuaternion(carRoot.quaternion)
+      .add(carRoot.position);
+    damagePositionScratch[i]!.set(
+      damageVectorScratch.x,
+      damageVectorScratch.y,
+      damageVectorScratch.z,
+      impact.radius,
+    );
+    damageVectorScratch
+      .set(impact.nx, impact.ny, impact.nz)
+      .applyQuaternion(carRoot.quaternion)
+      .normalize();
+    damageNormalScratch[i]!.set(
+      damageVectorScratch.x,
+      damageVectorScratch.y,
+      damageVectorScratch.z,
+      impact.strength,
+    );
+    damageMetaScratch[i]!.set(DAMAGE_TYPE_CODE[impact.type], impact.seed, 0, 0);
+  }
+
   carRoot.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const material = mesh.material as THREE.Material | THREE.Material[];
     if (Array.isArray(material)) {
-      for (const m of material) writeCarBodyCondition(m, dirt, scratches);
+      for (const m of material) writeCarBodyCondition(m, dirt, scratches, count);
     } else {
-      writeCarBodyCondition(material, dirt, scratches);
+      writeCarBodyCondition(material, dirt, scratches, count);
     }
   });
 }
 
-function writeCarBodyCondition(material: THREE.Material, dirt: number, scratches: number): void {
+function writeCarBodyCondition(
+  material: THREE.Material,
+  dirt: number,
+  scratches: number,
+  damageCount: number,
+): void {
   const uniforms = carBodyUniforms.get(material);
-  if (uniforms === undefined) return;
+  if (uniforms === undefined || !hasDamageUniforms(uniforms)) return;
   uniforms.dirt.value = dirt;
   uniforms.scratches!.value = scratches;
+  uniforms.damageCount.value = damageCount;
+  for (let i = 0; i < damageCount; i++) {
+    uniforms.damagePosRadius.value[i]!.copy(damagePositionScratch[i]!);
+    uniforms.damageNormalStrength.value[i]!.copy(damageNormalScratch[i]!);
+    uniforms.damageMeta.value[i]!.copy(damageMetaScratch[i]!);
+  }
 }
 
 /** Applies cosmetic wear, with irreversible engine destruction forced visibly burnt. */
