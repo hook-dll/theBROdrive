@@ -1,5 +1,14 @@
 import type { Item, PartItem } from '../items/items';
-import { variant, type BodyClass, type EngineSpec, type FuelType, type PartInstance } from '../parts/registry';
+import {
+  variant,
+  type BodyClass,
+  type EngineSpec,
+  type FuelType,
+  type PartInstance,
+  type RadiatorClass,
+  type RadiatorSpec,
+} from '../parts/registry';
+import { preferredRadiatorClass } from './cooling';
 
 /** Every car exposes the same four service positions, left to right. */
 export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'fuel_tank'] as const;
@@ -68,25 +77,46 @@ function servicePart(carId: string, suffix: string, variantId: string): PartItem
   };
 }
 
+/** The radiator class a given class of engine leaves the factory with. */
+const FACTORY_RADIATOR: Readonly<Record<RadiatorClass, string>> = {
+  small: 'radiator_small',
+  standard: 'radiator_standard',
+  large: 'radiator_copper',
+};
+
 /**
  * Factory state for a roadworthy car. The turbine position starts empty: forced
  * induction is optional, while the engine and both reservoirs are required.
+ *
+ * The radiator is chosen to SUIT THE ENGINE (`preferredRadiatorClass`) rather than
+ * being one standard core for all forty-six bodies. A car that left a factory was
+ * cooled adequately; the undersized-radiator failure is something the player
+ * creates by swapping parts or inherits from a car somebody else has been at.
  */
 export function createBonnetStorage(
   carId: string,
   engineVariantId: string,
   bodyClass: BodyClass,
   tankCapacity: number,
+  /**
+   * Forces a specific radiator instead of the engine's own class. This is how a
+   * roadside find can arrive with somebody else's bodge already fitted.
+   */
+  radiatorVariantId?: string,
 ): (Item | null)[] {
   const tankVariant = bodyClass === 'bus' || bodyClass === 'truck'
     ? 'tank_140'
     : tankCapacity <= 45
       ? 'tank_40'
       : 'tank_65';
+  const engine = variant(engineVariantId).engine;
+  const radiatorVariant =
+    radiatorVariantId ??
+    (engine ? FACTORY_RADIATOR[preferredRadiatorClass(engine)] : 'radiator_standard');
   return [
     servicePart(carId, 'engine', engineVariantId),
     null,
-    servicePart(carId, 'radiator', 'radiator_standard'),
+    servicePart(carId, 'radiator', radiatorVariant),
     servicePart(carId, 'fuel-tank', tankVariant),
   ];
 }
@@ -128,16 +158,40 @@ export function destroyedEngineSpec(engine: EngineSpec): EngineSpec {
     brakingCoeff: Math.min(engine.brakingCoeff * 0.2, 0.02),
   };
 }
-export type EngineFailureReason = 'water' | 'oil';
+export type EngineFailureReason = 'oil' | 'overheat';
 
-/** Called only for a running engine; turbine presence intentionally has no bearing. */
+/**
+ * Instant, unsurvivable engine failures for a RUNNING engine. Oil only.
+ *
+ * Dry water used to be here beside it and destroyed the engine on the spot. It is
+ * gone because the cooling system now models what actually happens: no water means
+ * no heat rejection, the temperature runs away over the next half minute, the lamp
+ * lights, power falls off, the engine stalls, and only then — if the player has
+ * driven through all of it — does it seize (`EngineCoolingSystem`, vehicle/cooling.ts,
+ * reports `overheat` through the same destruction path). Oil has no such gauge, so
+ * running the sump dry stays immediate.
+ */
 export function engineFailureReason(
   cells: readonly (Item | null)[],
-  waterLitres: number,
   oilLitres: number,
 ): EngineFailureReason | null {
   if (bonnetPart(cells, 0)?.destroyed) return null;
-  if (bonnetPart(cells, 2) === null || waterLitres <= 0) return 'water';
   if (oilLitres <= 0) return 'oil';
   return null;
+}
+
+/** The fitted radiator's cooling spec, or null when the slot is empty. */
+export function bonnetRadiator(cells: readonly (Item | null)[]): RadiatorSpec | null {
+  const part = bonnetPart(cells, 2);
+  return part ? variant(part.variantId).radiator ?? null : null;
+}
+
+/**
+ * Water the car can hold, litres: whatever the fitted radiator holds and nothing
+ * without one. Every level readout and every fill resolves through this, so a car
+ * with no radiator cannot be poured into rather than silently accepting water into
+ * a slot with no core in it.
+ */
+export function bonnetWaterCapacity(cells: readonly (Item | null)[]): number {
+  return bonnetRadiator(cells)?.capacity ?? 0;
 }

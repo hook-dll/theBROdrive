@@ -10,6 +10,7 @@ import {
   trunkCellLocal,
   type TrunkGridRayHit,
 } from '../src/vehicle/trunk';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -31,6 +32,7 @@ const car: CarState = {
   scratches: 0,
   waterLitres: 4,
   oilLitres: 4,
+  engineTempC: COLD_SOAK_C,
   storage: new Array(TRUNK_CELL_COUNT).fill(null),
   odometer: 0,
   x: 0,

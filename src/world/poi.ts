@@ -5,7 +5,7 @@ import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
 import type { CarState, GameWorld } from '../game/state';
-import { waterCapacity, oilCapacity, variant, type FuelType } from '../parts/registry';
+import { oilCapacity, variant, type FuelType } from '../parts/registry';
 import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
 import { makeFlatMaterial } from '../render/materials';
 import {
@@ -17,7 +17,8 @@ import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
 import { jobAt, type FreightField } from './freight';
-import { createBonnetStorage } from '../vehicle/bonnet';
+import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
+import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
 
@@ -618,8 +619,21 @@ function makeWorkingCar(
 ): CarState {
   const engine = variant(def.engineId).engine;
   const halfYaw = yaw / 2;
+  const carId = ctx.world.generatedPartId('poi-car', poi.index, slot);
+  // One roadside find in four has had its radiator replaced with the cheapest core
+  // that would bolt on. It drives away fine and then will not hold temperature on a
+  // climb, which is exactly the diagnosis this system exists to make possible — and
+  // it is why radiators are worth looking for in wrecks.
+  const bodged = hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 9) < 0.25;
+  const bonnet = createBonnetStorage(
+    carId,
+    def.engineId,
+    def.bodyClass,
+    def.tankLitres,
+    bodged ? 'radiator_small' : undefined,
+  );
   return {
-    id: ctx.world.generatedPartId('poi-car', poi.index, slot),
+    id: carId,
     modelId: def.id,
     gizmos: {},
     headlightMode: 'off',
@@ -633,15 +647,15 @@ function makeWorkingCar(
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
     fuelKind: engine?.fuel ?? null,
-    waterLitres: engine ? waterCapacity(engine) : 0,
+    // Part-topped, like the fuel: enough water to set off, little enough that a hot
+    // afternoon makes the level worth a look before a long leg.
+    waterLitres:
+      bonnetWaterCapacity(bonnet) * (0.45 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 10) * 0.4),
     oilLitres: engine ? oilCapacity(engine) : 0,
+    // Stood by the road for months: at air temperature, not at operating heat.
+    engineTempC: COLD_SOAK_C,
     storage: new Array(def.storageCells).fill(null),
-    bonnet: createBonnetStorage(
-      ctx.world.generatedPartId('poi-car', poi.index, slot),
-      def.engineId,
-      def.bodyClass,
-      def.tankLitres,
-    ),
+    bonnet,
     odometer: Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 4) * 240_000),
     x,
     y,

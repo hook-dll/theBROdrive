@@ -342,6 +342,40 @@ body {
   stroke: var(--hud-alarm-strong);
 }
 
+/* The ordinary driving cluster has no room for a separate temperature lamp;
+   colour keeps the fault visible without changing its footprint. */
+.hud-temperature.is-cold .hud-dial-value,
+.hud-temperature.is-cold .hud-dial-needle {
+  stroke: #5fa8c7;
+}
+
+.hud-temperature.is-normal .hud-dial-value,
+.hud-temperature.is-normal .hud-dial-needle {
+  stroke: #7da867;
+}
+
+.hud-temperature.is-warm .hud-dial-value,
+.hud-temperature.is-warm .hud-dial-needle {
+  stroke: var(--hud-diesel);
+}
+
+.hud-temperature.is-hot .hud-dial-value,
+.hud-temperature.is-hot .hud-dial-needle {
+  stroke: var(--hud-alarm);
+}
+
+.hud-temperature.is-critical .hud-dial-value,
+.hud-temperature.is-critical .hud-dial-needle {
+  stroke: var(--hud-alarm-strong);
+  animation: hud-temperature-critical 0.75s steps(2, end) infinite;
+}
+
+/* A flashing scale is legible at this size while a full dashboard pulse would
+   compete with steering and road motion at the edge of the player's vision. */
+@keyframes hud-temperature-critical {
+  50% { opacity: 0.35; }
+}
+
 
 .hud-indicators {
   display: flex;

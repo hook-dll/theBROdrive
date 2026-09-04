@@ -8,10 +8,11 @@
  */
 
 import { carModel } from '../vehicle/carmodels';
-import { waterCapacity, oilCapacity, variant } from '../parts/registry';
+import { oilCapacity, variant } from '../parts/registry';
 import type { Item } from '../items/items';
 import type { CarState, GameWorld } from './state';
-import { createBonnetStorage } from '../vehicle/bonnet';
+import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
+import { COLD_SOAK_C } from '../vehicle/cooling';
 
 /** What the pause menu chose to spawn: a complete model catalogue id. */
 export interface SpawnRequest {
@@ -34,6 +35,7 @@ export function spawnCarState(
   const engine = variant(def.engineId).engine;
   const half = heading / 2;
   const id = world.runtimePartId();
+  const bonnet = createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres);
   const car: CarState = {
     // Runtime ids come from the world's own counter, shared with runtime parts,
     // so spawned ids can never collide with generated or saved ones.
@@ -54,10 +56,11 @@ export function spawnCarState(
     // chore before every test.
     fuelLitres: def.tankLitres,
     fuelKind: engine?.fuel ?? null,
-    waterLitres: engine ? waterCapacity(engine) : 0,
+    waterLitres: bonnetWaterCapacity(bonnet),
     oilLitres: engine ? oilCapacity(engine) : 0,
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres),
+    bonnet,
     odometer: 0,
     x,
     y,

@@ -81,11 +81,11 @@ export interface CarState {
   /**
    * Water in the radiator and oil in the engine, litres.
    *
-   * Unlike fuel these are not consumed by driving — an old engine SEEPS them, and
-   * that is the whole mechanic: a slow drift downward that eventually makes you
-   * stop and look for a can. Capacities come from the engine's cylinder count (see
-   * `waterCapacity` / `oilCapacity` in parts/registry.ts) rather than a table,
-   * because a bigger engine holding more of both needs no authoring.
+   * Neither is consumed by driving the way fuel is. Oil SEEPS at a flat rate while
+   * the engine runs; water is lost to the cap and the hoses, and much faster once
+   * the engine is allowed to boil (see vehicle/cooling.ts). Water capacity belongs
+   * to the FITTED RADIATOR (`bonnetWaterCapacity`), oil capacity to the engine's
+   * cylinder count (`oilCapacity`), because that is what each one physically is.
    *
    * These live on the CAR, not on the container part, because the running engine is
    * what drains them. Detaching the container moves its share into the part (see the
@@ -93,6 +93,17 @@ export interface CarState {
    */
   waterLitres: number;
   oilLitres: number;
+  /**
+   * Coolant temperature, degrees Celsius.
+   *
+   * Persisted per car because it is real state, not a derived reading: a car parked
+   * hot is still hot a minute later, and the engine that seized from overheating did
+   * so because of a history the save has to carry. Live simulation lives in
+   * `EngineCoolingSystem` and mirrors into here on the same throttled cadence as
+   * fuel, so a number changing in the third decimal place does not write authority
+   * three hundred times a second.
+   */
+  engineTempC: number;
   /**
    * Boot cells. `null` is an empty cell; the array's LENGTH is the car's capacity,
    * fixed at spawn from the model, so a save carries the layout it was created with.
@@ -250,6 +261,7 @@ export type WorldDelta =
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
+  | { t: 'car_engine_temp'; carId: string; celsius: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
   | { t: 'trailer_add'; trailer: TrailerState }
@@ -555,6 +567,17 @@ export class GameWorld {
         const level = Math.max(0, delta.litres);
         if (delta.fluid === 'water') car.waterLitres = level;
         else car.oilLitres = level;
+        break;
+      }
+      case 'car_engine_temp': {
+        const car = s.cars[delta.carId];
+        if (!car) break;
+        // Bounded here rather than trusted: this is the one field a corrupt save or
+        // a divide upstream could turn into a NaN that then poisons every later
+        // step of the thermal integrator.
+        car.engineTempC = Number.isFinite(delta.celsius)
+          ? Math.min(400, Math.max(-60, delta.celsius))
+          : 30;
         break;
       }
       case 'car_storage': {

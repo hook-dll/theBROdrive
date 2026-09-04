@@ -54,8 +54,70 @@ export interface EngineSpec {
   /** Drag torque per rad/s of crank speed. This is what engine braking is made of. */
   readonly brakingCoeff: number;
   readonly cylinders: number;
+  /**
+   * Cooling profile overrides. Anything omitted is derived by `engineHeat`, so an
+   * engine only states what makes it unusual (a lazy Volga four that runs cool, a
+   * truck diesel with a big water jacket).
+   */
+  readonly heat?: Partial<EngineHeatSpec>;
 }
 
+
+/**
+ * How hard an engine has to be cooled, and the temperatures it lives between.
+ *
+ * Authored as an OPTIONAL override on `EngineSpec`: `engineHeat` below derives a
+ * balanced profile from the numbers an engine already declares (peak power, fuel,
+ * cylinders), so adding an engine to the catalogue gets a working cooling profile
+ * for free and a tuner can override exactly the field they disagree with.
+ *
+ * Every temperature is degrees Celsius; every heat flow is kW.
+ */
+export interface EngineHeatSpec {
+  /** Where the thermostat wants to sit once warm. */
+  readonly operatingC: number;
+  /** The band where the engine makes full power. */
+  readonly optimalMinC: number;
+  readonly optimalMaxC: number;
+  /** Lamp lights, power starts to fall away. */
+  readonly warningC: number;
+  /** The engine stalls here and cannot restart until it has cooled. */
+  readonly criticalC: number;
+  /** Reached only by ignoring the lamp: the engine is destroyed. */
+  readonly maxC: number;
+  /** Heat into the coolant while idling. */
+  readonly idleHeatKw: number;
+  /** Additional heat at full throttle. */
+  readonly loadHeatKw: number;
+  /** Additional heat at the redline, independent of load. */
+  readonly rpmHeatKw: number;
+  /**
+   * Thermal mass of block, head and coolant together, kJ per kelvin. This alone
+   * decides how long warm-up and cool-down take.
+   */
+  readonly thermalMassKjPerK: number;
+  /**
+   * Radiator capability this engine needs, kW per kelvin of coolant-to-air
+   * difference. A radiator below it will not hold the temperature under load —
+   * that is the whole fitment mechanic (`radiatorFit` in vehicle/cooling.ts).
+   */
+  readonly coolingRequirementKwPerK: number;
+}
+
+/** Radiator size classes, smallest first. Also the three built meshes. */
+export const RADIATOR_CLASSES = ['small', 'standard', 'large'] as const;
+export type RadiatorClass = (typeof RADIATOR_CLASSES)[number];
+
+export interface RadiatorSpec {
+  readonly klass: RadiatorClass;
+  /** Water the core and header tank hold together, litres. */
+  readonly capacity: number;
+  /**
+   * Heat rejection at full airflow with a full core, kW per kelvin of
+   * coolant-to-air difference. Compare against `coolingRequirementKwPerK`.
+   */
+  readonly coolingKwPerK: number;
+}
 export interface GearboxSpec {
   /** Forward gear ratios, first to top. */
   readonly ratios: readonly number[];
@@ -81,6 +143,8 @@ export interface PartVariant {
   readonly mass: number;
   readonly engine?: EngineSpec;
   readonly gearbox?: GearboxSpec;
+  /** Cooling capability, on radiator variants only. */
+  readonly radiator?: RadiatorSpec;
   readonly wheel?: WheelSpec;
   /** Fuel tank capacity, litres. */
   readonly capacity?: number;
@@ -463,23 +527,52 @@ const LADA_VARIANTS: readonly PartVariant[] = [
  * Radiators. The one service part whose variants come from three corners of this
  * catalogue: a radiator IS the car's water container, so all three sit in a bonnet
  * slot rather than two of them being cosmetic look-alikes wearing the same name.
+ *
+ * The three size classes are the whole fitment mechanic. `coolingKwPerK` is heat
+ * rejection per kelvin of coolant-to-air difference at full airflow, and an engine
+ * states how much of it it needs (`coolingRequirementKwPerK`), so:
+ *
+ *   small     1.10 kW/K   holds a four-cylinder (needs ~0.7-0.9)
+ *   standard  1.65 kW/K   holds a six (needs ~1.5)
+ *   large     2.45 kW/K   holds the V8 and the 6.6 truck diesel (needs ~1.9-2.3)
+ *
+ * Undersizing does not forbid the fit: the engine simply cannot hold temperature
+ * under load, which is the failure the player is meant to diagnose. The mass
+ * differences are real too, and they already feed chassis mass.
  */
 const RADIATOR_VARIANTS: readonly PartVariant[] = [
+  {
+    id: 'radiator_small',
+    kind: 'radiator',
+    label: 'small radiator',
+    mass: 7,
+    fits: ['car'],
+    radiator: { klass: 'small', capacity: 5.5, coolingKwPerK: 1.1 },
+  },
+  {
+    id: 'radiator_lada',
+    kind: 'radiator',
+    label: '2102 radiator',
+    mass: 8,
+    fits: ['car'],
+    radiator: { klass: 'small', capacity: 6.5, coolingKwPerK: 1.1 },
+  },
   {
     id: 'radiator_standard',
     kind: 'radiator',
     label: 'radiator',
     mass: 9,
     fits: ['car', 'truck', 'bus'],
+    radiator: { klass: 'standard', capacity: 9, coolingKwPerK: 1.65 },
   },
   {
     id: 'radiator_copper',
     kind: 'radiator',
     label: 'copper radiator',
-    mass: 11,
+    mass: 13,
     fits: ['car', 'truck', 'bus'],
+    radiator: { klass: 'large', capacity: 13, coolingKwPerK: 2.45 },
   },
-  { id: 'radiator_lada', kind: 'radiator', label: '2102 radiator', mass: 8, fits: ['car'] },
 ];
 
 export const ALL_VARIANTS: readonly PartVariant[] = [
@@ -576,45 +669,80 @@ export function applySponge(part: PartInstance, dt: number): boolean {
 }
 
 /**
- * Water and oil capacity for an engine, litres.
+ * Oil capacity for an engine, litres.
  *
  * Derived from cylinder count rather than authored per engine: a bigger engine
- * holds more of both, and the relationship is close enough to linear that a table
- * would only be six numbers restating this. Real four-cylinders of the era carry
- * roughly 6-7 L of water and 4 L of oil, which is what these land on.
+ * holds more, and the relationship is close enough to linear that a table would
+ * only be six numbers restating this. Water is NOT here — it belongs to the fitted
+ * radiator (`RadiatorSpec.capacity`), because which radiator is bolted in is what
+ * decides how much water the car can hold.
  */
-export function waterCapacity(engine: EngineSpec): number {
-  return 2.2 + engine.cylinders * 1.15;
-}
-
 export function oilCapacity(engine: EngineSpec): number {
   return 1.4 + engine.cylinders * 0.65;
 }
 
 /**
- * Litres per hour of engine running that each fluid seeps away.
+ * The cooling profile for an engine: authored overrides over derived defaults.
  *
- * These are NOT realistic — a sound engine loses neither. They are tuned so that a
- * full charge lasts roughly 150 km of cruising, which at 90 km/h is about an hour
- * and a half of driving:
+ * Everything here follows from numbers the engine already declares, so a new
+ * catalogue entry is cooled sensibly without authoring a second table:
  *
- *   4-cyl   6.8 L water / 4.0 L oil    ->  ~144 km / ~171 km
- *   6-cyl   9.1 L / 5.3 L              ->  ~193 km / ~227 km
- *   V8     11.4 L / 6.6 L              ->  ~241 km / ~283 km
+ *  - Heat into the coolant at full load is about the engine's own peak output. A
+ *    petrol engine of this era puts roughly a third of the fuel's energy out of the
+ *    crank and a third into the water, so 0.85x peak power is the right order.
+ *  - Thermal mass is the iron and the water together, and it alone sets how long
+ *    warm-up takes: 30 kJ/K on a four gives about a minute and a half of cruising
+ *    from a cold desert morning to 90 C.
+ *  - The cooling requirement is full-load heat divided by the ~62 K rise a radiator
+ *    is expected to hold at cruise, which is what maps the six engines onto the
+ *    three radiator classes.
+ *  - Diesels run hotter and tolerate more before they let go, exactly as the
+ *    thresholds below say.
  *
- * Deliberately expressed as an ABSOLUTE distance rather than a fraction of
- * ROAD_LENGTH. Tying it to the road's total length was the first attempt and it was
- * wrong twice over: it made the rates silently depend on a constant that has
- * nothing to do with engines, and it would rescale the whole mechanic if the road
- * ever grew — a longer road should mean MORE stops, not rarer ones. 150 km is a
- * number a player can hold in their head, and POIs sit every 1.2 km, so a top-up is
- * always reachable without it becoming a chore.
- *
- * Capacity scales with cylinder count while the rate is flat, so a big engine is
- * more self-sufficient between stops and pays for it at the fuel pump instead.
- * That asymmetry is intentional.
+ * Cached per spec object: the profile is pure, and the fixed step asks for it every
+ * tick for every live car.
  */
-export const WATER_LOSS_LPH = 4.25;
+const heatCache = new WeakMap<EngineSpec, EngineHeatSpec>();
+
+export function engineHeat(engine: EngineSpec): EngineHeatSpec {
+  const cached = heatCache.get(engine);
+  if (cached) return cached;
+
+  const diesel = engine.fuel === 'diesel';
+  const loadHeatKw = engine.peakPowerKw * (diesel ? 0.78 : 0.85);
+  const idleHeatKw = engine.peakPowerKw * 0.05;
+  const rpmHeatKw = engine.peakPowerKw * 0.1;
+  const derived: EngineHeatSpec = {
+    operatingC: diesel ? 95 : 90,
+    optimalMinC: diesel ? 80 : 75,
+    optimalMaxC: diesel ? 110 : 105,
+    warningC: diesel ? 115 : 110,
+    criticalC: diesel ? 135 : 125,
+    maxC: diesel ? 155 : 140,
+    idleHeatKw,
+    loadHeatKw,
+    rpmHeatKw,
+    thermalMassKjPerK: 12 + engine.cylinders * 4.5 + engine.peakPowerKw * 0.06,
+    coolingRequirementKwPerK: (idleHeatKw + loadHeatKw + rpmHeatKw) / 62,
+    ...engine.heat,
+  };
+  heatCache.set(engine, derived);
+  return derived;
+}
+
+/**
+ * Litres per hour of oil that a running engine seeps away.
+ *
+ * NOT realistic — a sound engine loses none. It is tuned so a full sump lasts
+ * roughly 170 km of cruising, which at 90 km/h is a couple of hours of driving.
+ * Deliberately an ABSOLUTE distance rather than a fraction of ROAD_LENGTH: a longer
+ * road should mean MORE stops, not rarer ones, and 150-200 km is a number a player
+ * can hold in their head while POIs sit every 1.2 km.
+ *
+ * Water has no flat rate any more. It boils off as a function of temperature (see
+ * `WATER_BOIL_LPH_PER_K` in vehicle/cooling.ts), which is what makes a mismatched
+ * radiator cost water as well as power.
+ */
 export const OIL_LOSS_LPH = 2.1;
 
 /**

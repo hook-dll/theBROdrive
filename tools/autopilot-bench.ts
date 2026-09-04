@@ -18,6 +18,7 @@ import type { Item } from '../src/items/items';
 import { variant } from '../src/parts/registry';
 import { preloadCarModels } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { Autopilot, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
@@ -75,6 +76,7 @@ function carState(road: Road): CarState {
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
     fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0,
     waterLitres: 10, oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('autopilot-bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0, x: p.x, y: p.y + 1.2, z: p.z,

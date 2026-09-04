@@ -1,6 +1,7 @@
 import { itemLabel } from '../items/items';
 import type { Item } from '../items/items';
 import { DAY_LENGTH } from '../game/state';
+import type { EngineTempReadout } from '../vehicle/cooling';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -18,6 +19,11 @@ export interface DrivingReadout {
   tankCapacity: number;
   engineRunning: boolean;
   engineDestroyed: boolean;
+  /**
+   * Engine coolant temperature, or null when the car has no engine fitted (the
+   * gauge then reads nothing rather than lying about a cold engine).
+   */
+  temperature: EngineTempReadout | null;
   /**
    * Water and oil as fractions of capacity. These have no dial: they sit still
    * for tens of minutes and then matter suddenly, which is a warning lamp's job,
@@ -105,6 +111,11 @@ export class Hud {
   private readonly fuelValue: SVGPathElement;
   private readonly fuelNeedle: SVGLineElement;
   private readonly engineOffEl: HTMLElement;
+  private readonly temperatureCluster: HTMLElement;
+  private readonly temperatureEl: SVGSVGElement;
+  private readonly temperatureValue: SVGPathElement;
+  private readonly temperatureNeedle: SVGLineElement;
+  private readonly temperatureReadoutEl: HTMLElement;
   private readonly handbrakeEl: HTMLElement;
   private readonly tcsEl: HTMLElement;
   private readonly warningsEl: HTMLElement;
@@ -121,6 +132,7 @@ export class Hud {
   private speedDeg = -1;
   private fuelDeg = -1;
   private clockDeg = -1;
+  private temperatureDeg = -1;
   private warningsSignature = '';
   private invSlots: HTMLElement[] = [];
   private invItems: readonly Item[] = [];
@@ -156,6 +168,14 @@ export class Hud {
     this.fuelValue = fuel.value;
     this.fuelNeedle = fuel.needle;
 
+    const temperature = this.buildDial('hud-temperature');
+    this.temperatureEl = temperature.svg;
+    this.temperatureValue = temperature.value;
+    this.temperatureNeedle = temperature.needle;
+    this.temperatureReadoutEl = el('div', 'hud-odometer');
+    this.temperatureCluster = el('div', 'hud-speed-cluster');
+    this.temperatureCluster.append(temperature.svg, this.temperatureReadoutEl);
+
     const clock = this.buildClock();
     this.clockNeedle = clock.needle;
 
@@ -176,7 +196,7 @@ export class Hud {
     this.warningsEl = el('div', 'hud-warnings is-hidden');
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, speedCluster, fuel.svg, clock.svg, indicators);
+    gaugeRow.append(tach.svg, speedCluster, fuel.svg, this.temperatureCluster, clock.svg, indicators);
 
     this.drivingCluster.append(
       gaugeRow,
@@ -346,10 +366,31 @@ export class Hud {
     );
     this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
 
+    const temperature = readout.temperature;
+    this.setVisible(this.temperatureCluster, temperature !== null);
+    if (temperature !== null) {
+      this.temperatureDeg = this.updateDial(
+        temperature.fraction,
+        1,
+        this.temperatureDeg,
+        this.temperatureValue,
+        this.temperatureNeedle,
+      );
+      this.setText(this.temperatureReadoutEl, `${Math.round(temperature.celsius)} C`);
+      this.temperatureEl.classList.toggle('is-cold', temperature.zone === 'cold');
+      this.temperatureEl.classList.toggle('is-normal', temperature.zone === 'normal');
+      this.temperatureEl.classList.toggle('is-warm', temperature.zone === 'warm');
+      this.temperatureEl.classList.toggle('is-hot', temperature.zone === 'hot');
+      this.temperatureEl.classList.toggle('is-critical', temperature.zone === 'critical');
+    }
+
     // Warning lamps. Built as a single string and diff-guarded, because this is in
     // the render path and the usual state of it is "unchanged for ten minutes".
     const warnings: string[] = [];
     if (readout.engineDestroyed) warnings.push('ENGINE DESTROYED');
+    if (temperature !== null && temperature.warning !== null) {
+      warnings.push(temperature.warning);
+    }
     if (readout.waterFraction < FLUID_ALARM_FRACTION) {
       warnings.push(readout.waterFraction <= 0 ? 'NO WATER' : 'WATER LOW');
     }

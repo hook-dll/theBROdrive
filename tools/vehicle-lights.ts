@@ -19,6 +19,7 @@ import { VehicleLightRig } from '../src/render/vehiclelights';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { carModel } from '../src/vehicle/carmodels';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { WorldOrigin } from '../src/world/origin';
 import { installBlankTextures } from './assetshim';
 
@@ -71,6 +72,7 @@ function carState(
       carModel(MODEL_ID).tankLitres,
     ),
     oilLitres: 10,
+    engineTempC: COLD_SOAK_C,
     storage: [],
     odometer: 0,
     x: index * 12,

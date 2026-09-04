@@ -1,0 +1,598 @@
+﻿Мне нужно разработать и внедрить полноценную, расширяемую систему охлаждения двигателя с радиаторами.
+
+Главная цель:
+создать радиаторы, которые подходят к разным типам автомобилей и двигателей, имеют разную эффективность охлаждения, содержат ограниченное количество воды и влияют на температуру двигателя. Также необходимо добавить простой визуальный индикатор температуры двигателя и сгенерировать простые 3D-модели радиаторов средствами Three.js или существующей системы ассетов проекта.
+
+Работай поэтапно и не переписывай существующую архитектуру без необходимости.
+
+
+Если в проекте уже есть похожая система температуры, повреждений, жидкостей или модульных деталей, переиспользуй её вместо создания дублирующей архитектуры.
+
+Не создавай новую физическую систему автомобиля. Интегрируй охлаждение в существующую систему.
+
+Архитектура системы охлаждения
+
+Создай отдельные переиспользуемые сущности:
+
+- EngineCoolingSystem;
+- Radiator;
+- CoolingSystemConfig;
+- TemperatureController или аналогичный модуль;
+- TemperatureGauge/HUD-компонент для интерфейса.
+
+Названия можно адаптировать под стиль проекта.
+
+Система должна быть data-driven: характеристики двигателей и радиаторов должны задаваться конфигурациями, а не быть жёстко зашиты в коде.
+
+Пример структуры двигателя:
+
+```js
+const engineConfigs = {
+  smallPetrol: {
+    name: 'Small Petrol Engine',
+    baseOperatingTemperature: 90,
+    optimalTemperatureMin: 75,
+    optimalTemperatureMax: 105,
+    warningTemperature: 110,
+    criticalTemperature: 125,
+    maximumTemperature: 140,
+
+    baseHeatGeneration: 0.8,
+    heatGenerationByLoad: 2.2,
+    heatGenerationByRpm: 0.4,
+
+    coolingRequirement: 1.0,
+    defaultRadiatorType: 'small'
+  },
+
+  largeDiesel: {
+    name: 'Large Diesel Engine',
+    baseOperatingTemperature: 95,
+    optimalTemperatureMin: 80,
+    optimalTemperatureMax: 110,
+    warningTemperature: 115,
+    criticalTemperature: 135,
+    maximumTemperature: 155,
+
+    baseHeatGeneration: 1.5,
+    heatGenerationByLoad: 3.5,
+    heatGenerationByRpm: 0.7,
+
+    coolingRequirement: 1.8,
+    defaultRadiatorType: 'large'
+  }
+};
+```
+
+Не обязательно использовать именно эти значения. Подбери сбалансированные значения после изучения существующей игры.
+
+
+```
+
+Параметры можно изменить, если они лучше соответствуют существующему балансу игры.
+
+## Этап 3. Модель температуры
+
+Добавь температуру двигателя как реальное состояние двигателя.
+
+У температуры должны быть:
+
+- текущая температура;
+- минимальная температура;
+- рабочий диапазон;
+- температура предупреждения;
+- критическая температура;
+- максимальная температура;
+- скорость нагрева;
+- скорость охлаждения.
+
+Температура должна зависеть как минимум от:
+
+1. типа двигателя;
+2. нагрузки на двигатель;
+3. оборотов двигателя;
+4. времени работы двигателя;
+5. эффективности радиатора;
+6. количества воды в радиаторе;
+7. скорости автомобиля или набегающего потока воздуха;
+8. температуры окружающей среды;
+9. состояния двигателя, если в игре уже есть повреждения;
+10. совместимости радиатора с двигателем.
+
+Используй стабильную модель, не зависящую от FPS. 
+
+
+Обязательные свойства поведения:
+
+- при малой нагрузке двигатель постепенно выходит на рабочую температуру;
+- при высокой нагрузке температура растёт быстрее;
+- при достаточном количестве воды и подходящем радиаторе температура стабилизируется;
+- при неподходящем или слишком слабом радиаторе двигатель перегревается;
+- при отсутствии воды охлаждение практически прекращается;
+- при низком уровне воды охлаждение постепенно ухудшается;
+- охлаждение не должно мгновенно снижать температуру;
+- после снятия нагрузки двигатель должен постепенно остывать;
+- температура не должна зависеть от частоты кадров;
+- температура не должна бесконечно уходить в отрицательные значения или становиться NaN/Infinity.
+
+Добавь ограничение и защиту от некорректных значений
+
+## Этап 4. Вода
+
+В качестве охлаждающей жидкости используется только вода.
+
+У каждого радиатора должны быть:
+
+- максимальная вместимость воды;
+- текущее количество воды;
+- возможность заправки;
+- возможность проверки уровня воды;
+- коэффициент эффективности в зависимости от заполненности.
+
+Добавь методы примерно такого типа:
+
+
+
+Вода может расходоваться постоянно, если это противоречит дизайну игры. Расход особенно заметен и увеличен при перегреве.
+
+Если системы утечек нет, не добавляй сложную механику повреждений без необходимости. Но архитектура должна позволять добавить утечку позже.
+
+
+
+Совместимость двигателей и радиаторов
+
+Реализуй систему совместимости.
+
+У двигателя могут быть требования:
+
+- минимальный класс радиатора;
+- предпочтительный класс радиатора;
+- список совместимых радиаторов;
+- множитель эффективности;
+- штраф за слишком маленький радиатор;
+- штраф за неподходящий тип радиатора.
+
+Примеры поведения:
+
+- маленький радиатор хорошо работает с маленьким двигателем;
+- маленький радиатор с большим двигателем работает, но двигатель постепенно перегревается;
+- большой радиатор на маленьком двигателе не должен ломать игру, но может быть избыточным;
+- несовместимый радиатор должен давать предупреждение;
+- если архитектура проекта позволяет, учитывай массу радиатора
+
+
+
+## Этап 6. Влияние температуры на двигатель
+
+Добавь несколько температурных зон:
+
+1. Холодный двигатель.
+2. Рабочая температура.
+3. Повышенная температура.
+4. Перегрев.
+5. Критический перегрев.
+
+В зависимости от температуры можно реализовать:
+
+- предупреждение игроку;
+- изменение цвета индикатора;
+- снижение мощности двигателя;
+- увеличение расхода топлива;
+- постепенное повреждение двигателя;
+- остановку двигателя при достижении критической температуры.
+
+Если в проекте ещё нет системы повреждений, сначала реализуй только:
+
+- визуальное предупреждение;
+- снижение мощности;
+- временное ограничение максимальных оборотов;
+- остановку двигателя при критическом перегреве.
+
+Не добавляй постоянное разрушение двигателя, пока не проверишь, как устроена существующая система повреждений.
+
+Снижение мощности должно корректно подключаться к уже существующей системе тяги и оборотов.
+
+## Этап 7. Воздушный поток и пустыня
+
+Так как игра происходит в пустыне, учти внешнюю температуру.
+
+
+Минимальные требования:
+
+- базовая температура воздуха влияет на итоговую температуру двигателя;
+- движение автомобиля улучшает охлаждение;
+- стоящий автомобиль охлаждается хуже;
+- при высокой температуре воздуха двигатель перегревается быстрее;
+- не нужно создавать сложную погодную систему, если её пока нет.
+
+Для скорости автомобиля используй безопасное нормирование:
+
+```js
+const normalizedSpeed = clamp(
+  vehicleSpeed / vehicle.maxCoolingSpeed,
+  0,
+  1
+);
+```
+
+Не допускай резкого скачка охлаждения при переходе от нулевой скорости к минимальной.
+
+## Этап 8. Индикатор температуры
+
+Добавь понятный HUD-индикатор температуры двигателя.
+
+Индикатор должен отображать:
+
+- текущую температуру;
+- цветовую зону;
+- процент заполнения шкалы;
+- предупреждение о перегреве;
+- состояние воды в радиаторе.
+- встрой его в текущую систему индикаторов на дашборде и выполни по их подобию.
+
+Цвета:
+
+- синий — двигатель холодный;
+- зелёный — нормальная рабочая температура;
+- жёлтый — температура повышена;
+- оранжевый — перегрев;
+- красный — критическая температура.
+
+
+Индикатор должен:
+
+- обновляться не чаще, чем это необходимо;
+- не создавать новые DOM-элементы каждый кадр;
+- корректно работать после смены автомобиля;
+- скрываться или показывать сообщение, если у автомобиля нет двигателя;
+- быть отделён от логики физики.
+
+
+Сгенерируй простые low-poly модели радиаторов средствами Three.js, если в проекте нет готовых моделей.
+
+Не нужно создавать сложные текстуры. Используй:
+
+- BoxGeometry;
+- PlaneGeometry;
+- CylinderGeometry;
+- тонкие повторяющиеся пластины;
+- боковые бачки;
+- верхний и нижний патрубки;
+- простые материалы.
+
+Создай минимум три визуальных варианта:
+
+1. Маленький радиатор.
+2. Стандартный радиатор.
+3. Большой усиленный радиатор.
+
+Каждая модель должна:
+
+- быть отдельным `THREE.Group`;
+- иметь одинаковую точку крепления;
+- иметь разумный масштаб;
+- поддерживать поворот и позиционирование;
+- иметь понятное имя;
+- не содержать лишних деталей, которые будут сильно влиять на производительность;
+- визуально отличаться по размеру и конструкции.
+
+
+Не создавай новую модель каждый кадр. Модель должна создаваться один раз и переиспользоваться через кэш или clone.
+
+Добавь точки подключения:
+
+- radiatorMount;
+- inlet;
+- outlet;
+- optionalFanMount.
+
+ Интеграция с автомобилем
+
+У автомобиля должен появиться объект охлаждения:
+
+```js
+vehicle.coolingSystem
+```
+
+Он должен содержать:
+
+```js
+{
+  engine,
+  radiator,
+  temperature,
+  waterAmount,
+  isOverheating,
+  isCritical,
+  performanceMultiplier
+}
+```
+
+Предпочтительно сделать методы:
+
+```js
+vehicle.coolingSystem.update(deltaTime, context);
+vehicle.coolingSystem.installRadiator(radiator);
+vehicle.coolingSystem.addWater(amount);
+vehicle.coolingSystem.getState();
+vehicle.coolingSystem.reset();
+```
+
+Контекст обновления может выглядеть так:
+
+```js
+{
+  engineLoad,
+  rpm,
+  speed,
+  maxSpeed,
+  ambientTemperature,
+  vehicleMass,
+  isMoving
+}
+```
+
+Интеграция должна происходить в существующем игровом цикле.
+
+Проверь, что:
+
+- система корректно работает при смене автомобиля;
+- у каждого автомобиля отдельное состояние температуры;
+- температура одного автомобиля не влияет на другой;
+- выключенный двигатель перестаёт нагреваться и постепенно остывает;
+- после перезапуска двигателя состояние ведёт себя предсказуемо;
+- переключение камер не влияет на расчёты;
+- замедление или ускорение времени игры не ломает систему.
+
+
+Нужны тесты или ручные сценарии:
+
+1. Маленький двигатель + маленький радиатор + полный радиатор:
+   температура стабилизируется.
+2. Большой двигатель + маленький радиатор:
+   температура растёт при высокой нагрузке.
+3. Большой двигатель + большой радиатор:
+   охлаждение справляется лучше.
+4. Любой двигатель без воды:
+   температура быстро растёт.
+5. Частично заполненный радиатор:
+   охлаждение слабее, чем у полного.
+6. Автомобиль стоит на месте:
+   охлаждение хуже, чем во время движения.
+7. Двигатель выключен:
+   температура постепенно снижается.
+8. Высокая температура пустыни:
+   двигатель перегревается быстрее.
+9. Работа при низком FPS:
+   результат не должен сильно отличаться.
+10. Установка несовместимого радиатора:
+    корректный отказ с понятной причиной.
+
+
+
+## Этап 12. Производительность
+
+Соблюдай следующие требования:
+
+- не создавай новые объекты и DOM-элементы каждый кадр;
+- не создавай новые 3D-модели в update-loop;
+- используй `deltaTime`;
+- избегай большого количества отдельных Mesh, если радиатор можно собрать эффективнее;
+- не выполняй тяжёлые вычисления чаще необходимого;
+- не ломай существующий FPS;
+- не меняй публичные API существующих систем без необходимости.
+
+## Этап 13. Результат
+
+После реализации предоставь:
+
+1. Список изменённых и новых файлов.
+2. Краткое описание архитектуры.
+3. Объяснение формулы нагрева и охлаждения.
+4. Список доступных двигателей и радиаторов.
+5. Описание подключения системы к игровому циклу.
+6. Описание подключения HUD-индикатора.
+7. Инструкцию по добавлению нового типа двигателя.
+8. Инструкцию по добавлению нового типа радиатора.
+9. Список проверенных сценариев.
+10. Список известных ограничений.
+
+Перед завершением проверь проект на:
+
+- синтаксические ошибки;
+- ошибки импорта;
+- ошибки `undefined`;
+- ошибки при отсутствии радиатора;
+- ошибки при нулевом количестве воды;
+- ошибки при отсутствии двигателя;
+- ошибки при смене автомобиля;
+- ошибки при остановленном двигателе.
+
+Если какие-либо названия файлов, классов или полей в проекте отличаются от описанных выше, адаптируй решение к существующей кодовой базе, а не создавай параллельную несовместимую систему.
+
+Главное требование:
+система должна быть модульной, расширяемой и понятной для дальнейшего добавления новых двигателей, радиаторов, утечек, вентиляторов, повреждений и разных охлаждающих жидкостей.
+```
+
+---
+
+# IMPLEMENTATION REPORT
+
+## 1. Files
+
+New:
+- `src/vehicle/cooling.ts` — the whole thermal model, radiator fitment and the
+  dashboard readout shape. No renderer, physics or world reference.
+- `tools/cooling.ts` — 28 checks over the model (fitment, behaviour, robustness,
+  consequences). `bun tools/cooling.ts`
+- `tools/cooling-drive.ts` — 17 checks over the INTEGRATION, driving real Vehicles
+  in a real physics world. `bun tools/cooling-drive.ts`
+- `tools/coollab/` — visual lab: the four radiator meshes and the gauge's five zone
+  colours. Serve the dev server and open `/tools/coollab/`.
+
+Changed:
+- `src/parts/registry.ts` — `EngineHeatSpec`, `RadiatorSpec`, `RADIATOR_CLASSES`,
+  `engineHeat()`, radiator variants with cooling data, `waterCapacity(engine)`
+  removed (water belongs to the radiator now), `WATER_LOSS_LPH` removed.
+- `src/vehicle/bonnet.ts` — slot 2 lookups (`bonnetRadiator`,
+  `bonnetWaterCapacity`), factory radiator chosen to suit the engine,
+  `engineFailureReason` reduced to oil, `EngineFailureReason` gains `overheat`.
+- `src/vehicle/vehicle.ts` — owns one `EngineCoolingSystem`, drives it from the
+  fixed step and from `settle`, mirrors `engineTempC` into authority, latches the
+  overheat stall, seizes a cooked engine through the existing destruction path.
+- `src/vehicle/drivetrain.ts` — `setThermalLimits(performance, revLimit)`.
+- `src/game/state.ts` — `CarState.engineTempC`, `car_engine_temp` delta + reducer.
+- `src/save/save.ts` — migrates `engineTempC` (absent = cold soak).
+- `src/game/spawn.ts`, `src/world/house.ts`, `src/world/poi.ts` — water from the
+  fitted core, cold engine at spawn, one POI car in four carries a bodged radiator.
+- `src/player/interaction.ts` — water capacity from the core; fitment warning on
+  both the "take" and the "install" prompt.
+- `src/render/partmesh.ts` — three radiator meshes by class.
+- `src/ui/hud.ts`, `src/ui/hud.css` — temperature gauge and its zone colours.
+- `src/main.ts` — passes the readout; water fraction now measured against the core.
+- 9 `tools/*` benches — the new `CarState` field.
+
+## 2. Architecture
+
+`EngineCoolingSystem` is one object per `Vehicle`, therefore one per car, which is
+what keeps two cars' temperatures independent. It holds no engine reference beyond
+the specs it was configured with and touches nothing outside itself, which is why
+the harness can drive it without a physics world.
+
+Data is in the registry, not in code: `EngineHeatSpec` per engine (derived from the
+numbers an engine already declares, overridable field by field through
+`EngineSpec.heat`) and `RadiatorSpec` per radiator variant. `radiatorFit()` is the
+single compatibility rule, used by the simulation AND by the bonnet prompt, so the
+two can never disagree about whether a core suits an engine.
+
+`CarState.engineTempC` is authority. The live value is mirrored in the Vehicle and
+flushed on the same throttled cadence as fuel, water and oil.
+
+## 3. Heating and cooling formula
+
+    dT/dt   = ( heatIn - heatOut ) / thermalMass
+    heatIn  = idle + load * throttle + rpm * revs                      [kW]
+    heatOut = ( core * fit * airflow * water * thermostat + shell ) * (T - air)
+
+- `airflow = 0.34 + 0.66 * min(speed / 22 m/s, 1)`. Linear from a standstill on
+  purpose: a steeper curve made the first metre per second of a rolling start dump
+  the temperature, which reads as a bug from the driver's seat.
+- `water = min(fill / 0.7, 1)`, and exactly 0 when the core is dry — no water, no
+  circuit. Only the shell loss remains, so a dry engine runs away in tens of
+  seconds rather than being destroyed on the spot.
+- `thermostat` is a smoothstep over `operating - 10 .. operating + 8`. It is
+  load-bearing, not detail: without it the balance has one equilibrium per load and
+  a correctly cooled car cruising gently settled at 52 C and never warmed up at
+  all. With it the ENGINE picks the temperature at light load and the RADIATOR
+  picks it under load.
+- Integration is SEMI-IMPLICIT: the loss term is evaluated at the end of the step,
+  which is unconditionally stable. Forward Euler on the same balance oscillates and
+  then diverges once `dt * k / mass` exceeds 2, which one hitching frame reaches.
+  Measured: 240 Hz, 5 Hz and 0.5 Hz agree within 2 C, and a one-hour step stays
+  finite and monotone.
+- Water loss: 0.55 L/h of seep while running, plus 2.2 L/h per kelvin above the
+  warning temperature. An engine allowed to run hot loses water, which makes it run
+  hotter. A parked car loses none.
+
+## 4. Engines and radiators
+
+    radiator          class      water    kW/K
+    small radiator    small       5.5 L   1.10
+    2102 radiator     small       6.5 L   1.10
+    radiator          standard    9.0 L   1.65
+    copper radiator   large      13.0 L   2.45
+
+Requirement is full-load heat / 62 K, which maps the catalogue onto those classes:
+1.2 and 1.6 fours -> small; 2.4 four and 2.8 six -> standard; 5.0 V8 and 6.6 truck
+diesel -> large. Petrol engines run 90 C (warning 110, critical 125, maximum 140);
+diesels 95 C (115 / 135 / 155).
+
+Fitment is never refused. An undersized core loses a further tenth of its rating
+(it also flows badly for the pump) and warns; an oversized core is capped at a
+fifth above what the engine asks for, so it buys water capacity and thermal margin
+but not a magically cold engine.
+
+## 5. Game-loop integration
+
+`Vehicle.fixedUpdate` builds the context from applied throttle, `rpm / redline`,
+forward speed and `ambientAirC(timeOfDay)`, then applies the result as a torque
+scale and a rev ceiling through `Drivetrain.setThermalLimits` — the one place torque
+is produced, so nothing else in the vehicle needs to know temperature exists.
+`settle(dt)` runs the same model with no combustion, so parked cars cool down.
+`rebuild()` rebinds engine and radiator, so a bonnet swap takes effect on the next
+tick and water that does not fit the smaller core is spilled.
+
+There is no weather system in this game and this feature did not justify one:
+ambient air is a cosine about a daily mean, 14 C at dawn to 46 C at 15:00, lagged
+past noon like real ground-heated air.
+
+## 6. HUD
+
+A fourth dial in `.hud-gauge-row` (tach, speed, fuel, temperature, clock), built
+with the existing `buildDial` helper and cached in the constructor like every other
+dial — no element is created per frame. Per frame it writes the arc/needle through
+`updateDial`, a whole-degree `92 C` label through the existing diff guard, and one
+of `.hud-temperature.is-cold|is-normal|is-warm|is-hot|is-critical` (blue, green,
+yellow, orange, flashing red). `temperature: null` (no engine fitted) hides the
+gauge and produces no warnings. The overheat text joins the existing diff-guarded
+lamp string beside `NO WATER` and `OIL LOW`.
+
+## 7. Adding an engine
+
+Add the variant to `ENGINE_VARIANTS` as before. It gets a working cooling profile
+automatically from its fuel, peak power and cylinder count. Disagree with any part
+of it by adding `heat: { warningC: 118, thermalMassKjPerK: 45 }` — anything omitted
+stays derived. Nothing else needs touching: fitment, the gauge scale and the zones
+all read the profile.
+
+## 8. Adding a radiator
+
+Add a variant with `kind: 'radiator'` and
+`radiator: { klass, capacity, coolingKwPerK }`. `preferredRadiatorClass`, the
+factory fitment table, the mesh switch in `partmesh.ts` and `radiatorFit` all key
+off `klass`, so a new core in an existing class needs no other change. A new CLASS
+means one entry in `RADIATOR_CLASSES`, one in `CLASS_CAPABILITY`, one in
+`FACTORY_RADIATOR` and one mesh branch.
+
+## 9. Scenarios verified
+
+`tools/cooling.ts` (28 checks, all pass) covers all ten scenarios from this brief:
+small engine + small core + full water stabilises at 86 C; big engine + small core
+reaches 194 C under load; big engine + large core holds 96 C; dry core passes
+critical within 60 s; a 30% core runs 12 K hotter than a full one; standing still
+runs 18 K hotter than moving; a stopped engine decays to air temperature; a marginal
+radiator that copes at 14 C air cooks at 46 C; 240 / 5 / 0.5 Hz agree within 2 C;
+an incompatible core reports a readable reason. Plus warm-up time (93 s), the zone
+order hot -> critical -> seizure, power cut before seizure, recovery on lifting off,
+boil-off, NaN/Infinity input, no engine, no radiator, water spill on downsizing and
+two systems not sharing state.
+
+`tools/cooling-drive.ts` (17 checks, all pass) proves the wiring with real
+Vehicles: a factory V8 pickup holds 103 C flat out in 46 C air; the same car on a
+small core reaches 119 C, loses 35% of its torque, drops its rev ceiling to 0.82,
+boils water and stalls; pulling the radiator takes its water with it and running
+with no radiator heats rather than crashes; fitting a full large core hands the car
+its water and capability; a parked car cools 35 K in ten minutes and persists it;
+two cars in one world keep independent temperatures.
+
+Also re-run green: `tools/car-dirt.ts`, `tools/autosave.ts`,
+`tools/runtime-lifecycle.ts`. `tsc --noEmit` clean. The gauge was checked visually
+in all five zones and the four radiator meshes were checked in `tools/coollab/`.
+
+## 10. Known limitations and deliberate behaviour changes
+
+- Dry water no longer destroys an engine instantly. It overheats, warns, loses
+  power, stalls, and only seizes after six seconds past its maximum temperature.
+- Water capacity is the RADIATOR's, not the engine's. Old saves keep their litres,
+  clamped to the fitted core.
+- One roadside POI car in four carries a deliberately undersized radiator. It
+  drives away fine and will not hold temperature on a long pull.
+- A cold engine loses up to 10% torque. An earlier 28% was measured and reverted:
+  every drive starts cold, and it moved the whole catalogue's acceleration figures.
+  `tools/handling-bench.ts` (measurement only, no assertions) will read a few per
+  cent slower over the first 90 s of a run.
+- No leaks, no fan, no head-gasket damage, no coolant other than water. The seams
+  for all four exist (`RadiatorFit`, the loss term, `WATER_BOIL_LPH_PER_K`,
+  `FluidKind`) and none are implemented.
+- Water cans hold 5 L, so refilling a 13 L core takes three of them.
+- Ambient air is a function of the clock alone: no shade, no altitude, no wind.
