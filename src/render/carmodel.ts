@@ -22,6 +22,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import {
   makeCarBodyConditionMaterial,
+  makeCarPaintFinishMaterial,
   makeCarPalettePaintMaterial,
   setCarBodyPalettePaint,
 } from './materials';
@@ -308,10 +309,11 @@ function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    // Soviet paint needs its atlas cell swapped in the shader. Stylized paint needs
-    // no shader at all: its colour arrives as a rebuilt palette texture.
-    const material =
-      def.paintStyle === 'soviet-atlas' ? makeCarPalettePaintMaterial(source) : source.clone();
+    // Soviet paint additionally needs atlas recolouring; both packs use the same
+    // metallic automotive finish.
+    const material = def.paintStyle === 'soviet-atlas'
+      ? makeCarPalettePaintMaterial(source)
+      : makeCarPaintFinishMaterial(source);
     clones.set(source, material);
     return material;
   };
