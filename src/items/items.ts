@@ -20,7 +20,7 @@ export type ShadeTint = 'green' | 'yellow' | 'red';
  * mechanic is identical for all four, and the only thing the kind decides is which
  * reservoir it goes into. Petrol and diesel additionally have to match the engine.
  */
-export type FluidKind = 'petrol' | 'diesel' | 'coolant' | 'oil';
+export type FluidKind = 'petrol' | 'diesel' | 'water' | 'oil';
 
 export interface ToolItem {
   readonly type: 'tool';
@@ -110,15 +110,27 @@ export type Item =
   | SunShadesItem;
 
 /**
- * Density, kg/litre. Petrol and diesel are the light ones; coolant is basically
- * water with glycol in it and oil is a shade under water.
+ * Density, kg/litre. Petrol and diesel are the light ones; water is water and oil
+ * is a shade under it.
  */
 const FLUID_DENSITY: Record<FluidKind, number> = {
   petrol: 0.75,
   diesel: 0.84,
-  coolant: 1.07,
+  water: 1.0,
   oil: 0.87,
 };
+
+/**
+ * One litre format for every container, `12.3 L`.
+ *
+ * A can used to round to whole litres while a reservoir readout showed a tenth, so
+ * pouring 4.4 L out of a can labelled `5 L` into a tank that then read `4.4/40.0 L`
+ * looked like the game had lost half a litre. It had not: the two were printing the
+ * same fluid to different precision.
+ */
+export function litreText(litres: number): string {
+  return `${litres.toFixed(1)} L`;
+}
 
 /** Display name for the HUD and interaction prompts. */
 export function itemLabel(item: Item): string {
@@ -127,10 +139,16 @@ export function itemLabel(item: Item): string {
       return item.tool;
     case 'part': {
       const label = variant(item.part.variantId).label;
-      return item.part.destroyed ? `destroyed ${label}` : label;
+      const named = item.part.destroyed ? `destroyed ${label}` : label;
+      // A detached container carries its fluid with it (see `PartInstance.litres`),
+      // and the amount is the whole reason to pick this one up rather than that one.
+      const litres = item.part.litres ?? 0;
+      if (litres <= 0) return named;
+      const fluid = item.part.fuelKind ? ` ${item.part.fuelKind}` : '';
+      return `${named} (${litreText(litres)}${fluid})`;
     }
     case 'fluid_can':
-      return `${item.fluid} can (${item.litres.toFixed(0)} L)`;
+      return `${item.fluid} can (${litreText(item.litres)})`;
     case 'weapon':
       return `${item.weapon} (${item.loaded}/${item.magazine})`;
     case 'ammo':
@@ -153,8 +171,19 @@ export function itemMass(item: Item): number {
   switch (item.type) {
     case 'tool':
       return 1.2;
-    case 'part':
-      return variant(item.part.variantId).mass;
+    case 'part': {
+      const v = variant(item.part.variantId);
+      const litres = item.part.litres ?? 0;
+      if (litres <= 0) return v.mass;
+      // A full radiator or tank is mostly fluid, and the player feels that on foot.
+      // A dry tank is recorded with no fuel kind, so the fallback is only ever the
+      // engine's oil or the radiator's water; a mis-fuelled mixture weighs as diesel.
+      const fluid: FluidKind =
+        item.part.fuelKind === 'mixed'
+          ? 'diesel'
+          : (item.part.fuelKind ?? (v.kind === 'engine' ? 'oil' : 'water'));
+      return v.mass + litres * FLUID_DENSITY[fluid];
+    }
     case 'fluid_can':
       // Empty can plus the fluid's own weight.
       return 2.5 + item.litres * FLUID_DENSITY[item.fluid];

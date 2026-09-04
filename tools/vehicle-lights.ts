@@ -63,7 +63,7 @@ function carState(
     ...lamps,
     dirt: 0,
     scratches: 0,
-    coolantLitres: 10,
+    waterLitres: 10,
     bonnet: createBonnetStorage(
       `vehicle-lights:${index}`,
       carModel(MODEL_ID).engineId,

@@ -2,12 +2,35 @@ import type { Item, PartItem } from '../items/items';
 import { variant, type BodyClass, type EngineSpec, type FuelType, type PartInstance } from '../parts/registry';
 
 /** Every car exposes the same four service positions, left to right. */
-export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'coolant_tank', 'fuel_tank'] as const;
+export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'fuel_tank'] as const;
 export const BONNET_SLOT_COUNT = BONNET_SLOT_KINDS.length;
 export type BonnetPartKind = (typeof BONNET_SLOT_KINDS)[number];
 
 export function bonnetSlotKind(cell: number): BonnetPartKind | null {
   return BONNET_SLOT_KINDS[cell] ?? null;
+}
+
+/**
+ * Which of the car's three reservoirs the container in this slot owns.
+ *
+ * One table rather than a `kind === 'radiator'` test at each call site: the level
+ * readout, the pour, and the transfer that keeps a removed container's fluid with it
+ * (see the `car_bonnet` delta in game/state.ts) must all agree about which slot
+ * holds what, and a turbine slot holding nothing is part of that agreement.
+ */
+export type BonnetFluidChannel = 'oil' | 'water' | 'fuel';
+
+export function bonnetSlotFluid(cell: number): BonnetFluidChannel | null {
+  switch (bonnetSlotKind(cell)) {
+    case 'engine':
+      return 'oil';
+    case 'radiator':
+      return 'water';
+    case 'fuel_tank':
+      return 'fuel';
+    default:
+      return null;
+  }
 }
 
 export function bonnetPart(cells: readonly (Item | null)[], cell: number): PartInstance | null {
@@ -63,7 +86,7 @@ export function createBonnetStorage(
   return [
     servicePart(carId, 'engine', engineVariantId),
     null,
-    servicePart(carId, 'coolant-tank', 'coolant_tank_standard'),
+    servicePart(carId, 'radiator', 'radiator_standard'),
     servicePart(carId, 'fuel-tank', tankVariant),
   ];
 }
@@ -105,16 +128,16 @@ export function destroyedEngineSpec(engine: EngineSpec): EngineSpec {
     brakingCoeff: Math.min(engine.brakingCoeff * 0.2, 0.02),
   };
 }
-export type EngineFailureReason = 'coolant' | 'oil';
+export type EngineFailureReason = 'water' | 'oil';
 
 /** Called only for a running engine; turbine presence intentionally has no bearing. */
 export function engineFailureReason(
   cells: readonly (Item | null)[],
-  coolantLitres: number,
+  waterLitres: number,
   oilLitres: number,
 ): EngineFailureReason | null {
   if (bonnetPart(cells, 0)?.destroyed) return null;
-  if (bonnetPart(cells, 2) === null || coolantLitres <= 0) return 'coolant';
+  if (bonnetPart(cells, 2) === null || waterLitres <= 0) return 'water';
   if (oilLitres <= 0) return 'oil';
   return null;
 }

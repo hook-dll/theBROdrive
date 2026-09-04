@@ -29,7 +29,7 @@ const car: CarState = {
   fuelLitres: 10,
   dirt: 0,
   scratches: 0,
-  coolantLitres: 4,
+  waterLitres: 4,
   oilLitres: 4,
   storage: new Array(TRUNK_CELL_COUNT).fill(null),
   odometer: 0,

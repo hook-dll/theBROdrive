@@ -212,7 +212,7 @@ function carState(modelId: string, y: number): CarState {
     fuelKind: engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
-    coolantLitres: 10,
+    waterLitres: 10,
     oilLitres: 10,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('suspension-probe', def.engineId, def.bodyClass, def.tankLitres),

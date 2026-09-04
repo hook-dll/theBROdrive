@@ -17,7 +17,7 @@ import { spawnCarState, type SpawnRequest } from './game/spawn';
 import { Inventory, itemLabel, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { coolantCapacity, oilCapacity } from './parts/registry';
+import { waterCapacity, oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
 import {
   carModelMeasure,
@@ -1375,7 +1375,7 @@ async function boot(): Promise<void> {
     if (driving) {
       const stats = driving.stats;
       const car = s.cars[drivingId!];
-      const coolantCap = coolantCapacity(stats.engine);
+      const waterCap = waterCapacity(stats.engine);
       const oilCap = oilCapacity(stats.engine);
       hud.setDriving({
         speedKmh: driving.speedKmh,
@@ -1384,7 +1384,7 @@ async function boot(): Promise<void> {
         gearLabel: driving.gearLabel,
         fuelLitres: car?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
-        coolantFraction: coolantCap > 0 ? (car?.coolantLitres ?? 0) / coolantCap : 1,
+        waterFraction: waterCap > 0 ? (car?.waterLitres ?? 0) / waterCap : 1,
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,
@@ -1465,7 +1465,7 @@ async function boot(): Promise<void> {
       ghost ? ghost.vehicle.modelMeasure.anchors : [],
       ghostCar ? ghostCar.gizmos : {},
       // Same rule the interaction resolve uses (`hasServiceSlot`): an engine, turbine,
-      // coolant tank or fuel tank cannot be mounted on a cosmetic anchor, so it must
+      // radiator or fuel tank cannot be mounted on a cosmetic anchor, so it must
       // not be previewed on one either. Its home is a bonnet slot.
       held && held.type === 'part' && !hasServiceSlot(held.part.variantId)
         ? held.part.variantId

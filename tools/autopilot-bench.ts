@@ -74,7 +74,7 @@ function carState(road: Road): CarState {
     id: 'autopilot-bench', modelId: MODEL_ID, gizmos: {}, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
     fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0,
-    coolantLitres: 10, oilLitres: 10,
+    waterLitres: 10, oilLitres: 10,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('autopilot-bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0, x: p.x, y: p.y + 1.2, z: p.z,

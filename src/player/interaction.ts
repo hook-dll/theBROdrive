@@ -10,12 +10,12 @@ import type {
   FluidKind,
   ToolKind,
 } from '../items/items';
-import { itemLabel } from '../items/items';
+import { itemLabel, litreText } from '../items/items';
 import type { CarStats, FuelType, PartInstance } from '../parts/registry';
 import {
   applyBrush,
   applySponge,
-  coolantCapacity,
+  waterCapacity,
   oilCapacity,
   variant,
   RUST_CLEAN_EPSILON,
@@ -193,24 +193,24 @@ const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
  * A serviceable reservoir, resolved from the bonnet slot the crosshair is on.
  *
  * Levels are read and filled through the FITTED PART that holds them — the engine
- * for oil, the coolant tank, the fuel tank — so what the bonnet tells you is
- * exactly what a can can pour into. A missing part has no reservoir at all, which
- * is also why removing a tank drains it.
+ * for oil, the radiator, the fuel tank — so what the bonnet tells you is exactly
+ * what a can can pour into. A missing part has no reservoir at all, and its fluid
+ * left with it (see `moveSlotFluid` in game/state.ts).
  */
 interface Reservoir {
-  /** What the readout calls it: 'oil', 'coolant', or the fuel actually in the tank. */
+  /** What the readout calls it: 'oil', 'water', or the fuel actually in the tank. */
   readonly label: string;
   readonly level: number;
   readonly capacity: number;
   /**
    * The fluid this reservoir is for. A fuel tank still ACCEPTS the other fuel —
    * mis-fuelling is a mistake the game lets you make and then warns about — while
-   * oil and coolant accept nothing else.
+   * oil and water accept nothing else.
    */
   readonly wants: FluidKind;
 }
 
-/** Narrowing guard: the two fluids a fuel tank takes, as opposed to oil or coolant. */
+/** Narrowing guard: the two fluids a fuel tank takes, as opposed to oil or water. */
 function isFuel(fluid: FluidKind): fluid is FuelType {
   return fluid === 'petrol' || fluid === 'diesel';
 }
@@ -222,9 +222,11 @@ function reservoirAccepts(reservoir: Reservoir, fluid: FluidKind): boolean {
 /** `oil 3.2/4.0 L`, or `oil full — 4.0 L` once topping up would do nothing. */
 function fillReadout(reservoir: Reservoir): string {
   if (reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) {
-    return `${reservoir.label} full — ${reservoir.capacity.toFixed(1)} L`;
+    return `${reservoir.label} full — ${litreText(reservoir.capacity)}`;
   }
-  return `${reservoir.label} ${reservoir.level.toFixed(1)}/${reservoir.capacity.toFixed(1)} L`;
+  // Same one-decimal format the can label uses, so pouring never looks like it lost
+  // half a litre in the transfer (`litreText`, items/items.ts).
+  return `${reservoir.label} ${reservoir.level.toFixed(1)}/${litreText(reservoir.capacity)}`;
 }
 
 /**
@@ -244,10 +246,10 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
         ? { label: 'oil', level: car.oilLitres, capacity, wants: 'oil' }
         : null;
     }
-    case 'coolant_tank': {
-      const capacity = coolantCapacity(stats.engine);
+    case 'radiator': {
+      const capacity = waterCapacity(stats.engine);
       return capacity > 0
-        ? { label: 'coolant', level: car.coolantLitres, capacity, wants: 'coolant' }
+        ? { label: 'water', level: car.waterLitres, capacity, wants: 'water' }
         : null;
     }
     case 'fuel_tank': {
@@ -885,7 +887,7 @@ export class Interaction {
       if (t.cell === null) return `${label} ${used}/${cells.length}`;
       const item = cells[t.cell];
       if (item) {
-        // A fitted engine, coolant tank or fuel tank reports what it is holding.
+        // A fitted engine, radiator or fuel tank reports what it is holding.
         // Same resolution the pour uses, so the number you read is the number a can
         // fills — and holding one turns the readout into the pour offer itself.
         const reservoir = this.aimedReservoir(resolved);
@@ -962,7 +964,7 @@ export class Interaction {
   }
 
   /**
-   * The reservoir under the crosshair: a fitted engine, coolant tank or fuel tank
+   * The reservoir under the crosshair: a fitted engine, radiator or fuel tank
    * in an OPENED bonnet. Both the level readout and the pour resolve through this
    * one method, so the two can never disagree about which tank you are looking at.
    */
@@ -982,8 +984,9 @@ export class Interaction {
    * What pouring this can into the aimed reservoir would do, or why it would not.
    *
    * Wrong fuel is accepted with an explicit warning; the resulting load cannot run
-   * the engine. Removing the tank drains it and provides the recovery path. Oil and
-   * coolant have no such forgiveness — they are simply the wrong reservoir.
+   * the engine. Pulling the tank tips the mixture out and provides the recovery
+   * path. Oil and water have no such forgiveness — they are simply the wrong
+   * reservoir.
    *
    * An empty can drops to the bare level readout rather than announcing itself. The
    * can's own litres are already on the inventory slot, and the tank is not the
@@ -1113,7 +1116,7 @@ export class Interaction {
    * Pours the held can into the reservoir the crosshair is on.
    *
    * Aimed at the fitted part, not the car: you open the bonnet, look at the engine,
-   * the coolant tank or the fuel tank, and hold the button. That makes the filling
+   * the radiator or the fuel tank, and hold the button. That makes the filling
    * gesture the same object as the level readout, and it is why an empty slot takes
    * nothing — there is no reservoir without the part that holds it.
    *
@@ -1148,7 +1151,7 @@ export class Interaction {
             : 'mixed';
       this.world.apply({ t: 'car_fuel', carId, litres: level, fuelKind });
     } else {
-      // Oil and coolant accept nothing but themselves, so the can names the channel.
+      // Oil and water accept nothing but themselves, so the can names the channel.
       this.world.apply({ t: 'car_fluid', carId, fluid: can.fluid, litres: level });
     }
   }
@@ -1270,13 +1273,9 @@ export class Interaction {
       if (t.owner === 'wreck') {
         this.world.apply({ t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item });
       } else if (t.side === 'bonnet') {
+        // The delta itself moves the slot's fluid into the part coming out and out of
+        // the part going in (`moveSlotFluid`, game/state.ts). Nothing to zero here.
         this.world.apply({ t: 'car_bonnet', carId: t.id, cell: t.cell, item: result.item });
-        if (result.action === 'retrieved' && BONNET_SLOT_KINDS[t.cell] === 'coolant_tank') {
-          this.world.apply({ t: 'car_fluid', carId: t.id, fluid: 'coolant', litres: 0 });
-        }
-        if (result.action === 'retrieved' && BONNET_SLOT_KINDS[t.cell] === 'fuel_tank') {
-          this.world.apply({ t: 'car_fuel', carId: t.id, litres: 0, fuelKind: null });
-        }
         resolved.vehicle?.rebuild();
       } else {
         this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });

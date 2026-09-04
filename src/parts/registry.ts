@@ -7,8 +7,8 @@
  * the player's hands, or be mounted as a cosmetic gizmo on a complete car model's
  * anchor point without changing representation.
  *
- * The authored model remains the car body, but engine, turbine, coolant tank and
- * fuel tank instances occupy typed bonnet cells and carry service capability.
+ * The authored model remains the car body, but engine, turbine, radiator and fuel
+ * tank instances occupy typed bonnet cells and carry service capability.
  * Everything mounted on free-form body anchors remains cosmetic.
  *
  * NETPLAY: every instance carries a stable string id, and nothing here references a
@@ -27,7 +27,6 @@ export type PartKind =
   | 'battery'
   | 'radiator'
   | 'fuel_tank'
-  | 'coolant_tank'
   | 'turbine'
   | 'seat'
   | 'mirror'
@@ -362,13 +361,6 @@ const TRIM_VARIANTS: readonly PartVariant[] = [
   { id: 'battery_lead', kind: 'battery', label: 'lead-acid battery', mass: 17, fits: ['car'] },
   { id: 'battery_heavy', kind: 'battery', label: 'heavy battery', mass: 29, fits: ['truck', 'bus'] },
   {
-    id: 'radiator_copper',
-    kind: 'radiator',
-    label: 'copper radiator',
-    mass: 11,
-    fits: ['car', 'truck', 'bus'],
-  },
-  {
     id: 'headlight_round',
     kind: 'headlight',
     label: 'round headlight',
@@ -379,13 +371,6 @@ const TRIM_VARIANTS: readonly PartVariant[] = [
     id: 'exhaust_single',
     kind: 'exhaust',
     label: 'exhaust',
-    mass: 9,
-    fits: ['car', 'truck', 'bus'],
-  },
-  {
-    id: 'coolant_tank_standard',
-    kind: 'coolant_tank',
-    label: 'coolant tank',
     mass: 9,
     fits: ['car', 'truck', 'bus'],
   },
@@ -464,7 +449,6 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     wheel: { radius: 0.3, width: 0.165, grip: 0.92 },
   },
   { id: 'tank_lada_39', kind: 'fuel_tank', label: '39 L tank', mass: 13, capacity: 39, fits: ['car'] },
-  { id: 'radiator_lada', kind: 'radiator', label: '2102 radiator', mass: 8, fits: ['car'] },
   { id: 'battery_lada', kind: 'battery', label: '2102 battery', mass: 15, fits: ['car'] },
   { id: 'seat_lada', kind: 'seat', label: '2102 seat', mass: 13, fits: ['car'] },
   { id: 'hood_lada', kind: 'hood', label: '2102 bonnet', mass: 18, fits: ['car'] },
@@ -475,11 +459,35 @@ const LADA_VARIANTS: readonly PartVariant[] = [
   { id: 'exhaust_lada', kind: 'exhaust', label: '2102 exhaust', mass: 8, fits: ['car'] },
 ];
 
+/**
+ * Radiators. The one service part whose variants come from three corners of this
+ * catalogue: a radiator IS the car's water container, so all three sit in a bonnet
+ * slot rather than two of them being cosmetic look-alikes wearing the same name.
+ */
+const RADIATOR_VARIANTS: readonly PartVariant[] = [
+  {
+    id: 'radiator_standard',
+    kind: 'radiator',
+    label: 'radiator',
+    mass: 9,
+    fits: ['car', 'truck', 'bus'],
+  },
+  {
+    id: 'radiator_copper',
+    kind: 'radiator',
+    label: 'copper radiator',
+    mass: 11,
+    fits: ['car', 'truck', 'bus'],
+  },
+  { id: 'radiator_lada', kind: 'radiator', label: '2102 radiator', mass: 8, fits: ['car'] },
+];
+
 export const ALL_VARIANTS: readonly PartVariant[] = [
   ...ENGINE_VARIANTS,
   ...GEARBOX_VARIANTS,
   ...WHEEL_VARIANTS,
   ...TANK_VARIANTS,
+  ...RADIATOR_VARIANTS,
   ...TRIM_VARIANTS,
   ...DASH_VARIANTS,
   ...LADA_VARIANTS,
@@ -504,6 +512,14 @@ export function variantsOfKind(kind: PartKind, bodyClass?: BodyClass): PartVaria
  *
  * `dirt` and `rust` are cosmetic. `destroyed` is the single irreversible service
  * state: only engines acquire it, and no cleaning tool clears it.
+ *
+ * `litres` is what a DETACHED container is carrying. While a container is fitted,
+ * the car owns the level (`CarState.waterLitres`, `oilLitres`, `fuelLitres`) because
+ * that is what the running engine drains and what the HUD reads; the `car_bonnet`
+ * delta pours it into the part on removal and back out on installation (see
+ * game/state.ts). So a radiator you pull out and carry to the trunk still holds its
+ * water, and putting it back gives the car exactly that water — nothing evaporates
+ * because the player picked it up.
  */
 export interface PartInstance {
   readonly id: string;
@@ -512,6 +528,10 @@ export interface PartInstance {
   rust: number;
   /** Irreversible catastrophic engine damage. Replacement is the only repair. */
   destroyed?: boolean;
+  /** Litres inside this container while it is detached. Absent means dry/not a container. */
+  litres?: number;
+  /** Which fuel a detached tank holds. Mixed is the mis-fuelled tank the engine refuses. */
+  fuelKind?: FuelType | 'mixed' | null;
 }
 
 /** Coarse dirt a brush can shift; below this only a sponge helps. */
@@ -556,14 +576,14 @@ export function applySponge(part: PartInstance, dt: number): boolean {
 }
 
 /**
- * Coolant and oil capacity for an engine, litres.
+ * Water and oil capacity for an engine, litres.
  *
  * Derived from cylinder count rather than authored per engine: a bigger engine
  * holds more of both, and the relationship is close enough to linear that a table
  * would only be six numbers restating this. Real four-cylinders of the era carry
- * roughly 6-7 L of coolant and 4 L of oil, which is what these land on.
+ * roughly 6-7 L of water and 4 L of oil, which is what these land on.
  */
-export function coolantCapacity(engine: EngineSpec): number {
+export function waterCapacity(engine: EngineSpec): number {
   return 2.2 + engine.cylinders * 1.15;
 }
 
@@ -578,7 +598,7 @@ export function oilCapacity(engine: EngineSpec): number {
  * full charge lasts roughly 150 km of cruising, which at 90 km/h is about an hour
  * and a half of driving:
  *
- *   4-cyl   6.8 L coolant / 4.0 L oil  ->  ~144 km / ~171 km
+ *   4-cyl   6.8 L water / 4.0 L oil    ->  ~144 km / ~171 km
  *   6-cyl   9.1 L / 5.3 L              ->  ~193 km / ~227 km
  *   V8     11.4 L / 6.6 L              ->  ~241 km / ~283 km
  *
@@ -594,7 +614,7 @@ export function oilCapacity(engine: EngineSpec): number {
  * more self-sufficient between stops and pays for it at the fuel pump instead.
  * That asymmetry is intentional.
  */
-export const COOLANT_LOSS_LPH = 4.25;
+export const WATER_LOSS_LPH = 4.25;
 export const OIL_LOSS_LPH = 2.1;
 
 /**

@@ -62,7 +62,7 @@ function conditionState(id: string, x = 0, z = 0, y = 1.2): CarState {
     fuelKind: 'petrol',
     dirt: 0,
     scratches: 0,
-    coolantLitres: 10,
+    waterLitres: 10,
     oilLitres: 10,
     storage: new Array(def.storageCells).fill(null),
     bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres),

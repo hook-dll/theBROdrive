@@ -5,7 +5,7 @@ import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
 import type { CarState, GameWorld } from '../game/state';
-import { coolantCapacity, oilCapacity, variant, type FuelType } from '../parts/registry';
+import { waterCapacity, oilCapacity, variant, type FuelType } from '../parts/registry';
 import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
 import { makeFlatMaterial } from '../render/materials';
 import {
@@ -323,7 +323,7 @@ function makeFluidCan(
  * What a gas stop stocks, by weight.
  *
  * Fuel dominates because fuel is the pressure the player feels every minute;
- * coolant and oil are the ones they only think about every 150 km or so, so they
+ * water and oil are the ones they only think about every 150 km or so, so they
  * turn up often enough to be findable and rarely enough to be worth a detour. Small
  * cans for the engine fluids, because that is how they are sold.
  *
@@ -343,7 +343,7 @@ function makeFluidCan(
 const FLUID_STOCK: readonly { fluid: FluidKind; weight: number; capacity: number }[] = [
   { fluid: 'petrol', weight: 0.5, capacity: 20 },
   { fluid: 'diesel', weight: 0.15, capacity: 20 },
-  { fluid: 'coolant', weight: 0.19, capacity: 5 },
+  { fluid: 'water', weight: 0.19, capacity: 5 },
   { fluid: 'oil', weight: 0.16, capacity: 5 },
 ];
 
@@ -633,7 +633,7 @@ function makeWorkingCar(
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
     fuelKind: engine?.fuel ?? null,
-    coolantLitres: engine ? coolantCapacity(engine) : 0,
+    waterLitres: engine ? waterCapacity(engine) : 0,
     oilLitres: engine ? oilCapacity(engine) : 0,
     storage: new Array(def.storageCells).fill(null),
     bonnet: createBonnetStorage(

@@ -19,7 +19,7 @@ import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
 import {
-  coolantCapacity,
+  waterCapacity,
   oilCapacity,
 } from '../parts/registry';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
@@ -567,10 +567,10 @@ export function createStartingCar(world: GameWorld): CarState {
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
   const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
-  // Coolant and oil start part-used on the same deterministic principle: the car
+  // Water and oil start part-used on the same deterministic principle: the car
   // has been sitting in a shed, not prepped. Enough to set off on, not enough to
   // finish on, which is what makes the first can worth picking up.
-  const coolantLitres = coolantCapacity(engine) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
+  const waterLitres = waterCapacity(engine) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
   const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
@@ -596,7 +596,7 @@ export function createStartingCar(world: GameWorld): CarState {
     scratches: 0,
     fuelLitres,
     fuelKind: engine.fuel,
-    coolantLitres,
+    waterLitres,
     oilLitres,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('car:start', def.engineId, def.bodyClass, def.tankLitres),
