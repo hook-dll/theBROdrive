@@ -1,0 +1,18 @@
+{
+  "paintRoughness": 0.48,
+  "paintMetalness": 0.38,
+  "rustRoughness": 0.97,
+  "rustMetalness": 0.0,
+  "dirtRoughness": 0.92,
+  "dentRoughness": 0.88,
+  "dentRoughnessStrength": 0.7,
+  "dentCoreMetalness": 0.06,
+  "dentCoreMetalnessStrength": 0.85,
+  "dentRimMetalness": 0.22,
+  "dentRimMetalnessStrength": 0.35,
+  "exposedMetalRoughness": 0.62,
+  "exposedMetalRoughnessStrength": 0.78,
+  "exposedMetalness": 0.72,
+  "exposedMetalnessStrength": 0.72,
+  "dentNormalDepth": 0.09
+}

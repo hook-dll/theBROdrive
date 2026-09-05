@@ -1,7 +1,26 @@
 import gameplay from '../config/gameplay.json';
 import audio from '../config/audio.json';
 import graphics from '../config/graphics.json';
+import materials from '../config/materials.json';
 
+export interface MaterialsConfig {
+  readonly paintRoughness: number;
+  readonly paintMetalness: number;
+  readonly rustRoughness: number;
+  readonly rustMetalness: number;
+  readonly dirtRoughness: number;
+  readonly dentRoughness: number;
+  readonly dentRoughnessStrength: number;
+  readonly dentCoreMetalness: number;
+  readonly dentCoreMetalnessStrength: number;
+  readonly dentRimMetalness: number;
+  readonly dentRimMetalnessStrength: number;
+  readonly exposedMetalRoughness: number;
+  readonly exposedMetalRoughnessStrength: number;
+  readonly exposedMetalness: number;
+  readonly exposedMetalnessStrength: number;
+  readonly dentNormalDepth: number;
+}
 export interface GameplayConfig {
   readonly dayCycleMinutes: number;
   readonly poiSpacingMetres: number;
@@ -55,3 +74,5 @@ function validate<T extends object>(value: T, name: string): T {
 export const GAMEPLAY_CONFIG = validate(gameplay as GameplayConfig, 'gameplay');
 export const AUDIO_CONFIG = validate(audio as AudioConfig, 'audio');
 export const GRAPHICS_CONFIG = validate(graphics as GraphicsConfig, 'graphics');
+
+export const MATERIALS_CONFIG = validate(materials as MaterialsConfig, 'materials');
