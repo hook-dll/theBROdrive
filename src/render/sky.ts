@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GRAPHICS_CONFIG } from '../config';
 import type { GraphicsQuality } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
 import { skyGradientAt } from '../world/gradient';
@@ -756,38 +757,19 @@ export class Sky {
     this.sunLight = new THREE.DirectionalLight(0xffffff, 3.0);
     this.sunLight.castShadow = true;
     const shadow = this.sunLight.shadow;
-    // 1024 on iGPU-class hardware: the 180 m frustum still resolves ~17 cm/texel,
-    // and the renderer's PCF filter softens the larger texels into a stylised
-    // blur. 2048 doubles the depth-pass fill cost for detail that never reads at
-    // this camera scale.
-    shadow.mapSize.set(1024, 1024);
-    shadow.camera.near = 40;
-    shadow.camera.far = SUN_DISTANCE + 300;
-    shadow.camera.left = -90;
-    shadow.camera.right = 90;
-    shadow.camera.top = 90;
-    shadow.camera.bottom = -90;
-    // BIAS IS MEASURED IN METRES ALONG THE LIGHT RAY, and `shadow.bias` is a
-    // fraction of the camera's depth range: over `near`..`far` (500 m) the old
-    // -0.0004 was 20 cm, and `normalBias` added 5 cm more with the sun overhead.
-    //
-    // Twenty-five centimetres is a CAR'S GROUND CLEARANCE. Three renders the back
-    // faces of a caster into the depth map (`shadowSide`, and see the note in
-    // render/carmodel.ts), so the depth stored under a car is its UNDERBODY,
-    // and the sand under it sits 0.11-0.29 m further from the light depending on the
-    // model. The bias therefore declared most of that sand lit: the car's contact
-    // shadow was eaten away wherever the dune relief closed the gap, and the surviving
-    // patches followed the desert tile's 3 m lattice — the diagonally striped, torn
-    // shadow, worst with the sun high and gone by dusk (the gap the bias has to beat
-    // is the clearance divided by sin(elevation)).
-    //
-    // 2 cm + 2 cm is all a CLOSED caster needs: its far face is metres behind its
-    // lit face, so the comparison has nothing to resolve but float noise, and the
-    // shadow-coordinate interpolation is exact for an orthographic light across a
-    // planar triangle. Nothing that receives this map casts into it from an open
-    // sheet, which is the one case that would want the old slack.
-    shadow.bias = -0.00004;
-    shadow.normalBias = 0.02;
+    // The shadow map follows the camera, so a tighter frustum spends its texels on
+    // the road, car and nearby props instead of wasting resolution on empty desert.
+    shadow.mapSize.set(GRAPHICS_CONFIG.shadowMapSize, GRAPHICS_CONFIG.shadowMapSize);
+    shadow.camera.near = GRAPHICS_CONFIG.shadowNear;
+    shadow.camera.far = GRAPHICS_CONFIG.shadowFar;
+    const shadowHalfSize = GRAPHICS_CONFIG.shadowFrustumHalfSize;
+    shadow.camera.left = -shadowHalfSize;
+    shadow.camera.right = shadowHalfSize;
+    shadow.camera.top = shadowHalfSize;
+    shadow.camera.bottom = -shadowHalfSize;
+    // Small bias preserves contact shadows without acne on the terrain.
+    shadow.bias = GRAPHICS_CONFIG.shadowBias;
+    shadow.normalBias = GRAPHICS_CONFIG.shadowNormalBias;
     shadow.camera.updateProjectionMatrix();
     scene.add(this.sunLight);
     // The target must be in the scene graph for its matrixWorld to update.
@@ -961,7 +943,9 @@ export class Sky {
     this._hemiGround.copy(C_GROUND).lerp(C_NIGHT_GROUND, night);
     this.hemiLight.color.copy(this._hemiSky);
     this.hemiLight.groundColor.copy(this._hemiGround);
-    this.hemiLight.intensity = (celestial.diffuseIlluminanceLux / 10_000) * this.exposure;
+    this.hemiLight.intensity =
+      (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
+      GRAPHICS_CONFIG.hemisphereIntensityScale;
 
     this.refreshEnvironment();
 

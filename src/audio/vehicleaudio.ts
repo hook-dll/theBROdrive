@@ -29,22 +29,23 @@
  * One-shots: gear engagement clunk, suspension/landing thump, engine start.
  */
 
+import { AUDIO_CONFIG } from '../config';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer, ramp } from './mixer';
 
 /** Speed (m/s) at which wind reaches its maximum intended level. */
-const WIND_FULL_MPS = 45;
+const WIND_FULL_MPS = AUDIO_CONFIG.windFullMps;
 /** Wind filter corners, Hz. Kept below hiss territory for a softer road sound. */
 const WIND_HP_LOW = 140;
 const WIND_HP_HIGH = 480;
 const WIND_LP_LOW = 3000;
 const WIND_LP_HIGH = 1800;
 /** Chase and orbit cameras share the same restrained wind level. */
-const WIND_GAIN = 0.16;
+const WIND_GAIN = AUDIO_CONFIG.windGain;
 
 /** Speed (m/s) at which tyre roll noise saturates. */
-const TYRE_FULL_MPS = 30;
-const TYRE_GAIN = 0.34;
+const TYRE_FULL_MPS = AUDIO_CONFIG.tyreFullMps;
+const TYRE_GAIN = AUDIO_CONFIG.tyreGain;
 /** Roll-noise band centre, Hz, for a glass-smooth and for a rough surface. */
 const TYRE_FREQ_SMOOTH = 620;
 const TYRE_FREQ_ROUGH = 260;
@@ -52,9 +53,9 @@ const TYRE_FREQ_ROUGH = 260;
 const ROUGHNESS_FULL = 0.05;
 
 /** Lateral slip (m/s) at which the skid voice starts and where it saturates. */
-const SKID_START_MPS = 1.6;
-const SKID_FULL_MPS = 7;
-const SKID_GAIN = 0.42;
+const SKID_START_MPS = AUDIO_CONFIG.skidStartMps;
+const SKID_FULL_MPS = AUDIO_CONFIG.skidFullMps;
+const SKID_GAIN = AUDIO_CONFIG.skidGain;
 
 /**
  * Brakes.
@@ -84,7 +85,7 @@ const BRAKE_MIN_MPS = 1.2;
 const BRAKE_FULL_MPS = 6;
 
 /** Pad rub: narrow (Q 6) low-mid friction, rising slightly with speed. */
-const RUB_GAIN = 0.055;
+const RUB_GAIN = AUDIO_CONFIG.rubGain;
 const RUB_FREQ_SLOW = 420;
 const RUB_FREQ_FAST = 780;
 const RUB_Q = 6;
@@ -107,18 +108,18 @@ const ROTOR_RATE_MAX_HZ = 26;
 /** Depth of the per-revolution amplitude pulse, 0..1. */
 const RUB_PULSE_DEPTH = 0.55;
 
-const ENGINE_GAIN_IDLE = 0.11;
-const ENGINE_GAIN_LOAD = 0.2;
+const ENGINE_GAIN_IDLE = AUDIO_CONFIG.engineGainIdle;
+const ENGINE_GAIN_LOAD = AUDIO_CONFIG.engineGainLoad;
 /** Low-pass corner at closed and at wide-open throttle, Hz. */
 const ENGINE_LP_CLOSED = 700;
 const ENGINE_LP_OPEN = 5200;
 
 /** Vertical speed (m/s) killed in one landing that counts as a full-strength thump. */
-const LANDING_FULL_MPS = 6;
+const LANDING_FULL_MPS = AUDIO_CONFIG.landingFullMps;
 
 /** Slew for continuous voices. The engine tracks fast; ambience is lazier. */
 const ENGINE_TAU = 0.03;
-const DESTROYED_METAL_GAIN = 0.16;
+const DESTROYED_METAL_GAIN = AUDIO_CONFIG.destroyedMetalGain;
 const DESTROYED_METAL_FREQ_IDLE = 720;
 const DESTROYED_METAL_FREQ_REV = 1650;
 const AMBIENCE_TAU = 0.09;
