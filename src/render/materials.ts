@@ -9,7 +9,6 @@
 
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
-import { MATERIALS_CONFIG } from '../config';
 import { applyComicShading } from './comic';
 import {
   MAX_BODY_DAMAGE_IMPACTS,
@@ -325,7 +324,7 @@ void condDamage(
   }
 }
 /** Full-strength panel depression in metres. */
-#define COND_DENT_DEPTH ${MATERIALS_CONFIG.dentNormalDepth}
+#define COND_DENT_DEPTH 0.14
 
 #include <map_pars_fragment>`;
 const PALETTE_PAINT_PARS = `
@@ -367,8 +366,9 @@ const CONDITION_BODY = `
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.46, 0.21, 0.09 ), rustMask );
   // Deep pits darken further. Colour alone cannot fake depth, but paired with the
   // relief from the normal hook it is what makes scale look like scale.
-  roughnessFactor = mix( roughnessFactor, ${MATERIALS_CONFIG.rustRoughness}, rustMask );
-  metalnessFactor = mix( metalnessFactor, ${MATERIALS_CONFIG.rustMetalness}, rustMask );
+  diffuseColor.rgb *= 1.0 - 0.35 * rustMask * ( 1.0 - smoothstep( 0.35, 0.95, condR.y ) );
+  roughnessFactor = mix( roughnessFactor, 0.97, rustMask );
+  metalnessFactor = mix( metalnessFactor, 0.0, rustMask );
 
   // Dirt settles on upward faces and pools in the pits of the rust mottle.
   float condUp = saturate( condN.y );
@@ -377,7 +377,7 @@ const CONDITION_BODY = `
   float condLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
   vec3 dustColor = mix( vec3( condLum ), vec3( 0.72, 0.66, 0.55 ), 0.5 );
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
-  roughnessFactor = mix( roughnessFactor, ${MATERIALS_CONFIG.dirtRoughness}, dustMask );
+  roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 }`;
 
 /**
@@ -403,7 +403,7 @@ const CAR_BODY_CONDITION_BODY = `
   float condLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
   vec3 dustColor = mix( vec3( condLum ), vec3( 0.72, 0.66, 0.55 ), 0.5 );
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
-  roughnessFactor = mix( roughnessFactor, ${MATERIALS_CONFIG.dirtRoughness}, dustMask );
+  roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 
   if ( uDamageCount > 0 ) {
     vec4 damageMasks;
@@ -432,11 +432,7 @@ const CAR_BODY_CONDITION_BODY = `
       min( vec3( 1.0 ), diffuseColor.rgb * 1.75 + vec3( 0.09 ) ),
       dentRim * 0.88
     );
-    roughnessFactor = mix(
-      roughnessFactor,
-      ${MATERIALS_CONFIG.dentRoughness},
-      max( dentCore, dentRim ) * ${MATERIALS_CONFIG.dentRoughnessStrength}
-    );
+    roughnessFactor = mix( roughnessFactor, 0.88, max( dentCore, dentRim ) * 0.7 );
 
     // A crushed panel is not a mirror. Paint over a dent is stretched and its clear
     // coat crazed, so the reflection goes with the shine: without this the pressed
@@ -444,16 +440,8 @@ const CAR_BODY_CONDITION_BODY = `
     // with the camera rather than as a hole in the panel. The folded rim keeps more
     // of it, which is what still catches the sun along the crease. Bare steel below
     // puts metalness back where the paint has actually gone.
-    metalnessFactor = mix(
-      metalnessFactor,
-      ${MATERIALS_CONFIG.dentCoreMetalness},
-      dentCore * ${MATERIALS_CONFIG.dentCoreMetalnessStrength}
-    );
-    metalnessFactor = mix(
-      metalnessFactor,
-      ${MATERIALS_CONFIG.dentRimMetalness},
-      dentRim * ${MATERIALS_CONFIG.dentRimMetalnessStrength}
-    );
+    metalnessFactor = mix( metalnessFactor, 0.06, dentCore * 0.85 );
+    metalnessFactor = mix( metalnessFactor, 0.22, dentRim * 0.35 );
 
     // Thin scratches and broken chip islands remove paint to dull bare steel.
     // Metalness changes with colour and roughness; gray albedo alone is paint.
@@ -463,16 +451,8 @@ const CAR_BODY_CONDITION_BODY = `
     );
     vec3 bareSteel = vec3( 0.24, 0.255, 0.27 );
     diffuseColor.rgb = mix( diffuseColor.rgb, bareSteel, exposedMetal * 0.92 );
-    roughnessFactor = mix(
-      roughnessFactor,
-      ${MATERIALS_CONFIG.exposedMetalRoughness},
-      exposedMetal * ${MATERIALS_CONFIG.exposedMetalRoughnessStrength}
-    );
-    metalnessFactor = mix(
-      metalnessFactor,
-      ${MATERIALS_CONFIG.exposedMetalness},
-      exposedMetal * ${MATERIALS_CONFIG.exposedMetalnessStrength}
-    );
+    roughnessFactor = mix( roughnessFactor, 0.62, exposedMetal * 0.78 );
+    metalnessFactor = mix( metalnessFactor, 0.72, exposedMetal * 0.72 );
 
     // Heavy strikes hold dirt in the crushed pocket and crack paths. It remains
     // local to that strike instead of becoming a full-body brown filter.
@@ -711,8 +691,8 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
  * both palette paint and body wear inert. Convert only the selected paint slot;
  * glass, lamps and trim keep their authored materials.
  */
-const CAR_PAINT_ROUGHNESS = MATERIALS_CONFIG.paintRoughness;
-const CAR_PAINT_METALNESS = MATERIALS_CONFIG.paintMetalness;
+const CAR_PAINT_ROUGHNESS = 0.72;
+const CAR_PAINT_METALNESS = 0.12;
 
 /**
  * Clones an authored paint slot with one shared metallic automotive finish.
