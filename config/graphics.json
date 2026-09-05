@@ -5,5 +5,5 @@
   "shadowFar": 800,
   "shadowBias": -0.00004,
   "shadowNormalBias": 0.02,
-  "hemisphereIntensityScale": 0.82
+  "hemisphereIntensityScale": 1.60
 }
