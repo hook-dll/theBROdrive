@@ -426,7 +426,7 @@ const CAR_BODY_CONDITION_BODY = `
 
     // A dent reads as a dark pressed centre and a narrow light folded rim even
     // under flat light; the normal hook moves the real specular highlight.
-    diffuseColor.rgb *= 1.0 - 0.68 * dentCore * dentCore;
+    diffuseColor.rgb *= 1.0 - 0.84 * dentCore * dentCore;
     diffuseColor.rgb = mix(
       diffuseColor.rgb,
       min( vec3( 1.0 ), diffuseColor.rgb * 1.75 + vec3( 0.09 ) ),
