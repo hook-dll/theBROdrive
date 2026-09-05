@@ -21,6 +21,13 @@ interface ConditionUniforms {
   readonly dirt: { value: number };
   readonly rust: { value: number };
   readonly scratches?: { value: number };
+  /**
+   * Offset of the wear noise within the body's own frame, metres. Sampling the
+   * field in body space is what nails rust and dirt to the panels; this offset is
+   * what stops two cars of the same model from wearing in identical places, which
+   * the old world-space sampling got for free.
+   */
+  readonly fieldOrigin: { value: THREE.Vector3 };
 }
 
 interface CarPaletteUniforms extends ConditionUniforms {
@@ -84,13 +91,13 @@ function flatKey(color: number, roughness: number): string {
 }
 
 /** Stable program cache key for every condition material. */
-const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
+const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v2';
 
 /**
  * Body paint layers a bounded set of localized dents, scratches and chips in one
  * shader permutation. Bump this whenever its GLSL layout changes.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v8';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v9';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -100,34 +107,40 @@ const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
 /**
  * The rust/dirt shader is written once and shared by every condition material. The
- * mottling comes from a 3D hash/value noise on world position — no textures — and the
- * dirt is weighted by the world-space normal's Y so it settles on upward faces and in
- * the pits of the rust mottle.
+ * mottling comes from a 3D hash/value noise — no textures — sampled in the SHADED
+ * OBJECT'S OWN frame, so a patch of rust belongs to the panel it sits on.
  *
- * The world position/normal arrive as varyings we inject into the vertex shader; we
- * cannot use the stock `normal` (it is view-space) and `worldPosition` is only
- * emitted under transmission, so the varyings are self-contained.
+ * Sampling it in world space, as this did, meant the field stood still in the world
+ * while the car drove through it: dirt and rust crawled across the shell, and the
+ * shading around a dent slid off the dent whenever the body rocked.
+ *
+ * Impact records stay world-space (they are rebuilt from the car's live pose every
+ * frame), so the world position and normal are still needed alongside the body-frame
+ * position. `vCondBodyBasis` rotates a body-frame gradient back into world space for
+ * the normal hooks.
  */
 const VERTEX_VARYING =
+  'uniform vec3 uCondFieldOrigin;\n' +
   'varying vec3 vViewPosition;\n' +
   'varying vec3 vCondWorldPos;\n' +
   'varying vec3 vCondWorldNormal;\n' +
-  'varying vec3 vCondLocalPos;\n' +
-  // Model units to metres, retained for the lower-flank dirt mask. Impact positions
-  // are world-space uniforms and therefore need no per-fragment mesh basis.
-  'varying vec3 vCondScale;';
+  // Body-frame metres, already carrying the per-instance offset.
+  'varying vec3 vCondBodyPos;\n' +
+  'varying mat3 vCondBodyBasis;';
 
 // Parts are placed with rotation + uniform scale only, so mat3(modelMatrix) is an
-// exact world transform for the normal (no inverse-transpose required).
+// exact world transform for the normal (no inverse-transpose required), and its
+// column lengths are the model-units-to-metres conversion.
 const WORLD_POS_HOOK =
   '#include <worldpos_vertex>\n' +
   '\tvCondWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n' +
   '\tvCondWorldNormal = mat3( modelMatrix ) * objectNormal;\n' +
-  '\tvCondLocalPos = transformed;\n' +
   '\tvec3 condAxX = mat3( modelMatrix ) * vec3( 1.0, 0.0, 0.0 );\n' +
   '\tvec3 condAxY = mat3( modelMatrix ) * vec3( 0.0, 1.0, 0.0 );\n' +
   '\tvec3 condAxZ = mat3( modelMatrix ) * vec3( 0.0, 0.0, 1.0 );\n' +
-  '\tvCondScale = vec3( length( condAxX ), length( condAxY ), length( condAxZ ) );';
+  '\tvec3 condScale = max( vec3( length( condAxX ), length( condAxY ), length( condAxZ ) ), vec3( 1e-6 ) );\n' +
+  '\tvCondBodyPos = transformed * condScale + uCondFieldOrigin;\n' +
+  '\tvCondBodyBasis = mat3( condAxX / condScale.x, condAxY / condScale.y, condAxZ / condScale.z );';
 
 const CONDITION_PARS = `
 uniform float uDirt;
@@ -344,7 +357,7 @@ const CONDITION_BODY = `
 #include <metalnessmap_fragment>
 
 {
-  vec3 condP = vCondWorldPos;
+  vec3 condP = vCondBodyPos;
   vec3 condN = normalize( vCondWorldNormal );
   vec2 condR = condRust( condP );
 
@@ -376,12 +389,12 @@ const CAR_BODY_CONDITION_BODY = `
 #include <metalnessmap_fragment>
 
 {
-  vec3 condP = vCondWorldPos;
+  vec3 condP = vCondBodyPos;
   vec3 condN = normalize( vCondWorldNormal );
   vec2 condR = condRust( condP );
   float condUp = saturate( condN.y );
   float condPit = 1.0 - smoothstep( 0.2, 0.9, condR.y );
-  vec3 condMetreP = vCondLocalPos * vCondScale;
+  vec3 condMetreP = vCondBodyPos - uCondFieldOrigin;
   float condLower = 1.0 - smoothstep( 0.25, 1.15, condMetreP.y );
   float dustMask = uDirt * max(
     ( 0.3 + 0.7 * condUp ) * ( 0.45 + 0.55 * condPit ),
@@ -458,13 +471,16 @@ const CONDITION_NORMAL = `
 #include <normal_fragment_maps>
 
 if ( uRust > 0.001 ) {
-  vec3 condNP = vCondWorldPos;
+  vec3 condNP = vCondBodyPos;
   float condH = condRust( condNP ).x;
   vec3 condGrad = vec3(
     condRust( condNP + vec3( COND_PIT_EPS, 0.0, 0.0 ) ).x - condH,
     condRust( condNP + vec3( 0.0, COND_PIT_EPS, 0.0 ) ).x - condH,
     condRust( condNP + vec3( 0.0, 0.0, COND_PIT_EPS ) ).x - condH
   ) / COND_PIT_EPS;
+  // The field is sampled in the body's frame, so its gradient is too: rotate it
+  // into world space before it meets the world normal.
+  condGrad = vCondBodyBasis * condGrad;
   vec3 condWN = normalize( vCondWorldNormal );
   condGrad -= condWN * dot( condGrad, condWN );
   // The normal is in view space by this point, so the world-space gradient has
@@ -482,13 +498,14 @@ const CAR_BODY_NORMAL = `
 #include <normal_fragment_maps>
 
 if ( uRust > 0.001 ) {
-  vec3 condNP = vCondWorldPos;
+  vec3 condNP = vCondBodyPos;
   float condH = condRust( condNP ).x;
   vec3 condGrad = vec3(
     condRust( condNP + vec3( COND_PIT_EPS, 0.0, 0.0 ) ).x - condH,
     condRust( condNP + vec3( 0.0, COND_PIT_EPS, 0.0 ) ).x - condH,
     condRust( condNP + vec3( 0.0, 0.0, COND_PIT_EPS ) ).x - condH
   ) / COND_PIT_EPS;
+  condGrad = vCondBodyBasis * condGrad;
   vec3 condWN = normalize( vCondWorldNormal );
   condGrad -= condWN * dot( condGrad, condWN );
   vec3 condVG = ( viewMatrix * vec4( condGrad, 0.0 ) ).xyz;
@@ -525,6 +542,7 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uRust = uniforms.rust;
   shader.uniforms.uScratches = uniforms.scratches ?? { value: 0 };
+  shader.uniforms.uCondFieldOrigin = uniforms.fieldOrigin;
 
   shader.vertexShader = shader.vertexShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
@@ -552,6 +570,7 @@ function patchCarBodyShader(
   shader.uniforms.uDamagePosRadius = uniforms.damagePosRadius;
   shader.uniforms.uDamageNormalStrength = uniforms.damageNormalStrength;
   shader.uniforms.uDamageMeta = uniforms.damageMeta;
+  shader.uniforms.uCondFieldOrigin = uniforms.fieldOrigin;
 
   shader.vertexShader = shader.vertexShader
     .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
@@ -581,6 +600,31 @@ function patchCarPaletteShader(
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+/**
+ * Spreads instances across the noise field. Irrational steps keep successive seeds
+ * far apart on all three axes rather than walking a line through the same mottle.
+ */
+function wearFieldOrigin(seed: number): THREE.Vector3 {
+  return new THREE.Vector3(
+    ((seed * 0.7548776662) % 1) * 512,
+    ((seed * 0.5698402909) % 1) * 512,
+    ((seed * 0.8191725134) % 1) * 512,
+  );
+}
+
+/** Parts carry no id here, so their patterns are spread by creation order. */
+let wearFieldSerial = 0;
+
+/**
+ * Places one material's wear pattern within the body-space noise field. Cars pass a
+ * hash of their id, so a saved car rusts in the same places every time it loads.
+ */
+export function setConditionFieldOrigin(material: THREE.Material, seed: number): void {
+  const uniforms = carBodyUniforms.get(material) ?? conditionUniforms.get(material);
+  if (uniforms === undefined) return;
+  uniforms.fieldOrigin.value.copy(wearFieldOrigin(seed));
+}
+
 
 /**
  * A MeshStandardMaterial that rusts and dirties. Returns a fresh instance every call
@@ -600,7 +644,11 @@ export function makeConditionMaterial(
   }
 
   const material = template.clone();
-  const uniforms: ConditionUniforms = { dirt: { value: 0 }, rust: { value: 0 } };
+  const uniforms: ConditionUniforms = {
+    dirt: { value: 0 },
+    rust: { value: 0 },
+    fieldOrigin: { value: wearFieldOrigin(++wearFieldSerial) },
+  };
   conditionUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchConditionShader(shader, uniforms);
   material.customProgramCacheKey = () => CONDITION_PROGRAM_KEY;
@@ -694,6 +742,7 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
     dirt: { value: 0 },
     rust: { value: 0 },
     scratches: { value: 0 },
+    fieldOrigin: { value: wearFieldOrigin(++wearFieldSerial) },
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
@@ -726,6 +775,8 @@ export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Mater
     dirt: { value: 0 },
     rust: { value: 0 },
     scratches: { value: 0 },
+    // Static bodies never wear, but the field origin is part of the shared shape.
+    fieldOrigin: { value: new THREE.Vector3() },
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
