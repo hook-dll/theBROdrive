@@ -274,8 +274,7 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
       appendTriangle(bucket(output), mesh, element, positionMatrix, normalMatrix);
     }
   }
-  const chassis = buckets.get('chassis');
-  const inked = chassis && def.paintRamp ? flattenSeamInk(chassis, def.paintRamp, luma) : 0;
+  const inked = 0;
 
   const output = new THREE.Group();
   output.name = name;
