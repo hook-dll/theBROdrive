@@ -29,7 +29,7 @@ import { TRUNK_CELL_COUNT } from './trunk';
  *  - SOVIET: Low Poly Soviet Car Pack. Fifteen FBX bodies in centimetres, each
  *    carrying its own wheels, colour taken from a shared 9x2 swatch atlas.
  *  - STYLIZED: thirty-one detailed LOD0 sources normalized offline into compact
- *    GLBs with one fixed chassis, one cabin and named animated parts.
+ *    GLBs with one fixed chassis and named animated parts.
  */
 const SOVIET = '/models/soviet';
 const STYLIZED = '/models/stylized';
@@ -42,13 +42,6 @@ const STYLIZED = '/models/stylized';
  */
 const STYLIZED_PALETTE = `${STYLIZED}/PixelColors.png`;
 
-/** Glass-free, door-card-free cabin kits cut for each Soviet body family. */
-const SOVIET_INTERIORS = {
-  sedan: { file: `${STYLIZED}/interior-sedan.glb`, textureFile: STYLIZED_PALETTE },
-  wagon: { file: `${STYLIZED}/interior-wagon.glb`, textureFile: STYLIZED_PALETTE },
-  hatchback: { file: `${STYLIZED}/interior-hatchback.glb`, textureFile: STYLIZED_PALETTE },
-  suv: { file: `${STYLIZED}/interior-suv.glb`, textureFile: STYLIZED_PALETTE },
-} as const;
 
 /**
  * The pack's palette material, i.e. everything on a body that is not glass or a
@@ -484,27 +477,13 @@ export interface CarModelDef {
    * A Stylized body draws its windows as separate meshes sharing one authored
    * `Glass` material, so naming that material is enough. A Soviet body has no
    * window objects at all: its glass is a REGION OF ONE MESH whose UVs point at a
-   * single atlas swatch, so the loader has to cut those triangles out before it can
-   * make them see-through (`isolateGlass` in render/carmodel.ts).
+   * single atlas swatch, so the loader cuts those triangles out into their own mesh
+   * (`isolateGlass` in render/carmodel.ts).
    *
    * Set one or the other, never both.
    */
   readonly glassMaterial?: string;
   readonly glassUvCell?: readonly [number, number];
-  /**
-   * A cabin fitted to a body that has none of its own.
-   *
-   * The Soviet bodies are hollow shells: with the glass now see-through you look
-   * straight through them. The Stylized pack bakes its seats, dash and floor into
-   * the same mesh as the outer shell, so the cabin was cut out of a donor body
-   * offline (tools/extract-interior.mjs) and is fitted here to each hollow body's
-   * own measured box.
-   */
-  readonly interior?: {
-    readonly file: string;
-    /** The donor pack's palette, which the cut cabin still samples. */
-    readonly textureFile: string;
-  };
   /**
    * Visual-only body lift as a fraction of wheel radius. Suspension, collider,
    * centre of mass and wheel mounts remain unchanged.
@@ -525,15 +504,15 @@ export interface CarModelDef {
    * Yaw applied to the imported model before it is measured, radians.
    *
    * The game drives toward +Z, so a model authored nose-first down -Z arrives
-   * back to front: it drives in reverse, its driver looks out of the rear window and
-   * its front axle steers from the rear. Nothing in a model file declares which end
-   * the lights are on — a body is just a mesh — so this is authored per pack. Both
-   * shipped packs are nose-first down +Z and set nothing.
+   * back to front: it drives in reverse and its front axle steers from the rear.
+   * Nothing in a model file declares which end the lights are on — a body is just a
+   * mesh — so this is authored per pack. Both shipped packs are nose-first down +Z
+   * and set nothing.
    *
    * It is applied before measurement rather than at draw time on purpose. Every
-   * derived quantity — the chassis box, which axle is the front one, the gizmo
-   * anchors and the driver's eye — comes out of the measured geometry, so rotating
-   * the geometry first is what keeps all of them agreeing with each other.
+   * derived quantity — the chassis box, which axle is the front one and the gizmo
+   * anchors — comes out of the measured geometry, so rotating the geometry first is
+   * what keeps all of them agreeing with each other.
    */
   readonly yaw?: number;
   /** Kerb mass, kg. Complete vehicle — there are no parts left to add to it. */
@@ -568,14 +547,6 @@ export interface CarModelDef {
    * only lands for a mid-seventies saloon shape (see `Vehicle`'s constructor).
    */
   readonly dragArea?: number;
-  /**
-   * In-car camera, as fractions of the measured body box: x of half-width, y of
-   * body height (0 = floor, 1 = roof), z of half-length. Resolved in
-   * render/carmodel.ts.
-   */
-  readonly viewFrac: readonly [number, number, number];
-  /** Exact chassis-local in-car camera point, overriding geometric measurement. */
-  readonly viewPoint?: readonly [number, number, number];
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors: readonly GizmoAnchorDef[];
@@ -586,7 +557,7 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'scale' | 'suspension' | 'viewFrac' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
+  'file' | 'scale' | 'suspension' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
 > & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb: string;
@@ -594,7 +565,6 @@ type Entry = Omit<
   readonly dir: string;
   readonly scale?: number;
   readonly suspension?: SuspensionTuning;
-  readonly viewFrac?: readonly [number, number, number];
   readonly handlingProfile?: HandlingProfile;
   readonly lights?: VehicleLightsDef;
   readonly gizmoAnchors?: readonly GizmoAnchorDef[];
@@ -603,28 +573,6 @@ type Entry = Omit<
 };
 
 
-/**
- * FALLBACK in-car eye, as fractions of the body box, for a body with no steering
- * wheel to sit behind.
- *
- * The in-car view is a real driver's eye now: `driverEyePoint` in
- * render/carmodel.ts derives it from the cabin's own steering wheel, which is the
- * one thing in a car whose position IS the driver's — it fixes the side, the
- * setback and the height, on all forty-six bodies, without a fraction being guessed
- * at anywhere.
- *
- * It used to be a HOOD camera riding on the nose, because these packs' windows were
- * opaque painted geometry and from inside the cabin the shell was a closed box. The
- * glass is see-through now (`isolateGlass`) and the hollow Soviet shells have a
- * fitted cabin, so the constraint that forced the eye onto the bonnet is gone.
- *
- * These fractions therefore only apply to a body that somehow has no wheel at all,
- * and they keep the nose placement for exactly that case: an eye dropped into the
- * middle of an empty shell sees nothing but its own roof.
- */
-const VIEW_CAR: readonly [number, number, number] = [0, 0.78, 0.96];
-/** A cab-forward truck has almost no bonnet: sit high, right at the front face. */
-const VIEW_CAB: readonly [number, number, number] = [0, 0.9, 0.96];
 
 /**
  * Low Poly Soviet Car Pack — fifteen bodies, one FBX each, and the only pack in
@@ -693,27 +641,6 @@ interface SovietSpec {
   readonly visualRideLiftWheelFraction?: number;
 }
 
-type SovietInteriorType = keyof typeof SOVIET_INTERIORS;
-
-/** Body-family mapping: estates retain their load floor, hatchbacks their compact
- * rear shelf, and the taller Nivas use an upright utility cabin. */
-const SOVIET_INTERIOR_TYPES: Readonly<Record<string, SovietInteriorType>> = {
-  'gz21.fbx': 'sedan',
-  'gz24.fbx': 'sedan',
-  'vz01.fbx': 'sedan',
-  'vz02.fbx': 'wagon',
-  'vz03.fbx': 'sedan',
-  'vz04.fbx': 'wagon',
-  'vz05.fbx': 'sedan',
-  'vz05r.fbx': 'sedan',
-  'vz06.fbx': 'sedan',
-  'vz07.fbx': 'sedan',
-  'vz08.fbx': 'hatchback',
-  'vz09.fbx': 'hatchback',
-  'vz099.fbx': 'sedan',
-  'vz21.fbx': 'suv',
-  'vz31.fbx': 'suv',
-};
 
 /*
  * ---- the grip ladder, and why it sits so far below 1.0 ----
@@ -1052,7 +979,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
 
 /**
  * Body-paint swatch used by each Soviet FBX. The shared atlas also carries glass,
- * chrome, lamps, tyres and interior colours; replacing the whole texture would tint
+ * chrome, lamps, tyres and trim colours; replacing the whole texture would tint
  * those parts too. Recolouring only this UV cell preserves the rest of the authored
  * palette and the rally car's decals.
  */
@@ -1117,6 +1044,17 @@ function stylizedLights(blinkers: boolean): VehicleLightsDef {
   return { ...lights, leftBlinkers: ['TurnLight_L'], rightBlinkers: ['TurnLight_R'] };
 }
 
+/**
+ * Visual-only lift for the VAZ bodies, as a fraction of wheel radius.
+ *
+ * These fifteen models are authored sitting lower on their wheels than the real
+ * cars did, so a Zhiguli looked slammed next to a Volga that already carries this
+ * correction. It is a RENDER offset and nothing else: the suspension, the collider,
+ * the centre of mass, the wheel mounts and every clearance the physics reads stay
+ * exactly where `SUSP_*.rideHeight` puts them (see `visualBodyLift`).
+ */
+const VAZ_VISUAL_RIDE_LIFT = 1 / 6;
+
 /** One entry per body; the pack's scale, palette and wheel detection are shared. */
 const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   id: spec.id,
@@ -1127,14 +1065,13 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   // Every body in this pack draws its windows as a region of the one body mesh,
   // UV-mapped to the atlas's dark teal swatch. Measured on all fifteen.
   glassUvCell: [3, 1],
-  // Each body family gets a componentized, glass-free cabin. The extractor removes
-  // donor door cards, which cannot agree with the Soviet shells' door apertures.
-  interior: SOVIET_INTERIORS[SOVIET_INTERIOR_TYPES[spec.file]],
   lights: sovietLights(spec.file),
   detectWheels: true,
   bodyClass: 'car',
   storageCells: spec.storageCells,
-  visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
+  visualRideLiftWheelFraction:
+    spec.visualRideLiftWheelFraction ??
+    (spec.file.startsWith('vz') ? VAZ_VISUAL_RIDE_LIFT : undefined),
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -1157,11 +1094,11 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
  * tools/normalize-stylized.ts.
  *
  * The source pack ships four levels of detail per vehicle. The unnumbered detailed
- * model is Unity's first/highest LOD tier and supplies the retained chassis, wheels
- * and complete cabin. The normalizer welds fixed doors and exterior trim into one
- * chassis, cuts cabin geometry into one interior mesh, combines every window, and
- * emits named wheels, steering wheel and lamp channels. glTF Transform then indexes,
- * quantizes and Meshopt-compresses the GLB; the runtime does no FBX repair work.
+ * model is Unity's first/highest LOD tier and supplies the retained chassis and
+ * wheels. The normalizer welds fixed doors, trim and cabin geometry into one
+ * chassis, combines every window, and emits named wheels, steering wheel and lamp
+ * channels. glTF Transform then indexes, quantizes and Meshopt-compresses the GLB;
+ * the runtime does no FBX repair work.
  *
  * Source coordinates already agree with the game — nose down +Z, +X to the left,
  * origin on the ground between the wheels — so no yaw is needed. Source scale is
@@ -1170,8 +1107,8 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
  * 1.52 m track and 0.62 m wheels.
  *
  * Every normalized output follows one scene contract: `wheel_fl/fr/rl/rr`,
- * `steering_wheel`, `chassis`, `interior`, `glass`, and the applicable named lamp
- * meshes. The truck's unused middle bogie is removed during normalization.
+ * `steering_wheel`, `chassis`, `glass`, and the applicable named lamp meshes. The
+ * truck's unused middle bogie is removed during normalization.
  */
 interface StylizedSpec {
   readonly id: string;
@@ -1189,7 +1126,6 @@ interface StylizedSpec {
   readonly handlingProfile?: HandlingProfile;
   readonly frontWeightShare?: number;
   readonly suspension?: SuspensionTuning;
-  readonly viewPoint?: readonly [number, number, number];
   /** This body's coachwork ramp in the 32x32 palette. */
   readonly paint: PalettePaintRamp;
   /** Set for the three supercars the pack gave no indicator lenses. */
@@ -1210,10 +1146,10 @@ function ramp(
 
 /*
  * Every ramp below was measured, not guessed: each body was rendered from five
- * viewpoints with the palette cell index written out as colour, and the coachwork
- * ramp is the block those renders actually show. A UV-area histogram does not
- * answer this — these bodies carry more hidden interior and underside surface,
- * mapped to the palette's greys, than they carry visible paint.
+ * angles with the palette cell index written out as colour, and the coachwork ramp
+ * is the block those renders actually show. A UV-area histogram does not answer
+ * this — these bodies carry more hidden underside surface mapped to the palette's
+ * greys than they carry visible paint.
  *
  * Figures are read off the shapes: the muscle coupes get the V8 and the firm
  * fastback springs, the utilities get four-wheel drive on truck springs, the vans
@@ -1402,7 +1338,6 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     label: 'transporter van',
     file: 'MicroBus2',
     bodyClass: 'bus',
-    viewPoint: [0.0492, 0.5, 0.561],
     mass: 1620,
     engineId: 'engine_d4_2000',
     gearboxId: 'gearbox_manual5',
@@ -1418,7 +1353,6 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     label: 'cab-over van',
     file: 'MicroBus3',
     bodyClass: 'bus',
-    viewPoint: [0.0442, 0.453, 0.988],
     mass: 1480,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual4',
@@ -1533,7 +1467,6 @@ const STYLIZED_SPECS: readonly StylizedSpec[] = [
     handlingProfile: 'sport',
     suspension: SUSP_SPORT,
     paint: ramp(18, 2, 0, 16, 5),
-    viewPoint: [0.42, 0.274, 0.182],
   },
 
   // ---- SpecialCar1-5: service vehicles. Two saloons, an ambulance, a bullion
@@ -1754,7 +1687,6 @@ const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
     rearDriveBias: spec.rearDriveBias,
     handlingProfile: spec.handlingProfile ?? 'classic',
     frontWeightShare: spec.frontWeightShare,
-    viewPoint: spec.viewPoint,
   } satisfies Entry;
 });
 
@@ -1768,8 +1700,8 @@ const ENTRIES: readonly Entry[] = [
 
   // -------------------------------------------------------------------------
   // Stylized Vehicles Pack. Thirty-one detailed LOD0 sources normalized offline:
-  // fixed doors and trim form one chassis, with one cabin, one glass mesh, named
-  // animated wheels and one mesh per independently controlled lamp channel.
+  // fixed doors, trim and cabin geometry form one chassis, with one glass mesh,
+  // named animated wheels and one mesh per independently controlled lamp channel.
   // -------------------------------------------------------------------------
   ...STYLIZED_CARS,
 ];
@@ -1784,7 +1716,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   paintRamp: e.paintRamp,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
-  interior: e.interior,
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
   detectWheels: e.detectWheels,
   wheelNodes: e.wheelNodes,
@@ -1803,8 +1734,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   handlingProfile: e.handlingProfile ?? 'classic',
   frontWeightShare: e.frontWeightShare,
   dragArea: e.dragArea,
-  viewFrac: e.viewFrac ?? (e.bodyClass === 'car' ? VIEW_CAR : VIEW_CAB),
-  viewPoint: e.viewPoint,
   lights: e.lights,
   gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   storageCells: TRUNK_CELL_COUNT,

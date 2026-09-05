@@ -7,8 +7,7 @@
  *   Stylized Vehicles Pack/Models/Detailed/<Name>/<Name>.fbx
  *
  * Output contract:
- *   chassis          fixed opaque shell, doors and trim, one mesh
- *   interior         seats, dash, floor and door cards, one mesh
+ *   chassis          fixed opaque shell, doors, trim and cabin geometry, one mesh
  *   glass            every window, one mesh
  *   steering_wheel   authored pivot retained for animation
  *   wheel_fl/fr/rl/rr authored pivots retained for suspension animation
@@ -61,7 +60,6 @@ const LAMP_MATERIALS = new Set(['Headlights', 'BrakeLights', 'TurnLight_L', 'Tur
 type Bucket = { position: number[]; normal: number[]; uv: number[]; triangles: number };
 type OutputName =
   | 'chassis'
-  | 'interior'
   | 'glass'
   | 'steering_wheel'
   | (typeof WHEEL_OUTPUTS)[number]
@@ -151,20 +149,6 @@ function meshOf(name: OutputName, bucket: Bucket, material: THREE.Material): THR
   return mesh;
 }
 
-function cabinBox(scene: THREE.Group, meshes: readonly THREE.Mesh[]): THREE.Box3 {
-  const body = new THREE.Box3();
-  const cabin = new THREE.Box3();
-  for (const mesh of meshes) {
-    if (!['FL', 'FR', 'BL', 'BR', 'BL2', 'BR2'].includes(mesh.name)) {
-      body.union(new THREE.Box3().setFromObject(mesh, true));
-    }
-    if (mesh.name.startsWith('Window')) cabin.union(new THREE.Box3().setFromObject(mesh, true));
-  }
-  if (cabin.isEmpty()) throw new Error(`${scene.name || 'model'} has no Window* meshes`);
-  cabin.min.y = body.min.y;
-  cabin.expandByScalar(6);
-  return cabin;
-}
 
 async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   const name = basename(def.file).replace(/\.(?:fbx|glb)$/i, '');
@@ -181,7 +165,6 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   scene.traverse((node) => {
     if (node instanceof THREE.Mesh) meshes.push(node);
   });
-  const windows = cabinBox(scene, meshes);
   const wheelNames = sourceWheelNames(name);
   const sourceToOutput = new Map(Object.entries(wheelNames).map(([output, input]) => [input, output as OutputName]));
 
@@ -195,10 +178,6 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
     return found;
   };
   const transforms = new Map<OutputName, THREE.Matrix4>();
-  const centroid = new THREE.Vector3();
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
 
   for (const mesh of meshes) {
     const wheelOutput = sourceToOutput.get(mesh.name);
@@ -228,15 +207,7 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
       } else if (LAMP_MATERIALS.has(material.name)) {
         output = material.name as OutputName;
       } else {
-        a.fromBufferAttribute(position, vertexAt(element)).applyMatrix4(mesh.matrixWorld);
-        b.fromBufferAttribute(position, vertexAt(element + 1)).applyMatrix4(mesh.matrixWorld);
-        c.fromBufferAttribute(position, vertexAt(element + 2)).applyMatrix4(mesh.matrixWorld);
-        centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-        // The glazed aperture is the cabin boundary. Side panels and roof skin sit
-        // outside it; seats, dash, floor and door cards sit inside it. Some bodies
-        // map their cabin to the paint ramp too, so UV colour cannot be used as a
-        // universal separator.
-        output = windows.containsPoint(centroid) ? 'interior' : 'chassis';
+        output = 'chassis';
       }
       appendTriangle(bucket(output), mesh, element, positionMatrix, normalMatrix);
     }
@@ -247,7 +218,6 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   const sharedPalette = paletteMaterial();
   const materials = new Map<string, THREE.Material>([
     ['chassis', sharedPalette],
-    ['interior', sharedPalette],
     ['steering_wheel', sharedPalette],
     ['wheel_fl', sharedPalette],
     ['wheel_fr', sharedPalette],
@@ -267,7 +237,7 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
     if (transform) transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
     output.add(mesh);
   }
-  for (const required of ['chassis', 'interior', 'glass', 'steering_wheel', ...WHEEL_OUTPUTS] as const) {
+  for (const required of ['chassis', 'glass', 'steering_wheel', ...WHEEL_OUTPUTS] as const) {
     if (!output.getObjectByName(required)) throw new Error(`${name} produced no ${required}`);
   }
   output.updateMatrixWorld(true);

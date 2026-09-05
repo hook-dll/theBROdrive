@@ -99,7 +99,6 @@ export class Hud {
   private readonly tops: HTMLElement[] = [];
 
   private readonly crosshairEl: HTMLElement;
-  private readonly seatCalibrationEl: HTMLElement;
   private readonly promptEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
   private readonly tachValue: SVGPathElement;
@@ -140,7 +139,6 @@ export class Hud {
   private invSelected = -1;
   private toasts: HTMLElement[] = [];
   private toastTimers = new Set<number>();
-  private seatCalibrationSignature = '';
   private disposed = false;
 
   constructor(root: HTMLElement) {
@@ -148,7 +146,6 @@ export class Hud {
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
 
-    this.seatCalibrationEl = el('div', 'hud-seat-calibration is-hidden');
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
     const tach = this.buildDial('hud-tach', true);
@@ -220,7 +217,6 @@ export class Hud {
     this.tops = [
       this.crosshairEl,
       this.promptEl,
-      this.seatCalibrationEl,
       this.drivingCluster,
       inventoryEl,
       this.toastEl,
@@ -438,23 +434,6 @@ export class Hud {
     this.setVisible(this.promptEl, text !== null);
     this.crosshairEl.classList.toggle('is-dim', text === null);
     if (text !== null) this.setText(this.promptEl, text);
-  }
-  setSeatCalibration(
-    active: boolean,
-    carName: string,
-    coordinates: { readonly x: number; readonly y: number; readonly z: number },
-  ): void {
-    this.setVisible(this.seatCalibrationEl, active);
-    if (!active) {
-      this.seatCalibrationSignature = '';
-      return;
-    }
-    const signature =
-      `${carName}\n` +
-      `WS AD ZX\n` +
-      `X ${coordinates.x.toFixed(3)}  Y ${coordinates.y.toFixed(3)}  Z ${coordinates.z.toFixed(3)}`;
-    this.seatCalibrationSignature = signature;
-    this.setText(this.seatCalibrationEl, signature);
   }
 
   setInventory(items: readonly Item[], selected: number, carriedMass: number, massLimit: number): void {

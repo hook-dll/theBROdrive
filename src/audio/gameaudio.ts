@@ -42,12 +42,11 @@ export class GameAudio {
    */
   updateDriving(
     state: VehicleAudioState | null,
-    interior: boolean,
     radioSpatial: RadioSpatialState,
     radioCarId: string | null,
   ): void {
     this.vehicle.setActive(state !== null);
-    if (state) this.vehicle.update(state, interior);
+    if (state) this.vehicle.update(state);
     this.activeRadioId = radioCarId;
 
     for (const [id, radio] of this.radios) {
@@ -60,10 +59,12 @@ export class GameAudio {
         ) {
           radio.setSourcePosition(radioSpatial.sourceX, radioSpatial.sourceY, radioSpatial.sourceZ);
         }
-        radio.setInterior(interior);
+        // The radio is a fitting of the car being driven, so audio remains in the
+        // cabin regardless of a camera distance selected purely for the view.
+        radio.setSeated(true);
         radio.setInCar(true);
       } else {
-        radio.setInterior(false);
+        radio.setSeated(false);
         radio.setInCar(false);
       }
     }

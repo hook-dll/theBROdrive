@@ -4,7 +4,7 @@ import type { PhysicsWorld } from '../core/physics';
 import { CAMERA_BASE_FOV, nearPlaneForFarPlane } from '../core/renderer';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
-export type CameraMode = 'foot' | 'interior' | 'chase' | 'orbit';
+export type CameraMode = 'foot' | 'hood' | 'chase';
 
 export interface CameraTarget {
   x: number;
@@ -15,8 +15,8 @@ export interface CameraTarget {
   qz: number;
   qw: number;
   speedKmh: number;
-  /** Driver eye point in body-local space, used by the interior camera. */
-  eyeOffset: readonly [number, number, number];
+  /** Bonnet camera mount in chassis-local metres; see CarModelMeasure.hoodPoint. */
+  hoodOffset: readonly [number, number, number];
 }
 
 /* ---- tuning ---- */
@@ -25,7 +25,7 @@ export interface CameraTarget {
 const PITCH_LIMIT = 1.45;
 /** Standing eye height above the player position, metres. */
 const EYE_HEIGHT = 1.62;
-/** How far ahead of the eye the spring's look-at point sits (foot/interior). */
+/** How far ahead of the eye the spring's look-at point sits. */
 const LOOK_AHEAD = 12;
 /**
  * Follow stiffness (rad/s). A critically damped first-order approach with
@@ -49,25 +49,21 @@ const CHASE_RECENTER_IDLE_SECONDS = 6;
 const CHASE_RECENTER_OMEGA = 2;
 /** Ignore sub-pixel touch jitter when deciding whether horizontal look is active. */
 const CHASE_LOOK_ACTIVITY_EPSILON = 1e-3;
-/** Interior view starts returning forward after one second without mouse/touch look. */
-const INTERIOR_RECENTER_IDLE_SECONDS = 1;
 /**
- * Log-distance added per wheel notch. Distance is `exp(logDistance)`, so a
- * notch always multiplies distance by a fixed factor. That is the only way one
- * gesture can span 1.5 m to 300 m with even perceptual speed — linear zoom over
- * that range is either uselessly slow up close or teleports the far view.
+ * Log-distance added per wheel notch. Distance is `exp(logDistance)`, so a notch
+ * always multiplies distance by a fixed factor, which keeps the near end of the
+ * range from crawling while the far end teleports.
  */
 const ZOOM_SENSITIVITY = 0.25;
 const DIST_MIN = 1.5;
-const DIST_MAX = 300;
-/** Upper chase distance; zooming past it hands the arm over to orbit. */
-const CHASE_MAX = 7;
-/** Constant elevation folded into the orbit pitch so the car hides no road. */
-const ORBIT_PITCH_BASE = 0.22;
+/** Furthest the chase arm may stand from the car, metres. */
+const DIST_MAX = 7;
+/** Constant elevation folded into the arm pitch so the car hides no road. */
+const ARM_PITCH_BASE = 0.22;
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
 /**
- * Ground clearance for the chase/orbit eye, metres, and the probe that finds the
+ * Ground clearance for the chase eye, metres, and the probe that finds the
  * ground beneath it.
  *
  * The probe starts just above the CAR (see liftAboveGround) and must stay under
@@ -83,10 +79,6 @@ const GROUND_PROBE_DOWN = 40;
  * disagree. 65 degrees on foot and in the car, matching The Long Drive.
  */
 const BASE_FOV = CAMERA_BASE_FOV;
-/** Narrower cockpit projection avoids stretching nearby doors and roof pillars. */
-const INTERIOR_FOV = 60;
-/** Close cockpit surfaces must remain in front of the clipping plane. */
-const INTERIOR_NEAR = 0.035;
 /**
  * Speed-widened ceiling. Kept at the same +14 degrees over the resting value that
  * it was before, so lowering the base changes where the camera sits at rest without
@@ -94,22 +86,6 @@ const INTERIOR_NEAR = 0.035;
  * the speed effect off entirely.
  */
 const MAX_FOV = BASE_FOV + 14;
-/**
- * Cockpit speed-widened ceiling.
- *
- * Perceived speed is optical FLOW, not velocity: a surface at lateral distance `d`
- * sweeps the retina at `v/d`, so what a driver reads speed from is near geometry
- * crossing the PERIPHERY — the verge, the shoulder, the posts. A narrow projection
- * throws that periphery off-screen and leaves only the distant road, which barely
- * moves, and that is the whole reason 120 km/h in the cabin reads like 70.
- *
- * The exterior views already widen (MAX_FOV); interior was pinned at INTERIOR_FOV
- * and therefore carried no speed cue at all. The swing is +8 against the exterior's
- * +14 because a cockpit pays for FOV twice: the dash, the pillars and the door cards
- * sit within a metre of the eye, so widening stretches them, and INTERIOR_NEAR is
- * 0.035 m precisely because they are that close.
- */
-const INTERIOR_MAX_FOV = INTERIOR_FOV + 8;
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
@@ -118,30 +94,6 @@ const BINOCULAR_FOV = BASE_FOV / 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
-/**
- * Interior g-force sway tuning. The eye stays inside the cabin, but the camera now
- * also inherits the chassis' physical pitch and roll. This bounded offset is the
- * driver's body moving in the seat, not a replacement for suspension motion.
- */
-/** Belted occupant travel, kept inside a conservative cabin-safe envelope. */
-const SWAY_LATERAL_MAX = 0.04;
-const SWAY_DEPTH_MAX = 0.05;
-/** Sway low-pass time constant, seconds. */
-const SWAY_TAU = 0.16;
-const SWAY_OMEGA = 1 / SWAY_TAU;
-/** Acceleration, m/s^2, that fully saturates the clamp. */
-const SWAY_ACCEL_FULL = 6;
-const SWAY_LATERAL_GAIN = SWAY_LATERAL_MAX / SWAY_ACCEL_FULL;
-const SWAY_DEPTH_GAIN = SWAY_DEPTH_MAX / SWAY_ACCEL_FULL;
-/** Small additional occupant counter-motion; chassis roll comes from target.q. */
-const SWAY_ROLL_MAX = 0.025;
-const SWAY_ROLL_GAIN = SWAY_ROLL_MAX / SWAY_ACCEL_FULL;
-
-const LOG_MIN = Math.log(DIST_MIN);
-const LOG_MAX = Math.log(DIST_MAX);
-const LOG_CHASE_MAX = Math.log(CHASE_MAX);
-/** Interior seat calibration speed, metres per second while an axis is held. */
-const SEAT_ADJUST_SPEED = 0.6;
 
 /* ---- module-level scratch: `update()` must not allocate ---- */
 const _vA = new THREE.Vector3();
@@ -149,7 +101,6 @@ const _vB = new THREE.Vector3();
 const _vC = new THREE.Vector3();
 const _vD = new THREE.Vector3();
 const _qA = new THREE.Quaternion();
-const _qB = new THREE.Quaternion();
 const _mA = new THREE.Matrix4();
 const _UP = new THREE.Vector3(0, 1, 0);
 const _FORWARD = new THREE.Vector3(0, 0, 1);
@@ -159,6 +110,9 @@ const _rayDir = { x: 0, y: 0, z: 0 };
 function clamp(x: number, lo: number, hi: number): number {
   return x < lo ? lo : x > hi ? hi : x;
 }
+
+const LOG_MIN = Math.log(DIST_MIN);
+const LOG_MAX = Math.log(DIST_MAX);
 
 
 function wrapAngle(angle: number): number {
@@ -170,26 +124,17 @@ function wrapAngle(angle: number): number {
       : wrapped;
 }
 
-function isExternalMode(mode: CameraMode): boolean {
-  return mode === 'chase' || mode === 'orbit';
-}
-
 export class CameraRig {
   /** Driving-view selection survives a trip on foot; `mode` reports foot while walking. */
-  private _mode: Exclude<CameraMode, 'foot'> = 'interior';
+  private _mode: Exclude<CameraMode, 'foot'> = 'chase';
   private onFoot = true;
 
   private yawValue = 0;
   private pitch = 0;
   private logDistance = Math.log(6);
-  /**
-   * Driving look survives while the shared yaw/pitch fields drive the foot camera.
-   * Yaw is body-local in interior mode and world-space in chase/orbit.
-   */
+  /** Driving look survives while the shared yaw/pitch fields drive the foot camera. */
   private drivingYaw = 0;
   private drivingPitch = 0;
-  /** Last rendered mode, used to preserve heading across interior/exterior switches. */
-  private previousMode: CameraMode = 'foot';
   /** Last non-vertical vehicle heading; used only for explicit view transitions/recentre. */
   private vehicleYaw = 0;
 
@@ -205,61 +150,29 @@ export class CameraRig {
   private recenterYaw = 0;
   /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
-  /** Seconds since the last interior-camera yaw or pitch input. */
-  private interiorLookIdle = 0;
-  /** True while I enables interior seat calibration controls. */
-  private seatAdjusting = false;
-  /** Mutable chassis-local driver eye used while calibrating the interior camera. */
-  private readonly interiorOffset = new THREE.Vector3();
-  private savedInteriorOffset: readonly [number, number, number] | null = null;
-  /** U disables acceleration-driven occupant sway while retaining the chassis pose. */
-  private headMovementEnabled = true;
-
+  /** Hood view heading relative to the car; the mount turns with the chassis. */
+  private hoodYawOffset = 0;
+  /** Ten-power binocular view: a held-item effect, independent of the camera mode. */
   private binoculars = false;
-  /**
-   * Interior sway state: previous frame's chassis position/local speeds for
-   * the finite-difference accel estimate, the low-pass-filtered accel, and
-   * the resulting bounded roll. `swayPrimed` skips the first post-reset
-   * frame so a fresh finite difference is never taken against a stale (or
-   * just-reset) previous position.
-   */
-  private readonly swayPrevPos = new THREE.Vector3();
-  private swayPrevFwdSpeed = 0;
-  private swayPrevLatSpeed = 0;
-  private swayAccelLong = 0;
-  private swayAccelLat = 0;
-  private swayRoll = 0;
-  private swayPrimed = false;
-  /** True while the driving view was 'interior' last frame; edge-detects entry. */
-  private wasInterior = false;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly physics: PhysicsWorld,
     origin: WorldOrigin,
   ) {
-    // The eye, its look target and the interior sway's previous-frame position are
-    // all cached RELATIVE positions that survive across frames. A rebase shifts the
-    // whole frame by -dx/-dz, so each must shift too, or the camera lags the world
-    // (the spring would ease a 1 km step over ~300 ms, the car flying off-screen)
-    // and the sway's finite difference would read the step as one giant velocity
-    // spike. Register here; the rig lives for the whole session, which is exactly
-    // the register() contract.
     origin.register(this);
   }
 
   /**
    * Rebasable: shift every relative position this rig keeps across frames by the
-   * frame step, so the camera stays glued to the world and the sway's finite
-   * difference keeps seeing real velocities. Y is a height, untouched by the origin.
+   * frame step, so the camera stays glued to the world. Y is a height, untouched by
+   * the origin.
    */
   rebase(shift: RebaseShift): void {
     this.eye.x -= shift.dx;
     this.eye.z -= shift.dz;
     this.lookAt.x -= shift.dx;
     this.lookAt.z -= shift.dz;
-    this.swayPrevPos.x -= shift.dx;
-    this.swayPrevPos.z -= shift.dz;
   }
 
   get mode(): CameraMode {
@@ -274,42 +187,6 @@ export class CameraRig {
     return { x: this.eye.x, y: this.eye.y, z: this.eye.z };
   }
 
-  /** True while the interior camera is in seat-adjustment mode. */
-  get isSeatAdjusting(): boolean {
-    return this.seatAdjusting;
-  }
-
-  /** Current chassis-local interior camera coordinates, in metres. */
-  get interiorCoordinates(): { x: number; y: number; z: number } {
-    return {
-      x: this.interiorOffset.x,
-      y: this.interiorOffset.y,
-      z: this.interiorOffset.z,
-    };
-  }
-
-  /** I toggles calibration only from the interior driving view. */
-  toggleSeatAdjusting(): void {
-    if (this.mode !== 'interior') return;
-    this.seatAdjusting = !this.seatAdjusting;
-  }
-  /** Applies the saved global calibration used instead of each model's authored eye. */
-  setInteriorCameraOffset(offset: readonly [number, number, number] | null): void {
-    this.savedInteriorOffset = offset;
-  }
-  get isHeadMovementEnabled(): boolean {
-    return this.headMovementEnabled;
-  }
-
-  /** U toggles occupant sway only from the interior driving view. */
-  toggleInteriorHeadMovement(): void {
-    if (this.mode !== 'interior') return;
-    this.headMovementEnabled = !this.headMovementEnabled;
-    this.swayAccelLong = 0;
-    this.swayAccelLat = 0;
-    this.swayRoll = 0;
-    this.swayPrimed = false;
-  }
 
   /** Unit view direction of the *smoothed* camera, for interaction raycasts. */
   get eyeDirection(): { x: number; y: number; z: number } {
@@ -323,9 +200,8 @@ export class CameraRig {
 
   setMode(mode: CameraMode): void {
     // Foot is derived from `onFoot`; retaining the driving selection is what makes
-    // a chase view, its orbit and its zoom still be there after re-entering a car.
+    // a chase view and its zoom still be there after re-entering a car.
     if (mode !== 'foot') this._mode = mode;
-    if (mode !== 'interior') this.seatAdjusting = false;
   }
 
   /**
@@ -337,25 +213,27 @@ export class CameraRig {
   }
 
   /**
-   * C toggles the two authored driving views. Orbit remains available by zooming
-   * outward from chase; pressing C from either external mode returns to the hood.
+   * C swaps the two driving views: the bonnet mount and the follow arm.
+   *
+   * Entering the hood view aims it down the car, because a bonnet camera left
+   * pointing wherever the chase arm happened to be is disorienting: the mount is
+   * rigid, so the mismatch reads as the car having spun rather than the view.
    */
   cycleDriving(): void {
-    this._mode = this._mode === 'interior' ? 'chase' : 'interior';
-    if (this._mode !== 'interior') this.seatAdjusting = false;
+    this._mode = this._mode === 'chase' ? 'hood' : 'chase';
+    if (this._mode === 'hood') this.yawValue = this.vehicleYaw;
   }
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {
     const d = dt > 0 ? dt : 1 / 60;
 
     // Entering/exiting a vehicle is the one legitimate snap point: teleporting
-    // between a cabin and a standing pose must not spring-in (a fly-through).
+    // between a vehicle and a standing pose must not spring-in (a fly-through).
     if (onFoot !== this.onFoot) {
       if (onFoot) {
-        this.seatAdjusting = false;
         // `snapFoot` must reuse yaw/pitch for camera-relative walking, so retain the
-        // driving orbit first. Otherwise looking around on foot overwrites where the
-        // chase camera was aimed even though its zoom survives.
+        // driving heading first. Otherwise looking around on foot overwrites where
+        // the chase camera was aimed even though its zoom survives.
         this.drivingYaw = this.yawValue;
         this.drivingPitch = this.pitch;
         this.onFoot = true;
@@ -364,20 +242,19 @@ export class CameraRig {
         this.onFoot = false;
         this.yawValue = this.drivingYaw;
         this.pitch = this.drivingPitch;
-        if (this._mode === 'interior') this.snapInterior(target);
-        else this.snapArm(target);
+        this.snapDriving(target);
       }
     }
 
     const inputMode: CameraMode = onFoot ? 'foot' : this._mode;
     if (!onFoot) this.updateVehicleYaw(target);
-    // Interior yaw is relative to the body; external yaw is absolute. Convert only
-    // on an authored camera switch. Once outside, subsequent chassis rotation has
-    // no path back into yaw, including while the car tumbles.
-    if (this.previousMode === 'interior' && isExternalMode(inputMode)) {
-      this.yawValue = wrapAngle(this.vehicleYaw + this.yawValue);
-    } else if (isExternalMode(this.previousMode) && inputMode === 'interior') {
-      this.yawValue = wrapAngle(this.yawValue - this.vehicleYaw);
+
+    // The hood mount turns with the car, so its heading is stored as an OFFSET from
+    // the chassis and rebuilt against the live heading every frame. Keeping the raw
+    // world yaw instead would leave the view pointing at the horizon it started on
+    // while the car drove around underneath it.
+    if (inputMode === 'hood') {
+      this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
     }
 
     // `input.lookYaw` is rightward mouse motion. Forward is (sin y, cos y) and up is
@@ -392,17 +269,10 @@ export class CameraRig {
     // activity lets that noise postpone recentering forever.
     // Vertical look is independent: it neither recentres pitch nor resets this timer.
     const horizontalLookActive = Math.abs(input.lookYaw) >= CHASE_LOOK_ACTIVITY_EPSILON;
-    const rotationLookActive =
-      horizontalLookActive || Math.abs(input.lookPitch) >= CHASE_LOOK_ACTIVITY_EPSILON;
     if (inputMode === 'chase') {
       this.chaseLookIdle = horizontalLookActive ? 0 : this.chaseLookIdle + d;
     } else {
       this.chaseLookIdle = 0;
-    }
-    if (inputMode === 'interior') {
-      this.interiorLookIdle = rotationLookActive ? 0 : this.interiorLookIdle + d;
-    } else {
-      this.interiorLookIdle = 0;
     }
 
     // Re-centre (V): level pitch and, in an external view, ease toward the
@@ -418,7 +288,7 @@ export class CameraRig {
     if (input.recenterCamera) {
       this.recentering = true;
       // Capture once: even a re-centre in progress must not inherit a wreck's spin.
-      this.recenterYaw = isExternalMode(inputMode) ? this.vehicleYaw : 0;
+      this.recenterYaw = onFoot ? 0 : this.vehicleYaw;
     }
     if (this.recentering) {
       const k = 1 - Math.exp(-RECENTER_OMEGA * d);
@@ -448,121 +318,72 @@ export class CameraRig {
         this.yawValue = wrapAngle(this.yawValue + yawError * k);
       }
     }
-    // The cabin view is body-local, so its rest pose is exactly zero yaw and pitch.
-    // After one second without rotation input, ease both axes forward. Any new look
-    // input resets the timer above before this block can act, so the return never
-    // fights the player.
-    if (
-      inputMode === 'interior' &&
-      !this.recentering &&
-      this.interiorLookIdle >= INTERIOR_RECENTER_IDLE_SECONDS
-    ) {
-      const yawError = wrapAngle(-this.yawValue);
-      const k = 1 - Math.exp(-RECENTER_OMEGA * d);
-      this.yawValue =
-        Math.abs(yawError) < RECENTER_EPSILON
-          ? 0
-          : wrapAngle(this.yawValue + yawError * k);
-      this.pitch =
-        Math.abs(this.pitch) < RECENTER_EPSILON
-          ? 0
-          : this.pitch + (0 - this.pitch) * k;
+
+    // Whatever look, re-centre or snap did to the world yaw this frame is the hood
+    // view's new offset from the car. Recording it here, once, is what keeps the two
+    // representations from disagreeing on the next frame.
+    if (inputMode === 'hood') {
+      this.hoodYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
     }
 
     // Wobble phases. Bob only advances while moving, so it freezes at rest.
     const moveMag = Math.min(1, Math.hypot(input.moveX, input.moveZ));
     if (moveMag > 1e-3) this.bobTime += d;
 
-    // Zoom drives the orbit arm only (foot and interior have no arm).
-    const driving: CameraMode = onFoot ? 'foot' : this._mode;
-    if (input.zoomDelta !== 0 && (driving === 'chase' || driving === 'orbit')) {
-      this.logDistance += input.zoomDelta * ZOOM_SENSITIVITY;
-      if (this._mode === 'chase' && this.logDistance > LOG_CHASE_MAX) {
-        this._mode = 'orbit'; // one gesture crosses from bumper-cam to landscape
-      }
-      this.logDistance = clamp(this.logDistance, LOG_MIN, LOG_MAX);
-      if (this._mode === 'chase') {
-        this.logDistance = Math.min(this.logDistance, LOG_CHASE_MAX);
-      }
+    // Zoom drives the chase arm only; the hood mount has no arm to lengthen.
+    if (input.zoomDelta !== 0 && !onFoot && this._mode === 'chase') {
+      this.logDistance = clamp(
+        this.logDistance + input.zoomDelta * ZOOM_SENSITIVITY,
+        LOG_MIN,
+        LOG_MAX,
+      );
     }
 
     const mode: CameraMode = onFoot ? 'foot' : this._mode;
-    this.previousMode = mode;
-
-    // Entering interior view — whether by stepping into the car or cycling
-    // views back to it — must start the sway from a clean zero. Otherwise a
-    // finite-difference position from seconds ago (or a different vehicle)
-    // turns into a single spurious velocity spike on the first frame back.
-    if (mode === 'interior' && !this.wasInterior) this.resetSway(target);
-    this.wasInterior = mode === 'interior';
 
     switch (mode) {
       case 'foot':
         this.desiredFoot(target, moveMag);
         break;
-      case 'interior':
-        this.desiredInterior(target, d, input);
+      case 'hood':
+        this.desiredHood(target);
         break;
       case 'chase':
         this.desiredArm(target);
         this.applyOcclusion(target);
         this.liftAboveGround(target);
         break;
-      case 'orbit':
-        this.desiredArm(target);
-        this.liftAboveGround(target);
-        break;
     }
 
-    // The interior camera is BOLTED to the car, so it must not be sprung toward its
-    // desired pose: a first-order follow at SPRING_OMEGA lags by v/omega, which is
-    // a metre at 45 km/h and 2.5 m at highway speed — enough for the eye to leave
-    // the driver's seat under acceleration and braking. Its softness comes from the
-    // bounded g-sway and shake instead.
-    //
-    // External cameras spring only the eye. Their look point is the current,
+    // The chase camera springs only its eye. Its look point is the current,
     // interpolated chassis centre: springing it by the same rule leaves it metres
     // behind a fast car, visibly pinning the view to the rear rather than its centre.
-    // The foot camera still springs both ends of its view ray.
-    if (mode === 'interior') {
+    // The foot camera springs both ends of its view ray.
+    //
+    // The hood camera springs NEITHER. It is bolted to the bonnet, so any lag turns
+    // into the mount sliding around on a panel it is supposed to be bolted to.
+    const k = 1 - Math.exp(-SPRING_OMEGA * d);
+    if (mode === 'hood') {
       this.eye.copy(_vA);
       this.lookAt.copy(_vB);
     } else {
-      const k = 1 - Math.exp(-SPRING_OMEGA * d);
       this.eye.lerp(_vA, k);
-      if (isExternalMode(mode)) this.lookAt.copy(_vB);
+      if (mode === 'chase') this.lookAt.copy(_vB);
       else this.lookAt.lerp(_vB, k);
     }
 
-    if (mode === 'interior') {
-      // The cockpit must inherit the chassis' actual roll. Looking at the road with
-      // world-up here silently levelled the cabin, making a physically rolling car
-      // feel glued to the road from the driver's seat.
-      _vC.copy(_UP).applyQuaternion(_qA);
-      _mA.lookAt(this.eye, this.lookAt, _vC);
-    } else {
-      _mA.lookAt(this.eye, this.lookAt, _UP);
-    }
-    // Rebuild from the current view every frame before applying occupant roll.
-    // Without this reset, `multiply` accumulated another roll forever: the camera
-    // inverted within seconds and made steering appear uncontrollable.
+    _mA.lookAt(this.eye, this.lookAt, _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
-    if (mode === 'interior') {
-      // A small occupant response remains on top of the chassis attitude. It is much
-      // smaller than the body roll now that the camera no longer levels the cabin.
-      _qB.setFromAxisAngle(_FORWARD, this.swayRoll);
-      this.camera.quaternion.multiply(_qB);
-    }
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
     // from `target` (the car's or player's transform, already relative), and on a
-    // rebase `rebase()` shifts eye/lookAt/swayPrevPos by the same frame step as the
-    // bodies, so this copy stays correct with no conversion. `eyePosition` and
+    // rebase `rebase()` shifts eye and lookAt by the same frame step as the bodies,
+    // so this copy stays correct with no conversion. `eyePosition` and
     // `eyeDirection` expose that same relative eye to interaction and spawn code,
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
 
-    this.updateFov(target.speedKmh, d, mode);
+    this.updateFov(target.speedKmh, d);
   }
 
   /* ---- desired pose per mode; each writes _vA = eye, _vB = look-at ---- */
@@ -574,105 +395,23 @@ export class CameraRig {
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
   }
 
-  private desiredInterior(target: CameraTarget, dt: number, input: InputFrame): void {
-    if (this.seatAdjusting) {
-      this.interiorOffset.x += input.seatMoveX * SEAT_ADJUST_SPEED * dt;
-      this.interiorOffset.y += input.seatMoveY * SEAT_ADJUST_SPEED * dt;
-      this.interiorOffset.z += input.seatMoveZ * SEAT_ADJUST_SPEED * dt;
-    }
+  /**
+   * Bonnet mount: the eye rides the car's own hood point, rigidly.
+   *
+   * The mount POSITION inherits the full chassis rotation — that is what makes the
+   * view rise over a crest and dip under braking — but the view DIRECTION is built
+   * from yaw and pitch against world up, so the horizon never rolls with the body.
+   * Rolling it is what makes an outside-mounted camera unreadable in a slide, and
+   * unlike a driver's head there is no occupant here to justify the motion.
+   */
+  private desiredHood(target: CameraTarget): void {
     _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.copy(this.interiorOffset).applyQuaternion(_qA);
-    _vA.set(target.x, target.y, target.z).add(_vC);
-
-    // G-force sway: a bounded offset around the fixed eye point above,
-    // derived from the chassis' own finite-differenced acceleration — see
-    // the SWAY_* block for why acceleration (not velocity) drives this.
-    // World velocity from the position delta, then rotated into the body
-    // frame (conjugate of a unit quaternion is its inverse) so it splits
-    // cleanly into forward and lateral components.
-    _vD.set(
-      target.x - this.swayPrevPos.x,
-      target.y - this.swayPrevPos.y,
-      target.z - this.swayPrevPos.z,
-    ).divideScalar(dt);
-    this.swayPrevPos.set(target.x, target.y, target.z);
-    _qB.copy(_qA).conjugate();
-    _vD.applyQuaternion(_qB);
-    const fwdSpeed = _vD.z;
-    const latSpeed = _vD.x;
-
-    if (this.headMovementEnabled) {
-      if (this.swayPrimed) {
-        const rawLong = (fwdSpeed - this.swayPrevFwdSpeed) / dt;
-        const rawLat = (latSpeed - this.swayPrevLatSpeed) / dt;
-        const k = 1 - Math.exp(-SWAY_OMEGA * dt);
-        this.swayAccelLong += (rawLong - this.swayAccelLong) * k;
-        this.swayAccelLat += (rawLat - this.swayAccelLat) * k;
-      } else {
-        this.swayPrimed = true; // first frame after a reset: nothing to difference against yet
-      }
-    } else {
-      this.swayAccelLong = 0;
-      this.swayAccelLat = 0;
-      this.swayRoll = 0;
-      this.swayPrimed = false;
-    }
-    this.swayPrevFwdSpeed = fwdSpeed;
-    this.swayPrevLatSpeed = latSpeed;
-
-    // Offset opposes the car's acceleration, like a body pressed back into
-    // its seat under throttle or thrown sideways under braking/cornering.
-    // The per-axis clamps below guarantee that acceleration cannot carry the eye
-    // outside the conservative cabin-safe envelope.
-    const offsetZ = clamp(
-      -this.swayAccelLong * SWAY_DEPTH_GAIN,
-      -SWAY_DEPTH_MAX,
-      SWAY_DEPTH_MAX,
-    );
-    const offsetX = clamp(
-      -this.swayAccelLat * SWAY_LATERAL_GAIN,
-      -SWAY_LATERAL_MAX,
-      SWAY_LATERAL_MAX,
-    );
-    this.swayRoll = this.headMovementEnabled
-      ? clamp(-this.swayAccelLat * SWAY_ROLL_GAIN, -SWAY_ROLL_MAX, SWAY_ROLL_MAX)
-      : 0;
-    _vD.set(offsetX, 0, offsetZ).applyQuaternion(_qA);
-    _vA.add(_vD);
-
-    // NO SYNTHETIC SHAKE. There used to be a speed-scaled sum of sines here, standing
-    // in for a road the physics could not feel: the collider is flat between vertex
-    // rows and sealed surfaces carried no sub-collider texture at all, so a smooth
-    // stretch of asphalt transmitted a measured 0.000 g and the view had to be shaken
-    // by hand to look like motion. The tyres now carry the road themselves (see the
-    // tyre block in vehicle/vehicle.ts, and `RoadTexture` in core/surfaces.ts) and this
-    // camera is bolted to the chassis, so what the eye does at speed is what the body
-    // does. A sine on top of that is noise uncorrelated with the ground, and it masks
-    // the signal a driver reads the surface from.
-
-    // View direction = car orientation applied to the local look vector.
-    this.lookVector(_vC);
-    _vD.copy(_vC).applyQuaternion(_qA);
+    _vC.set(target.hoodOffset[0], target.hoodOffset[1], target.hoodOffset[2]).applyQuaternion(_qA);
+    _vA.set(target.x + _vC.x, target.y + _vC.y, target.z + _vC.z);
+    this.lookVector(_vD);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
   }
 
-  /**
-   * Clears the interior sway's running state. Called whenever the driving
-   * view enters 'interior' — stepping into the car or cycling views back to
-   * it — so a finite-difference position from long ago (or a different
-   * vehicle) never turns into a one-frame velocity spike.
-   */
-  private resetSway(target: CameraTarget): void {
-    const offset = this.savedInteriorOffset ?? target.eyeOffset;
-    this.interiorOffset.set(offset[0], offset[1], offset[2]);
-    this.swayPrevPos.set(target.x, target.y, target.z);
-    this.swayPrevFwdSpeed = 0;
-    this.swayPrevLatSpeed = 0;
-    this.swayAccelLong = 0;
-    this.swayAccelLat = 0;
-    this.swayRoll = 0;
-    this.swayPrimed = false;
-  }
 
   /**
    * Records a stable horizontal heading for explicit transitions. Near vertical,
@@ -703,7 +442,7 @@ export class CameraRig {
     // The arm points from the look target to the eye, opposite the view heading.
     // Pitch moves an orbiting eye opposite the requested look direction: mouse-up
     // lowers armPitch until the eye sits below the target and therefore looks up.
-    const armPitch = ORBIT_PITCH_BASE - this.pitch;
+    const armPitch = ARM_PITCH_BASE - this.pitch;
     const ca = Math.cos(armPitch);
     const sa = Math.sin(armPitch);
     _vD.set(-viewX * ca, sa, -viewZ * ca);
@@ -787,15 +526,12 @@ export class CameraRig {
     if (_vA.y < floor) _vA.y = floor;
   }
 
-  private updateFov(speedKmh: number, dt: number, mode: CameraMode): void {
-    const restFov = mode === 'interior' ? INTERIOR_FOV : BASE_FOV;
-    const wideFov = mode === 'interior' ? INTERIOR_MAX_FOV : MAX_FOV;
+  private updateFov(speedKmh: number, dt: number): void {
     const normalFov =
-      restFov + (wideFov - restFov) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
+      BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
     const targetFov = this.binoculars ? BINOCULAR_FOV : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
-    const targetNear =
-      mode === 'interior' ? INTERIOR_NEAR : nearPlaneForFarPlane(this.camera.far);
+    const targetNear = nearPlaneForFarPlane(this.camera.far);
     let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
       this.camera.fov = this.fov;
@@ -814,7 +550,7 @@ export class CameraRig {
     out.set(Math.sin(this.yawValue) * cp, Math.sin(this.pitch), Math.cos(this.yawValue) * cp);
   }
 
-  /** On exit: keep the cabin view direction so the player steps out facing it. */
+  /** On exit: keep the driving view direction so the player steps out facing it. */
   private snapFoot(target: CameraTarget): void {
     _vC.subVectors(this.lookAt, this.eye);
     if (_vC.lengthSq() > 1e-8) {
@@ -829,23 +565,17 @@ export class CameraRig {
     this.fov = BASE_FOV;
   }
 
-  private snapInterior(target: CameraTarget): void {
-    const offset = this.savedInteriorOffset ?? target.eyeOffset;
-    this.interiorOffset.set(offset[0], offset[1], offset[2]);
-    _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.copy(this.interiorOffset).applyQuaternion(_qA);
-    this.eye.set(target.x, target.y, target.z).add(_vC);
-    this.lookVector(_vD);
-    _vD.applyQuaternion(_qA);
-    this.lookAt.copy(this.eye).addScaledVector(_vD, LOOK_AHEAD);
-    this.fov = BASE_FOV;
-  }
-
-  /** Snap into the remembered chase/orbit pose on entry, preserving its arm exactly. */
-  private snapArm(target: CameraTarget): void {
-    this.desiredArm(target);
-    if (this._mode === 'chase') this.applyOcclusion(target);
-    this.liftAboveGround(target);
+  /** Snap into the remembered driving pose on entry, preserving its arm exactly. */
+  private snapDriving(target: CameraTarget): void {
+    this.updateVehicleYaw(target);
+    if (this._mode === 'hood') {
+      this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
+      this.desiredHood(target);
+    } else {
+      this.desiredArm(target);
+      this.applyOcclusion(target);
+      this.liftAboveGround(target);
+    }
     this.eye.copy(_vA);
     this.lookAt.copy(_vB);
     this.fov = BASE_FOV;

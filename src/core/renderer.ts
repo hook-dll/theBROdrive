@@ -6,23 +6,22 @@ import type { ShadeTint } from '../items/items';
 /**
  * Renderer, scene and camera ownership.
  *
- * The far plane and fog are set up for the far-orbit camera: zooming out to a few
- * hundred metres means the horizon must still resolve, so the far plane is 4 km and
- * fog is exponential rather than linear. Linear fog over that range either erases
- * the middle distance or leaves the horizon looking like a flat card.
+ * The far plane and fog are set up for the desert vista: the horizon runs to a few
+ * kilometres and must still resolve, so the far plane is 4 km and fog is exponential
+ * rather than linear. Linear fog over that range either erases the middle distance
+ * or leaves the horizon looking like a flat card.
  */
 
 /**
  * Far-plane floor in metres. The sky dome (DOME_RADIUS = 3000 in render/sky.ts)
- * and the far-orbit camera (DIST_MAX = 300 in render/cameras.ts) both need at
- * least this much reach, so `setViewDistance` never drops below it: the drawn
- * horizon may shrink, but the dome and the orbit arm must keep resolving.
+ * needs at least this much reach, so `setViewDistance` never drops below it: the
+ * drawn horizon may shrink, but the dome must keep resolving.
  */
 export const CAMERA_FAR = 4000;
 /**
- * Near-plane floor in metres. It must clear the steering wheel and dashboard from
- * the driver's eye without clipping either surface. `setViewDistance` only ever
- * raises this, never lowers it.
+ * Near-plane floor in metres. The hood camera sits a hand's width off the bonnet,
+ * so this must clear the panel it is mounted on without slicing into it.
+ * `setViewDistance` only ever raises this, never lowers it.
  */
 export const CAMERA_NEAR = 0.08;
 /** Exterior-camera near plane for a configured far plane. */
@@ -31,16 +30,16 @@ export function nearPlaneForFarPlane(far: number): number {
 }
 
 /**
- * How far the free-look orbit camera may stand from the car (DIST_MAX in
- * render/cameras.ts). The far plane is measured from the camera, not the car,
- * so it must clear the draw distance by at least this much or the orbit camera
- * clips the far edge of the desert it can still see past the car.
+ * Standoff margin, metres: the far plane is measured from the CAMERA, not from the
+ * car, so it has to clear the draw distance by at least the chase arm's reach
+ * (DIST_MAX in render/cameras.ts) or the camera clips the far edge of the desert it
+ * can still see past the car. Rounded well clear of that 7 m arm.
  */
-const ORBIT_MARGIN = 300;
+const CAMERA_STANDOFF_MARGIN = 32;
 
 /** Far plane shared by the camera and the vista that closes its ground horizon. */
 export function farPlaneForViewDistance(metres: number): number {
-  return Math.max(CAMERA_FAR, metres + ORBIT_MARGIN);
+  return Math.max(CAMERA_FAR, metres + CAMERA_STANDOFF_MARGIN);
 }
 
 /**
