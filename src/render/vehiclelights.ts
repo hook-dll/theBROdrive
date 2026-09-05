@@ -21,38 +21,42 @@ import * as THREE from 'three';
  *  - Slots are lit by INTENSITY alone. Unclaimed slots stay in the scene at a
  *    visually black, nonzero intensity, so cycling headlights, braking or driving
  *    away remains a uniform write without a zero-to-lit driver specialization.
- *  - The pool only ever GROWS, and only when demand exceeds it. The initial block
- *    covers one fully lit car (two headlights, two tail lamps, two reversing lamps)
- *    — today's cost, unchanged for the overwhelmingly common case. A second lit car
- *    parked beside the first costs one recompile, once, and never again that
- *    session. Unlike dusk, that demand is created deliberately by the player and is
- *    rare, so paying for it when it happens beats charging every frame for slots
- *    that are almost always dark.
+ *  - The pool NEVER changes size. It was grown on demand, on the argument that a
+ *    second lit car is rare enough to pay for when it happens. Measured, that
+ *    payment is 4.5 SECONDS of blocked main thread on this scene the moment the
+ *    seventh beam is claimed — the whole world's lit materials recompiling in one
+ *    frame. Spawning a car at night and switching its lamps on is exactly how a
+ *    player meets it. No beam is worth a four-second freeze.
+ *
+ * Demand beyond the pool is therefore refused. `main.ts` offers beams in priority
+ * order — the driven car first, then nearest to the camera — so a refusal costs the
+ * FARTHEST lamp its pool of light on the ground, while its lens still glows.
  */
-const INITIAL_SLOT_COUNT = 6;
-/** Growth granularity: one lamp pair, so a second lit car does not overshoot. */
-const GROWTH_BLOCK = 2;
+/**
+ * Persistent spotlights. Covers one fully lit car: two headlights, two tail lamps
+ * and two reversing lamps, which is the common night case and today's cost.
+ */
+const SLOT_COUNT = 6;
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;
-/**
- * Hard ceiling. Beyond this the per-fragment cost of the forward-lighting loop is
- * indefensible on any machine, and a WebGL uniform budget is a real wall rather
- * than a preference. Twelve lamp pairs is more lit vehicles than the world ever
- * gathers in one place; the caller offers beams nearest-first, so anything refused
- * here is the farthest beam of an improbable crowd.
- */
-const MAX_SLOT_COUNT = 24;
 
 export class VehicleLightRig {
   private readonly lights: THREE.SpotLight[] = [];
+  private readonly scene: THREE.Scene;
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
 
-  constructor(private readonly scene: THREE.Scene) {
-    this.grow(INITIAL_SLOT_COUNT);
+  constructor(scene: THREE.Scene) {
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
+      light.castShadow = false;
+      scene.add(light, light.target);
+      this.lights.push(light);
+    }
+    this.scene = scene;
   }
 
-  /** Persistent spotlights in the scene. Grows with demand, never shrinks. */
+  /** Persistent spotlights in the scene. Fixed for the session; see the note above. */
   get lightCount(): number {
     return this.lights.length;
   }
@@ -85,10 +89,7 @@ export class VehicleLightRig {
     decay: number,
   ): boolean {
     if (!(intensity > 0)) return false;
-    if (this.used >= this.lights.length) {
-      if (this.lights.length >= MAX_SLOT_COUNT) return false;
-      this.grow(Math.min(GROWTH_BLOCK, MAX_SLOT_COUNT - this.lights.length));
-    }
+    if (this.used >= this.lights.length) return false;
     const light = this.lights[this.used++];
     light.position.copy(sourceWorld);
     light.target.position.copy(targetWorld);
@@ -121,12 +122,4 @@ export class VehicleLightRig {
     this.lights.length = 0;
   }
 
-  private grow(count: number): void {
-    for (let i = 0; i < count; i++) {
-      const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
-      light.castShadow = false;
-      this.scene.add(light, light.target);
-      this.lights.push(light);
-    }
-  }
 }
