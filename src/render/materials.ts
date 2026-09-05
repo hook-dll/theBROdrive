@@ -409,7 +409,7 @@ const CAR_BODY_CONDITION_BODY = `
     vec4 damageMasks;
     float heavyMask;
     vec3 unusedGradient;
-    condDamage( condP, condN, damageMasks, heavyMask, unusedGradient );
+    condDamage( vCondWorldPos, condN, damageMasks, heavyMask, unusedGradient );
     float damagePaintSurface = 1.0;
     #ifdef USE_MAP
       if ( uPalettePaint > 0.5 ) {

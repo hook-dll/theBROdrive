@@ -72,6 +72,8 @@ const LAMP_MATERIALS = new Set(['Headlights', 'BrakeLights', 'TurnLight_L', 'Tur
 const INK_MAX_LUMA = 50;
 const PALETTE_FILE = 'public/models/stylized/PixelColors.png';
 const PALETTE_CELLS = 32;
+/** Ink strips are thin geometry; broad dark faces are grilles, bumpers or tyres. */
+const MAX_INK_TRIANGLE_AREA = 350;
 
 
 type Bucket = { position: number[]; normal: number[]; uv: number[]; triangles: number };
@@ -174,15 +176,16 @@ async function paletteLuma(): Promise<Float32Array> {
 }
 
 /**
- * Repoints every inked panel-gap triangle at the body's own paint cell, so the gap
- * takes the car's colour and disappears.
+ * Repoints only the thin, neutral-black panel-gap triangles at the body's own paint
+ * cell, so the gap disappears without repainting dark body details.
  *
- * Done to UVs on the raw triangle soup, before `mergeVertices`: the seam strips
+ * Done to UVs on the raw triangle soup, before `mergeVertices`: the seam strips can
  * share vertices with the panels beside them, and rewriting a shared vertex after
  * indexing would drag a corner of the neighbouring panel into the paint cell too.
  *
- * Chassis only. The wheels sample the same near-black cell for their tyres, and a
- * body-coloured tyre is a worse bug than the line this removes.
+ * The old luma-only test also caught the darkest rows of a legitimate paint ramp and
+ * broad bumper/grille faces. A seam must be dark at all three corners, outside the
+ * model's paint ramp, and small enough to be a strip rather than a body part.
  */
 function flattenSeamInk(bucket: Bucket, ramp: PalettePaintRamp, luma: Float32Array): number {
   // The runtime uploads this palette flipped (see `loadPalette`), so a UV row counts
@@ -192,10 +195,39 @@ function flattenSeamInk(bucket: Bucket, ramp: PalettePaintRamp, luma: Float32Arr
   let flattened = 0;
   for (let triangle = 0; triangle < bucket.triangles; triangle++) {
     const base = triangle * 6;
-    const column = Math.floor(bucket.uv[base]! * PALETTE_CELLS);
-    const row = PALETTE_CELLS - 1 - Math.floor(bucket.uv[base + 1]! * PALETTE_CELLS);
-    if (column < 0 || column >= PALETTE_CELLS || row < 0 || row >= PALETTE_CELLS) continue;
-    if (luma[row * PALETTE_CELLS + column]! >= INK_MAX_LUMA) continue;
+    let inkCorners = 0;
+    let valid = true;
+    for (let corner = 0; corner < 3; corner++) {
+      const uvBase = base + corner * 2;
+      const column = Math.floor(bucket.uv[uvBase]! * PALETTE_CELLS);
+      const row = PALETTE_CELLS - 1 - Math.floor(bucket.uv[uvBase + 1]! * PALETTE_CELLS);
+      const inPaintRamp =
+        column >= ramp.column &&
+        column < ramp.column + ramp.columns &&
+        row >= ramp.row &&
+        row < ramp.row + ramp.rows;
+      if (
+        column < 0 || column >= PALETTE_CELLS ||
+        row < 0 || row >= PALETTE_CELLS ||
+        inPaintRamp ||
+        luma[row * PALETTE_CELLS + column]! >= INK_MAX_LUMA
+      ) {
+        valid = false;
+        break;
+      }
+      inkCorners++;
+    }
+    if (!valid || inkCorners !== 3) continue;
+
+    const ax = bucket.position[base + 3]! - bucket.position[base]!;
+    const ay = bucket.position[base + 4]! - bucket.position[base + 1]!;
+    const az = bucket.position[base + 5]! - bucket.position[base + 2]!;
+    const bx = bucket.position[base + 6]! - bucket.position[base]!;
+    const by = bucket.position[base + 7]! - bucket.position[base + 1]!;
+    const bz = bucket.position[base + 8]! - bucket.position[base + 2]!;
+    const area = Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx) * 0.5;
+    if (area > MAX_INK_TRIANGLE_AREA) continue;
+
     for (let corner = 0; corner < 3; corner++) {
       bucket.uv[base + corner * 2] = paintU;
       bucket.uv[base + corner * 2 + 1] = paintV;
