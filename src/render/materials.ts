@@ -434,6 +434,15 @@ const CAR_BODY_CONDITION_BODY = `
     );
     roughnessFactor = mix( roughnessFactor, 0.88, max( dentCore, dentRim ) * 0.7 );
 
+    // A crushed panel is not a mirror. Paint over a dent is stretched and its clear
+    // coat crazed, so the reflection goes with the shine: without this the pressed
+    // centre kept the coachwork's full metalness and read as a bright smear moving
+    // with the camera rather than as a hole in the panel. The folded rim keeps more
+    // of it, which is what still catches the sun along the crease. Bare steel below
+    // puts metalness back where the paint has actually gone.
+    metalnessFactor = mix( metalnessFactor, 0.06, dentCore * 0.85 );
+    metalnessFactor = mix( metalnessFactor, 0.22, dentRim * 0.35 );
+
     // Thin scratches and broken chip islands remove paint to dull bare steel.
     // Metalness changes with colour and roughness; gray albedo alone is paint.
     float exposedMetal = max(
