@@ -1,0 +1,14 @@
+{
+  "windFullMps": 45,
+  "windGain": 0.16,
+  "tyreFullMps": 30,
+  "tyreGain": 0.34,
+  "skidStartMps": 1.6,
+  "skidFullMps": 7,
+  "skidGain": 0.42,
+  "rubGain": 0.055,
+  "engineGainIdle": 0.11,
+  "engineGainLoad": 0.2,
+  "destroyedMetalGain": 0.16,
+  "landingFullMps": 6
+}

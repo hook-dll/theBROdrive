@@ -1,0 +1,15 @@
+{
+  "dayCycleMinutes": 24,
+  "poiSpacingMetres": 1200,
+  "dayCycleMinutesMin": 8,
+  "dayCycleMinutesMax": 128,
+  "poiSpacingMetresMin": 500,
+  "poiSpacingMetresMax": 5000,
+  "poiSpacingMetresStep": 100,
+  "defaultMasterVolume": 0.8,
+  "defaultRadioVolume": 0.6,
+  "defaultInkStrength": 0.2,
+  "defaultMouseSensitivity": 0.0022,
+  "mouseSensitivityMin": 0.0004,
+  "mouseSensitivityMax": 0.006
+}

@@ -9,8 +9,8 @@
  * length.
  */
 
+import { GAMEPLAY_CONFIG } from '../config';
 import { BINDABLE_ACTIONS } from '../core/input';
-
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
@@ -110,26 +110,23 @@ export interface Settings {
   preciseSteering: boolean;
 }
 
-export const DAY_CYCLE_MIN_MINUTES = 8;
-export const DAY_CYCLE_MAX_MINUTES = 128;
-export const POI_SPACING_MIN_METRES = 500;
-export const POI_SPACING_MAX_METRES = 5000;
-export const POI_SPACING_STEP_METRES = 100;
-export const DEFAULT_POI_SPACING_METRES = 1200;
+export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
+export const DAY_CYCLE_MAX_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMax;
+export const POI_SPACING_MIN_METRES = GAMEPLAY_CONFIG.poiSpacingMetresMin;
+export const POI_SPACING_MAX_METRES = GAMEPLAY_CONFIG.poiSpacingMetresMax;
+export const POI_SPACING_STEP_METRES = GAMEPLAY_CONFIG.poiSpacingMetresStep;
+export const DEFAULT_POI_SPACING_METRES = GAMEPLAY_CONFIG.poiSpacingMetres;
 
-export const DEFAULT_MASTER_VOLUME = 0.8;
-export const DEFAULT_RADIO_VOLUME = 0.6;
-export const DEFAULT_INK_STRENGTH = 0.2;
-export const DEFAULT_MOUSE_SENSITIVITY = 0.0022;
-export const MOUSE_SENSITIVITY_MIN = 0.0004;
-export const MOUSE_SENSITIVITY_MAX = 0.006;
+export const DEFAULT_MASTER_VOLUME = GAMEPLAY_CONFIG.defaultMasterVolume;
+export const DEFAULT_RADIO_VOLUME = GAMEPLAY_CONFIG.defaultRadioVolume;
+export const DEFAULT_INK_STRENGTH = GAMEPLAY_CONFIG.defaultInkStrength;
+export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity;
+export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
+export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
 
-/**
- * Default day length in real minutes. 24 matches state.ts's DAY_LENGTH
- * (24 * 60 s) at TIME_SCALE 1 — the historical behaviour; a faster or slower
- * cycle is opt-in.
- */
-const DEFAULT_DAY_CYCLE_MINUTES = 24;
+/** Default day length in real minutes. */
+const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
+
 
 export const DEFAULT_SETTINGS: Settings = {
   // Automatic by default: the gearbox is driver assist, not the game. Shifting by

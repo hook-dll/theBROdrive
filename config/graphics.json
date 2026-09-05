@@ -1,0 +1,9 @@
+{
+  "shadowMapSize": 2048,
+  "shadowFrustumHalfSize": 72,
+  "shadowNear": 40,
+  "shadowFar": 800,
+  "shadowBias": -0.00004,
+  "shadowNormalBias": 0.02,
+  "hemisphereIntensityScale": 0.82
+}
