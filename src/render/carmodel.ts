@@ -25,6 +25,7 @@ import {
   makeCarPaintFinishMaterial,
   makeCarPalettePaintMaterial,
   setCarBodyPalettePaint,
+  setConditionFieldOrigin,
 } from './materials';
 import {
   CAR_MODELS,
@@ -229,8 +230,11 @@ const CAR_PAINT_COLORS: readonly number[] = [
 ];
 const paintScratch = new THREE.Color();
 
-/** Stable string avalanche: a saved/generated car keeps its colour across reloads. */
-function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
+/**
+ * Stable string avalanche: a saved/generated car keeps its colour and its wear
+ * pattern across reloads.
+ */
+function appearanceHash(modelId: string, appearanceKey: string): number {
   let h = 0x811c9dc5;
   const key = `${modelId}:${appearanceKey}`;
   for (let i = 0; i < key.length; i++) {
@@ -241,7 +245,12 @@ function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
   h ^= h >>> 13;
   h = Math.imul(h, 0xc2b2ae35);
   h ^= h >>> 16;
-  return paintScratch.setHex(CAR_PAINT_COLORS[(h >>> 0) % CAR_PAINT_COLORS.length]!);
+  return h >>> 0;
+}
+
+function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
+  const h = appearanceHash(modelId, appearanceKey);
+  return paintScratch.setHex(CAR_PAINT_COLORS[h % CAR_PAINT_COLORS.length]!);
 }
 
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
@@ -269,12 +278,20 @@ function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
  * slot. Packs with a paint style name their paint; a pack without one is repainted
  * whole, which is what its single-material bodies describe.
  */
-function cloneCarBodyPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
+function cloneCarBodyPaintMaterials(
+  root: THREE.Object3D,
+  def: CarModelDef,
+  appearanceKey: string,
+): void {
+  const seed = appearanceHash(def.id, appearanceKey);
   const clones = new Map<THREE.Material, THREE.Material>();
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
     const material = makeCarBodyConditionMaterial(source);
+    // Wear is sampled in the body's own frame now, so two cars of one model would
+    // otherwise rust in identical places. The car's own hash spreads them apart.
+    setConditionFieldOrigin(material, seed);
     clones.set(source, material);
     return material;
   };
@@ -1140,7 +1157,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const wheels = new Map<string, THREE.Object3D>();
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
-  cloneCarBodyPaintMaterials(body, t.def);
+  cloneCarBodyPaintMaterials(body, t.def, appearanceKey);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
