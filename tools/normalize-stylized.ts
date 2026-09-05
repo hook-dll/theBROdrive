@@ -26,7 +26,8 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CAR_MODELS, type CarModelDef } from '../src/vehicle/carmodels';
+import sharp from 'sharp';
+import { CAR_MODELS, type CarModelDef, type PalettePaintRamp } from '../src/vehicle/carmodels';
 
 globalThis.document ??= {
   createElementNS: () => ({
@@ -56,6 +57,22 @@ const OUTPUT_ROOT = 'public/models/stylized';
 const STEERING_NAMES = new Set(['steering_wheel', 'rudder']);
 const WHEEL_OUTPUTS = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'] as const;
 const LAMP_MATERIALS = new Set(['Headlights', 'BrakeLights', 'TurnLight_L', 'TurnLight_R']);
+/**
+ * Palette luminance (0-255) below which a cell is the pack's INK rather than a
+ * material.
+ *
+ * The source models draw every panel gap — bonnet, doors, boot — as a thin strip of
+ * geometry mapped to the near-black end of the palette's neutral ramp. That reads as
+ * a pen outline on an otherwise flat-shaded car, which is not the look this game
+ * has: the Soviet pack draws no such lines, so the two packs disagreed on the same
+ * road. 50 covers #101010 through #2c2c2c — every shade the seams are drawn in —
+ * and stops short of #333333, which is the grille shadow, the wiper cowl and the
+ * tyre: parts that are meant to be dark.
+ */
+const INK_MAX_LUMA = 50;
+const PALETTE_FILE = 'public/models/stylized/PixelColors.png';
+const PALETTE_CELLS = 32;
+
 
 type Bucket = { position: number[]; normal: number[]; uv: number[]; triangles: number };
 type OutputName =
@@ -139,6 +156,55 @@ function geometryOf(bucket: Bucket, smoothChassis: boolean): THREE.BufferGeometr
   return indexed;
 }
 
+/**
+ * The palette's own pixels, so ink is identified by what a cell LOOKS like rather
+ * than by a hardcoded row: the ramps move around the sheet from car to car.
+ */
+async function paletteLuma(): Promise<Float32Array> {
+  const { data, info } = await sharp(PALETTE_FILE).raw().toBuffer({ resolveWithObject: true });
+  const luma = new Float32Array(PALETTE_CELLS * PALETTE_CELLS);
+  for (let row = 0; row < PALETTE_CELLS; row++) {
+    for (let column = 0; column < PALETTE_CELLS; column++) {
+      const i = (row * info.width + column) * info.channels;
+      luma[row * PALETTE_CELLS + column] =
+        0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
+    }
+  }
+  return luma;
+}
+
+/**
+ * Repoints every inked panel-gap triangle at the body's own paint cell, so the gap
+ * takes the car's colour and disappears.
+ *
+ * Done to UVs on the raw triangle soup, before `mergeVertices`: the seam strips
+ * share vertices with the panels beside them, and rewriting a shared vertex after
+ * indexing would drag a corner of the neighbouring panel into the paint cell too.
+ *
+ * Chassis only. The wheels sample the same near-black cell for their tyres, and a
+ * body-coloured tyre is a worse bug than the line this removes.
+ */
+function flattenSeamInk(bucket: Bucket, ramp: PalettePaintRamp, luma: Float32Array): number {
+  // The runtime uploads this palette flipped (see `loadPalette`), so a UV row counts
+  // up from the image's bottom while the catalogue's ramp rows count down from its top.
+  const paintU = (ramp.column + 0.5) / PALETTE_CELLS;
+  const paintV = (PALETTE_CELLS - 1 - ramp.keyRow + 0.5) / PALETTE_CELLS;
+  let flattened = 0;
+  for (let triangle = 0; triangle < bucket.triangles; triangle++) {
+    const base = triangle * 6;
+    const column = Math.floor(bucket.uv[base]! * PALETTE_CELLS);
+    const row = PALETTE_CELLS - 1 - Math.floor(bucket.uv[base + 1]! * PALETTE_CELLS);
+    if (column < 0 || column >= PALETTE_CELLS || row < 0 || row >= PALETTE_CELLS) continue;
+    if (luma[row * PALETTE_CELLS + column]! >= INK_MAX_LUMA) continue;
+    for (let corner = 0; corner < 3; corner++) {
+      bucket.uv[base + corner * 2] = paintU;
+      bucket.uv[base + corner * 2 + 1] = paintV;
+    }
+    flattened++;
+  }
+  return flattened;
+}
+
 function paletteMaterial(name = 'PixelColors'): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ name, color: 0xffffff, roughness: 0.72, metalness: 0.05 });
 }
@@ -149,6 +215,9 @@ function meshOf(name: OutputName, bucket: Bucket, material: THREE.Material): THR
   return mesh;
 }
 
+
+/** One decode for the whole run: every body shares this palette. */
+const luma = await paletteLuma();
 
 async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   const name = basename(def.file).replace(/\.(?:fbx|glb)$/i, '');
@@ -213,6 +282,9 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
     }
   }
 
+  const chassis = buckets.get('chassis');
+  const inked = chassis && def.paintRamp ? flattenSeamInk(chassis, def.paintRamp, luma) : 0;
+
   const output = new THREE.Group();
   output.name = name;
   const sharedPalette = paletteMaterial();
@@ -254,6 +326,7 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
 
   return Object.fromEntries([
     ['bytes', glb.byteLength],
+    ['seamInk', inked],
     ...[...buckets].map(([outputName, outputBucket]) => [outputName, outputBucket.triangles] as const),
   ]);
 }
