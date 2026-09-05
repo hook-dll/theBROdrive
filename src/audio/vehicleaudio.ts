@@ -39,7 +39,7 @@ const WIND_HP_LOW = 140;
 const WIND_HP_HIGH = 480;
 const WIND_LP_LOW = 3000;
 const WIND_LP_HIGH = 1800;
-/** Interior and chase cameras share the same restrained wind level. */
+/** Chase and orbit cameras share the same restrained wind level. */
 const WIND_GAIN = 0.16;
 
 /** Speed (m/s) at which tyre roll noise saturates. */
@@ -112,9 +112,6 @@ const ENGINE_GAIN_LOAD = 0.2;
 /** Low-pass corner at closed and at wide-open throttle, Hz. */
 const ENGINE_LP_CLOSED = 700;
 const ENGINE_LP_OPEN = 5200;
-/** Inside the car the engine is closer and the shell cuts the top end. */
-const ENGINE_INTERIOR_GAIN = 1.15;
-const ENGINE_INTERIOR_LP = 0.55;
 
 /** Vertical speed (m/s) killed in one landing that counts as a full-strength thump. */
 const LANDING_FULL_MPS = 6;
@@ -307,12 +304,8 @@ export class VehicleAudio {
     if (!active) this.wasRunning = false;
   }
 
-  /**
-   * One update per rendered frame. `interior` is the in-car camera: it is the only
-   * thing here that is a *view* concern, and it belongs in audio because what you
-   * hear depends on whether the shell is between you and the noise.
-   */
-  update(state: VehicleAudioState, interior: boolean): void {
+  /** One update per rendered frame. */
+  update(state: VehicleAudioState): void {
     if (!this.active) return;
     const now = this.mixer.now;
 
@@ -328,16 +321,11 @@ export class VehicleAudio {
     this.intakeFilter.frequency.setTargetAtTime(220 + fire * 6, now, ENGINE_TAU);
 
     const lpBase = ENGINE_LP_CLOSED + (ENGINE_LP_OPEN - ENGINE_LP_CLOSED) * (0.35 * rev + 0.65 * load);
-    this.engineLowpass.frequency.setTargetAtTime(
-      interior ? lpBase * ENGINE_INTERIOR_LP : lpBase,
-      now,
-      ENGINE_TAU,
-    );
+    this.engineLowpass.frequency.setTargetAtTime(lpBase, now, ENGINE_TAU);
 
     const running = state.engineRunning;
     const engineLevel = running
-      ? (ENGINE_GAIN_IDLE + ENGINE_GAIN_LOAD * (0.45 * rev + 0.55 * load)) *
-        (interior ? ENGINE_INTERIOR_GAIN : 1)
+      ? ENGINE_GAIN_IDLE + ENGINE_GAIN_LOAD * (0.45 * rev + 0.55 * load)
       : 0;
     ramp(this.engineGain.gain, engineLevel, now, ENGINE_TAU);
     ramp(this.intakeGain.gain, running ? 0.07 + 0.43 * load : 0, now, ENGINE_TAU);
@@ -349,9 +337,7 @@ export class VehicleAudio {
     );
     ramp(
       this.destroyedMetalGain.gain,
-      running && state.engineDestroyed
-        ? DESTROYED_METAL_GAIN * (0.45 + 0.55 * load) * (interior ? 0.8 : 1)
-        : 0,
+      running && state.engineDestroyed ? DESTROYED_METAL_GAIN * (0.45 + 0.55 * load) : 0,
       now,
       ENGINE_TAU,
     );
@@ -387,7 +373,7 @@ export class VehicleAudio {
     const rollT = clamp01(speed / TYRE_FULL_MPS);
     ramp(
       this.tyreGain.gain,
-      rollT * TYRE_GAIN * (0.6 + 0.8 * rough) * state.wheelContactFraction * (interior ? 0.7 : 1),
+      rollT * TYRE_GAIN * (0.6 + 0.8 * rough) * state.wheelContactFraction,
       now,
       AMBIENCE_TAU,
     );
@@ -403,7 +389,7 @@ export class VehicleAudio {
     const skidT = Math.max(slipT, lockT);
     ramp(
       this.skidGain.gain,
-      skidT * SKID_GAIN * state.wheelContactFraction * (interior ? 0.75 : 1),
+      skidT * SKID_GAIN * state.wheelContactFraction,
       now,
       0.05,
     );
@@ -432,7 +418,7 @@ export class VehicleAudio {
     );
     ramp(
       this.rubGain.gain,
-      brake * moving * unlocked * state.wheelContactFraction * RUB_GAIN * (interior ? 0.8 : 1),
+      brake * moving * unlocked * state.wheelContactFraction * RUB_GAIN,
       now,
       0.06,
     );

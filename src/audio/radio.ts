@@ -3,8 +3,7 @@
  *
  * The stream is routed through WebAudio so the car can be a real spatial source.
  * The station endpoints provide anonymous media CORS on every redirect, which
- * allows a panner and an exterior low-pass branch. The interior branch stays
- * direct and full-range, so sitting in the car remains the same radio signal.
+ * allows the spatialised low-pass branch.
  */
 
 import { AudioMixer, ramp } from './mixer';
@@ -33,28 +32,39 @@ export interface RadioSpatialState {
   listenerQw: number;
 }
 
-/** Delay before retrying a dropped stream, seconds. */
-const RETRY_DELAY_MS = 4000;
+/**
+ * Reconnect backoff, milliseconds.
+ *
+ * A dead relay used to be retried every four seconds forever, and every attempt is
+ * a fresh request the BROWSER logs itself — unreachable streams filled the console
+ * with network errors no `catch` here can suppress. Doubling up to a minute keeps a
+ * temporary drop recovering quickly while a blocked or offline machine settles into
+ * one attempt a minute.
+ */
+const RETRY_BASE_MS = 4000;
+const RETRY_MAX_MS = 60000;
 const SPATIAL_RAMP_SECONDS = 0.06;
 const EXTERIOR_CUTOFF_HZ = 3200;
 
 export class Radio {
   private readonly element: HTMLAudioElement;
   private readonly mediaSource: MediaElementAudioSourceNode;
-  private readonly interiorGain: GainNode;
+  private readonly cabinGain: GainNode;
   private readonly exteriorGain: GainNode;
   private readonly exteriorMono: GainNode;
   private readonly exteriorFilter: BiquadFilterNode;
   private readonly panner: PannerNode;
   private stationIndex = 0;
   private on = false;
+  private seated = true;
   private inCar = false;
-  private interior = true;
   private sourceReady = false;
   private paused = false;
   private volume = 1;
   private status: Status = 'offline';
   private retryTimer = 0;
+  /** Grows with each consecutive failure; reset the moment audio actually plays. */
+  private retryDelayMs = RETRY_BASE_MS;
   private disposed = false;
 
   constructor(private readonly mixer: AudioMixer) {
@@ -67,8 +77,8 @@ export class Radio {
     this.element.loop = false;
 
     this.mediaSource = ctx.createMediaElementSource(this.element);
-    this.interiorGain = ctx.createGain();
-    this.interiorGain.gain.value = 1;
+    this.cabinGain = ctx.createGain();
+    this.cabinGain.gain.value = 1;
     this.exteriorGain = ctx.createGain();
     this.exteriorGain.gain.value = 0;
     // A car is a single exterior source: collapse stereo before spatializing it.
@@ -87,7 +97,7 @@ export class Radio {
       rolloffFactor: 0.7,
       maxDistance: 180,
     });
-    this.mediaSource.connect(this.interiorGain).connect(ctx.destination);
+    this.mediaSource.connect(this.cabinGain).connect(ctx.destination);
     this.mediaSource.connect(this.exteriorMono).connect(this.exteriorFilter).connect(this.panner).connect(this.exteriorGain).connect(ctx.destination);
 
     this.element.addEventListener('playing', this.onPlaying);
@@ -95,6 +105,7 @@ export class Radio {
     this.element.addEventListener('error', this.onError);
     this.element.addEventListener('stalled', this.onError);
     this.element.addEventListener('ended', this.onError);
+    window.addEventListener('online', this.onOnline);
   }
 
   /** True when the radio is switched on, regardless of whether it can be heard. */
@@ -117,6 +128,7 @@ export class Radio {
   /** Switches the radio on or off. Returns the new on/off state. */
   toggle(): boolean {
     this.on = !this.on;
+    this.resetBackoff();
     this.sync();
     return this.on;
   }
@@ -128,6 +140,7 @@ export class Radio {
     // A station change is a new source, so the current one must be dropped.
     this.element.pause();
     this.element.removeAttribute('src');
+    this.resetBackoff();
     this.sync();
     return this.station;
   }
@@ -140,13 +153,13 @@ export class Radio {
     this.sync();
   }
 
-  /** Crossfades the untouched cabin branch and muffled exterior branch. */
-  setInterior(interior: boolean): void {
-    if (this.interior === interior) return;
-    this.interior = interior;
+  /** Crossfades between the cabin and spatialised branches when occupancy changes. */
+  setSeated(seated: boolean): void {
+    if (this.seated === seated) return;
+    this.seated = seated;
     const now = this.mixer.now;
-    ramp(this.interiorGain.gain, interior ? 1 : 0, now, SPATIAL_RAMP_SECONDS);
-    ramp(this.exteriorGain.gain, interior ? 0 : 1, now, SPATIAL_RAMP_SECONDS);
+    ramp(this.cabinGain.gain, seated ? 1 : 0, now, SPATIAL_RAMP_SECONDS);
+    ramp(this.exteriorGain.gain, seated ? 0 : 1, now, SPATIAL_RAMP_SECONDS);
   }
 
   /** Updates the listener pose without allocating per frame. */
@@ -213,6 +226,14 @@ export class Radio {
       return;
     }
 
+    // A machine that knows it has no network cannot reach a relay, so do not ask:
+    // the attempt would only add another logged failure. The browser's `online`
+    // event resumes tuning the moment connectivity returns.
+    if (navigator.onLine === false) {
+      this.status = 'offline';
+      return;
+    }
+
     const url = this.station.url;
     if (this.element.getAttribute('src') !== url) {
       this.element.src = url;
@@ -230,10 +251,12 @@ export class Radio {
 
   private scheduleRetry(): void {
     if (this.retryTimer !== 0 || this.disposed) return;
+    const delay = this.retryDelayMs;
+    this.retryDelayMs = Math.min(RETRY_MAX_MS, this.retryDelayMs * 2);
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = 0;
       if (this.on && this.sourceReady && !this.paused) this.sync();
-    }, RETRY_DELAY_MS);
+    }, delay);
   }
 
   private clearRetry(): void {
@@ -242,13 +265,31 @@ export class Radio {
     this.retryTimer = 0;
   }
 
+  /**
+   * A deliberate act — switching on, or changing station — is the player asking for
+   * this NOW, so it starts the backoff over instead of inheriting a minute-long wait
+   * accumulated while the machine was offline.
+   */
+  private resetBackoff(): void {
+    this.retryDelayMs = RETRY_BASE_MS;
+    this.clearRetry();
+  }
+
   private onPlaying = (): void => {
     this.status = 'live';
+    this.retryDelayMs = RETRY_BASE_MS;
     this.clearRetry();
   };
 
   private onWaiting = (): void => {
     if (this.status === 'live') this.status = 'connecting';
+  };
+
+  private onOnline = (): void => {
+    if (this.on && this.sourceReady && !this.paused) {
+      this.resetBackoff();
+      this.sync();
+    }
   };
 
   private onError = (): void => {
@@ -266,6 +307,7 @@ export class Radio {
     this.element.removeEventListener('error', this.onError);
     this.element.removeEventListener('stalled', this.onError);
     this.element.removeEventListener('ended', this.onError);
+    window.removeEventListener('online', this.onOnline);
     this.element.pause();
     this.element.removeAttribute('src');
   }

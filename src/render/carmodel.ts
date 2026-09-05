@@ -128,9 +128,9 @@ export interface CarModelMeasure {
   /** Chassis box half-extents, metres. */
   readonly halfExtents: readonly [number, number, number];
   readonly wheels: readonly WheelMeasure[];
-  /** Driver eye, chassis-local metres. */
-  readonly eyePoint: readonly [number, number, number];
   readonly anchors: readonly GizmoAnchor[];
+  /** Bonnet camera mount in chassis-local metres, measured off the bodywork. */
+  readonly hoodPoint: readonly [number, number, number];
   /** Where the model's own origin sits inside the chassis group. */
   readonly visualOffset: readonly [number, number, number];
 }
@@ -244,14 +244,6 @@ function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
   return paintScratch.setHex(CAR_PAINT_COLORS[(h >>> 0) % CAR_PAINT_COLORS.length]!);
 }
 
-/**
- * Whether a mesh carries any of its body's paint.
- *
- * Soviet bodies are one mesh each, named `<model>body`. Stylized bodies spread
- * their paint over the shell, the four doors and the interior trim, every one of
- * which uses the pack's single palette material — so the mesh is selected by what
- * it is made of rather than by name, and the glass and lens meshes fall out.
- */
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
   if (def.paintStyle === 'soviet-atlas') return mesh.name.endsWith('body');
   if (def.paintStyle === 'stylized-palette') {
@@ -327,37 +319,11 @@ function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void
       : eligible(child.material);
   });
 }
-/**
- * Gives the driven cabin its own two-sided materials. Normalized interiors contain
- * seats, dashboard, floor and door cards; Soviet fitted cabins use the same node.
- * Their inward faces must remain visible when free-look points toward a nearby
- * pillar or seat, without paying double-sided shading on the exterior shell.
- */
-function prepareDrivenInteriorFaces(root: THREE.Object3D): void {
-  const interior = root.getObjectByName('interior');
-  if (!interior) return;
-  const clones = new Map<THREE.Material, THREE.Material>();
-  interior.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const twoSided = (source: THREE.Material): THREE.Material => {
-      const existing = clones.get(source);
-      if (existing) return existing;
-      const material = source.clone();
-      material.side = THREE.DoubleSide;
-      clones.set(source, material);
-      return material;
-    };
-    child.material = Array.isArray(child.material)
-      ? child.material.map(twoSided)
-      : twoSided(child.material);
-  });
-}
 
 /**
- * Soviet shells are authored as outward-facing skins. Their doors therefore
- * vanished from the driver's side even though the same triangles were opaque from
- * outside. Driven instances already own cloned paint materials, so making that
- * shell two-sided fixes the cabin view without mutating shared/static materials.
+ * Soviet shells are authored as outward-facing skins. A single-sided skin shows
+ * holes at grazing angles from outside. Driven instances already own cloned paint
+ * materials, so making that shell two-sided does not mutate shared/static materials.
  */
 function prepareSovietShellFaces(root: THREE.Object3D, def: CarModelDef): void {
   if (def.paintStyle !== 'soviet-atlas') return;
@@ -608,31 +574,27 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
  * THE CAR SHADOW CONTRACT: bodywork casts and never receives; wheels do both.
  *
  * Both packs author bodywork as ZERO-THICKNESS panels, and a driven instance draws
- * them DOUBLE-SIDED on purpose — the Soviet shell so its doors are opaque from the
- * driver's seat (`prepareSovietShellFaces`), the normalized cabin so its roof, seats
- * and door cards read from inside (`prepareDrivenInteriorFaces`). A double-sided
- * panel is rasterized into the sun's depth map whichever way it faces, so it stores
- * ITS OWN surface depth, and three flips the shading normal for a back-facing
- * fragment — so the very same panel is also lit. It therefore shadows itself at any
- * bias small enough to keep the car's contact shadow on the sand (2 cm; see
- * render/sky.ts), which is the banding that appeared across roofs, bonnets and
- * flanks when that bias was tightened.
+ * the Soviet shell DOUBLE-SIDED on purpose (`prepareSovietShellFaces`). A
+ * double-sided panel is rasterized into the sun's depth map whichever way it faces,
+ * so it stores ITS OWN surface depth, and three flips the shading normal for a
+ * back-facing fragment — so the very same panel is also lit. It therefore shadows
+ * itself at any bias small enough to keep the car's contact shadow on the sand
+ * (2 cm; see render/sky.ts), which is the banding that appeared across roofs,
+ * bonnets and flanks when that bias was tightened.
  *
  * Measured in tools/shadowlab: dropping reception on the bodywork removes the bands
  * and changes NOTHING else — the ground silhouette is unchanged because the panels
- * still cast, and the cabin is already dark from the driver's seat with or without
- * self-shadowing, because no sun reaches it through the shell.
+ * still cast.
  *
  * `bodywork` is a caller's fact, not a mesh-name test: `buildTemplate` passes the
- * body scene and `takeOwnWheels` the wheel wrappers, so no pack, mesh name or
- * cabin/shell split can slip past it.
+ * body scene and `takeOwnWheels` the wheel wrappers, so no pack or mesh name can
+ * slip past it.
  */
 function prepareMaterials(root: THREE.Object3D, bodywork: boolean): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     // Glass is the one surface that must not cast: a window throws a pane-shaped
-    // black slab across the interior and the ground, which is the shadow of a
-    // wall, not of a window.
+    // black slab across the ground, which is the shadow of a wall, not of a window.
     child.castShadow = !materialsOf(child).includes(carGlassMaterial());
     child.receiveShadow = !bodywork;
     // Wheels are closed solids, so their lit face is culled from the depth map and
@@ -646,32 +608,26 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean): void {
  * The one window glass in the game, shared by every car of both packs.
  *
  * Shared rather than per-pack on purpose: glass is glass, and one material means
- * one program, one draw state and one place to tune the tint. `depthWrite: false`
- * because a window must not occlude what is behind it in the transparent pass —
- * with depth writing on, the nearest pane wins the depth test and the cabin, the
- * far windows and anything seen through the car vanish behind it.
+ * one program, one draw state and one place to tune the tint.
  */
 let glassMaterial: THREE.MeshStandardMaterial | null = null;
 
 function carGlassMaterial(): THREE.MeshStandardMaterial {
   glassMaterial ??= new THREE.MeshStandardMaterial({
     name: 'car-glass',
-    // A dark cold tint at low opacity: period glass is green-grey and thick, and
-    // anything clearer makes the cabin read as an open hole in the shell.
-    color: 0x18242a,
-    transparent: true,
-    opacity: 0.42,
-    roughness: 0.06,
-    metalness: 0,
-    // Both faces: from the driver's seat every window is seen from the inside.
+    // A cold near-black tint remains glossy enough to read as glass in direct sun.
+    color: 0x101a22,
+    transparent: false,
+    roughness: 0.08,
+    metalness: 0.12,
     side: THREE.DoubleSide,
-    depthWrite: false,
   });
   return glassMaterial;
 }
 
 /**
- * Makes a body's windows see-through, whichever way its pack drew them.
+ * Separates a body's windows into the shared opaque tint, whichever way its pack
+ * drew them.
  *
  * `glassMaterial` names an authored material on separate window meshes (Stylized),
  * and is a straight swap. `glassUvCell` is the harder case (Soviet): the windows
@@ -930,100 +886,17 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
  */
 const RIDE_DROP_M = 0.04;
 
-/** The node every pack names its steering wheel, and the cut cabin keeps. */
+/**
+ * How far the hood camera stands above the measured bonnet skin, metres. Enough to
+ * clear the panel it is mounted on without floating off it.
+ */
+const HOOD_CAMERA_CLEARANCE_M = 0.1;
+/** Scratch for the bonnet sweep; measuring a body must not allocate per vertex. */
+const _sample = new THREE.Vector3();
+
+/** The node every pack names for the animated steering wheel. */
 export const STEERING_WHEEL_NODE = 'steering_wheel';
 
-/**
- * Cabins are extracted about the donor body's centre and retain that body's size
- * in glTF extras. Fit each axis independently to the host shell: unlike the old
- * width-only uniform scale, this closes the floor, dashboard and parcel-shelf gaps
- * on short hatchbacks, long estates and tall SUVs without pushing trim through the
- * doors. Small insets keep the useful geometry behind the Soviet shell.
- */
-const INTERIOR_FIT = new THREE.Vector3(0.9, 0.94, 0.94);
-
-function donorBodySize(root: THREE.Object3D): THREE.Vector3 | null {
-  let value: unknown;
-  root.traverse((child) => {
-    value ??= child.userData.donorBodySize;
-  });
-  if (
-    !Array.isArray(value) ||
-    value.length !== 3 ||
-    value.some((component) => typeof component !== 'number' || component <= 0)
-  ) {
-    return null;
-  }
-  return new THREE.Vector3(value[0], value[1], value[2]);
-}
-
-/**
- * Fits the cut cabin into a body that has none, sized and placed from that body's
- * own measured box.
- *
- * The kit arrives in METRES about its donor's body centre; the scene it is being
- * added to is still in the model's own units and will be scaled by `def.scale`
- * afterwards, so both the fit scale and the offset are divided back out by it.
- */
-function mountInterior(def: CarModelDef, scene: THREE.Group, bodyBox: THREE.Box3): void {
-  const source = interiorScenes.get(def.interior!.file);
-  if (!source) throw new Error(`Interior "${def.interior!.file}" was not preloaded`);
-  const kit = source.clone(true);
-  const donorSize = donorBodySize(kit);
-  if (!donorSize) throw new Error(`Interior "${def.interior!.file}" has no donor body size`);
-
-  const size = bodyBox.getSize(new THREE.Vector3());
-  const centre = bodyBox.getCenter(new THREE.Vector3());
-  const mount = new THREE.Group();
-  mount.name = 'interior';
-  mount.add(kit);
-  mount.scale.set(
-    (size.x * INTERIOR_FIT.x) / donorSize.x / def.scale,
-    (size.y * INTERIOR_FIT.y) / donorSize.y / def.scale,
-    (size.z * INTERIOR_FIT.z) / donorSize.z / def.scale,
-  );
-  mount.position.copy(centre).multiplyScalar(1 / def.scale);
-  scene.add(mount);
-}
-
-/**
- * The driver's eye: behind the steering wheel and above its centre.
- *
- * Derived from the wheel rather than authored per model, because the wheel is the
- * one thing in a cabin whose position IS the driver's position — it fixes which
- * side the seat is on, how far back it sits and how high. Forty-six bodies would
- * otherwise need forty-six hand-tuned fractions, and every one of them would be a
- * guess at where a seat is.
- *
- * Called AFTER the scene has been scaled and re-centred, so the wheel's world
- * transform is already the chassis-local frame in metres and needs no conversion —
- * subtracting the body centre a second time here is what put the eye under the floor
- * the first time round.
- *
- * Null for a body with no wheel at all, which falls back to the authored fraction.
- */
-function driverEyePoint(scene: THREE.Group): [number, number, number] | null {
-  const wheel = scene.getObjectByName(STEERING_WHEEL_NODE);
-  if (!wheel) return null;
-  // Bounds, not the node origin: a steering column's origin sits at the dash end of
-  // the shaft, a good 12 cm ahead of the rim it is named for.
-  const rim = new THREE.Box3()
-    .setFromObject(wheel, true)
-    .getCenter(new THREE.Vector3());
-  return [rim.x, rim.y + EYE_ABOVE_WHEEL_M, rim.z - EYE_BEHIND_WHEEL_M];
-}
-
-/**
- * The driver's eye relative to the steering wheel's centre, metres.
- *
- * A driver's eyes are roughly a hand's width above the rim and a third of a metre
- * behind it — the gap between the wheel and the seat back. Any less and the rim
- * fills the screen; any more and the eye leaves the seat and ends up in the back.
- */
-const EYE_ABOVE_WHEEL_M = 0.14;
-const EYE_BEHIND_WHEEL_M = 0.38;
-/** Global lift applied to every model's current authored/measured interior eye. */
-const INTERIOR_EYE_DEFAULT_LIFT_M = 0.2;
 
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
@@ -1071,14 +944,13 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     });
   }
 
-  // Fractional anchor/eye resolution, straight into CHASSIS-LOCAL metres: x of
+  // Fractional anchor resolution, straight into CHASSIS-LOCAL metres: x of
   // half-width, y through the body's height (0 = floor, 1 = roof), z of half-length.
   //
   // Chassis-local is the only frame these can be resolved in. Resolving them in the
-  // model's OWN space and subtracting `centre` afterwards — which is what this did —
-  // silently broke every body whose box is not centred on its own origin: `frac *
-  // half` measured from the origin came out one offset wrong, and the fallback eye
-  // and every gizmo anchor went with it. Resolving in chassis space makes the
+  // model's OWN space and subtracting `centre` afterwards silently breaks every body
+  // whose box is not centred on its own origin: `frac * half` measured from the
+  // origin comes out one offset wrong. Resolving in chassis space makes the
   // fractions mean the same thing on all forty-six bodies.
   const resolveFrac = (frac: readonly [number, number, number]): [number, number, number] => [
     frac[0] * half.x,
@@ -1093,19 +965,46 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     yaw: a.yaw ?? 0,
   }));
 
-  // The cabin is fitted AFTER the body box is known, because the box is what it is
-  // fitted to, and it deliberately does not widen that box: an interior cannot make
-  // a car bigger.
-  if (def.interior) mountInterior(def, scene, bodyBox);
+  // Hood camera mount, measured rather than authored.
+  //
+  // The bonnet is the highest bodywork over the front third of the car, on the
+  // centreline: sampling THAT is what makes one rule work for a Volga, a Niva and
+  // a semi, none of which agree on where a bonnet is or whether it slopes. Taking
+  // the body box's top instead would put the camera on the ROOF, and taking its
+  // centre would bury it in the engine.
+  //
+  // The window deliberately stops short of the nose: the leading edge is bumper and
+  // grille, which slope away, and a camera pinned to them looks at sky.
+  const hoodFrontZ = half.z * 0.86;
+  const hoodRearZ = half.z * 0.34;
+  const hoodHalfWidth = half.x * 0.35;
+  let hoodY = -half.y;
+  scene.updateMatrixWorld(true);
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const position = node.geometry.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i++) {
+      _sample.fromBufferAttribute(position, i).applyMatrix4(node.matrixWorld).multiplyScalar(s);
+      const z = _sample.z - centre.z;
+      if (z < hoodRearZ || z > hoodFrontZ) continue;
+      if (Math.abs(_sample.x - centre.x) > hoodHalfWidth) continue;
+      hoodY = Math.max(hoodY, _sample.y - centre.y);
+    }
+  });
+  // A camera exactly on the sheet metal z-fights with it and shows nothing of the
+  // car, so it sits a hand's width proud of the measured skin.
+  const hoodPoint: [number, number, number] = [
+    0,
+    hoodY + HOOD_CAMERA_CLEARANCE_M,
+    (hoodFrontZ + hoodRearZ) * 0.5,
+  ];
+
 
   scene.scale.setScalar(s);
   scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene, true);
   scene.updateMatrixWorld(true);
-  const eyePoint = def.viewPoint
-    ? [...def.viewPoint] as [number, number, number]
-    : driverEyePoint(scene) ?? resolveFrac(def.viewFrac);
-  if (!def.viewPoint) eyePoint[1] += INTERIOR_EYE_DEFAULT_LIFT_M;
 
   // The model's origin is on the ground between the wheels, so the distance from
   // the chassis centre down to that origin is exactly the spawn clearance needed
@@ -1113,8 +1012,8 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
-    eyePoint,
     anchors,
+    hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
   };
 
@@ -1123,11 +1022,6 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
 const paletteTextures = new Map<string, THREE.Texture>();
-/**
- * The fitted cabin, parsed once per asset. Every body that borrows it clones the
- * same scene, so the geometry is one buffer however many cars carry it.
- */
-const interiorScenes = new Map<string, THREE.Group>();
 
 /**
  * Loads a pack's palette, tunes its sampling and decodes its pixels.
@@ -1174,30 +1068,7 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
       );
     }
   }
-  for (const def of defs) {
-    // The cabin is a glTF, but its UVs were CUT OUT of an FBX and never reoriented,
-    // so its palette is sampled the FBX way — same flip as the pack it came from,
-    // which is also what keeps one shared texture serving both.
-    if (def.interior) palettes.set(def.interior.textureFile, true);
-  }
   await Promise.all([...palettes].map(([url, fbxSource]) => loadPalette(url, fbxSource)));
-
-  // The fitted cabin, once for every body that borrows it. It is measured against
-  // each body's box at template time, so one parse serves all fifteen.
-  const interiors = new Map<string, string>();
-  for (const def of defs) {
-    if (def.interior && !interiorScenes.has(def.interior.file)) {
-      interiors.set(def.interior.file, def.interior.textureFile);
-    }
-  }
-  await Promise.all(
-    [...interiors].map(async ([file, textureFile]) => {
-      const scene = await loadScene(file);
-      applyTexture(scene, paletteTextures.get(textureFile)!);
-      tuneMaps(scene);
-      interiorScenes.set(file, scene);
-    }),
-  );
 
   await Promise.all(
     defs.map(async (def) => {
@@ -1235,7 +1106,7 @@ export const CAR_SPAWN_DROP_METRES = 0.75;
  * the sampled ground. Model origins vary across packs, so neither `halfExtents.y`
  * nor the authored origin is a reliable universal floor by itself.
  *
- * Open-world spawns use the default 0.75 m drop. Constrained interiors may request
+ * Open-world spawns use the default 0.75 m drop. Constrained spawns may request
  * less clear air so the car cannot meet a ceiling before gravity can settle it.
  */
 export function carSpawnYAboveGround(
@@ -1270,7 +1141,6 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
   const body = t.body.clone(true);
   cloneCarBodyPaintMaterials(body, t.def);
-  prepareDrivenInteriorFaces(body);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
@@ -1390,11 +1260,6 @@ export function disposeCarModelCache(): void {
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
   templates.clear();
-  // The cached cabin shares geometry and materials with the templates just walked,
-  // so it goes through the SAME dedup sets — a buffer freed there must not be freed
-  // a second time here.
-  for (const kit of interiorScenes.values()) dispose(kit);
-  interiorScenes.clear();
   // Palettes are shared by every body in a pack and by every recoloured copy, so
   // they are released here rather than through the per-material walk above, which
   // would otherwise free one pack's palette on the first car that referenced it.

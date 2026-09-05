@@ -108,8 +108,6 @@ export interface Settings {
    * is the familiar self-centering keyboard behavior.
    */
   preciseSteering: boolean;
-  /** Optional calibrated chassis-local interior camera position, in metres. */
-  interiorCameraOffset: readonly [number, number, number] | null;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = 8;
@@ -158,7 +156,6 @@ export const DEFAULT_SETTINGS: Settings = {
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
-  interiorCameraOffset: null,
 };
 
 /**
@@ -203,13 +200,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
       ? obj.mouseSensitivity
       : DEFAULT_MOUSE_SENSITIVITY;
-  const interiorOffsetRaw = obj.interiorCameraOffset;
-  const interiorCameraOffset =
-    Array.isArray(interiorOffsetRaw) &&
-    interiorOffsetRaw.length === 3 &&
-    interiorOffsetRaw.every((value) => typeof value === 'number' && Number.isFinite(value))
-      ? [interiorOffsetRaw[0]!, interiorOffsetRaw[1]!, interiorOffsetRaw[2]!] as const
-      : null;
 
   // Missing unit-interval settings mean an old save: use the authored default.
   const unitInterval = (value: unknown, fallback: number): number =>
@@ -252,7 +242,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
-    interiorCameraOffset,
   };
 
   const rawBindings = obj.keyBindings;

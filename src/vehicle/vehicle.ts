@@ -2204,11 +2204,6 @@ export class Vehicle implements Rebasable {
     return this.contactPlaneY;
   }
 
-  /** Hood-camera eye in chassis-local metres, for the in-car view. */
-  get eyePoint(): readonly [number, number, number] {
-    return this.measure.eyePoint;
-  }
-
   get rpm(): number {
     return this.drivetrain.rpm;
   }

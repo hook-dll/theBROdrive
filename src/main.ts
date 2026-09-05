@@ -638,7 +638,6 @@ async function boot(): Promise<void> {
   const camera = new CameraRig(renderer.camera, physics, origin);
   camera.setMode('foot');
   camera.setYaw(initialYaw);
-  camera.setInteriorCameraOffset(world.state.settings.interiorCameraOffset);
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre, TCS and
   // steering rule the human drives under applies to it unchanged.
@@ -692,7 +691,7 @@ async function boot(): Promise<void> {
     qz: 0,
     qw: 1,
     speedKmh: 0,
-    eyeOffset: [0, 0, 0],
+    hoodOffset: [0, 0, 0],
   };
 
   let lastInput: InputFrame = input.sample(0);
@@ -789,35 +788,7 @@ async function boot(): Promise<void> {
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
-      // Camera calibration owns the driving keys while enabled: the car must stay
-      // still while W/S/A/D/Z/X move the interior eye.
       if (f.cycleCamera) camera.cycleDriving();
-      if (f.toggleSeatAdjust) {
-        const wasAdjusting = camera.isSeatAdjusting;
-        camera.toggleSeatAdjusting();
-        if (wasAdjusting && !camera.isSeatAdjusting) {
-          const coordinates = camera.interiorCoordinates;
-          const interiorCameraOffset = [coordinates.x, coordinates.y, coordinates.z] as const;
-          camera.setInteriorCameraOffset(interiorCameraOffset);
-          world.apply({
-            t: 'settings',
-            settings: { ...s.settings, interiorCameraOffset },
-          });
-          hud.setToast(
-            `interior camera saved · ${coordinates.x.toFixed(3)}, ` +
-            `${coordinates.y.toFixed(3)}, ${coordinates.z.toFixed(3)}`,
-          );
-        }
-      }
-      if (f.toggleInteriorHeadMovement && camera.mode === 'interior') {
-        camera.toggleInteriorHeadMovement();
-        hud.setToast(
-          camera.isHeadMovementEnabled
-            ? 'interior head movement on'
-            : 'interior head movement off — fixed to seat point',
-        );
-      }
-      const calibratingSeat = camera.isSeatAdjusting;
       // One key cycles the complete driving state: sleeper -> frantic -> off.
       // Keeping the transition here means the HUD, input handover and controller
       // always observe the same state on the same fixed step.
@@ -834,15 +805,8 @@ async function boot(): Promise<void> {
           autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
         );
       }
-      if (autopilot.engaged && !calibratingSeat) {
+      if (autopilot.engaged) {
         autopilot.drive(dt, driving, f, origin.x, origin.z);
-      }
-      if (calibratingSeat) {
-        f.throttle = 0;
-        f.brake = 0;
-        f.reverse = false;
-        f.steer = 0;
-        f.shift = 0;
       }
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
@@ -1241,7 +1205,6 @@ async function boot(): Promise<void> {
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);
-      const eyePoint = driving.eyePoint;
       target.x = targetPos.x;
       target.y = targetPos.y;
       target.z = targetPos.z;
@@ -1250,12 +1213,12 @@ async function boot(): Promise<void> {
       target.qz = targetQuat.z;
       target.qw = targetQuat.w;
       target.speedKmh = driving.speedKmh;
-      target.eyeOffset = eyePoint;
+      target.hoodOffset = driving.modelMeasure.hoodPoint;
     } else {
       const p = player.interpolatedPosition(alpha);
-      target.x = p.x;
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
       // position; `player.position` is the capsule centre and would double up.
+      target.x = p.x;
       target.y = p.y - Player.FEET_OFFSET;
       target.z = p.z;
       target.qx = 0;
@@ -1263,7 +1226,6 @@ async function boot(): Promise<void> {
       target.qz = 0;
       target.qw = 1;
       target.speedKmh = 0;
-      target.eyeOffset = [0, 0, 0];
     }
 
     Object.assign(cameraInput, lastInput);
@@ -1281,11 +1243,6 @@ async function boot(): Promise<void> {
       driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
     camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
-    hud.setSeatCalibration(
-      camera.isSeatAdjusting,
-      driving ? carModel(s.cars[drivingId!]?.modelId ?? DEFAULT_CAR_MODEL_ID).label : '',
-      camera.interiorCoordinates,
-    );
 
     const cam = renderer.camera.position;
     sky.update(
@@ -1402,10 +1359,8 @@ async function boot(): Promise<void> {
       hud.setDriving(null);
     }
 
-    // Car audio follows the camera, not the simulation: whether the shell is
-    // between the listener and the noise is what decides how the engine, wind and
-    // tyres are filtered, and that is a view question. The radio additionally keeps
-    // its last car as a spatial source after the player steps out.
+    // Vehicle audio follows the driven car while its radio remains a spatial source
+    // after the player steps out.
     radioSpatial.sourceX = driving?.root.position.x ?? null;
     radioSpatial.sourceY = driving?.root.position.y ?? null;
     radioSpatial.sourceZ = driving?.root.position.z ?? null;
@@ -1418,7 +1373,6 @@ async function boot(): Promise<void> {
     radioSpatial.listenerQw = renderer.camera.quaternion.w;
     audio.updateDriving(
       driving ? driving.audio : null,
-      camera.mode === 'interior',
       radioSpatial,
       driving ? drivingId! : null,
     );
