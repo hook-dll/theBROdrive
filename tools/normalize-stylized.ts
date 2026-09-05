@@ -7,7 +7,8 @@
  *   Stylized Vehicles Pack/Models/Detailed/<Name>/<Name>.fbx
  *
  * Output contract:
- *   chassis          fixed opaque shell, doors, trim and cabin geometry, one mesh
+ *   chassis          fixed opaque shell, doors and trim, one mesh
+ *   interior         seats, dash, floor and door cards, one mesh
  *   glass            every window, one mesh
  *   steering_wheel   authored pivot retained for animation
  *   wheel_fl/fr/rl/rr authored pivots retained for suspension animation
@@ -25,9 +26,8 @@ import { basename, dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import sharp from 'sharp';
-import { CAR_MODELS, type CarModelDef, type PalettePaintRamp } from '../src/vehicle/carmodels';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { CAR_MODELS, type CarModelDef } from '../src/vehicle/carmodels';
 
 globalThis.document ??= {
   createElementNS: () => ({
@@ -57,26 +57,11 @@ const OUTPUT_ROOT = 'public/models/stylized';
 const STEERING_NAMES = new Set(['steering_wheel', 'rudder']);
 const WHEEL_OUTPUTS = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'] as const;
 const LAMP_MATERIALS = new Set(['Headlights', 'BrakeLights', 'TurnLight_L', 'TurnLight_R']);
-/**
- * Palette luminance (0-255) below which a cell is the pack's INK rather than a
- * material.
- *
- * The source models draw every panel gap — bonnet, doors, boot — as a thin strip of
- * geometry mapped to the near-black end of the palette's neutral ramp. That reads as
- * a pen outline on an otherwise flat-shaded car, which is not the look this game
- * has: the Soviet pack draws no such lines, so the two packs disagreed on the same
- * road. 50 covers #101010 through #2c2c2c — every shade the seams are drawn in —
- * and stops short of #333333, which is the grille shadow, the wiper cowl and the
- * tyre: parts that are meant to be dark.
- */
-const INK_MAX_LUMA = 50;
-const PALETTE_FILE = 'public/models/stylized/PixelColors.png';
-const PALETTE_CELLS = 32;
-
 
 type Bucket = { position: number[]; normal: number[]; uv: number[]; triangles: number };
 type OutputName =
   | 'chassis'
+  | 'interior'
   | 'glass'
   | 'steering_wheel'
   | (typeof WHEEL_OUTPUTS)[number]
@@ -137,65 +122,15 @@ function appendTriangle(
   bucket.triangles++;
 }
 
-/**
- * Rebuilds one normalized mesh. The source pack stores flat face normals even on
- * shallowly curved coachwork, exposing every triangulation edge as a dark wedge.
- * Average only chassis faces meeting below 35 degrees: broad doors, wings, bonnet
- * and roof become continuous while deliberate creases, panel breaks and lamp
- * pockets retain their authored hard edges.
- */
-function geometryOf(bucket: Bucket, smoothChassis: boolean): THREE.BufferGeometry {
+function geometryOf(bucket: Bucket): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.position, 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normal, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uv, 2));
-  const withNormals = smoothChassis ? toCreasedNormals(geometry, THREE.MathUtils.degToRad(35)) : geometry;
-  const indexed = mergeVertices(withNormals, 1e-4);
+  const indexed = mergeVertices(geometry, 1e-4);
   indexed.computeBoundingBox();
   indexed.computeBoundingSphere();
   return indexed;
-}
-
-/**
- * The palette's own pixels, so ink is identified by what a cell LOOKS like rather
- * than by a hardcoded row: the ramps move around the sheet from car to car.
- */
-async function paletteLuma(): Promise<Float32Array> {
-  const { data, info } = await sharp(PALETTE_FILE).raw().toBuffer({ resolveWithObject: true });
-  const luma = new Float32Array(PALETTE_CELLS * PALETTE_CELLS);
-  for (let row = 0; row < PALETTE_CELLS; row++) {
-    for (let column = 0; column < PALETTE_CELLS; column++) {
-      const i = (row * info.width + column) * info.channels;
-      luma[row * PALETTE_CELLS + column] =
-        0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
-    }
-  }
-  return luma;
-}
-
-/**
- * Repoints every dark panel-gap triangle at the body's own paint cell.
- *
- * Done to UVs on the raw triangle soup, before `mergeVertices`, so a seam's shared
- * vertices cannot drag a neighbouring panel into the paint cell after indexing.
- */
-function flattenSeamInk(bucket: Bucket, ramp: PalettePaintRamp, luma: Float32Array): number {
-  const paintU = (ramp.column + 0.5) / PALETTE_CELLS;
-  const paintV = (PALETTE_CELLS - 1 - ramp.keyRow + 0.5) / PALETTE_CELLS;
-  let flattened = 0;
-  for (let triangle = 0; triangle < bucket.triangles; triangle++) {
-    const base = triangle * 6;
-    const column = Math.floor(bucket.uv[base]! * PALETTE_CELLS);
-    const row = PALETTE_CELLS - 1 - Math.floor(bucket.uv[base + 1]! * PALETTE_CELLS);
-    if (column < 0 || column >= PALETTE_CELLS || row < 0 || row >= PALETTE_CELLS) continue;
-    if (luma[row * PALETTE_CELLS + column]! >= INK_MAX_LUMA) continue;
-    for (let corner = 0; corner < 3; corner++) {
-      bucket.uv[base + corner * 2] = paintU;
-      bucket.uv[base + corner * 2 + 1] = paintV;
-    }
-    flattened++;
-  }
-  return flattened;
 }
 
 function paletteMaterial(name = 'PixelColors'): THREE.MeshStandardMaterial {
@@ -203,14 +138,25 @@ function paletteMaterial(name = 'PixelColors'): THREE.MeshStandardMaterial {
 }
 
 function meshOf(name: OutputName, bucket: Bucket, material: THREE.Material): THREE.Mesh {
-  const mesh = new THREE.Mesh(geometryOf(bucket, name === 'chassis'), material);
+  const mesh = new THREE.Mesh(geometryOf(bucket), material);
   mesh.name = name;
   return mesh;
 }
 
-
-/** One decode for the whole run: every body shares this palette. */
-const luma = await paletteLuma();
+function cabinBox(scene: THREE.Group, meshes: readonly THREE.Mesh[]): THREE.Box3 {
+  const body = new THREE.Box3();
+  const cabin = new THREE.Box3();
+  for (const mesh of meshes) {
+    if (!['FL', 'FR', 'BL', 'BR', 'BL2', 'BR2'].includes(mesh.name)) {
+      body.union(new THREE.Box3().setFromObject(mesh, true));
+    }
+    if (mesh.name.startsWith('Window')) cabin.union(new THREE.Box3().setFromObject(mesh, true));
+  }
+  if (cabin.isEmpty()) throw new Error(`${scene.name || 'model'} has no Window* meshes`);
+  cabin.min.y = body.min.y;
+  cabin.expandByScalar(6);
+  return cabin;
+}
 
 async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   const name = basename(def.file).replace(/\.(?:fbx|glb)$/i, '');
@@ -227,6 +173,7 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
   scene.traverse((node) => {
     if (node instanceof THREE.Mesh) meshes.push(node);
   });
+  const windows = cabinBox(scene, meshes);
   const wheelNames = sourceWheelNames(name);
   const sourceToOutput = new Map(Object.entries(wheelNames).map(([output, input]) => [input, output as OutputName]));
 
@@ -240,6 +187,10 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
     return found;
   };
   const transforms = new Map<OutputName, THREE.Matrix4>();
+  const centroid = new THREE.Vector3();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
 
   for (const mesh of meshes) {
     const wheelOutput = sourceToOutput.get(mesh.name);
@@ -269,18 +220,26 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
       } else if (LAMP_MATERIALS.has(material.name)) {
         output = material.name as OutputName;
       } else {
-        output = 'chassis';
+        a.fromBufferAttribute(position, vertexAt(element)).applyMatrix4(mesh.matrixWorld);
+        b.fromBufferAttribute(position, vertexAt(element + 1)).applyMatrix4(mesh.matrixWorld);
+        c.fromBufferAttribute(position, vertexAt(element + 2)).applyMatrix4(mesh.matrixWorld);
+        centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+        // The glazed aperture is the cabin boundary. Side panels and roof skin sit
+        // outside it; seats, dash, floor and door cards sit inside it. Some bodies
+        // map their cabin to the paint ramp too, so UV colour cannot be used as a
+        // universal separator.
+        output = windows.containsPoint(centroid) ? 'interior' : 'chassis';
       }
       appendTriangle(bucket(output), mesh, element, positionMatrix, normalMatrix);
     }
   }
-  const inked = 0;
 
   const output = new THREE.Group();
   output.name = name;
   const sharedPalette = paletteMaterial();
   const materials = new Map<string, THREE.Material>([
     ['chassis', sharedPalette],
+    ['interior', sharedPalette],
     ['steering_wheel', sharedPalette],
     ['wheel_fl', sharedPalette],
     ['wheel_fr', sharedPalette],
@@ -300,9 +259,10 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
     if (transform) transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
     output.add(mesh);
   }
-  for (const required of ['chassis', 'glass', 'steering_wheel', ...WHEEL_OUTPUTS] as const) {
+  for (const required of ['chassis', 'interior', 'glass', 'steering_wheel', ...WHEEL_OUTPUTS] as const) {
     if (!output.getObjectByName(required)) throw new Error(`${name} produced no ${required}`);
   }
+  output.updateMatrixWorld(true);
 
   const glb = await new Promise<ArrayBuffer>((resolve, reject) => {
     new GLTFExporter().parse(output, (result) => resolve(result as ArrayBuffer), reject, {
@@ -316,7 +276,6 @@ async function exportModel(def: CarModelDef): Promise<Record<string, number>> {
 
   return Object.fromEntries([
     ['bytes', glb.byteLength],
-    ['seamInk', inked],
     ...[...buckets].map(([outputName, outputBucket]) => [outputName, outputBucket.triangles] as const),
   ]);
 }
