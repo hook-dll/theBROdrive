@@ -46,7 +46,7 @@ const LATERALS: readonly number[] = [
  */
 const COLLIDER_SLAB_QUADS = 15;
 
-const MARKING_LIFT = 0.03;
+const MARKING_LIFT = 0.002;
 const MARKING_HALF_WIDTH = 0.12;
 /** Keep the full edge marking on the asphalt. */
 const EDGE_LATERAL = HW - MARKING_HALF_WIDTH;
@@ -150,7 +150,8 @@ const markingMaterial = applyGroundSpotlightNormals(
     vertexColors: true,
     roughness: 0.94,
     metalness: 0,
-    // Markings sit 3 cm above the road; the offset keeps them from z-fighting.
+    // Markings sit 2 mm above the road: enough to avoid coplanar depth fighting
+    // while remaining visually flush with the asphalt under a tyre.
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
