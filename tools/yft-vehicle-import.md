@@ -1,9 +1,12 @@
 # GTA V add-on vehicle import (.rpf -> .yft -> GLB)
 
 Rules for a GTA V add-on car shipped as an `.rpf` archive. `tools/import-yft-vehicle.py`
-is the normalizer; it reads the archive directly, so no CodeWalker, .NET or Blender is
-involved. The runtime contract is the one `tools/dff-pack-import.md` defines, minus the
-hub nodes: a fragment authors its wheel as one complete object.
+reads and normalizes the archive directly, without CodeWalker or .NET. Blender is used
+only for the deterministic VAZ-2110 lamp cut: the source merges every front lens and
+every rear lens into two meshes, while the runtime controls their factory sections
+independently.
+The source-independent checklist for applying this process to another car is
+`tools/vehicle-lamp-authoring.md`.
 
 ## What is in the archive
 
@@ -33,9 +36,13 @@ one RSC7 resource per file. The `.yft` is a fragment:
 - Vehicle shaders map to runtime roles in `SHADER_ROLE`: `vehicle_paint*` -> `car_paint`,
   `vehicle_mesh`/`detail2`/`badges` -> `car_trim`, `vehicle_vehglass` -> `car_glass`,
   `vehicle_lightsemissive` -> lamps, `vehicle_interior2`/`dash_emissive` -> dropped.
-- Lamp lenses authored as glass (`fars_2110`, `stfar`, `reflector`) become lamp
-  material, never `car_glass`: a translucent sheet in front of an emissive lens leaves
-  the lamp lighting invisibly.
+- Lamp lenses authored as glass (`fars_2110`, `stfar`, `reflector`) first become the
+  coarse `headlights` and `taillights` meshes, never `car_glass`: a translucent sheet
+  in front of an emissive lens leaves the lamp lighting invisibly.
+- `tools/split-vaz2110-lamps.py` bisects those meshes on the Kirzhach/DAAZ lens
+  boundaries. It produces clear front and rear indicators, outer running lights,
+  trunk-lid stop and reverse lights, and static red centre/fog sections. The small
+  non-factory lower-front strips remain non-emissive auxiliary lenses.
 - A `vehicle_lightsemissive` mesh within `LAMP_SPLIT_Y` of the centre plane is a side
   repeater or a courtesy light, not a headlamp; it ships as trim.
 
@@ -54,10 +61,12 @@ The uncompressed intermediate is a build artefact, never a shipped runtime varia
 python tools/import-yft-vehicle.py extract dlc.rpf build/vaz2110
 cp build/vaz2110/body.glb build/vaz2110/body-lod.glb
 cp build/vaz2110/wheel.glb build/vaz2110/wheel-lod.glb
+blender --background --python tools/split-vaz2110-lamps.py -- \
+  build/vaz2110/body-lod.glb build/vaz2110/body-lamps.glb
 python tools/import-yft-vehicle.py assemble build/vaz2110 build/vaz2110/assembled.glb
 node tools/rim-split.mjs build/vaz2110/assembled.glb build/vaz2110/rim.glb
 npx gltf-transform optimize build/vaz2110/rim.glb public/models/gtav/vaz2110.glb \
-  --compress meshopt --palette false --join-named false --texture-compress false
+  --compress meshopt --simplify false --palette false --join-named false --texture-compress false
 ```
 
 `assemble` bakes nothing into the wheel nodes except a half-turn about the vertical
@@ -88,9 +97,9 @@ catalogue `yaw`, which the wheel-detaching loader would drop.
 
 ## Required verification
 
-1. `node tools/dff-pack-audit.mjs public/models/gtav --wheels-complete` — six material
-   roles, no textures, explicit lamp nodes, four wheel nodes, positive scales,
-   headlights ahead of taillights, every wheel wound outward.
+1. `node tools/dff-pack-audit.mjs public/models/gtav --wheels-complete` — required
+   body materials, texture-free geometry, explicit semantic lamp nodes, four wheel
+   nodes, positive scales, headlights ahead of taillights, every wheel wound outward.
 2. `carModelMeasure`: four wheels, plausible radius, and wheelbase/track matching the
    real car after `scale`. The VAZ-2110 measures 2.492 m and 1.395/1.360 m against the
    factory's 2492 mm and 1400/1370 mm.

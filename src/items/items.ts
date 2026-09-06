@@ -13,6 +13,9 @@ export type ToolKind = 'brush' | 'sponge' | 'wrench';
 export type WeaponKind = 'rifle' | 'shotgun';
 export type ShadeTint = 'green' | 'yellow' | 'red';
 
+/** A professional camera takes eleven exposures before its roll is spent. */
+export const CAMERA_FRAME_LIMIT = 11;
+
 /**
  * Everything that can be poured into a car.
  *
@@ -97,6 +100,32 @@ export interface SunShadesItem {
   readonly tint: ShadeTint;
 }
 
+export interface CameraItem {
+  readonly type: 'camera';
+  readonly id: string;
+  /** Exposures still available on this individual camera. */
+  framesRemaining: number;
+}
+
+export interface PhotographItem {
+  readonly type: 'photograph';
+  readonly id: string;
+  /** Downscaled JPEG captured from the rendered frame; persisted with the item. */
+  readonly imageDataUrl: string;
+}
+
+export interface FootballItem {
+  readonly type: 'football';
+  readonly id: string;
+}
+
+export interface PocketWatchItem {
+  readonly type: 'pocket_watch';
+  readonly id: string;
+  /** The lid is physical item state, so it survives selection changes and saves. */
+  open: boolean;
+}
+
 export type Item =
   | ToolItem
   | PartItem
@@ -107,7 +136,11 @@ export type Item =
   | BubbleGumItem
   | BinocularItem
   | TorchlightItem
-  | SunShadesItem;
+  | SunShadesItem
+  | CameraItem
+  | PhotographItem
+  | FootballItem
+  | PocketWatchItem;
 
 /**
  * Density, kg/litre. Petrol and diesel are the light ones; water is water and oil
@@ -163,6 +196,14 @@ export function itemLabel(item: Item): string {
       return 'torchlight';
     case 'sun_shades':
       return `${item.tint} sun shades`;
+    case 'camera':
+      return `professional camera (${item.framesRemaining}/${CAMERA_FRAME_LIMIT})`;
+    case 'photograph':
+      return 'photograph';
+    case 'football':
+      return 'football';
+    case 'pocket_watch':
+      return 'pocket watch';
   }
 }
 
@@ -201,6 +242,14 @@ export function itemMass(item: Item): number {
       return 0.45;
     case 'sun_shades':
       return 0.08;
+    case 'camera':
+      return 1.35;
+    case 'photograph':
+      return 0.005;
+    case 'football':
+      return 0.43;
+    case 'pocket_watch':
+      return 0.12;
   }
 }
 

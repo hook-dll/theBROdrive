@@ -7,8 +7,15 @@ import type { PartInstance } from './registry';
 import { variant } from './registry';
 import type { Item } from '../items/items';
 import { itemMass } from '../items/items';
-import { createItemMesh, createPartMesh, partHalfExtents } from '../render/partmesh';
+import {
+  createItemMesh,
+  createPartMesh,
+  disposeItemMeshResources,
+  FOOTBALL_RADIUS,
+  partHalfExtents,
+} from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
+import type { Shoveable } from '../player/player';
 
 /**
  * Every part and item lying loose in the world.
@@ -24,6 +31,191 @@ interface LooseEntry {
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
   readonly mesh: THREE.Object3D;
+  readonly football?: FootballMotion;
+}
+
+const FOOTBALL_SAMPLE_STRIDE = 7;
+const FOOTBALL_START_SPEED = 0.18;
+const FOOTBALL_SETTLED_SPEED = 0.14;
+const FOOTBALL_SETTLED_SECONDS = 0.45;
+const FOOTBALL_STRONG_KICK_SPEED = 5;
+
+/**
+ * Runtime-only rewind tape for one football. Authority still lives in the ordinary
+ * loose-item state; the tape is transient because saving an entire 60 Hz trajectory
+ * would make one ball larger than the rest of the world state.
+ */
+class FootballMotion implements Shoveable {
+  private readonly path: number[] = [];
+  private ready = false;
+  private active = false;
+  private returning = false;
+  private settledFor = 0;
+  private kickCooldown = 0;
+  private returnCursor = -1;
+  private queuedSample = -1;
+  private readonly translation = { x: 0, y: 0, z: 0 };
+  private readonly rotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly velocity = { x: 0, y: 0, z: 0 };
+  private readonly impulse = { x: 0, y: 0, z: 0 };
+  private readonly zero = { x: 0, y: 0, z: 0 };
+
+  constructor(
+    private readonly body: RAPIER.RigidBody,
+    private readonly collider: RAPIER.Collider,
+    private readonly mesh: THREE.Object3D,
+  ) {
+    this.resetPath();
+  }
+
+  shove(dirX: number, dirZ: number, seconds: number, speedMps: number): void {
+    if (this.returning || this.kickCooldown > 0 || seconds <= 0) return;
+    const length = Math.hypot(dirX, dirZ);
+    if (length < 1e-4) return;
+    if (!this.ready) {
+      this.ready = true;
+      this.resetPath();
+    }
+
+    const nx = dirX / length;
+    const nz = dirZ / length;
+    const strong = speedMps >= FOOTBALL_STRONG_KICK_SPEED;
+    const targetSpeed = strong
+      ? Math.min(12, speedMps * 1.55)
+      : Math.min(3, speedMps * 0.72);
+    const liftSpeed = strong ? Math.min(4.2, speedMps * 0.58) : 0.24;
+    this.body.linvel(this.velocity);
+    const along = this.velocity.x * nx + this.velocity.z * nz;
+    const delta = Math.max(0, targetSpeed - along);
+    const mass = this.body.mass();
+    this.impulse.x = nx * delta * mass;
+    this.impulse.y = Math.max(0, liftSpeed - this.velocity.y) * mass;
+    this.impulse.z = nz * delta * mass;
+    this.body.applyImpulse(this.impulse, true);
+    this.kickCooldown = strong ? 0.32 : 0.2;
+  }
+
+  afterStep(dt: number): void {
+    this.kickCooldown = Math.max(0, this.kickCooldown - dt);
+    if (this.returning) {
+      if (this.returnCursor < 0) {
+        this.finishReturn();
+      } else {
+        this.queueSample(this.returnCursor);
+        this.returnCursor -= 1;
+      }
+      return;
+    }
+
+    this.body.linvel(this.velocity);
+    const speed = Math.hypot(this.velocity.x, this.velocity.y, this.velocity.z);
+    if (!this.ready) {
+      // Freshly dropped balls fall and settle before their rewind origin is armed.
+      // A horizontal car strike during that settle is still a real kick.
+      if (Math.hypot(this.velocity.x, this.velocity.z) > 0.55) {
+        this.ready = true;
+        this.active = true;
+        this.resetPath();
+        this.recordCurrent();
+      } else {
+        this.settledFor = speed < FOOTBALL_SETTLED_SPEED ? this.settledFor + dt : 0;
+        if (this.settledFor >= FOOTBALL_SETTLED_SECONDS || this.body.isSleeping()) {
+          this.ready = true;
+          this.settledFor = 0;
+          this.body.setLinvel(this.zero, false);
+          this.body.setAngvel(this.zero, false);
+          this.body.sleep();
+          this.resetPath();
+        }
+      }
+      return;
+    }
+
+    if (!this.active) {
+      if (speed < FOOTBALL_START_SPEED) return;
+      this.active = true;
+      this.settledFor = 0;
+    }
+    this.recordCurrent();
+    this.settledFor =
+      speed < FOOTBALL_SETTLED_SPEED || this.body.isSleeping()
+        ? this.settledFor + dt
+        : 0;
+    if (this.settledFor >= FOOTBALL_SETTLED_SECONDS) this.startReturn();
+  }
+
+  rebase(dx: number, dz: number): void {
+    for (let i = 0; i < this.path.length; i += FOOTBALL_SAMPLE_STRIDE) {
+      this.path[i] = this.path[i]! - dx;
+      this.path[i + 2] = this.path[i + 2]! - dz;
+    }
+    // PhysicsWorld shifts the current body but cannot see a kinematic body's queued
+    // next pose. Re-issue that one target in the new frame as well.
+    if (this.returning && this.queuedSample >= 0) this.setQueuedSample(this.queuedSample);
+  }
+
+  private startReturn(): void {
+    const sampleCount = this.path.length / FOOTBALL_SAMPLE_STRIDE;
+    if (sampleCount < 2) {
+      this.active = false;
+      this.resetPath();
+      return;
+    }
+    this.returning = true;
+    this.settledFor = 0;
+    this.collider.setSensor(true);
+    this.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
+    this.body.setLinvel(this.zero, false);
+    this.body.setAngvel(this.zero, false);
+    this.returnCursor = sampleCount - 2;
+    this.queueSample(this.returnCursor);
+    this.returnCursor -= 1;
+  }
+
+  private finishReturn(): void {
+    this.returning = false;
+    this.active = false;
+    this.queuedSample = -1;
+    this.collider.setSensor(false);
+    this.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    this.body.setLinvel(this.zero, false);
+    this.body.setAngvel(this.zero, false);
+    const t = this.body.translation(this.translation);
+    const r = this.body.rotation(this.rotation);
+    this.mesh.position.set(t.x, t.y, t.z);
+    this.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    this.body.sleep();
+    this.resetPath();
+  }
+
+  private resetPath(): void {
+    this.path.length = 0;
+    this.recordCurrent();
+  }
+
+  private recordCurrent(): void {
+    const t = this.body.translation(this.translation);
+    const r = this.body.rotation(this.rotation);
+    this.path.push(t.x, t.y, t.z, r.x, r.y, r.z, r.w);
+  }
+
+  private queueSample(index: number): void {
+    this.queuedSample = index;
+    this.setQueuedSample(index);
+  }
+
+  private setQueuedSample(index: number): void {
+    const offset = index * FOOTBALL_SAMPLE_STRIDE;
+    this.translation.x = this.path[offset]!;
+    this.translation.y = this.path[offset + 1]!;
+    this.translation.z = this.path[offset + 2]!;
+    this.rotation.x = this.path[offset + 3]!;
+    this.rotation.y = this.path[offset + 4]!;
+    this.rotation.z = this.path[offset + 5]!;
+    this.rotation.w = this.path[offset + 6]!;
+    this.body.setNextKinematicTranslation(this.translation);
+    this.body.setNextKinematicRotation(this.rotation);
+  }
 }
 
 export class LoosePartField {
@@ -31,6 +223,7 @@ export class LoosePartField {
   private readonly items = new Map<string, LooseEntry>();
   private readonly colliderToPartId = new Map<number, string>();
   private readonly colliderToItemId = new Map<number, string>();
+  private readonly footballByBody = new Map<number, FootballMotion>();
   private readonly unregisterOrigin: () => void;
   private hasActiveCenter = false;
   private activeX = 0;
@@ -148,6 +341,11 @@ export class LoosePartField {
     return this.colliderToItemId.get(colliderHandle) ?? null;
   }
 
+  /** Custom foot-contact response for a football; other loose props use the generic nudge. */
+  shoveableForBody(bodyHandle: number): Shoveable | null {
+    return this.footballByBody.get(bodyHandle) ?? null;
+  }
+
   /** Mesh for a loose part, so interaction can scrub its condition in place. */
   meshFor(partId: string): THREE.Object3D | null {
     return this.parts.get(partId)?.mesh ?? null;
@@ -161,6 +359,18 @@ export class LoosePartField {
     this.disposeAllRuntime(true);
     this.materialiseNearbyFromState();
   }
+
+  /** Flushes every live loose pose into save authority without unloading its runtime. */
+  flushToState(): void {
+    for (const [id, entry] of this.parts) {
+      const loose = this.world.state.looseParts[id];
+      if (loose) this.flushPose(entry, loose);
+    }
+    for (const [id, entry] of this.items) {
+      const loose = this.world.state.looseItems[id];
+      if (loose) this.flushPose(entry, loose);
+    }
+  }
   /**
    * The physics world rebases every body after origin listeners run. Shift meshes
    * here too, including sleeping bodies that `syncVisuals` deliberately does not read.
@@ -173,7 +383,13 @@ export class LoosePartField {
     for (const entry of this.items.values()) {
       entry.mesh.position.x -= shift.dx;
       entry.mesh.position.z -= shift.dz;
+      entry.football?.rebase(shift.dx, shift.dz);
     }
+  }
+
+  /** Advances football rewind tapes after Rapier has produced this tick's pose. */
+  fixedUpdate(dt: number): void {
+    for (const football of this.footballByBody.values()) football.afterStep(dt);
   }
 
   /** Copies settled bodies' transforms into their meshes, once per render frame. */
@@ -238,6 +454,7 @@ export class LoosePartField {
     }
     this.items.clear();
     this.colliderToItemId.clear();
+    this.footballByBody.clear();
   }
 
   private syncEntry(entry: LooseEntry): void {
@@ -251,6 +468,8 @@ export class LoosePartField {
   }
 
   private disposeEntry(entry: LooseEntry): void {
+    disposeItemMeshResources(entry.mesh);
+    this.footballByBody.delete(entry.body.handle);
     this.scene.remove(entry.mesh);
     // removeBody forgets the surface and every collider attached to the body.
     this.physics.removeBody(entry.body);
@@ -283,22 +502,50 @@ export class LoosePartField {
 
   private materialiseItem(item: Item, x: number, y: number, z: number): void {
     const mesh = createItemMesh(item);
-    // Items have no partHalfExtents; derive the box collider from the visual bounds.
-    const box = new THREE.Box3().setFromObject(mesh);
-    const size = box.getSize(new THREE.Vector3());
-    const half = {
-      x: Math.max(size.x * 0.5, 0.04),
-      y: Math.max(size.y * 0.5, 0.04),
-      z: Math.max(size.z * 0.5, 0.04),
-    };
     // x/z are absolute; subtract the origin once before the body AND the mesh.
     const rx = x - this.origin.x;
     const rz = z - this.origin.z;
-    const { body, collider } = this.physics.addDynamicBox(half, { x: rx, y, z: rz }, itemMass(item));
+
+    let body: RAPIER.RigidBody;
+    let collider: RAPIER.Collider;
+    let football: FootballMotion | undefined;
+    if (item.type === 'football') {
+      body = this.physics.world.createRigidBody(
+        RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(rx, y, rz)
+          .setLinearDamping(0.08)
+          .setAngularDamping(0.12)
+          .setCcdEnabled(true),
+      );
+      collider = this.physics.world.createCollider(
+        RAPIER.ColliderDesc.ball(FOOTBALL_RADIUS)
+          .setMass(itemMass(item))
+          .setFriction(0.58)
+          .setRestitution(0.72)
+          .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max),
+        body,
+      );
+      football = new FootballMotion(body, collider, mesh);
+      this.footballByBody.set(body.handle, football);
+    } else {
+      // Other items have no partHalfExtents; derive their box from the visual bounds.
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const half = {
+        x: Math.max(size.x * 0.5, 0.04),
+        y: Math.max(size.y * 0.5, 0.04),
+        z: Math.max(size.z * 0.5, 0.04),
+      };
+      ({ body, collider } = this.physics.addDynamicBox(half, { x: rx, y, z: rz }, itemMass(item)));
+      body.sleep();
+    }
+
     mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
-    this.items.set(item.id, { body, collider, mesh });
+    const entry: LooseEntry = football
+      ? { body, collider, mesh, football }
+      : { body, collider, mesh };
+    this.items.set(item.id, entry);
     this.colliderToItemId.set(collider.handle, item.id);
-    body.sleep();
   }
 }

@@ -73,7 +73,11 @@ function clamp(value: number, lo: number, hi: number): number {
  * parts, jerry cans, wrecks) fall through to the direct impulse below.
  */
 export interface Shoveable {
-  shove(dirX: number, dirZ: number, seconds: number): void;
+  /**
+   * `speedMps` lets light props distinguish a walking nudge from a sprinting kick;
+   * heavy vehicles deliberately ignore it and retain their mass-limited creep.
+   */
+  shove(dirX: number, dirZ: number, seconds: number, speedMps: number): void;
 }
 
 export class Player implements Rebasable {
@@ -477,7 +481,7 @@ export class Player implements Rebasable {
       // lift their own parking hold, which no outside impulse could move.
       const owner = this.shoveLookup(body.handle);
       if (owner) {
-        owner.shove(px, pz, dt);
+        owner.shove(px, pz, dt, Math.hypot(moveX, moveZ));
         continue;
       }
 

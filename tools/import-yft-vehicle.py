@@ -7,14 +7,15 @@ nested vehicles.rpf holds one RSC7 resource per vehicle; the .yft is a fragment
 whose main drawable carries the whole body as ONE skinned mesh, and whose physics
 LOD children carry the single wheel the game instances at four corners.
 
-Two stages, because the decimator lives in `gltf-transform` (meshoptimizer):
+The production path has three steps:
 
-  extract   dlc.rpf            -> build/<name>/{body,wheel}.glb   (raw, full density)
+  extract   dlc.rpf            -> build/<name>/{body,wheel}.glb
+  Blender lamp cut             -> build/<name>/body-lamps.glb
   assemble  build/<name>/*.glb -> one GLB with the runtime node/material contract
 
-Between them, run `gltf-transform simplify` on each part with its own ratio: a
-37k-triangle wheel and a 210k-triangle body do not want the same one, and the
-wheel is decimated ONCE and then instanced, so all four corners stay identical.
+`tools/split-vaz2110-lamps.py` is the authored boundary between normalization and
+assembly. It physically divides the source's two combined lamp meshes into the
+independently controlled factory sections.
 
 What is dropped, and why it is dropped by BONE and not by name matching on the
 mesh: the source body is a single skinned mesh, so "the dashboard" is not an
@@ -393,8 +394,14 @@ MATERIALS = {
     "car_paint": ([0.055, 0.15, 0.11, 1], 0.68, 0.08),
     "car_trim": ([0.035, 0.04, 0.045, 1], 0.82, 0.0),
     "car_glass": ([0.025, 0.045, 0.055, 1], 0.08, 0.10),
-    "Headlights": ([0.72, 0.76, 0.66, 1], 0.18, 0.0),
+    "Headlights": ([0.72, 0.76, 0.74, 1], 0.18, 0.0),
+    # sRGB #f26716 from the VAZ-2104 atlas, converted to glTF linear RGB.
+    "IndicatorLights": ([0.887923, 0.135633, 0.008023, 1], 0.20, 0.0),
+    "TailLights": ([0.24, 0.006, 0.003, 1], 0.28, 0.0),
     "BrakeLights": ([0.32, 0.008, 0.004, 1], 0.28, 0.0),
+    "ReverseLights": ([0.78, 0.80, 0.76, 1], 0.20, 0.0),
+    "PassiveRearLights": ([0.20, 0.005, 0.003, 1], 0.32, 0.0),
+    "AuxiliaryLights": ([0.30, 0.32, 0.31, 1], 0.35, 0.0),
     "Tyres": ([0.018, 0.02, 0.022, 1], 0.94, 0.0),
 }
 # Runtime role -> (node name, mesh name, material).
@@ -403,7 +410,15 @@ NODE_CONTRACT = {
     "car_trim": ("chassis_trim", "trim", "car_trim"),
     "car_glass": ("glass", "glass", "car_glass"),
     "headlights": ("headlights", "headlights", "Headlights"),
-    "taillights": ("taillights", "taillights", "BrakeLights"),
+    "front_blinker_left": ("front_blinker_left", "front_blinker_left", "IndicatorLights"),
+    "front_blinker_right": ("front_blinker_right", "front_blinker_right", "IndicatorLights"),
+    "front_auxiliary": ("front_auxiliary", "front_auxiliary", "AuxiliaryLights"),
+    "taillights": ("taillights", "taillights", "TailLights"),
+    "brake_lights": ("brake_lights", "brake_lights", "BrakeLights"),
+    "reverse_lights": ("reverse_lights", "reverse_lights", "ReverseLights"),
+    "rear_blinker_left": ("rear_blinker_left", "rear_blinker_left", "IndicatorLights"),
+    "rear_blinker_right": ("rear_blinker_right", "rear_blinker_right", "IndicatorLights"),
+    "rear_passive": ("rear_passive", "rear_passive", "PassiveRearLights"),
     "wheel": ("wheel", "wheel", "Tyres"),
 }
 
@@ -755,7 +770,7 @@ def _read_glb(path: Path):
 
 
 def stage_assemble(build_dir: Path, out_path: Path):
-    body = _read_glb(build_dir / "body-lod.glb")
+    body = _read_glb(build_dir / "body-lamps.glb")
     wheel = _read_glb(build_dir / "wheel-lod.glb")["wheel"]
     mounts = json.loads((build_dir / "mounts.json").read_text())
 

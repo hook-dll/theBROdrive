@@ -22,11 +22,12 @@ import { oilCapacity } from '../parts/registry';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
+import { FOOTBALL_RADIUS } from '../render/partmesh';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import type { CarState, GameWorld } from '../game/state';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
-import type { Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 
 type V3 = [number, number, number];
 
@@ -614,30 +615,23 @@ export function createStartingCar(world: GameWorld): CarState {
 }
 
 // ---------------------------------------------------------------------------
-// Starting fuel can
+// Starting items
 // ---------------------------------------------------------------------------
-function fuelCanSpot(L: HomesteadLayout, seed: number): V3 {
-  const [u, v, yOff] = [10.0, -1.8, 0.28]; // yard, by the drums
-  const ju = (hash01(seed, 0x94d, 2) - 0.5) * 0.2;
-  const jv = (hash01(seed, 0x95d, 2) - 0.5) * 0.2;
-  const [x, z] = L.toWorld(u + ju, v + jv);
-  return [x, L.floorY + yOff, z];
-}
 
 /**
- * Places a jerry can of the starter car's fuel in the yard.
- *
- * The hand-placed position has a small seed-derived jitter, so the can remains
- * reachable and never lands inside a wall or under the floor. It is not pre-loaded
- * into the player's inventory — finding it introduces refuelling without cluttering
- * the garage.
+ * Places the starter fuel can and the three distinctive handheld items around
+ * the homestead. This runs only for a new world, so stable generated ids can never
+ * restock something the player has already taken.
  */
-export function spawnStartingFuelCan(world: GameWorld, loose: LoosePartField): void {
+export function spawnStartingItems(world: GameWorld, loose: LoosePartField): void {
   const road = new Road(world.seed);
   const terrain = new Terrain(world.seed, road);
   const L = layout(road, terrain);
 
-  const canSpot = fuelCanSpot(L, world.seed);
+  const [canX, canZ] = L.toWorld(
+    10.0 + (hash01(world.seed, 0x94d, 2) - 0.5) * 0.2,
+    -1.8 + (hash01(world.seed, 0x95d, 2) - 0.5) * 0.2,
+  );
   loose.spawnItem(
     {
       type: 'fluid_can',
@@ -646,7 +640,47 @@ export function spawnStartingFuelCan(world: GameWorld, loose: LoosePartField): v
       capacity: 20,
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },
-    canSpot[0], canSpot[1], canSpot[2],
+    canX,
+    L.floorY + 0.28,
+    canZ,
+  );
+
+  // Camera and watch wait on the garage workbench, readable as deliberate
+  // possessions rather than random scrap.
+  const [cameraX, cameraZ] = L.toWorld(13.45, 1.08);
+  loose.spawnItem(
+    {
+      type: 'camera',
+      id: world.generatedPartId('home_item', 0, 3),
+      framesRemaining: CAMERA_FRAME_LIMIT,
+    },
+    cameraX,
+    L.floorY + WB_TOP + 0.14,
+    cameraZ,
+  );
+  const [watchX, watchZ] = L.toWorld(13.45, 1.62);
+  loose.spawnItem(
+    {
+      type: 'pocket_watch',
+      id: world.generatedPartId('home_item', 0, 4),
+      open: false,
+    },
+    watchX,
+    L.floorY + WB_TOP + 0.08,
+    watchZ,
+  );
+
+  // The ball starts on bare ground beside the drive, with the centre one radius
+  // above the terrain so it neither floats nor spawns intersecting the sand.
+  const [ballX, ballZ] = L.toWorld(6.5, 5.9);
+  loose.spawnItem(
+    {
+      type: 'football',
+      id: world.generatedPartId('home_item', 0, 5),
+    },
+    ballX,
+    terrain.heightAt(ballX, ballZ, HOMESTEAD_S) + FOOTBALL_RADIUS,
+    ballZ,
   );
 }
 

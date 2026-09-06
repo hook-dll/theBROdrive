@@ -2,6 +2,9 @@
 
 Rules for cars from the current GTA SA DFF pack. Normalize offline; runtime code must receive a small, explicit GLB rather than learn pack-specific names. `tools/import-dff-pack.py` is that normalizer (Blender + DragonFF); `tools/dff-pack-audit.mjs` enforces the contract below on the packed result.
 
+For per-model factory lamp research, Blender cuts, semantic node names and the
+day/night control matrix, follow `tools/vehicle-lamp-authoring.md`.
+
 ## Keep and remove
 
 - Keep the intact exterior: chassis/body, bonnet, boot, bumpers, grille, lights, windscreen and all four complete `*_ok` doors.
@@ -16,11 +19,11 @@ Collapse source materials into these runtime roles and no more:
 - `car_paint` — painted body panels;
 - `car_trim` — grille, bumpers, mouldings, door cards and underbody;
 - `car_glass` — windows only;
-- `Headlights` / `BrakeLights` — lamp LENSES only. Pick them by the source's lamp texture (`fara`, `fari`, `vehiclelights*`, `povorotnik`) and require the face to sit in the outer tenth of the car's length: an object-name rule swallows the whole lamp housing, and a lamp texture halfway down the flank is a side repeater, not a headlight. Nothing translucent may end up in front of a lens — a lamp covered by a window mesh still lights, invisibly.
+- Lamp materials belong only on visible lens faces. Follow the semantic material/node contract in `tools/vehicle-lamp-authoring.md`; do not collapse a real running, stop, reverse or indicator section into one whole-lamp mesh. Pick candidate faces by source texture (`fara`, `fari`, `vehiclelights*`, `povorotnik`) and confirm them against the approved factory reference. Nothing translucent may remain in front of an emissive lens — a lamp covered by a window mesh still lights, invisibly.
 - `Tyres` — tyre carcass. Detached hubs may keep `car_trim`.
 - `wheel_rim` — the rim inside the tyre, split off by `tools/rim-split.mjs` after packing (no source pack separates them, and a wheel left as one dark material reads as a black circle beside the Soviet cars), and on a pickup its load bed as well: a working truck's bed is not painted in the coachwork colour. The name keeps both out of the `solid-paint` repaint.
 
-Do not ship the TXD or texture images for this pack. Remove unused UV attributes. Export lamp meshes as explicit nodes named `headlights` and `taillights`; select those node names in `CarModelDef.lights`. Select `car_glass` through `CarModelDef.glassMaterial`.
+Do not ship the TXD or texture images for this pack. Remove unused UV attributes. Export every controlled lamp function as an explicit semantic node from `tools/vehicle-lamp-authoring.md`, then select those node names in `CarModelDef.lights`. Select `car_glass` through `CarModelDef.glassMaterial`.
 
 ## Catalogue paint wiring
 
@@ -44,13 +47,13 @@ Do not ship the TXD or texture images for this pack. Remove unused UV attributes
 - Nose down +Z, the direction the game drives. A GTA body faces +Y and the glTF Y-up conversion turns that into -Z, so the normalizer bakes half a turn about the vertical axis into the geometry. Do not express this as catalogue `yaw`: the loader detaches wheel nodes and mixes their world centres with their local offsets, and a rotation left on a parent node is dropped by that detach.
 - No engine/interior/damage/collision/shadow nodes, no textures or images, no unused UVs.
 - Positive scales only. Bake source hierarchy transforms before export.
-- Meshopt-compress the final GLB after normalization: `node tools/rim-split.mjs <in> <rim>` then `gltf-transform optimize <rim> <out> --compress meshopt --palette false --join-named false` (a palette pass would invent a texture and joining named meshes would destroy the node contract).
+- Meshopt-compress the final GLB after normalization: `node tools/rim-split.mjs <in> <rim>` then `gltf-transform optimize <rim> <out> --compress meshopt --simplify false --palette false --join-named false` (simplification changes approved cuts, a palette pass invents a texture, and joining named meshes destroys the node contract).
 
 ## Required verification
 
-1. Run `node tools/dff-pack-audit.mjs public/models/saas`: six materials, zero textures/images, explicit lamp nodes, four wheel nodes with four matching hubs, positive scales, headlights ahead of taillights, and every wheel wound outward.
+1. Run `node tools/dff-pack-audit.mjs public/models/saas`: required materials, zero textures/images, explicit semantic lamp nodes, four wheel nodes with four matching hubs, positive scales, headlights ahead of taillights, and every wheel wound outward.
 2. Run `carModelMeasure`: four wheels, plausible radius, and wheelbase/track matching the real vehicle after scale.
-3. Spawn the car in the game. Toggle headlights and confirm the `Headlights` material changes from zero emission to visible emission and produces two mounts.
+3. Spawn the car in the game and complete the lamp-state matrix in `tools/vehicle-lamp-authoring.md`.
 4. Drive it: it must pull forward on throttle and steer from the front axle.
 5. View both sides: right rims face outward; no wheel has a negative scale.
 6. Drive over uneven ground: tyre, rim, hub and visible axle travel together with each suspension wrapper.

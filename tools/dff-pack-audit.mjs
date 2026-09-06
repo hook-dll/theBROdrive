@@ -32,7 +32,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 const args = process.argv.slice(2);
 const wheelsComplete = args.includes('--wheels-complete');
 const dir = args.find((arg) => !arg.startsWith('--')) ?? 'public/models/saas';
-const expectedMaterials = new Set([
+const baseMaterials = new Set([
   'car_paint',
   'car_trim',
   'car_glass',
@@ -43,6 +43,13 @@ const expectedMaterials = new Set([
   // whole wheel as one dark material, so this one is allowed rather than demanded.
   'wheel_rim',
 ]);
+const splitLampMaterials = [
+  'IndicatorLights',
+  'TailLights',
+  'ReverseLights',
+  'PassiveRearLights',
+  'AuxiliaryLights',
+];
 const requiredNodes = [
   'headlights', 'taillights',
   'wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr',
@@ -106,6 +113,11 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
   const json = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'));
   if ((json.images?.length ?? 0) !== 0) fail(file, `contains ${json.images.length} images`);
   if ((json.textures?.length ?? 0) !== 0) fail(file, `contains ${json.textures.length} textures`);
+  const splitLamps = (json.nodes ?? []).some((node) => node.name === 'brake_lights');
+  const expectedMaterials = new Set(baseMaterials);
+  if (splitLamps) {
+    for (const name of splitLampMaterials) expectedMaterials.add(name);
+  }
   const declaredMaterials = new Set((json.materials ?? []).map((material) => material.name));
   const missingMaterials = [...expectedMaterials].filter(
     (name) => name !== 'wheel_rim' && !declaredMaterials.has(name),
@@ -132,14 +144,51 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
     }
   });
   if (nodes.size !== requiredNodes.length) continue;
+  if (splitLamps) {
+    let missingSplitLamp = false;
+    for (const name of [
+      'brake_lights',
+      'reverse_lights',
+      'front_blinker_left',
+      'front_blinker_right',
+      'rear_blinker_left',
+      'rear_blinker_right',
+      'rear_passive',
+      'front_auxiliary',
+    ]) {
+      const node = scene.getObjectByName(name);
+      if (!node) {
+        fail(file, `missing node ${name}`);
+        missingSplitLamp = true;
+      } else {
+        nodes.set(name, node);
+      }
+    }
+    if (missingSplitLamp) continue;
+  }
 
   // `underbody` is only authored where the source DFF is an open shell, so it is
   // checked when present rather than demanded of every body.
-  for (const [nodeName, materialName] of [
-    ['headlights', 'Headlights'],
-    ['taillights', 'BrakeLights'],
-    ['underbody', 'car_trim'],
-  ]) {
+  const authoredMaterials = splitLamps
+    ? [
+        ['headlights', 'Headlights'],
+        ['taillights', 'TailLights'],
+        ['brake_lights', 'BrakeLights'],
+        ['reverse_lights', 'ReverseLights'],
+        ['front_blinker_left', 'IndicatorLights'],
+        ['front_blinker_right', 'IndicatorLights'],
+        ['rear_blinker_left', 'IndicatorLights'],
+        ['rear_blinker_right', 'IndicatorLights'],
+        ['rear_passive', 'PassiveRearLights'],
+        ['front_auxiliary', 'AuxiliaryLights'],
+        ['underbody', 'car_trim'],
+      ]
+    : [
+        ['headlights', 'Headlights'],
+        ['taillights', 'BrakeLights'],
+        ['underbody', 'car_trim'],
+      ];
+  for (const [nodeName, materialName] of authoredMaterials) {
     const node = nodes.get(nodeName) ?? scene.getObjectByName(nodeName);
     if (!node) continue;
     const actual = materialNames(node);
