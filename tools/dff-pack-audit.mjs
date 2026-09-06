@@ -28,6 +28,9 @@ const expectedMaterials = new Set([
   'Headlights',
   'BrakeLights',
   'Tyres',
+  // The rim, split off the tyre geometrically. Older exports (azlk2141) draw the
+  // whole wheel as one dark material, so this one is allowed rather than demanded.
+  'wheel_rim',
 ]);
 const requiredNodes = [
   'headlights', 'taillights',
@@ -93,7 +96,9 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
   if ((json.images?.length ?? 0) !== 0) fail(file, `contains ${json.images.length} images`);
   if ((json.textures?.length ?? 0) !== 0) fail(file, `contains ${json.textures.length} textures`);
   const declaredMaterials = new Set((json.materials ?? []).map((material) => material.name));
-  const missingMaterials = [...expectedMaterials].filter((name) => !declaredMaterials.has(name));
+  const missingMaterials = [...expectedMaterials].filter(
+    (name) => name !== 'wheel_rim' && !declaredMaterials.has(name),
+  );
   const extraMaterials = [...declaredMaterials].filter((name) => !expectedMaterials.has(name));
   if (missingMaterials.length || extraMaterials.length) {
     fail(file, `materials missing=[${missingMaterials}] extra=[${extraMaterials}]`);
@@ -137,8 +142,9 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
     const wheel = nodes.get(`wheel_${key}`);
     const hub = nodes.get(`hub_${key}`);
     const wheelMaterials = materialNames(wheel);
-    if (wheelMaterials.size !== 1 || !wheelMaterials.has('Tyres')) {
-      fail(file, `wheel_${key} uses [${[...wheelMaterials]}], expected Tyres`);
+    const strays = [...wheelMaterials].filter((name) => name !== 'Tyres' && name !== 'wheel_rim');
+    if (!wheelMaterials.has('Tyres') || strays.length) {
+      fail(file, `wheel_${key} uses [${[...wheelMaterials]}], expected Tyres (+ wheel_rim)`);
     }
     wheels[key] = centreAndRadius([wheel, hub]);
   }
