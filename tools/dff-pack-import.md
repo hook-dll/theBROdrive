@@ -18,7 +18,7 @@ Collapse source materials into these six runtime roles and no more:
 - `car_glass` — windows only;
 - `Headlights` — front lamp lenses;
 - `BrakeLights` — rear lamp lenses;
-- `Tyres` — tyre/rim wheel mesh; detached hubs may keep `car_trim`.
+- `Tyres` — tyre carcass; `wheel_rim` — the rim inside it, split off by `tools/rim-split.mjs` after packing (no source pack separates them, and a wheel left as one dark material reads as a black circle beside the Soviet cars). Detached hubs may keep `car_trim`.
 
 Do not ship the TXD or texture images for this pack. Remove unused UV attributes. Export lamp meshes as explicit nodes named `headlights` and `taillights`; select those node names in `CarModelDef.lights`. Select `car_glass` through `CarModelDef.glassMaterial`.
 
@@ -44,7 +44,7 @@ Do not ship the TXD or texture images for this pack. Remove unused UV attributes
 - Nose down +Z, the direction the game drives. A GTA body faces +Y and the glTF Y-up conversion turns that into -Z, so the normalizer bakes half a turn about the vertical axis into the geometry. Do not express this as catalogue `yaw`: the loader detaches wheel nodes and mixes their world centres with their local offsets, and a rotation left on a parent node is dropped by that detach.
 - No engine/interior/damage/collision/shadow nodes, no textures or images, no unused UVs.
 - Positive scales only. Bake source hierarchy transforms before export.
-- Meshopt-compress the final GLB after normalization (`gltf-transform optimize … --compress meshopt --palette false --join-named false`; a palette pass would invent a texture and joining named meshes would destroy the node contract).
+- Meshopt-compress the final GLB after normalization: `node tools/rim-split.mjs <in> <rim>` then `gltf-transform optimize <rim> <out> --compress meshopt --palette false --join-named false` (a palette pass would invent a texture and joining named meshes would destroy the node contract).
 
 ## Required verification
 
