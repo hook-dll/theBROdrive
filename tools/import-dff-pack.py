@@ -213,10 +213,16 @@ def new_runtime_material(name: str) -> bpy.types.Material:
         "Headlights": (0.72, 0.78, 0.72, 1.0),
         "BrakeLights": (0.45, 0.012, 0.008, 1.0),
         "Tyres": (0.018, 0.02, 0.022, 1.0),
+        # Painted steel rims, matched to the Soviet pack's wheel swatch. The source
+        # DFFs texture rim and tyre alike, so a single dark wheel material buried the
+        # rim in the tyre; this is the only wheel colour the runtime is given.
+        # The name carries `wheel` on purpose: the `solid-paint` repaint path skips
+        # any material whose name looks like a wheel, so a red car keeps grey rims.
+        "wheel_rim": (0.40, 0.41, 0.42, 1.0),
     }
     bsdf.inputs["Base Color"].default_value = colors[name]
     bsdf.inputs["Roughness"].default_value = 0.28 if name == "car_paint" else 0.55
-    bsdf.inputs["Metallic"].default_value = 0.35 if name == "car_paint" else 0.0
+    bsdf.inputs["Metallic"].default_value = 0.35 if name in ("car_paint", "wheel_rim") else 0.0
     return material
 
 
@@ -408,6 +414,10 @@ def create_wheels(
         if key.endswith("l") != source_key.endswith("l"):
             turn = Matrix.Rotation(math.pi, 4, "Z")
             vertices = [turn @ vertex for vertex in vertices]
+        # Rim inside, tyre outside: the source draws both as one mesh with one dark
+        # texture, so the split is geometric — a face's distance from the axle, which
+        # is the +X axis of the re-centred wheel.
+        rim_limit = radius * 0.62
         wheel = mesh_object(
             key,
             [(point.x, point.y, point.z) for point in vertices],
@@ -415,6 +425,11 @@ def create_wheels(
             materials["Tyres"],
             root,
         )
+        wheel.data.materials.append(materials["wheel_rim"])
+        for polygon, face in zip(wheel.data.polygons, faces):
+            centre = sum((vertices[index] for index in face), Vector()) / len(face)
+            if math.hypot(centre.y, centre.z) < rim_limit:
+                polygon.material_index = 1
         wheel.location = dummy_positions[key]
         decimate(wheel, 2_200)
         radii.append(radius)
@@ -532,7 +547,7 @@ def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bo
     if not body_objects:
         raise RuntimeError(f"No exterior meshes retained for {source}")
 
-    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres")}
+    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres", "wheel_rim")}
     axle_mid_y = sum(position.y for position in dummy_positions.values()) / 4
     buckets = collect_body(body_objects, axle_mid_y)
     wheel_geometry_by_key = {
