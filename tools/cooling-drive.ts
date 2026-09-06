@@ -27,8 +27,8 @@ import { preloadCarModels } from '../src/render/carmodel';
 
 installAssetShim();
 
-/** A V8 pickup: enough power to cook a small radiator, and it exists in the pack. */
-const MODEL_ID = 'st_v8_pickup';
+/** A UAZ van: enough load on a small radiator to cook it, and it exists in the pack. */
+const MODEL_ID = 'sa_uaz330364';
 const SETTLE_STEPS = 180;
 /** Mid-afternoon, so the desert is working against the radiator like it will in play. */
 const HOT_AFTERNOON = DAY_LENGTH * 0.625;

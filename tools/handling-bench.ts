@@ -19,7 +19,7 @@
  * document), so it runs as:
  *
  *   import { runBench } from '/tools/handling-bench.ts';
- *   await runBench(['sv_vaz2101', 'st_big_saloon']);
+ *   await runBench(['sv_vaz2101', 'sa_vaz2110']);
  *
  * Nothing here is part of the game bundle.
  */
@@ -1011,7 +1011,7 @@ export async function benchTowing(
  * Regression check for a latched parking brake: after suspension settling, a car
  * must move less than 2 cm over ten seconds on a 20° asphalt slope.
  */
-export async function runParkingSlopeCheck(modelId = 'st_big_saloon'): Promise<number> {
+export async function runParkingSlopeCheck(modelId = 'sa_vaz2110'): Promise<number> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId, addSlopeGround, true);
   const start = rig.vehicle.chassis.translation();
@@ -1037,7 +1037,7 @@ export async function runParkingSlopeCheck(modelId = 'st_big_saloon'): Promise<n
  * without requiring the chassis to stop before the gearbox responds.
  */
 export async function runAutomaticRollbackCheck(
-  modelId = 'st_big_saloon',
+  modelId = 'sa_vaz2110',
 ): Promise<{ rollbackMps: number; recoveryS: number; finalMps: number }> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId, addRollbackGround, true);
@@ -1095,7 +1095,7 @@ export async function runAutomaticRollbackCheck(
  * backward. The flat road isolates reverse torque from gravity.
  */
 export async function runAutomaticNeutralReverseCheck(
-  modelId = 'st_big_saloon',
+  modelId = 'sa_vaz2110',
 ): Promise<{ rollbackMps: number; engagementS: number; finalMps: number }> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId);

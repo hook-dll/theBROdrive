@@ -64,7 +64,7 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 installAssetShim();
 
 const SEED = 42;
-const MODEL_ID = 'st_mid_engine_v8';
+const MODEL_ID = 'sv_vaz2105r';
 /** Chunk span driven. Matches desert-ride.ts so the two benches describe one place. */
 const FROM_CHUNK = 120;
 const TO_CHUNK = 126;

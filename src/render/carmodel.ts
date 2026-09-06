@@ -29,13 +29,9 @@ import {
 } from './materials';
 import {
   CAR_MODELS,
-  STYLIZED_PAINT_MATERIAL,
-  STYLIZED_TAILLIGHT_COLOR,
-  STYLIZED_TAILLIGHT_MATERIAL,
   carModel,
   type CarModelDef,
   type GizmoAnchorDef,
-  type PalettePaintRamp,
 } from '../vehicle/carmodels';
 
 /** The four wheels the vehicle controller drives, in the order it expects them. */
@@ -160,28 +156,17 @@ let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
 
 /**
- * Redirects the Stylized pack's texture references from the PSD Unity ships to the
- * PNG a browser can decode.
+ * The FBX loader for the Soviet pack.
  *
- * Its FBX files name `PixelColors.psd` internally, with an absolute path from the
- * artist's machine. FBXLoader takes the basename and asks for it beside the model,
- * which no browser will decode, so the reference is rewritten to the converted PNG
- * sitting at exactly that stem (tools/psd-to-png.mjs). Rewriting the request beats
- * patching the reference inside 31 binary FBX files, and the catalogue names the
- * same PNG as its `textureFile`, so the rewrite and the shared palette resolve to
- * one URL and one fetch.
- *
- * The rewrite DELEGATES to the default manager rather than replacing it. Headless
- * tools install their own modifier there to turn the game's root-absolute asset
- * paths into file URLs (tools/assetshim.ts); resolving through it at request time
- * composes with whatever they installed, in either install order.
+ * It DELEGATES URL resolution to the default manager rather than replacing it.
+ * Headless tools install their own modifier there to turn the game's root-absolute
+ * asset paths into file URLs (tools/assetshim.ts); resolving through it at request
+ * time composes with whatever they installed, in either install order.
  */
 function fbxLoader(): FBXLoader {
   if (fbx) return fbx;
   const manager = new THREE.LoadingManager();
-  manager.setURLModifier((url) =>
-    THREE.DefaultLoadingManager.resolveURL(url.replace(/\.psd$/i, '.png')),
-  );
+  manager.setURLModifier((url) => THREE.DefaultLoadingManager.resolveURL(url));
   fbx = new FBXLoader(manager);
   return fbx;
 }
@@ -255,9 +240,6 @@ function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
 
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
   if (def.paintStyle === 'soviet-atlas') return mesh.name.endsWith('body');
-  if (def.paintStyle === 'stylized-palette') {
-    return materialsOf(mesh).some((material) => isPaintSlot(material, def));
-  }
   if (def.paintStyle === 'solid-paint') return true;
   return false;
 }
@@ -265,12 +247,11 @@ function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
 /**
  * Whether one material slot of a paint mesh is the paint itself.
  *
- * A Soviet body mesh has exactly one slot, so all of it is paint. A Stylized body
- * mesh has six — palette, glass, and four lamp lenses — and only the palette slot
- * may be repainted or weathered: rusting a headlight is not a thing.
+ * A Soviet body mesh has exactly one slot, so all of it is paint. A normalized GTA
+ * SA body carries six runtime roles in one file, and only the painted panels may be
+ * repainted or weathered: rusting a headlight is not a thing.
  */
 function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
-  if (def.paintStyle === 'stylized-palette') return material.name === STYLIZED_PAINT_MATERIAL;
   if (def.paintStyle === 'solid-paint') {
     if (def.glassMaterial && material.name === def.glassMaterial) return false;
     return !/(glass|lamp|light|chrome|trim|tyre|tire|wheel)/i.test(material.name);
@@ -354,48 +335,17 @@ function prepareSovietShellFaces(root: THREE.Object3D, def: CarModelDef): void {
     for (const material of materialsOf(child)) material.side = THREE.DoubleSide;
   });
 }
-/** Gives static Stylized brake lenses the same red surface as driven vehicles. */
-function tintStaticStylizedTaillights(root: THREE.Object3D, def: CarModelDef): void {
-  if (def.paintStyle !== 'stylized-palette') return;
-  const clones = new Map<THREE.Material, THREE.Material>();
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const tint = (source: THREE.Material): THREE.Material => {
-      if (source.name !== STYLIZED_TAILLIGHT_MATERIAL) return source;
-      const existing = clones.get(source);
-      if (existing) return existing;
-      const material = source.clone();
-      if (
-        material instanceof THREE.MeshStandardMaterial ||
-        material instanceof THREE.MeshPhongMaterial
-      ) {
-        material.color.setHex(STYLIZED_TAILLIGHT_COLOR);
-      }
-      clones.set(source, material);
-      return material;
-    };
-    child.material = Array.isArray(child.material)
-      ? child.material.map(tint)
-      : tint(child.material);
-  });
-}
 
 /** Writes one deterministic per-car colour into already-independent paint materials. */
 function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey: string): void {
   if (!def.paintStyle) return;
   const color = paintColorFor(def.id, appearanceKey);
-  const palette =
-    def.paintStyle === 'stylized-palette' ? repaintedPalette(def, color) : null;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
     for (const material of materialsOf(child)) {
       if (!(material instanceof THREE.MeshStandardMaterial)) continue;
       if (!isPaintSlot(material, def)) continue;
-      if (palette) {
-        if (material.map === palette) continue;
-        material.map = palette;
-        material.needsUpdate = true;
-      } else if (def.paintStyle === 'solid-paint') {
+      if (def.paintStyle === 'solid-paint') {
         material.map = null;
         material.color.copy(color);
         material.needsUpdate = true;
@@ -407,104 +357,9 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
 }
 
 /**
- * The pack palettes, decoded once so their ramps can be rebuilt in other colours.
+ * Sampling for the Soviet palette atlas.
  *
- * Keyed by texture URL rather than by model: the Stylized pack's thirty-one bodies
- * share one 32x32 image, so it is decoded once for all of them.
- */
-const paletteImages = new Map<string, ImageData>();
-/** Recoloured palettes, keyed by ramp and colour. At most one per colour per ramp. */
-const repaintedPalettes = new Map<string, THREE.Texture>();
-const paintRGB = { r: 0, g: 0, b: 0 };
-
-/**
- * Decodes a loaded palette texture's pixels, so a ramp can be read and rebuilt.
- *
- * A headless tool has neither a decoder nor a canvas, and the shared asset shim
- * deliberately resolves every texture to one blank object (tools/assetshim.ts) —
- * nothing a physics or geometry bench measures reads a pixel. So this records
- * nothing rather than throwing, and repainting is skipped for the run: those cars
- * keep the pack's authored colour, which no bench looks at.
- */
-function readPaletteImage(url: string, texture: THREE.Texture): void {
-  if (paletteImages.has(url)) return;
-  if (typeof document === 'undefined') return;
-  // TextureLoader hands back an HTMLImageElement, which is what a 2D context draws.
-  const image = texture.image as HTMLImageElement | undefined;
-  if (!image?.width || !image.height) return;
-  const canvas = document.createElement('canvas');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return;
-  ctx.drawImage(image, 0, 0);
-  paletteImages.set(url, ctx.getImageData(0, 0, canvas.width, canvas.height));
-}
-
-/**
- * One car's palette with its coachwork cells rebuilt as one factory colour.
- *
- * The source ramp bakes broad light and dark bands into different polygons. Once
- * the game supplies real lights and smooth normals those bands become false
- * two-tone paint, not shading. Every coloured paint texel therefore receives the
- * exact target colour; only the ramp's near-black cells remain authored because
- * they carry shut lines, window rubbers and deep recesses rather than coachwork.
- *
- * Null when the palette cannot be decoded (headless geometry/physics benches).
- */
-function repaintedPalette(def: CarModelDef, color: THREE.Color): THREE.Texture | null {
-  const url = def.textureFile;
-  const ramp = def.paintRamp;
-  if (!url || !ramp) throw new Error(`Car model "${def.id}" has no palette ramp to repaint`);
-  const source = paletteImages.get(url);
-  if (!source) return null;
-
-  const key = `${url}|${ramp.column},${ramp.columns},${ramp.row},${ramp.rows},${ramp.keyRow}|${color.getHexString(THREE.SRGBColorSpace)}`;
-  const cached = repaintedPalettes.get(key);
-  if (cached) return cached;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  const pixels = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
-  // The palette is stored, sampled and blended in sRGB, so the target colour has to
-  // leave the renderer's linear working space before it is written into it.
-  color.getRGB(paintRGB, THREE.SRGBColorSpace);
-  const keyLuma = Math.max(1, paletteLuma(pixels, ramp.column, ramp.keyRow));
-  for (let row = ramp.row; row < ramp.row + ramp.rows; row++) {
-    const relativeLuma = paletteLuma(pixels, ramp.column, row) / keyLuma;
-    // Keep only genuinely dark trim/recess cells. Every painted shade is flattened
-    // to one albedo and gets its brightness from scene lighting.
-    if (relativeLuma < 0.28) continue;
-    const r = Math.round(paintRGB.r * 255);
-    const g = Math.round(paintRGB.g * 255);
-    const b = Math.round(paintRGB.b * 255);
-    for (let column = ramp.column; column < ramp.column + ramp.columns; column++) {
-      const i = (row * source.width + column) * 4;
-      pixels.data[i] = r;
-      pixels.data[i + 1] = g;
-      pixels.data[i + 2] = b;
-    }
-  }
-  ctx.putImageData(pixels, 0, 0);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  tunePaletteTexture(texture);
-  repaintedPalettes.set(key, texture);
-  return texture;
-}
-
-function paletteLuma(image: ImageData, column: number, row: number): number {
-  const i = (row * image.width + column) * 4;
-  return 0.299 * image.data[i]! + 0.587 * image.data[i + 1]! + 0.114 * image.data[i + 2]!;
-}
-
-/**
- * Sampling for a palette atlas.
- *
- * Both packs paint by UV: a face points at one swatch of a small image, so there is
+ * The pack paints by UV: a face points at one swatch of a small image, so there is
  * no texture detail to filter and any filtering is pure damage. Nearest on BOTH
  * directions matters — with the default mipmap chain a 32x32 palette averages four
  * unrelated colours per level, so a car turned mud-coloured as it walked away from
@@ -522,11 +377,8 @@ function tunePaletteTexture(texture: THREE.Texture): void {
 /**
  * Points a subtree's palette material at its pack's shared texture.
  *
- * Normalized Stylized GLBs deliberately contain no embedded copy of the palette:
- * only the material named `PixelColors` samples it. Their glass and independently
- * controlled lamp materials stay flat until the runtime replaces or illuminates
- * them. Legacy/Soviet inputs have no named mapped slot, so omitting `materialName`
- * applies the texture to their available material as before.
+ * The Soviet FBXs have no named mapped slot, so the texture goes onto whichever
+ * material the body already carries.
  *
  * Materials are cloned once per source material, not once per mesh, so slots shared
  * between meshes stay one material and one draw call's worth of state.
@@ -655,7 +507,7 @@ function carGlassMaterial(): THREE.MeshStandardMaterial {
  * Separates a body's windows into the shared opaque tint, whichever way its pack
  * drew them.
  *
- * `glassMaterial` names an authored material on separate window meshes (Stylized),
+ * `glassMaterial` names an authored material on separate window meshes (GTA SA),
  * and is a straight swap. `glassUvCell` is the harder case (Soviet): the windows
  * are not objects at all, only the triangles of ONE body mesh whose UVs point at
  * the atlas's glass swatch, so they are cut out into a mesh of their own and the
@@ -1050,23 +902,20 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 const paletteTextures = new Map<string, THREE.Texture>();
 
 /**
- * Loads a pack's palette, tunes its sampling and decodes its pixels.
+ * Loads a pack's palette and tunes its sampling.
  *
- * The pixels are needed as well as the texture: repainting a Stylized body means
- * rebuilding one ramp of this image, which cannot be read back off the GPU.
+ * Only the Soviet FBX pack ships one. Its V origin follows the FORMAT: FBX counts
+ * V from the bottom, which is what TextureLoader's default flip already produces,
+ * so the flip stays on. Sampling it any other way puts roof paint on the sills and
+ * tyre black across the glass.
  */
-async function loadPalette(url: string, fbxSource: boolean): Promise<THREE.Texture> {
+async function loadPalette(url: string): Promise<THREE.Texture> {
   const cached = paletteTextures.get(url);
   if (cached) return cached;
   textures ??= new THREE.TextureLoader();
   const map = await textures.loadAsync(url);
-  // V origin follows the FORMAT, not the pack: glTF UVs are top-down and need no
-  // flip, while FBX counts V from the bottom, which is what TextureLoader's default
-  // flip already produces. Flipping an FBX pack's palette anyway samples it upside
-  // down — roof paint on the sills, tyre black across the glass.
-  map.flipY = fbxSource;
+  map.flipY = true;
   tunePaletteTexture(map);
-  readPaletteImage(url, map);
   paletteTextures.set(url, map);
   return map;
 }
@@ -1082,30 +931,20 @@ async function loadPalette(url: string, fbxSource: boolean): Promise<THREE.Textu
 export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
 
-  // Palettes first, and once per pack rather than once per body: a body cannot be
-  // repainted until the image its ramp lives in has been decoded.
-  const palettes = new Map<string, boolean>();
+  // The Soviet palette first, and once for the pack rather than once per body: a
+  // body cannot be repainted until the image its swatch lives in is loaded.
+  const palettes = new Set<string>();
   for (const def of defs) {
-    if (def.textureFile) {
-      // Normalized Stylized GLBs preserve their FBX-authored UV orientation.
-      palettes.set(
-        def.textureFile,
-        def.paintStyle === 'stylized-palette' || def.file.toLowerCase().endsWith('.fbx'),
-      );
-    }
+    if (def.textureFile) palettes.add(def.textureFile);
   }
-  await Promise.all([...palettes].map(([url, fbxSource]) => loadPalette(url, fbxSource)));
+  await Promise.all([...palettes].map((url) => loadPalette(url)));
 
   await Promise.all(
     defs.map(async (def) => {
       if (templates.has(def.id)) return;
       const scene = await loadScene(def.file);
       if (def.textureFile) {
-        applyTexture(
-          scene,
-          paletteTextures.get(def.textureFile)!,
-          def.paintStyle === 'stylized-palette' ? STYLIZED_PAINT_MATERIAL : undefined,
-        );
+        applyTexture(scene, paletteTextures.get(def.textureFile)!);
       }
       tuneMaps(scene);
       templates.set(def.id, buildTemplate(def, scene));
@@ -1196,7 +1035,6 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   group.name = id;
   const body = t.body.clone(true);
   cloneStaticPaintMaterials(body, t.def);
-  tintStaticStylizedTaillights(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   group.add(body);
@@ -1286,14 +1124,11 @@ export function disposeCarModelCache(): void {
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
   templates.clear();
-  // Palettes are shared by every body in a pack and by every recoloured copy, so
-  // they are released here rather than through the per-material walk above, which
-  // would otherwise free one pack's palette on the first car that referenced it.
+  // The Soviet palette is shared by every body in that pack, so it is released here
+  // rather than through the per-material walk above, which would otherwise free it
+  // on the first car that referenced it.
   for (const texture of paletteTextures.values()) texture.dispose();
   paletteTextures.clear();
-  for (const texture of repaintedPalettes.values()) texture.dispose();
-  repaintedPalettes.clear();
-  paletteImages.clear();
   gltf = null;
   fbx = null;
   glassMaterial = null;

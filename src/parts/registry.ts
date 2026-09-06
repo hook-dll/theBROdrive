@@ -194,10 +194,10 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
   },
   {
     // A lazy 2.4 litre four: peak torque at 2200 rpm and a 4500 rpm limit. This is
-    // the generic entry the Stylized compact saloon runs, NOT a Volga engine — the
-    // GAZ pair now have their own (`engine_zmz_21`/`engine_zmz_24`) in the Soviet
-    // driveline table, with that pack's own friction convention. Do not merge them:
-    // this one's figures are the ones the Stylized car was tuned against.
+    // the generic entry the UAZ van and Sobol run, NOT a Volga engine — the GAZ pair
+    // have their own (`engine_zmz_21`/`engine_zmz_24`) in the Soviet driveline table,
+    // with that pack's own friction convention. Do not merge them: this one's figures
+    // are what the imported working vehicles were tuned against.
     id: 'engine_i4_2445',
     kind: 'engine',
     label: '2.4 inline-four',
@@ -529,7 +529,7 @@ const LADA_VARIANTS: readonly PartVariant[] = [
  * ---- the Soviet pack's own driveline ----
  *
  * Fifteen bodies used to share three engines and two gearboxes, two of which were
- * the generic ones the Stylized pack uses. That is what made the pack feel like one
+ * the generic ones. That is what made the pack feel like one
  * car in fifteen shells: a Volga pulled like a Zhiguli, a Samara was a rear-drive
  * saloon's box bolted to a front-drive shell, and a Niva had no transfer gearing at
  * all. Every engine and every gearbox a Soviet body can be fitted with is here, with

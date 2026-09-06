@@ -1,0 +1,556 @@
+"""Normalize the SARUS GTA SA vehicle pack for the runtime.
+
+Run through Blender, not CPython:
+  blender --background --factory-startup --python tools/import-dff-pack.py
+
+The script deliberately ignores TXD files. It keeps the authored exterior and door
+cards, removes cabin/engine/damage/collision geometry, creates explicit moving wheel
+and hub nodes, and exports texture-free GLBs for glTF-Transform post-processing.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+import sys
+from pathlib import Path
+
+import bpy
+from mathutils import Matrix, Vector
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DIST = ROOT / "dist" / "models" / "saas"
+
+# id, source DFF, body face budget, and whether the source is an open shell that
+# needs a synthetic floor. Bodies whose own geometry already closes the underside
+# get no plate: adding one there only buries a slab inside the authored floor.
+MODELS = (
+    ("vaz2115", ROOT / "SARUS" / "ВАЗ 2115" / "tahoma.dff", 22_000, True),
+    ("gaz2217", ROOT / "SARUS" / "ГАЗ 2217 Соболь" / "pony.dff", 22_000, True),
+    ("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 18_000, False),
+    ("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 22_000, False),
+    ("uaz469", ROOT / "SARUS" / "УАЗ 469" / "rnchlure.dff", 22_000, True),
+    ("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 20_000, False),
+    ("vaz2114", ROOT / "SARUS" / "ВАЗ 2114" / "uranus.dff", 22_000, True),
+    ("vaz2110", ROOT / "SARUS" / "ВАЗ 2110" / "admiral.dff", 22_000, True),
+)
+
+ROLES = ("car_paint", "car_trim", "car_glass", "Headlights", "BrakeLights")
+WHEEL_KEYS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
+
+DAMAGE_RE = re.compile(r"(^|[_ .])(dam|damage|vlo|lod)([_ .]|$)", re.I)
+COLLISION_RE = re.compile(r"colmesh|colsphere|shadowmesh|collision|sentinel_col|_col\b", re.I)
+INTERIOR_RE = re.compile(
+    r"salon|interior|interier|v salone|dash|torpedo|pribork|rul|steer|seat|sid$|speed|mafon|"
+    r"dvig|motor|engine|exhaust|glush|stinger|podkapot|podves|dno|dnishe|"
+    r"kovrik|pedal|pion|navigator|registrator|cellphone|stetsom|advan|roadstar|"
+    r"pointer|tahook|shleif|tube|plafon|rama",
+    re.I,
+)
+EXTRA_RE = re.compile(r"^extra\d*$", re.I)
+WHEEL_NAME_RE = re.compile(r"wheel|koles|колес|shina|rezina|protekt", re.I)
+LAMP_RE = re.compile(r"vehiclelight|light|fara|far[sy]?|fonar|optik|povorot|turn|diod|stop", re.I)
+GLASS_RE = re.compile(r"glass|stekl|okno|windscreen|windshield", re.I)
+PAINT_RE = re.compile(r"primary|body(?:reflection)?|reflection|color_|^white(?:\.|$)|^chassis(?:\.0+)?$", re.I)
+TRIM_RE = re.compile(
+    r"chrom|black|rust|metall|dirt|scratch|carp|torped|salon|seat|dash|rul|"
+    r"wheel|shina|rezina|protekt|disc|disk|molding|nomer|ramki|under|briz|podkril",
+    re.I,
+)
+PANEL_RE = re.compile(r"chassis|bonnet|boot|door|dool|bump|bamp|wing|kuzov|cha$|chas$|bp_lf|1202", re.I)
+FRONT_LAMP_RE = re.compile(r"fars?_front|fara_pered|diod_pered|headlight", re.I)
+REAR_LAMP_RE = re.compile(r"fara_zad|tail|brake", re.I)
+
+
+def plain_name(name: str) -> str:
+    return re.sub(r"\.\d{3}$", "", name).strip().lower()
+
+
+def clear_scene() -> None:
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+    for collection in list(bpy.data.collections):
+        bpy.data.collections.remove(collection)
+    for datablocks in (bpy.data.meshes, bpy.data.materials, bpy.data.images, bpy.data.cameras, bpy.data.lights):
+        for datablock in list(datablocks):
+            datablocks.remove(datablock)
+
+
+def install_safe_dragonff_loader() -> None:
+    """Ignore malformed 0xffff separator triangles instead of aborting the clump."""
+    bpy.ops.preferences.addon_enable(module="DragonFF")
+    from DragonFF.gtaLib import dff as dff_lib
+
+    original = dff_lib.dff.load_file
+    if getattr(original, "_bro_safe", False):
+        return
+
+    def safe_load(instance, file_name):
+        result = original(instance, file_name)
+        skipped = 0
+        for clump in instance.clumps:
+            for geometry in clump.geometry_list:
+                count = len(geometry.vertices)
+                if not count:
+                    continue
+
+                def valid(face):
+                    return 0 <= face.a < count and 0 <= face.b < count and 0 <= face.c < count
+
+                before = len(geometry.triangles)
+                geometry.triangles = [face for face in geometry.triangles if valid(face)]
+                skipped += before - len(geometry.triangles)
+                split = geometry.extensions.get("mat_split")
+                if split is not None:
+                    before = len(split)
+                    geometry.extensions["mat_split"] = [face for face in split if valid(face)]
+                    skipped += before - len(geometry.extensions["mat_split"])
+        if skipped:
+            print(f"DragonFF: skipped {skipped} malformed triangle records in {file_name}")
+        return result
+
+    safe_load._bro_safe = True
+    dff_lib.dff.load_file = safe_load
+
+
+def import_dff(path: Path) -> None:
+    result = bpy.ops.import_scene.dff(
+        filepath=str(path),
+        load_images=False,
+        read_mat_split=True,
+        remove_doubles=True,
+        create_backfaces=False,
+        import_normals=True,
+        hide_damage_parts=False,
+        group_materials=False,
+        materials_naming="TEX",
+    )
+    if "FINISHED" not in result:
+        raise RuntimeError(f"DragonFF did not finish importing {path}: {result}")
+    bpy.context.view_layer.update()
+
+
+def wheel_key(name: str) -> str | None:
+    value = plain_name(name)
+    for source, target in (
+        ("wheel_lf_dummy", "wheel_fl"),
+        ("wheel_rf_dummy", "wheel_fr"),
+        ("wheel_lb_dummy", "wheel_rl"),
+        ("wheel_rb_dummy", "wheel_rr"),
+    ):
+        if source in value:
+            return target
+    return None
+
+
+def wheel_ancestor(obj: bpy.types.Object) -> tuple[str, bpy.types.Object] | None:
+    current = obj
+    while current is not None:
+        key = wheel_key(current.name)
+        if key is not None:
+            return key, current
+        current = current.parent
+    return None
+
+
+def excluded(obj: bpy.types.Object) -> bool:
+    current = obj
+    while current is not None:
+        name = plain_name(current.name)
+        if DAMAGE_RE.search(name) or COLLISION_RE.search(name) or INTERIOR_RE.search(name) or EXTRA_RE.fullmatch(name):
+            return True
+        current = current.parent
+    return False
+
+
+def material_alpha(material: bpy.types.Material | None) -> float:
+    if material is None:
+        return 1.0
+    return float(material.diffuse_color[3])
+
+
+def material_role(
+    obj: bpy.types.Object,
+    material: bpy.types.Material | None,
+    slot_index: int,
+    face_y: float,
+    axle_mid_y: float,
+) -> str:
+    object_name = plain_name(obj.name)
+    material_name = plain_name(material.name) if material is not None else ""
+
+    if FRONT_LAMP_RE.search(object_name):
+        return "Headlights"
+    if REAR_LAMP_RE.search(object_name):
+        return "BrakeLights"
+    if LAMP_RE.search(material_name) or LAMP_RE.search(object_name):
+        return "Headlights" if face_y >= axle_mid_y else "BrakeLights"
+
+    if GLASS_RE.search(material_name) or material_alpha(material) < 0.98:
+        return "car_glass"
+    if GLASS_RE.search(object_name) and len(obj.material_slots) <= 1:
+        return "car_glass"
+
+    if PAINT_RE.search(material_name):
+        return "car_paint"
+    if TRIM_RE.search(material_name):
+        return "car_trim"
+    if slot_index == 0 and PANEL_RE.search(object_name):
+        return "car_paint"
+    return "car_trim"
+
+
+def new_runtime_material(name: str) -> bpy.types.Material:
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.use_backface_culling = False
+    bsdf = material.node_tree.nodes.get("Principled BSDF")
+    colors = {
+        "car_paint": (0.34, 0.025, 0.018, 1.0),
+        "car_trim": (0.035, 0.04, 0.045, 1.0),
+        "car_glass": (0.035, 0.075, 0.11, 1.0),
+        "Headlights": (0.72, 0.78, 0.72, 1.0),
+        "BrakeLights": (0.45, 0.012, 0.008, 1.0),
+        "Tyres": (0.018, 0.02, 0.022, 1.0),
+    }
+    bsdf.inputs["Base Color"].default_value = colors[name]
+    bsdf.inputs["Roughness"].default_value = 0.28 if name == "car_paint" else 0.55
+    bsdf.inputs["Metallic"].default_value = 0.35 if name == "car_paint" else 0.0
+    return material
+
+
+def mesh_object(
+    name: str,
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, ...]],
+    material: bpy.types.Material,
+    parent: bpy.types.Object,
+) -> bpy.types.Object:
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.materials.append(material)
+    for polygon in mesh.polygons:
+        polygon.use_smooth = True
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.parent = parent
+    return obj
+
+
+def is_mirrored(obj: bpy.types.Object) -> bool:
+    """A GTA frame mirrors the left-hand parts with a negative-scale matrix.
+
+    Baking such a matrix into vertex positions keeps the source face order, which
+    leaves the exported triangles wound backwards: the part renders inside out.
+    Reversing each face of a mirrored object restores an outward-facing surface.
+    """
+    return obj.matrix_world.determinant() < 0
+
+
+def collect_body(
+    objects: list[bpy.types.Object],
+    axle_mid_y: float,
+) -> dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]]:
+    buckets = {role: ([], []) for role in ROLES}
+    for obj in objects:
+        mesh = obj.data
+        mirrored = is_mirrored(obj)
+        world_vertices = [obj.matrix_world @ vertex.co for vertex in mesh.vertices]
+        per_role_maps: dict[str, dict[int, int]] = {role: {} for role in ROLES}
+        for polygon in mesh.polygons:
+            face_y = sum(world_vertices[index].y for index in polygon.vertices) / len(polygon.vertices)
+            material = obj.material_slots[polygon.material_index].material if polygon.material_index < len(obj.material_slots) else None
+            role = material_role(obj, material, polygon.material_index, face_y, axle_mid_y)
+            vertices, faces = buckets[role]
+            index_map = per_role_maps[role]
+            face = []
+            source_indices = list(polygon.vertices)
+            if mirrored:
+                source_indices.reverse()
+            for source_index in source_indices:
+                target_index = index_map.get(source_index)
+                if target_index is None:
+                    point = world_vertices[source_index]
+                    target_index = len(vertices)
+                    vertices.append((point.x, point.y, point.z))
+                    index_map[source_index] = target_index
+                face.append(target_index)
+            faces.append(tuple(face))
+    return buckets
+
+
+def decimate(obj: bpy.types.Object, target_faces: int) -> None:
+    face_count = len(obj.data.polygons)
+    if face_count <= target_faces:
+        return
+    modifier = obj.modifiers.new("offline-decimate", "DECIMATE")
+    modifier.decimate_type = "COLLAPSE"
+    modifier.ratio = max(0.01, target_faces / face_count)
+    modifier.use_collapse_triangulate = True
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    obj.select_set(False)
+
+
+def signed_volume(vertices: list[Vector], faces: list[tuple[int, ...]]) -> float:
+    """Six times the signed volume of a closed mesh; negative means inverted faces."""
+    total = 0.0
+    for face in faces:
+        first = vertices[face[0]]
+        for i in range(1, len(face) - 1):
+            total += first.dot(vertices[face[i]].cross(vertices[face[i + 1]]))
+    return total
+
+
+def wheel_geometry(objects: list[bpy.types.Object]) -> tuple[list[Vector], list[tuple[int, ...]], Vector, float]:
+    vertices: list[Vector] = []
+    faces: list[tuple[int, ...]] = []
+    points: list[Vector] = []
+    for obj in objects:
+        transformed = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+        offset = len(vertices)
+        vertices.extend(transformed)
+        points.extend(transformed)
+        for polygon in obj.data.polygons:
+            faces.append(tuple(offset + index for index in polygon.vertices))
+    if not points:
+        raise RuntimeError("Empty wheel geometry")
+    # A wheel is a closed solid, so its own signed volume is the reliable oracle for
+    # which way its faces are wound — more reliable than the frame matrix, because
+    # this pack ships wheels that are already inverted before any mirror is applied
+    # (GTA renders them two-sided and never notices). Negative volume, flip.
+    if signed_volume(vertices, faces) < 0:
+        faces = [tuple(reversed(face)) for face in faces]
+    low = Vector(tuple(min(point[i] for point in points) for i in range(3)))
+    high = Vector(tuple(max(point[i] for point in points) for i in range(3)))
+    centre = (low + high) * 0.5
+    extents = high - low
+    radius = max(extents.x, extents.y, extents.z) * 0.5
+    return [point - centre for point in vertices], faces, centre, radius
+
+
+def create_wheels(
+    root: bpy.types.Object,
+    source_geometry: dict[str, tuple[list[Vector], list[tuple[int, ...]], Vector, float]],
+    dummy_positions: dict[str, Vector],
+    materials: dict[str, bpy.types.Material],
+) -> float:
+    available = [key for key in WHEEL_KEYS if key in source_geometry]
+    if not available:
+        raise RuntimeError("No wheel mesh parented to a DFF wheel dummy")
+    radii = []
+    for key in WHEEL_KEYS:
+        source_key = key if key in source_geometry else available[0]
+        vertices, faces, _source_centre, radius = source_geometry[source_key]
+        vertices = [vertex.copy() for vertex in vertices]
+        # `wheel_fl`/`wheel_rl` are the left assemblies; a wheel borrowed from the
+        # other side is turned about the vertical axis, never mirrored.
+        if key.endswith("l") != source_key.endswith("l"):
+            turn = Matrix.Rotation(math.pi, 4, "Z")
+            vertices = [turn @ vertex for vertex in vertices]
+        wheel = mesh_object(
+            key,
+            [(point.x, point.y, point.z) for point in vertices],
+            faces,
+            materials["Tyres"],
+            root,
+        )
+        wheel.location = dummy_positions[key]
+        decimate(wheel, 2_200)
+        radii.append(radius)
+
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=16,
+            radius=max(0.07, radius * 0.30),
+            depth=max(0.08, radius * 0.22),
+            location=dummy_positions[key],
+            rotation=(0.0, math.pi / 2, 0.0),
+        )
+        hub = bpy.context.object
+        hub.name = key.replace("wheel", "hub")
+        hub.data.name = f"{hub.name}_mount"
+        hub.data.materials.append(materials["car_trim"])
+        hub.parent = root
+        radii.append(radius)
+    return sum(radii) / len(radii)
+
+
+def add_underbody(
+    root: bpy.types.Object,
+    body_points: list[Vector],
+    dummy_positions: dict[str, Vector],
+    wheel_radius: float,
+    material: bpy.types.Material,
+) -> None:
+    """Close an open shell with a plate tucked inside the body's own sills."""
+    min_x = min(point.x for point in body_points)
+    max_x = max(point.x for point in body_points)
+    min_y = min(point.y for point in body_points)
+    max_y = max(point.y for point in body_points)
+    min_z = min(point.z for point in body_points)
+    axle_z = sum(position.z for position in dummy_positions.values()) / 4
+    centre_x = (min_x + max_x) * 0.5
+    centre_y = (min_y + max_y) * 0.5
+    # Inboard of the sills and short of the bumpers: a plate that reaches the body's
+    # own silhouette is visible from the side as a slab hanging between the wheels.
+    half_x = (max_x - min_x) * 0.40
+    half_y = (max_y - min_y) * 0.44
+    thickness = max(0.03, wheel_radius * 0.08)
+    # Floor height: below the door cards, above whatever hangs lowest at the ends.
+    top = min(axle_z + wheel_radius * 0.30, min_z + wheel_radius * 0.55)
+    low = (centre_x - half_x, centre_y - half_y, top - thickness)
+    high = (centre_x + half_x, centre_y + half_y, top)
+    vertices = [
+        (x, y, z)
+        for z in (low[2], high[2])
+        for y in (low[1], high[1])
+        for x in (low[0], high[0])
+    ]
+    faces = [
+        (0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1),
+        (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3),
+    ]
+    mesh_object("underbody", vertices, faces, material, root)
+
+
+def orient_to_game(root: bpy.types.Object) -> None:
+    """Turns the pack's forward axis onto the one the game drives along.
+
+    A GTA body points its nose down +Y, and the glTF exporter's Y-up conversion
+    sends Blender +Y to glTF -Z — so an untouched export arrives back to front:
+    it reverses under throttle and steers from the boot. Half a turn about the
+    vertical axis is baked into the geometry rather than declared as catalogue
+    `yaw`, because `render/carmodel.ts` detaches the wheel nodes and mixes their
+    world centres with their local offsets; a rotation left on a parent node is
+    dropped by that detach and the wheels would be drawn a wheelbase away.
+
+    A rotation is proper, so winding, normals and node scales are untouched, and
+    the left-hand wheels stay on the game's left.
+    """
+    turn = Matrix.Rotation(math.pi, 4, "Z")
+    for child in root.children:
+        child.data.transform(turn)
+        child.location = turn @ child.location
+
+
+def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bool) -> None:
+    print(f"\n=== {model_id}: {source} ===")
+    clear_scene()
+    import_dff(source)
+
+    meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    dummy_positions: dict[str, Vector] = {}
+    for obj in bpy.context.scene.objects:
+        key = wheel_key(obj.name)
+        if key is not None:
+            dummy_positions[key] = obj.matrix_world.translation.copy()
+    missing_dummies = [key for key in WHEEL_KEYS if key not in dummy_positions]
+    if missing_dummies:
+        raise RuntimeError(f"Missing wheel dummies in {source}: {missing_dummies}")
+
+    wheel_sources: dict[str, list[bpy.types.Object]] = {key: [] for key in WHEEL_KEYS}
+    body_objects: list[bpy.types.Object] = []
+    for obj in meshes:
+        wheel_parent = wheel_ancestor(obj)
+        if wheel_parent is not None:
+            wheel_sources[wheel_parent[0]].append(obj)
+        elif WHEEL_NAME_RE.search(plain_name(obj.name)):
+            continue
+        elif not excluded(obj):
+            body_objects.append(obj)
+    if not body_objects:
+        raise RuntimeError(f"No exterior meshes retained for {source}")
+
+    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres")}
+    axle_mid_y = sum(position.y for position in dummy_positions.values()) / 4
+    buckets = collect_body(body_objects, axle_mid_y)
+    wheel_geometry_by_key = {
+        key: wheel_geometry(objects)
+        for key, objects in wheel_sources.items()
+        if objects
+    }
+    body_points = [
+        obj.matrix_world @ Vector(corner)
+        for obj in body_objects
+        for corner in obj.bound_box
+    ]
+    source_body_meshes = len(body_objects)
+    source_body_faces = sum(len(obj.data.polygons) for obj in body_objects)
+
+    source_objects = list(bpy.context.scene.objects)
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+    for obj in source_objects:
+        if obj.name in bpy.data.objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    root = bpy.data.objects.new(model_id, None)
+    bpy.context.scene.collection.objects.link(root)
+
+    total_faces = sum(len(faces) for _vertices, faces in buckets.values())
+    for role in ROLES:
+        vertices, faces = buckets[role]
+        if not faces:
+            raise RuntimeError(f"{model_id} has no geometry for required role {role}")
+        obj = mesh_object(
+            {
+                "car_paint": "paint",
+                "car_trim": "trim",
+                "car_glass": "glass",
+                "Headlights": "headlights",
+                "BrakeLights": "taillights",
+            }[role],
+            vertices,
+            faces,
+            materials[role],
+            root,
+        )
+        share = max(64, round(body_target * len(faces) / max(1, total_faces)))
+        decimate(obj, share)
+
+    wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials)
+    if needs_underbody:
+        add_underbody(root, body_points, dummy_positions, wheel_radius, materials["car_trim"])
+    orient_to_game(root)
+
+    DIST.mkdir(parents=True, exist_ok=True)
+    blend_path = DIST / f"{model_id}.blend"
+    glb_path = DIST / f"{model_id}.glb"
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend_path), compress=True)
+
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.export_scene.gltf(
+        filepath=str(glb_path),
+        export_format="GLB",
+        use_selection=True,
+        export_yup=True,
+        export_apply=True,
+        export_texcoords=False,
+        export_normals=True,
+        export_tangents=False,
+        export_materials="EXPORT",
+        export_cameras=False,
+        export_lights=False,
+        export_animations=False,
+    )
+    print(
+        f"Exported {glb_path}: body source meshes={source_body_meshes}, "
+        f"source faces={source_body_faces}, wheel radius={wheel_radius:.3f}"
+    )
+
+
+def main() -> None:
+    install_safe_dragonff_loader()
+    requested = set(sys.argv[sys.argv.index("--") + 1:]) if "--" in sys.argv else set()
+    selected = [spec for spec in MODELS if not requested or spec[0] in requested]
+    missing = requested.difference(spec[0] for spec in selected)
+    if missing:
+        raise RuntimeError(f"Unknown model ids: {sorted(missing)}")
+    for spec in selected:
+        normalize(*spec)
+
+
+main()
