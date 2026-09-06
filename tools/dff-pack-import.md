@@ -11,14 +11,14 @@ Rules for cars from the current GTA SA DFF pack. Normalize offline; runtime code
 
 ## Materials
 
-Collapse source materials into these six runtime roles and no more:
+Collapse source materials into these runtime roles and no more:
 
 - `car_paint` — painted body panels;
 - `car_trim` — grille, bumpers, mouldings, door cards and underbody;
 - `car_glass` — windows only;
-- `Headlights` — front lamp lenses;
-- `BrakeLights` — rear lamp lenses;
-- `Tyres` — tyre carcass; `wheel_rim` — the rim inside it, split off by `tools/rim-split.mjs` after packing (no source pack separates them, and a wheel left as one dark material reads as a black circle beside the Soviet cars). Detached hubs may keep `car_trim`.
+- `Headlights` / `BrakeLights` — lamp LENSES only. Pick them by the source's lamp texture (`fara`, `fari`, `vehiclelights*`, `povorotnik`) and require the face to sit in the outer tenth of the car's length: an object-name rule swallows the whole lamp housing, and a lamp texture halfway down the flank is a side repeater, not a headlight. Nothing translucent may end up in front of a lens — a lamp covered by a window mesh still lights, invisibly.
+- `Tyres` — tyre carcass. Detached hubs may keep `car_trim`.
+- `wheel_rim` — the rim inside the tyre, split off by `tools/rim-split.mjs` after packing (no source pack separates them, and a wheel left as one dark material reads as a black circle beside the Soviet cars), and on a pickup its load bed as well: a working truck's bed is not painted in the coachwork colour. The name keeps both out of the `solid-paint` repaint.
 
 Do not ship the TXD or texture images for this pack. Remove unused UV attributes. Export lamp meshes as explicit nodes named `headlights` and `taillights`; select those node names in `CarModelDef.lights`. Select `car_glass` through `CarModelDef.glassMaterial`.
 
@@ -40,7 +40,7 @@ Do not ship the TXD or texture images for this pack. Remove unused UV attributes
 
 ## Export contract
 
-- One body mesh node per material role, plus four wheel nodes, four moving hub nodes, and an underbody node where the shell needed one.
+- One body mesh node per material role, plus four wheel nodes, four moving hub nodes, an underbody node where the shell needed one, a `bed` node on a pickup, and a `bulkhead` node on a body with an engine bay behind its grille (a cab-over has none: the plate would land inside the cabin and stick out through the windscreen).
 - Nose down +Z, the direction the game drives. A GTA body faces +Y and the glTF Y-up conversion turns that into -Z, so the normalizer bakes half a turn about the vertical axis into the geometry. Do not express this as catalogue `yaw`: the loader detaches wheel nodes and mixes their world centres with their local offsets, and a rotation left on a parent node is dropped by that detach.
 - No engine/interior/damage/collision/shadow nodes, no textures or images, no unused UVs.
 - Positive scales only. Bake source hierarchy transforms before export.
