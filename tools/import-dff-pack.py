@@ -299,11 +299,53 @@ def is_mirrored(obj: bpy.types.Object) -> bool:
     return obj.matrix_world.determinant() < 0
 
 
+def lamp_group_areas(
+    objects: list[bpy.types.Object],
+    lamp_zone: tuple[float, float],
+) -> dict[tuple[str, int, str], float]:
+    """Surface area of every lamp-textured material group, per car end.
+
+    A badge is textured like a lamp in this pack — the works emblem between the
+    Oka's headlights and the `ОКА` lettering beside its left tail lamp both carry
+    the lamp image — and binding them as lenses makes a car's badges glow. Area is
+    what separates them: an emblem is a fraction of the lens beside it.
+    """
+    areas: dict[tuple[str, int, str], float] = {}
+    for obj in objects:
+        for polygon in obj.data.polygons:
+            material = (
+                obj.material_slots[polygon.material_index].material
+                if polygon.material_index < len(obj.material_slots)
+                else None
+            )
+            if material is None or not LAMP_RE.search(plain_name(material.name)):
+                continue
+            face_y = sum(
+                (obj.matrix_world @ obj.data.vertices[index].co).y for index in polygon.vertices
+            ) / len(polygon.vertices)
+            if face_y >= lamp_zone[1]:
+                end = "front"
+            elif face_y <= lamp_zone[0]:
+                end = "rear"
+            else:
+                continue
+            key = (obj.name, polygon.material_index, end)
+            areas[key] = areas.get(key, 0.0) + polygon.area
+    return areas
+
+
 def collect_body(
     objects: list[bpy.types.Object],
     lamp_zone: tuple[float, float],
     bed_limit: float | None,
 ) -> dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]]:
+    areas = lamp_group_areas(objects, lamp_zone)
+    # A quarter of the biggest lens at that end of the car: enough to keep a second
+    # lamp of a pair, and far above any emblem.
+    floors = {
+        end: 0.25 * max((area for (_, _, at), area in areas.items() if at == end), default=0.0)
+        for end in ("front", "rear")
+    }
     buckets = {role: ([], []) for role in (*ROLES, BED_ROLE)}
     for obj in objects:
         mesh = obj.data
@@ -314,6 +356,10 @@ def collect_body(
             face_y = sum(world_vertices[index].y for index in polygon.vertices) / len(polygon.vertices)
             material = obj.material_slots[polygon.material_index].material if polygon.material_index < len(obj.material_slots) else None
             role = material_role(obj, material, polygon.material_index, face_y, lamp_zone)
+            if role in ("Headlights", "BrakeLights"):
+                end = "front" if role == "Headlights" else "rear"
+                if areas.get((obj.name, polygon.material_index, end), 0.0) < floors[end]:
+                    role = "car_trim"
             # A pickup's load bed is painted like its wheels, not like its cabin, so
             # the coachwork behind the cabin's rear wall changes material.
             if role == "car_paint" and bed_limit is not None and face_y <= bed_limit:
