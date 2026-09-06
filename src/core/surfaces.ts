@@ -174,7 +174,10 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
      * only a tenth of asphalt's cornering force, so leaving the road requires slow,
      * momentum-conscious steering rather than behaving like a wide paved shoulder.
      */
-    frictionSlip: 1.15,
+    // Loose sand still needs a usable longitudinal reserve: the tyre model applies
+    // through LONGITUDINAL_GRIP_FRACTION, so the former low reserve made a flat
+    // standstill unnecessarily close to the force limit.
+    frictionSlip: 1.8,
     sideFriction: 0.1,
     rollingResistance: 0.095,
     deformationDrag: 0.55,

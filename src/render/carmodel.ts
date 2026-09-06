@@ -258,6 +258,7 @@ function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
   if (def.paintStyle === 'stylized-palette') {
     return materialsOf(mesh).some((material) => isPaintSlot(material, def));
   }
+  if (def.paintStyle === 'solid-paint') return true;
   return false;
 }
 
@@ -270,6 +271,10 @@ function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
  */
 function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
   if (def.paintStyle === 'stylized-palette') return material.name === STYLIZED_PAINT_MATERIAL;
+  if (def.paintStyle === 'solid-paint') {
+    if (def.glassMaterial && material.name === def.glassMaterial) return false;
+    return !/(glass|lamp|light|chrome|trim|tyre|tire|wheel)/i.test(material.name);
+  }
   return true;
 }
 
@@ -389,6 +394,10 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
       if (palette) {
         if (material.map === palette) continue;
         material.map = palette;
+        material.needsUpdate = true;
+      } else if (def.paintStyle === 'solid-paint') {
+        material.map = null;
+        material.color.copy(color);
         material.needsUpdate = true;
       } else if (def.paintUvCell) {
         setCarBodyPalettePaint(material, color, def.paintUvCell);
