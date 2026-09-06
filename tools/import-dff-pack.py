@@ -16,25 +16,37 @@ import sys
 from pathlib import Path
 
 import bpy
+import bmesh
 from mathutils import Matrix, Vector
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist" / "models" / "saas"
 
-# id, source DFF, body face budget, and whether the source is an open shell that
-# needs a synthetic floor. Bodies whose own geometry already closes the underside
-# get no plate: adding one there only buries a slab inside the authored floor.
+# id, source DFF, body face budget, whether the source is an open shell that needs
+# a synthetic floor, and whether the car takes the Soviet pack's road wheel.
+#
+# Bodies whose own geometry already closes the underside get no floor plate: adding
+# one there only buries a slab inside the authored floor. The saloons and the small
+# van run the Soviet 2109 wheel so the whole Lada-shaped half of the catalogue
+# stands on one wheel; the UAZ pair and the Sobol keep their own, because a light
+# alloy road wheel under a working 4x4 reads as a mistake.
 MODELS = (
-    ("vaz2115", ROOT / "SARUS" / "ВАЗ 2115" / "tahoma.dff", 22_000, True),
-    ("gaz2217", ROOT / "SARUS" / "ГАЗ 2217 Соболь" / "pony.dff", 22_000, True),
-    ("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 18_000, False),
-    ("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 22_000, False),
-    ("uaz469", ROOT / "SARUS" / "УАЗ 469" / "rnchlure.dff", 22_000, True),
-    ("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 20_000, False),
-    ("vaz2114", ROOT / "SARUS" / "ВАЗ 2114" / "uranus.dff", 22_000, True),
-    ("vaz2110", ROOT / "SARUS" / "ВАЗ 2110" / "admiral.dff", 22_000, True),
+    ("vaz2115", ROOT / "SARUS" / "ВАЗ 2115" / "tahoma.dff", 45_000, True, True),
+    ("gaz2217", ROOT / "SARUS" / "ГАЗ 2217 Соболь" / "pony.dff", 30_000, True, False),
+    ("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 30_000, False, True),
+    ("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 30_000, False, False),
+    ("uaz469", ROOT / "SARUS" / "УАЗ 469" / "rnchlure.dff", 30_000, True, False),
+    ("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 30_000, False, True),
+    ("vaz2114", ROOT / "SARUS" / "ВАЗ 2114" / "uranus.dff", 45_000, True, True),
+    ("vaz2110", ROOT / "SARUS" / "ВАЗ 2110" / "admiral.dff", 45_000, True, True),
 )
+
+# The Soviet pack's own road wheel, reused rather than re-modelled. `09.wheel_fr`
+# sits on the FBX's -X side, which is the side a DFF calls left, so it is the copy
+# that needs no turning here.
+SOVIET_WHEEL_FBX = ROOT / "public" / "models" / "soviet" / "vz09.fbx"
+SOVIET_WHEEL_OBJECT = "09.wheel_fr"
 
 ROLES = ("car_paint", "car_trim", "car_glass", "Headlights", "BrakeLights")
 WHEEL_KEYS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
@@ -50,7 +62,10 @@ INTERIOR_RE = re.compile(
 )
 EXTRA_RE = re.compile(r"^extra\d*$", re.I)
 WHEEL_NAME_RE = re.compile(r"wheel|koles|колес|shina|rezina|protekt", re.I)
-LAMP_RE = re.compile(r"vehiclelight|light|fara|far[sy]?|fonar|optik|povorot|turn|diod|stop", re.I)
+# Lamp LENSES, by the texture the source names them after. Deliberately material
+# names only: `fars_front` is the whole lamp HOUSING, and matching the object name
+# made the front end of a car twenty thousand triangles of glowing lens.
+LAMP_RE = re.compile(r"vehiclelight|light|^fara|fonar|optik|povorot|turn|diod|stop", re.I)
 GLASS_RE = re.compile(r"glass|stekl|okno|windscreen|windshield", re.I)
 PAINT_RE = re.compile(r"primary|body(?:reflection)?|reflection|color_|^white(?:\.|$)|^chassis(?:\.0+)?$", re.I)
 TRIM_RE = re.compile(
@@ -59,8 +74,7 @@ TRIM_RE = re.compile(
     re.I,
 )
 PANEL_RE = re.compile(r"chassis|bonnet|boot|door|dool|bump|bamp|wing|kuzov|cha$|chas$|bp_lf|1202", re.I)
-FRONT_LAMP_RE = re.compile(r"fars?_front|fara_pered|diod_pered|headlight", re.I)
-REAR_LAMP_RE = re.compile(r"fara_zad|tail|brake", re.I)
+
 
 
 def plain_name(name: str) -> str:
@@ -175,19 +189,31 @@ def material_role(
     material: bpy.types.Material | None,
     slot_index: int,
     face_y: float,
-    axle_mid_y: float,
+    lamp_zone: tuple[float, float],
 ) -> str:
     object_name = plain_name(obj.name)
     material_name = plain_name(material.name) if material is not None else ""
 
-    if FRONT_LAMP_RE.search(object_name):
-        return "Headlights"
-    if REAR_LAMP_RE.search(object_name):
-        return "BrakeLights"
-    if LAMP_RE.search(material_name) or LAMP_RE.search(object_name):
-        return "Headlights" if face_y >= axle_mid_y else "BrakeLights"
+    # Lens before glass: a lamp lens is translucent too, and a headlight that ends
+    # up in the window mesh is both invisible and unlightable.
+    #
+    # The lens has to be AT AN END of the car as well as wear a lamp texture. This
+    # pack textures a whole lamp assembly — reflector bowls, bulb holders, side
+    # repeaters halfway down the flank — with the lamp image, and binding all of it
+    # as the headlight both lit up the wing and dragged the beam mount sideways off
+    # the lamp it is supposed to come out of.
+    rear_limit, front_limit = lamp_zone
+    if LAMP_RE.search(material_name):
+        if face_y >= front_limit:
+            return "Headlights"
+        if face_y <= rear_limit:
+            return "BrakeLights"
+        return "car_trim"
 
-    if GLASS_RE.search(material_name) or material_alpha(material) < 0.98:
+    # Windows are the pack's only translucent body material, so the alpha channel
+    # is what finds their exact outline inside a door — the door's own name says
+    # nothing about where its glass stops and its frame starts.
+    if GLASS_RE.search(material_name) or material_alpha(material) < 0.95:
         return "car_glass"
     if GLASS_RE.search(object_name) and len(obj.material_slots) <= 1:
         return "car_glass"
@@ -251,7 +277,7 @@ def is_mirrored(obj: bpy.types.Object) -> bool:
 
 def collect_body(
     objects: list[bpy.types.Object],
-    axle_mid_y: float,
+    lamp_zone: tuple[float, float],
 ) -> dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]]:
     buckets = {role: ([], []) for role in ROLES}
     for obj in objects:
@@ -262,7 +288,7 @@ def collect_body(
         for polygon in mesh.polygons:
             face_y = sum(world_vertices[index].y for index in polygon.vertices) / len(polygon.vertices)
             material = obj.material_slots[polygon.material_index].material if polygon.material_index < len(obj.material_slots) else None
-            role = material_role(obj, material, polygon.material_index, face_y, axle_mid_y)
+            role = material_role(obj, material, polygon.material_index, face_y, lamp_zone)
             vertices, faces = buckets[role]
             index_map = per_role_maps[role]
             face = []
@@ -279,6 +305,22 @@ def collect_body(
                 face.append(target_index)
             faces.append(tuple(face))
     return buckets
+
+
+def weld(obj: bpy.types.Object, distance: float = 0.0008) -> None:
+    """Merges the duplicate vertices left where source objects met.
+
+    A role mesh is welded from a dozen separate DFF objects, each of which brought
+    its own copies of the vertices along every shared seam. Collapse decimation
+    cannot move a vertex across a seam it does not know exists, so it eats the
+    detail around it instead — which is how a front bumper came out looking bitten.
+    """
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    bmesh.ops.remove_doubles(mesh, verts=mesh.verts, dist=distance)
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    obj.data.update()
 
 
 def decimate(obj: bpy.types.Object, target_faces: int) -> None:
@@ -389,11 +431,33 @@ def wheel_geometry(objects: list[bpy.types.Object]) -> tuple[list[Vector], list[
     return [point - centre for point in vertices], faces, centre, radius
 
 
+def load_soviet_wheel() -> tuple[list[Vector], list[tuple[int, ...]], float]:
+    """The Soviet pack's road wheel, centred on its own bounds and unit-scaled."""
+    before = set(bpy.context.scene.objects)
+    bpy.ops.import_scene.fbx(filepath=str(SOVIET_WHEEL_FBX))
+    imported = [obj for obj in bpy.context.scene.objects if obj not in before]
+    source = next((obj for obj in imported if obj.name.startswith(SOVIET_WHEEL_OBJECT)), None)
+    if source is None:
+        raise RuntimeError(f"{SOVIET_WHEEL_FBX} has no object {SOVIET_WHEEL_OBJECT}")
+    points = [source.matrix_world @ vertex.co for vertex in source.data.vertices]
+    faces = [tuple(polygon.vertices) for polygon in source.data.polygons]
+    low = Vector(tuple(min(point[i] for point in points) for i in range(3)))
+    high = Vector(tuple(max(point[i] for point in points) for i in range(3)))
+    centre = (low + high) * 0.5
+    extents = high - low
+    radius = max(extents.x, extents.y, extents.z) * 0.5
+    vertices = [(point - centre) / radius for point in points]
+    for obj in imported:
+        bpy.data.objects.remove(obj, do_unlink=True)
+    return vertices, faces, radius
+
+
 def create_wheels(
     root: bpy.types.Object,
     source_geometry: dict[str, tuple[list[Vector], list[tuple[int, ...]], Vector, float]],
     dummy_positions: dict[str, Vector],
     materials: dict[str, bpy.types.Material],
+    soviet_wheel: tuple[list[Vector], list[tuple[int, ...]], float] | None,
 ) -> float:
     available = [key for key in WHEEL_KEYS if key in source_geometry]
     if not available:
@@ -401,11 +465,21 @@ def create_wheels(
     radii = []
     for key in WHEEL_KEYS:
         source_key = key if key in source_geometry else available[0]
-        vertices, faces, _source_centre, radius = source_geometry[source_key]
-        vertices = [vertex.copy() for vertex in vertices]
-        # `wheel_fl`/`wheel_rl` are the left assemblies; a wheel borrowed from the
-        # other side is turned about the vertical axis, never mirrored.
-        if key.endswith("l") != source_key.endswith("l"):
+        radius = source_geometry[source_key][3]
+        if soviet_wheel is not None:
+            # The Soviet wheel arrives unit-scaled, so the DFF's own wheel radius is
+            # still what sizes it: the car keeps the stance its dummies describe.
+            unit_vertices, faces, _unit_radius = soviet_wheel
+            vertices = [vertex * radius for vertex in unit_vertices]
+            # The imported copy sits on the FBX's -X side, which is a DFF's left.
+            source_side_left = True
+        else:
+            source_vertices, faces, _source_centre, _radius = source_geometry[source_key]
+            vertices = [vertex.copy() for vertex in source_vertices]
+            source_side_left = source_key.endswith("l")
+        # A wheel taken from the other side is TURNED about the vertical axis, never
+        # mirrored: a mirror reverses winding and renders the assembly inside out.
+        if key.endswith("l") != source_side_left:
             turn = Matrix.Rotation(math.pi, 4, "Z")
             vertices = [turn @ vertex for vertex in vertices]
         # Rim and tyre are split later, off the packed GLB (tools/rim-split.mjs):
@@ -507,7 +581,13 @@ def orient_to_game(root: bpy.types.Object) -> None:
         child.location = turn @ child.location
 
 
-def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bool) -> None:
+def normalize(
+    model_id: str,
+    source: Path,
+    body_target: int,
+    needs_underbody: bool,
+    soviet_wheels: bool,
+) -> None:
     print(f"\n=== {model_id}: {source} ===")
     clear_scene()
     import_dff(source)
@@ -536,18 +616,24 @@ def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bo
         raise RuntimeError(f"No exterior meshes retained for {source}")
 
     materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres")}
-    axle_mid_y = sum(position.y for position in dummy_positions.values()) / 4
-    buckets = collect_body(body_objects, axle_mid_y)
-    wheel_geometry_by_key = {
-        key: wheel_geometry(objects)
-        for key, objects in wheel_sources.items()
-        if objects
-    }
     body_vertices = [
         obj.matrix_world @ vertex.co
         for obj in body_objects
         for vertex in obj.data.vertices
     ]
+    # The nose and tail bands a lamp lens may live in: a tenth of the car's length
+    # at each end, which reaches the whole lamp glass and nothing behind the wheel
+    # arch.
+    body_min_y = min(point.y for point in body_vertices)
+    body_max_y = max(point.y for point in body_vertices)
+    lamp_band = (body_max_y - body_min_y) * 0.10
+    lamp_zone = (body_min_y + lamp_band, body_max_y - lamp_band)
+    buckets = collect_body(body_objects, lamp_zone)
+    wheel_geometry_by_key = {
+        key: wheel_geometry(objects)
+        for key, objects in wheel_sources.items()
+        if objects
+    }
     source_body_meshes = len(body_objects)
     source_body_faces = sum(len(obj.data.polygons) for obj in body_objects)
 
@@ -579,11 +665,13 @@ def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bo
             materials[role],
             root,
         )
+        weld(obj)
         share = max(64, round(body_target * len(faces) / max(1, total_faces)))
         decimate(obj, share)
         harden_edges(obj)
 
-    wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials)
+    wheel = load_soviet_wheel() if soviet_wheels else None
+    wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials, wheel)
     add_nose_bulkhead(root, body_vertices, materials["car_trim"])
     if needs_underbody:
         add_underbody(root, body_vertices, dummy_positions, wheel_radius, materials["car_trim"])
