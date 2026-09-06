@@ -20,7 +20,7 @@ import { setCarBodyCondition } from '../../src/render/materials';
 import type { BodyDamageImpact, BodyDamageType } from '../../src/game/state';
 
 const params = new URLSearchParams(location.search);
-const requested = (params.get('model') ?? 'st_big_saloon,sv_vaz2106').split(',');
+const requested = (params.get('model') ?? 'sa_vaz2110,sv_vaz2106').split(',');
 const levels = (params.get('damage') ?? '0,0.12,0.3,1').split(',').map(Number);
 const distance = Number(params.get('z') ?? 15);
 

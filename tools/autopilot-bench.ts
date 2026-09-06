@@ -44,7 +44,7 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 // off disk rather than building its car in code.
 installAssetShim();
 
-const MODEL_ID = 'st_mid_engine_v8';
+const MODEL_ID = 'sv_vaz2105r';
 const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;

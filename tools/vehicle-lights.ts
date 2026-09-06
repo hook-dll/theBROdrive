@@ -38,7 +38,7 @@ class BunProgressEvent extends Event implements ProgressEvent {
 
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 
-const MODEL_ID = 'st_big_saloon';
+const MODEL_ID = 'sa_vaz2110';
 const VEHICLE_COUNT = 4;
 let failures = 0;
 

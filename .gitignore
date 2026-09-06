@@ -43,6 +43,7 @@ pnpm-debug.log*
 /PSX_Style_Cars*.zip
 /DeJunes/
 /new_glb_carpacks_to_try/
+/SARUS/
 
 # Reproducible astronomy catalogue inputs; the compact generated binary is vendored.
 /tycho2-vt88-source.tsv

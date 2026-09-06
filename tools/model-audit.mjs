@@ -9,7 +9,7 @@
  * render/carmodel.ts were derived from: it shows which material of a body is the
  * paint slot (the one with a map) and which are part colours (glass, grill, lights,
  * tyres), and it gives the raw length/width a scale has to be fitted to. By default it
- * audits the Stylized Vehicles Pack.
+ * audits the normalized GTA SA conversions.
  *
  * Usage: node tools/model-audit.mjs [public/models/<pack>]
  *
@@ -35,7 +35,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-const DIR = (process.argv[2] ?? 'public/models/stylized') + '/';
+const DIR = (process.argv[2] ?? 'public/models/saas') + '/';
 
 function report(name, scene) {
   scene.updateMatrixWorld(true);

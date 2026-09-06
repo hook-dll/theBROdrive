@@ -35,7 +35,6 @@ import { variant, OIL_LOSS_LPH } from '../parts/registry';
 import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
 import {
   carModel,
-  STYLIZED_TAILLIGHT_COLOR,
   frontWeightFraction,
   modelEngine,
   modelGearbox,
@@ -77,7 +76,7 @@ const GRAVITY = 9.81;
 // The original Soviet cars are 1960s-1980s machinery: a worn
 // recirculating-ball box, bias-ply tyres, soft springs on weak dampers, a live rear
 // axle, drums at the back and no electronics. Those constants remain the `classic`
-// baseline below. Later Stylized cars select `road`, `sport` or `utility`, changing
+// baseline below. Later bodies select `road`, `sport` or `utility`, changing
 // only the mechanisms their represented chassis actually changes: steering rate and
 // play, driveline compliance, radial-tyre response, speed loss and axle balance.
 //
@@ -435,9 +434,9 @@ const COUNTERSTEER_RELEASE_FULL_DEG = 18;
 /**
  * Mechanical handling families. The Soviet catalogue stays on `classic`, preserving
  * its slow recirculating-ball steering, cross-ply tyre response and live-axle balance.
- * The Stylized pack spans later radial-tyred road cars, purpose-built sports cars
- * and working 4x4/van/truck chassis; forcing all of them through that Soviet baseline
- * is why visually modern cars felt delayed, vague and tail-light.
+ * The GTA SA conversions span later radial-tyred road cars and working 4x4/van
+ * chassis; forcing all of them through that Soviet baseline is why visually modern
+ * cars felt delayed, vague and tail-light.
  */
 interface HandlingTuning {
   readonly steerInputExponent: number;
@@ -4871,11 +4870,6 @@ export class Vehicle implements Rebasable {
       lights.taillights,
       this.taillightMaterials,
     );
-    if (this.model.paintStyle === 'stylized-palette') {
-      for (const material of this.taillightMaterials) {
-        material.color.setHex(STYLIZED_TAILLIGHT_COLOR);
-      }
-    }
     this.reverseLightLensMeshes = this.bindLampMaterials(
       lights.reverseLights,
       this.reverseLightMaterials,

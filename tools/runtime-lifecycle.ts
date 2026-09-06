@@ -44,7 +44,7 @@ const NEAR_CENTER = { x: 0, z: 0 };
 const HYSTERESIS_CENTER = { x: 1000, z: 0 };
 const FAR_CENTER = { x: 3000, z: 0 };
 const TOW_CAR_ID = 'lifecycle:tow';
-const TOW_MODEL_ID = 'st_v8_pickup';
+const TOW_MODEL_ID = 'sa_uaz330364';
 
 let failures = 0;
 

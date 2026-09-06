@@ -28,35 +28,11 @@ import { TRUNK_CELL_COUNT } from './trunk';
  *
  *  - SOVIET: Low Poly Soviet Car Pack. Fifteen FBX bodies in centimetres, each
  *    carrying its own wheels, colour taken from a shared 9x2 swatch atlas.
- *  - STYLIZED: thirty-one detailed LOD0 sources normalized offline into compact
- *    GLBs with one fixed chassis and named animated parts.
+ *  - SAAS: private GTA SA mod conversions, normalized offline into texture-free
+ *    GLBs with six runtime material roles and explicit wheel, hub and lamp nodes.
  */
 const SOVIET = '/models/soviet';
-const STYLIZED = '/models/stylized';
 const SAAS = '/models/saas';
-
-/**
- * The Stylized pack's palette, converted from the PSD it ships as (see
- * tools/psd-to-png.mjs — no browser decodes PSD). It is a 32x32 image of vertical
- * light-to-dark ramps: paint, glass, chrome, tyres, lamps and decals all live in
- * it, and a body's UVs pick shades out of it rather than carrying a texture.
- */
-const STYLIZED_PALETTE = `${STYLIZED}/PixelColors.png`;
-
-
-/**
- * The pack's palette material, i.e. everything on a body that is not glass or a
- * lamp lens. It is the slot the renderer repaints and weathers.
- */
-export const STYLIZED_PAINT_MATERIAL = 'PixelColors';
-
-/** The normalized pack's rear brake-lens material. */
-export const STYLIZED_TAILLIGHT_MATERIAL = 'BrakeLights';
-/** Diffuse red retained when the stylized tail lens is not emitting. */
-export const STYLIZED_TAILLIGHT_COLOR = 0x7a0000;
-
-/** The pack's headlight material. Also the name the split lens mesh takes. */
-const STYLIZED_HEADLIGHT_MATERIAL = 'Headlights';
 
 /* ---- suspension presets ----
  *
@@ -353,10 +329,10 @@ const SUSP_TRUCK: SuspensionTuning = {
  *   working vehicle, empty bed   56-58% front   (the payload it is sprung for is
  *                                                not in it — the empty-pickup case)
  *
- * `frontWeightShare` overrides those defaults for the Stylized shapes whose engine
- * is visibly behind the cabin. Drive bias cannot distinguish a front-engine RWD car
- * from a rear-engine one, and treating both as 53% front makes the latter rotate
- * around an axle it does not actually load.
+ * `frontWeightShare` overrides those defaults for bodies whose engine is not over
+ * the axle the drive bias implies. Drive bias cannot distinguish a front-engine
+ * RWD car from a rear-engine one, and treating both as 53% front makes the latter
+ * rotate around an axle it does not actually load.
  */
 export function frontWeightFraction(model: {
   readonly rearDriveBias: number;
@@ -411,9 +387,9 @@ export interface VehicleLightsDef {
 
 /**
  * The model's own node names for the four wheels the vehicle drives, when the pack
- * names them consistently. Naming them beats finding them by shape: the Stylized
- * pack's doors are near-circular discs TALLER than its wheels, so shape detection
- * mounts four doors as the running gear and the car drives on its own bodywork.
+ * names them consistently. Naming them beats finding them by shape: a normalized
+ * GTA SA body draws each wheel as a tyre plus a separate hub island, and shape
+ * detection would mount the tyres alone and leave the hubs standing in the body.
  *
  * A wheel may name several nodes for a body that draws one wheel as a hub plus a
  * tyre; they are detached together and spin as one.
@@ -423,28 +399,6 @@ export interface WheelNodeNames {
   readonly wheel_fr: readonly string[];
   readonly wheel_rl: readonly string[];
   readonly wheel_rr: readonly string[];
-}
-
-/**
- * One colour's shades inside a pack's palette texture, as a block of texels.
- *
- * The Stylized pack paints by UV: a body's panels point at a column of a 32x32
- * palette holding that colour light-to-dark, and its glass, chrome, tyres, lamps
- * and decals point at other columns. Replacing the block — keeping each shade's
- * luminance relative to `keyRow` — repaints the coachwork and nothing else, which
- * is what lets one geometry file wear the catalogue's twelve factory colours.
- *
- * Rows are counted top-down, as the image is stored. Ramps are two columns wide
- * wherever the pack duplicated them (a door may sample either column), so the span
- * is authored rather than assumed.
- */
-export interface PalettePaintRamp {
-  readonly column: number;
-  readonly columns: number;
-  readonly row: number;
-  readonly rows: number;
-  /** The shade that reads as the car's colour; the others scale from its luminance. */
-  readonly keyRow: number;
 }
 
 /** Mechanical era shared by cars with the same steering and tyre construction. */
@@ -464,22 +418,20 @@ export interface CarModelDef {
   readonly textureFile?: string;
   /**
    * How this pack encodes body colour. Soviet bodies select a solid swatch from a
-   * shared 9x2 atlas, replaced in the fragment shader; Stylized bodies sample a
-   * light-to-dark ramp of a 32x32 palette, replaced by rebuilding that palette.
+   * shared 9x2 atlas, replaced in the fragment shader; the GTA SA conversions ship
+   * flat runtime materials whose paint slots are recoloured outright.
    */
-  readonly paintStyle?: 'soviet-atlas' | 'stylized-palette' | 'solid-paint';
+  readonly paintStyle?: 'soviet-atlas' | 'solid-paint';
   /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
   readonly paintUvCell?: readonly [number, number];
-  /** The Stylized palette block holding this body's coachwork colour. */
-  readonly paintRamp?: PalettePaintRamp;
   /**
    * The window glass, which the two packs encode incompatibly.
    *
-   * A Stylized body draws its windows as separate meshes sharing one authored
-   * `Glass` material, so naming that material is enough. A Soviet body has no
-   * window objects at all: its glass is a REGION OF ONE MESH whose UVs point at a
-   * single atlas swatch, so the loader cuts those triangles out into their own mesh
-   * (`isolateGlass` in render/carmodel.ts).
+   * A normalized GTA SA body draws its windows as separate meshes sharing one
+   * authored `car_glass` material, so naming that material is enough. A Soviet body
+   * has no window objects at all: its glass is a REGION OF ONE MESH whose UVs point
+   * at a single atlas swatch, so the loader cuts those triangles out into their own
+   * mesh (`isolateGlass` in render/carmodel.ts).
    *
    * Set one or the other, never both.
    */
@@ -1033,19 +985,6 @@ function sovietLights(file: string): VehicleLightsDef {
 }
 
 /**
- * The normalized Stylized models expose one mesh per independently controlled lamp
- * channel. The source pack has no reversing lenses.
- */
-function stylizedLights(blinkers: boolean): VehicleLightsDef {
-  const lights: VehicleLightsDef = {
-    headlights: [STYLIZED_HEADLIGHT_MATERIAL],
-    taillights: [STYLIZED_TAILLIGHT_MATERIAL],
-  };
-  if (!blinkers) return lights;
-  return { ...lights, leftBlinkers: ['TurnLight_L'], rightBlinkers: ['TurnLight_R'] };
-}
-
-/**
  * Visual-only lift for the VAZ bodies, as a fraction of wheel radius.
  *
  * These fifteen models are authored sitting lower on their wheels than the real
@@ -1091,645 +1030,16 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
 }));
 
 /**
- * Stylized Vehicles Pack — thirty-one detailed LOD0 sources normalized offline by
- * tools/normalize-stylized.ts.
- *
- * The source pack ships four levels of detail per vehicle. The unnumbered detailed
- * model is Unity's first/highest LOD tier and supplies the retained chassis and
- * wheels. The normalizer welds fixed doors, trim and cabin geometry into one
- * chassis, combines every window, and emits named wheels, steering wheel and lamp
- * channels. glTF Transform then indexes, quantizes and Meshopt-compresses the GLB;
- * the runtime does no FBX repair work.
- *
- * Source coordinates already agree with the game — nose down +Z, +X to the left,
- * origin on the ground between the wheels — so no yaw is needed. Source scale is
- * roughly 1.43x life-size centimetres (the saloon is 6.57 m long on 0.88 m wheels),
- * hence 0.007 rather than 0.01. That lands it at 4.60 m on a 2.48 m wheelbase,
- * 1.52 m track and 0.62 m wheels.
- *
- * Every normalized output follows one scene contract: `wheel_fl/fr/rl/rr`,
- * `steering_wheel`, `chassis`, `glass`, and the applicable named lamp meshes. The
- * truck's unused middle bogie is removed during normalization.
+ * Texture-free GTA SA conversions. Scale is fitted from each DFF dummy axle
+ * spacing to the real wheelbase; the runtime never sees source pack naming.
  */
-interface StylizedSpec {
-  readonly id: string;
-  readonly label: string;
-  /** File stem; the pack's own model name, kept so the asset is traceable. */
-  readonly file: string;
-  readonly bodyClass?: BodyClass;
-  readonly mass: number;
-  readonly engineId: string;
-  readonly gearboxId: string;
-  readonly tankLitres: number;
-  readonly wheelGrip: number;
-  readonly steerLock: number;
-  readonly rearDriveBias: number;
-  readonly handlingProfile?: HandlingProfile;
-  readonly frontWeightShare?: number;
-  readonly suspension?: SuspensionTuning;
-  /** This body's coachwork ramp in the 32x32 palette. */
-  readonly paint: PalettePaintRamp;
-  /** Set for the three supercars the pack gave no indicator lenses. */
-  readonly noBlinkers?: boolean;
-  readonly visualRideLiftWheelFraction?: number;
-}
-
-/** Palette block: first column, columns spanned, first row, rows, and key shade. */
-function ramp(
-  column: number,
-  columns: number,
-  row: number,
-  rows: number,
-  keyRow: number,
-): PalettePaintRamp {
-  return { column, columns, row, rows, keyRow };
-}
-
-/*
- * Every ramp below was measured, not guessed: each body was rendered from five
- * angles with the palette cell index written out as colour, and the coachwork ramp
- * is the block those renders actually show. A UV-area histogram does not answer
- * this — these bodies carry more hidden underside surface mapped to the palette's
- * greys than they carry visible paint.
- *
- * Figures are read off the shapes: the muscle coupes get the V8 and the firm
- * fastback springs, the utilities get four-wheel drive on truck springs, the vans
- * and the three lorries get diesels and the crashbox, and the supercars get the
- * highest grip in the catalogue.
- */
-const STYLIZED_SPECS: readonly StylizedSpec[] = [
-  // ---- Car1-5: coupes and muscle. Long bonnets, rear drive, firm. ----
-  {
-    id: 'st_muscle_fastback',
-    label: 'muscle fastback',
-    file: 'Car1',
-    mass: 1520,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 80,
-    wheelGrip: 1.05,
-    steerLock: 0.55,
-    rearDriveBias: 1,
-    suspension: SUSP_FASTBACK,
-    paint: ramp(0, 2, 0, 12, 6),
-  },
-  {
-    id: 'st_muscle_coupe',
-    label: 'muscle coupe',
-    file: 'Car2',
-    mass: 1450,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 75,
-    wheelGrip: 1.06,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    suspension: SUSP_FASTBACK,
-    paint: ramp(5, 2, 0, 15, 5),
-  },
-  {
-    id: 'st_skyline_coupe',
-    label: 'hardtop coupe',
-    file: 'Car3',
-    mass: 1180,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.04,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    handlingProfile: 'road',
-    suspension: SUSP_SPORT,
-    paint: ramp(7, 2, 16, 15, 22),
-  },
-  {
-    id: 'st_fastback_six',
-    label: 'straight-six fastback',
-    file: 'Car4',
-    mass: 1080,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    wheelGrip: 1.08,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    handlingProfile: 'road',
-    suspension: SUSP_SPORT,
-    paint: ramp(12, 2, 16, 15, 21),
-  },
-  {
-    // Boxy 80s rally homologation coupe: four-wheel drive is the whole point of it.
-    id: 'st_quattro_coupe',
-    label: 'rally coupe',
-    file: 'Car5',
-    mass: 1250,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.12,
-    steerLock: 0.58,
-    rearDriveBias: 0.5,
-    handlingProfile: 'sport',
-    frontWeightShare: 0.59,
-    suspension: SUSP_SPORT,
-    paint: ramp(3, 2, 0, 32, 8),
-  },
-
-  // ---- Jeep1-5: utilities. 4WD, truck springs, a visual lift on the short ones. ----
-  {
-    id: 'st_open_jeep',
-    label: 'open jeep',
-    file: 'Jeep1',
-    mass: 1180,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 55,
-    wheelGrip: 0.95,
-    steerLock: 0.66,
-    rearDriveBias: 0.5,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(14, 2, 16, 10, 18),
-    visualRideLiftWheelFraction: 1 / 6,
-  },
-  {
-    id: 'st_v8_pickup',
-    label: 'V8 pickup',
-    file: 'Jeep2',
-    mass: 1780,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 80,
-    wheelGrip: 1.0,
-    steerLock: 0.58,
-    rearDriveBias: 0.5,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(18, 2, 16, 16, 18),
-    visualRideLiftWheelFraction: 1 / 6,
-  },
-  {
-    id: 'st_short_landie',
-    label: 'short off-roader',
-    file: 'Jeep3',
-    mass: 1720,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 75,
-    wheelGrip: 0.98,
-    steerLock: 0.6,
-    rearDriveBias: 0.5,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(20, 2, 20, 9, 25),
-    visualRideLiftWheelFraction: 1 / 6,
-  },
-  {
-    id: 'st_wagon_4x4',
-    label: '4x4 estate',
-    file: 'Jeep4',
-    mass: 1690,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 80,
-    wheelGrip: 1.0,
-    steerLock: 0.58,
-    rearDriveBias: 0.5,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(22, 2, 16, 16, 18),
-  },
-  {
-    id: 'st_kei_4x4',
-    label: 'small 4x4',
-    file: 'Jeep5',
-    mass: 1050,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 40,
-    wheelGrip: 0.94,
-    steerLock: 0.64,
-    rearDriveBias: 0.5,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(24, 2, 16, 16, 16),
-    visualRideLiftWheelFraction: 1 / 6,
-  },
-
-  // ---- MicroBus1-5: vans. Cab-forward, so the driver's eye sits at the screen. ----
-  {
-    // Rear-engined, rear-drive and softly sprung, like the bus it is drawn from.
-    id: 'st_split_bus',
-    label: 'split-screen bus',
-    file: 'MicroBus1',
-    bodyClass: 'bus',
-    mass: 1320,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 60,
-    wheelGrip: 0.9,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    frontWeightShare: 0.44,
-    suspension: SUSP_SOFT,
-    paint: ramp(26, 2, 16, 16, 18),
-  },
-  {
-    id: 'st_transporter',
-    label: 'transporter van',
-    file: 'MicroBus2',
-    bodyClass: 'bus',
-    mass: 1620,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 0.94,
-    steerLock: 0.58,
-    rearDriveBias: 0,
-    handlingProfile: 'utility',
-    paint: ramp(28, 2, 16, 16, 17),
-  },
-  {
-    id: 'st_cabover_van',
-    label: 'cab-over van',
-    file: 'MicroBus3',
-    bodyClass: 'bus',
-    mass: 1480,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual4',
-    tankLitres: 60,
-    wheelGrip: 0.9,
-    steerLock: 0.62,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(28, 2, 0, 11, 0),
-  },
-  {
-    id: 'st_panel_van',
-    label: 'panel van',
-    file: 'MicroBus4',
-    bodyClass: 'bus',
-    mass: 1540,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 0.92,
-    steerLock: 0.6,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(27, 1, 0, 14, 0),
-  },
-  {
-    id: 'st_shag_van',
-    label: 'custom van',
-    file: 'MicroBus5',
-    bodyClass: 'bus',
-    mass: 1900,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 90,
-    wheelGrip: 0.95,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    suspension: SUSP_TRUCK,
-    paint: ramp(30, 2, 0, 16, 5),
-  },
-
-  // ---- Sedan1-5: the everyday cars. ----
-  {
-    id: 'st_big_saloon',
-    label: 'big saloon',
-    file: 'Sedan1',
-    mass: 1420,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 65,
-    wheelGrip: 0.96,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    suspension: SUSP_SOFT,
-    paint: ramp(24, 2, 0, 16, 4),
-  },
-  {
-    id: 'st_estate',
-    label: 'family estate',
-    file: 'Sedan2',
-    mass: 1360,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    wheelGrip: 0.96,
-    steerLock: 0.58,
-    rearDriveBias: 0,
-    handlingProfile: 'road',
-    paint: ramp(3, 2, 0, 32, 10),
-  },
-  {
-    id: 'st_compact_saloon',
-    label: 'compact saloon',
-    file: 'Sedan3',
-    mass: 1300,
-    engineId: 'engine_i4_2445',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.0,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    handlingProfile: 'road',
-    paint: ramp(22, 2, 0, 16, 4),
-  },
-  {
-    id: 'st_repmobile',
-    label: 'rep saloon',
-    file: 'Sedan4',
-    mass: 1280,
-    engineId: 'engine_i4_1600',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 62,
-    wheelGrip: 0.98,
-    steerLock: 0.6,
-    rearDriveBias: 0,
-    handlingProfile: 'road',
-    paint: ramp(20, 2, 0, 16, 4),
-  },
-  {
-    id: 'st_sport_touring',
-    label: 'sport touring',
-    file: 'Sedan5',
-    mass: 1240,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.02,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    handlingProfile: 'sport',
-    suspension: SUSP_SPORT,
-    paint: ramp(18, 2, 0, 16, 5),
-  },
-
-  // ---- SpecialCar1-5: service vehicles. Two saloons, an ambulance, a bullion
-  // van and a fire engine. The three big ones are lorries: diesel, crashbox and
-  // truck springs, with the cab-forward driving position that comes with bodyClass.
-  {
-    id: 'st_patrol_car',
-    label: 'patrol car',
-    file: 'SpecialCar1',
-    mass: 1680,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 75,
-    wheelGrip: 1.06,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    suspension: SUSP_SPORT,
-    paint: ramp(3, 2, 0, 32, 27),
-  },
-  {
-    id: 'st_city_taxi',
-    label: 'city taxi',
-    file: 'SpecialCar2',
-    mass: 1560,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_auto3',
-    tankLitres: 70,
-    wheelGrip: 0.96,
-    steerLock: 0.58,
-    rearDriveBias: 1,
-    suspension: SUSP_SOFT,
-    paint: ramp(16, 2, 0, 8, 3),
-  },
-  {
-    id: 'st_ambulance',
-    label: 'ambulance',
-    file: 'SpecialCar3',
-    bodyClass: 'truck',
-    mass: 3400,
-    engineId: 'engine_d4_2000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 90,
-    wheelGrip: 0.92,
-    steerLock: 0.52,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(0, 2, 16, 14, 20),
-  },
-  {
-    id: 'st_bullion_van',
-    label: 'bullion van',
-    file: 'SpecialCar4',
-    bodyClass: 'truck',
-    mass: 4600,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 120,
-    wheelGrip: 0.9,
-    steerLock: 0.52,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(3, 2, 0, 32, 11),
-  },
-  {
-    id: 'st_fire_engine',
-    label: 'fire engine',
-    file: 'SpecialCar5',
-    bodyClass: 'truck',
-    mass: 11000,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 240,
-    wheelGrip: 0.88,
-    steerLock: 0.48,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(3, 2, 0, 32, 2),
-  },
-
-  // ---- SportCar1-5: the supercars. Highest grip here; the first three were
-  // drawn without indicator lenses, which `noBlinkers` states rather than lets
-  // the lamp binder discover as a missing selector.
-  {
-    id: 'st_mid_engine_v8',
-    label: 'mid-engined V8',
-    file: 'SportCar1',
-    mass: 1620,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 80,
-    wheelGrip: 1.25,
-    steerLock: 0.54,
-    rearDriveBias: 0.5,
-    handlingProfile: 'sport',
-    frontWeightShare: 0.44,
-    suspension: SUSP_FASTBACK,
-    paint: ramp(16, 2, 8, 6, 11),
-    noBlinkers: true,
-  },
-  {
-    id: 'st_hypercar',
-    label: 'hypercar',
-    file: 'SportCar2',
-    mass: 1900,
-    engineId: 'engine_v8_5000',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 100,
-    wheelGrip: 1.28,
-    steerLock: 0.52,
-    rearDriveBias: 0.5,
-    handlingProfile: 'sport',
-    frontWeightShare: 0.45,
-    suspension: SUSP_FASTBACK,
-    paint: ramp(14, 2, 0, 5, 2),
-    noBlinkers: true,
-  },
-  {
-    id: 'st_wedge_sports',
-    label: 'wedge sports',
-    file: 'SportCar3',
-    mass: 1540,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 60,
-    wheelGrip: 1.2,
-    steerLock: 0.56,
-    rearDriveBias: 0.5,
-    handlingProfile: 'sport',
-    frontWeightShare: 0.43,
-    suspension: SUSP_SPORT,
-    paint: ramp(3, 2, 0, 32, 13),
-    noBlinkers: true,
-  },
-  {
-    id: 'st_rear_engine_sports',
-    label: 'rear-engined sports',
-    file: 'SportCar4',
-    mass: 1320,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 65,
-    wheelGrip: 1.22,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    handlingProfile: 'sport',
-    frontWeightShare: 0.39,
-    suspension: SUSP_FASTBACK,
-    paint: ramp(16, 2, 0, 8, 3),
-  },
-  {
-    id: 'st_turbo_coupe',
-    label: 'turbo coupe',
-    file: 'SportCar5',
-    mass: 1450,
-    engineId: 'engine_i6_2800',
-    gearboxId: 'gearbox_manual5',
-    tankLitres: 70,
-    wheelGrip: 1.18,
-    steerLock: 0.56,
-    rearDriveBias: 1,
-    handlingProfile: 'sport',
-    suspension: SUSP_SPORT,
-    paint: ramp(0, 2, 16, 14, 20),
-  },
-
-  {
-    // 6x4 tractor unit. Its middle axle is deleted and the rearmost pair drives,
-    // which puts the wheelbase at 3.47 m and leaves no wheel standing still.
-    id: 'st_tractor_unit',
-    label: 'tractor unit',
-    file: 'Truck1',
-    bodyClass: 'truck',
-    mass: 7800,
-    engineId: 'engine_d6_6600',
-    gearboxId: 'gearbox_truck6',
-    tankLitres: 300,
-    wheelGrip: 0.94,
-    steerLock: 0.46,
-    rearDriveBias: 1,
-    handlingProfile: 'utility',
-    suspension: SUSP_TRUCK,
-    paint: ramp(12, 2, 8, 8, 9),
-  },
-];
-
-/** One entry per normalized body; scale, palette, wheels and lamps are shared. */
-const STYLIZED_CARS: readonly Entry[] = STYLIZED_SPECS.map((spec) => {
-  return {
-    id: spec.id,
-    label: spec.label,
-    dir: STYLIZED,
-    glb: `${spec.file}.glb`,
-    textureFile: STYLIZED_PALETTE,
-    paintStyle: 'stylized-palette',
-    glassMaterial: 'Glass',
-    paintRamp: spec.paint,
-    lights: stylizedLights(spec.noBlinkers !== true),
-    wheelNodes: {
-      wheel_fl: ['wheel_fl'],
-      wheel_fr: ['wheel_fr'],
-      wheel_rl: ['wheel_rl'],
-      wheel_rr: ['wheel_rr'],
-    },
-    bodyClass: spec.bodyClass ?? 'car',
-    visualRideLiftWheelFraction: spec.visualRideLiftWheelFraction,
-    mass: spec.mass,
-    engineId: spec.engineId,
-    gearboxId: spec.gearboxId,
-    tankLitres: spec.tankLitres,
-    wheelGrip: spec.wheelGrip,
-    // Centimetres at about 1.43x life size; 0.007 puts the saloon at 4.6 m.
-    scale: 0.007,
-    suspension: spec.suspension,
-    steerLock: spec.steerLock,
-    rearDriveBias: spec.rearDriveBias,
-    handlingProfile: spec.handlingProfile ?? 'classic',
-    frontWeightShare: spec.frontWeightShare,
-  } satisfies Entry;
-});
-
-const ENTRIES: readonly Entry[] = [
-  // -------------------------------------------------------------------------
-  // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
-  // its own wheels (found by shape) and taking its colour from the pack's shared
-  // palette atlas. Life-size in centimetres, nose-first down +Z, 4-6k triangles.
-  // -------------------------------------------------------------------------
-  ...SOVIET_CARS,
-
-  // -------------------------------------------------------------------------
-  // Stylized Vehicles Pack. Thirty-one detailed LOD0 sources normalized offline:
-  // fixed doors, trim and cabin geometry form one chassis, with one glass mesh,
-  // named animated wheels and one mesh per independently controlled lamp channel.
-  // -------------------------------------------------------------------------
-  ...STYLIZED_CARS,
-
-  // -------------------------------------------------------------------------
-  // Private GTA SA mod conversion. The offline normalizer keeps only the exterior,
-  // closes the underbody, and flattens the source's material forest into six
-  // texture-free runtime roles while preserving the authored doors and wheel assemblies.
-  // -------------------------------------------------------------------------
+const SAAS_SPECS: readonly Entry[] = [
   {
     id: 'sa_azlk2141',
     label: 'AZLK-2141 Svyatogor',
     dir: SAAS,
     glb: 'azlk2141.glb',
-    glassMaterial: 'car_glass',
-    paintStyle: 'solid-paint',
-    lights: {
-      headlights: ['headlights'],
-      taillights: ['taillights'],
-    },
-    wheelNodes: {
-      wheel_fl: ['wheel_fl', 'hub_fl'],
-      wheel_fr: ['wheel_fr', 'hub_fr'],
-      wheel_rl: ['wheel_rl', 'hub_rl'],
-      wheel_rr: ['wheel_rr', 'hub_rr'],
-    },
     bodyClass: 'car',
-    // The DFF's 2.979 m axle spacing is normalized to the real 2.58 m wheelbase.
     scale: 0.86595,
     mass: 1070,
     engineId: 'engine_i4_1600',
@@ -1743,6 +1053,189 @@ const ENTRIES: readonly Entry[] = [
     frontWeightShare: 0.62,
     dragArea: 0.74,
   },
+  {
+    id: 'sa_vaz2115',
+    label: 'VAZ-2115 Samara',
+    dir: SAAS,
+    glb: 'vaz2115.glb',
+    bodyClass: 'car',
+    scale: 0.880301,
+    mass: 970,
+    engineId: 'engine_samara_1500',
+    gearboxId: 'gearbox_samara_5_tall',
+    tankLitres: 43,
+    wheelGrip: 0.67,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.61,
+    dragArea: 0.69,
+  },
+  {
+    id: 'sa_gaz2217',
+    label: 'GAZ-2217 Sobol',
+    dir: SAAS,
+    glb: 'gaz2217.glb',
+    bodyClass: 'truck',
+    scale: 0.87483,
+    mass: 2180,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 70,
+    wheelGrip: 0.62,
+    suspension: SUSP_TRUCK,
+    steerLock: 0.57,
+    rearDriveBias: 1,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.55,
+    dragArea: 1.55,
+  },
+  {
+    id: 'sa_oka',
+    label: 'VAZ-1111 Oka',
+    dir: SAAS,
+    glb: 'oka.glb',
+    bodyClass: 'car',
+    scale: 0.97465,
+    mass: 645,
+    engineId: 'engine_lada_1200',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 30,
+    wheelGrip: 0.61,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.62,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    dragArea: 0.62,
+  },
+  {
+    id: 'sa_uaz330364',
+    label: 'UAZ-330364',
+    dir: SAAS,
+    glb: 'uaz330364.glb',
+    bodyClass: 'truck',
+    scale: 0.950393,
+    mass: 1845,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 56,
+    wheelGrip: 0.59,
+    suspension: SUSP_TRUCK,
+    steerLock: 0.55,
+    rearDriveBias: 0.5,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.52,
+    dragArea: 1.85,
+  },
+  {
+    id: 'sa_uaz469',
+    label: 'UAZ-469',
+    dir: SAAS,
+    glb: 'uaz469.glb',
+    bodyClass: 'car',
+    scale: 0.843194,
+    mass: 1650,
+    engineId: 'engine_i4_2445',
+    gearboxId: 'gearbox_manual4',
+    tankLitres: 78,
+    wheelGrip: 0.58,
+    suspension: SUSP_NIVA,
+    steerLock: 0.55,
+    rearDriveBias: 0.5,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.52,
+    dragArea: 1.55,
+  },
+  {
+    id: 'sa_izh2715',
+    label: 'IZH-2715',
+    dir: SAAS,
+    glb: 'izh2715.glb',
+    bodyClass: 'truck',
+    scale: 0.863496,
+    mass: 1015,
+    engineId: 'engine_lada_1500',
+    gearboxId: 'gearbox_lada_4',
+    tankLitres: 46,
+    wheelGrip: 0.56,
+    suspension: SUSP_ZHIGULI_ESTATE,
+    steerLock: 0.55,
+    rearDriveBias: 1,
+    handlingProfile: 'classic',
+    frontWeightShare: 0.53,
+    dragArea: 1.0,
+  },
+  {
+    id: 'sa_vaz2114',
+    label: 'VAZ-2114 Samara',
+    dir: SAAS,
+    glb: 'vaz2114.glb',
+    bodyClass: 'car',
+    scale: 0.931395,
+    mass: 985,
+    engineId: 'engine_samara_1500',
+    gearboxId: 'gearbox_samara_5_tall',
+    tankLitres: 43,
+    wheelGrip: 0.67,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.61,
+    dragArea: 0.72,
+  },
+  {
+    id: 'sa_vaz2110',
+    label: 'VAZ-2110',
+    dir: SAAS,
+    glb: 'vaz2110.glb',
+    bodyClass: 'car',
+    scale: 0.827632,
+    mass: 1010,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 43,
+    wheelGrip: 0.68,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.61,
+    dragArea: 0.7,
+  },
+];
+
+const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
+  ...spec,
+  glassMaterial: 'car_glass',
+  paintStyle: 'solid-paint',
+  lights: {
+    headlights: ['headlights'],
+    taillights: ['taillights'],
+  },
+  wheelNodes: {
+    wheel_fl: ['wheel_fl', 'hub_fl'],
+    wheel_fr: ['wheel_fr', 'hub_fr'],
+    wheel_rl: ['wheel_rl', 'hub_rl'],
+    wheel_rr: ['wheel_rr', 'hub_rr'],
+  },
+}));
+
+const ENTRIES: readonly Entry[] = [
+  // -------------------------------------------------------------------------
+  // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
+  // its own wheels (found by shape) and taking its colour from the pack's shared
+  // palette atlas. Life-size in centimetres, nose-first down +Z, 4-6k triangles.
+  // -------------------------------------------------------------------------
+  ...SOVIET_CARS,
+
+  // -------------------------------------------------------------------------
+  // Private GTA SA mod conversions. Their DFF-specific hierarchy and material
+  // names are normalized offline into the explicit six-role runtime contract.
+  // -------------------------------------------------------------------------
+  ...SAAS_CARS,
 ];
 
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
@@ -1752,7 +1245,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   textureFile: e.textureFile,
   paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
-  paintRamp: e.paintRamp,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,

@@ -44,7 +44,7 @@ class BunProgressEvent extends Event implements ProgressEvent {
 // off disk rather than building one in code.
 installAssetShim();
 
-const MODEL_ID = 'st_big_saloon';
+const MODEL_ID = 'sa_vaz2110';
 const SETTLE_STEPS = 180;
 const DIRT_RUN_STEPS = 1_200;
 let failures = 0;

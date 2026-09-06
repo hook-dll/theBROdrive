@@ -16,6 +16,7 @@ import {
 import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
+import { ALL_VARIANTS } from '../parts/registry';
 import type { FluidKind, ShadeTint } from '../items/items';
 
 /**
@@ -202,6 +203,13 @@ export interface PauseHooks {
    * exercise fluid cans and bubble-gum packs without bypassing pickup physics.
    */
   spawnItem?: (request: DevSpawnItemRequest) => void;
+  /**
+   * Drops one part variant at the player's feet as a loose part. Dev-only for the
+   * same reason as the item dispenser: parts are what a run is spent scavenging,
+   * and a free engine on demand retires that whole search. When the hook is absent
+   * the button and its screen are never built.
+   */
+  spawnPart?: (variantId: string) => void;
   /**
    * Flips the driven car — or, on foot, the nearest car or trailer — back onto its
    * wheels. Dev-only: the shipping recovery for a car on its roof is a bubble-gum
@@ -459,7 +467,7 @@ export class MainMenu {
         return null;
       };
 
-      type Screen = 'main' | 'settings' | 'spawn' | 'item';
+      type Screen = 'main' | 'settings' | 'spawn' | 'item' | 'part';
       let screen: Screen = 'main';
       /**
        * Settings section, remembered across visits: someone adjusting the horizon
@@ -530,6 +538,7 @@ export class MainMenu {
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
         else if (next === 'item') renderItem?.();
+        else if (next === 'part') renderPart?.();
         else renderSpawn?.();
       };
 
@@ -623,6 +632,14 @@ export class MainMenu {
           const itemBtn = button('menu-button', 'Spawn Item (dev)');
           itemBtn.addEventListener('click', () => showScreen('item'));
           panel.appendChild(itemBtn);
+        }
+        // Every part variant the registry defines, grouped by kind: the picker is
+        // how a bonnet slot, an anchor mount or a part's mesh gets exercised without
+        // driving to a wreck first.
+        if (import.meta.env.DEV && hooks.spawnPart) {
+          const partBtn = button('menu-button', 'Spawn Part (dev)');
+          partBtn.addEventListener('click', () => showScreen('part'));
+          panel.appendChild(partBtn);
         }
         // No picker for this one either: the target is whatever the player is in or
         // standing next to, decided by main, so the button is the whole surface.
@@ -1345,6 +1362,59 @@ export class MainMenu {
         backBtn.focus();
       };
       const renderItem: (() => void) | null = import.meta.env.DEV ? renderItemScreen : null;
+
+      /**
+       * Dev part dispenser. Reads the registry rather than a hand-written list, so a
+       * variant added to `ALL_VARIANTS` is spawnable the moment it exists, and drops
+       * a real loose part: the same object a wreck yields, with the same pickup,
+       * storage and mounting paths behind it.
+       */
+      const renderPartScreen = (): void => {
+        panel.textContent = '';
+
+        const backBtn = button('menu-button', 'Back');
+        backBtn.addEventListener('click', () => showScreen('main'));
+        panel.appendChild(backBtn);
+
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Spawn Part';
+        panel.appendChild(title);
+
+        const list = el('div', 'menu-body-list');
+        // Grouped by kind, in registry order: the engines stay together and the trim
+        // does not interleave with the drivetrain halfway down a fifty-row list.
+        const kinds: string[] = [];
+        for (const part of ALL_VARIANTS) {
+          if (!kinds.includes(part.kind)) kinds.push(part.kind);
+        }
+        for (const kind of kinds) {
+          const heading = el('div', 'menu-body-group');
+          heading.textContent = kind.replace(/_/g, ' ');
+          list.appendChild(heading);
+
+          for (const part of ALL_VARIANTS.filter((v) => v.kind === kind)) {
+            const row = button('menu-body', '');
+            const name = el('span', 'menu-body-label');
+            name.textContent = part.label;
+            const detail = el('span', 'menu-body-class');
+            detail.textContent = `${part.mass} kg`;
+            row.append(name, detail);
+            row.addEventListener('click', () => {
+              hooks.spawnPart?.(part.id);
+              finish('resume');
+            });
+            list.appendChild(row);
+          }
+        }
+        panel.appendChild(list);
+
+        const note = el('div', 'menu-note');
+        note.textContent = 'selected part drops at your feet, clean and unused';
+        panel.appendChild(note);
+
+        backBtn.focus();
+      };
+      const renderPart: (() => void) | null = import.meta.env.DEV ? renderPartScreen : null;
 
       showScreen('main');
     });

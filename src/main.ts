@@ -17,7 +17,7 @@ import { spawnCarState, type SpawnRequest } from './game/spawn';
 import { Inventory, itemLabel, type Item } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { oilCapacity } from './parts/registry';
+import { oilCapacity, variant, type PartInstance } from './parts/registry';
 import { TouchControls } from './core/touch';
 import {
   carModelMeasure,
@@ -1578,6 +1578,33 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * The dev part dispenser behind `PauseHooks.spawnPart`.
+   *
+   * Same drop as `devSpawnItem` — a step in front of the player, on the ground the
+   * raycast finds — because a part is picked up, carried and mounted by hand. It is
+   * recorded through `loose.spawn`, so the picker exercises the real loose-part
+   * lifecycle rather than a menu-only shortcut, and the part arrives factory-fresh:
+   * no dirt, no rust, nothing to clean off before it can be fitted.
+   */
+  const devSpawnPart = (variantId: string): void => {
+    const eye = camera.eyePosition;
+    const dir = camera.eyeDirection;
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const dropX = eye.x + (dir.x / flat) * 1.2;
+    const dropZ = eye.z + (dir.z / flat) * 1.2;
+    const ground = physics.raycast(
+      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
+      { x: 0, y: -1, z: 0 },
+      SPAWN_PROBE_HEIGHT + 12,
+      player.rigidBody,
+    );
+    const groundY = ground ? ground.point.y : eye.y;
+    const part: PartInstance = { id: world.runtimePartId(), variantId, dirt: 0, rust: 0 };
+    loose.spawn(part, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
+    hud.setToast(`spawned ${variant(variantId).label}`);
+  };
+
+  /**
    * The dev righting tool behind `PauseHooks.flipVehicle`.
    *
    * Seated, it targets the car being driven — no proximity test can be wrong about
@@ -1680,6 +1707,9 @@ async function boot(): Promise<void> {
     // Same fold again: found consumables are the whole supply economy, so the
     // item dispenser exists only while developing.
     spawnItem: import.meta.env.DEV ? devSpawnItem : undefined,
+    // And once more for the parts picker: scavenging parts off wrecks is the loop a
+    // free engine on demand would retire.
+    spawnPart: import.meta.env.DEV ? devSpawnPart : undefined,
     // Same fold once more: righting a rolled car is what a gum charge is FOR, so the
     // free instant version is a development tool and nothing else.
     flipVehicle: import.meta.env.DEV ? devFlipVehicle : undefined,
