@@ -133,6 +133,7 @@ type Target =
   | { kind: 'pallet'; poiIndex: number }
   | { kind: 'freight-sign'; poiIndex: number }
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
+  | { kind: 'car-entry'; carId: string }
   | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
@@ -425,7 +426,24 @@ export class Interaction {
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const worldActionPressed = mountPressed && this.mountHasPriority(resolved.target);
-    if (worldActionPressed) this.mount(resolved);
+    if (worldActionPressed) {
+      let actionResolved = resolved;
+      if (
+        resolved.target.kind === 'car-entry' &&
+        resolved.vehicle &&
+        resolved.carId &&
+        this.world.state.stickersUnplaced > 0
+      ) {
+        const surface = this.pickBody(resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+        if (surface) {
+          actionResolved = {
+            ...resolved,
+            target: { kind: 'car-body', carId: resolved.carId, ...surface.local },
+          };
+        }
+      }
+      this.mount(actionResolved);
+    }
     if (interactPressed && !worldActionPressed) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
@@ -724,16 +742,15 @@ export class Interaction {
         }
       }
 
-      // Bodywork supplies the "looking at the car" target used by vehicle entry.
-      // A held cleaning tool needs the same real-surface target as a sticker, while
-      // anchors/storage still win for every other held item and bare-handed entry.
-      const washingBody =
-        held?.type === 'tool' && (held.tool === 'brush' || held.tool === 'sponge');
-      if (vehicleDist <= VEHICLE_RANGE) {
-        const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
-        if (surface && (washingBody || this.world.state.stickersUnplaced > 0 || bestDist === Infinity)) {
-          keep(surface.distance, { kind: 'car-body', carId, ...surface.local });
-        }
+      // Ordinary entry and whole-body cleaning need only the chassis collider already
+      // hit by Rapier above. The full render mesh is raycast only on the one frame a
+      // sticker is actually placed; walking near a detailed car stays constant-time.
+      if (
+        vehicleDist <= VEHICLE_RANGE &&
+        hit &&
+        vehicle.isChassisCollider(hit.colliderHandle)
+      ) {
+        keep(hit.toi, { kind: 'car-entry', carId });
       }
     }
 
@@ -769,13 +786,11 @@ export class Interaction {
   }
 
   /**
-   * Nearest point on a car's drawn bodywork along the aim ray, in the car's own
-   * local space.
+   * Exact body surface for sticker placement.
    *
-   * Three.js raycasting rather than Rapier: the physics chassis is a single box, and
-   * a sticker placed on a box would float off the bonnet of anything with a shape.
-   * The scene graph has the real triangles, so it is the only thing that can answer
-   * "where exactly is the player pointing on this car".
+   * This intentionally runs only on the sticker key edge. Three.js checks the render
+   * triangles on CPU; using it as the standing interaction probe made every fixed
+   * tick near a detailed car walk the complete mesh.
    */
   private pickBody(
     vehicle: Vehicle,
@@ -786,7 +801,10 @@ export class Interaction {
     dy: number,
     dz: number,
   ): { distance: number; local: { point: THREE.Vector3; normal: THREE.Vector3 } } | null {
-    this.raycaster.set(this.rayOrigin.set(eyeX, eyeY, eyeZ), this.rayDir.set(dx, dy, dz));
+    this.raycaster.set(
+      this.rayOrigin.set(eyeX, eyeY, eyeZ),
+      this.rayDir.set(dx, dy, dz).normalize(),
+    );
     this.raycaster.far = VEHICLE_RANGE;
     this.hits.length = 0;
     this.raycaster.intersectObject(vehicle.root, true, this.hits);
@@ -831,7 +849,9 @@ export class Interaction {
    */
   private mountHasPriority(target: Target): boolean {
     if (target.kind === 'none') return false;
-    if (target.kind === 'car-body') return this.world.state.stickersUnplaced > 0;
+    if (target.kind === 'car-body' || target.kind === 'car-entry') {
+      return this.world.state.stickersUnplaced > 0;
+    }
     return true;
   }
 
@@ -924,7 +944,7 @@ export class Interaction {
       return `empty trunk cell ${t.cell + 1}`;
     }
 
-    if (t.kind === 'car-body') {
+    if (t.kind === 'car-body' || t.kind === 'car-entry') {
       const car = this.world.state.cars[t.carId];
       if (!car) return null;
       const bodyPrompt = this.bodyToolPrompt(held, car);
@@ -968,7 +988,7 @@ export class Interaction {
 
 
     if (
-      t.kind === 'car-body' &&
+      (t.kind === 'car-body' || t.kind === 'car-entry') &&
       resolved.vehicle &&
       resolved.carId &&
       resolved.vehicleDist < VEHICLE_RANGE
@@ -1061,7 +1081,7 @@ export class Interaction {
   }
 
   private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {
-    if (resolved.target.kind === 'car-body') {
+    if (resolved.target.kind === 'car-body' || resolved.target.kind === 'car-entry') {
       this.scrubBody(dt, tool, resolved);
       return;
     }
@@ -1091,7 +1111,7 @@ export class Interaction {
    */
   private scrubBody(dt: number, tool: ToolKind, resolved: Resolved): void {
     const t = resolved.target;
-    if (t.kind !== 'car-body' || !resolved.vehicle) return;
+    if ((t.kind !== 'car-body' && t.kind !== 'car-entry') || !resolved.vehicle) return;
     const car = this.world.state.cars[t.carId];
     if (!car) return;
 
@@ -1445,9 +1465,10 @@ export class Interaction {
 
   private tryEnter(resolved: Resolved): void {
     if (!resolved.vehicle || !resolved.carId) return;
+    const target = resolved.target;
     if (
-      resolved.target.kind !== 'car-body' ||
-      resolved.target.carId !== resolved.carId ||
+      (target.kind !== 'car-body' && target.kind !== 'car-entry') ||
+      target.carId !== resolved.carId ||
       resolved.vehicleDist >= VEHICLE_RANGE
     ) return;
     this.world.apply({ t: 'enter_car', carId: resolved.carId });

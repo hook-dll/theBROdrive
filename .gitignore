@@ -44,6 +44,10 @@ pnpm-debug.log*
 /DeJunes/
 /new_glb_carpacks_to_try/
 /SARUS/
+/*.rpf
+
+# Offline model-conversion intermediates (tools/import-yft-vehicle.py stage 1/2).
+/build/
 
 # Reproducible astronomy catalogue inputs; the compact generated binary is vendored.
 /tycho2-vt88-source.tsv
