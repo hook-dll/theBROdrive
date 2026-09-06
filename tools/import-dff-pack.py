@@ -295,6 +295,63 @@ def decimate(obj: bpy.types.Object, target_faces: int) -> None:
     obj.select_set(False)
 
 
+def harden_edges(obj: bpy.types.Object, angle_degrees: float = 32.0) -> None:
+    """Splits normals across panel edges, so a merged body is not smoothed flat.
+
+    Every role mesh here is a WELD of a dozen source objects, and shading them all
+    smooth runs one normal across the seam between a wing and a door — the panels
+    read as a soft gradient instead of pressed steel, which is what makes these
+    bodies stand out beside the Soviet pack. Splitting above a panel-crease angle
+    keeps curvature smooth and creases sharp.
+    """
+    modifier = obj.modifiers.new("offline-edge-split", "EDGE_SPLIT")
+    modifier.split_angle = math.radians(angle_degrees)
+    modifier.use_edge_angle = True
+    modifier.use_edge_sharp = False
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    obj.select_set(False)
+
+
+def add_nose_bulkhead(
+    root: bpy.types.Object,
+    body_vertices: list[Vector],
+    material: bpy.types.Material,
+) -> None:
+    """Blanks off the empty engine bay seen through the grille.
+
+    A GTA bonnet hides a modelled engine that this pack deliberately drops, so the
+    gaps between the grille bars look straight into an empty shell. A plate set
+    just behind the nose, cut to the body's own front cross-section, gives those
+    gaps something dark to end on without touching the grille itself.
+    """
+    max_y = max(point.y for point in body_vertices)
+    min_y = min(point.y for point in body_vertices)
+    slice_depth = max(0.12, (max_y - min_y) * 0.10)
+    nose = [point for point in body_vertices if point.y >= max_y - slice_depth]
+    if len(nose) < 8:
+        raise RuntimeError("No nose cross-section to blank off")
+    min_x = min(point.x for point in nose)
+    max_x = max(point.x for point in nose)
+    min_z = min(point.z for point in nose)
+    max_z = max(point.z for point in nose)
+    centre_x = (min_x + max_x) * 0.5
+    centre_z = (min_z + max_z) * 0.5
+    half_x = (max_x - min_x) * 0.44
+    half_z = (max_z - min_z) * 0.45
+    y = max_y - slice_depth
+    vertices = [
+        (centre_x - half_x, y, centre_z - half_z),
+        (centre_x + half_x, y, centre_z - half_z),
+        (centre_x + half_x, y, centre_z + half_z),
+        (centre_x - half_x, y, centre_z + half_z),
+    ]
+    # Two faces, wound both ways: the plate is seen from in front through the grille
+    # and from behind through the wheel arches, and it is one quad thick.
+    mesh_object("bulkhead", vertices, [(0, 1, 2, 3), (3, 2, 1, 0)], material, root)
+
+
 def signed_volume(vertices: list[Vector], faces: list[tuple[int, ...]]) -> float:
     """Six times the signed volume of a closed mesh; negative means inverted faces."""
     total = 0.0
@@ -380,29 +437,40 @@ def create_wheels(
 
 def add_underbody(
     root: bpy.types.Object,
-    body_points: list[Vector],
+    body_vertices: list[Vector],
     dummy_positions: dict[str, Vector],
     wheel_radius: float,
     material: bpy.types.Material,
 ) -> None:
-    """Close an open shell with a plate tucked inside the body's own sills."""
-    min_x = min(point.x for point in body_points)
-    max_x = max(point.x for point in body_points)
-    min_y = min(point.y for point in body_points)
-    max_y = max(point.y for point in body_points)
-    min_z = min(point.z for point in body_points)
+    """Close an open shell with a plate tucked inside the body's own sills.
+
+    Sized off the SILL REGION between the axles rather than the body's silhouette:
+    a plate cut to the outer bounds includes the mirrors, the bumpers and the wheel
+    arches, and hangs out under the car as a visible slab.
+    """
+    front_y = (dummy_positions["wheel_fl"].y + dummy_positions["wheel_fr"].y) / 2
+    rear_y = (dummy_positions["wheel_rl"].y + dummy_positions["wheel_rr"].y) / 2
     axle_z = sum(position.z for position in dummy_positions.values()) / 4
+    inset_y = wheel_radius * 0.9
+    low_y = min(front_y, rear_y) + inset_y
+    high_y = max(front_y, rear_y) - inset_y
+    sill = [
+        point
+        for point in body_vertices
+        if low_y <= point.y <= high_y and point.z <= axle_z + wheel_radius * 0.6
+    ]
+    if len(sill) < 8:
+        raise RuntimeError("No sill region to close the floor against")
+    min_x = min(point.x for point in sill)
+    max_x = max(point.x for point in sill)
+    min_z = min(point.z for point in sill)
     centre_x = (min_x + max_x) * 0.5
-    centre_y = (min_y + max_y) * 0.5
-    # Inboard of the sills and short of the bumpers: a plate that reaches the body's
-    # own silhouette is visible from the side as a slab hanging between the wheels.
     half_x = (max_x - min_x) * 0.40
-    half_y = (max_y - min_y) * 0.44
     thickness = max(0.03, wheel_radius * 0.08)
-    # Floor height: below the door cards, above whatever hangs lowest at the ends.
+    # Floor height: below the door cards, above whatever hangs lowest along the sills.
     top = min(axle_z + wheel_radius * 0.30, min_z + wheel_radius * 0.55)
-    low = (centre_x - half_x, centre_y - half_y, top - thickness)
-    high = (centre_x + half_x, centre_y + half_y, top)
+    low = (centre_x - half_x, low_y, top - thickness)
+    high = (centre_x + half_x, high_y, top)
     vertices = [
         (x, y, z)
         for z in (low[2], high[2])
@@ -472,10 +540,10 @@ def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bo
         for key, objects in wheel_sources.items()
         if objects
     }
-    body_points = [
-        obj.matrix_world @ Vector(corner)
+    body_vertices = [
+        obj.matrix_world @ vertex.co
         for obj in body_objects
-        for corner in obj.bound_box
+        for vertex in obj.data.vertices
     ]
     source_body_meshes = len(body_objects)
     source_body_faces = sum(len(obj.data.polygons) for obj in body_objects)
@@ -510,10 +578,12 @@ def normalize(model_id: str, source: Path, body_target: int, needs_underbody: bo
         )
         share = max(64, round(body_target * len(faces) / max(1, total_faces)))
         decimate(obj, share)
+        harden_edges(obj)
 
     wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials)
+    add_nose_bulkhead(root, body_vertices, materials["car_trim"])
     if needs_underbody:
-        add_underbody(root, body_points, dummy_positions, wheel_radius, materials["car_trim"])
+        add_underbody(root, body_vertices, dummy_positions, wheel_radius, materials["car_trim"])
     orient_to_game(root)
 
     DIST.mkdir(parents=True, exist_ok=True)

@@ -161,6 +161,25 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
     }
   }
 
+  // A blanking plate behind the grille, where the shell needed one: a GTA bonnet
+  // hides a modelled engine this pack drops, so the gaps between the grille bars
+  // can look straight through an empty body. Where a plate exists it has to be
+  // INSIDE the shell — sticking out of the nose would read as a slab bolted to the
+  // bumper, and sitting too far back leaves the empty bay visible again.
+  const bulkhead = scene.getObjectByName('bulkhead');
+  if (bulkhead) {
+    const plate = new THREE.Box3().setFromObject(bulkhead, true);
+    const shell = new THREE.Box3()
+      .setFromObject(nodes.get('headlights'), true)
+      .union(new THREE.Box3().setFromObject(scene.getObjectByName('paint'), true))
+      .union(new THREE.Box3().setFromObject(scene.getObjectByName('trim'), true));
+    if (!shell.containsBox(plate)) fail(file, 'bulkhead pokes out of the bodyshell');
+    const noseThird = shell.min.z + (shell.max.z - shell.min.z) * (2 / 3);
+    if (plate.getCenter(new THREE.Vector3()).z < noseThird) {
+      fail(file, 'bulkhead sits too far back to close off the grille');
+    }
+  }
+
   const wheelbase = (
     Math.abs(wheels.fl.centre.z - wheels.rl.centre.z) +
     Math.abs(wheels.fr.centre.z - wheels.rr.centre.z)
