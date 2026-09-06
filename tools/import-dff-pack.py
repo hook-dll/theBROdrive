@@ -14,6 +14,7 @@ import math
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import bpy
 import bmesh
@@ -23,21 +24,35 @@ from mathutils import Matrix, Vector
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist" / "models" / "saas"
 
-# id, source DFF, body face budget, whether the source is an open shell that needs
-# a synthetic floor, and whether the car takes the Soviet pack's road wheel.
-#
-# Bodies whose own geometry already closes the underside get no floor plate: adding
-# one there only buries a slab inside the authored floor. The Oka and the IZH run
-# the Soviet 2109 wheel so the Lada-shaped half of the catalogue stands on one
-# wheel; the UAZ keeps its own, because a light road wheel under a working 4x4
-# reads as a mistake.
-#
+
+class Model(NamedTuple):
+    """One source body and the decisions that cannot be read off its geometry."""
+
+    model_id: str
+    source: Path
+    #: Triangle budget for the whole body, split between the material roles.
+    body_target: int
+    #: An open shell needs a synthetic floor; a body that closes its own underside
+    #: gets none, because the plate would only be buried inside the authored floor.
+    needs_underbody: bool
+    #: Take the Soviet 2109's road wheel, so the Lada-shaped half of the catalogue
+    #: stands on one wheel. A working 4x4 keeps its own: a light road wheel under it
+    #: reads as a mistake.
+    soviet_wheels: bool
+    #: Blank off the empty engine bay behind the grille. A cab-over has no bay to
+    #: blank: the plate would land inside the cabin and stick out of the windscreen.
+    needs_bulkhead: bool
+    #: Paint the load bed in the wheel colour instead of the coachwork colour, the
+    #: way a working pickup leaves the factory. The cabin's rear wall is the split.
+    has_cargo_bed: bool
+
+
 # The pack's other five bodies (both Samaras, the 2110, the Sobol and the UAZ-469)
 # were cut from the catalogue: better source models are wanted for those cars.
 MODELS = (
-    ("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 30_000, False, True),
-    ("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 30_000, False, False),
-    ("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 30_000, False, True),
+    Model("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 30_000, False, True, True, False),
+    Model("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 30_000, False, False, False, True),
+    Model("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 30_000, False, True, True, False),
 )
 
 # The Soviet pack's own road wheel, reused rather than re-modelled. `09.wheel_fr`
@@ -45,6 +60,11 @@ MODELS = (
 # that needs no turning here.
 SOVIET_WHEEL_FBX = ROOT / "public" / "models" / "soviet" / "vz09.fbx"
 SOVIET_WHEEL_OBJECT = "09.wheel_fr"
+
+#: The load-bed material. Its name carries `wheel` on purpose: the runtime's
+#: `solid-paint` repaint skips anything that looks like a wheel, so a repainted
+#: cabin leaves the bed in its working grey.
+BED_ROLE = "wheel_rim"
 
 ROLES = ("car_paint", "car_trim", "car_glass", "Headlights", "BrakeLights")
 WHEEL_KEYS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
@@ -58,12 +78,14 @@ INTERIOR_RE = re.compile(
     r"pointer|tahook|shleif|tube|plafon|rama",
     re.I,
 )
+DOOR_RE = re.compile(r"^doors?[rl]?_", re.I)
 EXTRA_RE = re.compile(r"^extra\d*$", re.I)
 WHEEL_NAME_RE = re.compile(r"wheel|koles|колес|shina|rezina|protekt", re.I)
 # Lamp LENSES, by the texture the source names them after. Deliberately material
 # names only: `fars_front` is the whole lamp HOUSING, and matching the object name
 # made the front end of a car twenty thousand triangles of glowing lens.
-LAMP_RE = re.compile(r"vehiclelight|light|^fara|fonar|optik|povorot|turn|diod|stop", re.I)
+# `^far` covers both spellings the pack uses for a lamp lens, `fara` and `fari`.
+LAMP_RE = re.compile(r"vehiclelight|light|^far|fonar|optik|povorot|turn|diod|stop", re.I)
 GLASS_RE = re.compile(r"glass|stekl|okno|windscreen|windshield", re.I)
 PAINT_RE = re.compile(r"primary|body(?:reflection)?|reflection|color_|^white(?:\.|$)|^chassis(?:\.0+)?$", re.I)
 TRIM_RE = re.compile(
@@ -211,7 +233,7 @@ def material_role(
     # Windows are the pack's only translucent body material, so the alpha channel
     # is what finds their exact outline inside a door — the door's own name says
     # nothing about where its glass stops and its frame starts.
-    if GLASS_RE.search(material_name) or material_alpha(material) < 0.95:
+    if GLASS_RE.search(material_name) or material_alpha(material) < 0.85:
         return "car_glass"
     if GLASS_RE.search(object_name) and len(obj.material_slots) <= 1:
         return "car_glass"
@@ -237,6 +259,7 @@ def new_runtime_material(name: str) -> bpy.types.Material:
         "Headlights": (0.72, 0.78, 0.72, 1.0),
         "BrakeLights": (0.45, 0.012, 0.008, 1.0),
         "Tyres": (0.018, 0.02, 0.022, 1.0),
+        BED_ROLE: (0.40, 0.41, 0.42, 1.0),
     }
     bsdf.inputs["Base Color"].default_value = colors[name]
     # Matte painted steel, like the Soviet pack: a metallic paint slot tints its own
@@ -279,17 +302,22 @@ def is_mirrored(obj: bpy.types.Object) -> bool:
 def collect_body(
     objects: list[bpy.types.Object],
     lamp_zone: tuple[float, float],
+    bed_limit: float | None,
 ) -> dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]]:
-    buckets = {role: ([], []) for role in ROLES}
+    buckets = {role: ([], []) for role in (*ROLES, BED_ROLE)}
     for obj in objects:
         mesh = obj.data
         mirrored = is_mirrored(obj)
         world_vertices = [obj.matrix_world @ vertex.co for vertex in mesh.vertices]
-        per_role_maps: dict[str, dict[int, int]] = {role: {} for role in ROLES}
+        per_role_maps: dict[str, dict[int, int]] = {role: {} for role in buckets}
         for polygon in mesh.polygons:
             face_y = sum(world_vertices[index].y for index in polygon.vertices) / len(polygon.vertices)
             material = obj.material_slots[polygon.material_index].material if polygon.material_index < len(obj.material_slots) else None
             role = material_role(obj, material, polygon.material_index, face_y, lamp_zone)
+            # A pickup's load bed is painted like its wheels, not like its cabin, so
+            # the coachwork behind the cabin's rear wall changes material.
+            if role == "car_paint" and bed_limit is not None and face_y <= bed_limit:
+                role = BED_ROLE
             vertices, faces = buckets[role]
             index_map = per_role_maps[role]
             face = []
@@ -582,13 +610,22 @@ def orient_to_game(root: bpy.types.Object) -> None:
         child.location = turn @ child.location
 
 
-def normalize(
-    model_id: str,
-    source: Path,
-    body_target: int,
-    needs_underbody: bool,
-    soviet_wheels: bool,
-) -> None:
+def cabin_rear(objects: list[bpy.types.Object]) -> float:
+    """Where the cabin ends, read off the door shuts.
+
+    The doors are the only parts of a pickup that state the cabin's extent, so the
+    rearmost point any door reaches is the wall the load bed starts behind.
+    """
+    doors = [obj for obj in objects if DOOR_RE.search(plain_name(obj.name))]
+    if not doors:
+        raise RuntimeError("No door mesh to measure the cabin against")
+    return min(
+        (obj.matrix_world @ vertex.co).y for obj in doors for vertex in obj.data.vertices
+    )
+
+
+def normalize(model: Model) -> None:
+    model_id, source, body_target = model.model_id, model.source, model.body_target
     print(f"\n=== {model_id}: {source} ===")
     clear_scene()
     import_dff(source)
@@ -616,7 +653,7 @@ def normalize(
     if not body_objects:
         raise RuntimeError(f"No exterior meshes retained for {source}")
 
-    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres")}
+    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres", BED_ROLE)}
     body_vertices = [
         obj.matrix_world @ vertex.co
         for obj in body_objects
@@ -629,7 +666,10 @@ def normalize(
     body_max_y = max(point.y for point in body_vertices)
     lamp_band = (body_max_y - body_min_y) * 0.10
     lamp_zone = (body_min_y + lamp_band, body_max_y - lamp_band)
-    buckets = collect_body(body_objects, lamp_zone)
+    # The cabin's rear wall, taken from the doors themselves: on a pickup everything
+    # behind the door shuts is load bed, and no name in the file says so.
+    bed_limit = cabin_rear(body_objects) if model.has_cargo_bed else None
+    buckets = collect_body(body_objects, lamp_zone, bed_limit)
     wheel_geometry_by_key = {
         key: wheel_geometry(objects)
         for key, objects in wheel_sources.items()
@@ -649,9 +689,11 @@ def normalize(
     bpy.context.scene.collection.objects.link(root)
 
     total_faces = sum(len(faces) for _vertices, faces in buckets.values())
-    for role in ROLES:
+    for role in (*ROLES, BED_ROLE):
         vertices, faces = buckets[role]
         if not faces:
+            if role == BED_ROLE:
+                continue
             raise RuntimeError(f"{model_id} has no geometry for required role {role}")
         obj = mesh_object(
             {
@@ -660,6 +702,7 @@ def normalize(
                 "car_glass": "glass",
                 "Headlights": "headlights",
                 "BrakeLights": "taillights",
+                BED_ROLE: "bed",
             }[role],
             vertices,
             faces,
@@ -671,10 +714,11 @@ def normalize(
         decimate(obj, share)
         harden_edges(obj)
 
-    wheel = load_soviet_wheel() if soviet_wheels else None
+    wheel = load_soviet_wheel() if model.soviet_wheels else None
     wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials, wheel)
-    add_nose_bulkhead(root, body_vertices, materials["car_trim"])
-    if needs_underbody:
+    if model.needs_bulkhead:
+        add_nose_bulkhead(root, body_vertices, materials["car_trim"])
+    if model.needs_underbody:
         add_underbody(root, body_vertices, dummy_positions, wheel_radius, materials["car_trim"])
     orient_to_game(root)
 
@@ -707,12 +751,12 @@ def normalize(
 def main() -> None:
     install_safe_dragonff_loader()
     requested = set(sys.argv[sys.argv.index("--") + 1:]) if "--" in sys.argv else set()
-    selected = [spec for spec in MODELS if not requested or spec[0] in requested]
-    missing = requested.difference(spec[0] for spec in selected)
+    selected = [model for model in MODELS if not requested or model.model_id in requested]
+    missing = requested.difference(model.model_id for model in selected)
     if missing:
         raise RuntimeError(f"Unknown model ids: {sorted(missing)}")
-    for spec in selected:
-        normalize(*spec)
+    for model in selected:
+        normalize(model)
 
 
 main()
