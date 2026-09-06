@@ -839,11 +839,12 @@ const TCS_AUTHORITY_START_MPS = 1.0;
 const TCS_AUTHORITY_FULL_MPS = 3.5;
 /**
  * Slip speed (m/s) at which TCS takes authority whatever the road speed, and the band
- * over which that authority arrives. Above the floor a wheel is spinning several
- * times faster than a rocking or digging one ever does.
+ * over which that authority arrives. A wheel spinning only a few m/s faster than the
+ * ground is already polishing loose sand; waiting for 5.5 m/s allowed a standing
+ * car to dig a hole while the lamp reported the late intervention.
  */
-const TCS_STUCK_SLIP_MPS = 5.5;
-const TCS_STUCK_BAND_MPS = 3;
+const TCS_STUCK_SLIP_MPS = 2.5;
+const TCS_STUCK_BAND_MPS = 2.5;
 /**
  * Share of a wheel's STATIC load at which traction control has its full authority; it
  * scales down linearly below that and reaches nothing at zero load.
@@ -1991,7 +1992,6 @@ export class Vehicle implements Rebasable {
     // its roll cage — grounded its collider on a dune crest, the solver held the
     // chassis up, and the ray-cast wheels kept reaching for terrain that was now
     // above their contact point. On screen that is a car whose wheels sink into the
-    // road, which is exactly what it looked like.
     const floor = Math.max(-half[1], this.measure.wheels[0].pos[1]);
     const colliderHalfY = (half[1] - floor) / 2;
     this.chassisCollider = physics.world.createCollider(

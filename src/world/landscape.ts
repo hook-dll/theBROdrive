@@ -116,13 +116,13 @@ interface Band {
 
 const BANDS: readonly Band[] = [
   /** Continental: broad altitude changes, almost no slope. */
-  { amplitude: 110, wavelength: 45_000, hilliness: false, home: false },
+  { amplitude: 140, wavelength: 45_000, hilliness: false, home: false },
   /** Regional: basins and divides, several minutes of driving across. */
-  { amplitude: 55, wavelength: 10_000, hilliness: false, home: false },
+  { amplitude: 70, wavelength: 10_000, hilliness: false, home: false },
   /** Hills: a climb or descent that lasts long enough to choose a gear. */
-  { amplitude: 42, wavelength: 2500, hilliness: true, home: true },
+  { amplitude: 58, wavelength: 2500, hilliness: true, home: true },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
-  { amplitude: 12, wavelength: 420, hilliness: false, home: true },
+  { amplitude: 18, wavelength: 420, hilliness: false, home: true },
 ];
 
 /** How far you drive before flat country becomes hill country, metres. */

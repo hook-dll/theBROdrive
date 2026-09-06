@@ -33,6 +33,7 @@ import { TRUNK_CELL_COUNT } from './trunk';
  */
 const SOVIET = '/models/soviet';
 const STYLIZED = '/models/stylized';
+const SAAS = '/models/saas';
 
 /**
  * The Stylized pack's palette, converted from the PSD it ships as (see
@@ -466,7 +467,7 @@ export interface CarModelDef {
    * shared 9x2 atlas, replaced in the fragment shader; Stylized bodies sample a
    * light-to-dark ramp of a 32x32 palette, replaced by rebuilding that palette.
    */
-  readonly paintStyle?: 'soviet-atlas' | 'stylized-palette';
+  readonly paintStyle?: 'soviet-atlas' | 'stylized-palette' | 'solid-paint';
   /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
   readonly paintUvCell?: readonly [number, number];
   /** The Stylized palette block holding this body's coachwork colour. */
@@ -1704,6 +1705,44 @@ const ENTRIES: readonly Entry[] = [
   // named animated wheels and one mesh per independently controlled lamp channel.
   // -------------------------------------------------------------------------
   ...STYLIZED_CARS,
+
+  // -------------------------------------------------------------------------
+  // Private GTA SA mod conversion. The offline normalizer keeps only the exterior,
+  // closes the underbody, and flattens the source's material forest into six
+  // texture-free runtime roles while preserving the authored doors and wheel assemblies.
+  // -------------------------------------------------------------------------
+  {
+    id: 'sa_azlk2141',
+    label: 'AZLK-2141 Svyatogor',
+    dir: SAAS,
+    glb: 'azlk2141.glb',
+    glassMaterial: 'car_glass',
+    paintStyle: 'solid-paint',
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+    },
+    wheelNodes: {
+      wheel_fl: ['wheel_fl', 'hub_fl'],
+      wheel_fr: ['wheel_fr', 'hub_fr'],
+      wheel_rl: ['wheel_rl', 'hub_rl'],
+      wheel_rr: ['wheel_rr', 'hub_rr'],
+    },
+    bodyClass: 'car',
+    // The DFF's 2.979 m axle spacing is normalized to the real 2.58 m wheelbase.
+    scale: 0.86595,
+    mass: 1070,
+    engineId: 'engine_i4_1600',
+    gearboxId: 'gearbox_manual5',
+    tankLitres: 55,
+    wheelGrip: 0.65,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    dragArea: 0.74,
+  },
 ];
 
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
