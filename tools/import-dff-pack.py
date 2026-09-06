@@ -27,19 +27,17 @@ DIST = ROOT / "dist" / "models" / "saas"
 # a synthetic floor, and whether the car takes the Soviet pack's road wheel.
 #
 # Bodies whose own geometry already closes the underside get no floor plate: adding
-# one there only buries a slab inside the authored floor. The saloons and the small
-# van run the Soviet 2109 wheel so the whole Lada-shaped half of the catalogue
-# stands on one wheel; the UAZ pair and the Sobol keep their own, because a light
-# alloy road wheel under a working 4x4 reads as a mistake.
+# one there only buries a slab inside the authored floor. The Oka and the IZH run
+# the Soviet 2109 wheel so the Lada-shaped half of the catalogue stands on one
+# wheel; the UAZ keeps its own, because a light road wheel under a working 4x4
+# reads as a mistake.
+#
+# The pack's other five bodies (both Samaras, the 2110, the Sobol and the UAZ-469)
+# were cut from the catalogue: better source models are wanted for those cars.
 MODELS = (
-    ("vaz2115", ROOT / "SARUS" / "ВАЗ 2115" / "tahoma.dff", 45_000, True, True),
-    ("gaz2217", ROOT / "SARUS" / "ГАЗ 2217 Соболь" / "pony.dff", 30_000, True, False),
     ("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 30_000, False, True),
     ("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 30_000, False, False),
-    ("uaz469", ROOT / "SARUS" / "УАЗ 469" / "rnchlure.dff", 30_000, True, False),
     ("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 30_000, False, True),
-    ("vaz2114", ROOT / "SARUS" / "ВАЗ 2114" / "uranus.dff", 45_000, True, True),
-    ("vaz2110", ROOT / "SARUS" / "ВАЗ 2110" / "admiral.dff", 45_000, True, True),
 )
 
 # The Soviet pack's own road wheel, reused rather than re-modelled. `09.wheel_fr`
@@ -241,8 +239,11 @@ def new_runtime_material(name: str) -> bpy.types.Material:
         "Tyres": (0.018, 0.02, 0.022, 1.0),
     }
     bsdf.inputs["Base Color"].default_value = colors[name]
-    bsdf.inputs["Roughness"].default_value = 0.28 if name == "car_paint" else 0.55
-    bsdf.inputs["Metallic"].default_value = 0.35 if name == "car_paint" else 0.0
+    # Matte painted steel, like the Soviet pack: a metallic paint slot tints its own
+    # highlight with the body colour, which under a warm sun turned every car a
+    # different shade of wrong beside its neighbours.
+    bsdf.inputs["Roughness"].default_value = 0.5 if name == "car_paint" else 0.55
+    bsdf.inputs["Metallic"].default_value = 0.0
     return material
 
 
