@@ -26,8 +26,15 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 
-/** Rim fraction of the wheel radius. A 13-inch steel wheel on a 175/70 tyre is 0.6. */
-const RIM_FRACTION = 0.58;
+/**
+ * Rim fraction of the wheel radius.
+ *
+ * Measured against the Soviet pack's own wheels: the painted disc reaches about
+ * two thirds of the way out and the tyre is the black band around it. Cut it much
+ * tighter and only a silver stud is left in the middle of a black circle, which is
+ * a wheel you cannot see at all from across the road.
+ */
+const RIM_FRACTION = 0.65;
 
 const [, , input, output = input] = process.argv;
 if (!input) {
@@ -52,8 +59,8 @@ function findOrCreate(name, build) {
 const rim = findOrCreate('wheel_rim', () =>
   document
     .createMaterial('wheel_rim')
-    .setBaseColorFactor([0.4, 0.41, 0.42, 1])
-    .setMetallicFactor(0.3)
+    .setBaseColorFactor([0.3, 0.31, 0.32, 1])
+    .setMetallicFactor(0.2)
     .setRoughnessFactor(0.5),
 );
 const tyre = findOrCreate('Tyres', () =>
