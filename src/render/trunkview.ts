@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createItemMesh } from './partmesh';
+import { createItemMesh, disposeItemMeshResources } from './partmesh';
 import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
@@ -187,6 +187,7 @@ export class TrunkView {
         for (const material of materials) {
           if (material.customProgramCacheKey() === CONDITION_PROGRAM_KEY) material.dispose();
         }
+        disposeItemMeshResources(mesh);
       });
       this.root.remove(holder);
     }

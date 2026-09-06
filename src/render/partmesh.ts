@@ -885,6 +885,131 @@ function buildSunShadesInto(b: MeshBuilder, tint: ShadeTint): void {
   b.box('shade_arm_r', 0.012, 0.014, 0.16, frame, [0.105, 0.025, -0.075]);
 }
 
+function buildProfessionalCameraInto(b: MeshBuilder): void {
+  const body = flat(0x202224, 0.78);
+  const rubber = flat(0x121416, 0.92);
+  const metal = cond(0x555b60, 0.65, 0.42);
+  const glass = flat(0x263841, 0.25);
+
+  // Full-size magnesium body, deep right-hand grip and a raised pentaprism make
+  // this read as a professional SLR silhouette rather than a compact camera.
+  b.box('camera_body', 0.25, 0.145, 0.09, body, [0, 0, 0]);
+  b.box('camera_grip', 0.07, 0.17, 0.105, rubber, [0.105, -0.012, 0.006]);
+  b.box('camera_prism', 0.09, 0.055, 0.075, body, [-0.018, 0.092, 0]);
+  b.box('camera_hotshoe', 0.045, 0.008, 0.04, metal, [-0.018, 0.124, -0.005]);
+  b.cylinder('camera_mode_dial', 0.027, 0.027, 0.016, 12, metal, [-0.085, 0.086, 0], ZERO);
+  b.cylinder('camera_shutter', 0.012, 0.012, 0.01, 10, metal, [0.094, 0.093, 0.02], ZERO);
+
+  // Three stepped barrel sections and a broad front element: deliberately as
+  // large as the body is tall, like an L-series zoom on a full-frame DSLR.
+  b.cylinder('camera_lens_mount', 0.072, 0.072, 0.035, 16, metal, [-0.018, 0, 0.06], AXIS_Z);
+  b.cylinder('camera_lens_barrel', 0.067, 0.062, 0.11, 16, rubber, [-0.018, 0, 0.13], AXIS_Z);
+  b.cylinder('camera_focus_ring', 0.071, 0.071, 0.035, 16, body, [-0.018, 0, 0.18], AXIS_Z);
+  b.cylinder('camera_lens_rim', 0.075, 0.075, 0.018, 16, metal, [-0.018, 0, 0.205], AXIS_Z);
+  b.cylinder('camera_lens_glass', 0.064, 0.064, 0.006, 16, glass, [-0.018, 0, 0.218], AXIS_Z);
+}
+
+export const FOOTBALL_RADIUS = 0.11;
+
+function buildFootballInto(b: MeshBuilder): void {
+  const leather = flat(0xe7e0cf, 0.82);
+  const patch = flat(0x292724, 0.88);
+  b.sphere('football_body', FOOTBALL_RADIUS, 16, 10, leather, [0, 0, 0]);
+  // A few low-profile dark panels preserve the classic football read without
+  // introducing a texture beside the primitive-built binoculars and torch.
+  b.sphere('football_patch_front', 0.045, 5, 3, patch, [0, 0, 0.104], [1, 1, 0.12]);
+  b.sphere('football_patch_back', 0.045, 5, 3, patch, [0, 0, -0.104], [1, 1, 0.12]);
+  b.sphere('football_patch_left', 0.045, 5, 3, patch, [-0.104, 0, 0], [0.12, 1, 1]);
+  b.sphere('football_patch_right', 0.045, 5, 3, patch, [0.104, 0, 0], [0.12, 1, 1]);
+  b.sphere('football_patch_top', 0.045, 5, 3, patch, [0, 0.104, 0], [1, 0.12, 1]);
+  b.sphere('football_patch_bottom', 0.045, 5, 3, patch, [0, -0.104, 0], [1, 0.12, 1]);
+}
+
+function buildPocketWatchBodyInto(b: MeshBuilder): void {
+  const caseMetal = cond(0xb08b45, 0.82, 0.34);
+  const face = flat(0xd8d2c4, 0.48);
+  const ink = flat(0x29251e, 0.72);
+  b.cylinder('pocket_watch_case', 0.068, 0.068, 0.018, 20, caseMetal, [0, 0, 0], AXIS_Z);
+  b.cylinder('pocket_watch_face', 0.059, 0.059, 0.004, 20, face, [0, 0, 0.012], AXIS_Z);
+  for (let hour = 0; hour < 12; hour++) {
+    const angle = hour * Math.PI / 6;
+    const radius = hour % 3 === 0 ? 0.047 : 0.05;
+    const length = hour % 3 === 0 ? 0.014 : 0.009;
+    b.box(
+      `pocket_watch_tick_${hour}`,
+      0.0035,
+      length,
+      0.0025,
+      ink,
+      [Math.sin(angle) * radius, Math.cos(angle) * radius, 0.015],
+      [0, 0, -angle],
+    );
+  }
+  b.cylinder('pocket_watch_crown', 0.011, 0.011, 0.016, 10, caseMetal, [0, 0.077, 0], AXIS_X);
+  b.torus('pocket_watch_loop', 0.018, 0.005, 8, 14, caseMetal, [0, 0.096, 0]);
+}
+
+function createPocketWatchMesh(open: boolean): THREE.Group {
+  const root = buildGroup(itemBlueprint('pocket_watch_body', buildPocketWatchBodyInto).instructions);
+
+  const ink = flat(0x29251e, 0.72);
+  const needle = buildGroup(
+    itemBlueprint('pocket_watch_needle', (b) => {
+      b.box('pocket_watch_hand', 0.004, 0.046, 0.003, ink, [0, 0.023, 0.018]);
+      b.cylinder('pocket_watch_pin', 0.006, 0.006, 0.004, 10, ink, [0, 0, 0.019], AXIS_Z);
+    }).instructions,
+  );
+  needle.name = 'pocket_watch_needle';
+  root.add(needle);
+
+  const coverMetal = cond(0xa78340, 0.82, 0.38);
+  const cover = buildGroup(
+    itemBlueprint('pocket_watch_cover', (b) => {
+      b.cylinder('pocket_watch_lid_disc', 0.069, 0.069, 0.012, 20, coverMetal, [0, -0.068, 0], AXIS_Z);
+      b.torus('pocket_watch_lid_ring', 0.053, 0.003, 8, 18, coverMetal, [0, -0.068, 0.007]);
+    }).instructions,
+  );
+  cover.name = 'pocket_watch_cover';
+  cover.position.set(0, 0.068, 0.024);
+  root.add(cover);
+  setPocketWatchState(root, open ? 1 : 0, 0);
+  return root;
+}
+
+/** Animates the hinged lid and the same twelve-hour, single-hand dial the HUD used. */
+export function setPocketWatchState(root: THREE.Object3D, openness: number, timeOfDay: number): void {
+  const cover = root.getObjectByName('pocket_watch_cover');
+  if (cover) cover.rotation.x = -Math.min(1, Math.max(0, openness)) * Math.PI * 0.76;
+  const needle = root.getObjectByName('pocket_watch_needle');
+  if (needle) {
+    const halfDay = 12 * 60 * 60;
+    const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
+    needle.rotation.z = -fraction * Math.PI * 2;
+  }
+}
+
+function createPhotographMesh(imageDataUrl: string): THREE.Group {
+  const root = buildGroup(
+    itemBlueprint('photograph', (b) => {
+      const paper = flat(0xe9e0cb, 0.86);
+      b.box('photograph_paper', 0.19, 0.135, 0.006, paper, [0, 0, 0]);
+    }).instructions,
+  );
+  const texture = new THREE.TextureLoader().load(imageDataUrl);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+  material.userData.itemOwnedResource = true;
+  const image = new THREE.Mesh(cachedGeo('photograph_image', () => new THREE.PlaneGeometry(0.164, 0.092)), material);
+  image.name = 'photograph_image';
+  image.position.set(0, 0.012, 0.004);
+  root.add(image);
+  return root;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -943,7 +1068,30 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return buildGroup(
         itemBlueprint(`sun_shades_${item.tint}`, (b) => buildSunShadesInto(b, item.tint)).instructions,
       );
+    case 'camera':
+      return buildGroup(itemBlueprint('professional_camera', buildProfessionalCameraInto).instructions);
+    case 'photograph':
+      return createPhotographMesh(item.imageDataUrl);
+    case 'football':
+      return buildGroup(itemBlueprint('football', buildFootballInto).instructions);
+    case 'pocket_watch':
+      return createPocketWatchMesh(item.open);
   }
+}
+
+/** Releases per-instance image resources; primitive geometry and flat materials stay cached. */
+export function disposeItemMeshResources(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of materials) {
+      if (material.userData.itemOwnedResource !== true) continue;
+      const mapped = material as THREE.Material & { map?: THREE.Texture | null };
+      mapped.map?.dispose();
+      material.dispose();
+    }
+  });
 }
 
 /** Releases every cached BufferGeometry. Call on teardown. */

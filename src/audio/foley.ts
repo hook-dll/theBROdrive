@@ -285,6 +285,15 @@ export class Foley {
     this.mixer.blip(this.out, { gain: 0.12, frequency: 1600, endFrequency: 700, decay: 0.04 });
   }
 
+  /** Mechanical mirror slap followed by the second shutter curtain. */
+  cameraShutter(): void {
+    this.mixer.burst(this.out, { gain: 0.19, frequency: 1250, q: 1.8, decay: 0.045 });
+    this.mixer.blip(this.out, { gain: 0.12, frequency: 420, endFrequency: 260, decay: 0.07 });
+    window.setTimeout(() => {
+      this.mixer.burst(this.out, { gain: 0.13, frequency: 920, q: 2.2, decay: 0.035 });
+    }, 65);
+  }
+
   reload(): void {
     this.mixer.burst(this.out, { gain: 0.2, frequency: 1100, q: 2.5, decay: 0.07 });
     window.setTimeout(() => {

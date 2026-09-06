@@ -1,6 +1,5 @@
 import { itemLabel } from '../items/items';
 import type { Item } from '../items/items';
-import { DAY_LENGTH } from '../game/state';
 import type { EngineTempReadout } from '../vehicle/cooling';
 
 /**
@@ -121,7 +120,6 @@ export class Hud {
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly odometerEl: HTMLElement;
-  private readonly clockNeedle: SVGLineElement;
   private readonly toastEl: HTMLElement;
   private readonly radioEl: HTMLElement;
   private readonly gumBubbleEl: HTMLElement;
@@ -130,7 +128,6 @@ export class Hud {
   private tachDeg = -1;
   private speedDeg = -1;
   private fuelDeg = -1;
-  private clockDeg = -1;
   private temperatureDeg = -1;
   private warningsSignature = '';
   private invSlots: HTMLElement[] = [];
@@ -173,8 +170,6 @@ export class Hud {
     this.temperatureCluster = el('div', 'hud-speed-cluster');
     this.temperatureCluster.append(temperature.svg, this.temperatureReadoutEl);
 
-    const clock = this.buildClock();
-    this.clockNeedle = clock.needle;
 
     this.gearEl = el('div', 'hud-gear');
 
@@ -193,7 +188,7 @@ export class Hud {
     this.warningsEl = el('div', 'hud-warnings is-hidden');
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, speedCluster, fuel.svg, this.temperatureCluster, clock.svg, indicators);
+    gaugeRow.append(tach.svg, speedCluster, fuel.svg, this.temperatureCluster, indicators);
 
     this.drivingCluster.append(
       gaugeRow,
@@ -284,46 +279,6 @@ export class Hud {
     return { svg, value, needle };
   }
 
-  /** A numberless single-hand clock, using the dashboard dial palette. */
-  private buildClock(): { svg: SVGSVGElement; needle: SVGLineElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-dial hud-clock-dial');
-    svg.setAttribute('viewBox', `0 0 ${TACH_SIZE} ${TACH_SIZE}`);
-    svg.setAttribute('width', String(TACH_SIZE));
-    svg.setAttribute('height', String(TACH_SIZE));
-
-    const track = svgEl('circle');
-    track.setAttribute('class', 'hud-dial-track');
-    track.setAttribute('cx', String(CX));
-    track.setAttribute('cy', String(CY));
-    track.setAttribute('r', String(R));
-    svg.appendChild(track);
-
-    // Twelve numberless hour marks, inside the thick outer track so they read as
-    // printing on the face rather than as teeth on its rim. Quarter-hours are only
-    // two viewBox units longer: enough to orient the eye immediately, not enough to
-    // turn a tiny dashboard clock into a labelled wall clock.
-    for (let hour = 0; hour < 12; hour++) {
-      const deg = hour * 30 - 90; // 12 o'clock is straight up in SVG coordinates.
-      const quarter = hour % 3 === 0;
-      const inner = polar(CX, CY, quarter ? R - 15 : R - 12, deg);
-      const outer = polar(CX, CY, R - 7, deg);
-      const tick = svgEl('line');
-      tick.setAttribute('class', quarter ? 'hud-clock-tick is-quarter' : 'hud-clock-tick');
-      tick.setAttribute('x1', inner.x.toFixed(2));
-      tick.setAttribute('y1', inner.y.toFixed(2));
-      tick.setAttribute('x2', outer.x.toFixed(2));
-      tick.setAttribute('y2', outer.y.toFixed(2));
-      svg.appendChild(tick);
-    }
-
-    const needle = svgEl('line');
-    needle.setAttribute('class', 'hud-dial-needle');
-    needle.setAttribute('x1', String(CX));
-    needle.setAttribute('y1', String(CY));
-    svg.appendChild(needle);
-    return { svg, needle };
-  }
 
   setDriving(readout: DrivingReadout | null): void {
     if (readout === null) {
@@ -512,17 +467,8 @@ export class Hud {
     }
   }
 
-  setTravel(km: number, timeOfDay: number): void {
+  setTravel(km: number): void {
     this.setText(this.odometerEl, `TRIP ${km.toFixed(1)} km`);
-    const halfDay = DAY_LENGTH * 0.5;
-    const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
-    const deg = -90 + fraction * 360;
-    const rounded = Math.round(deg * 10) / 10;
-    if (rounded === this.clockDeg) return;
-    this.clockDeg = rounded;
-    const tip = polar(CX, CY, NEEDLE_R, deg);
-    this.setAttr(this.clockNeedle, 'x2', tip.x.toFixed(2));
-    this.setAttr(this.clockNeedle, 'y2', tip.y.toFixed(2));
   }
 
   setToast(text: string): void {

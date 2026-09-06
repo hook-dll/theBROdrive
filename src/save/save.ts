@@ -15,7 +15,7 @@ import type {
 } from '../game/state';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
-import type { Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { variant, type PartInstance } from '../parts/registry';
 import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
@@ -748,6 +748,30 @@ function migrateItem(raw: unknown, where: string): Item {
       }
       return { type: 'sun_shades', id: obj.id, tint };
     }
+    case 'camera':
+      return {
+        type: 'camera',
+        id: obj.id,
+        framesRemaining: Math.min(
+          CAMERA_FRAME_LIMIT,
+          Math.max(0, Math.trunc(numOr(obj.framesRemaining, CAMERA_FRAME_LIMIT))),
+        ),
+      };
+    case 'photograph': {
+      const imageDataUrl = obj.imageDataUrl;
+      if (
+        typeof imageDataUrl !== 'string'
+        || !imageDataUrl.startsWith('data:image/jpeg;base64,')
+        || imageDataUrl.length > 1_000_000
+      ) {
+        throw new Error(`Save data is malformed: photograph at ${where} has invalid image data`);
+      }
+      return { type: 'photograph', id: obj.id, imageDataUrl };
+    }
+    case 'football':
+      return { type: 'football', id: obj.id };
+    case 'pocket_watch':
+      return { type: 'pocket_watch', id: obj.id, open: obj.open === true };
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);
   }

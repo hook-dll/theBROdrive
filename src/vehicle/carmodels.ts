@@ -393,7 +393,10 @@ const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
  */
 export interface VehicleLightsDef {
   readonly headlights: readonly string[];
+  /** Running-light lenses; models with combined rear lenses omit `brakeLights`. */
   readonly taillights: readonly string[];
+  /** Dedicated stop-lamp lenses when braking does not use the running-light section. */
+  readonly brakeLights?: readonly string[];
   readonly reverseLights?: readonly string[];
   readonly leftBlinkers?: readonly string[];
   readonly rightBlinkers?: readonly string[];
@@ -1207,6 +1210,10 @@ const GTAV_CARS: readonly Entry[] = GTAV_SPECS.map((spec) => ({
   lights: {
     headlights: ['headlights'],
     taillights: ['taillights'],
+    brakeLights: ['brake_lights'],
+    reverseLights: ['reverse_lights'],
+    leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+    rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
   },
   // One wheel mesh instanced at four corners: tyre, rim and hub are one node.
   wheelNodes: {

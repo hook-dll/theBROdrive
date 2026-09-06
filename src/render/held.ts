@@ -12,7 +12,12 @@
  * `renderer.render()`.
  */
 import * as THREE from 'three';
-import { createItemMesh, setBubbleGumPieceCount } from './partmesh';
+import {
+  createItemMesh,
+  disposeItemMeshResources,
+  setBubbleGumPieceCount,
+  setPocketWatchState,
+} from './partmesh';
 import { setPartCondition } from './materials';
 import { itemMass } from '../items/items';
 import type { Item } from '../items/items';
@@ -134,6 +139,8 @@ export class HeldItemView {
       gumUseProgress: number;
       /** Sticks left after the current use; the detached stick remains visible until the mouth. */
       gumCharges: number;
+      /** Accelerated game clock, used by the single-hand pocket-watch dial. */
+      timeOfDay: number;
     },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
@@ -176,9 +183,14 @@ export class HeldItemView {
     // but the returning empty wrapper is still the same 20 g viewmodel.
     const visibleMass = this.heldType === 'bubble_gum' ? 0.02 : item ? itemMass(item) : 0.02;
     const h = this.heaviness(visibleMass);
-    const baseX = LIGHT_X + (HEAVY_X - LIGHT_X) * h;
-    const baseY = LIGHT_Y + (HEAVY_Y - LIGHT_Y) * h;
-    const baseZ = -(HOLD_DIST_LIGHT + (HOLD_DIST_HEAVY - HOLD_DIST_LIGHT) * h);
+    let baseX = LIGHT_X + (HEAVY_X - LIGHT_X) * h;
+    let baseY = LIGHT_Y + (HEAVY_Y - LIGHT_Y) * h;
+    let baseZ = -(HOLD_DIST_LIGHT + (HOLD_DIST_HEAVY - HOLD_DIST_LIGHT) * h);
+    if (item?.type === 'photograph') {
+      baseX = 0.12;
+      baseY = -0.055;
+      baseZ = -0.3;
+    }
 
     // Gentle idle sway.
     let ox = Math.sin(t * 0.9) * SWAY_X;
@@ -224,6 +236,34 @@ export class HeldItemView {
       this.mesh.visible = !use;
       pitch -= TILT_PITCH;
       yaw += Math.PI - TILT_YAW;
+      roll -= TILT_ROLL;
+    } else if (item?.type === 'camera') {
+      this.useT = ramp(this.useT, use, USE_RAMP * 1.35, d);
+      const raised = this.useT;
+      // The viewfinder mask takes over only once the body has reached the eye.
+      // Until then the large lens and grip remain visible through the whole lift.
+      this.mesh.visible = raised < 0.97;
+      ox += -baseX * raised;
+      oy += (0.005 - baseY) * raised;
+      oz += (-0.13 - baseZ) * raised;
+      pitch -= TILT_PITCH * raised;
+      yaw += (Math.PI - TILT_YAW) * raised;
+      roll -= TILT_ROLL * raised;
+    } else if (item?.type === 'pocket_watch') {
+      this.useT = ramp(this.useT, item.open, USE_RAMP * 0.8, d);
+      const opened = this.useT;
+      setPocketWatchState(this.mesh, opened, opts.timeOfDay);
+      ox += -baseX * opened;
+      oy += (0.015 - baseY) * opened;
+      oz += (-0.21 - baseZ) * opened;
+      pitch -= TILT_PITCH * opened;
+      yaw -= TILT_YAW * opened;
+      roll -= TILT_ROLL * opened;
+    } else if (item?.type === 'photograph') {
+      // The photograph is itself the display: square it to the eye instead of
+      // presenting its paper edge in the generic carry pose.
+      pitch -= TILT_PITCH;
+      yaw -= TILT_YAW;
       roll -= TILT_ROLL;
     } else if (item?.type === 'torchlight') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
@@ -333,6 +373,7 @@ export class HeldItemView {
         if (mat.customProgramCacheKey() === CONDITION_PROGRAM_KEY) mat.dispose();
       }
     });
+    disposeItemMeshResources(this.mesh);
     this.hand.remove(this.mesh);
     this.mesh = null;
     this.heldType = null;

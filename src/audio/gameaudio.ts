@@ -109,6 +109,10 @@ export class GameAudio {
     this.foleyVoices.dryFire();
   }
 
+  cameraShutter(): void {
+    this.foleyVoices.cameraShutter();
+  }
+
   reload(): void {
     this.foleyVoices.reload();
   }

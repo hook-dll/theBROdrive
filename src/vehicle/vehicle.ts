@@ -1583,7 +1583,7 @@ type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
 type IndicatorSide = 'off' | 'left' | 'right';
 
 const HEADLIGHT_EMISSIVE = 0xffffff;
-/** Tail lenses are red even when unlit; braking only raises their red emission. */
+/** Running and stop lenses are red even when unlit; controls only raise their emission. */
 const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
 const BLINKER_EMISSIVE = 0xff8a00;
@@ -1697,6 +1697,7 @@ export class Vehicle implements Rebasable {
   private restoredLightStatePending = true;
   private readonly headlightLensMaterials: EmissiveMaterial[] = [];
   private readonly taillightMaterials: EmissiveMaterial[] = [];
+  private readonly brakeLightMaterials: EmissiveMaterial[] = [];
   private readonly reverseLightMaterials: EmissiveMaterial[] = [];
   private readonly leftBlinkerMaterials: EmissiveMaterial[] = [];
   private readonly rightBlinkerMaterials: EmissiveMaterial[] = [];
@@ -4875,6 +4876,7 @@ export class Vehicle implements Rebasable {
       lights.taillights,
       this.taillightMaterials,
     );
+    this.bindLampMaterials(lights.brakeLights, this.brakeLightMaterials);
     this.reverseLightLensMeshes = this.bindLampMaterials(
       lights.reverseLights,
       this.reverseLightMaterials,
@@ -4987,26 +4989,30 @@ export class Vehicle implements Rebasable {
   }
 
   private applyRearLightState(force = false): void {
-    const next = this.restoredLightStatePending
-      ? (this.car.taillightsOn ? 1 : 0)
-      : this.brakeLightCommand > 0.03
-        ? 2
-        : this.headlightMode === 'off'
-          ? 0
-          : 1;
+    const braking = !this.restoredLightStatePending && this.brakeLightCommand > 0.03;
+    const running = this.restoredLightStatePending
+      ? this.car.taillightsOn
+      : this.headlightMode !== 'off';
+    const next = (running ? 1 : 0) | (braking ? 2 : 0);
     if (force || next !== this.rearLightState) {
       this.rearLightState = next;
-      const intensity = next === 2 ? 6 : next === 1 ? 0.55 : 0;
+      const combinedRearLens = this.brakeLightMaterials.length === 0;
+      let runningIntensity = running ? 0.55 : 0;
+      if (combinedRearLens && braking) runningIntensity = 6;
       for (const material of this.taillightMaterials) {
-        material.emissive.setHex(intensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
-        material.emissiveIntensity = intensity;
+        material.emissive.setHex(runningIntensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
+        material.emissiveIntensity = runningIntensity;
       }
-      const authoredBeamIntensity =
-        next === 2
-          ? TAILLIGHT_BEAM.brakeIntensity
-          : next === 1
-            ? TAILLIGHT_BEAM.runningIntensity
-            : 0;
+      const brakeIntensity = braking ? 6 : 0;
+      for (const material of this.brakeLightMaterials) {
+        material.emissive.setHex(brakeIntensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
+        material.emissiveIntensity = brakeIntensity;
+      }
+      const authoredBeamIntensity = braking
+        ? TAILLIGHT_BEAM.brakeIntensity
+        : running
+          ? TAILLIGHT_BEAM.runningIntensity
+          : 0;
       this.taillightBeamIntensity = authoredBeamIntensity * this.headlightEnvironmentFactor;
     }
     const reversing = this.restoredLightStatePending
@@ -5049,6 +5055,7 @@ export class Vehicle implements Rebasable {
   private clearVisuals(): void {
     for (const material of this.headlightLensMaterials) material.dispose();
     for (const material of this.taillightMaterials) material.dispose();
+    for (const material of this.brakeLightMaterials) material.dispose();
     for (const material of this.reverseLightMaterials) material.dispose();
     for (const material of this.leftBlinkerMaterials) material.dispose();
     for (const material of this.rightBlinkerMaterials) material.dispose();
@@ -5064,6 +5071,7 @@ export class Vehicle implements Rebasable {
     this.reverseLightLensMeshes = [];
     this.headlightLensMaterials.length = 0;
     this.taillightMaterials.length = 0;
+    this.brakeLightMaterials.length = 0;
     this.reverseLightMaterials.length = 0;
     this.leftBlinkerMaterials.length = 0;
     this.rightBlinkerMaterials.length = 0;

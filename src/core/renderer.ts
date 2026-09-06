@@ -266,6 +266,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
+  uniform float uCameraViewfinder;
 
   const float SCALE_HEIGHT_M = ${glslFloat(HAZE_SCALE_HEIGHT_M)};
   const float REF_PATH_M = ${glslFloat(HAZE_REF_PATH_M)};
@@ -473,6 +474,14 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float ocular = max(leftEye, rightEye);
     color.rgb *= mix(1.0, ocular, uBinoculars);
 
+    // A broad, softly rounded eyecup vignette: unlike the binocular mask it keeps
+    // one professional-camera frame, but the dark top, bottom and corners make the
+    // eye-at-viewfinder state unmistakable.
+    vec2 finder = abs(vUv * 2.0 - 1.0);
+    float finderShape = pow(finder.x, 8.0) + pow(finder.y / 0.84, 8.0);
+    float finderMask = 1.0 - smoothstep(0.82, 1.04, finderShape);
+    color.rgb *= mix(1.0, finderMask, uCameraViewfinder);
+
     gl_FragColor = color;
   }
 `;
@@ -517,6 +526,9 @@ export class Renderer {
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
+  /** Reused 2D target for compact photographs; created only when the shutter fires. */
+  private photoCanvas: HTMLCanvasElement | null = null;
+  private photoContext: CanvasRenderingContext2D | null = null;
 
 
   /**
@@ -619,6 +631,7 @@ export class Renderer {
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
+        uCameraViewfinder: { value: 0 },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -655,7 +668,12 @@ export class Renderer {
 
 
   /** Updates inexpensive player-held/worn view effects without allocating. */
-  setItemViewEffects(shades: ShadeTint | null, binoculars: boolean, torchlight: boolean): void {
+  setItemViewEffects(
+    shades: ShadeTint | null,
+    binoculars: boolean,
+    torchlight: boolean,
+    cameraViewfinder: boolean,
+  ): void {
     const tint = this.hazeMaterial.uniforms.uViewTint.value as THREE.Color;
     if (shades === 'green') tint.setRGB(0.56, 0.86, 0.52);
     else if (shades === 'yellow') tint.setRGB(0.95, 0.78, 0.42);
@@ -663,6 +681,7 @@ export class Renderer {
     else tint.setRGB(1, 1, 1);
     this.hazeMaterial.uniforms.uViewTintStrength.value = shades === null ? 0 : 0.72;
     this.hazeMaterial.uniforms.uBinoculars.value = binoculars ? 1 : 0;
+    this.hazeMaterial.uniforms.uCameraViewfinder.value = cameraViewfinder ? 1 : 0;
 
     this.torchLight.visible = torchlight;
     if (torchlight) {
@@ -694,40 +713,83 @@ export class Renderer {
     this.pollGpuQueries();
     const query = this.beginGpuTimerQuery();
     try {
-      // Seconds. The field's drift rates are metres per second in its own sampled
-      // space, so time here has to be real time and nothing else.
-      this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
-      this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
-      this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
-        HAZE_MIN_EYE_ABOVE_M,
-        this.hazeEyeHeight,
-      );
-      this.camera.updateWorldMatrix(true, false);
-      (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
-        this.camera.matrixWorld,
-      );
-      this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
-        THREE.MathUtils.degToRad(this.camera.fov) / 2,
-      );
-      // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
-      //
-      // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
-      // (linear) into a render target — only the canvas gets `outputColorSpace` —
-      // and pass 2 copies those texels through untouched, so the frame reaches the
-      // display linear-encoded and roughly a gamma darker than a direct render.
-      // The whole game is lit and painted against that image.
-      //
-      // So this is deliberate, not an oversight: skipping the pass on the cheapest
-      // tier made it the only correctly encoded tier, which read as washed out
-      // beside the other two. Acceptable keeps the pass and drops the WARP instead
-      // (see `setHazeStrength`), which is where the cost actually was.
-      this.renderer.setRenderTarget(this.hazeTarget);
-      this.renderer.render(this.scene, this.camera);
-      this.renderer.setRenderTarget(null);
-      this.renderer.render(this.hazeScene, this.hazeCamera);
+      this.drawFrame();
     } finally {
       if (query !== null) this.endGpuTimerQuery();
     }
+  }
+
+  /**
+   * Captures the actual rendered view at a compact resolution, with eyepiece and
+   * worn-glass effects removed. The ordinary render immediately after this restores
+   * the player's viewfinder; only the photograph receives the clean optical image.
+   */
+  capturePhoto(): string | null {
+    if (this.photoCanvas === null) {
+      this.photoCanvas = document.createElement('canvas');
+      this.photoContext = this.photoCanvas.getContext('2d', { alpha: false });
+    }
+    const target = this.photoCanvas;
+    const context = this.photoContext;
+    if (!target || !context) return null;
+
+    const tintStrength = this.hazeMaterial.uniforms.uViewTintStrength.value as number;
+    const binoculars = this.hazeMaterial.uniforms.uBinoculars.value as number;
+    const viewfinder = this.hazeMaterial.uniforms.uCameraViewfinder.value as number;
+    try {
+      this.hazeMaterial.uniforms.uViewTintStrength.value = 0;
+      this.hazeMaterial.uniforms.uBinoculars.value = 0;
+      this.hazeMaterial.uniforms.uCameraViewfinder.value = 0;
+      this.drawFrame();
+
+      const source = this.renderer.domElement;
+      const longest = Math.max(source.width, source.height, 1);
+      const scale = Math.min(1, 640 / longest);
+      target.width = Math.max(1, Math.round(source.width * scale));
+      target.height = Math.max(1, Math.round(source.height * scale));
+      context.drawImage(source, 0, 0, target.width, target.height);
+      return target.toDataURL('image/jpeg', 0.82);
+    } catch {
+      return null;
+    } finally {
+      this.hazeMaterial.uniforms.uViewTintStrength.value = tintStrength;
+      this.hazeMaterial.uniforms.uBinoculars.value = binoculars;
+      this.hazeMaterial.uniforms.uCameraViewfinder.value = viewfinder;
+    }
+  }
+
+  private drawFrame(): void {
+    // Seconds. The field's drift rates are metres per second in its own sampled
+    // space, so time here has to be real time and nothing else.
+    this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
+    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
+    this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
+      HAZE_MIN_EYE_ABOVE_M,
+      this.hazeEyeHeight,
+    );
+    this.camera.updateWorldMatrix(true, false);
+    (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
+      this.camera.matrixWorld,
+    );
+    this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
+      THREE.MathUtils.degToRad(this.camera.fov) / 2,
+    );
+    // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
+    //
+    // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
+    // (linear) into a render target — only the canvas gets `outputColorSpace` —
+    // and pass 2 copies those texels through untouched, so the frame reaches the
+    // display linear-encoded and roughly a gamma darker than a direct render.
+    // The whole game is lit and painted against that image.
+    //
+    // So this is deliberate, not an oversight: skipping the pass on the cheapest
+    // tier made it the only correctly encoded tier, which read as washed out
+    // beside the other two. Acceptable keeps the pass and drops the WARP instead
+    // (see `setHazeStrength`), which is where the cost actually was.
+    this.renderer.setRenderTarget(this.hazeTarget);
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.hazeScene, this.hazeCamera);
   }
 
   /**

@@ -17,7 +17,7 @@ import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '.
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import { ALL_VARIANTS } from '../parts/registry';
-import type { FluidKind, ShadeTint } from '../items/items';
+import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -134,7 +134,10 @@ export type DevSpawnItemRequest =
   | { readonly type: 'bubble_gum' }
   | { readonly type: 'binoculars' }
   | { readonly type: 'torchlight' }
-  | { readonly type: 'sun_shades'; readonly tint: ShadeTint };
+  | { readonly type: 'sun_shades'; readonly tint: ShadeTint }
+  | { readonly type: 'camera' }
+  | { readonly type: 'football' }
+  | { readonly type: 'pocket_watch' };
 
 function driveLayout(rearDriveBias: number): DriveLayout {
   if (rearDriveBias <= 0) return 'FWD';
@@ -1336,6 +1339,13 @@ export class MainMenu {
         }[] = [
           { label: 'binoculars', detail: 'E toggle · 10x', request: { type: 'binoculars' } },
           { label: 'torchlight', detail: 'E toggle beam', request: { type: 'torchlight' } },
+          {
+            label: 'professional camera',
+            detail: `E viewfinder · ${CAMERA_FRAME_LIMIT} frames`,
+            request: { type: 'camera' },
+          },
+          { label: 'football', detail: 'walk or sprint into it', request: { type: 'football' } },
+          { label: 'pocket watch', detail: 'E open / close', request: { type: 'pocket_watch' } },
           { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
           { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
           { label: 'red sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'red' } },

@@ -14,7 +14,13 @@ import {
   storeSettings,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
-import { Inventory, itemLabel, type Item } from './items/items';
+import {
+  CAMERA_FRAME_LIMIT,
+  Inventory,
+  itemLabel,
+  type CameraItem,
+  type Item,
+} from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity, variant, type PartInstance } from './parts/registry';
@@ -51,7 +57,7 @@ import {
   HomesteadProvider,
   createStartingCar,
   homesteadSpawn,
-  spawnStartingFuelCan,
+  spawnStartingItems,
 } from './world/house';
 import { PoiProvider } from './world/poi';
 import { FreightField } from './world/freight';
@@ -478,6 +484,8 @@ async function boot(): Promise<void> {
    * nothing has to lift a pin.
    */
   player.setShoveLookup((bodyHandle) => {
+    const football = loose.shoveableForBody(bodyHandle);
+    if (football) return football;
     for (const vehicle of vehicles.values()) {
       if (vehicle.chassis.handle === bodyHandle) return vehicle;
     }
@@ -518,7 +526,7 @@ async function boot(): Promise<void> {
     // collide.
     inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
   } else {
-    spawnStartingFuelCan(world, loose);
+    spawnStartingItems(world, loose);
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -660,6 +668,7 @@ async function boot(): Promise<void> {
   const stateForSave = (): typeof world.state => {
     for (const vehicle of vehicles.values()) vehicle.pushState();
     trailerField.pushTransforms();
+    loose.flushToState();
     return world.state;
   };
   installVehicleAutosave(saves, world, stateForSave, saveName, (error) => {
@@ -776,6 +785,9 @@ async function boot(): Promise<void> {
   /** Held devices are edge-toggled by F and reset when their item leaves the hand. */
   let binocularsActive = false;
   let torchlightActive = false;
+  let cameraActive = false;
+  /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
+  let pendingPhotoCamera: CameraItem | null = null;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
   /**
@@ -897,6 +909,7 @@ async function boot(): Promise<void> {
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
     physics.step();
+    loose.fixedUpdate(dt);
 
     // Recover only after Rapier has produced the escaped pose, before origin
     // rebasing and interpolation latches can preserve that pose for another frame.
@@ -945,10 +958,23 @@ async function boot(): Promise<void> {
     const heldAfterSelection = inventory.held;
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
-    if (driving === null && f.useHeld && heldAfterSelection?.type === 'binoculars') {
-      binocularsActive = !binocularsActive;
-    } else if (driving === null && f.useHeld && heldAfterSelection?.type === 'torchlight') {
-      torchlightActive = !torchlightActive;
+    if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
+    if (driving === null && f.useHeld && heldAfterSelection !== null) {
+      if (heldAfterSelection.type === 'binoculars') {
+        binocularsActive = !binocularsActive;
+      } else if (heldAfterSelection.type === 'torchlight') {
+        torchlightActive = !torchlightActive;
+      } else if (heldAfterSelection.type === 'camera') {
+        if (!cameraActive) {
+          cameraActive = true;
+        } else if (heldAfterSelection.framesRemaining > 0) {
+          pendingPhotoCamera = heldAfterSelection;
+        } else {
+          hud.setToast('camera roll is spent');
+        }
+      } else if (heldAfterSelection.type === 'pocket_watch') {
+        heldAfterSelection.open = !heldAfterSelection.open;
+      }
     }
     if (f.useHeld && heldAfterSelection?.type === 'sun_shades') {
       const previous = s.player.wornSunShades;
@@ -1292,6 +1318,8 @@ async function boot(): Promise<void> {
       driving === null && inventory.held?.type === 'binoculars' && binocularsActive;
     const usingTorchlight =
       driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
+    const usingCamera =
+      driving === null && inventory.held?.type === 'camera' && cameraActive;
     camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
 
@@ -1445,7 +1473,7 @@ async function boot(): Promise<void> {
     );
     const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
-    hud.setTravel(activeS / 1000, s.timeOfDay);
+    hud.setTravel(activeS / 1000);
 
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
@@ -1459,13 +1487,18 @@ async function boot(): Promise<void> {
         ? usingBinoculars
         : held?.type === 'torchlight'
           ? usingTorchlight
-          : lastInput.usePrimary;
+          : held?.type === 'camera'
+            ? usingCamera
+            : held?.type === 'pocket_watch'
+              ? held.open
+              : lastInput.usePrimary;
     heldView.update(held, camera.mode, frameDt, {
       usePrimary: heldUse,
       moveMag: Math.min(1, Math.hypot(lastInput.moveX, lastInput.moveZ)),
       speedKmh: target.speedKmh,
       gumUseProgress,
       gumCharges: gumPackCharges,
+      timeOfDay: s.timeOfDay,
     });
 
     // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
@@ -1497,7 +1530,29 @@ async function boot(): Promise<void> {
       s.player.wornSunShades?.tint ?? null,
       usingBinoculars,
       usingTorchlight,
+      usingCamera,
     );
+    if (pendingPhotoCamera !== null) {
+      const cameraItem = pendingPhotoCamera;
+      pendingPhotoCamera = null;
+      const imageDataUrl = renderer.capturePhoto();
+      if (imageDataUrl === null) {
+        hud.setToast('camera could not expose the frame');
+      } else {
+        const added = inventory.add({
+          type: 'photograph',
+          id: world.runtimePartId(),
+          imageDataUrl,
+        });
+        if (added) {
+          cameraItem.framesRemaining = Math.max(0, cameraItem.framesRemaining - 1);
+          audio.cameraShutter();
+          hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
+        } else {
+          hud.setToast('too heavy to carry the photograph');
+        }
+      }
+    }
     renderer.render();
   };
 
@@ -1622,6 +1677,19 @@ async function boot(): Promise<void> {
         break;
       case 'sun_shades':
         item = { type: 'sun_shades', id: world.runtimePartId(), tint: request.tint };
+        break;
+      case 'camera':
+        item = {
+          type: 'camera',
+          id: world.runtimePartId(),
+          framesRemaining: CAMERA_FRAME_LIMIT,
+        };
+        break;
+      case 'football':
+        item = { type: 'football', id: world.runtimePartId() };
+        break;
+      case 'pocket_watch':
+        item = { type: 'pocket_watch', id: world.runtimePartId(), open: false };
         break;
     }
     loose.spawnItem(item, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
