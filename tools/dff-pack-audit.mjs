@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-/** Verify the normalized texture-free GTA SA vehicle contract. */
+/**
+ * Verify the normalized texture-free vehicle contract.
+ *
+ * Usage: node tools/dff-pack-audit.mjs [pack-dir] [--wheels-complete]
+ *
+ * `--wheels-complete` is for a pack whose wheel node already IS the complete
+ * assembly (tyre, rim, hub, axle), so there are no separate `hub_*` nodes to
+ * pair with it. The GTA SA pack needs them because its hub islands had to be
+ * cut out of `Chassis`; a GTA V fragment authors the wheel as one object.
+ */
 
 globalThis.document = {
   createElementNS: () => ({
@@ -20,7 +29,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
-const dir = process.argv[2] ?? 'public/models/saas';
+const args = process.argv.slice(2);
+const wheelsComplete = args.includes('--wheels-complete');
+const dir = args.find((arg) => !arg.startsWith('--')) ?? 'public/models/saas';
 const expectedMaterials = new Set([
   'car_paint',
   'car_trim',
@@ -35,7 +46,7 @@ const expectedMaterials = new Set([
 const requiredNodes = [
   'headlights', 'taillights',
   'wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr',
-  'hub_fl', 'hub_fr', 'hub_rl', 'hub_rr',
+  ...(wheelsComplete ? [] : ['hub_fl', 'hub_fr', 'hub_rl', 'hub_rr']),
 ];
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 let failures = 0;
@@ -146,7 +157,7 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
     if (!wheelMaterials.has('Tyres') || strays.length) {
       fail(file, `wheel_${key} uses [${[...wheelMaterials]}], expected Tyres (+ wheel_rim)`);
     }
-    wheels[key] = centreAndRadius([wheel, hub]);
+    wheels[key] = centreAndRadius(hub ? [wheel, hub] : [wheel]);
   }
 
   // Nose down +Z, the direction the game drives. A GTA body is authored facing the

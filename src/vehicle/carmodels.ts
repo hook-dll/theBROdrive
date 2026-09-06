@@ -21,18 +21,32 @@
 
 import type { BodyClass, EngineSpec, GearboxSpec, SuspensionTuning } from '../parts/registry';
 import { variant } from '../parts/registry';
+import modelFits from './model-fits.json';
+
 import { TRUNK_CELL_COUNT } from './trunk';
+const MODEL_FITS = modelFits as unknown as Record<string, CarModelFit>;
+function modelFit(id: string): CarModelFit {
+  const fit = MODEL_FITS[id];
+  if (!fit) throw new Error(`Model "${id}" is missing fit metadata`);
+  return fit;
+}
+
 
 /**
- * The two vendored packs, each credited beside its models.
+ * The three vendored packs, each credited beside its models.
  *
  *  - SOVIET: Low Poly Soviet Car Pack. Fifteen FBX bodies in centimetres, each
  *    carrying its own wheels, colour taken from a shared 9x2 swatch atlas.
  *  - SAAS: private GTA SA mod conversions, normalized offline into texture-free
  *    GLBs with six runtime material roles and explicit wheel, hub and lamp nodes.
+ *  - GTAV: GTA V add-on fragments (.yft inside an .rpf), normalized by
+ *    `tools/import-yft-vehicle.py` into the same texture-free contract as SAAS.
+ *    Its wheels are one authored assembly instanced at four corners, so these
+ *    bodies have wheel nodes and no separate hub nodes.
  */
 const SOVIET = '/models/soviet';
 const SAAS = '/models/saas';
+const GTAV = '/models/gtav';
 
 /* ---- suspension presets ----
  *
@@ -401,8 +415,29 @@ export interface WheelNodeNames {
   readonly wheel_rr: readonly string[];
 }
 
+/** Geometry metadata needed before the visual asset itself is resident. */
+export interface CarModelFit {
+  readonly halfExtents: readonly [number, number, number];
+  readonly wheels: readonly {
+    readonly id: string;
+    readonly pos: readonly [number, number, number];
+    readonly radius: number;
+    readonly isFront: boolean;
+  }[];
+  readonly anchors: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly pos: readonly [number, number, number];
+    readonly yaw: number;
+  }[];
+  readonly hoodPoint: readonly [number, number, number];
+  readonly visualOffset: readonly [number, number, number];
+}
+
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
+
+
 
 
 export interface CarModelDef {
@@ -411,6 +446,8 @@ export interface CarModelDef {
   readonly label: string;
   /** Model URL (.glb or .fbx), served from public/. */
   readonly file: string;
+  /** Static geometry metadata; lets physics and POI layout precede visual streaming. */
+  readonly fit: CarModelFit;
   /**
    * Base-colour texture URL, when the pack ships its palette separately from the
    * geometry. Both packs do, so the map is loaded once per pack and shared.
@@ -510,7 +547,7 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'scale' | 'suspension' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
+  'file' | 'fit' | 'scale' | 'suspension' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
 > & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb: string;
@@ -1128,6 +1165,58 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
   },
 }));
 
+/**
+ * GTA V add-on conversions. One body so far: the VAZ-2110, extracted from the
+ * fragment's skinned body mesh and its single authored wheel.
+ *
+ * Scale comes from the wheelbase, as everywhere else: the source measures 2.792
+ * between axle centres against the real car's 2492 mm, so 0.89255 puts the track
+ * on 1.39 m, the body on 4.24 m and the roof on 1.41 m — the factory figures.
+ *
+ * The 2110 is a Samara underneath: MacPherson struts in front, a trailing-arm
+ * torsion beam behind, transverse 1.5 and a five-speed transaxle driving the
+ * front wheels. Cd is the one number the car was actually famous for: 0.334,
+ * over 1.89 m² of frontal area.
+ */
+const GTAV_SPECS: readonly Entry[] = [
+  {
+    id: 'gt_vaz2110',
+    label: 'VAZ-2110',
+    dir: GTAV,
+    glb: 'vaz2110.glb',
+    bodyClass: 'car',
+    scale: 0.89255,
+    mass: 1030,
+    engineId: 'engine_samara_1500',
+    gearboxId: 'gearbox_samara_5',
+    tankLitres: 43,
+    wheelGrip: 0.66,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    dragArea: 0.63,
+  },
+];
+
+const GTAV_CARS: readonly Entry[] = GTAV_SPECS.map((spec) => ({
+  ...spec,
+  glassMaterial: 'car_glass',
+  paintStyle: 'solid-paint',
+  lights: {
+    headlights: ['headlights'],
+    taillights: ['taillights'],
+  },
+  // One wheel mesh instanced at four corners: tyre, rim and hub are one node.
+  wheelNodes: {
+    wheel_fl: ['wheel_fl'],
+    wheel_fr: ['wheel_fr'],
+    wheel_rl: ['wheel_rl'],
+    wheel_rr: ['wheel_rr'],
+  },
+}));
+
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
@@ -1141,12 +1230,18 @@ const ENTRIES: readonly Entry[] = [
   // names are normalized offline into the explicit six-role runtime contract.
   // -------------------------------------------------------------------------
   ...SAAS_CARS,
-];
 
+  // -------------------------------------------------------------------------
+  // GTA V add-on fragments. One skinned body mesh and one wheel per .yft, cut
+  // to the exterior and meshopt-compressed without geometry decimation.
+  // -------------------------------------------------------------------------
+  ...GTAV_CARS,
+];
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
   file: `${e.dir}/${e.glb}`,
+  fit: modelFit(e.id),
   textureFile: e.textureFile,
   paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,

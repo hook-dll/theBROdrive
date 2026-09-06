@@ -1,19 +1,12 @@
 /**
- * Loads and measures the complete car models (see vehicle/carmodels.ts).
+ * Loads complete car models (see vehicle/carmodels.ts).
  *
- * The GLB is the authority on shape, so this module's job is to read the shape back
- * out of it: the chassis box comes from the `body` node's bounds, the suspension
- * mounts from the `wheel-*` node positions and each wheel's radius from that node's
- * own bounds. Nothing is guessed and nothing is duplicated in a table.
+ * The GLB remains authoritative for visuals. A small generated fit manifest carries
+ * only the geometry metadata needed by physics and POI placement before a model is
+ * resident; the actual scene is loaded lazily and cloned per instance.
  *
  * Everything a caller gets is in CHASSIS-LOCAL metres: the origin is the centre of
- * the chassis box, which is what Rapier's rigid body and the render group both use.
- * The GLB's own origin sits on the ground between the wheels, so the loaded model
- * has to be pushed down by `visualOffset` inside that group — that single vector is
- * the whole conversion between "what the artist drew" and "what the physics owns".
- *
- * Templates are loaded once and cloned per instance; geometry, materials and the
- * shared colormap texture are all shared between clones.
+ * the chassis box, which is what Rapier's rigid body and render group both use.
  */
 
 import * as THREE from 'three';
@@ -31,6 +24,7 @@ import {
   CAR_MODELS,
   carModel,
   type CarModelDef,
+  type CarModelFit,
   type GizmoAnchorDef,
 } from '../vehicle/carmodels';
 
@@ -142,7 +136,8 @@ interface Template {
 }
 
 const templates = new Map<string, Template>();
-
+const modelLoads = new Map<string, Promise<void>>();
+const paletteLoads = new Map<string, Promise<THREE.Texture>>();
 /**
  * One ready-to-attach instance of every loaded model. GLB parsing is already paid
  * before play; cloning its scene graph was still first paid at a roadside POI or
@@ -912,55 +907,80 @@ const paletteTextures = new Map<string, THREE.Texture>();
 async function loadPalette(url: string): Promise<THREE.Texture> {
   const cached = paletteTextures.get(url);
   if (cached) return cached;
+  const pending = paletteLoads.get(url);
+  if (pending) return pending;
   textures ??= new THREE.TextureLoader();
-  const map = await textures.loadAsync(url);
-  map.flipY = true;
-  tunePaletteTexture(map);
-  paletteTextures.set(url, map);
-  return map;
+  const load = textures
+    .loadAsync(url)
+    .then((map) => {
+      map.flipY = true;
+      tunePaletteTexture(map);
+      paletteTextures.set(url, map);
+      paletteLoads.delete(url);
+      return map;
+    })
+    .catch((error) => {
+      paletteLoads.delete(url);
+      throw error;
+    });
+  paletteLoads.set(url, load);
+  return load;
+}
+
+function loadModel(def: CarModelDef): Promise<void> {
+  if (templates.has(def.id)) return Promise.resolve();
+  const pending = modelLoads.get(def.id);
+  if (pending) return pending;
+
+  const load = (async () => {
+    if (def.textureFile) await loadPalette(def.textureFile);
+    const scene = await loadScene(def.file);
+    if (def.textureFile) {
+      applyTexture(scene, paletteTextures.get(def.textureFile)!);
+    }
+    tuneMaps(scene);
+    templates.set(def.id, buildTemplate(def, scene));
+  })().catch((error) => {
+    modelLoads.delete(def.id);
+    throw error;
+  });
+  modelLoads.set(def.id, load);
+  return load;
 }
 
 /**
- * Loads every model in `ids` (default: the whole catalogue) and measures it.
- *
- * Must finish before the first `Vehicle` is constructed: a vehicle's collider,
- * suspension and mass all come out of the measurement, so there is no meaningful
- * \"not loaded yet\" state for it to run in. Compact normalized GLBs and the Soviet
- * source FBXs are loaded eagerly behind the loading screen.
+ * Loads the selected models once. Calls share the same in-flight promise per model,
+ * so POI streaming, a saved car and a dev spawn cannot duplicate network or parse
+ * work when they request the same asset in one frame.
  */
 export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
+  await Promise.all(defs.map(loadModel));
+}
 
-  // The Soviet palette first, and once for the pack rather than once per body: a
-  // body cannot be repainted until the image its swatch lives in is loaded.
-  const palettes = new Set<string>();
-  for (const def of defs) {
-    if (def.textureFile) palettes.add(def.textureFile);
-  }
-  await Promise.all([...palettes].map((url) => loadPalette(url)));
+/** Lazy-loading entry point used by runtime consumers that need one model. */
+export function loadCarModel(id: string): Promise<void> {
+  return loadModel(carModel(id));
+}
 
-  await Promise.all(
-    defs.map(async (def) => {
-      if (templates.has(def.id)) return;
-      const scene = await loadScene(def.file);
-      if (def.textureFile) {
-        applyTexture(scene, paletteTextures.get(def.textureFile)!);
-      }
-      tuneMaps(scene);
-      templates.set(def.id, buildTemplate(def, scene));
-    }),
-  );
+/** True when a visual template is resident and can be cloned synchronously. */
+export function isCarModelLoaded(id: string): boolean {
+  return templates.has(id);
+}
+
+function measureFromFit(fit: CarModelFit): CarModelMeasure {
+  return fit;
 }
 
 function template(id: string): Template {
   const t = templates.get(id);
-  if (!t) throw new Error(`Car model "${id}" was not preloaded`);
+  if (!t) throw new Error(`Car model "${id}" has not finished loading`);
   return t;
 }
 
-/** Measurements for a preloaded model. */
+/** Measurements are available from the tiny fit manifest before visuals stream in. */
 export function carModelMeasure(id: string): CarModelMeasure {
-  return template(id).measure;
+  return templates.get(id)?.measure ?? measureFromFit(carModel(id).fit);
 }
 
 /** Clear air below a newly-created car before gravity settles its suspension. */
@@ -1013,7 +1033,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   return { body, wheels };
 }
 
-/** A fresh instance of a preloaded model, sharing geometry but owning its paint state. */
+/** A fresh instance of a loaded model, sharing geometry but owning its paint state. */
 export function createCarModel(id: string, appearanceKey = id): CarModelInstance {
   const t = template(id);
   const warmed = warmDrivingInstances.get(id);
@@ -1045,12 +1065,9 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   }
   return group;
 }
-
 /**
- * Clones one driving and one static instance of each model while the loading screen
- * is up, then compiles every car material against the live scene lights. Asset parse,
- * scene-graph clone and GPU program compilation are therefore all paid before play;
- * a POI entering view performs no first-use model work.
+ * Clones instances only for templates already resident. Lazy models warm on their
+ * first visual attach instead of turning the loading screen into a catalogue preload.
  */
 export async function warmCarModelInstances(
   renderer: THREE.WebGLRenderer,
@@ -1061,25 +1078,25 @@ export async function warmCarModelInstances(
   const drivingBodies: THREE.Object3D[] = [];
   compileGroup.position.z = -20;
   scene.add(compileGroup);
-  for (let i = 0; i < CAR_MODELS.length; i++) {
-    const id = CAR_MODELS[i]!.id;
-    const drivingModel = cloneDrivingModel(template(id));
-    warmDrivingInstances.set(id, drivingModel);
+  for (const def of CAR_MODELS) {
+    if (!templates.has(def.id) || warmDrivingInstances.has(def.id)) continue;
+    const drivingModel = cloneDrivingModel(template(def.id));
+    warmDrivingInstances.set(def.id, drivingModel);
     drivingBodies.push(drivingModel.body);
     compileGroup.add(drivingModel.body);
-    const staticModel = cloneStaticModel(id);
+    const staticModel = cloneStaticModel(def.id);
     staticModel.traverse((object) => {
       object.frustumCulled = false;
     });
-    warmStaticInstances.set(id, staticModel);
+    warmStaticInstances.set(def.id, staticModel);
     compileGroup.add(staticModel);
-    if ((i & 1) === 1) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
   await renderer.compileAsync(scene, camera);
   scene.remove(compileGroup);
   for (const model of warmStaticInstances.values()) compileGroup.remove(model);
   for (const body of drivingBodies) compileGroup.remove(body);
 }
+
 
 /**
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
@@ -1124,6 +1141,8 @@ export function disposeCarModelCache(): void {
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
   templates.clear();
+  modelLoads.clear();
+  paletteLoads.clear();
   // The Soviet palette is shared by every body in that pack, so it is released here
   // rather than through the per-material walk above, which would otherwise free it
   // on the first car that referenced it.

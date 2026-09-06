@@ -12,6 +12,8 @@ import {
   carModelMeasure,
   carSpawnYAboveGround,
   createStaticCarModel,
+  isCarModelLoaded,
+  loadCarModel,
 } from '../render/carmodel';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
@@ -391,6 +393,7 @@ function buildPoi(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   disposables: Disposable[],
+  deferredVisuals: Array<() => void>,
   loose: LoosePartField,
   trailers: TrailerField,
   freight: FreightField,
@@ -402,7 +405,7 @@ function buildPoi(
 
   switch (poi.kind) {
     case 'roadside_wrecks':
-      buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks);
+      buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals);
       break;
     case 'gas_stop':
       buildGasStop(ctx, poi, group, bodies, colliders, loose, trailers, counter, shouldLoot);
@@ -748,6 +751,7 @@ function buildWrecks(
   colliders: RAPIER.Collider[],
   wreckTrunks: WreckTrunkField,
   registeredWrecks: string[],
+  deferredVisuals: Array<() => void>,
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
@@ -801,11 +805,28 @@ function buildWrecks(
       });
       continue;
     }
-
     const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
-    const shell = createStaticCarModel(def.id, carId);
-    setFromMatrix(shell, matrix);
-    group.add(shell);
+    const addShell = (): void => {
+      const shell = createStaticCarModel(def.id, carId);
+      setFromMatrix(shell, matrix);
+      group.add(shell);
+    };
+    if (isCarModelLoaded(def.id)) {
+      addShell();
+    } else {
+      let cancelled = false;
+      deferredVisuals.push(() => {
+        cancelled = true;
+      });
+      void loadCarModel(def.id).then(
+        () => {
+          if (!cancelled) addShell();
+        },
+        (error: unknown) => {
+          console.error(`failed to load static car model "${def.id}"`, error);
+        },
+      );
+    }
 
     // A box approximates a static shell well enough for a solid obstacle.
     const collider = addStaticCollider(
@@ -816,6 +837,7 @@ function buildWrecks(
       bodies,
       colliders,
     );
+    const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
     if (!isWorkingCar && collider) {
       wreckTrunks.register({
         id: carId,
@@ -823,10 +845,10 @@ function buildWrecks(
         x: p.x,
         y: originY,
         z: p.z,
-        qx: shell.quaternion.x,
-        qy: shell.quaternion.y,
-        qz: shell.quaternion.z,
-        qw: shell.quaternion.w,
+        qx: rotation.x,
+        qy: rotation.y,
+        qz: rotation.z,
+        qw: rotation.w,
         halfExtents: half,
       });
       registeredWrecks.push(carId);
@@ -1215,6 +1237,7 @@ export class PoiProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const disposables: Disposable[] = [];
+    const deferredVisuals: Array<() => void> = [];
     const registeredWrecks: string[] = [];
 
     for (const poi of pois) {
@@ -1225,6 +1248,7 @@ export class PoiProvider implements ChunkProvider {
         bodies,
         colliders,
         disposables,
+        deferredVisuals,
         this.loose,
         this.trailers,
         this.freight,
@@ -1244,6 +1268,7 @@ export class PoiProvider implements ChunkProvider {
         freight.forgetChunk(bodies);
         this.wreckTrunks.forget(registeredWrecks);
         for (const d of disposables) d.dispose();
+        for (const cancel of deferredVisuals) cancel();
       },
     };
   }

@@ -2192,6 +2192,11 @@ export class Vehicle implements Rebasable {
   get modelMeasure(): CarModelMeasure {
     return this.measure;
   }
+  /** True when a world ray hit this vehicle's cheap interaction collider. */
+  isChassisCollider(colliderHandle: number): boolean {
+    return this.chassisCollider.handle === colliderHandle;
+  }
+
 
   /**
    * Where the ground is in chassis-local metres when this car stands on its own

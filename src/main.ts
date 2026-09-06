@@ -22,7 +22,7 @@ import { TouchControls } from './core/touch';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
-  preloadCarModels,
+  loadCarModel,
   warmCarModelInstances,
 } from './render/carmodel';
 import { preloadTrailerModel } from './render/trailermodel';
@@ -215,11 +215,8 @@ async function boot(): Promise<void> {
   const originAnchor = { x: 0, y: 0, z: 0 };
   // Physics must exist before any provider or field that creates a collider.
   const physics = await PhysicsWorld.create();
-  // Every car's collider, suspension geometry and wheel radii are measured off its
-  // GLB, so the whole catalogue is loaded before anything builds a vehicle, a wreck
-  // or the starting car. ~5 MB from the same origin; there is no later moment where
-  // a half-loaded catalogue would be useful.
-  await preloadCarModels();
+  // Vehicle geometry is loaded per model when the active set or a streamed POI needs
+  // it. The fit manifest keeps physics/layout deterministic without resident meshes.
   // The trailer's GLB is fitted to the trailer's fixed physics before the first
   // trailer can materialise (a POI or a loaded save), exactly like the cars.
   await preloadTrailerModel(TRAILER_MODEL_FIT);
@@ -254,8 +251,8 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
-  // Scene lights now exist, so warm both CPU instances and their exact live shader
-  // permutations before the loading cover leaves. POI streaming never pays first use.
+  // Warm only models already requested by the active set. Later models parse and
+  // compile on demand, before their first Vehicle instance is attached.
   await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
@@ -357,13 +354,45 @@ async function boot(): Promise<void> {
   player.setRoad(road);
 
   const vehicles = new Map<string, Vehicle>();
-  const materializeVehicle = (car: CarState): Vehicle => {
+  const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
+  const loadingModels = new Set<string>();
+  const modelWarmups = new Map<string, Promise<void>>();
+  const materializeVehicle = (car: CarState): Promise<Vehicle> => {
     const existing = vehicles.get(car.id);
-    if (existing) return existing;
-    const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
-    vehicles.set(car.id, vehicle);
-    for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
-    return vehicle;
+    if (existing) return Promise.resolve(existing);
+    const pending = pendingVehicleLoads.get(car.id);
+    if (pending) return pending;
+
+    const promise = (async () => {
+      const def = carModel(car.modelId);
+      if (!loadingModels.has(def.id)) {
+        loadingModels.add(def.id);
+        hud.setToast(`loading ${def.label}`);
+      }
+      await loadCarModel(def.id);
+      let warmup = modelWarmups.get(def.id);
+      if (!warmup) {
+        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
+        modelWarmups.set(def.id, warmup);
+      }
+      await warmup;
+      const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
+      vehicles.set(car.id, vehicle);
+      for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
+      return vehicle;
+    })().then(
+      (vehicle) => {
+        pendingVehicleLoads.delete(car.id);
+        return vehicle;
+      },
+      (error) => {
+        pendingVehicleLoads.delete(car.id);
+        loadingModels.delete(car.modelId);
+        throw error;
+      },
+    );
+    pendingVehicleLoads.set(car.id, promise);
+    return promise;
   };
 
   const trailerVehicleFor = (carId: string): Vehicle | null => vehicles.get(carId) ?? null;
@@ -420,7 +449,10 @@ async function boot(): Promise<void> {
         isTowingCar ||
         withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED)
       ) {
-        materializeVehicle(car);
+        void materializeVehicle(car).catch((error: unknown) => {
+          console.error(`failed to load car model "${car.modelId}"`, error);
+          hud.setToast(`could not load ${carModel(car.modelId).label}`);
+        });
       }
     }
     trailerField.updateActive(
@@ -504,13 +536,32 @@ async function boot(): Promise<void> {
         ACTIVE_LOAD_RADIUS_SQUARED,
       )
     ) {
-      materializeVehicle(delta.car);
+      void materializeVehicle(delta.car).catch((error: unknown) => {
+        console.error(`failed to load car model "${delta.car.modelId}"`, error);
+        hud.setToast(`could not load ${carModel(delta.car.modelId).label}`);
+      });
     }
   });
-
-  // The driven car is selected unconditionally by reconciliation; trailers run
-  // afterwards so their saved hitches can resolve, then loose state follows.
   const initialActiveAnchor = activeWorldAnchor();
+  const initialDrivingId = world.state.player.drivingCarId;
+  const initialTowingIds = new Set(
+    Object.values(world.state.trailers)
+      .filter((trailer) => trailer.hitchedTo !== null)
+      .map((trailer) => trailer.hitchedTo as string),
+  );
+  const initialCars = Object.values(world.state.cars).filter(
+    (car) =>
+      car.id === initialDrivingId ||
+      initialTowingIds.has(car.id) ||
+      withinRadius(
+        car.x,
+        car.z,
+        initialActiveAnchor.x,
+        initialActiveAnchor.z,
+        ACTIVE_LOAD_RADIUS_SQUARED,
+      ),
+  );
+  await Promise.all(initialCars.map(materializeVehicle));
   reconcileActiveWorld(initialActiveAnchor.x, initialActiveAnchor.z);
 
   /**
