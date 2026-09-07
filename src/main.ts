@@ -791,7 +791,7 @@ async function boot(): Promise<void> {
   let cameraActive = false;
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
-  /** 0..1 while an R-key watch shake accelerates four in-game hours; 1 is idle. */
+  /** 0..1 while an E-key watch action accelerates four in-game hours; 1 is idle. */
   let watchFastForwardProgress = 1;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
@@ -989,19 +989,13 @@ async function boot(): Promise<void> {
         } else {
           hud.setToast('camera roll is spent');
         }
-      } else if (heldAfterSelection.type === 'pocket_watch') {
-        heldAfterSelection.open = !heldAfterSelection.open;
+      } else if (
+        heldAfterSelection.type === 'pocket_watch' &&
+        watchFastForwardProgress >= 1
+      ) {
+        watchFastForwardProgress = 0;
+        hud.setToast('watch shaken — winding four hours forward');
       }
-    }
-    if (
-      driving === null &&
-      f.useHeldSecondary &&
-      heldAfterSelection?.type === 'pocket_watch' &&
-      heldAfterSelection.open &&
-      watchFastForwardProgress >= 1
-    ) {
-      watchFastForwardProgress = 0;
-      hud.setToast('watch shaken — winding four hours forward');
     }
     if (f.useHeld && heldAfterSelection?.type === 'sun_shades') {
       const previous = s.player.wornSunShades;
@@ -1517,7 +1511,7 @@ async function boot(): Promise<void> {
           : held?.type === 'camera'
             ? usingCamera
             : held?.type === 'pocket_watch'
-              ? held.open
+              ? true
               : lastInput.usePrimary;
     heldView.update(held, camera.mode, frameDt, {
       usePrimary: heldUse,
@@ -1527,7 +1521,7 @@ async function boot(): Promise<void> {
       gumCharges: gumPackCharges,
       timeOfDay: s.timeOfDay,
       dayFactor: sky.dayFactor,
-      watchShakeProgress:
+      watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
     });
 
@@ -1565,7 +1559,7 @@ async function boot(): Promise<void> {
     if (pendingPhotoCamera !== null) {
       const cameraItem = pendingPhotoCamera;
       pendingPhotoCamera = null;
-      const imageDataUrl = renderer.capturePhoto();
+      const imageDataUrl = renderer.capturePhoto(sky.dayFactor);
       if (imageDataUrl === null) {
         hud.setToast('camera could not expose the frame');
       } else {
@@ -1719,7 +1713,7 @@ async function boot(): Promise<void> {
         item = { type: 'football', id: world.runtimePartId() };
         break;
       case 'pocket_watch':
-        item = { type: 'pocket_watch', id: world.runtimePartId(), open: false };
+        item = { type: 'pocket_watch', id: world.runtimePartId() };
         break;
     }
     loose.spawnItem(item, dropX + origin.x, groundY + 0.3, dropZ + origin.z);

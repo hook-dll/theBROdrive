@@ -949,7 +949,7 @@ function buildPocketWatchBodyInto(b: MeshBuilder): void {
   b.torus('pocket_watch_loop', 0.018, 0.005, 8, 14, caseMetal, [0, 0.096, 0]);
 }
 
-function createPocketWatchMesh(open: boolean): THREE.Group {
+function createPocketWatchMesh(): THREE.Group {
   const root = buildGroup(itemBlueprint('pocket_watch_body', buildPocketWatchBodyInto).instructions);
   // Radium-style lume: dark green by day, self-lit after the sky light has fallen.
   // This material belongs to one watch because emissive state is not part of the
@@ -1007,21 +1007,22 @@ function createPocketWatchMesh(open: boolean): THREE.Group {
   cover.name = 'pocket_watch_cover';
   cover.position.set(0, 0.068, 0.024);
   root.add(cover);
-  setPocketWatchState(root, open ? 1 : 0, 0);
+  setPocketWatchState(root, 0);
   return root;
 }
 
-/** Animates the hinged lid, single-hand dial, and darkness-reactive phosphorescent paint. */
+/** Keeps the lid open, animates the dial, and controls held-only dial hands. */
 export function setPocketWatchState(
   root: THREE.Object3D,
-  openness: number,
   timeOfDay: number,
   dayFactor = 1,
+  handsVisible = false,
 ): void {
   const cover = root.getObjectByName('pocket_watch_cover');
-  if (cover) cover.rotation.x = -Math.min(1, Math.max(0, openness)) * Math.PI * 0.76;
+  if (cover) cover.rotation.x = -Math.PI * 0.76;
   const needle = root.getObjectByName('pocket_watch_needle');
   if (needle) {
+    needle.visible = handsVisible;
     const halfDay = 12 * 60;
     const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
     needle.rotation.z = -fraction * Math.PI * 2;
@@ -1037,20 +1038,26 @@ function createPhotographMesh(imageDataUrl: string): THREE.Group {
   const root = buildGroup(
     itemBlueprint('photograph', (b) => {
       const paper = flat(0xe9e0cb, 0.86);
-      b.box('photograph_paper', 0.19, 0.135, 0.006, paper, [0, 0, 0]);
+      // Keep the overall width, but bring the paper closer to the 16:9 print
+      // so the border can stay narrow and identical on all four sides.
+      b.box('photograph_paper', 0.19, 0.1095, 0.006, paper, [0, 0, 0]);
     }).instructions,
   );
   const texture = new THREE.TextureLoader().load(imageDataUrl);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.MeshBasicMaterial({
+  const material = new THREE.MeshStandardMaterial({
     map: texture,
     side: THREE.DoubleSide,
-    toneMapped: false,
+    roughness: 0.9,
+    metalness: 0,
   });
   material.userData.itemOwnedResource = true;
-  const image = new THREE.Mesh(cachedGeo('photograph_image', () => new THREE.PlaneGeometry(0.164, 0.092)), material);
+  const image = new THREE.Mesh(
+    cachedGeo('photograph_image', () => new THREE.PlaneGeometry(0.184, 0.1035)),
+    material,
+  );
   image.name = 'photograph_image';
-  image.position.set(0, 0.012, 0.004);
+  image.position.set(0, 0, 0.004);
   root.add(image);
   return root;
 }
@@ -1120,7 +1127,7 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'football':
       return buildGroup(itemBlueprint('football', buildFootballInto).instructions);
     case 'pocket_watch':
-      return createPocketWatchMesh(item.open);
+      return createPocketWatchMesh();
   }
 }
 

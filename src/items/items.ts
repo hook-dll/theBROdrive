@@ -13,8 +13,8 @@ export type ToolKind = 'brush' | 'sponge' | 'wrench';
 export type WeaponKind = 'rifle' | 'shotgun';
 export type ShadeTint = 'green' | 'yellow' | 'red';
 
-/** A professional camera takes eleven exposures before its roll is spent. */
-export const CAMERA_FRAME_LIMIT = 11;
+/** A professional camera takes five exposures before its roll is spent. */
+export const CAMERA_FRAME_LIMIT = 5;
 
 /**
  * Everything that can be poured into a car.
@@ -122,8 +122,6 @@ export interface FootballItem {
 export interface PocketWatchItem {
   readonly type: 'pocket_watch';
   readonly id: string;
-  /** The lid is physical item state, so it survives selection changes and saves. */
-  open: boolean;
 }
 
 export type Item =

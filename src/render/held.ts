@@ -149,8 +149,8 @@ export class HeldItemView {
       timeOfDay: number;
       /** 0..1 direct daylight factor; phosphorescent markings brighten as it falls. */
       dayFactor: number;
-      /** Normalized R-key watch-shake cycle, or -1 while idle. */
-      watchShakeProgress: number;
+      /** Normalized pocket-watch action cycle, or -1 while idle. */
+      watchActionProgress: number;
     },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
@@ -256,21 +256,24 @@ export class HeldItemView {
       ox += -baseX * raised;
       oy += (0.005 - baseY) * raised;
       oz += (-0.13 - baseZ) * raised;
-      pitch -= TILT_PITCH * raised;
-      yaw += (Math.PI - TILT_YAW) * raised;
-      roll -= TILT_ROLL * raised;
+      // The lens points away from the player throughout the lift, matching the
+      // flashlight and binocular carry orientation rather than rotating only at
+      // the end of the raise.
+      pitch -= TILT_PITCH;
+      yaw += Math.PI - TILT_YAW;
+      roll -= TILT_ROLL;
     } else if (item?.type === 'pocket_watch') {
-      this.useT = ramp(this.useT, item.open, USE_RAMP * 0.8, d);
-      const opened = this.useT;
-      setPocketWatchState(this.mesh, opened, opts.timeOfDay, opts.dayFactor);
-      ox += -baseX * opened;
-      oy += (0.015 - baseY) * opened;
-      oz += (-0.32 - baseZ) * opened;
-      pitch -= TILT_PITCH * opened;
-      yaw -= TILT_YAW * opened;
-      roll -= TILT_ROLL * opened;
-      if (opts.watchShakeProgress >= 0) {
-        const progress = Math.min(1, opts.watchShakeProgress);
+      // Pocket watches are always open. Their dial hands are deliberately hidden
+      // on loose/trunk meshes and enabled only by this held-item view.
+      setPocketWatchState(this.mesh, opts.timeOfDay, opts.dayFactor, true);
+      ox += -baseX;
+      oy += 0.015 - baseY;
+      oz += -0.32 - baseZ;
+      pitch -= TILT_PITCH;
+      yaw -= TILT_YAW;
+      roll -= TILT_ROLL;
+      if (opts.watchActionProgress >= 0) {
+        const progress = Math.min(1, opts.watchActionProgress);
         const envelope = Math.sin(progress * Math.PI);
         const shake = Math.sin(progress * Math.PI * 2 * WATCH_SHAKE_CYCLES) * envelope;
         ox += shake * WATCH_SHAKE_X;

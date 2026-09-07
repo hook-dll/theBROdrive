@@ -664,7 +664,6 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     {
       type: 'pocket_watch',
       id: world.generatedPartId('home_item', 0, 4),
-      open: false,
     },
     watchX,
     L.floorY + WB_TOP + 0.08,

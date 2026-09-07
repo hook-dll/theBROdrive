@@ -15,8 +15,8 @@ import type {
 } from '../game/state';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
-import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { variant, type PartInstance } from '../parts/registry';
+import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -25,9 +25,9 @@ import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
  * Save files, as both IndexedDB records and shareable text codes.
  *
  * A save holds only `WorldState` — the player's mutations of an otherwise
- * procedural world. Everything generated (road, terrain, POIs, chunks) is a pure
- * function of `seed` and is deliberately never serialised, which is why a save
- * stays a few kB no matter how long the run.
+ * procedural world. Generated road, terrain, POIs and chunks remain a pure
+ * function of `seed`; physical photographs are embedded because their pixels
+ * cannot be regenerated from procedural state.
  */
 
 export interface SaveMeta {
@@ -279,10 +279,7 @@ const CODE_TAGS: readonly string[] = [CODE_TAG];
  * Encodes a state to a pasteable string: JSON -> UTF-8 bytes -> base64url.
  *
  * No compression: `CompressionStream` is asynchronous and this function must
- * remain synchronous per the public signature, so a compact non-stream encoding
- * is used instead. That is a deliberate tradeoff and a cheap one — a save is only
- * the player's mutations, already small. If a compressed variant is ever added,
- * it must carry its own tag (e.g. `BRO2C.`) so decoding stays unambiguous.
+ * remain synchronous per the public signature.
  */
 export function encodeSaveCode(state: WorldState): string {
   const json = JSON.stringify(state);
@@ -432,6 +429,7 @@ export function migrateState(raw: unknown): WorldState {
     deliveredPois: migrateNumberArray(obj.deliveredPois),
   };
 }
+
 
 /**
  * The accepted haul. A job whose slots are not both finite integers is dropped:
@@ -771,7 +769,7 @@ function migrateItem(raw: unknown, where: string): Item {
     case 'football':
       return { type: 'football', id: obj.id };
     case 'pocket_watch':
-      return { type: 'pocket_watch', id: obj.id, open: obj.open === true };
+      return { type: 'pocket_watch', id: obj.id };
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);
   }

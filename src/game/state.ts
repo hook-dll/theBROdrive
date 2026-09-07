@@ -210,6 +210,7 @@ export interface TrailerState {
   qw: number;
 }
 
+
 export interface WorldState {
   readonly seed: number;
   /** Real Laayoune local-solar date corresponding to dayIndex zero. */
