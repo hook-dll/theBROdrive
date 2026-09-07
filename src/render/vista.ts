@@ -24,6 +24,8 @@ import { TERRAIN_MATERIAL } from '../world/terrainmesh';
 
 /** Forty metres of hidden overlap beneath the nearest guaranteed tile edge. */
 const INNER_RADIUS = DESERT_TILE_SIZE - 40;
+/** Only the overlap covered by the settled 5x5 desert-tile window is non-occluding. */
+const NON_OCCLUDING_RADIUS = DESERT_TILE_SIZE * 2;
 /**
  * Radial spacing growth, and the cap it grows into.
  *
@@ -169,6 +171,24 @@ const MESA_MATERIAL = applyComicShading(
   },
 );
 
+// Same authored shading as streamed terrain, used only where both terrain systems
+// overlap. It draws colour but not depth, so the fine tiles win without corrupting
+// the depth of the distant vista, mesas, fog, or the post-process.
+const VISTA_OVERLAP_MATERIAL = applyComicShading(
+  new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.93,
+    metalness: 0,
+    depthWrite: false,
+  }),
+  {
+    lightingStrength: 0,
+    shadowWarmth: 0,
+    reliefShadeStrength: 0.28,
+    spotlightNormals: 'smooth',
+  },
+);
+
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
   return c * c * (3 - 2 * c);
@@ -293,7 +313,11 @@ export class VistaMesh {
       this.dirX[a] = Math.sin(theta);
       this.dirZ[a] = Math.cos(theta);
     }
-    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), TERRAIN_MATERIAL);
+    this.mesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      [VISTA_OVERLAP_MATERIAL, TERRAIN_MATERIAL],
+    );
+    this.mesh.renderOrder = -1;
     this.mesaMesh = new THREE.Mesh(new THREE.BufferGeometry(), MESA_MATERIAL);
     // Both meshes surround the camera and span the whole view; their bounding spheres
     // are no cheaper than drawing the already sparse geometry.
@@ -679,6 +703,16 @@ export class VistaMesh {
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    let overlapPairs = 0;
+    while (
+      overlapPairs < rings - 1 &&
+      this.radii[overlapPairs]! < NON_OCCLUDING_RADIUS
+    ) {
+      overlapPairs++;
+    }
+    const overlapIndexCount = overlapPairs * SECTORS * 6;
+    geometry.addGroup(0, overlapIndexCount, 0);
+    geometry.addGroup(overlapIndexCount, index.length - overlapIndexCount, 1);
     this.geometry?.dispose();
     this.geometry = geometry;
     this.groundLocalPositions = positions;
