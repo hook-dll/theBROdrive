@@ -441,12 +441,10 @@ export class VistaMesh {
       const base = lower + (upper - lower) * tz;
       const visibility = nearWeight * farWeight;
       xyz[i * 3 + 1] =
-        base + this.mesaHeightOffset[i]! - (1 - visibility) * this.mesaBurialDrop[i]!;
+        base + this.mesaHeightOffset[i]! * visibility - (1 - visibility) * MESA_BURY_DEPTH;
     }
     position.needsUpdate = true;
   }
-
-  /** Uses one lighting normal for both triangles of each nominal wall quad. */
   private refreshMesaNormals(): void {
     if (!this.mesaGeometry) return;
     this.mesaGeometry.computeVertexNormals();
