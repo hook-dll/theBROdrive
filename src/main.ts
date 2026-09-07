@@ -1275,7 +1275,6 @@ async function boot(): Promise<void> {
     // Without this call the rigid body and hitch moved while the GLB stayed forever
     // at its constructor pose, leaving an invisible trailer attached to the car.
     trailerField.syncVisuals(alpha);
-    loose.syncVisuals();
     debris.syncVisuals();
 
     // Ground effects share one wheel report. Spray ages every frame; tracks retain the
@@ -1342,6 +1341,7 @@ async function boot(): Promise<void> {
       cam.y,
       cam.z,
     );
+    loose.syncVisuals(s.timeOfDay, sky.dayFactor);
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
       vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
@@ -1389,7 +1389,7 @@ async function boot(): Promise<void> {
 
     // The disc only rebuilds when the camera has left the patch it was built for, so
     // this is a pair of comparisons on most frames.
-    vista.update(cam.x, cam.z, activeS);
+    vista.update(cam.x, cam.z, activeS, frameDt);
     // A daylight-only middle-distance illusion. It never modifies Sky or Audio; the
     // sky's computed daylight is only a visibility gate protecting the night view.
     mirage.update(activeS, sky.dayFactor);
@@ -1473,6 +1473,8 @@ async function boot(): Promise<void> {
       boot?.owner === 'wreck' ? wreckTrunks.get(boot.id) : null,
       alpha,
       origin,
+      s.timeOfDay,
+      sky.dayFactor,
     );
     hud.setInventory(
       inventory.all,

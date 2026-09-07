@@ -264,9 +264,9 @@ export class HeldItemView {
       yaw += Math.PI - TILT_YAW;
       roll -= TILT_ROLL;
     } else if (item?.type === 'pocket_watch') {
-      // Pocket watches are always open. Their dial hands are deliberately hidden
-      // on loose/trunk meshes and enabled only by this held-item view.
-      setPocketWatchState(this.mesh, opts.timeOfDay, opts.dayFactor, true);
+      // Pocket watches are always open and share the same time and ambient-light
+      // driven dial state in the hand, world, and storage views.
+      setPocketWatchState(this.mesh, opts.timeOfDay, opts.dayFactor);
       ox += -baseX;
       oy += 0.015 - baseY;
       oz += -0.32 - baseZ;

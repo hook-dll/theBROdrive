@@ -81,15 +81,16 @@ const ROCK_ALTITUDE = 260;
 
 /**
  * Sparse middle-distance landmarks. Candidate positions and full heights are absolute
- * world properties. Camera distance controls only two narrow burial bands: inside the
- * streamed ground, where a visual-only mesa must disappear, and at the draw-distance
- * edge, where a newly resident candidate must enter below the horizon rather than pop.
+ * world properties. A mesa starts dissolving once the camera comes within 500 metres
+ * of its footprint; that transition is irreversible for the rest of the session.
+ * The outer burial band remains only to prevent residency-edge popping.
  */
 const MESA_CELL_SIZE = 2200;
 const MESA_OCCUPANCY = 0.18;
-/** Mesas retain their full world-space height everywhere outside the near tile overlap. */
-const MESA_INNER_START = 450;
-const MESA_FULL_HEIGHT = 900;
+/** Clear ground kept between the camera and a mesa when its dissolve begins. */
+const MESA_DISSOLVE_CLEARANCE = 500;
+/** A slow, conspicuous disappearance that still begins with 500 metres of clearance. */
+const MESA_DISSOLVE_SECONDS = 18;
 const MESA_MAX_DISTANCE = 18_000;
 const MESA_OUTER_FADE = 2000;
 const MESA_RESIDENCY_MARGIN = SAMPLE_CELL_SIZE * 2;
@@ -129,6 +130,15 @@ type GroundHeightSamples = [
   Float32Array,
 ];
 
+type MesaCandidate = {
+  readonly key: string;
+  readonly firstVertex: number;
+  readonly vertexCount: number;
+  readonly centreX: number;
+  readonly centreZ: number;
+  readonly radius: number;
+};
+
 /** Palette scratch colours, set once per interpolation-cell load. */
 const sandLinear = new THREE.Color();
 const rockLinear = new THREE.Color();
@@ -143,6 +153,7 @@ const MESA_MATERIAL = applyComicShading(
     vertexColors: true,
     roughness: 0.98,
     metalness: 0,
+    alphaHash: true,
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
@@ -249,7 +260,9 @@ export class VistaMesh {
   private mesaGroundY: GroundHeightSamples | null = null;
   private mesaHeightOffset: Float32Array | null = null;
   private mesaCentreXZ: Float32Array | null = null;
-  private mesaBurialDrop: Float32Array | null = null;
+  private mesaCandidates: MesaCandidate[] = [];
+  private readonly dissolvingMesas = new Map<string, number>();
+  private readonly retiredMesas = new Set<string>();
   private mesaVisibleOuter = 0;
 
   /** Radius of the disc, metres. Set by the view-distance setting. */
@@ -302,7 +315,7 @@ export class VistaMesh {
     if (outer === this.outerRadius) return;
     this.outerRadius = outer;
     this.mesh.visible = outer > 0;
-    this.mesaMesh.visible = outer > MESA_INNER_START;
+    this.mesaMesh.visible = false;
     this.radii = outer > 0 ? ringRadii(outer) : [];
     this.groundSamples = null;
     this.groundSampleCache.clear();
@@ -314,9 +327,11 @@ export class VistaMesh {
   /**
    * The polar disc follows the camera continuously. Its expensive terrain samples
    * come from the four corners of the current cell; only the cheap interpolation runs
-   * every frame. Moving back to the same coordinate produces the same horizon exactly.
+   * every frame. Ground movement is spatial and reversible; a triggered mesa dissolve
+   * deliberately is not.
    */
-  update(cameraX: number, cameraZ: number, s: number): void {
+  update(cameraX: number, cameraZ: number, s: number, frameDt: number): void {
+    this.advanceMesaDissolves(frameDt);
     if (this.outerRadius <= 0) return;
     this.ensureGroundGeometry();
     const cellX = Math.floor(cameraX / SAMPLE_CELL_SIZE);
@@ -337,6 +352,20 @@ export class VistaMesh {
     this.updateGroundPositions(cameraX, cameraZ);
     this.updateMesaPositions(cameraX, cameraZ);
     if (cellChanged) this.refreshMesaNormals();
+  }
+
+  private advanceMesaDissolves(frameDt: number): void {
+    const elapsed = Math.max(0, frameDt);
+    if (elapsed === 0) return;
+    for (const [key, remaining] of this.dissolvingMesas) {
+      const next = remaining - elapsed;
+      if (next > 0) {
+        this.dissolvingMesas.set(key, next);
+        continue;
+      }
+      this.dissolvingMesas.delete(key);
+      this.retiredMesas.add(key);
+    }
   }
 
   private updateGroundPositions(cameraX: number, cameraZ: number): void {
@@ -409,41 +438,57 @@ export class VistaMesh {
   }
 
   private updateMesaPositions(cameraX: number, cameraZ: number): void {
-    if (
-      !this.mesaGeometry ||
-      !this.mesaGroundY ||
-      !this.mesaHeightOffset ||
-      !this.mesaCentreXZ ||
-      !this.mesaBurialDrop
-    ) {
-      return;
-    }
+    if (!this.mesaGeometry || !this.mesaGroundY || !this.mesaHeightOffset) return;
     const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
+    const color = this.mesaGeometry.getAttribute('color') as THREE.BufferAttribute;
     const xyz = position.array as Float32Array;
+    const rgba = color.array as Float32Array;
     const [base00, base10, base01, base11] = this.mesaGroundY;
     const tx = this.interpolationX;
     const tz = this.interpolationZ;
-    const outerFadeStart = Math.max(MESA_FULL_HEIGHT, this.mesaVisibleOuter - MESA_OUTER_FADE);
-    for (let i = 0; i < base00.length; i++) {
-      const centreX = this.mesaCentreXZ[i * 2]!;
-      const centreZ = this.mesaCentreXZ[i * 2 + 1]!;
-      const distance = Math.hypot(centreX - cameraX, centreZ - cameraZ);
-      const nearWeight = smoothstep01(
-        (distance - MESA_INNER_START) / (MESA_FULL_HEIGHT - MESA_INNER_START),
-      );
+    const outerFadeStart = Math.max(1, this.mesaVisibleOuter - MESA_OUTER_FADE);
+    let anyVisible = false;
+    for (const candidate of this.mesaCandidates) {
+      const distance = Math.hypot(candidate.centreX - cameraX, candidate.centreZ - cameraZ);
+      const clearance = distance - candidate.radius;
+      let remaining = this.dissolvingMesas.get(candidate.key);
+      if (
+        remaining === undefined &&
+        !this.retiredMesas.has(candidate.key) &&
+        clearance <= MESA_DISSOLVE_CLEARANCE
+      ) {
+        if (clearance <= 0) {
+          this.retiredMesas.add(candidate.key);
+          remaining = 0;
+        } else {
+          remaining = MESA_DISSOLVE_SECONDS;
+          this.dissolvingMesas.set(candidate.key, remaining);
+        }
+      }
+      const dissolveWeight = this.retiredMesas.has(candidate.key)
+        ? 0
+        : remaining === undefined
+          ? 1
+          : smoothstep01(remaining / MESA_DISSOLVE_SECONDS);
       const farWeight =
         1 -
         smoothstep01(
           (distance - outerFadeStart) / Math.max(1, this.mesaVisibleOuter - outerFadeStart),
         );
-      const lower = base00[i]! + (base10[i]! - base00[i]!) * tx;
-      const upper = base01[i]! + (base11[i]! - base01[i]!) * tx;
-      const base = lower + (upper - lower) * tz;
-      const visibility = nearWeight * farWeight;
-      xyz[i * 3 + 1] =
-        base + this.mesaHeightOffset[i]! * visibility - (1 - visibility) * MESA_BURY_DEPTH;
+      anyVisible ||= dissolveWeight > 0.002 && farWeight > 0.002;
+      const end = candidate.firstVertex + candidate.vertexCount;
+      for (let i = candidate.firstVertex; i < end; i++) {
+        const lower = base00[i]! + (base10[i]! - base00[i]!) * tx;
+        const upper = base01[i]! + (base11[i]! - base01[i]!) * tx;
+        const base = lower + (upper - lower) * tz;
+        xyz[i * 3 + 1] =
+          base + this.mesaHeightOffset[i]! * farWeight - (1 - farWeight) * MESA_BURY_DEPTH;
+        rgba[i * 4 + 3] = dissolveWeight;
+      }
     }
+    this.mesaMesh.visible = anyVisible;
     position.needsUpdate = true;
+    color.needsUpdate = true;
   }
   private refreshMesaNormals(): void {
     if (!this.mesaGeometry) return;
@@ -755,8 +800,8 @@ export class VistaMesh {
     const baseGroundY: [number[], number[], number[], number[]] = [[], [], [], []];
     const heightOffsets: number[] = [];
     const centres: number[] = [];
-    const burialDrops: number[] = [];
-    if (residentOuter > MESA_FULL_HEIGHT) {
+    const candidates: MesaCandidate[] = [];
+    if (residentOuter > 0) {
       const cameraX = cx + this.origin.x;
       const cameraZ = cz + this.origin.z;
       const minCellX = Math.floor((cameraX - residentOuter) / MESA_CELL_SIZE);
@@ -767,6 +812,8 @@ export class VistaMesh {
       for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
         for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
           if (hashUnit3(this.road.seed ^ MESA_TAG, cellX, cellZ) >= MESA_OCCUPANCY) continue;
+          const key = `${cellX},${cellZ}`;
+          if (this.retiredMesas.has(key)) continue;
           const worldX =
             (cellX + 0.18 + hashUnit3(this.road.seed ^ (MESA_TAG + 1), cellX, cellZ) * 0.64) *
             MESA_CELL_SIZE;
@@ -804,14 +851,14 @@ export class VistaMesh {
             hashUnit3(this.road.seed ^ (MESA_TAG + 6), cellX, cellZ) * Math.PI;
           const segments =
             9 + Math.floor(hashUnit3(this.road.seed ^ (MESA_TAG + 7), cellX, cellZ) * 5);
-          this.appendMesa(
+          const firstVertex = indices.length;
+          const footprintRadius = this.appendMesa(
             positions,
             colors,
             indices,
             baseGroundY,
             heightOffsets,
             centres,
-            burialDrops,
             groundPositions,
             groundSamples,
             groundX0,
@@ -826,20 +873,27 @@ export class VistaMesh {
             cellX,
             cellZ,
           );
+          candidates.push({
+            key,
+            firstVertex,
+            vertexCount: indices.length - firstVertex,
+            centreX: x,
+            centreZ: z,
+            radius: footprintRadius,
+          });
         }
       }
     }
 
     const indexed = new THREE.BufferGeometry();
     indexed.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    indexed.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    indexed.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
     indexed.setAttribute('_base00', new THREE.Float32BufferAttribute(baseGroundY[0], 1));
     indexed.setAttribute('_base10', new THREE.Float32BufferAttribute(baseGroundY[1], 1));
     indexed.setAttribute('_base01', new THREE.Float32BufferAttribute(baseGroundY[2], 1));
     indexed.setAttribute('_base11', new THREE.Float32BufferAttribute(baseGroundY[3], 1));
     indexed.setAttribute('_heightOffset', new THREE.Float32BufferAttribute(heightOffsets, 1));
     indexed.setAttribute('_centreXZ', new THREE.Float32BufferAttribute(centres, 2));
-    indexed.setAttribute('_burialDrop', new THREE.Float32BufferAttribute(burialDrops, 1));
     indexed.setIndex(indices);
     // Separate triangle normals keep the sedimentary ledges and faceted walls legible.
     const geometry = indexed.toNonIndexed();
@@ -854,18 +908,17 @@ export class VistaMesh {
       .array as Float32Array;
     this.mesaCentreXZ = (geometry.getAttribute('_centreXZ') as THREE.BufferAttribute)
       .array as Float32Array;
-    this.mesaBurialDrop = (geometry.getAttribute('_burialDrop') as THREE.BufferAttribute)
-      .array as Float32Array;
     geometry.deleteAttribute('_base00');
     geometry.deleteAttribute('_base10');
     geometry.deleteAttribute('_base01');
     geometry.deleteAttribute('_base11');
     geometry.deleteAttribute('_heightOffset');
     geometry.deleteAttribute('_centreXZ');
-    geometry.deleteAttribute('_burialDrop');
+    (geometry.getAttribute('color') as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
     this.mesaGeometry?.dispose();
     this.mesaGeometry = geometry;
     this.mesaMesh.geometry = geometry;
+    this.mesaCandidates = candidates;
     this.mesaMesh.visible = positions.length > 0;
   }
 
@@ -876,7 +929,6 @@ export class VistaMesh {
     baseGroundY: [number[], number[], number[], number[]],
     heightOffsets: number[],
     centres: number[],
-    burialDrops: number[],
     groundPositions: Float32Array,
     groundSamples: GroundCellSamples,
     groundX0: number,
@@ -890,7 +942,7 @@ export class VistaMesh {
     segments: number,
     cellX: number,
     cellZ: number,
-  ): void {
+  ): number {
     const groundAt = (sampleIndex: number, px: number, pz: number): number => {
       const sampleX = groundX0 + (sampleIndex % 2) * SAMPLE_CELL_SIZE;
       const sampleZ = groundZ0 + Math.floor(sampleIndex / 2) * SAMPLE_CELL_SIZE;
@@ -911,6 +963,7 @@ export class VistaMesh {
       groundAt(3, x, z),
     ];
     const firstVertex = positions.length / 3;
+    let footprintRadius = 0;
     for (let ring = 0; ring < MESA_RINGS.length; ring++) {
       const level = MESA_RINGS[ring]!;
       for (let segment = 0; segment < segments; segment++) {
@@ -922,6 +975,7 @@ export class VistaMesh {
           hashUnit3(this.road.seed ^ (MESA_TAG + 20 + segment), cellX, cellZ) * 0.24;
         const px = x + Math.cos(theta) * radiusX * level.radius * irregularity;
         const pz = z + Math.sin(theta) * radiusZ * level.radius * irregularity;
+        footprintRadius = Math.max(footprintRadius, Math.hypot(px - x, pz - z));
         const followsLocalGround = ring <= 1;
         const grounds: [number, number, number, number] = followsLocalGround
           ? [
@@ -945,13 +999,13 @@ export class VistaMesh {
           Math.min(1, mesaLinear.r * shade),
           Math.min(1, mesaLinear.g * shade),
           Math.min(1, mesaLinear.b * shade),
+          1,
         );
         for (let sample = 0; sample < 4; sample++) {
           baseGroundY[sample]!.push(grounds[sample]!);
         }
         heightOffsets.push(heightOffset);
         centres.push(x, z);
-        burialDrops.push(height + MESA_BURY_DEPTH);
       }
     }
 
@@ -974,16 +1028,16 @@ export class VistaMesh {
     const centre = positions.length / 3;
     const topOffset = height * 1.01;
     positions.push(x, centreGround[0] + topOffset, z);
-    colors.push(mesaLinear.r, mesaLinear.g, mesaLinear.b);
+    colors.push(mesaLinear.r, mesaLinear.g, mesaLinear.b, 1);
     for (let sample = 0; sample < 4; sample++) {
       baseGroundY[sample]!.push(centreGround[sample]!);
     }
     heightOffsets.push(topOffset);
     centres.push(x, z);
-    burialDrops.push(height + MESA_BURY_DEPTH);
     for (let segment = 0; segment < segments; segment++) {
       indices.push(centre, top + ((segment + 1) % segments), top + segment);
     }
+    return footprintRadius;
   }
 
   /** Vertices in the current disc, for the perf bench. */
@@ -1004,7 +1058,9 @@ export class VistaMesh {
     this.mesaGroundY = null;
     this.mesaHeightOffset = null;
     this.mesaCentreXZ = null;
-    this.mesaBurialDrop = null;
+    this.mesaCandidates = [];
+    this.dissolvingMesas.clear();
+    this.retiredMesas.clear();
   }
 }
 

@@ -45,6 +45,11 @@ const LATERALS: readonly number[] = [
  * inside the streaming scheduler's slice with room for the surrounding work.
  */
 const COLLIDER_SLAB_QUADS = 15;
+/**
+ * Rendered depth of the sealed mat. The terrain overlaps the upper edge, while this
+ * skirt continues well below it so low viewpoints never expose a zero-thickness sheet.
+ */
+const ROAD_BED_DEPTH = 0.35;
 
 const MARKING_LIFT = 0.002;
 const MARKING_HALF_WIDTH = 0.12;
@@ -126,6 +131,14 @@ const roadMaterial = applyGroundSpotlightNormals(
   new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.93,
+    metalness: 0,
+  }),
+);
+/** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
+const roadBedMaterial = applyGroundSpotlightNormals(
+  new THREE.MeshStandardMaterial({
+    color: 0x25231f,
+    roughness: 1,
     metalness: 0,
   }),
 );
@@ -320,6 +333,58 @@ export class RoadMeshProvider implements ChunkProvider {
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
       group.add(roadMesh);
+
+      // Close both open edges down into the terrain. This is deliberately visual-only:
+      // tyres still collide with the exact top ribbon, and the skirt remains buried
+      // wherever the sand meets the asphalt at its intended height.
+      const bedPositions = new Float32Array(sCount * 4 * 3);
+      const bedIndices = new Uint32Array((sCount - 1) * 12);
+      for (let si = 0; si < sCount; si++) {
+        const rightTop = si * latCount;
+        const leftTop = rightTop + latCount - 1;
+        const row = si * 12;
+
+        bedPositions[row] = positions[rightTop * 3]!;
+        bedPositions[row + 1] = positions[rightTop * 3 + 1]!;
+        bedPositions[row + 2] = positions[rightTop * 3 + 2]!;
+        bedPositions[row + 3] = bedPositions[row]!;
+        bedPositions[row + 4] = bedPositions[row + 1]! - ROAD_BED_DEPTH;
+        bedPositions[row + 5] = bedPositions[row + 2]!;
+
+        bedPositions[row + 6] = positions[leftTop * 3]!;
+        bedPositions[row + 7] = positions[leftTop * 3 + 1]!;
+        bedPositions[row + 8] = positions[leftTop * 3 + 2]!;
+        bedPositions[row + 9] = bedPositions[row + 6]!;
+        bedPositions[row + 10] = bedPositions[row + 7]! - ROAD_BED_DEPTH;
+        bedPositions[row + 11] = bedPositions[row + 8]!;
+      }
+      let bi = 0;
+      for (let si = 0; si < sCount - 1; si++) {
+        const row = si * 4;
+        const next = row + 4;
+        // Negative-lateral edge: outward normal points right.
+        bedIndices[bi++] = row;
+        bedIndices[bi++] = row + 1;
+        bedIndices[bi++] = next;
+        bedIndices[bi++] = next;
+        bedIndices[bi++] = row + 1;
+        bedIndices[bi++] = next + 1;
+        // Positive-lateral edge: outward normal points left.
+        bedIndices[bi++] = row + 2;
+        bedIndices[bi++] = next + 2;
+        bedIndices[bi++] = row + 3;
+        bedIndices[bi++] = next + 2;
+        bedIndices[bi++] = next + 3;
+        bedIndices[bi++] = row + 3;
+      }
+      const bedGeometry = new THREE.BufferGeometry();
+      disposables.push(bedGeometry);
+      bedGeometry.setAttribute('position', new THREE.BufferAttribute(bedPositions, 3));
+      bedGeometry.setIndex(new THREE.BufferAttribute(bedIndices, 1));
+      bedGeometry.computeVertexNormals();
+      const bedMesh = new THREE.Mesh(bedGeometry, roadBedMaterial);
+      bedMesh.receiveShadow = true;
+      group.add(bedMesh);
       yield;
 
       if (hasPhysics) {

@@ -1,10 +1,10 @@
 /**
  * Procedural meshes for every part and carried item in the game.
  *
- * Everything is built from primitives — no external assets, no textures. Geometry is
- * built once per logical form and cached; each create* call returns a fresh Object3D
- * that shares the cached BufferGeometry but gets its own materials, so every instance
- * can hold independent dirt/rust.
+ * Everything is built from primitives; the football adds one generated leather
+ * texture. Geometry and immutable materials are cached, while each create* call
+ * returns a fresh Object3D. Condition-sensitive parts still get independent
+ * materials so dirt and rust never bleed between instances.
  *
  * Car bodies are complete, authored GLB models (see render/carmodel.ts); this module
  * only builds the cosmetic parts and held items.
@@ -25,6 +25,7 @@ import type {
   WeaponKind,
 } from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
+import { applyComicShading } from './comic';
 
 // ---------------------------------------------------------------------------
 // Geometry cache
@@ -915,18 +916,224 @@ function buildProfessionalCameraInto(b: MeshBuilder): void {
 
 export const FOOTBALL_RADIUS = 0.11;
 
-function buildFootballInto(b: MeshBuilder): void {
-  const leather = flat(0xe7e0cf, 0.82);
-  const patch = flat(0x292724, 0.88);
-  b.sphere('football_body', FOOTBALL_RADIUS, 16, 10, leather, [0, 0, 0]);
-  // A few low-profile dark panels preserve the classic football read without
-  // introducing a texture beside the primitive-built binoculars and torch.
-  b.sphere('football_patch_front', 0.045, 5, 3, patch, [0, 0, 0.104], [1, 1, 0.12]);
-  b.sphere('football_patch_back', 0.045, 5, 3, patch, [0, 0, -0.104], [1, 1, 0.12]);
-  b.sphere('football_patch_left', 0.045, 5, 3, patch, [-0.104, 0, 0], [0.12, 1, 1]);
-  b.sphere('football_patch_right', 0.045, 5, 3, patch, [0.104, 0, 0], [0.12, 1, 1]);
-  b.sphere('football_patch_top', 0.045, 5, 3, patch, [0, 0.104, 0], [1, 0.12, 1]);
-  b.sphere('football_patch_bottom', 0.045, 5, 3, patch, [0, -0.104, 0], [1, 0.12, 1]);
+let footballSurfaceMaterial: THREE.MeshStandardMaterial | null = null;
+let footballPanelMaterial: THREE.MeshStandardMaterial | null = null;
+let footballSeamMaterial: THREE.LineBasicMaterial | null = null;
+
+const FOOTBALL_PHI = (1 + Math.sqrt(5)) / 2;
+const FOOTBALL_ICOSAHEDRON_VERTICES = [
+  [-1, FOOTBALL_PHI, 0], [1, FOOTBALL_PHI, 0],
+  [-1, -FOOTBALL_PHI, 0], [1, -FOOTBALL_PHI, 0],
+  [0, -1, FOOTBALL_PHI], [0, 1, FOOTBALL_PHI],
+  [0, -1, -FOOTBALL_PHI], [0, 1, -FOOTBALL_PHI],
+  [FOOTBALL_PHI, 0, -1], [FOOTBALL_PHI, 0, 1],
+  [-FOOTBALL_PHI, 0, -1], [-FOOTBALL_PHI, 0, 1],
+] as const;
+const FOOTBALL_ICOSAHEDRON_FACES = [
+  [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+  [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+  [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+  [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+] as const;
+
+function footballVertex(index: number): THREE.Vector3 {
+  const source = FOOTBALL_ICOSAHEDRON_VERTICES[index]!;
+  return new THREE.Vector3(source[0], source[1], source[2]).normalize();
+}
+
+/** Vertex one third of the way along a directed icosahedron edge. */
+function footballTruncatedVertex(from: number, to: number, radius: number): THREE.Vector3 {
+  return footballVertex(from).multiplyScalar(2).add(footballVertex(to)).normalize().multiplyScalar(radius);
+}
+
+function footballNeighbours(vertex: number): number[] {
+  const neighbours = new Set<number>();
+  for (const face of FOOTBALL_ICOSAHEDRON_FACES) {
+    const at = (face as readonly number[]).indexOf(vertex);
+    if (at < 0) continue;
+    neighbours.add(face[(at + 1) % 3]!);
+    neighbours.add(face[(at + 2) % 3]!);
+  }
+  const normal = footballVertex(vertex);
+  const reference = Math.abs(normal.y) < 0.9
+    ? new THREE.Vector3(0, 1, 0)
+    : new THREE.Vector3(1, 0, 0);
+  const tangentX = reference.cross(normal).normalize();
+  const tangentY = normal.clone().cross(tangentX);
+  return [...neighbours].sort((a, b) => {
+    const av = footballVertex(a);
+    const bv = footballVertex(b);
+    return Math.atan2(av.dot(tangentY), av.dot(tangentX))
+      - Math.atan2(bv.dot(tangentY), bv.dot(tangentX));
+  });
+}
+
+function footballPentagonGeometry(): THREE.BufferGeometry {
+  const radius = FOOTBALL_RADIUS * 1.006;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const pushPoint = (point: THREE.Vector3): void => {
+    point.normalize();
+    positions.push(point.x * radius, point.y * radius, point.z * radius);
+    normals.push(point.x, point.y, point.z);
+  };
+  const pushCurvedTriangle = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    c: THREE.Vector3,
+    depth: number,
+  ): void => {
+    if (depth === 0) {
+      pushPoint(a);
+      pushPoint(b);
+      pushPoint(c);
+      return;
+    }
+    const ab = a.clone().add(b).normalize();
+    const bc = b.clone().add(c).normalize();
+    const ca = c.clone().add(a).normalize();
+    pushCurvedTriangle(a, ab, ca, depth - 1);
+    pushCurvedTriangle(ab, b, bc, depth - 1);
+    pushCurvedTriangle(ca, bc, c, depth - 1);
+    pushCurvedTriangle(ab, bc, ca, depth - 1);
+  };
+
+  for (let vertex = 0; vertex < FOOTBALL_ICOSAHEDRON_VERTICES.length; vertex++) {
+    const centre = footballVertex(vertex);
+    const neighbours = footballNeighbours(vertex);
+    for (let side = 0; side < neighbours.length; side++) {
+      const a = footballTruncatedVertex(vertex, neighbours[side]!, 1);
+      const b = footballTruncatedVertex(vertex, neighbours[(side + 1) % neighbours.length]!, 1);
+      // A flat triangle lies inside the round white shell except at its vertices,
+      // leaving only black specks visible. Projecting a subdivided fan back onto
+      // the sphere makes the complete pentagonal leather panel cover the shell.
+      pushCurvedTriangle(centre, a, b, 3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  return geometry;
+}
+
+function footballSeamGeometry(): THREE.BufferGeometry {
+  const radius = FOOTBALL_RADIUS * 1.011;
+  const edges = new Map<string, readonly [number, number, number, number]>();
+  const addPolygon = (nodes: readonly (readonly [number, number])[]): void => {
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i]!;
+      const b = nodes[(i + 1) % nodes.length]!;
+      const aKey = `${a[0]}:${a[1]}`;
+      const bKey = `${b[0]}:${b[1]}`;
+      const key = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+      if (!edges.has(key)) edges.set(key, [a[0], a[1], b[0], b[1]]);
+    }
+  };
+
+  for (let vertex = 0; vertex < FOOTBALL_ICOSAHEDRON_VERTICES.length; vertex++) {
+    addPolygon(footballNeighbours(vertex).map((neighbour) => [vertex, neighbour] as const));
+  }
+  for (const [a, b, c] of FOOTBALL_ICOSAHEDRON_FACES) {
+    addPolygon([[a, b], [b, a], [b, c], [c, b], [c, a], [a, c]]);
+  }
+
+  const positions: number[] = [];
+  for (const [a0, a1, b0, b1] of edges.values()) {
+    const a = footballTruncatedVertex(a0, a1, radius);
+    const b = footballTruncatedVertex(b0, b1, radius);
+    const middle = a.clone().add(b).normalize().multiplyScalar(radius);
+    positions.push(
+      a.x, a.y, a.z, middle.x, middle.y, middle.z,
+      middle.x, middle.y, middle.z, b.x, b.y, b.z,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  return geometry;
+}
+
+function footballMaterial(): THREE.MeshStandardMaterial {
+  if (footballSurfaceMaterial) return footballSurfaceMaterial;
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const reliefCanvas = document.createElement('canvas');
+  reliefCanvas.width = size;
+  reliefCanvas.height = size;
+  const albedo = canvas.getContext('2d');
+  const relief = reliefCanvas.getContext('2d');
+  if (!albedo || !relief) throw new Error('Canvas 2D is required for the football surface');
+  albedo.fillStyle = '#ded9cc';
+  albedo.fillRect(0, 0, size, size);
+  relief.fillStyle = '#858585';
+  relief.fillRect(0, 0, size, size);
+
+  // Fixed-seed pores and faint wear make the white panels read as pebbled leather.
+  let seed = 0x4f1bbcdc;
+  for (let i = 0; i < 2600; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const x = seed & 255;
+    const y = (seed >>> 8) & 255;
+    const light = (seed >>> 17) & 1;
+    albedo.fillStyle = light ? 'rgba(255,255,255,0.05)' : 'rgba(55,48,39,0.045)';
+    albedo.fillRect(x, y, 1, 1);
+    relief.fillStyle = light ? '#969696' : '#747474';
+    relief.fillRect(x, y, 1, 1);
+  }
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.anisotropy = 4;
+  const bumpMap = new THREE.CanvasTexture(reliefCanvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.anisotropy = 4;
+  footballSurfaceMaterial = applyComicShading(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map,
+      bumpMap,
+      bumpScale: 0.0011,
+      roughness: 0.86,
+      metalness: 0,
+    }),
+    { contourStrength: 0, stippleStrength: 0 },
+  );
+  return footballSurfaceMaterial;
+}
+
+function createFootballMesh(): THREE.Group {
+  const root = new THREE.Group();
+  const body = new THREE.Mesh(
+    cachedGeo('football_body_detailed', () => new THREE.SphereGeometry(FOOTBALL_RADIUS, 32, 20)),
+    footballMaterial(),
+  );
+  body.name = 'football_body';
+  root.add(body);
+
+  footballPanelMaterial ??= applyComicShading(
+    new THREE.MeshStandardMaterial({ color: 0x20201f, roughness: 0.84, metalness: 0 }),
+    { contourStrength: 0, stippleStrength: 0 },
+  );
+  const panels = new THREE.Mesh(
+    cachedGeo('football_pentagons', footballPentagonGeometry),
+    footballPanelMaterial,
+  );
+  panels.name = 'football_black_panels';
+  root.add(panels);
+
+  footballSeamMaterial ??= new THREE.LineBasicMaterial({ color: 0x514e48 });
+  const seams = new THREE.LineSegments(
+    cachedGeo('football_panel_seams', footballSeamGeometry),
+    footballSeamMaterial,
+  );
+  seams.name = 'football_panel_seams';
+  root.add(seams);
+  return root;
 }
 
 function buildPocketWatchBodyInto(b: MeshBuilder): void {
@@ -1015,18 +1222,17 @@ function createPocketWatchMesh(): THREE.Group {
   return root;
 }
 
-/** Keeps the lid open, animates the dial, and controls held-only dial hands. */
+/** Keeps the lid open and updates the dial and ambient-light-driven lume. */
 export function setPocketWatchState(
   root: THREE.Object3D,
   timeOfDay: number,
   dayFactor = 1,
-  handsVisible = false,
 ): void {
   const cover = root.getObjectByName('pocket_watch_cover');
   if (cover) cover.rotation.x = -Math.PI * 0.76;
   const needle = root.getObjectByName('pocket_watch_needle');
   if (needle) {
-    needle.visible = handsVisible;
+    needle.visible = true;
     const halfDay = 12 * 60;
     const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
     needle.rotation.z = -fraction * Math.PI * 2;
@@ -1129,7 +1335,7 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'photograph':
       return createPhotographMesh(item.imageDataUrl);
     case 'football':
-      return buildGroup(itemBlueprint('football', buildFootballInto).instructions);
+      return createFootballMesh();
     case 'pocket_watch':
       return createPocketWatchMesh();
   }

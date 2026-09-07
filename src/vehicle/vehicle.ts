@@ -796,54 +796,29 @@ const LOAD_SENSITIVITY_MAX = 1.35;
  * part — it lights only while torque is actually being cut, so the player learns
  * where the surface runs out rather than being told about it.
  *
- * The threshold is a slip SPEED, not a slip ratio, and that distinction is the
- * whole difference between an aid and a trap.
+ * The feedback threshold is a slip SPEED, not a raw slip ratio. A ratio has a
+ * near-zero-speed singularity; its denominator is floored at SLIP_REFERENCE_MPS,
+ * so even a gently turning wheel looks far beyond the peak while the car is still.
  *
- * A slip ratio is (ωr − v)/max(|v|, SLIP_REFERENCE_MPS), and that denominator is
- * floored at 1.5 m/s so it stays finite at rest. At a standstill, then, a wheel
- * creeping round at 0.5 m/s of surface speed already reads a ratio of 0.33 — nearly
- * three times PEAK_SLIP_RATIO — so a ratio-based TCS pins itself at full cut the
- * instant you touch the throttle from rest. That is not a hypothetical: it is why a
- * coupe nosed into a pole on a slight grade could not reverse out with the lamp lit.
- * A standing start legitimately runs a slip ratio around 3; that is how a tyre makes
- * force at all.
+ * Measured-slip feedback therefore has no authority below
+ * TCS_AUTHORITY_START_MPS. At a standing start a separate feed-forward limit keeps
+ * the requested torque at, but not below, the tyre's peak capacity. This distinction
+ * matters on a grade: the former 68% target left a VAZ-2106 less tractive force than
+ * sand resistance plus a modest incline required, while unrestricted wheelspin fell
+ * onto the tyre curve's 75% sliding plateau and failed for the same reason.
  *
- * So the wheel is judged on how much faster its contact patch is moving than the
- * road, in m/s: TCS_SLIP_FLOOR_MPS is tolerated regardless of road speed, and above
- * a walking pace the allowance grows with speed until it is the same peak-slip ratio
- * the tyre model uses. Authority follows the VEHICLE'S forward speed, not one contact
- * point's instantaneous velocity: at a steep pothole face chassis pitch can make that
- * point nearly stationary even while the car is moving and the wheel is spinning.
- * Below TCS_AUTHORITY_START_MPS the driver keeps full authority for digging, rocking
- * and reversing out.
- *
- * EXCEPT WHEN THE WHEEL IS PLAINLY JUST POLISHING. Road speed alone was the whole
- * authority test, and it disabled the system exactly where it was invented for:
- * nose up a steep grade, the car crawls below walking pace, the driven wheels spin
- * freely, and TCS sat switched off watching them. Reported from play, and it is the
- * same failure the `sport` compound used to paper over — "unsticking a car bogged in
- * sand" is this case.
- *
- * A second authority path therefore opens on SLIP SPEED alone. Digging and rocking
- * run a couple of m/s of slip; a wheel turning TCS_STUCK_SLIP_MPS faster than the
- * ground it is standing on is not being driven, it is being wasted. Sign is still
- * taken from the commanded torque, so a locked wheel under braking and a car
- * deliberately reversing out are both untouched.
+ * Once the chassis is moving, feedback authority rises smoothly to full and
+ * tolerates 0.35 m/s of tread-speed excess before cutting torque. Authority follows
+ * the VEHICLE'S forward speed, not one contact point's instantaneous velocity:
+ * chassis pitch over a pothole can make that point nearly stationary while the car
+ * is moving. Sign still comes from commanded torque, so braking lock-up is untouched.
  */
-const TCS_SLIP_FLOOR_MPS = 2.2;
+const TCS_SLIP_FLOOR_MPS = 0.35;
 /** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
-const TCS_SLIP_BAND_MPS = 1.8;
+const TCS_SLIP_BAND_MPS = 0.65;
 /** Road speed (m/s) below which TCS may not cut at all, and above which it may cut fully. */
 const TCS_AUTHORITY_START_MPS = 1.0;
 const TCS_AUTHORITY_FULL_MPS = 3.5;
-/**
- * Slip speed (m/s) at which TCS takes authority whatever the road speed, and the band
- * over which that authority arrives. A wheel spinning only a few m/s faster than the
- * ground is already polishing loose sand; waiting for 5.5 m/s allowed a standing
- * car to dig a hole while the lamp reported the late intervention.
- */
-const TCS_STUCK_SLIP_MPS = 2.5;
-const TCS_STUCK_BAND_MPS = 2.5;
 /**
  * Share of a wheel's STATIC load at which traction control has its full authority; it
  * scales down linearly below that and reaches nothing at zero load.
@@ -861,8 +836,16 @@ const TCS_STUCK_BAND_MPS = 2.5;
  * on a dry asphalt road.
  */
 const TCS_LOAD_AUTHORITY_FRACTION = 0.5;
-/** Most of a wheel's drive torque TCS may take away. Never all of it: a bogged car still digs. */
+/** Most of a wheel's drive torque TCS may take away once the car is moving. */
 const TCS_MAX_CUT = 0.85;
+/**
+ * A small allowance above calculated peak avoids making load filtering and driveline
+ * lag into a hard ceiling; the tyre may show some wheelspin while still producing
+ * useful force. A lower target can strand a car on a grade before it ever moves.
+ */
+const TCS_LAUNCH_GRIP_FRACTION = 1.05;
+/** Launch limiter authority; five per cent remains when a wheel has almost no load. */
+const TCS_LAUNCH_MAX_CUT = 0.95;
 /** Cut smoothing, seconds: quick to intervene, slower to hand the torque back. */
 const TCS_ATTACK_TAU = 0.03;
 const TCS_RELEASE_TAU = 0.12;
@@ -4065,6 +4048,28 @@ export class Vehicle implements Rebasable {
       const wheelMass = WHEEL_MASS_KG * (w.radius / WHEEL_REFERENCE_RADIUS) ** 2;
       const inertia = 0.5 * wheelMass * w.radius * w.radius + (driven ? drivelineInertia : 0);
 
+      // Longitudinal capacity is known before TCS acts. That makes a standing-start
+      // feed-forward limit possible: the controller need not wait until first gear
+      // has already spun the wheel far past the tyre's force peak.
+      let capacityN = 0;
+      if (w.loadN > 0) {
+        const ground = controller.wheelGroundObject(w.index);
+        const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
+        const loadFactor = clamp(
+          1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
+          LOAD_SENSITIVITY_MIN,
+          LOAD_SENSITIVITY_MAX,
+        );
+        capacityN =
+          surface.frictionSlip *
+          LONGITUDINAL_GRIP_FRACTION *
+          wheelGrip *
+          tyreGrip *
+          loadFactor *
+          w.loadN;
+        if (inContact) this.ownTyreCapacityN += capacityN;
+      }
+
       // Traction control, measured from this wheel's OWN pre-step slip SPEED: how
       // much faster its contact patch is moving than the road, in m/s. Signed by the
       // commanded torque, which is what keeps this a traction aid and not an
@@ -4082,12 +4087,13 @@ export class Vehicle implements Rebasable {
         TCS_SLIP_FLOOR_MPS,
         PEAK_SLIP_RATIO * Math.abs(contactSpeed),
       );
-      // Two authority paths, whichever grants more: road speed, and slip speed alone.
-      // The second is what rescues a climb — see the note on TCS_STUCK_SLIP_MPS.
+      // No second, wheelspin-only authority path exists here. At near-zero chassis
+      // speed it used to turn a bogged launch into a sustained 85% torque cut: no
+      // visible wheelspin, no useful tyre force, and no progress. The car must first
+      // be allowed to pull itself into the speed-controlled range.
       const speedAuthority =
         (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
         (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS);
-      const stuckAuthority = (slipSpeed - TCS_STUCK_SLIP_MPS) / TCS_STUCK_BAND_MPS;
       // AND WHETHER THE TYRE IS CARRYING ANYTHING. `inContact` is Rapier's ray hit; it
       // stays true over a crest or a pothole rim while the spring is extended and the
       // load has gone. A wheel with no load on it is not losing traction, it is simply
@@ -4096,14 +4102,33 @@ export class Vehicle implements Rebasable {
       // and there is nothing to un-waste when the normal load is missing. Cutting there
       // lights the lamp and throws away the drive without buying a newton of grip.
       const loadAuthority = w.loadN / (w.staticLoadN * TCS_LOAD_AUTHORITY_FRACTION);
-      const authority =
-        clamp(Math.max(speedAuthority, stuckAuthority), 0, 1) * clamp(loadAuthority, 0, 1);
-      const cutTarget =
-        driven && inContact && w.driveTorqueNm !== 0
-          ? Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
-            TCS_MAX_CUT *
-            authority
+      const authority = clamp(speedAuthority, 0, 1) * clamp(loadAuthority, 0, 1);
+      const reactiveCut =
+        Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
+        TCS_MAX_CUT *
+        authority;
+      // At a standing start, use the loaded tyre's known capacity rather than waiting
+      // for measured slip. The target is deliberately near the peak: cutting to less
+      // can make the aid itself the reason a car cannot overcome a grade.
+      const launchAuthority =
+        1 -
+        clamp(
+          (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
+            (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
+          0,
+          1,
+        );
+      const driveTorque = Math.abs(w.driveTorqueNm);
+      const launchCut =
+        driveTorque > 0 && capacityN > 0
+          ? Math.min(
+              TCS_LAUNCH_MAX_CUT,
+              Math.max(0, 1 - (capacityN * w.radius * TCS_LAUNCH_GRIP_FRACTION) / driveTorque),
+            ) * launchAuthority
           : 0;
+      const cutTarget =
+        driven && inContact && w.driveTorqueNm !== 0 ? Math.max(reactiveCut, launchCut) : 0;
+      if (launchCut > w.tcsCut) w.tcsCut = launchCut;
       w.tcsCut +=
         (cutTarget - w.tcsCut) * (cutTarget > w.tcsCut ? tcsAttackBlend : tcsReleaseBlend);
       if (w.tcsCut > TCS_LAMP_THRESHOLD) this.tcsLampS = TCS_LAMP_HOLD_S;
@@ -4116,25 +4141,7 @@ export class Vehicle implements Rebasable {
 
       let longitudinalForce = 0;
       let gripUsage = 0;
-      if (w.loadN > 0) {
-        const ground = controller.wheelGroundObject(w.index);
-        const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
-        // μ(Fz) again, and it MUST be the same factor the lateral channel uses or the
-        // two axes would disagree about how much grip this tyre has. Reference load is
-        // this wheel's own parked load, so a car standing still is exactly as it was.
-        const loadFactor = clamp(
-          1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
-          LOAD_SENSITIVITY_MIN,
-          LOAD_SENSITIVITY_MAX,
-        );
-        const capacityN =
-          surface.frictionSlip *
-          LONGITUDINAL_GRIP_FRACTION *
-          wheelGrip *
-          tyreGrip *
-          loadFactor *
-          w.loadN;
-        if (inContact) this.ownTyreCapacityN += capacityN;
+      if (capacityN > 0) {
         const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
 
         // Shape: a peak that decays to a SLIDING PLATEAU, not to nothing.

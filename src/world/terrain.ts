@@ -147,10 +147,11 @@ const CHOP_AMPLITUDE = 0.3;
  *
  * Depth is bounded by ESCAPABILITY, not by looks: a scoop is the one part of this
  * band that makes a basin, so it sets the worst grade a stopped car finds under its
- * wheels. Sand's `frictionSlip` is 1.15 now (it was 1.35 when the old 0.55 m pits
- * were measured), which buys a 15% pull-away grade for a two-wheel-drive saloon, so
- * the depth came down with it and the threshold went up to make them sparser.
- * `tools/desert-washboard.ts` reports the blocked/stranded census that bounds both.
+ * wheels. Sand traction is calibrated against the real wheel model rather than the
+ * surface coefficient alone: `runInclineLaunchCheck` requires a stock VAZ-2106 to
+ * pull away on a five-degree sandy incline. The depth and threshold keep the steeper
+ * scoop faces sparse. `tools/desert-washboard.ts` still reports the wider
+ * blocked/stranded census that bounds them.
  */
 const SCOOP_WAVELENGTH = 26;
 const SCOOP_THRESHOLD = 0.5;
