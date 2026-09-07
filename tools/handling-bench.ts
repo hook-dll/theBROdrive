@@ -19,7 +19,7 @@
  * document), so it runs as:
  *
  *   import { runBench } from '/tools/handling-bench.ts';
- *   await runBench(['sv_vaz2101', 'sa_vaz2110']);
+ *   await runBench(['sv_vaz2101', 'gt_vaz2110']);
  *
  * Nothing here is part of the game bundle.
  */
@@ -184,7 +184,11 @@ function addGround(physics: PhysicsWorld, surface = SurfaceType.Asphalt): void {
   );
 }
 
-function addInclineGround(physics: PhysicsWorld, degrees: number): void {
+function addInclineGround(
+  physics: PhysicsWorld,
+  degrees: number,
+  surface = SurfaceType.Asphalt,
+): void {
   const halfDepth = 30;
   const rise = Math.tan((degrees * Math.PI) / 180) * halfDepth;
   physics.addStaticTrimesh(
@@ -195,7 +199,7 @@ function addInclineGround(physics: PhysicsWorld, degrees: number): void {
       30, rise, halfDepth,
     ]),
     new Uint32Array([0, 1, 2, 2, 1, 3]),
-    SurfaceType.Asphalt,
+    surface,
   );
 }
 
@@ -981,6 +985,98 @@ export async function runSurfaceCorneringCheck(
   };
 }
 
+/**
+ * Full-throttle standing start on flat ground. The wheel-speed excess is the
+ * quantity TCS controls; checking it beside progress catches both failure modes:
+ * a launch that burns the tyres and one that cuts so much torque the car bogs.
+ */
+export async function runLaunchTractionCheck(
+  modelId = 'gt_vaz2110',
+  surface = SurfaceType.Asphalt,
+): Promise<{ maxSlipMps: number; to10KmhS: number | null; distance3sM: number }> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(modelId, (physics) => addGround(physics, surface));
+  const start = rig.vehicle.chassis.translation();
+  let maxSlipMps = 0;
+  let to10KmhS: number | null = null;
+
+  drive(rig, 3, (t, input) => {
+    input.throttle = 1;
+    input.brake = 0;
+    input.steer = 0;
+    input.handbrake = false;
+    if (to10KmhS === null && rig.vehicle.speedKmh >= 10) to10KmhS = t;
+    for (const wheel of rig.vehicle.wheelSpray) {
+      const reference = Math.max(Math.abs(wheel.forwardSpeed), 1.5);
+      maxSlipMps = Math.max(maxSlipMps, Math.max(0, wheel.slipRatio) * reference);
+    }
+  });
+
+  const end = rig.vehicle.chassis.translation();
+  const distance3sM = Math.hypot(end.x - start.x, end.z - start.z);
+  rig.vehicle.dispose();
+  const result = {
+    maxSlipMps: +maxSlipMps.toFixed(2),
+    to10KmhS: to10KmhS === null ? null : +to10KmhS.toFixed(2),
+    distance3sM: +distance3sM.toFixed(2),
+  };
+  if (result.maxSlipMps > 1.1) {
+    throw new Error(`Launch spun the tyres ${result.maxSlipMps.toFixed(2)} m/s faster than the road`);
+  }
+  if (result.distance3sM < 0.6) {
+    throw new Error(`Launch advanced only ${result.distance3sM.toFixed(2)} m in 3 s`);
+  }
+  return result;
+}
+
+/**
+ * Pull-away on a loose incline. This protects the low-speed contract that matters
+ * outside the flat-road launch check: TCS may permit wheelspin, but it must not hold
+ * a sound two-wheel-drive car motionless.
+ */
+export async function runInclineLaunchCheck(
+  modelId = 'sv_vaz2106',
+  degrees = 5,
+  surface = SurfaceType.Sand,
+): Promise<{ maxSlipMps: number; distance4sM: number; finalMps: number }> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(
+    modelId,
+    (physics) => addInclineGround(physics, degrees, surface),
+    true,
+  );
+  const start = rig.vehicle.chassis.translation();
+  let maxSlipMps = 0;
+
+  drive(rig, 4, (_, input) => {
+    input.throttle = 1;
+    input.brake = 0;
+    input.steer = 0;
+    input.handbrake = false;
+    for (const wheel of rig.vehicle.wheelSpray) {
+      const reference = Math.max(Math.abs(wheel.forwardSpeed), 1.5);
+      maxSlipMps = Math.max(maxSlipMps, Math.max(0, wheel.slipRatio) * reference);
+    }
+  });
+
+  const end = rig.vehicle.chassis.translation();
+  const distance4sM = end.z - start.z;
+  const finalMps = rig.vehicle.audio.forwardMps;
+  rig.vehicle.dispose();
+  const result = {
+    maxSlipMps: +maxSlipMps.toFixed(2),
+    distance4sM: +distance4sM.toFixed(2),
+    finalMps: +finalMps.toFixed(2),
+  };
+  if (result.distance4sM < 0.5 || result.finalMps < 0.5) {
+    throw new Error(
+      `Incline launch advanced ${result.distance4sM.toFixed(2)} m in 4 s; ` +
+        `final speed ${result.finalMps.toFixed(2)} m/s, max slip ${result.maxSlipMps.toFixed(2)} m/s`,
+    );
+  }
+  return result;
+}
+
 export async function runBench(
   ids?: readonly string[],
   towKg: number | null = null,
@@ -1011,7 +1107,7 @@ export async function benchTowing(
  * Regression check for a latched parking brake: after suspension settling, a car
  * must move less than 2 cm over ten seconds on a 20° asphalt slope.
  */
-export async function runParkingSlopeCheck(modelId = 'sa_vaz2110'): Promise<number> {
+export async function runParkingSlopeCheck(modelId = 'gt_vaz2110'): Promise<number> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId, addSlopeGround, true);
   const start = rig.vehicle.chassis.translation();
@@ -1037,7 +1133,7 @@ export async function runParkingSlopeCheck(modelId = 'sa_vaz2110'): Promise<numb
  * without requiring the chassis to stop before the gearbox responds.
  */
 export async function runAutomaticRollbackCheck(
-  modelId = 'sa_vaz2110',
+  modelId = 'gt_vaz2110',
 ): Promise<{ rollbackMps: number; recoveryS: number; finalMps: number }> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId, addRollbackGround, true);
@@ -1095,7 +1191,7 @@ export async function runAutomaticRollbackCheck(
  * backward. The flat road isolates reverse torque from gravity.
  */
 export async function runAutomaticNeutralReverseCheck(
-  modelId = 'sa_vaz2110',
+  modelId = 'gt_vaz2110',
 ): Promise<{ rollbackMps: number; engagementS: number; finalMps: number }> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId);

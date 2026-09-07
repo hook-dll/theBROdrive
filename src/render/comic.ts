@@ -44,6 +44,12 @@ export interface ComicOptions {
    * gentle to survive haze and tone mapping. Follows the live directional light.
    */
   readonly reliefShadeStrength: number;
+  /**
+   * Normal used by vehicle spotlights. Ground with authored vertical normals needs
+   * the geometric face normal; smoothly sampled terrain should keep its interpolated
+   * vertex normal so the rendering mesh's triangulation does not become visible.
+   */
+  readonly spotlightNormals: 'geometric' | 'smooth';
   /** Vertical spacing of the strata contours, metres. */
   readonly contourSpacing: number;
   /** How dark a contour line is, 0..1. */
@@ -73,6 +79,7 @@ export const DEFAULT_COMIC: ComicOptions = {
   lightingStrength: 0.55,
   shadowWarmth: 1,
   reliefShadeStrength: 0,
+  spotlightNormals: 'geometric',
   contourSpacing: 7,
   contourStrength: 0.22,
   stippleStrength: 0.28,
@@ -81,7 +88,7 @@ export const DEFAULT_COMIC: ComicOptions = {
 };
 
 /** One program for every comic material, so they all share a compile. */
-const COMIC_PROGRAM_KEY = 'comic-ground-v4';
+const COMIC_PROGRAM_KEY = 'comic-ground-v5';
 const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v1';
 const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
 const DIRECT_CALL =
@@ -256,6 +263,7 @@ const FRAGMENT_HOOK = /* glsl */ `
 function patch(
   shader: WebGLProgramParametersWithUniforms,
   uniforms: Record<string, THREE.IUniform>,
+  geometricSpotlightNormals: boolean,
 ): void {
   for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
 
@@ -263,12 +271,13 @@ function patch(
     .replace('varying vec3 vViewPosition;', VERTEX_PARS)
     .replace('#include <worldpos_vertex>', VERTEX_HOOK);
 
-  shader.fragmentShader = patchGroundSpotNormal(
-    shader.fragmentShader
-      .replace('varying vec3 vViewPosition;', FRAGMENT_PARS)
-      .replace('#include <opaque_fragment>', RELIEF_SHADE_HOOK)
-      .replace('#include <tonemapping_fragment>', FRAGMENT_HOOK),
-  );
+  const fragmentShader = shader.fragmentShader
+    .replace('varying vec3 vViewPosition;', FRAGMENT_PARS)
+    .replace('#include <opaque_fragment>', RELIEF_SHADE_HOOK)
+    .replace('#include <tonemapping_fragment>', FRAGMENT_HOOK);
+  shader.fragmentShader = geometricSpotlightNormals
+    ? patchGroundSpotNormal(fragmentShader)
+    : fragmentShader;
 }
 
 /**
@@ -291,8 +300,9 @@ export function applyComicShading(
     uStippleCell: { value: o.stippleCell },
     uStippleRange: { value: o.stippleRange },
   };
-  material.onBeforeCompile = (shader) => patch(shader, uniforms);
-  material.customProgramCacheKey = () => COMIC_PROGRAM_KEY;
+  material.onBeforeCompile = (shader) =>
+    patch(shader, uniforms, o.spotlightNormals === 'geometric');
+  material.customProgramCacheKey = () => `${COMIC_PROGRAM_KEY}:${o.spotlightNormals}`;
   return material;
 }
 

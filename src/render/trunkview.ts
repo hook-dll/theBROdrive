@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createItemMesh, disposeItemMeshResources } from './partmesh';
+import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from './partmesh';
 import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
@@ -51,6 +51,7 @@ export class TrunkView {
   private readonly panels: THREE.Mesh[] = [];
   private readonly borders: THREE.LineLoop[] = [];
   private readonly itemHolders: THREE.Group[] = [];
+  private readonly pocketWatches: THREE.Object3D[] = [];
   private readonly posePosition = new THREE.Vector3();
   private readonly poseQuaternion = new THREE.Quaternion();
   private readonly cellPosition = new THREE.Vector3();
@@ -79,6 +80,8 @@ export class TrunkView {
     wreck: WreckTrunk | null,
     alpha: number,
     origin: WorldOrigin,
+    timeOfDay: number,
+    dayFactor: number,
   ): void {
     if (!view) {
       this.root.visible = false;
@@ -131,6 +134,9 @@ export class TrunkView {
       this.itemSignature = itemSignature;
       this.rebuildItems(view, halfExtents);
     }
+    for (const watch of this.pocketWatches) {
+      setPocketWatchState(watch, timeOfDay, dayFactor);
+    }
   }
 
   private layout(
@@ -169,6 +175,7 @@ export class TrunkView {
       if (item.type === 'photograph' || item.type === 'pocket_watch') {
         mesh.rotation.y += Math.PI;
       }
+      if (item.type === 'pocket_watch') this.pocketWatches.push(mesh);
       _box.setFromObject(mesh).getSize(_size);
       _box.getCenter(_centre);
       mesh.position.sub(_centre);
@@ -197,6 +204,7 @@ export class TrunkView {
       this.root.remove(holder);
     }
     this.itemHolders.length = 0;
+    this.pocketWatches.length = 0;
   }
 
   dispose(): void {

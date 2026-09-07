@@ -256,7 +256,12 @@ export const TERRAIN_MATERIAL = applyComicShading(
     roughness: 0.93,
     metalness: 0,
   }),
-  { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0.28 },
+  {
+    lightingStrength: 0,
+    shadowWarmth: 0,
+    reliefShadeStrength: 0.28,
+    spotlightNormals: 'smooth',
+  },
 );
 
 /**

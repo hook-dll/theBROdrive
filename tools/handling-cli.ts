@@ -12,8 +12,9 @@
  *
  *   npx tsx tools/handling-cli.ts [modelId ...]
  *
- * The three checks at the end are pass/fail: a parked car must not creep down a 20
- * degree slope, and an automatic must recover from rolling backwards.
+ * The checks at the end are pass/fail: a parked car must not creep down a 20
+ * degree slope, an automatic must recover from rollback, and a VAZ-2106 must pull
+ * away on a modest loose incline without TCS holding it motionless.
  *
  * Nothing here is part of the game bundle.
  */
@@ -23,6 +24,7 @@ import {
   runAutomaticNeutralReverseCheck,
   runAutomaticRollbackCheck,
   runBench,
+  runInclineLaunchCheck,
   runParkingSlopeCheck,
   type BenchResult,
 } from './handling-bench';
@@ -30,7 +32,7 @@ import {
 installAssetShim();
 
 const ids = process.argv.slice(2);
-const DEFAULT_IDS = ['sv_vaz2101', 'sa_vaz2110', 'sv_vaz2105r', 'sa_uaz330364', 'sa_gaz2217'];
+const DEFAULT_IDS = ['sv_vaz2101', 'gt_vaz2110', 'sv_vaz2105r', 'sa_uaz330364'];
 
 function pad(value: string | number, width: number): string {
   return String(value).padStart(width);
@@ -95,6 +97,9 @@ async function main(): Promise<void> {
       console.log(`  FAIL  ${label}: ${(error as Error).message}`);
     }
   };
+  await check('VAZ-2106 pulls away on a 5 degree sand incline', async () =>
+    runInclineLaunchCheck(),
+  );
   await check('parked on a 20 degree slope (drift m)', async () => runParkingSlopeCheck());
   await check('automatic recovers from rollback', async () => runAutomaticRollbackCheck());
   await check('automatic takes reverse while rolling back', async () =>

@@ -45,7 +45,7 @@ import { WorldOrigin } from '../src/world/origin';
 
 const GRAVITY = 9.81;
 const MODELS = process.argv.slice(2);
-const DEFAULT_MODELS = ['sv_vaz2105r', 'sv_vaz2101', 'sa_vaz2110', 'sa_uaz330364'];
+const DEFAULT_MODELS = ['sv_vaz2105r', 'sv_vaz2101', 'gt_vaz2110', 'sa_uaz330364'];
 
 /* ---------------------------------------------------------------------------
  * Section 1: the law, on a bare controller.

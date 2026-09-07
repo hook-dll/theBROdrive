@@ -488,11 +488,13 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
 function carGlassMaterial(): THREE.MeshStandardMaterial {
   glassMaterial ??= new THREE.MeshStandardMaterial({
     name: 'car-glass',
-    // A cold near-black tint remains glossy enough to read as glass in direct sun.
+    // Preserve the original cold near-black tint and push its glass highlight slightly
+    // brighter and sharper than before.
     color: 0x101a22,
     transparent: false,
-    roughness: 0.08,
-    metalness: 0.12,
+    roughness: 0.04,
+    metalness: 0.14,
+    envMapIntensity: 1.2,
     side: THREE.DoubleSide,
   });
   return glassMaterial;

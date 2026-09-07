@@ -13,6 +13,7 @@ import {
   disposeItemMeshResources,
   FOOTBALL_RADIUS,
   partHalfExtents,
+  setPocketWatchState,
 } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
 import type { Shoveable } from '../player/player';
@@ -32,6 +33,7 @@ interface LooseEntry {
   readonly collider: RAPIER.Collider;
   readonly mesh: THREE.Object3D;
   readonly football?: FootballMotion;
+  readonly pocketWatch?: THREE.Object3D;
 }
 
 const FOOTBALL_SAMPLE_STRIDE = 7;
@@ -392,10 +394,13 @@ export class LoosePartField {
     for (const football of this.footballByBody.values()) football.afterStep(dt);
   }
 
-  /** Copies settled bodies' transforms into their meshes, once per render frame. */
-  syncVisuals(): void {
+  /** Copies body transforms and updates environment-sensitive item visuals. */
+  syncVisuals(timeOfDay: number, dayFactor: number): void {
     for (const entry of this.parts.values()) this.syncEntry(entry);
-    for (const entry of this.items.values()) this.syncEntry(entry);
+    for (const entry of this.items.values()) {
+      this.syncEntry(entry);
+      if (entry.pocketWatch) setPocketWatchState(entry.pocketWatch, timeOfDay, dayFactor);
+    }
   }
 
   dispose(): void {
@@ -542,9 +547,10 @@ export class LoosePartField {
 
     mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
+    const pocketWatch = item.type === 'pocket_watch' ? mesh : undefined;
     const entry: LooseEntry = football
-      ? { body, collider, mesh, football }
-      : { body, collider, mesh };
+      ? { body, collider, mesh, football, pocketWatch }
+      : { body, collider, mesh, pocketWatch };
     this.items.set(item.id, entry);
     this.colliderToItemId.set(collider.handle, item.id);
   }
