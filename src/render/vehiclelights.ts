@@ -32,11 +32,12 @@ import * as THREE from 'three';
  * order — the driven car first, then nearest to the camera — so a refusal costs the
  * FARTHEST lamp its pool of light on the ground, while its lens still glows.
  */
-/**
- * Persistent spotlights. Covers one fully lit car: two headlights, two tail lamps
- * and two reversing lamps, which is the common night case and today's cost.
- */
-const SLOT_COUNT = 6;
+/** Persistent spotlight budget compiled into every lit material for this session. */
+const SLOT_COUNT: Record<'acceptable' | 'standard' | 'blessing', number> = {
+  acceptable: 2,
+  standard: 6,
+  blessing: 6,
+};
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;
 
@@ -46,8 +47,8 @@ export class VehicleLightRig {
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
 
-  constructor(scene: THREE.Scene) {
-    for (let i = 0; i < SLOT_COUNT; i++) {
+  constructor(scene: THREE.Scene, quality: keyof typeof SLOT_COUNT = 'standard') {
+    for (let i = 0; i < SLOT_COUNT[quality]; i++) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;
       scene.add(light, light.target);

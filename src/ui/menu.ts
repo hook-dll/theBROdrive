@@ -898,10 +898,11 @@ export class MainMenu {
               {
                 label: 'Acceptable',
                 icon: 'gfx1',
-                hint: 'Starts at 60% of native and may scale lower. For weak GPUs.',
+                hint: 'Up to 1600×900, adaptive to about 1280×720 at 30 FPS. For integrated GPUs.',
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
+                  settings.msaa = false;
                   apply();
                 },
               },
