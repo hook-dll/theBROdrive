@@ -37,6 +37,8 @@ export interface InputFrame {
   mount: boolean;
   /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
   useHeld: boolean;
+  /** Secondary handheld action: R by default, tapped and consumed by the item owner. */
+  useHeldSecondary: boolean;
   /** Drop the held item in front of the player: tap, consumed once by interaction. */
   dropItem: boolean;
   /** Remove the currently worn item: tap, consumed by the wearable owner. */
@@ -86,6 +88,7 @@ export function emptyInput(): InputFrame {
     interact: false,
     mount: false,
     useHeld: false,
+    useHeldSecondary: false,
     dropItem: false,
     removeWearable: false,
     usePrimary: false,
@@ -140,6 +143,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
   { id: 'autopilot', label: 'Autopilot: sleeper / frantic / off', defaultKeys: ['KeyP'] },
   { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
+  { id: 'useHeldSecondary', label: 'Held item secondary', defaultKeys: ['KeyR'] },
   { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
   { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
   { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
@@ -478,6 +482,7 @@ export class InputReader {
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
     f.useHeld = this.anyPressed(this.keys.useHeld);
+    f.useHeldSecondary = this.anyPressed(this.keys.useHeldSecondary);
     f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
     f.removeWearable = this.anyPressed(this.keys.removeWearable);
     // Both buttons are pedals while precise control is active, so they must not also

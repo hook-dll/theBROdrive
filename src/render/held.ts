@@ -84,6 +84,12 @@ const GUM_MOUTH_Y = -0.085;
 const GUM_MOUTH_Z = -0.13;
 const GUM_MOUTH_ROLL = 0.12;
 
+/* ---- pocket watch: short wrist shake while the dial fast-forwards ---- */
+const WATCH_SHAKE_CYCLES = 6;
+const WATCH_SHAKE_X = 0.018;
+const WATCH_SHAKE_Y = 0.006;
+const WATCH_SHAKE_ROLL = 0.14;
+
 /* ---- module-level scratch: `update` must not allocate ---- */
 const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
@@ -141,6 +147,10 @@ export class HeldItemView {
       gumCharges: number;
       /** Accelerated game clock, used by the single-hand pocket-watch dial. */
       timeOfDay: number;
+      /** 0..1 direct daylight factor; phosphorescent markings brighten as it falls. */
+      dayFactor: number;
+      /** Normalized R-key watch-shake cycle, or -1 while idle. */
+      watchShakeProgress: number;
     },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
@@ -252,13 +262,21 @@ export class HeldItemView {
     } else if (item?.type === 'pocket_watch') {
       this.useT = ramp(this.useT, item.open, USE_RAMP * 0.8, d);
       const opened = this.useT;
-      setPocketWatchState(this.mesh, opened, opts.timeOfDay);
+      setPocketWatchState(this.mesh, opened, opts.timeOfDay, opts.dayFactor);
       ox += -baseX * opened;
       oy += (0.015 - baseY) * opened;
-      oz += (-0.21 - baseZ) * opened;
+      oz += (-0.32 - baseZ) * opened;
       pitch -= TILT_PITCH * opened;
       yaw -= TILT_YAW * opened;
       roll -= TILT_ROLL * opened;
+      if (opts.watchShakeProgress >= 0) {
+        const progress = Math.min(1, opts.watchShakeProgress);
+        const envelope = Math.sin(progress * Math.PI);
+        const shake = Math.sin(progress * Math.PI * 2 * WATCH_SHAKE_CYCLES) * envelope;
+        ox += shake * WATCH_SHAKE_X;
+        oy += Math.sin(progress * Math.PI * 4 * WATCH_SHAKE_CYCLES) * envelope * WATCH_SHAKE_Y;
+        roll += shake * WATCH_SHAKE_ROLL;
+      }
     } else if (item?.type === 'photograph') {
       // The photograph is itself the display: square it to the eye instead of
       // presenting its paper edge in the generic carry pose.

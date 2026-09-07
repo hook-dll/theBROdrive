@@ -152,6 +152,9 @@ const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
 const GUM_USE_SECONDS = GUM_CHEW_SECONDS + GUM_GROW_SECONDS;
 const GUM_FLIP_RADIUS = 0.5;
+/** Four dial hours in the game's 24-minute clock. */
+const WATCH_FAST_FORWARD_SECONDS = DAY_LENGTH / 6;
+const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
 /**
  * Reach of the dev pause-menu flip, metres, measured from the player to a body
  * centre. Wide enough to right a car from wherever you got out of it, and short
@@ -782,12 +785,14 @@ async function boot(): Promise<void> {
   let gumTimer = 0;
   let gumPackCharges = 0;
   let gumUseHeld = false;
-  /** Held devices are edge-toggled by F and reset when their item leaves the hand. */
+  /** Held devices are edge-toggled by E and reset when their item leaves the hand. */
   let binocularsActive = false;
   let torchlightActive = false;
   let cameraActive = false;
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
+  /** 0..1 while an R-key watch shake accelerates four in-game hours; 1 is idle. */
+  let watchFastForwardProgress = 1;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
   /**
@@ -822,12 +827,24 @@ async function boot(): Promise<void> {
     recenterAccum ||= f.recenterCamera;
 
     const s = world.state;
+    let watchTimeAdvance = 0;
+    if (watchFastForwardProgress < 1) {
+      const nextProgress = Math.min(
+        1,
+        watchFastForwardProgress + dt / WATCH_FAST_FORWARD_REAL_SECONDS,
+      );
+      watchTimeAdvance =
+        (nextProgress - watchFastForwardProgress) * WATCH_FAST_FORWARD_SECONDS;
+      watchFastForwardProgress = nextProgress;
+    }
     world.apply({
       t: 'time',
-      // The day length is a setting, so the clock rate is derived from it rather
-      // than a constant: DAY_LENGTH in-game seconds must elapse over the player's
-      // chosen number of real minutes.
-      timeOfDay: s.timeOfDay + (dt * DAY_LENGTH) / (s.settings.dayCycleMinutes * 60),
+      // The ordinary clock rate and the watch's four-hour acceleration share this
+      // delta so midnight advances dayIndex and every sky system observes one time.
+      timeOfDay:
+        s.timeOfDay +
+        (dt * DAY_LENGTH) / (s.settings.dayCycleMinutes * 60) +
+        watchTimeAdvance,
       playedSeconds: s.playedSeconds + dt,
     });
 
@@ -975,6 +992,16 @@ async function boot(): Promise<void> {
       } else if (heldAfterSelection.type === 'pocket_watch') {
         heldAfterSelection.open = !heldAfterSelection.open;
       }
+    }
+    if (
+      driving === null &&
+      f.useHeldSecondary &&
+      heldAfterSelection?.type === 'pocket_watch' &&
+      heldAfterSelection.open &&
+      watchFastForwardProgress >= 1
+    ) {
+      watchFastForwardProgress = 0;
+      hud.setToast('watch shaken — winding four hours forward');
     }
     if (f.useHeld && heldAfterSelection?.type === 'sun_shades') {
       const previous = s.player.wornSunShades;
@@ -1499,6 +1526,9 @@ async function boot(): Promise<void> {
       gumUseProgress,
       gumCharges: gumPackCharges,
       timeOfDay: s.timeOfDay,
+      dayFactor: sky.dayFactor,
+      watchShakeProgress:
+        watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
     });
 
     // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
