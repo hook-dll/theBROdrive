@@ -83,40 +83,6 @@ export interface BubbleGumItem {
   /** Remaining pieces in this pack. A fresh gas-station pack contains five. */
   charges: number;
 }
-export interface WinchHook {
-  readonly stage: 'hook';
-  readonly carId: string;
-  /** Attachment point in chassis-local metres. */
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
-
-export interface AnchoredWinch {
-  readonly stage: 'anchored';
-  readonly carId: string;
-  /** Attachment point in chassis-local metres. */
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  /** Ground anchor in absolute world coordinates. */
-  readonly anchorX: number;
-  readonly anchorY: number;
-  readonly anchorZ: number;
-  /** Current unstretched cable length, shortened by the ratchet. */
-  restLength: number;
-}
-
-export type HandWinchSetup = WinchHook | AnchoredWinch;
-
-export interface HandWinchItem {
-  readonly type: 'hand_winch';
-  readonly id: string;
-  setup: HandWinchSetup | null;
-}
-
-/** Exposed height of the installed ground stake, metres. */
-export const HAND_WINCH_ANCHOR_HEIGHT = 1.65;
 
 export interface BinocularItem {
   readonly type: 'binoculars';
@@ -166,7 +132,6 @@ export type Item =
   | AmmoItem
   | QuarryItem
   | BubbleGumItem
-  | HandWinchItem
   | BinocularItem
   | TorchlightItem
   | SunShadesItem
@@ -223,12 +188,6 @@ export function itemLabel(item: Item): string {
       return item.species;
     case 'bubble_gum':
       return `bubble gum x${item.charges}`;
-    case 'hand_winch':
-      return item.setup === null
-        ? 'hand winch'
-        : item.setup.stage === 'hook'
-          ? 'hand winch (hooked)'
-          : 'hand winch (anchored)';
     case 'binoculars':
       return 'binoculars';
     case 'torchlight':
@@ -275,8 +234,6 @@ export function itemMass(item: Item): number {
       return item.mass;
     case 'bubble_gum':
       return 0.02;
-    case 'hand_winch':
-      return 10;
     case 'binoculars':
       return 0.75;
     case 'torchlight':
@@ -296,7 +253,7 @@ export function itemMass(item: Item): number {
 
 /** True while the item's primary action can be held down continuously. */
 export function isContinuousUse(item: Item): boolean {
-  return item.type === 'tool' || item.type === 'fluid_can' || item.type === 'hand_winch';
+  return item.type === 'tool' || item.type === 'fluid_can';
 }
 
 /**

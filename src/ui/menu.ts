@@ -132,7 +132,6 @@ const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: numbe
 export type DevSpawnItemRequest =
   | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
   | { readonly type: 'bubble_gum' }
-  | { readonly type: 'hand_winch' }
   | { readonly type: 'binoculars' }
   | { readonly type: 'torchlight' }
   | { readonly type: 'sun_shades'; readonly tint: ShadeTint }
@@ -1348,7 +1347,6 @@ export class MainMenu {
             request: { type: 'camera' },
           },
           { label: 'football', detail: 'walk or sprint into it', request: { type: 'football' } },
-          { label: 'hand winch', detail: 'F hook/anchor · LMB ratchet', request: { type: 'hand_winch' } },
           { label: 'pocket watch', detail: 'E wind +4 h', request: { type: 'pocket_watch' } },
           { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
           { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
