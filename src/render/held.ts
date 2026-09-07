@@ -132,6 +132,14 @@ export class HeldItemView {
     this.root.visible = false;
     this.scene.add(this.root);
   }
+  /** World-space cable outlet on the currently rendered hand winch. */
+  winchCablePoint(out: THREE.Vector3): THREE.Vector3 | null {
+    if (this.heldType !== 'hand_winch' || !this.mesh) return null;
+    const outlet = this.mesh.getObjectByName('winch_cable_outlet');
+    if (!outlet) return null;
+    return outlet.getWorldPosition(out);
+  }
+
 
   update(
     item: Item | null,
@@ -239,6 +247,18 @@ export class HeldItemView {
         roll += GUM_MOUTH_ROLL * reach;
       }
       setBubbleGumPieceCount(this.mesh, pieceCount);
+    } else if (item?.type === 'hand_winch') {
+      pitch -= TILT_PITCH * 0.55;
+      const angle = -0.26 + (use ? Math.sin(t * 9) * 0.42 : 0);
+      const lever = this.mesh.getObjectByName('winch_ratchet');
+      const grip = this.mesh.getObjectByName('winch_grip');
+      if (lever) {
+        lever.position.set(0.132 + Math.cos(angle) * 0.095, Math.sin(angle) * 0.095, -0.015);
+        lever.rotation.z = angle;
+      }
+      if (grip) {
+        grip.position.set(0.132 + Math.cos(angle) * 0.19, Math.sin(angle) * 0.19, -0.015);
+      }
     } else if (item?.type === 'binoculars') {
       this.useT = ramp(this.useT, use, USE_RAMP * 1.5, d);
       // Once the ocular mask is live the physical model is behind the player's

@@ -1,5 +1,7 @@
+import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import type { PhysicsWorld } from '../core/physics';
+import type { PhysicsWorld, Vec3 } from '../core/physics';
+import { SurfaceType } from '../core/surfaces';
 import type { CarState, GameWorld, StickerState } from '../game/state';
 import type { InputFrame } from '../core/input';
 import type {
@@ -9,8 +11,9 @@ import type {
   FluidCanItem,
   FluidKind,
   ToolKind,
+  HandWinchItem,
 } from '../items/items';
-import { itemLabel, litreText } from '../items/items';
+import { HAND_WINCH_ANCHOR_HEIGHT, itemLabel, litreText } from '../items/items';
 import type { CarStats, FuelType, PartInstance } from '../parts/registry';
 import {
   applyBrush,
@@ -115,6 +118,11 @@ const HITCH_CAR_RANGE = 9;
  * Named rather than hardcoded at the call site so a pack of designs can be added
  * without touching the placement path or the save format.
  */
+/** Working envelope of the ten-metre cable and its hand-operated ratchet. */
+const WINCH_MIN_LENGTH = 0.75;
+const WINCH_MAX_LENGTH = 10;
+const WINCH_RATCHET_M_S = 0.35;
+
 const STICKER_KIND = 'star';
 /**
  * Hits closer than this are treated as "no hit". The eye origin sits inside the
@@ -135,6 +143,7 @@ type Target =
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
   | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
+  | { kind: 'ground'; point: Vec3; surface: SurfaceType }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
 /**
@@ -362,6 +371,7 @@ export class Interaction {
   private readonly rayDir = new THREE.Vector3();
   private readonly qBody = new THREE.Quaternion();
   private readonly hits: THREE.Intersection[] = [];
+  private readonly winchAnchorBodies = new Map<string, RAPIER.RigidBody>();
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -373,6 +383,8 @@ export class Interaction {
     private readonly wreckTrunks: WreckTrunkField,
     /** The car in reach, WITH its id. Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
+    /** Finds a live chassis by persisted id for an installed winch. */
+    private readonly getVehicleById: (carId: string) => Vehicle | null,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
     private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
     /**
@@ -407,6 +419,7 @@ export class Interaction {
     this.prevDrop = input.dropItem;
     this.sound = null;
     this.continuous = null;
+    this.stepWinches(dt, input.usePrimary && !this.world.state.player.drivingCarId);
 
     if (this.world.state.player.drivingCarId) {
       // Sitting down closes whatever was open: the grid belongs to a player standing
@@ -428,11 +441,15 @@ export class Interaction {
     const worldActionPressed = mountPressed && this.mountHasPriority(resolved.target);
     if (worldActionPressed) {
       let actionResolved = resolved;
+      const winch = this.inventory.held;
       if (
         resolved.target.kind === 'car-entry' &&
         resolved.vehicle &&
         resolved.carId &&
-        this.world.state.stickersUnplaced > 0
+        (
+          this.world.state.stickersUnplaced > 0
+          || (winch?.type === 'hand_winch' && winch.setup === null)
+        )
       ) {
         const surface = this.pickBody(resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
         if (surface) {
@@ -658,6 +675,21 @@ export class Interaction {
       else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
       else if (palletPoi !== null) keep(hit.toi, { kind: 'pallet', poiIndex: palletPoi });
       else if (signPoi !== null) keep(hit.toi, { kind: 'freight-sign', poiIndex: signPoi });
+      else {
+        const winch = this.inventory.held;
+        const collider = this.physics.world.getCollider(h);
+        if (
+          winch?.type === 'hand_winch'
+          && winch.setup?.stage === 'hook'
+          && collider?.parent()?.isFixed()
+        ) {
+          keep(hit.toi, {
+            kind: 'ground',
+            point: hit.point,
+            surface: this.physics.surfaces.lookupType(h),
+          });
+        }
+      }
     }
 
     // Anchors have no colliders (a bare mount must be aimable), so project the ray
@@ -849,6 +881,11 @@ export class Interaction {
    */
   private mountHasPriority(target: Target): boolean {
     if (target.kind === 'none') return false;
+    const held = this.inventory.held;
+    if (held?.type === 'hand_winch') {
+      if (target.kind === 'ground') return held.setup?.stage === 'hook';
+      if (target.kind === 'car-body' || target.kind === 'car-entry') return true;
+    }
     if (target.kind === 'car-body' || target.kind === 'car-entry') {
       return this.world.state.stickersUnplaced > 0;
     }
@@ -858,6 +895,43 @@ export class Interaction {
   private promptFor(resolved: Resolved): string | null {
     const held = this.inventory.held;
     const t = resolved.target;
+
+    if (held?.type === 'hand_winch') {
+      const setup = held.setup;
+      if (setup?.stage === 'anchored') {
+        if (
+          (t.kind === 'car-body' || t.kind === 'car-entry')
+          && t.carId === setup.carId
+        ) {
+          return '[F] detach winch · [LMB] ratchet';
+        }
+        return '[LMB] ratchet · look at the attached car and press F to detach';
+      }
+      if (setup?.stage === 'hook') {
+        if (t.kind === 'ground') {
+          if (!this.acceptsWinchAnchor(t.surface)) return 'ground anchor needs sand, gravel or rock';
+          const vehicle = this.getVehicleById(setup.carId);
+          if (!vehicle) return 'attached car is out of reach';
+          const hook = vehicle.winchPoint(setup.x, setup.y, setup.z, this.vScratch);
+          const length = Math.hypot(
+            t.point.x - hook.x,
+            t.point.y - hook.y,
+            t.point.z - hook.z,
+          );
+          if (length < WINCH_MIN_LENGTH) return 'ground anchor is too close';
+          if (length > WINCH_MAX_LENGTH) return 'ground anchor is beyond the cable';
+          return `[F] drive ground anchor · ${length.toFixed(1)} m`;
+        }
+        if (
+          (t.kind === 'car-body' || t.kind === 'car-entry')
+          && t.carId === setup.carId
+        ) {
+          return '[F] remove hook · aim at loose ground to place the anchor';
+        }
+        return 'hook attached · aim at loose ground';
+      }
+      if (t.kind === 'car-body' || t.kind === 'car-entry') return '[F] hook winch to body';
+    }
 
     if (t.kind === 'loose-part') {
       const part = this.world.state.looseParts[t.partId]?.part;
@@ -1050,6 +1124,80 @@ export class Interaction {
     return null; // wrench: no continuous action; the [F] prompt flows through.
   }
 
+  private acceptsWinchAnchor(surface: SurfaceType): boolean {
+    return surface === SurfaceType.Sand
+      || surface === SurfaceType.Gravel
+      || surface === SurfaceType.Rock;
+  }
+
+  /** Keeps every installed cable taut; only the held kit shortens while ratcheting. */
+  private stepWinches(dt: number, ratchet: boolean): void {
+    const held = this.inventory.held;
+    for (const item of this.inventory.all) {
+      if (item.type !== 'hand_winch' || item.setup?.stage !== 'anchored') continue;
+      this.ensureWinchAnchor(item);
+      const setup = item.setup;
+      const vehicle = this.getVehicleById(setup.carId);
+      if (!vehicle) continue;
+      const result = vehicle.applyWinch(
+        setup.x,
+        setup.y,
+        setup.z,
+        setup.anchorX,
+        setup.anchorY,
+        setup.anchorZ,
+        setup.restLength,
+        dt,
+      );
+      if (result.length > WINCH_MAX_LENGTH + 1) {
+        item.setup = null;
+        this.removeWinchAnchor(item.id);
+        this.persistWinch();
+        continue;
+      }
+      if (ratchet && held?.id === item.id) {
+        setup.restLength = Math.max(
+          WINCH_MIN_LENGTH,
+          setup.restLength - WINCH_RATCHET_M_S * dt,
+        );
+      }
+    }
+  }
+
+  private ensureWinchAnchor(item: HandWinchItem): void {
+    const setup = item.setup;
+    if (setup?.stage !== 'anchored' || this.winchAnchorBodies.has(item.id)) return;
+    const body = this.physics.world.createRigidBody(
+      this.physics.rapier.RigidBodyDesc.fixed().setTranslation(
+        setup.anchorX - this.origin.x,
+        setup.anchorY + HAND_WINCH_ANCHOR_HEIGHT * 0.5,
+        setup.anchorZ - this.origin.z,
+      ),
+    );
+    this.physics.world.createCollider(
+      this.physics.rapier.ColliderDesc
+        .cylinder(HAND_WINCH_ANCHOR_HEIGHT * 0.5, 0.1)
+        .setFriction(1.2),
+      body,
+    );
+    this.winchAnchorBodies.set(item.id, body);
+  }
+
+  private removeWinchAnchor(itemId: string): void {
+    const body = this.winchAnchorBodies.get(itemId);
+    if (!body) return;
+    this.physics.world.removeRigidBody(body);
+    this.winchAnchorBodies.delete(itemId);
+  }
+
+  private persistWinch(): void {
+    this.world.apply({
+      t: 'inventory',
+      items: this.inventory.all,
+      selected: Math.max(0, this.inventory.selectedIndex),
+    });
+  }
+
   /**
    * Body-condition readouts use whole percentages: one short HUD line is easier to
    * scan than two 0..1 fractions, while retaining enough precision for a cosmetic
@@ -1166,6 +1314,7 @@ export class Interaction {
    */
   private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
     if (can.litres <= 0) return;
+
     const reservoir = this.aimedReservoir(resolved);
     if (!reservoir || !reservoirAccepts(reservoir, can.fluid)) return;
     const car = this.world.state.cars[reservoir.carId];
@@ -1200,6 +1349,82 @@ export class Interaction {
   private mount(resolved: Resolved): void {
     const t = resolved.target;
     const held = this.inventory.held;
+    if (held?.type === 'hand_winch') {
+      if (held.setup === null && t.kind === 'car-body') {
+        held.setup = {
+          stage: 'hook',
+          carId: t.carId,
+          x: t.point.x,
+          y: t.point.y,
+          z: t.point.z,
+        };
+        this.persistWinch();
+        this.sound = 'mount';
+        return;
+      }
+      if (
+        held.setup?.stage === 'hook'
+        && (t.kind === 'car-body' || t.kind === 'car-entry')
+        && t.carId === held.setup.carId
+      ) {
+        held.setup = null;
+        this.persistWinch();
+        this.sound = 'drop';
+        return;
+      }
+      if (held.setup?.stage === 'hook' && t.kind === 'ground') {
+        if (!this.acceptsWinchAnchor(t.surface)) {
+          this.sound = 'refused';
+          return;
+        }
+        const vehicle = this.getVehicleById(held.setup.carId);
+        if (!vehicle) {
+          this.sound = 'refused';
+          return;
+        }
+        const hook = vehicle.winchPoint(
+          held.setup.x,
+          held.setup.y,
+          held.setup.z,
+          this.vScratch,
+        );
+        const length = Math.hypot(
+          t.point.x - hook.x,
+          t.point.y - hook.y,
+          t.point.z - hook.z,
+        );
+        if (length < WINCH_MIN_LENGTH || length > WINCH_MAX_LENGTH) {
+          this.sound = 'refused';
+          return;
+        }
+        held.setup = {
+          stage: 'anchored',
+          carId: held.setup.carId,
+          x: held.setup.x,
+          y: held.setup.y,
+          z: held.setup.z,
+          anchorX: t.point.x + this.origin.x,
+          anchorY: t.point.y,
+          anchorZ: t.point.z + this.origin.z,
+          restLength: length,
+        };
+        this.persistWinch();
+        this.sound = 'mount';
+        return;
+      }
+      if (
+        held.setup?.stage === 'anchored'
+        && (t.kind === 'car-body' || t.kind === 'car-entry')
+        && t.carId === held.setup.carId
+      ) {
+        held.setup = null;
+        this.removeWinchAnchor(held.id);
+        this.persistWinch();
+        this.sound = 'drop';
+        return;
+      }
+    }
+
 
     if (t.kind === 'loose-part') {
       const loose = this.world.state.looseParts[t.partId];
@@ -1305,6 +1530,10 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
+      if (held?.type === 'hand_winch' && held.setup !== null) {
+        this.sound = 'refused';
+        return;
+      }
       const result = operateTrunkCell(cells, t.cell, held, this.inventory);
       if (result.action === 'refused') {
         this.sound = 'refused';
@@ -1378,6 +1607,7 @@ export class Interaction {
   ): void {
     const held = this.inventory.held;
     if (!held) return;
+    if (held.type === 'hand_winch' && held.setup !== null) return;
     const dirLen = Math.hypot(dirX, dirY, dirZ) || 1;
     const dx = dirX / dirLen;
     const dy = dirY / dirLen;

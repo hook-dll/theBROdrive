@@ -620,9 +620,9 @@ export function createStartingCar(world: GameWorld): CarState {
 // ---------------------------------------------------------------------------
 
 /**
- * Places the starter fuel can and the three distinctive handheld items around
- * the homestead. This runs only for a new world, so stable generated ids can never
- * restock something the player has already taken.
+ * Places the starter fuel can and distinctive handheld tools around the homestead.
+ * This runs only for a new world, so stable generated ids can never restock
+ * something the player has already taken.
  */
 export function spawnStartingItems(world: GameWorld, loose: LoosePartField): void {
   const road = new Road(world.seed);
@@ -669,6 +669,18 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     L.floorY + WB_TOP + 0.08,
     watchZ,
   );
+  const [winchX, winchZ] = L.toWorld(13.45, 2.15);
+  loose.spawnItem(
+    {
+      type: 'hand_winch',
+      id: world.generatedPartId('home_item', 0, 6),
+      setup: null,
+    },
+    winchX,
+    L.floorY + WB_TOP + 0.12,
+    winchZ,
+  );
+
 
   // The ball starts on bare ground beside the drive, with the centre one radius
   // above the terrain so it neither floats nor spawns intersecting the sand.
