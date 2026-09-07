@@ -25,6 +25,9 @@ export interface LoopCallbacks {
 export class GameLoop {
   private accumulator = 0;
   private lastTime = 0;
+  private lastRenderTime = 0;
+  private nextRenderTime = 0;
+  private minimumRenderIntervalMs = 0;
   private rafHandle = 0;
   private running = false;
   private tickCount = 0;
@@ -39,12 +42,22 @@ export class GameLoop {
     if (this.running) return;
     this.running = true;
     this.lastTime = performance.now();
+    this.lastRenderTime = this.lastTime;
+    this.nextRenderTime = this.lastTime;
     this.rafHandle = requestAnimationFrame(this.frame);
   }
 
   stop(): void {
     this.running = false;
     cancelAnimationFrame(this.rafHandle);
+  }
+
+  /** Caps presentation without changing the fixed 60 Hz simulation. */
+  setRenderFps(fps: number | null): void {
+    this.minimumRenderIntervalMs = fps === null ? 0 : 1000 / Math.max(1, fps);
+    const now = performance.now();
+    this.lastRenderTime = now;
+    this.nextRenderTime = now;
   }
 
   private frame = (now: number): void => {
@@ -78,10 +91,24 @@ export class GameLoop {
       this.accumulator = 0;
     }
 
-    // Alpha is a fraction of one step, and is now always a true fraction: the
-    // clamp above is what guarantees the accumulator is below one step here, so
-    // the renderer interpolates strictly between the last two states and never
-    // sits pinned at the newest one.
-    this.callbacks.render(this.accumulator / FIXED_DT, frameDt);
+    // Acceptable presents at at most 30 Hz but continues to simulate on every
+    // callback. Deadlines, rather than elapsed-time resets, matter here: a 40 Hz
+    // callback stream must produce ~30 renders, not accidentally halve to 20.
+    if (
+      this.minimumRenderIntervalMs > 0
+      && now + 0.5 < this.nextRenderTime
+    ) {
+      return;
+    }
+    if (this.minimumRenderIntervalMs > 0) {
+      do {
+        this.nextRenderTime += this.minimumRenderIntervalMs;
+      } while (this.nextRenderTime <= now);
+    } else {
+      this.nextRenderTime = now;
+    }
+    const renderElapsedMs = now - this.lastRenderTime;
+    this.lastRenderTime = now;
+    this.callbacks.render(this.accumulator / FIXED_DT, renderElapsedMs / 1000);
   };
 }

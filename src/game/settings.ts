@@ -14,15 +14,15 @@ import { BINDABLE_ACTIONS } from '../core/input';
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
- * Rendering tier. Three deliberately separate internal-resolution targets; shadow
- * and streetlight budgets follow the same low/standard/high ordering. MSAA remains
- * an independent option.
+ * Rendering tier. Acceptable uses an absolute 900p-to-720p pixel budget and a
+ * 30 FPS presentation target for weak integrated GPUs; simulation remains 60 Hz.
+ * Standard stays at native resolution, while Blessing supersamples. Shadow and
+ * local-light budgets follow the same low/standard/high ordering. MSAA remains an
+ * independent option after a preset is selected.
  *
- *  - `acceptable`: 60% of native and adaptive below that for weak integrated GPUs.
+ *  - `acceptable`: up to 1600x900, adaptive no lower than ~1280x720.
  *  - `standard`: the authored look at native resolution.
- *  - `blessing`: up to 2x native resolution per axis, locked against adaptive
- *    downscaling. The final resolve into the display is supersampling, not a quality
- *    reduction: four internal pixels contribute to each native pixel.
+ *  - `blessing`: 1.25x native resolution per axis.
  */
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 

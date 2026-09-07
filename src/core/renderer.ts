@@ -66,13 +66,14 @@ const MAX_DEPTH_RATIO = 160000;
 export const CAMERA_BASE_FOV = 65;
 
 /**
- * Internal-resolution scale relative to native backing resolution. Blessing keeps
- * modest supersampling rather than the old 2x-per-axis target: combined with 4x
- * MSAA and the fullscreen ink/haze pass that target shaded and resolved sixteen
- * samples per display pixel, enough to miss presentation intervals even on a 4090.
+ * Acceptable uses an absolute pixel budget rather than a display percentage. A
+ * 1080p monitor therefore starts near 1600x900, a 720p panel remains native, and
+ * a 4K television cannot accidentally ask a 6 W iGPU to shade millions of pixels.
  */
+const ACCEPTABLE_MAX_PIXELS = 1600 * 900;
+const ACCEPTABLE_MIN_PIXELS = 1280 * 720;
 const PIXEL_RATIO_SCALE: Record<GraphicsQuality, number> = {
-  acceptable: 0.6,
+  acceptable: 1,
   standard: 1,
   blessing: 1.25,
 };
@@ -686,6 +687,7 @@ export class Renderer {
       this.timerQueryExt = null;
     }
     this.basePixelRatio = this.pixelRatioFor(quality);
+    this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
@@ -808,15 +810,32 @@ export class Renderer {
   }
 
   private pixelRatioFor(quality: GraphicsQuality): number {
+    const dpr = window.devicePixelRatio;
+    if (quality === 'acceptable') {
+      const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
+      return Math.min(dpr, Math.sqrt(ACCEPTABLE_MAX_PIXELS / cssPixels));
+    }
     return Math.min(
-      window.devicePixelRatio * PIXEL_RATIO_SCALE[quality],
+      dpr * PIXEL_RATIO_SCALE[quality],
       MAX_PIXEL_RATIO[quality],
+    );
+  }
+
+  private updateAdaptiveFloor(): void {
+    if (this.quality !== 'acceptable') return;
+    const basePixels =
+      window.innerWidth * window.innerHeight * this.basePixelRatio * this.basePixelRatio;
+    this.adaptiveResolution.setMinimumScale(
+      Math.min(1, Math.sqrt(ACCEPTABLE_MIN_PIXELS / Math.max(1, basePixels))),
     );
   }
 
   private resize = (): void => {
     const width = window.innerWidth;
     const height = window.innerHeight;
+    this.basePixelRatio = this.pixelRatioFor(this.quality);
+    this.updateAdaptiveFloor();
+    this.renderer.setPixelRatio(this.basePixelRatio * this.adaptiveResolution.scale);
     this.renderer.setSize(width, height, false);
     this.resizeHazeTarget();
 
@@ -1078,6 +1097,7 @@ export class Renderer {
     this.disposeGpuQueries();
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
     this.basePixelRatio = this.pixelRatioFor(quality);
+    this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
   }

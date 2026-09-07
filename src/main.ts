@@ -235,7 +235,10 @@ async function boot(): Promise<void> {
     world.state.settings.msaa,
     world.state.settings.inkStrength,
   );
-  const vehicleLights = new VehicleLightRig(renderer.scene);
+  const vehicleLights = new VehicleLightRig(
+    renderer.scene,
+    world.state.settings.graphicsQuality,
+  );
   // Road texture canvases are one-time CPU work; create them under the loading cover
   // rather than letting RoadMeshProvider charge the first streamed road chunk.
   roadTextures();
@@ -1532,7 +1535,7 @@ async function boot(): Promise<void> {
     // is excluded because it is a different GPU workload; ordinary frames, including
     // the whole day-night transition, remain eligible for adaptive resolution.
     const adaptationEligible = !sky.didBakeEnvironmentThisFrame;
-    renderer.adaptResolution(adaptationEligible, driving === null);
+    renderer.adaptResolution(adaptationEligible, true);
     rebasedThisFrame = false;
     renderer.setHazeStrength(sky.dayFactor);
     renderer.setItemViewEffects(
@@ -1566,6 +1569,7 @@ async function boot(): Promise<void> {
   };
 
   const loop = new GameLoop({ fixedUpdate, render });
+  loop.setRenderFps(world.state.settings.graphicsQuality === 'acceptable' ? 30 : null);
   loading.classList.add('is-hidden');
   loop.start();
 
@@ -1809,6 +1813,7 @@ async function boot(): Promise<void> {
       // budget only on the next load.
       renderer.setQuality(world.state.settings.graphicsQuality);
       sky.setQuality(world.state.settings.graphicsQuality);
+      loop.setRenderFps(world.state.settings.graphicsQuality === 'acceptable' ? 30 : null);
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
