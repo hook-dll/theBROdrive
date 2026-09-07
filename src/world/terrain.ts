@@ -524,6 +524,15 @@ export class Terrain {
     return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral));
   }
 
+  /** Mountain contribution actually drawn at a camera-relative vista distance. */
+  private horizonMountainHeight(x: number, z: number, distanceFromCamera: number): number {
+    if (distanceFromCamera <= MOUNTAIN_START) return 0;
+    return (
+      this.road.landscape.mountainAt(x, z) *
+      smoothstep01((distanceFromCamera - MOUNTAIN_START) / MOUNTAIN_RAMP)
+    );
+  }
+
   /**
    * Camera-centred horizon height. `distanceFromCamera` rather than distance from
    * the road makes mountain ranges permanent horizon scenery. `reliefWeight` is a
@@ -539,11 +548,7 @@ export class Terrain {
     if (reliefWeight > 0) {
       h += this.relief(x, z, RELIEF_FULL) * Math.min(1, reliefWeight);
     }
-    if (distanceFromCamera > MOUNTAIN_START) {
-      h +=
-        this.road.landscape.mountainAt(x, z) *
-        smoothstep01((distanceFromCamera - MOUNTAIN_START) / MOUNTAIN_RAMP);
-    }
+    h += this.horizonMountainHeight(x, z, distanceFromCamera);
     return h;
   }
 
