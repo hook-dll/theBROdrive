@@ -669,17 +669,6 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     L.floorY + WB_TOP + 0.08,
     watchZ,
   );
-  const [winchX, winchZ] = L.toWorld(13.45, 2.15);
-  loose.spawnItem(
-    {
-      type: 'hand_winch',
-      id: world.generatedPartId('home_item', 0, 6),
-      setup: null,
-    },
-    winchX,
-    L.floorY + WB_TOP + 0.12,
-    winchZ,
-  );
 
 
   // The ball starts on bare ground beside the drive, with the centre one radius

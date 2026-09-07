@@ -39,7 +39,6 @@ import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
-import { WinchRigView } from './render/winch';
 import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
@@ -152,6 +151,8 @@ const SPRAY_SMOKE_YIELD = 0.4;
 const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
 const GUM_USE_SECONDS = GUM_CHEW_SECONDS + GUM_GROW_SECONDS;
+/** How close the player must be to the body for the gum pop to right it. */
+const GUM_FLIP_RADIUS = 0.5;
 /** Four dial hours in the game's 24-minute clock. */
 const WATCH_FAST_FORWARD_SECONDS = DAY_LENGTH / 6;
 const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
@@ -289,8 +290,6 @@ async function boot(): Promise<void> {
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
-  const winchView = new WinchRigView(renderer.scene, origin);
-  const winchHeldPoint = new THREE.Vector3();
   const trunkView = new TrunkView(renderer.scene);
   const anchorGhosts = new AnchorGhosts(renderer.scene);
   // Sand/gravel spray lives for the session like the other view systems; its
@@ -656,7 +655,6 @@ async function boot(): Promise<void> {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
     },
-    (carId) => vehicles.get(carId) ?? null,
     (carId, sticker) => {
       const vehicle = vehicles.get(carId);
       if (vehicle) vehicle.root.add(createStickerMesh(sticker));
@@ -1039,8 +1037,21 @@ async function boot(): Promise<void> {
     if (gumActive) {
       gumTimer += dt;
       if (gumTimer >= GUM_USE_SECONDS) {
+        const p = player.position;
+        let nearest: Vehicle | null = null;
+        let nearestDistSq = Number.POSITIVE_INFINITY;
+        for (const vehicle of vehicles.values()) {
+          if (!vehicle.touchesSphere(p.x, p.y, p.z, GUM_FLIP_RADIUS)) continue;
+          const t = vehicle.chassis.translation();
+          const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+          if (distSq < nearestDistSq) {
+            nearest = vehicle;
+            nearestDistSq = distSq;
+          }
+        }
+        nearest?.flipOver();
         audio.bubbleGumPop();
-        hud.setToast('POP');
+        hud.setToast(nearest ? 'POP — car flipped' : 'POP — no car close enough');
         gumActive = false;
         gumTimer = 0;
       }
@@ -1501,17 +1512,6 @@ async function boot(): Promise<void> {
       watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
     });
-    const installedWinch = inventory.all.find(
-      (item) => item.type === 'hand_winch' && item.setup !== null,
-    );
-    const cableEnd = heldView.winchCablePoint(winchHeldPoint) ?? renderer.camera.position;
-    winchView.update(
-      installedWinch?.type === 'hand_winch' ? installedWinch : null,
-      installedWinch?.type === 'hand_winch' && installedWinch.setup
-        ? vehicles.get(installedWinch.setup.carId) ?? null
-        : null,
-      cableEnd,
-    );
 
     // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
     // `interaction.lastAnchorTarget` is stale because anchor resolution is skipped.
@@ -1681,9 +1681,6 @@ async function boot(): Promise<void> {
         break;
       case 'bubble_gum':
         item = { type: 'bubble_gum', id: world.runtimePartId(), charges: 5 };
-        break;
-      case 'hand_winch':
-        item = { type: 'hand_winch', id: world.runtimePartId(), setup: null };
         break;
       case 'binoculars':
         item = { type: 'binoculars', id: world.runtimePartId() };

@@ -16,7 +16,7 @@ import type {
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { variant, type PartInstance } from '../parts/registry';
-import { CAMERA_FRAME_LIMIT, type HandWinchSetup, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -736,34 +736,6 @@ function migrateItem(raw: unknown, where: string): Item {
         id: obj.id,
         charges: Math.min(5, Math.max(1, Math.trunc(numOr(obj.charges, 5)))),
       };
-    case 'hand_winch': {
-      let setup: HandWinchSetup | null = null;
-      if (typeof obj.setup === 'object' && obj.setup !== null) {
-        const rawSetup = obj.setup as Record<string, unknown>;
-        if (
-          typeof rawSetup.carId === 'string'
-          && (rawSetup.stage === 'hook' || rawSetup.stage === 'anchored')
-        ) {
-          const hook = {
-            carId: rawSetup.carId,
-            x: numOr(rawSetup.x, 0),
-            y: numOr(rawSetup.y, 0),
-            z: numOr(rawSetup.z, 0),
-          };
-          setup = rawSetup.stage === 'hook'
-            ? { stage: 'hook', ...hook }
-            : {
-                stage: 'anchored',
-                ...hook,
-                anchorX: numOr(rawSetup.anchorX, 0),
-                anchorY: numOr(rawSetup.anchorY, 0),
-                anchorZ: numOr(rawSetup.anchorZ, 0),
-                restLength: Math.max(0.75, numOr(rawSetup.restLength, 1)),
-              };
-        }
-      }
-      return { type: 'hand_winch', id: obj.id, setup };
-    }
     case 'binoculars':
       return { type: 'binoculars', id: obj.id };
     case 'torchlight':
