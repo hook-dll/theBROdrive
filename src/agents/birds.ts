@@ -8,9 +8,9 @@ import type { Terrain } from '../world/terrain';
  * Desert birds: the only sign of life out on the road.
  *
  * Birds are kinematic agents — there is not a single Rapier collider here. They
- * live in a single `InstancedMesh`, animated with a shader-side wing flap driven by
- * a per-instance phase attribute, so the per-frame cost is a handful of matrix
- * writes, never a geometry update.
+ * live in one `InstancedMesh`; lightweight per-instance attributes vary silhouette,
+ * wing pose and animation while the shader bends the wings. Per-frame work remains
+ * matrix and attribute writes, never geometry rebuilds.
  *
  * Placement is deterministic by arclength, exactly like POIs: a bird group lives in
  * a hash-derived road slot, so the same seed always puts the same birds in the same
@@ -26,11 +26,6 @@ const ACTIVE_RADIUS = 400;
 /** Hysteresis: a group despawns only once the player is this far past it. */
 const DESPAWN_RADIUS = ACTIVE_RADIUS + 90;
 
-/** Birds within this distance of the player simulate every frame. */
-const LOD_NEAR = 120;
-const LOD_NEAR_SQ = LOD_NEAR * LOD_NEAR;
-/** Far birds simulate in ~0.2 s steps (≈ 5 Hz). */
-const LOD_FAR_STEP = 0.2;
 
 /** Candidate group slot width along the road, metres. */
 const GROUP_SPACING = 320;
@@ -74,7 +69,6 @@ const SALT_SIDE = 0x71ab;
 const SALT_SPECIES = 0x92ef;
 const SALT_OFFSET = 0xad03;
 const SALT_COUNT = 0xc417;
-const SALT_LOD = 0xd53a;
 const SALT_JITTER = 0xe6f1;
 const SALT_AIR = 0xf7a2;
 const SALT_YAW = 0x1803;
@@ -118,6 +112,10 @@ interface SpeciesDef {
   readonly cruiseSpeed: number;
   readonly cruiseAlt: number;
   readonly flapRate: number;
+  readonly flapDepth: number;
+  readonly wingPose: number;
+  readonly flightStyle: 'steady' | 'burst' | 'soar';
+  readonly animationPeriod: number;
   readonly behavior: 'wander' | 'circle';
   readonly minCount: number;
   readonly maxCount: number;
@@ -126,26 +124,53 @@ interface SpeciesDef {
   readonly bankGain: number;
   readonly climbRate: number;
   readonly airborneBias: number;
+  /** Shader-side proportions: length, span, rearward wing sweep and body depth. */
+  readonly bodyLength: number;
+  readonly wingSpan: number;
+  readonly wingSweep: number;
+  readonly bodyDepth: number;
 }
 
 const SPECIES: readonly SpeciesDef[] = [
   {
-    name: 'crow', mass: 0.45, scale: 0.9, color: 0x2f2a24,
-    cruiseSpeed: 9, cruiseAlt: 16, flapRate: 10, behavior: 'wander',
+    name: 'crow', mass: 0.45, scale: 0.9, color: 0x302b27,
+    cruiseSpeed: 9, cruiseAlt: 16, flapRate: 9.5, flapDepth: 0.88, wingPose: 0.03,
+    flightStyle: 'steady', animationPeriod: 1, behavior: 'wander',
     minCount: 2, maxCount: 5, flightBudget: 24, turnRate: 2.2, bankGain: 0.35,
     climbRate: 5, airborneBias: 0.35,
+    bodyLength: 1, wingSpan: 0.96, wingSweep: 0.03, bodyDepth: 1,
   },
   {
-    name: 'vulture', mass: 9.2, scale: 2.6, color: 0x262019,
-    cruiseSpeed: 7, cruiseAlt: 55, flapRate: 2.6, behavior: 'circle',
+    name: 'vulture', mass: 9.2, scale: 2.6, color: 0x29231d,
+    cruiseSpeed: 7, cruiseAlt: 55, flapRate: 3.2, flapDepth: 0.7, wingPose: 0.12,
+    flightStyle: 'soar', animationPeriod: 7.2, behavior: 'circle',
     minCount: 1, maxCount: 3, flightBudget: 120, turnRate: 0.7, bankGain: 0.6,
     climbRate: 2.5, airborneBias: 0.85,
+    bodyLength: 1.16, wingSpan: 1.3, wingSweep: 0.08, bodyDepth: 1.05,
   },
   {
-    name: 'sparrow', mass: 0.03, scale: 0.38, color: 0x7a6542,
-    cruiseSpeed: 11, cruiseAlt: 10, flapRate: 16, behavior: 'wander',
-    minCount: 3, maxCount: 6, flightBudget: 16, turnRate: 3.4, bankGain: 0.28,
+    name: 'sparrow', mass: 0.03, scale: 0.38, color: 0x806a45,
+    cruiseSpeed: 11, cruiseAlt: 10, flapRate: 17, flapDepth: 0.96, wingPose: -0.02,
+    flightStyle: 'burst', animationPeriod: 1.45, behavior: 'wander',
+    minCount: 3, maxCount: 7, flightBudget: 16, turnRate: 3.4, bankGain: 0.28,
     climbRate: 6, airborneBias: 0.3,
+    bodyLength: 0.78, wingSpan: 0.76, wingSweep: 0.04, bodyDepth: 0.88,
+  },
+  {
+    name: 'hawk', mass: 1.05, scale: 1.3, color: 0x6a4e32,
+    cruiseSpeed: 12, cruiseAlt: 36, flapRate: 5.8, flapDepth: 0.78, wingPose: 0.08,
+    flightStyle: 'soar', animationPeriod: 5.4, behavior: 'circle',
+    minCount: 1, maxCount: 2, flightBudget: 72, turnRate: 1.35, bankGain: 0.52,
+    climbRate: 4.2, airborneBias: 0.72,
+    bodyLength: 1.02, wingSpan: 1.14, wingSweep: 0.15, bodyDepth: 0.94,
+  },
+  {
+    name: 'swallow', mass: 0.02, scale: 0.34, color: 0x263b43,
+    cruiseSpeed: 16, cruiseAlt: 20, flapRate: 20, flapDepth: 0.82, wingPose: -0.04,
+    flightStyle: 'burst', animationPeriod: 1.05, behavior: 'wander',
+    minCount: 4, maxCount: 8, flightBudget: 27, turnRate: 4.4, bankGain: 0.34,
+    climbRate: 7, airborneBias: 0.62,
+    bodyLength: 0.72, wingSpan: 1.08, wingSweep: 0.22, bodyDepth: 0.76,
   },
 ];
 
@@ -176,7 +201,7 @@ interface Bird {
   phase: number;
   flapScale: number;
   scale: number;
-  lod: number;
+  motionTime: number;
   perchX: number;
   perchY: number;
   perchZ: number;
@@ -237,6 +262,8 @@ export class BirdFlock {
   private readonly mesh: THREE.InstancedMesh;
   private readonly phaseAttr: THREE.InstancedBufferAttribute;
   private readonly flapAttr: THREE.InstancedBufferAttribute;
+  private readonly shapeAttr: THREE.InstancedBufferAttribute;
+  private readonly wingPoseAttr: THREE.InstancedBufferAttribute;
   private readonly fallGeometry: THREE.BufferGeometry;
   private readonly fallMaterial: THREE.MeshStandardMaterial;
   private readonly falling: FallingBird[] = [];
@@ -284,10 +311,16 @@ export class BirdFlock {
     const instGeometry = buildBirdGeometry();
     this.phaseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS), 1);
     this.flapAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS), 1);
+    this.shapeAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS * 4), 4);
+    this.wingPoseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS), 1);
     this.phaseAttr.setUsage(THREE.DynamicDrawUsage);
     this.flapAttr.setUsage(THREE.DynamicDrawUsage);
+    this.shapeAttr.setUsage(THREE.DynamicDrawUsage);
+    this.wingPoseAttr.setUsage(THREE.DynamicDrawUsage);
     instGeometry.setAttribute('aPhase', this.phaseAttr);
     instGeometry.setAttribute('aFlapScale', this.flapAttr);
+    instGeometry.setAttribute('aShape', this.shapeAttr);
+    instGeometry.setAttribute('aWingPose', this.wingPoseAttr);
 
     // White base colour: per-species tint arrives via instanceColor.
     const material = new THREE.MeshStandardMaterial({
@@ -304,18 +337,24 @@ export class BirdFlock {
           '#include <common>\n' +
             'attribute float aPhase;\n' +
             'attribute float aFlapScale;\n' +
-            'attribute float aWing;\n',
+            'attribute float aWing;\n' +
+            'attribute float aWingPose;\n' +
+            'attribute vec4 aShape;\n',
         )
         .replace(
           '#include <begin_vertex>',
-          // Rotate wing vertices around the local Z (forward) axis, before the
-          // instance matrix is applied in project_vertex. Body vertices carry
-          // aWing == 0 and are untouched.
+          // Shape each species and bend the wings progressively from root to tip.
+          // Roots have aWing near zero, so they stay attached to the body.
           'vec3 transformed = vec3( position );\n' +
+            'transformed.z *= aShape.x;\n' +
+            'transformed.y *= aShape.w;\n' +
             '{\n' +
-            `  float wingAngle = sin( aPhase ) * aFlapScale * ${FLAP_MAX};\n` +
-            '  float w = aWing * wingAngle;\n' +
-            '  if ( abs( w ) > 1e-4 ) {\n' +
+            '  float wingWeight = abs( aWing );\n' +
+            '  if ( wingWeight > 1e-4 ) {\n' +
+            '    transformed.x *= mix( 1.0, aShape.y, wingWeight );\n' +
+            '    transformed.z -= wingWeight * aShape.z;\n' +
+            `    float wingAngle = aWingPose + sin( aPhase ) * aFlapScale * ${FLAP_MAX};\n` +
+            '    float w = sign( aWing ) * wingWeight * wingAngle;\n' +
             '    float c = cos( w );\n' +
             '    float s = sin( w );\n' +
             '    transformed = vec3( transformed.x * c - transformed.y * s, transformed.x * s + transformed.y * c, transformed.z );\n' +
@@ -416,21 +455,11 @@ export class BirdFlock {
 
     this.syncGroups(playerS);
 
+    // Even the distant/high birds advance every frame. The old 5 Hz far-LOD updated
+    // both flight position and wing phase in visible jumps; active flocks are small
+    // enough that continuous kinematic simulation is cheaper than hiding that stutter.
     for (let i = 0; i < this.activeCount; i++) {
-      const b = this.birds[i]!;
-      const dx = b.x - px;
-      const dy = b.y - py;
-      const dz = b.z - pz;
-      if (dx * dx + dy * dy + dz * dz < LOD_NEAR_SQ) {
-        this.tickBird(b, dt, px, py, pz, alertRadiusSq);
-        b.lod = 0;
-      } else {
-        b.lod += dt;
-        if (b.lod >= LOD_FAR_STEP) {
-          this.tickBird(b, b.lod, px, py, pz, alertRadiusSq);
-          b.lod = 0;
-        }
-      }
+      this.tickBird(this.birds[i]!, dt, px, py, pz, alertRadiusSq);
     }
 
     this.syncMeshes();
@@ -584,8 +613,10 @@ export class BirdFlock {
 
   private pickSpecies(g: number): SpeciesDef {
     const r = hash01(this.seed, g, SALT_SPECIES);
-    if (r < 0.16) return SPECIES[1]!; // vulture — rare, high, circling
-    if (r < 0.62) return SPECIES[0]!; // crow — common roadside
+    if (r < 0.1) return SPECIES[1]!; // vulture — rare, high, circling
+    if (r < 0.22) return SPECIES[3]!; // hawk — solitary, agile soaring
+    if (r < 0.55) return SPECIES[0]!; // crow — common roadside
+    if (r < 0.75) return SPECIES[4]!; // swallow — fast, darting flocks
     return SPECIES[2]!; // sparrow — small desert flocks
   }
 
@@ -614,7 +645,7 @@ export class BirdFlock {
     b.pitch = 0;
     b.phase = hash01(seed, g, k, SALT_YAW) * Math.PI * 2;
     b.scale = sp.scale * (0.9 + hash01(seed, g, k, SALT_JITTER + 2) * 0.2);
-    b.lod = hash01(seed, g, k, SALT_LOD) * LOD_FAR_STEP;
+    b.motionTime = hash01(seed, g, k, SALT_BUDGET + 1) * sp.animationPeriod;
     b.perchX = px;
     b.perchY = perchY;
     b.perchZ = pz;
@@ -637,14 +668,14 @@ export class BirdFlock {
       b.state = 'flying';
       b.y = groundY + sp.cruiseAlt;
       b.yaw = b.targetYaw;
-      b.flapScale = 1;
+      b.flapScale = sp.flightStyle === 'soar' ? 0.08 : sp.flapDepth;
       b.flightBudget = sp.flightBudget * (0.3 + hash01(seed, g, k, SALT_BUDGET) * 0.7);
       b.wanderTimer = 2;
     } else {
       b.state = 'perched';
       b.y = perchY;
       b.yaw = b.targetYaw;
-      b.flapScale = 0.12;
+      b.flapScale = 0.06;
       b.flightBudget = sp.flightBudget * (0.7 + hash01(seed, g, k, SALT_BUDGET) * 0.6);
     }
   }
@@ -660,13 +691,14 @@ export class BirdFlock {
 
   private tickBird(b: Bird, dt: number, px: number, py: number, pz: number, alertRadiusSq: number): void {
     const sp = b.species;
+    b.motionTime += dt;
     let flapActivity = 1.0;
-    let flapTarget = 1.0;
+    let flapTarget = sp.flapDepth;
 
     switch (b.state) {
       case 'perched': {
-        flapActivity = 0.25;
-        flapTarget = 0.12;
+        flapActivity = 0.18;
+        flapTarget = 0.06;
         const dx = b.x - px;
         const dy = b.y - py;
         const dz = b.z - pz;
@@ -677,8 +709,8 @@ export class BirdFlock {
         break;
       }
       case 'alerted':
-        flapActivity = 1.6;
-        flapTarget = 0.5;
+        flapActivity = 1.5;
+        flapTarget = sp.flapDepth * 0.55;
         b.stateTimer -= dt;
         if (b.stateTimer <= 0) {
           this.beginTakeoff(b, px, pz);
@@ -688,14 +720,22 @@ export class BirdFlock {
         break;
       case 'takeoff':
         flapActivity = 1.8;
-        flapTarget = 1.0;
+        flapTarget = sp.flapDepth;
         b.stateTimer -= dt;
         this.fly(b, dt);
         if (b.stateTimer <= 0) b.state = 'flying';
         break;
-      case 'flying':
-        flapActivity = 1.0;
-        flapTarget = 1.0;
+      case 'flying': {
+        const cycle = b.motionTime % sp.animationPeriod;
+        if (sp.flightStyle === 'soar') {
+          const powered = cycle < 1.15;
+          flapActivity = powered ? 1.15 : 0.07;
+          flapTarget = powered ? sp.flapDepth : 0.035;
+        } else if (sp.flightStyle === 'burst') {
+          const powered = cycle < sp.animationPeriod * 0.62;
+          flapActivity = powered ? 1.1 : 0.12;
+          flapTarget = powered ? sp.flapDepth : 0.06;
+        }
         b.flightBudget -= dt;
         this.fly(b, dt);
         if (b.flightBudget <= 0) {
@@ -705,14 +745,16 @@ export class BirdFlock {
           b.landZ = b.perchZ;
         }
         break;
+      }
       case 'landing':
-        flapActivity = 1.3;
-        flapTarget = 0.8;
+        flapActivity = 1.25;
+        flapTarget = sp.flapDepth * 0.78;
         this.land(b, dt);
         break;
     }
 
     b.phase += sp.flapRate * flapActivity * dt;
+    if (b.phase > Math.PI * 2) b.phase %= Math.PI * 2;
     const blend = Math.min(1, dt * 6);
     b.flapScale += (flapTarget - b.flapScale) * blend;
   }
@@ -814,7 +856,7 @@ export class BirdFlock {
       b.roll = 0;
       b.pitch = 0;
       b.state = 'perched';
-      b.flapScale = 0.12;
+      b.flapScale = 0.06;
       return;
     }
 
@@ -866,8 +908,13 @@ export class BirdFlock {
   // -- rendering --------------------------------------------------------------
 
   private syncMeshes(): void {
+    const phases = this.phaseAttr.array as Float32Array;
+    const flaps = this.flapAttr.array as Float32Array;
+    const shapes = this.shapeAttr.array as Float32Array;
+    const wingPoses = this.wingPoseAttr.array as Float32Array;
     for (let i = 0; i < this.activeCount; i++) {
       const b = this.birds[i]!;
+      const sp = b.species;
       this.e.set(b.pitch, b.yaw, b.roll, 'YXZ');
       this.q.setFromEuler(this.e);
       this.pv.set(b.x, b.y, b.z);
@@ -875,16 +922,24 @@ export class BirdFlock {
       this.m.compose(this.pv, this.q, this.sv);
       this.mesh.setMatrixAt(i, this.m);
 
-      this.col.setHex(b.species.color);
+      this.col.setHex(sp.color);
       this.mesh.setColorAt(i, this.col);
 
-      (this.phaseAttr.array as Float32Array)[i] = b.phase;
-      (this.flapAttr.array as Float32Array)[i] = b.flapScale;
+      phases[i] = b.phase;
+      flaps[i] = b.flapScale;
+      wingPoses[i] = sp.wingPose;
+      const shapeOffset = i * 4;
+      shapes[shapeOffset] = sp.bodyLength;
+      shapes[shapeOffset + 1] = sp.wingSpan;
+      shapes[shapeOffset + 2] = sp.wingSweep;
+      shapes[shapeOffset + 3] = sp.bodyDepth;
     }
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     this.phaseAttr.needsUpdate = true;
     this.flapAttr.needsUpdate = true;
+    this.shapeAttr.needsUpdate = true;
+    this.wingPoseAttr.needsUpdate = true;
     this.mesh.count = this.activeCount;
   }
 
@@ -946,29 +1001,42 @@ export class BirdFlock {
 // ---------------------------------------------------------------------------
 
 /**
- * Low-poly bird, local axes +X right / +Y up / +Z forward. A vertical rhombus
- * fuselage plus two swept wing triangles; each vertex carries `aWing` (0 = body,
- * +1 = right wing, -1 = left wing) so the shader can flap only the wings by
- * rotating them around the forward axis.
+ * Low-poly bird, local axes +X right / +Y up / +Z forward. The closed faceted
+ * fuselage, separate head, forked tail and two-segment wings keep a readable
+ * silhouette up close without adding a draw call. `aWing` is signed and weighted
+ * from root to tip so the shader bends each wing without opening a gap at its root.
  */
 function buildBirdGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array([
-    // body
-    0.0, 0.02, 0.3, // 0 nose
-    0.0, 0.1, 0.02, // 1 crown
-    0.0, 0.05, -0.28, // 2 tail
-    0.0, -0.02, 0.0, // 3 belly
-    // right wing
-    0.0, 0.0, 0.06, // 4 root front
-    0.0, 0.0, -0.2, // 5 root back
-    0.42, 0.02, -0.06, // 6 tip
-    // left wing
-    0.0, 0.0, 0.06, // 7 root front
-    0.0, 0.0, -0.2, // 8 root back
-    -0.42, 0.02, -0.06, // 9 tip
+    // Faceted fuselage: front, rear, top, belly, right and left.
+    0, 0.03, 0.23, 0, 0.035, -0.27, 0, 0.13, 0.01,
+    0, -0.075, 0.015, 0.095, 0.025, 0.01, -0.095, 0.025, 0.01,
+    // Angular head / beak.
+    0, 0.04, 0.4, 0, 0.15, 0.2, 0.08, 0.06, 0.23, -0.08, 0.06, 0.23,
+    // Forked tail fan.
+    -0.05, 0.035, -0.22, 0.05, 0.035, -0.22, -0.16, 0.03, -0.44,
+    0, 0.015, -0.35, 0.16, 0.03, -0.44,
+    // Right wing: two triangles, with a softly hinged mid-span.
+    0.055, 0.055, 0.12, 0.06, 0.045, -0.17, 0.3, 0.035, -0.015, 0.54, 0.025, -0.14,
+    // Left wing.
+    -0.055, 0.055, 0.12, -0.06, 0.045, -0.17, -0.3, 0.035, -0.015, -0.54, 0.025, -0.14,
   ]);
-  const wing = new Float32Array([0, 0, 0, 0, 1, 1, 1, -1, -1, -1]);
-  const index = new Uint16Array([0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 9, 8]);
+  const wing = new Float32Array([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0.06, 0.06, 0.58, 1,
+    -0.06, -0.06, -0.58, -1,
+  ]);
+  const index = new Uint16Array([
+    // Fuselage.
+    0, 2, 4, 0, 4, 3, 0, 3, 5, 0, 5, 2,
+    1, 4, 2, 1, 3, 4, 1, 5, 3, 1, 2, 5,
+    // Head.
+    6, 7, 8, 6, 8, 9, 6, 9, 7, 7, 9, 8,
+    // Tail.
+    10, 13, 12, 10, 11, 13, 11, 14, 13,
+    // Wings.
+    15, 17, 18, 15, 18, 16, 19, 22, 21, 19, 20, 22,
+  ]);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -989,7 +1057,7 @@ function makeEmptyBird(): Bird {
     vx: 0, vy: 0, vz: 0,
     yaw: 0, roll: 0, pitch: 0,
     phase: 0, flapScale: 0, scale: 1,
-    lod: 0,
+    motionTime: 0,
     perchX: 0, perchY: 0, perchZ: 0,
     stateTimer: 0, flightBudget: 0,
     targetYaw: 0, wanderTimer: 0, wanderCount: 0, wanderSalt: 0,
