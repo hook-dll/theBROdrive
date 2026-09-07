@@ -118,6 +118,18 @@ vista.update(camera.x, camera.z, S, 0);
 
 const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
 invariant(mesh !== undefined, 'vista mesh was not attached to the scene');
+invariant(Array.isArray(mesh.material) && mesh.material.length === 2, 'vista depth bands missing');
+const [overlapMaterial, distantMaterial] = mesh.material;
+invariant(
+  overlapMaterial instanceof THREE.MeshStandardMaterial &&
+    distantMaterial instanceof THREE.MeshStandardMaterial,
+  'vista lost authored terrain shading',
+);
+invariant(
+  !overlapMaterial.depthWrite && distantMaterial.depthWrite && mesh.renderOrder < 0,
+  'vista depth policy leaks beyond the terrain overlap',
+);
+invariant(mesh.geometry.groups.length === 2, 'vista overlap is not isolated from distant depth');
 const attribute = mesh.geometry.getAttribute('position');
 invariant(attribute instanceof THREE.BufferAttribute, 'vista has no position buffer');
 const positions = attribute.array as Float32Array;
