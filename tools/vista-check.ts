@@ -1,12 +1,13 @@
 /**
  * Regression check for the distant terrain overlap.
  *
- * The vista must start outside the streamed near terrain (a collapsed centre ring
- * produces camera-relative cones), while its road-near vertices stay below the road
- * ribbon so the coarse desert cannot erase distant road patches.
+ * The vista must begin beneath the nearest guaranteed player-centred tile edge, so a
+ * delayed outer visual tile cannot expose sky. Its road-near vertices must also stay
+ * below the road ribbon so the coarse desert cannot erase distant road patches.
  */
 
 import * as THREE from 'three';
+import { DESERT_TILE_SIZE } from '../src/world/deserttiledata';
 import { VistaMesh } from '../src/render/vista';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
@@ -14,7 +15,7 @@ import { Terrain } from '../src/world/terrain';
 
 const SEED = 3094605770;
 const S = 24_000;
-const INNER_RADIUS = 400;
+const MIN_TILE_OVERLAP = 40;
 const ROAD_CORE = 40;
 const ROAD_REACH = 1_600;
 const SNAP = 250;
@@ -169,8 +170,8 @@ for (let i = 0; i < positions.length; i += 3) {
 }
 
 invariant(
-  minimumRadius >= INNER_RADIUS - 0.1,
-  `vista intrudes into near terrain: minimum radius ${minimumRadius.toFixed(2)} m`,
+  DESERT_TILE_SIZE - minimumRadius >= MIN_TILE_OVERLAP - 0.1,
+  `vista leaves only ${(DESERT_TILE_SIZE - minimumRadius).toFixed(2)} m of guaranteed tile overlap`,
 );
 invariant(coreVertices > 0, 'vista generated no vertices over the road underlay core');
 invariant(

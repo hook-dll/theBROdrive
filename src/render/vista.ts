@@ -3,6 +3,7 @@ import { farPlaneForViewDistance } from '../core/renderer';
 import { hashUnit3 } from '../core/rng';
 import { applyComicShading } from './comic';
 
+import { DESERT_TILE_SIZE } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
@@ -11,17 +12,18 @@ import { TERRAIN_MATERIAL } from '../world/terrainmesh';
 
 /**
  * The fine, player-centred desert tiles own the ground around the camera. This polar
- * mesh begins inside their outer edge and carries only the distant view. A second,
- * much smaller mesh places sparse sedimentary mesas through the middle distance.
+ * mesh begins beneath their guaranteed synchronous ring and carries the distant view.
+ * The overlap also covers a visual tile that is still arriving from the worker, so a
+ * scheduling delay cannot expose sky between the two terrain systems. A second, much
+ * smaller mesh places sparse sedimentary mesas through the middle distance.
  *
- * Mountains rise with distance. Mesas keep a stable world position and full height
- * through the middle distance, then slide continuously below the rendered ground only
- * inside the streamed-terrain overlap and at the residency edge. The horizon is a
- * spatial interpolation of fixed world samples, never a timed animation.
+ * Mountains rise with distance. Mesas keep a stable world position, then dissolve
+ * irreversibly before the player reaches them. The horizon is a spatial interpolation
+ * of fixed world samples, never a timed animation.
  */
 
-/** The fine streamed tiles own the central 400 metres; the vista starts in their overlap. */
-const INNER_RADIUS = 400;
+/** Forty metres of hidden overlap beneath the nearest guaranteed tile edge. */
+const INNER_RADIUS = DESERT_TILE_SIZE - 40;
 /**
  * Radial spacing growth, and the cap it grows into.
  *
