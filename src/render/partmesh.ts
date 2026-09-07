@@ -951,6 +951,32 @@ function buildPocketWatchBodyInto(b: MeshBuilder): void {
 
 function createPocketWatchMesh(open: boolean): THREE.Group {
   const root = buildGroup(itemBlueprint('pocket_watch_body', buildPocketWatchBodyInto).instructions);
+  // Radium-style lume: dark green by day, self-lit after the sky light has fallen.
+  // This material belongs to one watch because emissive state is not part of the
+  // shared flat-material cache; the ordinary item-resource disposer releases it.
+  const lumeMaterial = makeFlatMaterial(0x173b2a, 0.7).clone();
+  lumeMaterial.emissive.setHex(0x68ff87);
+  lumeMaterial.emissiveIntensity = 0.04;
+  lumeMaterial.userData.itemOwnedResource = true;
+  root.userData.pocketWatchLumeMaterial = lumeMaterial;
+  for (let hour = 0; hour < 12; hour++) {
+    const angle = hour * Math.PI / 6;
+    const major = hour % 3 === 0;
+    const radius = major ? 0.047 : 0.05;
+    const strip = new THREE.Mesh(
+      cachedGeo(
+        major ? 'pocket_watch_lume_tick_major' : 'pocket_watch_lume_tick_minor',
+        () => new THREE.BoxGeometry(0.0018, major ? 0.008 : 0.005, 0.0014),
+      ),
+      lumeMaterial,
+    );
+    strip.name = `pocket_watch_lume_tick_${hour}`;
+    strip.position.set(Math.sin(angle) * radius, Math.cos(angle) * radius, 0.0168);
+    strip.rotation.z = -angle;
+    strip.castShadow = false;
+    strip.receiveShadow = false;
+    root.add(strip);
+  }
 
   const ink = flat(0x29251e, 0.72);
   const needle = buildGroup(
@@ -960,6 +986,15 @@ function createPocketWatchMesh(open: boolean): THREE.Group {
     }).instructions,
   );
   needle.name = 'pocket_watch_needle';
+  const handLume = new THREE.Mesh(
+    cachedGeo('pocket_watch_hand_lume', () => new THREE.BoxGeometry(0.0018, 0.032, 0.0014)),
+    lumeMaterial,
+  );
+  handLume.name = 'pocket_watch_hand_lume';
+  handLume.position.set(0, 0.024, 0.0202);
+  handLume.castShadow = false;
+  handLume.receiveShadow = false;
+  needle.add(handLume);
   root.add(needle);
 
   const coverMetal = cond(0xa78340, 0.82, 0.38);
@@ -976,15 +1011,25 @@ function createPocketWatchMesh(open: boolean): THREE.Group {
   return root;
 }
 
-/** Animates the hinged lid and the same twelve-hour, single-hand dial the HUD used. */
-export function setPocketWatchState(root: THREE.Object3D, openness: number, timeOfDay: number): void {
+/** Animates the hinged lid, single-hand dial, and darkness-reactive phosphorescent paint. */
+export function setPocketWatchState(
+  root: THREE.Object3D,
+  openness: number,
+  timeOfDay: number,
+  dayFactor = 1,
+): void {
   const cover = root.getObjectByName('pocket_watch_cover');
   if (cover) cover.rotation.x = -Math.min(1, Math.max(0, openness)) * Math.PI * 0.76;
   const needle = root.getObjectByName('pocket_watch_needle');
   if (needle) {
-    const halfDay = 12 * 60 * 60;
+    const halfDay = 12 * 60;
     const fraction = (((timeOfDay % halfDay) + halfDay) % halfDay) / halfDay;
     needle.rotation.z = -fraction * Math.PI * 2;
+  }
+  const lume = root.userData.pocketWatchLumeMaterial as THREE.MeshStandardMaterial | undefined;
+  if (lume) {
+    const darkness = 1 - Math.min(1, Math.max(0, dayFactor));
+    lume.emissiveIntensity = 0.04 + darkness * 1.25;
   }
 }
 
@@ -1079,16 +1124,28 @@ export function createItemMesh(item: Item): THREE.Object3D {
   }
 }
 
-/** Releases per-instance image resources; primitive geometry and flat materials stay cached. */
+/** Releases per-instance item materials and textures; cached primitive resources stay shared. */
 export function disposeItemMeshResources(root: THREE.Object3D): void {
+  const disposedMaterials = new Set<THREE.Material>();
+  const disposedTextures = new Set<THREE.Texture>();
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const material of materials) {
-      if (material.userData.itemOwnedResource !== true) continue;
+      if (
+        material.userData.itemOwnedResource !== true ||
+        disposedMaterials.has(material)
+      ) {
+        continue;
+      }
+      disposedMaterials.add(material);
       const mapped = material as THREE.Material & { map?: THREE.Texture | null };
-      mapped.map?.dispose();
+      const texture = mapped.map;
+      if (texture && !disposedTextures.has(texture)) {
+        disposedTextures.add(texture);
+        texture.dispose();
+      }
       material.dispose();
     }
   });

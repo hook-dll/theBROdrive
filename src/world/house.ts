@@ -5,11 +5,12 @@
  * (`STRAIGHT_RUNOUT` in road.ts keeps s ∈ [0, 260] dead straight and heading 0, and
  * `HOME_FLAT_RADIUS` in landscape.ts keeps the ground under the footprint level to
  * within a tenth of a metre). Inside the garage sits the starter car — a complete
- * model — and a jerry can lies within arm's reach.
+ * model — with a jerry can, professional camera and pocket watch within arm's reach;
+ * a football waits beside the drive.
  *
  * Everything here is pure geometry derived from the seed, never a texture or a
  * prefab, and never `Math.random` — the same seed rebuilds the same homestead,
- * car and fuel-can placement.
+ * car and starting-item placement.
  */
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';

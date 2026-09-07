@@ -187,8 +187,8 @@ export class TrunkView {
         for (const material of materials) {
           if (material.customProgramCacheKey() === CONDITION_PROGRAM_KEY) material.dispose();
         }
-        disposeItemMeshResources(mesh);
       });
+      disposeItemMeshResources(holder);
       this.root.remove(holder);
     }
     this.itemHolders.length = 0;

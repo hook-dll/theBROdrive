@@ -95,13 +95,13 @@ const MSAA_SAMPLES = 4;
 // line does when it spends a long way inside air whose refractive index is being
 // stirred by convection, and everything below follows from that one sentence:
 //
-//   WHERE     the hot air is a shallow slab lying on the ground. For each pixel the
-//             shader intersects that slab with the pixel's own world-space view ray
-//             and takes the LENGTH of the ray inside it. A steep ray leaves the slab
-//             at once and gets nothing, which is why the sky is still. A ray that
-//             grazes runs for hundreds of metres, which is why the horizon boils. A
-//             ray pointed down at the verge hits the ground in ten metres and gets
-//             almost nothing, which is why the ground under your feet is calm.
+//   WHERE     the hot air is a shallow layer lying on the ground. For each pixel the
+//             shader integrates that layer along the pixel's own world-space view ray.
+//             The scene depth then limits the effect to light that has actually
+//             travelled far enough through it. A steep ray leaves the layer at once
+//             and gets nothing, which is why the sky is still. A grazing ray runs for
+//             hundreds of metres, which is why the horizon boils. The road and nearby
+//             objects remain rigid because their real depth never reaches the haze.
 //
 //             Nothing about this is measured in screen rows, and that is the point:
 //             the old version decayed from a computed horizon ROW, so pitching the
@@ -156,19 +156,31 @@ const HAZE_SCALE_HEIGHT_M = 8.0;
  * the middle distance, saturated at the horizon.
  */
 const HAZE_REF_PATH_M = 350;
-/** Ground closer than this many metres remains completely free of shimmer. */
-const HAZE_NEAR_CLEAR_M = 30;
-/** Distance by which a descending sight line may receive its full path-based haze. */
-const HAZE_NEAR_FULL_M = 90;
+/** Scene geometry closer than this many metres remains completely free of shimmer. */
+const HAZE_NEAR_CLEAR_M = 45;
+/** Scene distance by which the actual depth buffer may receive full path-based haze. */
+const HAZE_NEAR_FULL_M = 140;
+/**
+ * A second, deliberately conservative ground-ray guard.
+ *
+ * Depth is authoritative for objects, but ground pixels are the one surface where an
+ * unresolved/cleared depth sample is visually catastrophic: the road texture boils
+ * under the player's feet. Keep descending rays rigid until their intersection with
+ * the local ground plane is well into the middle distance. This is independent of
+ * asphalt/gravel material and only backs up depth; its transition is too far away to
+ * form the old moving foreground patch.
+ */
+const HAZE_GROUND_CLEAR_M = 90;
+const HAZE_GROUND_FULL_M = 220;
 /**
  * Peak angular displacement, milliradians, at full development.
  *
- * Kept deliberately visible, but below the earlier exaggerated setting: measured on
- * the real pass (tools/haze-probe.ts), the field averages a third of this, so the
- * horizon moves by roughly two pixels at 1080p rather than reading as displaced
- * patches of the image.
+ * The previous 7.2 mrad peak was reported as a very strong displacement wave in the
+ * shipped desert. Halving the physical angle preserves the path/depth behavior while
+ * removing the gelatinous motion; binocular tuning can then amplify this controlled
+ * atmosphere rather than an already excessive base.
  */
-const HAZE_ANGLE_MRAD = 7.2;
+const HAZE_ANGLE_MRAD = 3.6;
 /**
  * Upward bias, milliradians at full development: the inferior mirage.
  *
@@ -176,7 +188,7 @@ const HAZE_ANGLE_MRAD = 7.2;
  * vertically squeezed toward the horizon. It scales with the shimmer reduction above
  * so the whole refractive movement becomes quieter without changing its shape.
  */
-const HAZE_LIFT_MRAD = 1.76;
+const HAZE_LIFT_MRAD = 0.88;
 /**
  * Radius of the sphere the convection field is sampled on, metres, and the cell sizes
  * on it.
@@ -254,6 +266,7 @@ function glslFloat(value: number): string {
 
 export const HAZE_FRAGMENT = /* glsl */ `
   uniform sampler2D tDiffuse;
+  uniform sampler2D tDepth;
   uniform vec2 uResolution;
   uniform float uTime;
   uniform float uStrength;
@@ -261,6 +274,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uHorizon;
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
+  uniform float uCameraNear;
+  uniform float uCameraFar;
   uniform float uInkStrength;
   uniform float uInkThreshold;
   uniform vec3 uViewTint;
@@ -283,19 +298,30 @@ export const HAZE_FRAGMENT = /* glsl */ `
   const float LATERAL_SHARE = ${glslFloat(HAZE_LATERAL_SHARE)};
 
   varying vec2 vUv;
+  const float GROUND_CLEAR_M = ${glslFloat(HAZE_GROUND_CLEAR_M)};
+  const float GROUND_FULL_M = ${glslFloat(HAZE_GROUND_FULL_M)};
 
-  /**
-   * World-space direction the pixel is looking along.
-   */
-  vec3 worldRay(vec2 uv) {
+  /** Unit view-space direction for a pixel. */
+  vec3 cameraRay(vec2 uv) {
     vec2 ndc = uv * 2.0 - 1.0;
     float aspect = uResolution.x / uResolution.y;
-    vec3 cameraRay = normalize(vec3(
+    return normalize(vec3(
       ndc.x * aspect * uTanHalfFov,
       ndc.y * uTanHalfFov,
       -1.0
     ));
-    return normalize(uCameraRotation * cameraRay);
+  }
+
+  /** Perspective depth-buffer value converted to negative view-space Z. */
+  float perspectiveDepthToViewZ(float depth) {
+    return (uCameraNear * uCameraFar) /
+      ((uCameraFar - uCameraNear) * depth - uCameraFar);
+  }
+
+  /** Actual distance from the eye to the first rendered surface on this pixel ray. */
+  float sceneDistance(vec2 uv, vec3 viewDir) {
+    float viewZ = perspectiveDepthToViewZ(texture2D(tDepth, uv).x);
+    return min(uCameraFar, -viewZ / max(1e-4, -viewDir.z));
   }
 
   /**
@@ -421,21 +447,30 @@ export const HAZE_FRAGMENT = /* glsl */ `
     vec2 uv = vUv;
     float shimmerWeight = 0.0;
     if (uStrength > 0.0) {
-      vec3 dir = worldRay(vUv);
+      vec3 viewDir = cameraRay(vUv);
+      vec3 dir = normalize(uCameraRotation * viewDir);
       // Everything the pixel gets follows from how far its ray runs through hot air.
       float path = layerPath(dir) / REF_PATH_M;
-      // A standing player's foreground used to inherit a small but visible fraction
-      // of the horizon warp. A descending ray gives us its approximate ground-hit
-      // distance, so keep the road underfoot rigid and blend shimmer into the middle
-      // distance rather than making the whole ground plane swim.
-      float nearClear = 1.0;
+      // The former mask relied only on ray elevation and a flat ground plane. The
+      // scene pass now supplies the real first-surface depth, keeping nearby geometry
+      // rigid regardless of where it appears on screen.
+      float depthClear = smoothstep(
+        NEAR_CLEAR_M,
+        NEAR_FULL_M,
+        sceneDistance(vUv, viewDir)
+      );
+      // Ground is uniquely intolerant of a missing depth sample: one cleared texel at
+      // an MSAA edge would otherwise make the road boil underfoot. A conservative
+      // ray/plane backup excludes only descending rays whose ground intersection is
+      // nearby; actual depth remains authoritative for every object and distant slope.
+      float groundClear = 1.0;
       if (dir.y < -1e-4) {
         float groundDistance = uEyeAbove / -dir.y;
-        nearClear = smoothstep(NEAR_CLEAR_M, NEAR_FULL_M, groundDistance);
+        groundClear = smoothstep(GROUND_CLEAR_M, GROUND_FULL_M, groundDistance);
       }
-      // Shaped atmospheric onset plus the explicit foreground clear zone.
+      // Shaped atmospheric onset plus both real-depth and ground safeguards.
       shimmerWeight =
-        uStrength * path * path * (3.0 - 2.0 * path) * nearClear;
+        uStrength * path * path * (3.0 - 2.0 * path) * min(depthClear, groundClear);
       vec2 warp = hazeWarp(dir);
 
       // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
@@ -519,8 +554,8 @@ export class Renderer {
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
   /**
-   * Camera height above the ground, metres, for the haze distance cut. Defaulted to a
-   * standing eye so the very first frame is sensible before the loop has supplied one.
+   * Camera height above the ground, metres, for the hot-layer integration. Defaulted
+   * to a standing eye so the very first frame is sensible before the loop supplies one.
    */
   private hazeEyeHeight = DEFAULT_EYE_HEIGHT_M;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
@@ -600,11 +635,17 @@ export class Renderer {
     this.fog = new THREE.FogExp2(0xd8c39a, 0.00035);
     this.scene.fog = this.fog;
 
-    // Every tier renders into this target, then uses the fullscreen pass for the
-    // authored colour handling and ink. Acceptable suppresses only the haze warp.
+    // Every tier renders into this colour-and-depth target, then uses the fullscreen
+    // pass for the authored colour handling and ink. Acceptable suppresses only the
+    // haze warp; standard and blessing sample the resolved depth so nearby geometry
+    // never inherits a horizon-shaped screen mask.
     // The independent MSAA setting decides geometry-edge samples.
+    const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
+    hazeDepth.minFilter = THREE.NearestFilter;
+    hazeDepth.magFilter = THREE.NearestFilter;
     this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
       samples: msaa ? MSAA_SAMPLES : 0,
+      depthTexture: hazeDepth,
     });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -619,6 +660,7 @@ export class Renderer {
       depthWrite: false,
       uniforms: {
         tDiffuse: { value: this.hazeTarget.texture },
+        tDepth: { value: this.hazeTarget.depthTexture },
         uResolution: { value: new THREE.Vector2(1, 1) },
         uTime: { value: 0 },
         uStrength: { value: 0 },
@@ -626,6 +668,8 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(CAMERA_BASE_FOV) / 2) },
+        uCameraNear: { value: CAMERA_NEAR },
+        uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
@@ -774,6 +818,8 @@ export class Renderer {
     this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
       THREE.MathUtils.degToRad(this.camera.fov) / 2,
     );
+    this.hazeMaterial.uniforms.uCameraNear.value = this.camera.near;
+    this.hazeMaterial.uniforms.uCameraFar.value = this.camera.far;
     // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
     //
     // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
@@ -830,7 +876,11 @@ export class Renderer {
    */
   setHazeStrength(strength: number): void {
     const wanted = this.quality === 'acceptable' ? 0 : strength;
-    this.hazeMaterial.uniforms.uStrength.value = Math.min(1, Math.max(0, wanted));
+    const active = Math.min(1, Math.max(0, wanted));
+    this.hazeMaterial.uniforms.uStrength.value = active;
+    // A disabled warp never samples depth, so do not resolve the multisampled depth
+    // buffer at night or on Acceptable.
+    this.hazeTarget.resolveDepthBuffer = active > 0;
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */

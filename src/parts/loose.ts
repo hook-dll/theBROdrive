@@ -513,8 +513,8 @@ export class LoosePartField {
       body = this.physics.world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
           .setTranslation(rx, y, rz)
-          .setLinearDamping(0.08)
-          .setAngularDamping(0.12)
+          .setLinearDamping(0.42)
+          .setAngularDamping(0.34)
           .setCcdEnabled(true),
       );
       collider = this.physics.world.createCollider(
