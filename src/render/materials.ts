@@ -41,6 +41,7 @@ interface CarBodyUniforms extends CarPaletteUniforms {
   readonly damagePosRadius: { value: THREE.Vector4[] };
   readonly damageNormalStrength: { value: THREE.Vector4[] };
   readonly damageMeta: { value: THREE.Vector4[] };
+  readonly damageBodyBasis: { value: THREE.Matrix3 };
 }
 
 function hasDamageUniforms(uniforms: CarPaletteUniforms): uniforms is CarBodyUniforms {
@@ -75,6 +76,8 @@ const damageMetaScratch = Array.from(
   () => new THREE.Vector4(),
 );
 const damageVectorScratch = new THREE.Vector3();
+const damageBodyMatrixScratch = new THREE.Matrix4();
+const damageBodyBasisScratch = new THREE.Matrix3();
 
 /** Templates keyed by parameter tuple. They are only ever cloned, never rendered. */
 const conditionTemplates = new Map<string, THREE.MeshStandardMaterial>();
@@ -97,7 +100,7 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v2';
  * Body paint layers a bounded set of localized dents, scratches and chips in one
  * shader permutation. Bump this whenever its GLSL layout changes.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v9';
+const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v10';
 /** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
 const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
 
@@ -153,6 +156,7 @@ uniform int uDamageCount;
 uniform vec4 uDamagePosRadius[${MAX_BODY_DAMAGE_IMPACTS}];
 uniform vec4 uDamageNormalStrength[${MAX_BODY_DAMAGE_IMPACTS}];
 uniform vec4 uDamageMeta[${MAX_BODY_DAMAGE_IMPACTS}];
+uniform mat3 uDamageBodyBasis;
 
 
 
@@ -239,8 +243,13 @@ void condDamage(
     vec3 delta = worldP - centre;
     float normalDistance = dot( delta, hitNormal );
     vec3 tangentDelta = delta - hitNormal * normalDistance;
+    // Build the scratch plane from axes that rotate with the chassis. Rebuilding it
+    // from world-up made anisotropic scratch lines change direction under roll/pitch
+    // even though their centre and radial dent mask remained attached to the panel.
+    vec3 bodyUp = uDamageBodyBasis[1];
+    vec3 bodyRight = uDamageBodyBasis[0];
     vec3 referenceAxis =
-      abs( hitNormal.y ) < 0.85 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
+      abs( dot( hitNormal, bodyUp ) ) < 0.85 ? bodyUp : bodyRight;
     vec3 tangentX = normalize( cross( referenceAxis, hitNormal ) );
     vec3 tangentY = normalize( cross( hitNormal, tangentX ) );
     float u = dot( tangentDelta, tangentX );
@@ -579,6 +588,7 @@ function patchCarBodyShader(
   shader.uniforms.uDamagePosRadius = uniforms.damagePosRadius;
   shader.uniforms.uDamageNormalStrength = uniforms.damageNormalStrength;
   shader.uniforms.uDamageMeta = uniforms.damageMeta;
+  shader.uniforms.uDamageBodyBasis = uniforms.damageBodyBasis;
   shader.uniforms.uCondFieldOrigin = uniforms.fieldOrigin;
 
   shader.vertexShader = shader.vertexShader
@@ -765,6 +775,7 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
     damageMeta: {
       value: Array.from({ length: MAX_BODY_DAMAGE_IMPACTS }, () => new THREE.Vector4()),
     },
+    damageBodyBasis: { value: new THREE.Matrix3() },
   };
   carBodyUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
@@ -847,15 +858,19 @@ export function setCarBodyCondition(
     );
     damageMetaScratch[i]!.set(DAMAGE_TYPE_CODE[impact.type], impact.seed, 0, 0);
   }
+  damageBodyMatrixScratch.makeRotationFromQuaternion(carRoot.quaternion);
+  damageBodyBasisScratch.setFromMatrix4(damageBodyMatrixScratch);
 
   carRoot.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const material = mesh.material as THREE.Material | THREE.Material[];
     if (Array.isArray(material)) {
-      for (const m of material) writeCarBodyCondition(m, dirt, scratches, count);
+      for (const m of material) {
+        writeCarBodyCondition(m, dirt, scratches, count, damageBodyBasisScratch);
+      }
     } else {
-      writeCarBodyCondition(material, dirt, scratches, count);
+      writeCarBodyCondition(material, dirt, scratches, count, damageBodyBasisScratch);
     }
   });
 }
@@ -865,12 +880,14 @@ function writeCarBodyCondition(
   dirt: number,
   scratches: number,
   damageCount: number,
+  damageBodyBasis: THREE.Matrix3,
 ): void {
   const uniforms = carBodyUniforms.get(material);
   if (uniforms === undefined || !hasDamageUniforms(uniforms)) return;
   uniforms.dirt.value = dirt;
   uniforms.scratches!.value = scratches;
   uniforms.damageCount.value = damageCount;
+  uniforms.damageBodyBasis.value.copy(damageBodyBasis);
   for (let i = 0; i < damageCount; i++) {
     uniforms.damagePosRadius.value[i]!.copy(damagePositionScratch[i]!);
     uniforms.damageNormalStrength.value[i]!.copy(damageNormalScratch[i]!);
