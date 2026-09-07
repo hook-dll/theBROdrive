@@ -849,6 +849,38 @@ function buildBubbleGumInto(b: MeshBuilder): void {
   }
 }
 
+function buildHandWinchInto(b: MeshBuilder): void {
+  const frame = cond(0xa8432f, 0.68, 0.42);
+  const edge = cond(0x69291f, 0.75, 0.38);
+  const steel = cond(0x62686b, 0.88, 0.3);
+  const cable = cond(0x25292a, 0.78, 0.5);
+  const grip = flat(0x302820, 0.9);
+
+  // One continuous U-frame: broad base, upright cheeks and cross-members all overlap.
+  b.box('winch_base', 0.25, 0.028, 0.29, frame, [0, -0.09, 0]);
+  b.box('winch_frame_left', 0.032, 0.19, 0.25, frame, [-0.109, 0, -0.005]);
+  b.box('winch_frame_right', 0.032, 0.19, 0.25, frame, [0.109, 0, -0.005]);
+  b.box('winch_rear_bridge', 0.23, 0.045, 0.045, frame, [0, 0.075, -0.105]);
+  b.box('winch_front_bridge', 0.23, 0.04, 0.045, frame, [0, -0.045, 0.112]);
+  b.box('winch_left_brace', 0.035, 0.21, 0.035, edge, [-0.109, 0.01, 0], [0.58, 0, 0]);
+  b.box('winch_right_brace', 0.035, 0.21, 0.035, edge, [0.109, 0.01, 0], [0.58, 0, 0]);
+
+  // The drum is captured between the cheeks; flanges overlap both cable and axle.
+  b.cylinder('winch_drum', 0.067, 0.067, 0.17, 20, cable, [0, 0, -0.015], AXIS_X);
+  b.cylinder('winch_drum_left_flange', 0.082, 0.082, 0.012, 20, steel, [-0.091, 0, -0.015], AXIS_X);
+  b.cylinder('winch_drum_right_flange', 0.082, 0.082, 0.012, 20, steel, [0.091, 0, -0.015], AXIS_X);
+  b.cylinder('winch_drum_axle', 0.018, 0.018, 0.25, 12, steel, [0, 0, -0.015], AXIS_X);
+  b.cylinder('winch_gearbox', 0.054, 0.054, 0.036, 14, edge, [0.132, 0, -0.015], AXIS_X);
+
+  // Twin rollers make a legible, mechanically connected cable outlet.
+  b.cylinder('winch_fairlead_top', 0.016, 0.016, 0.18, 12, steel, [0, -0.012, 0.128], AXIS_X);
+  b.cylinder('winch_fairlead_bottom', 0.016, 0.016, 0.18, 12, steel, [0, -0.055, 0.128], AXIS_X);
+  b.cylinder('winch_cable_outlet', 0.014, 0.014, 0.045, 10, cable, [0, -0.034, 0.158], AXIS_Z);
+
+  b.box('winch_ratchet', 0.19, 0.028, 0.038, steel, [0.17, 0.04, -0.015], [0, 0, -0.26]);
+  b.cylinder('winch_grip', 0.027, 0.027, 0.11, 12, grip, [0.255, 0.063, -0.015], AXIS_Z);
+}
+
 function buildBinocularsInto(b: MeshBuilder): void {
   const body = flat(0x252824, 0.75);
   const rim = cond(0x444942, 0.65, 0.3);
@@ -1112,6 +1144,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       setBubbleGumPieceCount(mesh, item.charges);
       return mesh;
     }
+    case 'hand_winch':
+      return buildGroup(itemBlueprint('hand_winch', buildHandWinchInto).instructions);
     case 'binoculars':
       return buildGroup(itemBlueprint('binoculars', buildBinocularsInto).instructions);
     case 'torchlight':

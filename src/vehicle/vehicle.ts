@@ -1022,6 +1022,11 @@ const SUSPENSION_FORCE_HEADROOM = 9;
 const PARK_BRAKE_DECEL = 12.0;
 /** Below this ground speed a braked car becomes a physically fixed parked car. */
 const PARK_HOLD_SPEED_MPS = 0.12;
+/** Manual cable puller: 3.5 tonne line pull, compliant enough for a 60 Hz solver. */
+const WINCH_MAX_FORCE_N = 35_000;
+const WINCH_STIFFNESS_N_M = 18_000;
+const WINCH_DAMPING_N_S_M = 2_400;
+
 /**
  * Being shouldered by the player, in four numbers.
  *
@@ -2687,6 +2692,64 @@ export class Vehicle implements Rebasable {
     // into the ground, and the wheel ray-casts are unforgiving about both.
     this.chassisBody.applyImpulse({ x: nx * impulse, y: 0, z: nz * impulse }, true);
     this.shoveTimer = SHOVE_RELEASE_SECONDS;
+  }
+
+  /** Physics-space position of a chassis-local hook, written into caller storage. */
+  winchPoint(localX: number, localY: number, localZ: number, out: THREE.Vector3): THREE.Vector3 {
+    const t = this.chassisBody.translation();
+    const r = this.chassisBody.rotation();
+    this.pos.set(t.x, t.y, t.z);
+    return out
+      .set(localX, localY, localZ)
+      .applyQuaternion(this.quat.set(r.x, r.y, r.z, r.w))
+      .add(this.pos);
+  }
+
+  /**
+   * Pulls a chassis-local hook toward an absolute fixed ground anchor.
+   *
+   * Applying at the chosen body point is the mechanism: Rapier receives the linear
+   * impulse and its `r × F` torque, so roof/door/sill choices genuinely differ.
+   * A compliant one-sided cable avoids the solver chatter of a hard distance joint.
+   */
+  applyWinch(
+    localX: number,
+    localY: number,
+    localZ: number,
+    anchorX: number,
+    anchorY: number,
+    anchorZ: number,
+    restLength: number,
+    dt: number,
+  ): { length: number; tension: number } {
+    const point = this.winchPoint(localX, localY, localZ, this.contactPoint);
+    const dx = anchorX - this.origin.x - point.x;
+    const dy = anchorY - point.y;
+    const dz = anchorZ - this.origin.z - point.z;
+    const length = Math.hypot(dx, dy, dz);
+    if (length < 1e-4 || dt <= 0) return { length, tension: 0 };
+    const invLength = 1 / length;
+    const nx = dx * invLength;
+    const ny = dy * invLength;
+    const nz = dz * invLength;
+    const velocity = this.chassisBody.velocityAtPoint(point);
+    const towardAnchor = velocity.x * nx + velocity.y * ny + velocity.z * nz;
+    const stretch = length - restLength;
+    const tension = Math.min(
+      WINCH_MAX_FORCE_N,
+      Math.max(0, stretch * WINCH_STIFFNESS_N_M - towardAnchor * WINCH_DAMPING_N_S_M),
+    );
+    if (tension > 0) {
+      const impulse = tension * dt;
+      this.forceScratch.x = nx * impulse;
+      this.forceScratch.y = ny * impulse;
+      this.forceScratch.z = nz * impulse;
+      this.chassisBody.applyImpulseAtPoint(this.forceScratch, point, true);
+      this.parkingHoldRequested = false;
+      this.parkingHoldActive = false;
+      this.shoveTimer = SHOVE_RELEASE_SECONDS;
+    }
+    return { length, tension };
   }
 
   /**
