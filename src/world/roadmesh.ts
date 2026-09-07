@@ -231,6 +231,14 @@ export class RoadMeshProvider implements ChunkProvider {
     try {
       const point = { x: 0, y: 0, z: 0 };
       const color = new THREE.Color();
+      // Keep texture coordinates close to zero before they enter Float32. Using
+      // absolute `s / tile` loses the fractional UV at long-distance road positions:
+      // the aggregate then advances in visible blocks as the camera moves, which looks
+      // exactly like heat haze on high-contrast gravel. The modulo preserves the
+      // world-space tile phase; the local delta remains continuous through this chunk.
+      const textureVStart =
+        (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES) /
+        ROAD_TILE_METRES;
 
       for (let si = 0; si < sCount; si++) {
         // Endpoint-exact rows: si * (sEnd - sStart) / (sCount - 1) makes the shared
@@ -257,10 +265,11 @@ export class RoadMeshProvider implements ChunkProvider {
           positions[vi * 3 + 1] = y;
           positions[vi * 3 + 2] = point.z - oz;
 
-          // Texture coordinates in world metres, so the grain has a fixed size and
-          // does not stretch through corners.
+          // Fixed-size world grain with a bounded longitudinal coordinate. Adjacent
+          // chunks may differ by a whole repeat at their seam, which RepeatWrapping
+          // maps to the same texel without sacrificing fractional precision.
           uvs[vi * 2] = lateral / ROAD_TILE_METRES;
-          uvs[vi * 2 + 1] = s / ROAD_TILE_METRES;
+          uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
 
           const a = Math.abs(lateral);
           color.lerpColors(

@@ -3,7 +3,7 @@
  *
  * Measures the heat-haze pass instead of describing it.
  *
- * The effect makes four claims that are all geometric, and every one of them is
+ * The effect makes five claims that are all geometric, and every one of them is
  * checkable without a human looking at anything:
  *
  *   1. WHERE IT IS. Displacement follows the length of each pixel's view ray inside
@@ -17,6 +17,8 @@
  *      twice the displacement in pixels, because that is what magnification means.
  *   4. IT IS ANCHORED TO A DIRECTION at a fixed range around the player, so moving
  *      the eye must change nothing and only time may.
+ *   5. IT RESPECTS SCENE DEPTH. A nearby rendered surface must remain rigid even
+ *      when its pixel lies on the horizon ray where distant scenery boils hardest.
  *
  * The measurement is exact rather than statistical: the pass is fed a floating-point
  * texture whose red and green channels ARE the u and v of each texel, so whatever the
@@ -41,6 +43,8 @@ const HEIGHT = 270;
 const BASE_FOV = 70;
 /** Eye height above the sand, metres: a standing player. */
 const EYE_ABOVE = 1.6;
+const PROBE_NEAR = 0.1;
+const PROBE_FAR = 4000;
 
 export interface ElevationBin {
   /** Ray elevation above the horizontal, degrees, at the bin's centre. */
@@ -61,6 +65,10 @@ interface Probe {
     yawDeg: number;
     fovDeg: number;
     time: number;
+    /** Positive camera-forward depth for a synthetic scene surface; far plane by default. */
+    viewDepthM?: number;
+    /** Direct shader strength; one by default, zero models night/Acceptable. */
+    strength?: number;
   }): Float32Array;
   /** Wall-clock cost of the fullscreen pass at 1080p, with and without the field. */
   cost(): { warpOnMs: number; warpOffMs: number };
@@ -98,6 +106,23 @@ function makeProbe(): Probe {
   source.magFilter = THREE.LinearFilter;
   source.needsUpdate = true;
 
+  // Synthetic scene depth. Most measurements expose the far plane; one regression
+  // check places opaque geometry ten metres from the eye to prove that the real depth
+  // gate, rather than a screen-ray guess, keeps it rigid.
+  const depthData = new Float32Array(WIDTH * HEIGHT * 4);
+  depthData.fill(1);
+  const depthSource = new THREE.DataTexture(
+    depthData,
+    WIDTH,
+    HEIGHT,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  depthSource.minFilter = THREE.NearestFilter;
+  depthSource.magFilter = THREE.NearestFilter;
+  depthSource.needsUpdate = true;
+  let currentViewDepth = PROBE_FAR;
+
   const target = new THREE.WebGLRenderTarget(WIDTH, HEIGHT, {
     type: THREE.FloatType,
     depthBuffer: false,
@@ -112,6 +137,7 @@ function makeProbe(): Probe {
     depthWrite: false,
     uniforms: {
       tDiffuse: { value: source },
+      tDepth: { value: depthSource },
       uResolution: { value: new THREE.Vector2(WIDTH, HEIGHT) },
       uTime: { value: 0 },
       uStrength: { value: 1 },
@@ -119,6 +145,8 @@ function makeProbe(): Probe {
       uHorizon: { value: 0.5 },
       uCameraRotation: { value: new THREE.Matrix3() },
       uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) },
+      uCameraNear: { value: PROBE_NEAR },
+      uCameraFar: { value: PROBE_FAR },
       // The ink and lens passes multiply colour. Here colour IS the measurement, so
       // both are switched off; they are unrelated to what this tool checks.
       uInkStrength: { value: 0 },
@@ -126,6 +154,7 @@ function makeProbe(): Probe {
       uViewTint: { value: new THREE.Color(1, 1, 1) },
       uViewTintStrength: { value: 0 },
       uBinoculars: { value: 0 },
+      uCameraViewfinder: { value: 0 },
     },
   });
 
@@ -144,7 +173,15 @@ function makeProbe(): Probe {
   const pixels = new Float32Array(WIDTH * HEIGHT * 4);
 
   return {
-    render({ pitchDeg, rollDeg, yawDeg, fovDeg, time }) {
+    render({
+      pitchDeg,
+      rollDeg,
+      yawDeg,
+      fovDeg,
+      time,
+      viewDepthM = PROBE_FAR,
+      strength = 1,
+    }) {
       euler.set(
         THREE.MathUtils.degToRad(pitchDeg),
         THREE.MathUtils.degToRad(yawDeg),
@@ -155,6 +192,17 @@ function makeProbe(): Probe {
       (material.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(matrix);
       material.uniforms.uTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
       material.uniforms.uTime.value = time;
+      material.uniforms.uStrength.value = strength;
+      const clampedViewDepth = Math.min(PROBE_FAR, Math.max(PROBE_NEAR, viewDepthM));
+      if (clampedViewDepth !== currentViewDepth) {
+        currentViewDepth = clampedViewDepth;
+        const viewZ = -clampedViewDepth;
+        const depth =
+          ((PROBE_NEAR + viewZ) * PROBE_FAR) /
+          ((PROBE_FAR - PROBE_NEAR) * viewZ);
+        for (let i = 0; i < depthData.length; i += 4) depthData[i] = depth;
+        depthSource.needsUpdate = true;
+      }
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
       renderer.readRenderTargetPixels(target, 0, 0, WIDTH, HEIGHT, pixels);
@@ -201,6 +249,7 @@ function makeProbe(): Probe {
       material.dispose();
       source.dispose();
       target.dispose();
+      depthSource.dispose();
       renderer.dispose();
     },
   };
@@ -414,7 +463,44 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
       `profile change ${(compare(byElevation, laterByElevation) * 100).toFixed(1)}%`,
     );
 
-    // --- 6. What the field costs ----------------------------------------------
+    // --- 6. Real scene depth keeps nearby geometry rigid -----------------------
+    const nearSurface = probe.render({
+      pitchDeg: 0,
+      rollDeg: 0,
+      yawDeg: 0,
+      fovDeg: BASE_FOV,
+      time: 3,
+      viewDepthM: 10,
+    });
+    const nearHorizon = meanWhere(
+      binned(nearSurface, BASE_FOV, rotationOf(0, 0), false),
+      (b) => Math.abs(b.elevationDeg) <= 3,
+    );
+    check(
+      'real depth keeps a ten-metre surface rigid',
+      nearHorizon < 0.001,
+      `${nearHorizon.toFixed(4)} mrad at 10 m against ${horizon.toFixed(3)} at the far plane`,
+    );
+
+    const disabled = probe.render({
+      pitchDeg: 0,
+      rollDeg: 0,
+      yawDeg: 0,
+      fovDeg: BASE_FOV,
+      time: 3,
+      strength: 0,
+    });
+    const disabledHorizon = meanWhere(
+      binned(disabled, BASE_FOV, rotationOf(0, 0), false),
+      (b) => Math.abs(b.elevationDeg) <= 3,
+    );
+    check(
+      'zero strength leaves the frame rigid',
+      disabledHorizon < 0.001,
+      `${disabledHorizon.toFixed(4)} mrad`,
+    );
+
+    // --- 7. What the field costs ----------------------------------------------
     //
     // The whole effect is one fullscreen pass, so its cost is one number: how much
     // longer the pass takes with the field switched on. Measured at 1080p, which is
