@@ -683,6 +683,7 @@ export class MainMenu {
         resumeBtn.focus();
       };
 
+
       /**
        * Settings, as four short sections behind an icon rail.
        *
@@ -1345,7 +1346,7 @@ export class MainMenu {
             request: { type: 'camera' },
           },
           { label: 'football', detail: 'walk or sprint into it', request: { type: 'football' } },
-          { label: 'pocket watch', detail: 'E open / close · R shake +4 h', request: { type: 'pocket_watch' } },
+          { label: 'pocket watch', detail: 'E wind +4 h', request: { type: 'pocket_watch' } },
           { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
           { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
           { label: 'red sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'red' } },

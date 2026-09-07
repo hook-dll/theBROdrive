@@ -264,6 +264,77 @@ function glslFloat(value: number): string {
   return Number.isInteger(value) ? `${value}.0` : String(value);
 }
 
+const PHOTO_SEPIA_STRENGTH = 0.1;
+const PHOTO_DAY_SATURATION = 0.9;
+const PHOTO_NIGHT_SATURATION = 0.85;
+const PHOTO_NIGHT_EXPOSURE_MIN_EV = 2;
+const PHOTO_NIGHT_EXPOSURE_MAX_EV = 3;
+const PHOTO_DAY_BLACK_LIFT = 0.018;
+
+function srgbToLinear(value: number): number {
+  return value <= 0.04045
+    ? value / 12.92
+    : Math.pow((value + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(value: number): number {
+  const clamped = Math.min(1, Math.max(0, value));
+  return clamped <= 0.0031308
+    ? clamped * 12.92
+    : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Applies the camera's authored print look in display space. Exposure is applied
+ * in linear light so each EV is a real doubling; the listed sepia, saturation,
+ * and black-lift controls then follow in their requested order.
+ */
+function processPhotoPixels(data: Uint8ClampedArray, dayFactor: number): void {
+  const day = Math.min(1, Math.max(0, dayFactor));
+  const night = 1 - day;
+  const exposureEv =
+    night <= 0
+      ? 0
+      : PHOTO_NIGHT_EXPOSURE_MIN_EV +
+        (PHOTO_NIGHT_EXPOSURE_MAX_EV - PHOTO_NIGHT_EXPOSURE_MIN_EV) * night;
+  const exposure = 2 ** exposureEv;
+  const saturation = PHOTO_DAY_SATURATION +
+    (PHOTO_NIGHT_SATURATION - PHOTO_DAY_SATURATION) * night;
+  const blackLift = PHOTO_DAY_BLACK_LIFT * day;
+
+  for (let i = 0; i < data.length; i += 4) {
+    let r = linearToSrgb(srgbToLinear(data[i]! / 255) * exposure);
+    let g = linearToSrgb(srgbToLinear(data[i + 1]! / 255) * exposure);
+    let b = linearToSrgb(srgbToLinear(data[i + 2]! / 255) * exposure);
+
+    const sepiaR = r * 0.393 + g * 0.769 + b * 0.189;
+    const sepiaG = r * 0.349 + g * 0.686 + b * 0.168;
+    const sepiaB = r * 0.272 + g * 0.534 + b * 0.131;
+    r += (sepiaR - r) * PHOTO_SEPIA_STRENGTH;
+    g += (sepiaG - g) * PHOTO_SEPIA_STRENGTH;
+    b += (sepiaB - b) * PHOTO_SEPIA_STRENGTH;
+
+    const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    r = luminance + (r - luminance) * saturation;
+    g = luminance + (g - luminance) * saturation;
+    b = luminance + (b - luminance) * saturation;
+
+    const shadow = 1 - smoothstep(0.08, 0.4, luminance);
+    r += blackLift * shadow;
+    g += blackLift * shadow;
+    b += blackLift * shadow;
+
+    data[i] = Math.round(Math.min(1, Math.max(0, r)) * 255);
+    data[i + 1] = Math.round(Math.min(1, Math.max(0, g)) * 255);
+    data[i + 2] = Math.round(Math.min(1, Math.max(0, b)) * 255);
+  }
+}
+
 export const HAZE_FRAGMENT = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform sampler2D tDepth;
@@ -768,7 +839,7 @@ export class Renderer {
    * worn-glass effects removed. The ordinary render immediately after this restores
    * the player's viewfinder; only the photograph receives the clean optical image.
    */
-  capturePhoto(): string | null {
+  capturePhoto(dayFactor: number): string | null {
     if (this.photoCanvas === null) {
       this.photoCanvas = document.createElement('canvas');
       this.photoContext = this.photoCanvas.getContext('2d', { alpha: false });
@@ -792,6 +863,9 @@ export class Renderer {
       target.width = Math.max(1, Math.round(source.width * scale));
       target.height = Math.max(1, Math.round(source.height * scale));
       context.drawImage(source, 0, 0, target.width, target.height);
+      const pixels = context.getImageData(0, 0, target.width, target.height);
+      processPhotoPixels(pixels.data, dayFactor);
+      context.putImageData(pixels, 0, 0);
       return target.toDataURL('image/jpeg', 0.82);
     } catch {
       return null;

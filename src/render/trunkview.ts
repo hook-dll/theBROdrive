@@ -163,7 +163,12 @@ export class TrunkView {
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);
       mesh.rotation.set(-0.22, 0.52, 0.08);
-      mesh.updateMatrixWorld(true);
+      // Flat-faced items otherwise show their backs in the storage preview:
+      // their authored front is +Z, while this common holder pose points it away
+      // from the player. Turn only the photograph and pocket watch around.
+      if (item.type === 'photograph' || item.type === 'pocket_watch') {
+        mesh.rotation.y += Math.PI;
+      }
       _box.setFromObject(mesh).getSize(_size);
       _box.getCenter(_centre);
       mesh.position.sub(_centre);
