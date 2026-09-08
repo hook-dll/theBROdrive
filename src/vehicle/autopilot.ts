@@ -35,6 +35,12 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
  */
 const DEFAULT_WHEELBASE_M = 2.6;
 const MIN_PURSUIT_DISTANCE_SQ = 9;
+/**
+ * How much of a bend may be previewed, radians of arc, and the shortest preview the
+ * steering stays stable with. See the cap in `drive`.
+ */
+const LOOKAHEAD_ARC_RAD = 0.5;
+const MIN_LOOKAHEAD_M = 6;
 // These mirror Vehicle's input-to-road-wheel path. Pure pursuit must cross the
 // steering-box play window without turning a small, valid curvature into full lock.
 const STEER_INPUT_EXPONENT = 1.35;
@@ -188,7 +194,20 @@ export class Autopilot {
     }
     const velocity = vehicle.chassis.linvel();
     const speed = Math.hypot(velocity.x, velocity.z);
-    const lookahead = config.lookaheadBase + speed * config.lookaheadSpeed;
+    // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
+    // chord to that point cuts the apex, so a preview longer than the corner itself
+    // steers the car inside the entry and then wide of the exit: measured on
+    // tools/playground-lap.ts, a 30 m hairpin taken with 24 m of preview put a wheel
+    // 1.1 m past the asphalt. Half a radian of arc is the most that can be previewed
+    // before the chord stops describing the curve, so the preview is capped at
+    // `0.5 / curvature` — no effect on a straight or a sweeper, decisive in a hairpin.
+    const lookahead = Math.max(
+      MIN_LOOKAHEAD_M,
+      Math.min(
+        config.lookaheadBase + speed * config.lookaheadSpeed,
+        LOOKAHEAD_ARC_RAD / Math.max(Math.abs(this.road.curvatureAt(this.hintS)), 1e-4),
+      ),
+    );
     const target = this.road.sampleAt(this.hintS + lookahead);
     const rotation = vehicle.chassis.rotation();
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
@@ -314,9 +333,36 @@ export class Autopilot {
     );
     targetSpeed = Math.max(3, targetSpeed - Math.max(0, target.grade) * 4);
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
-    if (obstacleDistance < Infinity) {
+    // A prop the COMMANDED LINE already clears is scenery to drive past, not an
+    // obstacle to brake for.
+    //
+    // Braking for it anyway is what made a littered road crawl: in-asphalt scatter
+    // arrives every few tens of metres, so the next prop was always inside the
+    // braking envelope and the target speed never climbed out of it — measured at
+    // 6.4 m/s against a 20 m/s cruise, with the steering calm and a clear line
+    // through the whole field the entire time. The envelope keeps a planned prop
+    // only while the car is still moving onto the line that passes it.
+    // Two ways a planned prop leaves the braking envelope: the line already passes
+    // it, or there is still room to GET onto that line before reaching it. The line
+    // moves at `LINE_SHIFT_PER_METRE` of road, so the distance the move needs is
+    // arithmetic; the 1.5 factor and the body length are the margin for arriving
+    // established rather than still moving across.
+    const shiftNeeded =
+      (Math.abs(this.plannedLateral - this.appliedLateral) / LINE_SHIFT_PER_METRE) * 1.5
+      + CAR_HALF_LENGTH_M;
+    const lineClearsHazard =
+      hazard !== null &&
+      hasIndexedDetour &&
+      (Math.abs(this.appliedLateral - hazard.lateral) >= hazard.radius + CAR_HALF_WIDTH_M
+        || this.hazardDistance >= shiftNeeded);
+    const brakingDistance = lineClearsHazard
+      ? // The short ray sees the same prop, so it goes with it; anything else the ray
+        // found is unplanned and still stops the car.
+        (rayMatchesIndexedHazard ? Infinity : this.dynamicDistance)
+      : obstacleDistance;
+    if (brakingDistance < Infinity) {
       const brakingSpeed = Math.sqrt(
-        Math.max(0, 2 * config.brakeAccel * Math.max(0, obstacleDistance - config.brakeLead)),
+        Math.max(0, 2 * config.brakeAccel * Math.max(0, brakingDistance - config.brakeLead)),
       );
       const indexedDetourControlsSpeed =
         hasIndexedDetour &&
@@ -370,10 +416,22 @@ export class Autopilot {
     const enteringCurve =
       upcomingCurvature >= TURN_COAST_CURVATURE ||
       Math.abs(out.steer) >= TURN_COAST_STEER;
-    if (!offRoad && speed >= TURN_COAST_MIN_SPEED_MPS && enteringCurve) {
-      // Coast while setting up for and holding a bend. Braking still comes from the
-      // curvature-derived target speed above; this only prevents the engine from
-      // fighting that slowdown or adding speed while lateral grip is occupied.
+    // Coast while HOLDING a bend at its limit, not merely while in one.
+    //
+    // The gate used to be a fixed 5 m/s: any curve tighter than 250 m, or any steer
+    // past 0.12, cut the throttle at every speed above it. The car then coasted down
+    // to 5 m/s, got its throttle back, crept over the threshold, and lost it again —
+    // stabilising at exactly 18 km/h for the whole corner however fast the corner
+    // could actually be taken. Measured on tools/playground-lap.ts: 18 km/h through a
+    // 110 m radius whose lateral limit is 85 km/h, and the same rule is what made an
+    // obstacle-strewn road crawl at 6 m/s, because avoidance steer sits past 0.12.
+    //
+    // `targetSpeed` already carries the grip limit (`lateralAccel / curvature`), the
+    // grade and every obstacle decision, so it is the honest thing to compare
+    // against: no power within a tenth of the limit, full use of the road below it.
+    // The floor remains, so a hairpin can always be pulled out of.
+    const coastSpeed = Math.max(TURN_COAST_MIN_SPEED_MPS, targetSpeed * 0.9);
+    if (!offRoad && speed >= coastSpeed && enteringCurve) {
       out.throttle = 0;
     }
     if (offRoad && speed > OFFROAD_SPEED_MPS) {
