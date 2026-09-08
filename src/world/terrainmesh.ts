@@ -14,6 +14,7 @@ import {
 } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
 import { desertPaletteAt } from './gradient';
+import { DESERT_TILE_SIZE } from './deserttiledata';
 
 /**
  * Desert either side of the road.
@@ -245,24 +246,53 @@ function bilinear(
  * Shared near/far desert material. Physical normals and the live key light choose the
  * lee side; a restrained relief re-ramp keeps broad dune shading visible after sky fill,
  * haze and tone mapping without a terrain shadow map or another draw.
- *
- * Exported because the vista mesh draws the same ground and must therefore be the same
- * material: a second one, however carefully matched, drifts the moment either is tuned,
- * and the seam between near desert and far desert is the one place a mismatch is obvious.
+ * The player-centred tiles use the same authored material with one extra distance
+ * transition. They arrive as a square worker-streamed window while the vista is a
+ * camera-centred disc; the tile shader removes only its small-scale height detail
+ * between these radii. The opaque base terrain remains intact, so distant objects
+ * can never show through the transition.
  */
-export const TERRAIN_MATERIAL = applyComicShading(
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.93,
-    metalness: 0,
-  }),
-  {
-    lightingStrength: 0,
-    shadowWarmth: 0,
-    reliefShadeStrength: 0.28,
-    spotlightNormals: 'smooth',
-  },
-);
+export const DESERT_TILE_FADE_FULL = 300;
+export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
+function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial {
+  const material = applyComicShading(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.93,
+      metalness: 0,
+    }),
+    {
+      lightingStrength: 0,
+      shadowWarmth: 0,
+      reliefShadeStrength: 0.28,
+      spotlightNormals: 'smooth',
+    },
+  );
+  if (!detailFade) return material;
+
+  const compileComic = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    compileComic.call(material, shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute float aTerrainDetail;\n',
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `vec3 transformed = vec3( position );
+float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
+float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
+transformed.y -= aTerrainDetail * detailFade;`,
+      );
+  };
+  const comicProgramKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v1`;
+  return material;
+}
+export const TERRAIN_MATERIAL = createTerrainMaterial(false);
+/** Fine player-centred tiles whose small-scale height relaxes into the vista base. */
+export const DESERT_TILE_MATERIAL = createTerrainMaterial(true);
 
 /**
  * One chunk's terrain, as two grids sharing one vertex buffer: the sparse FIELD

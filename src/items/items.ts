@@ -259,8 +259,8 @@ export function isContinuousUse(item: Item): boolean {
 /**
  * The player's carried items.
  *
- * Capacity is by mass, not slot count, so hauling an engine genuinely costs you.
- * Ordering is stable, because the HUD and the item-cycle key both index into it.
+ * Capacity is limited by both mass and three physical slots. Ordering is stable,
+ * because the HUD and the item-cycle key both index into it.
  *
  * The pack is authoritative here rather than in `WorldState`, so every structural
  * change reports through `onChange` and the owner mirrors it into state for saving.
@@ -268,6 +268,7 @@ export function isContinuousUse(item: Item): boolean {
  * integrity) are mutated in place, and the mirror holds the same object references,
  * so those ride along without a notification of their own.
  */
+export const INVENTORY_ITEM_LIMIT = 3;
 export class Inventory {
   private readonly items: Item[] = [];
   private selected = 0;
@@ -283,13 +284,16 @@ export class Inventory {
   /**
    * Replaces the whole pack from a loaded save. Silent: the caller already holds
    * the state this would write back, and notifying would be a redundant round trip.
+   * Legacy items beyond the three-slot limit are returned so the caller can drop
+   * them into the world instead of deleting them.
    */
-  restore(items: readonly Item[], selected: number): void {
+  restore(items: readonly Item[], selected: number): readonly Item[] {
     this.items.length = 0;
-    this.items.push(...items);
+    this.items.push(...items.slice(0, INVENTORY_ITEM_LIMIT));
     this.selected = this.items.length === 0
       ? 0
       : Math.min(Math.max(0, Math.trunc(selected)), this.items.length - 1);
+    return items.slice(INVENTORY_ITEM_LIMIT);
   }
 
   get all(): readonly Item[] {
@@ -307,7 +311,8 @@ export class Inventory {
   }
 
   /**
-   * Fails when the item would exceed the mass limit, so the caller can explain why.
+   * Fails when all three slots are occupied or the item would exceed the mass limit,
+   * so the caller can explain why.
    *
    * Exception, and it is load-bearing for the whole game: a single item may always be
    * picked up when your hands are otherwise empty, however heavy it is. Engines run
@@ -316,6 +321,7 @@ export class Inventory {
    * miserable instead — `carriedMass` saturates the movement penalty.
    */
   add(item: Item): boolean {
+    if (this.items.length >= INVENTORY_ITEM_LIMIT) return false;
     const mass = itemMass(item);
     const soleHeavyHaul = this.items.length === 0 && mass > this.massLimit;
     if (!soleHeavyHaul && this.carriedMass + mass > this.massLimit) return false;

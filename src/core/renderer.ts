@@ -336,6 +336,28 @@ function processPhotoPixels(data: Uint8ClampedArray, dayFactor: number): void {
   }
 }
 
+function drawPhotoMileage(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  mileageKm: number,
+): void {
+  const fontSize = Math.max(15, Math.round(height * 0.052));
+  const inset = Math.max(12, Math.round(width * 0.026));
+  const label = `${Math.max(0, mileageKm).toFixed(1)} km`;
+  context.save();
+  context.font = `600 ${fontSize}px "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive`;
+  context.textAlign = 'right';
+  context.textBaseline = 'bottom';
+  context.lineJoin = 'round';
+  context.lineWidth = Math.max(2, fontSize * 0.14);
+  context.strokeStyle = 'rgba(20, 16, 11, 0.72)';
+  context.fillStyle = 'rgba(242, 233, 211, 0.94)';
+  context.strokeText(label, width - inset, height - inset);
+  context.fillText(label, width - inset, height - inset);
+  context.restore();
+}
+
 export const HAZE_FRAGMENT = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform sampler2D tDepth;
@@ -857,8 +879,9 @@ export class Renderer {
    * Captures the actual rendered view at a compact resolution, with eyepiece and
    * worn-glass effects removed. The ordinary render immediately after this restores
    * the player's viewfinder; only the photograph receives the clean optical image.
+   * Mileage is burned into the print itself so saved and dropped photographs retain it.
    */
-  capturePhoto(dayFactor: number): string | null {
+  capturePhoto(dayFactor: number, mileageKm: number): string | null {
     if (this.photoCanvas === null) {
       this.photoCanvas = document.createElement('canvas');
       this.photoContext = this.photoCanvas.getContext('2d', { alpha: false });
@@ -885,6 +908,7 @@ export class Renderer {
       const pixels = context.getImageData(0, 0, target.width, target.height);
       processPhotoPixels(pixels.data, dayFactor);
       context.putImageData(pixels, 0, 0);
+      drawPhotoMileage(context, target.width, target.height, mileageKm);
       return target.toDataURL('image/jpeg', 0.82);
     } catch {
       return null;

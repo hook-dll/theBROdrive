@@ -78,7 +78,7 @@ import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
-import { bonnetWaterCapacity, hasServiceSlot } from './vehicle/bonnet';
+import { bonnetPart, bonnetWaterCapacity, hasServiceSlot } from './vehicle/bonnet';
 import {
   TrailerField,
   TRAILER_HALF_LENGTH,
@@ -528,10 +528,25 @@ async function boot(): Promise<void> {
   streamer.prime(initialProjection.s, initialProjection.lateral);
 
   if (loadedFromSave) {
-    // Restore the carried item before active-set reconciliation materialises nearby
-    // loose state: carried items are absent from the loose maps, so the two cannot
-    // collide.
-    inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
+    // Old saves may predate the three-slot pack. Keep their first three carried
+    // items and drop every excess item around the player instead of deleting it.
+    const overflow = inventory.restore(world.state.player.carried, world.state.player.carriedSelected);
+    if (overflow.length > 0) {
+      const p = player.absolutePosition;
+      for (let index = 0; index < overflow.length; index++) {
+        const item = overflow[index]!;
+        const angle = (index * Math.PI * 2) / overflow.length;
+        const x = p.x + Math.cos(angle) * 0.8;
+        const z = p.z + Math.sin(angle) * 0.8;
+        if (item.type === 'part') loose.spawn(item.part, x, p.y + 0.5, z);
+        else loose.spawnItem(item, x, p.y + 0.5, z);
+      }
+      world.apply({
+        t: 'inventory',
+        items: inventory.all,
+        selected: Math.max(0, inventory.selectedIndex),
+      });
+    }
   } else {
     spawnStartingItems(world, loose);
   }
@@ -1426,10 +1441,17 @@ async function boot(): Promise<void> {
       const car = s.cars[drivingId!];
       const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);
       const oilCap = oilCapacity(stats.engine);
+      const enginePart = bonnetPart(car?.bonnet ?? [], 0);
+      const requiredFuel = enginePart === null
+        ? null
+        : (variant(enginePart.variantId).engine?.fuel ?? null);
+      const wrongFuel = requiredFuel !== null
+        && (car?.fuelLitres ?? 0) > 0
+        && car?.fuelKind !== requiredFuel;
+      const checkEngine = requiredFuel === null || wrongFuel || (car?.oilLitres ?? 0) <= 0;
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,
-        redlineRpm: stats.engine.redlineRpm,
         gearLabel: driving.gearLabel,
         fuelLitres: car?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
@@ -1440,6 +1462,7 @@ async function boot(): Promise<void> {
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,
+        checkEngine,
         handbrake: lastInput.handbrake,
         tcsActive: driving.tcsActive,
       });
@@ -1484,7 +1507,6 @@ async function boot(): Promise<void> {
     );
     const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
-    hud.setTravel(activeS / 1000);
 
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
@@ -1549,22 +1571,24 @@ async function boot(): Promise<void> {
     if (pendingPhotoCamera !== null) {
       const cameraItem = pendingPhotoCamera;
       pendingPhotoCamera = null;
-      const imageDataUrl = renderer.capturePhoto(sky.dayFactor);
+      const imageDataUrl = renderer.capturePhoto(sky.dayFactor, activeS / 1000);
       if (imageDataUrl === null) {
         hud.setToast('camera could not expose the frame');
       } else {
-        const added = inventory.add({
-          type: 'photograph',
-          id: world.runtimePartId(),
-          imageDataUrl,
-        });
-        if (added) {
-          cameraItem.framesRemaining = Math.max(0, cameraItem.framesRemaining - 1);
-          audio.cameraShutter();
-          hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
-        } else {
-          hud.setToast('too heavy to carry the photograph');
-        }
+        const direction = camera.eyeDirection;
+        loose.spawnItem(
+          {
+            type: 'photograph',
+            id: world.runtimePartId(),
+            imageDataUrl,
+          },
+          cam.x + origin.x + direction.x * 0.65,
+          cam.y - 0.2,
+          cam.z + origin.z + direction.z * 0.65,
+        );
+        cameraItem.framesRemaining = Math.max(0, cameraItem.framesRemaining - 1);
+        audio.cameraShutter();
+        hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
       }
     }
     renderer.render();

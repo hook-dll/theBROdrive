@@ -69,6 +69,8 @@ const SIM_HZ = 60;
 
 // Standstill escape, duplicated from vehicle.ts the same way desert-ride.ts does it.
 const LONGITUDINAL_GRIP_FRACTION = 0.38;
+/** Powered loose-surface crawl μ for the reference wheelGrip on standard tyres. */
+const LOOSE_CRAWL_MU_FLOOR = 1.5;
 const WHEELBASE = 2.5;
 const TRACK = 1.5;
 const REAR_LOAD_SHARE = 0.48;
@@ -407,11 +409,11 @@ for (const { label, bands } of PROFILE_CASES) {
 /**
  * Can a stopped car drive out again?
  *
- * Identical statics to desert-ride.ts — footprint plane through four contact points,
- * measured on the surface the collider actually has — but on the tile lattice, which
- * is the surface the car is actually stopped on. A pair is BLOCKED when the grade
- * beats the tyres in the direction the car happens to be facing (a stopped car cannot
- * steer) and STRANDED when reverse fails too.
+ * Identical statics to desert-ride.ts — including the powered loose-surface crawl
+ * floor for the reference car — and a footprint plane through four contact points,
+ * measured on the surface the collider actually has. A pair is BLOCKED when the
+ * grade beats the tyres in the direction the car happens to be facing (a stopped car
+ * cannot steer) and STRANDED when reverse fails too.
  */
 {
   const sand = SURFACES[SurfaceType.Sand];
@@ -461,25 +463,25 @@ for (const { label, bands } of PROFILE_CASES) {
     `standstill escape over ${grades.length} (spot, heading) pairs inside ${ESCAPE_LATERAL} m, ` +
       `worst footprint grade ${(worstGrade * 100).toFixed(0)}%:`,
   );
-  for (const frictionSlip of new Set([sand.frictionSlip, 1.15, 1.35])) {
-    const mu = frictionSlip * LONGITUDINAL_GRIP_FRACTION;
-    const line: string[] = [];
-    for (const rearDriven of [true, false]) {
-      let blocked = 0;
-      let stranded = 0;
-      for (const grade of grades) {
-        const forward = grade <= climbs(mu, rearDriven);
-        const back = -grade <= climbs(mu, rearDriven);
-        if (!forward) blocked++;
-        if (!forward && !back) stranded++;
-      }
-      line.push(
-        `${rearDriven ? 'RWD' : 'FWD'} climbs ${(climbs(mu, rearDriven) * 100).toFixed(0)}%, ` +
-          `${((blocked / grades.length) * 100).toFixed(1)}% blocked / ` +
-          `${((stranded / grades.length) * 100).toFixed(2)}% stranded`,
-      );
+  const authoredMu = sand.frictionSlip * LONGITUDINAL_GRIP_FRACTION;
+  const mu = Math.max(authoredMu, LOOSE_CRAWL_MU_FLOOR);
+  const line: string[] = [];
+  for (const rearDriven of [true, false]) {
+    let blocked = 0;
+    let stranded = 0;
+    for (const grade of grades) {
+      const forward = grade <= climbs(mu, rearDriven);
+      const back = -grade <= climbs(mu, rearDriven);
+      if (!forward) blocked++;
+      if (!forward && !back) stranded++;
     }
-    const mark = frictionSlip === sand.frictionSlip ? ' <- shipped' : '';
-    console.log(`  frictionSlip ${frictionSlip.toFixed(2)}: ${line.join('   ')}${mark}`);
+    line.push(
+      `${rearDriven ? 'RWD' : 'FWD'} climbs ${(climbs(mu, rearDriven) * 100).toFixed(0)}%, ` +
+        `${((blocked / grades.length) * 100).toFixed(1)}% blocked / ` +
+        `${((stranded / grades.length) * 100).toFixed(2)}% stranded`,
+    );
   }
+  console.log(
+    `  powered crawl mu ${mu.toFixed(2)} (authored ${authoredMu.toFixed(2)}): ${line.join('   ')}`,
+  );
 }

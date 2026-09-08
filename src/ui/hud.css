@@ -17,6 +17,7 @@
      (0xc9a227 in render/partmesh.ts), so the badge in the spawner and the can
      lying on a forecourt teach each other. */
   --hud-diesel: #c9a227;
+  --hud-lcd-off: rgba(224, 122, 74, 0.1);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -238,193 +239,317 @@ body {
 .hud-driving {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   pointer-events: none;
-  transform: translateX(-50%) scale(0.75);
+  /* The old desktop cluster rendered at 75%; 93.75% is exactly 25% larger. */
+  transform: translateX(-50%) scale(0.9375);
   transform-origin: bottom center;
+}
+
+.hud-dashboard-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
 }
 
 .hud-gauge-row {
   display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.hud-centre-block {
+  display: flex;
+  width: 254px;
+  margin-top: 0;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
-  padding: 8px 10px;
+  gap: 2px;
+}
+
+.hud-centre-top {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
 }
 
 .hud-dial {
   display: block;
-  width: 120px;
-  height: 120px;
+  overflow: visible;
 }
 
-.hud-speed-cluster {
+.hud-main-dial {
+  width: 124px;
+  height: 124px;
+}
+
+
+.hud-main-dial-face {
+  fill: #171714;
+  stroke: #5c5951;
+  stroke-width: 2;
+}
+
+.hud-main-dial-rim {
+  fill: none;
+  stroke: rgba(232, 221, 196, 0.58);
+  stroke-width: 1.35;
+}
+
+.hud-dial-tick {
+  stroke: #dbd7cc;
+  stroke-width: 0.7;
+  opacity: 0.86;
+}
+
+.hud-dial-tick.is-half {
+  stroke-width: 1.05;
+  opacity: 0.95;
+}
+
+.hud-dial-tick.is-major {
+  stroke: #f0ede5;
+  stroke-width: 1.7;
+  opacity: 1;
+}
+
+.hud-dial-tick.is-red {
+  stroke: var(--hud-alarm-strong);
+  opacity: 1;
+}
+
+
+.hud-dial-needle {
+  stroke: #e4e1d9;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.hud-dial-hub {
+  fill: #292824;
+  stroke: #aaa69c;
+  stroke-width: 1.4;
+}
+
+.hud-aux-cluster {
   display: flex;
+  width: 84px;
   flex-direction: column;
   align-items: center;
 }
 
-.hud-odometer {
-  margin-top: -12px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--hud-fg-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.hud-aux-dial {
+  width: 84px;
+  height: 50px;
 }
 
-.hud-dial-track {
+.hud-aux-face {
+  fill: #141412;
+  stroke: #47453f;
+  stroke-width: 2;
+}
+
+.hud-aux-track {
   fill: none;
-  stroke: var(--hud-panel-soft);
-  stroke-width: 8;
+  stroke: rgba(232, 228, 218, 0.6);
+  stroke-width: 5;
 }
 
-.hud-dial-redline {
+.hud-aux-zone {
   fill: none;
-  stroke: var(--hud-alarm);
-  stroke-width: 8;
+  stroke-width: 5;
+  stroke-linecap: butt;
 }
 
-.hud-dial-value {
-  fill: none;
-  stroke: var(--hud-fg);
-  stroke-width: 8;
-  stroke-linecap: round;
+.hud-aux-zone.is-green {
+  stroke: #49a96b;
 }
 
-.hud-dial-needle {
-  stroke: var(--hud-fg);
+.hud-aux-zone.is-red {
+  stroke: #c84837;
+}
+
+.hud-aux-tick {
+  stroke: #f0ede5;
+  stroke-width: 0.8;
+}
+
+.hud-aux-tick.is-major {
+  stroke-width: 1.5;
+}
+
+
+.hud-aux-needle {
+  stroke: #e9e5dc;
   stroke-width: 2;
   stroke-linecap: round;
 }
 
-
-.hud-fuel-icon {
-  fill: var(--hud-fg-dim);
-}
-
-.hud-fuel.is-alarm .hud-dial-value,
-.hud-fuel.is-alarm .hud-dial-needle {
-  stroke: var(--hud-alarm-strong);
-}
-
-/* The ordinary driving cluster has no room for a separate temperature lamp;
-   colour keeps the fault visible without changing its footprint. */
-.hud-temperature.is-cold .hud-dial-value,
-.hud-temperature.is-cold .hud-dial-needle {
-  stroke: #5fa8c7;
-}
-
-.hud-temperature.is-normal .hud-dial-value,
-.hud-temperature.is-normal .hud-dial-needle {
-  stroke: #7da867;
-}
-
-.hud-temperature.is-warm .hud-dial-value,
-.hud-temperature.is-warm .hud-dial-needle {
-  stroke: var(--hud-diesel);
-}
-
-.hud-temperature.is-hot .hud-dial-value,
-.hud-temperature.is-hot .hud-dial-needle {
-  stroke: var(--hud-alarm);
-}
-
-.hud-temperature.is-critical .hud-dial-value,
-.hud-temperature.is-critical .hud-dial-needle {
-  stroke: var(--hud-alarm-strong);
-  animation: hud-temperature-critical 0.75s steps(2, end) infinite;
-}
-
-/* A flashing scale is legible at this size while a full dashboard pulse would
-   compete with steering and road motion at the edge of the player's vision. */
-@keyframes hud-temperature-critical {
-  50% { opacity: 0.35; }
+.hud-aux-hub {
+  fill: #22211e;
+  stroke: #aaa69c;
+  stroke-width: 1.2;
 }
 
 
-.hud-indicators {
+.hud-icon-panel {
   display: flex;
+  width: 76px;
   flex-direction: column;
   align-items: center;
+  gap: 3px;
+}
+
+.hud-indicator-row {
+  display: flex;
   justify-content: center;
-  gap: 8px;
-  width: 28px;
+  gap: 4px;
+}
+
+.hud-indicator-lamp,
+.hud-gear,
+.hud-handbrake,
+.hud-tcs {
+  display: flex;
+  box-sizing: border-box;
+  width: 22px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  color: var(--hud-fg);
+  background: rgba(31, 29, 25, 0.82);
+  border: 1px inset rgba(232, 221, 196, 0.24);
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.hud-indicator-lamp {
+  opacity: 0.16;
+}
+
+.hud-indicator-lamp svg {
+  width: 17px;
+  height: 13px;
+}
+
+.hud-indicator-lamp path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hud-check-engine {
+  color: var(--hud-diesel);
+}
+
+.hud-oil-warning {
+  color: var(--hud-alarm);
+}
+
+.hud-indicator-lamp.is-active {
+  opacity: 1;
+  background: rgba(80, 50, 18, 0.76);
+  text-shadow: 0 0 6px currentColor;
+}
+
+.hud-oil-warning.is-active {
+  background: rgba(106, 32, 22, 0.76);
 }
 
 .hud-gear {
-  min-width: 1.2em;
-  font-size: 30px;
-  font-weight: 700;
-  text-align: center;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 
-/* Always takes its dashboard cell. Only its illumination changes. */
 .hud-handbrake {
-  width: 22px;
-  height: 24px;
   color: var(--hud-alarm);
-  font-size: 22px;
-  font-weight: 900;
-  line-height: 24px;
-  text-align: center;
+  font-size: 15px;
   opacity: 0.16;
 }
 
 .hud-handbrake.is-active {
   opacity: 1;
-  text-shadow: 0 0 8px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
+  background: rgba(106, 32, 22, 0.72);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
 }
 
-/* Amber, not rust: an aid reporting work, not a fault. Same always-present cell. */
 .hud-tcs {
-  width: 28px;
   color: var(--hud-diesel);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  line-height: 14px;
-  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.02em;
   opacity: 0.16;
 }
 
 .hud-tcs.is-active {
   opacity: 1;
-  text-shadow: 0 0 8px color-mix(in srgb, var(--hud-diesel) 75%, transparent);
+  background: rgba(80, 65, 17, 0.72);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-diesel) 75%, transparent);
 }
 
-.hud-engine-off {
-  font-size: 13px;
-  letter-spacing: 0.22em;
-  color: var(--hud-alarm);
-  font-weight: 700;
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-alarm);
-  padding: 4px 10px;
+.hud-fuel.is-alarm .hud-aux-needle,
+.hud-fuel.is-alarm .hud-aux-hub {
+  stroke: var(--hud-alarm-strong);
 }
 
-.hud-warnings {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
+.hud-temperature.is-hot .hud-aux-needle,
+.hud-temperature.is-critical .hud-aux-needle {
+  stroke: var(--hud-alarm);
 }
 
-.hud-warning {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--hud-alarm);
-  background: var(--hud-panel);
-  border-left: 2px solid var(--hud-alarm);
-  padding: 3px 8px;
+.hud-temperature.is-critical .hud-aux-needle {
+  stroke: var(--hud-alarm-strong);
+  animation: hud-temperature-critical 0.75s steps(2, end) infinite;
 }
+
+@keyframes hud-temperature-critical {
+  50% { opacity: 0.35; }
+}
+
+.hud-lcd {
+  display: block;
+  width: 254px;
+  height: 32px;
+  margin-top: 0;
+  box-sizing: border-box;
+  background: #11160d;
+  border: 2px inset rgba(176, 166, 140, 0.5);
+  box-shadow:
+    inset 0 0 8px rgba(0, 0, 0, 0.82),
+    0 1px 0 rgba(232, 221, 196, 0.12);
+}
+
+.hud-lcd-segment {
+  stroke: var(--hud-lcd-off);
+  stroke-width: 1.25;
+  stroke-linecap: square;
+}
+
+.hud-lcd-segment.is-lit,
+.hud-lcd.is-alarm .hud-lcd-segment.is-lit {
+  stroke: var(--hud-alarm);
+  filter: drop-shadow(0 0 1px color-mix(in srgb, var(--hud-alarm) 75%, transparent));
+}
+
+.hud-lcd.is-alarm .hud-lcd-segment.is-lit {
+  animation: hud-lcd-error-blink 0.32s steps(1, end) infinite;
+}
+
+@keyframes hud-lcd-error-blink {
+  50% { opacity: 0.12; }
+}
+
 
 .hud-inventory {
   position: absolute;
@@ -438,13 +563,13 @@ body {
   pointer-events: none;
 }
 
-/* Keep the inventory clear of the centered driving dashboard. */
+/* Keep the inventory clear of the enlarged, taller driving dashboard. */
 .hud-driving:not(.is-hidden) ~ .hud-inventory {
-  bottom: 150px;
+  bottom: 180px;
 }
 
 @media (pointer: coarse) {
-  /* Mobile keeps the complete driving cluster but at half its desktop footprint. */
+  /* Mobile retains its old compact footprint; the requested increase is desktop-only. */
   .hud-driving {
     transform: translateX(-50%) scale(0.375);
   }
@@ -512,16 +637,6 @@ body {
 
 
 
-.hud-radio {
-  position: static;
-  font-size: 12px;
-  letter-spacing: 0.14em;
-  color: var(--hud-fg-dim);
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
-  padding: 5px 10px;
-  pointer-events: none;
-}
 
 .hud-toasts {
   position: absolute;

@@ -354,10 +354,16 @@ export function migrateState(raw: unknown): WorldState {
   const defaults = newWorldState(seed);
   const dp = defaults.player;
 
-  // A save written before the pack was persisted has no `carried`; an empty pack is
-  // the honest reading of that, and matches what those saves loaded as before.
+  // Removed item kinds cannot remain in the current inventory union. Drop only
+  // those explicitly retired by the game; malformed current items still reject
+  // the save instead of being silently lost.
   const carriedRaw = Array.isArray(playerRaw.carried) ? playerRaw.carried : [];
-  const carried: Item[] = carriedRaw.map((value, i) => migrateItem(value, `carried slot ${i}`));
+  const carried: Item[] = [];
+  for (let i = 0; i < carriedRaw.length; i++) {
+    const value = carriedRaw[i];
+    if (isRemovedLegacyItem(value)) continue;
+    carried.push(migrateItem(value, `carried slot ${i}`));
+  }
   const wornRaw = playerRaw.wornSunShades;
   const wornItem = wornRaw == null ? null : migrateItem(wornRaw, 'worn sun shades');
   if (wornItem !== null && wornItem.type !== 'sun_shades') {
@@ -402,7 +408,9 @@ export function migrateState(raw: unknown): WorldState {
 
   const looseItems: Record<string, { item: Item; x: number; y: number; z: number }> = {};
   for (const [id, value] of Object.entries(looseItemsRaw)) {
-    looseItems[id] = migrateLooseItem(asRecord(value, `loose item "${id}"`));
+    const raw = asRecord(value, `loose item "${id}"`);
+    if (isRemovedLegacyItem(raw.item)) continue;
+    looseItems[id] = migrateLooseItem(raw);
   }
 
   return {
@@ -670,6 +678,19 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
     y: numOr(raw.y, 0),
     z: numOr(raw.z, 0),
   };
+}
+
+/**
+ * Item kinds deliberately removed from the current game. They have no honest
+ * runtime representation, so retaining the rest of the save is safer than
+ * failing the whole load. The hand winch's anchors and constraint were removed
+ * with the mechanic; converting it to an unrelated item would invent progress.
+ */
+function isRemovedLegacyItem(raw: unknown): boolean {
+  return typeof raw === 'object'
+    && raw !== null
+    && !Array.isArray(raw)
+    && (raw as Record<string, unknown>).type === 'hand_winch';
 }
 
 function migrateItem(raw: unknown, where: string): Item {

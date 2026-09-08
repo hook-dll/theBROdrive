@@ -32,11 +32,11 @@ import { hashUnit3 } from '../core/rng';
  * along the road's own tangent, and the open desert is this field plus bounded dune
  * relief.
  *
- * The bands are spread over two decades of wavelength. The 45 km band carries most
- * of the altitude and almost none of the slope, which gives the road long cinematic
- * climbs and descents. The 2.5 km band supplies the sustained grade a driver feels;
- * the 420 m band still supplies crests and brows without turning the route into an
- * obstacle course.
+ * The bands are spread over two decades of wavelength. In this relief experiment
+ * both altitude and horizontal scale are multiplied by five: the 225 km band carries
+ * most of the altitude and almost none of the slope, the 12.5 km band supplies the
+ * sustained grade a driver feels, and the 2.1 km band still supplies crests and brows.
+ * Climbs become much taller and longer without becoming steeper.
  */
 
 /**
@@ -65,6 +65,13 @@ import { hashUnit3 } from '../core/rng';
  * all, so the ratio falls.
  */
 const FADE_PEAK_SLOPE = 1.5;
+
+/**
+ * Experimental macro-relief multiplier. Amplitude and every horizontal control
+ * distance use the same factor, so possible height/depth grow fivefold while the
+ * derivative — and therefore the road's maximum grade — stays unchanged.
+ */
+const RELIEF_SCALE = 5;
 
 /** Cubic smoothstep, used as the lattice fade. Derivative peaks at 1.5. */
 function fade(t: number): number {
@@ -116,17 +123,17 @@ interface Band {
 
 const BANDS: readonly Band[] = [
   /** Continental: broad altitude changes, almost no slope. */
-  { amplitude: 140, wavelength: 45_000, hilliness: false, home: false },
+  { amplitude: 140 * RELIEF_SCALE, wavelength: 45_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Regional: basins and divides, several minutes of driving across. */
-  { amplitude: 70, wavelength: 10_000, hilliness: false, home: false },
+  { amplitude: 70 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Hills: a climb or descent that lasts long enough to choose a gear. */
-  { amplitude: 58, wavelength: 2500, hilliness: true, home: true },
+  { amplitude: 58 * RELIEF_SCALE, wavelength: 2500 * RELIEF_SCALE, hilliness: true, home: true },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
-  { amplitude: 18, wavelength: 420, hilliness: false, home: true },
+  { amplitude: 18 * RELIEF_SCALE, wavelength: 420 * RELIEF_SCALE, hilliness: false, home: true },
 ];
 
 /** How far you drive before flat country becomes hill country, metres. */
-const HILLINESS_WAVELENGTH = 9000;
+const HILLINESS_WAVELENGTH = 9000 * RELIEF_SCALE;
 /**
  * Fraction of the gated band kept in the flattest country. Not small: even the flat
  * stretches should breathe, or the contrast makes them read as broken rather than
@@ -146,8 +153,8 @@ const HILLINESS_FLOOR = 0.45;
  * `sum(home amplitudes) * 1.5 / HOME_RAMP` — and a short one would be a hill in
  * itself.
  */
-const HOME_FLAT_RADIUS = 200;
-const HOME_RAMP = 1200;
+const HOME_FLAT_RADIUS = 200 * RELIEF_SCALE;
+const HOME_RAMP = 1200 * RELIEF_SCALE;
 
 /**
  * The steepest this field can be, as a fraction: every band's own bound plus the
@@ -166,17 +173,12 @@ export const MAX_RELIEF = BANDS.reduce((sum, b) => sum + b.amplitude, 0);
  * The mountains, which are NOT part of `heightAt` and are the reason the horizon has
  * anything on it.
  *
- * The bands above are sized so a car can drive anywhere in them, which caps them at
- * around 140 m of half-range. That is the right answer for ground you drive on and the
- * wrong one for ground you look at: 140 m at 20 km subtends a fifth of a degree, so a
- * desert built only from them has a horizon that is a straight line however far you can
- * see. What makes a vista is landforms measured in thousands of metres.
- *
- * So they live in their own field, and `Terrain` only lets them in past a couple of
- * kilometres of lateral distance from the road (see MOUNTAIN_START there). That gating is
- * the whole trick: the drivable band never sees them, so nothing about the road's grade or
- * the desert's slope budget changes, while everything past the collider's edge gets a
- * mountain range to be a horizon.
+ * The ordinary bands are sized so a car can drive anywhere in them. The experimental
+ * relief multiplier above makes their vertical range comparable to the mountain field,
+ * but these mountains still stay separate because they are scenery: `Terrain` only lets
+ * them in past a couple of kilometres of lateral distance from the road (see
+ * MOUNTAIN_START there). That gating keeps them out of the road's grade and the
+ * driveable desert's slope budget while preserving a distinct far skyline.
  *
  * `MOUNTAIN_THRESHOLD` is what makes them a RANGE rather than a plateau. Without it the
  * field's mean is half its amplitude, so the whole world lifts 700 m and the horizon is a

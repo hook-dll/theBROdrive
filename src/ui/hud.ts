@@ -12,12 +12,13 @@ import type { EngineTempReadout } from '../vehicle/cooling';
 export interface DrivingReadout {
   speedKmh: number;
   rpm: number;
-  redlineRpm: number;
   gearLabel: string;
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
   engineDestroyed: boolean;
+  /** Missing engine, incompatible fuel, or an engine with no oil. */
+  checkEngine: boolean;
   /**
    * Engine coolant temperature, or null when the car has no engine fitted (the
    * gauge then reads nothing rather than lying about a cold engine).
@@ -41,19 +42,77 @@ export interface DrivingReadout {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Tachometer geometry: a 270° sweep with the gap at the bottom, so the redline
-// zone sits at the top of the dial where over-revving reads naturally.
-const TACH_SIZE = 120;
-const CX = TACH_SIZE / 2;
-const CY = TACH_SIZE / 2;
-const R = 44; // arc radius in viewBox units
-const NEEDLE_R = 30; // needle length from the hub
-const START_ANGLE = 135; // bottom-left, degrees (SVG: 0 = +X, positive = clockwise)
+// Both primary instruments use the same 270° sweep. Its missing lower quarter
+// keeps the existing cut-off-circle silhouette; half scale lands at 12 o'clock.
+const DIAL_SIZE = 120;
+const CX = DIAL_SIZE / 2;
+const CY = DIAL_SIZE / 2;
+const MAIN_FACE_R = 54;
+const MAIN_NEEDLE_R = 37;
+const AUX_CX = 60;
+const AUX_CY = 62;
+const AUX_R = 44;
+const AUX_NEEDLE_R = 35;
+const AUX_START_ANGLE = 200;
+const AUX_SWEEP_ANGLE = 140;
+const AUX_END_ANGLE = AUX_START_ANGLE + AUX_SWEEP_ANGLE;
+const START_ANGLE = 135;
 const SWEEP_ANGLE = 270;
-const END_ANGLE = START_ANGLE + SWEEP_ANGLE; // 405 == 45, bottom-right
+const END_ANGLE = START_ANGLE + SWEEP_ANGLE;
 
-/** The redline zone occupies the top 15% of the dial; the full scale is scaled to suit. */
-const REDLINE_FRACTION = 0.85;
+interface MainDialScale {
+  readonly max: number;
+  readonly minorStep: number;
+  readonly halfStep: number;
+  readonly majorStep: number;
+  readonly redFrom: number;
+}
+
+const SPEEDOMETER_SCALE: MainDialScale = {
+  max: 200,
+  minorStep: 2,
+  halfStep: 10,
+  majorStep: 20,
+  redFrom: 180,
+};
+const TACHOMETER_SCALE: MainDialScale = {
+  max: 8000,
+  minorStep: 100,
+  halfStep: 500,
+  majorStep: 1000,
+  redFrom: 6000,
+};
+
+const LCD_DIGITS = 16;
+const LCD_STEP_MS = 180;
+const LCD_INITIAL_PAUSE_STEPS = 4;
+const RADIO_OFF_MESSAGE = 'RADIO OFF';
+const RADIO_OFF_DURATION_MS = 5000;
+const SEGMENT_IDS = 'abcdefghijklmnop';
+const SEGMENT_LINES: readonly (readonly [number, number, number, number])[] = [
+  [2, 1.5, 5.35, 1.5], [6.65, 1.5, 10, 1.5],
+  [10.5, 2.25, 10.5, 11.75], [10.5, 14.25, 10.5, 23.75],
+  [6.65, 24.5, 10, 24.5], [2, 24.5, 5.35, 24.5],
+  [1.5, 14.25, 1.5, 23.75], [1.5, 2.25, 1.5, 11.75],
+  [2, 13, 5.35, 13], [6.65, 13, 10, 13],
+  [2.4, 2.5, 5.55, 11.7], [6, 2.4, 6, 11.6],
+  [9.6, 2.5, 6.45, 11.7], [6.45, 14.3, 9.6, 23.5],
+  [6, 14.4, 6, 23.6], [5.55, 14.3, 2.4, 23.5],
+];
+const SEGMENT_GLYPHS: Readonly<Record<string, string>> = {
+  ' ': '', '-': 'ij', '_': 'ef', '!': 'lo', '/': 'mp',
+  '0': 'abcdefgh', '1': 'cd', '2': 'abcijgef', '3': 'abcdeij',
+  '4': 'hcdij', '5': 'abhijdef', '6': 'abhgijdef', '7': 'abcd',
+  '8': 'abcdefghij', '9': 'abhcdijef',
+  A: 'abhgcdij', B: 'hgcdefij', C: 'abhgfe', D: 'abcdeflo',
+  E: 'abhgijfe', F: 'abhgij', G: 'abhgfedj', H: 'hgcdij',
+  I: 'abeflo', J: 'cdefg', K: 'hgmn', L: 'hgef',
+  M: 'hgcdkm', N: 'hgcdkn', O: 'abcdefgh', P: 'abhcgij',
+  Q: 'abcdefghn', R: 'abhcgijn', S: 'abhijdef', T: 'ablo',
+  U: 'hgcdef', V: 'hcpn', W: 'hgcdnp', X: 'kmpn',
+  Y: 'kmo', Z: 'abmpef',
+};
+
 /** Fuel fraction below which the analogue gauge reads as an alarm. */
 const FUEL_ALARM_FRACTION = 0.12;
 /**
@@ -62,8 +121,6 @@ const FUEL_ALARM_FRACTION = 0.12;
  * to be carrying — you want warning early enough to plan a stop around it.
  */
 const FLUID_ALARM_FRACTION = 0.25;
-/** Analogue speedometer limit. Faster vehicles pin gracefully at the dial end. */
-const SPEEDOMETER_MAX_KMH = 160;
 /** Carried-mass fraction of the limit at which the readout turns alarming. */
 const MASS_ALARM_FRACTION = 0.9;
 
@@ -100,28 +157,23 @@ export class Hud {
   private readonly crosshairEl: HTMLElement;
   private readonly promptEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
-  private readonly tachValue: SVGPathElement;
   private readonly tachNeedle: SVGLineElement;
-  private readonly speedValue: SVGPathElement;
   private readonly speedNeedle: SVGLineElement;
   private readonly gearEl: HTMLElement;
   private readonly fuelEl: SVGSVGElement;
-  private readonly fuelValue: SVGPathElement;
   private readonly fuelNeedle: SVGLineElement;
-  private readonly engineOffEl: HTMLElement;
   private readonly temperatureCluster: HTMLElement;
   private readonly temperatureEl: SVGSVGElement;
-  private readonly temperatureValue: SVGPathElement;
   private readonly temperatureNeedle: SVGLineElement;
-  private readonly temperatureReadoutEl: HTMLElement;
   private readonly handbrakeEl: HTMLElement;
   private readonly tcsEl: HTMLElement;
-  private readonly warningsEl: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
-  private readonly odometerEl: HTMLElement;
   private readonly toastEl: HTMLElement;
-  private readonly radioEl: HTMLElement;
+  private readonly checkEngineEl: HTMLElement;
+  private readonly oilWarningEl: HTMLElement;
+  private readonly lcdEl: SVGSVGElement;
+  private readonly lcdSegments: readonly (readonly SVGLineElement[])[];
   private readonly gumBubbleEl: HTMLElement;
   private gumBubbleProgress = -1;
 
@@ -130,6 +182,13 @@ export class Hud {
   private fuelDeg = -1;
   private temperatureDeg = -1;
   private warningsSignature = '';
+  private engineOff = false;
+  private radioText: string | null = null;
+  private radioOffUntil = 0;
+  private displayMessage = '';
+  private displayEpoch = 0;
+  private displayOffset = -1;
+  private displayAlarm = false;
   private invSlots: HTMLElement[] = [];
   private invItems: readonly Item[] = [];
   private invLabels: string[] = [];
@@ -145,60 +204,63 @@ export class Hud {
 
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
-    const tach = this.buildDial('hud-tach', true);
-    this.tachValue = tach.value;
+    const tach = this.buildMainDial('hud-tach', TACHOMETER_SCALE);
     this.tachNeedle = tach.needle;
 
-    const speed = this.buildDial('hud-speedometer');
-    this.speedValue = speed.value;
+    const speed = this.buildMainDial('hud-speedometer', SPEEDOMETER_SCALE);
     this.speedNeedle = speed.needle;
 
-    this.odometerEl = el('div', 'hud-odometer');
-    const speedCluster = el('div', 'hud-speed-cluster');
-    speedCluster.append(speed.svg, this.odometerEl);
 
-    const fuel = this.buildDial('hud-fuel', false, true);
+    const fuel = this.buildAuxDial('hud-fuel', 'fuel');
     this.fuelEl = fuel.svg;
-    this.fuelValue = fuel.value;
     this.fuelNeedle = fuel.needle;
+    const fuelCluster = el('div', 'hud-aux-cluster');
+    fuelCluster.append(fuel.svg);
 
-    const temperature = this.buildDial('hud-temperature');
+    const temperature = this.buildAuxDial('hud-temperature', 'temperature');
     this.temperatureEl = temperature.svg;
-    this.temperatureValue = temperature.value;
     this.temperatureNeedle = temperature.needle;
-    this.temperatureReadoutEl = el('div', 'hud-odometer');
-    this.temperatureCluster = el('div', 'hud-speed-cluster');
-    this.temperatureCluster.append(temperature.svg, this.temperatureReadoutEl);
+    this.temperatureCluster = el('div', 'hud-aux-cluster');
+    this.temperatureCluster.append(temperature.svg);
 
+    const display = this.buildSegmentDisplay();
+    this.lcdEl = display.svg;
+    this.lcdSegments = display.segments;
 
     this.gearEl = el('div', 'hud-gear');
-
-    // Both of these cells are always present, so an indicator lighting up cannot
-    // widen or move the dashboard. Only their illumination changes.
     this.handbrakeEl = el('div', 'hud-handbrake');
     this.handbrakeEl.textContent = 'P';
     this.tcsEl = el('div', 'hud-tcs');
     this.tcsEl.textContent = 'TCS';
-    const indicators = el('div', 'hud-indicators');
-    indicators.append(this.gearEl, this.handbrakeEl, this.tcsEl);
-
-    this.engineOffEl = el('div', 'hud-engine-off is-hidden');
-    this.engineOffEl.textContent = 'ENGINE OFF';
-
-    this.warningsEl = el('div', 'hud-warnings is-hidden');
-
-    const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, speedCluster, fuel.svg, this.temperatureCluster, indicators);
-
-    this.drivingCluster.append(
-      gaugeRow,
-      this.engineOffEl,
-      this.warningsEl,
+    this.checkEngineEl = this.buildIconLamp(
+      'hud-check-engine',
+      'Check engine',
+      'M 4 5 H 7 L 9 3 H 16 L 18 5 H 21 V 14 H 18 L 16 16 H 7 L 5 14 H 2 V 7 H 4 Z M 9 8 H 16 M 12.5 6 V 11',
+    );
+    this.oilWarningEl = this.buildIconLamp(
+      'hud-oil-warning',
+      'Oil low',
+      'M 3 8 H 14 L 18 11 V 15 H 7 Q 3 15 3 11 Z M 14 8 L 18 5 H 21 M 20 12 Q 23 14 20 16',
     );
 
-    // The radio is part of the driving dashboard and scales/moves with it.
-    this.radioEl = el('div', 'hud-radio is-hidden');
-    this.drivingCluster.appendChild(this.radioEl);
+    const indicatorTop = el('div', 'hud-indicator-row');
+    indicatorTop.append(this.checkEngineEl, this.oilWarningEl, this.handbrakeEl);
+    const indicatorBottom = el('div', 'hud-indicator-row');
+    indicatorBottom.append(this.gearEl, this.tcsEl);
+    const indicators = el('div', 'hud-icon-panel');
+    indicators.append(indicatorTop, indicatorBottom);
+
+    const centreTop = el('div', 'hud-centre-top');
+    centreTop.append(this.temperatureCluster, indicators, fuelCluster);
+    const centreBlock = el('div', 'hud-centre-block');
+    centreBlock.append(centreTop, this.lcdEl);
+
+    const gaugeRow = el('div', 'hud-gauge-row');
+    gaugeRow.append(tach.svg, centreBlock, speed.svg);
+
+    const dashboard = el('div', 'hud-dashboard-shell');
+    dashboard.append(gaugeRow);
+    this.drivingCluster.append(dashboard);
 
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
@@ -220,63 +282,182 @@ export class Hud {
     root.append(...this.tops);
   }
 
-  private buildDial(
-    className: string,
-    redline = false,
-    fuelIcon = false,
-  ): { svg: SVGSVGElement; value: SVGPathElement; needle: SVGLineElement } {
+  private buildIconLamp(className: string, label: string, pathData: string): HTMLElement {
+    const lamp = el('div', `hud-indicator-lamp ${className}`);
+    lamp.setAttribute('role', 'img');
+    lamp.setAttribute('aria-label', label);
     const svg = svgEl('svg');
-    svg.setAttribute('class', `hud-dial ${className}`);
-    svg.setAttribute('viewBox', `0 0 ${TACH_SIZE} ${TACH_SIZE}`);
-    svg.setAttribute('width', String(TACH_SIZE));
-    svg.setAttribute('height', String(TACH_SIZE));
+    svg.setAttribute('viewBox', '0 0 24 18');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = svgEl('path');
+    path.setAttribute('d', pathData);
+    svg.appendChild(path);
+    lamp.appendChild(svg);
+    return lamp;
+  }
 
-    const track = svgEl('path');
-    track.setAttribute('class', 'hud-dial-track');
-    track.setAttribute('d', arcPath(CX, CY, R, START_ANGLE, END_ANGLE));
-    svg.appendChild(track);
+  private buildMainDial(
+    className: string,
+    scale: MainDialScale,
+  ): { svg: SVGSVGElement; needle: SVGLineElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', `hud-dial hud-main-dial ${className}`);
+    svg.setAttribute('viewBox', `0 0 ${DIAL_SIZE} ${DIAL_SIZE}`);
+    svg.setAttribute('width', String(DIAL_SIZE));
+    svg.setAttribute('height', String(DIAL_SIZE));
 
-    if (redline) {
-      const redlineArc = svgEl('path');
-      redlineArc.setAttribute('class', 'hud-dial-redline');
-      redlineArc.setAttribute(
-        'd',
-        arcPath(CX, CY, R, START_ANGLE + REDLINE_FRACTION * SWEEP_ANGLE, END_ANGLE),
+    const faceStart = polar(CX, CY, MAIN_FACE_R, START_ANGLE);
+    const face = svgEl('path');
+    face.setAttribute('class', 'hud-main-dial-face');
+    face.setAttribute(
+      'd',
+      `${arcPath(CX, CY, MAIN_FACE_R, START_ANGLE, END_ANGLE)} L ${faceStart.x.toFixed(2)} ${faceStart.y.toFixed(2)} Z`,
+    );
+    svg.appendChild(face);
+    const rim = svgEl('path');
+    rim.setAttribute('class', 'hud-main-dial-rim');
+    rim.setAttribute('d', arcPath(CX, CY, 51.5, START_ANGLE, END_ANGLE));
+    svg.appendChild(rim);
+
+    for (let value = 0; value <= scale.max; value += scale.minorStep) {
+      const fraction = value / scale.max;
+      const deg = START_ANGLE + fraction * SWEEP_ANGLE;
+      const major = value % scale.majorStep === 0;
+      const half = !major && value % scale.halfStep === 0;
+      const outer = polar(CX, CY, 50, deg);
+      const inner = polar(CX, CY, major ? 40 : half ? 43 : 46.5, deg);
+      const tick = svgEl('line');
+      tick.setAttribute(
+        'class',
+        `hud-dial-tick${major ? ' is-major' : half ? ' is-half' : ''}${value >= scale.redFrom ? ' is-red' : ''}`,
       );
-      svg.appendChild(redlineArc);
+      tick.setAttribute('x1', inner.x.toFixed(2));
+      tick.setAttribute('y1', inner.y.toFixed(2));
+      tick.setAttribute('x2', outer.x.toFixed(2));
+      tick.setAttribute('y2', outer.y.toFixed(2));
+      svg.appendChild(tick);
+
     }
 
-    if (fuelIcon) {
-      // Same threshold treatment as the tachometer's redline: it lives on the
-      // track beneath the value arc, never painted over the filled gauge.
-      const lowFuelArc = svgEl('path');
-      lowFuelArc.setAttribute('class', 'hud-dial-redline');
-      lowFuelArc.setAttribute(
-        'd',
-        arcPath(CX, CY, R, START_ANGLE, START_ANGLE + FUEL_ALARM_FRACTION * SWEEP_ANGLE),
-      );
-      svg.appendChild(lowFuelArc);
-    }
-
-    const value = svgEl('path');
-    value.setAttribute('class', 'hud-dial-value');
-    value.setAttribute('d', '');
-    svg.appendChild(value);
-
-    if (fuelIcon) {
-      const icon = svgEl('path');
-      icon.setAttribute('class', 'hud-fuel-icon');
-      icon.setAttribute('d', 'M47 43 H64 V79 H47 Z M51 48 H60 V60 H51 Z M64 49 H69 Q73 49 73 54 V70 Q73 75 68 75 H66 V71 H68 Q69 71 69 69 V54 Q69 53 67 53 H64 Z');
-      svg.appendChild(icon);
-    }
 
     const needle = svgEl('line');
     needle.setAttribute('class', 'hud-dial-needle');
     needle.setAttribute('x1', String(CX));
     needle.setAttribute('y1', String(CY));
     svg.appendChild(needle);
+    const hub = svgEl('circle');
+    hub.setAttribute('class', 'hud-dial-hub');
+    hub.setAttribute('cx', String(CX));
+    hub.setAttribute('cy', String(CY));
+    hub.setAttribute('r', '2.6');
+    svg.appendChild(hub);
 
-    return { svg, value, needle };
+    return { svg, needle };
+  }
+
+  private buildAuxDial(
+    className: string,
+    kind: 'fuel' | 'temperature',
+  ): { svg: SVGSVGElement; needle: SVGLineElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', `hud-dial hud-aux-dial ${className}`);
+    svg.setAttribute('viewBox', '0 0 120 72');
+    svg.setAttribute('width', '120');
+    svg.setAttribute('height', '72');
+
+    const face = svgEl('path');
+    face.setAttribute('class', 'hud-aux-face');
+    face.setAttribute('d', 'M 5 67 Q 11 7 60 5 Q 109 7 115 67 Z');
+    svg.appendChild(face);
+
+    const track = svgEl('path');
+    track.setAttribute('class', 'hud-aux-track');
+    track.setAttribute('d', arcPath(AUX_CX, AUX_CY, AUX_R, AUX_START_ANGLE, AUX_END_ANGLE));
+    svg.appendChild(track);
+
+    const zones = kind === 'fuel'
+      ? [
+          ['is-red', 0, 0.18],
+          ['is-green', 0.45, 1],
+        ] as const
+      : [
+          ['is-green', 0.27, 0.68],
+          ['is-red', 0.8, 1],
+        ] as const;
+    for (const [zoneClass, start, end] of zones) {
+      const zone = svgEl('path');
+      zone.setAttribute('class', `hud-aux-zone ${zoneClass}`);
+      zone.setAttribute(
+        'd',
+        arcPath(
+          AUX_CX,
+          AUX_CY,
+          AUX_R,
+          AUX_START_ANGLE + start * AUX_SWEEP_ANGLE,
+          AUX_START_ANGLE + end * AUX_SWEEP_ANGLE,
+        ),
+      );
+      svg.appendChild(zone);
+    }
+
+    for (let step = 0; step <= 10; step++) {
+      const fraction = step / 10;
+      const deg = AUX_START_ANGLE + fraction * AUX_SWEEP_ANGLE;
+      const major = step % 5 === 0;
+      const outer = polar(AUX_CX, AUX_CY, AUX_R, deg);
+      const inner = polar(AUX_CX, AUX_CY, major ? 36.5 : 40, deg);
+      const tick = svgEl('line');
+      tick.setAttribute('class', `hud-aux-tick${major ? ' is-major' : ''}`);
+      tick.setAttribute('x1', inner.x.toFixed(2));
+      tick.setAttribute('y1', inner.y.toFixed(2));
+      tick.setAttribute('x2', outer.x.toFixed(2));
+      tick.setAttribute('y2', outer.y.toFixed(2));
+      svg.appendChild(tick);
+    }
+
+
+    const needle = svgEl('line');
+    needle.setAttribute('class', 'hud-aux-needle');
+    needle.setAttribute('x1', String(AUX_CX));
+    needle.setAttribute('y1', String(AUX_CY));
+    svg.appendChild(needle);
+    const hub = svgEl('circle');
+    hub.setAttribute('class', 'hud-aux-hub');
+    hub.setAttribute('cx', String(AUX_CX));
+    hub.setAttribute('cy', String(AUX_CY));
+    hub.setAttribute('r', '3');
+    svg.appendChild(hub);
+
+    return { svg, needle };
+  }
+
+  private buildSegmentDisplay(): {
+    svg: SVGSVGElement;
+    segments: readonly (readonly SVGLineElement[])[];
+  } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', 'hud-lcd');
+    svg.setAttribute('viewBox', `0 0 ${LCD_DIGITS * 13 + 2} 28`);
+    svg.setAttribute('role', 'status');
+    const cells: SVGLineElement[][] = [];
+    for (let digit = 0; digit < LCD_DIGITS; digit++) {
+      const group = svgEl('g');
+      group.setAttribute('transform', `translate(${digit * 13 + 1} 1)`);
+      const cell: SVGLineElement[] = [];
+      for (const [x1, y1, x2, y2] of SEGMENT_LINES) {
+        const segment = svgEl('line');
+        segment.setAttribute('class', 'hud-lcd-segment');
+        segment.setAttribute('x1', String(x1));
+        segment.setAttribute('y1', String(y1));
+        segment.setAttribute('x2', String(x2));
+        segment.setAttribute('y2', String(y2));
+        group.appendChild(segment);
+        cell.push(segment);
+      }
+      svg.appendChild(group);
+      cells.push(cell);
+    }
+    return { svg, segments: cells };
   }
 
 
@@ -289,45 +470,37 @@ export class Hud {
     this.setVisible(this.drivingCluster, true);
     this.setVisible(this.crosshairEl, false);
 
-    this.tachDeg = this.updateDial(
+    this.tachDeg = this.updateMainNeedle(
       readout.rpm,
-      Math.max(readout.redlineRpm / REDLINE_FRACTION, 1),
+      TACHOMETER_SCALE.max,
       this.tachDeg,
-      this.tachValue,
       this.tachNeedle,
     );
-    this.speedDeg = this.updateDial(
+    this.speedDeg = this.updateMainNeedle(
       Math.abs(readout.speedKmh),
-      SPEEDOMETER_MAX_KMH,
+      SPEEDOMETER_SCALE.max,
       this.speedDeg,
-      this.speedValue,
       this.speedNeedle,
     );
 
     this.setText(this.gearEl, readout.gearLabel);
 
     const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
-    this.fuelDeg = this.updateDial(
+    this.fuelDeg = this.updateAuxNeedle(
       fuelFraction,
-      1,
       this.fuelDeg,
-      this.fuelValue,
       this.fuelNeedle,
-      FUEL_ALARM_FRACTION,
     );
     this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
 
     const temperature = readout.temperature;
     this.setVisible(this.temperatureCluster, temperature !== null);
     if (temperature !== null) {
-      this.temperatureDeg = this.updateDial(
+      this.temperatureDeg = this.updateAuxNeedle(
         temperature.fraction,
-        1,
         this.temperatureDeg,
-        this.temperatureValue,
         this.temperatureNeedle,
       );
-      this.setText(this.temperatureReadoutEl, `${Math.round(temperature.celsius)} C`);
       this.temperatureEl.classList.toggle('is-cold', temperature.zone === 'cold');
       this.temperatureEl.classList.toggle('is-normal', temperature.zone === 'normal');
       this.temperatureEl.classList.toggle('is-warm', temperature.zone === 'warm');
@@ -335,9 +508,11 @@ export class Hud {
       this.temperatureEl.classList.toggle('is-critical', temperature.zone === 'critical');
     }
 
-    // Warning lamps. Built as a single string and diff-guarded, because this is in
-    // the render path and the usual state of it is "unchanged for ten minutes".
+    // Faults own the display until the car is healthy; radio never trails them.
     const warnings: string[] = [];
+    if (fuelFraction < FUEL_ALARM_FRACTION) {
+      warnings.push(readout.fuelLitres <= 0 ? 'NO FUEL' : 'FUEL LOW');
+    }
     if (readout.engineDestroyed) warnings.push('ENGINE DESTROYED');
     if (temperature !== null && temperature.warning !== null) {
       warnings.push(temperature.warning);
@@ -348,38 +523,103 @@ export class Hud {
     if (readout.oilFraction < FLUID_ALARM_FRACTION) {
       warnings.push(readout.oilFraction <= 0 ? 'NO OIL' : 'OIL LOW');
     }
-    const signature = warnings.join(' · ');
-    if (signature !== this.warningsSignature) {
-      this.warningsSignature = signature;
-      this.warningsEl.textContent = signature;
-      this.setVisible(this.warningsEl, signature.length > 0);
-    }
-    this.setVisible(this.engineOffEl, !readout.engineRunning);
+    const signature = warnings.join('   ');
+    if (signature !== this.warningsSignature) this.warningsSignature = signature;
+    this.engineOff = !readout.engineRunning;
+    this.checkEngineEl.classList.toggle('is-active', readout.checkEngine);
+    this.oilWarningEl.classList.toggle('is-active', readout.oilFraction < FLUID_ALARM_FRACTION);
+    this.refreshSegmentDisplay();
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
     this.tcsEl.classList.toggle('is-active', readout.tcsActive);
   }
 
-  /** Radio line, or null when the radio has nothing to say (not in a car). */
+  /** Radio remains a message source for the LCD; it has no separate lamp cell. */
   setRadio(text: string | null): void {
-    this.setVisible(this.radioEl, text !== null);
-    if (text !== null) this.setText(this.radioEl, text);
+    if (text !== this.radioText) {
+      this.radioText = text;
+      this.radioOffUntil = text === RADIO_OFF_MESSAGE
+        ? performance.now() + RADIO_OFF_DURATION_MS
+        : 0;
+    }
+    this.refreshSegmentDisplay();
   }
 
-  private updateDial(
+  private refreshSegmentDisplay(): void {
+    let problemMessage = this.warningsSignature;
+    if (this.engineOff) {
+      problemMessage += `${problemMessage ? '   ' : ''}ENGINE OFF`;
+    }
+    const hasProblems = problemMessage.length > 0;
+    const radioMessage = this.radioText === RADIO_OFF_MESSAGE && performance.now() >= this.radioOffUntil
+      ? ''
+      : (this.radioText ?? '');
+    const rawMessage = hasProblems ? problemMessage : radioMessage;
+    const message = rawMessage
+      .toUpperCase()
+      .replace(/[·—–]/g, ' ')
+      .replace(/[^A-Z0-9 !/_-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (message !== this.displayMessage || hasProblems !== this.displayAlarm) {
+      this.displayMessage = message;
+      this.displayAlarm = hasProblems;
+      this.displayEpoch = performance.now();
+      this.displayOffset = -1;
+      this.setAttr(this.lcdEl, 'aria-label', message);
+      this.lcdEl.classList.toggle('is-alarm', hasProblems);
+    }
+
+    let offset = 0;
+    if (message.length > LCD_DIGITS) {
+      const elapsedSteps = Math.floor((performance.now() - this.displayEpoch) / LCD_STEP_MS);
+      offset = Math.max(0, elapsedSteps - LCD_INITIAL_PAUSE_STEPS) % (message.length + 3);
+    }
+    if (offset === this.displayOffset) return;
+    this.displayOffset = offset;
+
+    let frame: string;
+    if (message.length <= LCD_DIGITS) {
+      const leftPadding = Math.floor((LCD_DIGITS - message.length) / 2);
+      frame = `${' '.repeat(leftPadding)}${message}`.padEnd(LCD_DIGITS);
+    } else {
+      const scroll = `${message}   `;
+      frame = `${scroll}${scroll}`.slice(offset, offset + LCD_DIGITS);
+    }
+    for (let digit = 0; digit < LCD_DIGITS; digit++) {
+      const glyph = SEGMENT_GLYPHS[frame[digit] ?? ' '] ?? '';
+      const segments = this.lcdSegments[digit]!;
+      for (let segment = 0; segment < segments.length; segment++) {
+        segments[segment]!.classList.toggle('is-lit', glyph.includes(SEGMENT_IDS[segment]!));
+      }
+    }
+  }
+
+  private updateMainNeedle(
     value: number,
     max: number,
     previousDeg: number,
-    valuePath: SVGPathElement,
     needle: SVGLineElement,
-    valueStartFraction = 0,
   ): number {
     const fraction = Math.min(Math.max(value / max, 0), 1);
     const deg = START_ANGLE + fraction * SWEEP_ANGLE;
     const rounded = Math.round(deg * 10) / 10;
     if (rounded === previousDeg) return previousDeg;
-    const startDeg = START_ANGLE + valueStartFraction * SWEEP_ANGLE;
-    this.setAttr(valuePath, 'd', fraction <= valueStartFraction ? '' : arcPath(CX, CY, R, startDeg, deg));
-    const tip = polar(CX, CY, NEEDLE_R, deg);
+    const tip = polar(CX, CY, MAIN_NEEDLE_R, deg);
+    this.setAttr(needle, 'x2', tip.x.toFixed(2));
+    this.setAttr(needle, 'y2', tip.y.toFixed(2));
+    return rounded;
+  }
+
+  private updateAuxNeedle(
+    fractionValue: number,
+    previousDeg: number,
+    needle: SVGLineElement,
+  ): number {
+    const fraction = Math.min(Math.max(fractionValue, 0), 1);
+    const deg = AUX_START_ANGLE + fraction * AUX_SWEEP_ANGLE;
+    const rounded = Math.round(deg * 10) / 10;
+    if (rounded === previousDeg) return previousDeg;
+    const tip = polar(AUX_CX, AUX_CY, AUX_NEEDLE_R, deg);
     this.setAttr(needle, 'x2', tip.x.toFixed(2));
     this.setAttr(needle, 'y2', tip.y.toFixed(2));
     return rounded;
@@ -450,14 +690,9 @@ export class Hud {
     for (let i = 0; i < items.length; i++) {
       const label = itemLabel(items[i]!);
       const node = el('div', 'hud-inv-slot');
-      // The number row binds slots 1..8, so show the key that selects this slot.
-      // Beyond eight there is no shortcut, and the badge is omitted rather than
-      // advertising a key that does nothing.
-      if (i < 8) {
-        const key = el('span', 'hud-inv-key');
-        key.textContent = String(i + 1);
-        node.appendChild(key);
-      }
+      const key = el('span', 'hud-inv-key');
+      key.textContent = String(i + 1);
+      node.appendChild(key);
       const name = el('span', 'hud-inv-name');
       name.textContent = label;
       node.appendChild(name);
@@ -467,9 +702,6 @@ export class Hud {
     }
   }
 
-  setTravel(km: number): void {
-    this.setText(this.odometerEl, `TRIP ${km.toFixed(1)} km`);
-  }
 
   setToast(text: string): void {
     if (this.disposed) return;
