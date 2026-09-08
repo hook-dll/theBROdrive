@@ -1886,7 +1886,11 @@ async function boot(): Promise<void> {
 }
 
 
-void boot().catch((error: unknown) => {
+const launch = new URLSearchParams(window.location.search).has('poi-gallery')
+  ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
+  : boot();
+
+void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   document.body.innerHTML = `<pre style="color:#e8dcc4;background:#1a1712;padding:2rem;font:14px monospace">failed to start\n\n${message}</pre>`;
   throw error;
