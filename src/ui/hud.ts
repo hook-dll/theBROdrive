@@ -535,22 +535,28 @@ export class Hud {
 
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */
   setRadio(text: string | null): void {
-    if (text !== this.radioText) {
-      this.radioText = text;
-      this.radioOffUntil = text === RADIO_OFF_MESSAGE
-        ? performance.now() + RADIO_OFF_DURATION_MS
-        : 0;
+    if (text === this.radioText) {
+      if (text !== RADIO_OFF_MESSAGE || this.radioOffUntil === 0) return;
+      const now = performance.now();
+      if (now < this.radioOffUntil) return;
+      this.refreshSegmentDisplay(now);
+      return;
     }
-    this.refreshSegmentDisplay();
+    const now = performance.now();
+    this.radioText = text;
+    this.radioOffUntil = text === RADIO_OFF_MESSAGE
+      ? now + RADIO_OFF_DURATION_MS
+      : 0;
+    this.refreshSegmentDisplay(now);
   }
 
-  private refreshSegmentDisplay(): void {
+  private refreshSegmentDisplay(now = performance.now()): void {
     let problemMessage = this.warningsSignature;
     if (this.engineOff) {
       problemMessage += `${problemMessage ? '   ' : ''}ENGINE OFF`;
     }
     const hasProblems = problemMessage.length > 0;
-    const radioMessage = this.radioText === RADIO_OFF_MESSAGE && performance.now() >= this.radioOffUntil
+    const radioMessage = this.radioText === RADIO_OFF_MESSAGE && now >= this.radioOffUntil
       ? ''
       : (this.radioText ?? '');
     const rawMessage = hasProblems ? problemMessage : radioMessage;
@@ -563,7 +569,7 @@ export class Hud {
     if (message !== this.displayMessage || hasProblems !== this.displayAlarm) {
       this.displayMessage = message;
       this.displayAlarm = hasProblems;
-      this.displayEpoch = performance.now();
+      this.displayEpoch = now;
       this.displayOffset = -1;
       this.setAttr(this.lcdEl, 'aria-label', message);
       this.lcdEl.classList.toggle('is-alarm', hasProblems);
@@ -571,7 +577,7 @@ export class Hud {
 
     let offset = 0;
     if (message.length > LCD_DIGITS) {
-      const elapsedSteps = Math.floor((performance.now() - this.displayEpoch) / LCD_STEP_MS);
+      const elapsedSteps = Math.floor((now - this.displayEpoch) / LCD_STEP_MS);
       offset = Math.max(0, elapsedSteps - LCD_INITIAL_PAUSE_STEPS) % (message.length + 3);
     }
     if (offset === this.displayOffset) return;
@@ -593,6 +599,7 @@ export class Hud {
       }
     }
   }
+
 
   private updateMainNeedle(
     value: number,
