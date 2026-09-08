@@ -185,11 +185,13 @@ const WATER_SEEP_LPH = 0.55;
 /**
  * Seconds above the engine's maximum temperature before it is destroyed.
  *
- * A grace period rather than an instant kill: the critical lamp, the power cut and
- * the stall all arrive first, so a player who lifts off keeps their engine. Only
- * holding it wide open through all three warnings seizes it.
+ * Long, and deliberately so: the critical lamp, the power cut and the stall all
+ * arrive first, so an engine is only lost by someone who watched all three warnings
+ * and kept their foot in for the better part of a minute. Anything short of that is
+ * a scare and a cooldown, which is the outcome a player can learn from — losing a
+ * block to six seconds of inattention is not.
  */
-const SEIZE_SECONDS = 6;
+const SEIZE_SECONDS = 45;
 
 function clamp(value: number, low: number, high: number): number {
   return value < low ? low : value > high ? high : value;
