@@ -1176,6 +1176,15 @@ const CHASSIS_ANGULAR_DAMPING = 0.1;
 const TRANSFORM_EMIT_INTERVAL = 0.25;
 const ODOMETER_EMIT_INTERVAL = 0.5;
 const FUEL_EMIT_INTERVAL = 0.5;
+/**
+ * Seconds of RUNNING with a dry sump before the block is destroyed.
+ *
+ * Shorter than the overheat grace (`SEIZE_SECONDS`, vehicle/cooling.ts) because oil
+ * has no gauge and no lamp ramp: the warning is the oil light, which is already on
+ * before the level reaches zero. Half a minute is enough to notice it, stop, and
+ * pour in the can you are carrying.
+ */
+const OIL_STARVE_SECONDS = 30;
 
 /**
  * Cosmetic shell wear is emitted with the other slow-moving vehicle values; half a
@@ -1791,6 +1800,18 @@ export class Vehicle implements Rebasable {
    * misfire; with it, an overheat is a stop.
    */
   private overheatStalled = false;
+  /**
+   * Seconds this engine has been RUN with no oil in it, decayed while it has oil.
+   * See the destruction block in `fixedUpdate`.
+   */
+  private oilStarvedSeconds = 0;
+  /**
+   * Which block is currently bolted in. A different one is a DIFFERENT ENGINE: it
+   * has not been cooked, it has not been run dry, and it did not arrive at the
+   * temperature the last one left behind. `rebuild` compares this and hands a fresh
+   * engine a fresh thermal state.
+   */
+  private fittedEngineId: string | null = null;
 
   // Cosmetic shell condition is mirrored locally so dust and impacts do not write
   // authoritative state every 16.7 ms; washing resyncs through the same authority check.
@@ -2049,6 +2070,10 @@ export class Vehicle implements Rebasable {
     // hot is hot on its first tick rather than starting from a default and jumping.
     this.cooling = new EngineCoolingSystem(carState.engineTempC);
     this.cooling.setTemperature(carState.engineTempC);
+    // The engine already in the slot is not a replacement: recording it here is what
+    // stops the first `rebuild` from treating a loaded car as a fresh-engine fit and
+    // throwing away the temperature it was saved with.
+    this.fittedEngineId = bonnetPart(carState.bonnet, 0)?.id ?? null;
     this.rebuild();
     this.originDisposer = this.origin.register(this);
   }
@@ -2348,6 +2373,25 @@ export class Vehicle implements Rebasable {
     this.cooling.configure(this.drivetrainEngine(), bonnetRadiator(this.car.bonnet));
     this.cooling.setWater(this.localWater);
     this.localWater = this.cooling.waterLitres;
+
+    // A DIFFERENT block in the engine slot is a different engine, and it must not
+    // inherit the last one's history. Without this the state that killed the old
+    // engine outlived it: the car kept the seized engine's temperature, so a fresh
+    // block dropped into a cooked car started life above its own maximum and was
+    // destroyed again within seconds, and the `overheatStalled` latch meant it would
+    // not even idle in the meantime. A replacement now starts at air temperature
+    // with both damage timers and the stall latch cleared, which is what fitting a
+    // new engine is supposed to buy.
+    const engineId = bonnetPart(this.car.bonnet, 0)?.id ?? null;
+    if (engineId !== this.fittedEngineId) {
+      this.fittedEngineId = engineId;
+      this.cooling.reset(ambientAirC(this.world.state.timeOfDay, DAY_LENGTH));
+      this.localTemp = this.cooling.temperature;
+      this.lastAuthTemp = this.localTemp;
+      this.overheatStalled = false;
+      this.oilStarvedSeconds = 0;
+      this.world.apply({ t: 'car_engine_temp', carId: this.car.id, celsius: this.localTemp });
+    }
 
     // Fitted parts change the drivetrain; gizmos still change only mass.
     this.applyChassisMass(stats.mass);
@@ -3092,14 +3136,29 @@ export class Vehicle implements Rebasable {
       });
     }
 
-    // A dry SUMP destroys an intact engine outright, and so does an engine cooked
-    // past its maximum temperature for long enough (`takeSeizure`, consumed once so
-    // one seizure cannot be reported twice). It remains fitted and running, but its
-    // drivetrain spec collapses to limp-home torque.
-    const failure = this.engineRunning
-      ? engineFailureReason(this.car.bonnet, this.localOil)
-      : null;
-    if (failure !== null || this.cooling.takeSeizure()) {
+    // An engine is wrecked by being RUN wrecked, never by one bad moment.
+    //
+    // A dry sump used to destroy the block outright, which meant the oil lamp and
+    // the destruction arrived in the same instant and there was nothing to react to.
+    // Now running with no oil accumulates seconds, exactly as running past the
+    // maximum temperature does (`SEIZE_SECONDS`, vehicle/cooling.ts), and the block
+    // is only lost once it has been run like that for `OIL_STARVE_SECONDS`. It
+    // remains fitted and running after that, with its drivetrain spec collapsed to
+    // limp-home torque.
+    //
+    // The timer DECAYS rather than resets, at half rate, so nursing a dry engine in
+    // short bursts still adds up while a single scare followed by a proper fill does
+    // not carry a hidden death sentence.
+    const starving = this.engineRunning
+      && engineFailureReason(this.car.bonnet, this.localOil) === 'oil';
+    if (starving) this.oilStarvedSeconds += dt;
+    else if (this.oilStarvedSeconds > 0) {
+      this.oilStarvedSeconds = Math.max(0, this.oilStarvedSeconds - dt * 0.5);
+    }
+    const starved = this.oilStarvedSeconds >= OIL_STARVE_SECONDS;
+    if (starved) this.oilStarvedSeconds = 0;
+    // `takeSeizure` is consumed once, so one overheat cannot destroy two engines.
+    if (starved || this.cooling.takeSeizure()) {
       const engineItem = this.car.bonnet[0];
       if (engineItem?.type === 'part' && !engineItem.part.destroyed) {
         const destroyed = {
