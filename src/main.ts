@@ -237,6 +237,25 @@ async function boot(): Promise<void> {
     world.state.settings.msaa,
     world.state.settings.inkStrength,
   );
+  /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
+  const toggleFullscreen = (): void => {
+    const transition = document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.fullscreenEnabled
+        ? document.documentElement.requestFullscreen()
+        : null;
+    if (transition) void transition.catch(() => undefined);
+  };
+  /**
+   * Letterboxes by changing the canvas viewport itself. Renderer.resizeViewport
+   * then updates both the drawing buffer and camera aspect, so nothing is cropped
+   * or squeezed behind the bars.
+   */
+  const toggleCinema = (): void => {
+    document.body.classList.toggle('is-cinematic');
+    renderer.resizeViewport();
+  };
+
   const vehicleLights = new VehicleLightRig(
     renderer.scene,
     world.state.settings.graphicsQuality,
@@ -1899,12 +1918,17 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * Opens the pause overlay. Called by the Escape key and by the touch MENU button.
-   * It stays outside InputReader so it works without pointer lock and while the
-   * fixed-step loop is stopped.
+   * Opens the pause overlay. Escape, Backquote and touch all arrive here, outside
+   * InputReader, so pause still works while the fixed-step loop is stopped.
+   *
+   * Pointer Lock cannot expose a native cursor over DOM controls. Backquote
+   * therefore releases it only while the menu is open and asks for it back on
+   * Resume; Escape keeps the browser's normal unlocked-after-Escape behaviour.
    */
-  const openPause = (): void => {
+  const openPause = (restorePointerLock = false): void => {
     if (paused) return;
+    const shouldRestorePointerLock = restorePointerLock && input.pointerLocked;
+    if (document.pointerLockElement !== null) document.exitPointerLock();
     paused = true;
     loop.stop();
     // Silence everything behind the overlay, radio included: the loop is stopped,
@@ -1913,12 +1937,17 @@ async function boot(): Promise<void> {
     void (async () => {
       const s = world.state;
       const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
+      menu.hidePause();
+      // Do this in the menu gesture's microtask, before an IndexedDB save can
+      // consume transient user activation required by requestPointerLock.
+      if (action !== 'quit' && shouldRestorePointerLock) {
+        void canvas.requestPointerLock().catch(() => undefined);
+      }
       if (action === 'save') {
         const state = stateForSave();
         await saves.save(`slot-${state.seed}`, saveName(state), state);
         hud.setToast('saved');
       }
-      menu.hidePause();
       paused = false;
       audio.setPaused(false);
       if (action !== 'quit') loop.start();
@@ -1927,12 +1956,27 @@ async function boot(): Promise<void> {
   };
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape') openPause();
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || paused) return;
+    if (e.code === 'Escape') {
+      openPause();
+    } else if (e.code === 'Backquote') {
+      e.preventDefault();
+      openPause(true);
+    } else if (e.code === 'Equal' || e.code === 'NumpadAdd') {
+      e.preventDefault();
+      toggleFullscreen();
+    } else if (e.key === '-') {
+      e.preventDefault();
+      toggleCinema();
+    }
   });
 
   // Touch: the overlay builds itself on the first canvas touch, so desktop pays
   // only for the dormant listeners.
-  const touch = new TouchControls(uiRoot, canvas, { pause: openPause });
+  const touch = new TouchControls(uiRoot, canvas, {
+    pause: openPause,
+    fullscreen: toggleFullscreen,
+  });
   input.attachTouch(touch);
 }
 

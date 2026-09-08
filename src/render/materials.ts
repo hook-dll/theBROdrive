@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
+import { MATERIALS_CONFIG } from '../config';
 import { applyComicShading } from './comic';
 import {
   MAX_BODY_DAMAGE_IMPACTS,
@@ -710,11 +711,14 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
  * both palette paint and body wear inert. Convert only the selected paint slot;
  * glass, lamps and trim keep their authored materials.
  */
-const CAR_PAINT_ROUGHNESS = 0.72;
-const CAR_PAINT_METALNESS = 0.12;
+// Aged single-stage paint is still a dielectric with a readable sky reflection.
+// The former 0.72/0.12 pair made every lee-facing panel absorb both diffuse and
+// reflected light, so cars collapsed toward black even under a high desert Sun.
+const CAR_PAINT_ROUGHNESS = MATERIALS_CONFIG.paintRoughness;
+const CAR_PAINT_METALNESS = MATERIALS_CONFIG.paintMetalness;
 
 /**
- * Clones an authored paint slot with one shared metallic automotive finish.
+ * Clones an authored paint slot with one shared automotive finish.
  * Both model packs now differ only in their colour/texture, not in their BRDF.
  */
 export function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {

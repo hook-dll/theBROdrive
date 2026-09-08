@@ -195,18 +195,18 @@ async function loadScene(file: string): Promise<THREE.Group> {
 
 /** Curated factory colours shared by both imported packs. */
 const CAR_PAINT_COLORS: readonly number[] = [
-  0x2f5f87, // deep blue
-  0x74a3bd, // powder blue
-  0x315f55, // dark teal
-  0x76917a, // sage
-  0x8b3f36, // oxide red
-  0xb9683f, // burnt orange
-  0xc5a548, // ochre
-  0xd6d0bc, // ivory
-  0x9c927b, // beige
-  0x6f5b78, // plum
-  0x697887, // slate
-  0x343a40, // charcoal
+  0x4078a2, // deep blue
+  0x85b5cd, // powder blue
+  0x40776b, // dark teal
+  0x88a28c, // sage
+  0xa34e43, // oxide red
+  0xcf794c, // burnt orange
+  0xd8b754, // ochre
+  0xe2ddcc, // ivory
+  0xb0a58e, // beige
+  0x846e8e, // plum
+  0x7d8e9f, // slate
+  0x444b52, // charcoal
 ];
 const paintScratch = new THREE.Color();
 
@@ -488,13 +488,14 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
 function carGlassMaterial(): THREE.MeshStandardMaterial {
   glassMaterial ??= new THREE.MeshStandardMaterial({
     name: 'car-glass',
-    // Preserve the original cold near-black tint and push its glass highlight slightly
-    // brighter and sharper than before.
-    color: 0x101a22,
+    // Opaque sky mirror: the scene probe supplies sky, cirrus and Sun without
+    // revealing the unmodelled cabin. The restrained blue and reflection strength
+    // keep it glass-like without turning every window into a chrome-blue panel.
+    color: 0x203746,
     transparent: false,
-    roughness: 0.04,
-    metalness: 0.14,
-    envMapIntensity: 1.2,
+    roughness: 0.11,
+    metalness: 0.35,
+    envMapIntensity: 1.7,
     side: THREE.DoubleSide,
   });
   return glassMaterial;

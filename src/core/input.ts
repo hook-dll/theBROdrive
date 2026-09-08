@@ -109,10 +109,11 @@ export function emptyInput(): InputFrame {
 /**
  * Every remappable action, in display order. This is the single source of truth
  * for the settings screen (labels + defaults) and for the effective bindings
- * (InputReader resolves overrides against it). Escape is deliberately absent:
- * it is the pause key, handled outside InputReader, and can never be rebound.
- * The mouse buttons are equally fixed — they map straight to
- * usePrimary/useSecondary and are not actions.
+ * (InputReader resolves overrides against it). System controls are deliberately
+ * absent: Escape/Backquote pause, plus toggles fullscreen and minus toggles the
+ * cinema viewport, all outside InputReader and none can be rebound. The mouse
+ * buttons are equally fixed — they map straight to usePrimary/useSecondary and
+ * are not actions.
  */
 export const BINDABLE_ACTIONS: readonly {
   id: string;
@@ -157,12 +158,21 @@ export const BINDABLE_ACTIONS: readonly {
 const DEFAULT_BINDINGS: Record<string, readonly string[]> = {};
 for (const action of BINDABLE_ACTIONS) DEFAULT_BINDINGS[action.id] = action.defaultKeys;
 
+/** Fixed browser/display controls which must never leak into remappable actions. */
+export function isSystemControlCode(code: string): boolean {
+  return code === 'Escape'
+    || code === 'Backquote'
+    || code === 'Equal'
+    || code === 'NumpadAdd'
+    || code === 'Minus'
+    || code === 'NumpadSubtract';
+}
+
 /**
  * The effective keys for one action: the override when it has usable keys,
- * otherwise the default. Escape is the pause key (handled outside InputReader)
- * and the mouse buttons are the fixed usePrimary/useSecondary actions, so
- * neither can ever appear in a binding; a bad override degrades to the default
- * rather than silently unbinding the action.
+ * otherwise the default. Fixed system controls and mouse buttons can never appear
+ * in a binding; a bad override degrades to the default rather than silently
+ * unbinding the action.
  */
 function resolveKeys(
   override: readonly string[] | undefined,
@@ -171,7 +181,7 @@ function resolveKeys(
   if (!override || override.length === 0) return defaults;
   let cleaned: string[] | null = null;
   for (const code of override) {
-    if (code !== 'Escape' && !code.startsWith('Mouse')) {
+    if (!isSystemControlCode(code) && !code.startsWith('Mouse')) {
       if (cleaned === null) cleaned = [];
       cleaned.push(code);
     }

@@ -719,9 +719,11 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
+    const viewportWidth = Math.max(1, canvas.clientWidth);
+    const viewportHeight = Math.max(1, canvas.clientHeight);
     this.camera = new THREE.PerspectiveCamera(
       CAMERA_BASE_FOV,
-      window.innerWidth / window.innerHeight,
+      viewportWidth / viewportHeight,
       CAMERA_NEAR,
       CAMERA_FAR,
     );
@@ -806,6 +808,15 @@ export class Renderer {
   }
 
 
+  /**
+   * Re-reads the canvas CSS viewport after an in-page display-mode change.
+   * Browser resizes already call the same path through the window listener.
+   */
+  resizeViewport(): void {
+    this.resize();
+  }
+
+
   /** Updates inexpensive player-held/worn view effects without allocating. */
   setItemViewEffects(
     shades: ShadeTint | null,
@@ -834,7 +845,8 @@ export class Renderer {
   private pixelRatioFor(quality: GraphicsQuality): number {
     const dpr = window.devicePixelRatio;
     if (quality === 'acceptable') {
-      const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
+      const canvas = this.renderer.domElement;
+      const cssPixels = Math.max(1, canvas.clientWidth * canvas.clientHeight);
       return Math.min(dpr, Math.sqrt(ACCEPTABLE_MAX_PIXELS / cssPixels));
     }
     return Math.min(
@@ -845,16 +857,18 @@ export class Renderer {
 
   private updateAdaptiveFloor(): void {
     if (this.quality !== 'acceptable') return;
+    const canvas = this.renderer.domElement;
     const basePixels =
-      window.innerWidth * window.innerHeight * this.basePixelRatio * this.basePixelRatio;
+      canvas.clientWidth * canvas.clientHeight * this.basePixelRatio * this.basePixelRatio;
     this.adaptiveResolution.setMinimumScale(
       Math.min(1, Math.sqrt(ACCEPTABLE_MIN_PIXELS / Math.max(1, basePixels))),
     );
   }
 
   private resize = (): void => {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    const canvas = this.renderer.domElement;
+    const width = Math.max(1, canvas.clientWidth);
+    const height = Math.max(1, canvas.clientHeight);
     this.basePixelRatio = this.pixelRatioFor(this.quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio * this.adaptiveResolution.scale);

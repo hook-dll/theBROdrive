@@ -70,15 +70,15 @@ interface MainDialScale {
 
 const SPEEDOMETER_SCALE: MainDialScale = {
   max: 200,
-  minorStep: 2,
+  minorStep: 10,
   halfStep: 10,
   majorStep: 20,
   redFrom: 180,
 };
 const TACHOMETER_SCALE: MainDialScale = {
   max: 8000,
-  minorStep: 100,
-  halfStep: 500,
+  minorStep: 1000,
+  halfStep: 1000,
   majorStep: 1000,
   redFrom: 6000,
 };
@@ -412,7 +412,7 @@ export class Hud {
     const zones = kind === 'fuel'
       ? [
           ['is-red', 0, 0.18],
-          ['is-green', 0.45, 1],
+          ['is-neutral', 0.45, 1],
         ] as const
       : [
           ['is-green', 0.27, 0.68],
@@ -434,7 +434,7 @@ export class Hud {
       svg.appendChild(zone);
     }
 
-    for (let step = 0; step <= 10; step++) {
+    for (let step = 0; step <= 10; step += 5) {
       const fraction = step / 10;
       const deg = AUX_START_ANGLE + fraction * AUX_SWEEP_ANGLE;
       const major = step % 5 === 0;

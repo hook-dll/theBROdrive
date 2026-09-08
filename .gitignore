@@ -53,3 +53,9 @@ pnpm-debug.log*
 /tycho2-vt88-source.tsv
 /tycho2-vt88-supplement.tsv
 /Low Poly Soviet Car Pack/
+
+# Local capture and visual-review artifacts created in the repository root.
+/Recording *.mp4
+/glass-window-options.png
+/prbr*.jpg
+/prbr*.png

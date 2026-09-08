@@ -44,6 +44,24 @@ body {
   display: block;
 }
 
+/* Cinema mode changes the actual render viewport instead of masking or scaling it:
+   the camera receives the shorter canvas aspect, while the exposed body becomes
+   two exact 90 CSS-pixel black bars. HUD coordinates follow that viewport too. */
+body.is-cinematic {
+  background: #000;
+}
+
+body.is-cinematic #game {
+  top: 90px;
+  bottom: auto;
+  height: calc(100% - 180px);
+}
+
+body.is-cinematic #ui {
+  top: 90px;
+  bottom: 90px;
+}
+
 /* Overlay above the canvas. Non-interactive by default; interactive elements
    below re-enable pointer events on themselves or a wrapping container. */
 #ui {
@@ -254,7 +272,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 6px 10px;
+  padding: 6px 10px 0;
   background: var(--hud-panel);
   border: 1px solid var(--hud-border);
 }
@@ -372,6 +390,10 @@ body {
 
 .hud-aux-zone.is-green {
   stroke: #49a96b;
+}
+
+.hud-aux-zone.is-neutral {
+  stroke: #8b8982;
 }
 
 .hud-aux-zone.is-red {

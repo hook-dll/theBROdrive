@@ -55,6 +55,17 @@ const PIECE_BURST_MPS = 2.4;
 const PIECE_LIFT_MPS = 2.2;
 /** Largest angular velocity (rad/s) a piece leaves with, per axis. */
 const PIECE_SPIN = 7;
+/**
+ * Loose soil absorbs impact and deforms against the road. A capsule has no inherent
+ * rolling resistance, so without angular damping a dirt clod can coast like a ball.
+ */
+const SOIL_VELOCITY_SHARE = 0.18;
+const SOIL_BURST_MPS = 0.7;
+const SOIL_LIFT_MPS = 0.65;
+const SOIL_SPIN = 2;
+const SOIL_LINEAR_DAMPING = 1.8;
+const SOIL_ANGULAR_DAMPING = 5;
+const SOIL_FRICTION = 1.1;
 
 /**
  * What is doing the hitting: an oriented box with a velocity, in ABSOLUTE coordinates.
@@ -307,38 +318,52 @@ export class DebrisField {
     const py = prop.y + _offset.y;
     const pz = prop.z + _offset.z - this.origin.z;
 
-    const body = this.physics.world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(px, py, pz)
-        .setRotation({ x: _yaw.x, y: _yaw.y, z: _yaw.z, w: _yaw.w }),
-    );
-    const collider = this.physics.world.createCollider(
-      RAPIER.ColliderDesc.capsule(def.capsule[0] * prop.scale, def.capsule[1] * prop.scale).setMass(
-        def.mass * prop.scale,
-      ),
-      body,
-    );
+    const looseSoil = def.looseSoil === true;
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(px, py, pz)
+      .setRotation({ x: _yaw.x, y: _yaw.y, z: _yaw.z, w: _yaw.w });
+    if (looseSoil) {
+      bodyDesc
+        .setLinearDamping(SOIL_LINEAR_DAMPING)
+        .setAngularDamping(SOIL_ANGULAR_DAMPING);
+    }
+    const body = this.physics.world.createRigidBody(bodyDesc);
+    const colliderDesc = RAPIER.ColliderDesc
+      .capsule(def.capsule[0] * prop.scale, def.capsule[1] * prop.scale)
+      .setMass(def.mass * prop.scale);
+    if (looseSoil) {
+      colliderDesc
+        .setFriction(SOIL_FRICTION)
+        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Max)
+        .setRestitution(0);
+    }
+    const collider = this.physics.world.createCollider(colliderDesc, body);
     // A wheel that runs over a piece is on the piece, not on the sand under it.
     this.physics.surfaces.register(collider.handle, SurfaceType.Rock);
 
     // Momentum out of the impact, plus a burst away from the prop's own axis and a
-    // lift. Radial in XZ, so the far side leaves the far way.
+    // lift. Radial in XZ, so the far side leaves the far way. Loose dirt receives a
+    // short shove instead of inheriting most of the car's road speed.
+    const velocityShare = looseSoil ? SOIL_VELOCITY_SHARE : PIECE_VELOCITY_SHARE;
+    const burstMps = looseSoil ? SOIL_BURST_MPS : PIECE_BURST_MPS;
+    const liftMps = looseSoil ? SOIL_LIFT_MPS : PIECE_LIFT_MPS;
+    const spin = looseSoil ? SOIL_SPIN : PIECE_SPIN;
     const bx = _offset.x - impactor.fx * 0.2;
     const bz = _offset.z - impactor.fz * 0.2;
     const burst = Math.hypot(bx, bz) || 1;
     body.setLinvel(
       {
-        x: impactor.vx * PIECE_VELOCITY_SHARE + (bx / burst) * PIECE_BURST_MPS,
-        y: impactor.vy * 0.3 + PIECE_LIFT_MPS,
-        z: impactor.vz * PIECE_VELOCITY_SHARE + (bz / burst) * PIECE_BURST_MPS,
+        x: impactor.vx * velocityShare + (bx / burst) * burstMps,
+        y: impactor.vy * 0.3 + liftMps,
+        z: impactor.vz * velocityShare + (bz / burst) * burstMps,
       },
       true,
     );
     body.setAngvel(
       {
-        x: (Math.random() - 0.5) * PIECE_SPIN,
-        y: (Math.random() - 0.5) * PIECE_SPIN,
-        z: (Math.random() - 0.5) * PIECE_SPIN,
+        x: (Math.random() - 0.5) * spin,
+        y: (Math.random() - 0.5) * spin,
+        z: (Math.random() - 0.5) * spin,
       },
       true,
     );

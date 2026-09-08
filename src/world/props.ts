@@ -396,6 +396,11 @@ export interface PropPiece {
   /** Capsule collider at scale 1: half height, then radius. */
   readonly capsule: readonly [number, number];
   readonly mass: number;
+  /**
+   * A dirt clod yields and compacts instead of preserving momentum like woody debris.
+   * DebrisField uses this to give only the road-pile pieces strong rolling resistance.
+   */
+  readonly looseSoil?: true;
 }
 
 function armPiece(mirror: number): THREE.BufferGeometry {
@@ -431,9 +436,9 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
         { geometry: lump(0.15), material: matScrub, offset: [0.02, 0.3, -0.1], capsule: [0.05, 0.13], mass: 3 },
       ],
       scrub: [
-        { geometry: lump(0.34, 0.65), material: matScrub, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4 },
-        { geometry: lump(0.24, 0.65), material: matScrub, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2 },
-        { geometry: lump(0.2, 0.65), material: matScrub, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2 },
+        { geometry: lump(0.34, 0.65), material: matScrub, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4, looseSoil: true },
+        { geometry: lump(0.24, 0.65), material: matScrub, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2, looseSoil: true },
+        { geometry: lump(0.2, 0.65), material: matScrub, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2, looseSoil: true },
       ],
     };
   }
