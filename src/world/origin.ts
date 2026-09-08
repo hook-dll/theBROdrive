@@ -81,6 +81,7 @@ export interface Rebasable {
 export class WorldOrigin {
   private ox = 0;
   private oz = 0;
+  private revisionValue = 0;
   private readonly listeners = new Set<{ listener: Rebasable; active: boolean }>();
 
   /** Absolute X of the current origin. Relative = absolute - this. */
@@ -91,6 +92,11 @@ export class WorldOrigin {
   /** Absolute Z of the current origin. */
   get z(): number {
     return this.oz;
+  }
+
+  /** Monotonic token for async world-generation results. */
+  get revision(): number {
+    return this.revisionValue;
   }
 
   /**
@@ -116,6 +122,7 @@ export class WorldOrigin {
   reset(absX: number, absZ: number): void {
     this.ox = Math.round(absX / REBASE_STEP) * REBASE_STEP;
     this.oz = Math.round(absZ / REBASE_STEP) * REBASE_STEP;
+    this.revisionValue++;
   }
 
   /**
@@ -137,9 +144,9 @@ export class WorldOrigin {
     const nextZ = Math.round(absZ / REBASE_STEP) * REBASE_STEP;
     const shift: RebaseShift = { dx: nextX - this.ox, dz: nextZ - this.oz };
     if (shift.dx === 0 && shift.dz === 0) return null;
-
     this.ox = nextX;
     this.oz = nextZ;
+    this.revisionValue++;
     // Snapshot registrations: a callback may dispose itself or another listener
     // without skipping an unrelated callback or receiving a second notification.
     for (const registration of [...this.listeners]) {

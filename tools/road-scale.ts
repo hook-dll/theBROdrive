@@ -162,10 +162,10 @@ interface MilestoneRow {
  *
  * The walk is XZ only for two reasons, and the second is the load-bearing one. Elevation
  * is a function of POSITION, not arclength — it is not part of the centreline state and
- * cannot be integrated, and it is bounded by MAX_RELIEF (~142 m), so it cannot contribute
- * to a growing-coordinate problem. Only XZ grows without bound as the road winds, so only
- * XZ decides the float32 step. Calling `heightAt` here would double a ten-million-step
- * walk to buy a number that is pinned under 150 m by construction.
+ * cannot be integrated, and it is bounded by MAX_RELIEF (~1.43 km), so it cannot
+ * contribute to a growing-coordinate problem. Only XZ grows without bound as the road
+ * winds, so only XZ decides the float32 step. Calling `heightAt` here would double a
+ * ten-million-step walk to buy a number that is pinned under 1.5 km by construction.
  */
 function measureExtent(seed: number, lengthM: number): {
   milestones: MilestoneRow[];

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FrameProfiler } from './core/frameprofiler';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
@@ -369,6 +370,14 @@ async function boot(): Promise<void> {
   const vehicles = new Map<string, Vehicle>();
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
   const loadingModels = new Set<string>();
+  // Cosmetic uniforms are expensive to write: setCarBodyCondition traverses every
+  // mesh in the vehicle. The scalar accumulators and the bounded damage tail provide
+  // a stable dirty signature even though the damage array is mutated in place.
+  const appliedBodyCondition = new WeakMap<
+    Vehicle,
+    { dirt: number; scratches: number; damageLength: number; damageLast: unknown }
+  >();
+  const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   const modelWarmups = new Map<string, Promise<void>>();
   const materializeVehicle = (car: CarState): Promise<Vehicle> => {
     const existing = vehicles.get(car.id);
@@ -1271,6 +1280,7 @@ async function boot(): Promise<void> {
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
     const s = world.state;
+    frameProfiler?.beginFrame();
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
@@ -1278,12 +1288,26 @@ async function boot(): Promise<void> {
       vehicle.syncVisuals(alpha);
       // Dirt and impact records are read from the Vehicle's live accumulators, not
       // the batched save state: a collision or brush stroke must land this frame.
-      setCarBodyCondition(
-        vehicle.root,
-        vehicle.bodyDirt,
-        vehicle.bodyScratches,
-        vehicle.bodyDamage,
-      );
+      const dirt = vehicle.bodyDirt;
+      const scratches = vehicle.bodyScratches;
+      const damage = vehicle.bodyDamage;
+      const previous = appliedBodyCondition.get(vehicle);
+      const damageLast = damage[damage.length - 1];
+      if (
+        previous === undefined
+        || previous.dirt !== dirt
+        || previous.scratches !== scratches
+        || previous.damageLength !== damage.length
+        || previous.damageLast !== damageLast
+      ) {
+        setCarBodyCondition(vehicle.root, dirt, scratches, damage);
+        appliedBodyCondition.set(vehicle, {
+          dirt,
+          scratches,
+          damageLength: damage.length,
+          damageLast,
+        });
+      }
     }
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
@@ -1383,7 +1407,9 @@ async function boot(): Promise<void> {
     vehicleLights.beginFrame();
     for (const vehicle of litVehicles) vehicle.syncProjectedLights(vehicleLights);
     vehicleLights.endFrame();
-
+    frameProfiler?.begin('vista');
+    vista.update(cam.x, cam.z, activeS, frameDt);
+    frameProfiler?.end('vista');
     // Eye height for heat haze. The exact local road frame is still useful near the
     // corridor; farther out the same terrain method is the player-centred fine field.
     const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
@@ -1592,6 +1618,7 @@ async function boot(): Promise<void> {
       }
     }
     renderer.render();
+    frameProfiler?.endFrame();
   };
 
   const loop = new GameLoop({ fixedUpdate, render });
