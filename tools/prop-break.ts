@@ -249,18 +249,63 @@ if (!target) {
   const sweptProp: BreakableProp = { ...prop, id: sweptId };
   debris.register(sweptProp);
   debris.update(
-    { ...impactor, x: sweptProp.x - 5, y: sweptProp.y + 0.6, z: sweptProp.z, fx: 1, fz: 0 },
+    {
+      ...impactor,
+      x: sweptProp.x - 5,
+      y: sweptProp.y + 0.6,
+      z: sweptProp.z,
+      fx: 1,
+      fz: 0,
+      vx: 20,
+    },
     FIXED_DT,
     sweptProp.x - 5,
     sweptProp.z,
   );
   debris.update(
-    { ...impactor, x: sweptProp.x + 5, y: sweptProp.y + 0.6, z: sweptProp.z, fx: 1, fz: 0 },
+    {
+      ...impactor,
+      x: sweptProp.x + 5,
+      y: sweptProp.y + 0.6,
+      z: sweptProp.z,
+      fx: 1,
+      fz: 0,
+      vx: 20,
+    },
     FIXED_DT,
     sweptProp.x + 5,
     sweptProp.z,
   );
   check('high-speed sweep breaks prop', world.state.flattenedProps.includes(sweptId), `id ${sweptId}`);
+
+  const soilStarts = new Map<number, { x: number; z: number }>();
+  physics.world.forEachRigidBody((body) => {
+    if (!existingBodies.has(body.handle)) {
+      const p = body.translation();
+      soilStarts.set(body.handle, { x: p.x, z: p.z });
+    }
+  });
+  advanceFixedSteps(180, sweptProp.x, sweptProp.z);
+  let fastestSoilMps = 0;
+  let farthestSoilMetres = 0;
+  physics.world.forEachRigidBody((body) => {
+    const start = soilStarts.get(body.handle);
+    if (!start) return;
+    const p = body.translation();
+    const v = body.linvel();
+    fastestSoilMps = Math.max(fastestSoilMps, Math.hypot(v.x, v.z));
+    farthestSoilMetres = Math.max(farthestSoilMetres, Math.hypot(p.x - start.x, p.z - start.z));
+  });
+  check(
+    'dirt clods stop rolling after impact',
+    fastestSoilMps < 0.2,
+    `${fastestSoilMps.toFixed(3)} m/s after 3 s`,
+  );
+  check(
+    'dirt clods stay near the broken pile',
+    farthestSoilMetres < 4,
+    `${farthestSoilMetres.toFixed(2)} m after a 20 m/s hit`,
+  );
 
   // Repeated real-piece spawns must evict the oldest immediately rather than growing
   // past the hard budget. The cloned records model distinct props while keeping the

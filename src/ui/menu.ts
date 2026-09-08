@@ -1,7 +1,7 @@
 import type { SaveBackend, SaveMeta } from '../save/save';
 import { parseSeed, decodeSaveCode, encodeSaveCode } from '../save/save';
 import type { WorldState } from '../game/state';
-import { BINDABLE_ACTIONS } from '../core/input';
+import { BINDABLE_ACTIONS, isSystemControlCode } from '../core/input';
 import {
   DAY_CYCLE_MAX_MINUTES,
   DAY_CYCLE_MIN_MINUTES,
@@ -391,8 +391,8 @@ export class MainMenu {
 
   /**
    * Pause overlay with Settings and Spawn Vehicle sub-screens. One window
-   * keydown listener serves the whole pause: it routes Escape by screen and
-   * runs key-capture for rebinding. Element listeners live on the overlay, so
+   * keydown listener serves the whole pause: it routes either pause key by screen
+   * and runs key-capture for rebinding. Element listeners live on the overlay, so
    * removePause (which drops the overlay) releases everything except that one
    * window listener, which pauseCleanup removes.
    */
@@ -548,11 +548,10 @@ export class MainMenu {
       const onKey = (ev: KeyboardEvent): void => {
         if (screen === 'settings' && capturingActionId !== null) {
           // Capture mode: the next keydown becomes the binding. Modifier chords
-          // stay with the browser (same rule as InputReader) and Escape cancels
-          // without closing the menu.
+          // stay with the browser, while fixed system controls cancel capture.
           if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
           ev.preventDefault();
-          if (ev.code === 'Escape') {
+          if (isSystemControlCode(ev.code)) {
             capturingActionId = null;
             clearNote();
             renderBindings();
@@ -576,7 +575,7 @@ export class MainMenu {
           renderBindings();
           return;
         }
-        if (ev.key === 'Escape') {
+        if (ev.code === 'Escape' || ev.code === 'Backquote') {
           ev.preventDefault();
           if (screen === 'main') finish('resume');
           else showScreen('main');

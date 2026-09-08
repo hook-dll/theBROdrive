@@ -45,8 +45,10 @@ export interface TouchState {
 }
 
 interface TouchHooks {
-  /** Pause button: same overlay the Escape key opens. */
+  /** Pause button: same overlay the Escape and Backquote keys open. */
   readonly pause: () => void;
+  /** Fullscreen button: same in-page fullscreen mode as the plus key. */
+  readonly fullscreen: () => void;
 }
 
 type DrivePedal = 'forward' | 'backward';
@@ -376,7 +378,7 @@ export class TouchControls {
       fullscreen.type = 'button';
       fullscreen.textContent = '[ ]';
       fullscreen.setAttribute('aria-label', 'Enter fullscreen');
-      this.bindSystemButton(fullscreen, this.toggleFullscreen);
+      this.bindSystemButton(fullscreen, this.hooks.fullscreen);
       systems.appendChild(fullscreen);
       this.fullscreenButton = fullscreen;
     }
@@ -568,13 +570,6 @@ export class TouchControls {
     this.state[id] = true;
   }
 
-  private toggleFullscreen = (): void => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-    } else {
-      void document.documentElement.requestFullscreen().catch(() => undefined);
-    }
-  };
 
   private onFullscreenChange = (): void => {
     const button = this.fullscreenButton;
