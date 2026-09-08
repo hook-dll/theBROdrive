@@ -162,23 +162,6 @@ export class Radio {
     ramp(this.exteriorGain.gain, seated ? 0 : 1, now, SPATIAL_RAMP_SECONDS);
   }
 
-  /** Updates the listener pose without allocating per frame. */
-  setListener(spatial: RadioSpatialState): void {
-    const listener = this.mixer.ctx.listener;
-    listener.positionX.value = spatial.listenerX;
-    listener.positionY.value = spatial.listenerY;
-    listener.positionZ.value = spatial.listenerZ;
-
-    const { listenerQx: x, listenerQy: y, listenerQz: z, listenerQw: w } = spatial;
-    // Camera local forward is -Z and local up is +Y.
-    listener.forwardX.value = -2 * (x * z + y * w);
-    listener.forwardY.value = 2 * (x * w - y * z);
-    listener.forwardZ.value = -1 + 2 * (x * x + y * y);
-    listener.upX.value = 2 * (x * y - z * w);
-    listener.upY.value = 1 - 2 * (x * x + z * z);
-    listener.upZ.value = 2 * (y * z + x * w);
-  }
-
   /** Updates this car's source position when it is the driven car. */
   setSourcePosition(x: number, y: number, z: number): void {
     const now = this.mixer.now;
@@ -187,14 +170,6 @@ export class Radio {
     this.panner.positionX.setTargetAtTime(x, now, SPATIAL_RAMP_SECONDS);
     this.panner.positionY.setTargetAtTime(y, now, SPATIAL_RAMP_SECONDS);
     this.panner.positionZ.setTargetAtTime(z, now, SPATIAL_RAMP_SECONDS);
-  }
-
-  /** Updates the listener and, when supplied, this car's source pose. */
-  setSpatial(spatial: RadioSpatialState): void {
-    this.setListener(spatial);
-    if (spatial.sourceX !== null && spatial.sourceY !== null && spatial.sourceZ !== null) {
-      this.setSourcePosition(spatial.sourceX, spatial.sourceY, spatial.sourceZ);
-    }
   }
 
   setVolume(volume: number): void {

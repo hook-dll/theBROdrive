@@ -143,6 +143,35 @@ function polar(cx: number, cy: number, r: number, deg: number): { x: number; y: 
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
+/**
+ * The glyph table as CSS, installed once per document.
+ *
+ * Which segments a character lights is fixed data, so it belongs in a stylesheet
+ * rather than in sixteen class writes per digit per frame: the display then costs
+ * ONE attribute write per changed digit and the selector match is the browser's own
+ * work. One rule per segment, listing every character that lights it.
+ */
+let segmentRulesInstalled = false;
+function installSegmentGlyphRules(): void {
+  if (segmentRulesInstalled) return;
+  segmentRulesInstalled = true;
+  const rules: string[] = [];
+  for (let segment = 0; segment < SEGMENT_IDS.length; segment++) {
+    const id = SEGMENT_IDS[segment]!;
+    const selectors: string[] = [];
+    for (const [character, glyph] of Object.entries(SEGMENT_GLYPHS)) {
+      if (!glyph.includes(id)) continue;
+      selectors.push(`.hud-lcd-digit[data-c="${character}"] .hud-lcd-s${segment}`);
+    }
+    if (selectors.length === 0) continue;
+    rules.push(`${selectors.join(',')}{stroke:var(--hud-lcd-on)}`);
+  }
+  const style = document.createElement('style');
+  style.textContent = rules.join('\n');
+  document.head.appendChild(style);
+}
+
+
 function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
   const s = polar(cx, cy, r, startDeg);
   const e = polar(cx, cy, r, endDeg);
@@ -173,7 +202,7 @@ export class Hud {
   private readonly checkEngineEl: HTMLElement;
   private readonly oilWarningEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
-  private readonly lcdSegments: readonly (readonly SVGLineElement[])[];
+  private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private gumBubbleProgress = -1;
 
@@ -189,6 +218,11 @@ export class Hud {
   private displayEpoch = 0;
   private displayOffset = -1;
   private displayAlarm = false;
+  /** Sanitised LCD text, cached against the raw source it was derived from. */
+  private sanitizedSource: string | null = null;
+  private sanitized = '';
+  /** Per-digit character actually written to the DOM. */
+  private readonly displayCharacters: string[] = Array.from({ length: LCD_DIGITS }, () => '\u0000');
   private invSlots: HTMLElement[] = [];
   private invItems: readonly Item[] = [];
   private invLabels: string[] = [];
@@ -225,7 +259,7 @@ export class Hud {
 
     const display = this.buildSegmentDisplay();
     this.lcdEl = display.svg;
-    this.lcdSegments = display.segments;
+    this.lcdDigits = display.digits;
 
     this.gearEl = el('div', 'hud-gear');
     this.handbrakeEl = el('div', 'hud-handbrake');
@@ -433,31 +467,34 @@ export class Hud {
 
   private buildSegmentDisplay(): {
     svg: SVGSVGElement;
-    segments: readonly (readonly SVGLineElement[])[];
+    digits: readonly SVGGElement[];
   } {
+    installSegmentGlyphRules();
     const svg = svgEl('svg');
     svg.setAttribute('class', 'hud-lcd');
     svg.setAttribute('viewBox', `0 0 ${LCD_DIGITS * 13 + 2} 28`);
     svg.setAttribute('role', 'status');
-    const cells: SVGLineElement[][] = [];
+    const digits: SVGGElement[] = [];
     for (let digit = 0; digit < LCD_DIGITS; digit++) {
-      const group = svgEl('g');
+      const group = svgEl('g') as SVGGElement;
+      group.setAttribute('class', 'hud-lcd-digit');
       group.setAttribute('transform', `translate(${digit * 13 + 1} 1)`);
-      const cell: SVGLineElement[] = [];
+      group.setAttribute('data-c', ' ');
+      let index = 0;
       for (const [x1, y1, x2, y2] of SEGMENT_LINES) {
         const segment = svgEl('line');
-        segment.setAttribute('class', 'hud-lcd-segment');
+        segment.setAttribute('class', `hud-lcd-segment hud-lcd-s${index}`);
         segment.setAttribute('x1', String(x1));
         segment.setAttribute('y1', String(y1));
         segment.setAttribute('x2', String(x2));
         segment.setAttribute('y2', String(y2));
         group.appendChild(segment);
-        cell.push(segment);
+        index++;
       }
       svg.appendChild(group);
-      cells.push(cell);
+      digits.push(group);
     }
-    return { svg, segments: cells };
+    return { svg, digits };
   }
 
 
@@ -560,12 +597,19 @@ export class Hud {
       ? ''
       : (this.radioText ?? '');
     const rawMessage = hasProblems ? problemMessage : radioMessage;
-    const message = rawMessage
-      .toUpperCase()
-      .replace(/[·—–]/g, ' ')
-      .replace(/[^A-Z0-9 !/_-]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // This runs every frame while driving, and the message changes about as often as
+    // a station does. Sanitising it per frame was five string allocations a frame for
+    // an answer that had not moved.
+    if (rawMessage !== this.sanitizedSource) {
+      this.sanitizedSource = rawMessage;
+      this.sanitized = rawMessage
+        .toUpperCase()
+        .replace(/[·—–]/g, ' ')
+        .replace(/[^A-Z0-9 !/_-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    const message = this.sanitized;
     if (message !== this.displayMessage || hasProblems !== this.displayAlarm) {
       this.displayMessage = message;
       this.displayAlarm = hasProblems;
@@ -591,12 +635,16 @@ export class Hud {
       const scroll = `${message}   `;
       frame = `${scroll}${scroll}`.slice(offset, offset + LCD_DIGITS);
     }
+    // One attribute write per digit, and CSS decides which of its sixteen segments
+    // are lit (see installSegmentGlyphRules). The display used to write 256 class
+    // names per scroll step and every lit segment carried its own drop-shadow
+    // filter, so a scrolling message repainted the whole cluster five times a
+    // second — measurable as interaction latency whenever the radio had a line.
     for (let digit = 0; digit < LCD_DIGITS; digit++) {
-      const glyph = SEGMENT_GLYPHS[frame[digit] ?? ' '] ?? '';
-      const segments = this.lcdSegments[digit]!;
-      for (let segment = 0; segment < segments.length; segment++) {
-        segments[segment]!.classList.toggle('is-lit', glyph.includes(SEGMENT_IDS[segment]!));
-      }
+      const character = frame[digit] ?? ' ';
+      if (character === this.displayCharacters[digit]) continue;
+      this.displayCharacters[digit] = character;
+      this.lcdDigits[digit]!.setAttribute('data-c', character);
     }
   }
 
