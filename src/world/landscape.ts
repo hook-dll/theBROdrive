@@ -25,12 +25,7 @@ import { hashUnit3 } from '../core/rng';
  * the road being in two places at two heights: elevation has to be a function of
  * POSITION.
  *
- * So elevation is this field, and the field is Lipschitz by construction. Each band
- * is one octave of value noise over its own lattice, and `MAX_SLOPE` is the sum of
- * the bands' individual bounds — arithmetic about the constants in this file, not a
- * hope. Everything downstream inherits it: the road's grade is this field's slope
- * along the road's own tangent, and the open desert is this field plus bounded dune
- * relief.
+ * So elevation is this field, and the field is Lipschitz by construction. Each band is one octave of value noise over its own lattice, and `MAX_SLOPE` is the sum of the bands' individual bounds — arithmetic about the constants in this file, not a hope. Everything downstream inherits it: the road's grade is this field's slope along its own tangent, and the open desert is this field plus bounded dune relief.
  *
  * The bands are spread over two decades of wavelength. In this relief experiment
  * both altitude and horizontal scale are multiplied by five: the 225 km band carries
@@ -107,12 +102,10 @@ function band(seed: number, x: number, z: number): number {
  * most of it goes to the shortest band, where it is felt, and the long bands buy
  * altitude at almost no cost in steepness.
  *
- * `hilliness` gates a band by the regional hilliness field. Only the 1800 m band is
- * gated: gating the 420 m band too took mean road grade from 2.7-3.1% down to
- * 1.8-2.8% (tools/road-profile.ts), because that band is where most of the slope
- * budget lives, and it made flat country read as ironed rather than open. `home`
- * ramps a band in around the homestead, so the concrete pad and the driveway have
- * level ground under them.
+ * `hilliness` gates the 7.5 km hill band by the regional hilliness field. The shortest
+ * 1.26 km band remains ungated so the flat country still breathes instead of reading as
+ * ironed terrain. `home` ramps the two short bands in around the homestead, so the
+ * concrete pad and the driveway have level ground under them.
  */
 interface Band {
   readonly amplitude: number;
@@ -148,25 +141,23 @@ const HILLINESS_FLOOR = 0.45;
  * The homestead's concrete pad spans 4 to 20 m of lateral offset and its driveway
  * ramps from the pad down to the asphalt in 5 m, so ground that tilts under the
  * footprint becomes a lip the starting car has to climb to leave the garage. Only the
- * two short bands are ramped; the long ones are already under 2% here, which is 0.3 m
- * across the pad. The ramp is long because it costs slope of its own —
- * `sum(home amplitudes) * 1.5 / HOME_RAMP` — and a short one would be a hill in
- * itself.
+ * two short bands are ramped; the longest bands are gentle across the pad. The ramp is
+ * long because it costs slope of its own — `sum(home amplitudes) * 1.5 / HOME_RAMP` —
+ * and a short one would be a hill in itself.
  */
 const HOME_FLAT_RADIUS = 200 * RELIEF_SCALE;
 const HOME_RAMP = 1200 * RELIEF_SCALE;
 
 /**
  * The steepest this field can be, as a fraction: every band's own bound plus the
- * homestead ramp's. Unlike the old grade clamp this is reached, not merely respected —
- * `+-1` lattice values make the peak case common — so `tools/relief-probe.ts` finds
- * slopes within a factor of two of it rather than a factor of twenty.
+ * homestead ramp's. Scaling each relief amplitude and its wavelength together keeps
+ * this budget at the former value while making the climbs longer.
  */
 export const MAX_SLOPE =
   BANDS.reduce((sum, b) => sum + (b.amplitude * 2 * FADE_PEAK_SLOPE) / b.wavelength, 0) +
   (BANDS.reduce((sum, b) => sum + (b.home ? b.amplitude : 0), 0) * FADE_PEAK_SLOPE) / HOME_RAMP;
 
-/** Total half-range of the field, metres: no ground is further than this from datum. */
+/** Total half-range of the field, metres: three times the former bound. */
 export const MAX_RELIEF = BANDS.reduce((sum, b) => sum + b.amplitude, 0);
 
 /**

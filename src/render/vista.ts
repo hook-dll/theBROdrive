@@ -9,6 +9,11 @@ import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { TERRAIN_MATERIAL } from '../world/terrainmesh';
+import type {
+  VistaWorkerRequest,
+  VistaWorkerResponse,
+  VistaWorkerSampleResult,
+} from './vistaworker';
 
 /**
  * The fine, player-centred desert tiles own the ground around the camera. This polar
@@ -325,6 +330,9 @@ export class VistaMesh {
   private readonly mesaSparkles: THREE.Points;
   private geometry: THREE.BufferGeometry | null = null;
   private mesaGeometry: THREE.BufferGeometry | null = null;
+  /** Reused scratch geometry for normal generation; cell loads must not allocate it. */
+  private normalGeometry: THREE.BufferGeometry | null = null;
+  private normalPositions: Float32Array | null = null;
   private groundLocalPositions: Float32Array | null = null;
   private groundSamples: GroundCellSamples | null = null;
   private readonly groundSampleCache = new Map<string, GroundSample>();
@@ -338,6 +346,29 @@ export class VistaMesh {
   private mesaHeightOffset: Float32Array | null = null;
   private mesaCentreXZ: Float32Array | null = null;
   private mesaCandidates: MesaCandidate[] = [];
+  private worker: Worker | null = null;
+  private workerReady = false;
+  private disposed = false;
+  /**
+   * Which disc the worker holds. Bumped whenever the geometry is rebuilt, so a
+   * result computed for the previous view distance is dropped instead of being
+   * written into buffers of a different length.
+   */
+  private layoutId = 0;
+  private nextRequestId = 0;
+  /** At most one request is in flight, so a stale corner cannot delay a wanted one. */
+  private pendingRequest: {
+    id: number;
+    layoutId: number;
+    key: string;
+    cornerX: number;
+    cornerZ: number;
+  } | null = null;
+  /** Corners the camera is about to need, in vista-local coordinates. */
+  private readonly prefetchQueue: { cornerX: number; cornerZ: number }[] = [];
+  /** Scratch field values for the synchronous path; sized with the disc. */
+  private horizonScratch: Float32Array | null = null;
+  private baseScratch: Float32Array | null = null;
   private readonly dissolvingMesas = new Map<string, number>();
   private readonly retiredMesas = new Set<string>();
   private mesaVisibleOuter = 0;
@@ -420,6 +451,121 @@ export class VistaMesh {
       distant.visible = false;
       scene.add(distant);
     }
+    this.worker = this.createWorker();
+  }
+
+  private createWorker(): Worker | null {
+    if (typeof Worker === 'undefined') return null;
+    let worker: Worker | null = null;
+    try {
+      worker = new Worker(new URL('./vistaworker.ts', import.meta.url), { type: 'module' });
+      const candidate = worker;
+      candidate.onmessage = (event: MessageEvent<VistaWorkerResponse>) => {
+        if (this.disposed || candidate !== this.worker) return;
+        const response = event.data;
+        if (response.type === 'ready') {
+          this.workerReady = true;
+          this.pumpWorker();
+          return;
+        }
+        this.acceptSampleResult(response);
+      };
+      const fail = (): void => {
+        if (candidate !== this.worker) return;
+        candidate.terminate();
+        this.worker = null;
+        this.workerReady = false;
+      };
+      candidate.onerror = fail;
+      candidate.onmessageerror = fail;
+      const request: VistaWorkerRequest = {
+        type: 'init',
+        seed: this.road.seed,
+        spine: this.road.spine,
+      };
+      candidate.postMessage(request);
+      return candidate;
+    } catch {
+      worker?.terminate();
+      return null;
+    }
+  }
+
+  /**
+   * Sends at most one corner request per pump and only while the worker is idle.
+   * A queued corner that has since been sampled synchronously is dropped here
+   * rather than recomputed.
+   */
+  private pumpWorker(): void {
+    if (this.disposed || !this.worker || !this.workerReady || this.pendingRequest) return;
+    if (this.groundLocalPositions === null) return;
+    const ox = this.origin.x;
+    const oz = this.origin.z;
+    while (this.prefetchQueue.length > 0) {
+      const next = this.prefetchQueue.shift()!;
+      const key = `${next.cornerX + ox},${next.cornerZ + oz}`;
+      if (this.groundSampleCache.has(key)) continue;
+      const id = ++this.nextRequestId;
+      this.pendingRequest = {
+        id,
+        layoutId: this.layoutId,
+        key,
+        cornerX: next.cornerX,
+        cornerZ: next.cornerZ,
+      };
+      const request: VistaWorkerRequest = {
+        type: 'sample',
+        requestId: id,
+        layoutId: this.layoutId,
+        cornerX: next.cornerX,
+        cornerZ: next.cornerZ,
+        originX: ox,
+        originZ: oz,
+      };
+      this.worker.postMessage(request);
+      return;
+    }
+  }
+
+  /**
+   * Turns worker field values into a cached ground sample.
+   *
+   * Four things must still agree for the result to be usable: it must be the request
+   * we are waiting for, computed for the disc we still have, under an origin the
+   * cache key was formed from, and for a corner nothing has sampled synchronously in
+   * the meantime. Anything else is discarded — the synchronous path remains correct
+   * on its own, so a dropped prefetch costs nothing but the work.
+   */
+  private acceptSampleResult(result: VistaWorkerSampleResult): void {
+    const pending = this.pendingRequest;
+    this.pendingRequest = null;
+    if (
+      !pending
+      || pending.id !== result.requestId
+      || pending.layoutId !== this.layoutId
+      || result.layoutId !== this.layoutId
+      || result.originX !== this.origin.x
+      || result.originZ !== this.origin.z
+    ) {
+      this.pumpWorker();
+      return;
+    }
+    const horizon = new Float32Array(result.horizon);
+    const base = new Float32Array(result.base);
+    const vertexCount = this.radii.length * SECTORS;
+    if (
+      horizon.length === vertexCount
+      && base.length === vertexCount
+      && !this.groundSampleCache.has(pending.key)
+      && this.groundLocalPositions !== null
+    ) {
+      this.groundSampleCache.set(
+        pending.key,
+        this.buildGroundSample(pending.cornerX, pending.cornerZ, horizon, base),
+      );
+      this.trimGroundSampleCache();
+    }
+    this.pumpWorker();
   }
 
   /**
@@ -438,6 +584,8 @@ export class VistaMesh {
     this.groundLocalPositions = null;
     this.sampleCellX = Number.NaN;
     this.sampleCellZ = Number.NaN;
+    this.prefetchQueue.length = 0;
+    this.pendingRequest = null;
   }
 
   /**
@@ -904,6 +1052,12 @@ export class VistaMesh {
     this.geometry = geometry;
     this.groundLocalPositions = positions;
     this.mesh.geometry = geometry;
+    // A new disc invalidates the worker's layout, every queued corner and anything
+    // still in flight: they were all sized for the previous ring count.
+    this.layoutId++;
+    this.pendingRequest = null;
+    this.prefetchQueue.length = 0;
+    this.publishLayout();
   }
 
   private loadGroundCell(cellX: number, cellZ: number, s: number): void {
@@ -933,13 +1087,19 @@ export class VistaMesh {
       z0,
     );
 
-    while (this.groundSampleCache.size > 12) {
-      const oldest = this.groundSampleCache.keys().next().value;
-      if (oldest === undefined) break;
-      this.groundSampleCache.delete(oldest);
-    }
+    this.trimGroundSampleCache();
+    // Queue the corners of the eight neighbouring cells. Whichever way the camera
+    // leaves this cell, the corners it needs are already being sampled off-thread,
+    // so the crossing costs interpolation rather than a terrain sweep.
+    this.queueNeighbourCorners(cellX, cellZ);
+    this.pumpWorker();
   }
 
+  /**
+   * The synchronous fallback: samples the terrain field for one cell corner on the
+   * main thread. Used for the first cell of a session and whenever a crossing
+   * outruns the worker; the worker path below writes into the same cache.
+   */
   private groundSampleAt(cx: number, cz: number): GroundSample {
     const key = `${cx + this.origin.x},${cz + this.origin.z}`;
     const cached = this.groundSampleCache.get(key);
@@ -948,6 +1108,45 @@ export class VistaMesh {
       this.groundSampleCache.set(key, cached);
       return cached;
     }
+    invariantLocalPositions(this.groundLocalPositions);
+    const vertexCount = this.radii.length * SECTORS;
+    if (this.horizonScratch?.length !== vertexCount) {
+      this.horizonScratch = new Float32Array(vertexCount);
+      this.baseScratch = new Float32Array(vertexCount);
+    }
+    const horizon = this.horizonScratch;
+    const base = this.baseScratch!;
+    const ox = this.origin.x;
+    const oz = this.origin.z;
+    for (let r = 0; r < this.radii.length; r++) {
+      const radius = this.radii[r]!;
+      const reliefWeight =
+        1 - smoothstep01((radius - RELIEF_FADE_START) / (RELIEF_FADE_END - RELIEF_FADE_START));
+      for (let a = 0; a < SECTORS; a++) {
+        const i = r * SECTORS + a;
+        const vi = i * 3;
+        const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
+        const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
+        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
+        base[i] = this.terrain.baseHeight(absoluteX, absoluteZ, radius);
+      }
+    }
+    const sample = this.buildGroundSample(cx, cz, horizon, base);
+    this.groundSampleCache.set(key, sample);
+    return sample;
+  }
+
+  /**
+   * Shapes raw terrain field values into a renderable sample: the overlap bias, the
+   * road underlay, the rock/sand tint and the smooth normals. Deliberately shared by
+   * the synchronous and worker paths so both produce identical geometry.
+   */
+  private buildGroundSample(
+    cx: number,
+    cz: number,
+    horizon: Float32Array,
+    base: Float32Array,
+  ): GroundSample {
     invariantLocalPositions(this.groundLocalPositions);
     const vertexCount = this.radii.length * SECTORS;
     const heights = new Float32Array(vertexCount);
@@ -959,44 +1158,93 @@ export class VistaMesh {
       const bias =
         INNER_BIAS *
         (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
-      const reliefWeight =
-        1 - smoothstep01((radius - RELIEF_FADE_START) / (RELIEF_FADE_END - RELIEF_FADE_START));
       for (let a = 0; a < SECTORS; a++) {
         const i = r * SECTORS + a;
         const vi = i * 3;
-        const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
-        const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-        const horizonY = this.terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
-        const rockWeight = smoothstep01(
-          (horizonY - this.terrain.baseHeight(absoluteX, absoluteZ, radius)) / ROCK_ALTITUDE,
-        );
-        heights[i] =
-          radius <= ROAD_UNDERLAY_RADIUS
-            ? this.beneathRoad(absoluteX, absoluteZ, horizonY - bias, bias)
-            : horizonY - bias;
+        const horizonY = horizon[i]!;
+        const rockWeight = smoothstep01((horizonY - base[i]!) / ROCK_ALTITUDE);
+        if (radius <= ROAD_UNDERLAY_RADIUS) {
+          const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
+          const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
+          heights[i] = this.beneathRoad(absoluteX, absoluteZ, horizonY - bias, bias);
+        } else {
+          heights[i] = horizonY - bias;
+        }
         colors[vi] = sandLinear.r + (rockLinear.r - sandLinear.r) * rockWeight;
         colors[vi + 1] = sandLinear.g + (rockLinear.g - sandLinear.g) * rockWeight;
         colors[vi + 2] = sandLinear.b + (rockLinear.b - sandLinear.b) * rockWeight;
       }
     }
-    const sample = { heights, colors, normals: this.groundNormalsFor(heights) };
-    this.groundSampleCache.set(key, sample);
-    return sample;
+    return { heights, colors, normals: this.groundNormalsFor(heights) };
+  }
+
+  /** Sends the current disc layout so a sample request is only four numbers. */
+  private publishLayout(): void {
+    if (this.disposed || !this.worker || this.groundLocalPositions === null) return;
+    const positions = this.groundLocalPositions.slice();
+    const radii = new Float32Array(this.radii);
+    const request: VistaWorkerRequest = {
+      type: 'layout',
+      layoutId: this.layoutId,
+      positions: positions.buffer as ArrayBuffer,
+      radii: radii.buffer as ArrayBuffer,
+    };
+    this.worker.postMessage(request, [request.positions, request.radii]);
+  }
+
+  /**
+   * Corners of the 3x3 cell block around the current one. Nine cells share sixteen
+   * corners, four of which are the current cell's, so a crossing in any direction —
+   * including straight back — finds its corners already sampled.
+   */
+  private queueNeighbourCorners(cellX: number, cellZ: number): void {
+    if (!this.worker) return;
+    this.prefetchQueue.length = 0;
+    const ox = this.origin.x;
+    const oz = this.origin.z;
+    for (let dz = -1; dz <= 2; dz++) {
+      for (let dx = -1; dx <= 2; dx++) {
+        const cornerX = (cellX + dx) * SAMPLE_CELL_SIZE;
+        const cornerZ = (cellZ + dz) * SAMPLE_CELL_SIZE;
+        if (this.groundSampleCache.has(`${cornerX + ox},${cornerZ + oz}`)) continue;
+        this.prefetchQueue.push({ cornerX, cornerZ });
+      }
+    }
+  }
+
+  /**
+   * Bounded LRU over cell corners. Sixteen is the 3x3 prefetch block, so a player
+   * driving back and forth over one boundary never re-samples.
+   */
+  private trimGroundSampleCache(): void {
+    while (this.groundSampleCache.size > 24) {
+      const oldest = this.groundSampleCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.groundSampleCache.delete(oldest);
+    }
   }
 
   private groundNormalsFor(heights: Float32Array): Float32Array {
     invariantLocalPositions(this.groundLocalPositions);
     if (!this.geometry) throw new Error('vista ground geometry is not initialized');
-    const samplePositions = this.groundLocalPositions.slice();
-    for (let i = 0; i < heights.length; i++) samplePositions[i * 3 + 1] = heights[i]!;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(samplePositions, 3));
-    geometry.setIndex(this.geometry.getIndex());
-    geometry.computeVertexNormals();
-    const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
-    const normals = new Float32Array(normal.array as Float32Array);
-    geometry.dispose();
-    return normals;
+    const positionCount = this.groundLocalPositions.length;
+    if (this.normalGeometry === null || this.normalPositions?.length !== positionCount) {
+      this.normalPositions = new Float32Array(positionCount);
+      this.normalGeometry?.dispose();
+      this.normalGeometry = new THREE.BufferGeometry();
+      this.normalGeometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(this.normalPositions, 3),
+      );
+      this.normalGeometry.setIndex(this.geometry.getIndex()!);
+    }
+    this.normalPositions.set(this.groundLocalPositions);
+    for (let i = 0; i < heights.length; i++) this.normalPositions[i * 3 + 1] = heights[i]!;
+    const position = this.normalGeometry.getAttribute('position') as THREE.BufferAttribute;
+    position.needsUpdate = true;
+    this.normalGeometry.computeVertexNormals();
+    const normal = this.normalGeometry.getAttribute('normal') as THREE.BufferAttribute;
+    return new Float32Array(normal.array as Float32Array);
   }
 
   /**
@@ -1273,15 +1521,23 @@ export class VistaMesh {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.worker?.terminate();
+    this.worker = null;
+    this.workerReady = false;
     this.scene.remove(this.mesh);
     this.scene.remove(this.mesaMesh);
     this.scene.remove(this.mesaSparkles);
     this.geometry?.dispose();
     this.mesaGeometry?.dispose();
+    this.normalGeometry?.dispose();
     this.mesaSparkleGeometry.dispose();
     this.mesaSparkleMaterial.dispose();
     this.geometry = null;
     this.mesaGeometry = null;
+    this.normalGeometry = null;
+    this.normalPositions = null;
     this.groundLocalPositions = null;
     this.groundSamples = null;
     this.groundSampleCache.clear();

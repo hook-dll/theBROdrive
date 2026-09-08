@@ -12,6 +12,8 @@ export class WorldWorkScheduler {
   private workMs = 0;
   private jobsRun = 0;
   private lastTag: string | null = null;
+  private frameWorstMs = 0;
+  private frameWorstTag: string | null = null;
 
   constructor(
     private readonly budgetMs = 3,
@@ -20,11 +22,19 @@ export class WorldWorkScheduler {
 
   beginFrame(frameId: number): void {
     if (frameId === this.activeFrame) return;
+    if (import.meta.env.DEV && Number.isFinite(this.activeFrame) && this.frameWorstMs > 0) {
+      console.debug(
+        `[perf] streaming frame=${this.activeFrame} work=${this.workMs.toFixed(2)}ms ` +
+        `worst=${this.frameWorstMs.toFixed(2)}ms job=${this.frameWorstTag ?? 'none'}`,
+      );
+    }
     this.activeFrame = frameId;
     this.worked = false;
     this.workMs = 0;
     this.jobsRun = 0;
     this.lastTag = null;
+    this.frameWorstMs = 0;
+    this.frameWorstTag = null;
   }
 
   tryRun(frameId: number, tag: string, work: () => void): boolean {
@@ -38,7 +48,12 @@ export class WorldWorkScheduler {
     try {
       work();
     } finally {
-      this.workMs += performance.now() - started;
+      const elapsed = performance.now() - started;
+      this.workMs += elapsed;
+      if (elapsed > this.frameWorstMs) {
+        this.frameWorstMs = elapsed;
+        this.frameWorstTag = tag;
+      }
     }
     return true;
   }
