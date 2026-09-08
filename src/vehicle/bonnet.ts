@@ -1,5 +1,6 @@
 import type { Item, PartItem } from '../items/items';
 import {
+  oilCapacity,
   variant,
   type BodyClass,
   type EngineSpec,
@@ -37,6 +38,34 @@ export function bonnetSlotFluid(cell: number): BonnetFluidChannel | null {
       return 'water';
     case 'fuel_tank':
       return 'fuel';
+    default:
+      return null;
+  }
+}
+
+/**
+ * What a container part holds and how much of it, whether or not it is fitted.
+ *
+ * A detached engine, radiator or tank keeps its fluid in `PartInstance.litres`
+ * (see parts/registry.ts), so a part lying on the workshop floor can be filled
+ * before it is bolted in. This resolves the same three capacities the fitted
+ * readouts use, from the part alone: the bonnet is not consulted, because there
+ * may not be one.
+ */
+export interface PartContainer {
+  readonly channel: BonnetFluidChannel;
+  readonly capacity: number;
+}
+
+export function partContainer(part: PartInstance): PartContainer | null {
+  const spec = variant(part.variantId);
+  switch (spec.kind) {
+    case 'engine':
+      return spec.engine ? { channel: 'oil', capacity: oilCapacity(spec.engine) } : null;
+    case 'radiator':
+      return spec.radiator ? { channel: 'water', capacity: spec.radiator.capacity } : null;
+    case 'fuel_tank':
+      return spec.capacity ? { channel: 'fuel', capacity: spec.capacity } : null;
     default:
       return null;
   }
@@ -161,15 +190,17 @@ export function destroyedEngineSpec(engine: EngineSpec): EngineSpec {
 export type EngineFailureReason = 'oil' | 'overheat';
 
 /**
- * Instant, unsurvivable engine failures for a RUNNING engine. Oil only.
+ * Whether a RUNNING engine is currently being damaged, and by what. Oil only here;
+ * heat is reported by `EngineCoolingSystem` through the same destruction path.
  *
- * Dry water used to be here beside it and destroyed the engine on the spot. It is
- * gone because the cooling system now models what actually happens: no water means
- * no heat rejection, the temperature runs away over the next half minute, the lamp
- * lights, power falls off, the engine stalls, and only then — if the player has
- * driven through all of it — does it seize (`EngineCoolingSystem`, vehicle/cooling.ts,
- * reports `overheat` through the same destruction path). Oil has no such gauge, so
- * running the sump dry stays immediate.
+ * This is a CONDITION, not a verdict. Neither cause kills an engine the moment it
+ * appears: the caller accumulates time under it (`Vehicle`'s oil-starvation timer,
+ * `SEIZE_SECONDS` for heat) and only destroys the block once the engine has been
+ * run like that for long enough to wreck it. Water is not listed at all — no water
+ * means no heat rejection, so it arrives as overheating, with a gauge and a lamp to
+ * warn about it on the way.
+ *
+ * A destroyed engine reports nothing: there is no second failure to find.
  */
 export function engineFailureReason(
   cells: readonly (Item | null)[],

@@ -303,6 +303,14 @@ export type WorldDelta =
   | { t: 'part_drop'; part: PartInstance; x: number; y: number; z: number }
   | { t: 'part_pickup'; partId: string }
   | { t: 'part_condition'; partId: string; dirt: number; rust: number }
+  /**
+   * Fluid poured into a container that is NOT fitted to a car: a tank, radiator or
+   * engine lying in the world. The level lives on the part (`PartInstance.litres`)
+   * and comes back out through the `car_bonnet` transfer when it is installed.
+   */
+  | { t: 'loose_part_fluid'; partId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
+  /** Fluid poured into a can lying in the world. */
+  | { t: 'loose_item_fluid'; itemId: string; litres: number }
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
   | { t: 'poi_looted'; poiIndex: number }
@@ -721,6 +729,22 @@ export class GameWorld {
             }
           }
         }
+        break;
+      }
+      case 'loose_part_fluid': {
+        const loose = s.looseParts[delta.partId];
+        if (!loose) break;
+        loose.part.litres = delta.litres;
+        // A dry container records no fuel kind, exactly like a dry car tank: the
+        // next fluid in decides what it is holding.
+        if (delta.fuelKind !== undefined) {
+          loose.part.fuelKind = delta.litres > 0 ? delta.fuelKind : null;
+        }
+        break;
+      }
+      case 'loose_item_fluid': {
+        const loose = s.looseItems[delta.itemId];
+        if (loose?.item.type === 'fluid_can') loose.item.litres = delta.litres;
         break;
       }
       case 'item_drop':
