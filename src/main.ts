@@ -1937,9 +1937,14 @@ async function boot(): Promise<void> {
 }
 
 
-const launch = new URLSearchParams(window.location.search).has('poi-gallery')
+// Dev scenes are separate entry points reached by query string, so their code is a
+// dynamic import the production bundle drops rather than something the game carries.
+const query = new URLSearchParams(window.location.search);
+const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
-  : boot();
+  : query.has('playground')
+    ? import('./playground').then(({ bootPlayground }) => bootPlayground())
+    : boot();
 
 void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
