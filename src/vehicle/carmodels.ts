@@ -482,6 +482,11 @@ export interface CarModelDef {
    * centre of mass and wheel mounts remain unchanged.
    */
   readonly visualRideLiftWheelFraction?: number;
+  /** Authored rolling radius in metres when the source wheel is not factory-sized. */
+  readonly wheelRadius?: number;
+  /** Factory wheel-centre track in metres; omitted to retain the source geometry. */
+  readonly frontWheelTrack?: number;
+  readonly rearWheelTrack?: number;
   /**
    * Set when the model carries its own wheels but under the modeller's names
    * (`Wheel_1`, `Cylinder006`, ...). The loader then finds the four discs by shape
@@ -632,6 +637,9 @@ interface SovietSpec {
   readonly suspension: SuspensionTuning;
   readonly storageCells?: number;
   readonly visualRideLiftWheelFraction?: number;
+  readonly wheelRadius?: number;
+  readonly frontWheelTrack?: number;
+  readonly rearWheelTrack?: number;
 }
 
 
@@ -885,6 +893,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.62,
     dragArea: 0.72,
     suspension: SUSP_SAMARA,
+    wheelRadius: 0.285,
     storageCells: 2,
   },
   {
@@ -904,6 +913,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.615,
     dragArea: 0.72,
     suspension: SUSP_SAMARA,
+    wheelRadius: 0.285,
     storageCells: 3,
   },
   {
@@ -924,6 +934,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.6,
     dragArea: 0.7,
     suspension: SUSP_SAMARA,
+    wheelRadius: 0.285,
   },
   {
     // VAZ-2121 Niva: 1.6, 80 hp, permanent four-wheel drive through a locking centre
@@ -946,6 +957,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.53,
     dragArea: 1.3,
     suspension: SUSP_NIVA,
+    frontWheelTrack: 1.43,
+    rearWheelTrack: 1.4,
     storageCells: 4,
   },
   {
@@ -966,6 +979,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.52,
     dragArea: 1.2,
     suspension: SUSP_NIVA,
+    wheelRadius: 0.343,
+    frontWheelTrack: 1.43,
+    rearWheelTrack: 1.42,
     storageCells: 6,
   },
 ];
@@ -1052,6 +1068,9 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   visualRideLiftWheelFraction:
     spec.visualRideLiftWheelFraction ??
     (spec.file.startsWith('vz') ? VAZ_VISUAL_RIDE_LIFT : undefined),
+  wheelRadius: spec.wheelRadius,
+  frontWheelTrack: spec.frontWheelTrack,
+  rearWheelTrack: spec.rearWheelTrack,
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -1255,6 +1274,9 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
+  wheelRadius: e.wheelRadius,
+  frontWheelTrack: e.frontWheelTrack,
+  rearWheelTrack: e.rearWheelTrack,
   detectWheels: e.detectWheels,
   wheelNodes: e.wheelNodes,
   bodyClass: e.bodyClass,

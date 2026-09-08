@@ -584,9 +584,9 @@ body.is-cinematic #ui {
   pointer-events: none;
 }
 
-/* Keep the inventory clear of the enlarged, taller driving dashboard. */
+/* The carried slots are hand-state; the dashboard replaces them while driving. */
 .hud-driving:not(.is-hidden) ~ .hud-inventory {
-  bottom: 180px;
+  display: none;
 }
 
 @media (pointer: coarse) {
@@ -595,9 +595,6 @@ body.is-cinematic #ui {
     transform: translateX(-50%) scale(0.375);
   }
 
-  .hud-driving:not(.is-hidden) ~ .hud-inventory {
-    bottom: 82px;
-  }
 }
 
 .hud-inv-items {
