@@ -289,9 +289,9 @@ function cloneCarBodyPaintMaterials(
 }
 
 /**
- * Gives static cars independent paint without the dynamic body-wear shader. Parked
- * cars never accumulate dirt or scratches; paying that FBM cost for each one can
- * saturate an integrated GPU as POIs enter the scene.
+ * Gives static cars independent paint without dynamic body-dirt shading. Parked
+ * cars never accumulate dirt; paying that FBM cost for each one can saturate an
+ * integrated GPU as POIs enter the scene.
  */
 function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
   if (!def.paintStyle) return;

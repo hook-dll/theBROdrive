@@ -6,20 +6,6 @@ import materials from '../config/materials.json';
 export interface MaterialsConfig {
   readonly paintRoughness: number;
   readonly paintMetalness: number;
-  readonly rustRoughness: number;
-  readonly rustMetalness: number;
-  readonly dirtRoughness: number;
-  readonly dentRoughness: number;
-  readonly dentRoughnessStrength: number;
-  readonly dentCoreMetalness: number;
-  readonly dentCoreMetalnessStrength: number;
-  readonly dentRimMetalness: number;
-  readonly dentRimMetalnessStrength: number;
-  readonly exposedMetalRoughness: number;
-  readonly exposedMetalRoughnessStrength: number;
-  readonly exposedMetalness: number;
-  readonly exposedMetalnessStrength: number;
-  readonly dentNormalDepth: number;
 }
 export interface GameplayConfig {
   readonly dayCycleMinutes: number;

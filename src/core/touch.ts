@@ -1,9 +1,9 @@
 /**
- * Wheel-and-pedal touch controls for phones and tablets.
+ * Context-aware touch controls for phones and tablets.
  *
- * The left wheel supplies steering or sideways movement. The two right pedals
- * supply forward and backward movement. A drag anywhere outside the controls moves
- * the camera.
+ * Pedals supply forward/backward movement in either mode. The left thumb gets a
+ * steering wheel in a car and a camera-look joystick on foot; open canvas remains
+ * an equivalent free-look surface. Face buttons mirror their printed keyboard keys.
  */
 
 /** Ignore tiny wheel drags around its resting position. */
@@ -13,15 +13,17 @@ const LOOK_RADIANS_PER_PIXEL = 0.0035;
 /** Wheel-notch equivalent emitted per second at full zoom-fader deflection. */
 const ZOOM_SPEED = 1.2;
 
-/** Face buttons mirror the keyboard letters printed on them. */
 type TouchButton =
+  | 'useHeld'
   | 'interact'
-  | 'mount'
   | 'camera'
   | 'recenter'
   | 'drop'
+  | 'removeWearable'
   | 'lights'
-  | 'radioNext';
+  | 'autopilot'
+  | 'handbrake'
+  | 'cinema';
 
 export interface TouchState {
   /** True once a touch has been seen and the overlay is live. */
@@ -32,16 +34,19 @@ export interface TouchState {
   readonly backward: number;
   /** Steering-wheel axis, -1..1. */
   readonly steer: number;
-  /** True once touch controls own the steering axis. */
+  /** True only while touch controls display and own the driving wheel. */
   readonly steeringActive: boolean;
   /** One-shot taps, cleared by `consumeTaps`. */
   interact: boolean;
   mount: boolean;
+  useHeld: boolean;
   camera: boolean;
   recenter: boolean;
   drop: boolean;
+  removeWearable: boolean;
   lights: boolean;
-  radioNext: boolean;
+  autopilot: boolean;
+  handbrake: boolean;
 }
 
 interface TouchHooks {
@@ -49,26 +54,34 @@ interface TouchHooks {
   readonly pause: () => void;
   /** Fullscreen button: same in-page fullscreen mode as the plus key. */
   readonly fullscreen: () => void;
+  /** Cinema viewport: same letterbox toggle as the minus key. */
+  readonly cinema: () => void;
 }
 
 type DrivePedal = 'forward' | 'backward';
+type TouchMode = 'foot' | 'drive';
 
 interface ButtonSpec {
   readonly id: TouchButton;
   readonly key: string;
   readonly label: string;
+  readonly mode: TouchMode;
   readonly side: 'left' | 'right';
   readonly position: 'top' | 'lower-left' | 'lower-right' | 'bottom';
 }
 
 const BUTTONS: readonly ButtonSpec[] = [
-  { id: 'drop', key: 'Q', label: 'Drop item', side: 'left', position: 'top' },
-  { id: 'radioNext', key: 'T', label: 'Next radio station', side: 'left', position: 'lower-left' },
-  { id: 'lights', key: 'L', label: 'Cycle headlights', side: 'left', position: 'lower-right' },
-  { id: 'interact', key: 'E', label: 'Interact / enter / exit', side: 'right', position: 'top' },
-  { id: 'mount', key: 'F', label: 'Pick up / mount', side: 'right', position: 'lower-left' },
-  { id: 'camera', key: 'C', label: 'Toggle hood / chase camera', side: 'right', position: 'lower-right' },
-  { id: 'recenter', key: 'V', label: 'Recenter view', side: 'right', position: 'bottom' },
+  { id: 'useHeld', key: 'E', label: 'Use held item', mode: 'foot', side: 'left', position: 'top' },
+  { id: 'interact', key: 'F', label: 'Enter / exit vehicle', mode: 'foot', side: 'left', position: 'lower-left' },
+  { id: 'drop', key: 'Q', label: 'Drop item', mode: 'foot', side: 'left', position: 'lower-right' },
+  { id: 'removeWearable', key: 'G', label: 'Remove worn item', mode: 'foot', side: 'left', position: 'bottom' },
+  { id: 'camera', key: 'C', label: 'Toggle hood / chase camera', mode: 'drive', side: 'left', position: 'top' },
+  { id: 'recenter', key: 'V', label: 'Recenter view', mode: 'drive', side: 'left', position: 'lower-left' },
+  { id: 'lights', key: 'L', label: 'Cycle headlights', mode: 'drive', side: 'left', position: 'lower-right' },
+  { id: 'interact', key: 'F', label: 'Exit vehicle', mode: 'drive', side: 'right', position: 'top' },
+  { id: 'autopilot', key: 'P', label: 'Cycle autopilot', mode: 'drive', side: 'right', position: 'lower-left' },
+  { id: 'handbrake', key: 'SPACE', label: 'Toggle handbrake', mode: 'drive', side: 'right', position: 'lower-right' },
+  { id: 'cinema', key: '-', label: 'Toggle cinema viewport', mode: 'drive', side: 'right', position: 'bottom' },
 ];
 
 export class TouchControls {
@@ -82,6 +95,13 @@ export class TouchControls {
   private wheelRim: HTMLElement | null = null;
   private wheelTouchId: number | null = null;
   private wheelStartX = 0;
+  private lookStick: HTMLElement | null = null;
+  private lookStickThumb: HTMLElement | null = null;
+  private lookStickTouchId: number | null = null;
+  private lookStickStartX = 0;
+  private lookStickStartY = 0;
+  private lookStickLastX = 0;
+  private lookStickLastY = 0;
   private forwardPedal: HTMLButtonElement | null = null;
   private backwardPedal: HTMLButtonElement | null = null;
   private forwardTouchId: number | null = null;
@@ -94,6 +114,8 @@ export class TouchControls {
   private lookYaw = 0;
   private lookPitch = 0;
   private zoomAxis = 0;
+  private driving = false;
+  private zoomAvailable = false;
 
   private readonly state: TouchState & {
     active: boolean;
@@ -101,13 +123,6 @@ export class TouchControls {
     backward: number;
     steer: number;
     steeringActive: boolean;
-    interact: boolean;
-    mount: boolean;
-    camera: boolean;
-    recenter: boolean;
-    drop: boolean;
-    lights: boolean;
-    radioNext: boolean;
   } = {
     active: false,
     forward: 0,
@@ -116,11 +131,14 @@ export class TouchControls {
     steeringActive: false,
     interact: false,
     mount: false,
+    useHeld: false,
     camera: false,
     recenter: false,
     drop: false,
+    removeWearable: false,
     lights: false,
-    radioNext: false,
+    autopilot: false,
+    handbrake: false,
   };
 
   constructor(root: HTMLElement, canvas: HTMLCanvasElement, hooks: TouchHooks) {
@@ -152,11 +170,34 @@ export class TouchControls {
     return this.state;
   }
 
+  /** Switches the visible controls without rebuilding the overlay or its listeners. */
+  setDriving(driving: boolean): void {
+    if (driving === this.driving) return;
+    this.driving = driving;
+    this.releaseDriveControls();
+    this.releaseLookStick();
+    this.state.steeringActive = this.state.active && driving;
+    this.overlay?.classList.toggle('is-driving', driving);
+    this.overlay?.classList.toggle('has-zoom', driving && this.zoomAvailable);
+    if (!driving) this.releaseZoomFader();
+    this.updateHint();
+  }
+
+  /** The distance fader belongs exclusively to the external driving camera. */
+  setZoomAvailable(available: boolean): void {
+    if (available === this.zoomAvailable) return;
+    this.zoomAvailable = available;
+    const visible = this.driving && available;
+    this.overlay?.classList.toggle('has-zoom', visible);
+    if (!visible) this.releaseZoomFader();
+  }
+
   /** Release all analogue touch axes when the tab returns. */
   private onVisibility = (): void => {
     if (document.visibilityState !== 'visible') return;
     this.releaseDriveControls();
     this.releaseCameraDrag();
+    this.releaseLookStick();
     this.releaseZoomFader();
   };
 
@@ -177,28 +218,37 @@ export class TouchControls {
   consumeTaps(): {
     interact: boolean;
     mount: boolean;
+    useHeld: boolean;
     camera: boolean;
     recenter: boolean;
     drop: boolean;
+    removeWearable: boolean;
     lights: boolean;
-    radioNext: boolean;
+    autopilot: boolean;
+    handbrake: boolean;
   } {
     const taps = {
       interact: this.state.interact,
       mount: this.state.mount,
+      useHeld: this.state.useHeld,
       camera: this.state.camera,
       recenter: this.state.recenter,
       drop: this.state.drop,
+      removeWearable: this.state.removeWearable,
       lights: this.state.lights,
-      radioNext: this.state.radioNext,
+      autopilot: this.state.autopilot,
+      handbrake: this.state.handbrake,
     };
     this.state.interact = false;
     this.state.mount = false;
+    this.state.useHeld = false;
     this.state.camera = false;
     this.state.recenter = false;
     this.state.drop = false;
+    this.state.removeWearable = false;
     this.state.lights = false;
-    this.state.radioNext = false;
+    this.state.autopilot = false;
+    this.state.handbrake = false;
     return taps;
   }
 
@@ -276,6 +326,53 @@ export class TouchControls {
     control.addEventListener('touchcancel', release, { passive: false });
   }
 
+  private bindLookStick(control: HTMLElement, thumb: HTMLElement): void {
+    control.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.lookStickTouchId !== null) return;
+        const touch = e.changedTouches.item(0);
+        if (!touch) return;
+        this.lookStickTouchId = touch.identifier;
+        this.lookStickStartX = this.lookStickLastX = touch.clientX;
+        this.lookStickStartY = this.lookStickLastY = touch.clientY;
+        control.classList.add('is-active');
+      },
+      { passive: false },
+    );
+    control.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const touch = this.touchWithId(e.changedTouches, this.lookStickTouchId);
+        if (!touch) return;
+        this.lookYaw += (touch.clientX - this.lookStickLastX) * LOOK_RADIANS_PER_PIXEL;
+        this.lookPitch -= (touch.clientY - this.lookStickLastY) * LOOK_RADIANS_PER_PIXEL;
+        this.lookStickLastX = touch.clientX;
+        this.lookStickLastY = touch.clientY;
+        const radius = Math.max(1, control.getBoundingClientRect().width * 0.31);
+        const dx = touch.clientX - this.lookStickStartX;
+        const dy = touch.clientY - this.lookStickStartY;
+        const distance = Math.hypot(dx, dy);
+        const scale = distance > radius ? radius / distance : 1;
+        thumb.style.transform =
+          `translate(-50%, -50%) translate(${dx * scale}px, ${dy * scale}px)`;
+      },
+      { passive: false },
+    );
+    const release = (e: TouchEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.touchWithId(e.changedTouches, this.lookStickTouchId)) return;
+      this.releaseLookStick();
+    };
+    control.addEventListener('touchend', release, { passive: false });
+    control.addEventListener('touchcancel', release, { passive: false });
+  }
+
   private bindPedal(button: HTMLButtonElement, pedal: DrivePedal): void {
     button.addEventListener(
       'touchstart',
@@ -327,6 +424,12 @@ export class TouchControls {
     this.wheelRim?.style.removeProperty('transform');
   }
 
+  private releaseLookStick(): void {
+    this.lookStickTouchId = null;
+    this.lookStick?.classList.remove('is-active');
+    this.lookStickThumb?.style.removeProperty('transform');
+  }
+
   private releaseDriveControls(): void {
     this.releaseWheel();
     this.forwardTouchId = null;
@@ -350,14 +453,16 @@ export class TouchControls {
   private activate(): void {
     if (this.state.active) return;
     this.state.active = true;
-    this.state.steeringActive = true;
+    this.state.steeringActive = this.driving;
     this.buildOverlay();
   }
 
   private buildOverlay(): void {
     if (this.overlay) return;
     const overlay = document.createElement('div');
-    overlay.className = 'touch-ui';
+    overlay.className =
+      `touch-ui${this.driving ? ' is-driving' : ''}` +
+      `${this.driving && this.zoomAvailable ? ' has-zoom' : ''}`;
 
     const systems = document.createElement('div');
     systems.className = 'touch-system-row';
@@ -400,6 +505,11 @@ export class TouchControls {
     this.wheelRim = wheel.rim;
     overlay.appendChild(wheel.control);
 
+    const lookStick = this.makeLookStick();
+    this.lookStick = lookStick.control;
+    this.lookStickThumb = lookStick.thumb;
+    overlay.appendChild(lookStick.control);
+
     const pedals = document.createElement('div');
     pedals.className = 'touch-pedals';
     this.backwardPedal = this.makePedal('backward', 'BACK / REV', '▼');
@@ -414,8 +524,8 @@ export class TouchControls {
 
     this.hint = document.createElement('div');
     this.hint.className = 'touch-hint';
-    this.hint.textContent = 'wheel: steer · pedals: forward / back · drag screen: look';
     overlay.appendChild(this.hint);
+    this.updateHint();
     window.setTimeout(() => this.hint?.classList.add('is-faded'), 5000);
 
     this.root.appendChild(overlay);
@@ -436,6 +546,17 @@ export class TouchControls {
     control.appendChild(rim);
     this.bindWheel(control, rim);
     return { control, rim };
+  }
+
+  private makeLookStick(): { control: HTMLElement; thumb: HTMLElement } {
+    const control = document.createElement('div');
+    control.className = 'touch-look-stick';
+    control.setAttribute('aria-label', 'Camera look joystick');
+    const thumb = document.createElement('div');
+    thumb.className = 'touch-look-stick-thumb';
+    control.appendChild(thumb);
+    this.bindLookStick(control, thumb);
+    return { control, thumb };
   }
 
   private makePedal(pedal: DrivePedal, label: string, glyph: string): HTMLButtonElement {
@@ -521,7 +642,9 @@ export class TouchControls {
   private makeButton(spec: ButtonSpec): HTMLButtonElement {
     const button = document.createElement('button');
     button.className =
-      `touch-btn touch-btn--${spec.position}${spec.id === 'interact' ? ' touch-btn--primary' : ''}`;
+      `touch-btn touch-btn--${spec.position} touch-btn--${spec.mode}` +
+      `${spec.id === 'interact' ? ' touch-btn--primary' : ''}` +
+      `${spec.key.length > 1 ? ' touch-btn--wide-label' : ''}`;
     button.textContent = spec.key;
     button.type = 'button';
     button.setAttribute('aria-label', spec.label);
@@ -567,7 +690,21 @@ export class TouchControls {
   }
 
   private press(id: TouchButton): void {
+    if (id === 'cinema') {
+      this.hooks.cinema();
+      return;
+    }
     this.state[id] = true;
+    // Keyboard F owns both physical interaction paths. Mirroring both preserves its
+    // context-sensitive enter/exit versus pick-up/mount behavior on touch.
+    if (id === 'interact') this.state.mount = true;
+  }
+
+  private updateHint(): void {
+    if (!this.hint) return;
+    this.hint.textContent = this.driving
+      ? 'wheel: steer · pedals: forward / back · drag screen: look'
+      : 'joystick / drag screen: look · pedals: forward / back';
   }
 
 

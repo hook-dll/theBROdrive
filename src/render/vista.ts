@@ -89,17 +89,16 @@ const BIAS_FADE = 480;
 const ROCK_ALTITUDE = 260;
 
 /**
- * Sparse middle-distance landmarks. Candidate positions and full heights are absolute
- * world properties. A mesa starts dissolving once the camera comes within 500 metres
- * of its footprint; that transition is irreversible for the rest of the session.
- * The outer burial band remains only to prevent residency-edge popping.
+ * world properties. A mesa starts dissolving once the camera comes within one
+ * kilometre of its footprint; that transition is irreversible for the rest of the
+ * session. The outer burial band remains only to prevent residency-edge popping.
  */
 const MESA_CELL_SIZE = 2200;
 const MESA_OCCUPANCY = 0.18;
 /** Clear ground kept between the camera and a mesa when its dissolve begins. */
-const MESA_DISSOLVE_CLEARANCE = 500;
-/** A slow, conspicuous disappearance that still begins with 500 metres of clearance. */
-const MESA_DISSOLVE_SECONDS = 18;
+const MESA_DISSOLVE_CLEARANCE = 1000;
+/** A slow, conspicuous disappearance that begins with one kilometre of clearance. */
+const MESA_DISSOLVE_SECONDS = 36;
 const MESA_MAX_DISTANCE = 18_000;
 const MESA_OUTER_FADE = 2000;
 const MESA_RESIDENCY_MARGIN = SAMPLE_CELL_SIZE * 2;
@@ -119,52 +118,7 @@ const MESA_RINGS = [
   { radius: 0.39, height: 1 },
 ] as const;
 
-/**
- * One fixed, tiny point pool carries every active mesa dissolve. It adds one draw call
- * only while visible and uploads 1.5 KiB per frame at capacity; no mote objects or
- * transient arrays are created.
- */
-const MESA_SPARKLE_CAPACITY = 64;
-const MESA_SPARKLE_VISIBLE_MESAS = 4;
-const MESA_SPARKLE_VERTEX = /* glsl */ `
-attribute float aSize;
-attribute float aAlpha;
-attribute float aTint;
-varying float vAlpha;
-varying float vTint;
 
-void main() {
-  vAlpha = aAlpha;
-  vTint = aTint;
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  // Pull the glint a fraction toward the eye: enough to avoid coplanar flicker,
-  // nowhere near enough to reveal a point sampled from the mesa's far side.
-  mvPosition.z += 0.35;
-  gl_PointSize = aSize;
-  gl_Position = projectionMatrix * mvPosition;
-}
-`;
-const MESA_SPARKLE_FRAGMENT = /* glsl */ `
-varying float vAlpha;
-varying float vTint;
-
-void main() {
-  vec2 p = abs(gl_PointCoord * 2.0 - 1.0);
-  float radius = length(p);
-  float core = 1.0 - smoothstep(0.08, 0.38, radius);
-  float ray = (1.0 - smoothstep(0.035, 0.16, min(p.x, p.y)))
-    * (1.0 - smoothstep(0.45, 1.0, max(p.x, p.y)));
-  float shape = max(core, ray * 0.72);
-  float alpha = shape * vAlpha;
-  if (alpha < 0.02) discard;
-  vec3 ice = vec3(0.36, 0.82, 1.0);
-  vec3 gold = vec3(1.0, 0.68, 0.18);
-  vec3 tint = mix(ice, gold, vTint);
-  gl_FragColor = vec4(mix(tint, vec3(1.0), core * 0.7) * (1.5 + core * 1.5), alpha);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-}
-`;
 
 type GroundSample = {
   heights: Float32Array;
@@ -226,6 +180,7 @@ const MESA_MATERIAL = applyComicShading(
   },
 );
 
+
 // Same authored shading as streamed terrain, used only where both terrain systems
 // overlap. It draws colour but not depth, so the fine tiles win without corrupting
 // the depth of the distant vista, mesas, fog, or the post-process.
@@ -243,6 +198,7 @@ const VISTA_OVERLAP_MATERIAL = applyComicShading(
     spotlightNormals: 'smooth',
   },
 );
+
 
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -323,11 +279,6 @@ function renderedGroundHeightAt(
 export class VistaMesh {
   private readonly mesh: THREE.Mesh;
   private readonly mesaMesh: THREE.Mesh;
-  private readonly mesaSparkleGeometry = new THREE.BufferGeometry();
-  private readonly mesaSparkleData = new Float32Array(MESA_SPARKLE_CAPACITY * 6);
-  private readonly mesaSparkleBuffer = new THREE.InterleavedBuffer(this.mesaSparkleData, 6);
-  private readonly mesaSparkleMaterial: THREE.ShaderMaterial;
-  private readonly mesaSparkles: THREE.Points;
   private geometry: THREE.BufferGeometry | null = null;
   private mesaGeometry: THREE.BufferGeometry | null = null;
   /** Reused scratch geometry for normal generation; cell loads must not allocate it. */
@@ -372,7 +323,6 @@ export class VistaMesh {
   private readonly dissolvingMesas = new Map<string, number>();
   private readonly retiredMesas = new Set<string>();
   private mesaVisibleOuter = 0;
-  private mesaSparkleTime = 0;
 
   /** Radius of the disc, metres. Set by the view-distance setting. */
   private outerRadius = 0;
@@ -406,36 +356,6 @@ export class VistaMesh {
     );
     this.mesh.renderOrder = -1;
     this.mesaMesh = new THREE.Mesh(new THREE.BufferGeometry(), MESA_MATERIAL);
-    this.mesaSparkleBuffer.setUsage(THREE.DynamicDrawUsage);
-    this.mesaSparkleGeometry.setAttribute(
-      'position',
-      new THREE.InterleavedBufferAttribute(this.mesaSparkleBuffer, 3, 0),
-    );
-    this.mesaSparkleGeometry.setAttribute(
-      'aSize',
-      new THREE.InterleavedBufferAttribute(this.mesaSparkleBuffer, 1, 3),
-    );
-    this.mesaSparkleGeometry.setAttribute(
-      'aAlpha',
-      new THREE.InterleavedBufferAttribute(this.mesaSparkleBuffer, 1, 4),
-    );
-    this.mesaSparkleGeometry.setAttribute(
-      'aTint',
-      new THREE.InterleavedBufferAttribute(this.mesaSparkleBuffer, 1, 5),
-    );
-    this.mesaSparkleGeometry.setDrawRange(0, 0);
-    this.mesaSparkleMaterial = new THREE.ShaderMaterial({
-      vertexShader: MESA_SPARKLE_VERTEX,
-      fragmentShader: MESA_SPARKLE_FRAGMENT,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      toneMapped: false,
-    });
-    this.mesaSparkles = new THREE.Points(this.mesaSparkleGeometry, this.mesaSparkleMaterial);
-    this.mesaSparkles.frustumCulled = false;
-    this.mesaSparkles.visible = false;
-    scene.add(this.mesaSparkles);
     // Draw mesas before both vista bands. The colour-only inner vista can then cover
     // mesa fragments that are behind its ground without writing the overlap depth that
     // would prevent the finer player-centred tiles from replacing it.
@@ -596,10 +516,7 @@ export class VistaMesh {
    */
   update(cameraX: number, cameraZ: number, s: number, frameDt: number): void {
     this.advanceMesaDissolves(frameDt);
-    if (this.outerRadius <= 0) {
-      this.mesaSparkles.visible = false;
-      return;
-    }
+    if (this.outerRadius <= 0) return;
     this.ensureGroundGeometry();
     const cellX = Math.floor(cameraX / SAMPLE_CELL_SIZE);
     const cellZ = Math.floor(cameraZ / SAMPLE_CELL_SIZE);
@@ -619,13 +536,11 @@ export class VistaMesh {
     this.updateGroundPositions(cameraX, cameraZ);
     this.updateMesaPositions(cameraX, cameraZ);
     if (cellChanged) this.refreshMesaNormals();
-    this.updateMesaSparkles(cameraX, cameraZ);
   }
 
   private advanceMesaDissolves(frameDt: number): void {
     const elapsed = Math.max(0, frameDt);
     if (elapsed === 0) return;
-    this.mesaSparkleTime += elapsed;
     for (const [key, remaining] of this.dissolvingMesas) {
       const next = remaining - elapsed;
       if (next > 0) {
@@ -755,6 +670,16 @@ export class VistaMesh {
           base + this.mesaHeightOffset[i]! * farWeight - (1 - farWeight) * MESA_BURY_DEPTH;
       }
       if (dissolveWeight === candidate.lastDissolveWeight) continue;
+      // Re-uploading the dynamic RGBA buffer every rendered frame caused some
+      // drivers to synchronize the whole scene until the dissolve ended. At this
+      // 36-second duration the small alpha steps remain visually continuous.
+      if (
+        dissolveWeight > 0 &&
+        dissolveWeight < 1 &&
+        Math.abs(dissolveWeight - candidate.lastDissolveWeight) < 0.015
+      ) {
+        continue;
+      }
       candidate.lastDissolveWeight = dissolveWeight;
       for (let i = candidate.firstVertex; i < end; i++) rgba[i * 4 + 3] = dissolveWeight;
       // Candidate vertices are contiguous after toNonIndexed(). Upload only the
@@ -767,90 +692,7 @@ export class VistaMesh {
     if (colorChanged) color.needsUpdate = true;
   }
 
-  private updateMesaSparkles(cameraX: number, cameraZ: number): void {
-    if (!this.mesaGeometry || !this.mesaHeightOffset) {
-      this.mesaSparkles.visible = false;
-      return;
-    }
-    let activeCount = 0;
-    for (const candidate of this.mesaCandidates) {
-      if (this.dissolvingMesas.has(candidate.key)) activeCount++;
-    }
-    const shownCount = Math.min(activeCount, MESA_SPARKLE_VISIBLE_MESAS);
-    if (shownCount === 0) {
-      this.mesaSparkleGeometry.setDrawRange(0, 0);
-      this.mesaSparkles.visible = false;
-      return;
-    }
 
-    const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
-    const xyz = position.array as Float32Array;
-    const normal = this.mesaGeometry.getAttribute('normal') as THREE.BufferAttribute;
-    const perCandidate = Math.floor(MESA_SPARKLE_CAPACITY / shownCount);
-    let slot = 0;
-    let shown = 0;
-    for (const candidate of this.mesaCandidates) {
-      const remaining = this.dissolvingMesas.get(candidate.key);
-      if (remaining === undefined || shown >= shownCount) continue;
-      shown++;
-      const dissolveProgress = 1 - remaining / MESA_DISSOLVE_SECONDS;
-      const envelope =
-        smoothstep01(dissolveProgress / 0.08) *
-        smoothstep01((1 - dissolveProgress) / 0.1);
-      for (let mote = 0; mote < perCandidate && slot < MESA_SPARKLE_CAPACITY; mote++, slot++) {
-        const h0 = hashUnit3(
-          this.road.seed ^ (MESA_TAG + 500 + mote * 4),
-          candidate.cellX,
-          candidate.cellZ,
-        );
-        const h1 = hashUnit3(
-          this.road.seed ^ (MESA_TAG + 501 + mote * 4),
-          candidate.cellX,
-          candidate.cellZ,
-        );
-        const h2 = hashUnit3(
-          this.road.seed ^ (MESA_TAG + 502 + mote * 4),
-          candidate.cellX,
-          candidate.cellZ,
-        );
-        let sourceVertex =
-          candidate.firstVertex +
-          Math.min(candidate.vertexCount - 1, Math.floor(h0 * candidate.vertexCount));
-        // Prefer a raised, camera-facing surface. This keeps the tiny pool legible:
-        // points hidden on the back wall would cost the same and contribute nothing.
-        for (let probe = 1; probe < 8; probe++) {
-          const source = sourceVertex * 3;
-          const facing =
-            normal.getX(sourceVertex) * (cameraX - xyz[source]!) +
-            normal.getZ(sourceVertex) * (cameraZ - xyz[source + 2]!);
-          if (this.mesaHeightOffset[sourceVertex]! > 0 && facing > 0) break;
-          const alternate = hashUnit3(
-            this.road.seed ^ (MESA_TAG + 503 + mote * 8 + probe),
-            candidate.cellX,
-            candidate.cellZ,
-          );
-          sourceVertex =
-            candidate.firstVertex +
-            Math.min(candidate.vertexCount - 1, Math.floor(alternate * candidate.vertexCount));
-        }
-        const phase = (this.mesaSparkleTime * (0.4 + h2 * 0.55) + h1) % 1;
-        const lift = phase * (12 + h2 * 30);
-        const angle = h1 * Math.PI * 2;
-        const source = sourceVertex * 3;
-        const target = slot * 6;
-        this.mesaSparkleData[target] = xyz[source]! + Math.cos(angle) * phase * 8;
-        this.mesaSparkleData[target + 1] = xyz[source + 1]! + 3 + lift;
-        this.mesaSparkleData[target + 2] = xyz[source + 2]! + Math.sin(angle) * phase * 8;
-        this.mesaSparkleData[target + 3] = 8 + (1 - phase) * (8 + h0 * 5);
-        const pulse = Math.sin(phase * Math.PI);
-        this.mesaSparkleData[target + 4] = envelope * (0.35 + pulse * pulse * 0.65);
-        this.mesaSparkleData[target + 5] = h2;
-      }
-    }
-    this.mesaSparkleGeometry.setDrawRange(0, slot);
-    this.mesaSparkleBuffer.needsUpdate = true;
-    this.mesaSparkles.visible = slot > 0;
-  }
   private refreshMesaNormals(): void {
     if (!this.mesaGeometry) return;
     this.mesaGeometry.computeVertexNormals();
@@ -1528,12 +1370,9 @@ export class VistaMesh {
     this.workerReady = false;
     this.scene.remove(this.mesh);
     this.scene.remove(this.mesaMesh);
-    this.scene.remove(this.mesaSparkles);
     this.geometry?.dispose();
     this.mesaGeometry?.dispose();
     this.normalGeometry?.dispose();
-    this.mesaSparkleGeometry.dispose();
-    this.mesaSparkleMaterial.dispose();
     this.geometry = null;
     this.mesaGeometry = null;
     this.normalGeometry = null;

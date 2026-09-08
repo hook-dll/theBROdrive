@@ -389,13 +389,9 @@ async function boot(): Promise<void> {
   const vehicles = new Map<string, Vehicle>();
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
   const loadingModels = new Set<string>();
-  // Cosmetic uniforms are expensive to write: setCarBodyCondition traverses every
-  // mesh in the vehicle. The scalar accumulators and the bounded damage tail provide
-  // a stable dirty signature even though the damage array is mutated in place.
-  const appliedBodyCondition = new WeakMap<
-    Vehicle,
-    { dirt: number; scratches: number; damageLength: number; damageLast: unknown }
-  >();
+  // Body dirt is the only dynamic shell material input. Cache its last value so
+  // rendering does not traverse every mesh when the condition is unchanged.
+  const appliedBodyDirt = new WeakMap<Vehicle, number>();
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   const modelWarmups = new Map<string, Promise<void>>();
   const materializeVehicle = (car: CarState): Promise<Vehicle> => {
@@ -771,6 +767,7 @@ async function boot(): Promise<void> {
       road,
       terrain,
       player,
+      birds,
       camera,
       inventory,
       vehicles,
@@ -897,6 +894,7 @@ async function boot(): Promise<void> {
 
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
+    touch.setDriving(driving !== null);
 
     // Precise control is a preference, so M edits settings rather than a local flag:
     // the pause menu and hotkey always agree, and the held wheel survives save/load.
@@ -1305,27 +1303,12 @@ async function boot(): Promise<void> {
 
     for (const vehicle of vehicles.values()) {
       vehicle.syncVisuals(alpha);
-      // Dirt and impact records are read from the Vehicle's live accumulators, not
-      // the batched save state: a collision or brush stroke must land this frame.
+      // Dirt is read from the Vehicle's live accumulator rather than batched save
+      // state, so fresh road dust lands on the shell this frame.
       const dirt = vehicle.bodyDirt;
-      const scratches = vehicle.bodyScratches;
-      const damage = vehicle.bodyDamage;
-      const previous = appliedBodyCondition.get(vehicle);
-      const damageLast = damage[damage.length - 1];
-      if (
-        previous === undefined
-        || previous.dirt !== dirt
-        || previous.scratches !== scratches
-        || previous.damageLength !== damage.length
-        || previous.damageLast !== damageLast
-      ) {
-        setCarBodyCondition(vehicle.root, dirt, scratches, damage);
-        appliedBodyCondition.set(vehicle, {
-          dirt,
-          scratches,
-          damageLength: damage.length,
-          damageLast,
-        });
+      if (appliedBodyDirt.get(vehicle) !== dirt) {
+        setCarBodyCondition(vehicle.root, dirt);
+        appliedBodyDirt.set(vehicle, dirt);
       }
     }
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
@@ -1388,6 +1371,7 @@ async function boot(): Promise<void> {
       driving === null && inventory.held?.type === 'camera' && cameraActive;
     camera.setBinoculars(usingBinoculars);
     camera.update(frameDt, cameraInput, target, driving === null);
+    touch.setZoomAvailable(camera.mode === 'chase');
 
     const cam = renderer.camera.position;
     sky.update(
@@ -1447,9 +1431,6 @@ async function boot(): Promise<void> {
     // scale factor a 25 km range still fades, it just fades over 25 km.
     renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.viewDistance];
 
-    // The disc only rebuilds when the camera has left the patch it was built for, so
-    // this is a pair of comparisons on most frames.
-    vista.update(cam.x, cam.z, activeS, frameDt);
     // A daylight-only middle-distance illusion. It never modifies Sky or Audio; the
     // sky's computed daylight is only a visibility gate protecting the night view.
     mirage.update(activeS, sky.dayFactor);
@@ -1976,6 +1957,7 @@ async function boot(): Promise<void> {
   const touch = new TouchControls(uiRoot, canvas, {
     pause: openPause,
     fullscreen: toggleFullscreen,
+    cinema: toggleCinema,
   });
   input.attachTouch(touch);
 }

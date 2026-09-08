@@ -73,7 +73,6 @@ function carState(x: number, y: number, z: number, heading: number): CarState {
     fuelKind: variant(def.engineId).engine?.fuel ?? null,
     dirt: 0,
     scratches: 0,
-    damage: [],
     waterLitres: 10,
     oilLitres: 10,
     engineTempC: COLD_SOAK_C,
