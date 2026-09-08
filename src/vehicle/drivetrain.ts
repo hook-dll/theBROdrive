@@ -366,21 +366,28 @@ export class Drivetrain {
       this.rpmValue = this.freeRev(engine, dt, demand);
       crankSpeed = this.rpmValue / RPM_PER_RAD_PER_SEC;
     } else {
-      // Gear engaged: the crank is locked to wheel speed through the ratios.
-      // `crankSpeed` is kept RAW (unclamped) here: in too low a gear it can
-      // overshoot the redline, and that over-rev is what makes engine braking
-      // violent. Only `this.rpmValue` — used for fuelling, idle behaviour and
-      // the HUD — is clamped below. Engine braking deliberately reads the
-      // unclamped geared speed further down.
+      // In first/reverse, below the road speed corresponding to the requested crank
+      // speed, the clutch slips instead of dragging the engine down to idle. This is
+      // the hill-start behaviour a manual driver gets by raising the revs and feeding
+      // the clutch. Taller gears stay rigidly coupled; otherwise every upshift below
+      // the torque peak would silently ride the clutch.
       const total = this.gearRatio() * gearbox.finalDrive;
       crankSpeed = wheelAngularSpeed * total;
+      const gearedRpm = Math.abs(crankSpeed) * RPM_PER_RAD_PER_SEC;
+      const launchGear = this.gear === 1 || this.gear === GEAR_REVERSE;
+      const clutchRpm = launchGear
+        ? engine.idleRpm + demand * Math.max(0, engine.torquePeakRpm - engine.idleRpm)
+        : gearedRpm;
       this.rpmValue = clamp(
-        Math.abs(crankSpeed) * RPM_PER_RAD_PER_SEC,
+        Math.max(gearedRpm, clutchRpm),
         engine.idleRpm,
         engine.redlineRpm,
       );
     }
-    const crankSpeedAbs = Math.abs(crankSpeed);
+    const crankSpeedAbs = Math.max(
+      Math.abs(crankSpeed),
+      demand > 0 ? this.rpmValue / RPM_PER_RAD_PER_SEC : 0,
+    );
 
     let driveTorqueNm = 0;
     let engineBrakeTorqueNm = 0;

@@ -51,13 +51,16 @@ const SEEDS = [1, 7, 42, 1337];
 // "Drive into the desert, stop, and you cannot drive out again." That is a STATICS
 // question, not a dynamics one, so it is answered here rather than by driving a car:
 // a stopped car pulls away iff the tractive force its driven wheels can make exceeds
-// the grade plus the rolling resistance. Every number below is the game's own.
+// the grade plus the rolling resistance. The reference car uses standard tyres and
+// vehicle.ts's reference wheelGrip, so its powered loose-surface crawl μ is the exact
+// floor below. Every number below is the game's own.
 //
-// Duplicated from vehicle.ts on purpose, the same way ride-bench.ts duplicates the
-// wheel paths: importing them would mean exporting private tuning constants for a
-// tool. They are asserted against their source in the header line this prints.
+// Duplicated from vehicle.ts on purpose: importing it would mean exporting private
+// tuning constants for a tool. They are asserted against their source in the header.
 /** LONGITUDINAL_GRIP_FRACTION: fraction of `frictionSlip` that is longitudinal mu. */
 const LONGITUDINAL_GRIP_FRACTION = 0.38;
+/** Powered loose-surface crawl μ for the reference wheelGrip on standard tyres. */
+const LOOSE_CRAWL_MU_FLOOR = 1.5;
 /** Wheelbase and track of a period saloon, metres: the footprint put on the ground. */
 const WHEELBASE = 2.5;
 const TRACK = 1.5;
@@ -431,9 +434,10 @@ for (const lateral of ALONG_LATERALS) {
  *
  *     mu * drivenShare * cos(a)  >=  sin(a) + rollingResistance * cos(a)
  *
- * with `mu = frictionSlip * LONGITUDINAL_GRIP_FRACTION` and `drivenShare` including
- * the load the grade itself transfers onto (RWD) or off (FWD) the driven axle. The
- * grade is measured the way the car feels it: a wheelbase-by-track footprint set on
+ * with `mu = max(frictionSlip * LONGITUDINAL_GRIP_FRACTION,
+ * LOOSE_CRAWL_MU_FLOOR)` for the reference car, with `drivenShare` including the
+ * load the grade itself transfers onto (RWD) or off (FWD) the driven axle. The grade
+ * is measured the way the car feels it: a wheelbase-by-track footprint set on
  * the real trimesh, a plane through its four contact points, and that plane's slope
  * along the heading.
  *
@@ -494,25 +498,25 @@ for (const lateral of ALONG_LATERALS) {
     `standstill escape over ${grades.length} (spot, heading) pairs inside ${ESCAPE_LATERAL} m, ` +
       `worst footprint grade ${(worstGrade * 100).toFixed(0)}%:`,
   );
-  for (const frictionSlip of new Set([sand.frictionSlip, 1.15, 1.35, 1.55])) {
-    const mu = frictionSlip * LONGITUDINAL_GRIP_FRACTION;
-    const line: string[] = [];
-    for (const rearDriven of [true, false]) {
-      let blocked = 0;
-      let stranded = 0;
-      for (const grade of grades) {
-        const forward = grade <= climbs(mu, rearDriven);
-        const back = -grade <= climbs(mu, rearDriven);
-        if (!forward) blocked++;
-        if (!forward && !back) stranded++;
-      }
-      line.push(
-        `${rearDriven ? 'RWD' : 'FWD'} climbs ${(climbs(mu, rearDriven) * 100).toFixed(0)}%, ` +
-          `${((blocked / grades.length) * 100).toFixed(1)}% blocked / ` +
-          `${((stranded / grades.length) * 100).toFixed(2)}% stranded`,
-      );
+  const authoredMu = sand.frictionSlip * LONGITUDINAL_GRIP_FRACTION;
+  const mu = Math.max(authoredMu, LOOSE_CRAWL_MU_FLOOR);
+  const line: string[] = [];
+  for (const rearDriven of [true, false]) {
+    let blocked = 0;
+    let stranded = 0;
+    for (const grade of grades) {
+      const forward = grade <= climbs(mu, rearDriven);
+      const back = -grade <= climbs(mu, rearDriven);
+      if (!forward) blocked++;
+      if (!forward && !back) stranded++;
     }
-    const mark = frictionSlip === sand.frictionSlip ? ' <- shipped' : '';
-    console.log(`  frictionSlip ${frictionSlip.toFixed(2)}: ${line.join('   ')}${mark}`);
+    line.push(
+      `${rearDriven ? 'RWD' : 'FWD'} climbs ${(climbs(mu, rearDriven) * 100).toFixed(0)}%, ` +
+        `${((blocked / grades.length) * 100).toFixed(1)}% blocked / ` +
+        `${((stranded / grades.length) * 100).toFixed(2)}% stranded`,
+    );
   }
+  console.log(
+    `  powered crawl mu ${mu.toFixed(2)} (authored ${authoredMu.toFixed(2)}): ${line.join('   ')}`,
+  );
 }

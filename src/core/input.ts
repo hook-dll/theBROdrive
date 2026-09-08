@@ -7,6 +7,7 @@
  */
 
 import type { TouchControls } from './touch';
+import { INVENTORY_ITEM_LIMIT } from '../items/items';
 
 export interface InputFrame {
   /** 0..1 */
@@ -47,7 +48,7 @@ export interface InputFrame {
   useSecondary: boolean;
   /** Cycle the held item: -1 or +1. */
   cycleItem: number;
-  /** Direct inventory slot pick from the number row: 0 = none, otherwise 1..8. */
+  /** Direct inventory slot pick from the number row: 0 = none, otherwise 1..3. */
   selectSlot: number;
   /** On-foot movement, camera-relative. */
   moveX: number;
@@ -489,10 +490,10 @@ export class InputReader {
       (this.anyPressed(this.keys.itemNext) ? 1 : 0) -
       (this.anyPressed(this.keys.itemPrev) ? 1 : 0);
 
-    // Number row 1..8 picks an inventory slot directly. Digit codes are contiguous,
-    // and the numpad row is accepted too so either hand works.
+    // Number row 1..3 picks an inventory slot directly. The numpad row is accepted
+    // too so either hand works.
     f.selectSlot = 0;
-    for (let n = 1; n <= 8; n++) {
+    for (let n = 1; n <= INVENTORY_ITEM_LIMIT; n++) {
       if (this.pressed.has(`Digit${n}`) || this.pressed.has(`Numpad${n}`)) {
         f.selectSlot = n;
         break;

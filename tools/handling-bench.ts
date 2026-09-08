@@ -1032,13 +1032,14 @@ export async function runLaunchTractionCheck(
 /**
  * Pull-away on a loose incline. This protects the low-speed contract that matters
  * outside the flat-road launch check: TCS may permit wheelspin, but it must not hold
- * a sound two-wheel-drive car motionless.
+ * a sound two-wheel-drive car motionless. Eight seconds also covers the transition
+ * from controlled crawl to ordinary rolling speed.
  */
 export async function runInclineLaunchCheck(
   modelId = 'sv_vaz2106',
   degrees = 5,
   surface = SurfaceType.Sand,
-): Promise<{ maxSlipMps: number; distance4sM: number; finalMps: number }> {
+): Promise<{ maxSlipMps: number; distance8sM: number; finalMps: number }> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(
     modelId,
@@ -1048,9 +1049,9 @@ export async function runInclineLaunchCheck(
   const start = rig.vehicle.chassis.translation();
   let maxSlipMps = 0;
 
-  drive(rig, 4, (_, input) => {
+  drive(rig, 8, (_, input) => {
     input.throttle = 1;
-    input.brake = 0;
+    input.reverse = false;
     input.steer = 0;
     input.handbrake = false;
     for (const wheel of rig.vehicle.wheelSpray) {
@@ -1060,17 +1061,17 @@ export async function runInclineLaunchCheck(
   });
 
   const end = rig.vehicle.chassis.translation();
-  const distance4sM = end.z - start.z;
+  const distance8sM = end.z - start.z;
   const finalMps = rig.vehicle.audio.forwardMps;
   rig.vehicle.dispose();
   const result = {
     maxSlipMps: +maxSlipMps.toFixed(2),
-    distance4sM: +distance4sM.toFixed(2),
+    distance8sM: +distance8sM.toFixed(2),
     finalMps: +finalMps.toFixed(2),
   };
-  if (result.distance4sM < 0.5 || result.finalMps < 0.5) {
+  if (result.distance8sM < 0.5 || result.finalMps < 0.5) {
     throw new Error(
-      `Incline launch advanced ${result.distance4sM.toFixed(2)} m in 4 s; ` +
+      `Incline launch advanced ${result.distance8sM.toFixed(2)} m in 8 s; ` +
         `final speed ${result.finalMps.toFixed(2)} m/s, max slip ${result.maxSlipMps.toFixed(2)} m/s`,
     );
   }

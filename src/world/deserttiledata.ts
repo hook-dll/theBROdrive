@@ -38,6 +38,8 @@ export interface DesertTileGenerationContext {
 export interface DesertTileData {
   readonly heights: Float32Array;
   readonly positions: Float32Array;
+  /** Fine relief removed by the tile shader as the vista takes over. */
+  readonly detailOffsets: Float32Array;
   readonly normals: Float32Array;
   readonly colors: Float32Array;
   readonly indices: Uint32Array;
@@ -45,29 +47,44 @@ export interface DesertTileData {
 }
 
 
-function groundHeight(
+interface GroundHeightSample {
+  height: number;
+  detail: number;
+}
+
+function sampleGroundHeight(
   context: DesertTileGenerationContext,
   x: number,
   z: number,
   farFromRoad: boolean,
-): number {
-  if (farFromRoad) return context.terrain.explorationHeight(x, z, FULL_RELIEF_DISTANCE);
+  out: GroundHeightSample,
+): void {
+  if (farFromRoad) {
+    const detail = context.terrain.explorationDetailAt(x, z, FULL_RELIEF_DISTANCE);
+    out.height = context.terrain.openBase(x, z, FULL_RELIEF_DISTANCE) + detail;
+    out.detail = detail;
+    return;
+  }
   const approximate = context.roadDistance.distAt(x, z, DIST_LATTICE);
   if (approximate >= EXACT_DISTANCE_GATE) {
-    return context.terrain.explorationHeight(x, z, approximate);
+    const detail = context.terrain.explorationDetailAt(x, z, approximate);
+    out.height = context.terrain.openBase(x, z, approximate) + detail;
+    out.detail = detail;
+    return;
   }
 
   const hint = context.roadDistance.ownerAt(x, z, DIST_LATTICE);
   const projection = context.road.project(x, z, hint);
   const dist = Math.abs(projection.lateral);
-  const y = context.terrain.explorationHeightFromFrame(x, z, projection.lateral, projection.s);
+  const detail = context.terrain.explorationDetailAt(x, z, dist);
   const transitionInput = dist / CORRIDOR_OUTER;
   const transition =
     transitionInput < 0 ? 0 : transitionInput > 1 ? 1 : transitionInput;
   // The road ribbon owns the contact surface in the corridor. This small offset avoids
   // z-fighting while the fade leaves no ledge at the edge of the graded verge.
   const underRoad = 0.1 * (1 - transition * transition * (3 - 2 * transition));
-  return y - underRoad;
+  out.height = context.terrain.baseFromFrame(x, z, projection.lateral, projection.s) + detail - underRoad;
+  out.detail = detail;
 }
 
 /**
@@ -90,7 +107,7 @@ function fit<T extends Float32Array | Uint32Array | Uint8Array>(
  * Generates all terrain/noise/grid-derived data for one tile without touching a scene.
  *
  * `into` is an optional set of buffers reclaimed from a tile that has already been
- * torn down. Tile buffers are the largest thing this system churns — ~413 KB per
+ * torn down. Tile buffers are the largest thing this system churns — roughly 440 KB per
  * tile, five tiles per row crossing — and recycling them is what keeps the
  * allocator from turning a boundary crossing into a collection pause. Every element
  * below is written before it is read, and `propSurfaces` is cleared explicitly
@@ -110,8 +127,10 @@ export function generateDesertTileData(
   const vertexCount = DESERT_TILE_VERTS * DESERT_TILE_VERTS;
   const heights = fit(into?.heights, vertexCount, Float32Array);
   const positions = fit(into?.positions, vertexCount * 3, Float32Array);
+  const detailOffsets = fit(into?.detailOffsets, vertexCount, Float32Array);
   const normals = fit(into?.normals, vertexCount * 3, Float32Array);
   const colors = fit(into?.colors, vertexCount * 3, Float32Array);
+  const ground = { height: 0, detail: 0 };
   const paletteDistance = farFromRoad
     ? Math.abs(centreZ)
     : context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
@@ -121,8 +140,10 @@ export function generateDesertTileData(
     for (let iz = 0; iz < DESERT_TILE_VERTS; iz++) {
       const worldZ = startZ + iz * DESERT_TILE_STEP;
       const vi = ix * DESERT_TILE_VERTS + iz;
-      const y = groundHeight(context, worldX, worldZ, farFromRoad);
+      sampleGroundHeight(context, worldX, worldZ, farFromRoad, ground);
+      const y = ground.height;
       heights[vi] = y;
+      detailOffsets[vi] = ground.detail;
       positions[vi * 3] = worldX - centreX;
       positions[vi * 3 + 1] = y;
       positions[vi * 3 + 2] = worldZ - centreZ;
@@ -183,7 +204,7 @@ export function generateDesertTileData(
     propSurfaces[i] = context.terrain.openSurfaceAt(worldX, worldZ);
   }
 
-  return { heights, positions, normals, colors, indices, propSurfaces };
+  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces };
 }
 
 /** Buffers are moved from the worker; the main thread builds BufferAttributes over them. */
@@ -191,6 +212,7 @@ export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
   return [
     data.heights.buffer as ArrayBuffer,
     data.positions.buffer as ArrayBuffer,
+    data.detailOffsets.buffer as ArrayBuffer,
     data.normals.buffer as ArrayBuffer,
     data.colors.buffer as ArrayBuffer,
     data.indices.buffer as ArrayBuffer,

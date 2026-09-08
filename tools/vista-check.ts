@@ -549,11 +549,25 @@ invariant(
   halfwayAlpha > 0.45 && halfwayAlpha < 0.55,
   `mesa dissolve alpha is ${halfwayAlpha.toFixed(3)} halfway through`,
 );
+const approachSparkles = approachScene.children.find(
+  (child): child is THREE.Points => child instanceof THREE.Points,
+);
+invariant(approachSparkles !== undefined, 'mesa dissolve has no sparkle pool');
+invariant(
+  approachSparkles.visible &&
+    approachSparkles.geometry.drawRange.count > 0 &&
+    approachSparkles.geometry.drawRange.count <= 64,
+  `mesa dissolve draws ${approachSparkles.geometry.drawRange.count} sparkles outside its fixed pool`,
+);
 approachVista.update(0, 0, 0, 9.1);
 invariant(
   approachState.retiredMesas.has(targetMesa.key) &&
     !approachState.dissolvingMesas.has(targetMesa.key),
   'retreat restored or paused a dissolving mesa',
+);
+invariant(
+  !approachSparkles.visible && approachSparkles.geometry.drawRange.count === 0,
+  'mesa sparkle pool remained visible after the dissolve',
 );
 approachVista.update(triggerX, triggerZ, 0, 0);
 invariant(
@@ -567,6 +581,7 @@ invariant(
 );
 console.log(
   `mesa dissolve: triggered at 499 m clearance, halfway alpha ${halfwayAlpha.toFixed(2)}, ` +
+    `${approachSparkles.geometry.getAttribute('position').count} pooled sparkles, ` +
     'retreat and revisit kept it retired',
 );
 approachVista.dispose();

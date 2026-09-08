@@ -214,11 +214,11 @@ vec2 condRust( vec3 p ) {
  * lookup per mark. Four seed bands alter aspect, rotation and mask breakup, giving
  * the reference's 3–5 variations without texture fetches or shader permutations.
  *
- * x/y/z/w of masks are dent centre, bright folded rim, scratch and exposed-paint
- * chip. heavyMask adds localized grime/cracking only to severe impacts.
- * dentGradient is analytic radial/scratch relief in world units; noise breaks the
- * silhouette but is deliberately omitted from the gradient so it cannot turn a
- * low-poly panel into sparkling normal noise.
+ * x/y/z/w of masks are dent centre, folded rim, scratch and exposed-paint chip.
+ * heavyMask adds localized grime/cracking only to severe impacts. dentGradient is
+ * analytic radial/scratch relief in world units; noise breaks the silhouette but is
+ * deliberately omitted from the gradient so it cannot turn a low-poly panel into
+ * sparkling normal noise.
  */
 void condDamage(
   vec3 worldP,
@@ -285,18 +285,24 @@ void condDamage(
     float rim = smoothstep( 0.34, 0.56, radial )
       * ( 1.0 - smoothstep( 0.72, 0.96, radial ) ) * panel;
 
-    float wave = sin( ru / radius * 11.0 + seed * 19.0 ) * radius * 0.028;
-    float scratchLength = 1.0 - smoothstep( 0.55, 1.05, abs( ru ) / ( radius * 1.35 ) );
+    // Scratches stay inside the impact pocket. The old line extended to 1.4 radii
+    // without the radial envelope, which made a collision grow long octopus arms.
+    float wave = sin( ru / radius * 13.0 + seed * 19.0 ) * radius * 0.014;
+    float scratchLength =
+      1.0 - smoothstep( 0.24, 0.62, abs( ru ) / ( radius * 0.78 ) );
+    float scratchDistance = abs( rv - wave );
+    float scratchAA = fwidth( scratchDistance );
     float scratchLine = ( 1.0 - smoothstep(
-      radius * 0.012,
-      radius * mix( 0.035, 0.058, mod( variation, 2.0 ) ),
-      abs( rv - wave )
-    ) ) * scratchLength * panel;
+      radius * 0.003,
+      radius * mix( 0.014, 0.021, mod( variation, 2.0 ) ) + scratchAA,
+      scratchDistance
+    ) ) * scratchLength * envelope;
+    float secondDistance = abs( rv + radius * 0.11 + wave * 0.65 );
     float secondScratch = ( 1.0 - smoothstep(
-      radius * 0.014,
-      radius * 0.045,
-      abs( rv + radius * 0.16 + wave * 0.7 )
-    ) ) * scratchLength * panel * isHeavy;
+      radius * 0.004,
+      radius * 0.017 + fwidth( secondDistance ),
+      secondDistance
+    ) ) * scratchLength * envelope * isHeavy;
     float scratch = max( scratchLine, secondScratch )
       * ( isScratch + 0.28 * isChip + 0.18 * isDent + isHeavy );
 
@@ -306,12 +312,13 @@ void condDamage(
     float chip = ( 1.0 - smoothstep( 0.08, 0.76, radial ) )
       * smoothstep( 0.48, 0.72, chipNoise ) * panel
       * ( 0.18 * isScratch + isChip + 0.42 * isDent + isHeavy );
-    // Heavy impacts split paint along several irregular radial crack paths.
+    // Heavy paint cracks are short hairlines around the crushed centre, not three
+    // full-radius spokes that visually multiply one strike into several.
     float crackAngle = atan( rv, ru );
     float crackWave = abs( sin( crackAngle * 3.0 + seed * 23.0 + radial * 2.1 ) );
-    float crack = ( 1.0 - smoothstep( 0.025, 0.16, crackWave ) )
-      * smoothstep( 0.18, 0.34, radial )
-      * ( 1.0 - smoothstep( 0.72, 0.98, radial ) )
+    float crack = ( 1.0 - smoothstep( 0.008, 0.045 + fwidth( crackWave ), crackWave ) )
+      * smoothstep( 0.13, 0.22, radial )
+      * ( 1.0 - smoothstep( 0.46, 0.68, radial ) )
       * panel * isHeavy;
     scratch = max( scratch, crack );
 
@@ -433,14 +440,16 @@ const CAR_BODY_CONDITION_BODY = `
     float scratchMask = damageMasks.z;
     float chipMask = damageMasks.w;
 
-    // A dent reads as a dark pressed centre and a narrow light folded rim even
-    // under flat light; the normal hook moves the real specular highlight.
-    diffuseColor.rgb *= 1.0 - 0.84 * dentCore * dentCore;
-    diffuseColor.rgb = mix(
-      diffuseColor.rgb,
-      min( vec3( 1.0 ), diffuseColor.rgb * 1.75 + vec3( 0.09 ) ),
-      dentRim * 0.88
-    );
+    // Contrast follows the paint. Dark coachwork gets a pale compressed patch;
+    // light coachwork gets a dark one. An unconditional bright rim made ivory cars
+    // look self-illuminated, while an unconditional dark core hid dents on blue.
+    float paintLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float lightPaint = smoothstep( 0.28, 0.48, paintLum );
+    vec3 pressedLight = min( vec3( 1.0 ), diffuseColor.rgb * 1.55 + vec3( 0.08 ) );
+    vec3 pressedDark = diffuseColor.rgb * 0.38;
+    vec3 pressedPaint = mix( pressedLight, pressedDark, lightPaint );
+    diffuseColor.rgb = mix( diffuseColor.rgb, pressedPaint, dentCore * dentCore * 0.82 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, pressedPaint, dentRim * 0.64 );
     roughnessFactor = mix( roughnessFactor, 0.88, max( dentCore, dentRim ) * 0.7 );
 
     // A crushed panel is not a mirror. Paint over a dent is stretched and its clear

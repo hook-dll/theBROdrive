@@ -800,23 +800,22 @@ const LOAD_SENSITIVITY_MAX = 1.35;
  * near-zero-speed singularity; its denominator is floored at SLIP_REFERENCE_MPS,
  * so even a gently turning wheel looks far beyond the peak while the car is still.
  *
- * Measured-slip feedback therefore has no authority below
- * TCS_AUTHORITY_START_MPS. At a standing start a separate feed-forward limit keeps
- * the requested torque at, but not below, the tyre's peak capacity. This distinction
- * matters on a grade: the former 68% target left a VAZ-2106 less tractive force than
- * sand resistance plus a modest incline required, while unrestricted wheelspin fell
- * onto the tyre curve's 75% sliding plateau and failed for the same reason.
+ * Measured-slip feedback therefore ramps in with road speed on sealed surfaces; a
+ * separate feed-forward limit handles their standing start. Loose surfaces are the
+ * exception: the crawl-capacity floor below gives a loaded tyre a useful force budget
+ * before the chassis moves, so feedback can arrest the wheelspin that would otherwise
+ * leave it on the sliding plateau. Load authority still removes the cut from an
+ * airborne/light wheel.
  *
- * Once the chassis is moving, feedback authority rises smoothly to full and
- * tolerates 0.35 m/s of tread-speed excess before cutting torque. Authority follows
- * the VEHICLE'S forward speed, not one contact point's instantaneous velocity:
- * chassis pitch over a pothole can make that point nearly stationary while the car
- * is moving. Sign still comes from commanded torque, so braking lock-up is untouched.
+ * Chassis speed is signed in the COMMANDED direction. Rollback is not progress:
+ * using absolute chassis speed lets gravity arm the sealed-surface feedback while the
+ * engine is still trying to reverse that motion, exactly when all uphill force is
+ * needed.
  */
 const TCS_SLIP_FLOOR_MPS = 0.35;
 /** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
 const TCS_SLIP_BAND_MPS = 0.65;
-/** Road speed (m/s) below which TCS may not cut at all, and above which it may cut fully. */
+/** Sealed-surface road speed where measured-slip feedback starts gaining authority. */
 const TCS_AUTHORITY_START_MPS = 1.0;
 const TCS_AUTHORITY_FULL_MPS = 3.5;
 /**
@@ -846,6 +845,22 @@ const TCS_MAX_CUT = 0.85;
 const TCS_LAUNCH_GRIP_FRACTION = 1.05;
 /** Launch limiter authority; five per cent remains when a wheel has almost no load. */
 const TCS_LAUNCH_MAX_CUT = 0.95;
+/**
+ * Low-speed longitudinal μ floor on loose ground. It is the driver feeding clutch
+ * and throttle while TCS holds the tyre near its useful slip, not extra lateral grip:
+ * it applies only to driven wheels under power. On flat ground it fades out as the
+ * car reaches normal speed; while actually climbing, the terrain tangent keeps only
+ * the share the grade needs. 1.5 lets the reference VAZ-2106 retain enough force on
+ * the tyre curve's 75% sliding plateau to overcome sand's deformation resistance at
+ * the terrain generator's 17.9-degree base-slope bound.
+ */
+const LOOSE_CRAWL_MU_FLOOR = 1.5;
+const LOOSE_CRAWL_REFERENCE_WHEEL_GRIP = 0.58;
+const LOOSE_CRAWL_FULL_MPS = 1.5;
+const LOOSE_CRAWL_FADE_MPS = 4;
+/** Uphill tangent range over which crawl grip remains available after the speed fade. */
+const LOOSE_CRAWL_GRADE_START = 0.1;
+const LOOSE_CRAWL_GRADE_FULL = 0.3;
 /** Cut smoothing, seconds: quick to intervene, slower to hand the torque back. */
 const TCS_ATTACK_TAU = 0.03;
 const TCS_RELEASE_TAU = 0.12;
@@ -2989,6 +3004,18 @@ export class Vehicle implements Rebasable {
       input.reverse,
       input.throttle,
     );
+    // Keep an already-latched parking hold through the gearbox's launch interruption.
+    // Releasing the handbrake and pressing throttle on a steep grade used to drop the
+    // car for the whole shift time before first gear delivered one newton. The hold
+    // releases on the first tick real drive torque exists; it never propels the car.
+    if (
+      this.parkingHoldActive &&
+      !input.handbrake &&
+      throttle > 0 &&
+      drive.driveTorqueNm === 0
+    ) {
+      this.parkingHoldRequested = true;
+    }
     const brake = reverseDrive
       ? 0
       : Math.max(input.brake, brakingForDirectionChange ? input.throttle : 0);
@@ -3998,6 +4025,8 @@ export class Vehicle implements Rebasable {
 
     for (const w of this.wheels) {
       const driven = w.isFront ? this.frontDrivenCount > 0 : this.rearDrivenCount > 0;
+      const driveDirection = w.driveTorqueNm >= 0 ? 1 : -1;
+      const driveProgressSpeed = Math.max(0, vehicleForwardSpeed * driveDirection);
       const steer = controller.wheelSteering(w.index) ?? 0;
       // Wheel-plane forward: chassis +Z yawed by the steering angle — the same
       // basis the wheel mesh is drawn in — taken into world space.
@@ -4054,19 +4083,48 @@ export class Vehicle implements Rebasable {
       let capacityN = 0;
       if (w.loadN > 0) {
         const ground = controller.wheelGroundObject(w.index);
-        const surface = this.physics.surfaces.lookup(ground ? ground.handle : null);
+        const surfaceType = this.physics.surfaces.lookupType(ground ? ground.handle : null);
+        const surface = SURFACES[surfaceType];
         const loadFactor = clamp(
           1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
           LOAD_SENSITIVITY_MIN,
           LOAD_SENSITIVITY_MAX,
         );
-        capacityN =
+        let longitudinalMu =
           surface.frictionSlip *
           LONGITUDINAL_GRIP_FRACTION *
           wheelGrip *
           tyreGrip *
-          loadFactor *
-          w.loadN;
+          loadFactor;
+        if (
+          driven &&
+          w.driveTorqueNm !== 0 &&
+          (surfaceType === SurfaceType.Sand || surfaceType === SurfaceType.Gravel)
+        ) {
+          const fadeT = clamp(
+            (driveProgressSpeed - LOOSE_CRAWL_FULL_MPS) /
+              (LOOSE_CRAWL_FADE_MPS - LOOSE_CRAWL_FULL_MPS),
+            0,
+            1,
+          );
+          const speedWeight = 1 - fadeT * fadeT * (3 - 2 * fadeT);
+          const uphillTangent = Math.max(0, w.forwardDir.y * driveDirection);
+          const gradeWeight = clamp(
+            (uphillTangent - LOOSE_CRAWL_GRADE_START) /
+              (LOOSE_CRAWL_GRADE_FULL - LOOSE_CRAWL_GRADE_START),
+            0,
+            1,
+          );
+          const crawlWeight = Math.max(speedWeight, gradeWeight);
+          const crawlMu =
+            LOOSE_CRAWL_MU_FLOOR *
+            (wheelGrip / LOOSE_CRAWL_REFERENCE_WHEEL_GRIP) *
+            tyreGrip *
+            loadFactor *
+            crawlWeight;
+          longitudinalMu = Math.max(longitudinalMu, crawlMu);
+        }
+        capacityN = longitudinalMu * w.loadN;
         if (inContact) this.ownTyreCapacityN += capacityN;
       }
 
@@ -4087,13 +4145,16 @@ export class Vehicle implements Rebasable {
         TCS_SLIP_FLOOR_MPS,
         PEAK_SLIP_RATIO * Math.abs(contactSpeed),
       );
-      // No second, wheelspin-only authority path exists here. At near-zero chassis
-      // speed it used to turn a bogged launch into a sustained 85% torque cut: no
-      // visible wheelspin, no useful tyre force, and no progress. The car must first
-      // be allowed to pull itself into the speed-controlled range.
+      // Sealed ground ramps feedback in with commanded progress. On loose ground the
+      // explicit crawl grip budget makes low-speed feedback safe and necessary: it
+      // keeps the tread near useful slip instead of wasting a quarter of that budget
+      // on the sliding plateau.
       const speedAuthority =
-        (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
+        (driveProgressSpeed - TCS_AUTHORITY_START_MPS) /
         (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS);
+      const looseSurface =
+        w.groundSurface === SurfaceType.Sand || w.groundSurface === SurfaceType.Gravel;
+      const motionAuthority = looseSurface ? 1 : clamp(speedAuthority, 0, 1);
       // AND WHETHER THE TYRE IS CARRYING ANYTHING. `inContact` is Rapier's ray hit; it
       // stays true over a crest or a pothole rim while the spring is extended and the
       // load has gone. A wheel with no load on it is not losing traction, it is simply
@@ -4102,7 +4163,7 @@ export class Vehicle implements Rebasable {
       // and there is nothing to un-waste when the normal load is missing. Cutting there
       // lights the lamp and throws away the drive without buying a newton of grip.
       const loadAuthority = w.loadN / (w.staticLoadN * TCS_LOAD_AUTHORITY_FRACTION);
-      const authority = clamp(speedAuthority, 0, 1) * clamp(loadAuthority, 0, 1);
+      const authority = motionAuthority * clamp(loadAuthority, 0, 1);
       const reactiveCut =
         Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
         TCS_MAX_CUT *
@@ -4113,7 +4174,7 @@ export class Vehicle implements Rebasable {
       const launchAuthority =
         1 -
         clamp(
-          (Math.abs(vehicleForwardSpeed) - TCS_AUTHORITY_START_MPS) /
+          (driveProgressSpeed - TCS_AUTHORITY_START_MPS) /
             (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
           0,
           1,

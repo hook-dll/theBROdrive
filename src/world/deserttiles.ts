@@ -28,7 +28,12 @@ import type {
   DesertTileWorkerResponse,
 } from './deserttileworker';
 import type { WorldWorkScheduler } from './workqueue';
-import { TERRAIN_COLLIDER_SURFACE, TERRAIN_MATERIAL } from './terrainmesh';
+import {
+  DESERT_TILE_FADE_FULL,
+  DESERT_TILE_FADE_GONE,
+  DESERT_TILE_MATERIAL,
+  TERRAIN_COLLIDER_SURFACE,
+} from './terrainmesh';
 
 /**
  * Player-centred open desert.
@@ -78,6 +83,7 @@ interface DesertPropPlacement {
   readonly ry: number;
   readonly rz: number;
   readonly scale: number;
+  renderScale: number;
   readonly radius: number;
   mesh: THREE.InstancedMesh | null;
   instance: number;
@@ -288,6 +294,7 @@ export class DesertTileStreamer {
     }
 
     this.applyOneStagedUnit(frameId);
+    this.syncPropFades(x, z);
     this.syncPendingState();
   }
 
@@ -381,13 +388,14 @@ export class DesertTileStreamer {
     const centreZ = (tz + 0.5) * DESERT_TILE_SIZE;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(data.detailOffsets, 1));
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const group = new THREE.Group();
     group.position.set(centreX - this.origin.x, 0, centreZ - this.origin.z);
-    const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
+    const mesh = new THREE.Mesh(geometry, DESERT_TILE_MATERIAL);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     group.add(mesh);
@@ -458,6 +466,7 @@ export class DesertTileStreamer {
         ry: hash01(this.seed, PROP_TAG, tx, tz, i, 6) * Math.PI * 2,
         rz: form.rotate3d ? hash01(this.seed, PROP_TAG, tx, tz, i, 7) * Math.PI * 2 : 0,
         scale,
+        renderScale: scale,
         radius,
         mesh: null,
         instance: 0,
@@ -490,6 +499,37 @@ export class DesertTileStreamer {
       meshes.push(instances);
     }
     return { props, meshes };
+  }
+
+  /**
+   * Tile props share catalogue materials, so they cannot use the terrain vertex morph.
+   * Scale them through the same radial band instead. A tile enters the visual square
+   * with every prop at zero and reaches authored size over 180 metres; broken instances
+   * remain zero rather than being resurrected by this visual update.
+   */
+  private syncPropFades(cameraX: number, cameraZ: number): void {
+    const fadeSpan = DESERT_TILE_FADE_GONE - DESERT_TILE_FADE_FULL;
+    for (const tile of this.tiles.values()) {
+      for (const prop of tile.props) {
+        if (!prop.mesh) continue;
+        const dx = tile.centreX + prop.x - cameraX;
+        const dz = tile.centreZ + prop.z - cameraZ;
+        const distance = Math.hypot(dx, dz);
+        const t = Math.min(1, Math.max(0, (distance - DESERT_TILE_FADE_FULL) / fadeSpan));
+        const smooth = t * t * (3 - 2 * t);
+        const broken = propPieces(prop.form.id) && this.breakables?.isBroken(prop.id);
+        const renderScale = broken ? 0 : prop.scale * (1 - smooth);
+        if (Math.abs(renderScale - prop.renderScale) < 1e-4) continue;
+
+        prop.renderScale = renderScale;
+        instanceScratch.position.set(prop.x, prop.y, prop.z);
+        instanceScratch.rotation.set(prop.rx, prop.ry, prop.rz);
+        instanceScratch.scale.setScalar(renderScale);
+        instanceScratch.updateMatrix();
+        prop.mesh.setMatrixAt(prop.instance, instanceScratch.matrix);
+        prop.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
   }
 
   private desiredModeForTile(_tx: number, _tz: number): boolean {

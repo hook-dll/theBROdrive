@@ -418,8 +418,8 @@ export class Terrain {
     return this.fineRelief(x, z) * fade;
   }
 
-  /** The fine band for the shipped tile lattice, which has no outer seam. */
-  private explorationDetailAt(x: number, z: number, dist: number): number {
+  /** Fine band used by the player-centred tile lattice and its distance morph. */
+  explorationDetailAt(x: number, z: number, dist: number): number {
     if (dist <= CORRIDOR_INNER) return 0;
     const fade = smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER));
     return this.fineRelief(x, z) * fade;

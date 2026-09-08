@@ -14,11 +14,13 @@
  *
  * The checks at the end are pass/fail: a parked car must not creep down a 20
  * degree slope, an automatic must recover from rollback, and a VAZ-2106 must pull
- * away on a modest loose incline without TCS holding it motionless.
+ * away on both loose surfaces at the terrain generator's maximum base incline.
  *
  * Nothing here is part of the game bundle.
  */
 
+import { SurfaceType } from '../src/core/surfaces';
+import { MAX_SLOPE } from '../src/world/landscape';
 import { installAssetShim } from './assetshim';
 import {
   runAutomaticNeutralReverseCheck,
@@ -33,6 +35,7 @@ installAssetShim();
 
 const ids = process.argv.slice(2);
 const DEFAULT_IDS = ['sv_vaz2101', 'gt_vaz2110', 'sv_vaz2105r', 'sa_uaz330364'];
+const MAX_TERRAIN_INCLINE_DEG = (Math.atan(MAX_SLOPE) * 180) / Math.PI;
 
 function pad(value: string | number, width: number): string {
   return String(value).padStart(width);
@@ -97,8 +100,13 @@ async function main(): Promise<void> {
       console.log(`  FAIL  ${label}: ${(error as Error).message}`);
     }
   };
-  await check('VAZ-2106 pulls away on a 5 degree sand incline', async () =>
-    runInclineLaunchCheck(),
+  await check(
+    `VAZ-2106 pulls away on a ${MAX_TERRAIN_INCLINE_DEG.toFixed(1)} degree sand incline`,
+    async () => runInclineLaunchCheck('sv_vaz2106', MAX_TERRAIN_INCLINE_DEG, SurfaceType.Sand),
+  );
+  await check(
+    `VAZ-2106 pulls away on a ${MAX_TERRAIN_INCLINE_DEG.toFixed(1)} degree gravel incline`,
+    async () => runInclineLaunchCheck('sv_vaz2106', MAX_TERRAIN_INCLINE_DEG, SurfaceType.Gravel),
   );
   await check('parked on a 20 degree slope (drift m)', async () => runParkingSlopeCheck());
   await check('automatic recovers from rollback', async () => runAutomaticRollbackCheck());

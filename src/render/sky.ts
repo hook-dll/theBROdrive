@@ -119,12 +119,11 @@ const C_DAY_ZENITH = new THREE.Color().setStyle('#4d8ede');
  * The pale band the daytime sky fades to at the horizon, and — because `fog.color`
  * copies it — the colour the far desert dissolves into.
  *
- * Taken off a reference screenshot of the genre's own noon sky, where the horizon band
- * is very nearly white with a cyan bias and the saturated blue stays up high. It was
- * `#d7e5f3`: the same idea a shade duller and greener. The reference reads cleaner
- * because there is more cyan in it and it is brighter.
+ * Taken off a reference screenshot of the genre's own noon sky: almost white with
+ * only a restrained cyan bias, so the saturated blue remains overhead instead of
+ * reaching the desert skyline.
  */
-const C_DAY_HORIZON = new THREE.Color().setStyle('#d5eefd');
+const C_DAY_HORIZON = new THREE.Color().setStyle('#dceff8');
 const C_NIGHT_ZENITH = new THREE.Color().setStyle('#03040a');
 const C_NIGHT_HORIZON = new THREE.Color().setStyle('#0d1424');
 const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
@@ -939,6 +938,9 @@ export class Sky {
     this._hemiSky.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.02, 0.0)
       .lerp(C_DAY_HORIZON, 0.4)
+      // A trace of the Sun's warm white in the diffuse sky bounce keeps nominally
+      // neutral surfaces from reading cold without turning the scene amber.
+      .lerp(C_SUN_HIGH, 0.055)
       .lerp(C_NIGHT_ZENITH, night);
     this._hemiGround.copy(C_GROUND).lerp(C_NIGHT_GROUND, night);
     this.hemiLight.color.copy(this._hemiSky);
