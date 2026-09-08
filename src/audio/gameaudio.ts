@@ -24,6 +24,14 @@ export class GameAudio {
   private readonly radios = new Map<string, Radio>();
   private activeRadioId: string | null = null;
   private radioVolume = 1;
+  /** Last pose written to the context listener; NaN so the first frame always writes. */
+  private listenerX = Number.NaN;
+  private listenerY = Number.NaN;
+  private listenerZ = Number.NaN;
+  private listenerQx = Number.NaN;
+  private listenerQy = Number.NaN;
+  private listenerQz = Number.NaN;
+  private listenerQw = Number.NaN;
 
   applySettings(settings: Settings): void {
     this.mixer.setVolume(settings.masterVolume);
@@ -48,9 +56,12 @@ export class GameAudio {
     this.vehicle.setActive(state !== null);
     if (state) this.vehicle.update(state);
     this.activeRadioId = radioCarId;
+    // One AudioListener exists per context, so its pose belongs here rather than in
+    // each radio: writing it per radio meant every entered car in the session paid
+    // ten AudioParam writes a frame to set the same nine values.
+    this.writeListener(radioSpatial);
 
     for (const [id, radio] of this.radios) {
-      radio.setListener(radioSpatial);
       if (id === radioCarId) {
         if (
           radioSpatial.sourceX !== null &&
@@ -68,6 +79,46 @@ export class GameAudio {
         radio.setInCar(false);
       }
     }
+  }
+
+  /**
+   * Pose of the single AudioListener, skipped entirely while the camera is still.
+   * A parked player with the radio on is the common case, and an unchanged
+   * AudioParam write still crosses into the audio thread's parameter timeline.
+   */
+  private writeListener(spatial: RadioSpatialState): void {
+    if (this.radios.size === 0) return;
+    const { listenerQx: x, listenerQy: y, listenerQz: z, listenerQw: w } = spatial;
+    if (
+      spatial.listenerX === this.listenerX
+      && spatial.listenerY === this.listenerY
+      && spatial.listenerZ === this.listenerZ
+      && x === this.listenerQx
+      && y === this.listenerQy
+      && z === this.listenerQz
+      && w === this.listenerQw
+    ) {
+      return;
+    }
+    this.listenerX = spatial.listenerX;
+    this.listenerY = spatial.listenerY;
+    this.listenerZ = spatial.listenerZ;
+    this.listenerQx = x;
+    this.listenerQy = y;
+    this.listenerQz = z;
+    this.listenerQw = w;
+
+    const listener = this.mixer.ctx.listener;
+    listener.positionX.value = spatial.listenerX;
+    listener.positionY.value = spatial.listenerY;
+    listener.positionZ.value = spatial.listenerZ;
+    // Camera local forward is -Z and local up is +Y.
+    listener.forwardX.value = -2 * (x * z + y * w);
+    listener.forwardY.value = 2 * (x * w - y * z);
+    listener.forwardZ.value = -1 + 2 * (x * x + y * y);
+    listener.upX.value = 2 * (x * y - z * w);
+    listener.upY.value = 1 - 2 * (x * x + z * z);
+    listener.upZ.value = 2 * (y * z + x * w);
   }
 
   private radioFor(carId: string): Radio {
