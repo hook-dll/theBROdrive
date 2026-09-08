@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { AdaptiveResolutionController } from './core/adaptivequality';
 import { makeFlatMaterial } from './render/materials';
-import { createPoiVariant, POI_VARIANTS } from './world/poi-variants';
+import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './world/poi-variants';
 
 const GRID_COLUMNS = 5;
 const CELL_X = 38;
@@ -11,6 +12,13 @@ const OVERVIEW_Z = Math.max(120, GRID_ROWS * 27);
 const WALK_SPEED = 8;
 const FAST_SPEED = 24;
 const EYE_HEIGHT = 1.75;
+/** Mirrors the game's 'acceptable' tier budget: 1600x900 rendered pixels. */
+const MAX_RENDER_PIXELS = 1600 * 900;
+
+function pixelRatio(): number {
+  const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
+  return Math.min(window.devicePixelRatio, Math.sqrt(MAX_RENDER_PIXELS / cssPixels));
+}
 
 interface GalleryEntry {
   readonly definition: (typeof POI_VARIANTS)[number];
@@ -130,14 +138,23 @@ export function bootPoiGallery(): void {
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
   document.title = 'POI gallery · the BRO drive';
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Same framebuffer policy as the game's 'acceptable' tier: no multisampled
+  // backbuffer (an N100 iGPU pays MSAA bandwidth on every one of these pixels) and
+  // a hard pixel budget, because this viewer is fill-rate bound, not geometry bound.
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(pixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // The grid, the sun and the prototypes never move, and the room spots do not
+  // cast, so the shadow map is rendered once instead of re-rasterising all 3.9k
+  // casters every frame (measured 3871 extra draw calls, ~16 ms on an N100 iGPU).
+  // Only the roof toggle changes the caster set; it re-arms needsUpdate.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9eb3bd);
@@ -183,6 +200,7 @@ export function bootPoiGallery(): void {
     scene.add(pad);
 
     const root = createPoiVariant(index);
+    mergePoiStatics(root);
     root.position.set(x, 0.02, z);
     scene.add(root);
     const bounds = new THREE.Box3().setFromObject(root);
@@ -206,6 +224,123 @@ export function bootPoiGallery(): void {
     divider.position.set(0, 0.025, z);
     scene.add(divider);
   }
+
+  /**
+   * Room-light budget.
+   *
+   * Three.js forward-shades: every lit fragment evaluates every *visible* light in
+   * the scene. The 26 prototypes ship 45 room spots and 20 canopy lamps; on an
+   * Intel N100 iGPU all 65 of them measured 69 ms of a 116 ms frame with the grid
+   * on screen, and a light standing in its own cone — an interior — costs ~3.7 ms
+   * of the 1.44 Mpixel frame all by itself.
+   *
+   * So the fixtures' own lights become invisible source markers and a fixed pool of
+   * slots mirrors the nearest few, exactly as `LightBudget` does for streetlights.
+   * Four spots reach the room you stand in plus the one through the doorway, which
+   * is what these prototypes are inspected for; two point slots cover a forecourt's
+   * canopy lamps. The counts are constant for the session on purpose: the shader
+   * permutation is keyed on the visible light count, so a varying count would
+   * recompile every lit material as you walk between prototypes.
+   */
+  const SPOT_SLOT_COUNT = 4;
+  const POINT_SLOT_COUNT = 2;
+  const LIGHT_RANGE_SQ = 46 * 46;
+  const spotSources: THREE.SpotLight[] = [];
+  const pointSources: THREE.PointLight[] = [];
+  for (const entry of entries) {
+    entry.root.traverse((object) => {
+      if (object instanceof THREE.SpotLight) {
+        object.visible = false;
+        spotSources.push(object);
+      } else if (object instanceof THREE.PointLight) {
+        object.visible = false;
+        pointSources.push(object);
+      }
+    });
+  }
+  const spotSlots: THREE.SpotLight[] = [];
+  for (let slot = 0; slot < SPOT_SLOT_COUNT; slot++) {
+    const light = new THREE.SpotLight(0xffffff, 0, 4, 0.7, 0.9, 2);
+    light.castShadow = false;
+    scene.add(light, light.target);
+    spotSlots.push(light);
+  }
+  const pointSlots: THREE.PointLight[] = [];
+  for (let slot = 0; slot < POINT_SLOT_COUNT; slot++) {
+    const light = new THREE.PointLight(0xffffff, 0, 4, 2);
+    scene.add(light);
+    pointSlots.push(light);
+  }
+
+  const sourceWorld = new THREE.Vector3();
+  const targetWorld = new THREE.Vector3();
+  const spotChoice: number[] = [];
+  const spotChoiceDistance: number[] = [];
+  const pointChoice: number[] = [];
+  const pointChoiceDistance: number[] = [];
+  /** Insertion-sorts the lit sources in range into `choice`, nearest first. */
+  const pickNearest = (
+    sources: readonly THREE.Light[],
+    limit: number,
+    eye: THREE.Vector3,
+    choice: number[],
+    choiceDistance: number[],
+  ): void => {
+    choice.length = 0;
+    choiceDistance.length = 0;
+    for (let index = 0; index < sources.length; index++) {
+      const source = sources[index];
+      if (!source || source.intensity <= 0) continue;
+      const distanceSq = source.getWorldPosition(sourceWorld).distanceToSquared(eye);
+      if (distanceSq > LIGHT_RANGE_SQ) continue;
+      let at = choiceDistance.length;
+      while (at > 0 && (choiceDistance[at - 1] ?? 0) > distanceSq) at--;
+      if (at >= limit) continue;
+      choice.splice(at, 0, index);
+      choiceDistance.splice(at, 0, distanceSq);
+      if (choice.length > limit) {
+        choice.pop();
+        choiceDistance.pop();
+      }
+    }
+  };
+  const updateLightSlots = (): void => {
+    pickNearest(spotSources, SPOT_SLOT_COUNT, camera.position, spotChoice, spotChoiceDistance);
+    for (let slot = 0; slot < spotSlots.length; slot++) {
+      const light = spotSlots[slot];
+      if (!light) continue;
+      const sourceIndex = spotChoice[slot];
+      const source = sourceIndex === undefined ? undefined : spotSources[sourceIndex];
+      if (!source) {
+        light.intensity = 0;
+        continue;
+      }
+      light.position.copy(source.getWorldPosition(sourceWorld));
+      light.target.position.copy(source.target.getWorldPosition(targetWorld));
+      light.color.copy(source.color);
+      light.intensity = source.intensity;
+      light.distance = source.distance;
+      light.angle = source.angle;
+      light.penumbra = source.penumbra;
+      light.decay = source.decay;
+    }
+    pickNearest(pointSources, POINT_SLOT_COUNT, camera.position, pointChoice, pointChoiceDistance);
+    for (let slot = 0; slot < pointSlots.length; slot++) {
+      const light = pointSlots[slot];
+      if (!light) continue;
+      const sourceIndex = pointChoice[slot];
+      const source = sourceIndex === undefined ? undefined : pointSources[sourceIndex];
+      if (!source) {
+        light.intensity = 0;
+        continue;
+      }
+      light.position.copy(source.getWorldPosition(sourceWorld));
+      light.color.copy(source.color);
+      light.intensity = source.intensity;
+      light.distance = source.distance;
+      light.decay = source.decay;
+    }
+  };
 
   let yaw = camera.rotation.y;
   let pitch = camera.rotation.x;
@@ -234,6 +369,7 @@ export function bootPoiGallery(): void {
     scene.traverse((object) => {
       if (object.userData.poiRoof === true) object.visible = roofsVisible;
     });
+    renderer.shadowMap.needsUpdate = true;
     return roofsVisible;
   };
 
@@ -289,7 +425,7 @@ export function bootPoiGallery(): void {
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(pixelRatio() * adaptiveScale);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
   });
 
@@ -297,10 +433,29 @@ export function bootPoiGallery(): void {
   const right = new THREE.Vector3();
   const movement = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
+  /**
+   * Interiors are fill-rate bound: the same frame costs 48 ms at the full pixel
+   * budget and 17 ms at half of it. The game's controller is reused rather than
+   * reinvented, fed the frame period instead of a GPU timer query — this viewer is
+   * GPU-bound by construction, so the two agree, and 'acceptable' already targets
+   * the 30 Hz presentation a prototype walkthrough wants. Its 0.8 floor bottoms out
+   * at exactly 1280x720 of the 1600x900 budget.
+   */
+  const adaptive = new AdaptiveResolutionController('acceptable');
+  let adaptiveScale = 1;
+  const sampleFrameCost = (frameMs: number): void => {
+    if (adaptive.sample(frameMs, true, true, performance.now()) === null) return;
+    if (adaptive.scale === adaptiveScale) return;
+    adaptiveScale = adaptive.scale;
+    renderer.setPixelRatio(pixelRatio() * adaptiveScale);
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  };
   let previous = performance.now();
   const render = (now: number): void => {
-    const delta = Math.min(0.05, (now - previous) / 1000);
+    const frameMs = now - previous;
+    const delta = Math.min(0.05, frameMs / 1000);
     previous = now;
+    sampleFrameCost(frameMs);
     camera.getWorldDirection(forward);
     forward.y = 0;
     if (forward.lengthSq() > 0.001) forward.normalize();
@@ -317,6 +472,7 @@ export function bootPoiGallery(): void {
       camera.position.addScaledVector(movement.normalize(), speed * delta);
       camera.position.y = Math.max(0.3, Math.min(95, camera.position.y));
     }
+    updateLightSlots();
     renderer.render(scene, camera);
     requestAnimationFrame(render);
   };

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeFlatMaterial } from '../render/materials';
 
 export interface PoiVariantDefinition {
@@ -1822,6 +1823,65 @@ function validateDoorClearances(root: THREE.Group): void {
       if (window) throw new Error(`${root.name}: light switch overlaps ${window.label}`);
     }
   });
+}
+
+/**
+ * Collapses a prototype's static meshes into one mesh per material.
+ *
+ * A prototype is 100-250 individually positioned boxes and cylinders, and every
+ * one of them is a draw call in both the shadow and the colour pass. Twenty-six of
+ * them at once measured 4020 calls a frame — ~30 ms of pure command submission on
+ * an Intel N100, with only 82k triangles behind it. Materials and geometries are
+ * already shared through the caches above, so baking each group's world matrices
+ * into a single buffer costs nothing visually and cuts the call count by ~10x.
+ *
+ * Meshes that must keep their identity are left alone: roof panels (the viewer
+ * hides them), light switches (raycast targets carrying the toggle closure), door
+ * obstacles (clearance metadata) and anything with a one-off material, such as the
+ * bulbs whose emissive intensity follows their switch.
+ *
+ * Call it on a finished root, before it is positioned in the world.
+ */
+export function mergePoiStatics(root: THREE.Group): void {
+  root.updateMatrixWorld(true);
+  const groups = new Map<THREE.Material, THREE.Mesh[]>();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    if (object.userData.poiRoof === true) return;
+    if (typeof object.userData.poiLightToggle === 'function') return;
+    if (typeof object.userData.poiDoorObstacle === 'string') return;
+    if (Array.isArray(object.material)) return;
+    const group = groups.get(object.material);
+    if (group) group.push(object);
+    else groups.set(object.material, [object]);
+  });
+  for (const [material, meshes] of groups) {
+    if (meshes.length < 2) continue;
+    const indexed = meshes.every((mesh) => mesh.geometry.index !== null);
+    const parts: THREE.BufferGeometry[] = [];
+    for (const mesh of meshes) {
+      let geometry = mesh.geometry.clone();
+      for (const name of Object.keys(geometry.attributes)) {
+        if (name !== 'position' && name !== 'normal' && name !== 'uv') geometry.deleteAttribute(name);
+      }
+      if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+      const position = geometry.getAttribute('position');
+      if (!geometry.getAttribute('uv')) {
+        geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(position.count * 2), 2));
+      }
+      if (!indexed && geometry.index) geometry = geometry.toNonIndexed();
+      geometry.applyMatrix4(mesh.matrixWorld);
+      parts.push(geometry);
+    }
+    const merged = mergeGeometries(parts, false);
+    for (const part of parts) part.dispose();
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+    for (const original of meshes) original.removeFromParent();
+  }
 }
 
 export const POI_VARIANTS: readonly PoiVariantDefinition[] = [
