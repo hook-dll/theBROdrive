@@ -43,6 +43,7 @@ import {
   bonnetPart,
   bonnetSlotKind,
   bonnetWaterCapacity,
+  partContainer,
   hasServiceSlot,
 } from '../vehicle/bonnet';
 import { radiatorFit } from '../vehicle/cooling';
@@ -270,6 +271,48 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
     default:
       return null;
   }
+}
+
+/**
+ * Where a resolved reservoir actually lives, and therefore which delta a pour
+ * writes. A fitted container's level belongs to the CAR; a detached one carries it
+ * on the part; a can carries its own.
+ */
+type AimedReservoir = Reservoir &
+  (
+    | { readonly sink: 'car'; readonly carId: string }
+    | { readonly sink: 'loose-part'; readonly partId: string }
+    | { readonly sink: 'loose-can'; readonly itemId: string }
+  );
+
+/**
+ * The reservoir of a container lying in the world, or null when the part holds no
+ * fluid at all (a turbine, a wheel, a mirror).
+ *
+ * A detached tank is labelled by what is IN it, falling back to `fuel` because a
+ * bare tank has no engine to prefer a fuel for it. It still accepts either, so a
+ * mis-fuel is as available here as it is under the bonnet — and so is the recovery,
+ * since the tank is already out of the car.
+ */
+function loosePartReservoir(part: PartInstance): Reservoir | null {
+  const container = partContainer(part);
+  if (container === null) return null;
+  const level = part.litres ?? 0;
+  if (container.channel === 'fuel') {
+    const kind = part.fuelKind ?? null;
+    return {
+      label: kind === 'mixed' ? 'mixed fuel' : (kind ?? 'fuel'),
+      level,
+      capacity: container.capacity,
+      wants: kind === 'petrol' || kind === 'diesel' ? kind : 'petrol',
+    };
+  }
+  return {
+    label: container.channel,
+    level,
+    capacity: container.capacity,
+    wants: container.channel,
+  };
 }
 
 interface Resolved {
@@ -866,12 +909,25 @@ export class Interaction {
       if (!part) return null;
       const toolPrompt = this.toolPrompt(held, part);
       if (toolPrompt) return toolPrompt;
-      return `[F] pick up ${conditionPrefix(part)}${variant(part.variantId).label}`;
+      // A container on the ground offers the pour first: holding a can over a
+      // dry engine means one thing, and picking it up is still [F].
+      const reservoir = held?.type === 'fluid_can' ? this.aimedReservoir(resolved) : null;
+      if (reservoir) return this.pourPrompt(held as FluidCanItem, reservoir);
+      const container = loosePartReservoir(part);
+      const holding = container ? ` — ${fillReadout(container)}` : '';
+      return `[F] pick up ${conditionPrefix(part)}${variant(part.variantId).label}${holding}`;
     }
 
     if (t.kind === 'loose-item') {
       const item = this.world.state.looseItems[t.itemId]?.item;
       if (!item) return null;
+      // Can-to-can: the same gesture as filling a tank, so a five-litre oil can
+      // found half full can be consolidated instead of carried twice. A held can is
+      // in the pack, never in the loose field, so it can never be its own target.
+      if (held?.type === 'fluid_can' && item.type === 'fluid_can') {
+        const reservoir = this.aimedReservoir(resolved);
+        if (reservoir) return this.pourPrompt(held, reservoir);
+      }
       return `[F] pick up ${itemLabel(item)}`;
     }
 
@@ -1002,12 +1058,38 @@ export class Interaction {
   }
 
   /**
-   * The reservoir under the crosshair: a fitted engine, radiator or fuel tank
-   * in an OPENED bonnet. Both the level readout and the pour resolve through this
-   * one method, so the two can never disagree about which tank you are looking at.
+   * The reservoir under the crosshair. Three kinds resolve here so that the level
+   * readout and the pour can never disagree about which container you are looking
+   * at: a fitted engine, radiator or tank in an OPENED bonnet; the same three parts
+   * lying loose in the world; and a can on the ground.
+   *
+   * Filling a part before it is installed is the point of the loose cases. A wreck
+   * gives up a dry engine, you top it up where it lies, and the car it goes into
+   * receives that oil through the normal installation transfer (`moveSlotFluid` in
+   * game/state.ts) instead of needing a second trip with the can.
    */
-  private aimedReservoir(resolved: Resolved): (Reservoir & { readonly carId: string }) | null {
+  private aimedReservoir(resolved: Resolved): AimedReservoir | null {
     const t = resolved.target;
+    if (t.kind === 'loose-part') {
+      const part = this.world.state.looseParts[t.partId]?.part;
+      if (!part) return null;
+      const reservoir = loosePartReservoir(part);
+      return reservoir ? { ...reservoir, sink: 'loose-part', partId: t.partId } : null;
+    }
+    if (t.kind === 'loose-item') {
+      const item = this.world.state.looseItems[t.itemId]?.item;
+      if (item?.type !== 'fluid_can') return null;
+      return {
+        label: `${item.fluid} can`,
+        level: item.litres,
+        capacity: item.capacity,
+        // A can holds one fluid and mixes nothing: topping up a petrol can from a
+        // diesel one has no fiction behind it and no recovery from it.
+        wants: item.fluid,
+        sink: 'loose-can',
+        itemId: t.itemId,
+      };
+    }
     if (t.kind !== 'storage' || t.side !== 'bonnet' || t.owner !== 'car' || t.cell === null) {
       return null;
     }
@@ -1015,7 +1097,7 @@ export class Interaction {
     const car = this.world.state.cars[t.id];
     if (!car) return null;
     const reservoir = bonnetReservoir(car, resolved.vehicle.stats, t.cell);
-    return reservoir ? { ...reservoir, carId: t.id } : null;
+    return reservoir ? { ...reservoir, sink: 'car', carId: t.id } : null;
   }
 
   /**
@@ -1172,33 +1254,62 @@ export class Interaction {
 
     const reservoir = this.aimedReservoir(resolved);
     if (!reservoir || !reservoirAccepts(reservoir, can.fluid)) return;
-    const car = this.world.state.cars[reservoir.carId];
-    if (!car) return;
 
     const room = reservoir.capacity - reservoir.level;
     if (room <= FLUID_FULL_EPSILON) return;
     const poured = Math.min(FLUID_POUR_RATE * dt, can.litres, room);
     if (poured <= 0) return;
 
+    const level = reservoir.level + poured;
+    // A dry container takes the identity of whatever went in first; anything else on
+    // top of a different fuel is a mixture the engine will refuse to run on. Same
+    // rule fitted or loose, so pouring diesel into a petrol tank on the ground is
+    // the same mistake with the same recovery.
+    const fuelKind = (existing: FuelType | 'mixed' | null): FuelType | 'mixed' =>
+      reservoir.level <= FLUID_FULL_EPSILON || existing === can.fluid
+        ? (can.fluid as FuelType)
+        : 'mixed';
+
+    switch (reservoir.sink) {
+      case 'car': {
+        const car = this.world.state.cars[reservoir.carId];
+        if (!car) return;
+        if (isFuel(can.fluid)) {
+          this.world.apply({
+            t: 'car_fuel',
+            carId: reservoir.carId,
+            litres: level,
+            fuelKind: fuelKind(car.fuelKind),
+          });
+        } else {
+          // Oil and water accept nothing but themselves, so the can names the channel.
+          this.world.apply({
+            t: 'car_fluid',
+            carId: reservoir.carId,
+            fluid: can.fluid,
+            litres: level,
+          });
+        }
+        break;
+      }
+      case 'loose-part': {
+        const part = this.world.state.looseParts[reservoir.partId]?.part;
+        if (!part) return;
+        this.world.apply({
+          t: 'loose_part_fluid',
+          partId: reservoir.partId,
+          litres: level,
+          fuelKind: isFuel(can.fluid) ? fuelKind(part.fuelKind ?? null) : undefined,
+        });
+        break;
+      }
+      case 'loose-can': {
+        this.world.apply({ t: 'loose_item_fluid', itemId: reservoir.itemId, litres: level });
+        break;
+      }
+    }
     can.litres -= poured;
     this.continuous = 'pour';
-    const level = reservoir.level + poured;
-    const carId = reservoir.carId;
-    if (isFuel(can.fluid)) {
-      // The can is fuel and the reservoir accepted it, so this is the fuel tank.
-      // A dry tank takes the identity of whatever went in first; anything else on
-      // top of a different fuel is a mixture the engine will refuse to run on.
-      const fuelKind =
-        reservoir.level <= FLUID_FULL_EPSILON
-          ? can.fluid
-          : car.fuelKind === can.fluid
-            ? can.fluid
-            : 'mixed';
-      this.world.apply({ t: 'car_fuel', carId, litres: level, fuelKind });
-    } else {
-      // Oil and water accept nothing but themselves, so the can names the channel.
-      this.world.apply({ t: 'car_fluid', carId, fluid: can.fluid, litres: level });
-    }
   }
 
   private mount(resolved: Resolved): void {
