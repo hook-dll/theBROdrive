@@ -48,11 +48,13 @@ const LAND_FLARE = 4;
 const HOME_RADIUS = 60;
 const HOME_RADIUS_SQ = HOME_RADIUS * HOME_RADIUS;
 
-/** Alert radius grows with player speed: on foot you can creep close, but a car
- *  startles birds from well outside. Base is metres, `ALERT_PER_MS` is metres per m/s. */
-const ALERT_BASE = 14;
-const ALERT_PER_MS = 1.5;
-const ALERT_MAX = 70;
+/** Alert radius grows with player speed. At road speed it provides several seconds
+ *  of clearance before the car reaches the flock, even after the stagger below. */
+const ALERT_BASE = 22;
+const ALERT_PER_MS = 2.8;
+const ALERT_MAX = 130;
+const ALERT_DELAY_MIN = 0.08;
+const ALERT_DELAY_SPAN = 0.28;
 
 /** A gunshot startles perched birds within this radius of the muzzle. */
 const STARTLE_RADIUS = 45;
@@ -73,23 +75,15 @@ const SALT_JITTER = 0xe6f1;
 const SALT_AIR = 0xf7a2;
 const SALT_YAW = 0x1803;
 const SALT_BUDGET = 0x2944;
+const SALT_ALERT_DELAY = 0x35b7;
+const SALT_TAKEOFF_FAN = 0x46c9;
 
-// Perches. Birds rest ON THE ROAD, and the reason is exactness rather than romance.
+// Perches. Small roadside species rest ON THE ROAD, whose exact surface is known at
+// arbitrary points. Large soaring species never enter a perched or landing state.
 //
-// They used to rest on *approximations* of the pole line and the cacti — a height and
-// a lateral offset that a pole or a cactus would plausibly have, deliberately never
-// reading another provider's chunk content. The trouble is that a plausible perch is
-// not a perch: the pole line runs down ONE side at a fixed 6 m and only every few
-// dozen metres, and the cactus scatter puts a plant roughly once per thousand square
-// metres, so a bird placed at "cactus height, 34 to 94 m out" was almost never on a
-// cactus. It was sitting on nothing, six or two metres up, which is exactly what it
-// looked like.
-//
-// The road is the one surface in the world whose height is known EXACTLY at an
-// arbitrary point — `heightFromFrame` inside the corridor returns `roadSurfaceY`, the
-// same function the ribbon's own vertices come from, camber, bumps and potholes
-// included. A bird standing on it cannot hover, and a flock scattering off the asphalt
-// as a car comes is worth more than one perched on scenery that is not there.
+// Approximate pole and cactus perches were rejected because most put birds on empty
+// air. The road height comes from the same function as the ribbon vertices, including
+// camber, bumps and potholes, so the remaining roadside birds stand on real geometry.
 /** Widest lateral offset a bird stands at: on the asphalt, clear of the shoulder. */
 const PERCH_LATERAL = ROAD_HALF_WIDTH - 0.5;
 /** Metres of road a flock is strung along, so it is a scatter and not a line. */
@@ -124,6 +118,7 @@ interface SpeciesDef {
   readonly bankGain: number;
   readonly climbRate: number;
   readonly airborneBias: number;
+  readonly canPerch: boolean;
   /** Shader-side proportions: length, span, rearward wing sweep and body depth. */
   readonly bodyLength: number;
   readonly wingSpan: number;
@@ -134,42 +129,42 @@ interface SpeciesDef {
 const SPECIES: readonly SpeciesDef[] = [
   {
     name: 'crow', mass: 0.45, scale: 0.9, color: 0x302b27,
-    cruiseSpeed: 9, cruiseAlt: 16, flapRate: 9.5, flapDepth: 0.88, wingPose: 0.03,
+    cruiseSpeed: 7, cruiseAlt: 16, flapRate: 9.5, flapDepth: 0.88, wingPose: 0.03,
     flightStyle: 'steady', animationPeriod: 1, behavior: 'wander',
     minCount: 2, maxCount: 5, flightBudget: 24, turnRate: 2.2, bankGain: 0.35,
-    climbRate: 5, airborneBias: 0.35,
+    climbRate: 5, airborneBias: 0.35, canPerch: true,
     bodyLength: 1, wingSpan: 0.96, wingSweep: 0.03, bodyDepth: 1,
   },
   {
     name: 'vulture', mass: 9.2, scale: 2.6, color: 0x29231d,
-    cruiseSpeed: 7, cruiseAlt: 55, flapRate: 3.2, flapDepth: 0.7, wingPose: 0.12,
+    cruiseSpeed: 6.2, cruiseAlt: 90, flapRate: 3.2, flapDepth: 0.7, wingPose: 0.12,
     flightStyle: 'soar', animationPeriod: 7.2, behavior: 'circle',
     minCount: 1, maxCount: 3, flightBudget: 120, turnRate: 0.7, bankGain: 0.6,
-    climbRate: 2.5, airborneBias: 0.85,
+    climbRate: 2.5, airborneBias: 1, canPerch: false,
     bodyLength: 1.16, wingSpan: 1.3, wingSweep: 0.08, bodyDepth: 1.05,
   },
   {
     name: 'sparrow', mass: 0.03, scale: 0.38, color: 0x806a45,
-    cruiseSpeed: 11, cruiseAlt: 10, flapRate: 17, flapDepth: 0.96, wingPose: -0.02,
+    cruiseSpeed: 7.5, cruiseAlt: 10, flapRate: 17, flapDepth: 0.96, wingPose: -0.02,
     flightStyle: 'burst', animationPeriod: 1.45, behavior: 'wander',
     minCount: 3, maxCount: 7, flightBudget: 16, turnRate: 3.4, bankGain: 0.28,
-    climbRate: 6, airborneBias: 0.3,
+    climbRate: 5, airborneBias: 0.3, canPerch: true,
     bodyLength: 0.78, wingSpan: 0.76, wingSweep: 0.04, bodyDepth: 0.88,
   },
   {
     name: 'hawk', mass: 1.05, scale: 1.3, color: 0x6a4e32,
-    cruiseSpeed: 12, cruiseAlt: 36, flapRate: 5.8, flapDepth: 0.78, wingPose: 0.08,
+    cruiseSpeed: 8.5, cruiseAlt: 65, flapRate: 5.8, flapDepth: 0.78, wingPose: 0.08,
     flightStyle: 'soar', animationPeriod: 5.4, behavior: 'circle',
     minCount: 1, maxCount: 2, flightBudget: 72, turnRate: 1.35, bankGain: 0.52,
-    climbRate: 4.2, airborneBias: 0.72,
+    climbRate: 3.4, airborneBias: 1, canPerch: false,
     bodyLength: 1.02, wingSpan: 1.14, wingSweep: 0.15, bodyDepth: 0.94,
   },
   {
     name: 'swallow', mass: 0.02, scale: 0.34, color: 0x263b43,
-    cruiseSpeed: 16, cruiseAlt: 20, flapRate: 20, flapDepth: 0.82, wingPose: -0.04,
+    cruiseSpeed: 13, cruiseAlt: 20, flapRate: 20, flapDepth: 0.82, wingPose: -0.04,
     flightStyle: 'burst', animationPeriod: 1.05, behavior: 'wander',
     minCount: 4, maxCount: 8, flightBudget: 27, turnRate: 4.4, bankGain: 0.34,
-    climbRate: 7, airborneBias: 0.62,
+    climbRate: 6, airborneBias: 1, canPerch: false,
     bodyLength: 0.72, wingSpan: 1.08, wingSweep: 0.22, bodyDepth: 0.76,
   },
 ];
@@ -663,7 +658,7 @@ export class BirdFlock {
     b.landY = perchY;
     b.landZ = pz;
 
-    const airborne = hash01(seed, g, k, SALT_AIR) < sp.airborneBias;
+    const airborne = !sp.canPerch || hash01(seed, g, k, SALT_AIR) < sp.airborneBias;
     if (airborne) {
       b.state = 'flying';
       b.y = groundY + sp.cruiseAlt;
@@ -704,7 +699,7 @@ export class BirdFlock {
         const dz = b.z - pz;
         if (dx * dx + dy * dy + dz * dz < alertRadiusSq) {
           b.state = 'alerted';
-          b.stateTimer = 0.3;
+          b.stateTimer = this.alertDelay(b);
         }
         break;
       }
@@ -738,7 +733,7 @@ export class BirdFlock {
         }
         b.flightBudget -= dt;
         this.fly(b, dt);
-        if (b.flightBudget <= 0) {
+        if (b.flightBudget <= 0 && sp.canPerch) {
           b.state = 'landing';
           b.landX = b.perchX;
           b.landY = b.perchY;
@@ -770,10 +765,18 @@ export class BirdFlock {
       ax /= len;
       az /= len;
     }
-    b.yaw = Math.atan2(ax, az);
+    // A deterministic fan prevents a flock from stacking into one silhouette after
+    // a simultaneous startle. The angle stays broadly away from the approaching car.
+    const fan =
+      (hash01(this.seed, b.group, b.wanderSalt, SALT_TAKEOFF_FAN) - 0.5) * 0.9;
+    const cf = Math.cos(fan);
+    const sf = Math.sin(fan);
+    const fx = ax * cf + az * sf;
+    const fz = -ax * sf + az * cf;
+    b.yaw = Math.atan2(fx, fz);
     b.targetYaw = b.yaw;
-    b.vx = ax * b.species.cruiseSpeed;
-    b.vz = az * b.species.cruiseSpeed;
+    b.vx = fx * b.species.cruiseSpeed;
+    b.vz = fz * b.species.cruiseSpeed;
     b.vy = b.species.climbRate;
     b.wanderTimer = 1.5;
   }
@@ -891,6 +894,11 @@ export class BirdFlock {
     if (b.y < floor) b.y = floor;
   }
 
+  private alertDelay(b: Bird): number {
+    return ALERT_DELAY_MIN +
+      hash01(this.seed, b.group, b.wanderSalt, SALT_ALERT_DELAY) * ALERT_DELAY_SPAN;
+  }
+
   private startleNear(ox: number, oy: number, oz: number): void {
     for (let i = 0; i < this.activeCount; i++) {
       const b = this.birds[i]!;
@@ -900,7 +908,7 @@ export class BirdFlock {
       const dz = b.z - oz;
       if (dx * dx + dy * dy + dz * dz < STARTLE_RADIUS_SQ && b.state === 'perched') {
         b.state = 'alerted';
-        b.stateTimer = 0.3;
+        b.stateTimer = this.alertDelay(b);
       }
     }
   }

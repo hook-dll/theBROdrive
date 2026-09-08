@@ -470,7 +470,9 @@ export class InputReader {
     f.preciseSteering = preciseDrive;
 
     const taps = this.touch?.consumeTaps();
-    if (this.anyPressed(this.keys.handbrake)) this.keyboardHandbrake = !this.keyboardHandbrake;
+    if (this.anyPressed(this.keys.handbrake) || taps?.handbrake === true) {
+      this.keyboardHandbrake = !this.keyboardHandbrake;
+    }
     f.handbrake = this.keyboardHandbrake;
     f.shift =
       (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
@@ -481,16 +483,18 @@ export class InputReader {
     f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
     f.cycleTyres = this.anyPressed(this.keys.tyres);
     f.togglePreciseSteer = this.anyPressed(this.keys.mouseSteer);
-    f.toggleAutopilot = this.anyPressed(this.keys.autopilot);
+    f.toggleAutopilot =
+      this.anyPressed(this.keys.autopilot) || taps?.autopilot === true;
     f.recenterCamera =
       this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
     f.radioToggle = this.anyPressed(this.keys.radio);
-    f.radioNext = this.anyPressed(this.keys.radioStation) || taps?.radioNext === true;
+    f.radioNext = this.anyPressed(this.keys.radioStation);
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
-    f.useHeld = this.anyPressed(this.keys.useHeld);
+    f.useHeld = this.anyPressed(this.keys.useHeld) || taps?.useHeld === true;
     f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
-    f.removeWearable = this.anyPressed(this.keys.removeWearable);
+    f.removeWearable =
+      this.anyPressed(this.keys.removeWearable) || taps?.removeWearable === true;
     // Both buttons are pedals while precise control is active, so they must not also
     // fire or aim the held item. The mode is enabled only while driving, so on foot
     // this is exactly the ordinary behavior.
@@ -509,8 +513,8 @@ export class InputReader {
         break;
       }
     }
-    // On foot the wheel supplies left/right and the pedals supply forward/backward.
-    // Digital keys win only on the axis they currently hold.
+    // On foot the pedals retain forward/backward movement while camera look moves to
+    // the left joystick. Digital keys remain authoritative on each movement axis.
     const keyMoveX =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     const keyMoveZ =

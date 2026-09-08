@@ -132,6 +132,8 @@ const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
 const C_GROUND = new THREE.Color().setStyle('#d8a45c'); // warm ochre sand bounce
 const C_NIGHT_GROUND = new THREE.Color().setStyle('#0a0c14');
+/** Daylight sky illumination gain; the warm ground bounce is compensated below. */
+const DAY_SKY_FILL_BOOST = 1.5;
 
 // ---------------------------------------------------------------------------
 // Twilight moods
@@ -482,7 +484,9 @@ void main() {
   float sunEdge = cos(uSunAngularRadius);
   float sunAa = max(fwidth(sd) * 0.5, 0.0000001);
   float disc = smoothstep(sunEdge - sunAa, sunEdge + sunAa, sd);
-  float glow = pow(max(sd, 0.0), 6.0) * 0.45 + pow(max(sd, 0.0), 48.0) * 1.5;
+  // Keep the white-hot centre, but concentrate both lobes so the clipped region
+  // does not spread across a large part of a clear high-altitude sky.
+  float glow = pow(max(sd, 0.0), 12.0) * 0.45 + pow(max(sd, 0.0), 96.0) * 1.5;
   col += uSunColor * disc * 2.0;
   col += uSunGlowColor * glow * uSunGlowIntensity;
 
@@ -935,19 +939,24 @@ export class Sky {
 
     // Diffuse sky/ground bounce retains real day-to-night ratios; analytic
     // exposure, not an arbitrary night floor, makes dark-adapted silhouettes.
+    // Daylight receives 50% more SKY fill, while reciprocal compensation keeps
+    // the warm sand bounce at its former energy. This opens upward and vertical
+    // shadow detail with a blue-cyan cast without touching the direct Sun,
+    // shadow map, or global exposure.
+    const skyFillBoost = 1 + (DAY_SKY_FILL_BOOST - 1) * day;
     this._hemiSky.copy(C_DAY_ZENITH)
-      .offsetHSL(g.skyHueShift * 0.5, 0.02, 0.0)
-      .lerp(C_DAY_HORIZON, 0.4)
-      // A trace of the Sun's warm white in the diffuse sky bounce keeps nominally
-      // neutral surfaces from reading cold without turning the scene amber.
-      .lerp(C_SUN_HIGH, 0.055)
+      .offsetHSL(g.skyHueShift * 0.5, 0.025, 0.0)
+      .lerp(C_DAY_HORIZON, 0.32)
+      .lerp(C_SUN_HIGH, 0.025)
       .lerp(C_NIGHT_ZENITH, night);
-    this._hemiGround.copy(C_GROUND).lerp(C_NIGHT_GROUND, night);
+    this._hemiGround.copy(C_GROUND)
+      .lerp(C_NIGHT_GROUND, night)
+      .multiplyScalar(1 / skyFillBoost);
     this.hemiLight.color.copy(this._hemiSky);
     this.hemiLight.groundColor.copy(this._hemiGround);
     this.hemiLight.intensity =
       (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
-      GRAPHICS_CONFIG.hemisphereIntensityScale;
+      GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
 
     this.refreshEnvironment();
 

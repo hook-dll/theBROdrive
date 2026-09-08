@@ -364,6 +364,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform vec2 uResolution;
   uniform float uTime;
   uniform float uStrength;
+  uniform float uDaylight;
   uniform float uEyeAbove;
   uniform float uHorizon;
   uniform mat3 uCameraRotation;
@@ -582,6 +583,41 @@ export const HAZE_FRAGMENT = /* glsl */ `
     }
     vec4 color = texture2D(tDiffuse, uv);
 
+    // ACES' toe is intentionally cinematic, but in a sunlit desert it crushed
+    // backlit paint and props into the same near-black. A small display-space
+    // expansion restores separation inside dark colours without lifting true
+    // black, changing highlights, or touching the renderer's exposure.
+    float sceneLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float toeWeight = (1.0 - smoothstep(0.06, 0.42, sceneLum)) * uDaylight * 0.11;
+    color.rgb = mix(color.rgb, sqrt(max(color.rgb, vec3(0.0))), toeWeight);
+
+    // A thin sand veil where the sight line has crossed kilometres of desert air.
+    // Real scene depth keeps the foreground, cabin and car untouched; a narrow fade
+    // above the geometric horizon lets the suspended dust soften that boundary
+    // without tinting the open sky. This complements the world's distance fog rather
+    // than replacing it, so regional haze and view-distance settings remain sovereign.
+    float airDistance = -perspectiveDepthToViewZ(texture2D(tDepth, uv).x);
+    float horizonAir =
+      1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, vUv.y);
+    float sandVeil =
+      smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
+    color.rgb = mix(color.rgb, vec3(0.78, 0.69, 0.56), sandVeil);
+
+    // ACES has already supplied the filmic shoulder and soft contrast in the scene
+    // pass. This display-space finish stays deliberately smaller: a modest
+    // luminance-preserving colour separation, then warm highlights against slightly
+    // cooler shadows. It enriches the desert palette without installing a second
+    // tone mapper or clipping the shoulder ACES just made.
+    float gradeLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    color.rgb = mix(vec3(gradeLum), color.rgb, 1.055);
+    float highlightWarmth = smoothstep(0.16, 0.82, gradeLum);
+    color.rgb *= mix(
+      vec3(0.993, 0.998, 1.006),
+      vec3(1.012, 1.003, 0.985),
+      highlightWarmth
+    );
+    color.rgb = clamp(color.rgb, 0.0, 1.0);
+
     // Ink is ground treatment. Rendering it only below the horizon leaves the sky
     // (including every star point) outside the outline pass by construction.
     if (uInkStrength > 0.0 && vUv.y <= uHorizon) {
@@ -590,6 +626,18 @@ export const HAZE_FRAGMENT = /* glsl */ `
       // black lines on sand read as dirt, dark-sand lines read as ink.
       color.rgb = mix(color.rgb, color.rgb * 0.34, ink);
     }
+
+    // Sub-code-value film grain: visible as texture in broad flat areas, never as
+    // snow. The seed advances at 12 Hz rather than every display frame so a high
+    // refresh-rate panel does not turn this tiny texture into rapid scintillation.
+    float grainFrame = mod(floor(uTime * 12.0), 64.0);
+    vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
+    float grain =
+      fract(52.9829189 * fract(dot(grainPixel, vec2(0.06711056, 0.00583715)))) - 0.5;
+    float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float grainMask =
+      smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
+    color.rgb = clamp(color.rgb + grain * grainMask * 0.0042, 0.0, 1.0);
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
     // retained channels stay bright while the others are absorbed.
@@ -733,9 +781,9 @@ export class Renderer {
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
-    // pass for the authored colour handling and ink. Acceptable suppresses only the
-    // haze warp; standard and blessing sample the resolved depth so nearby geometry
-    // never inherits a horizon-shaped screen mask.
+    // pass for authored colour, restrained film grain and ink. Acceptable suppresses
+    // only the haze warp; standard and blessing sample the resolved depth so nearby
+    // geometry never inherits a horizon-shaped screen mask.
     // The independent MSAA setting decides geometry-edge samples.
     const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
     hazeDepth.minFilter = THREE.NearestFilter;
@@ -761,6 +809,7 @@ export class Renderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uTime: { value: 0 },
         uStrength: { value: 0 },
+        uDaylight: { value: 0 },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
@@ -1006,7 +1055,9 @@ export class Renderer {
    * agrees on.
    */
   setHazeStrength(strength: number): void {
-    const wanted = this.quality === 'acceptable' ? 0 : strength;
+    const daylight = Math.min(1, Math.max(0, strength));
+    this.hazeMaterial.uniforms.uDaylight.value = daylight;
+    const wanted = this.quality === 'acceptable' ? 0 : daylight;
     const active = Math.min(1, Math.max(0, wanted));
     this.hazeMaterial.uniforms.uStrength.value = active;
     // A disabled warp never samples depth, so do not resolve the multisampled depth

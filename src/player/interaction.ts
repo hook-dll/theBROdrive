@@ -1220,12 +1220,7 @@ export class Interaction {
     if (car.dirt === oldDirt && car.scratches === oldScratches) return;
 
     this.continuous = 'scrub';
-    setCarBodyCondition(
-      resolved.vehicle.root,
-      car.dirt,
-      car.scratches,
-      resolved.vehicle.bodyDamage,
-    );
+    setCarBodyCondition(resolved.vehicle.root, car.dirt);
     this.conditionEmitTimer += dt;
     if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
       this.conditionEmitTimer = 0;

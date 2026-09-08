@@ -1568,12 +1568,13 @@ body.is-cinematic #ui {
 /* ------------------------------------------------------------------ *
  *  Touch controls (phones and tablets)                               *
  *                                                                    *
- *  A steering wheel and two pedals occupy the natural thumb zones.   *
- *  Face buttons remain above them; open canvas is camera drag space.  *
+ *  Wheel/look stick and pedals occupy the natural thumb zones. Face  *
+ *  buttons remain above them; open canvas is camera drag space.      *
  * ------------------------------------------------------------------ */
 
 .touch-ui {
   --touch-drive-size: clamp(116px, 32vh, 142px);
+  --touch-wheel-size: calc(var(--touch-drive-size) * 1.25);
   --touch-pedal-bank-width: clamp(138px, 20vw, 174px);
   --touch-pedal-height: clamp(80px, 24vh, 104px);
   --touch-button-size: clamp(44px, 12vh, 54px);
@@ -1583,9 +1584,11 @@ body.is-cinematic #ui {
   inset: 0;
   pointer-events: none;
   z-index: 20;
+  opacity: 0.7;
 }
 
-.touch-wheel {
+.touch-wheel,
+.touch-look-stick {
   position: fixed;
   left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
   bottom: calc(var(--touch-bottom-gap) + 12px);
@@ -1595,6 +1598,61 @@ body.is-cinematic #ui {
   touch-action: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.touch-wheel {
+  width: var(--touch-wheel-size);
+  height: var(--touch-wheel-size);
+}
+
+.touch-ui:not(.is-driving) .touch-wheel,
+.touch-ui.is-driving .touch-look-stick {
+  display: none;
+}
+
+.touch-look-stick {
+  border: 3px solid rgba(229, 220, 196, 0.72);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 0 46%, rgba(229, 220, 196, 0.16) 47% 49%, transparent 50%),
+    radial-gradient(circle, rgba(18, 15, 11, 0.42), rgba(18, 15, 11, 0.7));
+  box-shadow:
+    inset 0 0 0 2px rgba(8, 7, 5, 0.48),
+    0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.touch-look-stick::after {
+  content: 'LOOK';
+  position: absolute;
+  left: 50%;
+  bottom: -13px;
+  transform: translateX(-50%);
+  color: rgba(229, 220, 196, 0.72);
+  font-family: var(--hud-font);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+}
+
+.touch-look-stick-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48%;
+  height: 48%;
+  transform: translate(-50%, -50%);
+  border: 3px solid rgba(229, 220, 196, 0.78);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.16), transparent 34%),
+    rgba(31, 27, 21, 0.94);
+  box-shadow:
+    inset 0 0 0 2px rgba(8, 7, 5, 0.52),
+    0 3px 9px rgba(0, 0, 0, 0.34);
+  will-change: transform;
+}
+
+.touch-look-stick.is-active {
+  border-color: rgba(229, 220, 196, 0.94);
 }
 
 .touch-wheel::after {
@@ -1620,7 +1678,7 @@ body.is-cinematic #ui {
   box-shadow:
     inset 0 0 0 2px rgba(8, 7, 5, 0.58),
     0 4px 14px rgba(0, 0, 0, 0.3);
-  opacity: 0.82;
+  opacity: 1;
   will-change: transform;
 }
 
@@ -1774,9 +1832,17 @@ body.is-cinematic #ui {
     inset 0 0 0 1px rgba(8, 7, 5, 0.45),
     0 3px 9px rgba(0, 0, 0, 0.24);
   pointer-events: auto;
-  opacity: 0.72;
+  opacity: 1;
   touch-action: none;
   user-select: none;
+}
+
+.touch-zoom-fader {
+  display: none;
+}
+
+.touch-ui.is-driving.has-zoom .touch-zoom-fader {
+  display: block;
 }
 
 .touch-zoom-fader::before,
@@ -1831,7 +1897,7 @@ body.is-cinematic #ui {
   top: auto;
   bottom: calc(var(--touch-bottom-gap) + var(--touch-drive-size) + 36px);
   width: var(--touch-drive-size);
-  height: calc(var(--touch-button-size) * 1.95);
+  height: calc(var(--touch-button-size) * 2.9);
   pointer-events: none;
 }
 
@@ -1839,9 +1905,21 @@ body.is-cinematic #ui {
   left: calc(var(--touch-edge-gap) - 12px + env(safe-area-inset-left));
 }
 
+.touch-ui.is-driving .touch-buttons--left {
+  left: calc(
+    var(--touch-edge-gap) - 12px + env(safe-area-inset-left) +
+      (var(--touch-wheel-size) - var(--touch-drive-size)) / 2
+  );
+  bottom: calc(var(--touch-bottom-gap) + var(--touch-wheel-size) + 36px);
+}
+
 .touch-buttons--right {
   right: calc(var(--touch-edge-gap) + env(safe-area-inset-right));
-  height: calc(var(--touch-button-size) * 2.9);
+}
+
+.touch-ui:not(.is-driving) .touch-btn--drive,
+.touch-ui.is-driving .touch-btn--foot {
+  display: none;
 }
 
 .touch-btn {
@@ -1865,10 +1943,15 @@ body.is-cinematic #ui {
   font-weight: 700;
   line-height: 1;
   text-align: center;
-  opacity: 0.84;
+  opacity: 1;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
   user-select: none;
+}
+
+.touch-btn--wide-label {
+  font-size: 9px;
+  letter-spacing: -0.02em;
 }
 
 .touch-btn--top {
@@ -1936,7 +2019,7 @@ body.is-cinematic #ui {
   font-family: var(--hud-font);
   font-size: 10px;
   letter-spacing: 0.12em;
-  opacity: 0.72;
+  opacity: 1;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
   user-select: none;
