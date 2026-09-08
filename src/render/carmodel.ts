@@ -690,9 +690,13 @@ function takeOwnWheels(
     // Radius from the disc's own bounds, measured across whichever pair of axes is
     // the wheel's face. The axle is the SHORTEST extent — some packs model a wheel
     // about X, some about Z — so taking half of the largest extent is what makes
-    // this independent of the modeller's axis convention.
+    // this independent of the modeller's axis convention. A catalogue radius
+    // corrects source art whose wheelbase is accurate but tyres are not.
     const extents = [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
-    radii.set(id, (Math.max(...extents) / 2) * s);
+    const sourceRadius = Math.max(...extents) / 2;
+    const radius = def.wheelRadius ?? sourceRadius * s;
+    const wheelScale = radius / (sourceRadius * s);
+    radii.set(id, radius);
     positions.set(id, centre.clone().multiplyScalar(s));
 
     // The vehicle spins a wheel about X and steers it about Y, so the wheel's axle
@@ -718,7 +722,10 @@ function takeOwnWheels(
 
     const wrapper = new THREE.Group();
     wrapper.name = id;
-    wrapper.scale.setScalar(s);
+    // Resize only the rolling plane. Shrinking the axle axis pulled the rim face
+    // inward on the 2131 until the black tyre sidewall occluded it; tyre width and
+    // rim-face depth are independent of the corrected outside diameter.
+    wrapper.scale.set(s, s * wheelScale, s * wheelScale);
     wrapper.add(align);
     prepareMaterials(wrapper, false);
     objects.set(id, wrapper);
@@ -810,13 +817,18 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const wheels: WheelMeasure[] = [];
   for (const id of WHEEL_IDS) {
     const p = toLocal(parts.positions.get(id)!);
+    const isFront = id === 'wheel_fl' || id === 'wheel_fr';
+    const track = isFront ? def.frontWheelTrack : def.rearWheelTrack;
+    // Track is a chassis-local centre-to-centre measurement. Keep the authored
+    // side and axle position; only correct how far the wheel sits from centre.
+    if (track !== undefined) p[0] = Math.sign(p[0]) * track * 0.5;
     wheels.push({
       id,
       // RIDE_DROP_M lifts the mount in chassis space, which drops the body by the
       // same amount once the suspension settles onto its (unchanged) tyres.
       pos: [p[0], p[1] + RIDE_DROP_M, p[2]],
       radius: parts.radii.get(id)!,
-      isFront: id === 'wheel_fl' || id === 'wheel_fr',
+      isFront,
     });
   }
 
