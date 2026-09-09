@@ -169,8 +169,6 @@ export interface SuspensionTuning {
   readonly reboundRatio: number;
   /** Compression available past static sag before the bump stop shuts, metres. */
   readonly bumpTravel: number;
-  /** Clear air under the body, metres. Saloon 0.13-0.18, working vehicle 0.20-0.24. */
-  readonly rideHeight: number;
 }
 
 export const ENGINE_VARIANTS: readonly PartVariant[] = [

@@ -144,7 +144,6 @@ const SUSP_CAR: SuspensionTuning = {
   compressionRatio: 0.26,
   reboundRatio: 0.42,
   bumpTravel: 0.09,
-  rideHeight: 0.16,
 };
 
 /* ---- the Soviet families ----
@@ -182,7 +181,6 @@ const SUSP_VOLGA_21: SuspensionTuning = {
   compressionRatio: 0.18,
   reboundRatio: 0.3,
   bumpTravel: 0.1,
-  rideHeight: 0.127,
 };
 
 /** GAZ-24: the same layout fifteen years later, with dampers that work. */
@@ -192,7 +190,6 @@ const SUSP_VOLGA_24: SuspensionTuning = {
   compressionRatio: 0.2,
   reboundRatio: 0.34,
   bumpTravel: 0.1,
-  rideHeight: 0.112,
 };
 
 /**
@@ -207,7 +204,6 @@ const SUSP_ZHIGULI: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.095,
-  rideHeight: 0.114,
 };
 
 /**
@@ -222,7 +218,6 @@ const SUSP_ZHIGULI_ESTATE: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.09,
-  rideHeight: 0.12,
 };
 
 /**
@@ -237,7 +232,6 @@ const SUSP_SAMARA: SuspensionTuning = {
   compressionRatio: 0.28,
   reboundRatio: 0.42,
   bumpTravel: 0.085,
-  rideHeight: 0.096,
 };
 
 /**
@@ -253,7 +247,6 @@ const SUSP_NIVA: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.14,
-  rideHeight: 0.158,
 };
 
 /**
@@ -266,7 +259,6 @@ const SUSP_LADA_RALLY: SuspensionTuning = {
   compressionRatio: 0.32,
   reboundRatio: 0.48,
   bumpTravel: 0.12,
-  rideHeight: 0.152,
 };
 
 /**
@@ -284,7 +276,6 @@ const SUSP_SOFT: SuspensionTuning = {
   compressionRatio: 0.22,
   reboundRatio: 0.36,
   bumpTravel: 0.1,
-  rideHeight: 0.155,
 };
 
 /** "Sport" in this era means a firm saloon on stiffer dampers, not a modern chassis. */
@@ -294,7 +285,6 @@ const SUSP_SPORT: SuspensionTuning = {
   compressionRatio: 0.3,
   reboundRatio: 0.46,
   bumpTravel: 0.08,
-  rideHeight: 0.13,
 };
 
 /**
@@ -307,7 +297,6 @@ const SUSP_FASTBACK: SuspensionTuning = {
   compressionRatio: 0.32,
   reboundRatio: 0.48,
   bumpTravel: 0.075,
-  rideHeight: 0.12,
 };
 
 /**
@@ -321,7 +310,6 @@ const SUSP_TRUCK: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.11,
-  rideHeight: 0.22,
 };
 
 /* ---- weight distribution ----
@@ -436,6 +424,19 @@ export interface CarModelFit {
   readonly hoodPoint: readonly [number, number, number];
   readonly visualOffset: readonly [number, number, number];
 }
+/** Stock exterior and running-gear dimensions, metres. */
+export interface FactoryGeometry {
+  readonly length: number;
+  readonly width: number;
+  readonly height: number;
+  /** Minimum published ground clearance. */
+  readonly clearance: number;
+  readonly wheelbase: number;
+  readonly frontTrack: number;
+  readonly rearTrack: number;
+  readonly wheelRadius: number;
+}
+
 
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
@@ -477,27 +478,13 @@ export interface CarModelDef {
    */
   readonly glassMaterial?: string;
   readonly glassUvCell?: readonly [number, number];
-  /**
-   * Visual-only body lift as a fraction of wheel radius. Suspension, collider,
-   * centre of mass and wheel mounts remain unchanged.
-   */
-  readonly visualRideLiftWheelFraction?: number;
-  /**
-   * Body-only correction for a source mesh whose coachwork is not life-size on
-   * the wheelbase scale. Wheels stay at their measured factory geometry.
-   */
-  readonly bodyScaleX?: number;
-  readonly bodyScaleY?: number;
+  /** Factory geometry used to fit body, axles and tyres at load time. */
+  readonly factory: FactoryGeometry;
   /**
    * Candidate road Soviet wheel-set model ids. The selected source supplies style
    * only; this car's own factory radius and axle positions remain authoritative.
    */
   readonly wheelSetPool?: readonly string[];
-  /** Authored rolling radius in metres when the source wheel is not factory-sized. */
-  readonly wheelRadius?: number;
-  /** Factory wheel-centre track in metres; omitted to retain the source geometry. */
-  readonly frontWheelTrack?: number;
-  readonly rearWheelTrack?: number;
   /**
    * Set when the model carries its own wheels but under the modeller's names
    * (`Wheel_1`, `Cylinder006`, ...). The loader then finds the four discs by shape
@@ -566,7 +553,15 @@ export interface CarModelDef {
 /** Shared defaults; every entry below states only what makes it itself. */
 type Entry = Omit<
   CarModelDef,
-  'file' | 'fit' | 'scale' | 'suspension' | 'lights' | 'gizmoAnchors' | 'storageCells' | 'handlingProfile'
+  | 'file'
+  | 'fit'
+  | 'factory'
+  | 'scale'
+  | 'suspension'
+  | 'lights'
+  | 'gizmoAnchors'
+  | 'storageCells'
+  | 'handlingProfile'
 > & {
   /** Model file name within the pack directory named by `dir`. */
   readonly glb: string;
@@ -581,17 +576,49 @@ type Entry = Omit<
   readonly storageCells?: number;
 };
 
+/**
+ * Historical stock dimensions. Metric tyre radii come from the listed factory
+ * sizes; the three old inch-size vehicles retain their measured period-tyre radii.
+ * The 2105 rally keeps its 0.300 m competition tyre on the stock 2105 shell.
+ */
+const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
+  sv_gaz21:       { length: 4.830, width: 1.800, height: 1.620, clearance: 0.190, wheelbase: 2.700, frontTrack: 1.410, rearTrack: 1.420, wheelRadius: 0.365 },
+  sv_gaz24:       { length: 4.735, width: 1.800, height: 1.490, clearance: 0.174, wheelbase: 2.800, frontTrack: 1.470, rearTrack: 1.420, wheelRadius: 0.354 },
+  sv_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297 },
+  sv_vaz2102:     { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297 },
+  sv_vaz2103:     { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
+  sv_vaz2104:     { length: 4.115, width: 1.620, height: 1.443, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
+  sv_vaz2105:     { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
+  sv_vaz2105r:    { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.300 },
+  sv_vaz2106:     { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
+  sv_vaz2107:     { length: 4.128, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
+  sv_vaz2108:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
+  sv_vaz2109:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
+  sv_vaz21099:    { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
+  sv_niva:        { length: 3.720, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.200, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343 },
+  sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343 },
+  sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310 },
+  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260 },
+  sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.220, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.430 },
+  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.390, rearTrack: 1.370, wheelRadius: 0.288 },
+  gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288 },
+};
+
+function factoryGeometry(id: string): FactoryGeometry {
+  const geometry = FACTORY_GEOMETRY[id];
+  if (!geometry) throw new Error(`Model "${id}" is missing factory geometry`);
+  return geometry;
+}
+
 
 
 /**
  * Low Poly Soviet Car Pack — fifteen bodies, one FBX each, and the only pack in
  * the catalogue that is about the same cars this game is already about.
  *
- * They needed no conversion and no simplification. Every one is 4.0k-5.8k triangles,
- * modelled in real-world proportions, nose-first
- * down +Z the way this game drives, and carrying its own four wheels as separate
- * meshes — so `detectWheels` finds them by shape and the whole pack lands on the
- * standard path. FBXLoader reports them in centimetres.
+ * They needed no conversion and no simplification. Every one is 4.0k-5.8k
+ * triangles, nose-first down +Z, with four consistently named wheel meshes.
+ * FBXLoader reports the source geometry in centimetres.
  *
  * Colour is UV, not material: each body's UVs point into a region of the pack's
  * shared `albedo.png` palette. The atlas is not one paint picture: it is eighteen
@@ -600,21 +627,12 @@ type Entry = Omit<
  *
  * ---- life-size, per body ----
  *
- * The pack is NOT uniformly scaled: at the flat 0.01 the whole pack used to share,
- * a Zhiguli measured a 2.29 m wheelbase against the real 2.424, while the GAZ-24 and
- * both Nivas came out oversize (2.93 against 2.80, 2.28 against 2.20). So each body
- * carries its own `scale`, set from the real car's WHEELBASE, because that is the
- * dimension every handling quantity is measured against: turn radius, load transfer,
- * pitch lever and the axle positions the springs are rated at. Length then lands
- * within 3% and rolling radius within a few percent for every body except the
- * Samaras, whose wheels are drawn 8% oversize relative to their own bodies.
- *
- * What uniform scale CANNOT fix is track width: the modeller drew the Volgas too
- * wide (1.63 m against 1.41 real) and the Zhigulis too narrow (1.29 against 1.35),
- * and squashing a body on one axis to correct it would be visible. The consequence
- * is honest and small: the Volgas resist roll slightly more than they should and the
- * Zhigulis slightly less. It is not compensated for in the springs, because a spring
- * rate is not a place to hide a geometry error.
+ * The pack is not uniformly scaled. Each source keeps its wheelbase-derived base
+ * scale, then render/carmodel.ts fits body width, body-only height and length to
+ * FACTORY_GEOMETRY. Axle positions, front/rear tracks and rolling radii are corrected
+ * independently, so fixing an over-wide Volga never widens its tyres and fitting a
+ * narrow Zhiguli never changes its wheelbase. The corrected body bounds remain the
+ * collider bounds; visual and physical proportions therefore cannot diverge.
  *
  * ---- everything else is the real car's ----
  *
@@ -647,12 +665,6 @@ interface SovietSpec {
   readonly dragArea: number;
   readonly suspension: SuspensionTuning;
   readonly storageCells?: number;
-  readonly visualRideLiftWheelFraction?: number;
-  readonly bodyScaleX?: number;
-  readonly bodyScaleY?: number;
-  readonly wheelRadius?: number;
-  readonly frontWheelTrack?: number;
-  readonly rearWheelTrack?: number;
 }
 
 
@@ -710,7 +722,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.48,
     dragArea: 1.05,
     suspension: SUSP_VOLGA_21,
-    visualRideLiftWheelFraction: 1 / 6,
   },
   {
     // GAZ-24 Volga: the same idea fifteen years later. 95 hp, four speeds on the
@@ -906,7 +917,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.62,
     dragArea: 0.72,
     suspension: SUSP_SAMARA,
-    wheelRadius: 0.285,
     storageCells: 2,
   },
   {
@@ -926,7 +936,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.615,
     dragArea: 0.72,
     suspension: SUSP_SAMARA,
-    wheelRadius: 0.285,
     storageCells: 3,
   },
   {
@@ -947,7 +956,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.6,
     dragArea: 0.7,
     suspension: SUSP_SAMARA,
-    wheelRadius: 0.285,
   },
   {
     // VAZ-2121 Niva: 1.6, 80 hp, permanent four-wheel drive through a locking centre
@@ -970,14 +978,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.53,
     dragArea: 1.3,
     suspension: SUSP_NIVA,
-    // The source body is 1.542 m wide and 1.402 m tall at the wheelbase scale;
-    // factory 2121 coachwork is 1.680 m wide and 1.640 m high.
-    bodyScaleX: 1.08927935,
-    bodyScaleY: 1.01634383,
-    visualRideLiftWheelFraction: 0,
-    wheelRadius: 0.343,
-    frontWheelTrack: 1.43,
-    rearWheelTrack: 1.4,
     storageCells: 4,
   },
   {
@@ -996,14 +996,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.52,
     dragArea: 1.2,
     suspension: SUSP_NIVA,
-    // 2131 shares the 1.680 m width and 1.640 m height, but has a 2.700 m
-    // wheelbase and factory 1.440/1.420 m front/rear tracks.
-    bodyScaleX: 1.06187234,
-    bodyScaleY: 1.04967589,
-    visualRideLiftWheelFraction: 0,
-    wheelRadius: 0.343,
-    frontWheelTrack: 1.44,
-    rearWheelTrack: 1.42,
     storageCells: 6,
   },
 ];
@@ -1094,16 +1086,6 @@ function sharedSovietWheelPool(file: string): readonly string[] | undefined {
   return SOVIET_WHEEL_SET_POOL;
 }
 
-/**
- * Visual-only lift for the VAZ bodies, as a fraction of wheel radius.
- *
- * These fifteen models are authored sitting lower on their wheels than the real
- * cars did, so a Zhiguli looked slammed next to a Volga that already carries this
- * correction. It is a RENDER offset and nothing else: the suspension, the collider,
- * the centre of mass, the wheel mounts and every clearance the physics reads stay
- * exactly where `SUSP_*.rideHeight` puts them (see `visualBodyLift`).
- */
-const VAZ_VISUAL_RIDE_LIFT = 1 / 6;
 
 /** One entry per body; the pack's scale, palette and wheel detection are shared. */
 const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
@@ -1123,14 +1105,6 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   wheelSetPool: sharedSovietWheelPool(spec.file),
   bodyClass: 'car',
   storageCells: spec.storageCells,
-  visualRideLiftWheelFraction:
-    spec.visualRideLiftWheelFraction ??
-    (spec.file.startsWith('vz') ? VAZ_VISUAL_RIDE_LIFT : undefined),
-  bodyScaleX: spec.bodyScaleX,
-  bodyScaleY: spec.bodyScaleY,
-  wheelRadius: spec.wheelRadius,
-  frontWheelTrack: spec.frontWheelTrack,
-  rearWheelTrack: spec.rearWheelTrack,
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -1336,13 +1310,8 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
-  visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
-  bodyScaleX: e.bodyScaleX,
-  bodyScaleY: e.bodyScaleY,
+  factory: factoryGeometry(e.id),
   wheelSetPool: e.wheelSetPool,
-  wheelRadius: e.wheelRadius,
-  frontWheelTrack: e.frontWheelTrack,
-  rearWheelTrack: e.rearWheelTrack,
   wheelNodes: e.wheelNodes,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
