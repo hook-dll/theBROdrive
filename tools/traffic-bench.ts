@@ -84,6 +84,7 @@ const traffic = new RoadTraffic(
   () => true,
 );
 check('menu-facing toggle enables traffic', traffic.toggle(), 'enabled');
+traffic.setDaylightFactor(0);
 
 let largestCount = 0;
 for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
@@ -96,9 +97,14 @@ for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its six-car budget',
-  largestCount <= 6 && populated.count <= 6,
+  'traffic stays within its eight-car budget',
+  largestCount <= 8 && populated.count <= 8,
   `largest ${largestCount}, live ${populated.count}`,
+);
+check(
+  'traffic forms a frequent local stream',
+  populated.count >= 6 && populated.nearestRoadDistance <= 300,
+  `${populated.count} live, nearest ${populated.nearestRoadDistance.toFixed(0)} m away`,
 );
 check(
   'both directions are populated',
@@ -109,6 +115,13 @@ check(
   'every traffic car uses sleeper autopilot',
   populated.allSleeper,
   `${populated.count} of ${populated.count} sleeper`,
+);
+check(
+  'night traffic uses high beam and dips around oncoming cars',
+  populated.highBeams > 0 &&
+    populated.lowBeams > 0 &&
+    populated.highBeams + populated.lowBeams === populated.count,
+  `${populated.highBeams} high, ${populated.lowBeams} dipped`,
 );
 check(
   'both directions actually drive',

@@ -14,19 +14,22 @@ import type { WorldOrigin } from './origin';
 import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 
-/** Six physical cars are enough to make the road inhabited without becoming a queue. */
-const MAX_TRAFFIC = 6;
+/** Eight physical cars keep both directions busy without turning the road into a queue. */
+const MAX_TRAFFIC = 8;
 const MAX_PER_DIRECTION = MAX_TRAFFIC / 2;
-/** Cars appear well outside reaction distance and leave beyond the active physics band. */
-const SPAWN_MIN_M = 360;
-const SPAWN_MAX_M = 700;
-const DESPAWN_M = 950;
-/** Centreline separation at creation; long enough for even two buses to settle cleanly. */
-const SPAWN_ROAD_GAP_M = 75;
+/**
+ * Keep the stream close enough that the player meets another car every few hundred
+ * metres. The old 360–700 m band hid most cars near the edge of the active world.
+ */
+const SPAWN_MIN_M = 160;
+const SPAWN_MAX_M = 560;
+const DESPAWN_M = 750;
+/** Centreline separation at creation; enough room to settle without sparse traffic. */
+const SPAWN_ROAD_GAP_M = 55;
 const SPAWN_WORLD_GAP_M = 30;
 const SPAWN_HAZARD_GAP_M = 18;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
-const SPAWN_INTERVAL_S = 2.5;
+const SPAWN_INTERVAL_S = 1.5;
 const DROP_SETTLE_S = 0.8;
 const LIFETIME_SAMPLE_S = 0.5;
 const CLOCK_SYNC_S = 1;
@@ -67,6 +70,8 @@ export interface TrafficStatus {
   readonly nearestRoadDistance: number;
   readonly movingSameDirection: number;
   readonly movingOncoming: number;
+  readonly highBeams: number;
+  readonly lowBeams: number;
 }
 
 /**
@@ -92,6 +97,7 @@ export class RoadTraffic {
   private readonly position = { x: 0, y: 0, z: 0 };
   private settingsRef: Settings | null = null;
   private clockSync = 0;
+  private daylightFactor = 1;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -119,6 +125,8 @@ export class RoadTraffic {
     let nearestRoadDistance = Infinity;
     let movingSameDirection = 0;
     let movingOncoming = 0;
+    let highBeams = 0;
+    let lowBeams = 0;
     const modelIds: string[] = [];
     for (const car of this.carList) {
       if (car.direction === 1) {
@@ -128,6 +136,8 @@ export class RoadTraffic {
         movingOncoming++;
       }
       modelIds.push(car.modelId);
+      if (car.vehicle.headlights === 'high') highBeams++;
+      else if (car.vehicle.headlights === 'low') lowBeams++;
       nearestRoadDistance = Math.min(
         nearestRoadDistance,
         Math.abs(car.forwardS - this.playerS),
@@ -144,6 +154,8 @@ export class RoadTraffic {
       nearestRoadDistance,
       movingSameDirection,
       movingOncoming,
+      highBeams,
+      lowBeams,
     };
   }
 
@@ -161,6 +173,40 @@ export class RoadTraffic {
     this.setEnabled(!this.enabledValue);
     return this.enabledValue;
   }
+  setDaylightFactor(daylightFactor: number): void {
+    this.daylightFactor = Math.max(0, Math.min(1, daylightFactor));
+  }
+
+  /**
+   * Distance along this driver's road direction to the nearest opposing car.
+   * Negative distances are already behind and therefore cannot keep the beam dipped.
+   */
+  nearestOncomingDistance(
+    forwardS: number,
+    direction: TrafficDirection,
+    excludeId?: string,
+  ): number {
+    let nearest = Infinity;
+    if (direction === -1 && this.sourceWorld.state.player.drivingCarId !== null) {
+      const playerAhead = (this.playerS - forwardS) * direction;
+      if (playerAhead > 0) nearest = playerAhead;
+    }
+    for (const car of this.carList) {
+      if (car.id === excludeId || car.direction === direction) continue;
+      const ahead = (car.forwardS - forwardS) * direction;
+      if (ahead > 0 && ahead < nearest) nearest = ahead;
+    }
+    return nearest;
+  }
+
+  /** Adds temporary vehicles to the shared fixed light pool without exposing ownership. */
+  collectLitVehicles(output: Vehicle[], environmentFactor: number): void {
+    for (const car of this.carList) {
+      car.vehicle.setHeadlightEnvironmentFactor(environmentFactor);
+      if (car.vehicle.hasLitLamps) output.push(car.vehicle);
+    }
+  }
+
 
   /** Writes every traffic controller before the shared physics step. */
   fixedUpdate(dt: number, playerS: number, originX: number, originZ: number): void {
@@ -178,6 +224,10 @@ export class RoadTraffic {
 
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
+      car.autopilot.setLightingConditions(
+        this.daylightFactor,
+        this.nearestOncomingDistance(car.forwardS, car.direction, car.id),
+      );
       car.lifetimeTimer -= dt;
       if (car.lifetimeTimer <= 0) {
         car.vehicle.absoluteTranslation(this.position);

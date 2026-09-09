@@ -281,6 +281,7 @@ interface LapMetrics {
   roadRecoveryExitLateral: number;
   roadRecoveryExitHeadingError: number;
   maxRoadRecoverySpeed: number;
+  maxRoadRecoveryThrottle: number;
   reverseSeconds: number;
   stuckSeconds: number;
   /** Closest another car's chassis came, metres between centres, or Infinity. */
@@ -349,6 +350,7 @@ async function measure(
   let roadRecoveryExitLateral = Number.NaN;
   let roadRecoveryExitHeadingError = Number.NaN;
   let maxRoadRecoverySpeed = 0;
+  let maxRoadRecoveryThrottle = 0;
   let wasRoadRecovering = false;
   let reverse = 0;
   let stuck = 0;
@@ -392,7 +394,10 @@ async function measure(
     if (lateral > CIRCUIT_HALF_WIDTH) offAsphalt += FIXED_DT;
     if (lateral > CIRCUIT_HALF_WIDTH) maxOffAsphaltSpeed = Math.max(maxOffAsphaltSpeed, speed);
     const roadRecovering = rig.autopilot.activity === 'offroad';
-    if (roadRecovering) maxRoadRecoverySpeed = Math.max(maxRoadRecoverySpeed, speed);
+    if (roadRecovering) {
+      maxRoadRecoverySpeed = Math.max(maxRoadRecoverySpeed, speed);
+      maxRoadRecoveryThrottle = Math.max(maxRoadRecoveryThrottle, rig.input.throttle);
+    }
     if (wasRoadRecovering && !roadRecovering && !Number.isFinite(roadRecoveryExitLateral)) {
       const rotation = rig.vehicle.chassis.rotation();
       const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
@@ -469,6 +474,7 @@ async function measure(
     roadRecoveryExitLateral,
     roadRecoveryExitHeadingError,
     maxRoadRecoverySpeed,
+    maxRoadRecoveryThrottle,
     reverseSeconds: reverse,
     stuckSeconds: stuck,
     nearestCar,
@@ -669,11 +675,13 @@ check(
     Math.abs(returning.finalLateral) <= CIRCUIT_HALF_WIDTH &&
     Math.abs(returning.roadRecoveryExitLateral - AUTOPILOT_MODES.sleeper.laneOffset) <= 0.45 &&
     Math.abs(returning.roadRecoveryExitHeadingError) <= 0.16 &&
-    returning.maxRoadRecoverySpeed <= 5,
+    returning.maxRoadRecoverySpeed <= 5 &&
+    returning.maxRoadRecoveryThrottle >= 0.9,
   `${returning.progress.toFixed(0)} m progress, recovery ended at lateral ` +
     `${returning.roadRecoveryExitLateral.toFixed(2)} m and heading error ` +
     `${(returning.roadRecoveryExitHeadingError * 180 / Math.PI).toFixed(1)}°, ` +
-    `${(returning.maxRoadRecoverySpeed * 3.6).toFixed(1)} km/h peak before alignment`,
+    `${(returning.maxRoadRecoverySpeed * 3.6).toFixed(1)} km/h peak and ` +
+    `${returning.maxRoadRecoveryThrottle.toFixed(2)} peak throttle before alignment`,
 );
 console.log(failures === 0 ? '\nall playground checks passed' : `\n${failures} playground check(s) FAILED`);
 if (failures > 0) process.exitCode = 1;

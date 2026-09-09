@@ -469,11 +469,50 @@ function checkHandover(): void {
   autopilot.drive(FIXED_DT, {} as Vehicle, input, 0, 0);
   check('disengaged autopilot leaves human frame untouched', JSON.stringify(input) === before, JSON.stringify(input));
 }
+async function checkAutomaticLights(): Promise<void> {
+  const rig = await makeRig();
+  rig.autopilot.setMode('sleeper');
+  rig.autopilot.setEngaged(true);
+
+  rig.autopilot.setLightingConditions(0, Infinity);
+  step(rig);
+  check(
+    'autonomous car uses high beam on a dark empty road',
+    rig.vehicle.headlights === 'high',
+    rig.vehicle.headlights,
+  );
+
+  rig.autopilot.setLightingConditions(0, 180);
+  step(rig);
+  check(
+    'autonomous car dips for approaching traffic',
+    rig.vehicle.headlights === 'low',
+    rig.vehicle.headlights,
+  );
+
+  rig.autopilot.setLightingConditions(0, Infinity);
+  step(rig);
+  check(
+    'autonomous car restores high beam after passing',
+    rig.vehicle.headlights === 'high',
+    rig.vehicle.headlights,
+  );
+
+  rig.autopilot.setLightingConditions(1, Infinity);
+  step(rig);
+  check(
+    'autonomous car switches headlights off in daylight',
+    rig.vehicle.headlights === 'off',
+    rig.vehicle.headlights,
+  );
+}
+
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
   console.log('autopilot bench: real Road surface collider, mid-engined V8, fixed 60 Hz');
   checkHandover();
+  await checkAutomaticLights();
   const sleeper = await measureMode('sleeper');
   const frantic = await measureMode('frantic');
   for (const [mode, result] of [['sleeper', sleeper], ['frantic', frantic]] as const) {

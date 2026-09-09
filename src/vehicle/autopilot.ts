@@ -230,6 +230,14 @@ const OFFROAD_HEADING_TOLERANCE_RAD = 0.14;
 /** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
 const OFFROAD_SPEED_MPS = 3.5;
 const OFFROAD_BRAKE_MAX = 0.7;
+/** Road recovery needs the decisive pedal that already lets frantic escape loose sand. */
+const OFFROAD_THROTTLE_BAND = 1.2;
+/** Automatic lamps come on through dusk, with hysteresis so twilight cannot chatter. */
+const AUTO_LIGHTS_ON_DAY_FACTOR = 0.22;
+const AUTO_LIGHTS_OFF_DAY_FACTOR = 0.32;
+/** Dip before the beams meet; restore high only once the opposing car is clearly past. */
+const HIGH_BEAM_DIP_M = 250;
+const HIGH_BEAM_RESTORE_M = 300;
 
 /**
  * SEEING OTHER TRAFFIC, and why it is not the same query as seeing a rock.
@@ -474,6 +482,10 @@ export class Autopilot {
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
   private speedCapValue = Infinity;
+  private daylightFactor = 1;
+  private oncomingGap = Infinity;
+  private automaticLightsOn = false;
+  private automaticHighBeam = true;
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
@@ -519,6 +531,11 @@ export class Autopilot {
    * queueing politely behind cars it was theoretically 60 km/h quicker than.
    */
   setSpeedCap(mps: number): void { this.speedCapValue = mps; }
+  /** Supplies ambient light and road distance to the nearest approaching vehicle. */
+  setLightingConditions(daylightFactor: number, oncomingGap: number): void {
+    this.daylightFactor = clamp(daylightFactor, 0, 1);
+    this.oncomingGap = oncomingGap >= 0 ? oncomingGap : Infinity;
+  }
   get engaged(): boolean { return this.engagedValue; }
   /** Rate-limited line being steered to, metres of road lateral. */
   get commandedLine(): number { return this.appliedLateral; }
@@ -542,6 +559,7 @@ export class Autopilot {
     this.recoveryBiasUntil = 0;
     this.lastRecoveryAt = -Infinity;
     this.recoveryAttempts = 0;
+    this.automaticHighBeam = true;
     this.passLine = null;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
@@ -556,6 +574,7 @@ export class Autopilot {
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
+    this.updateAutomaticHeadlights(vehicle);
     const config = MODES[this.modeValue];
     vehicle.absoluteTranslation(this.position);
     const projection = this.road.project(
@@ -973,7 +992,10 @@ export class Autopilot {
     // own brakes is a creep into whatever it stopped for, and it walked the car up to
     // a parked obstacle a metre at a time.
     const floor = targetSpeed > 1 ? THROTTLE_FLOOR : 0;
-    out.throttle = speedError > 0 ? clamp(speedError / config.throttleBand, floor, 1) : 0;
+    out.throttle =
+      speedError > 0
+        ? clamp(speedError / (offRoad ? OFFROAD_THROTTLE_BAND : config.throttleBand), floor, 1)
+        : 0;
     out.brake =
       speedError < 0 ? clamp(-speedError / config.brakeBand, 0, config.brakeCeiling) : 0;
     // WAITING IS DONE ON THE BRAKE.
@@ -1195,6 +1217,25 @@ export class Autopilot {
       if (Math.abs(this.road.curvatureAt(fromS + (distance * i) / steps)) > limit) return false;
     }
     return true;
+  }
+
+  private updateAutomaticHeadlights(vehicle: Vehicle): void {
+    if (this.automaticLightsOn) {
+      if (this.daylightFactor >= AUTO_LIGHTS_OFF_DAY_FACTOR) this.automaticLightsOn = false;
+    } else if (this.daylightFactor <= AUTO_LIGHTS_ON_DAY_FACTOR) {
+      this.automaticLightsOn = true;
+    }
+
+    if (!this.automaticLightsOn) {
+      vehicle.setHeadlights('off');
+      return;
+    }
+    if (this.automaticHighBeam) {
+      if (this.oncomingGap <= HIGH_BEAM_DIP_M) this.automaticHighBeam = false;
+    } else if (this.oncomingGap >= HIGH_BEAM_RESTORE_M) {
+      this.automaticHighBeam = true;
+    }
+    vehicle.setHeadlights(this.automaticHighBeam ? 'high' : 'low');
   }
 
   /**
