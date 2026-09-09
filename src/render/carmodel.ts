@@ -673,6 +673,9 @@ function takeOwnWheels(
   const objects = new Map<string, THREE.Object3D>();
   const positions = new Map<string, THREE.Vector3>();
   const radii = new Map<string, number>();
+  const worldPosition = new THREE.Vector3();
+  const worldQuaternion = new THREE.Quaternion();
+  const worldScale = new THREE.Vector3();
 
   for (const id of WHEEL_IDS) {
     const nodes = names[id]
@@ -711,11 +714,15 @@ function takeOwnWheels(
     else if (axle === 2) align.rotation.y = Math.PI / 2; // axle along Z
 
     for (const node of nodes) {
-      // With the mount moved to the centre, the mesh has to move the other way, or
-      // it would be drawn a tyre-width outboard of the wheel physics simulates.
-      const local = node.position.clone().sub(centre);
+      // Bounds are world-space. Preserve each node's complete world transform when
+      // detaching it; subtracting a world-space centre from node.position (which is
+      // parent-local) shifts wheels whenever the exporter adds a transformed parent.
+      node.matrixWorld.decompose(worldPosition, worldQuaternion, worldScale);
+      worldPosition.sub(centre);
       node.removeFromParent();
-      node.position.copy(local);
+      node.position.copy(worldPosition);
+      node.quaternion.copy(worldQuaternion);
+      node.scale.copy(worldScale);
       node.updateMatrix();
       align.add(node);
     }
