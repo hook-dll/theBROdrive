@@ -1,15 +1,10 @@
 import * as THREE from 'three';
 import { FIXED_DT, PhysicsWorld } from './core/physics';
 import { emptyInput, type InputFrame } from './core/input';
-import { GameWorld, newWorldState, DAY_LENGTH, type CarState } from './game/state';
-import type { Item } from './items/items';
-import { variant } from './parts/registry';
+import { GameWorld, newWorldState, DAY_LENGTH } from './game/state';
 import { makeFlatMaterial } from './render/materials';
 import { preloadCarModels } from './render/carmodel';
-import { createBonnetStorage } from './vehicle/bonnet';
-import { carModel } from './vehicle/carmodels';
-import { COLD_SOAK_C } from './vehicle/cooling';
-import { Autopilot, type AutopilotMode } from './vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from './vehicle/autopilot';
 import { Vehicle } from './vehicle/vehicle';
 import { HazardIndex } from './world/hazards';
 import { WorldOrigin } from './world/origin';
@@ -19,6 +14,7 @@ import {
   PLAYGROUND_ORIGIN_Z,
   type CircuitSector,
 } from './playground/circuit';
+import { playgroundCarState } from './playground/car';
 import { PlaygroundRoad } from './playground/playgroundroad';
 import {
   addCircuitCollider,
@@ -26,6 +22,7 @@ import {
   CIRCUIT_STRIPS,
   RIBBON_HALF_WIDTH,
 } from './playground/ribbon';
+import { PlaygroundTraffic, type TrafficState } from './playground/traffic';
 
 /**
  * The driving playground: a closed 2.7 km circuit you can watch a car drive.
@@ -40,11 +37,22 @@ import {
  * separate entry point that the production bundle drops.
  *
  * Controls are printed on screen. The autopilot drives; the keyboard is for moving
- * the car to the corner you want to look at and for choosing the camera.
+ * the car to the corner you want to look at, choosing the camera, and deciding
+ * whether the lap has traffic on it.
  */
 
 const SEED = 1337;
 const MODEL_ID = 'sv_vaz2105r';
+/**
+ * The body the traffic uses. It is the rally car for a measured reason: this lap
+ * holds 28% gradients, worse than anything the real road does, and the ordinary
+ * catalogue saloons cannot climb them. Filling the circuit with GAZ-24s and 2101s
+ * for variety was tried, and produced a scene of cars stranded on hillsides at full
+ * throttle: 18-24 off-road events per 90 s of traffic, against the rally car's
+ * clean lap.
+ */
+const TRAFFIC_MODEL_ID = 'sv_vaz2105r';
+const TRAFFIC_STATES: readonly TrafficState[] = ['rolling', 'parked', 'stowed'];
 /** Mirrors the game's 'acceptable' tier budget: 1600x900 rendered pixels. */
 const MAX_RENDER_PIXELS = 1600 * 900;
 const CHASE_BACK = 9;
@@ -57,36 +65,6 @@ const CAMERA_MODES: readonly CameraMode[] = ['chase', 'side', 'top'];
 function pixelRatio(): number {
   const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
   return Math.min(window.devicePixelRatio, Math.sqrt(MAX_RENDER_PIXELS / cssPixels));
-}
-
-function carState(x: number, y: number, z: number, heading: number): CarState {
-  const def = carModel(MODEL_ID);
-  return {
-    id: 'playground',
-    modelId: MODEL_ID,
-    gizmos: {},
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: def.tankLitres,
-    fuelKind: variant(def.engineId).engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('playground', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x,
-    y,
-    z,
-    qx: 0,
-    qy: Math.sin(heading / 2),
-    qz: 0,
-    qw: Math.cos(heading / 2),
-  };
 }
 
 /**
@@ -148,7 +126,7 @@ export async function bootPlayground(): Promise<void> {
   const rotateHint = document.getElementById('rotate-hint');
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
 
-  await preloadCarModels([MODEL_ID]);
+  await preloadCarModels([MODEL_ID, TRAFFIC_MODEL_ID]);
   const road = new PlaygroundRoad(SEED, PLAYGROUND_ORIGIN_X, PLAYGROUND_ORIGIN_Z);
   const circuit = road.circuit;
 
@@ -197,13 +175,32 @@ export async function bootPlayground(): Promise<void> {
   addCircuitCollider(physics, road, circuit);
   const world = new GameWorld(newWorldState(SEED));
   world.state.timeOfDay = DAY_LENGTH * 0.4;
-  const state = carState(start.x, start.y + 1.2, start.z, start.heading);
+  // The ego car starts ON THE LANE it is going to hold, not on the centreline: a
+  // 1.45 m lateral step at the green light is not what is being tested.
+  const startLateral = AUTOPILOT_MODES.frantic.laneOffset;
+  const state = playgroundCarState(
+    'playground',
+    MODEL_ID,
+    start.x + Math.cos(start.heading) * startLateral,
+    circuit.surfaceY(0, startLateral) + 1.2,
+    start.z - Math.sin(start.heading) * startLateral,
+    start.heading,
+  );
   world.state.cars[state.id] = state;
   const origin = new WorldOrigin();
   const vehicle = new Vehicle(physics, world, state, scene, origin);
   const autopilot = new Autopilot(road, new HazardIndex(), physics);
   const input: InputFrame = emptyInput();
   autopilot.setEngaged(true);
+  const traffic = new PlaygroundTraffic(
+    physics,
+    world,
+    scene,
+    origin,
+    road,
+    circuit,
+    [TRAFFIC_MODEL_ID],
+  );
 
   let mode: AutopilotMode = 'frantic';
   autopilot.setMode(mode);
@@ -216,10 +213,16 @@ export async function bootPlayground(): Promise<void> {
   let travelled = 0;
   let previousS = 0;
 
-  /** Drops the car on the centreline at an arclength, stationary and pointing along it. */
+  /** Drops the car on its own lane at an arclength, stationary and pointing along it. */
   const placeAt = (s: number): void => {
     const at = circuit.sampleAt(s);
-    vehicle.rescueTo(at.x, circuit.surfaceY(s, 0) + 1.2, at.z, at.heading);
+    const lateral = AUTOPILOT_MODES[mode].laneOffset;
+    vehicle.rescueTo(
+      at.x + Math.cos(at.heading) * lateral,
+      circuit.surfaceY(s, lateral) + 1.2,
+      at.z - Math.sin(at.heading) * lateral,
+      at.heading,
+    );
     hintS = s;
     previousS = s;
     travelled = 0;
@@ -250,6 +253,7 @@ export async function bootPlayground(): Promise<void> {
   head.textContent =
     `PLAYGROUND — ${(circuit.length / 1000).toFixed(2)} km closed lap, seed ${SEED}\n` +
     'C camera · M autopilot mode · A engage/disengage · Space pause · T time x1/x4\n' +
+    'X traffic rolling/parked/stowed · Z reset the traffic to its grid\n' +
     'R restart on the line · [ ] previous/next corner · 1-9 jump to a sector · Esc back to the game';
   sectorList.textContent = circuit.sectors
     .map((sector, index) => `${index + 1} ${sector.name}`)
@@ -289,6 +293,14 @@ export async function bootPlayground(): Promise<void> {
       case 'r':
         placeAt(0);
         break;
+      case 'x':
+        traffic.setState(
+          TRAFFIC_STATES[(TRAFFIC_STATES.indexOf(traffic.state) + 1) % TRAFFIC_STATES.length]!,
+        );
+        break;
+      case 'z':
+        traffic.reset();
+        break;
       case 't':
         timeScale = timeScale === 1 ? 4 : 1;
         break;
@@ -326,8 +338,10 @@ export async function bootPlayground(): Promise<void> {
       accumulator -= FIXED_DT;
       autopilot.drive(FIXED_DT, vehicle, input, origin.x, origin.z);
       vehicle.fixedUpdate(FIXED_DT, input);
+      traffic.fixedUpdate(FIXED_DT, origin.x, origin.z);
       physics.step();
       vehicle.postStep();
+      traffic.postStep();
 
       vehicle.absoluteTranslation(position);
       const projection = circuit.project(position.x, position.z, hintS);
@@ -345,6 +359,7 @@ export async function bootPlayground(): Promise<void> {
     }
 
     vehicle.syncVisuals(1);
+    traffic.syncVisuals(1);
     vehicle.absoluteTranslation(position);
     const projection = circuit.project(position.x, position.z, hintS);
     const sector = sectorOf(projection.s);
@@ -353,7 +368,7 @@ export async function bootPlayground(): Promise<void> {
     const curvature = Math.abs(circuit.sampleAt(projection.s).curvature);
     // The cornering limit the autopilot's own speed target is built from, so a
     // sector where the car is far below it is a sector worth looking at.
-    const lateralAccel = mode === 'frantic' ? 6.7 : 5.1;
+    const lateralAccel = AUTOPILOT_MODES[mode].lateralAccel;
     const limit = Math.sqrt(lateralAccel / Math.max(curvature, 1e-4));
 
     const root = vehicle.root;
@@ -386,7 +401,14 @@ export async function bootPlayground(): Promise<void> {
       `throttle    ${input.throttle.toFixed(2)}\n` +
       `brake       ${input.brake.toFixed(2)}\n` +
       `steer       ${input.steer.toFixed(3)}\n` +
-      `lateral     ${projection.lateral.toFixed(2)} m of ${CIRCUIT_HALF_WIDTH.toFixed(1)}\n` +
+      `lane        ${projection.lateral.toFixed(2)} m, want ${autopilot.commandedLine.toFixed(2)}, edge ${CIRCUIT_HALF_WIDTH.toFixed(1)}\n` +
+      `doing       ${autopilot.activity}\n` +
+      `ahead       ${
+        autopilot.obstacleGap < Infinity
+          ? `${autopilot.obstacleGap.toFixed(0)} m at ${(autopilot.obstacleSpeed * 3.6).toFixed(0)} km/h`
+          : 'clear'
+      }\n` +
+      `traffic     ${traffic.state}\n` +
       `grade       ${(circuit.sampleAt(projection.s).grade * 100).toFixed(1)}%\n` +
       `s           ${projection.s.toFixed(0)} / ${circuit.length.toFixed(0)} m\n` +
       `last lap    ${lastLapSeconds > 0 ? `${lastLapSeconds.toFixed(1)} s` : '—'}\n` +

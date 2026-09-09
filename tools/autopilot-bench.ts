@@ -19,7 +19,7 @@ import { variant } from '../src/parts/registry';
 import { preloadCarModels } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { Autopilot, type AutopilotMode } from '../src/vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { HazardIndex, type RoadHazard } from '../src/world/hazards';
@@ -56,10 +56,12 @@ const ROAD_STEP = 1;
 const PASSING_VERGE = 1.2;
 const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE;
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
-const MODES: Record<AutopilotMode, { cruise: number; lateralAccel: number }> = {
-  sleeper: { cruise: 20, lateralAccel: 5.1 },
-  frantic: { cruise: 28, lateralAccel: 6.7 },
-};
+// The tuning is the shipped table, never a copy: this bench's own numbers had
+// drifted to a lateral budget 40% above the autopilot's, so every corner-speed
+// check was passing against a limit the car never used.
+const MODES = AUTOPILOT_MODES;
+/** Mean speed floors for the littered-road run, m/s. See `checkLitteredRoad`. */
+const LITTER_FLOOR_MPS: Record<AutopilotMode, number> = { sleeper: 9.5, frantic: 11.5 };
 let failures = 0;
 
 function check(label: string, ok: boolean, detail: string): void {
@@ -130,9 +132,14 @@ async function makeRig(): Promise<Rig> {
   const hazards = new HazardIndex();
   const autopilot = new Autopilot(road, hazards, physics);
   const input = emptyInput();
+  // Settle ON THE BRAKES: three seconds of suspension settling with no pedal lets
+  // the car roll away down the road's own gradient, and every metric measured from
+  // START_S then starts from somewhere else.
+  input.handbrake = true;
   for (let i = 0; i < 180; i++) {
     vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
   }
+  input.handbrake = false;
   return { physics, vehicle, road, hazards, autopilot, input };
 }
 
@@ -376,21 +383,23 @@ async function checkLitteredRoad(): Promise<void> {
     //
     // With 20+ hazards/km the car is almost always moving from one passing line to
     // the next, and the commanded line moves at LINE_SHIFT_PER_METRE of road, so the
-    // achievable mean is bounded by how much road each move costs — a bound that
-    // falls further the faster the mode wants to go. Requiring 55% of cruise asked
-    // frantic for something the plan rate cannot deliver without swerving.
+    // achievable mean is bounded by how much road each move costs — a bound that does
+    // NOT rise when the cruise target does. A fraction of cruise was already the
+    // wrong shape at 28 m/s; at 130 km/h it asks frantic for something the plan rate
+    // cannot deliver without swerving, so the floor is stated in m/s.
     //
-    // 0.45 of cruise still catches the failure this test exists for: braking for
-    // props the chosen line already clears held the field at 6.4 m/s (sleeper) and
-    // 9.0 m/s (frantic), well under either bound. The upper bound is unchanged and
-    // still catches a car that ignores the litter altogether.
+    // Each floor is a couple of m/s above what the bug this test exists for produced
+    // — braking for props the chosen line already clears held the field at 6.4 m/s
+    // (sleeper) and 9.0 m/s (frantic) — and well under the 10.9/13.7 m/s a healthy
+    // planner measures. The upper bound is unchanged and still catches a car that
+    // ignores the litter altogether.
     check(
       `${mode}: littered road makes progress`,
       result.monotonic &&
         result.progress >= 1_800 - 5 &&
-        result.meanSpeed >= config.cruise * 0.45 &&
-        result.meanSpeed <= config.cruise * 1.15,
-      `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}, ${result.meanSpeed.toFixed(2)} m/s vs ${config.cruise.toFixed(0)} m/s target`,
+        result.meanSpeed >= LITTER_FLOOR_MPS[mode] &&
+        result.meanSpeed <= config.cruiseMps * 1.15,
+      `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}, ${result.meanSpeed.toFixed(2)} m/s vs a ${LITTER_FLOOR_MPS[mode].toFixed(1)} m/s floor and a ${config.cruiseMps.toFixed(0)} m/s cruise`,
     );
   }
 }
@@ -460,7 +469,7 @@ async function run(): Promise<void> {
     // The route loop breaks ON reaching the target, so the last sample lands a metre
     // or two short of it by construction.
     check(`${mode}: makes monotonic road progress`, result.monotonic && result.progress >= ROUTE_METRES - 5, `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}`);
-    check(`${mode}: holds useful cruise speed`, result.meanSpeed >= config.cruise * 0.55 && result.meanSpeed <= config.cruise * 1.15, `${result.meanSpeed.toFixed(2)} m/s vs ${config.cruise.toFixed(0)} m/s target`);
+    check(`${mode}: holds useful cruise speed`, result.meanSpeed >= config.cruiseMps * 0.55 && result.meanSpeed <= config.cruiseMps * 1.15, `${result.meanSpeed.toFixed(2)} m/s vs ${config.cruiseMps.toFixed(0)} m/s target`);
     check(`${mode}: slows for tightest corner`, result.tightSpeed <= cornerLimit + 3, `radius ${result.tightRadius.toFixed(1)} m, ${result.tightSpeed.toFixed(2)} m/s vs ${cornerLimit.toFixed(2)} m/s limit`);
   }
   check('frantic is materially faster than sleeper', frantic.meanSpeed >= sleeper.meanSpeed + 3, `${frantic.meanSpeed.toFixed(2)} vs ${sleeper.meanSpeed.toFixed(2)} m/s`);
