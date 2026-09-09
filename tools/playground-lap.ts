@@ -278,6 +278,9 @@ interface LapMetrics {
   offAsphaltSeconds: number;
   maxOffAsphaltSpeed: number;
   finalLateral: number;
+  roadRecoveryExitLateral: number;
+  roadRecoveryExitHeadingError: number;
+  maxRoadRecoverySpeed: number;
   reverseSeconds: number;
   stuckSeconds: number;
   /** Closest another car's chassis came, metres between centres, or Infinity. */
@@ -343,6 +346,10 @@ async function measure(
   let laneErrorWorst = 0;
   let offAsphalt = 0;
   let maxOffAsphaltSpeed = 0;
+  let roadRecoveryExitLateral = Number.NaN;
+  let roadRecoveryExitHeadingError = Number.NaN;
+  let maxRoadRecoverySpeed = 0;
+  let wasRoadRecovering = false;
   let reverse = 0;
   let stuck = 0;
   let nearestCar = Infinity;
@@ -384,6 +391,19 @@ async function measure(
     laneErrorWorst = Math.max(laneErrorWorst, Math.abs(laneError));
     if (lateral > CIRCUIT_HALF_WIDTH) offAsphalt += FIXED_DT;
     if (lateral > CIRCUIT_HALF_WIDTH) maxOffAsphaltSpeed = Math.max(maxOffAsphaltSpeed, speed);
+    const roadRecovering = rig.autopilot.activity === 'offroad';
+    if (roadRecovering) maxRoadRecoverySpeed = Math.max(maxRoadRecoverySpeed, speed);
+    if (wasRoadRecovering && !roadRecovering && !Number.isFinite(roadRecoveryExitLateral)) {
+      const rotation = rig.vehicle.chassis.rotation();
+      const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
+      const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
+      let headingError = Math.atan2(forwardX, forwardZ) - circuit.sampleAt(projection.s).heading;
+      while (headingError > Math.PI) headingError -= Math.PI * 2;
+      while (headingError < -Math.PI) headingError += Math.PI * 2;
+      roadRecoveryExitLateral = projection.lateral;
+      roadRecoveryExitHeadingError = headingError;
+    }
+    wasRoadRecovering = roadRecovering;
     if (rig.input.reverse) reverse += FIXED_DT;
     if (speed < 0.5) stuck += FIXED_DT;
     // A pass is counted when it STARTS, so a run that commits to one and then has to
@@ -446,6 +466,9 @@ async function measure(
     offAsphaltSeconds: offAsphalt,
     maxOffAsphaltSpeed,
     finalLateral: circuit.project(position.x, position.z, hint).lateral,
+    roadRecoveryExitLateral,
+    roadRecoveryExitHeadingError,
+    maxRoadRecoverySpeed,
     reverseSeconds: reverse,
     stuckSeconds: stuck,
     nearestCar,
@@ -611,7 +634,10 @@ check(
   crashed.progress >= BOULDER_S + 60 && crashed.reverseSeconds > 0.2,
   `${crashed.progress.toFixed(0)} m travelled past a boulder at ${BOULDER_S} m, ` +
     `${crashed.reverseSeconds.toFixed(1)} s in reverse, ${crashed.stuckSeconds.toFixed(1)} s stopped, ` +
-    `mean ${(crashed.meanSpeed * 3.6).toFixed(1)} km/h`,
+    `mean ${(crashed.meanSpeed * 3.6).toFixed(1)} km/h, recovery ended at ` +
+    `${crashed.roadRecoveryExitLateral.toFixed(2)} m / ` +
+    `${(crashed.roadRecoveryExitHeadingError * 180 / Math.PI).toFixed(1)}°, ` +
+    `${(crashed.maxRoadRecoverySpeed * 3.6).toFixed(1)} km/h peak while returning`,
 );
 
 
@@ -638,13 +664,16 @@ const returning = await measure(
   70,
 );
 check(
-  'sleeper: carefully returns from sand before accelerating',
+  'sleeper: occupies its lane before accelerating after sand',
   returning.progress >= 100 &&
     Math.abs(returning.finalLateral) <= CIRCUIT_HALF_WIDTH &&
-    returning.maxOffAsphaltSpeed <= 5,
-  `${returning.progress.toFixed(0)} m progress, final lateral ${returning.finalLateral.toFixed(2)} m, ` +
-    `${(returning.maxOffAsphaltSpeed * 3.6).toFixed(1)} km/h peak while off asphalt, ` +
-    `${returning.offAsphaltSeconds.toFixed(1)} s off asphalt`,
+    Math.abs(returning.roadRecoveryExitLateral - AUTOPILOT_MODES.sleeper.laneOffset) <= 0.45 &&
+    Math.abs(returning.roadRecoveryExitHeadingError) <= 0.16 &&
+    returning.maxRoadRecoverySpeed <= 5,
+  `${returning.progress.toFixed(0)} m progress, recovery ended at lateral ` +
+    `${returning.roadRecoveryExitLateral.toFixed(2)} m and heading error ` +
+    `${(returning.roadRecoveryExitHeadingError * 180 / Math.PI).toFixed(1)}°, ` +
+    `${(returning.maxRoadRecoverySpeed * 3.6).toFixed(1)} km/h peak before alignment`,
 );
 console.log(failures === 0 ? '\nall playground checks passed' : `\n${failures} playground check(s) FAILED`);
 if (failures > 0) process.exitCode = 1;
