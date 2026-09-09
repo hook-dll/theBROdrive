@@ -67,6 +67,7 @@ import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
+import { RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { setCarBodyCondition } from './render/materials';
 import { WreckTrunkField } from './world/wrecktrunks';
@@ -454,6 +455,40 @@ async function boot(): Promise<void> {
     const dz = z - anchorZ;
     return dx * dx + dz * dz <= radiusSquared;
   };
+  const trafficPosition = { x: 0, y: 0, z: 0 };
+  const traffic = new RoadTraffic(
+    physics,
+    world,
+    renderer.scene,
+    origin,
+    road,
+    hazards,
+    async (modelId) => {
+      await loadCarModel(modelId);
+      let warmup = modelWarmups.get(modelId);
+      if (!warmup) {
+        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
+        modelWarmups.set(modelId, warmup);
+      }
+      await warmup;
+    },
+    (x, z, radius) => {
+      const radiusSquared = radius * radius;
+      const anchor = activeWorldAnchor();
+      if (withinRadius(x, z, anchor.x, anchor.z, radiusSquared)) return false;
+      for (const vehicle of vehicles.values()) {
+        const position = vehicle.absoluteTranslation(trafficPosition);
+        if (withinRadius(x, z, position.x, position.z, radiusSquared)) return false;
+      }
+      // Also cover a saved car whose model is still loading and therefore has no
+      // runtime Vehicle yet. Its last transform is exact enough for a 30 m exclusion.
+      for (const id in world.state.cars) {
+        const car = world.state.cars[id]!;
+        if (withinRadius(x, z, car.x, car.z, radiusSquared)) return false;
+      }
+      return true;
+    },
+  );
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;
     const cars = world.state.cars;
@@ -778,6 +813,7 @@ async function boot(): Promise<void> {
       streamer,
       desert,
       tumbleweeds,
+      traffic,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -955,6 +991,10 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.setMode('foot');
     }
 
+    // Session traffic owns separate Vehicles, so it writes its sleeper controllers
+    // here and never enters the persistent `vehicles` map or save state.
+    traffic.fixedUpdate(dt, activeS, origin.x, origin.z);
+
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
     // that is never stepped sinks onto its own chassis collider and its wheels end
@@ -1007,6 +1047,7 @@ async function boot(): Promise<void> {
     // Latch the post-step transforms so the renderer can interpolate between the
     // last two steps instead of snapping to the newest one.
     for (const vehicle of vehicles.values()) vehicle.postStep();
+    traffic.postStep();
     trailerField.postStep();
     player.postStep();
 
@@ -1311,6 +1352,7 @@ async function boot(): Promise<void> {
         appliedBodyDirt.set(vehicle, dirt);
       }
     }
+    traffic.syncVisuals(alpha);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -1876,6 +1918,12 @@ async function boot(): Promise<void> {
       const metres = VIEW_DISTANCE_METRES[tier];
       renderer.setViewDistance(metres);
       vista.setViewDistance(metres);
+    },
+    trafficEnabled: () => traffic.enabled,
+    toggleTraffic: () => {
+      const enabled = traffic.toggle();
+      hud.setToast(enabled ? 'traffic on' : 'traffic off');
+      return enabled;
     },
     exportState: stateForSave,
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards

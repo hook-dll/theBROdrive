@@ -6,7 +6,7 @@ import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autop
 import { Vehicle } from '../vehicle/vehicle';
 import { HazardIndex } from '../world/hazards';
 import type { WorldOrigin } from '../world/origin';
-import { playgroundCarState } from './car';
+import { createServiceableCarState } from '../game/spawn';
 import { PLAYGROUND_ORIGIN_X, PLAYGROUND_ORIGIN_Z, type PlaygroundCircuit } from './circuit';
 import type { PlaygroundRoad } from './playgroundroad';
 import { ReversedPlaygroundRoad } from './reversedroad';
@@ -115,7 +115,7 @@ export class PlaygroundTraffic {
       const id = `traffic-${index}`;
       const modelId = models[index % models.length]!;
       const at = this.poseFor(slot, lateral);
-      const state = playgroundCarState(id, modelId, at.x, at.y, at.z, at.heading);
+      const state = createServiceableCarState(id, modelId, at.x, at.y, at.z, at.heading);
       world.state.cars[id] = state;
       const vehicle = new Vehicle(this.physics, world, state, scene, origin);
       const autopilot = new Autopilot(slot.oncoming ? reversed : forward, hazards, this.physics);

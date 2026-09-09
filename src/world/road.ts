@@ -96,6 +96,19 @@ export interface RoadProjection {
   readonly height: number;
 }
 
+/** The geometric road surface a driver needs; implemented by forward and reversed views. */
+export interface DriveRoad {
+  readonly length: number;
+  sampleAt(s: number): RoadSample;
+  curvatureAt(s: number): number;
+  project(x: number, z: number, hintS?: number): RoadProjection;
+  offsetPoint(
+    s: number,
+    lateral: number,
+    out?: { x: number; y: number; z: number },
+  ): { x: number; y: number; z: number };
+}
+
 /** One replayed run of nodes, `CHECKPOINT_NODES + 1` long so a segment never straddles. */
 interface Block {
   /** Checkpoint index, or -1 for an empty slot. */

@@ -1,0 +1,144 @@
+import * as THREE from 'three';
+import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
+import { SurfaceType } from '../src/core/surfaces';
+import { GameWorld, newWorldState } from '../src/game/state';
+import { loadCarModel } from '../src/render/carmodel';
+import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { HazardIndex } from '../src/world/hazards';
+import { WorldOrigin } from '../src/world/origin';
+import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
+import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
+import { RoadTraffic } from '../src/world/traffic';
+import { installAssetShim } from './assetshim';
+
+class BunProgressEvent extends Event implements ProgressEvent {
+  readonly lengthComputable: boolean;
+  readonly loaded: number;
+  readonly total: number;
+
+  constructor(type: string, init: ProgressEventInit = {}) {
+    super(type, init);
+    this.lengthComputable = init.lengthComputable ?? false;
+    this.loaded = init.loaded ?? 0;
+    this.total = init.total ?? 0;
+  }
+}
+if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
+installAssetShim();
+
+const SEED = 42;
+const PLAYER_S = 1_000;
+const ROAD_FROM = 900;
+const ROAD_TO = 2_100;
+const ROAD_STEP = 2;
+const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
+let failures = 0;
+
+function check(label: string, ok: boolean, detail: string): void {
+  if (!ok) failures++;
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
+}
+
+function addRoadCollider(physics: PhysicsWorld, road: Road): void {
+  const surface = new SurfaceField(road.seed);
+  const rows = Math.ceil((ROAD_TO - ROAD_FROM) / ROAD_STEP) + 1;
+  const vertices = new Float32Array(rows * 6);
+  const point = { x: 0, y: 0, z: 0 };
+  for (let row = 0; row < rows; row++) {
+    const s = Math.min(ROAD_TO, ROAD_FROM + row * ROAD_STEP);
+    for (let side = 0; side < 2; side++) {
+      const lateral = side === 0 ? -RIBBON_HALF_WIDTH : RIBBON_HALF_WIDTH;
+      road.offsetPoint(s, lateral, point);
+      const index = (row * 2 + side) * 3;
+      vertices[index] = point.x;
+      vertices[index + 1] = roadSurfaceY(road, surface, s, lateral, point.x, point.z);
+      vertices[index + 2] = point.z;
+    }
+  }
+  const indices = new Uint32Array((rows - 1) * 6);
+  for (let row = 0, index = 0; row < rows - 1; row++) {
+    const a = row * 2;
+    indices[index++] = a;
+    indices[index++] = a + 2;
+    indices[index++] = a + 1;
+    indices[index++] = a + 2;
+    indices[index++] = a + 3;
+    indices[index++] = a + 1;
+  }
+  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
+}
+
+console.log('world traffic bench: bounded, transient physical cars on the real road');
+const road = new Road(SEED);
+const physics = await PhysicsWorld.create();
+addRoadCollider(physics, road);
+const world = new GameWorld(newWorldState(SEED));
+const traffic = new RoadTraffic(
+  physics,
+  world,
+  new THREE.Scene(),
+  new WorldOrigin(),
+  road,
+  new HazardIndex(),
+  loadCarModel,
+  () => true,
+);
+check('menu-facing toggle enables traffic', traffic.toggle(), 'enabled');
+
+let largestCount = 0;
+for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
+  traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+  physics.step();
+  traffic.postStep();
+  largestCount = Math.max(largestCount, traffic.status.count);
+  if (step % 6 === 0) await Bun.sleep(0);
+}
+const populated = traffic.status;
+const catalogue = new Set(CAR_MODELS.map((model) => model.id));
+check(
+  'traffic stays within its six-car budget',
+  largestCount <= 6 && populated.count <= 6,
+  `largest ${largestCount}, live ${populated.count}`,
+);
+check(
+  'both directions are populated',
+  populated.sameDirection > 0 && populated.oncoming > 0,
+  `${populated.sameDirection} same-direction, ${populated.oncoming} oncoming`,
+);
+check(
+  'every traffic car uses sleeper autopilot',
+  populated.allSleeper,
+  `${populated.count} of ${populated.count} sleeper`,
+);
+check(
+  'both directions actually drive',
+  populated.movingSameDirection > 0 && populated.movingOncoming > 0,
+  `${populated.movingSameDirection} same-direction and ${populated.movingOncoming} oncoming moved`,
+);
+check(
+  'random traffic draws only from the full catalogue',
+  populated.modelIds.length > 0 && populated.modelIds.every((id) => catalogue.has(id)),
+  populated.modelIds.join(', '),
+);
+check(
+  'temporary traffic never enters the player save',
+  Object.keys(world.state.cars).length === 0,
+  `${Object.keys(world.state.cars).length} persistent traffic cars`,
+);
+
+traffic.fixedUpdate(0.6, PLAYER_S + 2_000, 0, 0);
+check(
+  'cars despawn beyond the active range',
+  traffic.status.count === 0,
+  `${traffic.status.count} cars remain`,
+);
+const toggledOff = !traffic.toggle();
+check(
+  'toggle off leaves no live or pending traffic',
+  toggledOff && traffic.status.count === 0 && !traffic.status.pending && !traffic.enabled,
+  JSON.stringify(traffic.status),
+);
+traffic.dispose();
+
+console.log(failures === 0 ? '\nall traffic checks passed' : `\n${failures} traffic check(s) FAILED`);
+if (failures > 0) process.exitCode = 1;

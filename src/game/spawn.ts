@@ -20,40 +20,33 @@ export interface SpawnRequest {
 }
 
 /**
- * Records a complete, fully fuelled car into state and returns it. The caller
- * materialises the Vehicle (physics + scene) from the CarState.
+ * Builds a complete, serviceable car without deciding whether it is persistent.
+ *
+ * World spawns add the result to `GameWorld`; temporary traffic keeps it in its own
+ * runtime world so ambient simulation works without traffic leaking into saves.
  */
-export function spawnCarState(
-  world: GameWorld,
-  request: SpawnRequest,
+export function createServiceableCarState(
+  id: string,
+  modelId: string,
   x: number,
   y: number,
   z: number,
   heading: number,
 ): CarState {
-  const def = carModel(request.modelId);
+  const def = carModel(modelId);
   const engine = variant(def.engineId).engine;
   const half = heading / 2;
-  const id = world.runtimePartId();
   const bonnet = createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres);
-  const car: CarState = {
-    // Runtime ids come from the world's own counter, shared with runtime parts,
-    // so spawned ids can never collide with generated or saved ones.
+  return {
     id,
-    modelId: request.modelId,
+    modelId,
     gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,
     reverseLightsOn: false,
-    // Straight out of the showroom: the dev spawn is the one car in the world with
-    // no history behind it.
     dirt: 0,
     scratches: 0,
-    // A complete model has no parts to age; fuel is its only fillable resource,
-    // so a spawn leaves the showroom with a full tank — and full of both the
-    // fluids it needs, because this is a dev tool and a dry one would just be a
-    // chore before every test.
     fuelLitres: def.tankLitres,
     fuelKind: engine?.fuel ?? null,
     waterLitres: bonnetWaterCapacity(bonnet),
@@ -70,6 +63,25 @@ export function spawnCarState(
     qz: 0,
     qw: Math.cos(half),
   };
+}
+
+/** Records a complete, fully fuelled car into state and returns it. */
+export function spawnCarState(
+  world: GameWorld,
+  request: SpawnRequest,
+  x: number,
+  y: number,
+  z: number,
+  heading: number,
+): CarState {
+  const car = createServiceableCarState(
+    world.runtimePartId(),
+    request.modelId,
+    x,
+    y,
+    z,
+    heading,
+  );
   world.apply({ t: 'car_add', car });
   return car;
 }

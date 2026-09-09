@@ -184,6 +184,9 @@ export interface PauseHooks {
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /** Apply a view-distance tier immediately; main pushes it to the renderer. */
   applyViewDistance: (v: ViewDistance) => void;
+  /** Session-only road traffic; temporary cars never enter save state. */
+  trafficEnabled: () => boolean;
+  toggleTraffic: () => boolean;
   /**
    * Record a fully fuelled car into the world.
    *
@@ -606,10 +609,14 @@ export class MainMenu {
 
         const resumeBtn = button('menu-button menu-primary', 'Resume');
         const settingsBtn = button('menu-button', 'Settings');
+        const trafficBtn = button(
+          'menu-button',
+          `Toggle Traffic — ${hooks.trafficEnabled() ? 'On' : 'Off'}`,
+        );
         const saveBtn = button('menu-button', 'Save');
         const exportBtn = button('menu-button', 'Export Save Code');
         const quitBtn = button('menu-button', 'Quit');
-        panel.append(resumeBtn, settingsBtn);
+        panel.append(resumeBtn, settingsBtn, trafficBtn);
         // Dev only, and labelled so a screenshot of it is never mistaken for the
         // shipping menu. `import.meta.env.DEV` is tested first so the branch folds
         // to a constant false in a production build and the label goes with it.
@@ -657,6 +664,11 @@ export class MainMenu {
 
         resumeBtn.addEventListener('click', () => finish('resume'));
         settingsBtn.addEventListener('click', () => showScreen('settings'));
+        trafficBtn.addEventListener('click', () => {
+          const enabled = hooks.toggleTraffic();
+          trafficBtn.textContent = `Toggle Traffic — ${enabled ? 'On' : 'Off'}`;
+          finish('resume');
+        });
         saveBtn.addEventListener('click', () => finish('save'));
         quitBtn.addEventListener('click', () => finish('quit'));
 
