@@ -14,7 +14,7 @@ import {
   PLAYGROUND_ORIGIN_Z,
   type CircuitSector,
 } from './playground/circuit';
-import { playgroundCarState } from './playground/car';
+import { createServiceableCarState } from './game/spawn';
 import { PlaygroundRoad } from './playground/playgroundroad';
 import {
   addCircuitCollider,
@@ -178,7 +178,7 @@ export async function bootPlayground(): Promise<void> {
   // The ego car starts ON THE LANE it is going to hold, not on the centreline: a
   // 1.45 m lateral step at the green light is not what is being tested.
   const startLateral = AUTOPILOT_MODES.frantic.laneOffset;
-  const state = playgroundCarState(
+  const state = createServiceableCarState(
     'playground',
     MODEL_ID,
     start.x + Math.cos(start.heading) * startLateral,

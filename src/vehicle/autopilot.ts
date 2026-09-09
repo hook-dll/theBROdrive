@@ -1,8 +1,8 @@
 /** Fixed-step road follower. Inputs remain ordinary InputFrame commands. */
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
-import { ROAD_HALF_WIDTH, type Road } from '../world/road';
-import { HazardIndex, type RoadHazard } from '../world/hazards';
+import { ROAD_HALF_WIDTH, type DriveRoad } from '../world/road';
+import { type HazardField, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
 
 export type AutopilotMode = 'sleeper' | 'frantic';
@@ -221,10 +221,13 @@ const PASSING_VERGE_M = 1.2;
 const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE_M;
 /** Outermost line either side that still keeps the body inside the verge allowance. */
 const EDGE_LINE_M = PASSING_EDGE - CAR_HALF_WIDTH_M;
+/** Enter only after a full departure; stay latched until the whole body is on asphalt. */
 const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
-const OFFROAD_SPEED_MPS = 8;
-const OFFROAD_BRAKE_MAX = 0.35;
+const OFFROAD_REJOIN_LATERAL_M = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.05;
+/** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
+const OFFROAD_SPEED_MPS = 3.5;
+const OFFROAD_BRAKE_MAX = 0.7;
 
 /**
  * SEEING OTHER TRAFFIC, and why it is not the same query as seeing a rock.
@@ -423,6 +426,11 @@ export class Autopilot {
   private stallAnchorZ = 0;
   /** Seconds since the last recovery attempt, which is what re-arms a given-up one. */
   private sinceRecovery = 0;
+  /**
+   * Latched after a full departure. Merely crossing the verge again is not enough:
+   * acceleration stays inhibited until the whole chassis is back on asphalt.
+   */
+  private roadRecoveryActive = false;
   private activityValue: AutopilotActivity = 'cruise';
   private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
@@ -489,8 +497,8 @@ export class Autopilot {
 
 
   constructor(
-    private readonly road: Road,
-    private readonly hazards: HazardIndex,
+    private readonly road: DriveRoad,
+    private readonly hazards: HazardField,
     /** Optional only until Vehicle exposes its PhysicsWorld; main passes the shared world. */
     private readonly physics?: PhysicsWorld,
   ) {}
@@ -521,6 +529,7 @@ export class Autopilot {
     this.stoppedFor = 0;
     this.sinceRecovery = RECOVERY_REARM_S;
     this.recoveryPhase = 'none';
+    this.roadRecoveryActive = false;
     this.recoveryTimer = 0;
     this.recoveryBias = 0;
     this.recoveryBiasUntil = 0;
@@ -553,15 +562,34 @@ export class Autopilot {
     const speed = Math.hypot(velocity.x, velocity.z);
     this.travelled += speed * dt;
     this.sinceRecovery += dt;
-    const offRoad = Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE;
-    if (offRoad) {
-      // A previous obstacle plan is no longer useful after an impact or flight into
-      // the desert. Road recovery takes priority and starts from the nearest safe
-      // road-edge line instead of trying to continue the old detour.
+    const wasRoadRecoveryActive = this.roadRecoveryActive;
+    if (Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE) {
+      this.roadRecoveryActive = true;
+    } else if (
+      this.roadRecoveryActive &&
+      Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M
+    ) {
+      this.roadRecoveryActive = false;
+    }
+    const offRoad = this.roadRecoveryActive;
+    if (offRoad && !wasRoadRecoveryActive) {
+      // Road re-entry is not obstacle recovery. The old manoeuvre reversed once,
+      // immediately declared its pull-out failed because it was still off-road, and
+      // exhausted both attempts in the sand. Cancel it and hold the nearest edge line.
+      this.recoveryPhase = 'none';
+      this.recoveryTimer = 0;
+      this.stoppedFor = 0;
+      this.stallAnchorX = this.position.x;
+      this.stallAnchorZ = this.position.z;
       this.plannedHazard = null;
       this.plannedLateral = 0;
-      this.appliedLateral = 0;
+      this.appliedLateral = Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE;
       this.passLine = null;
+    } else if (!offRoad && wasRoadRecoveryActive) {
+      // Do not carry the slow sand crossing into the ordinary stuck detector.
+      this.stoppedFor = 0;
+      this.stallAnchorX = this.position.x;
+      this.stallAnchorZ = this.position.z;
     }
     // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
     // chord to that point cuts the apex, so a preview longer than the corner itself
@@ -845,7 +873,7 @@ export class Autopilot {
     // 1.4 m/s covers the anchor distance and is working; a car that has moved two
     // metres in three seconds is stuck, whatever it is doing with the throttle.
     const wantsProgress = vehicle.engineRunning && roadSpeed > 1;
-    const stalled = wantsProgress && speed < CRAWL_SPEED_MPS;
+    const stalled = !offRoad && wantsProgress && speed < CRAWL_SPEED_MPS;
     const movedFromAnchor = Math.hypot(
       this.position.x - this.stallAnchorX,
       this.position.z - this.stallAnchorZ,
@@ -862,7 +890,7 @@ export class Autopilot {
       this.stoppedFor += dt;
     }
 
-    if (this.recoveryPhase === 'none' && this.stoppedFor >= STUCK_AFTER_S) {
+    if (!offRoad && this.recoveryPhase === 'none' && this.stoppedFor >= STUCK_AFTER_S) {
       this.beginRecovery(vehicle, config, projection.lateral, originX, originZ);
     }
     if (this.recoveryPhase !== 'none') {

@@ -256,6 +256,7 @@ export type WorldDelta =
   | { t: 'enter_car'; carId: string }
   | { t: 'exit_car' }
   | { t: 'car_add'; car: CarState }
+  | { t: 'car_remove'; carId: string }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
@@ -500,6 +501,9 @@ export class GameWorld {
         break;
       case 'car_add':
         s.cars[delta.car.id] = delta.car;
+        break;
+      case 'car_remove':
+        delete s.cars[delta.carId];
         break;
       case 'player_move':
         s.player.x = delta.x;

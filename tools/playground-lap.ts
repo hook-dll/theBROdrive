@@ -30,7 +30,7 @@ import {
   PLAYGROUND_ORIGIN_X,
   PLAYGROUND_ORIGIN_Z,
 } from '../src/playground/circuit';
-import { playgroundCarState } from '../src/playground/car';
+import { createServiceableCarState } from '../src/game/spawn';
 import { PlaygroundRoad } from '../src/playground/playgroundroad';
 import { addCircuitCollider } from '../src/playground/ribbon';
 import { PlaygroundTraffic, type TrafficState } from '../src/playground/traffic';
@@ -162,6 +162,9 @@ interface RigOptions {
   readonly startS?: number;
   /** Layout for the other cars; the shipped playground grid by default. */
   readonly slots?: readonly TrafficSlot[];
+  /** Spawn lateral and heading error for deliberate road-departure scenarios. */
+  readonly startLateral?: number;
+  readonly headingOffset?: number;
   /**
    * A STATIC obstacle nobody told the autopilot about, on the lane at this
    * arclength. This is what a crash leaves a car pressed against: the corridor rays
@@ -176,7 +179,15 @@ const BOULDER_RADIUS_M = 0.9;
 
 /** The car on its own lane, engine warm enough to pull, with the scene it needs. */
 async function makeRig(options: RigOptions): Promise<Rig> {
-  const { mode, traffic, startS = 0, slots, boulderS } = options;
+  const {
+    mode,
+    traffic,
+    startS = 0,
+    startLateral = AUTOPILOT_MODES[mode].laneOffset,
+    headingOffset = 0,
+    slots,
+    boulderS,
+  } = options;
   const physics = await PhysicsWorld.create();
   addCircuitCollider(physics, road, circuit);
   const world = new GameWorld(newWorldState(SEED));
@@ -194,14 +205,13 @@ async function makeRig(options: RigOptions): Promise<Rig> {
     );
   }
   const at = circuit.sampleAt(startS);
-  const lane = AUTOPILOT_MODES[mode].laneOffset;
-  const state = playgroundCarState(
+  const state = createServiceableCarState(
     'playground',
     MODEL_ID,
-    at.x + Math.cos(at.heading) * lane,
-    circuit.surfaceY(startS, lane) + 1.2,
-    at.z - Math.sin(at.heading) * lane,
-    at.heading,
+    at.x + Math.cos(at.heading) * startLateral,
+    circuit.surfaceY(startS, startLateral) + 1.2,
+    at.z - Math.sin(at.heading) * startLateral,
+    at.heading + headingOffset,
   );
   world.state.cars[state.id] = state;
   const scene = new THREE.Scene();
@@ -266,6 +276,8 @@ interface LapMetrics {
   laneErrorRms: number;
   laneErrorWorst: number;
   offAsphaltSeconds: number;
+  maxOffAsphaltSpeed: number;
+  finalLateral: number;
   reverseSeconds: number;
   stuckSeconds: number;
   /** Closest another car's chassis came, metres between centres, or Infinity. */
@@ -330,6 +342,7 @@ async function measure(
   let sumLaneErrorSq = 0;
   let laneErrorWorst = 0;
   let offAsphalt = 0;
+  let maxOffAsphaltSpeed = 0;
   let reverse = 0;
   let stuck = 0;
   let nearestCar = Infinity;
@@ -370,6 +383,7 @@ async function measure(
     sumLaneErrorSq += laneError * laneError;
     laneErrorWorst = Math.max(laneErrorWorst, Math.abs(laneError));
     if (lateral > CIRCUIT_HALF_WIDTH) offAsphalt += FIXED_DT;
+    if (lateral > CIRCUIT_HALF_WIDTH) maxOffAsphaltSpeed = Math.max(maxOffAsphaltSpeed, speed);
     if (rig.input.reverse) reverse += FIXED_DT;
     if (speed < 0.5) stuck += FIXED_DT;
     // A pass is counted when it STARTS, so a run that commits to one and then has to
@@ -430,6 +444,8 @@ async function measure(
     laneErrorRms: Math.sqrt(sumLaneErrorSq / Math.max(1, samples)),
     laneErrorWorst,
     offAsphaltSeconds: offAsphalt,
+    maxOffAsphaltSpeed,
+    finalLateral: circuit.project(position.x, position.z, hint).lateral,
     reverseSeconds: reverse,
     stuckSeconds: stuck,
     nearestCar,
@@ -598,5 +614,37 @@ check(
     `mean ${(crashed.meanSpeed * 3.6).toFixed(1)} km/h`,
 );
 
+
+// ---------------------------------------------------------------------------
+// Fully departed onto sand: stay slow until the whole car is back on asphalt.
+// ---------------------------------------------------------------------------
+//
+// Start twelve metres left of a flat straight and point another 26 degrees away
+// from it. This used to enter the generic reverse/pull-out loop: each pull-out ended
+// immediately because the car was still off-road, both attempts were consumed, and
+// it eventually sat in the sand. Road re-entry is now a separate latched state.
+const OFFROAD_START_S = 40;
+const OFFROAD_START_LATERAL_M = 12;
+console.log('\nplayground: sleeper returning from a full road departure');
+const returning = await measure(
+  {
+    mode: 'sleeper',
+    traffic: null,
+    startS: OFFROAD_START_S,
+    startLateral: OFFROAD_START_LATERAL_M,
+    headingOffset: Math.PI / 7,
+  },
+  1,
+  70,
+);
+check(
+  'sleeper: carefully returns from sand before accelerating',
+  returning.progress >= 100 &&
+    Math.abs(returning.finalLateral) <= CIRCUIT_HALF_WIDTH &&
+    returning.maxOffAsphaltSpeed <= 5,
+  `${returning.progress.toFixed(0)} m progress, final lateral ${returning.finalLateral.toFixed(2)} m, ` +
+    `${(returning.maxOffAsphaltSpeed * 3.6).toFixed(1)} km/h peak while off asphalt, ` +
+    `${returning.offAsphaltSeconds.toFixed(1)} s off asphalt`,
+);
 console.log(failures === 0 ? '\nall playground checks passed' : `\n${failures} playground check(s) FAILED`);
 if (failures > 0) process.exitCode = 1;

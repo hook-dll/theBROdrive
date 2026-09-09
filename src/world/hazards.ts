@@ -12,6 +12,11 @@ export interface RoadHazard {
   readonly breakable: boolean;
 }
 
+/** Read-only obstacle field consumed by a driver. */
+export interface HazardField {
+  forEachAhead(s: number, distance: number, fn: (hazard: RoadHazard) => void): void;
+}
+
 export class HazardIndex {
   private readonly byChunk = new Map<string, RoadHazard[]>();
   private readonly ordered: RoadHazard[] = [];
@@ -61,5 +66,38 @@ export class HazardIndex {
     }
     this.ordered.sort((a, b) => a.s - b.s);
     this.dirty = false;
+  }
+}
+
+/**
+ * The same hazards viewed from the opposite end of a finite road.
+ *
+ * Converted records are stable because Autopilot latches a chosen hazard across
+ * ticks; one mutable scratch object would silently move that plan to the next prop.
+ */
+export class ReversedHazardIndex implements HazardField {
+  private readonly reversed = new WeakMap<RoadHazard, RoadHazard>();
+
+  constructor(
+    private readonly forward: HazardField,
+    private readonly roadLength: number,
+  ) {}
+
+  forEachAhead(s: number, distance: number, fn: (hazard: RoadHazard) => void): void {
+    const start = Math.max(0, this.roadLength - s - Math.max(0, distance));
+    const end = Math.min(this.roadLength, this.roadLength - s);
+    this.forward.forEachAhead(start, end - start, (hazard) => {
+      let reversed = this.reversed.get(hazard);
+      if (!reversed) {
+        reversed = {
+          s: this.roadLength - hazard.s,
+          lateral: -hazard.lateral,
+          radius: hazard.radius,
+          breakable: hazard.breakable,
+        };
+        this.reversed.set(hazard, reversed);
+      }
+      fn(reversed);
+    });
   }
 }
