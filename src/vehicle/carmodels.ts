@@ -482,6 +482,17 @@ export interface CarModelDef {
    * centre of mass and wheel mounts remain unchanged.
    */
   readonly visualRideLiftWheelFraction?: number;
+  /**
+   * Body-only correction for a source mesh whose coachwork is not life-size on
+   * the wheelbase scale. Wheels stay at their measured factory geometry.
+   */
+  readonly bodyScaleX?: number;
+  readonly bodyScaleY?: number;
+  /**
+   * Candidate road Soviet wheel-set model ids. The selected source supplies style
+   * only; this car's own factory radius and axle positions remain authoritative.
+   */
+  readonly wheelSetPool?: readonly string[];
   /** Authored rolling radius in metres when the source wheel is not factory-sized. */
   readonly wheelRadius?: number;
   /** Factory wheel-centre track in metres; omitted to retain the source geometry. */
@@ -637,6 +648,8 @@ interface SovietSpec {
   readonly suspension: SuspensionTuning;
   readonly storageCells?: number;
   readonly visualRideLiftWheelFraction?: number;
+  readonly bodyScaleX?: number;
+  readonly bodyScaleY?: number;
   readonly wheelRadius?: number;
   readonly frontWheelTrack?: number;
   readonly rearWheelTrack?: number;
@@ -957,13 +970,17 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.53,
     dragArea: 1.3,
     suspension: SUSP_NIVA,
+    // The source body is 1.542 m wide and 1.402 m tall at the wheelbase scale;
+    // factory 2121 coachwork is 1.680 m wide and 1.640 m high.
+    bodyScaleX: 1.08927935,
+    bodyScaleY: 1.01634383,
+    visualRideLiftWheelFraction: 0,
+    wheelRadius: 0.343,
     frontWheelTrack: 1.43,
     rearWheelTrack: 1.4,
     storageCells: 4,
   },
   {
-    // VAZ-2131: the Niva stretched by half a metre, on the 1.7 and five speeds.
-    // 1.4 tonnes on the same springs, so it rolls more and stops worse.
     id: 'sv_niva_long',
     label: 'VAZ-2131 Niva',
     file: 'vz31.fbx',
@@ -979,8 +996,13 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     frontWeightShare: 0.52,
     dragArea: 1.2,
     suspension: SUSP_NIVA,
+    // 2131 shares the 1.680 m width and 1.640 m height, but has a 2.700 m
+    // wheelbase and factory 1.440/1.420 m front/rear tracks.
+    bodyScaleX: 1.06187234,
+    bodyScaleY: 1.04967589,
+    visualRideLiftWheelFraction: 0,
     wheelRadius: 0.343,
-    frontWheelTrack: 1.43,
+    frontWheelTrack: 1.44,
     rearWheelTrack: 1.42,
     storageCells: 6,
   },
@@ -1040,6 +1062,38 @@ function sovietLights(file: string): VehicleLightsDef {
   };
 }
 
+/** Shared pool: road Soviet sets only, excluding rally and both Niva sets. */
+const SOVIET_WHEEL_SET_POOL = [
+  'sv_gaz21',
+  'sv_gaz24',
+  'sv_vaz2101',
+  'sv_vaz2102',
+  'sv_vaz2103',
+  'sv_vaz2104',
+  'sv_vaz2105',
+  'sv_vaz2106',
+  'sv_vaz2107',
+  'sv_vaz2108',
+  'sv_vaz2109',
+  'sv_vaz21099',
+] as const;
+
+function sovietWheelNodes(file: string): WheelNodeNames {
+  const stem = file.slice(0, -4);
+  const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
+  return {
+    wheel_fl: [`${prefix}wheel_fl`],
+    wheel_fr: [`${prefix}wheel_fr`],
+    wheel_rl: [`${prefix}wheel_bl`],
+    wheel_rr: [`${prefix}wheel_br`],
+  };
+}
+
+function sharedSovietWheelPool(file: string): readonly string[] | undefined {
+  if (['vz05r.fbx', 'vz21.fbx', 'vz31.fbx'].includes(file)) return undefined;
+  return SOVIET_WHEEL_SET_POOL;
+}
+
 /**
  * Visual-only lift for the VAZ bodies, as a fraction of wheel radius.
  *
@@ -1062,12 +1116,18 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   // UV-mapped to the atlas's dark teal swatch. Measured on all fifteen.
   glassUvCell: [3, 1],
   lights: sovietLights(spec.file),
-  detectWheels: true,
+  // Soviet FBX wheel names are stable; explicit nodes also keep headless and
+  // browser loaders on the same four-corner interpretation.
+  detectWheels: false,
+  wheelNodes: sovietWheelNodes(spec.file),
+  wheelSetPool: sharedSovietWheelPool(spec.file),
   bodyClass: 'car',
   storageCells: spec.storageCells,
   visualRideLiftWheelFraction:
     spec.visualRideLiftWheelFraction ??
     (spec.file.startsWith('vz') ? VAZ_VISUAL_RIDE_LIFT : undefined),
+  bodyScaleX: spec.bodyScaleX,
+  bodyScaleY: spec.bodyScaleY,
   wheelRadius: spec.wheelRadius,
   frontWheelTrack: spec.frontWheelTrack,
   rearWheelTrack: spec.rearWheelTrack,
@@ -1111,6 +1171,7 @@ const SAAS_SPECS: readonly Entry[] = [
     handlingProfile: 'road',
     frontWeightShare: 0.62,
     dragArea: 0.74,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
     id: 'sa_oka',
@@ -1129,7 +1190,7 @@ const SAAS_SPECS: readonly Entry[] = [
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
-    dragArea: 0.62,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
     id: 'sa_uaz330364',
@@ -1149,6 +1210,7 @@ const SAAS_SPECS: readonly Entry[] = [
     handlingProfile: 'utility',
     frontWeightShare: 0.52,
     dragArea: 1.85,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
     id: 'sa_izh2715',
@@ -1168,6 +1230,7 @@ const SAAS_SPECS: readonly Entry[] = [
     handlingProfile: 'classic',
     frontWeightShare: 0.53,
     dragArea: 1.0,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
 ];
 
@@ -1216,7 +1279,7 @@ const GTAV_SPECS: readonly Entry[] = [
     suspension: SUSP_SAMARA,
     steerLock: 0.58,
     rearDriveBias: 0,
-    handlingProfile: 'road',
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
     frontWeightShare: 0.62,
     dragArea: 0.63,
   },
@@ -1274,10 +1337,12 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
   visualRideLiftWheelFraction: e.visualRideLiftWheelFraction,
+  bodyScaleX: e.bodyScaleX,
+  bodyScaleY: e.bodyScaleY,
+  wheelSetPool: e.wheelSetPool,
   wheelRadius: e.wheelRadius,
   frontWheelTrack: e.frontWheelTrack,
   rearWheelTrack: e.rearWheelTrack,
-  detectWheels: e.detectWheels,
   wheelNodes: e.wheelNodes,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,

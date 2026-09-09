@@ -799,6 +799,22 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     throw new Error(`Car model "${def.id}": could not identify four wheels by shape`);
   }
   const parts = takeOwnWheels(def, scene);
+  // Some source meshes have a correct axle spacing but undersized coachwork.
+  // Scale the body around its own centre so the factory wheel geometry and the
+  // wheelbase remain untouched; the measured chassis box then describes the
+  // corrected body in the same frame as the suspension.
+  const bodyBoxBeforeCorrection = boundsOf(scene);
+  const bodyCentreBeforeCorrection = bodyBoxBeforeCorrection.getCenter(new THREE.Vector3());
+  const bodyScaleX = def.bodyScaleX ?? 1;
+  const bodyScaleY = def.bodyScaleY ?? 1;
+  scene.scale.set(bodyScaleX, bodyScaleY, 1);
+  scene.position.set(
+    bodyCentreBeforeCorrection.x * (1 - bodyScaleX),
+    bodyCentreBeforeCorrection.y * (1 - bodyScaleY),
+    0,
+  );
+  scene.updateMatrixWorld(true);
+
 
   // Chassis box: the bounds of what is left, i.e. the body and its fixed trim.
   // Box3 has no scalar multiply, so the corners are scaled directly.
@@ -888,8 +904,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
-
-  scene.scale.setScalar(s);
+  scene.scale.set(s * bodyScaleX, s * bodyScaleY, s);
   scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene, true);
   scene.updateMatrixWorld(true);
@@ -970,12 +985,16 @@ function loadModel(def: CarModelDef): Promise<void> {
  */
 export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
-  await Promise.all(defs.map(loadModel));
+  const idsToLoad = new Set(defs.map((def) => def.id));
+  for (const def of defs) {
+    for (const sourceId of def.wheelSetPool ?? []) idsToLoad.add(sourceId);
+  }
+  await Promise.all([...idsToLoad].map((id) => loadModel(carModel(id))));
 }
 
 /** Lazy-loading entry point used by runtime consumers that need one model. */
 export function loadCarModel(id: string): Promise<void> {
-  return loadModel(carModel(id));
+  return preloadCarModels([id]);
 }
 
 /** True when a visual template is resident and can be cloned synchronously. */
@@ -992,6 +1011,33 @@ function template(id: string): Template {
   if (!t) throw new Error(`Car model "${id}" has not finished loading`);
   return t;
 }
+
+function selectedWheelTemplate(t: Template, appearanceKey: string): Template {
+  const pool = t.def.wheelSetPool;
+  if (!pool || pool.length === 0) return t;
+  const sourceId = pool[appearanceHash('vaz-wheel-set', appearanceKey) % pool.length]!;
+  return templates.get(sourceId) ?? t;
+}
+
+/**
+ * Clones a wheel style from the selected Soviet set while keeping this body's
+ * measured factory rolling radius. The source set contributes mesh, rim and
+ * tyre appearance; chassis geometry remains the target model's responsibility.
+ */
+function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Object3D> {
+  const source = selectedWheelTemplate(t, appearanceKey);
+  const wheels = new Map<string, THREE.Object3D>();
+  for (const targetWheel of t.measure.wheels) {
+    const mesh = source.wheels.get(targetWheel.id)!.clone(true);
+    const sourceWheel = source.measure.wheels.find((wheel) => wheel.id === targetWheel.id)!;
+    const rollingScale = targetWheel.radius / sourceWheel.radius;
+    mesh.scale.y *= rollingScale;
+    mesh.scale.z *= rollingScale;
+    wheels.set(targetWheel.id, mesh);
+  }
+  return wheels;
+}
+
 
 /** Measurements are available from the tiny fit manifest before visuals stream in. */
 export function carModelMeasure(id: string): CarModelMeasure {
@@ -1035,10 +1081,8 @@ function visualBodyLift(t: Template): number {
   for (const wheel of t.measure.wheels) wheelRadius = Math.max(wheelRadius, wheel.radius);
   return wheelRadius * fraction;
 }
-
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
-  const wheels = new Map<string, THREE.Object3D>();
-  for (const [wheelId, object] of t.wheels) wheels.set(wheelId, object.clone(true));
+  const wheels = cloneWheels(t, appearanceKey);
   const body = t.body.clone(true);
   cloneCarBodyPaintMaterials(body, t.def, appearanceKey);
   prepareSovietShellFaces(body, t.def);
@@ -1054,8 +1098,10 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
   const warmed = warmDrivingInstances.get(id);
   if (warmed) {
     warmDrivingInstances.delete(id);
-    applyRandomPaint(warmed.body, t.def, appearanceKey);
-    return warmed;
+    if (appearanceKey === id) {
+      applyRandomPaint(warmed.body, t.def, appearanceKey);
+      return warmed;
+    }
   }
   return cloneDrivingModel(t, appearanceKey);
 }
@@ -1073,8 +1119,9 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   applyRandomPaint(body, t.def, appearanceKey);
   body.position.y += visualBodyLift(t);
   group.add(body);
+  const wheels = cloneWheels(t, appearanceKey);
   for (const wheel of t.measure.wheels) {
-    const mesh = t.wheels.get(wheel.id)!.clone(true);
+    const mesh = wheels.get(wheel.id)!;
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
     group.add(mesh);
   }
@@ -1122,8 +1169,10 @@ export function createStaticCarModel(id: string, appearanceKey = id): THREE.Obje
   const warmed = warmStaticInstances.get(id);
   if (warmed) {
     warmStaticInstances.delete(id);
-    applyRandomPaint(warmed, t.def, appearanceKey);
-    return warmed;
+    if (appearanceKey === id) {
+      applyRandomPaint(warmed, t.def, appearanceKey);
+      return warmed;
+    }
   }
   return cloneStaticModel(id, appearanceKey);
 }
