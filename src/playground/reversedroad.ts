@@ -1,4 +1,5 @@
 import type { RoadProjection, RoadSample } from '../world/road';
+import type { RoadConditionBuffer } from '../world/gradient';
 import { PlaygroundRoad } from './playgroundroad';
 
 /**
@@ -24,6 +25,10 @@ import { PlaygroundRoad } from './playgroundroad';
  * which is precisely the lateral negation above.
  */
 export class ReversedPlaygroundRoad extends PlaygroundRoad {
+  override conditionAt(s: number, out: RoadConditionBuffer): void {
+    super.conditionAt(this.circuit.wrap(-s), out);
+  }
+
   override sampleAt(s: number): RoadSample {
     const forward = this.circuit.sampleAt(this.circuit.wrap(-s));
     return {

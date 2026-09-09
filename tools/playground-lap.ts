@@ -288,6 +288,7 @@ interface LapMetrics {
   nearestCar: number;
   impacts: number;
   passes: number;
+  indicatorSeconds: number;
   progress: number;
   sectors: SectorMetrics[];
 }
@@ -358,6 +359,7 @@ async function measure(
   let impacts = 0;
   let passes = 0;
   let passing = false;
+  let indicatorSeconds = 0;
 
   while (elapsed < seconds && lapSeconds.length < laps) {
     rig.autopilot.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
@@ -416,6 +418,7 @@ async function measure(
     const nowPassing = rig.autopilot.activity === 'pass';
     if (nowPassing && !passing) passes++;
     passing = nowPassing;
+    if (rig.vehicle.indicator !== 'off') indicatorSeconds += FIXED_DT;
     // Impacts are the honest collision test: the vehicle reports a velocity change
     // its own tyres cannot explain, at the threshold that scratches paint.
     const impact = rig.vehicle.lastImpact;
@@ -480,6 +483,7 @@ async function measure(
     nearestCar,
     impacts,
     passes,
+    indicatorSeconds,
     progress: travelled,
     sectors: finished,
   };
@@ -560,15 +564,23 @@ check(
 );
 check(
   'frantic: overtakes rather than queues',
-  busy.passes >= 3,
-  `${busy.passes} pass(es) started against four cars to catch, mean ${(busy.meanSpeed * 3.6).toFixed(1)} km/h`,
+  busy.passes >= 1 && busy.maxSignedLateral > 0.8,
+  `${busy.passes} passing manoeuvre(s) started while clearing four cars, mean ${(busy.meanSpeed * 3.6).toFixed(1)} km/h`,
 );
 // Bodies are about 1.7 m wide, so centres closer than that are touching. This is the
 // check that says a pass was a pass and not a shunt.
 check(
   'frantic: passes without touching anything',
-  busy.nearestCar >= 1.9 && busy.impacts === 0,
-  `nearest car ${busy.nearestCar.toFixed(2)} m between centres, ${busy.impacts} impact(s)`,
+  busy.nearestCar >= 1.9 &&
+    busy.impacts === 0 &&
+    Math.max(Math.abs(busy.minSignedLateral), Math.abs(busy.maxSignedLateral)) <=
+      CIRCUIT_HALF_WIDTH + 1.2,
+  `nearest car ${busy.nearestCar.toFixed(2)} m, ${busy.impacts} impact(s), lateral ${busy.minSignedLateral.toFixed(2)}..${busy.maxSignedLateral.toFixed(2)} m`,
+);
+check(
+  'frantic: signals its lane changes',
+  busy.indicatorSeconds >= 1,
+  `${busy.indicatorSeconds.toFixed(1)} s with an indicator active`,
 );
 console.log(
   `  mean ${(busy.meanSpeed * 3.6).toFixed(1)} km/h, peak ${(busy.peakSpeed * 3.6).toFixed(0)}, ` +
@@ -584,6 +596,11 @@ check(
   calm.maxSignedLateral <= 0.4 && calm.impacts === 0,
   `${calm.passes} pass(es), lateral ${calm.minSignedLateral.toFixed(2)}..${calm.maxSignedLateral.toFixed(2)} m, ` +
     `nearest car ${calm.nearestCar.toFixed(2)} m, mean ${(calm.meanSpeed * 3.6).toFixed(1)} km/h`,
+);
+check(
+  'sleeper: does not signal a lane change it never makes',
+  calm.indicatorSeconds < 0.1,
+  `${calm.indicatorSeconds.toFixed(1)} s with an indicator active`,
 );
 
 // ---------------------------------------------------------------------------

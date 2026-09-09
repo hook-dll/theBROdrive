@@ -28,8 +28,8 @@ installAssetShim();
 
 const SEED = 42;
 const PLAYER_S = 1_000;
-const ROAD_FROM = 900;
-const ROAD_TO = 2_100;
+const ROAD_FROM = 100;
+const ROAD_TO = 3_200;
 const ROAD_STEP = 2;
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
 let failures = 0;
@@ -97,13 +97,13 @@ for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its eight-car budget',
-  largestCount <= 8 && populated.count <= 8,
+  'traffic stays within its twelve-car budget',
+  largestCount <= 12 && populated.count <= 12,
   `largest ${largestCount}, live ${populated.count}`,
 );
 check(
   'traffic forms a frequent local stream',
-  populated.count >= 6 && populated.nearestRoadDistance <= 300,
+  populated.count >= 9 && populated.nearestRoadDistance <= 300,
   `${populated.count} live, nearest ${populated.nearestRoadDistance.toFixed(0)} m away`,
 );
 check(
@@ -112,9 +112,9 @@ check(
   `${populated.sameDirection} same-direction, ${populated.oncoming} oncoming`,
 );
 check(
-  'every traffic car uses sleeper autopilot',
-  populated.allSleeper,
-  `${populated.count} of ${populated.count} sleeper`,
+  'traffic contains cautious, normal and passing-capable drivers',
+  populated.sleeper > 0 && populated.frantic > 0 && populated.cautious > 0,
+  `${populated.sleeper} sleeper, ${populated.frantic} frantic, ${populated.cautious} cautious`,
 );
 check(
   'night traffic uses high beam and dips around oncoming cars',
@@ -138,8 +138,25 @@ check(
   Object.keys(world.state.cars).length === 0,
   `${Object.keys(world.state.cars).length} persistent traffic cars`,
 );
+// Keep the stream moving through several generations. This is the behavioral check:
+// different caps create queues and overtakes, and none may turn into a physical hit.
+for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
+  const movingPlayerS = PLAYER_S + step * FIXED_DT * 12;
+  traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0);
+  physics.step();
+  traffic.postStep();
+  largestCount = Math.max(largestCount, traffic.status.count);
+  if (step % 12 === 0) await Bun.sleep(0);
+}
+const streamed = traffic.status;
+check(
+  'mixed traffic queues and passes without collision',
+  streamed.impacts === 0 && streamed.passes > 0,
+  `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
+);
 
-traffic.fixedUpdate(0.6, PLAYER_S + 2_000, 0, 0);
+
+traffic.fixedUpdate(0.6, PLAYER_S + 4_000, 0, 0);
 check(
   'cars despawn beyond the active range',
   traffic.status.count === 0,
