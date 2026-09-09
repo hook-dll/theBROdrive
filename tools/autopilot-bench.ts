@@ -210,6 +210,9 @@ async function driveHazard(
   minSpeedNear: number;
   approachGap: number;
   approachSpeed: number;
+  /** Fastest and slowest the car went within 15 m of the hazard's edge. */
+  chargeSpeed: number;
+  restSpeed: number;
   passed: boolean;
   rig: Rig;
   worstLateral: number;
@@ -224,6 +227,8 @@ async function driveHazard(
   let minSpeedNear = Infinity;
   let approachGap = Infinity;
   let approachSpeed = 0;
+  let chargeSpeed = 0;
+  let restSpeed = Infinity;
   let worstLateral = 0;
   let passed = false;
   // The projection hint MUST be carried. `project` searches locally around it, so a
@@ -252,13 +257,19 @@ async function driveHazard(
     if (!passed && p.s < hazard.s) {
       approachGap = Math.min(approachGap, hazard.s - p.s);
       approachSpeed = v;
+      // Both measured from the hazard's EDGE, not its centre: a 6 m boulder's
+      // braking envelope is still 7 m/s twenty metres from the middle of it.
+      if (hazard.s - p.s < hazard.radius + 15) {
+        chargeSpeed = Math.max(chargeSpeed, v);
+        restSpeed = Math.min(restSpeed, v);
+      }
     }
     if (p.s > hazard.s + 15) {
       passed = true;
       break;
     }
   }
-  return { minDistance, speedAtClosest, minSpeedNear, approachGap, approachSpeed, worstLateral, passed, rig, chunk };
+  return { minDistance, speedAtClosest, minSpeedNear, approachGap, approachSpeed, chargeSpeed, restSpeed, worstLateral, passed, rig, chunk };
 }
 
 interface LitterMetrics {
@@ -418,10 +429,14 @@ async function checkHazards(): Promise<void> {
     `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${PASSING_EDGE.toFixed(2)} m edge`,
   );
   const wall = await driveHazard({ s: START_S + 300, lateral: 0, radius: 6, breakable: false }, 100);
+  // A road blocked from verge to verge is never passed and never charged. What the
+  // car does while it waits is its own business: the recovery manoeuvre retries every
+  // half-minute in case the world has changed, so the LAST speed sampled before the
+  // hazard is not a verdict — the fastest it ever came at the thing is.
   check(
     'impassable hazard stops the car short of it',
-    !wall.passed && wall.approachGap > 6 && wall.approachSpeed < 2,
-    `stopped ${wall.approachGap.toFixed(2)} m short at ${wall.approachSpeed.toFixed(2)} m/s, passed=${wall.passed}`,
+    !wall.passed && wall.approachGap > 6 && wall.restSpeed < 0.5 && wall.chargeSpeed < 6,
+    `stopped ${wall.approachGap.toFixed(2)} m short (to ${wall.restSpeed.toFixed(2)} m/s), never came at it faster than ${wall.chargeSpeed.toFixed(2)} m/s, passed=${wall.passed}`,
   );
   // A breakable prop is still a real road obstacle. Avoiding it keeps the car from
   // taking an unnecessary physics hit; the breakable flag only means a human can

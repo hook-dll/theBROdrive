@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
+import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
@@ -161,14 +162,37 @@ interface RigOptions {
   readonly startS?: number;
   /** Layout for the other cars; the shipped playground grid by default. */
   readonly slots?: readonly TrafficSlot[];
+  /**
+   * A STATIC obstacle nobody told the autopilot about, on the lane at this
+   * arclength. This is what a crash leaves a car pressed against: the corridor rays
+   * only report dynamic bodies, and there is no `HazardIndex` on this circuit, so the
+   * car has no sensing of it whatsoever and must get out on the stall detector alone.
+   */
+  readonly boulderS?: number;
 }
+
+/** Radius and lane of that boulder. Small enough that the escape bias clears it. */
+const BOULDER_RADIUS_M = 0.9;
 
 /** The car on its own lane, engine warm enough to pull, with the scene it needs. */
 async function makeRig(options: RigOptions): Promise<Rig> {
-  const { mode, traffic, startS = 0, slots } = options;
+  const { mode, traffic, startS = 0, slots, boulderS } = options;
   const physics = await PhysicsWorld.create();
   addCircuitCollider(physics, road, circuit);
   const world = new GameWorld(newWorldState(SEED));
+  if (boulderS !== undefined) {
+    const rock = circuit.sampleAt(boulderS);
+    const rockLateral = AUTOPILOT_MODES[mode].laneOffset;
+    physics.addStaticBall(
+      BOULDER_RADIUS_M,
+      {
+        x: rock.x + Math.cos(rock.heading) * rockLateral,
+        y: circuit.surfaceY(boulderS, rockLateral) + BOULDER_RADIUS_M * 0.7,
+        z: rock.z - Math.sin(rock.heading) * rockLateral,
+      },
+      SurfaceType.Rock,
+    );
+  }
   const at = circuit.sampleAt(startS);
   const lane = AUTOPILOT_MODES[mode].laneOffset;
   const state = playgroundCarState(
@@ -551,6 +575,27 @@ check(
     `${wedged.reverseSeconds.toFixed(1)} s in reverse, ${wedged.stuckSeconds.toFixed(1)} s stopped, ` +
     `mean ${(wedged.meanSpeed * 3.6).toFixed(1)} km/h, nearest ${wedged.nearestCar.toFixed(2)} m, ` +
     `${wedged.impacts} impact(s)`,
+);
+
+// ---------------------------------------------------------------------------
+// Crashed into scenery: nothing sensed it, and it still has to get out.
+// ---------------------------------------------------------------------------
+//
+// A boulder on the lane that no index knows about and no ray reports, because rays
+// only count dynamic bodies. The car drives into it at cruise, and from then on the
+// only evidence anything is wrong is that the car is not going anywhere: this is the
+// case a player reported as an autopilot revving its engine against an obstacle
+// forever, and it went undetected because a car with its foot down against something
+// solid rocks and slips past 1 km/h constantly, so a standstill test never fired.
+const BOULDER_S = 300;
+console.log('\nplayground: sleeper crashed into an unindexed boulder');
+const crashed = await measure({ mode: 'sleeper', traffic: null, boulderS: BOULDER_S }, 1, 70);
+check(
+  'sleeper: gets itself out of a crash into scenery',
+  crashed.progress >= BOULDER_S + 60 && crashed.reverseSeconds > 0.2,
+  `${crashed.progress.toFixed(0)} m travelled past a boulder at ${BOULDER_S} m, ` +
+    `${crashed.reverseSeconds.toFixed(1)} s in reverse, ${crashed.stuckSeconds.toFixed(1)} s stopped, ` +
+    `mean ${(crashed.meanSpeed * 3.6).toFixed(1)} km/h`,
 );
 
 console.log(failures === 0 ? '\nall playground checks passed' : `\n${failures} playground check(s) FAILED`);
