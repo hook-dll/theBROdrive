@@ -694,7 +694,7 @@ function takeOwnWheels(
     // corrects source art whose wheelbase is accurate but tyres are not.
     const extents = [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
     const sourceRadius = Math.max(...extents) / 2;
-    const radius = def.wheelRadius ?? sourceRadius * s;
+    const radius = def.factory.wheelRadius;
     const wheelScale = radius / (sourceRadius * s);
     radii.set(id, radius);
     positions.set(id, centre.clone().multiplyScalar(s));
@@ -759,15 +759,6 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
   scene.updateMatrixWorld(true);
 }
 
-/**
- * Cosmetic ride-height correction, metres: how far the body drops relative to the
- * wheels. Every catalogue body sits a hand's width too tall — the tyre tops ride
- * 3-5 cm clear of the arch lips instead of tucking under them, so the cars read as
- * standing on stilts. Raising each wheel's mount (its chassis-local Y) by this much
- * drops the body by the same amount; the collider floor keys off the same mount and
- * follows it up, so the belly keeps its clearance and only the stance changes.
- */
-const RIDE_DROP_M = 0.04;
 
 /**
  * How far the hood camera stands above the measured bonnet skin, metres. Enough to
@@ -799,28 +790,30 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     throw new Error(`Car model "${def.id}": could not identify four wheels by shape`);
   }
   const parts = takeOwnWheels(def, scene);
-  // Some source meshes have a correct axle spacing but undersized coachwork.
-  // Scale the body around its own centre so the factory wheel geometry and the
-  // wheelbase remain untouched; the measured chassis box then describes the
-  // corrected body in the same frame as the suspension.
-  const bodyBoxBeforeCorrection = boundsOf(scene);
-  const bodyCentreBeforeCorrection = bodyBoxBeforeCorrection.getCenter(new THREE.Vector3());
-  const bodyScaleX = def.bodyScaleX ?? 1;
-  const bodyScaleY = def.bodyScaleY ?? 1;
-  scene.scale.set(bodyScaleX, bodyScaleY, 1);
-  scene.position.set(
-    bodyCentreBeforeCorrection.x * (1 - bodyScaleX),
-    bodyCentreBeforeCorrection.y * (1 - bodyScaleY),
-    0,
-  );
+  // The base scale is calibrated from wheelbase. Fit the detached coachwork
+  // independently to its stock exterior dimensions, preserving its centre so axle
+  // placement and overhang balance do not inherit the source mesh's errors.
+  //
+  // Catalogue height runs from the tyre contact plane to the roof. The body box
+  // therefore occupies exactly the remainder above the published ground clearance;
+  // wheel centres are placed from the same two numbers below.
+  const sourceBodyBox = boundsOf(scene);
+  const sourceBodyCentre = sourceBodyBox.getCenter(new THREE.Vector3());
+  const sourceBodySize = sourceBodyBox.getSize(new THREE.Vector3());
+  const targetBodyHeight = def.factory.height - def.factory.clearance;
+  const bodyScaleX = def.factory.width / (sourceBodySize.x * s);
+  const bodyScaleY = targetBodyHeight / (sourceBodySize.y * s);
+  const bodyScaleZ = def.factory.length / (sourceBodySize.z * s);
+  scene.scale.set(s * bodyScaleX, s * bodyScaleY, s * bodyScaleZ);
+  scene.updateMatrixWorld(true);
+  const scaledBodyBox = boundsOf(scene);
+  const scaledBodyCentre = scaledBodyBox.getCenter(new THREE.Vector3());
+  scene.position.sub(scaledBodyCentre);
   scene.updateMatrixWorld(true);
 
-
   // Chassis box: the bounds of what is left, i.e. the body and its fixed trim.
-  // Box3 has no scalar multiply, so the corners are scaled directly.
+  // Recentring the scaled bounds keeps body, collider and wheel mounts in one frame.
   const bodyBox = boundsOf(scene);
-  bodyBox.min.multiplyScalar(s);
-  bodyBox.max.multiplyScalar(s);
   const centre = bodyBox.getCenter(new THREE.Vector3());
   const half = bodyBox.getSize(new THREE.Vector3()).multiplyScalar(0.5);
 
@@ -830,20 +823,32 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     v.z - centre.z,
   ];
 
+  const frontSourceZ =
+    (toLocal(parts.positions.get('wheel_fl')!)[2] +
+      toLocal(parts.positions.get('wheel_fr')!)[2]) *
+    0.5;
+  const rearSourceZ =
+    (toLocal(parts.positions.get('wheel_rl')!)[2] +
+      toLocal(parts.positions.get('wheel_rr')!)[2]) *
+    0.5;
+  const axleMidZ = (frontSourceZ + rearSourceZ) * 0.5;
+  const frontDirection = Math.sign(frontSourceZ - rearSourceZ) || 1;
+
   const wheels: WheelMeasure[] = [];
   for (const id of WHEEL_IDS) {
     const p = toLocal(parts.positions.get(id)!);
+    const radius = parts.radii.get(id)!;
     const isFront = id === 'wheel_fl' || id === 'wheel_fr';
-    const track = isFront ? def.frontWheelTrack : def.rearWheelTrack;
-    // Track is a chassis-local centre-to-centre measurement. Keep the authored
-    // side and axle position; only correct how far the wheel sits from centre.
-    if (track !== undefined) p[0] = Math.sign(p[0]) * track * 0.5;
+    const track = isFront ? def.factory.frontTrack : def.factory.rearTrack;
+    p[0] = Math.sign(p[0]) * track * 0.5;
+    p[1] = -half.y - def.factory.clearance + radius;
+    p[2] =
+      axleMidZ +
+      frontDirection * (isFront ? 0.5 : -0.5) * def.factory.wheelbase;
     wheels.push({
       id,
-      // RIDE_DROP_M lifts the mount in chassis space, which drops the body by the
-      // same amount once the suspension settles onto its (unchanged) tyres.
-      pos: [p[0], p[1] + RIDE_DROP_M, p[2]],
-      radius: parts.radii.get(id)!,
+      pos: [p[0], p[1], p[2]],
+      radius,
       isFront,
     });
   }
@@ -904,14 +909,11 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
-  scene.scale.set(s * bodyScaleX, s * bodyScaleY, s);
-  scene.position.set(-centre.x, -centre.y, -centre.z);
   prepareMaterials(scene, true);
   scene.updateMatrixWorld(true);
 
-  // The model's origin is on the ground between the wheels, so the distance from
-  // the chassis centre down to that origin is exactly the spawn clearance needed
-  // for the body to settle onto its wheels rather than through them.
+  // Geometry is now expressed directly in chassis-local metres; keeping the source
+  // origin offset in the fit manifest remains useful for asset diagnostics.
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
@@ -1029,8 +1031,13 @@ function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Obje
   const wheels = new Map<string, THREE.Object3D>();
   for (const targetWheel of t.measure.wheels) {
     const mesh = source.wheels.get(targetWheel.id)!.clone(true);
-    const sourceWheel = source.measure.wheels.find((wheel) => wheel.id === targetWheel.id)!;
-    const rollingScale = targetWheel.radius / sourceWheel.radius;
+    mesh.updateMatrixWorld(true);
+    const box = boundsOf(mesh);
+    const visualRadius = Math.max(box.max.y - box.min.y, box.max.z - box.min.z) * 0.5;
+    if (!(visualRadius > 0)) {
+      throw new Error(`Car model "${t.def.id}" has a wheel with no rolling radius`);
+    }
+    const rollingScale = targetWheel.radius / visualRadius;
     mesh.scale.y *= rollingScale;
     mesh.scale.z *= rollingScale;
     wheels.set(targetWheel.id, mesh);
@@ -1074,20 +1081,12 @@ export interface CarModelInstance {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
 }
 
-function visualBodyLift(t: Template): number {
-  const fraction = t.def.visualRideLiftWheelFraction ?? 0;
-  if (fraction === 0) return 0;
-  let wheelRadius = 0;
-  for (const wheel of t.measure.wheels) wheelRadius = Math.max(wheelRadius, wheel.radius);
-  return wheelRadius * fraction;
-}
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const wheels = cloneWheels(t, appearanceKey);
   const body = t.body.clone(true);
   cloneCarBodyPaintMaterials(body, t.def, appearanceKey);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
-  body.position.y += visualBodyLift(t);
   body.name = 'body';
   return { body, wheels };
 }
@@ -1107,8 +1106,8 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
 }
 
 /**
- * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
- * model puts them. This is what wrecks and scenery cars use.
+ * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
+ * factory track, wheelbase and clearance used by the driven chassis.
  */
 function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   const t = template(id);
@@ -1117,7 +1116,6 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
   const body = t.body.clone(true);
   cloneStaticPaintMaterials(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
-  body.position.y += visualBodyLift(t);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
   for (const wheel of t.measure.wheels) {

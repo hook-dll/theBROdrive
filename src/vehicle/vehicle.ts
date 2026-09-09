@@ -969,31 +969,6 @@ function unsprungMass(radius: number): number {
 const BUMP_STOP_FRACTION = 0.4;
 const BUMP_STOP_PEAK = 6;
 /**
- * Ride height, as a length the catalogue states.
- *
- * Two rules, and a body ends up at whichever leaves it LOWER:
- *
- *  - the preset's own `rideHeight`: clear air under the body box, in metres.
- *  - the artist's own STANCE, never lifted by more than RIDE_LIFT_MAX. Without that
- *    cap, a pack whose body box runs down to a low skirt or a modelled underbody gets
- *    put on stilts.
- *
- * What this replaced was a rule written in terms of the spring: the mount came from
- * `restLength - staticSag`, so every change of rate moved the car up or down and a
- * soft spring stood the body high. Ride height is now independent of the springs by
- * construction — `rebuild` places each axle's mount so a settled wheel centre lands
- * exactly one radius above the chosen contact plane, whatever that axle's sag is.
- *
- * Only Y comes from this; track and wheelbase always come from the model.
- */
-const RIDE_LIFT_MAX = 0.15;
-/** No body sits closer to the road than this, however low its box is drawn. */
-const RIDE_MIN_CLEARANCE = 0.075;
-/** Requested body lift, expressed as a fraction of the fitted tyre radius. This changes
- * only the chosen static clearance; spring, damper, travel, tyre and wheel geometry stay
- * untouched. */
-const CLEARANCE_WHEEL_RADIUS_FRACTION = 1 / 6;
-/**
  * How far above a settled wheel's centre its suspension mount is placed, metres.
  *
  * Pure bookkeeping: `restLength = sag + this`, so the spring is `this` short of free
@@ -1901,12 +1876,9 @@ export class Vehicle implements Rebasable {
   private longitudinalForceSum = 0;
   /**
    * The tyre contact plane in chassis-local metres: where the ground is when the
-   * car is standing on its own suspension. Set by `rebuild` from the mount it
-   * actually gives Rapier, which is NOT the mount the model measured (see the ride
-   * height rule above), so this is the only honest answer to "how high off the
-   * ground is this point on the car" — which is exactly what bolting a tow ball to
-   * an arbitrary body needs. Anything deriving a height from `measure.wheels[].pos`
-   * instead is out by the ride-height correction, up to RIDE_LIFT_MAX.
+   * car stands at its published factory clearance. `rebuild` places each suspension
+   * mount so the settled wheel centre lands exactly one radius above this plane,
+   * independent of spring frequency and static sag.
    */
   private contactPlaneY = -0.5;
   // Audio telemetry, written every fixed step and read by the audio layer at frame
@@ -2289,21 +2261,11 @@ export class Vehicle implements Rebasable {
     const suspension = this.model.suspension;
     const axles = this.axleGeometry;
 
-    // RIDE HEIGHT, as a length rather than a consequence.
-    //
-    // The body's clearance is now a number the catalogue states (see RIDE_LIFT_MAX):
-    // whichever is lower of the preset's own figure and the model's drawn stance plus
-    // the lift cap. Nothing in it depends on a spring rate, which is the whole point —
-    // softening the springs used to change how high the car stood.
+    // Factory ground clearance is a geometric dimension, not a spring consequence.
+    // Place each axle mount so its settled tyre contact patch lies this far below
+    // the body box, independent of axle sag and the source mesh's authored stance.
     const halfHeight = this.measure.halfExtents[1];
-    const referenceWheel = this.measure.wheels[0];
-    const drawnClearance = referenceWheel.radius - referenceWheel.pos[1] - halfHeight;
-    const baseClearance = Math.max(
-      RIDE_MIN_CLEARANCE,
-      Math.min(suspension.rideHeight, drawnClearance + RIDE_LIFT_MAX),
-    );
-    const clearance = baseClearance + referenceWheel.radius * CLEARANCE_WHEEL_RADIUS_FRACTION;
-    const contactY = -halfHeight - clearance;
+    const contactY = -halfHeight - this.model.factory.clearance;
 
     // Roll lever: how far the centre of mass sits above the tyre contact plane. This
     // is the arm the missing roll couple acts on (see applyRollCouple).
