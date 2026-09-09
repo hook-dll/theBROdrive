@@ -2160,12 +2160,22 @@ export class Vehicle implements Rebasable {
 
   /** Off -> dipped beam -> high beam -> off. */
   cycleHeadlights(): void {
+    this.setHeadlights(
+      this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off',
+    );
+  }
+  /** Sets an exact beam state; autonomous drivers use this instead of cycling UI state. */
+  setHeadlights(mode: HeadlightMode): void {
+    if (mode === this.headlightMode) return;
     this.restoredLightStatePending = false;
-    this.headlightMode =
-      this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
+    this.headlightMode = mode;
     this.applyHeadlightMode();
     this.applyRearLightState();
     this.pushLightState();
+  }
+
+  get headlights(): HeadlightMode {
+    return this.headlightMode;
   }
   toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
     this.indicatorSide = this.indicatorSide === side ? 'off' : side;

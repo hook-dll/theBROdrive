@@ -967,6 +967,10 @@ async function boot(): Promise<void> {
         );
       }
       if (autopilot.engaged) {
+        autopilot.setLightingConditions(
+          sky.dayFactor,
+          traffic.nearestOncomingDistance(activeS, 1),
+        );
         autopilot.drive(dt, driving, f, origin.x, origin.z);
       }
       driving.fixedUpdate(dt, f);
@@ -993,6 +997,7 @@ async function boot(): Promise<void> {
 
     // Session traffic owns separate Vehicles, so it writes its sleeper controllers
     // here and never enters the persistent `vehicles` map or save state.
+    traffic.setDaylightFactor(sky.dayFactor);
     traffic.fixedUpdate(dt, activeS, origin.x, origin.z);
 
     // Every other car still needs its suspension solved, or it has no springs at
@@ -1442,6 +1447,7 @@ async function boot(): Promise<void> {
     for (const vehicle of vehicles.values()) {
       if (vehicle.hasLitLamps) litVehicles.push(vehicle);
     }
+    traffic.collectLitVehicles(litVehicles, headlightVisibility);
     if (litVehicles.length > 1) {
       litVehicles.sort(
         (a, b) =>
