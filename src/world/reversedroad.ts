@@ -1,4 +1,5 @@
 import type { DriveRoad, RoadProjection, RoadSample } from './road';
+import type { RoadConditionBuffer } from './gradient';
 
 /**
  * The finite world road viewed in the opposite driving direction.
@@ -13,6 +14,10 @@ export class ReversedRoad implements DriveRoad {
   constructor(private readonly forward: DriveRoad) {
     this.length = forward.length;
   }
+  conditionAt(s: number, out: RoadConditionBuffer): void {
+    this.forward.conditionAt(this.forwardS(s), out);
+  }
+
 
   sampleAt(s: number): RoadSample {
     const sample = this.forward.sampleAt(this.forwardS(s));

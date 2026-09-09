@@ -1,4 +1,5 @@
 import { Landscape } from './landscape';
+import { roadConditionAt, type RoadConditionBuffer } from './gradient';
 import { MIN_CORNER_RADIUS, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
 import {
   buildSpine,
@@ -99,6 +100,8 @@ export interface RoadProjection {
 /** The geometric road surface a driver needs; implemented by forward and reversed views. */
 export interface DriveRoad {
   readonly length: number;
+  /** Non-geometric road state in this driving direction, written into caller storage. */
+  conditionAt(s: number, out: RoadConditionBuffer): void;
   sampleAt(s: number): RoadSample;
   curvatureAt(s: number): number;
   project(x: number, z: number, hintS?: number): RoadProjection;
@@ -167,6 +170,11 @@ export class Road {
     this.spineTables ??= buildSpine(this.seed, this.length);
     return this.spineTables;
   }
+  /** Surface, decay and sand cover at arclength `s`, without allocating a sample. */
+  conditionAt(s: number, out: RoadConditionBuffer): void {
+    roadConditionAt(Math.min(Math.max(s, 0), this.length), out);
+  }
+
 
   /**
    * Curvature at arclength s, radians per metre. Ramped in over the runout so the

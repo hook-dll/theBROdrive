@@ -14,22 +14,21 @@ import type { WorldOrigin } from './origin';
 import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 
-/** Eight physical cars keep both directions busy without turning the road into a queue. */
-const MAX_TRAFFIC = 8;
-const MAX_PER_DIRECTION = MAX_TRAFFIC / 2;
 /**
- * Keep the stream close enough that the player meets another car every few hundred
- * metres. The old 360–700 m band hid most cars near the edge of the active world.
+ * Twelve physical cars are enough for visible queues and overtakes while keeping the
+ * full Vehicle + Autopilot path affordable in the streamed world.
  */
-const SPAWN_MIN_M = 160;
-const SPAWN_MAX_M = 560;
-const DESPAWN_M = 750;
-/** Centreline separation at creation; enough room to settle without sparse traffic. */
-const SPAWN_ROAD_GAP_M = 55;
+const MAX_TRAFFIC = 12;
+const MAX_PER_DIRECTION = MAX_TRAFFIC / 2;
+const SPAWN_MIN_M = 140;
+const SPAWN_MAX_M = 650;
+const DESPAWN_M = 850;
+/** Same-lane separation at creation; opposing lanes may legitimately share `s`. */
+const SPAWN_ROAD_GAP_M = 70;
 const SPAWN_WORLD_GAP_M = 30;
 const SPAWN_HAZARD_GAP_M = 18;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
-const SPAWN_INTERVAL_S = 1.5;
+const SPAWN_INTERVAL_S = 1;
 const DROP_SETTLE_S = 0.8;
 const LIFETIME_SAMPLE_S = 0.5;
 const CLOCK_SYNC_S = 1;
@@ -37,6 +36,8 @@ const END_MARGIN_M = 80;
 const TRAFFIC_ID_PREFIX = 'traffic:';
 
 type TrafficDirection = 1 | -1;
+export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried';
+
 
 interface TrafficCar {
   readonly id: string;
@@ -45,10 +46,13 @@ interface TrafficCar {
   readonly spawnS: number;
   readonly vehicle: Vehicle;
   readonly autopilot: Autopilot;
+  readonly style: TrafficDriverStyle;
+  readonly speedCap: number;
   readonly input: InputFrame;
   forwardS: number;
   settleFor: number;
   lifetimeTimer: number;
+  wasPassing: boolean;
 }
 
 interface PendingSpawn {
@@ -57,6 +61,9 @@ interface PendingSpawn {
   readonly forwardS: number;
   readonly modelId: string;
   readonly id: string;
+  readonly style: TrafficDriverStyle;
+  readonly mode: 'sleeper' | 'frantic';
+  readonly speedCap: number;
 }
 
 export interface TrafficStatus {
@@ -65,7 +72,12 @@ export interface TrafficStatus {
   readonly sameDirection: number;
   readonly oncoming: number;
   readonly pending: boolean;
-  readonly allSleeper: boolean;
+  readonly sleeper: number;
+  readonly frantic: number;
+  readonly cautious: number;
+  readonly passing: number;
+  readonly passes: number;
+  readonly impacts: number;
   readonly modelIds: readonly string[];
   readonly nearestRoadDistance: number;
   readonly movingSameDirection: number;
@@ -98,6 +110,8 @@ export class RoadTraffic {
   private settingsRef: Settings | null = null;
   private clockSync = 0;
   private daylightFactor = 1;
+  private impactCount = 0;
+  private passCount = 0;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -128,6 +142,10 @@ export class RoadTraffic {
     let highBeams = 0;
     let lowBeams = 0;
     const modelIds: string[] = [];
+    let sleeper = 0;
+    let frantic = 0;
+    let cautious = 0;
+    let passing = 0;
     for (const car of this.carList) {
       if (car.direction === 1) {
         sameDirection++;
@@ -136,6 +154,10 @@ export class RoadTraffic {
         movingOncoming++;
       }
       modelIds.push(car.modelId);
+      if (car.autopilot.mode === 'frantic') frantic++;
+      else sleeper++;
+      if (car.style === 'cautious') cautious++;
+      if (car.autopilot.activity === 'pass') passing++;
       if (car.vehicle.headlights === 'high') highBeams++;
       else if (car.vehicle.headlights === 'low') lowBeams++;
       nearestRoadDistance = Math.min(
@@ -149,7 +171,12 @@ export class RoadTraffic {
       sameDirection,
       oncoming: this.carList.length - sameDirection,
       pending: this.pending !== null,
-      allSleeper: this.carList.every((car) => car.autopilot.mode === 'sleeper'),
+      sleeper,
+      frantic,
+      cautious,
+      passing,
+      passes: this.passCount,
+      impacts: this.impactCount,
       modelIds,
       nearestRoadDistance,
       movingSameDirection,
@@ -165,7 +192,11 @@ export class RoadTraffic {
     this.generation++;
     this.pending = null;
     this.spawnCooldown = enabled ? 0 : SPAWN_INTERVAL_S;
-    if (enabled) this.clockSync = 0;
+    if (enabled) {
+      this.clockSync = 0;
+      this.impactCount = 0;
+      this.passCount = 0;
+    }
     if (!enabled) this.clear();
   }
 
@@ -243,6 +274,9 @@ export class RoadTraffic {
         car.vehicle.settle(dt);
       } else {
         car.autopilot.drive(dt, car.vehicle, car.input, originX, originZ);
+        const passing = car.autopilot.activity === 'pass';
+        if (passing && !car.wasPassing) this.passCount++;
+        car.wasPassing = passing;
         car.vehicle.fixedUpdate(dt, car.input);
       }
     }
@@ -255,7 +289,11 @@ export class RoadTraffic {
   }
 
   postStep(): void {
-    for (const car of this.carList) car.vehicle.postStep();
+    for (const car of this.carList) {
+      car.vehicle.postStep();
+      const impact = car.vehicle.lastImpact;
+      if (impact && impact.severityMps > 1.8) this.impactCount++;
+    }
   }
 
   syncVisuals(alpha: number): void {
@@ -291,12 +329,16 @@ export class RoadTraffic {
     const forwardS = this.findSpawnS(direction);
     if (forwardS === null) return;
     const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    const driver = this.drawDriver(direction);
     const request: PendingSpawn = {
       generation: this.generation,
       direction,
       forwardS,
       modelId: model.id,
       id: `${TRAFFIC_ID_PREFIX}${(this.serial++).toString(36)}`,
+      style: driver.style,
+      mode: driver.mode,
+      speedCap: driver.speedCap,
     };
     this.pending = request;
     void this.prepareModel(request.modelId)
@@ -351,19 +393,23 @@ export class RoadTraffic {
       request.direction === 1 ? this.hazards : this.reverseHazards,
       this.physics,
     );
-    autopilot.setMode('sleeper');
+    autopilot.setMode(request.mode);
+    autopilot.setSpeedCap(request.speedCap);
     autopilot.setEngaged(true);
     this.carList.push({
       id: request.id,
       direction: request.direction,
       vehicle,
       modelId: request.modelId,
+      style: request.style,
+      speedCap: request.speedCap,
       spawnS: request.forwardS,
       autopilot,
       input: emptyInput(),
       forwardS: request.forwardS,
       settleFor: DROP_SETTLE_S,
       lifetimeTimer: LIFETIME_SAMPLE_S,
+      wasPassing: false,
     });
   }
 
@@ -381,7 +427,7 @@ export class RoadTraffic {
   }
 
   private findSpawnS(direction: TrafficDirection): number | null {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 0; attempt < 12; attempt++) {
       const distance = SPAWN_MIN_M + this.random() * (SPAWN_MAX_M - SPAWN_MIN_M);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
@@ -391,7 +437,7 @@ export class RoadTraffic {
   }
 
   private spawnSiteClear(s: number, direction: TrafficDirection): boolean {
-    if (!this.roadGapClear(s)) return false;
+    if (!this.roadGapClear(s, direction)) return false;
     const lane =
       direction === 1
         ? AUTOPILOT_MODES.sleeper.laneOffset
@@ -409,11 +455,49 @@ export class RoadTraffic {
     return clear;
   }
 
-  private roadGapClear(s: number): boolean {
+  private roadGapClear(s: number, direction: TrafficDirection): boolean {
     for (const car of this.carList) {
-      if (Math.abs(car.forwardS - s) < SPAWN_ROAD_GAP_M) return false;
+      if (car.direction === direction && Math.abs(car.forwardS - s) < SPAWN_ROAD_GAP_M) {
+        return false;
+      }
     }
     return true;
+  }
+
+  /**
+   * Draws behaviour independently of body choice. The first six in each direction
+   * deliberately include one cautious and one hurried driver; otherwise a random
+   * twelve-car sample can contain no vehicle capable of creating an overtake at all.
+   */
+  private drawDriver(direction: TrafficDirection): {
+    style: TrafficDriverStyle;
+    mode: 'sleeper' | 'frantic';
+    speedCap: number;
+  } {
+    const directionCount = this.carList.reduce(
+      (count, car) => count + Number(car.direction === direction),
+      0,
+    );
+    const styleRoll = this.random();
+    if (directionCount === 0 || styleRoll < 0.2) {
+      return {
+        style: 'cautious',
+        mode: 'sleeper',
+        speedCap: (42 + this.random() * 10) / 3.6,
+      };
+    }
+    if (directionCount === 2 || styleRoll >= 0.85) {
+      return {
+        style: 'hurried',
+        mode: 'frantic',
+        speedCap: (85 + this.random() * 20) / 3.6,
+      };
+    }
+    return {
+      style: 'normal',
+      mode: 'sleeper',
+      speedCap: (58 + this.random() * 12) / 3.6,
+    };
   }
 
   private removeAt(index: number): void {

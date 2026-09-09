@@ -69,10 +69,10 @@ function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
 }
 
-function carState(road: Road): CarState {
+function carState(road: Road, startS: number): CarState {
   const def = carModel(MODEL_ID);
   const engine = variant(def.engineId).engine;
-  const p = road.sampleAt(START_S);
+  const p = road.sampleAt(startS);
   return {
     id: 'autopilot-bench', modelId: MODEL_ID, gizmos: {}, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
@@ -89,44 +89,53 @@ function carState(road: Road): CarState {
 /** Builds only the real, narrow asphalt ribbon needed by this run; no visual mesh needed. */
 function addRoadCollider(physics: PhysicsWorld, road: Road, from: number, to: number): void {
   const field = new SurfaceField(road.seed);
-  const rows = Math.ceil((to - from) / ROAD_STEP) + 1;
-  const vertices = new Float32Array(rows * 6);
+  const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0 };
+  const chunkMetres = 100;
   const point = { x: 0, y: 0, z: 0 };
-  for (let row = 0; row < rows; row++) {
-    const s = Math.min(to, from + row * ROAD_STEP);
-    for (let side = 0; side < 2; side++) {
-      // The ribbon reaches PAST the asphalt on purpose. The autopilot is allowed a
-      // wheel on the verge to squeeze past a boulder (PASSING_VERGE_M in
-      // autopilot.ts), and in the game the desert collider is flush with the asphalt
-      // edge; a bench ribbon that stopped at the paint dropped every excursion into
-      // the void and reported it as an autopilot that could not hold a line.
-      const lateral = side === 0 ? -RIBBON_HALF_WIDTH : RIBBON_HALF_WIDTH;
-      road.offsetPoint(s, lateral, point);
-      const i = (row * 2 + side) * 3;
-      vertices[i] = point.x;
-      vertices[i + 1] = roadSurfaceY(road, field, s, lateral, point.x, point.z);
-      vertices[i + 2] = point.z;
+  for (let chunkFrom = from; chunkFrom < to; chunkFrom += chunkMetres) {
+    const chunkTo = Math.min(to, chunkFrom + chunkMetres);
+    const rows = Math.ceil((chunkTo - chunkFrom) / ROAD_STEP) + 1;
+    const vertices = new Float32Array(rows * 6);
+    for (let row = 0; row < rows; row++) {
+      const s = Math.min(chunkTo, chunkFrom + row * ROAD_STEP);
+      for (let side = 0; side < 2; side++) {
+        // The ribbon reaches PAST the asphalt on purpose. The autopilot is allowed a
+        // wheel on the verge to squeeze past a boulder (PASSING_VERGE_M in
+        // autopilot.ts), and in the game the desert collider is flush with the asphalt
+        // edge; a bench ribbon that stopped at the paint dropped every excursion into
+        // the void and reported it as an autopilot that could not hold a line.
+        const lateral = side === 0 ? -RIBBON_HALF_WIDTH : RIBBON_HALF_WIDTH;
+        road.offsetPoint(s, lateral, point);
+        const i = (row * 2 + side) * 3;
+        vertices[i] = point.x;
+        vertices[i + 1] = roadSurfaceY(road, field, s, lateral, point.x, point.z);
+        vertices[i + 2] = point.z;
+      }
     }
+    const indices = new Uint32Array((rows - 1) * 6);
+    for (let row = 0, i = 0; row < rows - 1; row++) {
+      const a = row * 2;
+      indices[i++] = a; indices[i++] = a + 2; indices[i++] = a + 1;
+      indices[i++] = a + 2; indices[i++] = a + 3; indices[i++] = a + 1;
+    }
+    road.conditionAt((chunkFrom + chunkTo) * 0.5, condition);
+    physics.addStaticTrimesh(vertices, indices, condition.surface);
   }
-  const indices = new Uint32Array((rows - 1) * 6);
-  for (let row = 0, i = 0; row < rows - 1; row++) {
-    const a = row * 2;
-    indices[i++] = a; indices[i++] = a + 2; indices[i++] = a + 1;
-    indices[i++] = a + 2; indices[i++] = a + 3; indices[i++] = a + 1;
-  }
-  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
 }
 
 interface Rig { physics: PhysicsWorld; vehicle: Vehicle; road: Road; hazards: HazardIndex; autopilot: Autopilot; input: InputFrame; }
 
-async function makeRig(): Promise<Rig> {
+async function makeRig(
+  startS = START_S,
+  routeMetres = ROUTE_METRES,
+): Promise<Rig> {
   const road = new Road(42);
   const physics = await PhysicsWorld.create();
-  addRoadCollider(physics, road, START_S - 40, START_S + ROUTE_METRES + 400);
+  addRoadCollider(physics, road, startS - 40, startS + routeMetres + 400);
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const state = carState(road);
+  const state = carState(road, startS);
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
   const hazards = new HazardIndex();
@@ -192,6 +201,59 @@ async function measureMode(mode: AutopilotMode): Promise<DriveMetrics> {
   }
   const progress = previousS - startS;
   return { meanSpeed: sumSpeed / samples, meanLateral: sumLateral / samples, maxLateral, rmsLateral: Math.sqrt(sumLateralSq / samples), signChangesPerKm: signChanges / Math.max(progress / 1000, 0.001), progress, monotonic, tightRadius: 1 / Math.max(tightCurvature, 1e-9), tightSpeed };
+}
+
+const LOOSE_START_S = 12_250;
+const LOOSE_ROUTE_METRES = 1_000;
+
+interface LooseSurfaceMetrics {
+  meanSpeed: number;
+  peakSpeed: number;
+  maxLateral: number;
+  progress: number;
+  monotonic: boolean;
+  allGravel: boolean;
+}
+
+async function measureLooseSurface(mode: AutopilotMode): Promise<LooseSurfaceMetrics> {
+  const rig = await makeRig(LOOSE_START_S, LOOSE_ROUTE_METRES);
+  rig.autopilot.setMode(mode);
+  rig.autopilot.setEngaged(true);
+  const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0 };
+  let previousS = LOOSE_START_S;
+  let startS = LOOSE_START_S;
+  let sumSpeed = 0;
+  let peakSpeed = 0;
+  let maxLateral = 0;
+  let samples = 0;
+  let monotonic = true;
+  let allGravel = true;
+  for (let i = 0; i < Math.ceil(180 / FIXED_DT); i++) {
+    step(rig);
+    const position = rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    const projection = rig.road.project(position.x, position.z, previousS);
+    if (i === 0) startS = projection.s;
+    if (i >= 2 / FIXED_DT && projection.s + 0.25 < previousS) monotonic = false;
+    previousS = projection.s;
+    rig.road.conditionAt(projection.s, condition);
+    allGravel &&= condition.surface === SurfaceType.Gravel;
+    maxLateral = Math.max(maxLateral, Math.abs(projection.lateral));
+    if (i >= 5 / FIXED_DT) {
+      const currentSpeed = speed(rig.vehicle);
+      sumSpeed += currentSpeed;
+      peakSpeed = Math.max(peakSpeed, currentSpeed);
+      samples++;
+    }
+    if (projection.s >= LOOSE_START_S + LOOSE_ROUTE_METRES) break;
+  }
+  return {
+    meanSpeed: sumSpeed / Math.max(samples, 1),
+    peakSpeed,
+    maxLateral,
+    progress: previousS - startS,
+    monotonic,
+    allGravel,
+  };
 }
 
 /**
@@ -505,6 +567,13 @@ async function checkAutomaticLights(): Promise<void> {
     rig.vehicle.headlights === 'off',
     rig.vehicle.headlights,
   );
+  rig.vehicle.setIndicator('left');
+  rig.autopilot.setEngaged(false);
+  check(
+    'handover clears an autonomous indicator',
+    rig.vehicle.indicator === 'off',
+    rig.vehicle.indicator,
+  );
 }
 
 
@@ -527,6 +596,33 @@ async function run(): Promise<void> {
     check(`${mode}: slows for tightest corner`, result.tightSpeed <= cornerLimit + 3, `radius ${result.tightRadius.toFixed(1)} m, ${result.tightSpeed.toFixed(2)} m/s vs ${cornerLimit.toFixed(2)} m/s limit`);
   }
   check('frantic is materially faster than sleeper', frantic.meanSpeed >= sleeper.meanSpeed + 3, `${frantic.meanSpeed.toFixed(2)} vs ${sleeper.meanSpeed.toFixed(2)} m/s`);
+  const looseSleeper = await measureLooseSurface('sleeper');
+  const looseFrantic = await measureLooseSurface('frantic');
+  for (const [mode, result] of [
+    ['sleeper', looseSleeper],
+    ['frantic', looseFrantic],
+  ] as const) {
+    const config = MODES[mode];
+    check(
+      `${mode}: traverses the real gravel district`,
+      result.allGravel &&
+        result.monotonic &&
+        result.progress >= LOOSE_ROUTE_METRES - 5 &&
+        result.maxLateral <= ROAD_HALF_WIDTH,
+      `${result.progress.toFixed(0)} m, worst lateral ${result.maxLateral.toFixed(2)} m, monotonic=${result.monotonic}`,
+    );
+    check(
+      `${mode}: respects loose-surface pace`,
+      result.peakSpeed <= config.cruiseMps * 0.75 &&
+        result.meanSpeed >= config.cruiseMps * 0.3,
+      `mean/peak ${(result.meanSpeed * 3.6).toFixed(0)}/${(result.peakSpeed * 3.6).toFixed(0)} km/h vs ${(config.cruiseMps * 3.6).toFixed(0)} km/h asphalt cruise`,
+    );
+  }
+  check(
+    'driver styles remain distinct on gravel',
+    looseFrantic.meanSpeed >= looseSleeper.meanSpeed + 3,
+    `${(looseFrantic.meanSpeed * 3.6).toFixed(0)} vs ${(looseSleeper.meanSpeed * 3.6).toFixed(0)} km/h`,
+  );
   await checkLitteredRoad();
   await checkHazards();
   if (failures) process.exitCode = 1;

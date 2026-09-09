@@ -51,6 +51,13 @@ export interface RoadCondition {
   /** Whether painted lane markings are still visible. */
   readonly markings: number;
 }
+/** Caller-owned storage for hot-path condition sampling without per-tick allocation. */
+export interface RoadConditionBuffer {
+  surface: SurfaceType;
+  decay: number;
+  sandCover: number;
+  markings: number;
+}
 
 /** Distance over which local decay varies, so decay is patchy rather than uniform. */
 const DECAY_PATCH_WAVELENGTH = 900;
@@ -303,7 +310,7 @@ function districtSurface(k: number): SurfaceType {
  * high decay is a ruined one; both are things a desert road actually is, and neither
  * was reachable while the material WAS a threshold on the decay.
  */
-export function roadConditionAt(s: number): RoadCondition {
+export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondition {
   // Garage ramp: hold the regional mean at pristine for GARAGE_FLAT_M, then blend it
   // up to whatever the region says by GARAGE_RAMP_M. Cubic smoothstep, so the join is
   // C1 at both ends and there is no distance at which the road visibly steps.
@@ -317,19 +324,17 @@ export function roadConditionAt(s: number): RoadCondition {
   // Fine patch: the existing 3-octave fbm, unchanged. It no longer moves the material
   // (districts own that), so it is purely how broken this stretch is.
   const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.28;
-
   const decay = Math.min(1, Math.max(0, envelope + patch));
   const surface = districtSurface(districtIndex(s));
-
-  return {
-    surface,
-    decay,
-    // Sand only starts drifting across the lanes once the surface is breaking up.
-    sandCover: Math.min(0.85, Math.max(0, (decay - 0.45) * 1.6)),
-    // Nothing paints an unsealed road, however well kept it is.
-    markings:
-      surface === SurfaceType.Gravel ? 0 : Math.max(0, 1 - decay * 1.9),
-  };
+  const condition = out ?? { surface, decay, sandCover: 0, markings: 0 };
+  condition.surface = surface;
+  condition.decay = decay;
+  // Sand only starts drifting across the lanes once the surface is breaking up.
+  condition.sandCover = Math.min(0.85, Math.max(0, (decay - 0.45) * 1.6));
+  // Nothing paints an unsealed road, however well kept it is.
+  condition.markings =
+    surface === SurfaceType.Gravel ? 0 : Math.max(0, 1 - decay * 1.9);
+  return condition;
 }
 
 // ---------------------------------------------------------------------------

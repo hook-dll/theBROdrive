@@ -995,8 +995,8 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.setMode('foot');
     }
 
-    // Session traffic owns separate Vehicles, so it writes its sleeper controllers
-    // here and never enters the persistent `vehicles` map or save state.
+    // Session traffic owns separate Vehicles, so it writes its mixed autonomous
+    // drivers here and never enters the persistent `vehicles` map or save state.
     traffic.setDaylightFactor(sky.dayFactor);
     traffic.fixedUpdate(dt, activeS, origin.x, origin.z);
 

@@ -2105,6 +2105,91 @@ export class Vehicle implements Rebasable {
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
+  /**
+   * Stable peak lateral acceleration available to an autonomous speed planner.
+   *
+   * Uses the same model, tyre, mass, surface and high-speed losses as the live tyre
+   * pass, but not transient load transfer or slip. The controller applies its own
+   * safety margin before treating this as a cornering budget.
+   */
+  estimatedLateralAccel(surfaceType: SurfaceType, speedMps: number): number {
+    const speedT = clamp(
+      (Math.abs(speedMps) - LATERAL_GRIP_FALLOFF_START_MPS) /
+        (LATERAL_GRIP_FALLOFF_END_MPS - LATERAL_GRIP_FALLOFF_START_MPS),
+      0,
+      1,
+    );
+    const lossT = speedT * speedT * (3 - 2 * speedT);
+    const front = 1 - this.handling.lateralGripMaxLoss * lossT;
+    const rear =
+      Math.max(
+        0.2,
+        1 -
+          this.handling.lateralGripMaxLoss *
+            this.handling.rearSpeedLossGain *
+            lossT,
+      ) * this.handling.rearAxleSideGrip;
+    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    return (
+      GRAVITY *
+      this.handling.lateralMu *
+      this.statsValue.wheelGrip *
+      Math.pow(GRIP_REFERENCE_MASS / this.statsValue.mass, GRIP_MASS_EXPONENT) *
+      SURFACES[surfaceType].sideFriction *
+      compound.side *
+      Math.min(front, rear)
+    );
+  }
+
+  /** Stable straight-line braking capacity on a named surface, in m/s². */
+  estimatedBrakeDecel(surfaceType: SurfaceType): number {
+    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    const longitudinalGrip =
+      this.statsValue.wheelGrip * (this.model.longitudinalGripScale ?? 1);
+    return Math.min(
+      FOOT_BRAKE_MAX_DECEL,
+      FOOT_BRAKE_GRIP_RATIO *
+        SURFACES[surfaceType].frictionSlip *
+        LONGITUDINAL_GRIP_FRACTION *
+        longitudinalGrip *
+        compound.grip *
+        GRAVITY,
+    );
+  }
+
+  /**
+   * Inverts this vehicle's exact steering profile for the ordinary shaped input path.
+   * Autonomy uses it instead of maintaining a stale copy of each handling family.
+   */
+  steeringInputForWheelAngle(wheelAngle: number, speedMps: number): number {
+    const magnitude = Math.abs(wheelAngle);
+    const speedT = clamp(
+      (Math.abs(speedMps) * 3.6 - STEER_FULL_LOCK_KMH) /
+        (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
+      0,
+      1,
+    );
+    const slideRelease = clamp(
+      ((this.rearSlipRad * 180) / Math.PI - COUNTERSTEER_RELEASE_START_DEG) /
+        (COUNTERSTEER_RELEASE_FULL_DEG - COUNTERSTEER_RELEASE_START_DEG),
+      0,
+      1,
+    );
+    const speedFactor =
+      1 -
+      (1 - this.handling.steerHighSpeedFraction) *
+        Math.pow(speedT, this.handling.steerLockCurve);
+    const effectiveLock = Math.max(
+      this.model.steerLock * (speedFactor + (1 - speedFactor) * slideRelease),
+      0.1,
+    );
+    const play = this.handling.steerPlay * (1 - slideRelease);
+    if (magnitude <= play * 0.12) return 0;
+    const targetAngle = Math.min(magnitude + play, effectiveLock);
+    const normalized = Math.pow(targetAngle / effectiveLock, 1 / this.handling.steerInputExponent);
+    return clamp(-Math.sign(wheelAngle) * normalized, -1, 1);
+  }
+
 
   /**
    * The fuel/parts gate, plus the overheat stall. A critically hot engine is NOT
@@ -2177,10 +2262,20 @@ export class Vehicle implements Rebasable {
   get headlights(): HeadlightMode {
     return this.headlightMode;
   }
-  toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
-    this.indicatorSide = this.indicatorSide === side ? 'off' : side;
+  /** Sets an exact indicator state; autonomous drivers must not use toggle semantics. */
+  setIndicator(side: IndicatorSide): void {
+    if (this.indicatorSide === side) return;
+    this.indicatorSide = side;
     this.indicatorElapsed = 0;
-    this.applyIndicatorState(this.indicatorSide !== 'off');
+    this.applyIndicatorState(side !== 'off');
+  }
+
+  toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
+    this.setIndicator(this.indicatorSide === side ? 'off' : side);
+  }
+
+  get indicator(): IndicatorSide {
+    return this.indicatorSide;
   }
 
   setHeadlightEnvironmentFactor(factor: number): void {

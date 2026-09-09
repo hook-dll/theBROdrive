@@ -1,6 +1,8 @@
 /** Fixed-step road follower. Inputs remain ordinary InputFrame commands. */
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
+import { SurfaceType } from '../core/surfaces';
+import type { RoadConditionBuffer } from '../world/gradient';
 import { ROAD_HALF_WIDTH, type DriveRoad } from '../world/road';
 import { type HazardField, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
@@ -41,6 +43,11 @@ interface ModeConfig {
    * arc; 0 is the old behaviour, which cuts every bend toward its inside.
    */
   readonly chordGain: number;
+  /**
+   * Feed-forward compensation for tyre slip after Vehicle maps the command through
+   * the exact handling profile.
+   */
+  readonly steeringGain: number;
   /**
    * Seconds of travel a cross-track error is taken out over, and the share of the
    * cornering budget lane keeping may spend doing it. Tighter holds the lane to a
@@ -94,6 +101,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     curveLead: 30,
     laneOffset: -ROAD_HALF_WIDTH / 2,
     chordGain: 0.9,
+    steeringGain: 1.55,
     holdSeconds: 0.65,
     holdShare: 0.5,
     throttleBand: 6,
@@ -114,6 +122,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     curveLead: 24,
     laneOffset: -ROAD_HALF_WIDTH / 2,
     chordGain: 0.45,
+    steeringGain: 1.45,
     holdSeconds: 0.85,
     holdShare: 0.35,
     throttleBand: 1.2,
@@ -142,14 +151,30 @@ const MIN_PURSUIT_DISTANCE_SQ = 9;
  */
 const LOOKAHEAD_ARC_RAD = 0.5;
 const MIN_LOOKAHEAD_M = 6;
-// These mirror Vehicle's input-to-road-wheel path. Pure pursuit must cross the
-// steering-box play window without turning a small, valid curvature into full lock.
-const STEER_INPUT_EXPONENT = 1.35;
-const STEER_PLAY_RAD = 0.024;
-const STEER_FULL_LOCK_KMH = 20;
-const STEER_REDUCED_KMH = 100;
-const STEER_HIGH_SPEED_FRACTION = 0.5;
-const STEER_LOCK_CURVE = 0.161;
+/** Planner reserves transient tyre load and steering correction below the stable peak. */
+const LATERAL_GRIP_RESERVE = 0.72;
+const BRAKE_GRIP_RESERVE = 0.82;
+const GRAVITY = 9.81;
+/**
+ * Straight-line pace by surface. Personality still sets the absolute speed: the
+ * factors describe how much of it the road can support before bumps and loose grip
+ * dominate. Decay and drifted sand reduce these further at the sampled location.
+ */
+const SURFACE_SPEED_FACTOR: Readonly<Record<SurfaceType, number>> = {
+  [SurfaceType.Asphalt]: 1,
+  [SurfaceType.CrackedAsphalt]: 0.84,
+  [SurfaceType.Gravel]: 0.45,
+  [SurfaceType.Sand]: 0.2,
+  [SurfaceType.Rock]: 0.32,
+  [SurfaceType.Concrete]: 0.96,
+};
+const DECAY_SPEED_LOSS = 0.14;
+const SAND_COVER_SPEED_LOSS = 0.28;
+const MIN_PLANNED_BRAKE_MPS2 = 0.75;
+/** Chassis yaw feedback removes weave energy without weakening steady cornering. */
+const YAW_RATE_DAMPING = 0.8;
+/** Use only this share of geometric stopping distance, so setup finishes before a bend. */
+const BRAKING_DISTANCE_RESERVE = 0.4;
 /**
  * Half the widest catalogue body, metres, plus a little. Used only to decide whether
  * a hazard is in this car's corridor; a per-model figure would make the decision
@@ -184,7 +209,7 @@ const INDEXED_RAY_MATCH_M = 4;
  */
 const LANE_HOLD_MIN_DISTANCE_M = 11;
 const LANE_HOLD_CURVATURE_MAX = 0.03;
-const TURN_CURVATURE_SAMPLES = 8;
+const ROAD_PROFILE_SAMPLES = 10;
 const TURN_COAST_CURVATURE = 0.004;
 const TURN_COAST_STEER = 0.12;
 const TURN_COAST_MIN_SPEED_MPS = 5;
@@ -230,6 +255,9 @@ const OFFROAD_HEADING_TOLERANCE_RAD = 0.14;
 /** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
 const OFFROAD_SPEED_MPS = 3.5;
 const OFFROAD_BRAKE_MAX = 0.7;
+/** Brake a developing road departure before loose-surface momentum makes it unrecoverable. */
+const EDGE_STABILITY_LATERAL_M = 1.6;
+const EDGE_STABILITY_LATERAL_SPEED_MPS = 0.4;
 /** Road recovery needs the decisive pedal that already lets frantic escape loose sand. */
 const OFFROAD_THROTTLE_BAND = 1.2;
 /** Automatic lamps come on through dusk, with hysteresis so twilight cannot chatter. */
@@ -261,7 +289,7 @@ const HIGH_BEAM_RESTORE_M = 300;
  */
 const PROBE_HEIGHT_M = 0.9;
 const PROBE_START_M = 4;
-/** Two rays a body's width apart cover a lane without pretending to be a sweep. */
+/** Centre plus two edge rays cover narrow cars and wider catalogue bodies. */
 const PROBE_HALF_WIDTH_M = 0.8;
 const PROBE_MIN_SIGHT_M = 26;
 const PROBE_SIGHT_SECONDS = 3.2;
@@ -308,11 +336,11 @@ const PARKED_CONFIRM_S = 0.6;
  * road straight enough to commit, is there a line that is clear, and is it time to
  * come back.
  */
-// A lane change costs 2.9/LINE_SHIFT_PER_METRE ≈ 32 m of road, so the decision has
-// to be taken with at least that much left: 2.5 s of travel is 37 m at 15 m/s and
-// 90 m at 130 km/h, which is also about when a driver commits.
-const PASS_TRIGGER_SECONDS = 2.5;
-const PASS_TRIGGER_MIN_M = 16;
+// A lane change costs 2.9/LINE_SHIFT_PER_METRE ≈ 32 m of road. Committing 3.2 s
+// ahead leaves another car length after the controller has reached the passing lane,
+// rather than arriving alongside while it is still crossing the lead car's corner.
+const PASS_TRIGGER_SECONDS = 3.2;
+const PASS_TRIGGER_MIN_M = 24;
 /** Room wanted beyond the obstacle itself before a line counts as clear. */
 const PASS_CLEAR_M = 30;
 const PASS_SIGHT_SECONDS = 2.5;
@@ -336,6 +364,8 @@ const PASS_ONCOMING_MPS = 20;
 const PASS_SIGHT_CAP_S = 6;
 /** Below this speed advantage frantic stays put rather than sitting alongside. */
 const PASS_SPEED_MARGIN_MPS = 4;
+/** Road travelled after the old lane first looks clear, giving the rear bumper room. */
+const PASS_REAR_CLEAR_M = 10;
 /** The lane must be clear this far ahead before the pass is over. */
 const PASS_RETURN_GAP_M = 24;
 const PASS_MIN_METRES = 32;
@@ -473,6 +503,7 @@ export class Autopilot {
   /** Committed passing line while going round traffic, or null. */
   private passLine: number | null = null;
   private passStartedAt = 0;
+  private passClearAt: number | null = null;
   private recoveryPhase: 'none' | 'reverse' | 'pullout' = 'none';
   private recoveryTimer = 0;
   /** Signed lateral direction the recovery is escaping toward. */
@@ -486,11 +517,18 @@ export class Autopilot {
   private oncomingGap = Infinity;
   private automaticLightsOn = false;
   private automaticHighBeam = true;
+  private controlledVehicle: Vehicle | null = null;
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
   private readonly probeNear = { x: 0, y: 0, z: 0 };
   private readonly probeFar = { x: 0, y: 0, z: 0 };
+  private readonly condition: RoadConditionBuffer = {
+    surface: SurfaceType.Asphalt,
+    decay: 0,
+    sandCover: 0,
+    markings: 1,
+  };
   /** Car lateral at the time of the scan; a hazard off to one side is not a hazard. */
   private scanLateral = 0;
   private readonly visitHazard = (hazard: RoadHazard): void => {
@@ -546,6 +584,7 @@ export class Autopilot {
   get activity(): AutopilotActivity { return this.activityValue; }
 
   setEngaged(engaged: boolean): void {
+    if (!engaged) this.controlledVehicle?.setIndicator('off');
     this.engagedValue = engaged;
     this.hintValid = false;
     this.stoppedFor = 0;
@@ -561,6 +600,7 @@ export class Autopilot {
     this.recoveryAttempts = 0;
     this.automaticHighBeam = true;
     this.passLine = null;
+    this.passClearAt = null;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
     this.activityValue = 'cruise';
@@ -574,6 +614,11 @@ export class Autopilot {
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
+    this.controlledVehicle = vehicle;
+    // Autonomy inverts the ordinary shaped steering path explicitly. Never let a
+    // player's precise-control preference change the physical command it computed.
+    out.preciseSteering = false;
+    const firstProjection = !this.hintValid;
     this.updateAutomaticHeadlights(vehicle);
     const config = MODES[this.modeValue];
     vehicle.absoluteTranslation(this.position);
@@ -582,6 +627,7 @@ export class Autopilot {
       this.position.z,
       this.hintValid ? this.hintS : undefined,
     );
+    if (firstProjection) this.appliedLateral = projection.lateral;
     this.hintS = projection.s;
     this.hintValid = true;
     const velocity = vehicle.chassis.linvel();
@@ -636,7 +682,26 @@ export class Autopilot {
         LOOKAHEAD_ARC_RAD / Math.max(Math.abs(this.road.curvatureAt(this.hintS)), 1e-4),
       ),
     );
+    const currentRoad = this.road.sampleAt(this.hintS);
     const target = this.road.sampleAt(this.hintS + lookahead);
+    this.road.conditionAt(this.hintS, this.condition);
+    const currentSurface = this.condition.surface;
+    const currentPhysicalBrake = vehicle.estimatedBrakeDecel(currentSurface);
+    const currentBrakeAccel = Math.max(
+      MIN_PLANNED_BRAKE_MPS2,
+      Math.min(config.brakeAccel, currentPhysicalBrake * BRAKE_GRIP_RESERVE) +
+        currentRoad.grade * GRAVITY,
+    );
+    const gradeLoad = Math.min(
+      0.8,
+      Math.abs(currentRoad.grade * GRAVITY) / Math.max(currentPhysicalBrake, 1),
+    );
+    const currentLateralAccel = Math.min(
+      config.lateralAccel,
+      vehicle.estimatedLateralAccel(currentSurface, speed) *
+        LATERAL_GRIP_RESERVE *
+        Math.sqrt(Math.max(0.35, 1 - gradeLoad * gradeLoad)),
+    );
     const rotation = vehicle.chassis.rotation();
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
     const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
@@ -668,9 +733,22 @@ export class Autopilot {
     this.bodyScanGap = this.axisScan(vehicle, originX, originZ, 1, BODY_SCAN_RANGE_M);
     const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
     const laneGap = this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ);
-    let headingError = Math.atan2(forwardX, forwardZ) - this.road.sampleAt(this.hintS).heading;
+    let headingError = Math.atan2(forwardX, forwardZ) - currentRoad.heading;
     while (headingError > Math.PI) headingError -= Math.PI * 2;
     while (headingError < -Math.PI) headingError += Math.PI * 2;
+    const lateralSpeed =
+      velocity.x * Math.cos(currentRoad.heading) -
+      velocity.z * Math.sin(currentRoad.heading);
+    const looseSurface =
+      currentSurface === SurfaceType.Gravel ||
+      currentSurface === SurfaceType.Sand ||
+      currentSurface === SurfaceType.Rock;
+    const edgeStability =
+      looseSurface &&
+      !offRoad &&
+      Math.abs(projection.lateral) > EDGE_STABILITY_LATERAL_M &&
+      projection.lateral * lateralSpeed > 0 &&
+      Math.abs(lateralSpeed) > EDGE_STABILITY_LATERAL_SPEED_MPS;
     // A plain road departure remains capped at walking speed until the whole car is
     // centred on its own lane and parallel to the road. An obstacle escape already
     // has a deliberate clear-side line; once its body is back on asphalt, preserve
@@ -751,6 +829,11 @@ export class Autopilot {
         : this.travelled < this.recoveryBiasUntil
           ? clamp(config.laneOffset + this.recoveryBias, -EDGE_LINE_M, EDGE_LINE_M)
           : (this.passLine ?? config.laneOffset);
+    const indicatorDelta = desiredLine - this.appliedLateral;
+    vehicle.setIndicator(
+      Math.abs(indicatorDelta) < 0.2 ? 'off' : indicatorDelta > 0 ? 'left' : 'right',
+    );
+
 
     // Ease onto the chosen line instead of jumping to it. The waypoint itself is
     // shifted by the rate-limited line, so lane keeping, obstacle avoidance and
@@ -793,8 +876,9 @@ export class Autopilot {
     // Moving the aim point OUTWARD by that sagitta makes the commanded arc the
     // lane's own arc, so the mode follows the corner instead of straightening it.
     // Curvature is taken mid-preview, where the chord error is generated.
+    const previewCurvature = this.road.curvatureAt(this.hintS + lookahead * 0.5);
     const chordShift =
-      -this.road.curvatureAt(this.hintS + lookahead * 0.5) *
+      -previewCurvature *
       lookahead *
       lookahead *
       0.125 *
@@ -827,43 +911,83 @@ export class Autopilot {
     const holdDistance = Math.max(LANE_HOLD_MIN_DISTANCE_M, speed * config.holdSeconds);
     const holdCap = Math.min(
       LANE_HOLD_CURVATURE_MAX,
-      (config.holdShare * config.lateralAccel) / Math.max(speed * speed, 1),
+      (config.holdShare * currentLateralAccel) / Math.max(speed * speed, 1),
     );
     const holdCurvature = clamp(
       (2 * (this.appliedLateral - projection.lateral)) / (holdDistance * holdDistance),
       -holdCap,
       holdCap,
     );
-    const wheelAngle = Math.atan(wheelbaseOf(vehicle) * (pursuitCurvature + holdCurvature));
-    // Vehicle applies its speed-dependent lock, input exponent and backlash after
-    // receiving this value. Pre-compensate those three stages so the requested
-    // geometric angle is what reaches the tyres, not a command hidden inside slack.
-    out.steer = steeringInputForWheelAngle(wheelAngle, vehicle.modelDef.steerLock, speed);
+    const pathCurvature = pursuitCurvature + holdCurvature;
+    // Feed-forward preserves the cornering authority proven by the tyre model. The
+    // second term is zero in a settled turn but opposes residual yaw after a lane
+    // change, preventing the delayed tyres from amplifying a weave into a spin.
+    const actualYawCurvature = vehicle.chassis.angvel().y / Math.max(speed, 3);
+    const controlledCurvature =
+      pathCurvature * config.steeringGain +
+      YAW_RATE_DAMPING * (pathCurvature - actualYawCurvature);
+    const wheelAngle = Math.atan(wheelbaseOf(vehicle) * controlledCurvature);
+    out.steer = vehicle.steeringInputForWheelAngle(wheelAngle, speed);
 
-    // Look beyond the physical braking distance for the bend's peak curvature.
-    // `curveLead` provides setup distance before braking becomes mandatory; keeping
-    // it separate from obstacle `brakeLead` avoids making prop stops unnecessarily
-    // early. Extra samples retain roughly the old spatial resolution over the
-    // longer preview.
+    // Build a local speed profile rather than applying one worst bend to the whole
+    // horizon. Every sample contributes its surface, decay, grade and curvature;
+    // braking distance then propagates that local limit back to the car.
+    const clearRoadSpeed = Math.min(config.cruiseMps, this.speedCapValue);
     const turnLookahead = Math.max(
       lookahead,
-      config.curveLead + config.brakeLead + (speed * speed) / (2 * config.brakeAccel),
+      config.curveLead +
+        config.brakeLead +
+        (speed * speed) / (2 * currentBrakeAccel),
     );
-    let upcomingCurvature = Math.abs(target.curvature);
-    for (let i = 1; i <= TURN_CURVATURE_SAMPLES; i++) {
-      upcomingCurvature = Math.max(
-        upcomingCurvature,
-        Math.abs(this.road.curvatureAt(this.hintS + (turnLookahead * i) / TURN_CURVATURE_SAMPLES)),
+    let targetSpeed = clearRoadSpeed;
+    let upcomingCurvature = Math.abs(currentRoad.curvature);
+    for (let i = 0; i <= ROAD_PROFILE_SAMPLES; i++) {
+      const distance = (turnLookahead * i) / ROAD_PROFILE_SAMPLES;
+      const sample = i === 0 ? currentRoad : this.road.sampleAt(this.hintS + distance);
+      this.road.conditionAt(sample.s, this.condition);
+      const surface = this.condition.surface;
+      const conditionFactor = Math.max(
+        0.55,
+        1 -
+          this.condition.decay * DECAY_SPEED_LOSS -
+          this.condition.sandCover * SAND_COVER_SPEED_LOSS,
+      );
+      const straightLimit = Math.max(
+        OFFROAD_SPEED_MPS,
+        clearRoadSpeed * SURFACE_SPEED_FACTOR[surface] * conditionFactor,
+      );
+      const physicalBrake = vehicle.estimatedBrakeDecel(surface);
+      const sampleGradeLoad = Math.min(
+        0.8,
+        Math.abs(sample.grade * GRAVITY) / Math.max(physicalBrake, 1),
+      );
+      const lateralAccel = Math.min(
+        config.lateralAccel,
+        vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
+          LATERAL_GRIP_RESERVE *
+          Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad)),
+      );
+      const curvature = Math.abs(sample.curvature);
+      upcomingCurvature = Math.max(upcomingCurvature, curvature);
+      const localLimit = Math.min(
+        straightLimit,
+        Math.sqrt(lateralAccel / Math.max(curvature, 1e-4)),
+      );
+      const sampleBrake = Math.max(
+        MIN_PLANNED_BRAKE_MPS2,
+        Math.min(config.brakeAccel, physicalBrake * BRAKE_GRIP_RESERVE) +
+          sample.grade * GRAVITY,
+      );
+      const brakingDistance =
+        Math.max(0, distance - config.curveLead) * BRAKING_DISTANCE_RESERVE;
+      targetSpeed = Math.min(
+        targetSpeed,
+        Math.sqrt(localLimit * localLimit + 2 * sampleBrake * brakingDistance),
       );
     }
-    let targetSpeed = Math.min(
-      Math.min(config.cruiseMps, this.speedCapValue),
-      Math.sqrt(config.lateralAccel / Math.max(upcomingCurvature, 1e-4)),
-    );
-    targetSpeed = Math.max(3, targetSpeed - Math.max(0, target.grade) * 4);
+    targetSpeed = Math.max(3, targetSpeed);
     // What the ROAD alone asks for, before anything in the way is considered. The
-    // stall detector needs it: a car at a standstill because of an obstacle is a very
-    // different thing from one at a standstill because the mode wants to be.
+    // stall detector needs it: a car stopped for traffic is not a failed drivetrain.
     const roadSpeed = targetSpeed;
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
     // A prop the COMMANDED LINE already clears is scenery to drive past, not an
@@ -890,24 +1014,30 @@ export class Autopilot {
         || this.hazardDistance >= shiftNeeded);
     if (!lineClearsHazard && this.hazardDistance < Infinity) {
       const brakingSpeed = Math.sqrt(
-        Math.max(0, 2 * config.brakeAccel * Math.max(0, this.hazardDistance - config.brakeLead)),
+        Math.max(
+          0,
+          2 * currentBrakeAccel * Math.max(0, this.hazardDistance - config.brakeLead),
+        ),
       );
       targetSpeed = Math.min(
         targetSpeed,
         hasIndexedDetour ? Math.max(AVOIDANCE_CRAWL_MPS, brakingSpeed) : brakingSpeed,
       );
     }
-    // Traffic, on relative terms. `leadSpeed` is what the probe measured, so the
-    // stopping bound reduces to the old wall case when the obstacle is parked and
-    // stops asking a following car to brake for a gap that is not closing.
+    // Following uses a physical stopping-energy bound plus time headway. Adding the
+    // two vehicle speeds was dimensionally plausible but unsafe: behind a moving
+    // leader it allowed far more closing speed than the available road could shed.
     if (gap < Infinity && !(rayMatchesIndexedHazard && lineClearsHazard)) {
       const closingRoom = Math.max(0, gap - FOLLOW_STANDOFF_M);
-      const stoppingCap = leadSpeed + Math.sqrt(2 * config.brakeAccel * closingRoom);
+      const stoppingCap = Math.sqrt(
+        leadSpeed * leadSpeed + 2 * currentBrakeAccel * closingRoom,
+      );
       const headwayGap = FOLLOW_STANDOFF_M + speed * config.headwayS;
       const followCap = Math.max(0, leadSpeed + (gap - headwayGap) / FOLLOW_RELAX_S);
       targetSpeed = Math.min(targetSpeed, stoppingCap, followCap);
     }
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
+    if (edgeStability) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (mustStop) targetSpeed = 0;
 
     // BEING STUCK IS A LACK OF PROGRESS, NOT A STANDSTILL, AND NOT A SPEEDOMETER
@@ -1037,6 +1167,13 @@ export class Autopilot {
         clamp((speed - OFFROAD_SPEED_MPS) / 6, 0.05, OFFROAD_BRAKE_MAX),
       );
     }
+    if (edgeStability) {
+      out.throttle = 0;
+      out.brake = Math.max(
+        out.brake,
+        clamp(Math.abs(lateralSpeed) / 3, 0.3, config.brakeCeiling),
+      );
+    }
     this.activityValue = offRoad
       ? 'offroad'
       : this.plannedHazard !== null
@@ -1117,27 +1254,52 @@ export class Autopilot {
     const triggerGap = Math.max(PASS_TRIGGER_MIN_M, speed * PASS_TRIGGER_SECONDS);
     if (this.passLine !== null) {
       const abortGap = Math.max(PASS_ABORT_MIN_M, speed * PASS_ABORT_SECONDS);
-      // Anything appearing in the lane BEING USED that is not moving with us is
-      // oncoming or parked; either way the pass is over and the car belongs back on
-      // its own side, where ordinary following will brake for whatever is left.
-      if (gap < abortGap && leadSpeed < PARKED_SPEED_MPS) {
+      // Inspect the lane BEING USED separately. The ordinary lead estimate also
+      // includes the lane being left and therefore keeps seeing the car alongside;
+      // treating that car as a new blockage makes the pass flap and sideswipe it.
+      // The passing lane was clear at commitment, so any body now inside this short
+      // envelope is enough reason to abort without guessing its velocity.
+      const passLaneGap = this.laneProbe(
+        vehicle,
+        this.passLine,
+        abortGap,
+        originX,
+        originZ,
+      );
+      if (passLaneGap < abortGap) {
         this.passLine = null;
+        this.passClearAt = null;
         return;
       }
       if (this.travelled - this.passStartedAt > PASS_MAX_METRES) {
         this.passLine = null;
+        this.passClearAt = null;
         return;
       }
       // A lane change costs about 32 m of road; returning before that means the car
       // never actually got to the line it committed to.
       if (this.travelled - this.passStartedAt < PASS_MIN_METRES) return;
       const returnSight = Math.max(PASS_RETURN_GAP_M, triggerGap + PASS_CLEAR_M);
-      if (this.laneProbe(vehicle, lane, returnSight, originX, originZ) >= returnSight) {
+      const ownLaneClear =
+        this.laneProbe(vehicle, lane, returnSight, originX, originZ) >= returnSight;
+      if (!ownLaneClear) {
+        this.passClearAt = null;
+        return;
+      }
+      if (this.passClearAt === null) {
+        this.passClearAt = this.travelled;
+        return;
+      }
+      if (this.travelled - this.passClearAt >= PASS_REAR_CLEAR_M) {
         this.passLine = null;
+        this.passClearAt = null;
       }
       return;
     }
 
+    // Finish returning before considering the next car in a queue. Starting a new
+    // pass while the chassis is still crossing its own lane is a side-swipe.
+    if (Math.abs(lateral - lane) > CAR_HALF_WIDTH_M * 0.5) return;
     if (gap === Infinity) return;
     const blocking = config.overtakes
       ? leadSpeed < config.cruiseMps - PASS_SPEED_MARGIN_MPS
@@ -1206,6 +1368,7 @@ export class Autopilot {
       if (this.laneProbe(vehicle, candidate, need, originX, originZ) < need) continue;
       this.passLine = candidate;
       this.passStartedAt = this.travelled;
+      this.passClearAt = null;
       return;
     }
   }
@@ -1449,7 +1612,10 @@ export class Autopilot {
     const segments = Math.min(PROBE_MAX_SEGMENTS, Math.max(1, Math.ceil(sight / maxChord)));
     const segment = sight / segments;
     let nearest = Infinity;
-    for (let side = -1; side <= 1; side += 2) {
+    // Centre and edge rays cover both narrow cars and wider catalogue bodies.
+    // Pass abort hysteresis prevents the centre ray briefly reacquiring the car
+    // alongside from being mistaken for a new stationary obstruction.
+    for (let side = -1; side <= 1; side++) {
       const offset = lane + side * PROBE_HALF_WIDTH_M;
       for (let step = 0; step < segments; step++) {
         const start = fromS + step * segment;
@@ -1528,28 +1694,4 @@ function wheelbaseOf(vehicle: Vehicle): number {
   return Number.isFinite(frontZ) && Number.isFinite(rearZ)
     ? Math.max(frontZ - rearZ, 1.5)
     : DEFAULT_WHEELBASE_M;
-}
-function steeringInputForWheelAngle(
-  wheelAngle: number,
-  modelSteerLock: number,
-  speedMps: number,
-): number {
-  const magnitude = Math.abs(wheelAngle);
-  // Commands under a fraction of the play are dropped, so a settled car is not
-  // sawing at the wheel. It has to stay WELL under the play itself: the fraction was
-  // 0.55, which discarded every correction worth less than a 180 m radius and is why
-  // a straight was held a metre and a half off line.
-  if (magnitude <= STEER_PLAY_RAD * 0.12) return 0;
-  const speedKmh = speedMps * 3.6;
-  const speedT = clamp(
-    (speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
-    0,
-    1,
-  );
-  const lockFactor = 1 - (1 - STEER_HIGH_SPEED_FRACTION) * Math.pow(speedT, STEER_LOCK_CURVE);
-  const effectiveLock = Math.max(modelSteerLock * lockFactor, 0.1);
-  const targetAngle = Math.min(magnitude + STEER_PLAY_RAD, effectiveLock);
-  const normalized = Math.pow(targetAngle / effectiveLock, 1 / STEER_INPUT_EXPONENT);
-  // Vehicle negates normalized input when converting it to a wheel angle.
-  return clamp(-Math.sign(wheelAngle) * normalized, -1, 1);
 }
