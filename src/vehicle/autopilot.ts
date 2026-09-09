@@ -197,6 +197,12 @@ const LINE_SHIFT_PER_METRE = 0.09;
 /** Line movement allowed on TIME rather than distance while barely rolling, m/s. */
 const LINE_SLEW_AT_REST_MPS = 0.5;
 /**
+ * And while clearing the oncoming lane in front of something coming at us. The gap
+ * must be closing this much faster than the car is moving for that to be the reading.
+ */
+const LINE_SLEW_ESCAPE_MPS = 2;
+const HEAD_ON_MARGIN_MPS = 4;
+/**
  * VERGE the autopilot is allowed to put a wheel on, metres beyond the asphalt.
  *
  * The road lost its gravel shoulders when it was narrowed to its old side markings,
@@ -252,7 +258,10 @@ const PROBE_SIGHT_SECONDS = 3.2;
  * long enough to see the car in front of you in a hairpin.
  */
 const PROBE_CHORD_DEVIATION_M = 2;
-const PROBE_MIN_REACH_M = 14;
+/** Ceiling on the walk, so a hairpin cannot ask for fifty rays. */
+const PROBE_MAX_SEGMENTS = 5;
+/** Heading error, radians, within which the car still counts as going down a lane. */
+const PROBE_PARALLEL_RAD = 0.25;
 /** Imminent-collision scan in the CAR's frame: valid even spun round or off-road. */
 const BODY_SCAN_RANGE_M = 18;
 const MUST_STOP_GAP_M = 4;
@@ -295,6 +304,23 @@ const PASS_TRIGGER_MIN_M = 16;
 const PASS_CLEAR_M = 30;
 const PASS_SIGHT_SECONDS = 2.5;
 const PASS_MIN_SPEED_MPS = 4;
+/**
+ * Overtaking a moving car: the speed advantage it takes to be worth starting, the
+ * longest pass that may be committed to, and the speed an unseen oncoming car is
+ * assumed to be doing while it happens.
+ */
+const PASS_ADVANTAGE_MPS = 3;
+const PASS_MAX_SECONDS = 15;
+const PASS_ONCOMING_MPS = 20;
+/**
+ * Seconds of that closure the sight requirement is actually asked for. A pass longer
+ * than this cannot be guaranteed by any probe on a road with crests, so beyond it the
+ * abort — return to your own side the moment something appears — is what carries the
+ * risk. Asking for the whole duration meant no overtake on this circuit ever
+ * qualified: the mode's speed advantage over traffic is 10-20 km/h, which is 300 m
+ * of clear road, and 300 m of PROVEN clear road does not exist here.
+ */
+const PASS_SIGHT_CAP_S = 6;
 /** Below this speed advantage frantic stays put rather than sitting alongside. */
 const PASS_SPEED_MARGIN_MPS = 4;
 /** The lane must be clear this far ahead before the pass is over. */
@@ -336,7 +362,7 @@ const STUCK_SPEED_MPS = 1 / 3.6;
  * it the car is picking its way past something, below it it is shuffling.
  */
 const CRAWL_SPEED_MPS = 1.5;
-const STALL_PROGRESS_M = 2.5;
+const STALL_PROGRESS_M = 1.2;
 const STALL_DECAY = 2;
 /** Backward speed, m/s, past which the car is rolling away rather than crawling. */
 const ROLLBACK_MPS = 0.6;
@@ -362,6 +388,8 @@ const RECOVERY_RETRY_METRES = 45;
  */
 const RECOVERY_BIAS_M = 2.2;
 const RECOVERY_ATTEMPT_LIMIT = 2;
+/** Seconds of getting nowhere after which a given-up manoeuvre is worth retrying. */
+const RECOVERY_REARM_S = 30;
 
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
@@ -387,8 +415,14 @@ export class Autopilot {
    */
   private travelled = 0;
   private stoppedFor = 0;
-  /** `travelled` when the current stall began; progress past it clears the timer. */
-  private stallAnchor = 0;
+  /**
+   * Where the car was when the current stall began, absolute metres. Ground covered
+   * from here is what decides whether it is stuck; see the block in `drive`.
+   */
+  private stallAnchorX = 0;
+  private stallAnchorZ = 0;
+  /** Seconds since the last recovery attempt, which is what re-arms a given-up one. */
+  private sinceRecovery = 0;
   private activityValue: AutopilotActivity = 'cruise';
   private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
@@ -396,6 +430,8 @@ export class Autopilot {
   private obstacleGapValue = Infinity;
   /** Its speed, estimated from the corridor probe's own distance derivative. */
   private obstacleSpeedValue = 0;
+  /** Rate the gap is shrinking, m/s. Larger than our own speed means it is coming AT us. */
+  private leadClosingValue = 0;
   /** Seconds that estimate has stayed below `PARKED_SPEED_MPS`, and whether it is real. */
   private leadParkedFor = 0;
   private leadMeasured = false;
@@ -424,6 +460,7 @@ export class Autopilot {
   private recoveryBiasUntil = 0;
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
+  private speedCapValue = Infinity;
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
@@ -460,6 +497,15 @@ export class Autopilot {
 
   get mode(): AutopilotMode { return this.modeValue; }
   setMode(mode: AutopilotMode): void { this.modeValue = mode; }
+  /**
+   * Ceiling below the mode's own cruise, m/s, or Infinity for none.
+   *
+   * The traffic on the test circuit uses it. Without it there is no speed
+   * differential to overtake into: this lap's gradients hold every car to much the
+   * same speed whatever its mode asks for, so the fast mode spent a whole lap
+   * queueing politely behind cars it was theoretically 60 km/h quicker than.
+   */
+  setSpeedCap(mps: number): void { this.speedCapValue = mps; }
   get engaged(): boolean { return this.engagedValue; }
   /** Rate-limited line being steered to, metres of road lateral. */
   get commandedLine(): number { return this.appliedLateral; }
@@ -473,7 +519,7 @@ export class Autopilot {
     this.engagedValue = engaged;
     this.hintValid = false;
     this.stoppedFor = 0;
-    this.stallAnchor = this.travelled;
+    this.sinceRecovery = RECOVERY_REARM_S;
     this.recoveryPhase = 'none';
     this.recoveryTimer = 0;
     this.recoveryBias = 0;
@@ -506,6 +552,7 @@ export class Autopilot {
     const velocity = vehicle.chassis.linvel();
     const speed = Math.hypot(velocity.x, velocity.z);
     this.travelled += speed * dt;
+    this.sinceRecovery += dt;
     const offRoad = Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE;
     if (offRoad) {
       // A previous obstacle plan is no longer useful after an impact or flight into
@@ -546,11 +593,31 @@ export class Autopilot {
     const hazard = this.hazard;
 
     // Traffic: the short body-frame scan for anything about to be hit, and the long
-    // lane probe along the line actually being driven for anything to be followed.
+    // lane probe for anything to be followed.
+    //
+    // The probe is cast down the COMMANDED line and, when the car is not on it and is
+    // still pointing along the road, down the line the body actually occupies as well.
+    // Those are the same corridor during ordinary lane keeping and very different
+    // after an abandoned pass: the car sat in the oncoming lane while its probe
+    // examined the lane it wanted to be in, and the traffic it was about to meet
+    // head-on was never in the corridor it was looking at.
+    //
+    // The parallel test is what keeps it honest. A car ANGLED across the road — one
+    // mid-recovery, say — is not going down any lane, and reading its own displaced
+    // corridor as blocked is how the escape manoeuvre talked itself out of moving.
+    // The car-frame scan above is the query that is valid at any angle.
     this.bodyScanGap = this.axisScan(vehicle, originX, originZ, 1, BODY_SCAN_RANGE_M);
     const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
     const laneGap = this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ);
-    this.updateLead(dt, Math.min(this.bodyScanGap, laneGap), speed);
+    let headingError = Math.atan2(forwardX, forwardZ) - this.road.sampleAt(this.hintS).heading;
+    while (headingError > Math.PI) headingError -= Math.PI * 2;
+    while (headingError < -Math.PI) headingError += Math.PI * 2;
+    const bodyLaneGap =
+      Math.abs(headingError) < PROBE_PARALLEL_RAD &&
+      Math.abs(projection.lateral - this.appliedLateral) > PROBE_HALF_WIDTH_M
+        ? this.laneProbe(vehicle, projection.lateral, sight, originX, originZ)
+        : Infinity;
+    this.updateLead(dt, Math.min(this.bodyScanGap, laneGap, bodyLaneGap), speed);
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
     let mustStop = this.bodyScanGap < MUST_STOP_GAP_M;
@@ -613,8 +680,25 @@ export class Autopilot {
     // A stationary driver turns the wheel before moving off, so below walking pace
     // the line may slew on time instead. Above it the distance rule is unchanged —
     // the two are equal at 5.6 m/s, and nothing fast ever sees the floor.
+    // AND ONE EXCEPTION ABOVE THAT: something coming the other way.
+    //
+    // A pass that has been abandoned leaves the car on the wrong side of the road,
+    // and if it has also been braked to walking pace it takes seven seconds of the
+    // ordinary rate to get back — measured, that is long enough to be hit head-on at
+    // 8 km/h by traffic doing 70. When the gap is closing FASTER than the car is
+    // moving, the thing ahead is coming at it, and clearing the lane stops being a
+    // manoeuvre and becomes the only thing that matters.
+    // Where the CAR is, not where its line is: the line is often already home while
+    // the body is still out in the other lane, which is exactly the dangerous state.
+    const onWrongSide =
+      projection.lateral * Math.sign(config.laneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
+    const headOn = gap < Infinity && this.leadClosingValue > speed + HEAD_ON_MARGIN_MPS;
     const lineRate =
-      Math.max(LINE_SHIFT_PER_METRE * speed, LINE_SLEW_AT_REST_MPS) * Math.max(dt, 0);
+      Math.max(
+        LINE_SHIFT_PER_METRE * speed,
+        LINE_SLEW_AT_REST_MPS,
+        onWrongSide && headOn ? LINE_SLEW_ESCAPE_MPS : 0,
+      ) * Math.max(dt, 0);
     this.appliedLateral += clamp(desiredLine - this.appliedLateral, -lineRate, lineRate);
     // Pure pursuit through a point ON the lane still cuts the bend: the chord to a
     // point `d` along an arc of curvature k passes k·d²/8 inside it, which in the
@@ -687,7 +771,7 @@ export class Autopilot {
       );
     }
     let targetSpeed = Math.min(
-      config.cruiseMps,
+      Math.min(config.cruiseMps, this.speedCapValue),
       Math.sqrt(config.lateralAccel / Math.max(upcomingCurvature, 1e-4)),
     );
     targetSpeed = Math.max(3, targetSpeed - Math.max(0, target.grade) * 4);
@@ -740,33 +824,40 @@ export class Autopilot {
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (mustStop) targetSpeed = 0;
 
-    // BEING STUCK IS A LACK OF PROGRESS, NOT A STANDSTILL.
+    // BEING STUCK IS A LACK OF PROGRESS, NOT A STANDSTILL, AND NOT A SPEEDOMETER
+    // READING EITHER.
     //
-    // Two ways to be stuck: asking for motion and getting none (wedged, or on ground
-    // it cannot climb), or sitting behind something parked, which used to last
-    // forever — the car's own speed target was legitimately zero, correct because
-    // there is a car in front, so no stall was ever detected.
+    // Three ways to be stuck: asking for motion and getting none, sitting behind
+    // something parked, or nosed into scenery nobody indexed. The last one is what a
+    // crash leaves behind, and it used to be undetectable: rays only report DYNAMIC
+    // bodies, because static obstacles are supposed to be known in the road frame, so
+    // a car resting against a rock or a bank has no obstacle ahead of it at all as
+    // far as this class can tell. The test that was left — a target above 1 m/s and a
+    // speed under 1 km/h — then never fired, because a car with its foot down against
+    // something solid does not sit still: the tyres bite and slip, the body rocks, and
+    // every excursion past 1 km/h decayed the timer. Reported as an autopilot that
+    // revs the engine forever and never tries to back out.
     //
-    // Neither can be tested by "is it stationary". A stopped car whose follow target
-    // is a metre a second still gets throttle, creeps half a metre, stops, and creeps
-    // again: measured, that took 28 s of shuffling to accumulate 3 s of standstill.
-    // So what is measured is METRES COVERED while below a crawl: a car picking its
-    // way past a rock field at 1.4 m/s is working, and a car that has moved 2 m in
-    // three seconds is not, whatever its speedometer says at any instant.
+    // So there is ONE test, and it measures metres of GROUND COVERED from an anchor
+    // dropped where the stall began. Distance travelled cannot be used for this:
+    // `travelled` integrates the speed MAGNITUDE, so a car rocking in place accrues
+    // it and keeps clearing its own timer. A car picking its way past a rock field at
+    // 1.4 m/s covers the anchor distance and is working; a car that has moved two
+    // metres in three seconds is stuck, whatever it is doing with the throttle.
     const wantsProgress = vehicle.engineRunning && roadSpeed > 1;
-    const blockedAhead =
-      mustStop || (gap < FOLLOW_STANDOFF_M + CAR_HALF_LENGTH_M && this.leadIsParked);
-    const stalled =
-      wantsProgress &&
-      (blockedAhead
-        ? speed < CRAWL_SPEED_MPS
-        : targetSpeed > 1 && speed < STUCK_SPEED_MPS);
+    const stalled = wantsProgress && speed < CRAWL_SPEED_MPS;
+    const movedFromAnchor = Math.hypot(
+      this.position.x - this.stallAnchorX,
+      this.position.z - this.stallAnchorZ,
+    );
     if (!stalled) {
       this.stoppedFor = Math.max(0, this.stoppedFor - dt * STALL_DECAY);
-      this.stallAnchor = this.travelled;
-    } else if (this.travelled - this.stallAnchor > STALL_PROGRESS_M) {
+      this.stallAnchorX = this.position.x;
+      this.stallAnchorZ = this.position.z;
+    } else if (movedFromAnchor > STALL_PROGRESS_M) {
       this.stoppedFor = 0;
-      this.stallAnchor = this.travelled;
+      this.stallAnchorX = this.position.x;
+      this.stallAnchorZ = this.position.z;
     } else {
       this.stoppedFor += dt;
     }
@@ -776,7 +867,16 @@ export class Autopilot {
     }
     if (this.recoveryPhase !== 'none') {
       this.activityValue = 'recover';
-      this.driveRecovery(dt, out, forwardSpeed, projection.lateral, gap);
+      // The pull-out drives on a fixed lock with no planner behind it, so it has to
+      // be given everything known to be in front: the rays see only dynamic bodies,
+      // and it was accelerating at indexed rock it could not feel.
+      this.driveRecovery(
+        dt,
+        out,
+        forwardSpeed,
+        projection.lateral,
+        Math.min(gap, this.hazardDistance),
+      );
       return;
     }
 
@@ -966,17 +1066,37 @@ export class Autopilot {
     // makes a pass from a standstill physical rather than a wish.
     if (!this.leadIsParked && speed < PASS_MIN_SPEED_MPS) return;
     if (gap > triggerGap) return;
-    // Committing to the other side of the road in a bend is how a pass becomes a
-    // head-on, and the probe that says the road is clear is a chord: over `need`
-    // metres it only describes the lane while `k·need²/8` stays inside it. The mode's
-    // own patience (`passCurvature`) and that geometric limit are both required, so
-    // the faster the pass the straighter the road it needs — which is the rule a
-    // driver uses too.
-    const need = gap + PASS_CLEAR_M + speed * PASS_SIGHT_SECONDS;
-    const chordLimit = (8 * PROBE_CHORD_DEVIATION_M) / (need * need);
-    if (!this.straightAhead(this.hintS, need, Math.min(config.passCurvature, chordLimit))) {
-      return;
+    // HOW MUCH ROAD A PASS ACTUALLY NEEDS.
+    //
+    // Getting round something PARKED costs the gap, the length of the thing and a
+    // couple of seconds: it is not going anywhere, and the manoeuvre can be abandoned
+    // at any point.
+    //
+    // Overtaking something MOVING costs the time to close the gap at the difference
+    // in speeds, and during that time an oncoming car covers its own road. Counting
+    // only our own travel is how frantic committed to a 121 m window behind a car it
+    // was overhauling at 10 km/h — a 24 second pass — and got hit head-on at 8 km/h
+    // three seconds later, having quite correctly stood on the brakes in the wrong
+    // lane. So the requirement is the CLOSING one, and a pass that would take longer
+    // than `PASS_MAX_SECONDS` is simply not available: overhauling a car ten km/h
+    // slower than you is not an overtake, it is a kilometre of hoping.
+    let need: number;
+    if (this.leadIsParked) {
+      need = gap + PASS_CLEAR_M + speed * PASS_SIGHT_SECONDS;
+    } else {
+      const advantage = speed - leadSpeed;
+      if (advantage < PASS_ADVANTAGE_MPS) return;
+      const seconds = (gap + PASS_CLEAR_M) / advantage;
+      if (seconds > PASS_MAX_SECONDS) return;
+      need = (speed + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S);
     }
+    // Two conditions, and they are different questions. `passCurvature` is policy:
+    // this mode does not overtake in a bend that tight. The reach is capability: the
+    // segmented probe can only answer over `PROBE_MAX_SEGMENTS` chords of the local
+    // radius, and committing to sight the probe cannot deliver is how a pass becomes
+    // a head-on.
+    if (!this.straightAhead(this.hintS, need, config.passCurvature)) return;
+    if (need > this.probeReach(this.hintS + PROBE_START_M)) return;
     // THE SHOULDER IS FOR THINGS THAT ARE NOT GOING ANYWHERE.
     //
     // Squeezing past a parked car or a boulder with a wheel on the verge is what the
@@ -1035,6 +1155,7 @@ export class Autopilot {
     if (!(gap < Infinity)) {
       this.obstacleGapValue = Infinity;
       this.obstacleSpeedValue = 0;
+      this.leadClosingValue = 0;
       this.leadParkedFor = 0;
       this.leadMeasured = false;
       return;
@@ -1043,6 +1164,7 @@ export class Autopilot {
     this.obstacleGapValue = gap;
     if (!(previous < Infinity) || dt <= 0) {
       this.obstacleSpeedValue = speed;
+      this.leadClosingValue = 0;
       this.leadParkedFor = 0;
       this.leadMeasured = false;
       return;
@@ -1056,6 +1178,7 @@ export class Autopilot {
       const alpha = this.leadMeasured ? Math.min(1, dt / LEAD_SPEED_TAU_S) : 1;
       this.leadMeasured = true;
       this.obstacleSpeedValue += (measured - this.obstacleSpeedValue) * alpha;
+      this.leadClosingValue += (closing - this.leadClosingValue) * alpha;
     }
     this.leadParkedFor =
       this.obstacleSpeedValue < PARKED_SPEED_MPS ? this.leadParkedFor + dt : 0;
@@ -1078,10 +1201,17 @@ export class Autopilot {
     originX: number,
     originZ: number,
   ): void {
-    const samePlace = this.travelled - this.lastRecoveryAt < RECOVERY_RETRY_METRES;
+    // "Same place" is both a distance and a WAIT. Distance alone made the give-up
+    // permanent: re-arming needed 45 m of road, and a car wedged against something is
+    // precisely a car that will never cover 45 m, so a driver who had tried both
+    // sides once sat there for the rest of the session. The world moves — traffic
+    // clears, a prop is destroyed, the ground settles — so after `RECOVERY_REARM_S`
+    // of getting nowhere it is worth trying again.
+    const samePlace =
+      this.travelled - this.lastRecoveryAt < RECOVERY_RETRY_METRES &&
+      this.sinceRecovery < RECOVERY_REARM_S;
     if (samePlace && this.recoveryAttempts >= RECOVERY_ATTEMPT_LIMIT) {
       this.stoppedFor = 0;
-      this.lastRecoveryAt = this.travelled;
       return;
     }
     // A second stall in the same place means the side chosen last time did not work.
@@ -1092,6 +1222,7 @@ export class Autopilot {
         : -Math.sign(config.laneOffset || -1);
     this.recoveryAttempts = samePlace ? this.recoveryAttempts + 1 : 1;
     this.lastRecoveryAt = this.travelled;
+    this.sinceRecovery = 0;
     this.stoppedFor = 0;
     this.plannedHazard = null;
     this.plannedLateral = 0;
@@ -1166,22 +1297,34 @@ export class Autopilot {
   }
 
   /**
+   * Metres of lane the segmented probe can actually examine from `fromS`. A caller
+   * that needs more than this has to treat a clear answer as "cannot see".
+   */
+  private probeReach(fromS: number): number {
+    const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
+    return PROBE_MAX_SEGMENTS * Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature);
+  }
+
+  /**
    * Distance to the nearest dynamic body in a road lane, metres, or Infinity.
    *
-   * Cast along the chord of the lane, so it follows the road's curve and gradient
-   * far better than a ray along the car's nose. See the block comment above
-   * `PROBE_HEIGHT_M` for why only dynamic hits count.
+   * The ray follows the lane's chord rather than the car's nose, so it keeps to the
+   * road's curve and gradient. See the block comment above `PROBE_HEIGHT_M` for why
+   * only dynamic hits count.
    *
-   * THE CHORD IS ONLY THE LANE WHILE THE BEND IS GENTLE. A chord of length d over
-   * curvature k passes k·d²/8 inside the arc, so the requested sight is cut to
-   * whatever keeps that inside `PROBE_CHORD_DEVIATION_M`. Without the cut, a 60 m
-   * probe in the 110 m esses left the road entirely and found a car on the far side
-   * of the lap — which, being a body at a fixed distance in a place the car was
-   * never going to reach, read as a PARKED obstacle and had sleeper hopping onto the
-   * verge thirteen times a lap to get round nothing at all.
+   * A CHORD IS ONLY THE LANE WHILE THE BEND IS GENTLE, so the sight is WALKED in
+   * segments short enough that each one stays within `PROBE_CHORD_DEVIATION_M` of the
+   * lane, and the walk stops at the first dynamic hit. One segment covers a straight;
+   * a 170 m look down a 320 m sweeper takes three, and a hairpin takes one per
+   * twenty metres.
    *
-   * Anything relying on a long sight has to make the same curvature test (see
-   * `updatePass`), because a short answer here is "cannot see", not "nothing there".
+   * Capping the reach instead was tried, and it silently forbade every fast overtake:
+   * a single 170 m chord in that sweeper misses the lane by eleven metres, so the cap
+   * shortened the answer to 71 m, and the pass rule — which must not commit to sight
+   * it does not have — refused. Before the cap existed, the same probe left the road
+   * in the 110 m esses and found a car on the far side of the lap: a body at a fixed
+   * distance in a place the car will never reach, which reads as a PARKED obstacle
+   * and had sleeper hopping onto the verge thirteen times a lap to pass nothing.
    */
   private laneProbe(
     vehicle: Vehicle,
@@ -1194,35 +1337,40 @@ export class Autopilot {
     const body = vehicle.chassis;
     const fromS = this.hintS + PROBE_START_M;
     const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
-    const reach = Math.max(
-      PROBE_MIN_REACH_M,
-      Math.min(sight, Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature)),
-    );
+    const maxChord = Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature);
+    const segments = Math.min(PROBE_MAX_SEGMENTS, Math.max(1, Math.ceil(sight / maxChord)));
+    const segment = sight / segments;
     let nearest = Infinity;
     for (let side = -1; side <= 1; side += 2) {
       const offset = lane + side * PROBE_HALF_WIDTH_M;
-      this.road.offsetPoint(fromS, offset, this.probeNear);
-      this.road.offsetPoint(fromS + reach, offset, this.probeFar);
-      const dx = this.probeFar.x - this.probeNear.x;
-      const dy = this.probeFar.y - this.probeNear.y;
-      const dz = this.probeFar.z - this.probeNear.z;
-      const length = Math.hypot(dx, dy, dz);
-      if (length < 1) continue;
-      // Position is durable absolute state; only the ray passed to Rapier is relative.
-      this.rayOrigin.x = this.probeNear.x - originX;
-      this.rayOrigin.y = this.probeNear.y + PROBE_HEIGHT_M;
-      this.rayOrigin.z = this.probeNear.z - originZ;
-      this.rayDirection.x = dx / length;
-      this.rayDirection.y = dy / length;
-      this.rayDirection.z = dz / length;
-      const hit = this.physics.raycast(this.rayOrigin, this.rayDirection, length, body);
-      if (!hit) continue;
-      const collider = this.physics.world.getCollider(hit.colliderHandle);
-      if (!collider?.parent()?.isDynamic()) continue;
-      // Chord metres are shorter than road metres in a bend; report road metres, and
-      // measure from the car rather than from where the probe starts.
-      const along = PROBE_START_M + (hit.toi * reach) / length;
-      if (along < nearest) nearest = along;
+      for (let step = 0; step < segments; step++) {
+        const start = fromS + step * segment;
+        this.road.offsetPoint(start, offset, this.probeNear);
+        this.road.offsetPoint(start + segment, offset, this.probeFar);
+        const dx = this.probeFar.x - this.probeNear.x;
+        const dy = this.probeFar.y - this.probeNear.y;
+        const dz = this.probeFar.z - this.probeNear.z;
+        const length = Math.hypot(dx, dy, dz);
+        if (length < 1) continue;
+        // Position is durable absolute state; only the ray passed to Rapier is relative.
+        this.rayOrigin.x = this.probeNear.x - originX;
+        this.rayOrigin.y = this.probeNear.y + PROBE_HEIGHT_M;
+        this.rayOrigin.z = this.probeNear.z - originZ;
+        this.rayDirection.x = dx / length;
+        this.rayDirection.y = dy / length;
+        this.rayDirection.z = dz / length;
+        const hit = this.physics.raycast(this.rayOrigin, this.rayDirection, length, body);
+        if (!hit) continue;
+        const collider = this.physics.world.getCollider(hit.colliderHandle);
+        // A static first hit ends this segment's line of sight, and the walk with it:
+        // whatever is beyond a crest or a rock is not visible from here.
+        if (!collider?.parent()?.isDynamic()) break;
+        // Chord metres are shorter than road metres in a bend; report road metres,
+        // measured from the car rather than from where the probe starts.
+        const along = PROBE_START_M + step * segment + (hit.toi * segment) / length;
+        if (along < nearest) nearest = along;
+        break;
+      }
     }
     return nearest;
   }

@@ -36,6 +36,11 @@ export const RIBBON_HALF_WIDTH = CIRCUIT_HALF_WIDTH + 3;
  */
 const APRON_WIDTH = 45;
 const RIBBON_STEP = 1;
+/**
+ * Fraction of the local radius a row may reach toward the inside of a bend. 0.75
+ * leaves the hairpin's inner shelf 22 m wide instead of 45 and folded.
+ */
+const INSIDE_RADIUS_FRACTION = 0.75;
 
 export interface CircuitRibbon {
   readonly vertices: Float32Array;
@@ -49,6 +54,15 @@ export interface CircuitRibbon {
 /**
  * One closed strip between two lateral offsets. Signs are kept as given, so a strip
  * from -45 to -5.9 is the left shelf and one from -5.9 to +5.9 is the road.
+ *
+ * A ROW IS NARROWED WHERE THE CORNER IS TIGHTER THAN THE STRIP IS WIDE. Offsetting
+ * 45 m into the INSIDE of a 30 m radius does not make a wide shelf: at 30 m the arc
+ * collapses to a point and past it the surface turns inside out, so the hairpin's
+ * inner shelf folded back across the asphalt as a wall of inverted triangles. It is
+ * invisible — it lies under the road it crosses — and a car on the inside line hit it
+ * head-on at 8 km/h with nothing in front of it, which is exactly as confusing to
+ * debug as it sounds. `INSIDE_RADIUS_FRACTION` keeps every row short of its own
+ * centre of curvature.
  */
 export function buildCircuitRibbon(
   road: PlaygroundRoad,
@@ -62,8 +76,18 @@ export function buildCircuitRibbon(
   const point = { x: 0, y: 0, z: 0 };
   for (let row = 0; row < rows; row++) {
     const s = row * step;
+    // Positive curvature turns toward positive lateral (circuit.ts), so that side is
+    // the inside of the bend and the only one that can fold.
+    const curvature = circuit.sampleAt(s).curvature;
+    const insideLimit =
+      curvature === 0 ? Infinity : INSIDE_RADIUS_FRACTION / Math.abs(curvature);
+    const insideSign = Math.sign(curvature);
     for (let side = 0; side < 2; side++) {
-      const lateral = side === 0 ? innerLateral : outerLateral;
+      const asked = side === 0 ? innerLateral : outerLateral;
+      const lateral =
+        Math.sign(asked) === insideSign && Math.abs(asked) > insideLimit
+          ? insideSign * insideLimit
+          : asked;
       road.offsetPoint(s, lateral, point);
       const i = (row * 2 + side) * 3;
       vertices[i] = point.x;

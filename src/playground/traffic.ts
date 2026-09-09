@@ -61,6 +61,13 @@ const DROP_HEIGHT_M = 1.2;
  * passes underneath it and the obstacle the bench meant to place did not exist.
  */
 const SETTLE_SECONDS = 0.8;
+/**
+ * Speed the traffic is held to, m/s. Slower than the careful mode's own cruise on
+ * purpose: 50 km/h against a frantic ego is a real differential to overtake into,
+ * and without one there is nothing to test — this lap's gradients hold everything to
+ * roughly the same speed however fast its mode wants to go.
+ */
+const TRAFFIC_SPEED_CAP_MPS = 50 / 3.6;
 
 export type TrafficState = 'rolling' | 'parked' | 'stowed';
 
@@ -113,6 +120,7 @@ export class PlaygroundTraffic {
       const vehicle = new Vehicle(this.physics, world, state, scene, origin);
       const autopilot = new Autopilot(slot.oncoming ? reversed : forward, hazards, this.physics);
       autopilot.setMode(slot.mode);
+      autopilot.setSpeedCap(TRAFFIC_SPEED_CAP_MPS);
       autopilot.setEngaged(true);
       this.carList.push({
         id,
