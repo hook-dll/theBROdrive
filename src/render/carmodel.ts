@@ -823,7 +823,18 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     v.z - centre.z,
   ];
 
+  const sourceOriginX = sourceBodyCentre.x * s;
   const sourceOriginZ = sourceBodyCentre.z * s;
+  const frontSourceX =
+    (parts.positions.get('wheel_fl')!.x +
+      parts.positions.get('wheel_fr')!.x) *
+      0.5 -
+    sourceOriginX;
+  const rearSourceX =
+    (parts.positions.get('wheel_rl')!.x +
+      parts.positions.get('wheel_rr')!.x) *
+      0.5 -
+    sourceOriginX;
   const frontSourceZ =
     (parts.positions.get('wheel_fl')!.z +
       parts.positions.get('wheel_fr')!.z) *
@@ -834,9 +845,11 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
       parts.positions.get('wheel_rr')!.z) *
       0.5 -
     sourceOriginZ;
-  // Axle midpoint follows the body length correction; wheelbase itself is the
-  // catalogue authority. This preserves real overhang asymmetry without leaving
-  // the wheels in the source mesh's uncorrected Z frame.
+  // Axle centres follow the body correction; tracks and wheelbase themselves are
+  // catalogue authorities. This preserves source-art offsets without leaving the
+  // wheels in the mesh's uncorrected frame.
+  const frontAxleX = frontSourceX * bodyScaleX;
+  const rearAxleX = rearSourceX * bodyScaleX;
   const axleMidZ = ((frontSourceZ + rearSourceZ) * 0.5) * bodyScaleZ;
   const frontDirection = Math.sign(frontSourceZ - rearSourceZ) || 1;
 
@@ -845,9 +858,10 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     const p = toLocal(parts.positions.get(id)!);
     const radius = parts.radii.get(id)!;
     const isFront = id === 'wheel_fl' || id === 'wheel_fr';
+    const axleX = (isFront ? frontAxleX : rearAxleX);
     const track = isFront ? def.factory.frontTrack : def.factory.rearTrack;
-    p[0] = Math.sign(p[0]) * track * 0.5;
     p[1] = -half.y - def.factory.clearance + radius;
+    p[0] = axleX + Math.sign(p[0] - axleX) * track * 0.5;
     p[2] =
       axleMidZ +
       frontDirection * (isFront ? 0.5 : -0.5) * def.factory.wheelbase;
