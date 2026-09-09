@@ -435,6 +435,7 @@ export interface FactoryGeometry {
   readonly frontTrack: number;
   readonly rearTrack: number;
   readonly wheelRadius: number;
+  readonly tyreWidth: number;
 }
 
 
@@ -582,26 +583,26 @@ type Entry = Omit<
  * The 2105 rally keeps its 0.300 m competition tyre on the stock 2105 shell.
  */
 const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
-  sv_gaz21:       { length: 4.830, width: 1.800, height: 1.620, clearance: 0.190, wheelbase: 2.700, frontTrack: 1.410, rearTrack: 1.420, wheelRadius: 0.365 },
-  sv_gaz24:       { length: 4.735, width: 1.800, height: 1.490, clearance: 0.174, wheelbase: 2.800, frontTrack: 1.470, rearTrack: 1.420, wheelRadius: 0.354 },
-  sv_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297 },
-  sv_vaz2102:     { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297 },
-  sv_vaz2103:     { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
-  sv_vaz2104:     { length: 4.115, width: 1.620, height: 1.443, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
-  sv_vaz2105:     { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
-  sv_vaz2105r:    { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.300 },
-  sv_vaz2106:     { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
-  sv_vaz2107:     { length: 4.128, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288 },
-  sv_vaz2108:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
-  sv_vaz2109:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
-  sv_vaz21099:    { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281 },
-  sv_niva:        { length: 3.720, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.200, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343 },
-  sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343 },
-  sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310 },
-  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260 },
-  sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.220, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.430 },
-  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.390, rearTrack: 1.370, wheelRadius: 0.288 },
-  gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288 },
+  sv_gaz21:       { length: 4.830, width: 1.800, height: 1.620, clearance: 0.190, wheelbase: 2.700, frontTrack: 1.410, rearTrack: 1.420, wheelRadius: 0.365, tyreWidth: 0.170 },
+  sv_gaz24:       { length: 4.735, width: 1.800, height: 1.490, clearance: 0.174, wheelbase: 2.800, frontTrack: 1.470, rearTrack: 1.420, wheelRadius: 0.354, tyreWidth: 0.187 },
+  sv_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155 },
+  sv_vaz2102:     { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297, tyreWidth: 0.165 },
+  sv_vaz2103:     { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sv_vaz2104:     { length: 4.115, width: 1.620, height: 1.443, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sv_vaz2105:     { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sv_vaz2105r:    { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.300, tyreWidth: 0.185 },
+  sv_vaz2106:     { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sv_vaz2107:     { length: 4.128, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sv_vaz2108:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  sv_vaz2109:     { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  sv_vaz21099:    { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  sv_niva:        { length: 3.720, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.200, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343, tyreWidth: 0.175 },
+  sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343, tyreWidth: 0.175 },
+  sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
+  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260, tyreWidth: 0.135 },
+  sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.220, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.430, tyreWidth: 0.225 },
+  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.390, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.165 },
+  gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
