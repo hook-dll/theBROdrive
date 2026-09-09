@@ -797,51 +797,70 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     throw new Error(`Car model "${def.id}": could not identify four wheels by shape`);
   }
   const parts = takeOwnWheels(def, scene);
-  // The base scale is calibrated from wheelbase. Fit the detached coachwork
-  // independently to its stock exterior dimensions, preserving its centre so axle
-  // placement and overhang balance do not inherit the source mesh's errors.
-  //
-  // Catalogue height runs from the tyre contact plane to the roof. The body box
-  // therefore occupies exactly the remainder above the published ground clearance;
-  // wheel centres are placed from the same two numbers below.
+  // Published width excludes mirrors, but the affected source meshes include them
+  // in their full Box3. Fitting that box made the actual shell 8-14% too narrow, so
+  // a correct factory track visibly sat outside the arches. Measure the lower 55%
+  // of the detached body: sills, wings and bumpers, but not mirrors. Height and
+  // length still use the complete body.
   const sourceBodyBox = boundsOf(scene);
   const sourceBodyCentre = sourceBodyBox.getCenter(new THREE.Vector3());
   const sourceBodySize = sourceBodyBox.getSize(new THREE.Vector3());
+  const shellTopY = sourceBodyBox.min.y + sourceBodySize.y * 0.55;
+  let shellMinX = Infinity;
+  let shellMaxX = -Infinity;
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const positions = node.geometry.getAttribute('position');
+    if (!positions) return;
+    for (let i = 0; i < positions.count; i++) {
+      _sample.fromBufferAttribute(positions, i).applyMatrix4(node.matrixWorld);
+      if (_sample.y > shellTopY) continue;
+      shellMinX = Math.min(shellMinX, _sample.x);
+      shellMaxX = Math.max(shellMaxX, _sample.x);
+    }
+  });
+  const sourceShellWidth = shellMaxX - shellMinX;
+  if (!(sourceShellWidth > 0)) {
+    throw new Error(`Car model "${def.id}" has no measurable lower body shell`);
+  }
+  const sourceShellCentreX = (shellMinX + shellMaxX) * 0.5;
   const targetBodyHeight = def.factory.height - def.factory.clearance;
-  const bodyScaleX = def.factory.width / (sourceBodySize.x * s);
+  const bodyScaleX = def.factory.width / (sourceShellWidth * s);
   const bodyScaleY = targetBodyHeight / (sourceBodySize.y * s);
   const bodyScaleZ = def.factory.length / (sourceBodySize.z * s);
   scene.scale.set(s * bodyScaleX, s * bodyScaleY, s * bodyScaleZ);
   scene.updateMatrixWorld(true);
   const scaledBodyBox = boundsOf(scene);
   const scaledBodyCentre = scaledBodyBox.getCenter(new THREE.Vector3());
-  scene.position.sub(scaledBodyCentre);
+  scene.position.set(
+    -sourceShellCentreX * s * bodyScaleX,
+    -scaledBodyCentre.y,
+    -scaledBodyCentre.z,
+  );
   scene.updateMatrixWorld(true);
 
-  // Chassis box: the bounds of what is left, i.e. the body and its fixed trim.
-  // Recentring the scaled bounds keeps body, collider and wheel mounts in one frame.
+  // Collider width is the published shell width, not the visible mirror span.
   const bodyBox = boundsOf(scene);
   const centre = bodyBox.getCenter(new THREE.Vector3());
+  centre.x = 0;
   const half = bodyBox.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+  half.x = def.factory.width * 0.5;
 
-  const toLocal = (v: THREE.Vector3): [number, number, number] => [
-    v.x - centre.x,
-    v.y - centre.y,
-    v.z - centre.z,
-  ];
 
-  const sourceOriginX = sourceBodyCentre.x * s;
-  const sourceOriginZ = sourceBodyCentre.z * s;
-  const frontSourceX =
-    (parts.positions.get('wheel_fl')!.x +
+  const sourceOriginX = sourceShellCentreX * s;
+  const frontAxleX =
+    ((parts.positions.get('wheel_fl')!.x +
       parts.positions.get('wheel_fr')!.x) *
       0.5 -
-    sourceOriginX;
-  const rearSourceX =
-    (parts.positions.get('wheel_rl')!.x +
+      sourceOriginX) *
+    bodyScaleX;
+  const rearAxleX =
+    ((parts.positions.get('wheel_rl')!.x +
       parts.positions.get('wheel_rr')!.x) *
       0.5 -
-    sourceOriginX;
+      sourceOriginX) *
+    bodyScaleX;
+  const sourceOriginZ = sourceBodyCentre.z * s;
   const frontSourceZ =
     (parts.positions.get('wheel_fl')!.z +
       parts.positions.get('wheel_fr')!.z) *
@@ -852,23 +871,21 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
       parts.positions.get('wheel_rr')!.z) *
       0.5 -
     sourceOriginZ;
-  // Axle centres follow the body correction; tracks and wheelbase themselves are
-  // catalogue authorities. This preserves source-art offsets without leaving the
-  // wheels in the mesh's uncorrected frame.
-  const frontAxleX = frontSourceX * bodyScaleX;
-  const rearAxleX = rearSourceX * bodyScaleX;
+  // Axle midpoint follows the body length correction; track and wheelbase themselves
+  // are catalogue authorities.
   const axleMidZ = ((frontSourceZ + rearSourceZ) * 0.5) * bodyScaleZ;
   const frontDirection = Math.sign(frontSourceZ - rearSourceZ) || 1;
 
   const wheels: WheelMeasure[] = [];
   for (const id of WHEEL_IDS) {
-    const p = toLocal(parts.positions.get(id)!);
+    const p: [number, number, number] = [0, 0, 0];
     const radius = parts.radii.get(id)!;
     const isFront = id === 'wheel_fl' || id === 'wheel_fr';
-    const axleX = (isFront ? frontAxleX : rearAxleX);
+    const isLeft = id === 'wheel_fl' || id === 'wheel_rl';
     const track = isFront ? def.factory.frontTrack : def.factory.rearTrack;
     p[1] = -half.y - def.factory.clearance + radius;
-    p[0] = axleX + Math.sign(p[0] - axleX) * track * 0.5;
+    const axleX = isFront ? frontAxleX : rearAxleX;
+    p[0] = axleX + (isLeft ? 0.5 : -0.5) * track;
     p[2] =
       axleMidZ +
       frontDirection * (isFront ? 0.5 : -0.5) * def.factory.wheelbase;
@@ -1060,10 +1077,14 @@ function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Obje
     const mesh = source.wheels.get(targetWheel.id)!.clone(true);
     mesh.updateMatrixWorld(true);
     const box = boundsOf(mesh);
+    const visualWidth = box.max.x - box.min.x;
     const visualRadius = Math.max(box.max.y - box.min.y, box.max.z - box.min.z) * 0.5;
-    if (!(visualRadius > 0)) {
-      throw new Error(`Car model "${t.def.id}" has a wheel with no rolling radius`);
+    if (!(visualRadius > 0) || !(visualWidth > 0)) {
+      throw new Error(`Car model "${t.def.id}" has a wheel with invalid dimensions`);
     }
+    // A shared wheel contributes its rim style, not the donor car's tyre section.
+    // Keep the target model's factory tyre width as well as its rolling radius.
+    mesh.scale.x *= t.def.factory.tyreWidth / visualWidth;
     const rollingScale = targetWheel.radius / visualRadius;
     mesh.scale.y *= rollingScale;
     mesh.scale.z *= rollingScale;
