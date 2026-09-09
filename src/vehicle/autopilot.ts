@@ -225,6 +225,8 @@ const EDGE_LINE_M = PASSING_EDGE - CAR_HALF_WIDTH_M;
 const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
 const OFFROAD_REJOIN_LATERAL_M = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.05;
+const OFFROAD_LANE_TOLERANCE_M = 0.35;
+const OFFROAD_HEADING_TOLERANCE_RAD = 0.14;
 /** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
 const OFFROAD_SPEED_MPS = 3.5;
 const OFFROAD_BRAKE_MAX = 0.7;
@@ -428,9 +430,12 @@ export class Autopilot {
   private sinceRecovery = 0;
   /**
    * Latched after a full departure. Merely crossing the verge again is not enough:
-   * acceleration stays inhibited until the whole chassis is back on asphalt.
+   * acceleration stays inhibited until the chassis is centred on its recovery line
+   * and parallel to the road.
    */
   private roadRecoveryActive = false;
+  private roadRecoveryTargetLine = 0;
+  private roadRecoveryFollowingEscape = false;
   private activityValue: AutopilotActivity = 'cruise';
   private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
@@ -530,6 +535,8 @@ export class Autopilot {
     this.sinceRecovery = RECOVERY_REARM_S;
     this.recoveryPhase = 'none';
     this.roadRecoveryActive = false;
+    this.roadRecoveryTargetLine = 0;
+    this.roadRecoveryFollowingEscape = false;
     this.recoveryTimer = 0;
     this.recoveryBias = 0;
     this.recoveryBiasUntil = 0;
@@ -565,14 +572,24 @@ export class Autopilot {
     const wasRoadRecoveryActive = this.roadRecoveryActive;
     if (Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE) {
       this.roadRecoveryActive = true;
-    } else if (
-      this.roadRecoveryActive &&
-      Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M
-    ) {
-      this.roadRecoveryActive = false;
     }
-    const offRoad = this.roadRecoveryActive;
+    let offRoad = this.roadRecoveryActive;
+    const roadRecoveryBias =
+      this.recoveryPhase !== 'none'
+        ? this.recoverySide * RECOVERY_BIAS_M
+        : this.travelled < this.recoveryBiasUntil
+          ? this.recoveryBias
+          : 0;
     if (offRoad && !wasRoadRecoveryActive) {
+      this.roadRecoveryFollowingEscape = Math.abs(roadRecoveryBias) > 0.01;
+      this.roadRecoveryTargetLine =
+        Math.abs(roadRecoveryBias) > 0.01
+          ? clamp(
+              config.laneOffset + roadRecoveryBias,
+              -OFFROAD_REJOIN_LATERAL_M,
+              OFFROAD_REJOIN_LATERAL_M,
+            )
+          : config.laneOffset;
       // Road re-entry is not obstacle recovery. The old manoeuvre reversed once,
       // immediately declared its pull-out failed because it was still off-road, and
       // exhausted both attempts in the sand. Cancel it and hold the nearest edge line.
@@ -585,11 +602,6 @@ export class Autopilot {
       this.plannedLateral = 0;
       this.appliedLateral = Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE;
       this.passLine = null;
-    } else if (!offRoad && wasRoadRecoveryActive) {
-      // Do not carry the slow sand crossing into the ordinary stuck detector.
-      this.stoppedFor = 0;
-      this.stallAnchorX = this.position.x;
-      this.stallAnchorZ = this.position.z;
     }
     // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
     // chord to that point cuts the apex, so a preview longer than the corner itself
@@ -640,6 +652,31 @@ export class Autopilot {
     let headingError = Math.atan2(forwardX, forwardZ) - this.road.sampleAt(this.hintS).heading;
     while (headingError > Math.PI) headingError -= Math.PI * 2;
     while (headingError < -Math.PI) headingError += Math.PI * 2;
+    // A plain road departure remains capped at walking speed until the whole car is
+    // centred on its own lane and parallel to the road. An obstacle escape already
+    // has a deliberate clear-side line; once its body is back on asphalt, preserve
+    // that line long enough to pass the obstacle instead of steering back into it.
+    const bodyOnAsphalt = Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M;
+    const settledOnRecoveryLine =
+      Math.abs(projection.lateral - this.roadRecoveryTargetLine) <=
+        OFFROAD_LANE_TOLERANCE_M &&
+      Math.abs(headingError) <= OFFROAD_HEADING_TOLERANCE_RAD;
+    if (
+      offRoad &&
+      bodyOnAsphalt &&
+      (this.roadRecoveryFollowingEscape || settledOnRecoveryLine)
+    ) {
+      this.roadRecoveryActive = false;
+      offRoad = false;
+      this.stoppedFor = 0;
+      this.stallAnchorX = this.position.x;
+      this.stallAnchorZ = this.position.z;
+      if (Math.abs(this.roadRecoveryTargetLine - config.laneOffset) > 0.01) {
+        this.recoveryBias = this.roadRecoveryTargetLine - config.laneOffset;
+        this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
+      }
+      this.roadRecoveryFollowingEscape = false;
+    }
     const bodyLaneGap =
       Math.abs(headingError) < PROBE_PARALLEL_RAD &&
       Math.abs(projection.lateral - this.appliedLateral) > PROBE_HALF_WIDTH_M
@@ -687,7 +724,9 @@ export class Autopilot {
       this.passLine = null;
     }
     const desiredLine = offRoad
-      ? Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE
+      ? Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M
+        ? this.roadRecoveryTargetLine
+        : Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE
       : this.plannedHazard !== null
         ? this.plannedLateral
         : this.travelled < this.recoveryBiasUntil
@@ -894,7 +933,7 @@ export class Autopilot {
       this.beginRecovery(vehicle, config, projection.lateral, originX, originZ);
     }
     if (this.recoveryPhase !== 'none') {
-      this.activityValue = 'recover';
+      this.activityValue = offRoad ? 'offroad' : 'recover';
       // The pull-out drives on a fixed lock with no planner behind it, so it has to
       // be given everything known to be in front: the rays see only dynamic bodies,
       // and it was accelerating at indexed rock it could not feel.
@@ -922,7 +961,7 @@ export class Autopilot {
       out.brake = 1;
       out.reverse = false;
       out.handbrake = false;
-      this.activityValue = 'recover';
+      this.activityValue = offRoad ? 'offroad' : 'recover';
       return;
     }
 
