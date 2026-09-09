@@ -823,15 +823,21 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     v.z - centre.z,
   ];
 
+  const sourceOriginZ = sourceBodyCentre.z * s;
   const frontSourceZ =
-    (toLocal(parts.positions.get('wheel_fl')!)[2] +
-      toLocal(parts.positions.get('wheel_fr')!)[2]) *
-    0.5;
+    (parts.positions.get('wheel_fl')!.z +
+      parts.positions.get('wheel_fr')!.z) *
+      0.5 -
+    sourceOriginZ;
   const rearSourceZ =
-    (toLocal(parts.positions.get('wheel_rl')!)[2] +
-      toLocal(parts.positions.get('wheel_rr')!)[2]) *
-    0.5;
-  const axleMidZ = (frontSourceZ + rearSourceZ) * 0.5;
+    (parts.positions.get('wheel_rl')!.z +
+      parts.positions.get('wheel_rr')!.z) *
+      0.5 -
+    sourceOriginZ;
+  // Axle midpoint follows the body length correction; wheelbase itself is the
+  // catalogue authority. This preserves real overhang asymmetry without leaving
+  // the wheels in the source mesh's uncorrected Z frame.
+  const axleMidZ = ((frontSourceZ + rearSourceZ) * 0.5) * bodyScaleZ;
   const frontDirection = Math.sign(frontSourceZ - rearSourceZ) || 1;
 
   const wheels: WheelMeasure[] = [];
