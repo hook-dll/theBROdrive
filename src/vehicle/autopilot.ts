@@ -366,6 +366,8 @@ const PASS_SIGHT_CAP_S = 6;
 const PASS_SPEED_MARGIN_MPS = 4;
 /** Road travelled after the old lane first looks clear, giving the rear bumper room. */
 const PASS_REAR_CLEAR_M = 10;
+/** Passing lane must also be clear behind before the lateral move begins. */
+const PASS_ENTRY_REAR_GAP_M = 18;
 /** The lane must be clear this far ahead before the pass is over. */
 const PASS_RETURN_GAP_M = 24;
 const PASS_MIN_METRES = 32;
@@ -434,10 +436,6 @@ const RECOVERY_REVERSE_BRAKE = 0.72;
 const RECOVERY_CRAWL_MPS = 4.5;
 const RECOVERY_BIAS_METRES = 50;
 const RECOVERY_REAR_CLEAR_M = 5;
-/** Opposing centres this close after a sustained stop constitute a local deadlock. */
-const DEADLOCK_ONCOMING_M = 18;
-/** Road-distance and physical-probe measurements use different body reference points. */
-const DEADLOCK_GAP_SLOP_M = 4;
 const RECOVERY_RETRY_METRES = 45;
 /**
  * How far off its lane the car holds after a pull-out. It has to be enough to CLEAR
@@ -539,6 +537,10 @@ export class Autopilot {
    * around; the player's autopilot can still recover from unindexed collision shapes.
    */
   private trafficRecoveryPolicy = false;
+  /** Granted by the traffic coordinator to exactly one head of an opposing queue. */
+  private deadlockPermission = false;
+  /** Dense ambient streams disable new overtakes; an active pass is still completed. */
+  private passingEnabled = true;
   /** Signed lateral direction the recovery is escaping toward. */
   private recoverySide = 1;
   private recoveryBias = 0;
@@ -613,6 +615,12 @@ export class Autopilot {
   setTrafficRecoveryPolicy(enabled: boolean): void {
     this.trafficRecoveryPolicy = enabled;
   }
+  setDeadlockPermission(enabled: boolean): void {
+    this.deadlockPermission = enabled;
+  }
+  setPassingEnabled(enabled: boolean): void {
+    this.passingEnabled = enabled;
+  }
   /** Supplies ambient light and road distance to the nearest approaching vehicle. */
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
     this.daylightFactor = clamp(daylightFactor, 0, 1);
@@ -672,6 +680,7 @@ export class Autopilot {
     this.passClearAt = null;
     this.passRetryAfterS = 0;
     this.recoveryCommitted = false;
+    this.deadlockPermission = false;
     this.dynamicBlockerKnown = false;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
@@ -727,18 +736,21 @@ export class Autopilot {
               OFFROAD_REJOIN_LATERAL_M,
             )
           : config.laneOffset;
-      // Road re-entry is not obstacle recovery. The old manoeuvre reversed once,
-      // immediately declared its pull-out failed because it was still off-road, and
-      // exhausted both attempts in the sand. Cancel it and hold the nearest edge line.
-      this.recoveryPhase = 'none';
-      this.recoveryTimer = 0;
-      this.recoveryCommitted = false;
-      this.stoppedFor = 0;
-      this.stallAnchorX = this.position.x;
-      this.stallAnchorZ = this.position.z;
+      // Ordinary road re-entry is not obstacle recovery: cancel an old generic
+      // manoeuvre and hold the nearest edge line. A coordinator-committed deadlock
+      // escape is different; crossing the verge is part of its chosen outer path,
+      // so preserve that manoeuvre until it clears the opposing head.
+      if (!this.recoveryCommitted) {
+        this.recoveryPhase = 'none';
+        this.recoveryTimer = 0;
+        this.stoppedFor = 0;
+        this.stallAnchorX = this.position.x;
+        this.stallAnchorZ = this.position.z;
+        this.appliedLateral =
+          Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE;
+      }
       this.plannedHazard = null;
       this.plannedLateral = 0;
-      this.appliedLateral = Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE;
       this.passLine = null;
     }
     // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
@@ -857,26 +869,6 @@ export class Autopilot {
     this.updateLead(dt, Math.min(this.bodyScanGap, laneGap, bodyLaneGap), speed);
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
-    const hasDeadlockPriority =
-      roadForwardX > 0.01 ||
-      (Math.abs(roadForwardX) <= 0.01 && roadForwardZ > 0);
-    const oncomingIsFrontBlocker =
-      this.oncomingGap <= DEADLOCK_ONCOMING_M &&
-      (
-        gap < Infinity
-          ? this.oncomingGap <= gap + DEADLOCK_GAP_SLOP_M &&
-            this.leadIsParked &&
-            Math.abs(this.leadClosingValue) <= PARKED_SPEED_MPS
-          : hazard !== null &&
-            !this.dynamicBlockerKnown &&
-            this.dynamicBodyAhead(
-              vehicle,
-              originX,
-              originZ,
-              roadForwardX,
-              roadForwardZ,
-            )
-      );
     // A recovery is normally an escape from unexplained static blockage. Dynamic
     // traffic ahead cancels it immediately, while a queued car behind does not.
     // An opposing-road deadlock is the exception: one direction receives stable
@@ -1180,11 +1172,10 @@ export class Autopilot {
         roadForwardX,
         roadForwardZ,
       );
-    const opposingDeadlock = hasDeadlockPriority && oncomingIsFrontBlocker;
+    const opposingDeadlock = this.deadlockPermission;
     const stalled =
-      !offRoad &&
       this.passLine === null &&
-      (unexplainedStaticStall || opposingDeadlock) &&
+      ((!offRoad && unexplainedStaticStall) || opposingDeadlock) &&
       speed < CRAWL_SPEED_MPS;
     const movedFromAnchor = Math.hypot(
       this.position.x - this.stallAnchorX,
@@ -1205,7 +1196,7 @@ export class Autopilot {
     if (
       stalled &&
       this.recoveryPhase === 'none' &&
-      this.stoppedFor >= STUCK_AFTER_S
+      (opposingDeadlock || this.stoppedFor >= STUCK_AFTER_S)
     ) {
       this.beginRecovery(
         vehicle,
@@ -1433,7 +1424,7 @@ export class Autopilot {
     // Finish returning before considering the next car in a queue. Starting a new
     // pass while the chassis is still crossing its own lane is a side-swipe.
     if (Math.abs(lateral - lane) > CAR_HALF_WIDTH_M * 0.5) return;
-    if (gap === Infinity || !config.overtakes) return;
+    if (gap === Infinity || !config.overtakes || !this.passingEnabled) return;
     const blocking = leadSpeed < config.cruiseMps - PASS_SPEED_MARGIN_MPS;
     if (!blocking) return;
     // A moving overtake needs speed. A genuinely parked car may be passed from rest,
@@ -1470,11 +1461,27 @@ export class Autopilot {
     // and the segmented probe must actually be able to see the required distance.
     if (!this.straightAhead(this.hintS, need, config.passCurvature)) return;
     if (need > this.probeReach(this.hintS + PROBE_START_M)) return;
+    // The corridor ray starts beyond the bonnet, so an opposing car already inside
+    // that blind spot can make the ray look clear. Traffic supplies an independent
+    // road-distance measurement; require both views before entering its lane.
+    if (this.oncomingGap < need) return;
     // Dynamic traffic is passed only on the opposing asphalt lane. The shoulder is
     // valid for indexed static hazards whose exact footprint is known; treating it
     // as a fallback traffic lane produced high-speed departures in dense traffic.
     const oncoming = -Math.sign(config.laneOffset || -1) * (ROAD_HALF_WIDTH / 2);
     if (Math.abs(oncoming - lateral) < CAR_HALF_WIDTH_M) return;
+    if (
+      this.laneProbe(
+        vehicle,
+        oncoming,
+        PASS_ENTRY_REAR_GAP_M,
+        originX,
+        originZ,
+        -1,
+      ) < PASS_ENTRY_REAR_GAP_M
+    ) {
+      return;
+    }
     if (this.laneProbe(vehicle, oncoming, need, originX, originZ) < need) return;
     this.passLine = oncoming;
     this.passStartedAt = this.travelled;
@@ -1608,10 +1615,16 @@ export class Autopilot {
       this.stoppedFor = 0;
       return;
     }
-    // A right-of-way escape stays on this driver's outer shoulder. Ordinary static
-    // recovery may try the opposite side on its second attempt.
+    // A right-of-way escape stays on the shoulder the car already occupies; crossing
+    // the whole road through the opposing head is not an escape. From its own lane it
+    // chooses that lane's outer shoulder. Ordinary static recovery may try the other
+    // side on its second attempt.
     this.recoverySide = committedDeadlock
-      ? Math.sign(config.laneOffset || -1)
+      ? Math.sign(
+          Math.abs(lateral) > CAR_HALF_WIDTH_M
+            ? lateral
+            : config.laneOffset || -1,
+        )
       : samePlace
         ? -this.recoverySide
         : Math.abs(lateral) > CAR_HALF_WIDTH_M
@@ -1721,7 +1734,7 @@ export class Autopilot {
     const arrived =
       this.recoveryTimer <= 0 ||
       gap < MUST_STOP_GAP_M ||
-      Math.abs(lateral) > OFFROAD_RECOVERY_EDGE;
+      (!this.recoveryCommitted && Math.abs(lateral) > OFFROAD_RECOVERY_EDGE);
     if (arrived) {
       this.recoveryPhase = 'none';
       this.recoveryTimer = 0;
@@ -1771,10 +1784,11 @@ export class Autopilot {
     sight: number,
     originX: number,
     originZ: number,
+    facing: 1 | -1 = 1,
   ): number {
     if (!this.physics) return Infinity;
     const body = vehicle.chassis;
-    const fromS = this.hintS + PROBE_START_M;
+    const fromS = this.hintS + facing * PROBE_START_M;
     const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
     const maxChord = Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature);
     const segments = Math.min(PROBE_MAX_SEGMENTS, Math.max(1, Math.ceil(sight / maxChord)));
@@ -1786,9 +1800,9 @@ export class Autopilot {
     for (let side = -1; side <= 1; side++) {
       const offset = lane + side * PROBE_HALF_WIDTH_M;
       for (let step = 0; step < segments; step++) {
-        const start = fromS + step * segment;
+        const start = fromS + facing * step * segment;
         this.road.offsetPoint(start, offset, this.probeNear);
-        this.road.offsetPoint(start + segment, offset, this.probeFar);
+        this.road.offsetPoint(start + facing * segment, offset, this.probeFar);
         const dx = this.probeFar.x - this.probeNear.x;
         const dy = this.probeFar.y - this.probeNear.y;
         const dz = this.probeFar.z - this.probeNear.z;

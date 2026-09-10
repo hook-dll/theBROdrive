@@ -41,6 +41,13 @@ const SALT_LATERAL = 0xa14f;
 const SALT_FORM = 0xc237;
 const SALT_SHAPE = 0xd46b;
 const SALT_COLOUR = 0xe581;
+export const DISTANT_MIRAGE_FAMILIES = [
+  'gate',
+  'arches',
+  'colonnade',
+  'balanced-sign',
+] as const;
+export type DistantMirageFamily = (typeof DISTANT_MIRAGE_FAMILIES)[number];
 
 function smoothstep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
@@ -67,6 +74,8 @@ export class DistantMirage {
   private eventY = 0;
   private eventZ = 0;
 
+  private previewActive = false;
+  private previewOpacity = 0;
   constructor(
     scene: THREE.Scene,
     private readonly road: Road,
@@ -124,6 +133,46 @@ export class DistantMirage {
     this.mesh.position.set(this.eventX - this.origin.x, this.eventY, this.eventZ - this.origin.z);
   }
 
+  /** Direct, deterministic presentation path used by the isolated mirage laboratory. */
+  showPreview(
+    family: DistantMirageFamily,
+    eventS: number,
+    lateral: number,
+    opacity: number,
+    scale: number,
+    variation: number,
+  ): void {
+    this.previewActive = true;
+    this.activeSlot = Number.MIN_SAFE_INTEGER;
+    this.eventS = eventS;
+    const point = this.road.offsetPoint(eventS, lateral);
+    this.eventX = point.x;
+    this.eventZ = point.z;
+    this.eventY = this.terrain.heightAt(point.x, point.z, eventS);
+    const approach = this.road.sampleAt(eventS - FULLY_VISIBLE_AHEAD);
+    this.mesh.rotation.y = Math.atan2(approach.x - point.x, approach.z - point.z);
+    this.mesh.scale.setScalar(Math.max(0.05, scale));
+    this.buildStructure(Math.round(variation), DISTANT_MIRAGE_FAMILIES.indexOf(family));
+    this.previewOpacity = Math.min(1, Math.max(0, opacity));
+    this.mesh.position.set(
+      this.eventX - this.origin.x,
+      this.eventY,
+      this.eventZ - this.origin.z,
+    );
+    this.setPreviewDayFactor(1);
+  }
+
+  setPreviewDayFactor(dayFactor: number): void {
+    const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor);
+    this.material.opacity = alpha;
+    this.mesh.visible = this.previewActive && alpha > 0.002;
+  }
+
+  hide(): void {
+    this.previewActive = false;
+    this.mesh.visible = false;
+  }
+
   private findVisibleSlot(playerS: number): number | null {
     // At most two slots can overlap the 1.5 km visibility window at a 12 km cadence.
     // Check the current slot and the next one because the seeded offset may put either
@@ -170,13 +219,14 @@ export class DistantMirage {
    * Pure seed + slot means an encounter survives reloads exactly, but two locations
    * almost never share a silhouette.
    */
-  private buildStructure(slot: number): void {
+  private buildStructure(slot: number, familyOverride?: number): void {
     const width = 26 + this.shapeRandom(slot, 0) * 38;
     const height = 38 + this.shapeRandom(slot, 1) * 50;
     const depth = 4 + this.shapeRandom(slot, 2) * 6;
     const pillar = 3.5 + this.shapeRandom(slot, 3) * 4;
     const beam = 4 + this.shapeRandom(slot, 4) * 5;
-    const family = Math.floor(hash01(this.seed, slot, SALT_FORM) * 4);
+    const family =
+      familyOverride ?? Math.floor(hash01(this.seed, slot, SALT_FORM) * DISTANT_MIRAGE_FAMILIES.length);
     let count = 0;
 
     if (family === 0) {

@@ -172,8 +172,8 @@ interface RigOptions {
    * car has no sensing of it whatsoever and must get out on the stall detector alone.
    */
   readonly boulderS?: number;
-  /** Authored road distance to opposing traffic for a deadlock scenario. */
-  readonly oncomingGap?: number;
+  /** Coordinator grant for the chosen head of an opposing queue. */
+  readonly deadlockPermission?: boolean;
   /** Applies the narrower recovery policy used by ambient road traffic. */
   readonly trafficRecoveryPolicy?: boolean;
 }
@@ -253,6 +253,7 @@ async function makeRig(options: RigOptions): Promise<Rig> {
   }
   input.handbrake = false;
   autopilot.setEngaged(true);
+  if (options.deadlockPermission) autopilot.setDeadlockPermission(true);
   return { physics, vehicle, autopilot, input, traffic: others };
 }
 
@@ -368,9 +369,6 @@ async function measure(
   let indicatorSeconds = 0;
 
   while (elapsed < seconds && lapSeconds.length < laps) {
-    if (options.oncomingGap !== undefined) {
-      rig.autopilot.setLightingConditions(1, options.oncomingGap);
-    }
     rig.autopilot.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
     rig.traffic?.fixedUpdate(FIXED_DT, 0, 0);
@@ -688,7 +686,7 @@ const queuedAtBoulder = await measure(
       { s: QUEUED_LEADER_START_S - 35, oncoming: false, mode: 'sleeper' },
       { s: BOULDER_S + 25, oncoming: true, mode: 'sleeper' },
     ],
-    oncomingGap: 10,
+    deadlockPermission: true,
     trafficRecoveryPolicy: true,
     boulderS: BOULDER_S,
   },
@@ -703,6 +701,50 @@ check(
     `${queuedAtBoulder.reverseSeconds.toFixed(1)} s in reverse, ` +
     `${queuedAtBoulder.stuckSeconds.toFixed(1)} s stopped, ` +
     `nearest traffic ${queuedAtBoulder.nearestCar.toFixed(2)} m`,
+);
+
+// ---------------------------------------------------------------------------
+// Off-road face-off: one leader must break the stalemate.
+// ---------------------------------------------------------------------------
+//
+// Both heads have drifted onto the same shoulder and face each other, with another
+// car queued behind the ego. There is no rock to classify: only the sustained,
+// stationary opposing contact and deterministic right of way may unlock the group.
+const OFFROAD_GRIDLOCK_S = 200;
+console.log('\nplayground: opposing traffic gridlocked on one shoulder');
+const offroadGridlock = await measure(
+  {
+    mode: 'sleeper',
+    traffic: 'rolling',
+    startS: OFFROAD_GRIDLOCK_S,
+    startLateral: 4,
+    slots: [
+      {
+        s: OFFROAD_GRIDLOCK_S - 15,
+        oncoming: false,
+        mode: 'sleeper',
+        lateral: 4,
+      },
+      {
+        s: OFFROAD_GRIDLOCK_S + 12,
+        oncoming: true,
+        mode: 'sleeper',
+        lateral: 4,
+      },
+    ],
+    deadlockPermission: true,
+    trafficRecoveryPolicy: true,
+  },
+  1,
+  45,
+);
+check(
+  'one off-road queue leader breaks the opposing stalemate',
+  offroadGridlock.progress >= 60 && offroadGridlock.nearestCar >= 2.7,
+  `${offroadGridlock.progress.toFixed(0)} m leader progress, ` +
+    `${offroadGridlock.reverseSeconds.toFixed(1)} s in reverse, ` +
+    `${offroadGridlock.stuckSeconds.toFixed(1)} s stopped, ` +
+    `nearest traffic ${offroadGridlock.nearestCar.toFixed(2)} m`,
 );
 
 

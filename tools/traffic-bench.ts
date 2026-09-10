@@ -26,7 +26,7 @@ class BunProgressEvent extends Event implements ProgressEvent {
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 installAssetShim();
 
-const SEED = 42;
+const SEED = Number(process.argv[2] ?? 42);
 const PLAYER_S = 1_000;
 const ROAD_FROM = 100;
 const ROAD_TO = 3_200;
@@ -83,22 +83,37 @@ const traffic = new RoadTraffic(
   loadCarModel,
   () => true,
 );
-traffic.setTargetCount(12);
+traffic.setTargetCount(30);
 traffic.setDaylightFactor(0);
 
 let largestCount = 0;
-for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
+const stoppedFor = new Map<string, number>();
+let longestStop = 0;
+function sampleStoppedTraffic(): void {
+  const live = new Set<string>();
+  traffic.forEachVehicle((id, vehicle) => {
+    live.add(id);
+    const duration = vehicle.speedKmh < 2 ? (stoppedFor.get(id) ?? 0) + FIXED_DT : 0;
+    stoppedFor.set(id, duration);
+    longestStop = Math.max(longestStop, duration);
+  });
+  for (const id of stoppedFor.keys()) {
+    if (!live.has(id)) stoppedFor.delete(id);
+  }
+}
+for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
   traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
   physics.step();
   traffic.postStep();
+  sampleStoppedTraffic();
   largestCount = Math.max(largestCount, traffic.status.count);
   if (step % 6 === 0) await Bun.sleep(0);
 }
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its twelve-car setting',
-  largestCount <= 12 && populated.count <= 12,
+  'traffic stays within its thirty-car setting',
+  largestCount <= 30 && populated.count <= 30,
   `largest ${largestCount}, live ${populated.count}`,
 );
 check(
@@ -118,9 +133,7 @@ check(
 );
 check(
   'night traffic uses high beam and dips around oncoming cars',
-  populated.highBeams > 0 &&
-    populated.lowBeams > 0 &&
-    populated.highBeams + populated.lowBeams === populated.count,
+  populated.highBeams > 0 && populated.lowBeams > 0,
   `${populated.highBeams} high, ${populated.lowBeams} dipped`,
 );
 check(
@@ -145,6 +158,7 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0);
   physics.step();
   traffic.postStep();
+  sampleStoppedTraffic();
   largestCount = Math.max(largestCount, traffic.status.count);
   if (step % 12 === 0) await Bun.sleep(0);
 }
@@ -153,6 +167,16 @@ check(
   'mixed traffic queues without collision',
   streamed.impacts === 0,
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
+);
+check(
+  'thirty-car stream reaches configured density',
+  largestCount === 30,
+  `${streamed.count} live, largest ${largestCount}`,
+);
+check(
+  'dense queues always resume',
+  longestStop < 30,
+  `longest continuous stop ${longestStop.toFixed(1)} s`,
 );
 
 

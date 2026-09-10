@@ -30,6 +30,8 @@ export interface TrafficSlot {
   readonly s: number;
   readonly oncoming: boolean;
   readonly mode: AutopilotMode;
+  /** Optional signed lateral in forward-lap coordinates for authored edge cases. */
+  readonly lateral?: number;
 }
 
 /**
@@ -111,7 +113,7 @@ export class PlaygroundTraffic {
     const hazards = new HazardIndex();
     this.slots.forEach((slot, index) => {
       const lane = AUTOPILOT_MODES[slot.mode].laneOffset;
-      const lateral = slot.oncoming ? -lane : lane;
+      const lateral = slot.lateral ?? (slot.oncoming ? -lane : lane);
       const id = `traffic-${index}`;
       const modelId = models[index % models.length]!;
       const at = this.poseFor(slot, lateral);
