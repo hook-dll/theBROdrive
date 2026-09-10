@@ -15,13 +15,18 @@ import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 
 /**
- * Thirty physical cars is the upper setting: enough for a dense road while keeping the
- * full Vehicle + Autopilot path affordable on a capable machine.
+ * Thirty physical cars is the upper setting: the live stream deliberately fluctuates
+ * below this cap so a long drive does not become a perfectly repeated convoy.
  */
 const MAX_TRAFFIC = 30;
 const SPAWN_MIN_M = 140;
 const SPAWN_MAX_M = 700;
 const DESPAWN_M = 850;
+/**
+ * A density trim may only take a car this far BEHIND the player, where its removal
+ * cannot be watched. `DESPAWN_M` still applies in both directions.
+ */
+const OFFSCREEN_TRIM_M = 90;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
 const SPAWN_ROAD_GAP_M = 70;
 const DENSE_SPAWN_ROAD_GAP_M = 32;
@@ -32,6 +37,8 @@ const PASSING_SPAWN_EXCLUSION_M = 300;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
 const SPAWN_INTERVAL_S = 1;
 const DENSE_SPAWN_INTERVAL_S = 0.5;
+const DENSITY_CHANGE_MIN_S = 36;
+const DENSITY_CHANGE_MAX_S = 72;
 const DROP_SETTLE_S = 0.8;
 /** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
 const TRAFFIC_SPAWN_DROP_M = 0;
@@ -56,6 +63,7 @@ interface TrafficCar {
   readonly vehicle: Vehicle;
   readonly autopilot: Autopilot;
   readonly style: TrafficDriverStyle;
+  readonly headwayS: number;
   readonly speedCap: number;
   roadLateral: number;
   readonly input: InputFrame;
@@ -72,6 +80,7 @@ interface PendingSpawn {
   readonly modelId: string;
   readonly id: string;
   readonly style: TrafficDriverStyle;
+  readonly headwayS: number;
   readonly mode: 'sleeper' | 'frantic';
   readonly speedCap: number;
 }
@@ -111,7 +120,11 @@ export class RoadTraffic {
   private readonly reverseHazards: ReversedHazardIndex;
   private readonly random: () => number;
   private readonly carList: TrafficCar[] = [];
+  /** User setting: the maximum number of live ambient cars. */
   private targetCount = 0;
+  /** Current natural-looking density, always at or below targetCount. */
+  private desiredCount = 0;
+  private densityTimer = 0;
   private generation = 0;
   private serial = 0;
   private spawnCooldown = 0;
@@ -199,11 +212,16 @@ export class RoadTraffic {
     };
   }
 
+  /** Sets the upper bound; the live stream chooses a changing count below it. */
   setTargetCount(count: number): void {
     const next = Math.min(MAX_TRAFFIC, Math.max(0, Math.round(count / 2) * 2));
-    for (const car of this.carList) car.autopilot.setPassingEnabled(next <= 12);
+    // 120 is above MAX_TRAFFIC on purpose: overtaking is on at every density while
+    // the dense stream is being judged in play. Back to 12 restores the old gate.
+    for (const car of this.carList) car.autopilot.setPassingEnabled(next <= 120);
     if (this.targetCount === next) return;
     this.targetCount = next;
+    this.desiredCount = next > 0 ? this.drawDesiredCount(next) : 0;
+    this.densityTimer = next > 0 ? this.drawDensityInterval() : 0;
     this.generation++;
     this.pending = null;
     this.spawnCooldown = next > 0 ? 0 : SPAWN_INTERVAL_S;
@@ -211,18 +229,7 @@ export class RoadTraffic {
       this.clear();
       return;
     }
-    while (this.carList.length > next) {
-      let farthest = 0;
-      for (let i = 1; i < this.carList.length; i++) {
-        if (
-          Math.abs(this.carList[i]!.forwardS - this.playerS) >
-          Math.abs(this.carList[farthest]!.forwardS - this.playerS)
-        ) {
-          farthest = i;
-        }
-      }
-      this.removeAt(farthest);
-    }
+    this.trimTo(this.desiredCount, true);
   }
 
   setDaylightFactor(daylightFactor: number): void {
@@ -329,7 +336,7 @@ export class RoadTraffic {
     this.playerS = playerS;
     this.syncSettings();
     if (this.targetCount === 0 && this.carList.length === 0) return;
-    while (this.carList.length > this.targetCount) this.removeAt(this.carList.length - 1);
+    this.trimTo(this.targetCount, true);
     this.clockSync -= dt;
     if (this.clockSync <= 0) {
       this.trafficWorld.apply({
@@ -338,6 +345,12 @@ export class RoadTraffic {
       });
       this.clockSync = CLOCK_SYNC_S;
     }
+    this.densityTimer -= dt;
+    if (this.densityTimer <= 0) {
+      this.desiredCount = this.drawDesiredCount(this.targetCount);
+      this.densityTimer = this.drawDensityInterval();
+    }
+    this.trimTo(this.desiredCount, false);
 
     // Deadlock arbitration needs current ordering. The half-second lifetime sample is
     // sufficient for despawning, but stale positions can grant a reversing manoeuvre
@@ -377,10 +390,14 @@ export class RoadTraffic {
     }
 
     this.spawnCooldown -= dt;
-    if (this.spawnCooldown <= 0 && this.pending === null && this.carList.length < this.targetCount) {
+    if (
+      this.spawnCooldown <= 0 &&
+      this.pending === null &&
+      this.carList.length < this.desiredCount
+    ) {
       this.queueSpawn();
       this.spawnCooldown =
-        this.targetCount > 12 ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
+        this.desiredCount > 12 ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
     }
   }
 
@@ -434,6 +451,7 @@ export class RoadTraffic {
       modelId: model.id,
       id: `${TRAFFIC_ID_PREFIX}${(this.serial++).toString(36)}`,
       style: driver.style,
+      headwayS: driver.headwayS,
       mode: driver.mode,
       speedCap: driver.speedCap,
     };
@@ -448,8 +466,8 @@ export class RoadTraffic {
 
   private finishSpawn(request: PendingSpawn): void {
     if (
-      this.targetCount === 0 ||
-      this.carList.length >= this.targetCount ||
+      this.desiredCount === 0 ||
+      this.carList.length >= this.desiredCount ||
       request.generation !== this.generation ||
       this.pending !== request ||
       Math.abs(request.forwardS - this.playerS) < SPAWN_MIN_M ||
@@ -496,7 +514,8 @@ export class RoadTraffic {
       request.direction === 1 ? this.hazards : this.reverseHazards,
       this.physics,
     );
-    autopilot.setPassingEnabled(this.targetCount <= 12);
+    autopilot.setPassingEnabled(this.targetCount <= 120);
+    autopilot.setFollowingHeadway(request.headwayS);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
     autopilot.setTrafficRecoveryPolicy(true);
@@ -507,6 +526,7 @@ export class RoadTraffic {
       vehicle,
       modelId: request.modelId,
       style: request.style,
+      headwayS: request.headwayS,
       roadLateral: forwardLateral,
       speedCap: request.speedCap,
       spawnS: request.forwardS,
@@ -545,7 +565,7 @@ export class RoadTraffic {
       if (car.direction === 1) same++;
       else oncoming++;
     }
-    const maxPerDirection = this.targetCount / 2;
+    const maxPerDirection = this.desiredCount / 2;
     if (same >= maxPerDirection && oncoming >= maxPerDirection) return null;
     if (same === 0 || oncoming >= maxPerDirection) return 1;
     if (oncoming === 0 || same >= maxPerDirection) return -1;
@@ -583,7 +603,7 @@ export class RoadTraffic {
 
   private roadGapClear(s: number, direction: TrafficDirection): boolean {
     const sameDirectionGap =
-      this.targetCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
+      this.desiredCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
     for (const car of this.carList) {
       const gap = Math.abs(car.forwardS - s);
       if (car.direction === direction) {
@@ -610,6 +630,7 @@ export class RoadTraffic {
    */
   private drawDriver(direction: TrafficDirection): {
     style: TrafficDriverStyle;
+    headwayS: number;
     mode: 'sleeper' | 'frantic';
     speedCap: number;
   } {
@@ -621,6 +642,7 @@ export class RoadTraffic {
     if (directionCount === 0 || styleRoll < 0.2) {
       return {
         style: 'cautious',
+        headwayS: 2.2 + this.random() * 0.8,
         mode: 'sleeper',
         speedCap: (42 + this.random() * 10) / 3.6,
       };
@@ -628,15 +650,82 @@ export class RoadTraffic {
     if (directionCount === 2 || styleRoll >= 0.85) {
       return {
         style: 'hurried',
+        headwayS: 1.0 + this.random() * 0.6,
         mode: 'frantic',
         speedCap: (85 + this.random() * 20) / 3.6,
       };
     }
     return {
       style: 'normal',
+      headwayS: 1.5 + this.random() * 0.9,
       mode: 'sleeper',
       speedCap: (58 + this.random() * 12) / 3.6,
     };
+  }
+
+  private drawDesiredCount(cap: number): number {
+    if (cap <= 0) return 0;
+    if (cap === 1) return 1;
+    const floor = Math.max(1, Math.ceil(cap * 0.65));
+    return floor + Math.floor(this.random() * (cap - floor + 1));
+  }
+
+  private drawDensityInterval(): number {
+    return (
+      DENSITY_CHANGE_MIN_S +
+      this.random() * (DENSITY_CHANGE_MAX_S - DENSITY_CHANGE_MIN_S)
+    );
+  }
+
+  /**
+   * Thins the live stream down to `count`.
+   *
+   * A car is only ever taken out where its disappearance cannot be watched: behind
+   * the player, farthest first. The density resampler used to drop the LAST entry
+   * of an append-ordered list, i.e. usually the most recently spawned car — and a
+   * fresh spawn sits 140–700 m AHEAD. So an oncoming car would materialise, drive
+   * at the player and blink out in the middle of the windscreen. Nothing can hide
+   * that: a traffic car is a full Vehicle and removal is instant, with no fade.
+   *
+   * `visible` is the escape hatch for the hard cap, which the player has just set
+   * and which MUST be honoured: with nothing behind, it gives up the farthest car
+   * in either direction. The soft density target instead stays unmet for a few
+   * seconds until something falls behind, which nobody can see.
+   */
+  private trimTo(count: number, visible: boolean): void {
+    while (this.carList.length > count) {
+      const index = this.pickTrimIndex(visible);
+      if (index < 0) return;
+      this.removeAt(index);
+    }
+  }
+
+  /**
+   * Farthest car behind the player, or — only for a hard cap — the farthest car in
+   * either direction. Traffic always spawns ahead and the player always drives with
+   * increasing `s`, so "behind" is exactly `playerS - forwardS`.
+   */
+  private pickTrimIndex(visible: boolean): number {
+    let best = -1;
+    let bestBehind = OFFSCREEN_TRIM_M;
+    for (let i = 0; i < this.carList.length; i++) {
+      const behind = this.playerS - this.carList[i]!.forwardS;
+      if (behind > bestBehind) {
+        bestBehind = behind;
+        best = i;
+      }
+    }
+    if (best >= 0 || !visible) return best;
+    let farthest = 0;
+    for (let i = 1; i < this.carList.length; i++) {
+      if (
+        Math.abs(this.carList[i]!.forwardS - this.playerS) >
+        Math.abs(this.carList[farthest]!.forwardS - this.playerS)
+      ) {
+        farthest = i;
+      }
+    }
+    return farthest;
   }
 
   private removeAt(index: number): void {

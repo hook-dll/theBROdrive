@@ -87,6 +87,7 @@ traffic.setTargetCount(30);
 traffic.setDaylightFactor(0);
 
 let largestCount = 0;
+let smallestPopulated = Infinity;
 const stoppedFor = new Map<string, number>();
 let longestStop = 0;
 function sampleStoppedTraffic(): void {
@@ -107,6 +108,7 @@ for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
   traffic.postStep();
   sampleStoppedTraffic();
   largestCount = Math.max(largestCount, traffic.status.count);
+  if (traffic.status.count > 0) smallestPopulated = Math.min(smallestPopulated, traffic.status.count);
   if (step % 6 === 0) await Bun.sleep(0);
 }
 const populated = traffic.status;
@@ -160,6 +162,7 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   traffic.postStep();
   sampleStoppedTraffic();
   largestCount = Math.max(largestCount, traffic.status.count);
+  if (traffic.status.count > 0) smallestPopulated = Math.min(smallestPopulated, traffic.status.count);
   if (step % 12 === 0) await Bun.sleep(0);
 }
 const streamed = traffic.status;
@@ -169,9 +172,9 @@ check(
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 check(
-  'thirty-car stream reaches configured density',
-  largestCount === 30,
-  `${streamed.count} live, largest ${largestCount}`,
+  'traffic density varies below configured cap',
+  largestCount <= 30 && smallestPopulated < largestCount,
+  `${streamed.count} live, range ${smallestPopulated}-${largestCount}`,
 );
 check(
   'dense queues always resume',

@@ -13,6 +13,10 @@ const GONE_FROM_ROAD_M = 11;
 
 const MAX_PLANTS = 420;
 const MAX_BLOCKS = 512;
+const MAX_CITY_WINDOWS = 1_536;
+const MAX_CITY_ACCENTS = 512;
+const MAX_CITY_ROOFS = 192;
+const MAX_CITY_STREETS = 192;
 const MAX_SHIPS = 240;
 
 /** Nearest a wreck may ground itself to the asphalt, and how far the field reaches out. */
@@ -234,14 +238,64 @@ function blockMaterial(colour: number): THREE.MeshBasicMaterial {
 }
 
 /**
+ * Wall paint per building.
+ *
+ * A desert town is mostly sandstone and whitewash, so those two families carry most
+ * of the weight; terracotta, faded teal, dusty blue, pale rose and olive are the
+ * minority of painted blocks that let a skyline read as a town rather than as one
+ * quarry. Authored in the same DISPLAY space as `displayColour`: pale, because the
+ * frame is tone mapped on the way out and a mid-lightness wall reads as shadow.
+ */
+interface CityPaint {
+  readonly hue: number;
+  readonly saturation: number;
+  readonly lightness: number;
+  /** Relative share of the buildings that receive this family. */
+  readonly weight: number;
+}
+
+const CITY_WALL_PAINTS: readonly CityPaint[] = [
+  { hue: 0.085, saturation: 0.3, lightness: 0.7, weight: 3 },
+  { hue: 0.11, saturation: 0.15, lightness: 0.79, weight: 2.2 },
+  { hue: 0.045, saturation: 0.33, lightness: 0.67, weight: 1.4 },
+  { hue: 0.47, saturation: 0.18, lightness: 0.73, weight: 1 },
+  { hue: 0.58, saturation: 0.17, lightness: 0.72, weight: 1 },
+  { hue: 0.96, saturation: 0.16, lightness: 0.75, weight: 0.8 },
+  { hue: 0.2, saturation: 0.17, lightness: 0.71, weight: 0.8 },
+];
+
+/**
+ * Roofs are the one part of a block nobody whitewashes: fired tile, painted tin,
+ * patinated copper or slate. They are therefore darker and more saturated than the
+ * wall below, which is what gives the skyline its punctuation.
+ */
+const CITY_ROOF_PAINTS: readonly CityPaint[] = [
+  { hue: 0.03, saturation: 0.44, lightness: 0.57, weight: 3 },
+  { hue: 0.08, saturation: 0.19, lightness: 0.61, weight: 2 },
+  { hue: 0.44, saturation: 0.2, lightness: 0.56, weight: 1.2 },
+  { hue: 0.6, saturation: 0.17, lightness: 0.59, weight: 1 },
+];
+
+/** Weighted pick from a paint list for a unit hash. */
+function pickPaint(paints: readonly CityPaint[], unit: number): CityPaint {
+  let total = 0;
+  for (const paint of paints) total += paint.weight;
+  let cursor = unit * total;
+  for (const paint of paints) {
+    cursor -= paint.weight;
+    if (cursor <= 0) return paint;
+  }
+  return paints[0]!;
+}
+
+/**
  * Rare render-only tableaus around the road.
  *
  * Every encounter is deterministic, starts 3–8 km after the previous one, and draws
  * from a shuffled set of five forms so each group of five contains every form once.
  * Only the active encounter owns instance matrices. Nothing enters physics, streaming,
- * saves, terrain, or shadow passes; every tableau is a single draw. Instance
- * coordinates are local to the encounter anchor, preserving precision even at the far
- * end of the forty-thousand-kilometre road.
+ * saves, terrain, or shadow passes. Each tableau uses a handful of instanced draws,
+ * preserving local coordinates around the encounter anchor at any road distance.
  */
 export class MirageTableau {
   private readonly root = new THREE.Group();
@@ -249,6 +303,10 @@ export class MirageTableau {
   private readonly trees: THREE.InstancedMesh;
   private readonly cacti: THREE.InstancedMesh;
   private readonly blocks: THREE.InstancedMesh;
+  private readonly cityWindows: THREE.InstancedMesh;
+  private readonly cityAccents: THREE.InstancedMesh;
+  private readonly cityRoofs: THREE.InstancedMesh;
+  private readonly cityStreets: THREE.InstancedMesh;
   private readonly ships: THREE.InstancedMesh;
   private readonly materials: readonly THREE.MeshBasicMaterial[];
   private readonly encounters: readonly Encounter[];
@@ -285,14 +343,36 @@ export class MirageTableau {
     const treeMaterial = cardMaterial();
     const cactusMaterial = cardMaterial();
     const stoneMaterial = blockMaterial(0xffffff);
+    const windowMaterial = blockMaterial(0xffffff);
+    const accentMaterial = blockMaterial(0xffffff);
+    const roofMaterial = blockMaterial(0xffffff);
+    const streetMaterial = blockMaterial(0xffffff);
     const shipMaterial = cardMaterial();
-    this.materials = [palmMaterial, treeMaterial, cactusMaterial, stoneMaterial, shipMaterial];
+    this.materials = [
+      palmMaterial,
+      treeMaterial,
+      cactusMaterial,
+      stoneMaterial,
+      shipMaterial,
+      windowMaterial,
+      accentMaterial,
+      roofMaterial,
+      streetMaterial,
+    ];
 
     this.palms = new THREE.InstancedMesh(palmGeometry(), palmMaterial, MAX_PLANTS);
     this.trees = new THREE.InstancedMesh(treeGeometry(), treeMaterial, MAX_PLANTS);
     this.cacti = new THREE.InstancedMesh(cactusGeometry(), cactusMaterial, MAX_PLANTS);
     const box = new THREE.BoxGeometry(1, 1, 1);
     this.blocks = new THREE.InstancedMesh(box, stoneMaterial, MAX_BLOCKS);
+    this.cityWindows = new THREE.InstancedMesh(box, windowMaterial, MAX_CITY_WINDOWS);
+    this.cityAccents = new THREE.InstancedMesh(box, accentMaterial, MAX_CITY_ACCENTS);
+    this.cityRoofs = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.5, 1, 6),
+      roofMaterial,
+      MAX_CITY_ROOFS,
+    );
+    this.cityStreets = new THREE.InstancedMesh(box, streetMaterial, MAX_CITY_STREETS);
     this.ships = new THREE.InstancedMesh(shipGeometry(), shipMaterial, MAX_SHIPS);
 
     for (const mesh of this.meshes) {
@@ -330,8 +410,7 @@ export class MirageTableau {
     this.root.visible = opacity > 0.002;
     if (!this.root.visible) return;
 
-    for (let i = 0; i < this.materials.length - 1; i++) this.materials[i]!.opacity = opacity;
-    this.materials[this.materials.length - 1]!.opacity = opacity * 0.74;
+    this.setMaterialOpacity(opacity);
     this.root.position.set(
       this.anchorX - this.origin.x,
       this.anchorY,
@@ -382,7 +461,7 @@ export class MirageTableau {
   setPreviewDayFactor(dayFactor: number, playerLateral: number): void {
     const roadFade = 1 - smoothstep(FADE_FROM_ROAD_M, GONE_FROM_ROAD_M, Math.abs(playerLateral));
     const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor) * roadFade;
-    for (const material of this.materials) material.opacity = alpha;
+    this.setMaterialOpacity(alpha);
     this.root.visible = this.previewActive && alpha > 0.002;
   }
 
@@ -392,7 +471,28 @@ export class MirageTableau {
   }
 
   private get meshes(): readonly THREE.InstancedMesh[] {
-    return [this.palms, this.trees, this.cacti, this.blocks, this.ships];
+    return [
+      this.palms,
+      this.trees,
+      this.cacti,
+      this.blocks,
+      this.cityWindows,
+      this.cityAccents,
+      this.cityRoofs,
+      this.cityStreets,
+      this.ships,
+    ];
+  }
+
+  private setMaterialOpacity(opacity: number): void {
+    for (const material of this.materials) material.opacity = opacity;
+    // Ships are broader and warmer; a little less alpha keeps them in the same
+    // atmospheric distance as the plants without becoming a flat orange wall.
+    this.materials[4]!.opacity = opacity * 0.74;
+    this.materials[5]!.opacity = opacity * 0.9;
+    this.materials[6]!.opacity = opacity * 0.82;
+    this.materials[7]!.opacity = opacity * 0.86;
+    this.materials[8]!.opacity = opacity * 0.58;
   }
 
   private buildSchedule(): readonly Encounter[] {
@@ -525,11 +625,31 @@ export class MirageTableau {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
+  /**
+   * A compact skyline rather than a pile of anonymous boxes:
+   * warm masonry blocks, cool window rhythm, balconies, roof caps and the dark
+   * strips of streets between them. Everything remains instanced and render-only.
+   */
   private buildCity(encounter: Encounter): void {
     let count = 0;
+    let windowCount = 0;
+    let accentCount = 0;
+    let roofCount = 0;
+    let streetCount = 0;
     const buildings = Math.max(1, Math.round(156 * this.densityScale));
+    const groundRelative = (ground: number): number => ground - this.anchorY;
+    const localPoint = (
+      point: { readonly x: number; readonly z: number },
+      localX: number,
+      localZ: number,
+      heading: number,
+    ): { x: number; z: number } => ({
+      x: point.x + Math.cos(heading) * localX + Math.sin(heading) * localZ - this.anchorX,
+      z: point.z - Math.sin(heading) * localX + Math.cos(heading) * localZ - this.anchorZ,
+    });
+
     for (let i = 0; i < buildings; i++) {
-      const key = encounter.index * buildings + i;
+      const key = encounter.index * MAX_BLOCKS + i;
       const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
       const s = encounter.startS + 10 + along * along * (encounter.length - 20);
       const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
@@ -538,31 +658,174 @@ export class MirageTableau {
       const point = this.road.offsetPoint(s, lateral);
       const ground = this.terrain.heightAt(point.x, point.z, s);
       const width = (5 + hashUnit3(this.seed, key, SALT_SHAPE) * 9) * this.sizeScale;
-      const buildingDepth = (5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9) * this.sizeScale;
+      const buildingDepth =
+        (5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9) * this.sizeScale;
       const tower = hashUnit3(this.seed, key, SALT_SHAPE + 6) > 0.92;
-      const height = (tower
-        ? 24 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 24
-        : 4 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 14) * this.sizeScale;
+      const height = (
+        tower
+          ? 24 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 24
+          : 4 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 14
+      ) * this.sizeScale;
       const heading = this.road.sampleAt(s).heading;
+      const y = groundRelative(ground);
       this.cityColour(key, depth, 0);
-      count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, width, height, buildingDepth, heading, this.colour);
+      count = this.addBox(
+        count,
+        point.x - this.anchorX,
+        y,
+        point.z - this.anchorZ,
+        width,
+        height,
+        buildingDepth,
+        heading,
+        this.colour,
+      );
 
       let totalHeight = height;
       if (hashUnit3(this.seed, key, SALT_SHAPE + 3) > 0.48) {
         const upperHeight = height * (0.18 + hashUnit3(this.seed, key, SALT_SHAPE + 4) * 0.25);
         this.cityColour(key, depth, 1);
-        count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY + totalHeight, point.z - this.anchorZ, width * 0.58, upperHeight, buildingDepth * 0.62, heading, this.colour);
+        count = this.addBox(
+          count,
+          point.x - this.anchorX,
+          y + totalHeight,
+          point.z - this.anchorZ,
+          width * 0.58,
+          upperHeight,
+          buildingDepth * 0.62,
+          heading,
+          this.colour,
+        );
         totalHeight += upperHeight;
       }
       if (hashUnit3(this.seed, key, SALT_SHAPE + 5) > 0.72) {
         this.colour.setHSL(0.09, 0.24, 0.76 + depth * 0.08);
-        count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY + totalHeight, point.z - this.anchorZ, width * 1.08, 0.7, buildingDepth * 1.08, heading, this.colour);
+        count = this.addBox(
+          count,
+          point.x - this.anchorX,
+          y + totalHeight,
+          point.z - this.anchorZ,
+          width * 1.08,
+          0.7,
+          buildingDepth * 1.08,
+          heading,
+          this.colour,
+        );
+      }
+
+      // A little road-shadow at each block prevents the city reading as weightless
+      // cubes and costs only one additional instanced box at most.
+      if (streetCount < MAX_CITY_STREETS && hashUnit3(this.seed, key, SALT_COLOUR + 4) > 0.28) {
+        this.colour.setHSL(0.08, 0.2, 0.29 + depth * 0.08);
+        streetCount = this.addBox(
+          streetCount,
+          point.x - this.anchorX,
+          y,
+          point.z - this.anchorZ,
+          width * 1.45,
+          0.06,
+          buildingDepth * 0.28,
+          heading,
+          this.colour,
+          this.cityStreets,
+        );
+      }
+
+      const rows = Math.max(1, Math.min(4, Math.floor(height / 3.4)));
+      const columns = width > 9 ? 2 : 1;
+      const windowHeight = Math.max(0.35, Math.min(1.05, height / (rows * 3.6)));
+      const windowWidth = Math.max(0.28, Math.min(1.7, width / (columns * 4.4)));
+      const fronts = hashUnit3(this.seed, key, SALT_PLACEMENT + 5) > 0.34 ? 2 : 1;
+      for (let face = 0; face < fronts; face++) {
+        const localZ = (face === 0 ? 1 : -1) * (buildingDepth * 0.5 + 0.045);
+        for (let row = 0; row < rows; row++) {
+          const floorY = 1.1 + row * (height / (rows + 0.45));
+          for (let column = 0; column < columns; column++) {
+            if (windowCount >= MAX_CITY_WINDOWS) break;
+            const localX = (column - (columns - 1) * 0.5) * width * 0.34;
+            const windowPoint = localPoint(point, localX, localZ, heading);
+            this.cityWindowColour(key, depth, row + column + face);
+            windowCount = this.addBox(
+              windowCount,
+              windowPoint.x,
+              y + floorY,
+              windowPoint.z,
+              windowWidth,
+              windowHeight,
+              0.07,
+              heading,
+              this.colour,
+              this.cityWindows,
+            );
+          }
+        }
+      }
+
+      // Balconies make the mid-rise blocks read as inhabited buildings, not crates.
+      if (rows > 1) {
+        for (let row = 0; row < rows; row++) {
+          if (accentCount >= MAX_CITY_ACCENTS) break;
+          if (hashUnit3(this.seed, key, SALT_SHAPE + 11 + row) < 0.48) continue;
+          const localZ = buildingDepth * 0.5 + 0.1;
+          const balconyPoint = localPoint(point, 0, localZ, heading);
+          this.cityAccentColour(key, depth);
+          accentCount = this.addBox(
+            accentCount,
+            balconyPoint.x,
+            y + 0.92 + row * (height / (rows + 0.45)),
+            balconyPoint.z,
+            width * 0.82,
+            0.1,
+            0.22,
+            heading,
+            this.colour,
+            this.cityAccents,
+          );
+        }
+      }
+
+      if (roofCount < MAX_CITY_ROOFS && (tower || hashUnit3(this.seed, key, SALT_SHAPE + 12) > 0.63)) {
+        const roofHeight = Math.max(1.2, Math.min(5, width * 0.24));
+        this.cityRoofColour(key, depth);
+        this.cityRoofs.setColorAt(roofCount, this.colour);
+        this.setTransform(
+          this.cityRoofs,
+          roofCount++,
+          point.x - this.anchorX,
+          y + totalHeight + roofHeight * 0.5,
+          point.z - this.anchorZ,
+          width * 0.86,
+          roofHeight,
+          buildingDepth * 0.86,
+          heading,
+        );
+        if (tower && accentCount < MAX_CITY_ACCENTS) {
+          this.colour.setHSL(0.08, 0.25, 0.63 + depth * 0.12);
+          accentCount = this.addBox(
+            accentCount,
+            point.x - this.anchorX,
+            y + totalHeight + roofHeight,
+            point.z - this.anchorZ,
+            0.18 * this.sizeScale,
+            roofHeight * 1.8,
+            0.18 * this.sizeScale,
+            heading,
+            this.colour,
+            this.cityAccents,
+          );
+        }
       }
     }
     this.blocks.count = count;
-    this.blocks.visible = true;
-    this.blocks.instanceMatrix.needsUpdate = true;
-    if (this.blocks.instanceColor) this.blocks.instanceColor.needsUpdate = true;
+    this.cityWindows.count = windowCount;
+    this.cityAccents.count = accentCount;
+    this.cityRoofs.count = roofCount;
+    this.cityStreets.count = streetCount;
+    for (const mesh of [this.blocks, this.cityWindows, this.cityAccents, this.cityRoofs, this.cityStreets]) {
+      mesh.visible = true;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   /**
@@ -571,10 +834,42 @@ export class MirageTableau {
    * wall has to be authored near white to read as pale stone rather than as shadow.
    */
   private cityColour(key: number, depth: number, tier: number): void {
+    const paint = pickPaint(CITY_WALL_PAINTS, hashUnit3(this.seed, key, SALT_COLOUR));
+    const hue = paint.hue + (hashUnit3(this.seed, key, SALT_COLOUR + 1) - 0.5) * 0.018;
+    const saturation =
+      paint.saturation * (0.8 + hashUnit3(this.seed, key, SALT_COLOUR + 2) * 0.45);
+    // `depth` lifts the far rows toward the haze, and a set-back upper storey is a
+    // shade paler than the mass it stands on: sunlight on a setback, not a new colour.
+    const lightness =
+      paint.lightness +
+      depth * 0.1 +
+      tier * 0.035 +
+      (hashUnit3(this.seed, key, SALT_COLOUR + 3) - 0.5) * 0.055;
+    this.colour.setHSL(hue, Math.min(0.62, saturation), Math.min(0.93, lightness));
+  }
+
+  private cityRoofColour(key: number, depth: number): void {
+    const paint = pickPaint(CITY_ROOF_PAINTS, hashUnit3(this.seed, key, SALT_COLOUR + 50));
     this.colour.setHSL(
-      0.075 + hashUnit3(this.seed, key, SALT_COLOUR + tier) * 0.035,
-      0.26 + hashUnit3(this.seed, key, SALT_COLOUR + tier + 2) * 0.14,
-      0.66 + depth * 0.1,
+      paint.hue + (hashUnit3(this.seed, key, SALT_COLOUR + 51) - 0.5) * 0.02,
+      paint.saturation * (0.85 + hashUnit3(this.seed, key, SALT_COLOUR + 52) * 0.3),
+      Math.min(0.9, paint.lightness + depth * 0.12),
+    );
+  }
+  private cityWindowColour(key: number, depth: number, variant: number): void {
+    const cool = hashUnit3(this.seed, key, SALT_COLOUR + 20 + variant) > 0.64;
+    this.colour.setHSL(
+      cool ? 0.56 : 0.11,
+      cool ? 0.22 : 0.3,
+      0.68 + depth * 0.16 + hashUnit3(this.seed, key, SALT_COLOUR + 30 + variant) * 0.12,
+    );
+  }
+
+  private cityAccentColour(key: number, depth: number): void {
+    this.colour.setHSL(
+      0.07 + hashUnit3(this.seed, key, SALT_COLOUR + 40) * 0.04,
+      0.2 + depth * 0.08,
+      0.54 + depth * 0.14,
     );
   }
 
@@ -672,9 +967,10 @@ export class MirageTableau {
     depth: number,
     yaw: number,
     colour: THREE.Color,
+    mesh: THREE.InstancedMesh = this.blocks,
   ): number {
-    this.setTransform(this.blocks, index, x, groundY + height * 0.5, z, width, height, depth, yaw);
-    this.blocks.setColorAt(index, colour);
+    this.setTransform(mesh, index, x, groundY + height * 0.5, z, width, height, depth, yaw);
+    mesh.setColorAt(index, colour);
     return index + 1;
   }
 

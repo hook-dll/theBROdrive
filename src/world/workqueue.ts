@@ -16,9 +16,22 @@ export class WorldWorkScheduler {
   private frameWorstTag: string | null = null;
 
   constructor(
-    private readonly budgetMs = 3,
-    private readonly maxJobsPerFrame = Number.POSITIVE_INFINITY,
+    private budgetMs = 3,
+    private maxJobsPerFrame = Number.POSITIVE_INFINITY,
   ) {}
+
+  /**
+   * Widens or restores the per-frame allowance.
+   *
+   * Play wants one small job per rendered frame; boot wants the whole live window
+   * built before the loading cover leaves, and the frame it spends doing that is
+   * never seen. The budget is therefore a property of the phase rather than of the
+   * scheduler's construction.
+   */
+  setFrameBudget(budgetMs: number, maxJobsPerFrame: number): void {
+    this.budgetMs = budgetMs;
+    this.maxJobsPerFrame = maxJobsPerFrame;
+  }
 
   beginFrame(frameId: number): void {
     if (frameId === this.activeFrame) return;

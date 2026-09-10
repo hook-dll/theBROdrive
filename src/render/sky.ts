@@ -131,9 +131,27 @@ const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
 const C_GROUND = new THREE.Color().setStyle('#d8a45c'); // warm ochre sand bounce
-const C_NIGHT_GROUND = new THREE.Color().setStyle('#0a0c14');
 /** Daylight sky illumination gain; the warm ground bounce is compensated below. */
 const DAY_SKY_FILL_BOOST = 1.5;
+/**
+ * MOONLIT FILL. The dome's night palette above is what the SKY looks like, and it
+ * is nearly black on purpose — that is what lets the stars read. The hemisphere
+ * bounce used to inherit those same numbers at a strictly photometric intensity,
+ * and the result at midnight was a desert of absolute zero: no dune, no verge, no
+ * silhouette, nothing but stars and whatever a headlight happened to be pointing
+ * at. That is what made night driving hostile rather than quiet. The beam was not
+ * too bright; it was the ONLY thing on screen, so the eye had nothing to adapt to
+ * and read it as glare.
+ *
+ * So the FILL — and only the fill, never the dome, the stars, the environment map
+ * or the direct key light — carries an authored floor: a cool moonlit sky bounce
+ * over a dim warm sand bounce, at about a hundredth of daylight. Enough that a
+ * dune keeps an edge and the road keeps its verges; far too little to compete with
+ * the lamps or to wash out a magnitude-8 star.
+ */
+const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
+const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
+const NIGHT_FILL_INTENSITY = 0.09;
 
 // ---------------------------------------------------------------------------
 // Twilight moods
@@ -937,26 +955,31 @@ export class Sky {
     this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure;
     this.sunLight.color.copy(this._lightColor);
 
-    // Diffuse sky/ground bounce retains real day-to-night ratios; analytic
-    // exposure, not an arbitrary night floor, makes dark-adapted silhouettes.
-    // Daylight receives 50% more SKY fill, while reciprocal compensation keeps
-    // the warm sand bounce at its former energy. This opens upward and vertical
-    // shadow detail with a blue-cyan cast without touching the direct Sun,
-    // shadow map, or global exposure.
+    // Diffuse sky/ground bounce retains real day-to-night ratios by day, and floors
+    // at an authored moonlit fill by night (see NIGHT_FILL_INTENSITY): photometric
+    // adaptation alone left the desert at absolute zero, which is what turned a
+    // headlight into the only object on screen. Daylight receives 50% more SKY fill,
+    // while reciprocal compensation keeps the warm sand bounce at its former energy.
+    // This opens upward and vertical shadow detail with a blue-cyan cast without
+    // touching the direct Sun, the shadow map, the dome, or global exposure.
     const skyFillBoost = 1 + (DAY_SKY_FILL_BOOST - 1) * day;
     this._hemiSky.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.025, 0.0)
       .lerp(C_DAY_HORIZON, 0.32)
       .lerp(C_SUN_HIGH, 0.025)
-      .lerp(C_NIGHT_ZENITH, night);
+      .lerp(C_NIGHT_FILL_SKY, night);
     this._hemiGround.copy(C_GROUND)
-      .lerp(C_NIGHT_GROUND, night)
+      .lerp(C_NIGHT_FILL_GROUND, night)
       .multiplyScalar(1 / skyFillBoost);
     this.hemiLight.color.copy(this._hemiSky);
     this.hemiLight.groundColor.copy(this._hemiGround);
-    this.hemiLight.intensity =
+    const photometricFill =
       (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
       GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
+    this.hemiLight.intensity = Math.max(
+      photometricFill,
+      NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,
+    );
 
     this.refreshEnvironment();
 

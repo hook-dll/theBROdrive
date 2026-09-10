@@ -325,6 +325,21 @@ export class DesertTileStreamer {
     return this.tiles.size;
   }
 
+  /**
+   * Attached visual tiles against the square the last update asked for. Boot waits
+   * on this so the player never arrives over ground that is still in the worker.
+   */
+  get readiness(): { readonly ready: number; readonly wanted: number } {
+    let ready = 0;
+    let wanted = 0;
+    for (const work of this.wanted.values()) {
+      if (!work.visual) continue;
+      wanted++;
+      if (this.tiles.has(work.key)) ready++;
+    }
+    return { ready, wanted };
+  }
+
   get physicsTileCount(): number {
     let count = 0;
     for (const tile of this.tiles.values()) if (tile.hasPhysics) count++;

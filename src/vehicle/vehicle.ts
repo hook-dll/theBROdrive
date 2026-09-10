@@ -1528,18 +1528,37 @@ interface ProjectedBeamShape {
 }
 
 /**
+ * TEMPERATURE AND SOFTNESS. A period sealed beam is a tungsten filament behind
+ * glass: roughly 3000 K, which is a warm amber-white, not the 6500 K white these
+ * beams used to project. The difference is not decorative. A white pool on ochre
+ * asphalt saturates all three channels at once and clips to paper under ACES, so
+ * the road ahead arrived as a flat overexposed disc — the "torch bolted to the
+ * bumper" look. A warm beam clips its blue channel LAST, so the same amount of
+ * light lands as graded sand instead of as white, and the night stops fighting the
+ * dawn and dusk palettes it sits between.
+ *
+ * The intensities below are therefore ~15% lower than the white tune with a
+ * slightly steeper falloff, which trades a burnt foreground for a gradient, and
+ * the penumbra is much wider so the pool has no hard elliptical rim to catch the
+ * eye. Readability is not paid for out of this: it is bought back in sky.ts, where
+ * a moonlit fill lifts the desert out of absolute black so that the beam is read
+ * against a visible world rather than against a void.
+ */
+const HEADLIGHT_BEAM_TINT = 0xffd7a3;
+
+/**
  * Dipped beam: broad foreground light aimed to meet the ground at roughly half
  * the previous range. Both its aim distance and attenuation cutoff are halved, so
  * the cone does not merely point past a shorter cutoff.
  */
 const HEADLIGHT_LOW: HeadlightBeam = {
-  intensity: 12.5,
+  intensity: 10.5,
   distance: 144,
   angle: 0.853,
-  penumbra: 0.68,
+  penumbra: 0.9,
   targetDistance: 13,
   targetDrop: 0.5,
-  decay: 0.25,
+  decay: 0.3,
 };
 
 /**
@@ -1547,13 +1566,13 @@ const HEADLIGHT_LOW: HeadlightBeam = {
  * from the previous long-distance tune.
  */
 const HEADLIGHT_HIGH: HeadlightBeam = {
-  intensity: 20,
+  intensity: 17,
   distance: 260,
   angle: 0.616,
-  penumbra: 0.45,
+  penumbra: 0.66,
   targetDistance: 28,
   targetDrop: 0.45,
-  decay: 0.2,
+  decay: 0.26,
 };
 
 type HeadlightMode = 'off' | 'low' | 'high';
@@ -1561,6 +1580,7 @@ type HeadlightMode = 'off' | 'low' | 'high';
 type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
 type IndicatorSide = 'off' | 'left' | 'right';
 
+/** Lens emission stays white-hot; only the light it THROWS carries the filament's warmth. */
 const HEADLIGHT_EMISSIVE = 0xffffff;
 /** Running and stop lenses are red even when unlit; controls only raise their emission. */
 const TAILLIGHT_EMISSIVE = 0xff0000;
@@ -3905,16 +3925,27 @@ export class Vehicle implements Rebasable {
    * the driven one: a lamp that is on casts a beam whoever left it on, so a
    * restored save and a car abandoned with its headlights burning both light the
    * ground. Dark lamps are offered nothing and cost no slot.
+   *
+   * `gain` scales every beam this vehicle casts. The driven car is offered 1: its
+   * own beams are the only way to read the road at night and MUST NOT be touched.
+   * Ambient cars are offered a faded gain (see `ambientBeamGain`), which is both a
+   * comfort and a pop-in fix: a beam that is already near zero at the range where
+   * the pool refuses it, or where its car spawned, has nothing left to snap.
+   * A gain of zero claims no slot at all, so the pool always belongs to the beams
+   * near enough to be seen.
    */
-  syncProjectedLights(rig: VehicleLightRig): void {
+  syncProjectedLights(rig: VehicleLightRig, gain: number): void {
+    if (!(gain > 0)) return;
     const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
     const headlightIntensity =
-      this.headlightMode === 'off' ? 0 : headlightBeam.intensity * this.headlightEnvironmentFactor;
+      this.headlightMode === 'off'
+        ? 0
+        : headlightBeam.intensity * this.headlightEnvironmentFactor * gain;
     for (let i = 0; i < 2; i++) {
       this.projectBeam(
         rig,
         this.headlightMounts[i],
-        HEADLIGHT_EMISSIVE,
+        HEADLIGHT_BEAM_TINT,
         headlightIntensity,
         headlightBeam,
         rig.headlightDistanceScale,
@@ -3923,14 +3954,14 @@ export class Vehicle implements Rebasable {
         rig,
         this.taillightMounts[i],
         TAILLIGHT_EMISSIVE,
-        this.taillightBeamIntensity,
+        this.taillightBeamIntensity * gain,
         TAILLIGHT_BEAM,
       );
       this.projectBeam(
         rig,
         this.reverseLightMounts[i],
         REVERSE_LIGHT_EMISSIVE,
-        this.reverseLightBeamIntensity,
+        this.reverseLightBeamIntensity * gain,
         REVERSE_LIGHT_BEAM,
       );
     }

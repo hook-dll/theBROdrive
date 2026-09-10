@@ -15,28 +15,14 @@ import * as THREE from 'three';
 import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { disposeCarModelCache, preloadCarModels } from '../src/render/carmodel';
-import { VehicleLightRig } from '../src/render/vehiclelights';
+import { ambientBeamGain, VehicleLightRig } from '../src/render/vehiclelights';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { carModel } from '../src/vehicle/carmodels';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { WorldOrigin } from '../src/world/origin';
-import { installBlankTextures } from './assetshim';
+import { installAssetShim } from './assetshim';
 
-class BunProgressEvent extends Event implements ProgressEvent {
-  readonly lengthComputable: boolean;
-  readonly loaded: number;
-  readonly total: number;
-
-  constructor(type: string, init: ProgressEventInit = {}) {
-    super(type, init);
-    this.lengthComputable = init.lengthComputable ?? false;
-    this.loaded = init.loaded ?? 0;
-    this.total = init.total ?? 0;
-  }
-}
-
-if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 
 const MODEL_ID = 'gt_vaz2110';
 const VEHICLE_COUNT = 4;
@@ -87,44 +73,14 @@ function carState(
 }
 
 /**
- * Three loaders issue root-relative browser requests. Keep their real loading path
- * intact by serving public/ from this Bun process, then restore the global request
- * constructor before vehicle construction. `stop(true)` guarantees no server
- * remains after either a success or a failed preload.
+ * The real loading path, headless. `installAssetShim` is what teaches three's
+ * loaders to read root-absolute model paths off the disk, resolves textures to a
+ * blank (nothing here reads a pixel) and gives `FBXLoader` the `window` it sizes
+ * its authoring cameras from before `carmodel.ts` throws them away.
  */
 async function preloadModels(): Promise<void> {
-  const publicRoot = new URL('../public/', import.meta.url);
-  const server = Bun.serve({
-    port: 0,
-    fetch(request) {
-      const pathname = decodeURIComponent(new URL(request.url).pathname);
-      if (pathname.includes('..')) return new Response('Not found', { status: 404 });
-      const file = Bun.file(new URL(`.${pathname}`, publicRoot));
-      return new Response(file);
-    },
-  });
-  const NativeRequest = globalThis.Request;
-
-  class AssetRequest extends NativeRequest {
-    constructor(input: RequestInfo | URL, init?: RequestInit) {
-      super(
-        typeof input === 'string' && input.startsWith('/') ? new URL(input, server.url).href : input,
-        init,
-      );
-    }
-  }
-
-  globalThis.Request = AssetRequest;
-  // Geometry and node names decode fine over that server; a TEXTURE cannot decode
-  // without a browser, and this harness measures lamp bounds and scene lights, not
-  // pixels. See tools/assetshim.ts.
-  installBlankTextures();
-  try {
-    await preloadCarModels([MODEL_ID]);
-  } finally {
-    globalThis.Request = NativeRequest;
-    server.stop(true);
-  }
+  installAssetShim();
+  await preloadCarModels([MODEL_ID]);
 }
 
 function spotlights(scene: THREE.Scene): THREE.SpotLight[] {
@@ -200,11 +156,15 @@ async function run(): Promise<void> {
   let rig: VehicleLightRig | null = null;
   let rigDisposed = false;
   const vehicles: Vehicle[] = [];
-  /** One rendered frame: offer every lit vehicle, exactly as main.ts does. */
+  /**
+   * One rendered frame: offer every lit vehicle, as main.ts does. These vehicles are
+   * all parked with no camera, so each is offered the driven car's undimmed gain;
+   * the ambient fade has its own scenario below.
+   */
   const projectFrame = (activeRig: VehicleLightRig): void => {
     activeRig.beginFrame();
     for (const vehicle of vehicles) {
-      if (vehicle.hasLitLamps) vehicle.syncProjectedLights(activeRig);
+      if (vehicle.hasLitLamps) vehicle.syncProjectedLights(activeRig, 1);
     }
     activeRig.endFrame();
   };
@@ -317,6 +277,46 @@ async function run(): Promise<void> {
       world.state.cars['vehicle-lights:2']?.headlightMode === 'low',
       JSON.stringify(world.state.cars['vehicle-lights:2']),
     );
+
+    // The ambient fade is what keeps another car's pool from arriving as a step.
+    // Four lit cars, all offered at the gain of a car 200 m away: not one slot may
+    // be claimed, because at that range the beam is worth nothing and a refusal or
+    // a spawn there must be invisible. Then the same four at close range claim the
+    // pool, and every claimed beam is dimmer than the driven car's own would be.
+    for (const vehicle of vehicles) {
+      vehicle.setHeadlights('low');
+      vehicle.syncVisuals(1);
+    }
+    rig.beginFrame();
+    for (const vehicle of vehicles) vehicle.syncProjectedLights(rig, ambientBeamGain(200));
+    rig.endFrame();
+    check(
+      'far ambient cars: a faded beam claims no slot',
+      ambientBeamGain(200) === 0 && rig.beamCount === 0 && allDark(spotlights(scene)),
+      `gain ${ambientBeamGain(200)}, ${rig.beamCount} beams`,
+    );
+    rig.beginFrame();
+    for (const vehicle of vehicles) vehicle.syncProjectedLights(rig, ambientBeamGain(20));
+    rig.endFrame();
+    const nearBeams = rig.beamCount;
+    // Numbers, not light objects: the next frame overwrites the same slots.
+    const fadedHeadlight = Math.max(
+      ...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0)),
+    );
+    rig.beginFrame();
+    vehicles[0].syncProjectedLights(rig, 1);
+    rig.endFrame();
+    const drivenHeadlight = Math.max(
+      ...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0)),
+    );
+    check(
+      'near ambient cars: beams project, dimmer than the driven car',
+      nearBeams === rig.lightCount &&
+        fadedHeadlight > 0 &&
+        fadedHeadlight < drivenHeadlight * 0.5,
+      `${fadedHeadlight.toFixed(2)} vs ${drivenHeadlight.toFixed(2)} driven`,
+    );
+    assertRigState(scene, rig, identities, targets, 'ambient fade');
 
     while (vehicles.length > 0) vehicles.pop()!.dispose();
     rig.clear();

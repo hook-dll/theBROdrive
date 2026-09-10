@@ -31,6 +31,19 @@ import * as THREE from 'three';
  * Demand beyond the pool is therefore refused. `main.ts` offers beams in priority
  * order — the driven car first, then nearest to the camera — so a refusal costs the
  * FARTHEST lamp its pool of light on the ground, while its lens still glows.
+ *
+ * WHOSE LIGHT MATTERS. The driven car's beams are the only way to read the road at
+ * night, so they are projected exactly as authored. Every other car's are projected
+ * faded (`ambientBeamGain`), for two reasons that happen to be the same fix:
+ *
+ *  - Comfort. A night with four cars around threw four full-brightness pools across
+ *    the asphalt, one of them oncoming and sweeping over the player's own lane. It
+ *    read as glare rather than as traffic, which is not a night anybody wants to
+ *    drive through, however defensible it is as photometry.
+ *  - Pop-in. A pool used to arrive at FULL brightness — the instant a car spawned
+ *    140 m ahead, or the instant the pool stopped refusing its beam. Fading the
+ *    gain to nothing before either range means there is no step left to see: the
+ *    lens still glows and approaches, and the ground light grows in behind it.
  */
 /** Persistent spotlight budget compiled into every lit material for this session. */
 const SLOT_COUNT: Record<'acceptable' | 'standard' | 'blessing', number> = {
@@ -47,6 +60,26 @@ const HEADLIGHT_DISTANCE_SCALE: Record<'acceptable' | 'standard' | 'blessing', n
 };
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;
+/**
+ * Beam scale for a car the player is NOT driving, by distance from the camera.
+ *
+ * `AMBIENT_BEAM_GAIN` is the ceiling: enough that a passing car lays a soft wash on
+ * the road, not enough to compete with the player's own beams for the lane ahead.
+ * The window closes before `SPAWN_MIN_M` in world/traffic.ts (140 m), so a spawn can
+ * never arrive already lighting the ground.
+ */
+const AMBIENT_BEAM_GAIN = 0.34;
+const AMBIENT_BEAM_FULL_M = 60;
+const AMBIENT_BEAM_GONE_M = 130;
+
+export function ambientBeamGain(distanceM: number): number {
+  if (distanceM <= AMBIENT_BEAM_FULL_M) return AMBIENT_BEAM_GAIN;
+  if (distanceM >= AMBIENT_BEAM_GONE_M) return 0;
+  const t =
+    (distanceM - AMBIENT_BEAM_FULL_M) / (AMBIENT_BEAM_GONE_M - AMBIENT_BEAM_FULL_M);
+  // Smoothstep, so the light grows in without an audible knee at either end.
+  return AMBIENT_BEAM_GAIN * (1 - t * t * (3 - 2 * t));
+}
 
 export class VehicleLightRig {
   readonly headlightDistanceScale: number;
