@@ -227,6 +227,66 @@ const HAZE_LATERAL_SHARE = 0.34;
 const HAZE_MIN_EYE_ABOVE_M = 0.5;
 /** Eye height assumed before the loop has supplied a real one: a standing player. */
 const DEFAULT_EYE_HEIGHT_M = 1.6;
+export interface HeatMirageParameters {
+  readonly scaleHeightM: number;
+  readonly referencePathM: number;
+  readonly nearClearM: number;
+  readonly nearFullM: number;
+  readonly groundClearM: number;
+  readonly groundFullM: number;
+  readonly angleMrad: number;
+  readonly liftMrad: number;
+  readonly sampleRangeM: number;
+  readonly broadCellM: number;
+  readonly fineCellM: number;
+  readonly broadRiseMps: number;
+  readonly fineRiseMps: number;
+  readonly plumeStretch: number;
+  readonly lateralShare: number;
+  readonly minimumEyeHeightM: number;
+}
+
+export const DEFAULT_HEAT_MIRAGE: HeatMirageParameters = {
+  scaleHeightM: HAZE_SCALE_HEIGHT_M,
+  referencePathM: HAZE_REF_PATH_M,
+  nearClearM: HAZE_NEAR_CLEAR_M,
+  nearFullM: HAZE_NEAR_FULL_M,
+  groundClearM: HAZE_GROUND_CLEAR_M,
+  groundFullM: HAZE_GROUND_FULL_M,
+  angleMrad: HAZE_ANGLE_MRAD,
+  liftMrad: HAZE_LIFT_MRAD,
+  sampleRangeM: HAZE_SAMPLE_RANGE_M,
+  broadCellM: HAZE_CELL_BROAD_M,
+  fineCellM: HAZE_CELL_FINE_M,
+  broadRiseMps: HAZE_RISE_BROAD_MPS,
+  fineRiseMps: HAZE_RISE_FINE_MPS,
+  plumeStretch: HAZE_PLUME_STRETCH,
+  lateralShare: HAZE_LATERAL_SHARE,
+  minimumEyeHeightM: HAZE_MIN_EYE_ABOVE_M,
+};
+
+/** Fresh uniform cells for every material that compiles the production mirage pass. */
+export function createHeatMirageUniforms(
+  parameters: HeatMirageParameters = DEFAULT_HEAT_MIRAGE,
+): Record<string, { value: number }> {
+  return {
+    SCALE_HEIGHT_M: { value: parameters.scaleHeightM },
+    REF_PATH_M: { value: parameters.referencePathM },
+    NEAR_CLEAR_M: { value: parameters.nearClearM },
+    NEAR_FULL_M: { value: parameters.nearFullM },
+    GROUND_CLEAR_M: { value: parameters.groundClearM },
+    GROUND_FULL_M: { value: parameters.groundFullM },
+    ANGLE_RAD: { value: parameters.angleMrad / 1000 },
+    LIFT_RAD: { value: parameters.liftMrad / 1000 },
+    SAMPLE_RANGE_M: { value: parameters.sampleRangeM },
+    CELL_BROAD: { value: parameters.broadCellM },
+    CELL_FINE: { value: parameters.fineCellM },
+    RISE_BROAD: { value: parameters.broadRiseMps },
+    RISE_FINE: { value: parameters.fineRiseMps },
+    PLUME_STRETCH: { value: parameters.plumeStretch },
+    LATERAL_SHARE: { value: parameters.lateralShare },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Ink outlines: the second half of the drawn-landscape look, in the same pass.
@@ -256,14 +316,6 @@ export const HAZE_VERTEX = /* glsl */ `
   }
 `;
 
-/**
- * A number GLSL will accept as a float. The haze constants above are the single
- * source of truth for both the shader and the CPU side, so they are compiled in
- * rather than duplicated as literals or paid for as uniforms that never change.
- */
-function glslFloat(value: number): string {
-  return Number.isInteger(value) ? `${value}.0` : String(value);
-}
 
 const PHOTO_SEPIA_STRENGTH = 0.1;
 const PHOTO_DAY_SATURATION = 0.9;
@@ -378,23 +430,23 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uBinoculars;
   uniform float uCameraViewfinder;
 
-  const float SCALE_HEIGHT_M = ${glslFloat(HAZE_SCALE_HEIGHT_M)};
-  const float REF_PATH_M = ${glslFloat(HAZE_REF_PATH_M)};
-  const float NEAR_CLEAR_M = ${glslFloat(HAZE_NEAR_CLEAR_M)};
-  const float NEAR_FULL_M = ${glslFloat(HAZE_NEAR_FULL_M)};
-  const float ANGLE_RAD = ${glslFloat(HAZE_ANGLE_MRAD / 1000)};
-  const float LIFT_RAD = ${glslFloat(HAZE_LIFT_MRAD / 1000)};
-  const float SAMPLE_RANGE_M = ${glslFloat(HAZE_SAMPLE_RANGE_M)};
-  const float CELL_BROAD = ${glslFloat(HAZE_CELL_BROAD_M)};
-  const float CELL_FINE = ${glslFloat(HAZE_CELL_FINE_M)};
-  const float RISE_BROAD = ${glslFloat(HAZE_RISE_BROAD_MPS)};
-  const float RISE_FINE = ${glslFloat(HAZE_RISE_FINE_MPS)};
-  const float PLUME_STRETCH = ${glslFloat(HAZE_PLUME_STRETCH)};
-  const float LATERAL_SHARE = ${glslFloat(HAZE_LATERAL_SHARE)};
+  uniform float SCALE_HEIGHT_M;
+  uniform float REF_PATH_M;
+  uniform float NEAR_CLEAR_M;
+  uniform float NEAR_FULL_M;
+  uniform float ANGLE_RAD;
+  uniform float LIFT_RAD;
+  uniform float SAMPLE_RANGE_M;
+  uniform float CELL_BROAD;
+  uniform float CELL_FINE;
+  uniform float RISE_BROAD;
+  uniform float RISE_FINE;
+  uniform float PLUME_STRETCH;
+  uniform float LATERAL_SHARE;
 
   varying vec2 vUv;
-  const float GROUND_CLEAR_M = ${glslFloat(HAZE_GROUND_CLEAR_M)};
-  const float GROUND_FULL_M = ${glslFloat(HAZE_GROUND_FULL_M)};
+  uniform float GROUND_CLEAR_M;
+  uniform float GROUND_FULL_M;
 
   /** Unit view-space direction for a pixel. */
   vec3 cameraRay(vec2 uv) {
@@ -700,6 +752,7 @@ export class Renderer {
    * to a standing eye so the very first frame is sensible before the loop supplies one.
    */
   private hazeEyeHeight = DEFAULT_EYE_HEIGHT_M;
+  private hazeMinimumEyeHeight = DEFAULT_HEAT_MIRAGE.minimumEyeHeightM;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -809,6 +862,7 @@ export class Renderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uTime: { value: 0 },
         uStrength: { value: 0 },
+        ...createHeatMirageUniforms(),
         uDaylight: { value: 0 },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uHorizon: { value: 0.5 },
@@ -1002,7 +1056,7 @@ export class Renderer {
     this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
     this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
     this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
-      HAZE_MIN_EYE_ABOVE_M,
+      this.hazeMinimumEyeHeight,
       this.hazeEyeHeight,
     );
     this.camera.updateWorldMatrix(true, false);
@@ -1051,6 +1105,29 @@ export class Renderer {
     return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
   }
 
+  /** Updates every physical parameter in the production heat-mirage shader. */
+  setHeatMirageParameters(parameters: HeatMirageParameters): void {
+    const uniforms = this.hazeMaterial.uniforms;
+    uniforms.SCALE_HEIGHT_M.value = Math.max(0.1, parameters.scaleHeightM);
+    uniforms.REF_PATH_M.value = Math.max(1, parameters.referencePathM);
+    uniforms.NEAR_CLEAR_M.value = Math.max(0, parameters.nearClearM);
+    uniforms.NEAR_FULL_M.value = Math.max(uniforms.NEAR_CLEAR_M.value + 1, parameters.nearFullM);
+    uniforms.GROUND_CLEAR_M.value = Math.max(0, parameters.groundClearM);
+    uniforms.GROUND_FULL_M.value = Math.max(
+      uniforms.GROUND_CLEAR_M.value + 1,
+      parameters.groundFullM,
+    );
+    uniforms.ANGLE_RAD.value = Math.max(0, parameters.angleMrad) / 1000;
+    uniforms.LIFT_RAD.value = parameters.liftMrad / 1000;
+    uniforms.SAMPLE_RANGE_M.value = Math.max(0.1, parameters.sampleRangeM);
+    uniforms.CELL_BROAD.value = Math.max(0.01, parameters.broadCellM);
+    uniforms.CELL_FINE.value = Math.max(0.01, parameters.fineCellM);
+    uniforms.RISE_BROAD.value = parameters.broadRiseMps;
+    uniforms.RISE_FINE.value = parameters.fineRiseMps;
+    uniforms.PLUME_STRETCH.value = Math.max(0.1, parameters.plumeStretch);
+    uniforms.LATERAL_SHARE.value = Math.min(1, Math.max(0, parameters.lateralShare));
+    this.hazeMinimumEyeHeight = parameters.minimumEyeHeightM;
+  }
   /**
    * How far the camera is above the ground it is looking across, metres. Supplied by
    * the composition root, which is the only thing that knows both the camera and the

@@ -35,7 +35,7 @@
  */
 
 import * as THREE from 'three';
-import { HAZE_FRAGMENT, HAZE_VERTEX } from '../src/core/renderer';
+import { createHeatMirageUniforms, HAZE_FRAGMENT, HAZE_VERTEX } from '../src/core/renderer';
 
 const WIDTH = 480;
 const HEIGHT = 270;
@@ -141,6 +141,8 @@ function makeProbe(): Probe {
       uResolution: { value: new THREE.Vector2(WIDTH, HEIGHT) },
       uTime: { value: 0 },
       uStrength: { value: 1 },
+      ...createHeatMirageUniforms(),
+      uDaylight: { value: 1 },
       uEyeAbove: { value: EYE_ABOVE },
       uHorizon: { value: 0.5 },
       uCameraRotation: { value: new THREE.Matrix3() },

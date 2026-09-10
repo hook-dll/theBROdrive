@@ -20,15 +20,18 @@ import { ReversedRoad } from './reversedroad';
  */
 const MAX_TRAFFIC = 30;
 const SPAWN_MIN_M = 140;
-const SPAWN_MAX_M = 650;
+const SPAWN_MAX_M = 700;
 const DESPAWN_M = 850;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
 const SPAWN_ROAD_GAP_M = 70;
 const DENSE_SPAWN_ROAD_GAP_M = 32;
 const SPAWN_WORLD_GAP_M = 30;
 const SPAWN_HAZARD_GAP_M = 18;
+/** Never materialize an opposing car inside a pass that was clear when committed. */
+const PASSING_SPAWN_EXCLUSION_M = 300;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
 const SPAWN_INTERVAL_S = 1;
+const DENSE_SPAWN_INTERVAL_S = 0.5;
 const DROP_SETTLE_S = 0.8;
 /** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
 const TRAFFIC_SPAWN_DROP_M = 0;
@@ -38,6 +41,8 @@ const LIFETIME_SAMPLE_S = 0.5;
 const CLOCK_SYNC_S = 1;
 const END_MARGIN_M = 80;
 const TRAFFIC_ID_PREFIX = 'traffic:';
+const DEADLOCK_ROAD_GAP_M = 18;
+const DEADLOCK_STOP_SPEED_MPS = 1.5;
 
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried';
@@ -52,6 +57,7 @@ interface TrafficCar {
   readonly autopilot: Autopilot;
   readonly style: TrafficDriverStyle;
   readonly speedCap: number;
+  roadLateral: number;
   readonly input: InputFrame;
   forwardS: number;
   settleFor: number;
@@ -194,6 +200,7 @@ export class RoadTraffic {
 
   setTargetCount(count: number): void {
     const next = Math.min(MAX_TRAFFIC, Math.max(0, Math.round(count / 2) * 2));
+    for (const car of this.carList) car.autopilot.setPassingEnabled(next <= 12);
     if (this.targetCount === next) return;
     this.targetCount = next;
     this.generation++;
@@ -243,6 +250,65 @@ export class RoadTraffic {
     return nearest;
   }
 
+  /**
+   * Resolves an opposing-queue stalemate centrally instead of letting every driver
+   * guess. Only the forward-direction head receives permission; cars behind either
+   * head remain ordinary followers. Separate clusters may resolve concurrently.
+   */
+  private assignDeadlockPermissions(): void {
+    for (const car of this.carList) car.autopilot.setDeadlockPermission(false);
+    for (const candidate of this.carList) {
+      if (
+        candidate.direction !== 1 ||
+        candidate.settleFor > 0 ||
+        (candidate.autopilot.obstacleGap === Infinity &&
+          candidate.autopilot.activity !== 'offroad')
+      ) {
+        continue;
+      }
+      const velocity = candidate.vehicle.chassis.linvel();
+      if (Math.hypot(velocity.x, velocity.z) >= DEADLOCK_STOP_SPEED_MPS) continue;
+
+      let opposing: TrafficCar | null = null;
+      let opposingGap = Infinity;
+      for (const other of this.carList) {
+        if (other.direction !== -1 || other.settleFor > 0) continue;
+        const ahead = other.forwardS - candidate.forwardS;
+        if (ahead > 0 && ahead < opposingGap) {
+          opposing = other;
+          opposingGap = ahead;
+        }
+      }
+      if (!opposing || opposingGap > DEADLOCK_ROAD_GAP_M) continue;
+      const opposingVelocity = opposing.vehicle.chassis.linvel();
+      if (
+        Math.hypot(opposingVelocity.x, opposingVelocity.z) >=
+        DEADLOCK_STOP_SPEED_MPS
+      ) {
+        continue;
+      }
+
+      let headsMeet = true;
+      for (const other of this.carList) {
+        if (other === candidate || other === opposing) continue;
+        if (other.direction === 1) {
+          const ahead = other.forwardS - candidate.forwardS;
+          if (ahead > 0 && ahead < opposingGap) {
+            headsMeet = false;
+            break;
+          }
+        } else {
+          const ahead = opposing.forwardS - other.forwardS;
+          if (ahead > 0 && ahead < opposingGap) {
+            headsMeet = false;
+            break;
+          }
+        }
+      }
+      if (headsMeet) candidate.autopilot.setDeadlockPermission(true);
+    }
+  }
+
   /** Visits every live temporary vehicle without exposing traffic ownership. */
   forEachVehicle(visitor: (id: string, vehicle: Vehicle) => void): void {
     for (const car of this.carList) visitor(car.id, car.vehicle);
@@ -272,6 +338,17 @@ export class RoadTraffic {
       this.clockSync = CLOCK_SYNC_S;
     }
 
+    // Deadlock arbitration needs current ordering. The half-second lifetime sample is
+    // sufficient for despawning, but stale positions can grant a reversing manoeuvre
+    // after two opposing cars have already crossed.
+    for (const car of this.carList) {
+      car.vehicle.absoluteTranslation(this.position);
+      const projection = this.road.project(this.position.x, this.position.z, car.forwardS);
+      car.forwardS = projection.s;
+      car.roadLateral = projection.lateral;
+    }
+
+    this.assignDeadlockPermissions();
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
       car.autopilot.setLightingConditions(
@@ -280,8 +357,6 @@ export class RoadTraffic {
       );
       car.lifetimeTimer -= dt;
       if (car.lifetimeTimer <= 0) {
-        car.vehicle.absoluteTranslation(this.position);
-        car.forwardS = this.road.project(this.position.x, this.position.z, car.forwardS).s;
         car.lifetimeTimer = LIFETIME_SAMPLE_S;
         if (Math.abs(car.forwardS - playerS) > DESPAWN_M) {
           this.removeAt(i);
@@ -303,7 +378,8 @@ export class RoadTraffic {
     this.spawnCooldown -= dt;
     if (this.spawnCooldown <= 0 && this.pending === null && this.carList.length < this.targetCount) {
       this.queueSpawn();
-      this.spawnCooldown = SPAWN_INTERVAL_S;
+      this.spawnCooldown =
+        this.targetCount > 12 ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
     }
   }
 
@@ -419,6 +495,7 @@ export class RoadTraffic {
       request.direction === 1 ? this.hazards : this.reverseHazards,
       this.physics,
     );
+    autopilot.setPassingEnabled(this.targetCount <= 12);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
     autopilot.setTrafficRecoveryPolicy(true);
@@ -429,6 +506,7 @@ export class RoadTraffic {
       vehicle,
       modelId: request.modelId,
       style: request.style,
+      roadLateral: forwardLateral,
       speedCap: request.speedCap,
       spawnS: request.forwardS,
       autopilot,
@@ -503,11 +581,20 @@ export class RoadTraffic {
   }
 
   private roadGapClear(s: number, direction: TrafficDirection): boolean {
+    const sameDirectionGap =
+      this.targetCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
     for (const car of this.carList) {
+      const gap = Math.abs(car.forwardS - s);
+      if (car.direction === direction) {
+        const spawnIsAhead = (s - car.forwardS) * direction > 0;
+        const requiredGap = spawnIsAhead ? SPAWN_ROAD_GAP_M : sameDirectionGap;
+        if (gap < requiredGap) return false;
+      }
       if (
-        car.direction === direction &&
-        Math.abs(car.forwardS - s) <
-          (this.targetCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M)
+        car.direction !== direction &&
+        (car.autopilot.activity === 'pass' ||
+          car.roadLateral * car.direction > -TRAFFIC_HALF_WIDTH_M) &&
+        gap < PASSING_SPAWN_EXCLUSION_M
       ) {
         return false;
       }

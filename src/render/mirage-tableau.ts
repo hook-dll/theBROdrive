@@ -22,7 +22,8 @@ const SALT_PLACEMENT = 0x64dd;
 const SALT_SHAPE = 0x75ef;
 const SALT_COLOUR = 0x8711;
 
-type MirageKind = 'palms' | 'trees' | 'cacti' | 'city' | 'fountains';
+export const MIRAGE_TABLEAU_KINDS = ['palms', 'trees', 'cacti', 'city', 'fountains'] as const;
+export type MirageKind = (typeof MIRAGE_TABLEAU_KINDS)[number];
 
 interface Encounter {
   readonly index: number;
@@ -181,6 +182,9 @@ export class MirageTableau {
   private anchorX = 0;
   private anchorY = 0;
   private anchorZ = 0;
+  private densityScale = 1;
+  private previewActive = false;
+  private previewOpacity = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -247,6 +251,48 @@ export class MirageTableau {
     );
   }
 
+  /** Direct presentation path for comparing every authored tableau in the lab. */
+  showPreview(
+    kind: MirageKind,
+    startS: number,
+    length: number,
+    lateralOffset: number,
+    opacity: number,
+    scale: number,
+    variation: number,
+    density: number,
+  ): void {
+    this.previewActive = true;
+    const encounter = {
+      index: Math.round(variation),
+      startS,
+      length: Math.max(80, length),
+      kind,
+    };
+    this.activateEncounter(encounter, density);
+    const anchor = this.road.offsetPoint(startS, lateralOffset);
+    this.root.position.set(
+      anchor.x - this.origin.x,
+      this.anchorY,
+      anchor.z - this.origin.z,
+    );
+    this.root.scale.setScalar(Math.max(0.05, scale));
+    this.previewOpacity = Math.min(1, Math.max(0, opacity));
+    this.setPreviewDayFactor(1);
+  }
+
+  setPreviewDayFactor(dayFactor: number): void {
+    const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor);
+    for (let i = 0; i < this.materials.length - 1; i++) this.materials[i]!.opacity = alpha;
+    this.materials[this.materials.length - 1]!.opacity = alpha * 0.74;
+    this.root.visible = this.previewActive && alpha > 0.002;
+  }
+
+  hide(): void {
+    this.previewActive = false;
+    this.root.visible = false;
+  }
+
   private get meshes(): readonly THREE.InstancedMesh[] {
     return [this.palms, this.trees, this.cacti, this.blocks, this.water];
   }
@@ -296,16 +342,19 @@ export class MirageTableau {
 
   private activate(index: number): void {
     this.activeEncounter = index;
+    this.activateEncounter(this.encounters[index]!, 1);
+  }
+
+  private activateEncounter(encounter: Encounter, density: number): void {
+    this.densityScale = Math.min(1, Math.max(0.02, density));
     for (const mesh of this.meshes) {
       mesh.count = 0;
       mesh.visible = false;
     }
-    const encounter = this.encounters[index]!;
     const anchor = this.road.sampleAt(encounter.startS);
     this.anchorX = anchor.x;
     this.anchorY = anchor.y;
     this.anchorZ = anchor.z;
-
     switch (encounter.kind) {
       case 'palms':
         this.buildPlants(this.palms, encounter, 360, 9, 185, 8, 18, 0.025, 0.24, 0.28);
@@ -337,7 +386,8 @@ export class MirageTableau {
     saturation: number,
     lightness: number,
   ): void {
-    for (let i = 0; i < count; i++) {
+    const instanceCount = Math.max(1, Math.round(count * this.densityScale));
+    for (let i = 0; i < instanceCount; i++) {
       const along = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT);
       const s = encounter.startS + 8 + along * along * (encounter.length - 16);
       const side = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
@@ -357,7 +407,7 @@ export class MirageTableau {
       );
       mesh.setColorAt(i, this.colour);
     }
-    mesh.count = count;
+    mesh.count = instanceCount;
     mesh.visible = true;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -365,7 +415,7 @@ export class MirageTableau {
 
   private buildCity(encounter: Encounter): void {
     let count = 0;
-    const buildings = 156;
+    const buildings = Math.max(1, Math.round(156 * this.densityScale));
     for (let i = 0; i < buildings; i++) {
       const key = encounter.index * buildings + i;
       const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
@@ -414,7 +464,7 @@ export class MirageTableau {
   private buildFountains(encounter: Encounter): void {
     let blockCount = 0;
     let waterCount = 0;
-    const rows = Math.max(8, Math.floor(encounter.length / 42));
+    const rows = Math.max(1, Math.floor(Math.max(8, encounter.length / 42) * this.densityScale));
     const stone = new THREE.Color(0xa69a82);
     const paleStone = new THREE.Color(0xc0b59d);
     const water = new THREE.Color(0x8bc9cf);
