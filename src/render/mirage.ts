@@ -263,3 +263,4 @@ export class DistantMirage {
     return index + 1;
   }
 }
+

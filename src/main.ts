@@ -47,6 +47,7 @@ import { loadStarField } from './render/starcatalog';
 import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
 import { DistantMirage } from './render/mirage';
+import { MirageTableau } from './render/mirage-tableau';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
@@ -333,6 +334,7 @@ async function boot(): Promise<void> {
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
+  const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
@@ -861,6 +863,8 @@ async function boot(): Promise<void> {
   let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = initialProjection.s;
+  /** Lateral offset of the active player from the road centre, maintained with activeS. */
+  let activeLateral = initialProjection.lateral;
   let gumActive = false;
   let gumTimer = 0;
   let gumPackCharges = 0;
@@ -1225,6 +1229,7 @@ async function boot(): Promise<void> {
       desertZ = p.z;
       desertLateral = projection.lateral;
     }
+    activeLateral = desertLateral;
     // Fairly alternate first access to the one-job frame budget. Road remains first
     // on one frame and desert on the next; an idle subsystem consumes nothing, so
     // the other still proceeds without delay.
@@ -1480,9 +1485,10 @@ async function boot(): Promise<void> {
     // scale factor a 25 km range still fades, it just fades over 25 km.
     renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.viewDistance];
 
-    // A daylight-only middle-distance illusion. It never modifies Sky or Audio; the
-    // sky's computed daylight is only a visibility gate protecting the night view.
+    // Render-only illusions: neither one owns physics, terrain, streamed props, or
+    // permanent world state. Tableaus dissolve as soon as the player leaves the road.
     mirage.update(activeS, sky.dayFactor);
+    mirageTableau.update(activeS, activeLateral, sky.dayFactor);
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
