@@ -102,16 +102,59 @@ function band(seed: number, x: number, z: number): number {
  * most of it goes to the shortest band, where it is felt, and the long bands buy
  * altitude at almost no cost in steepness.
  *
- * `hilliness` gates the 7.5 km hill band by the regional hilliness field. The shortest
- * 1.26 km band remains ungated so the flat country still breathes instead of reading as
- * ironed terrain. `home` ramps the two short bands in around the homestead, so the
- * concrete pad and the driveway have level ground under them.
+ * TEMPO, and why the two long bands do not have it. `RELIEF_SCALE` multiplies every
+ * amplitude AND every wavelength, and that is what buys the world its +-1430 m of
+ * range — of which +-1050 m lives in the 225 km and 50 km bands. Those two are the
+ * mountains, the basins and the far horizon, and nothing here touches them.
+ *
+ * The problem is the OTHER two. Stretched fivefold, every climb a driver meets lasts
+ * kilometres, so the road has exactly one pace: measured, the grade changes sign
+ * every 2.1 km and the whole world reads as "always tilted somewhere" instead of as
+ * hills. Long drags are wanted SOMETIMES, not always. So each felt band carries a
+ * SHORT alternative and a regional tempo field crossfades between them:
+ *
+ *   band    long tempo             short tempo          slope long/short
+ *   hills   +-290 m / 12.5 km      +-90 m / 6 km         6.96% / 4.50%
+ *   rolls   +- 90 m /  2.1 km      +-14 m / 250 m       12.86% / 16.80%
+ *
+ * A pair contributes `(1 - w) * long + w * short` with ONE shared `w`, so the two
+ * tempos never mix their worst cases and the field's bound is the worse of the two
+ * endpoints — 22.9% at the long end, 24.3% at the short one.
+ *
+ * LATTICE SPACING IS NOT FEATURE LENGTH, and this is the whole reason the numbers
+ * look small. Value noise with +-1 lattice values gives neighbouring cells the same
+ * value half the time, and a matching pair is a plateau with no slope, so features
+ * run two cells long on average. Measured crest-to-crest in short-tempo country:
+ *
+ *   +-40 m / 700 m  ->  1574 m (63 s at road speed)
+ *   +-30 m / 500 m  ->  1205 m (48 s)
+ *   +-22 m / 350 m  ->   881 m (35 s)
+ *   +-14 m / 250 m  ->   690 m (28 s)   <- chosen
+ *
+ * WHY NOT KEEP THE HEIGHT AT THE SHORT WAVELENGTH. +-90 m over 700 m is a 38% grade,
+ * and even the +-55 m compromise is 23.6%; band bounds ADD, and this field really does
+ * reach its bound (p100 over 2400 km came out at 22.4% of a 22.85% budget). The
+ * weakest catalogue car leaves a standstill at 18% and holds 12% indefinitely while
+ * towing (tools/climb-limit.ts), and a run-up does not rescue it: 60 km/h is worth
+ * 14 m of climb where a 350 m pitch at 30% asks for 105 m. So the short tempo spends
+ * its budget on FREQUENCY, and takes the amplitude it needs from the hills band
+ * rather than stacking on top: p100 came out at 21.9%, marginally gentler than the
+ * version this replaces, while the felt pace ranges from a 3.4 km drag to a crest
+ * every 690 m depending on where you are.
+ *
+ * `hilliness` gates the hills band in both tempos. `home` ramps both felt bands in
+ * around the homestead, so the concrete pad and the driveway have level ground.
  */
 interface Band {
   readonly amplitude: number;
   readonly wavelength: number;
   readonly hilliness: boolean;
   readonly home: boolean;
+  /**
+   * The same feature at a shorter pace, crossfaded in by `tempoAt`. Absent on the
+   * two long bands: they are the world's altitude range and hold one pace.
+   */
+  readonly short?: { readonly amplitude: number; readonly wavelength: number };
 }
 
 const BANDS: readonly Band[] = [
@@ -120,9 +163,21 @@ const BANDS: readonly Band[] = [
   /** Regional: basins and divides, several minutes of driving across. */
   { amplitude: 70 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Hills: a climb or descent that lasts long enough to choose a gear. */
-  { amplitude: 58 * RELIEF_SCALE, wavelength: 2500 * RELIEF_SCALE, hilliness: true, home: true },
+  {
+    amplitude: 58 * RELIEF_SCALE,
+    wavelength: 2500 * RELIEF_SCALE,
+    hilliness: true,
+    home: true,
+    short: { amplitude: 90, wavelength: 6000 },
+  },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
-  { amplitude: 18 * RELIEF_SCALE, wavelength: 420 * RELIEF_SCALE, hilliness: false, home: true },
+  {
+    amplitude: 18 * RELIEF_SCALE,
+    wavelength: 420 * RELIEF_SCALE,
+    hilliness: false,
+    home: true,
+    short: { amplitude: 14, wavelength: 250 },
+  },
 ];
 
 /** How far you drive before flat country becomes hill country, metres. */
@@ -133,6 +188,17 @@ const HILLINESS_WAVELENGTH = 9000 * RELIEF_SCALE;
  * flat.
  */
 const HILLINESS_FLOOR = 0.45;
+
+/**
+ * Wavelength of the tempo field, metres: how far you drive before the road's pace
+ * changes. 15 km is ten minutes at road speed — long enough to register as country
+ * with a character, short enough that one drive crosses several of them.
+ *
+ * Its own slope contribution is real but tiny: the crossfade moves at most the
+ * difference between the two tempos' amplitudes over its own wavelength, which is
+ * under 0.03 of the field's budget, so it stays out of MAX_SLOPE as hilliness does.
+ */
+const TEMPO_WAVELENGTH = 15_000;
 
 /**
  * Level ground around the origin: fully flat inside `HOME_FLAT_RADIUS`, ramping to
@@ -149,16 +215,40 @@ const HOME_FLAT_RADIUS = 200 * RELIEF_SCALE;
 const HOME_RAMP = 1200 * RELIEF_SCALE;
 
 /**
- * The steepest this field can be, as a fraction: every band's own bound plus the
- * homestead ramp's. Scaling each relief amplitude and its wavelength together keeps
- * this budget at the former value while making the climbs longer.
+ * A band's steepest slope at a given tempo. ONE tempo drives every paired band, so
+ * the bounds must be evaluated at a shared `tempo` rather than maximised per band:
+ * the short rolls and the long hills never coexist, and pretending they might would
+ * quote a 27% budget for a field that reaches 21.4%.
+ *
+ * Both quantities are linear in `tempo`, so the extremes are at 0 and 1 and there is
+ * nothing to search.
+ */
+function slopeAtTempo(b: Band, tempo: number): number {
+  const long = (b.amplitude * 2 * FADE_PEAK_SLOPE) / b.wavelength;
+  if (!b.short) return long;
+  const short = (b.short.amplitude * 2 * FADE_PEAK_SLOPE) / b.short.wavelength;
+  return long * (1 - tempo) + short * tempo;
+}
+
+function reliefAtTempo(b: Band, tempo: number): number {
+  if (!b.short) return b.amplitude;
+  return b.amplitude * (1 - tempo) + b.short.amplitude * tempo;
+}
+
+function sumOverBands(tempo: number, per: (b: Band, tempo: number) => number): number {
+  return BANDS.reduce((sum, b) => sum + per(b, tempo), 0);
+}
+
+/**
+ * The steepest this field can be, as a fraction: the worst tempo's band sum plus the
+ * homestead ramp's own contribution.
  */
 export const MAX_SLOPE =
-  BANDS.reduce((sum, b) => sum + (b.amplitude * 2 * FADE_PEAK_SLOPE) / b.wavelength, 0) +
+  Math.max(sumOverBands(0, slopeAtTempo), sumOverBands(1, slopeAtTempo)) +
   (BANDS.reduce((sum, b) => sum + (b.home ? b.amplitude : 0), 0) * FADE_PEAK_SLOPE) / HOME_RAMP;
 
-/** Total half-range of the field, metres: three times the former bound. */
-export const MAX_RELIEF = BANDS.reduce((sum, b) => sum + b.amplitude, 0);
+/** Total half-range of the field, metres, in the tempo that reaches highest. */
+export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(1, reliefAtTempo));
 
 /**
  * The mountains, which are NOT part of `heightAt` and are the reason the horizon has
@@ -203,9 +293,11 @@ function smoothstep01(t: number): number {
 }
 
 export class Landscape {
-  /** One hash tag per band, plus hilliness and the mountains. */
+  /** One hash tag per band tempo, plus hilliness, tempo and the mountains. */
   private readonly tags: readonly number[];
+  private readonly shortTags: readonly number[];
   private readonly hillTag: number;
+  private readonly tempoTag: number;
   private readonly mountainTags: readonly number[];
   /** Field value at the origin, subtracted so the homestead sits at y = 0. */
   private readonly datum: number;
@@ -214,6 +306,11 @@ export class Landscape {
     const base = seed >>> 0;
     this.tags = BANDS.map((_, i) => (base ^ 0x7f4a7c15) + i * 0x9e3779b9);
     this.hillTag = base ^ 0x1b873593;
+    // The short tempo is its OWN noise stream, not the long one resampled: sharing a
+    // tag would put both tempos' crests in the same places, and the crossfade would
+    // read as one hill breathing rather than as two different countries.
+    this.shortTags = BANDS.map((_, i) => (base ^ 0x5bf03635) + i * 0x9e3779b9);
+    this.tempoTag = base ^ 0x27d4eb2f;
     this.mountainTags = MOUNTAIN_BANDS.map((_, i) => (base ^ 0x2545f491) + i * 0x85ebca6b);
     this.datum = 0;
     this.datum = this.heightAt(0, 0);
@@ -250,9 +347,28 @@ export class Landscape {
     return HILLINESS_FLOOR + (1 - HILLINESS_FLOOR) * t;
   }
 
+  /**
+   * The road's PACE at a point, 0..1: 0 is the long tempo (kilometres per climb, the
+   * mountain pass), 1 is the short one (a crest every few hundred metres).
+   *
+   * Its own field, independent of hilliness, so how BIG the country is and how FAST
+   * it changes are separate questions. That gives four kinds of place instead of two:
+   * long climbs in tall country, long climbs in flat country, quick rollers in tall
+   * country, quick rollers in flat country.
+   *
+   * The 0.7 gain inside the smoothstep is hilliness', and for the same reason: it
+   * pushes the field past both ends of the ramp often enough that a fully long and a
+   * fully short region genuinely occur instead of everything hovering near a blend.
+   */
+  tempoAt(x: number, z: number): number {
+    const n = band(this.tempoTag, x / TEMPO_WAVELENGTH, z / TEMPO_WAVELENGTH);
+    return smoothstep01(0.5 + n * 0.7);
+  }
+
   /** Ground elevation at a world position, metres, relative to the homestead. */
   heightAt(x: number, z: number): number {
     let hilliness = -1;
+    let tempo = -1;
     let home = -1;
     let h = 0;
     for (let i = 0; i < BANDS.length; i++) {
@@ -269,6 +385,15 @@ export class Landscape {
         weight *= hilliness;
       }
       if (weight === 0) continue;
+      if (b.short) {
+        if (tempo < 0) tempo = this.tempoAt(x, z);
+        const long = b.amplitude * band(this.tags[i]!, x / b.wavelength, z / b.wavelength);
+        const short =
+          b.short.amplitude *
+          band(this.shortTags[i]!, x / b.short.wavelength, z / b.short.wavelength);
+        h += (long * (1 - tempo) + short * tempo) * weight;
+        continue;
+      }
       h += b.amplitude * band(this.tags[i]!, x / b.wavelength, z / b.wavelength) * weight;
     }
     return h - this.datum;

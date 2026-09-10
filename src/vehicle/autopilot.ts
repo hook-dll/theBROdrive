@@ -31,7 +31,6 @@ interface ModeConfig {
   readonly brakeAccel: number;
   readonly lookaheadBase: number;
   readonly lookaheadSpeed: number;
-  readonly hazardMargin: number;
   readonly brakeLead: number;
   readonly curveLead: number;
   /**
@@ -97,7 +96,6 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeAccel: 4.0,
     lookaheadBase: 11,
     lookaheadSpeed: 1.35,
-    hazardMargin: 1.4,
     brakeLead: 18,
     curveLead: 30,
     laneOffset: -ROAD_HALF_WIDTH / 2,
@@ -118,7 +116,6 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeAccel: 7.2,
     lookaheadBase: 9,
     lookaheadSpeed: 1.0,
-    hazardMargin: 0.45,
     brakeLead: 7,
     curveLead: 24,
     laneOffset: -ROAD_HALF_WIDTH / 2,
@@ -247,6 +244,14 @@ const PASSING_VERGE_M = 1.2;
 const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE_M;
 /** Outermost line either side that still keeps the body inside the verge allowance. */
 const EDGE_LINE_M = PASSING_EDGE - CAR_HALF_WIDTH_M;
+/**
+ * Indexed road props may use the wider graded shoulder, but only while an exact
+ * radius-based plan is active. Four metres clears the longest rotated trunk at the
+ * road edge; ordinary passing and accidental departures keep the tighter verge.
+ */
+const STATIC_AVOID_VERGE_M = 4;
+const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + STATIC_AVOID_VERGE_M;
+const STATIC_AVOID_LINE_M = STATIC_AVOID_EDGE - CAR_HALF_WIDTH_M;
 /** Enter only after a full departure; stay latched until the whole body is on asphalt. */
 const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
@@ -388,24 +393,10 @@ const PASS_MAX_HOLD_S = 20;
 /**
  * BEING STUCK, and getting out of it.
  *
- * A car that is asking for motion and not producing any is wedged, nosed into
- * something, or resting on ground it cannot climb. The old response was two seconds
- * of reverse with the wheels turned toward the road, after which ordinary guidance
- * resumed — and ordinary guidance aims at the same point it was aiming at before, so
- * the car drove straight back into the obstacle it had just backed away from.
- *
- * The manoeuvre is now the one a driver makes: back up with the wheels turned so the
- * NOSE swings toward the free side, then pull forward with them turned the other
- * way, and hold a lateral bias for the next stretch of road so the line that is
- * resumed goes round the obstacle instead of into it. A second stall within
- * `RECOVERY_RETRY_METRES` tries the other side, and after both sides have been tried
- * in the same place the car GIVES UP and waits: a road blocked from verge to verge
- * is a road blocked, and a car that keeps reversing and re-approaching a wall is
- * worse than one that sits in front of it. Moving 45 m of road, or the obstacle
- * going away, arms the manoeuvre again.
- *
- * Reversing is skipped when something is close behind: in traffic the car behind is
- * a worse problem than the one in front.
+ * A car asking for motion without making ground is wedged against scenery or blocked
+ * in an opposing queue. Recovery backs up, turns toward the road's right shoulder,
+ * pulls out, and retries the same radius-based line. There is deliberately no attempt
+ * limit: an autonomous car may wait for room behind, but it never abandons the task.
  */
 /** Recovery is forbidden while any physical traffic occupies this local envelope. */
 const DYNAMIC_BLOCKER_NEARBY_M = 12;
@@ -436,7 +427,10 @@ const RECOVERY_REVERSE_BRAKE = 0.72;
 const RECOVERY_CRAWL_MPS = 4.5;
 const RECOVERY_BIAS_METRES = 50;
 const RECOVERY_REAR_CLEAR_M = 5;
+/** Generic recovery remains bounded; indexed traffic roadblocks bypass this guard. */
 const RECOVERY_RETRY_METRES = 45;
+const RECOVERY_ATTEMPT_LIMIT = 2;
+const RECOVERY_REARM_S = 30;
 /**
  * How far off its lane the car holds after a pull-out. It has to be enough to CLEAR
  * what it was stuck on: 1.7 m left a body-width overlap with a car parked in the
@@ -444,9 +438,6 @@ const RECOVERY_RETRY_METRES = 45;
  * separation is a real pass.
  */
 const RECOVERY_BIAS_M = 2.2;
-const RECOVERY_ATTEMPT_LIMIT = 2;
-/** Seconds of getting nowhere after which a given-up manoeuvre is worth retrying. */
-const RECOVERY_REARM_S = 30;
 
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
@@ -519,6 +510,8 @@ export class Autopilot {
    */
   private plannedHazard: RoadHazard | null = null;
   private plannedLateral = 0;
+  /** True while easing back from the wider static-obstacle shoulder. */
+  private avoidanceReturning = false;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
   private appliedLateral = 0;
   /** Committed passing line while going round traffic, or null. */
@@ -551,7 +544,6 @@ export class Autopilot {
   private daylightFactor = 1;
   private oncomingGap = Infinity;
   private automaticLightsOn = false;
-  private automaticHighBeam = true;
   private playerHighBeamSuppressed = false;
   private playerHeadlightVehicle: Vehicle | null = null;
   private controlledVehicle: Vehicle | null = null;
@@ -673,9 +665,9 @@ export class Autopilot {
     this.recoveryTimer = 0;
     this.recoveryBias = 0;
     this.recoveryBiasUntil = 0;
+    this.avoidanceReturning = false;
     this.lastRecoveryAt = -Infinity;
     this.recoveryAttempts = 0;
-    this.automaticHighBeam = true;
     this.passLine = null;
     this.passClearAt = null;
     this.passRetryAfterS = 0;
@@ -716,8 +708,17 @@ export class Autopilot {
     this.travelled += speed * dt;
     this.sinceRecovery += dt;
     const wasRoadRecoveryActive = this.roadRecoveryActive;
-    if (Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE) {
+    const insideStaticAvoidance =
+      (this.plannedHazard !== null || this.avoidanceReturning) &&
+      Math.abs(projection.lateral) <= STATIC_AVOID_EDGE;
+    if (Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE && !insideStaticAvoidance) {
       this.roadRecoveryActive = true;
+    }
+    if (
+      this.avoidanceReturning &&
+      Math.abs(projection.lateral) <= OFFROAD_RECOVERY_EDGE
+    ) {
+      this.avoidanceReturning = false;
     }
     let offRoad = this.roadRecoveryActive;
     const roadRecoveryBias =
@@ -899,15 +900,12 @@ export class Autopilot {
     if (planned && planned.s + planned.radius + CAR_HALF_LENGTH_M < this.hintS) {
       this.plannedHazard = null;
       this.plannedLateral = 0;
+      this.avoidanceReturning = true;
     }
     if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
-      const line = this.detourLine(hazard, config);
-      if (line === null) {
-        mustStop = true;
-      } else {
-        this.plannedHazard = hazard;
-        this.plannedLateral = line;
-      }
+      this.plannedHazard = hazard;
+      this.plannedLateral = this.detourLine(hazard);
+      this.avoidanceReturning = false;
     }
     const hasIndexedDetour = hazard !== null && this.plannedHazard === hazard;
     const rayMatchesIndexedHazard =
@@ -991,7 +989,15 @@ export class Autopilot {
       lookahead *
       0.125 *
       config.chordGain;
-    const targetLateral = clamp(this.appliedLateral + chordShift, -PASSING_EDGE, PASSING_EDGE);
+    const lateralLimit =
+      this.plannedHazard !== null || this.avoidanceReturning
+        ? STATIC_AVOID_EDGE
+        : PASSING_EDGE;
+    const targetLateral = clamp(
+      this.appliedLateral + chordShift,
+      -lateralLimit,
+      lateralLimit,
+    );
     const waypointX = target.x + Math.cos(target.heading) * targetLateral;
     const waypointZ = target.z - Math.sin(target.heading) * targetLateral;
     const relativeX = waypointX - this.position.x;
@@ -1095,6 +1101,17 @@ export class Autopilot {
     }
     targetSpeed = Math.max(3, targetSpeed);
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
+    // Reach walking pace before the prop's near edge, then hold it until the rear of
+    // the car is clear. The same physical braking bound makes the approach gradual.
+    const avoiding = this.plannedHazard;
+    if (avoiding) {
+      const distanceToEdge = avoiding.s - avoiding.radius - this.hintS;
+      const avoidanceApproachSpeed = Math.sqrt(
+        AVOIDANCE_CRAWL_MPS * AVOIDANCE_CRAWL_MPS +
+          2 * currentBrakeAccel * Math.max(0, distanceToEdge - config.brakeLead),
+      );
+      targetSpeed = Math.min(targetSpeed, avoidanceApproachSpeed);
+    }
     // A prop the COMMANDED LINE already clears is scenery to drive past, not an
     // obstacle to brake for.
     //
@@ -1162,7 +1179,7 @@ export class Autopilot {
     const wantsProgress = vehicle.engineRunning && targetSpeed > 1;
     const unexplainedStaticStall =
       wantsProgress &&
-      (!this.trafficRecoveryPolicy || hazard !== null) &&
+      (!this.trafficRecoveryPolicy || hazard !== null || this.plannedHazard !== null) &&
       gap === Infinity &&
       !this.dynamicBlockerKnown &&
       !this.dynamicBodyAhead(
@@ -1312,44 +1329,16 @@ export class Autopilot {
   }
 
   /**
-   * Smallest detour that clears an indexed prop, or null if none fits.
+   * Right-side line that clears an indexed prop by its radius, the car body, and a
+   * fixed hysteresis margin. ReversedRoad mirrors lateral coordinates, so negative
+   * remains this driver's right shoulder in both traffic directions.
    *
-   * Sleeper takes the side that keeps it on its OWN half of the road wherever that
-   * fits, because crossing the centreline for a rock is what it is trying not to do;
-   * frantic takes whichever side is the smaller move from the line it is already on.
+   * Oversized obstacles clamp to the outer graded shoulder instead of producing a
+   * permanent stop. If that is still not enough, stuck recovery keeps retrying.
    */
-  private detourLine(hazard: RoadHazard, config: ModeConfig): number | null {
-    // Pick the smallest safe detour first, then decide about braking separately.
-    // A full sleeper margin before the compact clearance pushed centre-lane rocks
-    // to the road edge even when a modest lane change was enough.
-    const bodyClearance = hazard.radius + CAR_HALF_WIDTH_M;
-    const ownSide = Math.sign(config.laneOffset) || -1;
-    const clearanceLevels = [
-      bodyClearance + Math.min(config.hazardMargin, AVOID_HYSTERESIS_M),
-      bodyClearance + config.hazardMargin,
-      bodyClearance,
-    ];
-    for (const clearance of clearanceLevels) {
-      const left = hazard.lateral + clearance;
-      const right = hazard.lateral - clearance;
-      const leftFits = Math.abs(left) <= EDGE_LINE_M;
-      const rightFits = Math.abs(right) <= EDGE_LINE_M;
-      if (!leftFits && !rightFits) continue;
-      const own = ownSide < 0 ? right : left;
-      const other = ownSide < 0 ? left : right;
-      const ownFits = ownSide < 0 ? rightFits : leftFits;
-      const otherFits = ownSide < 0 ? leftFits : rightFits;
-      if (!config.overtakes && ownFits) return own;
-      if (!otherFits) return own;
-      if (!ownFits) return other;
-      // Whichever side needs the smaller move from the line already being held,
-      // so an off-centre hazard is passed without crossing the whole road and a
-      // plan in progress is not thrown away for its mirror image.
-      return Math.abs(own - this.appliedLateral) <= Math.abs(other - this.appliedLateral)
-        ? own
-        : other;
-    }
-    return null;
+  private detourLine(hazard: RoadHazard): number {
+    const clearance = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
+    return Math.max(hazard.lateral - clearance, -STATIC_AVOID_LINE_M);
   }
 
 
@@ -1504,17 +1493,7 @@ export class Autopilot {
     } else if (this.daylightFactor <= AUTO_LIGHTS_ON_DAY_FACTOR) {
       this.automaticLightsOn = true;
     }
-
-    if (!this.automaticLightsOn) {
-      vehicle.setHeadlights('off');
-      return;
-    }
-    if (this.automaticHighBeam) {
-      if (this.oncomingGap <= HIGH_BEAM_DIP_M) this.automaticHighBeam = false;
-    } else if (this.oncomingGap >= HIGH_BEAM_RESTORE_M) {
-      this.automaticHighBeam = true;
-    }
-    vehicle.setHeadlights(this.automaticHighBeam ? 'high' : 'low');
+    vehicle.setHeadlights(this.automaticLightsOn ? 'low' : 'off');
   }
 
   /**
@@ -1590,9 +1569,10 @@ export class Autopilot {
   }
 
   /**
-   * Chooses an escape side and enters the reverse (or pull-out) phase — unless both
-   * sides have already been tried here, in which case the road really is blocked and
-   * waiting is the correct manoeuvre.
+   * Enters the reverse (or pull-out) phase. Indexed traffic roadblocks and granted
+   * opposing deadlocks always retry on the road's right shoulder. Generic recovery
+   * retains its bounded alternating attempts so rough ground cannot make a car
+   * reverse indefinitely when there is no known obstacle.
    */
   private beginRecovery(
     vehicle: Vehicle,
@@ -1602,42 +1582,35 @@ export class Autopilot {
     originZ: number,
     committedDeadlock: boolean,
   ): void {
-    // "Same place" is both a distance and a WAIT. Distance alone made the give-up
-    // permanent: re-arming needed 45 m of road, and a car wedged against something is
-    // precisely a car that will never cover 45 m, so a driver who had tried both
-    // sides once sat there for the rest of the session. The world moves — traffic
-    // clears, a prop is destroyed, the ground settles — so after `RECOVERY_REARM_S`
-    // of getting nowhere it is worth trying again.
+    const persistentRoadblock =
+      committedDeadlock || (this.trafficRecoveryPolicy && this.plannedHazard !== null);
     const samePlace =
       this.travelled - this.lastRecoveryAt < RECOVERY_RETRY_METRES &&
       this.sinceRecovery < RECOVERY_REARM_S;
-    if (samePlace && this.recoveryAttempts >= RECOVERY_ATTEMPT_LIMIT) {
+    if (
+      !persistentRoadblock &&
+      samePlace &&
+      this.recoveryAttempts >= RECOVERY_ATTEMPT_LIMIT
+    ) {
       this.stoppedFor = 0;
       return;
     }
-    // A right-of-way escape stays on the shoulder the car already occupies; crossing
-    // the whole road through the opposing head is not an escape. From its own lane it
-    // chooses that lane's outer shoulder. Ordinary static recovery may try the other
-    // side on its second attempt.
-    this.recoverySide = committedDeadlock
-      ? Math.sign(
-          Math.abs(lateral) > CAR_HALF_WIDTH_M
-            ? lateral
-            : config.laneOffset || -1,
-        )
+    this.recoverySide = persistentRoadblock
+      ? Math.sign(config.laneOffset || -1)
       : samePlace
         ? -this.recoverySide
         : Math.abs(lateral) > CAR_HALF_WIDTH_M
           ? -Math.sign(lateral)
           : -Math.sign(config.laneOffset || -1);
-
-    this.recoveryAttempts = samePlace ? this.recoveryAttempts + 1 : 1;
+    this.recoveryAttempts = persistentRoadblock
+      ? 0
+      : samePlace
+        ? this.recoveryAttempts + 1
+        : 1;
     this.lastRecoveryAt = this.travelled;
     this.sinceRecovery = 0;
     this.stoppedFor = 0;
     this.recoveryCommitted = committedDeadlock;
-    this.plannedHazard = null;
-    this.plannedLateral = 0;
     this.passLine = null;
     // Reversing into the car behind is worse than the obstacle in front, so a blocked
     // tail skips straight to the pull-out and steers out of the problem instead.

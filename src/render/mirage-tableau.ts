@@ -13,7 +13,7 @@ const GONE_FROM_ROAD_M = 11;
 
 const MAX_PLANTS = 420;
 const MAX_BLOCKS = 512;
-const MAX_WATER = 384;
+const MAX_SHIPS = 240;
 
 const SALT_GAP = 0x31a7;
 const SALT_LENGTH = 0x42b9;
@@ -22,7 +22,7 @@ const SALT_PLACEMENT = 0x64dd;
 const SALT_SHAPE = 0x75ef;
 const SALT_COLOUR = 0x8711;
 
-export const MIRAGE_TABLEAU_KINDS = ['palms', 'trees', 'cacti', 'city', 'fountains'] as const;
+export const MIRAGE_TABLEAU_KINDS = ['palms', 'trees', 'cacti', 'city', 'ships'] as const;
 export type MirageKind = (typeof MIRAGE_TABLEAU_KINDS)[number];
 
 interface Encounter {
@@ -47,6 +47,30 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
+/**
+ * A mirage colour authored in DISPLAY space.
+ *
+ * Pass 2 in core/renderer.ts copies the linear scene target to the canvas
+ * untouched, so an unlit material's colour reaches the screen at its own numeric
+ * value. Converting an authored hex from sRGB darkens it by a whole gamma, and a
+ * tableau multiplies its card palette by an instance colour, so that darkening
+ * landed twice: palm fronds measured one or two code values on screen — a black
+ * paper cut-out of a palm rather than a green one.
+ */
+function displayColour(hex: number): THREE.Color {
+  return new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
+}
+
+/**
+ * Per-kind haze tint applied to every instance of a grove. Near white on purpose:
+ * it multiplies the card palette, so it varies the light on a plant instead of
+ * replacing its colour.
+ */
+const PALM_TINT = displayColour(0xfff1dc);
+const TREE_TINT = displayColour(0xf9f2e2);
+const CACTUS_TINT = displayColour(0xf3f8e6);
+const SHIP_TINT = displayColour(0xffe9d2);
+
 
 /** Two perpendicular copies of every triangle: a readable flat from any road angle. */
 function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.BufferGeometry {
@@ -68,8 +92,8 @@ function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.Buff
 
 function palmGeometry(): THREE.BufferGeometry {
   return crossedCardGeometry((triangle) => {
-    const trunk = new THREE.Color(0x76503a);
-    const leaf = new THREE.Color(0x46633a);
+    const trunk = displayColour(0xcb9a67);
+    const leaf = displayColour(0x86c96d);
     triangle(-0.055, 0, 0.055, 0, 0.035, 0.72, trunk);
     triangle(-0.055, 0, 0.035, 0.72, -0.015, 0.72, trunk);
     const crownX = 0.01;
@@ -93,8 +117,8 @@ function palmGeometry(): THREE.BufferGeometry {
 
 function treeGeometry(): THREE.BufferGeometry {
   return crossedCardGeometry((triangle) => {
-    const trunk = new THREE.Color(0x66503c);
-    const leaf = new THREE.Color(0x526343);
+    const trunk = displayColour(0xbe9066);
+    const leaf = displayColour(0x9ad081);
     triangle(-0.07, 0, 0.075, 0, 0.045, 0.62, trunk);
     triangle(-0.07, 0, 0.045, 0.62, -0.03, 0.62, trunk);
     const crown = (x: number, y: number, rx: number, ry: number, z: number): void => {
@@ -111,8 +135,8 @@ function treeGeometry(): THREE.BufferGeometry {
 
 function cactusGeometry(): THREE.BufferGeometry {
   return crossedCardGeometry((triangle) => {
-    const cactus = new THREE.Color(0x58714b);
-    const bloom = new THREE.Color(0xb66d51);
+    const cactus = displayColour(0x8ecb8b);
+    const bloom = displayColour(0xff9f72);
     const quad = (x0: number, y0: number, x1: number, y1: number, z = 0): void => {
       triangle(x0, y0, x1, y0, x1, y1, cactus, z);
       triangle(x0, y0, x1, y1, x0, y1, cactus, z);
@@ -126,6 +150,52 @@ function cactusGeometry(): THREE.BufferGeometry {
     triangle(0.25, 0.86, 0.41, 0.86, 0.34, 0.94, bloom, -0.005);
   });
 }
+/**
+ * A beached freighter with its plating gone: bow, broken stern, a leaning
+ * deckhouse and the frames still standing where the hull opened up.
+ *
+ * Authored one unit tall like every other card, so an instance's height scales the
+ * whole wreck. Rust reads as a palette rather than a texture: three warm tones plus
+ * a salt-bleached deck are enough to tell hull from superstructure at a kilometre.
+ */
+function shipGeometry(): THREE.BufferGeometry {
+  return crossedCardGeometry((triangle) => {
+    const hull = displayColour(0xc06844);
+    const shadedHull = displayColour(0x944b2f);
+    const rust = displayColour(0xe08a4c);
+    const deck = displayColour(0xd6bb95);
+    const quad = (
+      x0: number,
+      y0: number,
+      x1: number,
+      y1: number,
+      colour: THREE.Color,
+      z = 0,
+    ): void => {
+      triangle(x0, y0, x1, y0, x1, y1, colour, z);
+      triangle(x0, y0, x1, y1, x0, y1, colour, z);
+    };
+    // Hull, raked bow to the right, torn stern to the left.
+    quad(-0.52, 0, 0.5, 0.33, hull);
+    triangle(0.5, 0, 0.78, 0.4, 0.5, 0.4, hull);
+    triangle(-0.52, 0, -0.52, 0.33, -0.72, 0.28, shadedHull);
+    // Waterline stripe: the one horizontal that makes the shape read as a ship.
+    quad(-0.52, 0.1, 0.5, 0.15, rust, -0.001);
+    quad(-0.52, 0.33, 0.5, 0.38, deck, -0.002);
+    // Ribs standing where the plating has gone.
+    for (const x of [-0.36, -0.18, 0.02, 0.22]) {
+      quad(x, 0.38, x + 0.022, 0.52, shadedHull, -0.003);
+    }
+    // Deckhouse, bridge windows and funnel, all set aft of midships.
+    quad(-0.34, 0.38, 0.02, 0.63, shadedHull, -0.003);
+    quad(-0.3, 0.5, -0.02, 0.56, rust, -0.004);
+    quad(-0.2, 0.63, -0.07, 0.8, rust, -0.004);
+    // Mast, still upright, with a broken yard.
+    quad(0.26, 0.38, 0.29, 0.95, shadedHull, -0.003);
+    triangle(0.12, 0.82, 0.29, 0.86, 0.29, 0.78, shadedHull, -0.004);
+  });
+}
+
 
 function cardMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
@@ -157,9 +227,9 @@ function blockMaterial(colour: number): THREE.MeshBasicMaterial {
  * Every encounter is deterministic, starts 3–8 km after the previous one, and draws
  * from a shuffled set of five forms so each group of five contains every form once.
  * Only the active encounter owns instance matrices. Nothing enters physics, streaming,
- * saves, terrain, or shadow passes; an active forest is one draw and the fountain alley
- * is two. Instance coordinates are local to the encounter anchor, preserving precision
- * even at the far end of the forty-thousand-kilometre road.
+ * saves, terrain, or shadow passes; every tableau is a single draw. Instance
+ * coordinates are local to the encounter anchor, preserving precision even at the far
+ * end of the forty-thousand-kilometre road.
  */
 export class MirageTableau {
   private readonly root = new THREE.Group();
@@ -167,7 +237,7 @@ export class MirageTableau {
   private readonly trees: THREE.InstancedMesh;
   private readonly cacti: THREE.InstancedMesh;
   private readonly blocks: THREE.InstancedMesh;
-  private readonly water: THREE.InstancedMesh;
+  private readonly ships: THREE.InstancedMesh;
   private readonly materials: readonly THREE.MeshBasicMaterial[];
   private readonly encounters: readonly Encounter[];
 
@@ -197,15 +267,15 @@ export class MirageTableau {
     const treeMaterial = cardMaterial();
     const cactusMaterial = cardMaterial();
     const stoneMaterial = blockMaterial(0xffffff);
-    const waterMaterial = blockMaterial(0x92cbd0);
-    this.materials = [palmMaterial, treeMaterial, cactusMaterial, stoneMaterial, waterMaterial];
+    const shipMaterial = cardMaterial();
+    this.materials = [palmMaterial, treeMaterial, cactusMaterial, stoneMaterial, shipMaterial];
 
     this.palms = new THREE.InstancedMesh(palmGeometry(), palmMaterial, MAX_PLANTS);
     this.trees = new THREE.InstancedMesh(treeGeometry(), treeMaterial, MAX_PLANTS);
     this.cacti = new THREE.InstancedMesh(cactusGeometry(), cactusMaterial, MAX_PLANTS);
     const box = new THREE.BoxGeometry(1, 1, 1);
     this.blocks = new THREE.InstancedMesh(box, stoneMaterial, MAX_BLOCKS);
-    this.water = new THREE.InstancedMesh(box, waterMaterial, MAX_WATER);
+    this.ships = new THREE.InstancedMesh(shipGeometry(), shipMaterial, MAX_SHIPS);
 
     for (const mesh of this.meshes) {
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -283,8 +353,7 @@ export class MirageTableau {
 
   setPreviewDayFactor(dayFactor: number): void {
     const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor);
-    for (let i = 0; i < this.materials.length - 1; i++) this.materials[i]!.opacity = alpha;
-    this.materials[this.materials.length - 1]!.opacity = alpha * 0.74;
+    for (const material of this.materials) material.opacity = alpha;
     this.root.visible = this.previewActive && alpha > 0.002;
   }
 
@@ -294,7 +363,7 @@ export class MirageTableau {
   }
 
   private get meshes(): readonly THREE.InstancedMesh[] {
-    return [this.palms, this.trees, this.cacti, this.blocks, this.water];
+    return [this.palms, this.trees, this.cacti, this.blocks, this.ships];
   }
 
   private buildSchedule(): readonly Encounter[] {
@@ -304,7 +373,7 @@ export class MirageTableau {
     let permutation: MirageKind[] = [];
     while (startS < this.road.length) {
       if (index % 5 === 0) {
-        permutation = ['palms', 'trees', 'cacti', 'city', 'fountains'];
+        permutation = ['palms', 'trees', 'cacti', 'city', 'ships'];
         const block = Math.floor(index / 5);
         for (let i = permutation.length - 1; i > 0; i--) {
           const j = Math.floor(hashUnit3(this.seed, block * 8 + i, SALT_VARIANT) * (i + 1));
@@ -357,19 +426,19 @@ export class MirageTableau {
     this.anchorZ = anchor.z;
     switch (encounter.kind) {
       case 'palms':
-        this.buildPlants(this.palms, encounter, 360, 9, 185, 8, 18, 0.025, 0.24, 0.28);
+        this.buildPlants(this.palms, encounter, 360, 9, 185, 8, 18, PALM_TINT);
         break;
       case 'trees':
-        this.buildPlants(this.trees, encounter, 390, 9, 150, 7, 16, 0.22, 0.2, 0.3);
+        this.buildPlants(this.trees, encounter, 390, 9, 150, 7, 16, TREE_TINT);
         break;
       case 'cacti':
-        this.buildPlants(this.cacti, encounter, 420, 8, 220, 3.5, 11, 0.28, 0.22, 0.34);
+        this.buildPlants(this.cacti, encounter, 420, 8, 220, 3.5, 11, CACTUS_TINT);
         break;
       case 'city':
         this.buildCity(encounter);
         break;
-      case 'fountains':
-        this.buildFountains(encounter);
+      case 'ships':
+        this.buildShips(encounter);
         break;
     }
   }
@@ -382,9 +451,7 @@ export class MirageTableau {
     lateralMax: number,
     heightMin: number,
     heightMax: number,
-    hue: number,
-    saturation: number,
-    lightness: number,
+    tint: THREE.Color,
   ): void {
     const instanceCount = Math.max(1, Math.round(count * this.densityScale));
     for (let i = 0; i < instanceCount; i++) {
@@ -400,11 +467,15 @@ export class MirageTableau {
       const yaw = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE + 2) * Math.PI;
 
       this.setTransform(mesh, i, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, height * widthScale, height, height * widthScale, yaw);
-      this.colour.setHSL(
-        hue + (hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_COLOUR) - 0.5) * 0.025,
-        saturation,
-        lightness * (0.78 + depth * 0.35),
-      );
+      // The instance colour MULTIPLIES the card palette, so it is a haze tint near
+      // white rather than a second base colour. Two dark factors multiplied is what
+      // made a grove black; here the far rows are lifted toward the shimmering air
+      // and the near ones keep their own green.
+      const lift =
+        (0.9 + depth * 0.3) *
+        (0.94 +
+          hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_COLOUR) * 0.14);
+      this.colour.copy(tint).multiplyScalar(lift);
       mesh.setColorAt(i, this.colour);
     }
     mesh.count = instanceCount;
@@ -443,7 +514,7 @@ export class MirageTableau {
         totalHeight += upperHeight;
       }
       if (hashUnit3(this.seed, key, SALT_SHAPE + 5) > 0.72) {
-        this.colour.setHSL(0.07, 0.18, 0.32 + depth * 0.08);
+        this.colour.setHSL(0.09, 0.2, 0.66 + depth * 0.1);
         count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY + totalHeight, point.z - this.anchorZ, width * 1.08, 0.7, buildingDepth * 1.08, heading, this.colour);
       }
     }
@@ -453,47 +524,64 @@ export class MirageTableau {
     if (this.blocks.instanceColor) this.blocks.instanceColor.needsUpdate = true;
   }
 
+  /**
+   * Sunlit render, not albedo: these lightnesses are what the screen receives.
+   * See `displayColour`.
+   */
   private cityColour(key: number, depth: number, tier: number): void {
     this.colour.setHSL(
-      0.055 + hashUnit3(this.seed, key, SALT_COLOUR + tier) * 0.035,
-      0.18 + hashUnit3(this.seed, key, SALT_COLOUR + tier + 2) * 0.16,
-      0.28 + depth * 0.1,
+      0.075 + hashUnit3(this.seed, key, SALT_COLOUR + tier) * 0.035,
+      0.2 + hashUnit3(this.seed, key, SALT_COLOUR + tier + 2) * 0.18,
+      0.6 + depth * 0.14,
     );
   }
 
-  private buildFountains(encounter: Encounter): void {
-    let blockCount = 0;
-    let waterCount = 0;
-    const rows = Math.max(1, Math.floor(Math.max(8, encounter.length / 42) * this.densityScale));
-    const stone = new THREE.Color(0xa69a82);
-    const paleStone = new THREE.Color(0xc0b59d);
-    const water = new THREE.Color(0x8bc9cf);
-    for (let row = 0; row < rows; row++) {
-      const along = (row + 0.5) / rows;
-      const s = encounter.startS + along * along * encounter.length;
-      const heading = this.road.sampleAt(s).heading;
-      for (const side of [-1, 1]) {
-        const point = this.road.offsetPoint(s, side * 14);
-        const ground = this.terrain.heightAt(point.x, point.z, s);
-        const x = point.x - this.anchorX;
-        const y = ground - this.anchorY;
-        const z = point.z - this.anchorZ;
-        blockCount = this.addBox(blockCount, x, y, z, 8.5, 0.5, 8.5, heading, stone);
-        blockCount = this.addBox(blockCount, x, y + 0.5, z, 1.1, 2.2, 1.1, heading, paleStone);
-        blockCount = this.addBox(blockCount, x, y + 2.7, z, 4.4, 0.32, 4.4, heading, paleStone);
-        waterCount = this.addWater(waterCount, x, y + 4.35, z, 0.12, 3.5, 0.12, heading, 0, water);
-        waterCount = this.addWater(waterCount, x - 0.8, y + 3.75, z, 0.09, 2.8, 0.09, heading, -0.48, water);
-        waterCount = this.addWater(waterCount, x + 0.8, y + 3.75, z, 0.09, 2.8, 0.09, heading, 0.48, water);
-      }
+  /**
+   * A drowned fleet the sea left behind: hulks packed close enough to overlap from
+   * the road, each one grounded at its own angle. Placement is the plants' — biased
+   * toward the near verge and thinning outward — because a wreck field wants the
+   * same "walk into it" depth a grove does, not the fountains' two tidy rows.
+   */
+  private buildShips(encounter: Encounter): void {
+    const instanceCount = Math.max(1, Math.round(170 * this.densityScale));
+    for (let i = 0; i < instanceCount; i++) {
+      const key = encounter.index * MAX_SHIPS + i;
+      const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
+      const s = encounter.startS + 10 + along * along * (encounter.length - 20);
+      const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
+      const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
+      const lateral = side * (26 + depth * depth * 210);
+      const point = this.road.offsetPoint(s, lateral);
+      const ground = this.terrain.heightAt(point.x, point.z, s);
+      // A freighter is long, so the card is scaled well past its height; the list
+      // ranges from a coaster to something that took a dock to build.
+      const height = 7 + hashUnit3(this.seed, key, SALT_SHAPE) * 21;
+      const length = height * (2.1 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 1.5);
+      const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI * 2;
+      // Grounded hulls lie over; the lean also settles the keel into the sand.
+      const roll = (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
+      this.setTransform(
+        this.ships,
+        i,
+        point.x - this.anchorX,
+        ground - this.anchorY,
+        point.z - this.anchorZ,
+        length,
+        height,
+        length,
+        yaw,
+        roll,
+      );
+      const lift =
+        (0.86 + depth * 0.32) *
+        (0.9 + hashUnit3(this.seed, key, SALT_COLOUR) * 0.2);
+      this.colour.copy(SHIP_TINT).multiplyScalar(lift);
+      this.ships.setColorAt(i, this.colour);
     }
-    this.blocks.count = blockCount;
-    this.water.count = waterCount;
-    this.blocks.visible = true;
-    this.water.visible = true;
-    this.blocks.instanceMatrix.needsUpdate = true;
-    this.water.instanceMatrix.needsUpdate = true;
-    if (this.blocks.instanceColor) this.blocks.instanceColor.needsUpdate = true;
-    if (this.water.instanceColor) this.water.instanceColor.needsUpdate = true;
+    this.ships.count = instanceCount;
+    this.ships.visible = true;
+    this.ships.instanceMatrix.needsUpdate = true;
+    if (this.ships.instanceColor) this.ships.instanceColor.needsUpdate = true;
   }
 
   private addBox(
@@ -509,23 +597,6 @@ export class MirageTableau {
   ): number {
     this.setTransform(this.blocks, index, x, groundY + height * 0.5, z, width, height, depth, yaw);
     this.blocks.setColorAt(index, colour);
-    return index + 1;
-  }
-
-  private addWater(
-    index: number,
-    x: number,
-    y: number,
-    z: number,
-    width: number,
-    height: number,
-    depth: number,
-    yaw: number,
-    roll: number,
-    colour: THREE.Color,
-  ): number {
-    this.setTransform(this.water, index, x, y, z, width, height, depth, yaw, roll);
-    this.water.setColorAt(index, colour);
     return index + 1;
   }
 
