@@ -1683,8 +1683,6 @@ async function boot(): Promise<void> {
 
   const loop = new GameLoop({ fixedUpdate, render });
   loop.setRenderFps(world.state.settings.graphicsQuality === 'acceptable' ? 30 : null);
-  loading.classList.add('is-hidden');
-  loop.start();
 
   /**
    * The dev spawn tool behind `PauseHooks.spawnVehicle`. Defined unconditionally so
@@ -2021,6 +2019,18 @@ async function boot(): Promise<void> {
     cinema: toggleCinema,
   });
   input.attachTouch(touch);
+  // Prime the exact live render path while the loading cover still owns the screen.
+  // The first pass establishes sky/fog/post uniforms and bakes the environment;
+  // compileAsync then waits out parallel GPU compilation. Draw once more with those
+  // programs ready before handing the canvas to the player. Cold and cache-warm
+  // launches therefore cross the same visual-readiness barrier.
+  render(0, 0);
+  await renderer.waitForFrameShaders();
+  render(0, 0);
+  loading.classList.add('is-hidden');
+  // Start only after every frame callback dependency exists. Starting above the
+  // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
+  loop.start();
 }
 
 
