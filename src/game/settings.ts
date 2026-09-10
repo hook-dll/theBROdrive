@@ -85,7 +85,7 @@ export interface Settings {
   masterVolume: number;
   /** Car-radio volume, 0..1. */
   radioVolume: number;
-  /** Number of temporary road-traffic cars, in [0, 30] and even increments. */
+  /** Maximum number of temporary road-traffic cars; zero disables traffic. */
   trafficCount: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;

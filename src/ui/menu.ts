@@ -1044,12 +1044,12 @@ export class MainMenu {
             sliderField(
               'Traffic',
               'gameplay',
-              'Temporary road cars. Zero turns traffic off; higher values add more cars.',
+              'Maximum road cars. The live stream varies below this cap; zero turns traffic off.',
               TRAFFIC_COUNT_MIN,
               TRAFFIC_COUNT_MAX,
               TRAFFIC_COUNT_STEP,
               () => settings.trafficCount,
-              (value) => `${Math.round(value)} cars`,
+              (value) => (value === 0 ? 'Off' : `up to ${Math.round(value)} cars`),
               (value) => {
                 settings.trafficCount = value;
               },

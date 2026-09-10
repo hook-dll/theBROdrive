@@ -1014,8 +1014,23 @@ async function boot(): Promise<void> {
         autopilot.drive(dt, driving, f, origin.x, origin.z);
       }
       driving.fixedUpdate(dt, f);
-      if (f.toggleLights) driving.cycleHeadlights();
-      autopilot.syncPlayerHighBeam(driving);
+      if (f.toggleLights) {
+        driving.cycleHeadlights();
+        // The switch is the driver's from here: an engaged autopilot's automatic
+        // lamps otherwise rewrote this on the next fixed step, so L did nothing.
+        autopilot.releaseAutomaticHeadlights();
+        hud.setToast(
+          driving.headlights === 'off'
+            ? 'headlights off'
+            : driving.headlights === 'low'
+              ? 'headlights: dipped beam'
+              : 'headlights: main beam',
+        );
+      }
+      // Only an engaged autopilot dips for oncoming traffic. Left running while the
+      // player drives, it kept writing its own idea of the beam state onto the car
+      // every fixed step and fought the driver for the switch.
+      if (autopilot.engaged) autopilot.syncPlayerHighBeam(driving);
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
       if (f.cycleTyres) {

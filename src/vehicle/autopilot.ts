@@ -570,9 +570,18 @@ export class Autopilot {
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
   private speedCapValue = Infinity;
+  /** Ambient traffic may use a per-driver following distance. */
+  private followingHeadwayValue: number | null = null;
   private daylightFactor = 1;
   private oncomingGap = Infinity;
   private automaticLightsOn = false;
+  /**
+   * Whether this driver still owns the light switch. Traffic always does; the
+   * player's autopilot gives it up the moment the driver presses the switch itself,
+   * because otherwise the automation rewrote the choice on the very next fixed step
+   * and the key looked broken.
+   */
+  private automaticLightsOwned = true;
   private playerHighBeamSuppressed = false;
   private playerHeadlightVehicle: Vehicle | null = null;
   private controlledVehicle: Vehicle | null = null;
@@ -633,6 +642,9 @@ export class Autopilot {
    * queueing politely behind cars it was theoretically 60 km/h quicker than.
    */
   setSpeedCap(mps: number): void { this.speedCapValue = mps; }
+  setFollowingHeadway(seconds: number): void {
+    this.followingHeadwayValue = clamp(seconds, 0.9, 3.4);
+  }
   setTrafficRecoveryPolicy(enabled: boolean): void {
     this.trafficRecoveryPolicy = enabled;
   }
@@ -684,6 +696,9 @@ export class Autopilot {
   setEngaged(engaged: boolean): void {
     if (!engaged) this.controlledVehicle?.setIndicator('off');
     this.engagedValue = engaged;
+    // A fresh engagement is a fresh mandate: the automation drives the lamps again
+    // until the driver takes the switch back.
+    if (engaged) this.automaticLightsOwned = true;
     this.hintValid = false;
     this.stoppedFor = 0;
     this.sinceRecovery = RECOVERY_REARM_S;
@@ -1239,7 +1254,8 @@ export class Autopilot {
       const stoppingCap = Math.sqrt(
         leadSpeed * leadSpeed + 2 * currentBrakeAccel * closingRoom,
       );
-      const headwayGap = FOLLOW_STANDOFF_M + speed * config.headwayS;
+      const headwayGap =
+        FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
       const followCap = Math.max(0, leadSpeed + (gap - headwayGap) / FOLLOW_RELAX_S);
       targetSpeed = Math.min(targetSpeed, stoppingCap, followCap);
     }
@@ -1575,7 +1591,13 @@ export class Autopilot {
     return true;
   }
 
+  /** Surrenders the light switch to the driver until this autopilot is re-engaged. */
+  releaseAutomaticHeadlights(): void {
+    this.automaticLightsOwned = false;
+  }
+
   private updateAutomaticHeadlights(vehicle: Vehicle): void {
+    if (!this.automaticLightsOwned) return;
     if (this.automaticLightsOn) {
       if (this.daylightFactor >= AUTO_LIGHTS_OFF_DAY_FACTOR) this.automaticLightsOn = false;
     } else if (this.daylightFactor <= AUTO_LIGHTS_ON_DAY_FACTOR) {

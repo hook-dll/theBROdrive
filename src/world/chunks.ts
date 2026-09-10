@@ -181,6 +181,25 @@ export class ChunkStreamer {
   }
 
   /**
+   * Completed chunks against the visual window the last update asked for.
+   *
+   * Boot reports and waits on this: `hasPending` alone cannot tell "nothing queued
+   * yet" from "everything built", and a resumed drive must not start over chunks
+   * that have not run a single provider.
+   */
+  get readiness(): { readonly ready: number; readonly wanted: number } {
+    const clamped = Math.min(Math.max(this.previousPlayerS ?? 0, 0), this.road.length);
+    const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
+    const min = Math.max(0, playerChunk - VISUAL_RADIUS);
+    const max = Math.min(this.lastChunkIndex, playerChunk + VISUAL_RADIUS);
+    let ready = 0;
+    for (let index = min; index <= max; index++) {
+      if (this.built.get(index)?.complete) ready++;
+    }
+    return { ready, wanted: max - min + 1 };
+  }
+
+  /**
    * Push the shared night state into every live chunk that owns lamps. Cheap:
    * each provider does its own nearest-fixture selection over per-chunk lists.
    */
