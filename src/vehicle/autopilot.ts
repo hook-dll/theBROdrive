@@ -252,6 +252,29 @@ const EDGE_LINE_M = PASSING_EDGE - CAR_HALF_WIDTH_M;
 const STATIC_AVOID_VERGE_M = 4;
 const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + STATIC_AVOID_VERGE_M;
 const STATIC_AVOID_LINE_M = STATIC_AVOID_EDGE - CAR_HALF_WIDTH_M;
+/**
+ * BYPASSING SOMETHING STOPPED IN THE LANE, on the driver's own side.
+ *
+ * A stopped car is not an indexed prop: the corridor probe reports a distance, not a
+ * footprint, so there is no radius to build a line from. The line is therefore fixed
+ * and taken from the ROAD — far enough right that the whole body sits outside the
+ * asphalt, which clears anything standing on it whatever its width and however it is
+ * angled. It stays inside the graded shoulder the indexed detour already uses, and
+ * well short of the pole line at 6 m (see `POLE_LATERAL`, world/props.ts).
+ */
+const BLOCKER_BYPASS_LINE_M = ROAD_HALF_WIDTH + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
+/**
+ * How long the bypass is held past the ray hit on the blocker's front face: the
+ * longest catalogue body plus room for our own rear bumper, so the line is never
+ * released while the car is still alongside it.
+ */
+const BLOCKER_BODY_M = 5;
+/** Road the bypass line must be PROVEN clear over, beyond the blocker itself. */
+const BLOCKER_BYPASS_CLEAR_M = 14;
+/** The commanded line counts as reached within this, metres. */
+const BLOCKER_BYPASS_TOLERANCE_M = 0.35;
+/** Nose distance below which contact is imminent whatever the plan says. */
+const BLOCKER_BYPASS_CONTACT_M = 2;
 /** Enter only after a full departure; stay latched until the whole body is on asphalt. */
 const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
 const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
@@ -510,6 +533,12 @@ export class Autopilot {
    */
   private plannedHazard: RoadHazard | null = null;
   private plannedLateral = 0;
+  /**
+   * True while `plannedHazard` is a synthesised stopped-traffic bypass rather than an
+   * indexed prop. The manoeuvre is the same; only its geometry is measured instead of
+   * indexed, and a lead that must be crawled past is not a lead to queue behind.
+   */
+  private blockerBypass = false;
   /** True while easing back from the wider static-obstacle shoulder. */
   private avoidanceReturning = false;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
@@ -534,8 +563,8 @@ export class Autopilot {
   private deadlockPermission = false;
   /** Dense ambient streams disable new overtakes; an active pass is still completed. */
   private passingEnabled = true;
-  /** Signed lateral direction the recovery is escaping toward. */
-  private recoverySide = 1;
+  /** Signed lateral direction the recovery is escaping toward; the driver's right. */
+  private recoverySide = -1;
   private recoveryBias = 0;
   private recoveryBiasUntil = 0;
   private lastRecoveryAt = -Infinity;
@@ -680,6 +709,7 @@ export class Autopilot {
     if (!engaged) {
       this.plannedHazard = null;
       this.plannedLateral = 0;
+      this.blockerBypass = false;
       this.appliedLateral = 0;
     }
   }
@@ -752,6 +782,7 @@ export class Autopilot {
       }
       this.plannedHazard = null;
       this.plannedLateral = 0;
+      this.blockerBypass = false;
       this.passLine = null;
     }
     // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
@@ -900,12 +931,51 @@ export class Autopilot {
     if (planned && planned.s + planned.radius + CAR_HALF_LENGTH_M < this.hintS) {
       this.plannedHazard = null;
       this.plannedLateral = 0;
+      this.blockerBypass = false;
       this.avoidanceReturning = true;
     }
     if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
       this.plannedHazard = hazard;
       this.plannedLateral = this.detourLine(hazard);
+      this.blockerBypass = false;
       this.avoidanceReturning = false;
+    }
+    // A STOPPED CAR IS AN OBSTACLE, AND AN OBSTACLE IS PASSED ON THE DRIVER'S RIGHT.
+    //
+    // The oncoming lane was the only line this planner had for anything dynamic, so
+    // a wreck or the head of a queue standing in the right-hand lane sent every car
+    // — in both directions — across the centreline, where each one then waited for
+    // the lane the other was standing in. Nothing moved, and a mode that does not
+    // overtake at all simply queued behind the obstacle for good.
+    //
+    // A CONFIRMED stationary blocker is therefore planned exactly like an indexed
+    // prop: one committed line on this car's own side, the same crawl past it, and
+    // the same latch that holds the line until the rear bumper is clear. The
+    // oncoming lane keeps the job it is for — overtaking traffic that is MOVING.
+    if (
+      !offRoad &&
+      this.recoveryPhase === 'none' &&
+      this.plannedHazard === null &&
+      gap < Infinity &&
+      this.leadIsParked &&
+      gap <= Math.max(PASS_TRIGGER_MIN_M, speed * PASS_TRIGGER_SECONDS)
+    ) {
+      const bypass = Math.sign(config.laneOffset || -1) * BLOCKER_BYPASS_LINE_M;
+      const need = gap + BLOCKER_BYPASS_CLEAR_M;
+      // Commit only to a line the probe has actually cleared. A blocker standing
+      // half on the shoulder itself leaves no room out there, and that is the one
+      // case where crossing to the oncoming lane remains the better answer.
+      if (this.laneProbe(vehicle, bypass, need, originX, originZ) >= need) {
+        this.plannedHazard = {
+          s: this.hintS + gap,
+          lateral: config.laneOffset,
+          radius: BLOCKER_BODY_M,
+          breakable: false,
+        };
+        this.plannedLateral = bypass;
+        this.blockerBypass = true;
+        this.avoidanceReturning = false;
+      }
     }
     const hasIndexedDetour = hazard !== null && this.plannedHazard === hazard;
     const rayMatchesIndexedHazard =
@@ -1146,10 +1216,25 @@ export class Autopilot {
         hasIndexedDetour ? Math.max(AVOIDANCE_CRAWL_MPS, brakingSpeed) : brakingSpeed,
       );
     }
+    // A COMMITTED BYPASS MUST BE ALLOWED TO CREEP PAST WHAT IT IS GOING ROUND.
+    //
+    // The follow rule stops the car `FOLLOW_STANDOFF_M` behind whatever is in its
+    // corridor, and while the body is still in the lane that corridor is exactly
+    // where the parked blocker is: the line was already out on the shoulder, the car
+    // was not allowed to move, and a stopped car cannot steer onto a line. So once
+    // the commanded line has REACHED the bypass, the blocker stops being a lead to
+    // queue behind and becomes an obstacle to crawl past, which is what an indexed
+    // prop already is. The crawl itself is the avoidance profile above; the nose scan
+    // still stops the car if something is genuinely against the bumper.
+    const bypassEstablished =
+      this.blockerBypass &&
+      this.plannedHazard !== null &&
+      Math.abs(this.appliedLateral - this.plannedLateral) <= BLOCKER_BYPASS_TOLERANCE_M;
+    if (bypassEstablished && this.bodyScanGap >= BLOCKER_BYPASS_CONTACT_M) mustStop = false;
     // Following uses a physical stopping-energy bound plus time headway. Adding the
     // two vehicle speeds was dimensionally plausible but unsafe: behind a moving
     // leader it allowed far more closing speed than the available road could shed.
-    if (gap < Infinity && !(rayMatchesIndexedHazard && lineClearsHazard)) {
+    if (gap < Infinity && !bypassEstablished && !(rayMatchesIndexedHazard && lineClearsHazard)) {
       const closingRoom = Math.max(0, gap - FOLLOW_STANDOFF_M);
       const stoppingCap = Math.sqrt(
         leadSpeed * leadSpeed + 2 * currentBrakeAccel * closingRoom,
@@ -1454,9 +1539,12 @@ export class Autopilot {
     // that blind spot can make the ray look clear. Traffic supplies an independent
     // road-distance measurement; require both views before entering its lane.
     if (this.oncomingGap < need) return;
-    // Dynamic traffic is passed only on the opposing asphalt lane. The shoulder is
-    // valid for indexed static hazards whose exact footprint is known; treating it
-    // as a fallback traffic lane produced high-speed departures in dense traffic.
+    // Dynamic traffic is overtaken only on the opposing asphalt lane, and only while
+    // it is MOVING: a stopped blocker is bypassed on this driver's own right instead
+    // (see the bypass plan in `drive`), and reaches this rule only when the shoulder
+    // out there is itself blocked. Treating the shoulder as a general traffic lane
+    // produced high-speed departures in dense traffic, which is why the bypass is
+    // speed-limited and the moving overtake is not offered it at all.
     const oncoming = -Math.sign(config.laneOffset || -1) * (ROAD_HALF_WIDTH / 2);
     if (Math.abs(oncoming - lateral) < CAR_HALF_WIDTH_M) return;
     if (
@@ -1569,10 +1657,15 @@ export class Autopilot {
   }
 
   /**
-   * Enters the reverse (or pull-out) phase. Indexed traffic roadblocks and granted
-   * opposing deadlocks always retry on the road's right shoulder. Generic recovery
-   * retains its bounded alternating attempts so rough ground cannot make a car
-   * reverse indefinitely when there is no known obstacle.
+   * Enters the reverse (or pull-out) phase.
+   *
+   * EVERY ESCAPE GOES TO THE DRIVER'S RIGHT. The side used to alternate — a search
+   * for room when nothing was known about the blockage — and its second attempt
+   * aimed at the ONCOMING lane: two opposing queues then pulled out into each other
+   * and neither could finish. Left is kept for the one case where it is the way back
+   * onto the road: a car already past its own right-hand edge. Attempts at the same
+   * place stay bounded for generic stalls, so rough ground cannot make a car reverse
+   * indefinitely; a known roadblock or a granted deadlock retries without limit.
    */
   private beginRecovery(
     vehicle: Vehicle,
@@ -1595,13 +1688,9 @@ export class Autopilot {
       this.stoppedFor = 0;
       return;
     }
-    this.recoverySide = persistentRoadblock
-      ? Math.sign(config.laneOffset || -1)
-      : samePlace
-        ? -this.recoverySide
-        : Math.abs(lateral) > CAR_HALF_WIDTH_M
-          ? -Math.sign(lateral)
-          : -Math.sign(config.laneOffset || -1);
+    const right = Math.sign(config.laneOffset || -1);
+    this.recoverySide =
+      lateral * right > ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M ? -right : right;
     this.recoveryAttempts = persistentRoadblock
       ? 0
       : samePlace

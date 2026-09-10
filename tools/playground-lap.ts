@@ -611,17 +611,20 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// Parked traffic on a blind bend: waiting is safer than an unsighted escape.
+// Parked traffic on a blind bend: go round it on your own side.
 // ---------------------------------------------------------------------------
 //
 // One car is parked in the lane, in the middle of the 110 m esses. The chord a
 // corridor probe can see around a bend that tight is shorter than a safe overtake,
-// so `updatePass` correctly refuses. This used to trigger the generic stuck
-// recovery: the follower reversed and pulled across a lane it could not see.
+// so `updatePass` refuses the oncoming lane — correctly, and it is not needed. A
+// stopped car is an obstacle, and an obstacle is passed on the driver's RIGHT, at a
+// crawl, on the same graded shoulder an indexed prop is passed on.
 //
-// Dynamic traffic is not a drivetrain failure. The safe decision is to approach,
-// stop without contact, and wait. The unindexed static-boulder scenario below
-// separately retains and proves recovery for a genuinely unexplained obstruction.
+// This scenario used to certify waiting, which is what the road actually did: with
+// the oncoming lane the only line available, every mode that would not use it stood
+// behind the obstacle for good, and the ones that would used it in both directions
+// at once and gridlocked. What is checked now is that the car gets past, that it
+// never crosses the centreline to do it, and that it touches nothing.
 const OBSTACLE_S = 2_300;
 console.log('\nplayground: sleeper nosed into a parked car in the esses');
 const wedged = await measure(
@@ -634,14 +637,55 @@ const wedged = await measure(
   1,
   90,
 );
-const reachedBlockedCar = wedged.progress >= 100 && wedged.progress < 170;
 check(
-  'sleeper: waits instead of escaping blindly around parked traffic',
-  reachedBlockedCar && wedged.impacts === 0,
-  `${wedged.progress.toFixed(0)} m travelled before waiting, ` +
+  'sleeper: bypasses parked traffic on its own right',
+  wedged.progress >= 200 &&
+    wedged.impacts === 0 &&
+    wedged.maxSignedLateral <= 0.4 &&
+    wedged.minSignedLateral <= -CIRCUIT_HALF_WIDTH,
+  `${wedged.progress.toFixed(0)} m travelled, lateral ` +
+    `${wedged.minSignedLateral.toFixed(2)}..${wedged.maxSignedLateral.toFixed(2)} m ` +
+    `about a ${CIRCUIT_HALF_WIDTH.toFixed(1)} m edge, ` +
     `${wedged.reverseSeconds.toFixed(1)} s rolling backward, ${wedged.stuckSeconds.toFixed(1)} s stopped, ` +
     `mean ${(wedged.meanSpeed * 3.6).toFixed(1)} km/h, nearest ${wedged.nearestCar.toFixed(2)} m, ` +
     `${wedged.impacts} impact(s)`,
+);
+
+// ---------------------------------------------------------------------------
+// The obstacle a legal overtake was available for, and taken on the right anyway.
+// ---------------------------------------------------------------------------
+//
+// A car parked in the lane on the downhill run into the 320 m sweeper: gentle enough
+// that `passCurvature` allows an overtake, sighted far enough for one, and with the
+// oncoming lane completely empty. The old planner had exactly one line for anything
+// stopped — the other side of the road — so this is where every car in both
+// directions went, each then waiting on the lane the other was standing in, and the
+// road stopped moving. A stopped car is an obstacle: it is passed on the driver's
+// own right, and the centreline is not crossed to do it.
+const GRIDLOCK_S = 1_690;
+console.log('\nplayground: frantic at a parked car with the oncoming lane free');
+const gridlock = await measure(
+  {
+    mode: 'frantic',
+    traffic: 'parked',
+    startS: GRIDLOCK_S - 140,
+    slots: [{ s: GRIDLOCK_S, oncoming: false, mode: 'sleeper' }],
+  },
+  1,
+  45,
+);
+check(
+  'frantic: passes an obstacle on the right, not the oncoming lane',
+  gridlock.progress >= 200 &&
+    gridlock.impacts === 0 &&
+    gridlock.nearestCar >= 1.9 &&
+    gridlock.maxSignedLateral <= 0.4 &&
+    gridlock.minSignedLateral <= -CIRCUIT_HALF_WIDTH,
+  `${gridlock.progress.toFixed(0)} m travelled, lateral ` +
+    `${gridlock.minSignedLateral.toFixed(2)}..${gridlock.maxSignedLateral.toFixed(2)} m, ` +
+    `nearest car ${gridlock.nearestCar.toFixed(2)} m, ${gridlock.stuckSeconds.toFixed(1)} s stopped, ` +
+    `mean ${(gridlock.meanSpeed * 3.6).toFixed(1)} km/h, ${gridlock.passes} pass(es), ` +
+    `${gridlock.impacts} impact(s)`,
 );
 
 // ---------------------------------------------------------------------------
