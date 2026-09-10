@@ -15,16 +15,16 @@ import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 
 /**
- * Twelve physical cars are enough for visible queues and overtakes while keeping the
- * full Vehicle + Autopilot path affordable in the streamed world.
+ * Thirty physical cars is the upper setting: enough for a dense road while keeping the
+ * full Vehicle + Autopilot path affordable on a capable machine.
  */
-const MAX_TRAFFIC = 12;
-const MAX_PER_DIRECTION = MAX_TRAFFIC / 2;
+const MAX_TRAFFIC = 30;
 const SPAWN_MIN_M = 140;
 const SPAWN_MAX_M = 650;
 const DESPAWN_M = 850;
-/** Same-lane separation at creation; opposing lanes may legitimately share `s`. */
+/** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
 const SPAWN_ROAD_GAP_M = 70;
+const DENSE_SPAWN_ROAD_GAP_M = 32;
 const SPAWN_WORLD_GAP_M = 30;
 const SPAWN_HAZARD_GAP_M = 18;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
@@ -100,7 +100,7 @@ export class RoadTraffic {
   private readonly reverseHazards: ReversedHazardIndex;
   private readonly random: () => number;
   private readonly carList: TrafficCar[] = [];
-  private enabledValue = false;
+  private targetCount = 0;
   private generation = 0;
   private serial = 0;
   private spawnCooldown = 0;
@@ -131,7 +131,7 @@ export class RoadTraffic {
   }
 
   get enabled(): boolean {
-    return this.enabledValue;
+    return this.targetCount > 0;
   }
 
   get status(): TrafficStatus {
@@ -166,7 +166,7 @@ export class RoadTraffic {
       );
     }
     return {
-      enabled: this.enabledValue,
+      enabled: this.targetCount > 0,
       count: this.carList.length,
       sameDirection,
       oncoming: this.carList.length - sameDirection,
@@ -186,24 +186,31 @@ export class RoadTraffic {
     };
   }
 
-  setEnabled(enabled: boolean): void {
-    if (this.enabledValue === enabled) return;
-    this.enabledValue = enabled;
+  setTargetCount(count: number): void {
+    const next = Math.min(MAX_TRAFFIC, Math.max(0, Math.round(count / 2) * 2));
+    if (this.targetCount === next) return;
+    this.targetCount = next;
     this.generation++;
     this.pending = null;
-    this.spawnCooldown = enabled ? 0 : SPAWN_INTERVAL_S;
-    if (enabled) {
-      this.clockSync = 0;
-      this.impactCount = 0;
-      this.passCount = 0;
+    this.spawnCooldown = next > 0 ? 0 : SPAWN_INTERVAL_S;
+    if (next === 0) {
+      this.clear();
+      return;
     }
-    if (!enabled) this.clear();
+    while (this.carList.length > next) {
+      let farthest = 0;
+      for (let i = 1; i < this.carList.length; i++) {
+        if (
+          Math.abs(this.carList[i]!.forwardS - this.playerS) >
+          Math.abs(this.carList[farthest]!.forwardS - this.playerS)
+        ) {
+          farthest = i;
+        }
+      }
+      this.removeAt(farthest);
+    }
   }
 
-  toggle(): boolean {
-    this.setEnabled(!this.enabledValue);
-    return this.enabledValue;
-  }
   setDaylightFactor(daylightFactor: number): void {
     this.daylightFactor = Math.max(0, Math.min(1, daylightFactor));
   }
@@ -230,6 +237,11 @@ export class RoadTraffic {
     return nearest;
   }
 
+  /** Visits every live temporary vehicle without exposing traffic ownership. */
+  forEachVehicle(visitor: (id: string, vehicle: Vehicle) => void): void {
+    for (const car of this.carList) visitor(car.id, car.vehicle);
+  }
+
   /** Adds temporary vehicles to the shared fixed light pool without exposing ownership. */
   collectLitVehicles(output: Vehicle[], environmentFactor: number): void {
     for (const car of this.carList) {
@@ -242,8 +254,9 @@ export class RoadTraffic {
   /** Writes every traffic controller before the shared physics step. */
   fixedUpdate(dt: number, playerS: number, originX: number, originZ: number): void {
     this.playerS = playerS;
-    if (!this.enabledValue && this.carList.length === 0) return;
     this.syncSettings();
+    if (this.targetCount === 0 && this.carList.length === 0) return;
+    while (this.carList.length > this.targetCount) this.removeAt(this.carList.length - 1);
     this.clockSync -= dt;
     if (this.clockSync <= 0) {
       this.trafficWorld.apply({
@@ -282,7 +295,7 @@ export class RoadTraffic {
     }
 
     this.spawnCooldown -= dt;
-    if (this.spawnCooldown <= 0 && this.pending === null && this.carList.length < MAX_TRAFFIC) {
+    if (this.spawnCooldown <= 0 && this.pending === null && this.carList.length < this.targetCount) {
       this.queueSpawn();
       this.spawnCooldown = SPAWN_INTERVAL_S;
     }
@@ -301,7 +314,7 @@ export class RoadTraffic {
   }
 
   dispose(): void {
-    this.enabledValue = false;
+    this.targetCount = 0;
     this.generation++;
     this.pending = null;
     this.clear();
@@ -313,6 +326,7 @@ export class RoadTraffic {
       return;
     }
     this.settingsRef = source;
+    this.setTargetCount(source.trafficCount);
     this.trafficWorld.apply({
       t: 'settings',
       settings: {
@@ -351,7 +365,8 @@ export class RoadTraffic {
 
   private finishSpawn(request: PendingSpawn): void {
     if (
-      !this.enabledValue ||
+      this.targetCount === 0 ||
+      this.carList.length >= this.targetCount ||
       request.generation !== this.generation ||
       this.pending !== request ||
       Math.abs(request.forwardS - this.playerS) < SPAWN_MIN_M ||
@@ -420,9 +435,10 @@ export class RoadTraffic {
       if (car.direction === 1) same++;
       else oncoming++;
     }
-    if (same >= MAX_PER_DIRECTION && oncoming >= MAX_PER_DIRECTION) return null;
-    if (same === 0 || oncoming >= MAX_PER_DIRECTION) return 1;
-    if (oncoming === 0 || same >= MAX_PER_DIRECTION) return -1;
+    const maxPerDirection = this.targetCount / 2;
+    if (same >= maxPerDirection && oncoming >= maxPerDirection) return null;
+    if (same === 0 || oncoming >= maxPerDirection) return 1;
+    if (oncoming === 0 || same >= maxPerDirection) return -1;
     return this.random() < 0.5 ? 1 : -1;
   }
 
@@ -457,7 +473,11 @@ export class RoadTraffic {
 
   private roadGapClear(s: number, direction: TrafficDirection): boolean {
     for (const car of this.carList) {
-      if (car.direction === direction && Math.abs(car.forwardS - s) < SPAWN_ROAD_GAP_M) {
+      if (
+        car.direction === direction &&
+        Math.abs(car.forwardS - s) <
+          (this.targetCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M)
+      ) {
         return false;
       }
     }

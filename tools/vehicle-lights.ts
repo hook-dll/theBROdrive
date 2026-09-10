@@ -217,6 +217,11 @@ async function run(): Promise<void> {
     const origin = new WorldOrigin();
 
     rig = new VehicleLightRig(scene);
+    const blessingScene = new THREE.Scene();
+    const blessingRig = new VehicleLightRig(blessingScene, 'blessing');
+    check('blessing quality allocates eighteen lamp slots', blessingRig.lightCount === 18, `${blessingRig.lightCount} slots`);
+    check('blessing quality triples headlight reach', blessingRig.headlightDistanceScale === 3, `${blessingRig.headlightDistanceScale}x`);
+    blessingRig.dispose();
     const identities = spotlights(scene);
     const targets = identities.map((light) => light.target);
     assertRigState(scene, rig, identities, targets, 'rig construction');

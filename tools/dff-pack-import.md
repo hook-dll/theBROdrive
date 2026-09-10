@@ -2,6 +2,9 @@
 
 Rules for cars from the current GTA SA DFF pack. Normalize offline; runtime code must receive a small, explicit GLB rather than learn pack-specific names. `tools/import-dff-pack.py` is that normalizer (Blender + DragonFF); `tools/dff-pack-audit.mjs` enforces the contract below on the packed result.
 
+Общий end-to-end процесс, карточка задания и все контрольные ворота описаны в
+`tools/vehicle-pipeline.md`.
+
 For per-model factory lamp research, Blender cuts, semantic node names and the
 day/night control matrix, follow `tools/vehicle-lamp-authoring.md`.
 

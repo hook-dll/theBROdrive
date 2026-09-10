@@ -517,6 +517,8 @@ export class Autopilot {
   private oncomingGap = Infinity;
   private automaticLightsOn = false;
   private automaticHighBeam = true;
+  private playerHighBeamSuppressed = false;
+  private playerHeadlightVehicle: Vehicle | null = null;
   private controlledVehicle: Vehicle | null = null;
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
@@ -573,6 +575,31 @@ export class Autopilot {
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
     this.daylightFactor = clamp(daylightFactor, 0, 1);
     this.oncomingGap = oncomingGap >= 0 ? oncomingGap : Infinity;
+  }
+  /**
+   * Dips a manually driven player's high beam for an approaching vehicle, then
+   * restores it after the opposing car has passed. Low/off player choices remain
+   * untouched.
+   */
+  syncPlayerHighBeam(vehicle: Vehicle): void {
+    if (this.playerHeadlightVehicle !== vehicle) {
+      this.playerHeadlightVehicle = vehicle;
+      this.playerHighBeamSuppressed = false;
+    }
+    if (vehicle.headlights === 'high') {
+      if (this.oncomingGap <= HIGH_BEAM_DIP_M) {
+        vehicle.setHeadlights('low');
+        this.playerHighBeamSuppressed = true;
+      }
+      return;
+    }
+    if (!this.playerHighBeamSuppressed) return;
+    if (vehicle.headlights === 'off') {
+      this.playerHighBeamSuppressed = false;
+    } else if (this.oncomingGap >= HIGH_BEAM_RESTORE_M) {
+      vehicle.setHeadlights('high');
+      this.playerHighBeamSuppressed = false;
+    }
   }
   get engaged(): boolean { return this.engagedValue; }
   /** Rate-limited line being steered to, metres of road lateral. */

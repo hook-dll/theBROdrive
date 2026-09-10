@@ -36,18 +36,27 @@ import * as THREE from 'three';
 const SLOT_COUNT: Record<'acceptable' | 'standard' | 'blessing', number> = {
   acceptable: 2,
   standard: 6,
-  blessing: 6,
+  // Blessing assumes a capable GPU: nine cars can keep both headlamps projected.
+  blessing: 18,
+};
+/** Blessing also keeps the projected headlight cone visible three times farther. */
+const HEADLIGHT_DISTANCE_SCALE: Record<'acceptable' | 'standard' | 'blessing', number> = {
+  acceptable: 1,
+  standard: 1,
+  blessing: 3,
 };
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;
 
 export class VehicleLightRig {
+  readonly headlightDistanceScale: number;
   private readonly lights: THREE.SpotLight[] = [];
   private readonly scene: THREE.Scene;
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
 
   constructor(scene: THREE.Scene, quality: keyof typeof SLOT_COUNT = 'standard') {
+    this.headlightDistanceScale = HEADLIGHT_DISTANCE_SCALE[quality];
     for (let i = 0; i < SLOT_COUNT[quality]; i++) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;

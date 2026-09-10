@@ -85,6 +85,8 @@ export interface Settings {
   masterVolume: number;
   /** Car-radio volume, 0..1. */
   radioVolume: number;
+  /** Number of temporary road-traffic cars, in [0, 30] and even increments. */
+  trafficCount: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;
   /**
@@ -123,6 +125,10 @@ export const DEFAULT_INK_STRENGTH = GAMEPLAY_CONFIG.defaultInkStrength;
 export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity;
 export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
 export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
+export const TRAFFIC_COUNT_MIN = GAMEPLAY_CONFIG.trafficCountMin;
+export const TRAFFIC_COUNT_MAX = GAMEPLAY_CONFIG.trafficCountMax;
+export const TRAFFIC_COUNT_STEP = GAMEPLAY_CONFIG.trafficCountStep;
+export const DEFAULT_TRAFFIC_COUNT = GAMEPLAY_CONFIG.defaultTrafficCount;
 
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
@@ -137,6 +143,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
   masterVolume: DEFAULT_MASTER_VOLUME,
   radioVolume: DEFAULT_RADIO_VOLUME,
+  trafficCount: DEFAULT_TRAFFIC_COUNT,
   // Absent entries mean "use the default binding", so the empty record is the
   // correct default: it can never diverge from BINDABLE_ACTIONS. Shared by
   // design — Settings objects are replaced wholesale through world.apply
@@ -192,6 +199,10 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.poiSpacingMetres === 'number' && Number.isFinite(obj.poiSpacingMetres)
       ? obj.poiSpacingMetres
       : DEFAULT_POI_SPACING_METRES;
+  const trafficCountRaw =
+    typeof obj.trafficCount === 'number' && Number.isFinite(obj.trafficCount)
+      ? obj.trafficCount
+      : DEFAULT_TRAFFIC_COUNT;
 
   const sensitivityRaw =
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
@@ -217,6 +228,11 @@ export function sanitizeSettings(raw: unknown): Settings {
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     radioVolume: unitInterval(obj.radioVolume, DEFAULT_RADIO_VOLUME),
+    trafficCount:
+      Math.round(
+        Math.min(TRAFFIC_COUNT_MAX, Math.max(TRAFFIC_COUNT_MIN, trafficCountRaw)) /
+          TRAFFIC_COUNT_STEP,
+      ) * TRAFFIC_COUNT_STEP,
     inkStrength: unitInterval(obj.inkStrength, DEFAULT_INK_STRENGTH),
     keyBindings: {},
     // Anything unrecognised is standard, so an old save (which has no such field)

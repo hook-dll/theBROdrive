@@ -21,6 +21,10 @@ export interface GameplayConfig {
   readonly defaultMouseSensitivity: number;
   readonly mouseSensitivityMin: number;
   readonly mouseSensitivityMax: number;
+  readonly trafficCountMin: number;
+  readonly trafficCountMax: number;
+  readonly trafficCountStep: number;
+  readonly defaultTrafficCount: number;
 }
 
 export interface AudioConfig {

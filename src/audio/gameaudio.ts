@@ -13,6 +13,7 @@ import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer } from './mixer';
 import { VehicleAudio } from './vehicleaudio';
+import { TrafficEngineAudio } from './trafficengine';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio, type RadioSpatialState } from './radio';
 export type { RadioSpatialState } from './radio';
@@ -22,6 +23,8 @@ export class GameAudio {
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
   private readonly radios = new Map<string, Radio>();
+  private readonly trafficVoices = new Map<string, { voice: TrafficEngineAudio; lastFrame: number }>();
+  private trafficFrame = 0;
   private activeRadioId: string | null = null;
   private radioVolume = 1;
   /** Last pose written to the context listener; NaN so the first frame always writes. */
@@ -80,14 +83,42 @@ export class GameAudio {
       }
     }
   }
+  beginTrafficFrame(): void {
+    this.trafficFrame++;
+  }
+
+  updateTrafficVehicle(
+    id: string,
+    state: VehicleAudioState,
+    x: number,
+    y: number,
+    z: number,
+  ): void {
+    let entry = this.trafficVoices.get(id);
+    if (!entry) {
+      entry = { voice: new TrafficEngineAudio(this.mixer), lastFrame: this.trafficFrame };
+      this.trafficVoices.set(id, entry);
+    }
+    entry.lastFrame = this.trafficFrame;
+    entry.voice.update(state, x, y, z);
+  }
+
+  endTrafficFrame(): void {
+    for (const [id, entry] of this.trafficVoices) {
+      if (entry.lastFrame !== this.trafficFrame) {
+        entry.voice.dispose();
+        this.trafficVoices.delete(id);
+      }
+    }
+  }
+
 
   /**
-   * Pose of the single AudioListener, skipped entirely while the camera is still.
-   * A parked player with the radio on is the common case, and an unchanged
-   * AudioParam write still crosses into the audio thread's parameter timeline.
+   * Pose of the single AudioListener. Traffic engines need the same listener even
+   * before a radio has ever been switched on.
    */
   private writeListener(spatial: RadioSpatialState): void {
-    if (this.radios.size === 0) return;
+    // The listener is shared by radios and traffic engines.
     const { listenerQx: x, listenerQy: y, listenerQz: z, listenerQw: w } = spatial;
     if (
       spatial.listenerX === this.listenerX
@@ -190,6 +221,8 @@ export class GameAudio {
     this.foleyVoices.dispose();
     for (const radio of this.radios.values()) radio.dispose();
     this.radios.clear();
+    for (const entry of this.trafficVoices.values()) entry.voice.dispose();
+    this.trafficVoices.clear();
     this.mixer.dispose();
   }
 }

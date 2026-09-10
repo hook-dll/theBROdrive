@@ -12,6 +12,9 @@ import {
   POI_SPACING_MIN_METRES,
   POI_SPACING_STEP_METRES,
   TIME_OF_DAY_PRESETS,
+  TRAFFIC_COUNT_MAX,
+  TRAFFIC_COUNT_MIN,
+  TRAFFIC_COUNT_STEP,
 } from '../game/settings';
 import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
@@ -184,9 +187,6 @@ export interface PauseHooks {
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /** Apply a view-distance tier immediately; main pushes it to the renderer. */
   applyViewDistance: (v: ViewDistance) => void;
-  /** Session-only road traffic; temporary cars never enter save state. */
-  trafficEnabled: () => boolean;
-  toggleTraffic: () => boolean;
   /**
    * Record a fully fuelled car into the world.
    *
@@ -428,6 +428,7 @@ export class MainMenu {
         mouseSensitivity: base.mouseSensitivity,
         masterVolume: base.masterVolume,
         radioVolume: base.radioVolume,
+        trafficCount: base.trafficCount,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         viewDistance: base.viewDistance,
@@ -443,6 +444,7 @@ export class MainMenu {
           mouseSensitivity: settings.mouseSensitivity,
           masterVolume: settings.masterVolume,
           radioVolume: settings.radioVolume,
+          trafficCount: settings.trafficCount,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           viewDistance: settings.viewDistance,
@@ -609,14 +611,10 @@ export class MainMenu {
 
         const resumeBtn = button('menu-button menu-primary', 'Resume');
         const settingsBtn = button('menu-button', 'Settings');
-        const trafficBtn = button(
-          'menu-button',
-          `Toggle Traffic — ${hooks.trafficEnabled() ? 'On' : 'Off'}`,
-        );
         const saveBtn = button('menu-button', 'Save');
         const exportBtn = button('menu-button', 'Export Save Code');
         const quitBtn = button('menu-button', 'Quit');
-        panel.append(resumeBtn, settingsBtn, trafficBtn);
+        panel.append(resumeBtn, settingsBtn);
         // Dev only, and labelled so a screenshot of it is never mistaken for the
         // shipping menu. `import.meta.env.DEV` is tested first so the branch folds
         // to a constant false in a production build and the label goes with it.
@@ -664,11 +662,6 @@ export class MainMenu {
 
         resumeBtn.addEventListener('click', () => finish('resume'));
         settingsBtn.addEventListener('click', () => showScreen('settings'));
-        trafficBtn.addEventListener('click', () => {
-          const enabled = hooks.toggleTraffic();
-          trafficBtn.textContent = `Toggle Traffic — ${enabled ? 'On' : 'Off'}`;
-          finish('resume');
-        });
         saveBtn.addEventListener('click', () => finish('save'));
         quitBtn.addEventListener('click', () => finish('quit'));
 
@@ -1046,6 +1039,19 @@ export class MainMenu {
               (value) => `${(value / 1000).toFixed(value < 1000 ? 1 : value % 1000 === 0 ? 0 : 1)} km`,
               (value) => {
                 settings.poiSpacingMetres = value;
+              },
+            ),
+            sliderField(
+              'Traffic',
+              'gameplay',
+              'Temporary road cars. Zero turns traffic off; higher values add more cars.',
+              TRAFFIC_COUNT_MIN,
+              TRAFFIC_COUNT_MAX,
+              TRAFFIC_COUNT_STEP,
+              () => settings.trafficCount,
+              (value) => `${Math.round(value)} cars`,
+              (value) => {
+                settings.trafficCount = value;
               },
             ),
           );
