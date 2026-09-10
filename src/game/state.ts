@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import type { Item, SunShadesItem } from '../items/items';
+import type { Item, StickerKind, SunShadesItem } from '../items/items';
 import type { FuelType, PartInstance } from '../parts/registry';
 import { bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -33,8 +33,10 @@ function clamp01(value: number): number {
  * and it does not follow the player to another car. The car IS the save file.
  */
 export interface StickerState {
+  /** Physical envelope id consumed to create this permanent decal. */
+  readonly id: string;
   /** Sticker design id, from the built-in pack. */
-  readonly kind: string;
+  readonly kind: StickerKind;
   /** Contact point, car-local metres. */
   readonly x: number;
   readonly y: number;
@@ -47,17 +49,6 @@ export interface StickerState {
   readonly roll: number;
 }
 
-/**
- * The haul in progress. At most one, and that is a design constraint, not a
- * simplification: the destination is communicated by a single lit sign with no
- * number and no name on it, so two simultaneous destinations would be
- * indistinguishable.
- */
-export interface JobState {
-  readonly fromPoi: number;
-  readonly toPoi: number;
-  readonly cargoKg: number;
-}
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -234,18 +225,10 @@ export interface WorldState {
    * migrates through `migrateNumberArray` like every other index list in the save.
    */
   flattenedProps: number[];
-  /**
-   * The haul in progress, or null. One at a time by design: the destination is a
-   * single lit sign with no text on it, and two would be indistinguishable.
-   */
-  job: JobState | null;
-  /**
-   * Stickers earned but not yet stuck on. Deliveries pay in these; placing one is a
-   * separate, deliberate act, so finishing a run with a pocketful is legal.
-   */
-  stickersUnplaced: number;
-  /** POI slots already delivered to, so a stop cannot be farmed twice. */
-  deliveredPois: number[];
+  /** Full contents of courier trunks after their first physical mutation. */
+  courierStorage: Record<string, (Item | null)[]>;
+  /** Contract cargo ids already exchanged for signed envelopes. */
+  completedContractIds: string[];
 }
 
 export type WorldDelta =
@@ -267,6 +250,13 @@ export type WorldDelta =
   | { t: 'car_engine_temp'; carId: string; celsius: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
+  | {
+      t: 'courier_storage';
+      courierId: string;
+      cells: readonly (Item | null)[];
+      consumedItemId?: string;
+      completedContractId?: string;
+    }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'trailer_hitch'; trailerId: string; carId: string | null }
@@ -288,10 +278,7 @@ export type WorldDelta =
   | { t: 'item_pickup'; itemId: string }
   | { t: 'poi_looted'; poiIndex: number }
   | { t: 'prop_flatten'; propId: number }
-  | { t: 'job_accept'; job: JobState }
-  | { t: 'job_complete'; poiIndex: number }
-  | { t: 'job_abandon' }
-  | { t: 'sticker_place'; carId: string; sticker: StickerState }
+  | { t: 'sticker_place'; carId: string; sticker: StickerState; envelopeId: string }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'wearable'; shades: SunShadesItem | null }
   | { t: 'record'; s: number };
@@ -329,14 +316,13 @@ export function newWorldState(seed: number): WorldState {
     },
     cars: {},
     wreckStorage: {},
+    courierStorage: {},
+    completedContractIds: [],
     trailers: {},
     looseParts: {},
     looseItems: {},
     lootedPois: [],
     flattenedProps: [],
-    job: null,
-    stickersUnplaced: 0,
-    deliveredPois: [],
   };
 }
 
@@ -448,6 +434,11 @@ export class GameWorld {
       }
     }
     for (const storage of Object.values(state.wreckStorage)) {
+      for (const item of storage) {
+        if (item) bump(item.id);
+      }
+    }
+    for (const storage of Object.values(state.courierStorage)) {
       for (const item of storage) {
         if (item) bump(item.id);
       }
@@ -703,32 +694,28 @@ export class GameWorld {
       case 'prop_flatten':
         if (!s.flattenedProps.includes(delta.propId)) s.flattenedProps.push(delta.propId);
         break;
-      case 'job_accept':
-        s.job = delta.job;
-        break;
-      case 'job_complete': {
-        // The sticker is minted here, not on placement: the reward is earned by
-        // arriving, and where it goes on the car is a separate decision.
-        //
-        // Both ends are recorded as cleared. The destination stops a stop being
-        // delivered to twice; the ORIGIN is what stops the same pallet being hauled
-        // again and again, which it otherwise would be the moment `job` went null.
-        const origin = s.job?.fromPoi ?? -1;
-        s.job = null;
-        s.stickersUnplaced += 1;
-        for (const index of [delta.poiIndex, origin]) {
-          if (index >= 0 && !s.deliveredPois.includes(index)) s.deliveredPois.push(index);
+      case 'courier_storage':
+        if (
+          delta.completedContractId
+          && s.completedContractIds.includes(delta.completedContractId)
+        ) break;
+        s.courierStorage[delta.courierId] = delta.cells.slice();
+        if (delta.consumedItemId) {
+          const carried = s.player.carried.findIndex((item) => item.id === delta.consumedItemId);
+          if (carried >= 0) s.player.carried.splice(carried, 1);
         }
-        break;
-      }
-      case 'job_abandon':
-        s.job = null;
+        if (delta.completedContractId) {
+          s.completedContractIds.push(delta.completedContractId);
+        }
         break;
       case 'sticker_place': {
         const car = s.cars[delta.carId];
-        if (car && s.stickersUnplaced > 0) {
+        const envelope = s.player.carried.findIndex(
+          (item) => item.id === delta.envelopeId && item.type === 'sticker_envelope',
+        );
+        if (car && envelope >= 0) {
           car.stickers.push(delta.sticker);
-          s.stickersUnplaced -= 1;
+          s.player.carried.splice(envelope, 1);
         }
         break;
       }

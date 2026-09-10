@@ -8,6 +8,7 @@ import type {
   PartItem,
   FluidCanItem,
   FluidKind,
+  StickerEnvelopeItem,
   ToolKind,
 } from '../items/items';
 import { itemLabel, litreText } from '../items/items';
@@ -22,7 +23,6 @@ import {
 } from '../parts/registry';
 import type { LoosePartField } from '../parts/loose';
 import type { Vehicle } from '../vehicle/vehicle';
-import { jobAt, type FreightField } from '../world/freight';
 import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
 import {
@@ -52,6 +52,8 @@ import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
+import type { CourierField } from '../world/couriers';
+import { STICKER_SIZE } from '../render/stickers';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -112,13 +114,6 @@ const FUEL_POUR_RATE = 1.2;
  */
 const HITCH_CAR_RANGE = 9;
 /**
- * The only sticker design so far: a five-pointed star, one per completed haul.
- * Named rather than hardcoded at the call site so a pack of designs can be added
- * without touching the placement path or the save format.
- */
-
-const STICKER_KIND = 'star';
-/**
  * Hits closer than this are treated as "no hit". The eye origin sits inside the
  * player's own capsule, and `castRayAndGetNormal(..., solid = true)` returns an
  * immediate zero-distance self-hit when the ray is not told to exclude that body.
@@ -132,11 +127,15 @@ type Target =
   | { kind: 'loose-part'; partId: string }
   | { kind: 'loose-item'; itemId: string }
   | { kind: 'trailer'; trailerId: string }
-  | { kind: 'pallet'; poiIndex: number }
-  | { kind: 'freight-sign'; poiIndex: number }
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
-  | { kind: 'car-body'; carId: string; point: THREE.Vector3; normal: THREE.Vector3 }
+  | {
+      kind: 'car-body';
+      carId: string;
+      point: THREE.Vector3;
+      normal: THREE.Vector3;
+      valid: boolean;
+    }
   | { kind: 'anchor'; carId: string; anchorId: string };
 
 /**
@@ -406,6 +405,18 @@ export class Interaction {
   private readonly rayDir = new THREE.Vector3();
   private readonly qBody = new THREE.Quaternion();
   private readonly hits: THREE.Intersection[] = [];
+  private prevPrimary = false;
+  private prevSecondary = false;
+  private stickerPlacement: { envelopeId: string; carId: string; roll: number } | null = null;
+  private readonly stickerPoint = new THREE.Vector3();
+  private readonly stickerNormal = new THREE.Vector3();
+  private readonly stickerRight = new THREE.Vector3();
+  private readonly stickerUp = new THREE.Vector3();
+  private readonly stickerCorner = new THREE.Vector3();
+  private readonly stickerWorldNormal = new THREE.Vector3();
+  private readonly stickerQuaternion = new THREE.Quaternion();
+  private readonly stickerNormalMatrix = new THREE.Matrix3();
+  private readonly stickerForward = new THREE.Vector3(0, 0, 1);
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -413,12 +424,18 @@ export class Interaction {
     private readonly inventory: Inventory,
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
-    private readonly freight: FreightField,
     private readonly wreckTrunks: WreckTrunkField,
+    private readonly couriers: CourierField,
     /** The car in reach, WITH its id. Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
     private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
+    /** Owns the single reusable translucent placement preview. */
+    private readonly onStickerPreview: (
+      carId: string | null,
+      sticker: StickerState | null,
+      valid: boolean,
+    ) => void,
     /**
      * The floating origin. Interaction straddles both frames by nature: its rays go
      * into Rapier (relative) while the things it drops and teleports are saved world
@@ -446,11 +463,15 @@ export class Interaction {
     const interactPressed = input.interact && !this.prevInteract;
     const mountPressed = input.mount && !this.prevMount;
     const dropPressed = input.dropItem && !this.prevDrop;
+    const primaryPressed = input.usePrimary && !this.prevPrimary;
+    const secondaryPressed = input.useSecondary && !this.prevSecondary;
     this.prevInteract = input.interact;
     this.prevMount = input.mount;
     this.prevDrop = input.dropItem;
     this.sound = null;
     this.continuous = null;
+    this.prevPrimary = input.usePrimary;
+    this.prevSecondary = input.useSecondary;
 
     if (this.world.state.player.drivingCarId) {
       // Sitting down closes whatever was open: the grid belongs to a player standing
@@ -465,6 +486,20 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    if (this.stickerPlacement) {
+      return this.updateStickerPlacement(
+        resolved,
+        input,
+        mountPressed || primaryPressed,
+        secondaryPressed,
+        eyeX,
+        eyeY,
+        eyeZ,
+        dirX,
+        dirY,
+        dirZ,
+      );
+    }
     this.holdOpenStorage(resolved, eyeX, eyeY, eyeZ);
     const prompt = this.promptFor(resolved);
 
@@ -476,13 +511,18 @@ export class Interaction {
         resolved.target.kind === 'car-entry'
         && resolved.vehicle
         && resolved.carId
-        && this.world.state.stickersUnplaced > 0
+        && this.inventory.held?.type === 'sticker_envelope'
       ) {
-        const surface = this.pickBody(resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+        const surface = this.pickBody(resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, 0);
         if (surface) {
           actionResolved = {
             ...resolved,
-            target: { kind: 'car-body', carId: resolved.carId, ...surface.local },
+            target: {
+              kind: 'car-body',
+              carId: resolved.carId,
+              ...surface.local,
+              valid: surface.valid,
+            },
           };
         }
       }
@@ -520,10 +560,110 @@ export class Interaction {
     return { prompt, sound: this.sound, continuous: this.continuous, boot };
   }
 
+  /** Cancels the modal preview. Escape uses this before opening the pause screen. */
+  cancelStickerPlacement(): boolean {
+    if (!this.stickerPlacement) return false;
+    this.stickerPlacement = null;
+    this.onStickerPreview(null, null, false);
+    return true;
+  }
+
+  private updateStickerPlacement(
+    resolved: Resolved,
+    input: InputFrame,
+    confirm: boolean,
+    cancel: boolean,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+  ): InteractionResult {
+    const placement = this.stickerPlacement!;
+    const held = this.inventory.held;
+    if (held?.type !== 'sticker_envelope' || held.id !== placement.envelopeId || cancel) {
+      this.cancelStickerPlacement();
+      return {
+        prompt: cancel ? 'sticker placement cancelled' : null,
+        sound: null,
+        continuous: null,
+        boot: null,
+      };
+    }
+    placement.roll += input.zoomDelta * Math.PI / 12;
+    if (!resolved.vehicle || resolved.carId !== placement.carId) {
+      this.onStickerPreview(null, null, false);
+      return {
+        prompt: 'aim at the same car · Esc/right click cancel',
+        sound: null,
+        continuous: null,
+        boot: null,
+      };
+    }
+    const surface = this.pickBody(
+      resolved.vehicle,
+      eyeX,
+      eyeY,
+      eyeZ,
+      dirX,
+      dirY,
+      dirZ,
+      placement.roll,
+    );
+    if (!surface) {
+      this.onStickerPreview(null, null, false);
+      return {
+        prompt: 'aim at a painted panel · Esc/right click cancel',
+        sound: null,
+        continuous: null,
+        boot: null,
+      };
+    }
+    const sticker: StickerState = {
+      id: `${held.id}:sticker`,
+      kind: held.stickerKind,
+      x: surface.local.point.x,
+      y: surface.local.point.y,
+      z: surface.local.point.z,
+      nx: surface.local.normal.x,
+      ny: surface.local.normal.y,
+      nz: surface.local.normal.z,
+      roll: placement.roll,
+    };
+    this.onStickerPreview(placement.carId, sticker, surface.valid);
+    if (confirm && surface.valid) {
+      this.world.apply({
+        t: 'sticker_place',
+        carId: placement.carId,
+        sticker,
+        envelopeId: held.id,
+      });
+      this.inventory.remove(held.id);
+      this.onStickerPlaced(placement.carId, sticker);
+      this.stickerPlacement = null;
+      this.onStickerPreview(null, null, false);
+      this.sound = 'mount';
+      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null };
+    }
+    return {
+      prompt: surface.valid
+        ? '[F/click] place · wheel rotate · Esc/right click cancel'
+        : 'does not fit this painted panel · rotate or move',
+      sound: null,
+      continuous: null,
+      boot: null,
+    };
+  }
+
   private storageCells(
     target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
   ): readonly (Item | null)[] | null {
     if (target.owner === 'wreck') return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+    if (target.owner === 'courier') {
+      const courier = this.couriers.get(target.id);
+      return this.world.state.courierStorage[target.id] ?? courier?.defaultStorage ?? null;
+    }
     const car = this.world.state.cars[target.id];
     return target.side === 'bonnet' ? car?.bonnet ?? null : car?.storage ?? null;
   }
@@ -546,12 +686,14 @@ export class Interaction {
     out: THREE.Vector3,
   ): boolean {
     let half: readonly [number, number, number];
-    if (target.owner === 'wreck') {
-      const wreck = this.wreckTrunks.get(target.id);
-      if (!wreck) return false;
-      half = wreck.halfExtents;
-      this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
-      out.set(wreck.x, wreck.y, wreck.z);
+    if (target.owner !== 'car') {
+      const fixed = target.owner === 'wreck'
+        ? this.wreckTrunks.get(target.id)
+        : this.couriers.get(target.id);
+      if (!fixed) return false;
+      half = fixed.halfExtents;
+      this.trunkQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
+      out.set(fixed.x, fixed.y, fixed.z);
     } else {
       if (!vehicle) return false;
       half = vehicle.modelMeasure.halfExtents;
@@ -694,14 +836,9 @@ export class Interaction {
       const partId = this.loose.partIdForCollider(h);
       const itemId = partId ? null : this.loose.itemIdForCollider(h);
       const trailerId = partId || itemId ? null : this.trailers.trailerIdForCollider(h);
-      const claimed = partId || itemId || trailerId;
-      const palletPoi = claimed ? null : this.freight.palletPoiForCollider(h);
-      const signPoi = claimed || palletPoi !== null ? null : this.freight.signPoiForCollider(h);
       if (partId) keep(hit.toi, { kind: 'loose-part', partId });
       else if (itemId) keep(hit.toi, { kind: 'loose-item', itemId });
       else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
-      else if (palletPoi !== null) keep(hit.toi, { kind: 'pallet', poiIndex: palletPoi });
-      else if (signPoi !== null) keep(hit.toi, { kind: 'freight-sign', poiIndex: signPoi });
     }
 
     // Anchors have no colliders (a bare mount must be aimable), so project the ray
@@ -825,6 +962,37 @@ export class Interaction {
       }
     }
 
+    for (const courier of this.couriers.values()) {
+      this.trunkPosition.set(
+        courier.x - this.origin.x,
+        courier.y,
+        courier.z - this.origin.z,
+      );
+      this.trunkQuaternion.set(courier.qx, courier.qy, courier.qz, courier.qw);
+      if (
+        this.pickStorage(
+          eyeX,
+          eyeY,
+          eyeZ,
+          dx,
+          dy,
+          dz,
+          this.trunkPosition,
+          this.trunkQuaternion,
+          courier.halfExtents,
+          'trunk',
+        )
+      ) {
+        keep(this.trunkPickedDistance, {
+          kind: 'storage',
+          owner: 'courier',
+          side: 'trunk',
+          id: courier.id,
+          cell: this.trunkPickedCell,
+        });
+      }
+    }
+
     // `lastAnchorTarget` was already recorded by `keep`.
     return { target, vehicle, carId, vehicleDist };
   }
@@ -844,7 +1012,12 @@ export class Interaction {
     dx: number,
     dy: number,
     dz: number,
-  ): { distance: number; local: { point: THREE.Vector3; normal: THREE.Vector3 } } | null {
+    roll: number,
+  ): {
+    distance: number;
+    valid: boolean;
+    local: { point: THREE.Vector3; normal: THREE.Vector3 };
+  } | null {
     this.raycaster.set(
       this.rayOrigin.set(eyeX, eyeY, eyeZ),
       this.rayDir.set(dx, dy, dz).normalize(),
@@ -853,23 +1026,81 @@ export class Interaction {
     this.hits.length = 0;
     this.raycaster.intersectObject(vehicle.root, true, this.hits);
     for (const hit of this.hits) {
-      // Wheels are not bodywork, and a sticker on a rotating wheel would smear.
-      if (/^wheel_/.test(hit.object.name)) continue;
       if (!hit.face) continue;
-      const point = vehicle.root.worldToLocal(hit.point.clone());
-      // Face normals are in the hit object's local space; take them to world and
-      // then into the car's frame, so a normal on a rotated sub-mesh is still right.
-      const normal = hit.face.normal
-        .clone()
-        .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld))
+      const stickerSlots = hit.object.userData.stickerMaterialIndices as number[] | undefined;
+      if (!stickerSlots?.includes(hit.face.materialIndex)) continue;
+      const distance = hit.distance;
+      const surfaceObject = hit.object;
+      this.stickerPoint.copy(hit.point);
+      vehicle.root.worldToLocal(this.stickerPoint);
+      this.stickerNormal
+        .copy(hit.face.normal)
+        .applyNormalMatrix(this.stickerNormalMatrix.getNormalMatrix(hit.object.matrixWorld))
         .normalize();
-      vehicle.root.getWorldQuaternion(this.qBody);
-      normal.applyQuaternion(this.qBody.invert()).normalize();
+      vehicle.root.getWorldQuaternion(this.qBody).invert();
+      this.stickerNormal.applyQuaternion(this.qBody).normalize();
       this.hits.length = 0;
-      return { distance: hit.distance, local: { point, normal } };
+      const valid = this.stickerFootprintFits(
+        vehicle,
+        surfaceObject,
+        this.stickerPoint,
+        this.stickerNormal,
+        roll,
+      );
+      return {
+        distance,
+        valid,
+        local: { point: this.stickerPoint, normal: this.stickerNormal },
+      };
     }
     this.hits.length = 0;
     return null;
+  }
+
+  /** Centre plus four corner probes must land on the same painted mesh. */
+  private stickerFootprintFits(
+    vehicle: Vehicle,
+    surfaceObject: THREE.Object3D,
+    point: THREE.Vector3,
+    normal: THREE.Vector3,
+    roll: number,
+  ): boolean {
+    this.stickerQuaternion.setFromUnitVectors(this.stickerForward, normal);
+    this.stickerRight.set(1, 0, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
+    this.stickerUp.set(0, 1, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
+    vehicle.root.getWorldQuaternion(this.qBody);
+    this.stickerWorldNormal.copy(normal).applyQuaternion(this.qBody).normalize();
+    const half = STICKER_SIZE * 0.5;
+    for (let corner = 0; corner < 4; corner++) {
+      const sx = (corner & 1) === 0 ? -half : half;
+      const sy = (corner & 2) === 0 ? -half : half;
+      this.stickerCorner
+        .copy(point)
+        .addScaledVector(this.stickerRight, sx)
+        .addScaledVector(this.stickerUp, sy)
+        .addScaledVector(normal, 0.035);
+      vehicle.root.localToWorld(this.stickerCorner);
+      this.raycaster.set(
+        this.stickerCorner,
+        this.rayDir.copy(this.stickerWorldNormal).negate(),
+      );
+      this.raycaster.near = 0;
+      this.raycaster.far = 0.07;
+      this.hits.length = 0;
+      this.raycaster.intersectObject(vehicle.root, true, this.hits);
+      let accepted = false;
+      for (const hit of this.hits) {
+        if (hit.object !== surfaceObject || !hit.face) continue;
+        const slots = hit.object.userData.stickerMaterialIndices as number[] | undefined;
+        if (slots?.includes(hit.face.materialIndex)) {
+          accepted = true;
+          break;
+        }
+      }
+      this.hits.length = 0;
+      if (!accepted) return false;
+    }
+    return true;
   }
 
   /**
@@ -894,7 +1125,7 @@ export class Interaction {
   private mountHasPriority(target: Target): boolean {
     if (target.kind === 'none') return false;
     if (target.kind === 'car-body' || target.kind === 'car-entry') {
-      return this.world.state.stickersUnplaced > 0;
+      return this.inventory.held?.type === 'sticker_envelope';
     }
     return true;
   }
@@ -932,28 +1163,6 @@ export class Interaction {
     }
 
 
-    if (t.kind === 'pallet') {
-      const job = jobAt(
-        this.world.state.seed,
-        t.poiIndex,
-        this.world.state.settings.poiSpacingMetres,
-      );
-      if (!job) return null;
-      const km = (job.distanceM / 1000).toFixed(0);
-      if (this.world.state.job) return `${job.cargoKg} kg — already hauling`;
-      const trailer = resolved.carId ? this.trailers.hitchedTo(resolved.carId) : null;
-      if (!trailer) return `${job.cargoKg} kg, ${km} km down the road — needs a trailer`;
-      if (trailer.cargoKg > 0) return `${job.cargoKg} kg — your trailer is loaded`;
-      return `[F] load ${job.cargoKg} kg — ${km} km down the road`;
-    }
-
-    if (t.kind === 'freight-sign') {
-      const job = this.world.state.job;
-      if (!job || job.toPoi !== t.poiIndex) return null;
-      const trailer = resolved.carId ? this.trailers.hitchedTo(resolved.carId) : null;
-      if (!trailer || trailer.cargoKg <= 0) return 'this is the place — bring the load';
-      return `[F] deliver ${Math.round(trailer.cargoKg)} kg`;
-    }
 
     if (t.kind === 'storage') {
       const cells = this.storageCells(t);
@@ -998,6 +1207,20 @@ export class Interaction {
             : null;
         return `[F] install ${itemLabel(held)} — ${slotLabel} slot${install ? ` — ${install}` : ''}`;
       }
+      if (held?.type === 'contract_cargo' && t.owner === 'courier') {
+        const courier = this.couriers.get(t.id);
+        if (!courier || courier.index <= held.sourceCourierIndex) {
+          return 'this courier cannot sign its own parcel';
+        }
+        return `[F] deliver ${itemLabel(held)} — receive signed envelope`;
+      }
+      if (
+        held?.type === 'contract_cargo'
+        && t.owner === 'car'
+        && cells.some((cell) => cell?.type === 'contract_cargo')
+      ) {
+        return 'one contract parcel is already aboard';
+      }
       if (held) return `[F] stow ${itemLabel(held)} — cell ${t.cell + 1}`;
       return `empty trunk cell ${t.cell + 1}`;
     }
@@ -1007,9 +1230,7 @@ export class Interaction {
       if (!car) return null;
       const bodyPrompt = this.bodyToolPrompt(held, car);
       if (bodyPrompt) return bodyPrompt;
-      if (this.world.state.stickersUnplaced > 0) {
-        return `[F] stick it on — ${this.world.state.stickersUnplaced} to place`;
-      }
+      if (held?.type === 'sticker_envelope') return '[F] preview sticker placement';
     }
 
     if (t.kind === 'trailer') {
@@ -1356,40 +1577,6 @@ export class Interaction {
       return;
     }
 
-    // Accepting a haul. The job is recorded and the destination's sign lights on the
-    // next frame's lamp push — no chunk rebuild, nothing else to tell the player.
-    if (t.kind === 'pallet') {
-      if (this.world.state.job) return;
-      const job = jobAt(
-        this.world.state.seed,
-        t.poiIndex,
-        this.world.state.settings.poiSpacingMetres,
-      );
-      if (!job || !resolved.carId) return;
-      const trailer = this.trailers.hitchedTo(resolved.carId);
-      if (!trailer || trailer.cargoKg > 0) return;
-      trailer.setCargo(job.cargoKg);
-      this.world.apply({
-        t: 'job_accept',
-        job: { fromPoi: job.fromPoi, toPoi: job.toPoi, cargoKg: job.cargoKg },
-      });
-      this.freight.takePallet(t.poiIndex);
-      this.sound = 'mount';
-      return;
-    }
-
-    // Delivering. The sign is both the marker and the receiver: one object doing
-    // both jobs is why this system needs no UI at all.
-    if (t.kind === 'freight-sign') {
-      const job = this.world.state.job;
-      if (!job || job.toPoi !== t.poiIndex || !resolved.carId) return;
-      const trailer = this.trailers.hitchedTo(resolved.carId);
-      if (!trailer || trailer.cargoKg <= 0) return;
-      trailer.setCargo(0);
-      this.world.apply({ t: 'job_complete', poiIndex: t.poiIndex });
-      this.sound = 'mount';
-      return;
-    }
 
     // The first press opens a compartment. Further presses operate its aimed cell.
     if (t.kind === 'storage') {
@@ -1416,6 +1603,40 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
+      if (!cells[t.cell] && held?.type === 'contract_cargo' && t.owner === 'courier') {
+        const courier = this.couriers.get(t.id);
+        if (!courier || courier.index <= held.sourceCourierIndex) {
+          this.sound = 'refused';
+          return;
+        }
+        const envelope: StickerEnvelopeItem = {
+          type: 'sticker_envelope',
+          id: `${held.id}:signed:${courier.index}`,
+          stickerKind: held.rewardStickerKind,
+          completedContractId: held.id,
+        };
+        const nextCells = cells.slice();
+        nextCells[t.cell] = envelope;
+        this.world.apply({
+          t: 'courier_storage',
+          courierId: t.id,
+          cells: nextCells,
+          consumedItemId: held.id,
+          completedContractId: held.id,
+        });
+        this.inventory.remove(held.id);
+        this.sound = 'mount';
+        return;
+      }
+      if (
+        !cells[t.cell]
+        && held?.type === 'contract_cargo'
+        && t.owner === 'car'
+        && cells.some((cell) => cell?.type === 'contract_cargo')
+      ) {
+        this.sound = 'refused';
+        return;
+      }
       const result = operateTrunkCell(cells, t.cell, held, this.inventory);
       if (result.action === 'refused') {
         this.sound = 'refused';
@@ -1424,6 +1645,10 @@ export class Interaction {
       if (result.action === 'none') return;
       if (t.owner === 'wreck') {
         this.world.apply({ t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item });
+      } else if (t.owner === 'courier') {
+        const nextCells = cells.slice();
+        nextCells[t.cell] = result.item;
+        this.world.apply({ t: 'courier_storage', courierId: t.id, cells: nextCells });
       } else if (t.side === 'bonnet') {
         // The delta itself moves the slot's fluid into the part coming out and out of
         // the part going in (`moveSlotFluid`, game/state.ts). Nothing to zero here.
@@ -1436,26 +1661,24 @@ export class Interaction {
       return;
     }
 
-    // Placing a sticker. Permanent by design: no removal path exists anywhere, and
-    // it stays with this car if the player ever drives another.
+    // First F opens a modal physical preview. The envelope stays held until the
+    // second F/click confirms a five-probe-valid painted footprint.
     if (t.kind === 'car-body') {
-      if (this.world.state.stickersUnplaced <= 0) return;
-      const car = this.world.state.cars[t.carId];
-      if (!car) return;
-      const sticker: StickerState = {
-        kind: STICKER_KIND,
+      const envelope = held?.type === 'sticker_envelope' ? held : null;
+      if (!envelope || !this.world.state.cars[t.carId]) return;
+      this.stickerPlacement = { envelopeId: envelope.id, carId: t.carId, roll: 0 };
+      this.openStorage = null;
+      this.onStickerPreview(t.carId, {
+        id: `${envelope.id}:sticker`,
+        kind: envelope.stickerKind,
         x: t.point.x,
         y: t.point.y,
         z: t.point.z,
         nx: t.normal.x,
         ny: t.normal.y,
         nz: t.normal.z,
-        // Spin from where the player happened to be standing, so a bonnet full of
-        // them reads as hand-applied rather than stamped.
-        roll: Math.atan2(t.normal.x, t.normal.z),
-      };
-      this.world.apply({ t: 'sticker_place', carId: t.carId, sticker });
-      this.onStickerPlaced(t.carId, sticker);
+        roll: 0,
+      }, t.valid);
       this.sound = 'mount';
       return;
     }

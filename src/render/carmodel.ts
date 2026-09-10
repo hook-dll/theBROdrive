@@ -351,6 +351,45 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
   });
 }
 
+/** Records exact paint material slots so decal raycasts never accept glass or trim. */
+function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    const materials = materialsOf(child);
+    child.userData.stickerMaterialIndices = materials
+      .map((material, index) => (isPaintSlot(material, def) ? index : -1))
+      .filter((index) => index >= 0);
+  });
+}
+
+/** Courier-only shader accent: turquoise paint with a bright view-angle rim. */
+function applyCourierAppearance(root: THREE.Object3D, def: CarModelDef): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    for (const material of materialsOf(child)) {
+      if (!(material instanceof THREE.MeshStandardMaterial) || !isPaintSlot(material, def)) continue;
+      material.color.setHex(0x36b8b3);
+      material.metalness = 0.68;
+      material.roughness = 0.22;
+      material.emissive.setHex(0x481b55);
+      material.emissiveIntensity = 0.28;
+      const previousCompile = material.onBeforeCompile;
+      const previousKey = material.customProgramCacheKey;
+      material.onBeforeCompile = (shader, renderer) => {
+        previousCompile.call(material, shader, renderer);
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `outgoingLight += mix(vec3(0.05, 0.9, 0.82), vec3(0.9, 0.15, 0.72),
+            0.5 + 0.5 * normal.y) * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.2) * 1.4;
+          #include <opaque_fragment>`,
+        );
+      };
+      material.customProgramCacheKey = () => `${previousKey.call(material)}|courier-rim-v1`;
+      material.needsUpdate = true;
+    }
+  });
+}
+
 /**
  * Sampling for the Soviet palette atlas.
  *
@@ -1135,6 +1174,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   cloneCarBodyPaintMaterials(body, t.def, appearanceKey);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
+  markStickerSurfaces(body, t.def);
   body.name = 'body';
   return { body, wheels };
 }
@@ -1221,6 +1261,13 @@ export function createStaticCarModel(id: string, appearanceKey = id): THREE.Obje
     }
   }
   return cloneStaticModel(id, appearanceKey);
+}
+
+/** Static, solid courier with the same deterministic body and a unique shader finish. */
+export function createCourierCarModel(id: string, appearanceKey: string): THREE.Object3D {
+  const model = createStaticCarModel(id, appearanceKey);
+  applyCourierAppearance(model, carModel(id));
+  return model;
 }
 
 export function disposeCarModelCache(): void {

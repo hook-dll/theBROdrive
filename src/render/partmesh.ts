@@ -1272,6 +1272,25 @@ function createPhotographMesh(imageDataUrl: string): THREE.Group {
   return root;
 }
 
+function buildContractParcelInto(b: MeshBuilder): void {
+  const paper = flat(0x8f6847, 0.92);
+  const string = flat(0x3a281c, 0.96);
+  const label = flat(0xd9c8a5, 0.9);
+  b.box('contract_parcel', 0.32, 0.2, 0.17, paper, [0, 0, 0]);
+  b.box('contract_parcel_string_x', 0.018, 0.205, 0.176, string, [0, 0, 0]);
+  b.box('contract_parcel_string_y', 0.325, 0.018, 0.176, string, [0, 0, 0]);
+  b.box('contract_parcel_label', 0.15, 0.075, 0.006, label, [0.045, 0.025, 0.088]);
+}
+
+function buildStickerEnvelopeInto(b: MeshBuilder): void {
+  const paper = flat(0xd8c8ad, 0.9);
+  const fold = flat(0xb9a78c, 0.92);
+  const seal = flat(0x8e2231, 0.72);
+  b.box('sticker_envelope', 0.23, 0.15, 0.012, paper, [0, 0, 0]);
+  b.box('sticker_envelope_fold', 0.18, 0.008, 0.014, fold, [0, 0.015, 0.002], [0, 0, -0.34]);
+  b.cylinder('sticker_envelope_seal', 0.027, 0.027, 0.008, 14, seal, [0, -0.005, 0.011], AXIS_Z);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -1338,6 +1357,10 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createFootballMesh();
     case 'pocket_watch':
       return createPocketWatchMesh();
+    case 'contract_cargo':
+      return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
+    case 'sticker_envelope':
+      return buildGroup(itemBlueprint('sticker_envelope', buildStickerEnvelopeInto).instructions);
   }
 }
 

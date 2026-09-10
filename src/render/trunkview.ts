@@ -12,6 +12,7 @@ import {
 } from '../vehicle/trunk';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunk } from '../world/wrecktrunks';
+import type { CourierTrunk } from '../world/couriers';
 
 const CELL_INSET = 0.9;
 const ITEM_FIT = 0.68;
@@ -77,7 +78,7 @@ export class TrunkView {
   update(
     view: TrunkViewState | null,
     vehicle: Vehicle | null,
-    wreck: WreckTrunk | null,
+    fixed: WreckTrunk | CourierTrunk | null,
     alpha: number,
     origin: WorldOrigin,
     timeOfDay: number,
@@ -97,13 +98,13 @@ export class TrunkView {
       halfExtents = vehicle.modelMeasure.halfExtents;
       vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
     } else {
-      if (!wreck) {
+      if (!fixed) {
         this.root.visible = false;
         return;
       }
-      halfExtents = wreck.halfExtents;
-      this.posePosition.set(wreck.x - origin.x, wreck.y, wreck.z - origin.z);
-      this.poseQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
+      halfExtents = fixed.halfExtents;
+      this.posePosition.set(fixed.x - origin.x, fixed.y, fixed.z - origin.z);
+      this.poseQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
     }
 
     this.root.visible = true;

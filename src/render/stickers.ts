@@ -18,13 +18,15 @@ import type { StickerState } from '../game/state';
  */
 
 /** Sticker size in metres. Big enough to read from the driver's seat. */
-const SIZE = 0.12;
+export const STICKER_SIZE = 0.12;
 /**
  * Lift along the normal. Large enough to beat depth precision on a shell metres
  * from the camera, small enough that it never reads as floating.
  */
 const LIFT = 0.004;
 const TEXTURE_SIZE = 128;
+const STICKER_FORWARD = new THREE.Vector3(0, 0, 1);
+const stickerNormal = new THREE.Vector3();
 
 /** Star, drawn once and shared by every sticker in the session. */
 let _starTexture: THREE.CanvasTexture | null = null;
@@ -68,7 +70,7 @@ function starTexture(): THREE.CanvasTexture {
 
 let _sharedGeometry: THREE.PlaneGeometry | null = null;
 function stickerGeometry(): THREE.PlaneGeometry {
-  if (!_sharedGeometry) _sharedGeometry = new THREE.PlaneGeometry(SIZE, SIZE);
+  _sharedGeometry ??= new THREE.PlaneGeometry(STICKER_SIZE, STICKER_SIZE);
   return _sharedGeometry;
 }
 
@@ -97,21 +99,44 @@ function stickerMaterial(): THREE.MeshStandardMaterial {
  * local: the sticker then rides the chassis for free, including through the render
  * interpolation the car already does.
  */
+export function setStickerMeshState(mesh: THREE.Mesh, sticker: StickerState): void {
+  stickerNormal.set(sticker.nx, sticker.ny, sticker.nz);
+  if (stickerNormal.lengthSq() < 1e-8) stickerNormal.set(0, 1, 0);
+  stickerNormal.normalize();
+  mesh.position.set(sticker.x, sticker.y, sticker.z).addScaledVector(stickerNormal, LIFT);
+  mesh.quaternion.setFromUnitVectors(STICKER_FORWARD, stickerNormal);
+  mesh.rotateZ(sticker.roll);
+}
+
 export function createStickerMesh(sticker: StickerState): THREE.Mesh {
   const mesh = new THREE.Mesh(stickerGeometry(), stickerMaterial());
-  mesh.position.set(sticker.x, sticker.y, sticker.z);
-
-  const normal = new THREE.Vector3(sticker.nx, sticker.ny, sticker.nz);
-  if (normal.lengthSq() < 1e-6) normal.set(0, 1, 0);
-  normal.normalize();
-
-  // A plane's own facing is +Z, so aim that at the surface normal, then spin about
-  // it by the recorded roll.
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-  mesh.rotateZ(sticker.roll);
-  mesh.position.addScaledVector(normal, LIFT);
-
+  setStickerMeshState(mesh, sticker);
   mesh.renderOrder = 2;
   mesh.name = 'sticker';
   return mesh;
+}
+
+/** One reusable translucent decal parented to the car while placement is active. */
+export function createStickerPreviewMesh(): THREE.Mesh {
+  const material = stickerMaterial().clone();
+  material.transparent = true;
+  material.opacity = 0.68;
+  material.depthWrite = false;
+  const mesh = new THREE.Mesh(stickerGeometry(), material);
+  mesh.renderOrder = 3;
+  mesh.name = 'sticker-preview';
+  mesh.visible = false;
+  return mesh;
+}
+
+export function updateStickerPreview(
+  mesh: THREE.Mesh,
+  sticker: StickerState | null,
+  valid: boolean,
+): void {
+  mesh.visible = sticker !== null;
+  if (!sticker) return;
+  setStickerMeshState(mesh, sticker);
+  const material = mesh.material as THREE.MeshStandardMaterial;
+  material.color.setHex(valid ? 0xffffff : 0xff4f46);
 }

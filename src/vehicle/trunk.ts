@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { Item } from '../items/items';
 
-/** Every car and static wreck uses the same visible four-by-two trunk layout. */
+/** Every car and static roadside vehicle uses the same visible four-by-two trunk layout. */
 export const TRUNK_COLUMNS = 4;
 export const TRUNK_ROWS = 2;
 export const TRUNK_CELL_COUNT = TRUNK_COLUMNS * TRUNK_ROWS;
@@ -14,7 +14,7 @@ const TRUNK_GRID_BODY_FRACTION = 1.65;
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
 
 export type StorageSide = 'trunk' | 'bonnet';
-export type StorageOwnerKind = 'car' | 'wreck';
+export type StorageOwnerKind = 'car' | 'wreck' | 'courier';
 
 /** Fixed-step trunk view handed from world interaction to the renderer. */
 export interface TrunkViewState {
