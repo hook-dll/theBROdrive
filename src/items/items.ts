@@ -124,6 +124,27 @@ export interface PocketWatchItem {
   readonly id: string;
 }
 
+export type StickerKind = 'star';
+
+/** A physical task object. Its source index is the complete delivery contract. */
+export interface ContractCargoItem {
+  readonly type: 'contract_cargo';
+  readonly id: string;
+  readonly sourceCourierIndex: number;
+  readonly contractKind: 'parcel';
+  readonly cargoName: string;
+  readonly rewardStickerKind: StickerKind;
+  readonly generatedSeed: number;
+}
+
+/** Signed physical reward, consumed only when its sticker is confirmed on a car. */
+export interface StickerEnvelopeItem {
+  readonly type: 'sticker_envelope';
+  readonly id: string;
+  readonly stickerKind: StickerKind;
+  readonly completedContractId: string;
+}
+
 export type Item =
   | ToolItem
   | PartItem
@@ -138,7 +159,9 @@ export type Item =
   | CameraItem
   | PhotographItem
   | FootballItem
-  | PocketWatchItem;
+  | PocketWatchItem
+  | ContractCargoItem
+  | StickerEnvelopeItem;
 
 /**
  * Density, kg/litre. Petrol and diesel are the light ones; water is water and oil
@@ -202,6 +225,10 @@ export function itemLabel(item: Item): string {
       return 'football';
     case 'pocket_watch':
       return 'pocket watch';
+    case 'contract_cargo':
+      return item.cargoName;
+    case 'sticker_envelope':
+      return 'signed sticker envelope';
   }
 }
 
@@ -248,6 +275,10 @@ export function itemMass(item: Item): number {
       return 0.43;
     case 'pocket_watch':
       return 0.12;
+    case 'contract_cargo':
+      return 12;
+    case 'sticker_envelope':
+      return 0.08;
   }
 }
 

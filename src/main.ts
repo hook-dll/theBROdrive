@@ -51,8 +51,12 @@ import { MirageTableau } from './render/mirage-tableau';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
-import { VehicleLightRig } from './render/vehiclelights';
-import { createStickerMesh } from './render/stickers';
+import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
+import {
+  createStickerMesh,
+  createStickerPreviewMesh,
+  updateStickerPreview,
+} from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
 import {
@@ -62,7 +66,6 @@ import {
   spawnStartingItems,
 } from './world/house';
 import { PoiProvider } from './world/poi';
-import { FreightField } from './world/freight';
 import { DebrisField, type Impactor } from './world/debris';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
@@ -72,6 +75,7 @@ import { RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { setCarBodyCondition } from './render/materials';
 import { WreckTrunkField } from './world/wrecktrunks';
+import { CourierField } from './world/couriers';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -173,6 +177,28 @@ const DEV_FLIP_RADIUS = 12;
 const UNDERWORLD_Y = -400;
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
+
+/**
+ * Streaming budget while playing: one small job per rendered frame, which is what
+ * keeps road and desert attachment out of the frame time.
+ */
+const STREAM_FRAME_BUDGET_MS = 3;
+const STREAM_JOBS_PER_FRAME = 1;
+/**
+ * Streaming budget while the loading cover still owns the screen. Nothing is being
+ * displayed and nothing is being simulated, so the only reason to stay small would
+ * be to hand the player an unfinished world — which is the bug this exists to fix.
+ */
+const BOOT_STREAM_BUDGET_MS = 12;
+const BOOT_STREAM_JOBS_PER_FRAME = 64;
+/** Streamer calls per warm-up pass; each one admits at most a single job. */
+const BOOT_STREAM_CALLS_PER_PASS = 8;
+/**
+ * Ceiling on the boot warm-up. A worker that never answers, or a machine slow enough
+ * that the whole window cannot be built, must still reach the road: the world then
+ * finishes arriving during play exactly as it used to.
+ */
+const BOOT_WARMUP_LIMIT_MS = 25_000;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -306,13 +332,15 @@ async function boot(): Promise<void> {
   // Trailers are world objects like cars, not chunk scenery: they move, so they
   // must outlive the chunk they were found standing in.
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
-  // Freight: a sign at every stop, pallets where the seed says there is a load.
-  const freight = new FreightField();
+  // Static trunk registries follow streamed physics chunks; edited contents live in state.
   const wreckTrunks = new WreckTrunkField();
+  const couriers = new CourierField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   const trunkView = new TrunkView(renderer.scene);
+  const stickerPreview = createStickerPreviewMesh();
+  renderer.scene.add(stickerPreview);
   const anchorGhosts = new AnchorGhosts(renderer.scene);
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
@@ -344,7 +372,8 @@ async function boot(): Promise<void> {
   }
   // One streaming unit per rendered frame prevents road and desert attachment from
   // stacking into the periodic 3-4 ms main-thread spikes visible on fast displays.
-  const worldWork = new WorldWorkScheduler(3, 1);
+  // Boot widens this deliberately; see `warmStreamedWorld`.
+  const worldWork = new WorldWorkScheduler(STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME);
   const desert = new DesertTileStreamer(
     world.seed,
     road,
@@ -379,7 +408,7 @@ async function boot(): Promise<void> {
   streamer.register(new ScatterProvider(debris, hazards));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, freight, wreckTrunks));
+  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -725,8 +754,8 @@ async function boot(): Promise<void> {
     inventory,
     loose,
     trailerField,
-    freight,
     wreckTrunks,
+    couriers,
     () => {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
@@ -734,6 +763,19 @@ async function boot(): Promise<void> {
     (carId, sticker) => {
       const vehicle = vehicles.get(carId);
       if (vehicle) vehicle.root.add(createStickerMesh(sticker));
+    },
+    (carId, sticker, valid) => {
+      if (!carId || !sticker) {
+        stickerPreview.visible = false;
+        return;
+      }
+      const vehicle = vehicles.get(carId);
+      if (!vehicle) {
+        stickerPreview.visible = false;
+        return;
+      }
+      if (stickerPreview.parent !== vehicle.root) vehicle.root.add(stickerPreview);
+      updateStickerPreview(stickerPreview, sticker, valid);
     },
     origin,
   );
@@ -759,17 +801,11 @@ async function boot(): Promise<void> {
     hud.setToast('autosave failed');
   });
 
-  // Freight has no HUD of its own — the job lives on a signpost and the payment on
-  // the bodywork — so the only feedback it needs is the moment each thing happens.
-  // Riding the delta stream keeps that out of the interaction code entirely.
   world.onDelta((delta) => {
-    if (delta.t === 'job_accept') {
-      hud.setToast(`${delta.job.cargoKg} kg aboard — look for the lit sign`);
-    } else if (delta.t === 'job_complete') {
-      hud.setToast('delivered — one sticker earned');
+    if (delta.t === 'courier_storage' && delta.completedContractId) {
+      hud.setToast('delivered — signed sticker envelope received');
     } else if (delta.t === 'sticker_place') {
-      const left = world.state.stickersUnplaced;
-      hud.setToast(left > 0 ? `stuck on — ${left} left to place` : 'stuck on');
+      hud.setToast('stuck on');
     } else if (delta.t === 'settings') {
       // Every path that changes preferences goes through this delta — the pause menu,
       // the precise-control hotkey, anything added later — so mirroring here is the
@@ -798,7 +834,7 @@ async function boot(): Promise<void> {
       input,
       loose,
       debris,
-      freight,
+      couriers,
       sky,
       trailers: trailerField,
       road,
@@ -1449,6 +1485,13 @@ async function boot(): Promise<void> {
     // spent a frame on yesterday's twilight. The offer order is the priority order
     // the rig allocates in — driven car first, then nearest to the camera — so the
     // only beams a full pool can refuse are the farthest ones.
+    //
+    // The driven car projects its beams as authored; everyone else's are faded by
+    // range (see `ambientBeamGain`). Full-strength ambient pools made a night with
+    // traffic read as glare, and arrived as a step: a car spawns 140 m ahead, or the
+    // pool stops refusing its lamp, and a bright ellipse existed where there had
+    // been none. Faded, the farthest offers are worth nothing anyway, so a refusal
+    // and a spawn are both invisible.
     litVehicles.length = 0;
     for (const vehicle of vehicles.values()) {
       if (vehicle.hasLitLamps) litVehicles.push(vehicle);
@@ -1462,7 +1505,12 @@ async function boot(): Promise<void> {
       );
     }
     vehicleLights.beginFrame();
-    for (const vehicle of litVehicles) vehicle.syncProjectedLights(vehicleLights);
+    for (const vehicle of litVehicles) {
+      vehicle.syncProjectedLights(
+        vehicleLights,
+        vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam)),
+      );
+    }
     vehicleLights.endFrame();
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
@@ -1585,7 +1633,11 @@ async function boot(): Promise<void> {
     trunkView.update(
       boot,
       boot?.owner === 'car' ? (vehicles.get(boot.id) ?? null) : null,
-      boot?.owner === 'wreck' ? wreckTrunks.get(boot.id) : null,
+      boot?.owner === 'wreck'
+        ? wreckTrunks.get(boot.id)
+        : boot?.owner === 'courier'
+          ? couriers.get(boot.id)
+          : null,
       alpha,
       origin,
       s.timeOfDay,
@@ -2004,7 +2056,8 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || paused) return;
     if (e.code === 'Escape') {
-      openPause();
+      if (interaction.cancelStickerPlacement()) e.preventDefault();
+      else openPause();
     } else if (e.code === 'Backquote') {
       e.preventDefault();
       openPause(true);
@@ -2025,6 +2078,62 @@ async function boot(): Promise<void> {
     cinema: toggleCinema,
   });
   input.attachTouch(touch);
+  /**
+   * WHY THE WORLD IS FINISHED BEFORE THE LOOP STARTS.
+   *
+   * Streaming is amortized: one bounded job per rendered frame, which is correct
+   * while driving and wrong at boot. `prime` guarantees only the tile the player
+   * stands on plus the nine-tile desert patch, so the loop used to start over a
+   * world that was still arriving — road chunks ahead unbuilt, their colliders
+   * absent — and a resumed save that was already rolling drove straight off the
+   * built ground and under the terrain. Waiting here costs launch seconds nobody
+   * is looking at and removes the failure entirely.
+   *
+   * The anchor is the boot projection, so this builds exactly the window the first
+   * fixed step will ask for. `setTimeout` rather than a frame callback: the desert
+   * and vista workers answer on macrotasks, and the render loop is not running yet.
+   */
+  const warmStreamedWorld = async (): Promise<void> => {
+    const label = loading.querySelector<HTMLElement>('.launch-loading-text');
+    worldWork.setFrameBudget(BOOT_STREAM_BUDGET_MS, BOOT_STREAM_JOBS_PER_FRAME);
+    const deadline = performance.now() + BOOT_WARMUP_LIMIT_MS;
+    try {
+      for (;;) {
+        frameId++;
+        worldWork.beginFrame(frameId);
+        for (let call = 0; call < BOOT_STREAM_CALLS_PER_PASS; call++) {
+          streamer.update(initialProjection.s, frameId, initialProjection.lateral);
+        }
+        desert.update(
+          initialGround.x,
+          initialGround.z,
+          initialProjection.lateral,
+          frameId,
+        );
+        const roadWindow = streamer.readiness;
+        const sandWindow = desert.readiness;
+        const built = roadWindow.ready + sandWindow.ready;
+        const total = Math.max(1, roadWindow.wanted + sandWindow.wanted);
+        const complete =
+          !worldWork.hasPending &&
+          roadWindow.ready >= roadWindow.wanted &&
+          sandWindow.ready >= sandWindow.wanted;
+        if (label) {
+          label.textContent = complete
+            ? 'the road is ready'
+            : `building the world — ${Math.min(99, Math.floor((built / total) * 100))}%`;
+        }
+        if (complete || performance.now() >= deadline) return;
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      }
+    } finally {
+      worldWork.setFrameBudget(STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME);
+    }
+  };
+  await warmStreamedWorld();
+
   // Prime the exact live render path while the loading cover still owns the screen.
   // The first pass establishes sky/fog/post uniforms and bakes the environment;
   // compileAsync then waits out parallel GPU compilation. Draw once more with those

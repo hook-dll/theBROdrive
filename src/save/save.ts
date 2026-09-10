@@ -4,7 +4,6 @@ import { newWorldState } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
-  JobState,
   PlayerState,
   StickerState,
   TrailerState,
@@ -347,6 +346,7 @@ export function migrateState(raw: unknown): WorldState {
   const looseItemsRaw = recordField(obj.looseItems, 'looseItems');
   const trailersRaw = recordField(obj.trailers, 'trailers');
   const wreckStorageRaw = recordField(obj.wreckStorage, 'wreckStorage');
+  const courierStorageRaw = recordField(obj.courierStorage, 'courierStorage');
 
   const seed = seedRaw >>> 0;
   const defaults = newWorldState(seed);
@@ -399,6 +399,11 @@ export function migrateState(raw: unknown): WorldState {
     wreckStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `wreck "${id}" trunk`);
   }
 
+  const courierStorage: Record<string, (Item | null)[]> = {};
+  for (const [id, value] of Object.entries(courierStorageRaw)) {
+    courierStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `courier "${id}" trunk`);
+  }
+
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
   for (const [id, value] of Object.entries(loosePartsRaw)) {
     looseParts[id] = migrateLoosePart(asRecord(value, `loose part "${id}"`));
@@ -409,6 +414,31 @@ export function migrateState(raw: unknown): WorldState {
     const raw = asRecord(value, `loose item "${id}"`);
     if (isRemovedLegacyItem(raw.item)) continue;
     looseItems[id] = migrateLooseItem(raw);
+  }
+
+  // Retired abstract rewards become physical envelopes. Preserve the documented
+  // preference for the first car's boot, then materialise overflow beside the player.
+  const legacyEnvelopeCount = Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0)));
+  const firstCar = Object.values(cars)[0];
+  for (let index = 0; index < legacyEnvelopeCount; index++) {
+    const id = `legacy:sticker-envelope:${index}`;
+    const item: Item = {
+      type: 'sticker_envelope',
+      id,
+      stickerKind: 'star',
+      completedContractId: `legacy:delivery:${index}`,
+    };
+    const cell = firstCar?.storage.findIndex((stored) => stored === null) ?? -1;
+    if (firstCar && cell >= 0) {
+      firstCar.storage[cell] = item;
+    } else {
+      looseItems[id] = {
+        item,
+        x: player.x + (index % 4) * 0.18,
+        y: player.y,
+        z: player.z + Math.floor(index / 4) * 0.18,
+      };
+    }
   }
 
   return {
@@ -426,35 +456,17 @@ export function migrateState(raw: unknown): WorldState {
     player,
     cars,
     wreckStorage,
+    courierStorage,
+    completedContractIds: migrateStringArray(obj.completedContractIds),
     trailers,
     looseParts,
     looseItems,
     lootedPois: migrateNumberArray(obj.lootedPois),
     flattenedProps: migrateNumberArray(obj.flattenedProps),
-    job: migrateJob(obj.job),
-    stickersUnplaced: Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0))),
-    deliveredPois: migrateNumberArray(obj.deliveredPois),
   };
 }
 
 
-/**
- * The accepted haul. A job whose slots are not both finite integers is dropped:
- * the cargo is already on the trailer either way, and a job pointing at nowhere
- * would light no sign and never complete.
- */
-function migrateJob(raw: unknown): JobState | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
-  const fromPoi = numOr(obj.fromPoi, -1);
-  const toPoi = numOr(obj.toPoi, -1);
-  if (fromPoi < 0 || toPoi < 0) return null;
-  return {
-    fromPoi: Math.trunc(fromPoi),
-    toPoi: Math.trunc(toPoi),
-    cargoKg: Math.max(0, numOr(obj.cargoKg, 0)),
-  };
-}
 
 function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   if (typeof raw.id !== 'string') {
@@ -517,12 +529,14 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   // failing the load: losing a mark is bad, losing the save is worse.
   const stickers: StickerState[] = [];
   if (Array.isArray(raw.stickers)) {
-    for (const value of raw.stickers) {
+    for (let index = 0; index < raw.stickers.length; index++) {
+      const value = raw.stickers[index];
       if (typeof value !== 'object' || value === null) continue;
       const s = value as Record<string, unknown>;
-      if (typeof s.kind !== 'string') continue;
+      if (s.kind !== 'star') continue;
       stickers.push({
-        kind: s.kind,
+        id: typeof s.id === 'string' ? s.id : `legacy:${raw.id}:sticker:${index}`,
+        kind: 'star',
         x: numOr(s.x, 0),
         y: numOr(s.y, 0),
         z: numOr(s.z, 0),
@@ -758,6 +772,36 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'football', id: obj.id };
     case 'pocket_watch':
       return { type: 'pocket_watch', id: obj.id };
+    case 'contract_cargo': {
+      const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
+      if (
+        sourceCourierIndex < 0
+        || obj.contractKind !== 'parcel'
+        || typeof obj.cargoName !== 'string'
+        || obj.rewardStickerKind !== 'star'
+      ) {
+        throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
+      }
+      return {
+        type: 'contract_cargo',
+        id: obj.id,
+        sourceCourierIndex,
+        contractKind: 'parcel',
+        cargoName: obj.cargoName,
+        rewardStickerKind: 'star',
+        generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
+      };
+    }
+    case 'sticker_envelope':
+      if (obj.stickerKind !== 'star' || typeof obj.completedContractId !== 'string') {
+        throw new Error(`Save data is malformed: sticker envelope at ${where} is invalid`);
+      }
+      return {
+        type: 'sticker_envelope',
+        id: obj.id,
+        stickerKind: 'star',
+        completedContractId: obj.completedContractId,
+      };
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);
   }
@@ -768,6 +812,15 @@ function migrateNumberArray(value: unknown): number[] {
   const out: number[] = [];
   for (const item of value) {
     if (typeof item === 'number' && Number.isFinite(item)) out.push(item);
+  }
+  return out;
+}
+
+function migrateStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === 'string' && !out.includes(item)) out.push(item);
   }
   return out;
 }

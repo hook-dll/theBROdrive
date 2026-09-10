@@ -11,6 +11,7 @@ import { makeFlatMaterial } from '../render/materials';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
+  createCourierCarModel,
   createStaticCarModel,
   isCarModelLoaded,
   loadCarModel,
@@ -18,11 +19,20 @@ import {
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
-import { jobAt, type FreightField } from './freight';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
+import {
+  courierDefaultStorage,
+  courierId,
+  couriersBetween,
+  isCourierPoiSlot,
+  type CourierField,
+  type CourierStop,
+} from './couriers';
+
+const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
 /**
  * Points of interest: the roadside stops that give the drive a reason to continue.
@@ -84,7 +94,10 @@ export function poisBetween(
     const s = i * spacing;
     if (s <= 0 || s > ROAD_LENGTH) continue;
 
-    if (hash01(seed, POI_DOMAIN, i) >= POI_OCCUPANCY) continue;
+    if (
+      hash01(seed, POI_DOMAIN, i) >= POI_OCCUPANCY
+      && !isCourierPoiSlot(seed, i, spacing)
+    ) continue;
 
     const kindRoll = hash01(seed, POI_DOMAIN, i, 1);
     let kind: PoiKind;
@@ -392,11 +405,9 @@ function buildPoi(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  disposables: Disposable[],
   deferredVisuals: Array<() => void>,
   loose: LoosePartField,
   trailers: TrailerField,
-  freight: FreightField,
   wreckTrunks: WreckTrunkField,
   registeredWrecks: string[],
 ): void {
@@ -418,189 +429,92 @@ function buildPoi(
       break;
   }
 
-  buildFreight(ctx, poi, group, bodies, colliders, disposables, freight);
 
   // Record that this POI's loot is now materialised. The flag alone is the whole
   // idempotency guard across chunk promotion / unload / reload.
   if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
 
-// ---------------------------------------------------------------------------
-// Freight furniture: the destination sign every stop carries, and the pallet
-// waiting at the ones with a load to move.
-// ---------------------------------------------------------------------------
 
-const SIGN_POST_HEIGHT = 2.5;
-const SIGN_PANEL = 1.05;
-/** Lateral offset from the POI anchor, toward the road. */
-const SIGN_LATERAL = -5.5;
-const PALLET_HALF: readonly [number, number, number] = [0.7, 0.45, 1.1];
-
-/**
- * The trailer pictogram. Drawn rather than authored so the sign carries no text in
- * any language: a box on two wheels behind a hitch is the only thing the player
- * needs to read, and it means the same thing at 200 m as it does at 2 m.
- */
-let _signTexture: THREE.CanvasTexture | null = null;
-function trailerSignTexture(): THREE.CanvasTexture {
-  if (_signTexture) return _signTexture;
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const g = canvas.getContext('2d');
-  if (!g) throw new Error('2D canvas unavailable for the freight sign');
-
-  g.fillStyle = '#1d2b22';
-  g.fillRect(0, 0, size, size);
-  g.strokeStyle = '#e8dcc4';
-  g.lineWidth = 8;
-  g.strokeRect(14, 14, size - 28, size - 28);
-
-  g.fillStyle = '#e8dcc4';
-  // Bed.
-  g.fillRect(70, 96, 130, 62);
-  // Drawbar and hitch eye.
-  g.fillRect(40, 132, 34, 10);
-  g.beginPath();
-  g.arc(40, 137, 12, 0, Math.PI * 2);
-  g.fill();
-  // Wheels.
-  for (const cx of [104, 168]) {
-    g.beginPath();
-    g.arc(cx, 172, 20, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.fillStyle = '#1d2b22';
-  for (const cx of [104, 168]) {
-    g.beginPath();
-    g.arc(cx, 172, 8, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  _signTexture = tex;
-  return tex;
-}
-
-/**
- * One sign per stop, plus a pallet where there is freight waiting.
- *
- * The sign is built at every POI on purpose. If only destinations had signs, the
- * mere presence of one would give the answer away and the lighting would be
- * decoration; a road lined with dark frames means the lit one is genuinely
- * information.
- *
- * The panel material is per-POI rather than shared, because exactly one of them
- * lights at a time — a module-level material could only light all or none.
- */
-function buildFreight(
+// Couriers are their own sparse POIs. The sequence is random-access and every
+// adjacent pair is 5–12 km apart, independent of ordinary POI density.
+function buildCourier(
   ctx: ChunkContext,
-  poi: Poi,
+  stop: CourierStop,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  disposables: Disposable[],
-  freight: FreightField,
+  courierField: CourierField,
+  registeredCouriers: string[],
+  deferredVisuals: Array<() => void>,
 ): void {
-  const a = anchorXZ(ctx, poi);
-  const ox = ctx.originX;
-  const oz = ctx.originZ;
-  const base = placeAt(ctx, poi, a, SIGN_LATERAL, 0, a.heading);
+  const def = pick(COURIER_MODELS, stop.appearanceSeed);
+  const measure = carModelMeasure(def.id);
+  const half = measure.halfExtents;
+  const road = ctx.road.sampleAt(stop.s);
+  const point = ctx.road.offsetPoint(stop.s, stop.lateral);
+  point.y = ctx.terrain.heightAt(point.x, point.z, stop.s);
+  const yaw = road.heading + (hash01(stop.appearanceSeed, 1) - 0.5) * 0.16;
+  const originY = point.y + half[1] - 0.02;
+  const id = courierId(stop.index);
+  const matrix = poseMatrix(
+    point.x,
+    originY,
+    point.z,
+    yaw,
+    0,
+    0,
+    ctx.originX,
+    ctx.originZ,
+  );
+  const addModel = (): void => {
+    const model = createCourierCarModel(def.id, id);
+    setFromMatrix(model, matrix);
+    group.add(model);
+  };
+  if (isCarModelLoaded(def.id)) {
+    addModel();
+  } else {
+    let cancelled = false;
+    deferredVisuals.push(() => {
+      cancelled = true;
+    });
+    void loadCarModel(def.id).then(
+      () => {
+        if (!cancelled) addModel();
+      },
+      (error: unknown) => {
+        console.error(`failed to load courier car model "${def.id}"`, error);
+      },
+    );
+  }
 
-  const postGeo = new THREE.CylinderGeometry(0.07, 0.09, SIGN_POST_HEIGHT, 6);
-  disposables.push(postGeo);
-  addStaticMesh(
+  const collider = addStaticCollider(
     ctx,
-    postGeo,
-    makeFlatMaterial(0x4a4640, 0.7),
-    poseMatrix(base.x, base.y + SIGN_POST_HEIGHT / 2, base.z, a.heading, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
+    new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
+    matrix,
+    SurfaceType.Rock,
     bodies,
     colliders,
   );
-
-  const panelGeo = new THREE.BoxGeometry(SIGN_PANEL, SIGN_PANEL, 0.08);
-  const panelMat = new THREE.MeshStandardMaterial({
-    map: trailerSignTexture(),
-    roughness: 0.55,
-    metalness: 0.05,
-    emissive: 0xffe6a8,
-    emissiveIntensity: 0,
+  if (!collider) return;
+  const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
+  courierField.register({
+    id,
+    index: stop.index,
+    modelId: def.id,
+    x: point.x,
+    y: originY,
+    z: point.z,
+    qx: rotation.x,
+    qy: rotation.y,
+    qz: rotation.z,
+    qw: rotation.w,
+    halfExtents: half,
+    defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index),
   });
-  disposables.push(panelGeo, panelMat);
-  const panelMatrix = poseMatrix(
-    base.x,
-    base.y + SIGN_POST_HEIGHT + SIGN_PANEL / 2 - 0.2,
-    base.z,
-    // Face across the road, so it reads from a car coming up on it.
-    a.heading + Math.PI / 2,
-    0,
-    0,
-    ox,
-    oz,
-  );
-  const panel = new THREE.Mesh(panelGeo, panelMat);
-  setFromMatrix(panel, panelMatrix);
-  group.add(panel);
-  const panelCollider = addStaticCollider(
-    ctx,
-    panelGeo,
-    panelMatrix,
-    SurfaceType.Concrete,
-    bodies,
-    colliders,
-  );
-
-  // A data source for LightBudget, not a rendered light: kept invisible so chunk
-  // streaming never changes Three's point-light shader permutation.
-  const light = new THREE.PointLight(0xffe6a8, 0, 34, 2);
-  light.position.set(base.x - ox, base.y + SIGN_POST_HEIGHT, base.z - oz);
-  light.visible = false;
-  light.userData.lightBudgetSource = true;
-  group.add(light);
-
-  freight.registerSign(poi.index, panelMat, light, panelCollider?.handle ?? null, bodies);
-
-  // The pallet: present only where the seed says there is a load, the player is not
-  // already carrying one from here, and this stop has not been cleared before.
-  const job = jobAt(ctx.world.seed, poi.index, ctx.world.state.settings.poiSpacingMetres);
-  if (!job) return;
-  const s = ctx.world.state;
-  const taken = s.job !== null && s.job.fromPoi === poi.index;
-  if (taken || s.deliveredPois.includes(poi.index)) return;
-
-  const palletGeo = new THREE.BoxGeometry(PALLET_HALF[0] * 2, PALLET_HALF[1] * 2, PALLET_HALF[2] * 2);
-  disposables.push(palletGeo);
-  const spot = placeAt(ctx, poi, a, 2.6, 3.4, a.heading);
-  const palletMatrix = poseMatrix(
-    spot.x,
-    spot.y + PALLET_HALF[1],
-    spot.z,
-    a.heading + hash01(poi.variantSeed, 0x9a) * 0.4,
-    0,
-    0,
-    ox,
-    oz,
-  );
-  const pallet = new THREE.Mesh(palletGeo, makeFlatMaterial(0x8a6238, 0.9));
-  setFromMatrix(pallet, palletMatrix);
-  pallet.castShadow = true;
-  group.add(pallet);
-  const palletCollider = addStaticCollider(
-    ctx,
-    palletGeo,
-    palletMatrix,
-    SurfaceType.Concrete,
-    bodies,
-    colliders,
-  );
-  freight.registerPallet(poi.index, pallet, palletCollider?.handle ?? null, bodies);
+  registeredCouriers.push(id);
 }
-
 /**
  * Fraction of roadside wreck fields containing one working car. The roll is per
  * field, not per shell: most stops are wrecks only, while roughly one in three has
@@ -1194,24 +1108,10 @@ function buildCamp(
   }
 }
 
-/** Anything with a `dispose`, for per-chunk textures, materials and geometries. */
-interface Disposable {
-  dispose(): void;
-}
 
 /**
- * Builds every POI inside a chunk. Scenery is always built; loot is generated once
- * per POI (guarded by `lootedPois`) and its dynamic bodies are owned by
- * `LoosePartField`, not by the chunk — so chunk unload never tears loot down.
- *
- * The freight sign and pallet have identities outside the chunk so the aim ray can
- * name them and the destination sign can be lit. `dispose` drops those registrations,
- * keyed on this chunk's own body array.
- *
- * `setLamps` is where the destination sign lights. It is the per-frame push the
- * streamer already makes to every live chunk, which is why a job starting or
- * finishing needs no chunk rebuild: nothing about the world's *structure* changed,
- * only which panel is glowing.
+ * Builds ordinary stops plus the sparse courier network. Static trunk registries
+ * exist only for the live physics band; their edited contents remain in WorldState.
  */
 export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
@@ -1219,8 +1119,8 @@ export class PoiProvider implements ChunkProvider {
   constructor(
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
-    private readonly freight: FreightField,
     private readonly wreckTrunks: WreckTrunkField,
+    private readonly couriers: CourierField,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1235,9 +1135,9 @@ export class PoiProvider implements ChunkProvider {
     group.name = 'poi';
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-    const disposables: Disposable[] = [];
     const deferredVisuals: Array<() => void> = [];
     const registeredWrecks: string[] = [];
+    const registeredCouriers: string[] = [];
 
     for (const poi of pois) {
       buildPoi(
@@ -1246,27 +1146,43 @@ export class PoiProvider implements ChunkProvider {
         group,
         bodies,
         colliders,
-        disposables,
         deferredVisuals,
         this.loose,
         this.trailers,
-        this.freight,
         this.wreckTrunks,
         registeredWrecks,
       );
     }
+    for (const stop of couriersBetween(
+      ctx.world.seed,
+      ctx.sStart,
+      ctx.sEnd,
+      ctx.world.state.settings.poiSpacingMetres,
+    )) {
+      const courierPoi = pois.find((poi) => poi.s === stop.s);
+      if (!courierPoi) continue;
+      buildCourier(
+        ctx,
+        {
+          ...stop,
+          lateral: courierPoi.lateral + (stop.lateral < 0 ? -13 : 13),
+        },
+        group,
+        bodies,
+        colliders,
+        this.couriers,
+        registeredCouriers,
+        deferredVisuals,
+      );
+    }
 
-    const freight = this.freight;
-    const world = ctx.world;
     return {
       group,
       bodies,
       colliders,
-      setLamps: (on) => freight.updateSigns(on, world.state.job?.toPoi ?? null),
       dispose: () => {
-        freight.forgetChunk(bodies);
         this.wreckTrunks.forget(registeredWrecks);
-        for (const d of disposables) d.dispose();
+        this.couriers.forget(registeredCouriers);
         for (const cancel of deferredVisuals) cancel();
       },
     };
