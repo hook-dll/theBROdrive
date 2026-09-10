@@ -865,6 +865,20 @@ export class Renderer {
     this.resize();
   }
 
+  /**
+   * Waits until both halves of the current frame have finished compiling.
+   *
+   * Call this after one covered warm-up render: that render establishes the live
+   * sky/environment material variants, while compileAsync waits for drivers using
+   * KHR_parallel_shader_compile instead of exposing an incomplete first frame.
+   */
+  async waitForFrameShaders(): Promise<void> {
+    await Promise.all([
+      this.renderer.compileAsync(this.scene, this.camera),
+      this.renderer.compileAsync(this.hazeScene, this.hazeCamera),
+    ]);
+  }
+
 
   /** Updates inexpensive player-held/worn view effects without allocating. */
   setItemViewEffects(
