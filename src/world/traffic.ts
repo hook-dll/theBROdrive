@@ -30,6 +30,10 @@ const SPAWN_HAZARD_GAP_M = 18;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
 const SPAWN_INTERVAL_S = 1;
 const DROP_SETTLE_S = 0.8;
+/** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
+const TRAFFIC_SPAWN_DROP_M = 0;
+const SPAWN_GROUND_PROBE_UP_M = 2;
+const SPAWN_GROUND_PROBE_DEPTH_M = 4;
 const LIFETIME_SAMPLE_S = 0.5;
 const CLOCK_SYNC_S = 1;
 const END_MARGIN_M = 80;
@@ -107,6 +111,8 @@ export class RoadTraffic {
   private pending: PendingSpawn | null = null;
   private playerS = 0;
   private readonly position = { x: 0, y: 0, z: 0 };
+  private readonly groundProbeOrigin = { x: 0, y: 0, z: 0 };
+  private readonly groundProbeDirection = { x: 0, y: -1, z: 0 };
   private settingsRef: Settings | null = null;
   private clockSync = 0;
   private daylightFactor = 1;
@@ -384,9 +390,14 @@ export class RoadTraffic {
     const x = roadPoint.x + Math.cos(roadPoint.heading) * forwardLateral;
     const z = roadPoint.z - Math.sin(roadPoint.heading) * forwardLateral;
     if (!this.isSpawnClear(x, z, SPAWN_WORLD_GAP_M)) return;
+    if (!this.hasSpawnGround(x, roadPoint.y, z)) return;
 
     const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
-    const y = carSpawnYAboveGround(carModelMeasure(request.modelId), roadPoint.y);
+    const y = carSpawnYAboveGround(
+      carModelMeasure(request.modelId),
+      roadPoint.y,
+      TRAFFIC_SPAWN_DROP_M,
+    );
     const state = createServiceableCarState(
       request.id,
       request.modelId,
@@ -410,6 +421,7 @@ export class RoadTraffic {
     );
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
+    autopilot.setTrafficRecoveryPolicy(true);
     autopilot.setEngaged(true);
     this.carList.push({
       id: request.id,
@@ -426,6 +438,25 @@ export class RoadTraffic {
       lifetimeTimer: LIFETIME_SAMPLE_S,
       wasPassing: false,
     });
+  }
+
+  /**
+   * Far road samples can exist before their streamed collision chunks. Creating a
+   * dynamic car there lets gravity drop it through empty space before the player can
+   * see why. Require fixed support at the sampled road height; a later spawn attempt
+   * will succeed once that chunk has entered the physical window.
+   */
+  private hasSpawnGround(x: number, y: number, z: number): boolean {
+    this.groundProbeOrigin.x = x - this.origin.x;
+    this.groundProbeOrigin.y = y + SPAWN_GROUND_PROBE_UP_M;
+    this.groundProbeOrigin.z = z - this.origin.z;
+    const hit = this.physics.raycast(
+      this.groundProbeOrigin,
+      this.groundProbeDirection,
+      SPAWN_GROUND_PROBE_DEPTH_M,
+    );
+    if (!hit) return false;
+    return this.physics.world.getCollider(hit.colliderHandle)?.parent()?.isFixed() ?? false;
   }
 
   private nextDirection(): TrafficDirection | null {

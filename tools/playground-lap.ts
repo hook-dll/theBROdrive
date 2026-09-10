@@ -172,6 +172,10 @@ interface RigOptions {
    * car has no sensing of it whatsoever and must get out on the stall detector alone.
    */
   readonly boulderS?: number;
+  /** Authored road distance to opposing traffic for a deadlock scenario. */
+  readonly oncomingGap?: number;
+  /** Applies the narrower recovery policy used by ambient road traffic. */
+  readonly trafficRecoveryPolicy?: boolean;
 }
 
 /** Radius and lane of that boulder. Small enough that the escape bias clears it. */
@@ -188,6 +192,7 @@ async function makeRig(options: RigOptions): Promise<Rig> {
     slots,
     boulderS,
   } = options;
+  const hazards = new HazardIndex();
   const physics = await PhysicsWorld.create();
   addCircuitCollider(physics, road, circuit);
   const world = new GameWorld(newWorldState(SEED));
@@ -217,8 +222,9 @@ async function makeRig(options: RigOptions): Promise<Rig> {
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const autopilot = new Autopilot(road, new HazardIndex(), physics);
+  const autopilot = new Autopilot(road, hazards, physics);
   autopilot.setMode(mode);
+  if (options.trafficRecoveryPolicy) autopilot.setTrafficRecoveryPolicy(true);
   const input = emptyInput();
   const others =
     traffic === null
@@ -362,6 +368,9 @@ async function measure(
   let indicatorSeconds = 0;
 
   while (elapsed < seconds && lapSeconds.length < laps) {
+    if (options.oncomingGap !== undefined) {
+      rig.autopilot.setLightingConditions(1, options.oncomingGap);
+    }
     rig.autopilot.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
     rig.traffic?.fixedUpdate(FIXED_DT, 0, 0);
@@ -604,19 +613,17 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// Nosed into a parked car where no pass fits: the manoeuvre, not the loop.
+// Parked traffic on a blind bend: waiting is safer than an unsighted escape.
 // ---------------------------------------------------------------------------
 //
-// One car parked in the lane, in the middle of the 110 m esses. That location is the
-// point: the chord a corridor probe can see round a bend that tight is far shorter
-// than an overtake needs, so `updatePass` correctly refuses, and the only way past
-// is the recovery manoeuvre — back out with the wheels turned, pull forward with
-// them turned the other way, and hold the escaping side for the next stretch.
+// One car is parked in the lane, in the middle of the 110 m esses. The chord a
+// corridor probe can see around a bend that tight is shorter than a safe overtake,
+// so `updatePass` correctly refuses. This used to trigger the generic stuck
+// recovery: the follower reversed and pulled across a lane it could not see.
 //
-// Before that manoeuvre existed the car reversed for two seconds, resumed the line
-// it had been on, and drove back into the obstacle for as long as you cared to
-// watch. `passedObstacle` is the whole test; `reverseSeconds` proves it was done the
-// intended way rather than by squeezing past on momentum.
+// Dynamic traffic is not a drivetrain failure. The safe decision is to approach,
+// stop without contact, and wait. The unindexed static-boulder scenario below
+// separately retains and proves recovery for a genuinely unexplained obstruction.
 const OBSTACLE_S = 2_300;
 console.log('\nplayground: sleeper nosed into a parked car in the esses');
 const wedged = await measure(
@@ -629,12 +636,12 @@ const wedged = await measure(
   1,
   90,
 );
-const passedObstacle = wedged.progress >= 130 + 40;
+const reachedBlockedCar = wedged.progress >= 100 && wedged.progress < 170;
 check(
-  'sleeper: backs out of a blocked lane and gets past',
-  passedObstacle && wedged.reverseSeconds > 0.2 && wedged.impacts === 0,
-  `${wedged.progress.toFixed(0)} m travelled of the 170 m needed to clear it, ` +
-    `${wedged.reverseSeconds.toFixed(1)} s in reverse, ${wedged.stuckSeconds.toFixed(1)} s stopped, ` +
+  'sleeper: waits instead of escaping blindly around parked traffic',
+  reachedBlockedCar && wedged.impacts === 0,
+  `${wedged.progress.toFixed(0)} m travelled before waiting, ` +
+    `${wedged.reverseSeconds.toFixed(1)} s rolling backward, ${wedged.stuckSeconds.toFixed(1)} s stopped, ` +
     `mean ${(wedged.meanSpeed * 3.6).toFixed(1)} km/h, nearest ${wedged.nearestCar.toFixed(2)} m, ` +
     `${wedged.impacts} impact(s)`,
 );
@@ -661,6 +668,41 @@ check(
     `${crashed.roadRecoveryExitLateral.toFixed(2)} m / ` +
     `${(crashed.roadRecoveryExitHeadingError * 180 / Math.PI).toFixed(1)}°, ` +
     `${(crashed.maxRoadRecoverySpeed * 3.6).toFixed(1)} km/h peak while returning`,
+);
+
+// ---------------------------------------------------------------------------
+// Opposing queues at scenery: one leader receives right of way.
+// ---------------------------------------------------------------------------
+//
+// A follower closes from behind while an opposing car reaches the other side of the
+// same unindexed boulder. The forward-direction leader has deterministic right of way
+// on this +Z straight and must use the outer shoulder; the opposing head and follower
+// remain blockers, not reasons for every car to abandon recovery.
+const QUEUED_LEADER_START_S = BOULDER_S - 130;
+console.log('\nplayground: queue leader blocked by a boulder');
+const queuedAtBoulder = await measure(
+  {
+    mode: 'sleeper',
+    traffic: 'rolling',
+    slots: [
+      { s: QUEUED_LEADER_START_S - 35, oncoming: false, mode: 'sleeper' },
+      { s: BOULDER_S + 25, oncoming: true, mode: 'sleeper' },
+    ],
+    oncomingGap: 10,
+    trafficRecoveryPolicy: true,
+    boulderS: BOULDER_S,
+  },
+  1,
+  45,
+);
+check(
+  'queue leader resolves scenery between opposing queues',
+  queuedAtBoulder.progress >= BOULDER_S - QUEUED_LEADER_START_S + 30 &&
+    queuedAtBoulder.nearestCar >= 2.7,
+  `${queuedAtBoulder.progress.toFixed(0)} m leader progress, ` +
+    `${queuedAtBoulder.reverseSeconds.toFixed(1)} s in reverse, ` +
+    `${queuedAtBoulder.stuckSeconds.toFixed(1)} s stopped, ` +
+    `nearest traffic ${queuedAtBoulder.nearestCar.toFixed(2)} m`,
 );
 
 

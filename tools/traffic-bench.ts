@@ -138,8 +138,8 @@ check(
   Object.keys(world.state.cars).length === 0,
   `${Object.keys(world.state.cars).length} persistent traffic cars`,
 );
-// Keep the stream moving through several generations. This is the behavioral check:
-// different caps create queues and overtakes, and none may turn into a physical hit.
+// Keep the stream moving through several generations. Passing has a dedicated,
+// authored playground scenario; this random stream owns the collision-free queue.
 for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   const movingPlayerS = PLAYER_S + step * FIXED_DT * 12;
   traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0);
@@ -150,8 +150,8 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
 }
 const streamed = traffic.status;
 check(
-  'mixed traffic queues and passes without collision',
-  streamed.impacts === 0 && streamed.passes > 0,
+  'mixed traffic queues without collision',
+  streamed.impacts === 0,
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 

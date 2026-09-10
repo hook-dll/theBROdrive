@@ -1,5 +1,6 @@
 /** Fixed-step road follower. Inputs remain ordinary InputFrame commands. */
 import type { InputFrame } from '../core/input';
+import type RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
 import type { RoadConditionBuffer } from '../world/gradient';
@@ -325,16 +326,15 @@ const LEAD_SPEED_TAU_S = 0.3;
  * of them is not there.
  */
 const LEAD_JUMP_MPS = 40;
-/** Below this the obstacle counts as parked, and even `sleeper` will go round it. */
+/** Below this the obstacle counts as parked. */
 const PARKED_SPEED_MPS = 1.5;
 /** For how long, before a decision may be taken on it. See `updateLead`. */
 const PARKED_CONFIRM_S = 0.6;
 
 /**
- * PASSING. Sleeper only passes things that are not going to move; frantic passes
- * anything slower than it wants to go, and both need the same three answers: is the
- * road straight enough to commit, is there a line that is clear, and is it time to
- * come back.
+ * PASSING. Frantic traffic passes things materially slower than its intended pace.
+ * Sleeper follows traffic; a stationary car does not turn an unsighted shoulder into
+ * a lane. A pass still needs a straight road, a clear opposing lane and a safe return.
  */
 // A lane change costs 2.9/LINE_SHIFT_PER_METRE ≈ 32 m of road. Committing 3.2 s
 // ahead leaves another car length after the controller has reached the passing lane,
@@ -374,6 +374,14 @@ const PASS_MAX_METRES = 260;
 /** Traffic appearing this close in the lane being used aborts the pass. */
 const PASS_ABORT_SECONDS = 1.6;
 const PASS_ABORT_MIN_M = 14;
+/**
+ * An aborted pass must spend long enough back on its own line to observe a new gap.
+ * Without this, a congested lane alternated pass/follow every fixed step as two
+ * candidate lines took turns seeing the same cars.
+ */
+const PASS_RETRY_DELAY_S = 5;
+/** No physical overtake may own a lane indefinitely after traffic has stopped. */
+const PASS_MAX_HOLD_S = 20;
 
 /**
  * BEING STUCK, and getting out of it.
@@ -397,6 +405,10 @@ const PASS_ABORT_MIN_M = 14;
  * Reversing is skipped when something is close behind: in traffic the car behind is
  * a worse problem than the one in front.
  */
+/** Recovery is forbidden while any physical traffic occupies this local envelope. */
+const DYNAMIC_BLOCKER_NEARBY_M = 12;
+/** Move this far after losing a dynamic lead before a stop can be called unexplained. */
+const DYNAMIC_BLOCKER_CLEAR_M = 5;
 const STUCK_SPEED_MPS = 1 / 3.6;
 /**
  * Speed below which a car nosed up to something parked counts as going nowhere, the
@@ -422,6 +434,10 @@ const RECOVERY_REVERSE_BRAKE = 0.72;
 const RECOVERY_CRAWL_MPS = 4.5;
 const RECOVERY_BIAS_METRES = 50;
 const RECOVERY_REAR_CLEAR_M = 5;
+/** Opposing centres this close after a sustained stop constitute a local deadlock. */
+const DEADLOCK_ONCOMING_M = 18;
+/** Road-distance and physical-probe measurements use different body reference points. */
+const DEADLOCK_GAP_SLOP_M = 4;
 const RECOVERY_RETRY_METRES = 45;
 /**
  * How far off its lane the car holds after a pull-out. It has to be enough to CLEAR
@@ -486,6 +502,13 @@ export class Autopilot {
   /** Seconds that estimate has stayed below `PARKED_SPEED_MPS`, and whether it is real. */
   private leadParkedFor = 0;
   private leadMeasured = false;
+  /**
+   * A dynamic blocker remains known while this car is stationary, even when a bend
+   * makes the corridor ray lose it. Moving away proves the old observation obsolete.
+   */
+  private dynamicBlockerKnown = false;
+  private dynamicBlockerAnchorX = 0;
+  private dynamicBlockerAnchorZ = 0;
   private bodyScanGap = Infinity;
   /**
    * The hazard currently being avoided and the line chosen for it.
@@ -503,9 +526,19 @@ export class Autopilot {
   /** Committed passing line while going round traffic, or null. */
   private passLine: number | null = null;
   private passStartedAt = 0;
+  private passStartedAtS = 0;
   private passClearAt: number | null = null;
+  private passRetryAfterS = 0;
   private recoveryPhase: 'none' | 'reverse' | 'pullout' = 'none';
   private recoveryTimer = 0;
+  /** A deterministic right-of-way escape through an opposing-traffic deadlock. */
+  private recoveryCommitted = false;
+  /**
+   * Ambient traffic treats only indexed scenery and opposing-gridlock as recoverable.
+   * This avoids mistaking a weak climb or rough patch for an object worth reversing
+   * around; the player's autopilot can still recover from unindexed collision shapes.
+   */
+  private trafficRecoveryPolicy = false;
   /** Signed lateral direction the recovery is escaping toward. */
   private recoverySide = 1;
   private recoveryBias = 0;
@@ -520,6 +553,8 @@ export class Autopilot {
   private playerHighBeamSuppressed = false;
   private playerHeadlightVehicle: Vehicle | null = null;
   private controlledVehicle: Vehicle | null = null;
+  private readonly dynamicProximityShape: RAPIER.Ball | null;
+  private readonly identityRotation = { x: 0, y: 0, z: 0, w: 1 };
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
@@ -558,7 +593,11 @@ export class Autopilot {
     private readonly hazards: HazardField,
     /** Optional only until Vehicle exposes its PhysicsWorld; main passes the shared world. */
     private readonly physics?: PhysicsWorld,
-  ) {}
+  ) {
+    this.dynamicProximityShape = physics
+      ? new physics.rapier.Ball(DYNAMIC_BLOCKER_NEARBY_M)
+      : null;
+  }
 
   get mode(): AutopilotMode { return this.modeValue; }
   setMode(mode: AutopilotMode): void { this.modeValue = mode; }
@@ -571,6 +610,9 @@ export class Autopilot {
    * queueing politely behind cars it was theoretically 60 km/h quicker than.
    */
   setSpeedCap(mps: number): void { this.speedCapValue = mps; }
+  setTrafficRecoveryPolicy(enabled: boolean): void {
+    this.trafficRecoveryPolicy = enabled;
+  }
   /** Supplies ambient light and road distance to the nearest approaching vehicle. */
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
     this.daylightFactor = clamp(daylightFactor, 0, 1);
@@ -628,6 +670,9 @@ export class Autopilot {
     this.automaticHighBeam = true;
     this.passLine = null;
     this.passClearAt = null;
+    this.passRetryAfterS = 0;
+    this.recoveryCommitted = false;
+    this.dynamicBlockerKnown = false;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
     this.activityValue = 'cruise';
@@ -687,6 +732,7 @@ export class Autopilot {
       // exhausted both attempts in the sand. Cancel it and hold the nearest edge line.
       this.recoveryPhase = 'none';
       this.recoveryTimer = 0;
+      this.recoveryCommitted = false;
       this.stoppedFor = 0;
       this.stallAnchorX = this.position.x;
       this.stallAnchorZ = this.position.z;
@@ -710,6 +756,8 @@ export class Autopilot {
       ),
     );
     const currentRoad = this.road.sampleAt(this.hintS);
+    const roadForwardX = Math.sin(currentRoad.heading);
+    const roadForwardZ = Math.cos(currentRoad.heading);
     const target = this.road.sampleAt(this.hintS + lookahead);
     this.road.conditionAt(this.hintS, this.condition);
     const currentSurface = this.condition.surface;
@@ -809,6 +857,47 @@ export class Autopilot {
     this.updateLead(dt, Math.min(this.bodyScanGap, laneGap, bodyLaneGap), speed);
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
+    const hasDeadlockPriority =
+      roadForwardX > 0.01 ||
+      (Math.abs(roadForwardX) <= 0.01 && roadForwardZ > 0);
+    const oncomingIsFrontBlocker =
+      this.oncomingGap <= DEADLOCK_ONCOMING_M &&
+      (
+        gap < Infinity
+          ? this.oncomingGap <= gap + DEADLOCK_GAP_SLOP_M &&
+            this.leadIsParked &&
+            Math.abs(this.leadClosingValue) <= PARKED_SPEED_MPS
+          : hazard !== null &&
+            !this.dynamicBlockerKnown &&
+            this.dynamicBodyAhead(
+              vehicle,
+              originX,
+              originZ,
+              roadForwardX,
+              roadForwardZ,
+            )
+      );
+    // A recovery is normally an escape from unexplained static blockage. Dynamic
+    // traffic ahead cancels it immediately, while a queued car behind does not.
+    // An opposing-road deadlock is the exception: one direction receives stable
+    // right of way and commits to the outer shoulder while the other keeps waiting.
+    if (
+      !this.recoveryCommitted &&
+      (
+        gap < Infinity ||
+        this.dynamicBodyAhead(
+          vehicle,
+          originX,
+          originZ,
+          roadForwardX,
+          roadForwardZ,
+        )
+      )
+    ) {
+      this.recoveryPhase = 'none';
+      this.recoveryTimer = 0;
+      this.stoppedFor = 0;
+    }
     let mustStop = this.bodyScanGap < MUST_STOP_GAP_M;
 
     // Retire only after the REAR of the car has passed the far edge of the prop.
@@ -1013,9 +1102,6 @@ export class Autopilot {
       );
     }
     targetSpeed = Math.max(3, targetSpeed);
-    // What the ROAD alone asks for, before anything in the way is considered. The
-    // stall detector needs it: a car stopped for traffic is not a failed drivetrain.
-    const roadSpeed = targetSpeed;
     if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
     // A prop the COMMANDED LINE already clears is scenery to drive past, not an
     // obstacle to brake for.
@@ -1070,25 +1156,36 @@ export class Autopilot {
     // BEING STUCK IS A LACK OF PROGRESS, NOT A STANDSTILL, AND NOT A SPEEDOMETER
     // READING EITHER.
     //
-    // Three ways to be stuck: asking for motion and getting none, sitting behind
-    // something parked, or nosed into scenery nobody indexed. The last one is what a
-    // crash leaves behind, and it used to be undetectable: rays only report DYNAMIC
-    // bodies, because static obstacles are supposed to be known in the road frame, so
-    // a car resting against a rock or a bank has no obstacle ahead of it at all as
-    // far as this class can tell. The test that was left — a target above 1 m/s and a
-    // speed under 1 km/h — then never fired, because a car with its foot down against
-    // something solid does not sit still: the tyres bite and slip, the body rocks, and
-    // every excursion past 1 km/h decayed the timer. Reported as an autopilot that
-    // revs the engine forever and never tries to back out.
+    // A stop is unexplained only while the controller is still asking the car to
+    // move. Following and a blocked passing lane deliberately reduce `targetSpeed`
+    // to zero; treating that queue as a drivetrain failure made every third car back
+    // up and pull into neighbouring traffic after three seconds. An unindexed static
+    // obstacle leaves the target high, so the recovery path that exists for a real
+    // wedge remains armed.
     //
-    // So there is ONE test, and it measures metres of GROUND COVERED from an anchor
-    // dropped where the stall began. Distance travelled cannot be used for this:
-    // `travelled` integrates the speed MAGNITUDE, so a car rocking in place accrues
-    // it and keeps clearing its own timer. A car picking its way past a rock field at
-    // 1.4 m/s covers the anchor distance and is working; a car that has moved two
-    // metres in three seconds is stuck, whatever it is doing with the throttle.
-    const wantsProgress = vehicle.engineRunning && roadSpeed > 1;
-    const stalled = !offRoad && wantsProgress && speed < CRAWL_SPEED_MPS;
+    // Ground covered, rather than the speedometer, is still the evidence. A car
+    // pressed into scenery rocks and spins its tyres above 1 km/h without going
+    // anywhere, while one picking through rough ground at walking pace is making
+    // legitimate progress.
+    const wantsProgress = vehicle.engineRunning && targetSpeed > 1;
+    const unexplainedStaticStall =
+      wantsProgress &&
+      (!this.trafficRecoveryPolicy || hazard !== null) &&
+      gap === Infinity &&
+      !this.dynamicBlockerKnown &&
+      !this.dynamicBodyAhead(
+        vehicle,
+        originX,
+        originZ,
+        roadForwardX,
+        roadForwardZ,
+      );
+    const opposingDeadlock = hasDeadlockPriority && oncomingIsFrontBlocker;
+    const stalled =
+      !offRoad &&
+      this.passLine === null &&
+      (unexplainedStaticStall || opposingDeadlock) &&
+      speed < CRAWL_SPEED_MPS;
     const movedFromAnchor = Math.hypot(
       this.position.x - this.stallAnchorX,
       this.position.z - this.stallAnchorZ,
@@ -1105,8 +1202,19 @@ export class Autopilot {
       this.stoppedFor += dt;
     }
 
-    if (!offRoad && this.recoveryPhase === 'none' && this.stoppedFor >= STUCK_AFTER_S) {
-      this.beginRecovery(vehicle, config, projection.lateral, originX, originZ);
+    if (
+      stalled &&
+      this.recoveryPhase === 'none' &&
+      this.stoppedFor >= STUCK_AFTER_S
+    ) {
+      this.beginRecovery(
+        vehicle,
+        config,
+        projection.lateral,
+        originX,
+        originZ,
+        opposingDeadlock,
+      );
     }
     if (this.recoveryPhase !== 'none') {
       this.activityValue = offRoad ? 'offroad' : 'recover';
@@ -1118,7 +1226,7 @@ export class Autopilot {
         out,
         forwardSpeed,
         projection.lateral,
-        Math.min(gap, this.hazardDistance),
+        this.recoveryCommitted ? Infinity : Math.min(gap, this.hazardDistance),
       );
       return;
     }
@@ -1253,14 +1361,13 @@ export class Autopilot {
     return null;
   }
 
+
+
   /**
    * Starts, holds and ends a pass. Writes `passLine`; reads only what it is given.
    *
-   * The trigger is deliberately different per mode: sleeper goes round a PARKED
-   * obstacle (nothing else is worth crossing a centreline for), frantic goes round
-   * anything materially slower than it wants to be going. Everything after the
-   * trigger is common — a clear line, a straight enough road, and a return as soon
-   * as the lane it left has room again.
+   * Sleeper never changes lane around dynamic traffic. Frantic may pass anything
+   * materially slower than its intended pace, subject to sight and closure checks.
    */
   private updatePass(
     vehicle: Vehicle,
@@ -1284,8 +1391,6 @@ export class Autopilot {
       // Inspect the lane BEING USED separately. The ordinary lead estimate also
       // includes the lane being left and therefore keeps seeing the car alongside;
       // treating that car as a new blockage makes the pass flap and sideswipe it.
-      // The passing lane was clear at commitment, so any body now inside this short
-      // envelope is enough reason to abort without guessing its velocity.
       const passLaneGap = this.laneProbe(
         vehicle,
         this.passLine,
@@ -1293,14 +1398,14 @@ export class Autopilot {
         originX,
         originZ,
       );
-      if (passLaneGap < abortGap) {
+      if (
+        passLaneGap < abortGap ||
+        this.travelled - this.passStartedAt > PASS_MAX_METRES ||
+        this.sinceRecovery - this.passStartedAtS > PASS_MAX_HOLD_S
+      ) {
         this.passLine = null;
         this.passClearAt = null;
-        return;
-      }
-      if (this.travelled - this.passStartedAt > PASS_MAX_METRES) {
-        this.passLine = null;
-        this.passClearAt = null;
+        this.passRetryAfterS = this.sinceRecovery + PASS_RETRY_DELAY_S;
         return;
       }
       // A lane change costs about 32 m of road; returning before that means the car
@@ -1324,26 +1429,22 @@ export class Autopilot {
       return;
     }
 
+    if (this.sinceRecovery < this.passRetryAfterS) return;
     // Finish returning before considering the next car in a queue. Starting a new
     // pass while the chassis is still crossing its own lane is a side-swipe.
     if (Math.abs(lateral - lane) > CAR_HALF_WIDTH_M * 0.5) return;
-    if (gap === Infinity) return;
-    const blocking = config.overtakes
-      ? leadSpeed < config.cruiseMps - PASS_SPEED_MARGIN_MPS
-      : this.leadIsParked;
+    if (gap === Infinity || !config.overtakes) return;
+    const blocking = leadSpeed < config.cruiseMps - PASS_SPEED_MARGIN_MPS;
     if (!blocking) return;
-    // OVERTAKING NEEDS SPEED; GETTING ROUND A PARKED CAR DOES NOT.
-    //
-    // Sitting alongside slower traffic at walking pace is not a pass, so a moving
-    // obstacle has a speed floor. Something parked is different, and the floor used
-    // to apply to it too: the follow brake wins the race against the planner — by
-    // the time the obstacle is confirmed stationary the car is already down to
-    // walking pace — so a car parked on a dead straight got a reverse manoeuvre
-    // instead of the lane change any driver would make. Seen in the playground with
-    // the traffic parked, and now the commanded line may slew at rest, which is what
-    // makes a pass from a standstill physical rather than a wish.
+    // A moving overtake needs speed. A genuinely parked car may be passed from rest,
+    // but only with real bumper room; a late "parked" classification at road speed is
+    // an emergency braking situation, not permission to swerve from contact distance.
     if (!this.leadIsParked && speed < PASS_MIN_SPEED_MPS) return;
-    if (gap > triggerGap) return;
+    const passFromRest = this.leadIsParked && speed < CRAWL_SPEED_MPS;
+    const minimumStartGap = passFromRest
+      ? MUST_STOP_GAP_M
+      : Math.max(PASS_ABORT_MIN_M, speed * PASS_ABORT_SECONDS);
+    if (gap < minimumStartGap || gap > triggerGap) return;
     // HOW MUCH ROAD A PASS ACTUALLY NEEDS.
     //
     // Getting round something PARKED costs the gap, the length of the thing and a
@@ -1354,10 +1455,7 @@ export class Autopilot {
     // in speeds, and during that time an oncoming car covers its own road. Counting
     // only our own travel is how frantic committed to a 121 m window behind a car it
     // was overhauling at 10 km/h — a 24 second pass — and got hit head-on at 8 km/h
-    // three seconds later, having quite correctly stood on the brakes in the wrong
-    // lane. So the requirement is the CLOSING one, and a pass that would take longer
-    // than `PASS_MAX_SECONDS` is simply not available: overhauling a car ten km/h
-    // slower than you is not an overtake, it is a kilometre of hoping.
+    // three seconds later, having correctly stood on the brakes in the wrong lane.
     let need: number;
     if (this.leadIsParked) {
       need = gap + PASS_CLEAR_M + speed * PASS_SIGHT_SECONDS;
@@ -1368,36 +1466,20 @@ export class Autopilot {
       if (seconds > PASS_MAX_SECONDS) return;
       need = (speed + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S);
     }
-    // Two conditions, and they are different questions. `passCurvature` is policy:
-    // this mode does not overtake in a bend that tight. The reach is capability: the
-    // segmented probe can only answer over `PROBE_MAX_SEGMENTS` chords of the local
-    // radius, and committing to sight the probe cannot deliver is how a pass becomes
-    // a head-on.
+    // Policy and capability are separate checks: the mode must allow this curvature,
+    // and the segmented probe must actually be able to see the required distance.
     if (!this.straightAhead(this.hintS, need, config.passCurvature)) return;
     if (need > this.probeReach(this.hintS + PROBE_START_M)) return;
-    // THE SHOULDER IS FOR THINGS THAT ARE NOT GOING ANYWHERE.
-    //
-    // Squeezing past a parked car or a boulder with a wheel on the verge is what the
-    // verge allowance is for, and the careful mode tries it FIRST because it keeps
-    // the car on its own side of the road. Using the same shoulder to overtake
-    // MOVING traffic is not driving, it is undertaking on the sand at 70 km/h — which
-    // is what both modes did on the traffic lap until the candidate list depended on
-    // whether the obstacle is parked rather than only on the mode.
-    const verge = Math.sign(config.laneOffset || -1) * EDGE_LINE_M;
+    // Dynamic traffic is passed only on the opposing asphalt lane. The shoulder is
+    // valid for indexed static hazards whose exact footprint is known; treating it
+    // as a fallback traffic lane produced high-speed departures in dense traffic.
     const oncoming = -Math.sign(config.laneOffset || -1) * (ROAD_HALF_WIDTH / 2);
-    const candidates = !this.leadIsParked
-      ? [oncoming]
-      : config.overtakes
-        ? [oncoming, verge]
-        : [verge, oncoming];
-    for (const candidate of candidates) {
-      if (Math.abs(candidate - lateral) < CAR_HALF_WIDTH_M) continue;
-      if (this.laneProbe(vehicle, candidate, need, originX, originZ) < need) continue;
-      this.passLine = candidate;
-      this.passStartedAt = this.travelled;
-      this.passClearAt = null;
-      return;
-    }
+    if (Math.abs(oncoming - lateral) < CAR_HALF_WIDTH_M) return;
+    if (this.laneProbe(vehicle, oncoming, need, originX, originZ) < need) return;
+    this.passLine = oncoming;
+    this.passStartedAt = this.travelled;
+    this.passStartedAtS = this.sinceRecovery;
+    this.passClearAt = null;
   }
 
   /** True while every sampled curvature over `distance` stays under `limit`. */
@@ -1450,6 +1532,19 @@ export class Autopilot {
    * verge thirteen times in a lap, and frantic did it at 120 km/h and left the road.
    */
   private updateLead(dt: number, gap: number, speed: number): void {
+    if (gap < Infinity) {
+      this.dynamicBlockerKnown = true;
+      this.dynamicBlockerAnchorX = this.position.x;
+      this.dynamicBlockerAnchorZ = this.position.z;
+    } else if (
+      this.dynamicBlockerKnown &&
+      Math.hypot(
+        this.position.x - this.dynamicBlockerAnchorX,
+        this.position.z - this.dynamicBlockerAnchorZ,
+      ) >= DYNAMIC_BLOCKER_CLEAR_M
+    ) {
+      this.dynamicBlockerKnown = false;
+    }
     if (!(gap < Infinity)) {
       this.obstacleGapValue = Infinity;
       this.obstacleSpeedValue = 0;
@@ -1498,6 +1593,7 @@ export class Autopilot {
     lateral: number,
     originX: number,
     originZ: number,
+    committedDeadlock: boolean,
   ): void {
     // "Same place" is both a distance and a WAIT. Distance alone made the give-up
     // permanent: re-arming needed 45 m of road, and a car wedged against something is
@@ -1512,16 +1608,21 @@ export class Autopilot {
       this.stoppedFor = 0;
       return;
     }
-    // A second stall in the same place means the side chosen last time did not work.
-    this.recoverySide = samePlace
-      ? -this.recoverySide
-      : Math.abs(lateral) > CAR_HALF_WIDTH_M
-        ? -Math.sign(lateral)
-        : -Math.sign(config.laneOffset || -1);
+    // A right-of-way escape stays on this driver's outer shoulder. Ordinary static
+    // recovery may try the opposite side on its second attempt.
+    this.recoverySide = committedDeadlock
+      ? Math.sign(config.laneOffset || -1)
+      : samePlace
+        ? -this.recoverySide
+        : Math.abs(lateral) > CAR_HALF_WIDTH_M
+          ? -Math.sign(lateral)
+          : -Math.sign(config.laneOffset || -1);
+
     this.recoveryAttempts = samePlace ? this.recoveryAttempts + 1 : 1;
     this.lastRecoveryAt = this.travelled;
     this.sinceRecovery = 0;
     this.stoppedFor = 0;
+    this.recoveryCommitted = committedDeadlock;
     this.plannedHazard = null;
     this.plannedLateral = 0;
     this.passLine = null;
@@ -1532,6 +1633,45 @@ export class Autopilot {
       RECOVERY_REAR_CLEAR_M;
     this.recoveryPhase = rearClear ? 'reverse' : 'pullout';
     this.recoveryTimer = rearClear ? RECOVERY_REVERSE_S : RECOVERY_PULLOUT_S;
+  }
+  /**
+   * Broad-phase guard for the sensor blind spot created by an angled car or tight
+   * bend. Bodies beside or ahead make a blind pull-out unsafe. A body clearly behind
+   * is deliberately ignored: it is the waiting queue, and `beginRecovery` uses the
+   * rear scan to choose a forward-only escape when that queue leaves no reversing
+   * room.
+   */
+  private dynamicBodyAhead(
+    vehicle: Vehicle,
+    originX: number,
+    originZ: number,
+    forwardX: number,
+    forwardZ: number,
+  ): boolean {
+    if (!this.physics || !this.dynamicProximityShape) return false;
+    this.rayOrigin.x = this.position.x - originX;
+    this.rayOrigin.y = this.position.y;
+    this.rayOrigin.z = this.position.z - originZ;
+    let found = false;
+    this.physics.world.intersectionsWithShape(
+      this.rayOrigin,
+      this.identityRotation,
+      this.dynamicProximityShape,
+      (collider) => {
+        const other = collider.translation();
+        const along =
+          (other.x - this.rayOrigin.x) * forwardX +
+          (other.z - this.rayOrigin.z) * forwardZ;
+        if (along < -CAR_HALF_LENGTH_M) return true;
+        found = true;
+        return false;
+      },
+      this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
+      undefined,
+      undefined,
+      vehicle.chassis,
+    );
+    return found;
   }
 
   /**
@@ -1586,6 +1726,7 @@ export class Autopilot {
       this.recoveryPhase = 'none';
       this.recoveryTimer = 0;
       this.stoppedFor = 0;
+      this.recoveryCommitted = false;
       // Hold the escape side for the next stretch of road. Without this the resumed
       // line is the one that was blocked, and the car drives back into the obstacle
       // it just reversed away from — the loop this manoeuvre exists to break.
