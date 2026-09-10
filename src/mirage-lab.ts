@@ -78,6 +78,7 @@ interface LabState {
   opacity: number;
   distance: number;
   lateral: number;
+  setback: number;
   scale: number;
   variation: number;
   length: number;
@@ -221,7 +222,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
   root.innerHTML = `
     <style>
       .mirage-lab{position:fixed;z-index:50;left:14px;top:14px;bottom:14px;width:min(390px,calc(100vw - 28px));overflow:auto;padding:15px;color:#eadfca;background:rgba(19,17,13,.91);border:1px solid #82735b;font:12px/1.3 Consolas,monospace;box-shadow:0 8px 35px #0008}
-      .mirage-lab h1{font:700 20px/1.1 "Segoe UI",sans-serif;margin:0 0 5px}.mirage-lab p{color:#bfb39e;margin:0 0 12px}.mirage-lab fieldset{border:1px solid #554a39;margin:0 0 10px;padding:9px}.mirage-lab legend{color:#d7bd89;padding:0 5px}.mirage-lab label{display:grid;grid-template-columns:1fr 142px 57px;gap:7px;align-items:center;margin:6px 0}.mirage-lab input[type=range]{width:100%}.mirage-lab output{text-align:right;color:#f2d59b}.mirage-lab select,.mirage-lab button{color:#eadfca;background:#2b251b;border:1px solid #6b5c44;padding:6px;font:12px Consolas,monospace}.mirage-lab select{width:100%;margin-bottom:9px}.mirage-lab .buttons{display:flex;gap:6px;flex-wrap:wrap}.mirage-lab button:hover{background:#5c4930}.mirage-lab .presentation[hidden]{display:none}.mirage-lab .footer{color:#988c78;margin-top:8px}
+      .mirage-lab h1{font:700 20px/1.1 "Segoe UI",sans-serif;margin:0 0 5px}.mirage-lab p{color:#bfb39e;margin:0 0 12px}.mirage-lab fieldset{border:1px solid #554a39;margin:0 0 10px;padding:9px}.mirage-lab legend{color:#d7bd89;padding:0 5px}.mirage-lab label{display:grid;grid-template-columns:1fr 142px 57px;gap:7px;align-items:center;margin:6px 0}.mirage-lab input[type=range]{width:100%}.mirage-lab output{text-align:right;color:#f2d59b}.mirage-lab select,.mirage-lab button{color:#eadfca;background:#2b251b;border:1px solid #6b5c44;padding:6px;font:12px Consolas,monospace}.mirage-lab select{width:100%;margin-bottom:9px}.mirage-lab .buttons{display:flex;gap:6px;flex-wrap:wrap}.mirage-lab button:hover{background:#5c4930}.mirage-lab .presentation[hidden],.mirage-lab label[hidden]{display:none}.mirage-lab .footer{color:#988c78;margin-top:8px}
     </style>
     <h1>ЛАБОРАТОРИЯ МИРАЖЕЙ</h1>
     <p>Клик по дороге — мышь. WASD/стрелки — езда, X/Z — передачи, C — капот/погоня, V — камера назад, колесо — дистанция.</p>
@@ -240,11 +241,12 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
     <fieldset class="presentation"><legend>Визуальный мираж</legend>
       <label><span>Непрозрачность</span><input data-control="opacity" type="range" min="0" max="1" step="0.01"><output></output></label>
       <label><span>Дистанция</span><input data-control="distance" type="range" min="180" max="1300" step="5"><output data-unit="м"></output></label>
-      <label><span>Смещение</span><input data-control="lateral" type="range" min="-500" max="500" step="5"><output data-unit="м"></output></label>
+      <label data-system="distant"><span>Смещение</span><input data-control="lateral" type="range" min="-500" max="500" step="5"><output data-unit="м"></output></label>
+      <label data-system="tableau"><span>Отступ от дороги</span><input data-control="setback" type="range" min="0" max="320" step="5"><output data-unit="м"></output></label>
       <label><span>Масштаб</span><input data-control="scale" type="range" min="0.25" max="3" step="0.05"><output data-unit="×"></output></label>
       <label><span>Вариант seed</span><input data-control="variation" type="range" min="0" max="99" step="1"><output></output></label>
-      <label><span>Длина табло</span><input data-control="length" type="range" min="100" max="1200" step="10"><output data-unit="м"></output></label>
-      <label><span>Плотность табло</span><input data-control="density" type="range" min="0.05" max="1" step="0.05"><output></output></label>
+      <label data-system="tableau"><span>Длина табло</span><input data-control="length" type="range" min="100" max="1200" step="10"><output data-unit="м"></output></label>
+      <label data-system="tableau"><span>Плотность табло</span><input data-control="density" type="range" min="0.05" max="1" step="0.05"><output></output></label>
     </fieldset>
     <div class="buttons"><button data-action="reset">Сбросить параметры</button><button data-action="game">Вернуться в игру</button></div>
     <div class="footer" data-drive-status>0 км/ч · камера: погоня</div>
@@ -266,8 +268,14 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       const output = input.parentElement?.querySelector('output');
       if (output) output.textContent = `${Number(state.heat[key].toFixed(2))}${output.dataset.unit ?? ''}`;
     });
+    const system = SELECTIONS[state.selection]?.system;
     const panel = root.querySelector<HTMLElement>('.presentation');
-    if (panel) panel.hidden = SELECTIONS[state.selection]?.system === 'heat';
+    if (panel) panel.hidden = system === 'heat';
+    // A tableau lines both verges and a distant silhouette stands alone off to one
+    // side, so the two systems do not share a placement control.
+    root.querySelectorAll<HTMLElement>('[data-system]').forEach((row) => {
+      row.hidden = row.dataset.system !== system;
+    });
   };
 
   root.addEventListener('input', (event) => {
@@ -299,6 +307,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
     state.opacity = 0.82;
     state.distance = 560;
     state.lateral = 95;
+    state.setback = 0;
     state.scale = 1;
     state.variation = 7;
     state.length = 760;
@@ -333,6 +342,7 @@ export async function bootMirageLab(): Promise<void> {
     opacity: 0.82,
     distance: 560,
     lateral: 95,
+    setback: 0,
     scale: 1,
     variation: 7,
     length: 760,
@@ -412,7 +422,7 @@ export async function bootMirageLab(): Promise<void> {
         selection.kind,
         CAMERA_S + state.distance,
         state.length,
-        state.lateral,
+        state.setback,
         state.opacity,
         state.scale,
         state.variation,
@@ -502,7 +512,7 @@ export async function bootMirageLab(): Promise<void> {
     );
     vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);
-    tableau.setPreviewDayFactor(sky.dayFactor);
+    tableau.setPreviewDayFactor(sky.dayFactor, projection.lateral);
     renderer.setHazeStrength(state.heatStrength * sky.dayFactor);
     const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
     renderer.setHazeEyeHeight(

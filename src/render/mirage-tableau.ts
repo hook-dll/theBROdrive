@@ -15,6 +15,12 @@ const MAX_PLANTS = 420;
 const MAX_BLOCKS = 512;
 const MAX_SHIPS = 240;
 
+/** Nearest a wreck may ground itself to the asphalt, and how far the field reaches out. */
+const SHIP_NEAR_M = 34;
+const SHIP_SPREAD_M = 210;
+/** Placement attempts per wreck before the slot is left empty. */
+const SHIP_ATTEMPTS = 6;
+
 const SALT_GAP = 0x31a7;
 const SALT_LENGTH = 0x42b9;
 const SALT_VARIANT = 0x53cb;
@@ -209,10 +215,16 @@ function cardMaterial(): THREE.MeshBasicMaterial {
   });
 }
 
+/**
+ * Blocks are box instances: the geometry carries no colour attribute, so the
+ * material MUST NOT ask for vertex colours. `vertexColors: true` here made the
+ * shader read a disabled attribute — a constant black — and multiplied every
+ * building by zero, which is why the sandstone city rendered as a silhouette.
+ * Per-instance colour arrives through `instanceColor` alone.
+ */
 function blockMaterial(colour: number): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     color: colour,
-    vertexColors: true,
     transparent: true,
     opacity: 0,
     depthWrite: true,
@@ -247,12 +259,18 @@ export class MirageTableau {
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3();
   private readonly colour = new THREE.Color();
+  /** Accepted wreck centres and their footprint radii, so a new hulk can dodge them. */
+  private readonly shipX = new Float32Array(MAX_SHIPS);
+  private readonly shipZ = new Float32Array(MAX_SHIPS);
+  private readonly shipRadius = new Float32Array(MAX_SHIPS);
 
   private activeEncounter = -1;
   private anchorX = 0;
   private anchorY = 0;
   private anchorZ = 0;
   private densityScale = 1;
+  private sizeScale = 1;
+  private setbackM = 0;
   private previewActive = false;
   private previewOpacity = 0;
 
@@ -321,12 +339,19 @@ export class MirageTableau {
     );
   }
 
-  /** Direct presentation path for comparing every authored tableau in the lab. */
+  /**
+   * Direct presentation path for comparing every authored tableau in the lab.
+   *
+   * The tableau always straddles the road exactly as it does in game: the anchor is
+   * the centreline, `setback` pushes both verges outward, and `scale` resizes the
+   * forms only. Moving or scaling the group as a whole would drag the far verge
+   * across the asphalt, which is the one thing a roadside tableau must never do.
+   */
   showPreview(
     kind: MirageKind,
     startS: number,
     length: number,
-    lateralOffset: number,
+    setback: number,
     opacity: number,
     scale: number,
     variation: number,
@@ -339,20 +364,24 @@ export class MirageTableau {
       length: Math.max(80, length),
       kind,
     };
-    this.activateEncounter(encounter, density);
-    const anchor = this.road.offsetPoint(startS, lateralOffset);
+    this.activateEncounter(encounter, density, scale, setback);
+    this.root.scale.setScalar(1);
     this.root.position.set(
-      anchor.x - this.origin.x,
+      this.anchorX - this.origin.x,
       this.anchorY,
-      anchor.z - this.origin.z,
+      this.anchorZ - this.origin.z,
     );
-    this.root.scale.setScalar(Math.max(0.05, scale));
     this.previewOpacity = Math.min(1, Math.max(0, opacity));
-    this.setPreviewDayFactor(1);
+    this.setPreviewDayFactor(1, 0);
   }
 
-  setPreviewDayFactor(dayFactor: number): void {
-    const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor);
+  /**
+   * The lab is driveable, so the preview owes the player the same vanishing act the
+   * game gives: leave the asphalt and the apparition goes with it.
+   */
+  setPreviewDayFactor(dayFactor: number, playerLateral: number): void {
+    const roadFade = 1 - smoothstep(FADE_FROM_ROAD_M, GONE_FROM_ROAD_M, Math.abs(playerLateral));
+    const alpha = this.previewOpacity * smoothstep(0.12, 0.42, dayFactor) * roadFade;
     for (const material of this.materials) material.opacity = alpha;
     this.root.visible = this.previewActive && alpha > 0.002;
   }
@@ -411,11 +440,23 @@ export class MirageTableau {
 
   private activate(index: number): void {
     this.activeEncounter = index;
-    this.activateEncounter(this.encounters[index]!, 1);
+    this.activateEncounter(this.encounters[index]!, 1, 1, 0);
   }
 
-  private activateEncounter(encounter: Encounter, density: number): void {
+  /**
+   * `size` scales the forms only and `setback` pushes both verges away from the
+   * asphalt; neither may move the tableau sideways, so the road always runs through
+   * the middle of it.
+   */
+  private activateEncounter(
+    encounter: Encounter,
+    density: number,
+    size: number,
+    setback: number,
+  ): void {
     this.densityScale = Math.min(1, Math.max(0.02, density));
+    this.sizeScale = Math.min(8, Math.max(0.05, size));
+    this.setbackM = Math.max(0, setback);
     for (const mesh of this.meshes) {
       mesh.count = 0;
       mesh.visible = false;
@@ -459,10 +500,10 @@ export class MirageTableau {
       const s = encounter.startS + 8 + along * along * (encounter.length - 16);
       const side = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
       const depth = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT + 2);
-      const lateral = side * (lateralMin + depth * depth * (lateralMax - lateralMin));
+      const lateral = side * (this.setbackM + lateralMin + depth * depth * (lateralMax - lateralMin));
       const point = this.road.offsetPoint(s, lateral);
       const ground = this.terrain.heightAt(point.x, point.z, s);
-      const height = heightMin + hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE) * (heightMax - heightMin);
+      const height = (heightMin + hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE) * (heightMax - heightMin)) * this.sizeScale;
       const widthScale = 0.82 + hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE + 1) * 0.36;
       const yaw = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE + 2) * Math.PI;
 
@@ -493,15 +534,15 @@ export class MirageTableau {
       const s = encounter.startS + 10 + along * along * (encounter.length - 20);
       const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
       const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
-      const lateral = side * (18 + depth * depth * 127);
+      const lateral = side * (this.setbackM + 18 + depth * depth * 127);
       const point = this.road.offsetPoint(s, lateral);
       const ground = this.terrain.heightAt(point.x, point.z, s);
-      const width = 5 + hashUnit3(this.seed, key, SALT_SHAPE) * 9;
-      const buildingDepth = 5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9;
+      const width = (5 + hashUnit3(this.seed, key, SALT_SHAPE) * 9) * this.sizeScale;
+      const buildingDepth = (5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9) * this.sizeScale;
       const tower = hashUnit3(this.seed, key, SALT_SHAPE + 6) > 0.92;
-      const height = tower
+      const height = (tower
         ? 24 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 24
-        : 4 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 14;
+        : 4 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 14) * this.sizeScale;
       const heading = this.road.sampleAt(s).heading;
       this.cityColour(key, depth, 0);
       count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, width, height, buildingDepth, heading, this.colour);
@@ -514,7 +555,7 @@ export class MirageTableau {
         totalHeight += upperHeight;
       }
       if (hashUnit3(this.seed, key, SALT_SHAPE + 5) > 0.72) {
-        this.colour.setHSL(0.09, 0.2, 0.66 + depth * 0.1);
+        this.colour.setHSL(0.09, 0.24, 0.76 + depth * 0.08);
         count = this.addBox(count, point.x - this.anchorX, ground - this.anchorY + totalHeight, point.z - this.anchorZ, width * 1.08, 0.7, buildingDepth * 1.08, heading, this.colour);
       }
     }
@@ -525,47 +566,79 @@ export class MirageTableau {
   }
 
   /**
-   * Sunlit render, not albedo: these lightnesses are what the screen receives.
-   * See `displayColour`.
+   * Sandstone under a desert noon, not albedo: these lightnesses are what the screen
+   * receives (see `displayColour`), and the frame is tone mapped on the way out, so a
+   * wall has to be authored near white to read as pale stone rather than as shadow.
    */
   private cityColour(key: number, depth: number, tier: number): void {
     this.colour.setHSL(
       0.075 + hashUnit3(this.seed, key, SALT_COLOUR + tier) * 0.035,
-      0.2 + hashUnit3(this.seed, key, SALT_COLOUR + tier + 2) * 0.18,
-      0.6 + depth * 0.14,
+      0.26 + hashUnit3(this.seed, key, SALT_COLOUR + tier + 2) * 0.14,
+      0.66 + depth * 0.1,
     );
   }
 
   /**
-   * A drowned fleet the sea left behind: hulks packed close enough to overlap from
-   * the road, each one grounded at its own angle. Placement is the plants' — biased
-   * toward the near verge and thinning outward — because a wreck field wants the
-   * same "walk into it" depth a grove does, not the fountains' two tidy rows.
+   * A drowned fleet the sea left behind, each hulk grounded at its own angle.
+   *
+   * A wreck is a card up to seventy metres long, so placing them by hash alone piled
+   * them into each other: the field read as a scrapyard of intersecting planes. Each
+   * candidate now has to clear the hulls already down by the sum of their footprint
+   * radii, and a slot that cannot find room after `SHIP_ATTEMPTS` tries is simply left
+   * empty — the fleet thins out instead of overlapping.
    */
   private buildShips(encounter: Encounter): void {
-    const instanceCount = Math.max(1, Math.round(170 * this.densityScale));
-    for (let i = 0; i < instanceCount; i++) {
+    const slots = Math.max(1, Math.round(110 * this.densityScale));
+    let placed = 0;
+    for (let i = 0; i < slots; i++) {
       const key = encounter.index * MAX_SHIPS + i;
-      const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
-      const s = encounter.startS + 10 + along * along * (encounter.length - 20);
-      const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
-      const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
-      const lateral = side * (26 + depth * depth * 210);
-      const point = this.road.offsetPoint(s, lateral);
-      const ground = this.terrain.heightAt(point.x, point.z, s);
       // A freighter is long, so the card is scaled well past its height; the list
       // ranges from a coaster to something that took a dock to build.
-      const height = 7 + hashUnit3(this.seed, key, SALT_SHAPE) * 21;
-      const length = height * (2.1 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 1.5);
+      const height = (6 + hashUnit3(this.seed, key, SALT_SHAPE) * 15) * this.sizeScale;
+      const length = height * (2.2 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 1.3);
+      // The card runs from -0.72 to 0.78 along its length, so the footprint that has
+      // to stay clear of the neighbours is wider than a half-length.
+      const radius = length * 0.7;
+      let x = 0;
+      let z = 0;
+      let ground = 0;
+      let depth = 0;
+      let room = false;
+      for (let attempt = 0; attempt < SHIP_ATTEMPTS && !room; attempt++) {
+        const salt = SALT_PLACEMENT + attempt * 3;
+        const along = hashUnit3(this.seed, key, salt);
+        const s = encounter.startS + 20 + along * (encounter.length - 40);
+        const side = hashUnit3(this.seed, key, salt + 1) < 0.5 ? -1 : 1;
+        const candidateDepth = hashUnit3(this.seed, key, salt + 2);
+        const lateral =
+          side * (this.setbackM + SHIP_NEAR_M + candidateDepth * candidateDepth * SHIP_SPREAD_M);
+        const point = this.road.offsetPoint(s, lateral);
+        room = true;
+        for (let other = 0; other < placed; other++) {
+          const dx = point.x - this.shipX[other]!;
+          const dz = point.z - this.shipZ[other]!;
+          const clearance = radius + this.shipRadius[other]!;
+          if (dx * dx + dz * dz < clearance * clearance) {
+            room = false;
+            break;
+          }
+        }
+        if (!room) continue;
+        x = point.x;
+        z = point.z;
+        ground = this.terrain.heightAt(point.x, point.z, s);
+        depth = candidateDepth;
+      }
+      if (!room) continue;
       const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI * 2;
       // Grounded hulls lie over; the lean also settles the keel into the sand.
       const roll = (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
       this.setTransform(
         this.ships,
-        i,
-        point.x - this.anchorX,
+        placed,
+        x - this.anchorX,
         ground - this.anchorY,
-        point.z - this.anchorZ,
+        z - this.anchorZ,
         length,
         height,
         length,
@@ -576,9 +649,14 @@ export class MirageTableau {
         (0.86 + depth * 0.32) *
         (0.9 + hashUnit3(this.seed, key, SALT_COLOUR) * 0.2);
       this.colour.copy(SHIP_TINT).multiplyScalar(lift);
-      this.ships.setColorAt(i, this.colour);
+      this.ships.setColorAt(placed, this.colour);
+      this.shipX[placed] = x;
+      this.shipZ[placed] = z;
+      this.shipRadius[placed] = radius;
+      placed++;
+      if (placed >= MAX_SHIPS) break;
     }
-    this.ships.count = instanceCount;
+    this.ships.count = placed;
     this.ships.visible = true;
     this.ships.instanceMatrix.needsUpdate = true;
     if (this.ships.instanceColor) this.ships.instanceColor.needsUpdate = true;
