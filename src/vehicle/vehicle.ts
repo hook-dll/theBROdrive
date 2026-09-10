@@ -3917,6 +3917,7 @@ export class Vehicle implements Rebasable {
         HEADLIGHT_EMISSIVE,
         headlightIntensity,
         headlightBeam,
+        rig.headlightDistanceScale,
       );
       this.projectBeam(
         rig,
@@ -3941,6 +3942,7 @@ export class Vehicle implements Rebasable {
     color: THREE.ColorRepresentation,
     intensity: number,
     shape: ProjectedBeamShape,
+    distanceScale = 1,
   ): void {
     if (!mount || !(intensity > 0)) return;
     const sourceWorld = this.projectedLightSource
@@ -3956,7 +3958,7 @@ export class Vehicle implements Rebasable {
       targetWorld,
       color,
       intensity,
-      shape.distance,
+      shape.distance * distanceScale,
       shape.angle,
       shape.penumbra,
       shape.decay,

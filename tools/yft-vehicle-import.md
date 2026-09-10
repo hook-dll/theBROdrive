@@ -8,6 +8,9 @@ independently.
 The source-independent checklist for applying this process to another car is
 `tools/vehicle-lamp-authoring.md`.
 
+Общий end-to-end процесс, карточка задания и все контрольные ворота описаны в
+`tools/vehicle-pipeline.md`.
+
 ## What is in the archive
 
 An add-on DLC is an RPF7 archive containing `x64/vehicles.rpf`, itself an RPF7 holding

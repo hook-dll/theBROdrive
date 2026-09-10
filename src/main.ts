@@ -966,15 +966,16 @@ async function boot(): Promise<void> {
           autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
         );
       }
+      autopilot.setLightingConditions(
+        sky.dayFactor,
+        traffic.nearestOncomingDistance(activeS, 1),
+      );
       if (autopilot.engaged) {
-        autopilot.setLightingConditions(
-          sky.dayFactor,
-          traffic.nearestOncomingDistance(activeS, 1),
-        );
         autopilot.drive(dt, driving, f, origin.x, origin.z);
       }
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) driving.cycleHeadlights();
+      autopilot.syncPlayerHighBeam(driving);
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
       if (f.cycleTyres) {
@@ -1561,6 +1562,17 @@ async function boot(): Promise<void> {
       radioSpatial,
       driving ? drivingId! : null,
     );
+    audio.beginTrafficFrame();
+    traffic.forEachVehicle((id, vehicle) => {
+      audio.updateTrafficVehicle(
+        id,
+        vehicle.audio,
+        vehicle.root.position.x,
+        vehicle.root.position.y,
+        vehicle.root.position.z,
+      );
+    });
+    audio.endTrafficFrame();
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
@@ -1895,6 +1907,7 @@ async function boot(): Promise<void> {
     applySettings: (next) => {
       const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
+      traffic.setTargetCount(world.state.settings.trafficCount);
       // POI chunks rebuild one at a time after Resume. That keeps a slider drag and
       // a dense 500 m stop layout from turning the pause-menu interaction into a
       // multi-second main-thread task.
@@ -1924,12 +1937,6 @@ async function boot(): Promise<void> {
       const metres = VIEW_DISTANCE_METRES[tier];
       renderer.setViewDistance(metres);
       vista.setViewDistance(metres);
-    },
-    trafficEnabled: () => traffic.enabled,
-    toggleTraffic: () => {
-      const enabled = traffic.toggle();
-      hud.setToast(enabled ? 'traffic on' : 'traffic off');
-      return enabled;
     },
     exportState: stateForSave,
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards

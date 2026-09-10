@@ -83,7 +83,7 @@ const traffic = new RoadTraffic(
   loadCarModel,
   () => true,
 );
-check('menu-facing toggle enables traffic', traffic.toggle(), 'enabled');
+traffic.setTargetCount(12);
 traffic.setDaylightFactor(0);
 
 let largestCount = 0;
@@ -97,7 +97,7 @@ for (let step = 0; step < Math.ceil(18 / FIXED_DT); step++) {
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its twelve-car budget',
+  'traffic stays within its twelve-car setting',
   largestCount <= 12 && populated.count <= 12,
   `largest ${largestCount}, live ${populated.count}`,
 );
@@ -162,10 +162,10 @@ check(
   traffic.status.count === 0,
   `${traffic.status.count} cars remain`,
 );
-const toggledOff = !traffic.toggle();
+traffic.setTargetCount(0);
 check(
-  'toggle off leaves no live or pending traffic',
-  toggledOff && traffic.status.count === 0 && !traffic.status.pending && !traffic.enabled,
+  'zero traffic setting leaves no live or pending traffic',
+  traffic.status.count === 0 && !traffic.status.pending && !traffic.enabled,
   JSON.stringify(traffic.status),
 );
 traffic.dispose();

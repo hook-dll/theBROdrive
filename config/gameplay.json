@@ -9,7 +9,10 @@
   "defaultMasterVolume": 0.8,
   "defaultRadioVolume": 0.6,
   "defaultInkStrength": 0.5,
-  "defaultMouseSensitivity": 0.0022,
   "mouseSensitivityMin": 0.0004,
-  "mouseSensitivityMax": 0.006
+  "mouseSensitivityMax": 0.006,
+  "trafficCountMin": 0,
+  "trafficCountMax": 30,
+  "trafficCountStep": 2,
+  "defaultTrafficCount": 0
 }
