@@ -132,9 +132,9 @@ check(
   `${populated.sleeper} sleeper, ${populated.frantic} frantic, ${populated.cautious} cautious`,
 );
 check(
-  'night traffic uses high beam and dips around oncoming cars',
-  populated.highBeams > 0 && populated.lowBeams > 0,
-  `${populated.highBeams} high, ${populated.lowBeams} dipped`,
+  'night traffic uses only low beam',
+  populated.highBeams === 0 && populated.lowBeams > 0,
+  `${populated.highBeams} high, ${populated.lowBeams} low`,
 );
 check(
   'both directions actually drive',

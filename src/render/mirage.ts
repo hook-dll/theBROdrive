@@ -53,6 +53,27 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
+/**
+ * A unit box whose vertices carry a vertical brightness ramp.
+ *
+ * The structure is unlit (see the material note below), so nothing else separates
+ * its faces. A base a third darker than the crown restores the relief a silhouette
+ * against the sky actually shows, and costs no shading.
+ */
+function gradientBoxGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const position = geometry.getAttribute('position');
+  const shades = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const shade = 0.72 + (position.getY(i) + 0.5) * 0.36;
+    shades[i * 3] = shade;
+    shades[i * 3 + 1] = shade;
+    shades[i * 3 + 2] = shade;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(shades, 3));
+  return geometry;
+}
+
 
 /**
  * One geometry and one material form every structure. A new candidate rewrites at
@@ -60,7 +81,7 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
  * opacity, allocates nothing, and performs no terrain work.
  */
 export class DistantMirage {
-  private readonly material: THREE.MeshStandardMaterial;
+  private readonly material: THREE.MeshBasicMaterial;
   private readonly mesh: THREE.InstancedMesh;
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
@@ -83,18 +104,26 @@ export class DistantMirage {
     private readonly seed: number,
     private readonly origin: WorldOrigin,
   ) {
-    this.material = new THREE.MeshStandardMaterial({
-      color: 0x6d4b3c,
-      roughness: 1,
-      metalness: 0,
-      flatShading: true,
+    // UNLIT, AND AUTHORED IN DISPLAY SPACE.
+    //
+    // A shaded standard material turned every structure into a black paper cut-out.
+    // Pass 2 in core/renderer.ts copies the linear scene target to the canvas
+    // untouched, so a colour reaches the screen at its own numeric value: a 0.24
+    // lightness stone is 60/255 at best, and the sun stands behind the silhouette
+    // as often as in front of it, which took the lit face down to single digits.
+    //
+    // A mirage is refracted light rather than a surface. It carries its own
+    // brightness, takes no shading, and keeps its colour whatever the sun does.
+    this.material = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      color: 0xffffff,
       transparent: true,
       opacity: 0,
       depthWrite: false,
       fog: true,
     });
     this.mesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
+      gradientBoxGeometry(),
       this.material,
       MAX_PIECES,
     );
@@ -283,9 +312,12 @@ export class DistantMirage {
       }
     }
 
-    const hue = 0.025 + hash01(this.seed, slot, SALT_COLOUR) * 0.035;
-    const saturation = 0.2 + hash01(this.seed, slot, SALT_COLOUR + 1) * 0.18;
-    const lightness = 0.24 + hash01(this.seed, slot, SALT_COLOUR + 2) * 0.12;
+    // Sunlit stone seen through kilometres of shimmering air: warm, pale and
+    // saturated enough that two encounters never read as the same silhouette.
+    // These are display values, not albedo — see the material note.
+    const hue = 0.045 + hash01(this.seed, slot, SALT_COLOUR) * 0.05;
+    const saturation = 0.26 + hash01(this.seed, slot, SALT_COLOUR + 1) * 0.22;
+    const lightness = 0.62 + hash01(this.seed, slot, SALT_COLOUR + 2) * 0.16;
     this.material.color.setHSL(hue, saturation, lightness);
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;

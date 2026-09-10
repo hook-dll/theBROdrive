@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { InputReader, emptyInput, type InputFrame } from './core/input';
+import { GameLoop } from './core/loop';
+import { PhysicsWorld } from './core/physics';
+import { SurfaceType } from './core/surfaces';
 import {
   DEFAULT_HEAT_MIRAGE,
   Renderer,
@@ -6,8 +10,16 @@ import {
 } from './core/renderer';
 import { parseCalendarEpoch } from './game/calendar';
 import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from './game/settings';
-import { DAY_LENGTH, newWorldState } from './game/state';
+import { DAY_LENGTH, GameWorld, newWorldState } from './game/state';
+import { spawnCarState } from './game/spawn';
 import { applyComicShading } from './render/comic';
+import {
+  carModelMeasure,
+  carSpawnYAboveGround,
+  loadCarModel,
+  warmCarModelInstances,
+} from './render/carmodel';
+import { CameraRig, type CameraTarget } from './render/cameras';
 import {
   DISTANT_MIRAGE_FAMILIES,
   DistantMirage,
@@ -25,6 +37,8 @@ import { WorldOrigin } from './world/origin';
 import { ROAD_HALF_WIDTH, Road } from './world/road';
 import { roadSurfaceY, SurfaceField } from './world/roadsurface';
 import { Terrain } from './world/terrain';
+import { DEFAULT_CAR_MODEL_ID } from './vehicle/carmodels';
+import { Vehicle } from './vehicle/vehicle';
 
 const SEED = 1337;
 const CAMERA_S = 1_000;
@@ -175,6 +189,32 @@ function makeRoad(road: Road): THREE.Mesh {
   return mesh;
 }
 
+/**
+ * The lab's compact terrain is already triangle soup. Rapier needs an index for
+ * that same soup; copying positions also folds in the mesh translation so the road
+ * seen by the camera and the road seen by the tyres cannot diverge.
+ */
+function addStaticMeshCollider(
+  physics: PhysicsWorld,
+  mesh: THREE.Mesh,
+  surface: SurfaceType,
+): void {
+  const position = mesh.geometry.getAttribute('position');
+  if (!(position instanceof THREE.BufferAttribute) || !(position.array instanceof Float32Array)) {
+    throw new Error('Mirage Lab ground mesh must use Float32 positions');
+  }
+  const vertices = new Float32Array(position.array.length);
+  for (let i = 0; i < position.count; i++) {
+    const offset = i * 3;
+    vertices[offset] = position.array[offset]! + mesh.position.x;
+    vertices[offset + 1] = position.array[offset + 1]! + mesh.position.y;
+    vertices[offset + 2] = position.array[offset + 2]! + mesh.position.z;
+  }
+  const indices = new Uint32Array(position.count);
+  for (let i = 0; i < indices.length; i++) indices[i] = i;
+  physics.addStaticTrimesh(vertices, indices, surface);
+}
+
 function createInterface(state: LabState, apply: () => void): HTMLElement {
   const root = document.createElement('aside');
   root.className = 'mirage-lab';
@@ -184,7 +224,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       .mirage-lab h1{font:700 20px/1.1 "Segoe UI",sans-serif;margin:0 0 5px}.mirage-lab p{color:#bfb39e;margin:0 0 12px}.mirage-lab fieldset{border:1px solid #554a39;margin:0 0 10px;padding:9px}.mirage-lab legend{color:#d7bd89;padding:0 5px}.mirage-lab label{display:grid;grid-template-columns:1fr 142px 57px;gap:7px;align-items:center;margin:6px 0}.mirage-lab input[type=range]{width:100%}.mirage-lab output{text-align:right;color:#f2d59b}.mirage-lab select,.mirage-lab button{color:#eadfca;background:#2b251b;border:1px solid #6b5c44;padding:6px;font:12px Consolas,monospace}.mirage-lab select{width:100%;margin-bottom:9px}.mirage-lab .buttons{display:flex;gap:6px;flex-wrap:wrap}.mirage-lab button:hover{background:#5c4930}.mirage-lab .presentation[hidden]{display:none}.mirage-lab .footer{color:#988c78;margin-top:8px}
     </style>
     <h1>ЛАБОРАТОРИЯ МИРАЖЕЙ</h1>
-    <p>Production Renderer, Sky, comic shading и физический рельеф. Перетаскивание — обзор, колесо — FOV.</p>
+    <p>Клик по дороге — мышь. WASD/стрелки — езда, X/Z — передачи, C — капот/погоня, V — камера назад, колесо — дистанция.</p>
     <select data-control="selection" aria-label="Тип миража">${SELECTIONS.map((item, index) => `<option value="${index}">${String(index + 1).padStart(2, '0')} · ${item.label}</option>`).join('')}</select>
     <fieldset><legend>Время и графика</legend>
       <div class="buttons"><button data-time="6">Рассвет</button><button data-time="12">День</button><button data-time="18">Закат</button><button data-time="0">Ночь</button></div>
@@ -207,6 +247,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <label><span>Плотность табло</span><input data-control="density" type="range" min="0.05" max="1" step="0.05"><output></output></label>
     </fieldset>
     <div class="buttons"><button data-action="reset">Сбросить параметры</button><button data-action="game">Вернуться в игру</button></div>
+    <div class="footer" data-drive-status>0 км/ч · камера: погоня</div>
     <div class="footer">Heat haze остаётся доступным поверх каждого визуального миража для совместной настройки.</div>`;
   document.body.appendChild(root);
 
@@ -297,12 +338,17 @@ export async function bootMirageLab(): Promise<void> {
     length: 760,
     density: 1,
   };
+  const world = new GameWorld(newWorldState(SEED));
   const renderer = new Renderer(canvas, state.quality, state.msaa, state.ink);
   const road = new Road(SEED);
   const terrain = new Terrain(SEED, road);
   const origin = new WorldOrigin();
   const cameraPoint = road.sampleAt(CAMERA_S);
-  const starField = await loadStarField(new Date(parseCalendarEpoch(CALENDAR)), state.quality);
+  const [physics, starField] = await Promise.all([
+    PhysicsWorld.create(),
+    loadStarField(new Date(parseCalendarEpoch(CALENDAR)), state.quality),
+    loadCarModel(DEFAULT_CAR_MODEL_ID),
+  ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin);
   const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin);
@@ -311,40 +357,37 @@ export async function bootMirageLab(): Promise<void> {
   landscape.position.set(-origin.x, 0, -origin.z);
   roadMesh.position.set(-origin.x, 0.2, -origin.z);
   renderer.scene.add(landscape, roadMesh);
-  renderer.camera.position.set(
-    cameraPoint.x - origin.x,
-    cameraPoint.y + 2.1,
-    cameraPoint.z - origin.z,
-  );
-  renderer.camera.rotation.order = 'YXZ';
-  renderer.camera.rotation.y = cameraPoint.heading;
-  renderer.camera.rotation.x = -0.2;
+  addStaticMeshCollider(physics, landscape, SurfaceType.Sand);
+  addStaticMeshCollider(physics, roadMesh, SurfaceType.Asphalt);
   renderer.setViewDistance(2_500);
-  renderer.setHazeEyeHeight(2.1);
 
-  let yaw = cameraPoint.heading + Math.PI;
-  let pitch = -0.2;
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-  canvas.addEventListener('pointerdown', (event) => {
-    dragging = true;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!dragging) return;
-    yaw -= (event.clientX - lastX) * 0.003;
-    pitch = THREE.MathUtils.clamp(pitch - (event.clientY - lastY) * 0.003, -1.2, 0.6);
-    lastX = event.clientX;
-    lastY = event.clientY;
-  });
-  canvas.addEventListener('pointerup', () => { dragging = false; });
-  canvas.addEventListener('wheel', (event) => {
-    renderer.camera.fov = THREE.MathUtils.clamp(renderer.camera.fov + event.deltaY * 0.025, 25, 90);
-    renderer.camera.updateProjectionMatrix();
-  }, { passive: true });
+  await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
+  const surfaceField = new SurfaceField(SEED);
+  const roadY = roadSurfaceY(
+    road,
+    surfaceField,
+    CAMERA_S,
+    0,
+    cameraPoint.x,
+    cameraPoint.z,
+  ) + roadMesh.position.y;
+  const carState = spawnCarState(
+    world,
+    { modelId: DEFAULT_CAR_MODEL_ID },
+    cameraPoint.x,
+    carSpawnYAboveGround(carModelMeasure(DEFAULT_CAR_MODEL_ID), roadY),
+    cameraPoint.z,
+    cameraPoint.heading,
+  );
+  const vehicle = new Vehicle(physics, world, carState, renderer.scene, origin);
+  vehicle.postStep();
+  vehicle.syncVisuals(1);
+
+  const input = new InputReader(canvas);
+  input.setKeyBindings(world.state.settings.keyBindings);
+  input.setMouseSensitivity(world.state.settings.mouseSensitivity);
+  const camera = new CameraRig(renderer.camera, physics, origin);
+  camera.setMode('chase');
 
   const apply = (): void => {
     renderer.setQuality(state.quality);
@@ -380,32 +423,108 @@ export async function bootMirageLab(): Promise<void> {
       tableau.hide();
     }
   };
-  createInterface(state, apply);
+  const interfaceRoot = createInterface(state, apply);
+  const driveStatus = interfaceRoot.querySelector<HTMLElement>('[data-drive-status]');
   apply();
 
-  const labWindow = window as unknown as { __renderMirageLab?: () => string };
-  const renderFrame = (): string => {
-    renderer.camera.rotation.set(pitch, yaw, 0);
+  const target: CameraTarget = {
+    x: cameraPoint.x,
+    y: carState.y,
+    z: cameraPoint.z,
+    qx: carState.qx,
+    qy: carState.qy,
+    qz: carState.qz,
+    qw: carState.qw,
+    speedKmh: 0,
+    hoodOffset: vehicle.modelMeasure.hoodPoint,
+  };
+  const targetPosition = new THREE.Vector3();
+  const targetRotation = new THREE.Quaternion();
+  const cameraInput = emptyInput();
+  let lastInput: InputFrame = emptyInput();
+  let lookYaw = 0;
+  let lookPitch = 0;
+  let zoom = 0;
+  let recenter = false;
+  let activeS = CAMERA_S;
+
+  const fixedUpdate = (dt: number): void => {
+    const frameInput = input.sample(dt);
+    lastInput = frameInput;
+    lookYaw += frameInput.lookYaw;
+    lookPitch += frameInput.lookPitch;
+    zoom += frameInput.zoomDelta;
+    recenter ||= frameInput.recenterCamera;
+    if (frameInput.cycleCamera) camera.cycleDriving();
+    if (frameInput.toggleLights) vehicle.cycleHeadlights();
+    if (frameInput.toggleLeftIndicator) vehicle.toggleIndicator('left');
+    if (frameInput.toggleRightIndicator) vehicle.toggleIndicator('right');
+    vehicle.fixedUpdate(dt, frameInput);
+    physics.step();
+    vehicle.postStep();
+  };
+
+  const renderFrame = (alpha: number, frameDt: number): void => {
+    vehicle.syncVisuals(alpha);
+    vehicle.interpolatedTransform(alpha, targetPosition, targetRotation);
+    target.x = targetPosition.x;
+    target.y = targetPosition.y;
+    target.z = targetPosition.z;
+    target.qx = targetRotation.x;
+    target.qy = targetRotation.y;
+    target.qz = targetRotation.z;
+    target.qw = targetRotation.w;
+    target.speedKmh = vehicle.speedKmh;
+
+    Object.assign(cameraInput, lastInput);
+    cameraInput.lookYaw = lookYaw;
+    cameraInput.lookPitch = lookPitch;
+    cameraInput.zoomDelta = zoom;
+    cameraInput.recenterCamera = recenter;
+    lookYaw = 0;
+    lookPitch = 0;
+    zoom = 0;
+    recenter = false;
+    camera.update(frameDt, cameraInput, target, false);
+
+    const projection = road.project(target.x + origin.x, target.z + origin.z, activeS);
+    activeS = projection.s;
+    const cam = renderer.camera.position;
     const daySeconds = (state.timeHours / 24) * DAY_LENGTH;
     sky.update(
       CALENDAR,
       daySeconds,
       0,
-      CAMERA_S,
-      renderer.camera.position.x,
-      renderer.camera.position.y,
-      renderer.camera.position.z,
+      activeS,
+      cam.x,
+      cam.y,
+      cam.z,
     );
+    vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);
     tableau.setPreviewDayFactor(sky.dayFactor);
     renderer.setHazeStrength(state.heatStrength * sky.dayFactor);
+    const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
+    renderer.setHazeEyeHeight(
+      cam.y - terrain.explorationHeightFromFrame(
+        cam.x + origin.x,
+        cam.z + origin.z,
+        camProjection.lateral,
+        camProjection.s,
+      ),
+    );
+    if (driveStatus) {
+      const cameraLabel = camera.mode === 'hood' ? 'капот' : 'погоня';
+      driveStatus.textContent = `${Math.round(vehicle.speedKmh)} км/ч · камера: ${cameraLabel}`;
+    }
     renderer.render();
+  };
+
+  const labWindow = window as unknown as { __renderMirageLab?: () => string };
+  labWindow.__renderMirageLab = () => {
+    renderFrame(1, 0);
     return canvas.toDataURL('image/png');
   };
-  labWindow.__renderMirageLab = renderFrame;
-  const frame = (): void => {
-    renderFrame();
-    window.setTimeout(() => requestAnimationFrame(frame), 1000 / 30);
-  };
-  window.setTimeout(() => requestAnimationFrame(frame), 1000 / 30);
+  const loop = new GameLoop({ fixedUpdate, render: renderFrame });
+  loop.start();
 }

@@ -49,19 +49,19 @@ const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;
 /**
- * Metres of verge the planner may use, mirroring `PASSING_VERGE_M` in autopilot.ts,
- * and how far past the asphalt this bench's ribbon is solid. The ribbon is wider than
- * the allowance so a legitimate pass never lands on the collider's own edge.
+ * Ordinary passing still uses the 1.2 m verge. Indexed props may use four metres of
+ * graded shoulder, matching `STATIC_AVOID_VERGE_M`; the collider extends past that
+ * envelope so the outer wheels remain supported.
  */
 const PASSING_VERGE = 1.2;
 const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE;
-const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
+const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + 4;
+const PLANNED_CLEARANCE_M = 1.05 + 0.4;
+const RIBBON_HALF_WIDTH = STATIC_AVOID_EDGE + 1;
 // The tuning is the shipped table, never a copy: this bench's own numbers had
 // drifted to a lateral budget 40% above the autopilot's, so every corner-speed
 // check was passing against a limit the car never used.
 const MODES = AUTOPILOT_MODES;
-/** Mean speed floors for the littered-road run, m/s. See `checkLitteredRoad`. */
-const LITTER_FLOOR_MPS: Record<AutopilotMode, number> = { sleeper: 9.5, frantic: 11.5 };
 let failures = 0;
 
 function check(label: string, ok: boolean, detail: string): void {
@@ -128,6 +128,7 @@ interface Rig { physics: PhysicsWorld; vehicle: Vehicle; road: Road; hazards: Ha
 async function makeRig(
   startS = START_S,
   routeMetres = ROUTE_METRES,
+  hazards?: HazardIndex,
 ): Promise<Rig> {
   const road = new Road(42);
   const physics = await PhysicsWorld.create();
@@ -138,8 +139,8 @@ async function makeRig(
   const state = carState(road, startS);
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const hazards = new HazardIndex();
-  const autopilot = new Autopilot(road, hazards, physics);
+  const hazardIndex = hazards ?? new HazardIndex();
+  const autopilot = new Autopilot(road, hazardIndex, physics);
   const input = emptyInput();
   // Settle ON THE BRAKES: three seconds of suspension settling with no pedal lets
   // the car roll away down the road's own gradient, and every metric measured from
@@ -149,7 +150,7 @@ async function makeRig(
     vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
   }
   input.handbrake = false;
-  return { physics, vehicle, road, hazards, autopilot, input };
+  return { physics, vehicle, road, hazards: hazardIndex, autopilot, input };
 }
 
 function step(rig: Rig): void {
@@ -263,12 +264,29 @@ async function measureLooseSurface(mode: AutopilotMode): Promise<LooseSurfaceMet
  * road never reaches the second hazard, so the breakable check would only ever be
  * measuring the first one's success.
  */
+function addHazardCollider(rig: Rig, hazard: RoadHazard): void {
+  const point = rig.road.offsetPoint(hazard.s, hazard.lateral);
+  const body = rig.physics.world.createRigidBody(
+    rig.physics.rapier.RigidBodyDesc.fixed().setTranslation(
+      point.x,
+      point.y + 1,
+      point.z,
+    ),
+  );
+  rig.physics.world.createCollider(
+    rig.physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
+    body,
+  );
+}
+
 async function driveHazard(
   hazard: RoadHazard,
   seconds: number,
 ): Promise<{
   minDistance: number;
   speedAtClosest: number;
+  commandedAtClosest: number;
+  closestLateral: number;
   minSpeedNear: number;
   approachGap: number;
   approachSpeed: number;
@@ -276,16 +294,24 @@ async function driveHazard(
   chargeSpeed: number;
   restSpeed: number;
   passed: boolean;
+  rejoined: boolean;
+  recoveryStarts: number;
+  thirdRecoveryAt: number;
   rig: Rig;
   worstLateral: number;
   chunk: string;
 }> {
-  const rig = await makeRig();
-  rig.autopilot.setEngaged(true);
+  const hazards = new HazardIndex();
   const chunk = 'autopilot-bench-hazards';
-  rig.hazards.add(chunk, hazard);
+  hazards.add(chunk, hazard);
+  const rig = await makeRig(START_S, ROUTE_METRES, hazards);
+  rig.autopilot.setTrafficRecoveryPolicy(true);
+  rig.autopilot.setEngaged(true);
+  addHazardCollider(rig, hazard);
   let minDistance = Infinity;
   let speedAtClosest = 0;
+  let commandedAtClosest = 0;
+  let closestLateral = 0;
   let minSpeedNear = Infinity;
   let approachGap = Infinity;
   let approachSpeed = 0;
@@ -293,6 +319,10 @@ async function driveHazard(
   let restSpeed = Infinity;
   let worstLateral = 0;
   let passed = false;
+  let rejoined = false;
+  let recoveryStarts = 0;
+  let thirdRecoveryAt = Infinity;
+  let wasRecovering = false;
   // The projection hint MUST be carried. `project` searches locally around it, so a
   // fixed hint saturates a couple of hundred metres out and every distance measured
   // against a hazard further along the route silently freezes.
@@ -303,6 +333,12 @@ async function driveHazard(
     const p = rig.road.project(pos.x, pos.z, hint);
     hint = p.s;
     const v = speed(rig.vehicle);
+    const recovering = rig.autopilot.activity === 'recover';
+    if (recovering && !wasRecovering) {
+      recoveryStarts++;
+      if (recoveryStarts === 3) thirdRecoveryAt = i * FIXED_DT;
+    }
+    wasRecovering = recovering;
     worstLateral = Math.max(worstLateral, Math.abs(p.lateral));
     // Clearance is only meaningful ALONGSIDE the hazard: a Euclidean (s, lateral)
     // distance measured from 200 m back reports the approach, not the pass.
@@ -311,6 +347,8 @@ async function driveHazard(
       if (clearance < minDistance) {
         minDistance = clearance;
         speedAtClosest = v;
+        commandedAtClosest = rig.autopilot.commandedLine;
+        closestLateral = p.lateral;
       }
     }
     if (Math.abs(p.s - hazard.s) < 8) minSpeedNear = Math.min(minSpeedNear, v);
@@ -326,12 +364,34 @@ async function driveHazard(
         restSpeed = Math.min(restSpeed, v);
       }
     }
-    if (p.s > hazard.s + 15) {
-      passed = true;
+    if (p.s > hazard.s + 15) passed = true;
+    if (
+      passed &&
+      p.s > hazard.s + 60 &&
+      Math.abs(p.lateral - MODES.sleeper.laneOffset) < 0.35
+    ) {
+      rejoined = true;
       break;
     }
   }
-  return { minDistance, speedAtClosest, minSpeedNear, approachGap, approachSpeed, chargeSpeed, restSpeed, worstLateral, passed, rig, chunk };
+  return {
+    minDistance,
+    speedAtClosest,
+    commandedAtClosest,
+    closestLateral,
+    minSpeedNear,
+    approachGap,
+    approachSpeed,
+    chargeSpeed,
+    restSpeed,
+    passed,
+    rejoined,
+    recoveryStarts,
+    thirdRecoveryAt,
+    rig,
+    worstLateral,
+    chunk,
+  };
 }
 
 interface LitterMetrics {
@@ -448,66 +508,80 @@ async function checkLitteredRoad(): Promise<void> {
       `RMS |steer| ${result.steerRms.toFixed(3)}, worst ${result.worstSteer.toFixed(3)} (full lock 1.000)`,
     );
     check(
-      `${mode}: littered road stays on road`,
-      result.worstLateral <= PASSING_EDGE,
-      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${PASSING_EDGE.toFixed(2)} m edge`,
+      `${mode}: littered road stays inside the static-avoidance shoulder`,
+      result.worstLateral <= STATIC_AVOID_EDGE,
+      `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${STATIC_AVOID_EDGE.toFixed(2)} m edge`,
     );
-    // WHAT SETS THE SPEED HERE IS THE LATERAL MOVE, NOT THE CRUISE TARGET.
-    //
-    // With 20+ hazards/km the car is almost always moving from one passing line to
-    // the next, and the commanded line moves at LINE_SHIFT_PER_METRE of road, so the
-    // achievable mean is bounded by how much road each move costs — a bound that does
-    // NOT rise when the cruise target does. A fraction of cruise was already the
-    // wrong shape at 28 m/s; at 130 km/h it asks frantic for something the plan rate
-    // cannot deliver without swerving, so the floor is stated in m/s.
-    //
-    // Each floor is a couple of m/s above what the bug this test exists for produced
-    // — braking for props the chosen line already clears held the field at 6.4 m/s
-    // (sleeper) and 9.0 m/s (frantic) — and well under the 10.9/13.7 m/s a healthy
-    // planner measures. The upper bound is unchanged and still catches a car that
-    // ignores the litter altogether.
+    // Dense scatter keeps the controller in the requested walking-pace avoidance
+    // mode almost continuously. Progress, not the old cruise-speed floor, is the
+    // contract: it must keep moving forward without charging between props.
     check(
-      `${mode}: littered road makes progress`,
+      `${mode}: littered road keeps making slow progress`,
       result.monotonic &&
-        result.progress >= 1_800 - 5 &&
-        result.meanSpeed >= LITTER_FLOOR_MPS[mode] &&
-        result.meanSpeed <= config.cruiseMps * 1.15,
-      `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}, ${result.meanSpeed.toFixed(2)} m/s vs a ${LITTER_FLOOR_MPS[mode].toFixed(1)} m/s floor and a ${config.cruiseMps.toFixed(0)} m/s cruise`,
+        result.progress >= 900 &&
+        result.meanSpeed >= 4.5 &&
+        result.meanSpeed <= 10,
+      `${result.progress.toFixed(0)} m, monotonic=${result.monotonic}, ${result.meanSpeed.toFixed(2)} m/s`,
     );
   }
 }
 
 async function checkHazards(): Promise<void> {
-  // A rock the width of the lane's centre: passable, but only by moving over.
-  const rock = await driveHazard({ s: START_S + 300, lateral: 0, radius: 1.2, breakable: false }, 100);
-  check(
-    'non-breakable hazard is cleared, never driven through',
-    rock.passed && rock.minDistance >= 1.2,
-    `passed=${rock.passed}, clearance ${rock.minDistance.toFixed(2)} m at ${rock.speedAtClosest.toFixed(2)} m/s, closest approach ${rock.approachGap.toFixed(2)} m at ${rock.approachSpeed.toFixed(2)} m/s`,
+  // A rock the width of the lane's centre: pass on the right at walking pace, then
+  // settle back onto the normal lane only after the rear bumper is clear.
+  const rock = await driveHazard(
+    { s: START_S + 300, lateral: 0, radius: 1.2, breakable: false },
+    100,
   );
   check(
-    'avoiding it does not put the car off the road',
-    rock.worstLateral <= PASSING_EDGE,
-    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${PASSING_EDGE.toFixed(2)} m edge`,
+    'non-breakable hazard is passed slowly on the right',
+    rock.passed &&
+      rock.rejoined &&
+      rock.closestLateral < 0 &&
+      rock.commandedAtClosest <= -(1.2 + PLANNED_CLEARANCE_M) + 0.2 &&
+      rock.speedAtClosest <= 5.5,
+    `passed/rejoined=${rock.passed}/${rock.rejoined}, body/commanded lateral ${rock.closestLateral.toFixed(2)}/${rock.commandedAtClosest.toFixed(2)} m, clearance ${rock.minDistance.toFixed(2)} m at ${rock.speedAtClosest.toFixed(2)} m/s`,
   );
-  const wall = await driveHazard({ s: START_S + 300, lateral: 0, radius: 6, breakable: false }, 100);
-  // A road blocked from verge to verge is never passed and never charged. What the
-  // car does while it waits is its own business: the recovery manoeuvre retries every
-  // half-minute in case the world has changed, so the LAST speed sampled before the
-  // hazard is not a verdict — the fastest it ever came at the thing is.
   check(
-    'impassable hazard stops the car short of it',
-    !wall.passed && wall.approachGap > 6 && wall.restSpeed < 0.5 && wall.chargeSpeed < 6,
-    `stopped ${wall.approachGap.toFixed(2)} m short (to ${wall.restSpeed.toFixed(2)} m/s), never came at it faster than ${wall.chargeSpeed.toFixed(2)} m/s, passed=${wall.passed}`,
+    'static avoidance stays inside its graded shoulder',
+    rock.worstLateral <= STATIC_AVOID_EDGE,
+    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${STATIC_AVOID_EDGE.toFixed(2)} m edge`,
   );
-  // A breakable prop is still a real road obstacle. Avoiding it keeps the car from
-  // taking an unnecessary physics hit; the breakable flag only means a human can
-  // destroy it, not that the autopilot should aim through it.
-  const pile = await driveHazard({ s: START_S + 300, lateral: 0, radius: 1.2, breakable: true }, 100);
+  const trunk = await driveHazard(
+    { s: START_S + 300, lateral: -2.3, radius: 1.6, breakable: false },
+    120,
+  );
   check(
-    'breakable hazard is cleared without driving through',
-    pile.passed && pile.minDistance >= 1.2 && pile.minSpeedNear > 1,
-    `passed=${pile.passed}, clearance ${pile.minDistance.toFixed(2)} m, near-hazard minimum ${pile.minSpeedNear.toFixed(2)} m/s`,
+    'right-edge trunk keeps radius clearance on the right',
+    trunk.passed &&
+      trunk.rejoined &&
+      trunk.closestLateral < -2.3 &&
+      trunk.commandedAtClosest <= -2.3 - 1.6 - PLANNED_CLEARANCE_M + 0.2 &&
+      trunk.speedAtClosest <= 5.5,
+    `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body/commanded lateral ${trunk.closestLateral.toFixed(2)}/${trunk.commandedAtClosest.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s`,
+  );
+  const wall = await driveHazard(
+    { s: START_S + 300, lateral: 0, radius: 6, breakable: false },
+    45,
+  );
+  check(
+    'blocked autopilot keeps retrying without charging',
+    wall.recoveryStarts >= 3 && wall.thirdRecoveryAt < 40 && wall.chargeSpeed < 8,
+    `${wall.recoveryStarts} recoveries, third at ${wall.thirdRecoveryAt.toFixed(1)} s, fastest approach ${wall.chargeSpeed.toFixed(2)} m/s`,
+  );
+  // A breakable prop is still passed rather than deliberately struck.
+  const pile = await driveHazard(
+    { s: START_S + 300, lateral: 0, radius: 1.2, breakable: true },
+    100,
+  );
+  check(
+    'breakable hazard is passed slowly on the right',
+    pile.passed &&
+      pile.rejoined &&
+      pile.closestLateral < 0 &&
+      pile.minDistance >= 1.2 + 1 &&
+      pile.speedAtClosest <= 5.5,
+    `passed/rejoined=${pile.passed}/${pile.rejoined}, clearance ${pile.minDistance.toFixed(2)} m at ${pile.speedAtClosest.toFixed(2)} m/s`,
   );
   // Unloading the chunk must give the road back.
   wall.rig.hazards.forget(wall.chunk);
@@ -538,26 +612,18 @@ async function checkAutomaticLights(): Promise<void> {
 
   rig.autopilot.setLightingConditions(0, Infinity);
   step(rig);
-  check(
-    'autonomous car uses high beam on a dark empty road',
-    rig.vehicle.headlights === 'high',
-    rig.vehicle.headlights,
-  );
-
+  const darkEmptyRoad = rig.vehicle.headlights;
   rig.autopilot.setLightingConditions(0, 180);
   step(rig);
-  check(
-    'autonomous car dips for approaching traffic',
-    rig.vehicle.headlights === 'low',
-    rig.vehicle.headlights,
-  );
-
+  const darkOncomingTraffic = rig.vehicle.headlights;
   rig.autopilot.setLightingConditions(0, Infinity);
   step(rig);
   check(
-    'autonomous car restores high beam after passing',
-    rig.vehicle.headlights === 'high',
-    rig.vehicle.headlights,
+    'autonomous car keeps low beam throughout darkness',
+    darkEmptyRoad === 'low' &&
+      darkOncomingTraffic === 'low' &&
+      rig.vehicle.headlights === 'low',
+    `${darkEmptyRoad}/${darkOncomingTraffic}/${rig.vehicle.headlights}`,
   );
 
   rig.autopilot.setLightingConditions(1, Infinity);
@@ -582,6 +648,11 @@ async function run(): Promise<void> {
   console.log('autopilot bench: real Road surface collider, mid-engined V8, fixed 60 Hz');
   checkHandover();
   await checkAutomaticLights();
+  if (process.argv.includes('--traffic-behavior')) {
+    await checkHazards();
+    if (failures) process.exitCode = 1;
+    return;
+  }
   const sleeper = await measureMode('sleeper');
   const frantic = await measureMode('frantic');
   for (const [mode, result] of [['sleeper', sleeper], ['frantic', frantic]] as const) {

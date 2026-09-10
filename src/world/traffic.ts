@@ -92,6 +92,7 @@ export interface TrafficStatus {
   readonly nearestRoadDistance: number;
   readonly movingSameDirection: number;
   readonly movingOncoming: number;
+  /** Retained in status telemetry; autonomous traffic must leave this at zero. */
   readonly highBeams: number;
   readonly lowBeams: number;
 }
