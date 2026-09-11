@@ -4,6 +4,32 @@
 
 ### Fixed
 
+- Traffic no longer crawls. A driver's speed is scaled by the surface under it, and
+  this road is 46% graded gravel, 50% cracked asphalt and 4% clean — so gravel's
+  0.45 factor was not an occasional loose district but the pace of half the drive.
+  With the old caps an ordinary car was given a 26-31 km/h target there and the
+  pedal law held it to 20-24. The factor was also charging for grip twice: corner
+  speed, braking and grade limits are all computed from the real per-surface physics
+  separately. Measured on the real road (seed 42, an 11% gravel climb at 12500 m,
+  then cracked asphalt at 10000 m), achieved speed per driver: cautious 24/56 km/h,
+  ordinary 31/68, hurried 41/92, against 20/49 for the ordinary car before. A
+  careful driver's own cruise went from 70 to 80 km/h and a hurried one's from 95 to
+  105; frantic keeps its 130 because the car runs out first — a catalogue saloon
+  measures 108 km/h flat out on this road's asphalt.
+- An overtake is now a pass rather than a detour. Ordinary and hurried traffic differ
+  by 24 km/h on cracked asphalt and 10 on a steep gravel climb, where both are near
+  full throttle; the two used to be separated by 12-21 km/h from a 26-31 km/h base,
+  which is two cars crawling abreast.
+- Gravel pace stops at half the clean-road figure, not higher, because that is where
+  the controller runs out: a frantic driver given 70 km/h there stood on the brake
+  inside a bend, lost the front on the loose surface and ran 1.2 m past the asphalt.
+  Modulating the brake against per-surface grip is what would buy the rest.
+- The autopilot bench was reporting five failures that were its own: it placed the
+  test car 1.2 m above the road, which is past the suspension's travel, so the
+  chassis met the road mesh itself and Rapier resolved that penetration by throwing
+  the car off the road at up to 200 km/h — at road positions that moved whenever the
+  ribbon was retessellated. It now places the car exactly as the world places a
+  spawned one. The gravel-district checks that were failing from this pass.
 - The drive no longer starts at a resolution the launch transient chose. Dynamic
   resolution is measured from GPU time, and the frames straddling the reveal — the
   last shader variants, the first uploads, the boot GC — are the most expensive of
