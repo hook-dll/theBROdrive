@@ -1029,22 +1029,21 @@ export class Autopilot {
     this.updateLead(dt, Math.min(this.bodyScanGap, laneGap, bodyLaneGap), speed);
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
-    // A recovery is normally an escape from unexplained static blockage. Dynamic
-    // traffic ahead cancels it immediately, while a queued car behind does not.
-    // An opposing-road deadlock is the exception: one direction receives stable
-    // right of way and commits to the outer shoulder while the other keeps waiting.
+    // A recovery is normally an escape from unexplained static blockage, and
+    // MOVING traffic ahead cancels it: a queue is not a wedge, and reversing out of
+    // one is how a stream turns into a pile-up.
+    //
+    // Something STOPPED ahead is the opposite. Seen in play: the player's car came
+    // off the sand into the opposing lane, met a stopped oncoming car nose to nose,
+    // and both sat there for good — because this test cancelled the manoeuvre and
+    // zeroed the stall timer every single step, for as long as that car was there.
+    // The car in front of a wedged driver is usually the reason it is wedged.
+    const blockerMoving = gap < Infinity && this.obstacleSpeedValue > CRAWL_SPEED_MPS;
     if (
       !this.recoveryCommitted &&
-      (
-        gap < Infinity ||
-        this.dynamicBodyAhead(
-          vehicle,
-          originX,
-          originZ,
-          roadForwardX,
-          roadForwardZ,
-        )
-      )
+      (blockerMoving ||
+        (gap === Infinity &&
+          this.dynamicBodyAhead(vehicle, originX, originZ, roadForwardX, roadForwardZ)))
     ) {
       this.recoveryPhase = 'none';
       this.recoveryTimer = 0;
