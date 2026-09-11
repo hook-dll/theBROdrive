@@ -9,6 +9,8 @@ const DEFAULT_POI_SPACING_M = 1_200;
 const FIRST_COURIER_M = 7_000;
 const COURIER_DOMAIN = 0x43555231; // 'CUR1'
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
+/** Road-centre distance: visible from the lane without blocking the asphalt. */
+const COURIER_PARKING_LATERAL_M = 9.5;
 
 const PARCEL_NAMES = [
   'sealed film parcel',
@@ -66,6 +68,11 @@ export function isCourierPoiSlot(
     if (band >= 0 && courierSlotIndex(seed, band, poiSpacing) === poiIndex) return true;
   }
   return false;
+}
+
+/** Parks on the POI side but at its road-facing edge, never hidden behind the site. */
+export function courierParkingLateral(poiLateral: number): number {
+  return (poiLateral < 0 ? -1 : 1) * COURIER_PARKING_LATERAL_M;
 }
 
 export function couriersBetween(
