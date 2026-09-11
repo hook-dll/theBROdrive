@@ -69,10 +69,11 @@ function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
 }
 
-function carState(road: Road, startS: number): CarState {
+function carState(road: Road, startS: number, lateral = 0): CarState {
   const def = carModel(MODEL_ID);
   const engine = variant(def.engineId).engine;
-  const p = road.sampleAt(startS);
+  const p = lateral === 0 ? road.sampleAt(startS) : road.offsetPoint(startS, lateral);
+  const heading = road.sampleAt(startS).heading;
   return {
     id: 'autopilot-bench', modelId: MODEL_ID, gizmos: {}, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
@@ -82,7 +83,7 @@ function carState(road: Road, startS: number): CarState {
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet: createBonnetStorage('autopilot-bench', def.engineId, def.bodyClass, def.tankLitres),
     odometer: 0, x: p.x, y: p.y + 1.2, z: p.z,
-    qx: 0, qy: Math.sin(p.heading / 2), qz: 0, qw: Math.cos(p.heading / 2),
+    qx: 0, qy: Math.sin(heading / 2), qz: 0, qw: Math.cos(heading / 2),
   };
 }
 
@@ -642,6 +643,73 @@ async function checkAutomaticLights(): Promise<void> {
   );
 }
 
+/**
+ * WEDGED OFF THE ASPHALT. A player nosing a car into a roadside pole and then
+ * engaging the autopilot used to get full throttle until the engine cooked: the
+ * road-return manoeuvre only steers, and the stall detector — the thing that backs
+ * a wedged car out — refused to look at a car that was off the road, on the theory
+ * that the return WAS its manoeuvre. Being stuck is a lack of progress, and the
+ * verge is where the things to get stuck on live.
+ */
+async function checkWedgedOffRoad(): Promise<void> {
+  const lateral = -(ROAD_HALF_WIDTH + 3.2);
+  const road = new Road(42);
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, START_S - 40, START_S + 200);
+  const world = new GameWorld(newWorldState(42));
+  const state = carState(road, START_S, lateral);
+  world.state.cars[state.id] = state;
+  const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
+  const autopilot = new Autopilot(road, new HazardIndex(), physics);
+  const input = emptyInput();
+  // The pole: fixed, slim, and four metres up the same off-road line.
+  const pole = road.offsetPoint(START_S + 4.2, lateral);
+  const poleBody = physics.world.createRigidBody(
+    physics.rapier.RigidBodyDesc.fixed().setTranslation(pole.x, pole.y + 2, pole.z),
+  );
+  physics.world.createCollider(physics.rapier.ColliderDesc.cylinder(2.5, 0.35), poleBody);
+
+  input.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+  }
+  input.handbrake = false;
+  // Drive into it the way a player would, then hand over.
+  for (let i = 0; i < 240; i++) {
+    input.throttle = 0.35;
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+  }
+  input.throttle = 0;
+  const start = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+  const startX = start.x;
+  const startZ = start.z;
+  autopilot.setMode('sleeper');
+  autopilot.setEngaged(true);
+  let fullThrottleSeconds = 0;
+  let reverseSeconds = 0;
+  let escaped = 0;
+  for (let i = 0; i < Math.ceil(30 / FIXED_DT); i++) {
+    autopilot.drive(FIXED_DT, vehicle, input, 0, 0);
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+    if (input.throttle > 0.9) fullThrottleSeconds += FIXED_DT;
+    if (input.reverse) reverseSeconds += FIXED_DT;
+    const p = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    escaped = Math.max(escaped, Math.hypot(p.x - startX, p.z - startZ));
+  }
+  check(
+    'a car wedged on the verge backs itself out',
+    reverseSeconds >= 0.5 && escaped >= 5,
+    `${reverseSeconds.toFixed(1)} s reversing, ${escaped.toFixed(1)} m from the pole`,
+  );
+  check(
+    'a wedged car does not sit at full throttle',
+    fullThrottleSeconds <= 15,
+    `${fullThrottleSeconds.toFixed(1)} s of 30 at full throttle`,
+  );
+  vehicle.dispose();
+  physics.world.free();
+}
+
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
@@ -695,6 +763,7 @@ async function run(): Promise<void> {
     `${(looseFrantic.meanSpeed * 3.6).toFixed(0)} vs ${(looseSleeper.meanSpeed * 3.6).toFixed(0)} km/h`,
   );
   await checkLitteredRoad();
+  await checkWedgedOffRoad();
   await checkHazards();
   if (failures) process.exitCode = 1;
 }

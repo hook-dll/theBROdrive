@@ -130,8 +130,8 @@ check(
 );
 check(
   'traffic contains cautious, normal and passing-capable drivers',
-  populated.sleeper > 0 && populated.frantic > 0 && populated.cautious > 0,
-  `${populated.sleeper} sleeper, ${populated.frantic} frantic, ${populated.cautious} cautious`,
+  populated.sleeper > 0 && populated.hurried > 0 && populated.cautious > 0,
+  `${populated.sleeper} sleeper, ${populated.hurried} hurried, ${populated.cautious} cautious`,
 );
 check(
   'night traffic uses only low beam',

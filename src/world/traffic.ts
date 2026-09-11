@@ -5,7 +5,7 @@ import { mulberry32 } from '../core/rng';
 import { createServiceableCarState } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
-import { Autopilot, AUTOPILOT_MODES } from '../vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
 import type { Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { Vehicle } from '../vehicle/vehicle';
@@ -81,7 +81,7 @@ interface PendingSpawn {
   readonly id: string;
   readonly style: TrafficDriverStyle;
   readonly headwayS: number;
-  readonly mode: 'sleeper' | 'frantic';
+  readonly mode: AutopilotMode;
   readonly speedCap: number;
 }
 
@@ -92,6 +92,7 @@ export interface TrafficStatus {
   readonly oncoming: number;
   readonly pending: boolean;
   readonly sleeper: number;
+  readonly hurried: number;
   readonly frantic: number;
   readonly cautious: number;
   readonly passing: number;
@@ -169,6 +170,7 @@ export class RoadTraffic {
     let lowBeams = 0;
     const modelIds: string[] = [];
     let sleeper = 0;
+    let hurried = 0;
     let frantic = 0;
     let cautious = 0;
     let passing = 0;
@@ -181,6 +183,7 @@ export class RoadTraffic {
       }
       modelIds.push(car.modelId);
       if (car.autopilot.mode === 'frantic') frantic++;
+      else if (car.autopilot.mode === 'hurried') hurried++;
       else sleeper++;
       if (car.style === 'cautious') cautious++;
       if (car.autopilot.activity === 'pass') passing++;
@@ -198,6 +201,7 @@ export class RoadTraffic {
       oncoming: this.carList.length - sameDirection,
       pending: this.pending !== null,
       sleeper,
+      hurried,
       frantic,
       cautious,
       passing,
@@ -631,7 +635,7 @@ export class RoadTraffic {
   private drawDriver(direction: TrafficDirection): {
     style: TrafficDriverStyle;
     headwayS: number;
-    mode: 'sleeper' | 'frantic';
+    mode: AutopilotMode;
     speedCap: number;
   } {
     const directionCount = this.carList.reduce(
@@ -647,11 +651,15 @@ export class RoadTraffic {
         speedCap: (42 + this.random() * 10) / 3.6,
       };
     }
-    if (directionCount === 2 || styleRoll >= 0.85) {
+    // One car in five is in a hurry, and it drives the HURRIED mode, not frantic:
+    // ambient traffic that overtakes into windows it would take itself. Frantic —
+    // the smaller gap, the shorter patience — belongs to the player's own autopilot,
+    // where somebody is watching the road it is taking.
+    if (directionCount === 2 || styleRoll >= 0.8) {
       return {
         style: 'hurried',
         headwayS: 1.0 + this.random() * 0.6,
-        mode: 'frantic',
+        mode: 'hurried',
         speedCap: (85 + this.random() * 20) / 3.6,
       };
     }
