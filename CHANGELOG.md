@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1 — 2026-09-11
+
+### Fixed
+
+- Courier cars now park at the road-facing edge of their POI instead of receiving
+  an unrelated lateral offset that could hide later couriers behind the site.
+
 ## 0.14.0 — 2026-09-11
 
 ### Added

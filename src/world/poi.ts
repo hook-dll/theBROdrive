@@ -26,6 +26,7 @@ import type { WreckTrunkField } from './wrecktrunks';
 import {
   courierDefaultStorage,
   courierId,
+  courierParkingLateral,
   couriersBetween,
   isCourierPoiSlot,
   type CourierField,
@@ -1165,7 +1166,7 @@ export class PoiProvider implements ChunkProvider {
         ctx,
         {
           ...stop,
-          lateral: courierPoi.lateral + (stop.lateral < 0 ? -13 : 13),
+          lateral: courierParkingLateral(courierPoi.lateral),
         },
         group,
         bodies,
