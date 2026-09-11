@@ -48,6 +48,23 @@
   free of its own switch cost mid-manoeuvre.
 - Autonomous indicators follow the car's remaining lateral travel, so they stay on for
   the whole lane change instead of going dark as soon as the commanded line arrives.
+- The traffic setting now puts its cars where they can be seen. At thirty, a cruising
+  player had 6.7 cars ahead of him and 12.9 piled up behind, because the stream was
+  spawned only ahead and collected 850 m behind, and he overtakes nearly all of it.
+  The rear tail is now bounded by the collision window, and a driver whose speed cap
+  beats the player's actual pace is spawned behind him so it closes and arrives in
+  view. Measured at 90 km/h: 10.6-11.1 cars ahead of 22.4-23.1 live, against 6.7 of
+  19.7 before.
+- Traffic spawn sites are no longer drawn past the streamed collision window. A site
+  with no ground under it still passed selection, held the one pending spawn through
+  a model load, and was discarded on arrival — 207 of 300 attempts, a refill rate of
+  0.38 cars/s against the 2/s the cooldown allows, which is why the stream sagged to
+  half its setting after every density change.
+- An oncoming car is only treated as out in the opposing lane — and so as a 300 m
+  spawn blackout — once it is half a body past the crown. The old test left 0.35 m
+  of slack over the lane centre, so ordinary lane-keeping error on a bend read as an
+  overtake in progress: 419 of 1540 candidate sites rejected on one seed, none on
+  another.
 
 ## 0.14.3 — 2026-09-11
 

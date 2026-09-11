@@ -13,6 +13,7 @@ import { ReversedHazardIndex, type HazardField } from './hazards';
 import type { WorldOrigin } from './origin';
 import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
+import { PHYSICS_REACH_M } from './chunks';
 
 /**
  * Thirty physical cars is the upper setting: the live stream deliberately fluctuates
@@ -20,13 +21,44 @@ import { ReversedRoad } from './reversedroad';
  */
 const MAX_TRAFFIC = 30;
 const SPAWN_MIN_M = 140;
-const SPAWN_MAX_M = 700;
+/**
+ * THE BAND ENDS WHERE THE GROUND DOES.
+ *
+ * A spawn needs a fixed collider under it (`spawnSiteClear` -> `hasSpawnGround`),
+ * and the streamer only builds colliders within `PHYSICS_REACH_M`. The band used to
+ * run to 700 m, so two sites in three passed selection, held the single `pending`
+ * slot through a model load, and were then thrown away on arrival — measured at 207
+ * of 300 attempts, a refill rate of 0.38 cars/s against the 2/s the cooldown allows.
+ * The stream sagged to half its target after every density change for no other
+ * reason. Sites are now drawn only where a car can actually stand.
+ */
+const SPAWN_MAX_M = PHYSICS_REACH_M;
+/**
+ * TRAFFIC ALSO COMES UP FROM BEHIND.
+ *
+ * Spawning only ahead makes the mirror a graveyard: the player overtakes nearly
+ * everything (ambient caps are 42-105 km/h), and every overtaken car then holds a
+ * slot out of sight until the rear despawn. A driver whose cap genuinely beats the
+ * player's current speed is instead put behind, closes, and arrives in view — the
+ * only way a car can populate the road AHEAD of the spawn band.
+ */
+const REAR_SPAWN_MIN_M = 250;
+const REAR_SPAWN_MAX_M = 360;
+/** Speed advantage over the player that makes a rear spawn worth its slot. */
+const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
  * Road the player may have covered between a spawn being chosen and its model
  * finishing loading. See `finishSpawn`.
  */
 const SPAWN_ARRIVAL_SLACK_M = 60;
 const DESPAWN_M = 850;
+/**
+ * Behind, the budget is spent much sooner. A car dropped by the player is invisible
+ * from the moment it leaves the mirror, and past `PHYSICS_REACH_M` it has no road
+ * under it at all — it free-falls while holding one of the thirty slots. Recycling
+ * it into a spawn the player can see is worth the shorter tail.
+ */
+const DESPAWN_BEHIND_M = PHYSICS_REACH_M;
 /**
  * A density trim may only take a car this far BEHIND the player, where its removal
  * cannot be watched. `DESPAWN_M` still applies in both directions.
@@ -40,6 +72,18 @@ const SPAWN_HAZARD_GAP_M = 18;
 /** Never materialize an opposing car inside a pass that was clear when committed. */
 const PASSING_SPAWN_EXCLUSION_M = 300;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
+/**
+ * Lateral, measured in a car's own direction sense, past which it is genuinely out
+ * in the opposing lane rather than merely wandering inside its own.
+ *
+ * Lane centre is `ROAD_HALF_WIDTH / 2` = 1.45 m, so testing the body edge against
+ * the crown (`> -TRAFFIC_HALF_WIDTH_M`) left 0.35 m of slack: ordinary lane-keeping
+ * error on a bend read as an overtake in progress and blacked out 300 m of road for
+ * spawning. Measured at 419 of 1540 rejected sites on one seed and none on another,
+ * i.e. a silent, seed-dependent density loss. This is the autopilot's own
+ * wrong-side test — half a body past the crown, and committed to it.
+ */
+const OPPOSING_LANE_INTRUSION_M = TRAFFIC_HALF_WIDTH_M * 0.5;
 const SPAWN_INTERVAL_S = 1;
 const DENSE_SPAWN_INTERVAL_S = 0.5;
 const DENSITY_CHANGE_MIN_S = 36;
@@ -92,10 +136,18 @@ interface PendingSpawn {
   readonly headwayS: number;
   readonly mode: AutopilotMode;
   readonly speedCap: number;
+  /** Drawn from the rear band, so arrival is revalidated against the rear limits. */
+  readonly rear: boolean;
 }
 
 export interface TrafficStatus {
   readonly enabled: boolean;
+  /**
+   * Live cars in front of the player — the part of the quota he can actually see.
+   * The stream is spawned ahead and collected behind, so this is the number the
+   * traffic setting is judged by, not `count`.
+   */
+  readonly ahead: number;
   readonly count: number;
   readonly sameDirection: number;
   readonly oncoming: number;
@@ -140,6 +192,12 @@ export class RoadTraffic {
   private spawnCooldown = 0;
   private pending: PendingSpawn | null = null;
   private playerS = 0;
+  /**
+   * Smoothed player pace along the road. A rear spawn is only worth a slot if its
+   * driver can actually close on this; see `queueSpawn`.
+   */
+  private playerSpeed = 0;
+  private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly groundProbeOrigin = { x: 0, y: 0, z: 0 };
   private readonly groundProbeDirection = { x: 0, y: -1, z: 0 };
@@ -183,6 +241,7 @@ export class RoadTraffic {
     let frantic = 0;
     let cautious = 0;
     let passing = 0;
+    let ahead = 0;
     for (const car of this.carList) {
       if (car.direction === 1) {
         sameDirection++;
@@ -198,6 +257,7 @@ export class RoadTraffic {
       if (car.autopilot.activity === 'pass') passing++;
       if (car.vehicle.headlights === 'high') highBeams++;
       else if (car.vehicle.headlights === 'low') lowBeams++;
+      if (car.forwardS > this.playerS) ahead++;
       nearestRoadDistance = Math.min(
         nearestRoadDistance,
         Math.abs(car.forwardS - this.playerS),
@@ -206,6 +266,7 @@ export class RoadTraffic {
     return {
       enabled: this.targetCount > 0,
       count: this.carList.length,
+      ahead,
       sameDirection,
       oncoming: this.carList.length - sameDirection,
       pending: this.pending !== null,
@@ -401,6 +462,13 @@ export class RoadTraffic {
 
   /** Writes every traffic controller before the shared physics step. */
   fixedUpdate(dt: number, playerS: number, originX: number, originZ: number): void {
+    // A jump this large is a teleport (load, fast travel, the despawn-range test),
+    // not motion, and must not be read as a speed no traffic could ever match.
+    const advance = playerS - this.playerS;
+    this.playerSpeed =
+      dt > 0 && Math.abs(advance) < 50
+        ? this.playerSpeed * 0.9 + (advance / dt) * 0.1
+        : 0;
     this.playerS = playerS;
     this.syncSettings();
     if (this.targetCount === 0 && this.carList.length === 0) return;
@@ -433,7 +501,6 @@ export class RoadTraffic {
     this.assignDeadlockPermissions();
     this.assignReverseRoom();
     this.assignPassPermissions();
-    this.assignPassPermissions();
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
       car.autopilot.setLightingConditions(
@@ -443,7 +510,8 @@ export class RoadTraffic {
       car.lifetimeTimer -= dt;
       if (car.lifetimeTimer <= 0) {
         car.lifetimeTimer = LIFETIME_SAMPLE_S;
-        if (Math.abs(car.forwardS - playerS) > DESPAWN_M) {
+        const offset = car.forwardS - playerS;
+        if (offset > DESPAWN_M || -offset > DESPAWN_BEHIND_M) {
           this.removeAt(i);
           continue;
         }
@@ -511,10 +579,17 @@ export class RoadTraffic {
   private queueSpawn(): void {
     const direction = this.nextDirection();
     if (direction === null) return;
-    const forwardS = this.findSpawnS(direction);
+    // The driver is drawn BEFORE the site, because which road is worth searching
+    // depends on the cap it was given. A car slower than the player that starts
+    // behind him is a car he will never see: it only falls further back until the
+    // rear despawn collects it. Oncoming traffic behind him is worse still — it
+    // drives away from the moment it exists.
+    const driver = this.drawDriver(direction);
+    const fromBehind =
+      direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
+    const forwardS = this.findSpawnS(direction, fromBehind);
     if (forwardS === null) return;
     const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
-    const driver = this.drawDriver(direction);
     const request: PendingSpawn = {
       generation: this.generation,
       direction,
@@ -525,6 +600,7 @@ export class RoadTraffic {
       headwayS: driver.headwayS,
       mode: driver.mode,
       speedCap: driver.speedCap,
+      rear: forwardS < this.playerS,
     };
     this.pending = request;
     void this.prepareModel(request.modelId)
@@ -550,15 +626,19 @@ export class RoadTraffic {
     // A spawn that arrives slightly closer than intended is still a spawn behind a
     // crest or a bend, so the band is allowed to have shrunk by the road a loading
     // screen can cover. Closer than THAT is a car appearing in view, and is still
-    // refused.
-    const band = Math.abs(request.forwardS - this.playerS);
+    // refused. A REAR spawn drifts the other way — the player is driving away from
+    // it — so its far edge is the one that has to hold, or the car materialises
+    // already outside `DESPAWN_BEHIND_M` and is collected on its first sample.
+    const offset = request.forwardS - this.playerS;
+    const arrivalOk = request.rear
+      ? -offset >= REAR_SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && -offset <= REAR_SPAWN_MAX_M
+      : offset >= SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && offset <= SPAWN_MAX_M;
     if (
       this.desiredCount === 0 ||
       this.carList.length >= this.desiredCount ||
       request.generation !== this.generation ||
       this.pending !== request ||
-      band < SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M ||
-      band > SPAWN_MAX_M
+      !arrivalOk
     ) {
       return;
     }
@@ -572,7 +652,6 @@ export class RoadTraffic {
     const x = roadPoint.x + Math.cos(roadPoint.heading) * forwardLateral;
     const z = roadPoint.z - Math.sin(roadPoint.heading) * forwardLateral;
     if (!this.isSpawnClear(x, z, SPAWN_WORLD_GAP_M)) return;
-    if (!this.hasSpawnGround(x, roadPoint.y, z)) return;
 
     const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
     const y = carSpawnYAboveGround(
@@ -659,9 +738,17 @@ export class RoadTraffic {
     return this.random() < 0.5 ? 1 : -1;
   }
 
-  private findSpawnS(direction: TrafficDirection): number | null {
+  /**
+   * `fromBehind` searches the rear band first. It is a preference, not a mode: a
+   * rear site that is blocked must not cost the whole spawn, so the later attempts
+   * fall back to the road ahead.
+   */
+  private findSpawnS(direction: TrafficDirection, fromBehind: boolean): number | null {
     for (let attempt = 0; attempt < 12; attempt++) {
-      const distance = SPAWN_MIN_M + this.random() * (SPAWN_MAX_M - SPAWN_MIN_M);
+      const behind = fromBehind && attempt < 6;
+      const distance = behind
+        ? -(REAR_SPAWN_MIN_M + this.random() * (REAR_SPAWN_MAX_M - REAR_SPAWN_MIN_M))
+        : SPAWN_MIN_M + this.random() * (SPAWN_MAX_M - SPAWN_MIN_M);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
       if (this.spawnSiteClear(s, direction)) return s;
@@ -685,7 +772,13 @@ export class RoadTraffic {
         }
       },
     );
-    return clear;
+    if (!clear) return false;
+    // Ground is part of whether a site EXISTS, not a last-moment veto. Left to
+    // `finishSpawn`, an unsupported site still consumed the one pending slot and a
+    // model load before being discarded; here the search simply moves on and the
+    // same tick can offer a supported one.
+    const point = this.road.offsetPoint(s, lane, this.spawnPoint);
+    return this.hasSpawnGround(point.x, point.y, point.z);
   }
 
   private roadGapClear(s: number, direction: TrafficDirection): boolean {
@@ -701,7 +794,7 @@ export class RoadTraffic {
       if (
         car.direction !== direction &&
         (car.autopilot.activity === 'pass' ||
-          car.roadLateral * car.direction > -TRAFFIC_HALF_WIDTH_M) &&
+          car.roadLateral * car.direction > OPPOSING_LANE_INTRUSION_M) &&
         gap < PASSING_SPAWN_EXCLUSION_M
       ) {
         return false;

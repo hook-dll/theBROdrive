@@ -25,6 +25,15 @@ export const CHUNK_LENGTH = 200;
 const VISUAL_RADIUS = 6;
 /** Chunks that carry physics colliders either side of the player. */
 const PHYSICS_RADIUS = 2;
+/**
+ * Road arclength either side of the player that is GUARANTEED to carry collision.
+ *
+ * The live physics set is `playerChunk ± PHYSICS_RADIUS`, so the supported reach
+ * runs from `CHUNK_LENGTH * PHYSICS_RADIUS` (player at a chunk boundary) to one
+ * chunk more (player at its far edge). Anything that needs ground under it at a
+ * distance — traffic spawning, in particular — must use the guaranteed figure.
+ */
+export const PHYSICS_REACH_M = CHUNK_LENGTH * PHYSICS_RADIUS;
 /** Past this lateral distance road content carries no physics or prop colliders. */
 const ROAD_PHYSICS_REACH = 1200;
 
