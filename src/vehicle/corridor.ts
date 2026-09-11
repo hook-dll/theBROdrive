@@ -70,6 +70,11 @@ export interface CorridorRequest {
   readonly oncomingGap: number;
   /** Assumed speed of an unseen car coming the other way. */
   readonly oncomingSpeed: number;
+  /**
+   * Is the opposing lane clear BEHIND us? Pulling out in front of something already
+   * overtaking is a rear-end, and the corridor search has no rearward obstacles.
+   */
+  readonly crossingRearClear: boolean;
   /** Road the car needs to stop from here; a hard block inside it is not feasible. */
   readonly stopRoom: number;
   readonly obstacles: readonly CorridorObstacle[];
@@ -87,6 +92,14 @@ export interface CorridorPlan {
   readonly usesOncomingLane: boolean;
   /** True while the chosen line puts the body past the asphalt. */
   readonly usesShoulder: boolean;
+  /**
+   * Nearest thing in the driver's OWN lane and its speed, whatever line was
+   * chosen. While the body is still in that lane — and a lane change costs about
+   * thirty metres of road — this is what it must keep a headway behind, or it
+   * accelerates into the bumper of the car it is committed to overtaking.
+   */
+  readonly laneBlockDistance: number;
+  readonly laneBlockSpeed: number;
 }
 
 /** Lateral resolution of the search. A quarter of a metre is a tenth of a car. */
@@ -100,7 +113,7 @@ const BLOCK_COST = 600;
 /** Cost per m/s of speed a slower car in the corridor would cost us. */
 const SLOW_COST_PER_MPS = 6;
 /** Paid once for changing the commanded line at all: the hysteresis. */
-const SWITCH_COST = 1.2;
+const SWITCH_COST = 3;
 /** Room wanted beyond an obstacle before the corridor counts as past it. */
 const CLEAR_M = 30;
 /** Slowest closing speed an overtake is planned at, so the sums stay finite. */
@@ -192,6 +205,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     oncomingGap,
     oncomingSpeed,
     stopRoom,
+    crossingRearClear,
     obstacles,
   } = request;
   const ownSide = Math.sign(laneOffset || -1);
@@ -258,6 +272,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
         (Math.min(ownLaneBlock, horizon) + CLEAR_M) / advantage;
       const roomNeeded = (Math.max(speed, desiredSpeed) + oncomingSpeed) * manoeuvreSeconds;
       if (oncomingGap < roomNeeded) return;
+      if (!crossingRearClear) return;
     }
     const bodyEdge = Math.abs(line) + halfWidth;
     const leavesAsphalt = bodyEdge > asphaltLimit;
@@ -297,7 +312,10 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     bestFeasible = feasible;
   };
 
+  // The two lane centres exactly, so the grid never undershoots a lane by a few
+  // centimetres and shave the clearance to the car being passed.
   evaluate(laneOffset);
+  evaluate(-laneOffset);
   const first = Math.ceil(-edgeLimit / LINE_STEP_M) * LINE_STEP_M;
   for (let line = first; line <= edgeLimit + 1e-6; line += LINE_STEP_M) {
     evaluate(line);
@@ -310,5 +328,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     blockSpeed: bestBlockSpeed,
     usesOncomingLane: bestLine * ownSide < -halfWidth * 0.5,
     usesShoulder: Math.abs(bestLine) + halfWidth > asphaltLimit,
+    laneBlockDistance,
+    laneBlockSpeed,
   };
 }

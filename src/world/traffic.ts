@@ -54,6 +54,10 @@ const CLOCK_SYNC_S = 1;
 const END_MARGIN_M = 80;
 const TRAFFIC_ID_PREFIX = 'traffic:';
 const DEADLOCK_ROAD_GAP_M = 18;
+/** Bumper-to-bumper enough that a car behind is in the way of a reverse. */
+const YIELD_CHAIN_GAP_M = 14;
+/** While one car is out in the opposing lane, oncoming traffic this close waits. */
+const OPPOSING_PASS_EXCLUSION_M = 260;
 const DEADLOCK_STOP_SPEED_MPS = 1.5;
 
 type TrafficDirection = 1 | -1;
@@ -326,6 +330,61 @@ export class RoadTraffic {
     }
   }
 
+  /**
+   * WHEN THE HEAD OF A QUEUE HAS TO BACK UP, THE QUEUE BACKS UP WITH IT.
+   *
+   * A car wedged against a rock reverses out of it — and cannot, because the next
+   * car is against its bumper and the one behind that against ITS bumper. Seen in
+   * play: a line of traffic stopped at a rock, the head shuffling into the car
+   * behind, nothing moving, the player at the back of it waiting for good.
+   *
+   * So the request travels down the line. Each car within `YIELD_CHAIN_GAP_M` of
+   * one that needs room is asked to give ground, and its own follower is asked in
+   * turn — the chain is walked front to back until it stops. Each driver reverses
+   * only while its own rear is clear, so the queue unwinds from the end.
+   */
+  private assignReverseRoom(): void {
+    for (const car of this.carList) car.autopilot.setYieldReverse(false);
+    for (const direction of [1, -1] as const) {
+      const queue = this.carList
+        .filter((car) => car.direction === direction && car.settleFor <= 0)
+        // Front of the queue first, in this direction's own sense of forward.
+        .sort((a, b) => (b.forwardS - a.forwardS) * direction);
+      for (let i = 0; i < queue.length; i++) {
+        const ahead = queue[i]!;
+        if (!ahead.autopilot.needsReverseRoom) continue;
+        const behind = queue[i + 1];
+        if (!behind) continue;
+        const gap = Math.abs(ahead.forwardS - behind.forwardS);
+        if (gap > YIELD_CHAIN_GAP_M) continue;
+        behind.autopilot.setYieldReverse(true);
+      }
+    }
+  }
+
+  /**
+   * ONE CAR AT A TIME IN THE OPPOSING LANE.
+   *
+   * Each driver checks the opposing lane for itself and finds it clear, because the
+   * car coming the other way is in its OWN lane, minding its own business — right
+   * up until it makes the same decision. Two individually correct overtakes then
+   * meet head-on, and nothing inside a single car can see that coming. So the
+   * coordinator owns it: while a car is out in the wrong lane, nothing coming the
+   * other way within `OPPOSING_PASS_EXCLUSION_M` may start a pass of its own.
+   */
+  private assignPassPermissions(): void {
+    for (const car of this.carList) {
+      const blocked = this.carList.some(
+        (other) =>
+          other !== car &&
+          other.direction !== car.direction &&
+          other.autopilot.activity === 'pass' &&
+          Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M,
+      );
+      car.autopilot.setPassingEnabled(!blocked && this.targetCount <= 120);
+    }
+  }
+
   /** Visits every live temporary vehicle without exposing traffic ownership. */
   forEachVehicle(visitor: (id: string, vehicle: Vehicle) => void): void {
     for (const car of this.carList) visitor(car.id, car.vehicle);
@@ -372,6 +431,9 @@ export class RoadTraffic {
     }
 
     this.assignDeadlockPermissions();
+    this.assignReverseRoom();
+    this.assignPassPermissions();
+    this.assignPassPermissions();
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
       car.autopilot.setLightingConditions(
