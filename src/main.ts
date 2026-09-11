@@ -1424,6 +1424,15 @@ async function boot(): Promise<void> {
     );
   };
 
+  /**
+   * Holds the adaptive-resolution controller off the frames that are not worth
+   * judging. Every measurement taken before `settleLaunchResolution` has finished
+   * belongs to the launch transient — freshly compiled shader variants, first
+   * texture uploads, the boot GC — not to the cost of the drive, and letting it
+   * judge those walked a healthy machine straight down to its resolution floor.
+   */
+  let adaptationFrozen = true;
+
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
     const s = world.state;
@@ -1744,7 +1753,7 @@ async function boot(): Promise<void> {
     // GPU timer queries measure only render submission. The one startup PMREM bake
     // is excluded because it is a different GPU workload; ordinary frames, including
     // the whole day-night transition, remain eligible for adaptive resolution.
-    const adaptationEligible = !sky.didBakeEnvironmentThisFrame;
+    const adaptationEligible = !adaptationFrozen && !sky.didBakeEnvironmentThisFrame;
     renderer.adaptResolution(adaptationEligible, true);
     rebasedThisFrame = false;
     renderer.setHazeStrength(sky.dayFactor);
@@ -2216,6 +2225,64 @@ async function boot(): Promise<void> {
   };
   await warmStreamedWorld();
 
+  /**
+   * WHY THE LAUNCH WAITS FOR THE PICTURE TO STOP CHANGING.
+   *
+   * The barrier above guarantees that everything is BUILT: the world is streamed,
+   * both live shader variants are linked, and a GPU fence has retired the first
+   * real frame. It does not guarantee that the frame the player is about to see is
+   * the frame he will keep. Resolution is measured, and the frames straddling the
+   * reveal are the most expensive of the session — the remaining shader variants,
+   * the first uploads, the boot GC — so the adaptive controller used to read that
+   * transient as a machine that could not cope and walk the drawing buffer down,
+   * step after step, to its floor. At 55% the film grain is filtered away by the
+   * upscale, the ink outlines smear into a general darkening, and the road loses
+   * its aggregate: the drive looked unfinished, and a second launch — with a warm
+   * cache and therefore fewer slow frames — looked right.
+   *
+   * So the same real frame path runs here, under the cover, at display pace. The
+   * first frames are rendered but not judged (`adaptationFrozen`), which is what
+   * throws the transient away; the rest are judged exactly as they will be in the
+   * drive. The cover leaves when the controller has actually MEASURED the scale it
+   * is holding, so the first frame the player sees is the finished one.
+   */
+  const SETTLE_DISCARD_FRAMES = 30;
+  /**
+   * Wall-clock ceiling, not a frame count: the frames being settled are the slowest
+   * of the session, so counting them measures the machine rather than the wait. A
+   * descent is bounded — each step needs its discarded resize frames, its half
+   * second of evidence and a 1.5 s cooldown, and the floor is four steps below full
+   * resolution — so twenty seconds covers the worst honest case. A machine with
+   * headroom reaches its verdict in about a second and a half and leaves then.
+   *
+   * Leaving early would be worse than waiting: the remaining steps would then be
+   * taken with the player watching, which is the resolution walking down under him
+   * — precisely the thing this phase exists to prevent.
+   */
+  const SETTLE_MAX_MS = 20_000;
+  const settleLaunchResolution = async (): Promise<void> => {
+    // Without GPU timing nothing can move the scale, so there is nothing to settle.
+    if (!renderer.measuresGpuTime) {
+      adaptationFrozen = false;
+      return;
+    }
+    const label = loading.querySelector<HTMLElement>('.launch-loading-text');
+    if (label) label.textContent = 'settling the picture';
+    const deadline = performance.now() + SETTLE_MAX_MS;
+    for (let frame = 0; performance.now() < deadline; frame++) {
+      adaptationFrozen = frame < SETTLE_DISCARD_FRAMES;
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+      render(0, 0);
+      if (adaptationFrozen) continue;
+      if (renderer.resolutionSettled) break;
+    }
+    adaptationFrozen = false;
+  };
+
   // Prime the exact live render path while the loading cover still owns the screen.
   // The first pass establishes sky/fog/post uniforms and bakes the environment.
   // compileAsync then waits for the exact offscreen scene and canvas post variants,
@@ -2225,6 +2292,7 @@ async function boot(): Promise<void> {
   await renderer.waitForFrameShaders();
   render(0, 0);
   await renderer.waitForSubmittedFrame();
+  await settleLaunchResolution();
   loading.classList.add('is-hidden');
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
