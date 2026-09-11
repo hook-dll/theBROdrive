@@ -1816,8 +1816,19 @@ export class Autopilot {
       this.obstacleSpeedValue += (measured - this.obstacleSpeedValue) * alpha;
       this.leadClosingValue += (closing - this.leadClosingValue) * alpha;
     }
+    // A CAR COMING AT US IS NOT A PARKED CAR.
+    //
+    // `measured` is our own speed minus the closing rate, clamped at zero — and for
+    // an oncoming car the closing rate is the SUM of the two speeds, so the estimate
+    // pins at zero and the confirmation timer runs exactly as it would behind a
+    // wreck. Six tenths of a second later the driver believed there was an abandoned
+    // car in its lane and took the shoulder to get round it, on a clean road, in
+    // both directions at once, every time two streams met near a bend where the
+    // corridor probe strays into the other lane. The closing rate is what tells the
+    // two apart: nothing stationary can approach faster than we are travelling.
+    const approaching = this.leadClosingValue > speed + HEAD_ON_MARGIN_MPS;
     this.leadParkedFor =
-      this.obstacleSpeedValue < PARKED_SPEED_MPS ? this.leadParkedFor + dt : 0;
+      !approaching && this.obstacleSpeedValue < PARKED_SPEED_MPS ? this.leadParkedFor + dt : 0;
   }
 
   /** True only once the thing in front has been slow for long enough to believe. */
