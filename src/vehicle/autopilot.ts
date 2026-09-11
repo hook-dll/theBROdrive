@@ -1381,31 +1381,49 @@ export class Autopilot {
     // anywhere, while one picking through rough ground at walking pace is making
     // legitimate progress.
     const wantsProgress = vehicle.engineRunning && targetSpeed > 1;
+    // The dynamic guards below exist so a car QUEUEING behind traffic is never
+    // mistaken for a wedged one. Off the asphalt there is no queue to be in: a car
+    // out on the sand asking for speed and not moving is leaning on something, and
+    // a traffic car happening to be nearby is no explanation at all. Measured live:
+    // frantic left the road, wedged on a power-line pylon, and held full throttle
+    // through HEATING ENGINE, OVERHEATING and TURN OFF ENGINE, because cars passing
+    // on the road beside it kept `dynamicBlockerKnown` set the whole time.
+    const queueExplainsIt =
+      !offRoad &&
+      (this.dynamicBlockerKnown ||
+        this.dynamicBodyAhead(vehicle, originX, originZ, roadForwardX, roadForwardZ));
     const unexplainedStaticStall =
       wantsProgress &&
-      (!this.trafficRecoveryPolicy || hazard !== null || this.plannedHazard !== null) &&
+      (offRoad ||
+        !this.trafficRecoveryPolicy ||
+        hazard !== null ||
+        this.plannedHazard !== null) &&
       gap === Infinity &&
-      !this.dynamicBlockerKnown &&
-      !this.dynamicBodyAhead(
-        vehicle,
-        originX,
-        originZ,
-        roadForwardX,
-        roadForwardZ,
-      );
+      !queueExplainsIt;
     const opposingDeadlock = this.deadlockPermission;
-    // OFF THE ASPHALT IS WHERE THE THINGS TO GET WEDGED ON LIVE.
+    // NOSE TO NOSE IN THE WRONG LANE IS A DEADLOCK NOBODY WAS RESOLVING.
     //
-    // This used to require `!offRoad`, on the reading that a car off the road is
-    // already running one manoeuvre — the drive back to the lane — and does not
-    // need another. But that manoeuvre only steers; it has no idea whether the car
-    // is actually going anywhere. Nose a car into a pole on the verge, engage, and
-    // the road recovery asked for full throttle at a lane it could not reach, for
-    // as long as the engine survived it. Being wedged is a lack of PROGRESS, and
-    // that is just as true on sand as on tarmac.
+    // A pass that went wrong ends with this car stopped somewhere that is not its
+    // own lane, facing a stopped car that is in ITS own lane and has nowhere to go.
+    // The traffic coordinator arbitrates exactly this for ambient cars, but the
+    // player's autopilot is not in its roster, and the ordinary stall test cannot
+    // see the situation at all: it requires an EMPTY corridor (`gap === Infinity`),
+    // and here the corridor holds the very car that is the problem. So both sat
+    // there, brakes on, indefinitely.
+    //
+    // Being displaced from your own lane in front of something stopped is its own
+    // evidence: give up the pass and let the recovery back out of the lane that is
+    // not yours.
+    const displaced = Math.abs(projection.lateral - config.laneOffset) > CAR_HALF_WIDTH_M;
+    // `wantsProgress` cannot be used here: following a stopped car is exactly what
+    // drives the target speed to zero, so asking for it would make this test unable
+    // to fire in the only situation it exists for.
+    const headOnStandoff =
+      vehicle.engineRunning && gap < Infinity && this.leadIsParked && displaced && !offRoad;
+    if (headOnStandoff && speed < CRAWL_SPEED_MPS && this.passLine !== null) this.clearPass();
     const stalled =
       this.passLine === null &&
-      (unexplainedStaticStall || opposingDeadlock) &&
+      (unexplainedStaticStall || opposingDeadlock || headOnStandoff) &&
       speed < CRAWL_SPEED_MPS;
     const movedFromAnchor = Math.hypot(
       this.position.x - this.stallAnchorX,
@@ -1543,16 +1561,32 @@ export class Autopilot {
   }
 
   /**
-   * Right-side line that clears an indexed prop by its radius, the car body, and a
-   * fixed hysteresis margin. ReversedRoad mirrors lateral coordinates, so negative
-   * remains this driver's right shoulder in both traffic directions.
+   * Line that clears an indexed prop by its radius, the car body, and a fixed
+   * hysteresis margin — on the driver's RIGHT where that is possible. ReversedRoad
+   * mirrors lateral coordinates, so negative remains this driver's right shoulder in
+   * both traffic directions.
    *
-   * Oversized obstacles clamp to the outer graded shoulder instead of producing a
-   * permanent stop. If that is still not enough, stuck recovery keeps retrying.
+   * A RIGHT-SIDE LINE THAT DOES NOT CLEAR IS WORSE THAN NO DETOUR. The clamp to the
+   * graded shoulder used to be the whole answer, which meant a prop far out on the
+   * right — a power-line pylon, the commonest thing beside this road — produced a
+   * committed line AT the shoulder limit, still inside the pylon's own radius. The
+   * planner then drove onto the sand and held that line into the pylon's leg, where
+   * the car spun its wheels until the engine cooked. Seen in a live drive; the pairs
+   * of cars standing on the verge are the same thing having happened to traffic.
+   *
+   * So when the shoulder cannot clear it, go round the OTHER side, and only as far
+   * as the asphalt allows: a pylon at six metres needs no detour at all, because a
+   * line inside this driver's own lane already clears it by metres. The clamp
+   * survives only for something that genuinely straddles both, where stuck recovery
+   * is the honest answer.
    */
   private detourLine(hazard: RoadHazard): number {
     const clearance = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
-    return Math.max(hazard.lateral - clearance, -STATIC_AVOID_LINE_M);
+    const right = hazard.lateral - clearance;
+    if (right >= -STATIC_AVOID_LINE_M) return right;
+    const left = hazard.lateral + clearance;
+    if (left <= EDGE_LINE_M) return left;
+    return -STATIC_AVOID_LINE_M;
   }
 
 

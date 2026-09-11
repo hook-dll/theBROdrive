@@ -328,6 +328,7 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  await sky.waitForAssets();
   // Warm only models already requested by the active set. Later models parse and
   // compile on demand, before their first Vehicle instance is attached.
   await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
@@ -1989,6 +1990,39 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * The dev shortcut behind `PauseHooks.seatInNearestCar`.
+   *
+   * Getting into a car needs a look ray at a door, which a human does without
+   * thinking and an automated test session cannot do at all — so every attempt to
+   * observe the autopilot in the REAL game, rather than in a bench, stalled on
+   * walking round a bonnet. This puts the player in the nearest car within
+   * `DEV_FLIP_RADIUS`, and exists only while developing.
+   */
+  const devSeatInNearestCar = (): void => {
+    if (world.state.player.drivingCarId) {
+      hud.setToast('already driving');
+      return;
+    }
+    const p = player.position;
+    let nearestId: string | null = null;
+    let nearestDistSq = DEV_FLIP_RADIUS * DEV_FLIP_RADIUS;
+    for (const [id, vehicle] of vehicles) {
+      const t = vehicle.chassis.translation();
+      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
+      if (distSq < nearestDistSq) {
+        nearestId = id;
+        nearestDistSq = distSq;
+      }
+    }
+    if (nearestId === null) {
+      hud.setToast(`no car within ${DEV_FLIP_RADIUS} m`);
+      return;
+    }
+    world.apply({ t: 'enter_car', carId: nearestId });
+    hud.setToast('seated in the nearest car');
+  };
+
+  /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
    * rather than being held in the menu: the menu is a view, not an owner.
@@ -2050,6 +2084,9 @@ async function boot(): Promise<void> {
     // Same fold once more: righting a rolled car is what a gum charge is FOR, so the
     // free instant version is a development tool and nothing else.
     flipVehicle: import.meta.env.DEV ? devFlipVehicle : undefined,
+    // Development only, and for one reason: a scripted session cannot aim a look
+    // ray at a door, so without this the real game is unobservable to automation.
+    seatInNearestCar: import.meta.env.DEV ? devSeatInNearestCar : undefined,
   };
 
   /**
@@ -2172,13 +2209,14 @@ async function boot(): Promise<void> {
   await warmStreamedWorld();
 
   // Prime the exact live render path while the loading cover still owns the screen.
-  // The first pass establishes sky/fog/post uniforms and bakes the environment;
-  // compileAsync then waits out parallel GPU compilation. Draw once more with those
-  // programs ready before handing the canvas to the player. Cold and cache-warm
-  // launches therefore cross the same visual-readiness barrier.
+  // The first pass establishes sky/fog/post uniforms and bakes the environment.
+  // compileAsync then waits for the exact offscreen scene and canvas post variants,
+  // not a different direct-to-canvas scene variant. The second draw uploads every
+  // remaining texture, shadow and PMREM result; its GPU fence is the final barrier.
   render(0, 0);
   await renderer.waitForFrameShaders();
   render(0, 0);
+  await renderer.waitForSubmittedFrame();
   loading.classList.add('is-hidden');
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
