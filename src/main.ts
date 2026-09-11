@@ -990,14 +990,16 @@ async function boot(): Promise<void> {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
       if (f.cycleCamera) camera.cycleDriving();
-      // One key cycles the complete driving state: sleeper -> frantic -> off.
-      // Keeping the transition here means the HUD, input handover and controller
-      // always observe the same state on the same fixed step.
+      // One key cycles the complete driving state: sleeper -> hurried -> frantic ->
+      // off. Keeping the transition here means the HUD, input handover and
+      // controller always observe the same state on the same fixed step.
       if (f.toggleAutopilot) {
         if (!autopilot.engaged) {
           autopilot.setMode('sleeper');
           autopilot.setEngaged(true);
         } else if (autopilot.mode === 'sleeper') {
+          autopilot.setMode('hurried');
+        } else if (autopilot.mode === 'hurried') {
           autopilot.setMode('frantic');
         } else {
           autopilot.setEngaged(false);

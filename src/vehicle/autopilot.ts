@@ -8,7 +8,7 @@ import { ROAD_HALF_WIDTH, type DriveRoad } from '../world/road';
 import { type HazardField, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
 
-export type AutopilotMode = 'sleeper' | 'frantic';
+export type AutopilotMode = 'sleeper' | 'hurried' | 'frantic';
 
 /**
  * What the driver is doing right now. Dev HUDs and the playground benches read it;
@@ -68,6 +68,18 @@ interface ModeConfig {
   readonly overtakes: boolean;
   /** Curvature, rad/m, above which the road is too bent to commit to a pass. */
   readonly passCurvature: number;
+  /**
+   * NERVE. Multiplies every discretionary margin of an overtake: the sight it asks
+   * for, the speed advantage it insists on, how slow a leader has to be to be worth
+   * passing, and how long it will sulk after an abort. 1 is the cautious baseline.
+   *
+   * It deliberately does NOT touch the abort rules, the entry check behind, the
+   * curvature the mode accepts, or anything the speed planner does with grip: a
+   * bolder driver commits to smaller windows, it does not corner harder than the
+   * tyres or stay in the oncoming lane once something appears in it. That is the
+   * difference between hurrying and crashing.
+   */
+  readonly passNerve: number;
 }
 
 /**
@@ -109,6 +121,36 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     headwayS: 2.2,
     overtakes: false,
     passCurvature: 0.012,
+    passNerve: 1,
+  },
+  /**
+   * The driver with somewhere to be and a licence to keep. 95 km/h, a cornering
+   * budget two thirds of the tyres', pedals used deliberately rather than as
+   * switches — and it overtakes, but only into a window it would take itself. It is
+   * what ambient traffic's hurried drivers use, and the middle setting of the
+   * player's own autopilot: livelier than sleeper without frantic's appetite for a
+   * small gap.
+   */
+  hurried: {
+    cruiseMps: 95 / 3.6,
+    lateralAccel: 4.7,
+    brakeAccel: 5.4,
+    lookaheadBase: 10,
+    lookaheadSpeed: 1.2,
+    brakeLead: 12,
+    curveLead: 27,
+    laneOffset: -ROAD_HALF_WIDTH / 2,
+    chordGain: 0.68,
+    steeringGain: 1.5,
+    holdSeconds: 0.75,
+    holdShare: 0.42,
+    throttleBand: 3,
+    brakeBand: 4,
+    brakeCeiling: 0.8,
+    headwayS: 1.6,
+    overtakes: true,
+    passCurvature: 0.010,
+    passNerve: 0.88,
   },
   frantic: {
     cruiseMps: 130 / 3.6,
@@ -128,7 +170,14 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeCeiling: 1,
     headwayS: 1.2,
     overtakes: true,
-    passCurvature: 0.006,
+    // A bend of 0.009 rad/m is a 110 m radius: gentle enough that the speed planner
+    // still allows most of this mode's pace through it. The old 0.006 demanded a
+    // straighter road than the cautious mode did, which on a desert road that is
+    // never quite straight is most of the reason an overtake never happened.
+    passCurvature: 0.009,
+    // Two thirds of the cautious margins. It is in a hurry, it takes the smaller
+    // window, and it gets back in.
+    passNerve: 0.66,
   },
 };
 
@@ -392,6 +441,18 @@ const PASS_ONCOMING_MPS = 20;
 const PASS_SIGHT_CAP_S = 6;
 /** Below this speed advantage frantic stays put rather than sitting alongside. */
 const PASS_SPEED_MARGIN_MPS = 4;
+/**
+ * Headway, in seconds of travel, a car must still have to its lead before a pass
+ * may START.
+ *
+ * It used to be `PASS_ABORT_SECONDS` (1.6 s), which is longer than the gap the
+ * follower controller settles at — 1.0-1.6 s for traffic, 1.2 s for frantic. So a
+ * car that had actually caught something and tucked in behind it was, by
+ * construction, always too CLOSE to be allowed to overtake, and the only passes
+ * that ever fired were the transient frames while still closing in. Sitting in a
+ * leader's mirrors is precisely when a driver wants the other lane.
+ */
+const PASS_FOLLOW_SECONDS = 0.6;
 /** Road travelled after the old lane first looks clear, giving the rear bumper room. */
 const PASS_REAR_CLEAR_M = 10;
 /** Passing lane must also be clear behind before the lateral move begins. */
@@ -539,6 +600,8 @@ export class Autopilot {
    * indexed, and a lead that must be crawled past is not a lead to queue behind.
    */
   private blockerBypass = false;
+  /** True once the BODY is out in the passing lane, not merely committed to going. */
+  private passEstablished = false;
   /** True while easing back from the wider static-obstacle shoulder. */
   private avoidanceReturning = false;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
@@ -548,6 +611,13 @@ export class Autopilot {
   private passStartedAt = 0;
   private passStartedAtS = 0;
   private passClearAt: number | null = null;
+  /**
+   * Road seen clear in the lane a committed pass is using. While passing, this —
+   * not the ordinary lead gap — is what the speed plan follows: the ordinary gap
+   * still holds the car being overtaken, so queueing behind it kept the overtaking
+   * car pinned at the leader's own speed, alongside, until the manoeuvre timed out.
+   */
+  private passLaneGapValue = Infinity;
   private passRetryAfterS = 0;
   private recoveryPhase: 'none' | 'reverse' | 'pullout' = 'none';
   private recoveryTimer = 0;
@@ -565,6 +635,8 @@ export class Autopilot {
   private passingEnabled = true;
   /** Signed lateral direction the recovery is escaping toward; the driver's right. */
   private recoverySide = -1;
+  /** Whether the manoeuvre in progress started off the asphalt. */
+  private recoveryOffRoad = false;
   private recoveryBias = 0;
   private recoveryBiasUntil = 0;
   private lastRecoveryAt = -Infinity;
@@ -703,6 +775,7 @@ export class Autopilot {
     this.stoppedFor = 0;
     this.sinceRecovery = RECOVERY_REARM_S;
     this.recoveryPhase = 'none';
+    this.recoveryOffRoad = false;
     this.roadRecoveryActive = false;
     this.roadRecoveryTargetLine = 0;
     this.roadRecoveryFollowingEscape = false;
@@ -712,8 +785,7 @@ export class Autopilot {
     this.avoidanceReturning = false;
     this.lastRecoveryAt = -Infinity;
     this.recoveryAttempts = 0;
-    this.passLine = null;
-    this.passClearAt = null;
+    this.clearPass();
     this.passRetryAfterS = 0;
     this.recoveryCommitted = false;
     this.deadlockPermission = false;
@@ -798,7 +870,7 @@ export class Autopilot {
       this.plannedHazard = null;
       this.plannedLateral = 0;
       this.blockerBypass = false;
-      this.passLine = null;
+      this.clearPass();
     }
     // Pure pursuit aims at a point `lookahead` metres along the road. In a bend the
     // chord to that point cuts the apex, so a preview longer than the corner itself
@@ -1009,7 +1081,7 @@ export class Autopilot {
     if (!offRoad && !recovering && this.plannedHazard === null) {
       this.updatePass(vehicle, config, projection.lateral, speed, gap, leadSpeed, originX, originZ);
     } else if (this.passLine !== null && (offRoad || recovering)) {
-      this.passLine = null;
+      this.clearPass();
     }
     const desiredLine = offRoad
       ? Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M
@@ -1249,15 +1321,46 @@ export class Autopilot {
     // Following uses a physical stopping-energy bound plus time headway. Adding the
     // two vehicle speeds was dimensionally plausible but unsafe: behind a moving
     // leader it allowed far more closing speed than the available road could shed.
-    if (gap < Infinity && !bypassEstablished && !(rayMatchesIndexedHazard && lineClearsHazard)) {
-      const closingRoom = Math.max(0, gap - FOLLOW_STANDOFF_M);
-      const stoppingCap = Math.sqrt(
-        leadSpeed * leadSpeed + 2 * currentBrakeAccel * closingRoom,
+    //
+    // A COMMITTED PASS FOLLOWS THE LANE IT IS USING, NOT THE CAR IT IS PASSING —
+    // BUT ONLY ONCE IT IS IN IT. `gap` is the ordinary lead estimate, and that
+    // estimate deliberately keeps seeing the lane being left, so while alongside the
+    // headway term held the overtaking car at the overtaken car's own speed. It sat
+    // level with a rear wing until PASS_MAX_METRES gave up and it dropped back in.
+    //
+    // Dropping the queue rule the instant a pass is DECIDED is the other mistake:
+    // the lane change costs about 32 m of road, and for all of it the car being
+    // passed is still directly ahead. Released early, the overtaking car spends that
+    // distance accelerating into the bumper it is trying to get round — measured as
+    // rear-end contacts in the dense bench. So the leader keeps its say until the
+    // body has actually reached the other lane, and the passing lane is braked for
+    // throughout.
+    const passing = this.passLine !== null;
+    const passOut = passing && this.passEstablished;
+    const brakeFor = (obstacleGap: number, obstacleSpeed: number): void => {
+      if (!(obstacleGap < Infinity)) return;
+      const closingRoom = Math.max(0, obstacleGap - FOLLOW_STANDOFF_M);
+      targetSpeed = Math.min(
+        targetSpeed,
+        Math.sqrt(obstacleSpeed * obstacleSpeed + 2 * currentBrakeAccel * closingRoom),
       );
-      const headwayGap =
-        FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
-      const followCap = Math.max(0, leadSpeed + (gap - headwayGap) / FOLLOW_RELAX_S);
-      targetSpeed = Math.min(targetSpeed, stoppingCap, followCap);
+    };
+    if (!bypassEstablished && !(rayMatchesIndexedHazard && lineClearsHazard)) {
+      if (!passOut) {
+        brakeFor(gap, leadSpeed);
+        if (gap < Infinity) {
+          const headwayGap =
+            FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
+          const followCap = Math.max(0, leadSpeed + (gap - headwayGap) / FOLLOW_RELAX_S);
+          // Crossing to the other lane is not the moment to be shedding speed to a
+          // headway the manoeuvre is about to make irrelevant: hold the leader's own
+          // pace rather than falling back behind it.
+          targetSpeed = Math.min(targetSpeed, passing ? Math.max(followCap, leadSpeed) : followCap);
+        }
+      }
+      // An oncoming car is what would be in the passing lane, so it is braked for as
+      // if stationary; the abort in `updatePass` owns the decision to leave.
+      if (passing) brakeFor(this.passLaneGapValue, 0);
     }
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (edgeStability) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
@@ -1291,9 +1394,18 @@ export class Autopilot {
         roadForwardZ,
       );
     const opposingDeadlock = this.deadlockPermission;
+    // OFF THE ASPHALT IS WHERE THE THINGS TO GET WEDGED ON LIVE.
+    //
+    // This used to require `!offRoad`, on the reading that a car off the road is
+    // already running one manoeuvre — the drive back to the lane — and does not
+    // need another. But that manoeuvre only steers; it has no idea whether the car
+    // is actually going anywhere. Nose a car into a pole on the verge, engage, and
+    // the road recovery asked for full throttle at a lane it could not reach, for
+    // as long as the engine survived it. Being wedged is a lack of PROGRESS, and
+    // that is just as true on sand as on tarmac.
     const stalled =
       this.passLine === null &&
-      ((!offRoad && unexplainedStaticStall) || opposingDeadlock) &&
+      (unexplainedStaticStall || opposingDeadlock) &&
       speed < CRAWL_SPEED_MPS;
     const movedFromAnchor = Math.hypot(
       this.position.x - this.stallAnchorX,
@@ -1323,6 +1435,7 @@ export class Autopilot {
         originX,
         originZ,
         opposingDeadlock,
+        offRoad,
       );
     }
     if (this.recoveryPhase !== 'none') {
@@ -1467,26 +1580,38 @@ export class Autopilot {
     // the car being passed was 70 m ahead left the controller flapping across the
     // centreline every few metres and the commanded line stuck halfway.
     const triggerGap = Math.max(PASS_TRIGGER_MIN_M, speed * PASS_TRIGGER_SECONDS);
+    // The speed this driver would actually hold on a clear road. Both the decision
+    // to pass and the room it needs are measured against THIS, not the mode's
+    // headline cruise: a traffic car capped at 85 km/h that reasons with frantic's
+    // 130 plans a pass it cannot execute, and then needs far less sight than the
+    // overtake truly takes.
+    const cruise = Math.min(config.cruiseMps, this.speedCapValue);
     if (this.passLine !== null) {
       const abortGap = Math.max(PASS_ABORT_MIN_M, speed * PASS_ABORT_SECONDS);
       // Inspect the lane BEING USED separately. The ordinary lead estimate also
       // includes the lane being left and therefore keeps seeing the car alongside;
       // treating that car as a new blockage makes the pass flap and sideswipe it.
+      // The probe reaches past the abort distance so the speed plan has something to
+      // slow against before the abort itself fires.
+      const passSight = Math.max(abortGap, triggerGap + PASS_CLEAR_M);
       const passLaneGap = this.laneProbe(
         vehicle,
         this.passLine,
-        abortGap,
+        passSight,
         originX,
         originZ,
       );
+      this.passLaneGapValue = passLaneGap;
+      // Out in the lane, rather than on the way to it: half a car's width from the
+      // passing line is where the leader stops being something to queue behind.
+      if (Math.abs(lateral - this.passLine) <= CAR_HALF_WIDTH_M) this.passEstablished = true;
       if (
         passLaneGap < abortGap ||
         this.travelled - this.passStartedAt > PASS_MAX_METRES ||
         this.sinceRecovery - this.passStartedAtS > PASS_MAX_HOLD_S
       ) {
-        this.passLine = null;
-        this.passClearAt = null;
-        this.passRetryAfterS = this.sinceRecovery + PASS_RETRY_DELAY_S;
+        this.clearPass();
+        this.passRetryAfterS = this.sinceRecovery + PASS_RETRY_DELAY_S * config.passNerve;
         return;
       }
       // A lane change costs about 32 m of road; returning before that means the car
@@ -1504,8 +1629,7 @@ export class Autopilot {
         return;
       }
       if (this.travelled - this.passClearAt >= PASS_REAR_CLEAR_M) {
-        this.passLine = null;
-        this.passClearAt = null;
+        this.clearPass();
       }
       return;
     }
@@ -1515,7 +1639,7 @@ export class Autopilot {
     // pass while the chassis is still crossing its own lane is a side-swipe.
     if (Math.abs(lateral - lane) > CAR_HALF_WIDTH_M * 0.5) return;
     if (gap === Infinity || !config.overtakes || !this.passingEnabled) return;
-    const blocking = leadSpeed < config.cruiseMps - PASS_SPEED_MARGIN_MPS;
+    const blocking = leadSpeed < cruise - PASS_SPEED_MARGIN_MPS * config.passNerve;
     if (!blocking) return;
     // A moving overtake needs speed. A genuinely parked car may be passed from rest,
     // but only with real bumper room; a late "parked" classification at road speed is
@@ -1524,7 +1648,7 @@ export class Autopilot {
     const passFromRest = this.leadIsParked && speed < CRAWL_SPEED_MPS;
     const minimumStartGap = passFromRest
       ? MUST_STOP_GAP_M
-      : Math.max(PASS_ABORT_MIN_M, speed * PASS_ABORT_SECONDS);
+      : Math.max(PASS_ABORT_MIN_M, speed * PASS_FOLLOW_SECONDS);
     if (gap < minimumStartGap || gap > triggerGap) return;
     // HOW MUCH ROAD A PASS ACTUALLY NEEDS.
     //
@@ -1541,11 +1665,22 @@ export class Autopilot {
     if (this.leadIsParked) {
       need = gap + PASS_CLEAR_M + speed * PASS_SIGHT_SECONDS;
     } else {
-      const advantage = speed - leadSpeed;
-      if (advantage < PASS_ADVANTAGE_MPS) return;
+      // The advantage that matters is the one the overtake will be DRIVEN at, not
+      // the one the car happens to have while matched to the leader's pace. A
+      // follower settled in a leader's mirrors is closing at zero by definition, so
+      // measuring the instantaneous difference meant a car could only ever decide to
+      // pass during the seconds it was still catching up — and the follow controller
+      // spends those seconds removing exactly that difference.
+      const advantage = cruise - leadSpeed;
+      if (advantage < PASS_ADVANTAGE_MPS * config.passNerve) return;
       const seconds = (gap + PASS_CLEAR_M) / advantage;
-      if (seconds > PASS_MAX_SECONDS) return;
-      need = (speed + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S);
+      if (seconds > PASS_MAX_SECONDS / config.passNerve) return;
+      // The sight a driver INSISTS on is the discretionary part of an overtake: the
+      // oncoming car it is budgeting for is hypothetical, and the abort is what
+      // answers a real one. A hurried driver takes the shorter window; the proven
+      // clear road it still demands is `need`, only less of it.
+      need =
+        (cruise + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S) * config.passNerve;
     }
     // Policy and capability are separate checks: the mode must allow this curvature,
     // and the segmented probe must actually be able to see the required distance.
@@ -1580,6 +1715,18 @@ export class Autopilot {
     this.passStartedAt = this.travelled;
     this.passStartedAtS = this.sinceRecovery;
     this.passClearAt = null;
+    // Committed, but still in its own lane: the car being passed keeps its say over
+    // this driver's speed until the body has actually crossed.
+    this.passEstablished = false;
+    this.passLaneGapValue = Infinity;
+  }
+
+  /** Ends any committed pass and every piece of state that belongs to it. */
+  private clearPass(): void {
+    this.passLine = null;
+    this.passClearAt = null;
+    this.passEstablished = false;
+    this.passLaneGapValue = Infinity;
   }
 
   /** True while every sampled curvature over `distance` stays under `limit`. */
@@ -1696,9 +1843,18 @@ export class Autopilot {
     originX: number,
     originZ: number,
     committedDeadlock: boolean,
+    /** Was the car off the asphalt when it wedged? Changes what ends the pull-out. */
+    wedgedOffRoad: boolean,
   ): void {
+    this.recoveryOffRoad = wedgedOffRoad;
+    // A pole on the verge does not get bored. Giving up after the attempt limit put
+    // the car straight back to full throttle against whatever it was leaning on, so
+    // a wedge off the asphalt retries for as long as it takes, exactly like an
+    // opposing-queue deadlock does.
     const persistentRoadblock =
-      committedDeadlock || (this.trafficRecoveryPolicy && this.plannedHazard !== null);
+      committedDeadlock ||
+      wedgedOffRoad ||
+      (this.trafficRecoveryPolicy && this.plannedHazard !== null);
     const samePlace =
       this.travelled - this.lastRecoveryAt < RECOVERY_RETRY_METRES &&
       this.sinceRecovery < RECOVERY_REARM_S;
@@ -1722,7 +1878,7 @@ export class Autopilot {
     this.sinceRecovery = 0;
     this.stoppedFor = 0;
     this.recoveryCommitted = committedDeadlock;
-    this.passLine = null;
+    this.clearPass();
     // Reversing into the car behind is worse than the obstacle in front, so a blocked
     // tail skips straight to the pull-out and steers out of the problem instead.
     const rearClear =
@@ -1794,7 +1950,15 @@ export class Autopilot {
       out.brake = RECOVERY_REVERSE_BRAKE;
       out.reverse = true;
       out.steer = clamp(this.recoverySide * RECOVERY_STEER, -1, 1);
-      if (this.recoveryTimer <= 0 || Math.abs(lateral) > EDGE_LINE_M + CAR_HALF_WIDTH_M) {
+      // The lateral test is "the reverse has taken the car far enough out to steer
+      // round what blocked it". A car that was ALREADY out there — wedged on a pole
+      // on the verge — satisfies it on the first tick, which ended the reverse
+      // before the clutch had taken up and handed straight back to a pull-out that
+      // drove into the same pole. Out there the timer owns the phase.
+      if (
+        this.recoveryTimer <= 0 ||
+        (!this.recoveryOffRoad && Math.abs(lateral) > EDGE_LINE_M + CAR_HALF_WIDTH_M)
+      ) {
         this.recoveryPhase = 'pullout';
         this.recoveryTimer = RECOVERY_PULLOUT_S;
       }
@@ -1815,12 +1979,20 @@ export class Autopilot {
     // own end condition cannot be the line limit the reverse just crossed — that cut
     // the manoeuvre off on its first tick and left the car sitting on the verge. It
     // ends on time, on something in front, or on genuinely leaving the road.
+    //
+    // A wedge that happened OFF the asphalt is already outside that line, so the
+    // same test would end the manoeuvre before it moved a metre and hand the car
+    // straight back to the throttle that was cooking the engine against a pole.
+    // Out there, only the timer and the nose end it.
     const arrived =
       this.recoveryTimer <= 0 ||
       gap < MUST_STOP_GAP_M ||
-      (!this.recoveryCommitted && Math.abs(lateral) > OFFROAD_RECOVERY_EDGE);
+      (!this.recoveryCommitted &&
+        !this.recoveryOffRoad &&
+        Math.abs(lateral) > OFFROAD_RECOVERY_EDGE);
     if (arrived) {
       this.recoveryPhase = 'none';
+      this.recoveryOffRoad = false;
       this.recoveryTimer = 0;
       this.stoppedFor = 0;
       this.recoveryCommitted = false;

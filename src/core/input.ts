@@ -62,7 +62,7 @@ export interface InputFrame {
   zoomDelta: number;
   /** Toggle precise control: tap, consumed once by the settings owner. */
   togglePreciseSteer: boolean;
-  /** Cycles autopilot: sleeper -> frantic -> off; edge-triggered. */
+  /** Cycles autopilot: sleeper -> hurried -> frantic -> off; edge-triggered. */
   toggleAutopilot: boolean;
   /** Precise control owns a persistent, linear steering-wheel position this frame. */
   preciseSteering: boolean;
@@ -140,7 +140,7 @@ export const BINDABLE_ACTIONS: readonly {
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },
   { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
-  { id: 'autopilot', label: 'Autopilot: sleeper / frantic / off', defaultKeys: ['KeyP'] },
+  { id: 'autopilot', label: 'Autopilot: sleeper / hurried / frantic / off', defaultKeys: ['KeyP'] },
   { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
   { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
   { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
