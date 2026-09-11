@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- Driving down into a deep basin no longer pins the car and then the player to the
+  middle of the road. The fall-out-of-world rescue treated a fixed altitude
+  (-400 m) as "below the world", but the landscape carries ±1430 m of relief, so
+  whole basins sit under that line — 56% of seed 1337's road and 76% of seed 2024's,
+  in continuous stretches over 100 km. The boundary is now measured against the
+  ground at the body's own position, so solid asphalt at any altitude is never a fall.
+- A rescue that does fire places the car along the road's grade instead of level on
+  it: at 14% that is 2.8 cm of bumper inside the asphalt rather than 30 cm, which is
+  the sunk-rear, raised-nose pose the repeating rescue left behind.
 - Overtaking no longer stalls on the centre line: the car being passed is located by a
   probe cast down a fixed lane centre rather than down the driver's own moving line,
   so it can no longer appear to jump into the lane being used to pass it. Measured
