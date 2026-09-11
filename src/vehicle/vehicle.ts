@@ -3840,16 +3840,33 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Places the chassis upright and at rest at a world position. For the
-   * fall-out-of-world rescue only: velocities are cleared so the car does not
-   * arrive carrying the speed of its fall, and the interpolation snapshots are
-   * re-primed so the renderer does not draw a streak from wherever it fell to.
+   * Places the chassis at rest on a world position, pitched to the ground's own
+   * grade. For the fall-out-of-world rescue only: velocities are cleared so the car
+   * does not arrive carrying the speed of its fall, and the interpolation snapshots
+   * are re-primed so the renderer does not draw a streak from wherever it fell to.
+   *
+   * `grade` is rise over run along `heading` (`Road.sampleAt().grade`). A level body
+   * on a slope stands on one axle: at this world's 22% ceiling that is half a metre
+   * of penetration over a wheelbase, which the solver answers by shoving the car
+   * back out of the ground.
    */
-  rescueTo(x: number, y: number, z: number, heading: number): void {
+  rescueTo(x: number, y: number, z: number, heading: number, grade = 0): void {
     // x/z arrive absolute (road.sampleAt); Rapier holds relative positions.
     this.chassisBody.setTranslation({ x: x - this.origin.x, y, z: z - this.origin.z }, true);
+    // Yaw about world up, then pitch about the car's OWN right axis: the product of
+    // the two quaternions, written out because only two components of each are
+    // non-zero. This model's forward is +Z, so its right axis is -X and a nose-up
+    // pitch is a NEGATIVE rotation about local +X — measured, the other sign doubles
+    // the error it is there to remove (57 cm of bumper inside a 14% grade instead of
+    // none).
+    const halfYaw = heading / 2;
+    const halfPitch = -Math.atan(grade) / 2;
+    const cy = Math.cos(halfYaw);
+    const sy = Math.sin(halfYaw);
+    const cp = Math.cos(halfPitch);
+    const sp = Math.sin(halfPitch);
     this.chassisBody.setRotation(
-      { x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) },
+      { x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp },
       true,
     );
     this.chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);

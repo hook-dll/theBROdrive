@@ -251,6 +251,36 @@ export const MAX_SLOPE =
 export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(1, reliefAtTempo));
 
 /**
+ * How far BELOW THE GROUND a body has to be to count as having escaped the world.
+ *
+ * An ABSOLUTE altitude cannot express this. The field's half-range is `MAX_RELIEF`
+ * (+-1430 m), so whole basins — over a hundred kilometres of road at a time on
+ * ordinary seeds — sit below any fixed line drawn for the purpose. A car driving down
+ * into one then satisfies the test on solid asphalt, is "rescued" onto the road, and
+ * satisfies it again on the next step, for good.
+ *
+ * The margin only has to clear how far real ground can sit below this field: the wash
+ * and scoop hollows in `world/terrain.ts`, about five metres between them. Sixty
+ * leaves an order of magnitude and is still a fall nothing survives by accident.
+ */
+export const UNDERWORLD_DROP_M = 60;
+
+/**
+ * Has this position left the world? True for a body far under the ground at its own
+ * x/z, and for any non-finite coordinate — a NaN pose is exactly the collider edge
+ * case the rescue exists for, and it compares false against every threshold.
+ */
+export function hasEscapedWorld(
+  landscape: Landscape,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return true;
+  return y < landscape.heightAt(x, z) - UNDERWORLD_DROP_M;
+}
+
+/**
  * The mountains, which are NOT part of `heightAt` and are the reason the horizon has
  * anything on it.
  *

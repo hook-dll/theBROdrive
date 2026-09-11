@@ -67,6 +67,7 @@ import {
 } from './world/house';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
+import { hasEscapedWorld } from './world/landscape';
 import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -170,11 +171,6 @@ const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
  */
 const DEV_FLIP_RADIUS = 12;
 
-/**
- * The terrain's complete drivable height range is bounded far above this line. A
- * body below it has escaped the world rather than merely driving through a deep dune.
- */
-const UNDERWORLD_Y = -400;
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
 
@@ -730,17 +726,25 @@ async function boot(): Promise<void> {
    * A failed terrain/collider edge case must not strand a session below the playable
    * world. Use the fallen driven car as the anchor when present, put it back on the
    * nearest road centreline, and place the player at the same road point.
+   *
+   * The boundary is `hasEscapedWorld`: how far below the GROUND a body is, never an
+   * absolute altitude. See its comment in world/landscape.ts for what an altitude
+   * costs — a basin floor satisfies it, the rescue puts the car back on that same
+   * floor, and the two chase each other every fixed step.
    */
+  const escaped = (position: { x: number; y: number; z: number }): boolean =>
+    hasEscapedWorld(road.landscape, position.x, position.y, position.z);
+
   const recoverUnderworld = (): void => {
     const drivingId = world.state.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
     const playerPosition = player.absolutePosition;
-    const playerFallen = !Number.isFinite(playerPosition.y) || playerPosition.y < UNDERWORLD_Y;
+    const playerFallen = escaped(playerPosition);
     let carPosition: { x: number; y: number; z: number } | null = null;
     const carFallen = driving
       ? (() => {
           carPosition = driving.absoluteTranslation(originAnchor);
-          return !Number.isFinite(carPosition.y) || carPosition.y < UNDERWORLD_Y;
+          return escaped(carPosition);
         })()
       : false;
     if (!playerFallen && !carFallen) return;
@@ -751,11 +755,15 @@ async function boot(): Promise<void> {
     const projection = road.project(anchorX, anchorZ);
     const roadPoint = road.sampleAt(projection.s);
     if (carFallen && driving) {
+      // ALONG THE ROAD, NOT LEVEL. The centreline's own elevation with a level body
+      // is a car buried to its rear axle on anything but a flat stretch: the grade
+      // here reaches 22%, which over a 4 m wheelbase is half a metre of nose-up.
       driving.rescueTo(
         roadPoint.x,
         roadPoint.y - driving.contactPlaneLocalY,
         roadPoint.z,
         roadPoint.heading,
+        roadPoint.grade,
       );
       driving.pushTransform();
     }
