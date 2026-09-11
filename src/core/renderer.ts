@@ -1249,6 +1249,25 @@ export class Renderer {
   // --- Adaptive resolution ---
 
   /**
+   * The live drawing-buffer scale, where 1 is the tier's full resolution. The
+   * launch settles this under the loading cover, so the first frame the player
+   * sees is already at the resolution the rest of the session will run at.
+   */
+  get resolutionScale(): number {
+    return this.adaptiveResolution.scale;
+  }
+
+  /** Whether this context can time the GPU. Without it the scale never moves. */
+  get measuresGpuTime(): boolean {
+    return this.timerQueryExt !== null;
+  }
+
+  /** Whether the live scale has been measured long enough to stand on its own. */
+  get resolutionSettled(): boolean {
+    return this.adaptiveResolution.verdictReached(performance.now());
+  }
+
+  /**
    * Incorporates completed GPU timer results using this frame's safety policy.
    * With no completed GPU result (including unsupported/disjoint queries), the
    * controller gets a null sample and intentionally retains its current scale.

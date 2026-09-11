@@ -4,6 +4,27 @@
 
 ### Fixed
 
+- The drive no longer starts at a resolution the launch transient chose. Dynamic
+  resolution is measured from GPU time, and the frames straddling the reveal — the
+  last shader variants, the first uploads, the boot GC — are the most expensive of
+  the session, so the controller read them as a machine that could not cope and
+  walked the drawing buffer down step by step. Measured on a cold profile at
+  1384x805: the first entry into the world ran at 761x442, the second at 1176x684,
+  identical world and settings. At 55% the film grain is filtered away by the
+  upscale, the ink outlines smear into a general darkening and the asphalt loses its
+  aggregate, which is why the first launch looked unfinished and a second one looked
+  right. The launch now renders the real frame path under the loading cover,
+  discards the transient, and lifts the cover only once the controller has actually
+  measured the resolution it is holding — verified as an unchanged drawing buffer
+  over the 30 s after the reveal, on the same machine that used to drift through
+  four resolutions in that time.
+- A resolution drop is no longer permanent. Coming back up needed 240 CONSECUTIVE
+  samples under the fast threshold, and any single sample in the band between the
+  two thresholds reset the count — and that band is where a healthy frame on an
+  integrated GPU actually lives, so nothing ever climbed out. Both directions now
+  read a running average of GPU cost, which a brief stall cannot fake: one second of
+  40 ms frames costs at most one step and is repaid, and thirty seconds of real
+  headroom restores full resolution.
 - Driving down into a deep basin no longer pins the car and then the player to the
   middle of the road. The fall-out-of-world rescue treated a fixed altitude
   (-400 m) as "below the world", but the landscape carries ±1430 m of relief, so
