@@ -4,7 +4,7 @@ import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
 import { SURFACES, SurfaceType } from './core/surfaces';
-import { Renderer } from './core/renderer';
+import { presentationFpsFor, prefersMobilePresentation, Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
@@ -211,6 +211,7 @@ async function boot(): Promise<void> {
   ) {
     throw new Error('index.html is missing #game, #ui or #launch-loading');
   }
+  const mobilePresentation = prefersMobilePresentation();
 
   const saves = new IndexedDbSaves();
   const menu = new MainMenu(uiRoot, loading);
@@ -226,7 +227,21 @@ async function boot(): Promise<void> {
   // they only take a tier at construction. See game/settings.ts.
   {
     const stored = loadStoredSettings();
-    if (stored) world.apply({ t: 'settings', settings: stored });
+    if (stored) {
+      world.apply({ t: 'settings', settings: stored });
+    } else if (mobilePresentation) {
+      // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
+      // Once the player changes a display setting, the stored machine preference wins.
+      world.apply({
+        t: 'settings',
+        settings: {
+          ...world.state.settings,
+          graphicsQuality: 'acceptable',
+          viewDistance: 'near',
+          msaa: false,
+        },
+      });
+    }
   }
 
   // The spine (checkpoints + coarse index) is what makes a long road affordable: it
@@ -264,6 +279,7 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
     world.state.settings.msaa,
     world.state.settings.inkStrength,
+    mobilePresentation,
   );
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
@@ -1757,7 +1773,9 @@ async function boot(): Promise<void> {
   };
 
   const loop = new GameLoop({ fixedUpdate, render });
-  loop.setRenderFps(world.state.settings.graphicsQuality === 'acceptable' ? 30 : null);
+  loop.setRenderFps(
+    presentationFpsFor(world.state.settings.graphicsQuality, mobilePresentation),
+  );
 
   /**
    * The dev spawn tool behind `PauseHooks.spawnVehicle`. Defined unconditionally so
@@ -1997,7 +2015,9 @@ async function boot(): Promise<void> {
       // budget only on the next load.
       renderer.setQuality(world.state.settings.graphicsQuality);
       sky.setQuality(world.state.settings.graphicsQuality);
-      loop.setRenderFps(world.state.settings.graphicsQuality === 'acceptable' ? 30 : null);
+      loop.setRenderFps(
+        presentationFpsFor(world.state.settings.graphicsQuality, mobilePresentation),
+      );
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.2 — 2026-09-11
+
+### Changed
+
+- Phone-sized touch devices now start on Acceptable/near/MSAA-off unless that browser
+  already has an explicit graphics preference.
+- Mobile rendering uses absolute 540p/720p/900p pixel ceilings for
+  Acceptable/Standard/Blessing and never renders duplicate frames above 60 FPS.
+
+### Fixed
+
+- High-DPR 90/120 Hz phones no longer multiply the scene, post-process, and MSAA fill
+  cost from desktop-oriented pixel ratios and uncapped presentation.
+
 ## 0.14.1 — 2026-09-11
 
 ### Fixed

@@ -901,7 +901,7 @@ export class MainMenu {
               {
                 label: 'Acceptable',
                 icon: 'gfx1',
-                hint: 'Up to 1600×900, adaptive to about 1280×720 at 30 FPS. For integrated GPUs.',
+                hint: 'Recommended for phones: mobile pixel budget, 30 FPS, no shadows or shimmer.',
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
@@ -912,7 +912,7 @@ export class MainMenu {
               {
                 label: 'Standard',
                 icon: 'gfx2',
-                hint: 'Native resolution with adaptive protection for frame rate.',
+                hint: 'Native desktop quality; phones cap the target at 1280×720 and 60 FPS.',
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
@@ -922,7 +922,7 @@ export class MainMenu {
               {
                 label: 'Blessing',
                 icon: 'gfx3',
-                hint: 'Locks up to 2x native resolution per axis. No adaptive downscaling.',
+                hint: 'Supersampled desktop image; phones cap the target at 1600×900 and 60 FPS.',
                 active: () => settings.graphicsQuality === 'blessing',
                 pick: () => {
                   settings.graphicsQuality = 'blessing';
