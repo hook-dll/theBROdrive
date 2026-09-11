@@ -14,15 +14,17 @@ import { BINDABLE_ACTIONS } from '../core/input';
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
- * Rendering tier. Acceptable uses an absolute 900p-to-720p pixel budget and a
- * 30 FPS presentation target for weak integrated GPUs; simulation remains 60 Hz.
- * Standard stays at native resolution, while Blessing supersamples. Shadow and
- * local-light budgets follow the same low/standard/high ordering. MSAA remains an
- * independent option after a preset is selected.
+ * Rendering tier. Acceptable uses an absolute 900p-to-720p desktop pixel budget and
+ * a 30 FPS presentation target; simulation remains 60 Hz. Standard stays at native
+ * desktop resolution, while Blessing supersamples. On phone-sized touch devices the
+ * same tiers retain their shaders and geometry but cap at 540p, 720p and 900p
+ * respectively; Standard and Blessing also stop at 60 FPS on high-refresh displays.
+ * Shadow and local-light budgets follow the same low/standard/high ordering. MSAA
+ * remains an independent option after a preset is selected.
  *
- *  - `acceptable`: up to 1600x900, adaptive no lower than ~1280x720.
- *  - `standard`: the authored look at native resolution.
- *  - `blessing`: 1.25x native resolution per axis.
+ *  - `acceptable`: desktop up to 1600x900; phones up to 960x540 at 30 FPS.
+ *  - `standard`: authored desktop look; phones up to 1280x720 at 60 FPS.
+ *  - `blessing`: 1.25x desktop supersampling; phones up to 1600x900 at 60 FPS.
  */
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 

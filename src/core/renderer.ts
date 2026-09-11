@@ -72,6 +72,21 @@ export const CAMERA_BASE_FOV = 65;
  */
 const ACCEPTABLE_MAX_PIXELS = 1600 * 900;
 const ACCEPTABLE_MIN_PIXELS = 1280 * 720;
+/**
+ * Phone screens make raw DPR a poor quality target: their small pixels invite the
+ * browser to render several million scene pixels before MSAA and the post pass. Keep
+ * the same tier ordering, shaders and geometry under an absolute portable budget.
+ */
+const MOBILE_MAX_PIXELS: Record<GraphicsQuality, number> = {
+  acceptable: 960 * 540,
+  standard: 1280 * 720,
+  blessing: 1600 * 900,
+};
+const MOBILE_MIN_PIXELS: Record<GraphicsQuality, number> = {
+  acceptable: 640 * 360,
+  standard: 960 * 540,
+  blessing: 1280 * 720,
+};
 const PIXEL_RATIO_SCALE: Record<GraphicsQuality, number> = {
   acceptable: 1,
   standard: 1,
@@ -89,6 +104,24 @@ const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
  * graphics tiers control resolution and shadows.
  */
 const MSAA_SAMPLES = 4;
+
+/** Touch plus a coarse pointer or phone-sized screen avoids classifying touch laptops. */
+export function prefersMobilePresentation(): boolean {
+  if (navigator.maxTouchPoints <= 0) return false;
+  const coarse = typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
+  const phoneSized = Math.min(window.screen.width, window.screen.height) <= 600;
+  return coarse || phoneSized;
+}
+
+/** Never spend a phone's 90/120 Hz refresh budget on duplicate 60 Hz simulation states. */
+export function presentationFpsFor(
+  quality: GraphicsQuality,
+  mobilePresentation = prefersMobilePresentation(),
+): number | null {
+  if (quality === 'acceptable') return 30;
+  return mobilePresentation ? 60 : null;
+}
 // ---------------------------------------------------------------------------
 // Heat haze: refraction through the hot layer over the sand, as a post pass.
 //
@@ -783,6 +816,7 @@ export class Renderer {
     quality: GraphicsQuality = 'standard',
     msaa = true,
     inkStrength = DEFAULT_INK_STRENGTH,
+    private readonly mobilePresentation = prefersMobilePresentation(),
   ) {
     this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
@@ -961,24 +995,27 @@ export class Renderer {
 
   private pixelRatioFor(quality: GraphicsQuality): number {
     const dpr = window.devicePixelRatio;
-    if (quality === 'acceptable') {
-      const canvas = this.renderer.domElement;
-      const cssPixels = Math.max(1, canvas.clientWidth * canvas.clientHeight);
-      return Math.min(dpr, Math.sqrt(ACCEPTABLE_MAX_PIXELS / cssPixels));
-    }
-    return Math.min(
-      dpr * PIXEL_RATIO_SCALE[quality],
-      MAX_PIXEL_RATIO[quality],
-    );
+    const canvas = this.renderer.domElement;
+    const cssPixels = Math.max(1, canvas.clientWidth * canvas.clientHeight);
+    const desired = quality === 'acceptable'
+      ? Math.min(dpr, Math.sqrt(ACCEPTABLE_MAX_PIXELS / cssPixels))
+      : Math.min(dpr * PIXEL_RATIO_SCALE[quality], MAX_PIXEL_RATIO[quality]);
+    if (!this.mobilePresentation) return desired;
+    return Math.min(desired, Math.sqrt(MOBILE_MAX_PIXELS[quality] / cssPixels));
   }
 
   private updateAdaptiveFloor(): void {
-    if (this.quality !== 'acceptable') return;
+    const minimumPixels = this.mobilePresentation
+      ? MOBILE_MIN_PIXELS[this.quality]
+      : this.quality === 'acceptable'
+        ? ACCEPTABLE_MIN_PIXELS
+        : null;
+    if (minimumPixels === null) return;
     const canvas = this.renderer.domElement;
     const basePixels =
       canvas.clientWidth * canvas.clientHeight * this.basePixelRatio * this.basePixelRatio;
     this.adaptiveResolution.setMinimumScale(
-      Math.min(1, Math.sqrt(ACCEPTABLE_MIN_PIXELS / Math.max(1, basePixels))),
+      Math.min(1, Math.sqrt(minimumPixels / Math.max(1, basePixels))),
     );
   }
 
