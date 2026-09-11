@@ -26,6 +26,8 @@ const CORRIDOR_MAX_HORIZON_M = 220;
 const ONCOMING_LANE_COST = 16;
 /** Speed an unseen car coming the other way is assumed to be doing. */
 const ONCOMING_ASSUMED_MPS = 20;
+/** Opposing lane must be clear this far BEHIND before crossing into it. */
+const ONCOMING_REAR_GAP_M = 20;
 /** Clearance below which something alongside is squeezed past at walking pace. */
 const CORRIDOR_SQUEEZE_M = 0.6;
 
@@ -529,6 +531,9 @@ const RECOVERY_REVERSE_S = 1.8;
 const RECOVERY_PULLOUT_S = 2.4;
 const RECOVERY_STEER = 0.85;
 const RECOVERY_REVERSE_BRAKE = 0.72;
+/** Room a yielding car keeps behind itself, and how fast it gives ground back. */
+const YIELD_REVERSE_ROOM_M = 6;
+const YIELD_REVERSE_MPS = 1.6;
 const RECOVERY_CRAWL_MPS = 4.5;
 const RECOVERY_BIAS_METRES = 50;
 const RECOVERY_REAR_CLEAR_M = 5;
@@ -612,8 +617,12 @@ export class Autopilot {
   private corridorBlockDistance = Infinity;
   private corridorBlockSpeed = 0;
   private corridorSqueezeDistance = Infinity;
+  private corridorLaneBlockDistance = Infinity;
+  private corridorLaneBlockSpeed = 0;
   private planUsesOncomingLane = false;
   private planUsesShoulder = false;
+  /** Asked by the traffic coordinator to give the car in front room to reverse. */
+  private yieldReverse = false;
   private bodyScanGap = Infinity;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
   private appliedLateral = 0;
@@ -749,6 +758,25 @@ export class Autopilot {
   setDeadlockPermission(enabled: boolean): void {
     this.deadlockPermission = enabled;
   }
+  /**
+   * MAKING ROOM FOR THE CAR IN FRONT TO BACK UP.
+   *
+   * A car that has to reverse out of something — a rock across its lane, a wedge —
+   * cannot, because the queue behind it is against its bumper. Seen in play: the
+   * head of a queue at a rock shuffling backwards into the car behind it while the
+   * whole line, the player included, waited for good.
+   *
+   * So the coordinator tells the cars behind to give the room back, and they pass
+   * the request down the line. Each one only ever reverses while its OWN rear is
+   * clear, so the chain unwinds from the back and nobody is pushed.
+   */
+  setYieldReverse(enabled: boolean): void {
+    this.yieldReverse = enabled;
+  }
+  /** True while this driver is backing out of something and needs the room behind. */
+  get needsReverseRoom(): boolean {
+    return this.recoveryPhase === 'reverse' || this.yieldReverse;
+  }
   setPassingEnabled(enabled: boolean): void {
     this.passingEnabled = enabled;
   }
@@ -812,6 +840,7 @@ export class Autopilot {
     this.recoveryAttempts = 0;
     this.recoveryCommitted = false;
     this.deadlockPermission = false;
+    this.yieldReverse = false;
     this.dynamicBlockerKnown = false;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
@@ -1045,12 +1074,22 @@ export class Autopilot {
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
     // The rays report a distance, not a lateral: the lane probe was cast down the
     // commanded line and the body scan down the car's own, so the thing it found is
-    // in one of those two. Take the line that actually produced the nearest answer.
+    // in one of those two. But it MUST NOT be recorded as sitting on our commanded
+    // line, because that line moves: as it slid toward the opposing lane, the car
+    // ahead slid with it, the opposing corridor read as blocked, the lane read as
+    // clear, and the planner flipped back — every step, for as long as the car sat
+    // behind it. Seen in play as an indicator buzzing while the overtake never
+    // happened. Traffic keeps to lane centres, so the estimate is snapped to
+    // whichever lane the probe that found it was looking down.
     if (gap < Infinity) {
-      const leadLateral =
+      const probeLine =
         bodyLaneGap <= laneGap && bodyLaneGap <= this.bodyScanGap
           ? projection.lateral
           : this.appliedLateral;
+      const leadLateral =
+        Math.abs(probeLine - config.laneOffset) <= Math.abs(probeLine + config.laneOffset)
+          ? config.laneOffset
+          : -config.laneOffset;
       obstacles.push({
         s: gap,
         lateral: leadLateral,
@@ -1069,7 +1108,17 @@ export class Autopilot {
       desiredSpeed: Math.min(config.cruiseMps, this.speedCapValue),
       halfWidth: CAR_HALF_WIDTH_M,
       horizon,
-      lineRatePerMetre: LINE_SHIFT_PER_METRE,
+      // The commanded line moves per METRE of road, except near a standstill, where
+      // it slews on time instead (see `LINE_SLEW_AT_REST_MPS` below) — a stationary
+      // driver turns the wheel before moving off. The planner has to know that, or
+      // a stopped car computes that reaching the shoulder costs thirty metres it
+      // cannot cover, calls every corridor blocked, and waits for good. Seen in
+      // play: a queue stopped at a rock with nobody going round it, the player's
+      // car at the back of it, indefinitely.
+      lineRatePerMetre:
+        speed < CRAWL_SPEED_MPS
+          ? LINE_SLEW_AT_REST_MPS / Math.max(speed, 0.4)
+          : LINE_SHIFT_PER_METRE,
       asphaltLimit: ROAD_HALF_WIDTH,
       edgeLimit: STATIC_AVOID_LINE_M,
       // The mode's whole appetite for the opposing lane, in one number. A driver
@@ -1082,12 +1131,19 @@ export class Autopilot {
         this.laneProbe(vehicle, oncomingLine, horizon, originX, originZ),
       ),
       oncomingSpeed: ONCOMING_ASSUMED_MPS,
+      // Nothing already coming up the opposing lane behind us: the search only ever
+      // looks forward, so this is the one rearward fact it needs.
+      crossingRearClear:
+        this.laneProbe(vehicle, oncomingLine, ONCOMING_REAR_GAP_M, originX, originZ, -1) >=
+        ONCOMING_REAR_GAP_M,
       stopRoom: MUST_STOP_GAP_M + (speed * speed) / (2 * currentBrakeAccel),
       obstacles,
     });
     this.corridorFeasible = plan.feasible || offRoad || recovering;
     this.corridorBlockDistance = plan.blockDistance;
     this.corridorBlockSpeed = plan.blockSpeed;
+    this.corridorLaneBlockDistance = plan.laneBlockDistance;
+    this.corridorLaneBlockSpeed = plan.laneBlockSpeed;
     // Telemetry reads "pass" from where the CAR is, not from where the line points:
     // the planner re-decides every step, so a line that dips across the centre for
     // a moment is not an overtake, and counting those turned a bench's pass counter
@@ -1323,6 +1379,40 @@ export class Autopilot {
         );
       }
     }
+    // A LANE CHANGE TAKES THIRTY METRES, AND THE CAR AHEAD IS STILL AHEAD FOR ALL
+    // OF THEM. Once the chosen corridor is the opposing lane, the car being passed
+    // is no longer in it and stops being braked for — correct once the body is out
+    // there, and a rear-end while still crossing: measured as twelve contacts in
+    // the dense bench the moment overtakes started working. So while the body is
+    // still in its own lane, whatever is in THAT lane keeps its headway.
+    if (
+      this.corridorLaneBlockDistance < Infinity &&
+      // Moving only: a STATIC prop in the lane is what the corridor is going round,
+      // and keeping a headway behind it is a crawl that never ends.
+      this.corridorLaneBlockSpeed > CRAWL_SPEED_MPS &&
+      // A body at the centreline still overlaps the lane it is leaving, so the
+      // headway holds until the car is genuinely out of it — a whole body width,
+      // not half. Released at half, the crossing car rear-ended the leader it was
+      // committed to overtaking: eight contacts in the dense bench, every one of
+      // them logged at a lateral of about zero.
+      Math.abs(projection.lateral - config.laneOffset) < CAR_HALF_WIDTH_M * 2
+    ) {
+      const laneSpeed = Math.max(0, this.corridorLaneBlockSpeed);
+      const headwayGap =
+        FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
+      targetSpeed = Math.min(
+        targetSpeed,
+        Math.sqrt(
+          laneSpeed * laneSpeed +
+            2 * currentBrakeAccel * Math.max(0, this.corridorLaneBlockDistance - FOLLOW_STANDOFF_M),
+        ),
+        // Never below the leader's own pace: dropping back is not how a pass starts.
+        Math.max(
+          laneSpeed,
+          laneSpeed + (this.corridorLaneBlockDistance - headwayGap) / FOLLOW_RELAX_S,
+        ),
+      );
+    }
     // Easing past something close alongside is done at walking pace even when the
     // corridor clears it: the clearance is centimetres of hysteresis, not a lane.
     if (this.corridorSqueezeDistance < Infinity) {
@@ -1343,6 +1433,22 @@ export class Autopilot {
     // that hides the driver's intent from it.
     const wantedSpeed = targetSpeed;
     if (mustStop) targetSpeed = 0;
+
+    // Asked to give the car in front room to back out: roll back gently, and only
+    // while this car's own rear is clear, so the chain unwinds from the end of the
+    // queue rather than shoving whoever is last.
+    if (this.yieldReverse && this.recoveryPhase === 'none') {
+      const rearClear =
+        this.axisScan(vehicle, originX, originZ, -1, YIELD_REVERSE_ROOM_M + 2) >
+        YIELD_REVERSE_ROOM_M;
+      out.throttle = 0;
+      out.handbrake = false;
+      out.reverse = rearClear && forwardSpeed > -YIELD_REVERSE_MPS;
+      out.brake = out.reverse ? RECOVERY_REVERSE_BRAKE * 0.6 : 0.4;
+      out.steer = 0;
+      this.activityValue = 'recover';
+      return;
+    }
 
     // BEING STUCK IS "NO WAY THROUGH", AND THAT IS NOW ONE QUESTION.
     //

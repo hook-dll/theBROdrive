@@ -36,6 +36,7 @@ function request(overrides: Partial<CorridorRequest> = {}): CorridorRequest {
     oncomingGap: Number.POSITIVE_INFINITY,
     oncomingSpeed: 20,
     stopRoom: 45,
+    crossingRearClear: true,
     obstacles: [],
     ...overrides,
   };
