@@ -140,6 +140,14 @@ function overlaps(
  * distance is covered the car occupies EVERY lateral between the two. Asking
  * only about the destination is what let a planner commit to a line whose path
  * went straight through the thing it was avoiding.
+ *
+ * BUT THE ROAD THAT MATTERS IS CLOSING DISTANCE, NOT OUR OWN TRAVEL. A lane
+ * change costs about 32 m of travel, and measured against a car 30 m ahead that
+ * looked like a certain collision — so a driver tucked in behind a slower car
+ * could never choose the other lane, sat on its tail and followed it forever,
+ * which is exactly what it did. The car ahead is MOVING: by the time the line has
+ * crossed, it has gone its own way, and only the difference in speeds is spent.
+ * At 20 m/s behind a car doing 16, that 32 m of travel is 6 m of closure.
  */
 function sweptOverlap(
   obstacle: CorridorObstacle,
@@ -147,8 +155,11 @@ function sweptOverlap(
   to: number,
   halfWidth: number,
   transitionDistance: number,
+  speed: number,
 ): boolean {
-  if (obstacle.s <= transitionDistance) {
+  const closingShare =
+    speed > 0.1 ? Math.min(1, Math.max(0, (speed - obstacle.speed) / speed)) : 1;
+  if (obstacle.s <= transitionDistance * closingShare) {
     const low = Math.min(from, to);
     const high = Math.max(from, to);
     return obstacle.lateral + obstacle.halfWidth > low - halfWidth &&
@@ -214,7 +225,9 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     let hardBlockDistance = Number.POSITIVE_INFINITY;
     for (const obstacle of obstacles) {
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
-      if (!sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance)) continue;
+      if (!sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance, speed)) {
+        continue;
+      }
       if (obstacle.s < blockDistance) {
         blockDistance = obstacle.s;
         blockSpeed = obstacle.speed;
