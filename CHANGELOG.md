@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.14.3 — 2026-09-11
+
+### Fixed
+
+- The launch cover now waits for the shader variants the live frame actually uses:
+  the scene pass is compiled with the offscreen haze target bound, so its
+  tone-mapping/colour-space program is the one that was warmed.
+- Launch also waits on a GPU fence after the final covered draw, so first-run texture
+  uploads, shadow maps, the environment bake and the fullscreen pass are finished
+  before the player sees anything.
+- The lunar texture is awaited during loading instead of popping in after the drive
+  has started.
+
 ## 0.14.2 — 2026-09-11
 
 ### Changed

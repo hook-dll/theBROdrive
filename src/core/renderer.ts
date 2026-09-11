@@ -954,17 +954,62 @@ export class Renderer {
   }
 
   /**
-   * Waits until both halves of the current frame have finished compiling.
+   * Waits until both program variants used by the live two-pass frame are ready.
    *
-   * Call this after one covered warm-up render: that render establishes the live
-   * sky/environment material variants, while compileAsync waits for drivers using
-   * KHR_parallel_shader_compile instead of exposing an incomplete first frame.
+   * The scene pass renders into `hazeTarget`, where Three disables renderer tone
+   * mapping and uses the working colour space. Compiling it with the default target
+   * instead builds a different canvas-output program; on a cold driver cache that
+   * left the real scene programs compiling after the loading cover disappeared.
    */
   async waitForFrameShaders(): Promise<void> {
-    await Promise.all([
-      this.renderer.compileAsync(this.scene, this.camera),
-      this.renderer.compileAsync(this.hazeScene, this.hazeCamera),
-    ]);
+    const previousTarget = this.renderer.getRenderTarget();
+    try {
+      this.renderer.setRenderTarget(this.hazeTarget);
+      const sceneReady = this.renderer.compileAsync(this.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+      const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
+      await Promise.all([sceneReady, postReady]);
+    } finally {
+      this.renderer.setRenderTarget(previousTarget);
+    }
+  }
+
+  /**
+   * Waits until the GPU has completed every command submitted before this call.
+   *
+   * Shader linking alone does not cover the first texture uploads, shadow maps,
+   * PMREM bake, render-target resolve, or fullscreen pass. A fence after the final
+   * covered draw makes all of those part of the launch barrier as well.
+   */
+  async waitForSubmittedFrame(): Promise<void> {
+    const context = this.renderer.getContext();
+    if (
+      typeof WebGL2RenderingContext === 'undefined'
+      || !(context instanceof WebGL2RenderingContext)
+    ) {
+      context.finish();
+      return;
+    }
+
+    const fence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (fence === null) throw new Error('could not create the launch GPU fence');
+    context.flush();
+    await new Promise<void>((resolve, reject) => {
+      const poll = (): void => {
+        const status = context.clientWaitSync(fence, 0, 0);
+        if (status === context.TIMEOUT_EXPIRED) {
+          setTimeout(poll, 8);
+          return;
+        }
+        context.deleteSync(fence);
+        if (status === context.WAIT_FAILED) {
+          reject(new Error('the launch GPU fence failed'));
+        } else {
+          resolve();
+        }
+      };
+      setTimeout(poll, 0);
+    });
   }
 
 

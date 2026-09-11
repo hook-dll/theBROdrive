@@ -360,6 +360,7 @@ export async function bootMirageLab(): Promise<void> {
     loadCarModel(DEFAULT_CAR_MODEL_ID),
   ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  await sky.waitForAssets();
   const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin);
   const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin);
   const landscape = makeLandscape(road, terrain);

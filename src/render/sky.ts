@@ -632,6 +632,8 @@ export class Sky {
   /** Solar System Scope lunar map, CC BY 4.0; attribution is in LICENSE. */
   private readonly moonTexture: THREE.Texture;
   private readonly astronomy = new AstronomySystem();
+  /** Network/decode completion for the only external texture owned by the sky. */
+  private readonly moonReady: Promise<void>;
   private exposure = 1;
 
   // --- Environment probe: what makes metal read as metal (see refreshEnvironment) ---
@@ -700,7 +702,11 @@ export class Sky {
     webgl: THREE.WebGLRenderer,
     starField: StarField,
   ) {
-    this.moonTexture = new THREE.TextureLoader().load('/data/moon.jpg');
+    this.moonTexture = new THREE.Texture();
+    this.moonReady = new THREE.ImageLoader().loadAsync('/data/moon.jpg').then((image) => {
+      this.moonTexture.image = image;
+      this.moonTexture.needsUpdate = true;
+    });
     // Raw sampling: the map is a display-referred photograph of the Moon, and its
     // sRGB numbers used directly as reflectance land close to the contrast the eye
     // reports. The true linear albedo map is a far harsher 4:1 maria-to-highland
@@ -801,6 +807,11 @@ export class Sky {
     scene.add(this.hemiLight);
 
     scene.add(this.root);
+  }
+
+  /** Prevents the launch cover from leaving while the lunar texture is still decoding. */
+  async waitForAssets(): Promise<void> {
+    await this.moonReady;
   }
 
 
