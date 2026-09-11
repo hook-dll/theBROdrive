@@ -108,16 +108,20 @@ interface ModeConfig {
 /**
  * TWO DRIVERS, NOT ONE WITH A SPEED KNOB.
  *
- * `sleeper` is the character asleep at the wheel of his own life: 70 km/h, its own
+ * `sleeper` is the character asleep at the wheel of his own life: 80 km/h, its own
  * lane, a cornering budget under half of what the tyres have, gentle pedals, and it
  * only leaves its lane for something that is not going to move. It arrives late and
- * it arrives.
+ * it arrives. 70 km/h was its old figure and it was an unhurried driver's speed on
+ * a good road, not on this one: the surface factor took another third off it and the
+ * soft pedal band another 10%, so what the player actually watched was 40 km/h.
  *
  * `frantic` is the same car driven by somebody who is out of time: 130 km/h, twice
  * the cornering budget, pedals used as switches, and it will take the oncoming lane
  * to get past traffic when it can see far enough to do it. Its corner entries are
  * deliberately less exact — half the chord correction — so it clips lines rather
- * than tracing them.
+ * than tracing them. Its number is left alone because the CAR runs out first: a
+ * catalogue saloon measures 108 km/h flat out on this road's asphalt and 55 on its
+ * gravel, so asking for more would only make its corner entries worse.
  *
  * Both hold the RIGHT-HAND LANE. That is the change with the widest reach: a car on
  * the centreline meets oncoming traffic head-on and has nowhere to put a swerve,
@@ -126,7 +130,7 @@ interface ModeConfig {
  */
 const MODES: Record<AutopilotMode, ModeConfig> = {
   sleeper: {
-    cruiseMps: 70 / 3.6,
+    cruiseMps: 80 / 3.6,
     lateralAccel: 3.2,
     brakeAccel: 4.0,
     lookaheadBase: 11,
@@ -147,7 +151,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     passNerve: 1,
   },
   /**
-   * The driver with somewhere to be and a licence to keep. 95 km/h, a cornering
+   * The driver with somewhere to be and a licence to keep. 105 km/h, a cornering
    * budget two thirds of the tyres', pedals used deliberately rather than as
    * switches — and it overtakes, but only into a window it would take itself. It is
    * what ambient traffic's hurried drivers use, and the middle setting of the
@@ -155,7 +159,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
    * small gap.
    */
   hurried: {
-    cruiseMps: 95 / 3.6,
+    cruiseMps: 105 / 3.6,
     lateralAccel: 4.7,
     brakeAccel: 5.4,
     lookaheadBase: 10,
@@ -229,13 +233,43 @@ const GRAVITY = 9.81;
  * Straight-line pace by surface. Personality still sets the absolute speed: the
  * factors describe how much of it the road can support before bumps and loose grip
  * dominate. Decay and drifted sand reduce these further at the sampled location.
+ *
+ * These are COMFORT factors and nothing else. Every limit that grip actually
+ * decides is computed from the real per-surface physics a few lines below — the
+ * corner speed from `lateralAccel` against the sampled curvature, the approach from
+ * `vehicle.estimatedBrakeDecel(surface)`, both reserved again by
+ * LATERAL_GRIP_RESERVE and BRAKE_GRIP_RESERVE. So a factor low enough to be a grip
+ * model is charging the car twice, and gravel's 0.45 was exactly that: measured on
+ * seed 1337, 46% of this road is graded gravel and 50% is cracked asphalt, with 4%
+ * of clean surface in total, so 0.45 was not an occasional loose district but the
+ * pace of half the drive. It held an ordinary traffic car — 58-70 km/h of its own
+ * — to a 26-31 km/h target and, through the pedal law, an actual 20-24 km/h. That
+ * is a tractor on a highway, and it is why an overtake had no differential worth
+ * the name: both cars were pinned to the same fraction of the same low number.
+ *
+ * The figures now describe a GRADED surface, which is what a road district is: a
+ * gravel highway is driven briskly and the ride tells you it is gravel. A rutted
+ * track is what the desert is for, and that is `Sand`.
+ *
+ * Gravel stops at 0.50 rather than going higher because that is where the CONTROLLER
+ * runs out, not where the comfort argument does. At 0.72 a frantic driver reached
+ * the bend at 12500 m (seed 42) doing 70 km/h, stood on the brake inside it — its
+ * brake ceiling is 1.0, it uses pedals as switches — lost the front on the loose
+ * surface and ran 1.2 m past the asphalt before recovering. 0.58 still left it
+ * 0.7 m out; 0.50 keeps the whole body on the road with 0.2 m to spare. Modulating
+ * the brake against real per-surface grip would buy the rest, and is the honest way
+ * to go faster here; until then this is the bound.
+ *
+ * It is the traffic caps in world/traffic.ts that carry the pace of the stream, and
+ * they are where the player's complaint actually lives. This factor only has to stop
+ * being a second grip model.
  */
 const SURFACE_SPEED_FACTOR: Readonly<Record<SurfaceType, number>> = {
   [SurfaceType.Asphalt]: 1,
-  [SurfaceType.CrackedAsphalt]: 0.84,
-  [SurfaceType.Gravel]: 0.45,
+  [SurfaceType.CrackedAsphalt]: 0.92,
+  [SurfaceType.Gravel]: 0.5,
   [SurfaceType.Sand]: 0.2,
-  [SurfaceType.Rock]: 0.32,
+  [SurfaceType.Rock]: 0.45,
   [SurfaceType.Concrete]: 0.96,
 };
 const DECAY_SPEED_LOSS = 0.14;

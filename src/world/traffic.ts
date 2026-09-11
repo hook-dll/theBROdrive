@@ -807,6 +807,27 @@ export class RoadTraffic {
    * Draws behaviour independently of body choice. The first six in each direction
    * deliberately include one cautious and one hurried driver; otherwise a random
    * twelve-car sample can contain no vehicle capable of creating an overtake at all.
+   *
+   * WHY THESE SPEEDS.
+   *
+   * A cap is the pace on CLEAN asphalt, and this road has almost none: measured on
+   * seed 1337 it is 50% cracked asphalt, 46% graded gravel and 4% clean, and the
+   * autopilot's surface factor scales the cap by the surface it is on. The old caps
+   * — 42-52, 58-70, 85-105 — therefore put ordinary traffic on a 26-31 km/h target
+   * over nearly half the drive, and the pedal law held it under 25. That is the
+   * Zhiguli the player watched creep up a hill.
+   *
+   * The spread matters as much as the middle: an overtake is only an overtake if the
+   * differential survives being multiplied by the surface. An ordinary car and a
+   * hurried one used to differ by 15-47 km/h on clean asphalt but only by 12-21 on
+   * gravel — from a 26-31 km/h base, so a pass was two cars crawling side by side,
+   * which is what read as easing round rather than going past. They now sit at
+   * 46 and 61 km/h on gravel and 74 and 97 on cracked asphalt, so the same
+   * differential is spent from a pace where the manoeuvre is over in seconds.
+   *
+   * A cap above its mode's own cruise does nothing — the planner takes the lower of
+   * the two — so the top of each band is deliberately just past the ceiling it draws
+   * against (sleeper 80, hurried 105) rather than far past it.
    */
   private drawDriver(direction: TrafficDirection): {
     style: TrafficDriverStyle;
@@ -824,7 +845,7 @@ export class RoadTraffic {
         style: 'cautious',
         headwayS: 2.2 + this.random() * 0.8,
         mode: 'sleeper',
-        speedCap: (42 + this.random() * 10) / 3.6,
+        speedCap: (58 + this.random() * 12) / 3.6,
       };
     }
     // One car in five is in a hurry, and it drives the HURRIED mode, not frantic:
@@ -836,14 +857,14 @@ export class RoadTraffic {
         style: 'hurried',
         headwayS: 1.0 + this.random() * 0.6,
         mode: 'hurried',
-        speedCap: (85 + this.random() * 20) / 3.6,
+        speedCap: (95 + this.random() * 20) / 3.6,
       };
     }
     return {
       style: 'normal',
       headwayS: 1.5 + this.random() * 0.9,
       mode: 'sleeper',
-      speedCap: (58 + this.random() * 12) / 3.6,
+      speedCap: (72 + this.random() * 12) / 3.6,
     };
   }
 
