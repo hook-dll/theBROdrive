@@ -29,7 +29,10 @@ installAssetShim();
 const SEED = Number(process.argv[2] ?? 42);
 const PLAYER_S = 1_000;
 const ROAD_FROM = 100;
-const ROAD_TO = 3_200;
+/** Enough road for the streamed phase below to cruise at motorway pace. */
+const ROAD_TO = 7_000;
+/** Cruising pace for the streamed phase: the speed the distribution is judged at. */
+const PLAYER_MPS = 25;
 const ROAD_STEP = 2;
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
 let failures = 0;
@@ -155,16 +158,28 @@ check(
 );
 // Keep the stream moving through several generations. Passing has a dedicated,
 // authored playground scenario; this random stream owns the collision-free queue.
+let aheadSum = 0;
+let liveSum = 0;
+let distributionSamples = 0;
 for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
-  const movingPlayerS = PLAYER_S + step * FIXED_DT * 12;
+  const movingPlayerS = PLAYER_S + step * FIXED_DT * PLAYER_MPS;
   traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0);
   physics.step();
   traffic.postStep();
   sampleStoppedTraffic();
-  largestCount = Math.max(largestCount, traffic.status.count);
-  if (traffic.status.count > 0) smallestPopulated = Math.min(smallestPopulated, traffic.status.count);
+  const sample = traffic.status;
+  largestCount = Math.max(largestCount, sample.count);
+  if (sample.count > 0) smallestPopulated = Math.min(smallestPopulated, sample.count);
+  // The first seconds still carry the stationary phase's layout.
+  if (step * FIXED_DT > 20) {
+    aheadSum += sample.ahead;
+    liveSum += sample.count;
+    distributionSamples++;
+  }
   if (step % 12 === 0) await Bun.sleep(0);
 }
+const meanAhead = aheadSum / distributionSamples;
+const meanLive = liveSum / distributionSamples;
 const streamed = traffic.status;
 check(
   'mixed traffic queues without collision',
@@ -181,9 +196,22 @@ check(
   longestStop < 30,
   `longest continuous stop ${longestStop.toFixed(1)} s`,
 );
+// THE SETTING IS JUDGED BY WHAT IS IN FRONT, NOT BY `count`.
+//
+// Cars spawn ahead and are collected behind, and the player overtakes most of the
+// stream, so the rear is where the quota goes to die: with a 700 m spawn band past
+// the collision window and an 850 m rear tail, two thirds of thirty cars sat behind
+// a cruising player and the road ahead held six. This fails if that returns.
+check(
+  'most of the quota stays where the player can see it',
+  meanAhead >= 9 && meanAhead >= meanLive * 0.4,
+  `${meanAhead.toFixed(1)} of ${meanLive.toFixed(1)} live ahead at ${(PLAYER_MPS * 3.6).toFixed(0)} km/h`,
+);
 
 
-traffic.fixedUpdate(0.6, PLAYER_S + 4_000, 0, 0);
+// Beyond every range from where the stream actually ended, not from where it began:
+// the forward tail reaches `DESPAWN_M` past the last driven position.
+traffic.fixedUpdate(0.6, PLAYER_S + 120 * PLAYER_MPS + 4_000, 0, 0);
 check(
   'cars despawn beyond the active range',
   traffic.status.count === 0,
