@@ -74,6 +74,17 @@ check(
   `line ${slowLead.line.toFixed(2)}`,
 );
 
+// Tucked into the leader's mirrors is exactly when a driver wants the other lane,
+// and a lane change measured against our own travel (32 m) called that a certain
+// collision: the car sat on the tail and followed it for good. Only the CLOSING
+// distance is spent.
+const tuckedIn = planCorridor(request({ obstacles: [car(28, LANE, 16)], speed: 17 }));
+check(
+  'a car already on the leader\u2019s tail still overtakes',
+  tuckedIn.usesOncomingLane && tuckedIn.feasible,
+  `line ${tuckedIn.line.toFixed(2)}`,
+);
+
 const oncomingClose = planCorridor({
   ...request({ obstacles: [car(60, LANE, 14)] }),
   oncomingGap: 120,
