@@ -225,6 +225,11 @@ export interface PauseHooks {
    */
   flipVehicle?: () => void;
   /**
+   * Seat the player in the nearest car, skipping the look-ray at a door. Dev only;
+   * absent in a production build, like the spawn hooks above.
+   */
+  seatInNearestCar?: () => void;
+  /**
    * The LIVE world state, for "Export Save Code".
    *
    * This used to be rebuilt from the two numbers the overlay happens to display
@@ -657,6 +662,14 @@ export class MainMenu {
             finish('resume');
           });
           panel.appendChild(flipBtn);
+        }
+        if (import.meta.env.DEV && hooks.seatInNearestCar) {
+          const seatBtn = button('menu-button', 'Drive Nearest Car (dev)');
+          seatBtn.addEventListener('click', () => {
+            hooks.seatInNearestCar?.();
+            finish('resume');
+          });
+          panel.appendChild(seatBtn);
         }
         panel.append(saveBtn, exportBtn, quitBtn);
 
