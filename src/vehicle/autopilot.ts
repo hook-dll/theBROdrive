@@ -582,6 +582,13 @@ export class Autopilot {
   private dynamicBlockerKnown = false;
   private dynamicBlockerAnchorX = 0;
   private dynamicBlockerAnchorZ = 0;
+  /**
+   * Set when a committed pass was dropped because a prop appeared that its line did
+   * not clear. Suppresses detour planning until the body is back in its own lane,
+   * because a right-side detour planned from the opposing lane commands a swing
+   * across the road — over the prop.
+   */
+  private passReturning = false;
   private bodyScanGap = Infinity;
   /**
    * The hazard currently being avoided and the line chosen for it.
@@ -1020,6 +1027,14 @@ export class Autopilot {
     }
     let mustStop = this.bodyScanGap < MUST_STOP_GAP_M;
 
+    // The abort latch lifts the moment the body is back on its own line, which is
+    // where a right-side detour may legitimately be planned from.
+    if (
+      this.passReturning &&
+      Math.abs(projection.lateral - config.laneOffset) <= CAR_HALF_WIDTH_M
+    ) {
+      this.passReturning = false;
+    }
     // Retire only after the REAR of the car has passed the far edge of the prop.
     // The old subtraction retired at the near edge, exactly while the car was
     // alongside it, and centreline guidance then steered back through the obstacle.
@@ -1031,10 +1046,45 @@ export class Autopilot {
       this.avoidanceReturning = true;
     }
     if (!offRoad && hazard && (this.plannedHazard === null || hazard.s < this.plannedHazard.s)) {
-      this.plannedHazard = hazard;
-      this.plannedLateral = this.detourLine(hazard);
-      this.blockerBypass = false;
-      this.avoidanceReturning = false;
+      // A PROP FOUND MID-PASS IS NOT PLANNED FROM THE LANE THIS CAR IS NOT IN.
+      //
+      // The detour is a RIGHT-side line measured from the road, and the overtaking
+      // car is out on the left. Planning it while the pass is live commanded a swing
+      // across the whole road — across the very prop it was avoiding — which is how
+      // frantic committed to a clean overtake and drove into a rock the queue it was
+      // passing had started to ease around.
+      //
+      // Two honest answers, and which one applies is geometry: the passing line
+      // either clears the prop, in which case carry on and let the prop be scenery
+      // until the pass ends, or it does not, in which case the pass is over — drop
+      // it, fall back in behind, and plan the detour from this car's own lane like
+      // everybody else.
+      const passClearsIt =
+        this.passLine !== null &&
+        Math.abs(this.passLine - hazard.lateral) >=
+          hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
+      // A right-side detour is a line measured from this car's OWN lane, so it may
+      // only be planned from there. After an abort the body is still out on the
+      // left, and planning the detour from out there is the swing across the road
+      // this whole branch exists to prevent: the car returns to its lane first,
+      // braking for the prop on the way, and the plan is made once it is back.
+      //
+      // The gate is the RETURN, not mere displacement. Gating on displacement broke
+      // a littered road outright: the first detour displaces the car by definition,
+      // so no later prop could ever be planned and the bench crawled 277 m where it
+      // had covered 1012.
+      if (passClearsIt) {
+        // Nothing to plan: the committed line is already wide of it.
+      } else if (this.passLine !== null) {
+        this.clearPass();
+        this.passRetryAfterS = this.sinceRecovery + PASS_RETRY_DELAY_S;
+        this.passReturning = true;
+      } else if (!this.passReturning) {
+        this.plannedHazard = hazard;
+        this.plannedLateral = this.detourLine(hazard);
+        this.blockerBypass = false;
+        this.avoidanceReturning = false;
+      }
     }
     // A STOPPED CAR IS AN OBSTACLE, AND AN OBSTACLE IS PASSED ON THE DRIVER'S RIGHT.
     //
