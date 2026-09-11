@@ -675,6 +675,15 @@ export class Autopilot {
   private readonly visitHazard = (hazard: RoadHazard): void => {
     const distance = hazard.s - this.hintS;
     if (distance >= this.hazardDistance) return;
+    // A PROP THAT DOES NOT REACH THE ASPHALT IS SCENERY.
+    //
+    // The path tests below ask whether the prop is near this car's LINE, and a line
+    // that has already been pushed out to the shoulder for one prop is near every
+    // other prop standing out there. Measured in a live drive: cars left the road,
+    // in both directions, with nothing on the road at all — the nearest thing being
+    // roadside scatter and power-line pylons metres past the paint. A detour is for
+    // something in the way, and only what overlaps the asphalt is in the way.
+    if (Math.abs(hazard.lateral) - hazard.radius >= ROAD_HALF_WIDTH) return;
     // The intended line matters as much as the current line: after avoiding one prop,
     // the next prop may be on the detour rather than on the centreline.
     const reach = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
@@ -1561,32 +1570,19 @@ export class Autopilot {
   }
 
   /**
-   * Line that clears an indexed prop by its radius, the car body, and a fixed
-   * hysteresis margin — on the driver's RIGHT where that is possible. ReversedRoad
-   * mirrors lateral coordinates, so negative remains this driver's right shoulder in
-   * both traffic directions.
+   * Right-side line that clears an indexed prop by its radius, the car body, and a
+   * fixed hysteresis margin. ReversedRoad mirrors lateral coordinates, so negative
+   * remains this driver's right shoulder in both traffic directions — which is what
+   * lets two opposing streams go round the SAME obstacle and still pass each other.
    *
-   * A RIGHT-SIDE LINE THAT DOES NOT CLEAR IS WORSE THAN NO DETOUR. The clamp to the
-   * graded shoulder used to be the whole answer, which meant a prop far out on the
-   * right — a power-line pylon, the commonest thing beside this road — produced a
-   * committed line AT the shoulder limit, still inside the pylon's own radius. The
-   * planner then drove onto the sand and held that line into the pylon's leg, where
-   * the car spun its wheels until the engine cooked. Seen in a live drive; the pairs
-   * of cars standing on the verge are the same thing having happened to traffic.
-   *
-   * So when the shoulder cannot clear it, go round the OTHER side, and only as far
-   * as the asphalt allows: a pylon at six metres needs no detour at all, because a
-   * line inside this driver's own lane already clears it by metres. The clamp
-   * survives only for something that genuinely straddles both, where stuck recovery
-   * is the honest answer.
+   * Oversized obstacles clamp to the outer graded shoulder instead of producing a
+   * permanent stop. If that is still not enough, stuck recovery keeps retrying.
+   * Nothing here decides WHETHER to detour: `visitHazard` does that, and only props
+   * that actually reach the asphalt are offered.
    */
   private detourLine(hazard: RoadHazard): number {
     const clearance = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
-    const right = hazard.lateral - clearance;
-    if (right >= -STATIC_AVOID_LINE_M) return right;
-    const left = hazard.lateral + clearance;
-    if (left <= EDGE_LINE_M) return left;
-    return -STATIC_AVOID_LINE_M;
+    return Math.max(hazard.lateral - clearance, -STATIC_AVOID_LINE_M);
   }
 
 
@@ -1696,8 +1692,11 @@ export class Autopilot {
     // was overhauling at 10 km/h — a 24 second pass — and got hit head-on at 8 km/h
     // three seconds later, having correctly stood on the brakes in the wrong lane.
     let need: number;
+    /** Road an oncoming car needs to be clear of before this pass may be committed. */
+    let headOnRoom: number;
     if (this.leadIsParked) {
       need = gap + PASS_CLEAR_M + speed * PASS_SIGHT_SECONDS;
+      headOnRoom = need;
     } else {
       // The advantage that matters is the one the overtake will be DRIVEN at, not
       // the one the car happens to have while matched to the leader's pace. A
@@ -1709,12 +1708,18 @@ export class Autopilot {
       if (advantage < PASS_ADVANTAGE_MPS * config.passNerve) return;
       const seconds = (gap + PASS_CLEAR_M) / advantage;
       if (seconds > PASS_MAX_SECONDS / config.passNerve) return;
-      // The sight a driver INSISTS on is the discretionary part of an overtake: the
-      // oncoming car it is budgeting for is hypothetical, and the abort is what
-      // answers a real one. A hurried driver takes the shorter window; the proven
-      // clear road it still demands is `need`, only less of it.
-      need =
-        (cruise + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S) * config.passNerve;
+      // SIGHT IS DISCRETIONARY; ROOM FOR THE CAR COMING THE OTHER WAY IS NOT.
+      //
+      // `need` is how much clear road the driver INSISTS on seeing, and a hurried
+      // one may insist on less: the oncoming car it budgets for is hypothetical and
+      // the abort answers a real one. Scaling it by nerve was right. Scaling the
+      // room for an oncoming car that traffic has ALREADY MEASURED was not: frantic
+      // committed with 126 m of closing room at a combined 55 m/s — two and a half
+      // seconds — drove into the other lane and stopped against the car it had been
+      // told about. `headOnRoom` is therefore the full manoeuvre, uncapped and
+      // unscaled: what it takes, at the speed both cars are actually doing.
+      need = (cruise + PASS_ONCOMING_MPS) * Math.min(seconds, PASS_SIGHT_CAP_S) * config.passNerve;
+      headOnRoom = (Math.max(speed, cruise) + PASS_ONCOMING_MPS) * seconds;
     }
     // Policy and capability are separate checks: the mode must allow this curvature,
     // and the segmented probe must actually be able to see the required distance.
@@ -1723,7 +1728,7 @@ export class Autopilot {
     // The corridor ray starts beyond the bonnet, so an opposing car already inside
     // that blind spot can make the ray look clear. Traffic supplies an independent
     // road-distance measurement; require both views before entering its lane.
-    if (this.oncomingGap < need) return;
+    if (this.oncomingGap < headOnRoom) return;
     // Dynamic traffic is overtaken only on the opposing asphalt lane, and only while
     // it is MOVING: a stopped blocker is bypassed on this driver's own right instead
     // (see the bypass plan in `drive`), and reaches this rule only when the shoulder
