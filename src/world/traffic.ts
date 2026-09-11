@@ -21,6 +21,11 @@ import { ReversedRoad } from './reversedroad';
 const MAX_TRAFFIC = 30;
 const SPAWN_MIN_M = 140;
 const SPAWN_MAX_M = 700;
+/**
+ * Road the player may have covered between a spawn being chosen and its model
+ * finishing loading. See `finishSpawn`.
+ */
+const SPAWN_ARRIVAL_SLACK_M = 60;
 const DESPAWN_M = 850;
 /**
  * A density trim may only take a car this far BEHIND the player, where its removal
@@ -469,13 +474,29 @@ export class RoadTraffic {
   }
 
   private finishSpawn(request: PendingSpawn): void {
+    // THE PLAYER MOVES WHILE THE MODEL LOADS.
+    //
+    // The site was picked at least `SPAWN_MIN_M` (140 m) ahead, and this runs when
+    // the car's model finishes loading — several ticks later, and a whole load if
+    // that model has never been used this session. At 90 km/h the player covers 25
+    // metres a second, so the band check failed by one or two metres and the spawn
+    // was thrown away. Cached models resolve inside a tick and never saw it, which
+    // is why it only showed up after CHANGING the traffic setting: the new draws
+    // pull models that are not in the cache yet, every spawn was discarded on
+    // arrival, and a road that had twenty cars quietly emptied to none.
+    //
+    // A spawn that arrives slightly closer than intended is still a spawn behind a
+    // crest or a bend, so the band is allowed to have shrunk by the road a loading
+    // screen can cover. Closer than THAT is a car appearing in view, and is still
+    // refused.
+    const band = Math.abs(request.forwardS - this.playerS);
     if (
       this.desiredCount === 0 ||
       this.carList.length >= this.desiredCount ||
       request.generation !== this.generation ||
       this.pending !== request ||
-      Math.abs(request.forwardS - this.playerS) < SPAWN_MIN_M ||
-      Math.abs(request.forwardS - this.playerS) > SPAWN_MAX_M
+      band < SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M ||
+      band > SPAWN_MAX_M
     ) {
       return;
     }
