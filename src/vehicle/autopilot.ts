@@ -292,6 +292,12 @@ const LINE_SHIFT_PER_METRE = 0.09;
 /** Line movement allowed on TIME rather than distance while barely rolling, m/s. */
 const LINE_SLEW_AT_REST_MPS = 0.5;
 /**
+ * Lateral error, in metres, below which no indicator is shown. Lane keeping holds
+ * the body to a few tenths of its line, so the deadband has to sit above that
+ * wander and well below half a lane, or a straight road flashes a lamp.
+ */
+const INDICATOR_DEADBAND_M = 0.6;
+/**
  * And while clearing the oncoming lane in front of something coming at us. The gap
  * must be closing this much faster than the car is moving for that to be the reading.
  */
@@ -626,6 +632,14 @@ export class Autopilot {
   private bodyScanGap = Infinity;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
   private appliedLateral = 0;
+  /**
+   * The line the planner CHOSE last step, which is what its switching hysteresis
+   * has to be measured against. Measuring it against `appliedLateral` — the
+   * rate-limited line the car is still slewing along — charged the switch cost to
+   * both candidates at once for the whole transition, so mid-manoeuvre the planner
+   * had no commitment at all and any cost wobble flipped it.
+   */
+  private planLine = 0;
   private recoveryPhase: 'none' | 'reverse' | 'pullout' = 'none';
   private recoveryTimer = 0;
   /** A deterministic right-of-way escape through an opposing-traffic deadlock. */
@@ -845,7 +859,10 @@ export class Autopilot {
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
     this.activityValue = 'cruise';
-    if (!engaged) this.appliedLateral = 0;
+    if (!engaged) {
+      this.appliedLateral = 0;
+      this.planLine = 0;
+    }
   }
 
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
@@ -864,7 +881,10 @@ export class Autopilot {
       this.position.z,
       this.hintValid ? this.hintS : undefined,
     );
-    if (firstProjection) this.appliedLateral = projection.lateral;
+    if (firstProjection) {
+      this.appliedLateral = projection.lateral;
+      this.planLine = projection.lateral;
+    }
     this.hintS = projection.s;
     this.hintValid = true;
     const velocity = vehicle.chassis.linvel();
@@ -1026,7 +1046,29 @@ export class Autopilot {
       Math.abs(projection.lateral - this.appliedLateral) > PROBE_HALF_WIDTH_M
         ? this.laneProbe(vehicle, projection.lateral, sight, originX, originZ)
         : Infinity;
-    this.updateLead(dt, Math.min(this.bodyScanGap, laneGap, bodyLaneGap), speed);
+    // THE CAR BEING PASSED IS STILL A MOVING CAR.
+    //
+    // Every probe above is cast down a line the driver is using: once the commanded
+    // line and the body are out in the opposing lane, none of them can see the car
+    // in the lane being left, the tracked lead is dropped, and its speed estimate
+    // falls to zero. A moving car recorded as STATIONARY is a different object to
+    // the planner and to the speed plan: it is something to be eased past at
+    // walking pace, and the squeeze clamp duly held the overtake at the leader's own
+    // speed for good — measured, 42 km/h alongside a 43 km/h car, 19 m behind it,
+    // for as long as the run lasted. So our own lane is probed while the line is
+    // elsewhere, and that distance feeds the SAME tracker, which keeps the estimate
+    // continuous across the whole manoeuvre.
+    const lineInOwnLane =
+      Math.abs(projection.lateral - config.laneOffset) < PROBE_HALF_WIDTH_M &&
+      Math.abs(this.appliedLateral - config.laneOffset) < PROBE_HALF_WIDTH_M;
+    const ownLaneGap = lineInOwnLane
+      ? Math.min(laneGap, bodyLaneGap)
+      : this.laneProbe(vehicle, config.laneOffset, sight, originX, originZ);
+    this.updateLead(
+      dt,
+      Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap),
+      speed,
+    );
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
     // A recovery is normally an escape from unexplained static blockage, and
@@ -1071,27 +1113,26 @@ export class Autopilot {
     );
     this.collectHorizon = horizon;
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
-    // The rays report a distance, not a lateral: the lane probe was cast down the
-    // commanded line and the body scan down the car's own, so the thing it found is
-    // in one of those two. But it MUST NOT be recorded as sitting on our commanded
-    // line, because that line moves: as it slid toward the opposing lane, the car
-    // ahead slid with it, the opposing corridor read as blocked, the lane read as
-    // clear, and the planner flipped back — every step, for as long as the car sat
-    // behind it. Seen in play as an indicator buzzing while the overtake never
-    // happened. Traffic keeps to lane centres, so the estimate is snapped to
-    // whichever lane the probe that found it was looking down.
-    if (gap < Infinity) {
-      const probeLine =
-        bodyLaneGap <= laneGap && bodyLaneGap <= this.bodyScanGap
-          ? projection.lateral
-          : this.appliedLateral;
-      const leadLateral =
-        Math.abs(probeLine - config.laneOffset) <= Math.abs(probeLine + config.laneOffset)
-          ? config.laneOffset
-          : -config.laneOffset;
+    // WHICH LANE THE CAR AHEAD IS IN IS MEASURED, NEVER INFERRED FROM OUR OWN LINE.
+    //
+    // The rays report a distance, not a lateral. Snapping that distance to whichever
+    // lane centre was nearest the probe's own cast line works only while the cast
+    // line is inside a lane — and during an overtake it is not. Measured in the
+    // repro: the moment the commanded line crossed the centre, the car being passed
+    // was recorded in the OPPOSING lane, the opposing corridor read as blocked, our
+    // own lane read as clear, and the planner turned back. Next step the line had
+    // slewed back below the centre, the same car moved back into our lane, and the
+    // pass fired again. The car settled straddling the centre line with the planner
+    // flipping every step: both indicators buzzing, no speed cap from a lane the
+    // planner believed was empty, and the lead nudged along at 120 km/h.
+    //
+    // So the obstacle's lane comes from a probe cast down a FIXED lane centre —
+    // `ownLaneGap` above, which is also what keeps the tracked speed estimate alive
+    // while the line is out in the other lane.
+    if (ownLaneGap < Infinity) {
       obstacles.push({
-        s: gap,
-        lateral: leadLateral,
+        s: ownLaneGap,
+        lateral: config.laneOffset,
         halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
         // A car coming AT us reads as stationary through `speed - closing`, and the
         // planner wants exactly that: something to be gone round, not followed.
@@ -1101,7 +1142,7 @@ export class Autopilot {
     const oncomingLine = -Math.sign(config.laneOffset || -1) * (ROAD_HALF_WIDTH / 2);
     const plan = planCorridor({
       ownLateral: projection.lateral,
-      previousLine: this.appliedLateral,
+      previousLine: this.planLine,
       laneOffset: config.laneOffset,
       speed,
       desiredSpeed: Math.min(config.cruiseMps, this.speedCapValue),
@@ -1170,9 +1211,20 @@ export class Autopilot {
       : recovering || this.travelled < this.recoveryBiasUntil
         ? clamp(config.laneOffset + this.recoveryBias, -EDGE_LINE_M, EDGE_LINE_M)
         : plan.line;
-    const indicatorDelta = desiredLine - this.appliedLateral;
+    this.planLine = plan.line;
+    // SIGNAL WHILE THE CAR IS STILL MOVING ACROSS, which is what the commanded line
+    // cannot tell us: it reaches the target line long before the body does, so a
+    // delta measured against it goes dark in the middle of a lane change. Measured
+    // against the BODY, the indicator is on for exactly as long as there is lateral
+    // travel left to do. The deadband is wider than a lane-keeping wander so that
+    // holding a lane never lights a lamp.
+    const indicatorDelta = desiredLine - projection.lateral;
     vehicle.setIndicator(
-      Math.abs(indicatorDelta) < 0.2 ? 'off' : indicatorDelta > 0 ? 'left' : 'right',
+      Math.abs(indicatorDelta) < INDICATOR_DEADBAND_M
+        ? 'off'
+        : indicatorDelta > 0
+          ? 'left'
+          : 'right',
     );
 
 
