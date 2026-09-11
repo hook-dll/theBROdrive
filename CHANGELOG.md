@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Overtaking no longer stalls on the centre line: the car being passed is located by a
+  probe cast down a fixed lane centre rather than down the driver's own moving line,
+  so it can no longer appear to jump into the lane being used to pass it. Measured
+  before the fix, with the opposing lane empty: 22 seconds of 30 straddling the
+  centre, 1204 indicator changes, and the leader nudged along in front.
+- A car being overtaken keeps its measured speed while the driver's line is out in the
+  opposing lane, so it is no longer treated as a stationary obstacle to be squeezed
+  past at walking pace — which held every pass at the leader's own speed, alongside it,
+  indefinitely.
+- The planner's switching hysteresis is measured against the line it last chose rather
+  than the rate-limited line the car is still slewing along, so a decision cannot flip
+  free of its own switch cost mid-manoeuvre.
+- Autonomous indicators follow the car's remaining lateral travel, so they stay on for
+  the whole lane change instead of going dark as soon as the commanded line arrives.
+
 ## 0.14.3 — 2026-09-11
 
 ### Fixed

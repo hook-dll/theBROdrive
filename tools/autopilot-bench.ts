@@ -724,6 +724,111 @@ async function checkWedgedOffRoad(): Promise<void> {
   physics.world.free();
 }
 
+/**
+ * OVERTAKING A SLOWER CAR WITH THE OPPOSING LANE EMPTY, with a second real car on
+ * the road rather than a hazard: the only scenario in which the driver's own line
+ * leaves its lane while a moving body stays in it, and every fault this defends
+ * against came from measuring that body against the moving line. Seen in play
+ * before this check existed: the car went to the centre of the road, flashed both
+ * indicators, and pushed the car it was trying to pass along in front of it.
+ */
+async function checkOvertake(): Promise<void> {
+  const leadAhead = 45;
+  const leadCap = 12;
+  const seconds = 30;
+  const road = new Road(42);
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, START_S - 60, START_S + 2_400);
+  const world = new GameWorld(newWorldState(42));
+  const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
+  const hazards = new HazardIndex();
+  const lane = -ROAD_HALF_WIDTH / 2;
+  const chaserState = { ...carState(road, START_S, lane), id: 'overtake-chaser' };
+  const leadState = { ...carState(road, START_S + leadAhead, lane), id: 'overtake-lead' };
+  world.state.cars[chaserState.id] = chaserState;
+  world.state.cars[leadState.id] = leadState;
+  const chaser = new Vehicle(physics, world, chaserState, scene, origin);
+  const lead = new Vehicle(physics, world, leadState, scene, origin);
+  const chaserPilot = new Autopilot(road, hazards, physics);
+  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserInput = emptyInput();
+  const leadInput = emptyInput();
+  chaserInput.handbrake = true;
+  leadInput.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+  }
+  chaserInput.handbrake = false;
+  leadInput.handbrake = false;
+  chaserPilot.setMode('frantic');
+  leadPilot.setMode('sleeper');
+  chaserPilot.setEngaged(true);
+  leadPilot.setEngaged(true);
+  let indicatorChanges = 0;
+  let previousIndicator = chaser.indicator;
+  let straddleSeconds = 0;
+  let clearanceWhileLevel = Infinity;
+  let crossed = false;
+  let completed = false;
+  const chaserPosition = new THREE.Vector3();
+  const leadPosition = new THREE.Vector3();
+  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
+    leadPilot.setSpeedCap(leadCap);
+    chaserPilot.drive(FIXED_DT, chaser, chaserInput, 0, 0);
+    leadPilot.drive(FIXED_DT, lead, leadInput, 0, 0);
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+    if (chaser.indicator !== previousIndicator) {
+      indicatorChanges++;
+      previousIndicator = chaser.indicator;
+    }
+    chaser.absoluteTranslation(chaserPosition);
+    lead.absoluteTranslation(leadPosition);
+    const chaserRoad = road.project(chaserPosition.x, chaserPosition.z);
+    const leadRoad = road.project(leadPosition.x, leadPosition.z);
+    const along = leadRoad.s - chaserRoad.s;
+    if (chaserRoad.lateral > 0.9) crossed = true;
+    // Straddling: the body spans the centre line with the other car still ahead.
+    if (Math.abs(chaserRoad.lateral) < 0.8 && along > 0) straddleSeconds += FIXED_DT;
+    // Level: bumpers overlapping, which is where a clearance actually matters.
+    if (Math.abs(along) < 4.6) {
+      clearanceWhileLevel = Math.min(
+        clearanceWhileLevel,
+        Math.abs(chaserRoad.lateral - leadRoad.lateral) - PLANNED_CLEARANCE_M,
+      );
+    }
+    if (along < -8) completed = true;
+  }
+  check(
+    'frantic overtakes a slower car and gets back in',
+    crossed && completed,
+    `crossed=${crossed}, cleared by 8 m=${completed}`,
+  );
+  check(
+    'an overtake never parks on the centre line',
+    straddleSeconds <= 2.5,
+    `${straddleSeconds.toFixed(1)} s of 30 straddling the centre with a car ahead`,
+  );
+  check(
+    'an overtake keeps its clearance and one indicator story',
+    clearanceWhileLevel > 0 && indicatorChanges <= 8,
+    `clearance ${
+      Number.isFinite(clearanceWhileLevel) ? clearanceWhileLevel.toFixed(2) + ' m' : 'never level'
+    }, ${indicatorChanges} indicator changes`,
+  );
+  chaser.dispose();
+  lead.dispose();
+  physics.world.free();
+}
+
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
@@ -731,6 +836,7 @@ async function run(): Promise<void> {
   checkHandover();
   await checkAutomaticLights();
   if (process.argv.includes('--traffic-behavior')) {
+    await checkOvertake();
     await checkHazards();
     if (failures) process.exitCode = 1;
     return;
@@ -778,6 +884,7 @@ async function run(): Promise<void> {
   );
   await checkLitteredRoad();
   await checkWedgedOffRoad();
+  await checkOvertake();
   await checkHazards();
   if (failures) process.exitCode = 1;
 }
