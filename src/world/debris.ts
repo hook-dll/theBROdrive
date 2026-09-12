@@ -5,6 +5,11 @@ import { SurfaceType } from '../core/surfaces';
 import type { GameWorld } from '../game/state';
 import type { WorldOrigin } from './origin';
 import type { BreakableProp, PropPiece } from './props';
+import {
+  createMedicineRemnantMesh,
+  disposeItemMeshResources,
+  type MedicineRemnantKind,
+} from '../render/partmesh';
 
 /**
  * Props that come apart, and the pieces of the ones that have.
@@ -93,7 +98,7 @@ export interface Impactor {
 
 interface Piece {
   readonly body: RAPIER.RigidBody;
-  readonly mesh: THREE.Mesh;
+  readonly mesh: THREE.Object3D;
   age: number;
   sleepingSeconds: number;
 }
@@ -175,6 +180,55 @@ export class DebrisField {
 
   forget(ids: readonly number[]): void {
     for (const id of ids) this.standing.delete(id);
+  }
+
+  /**
+   * Hands an uncorked medicine part from the first-person animation to Rapier.
+   * These are ordinary nearby debris: they settle independently and retire only
+   * after the player has travelled far enough that keeping them is pointless.
+   */
+  spawnMedicineRemnant(
+    kind: MedicineRemnantKind,
+    position: Readonly<{ x: number; y: number; z: number }>,
+    velocity: Readonly<{ x: number; y: number; z: number }>,
+    angularVelocity: Readonly<{ x: number; y: number; z: number }>,
+  ): void {
+    this.makeRoom();
+
+    const halfHeight = kind === 'bottle' ? 0.085 : 0.02;
+    const radius = kind === 'bottle' ? 0.057 : 0.044;
+    const mass = kind === 'bottle' ? 0.07 : 0.018;
+    const px = position.x - this.origin.x;
+    const pz = position.z - this.origin.z;
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(px, position.y, pz)
+      .setCcdEnabled(true)
+      .setLinearDamping(0.9)
+      .setAngularDamping(1.1);
+    const body = this.physics.world.createRigidBody(bodyDesc);
+    const collider = this.physics.world.createCollider(
+      RAPIER.ColliderDesc.cylinder(halfHeight, radius)
+        .setMass(mass)
+        .setFriction(0.8)
+        .setRestitution(kind === 'cap' ? 0.2 : 0.08),
+      body,
+    );
+    this.physics.surfaces.register(collider.handle, SurfaceType.Rock);
+    body.setLinvel(velocity, true);
+    body.setAngvel(angularVelocity, true);
+
+    const mesh = createMedicineRemnantMesh(kind);
+    mesh.position.set(px, position.y, pz);
+    mesh.traverse((object) => {
+      const part = object as THREE.Mesh;
+      if (!part.isMesh) return;
+      const materials = Array.isArray(part.material) ? part.material : [part.material];
+      const transparent = materials.some((material) => material.transparent);
+      part.castShadow = !transparent;
+      part.receiveShadow = !transparent;
+    });
+    this.scene.add(mesh);
+    this.pieces.push({ body, mesh, age: 0, sleepingSeconds: 0 });
   }
 
   /**
@@ -282,8 +336,15 @@ export class DebrisField {
 
   private removePiece(piece: Piece): void {
     this.scene.remove(piece.mesh);
+    disposeItemMeshResources(piece.mesh);
     // removeBody forgets the surface and every collider attached to the body.
     this.physics.removeBody(piece.body);
+  }
+
+  private makeRoom(): void {
+    if (this.pieces.length < MAX_PIECES) return;
+    const oldest = this.pieces.shift();
+    if (oldest) this.removePiece(oldest);
   }
 
   private breakProp(prop: BreakableProp, impactor: Impactor): void {
@@ -304,10 +365,7 @@ export class DebrisField {
   }
 
   private spawnPiece(prop: BreakableProp, def: PropPiece, impactor: Impactor): void {
-    if (this.pieces.length >= MAX_PIECES) {
-      const oldest = this.pieces.shift();
-      if (oldest) this.removePiece(oldest);
-    }
+    this.makeRoom();
 
     // The piece's place in the whole, taken through the prop's own yaw and scale, so a
     // cactus that stood turned comes apart turned. `_yaw` was set by `breakProp`.

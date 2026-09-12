@@ -315,6 +315,11 @@ export class Player implements Rebasable {
     return this.body;
   }
 
+  /** Capsule collider used to enumerate actual post-solver impacts while on foot. */
+  get collisionCollider(): RAPIER.Collider {
+    return this.collider;
+  }
+
   /** Removes the capsule from the world while seated in a car (and restores it on foot). */
   setEnabled(enabled: boolean): void {
     if (this.enabled === enabled) return;

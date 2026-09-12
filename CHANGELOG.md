@@ -230,6 +230,11 @@
 
 ### Changed
 
+- Medicine is now consumed with E from the selected hand slot. The two-second action
+  uncorks the bottle, tips both modelled pills into the mouth, and releases the empty
+  container; its cap and bottle continue as separate physical debris and remain where
+  they settle nearby. The label now wraps the bottle and carries no dose text, while
+  primary fire no longer consumes medicine.
 - Nothing beside the road stands on air any more. The desert is dunes, and measured
   through the real generators the ground under a 14 m footprint carries 1.5 m of
   height range at a 9-10% tilt — so a structure placed from ONE centre sample stood
@@ -266,6 +271,16 @@
   approaching and receding cars remain legible against the desert.
 
 ### Fixed
+
+- Autopilot cars no longer treat a breakable dirt pile as an invitation to hit it:
+  every indexed road prop is planned as a solid obstacle. A car already pressed
+  against one recognises the contact in 1.6 s, reverses on one lock, keeps that lock
+  until its backward roll has stopped, and then pulls forward on the opposite lock.
+  The forward arc now gets its own 1.6 s instead of spending that time braking in the
+  wrong steering direction. In the real-physics bench the wedged car clears the prop
+  in one recovery attempt and drives 99 m in the 30-second scenario; the permanent
+  checks also cover a non-disappearing breakable pile, steering polarity, traffic
+  beside a blocked lane, ordinary road holding, and repeated attempts at a true wall.
 
 - Cars no longer flicker at the road's start. Reported from play: bodies blinking on and
   off at the beginning of the road while no car ever arrived there. A `Vehicle` joins the

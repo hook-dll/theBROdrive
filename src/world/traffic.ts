@@ -272,6 +272,14 @@ export class RoadTraffic {
   private playerSpeed = 0;
   private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
+  private pedestrianActive = false;
+  private pedestrianPrimed = false;
+  private pedestrianX = 0;
+  private pedestrianZ = 0;
+  private pedestrianPreviousX = 0;
+  private pedestrianPreviousZ = 0;
+  private pedestrianVx = 0;
+  private pedestrianVz = 0;
   private readonly groundProbeOrigin = { x: 0, y: 0, z: 0 };
   private readonly groundProbeDirection = { x: 0, y: -1, z: 0 };
   private settingsRef: Settings | null = null;
@@ -569,6 +577,21 @@ export class RoadTraffic {
     return car.roadLateral * car.direction > CROWN_CROSSING_INTRUSION_M;
   }
 
+  /** Makes the on-foot player visible to traffic without allocating a synthetic body. */
+  setPedestrianObstacle(x: number, z: number): void {
+    this.pedestrianActive = true;
+    this.pedestrianX = x;
+    this.pedestrianZ = z;
+  }
+
+  /** A seated player is already represented by the driven vehicle's chassis. */
+  clearPedestrianObstacle(): void {
+    this.pedestrianActive = false;
+    this.pedestrianPrimed = false;
+    this.pedestrianVx = 0;
+    this.pedestrianVz = 0;
+  }
+
   /** Visits every live temporary vehicle without exposing traffic ownership. */
   forEachVehicle(visitor: (id: string, vehicle: Vehicle) => void): void {
     for (const car of this.carList) visitor(car.id, car.vehicle);
@@ -593,6 +616,20 @@ export class RoadTraffic {
         ? this.playerSpeed * 0.9 + (advance / dt) * 0.1
         : 0;
     this.playerS = playerS;
+    if (this.pedestrianActive) {
+      const dx = this.pedestrianX - this.pedestrianPreviousX;
+      const dz = this.pedestrianZ - this.pedestrianPreviousZ;
+      if (this.pedestrianPrimed && dt > 0 && dx * dx + dz * dz < 64) {
+        this.pedestrianVx = dx / dt;
+        this.pedestrianVz = dz / dt;
+      } else {
+        this.pedestrianVx = 0;
+        this.pedestrianVz = 0;
+      }
+      this.pedestrianPreviousX = this.pedestrianX;
+      this.pedestrianPreviousZ = this.pedestrianZ;
+      this.pedestrianPrimed = true;
+    }
     this.syncSettings();
     if (this.targetCount === 0 && this.carList.length === 0) return;
     this.trimTo(Math.ceil(this.roadTargetCount()), true);
@@ -629,6 +666,16 @@ export class RoadTraffic {
     this.assignPassPermissions();
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
+      if (this.pedestrianActive) {
+        car.autopilot.setPedestrianObstacle(
+          this.pedestrianX,
+          this.pedestrianZ,
+          this.pedestrianVx,
+          this.pedestrianVz,
+        );
+      } else {
+        car.autopilot.clearPedestrianObstacle();
+      }
       car.autopilot.setLightingConditions(
         this.daylightFactor,
         this.nearestOncomingDistance(car.forwardS, car.direction, car.id),

@@ -94,6 +94,11 @@ const BINOCULAR_FOV = BASE_FOV / 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
+/** Death first turns the existing view down, then lifts it while the screen fades. */
+const DEATH_LOOK_DOWN_SECONDS = 2.5;
+const DEATH_RISE_SECONDS = 6.5;
+const DEATH_TOTAL_SECONDS = DEATH_LOOK_DOWN_SECONDS + DEATH_RISE_SECONDS;
+const DEATH_RISE_METRES = 40;
 
 /* ---- module-level scratch: `update()` must not allocate ---- */
 const _vA = new THREE.Vector3();
@@ -154,6 +159,11 @@ export class CameraRig {
   private hoodYawOffset = 0;
   /** Ten-power binocular view: a held-item effect, independent of the camera mode. */
   private binoculars = false;
+  private deathActive = false;
+  private deathElapsed = 0;
+  private readonly deathStartEye = new THREE.Vector3();
+  private readonly deathStartQuaternion = new THREE.Quaternion();
+  private readonly deathDownQuaternion = new THREE.Quaternion();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -173,6 +183,8 @@ export class CameraRig {
     this.eye.z -= shift.dz;
     this.lookAt.x -= shift.dx;
     this.lookAt.z -= shift.dz;
+    this.deathStartEye.x -= shift.dx;
+    this.deathStartEye.z -= shift.dz;
   }
 
   get mode(): CameraMode {
@@ -210,6 +222,67 @@ export class CameraRig {
    */
   setYaw(yaw: number): void {
     this.yawValue = yaw;
+  }
+
+  /**
+   * Captures the live view once. From here until reload, mouse input is deliberately
+   * absent from the camera path; the sequence owns both position and orientation.
+   */
+  beginDeath(): void {
+    if (this.deathActive) return;
+    this.deathActive = true;
+    this.deathElapsed = 0;
+    this.deathStartEye.copy(this.eye);
+    this.deathStartQuaternion.copy(this.camera.quaternion);
+    this.binoculars = false;
+    this.recentering = false;
+
+    // A camera looks along local -Z. This orientation maps that axis exactly onto
+    // world -Y, with -Z as its screen-up direction so the pole is unambiguous.
+    _vA.set(0, 0, 0);
+    _vB.set(0, -1, 0);
+    _vC.set(0, 0, -1);
+    _mA.lookAt(_vA, _vB, _vC);
+    this.deathDownQuaternion.setFromRotationMatrix(_mA);
+  }
+
+  /**
+   * Advances the complete death camera. Returns the black-fade fraction: zero while
+   * turning down, then the same smooth 0..1 curve used by the upward flight.
+   */
+  updateDeath(dt: number, target: CameraTarget): number {
+    if (!this.deathActive) this.beginDeath();
+    const d = dt > 0 ? dt : 1 / 60;
+    this.deathElapsed = Math.min(DEATH_TOTAL_SECONDS, this.deathElapsed + d);
+
+    const lookT = clamp(this.deathElapsed / DEATH_LOOK_DOWN_SECONDS, 0, 1);
+    const lookSmooth = lookT * lookT * (3 - 2 * lookT);
+    const riseT = clamp(
+      (this.deathElapsed - DEATH_LOOK_DOWN_SECONDS) / DEATH_RISE_SECONDS,
+      0,
+      1,
+    );
+    const riseSmooth = riseT * riseT * (3 - 2 * riseT);
+
+    this.eye.set(
+      this.deathStartEye.x + (target.x - this.deathStartEye.x) * riseSmooth,
+      this.deathStartEye.y + DEATH_RISE_METRES * riseSmooth,
+      this.deathStartEye.z + (target.z - this.deathStartEye.z) * riseSmooth,
+    );
+    this.camera.quaternion.slerpQuaternions(
+      this.deathStartQuaternion,
+      this.deathDownQuaternion,
+      lookSmooth,
+    );
+    this.camera.position.copy(this.eye);
+    _vD.set(0, 0, -LOOK_AHEAD).applyQuaternion(this.camera.quaternion);
+    this.lookAt.copy(this.eye).add(_vD);
+    this.updateFov(0, d);
+    return riseSmooth;
+  }
+
+  get deathComplete(): boolean {
+    return this.deathActive && this.deathElapsed >= DEATH_TOTAL_SECONDS;
   }
 
   /**

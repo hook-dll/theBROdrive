@@ -116,8 +116,26 @@ class MeshBuilder {
     this.push(key, () => new THREE.BoxGeometry(w, h, d), material, position, rotation, scale);
   }
 
-  cylinder(key: string, radiusTop: number, radiusBottom: number, height: number, radialSegments: number, material: MaterialSpec, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE): void {
-    this.push(key, () => new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, 1, false), material, position, rotation, scale);
+  cylinder(
+    key: string,
+    radiusTop: number,
+    radiusBottom: number,
+    height: number,
+    radialSegments: number,
+    material: MaterialSpec,
+    position: Vec3,
+    rotation: Vec3 = ZERO,
+    scale: Vec3 = ONE,
+    openEnded = false,
+  ): void {
+    this.push(
+      key,
+      () => new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, 1, openEnded),
+      material,
+      position,
+      rotation,
+      scale,
+    );
   }
 
   torus(key: string, radius: number, tube: number, radialSegments: number, tubularSegments: number, material: MaterialSpec, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE, arc = Math.PI * 2): void {
@@ -854,6 +872,38 @@ function buildBubbleGumInto(b: MeshBuilder): void {
 }
 
 
+function buildMedicineBottleInto(b: MeshBuilder): void {
+  const amberGlass = glass(0x8a4319, 0.12);
+  const cap = flat(0xe7dfc8, 0.92);
+  const capWear = flat(0xc9bfa8, 1);
+  const label = flat(0xf3f0e7, 0.96);
+  const pill = flat(0xf2ead8, 0.8);
+
+  // Two complete pills sit inside the transparent amber bottle. They are separate
+  // three-piece capsules, not a texture or an inventory count, so the dose remains
+  // literally readable through the glass from any close view.
+  b.cylinder('medicine_pill_0_body', 0.011, 0.011, 0.034, 10, pill, [0, 0.027, -0.014], AXIS_X);
+  b.sphere('medicine_pill_0_end_l', 0.011, 8, 6, pill, [-0.017, 0.027, -0.014]);
+  b.sphere('medicine_pill_0_end_r', 0.011, 8, 6, pill, [0.017, 0.027, -0.014]);
+  b.cylinder('medicine_pill_1_body', 0.011, 0.011, 0.034, 10, pill, [0.006, 0.049, 0.014], AXIS_Z);
+  b.sphere('medicine_pill_1_end_l', 0.011, 8, 6, pill, [0.006, 0.049, -0.003]);
+  b.sphere('medicine_pill_1_end_r', 0.011, 8, 6, pill, [0.006, 0.049, 0.031]);
+
+  b.cylinder('medicine_bottle_body', 0.052, 0.055, 0.12, 18, amberGlass, [0, 0.06, 0]);
+  b.cylinder('medicine_bottle_shoulder', 0.036, 0.052, 0.032, 18, amberGlass, [0, 0.136, 0]);
+  b.cylinder('medicine_bottle_neck', 0.036, 0.036, 0.025, 18, amberGlass, [0, 0.1645, 0], ZERO, ONE, true);
+
+  // A thin paper band follows the bottle wall instead of hovering as a flat card.
+  // It stays deliberately unprinted: the two physical pills already communicate the dose.
+  b.cylinder('medicine_label', 0.0557, 0.0557, 0.052, 24, label, [0, 0.078, 0], ZERO, ONE, true);
+
+  // Alternating cream rings make the lid visibly worn rather than factory white.
+  b.cylinder('medicine_cap', 0.043, 0.043, 0.039, 18, cap, [0, 0.19, 0]);
+  b.cylinder('medicine_cap_wear_low', 0.0435, 0.0435, 0.004, 18, capWear, [0, 0.175, 0]);
+  b.cylinder('medicine_cap_wear_high', 0.0435, 0.0435, 0.004, 18, capWear, [0, 0.197, 0]);
+}
+
+
 function buildBinocularsInto(b: MeshBuilder): void {
   const body = flat(0x252824, 0.75);
   const rim = cond(0x444942, 0.65, 0.3);
@@ -1315,6 +1365,82 @@ export function setBubbleGumPieceCount(root: THREE.Object3D, charges: number): v
   });
 }
 
+interface MedicinePartHome {
+  readonly position: THREE.Vector3;
+  readonly rotation: THREE.Euler;
+  readonly scale: THREE.Vector3;
+}
+
+/**
+ * Animates the bottle's loose pieces in model space. The hand moves the bottle as
+ * a whole; this moves the uncorked lid and both physical pills independently.
+ */
+export function setMedicineUseProgress(root: THREE.Object3D, rawProgress: number): void {
+  const progress = Math.max(0, Math.min(1, rawProgress));
+  root.traverse((object) => {
+    const isCap = object.name.startsWith('medicine_cap');
+    const isPill = object.name.startsWith('medicine_pill_');
+    if (!isCap && !isPill) return;
+
+    let home = object.userData.medicinePartHome as MedicinePartHome | undefined;
+    if (!home) {
+      home = {
+        position: object.position.clone(),
+        rotation: object.rotation.clone(),
+        scale: object.scale.clone(),
+      };
+      object.userData.medicinePartHome = home;
+    }
+    object.position.copy(home.position);
+    object.rotation.copy(home.rotation);
+    object.scale.copy(home.scale);
+    object.visible = true;
+
+    if (isCap) {
+      // The cap clears the neck during the first quarter of the action. At the
+      // endpoint the matching world rigid body takes over the same flight.
+      const flight = Math.min(1, progress / 0.23);
+      object.position.x += flight * 0.16;
+      object.position.y += flight * 0.08 + Math.sin(flight * Math.PI) * 0.08;
+      object.position.z += flight * 0.035;
+      object.rotation.x += flight * 8;
+      object.rotation.z += flight * 4;
+      object.visible = progress < 0.23;
+      return;
+    }
+
+    // Once the tipped bottle reaches the mouth, both complete capsules leave
+    // through the neck and separate slightly before disappearing behind camera.
+    const flight = Math.max(0, Math.min(1, (progress - 0.5) / 0.18));
+    const side = object.name.includes('_0_') ? -1 : 1;
+    object.position.x += side * flight * 0.045;
+    object.position.y += flight * 0.2;
+    object.position.z += flight * 0.04;
+    object.scale.multiplyScalar(1 + flight * 0.35);
+    object.visible = progress < 0.7;
+  });
+}
+
+export type MedicineRemnantKind = 'bottle' | 'cap';
+
+/** Centred, empty medicine-bottle pieces for dynamic debris after the dose. */
+export function createMedicineRemnantMesh(kind: MedicineRemnantKind): THREE.Object3D {
+  const instructions = itemBlueprint('medicine_bottle', buildMedicineBottleInto).instructions.filter((ins) =>
+    kind === 'cap'
+      ? ins.name.startsWith('medicine_cap')
+      : ins.name.startsWith('medicine_bottle_') || ins.name === 'medicine_label',
+  );
+  const model = buildGroup(instructions);
+  const bounds = new THREE.Box3().setFromObject(model);
+  const centre = bounds.getCenter(new THREE.Vector3());
+  model.position.sub(centre);
+
+  const root = new THREE.Group();
+  root.name = kind === 'cap' ? 'spent_medicine_cap' : 'spent_medicine_bottle';
+  root.add(model);
+  return root;
+}
+
 /** A held/carried item mesh. Parts reuse createPartMesh; other items build from primitives. */
 export function createItemMesh(item: Item): THREE.Object3D {
   switch (item.type) {
@@ -1341,6 +1467,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       setBubbleGumPieceCount(mesh, item.charges);
       return mesh;
     }
+    case 'medicine':
+      return buildGroup(itemBlueprint('medicine_bottle', buildMedicineBottleInto).instructions);
     case 'binoculars':
       return buildGroup(itemBlueprint('binoculars', buildBinocularsInto).instructions);
     case 'torchlight':

@@ -628,9 +628,9 @@ export function createStartingCar(world: GameWorld): CarState {
 // ---------------------------------------------------------------------------
 
 /**
- * Places the starter fuel can and distinctive handheld tools around the homestead.
- * This runs only for a new world, so stable generated ids can never restock
- * something the player has already taken.
+ * Places the starter fuel can, two medicine bottles and distinctive handheld tools
+ * around the homestead. This runs only for a new world, so stable generated ids can
+ * never restock something the player has already taken.
  */
 export function spawnStartingItems(world: GameWorld, loose: LoosePartField): void {
   const road = new Road(world.seed);
@@ -677,6 +677,21 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     L.floorY + WB_TOP + 0.08,
     watchZ,
   );
+
+  // Two complete doses wait in the garage together: enough to teach the item's
+  // value without making the rest of the road's rare POI finds redundant.
+  for (let i = 0; i < 2; i++) {
+    const [medicineX, medicineZ] = L.toWorld(12.75, 1.18 + i * 0.34);
+    loose.spawnItem(
+      {
+        type: 'medicine',
+        id: world.generatedPartId('home_item', 0, 6 + i),
+      },
+      medicineX,
+      L.floorY + WB_TOP + 0.12,
+      medicineZ,
+    );
+  }
 
 
   // The ball starts on bare ground beside the drive, with the centre one radius

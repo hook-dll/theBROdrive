@@ -119,8 +119,18 @@ export interface CorridorPlan {
 const LINE_STEP_M = 0.25;
 /** Cost per metre of deviation from the driver's own lane. */
 const LANE_COST_PER_M = 1;
-/** Cost per metre of body past the asphalt edge. Deliberately steep. */
-const SHOULDER_COST_PER_M = 14;
+/**
+ * Cost per metre of body past the asphalt edge. Deliberately steep, and steep enough to
+ * beat `LEFT_PASS_COST` after about a metre of it.
+ *
+ * Reported from play, and the reason for the number: a low pile of rubble in the
+ * driver's own lane with a COMPLETELY EMPTY opposing lane beside it. Going round on the
+ * right means leaving the asphalt, and two metres of sand used to be priced below the
+ * convention that immovable things are passed on the right - so the car went into the
+ * sand, bogged there, and never got past. The convention is worth keeping while both
+ * options are road; it is not worth a bogging.
+ */
+const SHOULDER_COST_PER_M = 26;
 /** Something immovable in the corridor, scaled by how soon it arrives. */
 const BLOCK_COST = 600;
 /** Cost per m/s of speed a slower car in the corridor would cost us. */
@@ -150,6 +160,16 @@ const SHOULDER_BYPASS_MAX_SPEED = 2;
  * is passed on the left instead of stopping the car.
  */
 const LEFT_PASS_COST = 34;
+/**
+ * The escape hatch in `sweptOverlap`, and both halves of it are deliberately tiny.
+ *
+ * Wider, it is not an escape but a licence: at 4 m/s and three metres of reach the
+ * planner committed to lines the body could not reach and the bench caught it clipping
+ * a rock it had been asked to creep past. Walking pace with the thing already at the
+ * bumper is the only arrangement where stopping has nothing left to offer.
+ */
+const STANDING_SPEED_MPS = 1.5;
+const STANDING_REACH_M = 2;
 
 function overlaps(
   obstacle: CorridorObstacle,
@@ -183,6 +203,26 @@ function sweptOverlap(
   transitionDistance: number,
   speed: number,
 ): boolean {
+  // A STOPPED CAR CANNOT SWEEP INTO ANYTHING, and judging it as if it could is a trap
+  // it never gets out of. The swept band runs from where the body IS, so a still thing
+  // that already overlaps this lateral - a pile the car has crept up to and stopped at -
+  // poisons every candidate line, including the ones that would clear it. The corridor
+  // is then infeasible at zero speed, the car is held at zero speed because the corridor
+  // is infeasible, and it stands beside the pile for good. Reported from play exactly
+  // that way: the player's car stuck at a mound in its own lane while ambient traffic
+  // went round it.
+  //
+  // Below walking pace, against something that is not moving either, only the
+  // destination matters: the wheels are turned before the car rolls, and there is no
+  // closing speed left to run out of.
+  if (
+    speed <= STANDING_SPEED_MPS &&
+    obstacle.speed <= SHOULDER_BYPASS_MAX_SPEED &&
+    obstacle.s <= STANDING_REACH_M &&
+    overlaps(obstacle, from, halfWidth)
+  ) {
+    return overlaps(obstacle, to, halfWidth);
+  }
   const closingShare =
     speed > 0.1 ? Math.min(1, Math.max(0, (speed - obstacle.speed) / speed)) : 1;
   if (obstacle.s <= transitionDistance * closingShare) {
@@ -244,6 +284,9 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     laneBlockLateral = obstacle.lateral;
   }
   const laneBlockIsStill = laneBlockSpeed <= SHOULDER_BYPASS_MAX_SPEED;
+
+  const nearness = (distance: number): number =>
+    distance >= horizon ? 0 : 1 - distance / horizon;
 
   const evaluate = (line: number): void => {
     if (Math.abs(line) > edgeLimit) return;
@@ -309,8 +352,6 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     // unpriced, the planner undertook moving traffic on the shoulder because sand
     // was cheaper than losing pace.
     if (leavesAsphalt && !laneBlockIsStill) return;
-    const nearness = (distance: number): number =>
-      distance >= horizon ? 0 : 1 - distance / horizon;
     let cost =
       Math.abs(line - laneOffset) * LANE_COST_PER_M +
       Math.max(0, bodyEdge - asphaltLimit) * SHOULDER_COST_PER_M +

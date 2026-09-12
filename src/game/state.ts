@@ -135,6 +135,8 @@ export interface PlayerState {
   z: number;
   yaw: number;
   pitch: number;
+  /** Hidden physical condition, normalised to 0 (dead) .. 1 (uninjured). */
+  health: number;
   /** Arclength hint for road projection; also what save files display. */
   s: number;
   /** Car the player is currently driving, or null when on foot. */
@@ -236,6 +238,7 @@ export type WorldDelta =
   | { t: 'time_of_day'; timeOfDay: number }
   | { t: 'settings'; settings: Settings }
   | { t: 'player_move'; x: number; y: number; z: number; yaw: number; pitch: number; s: number }
+  | { t: 'player_health'; health: number }
   | { t: 'enter_car'; carId: string }
   | { t: 'exit_car' }
   | { t: 'car_add'; car: CarState }
@@ -308,6 +311,7 @@ export function newWorldState(seed: number): WorldState {
       z: -14,
       yaw: 0,
       pitch: 0,
+      health: 1,
       s: 0,
       drivingCarId: null,
       carried: [],
@@ -503,6 +507,9 @@ export class GameWorld {
         s.player.yaw = delta.yaw;
         s.player.pitch = delta.pitch;
         s.player.s = delta.s;
+        break;
+      case 'player_health':
+        s.player.health = Math.min(1, Math.max(0, delta.health));
         break;
       case 'enter_car':
         s.player.drivingCarId = delta.carId;

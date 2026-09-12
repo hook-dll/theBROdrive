@@ -573,22 +573,51 @@ async function checkHazards(): Promise<void> {
     rock.worstLateral <= STATIC_AVOID_EDGE,
     `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${STATIC_AVOID_EDGE.toFixed(2)} m edge`,
   );
+  // A MOUND IN THE LANE MUST NOT PARK THE CAR.
+  //
+  // Reported from play: the player's car on autopilot, a pile of dirt in its own lane,
+  // endless attempts to get round and no progress at all while ambient traffic went
+  // past. A metre of pile 1.3 m off the crown leaves NO line inside the asphalt that
+  // clears it, so the car eases out onto the shoulder to creep by - and once it was
+  // there, stopped, the planner judged every candidate line by a swept band that starts
+  // at the body's own lateral. The pile already overlapped that, so every line was
+  // impossible, the corridor was infeasible, the speed law held the car at zero, and
+  // zero speed is what kept the pile there. It stood beside it for the rest of the
+  // session.
+  const mound = await driveHazard(
+    { s: START_S + 300, lateral: -1.3, radius: 1.0, breakable: false },
+    90,
+  );
+  check(
+    'a mound in the lane never parks the car',
+    mound.passed && mound.rejoined,
+    `passed/rejoined=${mound.passed}/${mound.rejoined}, closest ${mound.minDistance.toFixed(2)} m at ${mound.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${mound.worstLateral.toFixed(2)} m`,
+  );
   const trunk = await driveHazard(
     { s: START_S + 300, lateral: -2.3, radius: 1.6, breakable: false },
     120,
   );
-  // The corridor planner commands one line for the whole manoeuvre and lets it
-  // relax as soon as the body is past, so the commanded line at the closest sample
-  // is already on its way home. What the contract is about is where the CAR went:
-  // to the right of the trunk, clearing it by its radius, at walking pace.
+  // A TRUNK AGAINST THE RIGHT VERGE IS PASSED ON THE LEFT, and that reverses what this
+  // check used to demand.
+  //
+  // Immovable things are passed on the right by convention, so two opposing streams go
+  // round the same one and still clear each other. A trunk lying at -2.3 m with a 1.6 m
+  // radius leaves no right-hand line on the asphalt at all: the old price sent the car
+  // 5.1 m out, deep into the sand, to keep the convention. Reported from play as a car
+  // that went for the verge past a pile of rubble, bogged there, and never got by, with
+  // a completely empty opposing lane beside it. The convention is worth keeping while
+  // both options are road; it is not worth a bogging. What is checked now is that the
+  // car gets past, keeps the trunk's radius of clearance, and does it without leaving
+  // the asphalt for the sand.
   check(
-    'right-edge trunk keeps radius clearance on the right',
+    'right-edge trunk is passed on the road, not in the sand',
     trunk.passed &&
       trunk.rejoined &&
-      trunk.closestLateral < -2.3 &&
+      trunk.closestLateral > -2.3 &&
       trunk.minDistance >= 1.6 &&
-      trunk.speedAtClosest <= 6,
-    `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body lateral ${trunk.closestLateral.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s`,
+      trunk.worstLateral <= ROAD_HALF_WIDTH + PASSING_VERGE &&
+      trunk.speedAtClosest <= 8,
+    `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body lateral ${trunk.closestLateral.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${trunk.worstLateral.toFixed(2)} m`,
   );
   const wall = await driveHazard(
     { s: START_S + 300, lateral: 0, radius: 6, breakable: false },
@@ -602,13 +631,15 @@ async function checkHazards(): Promise<void> {
     wall.recoveryStarts >= 2 && wall.chargeSpeed < 8,
     `${wall.recoveryStarts} recoveries, fastest approach ${wall.chargeSpeed.toFixed(2)} m/s`,
   );
-  // A breakable prop is still passed rather than deliberately struck.
+  // Breakability belongs to impact physics, never to the driving decision. This
+  // collider cannot disappear, so passing it proves the autopilot did not rely on
+  // charging the dirt pile hard enough to break it.
   const pile = await driveHazard(
     { s: START_S + 300, lateral: 0, radius: 1.2, breakable: true },
     100,
   );
   check(
-    'breakable hazard is passed slowly on the right',
+    'breakable dirt pile is treated as solid and driven around',
     pile.passed &&
       pile.rejoined &&
       pile.closestLateral < 0 &&
@@ -1235,23 +1266,117 @@ async function checkWedgedOnRoad(): Promise<void> {
   autopilot.setEngaged(true);
   let escaped = 0;
   let escapeSeconds = Infinity;
+  let recoveryStartedAt = Infinity;
+  let reverseSteer = 0;
+  let pulloutSteer = 0;
+  let furthestS = -Infinity;
+  let recoveryStarts = 0;
+  let wasRecovering = false;
+  const recoveryTrace: string[] = [];
+  let lastRecoveryState = '';
   for (let i = 0; i < Math.ceil(30 / FIXED_DT); i++) {
     autopilot.drive(FIXED_DT, vehicle, input, 0, 0);
+    const recovering = autopilot.activity === 'recover';
+    if (recovering && !wasRecovering) recoveryStarts++;
+    wasRecovering = recovering;
+    if (recovering && recoveryStartedAt === Infinity) recoveryStartedAt = i * FIXED_DT;
+    if (recovering && input.reverse && Math.abs(input.steer) > 0.5) {
+      reverseSteer = input.steer;
+    }
+    if (
+      recovering &&
+      !input.reverse &&
+      input.throttle > 0 &&
+      Math.abs(input.steer) > 0.5
+    ) {
+      pulloutSteer = input.steer;
+    }
     vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
     const p = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    const roadPosition = road.project(p.x, p.z);
+    const recoveryState = `${autopilot.activity}:${input.reverse ? 'R' : 'F'}`;
+    if (recoveryState !== lastRecoveryState) {
+      recoveryTrace.push(
+        `${(i * FIXED_DT).toFixed(1)}s ${recoveryState} s=${roadPosition.s.toFixed(1)} lat=${roadPosition.lateral.toFixed(1)} v=${speed(vehicle).toFixed(1)}`,
+      );
+      lastRecoveryState = recoveryState;
+    }
+    furthestS = Math.max(furthestS, roadPosition.s);
     const moved = Math.hypot(p.x - start.x, p.z - start.z);
     escaped = Math.max(escaped, moved);
     if (moved >= 8 && escapeSeconds === Infinity) escapeSeconds = i * FIXED_DT;
   }
   check(
+    'a wedged car recognises the obstruction promptly',
+    recoveryStartedAt <= 2.5,
+    `recovery started at ${recoveryStartedAt.toFixed(1)} s`,
+  );
+  check(
+    'recovery reverses and pulls forward on opposite steering locks',
+    Math.abs(reverseSteer) >= 0.8 &&
+      Math.abs(pulloutSteer) >= 0.8 &&
+      Math.sign(reverseSteer) === -Math.sign(pulloutSteer),
+    `reverse steer ${reverseSteer.toFixed(2)}, forward steer ${pulloutSteer.toFixed(2)}`,
+  );
+  check(
     'a car wedged against a prop on the road gets itself out',
-    escaped >= 8,
-    `${escaped.toFixed(1)} m covered, 8 m reached at ${
+    recoveryStarts === 1 && furthestS >= hazard.s + 20,
+    `${escaped.toFixed(1)} m covered after ${recoveryStarts} recovery attempt(s), furthest s ${(furthestS - hazard.s).toFixed(1)} m past obstacle, 8 m reached at ${
       Number.isFinite(escapeSeconds) ? escapeSeconds.toFixed(1) + ' s' : 'never'
-    }`,
+    }; engine=${vehicle.engineRunning}, input=${input.throttle.toFixed(2)}/${input.brake.toFixed(2)}; ${recoveryTrace.join(' -> ')}`,
   );
   vehicle.dispose();
   physics.world.free();
+}
+
+async function checkPedestrianObstacle(): Promise<void> {
+  const rig = await makeRig();
+  rig.autopilot.setEngaged(true);
+  const pedestrianS = START_S + 120;
+  const pedestrianLateral = rig.road.laneCentreAt(pedestrianS, 0);
+  const pedestrian = rig.road.offsetPoint(pedestrianS, pedestrianLateral);
+  let hint = START_S;
+  let sawObstacle = false;
+  let passed = false;
+  let closestLateral = Infinity;
+  let closestDistance = Infinity;
+
+  for (let i = 0; i < Math.ceil(45 / FIXED_DT); i++) {
+    rig.autopilot.setPedestrianObstacle(pedestrian.x, pedestrian.z, 0, 0);
+    step(rig);
+    const position = rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    const projection = rig.road.project(position.x, position.z, hint);
+    hint = projection.s;
+    sawObstacle ||= rig.autopilot.obstacleGap < Infinity;
+    const distance = Math.hypot(position.x - pedestrian.x, position.z - pedestrian.z);
+    closestDistance = Math.min(closestDistance, distance);
+    if (Math.abs(projection.s - pedestrianS) <= 3) {
+      closestLateral = Math.min(
+        closestLateral,
+        Math.abs(projection.lateral - pedestrianLateral),
+      );
+    }
+    if (projection.s > pedestrianS + 12) {
+      passed = true;
+      break;
+    }
+  }
+
+  check(
+    'traffic sees and clears a stationary pedestrian',
+    sawObstacle && passed && closestDistance >= 1.25 && closestLateral >= 1.25,
+    `seen/passed=${sawObstacle}/${passed}, centre clearance ${closestDistance.toFixed(2)} m, lateral ${closestLateral.toFixed(2)} m`,
+  );
+
+  rig.autopilot.clearPedestrianObstacle();
+  step(rig);
+  check(
+    'seated player is removed as a separate obstacle',
+    rig.autopilot.obstacleGap === Infinity,
+    `remaining gap ${rig.autopilot.obstacleGap}`,
+  );
+  rig.vehicle.dispose();
+  rig.physics.world.free();
 }
 
 async function run(): Promise<void> {
@@ -1262,6 +1387,7 @@ async function run(): Promise<void> {
   if (process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
     await checkHazards();
+    await checkPedestrianObstacle();
     if (failures) process.exitCode = 1;
     return;
   }
@@ -1322,6 +1448,7 @@ async function run(): Promise<void> {
   await checkBoxedInHazard();
   await checkWedgedOnRoad();
   await checkHazards();
+  await checkPedestrianObstacle();
   if (failures) process.exitCode = 1;
 }
 
