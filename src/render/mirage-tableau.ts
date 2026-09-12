@@ -17,13 +17,22 @@ const MAX_CITY_WINDOWS = 1_536;
 const MAX_CITY_ACCENTS = 512;
 const MAX_CITY_ROOFS = 192;
 const MAX_CITY_STREETS = 192;
+/** Metres a roof cone is buried in the block it caps, so their faces never coincide. */
+const ROOF_SINK_M = 0.3;
 const MAX_SHIPS = 240;
 
-/** Nearest a wreck may ground itself to the asphalt, and how far the field reaches out. */
-const SHIP_NEAR_M = 34;
+/**
+ * Nearest a wreck may ground itself to the asphalt, and how far the field reaches out.
+ *
+ * A hull is seventy metres of ship. Sat at the verge like a palm it is a wall the
+ * road runs along, and the eye cannot take in a shape it cannot see the ends of, so
+ * the fleet alone stands well back: sixty metres is far enough that the nearest wreck
+ * fits in the windscreen whole.
+ */
+const SHIP_NEAR_M = 60;
 const SHIP_SPREAD_M = 210;
 /** Placement attempts per wreck before the slot is left empty. */
-const SHIP_ATTEMPTS = 6;
+const SHIP_ATTEMPTS = 10;
 
 const SALT_GAP = 0x31a7;
 const SALT_LENGTH = 0x42b9;
@@ -42,7 +51,7 @@ interface Encounter {
   readonly kind: MirageKind;
 }
 
-type CardTriangle = (
+export type CardTriangle = (
   ax: number,
   ay: number,
   bx: number,
@@ -67,7 +76,7 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
  * landed twice: palm fronds measured one or two code values on screen — a black
  * paper cut-out of a palm rather than a green one.
  */
-function displayColour(hex: number): THREE.Color {
+export function displayColour(hex: number): THREE.Color {
   return new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
 }
 
@@ -76,14 +85,14 @@ function displayColour(hex: number): THREE.Color {
  * it multiplies the card palette, so it varies the light on a plant instead of
  * replacing its colour.
  */
-const PALM_TINT = displayColour(0xfff1dc);
-const TREE_TINT = displayColour(0xf9f2e2);
-const CACTUS_TINT = displayColour(0xf3f8e6);
+export const PALM_TINT = displayColour(0xfff1dc);
+export const TREE_TINT = displayColour(0xf9f2e2);
+export const CACTUS_TINT = displayColour(0xf3f8e6);
 const SHIP_TINT = displayColour(0xffe9d2);
 
 
 /** Two perpendicular copies of every triangle: a readable flat from any road angle. */
-function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.BufferGeometry {
+export function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.BufferGeometry {
   const positions: number[] = [];
   const colours: number[] = [];
   const triangle: CardTriangle = (ax, ay, bx, by, cx, cy, colour, z = 0) => {
@@ -100,114 +109,358 @@ function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.Buff
   return geometry;
 }
 
-function palmGeometry(): THREE.BufferGeometry {
-  return crossedCardGeometry((triangle) => {
-    const trunk = displayColour(0xcb9a67);
-    const leaf = displayColour(0x86c96d);
-    triangle(-0.055, 0, 0.055, 0, 0.035, 0.72, trunk);
-    triangle(-0.055, 0, 0.035, 0.72, -0.015, 0.72, trunk);
-    const crownX = 0.01;
-    const crownY = 0.73;
-    const ends: readonly (readonly [number, number, number])[] = [
-      [-0.62, 0.58, 0.075], [-0.5, 0.76, 0.07], [-0.28, 0.94, 0.06],
-      [-0.06, 1.03, 0.05], [0.18, 1.01, 0.05], [0.42, 0.9, 0.065],
-      [0.58, 0.7, 0.075], [0.55, 0.5, 0.07],
-    ];
-    for (const [endX, endY, halfWidth] of ends) {
-      const dx = endX - crownX;
-      const dy = endY - crownY;
-      const length = Math.hypot(dx, dy);
-      const px = (-dy / length) * halfWidth;
-      const py = (dx / length) * halfWidth;
-      triangle(crownX + px, crownY + py, endX, endY, crownX - px, crownY - py, leaf, -0.002);
-    }
-    triangle(-0.12, 0.68, 0.13, 0.69, 0.01, 0.84, leaf, -0.003);
-  });
+/**
+ * The furthest any vertex of a card sits from its origin in the ground plane.
+ *
+ * A crossed card holds both copies, so this one number bounds the whole footprint
+ * under a uniform XZ scale and under any yaw. It is the radius a spacing test has to
+ * use; anything smaller is a licence to overlap, and every hand-picked value tried
+ * here was smaller.
+ */
+function planarReach(geometry: THREE.BufferGeometry): number {
+  const position = geometry.getAttribute('position');
+  let worst = 0;
+  for (let i = 0; i < position.count; i++) {
+    worst = Math.max(worst, Math.hypot(position.getX(i), position.getZ(i)));
+  }
+  return worst;
 }
 
-function treeGeometry(): THREE.BufferGeometry {
+/**
+ * The three palms. A grove of one silhouette repeated is a wallpaper, and the cheapest
+ * cure is not more geometry but a second and a third set of proportions: a tall thin
+ * one that leans, a stout one carrying dates, and a young one barely out of the sand.
+ */
+interface PalmForm {
+  /** Height of the crown up the unit trunk. */
+  readonly crownY: number;
+  /** Sideways drift of the trunk's top: a palm is never plumb. */
+  readonly lean: number;
+  /** Trunk thickness multiplier. */
+  readonly girth: number;
+  readonly fronds: number;
+  /** Frond length, and how hard the tip is pulled down. */
+  readonly reach: number;
+  readonly droop: number;
+  readonly leafWidth: number;
+  /** Depth the crown is spread over, in unit-height. */
+  readonly depth: number;
+  /** Phase of the per-frond length wobble, so two forms differ frond by frond. */
+  readonly phase: number;
+  readonly nuts: boolean;
+}
+
+const PALM_FORMS: readonly PalmForm[] = [
+  { crownY: 0.74, lean: 0.06, girth: 1, fronds: 9, reach: 0.58, droop: 0.42, leafWidth: 1, depth: 0.34, phase: 0, nuts: false },
+  { crownY: 0.62, lean: -0.04, girth: 1.35, fronds: 11, reach: 0.52, droop: 0.3, leafWidth: 1.25, depth: 0.4, phase: 1.7, nuts: true },
+  { crownY: 0.5, lean: 0.14, girth: 0.85, fronds: 7, reach: 0.62, droop: 0.55, leafWidth: 0.9, depth: 0.3, phase: 3.1, nuts: false },
+];
+
+/**
+ * Date palms, in three forms.
+ *
+ * A FROND IS TWO STRIPS, NOT ONE TRIANGLE. The old palm spread eight flat triangles of
+ * a single green from one point: a starfish, and one with no underside. Each frond
+ * here is an arc with a lit upper half and a shadowed lower half split along its own
+ * spine, which is what gives a crown its dome from a flat card — the same tone trick
+ * the acacia and the city use.
+ *
+ * THE FRONDS ARE ALSO SPREAD IN DEPTH, and that is not decoration. Coplanar cards a
+ * few millimetres apart are below the depth buffer's resolution at the distance these
+ * are seen from, so the near frond and the far frond swap places pixel by pixel as the
+ * camera moves: a crown that boils. Laid out across a quarter of the palm's height
+ * they are simply a crown with a front and a back, and the ordering is unambiguous.
+ */
+export function palmGeometry(variant = 0): THREE.BufferGeometry {
+  const form = PALM_FORMS[Math.abs(Math.round(variant)) % PALM_FORMS.length]!;
   return crossedCardGeometry((triangle) => {
-    const trunk = displayColour(0xbe9066);
-    const leaf = displayColour(0x9ad081);
-    triangle(-0.07, 0, 0.075, 0, 0.045, 0.62, trunk);
-    triangle(-0.07, 0, 0.045, 0.62, -0.03, 0.62, trunk);
-    const crown = (x: number, y: number, rx: number, ry: number, z: number): void => {
-      triangle(x, y, x - rx, y, x, y + ry, leaf, z);
-      triangle(x, y, x, y + ry, x + rx, y, leaf, z);
-      triangle(x, y, x + rx, y, x, y - ry, leaf, z);
-      triangle(x, y, x, y - ry, x - rx, y, leaf, z);
+    const barkLit = displayColour(0xd0a271);
+    const barkShade = displayColour(0x946c45);
+    const leafLit = displayColour(0x9ad778);
+    const leafShade = displayColour(0x4f8149);
+    const nut = displayColour(0xc8893f);
+    const quad = (
+      ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number, dx: number, dy: number,
+      colour: THREE.Color, z = 0,
+    ): void => {
+      triangle(ax, ay, bx, by, cx, cy, colour, z);
+      triangle(ax, ay, cx, cy, dx, dy, colour, z);
     };
-    crown(-0.22, 0.7, 0.34, 0.27, -0.002);
-    crown(0.2, 0.72, 0.38, 0.3, -0.003);
-    crown(0, 0.91, 0.38, 0.3, -0.004);
+
+    // Trunk: a leaning arc, split down its length into a lit face and a shaded one.
+    const crownY = form.crownY;
+    const trunkAt = (t: number): readonly [number, number, number] => [
+      form.lean * t * t,
+      crownY * t,
+      0.055 * form.girth * (1 - 0.42 * t),
+    ];
+    for (let i = 0; i < 5; i++) {
+      const [x0, y0, r0] = trunkAt(i / 5);
+      const [x1, y1, r1] = trunkAt((i + 1) / 5);
+      quad(x0 - r0, y0, x0, y0, x1, y1, x1 - r1, y1, barkShade);
+      quad(x0, y0, x0 + r0, y0, x1 + r1, y1, x1, y1, barkLit);
+    }
+
+    const [crownX, crownTop] = trunkAt(1);
+    const count = form.fronds;
+    for (let k = 0; k < count; k++) {
+      // Fan from one side to the other, with the frond's own reach and droop varied
+      // by a fixed wobble so no two arms of a crown are the same length.
+      const spread = k / (count - 1);
+      const angle = Math.PI * (1.08 - spread * 1.16);
+      const wobble = Math.sin(k * 2.399 + form.phase);
+      const reach = form.reach * (0.86 + wobble * 0.14);
+      const droop = form.droop * (0.8 + (1 - Math.abs(Math.cos(angle))) * 0.5);
+      const halfWidth = 0.052 * form.leafWidth;
+      // Interleaved depth: neighbours in the fan are never neighbours in depth, so
+      // the pair that overlaps most on screen is the pair furthest apart in z.
+      const z = (((k * 7) % count) / (count - 1) - 0.5) * form.depth;
+
+      const spine = (t: number): readonly [number, number] => [
+        crownX + Math.cos(angle) * reach * t,
+        crownTop + Math.sin(angle) * reach * t - droop * reach * t * t,
+      ];
+      const SEGMENTS = 4;
+      for (let i = 0; i < SEGMENTS; i++) {
+        const t0 = i / SEGMENTS;
+        const t1 = (i + 1) / SEGMENTS;
+        const [ax, ay] = spine(t0);
+        const [bx, by] = spine(t1);
+        const dx = bx - ax;
+        const dy = by - ay;
+        const len = Math.max(1e-4, Math.hypot(dx, dy));
+        const nx = (-dy / len);
+        const ny = (dx / len);
+        // Widest a third of the way out, closed to a point at the tip.
+        const w0 = halfWidth * Math.sin(Math.PI * Math.pow(t0, 0.55));
+        const w1 = halfWidth * Math.sin(Math.PI * Math.pow(t1, 0.55));
+        quad(ax, ay, ax + nx * w0, ay + ny * w0, bx + nx * w1, by + ny * w1, bx, by, leafLit, z);
+        quad(ax, ay, bx, by, bx - nx * w1, by - ny * w1, ax - nx * w0, ay - ny * w0, leafShade, z - 0.03);
+      }
+    }
+
+    if (form.nuts) {
+      // A date cluster hanging under the crown: three small darts, not a sphere.
+      for (let i = 0; i < 3; i++) {
+        const x = crownX + (i - 1) * 0.055;
+        triangle(x - 0.045, crownTop - 0.01, x + 0.045, crownTop - 0.01, x, crownTop - 0.11, nut, -0.34);
+      }
+    }
   });
 }
 
+/**
+ * A desert acacia: a leaning, tapered trunk that forks twice into a flat-topped canopy.
+ *
+ * A FLAT CARD GETS ITS VOLUME FROM TONE, not from shape — the same trick the city uses
+ * with its wall, window and roof paints. Every part here is drawn in a lit tone and a
+ * shadowed one split down a consistent light direction, and the canopy is seven
+ * overlapping clumps rather than one mass so its edge breaks against the sky instead of
+ * reading as a cut-out lozenge. The earlier version was a stick and three diamonds.
+ */
+export function treeGeometry(): THREE.BufferGeometry {
+  return crossedCardGeometry((triangle) => {
+    const barkLit = displayColour(0xc59a60);
+    const barkShade = displayColour(0x8a6742);
+    const leafLit = displayColour(0xb2dc8a);
+    const leafMid = displayColour(0x86bb6a);
+    const leafShade = displayColour(0x5c8a4c);
+    const quad = (
+      ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number, dx: number, dy: number,
+      colour: THREE.Color, z = 0,
+    ): void => {
+      triangle(ax, ay, bx, by, cx, cy, colour, z);
+      triangle(ax, ay, cx, cy, dx, dy, colour, z);
+    };
+
+    // Trunk: root flare at the ground, tapering and leaning slightly right.
+    quad(-0.115, 0, -0.045, 0.1, -0.028, 0.46, -0.075, 0.46, barkShade);
+    quad(-0.045, 0.1, 0.09, 0.06, 0.052, 0.46, -0.028, 0.46, barkLit);
+    quad(0.09, 0.06, 0.125, 0, 0.06, 0, 0.052, 0.12, barkShade);
+    // Fork: three limbs reaching out under the canopy.
+    quad(-0.075, 0.44, -0.028, 0.44, -0.12, 0.68, -0.17, 0.66, barkShade, -0.001);
+    quad(-0.01, 0.44, 0.05, 0.44, 0.2, 0.66, 0.15, 0.69, barkLit, -0.001);
+    quad(-0.02, 0.5, 0.03, 0.5, 0.04, 0.72, -0.01, 0.72, barkLit, -0.001);
+
+    /**
+     * One clump of foliage: a shadowed underside with a lit cap over it.
+     *
+     * The three tones are separated in depth by centimetres of the tree's own height,
+     * not by thousandths. A depth buffer's resolution at the distance a tableau is
+     * seen from is measured in tens of centimetres, so the old millimetre offsets were
+     * BELOW THE NOISE: the shadow and the cap swapped places pixel by pixel as the
+     * camera moved, which is the boiling canopy. Two clumps also shared an offset
+     * exactly, and those fought at any distance at all.
+     */
+    const clump = (x: number, y: number, rx: number, ry: number, z: number): void => {
+      triangle(x - rx, y, x + rx, y, x + rx * 0.45, y - ry * 0.75, leafShade, z);
+      triangle(x - rx, y, x + rx * 0.45, y - ry * 0.75, x - rx * 0.45, y - ry * 0.7, leafShade, z);
+      triangle(x - rx, y, x - rx * 0.35, y + ry, x + rx * 0.2, y + ry * 0.95, leafMid, z - 0.035);
+      triangle(x - rx, y, x + rx * 0.2, y + ry * 0.95, x + rx, y, leafMid, z - 0.035);
+      triangle(x - rx * 0.5, y + ry * 0.5, x - rx * 0.1, y + ry * 1.05, x + rx * 0.45, y + ry * 0.6, leafLit, z - 0.07);
+    };
+    // Spread through the crown rather than stacked on one plane: neighbouring clumps
+    // sit at opposite ends of the depth range, so the pair that overlaps most on
+    // screen is the pair furthest apart in z. In the perpendicular copy the same
+    // spread becomes width, which is what a canopy has anyway.
+    clump(-0.44, 0.74, 0.26, 0.16, 0.24);
+    clump(0.42, 0.76, 0.27, 0.17, -0.18);
+    clump(-0.2, 0.8, 0.3, 0.2, 0.06);
+    clump(0.18, 0.82, 0.31, 0.21, -0.3);
+    clump(-0.05, 0.9, 0.33, 0.2, 0.18);
+    clump(-0.3, 0.95, 0.2, 0.14, -0.08);
+    clump(0.26, 0.96, 0.21, 0.14, 0.32);
+  });
+}
+
+/**
+ * A saguaro: a fluted column with two arms, each turning up at the elbow.
+ *
+ * Roundness comes from three vertical strips — shade, body, highlight — running the
+ * whole height, which is what a flat quad of one green could never give. The ribs are
+ * two darker lines inside the body strip, the crown is domed rather than pointed, and
+ * the blooms sit on the tips where they actually grow.
+ */
 function cactusGeometry(): THREE.BufferGeometry {
   return crossedCardGeometry((triangle) => {
-    const cactus = displayColour(0x8ecb8b);
-    const bloom = displayColour(0xff9f72);
-    const quad = (x0: number, y0: number, x1: number, y1: number, z = 0): void => {
-      triangle(x0, y0, x1, y0, x1, y1, cactus, z);
-      triangle(x0, y0, x1, y1, x0, y1, cactus, z);
-    };
-    quad(-0.105, 0, 0.105, 1);
-    quad(-0.43, 0.42, -0.08, 0.56, -0.002);
-    quad(-0.43, 0.42, -0.28, 0.75, -0.002);
-    quad(0.08, 0.58, 0.39, 0.71, -0.003);
-    quad(0.25, 0.58, 0.39, 0.86, -0.003);
-    triangle(-0.15, 1, 0.15, 1, 0, 1.08, cactus, -0.004);
-    triangle(0.25, 0.86, 0.41, 0.86, 0.34, 0.94, bloom, -0.005);
-  });
-}
-/**
- * A beached freighter with its plating gone: bow, broken stern, a leaning
- * deckhouse and the frames still standing where the hull opened up.
- *
- * Authored one unit tall like every other card, so an instance's height scales the
- * whole wreck. Rust reads as a palette rather than a texture: three warm tones plus
- * a salt-bleached deck are enough to tell hull from superstructure at a kilometre.
- */
-function shipGeometry(): THREE.BufferGeometry {
-  return crossedCardGeometry((triangle) => {
-    const hull = displayColour(0xc06844);
-    const shadedHull = displayColour(0x944b2f);
-    const rust = displayColour(0xe08a4c);
-    const deck = displayColour(0xd6bb95);
+    const shade = displayColour(0x4f7a52);
+    const body = displayColour(0x76ab74);
+    const lit = displayColour(0x9ecf92);
+    const rib = displayColour(0x628c61);
+    const bloom = displayColour(0xf7d7a0);
     const quad = (
-      x0: number,
-      y0: number,
-      x1: number,
-      y1: number,
-      colour: THREE.Color,
-      z = 0,
+      x0: number, y0: number, x1: number, y1: number, colour: THREE.Color, z = 0,
     ): void => {
       triangle(x0, y0, x1, y0, x1, y1, colour, z);
       triangle(x0, y0, x1, y1, x0, y1, colour, z);
     };
-    // Hull, raked bow to the right, torn stern to the left.
-    quad(-0.52, 0, 0.5, 0.33, hull);
-    triangle(0.5, 0, 0.78, 0.4, 0.5, 0.4, hull);
-    triangle(-0.52, 0, -0.52, 0.33, -0.72, 0.28, shadedHull);
-    // Waterline stripe: the one horizontal that makes the shape read as a ship.
-    quad(-0.52, 0.1, 0.5, 0.15, rust, -0.001);
-    quad(-0.52, 0.33, 0.5, 0.38, deck, -0.002);
-    // Ribs standing where the plating has gone.
-    for (const x of [-0.36, -0.18, 0.02, 0.22]) {
-      quad(x, 0.38, x + 0.022, 0.52, shadedHull, -0.003);
+    /** A limb as three tonal strips, with a domed cap. */
+    const column = (
+      x0: number, x1: number, y0: number, y1: number, z: number,
+    ): void => {
+      const w = x1 - x0;
+      quad(x0, y0, x0 + w * 0.3, y1, shade, z);
+      quad(x0 + w * 0.3, y0, x0 + w * 0.78, y1, body, z);
+      quad(x0 + w * 0.78, y0, x1, y1, lit, z);
+      quad(x0 + w * 0.42, y0, x0 + w * 0.47, y1 - w * 0.4, rib, z - 0.0005);
+      quad(x0 + w * 0.62, y0, x0 + w * 0.67, y1 - w * 0.4, rib, z - 0.0005);
+      // Dome: two steps rather than a point, so the tip is not a spike.
+      triangle(x0, y1, x1, y1, x1 - w * 0.18, y1 + w * 0.34, body, z);
+      triangle(x0, y1, x1 - w * 0.18, y1 + w * 0.34, x0 + w * 0.18, y1 + w * 0.34, body, z);
+      triangle(x0 + w * 0.18, y1 + w * 0.34, x1 - w * 0.18, y1 + w * 0.34, x0 + w * 0.5, y1 + w * 0.52, lit, z - 0.001);
+    };
+
+    column(-0.1, 0.1, 0, 0.92, 0);
+    // Left arm: out, then up, with the elbow filled so the turn is not a notch.
+    quad(-0.4, 0.4, -0.08, 0.53, body, -0.002);
+    quad(-0.4, 0.4, -0.33, 0.46, shade, -0.0025);
+    column(-0.4, -0.26, 0.44, 0.74, -0.003);
+    // Right arm, higher and shorter.
+    quad(0.08, 0.56, 0.36, 0.68, body, -0.002);
+    quad(0.29, 0.56, 0.36, 0.62, shade, -0.0025);
+    column(0.25, 0.38, 0.6, 0.83, -0.003);
+    // Blooms on the three tips.
+    triangle(-0.06, 1.0, 0.06, 1.0, 0, 1.07, bloom, -0.004);
+    triangle(-0.36, 0.82, -0.28, 0.82, -0.32, 0.88, bloom, -0.004);
+    triangle(0.28, 0.91, 0.36, 0.91, 0.32, 0.97, bloom, -0.004);
+  });
+}
+/**
+ * A beached freighter, listing, with its plating gone amidships.
+ *
+ * THREE THINGS MAKE A HULL READ AS A HULL and the earlier version had none of them.
+ * It LISTS: the whole wreck leans, which is the difference between a ship aground and a
+ * box on sand. It has SHEER: the deck line curves up toward the bow instead of running
+ * level, which is the one curve the eye uses to tell a ship from a shed. And it is lit
+ * from one side, in four rust tones plus a bleached deck, so the flank has a top, a
+ * middle and a shadowed turn of the bilge.
+ *
+ * The hold is open to the sky — a dark interior with frames standing in it — and sand
+ * has drifted against the low side. Authored one unit tall like every other card, so an
+ * instance's height scales the whole wreck.
+ */
+function shipGeometry(): THREE.BufferGeometry {
+  return crossedCardGeometry((triangle) => {
+    const hullLit = displayColour(0xcf7a4e);
+    const hull = displayColour(0xb35f3c);
+    const bilge = displayColour(0x7d4029);
+    const rust = displayColour(0xe6a05c);
+    const deck = displayColour(0xd9c19c);
+    const dark = displayColour(0x4a2a1d);
+    const drift = displayColour(0xd9ab74);
+    const quad = (
+      ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number, dx: number, dy: number,
+      colour: THREE.Color, z = 0,
+    ): void => {
+      triangle(ax, ay, bx, by, cx, cy, colour, z);
+      triangle(ax, ay, cx, cy, dx, dy, colour, z);
+    };
+    /** The list, applied to every authored point: bow down to the right by ~7 degrees. */
+    const LEAN = -0.12;
+    const tilt = (x: number, y: number): readonly [number, number] => [x, y + x * LEAN];
+    const q = (
+      ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number, dx: number, dy: number,
+      colour: THREE.Color, z = 0,
+    ): void => {
+      const a = tilt(ax, ay);
+      const b = tilt(bx, by);
+      const c = tilt(cx, cy);
+      const d = tilt(dx, dy);
+      quad(a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1], colour, z);
+    };
+    const t = (
+      ax: number, ay: number, bx: number, by: number, cx: number, cy: number,
+      colour: THREE.Color, z = 0,
+    ): void => {
+      const a = tilt(ax, ay);
+      const b = tilt(bx, by);
+      const c = tilt(cx, cy);
+      triangle(a[0], a[1], b[0], b[1], c[0], c[1], colour, z);
+    };
+
+    // Hull in three horizontal bands, the deck line rising toward the bow on the right.
+    q(-0.5, 0.04, 0.52, 0.04, 0.56, 0.2, -0.48, 0.15, bilge);
+    q(-0.48, 0.15, 0.56, 0.2, 0.6, 0.3, -0.47, 0.27, hull);
+    q(-0.47, 0.27, 0.6, 0.3, 0.62, 0.42, -0.46, 0.35, hullLit);
+    // Raked bow: the stem rises past the deck and the flare cuts back under it.
+    t(0.6, 0.3, 0.86, 0.5, 0.62, 0.42, hullLit);
+    t(0.52, 0.04, 0.86, 0.5, 0.6, 0.3, hull);
+    // Torn stern: the plating has gone in three jagged steps.
+    t(-0.5, 0.04, -0.48, 0.15, -0.66, 0.12, bilge);
+    t(-0.48, 0.15, -0.47, 0.27, -0.62, 0.24, hull);
+    t(-0.47, 0.27, -0.46, 0.35, -0.58, 0.3, hullLit);
+    // Boot stripe along the old waterline, and the bleached deck edge above it.
+    q(-0.49, 0.12, 0.58, 0.24, 0.58, 0.28, -0.48, 0.16, rust, -0.001);
+    q(-0.46, 0.35, 0.62, 0.42, 0.62, 0.46, -0.46, 0.39, deck, -0.002);
+    // The hold, open to the sky: dark interior with frames standing in it.
+    q(-0.3, 0.36, 0.16, 0.4, 0.16, 0.56, -0.3, 0.52, dark, -0.003);
+    for (const x of [-0.26, -0.14, -0.02, 0.1]) {
+      q(x, 0.37, x + 0.016, 0.37, x + 0.016, 0.56, x, 0.56, rust, -0.004);
     }
-    // Deckhouse, bridge windows and funnel, all set aft of midships.
-    quad(-0.34, 0.38, 0.02, 0.63, shadedHull, -0.003);
-    quad(-0.3, 0.5, -0.02, 0.56, rust, -0.004);
-    quad(-0.2, 0.63, -0.07, 0.8, rust, -0.004);
-    // Mast, still upright, with a broken yard.
-    quad(0.26, 0.38, 0.29, 0.95, shadedHull, -0.003);
-    triangle(0.12, 0.82, 0.29, 0.86, 0.29, 0.78, shadedHull, -0.004);
+    // Deckhouse aft: three tiers, each set back, with a lit window band.
+    q(-0.44, 0.36, -0.32, 0.37, -0.32, 0.58, -0.44, 0.57, hull, -0.003);
+    q(-0.42, 0.58, -0.33, 0.58, -0.33, 0.72, -0.42, 0.72, hullLit, -0.004);
+    q(-0.41, 0.62, -0.34, 0.62, -0.34, 0.66, -0.41, 0.66, dark, -0.005);
+    q(-0.4, 0.72, -0.35, 0.72, -0.35, 0.8, -0.4, 0.8, hull, -0.004);
+    // Funnel, raked aft, with its band.
+    q(-0.24, 0.56, -0.16, 0.56, -0.14, 0.78, -0.22, 0.78, hull, -0.004);
+    q(-0.235, 0.7, -0.155, 0.7, -0.15, 0.75, -0.23, 0.75, dark, -0.005);
+    // Mast and boom forward, still standing.
+    q(0.3, 0.42, 0.318, 0.42, 0.318, 0.92, 0.3, 0.92, hull, -0.003);
+    t(0.16, 0.8, 0.318, 0.86, 0.318, 0.76, hull, -0.004);
+    // Sand drifted against the low side, and one plate lying where it fell.
+    t(-0.66, 0.12, -0.5, 0.04, -0.72, 0.02, drift, -0.001);
+    q(0.56, 0.02, 0.8, 0.02, 0.78, 0.06, 0.58, 0.07, drift, -0.001);
+    q(-0.9, 0.0, -0.74, 0.0, -0.76, 0.05, -0.9, 0.04, bilge, -0.002);
   });
 }
 
 
-function cardMaterial(): THREE.MeshBasicMaterial {
+export function cardMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
@@ -220,21 +473,67 @@ function cardMaterial(): THREE.MeshBasicMaterial {
 }
 
 /**
- * Blocks are box instances: the geometry carries no colour attribute, so the
- * material MUST NOT ask for vertex colours. `vertexColors: true` here made the
- * shader read a disabled attribute — a constant black — and multiplied every
- * building by zero, which is why the sandstone city rendered as a silhouette.
- * Per-instance colour arrives through `instanceColor` alone.
+ * Blocks are box instances, and the material may only ask for vertex colours when the
+ * geometry actually carries them: `vertexColors: true` over a plain `BoxGeometry` made
+ * the shader read a disabled attribute — a constant black — and multiplied every
+ * building by zero, which is why the sandstone city once rendered as a silhouette.
+ * Per-building paint arrives through `instanceColor` either way.
  */
-function blockMaterial(colour: number): THREE.MeshBasicMaterial {
+function blockMaterial(toned: boolean): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
-    color: colour,
+    color: 0xffffff,
+    vertexColors: toned,
     transparent: true,
     opacity: 0,
     depthWrite: true,
     fog: true,
     toneMapped: true,
   });
+}
+
+/**
+ * A box whose six faces carry six tones, so an unlit building has a sunny side.
+ *
+ * The city is drawn with `MeshBasicMaterial` for the same reason the mirages are: it
+ * is refracted light rather than a surface, and a lit material put the sun behind the
+ * skyline as often as in front of it. The cost of that was a town of flat rectangles
+ * where two walls meeting at a corner were the same number, so the corner vanished
+ * and every block read as a sticker. One baked light direction — top brightest, +X
+ * sunlit, -X in shade — costs nothing and gives every box its third dimension back.
+ * `instanceColor` multiplies this, so a building's paint still arrives per instance.
+ */
+function tonedBoxGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  // BoxGeometry's groups run +X, -X, +Y, -Y, +Z, -Z, four vertices each.
+  const faceTone = [1.1, 0.72, 1.18, 0.58, 0.95, 0.8];
+  const position = geometry.getAttribute('position');
+  const colours = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const tone = faceTone[Math.floor(i / 4)] ?? 1;
+    colours[i * 3] = tone;
+    colours[i * 3 + 1] = tone;
+    colours[i * 3 + 2] = tone;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geometry;
+}
+
+/** The same treatment for a roof cone: lit on the +X side, shaded away from it. */
+function tonedConeGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.ConeGeometry(0.5, 1, 6);
+  const position = geometry.getAttribute('position');
+  const colours = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const x = position.getX(i);
+    const z = position.getZ(i);
+    const facing = (x * 0.82 + z * 0.3) / 0.5;
+    const tone = 0.74 + Math.max(0, facing) * 0.42;
+    colours[i * 3] = tone;
+    colours[i * 3 + 1] = tone;
+    colours[i * 3 + 2] = tone;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geometry;
 }
 
 /**
@@ -299,7 +598,8 @@ function pickPaint(paints: readonly CityPaint[], unit: number): CityPaint {
  */
 export class MirageTableau {
   private readonly root = new THREE.Group();
-  private readonly palms: THREE.InstancedMesh;
+  /** One instanced mesh per palm form; an instance picks its form by hash. */
+  private readonly palms: readonly THREE.InstancedMesh[];
   private readonly trees: THREE.InstancedMesh;
   private readonly cacti: THREE.InstancedMesh;
   private readonly blocks: THREE.InstancedMesh;
@@ -328,6 +628,16 @@ export class MirageTableau {
   private anchorZ = 0;
   private densityScale = 1;
   private sizeScale = 1;
+  /**
+   * How far a wreck reaches from its own origin per unit of length scale, MEASURED
+   * off the geometry rather than guessed.
+   *
+   * Two hand-written constants in a row got this wrong and the fleet kept crossing.
+   * A hull is not centred on its origin and it is two perpendicular cards, so its
+   * footprint is neither a half-length nor a circle about the middle: it is the
+   * furthest vertex in the XZ plane, and only the geometry knows where that is.
+   */
+  private readonly shipReach: number;
   private setbackM = 0;
   private previewActive = false;
   private previewOpacity = 0;
@@ -342,11 +652,11 @@ export class MirageTableau {
     const palmMaterial = cardMaterial();
     const treeMaterial = cardMaterial();
     const cactusMaterial = cardMaterial();
-    const stoneMaterial = blockMaterial(0xffffff);
-    const windowMaterial = blockMaterial(0xffffff);
-    const accentMaterial = blockMaterial(0xffffff);
-    const roofMaterial = blockMaterial(0xffffff);
-    const streetMaterial = blockMaterial(0xffffff);
+    const stoneMaterial = blockMaterial(true);
+    const windowMaterial = blockMaterial(false);
+    const accentMaterial = blockMaterial(true);
+    const roofMaterial = blockMaterial(true);
+    const streetMaterial = blockMaterial(false);
     const shipMaterial = cardMaterial();
     this.materials = [
       palmMaterial,
@@ -360,20 +670,24 @@ export class MirageTableau {
       streetMaterial,
     ];
 
-    this.palms = new THREE.InstancedMesh(palmGeometry(), palmMaterial, MAX_PLANTS);
+    this.palms = PALM_FORMS.map(
+      (_form, index) => new THREE.InstancedMesh(palmGeometry(index), palmMaterial, MAX_PLANTS),
+    );
     this.trees = new THREE.InstancedMesh(treeGeometry(), treeMaterial, MAX_PLANTS);
     this.cacti = new THREE.InstancedMesh(cactusGeometry(), cactusMaterial, MAX_PLANTS);
     const box = new THREE.BoxGeometry(1, 1, 1);
-    this.blocks = new THREE.InstancedMesh(box, stoneMaterial, MAX_BLOCKS);
+    this.blocks = new THREE.InstancedMesh(tonedBoxGeometry(), stoneMaterial, MAX_BLOCKS);
     this.cityWindows = new THREE.InstancedMesh(box, windowMaterial, MAX_CITY_WINDOWS);
-    this.cityAccents = new THREE.InstancedMesh(box, accentMaterial, MAX_CITY_ACCENTS);
+    this.cityAccents = new THREE.InstancedMesh(tonedBoxGeometry(), accentMaterial, MAX_CITY_ACCENTS);
     this.cityRoofs = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(0.5, 1, 6),
+      tonedConeGeometry(),
       roofMaterial,
       MAX_CITY_ROOFS,
     );
     this.cityStreets = new THREE.InstancedMesh(box, streetMaterial, MAX_CITY_STREETS);
-    this.ships = new THREE.InstancedMesh(shipGeometry(), shipMaterial, MAX_SHIPS);
+    const hull = shipGeometry();
+    this.shipReach = planarReach(hull);
+    this.ships = new THREE.InstancedMesh(hull, shipMaterial, MAX_SHIPS);
 
     for (const mesh of this.meshes) {
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -472,7 +786,7 @@ export class MirageTableau {
 
   private get meshes(): readonly THREE.InstancedMesh[] {
     return [
-      this.palms,
+      ...this.palms,
       this.trees,
       this.cacti,
       this.blocks,
@@ -511,11 +825,19 @@ export class MirageTableau {
           permutation[j] = swap;
         }
       }
+      const kind = permutation[index % 5]!;
       encounters.push({
         index,
         startS,
-        length: 680 + hashUnit3(this.seed, index, SALT_LENGTH) * 520,
-        kind: permutation[index % 5]!,
+        // A fleet is the one tableau read as a LANDSCAPE rather than as a verge: it
+        // needs to arrive, surround and leave, and 700 m of it goes by in half a
+        // minute. It also has to spread its hulls out, and the length is the only
+        // axis with room to do that, because their distance from the road is fixed.
+        length:
+          kind === 'ships'
+            ? 1_400 + hashUnit3(this.seed, index, SALT_LENGTH) * 260
+            : 680 + hashUnit3(this.seed, index, SALT_LENGTH) * 520,
+        kind,
       });
       startS += MIN_GAP_M + hashUnit3(this.seed, index, SALT_GAP) * GAP_RANGE_M;
       index++;
@@ -540,7 +862,13 @@ export class MirageTableau {
 
   private activate(index: number): void {
     this.activeEncounter = index;
-    this.activateEncounter(this.encounters[index]!, 1, 1, 0);
+    const encounter = this.encounters[index]!;
+    // Palms are the one grove worth seeing as ARCHITECTURE rather than as vegetation:
+    // a thin stand of giants reads as an oasis somebody could walk into, while three
+    // hundred ordinary ones are a hedge along the road. Tenfold fewer at three times
+    // the height is the same triangle budget spent on silhouettes you can tell apart.
+    const palms = encounter.kind === 'palms';
+    this.activateEncounter(encounter, palms ? 0.1 : 1, palms ? 3 : 1, 0);
   }
 
   /**
@@ -570,10 +898,10 @@ export class MirageTableau {
         this.buildPlants(this.palms, encounter, 360, 9, 185, 8, 18, PALM_TINT);
         break;
       case 'trees':
-        this.buildPlants(this.trees, encounter, 390, 9, 150, 7, 16, TREE_TINT);
+        this.buildPlants([this.trees], encounter, 390, 9, 150, 7, 16, TREE_TINT);
         break;
       case 'cacti':
-        this.buildPlants(this.cacti, encounter, 420, 8, 220, 3.5, 11, CACTUS_TINT);
+        this.buildPlants([this.cacti], encounter, 420, 8, 220, 3.5, 11, CACTUS_TINT);
         break;
       case 'city':
         this.buildCity(encounter);
@@ -584,8 +912,15 @@ export class MirageTableau {
     }
   }
 
+  /**
+   * Scatters one plant species along the encounter.
+   *
+   * `forms` is a set of interchangeable silhouettes sharing one material: an instance
+   * picks one by hash and lands in that form's own buffer, so a grove of three palms
+   * costs three draws instead of one and never repeats the same tree twice in a row.
+   */
   private buildPlants(
-    mesh: THREE.InstancedMesh,
+    forms: readonly THREE.InstancedMesh[],
     encounter: Encounter,
     count: number,
     lateralMin: number,
@@ -595,34 +930,47 @@ export class MirageTableau {
     tint: THREE.Color,
   ): void {
     const instanceCount = Math.max(1, Math.round(count * this.densityScale));
+    const used = new Array<number>(forms.length).fill(0);
     for (let i = 0; i < instanceCount; i++) {
-      const along = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT);
+      const key = encounter.index * MAX_PLANTS + i;
+      const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
       const s = encounter.startS + 8 + along * along * (encounter.length - 16);
-      const side = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
-      const depth = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_PLACEMENT + 2);
+      const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
+      const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
       const lateral = side * (this.setbackM + lateralMin + depth * depth * (lateralMax - lateralMin));
       const point = this.road.offsetPoint(s, lateral);
       const ground = this.terrain.heightAt(point.x, point.z, s);
-      const height = (heightMin + hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE) * (heightMax - heightMin)) * this.sizeScale;
-      const widthScale = 0.82 + hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE + 1) * 0.36;
-      const yaw = hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_SHAPE + 2) * Math.PI;
+      const height = (heightMin + hashUnit3(this.seed, key, SALT_SHAPE) * (heightMax - heightMin)) * this.sizeScale;
+      const widthScale = 0.82 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 0.36;
+      const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI;
 
-      this.setTransform(mesh, i, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, height * widthScale, height, height * widthScale, yaw);
+      const form = Math.min(
+        forms.length - 1,
+        Math.floor(hashUnit3(this.seed, key, SALT_VARIANT) * forms.length),
+      );
+      const mesh = forms[form]!;
+      const slot = used[form]!;
+      if (slot >= MAX_PLANTS) continue;
+      used[form] = slot + 1;
+
+      this.setTransform(mesh, slot, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, height * widthScale, height, height * widthScale, yaw);
       // The instance colour MULTIPLIES the card palette, so it is a haze tint near
       // white rather than a second base colour. Two dark factors multiplied is what
       // made a grove black; here the far rows are lifted toward the shimmering air
       // and the near ones keep their own green.
       const lift =
         (0.9 + depth * 0.3) *
-        (0.94 +
-          hashUnit3(this.seed, encounter.index * MAX_PLANTS + i, SALT_COLOUR) * 0.14);
+        (0.94 + hashUnit3(this.seed, key, SALT_COLOUR) * 0.14);
       this.colour.copy(tint).multiplyScalar(lift);
-      mesh.setColorAt(i, this.colour);
+      mesh.setColorAt(slot, this.colour);
     }
-    mesh.count = instanceCount;
-    mesh.visible = true;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    for (let form = 0; form < forms.length; form++) {
+      const mesh = forms[form]!;
+      mesh.count = used[form]!;
+      mesh.visible = mesh.count > 0;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   /**
@@ -792,7 +1140,10 @@ export class MirageTableau {
           this.cityRoofs,
           roofCount++,
           point.x - this.anchorX,
-          y + totalHeight + roofHeight * 0.5,
+          // Sunk, not seated. The cone's base cap and the block's top face are the same
+          // plane otherwise, and two coplanar faces at a kilometre is a shimmering roof
+          // — the one artefact in the city you can see from the road.
+          y + totalHeight + roofHeight * 0.5 - ROOF_SINK_M,
           point.z - this.anchorZ,
           width * 0.86,
           roofHeight,
@@ -878,12 +1229,22 @@ export class MirageTableau {
    *
    * A wreck is a card up to seventy metres long, so placing them by hash alone piled
    * them into each other: the field read as a scrapyard of intersecting planes. Each
-   * candidate now has to clear the hulls already down by the sum of their footprint
-   * radii, and a slot that cannot find room after `SHIP_ATTEMPTS` tries is simply left
+   * candidate has to clear the hulls already down by the sum of their footprint radii,
+   * and a slot that cannot find room after `SHIP_ATTEMPTS` tries is simply left
    * empty — the fleet thins out instead of overlapping.
+   *
+   * THE FOOTPRINT IS A SQUARE'S DIAGONAL, NOT A HALF-LENGTH. A wreck is two
+   * perpendicular cards, so it reaches its full length along X AND along Z: a circle
+   * sized to half the hull left the corners of one pair free to sit inside the other,
+   * and the wrecks that crossed were the ones lying at right angles to each other.
+   * The card runs -0.72 to 0.78 of its length, so the honest radius is 0.78 times the
+   * root of two.
    */
   private buildShips(encounter: Encounter): void {
-    const slots = Math.max(1, Math.round(110 * this.densityScale));
+    // Half the fleet it was. The count was set against a 700 m encounter; over 1.5 km
+    // the same hulls would read as a breaker's yard rather than as a stranded fleet,
+    // and the clearance test would spend its attempts refusing them.
+    const slots = Math.max(1, Math.round(55 * this.densityScale));
     let placed = 0;
     for (let i = 0; i < slots; i++) {
       const key = encounter.index * MAX_SHIPS + i;
@@ -891,9 +1252,7 @@ export class MirageTableau {
       // ranges from a coaster to something that took a dock to build.
       const height = (6 + hashUnit3(this.seed, key, SALT_SHAPE) * 15) * this.sizeScale;
       const length = height * (2.2 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 1.3);
-      // The card runs from -0.72 to 0.78 along its length, so the footprint that has
-      // to stay clear of the neighbours is wider than a half-length.
-      const radius = length * 0.7;
+      const radius = length * this.shipReach;
       let x = 0;
       let z = 0;
       let ground = 0;

@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+### Added
+
+- Lakes. Once every 200-300 km the desert is searched beside the road for a closed
+  hollow, and where it finds one deep and wide enough, that hollow is full of water,
+  ringed with dense grass and fringed with palms. It offers one about every 875 km on
+  seed 1337 — roughly a third of the attempts — and the rest of the time there is
+  nothing there, which is the correct answer rather than a shortfall.
+  NOTHING IS DUG. `Terrain` is byte-for-byte the road-only world, physics is untouched
+  and the tile worker never hears about any of it: the water is a reader. The window is
+  sampled through the tiles' own ground function, every depression in it is filled to
+  its own lip by a priority flood from the window's edge, and the largest pool becomes
+  the lake. A closed basin fills; an open slope fills to nothing.
+  It costs one transparent draw for the water, three instanced draws for the fringe and
+  a texture-offset update per frame while it is visible, and nothing at all when it is
+  not. The search is sliced through the same streaming budget the terrain tiles use, at
+  under 3 ms a frame. The surface is a stock `MeshStandardMaterial` — fog, the sky's
+  PMREM reflection and the sun's specular come free with it — and the whole shoreline is
+  BAKED: every vertex carries the water's depth over the ground as an RGBA vertex
+  colour, so the soft edge, the foam strip and the depth tint cost no shader, no depth
+  read and no second pass. Knowing the boundary exactly is also what lets the grass ring
+  the water rather than the site.
+  It vanishes as you reach it. Not on leaving the road, like the tableaus — driving to a
+  lake IS the encounter — but by APPROACH: full water until the last few dozen metres,
+  gone within 10 m of the waterline, and back when you pull away. The fade is a function
+  of where you stand, so it is reversible by construction and nobody has to write
+  hydrolock, buoyancy or a walk home. It is also gone if the eye drops to the water's
+  level, because a transparent sheet seen from under is a colour filter over the screen.
+  The water's colour is taken from the sand's. `desertPaletteAt` walks the ground's hue
+  right around the wheel over the length of the road, so the lake is pinned blue and
+  slides off the sand only where the sand itself goes blue.
+  `tools/water.ts` measures all of it, and the pause menu grows a dev-only
+  "Jump to Lake" that walks forward to the next site that actually holds water.
+- Distant mirages are vessels now. The gate, the arches, the colonnade and the
+  balanced sign were four arrangements of one box in one colour, and a grammar of
+  boxes reads as scaffolding; a second attempt built six assembled objects and only
+  one of them worked. The one that worked was the amphora, and not because it had
+  more detail — because it was the single form whose whole identity is one silhouette
+  curve. Anything assembled from parts has proportions to get wrong, and at a
+  kilometre a chair with the wrong members is a ladder and a ribcage is a fence.
+  So there are ten vessels and nothing else: amphora, pithos, jug, oil flask, krater,
+  hydria, kylix, decanter, lidded urn and bottle. Each is a hand-placed outline turned
+  on a lathe — sixteen pairs of numbers that cannot be out of proportion with each
+  other because there are no parts. A new vessel costs one array. Handles are not
+  placed by hand either: the distance from the axis is read off the profile at the
+  handle's own height, so a loop leans on the clay instead of floating beside it or
+  sinking into it, and it stays there when the seed restretches the jar.
+  The seed picks the shape and varies its height and stoutness by about a fifth — no
+  more, because past that a jar stops being the jar it was drawn as.
+
 ### Fixed
 
 - Traffic no longer crawls. A driver's speed is scaled by the surface under it, and
@@ -16,6 +65,39 @@
   careful driver's own cruise went from 70 to 80 km/h and a hurried one's from 95 to
   105; frantic keeps its 130 because the car runs out first — a catalogue saloon
   measures 108 km/h flat out on this road's asphalt.
+- The ink outline no longer stops at the horizon. It was gated on screen height,
+  which kept the Sobel pass off the sky and every star point but also left every
+  silhouette that rises above the horizon undrawn: a tree got a line round its trunk
+  and none round its crown. The sky, the stars and the planets all render without
+  writing depth, so the gate is now the scene depth the same shader already samples
+  for the sand veil. Canopies, roofs, masts and the mountain skyline keep their line;
+  the night sky stays clean.
+- Wrecks no longer stand inside each other. Two hand-picked footprint radii in a row
+  were too small, so hulls at right angles cleared the spacing test and crossed into
+  an X. The radius is now MEASURED off the geometry — the furthest vertex from the
+  hull's origin in the ground plane — which is exact for a card that is not centred
+  on its origin and reaches its full length along both axes.
+  The fleet also stands sixty metres off the asphalt instead of thirty-four — a
+  seventy-metre hull at the verge is a wall the road runs along — spreads over 1.5 km
+  instead of 700 m, and carries half the hulls, which over the longer span reads as a
+  stranded fleet rather than a breaker's yard.
+- Canopies no longer boil. The acacia's seven foliage clumps were separated by
+  thousandths of the tree's height and two pairs shared an offset exactly, which is
+  far below the depth buffer's resolution at the range a tableau is seen from: the
+  shadow and the lit cap swapped places pixel by pixel as the camera moved. The crown
+  is now spread through real depth, interleaved so the clumps that overlap most on
+  screen are the ones furthest apart in z — and in the card's perpendicular copy that
+  same spread reads as canopy width.
+- Palms are three forms instead of one, and a frond is an arc with a lit upper half
+  and a shaded underside rather than a flat triangle of one green — the old crown was
+  a starfish. A palm encounter now stands ten times thinner at three times the height:
+  a sparse stand of giants is an oasis you could walk into, where three hundred
+  ordinary ones were a hedge along the road.
+- The city has a sunny side. Its blocks are unlit boxes, so two walls meeting at a
+  corner were the same number and every building read as a sticker; the box and the
+  roof cone now carry a baked light direction in their vertex colours, which costs
+  nothing and gives the skyline its third dimension back.
+
 - An overtake is now a pass rather than a detour. Ordinary and hurried traffic differ
   by 24 km/h on cracked asphalt and 10 on a steep gravel climb, where both are near
   full throttle; the two used to be separated by 12-21 km/h from a 26-31 km/h base,

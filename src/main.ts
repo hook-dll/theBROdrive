@@ -48,6 +48,7 @@ import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
 import { DistantMirage } from './render/mirage';
 import { MirageTableau } from './render/mirage-tableau';
+import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
@@ -170,6 +171,12 @@ const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
  * enough that it cannot reach past one wreck to another at a gas stop.
  */
 const DEV_FLIP_RADIUS = 12;
+/**
+ * How far past the searched window `devJumpToLake` sets the player down. Outside it, so
+ * whatever hollow the desert offered is in front of the camera rather than under it, and
+ * well outside the approach fade, so the water is at full opacity.
+ */
+const DEV_LAKE_WINDOW_MARGIN_M = 40;
 
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
@@ -376,6 +383,13 @@ async function boot(): Promise<void> {
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
+  // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
+  // dissolves as the player reaches the shore.
+  const lakeWater = new LakeWater(
+    renderer.scene,
+    { seed: world.seed, road, terrain, roadDistance },
+    origin,
+  );
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
@@ -875,6 +889,9 @@ async function boot(): Promise<void> {
       worldWork,
       streamer,
       desert,
+      lakeWater,
+      // Same shortcut as the pause-menu button, for a console or a scripted session.
+      jumpToLake: (index = 0) => devJumpToLake(index),
       tumbleweeds,
       traffic,
       state: () => world.state,
@@ -1588,6 +1605,40 @@ async function boot(): Promise<void> {
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
     mirage.update(activeS, sky.dayFactor);
     mirageTableau.update(activeS, activeLateral, sky.dayFactor);
+    // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
+    // absolute player position; the bake is sliced through the streaming budget the
+    // terrain tiles use.
+    lakeWater.update(
+      cam.x + origin.x,
+      cam.y,
+      cam.z + origin.z,
+      activeS,
+      frameId,
+      worldWork,
+      frameDt,
+    );
+    // A site is only an attempt, and about two in three windows hold no hollow worth
+    // filling. Rather than make a tester press the button until one does, the dev jump
+    // leaves a marker and this walks it forward until a site comes up wet — then sets
+    // them down somewhere the water is actually in front of them.
+    if (import.meta.env.DEV && devLakeSeek >= 0) {
+      if (lakeWater.ready) {
+        devLakeSeek = -1;
+        const view = lakeWater.viewpoint();
+        if (view) {
+          player.teleport(view.x, view.y + 1.2, view.z, activeS);
+          player.pushState();
+          camera.setYaw(view.yaw);
+        }
+      } else if (lakeWater.phaseName === 'dry') {
+        devLakeSeek++;
+        if (devLakeSeek < lakeWater.sites.length) devJumpToLake(devLakeSeek);
+        else {
+          devLakeSeek = -1;
+          hud.setToast('no lake left on this seed');
+        }
+      }
+    }
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
@@ -2007,6 +2058,59 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * The dev shortcut behind `PauseHooks.jumpToLake`.
+   *
+   * A lake is attempted once per 200-300 km, so reaching one by driving is hours. This
+   * puts the player on the road side of the searched window, far enough out that the
+   * water is at full opacity (the approach fade is metres, not hundreds —
+   * render/lakewater.ts), facing into it. The driven car comes along through the same
+   * `rescueTo` the underworld recovery uses, so the two never end up in different
+   * counties.
+   *
+   * A site is only an ATTEMPT: about two in three windows hold no hollow worth filling.
+   * The index is left in `devLakeSeek`, and the render loop walks it forward until a
+   * site comes up wet, so one press lands on water.
+   */
+  let devLakeSeek = -1;
+  const devJumpToLake = (index: number): void => {
+    const sites = lakeWater.sites;
+    if (sites.length === 0) {
+      hud.setToast('no lake sites on this seed');
+      return;
+    }
+    const clamped = Math.min(sites.length - 1, Math.max(0, Math.floor(index)));
+    devLakeSeek = clamped;
+    const site = sites[clamped]!;
+    const centre = road.offsetPoint(site.s, site.lateral);
+    const roadPoint = road.sampleAt(site.s);
+    // Outward from the window's centre toward the centreline, then back off past its edge.
+    const toRoadX = roadPoint.x - centre.x;
+    const toRoadZ = roadPoint.z - centre.z;
+    const span = Math.hypot(toRoadX, toRoadZ) || 1;
+    const standOff = LakeWater.lattice.reach + DEV_LAKE_WINDOW_MARGIN_M;
+    const standX = centre.x + (toRoadX / span) * standOff;
+    const standZ = centre.z + (toRoadZ / span) * standOff;
+    const standY = terrain.heightAt(standX, standZ, site.s);
+    // Facing the window: the road frame's forward is (sin h, cos h), and so is the
+    // player's yaw, so one `atan2` serves both.
+    const yaw = Math.atan2(centre.x - standX, centre.z - standZ);
+
+    const drivingId = world.state.player.drivingCarId;
+    const driven = drivingId ? vehicles.get(drivingId) : undefined;
+    if (driven) {
+      driven.rescueTo(standX, standY - driven.contactPlaneLocalY, standZ, yaw, 0);
+      driven.pushTransform();
+    }
+    player.teleport(standX, standY + 1.2, standZ, site.s);
+    player.pushState();
+    // The camera's yaw only: the player's own is private and follows the look anyway.
+    camera.setYaw(yaw);
+    hud.setToast(
+      `lake site ${site.index + 1} of ${sites.length}, ${(site.s / 1000).toFixed(0)} km, ` +
+        `${Math.abs(site.lateral).toFixed(0)} m off the road`,
+    );
+  };
+  /**
    * The dev shortcut behind `PauseHooks.seatInNearestCar`.
    *
    * Getting into a car needs a look ray at a door, which a human does without
@@ -2104,6 +2208,10 @@ async function boot(): Promise<void> {
     // Development only, and for one reason: a scripted session cannot aim a look
     // ray at a door, so without this the real game is unobservable to automation.
     seatInNearestCar: import.meta.env.DEV ? devSeatInNearestCar : undefined,
+    // A lake is one per 200-300 km, so reaching one by driving is a couple of hours.
+    // Development only, and for the same reason the seat shortcut exists: without it
+    // the feature cannot be looked at.
+    jumpToLake: import.meta.env.DEV ? devJumpToLake : undefined,
   };
 
   /**
