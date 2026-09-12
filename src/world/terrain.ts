@@ -118,11 +118,12 @@ const RIPPLE_FULL = 55;
  *                         mesh kick rms/p99    body heave rms/p95 (g)
  *   road (reference)        0.18-0.31 / 0.5-0.9      0.101 / -
  *   desert before           0.095 / 0.32             0.317 / 0.61
- *   desert now              0.300 / 1.09             0.707 / 1.38
+ *   desert, 0.24 m         0.300 / 1.09             0.707 / 1.38
+ *   desert, 0.36 m         0.40-0.44 / 1.52-1.75       - / -
  */
 const CORRUGATION_SPACING = 5;
 const CORRUGATION_COHERENCE = 48;
-const CORRUGATION_AMPLITUDE = 0.24;
+const CORRUGATION_AMPLITUDE = 0.36;
 const CORRUGATION_BEND_WAVELENGTH = 420;
 const CORRUGATION_BEND = 26;
 const CORRUGATION_PATCH_LENGTH = 1500;

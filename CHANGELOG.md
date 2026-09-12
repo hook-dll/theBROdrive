@@ -51,6 +51,17 @@
   The seed picks the shape and varies its height and stoutness by about a fifth — no
   more, because past that a jar stops being the jar it was drawn as.
 
+### Changed
+
+- Open-desert corrugation is more pronounced: its ten-metre wave amplitude rises from
+  0.24 m to 0.36 m. The shipped heightfield bench measures 0.40-0.44 m/s RMS kick
+  along the open-desert samples at 60 km/h, while the standstill escape census remains
+  at 0% blocked and 0% stranded across 501,696 position/heading pairs.
+- New saves start with ink strength at 20% instead of 50%; existing saved preferences
+  remain unchanged.
+- Ambient traffic now keeps dipped headlights on throughout the day and night so
+  approaching and receding cars remain legible against the desert.
+
 ### Fixed
 
 - Traffic no longer crawls. A driver's speed is scaled by the surface under it, and

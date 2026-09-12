@@ -685,6 +685,7 @@ export class RoadTraffic {
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
     autopilot.setTrafficRecoveryPolicy(true);
+    autopilot.setLowBeamsAlwaysOn(true);
     autopilot.setEngaged(true);
     this.carList.push({
       id: request.id,

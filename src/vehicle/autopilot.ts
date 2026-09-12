@@ -702,6 +702,8 @@ export class Autopilot {
   private daylightFactor = 1;
   private oncomingGap = Infinity;
   private automaticLightsOn = false;
+  /** Ambient traffic keeps dipped beams lit in daylight as a visibility aid. */
+  private lowBeamsAlwaysOn = false;
   /**
    * Whether this driver still owns the light switch. Traffic always does; the
    * player's autopilot gives it up the moment the driver presses the switch itself,
@@ -827,6 +829,9 @@ export class Autopilot {
   }
   setPassingEnabled(enabled: boolean): void {
     this.passingEnabled = enabled;
+  }
+  setLowBeamsAlwaysOn(enabled: boolean): void {
+    this.lowBeamsAlwaysOn = enabled;
   }
   /** Supplies ambient light and road distance to the nearest approaching vehicle. */
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
@@ -1715,6 +1720,10 @@ export class Autopilot {
 
   private updateAutomaticHeadlights(vehicle: Vehicle): void {
     if (!this.automaticLightsOwned) return;
+    if (this.lowBeamsAlwaysOn) {
+      vehicle.setHeadlights('low');
+      return;
+    }
     if (this.automaticLightsOn) {
       if (this.daylightFactor >= AUTO_LIGHTS_OFF_DAY_FACTOR) this.automaticLightsOn = false;
     } else if (this.daylightFactor <= AUTO_LIGHTS_ON_DAY_FACTOR) {
