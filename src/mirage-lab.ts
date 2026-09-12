@@ -169,8 +169,13 @@ function makeRoad(road: Road): THREE.Mesh {
   for (let i = 0; i < segments; i++) {
     const s0 = CAMERA_S - 120 + (i / segments) * GROUND_LENGTH;
     const s1 = CAMERA_S - 120 + ((i + 1) / segments) * GROUND_LENGTH;
-    vertex(s0, -ROAD_HALF_WIDTH); vertex(s1, -ROAD_HALF_WIDTH); vertex(s1, ROAD_HALF_WIDTH);
-    vertex(s0, -ROAD_HALF_WIDTH); vertex(s1, ROAD_HALF_WIDTH); vertex(s0, ROAD_HALF_WIDTH);
+    // The asphalt is not one width any more (`roadprofile.ts`), and the lab's ground
+    // is the real terrain, whose corridor follows the real edge. A fixed strip here
+    // would leave a gap or overlap wherever the road happens to be opened out.
+    const h0 = road.halfWidthAt(s0);
+    const h1 = road.halfWidthAt(s1);
+    vertex(s0, -h0); vertex(s1, -h1); vertex(s1, h1);
+    vertex(s0, -h0); vertex(s1, h1); vertex(s0, h0);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));

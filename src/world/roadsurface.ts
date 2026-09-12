@@ -1,6 +1,6 @@
 import { hash01, Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { NODE_SPACING, ROAD_HALF_WIDTH, type Road } from './road';
+import { NODE_SPACING, type Road } from './road';
 import { roadConditionAt } from './gradient';
 
 /**
@@ -141,14 +141,18 @@ const POTH_MAX_RAMP = 0.055;
  */
 const POTH_MAX_DEPTH = 0.12;
 /**
- * Lateral lines (m) a pothole may centre on.
- *
- * These MUST be columns of the road mesh's own cross-section (roadmesh.ts
- * LATERALS), so the deeper point is sampled by the collider. Wheel paths and the
- * spaces between them are both eligible: a driver can choose a line, not just absorb
- * a rumble strip.
+ * Lateral lines (m) a pothole may centre on. The narrow catalogue stays separate so
+ * every existing one-lane slot retains its exact random choice; wider asphalt adds
+ * only outside columns.
  */
 const POTH_LATERALS: readonly number[] = [-2.45, -1.65, -0.85, 0, 0.85, 1.65, 2.45];
+const WIDE_POTH_LATERALS: readonly number[] = [
+  -5.25, -4.85, -4.05, -3.25,
+  ...POTH_LATERALS,
+  3.25, 4.05, 4.85, 5.25,
+];
+/** Do not seed an outer-path hole until its centre is actually on the taper. */
+const WIDE_POTHOLE_MIN_HALF_WIDTH = 5.25;
 
 // Hash tags keep each pothole property's random stream independent.
 const TAG_POTH_BURST = 0x50d4b7;
@@ -173,11 +177,16 @@ interface Pothole {
  * Shape of the pothole candidate at `slot`, before the decay-scaled occupancy
  * test. Deterministic in (seed, slot), so neighbouring chunks agree across seams.
  */
-function potholeForSlot(seed: number, slot: number): Pick<Pothole, 's' | 'lateral' | 'diameter'> {
+function potholeForSlot(
+  seed: number,
+  slot: number,
+  halfWidth: number,
+): Pick<Pothole, 's' | 'lateral' | 'diameter'> {
   const off = Math.floor(hash01(seed, slot, TAG_POTH_OFFSET) * SUB_DIVISIONS);
+  const laterals = halfWidth < WIDE_POTHOLE_MIN_HALF_WIDTH ? POTH_LATERALS : WIDE_POTH_LATERALS;
   return {
     s: POTH_SLOT * slot + off * SURFACE_STEP,
-    lateral: POTH_LATERALS[Math.floor(hash01(seed, slot, TAG_POTH_LATERAL) * POTH_LATERALS.length)]!,
+    lateral: laterals[Math.floor(hash01(seed, slot, TAG_POTH_LATERAL) * laterals.length)]!,
     diameter: POTH_MIN_D + (POTH_MAX_D - POTH_MIN_D) * hash01(seed, slot, TAG_POTH_DIAMETER),
   };
 }
@@ -187,13 +196,13 @@ function potholeForSlot(seed: number, slot: number): Pick<Pothole, 's' | 'latera
  * Occupancy rises quadratically with decay and is bursty (0.35..1 multiplier), so
  * holes cluster on ruined stretches and almost vanish from maintained ones.
  */
-function potholeAtSlot(seed: number, slot: number, decay: number): Pothole | null {
+function potholeAtSlot(seed: number, slot: number, decay: number, halfWidth: number): Pothole | null {
   const burst = 0.35 + 0.65 * hash01(seed, slot, TAG_POTH_BURST);
   // Floor + quadratic decay growth: pristine road still gets the odd patched hole,
   // ruined road gets plenty.
   const decayFactor = POTH_DECAY_FLOOR + (1 - POTH_DECAY_FLOOR) * decay * decay;
   if (hash01(seed, slot, TAG_POTH_OCCUPANCY) >= POTH_DENSITY * decayFactor * burst) return null;
-  const shape = potholeForSlot(seed, slot);
+  const shape = potholeForSlot(seed, slot, halfWidth);
   // Decay drives HOW MANY holes there are (above), not how shallow each one is. A
   // hole in maintained tarmac is a hole — the old double taper (this factor times
   // another `0.5 + 0.5 * decay`) left the early road's holes 10-20 mm deep, which
@@ -215,11 +224,17 @@ function potholeAtSlot(seed: number, slot: number, decay: number): Pothole | nul
  * vertex rows, so the cosine profile's centre is always exactly sampled; the
  * 1.333 m grid cannot resolve anything smaller anyway.
  */
-function potholeAt(seed: number, s: number, lateral: number, decay: number): number {
+function potholeAt(
+  seed: number,
+  s: number,
+  lateral: number,
+  decay: number,
+  halfWidth: number,
+): number {
   // The +1e-9 guards a float-boundary trap: row s = 3j * (4/3) rounds to just
   // BELOW 4j, so floor(s / 4) alone would look up slot j-1 and silently drop every
   // pothole anchored at a slot start. The epsilon is far below any real feature.
-  const hole = potholeAtSlot(seed, Math.floor(s / POTH_SLOT + 1e-9), decay);
+  const hole = potholeAtSlot(seed, Math.floor(s / POTH_SLOT + 1e-9), decay, halfWidth);
   if (!hole) return 0;
   const ds = s - hole.s;
   const dl = lateral - hole.lateral;
@@ -261,6 +276,7 @@ export class SurfaceField {
     z: number,
     decay: number,
     surface: SurfaceType,
+    halfWidth: number,
   ): number {
     const und =
       UND_AMP * (UND_FLOOR + (1 - UND_FLOOR) * decay) *
@@ -269,14 +285,14 @@ export class SurfaceField {
       BUMP_AMP[surface] * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
     const edgeT = Math.max(
       0,
-      Math.min(1, (Math.abs(lateral) - (ROAD_HALF_WIDTH - EDGE_BREAK_WIDTH)) / EDGE_BREAK_WIDTH),
+      Math.min(1, (Math.abs(lateral) - (halfWidth - EDGE_BREAK_WIDTH)) / EDGE_BREAK_WIDTH),
     );
     const edgeBreak =
       EDGE_BREAK_DEPTH *
       decay *
       Math.sin(Math.PI * edgeT) *
       Math.max(0, this.bumpNoise.at(x * 0.08 + 19.7, z * 0.08 - 7.3));
-    return und + bump - edgeBreak + potholeAt(this.seed, s, lateral, decay);
+    return und + bump - edgeBreak + potholeAt(this.seed, s, lateral, decay, halfWidth);
   }
 }
 
@@ -296,9 +312,11 @@ export function roadSurfaceY(
 ): number {
   const sample = road.sampleAt(s);
   const cond = roadConditionAt(s);
+  // Camber remains curvature times the queried lateral: widening changes the edge,
+  // not the banking law of a given point on the mat.
   return (
     sample.y -
     sample.curvature * CAMBER_SCALE * lateral +
-    field.displacement(s, lateral, x, z, cond.decay, cond.surface)
+    field.displacement(s, lateral, x, z, cond.decay, cond.surface, road.halfWidthAt(s))
   );
 }

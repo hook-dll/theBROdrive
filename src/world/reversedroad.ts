@@ -57,6 +57,27 @@ export class ReversedRoad implements DriveRoad {
     return this.forward.offsetPoint(this.forwardS(s), -lateral, out);
   }
 
+  halfWidthAt(s: number): number {
+    return this.forward.halfWidthAt(this.forwardS(s));
+  }
+
+  lanesPerSideAt(s: number): number {
+    return this.forward.lanesPerSideAt(this.forwardS(s));
+  }
+
+  /**
+   * THE SAME NUMBER AS THE FORWARD ROAD, NOT ITS NEGATION.
+   *
+   * Every lateral in this view is already mirrored — `project` negates what the
+   * forward road reports and `offsetPoint` negates what it is given — so a lane
+   * centre of -1.45 means "1.45 m right of MY travel" in whichever view asks for it.
+   * Negating here put the oncoming stream on the forward stream's side of the crown:
+   * traffic spawned into occupied lanes, and what did spawn drove at it head-on.
+   */
+  laneCentreAt(s: number, lane: number): number {
+    return this.forward.laneCentreAt(this.forwardS(s), lane);
+  }
+
   private forwardS(s: number): number {
     return Math.max(0, Math.min(this.length, this.length - s));
   }

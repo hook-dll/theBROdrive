@@ -19,6 +19,7 @@ import { hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
+import { fitGround } from './footprint';
 import { oilCapacity } from '../parts/registry';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
@@ -123,14 +124,22 @@ function layout(road: Road, terrain: Terrain): HomesteadLayout {
     ref.z + az * u + fz * v,
   ];
 
-  let top = -Infinity;
-  for (let u = 4.0; u <= PAD_U1; u += 2) {
-    for (let v = PAD_V0; v <= PAD_V1; v += 2) {
-      const [x, z] = toWorld(u, v);
-      const h = terrain.heightAt(x, z, HOMESTEAD_S);
-      if (h > top) top = h;
-    }
-  }
+  // The slab tops the HIGHEST ground under its footprint (see SLAB_LIFT), which is
+  // the one number `fitGround` is asked for here; the pad is poured level because a
+  // garage floor is, and its thickness carries the rest.
+  const uc = (4.0 + PAD_U1) / 2;
+  const vc = (PAD_V0 + PAD_V1) / 2;
+  const [cx, cz] = toWorld(uc, vc);
+  const top = fitGround(
+    terrain,
+    cx,
+    cz,
+    ref.heading,
+    (PAD_U1 - 4.0) / 2,
+    (PAD_V1 - PAD_V0) / 2,
+    HOMESTEAD_S,
+    9,
+  ).maxY;
 
   return { floorY: top + SLAB_LIFT, roadY: ref.y, ax, az, fx, fz, toWorld };
 }

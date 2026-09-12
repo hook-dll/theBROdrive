@@ -364,6 +364,19 @@ function fieldRings(): { magnitudes: number[]; laterals: number[] } {
 }
 
 /**
+ * Keeps the fan's fixed ring topology while its near-road columns follow the local
+ * asphalt edge. The outer detail seam remains at `DETAIL_REACH`; only its intervening
+ * columns compress through a wide stretch, so strips, berm rings and collider counts
+ * do not change.
+ */
+function rowMagnitude(road: Road, s: number, magnitude: number): number {
+  const halfWidth = road.halfWidthAt(s);
+  if (magnitude < CORRIDOR_INNER) return halfWidth - ROAD_SEAM_OVERLAP;
+  if (magnitude >= DETAIL_REACH) return magnitude;
+  return halfWidth + (magnitude - CORRIDOR_INNER) * (DETAIL_REACH - halfWidth) / (DETAIL_REACH - CORRIDOR_INNER);
+}
+
+/**
  * Desert BASE height at a world position: `Terrain.openBase` with the nearest-branch
  * distance interpolated off the lattice. A pure function of x and z, which is what
  * makes every chunk agree.
@@ -373,7 +386,12 @@ function fieldRings(): { magnitudes: number[]; laterals: number[] } {
  * it under every refined vertex.
  */
 function worldBase(terrain: Terrain, roadDistance: RoadDistance, x: number, z: number): number {
-  return terrain.openBase(x, z, roadDistance.distAt(x, z, DIST_LATTICE));
+  return terrain.openBase(
+    x,
+    z,
+    roadDistance.distAt(x, z, DIST_LATTICE),
+    roadDistance.ownerAt(x, z, DIST_LATTICE),
+  );
 }
 
 /**
@@ -384,12 +402,12 @@ function worldBase(terrain: Terrain, roadDistance: RoadDistance, x: number, z: n
  * ribbon's own vertex at that exact `s`, which only the frame knows; past 30 m the two
  * paths are the same arithmetic (the berm is zero that close in), so the fade is between
  * values that agree, and it stays as the guarantee that they must.
- *
  * The last term is the seam tuck: terrain overlaps the asphalt edge slightly and
  * samples the same road surface there, biased just under the ribbon so the floating
  * pixel seam closes without a coplanar z-fight.
  */
 function fieldHeight(
+  road: Road,
   terrain: Terrain,
   roadDistance: RoadDistance,
   s: number,
@@ -414,7 +432,7 @@ function fieldHeight(
     const world = worldBase(terrain, roadDistance, x, z);
     y = world + (frameY - world) * frameWeight;
   }
-  if (!isApron && absLateral <= CORRIDOR_INNER) y -= ROAD_SEAM_DROP;
+  if (!isApron && absLateral <= road.halfWidthAt(s)) y -= ROAD_SEAM_DROP;
   return y;
 }
 
@@ -450,12 +468,15 @@ export function drawnGroundY(
   const side = lateral < 0 ? -1 : 1;
 
   // Ring bracket. The list is short and ascending, and a linear walk over ~30 entries
-  // beats a binary search's branches at this size.
+  // beats a binary search's branches at this size. Compare against this row's shifted
+  // rings, not the narrow-road reference list.
   let ri = 0;
-  while (ri < magnitudes.length - 2 && magnitudes[ri + 1]! < absLateral) ri++;
+  while (ri < magnitudes.length - 2 && rowMagnitude(road, s, magnitudes[ri + 1]!) < absLateral) ri++;
   const inner = magnitudes[ri]!;
   const outer = magnitudes[ri + 1]!;
-  const across = Math.min(1, Math.max(0, (absLateral - inner) / (outer - inner)));
+  const innerAtS = rowMagnitude(road, s, inner);
+  const outerAtS = rowMagnitude(road, s, outer);
+  const across = Math.min(1, Math.max(0, (absLateral - innerAtS) / (outerAtS - innerAtS)));
 
   // Row bracket, on the same absolute S_STEP lattice every chunk shares.
   const row = Math.floor(s / S_STEP) * S_STEP;
@@ -475,17 +496,17 @@ export function drawnGroundY(
     const bz = rowFrame.z;
     const dx = rowFrame.lateralX;
     const dz = rowFrame.lateralZ;
-    const innerLat = side * inner;
-    const outerLat = side * outer;
-    const innerY = fieldHeight(terrain, roadDistance, rowS, innerLat, bx + dx * innerLat, bz + dz * innerLat, isApron);
-    const outerY = fieldHeight(terrain, roadDistance, rowS, outerLat, bx + dx * outerLat, bz + dz * outerLat, isApron);
+    const innerLat = side * rowMagnitude(road, rowS, inner);
+    const outerLat = side * rowMagnitude(road, rowS, outer);
+    const innerY = fieldHeight(road, terrain, roadDistance, rowS, innerLat, bx + dx * innerLat, bz + dz * innerLat, isApron);
+    const outerY = fieldHeight(road, terrain, roadDistance, rowS, outerLat, bx + dx * outerLat, bz + dz * outerLat, isApron);
     const value = innerY + (outerY - innerY) * across;
     if (step === 0) near = value;
     else far = value;
   }
 
   const p = road.offsetPoint(s, lateral);
-  return near + (far - near) * along + terrain.detailAt(p.x, p.z, absLateral);
+  return near + (far - near) * along + terrain.detailAt(p.x, p.z, absLateral, s);
 }
 
 export class TerrainMeshProvider implements ChunkProvider {
@@ -533,11 +554,11 @@ export class TerrainMeshProvider implements ChunkProvider {
     const latCount = laterals.length;
     const fieldCount = sCount * latCount;
 
-    // The refined grid's own columns: uniform `FINE_STEP` from the road edge out to
-    // `DETAIL_REACH`, with the spacing divided evenly into the span rather than
-    // stepped off the edge, which would leave a sliver column at the far end.
-    // Its innermost column is the same TERRAIN_INNER ring the field lattice starts on,
-    // so the tuck under the road ribbon is inherited rather than re-derived.
+    // The refined grid's own columns run from the road edge out to `DETAIL_REACH`,
+    // with the spacing divided evenly into the span rather than stepped off the edge,
+    // which would leave a sliver column at the far end. Its innermost column shares
+    // the field lattice's reference ring, then each row shifts that ring to its real
+    // shoulder while the fixed outer seam stays at 80 m.
     const fineSteps = Math.round((DETAIL_REACH - CORRIDOR_INNER) / FINE_STEP);
     const fineSpacing = (DETAIL_REACH - CORRIDOR_INNER) / fineSteps;
     const fineMagnitudes: number[] = [TERRAIN_INNER];
@@ -573,11 +594,11 @@ export class TerrainMeshProvider implements ChunkProvider {
       // Every vertex in the row already knows its own lateral offset, so the terrain
       // never has to project back to the centreline to find its frame.
       for (let li = 0; li < latCount; li++) {
-        const lateral = laterals[li]!;
+        const lateral = Math.sign(laterals[li]!) * rowMagnitude(road, s, Math.abs(laterals[li]!));
         const px = originX + stepX * lateral;
         const pz = originZ + stepZ * lateral;
         const vi = si * latCount + li;
-        const y = fieldHeight(terrain, this.roadDistance, s, lateral, px, pz, isApron);
+        const y = fieldHeight(road, terrain, this.roadDistance, s, lateral, px, pz, isApron);
         positions[vi * 3] = px - ox;
         positions[vi * 3 + 1] = y;
         positions[vi * 3 + 2] = pz - oz;
@@ -698,14 +719,15 @@ export class TerrainMeshProvider implements ChunkProvider {
     // watertight by construction; the 11 mm of curve fidelity it gives up over an 8 m
     // span is invisible and was never in the coarse mesh either.
     for (let j = 0; j < fineRows; j++) {
-      const palette = desertPaletteAt(sStart + j * FINE_STEP);
+      const frameS = sStart + j * FINE_STEP;
+      const palette = desertPaletteAt(frameS);
       sandLinear.setHex(palette.sand);
       const nearRow = rowLow[j]! * latCount;
       const farRow = nearRow + latCount;
       const alongWeight = rowWeight[j]!;
       const rowBase = fieldCount + j * fineCount;
       for (let c = 0; c < fineCount; c++) {
-        const lateral = fineLaterals[c]!;
+        const lateral = Math.sign(fineLaterals[c]!) * rowMagnitude(road, frameS, Math.abs(fineLaterals[c]!));
         const low = columnLow[c]!;
         const across = columnWeight[c]!;
         const nearInner = (nearRow + low) * 3;
@@ -726,7 +748,7 @@ export class TerrainMeshProvider implements ChunkProvider {
         // The height alone carries the detail layer, and it is added AFTER the
         // interpolation: interpolating a coarsely sampled detail term is what aliases
         // it, which is the whole reason this grid exists.
-        positions[vi * 3 + 1] = y + terrain.detailAt(px, pz, Math.abs(lateral));
+        positions[vi * 3 + 1] = y + terrain.detailAt(px, pz, Math.abs(lateral), frameS);
         positions[vi * 3 + 2] = z;
         lateralOf[vi] = lateral;
 

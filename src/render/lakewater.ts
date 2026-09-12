@@ -7,6 +7,7 @@ import {
   type GroundHeightSample,
 } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
+import type { LakeSite } from '../world/lakes';
 import type { WorldOrigin } from '../world/origin';
 import type { WorldWorkScheduler } from '../world/workqueue';
 import {
@@ -18,32 +19,30 @@ import {
   PALM_TINT,
   TREE_TINT,
 } from './mirage-tableau';
+import { MIRAGE_FADE_BAND_M } from './mirage-tableau';
 import { createWaterMaterial, WAVE_TILE_METRES, type WaterMaterial } from './watermaterial';
 
 /**
- * Rare desert lakes: water standing in a hollow the desert already had.
+ * Desert lakes: the water that stands in a basin, drawn by reading the ground.
  *
- * NOTHING HERE TOUCHES THE WORLD, and that is the whole design. An earlier version dug
- * the basin — a deterministic term in `Terrain.relief` — and every consequence cascaded,
- * because that relief is collided ground shared with the tile worker and it lives beside
- * the road's maintained corridor. The dig needed a corridor fade, then a rim-gradient
- * budget against the dune band, then an absolute floor because the landscape tilts
- * across 300 m, then a plateau to carry the tilt, then a 600 m band to spread it, which
- * pushed the site so far out that the road could curve back into its own footprint. Six
- * constraints, each created by the last.
+ * THE HOLLOW IS NOT THIS MODULE'S. `world/lakes.ts` digs it — a deterministic term in
+ * the terrain, in the collided mesh and in the tile worker — and this module finds it,
+ * fills it and draws the surface. That division is why the water can be a reader: it
+ * samples the tiles' own ground function, so the shoreline is cut from exactly the sand
+ * that is drawn, and nothing here can move the world.
  *
- * This module reads the terrain and writes nothing. `Terrain` is byte-for-byte the
- * road-only world, physics is untouched, the tile worker is untouched, and the only
- * thing that can go wrong is a picture.
+ * It was tried the other way, with no dig at all: search for a closed depression the
+ * dune field happened to leave. It found one every third attempt, and what it found was
+ * broad and two metres deep — filled, that is not a lake, it is painted sand. The dune
+ * band is built from kilometre-long ridges; it does not make bowls.
  *
- * HOW A LAKE IS FOUND. Every 200-300 km the schedule picks a window of desert beside the
- * road. The window is sampled, the lowest point in it is taken, and the water RISES from
- * there: repeatedly absorb the lowest cell on the frontier, raising the level to meet it,
- * until the flood reaches the window's edge — at which point the basin has spilled and
- * the last level before that is its lip. This is the standard priority flood, and it is
- * the honest definition of "how full can this hollow get": a closed basin fills to its
- * lowest lip, an open slope fills to nothing. Where the desert offers no hollow, there is
- * no lake, and the drive is a little longer to the next one.
+ * HOW A LAKE IS FILLED. Every 200-300 km (and once at the house) the schedule names a
+ * window of desert beside the road. The window is sampled, then a priority flood runs
+ * from its EDGE inward: pop the lowest frontier cell, and the level a neighbour would
+ * drain at is `max(level we came from, its own height)` — water cannot escape over
+ * ground higher than itself. One pass finds every hollow at once with the window's edge
+ * as the sea the country drains to, and the dug basin is the deepest of them. It is also
+ * still honest about ground it did not dig: where there is no hollow there is no water.
  *
  * WHY THE SHORELINE IS WORTH THE TROUBLE. It is BAKED: every vertex carries the water's
  * depth over the ground as an RGBA vertex colour, so the soft edge, the foam strip and
@@ -55,7 +54,7 @@ import { createWaterMaterial, WAVE_TILE_METRES, type WaterMaterial } from './wat
  * WHY IT VANISHES BY APPROACH. The tableaus in mirage-tableau.ts fade when you leave the
  * road, because they straddle it and there is nowhere to go and look. A lake is half a
  * kilometre out: driving to it IS the encounter. So the fade is the approach — full water
- * until the last few dozen metres, gone inside `VANISH_GONE_M` of the waterline, and back
+ * in the last ten metres — the tableaus' own band — gone inside `VANISH_GONE_M` of the waterline, and back
  * when you pull away. No latch: the opacity is a function of where you stand, so it is
  * reversible by construction, and nobody has to write hydrolock, buoyancy or a walk home.
  */
@@ -104,18 +103,34 @@ const MIN_LAKE_DEPTH_M = 1.6;
 const MAX_FILL_M = 7;
 
 /**
- * How far the eye must stand above the water before the sheet is fully drawn. A surface
- * seen from level with itself is a line; seen from under it, it is a coloured filter over
- * the whole screen.
+ * The band the eye height fades the sheet over, around the water's own level.
+ *
+ * NARROW, and deliberately low. Its only job is the case the first drive to a lake
+ * found: ground outside the pool that lies below the water's level puts the eye UNDER a
+ * transparent sheet, which then fills the screen with turquoise. It is NOT an approach
+ * fade — when it was four metres tall, a lake seen across low ground from the road came
+ * up half-drawn, and the fade the player is supposed to notice is the one below.
  */
-const EYE_ABOVE_WATER_M = 2.5;
+const EYE_ABOVE_WATER_M = 1.2;
+const EYE_BELOW_WATER_M = 0.3;
 /**
- * The approach fade, in metres from the waterline. Abrupt on purpose: the water is there
- * while you drive at it and gone by the time you could put a wheel in it. A long fade
- * would read as a rendering fault rather than as the desert keeping its joke.
+ * The approach fade, in metres from the waterline: full water outside `VANISH_FULL_M`,
+ * nothing inside `VANISH_GONE_M`.
+ *
+ * The band is the TABLEAUS' band, imported rather than tuned, and it is the point of
+ * the whole effect: you drive the whole way across the desert to the shore with the
+ * water fully drawn, and it evaporates in the last ten metres, exactly as a mirage town
+ * evaporates in the ten metres after you leave the asphalt. Two metres of it are kept
+ * so the water is gone before a wheel could be in it.
  */
-const VANISH_GONE_M = 10;
-const VANISH_FULL_M = 26;
+const VANISH_GONE_M = 2;
+const VANISH_FULL_M = VANISH_GONE_M + MIRAGE_FADE_BAND_M;
+/**
+ * Where the dev jump in main.ts parks to look at a lake. Nothing to do with the fade any
+ * more: the water is fully drawn from a couple of metres out, so the standoff is only
+ * about seeing the whole sheet and its fringe at once.
+ */
+const VIEWPOINT_STANDOFF_M = 90;
 
 /**
  * The depth ramp, and it is tuned for the lakes the desert actually makes.
@@ -224,13 +239,6 @@ const SALT_PLANT = 0x54eb;
 const SALT_SHAPE = 0x65fd;
 const SALT_COLOUR = 0x770f;
 
-/** A scheduled attempt at a lake. Whether one exists there is the terrain's business. */
-export interface LakeSite {
-  readonly index: number;
-  readonly s: number;
-  /** Signed lateral offset in `Road.offsetPoint`'s basis; positive is LEFT of travel. */
-  readonly lateral: number;
-}
 
 function smoothstep(edge0: number, edge1: number, value: number): number {
   const t = (value - edge0) / (edge1 - edge0);
@@ -279,7 +287,11 @@ type Phase =
   | 'measuring'
   | 'measuring2'
   | 'baking'
+  | 'baking2'
+  | 'baking3'
   | 'planting'
+  | 'planting2'
+  | 'planting3'
   | 'ready'
   | 'dry';
 
@@ -316,6 +328,8 @@ export class LakeWater {
 
   private phase: Phase = 'idle';
   private siteIndex = -1;
+  /** Arclength of the site being searched: the hint the far ground sampler needs. */
+  private siteS = 0;
   private readyIndex = -1;
   private buildRow = 0;
   private centreX = 0;
@@ -378,27 +392,16 @@ export class LakeWater {
 
     this.root.visible = false;
     scene.add(this.root);
-    this.siteList = this.buildSchedule();
+    this.siteList = context.terrain.basins.schedule;
   }
 
-  /** Where a lake is attempted. Deterministic from the seed, like every other encounter. */
-  private buildSchedule(): readonly LakeSite[] {
-    const seed = this.context.seed;
-    const sites: LakeSite[] = [];
-    let s = MIN_GAP_M * 0.5 + hashUnit3(seed, -1, SALT_GAP) * GAP_RANGE_M;
-    let index = 0;
-    while (s < this.context.road.length) {
-      const side = hashUnit3(seed, index, SALT_SIDE) < 0.5 ? -1 : 1;
-      sites.push({
-        index,
-        s,
-        lateral: side * (LATERAL_MIN_M + hashUnit3(seed, index, SALT_LATERAL) * LATERAL_RANGE_M),
-      });
-      s += MIN_GAP_M + hashUnit3(seed, index, SALT_GAP) * GAP_RANGE_M;
-      index++;
-    }
-    return sites;
-  }
+  /**
+   * THE SCHEDULE IS THE TERRAIN'S, not this module's.
+   *
+   * The basin is dug (`world/lakes.ts`), so the ground and the water have to be
+   * talking about the same site: one list, owned by the thing that shapes the ground,
+   * read by the thing that fills it.
+   */
 
   get sites(): readonly LakeSite[] {
     return this.siteList;
@@ -462,7 +465,7 @@ export class LakeWater {
     // surface is only ever drawn to someone standing above it.
     this.opacity =
       smoothstep(VANISH_GONE_M, VANISH_FULL_M, this.waterlineDistance(playerX, playerZ)) *
-      smoothstep(this.waterY - 0.2, this.waterY + EYE_ABOVE_WATER_M, playerY);
+      smoothstep(this.waterY - EYE_BELOW_WATER_M, this.waterY + EYE_ABOVE_WATER_M, playerY);
     this.root.visible = this.opacity > 0.002;
     if (!this.root.visible) return;
 
@@ -490,14 +493,31 @@ export class LakeWater {
     const clampedX = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localX));
     const clampedZ = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localZ));
     const outside = Math.hypot(localX - clampedX, localZ - clampedZ);
-    const ix = Math.round((clampedX + SITE_REACH_M) / SITE_STEP_M);
-    const iz = Math.round((clampedZ + SITE_REACH_M) / SITE_STEP_M);
-    return outside + this.edgeDistance[ix * SITE_VERTS + iz]!;
+    // BILINEAR, not nearest. The lattice is 8 m and the whole approach fade is 10, so a
+    // nearest-sample lookup handed the fade a staircase with two treads in it - which is
+    // exactly the two-step vanish this fade exists to avoid. Interpolating a distance
+    // field is safe for the same reason it is in world/roaddistance.ts: the field is
+    // 1-Lipschitz, so the interpolant can never overshoot the true distance by more than
+    // the cell it was read from.
+    const fx = (clampedX + SITE_REACH_M) / SITE_STEP_M;
+    const fz = (clampedZ + SITE_REACH_M) / SITE_STEP_M;
+    const ix = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fx)));
+    const iz = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fz)));
+    const tx = fx - ix;
+    const tz = fz - iz;
+    const d00 = this.edgeDistance[ix * SITE_VERTS + iz]!;
+    const d10 = this.edgeDistance[(ix + 1) * SITE_VERTS + iz]!;
+    const d01 = this.edgeDistance[ix * SITE_VERTS + iz + 1]!;
+    const d11 = this.edgeDistance[(ix + 1) * SITE_VERTS + iz + 1]!;
+    const near = d00 + (d10 - d00) * tx;
+    const far = d01 + (d11 - d01) * tx;
+    return outside + near + (far - near) * tz;
   }
 
   private beginSearch(site: LakeSite): void {
     const centre = this.context.road.offsetPoint(site.s, site.lateral);
     this.siteIndex = site.index;
+    this.siteS = site.s;
     this.centreX = centre.x;
     this.centreZ = centre.z;
     this.buildRow = 0;
@@ -532,11 +552,33 @@ export class LakeWater {
         this.phase = 'baking';
         return;
       case 'baking':
-        this.bakeSurface();
+        // Three slices over the lattice: half the vertices, the other half, then the
+        // quads. All of it in one slice measured 3.5 ms against a 3 ms budget, and
+        // vertices-then-quads still sat exactly on the line with a browser running.
+        this.bakeVertices(0, SITE_VERTS >> 1);
+        this.phase = 'baking2';
+        return;
+      case 'baking2':
+        this.bakeVertices(SITE_VERTS >> 1, SITE_VERTS);
+        this.phase = 'baking3';
+        return;
+      case 'baking3':
+        this.bakeQuads();
         this.phase = 'planting';
         return;
       case 'planting':
-        this.plantFringe();
+        // Three slices, because a dug basin has a 500 m shoreline: finding it, then
+        // the grass, then the woody bands. All of it in one slice measured 3.1 ms
+        // against a 3 ms budget, and the grass alone measured 3.04 ms with it.
+        this.findShore();
+        this.phase = 'planting2';
+        return;
+      case 'planting2':
+        this.plantGrass();
+        this.phase = 'planting3';
+        return;
+      case 'planting3':
+        this.plantWoody();
         this.phase = 'ready';
         this.readyIndex = this.siteIndex;
         return;
@@ -558,7 +600,7 @@ export class LakeWater {
         // `farFromRoad` is TRUE and that is exact, not an approximation: the whole window
         // sits past `RELIEF_FULL`, where the tile lattice itself stops asking about the
         // road and evaluates the dune band at full strength. See `LATERAL_MIN_M`.
-        sampleGroundHeight(this.context, worldX, startZ + iz * SITE_STEP_M, true, this.ground);
+        sampleGroundHeight(this.context, worldX, startZ + iz * SITE_STEP_M, true, this.ground, this.siteS);
         this.heights[ix * SITE_VERTS + iz] = this.ground.height;
       }
     }
@@ -779,12 +821,12 @@ export class LakeWater {
 
 
   /** Positions, wave UVs and the baked RGBA shoreline for the filled sheet. */
-  private bakeSurface(): void {
+  private bakeVertices(fromX: number, toX: number): void {
     const { deep, shallow, foam } = waterPaletteAt(this.siteList[this.siteIndex]!.s);
     const startX = this.centreX - SITE_REACH_M;
     const startZ = this.centreZ - SITE_REACH_M;
 
-    for (let ix = 0; ix < SITE_VERTS; ix++) {
+    for (let ix = fromX; ix < toX; ix++) {
       const localX = -SITE_REACH_M + ix * SITE_STEP_M;
       for (let iz = 0; iz < SITE_VERTS; iz++) {
         const vi = ix * SITE_VERTS + iz;
@@ -816,6 +858,9 @@ export class LakeWater {
       }
     }
 
+  }
+
+  private bakeQuads(): void {
     // Only quads with a wet corner are drawn: the dry part of the window never reaches
     // the index buffer, so the draw is the lake and not the box it was cut from.
     let io = 0;
@@ -856,7 +901,7 @@ export class LakeWater {
    * grass then follows every bay and spit, which is the whole reason the boundary was
    * worth knowing exactly.
    */
-  private plantFringe(): void {
+  private findShore(): void {
     this.shoreCount = 0;
     for (let ix = 0; ix < SITE_VERTS; ix++) {
       for (let iz = 0; iz < SITE_VERTS; iz++) {
@@ -871,7 +916,13 @@ export class LakeWater {
       }
     }
 
+  }
+
+  private plantGrass(): void {
     this.fill(this.grass, MAX_GRASS, GRASS_PER_CELL, 0, GRASS_HEIGHT, GRASS_JITTER_M, GRASS_TINT);
+  }
+
+  private plantWoody(): void {
     this.fill(this.palms, MAX_PALMS, PALMS_PER_CELL, 1, PALM_HEIGHT, PLANT_JITTER_M, PALM_TINT);
     this.fill(this.trees, MAX_TREES, TREES_PER_CELL, 2, TREE_HEIGHT, PLANT_JITTER_M, TREE_TINT);
   }
@@ -992,7 +1043,7 @@ export class LakeWater {
     const dirZ = road.z - waterZ;
     const span = Math.hypot(dirX, dirZ) || 1;
 
-    for (let out = VANISH_FULL_M; out <= SITE_REACH_M * 2; out += SITE_STEP_M) {
+    for (let out = VIEWPOINT_STANDOFF_M; out <= SITE_REACH_M * 2; out += SITE_STEP_M) {
       const x = waterX + (dirX / span) * out;
       const z = waterZ + (dirZ / span) * out;
       const localX = x - this.centreX;
@@ -1002,7 +1053,7 @@ export class LakeWater {
       const iz = Math.round((localZ + SITE_REACH_M) / SITE_STEP_M);
       const groundY = this.heights[ix * SITE_VERTS + iz]!;
       if (groundY < this.waterY + EYE_ABOVE_WATER_M) continue;
-      if (this.edgeDistance[ix * SITE_VERTS + iz]! <= VANISH_FULL_M) continue;
+      if (this.edgeDistance[ix * SITE_VERTS + iz]! <= VIEWPOINT_STANDOFF_M * 0.5) continue;
       return { x, y: groundY, z, yaw: Math.atan2(waterX - x, waterZ - z) };
     }
     return null;

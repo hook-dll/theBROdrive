@@ -3,13 +3,23 @@ import { hashUnit3 } from '../core/rng';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
+import { fitGround } from '../world/footprint';
 
 const MIN_GAP_M = 3_000;
 const GAP_RANGE_M = 5_000;
 const APPROACH_M = 900;
 const RETREAT_M = 260;
+/**
+ * Metres of travel over which an apparition evaporates once you have come for it.
+ *
+ * Ten, and that number is the whole character of a mirage in this game: leave the
+ * asphalt and the town is gone before the car has straightened up. The lakes in
+ * render/lakewater.ts import it so both kinds of apparition thin out at one rate and
+ * cannot drift apart into two different-feeling tricks.
+ */
+export const MIRAGE_FADE_BAND_M = 10;
 const FADE_FROM_ROAD_M = 1;
-const GONE_FROM_ROAD_M = 11;
+const GONE_FROM_ROAD_M = FADE_FROM_ROAD_M + MIRAGE_FADE_BAND_M;
 
 const MAX_PLANTS = 420;
 const MAX_BLOCKS = 512;
@@ -1004,7 +1014,7 @@ export class MirageTableau {
       const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
       const lateral = side * (this.setbackM + 18 + depth * depth * 127);
       const point = this.road.offsetPoint(s, lateral);
-      const ground = this.terrain.heightAt(point.x, point.z, s);
+      const heading = this.road.sampleAt(s).heading;
       const width = (5 + hashUnit3(this.seed, key, SALT_SHAPE) * 9) * this.sizeScale;
       const buildingDepth =
         (5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9) * this.sizeScale;
@@ -1014,7 +1024,19 @@ export class MirageTableau {
           ? 24 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 24
           : 4 + hashUnit3(this.seed, key, SALT_SHAPE + 2) * 14
       ) * this.sizeScale;
-      const heading = this.road.sampleAt(s).heading;
+      // A block is plumb, so it is seated on the LOWEST corner of its own footprint:
+      // on 10% ground a 12 m block placed from its centre sample stands on a plinth
+      // of air along one wall.
+      const ground = fitGround(
+        this.terrain,
+        point.x,
+        point.z,
+        heading,
+        width * 0.5,
+        buildingDepth * 0.5,
+        s,
+        2,
+      ).seatAt(0, 0, width * 0.5, buildingDepth * 0.5);
       const y = groundRelative(ground);
       this.cityColour(key, depth, 0);
       count = this.addBox(
@@ -1255,7 +1277,7 @@ export class MirageTableau {
       const radius = length * this.shipReach;
       let x = 0;
       let z = 0;
-      let ground = 0;
+      let hintS = 0;
       let depth = 0;
       let room = false;
       for (let attempt = 0; attempt < SHIP_ATTEMPTS && !room; attempt++) {
@@ -1280,24 +1302,27 @@ export class MirageTableau {
         if (!room) continue;
         x = point.x;
         z = point.z;
-        ground = this.terrain.heightAt(point.x, point.z, s);
+        hintS = s;
         depth = candidateDepth;
       }
       if (!room) continue;
       const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI * 2;
-      // Grounded hulls lie over; the lean also settles the keel into the sand.
-      const roll = (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
+      // A hull lies ALONG the dune it stranded on: the keel takes the ground's own
+      // tilt, and the derelict lean is added to that rather than used instead of it.
+      const plane = fitGround(this.terrain, x, z, yaw, length * 0.5, length * 0.5, hintS, 2);
+      const roll = plane.roll + (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
       this.setTransform(
         this.ships,
         placed,
         x - this.anchorX,
-        ground - this.anchorY,
+        plane.centreY - this.anchorY,
         z - this.anchorZ,
         length,
         height,
         length,
         yaw,
         roll,
+        plane.pitch,
       );
       const lift =
         (0.86 + depth * 0.32) *
@@ -1333,6 +1358,11 @@ export class MirageTableau {
     return index + 1;
   }
 
+  /**
+   * `YXZ`, so `roll` keeps the meaning it had when this took no pitch (with
+   * `pitch = 0` the composition is the same `Ry·Rz`) and the pair now reads as the
+   * ground's own tilt, exactly as `GroundPlane` reports it.
+   */
   private setTransform(
     mesh: THREE.InstancedMesh,
     index: number,
@@ -1344,9 +1374,10 @@ export class MirageTableau {
     depth: number,
     yaw: number,
     roll = 0,
+    pitch = 0,
   ): void {
     this.position.set(x, y, z);
-    this.euler.set(0, yaw, roll);
+    this.euler.set(pitch, yaw, roll, 'YXZ');
     this.quaternion.setFromEuler(this.euler);
     this.scale.set(width, height, depth);
     this.matrix.compose(this.position, this.quaternion, this.scale);

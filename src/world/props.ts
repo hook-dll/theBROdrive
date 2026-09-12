@@ -19,7 +19,7 @@ import { hash01 } from '../core/rng';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
 
-import type { Monument, PoleEra } from './gradient';
+import type { Monument, PoleCondition, PoleEra } from './gradient';
 import { HazardIndex } from './hazards';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { Terrain } from './terrain';
@@ -48,7 +48,15 @@ const ROAD_HAZARD_START = 600;
 const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
 const CELL_L = 6; // metres between candidate cells laterally
-const MIN_LAT = 9; // props stay off the corridor + gravel verge (~8.2 m)
+/**
+ * Nearest a scattered prop stands to the ASPHALT EDGE, metres: clear of the 3.5 m
+ * gravel verge with room to spare. Authored as a setback for the same reason the
+ * pole line is — a fixed 9 m from the crown is 9 m of clearance on a narrow road and
+ * 3.2 m on a widened one, which puts cacti on the verge and boulders at the paint.
+ */
+const SCATTER_SETBACK_M = 6.1;
+/** Cheap pre-filter: the setback at the NARROWEST the road ever is. */
+const MIN_LAT = ROAD_HALF_WIDTH + SCATTER_SETBACK_M;
 /**
  * Lateral reach of the scatter, and where it starts thinning out.
  *
@@ -86,7 +94,17 @@ const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 // comment: the sign is load-bearing for road/terrain triangle winding), so the
 // right-hand side is a negative offset.
 const TAG_POLE = 0x90f1e2;
-const POLE_LATERAL = -6.0;
+/**
+ * MEASURED FROM THE ASPHALT EDGE, NOT FROM THE CROWN.
+ *
+ * The line used to stand at a fixed -6 m, which was the edge plus 3.1 m while every
+ * road was 5.8 m wide. On a widened stretch (`roadprofile.ts`) that put the poles
+ * 0.2 m off the paint and the lamp arms over the outer lane. Real poles keep their
+ * distance from the road they light, so the setback is what is authored and the
+ * lateral is derived — which also means the whole line sweeps out and back through
+ * a taper exactly as the carriageway does.
+ */
+const POLE_SETBACK_M = 3.1;
 const POLE_HEIGHT: Record<PoleEra, number> = {
   timber: 6.5,
   lattice: 8.5,
@@ -104,9 +122,10 @@ const LAMP_POINT = 90;
 const LAMP_EMISSIVE = 2.8;
 /**
  * How far the concrete lamp arm reaches from its pole, metres. The poles stand at
- * POLE_LATERAL = -6 and the shoulder's outer edge is at -4.7, so 2.4 hangs the
- * head at lateral -3.6: over the gravel, a foot short of the asphalt edge, which
- * is where the light pool wants to sit to cover the near lane.
+ * poles stand `POLE_SETBACK_M` = 3.1 m outside the asphalt edge and the gravel verge
+ * is 3.5 m wide, so 2.4 hangs the head 0.7 m outside that edge: over the gravel,
+ * which is where the light pool wants to sit to cover the near lane. The reach is a
+ * constant because the setback is: the head keeps its 0.7 m at any road width.
  */
 const LAMP_ARM_REACH = 2.4;
 
@@ -647,6 +666,10 @@ export class ScatterProvider implements ChunkProvider {
           const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
           const absLateral = Math.abs(lateral);
           if (absLateral < MIN_LAT || absLateral > MAX_LAT) break cell;
+          // The exact near edge, now that `s` is known. `MIN_LAT` above is the cheap
+          // narrow-road filter; this is the one that keeps a prop off a widened verge,
+          // and it costs three hashes rather than a road projection.
+          if (absLateral < ctx.road.halfWidthAt(s) + SCATTER_SETBACK_M) break cell;
 
           // Thin out towards the far edge so the scatter ends in a fringe rather than a
           // fence line. Still only arithmetic: no sampling yet.
@@ -658,7 +681,7 @@ export class ScatterProvider implements ChunkProvider {
           // From the FRAME, not by projection: this cell was generated from (s, lateral),
           // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
           // counter already knows.
-          const surface = ctx.terrain.surfaceFromFrame(p.x, p.z, lateral);
+          const surface = ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s);
 
           // Correlation: cacti and scrub on sand, rocks concentrated on rock outcrops.
           let forms: PropForm[];
@@ -753,7 +776,10 @@ export class ScatterProvider implements ChunkProvider {
           const scaleRoll = hash01(seed, tag, candidate, 2);
           const scale = kind === 0 ? 0.9 + scaleRoll * 0.6 : 0.65 + scaleRoll * 0.7;
           const radius = form.baseRadius * scale;
-          const lateralReach = Math.max(0, ROAD_HALF_WIDTH - radius - ROAD_HAZARD_EDGE_CLEARANCE);
+          // Across whatever asphalt there is here: a widened stretch gets its holes
+          // and rubble over both lanes, not only over the inner one.
+          const asphaltHalf = ctx.road.halfWidthAt(s);
+          const lateralReach = Math.max(0, asphaltHalf - radius - ROAD_HAZARD_EDGE_CLEARANCE);
           const lateral = (hash01(seed, tag, candidate, 3) * 2 - 1) * lateralReach;
           const p = ctx.road.offsetPoint(s, lateral);
           const ry = hash01(seed, tag, candidate, 4) * Math.PI * 2;
@@ -994,7 +1020,7 @@ interface PolePose {
 
 /**
  * Timber-era lamp head, hung from an outrigger under the road-side crossarm tip.
- * X = 2.1 puts the head at lateral -3.9 from a pole at POLE_LATERAL = -6: right at
+ * X = 2.1 puts the head 3.9 m out from a pole 6 m from a narrow road's crown: right at
  * the asphalt edge (-3.3 plus the paint), which is the only way a 6 m mast with an
  * inverse-square falloff actually lights the near lane rather than the gravel.
  */
@@ -1005,7 +1031,7 @@ const TIMBER_LAMP_LOCAL: readonly [number, number, number] = [2.1, 5.95, 0];
  *
  * +X is LEFT of travel and the poles stand right of the road, so a positive X
  * reaches over the carriageway. The concrete arm reaches `LAMP_ARM_REACH` from a
- * pole at POLE_LATERAL = -6, leaving the head just inside the shoulder edge —
+ * pole standing 3.1 m outside the paint, leaving the head just inside the shoulder —
  * where a real streetlight hangs — so its pool of light lands on the asphalt.
  */
 function lampLocal(era: PoleEra, hasCrossarm: boolean): [number, number, number] | null {
@@ -1037,13 +1063,20 @@ function poleQuaternion(twist: number, angle: number, az: number, out: THREE.Qua
   out.copy(_q1);
 }
 
-/** Pure, chunk-independent description of the pole at global index `index`. */
-function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number): PolePose {
-  const cond = poleConditionAt(s);
-  const sample = road.sampleAt(s);
-  const p = road.offsetPoint(s, POLE_LATERAL);
-  const groundY = terrain.heightAt(p.x, p.z, s);
-
+/**
+ * The visual pose is factored from the road query so the gallery cannot drift into
+ * a hand-copied silhouette while the provider retains its exact world-space inputs.
+ */
+function describePoleAt(
+  seed: number,
+  s: number,
+  index: number,
+  baseX: number,
+  baseY: number,
+  baseZ: number,
+  heading: number,
+  cond: PoleCondition,
+): PolePose {
   const h1 = hash01(seed, TAG_POLE, index, 0);
   const h2 = hash01(seed, TAG_POLE, index, 1);
   const h3 = hash01(seed, TAG_POLE, index, 2);
@@ -1065,7 +1098,7 @@ function describePole(road: Road, terrain: Terrain, seed: number, s: number, ind
   // LEFT-of-travel normal. Everything mounted on an arm therefore uses positive X
   // to lean over the road (see `lampLocal`).
   const jitter = (h4 - 0.5) * 0.14;
-  const twist = sample.heading + (cond.era === 'lattice' ? Math.PI * 0.25 : 0) + jitter;
+  const twist = heading + (cond.era === 'lattice' ? Math.PI * 0.25 : 0) + jitter;
 
   const hasCrossarm = cond.era === 'timber' ? !collapsed && h5 > d * 0.8 : true;
   const lampWorks = h6 < cond.lampChance;
@@ -1080,21 +1113,21 @@ function describePole(road: Road, terrain: Terrain, seed: number, s: number, ind
   let lampZ = 0;
   if (ll) {
     const w = applyPoleRotation(ll[0], ll[1], ll[2], twist, leanAngle, leanAz);
-    lampX = p.x + w.x;
-    lampY = groundY + w.y;
-    lampZ = p.z + w.z;
+    lampX = baseX + w.x;
+    lampY = baseY + w.y;
+    lampZ = baseZ + w.z;
   }
 
   return {
     index,
     s,
     era: cond.era,
-    baseX: p.x,
-    baseY: groundY,
-    baseZ: p.z,
-    topX: p.x + top.x,
-    topY: groundY + top.y,
-    topZ: p.z + top.z,
+    baseX,
+    baseY,
+    baseZ,
+    topX: baseX + top.x,
+    topY: baseY + top.y,
+    topZ: baseZ + top.z,
     lampX,
     lampY,
     lampZ,
@@ -1108,6 +1141,13 @@ function describePole(road: Road, terrain: Terrain, seed: number, s: number, ind
     hasWire,
     height,
   };
+}
+
+/** Pure, chunk-independent description of the pole at global index `index`. */
+function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number): PolePose {
+  const sample = road.sampleAt(s);
+  const p = road.offsetPoint(s, -(road.halfWidthAt(s) + POLE_SETBACK_M));
+  return describePoleAt(seed, s, index, p.x, terrain.heightAt(p.x, p.z, s), p.z, sample.heading, poleConditionAt(s));
 }
 
 // --- Pole silhouette geometries (shared) ------------------------------------
@@ -1200,7 +1240,7 @@ function concreteColumn(): THREE.BufferGeometry {
     const col = new THREE.CylinderGeometry(0.12, 0.3, 9.0, 10, 1).translate(0, 4.5, 0);
     // Curved lamp arm sweeping out toward the road and down to the lamp head.
     // Local +X is LEFT of travel (see `applyPoleRotation`); the pole line stands
-    // to the RIGHT of the road at POLE_LATERAL, so the arm must reach along +X to
+    // to the RIGHT of the road, outside the paint, so the arm must reach along +X to
     // hang its head over the carriageway. It used to sweep to -X, which put every
     // lamp on the desert side and lit the sand instead of the asphalt.
     const curve = new THREE.QuadraticBezierCurve3(
@@ -1243,6 +1283,19 @@ function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
       poleGroup.add(bulb);
     }
   }
+}
+
+/**
+ * Builds the production pole silhouette at a gallery-friendly origin. This remains
+ * intentionally pose-only: wires and light-budget source markers belong to chunks.
+ */
+export function createPoleDisplay(cond: PoleCondition, seed: number, index: number): THREE.Group {
+  const pose = describePoleAt(seed, 0, index, 0, 0, 0, 0, cond);
+  const group = new THREE.Group();
+  group.position.y = pose.collapsed ? -0.12 : 0;
+  poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, group.quaternion);
+  addPoleMeshes(group, pose);
+  return group;
 }
 
 /** A cosh-based catenary: zero sag at the ends, deepest in the middle. */
@@ -1670,7 +1723,10 @@ export class MonumentProvider implements ChunkProvider {
       // boundaries (100 chunks), so `monumentsBetween`'s inclusive upper bound
       // would build them twice; half-open dedupe fixes that.
       if (m.s < ctx.sStart || m.s >= ctx.sEnd) continue;
-      const p = ctx.road.offsetPoint(m.s, m.lateral);
+      // From the edge out, so a monument keeps its distance from the road however
+      // wide the road is there.
+      const lateral = m.side * (ctx.road.halfWidthAt(m.s) + m.setback);
+      const p = ctx.road.offsetPoint(m.s, lateral);
       const groundY = ctx.terrain.heightAt(p.x, p.z, m.s);
       const heading = ctx.road.sampleAt(m.s).heading;
       const b: MonumentBuild = { ctx, group, bodies, colliders, disposables, m, x: p.x, y: groundY, z: p.z, heading };

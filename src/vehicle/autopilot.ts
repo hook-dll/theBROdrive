@@ -4,7 +4,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
 import type { RoadConditionBuffer } from '../world/gradient';
-import { ROAD_HALF_WIDTH, type DriveRoad } from '../world/road';
+import { type DriveRoad } from '../world/road';
 import { type HazardField, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
 import { planCorridor, type CorridorObstacle } from './corridor';
@@ -24,6 +24,19 @@ const CORRIDOR_MAX_HORIZON_M = 220;
  * costing roughly 3 m/s of pace, which is where a driver starts looking.
  */
 const ONCOMING_LANE_COST = 16;
+/**
+ * Multiplier on that price for a driver crossing the crown only because something is
+ * PARKED in its lane.
+ *
+ * CHEAPER THAN THE SAND, deliberately. A rock in the lane used to be gone round on
+ * the shoulder by everybody, because two metres of verge at the shoulder price beat
+ * any crown crossing — and cars bogged down out there, one after another, until the
+ * verge itself was the blockage and the queue behind it had nowhere left to go. That
+ * is what a five-minute standoff looked like. A real driver uses the empty oncoming
+ * lane for this and keeps the sand for when that lane is busy; the crossing gate
+ * still decides whether it is actually empty.
+ */
+const STILL_BYPASS_NERVE = 1.4;
 /** Speed an unseen car coming the other way is assumed to be doing. */
 const ONCOMING_ASSUMED_MPS = 20;
 /** Opposing lane must be clear this far BEHIND before crossing into it. */
@@ -56,11 +69,6 @@ interface ModeConfig {
   readonly lookaheadSpeed: number;
   readonly brakeLead: number;
   readonly curveLead: number;
-  /**
-   * Signed lateral of the lane the mode holds, metres. Positive lateral is LEFT of
-   * travel (see `Road.offsetPoint`), so a right-hand lane is NEGATIVE.
-   */
-  readonly laneOffset: number;
   /**
    * Fraction of the pure-pursuit chord error that is corrected. 1 follows the lane's
    * arc; 0 is the old behaviour, which cuts every bend toward its inside.
@@ -103,6 +111,17 @@ interface ModeConfig {
    * difference between hurrying and crashing.
    */
   readonly passNerve: number;
+  /**
+   * May this driver use a SECOND LANE ON ITS OWN SIDE to get past somebody?
+   *
+   * Separate from `overtakes`, which is about crossing the crown. A widened stretch
+   * offers a free lane with no oncoming traffic in it, so every driver took it the
+   * moment anything ahead was slower — and a dual carriageway of ordinary traffic
+   * became a road where everybody was changing lanes all the time. Only the driver
+   * who is out of time does that; the rest hold the lane they were given and merge
+   * when the road makes them.
+   */
+  readonly lanePasses: boolean;
 }
 
 /**
@@ -110,11 +129,6 @@ interface ModeConfig {
  *
  * `sleeper` is the character asleep at the wheel of his own life: 80 km/h, its own
  * lane, a cornering budget under half of what the tyres have, gentle pedals, and it
- * only leaves its lane for something that is not going to move. It arrives late and
- * it arrives. 70 km/h was its old figure and it was an unhurried driver's speed on
- * a good road, not on this one: the surface factor took another third off it and the
- * soft pedal band another 10%, so what the player actually watched was 40 km/h.
- *
  * `frantic` is the same car driven by somebody who is out of time: 130 km/h, twice
  * the cornering budget, pedals used as switches, and it will take the oncoming lane
  * to get past traffic when it can see far enough to do it. Its corner entries are
@@ -137,7 +151,6 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     lookaheadSpeed: 1.35,
     brakeLead: 18,
     curveLead: 30,
-    laneOffset: -ROAD_HALF_WIDTH / 2,
     chordGain: 0.9,
     steeringGain: 1.55,
     holdSeconds: 0.65,
@@ -147,6 +160,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeCeiling: 0.55,
     headwayS: 2.2,
     overtakes: false,
+    lanePasses: false,
     passCurvature: 0.012,
     passNerve: 1,
   },
@@ -166,7 +180,6 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     lookaheadSpeed: 1.2,
     brakeLead: 12,
     curveLead: 27,
-    laneOffset: -ROAD_HALF_WIDTH / 2,
     chordGain: 0.68,
     steeringGain: 1.5,
     holdSeconds: 0.75,
@@ -176,6 +189,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeCeiling: 0.8,
     headwayS: 1.6,
     overtakes: true,
+    lanePasses: false,
     passCurvature: 0.010,
     passNerve: 0.88,
   },
@@ -187,7 +201,6 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     lookaheadSpeed: 1.0,
     brakeLead: 7,
     curveLead: 24,
-    laneOffset: -ROAD_HALF_WIDTH / 2,
     chordGain: 0.45,
     steeringGain: 1.45,
     holdSeconds: 0.85,
@@ -197,6 +210,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakeCeiling: 1,
     headwayS: 1.2,
     overtakes: true,
+    lanePasses: true,
     // A bend of 0.009 rad/m is a 110 m radius: gentle enough that the speed planner
     // still allows most of this mode's pace through it. The old 0.006 demanded a
     // straighter road than the cautious mode did, which on a desert road that is
@@ -296,6 +310,12 @@ const CAR_HALF_LENGTH_M = 3;
 const AVOID_HYSTERESIS_M = 0.4;
 /** A valid indexed detour must keep rolling or its rate-limited line can never finish. */
 const AVOIDANCE_CRAWL_MPS = 3.5;
+/**
+ * How close the nose may come to something STILL in the chosen corridor before the
+ * car stops rather than crawls. Half a bumper: near enough to read as "went up to
+ * it", far enough that the contact the driver used to make never happens.
+ */
+const STILL_BLOCK_STANDOFF_M = 1.5;
 /** Physics rays begin ahead of the chassis, so their range differs from road-frame s. */
 const INDEXED_RAY_MATCH_M = 4;
 /**
@@ -353,17 +373,12 @@ const HEAD_ON_MARGIN_MPS = 4;
  * (world/terrain.ts) so a pass costs nothing but grip.
  */
 const PASSING_VERGE_M = 1.2;
-const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE_M;
-/** Outermost line either side that still keeps the body inside the verge allowance. */
-const EDGE_LINE_M = PASSING_EDGE - CAR_HALF_WIDTH_M;
 /**
  * Indexed road props may use the wider graded shoulder, but only while an exact
  * radius-based plan is active. Four metres clears the longest rotated trunk at the
  * road edge; ordinary passing and accidental departures keep the tighter verge.
  */
 const STATIC_AVOID_VERGE_M = 4;
-const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + STATIC_AVOID_VERGE_M;
-const STATIC_AVOID_LINE_M = STATIC_AVOID_EDGE - CAR_HALF_WIDTH_M;
 /**
  * BYPASSING SOMETHING STOPPED IN THE LANE, on the driver's own side.
  *
@@ -374,7 +389,7 @@ const STATIC_AVOID_LINE_M = STATIC_AVOID_EDGE - CAR_HALF_WIDTH_M;
  * angled. It stays inside the graded shoulder the indexed detour already uses, and
  * well short of the pole line at 6 m (see `POLE_LATERAL`, world/props.ts).
  */
-const BLOCKER_BYPASS_LINE_M = ROAD_HALF_WIDTH + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
+/** A stopped blocker clears the asphalt by this body-and-hysteresis margin. */
 /**
  * How long the bypass is held past the ray hit on the blocker's front face: the
  * longest catalogue body plus room for our own rear bumper, so the line is never
@@ -388,9 +403,7 @@ const BLOCKER_BYPASS_TOLERANCE_M = 0.35;
 /** Nose distance below which contact is imminent whatever the plan says. */
 const BLOCKER_BYPASS_CONTACT_M = 2;
 /** Enter only after a full departure; stay latched until the whole body is on asphalt. */
-const OFFROAD_RECOVERY_EDGE = PASSING_EDGE;
-const OFFROAD_RECOVERY_LINE = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.2;
-const OFFROAD_REJOIN_LATERAL_M = ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M - 0.05;
+/** Off-road re-entry is measured from the asphalt edge where the car stands. */
 const OFFROAD_LANE_TOLERANCE_M = 0.35;
 const OFFROAD_HEADING_TOLERANCE_RAD = 0.14;
 /** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
@@ -458,6 +471,12 @@ const MUST_STOP_GAP_M = 4;
  * is how quickly a gap error is taken out. Everything else follows from those.
  */
 const FOLLOW_STANDOFF_M = 7;
+/**
+ * An adjacent lane is not scanned until it can change this tick's plan. Matching
+ * the corridor's minimum worthwhile advantage preserves a free lane for a slower
+ * leader without making every empty ambient car inspect both carriageways.
+ */
+const ADJACENT_LANE_PROBE_ADVANTAGE_MPS = 0.5;
 const FOLLOW_RELAX_S = 2.2;
 const LEAD_SPEED_TAU_S = 0.3;
 /**
@@ -549,6 +568,16 @@ const PASS_MAX_HOLD_S = 20;
 const DYNAMIC_BLOCKER_NEARBY_M = 12;
 /** Move this far after losing a dynamic lead before a stop can be called unexplained. */
 const DYNAMIC_BLOCKER_CLEAR_M = 5;
+/**
+ * The band, ahead of and behind the car's own centre, in which another body counts
+ * as ALONGSIDE rather than as something to follow.
+ *
+ * It has to cover the forward probes' blind spot — they start `PROBE_START_M` past
+ * the bumper — plus a body length either way, because two cars whose centres are
+ * eight metres apart still overlap for the length of a lane change.
+ */
+const ABEAM_AHEAD_M = 9;
+const ABEAM_BEHIND_M = 9;
 const STUCK_SPEED_MPS = 1 / 3.6;
 /**
  * Speed below which a car nosed up to something parked counts as going nowhere, the
@@ -659,11 +688,19 @@ export class Autopilot {
   private corridorSqueezeDistance = Infinity;
   private corridorLaneBlockDistance = Infinity;
   private corridorLaneBlockSpeed = 0;
+  /** Ambient traffic's requested lane; null restores the driver's inner lane. */
+  private requestedLane: number | null = null;
+  /** Road width at this tick's projection, shared with hazard callbacks. */
+  private asphaltHalfWidth = 0;
+  /** Scratch lane centres: avoids rebuilding the planner's candidate list per tick. */
+  private readonly laneCentres: number[] = [];
   private planUsesOncomingLane = false;
   private planUsesShoulder = false;
   /** Asked by the traffic coordinator to give the car in front room to reverse. */
   private yieldReverse = false;
   private bodyScanGap = Infinity;
+  /** Along-road speed of the nearest hit from the most recent lane probe. */
+  private probeHitSpeed = 0;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
   private appliedLateral = 0;
   /**
@@ -730,7 +767,14 @@ export class Autopilot {
   /** Car lateral at the time of the scan; a hazard off to one side is not a hazard. */
   private scanLateral = 0;
   private readonly visitHazard = (hazard: RoadHazard): void => {
-    const distance = hazard.s - this.hintS;
+    // BUMPER TO NEAR EDGE, like the planner's own obstacles (`collectHazard`).
+    //
+    // Centre to centre is a body length and a radius short of the truth, and the
+    // recovery's "something in front, stop" gate compares this against a fixed four
+    // metres — so a car pulling out at a 1.2 m rock stopped measuring 4 m when its
+    // bumper was already touching it. Measured in the bench: a 2.9 m/s nose-on
+    // contact with an indexed prop it was trying to get round.
+    const distance = hazard.s - hazard.radius - CAR_HALF_LENGTH_M - this.hintS;
     if (distance >= this.hazardDistance) return;
     // A PROP THAT DOES NOT REACH THE ASPHALT IS SCENERY.
     //
@@ -740,7 +784,7 @@ export class Autopilot {
     // in both directions, with nothing on the road at all — the nearest thing being
     // roadside scatter and power-line pylons metres past the paint. A detour is for
     // something in the way, and only what overlaps the asphalt is in the way.
-    if (Math.abs(hazard.lateral) - hazard.radius >= ROAD_HALF_WIDTH) return;
+    if (Math.abs(hazard.lateral) - hazard.radius >= this.asphaltHalfWidth) return;
     // `visitHazard` still answers "what is the nearest prop on the line I am on",
     // which the breakable-speed rule and the recovery reach both want. The corridor
     // planner uses `collectHazard` below instead, because a planner that only ever
@@ -756,7 +800,7 @@ export class Autopilot {
    * that do not reach the asphalt are scenery, and are not offered at all.
    */
   private readonly collectHazard = (hazard: RoadHazard): void => {
-    if (Math.abs(hazard.lateral) - hazard.radius >= ROAD_HALF_WIDTH) return;
+    if (Math.abs(hazard.lateral) - hazard.radius >= this.asphaltHalfWidth) return;
     // Distance to the NEAR EDGE, from the bumper: a six-metre boulder whose centre
     // is 21 m away is 15 m of road away, and braking to its centre is braking six
     // metres too late. The planner's swept test wants the same edge.
@@ -778,8 +822,8 @@ export class Autopilot {
 
 
   constructor(
-    private readonly road: DriveRoad,
-    private readonly hazards: HazardField,
+    private road: DriveRoad,
+    private hazards: HazardField,
     /** Optional only until Vehicle exposes its PhysicsWorld; main passes the shared world. */
     private readonly physics?: PhysicsWorld,
   ) {
@@ -822,6 +866,14 @@ export class Autopilot {
    */
   setYieldReverse(enabled: boolean): void {
     this.yieldReverse = enabled;
+  }
+  /**
+   * Requests a same-direction lane. The request is clamped at the driver's current
+   * arclength on every tick, so an outer-lane car merges through a taper instead of
+   * ever targeting a lane that has ceased to exist.
+   */
+  requestLane(lane: number | null): void {
+    this.requestedLane = lane === null ? null : Math.max(0, Math.floor(lane));
   }
   /** True while this driver is backing out of something and needs the room behind. */
   get needsReverseRoom(): boolean {
@@ -871,6 +923,23 @@ export class Autopilot {
   /** Estimated speed of that body, m/s. Zero for anything parked. */
   get obstacleSpeed(): number { return this.obstacleSpeedValue; }
   get activity(): AutopilotActivity { return this.activityValue; }
+
+  /**
+   * Hands this driver a different road, mid-drive.
+   *
+   * The turning circle at the road's start is a second road view (`world/turnaround.ts`),
+   * and an ambient car that reaches the end of the world is given it, driven round the
+   * bulb, and handed the ordinary road back facing the other way. Everything the
+   * controller holds about WHERE it is - the projection hint, the planned line, the
+   * recovery state - belongs to the road it was holding, so this resets exactly what a
+   * fresh engagement resets and nothing else: the mode, the speed cap and the headway
+   * are the driver's, not the road's.
+   */
+  retarget(road: DriveRoad, hazards: HazardField): void {
+    this.road = road;
+    this.hazards = hazards;
+    this.setEngaged(this.engagedValue);
+  }
 
   setEngaged(engaged: boolean): void {
     if (!engaged) this.controlledVehicle?.setIndicator('off');
@@ -926,6 +995,28 @@ export class Autopilot {
     }
     this.hintS = projection.s;
     this.hintValid = true;
+    this.asphaltHalfWidth = this.road.halfWidthAt(this.hintS);
+    const lanesPerSide = this.road.lanesPerSideAt(this.hintS);
+    const desiredLane = Math.min(this.requestedLane ?? 0, lanesPerSide - 1);
+    const ownLaneOffset = this.road.laneCentreAt(this.hintS, desiredLane);
+    const passingEdge = this.asphaltHalfWidth + PASSING_VERGE_M;
+    const edgeLine = passingEdge - CAR_HALF_WIDTH_M;
+    const staticAvoidEdge = this.asphaltHalfWidth + STATIC_AVOID_VERGE_M;
+    const staticAvoidLine = staticAvoidEdge - CAR_HALF_WIDTH_M;
+    const offRoadRecoveryLine = this.asphaltHalfWidth - CAR_HALF_WIDTH_M - 0.2;
+    const offRoadRejoinLateral = this.asphaltHalfWidth - CAR_HALF_WIDTH_M - 0.05;
+    this.laneCentres.length = 0;
+    // ONLY A DRIVER IN A HURRY SHOPS FOR LANES. Everyone else drives the lane it was
+    // given — the one its own request (or a traffic merge) names — so a widened
+    // stretch reads as traffic keeping its place rather than as a road where every
+    // car changes lanes whenever something ahead is a little slower.
+    if (config.lanePasses) {
+      for (let lane = 0; lane < lanesPerSide; lane++) {
+        this.laneCentres.push(this.road.laneCentreAt(this.hintS, lane));
+      }
+    } else {
+      this.laneCentres.push(ownLaneOffset);
+    }
     const velocity = vehicle.chassis.linvel();
     const speed = Math.hypot(velocity.x, velocity.z);
     this.travelled += speed * dt;
@@ -935,8 +1026,8 @@ export class Autopilot {
     // not a car that has left the road: the planner put it there and will bring it
     // back. Only a departure the planner did not ask for is a road departure.
     const insideStaticAvoidance =
-      this.planUsesShoulder && Math.abs(projection.lateral) <= STATIC_AVOID_EDGE;
-    if (Math.abs(projection.lateral) > OFFROAD_RECOVERY_EDGE && !insideStaticAvoidance) {
+      this.planUsesShoulder && Math.abs(projection.lateral) <= staticAvoidEdge;
+    if (Math.abs(projection.lateral) > passingEdge && !insideStaticAvoidance) {
       this.roadRecoveryActive = true;
     }
     let offRoad = this.roadRecoveryActive;
@@ -951,11 +1042,11 @@ export class Autopilot {
       this.roadRecoveryTargetLine =
         Math.abs(roadRecoveryBias) > 0.01
           ? clamp(
-              config.laneOffset + roadRecoveryBias,
-              -OFFROAD_REJOIN_LATERAL_M,
-              OFFROAD_REJOIN_LATERAL_M,
+              ownLaneOffset + roadRecoveryBias,
+              -offRoadRejoinLateral,
+              offRoadRejoinLateral,
             )
-          : config.laneOffset;
+          : ownLaneOffset;
       // Ordinary road re-entry is not obstacle recovery: cancel an old generic
       // manoeuvre and hold the nearest edge line. A coordinator-committed deadlock
       // escape is different; crossing the verge is part of its chosen outer path,
@@ -967,7 +1058,7 @@ export class Autopilot {
         this.stallAnchorX = this.position.x;
         this.stallAnchorZ = this.position.z;
         this.appliedLateral =
-          Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE;
+          Math.sign(projection.lateral || 1) * offRoadRecoveryLine;
       }
       this.planUsesShoulder = false;
       this.planUsesOncomingLane = false;
@@ -1039,6 +1130,7 @@ export class Autopilot {
     this.bodyScanGap = this.axisScan(vehicle, originX, originZ, 1, BODY_SCAN_RANGE_M);
     const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
     const laneGap = this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ);
+    const laneProbeSpeed = this.probeHitSpeed;
     let headingError = Math.atan2(forwardX, forwardZ) - currentRoad.heading;
     while (headingError > Math.PI) headingError -= Math.PI * 2;
     while (headingError < -Math.PI) headingError += Math.PI * 2;
@@ -1059,7 +1151,7 @@ export class Autopilot {
     // centred on its own lane and parallel to the road. An obstacle escape already
     // has a deliberate clear-side line; once its body is back on asphalt, preserve
     // that line long enough to pass the obstacle instead of steering back into it.
-    const bodyOnAsphalt = Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M;
+    const bodyOnAsphalt = Math.abs(projection.lateral) <= offRoadRejoinLateral;
     const settledOnRecoveryLine =
       Math.abs(projection.lateral - this.roadRecoveryTargetLine) <=
         OFFROAD_LANE_TOLERANCE_M &&
@@ -1074,8 +1166,8 @@ export class Autopilot {
       this.stoppedFor = 0;
       this.stallAnchorX = this.position.x;
       this.stallAnchorZ = this.position.z;
-      if (Math.abs(this.roadRecoveryTargetLine - config.laneOffset) > 0.01) {
-        this.recoveryBias = this.roadRecoveryTargetLine - config.laneOffset;
+      if (Math.abs(this.roadRecoveryTargetLine - ownLaneOffset) > 0.01) {
+        this.recoveryBias = this.roadRecoveryTargetLine - ownLaneOffset;
         this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
       }
       this.roadRecoveryFollowingEscape = false;
@@ -1098,11 +1190,12 @@ export class Autopilot {
     // elsewhere, and that distance feeds the SAME tracker, which keeps the estimate
     // continuous across the whole manoeuvre.
     const lineInOwnLane =
-      Math.abs(projection.lateral - config.laneOffset) < PROBE_HALF_WIDTH_M &&
-      Math.abs(this.appliedLateral - config.laneOffset) < PROBE_HALF_WIDTH_M;
+      Math.abs(projection.lateral - ownLaneOffset) < PROBE_HALF_WIDTH_M &&
+      Math.abs(this.appliedLateral - ownLaneOffset) < PROBE_HALF_WIDTH_M;
     const ownLaneGap = lineInOwnLane
       ? Math.min(laneGap, bodyLaneGap)
-      : this.laneProbe(vehicle, config.laneOffset, sight, originX, originZ);
+      : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ);
+    const ownLaneProbeSpeed = lineInOwnLane ? laneProbeSpeed : this.probeHitSpeed;
     this.updateLead(
       dt,
       Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap),
@@ -1152,6 +1245,18 @@ export class Autopilot {
     );
     this.collectHorizon = horizon;
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
+    // AND WHAT IS BESIDE THE CAR, which no forward ray can answer: the lane probes
+    // start four metres past the bumper, so a car level with the door is invisible
+    // to every one of them. That blind spot is how a driver indicated, moved into
+    // the next lane and drove into the car already in it.
+    this.collectAbeamNeighbours(
+      vehicle,
+      originX,
+      originZ,
+      roadForwardX,
+      roadForwardZ,
+      projection.lateral,
+    );
     // WHICH LANE THE CAR AHEAD IS IN IS MEASURED, NEVER INFERRED FROM OUR OWN LINE.
     //
     // The rays report a distance, not a lateral. Snapping that distance to whichever
@@ -1168,23 +1273,61 @@ export class Autopilot {
     // So the obstacle's lane comes from a probe cast down a FIXED lane centre —
     // `ownLaneGap` above, which is also what keeps the tracked speed estimate alive
     // while the line is out in the other lane.
+    // A lane probe is three rays per chord segment. The adjacent lane is only worth
+    // that work when it can affect this tick's choice: a traffic request names it,
+    // or a slower leader inside the horizon gives the planner a reason to leave.
+    // Empty-road traffic therefore keeps the original probe budget.
+    const desiredSpeed = Math.min(config.cruiseMps, this.speedCapValue);
+    const probeAdjacentLanes =
+      config.lanePasses &&
+      (desiredLane > 0 ||
+        (ownLaneGap < horizon &&
+          ownLaneProbeSpeed < desiredSpeed - ADJACENT_LANE_PROBE_ADVANTAGE_MPS));
+    // Keep the established own-lane tracker as the speed authority. Adjacent lanes
+    // are new information for the lateral cost search; letting their raw body speed
+    // replace the tracker's filtered lead here would change narrow-road following.
     if (ownLaneGap < Infinity) {
       obstacles.push({
         s: ownLaneGap,
-        lateral: config.laneOffset,
+        lateral: ownLaneOffset,
         halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
-        // A car coming AT us reads as stationary through `speed - closing`, and the
-        // planner wants exactly that: something to be gone round, not followed.
         speed: this.leadClosingValue > speed + HEAD_ON_MARGIN_MPS ? 0 : leadSpeed,
       });
     }
-    const oncomingLine = -Math.sign(config.laneOffset || -1) * (ROAD_HALF_WIDTH / 2);
+    if (probeAdjacentLanes) {
+      for (const laneCentre of this.laneCentres) {
+        if (laneCentre === ownLaneOffset) continue;
+        const laneGapForPlan = this.laneProbe(vehicle, laneCentre, sight, originX, originZ);
+        if (laneGapForPlan === Infinity) continue;
+        obstacles.push({
+          s: laneGapForPlan,
+          lateral: laneCentre,
+          halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
+          speed: this.probeHitSpeed,
+        });
+      }
+    }
+    const oncomingLine = -ownLaneOffset;
+    // GOING ROUND A PARKED THING IS NOT AN OVERTAKE.
+    //
+    // `overtakes` is an appetite for passing MOVING traffic, and pricing the opposing
+    // lane out of reach for everyone else meant a cautious driver facing a rock in
+    // its lane had nothing left but the shoulder — and if the shoulder was no good,
+    // nothing at all. Reported from play: a prop in one lane, a queue behind it, an
+    // opposing queue level with its head, and five minutes of nobody moving.
+    //
+    // So a STILL blocker opens the crown to any driver, at a price: the crossing
+    // gate below is unchanged, so it still only goes when the opposing lane is
+    // genuinely clear for the whole manoeuvre and clear behind as well.
+    const stillBlocker = this.hazardDistance < horizon || this.leadIsParked;
+    const mayCrossCrown = this.passingEnabled && (config.overtakes || stillBlocker);
+    if (mayCrossCrown) this.laneCentres.push(oncomingLine);
     const plan = planCorridor({
       ownLateral: projection.lateral,
       previousLine: this.planLine,
-      laneOffset: config.laneOffset,
+      laneOffset: ownLaneOffset,
       speed,
-      desiredSpeed: Math.min(config.cruiseMps, this.speedCapValue),
+      desiredSpeed,
       halfWidth: CAR_HALF_WIDTH_M,
       horizon,
       // The commanded line moves per METRE of road, except near a standstill, where
@@ -1198,13 +1341,18 @@ export class Autopilot {
         speed < CRAWL_SPEED_MPS
           ? LINE_SLEW_AT_REST_MPS / Math.max(speed, 0.4)
           : LINE_SHIFT_PER_METRE,
-      asphaltLimit: ROAD_HALF_WIDTH,
-      edgeLimit: STATIC_AVOID_LINE_M,
-      // The mode's whole appetite for the opposing lane, in one number. A driver
-      // that does not overtake simply prices that lane out of reach.
-      oncomingLaneCost: config.overtakes && this.passingEnabled
-        ? ONCOMING_LANE_COST * config.passNerve
-        : Number.POSITIVE_INFINITY,
+      laneCentres: this.laneCentres,
+      oncomingBoundary: 0,
+      asphaltLimit: this.asphaltHalfWidth,
+      edgeLimit: staticAvoidLine,
+      // The mode's whole appetite for the opposing lane, in one number — and a
+      // dearer one for a driver that is only there because something is parked in
+      // its way, so it prefers the shoulder and its own lane while either works.
+      oncomingLaneCost: !mayCrossCrown
+        ? Number.POSITIVE_INFINITY
+        : config.overtakes
+          ? ONCOMING_LANE_COST * config.passNerve
+          : ONCOMING_LANE_COST * STILL_BYPASS_NERVE,
       oncomingGap: Math.min(
         this.oncomingGap,
         this.laneProbe(vehicle, oncomingLine, horizon, originX, originZ),
@@ -1231,24 +1379,26 @@ export class Autopilot {
       !offRoad &&
       !recovering &&
       plan.usesOncomingLane &&
-      projection.lateral * Math.sign(config.laneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
+      (projection.lateral - 0) * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     this.planUsesShoulder = !offRoad && !recovering && plan.usesShoulder;
     // Anything the corridor clears by only its hysteresis margin is squeezed past at
     // walking pace rather than at road speed.
     this.corridorSqueezeDistance = Number.POSITIVE_INFINITY;
     for (const obstacle of obstacles) {
-      if (obstacle.speed > CRAWL_SPEED_MPS) continue;
+      // A car alongside is not a squeeze: it is beside the corridor, not in it, and
+      // pricing it here put every driver with a neighbour at walking pace.
+      if (obstacle.abeam || obstacle.speed > CRAWL_SPEED_MPS) continue;
       const clearance = Math.abs(obstacle.lateral - plan.line) - obstacle.halfWidth;
       if (clearance < CAR_HALF_WIDTH_M + CORRIDOR_SQUEEZE_M && obstacle.s >= 0) {
         this.corridorSqueezeDistance = Math.min(this.corridorSqueezeDistance, obstacle.s);
       }
     }
     const desiredLine = offRoad
-      ? Math.abs(projection.lateral) <= OFFROAD_REJOIN_LATERAL_M
+      ? Math.abs(projection.lateral) <= offRoadRejoinLateral
         ? this.roadRecoveryTargetLine
-        : Math.sign(projection.lateral || 1) * OFFROAD_RECOVERY_LINE
+        : Math.sign(projection.lateral || 1) * offRoadRecoveryLine
       : recovering || this.travelled < this.recoveryBiasUntil
-        ? clamp(config.laneOffset + this.recoveryBias, -EDGE_LINE_M, EDGE_LINE_M)
+        ? clamp(ownLaneOffset + this.recoveryBias, -edgeLine, edgeLine)
         : plan.line;
     this.planLine = plan.line;
     // SIGNAL WHILE THE CAR IS STILL MOVING ACROSS, which is what the commanded line
@@ -1292,7 +1442,7 @@ export class Autopilot {
     // Where the CAR is, not where its line is: the line is often already home while
     // the body is still out in the other lane, which is exactly the dangerous state.
     const onWrongSide =
-      projection.lateral * Math.sign(config.laneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
+      projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     const headOn = gap < Infinity && this.leadClosingValue > speed + HEAD_ON_MARGIN_MPS;
     const lineRate =
       Math.max(
@@ -1315,7 +1465,7 @@ export class Autopilot {
       lookahead *
       0.125 *
       config.chordGain;
-    const lateralLimit = this.planUsesShoulder ? STATIC_AVOID_EDGE : PASSING_EDGE;
+    const lateralLimit = this.planUsesShoulder ? staticAvoidEdge : passingEdge;
     const targetLateral = clamp(
       this.appliedLateral + chordShift,
       -lateralLimit,
@@ -1453,11 +1603,22 @@ export class Autopilot {
       // Something STILL in the corridor is approached at walking pace, not stopped
       // for: the car is going to ease past it, and a littered road is otherwise a
       // continuous emergency stop — measured at 0.9 m/s against a 30 m/s cruise,
-      // with a clear line through the whole field the entire time. The nose scan
-      // and `mustStop` are what actually stop the car when contact is imminent.
+      // with a clear line through the whole field the entire time.
+      //
+      // BUT THE CRAWL IS FOR EASING PAST, NOT FOR LEANING ON. When the planner has
+      // found NO way through, the thing in front is going to be touched at walking
+      // pace, and the nose scan cannot prevent it: that scan sees dynamic bodies
+      // only, so an indexed rock had nothing at all to stop the car and it crept
+      // into it — measured as a 2.9 m/s nose-on contact. With a corridor still
+      // available the crawl is exactly right and the field is driven through; with
+      // none, the car stops a bumper short and waits for a line to open.
       targetSpeed = Math.min(
         targetSpeed,
-        blockSpeed > CRAWL_SPEED_MPS ? braking : Math.max(AVOIDANCE_CRAWL_MPS, braking),
+        blockSpeed > CRAWL_SPEED_MPS
+          ? braking
+          : !this.corridorFeasible && this.corridorBlockDistance <= STILL_BLOCK_STANDOFF_M
+            ? 0
+            : Math.max(AVOIDANCE_CRAWL_MPS, braking),
       );
       if (blockSpeed > CRAWL_SPEED_MPS) {
         // Moving: keep a time headway behind it.
@@ -1485,7 +1646,7 @@ export class Autopilot {
       // not half. Released at half, the crossing car rear-ended the leader it was
       // committed to overtaking: eight contacts in the dense bench, every one of
       // them logged at a lateral of about zero.
-      Math.abs(projection.lateral - config.laneOffset) < CAR_HALF_WIDTH_M * 2
+      Math.abs(projection.lateral - ownLaneOffset) < CAR_HALF_WIDTH_M * 2
     ) {
       const laneSpeed = Math.max(0, this.corridorLaneBlockSpeed);
       const headwayGap =
@@ -1857,9 +2018,9 @@ export class Autopilot {
       this.stoppedFor = 0;
       return;
     }
-    const right = Math.sign(config.laneOffset || -1);
+    const right = Math.sign(this.road.laneCentreAt(this.hintS, 0) || -1);
     this.recoverySide =
-      lateral * right > ROAD_HALF_WIDTH - CAR_HALF_WIDTH_M ? -right : right;
+      lateral * right > this.road.halfWidthAt(this.hintS) - CAR_HALF_WIDTH_M ? -right : right;
     this.recoveryAttempts = persistentRoadblock
       ? 0
       : samePlace
@@ -1876,6 +2037,60 @@ export class Autopilot {
       RECOVERY_REAR_CLEAR_M;
     this.recoveryPhase = rearClear ? 'reverse' : 'pullout';
     this.recoveryTimer = rearClear ? RECOVERY_REVERSE_S : RECOVERY_PULLOUT_S;
+  }
+
+  /**
+   * Every dynamic body LEVEL WITH THIS ONE, offered to the planner as an abeam
+   * obstacle: a direction it may not steer in, priced nowhere.
+   *
+   * One broad-phase query rather than a ray per lane, and it is deliberately not
+   * demand-gated: the danger is not "can I overtake", it is "is the space I am
+   * drifting into already taken", and that question is live on every tick of
+   * ordinary lane keeping. Positions are resolved in the ROAD's frame, not the
+   * car's, so a body angled across the road still reports the lateral it occupies.
+   */
+  private collectAbeamNeighbours(
+    vehicle: Vehicle,
+    originX: number,
+    originZ: number,
+    roadForwardX: number,
+    roadForwardZ: number,
+    ownLateral: number,
+  ): void {
+    if (!this.physics || !this.dynamicProximityShape) return;
+    const obstacles = this.corridorObstacles;
+    this.rayOrigin.x = this.position.x - originX;
+    this.rayOrigin.y = this.position.y;
+    this.rayOrigin.z = this.position.z - originZ;
+    this.physics.world.intersectionsWithShape(
+      this.rayOrigin,
+      this.identityRotation,
+      this.dynamicProximityShape,
+      (collider) => {
+        const other = collider.translation();
+        const dx = other.x - this.rayOrigin.x;
+        const dz = other.z - this.rayOrigin.z;
+        const along = dx * roadForwardX + dz * roadForwardZ;
+        if (along > ABEAM_AHEAD_M || along < -ABEAM_BEHIND_M) return true;
+        // Positive lateral is LEFT of travel (see `Road.offsetPoint`), and the
+        // road's own forward vector is what that sign is measured against.
+        const across = dx * roadForwardZ - dz * roadForwardX;
+        const parent = collider.parent();
+        const velocity = parent ? parent.linvel() : { x: 0, y: 0, z: 0 };
+        obstacles.push({
+          s: 0,
+          lateral: ownLateral + across,
+          halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
+          speed: velocity.x * roadForwardX + velocity.z * roadForwardZ,
+          abeam: true,
+        });
+        return true;
+      },
+      this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
+      undefined,
+      undefined,
+      vehicle.chassis,
+    );
   }
   /**
    * Broad-phase guard for the sensor blind spot created by an angled car or tight
@@ -1947,7 +2162,8 @@ export class Autopilot {
       // drove into the same pole. Out there the timer owns the phase.
       if (
         this.recoveryTimer <= 0 ||
-        (!this.recoveryOffRoad && Math.abs(lateral) > EDGE_LINE_M + CAR_HALF_WIDTH_M)
+        (!this.recoveryOffRoad &&
+          Math.abs(lateral) > this.road.halfWidthAt(this.hintS) + PASSING_VERGE_M)
       ) {
         this.recoveryPhase = 'pullout';
         this.recoveryTimer = RECOVERY_PULLOUT_S;
@@ -1979,7 +2195,7 @@ export class Autopilot {
       gap < MUST_STOP_GAP_M ||
       (!this.recoveryCommitted &&
         !this.recoveryOffRoad &&
-        Math.abs(lateral) > OFFROAD_RECOVERY_EDGE);
+        Math.abs(lateral) > this.road.halfWidthAt(this.hintS) + PASSING_VERGE_M);
     if (arrived) {
       this.recoveryPhase = 'none';
       this.recoveryOffRoad = false;
@@ -2032,7 +2248,9 @@ export class Autopilot {
     originZ: number,
     facing: 1 | -1 = 1,
   ): number {
+    this.probeHitSpeed = 0;
     if (!this.physics) return Infinity;
+    // The ray must not find the car casting it.
     const body = vehicle.chassis;
     const fromS = this.hintS + facing * PROBE_START_M;
     const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
@@ -2070,7 +2288,13 @@ export class Autopilot {
         // Chord metres are shorter than road metres in a bend; report road metres,
         // measured from the car rather than from where the probe starts.
         const along = PROBE_START_M + step * segment + (hit.toi * segment) / length;
-        if (along < nearest) nearest = along;
+        if (along < nearest) {
+          nearest = along;
+          const otherVelocity = collider.parent()!.linvel();
+          const road = this.road.sampleAt(this.hintS + facing * along);
+          this.probeHitSpeed =
+            otherVelocity.x * Math.sin(road.heading) + otherVelocity.z * Math.cos(road.heading);
+        }
         break;
       }
     }

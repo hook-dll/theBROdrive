@@ -66,6 +66,7 @@ import {
   homesteadSpawn,
   spawnStartingItems,
 } from './world/house';
+import { TerminusPadProvider } from './world/terminuspad';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { hasEscapedWorld } from './world/landscape';
@@ -429,6 +430,7 @@ async function boot(): Promise<void> {
   );
   streamer.register(new RoadMeshProvider(world.seed));
   streamer.register(new HomesteadProvider());
+  streamer.register(new TerminusPadProvider());
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
   // is what lets the autopilot know a dirt pile from a rock without a physics query:
   // the generator already knew, and this is the only place that knowledge survives.
@@ -1396,7 +1398,7 @@ async function boot(): Promise<void> {
   const wheelSurface = (ws: WheelSprayState): SurfaceType => {
     if (ws.surface !== TERRAIN_COLLIDER_SURFACE) return ws.surface;
     const p = road.project(ws.absoluteContactX, ws.absoluteContactZ, activeS);
-    return terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral);
+    return terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral, p.s);
   };
 
   /**
@@ -2413,11 +2415,13 @@ async function boot(): Promise<void> {
 const query = new URLSearchParams(window.location.search);
 const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
-  : query.has('playground')
-    ? import('./playground').then(({ bootPlayground }) => bootPlayground())
-    : query.has('mirage-lab')
-      ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
-      : boot();
+  : query.has('prop-gallery')
+    ? import('./prop-gallery').then(({ bootPropGallery }) => bootPropGallery())
+    : query.has('playground')
+      ? import('./playground').then(({ bootPlayground }) => bootPlayground())
+      : query.has('mirage-lab')
+        ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
+        : boot();
 
 void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

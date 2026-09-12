@@ -389,10 +389,12 @@ async function driveHazard(
       }
     }
     if (p.s > hazard.s + 15) passed = true;
+    // Back in ITS LANE, whatever the road is doing there: the lane centre is now a
+    // road property (see world/roadprofile.ts), not a constant on the driving mode.
     if (
       passed &&
       p.s > hazard.s + 60 &&
-      Math.abs(p.lateral - MODES.sleeper.laneOffset) < 0.35
+      Math.abs(p.lateral - rig.road.laneCentreAt(p.s, 0)) < 0.35
     ) {
       rejoined = true;
       break;
@@ -852,6 +854,405 @@ async function checkOvertake(): Promise<void> {
   physics.world.free();
 }
 
+/**
+ * PASSING WITHOUT CROSSING THE CROWN, on a stretch that offers two lanes each way.
+ *
+ * The same geometry as the overtake above, moved to a widened section: the slower
+ * car holds lane 0, and the driver behind should go round it by moving OUTWARD into
+ * lane 1 and coming back, never using the oncoming carriageway and never asking for
+ * the oncoming-clearance gate. On the narrow road nothing about this is available,
+ * which is exactly what the check above still measures.
+ */
+async function checkLanePass(): Promise<void> {
+  const leadAhead = 45;
+  const leadCap = 12;
+  const seconds = 30;
+  const road = new Road(42);
+  let wideS = -1;
+  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
+    // Room for the whole manoeuvre inside the open section, not across its taper.
+    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
+  }
+  if (wideS < 0) throw new Error('no widened stretch on this seed');
+
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, wideS - 60, wideS + 1_200);
+  const world = new GameWorld(newWorldState(42));
+  const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
+  const hazards = new HazardIndex();
+  const inner = road.laneCentreAt(wideS, 0);
+  const outer = road.laneCentreAt(wideS, 1);
+  const chaserState = { ...carState(road, wideS, inner), id: 'lane-chaser' };
+  const leadState = { ...carState(road, wideS + leadAhead, inner), id: 'lane-lead' };
+  world.state.cars[chaserState.id] = chaserState;
+  world.state.cars[leadState.id] = leadState;
+  const chaser = new Vehicle(physics, world, chaserState, scene, origin);
+  const lead = new Vehicle(physics, world, leadState, scene, origin);
+  const chaserPilot = new Autopilot(road, hazards, physics);
+  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserInput = emptyInput();
+  const leadInput = emptyInput();
+  chaserInput.handbrake = true;
+  leadInput.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+  }
+  chaserInput.handbrake = false;
+  leadInput.handbrake = false;
+  chaserPilot.setMode('frantic');
+  leadPilot.setMode('sleeper');
+  chaserPilot.setEngaged(true);
+  leadPilot.setEngaged(true);
+
+  let reachedOuterLane = false;
+  let crossedCrown = false;
+  let completed = false;
+  let worstCrownSide = 0;
+  let clearanceWhileLevel = Infinity;
+  const chaserPosition = new THREE.Vector3();
+  const leadPosition = new THREE.Vector3();
+  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
+    leadPilot.setSpeedCap(leadCap);
+    chaserPilot.drive(FIXED_DT, chaser, chaserInput, 0, 0);
+    leadPilot.drive(FIXED_DT, lead, leadInput, 0, 0);
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+    chaser.absoluteTranslation(chaserPosition);
+    lead.absoluteTranslation(leadPosition);
+    const chaserRoad = road.project(chaserPosition.x, chaserPosition.z);
+    const leadRoad = road.project(leadPosition.x, leadPosition.z);
+    const along = leadRoad.s - chaserRoad.s;
+    // Lane centres are negative here; "outward" is more negative still.
+    if (chaserRoad.lateral <= outer + 0.6) reachedOuterLane = true;
+    if (chaserRoad.lateral > 0) crossedCrown = true;
+    worstCrownSide = Math.max(worstCrownSide, chaserRoad.lateral);
+    if (Math.abs(along) < 4.6) {
+      clearanceWhileLevel = Math.min(
+        clearanceWhileLevel,
+        Math.abs(chaserRoad.lateral - leadRoad.lateral) - PLANNED_CLEARANCE_M,
+      );
+    }
+    if (along < -8) completed = true;
+  }
+  check(
+    'a slower car is passed in the next lane, not the oncoming one',
+    reachedOuterLane && completed && !crossedCrown,
+    `outer lane=${reachedOuterLane}, cleared by 8 m=${completed}, worst lateral toward the crown ${worstCrownSide.toFixed(2)} m`,
+  );
+  check(
+    'the lane pass keeps its clearance',
+    clearanceWhileLevel > 0,
+    Number.isFinite(clearanceWhileLevel) ? `${clearanceWhileLevel.toFixed(2)} m` : 'never level',
+  );
+  chaser.dispose();
+  lead.dispose();
+  physics.world.free();
+}
+
+/**
+ * A CAR ALONGSIDE IS NOT A GAP.
+ *
+ * The forward lane probes start four metres ahead of the bumper, so a car level
+ * with the door is invisible to every sensor the planner had. Seen in play on a
+ * widened stretch: the driver indicated, moved into the next lane, and drove into
+ * the car that was already in it — after which the two travelled locked together.
+ *
+ * The scenario reproduces exactly that geometry: a slow leader in the driver's own
+ * lane, giving it every reason to move out, and a second car holding the next lane
+ * beside it.
+ */
+async function checkSideBySide(): Promise<void> {
+  const seconds = 25;
+  const road = new Road(42);
+  let wideS = -1;
+  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
+    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
+  }
+  if (wideS < 0) throw new Error('no widened stretch on this seed');
+
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, wideS - 60, wideS + 1_200);
+  const world = new GameWorld(newWorldState(42));
+  const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
+  const hazards = new HazardIndex();
+  const inner = road.laneCentreAt(wideS, 0);
+  const outer = road.laneCentreAt(wideS, 1);
+  const chaserState = { ...carState(road, wideS, inner), id: 'side-chaser' };
+  const leadState = { ...carState(road, wideS + 32, inner), id: 'side-lead' };
+  // Level with the chaser's door, in the lane it wants.
+  const neighbourState = { ...carState(road, wideS + 1, outer), id: 'side-neighbour' };
+  for (const state of [chaserState, leadState, neighbourState]) world.state.cars[state.id] = state;
+  const chaser = new Vehicle(physics, world, chaserState, scene, origin);
+  const lead = new Vehicle(physics, world, leadState, scene, origin);
+  const neighbour = new Vehicle(physics, world, neighbourState, scene, origin);
+  const pilots = [
+    new Autopilot(road, hazards, physics),
+    new Autopilot(road, hazards, physics),
+    new Autopilot(road, hazards, physics),
+  ] as const;
+  const inputs = [emptyInput(), emptyInput(), emptyInput()] as const;
+  const cars = [chaser, lead, neighbour] as const;
+  for (const input of inputs) input.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    for (let k = 0; k < cars.length; k++) cars[k]!.fixedUpdate(FIXED_DT, inputs[k]!);
+    physics.step();
+    for (const car of cars) car.postStep();
+  }
+  for (const input of inputs) input.handbrake = false;
+  pilots[0].setMode('frantic');
+  pilots[1].setMode('sleeper');
+  pilots[2].setMode('sleeper');
+  for (const pilot of pilots) {
+    pilot.setTrafficRecoveryPolicy(true);
+    pilot.setEngaged(true);
+  }
+  // The neighbour holds the outer lane; traffic would ask for it the same way.
+  pilots[2].requestLane(1);
+
+  let impacts = 0;
+  let closest = Infinity;
+  let closestLateralGap = Infinity;
+  const chaserPosition = new THREE.Vector3();
+  const neighbourPosition = new THREE.Vector3();
+  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
+    pilots[1].setSpeedCap(10);
+    pilots[2].setSpeedCap(11);
+    for (let k = 0; k < cars.length; k++) {
+      pilots[k]!.drive(FIXED_DT, cars[k]!, inputs[k]!, 0, 0);
+      cars[k]!.fixedUpdate(FIXED_DT, inputs[k]!);
+    }
+    physics.step();
+    for (const car of cars) car.postStep();
+    for (const car of cars) {
+      const impact = car.lastImpact;
+      if (impact && impact.severityMps > 1.2) impacts++;
+    }
+    chaser.absoluteTranslation(chaserPosition);
+    neighbour.absoluteTranslation(neighbourPosition);
+    const chaserRoad = road.project(chaserPosition.x, chaserPosition.z);
+    const neighbourRoad = road.project(neighbourPosition.x, neighbourPosition.z);
+    closest = Math.min(closest, chaserPosition.distanceTo(neighbourPosition));
+    // Only while they are actually level: once one is clear of the other, the lane
+    // is legitimately free and the gap is meaningless.
+    if (Math.abs(chaserRoad.s - neighbourRoad.s) < 5) {
+      closestLateralGap = Math.min(
+        closestLateralGap,
+        Math.abs(chaserRoad.lateral - neighbourRoad.lateral),
+      );
+    }
+  }
+  check(
+    'a car in the next lane is not driven into',
+    impacts === 0 && closest > 2.2,
+    `${impacts} impact(s), closest ${closest.toFixed(2)} m centre to centre`,
+  );
+  check(
+    'the driver keeps a body width while they are level',
+    closestLateralGap > 2.1,
+    Number.isFinite(closestLateralGap)
+      ? `${closestLateralGap.toFixed(2)} m of lateral gap while level`
+      : 'never level',
+  );
+  for (const car of cars) car.dispose();
+  physics.world.free();
+}
+
+/**
+ * BOXED IN, WITH A ROCK AHEAD.
+ *
+ * The other half of knowing what is beside you: a driver that may not steer into an
+ * occupied lane must SLOW for the thing in its own lane instead of going through it.
+ * Reported from play on a four-lane stretch — a car in a full stream met an indexed
+ * prop and hit it.
+ */
+async function checkBoxedInHazard(): Promise<void> {
+  const seconds = 60;
+  const road = new Road(42);
+  let wideS = -1;
+  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
+    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
+  }
+  if (wideS < 0) throw new Error('no widened stretch on this seed');
+  const inner = road.laneCentreAt(wideS, 0);
+  const outer = road.laneCentreAt(wideS, 1);
+  const hazard: RoadHazard = { s: wideS + 140, lateral: inner, radius: 1.2, breakable: false };
+  const hazards = new HazardIndex();
+  hazards.add('autopilot-bench-boxed', hazard);
+
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, wideS - 60, wideS + 1_200);
+  const world = new GameWorld(newWorldState(42));
+  const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
+  const rockPoint = road.offsetPoint(hazard.s, hazard.lateral);
+  const rockBody = physics.world.createRigidBody(
+    physics.rapier.RigidBodyDesc.fixed().setTranslation(rockPoint.x, rockPoint.y + 1, rockPoint.z),
+  );
+  physics.world.createCollider(
+    physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
+    rockBody,
+  );
+
+  const driverState = { ...carState(road, wideS, inner), id: 'boxed-driver' };
+  const neighbourState = { ...carState(road, wideS + 1, outer), id: 'boxed-neighbour' };
+  world.state.cars[driverState.id] = driverState;
+  world.state.cars[neighbourState.id] = neighbourState;
+  const driver = new Vehicle(physics, world, driverState, scene, origin);
+  const neighbour = new Vehicle(physics, world, neighbourState, scene, origin);
+  const driverPilot = new Autopilot(road, hazards, physics);
+  const neighbourPilot = new Autopilot(road, new HazardIndex(), physics);
+  const driverInput = emptyInput();
+  const neighbourInput = emptyInput();
+  driverInput.handbrake = true;
+  neighbourInput.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    driver.fixedUpdate(FIXED_DT, driverInput);
+    neighbour.fixedUpdate(FIXED_DT, neighbourInput);
+    physics.step();
+    driver.postStep();
+    neighbour.postStep();
+  }
+  driverInput.handbrake = false;
+  neighbourInput.handbrake = false;
+  driverPilot.setMode('sleeper');
+  neighbourPilot.setMode('sleeper');
+  driverPilot.setTrafficRecoveryPolicy(true);
+  neighbourPilot.setTrafficRecoveryPolicy(true);
+  driverPilot.setEngaged(true);
+  neighbourPilot.setEngaged(true);
+  neighbourPilot.requestLane(1);
+
+  let minRockDistance = Infinity;
+  let impacts = 0;
+  let passedRock = false;
+  let minNeighbourDistance = Infinity;
+  let impactReport = '';
+  const position = new THREE.Vector3();
+  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
+    driverPilot.drive(FIXED_DT, driver, driverInput, 0, 0);
+    neighbourPilot.drive(FIXED_DT, neighbour, neighbourInput, 0, 0);
+    driver.fixedUpdate(FIXED_DT, driverInput);
+    neighbour.fixedUpdate(FIXED_DT, neighbourInput);
+    physics.step();
+    driver.postStep();
+    neighbour.postStep();
+    const impact = driver.lastImpact;
+    const neighbourPosition = new THREE.Vector3();
+    driver.absoluteTranslation(position);
+    neighbour.absoluteTranslation(neighbourPosition);
+    const toNeighbour = position.distanceTo(neighbourPosition);
+    minNeighbourDistance = Math.min(minNeighbourDistance, toNeighbour);
+    if (impact && impact.severityMps > 1.2) {
+      impacts++;
+      if (impactReport === '') {
+        const p = road.project(position.x, position.z);
+        impactReport = `at ${(i * FIXED_DT).toFixed(1)} s, ${impact.severityMps.toFixed(2)} m/s, speed ${
+          speed(driver).toFixed(2)
+        } m/s, lateral ${p.lateral.toFixed(2)} m, ${(hazard.s - p.s).toFixed(1)} m short`;
+      }
+    }
+    minRockDistance = Math.min(
+      minRockDistance,
+      Math.hypot(position.x - rockPoint.x, position.z - rockPoint.z),
+    );
+    if (road.project(position.x, position.z).s > hazard.s + 12) passedRock = true;
+  }
+  check(
+    'a boxed-in driver slows for the rock instead of hitting it',
+    impacts === 0 && minRockDistance >= hazard.radius + 0.9,
+    `${impacts} impact(s) [${impactReport}], closest ${minRockDistance.toFixed(2)} m to a ${hazard.radius} m rock, neighbour ${minNeighbourDistance.toFixed(2)} m`,
+  );
+  check(
+    'and gets past it once the next lane frees up',
+    passedRock,
+    passedRock ? 'cleared the rock' : 'never got past',
+  );
+  driver.dispose();
+  neighbour.dispose();
+  physics.world.free();
+}
+
+/**
+ * WEDGED ON THE ASPHALT, not on the verge.
+ *
+ * `checkWedgedOffRoad` covers a car leaning on a pole out in the sand. Reported from
+ * play on a four-lane stretch: a car met an indexed prop in its own lane, hit it,
+ * and then sat against it without ever trying to get out while the queue behind it
+ * worked around the pair.
+ */
+async function checkWedgedOnRoad(): Promise<void> {
+  const road = new Road(42);
+  let wideS = -1;
+  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
+    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
+  }
+  if (wideS < 0) throw new Error('no widened stretch on this seed');
+  const lane = road.laneCentreAt(wideS, 0);
+  const hazard: RoadHazard = { s: wideS + 8, lateral: lane, radius: 1.2, breakable: false };
+  const hazards = new HazardIndex();
+  hazards.add('autopilot-bench-wedge', hazard);
+
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, wideS - 60, wideS + 600);
+  const world = new GameWorld(newWorldState(42));
+  const state = { ...carState(road, wideS, lane), id: 'wedge-on-road' };
+  world.state.cars[state.id] = state;
+  const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
+  const autopilot = new Autopilot(road, hazards, physics);
+  autopilot.setTrafficRecoveryPolicy(true);
+  const input = emptyInput();
+  const point = road.offsetPoint(hazard.s, hazard.lateral);
+  const body = physics.world.createRigidBody(
+    physics.rapier.RigidBodyDesc.fixed().setTranslation(point.x, point.y + 1, point.z),
+  );
+  physics.world.createCollider(
+    physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
+    body,
+  );
+
+  input.brake = 1;
+  for (let i = 0; i < 180; i++) {
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+  }
+  input.brake = 0;
+  // Drive into it the way a distracted car would, then hand over.
+  for (let i = 0; i < 180; i++) {
+    input.throttle = 0.45;
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+  }
+  input.throttle = 0;
+  const start = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+  autopilot.setMode('sleeper');
+  autopilot.setEngaged(true);
+  let escaped = 0;
+  let escapeSeconds = Infinity;
+  for (let i = 0; i < Math.ceil(30 / FIXED_DT); i++) {
+    autopilot.drive(FIXED_DT, vehicle, input, 0, 0);
+    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
+    const p = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    const moved = Math.hypot(p.x - start.x, p.z - start.z);
+    escaped = Math.max(escaped, moved);
+    if (moved >= 8 && escapeSeconds === Infinity) escapeSeconds = i * FIXED_DT;
+  }
+  check(
+    'a car wedged against a prop on the road gets itself out',
+    escaped >= 8,
+    `${escaped.toFixed(1)} m covered, 8 m reached at ${
+      Number.isFinite(escapeSeconds) ? escapeSeconds.toFixed(1) + ' s' : 'never'
+    }`,
+  );
+  vehicle.dispose();
+  physics.world.free();
+}
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
@@ -916,6 +1317,10 @@ async function run(): Promise<void> {
   await checkLitteredRoad();
   await checkWedgedOffRoad();
   await checkOvertake();
+  await checkLanePass();
+  await checkSideBySide();
+  await checkBoxedInHazard();
+  await checkWedgedOnRoad();
   await checkHazards();
   if (failures) process.exitCode = 1;
 }
