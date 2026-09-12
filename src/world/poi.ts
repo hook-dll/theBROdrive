@@ -425,6 +425,7 @@ function makeTool(
   };
 }
 
+
 const TOOL_KINDS: readonly ToolKind[] = ['brush', 'sponge', 'wrench'];
 
 // ---------------------------------------------------------------------------
@@ -1035,6 +1036,7 @@ function buildGasStop(
       gumSpot.y + 0.18,
       gumSpot.z,
     );
+
 
     // A trailer on the forecourt. Take one, leave one: they are never owned, so
     // this records a world object rather than giving the player a possession, and

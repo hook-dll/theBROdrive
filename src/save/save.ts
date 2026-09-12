@@ -374,6 +374,7 @@ export function migrateState(raw: unknown): WorldState {
     z: numOr(playerRaw.z, dp.z),
     yaw: numOr(playerRaw.yaw, dp.yaw),
     pitch: numOr(playerRaw.pitch, dp.pitch),
+    health: Math.min(1, Math.max(0, numOr(playerRaw.health, dp.health))),
     s: numOr(playerRaw.s, dp.s),
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
     carried,
@@ -737,6 +738,8 @@ function migrateItem(raw: unknown, where: string): Item {
         id: obj.id,
         charges: Math.min(5, Math.max(1, Math.trunc(numOr(obj.charges, 5)))),
       };
+    case 'medicine':
+      return { type: 'medicine', id: obj.id };
     case 'binoculars':
       return { type: 'binoculars', id: obj.id };
     case 'torchlight':

@@ -301,6 +301,9 @@ const BRAKING_DISTANCE_RESERVE = 0.4;
 const CAR_HALF_WIDTH_M = 1.05;
 /** Keeps the avoidance line until the whole vehicle has cleared the prop. */
 const CAR_HALF_LENGTH_M = 3;
+/** A standing person is narrow, but remains a physical body the whole car must clear. */
+const PEDESTRIAN_RADIUS_M = 0.42;
+const PEDESTRIAN_QUERY_RANGE_M = CORRIDOR_MAX_HORIZON_M + 20;
 /**
  * Extra metres the middle avoidance rung asks for beyond bare body clearance, and the
  * fraction of that clearance the braking corridor is measured at. Together they
@@ -595,10 +598,21 @@ const THROTTLE_FLOOR = 0.2;
 /** Below this target the car is waiting, and waiting is held on this much brake. */
 const HOLD_TARGET_MPS = 1;
 const HOLD_BRAKE = 0.6;
+/** Generic stalls need enough evidence not to mistake a slow launch for a wedge. */
 const STUCK_AFTER_S = 3;
+/** A bumper already against a known road prop needs no such long confirmation. */
+const CONTACT_STUCK_AFTER_S = 1;
+const CONTACT_STUCK_GAP_M = 0.75;
+/**
+ * Moving traffic may cross a wedged car's probes without being the obstruction.
+ * Normal following requests zero speed and does not accumulate this timer.
+ */
+const MOVING_BLOCKER_GRACE_S = 25;
 const RECOVERY_REVERSE_S = 1.8;
-const RECOVERY_PULLOUT_S = 2.4;
-const RECOVERY_STEER = 0.85;
+const RECOVERY_PULLOUT_S = 1.6;
+/** Opposite substantial locks make the two-point turn decisive without tyre scrub at full lock. */
+const RECOVERY_REVERSE_STEER = 0.85;
+const RECOVERY_PULLOUT_STEER = 0.85;
 const RECOVERY_REVERSE_BRAKE = 0.72;
 /** Room a yielding car keeps behind itself, and how fast it gives ground back. */
 const YIELD_REVERSE_ROOM_M = 6;
@@ -611,12 +625,11 @@ const RECOVERY_RETRY_METRES = 45;
 const RECOVERY_ATTEMPT_LIMIT = 2;
 const RECOVERY_REARM_S = 30;
 /**
- * How far off its lane the car holds after a pull-out. It has to be enough to CLEAR
- * what it was stuck on: 1.7 m left a body-width overlap with a car parked in the
- * lane, so the bias puts the line just past the centreline, where 2.2 m of
- * separation is a real pass.
+ * How far off its lane the car holds after a pull-out. This clears a 1.2 m road
+ * prop by the widest car body plus avoidance hysteresis; the old 2.2 m bias still
+ * overlapped that corridor and drove the first attempt back into the obstruction.
  */
-const RECOVERY_BIAS_M = 2.2;
+const RECOVERY_BIAS_M = 3.2;
 
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
@@ -659,7 +672,6 @@ export class Autopilot {
   private roadRecoveryTargetLine = 0;
   private roadRecoveryFollowingEscape = false;
   private activityValue: AutopilotActivity = 'cruise';
-  private hazard: RoadHazard | null = null;
   private hazardDistance = Infinity;
   /** Nearest dynamic body in the driving corridor, metres, from either scan. */
   private obstacleGapValue = Infinity;
@@ -721,6 +733,8 @@ export class Autopilot {
    * around; the player's autopilot can still recover from unindexed collision shapes.
    */
   private trafficRecoveryPolicy = false;
+  /** Seconds of asking for speed and covering no ground, whatever is in front. */
+  private groundlessFor = 0;
   /** Granted by the traffic coordinator to exactly one head of an opposing queue. */
   private deadlockPermission = false;
   /** Dense ambient streams disable new overtakes; an active pass is still completed. */
@@ -738,6 +752,11 @@ export class Autopilot {
   private followingHeadwayValue: number | null = null;
   private daylightFactor = 1;
   private oncomingGap = Infinity;
+  private pedestrianActive = false;
+  private pedestrianX = 0;
+  private pedestrianZ = 0;
+  private pedestrianVx = 0;
+  private pedestrianVz = 0;
   private automaticLightsOn = false;
   /** Ambient traffic keeps dipped beams lit in daylight as a visibility aid. */
   private lowBeamsAlwaysOn = false;
@@ -785,13 +804,10 @@ export class Autopilot {
     // roadside scatter and power-line pylons metres past the paint. A detour is for
     // something in the way, and only what overlaps the asphalt is in the way.
     if (Math.abs(hazard.lateral) - hazard.radius >= this.asphaltHalfWidth) return;
-    // `visitHazard` still answers "what is the nearest prop on the line I am on",
-    // which the breakable-speed rule and the recovery reach both want. The corridor
-    // planner uses `collectHazard` below instead, because a planner that only ever
-    // heard about the prop on its current line could not price any other line.
+    // The autopilot never treats a breakable prop as permission to hit it: every
+    // indexed road hazard is an immovable obstacle for planning and recovery.
     const reach = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
     if (Math.abs(hazard.lateral - this.scanLateral) >= reach) return;
-    this.hazard = hazard;
     this.hazardDistance = distance;
   };
   /**
@@ -815,7 +831,6 @@ export class Autopilot {
   };
   /** Clears the nearest-hazard result before a scan. See the note in `drive`. */
   private beginHazardScan(lateral: number): void {
-    this.hazard = null;
     this.hazardDistance = Infinity;
     this.scanLateral = lateral;
   }
@@ -889,6 +904,19 @@ export class Autopilot {
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
     this.daylightFactor = clamp(daylightFactor, 0, 1);
     this.oncomingGap = oncomingGap >= 0 ? oncomingGap : Infinity;
+  }
+  /** Supplies the on-foot player as a physical obstacle in absolute world space. */
+  setPedestrianObstacle(x: number, z: number, vx: number, vz: number): void {
+    this.pedestrianActive = true;
+    this.pedestrianX = x;
+    this.pedestrianZ = z;
+    this.pedestrianVx = vx;
+    this.pedestrianVz = vz;
+  }
+
+  /** Removes the player-shaped obstacle while the player is represented by a car. */
+  clearPedestrianObstacle(): void {
+    this.pedestrianActive = false;
   }
   /**
    * Dips a manually driven player's high beam for an approaching vehicle, then
@@ -1103,6 +1131,37 @@ export class Autopilot {
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
     const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
     const forwardSpeed = velocity.x * forwardX + velocity.z * forwardZ;
+    let pedestrianGap = Infinity;
+    let pedestrianLateral = 0;
+    let pedestrianSpeed = 0;
+    let pedestrianBodyGap = Infinity;
+    if (this.pedestrianActive) {
+      const dx = this.pedestrianX - this.position.x;
+      const dz = this.pedestrianZ - this.position.z;
+      if (dx * dx + dz * dz <= PEDESTRIAN_QUERY_RANGE_M * PEDESTRIAN_QUERY_RANGE_M) {
+        const pedestrianProjection = this.road.project(
+          this.pedestrianX,
+          this.pedestrianZ,
+          this.hintS,
+        );
+        pedestrianGap =
+          pedestrianProjection.s - this.hintS - CAR_HALF_LENGTH_M - PEDESTRIAN_RADIUS_M;
+        pedestrianLateral = pedestrianProjection.lateral;
+        pedestrianSpeed = Math.max(
+          0,
+          this.pedestrianVx * roadForwardX + this.pedestrianVz * roadForwardZ,
+        );
+        const bodyAhead = dx * forwardX + dz * forwardZ;
+        const bodyAcross = Math.abs(dx * forwardZ - dz * forwardX);
+        if (
+          bodyAhead >= -PEDESTRIAN_RADIUS_M
+          && bodyAhead <= BODY_SCAN_RANGE_M + CAR_HALF_LENGTH_M
+          && bodyAcross <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M
+        ) {
+          pedestrianBodyGap = bodyAhead - CAR_HALF_LENGTH_M - PEDESTRIAN_RADIUS_M;
+        }
+      }
+    }
 
 
     this.beginHazardScan(projection.lateral);
@@ -1111,7 +1170,6 @@ export class Autopilot {
       Math.max(lookahead + 8, config.brakeLead + (speed * speed) / (2 * config.brakeAccel)),
       this.visitHazard,
     );
-    const hazard = this.hazard;
 
     // Traffic: the short body-frame scan for anything about to be hit, and the long
     // lane probe for anything to be followed.
@@ -1127,10 +1185,23 @@ export class Autopilot {
     // mid-recovery, say — is not going down any lane, and reading its own displaced
     // corridor as blocked is how the escape manoeuvre talked itself out of moving.
     // The car-frame scan above is the query that is valid at any angle.
-    this.bodyScanGap = this.axisScan(vehicle, originX, originZ, 1, BODY_SCAN_RANGE_M);
+    this.bodyScanGap = Math.min(
+      this.axisScan(vehicle, originX, originZ, 1, BODY_SCAN_RANGE_M),
+      pedestrianBodyGap,
+    );
     const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
-    const laneGap = this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ);
-    const laneProbeSpeed = this.probeHitSpeed;
+    const pedestrianOnAppliedLine =
+      pedestrianGap >= -PEDESTRIAN_RADIUS_M
+      && pedestrianGap <= sight
+      && Math.abs(pedestrianLateral - this.appliedLateral)
+        <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
+    const laneGap = Math.min(
+      this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ),
+      pedestrianOnAppliedLine ? pedestrianGap : Infinity,
+    );
+    const laneProbeSpeed = pedestrianOnAppliedLine && laneGap === pedestrianGap
+      ? pedestrianSpeed
+      : this.probeHitSpeed;
     let headingError = Math.atan2(forwardX, forwardZ) - currentRoad.heading;
     while (headingError > Math.PI) headingError -= Math.PI * 2;
     while (headingError < -Math.PI) headingError += Math.PI * 2;
@@ -1172,10 +1243,18 @@ export class Autopilot {
       }
       this.roadRecoveryFollowingEscape = false;
     }
+    const pedestrianOnBodyLine =
+      pedestrianGap >= -PEDESTRIAN_RADIUS_M
+      && pedestrianGap <= sight
+      && Math.abs(pedestrianLateral - projection.lateral)
+        <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
     const bodyLaneGap =
       Math.abs(headingError) < PROBE_PARALLEL_RAD &&
       Math.abs(projection.lateral - this.appliedLateral) > PROBE_HALF_WIDTH_M
-        ? this.laneProbe(vehicle, projection.lateral, sight, originX, originZ)
+        ? Math.min(
+            this.laneProbe(vehicle, projection.lateral, sight, originX, originZ),
+            pedestrianOnBodyLine ? pedestrianGap : Infinity,
+          )
         : Infinity;
     // THE CAR BEING PASSED IS STILL A MOVING CAR.
     //
@@ -1192,15 +1271,42 @@ export class Autopilot {
     const lineInOwnLane =
       Math.abs(projection.lateral - ownLaneOffset) < PROBE_HALF_WIDTH_M &&
       Math.abs(this.appliedLateral - ownLaneOffset) < PROBE_HALF_WIDTH_M;
-    const ownLaneGap = lineInOwnLane
-      ? Math.min(laneGap, bodyLaneGap)
-      : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ);
-    const ownLaneProbeSpeed = lineInOwnLane ? laneProbeSpeed : this.probeHitSpeed;
-    this.updateLead(
-      dt,
-      Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap),
-      speed,
+    const pedestrianInOwnLane =
+      pedestrianGap >= -PEDESTRIAN_RADIUS_M
+      && pedestrianGap <= sight
+      && Math.abs(pedestrianLateral - ownLaneOffset)
+        <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
+    const ownLaneGap = Math.min(
+      lineInOwnLane
+        ? Math.min(laneGap, bodyLaneGap)
+        : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ),
+      pedestrianInOwnLane ? pedestrianGap : Infinity,
     );
+    const ownLaneProbeSpeed =
+      pedestrianInOwnLane && ownLaneGap === pedestrianGap
+        ? pedestrianSpeed
+        : lineInOwnLane
+          ? laneProbeSpeed
+          : this.probeHitSpeed;
+    const nearestGap = Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap);
+    const leadParkedBefore = this.leadParkedFor;
+    this.updateLead(dt, nearestGap, speed);
+    const pedestrianLeadGap = Math.min(
+      pedestrianBodyGap,
+      pedestrianOnAppliedLine ? pedestrianGap : Infinity,
+      pedestrianOnBodyLine ? pedestrianGap : Infinity,
+      pedestrianInOwnLane ? pedestrianGap : Infinity,
+    );
+    if (pedestrianLeadGap < Infinity && pedestrianLeadGap <= nearestGap) {
+      // Unlike an anonymous ray hit, this obstacle comes with an exact velocity.
+      // Use it on the acquisition tick so a pedestrian is not assumed to match the
+      // car's speed for the first reaction interval.
+      this.obstacleSpeedValue = pedestrianSpeed;
+      this.leadClosingValue = Math.max(0, speed - pedestrianSpeed);
+      this.leadMeasured = true;
+      this.leadParkedFor =
+        pedestrianSpeed < PARKED_SPEED_MPS ? leadParkedBefore + dt : 0;
+    }
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
     // A recovery is normally an escape from unexplained static blockage, and
@@ -1213,8 +1319,13 @@ export class Autopilot {
     // zeroed the stall timer every single step, for as long as that car was there.
     // The car in front of a wedged driver is usually the reason it is wedged.
     const blockerMoving = gap < Infinity && this.obstacleSpeedValue > CRAWL_SPEED_MPS;
+    //
+    // A passing body can hide a static wedge from the dynamic probes, but only
+    // briefly. A normal follower requests zero speed and never accumulates
+    // `groundlessFor`, so this shorter grace does not make queues reverse.
     if (
       !this.recoveryCommitted &&
+      this.groundlessFor < MOVING_BLOCKER_GRACE_S &&
       (blockerMoving ||
         (gap === Infinity &&
           this.dynamicBodyAhead(vehicle, originX, originZ, roadForwardX, roadForwardZ)))
@@ -1245,6 +1356,17 @@ export class Autopilot {
     );
     this.collectHorizon = horizon;
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
+    if (
+      pedestrianGap >= -PEDESTRIAN_RADIUS_M
+      && pedestrianGap <= horizon
+    ) {
+      obstacles.push({
+        s: pedestrianGap,
+        lateral: pedestrianLateral,
+        halfWidth: PEDESTRIAN_RADIUS_M + AVOID_HYSTERESIS_M,
+        speed: pedestrianSpeed,
+      });
+    }
     // AND WHAT IS BESIDE THE CAR, which no forward ray can answer: the lane probes
     // start four metres past the bumper, so a car level with the door is invisible
     // to every one of them. That blind spot is how a driver indicated, moved into
@@ -1573,7 +1695,6 @@ export class Autopilot {
       );
     }
     targetSpeed = Math.max(3, targetSpeed);
-    if (hazard?.breakable) targetSpeed = Math.min(targetSpeed, 8);
     // THE SPEED PLAN FOLLOWS THE CORRIDOR THAT WAS CHOSEN, AND NOTHING ELSE.
     //
     // This replaces four overlapping clamps — an approach crawl for a planned prop,
@@ -1733,6 +1854,13 @@ export class Autopilot {
       this.position.x - this.stallAnchorX,
       this.position.z - this.stallAnchorZ,
     );
+    // Ground covered while asking for speed, and NOTHING else clears it. `stoppedFor`
+    // is cancelled by traffic ahead; this is the fact that cancel is allowed to hide
+    // only for a while.
+    this.groundlessFor =
+      askingToMove && speed < CRAWL_SPEED_MPS && movedFromAnchor <= STALL_PROGRESS_M
+        ? this.groundlessFor + dt
+        : 0;
     if (!stalled) {
       this.stoppedFor = Math.max(0, this.stoppedFor - dt * STALL_DECAY);
       this.stallAnchorX = this.position.x;
@@ -1744,11 +1872,15 @@ export class Autopilot {
     } else {
       this.stoppedFor += dt;
     }
+    const stuckAfter =
+      this.hazardDistance <= CONTACT_STUCK_GAP_M
+        ? CONTACT_STUCK_AFTER_S
+        : STUCK_AFTER_S;
 
     if (
       stalled &&
       this.recoveryPhase === 'none' &&
-      (opposingDeadlock || this.stoppedFor >= STUCK_AFTER_S)
+      (opposingDeadlock || this.stoppedFor >= stuckAfter)
     ) {
       this.beginRecovery(
         vehicle,
@@ -1762,15 +1894,16 @@ export class Autopilot {
     }
     if (this.recoveryPhase !== 'none') {
       this.activityValue = offRoad ? 'offroad' : 'recover';
-      // The pull-out drives on a fixed lock with no planner behind it, so it has to
-      // be given everything known to be in front: the rays see only dynamic bodies,
-      // and it was accelerating at indexed rock it could not feel.
+      // The indexed prop that triggered recovery is the thing this fixed-lock arc
+      // must drive around; treating it as a new stop signal ended the forward leg
+      // on its first tick. Dynamic bodies remain a hard guard against pulling into
+      // another car.
       this.driveRecovery(
         dt,
         out,
         forwardSpeed,
         projection.lateral,
-        this.recoveryCommitted ? Infinity : Math.min(gap, this.hazardDistance),
+        this.recoveryCommitted ? Infinity : gap,
       );
       return;
     }
@@ -1852,6 +1985,19 @@ export class Autopilot {
         out.brake,
         clamp(Math.abs(lateralSpeed) / 3, 0.3, config.brakeCeiling),
       );
+    }
+    // A DEAD ENGINE IS NOT A DRIVING PROBLEM, AND THE PEDAL DOES NOT FIX IT.
+    //
+    // `Vehicle.engineRunning` is false while the block is stalled on its own oil film
+    // or the fuel has gone. Measured from the reported case: the car had crept up to a
+    // mound in its lane, could not plan its way past it, sat there with the throttle at
+    // 1.00 until the coolant boiled, and then stood with the pedal still down - an
+    // engine that would not restart because nothing let it cool, and a stall rule that
+    // does not look at cars whose engine has stopped, so no recovery either. Closing
+    // the throttle is what a driver does and what lets the temperature come back.
+    if (!vehicle.engineRunning) {
+      out.throttle = 0;
+      out.brake = Math.max(out.brake, speed < CRAWL_SPEED_MPS ? HOLD_BRAKE : out.brake);
     }
     this.activityValue = offRoad
       ? 'offroad'
@@ -2133,10 +2279,9 @@ export class Autopilot {
   }
 
   /**
-   * The manoeuvre itself. Reversing with the wheels turned toward `recoverySide`
-   * swings the NOSE that way — a steered axle dragged backwards yaws the body the
-   * opposite way to the same lock driven forwards — and the pull-out then uses the
-   * opposite lock to drive out along the side the nose is already pointing at.
+   * The manoeuvre is a deliberate two-point turn. Reverse holds a substantial lock
+   * toward `recoverySide`; once the backward roll stops, the forward pull-out holds
+   * the opposite lock and follows the nose clear of the obstacle.
    */
   private driveRecovery(
     dt: number,
@@ -2145,16 +2290,16 @@ export class Autopilot {
     lateral: number,
     gap: number,
   ): void {
-    this.recoveryTimer -= dt;
     out.handbrake = false;
     if (this.recoveryPhase === 'reverse') {
+      this.recoveryTimer -= dt;
       out.throttle = 0;
       // In automatic mode, reverse=true selects R at rest and brake becomes reverse
       // throttle on the following tick, so the same pedal stops a car still rolling
       // forward and then backs it up.
       out.brake = RECOVERY_REVERSE_BRAKE;
       out.reverse = true;
-      out.steer = clamp(this.recoverySide * RECOVERY_STEER, -1, 1);
+      out.steer = clamp(this.recoverySide * RECOVERY_REVERSE_STEER, -1, 1);
       // The lateral test is "the reverse has taken the car far enough out to steer
       // round what blocked it". A car that was ALREADY out there — wedged on a pole
       // on the verge — satisfies it on the first tick, which ended the reverse
@@ -2170,32 +2315,34 @@ export class Autopilot {
       }
       return;
     }
+
     out.reverse = false;
-    out.steer = clamp(-this.recoverySide * RECOVERY_STEER, -1, 1);
-    // Still rolling backwards: the automatic only selects a forward gear at rest, so
-    // the pedal that matters is the brake until it is stopped.
+    // Keep the reverse lock while braking the remaining backward roll. Reversing
+    // the wheel before the car reverses its travel bends the tail back toward the
+    // obstacle and also spends the pull-out timer without moving forward.
     if (forwardSpeed < -0.15) {
+      out.steer = clamp(this.recoverySide * RECOVERY_REVERSE_STEER, -1, 1);
       out.throttle = 0;
       out.brake = 0.5;
       return;
     }
+
+    this.recoveryTimer -= dt;
+    out.steer = clamp(-this.recoverySide * RECOVERY_PULLOUT_STEER, -1, 1);
     out.brake = 0;
     out.throttle = forwardSpeed < RECOVERY_CRAWL_MPS ? 0.55 : 0;
     // The pull-out is what brings a car back from where the reverse put it, so its
-    // own end condition cannot be the line limit the reverse just crossed — that cut
-    // the manoeuvre off on its first tick and left the car sitting on the verge. It
-    // ends on time, on something in front, or on genuinely leaving the road.
+    // own end condition cannot be the indexed prop or the line limit the reverse
+    // just crossed. Both ended the manoeuvre on its first tick. A dynamic body still
+    // stops the arc; otherwise the opposite lock is held for the full pull-out.
     //
     // A wedge that happened OFF the asphalt is already outside that line, so the
     // same test would end the manoeuvre before it moved a metre and hand the car
     // straight back to the throttle that was cooking the engine against a pole.
-    // Out there, only the timer and the nose end it.
+    // Out there, only the timer and a dynamic body end it.
     const arrived =
       this.recoveryTimer <= 0 ||
-      gap < MUST_STOP_GAP_M ||
-      (!this.recoveryCommitted &&
-        !this.recoveryOffRoad &&
-        Math.abs(lateral) > this.road.halfWidthAt(this.hintS) + PASSING_VERGE_M);
+      gap < MUST_STOP_GAP_M;
     if (arrived) {
       this.recoveryPhase = 'none';
       this.recoveryOffRoad = false;

@@ -2045,6 +2045,11 @@ export class Vehicle implements Rebasable {
     return this.chassisBody;
   }
 
+  /** Chassis collider used to enumerate actual post-solver impacts for the driver. */
+  get collisionCollider(): RAPIER.Collider {
+    return this.chassisCollider;
+  }
+
   /** Non-null only during the fixed step that classified the previous solve as a collision. */
   get lastImpact(): VehicleImpact | null {
     return this.impactThisStep ? this.impactState : null;

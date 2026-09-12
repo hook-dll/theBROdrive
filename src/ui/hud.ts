@@ -204,6 +204,11 @@ export class Hud {
   private readonly lcdEl: SVGSVGElement;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
+  private readonly damageVignetteEl: HTMLElement;
+  private readonly deathFadeEl: HTMLElement;
+  private readonly root: HTMLElement;
+  private damageStrength = -1;
+  private deathFade = -1;
   private gumBubbleProgress = -1;
 
   private tachDeg = -1;
@@ -232,6 +237,7 @@ export class Hud {
   private disposed = false;
 
   constructor(root: HTMLElement) {
+    this.root = root;
     this.crosshairEl = el('div', 'hud-crosshair');
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
@@ -304,6 +310,8 @@ export class Hud {
 
     this.toastEl = el('div', 'hud-toasts');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
+    this.damageVignetteEl = el('div', 'hud-damage-vignette');
+    this.deathFadeEl = el('div', 'hud-death-fade');
 
     this.tops = [
       this.crosshairEl,
@@ -313,7 +321,7 @@ export class Hud {
       this.toastEl,
       this.gumBubbleEl,
     ];
-    root.append(...this.tops);
+    root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
   }
 
   private buildIconLamp(className: string, label: string, pathData: string): HTMLElement {
@@ -497,6 +505,38 @@ export class Hud {
     return { svg, digits };
   }
 
+
+  /**
+   * Health remains numerical state only. Its sole presentation is this soft black
+   * edge treatment; death suppresses every interactive HUD child and owns a separate
+   * solid fade that is allowed to reach full black.
+   */
+  setHealthEffects(damage: number, dying: boolean, fade: number): void {
+    const strength = Math.min(1, Math.max(0, damage));
+    if (Math.abs(strength - this.damageStrength) > 0.001) {
+      this.damageStrength = strength;
+      const edgeOpacity =
+        strength <= 0 ? 0 : Math.min(0.96, 0.22 + strength * 0.74);
+      this.damageVignetteEl.style.setProperty(
+        '--damage-opacity',
+        String(edgeOpacity),
+      );
+      this.damageVignetteEl.style.setProperty(
+        '--damage-blur',
+        `${(5 + strength * 15).toFixed(1)}px`,
+      );
+      this.damageVignetteEl.style.setProperty(
+        '--damage-inner',
+        `${(68 - strength * 34).toFixed(1)}%`,
+      );
+    }
+    const black = Math.min(1, Math.max(0, fade));
+    if (black === 1 ? this.deathFade !== 1 : Math.abs(black - this.deathFade) > 0.001) {
+      this.deathFade = black;
+      this.deathFadeEl.style.opacity = String(black);
+    }
+    this.root.classList.toggle('is-death-sequence', dying);
+  }
 
   setDriving(readout: DrivingReadout | null): void {
     if (readout === null) {
@@ -794,6 +834,9 @@ export class Hud {
     this.toasts = [];
     for (const node of this.tops) node.remove();
     this.tops.length = 0;
+    this.damageVignetteEl.remove();
+    this.deathFadeEl.remove();
+    this.root.classList.remove('is-death-sequence');
   }
 
   private setText(node: HTMLElement, value: string): void {

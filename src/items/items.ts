@@ -84,6 +84,12 @@ export interface BubbleGumItem {
   charges: number;
 }
 
+/** One sealed dose: the bottle visibly contains two pills and is consumed whole. */
+export interface MedicineItem {
+  readonly type: 'medicine';
+  readonly id: string;
+}
+
 export interface BinocularItem {
   readonly type: 'binoculars';
   readonly id: string;
@@ -153,6 +159,7 @@ export type Item =
   | AmmoItem
   | QuarryItem
   | BubbleGumItem
+  | MedicineItem
   | BinocularItem
   | TorchlightItem
   | SunShadesItem
@@ -211,6 +218,8 @@ export function itemLabel(item: Item): string {
       return item.species;
     case 'bubble_gum':
       return `bubble gum x${item.charges}`;
+    case 'medicine':
+      return 'medicine bottle';
     case 'binoculars':
       return 'binoculars';
     case 'torchlight':
@@ -261,6 +270,8 @@ export function itemMass(item: Item): number {
       return item.mass;
     case 'bubble_gum':
       return 0.02;
+    case 'medicine':
+      return 0.09;
     case 'binoculars':
       return 0.75;
     case 'torchlight':

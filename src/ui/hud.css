@@ -684,6 +684,50 @@ body.is-cinematic #ui {
 }
 
 /* ------------------------------------------------------------------ *
+ *  Hidden health and death                                           *
+ * ------------------------------------------------------------------ */
+
+.hud-damage-vignette {
+  --damage-opacity: 0;
+  --damage-blur: 2px;
+  --damage-inner: 72%;
+  position: fixed;
+  inset: -24px;
+  z-index: 18;
+  pointer-events: none;
+  opacity: var(--damage-opacity);
+  background:
+    radial-gradient(
+      ellipse at center,
+      transparent 0,
+      transparent calc(var(--damage-inner) - 8%),
+      rgba(0, 0, 0, 0.1) var(--damage-inner),
+      rgba(0, 0, 0, 0.55) calc(var(--damage-inner) + 20%),
+      #000 100%
+    );
+  -webkit-backdrop-filter: blur(var(--damage-blur));
+  backdrop-filter: blur(var(--damage-blur));
+  will-change: opacity, backdrop-filter;
+}
+
+.hud-death-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  pointer-events: none;
+  opacity: 0;
+  background: #000;
+  will-change: opacity;
+}
+
+/* Inputs remain installed so traffic and physics can finish the shot, but no control
+   surface or held-item UI survives under the death camera. */
+#ui.is-death-sequence > :not(.hud-damage-vignette):not(.hud-death-fade) {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ------------------------------------------------------------------ *
  *  Menu (title screen and pause overlay)                             *
  * ------------------------------------------------------------------ */
 

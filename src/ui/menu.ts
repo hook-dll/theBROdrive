@@ -135,6 +135,7 @@ const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: numbe
 export type DevSpawnItemRequest =
   | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
   | { readonly type: 'bubble_gum' }
+  | { readonly type: 'medicine' }
   | { readonly type: 'binoculars' }
   | { readonly type: 'torchlight' }
   | { readonly type: 'sun_shades'; readonly tint: ShadeTint }
@@ -1385,6 +1386,7 @@ export class MainMenu {
           readonly detail: string;
           readonly request: DevSpawnItemRequest;
         }[] = [
+          { label: 'medicine bottle', detail: 'E use · full recovery', request: { type: 'medicine' } },
           { label: 'binoculars', detail: 'E toggle · 10x', request: { type: 'binoculars' } },
           { label: 'torchlight', detail: 'E toggle beam', request: { type: 'torchlight' } },
           {

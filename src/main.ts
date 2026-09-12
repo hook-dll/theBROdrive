@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
+import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
 import { SURFACES, SurfaceType } from './core/surfaces';
 import { presentationFpsFor, prefersMobilePresentation, Renderer } from './core/renderer';
@@ -36,6 +37,7 @@ import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { Player } from './player/player';
+import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, type CameraTarget } from './render/cameras';
@@ -181,6 +183,10 @@ const DEV_LAKE_WINDOW_MARGIN_M = 40;
 
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
+/** Short first-person uncork/drink/release cycle for a selected medicine bottle. */
+const MEDICINE_USE_SECONDS = 2;
+/** The lid leaves the held mesh here and continues as a world rigid body. */
+const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
 
 /**
  * Streaming budget while playing: one small job per rendered frame, which is what
@@ -215,6 +221,8 @@ async function boot(): Promise<void> {
   ) {
     throw new Error('index.html is missing #game, #ui or #launch-loading');
   }
+  installScreenWakeLock();
+
   const mobilePresentation = prefersMobilePresentation();
 
   const saves = new IndexedDbSaves();
@@ -322,6 +330,9 @@ async function boot(): Promise<void> {
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   const hud = new Hud(uiRoot);
+  const vitals = new PlayerVitals(world.state.player.health, (health) => {
+    world.apply({ t: 'player_health', health });
+  });
   // Audio is created before anything can make a noise and lives for the session:
   // its context starts suspended and the first click/keypress resumes it, so no
   // caller ever has to ask whether sound is available yet.
@@ -835,6 +846,7 @@ async function boot(): Promise<void> {
     for (const vehicle of vehicles.values()) vehicle.pushState();
     trailerField.pushTransforms();
     loose.flushToState();
+    vitals.flush();
     return world.state;
   };
   installVehicleAutosave(saves, world, stateForSave, saveName, (error) => {
@@ -896,6 +908,8 @@ async function boot(): Promise<void> {
       jumpToLake: (index = 0) => devJumpToLake(index),
       tumbleweeds,
       traffic,
+      vitals,
+      autopilot,
       state: () => world.state,
       view: () => ({
         eye: camera.eyePosition,
@@ -929,6 +943,7 @@ async function boot(): Promise<void> {
    * exactly once per rendered frame.
    */
   const cameraInput: InputFrame = emptyInput();
+  const deathInput: InputFrame = emptyInput();
   let lookYawAccum = 0;
   let lookPitchAccum = 0;
   let zoomAccum = 0;
@@ -948,7 +963,37 @@ async function boot(): Promise<void> {
   let gumActive = false;
   let gumTimer = 0;
   let gumPackCharges = 0;
-  let gumUseHeld = false;
+  let primaryUseHeld = false;
+  let medicineActive = false;
+  let medicineTimer = 0;
+  let medicineCapReleased = false;
+  let dying = vitals.dead;
+  let deathReloadScheduled = false;
+  const beginDeathSequence = (): void => {
+    if (dying) return;
+    dying = true;
+    autopilot.setEngaged(false);
+    camera.beginDeath();
+    if (document.pointerLockElement !== null) document.exitPointerLock();
+    Object.assign(lastInput, deathInput);
+    lookYawAccum = 0;
+    lookPitchAccum = 0;
+    zoomAccum = 0;
+    recenterAccum = false;
+    prompt = null;
+    boot = null;
+  };
+  if (import.meta.env.DEV) {
+    const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
+    dev['killPlayer'] = (): void => {
+      if (!vitals.dead) {
+        vitals.beginCollisionFrame('foot');
+        vitals.recordContact(-1, 70);
+        vitals.endCollisionFrame();
+      }
+      beginDeathSequence();
+    };
+  }
   /** Held devices are edge-toggled by E and reset when their item leaves the hand. */
   let binocularsActive = false;
   let torchlightActive = false;
@@ -981,9 +1026,105 @@ async function boot(): Promise<void> {
     listenerQw: 1,
   };
 
+  // Collision severity reads pre-solver velocity. Rapier resolves most of that
+  // velocity away on the same step that creates the contact, so sampling afterwards
+  // would make the hardest crash look like the slowest. The weak pool keeps one
+  // scratch vector per live Vehicle without retaining despawned traffic.
+  const impactVelocityPool = new WeakMap<Vehicle, THREE.Vector3>();
+  const impactVelocityByBody = new Map<number, THREE.Vector3>();
+  const impactPlayerVelocity = new THREE.Vector3();
+  const impactOtherVelocity = new THREE.Vector3();
+  const impactRelativeVelocity = new THREE.Vector3();
+  const impactNormal = new THREE.Vector3();
+  const captureImpactVelocities = (): void => {
+    impactVelocityByBody.clear();
+    const capture = (vehicle: Vehicle): void => {
+      let velocity = impactVelocityPool.get(vehicle);
+      if (velocity === undefined) {
+        velocity = new THREE.Vector3();
+        impactVelocityPool.set(vehicle, velocity);
+      }
+      vehicle.chassis.linvel(velocity);
+      impactVelocityByBody.set(vehicle.chassis.handle, velocity);
+    };
+    for (const vehicle of vehicles.values()) capture(vehicle);
+    traffic.forEachVehicle((_id, vehicle) => capture(vehicle));
+    player.rigidBody.linvel(impactPlayerVelocity);
+  };
+
+  /**
+   * Converts post-solver contact manifolds into debounced injuries. Only the velocity
+   * closing along the contact normal contributes: a tyre or chassis sliding quickly
+   * along the road is not a high-speed collision with the road.
+   */
+  const resolvePlayerImpacts = (driving: Vehicle | null): number => {
+    const collider = driving?.collisionCollider ?? player.collisionCollider;
+    const targetBody = collider.parent();
+    if (targetBody === null) return 0;
+    const targetVelocity =
+      (driving ? impactVelocityByBody.get(targetBody.handle) : impactPlayerVelocity)
+      ?? impactPlayerVelocity;
+    vitals.beginCollisionFrame(driving ? 'car' : 'foot');
+
+    physics.world.contactPairsWith(collider, (otherCollider) => {
+      const otherBody = otherCollider.parent();
+      if (otherBody === null) return;
+      const otherVehicleVelocity = impactVelocityByBody.get(otherBody.handle);
+      if (driving === null) {
+        // On foot, terrain and buildings cannot reach the harmful walking threshold;
+        // only a moving vehicle is a hard body capable of striking the capsule.
+        if (otherVehicleVelocity === undefined) return;
+      } else if (
+        !otherBody.isFixed()
+        && otherVehicleVelocity === undefined
+        && otherBody.mass() < 100
+      ) {
+        // Loose cans, tools and footballs are contacts, not hard-object crashes.
+        return;
+      }
+
+      if (otherBody.isFixed()) {
+        impactOtherVelocity.set(0, 0, 0);
+      } else if (otherVehicleVelocity !== undefined) {
+        impactOtherVelocity.copy(otherVehicleVelocity);
+      } else {
+        otherBody.linvel(impactOtherVelocity);
+      }
+      impactRelativeVelocity.subVectors(targetVelocity, impactOtherVelocity);
+
+      let strongestClosingMps = 0;
+      physics.world.contactPair(collider, otherCollider, (manifold) => {
+        if (manifold.numSolverContacts() === 0) return;
+        let impulse = 0;
+        for (let i = 0; i < manifold.numContacts(); i++) {
+          impulse = Math.max(impulse, manifold.contactImpulse(i));
+        }
+        // Speculative manifolds appear just before contact. They must not consume
+        // the debounce key before the first solver impulse actually lands.
+        if (impulse <= 0) return;
+        manifold.normal(impactNormal);
+        strongestClosingMps = Math.max(
+          strongestClosingMps,
+          Math.abs(impactRelativeVelocity.dot(impactNormal)),
+        );
+      });
+      if (strongestClosingMps > 0) {
+        vitals.recordContact(otherCollider.handle, strongestClosingMps * 3.6);
+      }
+    });
+
+    return vitals.endCollisionFrame();
+  };
+
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
     const f = input.sample(dt);
+    if (dying) {
+      // Camera look, inventory use and interaction all read this frame object below.
+      // Continuing traffic/vehicle physics during the shot keeps a fatal wreck moving
+      // naturally without leaving any player control alive.
+      Object.assign(f, deathInput);
+    }
     lastInput = f;
     lookYawAccum += f.lookYaw;
     lookPitchAccum += f.lookPitch;
@@ -1011,6 +1152,7 @@ async function boot(): Promise<void> {
         watchTimeAdvance,
       playedSeconds: s.playedSeconds + dt,
     });
+    vitals.update(dt);
 
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
@@ -1028,7 +1170,7 @@ async function boot(): Promise<void> {
           : 'precise control off — steering self-centres',
       );
     }
-    input.setPreciseSteering(s.settings.preciseSteering && driving !== null);
+    input.setPreciseSteering(!dying && s.settings.preciseSteering && driving !== null);
 
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
@@ -1099,6 +1241,12 @@ async function boot(): Promise<void> {
 
     // Session traffic owns separate Vehicles, so it writes its mixed autonomous
     // drivers here and never enters the persistent `vehicles` map or save state.
+    if (driving === null) {
+      const pedestrian = player.absolutePosition;
+      traffic.setPedestrianObstacle(pedestrian.x, pedestrian.z);
+    } else {
+      traffic.clearPedestrianObstacle();
+    }
     traffic.setDaylightFactor(sky.dayFactor);
     traffic.fixedUpdate(dt, activeS, origin.x, origin.z);
 
@@ -1114,10 +1262,14 @@ async function boot(): Promise<void> {
     // inside `updateVehicle`, towed or standing.
     trailerField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
 
+
+    captureImpactVelocities();
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
     physics.step();
+    const injury = resolvePlayerImpacts(driving);
+    if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
 
     // Recover only after Rapier has produced the escaped pose, before origin
@@ -1158,10 +1310,12 @@ async function boot(): Promise<void> {
     trailerField.postStep();
     player.postStep();
 
-    // Item selection: the number row wins over the cycle keys when both arrive in
-    // the same tick, since a direct pick is the more specific intent.
-    if (f.selectSlot > 0) inventory.selectIndex(f.selectSlot - 1);
-    else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
+    // A consumption animation owns the hand until it releases the empty bottle;
+    // switching slots under it would replace the retained viewmodel mid-action.
+    if (!medicineActive) {
+      if (f.selectSlot > 0) inventory.selectIndex(f.selectSlot - 1);
+      else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
+    }
 
     // E owns held-item toggles/equipping. F remains the physical world action,
     // including vehicle entry, so using an item can never also touch the aimed car.
@@ -1169,8 +1323,17 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
-    if (driving === null && f.useHeld && heldAfterSelection !== null) {
-      if (heldAfterSelection.type === 'binoculars') {
+    if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
+      if (heldAfterSelection.type === 'medicine') {
+        // Health and inventory change in one turn before the autosave microtask.
+        // The removed item's viewmodel remains owned by the timed animation below.
+        vitals.restoreFully();
+        inventory.remove(heldAfterSelection.id);
+        medicineActive = true;
+        medicineTimer = 0;
+        medicineCapReleased = false;
+        hud.setToast('medicine taken');
+      } else if (heldAfterSelection.type === 'binoculars') {
         binocularsActive = !binocularsActive;
       } else if (heldAfterSelection.type === 'torchlight') {
         torchlightActive = !torchlightActive;
@@ -1190,7 +1353,7 @@ async function boot(): Promise<void> {
         hud.setToast('watch shaken — winding four hours forward');
       }
     }
-    if (f.useHeld && heldAfterSelection?.type === 'sun_shades') {
+    if (!medicineActive && f.useHeld && heldAfterSelection?.type === 'sun_shades') {
       const previous = s.player.wornSunShades;
       const next = inventory.remove(heldAfterSelection.id);
       if (next?.type === 'sun_shades') {
@@ -1211,12 +1374,62 @@ async function boot(): Promise<void> {
       }
     }
 
-    // One charge is consumed immediately. Three seconds of chewing come first;
+    const primaryPressed = f.usePrimary && !primaryUseHeld;
+    primaryUseHeld = f.usePrimary;
+
+    if (medicineActive) {
+      medicineTimer = Math.min(MEDICINE_USE_SECONDS, medicineTimer + dt);
+      const progress = medicineTimer / MEDICINE_USE_SECONDS;
+      const eye = camera.eyePosition;
+      const direction = camera.eyeDirection;
+      const flatLength = Math.hypot(direction.x, direction.z) || 1;
+      const forwardX = direction.x / flatLength;
+      const forwardZ = direction.z / flatLength;
+      const rightX = -forwardZ;
+      const rightZ = forwardX;
+
+      if (!medicineCapReleased && progress >= MEDICINE_CAP_RELEASE_PROGRESS) {
+        debris.spawnMedicineRemnant(
+          'cap',
+          {
+            x: eye.x + origin.x + forwardX * 0.48 + rightX * 0.2,
+            y: eye.y - 0.16,
+            z: eye.z + origin.z + forwardZ * 0.48 + rightZ * 0.2,
+          },
+          {
+            x: forwardX * 0.25 + rightX * 1.15,
+            y: 1.3,
+            z: forwardZ * 0.25 + rightZ * 1.15,
+          },
+          { x: 6, y: 4, z: -5 },
+        );
+        medicineCapReleased = true;
+      }
+
+      if (medicineTimer >= MEDICINE_USE_SECONDS) {
+        debris.spawnMedicineRemnant(
+          'bottle',
+          {
+            x: eye.x + origin.x + forwardX * 0.62 + rightX * 0.12,
+            y: eye.y - 0.32,
+            z: eye.z + origin.z + forwardZ * 0.62 + rightZ * 0.12,
+          },
+          {
+            x: forwardX * 0.22 + rightX * 0.08,
+            y: -0.3,
+            z: forwardZ * 0.22 + rightZ * 0.08,
+          },
+          { x: 2.6, y: 1.4, z: 2.1 },
+        );
+        medicineActive = false;
+        medicineTimer = 0;
+      }
+    }
+
+    // One gum charge is consumed immediately. Three seconds of chewing come first;
     // only then does the screen-space bubble grow for five seconds before popping.
     const gum = inventory.held;
-    const gumPressed = f.usePrimary && !gumUseHeld;
-    gumUseHeld = f.usePrimary;
-    if (!driving && !gumActive && gum?.type === 'bubble_gum' && gumPressed) {
+    if (!driving && !medicineActive && !gumActive && gum?.type === 'bubble_gum' && primaryPressed) {
       gum.charges -= 1;
       gumPackCharges = Math.max(0, gum.charges);
       if (gum.charges <= 0) inventory.remove(gum.id);
@@ -1250,7 +1463,7 @@ async function boot(): Promise<void> {
     const dir = camera.eyeDirection;
     const interacted = interaction.fixedUpdate(
       dt,
-      f,
+      medicineActive ? deathInput : f,
       eye.x,
       eye.y,
       eye.z,
@@ -1281,7 +1494,7 @@ async function boot(): Promise<void> {
     // Shooting: the held item decides. A kill only enters the inventory if it fits,
     // so a full pack means the bird is lost rather than silently teleported in.
     const held = inventory.held;
-    if (held && held.type === 'weapon' && f.usePrimary) {
+    if (!medicineActive && held && held.type === 'weapon' && f.usePrimary) {
       const shot = weapons.tryFire(held, f.useSecondary, eye, dir, birds, inventory, dt);
       if (shot.result === 'fired') {
         audio.gunshot();
@@ -1523,14 +1736,24 @@ async function boot(): Promise<void> {
     zoomAccum = 0;
     recenterAccum = false;
     const usingBinoculars =
-      driving === null && inventory.held?.type === 'binoculars' && binocularsActive;
+      !dying && driving === null && inventory.held?.type === 'binoculars' && binocularsActive;
     const usingTorchlight =
-      driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
+      !dying && driving === null && inventory.held?.type === 'torchlight' && torchlightActive;
     const usingCamera =
-      driving === null && inventory.held?.type === 'camera' && cameraActive;
+      !dying && driving === null && inventory.held?.type === 'camera' && cameraActive;
     camera.setBinoculars(usingBinoculars);
-    camera.update(frameDt, cameraInput, target, driving === null);
-    touch.setZoomAvailable(camera.mode === 'chase');
+    let deathFade = 0;
+    if (dying) {
+      deathFade = camera.updateDeath(frameDt, target);
+    } else {
+      camera.update(frameDt, cameraInput, target, driving === null);
+    }
+    if (dying && camera.deathComplete && !deathReloadScheduled) {
+      deathReloadScheduled = true;
+      // Hold one fully black painted frame before navigation replaces the scene.
+      window.setTimeout(() => window.location.reload(), 250);
+    }
+    touch.setZoomAvailable(!dying && camera.mode === 'chase');
 
     const cam = renderer.camera.position;
     sky.update(
@@ -1553,7 +1776,6 @@ async function boot(): Promise<void> {
     // This runs AFTER the environment factor above, because that factor is a
     // multiplier on the beam intensities the rig is about to read; projecting first
     // spent a frame on yesterday's twilight. The offer order is the priority order
-    // the rig allocates in — driven car first, then nearest to the camera — so the
     // only beams a full pool can refuse are the farthest ones.
     //
     // The driven car projects its beams as authored; everyone else's are faded by
@@ -1756,6 +1978,7 @@ async function boot(): Promise<void> {
     const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
 
+    hud.setHealthEffects(vitals.damageEffect, dying, deathFade);
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
     const held = inventory.held;
@@ -1763,6 +1986,8 @@ async function boot(): Promise<void> {
       gumActive && gumTimer < GUM_PACK_ANIM_SECONDS
         ? gumTimer / GUM_PACK_ANIM_SECONDS
         : -1;
+    const medicineUseProgress =
+      medicineActive ? medicineTimer / MEDICINE_USE_SECONDS : -1;
     const heldUse =
       held?.type === 'binoculars'
         ? usingBinoculars
@@ -1779,6 +2004,7 @@ async function boot(): Promise<void> {
       speedKmh: target.speedKmh,
       gumUseProgress,
       gumCharges: gumPackCharges,
+      medicineUseProgress,
       timeOfDay: s.timeOfDay,
       dayFactor: sky.dayFactor,
       watchActionProgress:
@@ -1956,6 +2182,9 @@ async function boot(): Promise<void> {
         break;
       case 'bubble_gum':
         item = { type: 'bubble_gum', id: world.runtimePartId(), charges: 5 };
+        break;
+      case 'medicine':
+        item = { type: 'medicine', id: world.runtimePartId() };
         break;
       case 'binoculars':
         item = { type: 'binoculars', id: world.runtimePartId() };
@@ -2225,7 +2454,7 @@ async function boot(): Promise<void> {
    * Resume; Escape keeps the browser's normal unlocked-after-Escape behaviour.
    */
   const openPause = (restorePointerLock = false): void => {
-    if (paused) return;
+    if (paused || dying) return;
     const shouldRestorePointerLock = restorePointerLock && input.pointerLocked;
     if (document.pointerLockElement !== null) document.exitPointerLock();
     paused = true;

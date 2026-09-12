@@ -16,6 +16,7 @@ import {
   createItemMesh,
   disposeItemMeshResources,
   setBubbleGumPieceCount,
+  setMedicineUseProgress,
   setPocketWatchState,
 } from './partmesh';
 import { setPartCondition } from './materials';
@@ -84,6 +85,13 @@ const GUM_MOUTH_Y = -0.085;
 const GUM_MOUTH_Z = -0.13;
 const GUM_MOUTH_ROLL = 0.12;
 
+/* ---- medicine: uncork, tip the bottle to the mouth, then release it ---- */
+const MEDICINE_MOUTH_X = 0.08;
+const MEDICINE_MOUTH_Y = -0.055;
+const MEDICINE_MOUTH_Z = -0.24;
+const MEDICINE_REACH_END = 0.5;
+const MEDICINE_RELEASE_START = 0.76;
+
 /* ---- pocket watch: short wrist shake while the dial fast-forwards ---- */
 const WATCH_SHAKE_CYCLES = 6;
 const WATCH_SHAKE_X = 0.018;
@@ -146,6 +154,8 @@ export class HeldItemView {
       gumUseProgress: number;
       /** Sticks left after the current use; the detached stick remains visible until the mouth. */
       gumCharges: number;
+      /** Normalized uncork/drink/drop cycle, or -1 while no medicine is being used. */
+      medicineUseProgress: number;
       /** Accelerated game clock, used by the single-hand pocket-watch dial. */
       timeOfDay: number;
       /** 0..1 direct daylight factor; phosphorescent markings brighten as it falls. */
@@ -156,25 +166,31 @@ export class HeldItemView {
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
 
-    // A spent pack remains for the return half of its animation even though the
-    // inventory has already removed it. Likewise, do not replace it with the newly
-    // selected slot until the hand has come back from the mouth.
+    // A consumed item remains in the hand until its complete action returns control
+    // to the newly selected slot. Gum retains its wrapper; medicine retains the
+    // now-empty bottle while its cap and pills have already detached.
     const gumAnimating =
       opts.gumUseProgress >= 0 &&
       opts.gumUseProgress <= 1 &&
       this.heldType === 'bubble_gum' &&
       this.mesh !== null;
-    if (mode !== 'foot' || (item === null && !gumAnimating)) {
+    const medicineAnimating =
+      opts.medicineUseProgress >= 0 &&
+      opts.medicineUseProgress <= 1 &&
+      this.heldType === 'medicine' &&
+      this.mesh !== null;
+    if (mode !== 'foot' || (item === null && !gumAnimating && !medicineAnimating)) {
       this.root.visible = false;
       this.resetMotion();
       return;
     }
 
-    // Rebuild only when the held item actually changes. A gum pack in flight owns
-    // the hand until it returns, including the final use where the pack is gone.
+    // Do not hand ownership to a newly selected slot until a consumption animation
+    // has finished, including the final use where the original inventory item is gone.
     if (
       item !== null &&
       !gumAnimating &&
+      !medicineAnimating &&
       (item.type !== this.heldType || item.id !== this.heldId)
     ) {
       this.rebuild(item);
@@ -189,10 +205,12 @@ export class HeldItemView {
     this.time += d;
     const t = this.time;
 
-    // Heavy items sink toward centre for a two-handed carry; light ones stay
-    // to the side, one-handed. During the final gum use `item` may already be null,
-    // but the returning empty wrapper is still the same 20 g viewmodel.
-    const visibleMass = this.heldType === 'bubble_gum' ? 0.02 : item ? itemMass(item) : 0.02;
+    // During a final consumption cycle `item` may already be null, but the retained
+    // wrapper/bottle still has the same tiny mass and therefore the same carry pose.
+    const visibleMass =
+      this.heldType === 'bubble_gum' ? 0.02 :
+      this.heldType === 'medicine' ? 0.09 :
+      item ? itemMass(item) : 0.02;
     const h = this.heaviness(visibleMass);
     let baseX = LIGHT_X + (HEAVY_X - LIGHT_X) * h;
     let baseY = LIGHT_Y + (HEAVY_Y - LIGHT_Y) * h;
@@ -240,6 +258,24 @@ export class HeldItemView {
         roll += GUM_MOUTH_ROLL * reach;
       }
       setBubbleGumPieceCount(this.mesh, pieceCount);
+    } else if (this.heldType === 'medicine') {
+      const medicineProgress = opts.medicineUseProgress;
+      if (medicineProgress >= 0 && medicineProgress <= 1) {
+        const reachRaw = Math.min(1, medicineProgress / MEDICINE_REACH_END);
+        const reachIn = reachRaw * reachRaw * (3 - 2 * reachRaw);
+        const releaseRaw = Math.max(
+          0,
+          Math.min(1, (medicineProgress - MEDICINE_RELEASE_START) / (1 - MEDICINE_RELEASE_START)),
+        );
+        const release = releaseRaw * releaseRaw * (3 - 2 * releaseRaw);
+        const reach = reachIn * (1 - release * 0.45);
+        ox += (MEDICINE_MOUTH_X - baseX) * reach + release * 0.08;
+        oy += (MEDICINE_MOUTH_Y - baseY) * reach - release * 0.22;
+        oz += (MEDICINE_MOUTH_Z - baseZ) * reach + release * 0.04;
+        pitch -= reach * 1.28;
+        roll += reach * 0.18 + release * 0.35;
+      }
+      setMedicineUseProgress(this.mesh, medicineProgress);
     } else if (item?.type === 'binoculars') {
       this.useT = ramp(this.useT, use, USE_RAMP * 1.5, d);
       // Once the ocular mask is live the physical model is behind the player's
