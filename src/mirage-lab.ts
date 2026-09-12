@@ -245,7 +245,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <label data-system="tableau"><span>Отступ от дороги</span><input data-control="setback" type="range" min="0" max="320" step="5"><output data-unit="м"></output></label>
       <label><span>Масштаб</span><input data-control="scale" type="range" min="0.25" max="3" step="0.05"><output data-unit="×"></output></label>
       <label><span>Вариант seed</span><input data-control="variation" type="range" min="0" max="99" step="1"><output></output></label>
-      <label data-system="tableau"><span>Длина табло</span><input data-control="length" type="range" min="100" max="1200" step="10"><output data-unit="м"></output></label>
+      <label data-system="tableau"><span>Длина табло</span><input data-control="length" type="range" min="100" max="1700" step="10"><output data-unit="м"></output></label>
       <label data-system="tableau"><span>Плотность табло</span><input data-control="density" type="range" min="0.05" max="1" step="0.05"><output></output></label>
     </fieldset>
     <div class="buttons"><button data-action="reset">Сбросить параметры</button><button data-action="game">Вернуться в игру</button></div>

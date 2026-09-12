@@ -703,9 +703,17 @@ export const HAZE_FRAGMENT = /* glsl */ `
     );
     color.rgb = clamp(color.rgb, 0.0, 1.0);
 
-    // Ink is ground treatment. Rendering it only below the horizon leaves the sky
-    // (including every star point) outside the outline pass by construction.
-    if (uInkStrength > 0.0 && vUv.y <= uHorizon) {
+    // Ink is for surfaces, and "surface" is a depth question rather than a screen-height
+    // one. The gate used to be a screen-height test against uHorizon, which kept the
+    // outline pass off the sky and every star point — but it also left everything whose
+    // silhouette rises above the horizon undrawn, so a tree got a line round its trunk
+    // and none round its crown.
+    //
+    // The sky, the stars and the planets all render with depthWrite off, so they
+    // leave depth at the far plane while real geometry does not. Testing the depth this
+    // shader already samples excludes them by the property that actually distinguishes
+    // them, and lets a canopy, a roof or a mast keep its outline against open sky.
+    if (uInkStrength > 0.0 && airDistance < uCameraFar * 0.999) {
       float ink = inkEdge(uv, 1.0 / uResolution) * uInkStrength;
       // The line is the surface's own colour driven down, not a black overlay:
       // black lines on sand read as dirt, dark-sand lines read as ink.

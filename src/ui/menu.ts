@@ -230,6 +230,11 @@ export interface PauseHooks {
    */
   seatInNearestCar?: () => void;
   /**
+   * Put the player on the rim of a lake basin, by site index. Lakes are one per
+   * 200-300 km, so driving to one is hours; dev only, absent in a production build.
+   */
+  jumpToLake?: (index: number) => void;
+  /**
    * The LIVE world state, for "Export Save Code".
    *
    * This used to be rebuilt from the two numbers the overlay happens to display
@@ -670,6 +675,17 @@ export class MainMenu {
             finish('resume');
           });
           panel.appendChild(seatBtn);
+        }
+        if (import.meta.env.DEV && hooks.jumpToLake) {
+          // Cycles through the first sites on each press rather than opening a screen
+          // for one number: every seed has 160 of them and they are interchangeable.
+          let nextLake = 0;
+          const lakeBtn = button('menu-button', 'Jump to Lake (dev)');
+          lakeBtn.addEventListener('click', () => {
+            hooks.jumpToLake?.(nextLake++);
+            finish('resume');
+          });
+          panel.appendChild(lakeBtn);
         }
         panel.append(saveBtn, exportBtn, quitBtn);
 

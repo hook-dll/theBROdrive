@@ -47,12 +47,19 @@ export interface DesertTileData {
 }
 
 
-interface GroundHeightSample {
+export interface GroundHeightSample {
   height: number;
   detail: number;
 }
 
-function sampleGroundHeight(
+/**
+ * The exact drawn/collided ground height at a point. Exported because the lake surface
+ * (render/lakewater.ts) has to bake its shoreline against the SAME height the tile
+ * lattice will draw, not against a second opinion assembled from `Terrain` directly:
+ * the corridor transition and the under-road offset below are part of that height, and
+ * a shoreline cut a few centimetres off the sand is a visible seam.
+ */
+export function sampleGroundHeight(
   context: DesertTileGenerationContext,
   x: number,
   z: number,
