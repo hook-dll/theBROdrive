@@ -235,6 +235,15 @@
   container; its cap and bottle continue as separate physical debris and remain where
   they settle nearby. The label now wraps the bottle and carries no dose text, while
   primary fire no longer consumes medicine.
+- Ambient traffic keeps its 60 Hz vehicle physics but now replans its expensive
+  multi-ray driving corridor at 45 Hz. At 23 live cars this cut controller calls by
+  24%, physics raycasts by 28%, and traffic-update CPU time by 26% in the live game.
+  Queue arbitration also reuses its two sorting buffers instead of allocating them
+  every physics step.
+- Dry asphalt now starts from `#9e9c9d` instead of near-black bitumen, while cracked
+  districts remain a distinct, slightly darker warm grey. The existing aggregate,
+  bleaching, wheel paths, repairs and coarse mottling still break up the surface, with
+  an added subtle warm/cool chip variation so the lighter road does not become flat.
 - Nothing beside the road stands on air any more. The desert is dunes, and measured
   through the real generators the ground under a 14 m footprint carries 1.5 m of
   height range at a 9-10% tilt — so a structure placed from ONE centre sample stood

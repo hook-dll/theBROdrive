@@ -127,9 +127,10 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.012,
     microRelief: 0,
     hummock: 0,
-    // 6 mm of chip and seam: a well-kept sealed road, ISO class B/C territory.
+    // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
+    // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
     texture: 0.006,
-    color: 0x505055,
+    color: 0x9e9c9d,
     dust: 0.0,
     smoke: 1.0,
   },
@@ -142,9 +143,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.06,
     microRelief: 0,
     hummock: 0,
-    // Crazing, patches and lifted edges. Nearly three times the sound asphalt.
+    // Older cracked districts stay distinct, but no longer collapse back to wet black.
     texture: 0.011,
-    color: 0x5a5550,
+    color: 0x888482,
     dust: 0.1,
     smoke: 0.85,
   },
