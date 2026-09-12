@@ -114,15 +114,17 @@ function paintGrain(ctx: CanvasRenderingContext2D, contrast: number, blotch: num
       const cx = (x / CHIP_PIXELS) | 0;
       const cy = (y / CHIP_PIXELS) | 0;
       const chip = hash01(0x5bd1e995, cx % chipCells, cy % chipCells);
-      // Pale chips sit above the mean, dark ones further below it.
+      // Pale chips sit above the mean, dark ones further below it. A tiny independent
+      // warm/cool bias keeps the aggregate from being monochrome computer noise.
       const chipTone = chip > 0.34 ? (chip - 0.34) * 1.5 * contrast : -(0.34 - chip) * 2.2 * contrast;
       const grit = (hash01(0x27d4eb2f, x, y) - 0.5) * contrast * 0.55;
       const bleach = wrapNoise(x, y, BLOTCH_CELLS, 0x165667b1) * blotch;
+      const tint = (hash01(0x6c8e9cf5, cx % chipCells, cy % chipCells) - 0.5) * 5;
       const tone = Math.max(0, Math.min(255, Math.round(BASE_TONE + chipTone + grit + bleach)));
       const o = (y * TEXTURE_SIZE + x) * 4;
-      data[o] = tone;
+      data[o] = Math.max(0, Math.min(255, Math.round(tone + tint)));
       data[o + 1] = tone;
-      data[o + 2] = tone + 1 > 255 ? 255 : tone + 1;
+      data[o + 2] = Math.max(0, Math.min(255, Math.round(tone + 1 - tint * 0.65)));
       data[o + 3] = 255;
     }
   }

@@ -139,6 +139,13 @@ const DEADLOCK_STOP_SPEED_MPS = 1.5;
  * error the road's own planner then reads as a departure to recover from.
  */
 const TURN_REJOIN_M = 25;
+/**
+ * Ambient drivers do not need a new multi-ray route plan at the 60 Hz suspension
+ * rate. Forty-five decisions per second keep obstacle latency below 23 ms while
+ * reducing the dominant traffic CPU cost; vehicle forces still advance every
+ * physics step.
+ */
+const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
 
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried';
@@ -177,7 +184,14 @@ interface TrafficCar {
    * of which reason about who is ahead of whom in ONE direction of travel.
    */
   turnS: number;
+  /** Time accumulated since this ambient driver's last route/control plan. */
+  controlAccumulator: number;
 }
+
+const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
+  b.forwardS - a.forwardS;
+const REVERSE_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
+  a.forwardS - b.forwardS;
 
 interface PendingSpawn {
   readonly generation: number;
@@ -249,6 +263,9 @@ export class RoadTraffic {
   private readonly noHazards: HazardField = { forEachAhead: () => {} };
   private readonly random: () => number;
   private readonly carList: TrafficCar[] = [];
+  /** Reused coordinator scratch; allocating and sorting two fresh arrays at 60 Hz caused GC churn. */
+  private readonly forwardQueue: TrafficCar[] = [];
+  private readonly reverseQueue: TrafficCar[] = [];
   /** User setting: the maximum number of live ambient cars. */
   private targetCount = 0;
   /** Current natural-looking density, always at or below targetCount. */
@@ -489,21 +506,28 @@ export class RoadTraffic {
    * only while its own rear is clear, so the queue unwinds from the end.
    */
   private assignReverseRoom(): void {
-    for (const car of this.carList) car.autopilot.setYieldReverse(false);
-    for (const direction of [1, -1] as const) {
-      const queue = this.carList
-        .filter((car) => car.direction === direction && car.settleFor <= 0 && car.turnS < 0)
-        // Front of the queue first, in this direction's own sense of forward.
-        .sort((a, b) => (b.forwardS - a.forwardS) * direction);
-      for (let i = 0; i < queue.length; i++) {
-        const ahead = queue[i]!;
-        if (!ahead.autopilot.needsReverseRoom) continue;
-        const behind = queue[i + 1];
-        if (!behind) continue;
-        const gap = Math.abs(ahead.forwardS - behind.forwardS);
-        if (gap > YIELD_CHAIN_GAP_M) continue;
-        behind.autopilot.setYieldReverse(true);
-      }
+    this.forwardQueue.length = 0;
+    this.reverseQueue.length = 0;
+    for (const car of this.carList) {
+      car.autopilot.setYieldReverse(false);
+      if (car.settleFor > 0 || car.turnS >= 0) continue;
+      (car.direction === 1 ? this.forwardQueue : this.reverseQueue).push(car);
+    }
+    this.forwardQueue.sort(FORWARD_QUEUE_ORDER);
+    this.reverseQueue.sort(REVERSE_QUEUE_ORDER);
+    this.assignReverseRoomInQueue(this.forwardQueue);
+    this.assignReverseRoomInQueue(this.reverseQueue);
+  }
+
+  private assignReverseRoomInQueue(queue: readonly TrafficCar[]): void {
+    for (let i = 0; i < queue.length; i++) {
+      const ahead = queue[i]!;
+      if (!ahead.autopilot.needsReverseRoom) continue;
+      const behind = queue[i + 1];
+      if (!behind) continue;
+      const gap = Math.abs(ahead.forwardS - behind.forwardS);
+      if (gap > YIELD_CHAIN_GAP_M) continue;
+      behind.autopilot.setYieldReverse(true);
     }
   }
 
@@ -712,11 +736,16 @@ export class RoadTraffic {
         car.vehicle.settle(dt);
       } else {
         this.serviceTurn(car);
-        car.autopilot.drive(dt, car.vehicle, car.input, originX, originZ);
+        car.controlAccumulator += dt;
+        if (car.controlAccumulator >= TRAFFIC_CONTROL_INTERVAL_S) {
+          const controlDt = car.controlAccumulator;
+          car.controlAccumulator -= TRAFFIC_CONTROL_INTERVAL_S;
+          car.autopilot.drive(controlDt, car.vehicle, car.input, originX, originZ);
+        }
+        car.vehicle.fixedUpdate(dt, car.input);
         const passing = car.autopilot.activity === 'pass';
         if (passing && !car.wasPassing) this.passCount++;
         car.wasPassing = passing;
-        car.vehicle.fixedUpdate(dt, car.input);
       }
     }
 
@@ -955,6 +984,8 @@ export class RoadTraffic {
       lifetimeTimer: LIFETIME_SAMPLE_S,
       stoppedFor: 0,
       wasPassing: false,
+      controlAccumulator:
+        (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
       turnS: -1,
     });
   }
