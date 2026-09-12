@@ -18,6 +18,7 @@ import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import type { DesertTileGenerationContext } from '../src/world/deserttiledata';
+import { MIRAGE_FADE_BAND_M } from '../src/render/mirage-tableau';
 import { LakeWater, waterPaletteAt } from '../src/render/lakewater';
 import { desertPaletteAt } from '../src/world/gradient';
 
@@ -25,6 +26,13 @@ const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 const L = LakeWater.lattice;
 /** Sites searched. Each is a full window of terrain samples, so this is the slow part. */
 const SITES_SEARCHED = 14;
+
+/** The same smoothstep the renderer uses, for reasoning about its own fade curve. */
+function smoothstepAt(edge0: number, edge1: number, value: number): number {
+  const t = (value - edge0) / (edge1 - edge0);
+  const c = t < 0 ? 0 : t > 1 ? 1 : t;
+  return c * c * (3 - 2 * c);
+}
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -50,12 +58,19 @@ console.log(
     `window ${L.reach * 2} m at ${L.step} m`,
 );
 
-// --- 1. The world is untouched ----------------------------------------------
-// A second Terrain from the same seed, which no LakeWater has ever been constructed
-// against. If a lake had a terrain term, these would diverge.
+// --- 1. The hollow is real ---------------------------------------------------
+// THE BASIN IS DUG (world/lakes.ts): it is in the collided ground, in the mesh and in
+// the tile worker, which is the whole difference between water in a bowl and a sheet
+// of paint over dunes. An earlier design read the terrain and wrote nothing, and what
+// the player got was a broad two-metre dip filled to the brim — "покрашенный песок".
+//
+// Measured against a second Terrain built from the same seed, so the shape is also
+// proved deterministic: the worker builds its own instance and must agree exactly.
 const virginTerrain = new Terrain(SEED, new Road(SEED));
+const firstSite = water.sites[0]!;
+const firstCentre = road.offsetPoint(firstSite.s, firstSite.lateral);
 let worstDrift = 0;
-const firstCentre = road.offsetPoint(water.sites[0]!.s, water.sites[0]!.lateral);
+let deepest = 0;
 for (let i = 0; i < 4000; i++) {
   const angle = (i / 4000) * Math.PI * 2;
   const r = (((i * 37) % 100) / 100) * L.reach * 1.5;
@@ -64,14 +79,29 @@ for (let i = 0; i < 4000; i++) {
   const drift = Math.abs(virginTerrain.heightAt(x, z) - terrain.heightAt(x, z));
   if (drift > worstDrift) worstDrift = drift;
 }
+// The rim is what closes the basin, so the floor is measured against the crest of it
+// rather than against the open desert, which is tens of metres of dune away.
+const centreY = terrain.heightAt(firstCentre.x, firstCentre.z, firstSite.s);
+for (let i = 0; i < 360; i++) {
+  const angle = (i / 360) * Math.PI * 2;
+  const x = firstCentre.x + Math.cos(angle) * (firstSite.radius + 24);
+  const z = firstCentre.z + Math.sin(angle) * (firstSite.radius + 24);
+  deepest = Math.max(deepest, terrain.heightAt(x, z, firstSite.s) - centreY);
+}
 check(
-  'the terrain is identical with and without the lakes',
-  worstDrift === 0,
-  `worst drift ${worstDrift} m over 4000 points across a site`,
+  'the ground under a lake is a bowl, and the same bowl every time',
+  worstDrift === 0 && deepest >= 4,
+  `${deepest.toFixed(1)} m from the floor up to the rim, ${worstDrift} m of drift between two builds`,
+);
+check(
+  'the first lake belongs to the opening drive',
+  firstSite.s < 3_000 && Math.abs(firstSite.lateral) < 900,
+  `site 0 at ${(firstSite.s / 1000).toFixed(1)} km, ${Math.abs(firstSite.lateral).toFixed(0)} m off the road`,
 );
 
 // --- 2. Rarity ---------------------------------------------------------------
-const schedule = water.sites.slice(0, 24);
+// The first lake is authored at the house; the rarity rule is about the rest.
+const schedule = water.sites.slice(1, 25);
 let minGap = Number.POSITIVE_INFINITY;
 let maxGap = 0;
 for (let i = 1; i < schedule.length; i++) {
@@ -332,10 +362,24 @@ check(
   backAway > 0.99,
   `opacity ${backAway.toFixed(3)} after retreating; the fade is a function of position, not a latch`,
 );
+// THE TABLEAUS' OWN BAND. The lake is a mirage and so is the mirage town, and a player
+// who has learned one has learned the other: leave the asphalt and the town evaporates
+// over ten metres; walk to the shore and the water evaporates over the same ten. The
+// width is imported, not retyped, so the two cannot drift; what is checked here is that
+// the lake actually uses it, that the ramp is monotonic rather than a pair of steps, and
+// that the water survives to within a couple of metres of its own edge.
+let fadeMonotonic = true;
+let previousOpacity = -1;
+for (let out = L.vanishFull + 4; out >= L.vanishGone - 4; out -= 0.25) {
+  const opacity = smoothstepAt(L.vanishGone, L.vanishFull, out);
+  if (opacity > previousOpacity + 1e-6 && previousOpacity >= 0) fadeMonotonic = false;
+  previousOpacity = opacity;
+}
 check(
-  'the fade is abrupt, not a long dissolve',
-  L.vanishFull - L.vanishGone <= 20,
-  `full water at ${L.vanishFull} m from the waterline, none at ${L.vanishGone} m`,
+  'the water evaporates over exactly a tableau-leaving',
+  L.vanishFull - L.vanishGone === MIRAGE_FADE_BAND_M && L.vanishGone <= 3 && fadeMonotonic,
+  `full water at ${L.vanishFull} m from the waterline, none at ${L.vanishGone} m, ` +
+    `band ${L.vanishFull - L.vanishGone} m against the tableaus' ${MIRAGE_FADE_BAND_M} m, monotonic=${fadeMonotonic}`,
 );
 
 // --- 6. The water reads against whatever colour the sand has got to ------------

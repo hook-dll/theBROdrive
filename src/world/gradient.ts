@@ -678,8 +678,16 @@ export type MonumentKind =
 export interface Monument {
   /** Arclength of the monument. */
   readonly s: number;
-  /** Lateral offset from the centreline; negative is left of travel. */
-  readonly lateral: number;
+  /** Which side of the road it stands on: -1 is right of travel, +1 left. */
+  readonly side: -1 | 1;
+  /**
+   * Metres from the ASPHALT EDGE, not from the centreline.
+   *
+   * This module knows nothing about how wide the road is there (`roadprofile.ts`
+   * owns that), and a monument authored at a fixed lateral stood on the paint of a
+   * widened stretch. The consumer adds the local half width.
+   */
+  readonly setback: number;
   readonly kind: MonumentKind;
   /** Deterministic per-monument variation seed. */
   readonly variantSeed: number;
@@ -721,7 +729,8 @@ export function monumentsBetween(seed: number, fromS: number, toS: number): Monu
     result.push({
       s,
       // Alternate sides so the road does not develop a lopsided rhythm.
-      lateral: (i % 2 === 0 ? 1 : -1) * (6.5 + hash01(seed, i, 7) * 2.5),
+      side: i % 2 === 0 ? 1 : -1,
+      setback: 3.6 + hash01(seed, i, 7) * 2.5,
       kind,
       variantSeed: (seed ^ (i * 0x9e3779b9)) >>> 0,
       text: kind === 'distance_sign' ? `${km} km` : '',

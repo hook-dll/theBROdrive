@@ -32,6 +32,10 @@ import { hash01 } from '../core/rng';
 /**
  * Tile size in world metres, both axes so the grain never stretches.
  *
+ * RoadMesh writes U as absolute `lateral / ROAD_TILE_METRES`, not a fraction of the
+ * local carriageway, so widening preserves aggregate scale. Lane paint remains mesh
+ * geometry; this texture deliberately contains no line pattern to stretch or repeat.
+ *
  * 24 m, not 8: at 8 m the same crack and the same patch came round every third car
  * length and the surface read as paving slabs. The repeat has to be longer than the
  * distance over which the eye can hold a pattern at driving speed.

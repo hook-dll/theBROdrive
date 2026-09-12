@@ -30,12 +30,19 @@ import {
   PLAYGROUND_ORIGIN_X,
   PLAYGROUND_ORIGIN_Z,
 } from '../src/playground/circuit';
+import { laneOffsetFor } from '../src/world/roadprofile';
 import { createServiceableCarState } from '../src/game/spawn';
 import { PlaygroundRoad } from '../src/playground/playgroundroad';
 import { addCircuitCollider } from '../src/playground/ribbon';
 import { PlaygroundTraffic, type TrafficState } from '../src/playground/traffic';
 import { installAssetShim } from './assetshim';
 
+
+/**
+ * The lane the circuit's traffic and ego car hold. A lane centre is a road property
+ * now (`world/roadprofile.ts`); negative because positive lateral is left of travel.
+ */
+const CIRCUIT_LANE = -laneOffsetFor(CIRCUIT_HALF_WIDTH, 0);
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
   readonly loaded: number;
@@ -187,7 +194,7 @@ async function makeRig(options: RigOptions): Promise<Rig> {
     mode,
     traffic,
     startS = 0,
-    startLateral = AUTOPILOT_MODES[mode].laneOffset,
+    startLateral = CIRCUIT_LANE,
     headingOffset = 0,
     slots,
     boulderS,
@@ -198,7 +205,7 @@ async function makeRig(options: RigOptions): Promise<Rig> {
   const world = new GameWorld(newWorldState(SEED));
   if (boulderS !== undefined) {
     const rock = circuit.sampleAt(boulderS);
-    const rockLateral = AUTOPILOT_MODES[mode].laneOffset;
+    const rockLateral = CIRCUIT_LANE;
     physics.addStaticBall(
       BOULDER_RADIUS_M,
       {
@@ -313,7 +320,7 @@ async function measure(
   seconds: number,
 ): Promise<LapMetrics> {
   const rig = await makeRig(options);
-  const lane = AUTOPILOT_MODES[options.mode].laneOffset;
+  const lane = CIRCUIT_LANE;
   const position = { x: 0, y: 0, z: 0 };
   const other = { x: 0, y: 0, z: 0 };
   const sectors = new Map<string, SectorMetrics & { samples: number }>();
@@ -529,7 +536,7 @@ for (const mode of ['sleeper', 'frantic'] as const) {
       metrics.maxSignedLateral <= 0.4,
     `lane error RMS ${metrics.laneErrorRms.toFixed(2)} m (bound ${LANE_RMS_BOUND[mode].toFixed(2)}), ` +
       `worst ${metrics.laneErrorWorst.toFixed(2)} m (bound ${LANE_WORST_BOUND[mode].toFixed(2)}), ` +
-      `lateral ${metrics.minSignedLateral.toFixed(2)}..${metrics.maxSignedLateral.toFixed(2)} m about a ${config.laneOffset.toFixed(2)} m lane`,
+      `lateral ${metrics.minSignedLateral.toFixed(2)}..${metrics.maxSignedLateral.toFixed(2)} m about a ${CIRCUIT_LANE.toFixed(2)} m lane`,
   );
   // A cap nobody reaches is a comment, not a character: the lower bound is what says
   // the lap can actually deliver the mode's speed.
@@ -818,7 +825,7 @@ check(
   'sleeper: occupies its lane before accelerating after sand',
   returning.progress >= 100 &&
     Math.abs(returning.finalLateral) <= CIRCUIT_HALF_WIDTH &&
-    Math.abs(returning.roadRecoveryExitLateral - AUTOPILOT_MODES.sleeper.laneOffset) <= 0.45 &&
+    Math.abs(returning.roadRecoveryExitLateral - CIRCUIT_LANE) <= 0.45 &&
     Math.abs(returning.roadRecoveryExitHeadingError) <= 0.16 &&
     returning.maxRoadRecoverySpeed <= 5 &&
     returning.maxRoadRecoveryThrottle >= 0.9,

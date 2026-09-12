@@ -2,9 +2,11 @@ import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
 import { desertPaletteAt } from './gradient';
-import type { Road } from './road';
+import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
+import { terminusWeight } from './terminus';
+
 
 /** Side length of one absolute, deterministic desert tile. */
 export const DESERT_TILE_SIZE = 240;
@@ -13,7 +15,7 @@ export const DESERT_TILE_VERTS = DESERT_TILE_CELLS + 1;
 export const DESERT_TILE_STEP = DESERT_TILE_SIZE / DESERT_TILE_CELLS;
 
 const DIST_LATTICE = 20;
-const EXACT_DISTANCE_GATE = CORRIDOR_OUTER + DIST_LATTICE * 2;
+const EXACT_DISTANCE_GATE = Math.max(CORRIDOR_OUTER, ROAD_MAX_HALF_WIDTH) + DIST_LATTICE * 2;
 const FULL_RELIEF_DISTANCE = 200;
 const PROP_TAG = 0x44535254;
 const MAX_TILE_PROPS = 5;
@@ -65,17 +67,29 @@ export function sampleGroundHeight(
   z: number,
   farFromRoad: boolean,
   out: GroundHeightSample,
+  /**
+   * An arclength NEAR this point, for the far-from-road path only.
+   *
+   * NO OWNER LOOKUP OUT HERE: paying `roadDistance.ownerAt` per sample measured
+   * 17.8 ms in a single lake-search slice against a 3 ms budget. It is not needed for
+   * the corridor either — every fade that starts at the asphalt edge is saturated at
+   * this distance. It IS needed to find a lake basin (world/lakes.ts), which is
+   * scheduled by arclength, so the caller passes the one it already has: a tile its
+   * own nearest road branch, the water's own search the site it is searching.
+   */
+  hintS = 0,
 ): void {
   if (farFromRoad) {
-    const detail = context.terrain.explorationDetailAt(x, z, FULL_RELIEF_DISTANCE);
-    out.height = context.terrain.openBase(x, z, FULL_RELIEF_DISTANCE) + detail;
+    const detail = context.terrain.explorationDetailAt(x, z, FULL_RELIEF_DISTANCE, hintS);
+    out.height = context.terrain.openBase(x, z, FULL_RELIEF_DISTANCE, hintS) + detail;
     out.detail = detail;
     return;
   }
   const approximate = context.roadDistance.distAt(x, z, DIST_LATTICE);
   if (approximate >= EXACT_DISTANCE_GATE) {
-    const detail = context.terrain.explorationDetailAt(x, z, approximate);
-    out.height = context.terrain.openBase(x, z, approximate) + detail;
+    const s = context.roadDistance.ownerAt(x, z, DIST_LATTICE);
+    const detail = context.terrain.explorationDetailAt(x, z, approximate, s);
+    out.height = context.terrain.openBase(x, z, approximate, s) + detail;
     out.detail = detail;
     return;
   }
@@ -83,8 +97,9 @@ export function sampleGroundHeight(
   const hint = context.roadDistance.ownerAt(x, z, DIST_LATTICE);
   const projection = context.road.project(x, z, hint);
   const dist = Math.abs(projection.lateral);
-  const detail = context.terrain.explorationDetailAt(x, z, dist);
-  const transitionInput = dist / CORRIDOR_OUTER;
+  const detail = context.terrain.explorationDetailAt(x, z, dist, projection.s);
+  const halfWidth = context.road.halfWidthAt(projection.s);
+  const transitionInput = (dist - halfWidth) / (CORRIDOR_OUTER - halfWidth);
   const transition =
     transitionInput < 0 ? 0 : transitionInput > 1 ? 1 : transitionInput;
   // The road ribbon owns the contact surface in the corridor. This small offset avoids
@@ -142,12 +157,18 @@ export function generateDesertTileData(
     ? Math.abs(centreZ)
     : context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
   const palette = new THREE.Color(desertPaletteAt(paletteDistance).sand);
+  // One lattice node for the whole tile: the far path needs an arclength only to find
+  // a lake basin, and a basin is 860 m across, so the tile's own nearest branch is
+  // exact enough. See `sampleGroundHeight`.
+  const tileHintS = farFromRoad
+    ? context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE)
+    : 0;
   for (let ix = 0; ix < DESERT_TILE_VERTS; ix++) {
     const worldX = startX + ix * DESERT_TILE_STEP;
     for (let iz = 0; iz < DESERT_TILE_VERTS; iz++) {
       const worldZ = startZ + iz * DESERT_TILE_STEP;
       const vi = ix * DESERT_TILE_VERTS + iz;
-      sampleGroundHeight(context, worldX, worldZ, farFromRoad, ground);
+      sampleGroundHeight(context, worldX, worldZ, farFromRoad, ground, tileHintS);
       const y = ground.height;
       heights[vi] = y;
       detailOffsets[vi] = ground.detail;
@@ -205,6 +226,7 @@ export function generateDesertTileData(
     const localZ = (0.08 + hash01(context.seed, PROP_TAG, tx, tz, i, 2) * 0.84) * DESERT_TILE_SIZE;
     const worldX = startX + localX;
     const worldZ = startZ + localZ;
+    if (terminusWeight(worldX, worldZ) > 0) continue;
     // Roadside scatter owns the corridor. Once this tile is definitely far away, do
     // not ask the whole-road grid at all.
     if (!farFromRoad && context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;

@@ -4,11 +4,14 @@ import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { loadCarModel } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
-import { HazardIndex } from '../src/world/hazards';
+import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { RoadTraffic } from '../src/world/traffic';
+import { Terrain } from '../src/world/terrain';
+import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
+import { lanesPerSideAt } from '../src/world/roadprofile';
 import { installAssetShim } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
@@ -40,6 +43,14 @@ let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
+}
+
+/** First arclength where the carriageway offers two lanes each way. */
+function findWideS(road: Road): number {
+  for (let s = PLAYER_S; s < 400_000; s += 100) {
+    if (lanesPerSideAt(SEED, s) === 2) return s;
+  }
+  throw new Error('no widened stretch on this seed');
 }
 
 function addRoadCollider(physics: PhysicsWorld, road: Road): void {
@@ -230,6 +241,204 @@ check(
   traffic.status.count === 0 && !traffic.status.pending && !traffic.enabled,
   JSON.stringify(traffic.status),
 );
+
+// THE WIDENED ROAD CARRIES MORE CARS, AND STOPS THERE.
+//
+// The setting is the narrow road's number; a stretch with two lanes each way runs up
+// to the configured maximum and no further, so a player who asked for twelve meets
+// twelve on the ordinary road and up to thirty on a highway section.
+{
+  const wideS = findWideS(road);
+  const wideTraffic = new RoadTraffic(
+    physics,
+    new GameWorld(newWorldState(SEED)),
+    new THREE.Scene(),
+    new WorldOrigin(),
+    road,
+    new HazardIndex(),
+    loadCarModel,
+    () => true,
+  );
+  wideTraffic.setTargetCount(12);
+  wideTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+  const narrowTarget = wideTraffic.status.target;
+  wideTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0);
+  const wideTarget = wideTraffic.status.target;
+  check(
+    'a widened stretch raises the density toward the cap',
+    narrowTarget <= 12 && wideTarget > narrowTarget && wideTarget <= 30,
+    `${narrowTarget} asked for on the narrow road, ${wideTarget} on the wide one (cap 30)`,
+  );
+  wideTraffic.dispose();
+}
+
+// A PROP IN THE ROAD MUST NOT STOP THE WORLD.
+//
+// Reported from play: a rock in one lane, a queue behind it, an opposing queue that
+// had drawn level with its head, and nothing moving for five minutes. Both streams
+// are stopped, so nobody's own sensors call it anything but "traffic ahead" — the
+// coordinator has to see the standoff and hand one head right of way.
+{
+  const blockS = PLAYER_S + 260;
+  const blockedHazards = new HazardIndex();
+  const rock: RoadHazard = { s: blockS, lateral: -1.45, radius: 1.2, breakable: false };
+  blockedHazards.add('traffic-bench-block', rock);
+  const rockPoint = road.offsetPoint(rock.s, rock.lateral);
+  const rockBody = physics.world.createRigidBody(
+    physics.rapier.RigidBodyDesc.fixed().setTranslation(rockPoint.x, rockPoint.y + 1, rockPoint.z),
+  );
+  physics.world.createCollider(
+    physics.rapier.ColliderDesc.cylinder(1, rock.radius).setFriction(0.9),
+    rockBody,
+  );
+  const blocked = new RoadTraffic(
+    physics,
+    new GameWorld(newWorldState(SEED)),
+    new THREE.Scene(),
+    new WorldOrigin(),
+    road,
+    blockedHazards,
+    loadCarModel,
+    () => true,
+  );
+  blocked.setTargetCount(12);
+  blocked.setDaylightFactor(1);
+  const stopped = new Map<string, number>();
+  let worstStop = 0;
+  let passedTheRock = 0;
+  const before = new Set<string>();
+  for (let step = 0; step < Math.ceil(150 / FIXED_DT); step++) {
+    blocked.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+    physics.step();
+    blocked.postStep();
+    const live = new Set<string>();
+    blocked.forEachVehicle((id, vehicle) => {
+      live.add(id);
+      const held = vehicle.speedKmh < 2 ? (stopped.get(id) ?? 0) + FIXED_DT : 0;
+      stopped.set(id, held);
+      // Settle time and the first seconds of a spawn are not a standoff.
+      if (step * FIXED_DT > 8) worstStop = Math.max(worstStop, held);
+      const position = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+      const s = road.project(position.x, position.z, blockS).s;
+      if (s < blockS - 20) before.add(id);
+      else if (s > blockS + 20 && before.has(id)) {
+        before.delete(id);
+        passedTheRock++;
+      }
+    });
+    for (const id of stopped.keys()) if (!live.has(id)) stopped.delete(id);
+    if (step % 12 === 0) await Bun.sleep(0);
+  }
+  check(
+    'a rock in the road never deadlocks both streams',
+    worstStop < 22,
+    `longest continuous stop ${worstStop.toFixed(1)} s of 150 s (nothing may stand for 22)`,
+  );
+  check(
+    'and traffic keeps getting past it',
+    // Two in two and a half minutes is not much, and a lane with a rock in it is not
+    // much of a lane: what this defends is that the number is not zero.
+    passedTheRock >= 2,
+    `${passedTheRock} cars went from before the rock to past it`,
+  );
+  blocked.dispose();
+  physics.world.removeRigidBody(rockBody);
+}
+// THE ROAD'S END TURNS CARS ROUND INSTEAD OF EATING THEM.
+//
+// Oncoming traffic used to drive to s = 0, sit against the clamp its reversed road view
+// collapses to, and be recycled out of sight. There is a turning circle there now
+// (`world/terminus.ts` paves it, `world/turnaround.ts` is the line round it), so what
+// this measures is the whole handover: a car arrives, loops, and leaves in the other
+// direction under its own power, having touched nothing.
+{
+  const terrain = new Terrain(SEED, road);
+  const step = 1.5;
+  const x0 = -40;
+  const x1 = 40;
+  const z0 = -40;
+  const z1 = ROAD_FROM + 20;
+  const nx = Math.round((x1 - x0) / step) + 1;
+  const nz = Math.round((z1 - z0) / step) + 1;
+  const vertices = new Float32Array(nx * nz * 3);
+  for (let ix = 0; ix < nx; ix++) {
+    for (let iz = 0; iz < nz; iz++) {
+      const x = x0 + ix * step;
+      const z = z0 + iz * step;
+      const i = (ix * nz + iz) * 3;
+      vertices[i] = x;
+      vertices[i + 1] = terrain.heightAt(x, z, Math.max(0, z));
+      vertices[i + 2] = z;
+    }
+  }
+  const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);
+  for (let ix = 0, o = 0; ix < nx - 1; ix++) {
+    for (let iz = 0; iz < nz - 1; iz++) {
+      const a = ix * nz + iz;
+      const b = (ix + 1) * nz + iz;
+      indices[o++] = a; indices[o++] = a + 1; indices[o++] = b;
+      indices[o++] = b; indices[o++] = a + 1; indices[o++] = b + 1;
+    }
+  }
+  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
+
+  const endS = 220;
+  const ending = new RoadTraffic(
+    physics,
+    new GameWorld(newWorldState(SEED)),
+    new THREE.Scene(),
+    new WorldOrigin(),
+    road,
+    new HazardIndex(),
+    loadCarModel,
+    () => true,
+  );
+  ending.setTargetCount(12);
+  ending.setDaylightFactor(1);
+  const reachedEnd = new Set<string>();
+  const cameBack = new Set<string>();
+  let onPad = 0;
+  let strandedOnPad = 0;
+  const padTime = new Map<string, number>();
+  const impactsBefore = ending.status.impacts;
+  for (let i = 0; i < Math.ceil(180 / FIXED_DT); i++) {
+    ending.fixedUpdate(FIXED_DT, endS, 0, 0);
+    physics.step();
+    ending.postStep();
+    ending.forEachVehicle((id, vehicle) => {
+      const p = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+      const r = Math.hypot(p.x, p.z + TERMINUS_CENTRE_M);
+      if (r <= TERMINUS_PAD_M) {
+        if (!padTime.has(id)) onPad++;
+        const held = (padTime.get(id) ?? 0) + FIXED_DT;
+        padTime.set(id, held);
+        // A turn takes twenty seconds; a minute on the paving is a car that is stuck
+        // on it, which is the failure this whole handover could plausibly produce.
+        if (held > 60) strandedOnPad++;
+      }
+      const s = road.project(p.x, p.z, 60).s;
+      if (s < 40) reachedEnd.add(id);
+      else if (s > 150 && reachedEnd.has(id)) cameBack.add(id);
+    });
+    if (i % 12 === 0) await Bun.sleep(0);
+  }
+  check(
+    'cars that reach the end of the road turn round in the bulb',
+    cameBack.size >= 2 && onPad >= cameBack.size,
+    `${onPad} car(s) used the turning circle, ${cameBack.size} drove back out past 150 m in 180 s`,
+  );
+  check(
+    'and none of them is left standing on the paving',
+    strandedOnPad === 0,
+    `${strandedOnPad} car-tick(s) over a minute on the pad, ${padTime.size} visitor(s) counted`,
+  );
+  check(
+    'the turn costs no collisions',
+    ending.status.impacts === impactsBefore,
+    `${ending.status.impacts - impactsBefore} impact(s) while turning`,
+  );
+  ending.dispose();
+}
 traffic.dispose();
 
 console.log(failures === 0 ? '\nall traffic checks passed' : `\n${failures} traffic check(s) FAILED`);

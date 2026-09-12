@@ -6,6 +6,7 @@ import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
+import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
@@ -19,22 +20,35 @@ import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
  */
 
 const HW = ROAD_HALF_WIDTH;
-/** Asphalt edge; matches terrain.ts CORRIDOR_INNER. */
-const CORRIDOR_INNER = HW;
 
 /**
- * Cross-section lateral offsets, left to right.
- *
- * Finer inside the lanes than the geometry strictly needs, because the columns are
- * also where the surface's WEATHERING is sampled: the polished wheel paths and the
- * bleached outer edge are strips half a metre wide, and a 1.1 m column spacing
- * cannot resolve either. The extra columns cost ~6 vertices per row.
+ * Cross-section lateral offsets, left to right. The narrow and open templates have
+ * exactly the same count, so quad strips and collider slabs cannot tear in a taper.
+ * The narrow literals preserve the old ribbon bit-for-bit; the wide literals retain
+ * dense wheel/edge samples and hit the outer pothole catalogue's fixed laterals.
  */
-const LATERALS: readonly number[] = [
-  -HW, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
+const SECTION_LATERALS: readonly number[] = [
+  -HW, -2.45, -2, -1.65, -1.2, -0.85, -0.4,
   0,
-  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, HW,
+  0.4, 0.85, 1.2, 1.65, 2, 2.45, HW,
 ];
+const WIDE_SECTION_LATERALS: readonly number[] = [
+  -5.8, -5.25, -4.85, -4.05, -3.25, -2.45, -0.85,
+  0,
+  0.85, 2.45, 3.25, 4.05, 4.85, 5.25, 5.8,
+];
+
+function sectionLateral(halfWidth: number, column: number): number {
+  const narrowLateral = SECTION_LATERALS[column]!;
+  if (halfWidth === HW) return narrowLateral;
+  const wideLateral = WIDE_SECTION_LATERALS[column]!;
+  if (halfWidth === HW * 2) return wideLateral;
+  // The outer lane's own half-width is the added asphalt. Interpolating its
+  // lane-defined taper between fixed endpoint templates preserves the column count
+  // while letting terrain's outer-lane potholes land on real mesh vertices.
+  const widening = laneHalfWidthFor(halfWidth, 1) / laneHalfWidthFor(HW * 2, 1);
+  return narrowLateral + (wideLateral - narrowLateral) * widening;
+}
 
 /**
  * Longitudinal rows of quads per collider slab.
@@ -53,29 +67,31 @@ const ROAD_BED_DEPTH = 0.35;
 
 const MARKING_LIFT = 0.002;
 const MARKING_HALF_WIDTH = 0.12;
-/** Keep the full edge marking on the asphalt. */
-const EDGE_LATERAL = HW - MARKING_HALF_WIDTH;
 const MARKING_MIN = 0.03;
 
 /**
- * Weathering of the driving surface, as three things a photograph of any old
- * two-lane road shows and this road did not.
+ * Weathering of the driving surface, as three things a photograph of an old road
+ * shows and this road did not.
  *
- *  1. WHEEL PATHS. Tyres polish two strips per lane and grind the dust out of them,
- *     so they are darker and smoother than the rest, and they are the single most
- *     recognisable feature of a used road. WHEEL_PATH_LATERALS are the strip
- *     centres: a 1.65 m track either side of each lane's centreline.
- *  2. A DUSTY CROWN AND ROAD EDGE. Between the wheel paths and out at the
- *     edges nothing sweeps the surface, so wind-blown dust settles and the bitumen
- *     bleaches: lighter, and browner, not just lighter.
- *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre is where the mat ravels and
- *     the verge creeps in, so it fades towards the gravel colour before the actual
- *     edge rather than stopping dead at it.
+ *  1. WHEEL PATHS. Tyres polish two strips per lane and grind dust out of them.
+ *     Each lane supplies its own pair, so opening a lane extends the traffic story
+ *     rather than scaling narrow-road tracks across empty asphalt.
+ *  2. A DUSTY CROWN AND ROAD EDGE. Between the wheel paths and out at the edges
+ *     nothing sweeps the surface, so wind-blown dust settles and bitumen bleaches.
+ *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre ravels into the verge before
+ *     the asphalt ends rather than stopping in a hard visual line.
  *
  * All three are applied to the vertex colour, on top of the tiled asphalt texture
- * (render/roadtexture.ts) that carries the aggregate, cracks and patches.
+ * (render/roadtexture.ts) that carries aggregate, cracks and patches.
  */
-const WHEEL_PATH_LATERALS: readonly number[] = [-2.45, -0.85, 0.85, 2.45];
+/**
+ * The inherited polished pair is centred 0.2 m outward of each nominal lane centre:
+ * it preserves the narrow road's ±0.85/±2.45 m tracks while carrying that real-world
+ * camber bias into every added lane.
+ */
+const WHEEL_TRACK_LANE_BIAS = 0.2;
+/** A 1.6 m tyre track places each path 0.8 m either side of its lane centre. */
+const WHEEL_TRACK_HALF = 0.8;
 /** Half-width of a polished strip, metres. */
 const WHEEL_PATH_HALF = 0.5;
 /** Darkening at the centre of a wheel path, as a fraction of the lane colour. */
@@ -158,6 +174,18 @@ function attachRoadTextures(): void {
   textureGain = 1 / Math.max(0.2, mean);
 }
 
+/** Shared road finish for small paved features outside the ribbon. */
+export function roadAsphaltMaterial(): THREE.MeshStandardMaterial {
+  attachRoadTextures();
+  return roadMaterial;
+}
+
+/** Texture-brightness-corrected vertex colour for the road's start condition. */
+export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
+  attachRoadTextures();
+  return out.copy(SURFACE_LINEAR[roadConditionAt(0).surface]!).multiplyScalar(textureGain);
+}
+
 const markingMaterial = applyGroundSpotlightNormals(
   new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -172,23 +200,23 @@ const markingMaterial = applyGroundSpotlightNormals(
 );
 
 /** Fraction of sand covering a point at |lateral| = a, given sandCover (0..1). */
-function sandFactor(a: number, sandCover: number): number {
+function sandFactor(a: number, halfWidth: number, sandCover: number): number {
   if (sandCover <= 0) return 0;
-  const tip = HW * (1 - sandCover);
+  const tip = halfWidth * (1 - sandCover);
   if (a <= tip) return 0;
-  if (a >= CORRIDOR_INNER) return 1;
-  return (a - tip) / (CORRIDOR_INNER - tip);
+  if (a >= halfWidth) return 1;
+  return (a - tip) / (halfWidth - tip);
 }
 
 interface MarkingLine {
-  readonly lateral: number;
+  readonly kind: 'edge' | 'crown' | 'divider';
   readonly dashed: boolean;
 }
 
 const MARKING_LINES: readonly MarkingLine[] = [
-  { lateral: -EDGE_LATERAL, dashed: false },
-  { lateral: 0, dashed: true },
-  { lateral: EDGE_LATERAL, dashed: false },
+  { kind: 'edge', dashed: false },
+  { kind: 'crown', dashed: true },
+  { kind: 'divider', dashed: true },
 ];
 
 export class RoadMeshProvider implements ChunkProvider {
@@ -221,13 +249,12 @@ export class RoadMeshProvider implements ChunkProvider {
     // happens only where a coordinate is about to live in f32.
     const ox = ctx.originX;
     const oz = ctx.originZ;
-
+    const latCount = SECTION_LATERALS.length;
     // One surface type per chunk drives the collider friction profile. Visual colour
     // is sampled per row below because a material-district boundary can cross a chunk.
     const surface = roadConditionAt((sStart + sEnd) / 2).surface;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
-    const latCount = LATERALS.length;
     const vertexCount = sCount * latCount;
 
     const positions = new Float32Array(vertexCount * 3);
@@ -258,6 +285,9 @@ export class RoadMeshProvider implements ChunkProvider {
         // boundary row bit-identical in both neighbours, keeping the seam watertight
         // at the denser resolution.
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        // Every consumer of this row gets this one local width. In particular the
+        // collider is indexed from these same fixed-count rows as the visible mat.
+        const halfWidth = road.halfWidthAt(s);
         const cond = roadConditionAt(s);
         const laneBase = SURFACE_LINEAR[cond.surface] ?? null;
         // Palette colour is a function of arclength alone: sample once per row, so
@@ -267,7 +297,7 @@ export class RoadMeshProvider implements ChunkProvider {
         gravelLinear.setHex(palette.gravel);
 
         for (let li = 0; li < latCount; li++) {
-          const lateral = LATERALS[li]!;
+          const lateral = sectionLateral(halfWidth, li);
           road.offsetPoint(s, lateral, point);
           // Shared height function: the desert terrain adopts this exact surface at
           // the asphalt edge, so the two meshes stay flush.
@@ -278,19 +308,18 @@ export class RoadMeshProvider implements ChunkProvider {
           positions[vi * 3 + 1] = y;
           positions[vi * 3 + 2] = point.z - oz;
 
-          // Fixed-size world grain with a bounded longitudinal coordinate. Adjacent
-          // chunks may differ by a whole repeat at their seam, which RepeatWrapping
-          // maps to the same texel without sacrificing fractional precision.
+          // Absolute lateral / 24 m is world-scale texture space: widening neither
+          // stretches aggregate nor bakes lane paint into this texture.
           uvs[vi * 2] = lateral / ROAD_TILE_METRES;
           uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
 
           const a = Math.abs(lateral);
           color.lerpColors(
-            a <= HW ? (laneBase ?? gravelLinear) : gravelLinear,
+            laneBase ?? gravelLinear,
             sandLinear,
-            sandFactor(a, cond.sandCover),
+            sandFactor(a, halfWidth, cond.sandCover),
           );
-          if (a <= HW) this.weather(color, gravelLinear, s, lateral, a, cond.decay);
+          this.weather(color, gravelLinear, s, lateral, a, halfWidth, cond.decay);
           color.multiplyScalar(textureGain);
           colors[vi * 3] = color.r;
           colors[vi * 3 + 1] = color.g;
@@ -470,16 +499,29 @@ export class RoadMeshProvider implements ChunkProvider {
     s: number,
     lateral: number,
     a: number,
+    halfWidth: number,
     decay: number,
   ): void {
-    // Distance to the nearest wheel path, as a 0..1 strength across its half-width.
     let track = 0;
-    for (const centre of WHEEL_PATH_LATERALS) {
-      const t = 1 - Math.min(1, Math.abs(lateral - centre) / WHEEL_PATH_HALF);
-      if (t > track) track = t;
+    if (halfWidth === HW) {
+      // Keep the original literal centres, rather than reconstructing them through
+      // arithmetic, so the narrow road's weather field remains bit-identical.
+      for (const centre of [-2.45, -0.85, 0.85, 2.45]) {
+        const t = 1 - Math.min(1, Math.abs(lateral - centre) / WHEEL_PATH_HALF);
+        if (t > track) track = t;
+      }
+    } else {
+      for (const side of [-1, 1]) {
+        for (let lane = 0; lane < 2; lane++) {
+          const centre = side * (laneOffsetFor(halfWidth, lane) + WHEEL_TRACK_LANE_BIAS);
+          for (const wheel of [-WHEEL_TRACK_HALF, WHEEL_TRACK_HALF]) {
+            const t = 1 - Math.min(1, Math.abs(lateral - (centre + wheel)) / WHEEL_PATH_HALF);
+            if (t > track) track = t;
+          }
+        }
+      }
     }
     const smoothTrack = track * track * (3 - 2 * track);
-    // Traffic thins out as the road dies, so the tracks fade with decay.
     const polish = smoothTrack * WHEEL_PATH_DARKEN * (1 - decay * 0.7);
     const dust = (1 - smoothTrack) * DUST_LIGHTEN * (0.5 + decay);
 
@@ -487,7 +529,7 @@ export class RoadMeshProvider implements ChunkProvider {
     if (dust > 0) color.lerp(gravel, dust * DUST_TINT);
 
     // Ravelled edge: the mat frays into the verge rather than ending at a line.
-    const intoEdge = 1 - Math.min(1, (HW - a) / EDGE_RAVEL);
+    const intoEdge = 1 - Math.min(1, (halfWidth - a) / EDGE_RAVEL);
     if (intoEdge > 0) {
       const t = intoEdge * intoEdge;
       color.lerp(gravel, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
@@ -522,39 +564,53 @@ export class RoadMeshProvider implements ChunkProvider {
       const point = { x: 0, y: 0, z: 0 };
       const color = new THREE.Color();
 
-      // Marking quads are emitted per surface step (not per node) so their corners
-      // coincide with mesh vertices — a quad spanning a pothole or bump would
-      // otherwise float or cut through the road surface between its corners.
-      //
-      // Coverage is per quad rather than per chunk: paint does not fade uniformly, it
-      // survives in patches and is scrubbed off entirely where the traffic and the sand
-      // have worked on it. A quad below PAINT_GONE is not drawn at all, which leaves the
-      // gaps and half-dashes that say nobody has repainted this in decades.
+      // Marking quads are emitted per surface step so their corners coincide with
+      // mesh vertices rather than floating across a bump or pothole.
       for (let si = 0; si < sCount - 1; si++) {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        const s1 = s + SURFACE_STEP;
         const condition = roadConditionAt(s);
         const laneBase = SURFACE_LINEAR[condition.surface];
-        // Paint eligibility and its underlying sealed material must come from the
-        // same point. A surface-district boundary can cross this chunk even though
-        // the collider uses the midpoint's dominant material.
         if (condition.markings >= MARKING_MIN && laneBase) {
+          const halfWidth0 = road.halfWidthAt(s);
+          const halfWidth1 = road.halfWidthAt(s1);
           for (const line of MARKING_LINES) {
-            // Dashes are 4 m on / 4 m off; skip the odd 4 m blocks.
-            if (line.dashed && ((si / SUB_DIVISIONS) | 0) & 1) continue;
-            // Each line wears independently: the offset separates their noise streams.
-            const wear = this.paintNoise.fbm(
-              (s + line.lateral * 130) / PAINT_WEAR_WAVELENGTH,
-              2,
-              2.3,
-              0.5,
-            );
-            const coverage = condition.markings * (0.72 + wear * 0.55);
-            if (coverage < PAINT_GONE) continue;
-            color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
-            this.emitMarkingQuad(
-              road, line.lateral, s, s + SURFACE_STEP,
-              ox, oz, point, color, positions, colors,
-            );
+            // Keep the old crown cadence exactly. The dividers use their own two-metre
+            // phase and only paint a complete step inside an on dash, never a stretched
+            // half dash. They also require both ends to be genuinely two-lane.
+            const dividerOn0 = (Math.floor((s + 2) / 8) & 1) === 0;
+            const dividerOn1 = (Math.floor((s1 + 2) / 8) & 1) === 0;
+            if (line.kind === 'crown' && ((si / SUB_DIVISIONS) | 0) & 1) continue;
+            if (
+              line.kind === 'divider' &&
+              (!dividerOn0 || !dividerOn1 ||
+                road.lanesPerSideAt(s) !== 2 || road.lanesPerSideAt(s1) !== 2)
+            ) continue;
+
+            const laterals: readonly [number, number][] =
+              line.kind === 'edge'
+                ? [
+                  [-(halfWidth0 - MARKING_HALF_WIDTH), -(halfWidth1 - MARKING_HALF_WIDTH)],
+                  [halfWidth0 - MARKING_HALF_WIDTH, halfWidth1 - MARKING_HALF_WIDTH],
+                ]
+                : line.kind === 'divider'
+                  ? [[-LANE_WIDTH, -LANE_WIDTH], [LANE_WIDTH, LANE_WIDTH]]
+                  : [[0, 0]];
+            for (const [lateral0, lateral1] of laterals) {
+              const wear = this.paintNoise.fbm(
+                (s + lateral0 * 130) / PAINT_WEAR_WAVELENGTH,
+                2,
+                2.3,
+                0.5,
+              );
+              const coverage = condition.markings * (0.72 + wear * 0.55);
+              if (coverage < PAINT_GONE) continue;
+              color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
+              this.emitMarkingQuad(
+                road, lateral0, lateral1, s, s1,
+                ox, oz, point, color, positions, colors,
+              );
+            }
           }
         }
         yield;
@@ -572,8 +628,6 @@ export class RoadMeshProvider implements ChunkProvider {
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       const markings = new THREE.Mesh(geometry, markingMaterial);
-      // Keep painted lines inside the same vehicle shadow as the lane beneath them;
-      // otherwise their lifted quads remain bright and visually cut holes through it.
       markings.receiveShadow = true;
       completed = true;
       return markings;
@@ -584,7 +638,8 @@ export class RoadMeshProvider implements ChunkProvider {
 
   private emitMarkingQuad(
     road: Road,
-    lateral: number,
+    lateral0: number,
+    lateral1: number,
     s0: number,
     s1: number,
     ox: number,
@@ -594,16 +649,18 @@ export class RoadMeshProvider implements ChunkProvider {
     positions: number[],
     colors: number[],
   ): void {
-    const l0 = lateral - MARKING_HALF_WIDTH;
-    const l1 = lateral + MARKING_HALF_WIDTH;
+    const l00 = lateral0 - MARKING_HALF_WIDTH;
+    const l01 = lateral0 + MARKING_HALF_WIDTH;
+    const l10 = lateral1 - MARKING_HALF_WIDTH;
+    const l11 = lateral1 + MARKING_HALF_WIDTH;
     // Four corners [c00, c01, c10, c11]; emit triangles c00,c10,c01 and c10,c11,c01.
-    this.markingCorner(road, s0, l0, ox, oz, point);
+    this.markingCorner(road, s0, l00, ox, oz, point);
     const x00 = point.x; const y00 = point.y; const z00 = point.z;
-    this.markingCorner(road, s0, l1, ox, oz, point);
+    this.markingCorner(road, s0, l01, ox, oz, point);
     const x01 = point.x; const y01 = point.y; const z01 = point.z;
-    this.markingCorner(road, s1, l0, ox, oz, point);
+    this.markingCorner(road, s1, l10, ox, oz, point);
     const x10 = point.x; const y10 = point.y; const z10 = point.z;
-    this.markingCorner(road, s1, l1, ox, oz, point);
+    this.markingCorner(road, s1, l11, ox, oz, point);
     const x11 = point.x; const y11 = point.y; const z11 = point.z;
 
     const order = [0, 2, 1, 2, 3, 1];

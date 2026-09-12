@@ -20,7 +20,7 @@ import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin, type RebaseShift } from '../src/world/origin';
-import { installBlankTextures } from './assetshim';
+import { installAssetShim } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -133,7 +133,11 @@ async function preloadModels(): Promise<void> {
   globalThis.Request = AssetRequest;
   // A TEXTURE cannot decode without a browser, and nothing here reads a pixel; the
   // palette both packs paint from stands in blank. See tools/assetshim.ts.
-  installBlankTextures();
+  // Blank textures alone are not enough: the model pipeline reads `self` and a
+  // viewport size off `window` while it loads, and outside a browser both are simply
+  // absent - this bench had been failing its own preload on that, before it measured
+  // anything.
+  installAssetShim();
   try {
     await Promise.all([preloadTrailerModel(TRAILER_MODEL_FIT), preloadCarModels([TOW_MODEL_ID])]);
   } finally {
@@ -373,6 +377,24 @@ if (failures === 0) {
     tow = activeVehicles.get(TOW_CAR_ID) ?? null;
     const hitchedRuntime = trailers.get(hitchedState.id);
     check('far towing car retained', tow !== null, `${activeVehicles.size} live cars`);
+
+    // A FRAME CAN ARRIVE BEFORE A STEP DOES.
+    //
+    // The loop only runs a fixed step once its accumulator has filled, so above 60 fps
+    // there are frames with no step in them at all - and an ambient car is created from
+    // a model-load callback, between frames. A car whose interpolation snapshots were
+    // still at their zeroed default was drawn, for that one frame, at the floating
+    // origin: reported from play as bodies flickering at the road's start, which is
+    // exactly where the origin sits while the player is parked at the homestead.
+    if (tow) {
+      tow.syncVisuals(0.5);
+      const drawn = tow.root.position;
+      check(
+        'a car is drawn where it was created, before its first step',
+        Math.hypot(drawn.x + origin.x - towState.x, drawn.z + origin.z - towState.z) < 0.01,
+        `drawn at ${(drawn.x + origin.x).toFixed(2)}, ${(drawn.z + origin.z).toFixed(2)} for a car created at ${towState.x.toFixed(2)}, ${towState.z.toFixed(2)}`,
+      );
+    }
     check('far hitched trailer retained', hitchedRuntime !== null, `${trailers.liveCount} live trailers`);
     check('far hitched trailer coupled', hitchedRuntime?.coupled === true, `${hitchedRuntime?.coupled ?? false}`);
     check('far hitched trailer keeps state id', hitchedRuntime?.id === hitchedState.id, hitchedRuntime?.id ?? 'missing');

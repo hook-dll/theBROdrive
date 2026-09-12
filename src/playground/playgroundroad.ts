@@ -1,5 +1,5 @@
 import { Road, type RoadProjection, type RoadSample } from '../world/road';
-import { PlaygroundCircuit } from './circuit';
+import { CIRCUIT_HALF_WIDTH, PlaygroundCircuit } from './circuit';
 
 /**
  * The playground circuit, wearing the road's interface.
@@ -50,5 +50,19 @@ export class PlaygroundRoad extends Road {
 
   override project(x: number, z: number, hintS?: number): RoadProjection {
     return this.circuit.project(x, z, hintS);
+  }
+
+  /**
+   * The circuit is ONE fixed-width lap. The world road's widenings are a function of
+   * world arclength (`roadprofile.ts`), and a lap's `s` is not that: inherited, the
+   * bench would randomly claim two lanes on a ribbon that is 5.8 m wide from end to
+   * end and put the autopilot's lane targets off the asphalt.
+   */
+  override halfWidthAt(): number {
+    return CIRCUIT_HALF_WIDTH;
+  }
+
+  override lanesPerSideAt(): number {
+    return 1;
   }
 }

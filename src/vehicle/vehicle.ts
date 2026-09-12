@@ -2004,6 +2004,7 @@ export class Vehicle implements Rebasable {
     );
 
     this.scene.add(this.rootGroup);
+    this.primeTransform();
 
     this.statsValue = this.computeStats();
     this.drivetrain = new Drivetrain(
@@ -2755,6 +2756,7 @@ export class Vehicle implements Rebasable {
     this.parkingHoldRequested = false;
     this.parkingHoldActive = false;
     this.shoveTimer = SHOVE_RELEASE_SECONDS;
+    this.primeTransform();
     this.snapshotPrimed = false;
   }
 
@@ -3791,12 +3793,9 @@ export class Vehicle implements Rebasable {
     }
 
     if (!this.snapshotPrimed) {
-      // First step (or first after a spawn): both ends of the interpolation are the
-      // current transform, so the car does not lerp in from the origin.
-      this.chassisBody.translation(this.stepPos);
-      this.chassisBody.rotation(this.stepQuat);
-      this.prevPos.copy(this.stepPos);
-      this.prevQuat.copy(this.stepQuat);
+      // First step, or the first after a teleport: both ends of the interpolation are
+      // the current transform, so the car does not lerp in from wherever it was.
+      this.primeTransform();
       this.snapshotPrimed = true;
       return;
     }
@@ -3811,6 +3810,26 @@ export class Vehicle implements Rebasable {
    * steps. The camera target and the car's own visuals must read exactly the same
    * pose, or the camera chases a car that is drawn somewhere else.
    */
+  /**
+   * Both ends of the interpolation, and the drawn group, set to where the body IS.
+   *
+   * Called at construction and after every teleport, not merely left for the next
+   * `postStep`. A FRAME CAN ARRIVE BEFORE A STEP DOES: the loop only runs a fixed step
+   * when the accumulator has filled, so above 60 fps there are frames with no step in
+   * them at all - and an ambient car is created from a model-load callback, between
+   * frames. With the snapshots still at their zeroed default, that frame drew the car
+   * at the floating origin. Reported from play as bodies flickering at the road's
+   * start, which is exactly where the origin sits while the player is at the homestead.
+   */
+  private primeTransform(): void {
+    this.chassisBody.translation(this.stepPos);
+    this.chassisBody.rotation(this.stepQuat);
+    this.prevPos.copy(this.stepPos);
+    this.prevQuat.copy(this.stepQuat);
+    this.rootGroup.position.copy(this.stepPos);
+    this.rootGroup.quaternion.copy(this.stepQuat);
+  }
+
   interpolatedTransform(alpha: number, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
     outPos.lerpVectors(this.prevPos, this.stepPos, alpha);
     outQuat.slerpQuaternions(this.prevQuat, this.stepQuat, alpha);
@@ -3882,6 +3901,7 @@ export class Vehicle implements Rebasable {
     // step, so the move would be silently undone one tick later. Clearing the flag
     // makes the next `postStep` re-latch the hold at wherever we just put it.
     this.parkingHoldActive = false;
+    this.primeTransform();
     this.snapshotPrimed = false;
   }
 

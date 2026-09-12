@@ -2,8 +2,9 @@ import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import type { GameWorld } from '../game/state';
-import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
+import { Autopilot, type AutopilotMode } from '../vehicle/autopilot';
 import { Vehicle } from '../vehicle/vehicle';
+import { laneOffsetFor, NARROW_HALF_WIDTH } from '../world/roadprofile';
 import { HazardIndex } from '../world/hazards';
 import type { WorldOrigin } from '../world/origin';
 import { createServiceableCarState } from '../game/spawn';
@@ -112,7 +113,8 @@ export class PlaygroundTraffic {
     // traffic must discover the ego car the same way the ego car discovers it.
     const hazards = new HazardIndex();
     this.slots.forEach((slot, index) => {
-      const lane = AUTOPILOT_MODES[slot.mode].laneOffset;
+      // NEGATIVE: positive lateral is left of travel, and the slots drive on the right.
+      const lane = -laneOffsetFor(NARROW_HALF_WIDTH, 0);
       const lateral = slot.lateral ?? (slot.oncoming ? -lane : lane);
       const id = `traffic-${index}`;
       const modelId = models[index % models.length]!;

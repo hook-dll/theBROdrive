@@ -1,7 +1,9 @@
 import { Noise2D } from '../core/rng';
+import { LakeBasins } from './lakes';
 import { SurfaceType } from '../core/surfaces';
-import { ROAD_HALF_WIDTH, type Road } from './road';
+import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
+import { onTerminusPad, terminusWeight } from './terminus';
 
 /**
  * Terrain height is the `Landscape` field plus bounded dune relief. The road is not
@@ -24,7 +26,7 @@ import { SurfaceField, roadSurfaceY } from './roadsurface';
  * camber and centimetre-scale surface detail.
  */
 
-/** Asphalt edge and inner boundary of the desert terrain. */
+/** Narrow-road reference edge; local corridor edges come from `Road.halfWidthAt(s)`. */
 export const CORRIDOR_INNER = ROAD_HALF_WIDTH;
 /** Beyond this lateral distance the terrain is open desert. */
 export const CORRIDOR_OUTER = 30;
@@ -282,7 +284,16 @@ export class Terrain {
     this.outcropNoise = new Noise2D(seed ^ 0xd3a2646c);
     this.washNoise = new Noise2D(seed ^ 0x94d049bb);
     this.field = new SurfaceField(seed);
+    this.basins = new LakeBasins(road, seed);
+    // The grade a basin is cut into is the open desert at its centre, which is this
+    // object's own height function minus the basins themselves. Handing it over
+    // rather than letting `LakeBasins` call back into `openBase` is what keeps the
+    // two from recursing.
+    this.basins.setGradeReader((x, z) => this.undugOpen(x, z, RELIEF_FULL, 0));
   }
+
+  /** Lake basins dug into this terrain, and the schedule they come from. */
+  readonly basins: LakeBasins;
 
   /** Strength of the rock-outcrop field at a point, used for both height and material. */
   private outcropAt(x: number, z: number): number {
@@ -293,9 +304,9 @@ export class Terrain {
    * Open-desert landforms at a point. Every term is a pure function of world
    * position; `dist` only grades the maintained corridor into the dune field.
    */
-  private relief(x: number, z: number, dist: number): number {
+  private relief(x: number, z: number, dist: number, inner: number): number {
     const duneFade = smoothstep01(
-      (dist - CORRIDOR_INNER) / (RELIEF_FULL - CORRIDOR_INNER),
+      (dist - inner) / (RELIEF_FULL - inner),
     );
     const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
     const across = -x * DUNE_AXIS_Z + z * DUNE_AXIS_X;
@@ -342,7 +353,7 @@ export class Terrain {
         0.35,
       ) *
       RIPPLE_AMPLITUDE *
-      smoothstep01((dist - CORRIDOR_INNER) / (RIPPLE_FULL - CORRIDOR_INNER));
+      smoothstep01((dist - inner) / (RIPPLE_FULL - inner));
 
     const outcrop = this.outcropAt(x, z);
     if (outcrop > OUTCROP_THRESHOLD) {
@@ -358,7 +369,7 @@ export class Terrain {
     );
     if (wash > WASH_THRESHOLD) {
       const t = (wash - WASH_THRESHOLD) / (1 - WASH_THRESHOLD);
-      const washFade = smoothstep01((dist - CORRIDOR_INNER) / (WASH_FULL - CORRIDOR_INNER));
+      const washFade = smoothstep01((dist - inner) / (WASH_FULL - inner));
       h -= t * t * WASH_DEPTH * washFade;
     }
     return h;
@@ -410,20 +421,28 @@ export class Terrain {
    * The fine band for the legacy road-aligned refined grid. It fades to exactly zero
    * at both of that mesh's seams; large-scale dune shape remains in `relief`.
    */
-  detailAt(x: number, z: number, dist: number): number {
-    if (dist <= CORRIDOR_INNER || dist >= DETAIL_REACH) return 0;
+  detailAt(x: number, z: number, dist: number, s: number): number {
+    const inner = this.road.halfWidthAt(s);
+    if (dist <= inner || dist >= DETAIL_REACH) return 0;
+    const paved = terminusWeight(x, z);
+    if (paved >= 1) return 0;
     const fade =
-      smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER)) *
+      smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner)) *
       (1 - smoothstep01((dist - DETAIL_HOLD) / (DETAIL_REACH - DETAIL_HOLD)));
     if (fade <= 0) return 0;
-    return this.fineRelief(x, z) * fade;
+    return this.fineRelief(x, z) * fade * (1 - paved);
   }
 
   /** Fine band used by the player-centred tile lattice and its distance morph. */
-  explorationDetailAt(x: number, z: number, dist: number): number {
-    if (dist <= CORRIDOR_INNER) return 0;
-    const fade = smoothstep01((dist - CORRIDOR_INNER) / (DETAIL_FADE_IN - CORRIDOR_INNER));
-    return this.fineRelief(x, z) * fade;
+  explorationDetailAt(x: number, z: number, dist: number, s: number): number {
+    const inner = this.road.halfWidthAt(s);
+    if (dist <= inner) return 0;
+    // Wheel-scale relief is faded out under the turning circle's paving, so the pad is
+    // a pad rather than a flat height with sand ripples standing on it.
+    const paved = terminusWeight(x, z);
+    if (paved >= 1) return 0;
+    const fade = smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner));
+    return this.fineRelief(x, z) * fade * (1 - paved);
   }
 
   /**
@@ -431,18 +450,27 @@ export class Terrain {
    * no berm and no road-distance mountain wall. Horizon mountains are applied only
    * by `horizonHeight`, in the camera-centred vista where they remain unreachable.
    */
-  openBase(x: number, z: number, dist: number): number {
-    return this.road.landscape.heightAt(x, z) + this.relief(x, z, dist);
+  openBase(x: number, z: number, dist: number, s: number): number {
+    const open = this.undugOpen(x, z, dist, s);
+    // Lake basins are DUG: they are part of the collided ground, in the mesh and in
+    // the tile worker, so the water in `render/lakewater.ts` stands in a real hollow
+    // (see world/lakes.ts). Away from a basin this returns `open` untouched.
+    return this.basins.shape(x, z, open, s);
+  }
+
+  /** The open desert before any basin is cut into it. */
+  private undugOpen(x: number, z: number, dist: number, s: number): number {
+    return this.road.landscape.heightAt(x, z) + this.relief(x, z, dist, this.road.halfWidthAt(s));
   }
 
   /** Legacy road-fan height, retaining its finite detail seam for tooling. */
-  openHeight(x: number, z: number, dist: number): number {
-    return this.openBase(x, z, dist) + this.detailAt(x, z, dist);
+  openHeight(x: number, z: number, dist: number, s: number): number {
+    return this.openBase(x, z, dist, s) + this.detailAt(x, z, dist, s);
   }
 
   /** Fine open terrain used by the player-centred desert tiles. */
-  explorationHeight(x: number, z: number, dist: number): number {
-    return this.openBase(x, z, dist) + this.explorationDetailAt(x, z, dist);
+  explorationHeight(x: number, z: number, dist: number, s: number): number {
+    return this.openBase(x, z, dist, s) + this.explorationDetailAt(x, z, dist, s);
   }
 
   /** Base landscape for distant meshes that deliberately omit dune relief. */
@@ -461,9 +489,10 @@ export class Terrain {
    * `roadEdgeHeight` sample which would otherwise be computed and discarded.
    */
   private gradedBase(x: number, z: number, dist: number, s: number, side: number): number {
-    const open = this.openBase(x, z, dist);
+    const open = this.openBase(x, z, dist, s);
     if (dist >= CORRIDOR_OUTER) return open;
-    const t0 = (dist - CORRIDOR_INNER) / (CORRIDOR_OUTER - CORRIDOR_INNER);
+    const innerWidth = this.road.halfWidthAt(s);
+    const t0 = (dist - innerWidth) / (CORRIDOR_OUTER - innerWidth);
     const t = t0 * t0 * (3 - 2 * t0);
     const inner = this.roadEdgeHeight(s, side);
     return inner + (open - inner) * t;
@@ -494,8 +523,11 @@ export class Terrain {
   heightAt(x: number, z: number, hintS?: number): number {
     const p = this.road.project(x, z, hintS);
     const dist = Math.abs(p.lateral);
-    if (dist <= CORRIDOR_INNER) return roadSurfaceY(this.road, this.field, p.s, p.lateral, x, z);
-    return this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral)) + this.explorationDetailAt(x, z, dist);
+    const base =
+      dist <= this.road.halfWidthAt(p.s)
+        ? roadSurfaceY(this.road, this.field, p.s, p.lateral, x, z)
+        : this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral));
+    return this.levelForTerminus(x, z, base) + this.explorationDetailAt(x, z, dist, p.s);
   }
 
   /**
@@ -512,18 +544,54 @@ export class Terrain {
    */
   baseFromFrame(x: number, z: number, lateral: number, s: number): number {
     const dist = Math.abs(lateral);
-    if (dist <= CORRIDOR_INNER) return roadSurfaceY(this.road, this.field, s, lateral, x, z);
-    return this.gradedBase(x, z, dist, s, Math.sign(lateral));
+    const base =
+      dist <= this.road.halfWidthAt(s)
+        ? roadSurfaceY(this.road, this.field, s, lateral, x, z)
+        : this.gradedBase(x, z, dist, s, Math.sign(lateral));
+    return this.levelForTerminus(x, z, base);
+  }
+
+  /**
+   * The turning circle's paving is LEVEL, and this is the only place the terrain says
+   * so. Blended, not switched: the weight is 1 over the whole disc and eases to 0 by
+   * the rim, so the pad is a pad and the desert around it is still the desert.
+   *
+   * Applied once, at the base, with the detail layers faded to nothing by the same
+   * weight. Every consumer - the drawn mesh, the collider baked from it, the tile
+   * worker, the rescue check - therefore gets one number, and the pad in
+   * `render/terminuspad.ts` can be built flat and sit exactly on it.
+   */
+  private levelForTerminus(x: number, z: number, height: number): number {
+    const w = terminusWeight(x, z);
+    if (w === 0) return height;
+    return height + (this.terminusSurfaceY(x, z) - height) * w;
+  }
+
+  /**
+   * The paving's own height: the road's surface field read at the START of the road,
+   * carried back across the apron.
+   *
+   * Not a constant plane. Using the road's own field means the pad meets the asphalt at
+   * the mouth with no step to measure - the two are the same function at s = 0 - and the
+   * pad keeps the surface's wheel-scale texture instead of reading as a poured slab. The
+   * lateral term is dropped (0, not `x`) so the edge-break groove that belongs to a
+   * 5.8 m ribbon does not get extruded across a 34 m disc.
+   *
+   * `world/terminuspad.ts` builds its mesh from this, so the drawn asphalt and the
+   * collided ground are one surface.
+   */
+  terminusSurfaceY(x: number, z: number): number {
+    return roadSurfaceY(this.road, this.field, 0, 0, x, z);
   }
 
   /** Fine driveable height for a caller that already owns the exact road frame. */
   explorationHeightFromFrame(x: number, z: number, lateral: number, s: number): number {
-    return this.baseFromFrame(x, z, lateral, s) + this.explorationDetailAt(x, z, Math.abs(lateral));
+    return this.baseFromFrame(x, z, lateral, s) + this.explorationDetailAt(x, z, Math.abs(lateral), s);
   }
 
   /** Legacy finite-detail frame sample used by road-fan tooling. */
   heightFromFrame(x: number, z: number, lateral: number, s: number): number {
-    return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral));
+    return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral), s);
   }
 
   /** Mountain contribution actually drawn at a camera-relative vista distance. */
@@ -548,36 +616,40 @@ export class Terrain {
   ): number {
     let h = this.road.landscape.heightAt(x, z);
     if (reliefWeight > 0) {
-      h += this.relief(x, z, RELIEF_FULL) * Math.min(1, reliefWeight);
+      h += this.relief(x, z, RELIEF_FULL, ROAD_MAX_HALF_WIDTH) * Math.min(1, reliefWeight);
     }
     h += this.horizonMountainHeight(x, z, distanceFromCamera);
     return h;
   }
 
   /**
-   * Road-surface height at one asphalt edge (`side` = ±1). At
-   * `dist = CORRIDOR_INNER`, both road and desert meshes sample this exact value.
+   * Road-surface height at one asphalt edge (`side` = ±1). At the local half-width,
+   * both road and desert meshes sample this exact value.
    */
   private roadEdgeHeight(s: number, side: number): number {
-    const p = this.road.offsetPoint(s, side * CORRIDOR_INNER);
-    return roadSurfaceY(this.road, this.field, s, side * CORRIDOR_INNER, p.x, p.z);
+    const halfWidth = this.road.halfWidthAt(s);
+    const p = this.road.offsetPoint(s, side * halfWidth);
+    return roadSurfaceY(this.road, this.field, s, side * halfWidth, p.x, p.z);
   }
 
   /** `surfaceAt` for a caller that already knows the lateral offset. */
-  surfaceFromFrame(x: number, z: number, lateral: number): SurfaceType {
-    if (Math.abs(lateral) <= CORRIDOR_INNER + VERGE_WIDTH) return SurfaceType.Gravel;
+  surfaceFromFrame(x: number, z: number, lateral: number, s: number): SurfaceType {
+    if (Math.abs(lateral) <= this.road.halfWidthAt(s) + VERGE_WIDTH) return SurfaceType.Gravel;
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
+
   /** Surface material beyond the graded road corridor, without a road projection. */
   openSurfaceAt(x: number, z: number): SurfaceType {
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
 
-
   /** Surface material of the open ground at a point. The road itself is separate. */
   surfaceAt(x: number, z: number, hintS?: number): SurfaceType {
+    // The turning circle is paved, and the terrain has to agree with the pad's own
+    // collider about that or a wheel that crosses the seam changes surface twice.
+    if (onTerminusPad(x, z)) return SurfaceType.Asphalt;
     const p = this.road.project(x, z, hintS);
-    if (Math.abs(p.lateral) <= CORRIDOR_INNER + VERGE_WIDTH) return SurfaceType.Gravel;
+    if (Math.abs(p.lateral) <= this.road.halfWidthAt(p.s) + VERGE_WIDTH) return SurfaceType.Gravel;
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
 

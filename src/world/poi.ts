@@ -32,6 +32,7 @@ import {
   type CourierField,
   type CourierStop,
 } from './couriers';
+import { fitGround, type GroundPlane } from './footprint';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
@@ -176,19 +177,55 @@ function rotateXZ(lx: number, lz: number, yaw: number): { x: number; z: number }
   return { x: c * lx + s * lz, z: -s * lx + c * lz };
 }
 
-/** Terrain-grounded placement at a local offset from the anchor. */
-function placeAt(
+/**
+ * A structure's site: the anchor its local (right, forward) offsets are measured
+ * from, the yaw they are rotated by, and ONE plane fitted to the ground under the
+ * whole footprint.
+ *
+ * One plane per site rather than one sample per part is the entire fix for
+ * buildings half-buried in a dune: a canopy's four posts used to take four
+ * independent centre samples and carry a level roof between them, so on the 9-10%
+ * ground this world is made of, two of them stood on air. Now the site knows its
+ * slope, `lift` raises anything standing on a laid apron, and a part either follows
+ * the plane (`sitePoint`), stands plumb on it (`seatY`), or tilts onto it
+ * (`plane.roll`/`plane.pitch`).
+ */
+interface Site {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly plane: GroundPlane;
+  /** Top of the apron above the fitted plane, or zero on bare ground. */
+  readonly lift: number;
+}
+
+function siteAt(
   ctx: ChunkContext,
   poi: Poi,
   anchor: Anchor,
-  lx: number,
-  lz: number,
   yaw: number,
-): { x: number; y: number; z: number } {
-  const o = rotateXZ(lx, lz, yaw);
-  const x = anchor.x + o.x;
-  const z = anchor.z + o.z;
-  return { x, y: ctx.terrain.heightAt(x, z, poi.s), z };
+  halfRight: number,
+  halfForward: number,
+  lift = 0,
+): Site {
+  return {
+    x: anchor.x,
+    z: anchor.z,
+    yaw,
+    lift,
+    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s),
+  };
+}
+
+/** World position of a local offset, on the site's ground (or on its apron). */
+function sitePoint(site: Site, lx: number, lz: number): { x: number; y: number; z: number } {
+  const o = rotateXZ(lx, lz, site.yaw);
+  return { x: site.x + o.x, y: site.plane.yAt(lx, lz) + site.lift, z: site.z + o.z };
+}
+
+/** `GroundPlane.seatAt` lifted onto the site's apron. */
+function seatY(site: Site, lx: number, lz: number, halfRight: number, halfForward: number): number {
+  return site.plane.seatAt(lx, lz, halfRight, halfForward) + site.lift;
 }
 
 /** Terrain-grounded position offset along the road instead of in local space. */
@@ -454,8 +491,11 @@ function buildCourier(
   const half = measure.halfExtents;
   const road = ctx.road.sampleAt(stop.s);
   const point = ctx.road.offsetPoint(stop.s, stop.lateral);
-  point.y = ctx.terrain.heightAt(point.x, point.z, stop.s);
   const yaw = road.heading + (hash01(stop.appearanceSeed, 1) - 0.5) * 0.16;
+  // A parked car sits ALONG the slope it is parked on. One centre sample used to
+  // leave half a metre of air under the downhill wheels on this ground.
+  const plane = fitGround(ctx.terrain, point.x, point.z, yaw, half[0], half[2], stop.s);
+  point.y = plane.centreY;
   const originY = point.y + half[1] - 0.02;
   const id = courierId(stop.index);
   const matrix = poseMatrix(
@@ -463,8 +503,8 @@ function buildCourier(
     originY,
     point.z,
     yaw,
-    0,
-    0,
+    plane.roll,
+    plane.pitch,
     ctx.originX,
     ctx.originZ,
   );
@@ -702,10 +742,13 @@ function buildWrecks(
       }
     }
 
+    // The shell lies ALONG the ground and then adds its own derelict lean; the
+    // fitted plane is what stops a body bridging a dune face on two wheels.
+    const plane = fitGround(ctx.terrain, p.x, p.z, yaw, half[0], half[2], poi.s);
     const sink = isWorkingCar ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
-    const roll = isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3;
-    const pitch = isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22;
-    const originY = p.y + half[1] - sink;
+    const roll = plane.roll + (isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3);
+    const pitch = plane.pitch + (isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22);
+    const originY = plane.centreY + half[1] - sink;
 
     // Distant scenery shows the future working car as an upright static model.
     // Promotion into the physics band replaces it with a real Vehicle.
@@ -775,6 +818,85 @@ const TRAILER_STOP_CHANCE = 0.45;
 /** Domain tag for the trailer roll. */
 const TRAILER_DOMAIN = 0x54524c31; // 'TRL1'
 
+/**
+ * A laid concrete apron, and the reason the buildings above it need no terrain
+ * sampling of their own.
+ *
+ * Its TOP IS THE FITTED PLANE: the slab follows the grade instead of cutting a
+ * level terrace into a dune, so the only step it presents to a car is the ground's
+ * own deviation from that plane — a few tens of centimetres — rather than the metre
+ * and a half a horizontal pad would need. Everything standing on it is then placed
+ * analytically, exactly, with `sitePoint`.
+ */
+const APRON_LIFT_FRACTION = 0.6;
+/** Slab depth below the plane, beyond what the ground's unevenness already demands. */
+const APRON_BASE_THICKNESS = 0.5;
+
+/** A site whose parts stand on an apron rather than on bare sand. */
+function apronSite(
+  ctx: ChunkContext,
+  poi: Poi,
+  anchor: Anchor,
+  yaw: number,
+  halfRight: number,
+  halfForward: number,
+): Site {
+  const bare = siteAt(ctx, poi, anchor, yaw, halfRight, halfForward);
+  return { ...bare, lift: bare.plane.residual * APRON_LIFT_FRACTION };
+}
+
+function addApron(
+  ctx: ChunkContext,
+  site: Site,
+  halfRight: number,
+  halfForward: number,
+  group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+): void {
+  const thickness = site.plane.residual * 1.2 + APRON_BASE_THICKNESS;
+  addStaticMesh(
+    ctx,
+    new THREE.BoxGeometry(halfRight * 2, thickness, halfForward * 2),
+    makeFlatMaterial(0x9b968c, 0.92),
+    poseMatrix(
+      site.x,
+      site.plane.centreY + site.lift - thickness / 2,
+      site.z,
+      site.yaw,
+      site.plane.roll,
+      site.plane.pitch,
+      ctx.originX,
+      ctx.originZ,
+    ),
+    SurfaceType.Concrete,
+    group,
+    bodies,
+    colliders,
+  );
+}
+
+/** Forecourt slab: covers the canopy and the attendant shack beside it. */
+const FORECOURT_HALF_RIGHT = 5.4;
+const FORECOURT_HALF_FORWARD = 3.6;
+/** Headroom kept under the canopy at its HIGHEST post, metres. */
+const CANOPY_CLEARANCE = 2.9;
+/** Canopy posts, as (right, forward) offsets from the forecourt centre. */
+const CANOPY_POSTS: readonly (readonly [number, number])[] = [
+  [-4.4, -2.9],
+  [4.4, -2.9],
+  [-4.4, 2.9],
+  [4.4, 2.9],
+];
+
+/** Workshop slab: the shed, its overhang and the bench beside it. */
+const WORKSHOP_HALF_RIGHT = 3.0;
+const WORKSHOP_HALF_FORWARD = 2.4;
+
+/** Camp ground: tent, fire and the crates scattered around them. */
+const CAMP_HALF_RIGHT = 3.0;
+const CAMP_HALF_FORWARD = 3.0;
+
 function buildGasStop(
   ctx: ChunkContext,
   poi: Poi,
@@ -790,32 +912,38 @@ function buildGasStop(
   const ox = ctx.originX;
   const oz = ctx.originZ;
   const yaw = a.heading;
+  const site = apronSite(ctx, poi, a, yaw, FORECOURT_HALF_RIGHT, FORECOURT_HALF_FORWARD);
+  addApron(ctx, site, FORECOURT_HALF_RIGHT, FORECOURT_HALF_FORWARD, group, bodies, colliders);
 
-  // Canopy roof, spanning the road direction so it reads as a forecourt.
-  const roof = placeAt(ctx, poi, a, 0, 0, yaw);
+  // Canopy roof, spanning the road direction so it reads as a forecourt. It is LEVEL
+  // and set above the highest post base, so the headroom is honest wherever the
+  // forecourt falls away; each post is then cut to reach its own footing.
+  let roofTop = -Infinity;
+  for (const [lx, lz] of CANOPY_POSTS) {
+    roofTop = Math.max(roofTop, sitePoint(site, lx, lz).y + CANOPY_CLEARANCE);
+  }
+  const roof = sitePoint(site, 0, 0);
   addStaticMesh(
     ctx,
     new THREE.BoxGeometry(9.6, 0.4, 6.2),
     makeFlatMaterial(0x8fa0ad, 0.8),
-    poseMatrix(roof.x, roof.y + 3.6, roof.z, yaw, 0, 0, ox, oz),
+    poseMatrix(roof.x, roofTop + 0.2, roof.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
     colliders,
   );
 
-  for (const [lx, lz] of [
-    [-4.4, -2.9],
-    [4.4, -2.9],
-    [-4.4, 2.9],
-    [4.4, 2.9],
-  ] as const) {
-    const post = placeAt(ctx, poi, a, lx, lz, yaw);
+  for (const [lx, lz] of CANOPY_POSTS) {
+    const post = sitePoint(site, lx, lz);
+    // Into the slab at the bottom, into the roof slab at the top: no seam either end.
+    const base = post.y - 0.06;
+    const height = roofTop + 0.2 - base;
     addStaticMesh(
       ctx,
-      new THREE.BoxGeometry(0.36, 3.6, 0.36),
+      new THREE.BoxGeometry(0.36, height, 0.36),
       makeFlatMaterial(0x70757a, 0.85),
-      poseMatrix(post.x, post.y + 1.8, post.z, yaw, 0, 0, ox, oz),
+      poseMatrix(post.x, base + height / 2, post.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -826,23 +954,24 @@ function buildGasStop(
   // Two pumps, one petrol (red) and one diesel (green).
   for (let i = 0; i < 2; i++) {
     const lx = i === 0 ? -1.6 : 1.6;
-    const pump = placeAt(ctx, poi, a, lx, 0.2, yaw);
+    const pump = sitePoint(site, lx, 0.2);
+    const pumpBase = seatY(site, lx, 0.2, 0.45, 0.28);
     addStaticMesh(
       ctx,
       new THREE.BoxGeometry(0.9, 1.5, 0.55),
       makeFlatMaterial(i === 0 ? 0xc23b2e : 0x2f6f3f, 0.6),
-      poseMatrix(pump.x, pump.y + 0.75, pump.z, yaw, 0, 0, ox, oz),
+      poseMatrix(pump.x, pumpBase + 0.75, pump.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
       colliders,
     );
-    const face = placeAt(ctx, poi, a, lx, 0.55, yaw);
+    const face = sitePoint(site, lx, 0.55);
     addStaticMesh(
       ctx,
       new THREE.BoxGeometry(0.6, 0.35, 0.1),
       makeFlatMaterial(0x22252a, 0.5),
-      poseMatrix(face.x, face.y + 1.25, face.z, yaw, 0, 0, ox, oz),
+      poseMatrix(face.x, pumpBase + 1.25, face.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -851,12 +980,13 @@ function buildGasStop(
   }
 
   // Small attendant shack off to one side.
-  const shack = placeAt(ctx, poi, a, 3.4, -2.0, yaw);
+  const shack = sitePoint(site, 3.4, -2.0);
+  const shackBase = seatY(site, 3.4, -2.0, 1.3, 1.0);
   addStaticMesh(
     ctx,
     new THREE.BoxGeometry(2.6, 2.2, 2.0),
     makeFlatMaterial(0x9a8f86, 0.9),
-    poseMatrix(shack.x, shack.y + 1.1, shack.z, yaw + 0.12, 0, 0, ox, oz),
+    poseMatrix(shack.x, shackBase + 1.1, shack.z, yaw + 0.12, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -866,7 +996,7 @@ function buildGasStop(
     ctx,
     new THREE.BoxGeometry(3.0, 0.18, 2.4),
     makeFlatMaterial(0x7d4a35, 0.85),
-    poseMatrix(shack.x, shack.y + 2.35, shack.z, yaw + 0.12, 0, 0, ox, oz),
+    poseMatrix(shack.x, shackBase + 2.35, shack.z, yaw + 0.12, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -883,20 +1013,17 @@ function buildGasStop(
       // 12-20 L; a 5 L fluid can holds 3-5.
       const litres = Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
       const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
-      const c = placeAt(
-        ctx,
-        poi,
-        a,
+      const c = sitePoint(
+        site,
         (hash01(poi.variantSeed, 33, i) - 0.5) * 4,
         (hash01(poi.variantSeed, 34, i) - 0.5) * 3 - 0.4,
-        yaw,
       );
       loose.spawnItem(can, c.x, c.y + 0.2, c.z);
     }
 
     // The roadside-only rescue resource: one sealed five-piece pack per gas stop.
     // It sits by the attendant shack, not in the general POI loot tables.
-    const gumSpot = placeAt(ctx, poi, a, 2.6, -0.7, yaw);
+    const gumSpot = sitePoint(site, 2.6, -0.7);
     const gumSub = counter.sub++;
     loose.spawnItem(
       {
@@ -913,7 +1040,7 @@ function buildGasStop(
     // this records a world object rather than giving the player a possession, and
     // the `shouldLoot` gate is what stops the stop growing a new one every reload.
     if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) < TRAILER_STOP_CHANCE) {
-      const spot = placeAt(ctx, poi, a, 6.4, -1.2, yaw);
+      const spot = sitePoint(site, 6.4, -1.2);
       const half = yaw / 2;
       trailers.spawn({
         id: `trailer:${poi.index}`,
@@ -947,14 +1074,18 @@ function buildWorkshop(
   const ox = ctx.originX;
   const oz = ctx.originZ;
   const yaw = a.heading + (hash01(poi.variantSeed, 40) - 0.5) * 0.3;
+  const site = apronSite(ctx, poi, a, yaw, WORKSHOP_HALF_RIGHT, WORKSHOP_HALF_FORWARD);
+  addApron(ctx, site, WORKSHOP_HALF_RIGHT, WORKSHOP_HALF_FORWARD, group, bodies, colliders);
 
-  // Corrugated shed: body + overhanging roof.
-  const shed = placeAt(ctx, poi, a, 0, 0, yaw);
+  // Corrugated shed: body + overhanging roof. Plumb, seated so its lowest corner
+  // meets the slab and the rest of the sill is buried rather than hanging.
+  const shed = sitePoint(site, 0, 0);
+  const shedBase = seatY(site, 0, 0, 2.3, 1.7);
   addStaticMesh(
     ctx,
     new THREE.BoxGeometry(4.6, 2.6, 3.4),
     makeFlatMaterial(0x8a8f94, 0.85),
-    poseMatrix(shed.x, shed.y + 1.3, shed.z, yaw, 0, 0, ox, oz),
+    poseMatrix(shed.x, shedBase + 1.3, shed.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -964,28 +1095,29 @@ function buildWorkshop(
     ctx,
     new THREE.BoxGeometry(5.2, 0.2, 4.0),
     makeFlatMaterial(0x9a4a35, 0.9),
-    poseMatrix(shed.x, shed.y + 2.75, shed.z, yaw, 0, 0, ox, oz),
+    poseMatrix(shed.x, shedBase + 2.75, shed.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
     colliders,
   );
   // Painted door opening on the near wall (visual only).
-  const door = placeAt(ctx, poi, a, 0, -1.75, yaw);
+  const door = sitePoint(site, 0, -1.75);
   addVisual(
     new THREE.BoxGeometry(1.1, 2.0, 0.12),
     makeFlatMaterial(0x2a2a2a, 0.95),
-    poseMatrix(door.x, door.y + 1.0, door.z, yaw, 0, 0, ox, oz),
+    poseMatrix(door.x, shedBase + 1.0, door.z, yaw, 0, 0, ox, oz),
     group,
   );
 
-  // Workbench: top + four legs.
-  const bench = placeAt(ctx, poi, a, 1.6, -0.4, yaw);
+  // Workbench: a level top on four legs, each cut to its own footing.
+  const bench = sitePoint(site, 1.6, -0.4);
+  const benchTop = bench.y + 0.85;
   addStaticMesh(
     ctx,
     new THREE.BoxGeometry(2.2, 0.12, 0.8),
     makeFlatMaterial(0x7a5230, 0.85),
-    poseMatrix(bench.x, bench.y + 0.85, bench.z, yaw, 0, 0, ox, oz),
+    poseMatrix(bench.x, benchTop, bench.z, yaw, 0, 0, ox, oz),
     SurfaceType.Concrete,
     group,
     bodies,
@@ -997,12 +1129,14 @@ function buildWorkshop(
     [-1.0, 0.3],
     [1.0, 0.3],
   ] as const) {
-    const leg = placeAt(ctx, poi, a, 1.6 + llx, -0.4 + llz, yaw);
+    const leg = sitePoint(site, 1.6 + llx, -0.4 + llz);
+    const legBase = leg.y - 0.03;
+    const legHeight = benchTop - legBase;
     addStaticMesh(
       ctx,
-      new THREE.BoxGeometry(0.12, 0.85, 0.12),
+      new THREE.BoxGeometry(0.12, legHeight, 0.12),
       makeFlatMaterial(0x5d4326, 0.9),
-      poseMatrix(leg.x, leg.y + 0.42, leg.z, yaw, 0, 0, ox, oz),
+      poseMatrix(leg.x, legBase + legHeight / 2, leg.z, yaw, 0, 0, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -1011,11 +1145,11 @@ function buildWorkshop(
   }
   // Two tool silhouettes on the bench (visual only).
   for (let i = 0; i < 2; i++) {
-    const t = placeAt(ctx, poi, a, 1.4 + i * 0.5, -0.4, yaw);
+    const t = sitePoint(site, 1.4 + i * 0.5, -0.4);
     addVisual(
       new THREE.BoxGeometry(0.5, 0.06, 0.06),
       makeFlatMaterial(0x3b3b3b, 0.6),
-      poseMatrix(t.x, t.y + 0.93, t.z, yaw, 0, hash01(poi.variantSeed, 45, i) * 0.4, ox, oz),
+      poseMatrix(t.x, benchTop + 0.09, t.z, yaw, 0, hash01(poi.variantSeed, 45, i) * 0.4, ox, oz),
       group,
     );
   }
@@ -1025,8 +1159,7 @@ function buildWorkshop(
     for (let i = 0; i < toolCount; i++) {
       const tool = pick(TOOL_KINDS, poi.variantSeed, 63, i);
       const item = makeTool(ctx.world, poi, tool, counter);
-      const p = placeAt(ctx, poi, a, 1.6, -0.4, yaw);
-      loose.spawnItem(item, p.x, p.y + 1.0, p.z);
+      loose.spawnItem(item, bench.x, benchTop + 0.15, bench.z);
     }
   }
 }
@@ -1045,18 +1178,23 @@ function buildCamp(
   const ox = ctx.originX;
   const oz = ctx.originZ;
   const yaw = a.heading + (hash01(poi.variantSeed, 80) - 0.5) * 0.5;
+  // A camp is pitched ON the slope, not on a slab: nothing here is plumb, so every
+  // piece takes the ground's own tilt.
+  const site = siteAt(ctx, poi, a, yaw, CAMP_HALF_RIGHT, CAMP_HALF_FORWARD);
 
   // Teepee tent (visual only — cloth).
-  const tent = placeAt(ctx, poi, a, -1.8, 0.5, yaw);
+  const tent = sitePoint(site, -1.8, 0.5);
+  const tentTilt = site.plane.tiltFor(-yaw);
   addVisual(
     new THREE.ConeGeometry(2.1, 2.2, 6),
     makeFlatMaterial(0xc9b98a, 0.95),
-    poseMatrix(tent.x, tent.y + 1.1, tent.z, 0, 0, 0, ox, oz),
+    poseMatrix(tent.x, tent.y + 1.1, tent.z, 0, tentTilt.roll, tentTilt.pitch, ox, oz),
     group,
   );
 
-  // Fire ring: flat stone torus plus two logs (visual only).
-  const fire = placeAt(ctx, poi, a, 1.4, -0.4, yaw);
+  // Fire ring: flat stone torus plus two logs (visual only). The torus is already
+  // laid over by a quarter turn, so it takes the ground's height but not its tilt.
+  const fire = sitePoint(site, 1.4, -0.4);
   addVisual(
     new THREE.TorusGeometry(0.8, 0.16, 6, 18),
     makeFlatMaterial(0x3a3a3a, 0.9),
@@ -1074,19 +1212,16 @@ function buildCamp(
 
   // Crates.
   for (let i = 0; i < 3; i++) {
-    const c = placeAt(
-      ctx,
-      poi,
-      a,
-      (hash01(poi.variantSeed, 84, i) - 0.5) * 4,
-      (hash01(poi.variantSeed, 85, i) - 0.5) * 4,
-      yaw,
-    );
+    const lx = (hash01(poi.variantSeed, 84, i) - 0.5) * 4;
+    const lz = (hash01(poi.variantSeed, 85, i) - 0.5) * 4;
+    const c = sitePoint(site, lx, lz);
+    const crateYaw = hash01(poi.variantSeed, 86, i) * Math.PI;
+    const tilt = site.plane.tiltFor(crateYaw - yaw);
     addStaticMesh(
       ctx,
       new THREE.BoxGeometry(0.7, 0.7, 0.7),
       makeFlatMaterial(0x8a6238, 0.9),
-      poseMatrix(c.x, c.y + 0.35, c.z, hash01(poi.variantSeed, 86, i) * Math.PI, 0, 0, ox, oz),
+      poseMatrix(c.x, c.y + 0.34, c.z, crateYaw, tilt.roll, tilt.pitch, ox, oz),
       SurfaceType.Concrete,
       group,
       bodies,
@@ -1097,13 +1232,10 @@ function buildCamp(
   if (shouldLoot) {
     const tool = pick(TOOL_KINDS, poi.variantSeed, 98);
     const item = makeTool(ctx.world, poi, tool, counter);
-    const tp = placeAt(
-      ctx,
-      poi,
-      a,
+    const tp = sitePoint(
+      site,
       (hash01(poi.variantSeed, 99) - 0.5) * 3,
       (hash01(poi.variantSeed, 100) - 0.5) * 3,
-      yaw,
     );
     loose.spawnItem(item, tp.x, tp.y + 0.25, tp.z);
   }

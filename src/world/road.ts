@@ -7,6 +7,7 @@ import {
   COARSE_SPACING,
   type RoadSpine,
 } from './roadspine';
+import { halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH } from './roadprofile';
 
 /**
  * The road is the spine of the world.
@@ -36,8 +37,17 @@ import {
 
 export { NODE_SPACING, MIN_CORNER_RADIUS };
 
-/** Half-width of the asphalt. 2.9 m puts each edge at the former side marking. */
-export const ROAD_HALF_WIDTH = 2.9;
+/**
+ * Half-width of the NARROW road, and the width of one lane. The asphalt is this wide
+ * either side of the crown wherever the carriageway is one lane each way — which is
+ * most of it — and twice that through the widened stretches `roadprofile.ts` lays
+ * down. Anything that needs the width where it actually stands must ask
+ * `DriveRoad.halfWidthAt(s)`; this constant is the floor, not the answer.
+ */
+export const ROAD_HALF_WIDTH = LANE_WIDTH;
+/** Widest the asphalt ever gets, each side of the crown. Fades, reaches and budgets
+ *  that must cover the road wherever it is use this rather than a per-`s` query. */
+export const ROAD_MAX_HALF_WIDTH = LANE_WIDTH * 2;
 /**
  * Total road length in metres. Forty thousand kilometres — a circumnavigation, and at
  * 90 km/h about 450 hours of driving, so it is measured in sessions rather than in an
@@ -110,6 +120,15 @@ export interface DriveRoad {
     lateral: number,
     out?: { x: number; y: number; z: number },
   ): { x: number; y: number; z: number };
+  /** Half-width of the asphalt at an arclength, metres. */
+  halfWidthAt(s: number): number;
+  /** Driveable lanes in THIS direction of travel at an arclength: 1 or 2. */
+  lanesPerSideAt(s: number): number;
+  /**
+   * Signed lateral of a lane's centre in this direction's frame, ready for
+   * `offsetPoint`. Lane 0 is beside the crown; higher indices move outward.
+   */
+  laneCentreAt(s: number, lane: number): number;
 }
 
 /** One replayed run of nodes, `CHECKPOINT_NODES + 1` long so a segment never straddles. */
@@ -312,6 +331,28 @@ export class Road {
     target.y = c.y;
     target.z = c.z - Math.sin(c.heading) * lateral;
     return target;
+  }
+
+
+  /** Half-width of the asphalt at an arclength, metres. See `roadprofile.ts`. */
+  halfWidthAt(s: number): number {
+    return halfWidthAt(this.seed, s);
+  }
+
+  /** Driveable lanes in one direction at an arclength: 1 or 2. */
+  lanesPerSideAt(s: number): number {
+    return lanesPerSideAt(this.seed, s);
+  }
+
+  /**
+   * Centre of a driving lane, signed for `offsetPoint`.
+   *
+   * NEGATIVE, because positive lateral is LEFT of travel and this world drives on the
+   * right. `ReversedRoad` negates it again for the oncoming stream, so both
+   * directions ask for "my lane N" and get their own side of the crown.
+   */
+  laneCentreAt(s: number, lane: number): number {
+    return -laneOffsetFor(this.halfWidthAt(s), lane);
   }
 
   /**

@@ -22,7 +22,6 @@
  * round a stone, going by a stopped wreck on the right and overtaking on the
  * opposing lane are all the same decision with different obstacles in it.
  *
- * It is a PURE function: road-relative obstacles in, a line and what blocks it
  * out. No physics, no rays, no clock. That is what makes the interesting cases
  * (rock in the lane with oncoming traffic at 120 m; the same rock with the road
  * clear for a kilometre) table-testable in milliseconds instead of reachable
@@ -42,6 +41,13 @@ export interface CorridorObstacle {
   readonly lateral: number;
   readonly halfWidth: number;
   readonly speed: number;
+  /**
+   * Something LEVEL WITH THE BODY rather than ahead of it: a car in the next lane,
+   * seen by proximity rather than by a forward ray. It is not an obstruction — it
+   * blocks no line the driver is already on — it is a direction the driver may not
+   * move in, so it is priced nowhere and only ever vetoes steering toward it.
+   */
+  readonly abeam?: boolean;
 }
 
 export interface CorridorRequest {
@@ -51,6 +57,13 @@ export interface CorridorRequest {
   /** The lane this driver holds when nothing else matters. */
   readonly laneOffset: number;
   readonly speed: number;
+  /** Exact driveable lane centres on this driver's side, including `laneOffset`. */
+  readonly laneCentres?: readonly number[];
+  /**
+   * Signed lateral of the crown separating this direction from oncoming traffic.
+   * It is geometry supplied by the road view, not an inference from a line's sign.
+   */
+  readonly oncomingBoundary?: number;
   /** Speed the driver would hold on a clear road. */
   readonly desiredSpeed: number;
   readonly halfWidth: number;
@@ -204,15 +217,17 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     oncomingLaneCost,
     oncomingGap,
     oncomingSpeed,
+    laneCentres = [laneOffset],
+    oncomingBoundary = 0,
     stopRoom,
     crossingRearClear,
     obstacles,
   } = request;
-  const ownSide = Math.sign(laneOffset || -1);
   let bestLine = laneOffset;
   let bestCost = Number.POSITIVE_INFINITY;
   let bestBlockDistance = Number.POSITIVE_INFINITY;
   let bestBlockSpeed = 0;
+  const ownSide = Math.sign(laneOffset - oncomingBoundary || -1);
   let bestFeasible = false;
   // What blocks the driver's OWN lane, once, for every candidate to reason about:
   // it is the thing a detour or an overtake exists to get past, and whether it is
@@ -221,7 +236,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
   let laneBlockSpeed = 0;
   let laneBlockLateral = laneOffset;
   for (const obstacle of obstacles) {
-    if (obstacle.s < 0 || obstacle.s > horizon) continue;
+    if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) continue;
     if (!overlaps(obstacle, laneOffset, halfWidth)) continue;
     if (obstacle.s >= laneBlockDistance) continue;
     laneBlockDistance = obstacle.s;
@@ -238,6 +253,19 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     let blockSpeed = 0;
     let hardBlockDistance = Number.POSITIVE_INFINITY;
     for (const obstacle of obstacles) {
+      // NEVER STEER TOWARD A CAR ALONGSIDE, and never be trapped by one either.
+      //
+      // Holding the present gap or widening it stays available whatever is beside
+      // the body, so a driver pinned between two cars still has lines to choose
+      // from; only closing on one is refused. Treating it as an ordinary obstacle
+      // instead would make every line infeasible the moment a neighbour drew level
+      // and stop the car dead in the middle of the carriageway.
+      if (obstacle.abeam) {
+        const gapNow = Math.abs(obstacle.lateral - ownLateral);
+        const gapThere = Math.abs(obstacle.lateral - line);
+        if (gapThere < obstacle.halfWidth + halfWidth && gapThere < gapNow) return;
+        continue;
+      }
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
       if (!sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance, speed)) {
         continue;
@@ -252,18 +280,19 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
         hardBlockDistance = obstacle.s;
       }
     }
-    const crossesCentre = line * ownSide < -halfWidth * 0.5;
+    const crossesCentre =
+      (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
     if (crossesCentre) {
       // Room for a car coming the other way is not a preference. The manoeuvre
       // lasts as long as it takes to overhaul whatever is in our own lane, and an
       // oncoming car covers its own road while it happens.
       const ownLaneBlock = obstacles.reduce((nearest, obstacle) => {
-        if (obstacle.s < 0 || obstacle.s > horizon) return nearest;
+        if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return nearest;
         if (!overlaps(obstacle, laneOffset, halfWidth)) return nearest;
         return Math.min(nearest, obstacle.s);
       }, Number.POSITIVE_INFINITY);
       const leaderSpeed = obstacles.reduce((slowest, obstacle) => {
-        if (obstacle.s < 0 || obstacle.s > horizon) return slowest;
+        if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return slowest;
         if (!overlaps(obstacle, laneOffset, halfWidth)) return slowest;
         return Math.min(slowest, obstacle.speed);
       }, desiredSpeed);
@@ -312,10 +341,10 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     bestFeasible = feasible;
   };
 
-  // The two lane centres exactly, so the grid never undershoots a lane by a few
-  // centimetres and shave the clearance to the car being passed.
-  evaluate(laneOffset);
-  evaluate(-laneOffset);
+  // Exact centres matter: the quarter-metre avoidance lattice would otherwise shave
+  // clearance from a lane by centimetres. `laneCentres` includes every lane on this
+  // side; only a line across the explicit crown boundary pays the opposing gate.
+  for (const laneCentre of laneCentres) evaluate(laneCentre);
   const first = Math.ceil(-edgeLimit / LINE_STEP_M) * LINE_STEP_M;
   for (let line = first; line <= edgeLimit + 1e-6; line += LINE_STEP_M) {
     evaluate(line);
@@ -326,7 +355,8 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     feasible: bestFeasible,
     blockDistance: bestBlockDistance,
     blockSpeed: bestBlockSpeed,
-    usesOncomingLane: bestLine * ownSide < -halfWidth * 0.5,
+    usesOncomingLane:
+      (bestLine - oncomingBoundary) * ownSide < -halfWidth * 0.5,
     usesShoulder: Math.abs(bestLine) + halfWidth > asphaltLimit,
     laneBlockDistance,
     laneBlockSpeed,

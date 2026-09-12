@@ -14,6 +14,7 @@ import {
   PLAYGROUND_ORIGIN_Z,
   type CircuitSector,
 } from './playground/circuit';
+import { laneOffsetFor } from './world/roadprofile';
 import { createServiceableCarState } from './game/spawn';
 import { PlaygroundRoad } from './playground/playgroundroad';
 import {
@@ -177,7 +178,7 @@ export async function bootPlayground(): Promise<void> {
   world.state.timeOfDay = DAY_LENGTH * 0.4;
   // The ego car starts ON THE LANE it is going to hold, not on the centreline: a
   // 1.45 m lateral step at the green light is not what is being tested.
-  const startLateral = AUTOPILOT_MODES.frantic.laneOffset;
+  const startLateral = -laneOffsetFor(CIRCUIT_HALF_WIDTH, 0);
   const state = createServiceableCarState(
     'playground',
     MODEL_ID,
@@ -216,7 +217,7 @@ export async function bootPlayground(): Promise<void> {
   /** Drops the car on its own lane at an arclength, stationary and pointing along it. */
   const placeAt = (s: number): void => {
     const at = circuit.sampleAt(s);
-    const lateral = AUTOPILOT_MODES[mode].laneOffset;
+    const lateral = -laneOffsetFor(CIRCUIT_HALF_WIDTH, 0);
     vehicle.rescueTo(
       at.x + Math.cos(at.heading) * lateral,
       circuit.surfaceY(s, lateral) + 1.2,
