@@ -87,7 +87,7 @@ const traffic = new RoadTraffic(
   () => true,
 );
 traffic.setTargetCount(30);
-traffic.setDaylightFactor(0);
+traffic.setDaylightFactor(1);
 
 let largestCount = 0;
 let smallestPopulated = Infinity;
@@ -137,9 +137,16 @@ check(
   `${populated.sleeper} sleeper, ${populated.hurried} hurried, ${populated.cautious} cautious`,
 );
 check(
-  'night traffic uses only low beam',
-  populated.highBeams === 0 && populated.lowBeams > 0,
-  `${populated.highBeams} high, ${populated.lowBeams} low`,
+  'daylight traffic uses only low beam',
+  populated.highBeams === 0 && populated.lowBeams === populated.count,
+  `${populated.highBeams} high, ${populated.lowBeams} low / ${populated.count} cars`,
+);
+traffic.setDaylightFactor(0);
+traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+check(
+  'night traffic keeps every low beam lit',
+  traffic.status.highBeams === 0 && traffic.status.lowBeams === traffic.status.count,
+  `${traffic.status.highBeams} high, ${traffic.status.lowBeams} low / ${traffic.status.count} cars`,
 );
 check(
   'both directions actually drive',
