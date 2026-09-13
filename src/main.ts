@@ -885,7 +885,7 @@ async function boot(): Promise<void> {
   camera.setMode('foot');
   camera.setYaw(initialYaw);
 
-  // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre, TCS and
+  // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
   const autopilot = new Autopilot(road, hazards, physics);
 
@@ -1942,7 +1942,6 @@ async function boot(): Promise<void> {
         engineDestroyed: driving.engineDestroyed,
         checkEngine,
         handbrake: lastInput.handbrake,
-        tcsActive: driving.tcsActive,
       });
     } else {
       hud.setDriving(null);

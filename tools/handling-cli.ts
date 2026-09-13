@@ -28,6 +28,7 @@ import {
   runBench,
   runInclineLaunchCheck,
   runParkingSlopeCheck,
+  steepestPullAwayDeg,
   type BenchResult,
 } from './handling-bench';
 
@@ -104,10 +105,34 @@ async function main(): Promise<void> {
     `VAZ-2106 pulls away on a ${MAX_TERRAIN_INCLINE_DEG.toFixed(1)} degree sand incline`,
     async () => runInclineLaunchCheck('sv_vaz2106', MAX_TERRAIN_INCLINE_DEG, SurfaceType.Sand),
   );
-  await check(
-    `VAZ-2106 pulls away on a ${MAX_TERRAIN_INCLINE_DEG.toFixed(1)} degree gravel incline`,
-    async () => runInclineLaunchCheck('sv_vaz2106', MAX_TERRAIN_INCLINE_DEG, SurfaceType.Gravel),
-  );
+  // GRAVEL IS NOT HELD TO A GRADE, IT IS HELD TO ASPHALT. The check that used to be
+  // here asserted that a VAZ-2106 could pull away on 18.7 degrees of gravel, and it
+  // passed — because gravel in the old friction table had roughly TWICE asphalt's
+  // thrust. Measured on the old table, the fleet's standing-start ceilings were 10
+  // degrees on asphalt and 21 to 25 on gravel; a loose unsealed surface out-climbing
+  // sealed Tarmac by a factor of two was the same class of error that had sand braking
+  // better than asphalt, and it is the bug this pair of checks now defends against.
+  //
+  // A grade cannot be asserted on a surface that forms none of the world's slopes: the
+  // only gravel that exists is the homestead yard, which is flat, and the fleet's
+  // honest ceiling on it is around 6 degrees. What DOES need defending is that gravel
+  // is a working road surface — worse than asphalt, as its own coefficient says, and
+  // never accidentally a bog. So the assertion is the relation, both ways round.
+  await check('gravel is a worse road than asphalt, but still a road', async () => {
+    const onAsphalt = await steepestPullAwayDeg('sv_vaz2106', SurfaceType.Asphalt);
+    const onGravel = await steepestPullAwayDeg('sv_vaz2106', SurfaceType.Gravel);
+    if (onGravel >= onAsphalt) {
+      throw new Error(
+        `gravel out-climbs asphalt: ${onGravel} deg against ${onAsphalt} deg`,
+      );
+    }
+    if (onGravel < onAsphalt * 0.5) {
+      throw new Error(
+        `gravel is a bog, not a road: ${onGravel} deg against ${onAsphalt} deg on asphalt`,
+      );
+    }
+    return { onAsphaltDeg: onAsphalt, onGravelDeg: onGravel };
+  });
   await check('parked on a 20 degree slope (drift m)', async () => runParkingSlopeCheck());
   await check('automatic recovers from rollback', async () => runAutomaticRollbackCheck());
   await check('automatic takes reverse while rolling back', async () =>

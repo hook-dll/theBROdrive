@@ -52,15 +52,24 @@ const SEEDS = [1, 7, 42, 1337];
 // question, not a dynamics one, so it is answered here rather than by driving a car:
 // a stopped car pulls away iff the tractive force its driven wheels can make exceeds
 // the grade plus the rolling resistance. The reference car uses standard tyres and
-// vehicle.ts's reference wheelGrip, so its powered loose-surface crawl μ is the exact
-// floor below. Every number below is the game's own.
+// vehicle.ts's reference wheelGrip, so every number below is the game's own.
+//
+// A STOPPED CAR ON SAND IS ALWAYS DIGGING, which is what makes this statics simple.
+// The dig's gate is speed (see DIG_FIRM_MU in vehicle.ts), and a car in this census is
+// stopped by definition, so the dig is fully in: the effective driven-axle μ is
+// DIG_FIRM_MU and the rolling resistance is DIG_FIRM_RR, not the loose sand's own 0.16.
+// Both halves matter and neither may be left out — with the honest μ of 0.44 and the
+// loose rolling resistance, essentially every slope in this desert would strand a
+// two-wheel-drive car, which is exactly the report the concession exists to prevent.
 //
 // Duplicated from vehicle.ts on purpose: importing it would mean exporting private
-// tuning constants for a tool. They are asserted against their source in the header.
-/** LONGITUDINAL_GRIP_FRACTION: fraction of `frictionSlip` that is longitudinal mu. */
-const LONGITUDINAL_GRIP_FRACTION = 0.38;
-/** Powered loose-surface crawl μ for the reference wheelGrip on standard tyres. */
-const LOOSE_CRAWL_MU_FLOOR = 1.5;
+// tuning constants for a tool. Each value below names the constant it copies.
+/** SurfaceProps.longitudinalMu for sand: the honest coefficient, for reference. */
+const SAND_LONGITUDINAL_MU = 0.44;
+/** DIG_FIRM_MU: driven-axle μ the dig grants at full bite. */
+const DIG_FIRM_MU = 1.6;
+/** DIG_FIRM_RR: rolling resistance of firm sand while the dig is in. */
+const DIG_FIRM_RR = 0.012;
 /** Wheelbase and track of a period saloon, metres: the footprint put on the ground. */
 const WHEELBASE = 2.5;
 const TRACK = 1.5;
@@ -434,12 +443,11 @@ for (const lateral of ALONG_LATERALS) {
  *
  *     mu * drivenShare * cos(a)  >=  sin(a) + rollingResistance * cos(a)
  *
- * with `mu = max(frictionSlip * LONGITUDINAL_GRIP_FRACTION,
- * LOOSE_CRAWL_MU_FLOOR)` for the reference car, with `drivenShare` including the
- * load the grade itself transfers onto (RWD) or off (FWD) the driven axle. The grade
- * is measured the way the car feels it: a wheelbase-by-track footprint set on
- * the real trimesh, a plane through its four contact points, and that plane's slope
- * along the heading.
+ * with `mu = DIG_FIRM_MU` and `rollingResistance = DIG_FIRM_RR` because the car is
+ * stopped and therefore digging; `drivenShare` includes the load the grade itself
+ * transfers onto (RWD) or off (FWD) the driven axle. The grade is measured the way the
+ * car feels it: a wheelbase-by-track footprint set on the real trimesh, a plane through
+ * its four contact points, and that plane's slope along the heading.
  *
  * THE HEADING IS NOT A FREE CHOICE. A stopped car cannot steer: the wheels turn but
  * the car goes where it was pointing until it is rolling. So the pair that matters is
@@ -456,7 +464,7 @@ for (const lateral of ALONG_LATERALS) {
   const climbs = (mu: number, rearDriven: boolean): number => {
     const share = rearDriven ? REAR_LOAD_SHARE : 1 - REAR_LOAD_SHARE;
     const sign = rearDriven ? 1 : -1;
-    return (mu * share - sand.rollingResistance) / (1 - sign * mu * COM_HEIGHT_OVER_WHEELBASE);
+    return (mu * share - DIG_FIRM_RR) / (1 - sign * mu * COM_HEIGHT_OVER_WHEELBASE);
   };
 
   // Grade under a footprint at every (spot, heading), gathered once: the sweep below
@@ -498,8 +506,7 @@ for (const lateral of ALONG_LATERALS) {
     `standstill escape over ${grades.length} (spot, heading) pairs inside ${ESCAPE_LATERAL} m, ` +
       `worst footprint grade ${(worstGrade * 100).toFixed(0)}%:`,
   );
-  const authoredMu = sand.frictionSlip * LONGITUDINAL_GRIP_FRACTION;
-  const mu = Math.max(authoredMu, LOOSE_CRAWL_MU_FLOOR);
+  const mu = Math.max(SAND_LONGITUDINAL_MU, DIG_FIRM_MU);
   const line: string[] = [];
   for (const rearDriven of [true, false]) {
     let blocked = 0;
@@ -517,6 +524,7 @@ for (const lateral of ALONG_LATERALS) {
     );
   }
   console.log(
-    `  powered crawl mu ${mu.toFixed(2)} (authored ${authoredMu.toFixed(2)}): ${line.join('   ')}`,
+    `  digging mu ${mu.toFixed(2)} (honest sand ${SAND_LONGITUDINAL_MU.toFixed(2)}), ` +
+      `firm-sand rr ${DIG_FIRM_RR.toFixed(3)}: ${line.join('   ')}`,
   );
 }

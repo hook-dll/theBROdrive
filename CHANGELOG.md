@@ -4,6 +4,29 @@
 
 ### Added
 
+- `tools/climb-sweep.ts` asks the question the desert actually poses, of every body in
+  the catalogue: how steep a grade can this car still escape on? A real car, real
+  Rapier, released from a parked start on a real incline and driven at full throttle,
+  with the answer bisected rather than sampled. It prints every surface for information
+  and asserts on the two that form open slopes a car can be stranded on — sand and the
+  verge — in the only form the requirement has ever had: NO DIGGING SURFACE MAY BE A
+  PENALTY. Whatever a body climbs on sealed Tarmac it must also climb on sand, which is
+  the whole point of the concession, and it is measured per body because a truck whose
+  first gear tops out at 13 degrees on asphalt is limited by its gearbox and not by the
+  ground. The absolute requirement is kept on its own line so it cannot be averaged
+  away: the weakest front-engined rear-drive car in the catalogue — the GAZ-21 Volga,
+  which `tools/climb-limit.ts` names independently — clears the world's own steepest
+  grade of 18.7 degrees with margin. Measured over the whole fleet, every body digs as
+  well as it grips and most do far better: 18.1 to 30.7 degrees on sand against 10.5 to
+  21.9 on asphalt.
+- `tools/tap-response.ts` measures what one tap of a steering key does, because most
+  players steer this game with the keyboard and the mapping from TAP LENGTH to
+  ROAD-WHEEL ANGLE is then the whole of the control system that matters. It sweeps tap
+  durations from 40 ms to 700 ms and asserts three properties: a fine tap produces a
+  real correction, a longer tap always produces more than a shorter one, and no single
+  step of the sweep multiplies the response by more than three. All three were broken —
+  see the steering entry under Changed.
+
 - The driving view now carries a permanent, tunable soft-focus pass. Collision damage
   no longer adds more blur: it briefly drains colour, hardens contrast and closes a
   stronger black-red vignette around the frame.
@@ -239,6 +262,19 @@
 
 ### Removed
 
+- TRACTION CONTROL, and its lamp on the dashboard. It was built to answer a friction
+  table that mixed a Rapier cone budget with a plain ratio, and once that table became
+  one honest coefficient per axis the aid had nothing left to do but subtract. It was
+  holding driven wheels at asphalt's 12 per cent slip on surfaces whose own peak is 30
+  per cent, which is the exact band a digging tyre needs, and on a front-driven
+  microcar on an 18.7 degree sand slope it was cutting a third to a half of the drive
+  away — 2185 N of thrust against the 2205 N the grade asked for. The tyre model
+  already refuses to make force past its peak and decays it to a sliding plateau, so a
+  wheel that spins simply makes less force, which is the honest penalty and the one the
+  player can feel. Gone with it: `WheelVisual.tcsCut`, the per-wheel cut smoothing,
+  `Vehicle.tcsActive`, the HUD readout field, the `hud-tcs` element and its stylesheet
+  rules, and the bench's TCS duty-cycle column.
+
 - ANCHOR GIZMOS, and the eleven part kinds that existed only to hang on them. Bolting
   a spare door to a car's roof was a mechanic with no gameplay behind it: nothing
   spawns it — POI loot is tools and fuel cans, and `world/poi.ts` says in as many words
@@ -267,6 +303,74 @@
 - `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
 
 ### Changed
+
+- KEYBOARD TAPS STEER THE CAR NOW. Two soft-centre terms sit in series — the input
+  layer's smoothing of a binary key, and the vehicle's own shaping exponent — and the
+  second was squaring the first until the bottom of the range did nothing at all.
+  Measured, one tap at 60 km/h, road-wheel angle at the peak of the response: a 40 ms
+  tap produced 0.00 degrees, 80 ms produced 0.03, and 120 ms produced 1.29. That is not
+  a steep curve, it is a cliff, and it is the one shape a discrete input cannot be
+  asked to steer with: the player's finest available correction landed on the wrong
+  side of it, and the car did not deviate until the tap was long enough to deviate far
+  too much. The free play was the larger half of the cause — a backlash window is dead
+  travel crossed TWICE per correction, and a player tapping a key makes a correction
+  out of reversals by definition, so it was subtracted from every input rather than
+  from the rare one. `STEER_PLAY_RAD` comes down from 0.024 to 0.008 rad (0.46 degrees
+  at the tyre, the tight end of what a worn box honestly has) and `STEER_INPUT_EXPONENT`
+  from 1.55 to 1.25. The same sweep now runs 0.89, 1.43, 1.98, 3.64 and 4.73 degrees at
+  40, 60, 80, 120 and 160 ms — smooth across the whole range, still well short of the
+  rim, and a light tap is a light correction. What is worth keeping is kept: the centre
+  is still softer than the rim, and the play still fades out entirely during a slide.
+- SURFACE GRIP IS ONE HONEST COEFFICIENT PER AXIS. The old table mixed a Rapier cone
+  budget (`frictionSlip`, 2.6 on asphalt) with a plain ratio (`sideFriction`, 1.0 on
+  asphalt and 0.1 on sand), so the two numbers did not mean the same thing and could
+  not be compared — which is exactly how sand ended up braking BETTER than Tarmac.
+  `SurfaceProps` now carries `longitudinalMu` and `lateralMu` as real peak coefficients
+  against a grip-1.0 reference tyre, plus the surface's own `optimalSlip`, with the
+  sourcing cited in the file. Asphalt is pinned to the old ladder exactly — 0.988 and
+  1.7 — so every existing bench and the whole handling calibration are untouched to the
+  digit; only the other six surfaces moved. Sand is now what sand is: longitudinal down
+  to 0.44, lateral UP to 0.51 because a tyre digging into a loose material resists
+  sliding across it more than it resists rolling through it, rolling resistance up to
+  0.16, and its force peak at 0.30 of slip against asphalt's 0.12. Cracked asphalt
+  0.84/1.43, gravel 0.72/1.2, rock 0.89/1.5, concrete 0.96/1.65.
+  `HandlingTuning.lateralMu` became `tyreLateralScale` — each profile's old ratio
+  against 1.7 — so a sporty car keeps exactly the lateral grip it had.
+- THE VERGE IS ITS OWN SURFACE. The 3.5 m outside the paint was gravel, which is what a
+  maintained district is; a verge is the grader's spoil lying on the road's own
+  compacted base, and it does not carry a wheel the same way.
+  `SurfaceType.LooseShoulder` is 0.44 longitudinal, 0.8 lateral, 0.06 rolling
+  resistance — markedly worse than the road it borders, which is what makes a mistake on
+  this deliberately narrow road cost something without being the desert. It is reachable
+  only from outside the paint, and the autopilot and the road mesh both know it.
+- THE DIG, and it is the one place this simulation lies to the player on purpose. Honest
+  sand gives a two-wheel-drive car about 0.13 of mu on its driven axle against the 0.62
+  the terrain's own maximum slope asks for: modelled honestly a VAZ-2101 is immobile on
+  any sand slope and on most flat sand, which would be correct and would make most of
+  this world unplayable. So a driven wheel on sand is granted more grip — it excavates,
+  throws material back, and stands on the firmer sand beneath the dry crust.
+  IT GATES ON THE CAR'S SPEED, NOT THE WHEEL'S SLIP, and that was the hard half. A grip
+  floor keyed to slip is positive feedback against its own input: the dig grips, the
+  slip falls, the dig switches off, the slip rises. Traced every step on an 18.7 degree
+  slope it settled into a limit cycle of period two — capacity alternating 860, 7879,
+  862 and 7815 N with the wheel's surface speed swinging 0.15 to 0.90 m/s on alternate
+  ticks — and the thrust averaged to exactly the force needed to hold the car still:
+  full throttle, 12 kN of instantaneous thrust, no motion at all. Speed cannot follow
+  the slip inside a step, so the loop has nowhere to close; it is also the better story,
+  since a wheel excavates in proportion to how long it has been turning without getting
+  anywhere. Full below 3 m/s, gone by 10, on sand and the verge and never on the road.
+  AND IT HAS TWO HALVES, because grip alone was no use. Raised until the tyre had more
+  than twice the capacity the grade asked for, the car still would not move: the driven
+  axle was already delivering everything the ENGINE had, 5924 N of thrust against the
+  6738 N needed, of which 2163 N was rolling resistance — and no amount of grip moves a
+  number the engine cannot reach. The mechanism does not merely grip better, it also
+  CARRIES the wheel instead of sinking under it, so the firm ground's rolling resistance
+  switches with the friction. Both constants are named, calibrated and argued in the
+  file. The concession is deliberately identical for every car, because its purpose is
+  to guarantee that the weakest machine in the catalogue can leave the desert, and it is
+  a floor granted to two surfaces rather than a blanket grip multiplier. Measured across
+  the fleet: no digging surface is a penalty against asphalt, and the strongest vehicles
+  on sand reach 30 degrees.
 
 - A CAR NOW WEIGHS WHAT IT IS CARRYING. Mass was the model's kerb figure plus
   whatever hung on the cosmetic anchors, and nothing else: the engine in the bonnet,
@@ -374,6 +478,39 @@
   approaching and receding cars remain legible against the desert.
 
 ### Fixed
+
+- The handbrake no longer launches the car. Reported from play: letting the handbrake
+  off made the car jump. The parking hold works by teleporting the chassis back to the
+  pose it latched, every step, and nothing checked that the car was standing on its
+  wheels when it latched — so a handbrake pulled during the drop after a spawn, or on
+  any car whose suspension had not settled, pinned the body IN THE AIR at whatever
+  height it happened to occupy. It then hung there for as long as the brake was on, and
+  on release it fell the whole distance and bounced. Measured on a hatchback held from
+  the first step: pinned 0.748 m above its resting height with every wheel unloaded,
+  then a 2.45 m/s impact, a rebound to 0.265 m and three more oscillations. The latch
+  now requires the springs to be carrying at least 45 per cent of the car's weight — a
+  car genuinely parked sits within a few per cent of its own weight, so the threshold
+  only has to separate "on its wheels" from "in the air". Release now drops 0.011 m
+  with no rebound. The same guard corrected every bench that measures a car on a slope:
+  they had been releasing a suspended body too, and reporting the fall.
+- Gravel no longer out-climbs asphalt. On the old table the fleet's standing-start
+  ceilings were 10 degrees on Tarmac and 21 to 25 on gravel — a loose unsealed surface
+  with roughly twice the thrust of sealed Tarmac, which is the same class of error that
+  had sand braking better than asphalt, and it is what the old "pulls away on an 18.7
+  degree gravel incline" regression check was pinning in place. That check asserted a
+  grade on a surface that forms none of the world's slopes: the only gravel that exists
+  is the homestead yard, which is flat. It now asserts the relation instead, both ways
+  round — gravel is worse than asphalt, and it is not a bog — measured with a new
+  bisection helper on the real car.
+- The desert escape benches were reporting NaN, and had been computing their answer from
+  a friction constant that no longer existed. `desert-ride.ts` and
+  `desert-washboard.ts` duplicate the vehicle's tuning on purpose — importing it would
+  mean exporting private constants for a tool — so they kept a `LOOSE_CRAWL_MU_FLOOR`
+  and a `frictionSlip` that the surface rewrite deleted. Updated to the model that
+  exists: a stopped car on sand is ALWAYS digging, so the dig's coefficient and the
+  dig's rolling friction both apply. Measured over 3.0 million (spot, heading) pairs
+  inside 560 m of real desert, ZERO are stranded — no car can be parked anywhere in this
+  desert that it cannot also drive out of.
 
 - The bonnet camera no longer sits inside the car. The mount is measured at load time
   by sweeping the bodywork over the front third of the model, and the sweep multiplied

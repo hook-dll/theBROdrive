@@ -68,9 +68,14 @@ const CONTACT_PATCH_M = 0.16;
 const SIM_HZ = 60;
 
 // Standstill escape, duplicated from vehicle.ts the same way desert-ride.ts does it.
-const LONGITUDINAL_GRIP_FRACTION = 0.38;
-/** Powered loose-surface crawl μ for the reference wheelGrip on standard tyres. */
-const LOOSE_CRAWL_MU_FLOOR = 1.5;
+// A stopped car on sand is ALWAYS DIGGING, so the dig's constants apply in full: see
+// the header of that block in desert-ride.ts for why both of them are needed.
+/** SurfaceProps.longitudinalMu for sand: the honest coefficient, for reference. */
+const SAND_LONGITUDINAL_MU = 0.44;
+/** DIG_FIRM_MU: driven-axle μ the dig grants at full bite. */
+const DIG_FIRM_MU = 1.6;
+/** DIG_FIRM_RR: rolling resistance of firm sand while the dig is in. */
+const DIG_FIRM_RR = 0.012;
 const WHEELBASE = 2.5;
 const TRACK = 1.5;
 const REAR_LOAD_SHARE = 0.48;
@@ -409,9 +414,9 @@ for (const { label, bands } of PROFILE_CASES) {
 /**
  * Can a stopped car drive out again?
  *
- * Identical statics to desert-ride.ts — including the powered loose-surface crawl
- * floor for the reference car — and a footprint plane through four contact points,
- * measured on the surface the collider actually has. A pair is BLOCKED when the
+ * Identical statics to desert-ride.ts — a stopped car is digging, so the dig's μ and
+ * the dig's rolling resistance both apply — with a footprint plane through four contact
+ * points, measured on the surface the collider actually has. A pair is BLOCKED when the
  * grade beats the tyres in the direction the car happens to be facing (a stopped car
  * cannot steer) and STRANDED when reverse fails too.
  */
@@ -420,7 +425,7 @@ for (const { label, bands } of PROFILE_CASES) {
   const climbs = (mu: number, rearDriven: boolean): number => {
     const share = rearDriven ? REAR_LOAD_SHARE : 1 - REAR_LOAD_SHARE;
     const sign = rearDriven ? 1 : -1;
-    return (mu * share - sand.rollingResistance) / (1 - sign * mu * COM_HEIGHT_OVER_WHEELBASE);
+    return (mu * share - DIG_FIRM_RR) / (1 - sign * mu * COM_HEIGHT_OVER_WHEELBASE);
   };
 
   const grades: number[] = [];
@@ -463,8 +468,7 @@ for (const { label, bands } of PROFILE_CASES) {
     `standstill escape over ${grades.length} (spot, heading) pairs inside ${ESCAPE_LATERAL} m, ` +
       `worst footprint grade ${(worstGrade * 100).toFixed(0)}%:`,
   );
-  const authoredMu = sand.frictionSlip * LONGITUDINAL_GRIP_FRACTION;
-  const mu = Math.max(authoredMu, LOOSE_CRAWL_MU_FLOOR);
+  const mu = Math.max(SAND_LONGITUDINAL_MU, DIG_FIRM_MU);
   const line: string[] = [];
   for (const rearDriven of [true, false]) {
     let blocked = 0;
@@ -482,6 +486,7 @@ for (const { label, bands } of PROFILE_CASES) {
     );
   }
   console.log(
-    `  powered crawl mu ${mu.toFixed(2)} (authored ${authoredMu.toFixed(2)}): ${line.join('   ')}`,
+    `  digging mu ${mu.toFixed(2)} (honest sand ${SAND_LONGITUDINAL_MU.toFixed(2)}), ` +
+      `firm-sand rr ${DIG_FIRM_RR.toFixed(3)}: ${line.join('   ')}`,
   );
 }

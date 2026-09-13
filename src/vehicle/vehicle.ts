@@ -102,8 +102,37 @@ const GRAVITY = 9.81;
 // ---------------------------------------------------------------------------
 
 
-/** Steering input shaping exponent: |s|^p with p>1 compresses small deflections. */
-const STEER_INPUT_EXPONENT = 1.55;
+/**
+ * Steering input shaping exponent: |s|^p with p>1 compresses small deflections, which
+ * is what a soft centre is.
+ *
+ * IT IS THE SECOND SOFT CENTRE IN SERIES, and that is what sets its size. The input
+ * layer already smoothes a binary key into a ramp (see core/input.ts), so the value
+ * this exponent sees from a keyboard is never a human's analogue position — it is that
+ * ramp, halfway up, most of the time. Squaring the compression on top of the ramp
+ * leaves the bottom of the range doing nothing at all.
+ *
+ * Measured with `tools/tap-response.ts`, one steering tap at 60 km/h, road-wheel
+ * angle at the peak of the response:
+ *
+ *   tap     1.55 (was)     1.25 (now)
+ *   40 ms       0.00 deg       0.86 deg
+ *   80 ms       0.03 deg       1.92 deg
+ *   120 ms      1.29 deg       3.54 deg
+ *   160 ms      2.19 deg       4.59 deg
+ *
+ * The old curve was not merely steep, it had a CLIFF: everything below 100 ms of tap
+ * produced literally nothing, and 120 ms produced more than a degree. That is the one
+ * shape a discrete input cannot be asked to steer with, because the player's finest
+ * available correction lands on the wrong side of it. At 1.25 the response is smooth
+ * across the whole range — 0.86, 1.92, 3.54, 4.59 — and a light tap now means a light
+ * correction.
+ *
+ * It is still well above 1, so the centre is still softer than the rim: the top of the
+ * travel remains the part that gives the most angle per unit of input, which is what
+ * keeps a full-lock demand from being twitchy.
+ */
+const STEER_INPUT_EXPONENT = 1.25;
 /** Max rate of steering-angle change at parking speed (rad/s). */
 const STEER_RATE_PARK_RAD_S = 2.0;
 /** Max rate of steering-angle change at highway speed (rad/s). */
@@ -128,16 +157,29 @@ const STEER_RATE_CURVE = 1.6;
 /**
  * Steering-box free play, radians at the ROAD WHEEL.
  *
- * A worn recirculating-ball box has 20-30° of slack at the steering wheel, which is
- * about a degree at the tyre. Implemented as a backlash operator on the commanded
- * angle: the tyres do not move until the command leaves the play window, so the
- * first bit of every input does nothing and a reversal costs 2x the play before
- * anything happens. That is the "delay between input and response", and unlike a
- * time delay it is honest, because holding an angle still holds it.
+ * A worn recirculating-ball box has 10-20° of slack at the rim, which through a 17:1
+ * box is 0.6-1.2° at the tyre. Implemented as a backlash operator on the commanded
+ * angle: the tyres do not move until the command leaves the play window, so the first
+ * bit of every input does nothing and a reversal costs 2x the play before anything
+ * happens. That is the "delay between input and response", and unlike a time delay it
+ * is honest, because holding an angle still holds it.
  *
- * 0.018 rad (1°) costs the first ~12% of stick travel at 80 km/h.
+ * IT WAS 0.024, AND THAT MADE TAP STEERING IMPOSSIBLE. A backlash window is dead travel
+ * that has to be crossed twice per correction, and a player tapping a key makes a
+ * correction by DEFINITION out of reversals — so the play was subtracted from every
+ * single input, not from the rare one. Measured on the same tap sweep as the exponent above, with the play at 0.024, the whole bottom half of the tap range did nothing:
+ * 40, 60 and 80 ms all produced under 0.04 degrees of road-wheel angle, and the first
+ * tap that moved the wheels at all was 120 ms, which then produced 1.29 degrees. Set
+ * the play to zero and the cliff vanishes, which is how the play — not the exponent —
+ * was identified as its main cause.
+ *
+ * 0.008 rad is 0.46°, at the tight end of what a worn box honestly has, and it is
+ * chosen deliberately at that end: the character is worth keeping, the dead zone is
+ * not. Note that it is already faded out entirely during a slide (see `slideRelease`),
+ * for the same reason — a countersteering driver is making exactly this kind of
+ * reversal, and the argument is the same one.
  */
-const STEER_PLAY_RAD = 0.024;
+const STEER_PLAY_RAD = 0.008;
 /**
  * Caster self-centring inside the play window, rad/s.
  *
@@ -466,12 +508,6 @@ const DEFORMATION_DRAG_FULL_MPS = 8;
 /** Contact speed (m/s) floor in the slip-angle denominator, to keep it finite at rest. */
 const SLIP_ANGLE_REF_MPS = 2;
 /**
- * Peak lateral coefficient on dry asphalt before load and axle modifiers.
- * Surface multipliers are normalized with asphalt = 1, so this carries the absolute
- * road coefficient previously split between `LATERAL_MU` and asphalt's misleading
- * `sideFriction: 2`.
- */
-const LATERAL_MU = 1.7;
 /**
  * Forward speed (m/s) below which a tyre may spend its whole lateral capacity on
  * holding rather than on a slip-angle curve. A shade under walking pace: fast enough
@@ -539,7 +575,12 @@ interface HandlingTuning {
   readonly bumpSteer: number;
   readonly drivelineLag: number;
   readonly lateralGripFraction: number;
-  readonly lateralMu: number;
+  /**
+   * The profile's own cornering quality, multiplied ON TOP of the surface's measured
+   * coefficient — later radials and quicker racks against the period baseline. 1.0 is
+   * the classic profile, which is what the surface table is quoted for.
+   */
+  readonly tyreLateralScale: number;
   readonly rearAxleSideGrip: number;
   readonly slipPeakFrontDeg: number;
   readonly slipPeakRearDeg: number;
@@ -558,7 +599,7 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     bumpSteer: BUMP_STEER_MAX_RAD,
     drivelineLag: DRIVELINE_LAG_S,
     lateralGripFraction: LATERAL_GRIP_FRACTION,
-    lateralMu: LATERAL_MU,
+    tyreLateralScale: 1,
     rearAxleSideGrip: REAR_AXLE_SIDE_GRIP,
     slipPeakFrontDeg: SLIP_PEAK_FRONT_DEG,
     slipPeakRearDeg: SLIP_PEAK_REAR_DEG,
@@ -575,7 +616,7 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     bumpSteer: 0.009,
     drivelineLag: 0.055,
     lateralGripFraction: 0.36,
-    lateralMu: 1.84,
+    tyreLateralScale: 1.0824,
     rearAxleSideGrip: 0.985,
     slipPeakFrontDeg: 5.9,
     slipPeakRearDeg: 5.5,
@@ -592,7 +633,7 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     bumpSteer: 0.005,
     drivelineLag: 0.035,
     lateralGripFraction: 0.39,
-    lateralMu: 2.0,
+    tyreLateralScale: 1.1765,
     rearAxleSideGrip: 0.99,
     slipPeakFrontDeg: 5.25,
     slipPeakRearDeg: 5,
@@ -609,7 +650,7 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     bumpSteer: 0.016,
     drivelineLag: 0.075,
     lateralGripFraction: 0.34,
-    lateralMu: 1.64,
+    tyreLateralScale: 0.9647,
     rearAxleSideGrip: 0.97,
     slipPeakFrontDeg: 7,
     slipPeakRearDeg: 6.5,
@@ -766,12 +807,6 @@ const WHEEL_MASS_KG = 20;
 /** Radius (m) the wheel mass is quoted at; mass scales with radius². */
 const WHEEL_REFERENCE_RADIUS = 0.35;
 /**
- * Fraction of a surface's `frictionSlip` that acts as its longitudinal μ. Those
- * surface numbers are Bullet cone budgets (asphalt 2.6), not friction
- * coefficients; 0.38 lands asphalt at ~1.0, i.e. a tyre that can just about
- * transmit its own share of the car's weight.
- */
-const LONGITUDINAL_GRIP_FRACTION = 0.38;
 /** Contact-speed floor (m/s) for the slip-ratio denominator, to keep it finite. */
 const SLIP_REFERENCE_MPS = 1.5;
 /** Slip ratio at or below which a wheel counts as locked and sliding. */
@@ -789,19 +824,11 @@ const LOCK_SLIP_RATIO = -0.5;
  */
 const WHEEL_LOAD_TAU = 0.025;
 /**
- * Slip ratio at which a tyre makes its peak longitudinal force.
- *
- * The curve is F = μN · 2u/(1+u²) with u = slip/PEAK: linear off zero, peaking at
- * exactly u = 1, then decaying like 1/u. That decay IS sliding friction, so a
- * locked wheel now stops the car less well than one held at optimal slip because
- * of the curve's shape rather than because a constant said so. The old model could
- * not express it — Rapier's cone clipped force without ever letting a tyre slide,
- * so locking had to be given a deliberately weaker deceleration demand
- * (LOCKED_DECEL 5.6 against the pedal's 7.0) to stop it being a free upgrade.
- *
- * 0.12 is a period cross-ply on asphalt; a radial peaks earlier and sharper.
+ * THE SLIP THE LONGITUDINAL CURVE PEAKS AT IS A SURFACE PROPERTY, and it now lives in
+ * `SurfaceProps.optimalSlip` rather than here. It used to be this one constant (0.12, a
+ * period cross-ply on asphalt) for every surface in the world, which quietly made the
+ * whole model read sand at an asphalt slip angle — see the field's own note.
  */
-const PEAK_SLIP_RATIO = 0.12;
 /**
  * Force a fully sliding tyre keeps, as a fraction of its peak. This is why ABS
  * exists: locking costs about a quarter of the grip, and it is now that ratio
@@ -846,108 +873,138 @@ const LOAD_SENSITIVITY_MIN = 0.5;
 const LOAD_SENSITIVITY_MAX = 1.35;
 
 /**
- * Traction control: the driver aid that used to masquerade as a tyre compound.
+ * THE DIG: the one place this simulation lies to the player on purpose.
  *
- * `sport` was never a compound. Its only felt benefit was unsticking a car bogged in
- * sand or gravel, which is not what rubber does — it is what slip control does, and
- * it was doing it by silently handing out 35% more cornering grip as well. So the
- * mechanism is now what it always was: when a driven wheel spins up past the slip
- * where the tyre makes its peak force, the torque going to it is cut back until it
- * is near that peak again. Nothing is added; a wheel is stopped from wasting what it
- * already has on the sliding side of the curve.
+ * Honest sand gives a two-wheel-drive car about 0.13 of mu on its driven axle, against
+ * the 0.62 the terrain's own maximum slope asks for. That is not a tuning error and no
+ * coefficient fixes it: it is the arithmetic of a 52 per cent axle share against dry
+ * loose sand, and it is why a real car on ordinary tyres does not climb dunes.
+ * MODELLED HONESTLY, A VAZ-2101 IS IMMOBILE ON ANY SAND SLOPE AND ON MOST FLAT SAND.
  *
- * It is always armed and entirely automatic, because that is what it is for: no
- * player would ever choose to be past the peak. The dashboard lamp is the honest
- * part — it lights only while torque is actually being cut, so the player learns
- * where the surface runs out rather than being told about it.
+ * That would be correct and it would be a worse game, because the desert is most of
+ * this world and the player drives to it on purpose. So the model lies, in ONE place,
+ * with the lie written down here rather than hidden in a friction table.
  *
- * The feedback threshold is a slip SPEED, not a raw slip ratio. A ratio has a
- * near-zero-speed singularity; its denominator is floored at SLIP_REFERENCE_MPS,
- * so even a gently turning wheel looks far beyond the peak while the car is still.
+ * WHAT THE LIE CLAIMS TO BE. A driven wheel spinning on sand does not slide over it —
+ * it EXCAVATES. It throws material back, digs a trench, and within a turn or two it is
+ * standing on the damper, firmer sand beneath the dry surface layer. Off-roaders call
+ * this giving it the beans, and it is why a spinning wheel on a dune sometimes climbs
+ * where a gentle one digs in and stops. In terramechanics it is the soil-flow regime
+ * change at roughly 0.2 of slip: past it the tyre is no longer shearing the surface,
+ * it is cutting into it.
  *
- * Measured-slip feedback therefore ramps in with road speed on sealed surfaces; a
- * separate feed-forward limit handles their standing start. Loose surfaces are the
- * exception: the crawl-capacity floor below gives a loaded tyre a useful force budget
- * before the chassis moves, so feedback can arrest the wheelspin that would otherwise
- * leave it on the sliding plateau. Load authority still removes the cut from an
- * airborne/light wheel.
+ * So the dig is a FRICTION FLOOR on the driven wheels. The only question that matters is
+ * WHAT TURNS IT ON, and the answer is HOW FAST THE CAR IS MOVING — full below 3 m/s and
+ * gone by 10:
  *
- * Chassis speed is signed in the COMMANDED direction. Rollback is not progress:
- * using absolute chassis speed lets gravity arm the sealed-surface feedback while the
- * engine is still trying to reverse that motion, exactly when all uphill force is
- * needed.
+ *   - it cannot help a car that is already making progress: the concession removes
+ *     itself as the car accelerates, so sand at pace stays exactly as treacherous as the
+ *     coefficients in `surfaces.ts` say;
+ *   - it is what the player DISCOVERS, because the only way it shows up is to be stopped
+ *     or nearly so with the throttle down;
+ *   - it cannot be used on the road, because it applies to sand and the loose verge and
+ *     nothing else. The packed gravel of a maintained yard is honest: its coefficient is
+ *     measured, and a car that cannot climb it cannot climb it.
+ *
+ * THE GATE USED TO BE THE WHEEL'S SLIP, and that was wrong in a way no tuning would
+ * have fixed. A grip floor keyed to slip is a POSITIVE FEEDBACK LOOP against the very
+ * thing it feeds: the dig grips, the slip falls, the dig switches off, the slip rises,
+ * the dig grips again. Measured on a 18.7-degree sand slope with the wheel traced every
+ * step, it settled into a limit cycle of period two — capacity alternating 860 N,
+ * 7879 N, 862 N, 7815 N, with the wheel's own surface speed swinging between 0.15 and
+ * 0.90 m/s on alternate ticks — and the thrust averaged out to exactly the force needed
+ * to hold the car still. It neither climbed nor rolled back: full throttle, 12 kN of
+ * instantaneous thrust, and no motion at all.
+ *
+ * Speed is the right signal because it is SLOW. It is the integral of those forces, so it
+ * cannot follow the wheel's slip inside a step and the loop that made the slip gate
+ * oscillate has nowhere to close. It is also the better story: a wheel excavates in
+ * proportion to how long it has been turning without getting anywhere, which is precisely
+ * what low speed means.
+ *
+ * AND IT IS DELIBERATELY THE SAME FOR EVERY CAR. It does not scale with `wheelGrip`,
+ * because its purpose is to guarantee that the weakest machine in the catalogue can
+ * leave the desert, and a concession that scaled with tyre quality would abandon
+ * exactly the cars that need it.
+ *
+ * The magnitude is set by measurement, not by taste, and the instrument is
+ * `tools/climb-sweep.ts`: for EVERY body in the catalogue, the steepest grade it still
+ * escapes has to be at least the steepest grade the world can generate. That is the
+ * whole specification, and it is deliberately a floor rather than a feel — a concession
+ * granted to the surfaces that need one, not a blanket grip multiplier.
  */
-const TCS_SLIP_FLOOR_MPS = 0.35;
-/** Slip speed (m/s) past the threshold over which the cut ramps from none to full. */
-const TCS_SLIP_BAND_MPS = 0.65;
-/** Sealed-surface road speed where measured-slip feedback starts gaining authority. */
-const TCS_AUTHORITY_START_MPS = 1.0;
-const TCS_AUTHORITY_FULL_MPS = 3.5;
 /**
- * Share of a wheel's STATIC load at which traction control has its full authority; it
- * scales down linearly below that and reaches nothing at zero load.
+ * Speed (m/s) below which the dig is fully in, and the speed by which it is gone.
  *
- * A tyre makes force in proportion to what is pressing it into the ground. Over a
- * crest, on a pothole rim or on the light side of a bump, the load goes and the spin
- * that follows is the driveline turning a free wheel — not a tyre losing its grip.
- * Rapier still reports the wheel as "in contact" throughout, because its ray still
- * reaches the ground, so contact alone cannot tell the two apart. Load can.
+ * A stuck car creeps; a car crossing a dune at 40 km/h does not. See the block comment
+ * above for why the gate is a speed at all.
+ */
+const DIG_FULL_MPS = 3;
+const DIG_GONE_MPS = 10;
+/**
+ * Effective driven-axle mu the dig grants at full bite, before load sensitivity.
  *
- * Half, rather than a token fraction, because a wheel down to half its static load has
- * already lost half its grip and the aid should be backing off by then. Measured on the
- * real road collider (tools/surface-feel.ts), driven wheels sat under a third of static
- * load for half of a standing start, which is why the lamp was lit for two thirds of it
- * on a dry asphalt road.
+ * Calibrated against the climb sweep; see the block comment above for the target. It is
+ * deliberately only a little above the honest asphalt figure rather than as high as the
+ * grip budget would allow, because THE TYRE IS NOT WHAT LIMITS THIS CLIMB — see
+ * DIG_FIRM_RR.
  */
-const TCS_LOAD_AUTHORITY_FRACTION = 0.5;
-/** Most of a wheel's drive torque TCS may take away once the car is moving. */
-const TCS_MAX_CUT = 0.85;
+const DIG_FIRM_MU = 1.6;
 /**
- * A small allowance above calculated peak avoids making load filtering and driveline
- * lag into a hard ceiling; the tyre may show some wheelspin while still producing
- * useful force. A lower target can strand a car on a grade before it ever moves.
- */
-const TCS_LAUNCH_GRIP_FRACTION = 1.05;
-/** Launch limiter authority; five per cent remains when a wheel has almost no load. */
-const TCS_LAUNCH_MAX_CUT = 0.95;
-/**
- * Low-speed longitudinal μ floor on loose ground. It is the driver feeding clutch
- * and throttle while TCS holds the tyre near its useful slip, not extra lateral grip:
- * it applies only to driven wheels under power. On flat ground it fades out as the
- * car reaches normal speed; while actually climbing, the terrain tangent keeps only
- * the share the grade needs. 1.5 lets the reference VAZ-2106 retain enough force on
- * the tyre curve's 75% sliding plateau to overcome sand's deformation resistance at
- * the terrain generator's 17.9-degree base-slope bound.
- */
-const LOOSE_CRAWL_MU_FLOOR = 1.5;
-const LOOSE_CRAWL_REFERENCE_WHEEL_GRIP = 0.58;
-const LOOSE_CRAWL_FULL_MPS = 1.5;
-const LOOSE_CRAWL_FADE_MPS = 4;
-/** Uphill tangent range over which crawl grip remains available after the speed fade. */
-const LOOSE_CRAWL_GRADE_START = 0.1;
-const LOOSE_CRAWL_GRADE_FULL = 0.3;
-/** Cut smoothing, seconds: quick to intervene, slower to hand the torque back. */
-const TCS_ATTACK_TAU = 0.03;
-const TCS_RELEASE_TAU = 0.12;
-/**
- * Cut fraction above which the dashboard lamp counts the system as working.
+ * Rolling resistance of the FIRM sand under the dry crust, while the dig is in, as a
+ * fraction of the wheel's load. The other half of the same lie, and the half that
+ * actually decides the climb.
  *
- * A twentieth of the torque is not an intervention, it is the aid breathing. Paired
- * with TCS_LAMP_HOLD_S it was also an amplifier: every isolated single-step trim lit
- * the lamp for 21 frames, so a duty cycle of one cut in six read on the dashboard as a
- * lamp that never goes out. Measured on the real road collider (tools/surface-feel.ts),
- * 17% of driven-wheel steps carrying a cut showed as a lamp lit for 55% of the run.
+ * Measured, this is what stops a two-wheel-drive car on a sand slope, and it is not the
+ * friction coefficient at all. With the dig's friction floor raised until the tyre had
+ * 4.5 kN of capacity per rear wheel — more than twice what the grade asks for — the
+ * car still would not move, because the driven axle was already delivering everything
+ * the ENGINE had: 5924 N of thrust, measured at zero wheel slip against the 6738 N
+ * needed to hold 18.7 degrees at sand's own rolling resistance of 0.16. Raising the
+ * friction floor from 1.2 to 2.1 changed the outcome by exactly nothing, which is the
+ * signature of a limit that is not where it looks: 2163 N of that 6738 was rolling
+ * resistance, and no amount of grip moves a number the engine cannot reach.
  *
- * A fifth of the torque is a cut the driver can feel through the seat, which is the
- * only thing the lamp is for: it should teach where the grip ran out, not report that
- * the system is fitted.
+ * The fix is not a bigger friction lie, it is to stop applying only HALF the dig. The
+ * mechanism it models is a wheel cutting through the dry surface layer onto the damper
+ * sand beneath, and damper sand does not merely grip better — it also carries a wheel
+ * instead of sinking under it, which is precisely what rolling resistance measures. A
+ * car cannot be on firmer ground and still be ploughing through loose sand, so the two
+ * have to switch together.
+ *
+ * 0.012 is the bottom of a wheel rut, which is as firm as loose ground gets in this
+ * world: just under asphalt's own 0.013, and a thirteenth of the loose sand it replaces.
+ * It is set from the far end of the fleet rather than the middle, and the car that
+ * decides it is the VAZ-1111 Oka — front-driven, so on an 18.7-degree climb it is
+ * standing on 32 per cent of its own weight, and it crosses that slope at 2185 N of
+ * thrust against 2205 N of resistance. A tenth of a per cent of the fleet's weight either
+ * way decides whether the smallest car in the catalogue is trapped in the desert, so the
+ * concession is sized to leave it a real margin rather than to make the big cars look
+ * good.
  */
-const TCS_LAMP_THRESHOLD = 0.2;
+const DIG_FIRM_RR = 0.012;
 /**
- * Minimum time (s) the lamp stays lit once lit. A single-step intervention is real
- * but invisible at 60 Hz; a lamp that flickers for one frame teaches nothing.
+ * The surfaces a wheel can excavate, and therefore the surfaces the dig applies to.
+ *
+ * Sand and the loose verge, and NOT the packed gravel of a maintained yard or apron.
+ * The distinction is the dig's own mechanism: it models a wheel cutting through a loose
+ * layer onto something firm beneath, and only a surface with a loose layer over a firm
+ * one has anything to cut through. Sand is the desert, tens of centimetres of it over
+ * damper sand. The verge is the spoil the grader pushed off the road, lying on the
+ * road's own compacted base — and it is the surface a driver lands on BY MISTAKE, so it
+ * is the one that most needs a way back.
+ *
+ * The verge is why this is a set rather than a single comparison. Measured, a car with
+ * an honest loose coefficient climbs 5 degrees of it: run a wheel off the edge on any
+ * road steep enough to be interesting and the car could neither rejoin the road nor make
+ * progress along the verge. Backing down is always available and is not a trap, but a
+ * verge you cannot drive off is not what "punishing but escapable" means.
  */
-const TCS_LAMP_HOLD_S = 0.35;
+const DIG_SURFACES: ReadonlySet<SurfaceType> = new Set([
+  SurfaceType.Sand,
+  SurfaceType.LooseShoulder,
+]);
+
 /* ---------------------------------------------------------------------------
  * THE TYRE AS A SPRING, and why road feel used to disappear whenever the
  * suspension was softened.
@@ -1060,6 +1117,27 @@ const SUSPENSION_FORCE_HEADROOM = 9;
 const PARK_BRAKE_DECEL = 12.0;
 /** Below this ground speed a braked car becomes a physically fixed parked car. */
 const PARK_HOLD_SPEED_MPS = 0.12;
+/**
+ * Share of its own weight the springs must be carrying before a parked car may be
+ * PINNED in place, as a fraction of `m·g`.
+ *
+ * The hold works by teleporting the chassis back to the pose it latched, every step.
+ * That is only a resting pose if the car was standing on its wheels when it latched,
+ * and nothing used to check: the handbrake pulled during the drop after a spawn — or
+ * on any car whose suspension had not settled — latched the body IN THE AIR, at
+ * whatever height it happened to occupy. The car then hung there for as long as the
+ * brake was on, and the moment it was released it fell the whole distance and landed
+ * hard enough to bounce back up. Measured on a hatchback before this guard, holding
+ * the handbrake from the first step: pinned 0.748 m above its resting height with
+ * every wheel unloaded, then on release a 2.45 m/s impact, a rebound to 0.265 m and
+ * three more oscillations. Reported from play as the car jumping when the handbrake
+ * is let off.
+ *
+ * A car that is genuinely parked sits within a few per cent of its own weight, so the
+ * threshold only has to separate "on its wheels" from "in the air"; it is deliberately
+ * well below 1 so a car parked across a crest with a wheel lifted still holds.
+ */
+const PARK_HOLD_MIN_LOAD_FRACTION = 0.45;
 
 /**
  * Being shouldered by the player, in four numbers.
@@ -1378,14 +1456,33 @@ interface WheelVisual {
   scratchCp: { x: number; y: number; z: number };
   /** Friction-slip budget set for this wheel this step, i.e. its cone size. */
   frictionSlip: number;
+  /**
+   * How far into THE DIG this wheel is, 0..1 — see the block comment on `DIG_FIRM_MU`.
+   *
+   * One step old by the time the setup pass reads it, like every other ground quantity
+   * a wheel publishes, and that is what lets the same number drive both halves of the
+   * concession: the friction floor in the tyre force and the rolling resistance the
+   * chassis drags against.
+   */
+  digWeight: number;
+  /**
+   * This step's longitudinal capacity and the force the tyre actually took from it,
+   * newtons.
+   *
+   * Published because what a tyre does on a loose surface is a conversation between
+   * three numbers — what the ground offers, what the aid allows and what the wheel
+   * asks for — and no bench could see any of them. `tools/climb-sweep.ts` reads these
+   * to explain WHY a grade is or is not climbable, rather than only reporting that it
+   * is not.
+   */
+  longitudinalCapacityN: number;
+  longitudinalForceN: number;
   /** Registered surface under this wheel this step; read by the spray. */
   groundSurface: SurfaceType;
   /** Did this wheel find a collider this step? Read by the spray. */
   grounded: boolean;
   /** Smoothed slide amount, 0 = inside the friction cone, 1 = fully saturated. */
   slideT: number;
-  /** Smoothed TCS torque cut on this wheel, 0 = none, 1 = all of it. */
-  tcsCut: number;
   /** Locked and sliding: emergent from the wheel's rotation, or the handbrake on a rear. */
   locked: boolean;
   /** Physical wheel speed (rad/s), integrated by updateWheelDynamics. */
@@ -1743,8 +1840,9 @@ const BLINKER_PERIOD_S = 2 / 3;
  * "loose but never lost": there is more grip there than a standard tyre has, and the
  * car makes you work for every newton of it.
  *
- * There is no `sport`. What it did on the surfaces where it was felt is traction
- * control, and it is now traction control (see the TCS constants above).
+ * There is no `sport`. What it did on the surfaces where it was felt was traction
+ * control, and traction control has since been deleted — see the note below on the
+ * dig, which is what the tyre model does instead on loose ground.
  */
 const TYRE_COMPOUNDS = [
   { label: 'bald', grip: 0.55, side: 0.55 },
@@ -1832,11 +1930,8 @@ export class Vehicle implements Rebasable {
   private tyreCompoundIndex = 1;
 
   /**
-   * Seconds the TCS dashboard lamp still owes the player. Set whenever the system
-   * actually cuts torque, counted down every step, so the lamp reports work done
-   * rather than a system merely being fitted.
+   * Seconds the dashboard's warning lamp still owes the player.
    */
-  private tcsLampS = 0;
 
   private readonly dragCoeff: number;
 
@@ -1961,6 +2056,14 @@ export class Vehicle implements Rebasable {
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
   /** Aligning moment summed over the wheels this step, N·m·s about world up. */
   private alignTorqueImpulse = 0;
+  /**
+   * Whether the CAR is digging, as opposed to any one wheel — see DIG_FIRM_RR.
+   *
+   * A trench is a property of the car, not of a corner: once the driven wheels have cut
+   * through, all four are standing on the same firm layer. One step old when the setup
+   * pass reads it, which is the same lag every other ground quantity here carries.
+   */
+  private digWeightCar = 0;
   private readonly forceScratch = { x: 0, y: 0, z: 0 };
   /** Per-wheel tyre impulse, applied at the contact patch. */
   private readonly tyreImpulse = { x: 0, y: 0, z: 0 };
@@ -2239,14 +2342,6 @@ export class Vehicle implements Rebasable {
     return TYRE_COMPOUNDS[this.tyreCompoundIndex].label;
   }
 
-  /**
-   * Is traction control cutting torque right now? Drives the dashboard lamp, and
-   * nothing else: the aid itself is unconditional.
-   */
-  get tcsActive(): boolean {
-    return this.tcsLampS > 0;
-  }
-
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
@@ -2267,10 +2362,10 @@ export class Vehicle implements Rebasable {
     const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
     return (
       GRAVITY *
-      this.handling.lateralMu *
+      SURFACES[surfaceType].lateralMu *
+      this.handling.tyreLateralScale *
       this.statsValue.wheelGrip *
       Math.pow(GRIP_REFERENCE_MASS / this.statsValue.mass, GRIP_MASS_EXPONENT) *
-      SURFACES[surfaceType].sideFriction *
       compound.side *
       worstTyreGrip *
       this.handling.rearAxleSideGrip
@@ -2285,8 +2380,7 @@ export class Vehicle implements Rebasable {
     return Math.min(
       FOOT_BRAKE_MAX_DECEL,
       FOOT_BRAKE_GRIP_RATIO *
-        SURFACES[surfaceType].frictionSlip *
-        LONGITUDINAL_GRIP_FRACTION *
+        SURFACES[surfaceType].longitudinalMu *
         longitudinalGrip *
         compound.grip *
         GRAVITY,
@@ -2603,11 +2697,13 @@ export class Vehicle implements Rebasable {
         mesh,
         scratchCp: { x: 0, y: 0, z: 0 },
         frictionSlip: 0,
+        digWeight: 0,
+        longitudinalCapacityN: 0,
+        longitudinalForceN: 0,
         groundSurface: SurfaceType.Asphalt,
         grounded: false,
         slideT: 0,
         slipAngleRad: 0,
-        tcsCut: 0,
         locked: false,
         spinRadS: 0,
         drawnSpin: 0,
@@ -3096,8 +3192,21 @@ export class Vehicle implements Rebasable {
       this.capDestroyedEngineSpeed(fwd);
       fwd = Math.sign(fwd) * DESTROYED_ENGINE_SPEED_CAP_MPS;
     }
+    // A hold may only LATCH on a car standing on its wheels — see
+    // PARK_HOLD_MIN_LOAD_FRACTION. Once latched it stays latched for as long as the
+    // handbrake is on, at whatever pose it took, which is the point of a parking brake.
+    //
+    // `w.loadN` is last step's smoothed suspension load, like everything else the wheel
+    // pass publishes, and it is the right signal rather than `w.grounded`: a ray
+    // reaching the ground says nothing about whether the car is resting on it. A car
+    // still in the air holds its wheels at full droop against long rays and reports
+    // every one of them grounded with the springs carrying nothing.
+    let holdLoadN = 0;
+    for (const w of this.wheels) holdLoadN += w.loadN;
+    const onWheels = holdLoadN > PARK_HOLD_MIN_LOAD_FRACTION * stats.mass * GRAVITY;
     this.parkingHoldRequested =
-      input.handbrake && (this.parkingHoldActive || Math.abs(fwd) < PARK_HOLD_SPEED_MPS);
+      input.handbrake &&
+      (this.parkingHoldActive || (Math.abs(fwd) < PARK_HOLD_SPEED_MPS && onWheels));
 
     // Manual shift request; with driver assist on this is a +/- gate — the
     // request applies now and the next automatic decision may override it.
@@ -3383,8 +3492,7 @@ export class Vehicle implements Rebasable {
     for (const w of this.wheels) {
       if (!w.grounded) continue;
       brakeCapacityN +=
-        SURFACES[w.groundSurface].frictionSlip *
-        LONGITUDINAL_GRIP_FRACTION *
+        SURFACES[w.groundSurface].longitudinalMu *
         longitudinalGrip *
         tyreGrip *
         w.loadN;
@@ -3413,11 +3521,13 @@ export class Vehicle implements Rebasable {
       tyreGrip *
       this.handling.lateralGripFraction *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
-    // The real lateral coefficient. Mass-scaled for the same reason the cone was:
-    // road tyres are sized to the chassis, not scaled with it, so a laden truck
-    // corners worse per kilogram than a hatchback.
-    const lateralMu =
-      this.handling.lateralMu *
+    // What the car brings to every contact patch, before the ground does: its own
+    // tyre quality, its handling profile, and the mass scaling — road tyres are sized
+    // to the chassis rather than with it, so a laden truck corners worse per kilogram
+    // than a hatchback. The SURFACE's own coefficient is applied per wheel below,
+    // because with four wheels on as many surfaces it is no longer one number.
+    const lateralCarFactor =
+      this.handling.tyreLateralScale *
       stats.wheelGrip *
       Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
     // The load μ(Fz) is measured against THIS WHEEL parked: `w.staticLoadN`, from the
@@ -3526,7 +3636,7 @@ export class Vehicle implements Rebasable {
         LOAD_SENSITIVITY_MAX,
       );
 
-      const frictionSlip = surface.frictionSlip * gripBudgetFactor * loadFactor;
+      const frictionSlip = surface.longitudinalMu * gripBudgetFactor * loadFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       // ZERO. Rapier's lateral channel is a velocity-cancelling constraint scaled by
       // this gain, and a constraint is a ceiling with no curve under it: side force
@@ -3536,8 +3646,8 @@ export class Vehicle implements Rebasable {
       controller.setWheelSideFrictionStiffness(w.index, 0);
       w.tyreGrip = tyreTemperatureGrip(w.tyreTempC);
       w.lateralCapacityN =
-        lateralMu *
-        surface.sideFriction *
+        surface.lateralMu *
+        lateralCarFactor *
         compound.side *
         w.tyreGrip *
         axleGrip *
@@ -3623,7 +3733,20 @@ export class Vehicle implements Rebasable {
 
       if (ground) {
         contactCount++;
-        rollingResistanceSum += surface.rollingResistance;
+        // The dig firms the ground the CAR is standing on, and firm ground is easier to
+        // roll on as well as grippier — see DIG_FIRM_RR. It follows `digWeightCar` and
+        // not this wheel's own dig weight, and that is the whole of why it works: the
+        // driven axle is the only one that excavates, but a car in a trench has all four
+        // wheels on the bottom of it, and the undriven pair's rolling resistance is most
+        // of what a two-wheel-drive car on a sand slope is fighting.
+        //
+        // `digWeightCar` is zero on every surface but sand, so every other surface costs
+        // nothing here. And it is zero the moment the driver lifts off, which is what
+        // keeps sand what it is: power through it and the car is on firm ground, coast in
+        // it and the honest 0.16 eats your speed.
+        rollingResistanceSum +=
+          surface.rollingResistance -
+          (surface.rollingResistance - DIG_FIRM_RR) * this.digWeightCar;
         roughnessSum += surface.roughness;
         if (driven) drivenContactCount++;
       }
@@ -3645,6 +3768,10 @@ export class Vehicle implements Rebasable {
       this.skipTyreDynamicsSteps--;
       this.longitudinalForceSum = 0;
       this.ownTyreCapacityN = 0;
+      // No tyre pass ran, so nothing dug this step either. Leaving the last value would
+      // hand the chassis firm sand's rolling resistance on a step with no wheels on it.
+      this.digWeightCar = 0;
+      for (const w of this.wheels) w.digWeight = 0;
       // No tyre pass ran, so no aligning moment was earned. Leaving a stale one would
       // apply the previous tick's yaw damping to a step that had no tyre forces at all.
       this.alignTorqueImpulse = 0;
@@ -4141,7 +4268,7 @@ export class Vehicle implements Rebasable {
    *
    * The tyre owns longitudinal force. Drive torque spins the wheel up, brake torque
    * slows it (never past a standstill), and the contact makes a force from the SLIP
-   * that results — peaking at PEAK_SLIP_RATIO and decaying past it, so a locked or
+   * that results — peaking at the surface's own optimal slip and decaying past it, so a locked or
    * spinning tyre transmits less than one held at optimal slip. That force is what
    * accelerates and stops the car: it is applied to the chassis at the contact
    * point, which also gives the pitch couple (dive and squat) for free.
@@ -4161,15 +4288,13 @@ export class Vehicle implements Rebasable {
     if (!controller || dt <= 0) return;
     this.longitudinalForceSum = 0;
     this.ownTyreCapacityN = 0;
+    let carDigWeight = 0;
 
     this.chassisBody.rotation(this.rotationScratch);
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
     // Grip leaves slowly and comes back quickly: see SLIDE_ONSET_TAU.
     const slideOnsetBlend = dt / (SLIDE_ONSET_TAU + dt);
     const slideRecoverBlend = dt / (SLIDE_RECOVER_TAU + dt);
-    const tcsAttackBlend = dt / (TCS_ATTACK_TAU + dt);
-    const tcsReleaseBlend = dt / (TCS_RELEASE_TAU + dt);
-    this.tcsLampS = Math.max(0, this.tcsLampS - dt);
 
     const spinCeiling = this.drivetrain.maxDrivenWheelSpinRadS;
     // The crank and flywheel a driven wheel has to drag round with it, geared up by
@@ -4191,13 +4316,20 @@ export class Vehicle implements Rebasable {
       // basis the wheel mesh is drawn in — taken into world space.
       rotateVector(w.forwardDir, this.rotationScratch, Math.sin(steer), 0, Math.cos(steer));
 
+      // The ground this wheel is standing on, resolved ONCE for the whole wheel: the
+      // capacity, the aid and the force curve all need it, and it used to be looked up
+      // separately at each of them.
+      const wheelGround = controller.wheelGroundObject(w.index);
+      const surfaceType = this.physics.surfaces.lookupType(wheelGround ? wheelGround.handle : null);
+      const surface = SURFACES[surfaceType];
+
       const inContact = controller.wheelIsInContact(w.index);
       let contactSpeed = 0;
       if (inContact) {
         // The rolling direction is the wheel plane projected onto the surface. On
         // flat ground this is unchanged. On a steep pothole wall it gains the
-        // vertical component the contact patch actually travels along, preventing
-        // both slip and TCS from being measured in the wrong plane.
+        // vertical component the contact patch actually travels along, so slip is
+        // measured in the plane the tyre really works in.
         const normal = controller.wheelContactNormal(w.index, w.contactNormal);
         if (normal) {
           const normalComponent =
@@ -4236,124 +4368,48 @@ export class Vehicle implements Rebasable {
       const wheelMass = WHEEL_MASS_KG * (w.radius / WHEEL_REFERENCE_RADIUS) ** 2;
       const inertia = 0.5 * wheelMass * w.radius * w.radius + (driven ? drivelineInertia : 0);
 
-      // Longitudinal capacity is known before TCS acts. That makes a standing-start
-      // feed-forward limit possible: the controller need not wait until first gear
-      // has already spun the wheel far past the tyre's force peak.
+      // The longitudinal capacity, from the load this corner is carrying and the
+      // coefficient of the ground under it. It sizes both the force the tyre may make
+      // and, on loose ground, the dig.
       let capacityN = 0;
+      // Cleared before the capacity block rather than inside it: a wheel that has left
+      // the ground has no dig on it, and the last value would otherwise keep firm sand's
+      // rolling resistance under a wheel that is not touching anything.
+      w.digWeight = 0;
       if (w.loadN > 0) {
-        const ground = controller.wheelGroundObject(w.index);
-        const surfaceType = this.physics.surfaces.lookupType(ground ? ground.handle : null);
-        const surface = SURFACES[surfaceType];
         const loadFactor = clamp(
           1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
           LOAD_SENSITIVITY_MIN,
           LOAD_SENSITIVITY_MAX,
         );
-        let longitudinalMu =
-          surface.frictionSlip *
-          LONGITUDINAL_GRIP_FRACTION *
-          wheelGrip *
-          tyreGrip *
-          loadFactor;
-        if (
-          driven &&
-          w.driveTorqueNm !== 0 &&
-          (surfaceType === SurfaceType.Sand || surfaceType === SurfaceType.Gravel)
-        ) {
+        let longitudinalMu = surface.longitudinalMu * wheelGrip * tyreGrip * loadFactor;
+        // THE DIG — see the block comment on `DIG_FIRM_MU`. Sand only, and driven wheels
+        // only: on a car with a driven front axle the dig firms both, which is the same
+        // concession applied to the wheels doing the work.
+        //
+        // Gate on the CAR'S SPEED, not the wheel's. `driveProgressSpeed` is the car's
+        // own speed along the intended direction of travel, floored at zero, so a car
+        // being dragged backwards down a dune still counts as stopped and still digs.
+        if (driven && w.driveTorqueNm !== 0 && DIG_SURFACES.has(surfaceType)) {
           const fadeT = clamp(
-            (driveProgressSpeed - LOOSE_CRAWL_FULL_MPS) /
-              (LOOSE_CRAWL_FADE_MPS - LOOSE_CRAWL_FULL_MPS),
+            (driveProgressSpeed - DIG_FULL_MPS) / (DIG_GONE_MPS - DIG_FULL_MPS),
             0,
             1,
           );
-          const speedWeight = 1 - fadeT * fadeT * (3 - 2 * fadeT);
-          const uphillTangent = Math.max(0, w.forwardDir.y * driveDirection);
-          const gradeWeight = clamp(
-            (uphillTangent - LOOSE_CRAWL_GRADE_START) /
-              (LOOSE_CRAWL_GRADE_FULL - LOOSE_CRAWL_GRADE_START),
-            0,
-            1,
-          );
-          const crawlWeight = Math.max(speedWeight, gradeWeight);
-          const crawlMu =
-            LOOSE_CRAWL_MU_FLOOR *
-            (wheelGrip / LOOSE_CRAWL_REFERENCE_WHEEL_GRIP) *
-            tyreGrip *
-            loadFactor *
-            crawlWeight;
-          longitudinalMu = Math.max(longitudinalMu, crawlMu);
+          const digWeight = 1 - fadeT * fadeT * (3 - 2 * fadeT);
+          longitudinalMu = Math.max(longitudinalMu, DIG_FIRM_MU * digWeight * loadFactor);
+          w.digWeight = digWeight;
+          if (digWeight > carDigWeight) carDigWeight = digWeight;
         }
         capacityN = longitudinalMu * w.loadN;
         if (inContact) this.ownTyreCapacityN += capacityN;
       }
 
-      // Traction control, measured from this wheel's OWN pre-step slip SPEED: how
-      // much faster its contact patch is moving than the road, in m/s. Signed by the
-      // commanded torque, which is what keeps this a traction aid and not an
-      // accidental ABS — a wheel locking under the brakes slips the other way
-      // relative to its drive torque and is left alone.
-      //
-      // The allowance is the larger of a fixed floor and the tyre model's own peak
-      // slip at this contact's road speed. Authority is intentionally based on the
-      // chassis' forward speed instead: angular motion over a sharp pothole can make
-      // one contact point almost stationary, but it must not switch TCS off while the
-      // vehicle itself is moving.
-      const slipSpeed =
-        (w.spinRadS * w.radius - contactSpeed) * (w.driveTorqueNm >= 0 ? 1 : -1);
-      const allowance = Math.max(
-        TCS_SLIP_FLOOR_MPS,
-        PEAK_SLIP_RATIO * Math.abs(contactSpeed),
-      );
-      // Sealed ground ramps feedback in with commanded progress. On loose ground the
-      // explicit crawl grip budget makes low-speed feedback safe and necessary: it
-      // keeps the tread near useful slip instead of wasting a quarter of that budget
-      // on the sliding plateau.
-      const speedAuthority =
-        (driveProgressSpeed - TCS_AUTHORITY_START_MPS) /
-        (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS);
-      const looseSurface =
-        w.groundSurface === SurfaceType.Sand || w.groundSurface === SurfaceType.Gravel;
-      const motionAuthority = looseSurface ? 1 : clamp(speedAuthority, 0, 1);
-      // AND WHETHER THE TYRE IS CARRYING ANYTHING. `inContact` is Rapier's ray hit; it
-      // stays true over a crest or a pothole rim while the spring is extended and the
-      // load has gone. A wheel with no load on it is not losing traction, it is simply
-      // not being asked for any — and the sand note in core/surfaces.ts already says
-      // what follows: traction control only stops a wheel WASTING force it could make,
-      // and there is nothing to un-waste when the normal load is missing. Cutting there
-      // lights the lamp and throws away the drive without buying a newton of grip.
-      const loadAuthority = w.loadN / (w.staticLoadN * TCS_LOAD_AUTHORITY_FRACTION);
-      const authority = motionAuthority * clamp(loadAuthority, 0, 1);
-      const reactiveCut =
-        Math.min(1, Math.max(0, slipSpeed - allowance) / TCS_SLIP_BAND_MPS) *
-        TCS_MAX_CUT *
-        authority;
-      // At a standing start, use the loaded tyre's known capacity rather than waiting
-      // for measured slip. The target is deliberately near the peak: cutting to less
-      // can make the aid itself the reason a car cannot overcome a grade.
-      const launchAuthority =
-        1 -
-        clamp(
-          (driveProgressSpeed - TCS_AUTHORITY_START_MPS) /
-            (TCS_AUTHORITY_FULL_MPS - TCS_AUTHORITY_START_MPS),
-          0,
-          1,
-        );
-      const driveTorque = Math.abs(w.driveTorqueNm);
-      const launchCut =
-        driveTorque > 0 && capacityN > 0
-          ? Math.min(
-              TCS_LAUNCH_MAX_CUT,
-              Math.max(0, 1 - (capacityN * w.radius * TCS_LAUNCH_GRIP_FRACTION) / driveTorque),
-            ) * launchAuthority
-          : 0;
-      const cutTarget =
-        driven && inContact && w.driveTorqueNm !== 0 ? Math.max(reactiveCut, launchCut) : 0;
-      if (launchCut > w.tcsCut) w.tcsCut = launchCut;
-      w.tcsCut +=
-        (cutTarget - w.tcsCut) * (cutTarget > w.tcsCut ? tcsAttackBlend : tcsReleaseBlend);
-      if (w.tcsCut > TCS_LAMP_THRESHOLD) this.tcsLampS = TCS_LAMP_HOLD_S;
-
-      let spin = w.spinRadS + (dt * w.driveTorqueNm * (1 - w.tcsCut)) / inertia;
+      // Drive torque spins the wheel up. Nothing is taken away from it: the tyre model
+      // below decides what the contact can actually transmit, and a wheel that spins
+      // past its peak simply makes less force — see the slip curve. There is no traction
+      // control here, deliberately; see the note where its constants used to be.
+      let spin = w.spinRadS + (dt * w.driveTorqueNm) / inertia;
 
       const brakeDelta = (dt * w.brakeForceN * w.radius) / inertia;
       if (Math.abs(spin) <= brakeDelta) spin = 0;
@@ -4371,9 +4427,13 @@ export class Vehicle implements Rebasable {
         // standing start runs slip ≈ 3, i.e. u ≈ 25, where that curve delivers 8% of
         // the tyre's grip. A sliding tyre keeps roughly three quarters of its peak,
         // so the plateau term carries the force once the peak term has decayed.
+        // The surface's OWN peak-slip ratio, not one constant for the world. On sand
+        // that is 0.3 against asphalt's 0.12: the same tyre, shearing a material that
+        // has to move a great deal further before it pushes back.
+        const optimalSlip = surface.optimalSlip;
         const slipOf = (omega: number): number => (omega * w.radius - contactSpeed) / reference;
         const forceOf = (slip: number): number => {
-          const u = slip / PEAK_SLIP_RATIO;
+          const u = slip / optimalSlip;
           const peak = (2 * u) / (1 + u * u);
           const slide = Math.tanh(SLIDE_CURVE_GAIN * u);
           return capacityN * ((1 - SLIDING_GRIP_FRACTION) * peak + SLIDING_GRIP_FRACTION * slide);
@@ -4382,13 +4442,13 @@ export class Vehicle implements Rebasable {
         // Damping uses the curve's own slope, clamped to the rising side: past the
         // peak it goes negative, and feeding that back drives the wheel away from
         // equilibrium instead of toward it.
-        const u0 = slipOf(spin) / PEAK_SLIP_RATIO;
+        const u0 = slipOf(spin) / optimalSlip;
         const th = Math.tanh(SLIDE_CURVE_GAIN * u0);
         const slopeU =
           (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u0 * u0)) / ((1 + u0 * u0) * (1 + u0 * u0))) +
           SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th);
         const stiffness =
-          (capacityN * Math.max(0, slopeU) * w.radius) / (PEAK_SLIP_RATIO * reference);
+          (capacityN * Math.max(0, slopeU) * w.radius) / (optimalSlip * reference);
 
         const spin0 = spin;
         const force0 = forceOf(slipOf(spin0));
@@ -4420,6 +4480,8 @@ export class Vehicle implements Rebasable {
 
       w.spinRadS = spin;
       w.drawnSpin += spin * dt;
+      w.longitudinalCapacityN = capacityN;
+      w.longitudinalForceN = longitudinalForce;
 
       const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
       w.slipRatio = (spin * w.radius - contactSpeed) / reference;
@@ -4621,7 +4683,7 @@ export class Vehicle implements Rebasable {
       // longitudinal channel is eating, which is what it has no longer got left for
       // cornering.
       //
-      // It must be a force ratio. The first version divided slip by PEAK_SLIP_RATIO,
+      // It must be a force ratio. The first version divided slip by the peak ratio,
       // which is unbounded and reads 1.0 at a slip of 0.12 — and a car at full
       // throttle cruises at 0.28-0.34. So every driven wheel sat pinned at "fully
       // sliding" whenever the throttle was open, cutting its side grip to the
@@ -4663,6 +4725,8 @@ export class Vehicle implements Rebasable {
         TYRE_MAX_C,
       );
     }
+
+    this.digWeightCar = carDigWeight;
 
     // One torque impulse for the whole axle set. Applied after the loop so the four
     // aligning moments are summed rather than four separate solver touches, and about

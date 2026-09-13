@@ -273,7 +273,6 @@ interface Result {
   joltG: number;
   contact: number;
   heldLateral: number;
-  tcsDuty: number;
   maxSpeed: number;
 }
 
@@ -289,7 +288,6 @@ function drive(rig: Rig, label: string): Result {
   let s = START_S;
   let integral = 0;
   let steps = 0;
-  let tcsSteps = 0;
   let speedSum = 0;
   let maxSpeed = 0;
   let metres = 0;
@@ -347,7 +345,6 @@ function drive(rig: Rig, label: string): Result {
     metres += speed * FIXED_DT;
     if (speed > maxSpeed) maxSpeed = speed;
     stalledSteps = speed < 1 ? stalledSteps + 1 : 0;
-    if (vehicle.tcsActive) tcsSteps++;
     steps++;
   }
 
@@ -364,19 +361,17 @@ function drive(rig: Rig, label: string): Result {
     joltG: jolt,
     contact: contactSum / Math.max(1, steps),
     heldLateral,
-    tcsDuty: tcsSteps / Math.max(1, steps),
     maxSpeed: maxSpeed * 3.6,
   };
 }
 
 /** Flat-out from rest on the road: the acceleration and top-speed half of the report. */
-function flatOut(rig: Rig, seconds: number): { to100s: number | null; topKmh: number; tcs: number } {
+function flatOut(rig: Rig, seconds: number): { to100s: number | null; topKmh: number } {
   const { vehicle, road, input } = rig;
   const aim = { x: 0, y: 0, z: 0 };
   let s = START_S;
   let to100: number | null = null;
   let top = 0;
-  let tcsSteps = 0;
   const steps = Math.round(seconds / FIXED_DT);
   for (let i = 0; i < steps; i++) {
     const t = vehicle.chassis.translation();
@@ -397,9 +392,8 @@ function flatOut(rig: Rig, seconds: number): { to100s: number | null; topKmh: nu
     const kmh = Math.hypot(v.x, v.z) * 3.6;
     if (kmh > top) top = kmh;
     if (to100 === null && kmh >= 100) to100 = i * FIXED_DT;
-    if (vehicle.tcsActive) tcsSteps++;
   }
-  return { to100s: to100, topKmh: top, tcs: tcsSteps / steps };
+  return { to100s: to100, topKmh: top };
 }
 
 function row(r: Result): string {
@@ -410,7 +404,6 @@ function row(r: Result): string {
     `${r.joltG.toFixed(3)}`.padStart(7),
     `${(r.contact * 100).toFixed(1)}%`.padStart(8),
     `${r.heldLateral.toFixed(0)}m`.padStart(6),
-    `${(r.tcsDuty * 100).toFixed(1)}%`.padStart(7),
     `${r.metres.toFixed(0)} m`.padStart(9),
   ].join(' ');
 }
@@ -420,7 +413,7 @@ async function run(): Promise<void> {
   console.log(
     `surface feel @ ${speedKmh} km/h asked, ${MODEL_ID}, seed ${SEED}, s ${START_S}..${END_S}`,
   );
-  console.log('surface        speed    heave    jolt   contact   line     tcs  distance');
+  console.log('surface        speed    heave    jolt   contact   line  distance');
 
   console.log(row(drive(await makeRig(0, 'flat'), 'flat')));
   console.log(row(drive(await makeRig(0, 'road'), 'road')));
@@ -432,7 +425,7 @@ async function run(): Promise<void> {
     console.log(
       `  ${ground.padEnd(7)} 0-100 ${
         sprint.to100s === null ? '  never' : `${sprint.to100s.toFixed(1)} s`
-      }, top ${sprint.topKmh.toFixed(1)} km/h, tcs lit ${(sprint.tcs * 100).toFixed(1)}%`,
+      }, top ${sprint.topKmh.toFixed(1)} km/h`,
     );
   }
 }

@@ -11,8 +11,10 @@
  *
  *   2. TRACTION. The driven axle's share of the weight times the surface's
  *      longitudinal grip. Analytic here and MEASURED by `--sweep`, which drives the
- *      real car up a real incline in Rapier through `runInclineLaunchCheck`, so TCS,
- *      load transfer, the differential and the clutch are all in the loop.
+ *      real car up a real incline in Rapier through `runInclineLaunchCheck`, so load
+ *      transfer, the differential and the clutch are all in the loop. (For the loose
+ *      surfaces that sweep is `tools/climb-sweep.ts`, which is the one that matters:
+ *      this bench is honest asphalt, and nothing climbs a dune honestly.)
  *
  *   3. HEAT, which is the one nobody expects and the one that actually binds.
  *      Airflow through the core is linear in road speed and heat in is set by

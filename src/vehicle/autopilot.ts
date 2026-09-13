@@ -285,6 +285,12 @@ const SURFACE_SPEED_FACTOR: Readonly<Record<SurfaceType, number>> = {
   [SurfaceType.Sand]: 0.2,
   [SurfaceType.Rock]: 0.45,
   [SurfaceType.Concrete]: 0.96,
+  // The loose verge is a pace of its own: slower than the packed district it was
+  // graded off, and much less than the road it borders. This factor exists to stop a
+  // driver pressing on into ground the car cannot hold, so it tracks the surface's
+  // grip rather than its comfort — 0.44 of asphalt's longitudinal coefficient, and
+  // 0.06 of rolling resistance to drag against.
+  [SurfaceType.LooseShoulder]: 0.45,
 };
 const DECAY_SPEED_LOSS = 0.14;
 const SAND_COVER_SPEED_LOSS = 0.28;

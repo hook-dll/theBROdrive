@@ -33,11 +33,6 @@ export interface DrivingReadout {
   oilFraction: number;
   /** Parking brake state. Keyboard and touch controls both latch it. */
   handbrake: boolean;
-  /**
-   * Is traction control cutting drive torque this frame? The lamp is lit only while
-   * the aid is doing something, which is what makes it teach where the grip ran out.
-   */
-  tcsActive: boolean;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -195,7 +190,6 @@ export class Hud {
   private readonly temperatureEl: SVGSVGElement;
   private readonly temperatureNeedle: SVGLineElement;
   private readonly handbrakeEl: HTMLElement;
-  private readonly tcsEl: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
@@ -271,8 +265,6 @@ export class Hud {
     this.gearEl = el('div', 'hud-gear');
     this.handbrakeEl = el('div', 'hud-handbrake');
     this.handbrakeEl.textContent = 'P';
-    this.tcsEl = el('div', 'hud-tcs');
-    this.tcsEl.textContent = 'TCS';
     this.checkEngineEl = this.buildIconLamp(
       'hud-check-engine',
       'Check engine',
@@ -287,7 +279,7 @@ export class Hud {
     const indicatorTop = el('div', 'hud-indicator-row');
     indicatorTop.append(this.checkEngineEl, this.oilWarningEl, this.handbrakeEl);
     const indicatorBottom = el('div', 'hud-indicator-row');
-    indicatorBottom.append(this.gearEl, this.tcsEl);
+    indicatorBottom.append(this.gearEl);
     const indicators = el('div', 'hud-icon-panel');
     indicators.append(indicatorTop, indicatorBottom);
 
@@ -610,7 +602,6 @@ export class Hud {
     this.oilWarningEl.classList.toggle('is-active', readout.oilFraction < FLUID_ALARM_FRACTION);
     this.refreshSegmentDisplay();
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
-    this.tcsEl.classList.toggle('is-active', readout.tcsActive);
   }
 
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */
