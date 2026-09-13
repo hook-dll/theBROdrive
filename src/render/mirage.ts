@@ -9,8 +9,9 @@ import type { Terrain } from '../world/terrain';
  *
  * It is deliberately not world content: there is no collider, reward, marker, or
  * close model. The player can see it for roughly half a minute, but it dissolves
- * before the road can bring them near enough to inspect it. One seeded encounter is
- * placed early enough to make the experiment testable; later candidates are sparse.
+ * before the road can bring them near enough to inspect it. One encounter is placed
+ * early enough to make the experiment testable; after that every three 12 km slots
+ * contain exactly one seeded vessel, keeping them sparse without unbounded droughts.
  *
  * WHAT IT SHOWS, AND WHY IT IS ONLY POTTERY.
  *
@@ -33,7 +34,7 @@ import type { Terrain } from '../world/terrain';
  */
 
 const SLOT_SPACING = 12_000;
-const SLOT_CHANCE = 0.28;
+const SLOTS_PER_ENCOUNTER_BLOCK = 3;
 const FIRST_ENCOUNTER_S = 2_600;
 
 /** Longitudinal visibility window ahead of the player, in road metres. */
@@ -49,7 +50,7 @@ const LATERAL_RANGE = 180;
 /** Handles, lids and feet. Four is the most any vessel here asks for. */
 const MAX_RINGS = 4;
 
-const SALT_CHANCE = 0x4d17;
+const SALT_OCCUPIED_SLOT = 0x4d17;
 const SALT_POSITION = 0x6a21;
 const SALT_SIDE = 0x83c9;
 const SALT_LATERAL = 0xa14f;
@@ -514,7 +515,20 @@ export class DistantMirage {
   }
 
   private slotExists(slot: number): boolean {
-    return slot === 0 || hash01(this.seed, slot, SALT_CHANCE) < SLOT_CHANCE;
+    if (slot === 0) return true;
+    // Independent 28% rolls had the right average but no upper bound: seed 1337
+    // placed nothing between 2.6 km and 104.6 km, and valid seeds produced gaps over
+    // 300 km. Pick one slot in each three-slot block instead. Random position within
+    // each slot remains, so the cadence does not become a visible metronome; the
+    // longest possible spatial gap is now 68 km.
+    const block = Math.floor((slot - 1) / SLOTS_PER_ENCOUNTER_BLOCK);
+    const firstSlot = block * SLOTS_PER_ENCOUNTER_BLOCK + 1;
+    const occupied =
+      firstSlot +
+      Math.floor(
+        hash01(this.seed, block, SALT_OCCUPIED_SLOT) * SLOTS_PER_ENCOUNTER_BLOCK,
+      );
+    return slot === occupied;
   }
 
   private slotS(slot: number): number {

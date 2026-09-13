@@ -104,7 +104,7 @@ export function createWaterMaterial(): WaterMaterial {
   const material = new THREE.MeshStandardMaterial({
     // The mesh bakes depth into an RGBA colour attribute: shoreline alpha, shallow
     // tint and foam all arrive as vertex data, so none of them costs a shader or a
-    // depth read. See world/water.ts.
+    // depth read. See render/lakewater.ts.
     vertexColors: true,
     transparent: true,
     // Water is drawn after the opaque pass and is convex from above, so depth writes
@@ -114,12 +114,11 @@ export function createWaterMaterial(): WaterMaterial {
     metalness: 0,
     normalMap,
     envMapIntensity: 1.25,
-    // BOTH SIDES, and this is the difference between a lake and nothing at all. The
-    // mirage sheet stands a few metres above the road (render/mirage-lake.ts), so a
-    // driver's 1.6 m eye looks UP at it: with `FrontSide` every polygon is back-facing
-    // and the water is invisible, which is exactly what the first drive showed — a palm
-    // grove on the skyline and no water under it. Seen edge-on from just below, the
-    // sheet reads as the bright band of an inferior mirage, which is what it is.
+    // BOTH SIDES. A transparent plane drawn front-side only is invisible from
+    // underneath, and the ground beside a basin does not stop at the shoreline: it can
+    // lie below the water's own level, so the surface has to be drawable from below as
+    // well. `lakewater.ts` fades it out over that band rather than letting it fill the
+    // screen, but the sheet has to be there for the fade to be what ends it.
     side: THREE.DoubleSide,
   });
   material.normalScale.set(0.5, 0.5);

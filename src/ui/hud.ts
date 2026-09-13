@@ -204,6 +204,7 @@ export class Hud {
   private readonly lcdEl: SVGSVGElement;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
+  private readonly persistentBlurEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
   private readonly deathFadeEl: HTMLElement;
   private readonly root: HTMLElement;
@@ -309,6 +310,7 @@ export class Hud {
 
 
     this.toastEl = el('div', 'hud-toasts');
+    this.persistentBlurEl = el('div', 'hud-persistent-blur');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -321,7 +323,12 @@ export class Hud {
       this.toastEl,
       this.gumBubbleEl,
     ];
-    root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
+    root.append(
+      ...this.tops,
+      this.persistentBlurEl,
+      this.damageVignetteEl,
+      this.deathFadeEl,
+    );
   }
 
   private buildIconLamp(className: string, label: string, pathData: string): HTMLElement {
@@ -507,27 +514,23 @@ export class Hud {
 
 
   /**
-   * Health remains numerical state only. Its sole presentation is this soft black
-   * edge treatment; death suppresses every interactive HUD child and owns a separate
-   * solid fade that is allowed to reach full black.
+   * Health remains numerical state only. A recent impact temporarily drains colour,
+   * hardens contrast and closes in the black edge treatment; death suppresses every
+   * interactive HUD child and owns a separate solid fade that may reach full black.
    */
   setHealthEffects(damage: number, dying: boolean, fade: number): void {
     const strength = Math.min(1, Math.max(0, damage));
     if (Math.abs(strength - this.damageStrength) > 0.001) {
       this.damageStrength = strength;
       const edgeOpacity =
-        strength <= 0 ? 0 : Math.min(0.96, 0.22 + strength * 0.74);
+        strength <= 0 ? 0 : Math.min(1, 0.34 + strength * 0.66);
       this.damageVignetteEl.style.setProperty(
         '--damage-opacity',
         String(edgeOpacity),
       );
       this.damageVignetteEl.style.setProperty(
-        '--damage-blur',
-        `${(5 + strength * 15).toFixed(1)}px`,
-      );
-      this.damageVignetteEl.style.setProperty(
         '--damage-inner',
-        `${(68 - strength * 34).toFixed(1)}%`,
+        `${(66 - strength * 38).toFixed(1)}%`,
       );
     }
     const black = Math.min(1, Math.max(0, fade));
@@ -835,6 +838,7 @@ export class Hud {
     for (const node of this.tops) node.remove();
     this.tops.length = 0;
     this.damageVignetteEl.remove();
+    this.persistentBlurEl.remove();
     this.deathFadeEl.remove();
     this.root.classList.remove('is-death-sequence');
   }

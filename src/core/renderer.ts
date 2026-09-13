@@ -730,7 +730,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
     float grainMask =
       smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
-    color.rgb = clamp(color.rgb + grain * grainMask * 0.0042, 0.0, 1.0);
+    color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
     // retained channels stay bright while the others are absorbed.

@@ -381,7 +381,7 @@ async function boot(): Promise<void> {
   // in one pooled mesh instead of creating scene objects along the route.
   const tyreTracks = new SandTyreTracks(renderer.scene, origin);
   // Tumbleweeds share the spray ring so a hit can become dust without a second particle
-  // budget. Their own cap is ten fixed instances; they never enter road hazards.
+  // budget. Their own cap is four fixed instances; they never enter road hazards.
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open

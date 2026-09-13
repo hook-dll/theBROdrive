@@ -48,13 +48,14 @@ const NORMAL_BIAS_BEFORE = 0.05;
 
 /**
  * Body-to-ground clearance of the shipped cars, metres, as they SETTLE on their
- * springs — the figure tools/suspension-probe.ts reports, not the drawn stance,
- * because a low-drawn box is lifted to a stated clearance (RIDE_LIFT_MAX).
+ * springs — the figures tools/suspension-probe.ts reports, not the drawn stance,
+ * because a low-drawn box is lifted to a stated clearance (RIDE_LIFT_MAX). The
+ * lowest, the ordinary and the highest body in the catalogue.
  */
 const CLEARANCES: readonly { readonly label: string; readonly metres: number }[] = [
-  { label: 'mid-engined V8', metres: 0.18 },
-  { label: 'VAZ-2101 Zhiguli', metres: 0.2 },
-  { label: 'tractor unit', metres: 0.51 },
+  { label: 'AZLK-2141 Svyatogor', metres: 0.144 },
+  { label: 'VAZ-2101 Zhiguli', metres: 0.174 },
+  { label: 'VAZ-2121 Niva', metres: 0.224 },
 ];
 
 const DEPTH_RANGE = SHADOW_FAR - SHADOW_NEAR;
