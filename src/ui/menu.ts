@@ -61,14 +61,17 @@ function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): st
   const vista = mobilePresentation ? GRAPHICS_TIERS[tier.mobileVista] : tier;
   const pixels = mobilePresentation ? tier.mobileMaxPixels : tier.maxPixels;
   const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
+  const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
+  const points = mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
   const mpx = (value: number): string => `${(value / 1_000_000).toFixed(1)} Mpx`;
   const horizon =
     vista.horizonM >= 1000 ? `${Math.round(vista.horizonM / 1000)} km` : `${vista.horizonM} m`;
   return (
     `${mpx(pixels)} max, ${horizon} horizon. ` +
     `${shadows ? 'Sun shadows.' : 'No sun shadows.'} ` +
-    `Stars to magnitude ${tier.starMagnitude}. ` +
-    'Visible light sources change on the next load.'
+    `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}, ` +
+    `${spots + points} light sources shaded per lit pixel. ` +
+    'The light count is compiled into the world, so it changes on the next load.'
   );
 }
 

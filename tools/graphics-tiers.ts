@@ -23,6 +23,9 @@ import {
   GRAPHICS_TIERS,
   MOBILE_FRAME_RATES,
   presentationFpsFor,
+  starMagnitudeFor,
+  streetLightSlotsFor,
+  vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../src/game/settings';
 import { minimumScaleFor, renderScaleFor } from '../src/core/renderer';
@@ -57,9 +60,12 @@ const COST_KEYS = [
   'minPixels',
   'mobileMinPixels',
   'starMagnitude',
+  'mobileStarMagnitude',
   'horizonM',
   'vehicleLightSlots',
+  'mobileVehicleLightSlots',
   'streetLightSlots',
+  'mobileStreetLightSlots',
 ] as const;
 const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
 
@@ -145,6 +151,70 @@ for (const quality of LADDER) {
     if (!Number.isFinite(vista.horizonM) || vista.horizonM <= 0) {
       failures.push(`${quality}: mobileVista "${tier.mobileVista}" is not a rung`);
     }
+  }
+}
+
+// --- 1d. a phone is never asked for a desktop's per-pixel light loop ---------
+//
+// THE LARGEST PER-PIXEL COST IN THE GAME, and the one that hid best. Three compiles the
+// light count into every lit material as an unrolled loop bound, so every lit fragment
+// evaluates every slot — dark ones included, which is why unused lamps are held at an
+// intensity of 1e-8 rather than switched off. The bill is PIXELS x SLOTS on every frame,
+// and the top rung's desktop budget is 18 spotlights plus 8 point lights, which on a phone
+// presenting 1.44 megapixels at 50 FPS came to 37 million light evaluations per frame and
+// 1.9 BILLION per second. That was, measurably, where the heat was.
+{
+  // A phone's ceiling. Six spots and six points keeps three cars' beams drawn and the lit
+  // road receding, which is all a phone screen resolves; more than the desktop standard
+  // budget is a desktop's fill rate being spent on a phone's pixels.
+  const PHONE_LIGHT_CEILING = 12;
+  for (const quality of LADDER) {
+    const spots = vehicleLightSlotsFor(quality, true);
+    const points = streetLightSlotsFor(quality, true);
+    const total = spots + points;
+    if (total > PHONE_LIGHT_CEILING) {
+      failures.push(
+        `${quality}: a phone is asked to shade ${spots} spotlights + ${points} point lights ` +
+          `= ${total} per lit fragment, above the ${PHONE_LIGHT_CEILING} ceiling`,
+      );
+    }
+    if (spots % 2 !== 0 || points % 2 !== 0) {
+      failures.push(`${quality}: a phone's light budget is not even, so it cannot split by direction`);
+    }
+    // The phone budget must exist and be a real budget, never zero or missing: a rung that
+    // shades no lights at all is a different picture, not a cheaper one.
+    if (spots < 2 || points < 2) {
+      failures.push(`${quality}: a phone gets ${spots} spots and ${points} points — too few to light a night`);
+    }
+    // And it must not simply echo the desktop column, or the cap is doing nothing.
+    const desktop = GRAPHICS_TIERS[quality].vehicleLightSlots + GRAPHICS_TIERS[quality].streetLightSlots;
+    if (quality !== 'acceptable' && total >= desktop) {
+      failures.push(
+        `${quality}: a phone gets ${total} lights against a desktop's ${desktop} — the cap does nothing here`,
+      );
+    }
+  }
+}
+
+// --- 1e. the per-pixel bill, in numbers --------------------------------------
+//
+// Printed rather than asserted beyond the ceiling above, because it is the figure that
+// makes the ceiling's reason legible: light evaluations per frame is pixels x slots, and
+// nothing else in the game scales that way.
+{
+  console.log(String.fromCharCode(10) + 'phone light cost at the pixel ceiling each rung gives a phone');
+  console.log('rung         pixels      slots   evaluations/frame   at 60 FPS');
+  for (const quality of LADDER) {
+    const tier = GRAPHICS_TIERS[quality];
+    // The phone column throughout: the pixel ceiling a phone gets is `mobileMaxPixels`,
+    // and the slot count is the phone's own.
+    const pixels = tier.mobileMaxPixels;
+    const slots = vehicleLightSlotsFor(quality, true) + streetLightSlotsFor(quality, true);
+    const perFrame = pixels * slots;
+    console.log(
+      `${quality.padEnd(12)} ${(pixels / 1e6).toFixed(2).padStart(6)} Mpx ${String(slots).padStart(7)} ` +
+        `${(perFrame / 1e6).toFixed(1).padStart(15)} M ${(perFrame * 60 / 1e9).toFixed(2).padStart(9)} G/s`,
+    );
   }
 }
 

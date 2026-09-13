@@ -15,7 +15,10 @@ import {
   loadStoredSettings,
   presentationFpsFor,
   shadowsFor,
+  starMagnitudeFor,
   storeSettings,
+  streetLightSlotsFor,
+  vehicleLightSlotsFor,
   viewDistanceFogScaleFor,
   viewDistanceFor,
   type GraphicsQuality,
@@ -343,6 +346,7 @@ async function boot(): Promise<void> {
   const vehicleLights = new VehicleLightRig(
     renderer.scene,
     world.state.settings.graphicsQuality,
+    mobilePresentation,
   );
   // Contact shadows are not a night effect and are not gated on the light rig: they are
   // the only thing on screen that reports what each tyre is carrying, they are the one
@@ -373,6 +377,7 @@ async function boot(): Promise<void> {
   const starField = await loadStarField(
     new Date(parseCalendarEpoch(world.state.calendarEpoch)),
     world.state.settings.graphicsQuality,
+    mobilePresentation,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
@@ -483,7 +488,11 @@ async function boot(): Promise<void> {
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
-  const lightBudget = new LightBudget(renderer.scene, world.state.settings.graphicsQuality);
+  const lightBudget = new LightBudget(
+    renderer.scene,
+    world.state.settings.graphicsQuality,
+    mobilePresentation,
+  );
 
   let initialYaw = 0;
   const player = new Player(physics, world, origin);
@@ -519,6 +528,14 @@ async function boot(): Promise<void> {
         // simulation rate can never leave the report describing a rate the game is not
         // running. The header and the per-second split have to agree about it.
         const simulationHz = Math.round(1 / FIXED_DT);
+        // The light budget belongs in the header because it is the largest per-PIXEL cost
+        // the game has, and it is invisible anywhere else: the lamps are dormant in
+        // daylight and there is nothing on screen to suggest that every lit fragment is
+        // still paying for all of them. Pixels x slots is the number that explains a warm
+        // phone, so it is printed rather than left to be inferred.
+        const spotSlots = vehicleLightSlotsFor(s.graphicsQuality, mobilePresentation);
+        const pointSlots = streetLightSlotsFor(s.graphicsQuality, mobilePresentation);
+        const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
         const framesPerSecond =
           mobilePresentation ? `${s.mobileFrameRate} FPS (capped)` : 'uncapped';
         const header = [
@@ -531,6 +548,8 @@ async function boot(): Promise<void> {
           `GPU ${gpuMs === null ? 'not measurable on this device' : `${gpuMs.toFixed(2)} ms per frame`}`,
           `simulation ${simulationHz} Hz, sim ticks per frame ` +
             `${(simulationHz / (mobilePresentation ? s.mobileFrameRate : simulationHz)).toFixed(1)}`,
+          `light slots ${spotSlots} spot + ${pointSlots} point = ${spotSlots + pointSlots} ` +
+            `per lit fragment, stars to magnitude ${stars}`,
         ].join('\n');
         return `${header}\n\n${frameProfiler?.report(simulationHz) ?? 'profiler unavailable'}`;
       }
@@ -2527,7 +2546,7 @@ async function boot(): Promise<void> {
       // load, and the menu says so.
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
-      sky.setQuality(tier);
+      sky.setQuality(tier, mobilePresentation);
       const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
@@ -2786,7 +2805,7 @@ async function boot(): Promise<void> {
       world.apply({ t: 'settings', settings });
       renderer.setMsaa(settings.msaa);
       renderer.setQuality(tier);
-      sky.setQuality(tier);
+      sky.setQuality(tier, mobilePresentation);
       const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);

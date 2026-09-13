@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import {
+  GRAPHICS_TIERS,
+  vehicleLightSlotsFor,
+  type GraphicsQuality,
+} from '../game/settings';
 
 /**
  * Renderer spotlights for the vehicle lamps that are LIT, wherever they are.
@@ -46,15 +50,8 @@ import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
  *    gain to nothing before either range means there is no step left to see: the
  *    lens still glows and approaches, and the ground light grows in behind it.
  */
-/** Persistent spotlight budget compiled into every lit material for this session. */
-const SLOT_COUNT: Record<'acceptable' | 'standard' | 'blessing', number> = {
-  acceptable: GRAPHICS_TIERS.acceptable.vehicleLightSlots,
-  standard: GRAPHICS_TIERS.standard.vehicleLightSlots,
-  // The top rung assumes a capable GPU: nine cars can keep both headlamps projected.
-  blessing: GRAPHICS_TIERS.blessing.vehicleLightSlots,
-};
 /** The top rung also keeps the projected cone visible three times farther. */
-const HEADLIGHT_DISTANCE_SCALE: Record<'acceptable' | 'standard' | 'blessing', number> = {
+const HEADLIGHT_DISTANCE_SCALE: Record<GraphicsQuality, number> = {
   acceptable: GRAPHICS_TIERS.acceptable.headlightDistanceScale,
   standard: GRAPHICS_TIERS.standard.headlightDistanceScale,
   blessing: GRAPHICS_TIERS.blessing.headlightDistanceScale,
@@ -89,9 +86,16 @@ export class VehicleLightRig {
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
 
-  constructor(scene: THREE.Scene, quality: keyof typeof SLOT_COUNT = 'standard') {
+  constructor(
+    scene: THREE.Scene,
+    quality: GraphicsQuality = 'standard',
+    mobilePresentation = false,
+  ) {
     this.headlightDistanceScale = HEADLIGHT_DISTANCE_SCALE[quality];
-    for (let i = 0; i < SLOT_COUNT[quality]; i++) {
+    // The count is compiled into every lit material, so it is decided here and never
+    // again: see `mobileVehicleLightSlots` for what it costs per pixel.
+    const slots = vehicleLightSlotsFor(quality, mobilePresentation);
+    for (let i = 0; i < slots; i++) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;
       scene.add(light, light.target);

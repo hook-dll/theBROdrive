@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, streetLightSlotsFor, type GraphicsQuality } from '../game/settings';
 
 /**
  * GPU street-light budget.
@@ -30,11 +30,6 @@ import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
  * you before the pools stop. It is the same per-pixel cost story in reverse: a
  * machine with fill rate to spare can afford two more lights everywhere.
  */
-const STREETLIGHT_SLOT_COUNT: Record<GraphicsQuality, number> = {
-  acceptable: GRAPHICS_TIERS.acceptable.streetLightSlots,
-  standard: GRAPHICS_TIERS.standard.streetLightSlots,
-  blessing: GRAPHICS_TIERS.blessing.streetLightSlots,
-};
 /** Three concrete-era poles can be ~255 m away. */
 const CUTOFF_DISTANCE = 300;
 const CUTOFF_DISTANCE_SQ = CUTOFF_DISTANCE * CUTOFF_DISTANCE;
@@ -56,8 +51,9 @@ export class LightBudget {
   constructor(
     private readonly scene: THREE.Scene,
     quality: GraphicsQuality = 'standard',
+    mobilePresentation = false,
   ) {
-    this.slotCount = STREETLIGHT_SLOT_COUNT[quality];
+    this.slotCount = streetLightSlotsFor(quality, mobilePresentation);
     this.lightsPerDirection = this.slotCount / 2;
     for (let i = 0; i < this.slotCount; i++) {
       const slot = new THREE.PointLight(0xffc37a, 0, 46, 2);

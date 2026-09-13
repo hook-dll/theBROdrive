@@ -364,6 +364,37 @@
 
 ### Changed
 
+- A PHONE IS NEVER ASKED FOR A DESKTOP'S LIGHT LOOP, which is the largest per-pixel cost
+  in the game and the one that explains the heat. Three compiles the light count into every
+  lit material as an unrolled loop bound, so every lit fragment evaluates every slot —
+  dark ones included, which is why unused lamps are held at an intensity of 1e-8 rather
+  than switched off. The bill is PIXELS x SLOTS on every frame, and it does not care that
+  most of those lights are dormant. The top rung's desktop budget is 18 spotlights plus 8
+  point lights; a phone presenting 1.44 megapixels at 50 FPS was therefore evaluating 26
+  lights on every lit fragment — 37 million light evaluations per frame and 1.9 BILLION per
+  second. Measured on the device, that frame had 11 ms of CPU work in a 19.7 ms interval,
+  so the CPU was not the constraint; the fill was. A phone now gets its own budget, capped
+  at the desktop STANDARD counts: 2/2, 4/4, 6/6 against the desktop's 2/2, 6/6, 18/8. The
+  top rung's phone cost falls from 2.25 G light evaluations per second to 1.04, and the
+  bench prints that figure for every rung so the ceiling has a reason attached to it rather
+  than being a number somebody liked.
+- The same treatment for the star field, which is the other place where a phone was being
+  handed more than its screen can show: the top rung draws to magnitude 8.5 — the WHOLE
+  catalogue, 77,667 additive points — against 45,617 at 8 and 15,447 at 7. A phone now
+  caps at 8, which past a phone's pixel density is not a visible difference and is a real
+  blend-rate saving.
+- Both are threaded as REQUIRED parameters rather than defaults, so a call site that forgets
+  to say which presentation it is building for fails to compile instead of silently costing
+  a phone a desktop's fill rate. That is what caught `mirage-lab`, and it is why the
+  readers now ask `vehicleLightSlotsFor(quality, mobilePresentation)` instead of indexing a
+  per-tier record that could not tell the two apart.
+- The frame report prints the light budget in its header — `light slots 6 spot + 6 point =
+  12 per lit fragment` — because it is invisible everywhere else: the lamps are dormant in
+  daylight and nothing on screen suggests that every lit fragment is still paying for all
+  of them. Pixels x slots is the number that explains a warm phone, so it is printed rather
+  than left to be inferred. The menu's tier hints say the same thing, and describe the
+  budget the presentation actually gets.
+
 - THE FRAME REPORT COPIES ITSELF. The readout is read on a phone, held in a hand, by
   somebody who then has to get the numbers somewhere else — retyping eight lines of
   monospace off a screen is not a realistic way to move a measurement, so the report moves
