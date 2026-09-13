@@ -4,6 +4,13 @@
 
 ### Added
 
+- `tools/spray-pool.ts` holds the wheel-spray pool to both halves of its new idle gate: a
+  pool with nothing in flight must flag no uploads, and a pool that has motes in it must
+  still fly. Breaking the gate either way is caught — leaving it open reports "an empty
+  pool still flagged its buffers", and closing it permanently reports "live motes did not
+  move between frames", which is the failure that matters, because those motes would hang
+  in the air for the rest of their life.
+
 - `tools/graphics-tiers.ts` holds the rendering ladder to two properties that were both
   false. The ladder must CLIMB, so that every rung is a purchase rather than a relabelling
   — the star depth was limiting magnitude 8 on two of the three rungs, so choosing between
@@ -343,6 +350,50 @@
 - `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
 
 ### Changed
+
+- A PHONE'S RUNG NOW BUYS SHARPNESS; ITS HEAT IS THE PLAYER'S. The rung owned both, and
+  the coupling was the whole problem: a phone drawing a 1440p screen at the weakest rung's
+  960x540 is visibly soft, and the only way off that picture was the next rung, which
+  brought 60 FPS, a sun shadow pass, and — on the top rung — a 25 km vista with it. How
+  sharp the picture is and how warm the device gets are different questions.
+  THE FRAME RATE IS A SETTING, not a property of the rung, because nothing else can answer
+  it: a browser exposes no thermal state, no battery temperature and no clock speed, so the
+  game cannot know a phone is hot, only the person holding it can. It is also the largest
+  lever there is — half the frames is half the GPU work, half the render-side CPU and half
+  the presenting, while the simulation keeps its fixed 60 Hz so the car handles
+  identically. It appears on the Display tab only where it means something, and defaults
+  to 30 FPS: a phone that is too slow can be made faster by moving up the ladder, and a
+  phone that is too hot has no such lever.
+  A PHONE NEVER GETS A SHADOW PASS. The shadow pass renders the world a second time from
+  the light, which is the largest sustained GPU cost a phone can be handed, and a phone's
+  screen is small enough that what it buys is small. Off on every rung; the desktop column
+  keeps the choice. This also exposed a live defect: `setQuality` re-derived the rule as
+  `quality !== 'acceptable'` instead of reading the table the constructor used, so the two
+  disagreed the moment the table stopped matching that expression.
+  A PHONE NEVER GETS THE 25 KM VISTA. The pixel cap does nothing for the vista, which is
+  CPU terrain sampling set by RADIUS: measured on the vista, a cell rebuild costs 13.0 ms
+  at 4 km, 17.3 ms at 8 km and 32.8 ms at 25 km on a 5950X, and a phone core is slower
+  than that. A rung now NAMES an authored vista pair rather than inventing a horizon, so
+  the fog stays the tuned one, and the top rung's phone vista drops from 25 km to the
+  standard 8 km. Every other phone configuration is unchanged.
+  AND IT IS NOT ASKED FOR MAXIMUM CLOCKS. `powerPreference: 'high-performance'` picks the
+  discrete GPU on a desktop, which is what it is for; on a phone there is one GPU, and
+  asking for maximum performance is asking the driver for clocks the game does not need
+  and the device cannot shed.
+- THE WHEEL SPRAY POOL SLEEPS. It scanned all 400 slots and flagged three dynamic
+  attributes on every frame whatever it held — 400 pointless tests and 8,000 bytes of
+  attribute flags for a draw of 400 discarded points, on every frame a wheel was not
+  slipping, which is most of them. Motes in flight are now counted, so an empty pool costs
+  one comparison.
+- `tools/adaptive-quality.ts` now asserts contracts instead of tuned numbers. It pinned
+  the settle window ("the 8th slow sample steps down") and the per-tier floor constants,
+  and had been failing since the settle window was raised from 7 samples to 8 + 30 for the
+  launch settle — reporting a change of opinion rather than a defect, which is why nobody
+  was reading it. It now drives the controller until it acts rather than counting samples,
+  and asks whether a machine in trouble is protected at all: brief slowness does not move
+  the resolution, sustained overload does and stops at a floor, an installed floor is
+  honoured, and recovery is earned. It passes for the first time in a while, and reports
+  what it measured.
 
 - GRAPHICS IS ONE LADDER THAT OWNS EVERYTHING, and the pixel budget is absolute on every
   rung. There were three defects, and the first one is why this game ran badly on a

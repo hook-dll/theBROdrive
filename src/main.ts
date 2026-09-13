@@ -5,16 +5,17 @@ import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
 import { SURFACES, SurfaceType } from './core/surfaces';
-import { presentationFpsFor, prefersMobilePresentation, Renderer } from './core/renderer';
+import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
   GRAPHICS_TIERS,
   TIME_OF_DAY_PRESETS,
-  VIEW_DISTANCE_FOG_SCALE,
-  VIEW_DISTANCE_METRES,
   loadStoredSettings,
+  presentationFpsFor,
   storeSettings,
+  viewDistanceFogScaleFor,
+  viewDistanceFor,
   type GraphicsQuality,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
@@ -433,7 +434,7 @@ async function boot(): Promise<void> {
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
-    const metres = VIEW_DISTANCE_METRES[world.state.settings.graphicsQuality];
+    const metres = viewDistanceFor(world.state.settings.graphicsQuality, mobilePresentation);
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
@@ -1896,7 +1897,7 @@ async function boot(): Promise<void> {
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
     // is all there is and hides the vista completely when there is more: at the 'vast'
     // scale factor a 25 km range still fades, it just fades over 25 km.
-    renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.graphicsQuality];
+    renderer.fog.density *= viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
 
     // Render-only illusions: neither one owns physics, terrain, streamed props, or
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
@@ -2126,7 +2127,7 @@ async function boot(): Promise<void> {
 
   const loop = new GameLoop({ fixedUpdate, render });
   loop.setRenderFps(
-    presentationFpsFor(world.state.settings.graphicsQuality, mobilePresentation),
+    presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate),
   );
 
   /**
@@ -2459,11 +2460,11 @@ async function boot(): Promise<void> {
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
       sky.setQuality(tier);
-      const horizon = VIEW_DISTANCE_METRES[tier];
+      const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
       loop.setRenderFps(
-        presentationFpsFor(world.state.settings.graphicsQuality, mobilePresentation),
+        presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate),
       );
     },
     applyTimePreset: (preset) => {
@@ -2711,10 +2712,10 @@ async function boot(): Promise<void> {
       renderer.setMsaa(settings.msaa);
       renderer.setQuality(tier);
       sky.setQuality(tier);
-      const horizon = VIEW_DISTANCE_METRES[tier];
+      const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
-      loop.setRenderFps(presentationFpsFor(tier, mobilePresentation));
+      loop.setRenderFps(presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate));
       await settleLaunchResolution();
     };
 

@@ -19,7 +19,10 @@
  */
 
 import {
+  DEFAULT_MOBILE_FRAME_RATE,
   GRAPHICS_TIERS,
+  MOBILE_FRAME_RATES,
+  presentationFpsFor,
   type GraphicsQuality,
 } from '../src/game/settings';
 import { minimumScaleFor, renderScaleFor } from '../src/core/renderer';
@@ -106,6 +109,62 @@ for (const quality of LADDER) {
   const tier = GRAPHICS_TIERS[quality];
   if (!tier.shadows && tier.msaa === false && tier.shadows !== false) {
     failures.push(`${quality}: nonsensical shadow/MSAA combination`);
+  }
+}
+
+// --- 1b. a phone's rung buys sharpness, not heat ------------------------------
+//
+// A phone is two machines at once: the one that draws the picture and the one that gets
+// hot. The rung owns the first. The second belongs to the player, because a browser
+// exposes no thermal state for the game to read — and it must not be welded to the rung,
+// or the only way off a blurry picture on a 1440p screen would be to accept 60 FPS of
+// heat along with it.
+{
+  const measuredCellLoadMs: Record<string, number> = { acceptable: 13.0, standard: 17.3, blessing: 31.9 };
+  for (const quality of LADDER) {
+    const tier = GRAPHICS_TIERS[quality];
+    if (tier.mobileShadows) {
+      failures.push(
+        `${quality}: a phone presentation still claims a shadow pass, which is a second ` +
+          `render of the world and the largest sustained GPU cost a phone can be given`,
+      );
+    }
+    const vista = GRAPHICS_TIERS[tier.mobileVista];
+    if (vista.horizonM > GRAPHICS_TIERS.blessing.horizonM) {
+      failures.push(`${quality}: a phone inherits a vista beyond the strongest rung's own`);
+    }
+    if (vista.horizonM > GRAPHICS_TIERS.standard.horizonM) {
+      failures.push(
+        `${quality}: a phone inherits the ${vista.horizonM} m vista ` +
+          `(${measuredCellLoadMs[tier.mobileVista] ?? '?'} ms per cell rebuild measured on a ` +
+          `5950X, and a phone core is slower) — no phone is handed that map`,
+      );
+    }
+    // The vista a phone gets must still be a real, authored pair: an unknown name would
+    // silently fall through to `undefined` metres and draw nothing.
+    if (!Number.isFinite(vista.horizonM) || vista.horizonM <= 0) {
+      failures.push(`${quality}: mobileVista "${tier.mobileVista}" is not a rung`);
+    }
+  }
+}
+
+// --- 1c. the frame-rate cap is offered, never derived -------------------------
+{
+  for (const rate of MOBILE_FRAME_RATES) {
+    if (!Number.isFinite(rate) || rate <= 0) failures.push(`offered frame rate ${rate} is not a rate`);
+  }
+  if (!MOBILE_FRAME_RATES.includes(DEFAULT_MOBILE_FRAME_RATE)) {
+    failures.push('the default frame rate is not one of the offered rates');
+  }
+  // A desktop presents uncapped: there is no battery to protect and the adaptive
+  // controller already holds the GPU at its target by moving resolution.
+  if (presentationFpsFor(false, DEFAULT_MOBILE_FRAME_RATE) !== null) {
+    failures.push('a desktop presentation was given a frame-rate cap');
+  }
+  for (const rate of MOBILE_FRAME_RATES) {
+    if (presentationFpsFor(true, rate) !== rate) {
+      failures.push(`a phone asked for ${rate} FPS and did not get it`);
+    }
   }
 }
 

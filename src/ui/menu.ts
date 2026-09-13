@@ -11,6 +11,7 @@ import {
   POI_SPACING_MAX_METRES,
   POI_SPACING_MIN_METRES,
   POI_SPACING_STEP_METRES,
+  MOBILE_FRAME_RATES,
   TIME_OF_DAY_PRESETS,
   TRAFFIC_COUNT_MAX,
   TRAFFIC_COUNT_MIN,
@@ -18,6 +19,7 @@ import {
 } from '../game/settings';
 import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
 import { GRAPHICS_TIERS } from '../game/settings';
+import { prefersMobilePresentation } from '../core/renderer';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import { ALL_VARIANTS } from '../parts/registry';
@@ -51,16 +53,20 @@ function input(cls: string): HTMLInputElement {
  * waited for the next load: two halves of one rung described in two places, and only
  * one of them true.
  */
-function describeTier(quality: GraphicsQuality): string {
+function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): string {
   const tier = GRAPHICS_TIERS[quality];
-  const mpx = (pixels: number): string => `${(pixels / 1_000_000).toFixed(1)} Mpx`;
+  // Read as the presentation in front of the player will actually get it. A phone is
+  // handed different numbers for the pixel ceiling, the vista and the shadow pass, and a
+  // label quoting the desktop column at a phone would be describing a rung nobody is on.
+  const vista = mobilePresentation ? GRAPHICS_TIERS[tier.mobileVista] : tier;
+  const pixels = mobilePresentation ? tier.mobileMaxPixels : tier.maxPixels;
+  const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
+  const mpx = (value: number): string => `${(value / 1_000_000).toFixed(1)} Mpx`;
   const horizon =
-    tier.horizonM >= 1000 ? `${Math.round(tier.horizonM / 1000)} km` : `${tier.horizonM} m`;
-  const frameRate =
-    tier.mobileFps === null ? 'uncapped on desktop' : `${tier.mobileFps} FPS on a phone`;
+    vista.horizonM >= 1000 ? `${Math.round(vista.horizonM / 1000)} km` : `${vista.horizonM} m`;
   return (
-    `${mpx(tier.maxPixels)} max, ${horizon} horizon, ${frameRate}. ` +
-    `${tier.shadows ? 'Sun shadows.' : 'No sun shadows.'} ` +
+    `${mpx(pixels)} max, ${horizon} horizon. ` +
+    `${shadows ? 'Sun shadows.' : 'No sun shadows.'} ` +
     `Stars to magnitude ${tier.starMagnitude}. ` +
     'Visible light sources change on the next load.'
   );
@@ -211,7 +217,6 @@ export interface PauseHooks {
   applySettings: (next: Settings) => void;
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
-  /** Apply a view-distance tier immediately; main pushes it to the renderer. */
   /**
    * Record a fully fuelled car into the world.
    *
@@ -455,6 +460,7 @@ export class MainMenu {
       // authoritative object: it is copied on entry, never mutated here, and
       // every change pushes a complete Settings object back through
       // hooks.applySettings (keyBindings re-copied so the applied map is ours).
+      const mobilePresentation = prefersMobilePresentation();
       const base = hooks.settings();
       const settings: Settings = {
         gearboxMode: base.gearboxMode,
@@ -467,6 +473,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         msaa: base.msaa,
+        mobileFrameRate: base.mobileFrameRate,
         inkStrength: base.inkStrength,
         preciseSteering: base.preciseSteering,
       };
@@ -482,6 +489,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           msaa: settings.msaa,
+          mobileFrameRate: settings.mobileFrameRate,
           inkStrength: settings.inkStrength,
           preciseSteering: settings.preciseSteering,
         });
@@ -953,7 +961,7 @@ export class MainMenu {
               {
                 label: 'Phone',
                 icon: 'gfx1',
-                hint: describeTier('acceptable'),
+                hint: describeTier('acceptable', mobilePresentation),
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
@@ -963,7 +971,7 @@ export class MainMenu {
               {
                 label: 'Desktop',
                 icon: 'gfx2',
-                hint: describeTier('standard'),
+                hint: describeTier('standard', mobilePresentation),
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
@@ -973,7 +981,7 @@ export class MainMenu {
               {
                 label: 'Workstation',
                 icon: 'gfx3',
-                hint: describeTier('blessing'),
+                hint: describeTier('blessing', mobilePresentation),
                 active: () => settings.graphicsQuality === 'blessing',
                 pick: () => {
                   settings.graphicsQuality = 'blessing';
@@ -981,6 +989,31 @@ export class MainMenu {
                 },
               },
             ]),
+            // ONLY on a phone, and the only control here that is about the device rather
+            // than the picture. Half the frames is half the GPU work, half the render-side
+            // CPU and half the presenting, while the simulation keeps its fixed 60 Hz, so
+            // the car still drives identically — which makes this the one lever a player
+            // has against a phone that runs fine and gets hot.
+            ...(mobilePresentation
+              ? [
+                  segmented(
+                    'Frame Rate',
+                    MOBILE_FRAME_RATES.map((rate) => ({
+                      label: rate === 60 ? 'Smooth' : 'Cool',
+                      icon: rate === 60 ? 'gfx3' : 'gfx1',
+                      hint:
+                        rate === 60
+                          ? '60 FPS. Smoother, and the warmest setting in the game.'
+                          : '30 FPS. The coolest the game can run: same picture, half the frames, and the car still handles identically.',
+                      active: () => settings.mobileFrameRate === rate,
+                      pick: () => {
+                        settings.mobileFrameRate = rate;
+                        apply();
+                      },
+                    })),
+                  ),
+                ]
+              : []),
             segmented('MSAA', [
               {
                 label: 'On',
