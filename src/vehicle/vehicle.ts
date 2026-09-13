@@ -1007,6 +1007,78 @@ const DIG_SURFACES: ReadonlySet<SurfaceType> = new Set([
   SurfaceType.LooseShoulder,
 ]);
 
+/**
+ * THE LOW RANGE: the second time this simulation lies to the player on purpose.
+ *
+ * The first lie is the dig, and it exists because the desert is most of this world. This
+ * one exists because the ROAD is the rest of it, and the road can be steeper than the car
+ * that starts on it.
+ *
+ * WHAT BREAKS WITHOUT IT. `tools/climb-sweep.ts` measures the steepest grade each body
+ * escapes from a parked start, and the road's own steepest grade is measured by
+ * `tools/road-profile.ts`. Those two numbers are supposed to nest — the road is what the
+ * fleet was designed around — and they do not: the starter VAZ-2101 escapes 10.9 degrees
+ * of honest asphalt, while seed 1's road reaches 21.0% (11.9 degrees) and six seeds
+ * measured reach 17.0-21.0%. From a standstill on one of those pitches the stock car
+ * cannot move at all: measured on a 12-degree ramp, it sits at 0 km/h with the driven
+ * wheels at 7.2 rad/s and a slip ratio of 7 against a peak-slip of 0.12, and the grade
+ * wins. Even the whole plateau is not the problem — the tyre's own best point is
+ * `0.946 * capacity`, and the capacity is short.
+ *
+ * WHY NO COEFFICIENT FIXES IT. A 2101's `wheelGrip` is 0.558 — worn Soviet factory
+ * tyres — and asphalt's own coefficient is 0.988, so the driven axle works at 0.551 of
+ * mu. On an 18.7-degree climb the rear axle carries 5.1 kN and the grade asks 3.0 kN, so
+ * the axle needs 0.63 of mu to hold it and has 0.55. That is not a tuning error, it is
+ * the arithmetic of a 1.2-litre car on hard rubber, and it is why the honest model stops
+ * it just below the steepest road the generator can draw.
+ *
+ * SO THE MODEL LIES, ONCE, IN ONE PLACE, AND THE LIE IS THIS: on a road surface, a
+ * driven wheel at a CRAWL does not have to make its worst case. A driver on a hill start
+ * is not holding full throttle and hoping — they slip the clutch, they take the gear
+ * that pulls, and the tyre is loaded long enough to bite. The concession grants the
+ * driven axle an absolute mu floor at a crawl, which is the same shape of lie as the dig
+ * and is argued the same way: a concession granted to the ground that needs one, sized
+ * by measurement, and it cannot be used anywhere it was not intended.
+ *
+ * WHY THE GATE IS THE CAR'S SPEED, AND WHY IT IS NARROW. `DIG_FULL_MPS` and
+ * `DIG_GONE_MPS` explain why a speed gate is the only stable choice — a slip-gated floor
+ * is a positive feedback loop against the thing it feeds. This one is deliberately much
+ * narrower than the dig's 3-10 m/s: fully in below 1 m/s and gone by 4. On a grade the
+ * car settles into a stable creep, because a faster car gets less of the floor and a
+ * slower one gets more — measured, that equilibrium is a few km/h up the pitch, which is
+ * the whole intent. Off a grade, the honest model is back by 14 km/h, so the road at any
+ * real speed, every corner, every slide and every braking distance are untouched.
+ *
+ * AND IT IS THE SAME FOR EVERY CAR, for the dig's own reason: it exists to guarantee that
+ * the weakest machine in the catalogue can leave a climb, and a concession that scaled
+ * with tyre quality would abandon exactly the cars that need it.
+ *
+ * The surfaces are the road DECK — the four the generator draws a district from (see
+ * `DISTRICT_SURFACES` in `world/gradient.ts`) — and deliberately not rock. A bedrock
+ * outcrop is honest ground, and "this slope is too steep for this car" is a legitimate
+ * answer there in a way that it is not on a road the player was routed along.
+ */
+const LOW_RANGE_SURFACES: ReadonlySet<SurfaceType> = new Set([
+  SurfaceType.Asphalt,
+  SurfaceType.CrackedAsphalt,
+  SurfaceType.Gravel,
+  SurfaceType.Concrete,
+]);
+/**
+ * Driven-axle mu the low range grants at full bite, before load sensitivity.
+ *
+ * Sized against the requirement rather than by taste, and the requirement is the same
+ * shape as the dig's: EVERY body in the catalogue must escape the world's steepest road
+ * grade from a standstill, on the WORST surface the road deck is made of — which is
+ * gravel, at 0.72, not asphalt. `tools/climb-sweep.ts` measures it; the honest figure for
+ * the 2101 is 0.63 of mu at 18.7 degrees, so this sits above that with the margin the
+ * bench asserts rather than a hair above the threshold.
+ */
+const LOW_RANGE_MU = 1.2;
+/** Speed (m/s) below which the low range is fully in, and the speed by which it is gone. */
+const LOW_RANGE_FULL_MPS = 1;
+const LOW_RANGE_GONE_MPS = 4;
+
 /* ---------------------------------------------------------------------------
  * THE TYRE AS A SPRING, and why road feel used to disappear whenever the
  * suspension was softened.
@@ -4478,6 +4550,22 @@ export class Vehicle implements Rebasable {
           longitudinalMu = Math.max(longitudinalMu, DIG_FIRM_MU * digWeight * loadFactor);
           w.digWeight = digWeight;
           if (digWeight > carDigWeight) carDigWeight = digWeight;
+        }
+        // THE LOW RANGE — see the block comment on `LOW_RANGE_MU`. The road deck only, and
+        // driven wheels only. Applied AFTER the dig, and below its 1.6, so on loose ground
+        // the dig's own figure still governs and sand is unchanged to the digit.
+        if (driven && w.driveTorqueNm !== 0 && LOW_RANGE_SURFACES.has(surfaceType)) {
+          const fadeT = clamp(
+            (driveProgressSpeed - LOW_RANGE_FULL_MPS) /
+              (LOW_RANGE_GONE_MPS - LOW_RANGE_FULL_MPS),
+            0,
+            1,
+          );
+          const lowRangeWeight = 1 - fadeT * fadeT * (3 - 2 * fadeT);
+          longitudinalMu = Math.max(
+            longitudinalMu,
+            LOW_RANGE_MU * lowRangeWeight * loadFactor,
+          );
         }
         capacityN = longitudinalMu * w.loadN;
         if (inContact) this.ownTyreCapacityN += capacityN;

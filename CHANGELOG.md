@@ -4,6 +4,41 @@
 
 ### Changed
 
+- A CAR THAT CANNOT LEAVE A HILL IS GIVEN A CRAWL. The road and the fleet were supposed to
+  agree — the road is what the cars were designed around — and they did not. Measured: the
+  starter VAZ-2101 escapes 10.9 degrees of honest asphalt from a parked start, while seed
+  1's road reaches 21.0% (11.9 degrees) and six seeds measured reach 17.0-21.0%. On those
+  pitches the stock car sat still at full throttle: 0 km/h with the driven wheels at
+  7.2 rad/s and a slip ratio of 7 against a peak-slip of 0.12. No coefficient fixes it —
+  the 2101's worn tyres work the driven axle at 0.551 of mu, and 18.7 degrees asks 0.63 —
+  so the tyre model now lies once on PURPOSE, in the same shape as the existing sand dig:
+  a road-deck surface grants the driven axle a mu floor at a CRAWL (below 1 m/s fully in,
+  gone by 4), which is what a driver gets from slipping the clutch and taking the gear that
+  pulls. Measured on a 12-degree ramp, the engine now gets the car up it at 9.2 km/h
+  instead of not at all, and the equilibrium is a crawl because a faster car gets less of
+  the floor. Above 14 km/h the honest model is back in full: braking from 100 km/h measures
+  72.1 m both with the concession and without, and top speed, cornering, slides and factory
+  0-100 figures are unmoved (the 2101 is 22.02 s against its real 22 s).
+- THE CONCESSION COVERS THE ROAD, NOT ROCK. It applies to the four surfaces the generator
+  draws a road district from — asphalt, cracked asphalt, gravel and concrete — and
+  deliberately not to bedrock, where "this slope is too steep for this car" is a legitimate
+  answer. It is applied after the dig and below its figure, so sand and the loose verge are
+  unchanged to the digit.
+- `tools/climb-sweep.ts` now holds the road's own promise, which nothing checked before: a
+  road-deck surface that cannot be left from a standstill is a dead end, not a challenge.
+  Asphalt used to be excluded from the sweep on purpose — "the honest reference, printed so
+  every other surface can be read against it" — and that stance was wrong for exactly one
+  reason: the reference was not good enough. Every surface the deck is made of is now swept,
+  the weakest rear-drive car must clear the world's 18.7 degrees on each of them with
+  margin, and the whole 20-body catalogue passes. One body legitimately cannot: the
+  UAZ-330364's first gear tops out at 15.1 degrees, so it is held to its own honest asphalt
+  ceiling rather than to the world's maximum — a gearbox limit, not a grip one.
+- THE GRAVEL CHECK MOVED DOMAIN. It asserted that gravel is a worse road than asphalt by
+  comparing standing-start ceilings, and the crawl concession deliberately flattens those
+  ceilings for all four deck surfaces into one number. The relation still has to hold, so it
+  is now asserted where it still means something — a braking distance from 100 km/h, which
+  the concession never touches: measured 72.1 m on asphalt against 90.3 m on gravel.
+
 - EVERY ROADSIDE STOP IS ONE OF THE GALLERY'S 26 BUILDINGS. The world used to have four
   hand-built kinds — a wreck field, a petrol station, a workshop and a camp — and the
   twenty-six buildings in the POI gallery existed only in that gallery. Now the four are

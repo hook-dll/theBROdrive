@@ -171,7 +171,7 @@ function leanDeg(q: { x: number; y: number; z: number; w: number }): number {
   return (Math.acos(Math.max(-1, Math.min(1, upY))) * 180) / Math.PI;
 }
 /** A flat, infinite-enough plane using the requested tyre surface. */
-function addGround(physics: PhysicsWorld, surface = SurfaceType.Asphalt): void {
+export function addGround(physics: PhysicsWorld, surface = SurfaceType.Asphalt): void {
   const heights = new Float32Array(4);
   physics.addHeightfield(
     1,
@@ -1155,6 +1155,50 @@ export async function runInclineLaunchCheck(
     );
   }
   return result;
+}
+
+/**
+ * Braking distance from 100 km/h on one named surface, metres.
+ *
+ * The companion to `steepestPullAwayDeg`, and the reason it exists is the CRAWL
+ * CONCESSION: on a road surface below walking pace the model deliberately floors the
+ * driven axle's grip, which flattens the standing-start ceilings of asphalt, cracked
+ * asphalt, gravel and concrete into the same number. A standing start therefore stops
+ * being able to tell those surfaces apart, and the thing that still must is the domain the
+ * concession never touches — speed. What a surface is worth at 100 km/h is its own
+ * coefficient, and this measures it with the real car rather than restating the table.
+ */
+export async function brakeDistanceOn(
+  modelId: string,
+  surface: SurfaceType,
+  fromKmh = 100,
+): Promise<number> {
+  await preloadCarModels([modelId]);
+  const rig = await makeRig(modelId, (physics) => addGround(physics, surface), false);
+  const body = rig.vehicle.chassis;
+  // Run up to the entry speed, then stop the clock and the pedals both.
+  drive(rig, 25, (_, f) => {
+    f.throttle = rig.vehicle.speedKmh < fromKmh ? 1 : 0;
+    f.brake = rig.vehicle.speedKmh >= fromKmh ? 1 : 0;
+    f.steer = 0;
+    f.handbrake = false;
+  });
+  const start = body.translation();
+  let enteredKmh = 0;
+  drive(rig, 15, (_, f) => {
+    f.throttle = 0;
+    f.brake = 1;
+    f.steer = 0;
+    f.handbrake = false;
+    if (enteredKmh === 0) enteredKmh = rig.vehicle.speedKmh;
+  });
+  const end = body.translation();
+  const distance = Math.hypot(end.x - start.x, end.z - start.z);
+  rig.vehicle.dispose();
+  if (enteredKmh < 80) {
+    throw new Error(`only reached ${enteredKmh.toFixed(0)} km/h before braking`);
+  }
+  return +distance.toFixed(1);
 }
 
 export async function runBench(

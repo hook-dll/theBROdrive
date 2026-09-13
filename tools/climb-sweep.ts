@@ -125,39 +125,43 @@ async function steepestEscape(modelId: string, surface: SurfaceType): Promise<nu
 }
 
 /**
- * The surfaces to sweep, and whether each one has to clear the world's own maximum grade.
+ * The surfaces to sweep, and what each one is held to.
  *
- * `mustEscape` is not applied to every surface, and the reason is what each one IS:
+ * `digSurface` marks the loose ground the DIG exists for, and those are held to a
+ * RELATION rather than to a grade: a digging surface must never be a penalty against
+ * sealed Tarmac, because the dig exists precisely to guarantee that. It is NOT required
+ * to climb the world's maximum when the drivetrain cannot — a heavy truck whose first gear
+ * tops out at 13 degrees on asphalt is not trapped by sand, it is limited by its gearbox,
+ * and demanding 18.7 degrees of it on sand would be demanding that loose ground out-climb
+ * Tarmac.
  *
- *   - SAND and the loose SHOULDER are the two that form the open slopes a car gets onto
- *     by choice or by mistake, and being unable to climb out of either is a trap. They
- *     are held to the full world maximum.
- *   - GRAVEL exists in exactly one place, the homestead yard, which is built flat. There
- *     is no sloped gravel anywhere for a car to be trapped on, so sweeping it against a
- *     dune only measures a surface the player cannot meet. It is swept and printed for
- *     information, because a number that looks wrong should be visible.
- *   - ASPHALT is not asserted on at all. It is the reference: what a car climbs on the
- *     road is the honest limit of its drivetrain and tyres, and it is printed so every
- *     other surface can be read against it.
- *   - ROCK is bedrock outcrops: solid, and honest. Its coefficient is measured and much
- *     higher than loose ground's, so what stops a car on a steep outcrop is the engine's
- *     tractive effort, not a bog — and "this slope is too steep for this car" is a
- *     legitimate answer on rock in a way that it is not on sand. Nearly every surface in
- *     the world is limited by the drivetrain before it is limited by grip, and asphalt
- *     included: the same GAZ-21 that digs its way up 22 degrees of sand has 12 degrees
- *     of honest asphalt in it. The dig is a deliberate exception granted to the two
- *     surfaces that need one, not a floor applied to the whole world.
+ * `roadDeck` marks the four surfaces the generator draws a road DISTRICT from (see
+ * `DISTRICT_SURFACES` in `world/gradient.ts`), and those are held to the world's own
+ * steepest grade outright. That is a different promise from the dig's, and it is the one
+ * the LOW RANGE exists for: the road is where the player is ROUTED, so a pitch the car
+ * cannot leave from a standstill is a dead end rather than a challenge. It used to go
+ * unasserted here — "asphalt is the honest reference, printed so every other surface can
+ * be read against it" — and that stance was wrong for exactly one reason: the reference
+ * was not good enough. Measured before the concession, the starter VAZ-2101 escaped 10.9
+ * degrees of honest asphalt while seed 1's road reaches 11.9.
+ *
+ * ROCK is deliberately in neither group. A bedrock outcrop is honest ground, and "this
+ * slope is too steep for this car" is a legitimate answer there in a way that it is not on
+ * a road.
  */
-const SURFACES: readonly { name: string; type: SurfaceType; digSurface: boolean }[] = [
-  // Asphalt is the reference the whole fleet and the road itself were designed
-  // around, so it is printed first and never asserted on directly: whatever a car can
-  // do here is the honest traction limit of the machine, and every other surface is
-  // read against it.
-  { name: 'asphalt', type: SurfaceType.Asphalt, digSurface: false },
-  { name: 'sand', type: SurfaceType.Sand, digSurface: true },
-  { name: 'shoulder', type: SurfaceType.LooseShoulder, digSurface: true },
-  { name: 'gravel', type: SurfaceType.Gravel, digSurface: false },
-  { name: 'rock', type: SurfaceType.Rock, digSurface: false },
+const SURFACES: readonly {
+  name: string;
+  type: SurfaceType;
+  digSurface: boolean;
+  roadDeck: boolean;
+}[] = [
+  { name: 'asphalt', type: SurfaceType.Asphalt, digSurface: false, roadDeck: true },
+  { name: 'cracked', type: SurfaceType.CrackedAsphalt, digSurface: false, roadDeck: true },
+  { name: 'gravel', type: SurfaceType.Gravel, digSurface: false, roadDeck: true },
+  { name: 'concrete', type: SurfaceType.Concrete, digSurface: false, roadDeck: true },
+  { name: 'sand', type: SurfaceType.Sand, digSurface: true, roadDeck: false },
+  { name: 'shoulder', type: SurfaceType.LooseShoulder, digSurface: true, roadDeck: false },
+  { name: 'rock', type: SurfaceType.Rock, digSurface: false, roadDeck: false },
 ];
 
 /**
@@ -219,18 +223,20 @@ for (const surface of SURFACES) {
   await preloadCarModels(models);
   for (const id of models) {
     const deg = await ceilingFor(id, surface.type);
-    if (!surface.digSurface) {
+    if (!surface.digSurface && !surface.roadDeck) {
       console.log(`${id.padEnd(20)} ${deg.toFixed(1).padStart(20)}   ${'—'.padStart(10)}   —`);
       continue;
     }
 
-    // THE CONTRACT, in one line: a digging surface must never be a penalty. Whatever
-    // this body can climb on sealed Tarmac it must also climb on sand and on the verge,
-    // because the dig exists precisely to guarantee that. It is NOT required to climb
-    // the world's maximum when its own drivetrain cannot — a heavy truck whose first
-    // gear tops out at 13 degrees on asphalt is not trapped by sand, it is limited by
-    // its gearbox, and demanding 18.7 degrees of it on sand would be demanding that
-    // loose ground out-climb Tarmac.
+    // THE CONTRACT, in one line, and it is the same line for both groups: whatever this
+    // body can climb on the reference surface it must also climb here, because the
+    // concession exists precisely to guarantee that. It is NOT required to climb the
+    // world's maximum when its own drivetrain cannot — a heavy truck whose first gear tops
+    // out at 13 degrees on asphalt is not trapped by the road, it is limited by its
+    // gearbox, and demanding 18.7 degrees of it would be demanding that the concession do
+    // an engine's work. Measured: the UAZ-330364's torque ceiling is 15.1 degrees, its
+    // honest asphalt escape 13.0, and it is the one body in the catalogue the deck's
+    // requirement cannot reach.
     const reference = Math.min(WORLD_MAX_GRADE_DEG, await ceilingFor(id, SurfaceType.Asphalt));
     const required = reference - RELATIVE_TOLERANCE_DEG;
     const ok = deg >= required;
@@ -239,18 +245,26 @@ for (const surface of SURFACES) {
       id === WEAKEST_RWD && deg >= WORLD_MAX_GRADE_DEG + WEAKEST_RWD_MARGIN_DEG
         ? ' (weakest RWD clears the world with margin)'
         : '';
+    const verdict = ok
+      ? surface.roadDeck
+        ? 'road is escapable'
+        : 'not a penalty'
+      : surface.roadDeck
+        ? 'DEAD END'
+        : 'WORSE THAN ASPHALT';
     console.log(
       `${id.padEnd(20)} ${deg.toFixed(1).padStart(20)}   ` +
         `${`>= ${required.toFixed(1)}`.padStart(10)}   ` +
-        `${ok ? 'not a penalty' : 'WORSE THAN ASPHALT'}${note}`,
+        `${verdict}${note}`,
     );
   }
 }
 
-// AND THE REQUIREMENT THE CONCESSION EXISTS FOR, stated on its own so it cannot be
-// lost among the fleet: the weakest front-engined rear-drive car clears the world's own
-// steepest grade on both digging surfaces, with margin.
-for (const surface of SURFACES.filter((s) => s.digSurface)) {
+// AND THE REQUIREMENT BOTH CONCESSIONS EXIST FOR, stated on its own so it cannot be lost
+// among the fleet: the weakest front-engined rear-drive car clears the world's own steepest
+// grade on every surface a car can be stuck on — the loose ground the dig covers, and the
+// deck the road is made of — with margin.
+for (const surface of SURFACES.filter((s) => s.digSurface || s.roadDeck)) {
   const deg = await ceilingFor(WEAKEST_RWD, surface.type);
   if (deg < WORLD_MAX_GRADE_DEG + WEAKEST_RWD_MARGIN_DEG) {
     failures++;
@@ -265,6 +279,7 @@ if (failures > 0) {
   throw new Error(`${failures} climb checks failed`);
 }
 console.log(
-  '\nno digging surface is a penalty against asphalt, and the weakest rear-drive car ' +
-    `clears the world's ${WORLD_MAX_GRADE_DEG.toFixed(1)} degrees with margin`,
+  '\nno digging surface and no surface the road is made of is a penalty against asphalt, ' +
+    `and the weakest rear-drive car clears the world's ` +
+    `${WORLD_MAX_GRADE_DEG.toFixed(1)} degrees with margin`,
 );
