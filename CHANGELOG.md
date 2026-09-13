@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Removed
+
+- THE FULL-SCREEN SCENE BLUR. It was a `backdrop-filter` over the whole viewport, so the
+  compositor had to read back the frame the 3D pass had just drawn and filter it before
+  anything else could land on top — every frame, for as long as it existed, because the
+  scene beneath it is never still. That is a full-frame read and write per frame, and on a
+  phone it is a real one.
+  The radius was 0.08 px, and it turns out to have been doing nothing at all. Measured:
+  with the loop stopped and CSS animations frozen so the composited frame was provably
+  static — the same state captured twice gave a byte-identical PNG — a probe element with
+  `blur(0.08px)` produced a PNG byte-identical to the frame with no element at all, same
+  SHA-256. The same probe at 6 px changed the output substantially, so the test could see a
+  blur and the null result is real rather than a blind test. An invisible effect bought
+  with a per-frame compositor pass is the worst trade in the file, and it is gone.
+  The title screen's background blur is a different thing and is untouched: that is a
+  `filter` on a static image behind the menu, not a `backdrop-filter` over the live scene,
+  and it costs nothing while driving.
+
 ## 0.15.0 — 2026-09-13
 
 ### Added
