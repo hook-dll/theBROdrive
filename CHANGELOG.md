@@ -543,6 +543,26 @@
 
 ### Fixed
 
+- THE SCREEN CAME BACK. The contact occlusion added in this release darkened FLAT OPEN
+  GROUND under the driving camera — measured, empty desert went to 219 of 255 in a band
+  three to six metres from the eye, a soft blob that followed the car because the camera
+  follows the car. That is the whole of what a player reported as ghosting around the
+  vehicle and pale bubbles drifting over the desert: one artifact, not two. Nothing was
+  occluding anything. The ground's own depth changes fast with screen position at close
+  range, so the far side of the sample disc is genuinely further from the eye than its
+  centre, which is exactly what an occluder looks like to a test that compares depths and
+  nothing else. Three attempts at cancelling that gradient each traded one artifact for
+  another, and the pass is REMOVED rather than patched a fourth time: it was worth a
+  grounding cue, not a rewrite of the shader's depth handling, and the contact patches
+  below do the same job from data the vehicle already knows. The shader now compiles and
+  renders under a real GL context, which was checked directly after the removal.
+- Contact patches stopped being stripes. Their length was taken from the wheel radius at
+  0.95 of it, which on a Zhiguli drew 0.56 by 0.21 m — three to four times too long, and a
+  stripe reads as a smeared shadow or a tyre mark rather than as a wheel standing on
+  something. A real footprint is about as long as it is wide, because its length is set
+  by load and pressure rather than by radius; 0.35 of the radius is a real patch's
+  half-length, and the patch is square at 0.21 by 0.21 m on the same car.
+
 - LETTING GO OF A PEDAL NOW MEANS SOMETHING. A keyboard pedal is a switch, so the input
   layer's ramp is the only thing that turns a press into a dose — and the release was
   the half that was wrong. At a 0.3 s decay, releasing a key did not release the pedal:

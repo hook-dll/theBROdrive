@@ -332,30 +332,6 @@ export function createHeatMirageUniforms(
  */
 const INK_THRESHOLD = 0.14;
 
-/**
- * CONTACT OCCLUSION: how hard, how wide, and over what depth band.
- *
- * The radius is a WORLD distance, which is the whole reason this reads as contact rather
- * than as grime: a rock is darkened by the corner it stands on by the same amount at any
- * distance, instead of more when it is far away. 0.35 m is roughly a boot's width — wide
- * enough to catch a pole base, a rock's underside and the gap between a tyre and the
- * ground, and far too small to touch a dune.
- *
- * The band is the range of depth difference that counts as contact. Below the bias,
- * two surfaces are the SAME surface as far as this is concerned and a flat road on a
- * slope does not darken itself; above the bias plus the range, an occluder is too far
- * in front to be touching and is ignored — which is what stops a hillside darkening the
- * road in front of it.
- *
- * The strength is deliberately modest. This is not ambient occlusion as a lighting
- * model, it is a grounding cue, and over a bright desert a strong version reads as dirt
- * on the lens. It is off entirely on the cheapest tier, where the six extra depth reads
- * per pixel are the kind of cost that tier exists to avoid.
- */
-const AO_STRENGTH = 0.45;
-const AO_RADIUS_M = 0.35;
-const AO_BIAS_M = 0.02;
-const AO_RANGE_M = 0.5;
 
 /**
  * Fullscreen triangle: three clip-space vertices, one corner padded to cover the whole
@@ -487,10 +463,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uViewTintStrength;
   uniform float uBinoculars;
   uniform float uCameraViewfinder;
-  uniform float uAoStrength;
-  uniform float uAoRadiusM;
-  uniform float uAoBiasM;
-  uniform float uAoRangeM;
 
   uniform float SCALE_HEIGHT_M;
   uniform float REF_PATH_M;
@@ -527,52 +499,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       ((uCameraFar - uCameraNear) * depth - uCameraFar);
   }
 
-  /**
-   * CONTACT OCCLUSION, in screen space against the depth the scene pass already wrote.
-   *
-   * What this adds is the one thing a desert has none of and every object in one needs:
-   * the darkening where something meets the ground. Rocks, poles, car bodies and tyres
-   * all sit ON the sand with no shadow under them, because the only shadow source is a
-   * 144 m shadow map whose texels are 7 cm across and 117 cm along the light at a low
-   * sun. Where a surface meets another surface, this finds it at pixel resolution.
-   *
-   * Six taps on a disc whose radius is a WORLD distance, so an object is darkened by the
-   * same amount whether the camera is beside it or thirty metres away. A sample counts
-   * as an occluder when it is NEARER the eye than the fragment's own plane and within
-   * the AO range of it: the first condition is geometry in front, the second is what
-   * stops a distant hillside darkening the road it stands behind.
-   *
-   * The disc is walked on a golden angle rather than in a fixed cross, so six taps do
-   * not read as six taps — a regular pattern puts a visible starburst into every
-   * corner it touches, and it is the same six texture reads either way.
-   *
-   * THE SURFACE'S OWN SLOPE IS NOT REMOVED, and that was measured rather than assumed.
-   * Fitting a local plane from four extra taps is the textbook answer, and it was built
-   * and then taken back out: driving this shader with a synthetic depth buffer, a
-   * 20-degree ramp — the steepest face this world generates —
-   * produced no self-darkening with or without the plane, because a 0.35 m disc steps
-   * only 0.13 m along a face that shallow, which the band below already ignores. What
-   * the plane did cost was the contacts it exists to find: the taps it is fitted to are
-   * contaminated by the very edge being looked for, and a 0.4 m step's darkening fell
-   * from 32 levels to 22 while a 0.15 m one vanished altogether.
-   */
-  float contactAO(vec2 uv, float viewZ, vec2 discUv) {
-    float occlusion = 0.0;
-    for (int i = 0; i < 6; i++) {
-      float angle = float(i) * 2.39996323;
-      // Radius grows over the six so the taps cover the disc rather than its rim.
-      float t = 0.35 + 0.65 * (float(i) / 5.0);
-      vec2 offset = vec2(cos(angle), sin(angle)) * discUv * t;
-      float neighbourZ = -perspectiveDepthToViewZ(texture2D(tDepth, uv + offset).x);
-      // Positive when the neighbour stands PROUD of this pixel's own plane, which is
-      // geometry in front of it rather than the same surface continuing.
-      float inFront = viewZ - neighbourZ;
-      occlusion +=
-        smoothstep(uAoBiasM, uAoBiasM + uAoRangeM, inFront) *
-        (1.0 - smoothstep(uAoBiasM + uAoRangeM, uAoBiasM + uAoRangeM * 2.0, inFront));
-    }
-    return occlusion / 6.0;
-  }
 
   /** Actual distance from the eye to the first rendered surface on this pixel ray. */
   float sceneDistance(vec2 uv, vec3 viewDir) {
@@ -764,22 +690,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
     color.rgb = mix(color.rgb, vec3(0.78, 0.69, 0.56), sandVeil);
 
-    // Contact occlusion, before the grade so the darkened pixel is graded like any
-    // other. Only where there is geometry: the sky and the stars write hardware depth at
-    // the far plane, and the pixel nearest them is the skyline, which has nothing to be
-    // occluded by.
-    if (uAoStrength > 0.0 && airDistance < uCameraFar * 0.999) {
-      float viewZ = -perspectiveDepthToViewZ(texture2D(tDepth, uv).x);
-      // The disc's radius in UV. A world offset of r at distance z subtends r/z radians,
-      // and one radian spans 0.5/tan(halfFov) of the frame's height — halved again across
-      // the width, because UV.x is the aspect-corrected axis.
-      float aspect = uResolution.x / uResolution.y;
-      vec2 discUv = vec2(
-        (uAoRadiusM / max(0.6, viewZ)) * (0.5 / uTanHalfFov) / aspect,
-        (uAoRadiusM / max(0.6, viewZ)) * (0.5 / uTanHalfFov)
-      );
-      color.rgb *= 1.0 - contactAO(uv, viewZ, discUv) * uAoStrength;
-    }
 
     // ACES has already supplied the filmic shoulder and soft contrast in the scene
     // pass. This display-space finish stays deliberately smaller: a modest
@@ -1011,12 +921,6 @@ export class Renderer {
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
         uCameraViewfinder: { value: 0 },
-        // Off for a scene rendered without depth of its own — see the tier note in the
-        // constructor — and on everywhere else.
-        uAoStrength: { value: quality === 'acceptable' ? 0 : AO_STRENGTH },
-        uAoRadiusM: { value: AO_RADIUS_M },
-        uAoBiasM: { value: AO_BIAS_M },
-        uAoRangeM: { value: AO_RANGE_M },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -1484,9 +1388,6 @@ export class Renderer {
     this.adaptiveResolution.setQuality(quality);
     this.disposeGpuQueries();
     this.renderer.shadowMap.enabled = quality !== 'acceptable';
-    // Contact occlusion follows the shadows: both are ambient light being blocked, and
-    // both are per-pixel depth work the cheapest tier does without.
-    this.hazeMaterial.uniforms.uAoStrength.value = quality === 'acceptable' ? 0 : AO_STRENGTH;
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
