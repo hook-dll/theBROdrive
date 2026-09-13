@@ -59,6 +59,8 @@ function frame(simTickMs: readonly number[], sections: Readonly<Record<string, n
 const FRAMES = 24;
 const SIM_TICKS = [3, 2];
 const SECTIONS = { sky: 1, vista: 4, draw: 2 };
+/** Frames in an imposed run. Must stay under the profiler's own window size. */
+const RUN_FRAMES = 240;
 const SLACK = 1;
 
 for (let i = 0; i < FRAMES; i++) frame(SIM_TICKS, SECTIONS, SLACK);
@@ -92,6 +94,35 @@ check(
 const fps = Number(/([\d.]+) fps presented/.exec(report)?.[1]);
 const busy = Number(/([\d.]+) ms of CPU per second/.exec(report)?.[1]);
 const expectedBusy = (perFrameSim + perFrameRender + SLACK) * fps;
+// THE FRAME BUDGET, which is the whole of what can be known about the GPU where there is
+// no GPU timer: the interval, the CPU work inside it, and the difference. The difference is
+// the number that decides whether to go after pixels or after the simulation, so it has to
+// be exactly the difference and nothing else.
+{
+  const budget =
+    /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms waiting/
+      .exec(report);
+  check('the frame budget is reported', budget !== null, budget?.[0] ?? 'missing from the report');
+  const interval = Number(budget?.[1]);
+  const work = Number(budget?.[2]);
+  const waiting = Number(budget?.[3]);
+  check(
+    'the interval is the reciprocal of the presented rate it sits beside',
+    Math.abs(interval - 1000 / fps) < 0.05,
+    `${interval} ms against ${(1000 / fps).toFixed(2)} ms`,
+  );
+  check(
+    'the budget splits into work and waiting and loses nothing',
+    Math.abs(work + waiting - interval) < 0.01,
+    `${work} + ${waiting} = ${work + waiting} against ${interval}`,
+  );
+  check(
+    'a frame the CPU fills has nothing waiting',
+    waiting < 0.01,
+    `${waiting} ms waiting for a frame that is all work`,
+  );
+}
+
 check(
   'the presented rate is a plausible one for the frames measured',
   fps > 50 && fps < 120,
@@ -181,7 +212,9 @@ check(
    * and spends the rest of the interval idle. So each frame's work is measured and the
    * remaining interval is idle time the clock passes through unmeasured.
    */
-  const perSecond = (presentedFps: number): { sim: number; render: number; text: string } => {
+  const perSecond = (
+    presentedFps: number,
+  ): { sim: number; render: number; waiting: number; text: string } => {
     const fixed = new FrameProfiler(clock.now);
     const tickMs = 0.5;
     const renderMs = 4;
@@ -195,7 +228,7 @@ check(
     );
     // Short of a full window, so the report describes these frames rather than an empty
     // window the roll just cleared.
-    for (let i = 0; i < 239; i++) {
+    for (let i = 0; i < RUN_FRAMES - 1; i++) {
       for (let k = 0; k < ticksPerFrame; k++) {
         fixed.begin('sim');
         clock.advance(tickMs);
@@ -210,15 +243,43 @@ check(
       clock.advance(idleMs);
     }
     const text = fixed.report(60);
+    const budget =
+      /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms waiting/
+        .exec(text);
+    // TOLERANCE, and where it comes from. A window of N frames spans N-1 intervals, and
+    // the last frame is closed at the END of its work — its trailing idle has not happened
+    // yet. So the measured elapsed time is one frame's idle short, the rate reads very
+    // slightly high, and the interval and the waiting read correspondingly low. The error
+    // is one frame's idle divided by the window, which on a real 30 FPS window is under
+    // half a per cent. Stated rather than papered over, because the identity this backs —
+    // `work + waiting = interval` — is exact and is checked separately above.
+    const boundaryMs = idleMs / RUN_FRAMES;
+    check(
+      `at ${presentedFps} FPS the waiting is the rest of the interval`,
+      Math.abs(Number(budget?.[1]) - 1000 / presentedFps) < boundaryMs + 0.01
+        && Math.abs(Number(budget?.[3]) - idleMs) < boundaryMs + 0.01,
+      `${budget?.[3]} ms waiting against ${idleMs.toFixed(2)} ms of imposed idle, ` +
+        `within ${boundaryMs.toFixed(2)} ms of window boundary`,
+    );
     return {
       sim: Number(/per second: simulation (\d+) ms/.exec(text)?.[1]),
       render: Number(/\+ render (\d+) ms/.exec(text)?.[1]),
+      waiting: Number(budget?.[3]),
       text,
     };
   };
 
   const at30 = perSecond(30);
   const at60 = perSecond(60);
+  // Waiting is the diagnostic: at 30 FPS there is more interval for the same work, so the
+  // waiting must grow by exactly the extra interval. That is the relationship a reader uses
+  // to decide whether a warm device is waiting on fill.
+  // The same boundary artifact applies to each run, so a difference of two carries both.
+  check(
+    'a slower presentation has proportionally more waiting, for the same work',
+    Math.abs((at30.waiting - at60.waiting) - (1000 / 30 - 1000 / 60)) < 0.6,
+    `30 FPS ${at30.waiting.toFixed(2)} ms against 60 FPS ${at60.waiting.toFixed(2)} ms`,
+  );
   check(
     'the simulation costs the same per second however often the frame is presented',
     Math.abs(at30.sim - at60.sim) <= 1,

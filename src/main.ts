@@ -524,6 +524,18 @@ async function boot(): Promise<void> {
     ? (): string => {
         const s = world.state.settings;
         const gpuMs = renderer.gpuFrameMs;
+        const measuresGpu = renderer.measuresGpuTime;
+        // THREE STATES, NOT TWO. "Not measurable" and "not measured yet" are different
+        // answers and only one of them is about the device: `gpuFrameMs` is also null
+        // immediately after any resolution change, because the controller throws its
+        // evidence away, so a machine that measures its GPU perfectly well would have been
+        // told its GPU could not be measured. Reporting the wrong one of these sends
+        // somebody hunting a browser limitation they do not have.
+        const gpuLine = !measuresGpu
+          ? 'GPU time NOT MEASURABLE: this browser exposes no timer query'
+          : gpuMs === null
+            ? 'GPU time available, no sample yet (a resolution change clears the average)'
+            : `GPU ${gpuMs.toFixed(2)} ms per frame`;
         // Both figures come from the one constant the loop steps at, so a change to the
         // simulation rate can never leave the report describing a rate the game is not
         // running. The header and the per-second split have to agree about it.
@@ -545,13 +557,25 @@ async function boot(): Promise<void> {
           `presenting ${framesPerSecond}, shadows ` +
             `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
             `msaa ${s.msaa ? 'on' : 'off'}`,
-          `GPU ${gpuMs === null ? 'not measurable on this device' : `${gpuMs.toFixed(2)} ms per frame`}`,
+          gpuLine,
           `simulation ${simulationHz} Hz, sim ticks per frame ` +
             `${(simulationHz / (mobilePresentation ? s.mobileFrameRate : simulationHz)).toFixed(1)}`,
           `light slots ${spotSlots} spot + ${pointSlots} point = ${spotSlots + pointSlots} ` +
             `per lit fragment, stars to magnitude ${stars}`,
-        ].join('\n');
-        return `${header}\n\n${frameProfiler?.report(simulationHz) ?? 'profiler unavailable'}`;
+        ];
+        // WHEN THERE IS NO GPU TIMER — every Android browser, which is the device whose
+        // heat started this — the frame budget below is the whole of what can be known, and
+        // the only way to attribute its `waiting` is to change something and watch. MSAA is
+        // the one such change that is both a single variable and applied without a reload:
+        // it multiplies the scene pass's sample work and touches nothing else. If turning it
+        // off does not move the waiting, the scene pass is not what the frame is waiting for.
+        if (!measuresGpu) {
+          header.push(
+            'Attribution without a timer: toggle MSAA on the Display tab and re-read.',
+            'Waiting that shrinks with it is the scene pass; waiting that does not is elsewhere.',
+          );
+        }
+        return `${header.join('\n')}\n\n${frameProfiler?.report(simulationHz) ?? 'profiler unavailable'}`;
       }
     : undefined;
   const modelWarmups = new Map<string, Promise<void>>();

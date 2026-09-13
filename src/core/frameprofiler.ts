@@ -78,13 +78,28 @@ export class FrameProfiler {
   /** Length of the current window, seconds. The divisor for every per-second figure. */
   private elapsedSeconds = 0;
 
+  /**
+   * Starts the window at the first work of ANY kind, not at the first presented frame.
+   *
+   * A frame's simulation runs BEFORE its `beginFrame`, several ticks of it, so opening the
+   * window there left that work outside the elapsed time the report divides by: the window
+   * then described less time than it contained work, and `busy` could exceed the interval
+   * it was supposed to fit inside — measured, 13.00 ms of work against a 12.79 ms interval,
+   * which makes the waiting clamp to zero and hides the very figure the report exists to
+   * show. Opening on the first sample of either kind makes the span exact by construction.
+   */
+  private ensureWindowStarted(): number {
+    const now = this.clock();
+    if (this.windowStartMs === 0) this.windowStartMs = now;
+    return now;
+  }
+
   beginFrame(): void {
-    this.renderStart = this.clock();
-    if (this.windowStartMs === 0) this.windowStartMs = this.renderStart;
+    this.renderStart = this.ensureWindowStarted();
   }
 
   begin(section: SampleKey): void {
-    this.open.set(section, this.clock());
+    this.open.set(section, this.ensureWindowStarted());
   }
 
   end(section: SampleKey): void {
@@ -157,6 +172,25 @@ export class FrameProfiler {
     lines.push(
       `[perf] per frame: simulation ${simMs.toFixed(2)} ms + render ${renderWallMs.toFixed(2)} ms ` +
         `= ${busyMsPerFrame.toFixed(2)} ms of work`,
+    );
+
+    // THE FRAME BUDGET, and the only handle on the GPU where there is no GPU timer.
+    //
+    // `waiting` is time inside a presented frame that no measured CPU section accounts
+    // for. It is not idle: it is the CPU blocked, most often on the GPU finishing, on the
+    // compositor, or on the display. Which of those it is cannot be read from here — a
+    // browser exposes no GPU timer on most mobile platforms, deliberately — but its SIZE
+    // is the question that matters, and a change in the size across a change in the
+    // settings tells them apart by intervention.
+    //
+    // The interval is the presented cadence, so while the machine is meeting its target
+    // this is the interval it meters and while it is not, it is what the frame really
+    // cost. Either reading is useful; neither is an estimate.
+    const intervalMs = framesPerSecond > 0 ? 1000 / framesPerSecond : 0;
+    const waitingMs = Math.max(0, intervalMs - busyMsPerFrame);
+    lines.push(
+      `[perf] frame budget: ${intervalMs.toFixed(2)} ms per presented frame = ` +
+        `${busyMsPerFrame.toFixed(2)} ms of CPU work + ${waitingMs.toFixed(2)} ms waiting`,
     );
 
     // WHICH HALF A FRAME RATE CAN REACH.
