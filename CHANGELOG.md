@@ -364,6 +364,20 @@
 
 ### Changed
 
+- THE FRAME REPORT WAS UNREADABLE ON THE DEVICE IT WAS BUILT FOR. `white-space: pre`
+  with `overflow-x: auto` meant a long line ran past the panel and scrolled silently away
+  in landscape on a phone — the frame budget line was written, rendered, and never seen,
+  which is the worst possible outcome for a readout that exists to be read there. It is
+  `pre-wrap` now; the aligned summary table stays aligned and the prose lines reach the eye.
+  Verified: the readout reports nothing to scroll (`scrollW 596` against `clientW 596`).
+- The report prints DRAW CALLS AND TRIANGLES per frame, because that is what separates a
+  frame which is slow because it FILLS a lot of pixels from one which is slow because it
+  ISSUES a lot of work — and the two want opposite fixes. Three resets its counters at the
+  start of every `render` call, so with two passes the counters described only the second,
+  which is a single fullscreen triangle: worse than no reading at all, because it looks
+  like an answer. Auto-reset is off and the frame resets them explicitly. Measured on a
+  desktop at the top rung: 121 calls, 217k triangles.
+
 - THE FRAME REPORT SAYS WHAT THE FRAME IS WAITING FOR, which is the question a phone
   without a GPU timer otherwise cannot answer at all. A new line gives the budget: the
   presented interval, the CPU work inside it, and the difference. The difference is not

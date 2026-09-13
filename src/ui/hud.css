@@ -1223,10 +1223,17 @@ body.is-cinematic #ui {
 }
 
 /* The development frame readout: monospace and preformatted, because it is a table
-   of numbers that has to line up to be readable, and it is copied by eye. */
+   of numbers that has to line up to be readable, and it is copied by eye.
+
+   `pre-wrap`, NOT `pre`. This is read on a phone in landscape, where a long line runs
+   past the panel and `overflow-x: auto` scrolls it away silently — the frame budget line
+   was written, rendered, and never seen, which is the worst possible outcome for a
+   readout that exists to be read on that exact device. Wrapping keeps the aligned summary
+   table aligned and lets the prose lines reach the eye. */
 .menu-perf {
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow-x: auto;
   color: var(--menu-text, #e8dcc4);
   background: rgba(0, 0, 0, 0.28);

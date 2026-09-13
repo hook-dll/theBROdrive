@@ -893,6 +893,14 @@ export class Renderer {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
+    // Draw statistics are accumulated by hand across BOTH passes of a frame.
+    //
+    // Three resets its counters at the start of every `render` call by default, so after
+    // this renderer's two passes the counters describe only the second one — the single
+    // fullscreen triangle. That is worse than no reading at all, because it looks like an
+    // answer. With auto-reset off and an explicit reset at the top of the frame, the
+    // counters describe the frame.
+    this.renderer.info.autoReset = false;
 
     const viewportWidth = Math.max(1, canvas.clientWidth);
     const viewportHeight = Math.max(1, canvas.clientHeight);
@@ -1183,6 +1191,7 @@ export class Renderer {
   }
 
   private drawFrame(): void {
+    this.renderer.info.reset();
     // Seconds. The field's drift rates are metres per second in its own sampled
     // space, so time here has to be real time and nothing else.
     this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
@@ -1310,6 +1319,25 @@ export class Renderer {
   /** Whether this context can time the GPU. Without it the scale never moves. */
   get measuresGpuTime(): boolean {
     return this.timerQueryExt !== null;
+  }
+
+  /**
+   * Draw calls submitted by the last frame, both passes together.
+   *
+   * The number that separates a frame which is slow because it FILLS a lot of pixels from
+   * one which is slow because it ISSUES a lot of work. Those two have opposite fixes, and
+   * the CPU cost of submitting a frame (`draw` in the profiler) is dominated by the second:
+   * measured on a phone, cutting the pixel budget by nearly three times and the light slots
+   * by three moved the draw cost by twenty per cent, which is the signature of per-call
+   * overhead rather than fill rate.
+   */
+  get drawCalls(): number {
+    return this.renderer.info.render.calls;
+  }
+
+  /** Triangles submitted by the last frame, both passes together. */
+  get drawnTriangles(): number {
+    return this.renderer.info.render.triangles;
   }
 
   /**
