@@ -16,14 +16,83 @@ export const enum SurfaceType {
   Sand = 3,
   Rock = 4,
   Concrete = 5,
+  /**
+   * The loose verge outside the asphalt edge, 3.5 m of it each side.
+   *
+   * NOT the same material as the `Gravel` a road district is made of, and treating the
+   * two as one was a modelling error worth naming. A gravel DISTRICT is a graded road
+   * somebody maintains: the surface course is packed, its fines have been rolled in,
+   * and it is driven briskly. A verge is everything the grader pushed off that road —
+   * loose, uncompacted, deeper, and never driven on except by mistake. The measured
+   * difference is large: packed gravel is mu 0.6 with 0.012 of rolling resistance and
+   * loose gravel is mu 0.35 with 0.06 (Moyer's rolling-friction figures, and the WSP
+   * loose-gravel study). That is a surface which gives way under a wheel.
+   *
+   * It matters here because this road is deliberately narrow, so the verge is exactly
+   * where a mistake puts you, and it should cost something — a moment of scrabbling
+   * and a puff of dust — without being the desert.
+   */
+  LooseShoulder = 6,
 }
 
+/**
+ * ONE SURFACE, ONE SET OF REAL COEFFICIENTS.
+ *
+ * These two fields used to be different animals sharing a name. `frictionSlip` was a
+ * Rapier friction-cone budget — asphalt 2.6, sand 2.8 — which the tyre model then
+ * multiplied by 0.38 to reach a mu, while `sideFriction` was already a plain fraction
+ * of asphalt. Nothing kept the two in step and nothing could: one was a solver input
+ * and the other a coefficient, so the table had no single meaning and no way to check.
+ * That is exactly how sand became the best braking surface in the game — 2.8 was
+ * chosen to stop two-wheel drives bogging, and nobody asked what it did to the brakes.
+ *
+ * Both channels are now the same physical quantity: the PEAK FRICTION COEFFICIENT this
+ * surface offers a reference tyre of grip 1.0, dry, at nominal load. The tyre model
+ * multiplies them by the car's own `wheelGrip` and by the load, slip, lock and
+ * temperature factors, and each car's achieved figure is then whatever its weight
+ * transfer and slip curve make of it — the same relationship a real car has with a
+ * real road.
+ *
+ * The absolute scale is unchanged on purpose: asphalt keeps the numbers it has always
+ * had (0.99 longitudinal, 1.70 lateral), so every car in the catalogue brakes, corners
+ * and accelerates, and every bench in `tools/`, exactly as before. What changed is the
+ * RELATIVE grip of the other surfaces, which now comes from measured road data instead
+ * of from a chain of retunings.
+ *
+ * Sources for the relative figures, dry, car tyre:
+ *  - dry asphalt and concrete mu 0.7-0.8; loose gravel drops from 0.8 to 0.35 and
+ *    packed gravel sits near 0.6 (FEMA road-surface-friction survey; the WSP
+ *    loose-gravel study; Moyer's rolling-resistance figures of 0.008 on a hard road,
+ *    0.012 on dry firm packed gravel and 0.06 on wet loose gravel).
+ *  - sand: peak drawbar-pull coefficient 0.31-0.33 at low inflation and 0.11-0.12 at
+ *    high, with the soil's flow character changing around 0.2 of slip (single-wheel
+ *    tester work on sandy loam). A tyre on sand is not sliding over it, it is SHEARING
+ *    it, and dry loose sand has almost no shear strength to offer a 165-section tyre.
+ *  - solid rock is not slippery: a dry rock shelf is within a few per cent of dry
+ *    asphalt. What punishes a car on the desert's outcrops is the SHAPE of them, which
+ *    this table does not model and `roughness`/`microRelief`/`hummock` do.
+ */
 export interface SurfaceProps {
   readonly label: string;
-  /** Longitudinal grip relative to a normal dry-road tyre budget. */
-  readonly frictionSlip: number;
-  /** Lateral grip relative to dry asphalt, where asphalt is exactly 1. */
-  readonly sideFriction: number;
+  /**
+   * Peak longitudinal friction coefficient — traction and braking — as a fraction of
+   * the wheel's own vertical load.
+   */
+  readonly longitudinalMu: number;
+  /** Peak lateral friction coefficient, same reference. */
+  readonly lateralMu: number;
+  /**
+   * Slip ratio at which the longitudinal force peaks on this surface.
+   *
+   * The most surface-dependent number in the whole tyre model, and it used to be one
+   * constant (0.12) for the entire world. It is not one: a tyre on asphalt makes its
+   * best thrust at about an eighth of its speed in slip, and a tyre on sand has to
+   * shear a great deal more soil before the soil pushes back at all — 0.2 to 0.4, with
+   * the flow regime changing at 0.2. Using asphalt's figure on sand made the model look
+   * for the tyre's peak at a slip where sand delivers almost nothing, and then blamed
+   * the surface for the shortfall.
+   */
+  readonly optimalSlip: number;
   /** Speed-independent drag, as a fraction of vehicle weight. */
   readonly rollingResistance: number;
   /**
@@ -120,8 +189,13 @@ export interface SurfaceProps {
 export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Asphalt]: {
     label: 'asphalt',
-    frictionSlip: 2.6,
-    sideFriction: 1.0,
+    // The reference surface: every other row is stated against this one, and these two
+    // numbers are the calibration every bench in the game was read at.
+    // 0.988 is 2.6 x 0.38 to the digit — the old cone budget and its conversion,
+    // collapsed into the coefficient they always meant.
+    longitudinalMu: 0.988,
+    lateralMu: 1.7,
+    optimalSlip: 0.12,
     rollingResistance: 0.013,
     deformationDrag: 0,
     roughness: 0.012,
@@ -136,8 +210,12 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
-    frictionSlip: 2.2,
-    sideFriction: 0.84,
+    // Weathered, polished and broken. Measured dry friction on aged asphalt runs about
+    // 0.85 of new, and the slate of loose aggregate in the cracks costs a little more
+    // lateral than longitudinal grip.
+    longitudinalMu: 0.84,
+    lateralMu: 1.43,
+    optimalSlip: 0.14,
     rollingResistance: 0.018,
     deformationDrag: 0,
     roughness: 0.06,
@@ -151,10 +229,20 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Gravel]: {
     label: 'gravel',
-    frictionSlip: 1.35,
-    sideFriction: 0.25,
-    rollingResistance: 0.035,
-    deformationDrag: 0,
+    // A GRADED gravel road: 0.6 of mu measured on packed gravel against 0.8 on
+    // asphalt, so 0.75 of the reference. It is nearly isotropic — the reason loose
+    // gravel loses more laterally is that the stones roll sideways, and on a surface
+    // that has been rolled in, they do not. The old lateral figure was 0.25 of
+    // asphalt, half the longitudinal one, which made a quarter of this road's length
+    // behave like wet ice while braking on it was fine.
+    longitudinalMu: 0.72,
+    lateralMu: 1.2,
+    optimalSlip: 0.2,
+    rollingResistance: 0.02,
+    // Some ploughing, because a wheel does push a ridge of loose stone — but a graded
+    // road has little loose material on it, and this is the number that decides
+    // whether a slide on gravel slows you down or just holds you sideways forever.
+    deformationDrag: 0.12,
     roughness: 0.09,
     // Gravel is the ROUGHEST ground in the game, and it used to be quieter than sand:
     // 7 mm against sand's 18. A graded track corrugates under its own traffic —
@@ -169,20 +257,30 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Sand]: {
     label: 'sand',
-    /**
-     * Forward traction stays high enough that ordinary cars are not irrecoverably
-     * stranded between dunes. Lateral grip is a separate ratio: loose sand retains
-     * only a tenth of asphalt's cornering force, so leaving the road requires slow,
-     * momentum-conscious steering rather than behaving like a wide paved shoulder.
-     */
-    // The tyre model also scales this by the car's own wheelGrip and by
-    // LONGITUDINAL_GRIP_FRACTION. At 1.8 a VAZ-2106 could only crawl on level sand
-    // and stalled on a two-degree rise even with its driven wheels spinning. 2.8
-    // preserves the large rolling loss and poor lateral grip, but leaves enough
-    // longitudinal force for an ordinary two-wheel-drive car to cross a modest dune.
-    frictionSlip: 2.8,
-    sideFriction: 0.1,
-    rollingResistance: 0.095,
+    // THE TAR PIT, and the two channels say different things on purpose.
+    //
+    // Longitudinally it is the worst surface in the game by a wide margin: a peak
+    // drawbar coefficient of about a third against asphalt's 0.8, so 0.44 of the
+    // reference, and it needs nearly three times the slip of a road tyre to reach even
+    // that. A two-wheel drive car on honest sand cannot pull itself up a 19-degree dune
+    // — that is not a bug in this table, it is what sand is.
+    // What makes it escapable anyway is `DIG_FIRM_MU` in vehicle/vehicle.ts, a
+    // deliberate and documented concession. Read that before touching these numbers.
+    longitudinalMu: 0.44,
+    // Laterally it is poor but NOT a skating rink, and it used to be one: 0.1 of
+    // asphalt meant a car cornered at a tenth of a g, which is less grip than any
+    // surface a car is ever on. Real sand is treacherous because a wheel shears it and
+    // sinks, not because the surface is smooth.
+    lateralMu: 0.51,
+    optimalSlip: 0.3,
+    // Rolling resistance is where sand's cost really lives, and this used to be 0.095 —
+    // less than an eighth of what a car tyre actually sees on loose sand, measured at
+    // 0.2 to 0.4 with sinkage. It is now well above the road figures, which is what
+    // makes crossing a dune slow and thirsty rather than merely slippery.
+    rollingResistance: 0.16,
+    // The ploughing drag: a tyre travelling sideways through sand builds a bank against
+    // its sidewall. This is what makes a broadside skid in sand shed speed and trip the
+    // car instead of holding a clean line forever.
     deformationDrag: 0.55,
     roughness: 0.05,
     // Wind ripple, and the long hummocks under the geometry's own ~10 m corrugation
@@ -198,8 +296,14 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Rock]: {
     label: 'rock',
-    frictionSlip: 2.1,
-    sideFriction: 0.4,
+    // Dry rock is not slippery and never was: a solid shelf measures within a few per
+    // cent of dry asphalt, and this used to be 0.4 of it, which is a wet clay figure.
+    // Broken rock loses a little more laterally than longitudinally, because the loose
+    // plates on top of it move — but the outcrops earn their reputation through their
+    // SHAPE, which is what `roughness` and `microRelief` below are for.
+    longitudinalMu: 0.89,
+    lateralMu: 1.5,
+    optimalSlip: 0.14,
     rollingResistance: 0.022,
     deformationDrag: 0,
     roughness: 0.13,
@@ -213,8 +317,10 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Concrete]: {
     label: 'concrete',
-    frictionSlip: 2.5,
-    sideFriction: 0.96,
+    // Slightly denser and more uniform than asphalt, and slightly more grippy dry.
+    longitudinalMu: 0.96,
+    lateralMu: 1.65,
+    optimalSlip: 0.12,
     rollingResistance: 0.012,
     deformationDrag: 0,
     roughness: 0.006,
@@ -226,6 +332,30 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     color: 0x9a978f,
     dust: 0.0,
     smoke: 1.0,
+  },
+  [SurfaceType.LooseShoulder]: {
+    label: 'loose shoulder',
+    // Loose gravel: 0.35 of mu against 0.8 on asphalt, so 0.44 of the reference, and
+    // 0.06 of rolling resistance against a packed road's 0.012. Both figures are the
+    // measured ones, and between them they are the whole character of the surface: a
+    // car that drops a wheel here loses its line and its speed at the same time.
+    longitudinalMu: 0.44,
+    lateralMu: 0.8,
+    // Slip peaks late because the material has to be sheared, like sand and unlike the
+    // packed district gravel above.
+    optimalSlip: 0.26,
+    rollingResistance: 0.06,
+    // Deeper loose material than a graded district, so it ploughs more.
+    deformationDrag: 0.32,
+    roughness: 0.075,
+    // The grader's spoil: coarser than the district's surface course and never rolled,
+    // so it holds a coarser ripple than the road it came off.
+    microRelief: 0.022,
+    hummock: 0.038,
+    texture: 0.006,
+    color: 0x8a7d63,
+    dust: 0.8,
+    smoke: 0.1,
   },
 };
 

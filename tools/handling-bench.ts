@@ -183,12 +183,23 @@ function addGround(physics: PhysicsWorld, surface = SurfaceType.Asphalt): void {
   );
 }
 
-function addInclineGround(
+/**
+ * A ramp of a given grade, centred on the origin and rising towards +Z.
+ *
+ * `halfDepthM` matters more than it looks. The default 30 m is plenty for the launch
+ * checks, which only ever need the first second or two. A run measured over ten seconds
+ * at 20-40 km/h covers well over a hundred metres, so it would drive off the top of a
+ * 30 m ramp and measure a falling car: an early version of the pull-away sweep reported
+ * a car that had climbed 20 m as having descended 38, because the "lowest point" it
+ * tracked was the ground it finally hit. Callers that run long must ask for a long ramp.
+ */
+export function addInclineGround(
   physics: PhysicsWorld,
   degrees: number,
   surface = SurfaceType.Asphalt,
+  halfDepthM = 30,
 ): void {
-  const halfDepth = 30;
+  const halfDepth = halfDepthM;
   const rise = Math.tan((degrees * Math.PI) / 180) * halfDepth;
   physics.addStaticTrimesh(
     new Float32Array([
@@ -212,7 +223,7 @@ function addRollbackGround(physics: PhysicsWorld): void {
   addInclineGround(physics, 8);
 }
 
-interface Rig {
+export interface Rig {
   physics: PhysicsWorld;
   vehicle: Vehicle;
   scene: THREE.Scene;
@@ -228,7 +239,7 @@ interface Rig {
  * goes through the same drawbar hitch the game uses, so what the bench measures is
  * the real constraint and the real tongue weight, not an approximation of them.
  */
-async function makeRig(
+export async function makeRig(
   modelId: string,
   ground: (physics: PhysicsWorld) => void = addGround,
   settleWithHandbrake = false,
@@ -273,13 +284,29 @@ async function makeRig(
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
     rig.trailer?.fixedUpdate(FIXED_DT);
     rig.physics.step();
+    // PARKED, NOT ROLLING AWAY. A car being measured on a grade is one that was
+    // standing there on its handbrake, and this is the fixture that makes the rig be
+    // that car. Without it a rig on anything steep starts sliding the moment it lands
+    // and is doing several metres a second by the time the run begins — which is not
+    // merely a bad zero, it is a different scenario: the automatic will not engage a
+    // gear above AUTO_NEUTRAL_ENGAGE_MPS, so the run would measure a runaway car in
+    // neutral and report every steep grade as unclimbable for that reason alone.
+    // Measured on a 21-degree sand slope before this: 203 m of rollback and no gear.
+    //
+    // Horizontal and angular only. Gravity still settles it onto its springs, which is
+    // the thing the 180 steps are actually for.
+    if (settleWithHandbrake) {
+      const v = rig.vehicle.chassis.linvel();
+      rig.vehicle.chassis.setLinvel({ x: 0, y: v.y, z: 0 }, true);
+      rig.vehicle.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
     rig.vehicle.postStep();
     rig.trailer?.postStep();
   }
   return rig;
 }
 
-function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFrame) => void): void {
+export function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFrame) => void): void {
   const steps = Math.round(seconds / FIXED_DT);
   for (let i = 0; i < steps; i++) {
     shape(i * FIXED_DT, rig.input);
@@ -985,9 +1012,10 @@ export async function runSurfaceCorneringCheck(
 }
 
 /**
- * Full-throttle standing start on flat ground. The wheel-speed excess is the
- * quantity TCS controls; checking it beside progress catches both failure modes:
- * a launch that burns the tyres and one that cuts so much torque the car bogs.
+ * Full-throttle standing start on flat ground. The wheel-speed excess and the
+ * progress are checked together, because a launch can fail in both directions: one
+ * that burns the tyres on the sliding plateau, and one that bogs with no motive force
+ * at all.
  */
 export async function runLaunchTractionCheck(
   modelId = 'gt_vaz2110',
@@ -1029,10 +1057,62 @@ export async function runLaunchTractionCheck(
 }
 
 /**
+ * How steep a grade a body can still pull away on, by bisection, degrees.
+ *
+ * A standing start on an endless ramp is the WORST case a car can meet, not the normal
+ * one, and that is exactly what makes it the right instrument for a loose surface: it
+ * answers "if this car ends up stopped here, can it get going again". On sealed ground
+ * it answers a different and less useful question, because a road is driven with
+ * momentum and a hill is short — see `tools/climb-sweep.ts`, which prints the sealed
+ * ceilings for information and asserts only on the surfaces that form open slopes.
+ *
+ * Bisection rather than a fixed ladder because the answer is a threshold, and a
+ * threshold is what an assertion can hold.
+ */
+export async function steepestPullAwayDeg(
+  modelId: string,
+  surface: SurfaceType,
+  maxDeg = 30,
+): Promise<number> {
+  await preloadCarModels([modelId]);
+  const attempt = async (deg: number): Promise<boolean> => {
+    const rig = await makeRig(
+      modelId,
+      (physics) => addInclineGround(physics, deg, surface, 150),
+      true,
+    );
+    const start = rig.vehicle.chassis.translation();
+    let lowest = start.y;
+    drive(rig, 10, (_, input) => {
+      input.throttle = 1;
+      input.reverse = false;
+      input.steer = 0;
+      input.handbrake = false;
+      const y = rig.vehicle.chassis.translation().y;
+      if (y < lowest) lowest = y;
+    });
+    const end = rig.vehicle.chassis.translation();
+    const climbed = end.y - lowest;
+    const speed = rig.vehicle.audio.forwardMps;
+    rig.vehicle.dispose();
+    return climbed > 1 && speed > 0.5;
+  };
+  if (!(await attempt(4))) return 4;
+  let low = 4;
+  let high = maxDeg;
+  for (let i = 0; i < 5; i++) {
+    const mid = (low + high) / 2;
+    if (await attempt(mid)) low = mid;
+    else high = mid;
+  }
+  return Math.round(low * 10) / 10;
+}
+
+/**
  * Pull-away on a loose incline. This protects the low-speed contract that matters
- * outside the flat-road launch check: TCS may permit wheelspin, but it must not hold
- * a sound two-wheel-drive car motionless. Eight seconds also covers the transition
- * from controlled crawl to ordinary rolling speed.
+ * outside the flat-road launch check: a sound two-wheel-drive car must be able to get
+ * moving from rest on a loose slope. Eight seconds also covers the transition from the
+ * launch to ordinary rolling speed.
  */
 export async function runInclineLaunchCheck(
   modelId = 'sv_vaz2106',

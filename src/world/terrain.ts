@@ -37,8 +37,19 @@ export const CORRIDOR_OUTER = 30;
  */
 const RELIEF_FULL = 200;
 
-/** Width of the gravel verge outside the asphalt, in metres. */
+/** Width of the loose verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
+
+/**
+ * What a wheel standing on the verge is standing on.
+ *
+ * NOT `Gravel`. The verge is the spoil the grader pushed off the road: loose,
+ * uncompacted and never driven on, where a gravel DISTRICT is a packed surface course
+ * somebody maintains and drives briskly. They measure differently enough to be
+ * different materials — see `SurfaceType.LooseShoulder` — and the verge is where a
+ * mistake on this deliberately narrow road puts you, so it has to be the honest one.
+ */
+const VERGE_SURFACE = SurfaceType.LooseShoulder;
 
 /**
  * Prevailing-wind basis for every dune band. Stretching noise along one fixed axis
@@ -634,7 +645,13 @@ export class Terrain {
 
   /** `surfaceAt` for a caller that already knows the lateral offset. */
   surfaceFromFrame(x: number, z: number, lateral: number, s: number): SurfaceType {
-    if (Math.abs(lateral) <= this.road.halfWidthAt(s) + VERGE_WIDTH) return SurfaceType.Gravel;
+    const toEdge = Math.abs(lateral) - this.road.halfWidthAt(s);
+    // Inside the paint the ROAD collider owns the contact and this answer is only
+    // reachable if a wheel has slipped through the ribbon, so it keeps the district
+    // material as a harmless default. Outside it is the shoulder, and past that the
+    // open desert.
+    if (toEdge <= 0) return SurfaceType.Gravel;
+    if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
 
@@ -649,7 +666,9 @@ export class Terrain {
     // collider about that or a wheel that crosses the seam changes surface twice.
     if (onTerminusPad(x, z)) return SurfaceType.Asphalt;
     const p = this.road.project(x, z, hintS);
-    if (Math.abs(p.lateral) <= this.road.halfWidthAt(p.s) + VERGE_WIDTH) return SurfaceType.Gravel;
+    const toEdge = Math.abs(p.lateral) - this.road.halfWidthAt(p.s);
+    if (toEdge <= 0) return SurfaceType.Gravel;
+    if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
 

@@ -441,8 +441,7 @@ body.is-cinematic #ui {
 
 .hud-indicator-lamp,
 .hud-gear,
-.hud-handbrake,
-.hud-tcs {
+.hud-handbrake {
   display: flex;
   box-sizing: border-box;
   width: 22px;
@@ -507,19 +506,6 @@ body.is-cinematic #ui {
   opacity: 1;
   background: rgba(106, 32, 22, 0.72);
   text-shadow: 0 0 6px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
-}
-
-.hud-tcs {
-  color: var(--hud-diesel);
-  font-size: 9px;
-  letter-spacing: 0.02em;
-  opacity: 0.16;
-}
-
-.hud-tcs.is-active {
-  opacity: 1;
-  background: rgba(80, 65, 17, 0.72);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-diesel) 75%, transparent);
 }
 
 .hud-fuel.is-alarm .hud-aux-needle,

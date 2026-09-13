@@ -230,7 +230,7 @@ export class Drivetrain {
    * 60 Hz step. Any dip in load (a pothole, a crest, a bump) was therefore an instant
    * wheelspin, traction control cut 85% of the torque to answer it, and the car could
    * not accelerate: measured on the real road collider, 0-100 km/h took 14.8 s
-   * against 8.6 s on a flat plane of the same asphalt, with the TCS lamp lit 68% of
+   * against 8.6 s on a flat plane of the same asphalt, with the aid then fitted lit 68% of
    * the run (tools/surface-feel.ts).
    *
    * `drivenWheels` is the divisor because that is how the torque is split. Through an
