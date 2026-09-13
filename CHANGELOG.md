@@ -364,6 +364,27 @@
 
 ### Changed
 
+- THE FRAME REPORT SAYS WHAT THE FRAME IS WAITING FOR, which is the question a phone
+  without a GPU timer otherwise cannot answer at all. A new line gives the budget: the
+  presented interval, the CPU work inside it, and the difference. The difference is not
+  idle — it is the CPU blocked, most often on the GPU, and its SIZE is what decides whether
+  to go after pixels or after the simulation. It is exact rather than estimated, and it
+  needs no timer, so it works on the devices that have none.
+- `GPU not measurable` was reported for two different situations, and only one of them is
+  about the device. `gpuFrameMs` is also null immediately after any resolution change,
+  because the controller discards its evidence, so a machine that measures its GPU perfectly
+  well was being told its GPU could not be measured — which sends somebody hunting a browser
+  limitation they do not have. The report now distinguishes no-timer from no-sample-yet, and
+  where there is no timer it says how to attribute the waiting by hand: toggle MSAA and
+  re-read, because a waiting that shrinks with it is the scene pass and one that does not is
+  elsewhere.
+- The window opened at the first presented frame rather than at the first work of any kind,
+  and a frame's simulation runs BEFORE its `beginFrame`. The elapsed time the report divides
+  by was therefore shorter than the work it contained: measured, 13.00 ms of work against a
+  12.79 ms interval, which clamped the waiting to zero and hid the very figure the report
+  exists to show. Opening on the first sample of either kind makes the span exact by
+  construction.
+
 - A PHONE IS NEVER ASKED FOR A DESKTOP'S LIGHT LOOP, which is the largest per-pixel cost
   in the game and the one that explains the heat. Three compiles the light count into every
   lit material as an unrolled loop bound, so every lit fragment evaluates every slot —
