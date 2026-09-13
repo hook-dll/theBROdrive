@@ -122,6 +122,21 @@ interface ModeConfig {
    * when the road makes them.
    */
   readonly lanePasses: boolean;
+  /**
+   * Share of a loose surface's own grip a driver of this character dares to use.
+   *
+   * `SURFACE_SPEED_FACTOR` is one table for every driver, and it was set to the bound a
+   * FRANTIC driver needed: at 0.72 on gravel it arrived at a bend, stood on the brake
+   * inside it, lost the front and ran 1.2 m past the asphalt, so gravel came down to
+   * 0.50. That is a bound on the controller, not on the surface — and charging every
+   * driver the same 0.50 made the whole ambient stream crawl, because the stream has no
+   * frantic drivers in it at all (see the traffic driver draw: sleeper and hurried only).
+   *
+   * So the strict bound is the frantic driver's, and this is the dial that says so. 1
+   * spends the surface's whole grip ratio; frantic's 0.7 reproduces the measured grave
+   * bound (0.72 x 0.7 = 0.50) for the only character that had earned it.
+   */
+  readonly looseSurfacePace: number;
 }
 
 /**
@@ -163,6 +178,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     lanePasses: false,
     passCurvature: 0.012,
     passNerve: 1,
+    looseSurfacePace: 1,
   },
   /**
    * The driver with somewhere to be and a licence to keep. 105 km/h, a cornering
@@ -192,6 +208,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     lanePasses: false,
     passCurvature: 0.010,
     passNerve: 0.88,
+    looseSurfacePace: 1,
   },
   frantic: {
     cruiseMps: 130 / 3.6,
@@ -219,6 +236,10 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     // Two thirds of the cautious margins. It is in a hurry, it takes the smaller
     // window, and it gets back in.
     passNerve: 0.66,
+    // The one place frantic is deliberately the slowest of the three: 0.7 of a loose
+    // surface's grip ratio is the bound it was measured running off the road at, and it
+    // keeps it. The careful modes spend the whole ratio.
+    looseSurfacePace: 0.7,
   },
 };
 
@@ -281,15 +302,24 @@ const GRAVITY = 9.81;
 const SURFACE_SPEED_FACTOR: Readonly<Record<SurfaceType, number>> = {
   [SurfaceType.Asphalt]: 1,
   [SurfaceType.CrackedAsphalt]: 0.92,
-  [SurfaceType.Gravel]: 0.5,
-  [SurfaceType.Sand]: 0.2,
-  [SurfaceType.Rock]: 0.45,
+  // GRAVEL AND ROCK TRACK THE SURFACE'S OWN GRIP, and that is the correction. Gravel
+  // sits at 0.72 of asphalt's longitudinal coefficient (0.72 against 0.988) and rock at
+  // 0.90 — rock is BETTER than the cracked asphalt beside it — while both were being
+  // driven at 0.45-0.50, which is roughly half of what their own friction implies. The
+  // road is a quarter gravel districts, so the whole ambient stream was held at about
+  // 36 km/h there and reported from play as traffic that is simply slow.
+  //
+  // The strict bound those two used to carry belongs to the FRANTIC driver, which was
+  // what it was measured on, and it lives on that mode now as `looseSurfacePace` — a
+  // careful driver at 80 km/h with gentle pedals is not the car that ran off the road.
+  [SurfaceType.Gravel]: 0.72,
+  [SurfaceType.Rock]: 0.9,
+  // SAND AND THE VERGE STAY CONSERVATIVE, and deliberately below their grip ratios.
+  // Their coefficient is 0.44 of asphalt's, but the cost of being wrong there is not
+  // running wide — it is bogging, which is a stop rather than a scare. A packed gravel
+  // district road carries ordinary traffic; a sand pan does not.
+  [SurfaceType.Sand]: 0.3,
   [SurfaceType.Concrete]: 0.96,
-  // The loose verge is a pace of its own: slower than the packed district it was
-  // graded off, and much less than the road it borders. This factor exists to stop a
-  // driver pressing on into ground the car cannot hold, so it tracks the surface's
-  // grip rather than its comfort — 0.44 of asphalt's longitudinal coefficient, and
-  // 0.06 of rolling resistance to drag against.
   [SurfaceType.LooseShoulder]: 0.45,
 };
 const DECAY_SPEED_LOSS = 0.14;
@@ -932,6 +962,18 @@ export class Autopilot {
   setLowBeamsAlwaysOn(enabled: boolean): void {
     this.lowBeamsAlwaysOn = enabled;
   }
+  /**
+   * How much of a surface's own grip ratio this driver's character dares to spend.
+   *
+   * Sealed surfaces are left alone: `SURFACE_SPEED_FACTOR` already reads 0.92-1.0 for
+   * them, and there is no character argument about how fast asphalt may be driven. Only
+   * the loose ones take the mode's `looseSurfacePace`, which is where the frantic
+   * driver's measured bound lives — see the table.
+   */
+  private surfacePace(surface: SurfaceType): number {
+    const factor = SURFACE_SPEED_FACTOR[surface];
+    return factor >= 0.92 ? factor : factor * MODES[this.modeValue].looseSurfacePace;
+  }
   /** Supplies ambient light and road distance to the nearest approaching vehicle. */
   setLightingConditions(daylightFactor: number, oncomingGap: number): void {
     this.daylightFactor = clamp(daylightFactor, 0, 1);
@@ -1499,7 +1541,8 @@ export class Autopilot {
     // gate below is unchanged, so it still only goes when the opposing lane is
     // genuinely clear for the whole manoeuvre and clear behind as well.
     const stillBlocker = this.hazardDistance < horizon || this.leadIsParked;
-    const mayCrossCrown = this.passingEnabled && (config.overtakes || stillBlocker);
+    const mayCrossCrown =
+      this.passingEnabled && (config.overtakes || stillBlocker);
     if (mayCrossCrown) this.laneCentres.push(oncomingLine);
     const plan = planCorridor({
       ownLateral: projection.lateral,
@@ -1720,7 +1763,7 @@ export class Autopilot {
       );
       const straightLimit = Math.max(
         OFFROAD_SPEED_MPS,
-        clearRoadSpeed * SURFACE_SPEED_FACTOR[surface] * conditionFactor,
+        clearRoadSpeed * this.surfacePace(surface) * conditionFactor,
       );
       const physicalBrake = vehicle.estimatedBrakeDecel(surface);
       const sampleGradeLoad = Math.min(

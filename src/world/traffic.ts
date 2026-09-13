@@ -40,12 +40,13 @@ const WIDE_TRAFFIC = 24;
  * every 36-72 s, and the retained FRACTION is held between re-rolls — which is what lets
  * a widening fill smoothly instead of stepping at a profile boundary.
  *
- * A fifth, not the two thirds this used to be: with the cap now derived from the road,
- * a range that narrow left the stream within a couple of cars of the same number for
- * hours, so the road read as a conveyor. It is a rotation between "you own the road" and
- * "you are in company", and both ends have to be reachable to be worth having.
+ * A third, against the two thirds this started at and the fifth it was briefly set to.
+ * The range is a rotation between "you own the road" and "you are in company", and both
+ * ends have to be reachable to be worth having; a fifth was measured to reach the quiet
+ * end too hard, leaving a narrow road with two or three cars and the player alone on it
+ * for minutes at a time, which is what a fifth of twelve means in practice.
  */
-const DENSITY_FLOOR = 0.2;
+const DENSITY_FLOOR = 0.35;
 /**
  * Above this the stream packs tighter (see `SPAWN_ROAD_GAP_M`). It is the narrow road's
  * whole capacity, so the rule reads: a stream busier than a full two-lane road's worth

@@ -35,6 +35,34 @@
 
 ### Changed
 
+- THE LOOSE-SURFACE SPEED LIMIT IS NOW A PROPERTY OF THE DRIVER, NOT OF THE ROAD. The
+  table read 0.50 for gravel and 0.45 for rock, against longitudinal grip coefficients of
+  0.72 and 0.89 — rock is BETTER than the cracked asphalt beside it (0.84), yet every
+  driver was held at half its pace, and gravel districts are a quarter of this road. The
+  stream's own measured pace was a median of 41 km/h with the speed caps allowing 58-115,
+  which is the "traffic is slow" a player sees, and the factors were where it lived.
+- Those two numbers were not wrong, they were MISFILED: 0.50 is the bound a FRANTIC driver
+  was measured needing, arriving at a bend at 70 km/h, standing on the brake inside it,
+  losing the front on the loose surface and running 1.2 m past the asphalt. That is a limit
+  on one character's controller, and charging it to every character made the careful ones
+  pay for the reckless one's tyres. It is now `ModeConfig.looseSurfacePace`: 1 for sleeper
+  and hurried, which spend the surface's whole grip ratio, and 0.7 for frantic, which
+  reproduces the measured 0.50 (0.72 x 0.7) and keeps the bound it earned.
+- Ambient traffic has no frantic drivers in it at all — it draws sleeper and hurried only —
+  so this is what sets the stream's pace on loose ground. Measured by
+  `tools/autopilot-bench.ts`, which holds the property directly: "sleeper: respects
+  loose-surface pace" goes from a mean/peak of 33/35 km/h to 46/49 km/h, with the same
+  bench reporting no new failure anywhere and the one pre-existing failure unmoved.
+- Sand and the loose verge are deliberately NOT part of that correction. Their grip ratio
+  is 0.44 of asphalt's, but the cost of being wrong there is bogging rather than running
+  wide, which is a stop and not a scare, so they stay below what their friction would
+  allow (0.20 -> 0.30 for sand, 0.45 unchanged for the verge).
+- Measured on the real road over 30 minutes of the stream driving itself: the median speed
+  goes 41 -> 47 km/h, the 25th percentile 28 -> 36, commanded-line reversals in `follow`
+  22.0 -> 18.9 per km, passes 58 -> 48 and impacts 8 -> 4. `tools/traffic-bench.ts` passes
+  every check, including the two-lane/four-lane caps, the rotation and the rock deadlock.
+
+
 - THE STREAM'S SIZE IS THE ROAD'S ANSWER NOW, NOT THE PLAYER'S. A two-lane road carries
   twelve cars and a four-lane one twenty-four, interpolated across the taper so nothing
   steps at a profile boundary, and the `Traffic` slider is gone from the pause menu with
@@ -43,13 +71,14 @@
   the setting and a widened one ran up to a fixed ceiling of thirty. That asked the player
   a question they had no way to judge — how many cars a carriageway they have not seen yet
   should hold — and the honest answer is a property of the road, which already knows it.
-- THE DENSITY ROTATES OVER THE WHOLE RANGE, A FIFTH TO ALL OF IT. The live count is one
-  draw in `[0.2 x cap, cap]`, re-rolled every 36-72 s, and the retained FRACTION is held
+- THE DENSITY ROTATES OVER THE WHOLE RANGE, A THIRD TO ALL OF IT. The live count is one
+  draw in `[0.35 x cap, cap]`, re-rolled every 36-72 s, and the retained FRACTION is held
   between re-rolls so a widening fills smoothly rather than stepping. The floor used to be
   two thirds, which with a cap derived from the road left the stream within a couple of
-  cars of the same number for hours: measured over 900 s on a narrow stretch, the old range
-  top-to-bottom was a third of what the road can hold, so the stream read as a conveyor.
-  Measured after: 3-12 against a cap of 12, and 4.8-24 against 24.
+  cars of the same number for hours, so the stream read as a conveyor. A fifth was tried
+  next and measured too far the other way: on a narrow road that is two or three cars, and
+  the player drove alone on it for minutes at a time. Measured at a third: 5-12 against a
+  cap of 12, and 8-24 against 24.
 - `tools/traffic-bench.ts` now holds the cap itself — twelve on two lanes, twenty-four on
   four, a target between a fifth of the cap and the cap, and a rotation that reaches both
   ends over a drive — instead of holding a slider's value. Its three checks that asserted
