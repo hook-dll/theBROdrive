@@ -49,25 +49,32 @@ const HOMESTEAD_S = 116;
 const SIDE = -1;
 
 /**
- * How much further from the road the whole homestead sits, metres.
+ * Garage door line: the building's garage front sits here, and the driveway ramps up to
+ * it from the road. It is also the homestead's NEAREST point to the road, so this number
+ * is the homestead's setback.
  *
- * Added in ONE place — `toWorld` below — rather than to each coordinate, so every
- * constant in this file stays a building-relative offset and the compound can be
- * moved again by changing this number alone. It is also what keeps the house off the
- * road now that it is a 29 by 19 m compound with its own drive: at the old setback
- * that drive would have started in the verge.
- */
-const HOMESTEAD_DEPTH_M = 50;
-
-/**
- * Garage door line. The building's own garage front sits here, and the driveway ramps
- * up to it from the road.
+ * WHY IT STAYS AT THE ROAD, and it is not a matter of taste. The terrain is fitted to the
+ * road only inside the 30 m corridor (`terrain.ts`); past that the landscape's long bands
+ * return, and they keep their slope everywhere — the origin-centred flattening in
+ * `landscape.ts` suppresses the SHORT bands, not those. So distance from the road is
+ * bought with relief, and a concrete pad cannot pay for it: measured under this
+ * compound's own footprint, the ground varies 0.60 m at this setback and 1.62 m fifty
+ * metres further out, where it also stands 1.5-3.1 m higher. The slab is 0.45 m thick
+ * with a 0.12 m lift, so it absorbs the first and not the second — push the homestead out
+ * and it ends up on a hill with the edge of its pad in the air. Move it outward only
+ * after making the terrain answer for it.
  */
 const GARAGE_DOOR_U = 8.3;
 /** Small free-fall inside the low garage; the open-world 0.75 m drop hits its roof. */
 const GARAGE_CAR_DROP_METRES = 0.08;
 
-const SLAB_THICK = 0.45;
+/**
+ * Slab thickness below the pad's top surface, and the lift above the highest ground
+ * under it. Exported because together they are the pad's CAPACITY to absorb uneven
+ * ground, and `tools/poi-placement.ts` holds the terrain to it — a homestead placed
+ * where the ground varies more than this stands on a hill with its edge in the air.
+ */
+export const SLAB_THICK = 0.45;
 
 /**
  * Intensity given to every authored lamp of the building and of the yard.
@@ -83,7 +90,7 @@ const HOMESTEAD_LAMP_INTENSITY = 0.55;
  *  LOWEST corner of the footprint still has concrete below the sand: the runout is
  *  level to a tenth of a metre, not exactly, since the landscape's long bands keep
  *  their slope everywhere (see landscape.ts). */
-const SLAB_LIFT = 0.12;
+export const SLAB_LIFT = 0.12;
 
 /** Gravel driveway: a filled wedge from the garage door down to the asphalt edge. */
 const DRIVE_FAR_U = ROAD_HALF_WIDTH; // meet the road surface, not the shoulder
@@ -115,6 +122,7 @@ const GARAGE_CENTRE_V = VARIANT_V + 8.68;
  */
 const VARIANT_HALF_X = 13.7;
 const VARIANT_HALF_Z = 7.8;
+/** Exported for the same reason as the slab: the bench measures under this footprint. */
 /** Yard in front of the garage, beyond the building, for the junk and the fuel can. */
 const YARD_M = 3.2;
 
@@ -124,6 +132,15 @@ const PAD_V1 = VARIANT_V + VARIANT_HALF_X + YARD_M;
 const PAD_U0 = VARIANT_U - VARIANT_HALF_Z;
 const PAD_U1 = VARIANT_U + VARIANT_HALF_Z;
 
+/** The pad's extent, exported so the placement bench measures under the same footprint. */
+export const HOMESTEAD_PAD = {
+  s: HOMESTEAD_S,
+  u0: PAD_U0,
+  u1: PAD_U1,
+  v0: PAD_V0,
+  v1: PAD_V1,
+};
+
 /** Workbench just inside the garage door. Items rest on top at `+WB_TOP`. */
 const WB_U0 = GARAGE_DOOR_U + 1.4;
 const WB_U1 = GARAGE_DOOR_U + 2.1;
@@ -132,8 +149,25 @@ const WB_V1 = GARAGE_CENTRE_V - 1.4;
 const WB_TOP = 0.9;
 
 /** Layout derived from the seed; shared by the chunk and the scatter helpers. */
-interface HomesteadLayout {
+export interface HomesteadLayout {
   floorY: number;
+  /**
+   * Underside of the concrete pad, metres.
+   *
+   * DERIVED FROM THE GROUND rather than fixed, and that is the difference between a pad
+   * that works anywhere and one that works only where it was designed. The top is poured
+   * above the HIGHEST ground under the footprint, so the slab has to reach the LOWEST
+   * ground or its downhill edge hangs in the air — and the gap is the ground's full height
+   * range, not its deviation from a slope, because a garage floor is poured level.
+   *
+   * The compound is 39 m along the road, four times the hand-built house's pad, so it
+   * spans four times the relief: measured, 0.63 m of range against the 0.33 m a 0.45 m
+   * slab can bridge. Fixed thickness was therefore already not enough at the road, let
+   * alone anywhere else; this makes the pad size itself.
+   */
+  baseY: number;
+  /** Lowest ground under the pad, so a caller can check the slab reached it. */
+  padMinGroundY: number;
   roadY: number;
   ax: number;
   az: number;
@@ -152,7 +186,7 @@ interface HomesteadLayout {
  * inside the road corridor is now the road surface itself (see terrain.ts), so
  * the wedge only needs a modest burial to stay below the ground it sits on.
  */
-function layout(road: Road, terrain: Terrain): HomesteadLayout {
+export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
   const ref = road.sampleAt(HOMESTEAD_S);
   // Forward = direction of travel, right = road's right-hand normal.
   const fx = Math.sin(ref.heading);
@@ -162,28 +196,42 @@ function layout(road: Road, terrain: Terrain): HomesteadLayout {
   const az = -SIDE * Math.sin(ref.heading);
 
   const toWorld = (u: number, v: number): [number, number] => [
-    ref.x + ax * (u + HOMESTEAD_DEPTH_M) + fx * v,
-    ref.z + az * (u + HOMESTEAD_DEPTH_M) + fz * v,
+    ref.x + ax * u + fx * v,
+    ref.z + az * u + fz * v,
   ];
 
   // The slab tops the HIGHEST ground under its footprint (see SLAB_LIFT), which is
   // the one number `fitGround` is asked for here; the pad is poured level because a
   // garage floor is, and its thickness carries the rest.
-  const uc = (4.0 + PAD_U1) / 2;
+  const uc = (PAD_U0 + PAD_U1) / 2;
   const vc = (PAD_V0 + PAD_V1) / 2;
   const [cx, cz] = toWorld(uc, vc);
-  const top = fitGround(
+  const plane = fitGround(
     terrain,
     cx,
     cz,
     ref.heading,
-    (PAD_U1 - 4.0) / 2,
+    (PAD_U1 - PAD_U0) / 2,
     (PAD_V1 - PAD_V0) / 2,
     HOMESTEAD_S,
     9,
-  ).maxY;
+  );
+  const floorY = plane.maxY + SLAB_LIFT;
+  // At least SLAB_THICK of concrete, and ALWAYS below the lowest ground: the pad's job
+  // is to be underground at its shallowest point.
+  const baseY = Math.min(plane.minY - 0.05, floorY - SLAB_THICK);
 
-  return { floorY: top + SLAB_LIFT, roadY: ref.y, ax, az, fx, fz, toWorld };
+  return {
+    floorY,
+    baseY,
+    padMinGroundY: plane.minY,
+    roadY: ref.y,
+    ax,
+    az,
+    fx,
+    fz,
+    toWorld,
+  };
 }
 
 /** Local (u, v, y) box -> world axis-aligned box. Exact because the frame is flat. */
@@ -310,7 +358,7 @@ function drivewayData(L: HomesteadLayout): { verts: number[]; tris: number[] } {
   // Buried as deep as the slab, for the same reason: the ground beside the runout is
   // level to a tenth of a metre rather than exactly, so a shallow wedge shows its
   // underside on the low side.
-  const base = Math.min(L.floorY, L.roadY) - SLAB_THICK;
+  const base = Math.min(L.baseY, L.roadY - SLAB_THICK);
   const top0 = L.floorY;
   const top1 = L.roadY;
   const corners: V3[] = [
@@ -345,7 +393,7 @@ export class HomesteadProvider implements ChunkProvider {
   build(ctx: ChunkContext): ChunkContent | null {
     if (ctx.chunkIndex !== 0) return null;
 
-    const L = layout(ctx.road, ctx.terrain);
+    const L = homesteadLayout(ctx.road, ctx.terrain);
     const ox = ctx.originX;
     const oz = ctx.originZ;
     const group = new THREE.Group();
@@ -381,7 +429,7 @@ export class HomesteadProvider implements ChunkProvider {
     const fy = L.floorY;
 
     // --- Shared concrete pad (garage floor + house floor, one flush slab) ----
-    solid(bctx, boxUV(L, PAD_U0, PAD_V0, fy - SLAB_THICK, PAD_U1, PAD_V1, fy), concrete, floorMat);
+    solid(bctx, boxUV(L, PAD_U0, PAD_V0, L.baseY, PAD_U1, PAD_V1, fy), concrete, floorMat);
 
     // --- THE HOUSE AND GARAGE: the gallery's `starter-homestead` variant -------
     //
@@ -584,7 +632,7 @@ export function homesteadSpawn(
   road: Road,
   terrain: Terrain,
 ): { x: number; y: number; z: number; yaw: number } {
-  const L = layout(road, terrain);
+  const L = homesteadLayout(road, terrain);
   // Alongside the parked car, one bay toward the garage's -v wall.
   const [x, z] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V - 2.2);
   // Facing out of the garage is the -away direction; yaw is measured from +Z.
@@ -599,7 +647,7 @@ export function homesteadSpawn(
 export function createStartingCar(world: GameWorld): CarState {
   const road = new Road(world.seed);
   const terrain = new Terrain(world.seed, road);
-  const L = layout(road, terrain);
+  const L = homesteadLayout(road, terrain);
 
   const def = pick(CAR_MODELS, world.seed, 0x3f0);
   const engine = modelEngine(def);
@@ -663,7 +711,7 @@ export function createStartingCar(world: GameWorld): CarState {
 export function spawnStartingItems(world: GameWorld, loose: LoosePartField): void {
   const road = new Road(world.seed);
   const terrain = new Terrain(world.seed, road);
-  const L = layout(road, terrain);
+  const L = homesteadLayout(road, terrain);
 
   // The can stands on the yard beside the garage door, where the player cannot miss
   // it on the way out.

@@ -90,10 +90,32 @@ export function variantDef(index: number): (typeof POI_VARIANTS)[number] {
  */
 const MARKER_DISTANCE = 26;
 
-/** One merged mesh's parts. Geometry and material are shared by every instance. */
+/**
+ * One mesh of the finished variant, with everything needed to rebuild it.
+ *
+ * THE TRANSFORM IS NOT OPTIONAL, and getting this wrong is not subtle. `mergePoiStatics`
+ * bakes the world matrix into the geometry of every mesh it MERGES — but it deliberately
+ * leaves others alone (roof panels, light switches, door-obstacle markers, anything with a
+ * unique material), and those keep their transform on the Object3D. A cache that stored
+ * only geometry and material and rebuilt a mesh at the origin collapsed every un-merged
+ * mesh into the ground: measured, the starter homestead lost all twelve of its roof panels
+ * and `long-house` came out 2.8 m tall instead of 5.5 m.
+ *
+ * It is the WORLD matrix rather than the local one, because a variant's parts are NESTED:
+ * a tilted container's shell lives inside its own rotated group, and rebuilding that mesh
+ * as a flat child of a new root would drop the ancestor's transform. Measured on
+ * `buried-container`, which is the deliberately half-sunk one: 0.46 m too tall. Composing
+ * the whole chain costs nothing and removes the whole class of error.
+ *
+ * `userData` is kept for the same reason as the transform — `poiRoof` and the light-toggle
+ * closure live there, and the gallery's roof button reads the first of them.
+ */
 interface MergedMesh {
   readonly geometry: THREE.BufferGeometry;
   readonly material: THREE.Material | THREE.Material[];
+  /** The mesh's matrix relative to the variant root, with every ancestor composed in. */
+  readonly matrix: THREE.Matrix4;
+  readonly userData: Record<string, unknown>;
 }
 
 /** Everything about a variant that does not depend on where it is placed. */
@@ -188,7 +210,15 @@ function buildAssets(index: number): VariantAssets {
   const meshes: MergedMesh[] = [];
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    if (mesh.isMesh && mesh.geometry) meshes.push({ geometry: mesh.geometry, material: mesh.material });
+    if (!mesh.isMesh || !mesh.geometry) return;
+    meshes.push({
+      geometry: mesh.geometry,
+      material: mesh.material,
+      // Relative to the root, which is at the origin here, so this IS the mesh's whole
+      // placement in the variant's own space.
+      matrix: mesh.matrixWorld.clone(),
+      userData: { ...mesh.userData },
+    });
   });
 
   const solid = collectSolidGeometry(root);
@@ -244,6 +274,10 @@ export function createVariantInstance(index: number): VariantInstance {
 
   for (const part of assets.meshes) {
     const mesh = new THREE.Mesh(part.geometry, part.material);
+    part.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+    // `poiRoof` and the light-toggle closure ride here. The closure is shared, which is
+    // correct: every instance of a variant is the same building.
+    Object.assign(mesh.userData, part.userData);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);

@@ -29,14 +29,28 @@
   catalogue's shells are built with real openings — `wallWithOpenings` leaves a hole and
   trims it — so a trimesh is both solid and walkable and needs no hand-authored proxy.
   Roofs are excluded, or the trimesh would enclose the interior from above.
-- THE STARTER HOMESTEAD IS THE GALLERY'S, MOVED 100 M ALONG THE ROAD AND 50 M DEEPER
-  INTO THE DESERT. It was a hand-built 705-line compound; it is now the catalogue's
-  `starter-homestead` — house and garage, furnished, with its own room lights — and the
-  file keeps only what the catalogue does not bring: the concrete pad, the gravel drive
-  from the asphalt to the garage door, the yard, the oil drums and tyre stack, the water
-  tank, the fence, the lamps, the spawn, the starter car and the starter items. The shift
-  is one constant (`HOMESTEAD_DEPTH_M`) applied inside the layout frame, so every other
-  coordinate in the file stayed a building-relative offset.
+- THE STARTER HOMESTEAD IS THE GALLERY'S, 100 M FURTHER ALONG THE ROAD. It was a
+  hand-built 705-line compound; it is now the catalogue's `starter-homestead` — house and
+  garage, furnished, with its own room lights — and the file keeps only what the catalogue
+  does not bring: the concrete pad, the gravel drive from the asphalt to the garage door,
+  the yard, the oil drums and tyre stack, the water tank, the fence, the lamps, the spawn,
+  the starter car and the starter items.
+  IT STAYS AT THE ROAD, and that is a measurement rather than a preference. The terrain is
+  fitted to the road only inside the 30 m corridor; past that the landscape's long bands
+  return and keep their slope, which the origin-centred flattening does not touch because
+  it suppresses the SHORT bands. Placing the compound 50 m out put its pad on ground that
+  varies 1.62 m and stands 1.5-3.1 m higher, against 0.60 m at the road — and a concrete
+  pad cannot pay for that, so the house ended up on a hill with the edge of its slab in the
+  air. It is back where the hand-built house's garage door always was, 8.3 m from the
+  centreline, and `tools/poi-placement.ts` holds it there.
+- THE HOMESTEAD PAD NOW SIZES ITSELF TO THE GROUND. Its top is poured above the highest
+  ground under the footprint and its underside was a fixed 0.45 m below that — which was
+  already not enough, because this compound's pad is 39 m along the road against the
+  hand-built house's 9 m, so it spans four times the relief: measured 0.63 m of range
+  against the 0.33 m a 0.45 m slab can bridge. The underside is now derived from the
+  lowest ground under the pad, so the slab always reaches it, and the bench holds the
+  RESULT — a pad deep enough to reach the ground everywhere is a plinth, and a plinth is a
+  worse artefact than the gap it replaced. Measured: 0.82 m deep, under the 1.2 m limit.
 - BUILDING A POI IS CACHED, and that is not an optimisation but a correctness fix. Merging
   a variant costs 3.74 ms on a 5950X and 11.4 ms at worst, against a streaming budget of
   3 ms per frame with one job per frame — so rebuilding per placement would have hitched
@@ -55,6 +69,27 @@
 - `tools/poi-grounding.ts` and `tools/wreck-spacing.ts` follow the change: the grounding
   bench groups by category rather than by the four dead kinds, and the wreck bench reads
   the container category, which is where the car field is built now.
+
+### Fixed
+
+- EVERY BUILDING WAS MISSING ITS ROOF, and every un-merged mesh with it. The variant
+  cache stored each mesh as geometry and material only, then rebuilt it at the
+  origin — but `mergePoiStatics` bakes the transform into the geometry of only the
+  meshes it MERGES, and deliberately leaves others alone (roof panels, light switches,
+  unique-material trims). So every un-merged mesh collapsed into the ground: the
+  starter homestead lost all twelve of its roof panels and `long-house` came out 2.8 m
+  tall instead of 5.5 m. The cache now keeps the full WORLD matrix, with every
+  ancestor composed in, because a variant's parts are nested — a tilted container's
+  shell lives inside its own rotated group, and restoring only the mesh's own
+  transform left `buried-container` 0.46 m too tall. `userData` is kept with it, so
+  `poiRoof` and the light-toggle closure survive.
+
+- `tools/poi-placement.ts` now states the property it was missing, which is what would
+  have caught that immediately: an instance must have the same meshes, the same roof
+  panels and the same extent as the merged catalogue form the gallery displays.
+  Measured across all 26: agreement to 0.000 m. It is not redundant with any code
+  check, because the failure looked plausible in a screenshot — most of a building IS
+  merged, so the walls were all there and only the roof was gone.
 
 ### Removed
 

@@ -32,9 +32,12 @@ import {
   variantDef,
   warmVariantAssets,
 } from '../src/world/poivariantbuild';
+import { createPoiVariant, mergePoiStatics } from '../src/world/poi-variants';
 import {
+  HOMESTEAD_PAD,
   HomesteadProvider,
   createStartingCar,
+  homesteadLayout,
   homesteadSpawn,
 } from '../src/world/house';
 import { halfWidthAt } from '../src/world/roadprofile';
@@ -57,6 +60,8 @@ const terrain = new Terrain(SEED, road);
 const MIN_VERGE_M = 10;
 /** The widest span the placement promises on top of it. */
 const MAX_VERGE_M = 22;
+/** Deepest a homestead pad may be before it is a plinth rather than a foundation. */
+const MAX_PAD_DEPTH_M = 1.2;
 
 // --- 1. every building clears the road ---------------------------------------
 {
@@ -157,11 +162,54 @@ const MAX_VERGE_M = 22;
     const lateral = Math.hypot(dx - along * fx, dz - along * fz);
     return lateral;
   })();
+  // THE HOMESTEAD BELONGS AT THE ROAD, and this is the check for it.
+  //
+  // The terrain is fitted to the road only inside the 30 m corridor; past that the
+  // landscape's long bands return and keep their slope. So the pad's capacity to absorb
+  // uneven ground — its thickness plus its lift — is what limits how far out the compound
+  // may stand, and the relief under the pad is the number that decides it. Measured: 0.60 m
+  // at the road against 1.62 m fifty metres out, which the slab cannot answer for.
   check(
-    distanceFromRoad > roadEdge + 40,
-    `the homestead's centre is ${distanceFromRoad.toFixed(1)} m from the centreline, not ` +
-      `the 50 m deeper than the road edge it is supposed to be`,
+    HOMESTEAD_PAD.u0 < 30,
+    `the homestead's nearest edge is ${HOMESTEAD_PAD.u0.toFixed(1)} m from the centreline, ` +
+      'outside the terrain corridor that is fitted to the road',
   );
+  {
+    const L = homesteadLayout(road, terrain);
+    let min = Infinity;
+    let max = -Infinity;
+    for (let u = HOMESTEAD_PAD.u0; u <= HOMESTEAD_PAD.u1; u += 2.5) {
+      for (let v = HOMESTEAD_PAD.v0; v <= HOMESTEAD_PAD.v1; v += 2.5) {
+        const [x, z] = L.toWorld(u, v);
+        const y = terrain.heightAt(x, z, HOMESTEAD_PAD.s);
+        if (y < min) min = y;
+        if (y > max) max = y;
+      }
+    }
+    const spread = max - min;
+
+    // The slab reaches the ground BY CONSTRUCTION now, so the property that can still
+    // fail is the one that made this necessary: a pad deep enough to reach the ground
+    // everywhere is a PLINTH, and a concrete plinth under a house is a worse artefact
+    // than the gap it replaced. So the ground has to be flat enough that the answer stays
+    // modest — which is the real reason the homestead cannot be pushed into the desert.
+    const depth = L.floorY - L.baseY;
+    check(
+      depth <= MAX_PAD_DEPTH_M,
+      `the homestead pad has to be ${depth.toFixed(2)} m deep to reach the ground, past the ` +
+        `${MAX_PAD_DEPTH_M} m a pad may be before it reads as a plinth — this ground is too ` +
+        'sloped for a compound this size, so move it nearer the road',
+    );
+    check(
+      L.baseY <= L.padMinGroundY,
+      `the pad's underside (${L.baseY.toFixed(2)} m) is above the lowest ground under it ` +
+        `(${L.padMinGroundY.toFixed(2)} m), so its downhill edge hangs in the air`,
+    );
+    console.log(
+      `  pad ground: ${min.toFixed(2)}..${max.toFixed(2)} m, spread ${spread.toFixed(2)} m, ` +
+        `slab ${depth.toFixed(2)} m deep`,
+    );
+  }
 
   // The car belongs INSIDE the building, not on the lawn: its centre must be within
   // the building's measured footprint, which is the only thing that distinguishes
@@ -256,6 +304,80 @@ const MAX_VERGE_M = 22;
   console.log(
     `  placement ${mean.toFixed(3)} ms mean, ${worst.toFixed(3)} ms worst ` +
       `(${samples.length} placements, budget ${STREAM_BUDGET_MS} ms)`,
+  );
+}
+
+// --- 5. what the world builds IS what the gallery shows ----------------------
+//
+// THE CHECK THIS FILE WAS MISSING, and its absence cost a real bug. A variant is built
+// from the catalogue, merged, then cached and re-made per placement — and the caching
+// step reconstructed every mesh at the origin, which silently flattened every mesh that
+// `mergePoiStatics` does not merge (roofs, switches, unique-material trims). The result
+// was buildings with no roofs and one variant 2.7 m short, and it looked plausible in a
+// screenshot, because most of a building IS merged.
+//
+// So the property is stated directly: an instance must have the same meshes, the same
+// roofs and the same extent as the merged catalogue form the gallery displays.
+{
+  let worst = 0;
+  let worstId = '';
+  for (let index = 0; index < variantCount(); index++) {
+    const gallery = createPoiVariant(index);
+    mergePoiStatics(gallery);
+    gallery.updateMatrixWorld(true);
+
+    let galleryMeshes = 0;
+    let galleryRoofs = 0;
+    gallery.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      galleryMeshes++;
+      if (mesh.userData.poiRoof === true) galleryRoofs++;
+    });
+
+    const instance = createVariantInstance(index);
+    instance.group.updateMatrixWorld(true);
+    let instanceMeshes = 0;
+    let instanceRoofs = 0;
+    instance.group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      instanceMeshes++;
+      if (mesh.userData.poiRoof === true) instanceRoofs++;
+    });
+
+    const id = variantDef(index).id;
+    check(
+      instanceMeshes === galleryMeshes,
+      `${id}: the world builds ${instanceMeshes} meshes where the gallery shows ${galleryMeshes}`,
+    );
+    check(
+      instanceRoofs === galleryRoofs,
+      `${id}: the world builds ${instanceRoofs} roof panels where the gallery shows ${galleryRoofs}`,
+    );
+
+    const want = new THREE.Box3().setFromObject(gallery, true);
+    const got = new THREE.Box3().setFromObject(instance.group, true);
+    const delta = Math.max(
+      Math.abs(want.min.y - got.min.y),
+      Math.abs(want.max.y - got.max.y),
+      Math.abs(want.min.x - got.min.x),
+      Math.abs(want.max.x - got.max.x),
+      Math.abs(want.min.z - got.min.z),
+      Math.abs(want.max.z - got.max.z),
+    );
+    if (delta > worst) {
+      worst = delta;
+      worstId = id;
+    }
+    check(
+      delta < 0.01,
+      `${id}: the world builds a building ${delta.toFixed(2)} m different from the ` +
+        'gallery\'s, so something is being dropped or misplaced',
+    );
+  }
+  console.log(
+    `  26 variants match the gallery to within ${worst.toFixed(3)} m (worst: ${worstId})`,
   );
 }
 
