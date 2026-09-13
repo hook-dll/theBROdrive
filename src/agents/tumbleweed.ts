@@ -12,9 +12,9 @@ import type { WheelSpray } from '../render/wheelspray';
  * This uses an analytic rolling/ballistic integrator instead of a Rapier body per weed.
  * Ten dynamic bodies were tried in the traffic prototype; their broad-phase pairs and
  * solver work were disproportionate to props that must neither block nor interest the
- * autopilot. The field therefore pays ten terrain samples, ten matrix writes, and at
- * most one OBB hit test per fixed step. The cap is ten: enough to make crossings feel
- * common over a 520 m road band, while its worst case is fixed before a frame begins.
+ * autopilot. The field therefore pays one terrain sample and one matrix write per live
+ * weed, plus at most one OBB hit test: four of each at `TUMBLEWEED_CAP`, and the fixed
+ * pool means the worst case is known before a frame begins.
  */
 
 /**

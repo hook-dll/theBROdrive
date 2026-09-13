@@ -19,6 +19,8 @@
   --hud-diesel: #c9a227;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  /* Permanent scene softness. Change this one value while tuning the look. */
+  --persistent-scene-blur: 0.08px;
 }
 
 * {
@@ -687,9 +689,17 @@ body.is-cinematic #ui {
  *  Hidden health and death                                           *
  * ------------------------------------------------------------------ */
 
+.hud-persistent-blur {
+  position: fixed;
+  inset: -24px;
+  z-index: 17;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(var(--persistent-scene-blur));
+  backdrop-filter: blur(var(--persistent-scene-blur));
+}
+
 .hud-damage-vignette {
   --damage-opacity: 0;
-  --damage-blur: 2px;
   --damage-inner: 72%;
   position: fixed;
   inset: -24px;
@@ -700,13 +710,13 @@ body.is-cinematic #ui {
     radial-gradient(
       ellipse at center,
       transparent 0,
-      transparent calc(var(--damage-inner) - 8%),
-      rgba(0, 0, 0, 0.1) var(--damage-inner),
-      rgba(0, 0, 0, 0.55) calc(var(--damage-inner) + 20%),
+      transparent calc(var(--damage-inner) - 10%),
+      rgba(45, 5, 2, 0.2) var(--damage-inner),
+      rgba(10, 1, 0, 0.84) calc(var(--damage-inner) + 20%),
       #000 100%
     );
-  -webkit-backdrop-filter: blur(var(--damage-blur));
-  backdrop-filter: blur(var(--damage-blur));
+  -webkit-backdrop-filter: saturate(0.32) contrast(1.28) brightness(0.78);
+  backdrop-filter: saturate(0.32) contrast(1.28) brightness(0.78);
   will-change: opacity, backdrop-filter;
 }
 

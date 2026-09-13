@@ -103,7 +103,8 @@ export class PhysicsWorld {
    * this should stay in the low thousands of metres forever. A site that still writes
    * an absolute coordinate shows up here as a number in the tens of thousands the
    * moment it is created, which is a far more reliable check than auditing call sites
-   * by hand. Cheap enough to assert in a dev build, and used by tools/origin-drift.ts.
+   * by hand. Cheap enough to assert in a dev build, and used by tools/desert-stream.ts
+   * and tools/long-drive-soak.ts.
    */
   maxBodyDistance(): number {
     let worst = 0;

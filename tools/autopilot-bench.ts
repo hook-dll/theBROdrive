@@ -1381,7 +1381,7 @@ async function checkPedestrianObstacle(): Promise<void> {
 
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
-  console.log('autopilot bench: real Road surface collider, mid-engined V8, fixed 60 Hz');
+  console.log(`autopilot bench: real Road surface collider, ${carModel(MODEL_ID).label}, fixed 60 Hz`);
   checkHandover();
   await checkAutomaticLights();
   if (process.argv.includes('--traffic-behavior')) {

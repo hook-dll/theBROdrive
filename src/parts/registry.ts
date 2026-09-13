@@ -192,15 +192,16 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
   },
   {
     // A lazy 2.4 litre four: peak torque at 2200 rpm and a 4500 rpm limit. This is
-    // the generic entry the UAZ van and Sobol run, NOT a Volga engine — the GAZ pair
-    // have their own (`engine_zmz_21`/`engine_zmz_24`) in the Soviet driveline table,
-    // with that pack's own friction convention. Do not merge them: this one's figures
-    // are what the imported working vehicles were tuned against.
+    // the UAZ van's engine, NOT a Volga one — the GAZ pair have their own
+    // (`engine_zmz_21`/`engine_zmz_24`) in the Soviet driveline table, with that
+    // pack's own friction convention. Do not merge them: this one's figures are what
+    // the imported working vehicle was tuned against. It fits trucks because the body
+    // that runs it is one.
     id: 'engine_i4_2445',
     kind: 'engine',
     label: '2.4 inline-four',
     mass: 165,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       fuel: 'petrol',
       peakPowerKw: 52,
@@ -447,8 +448,7 @@ const TRIM_VARIANTS: readonly PartVariant[] = [
 ];
 
 /**
- * Dashboards. Pure mass and looks, but they sit directly in the interior camera's
- * view, so a mismatched one is the most visible cross-fit in the game.
+ * Dashboards. Pure mass and looks.
  *
  * `dash_std` is listed first so a generic spawn picker gives ordinary cars the
  * ordinary dash.

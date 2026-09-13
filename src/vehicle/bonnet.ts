@@ -118,7 +118,7 @@ const FACTORY_RADIATOR: Readonly<Record<RadiatorClass, string>> = {
  * induction is optional, while the engine and both reservoirs are required.
  *
  * The radiator is chosen to SUIT THE ENGINE (`preferredRadiatorClass`) rather than
- * being one standard core for all forty-six bodies. A car that left a factory was
+ * being one standard core for every body. A car that left a factory was
  * cooled adequately; the undersized-radiator failure is something the player
  * creates by swapping parts or inherits from a car somebody else has been at.
  */

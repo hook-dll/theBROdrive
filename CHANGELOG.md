@@ -4,6 +4,15 @@
 
 ### Added
 
+- The driving view now carries a permanent, tunable soft-focus pass. Collision damage
+  no longer adds more blur: it briefly drains colour, hardens contrast and closes a
+  stronger black-red vignette around the frame.
+
+- Distant vessel mirages no longer use independent occupancy rolls that could leave a
+  valid seed empty for hundreds of kilometres. Each three-slot block now contains one
+  seeded encounter, retaining irregular spacing while bounding the spatial drought at
+  68 km.
+
 - A turning circle where the road starts. The road is generated from s = 0 upward and
   simply stopped there: the asphalt ended mid-stride against a dune, and ambient traffic
   driving toward the start ran out of road, sat against the clamp its reversed road view
@@ -280,6 +289,33 @@
   approaching and receding cars remain legible against the desert.
 
 ### Fixed
+
+- The bonnet camera no longer sits inside the car. The mount is measured at load time
+  by sweeping the bodywork over the front third of the model, and the sweep multiplied
+  each sample by the pack's scale a second time — `matrixWorld` already carries it. On
+  every centimetre-scale body, which is the whole Soviet pack, the window then contained
+  no geometry at all: the highest sample stayed at its seed value, the box floor, and
+  the camera looked at the road from inside the cabin through the dashboard and bonnet.
+  Measured before the fix on a VAZ-2103: 0.71 m of bodywork directly ahead of the mount,
+  0.08 m below it. It is now 0.19 m above the chassis centre on that car — 0.11 m of
+  bonnet under it and nothing in front — and the mount lands between 0.19 m and 0.45 m
+  above chassis centre on the cars, with the cab-forward UAZ truck capped at roof height
+  rather than floating above its cab. `tools/hood-mount.ts` casts against the real body
+  geometry of all twenty models and fails on a mount that looks through its own car or
+  that stands on nothing.
+- `tools/service.ts` is gone. It had not run since the abstract freight system was
+  removed in 0.14.0 — its import of `src/world/freight` no longer resolved. The service
+  rules it covered are not lost: `tools/cooling.ts` and `tools/cooling-drive.ts` hold
+  the thermal model and its wiring, `tools/road-scale.ts` the destroyed-engine path.
+- `engine_i4_2445` finally fits the body that runs it. The UAZ-330364 is a `truck`, so
+  the fit list excluded the van's own engine from any picker filtered by body class.
+  Installation never checked it — `bonnetAccepts` reads the part kind — so this was a
+  rule that only ever hid the right answer.
+- Diesel is still stocked, and the comment that justified it is not lying any more. The
+  gas-stop split claimed 8 of 46 bodies ran on diesel and named the Land-Rover-shaped
+  utilities and the vans; none of those bodies has existed since the Stylized pack was
+  dropped, and no catalogue entry runs on diesel at all. The 15% share stays, for the
+  two diesel engines a player can fit, but the note now says that instead.
 
 - Autopilot cars no longer treat a breakable dirt pile as an invitation to hit it:
   every indexed road prop is planned as a solid obstacle. A car already pressed

@@ -943,7 +943,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   // model's OWN space and subtracting `centre` afterwards silently breaks every body
   // whose box is not centred on its own origin: `frac * half` measured from the
   // origin comes out one offset wrong. Resolving in chassis space makes the
-  // fractions mean the same thing on all forty-six bodies.
+  // fractions mean the same thing on every body.
   const resolveFrac = (frac: readonly [number, number, number]): [number, number, number] => [
     frac[0] * half.x,
     (frac[1] * 2 - 1) * half.y,
@@ -967,28 +967,38 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   //
   // The window deliberately stops short of the nose: the leading edge is bumper and
   // grille, which slope away, and a camera pinned to them looks at sky.
+  //
+  // SAMPLES ARE ALREADY CHASSIS-LOCAL METRES: `matrixWorld` carries the pack's own
+  // scale and the body fit applied above. Multiplying them by `def.scale` a second
+  // time emptied the window on every centimetre-scale body — the whole Soviet pack —
+  // so `hoodY` never left its initial value and the mount sat at the floor of the
+  // box, inside the car.
   const hoodFrontZ = half.z * 0.86;
   const hoodRearZ = half.z * 0.34;
   const hoodHalfWidth = half.x * 0.35;
-  let hoodY = -half.y;
+  let skinY = -half.y;
   scene.updateMatrixWorld(true);
   scene.traverse((node) => {
     if (!(node instanceof THREE.Mesh)) return;
     const position = node.geometry.getAttribute('position');
     if (!position) return;
     for (let i = 0; i < position.count; i++) {
-      _sample.fromBufferAttribute(position, i).applyMatrix4(node.matrixWorld).multiplyScalar(s);
+      _sample.fromBufferAttribute(position, i).applyMatrix4(node.matrixWorld);
       const z = _sample.z - centre.z;
       if (z < hoodRearZ || z > hoodFrontZ) continue;
       if (Math.abs(_sample.x - centre.x) > hoodHalfWidth) continue;
-      hoodY = Math.max(hoodY, _sample.y - centre.y);
+      skinY = Math.max(skinY, _sample.y - centre.y);
     }
   });
   // A camera exactly on the sheet metal z-fights with it and shows nothing of the
-  // car, so it sits a hand's width proud of the measured skin.
+  // car, so it sits a hand's width proud of the measured skin — but never above the
+  // roof. On a cab-forward body (the UAZ truck, and any van bodied the same way)
+  // the front third holds nothing but cab roof, so the measured skin IS the roof
+  // and clearing it would float the mount above the vehicle. There it tops out level
+  // with the roof, at the windscreen line, which is where a cab-over's driver sits.
   const hoodPoint: [number, number, number] = [
     0,
-    hoodY + HOOD_CAMERA_CLEARANCE_M,
+    Math.min(skinY + HOOD_CAMERA_CLEARANCE_M, half.y),
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 

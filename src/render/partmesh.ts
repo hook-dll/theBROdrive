@@ -467,7 +467,7 @@ function buildDoor(b: MeshBuilder, v: PartVariant): void {
  * Dashboards. Wide and shallow, sitting in front of the driver's eye.
  *
  * Origin is the mount point; the binnacle stands above it and the fascia runs
- * forward, so the part reads correctly from the interior camera.
+ * forward, as it does in the car.
  */
 function buildDashboard(b: MeshBuilder, v: PartVariant): void {
   const id = v.id;

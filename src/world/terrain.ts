@@ -559,7 +559,7 @@ export class Terrain {
    * Applied once, at the base, with the detail layers faded to nothing by the same
    * weight. Every consumer - the drawn mesh, the collider baked from it, the tile
    * worker, the rescue check - therefore gets one number, and the pad in
-   * `render/terminuspad.ts` can be built flat and sit exactly on it.
+   * `world/terminuspad.ts` can be built flat and sit exactly on it.
    */
   private levelForTerminus(x: number, z: number, height: number): number {
     const w = terminusWeight(x, z);

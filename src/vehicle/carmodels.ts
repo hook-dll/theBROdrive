@@ -12,7 +12,7 @@
  * defaults: mass, gearbox, original engine, tank capacity, springs and steering.
  *
  * Every catalogue model is roadworthy. A wreck is a STATE a body is found in, not a
- * class of body: the same forty-six models supply the player's car, the working
+ * class of body: the same twenty models supply the player's car, the working
  * cars generated at roadside stops, and the sunken shells scattered beside them.
  *
  * Free-form anchor parts remain cosmetic. The separate four-cell bonnet service
@@ -162,10 +162,11 @@ const SUSP_CAR: SuspensionTuning = {
 
 /*
  * `Vehicle.rebuild` adds one sixth of the measured wheel radius to the catalogue's
- * clearance before placing the contact plane. The Soviet numbers below are
+ * clearance before placing the contact plane. The numbers in `FACTORY_GEOMETRY` are
  * therefore BASE clearances, already reduced by that measured lift: the suspension
- * probe then reads the real 190/174/165/170/150/220/205 mm under the body. Writing
- * those real figures directly made every car sit 50-63 mm too high.
+ * probe then reads 144-224 mm under a settled body, the Niva highest and the
+ * AZLK-2141 lowest. Writing those real figures directly made every car sit 50-63 mm
+ * too high.
  */
 
 /**
@@ -285,18 +286,6 @@ const SUSP_SPORT: SuspensionTuning = {
   compressionRatio: 0.3,
   reboundRatio: 0.46,
   bumpTravel: 0.08,
-};
-
-/**
- * The V8 fastback: the firmest and lowest thing here, because its launch torque
- * will seesaw anything softer. Still 1.5 Hz rather than a track car's 2.5.
- */
-const SUSP_FASTBACK: SuspensionTuning = {
-  frontHz: 1.5,
-  rearHz: 1.68,
-  compressionRatio: 0.32,
-  reboundRatio: 0.48,
-  bumpTravel: 0.075,
 };
 
 /**

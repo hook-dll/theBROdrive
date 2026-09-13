@@ -124,8 +124,8 @@ export function poisBetween(
 
 /**
  * The POI at a given slot, or null when that slot is empty desert. Same rolls as
- * `poisBetween`, factored out so the freight system can resolve a destination slot
- * without sampling a whole stretch of road.
+ * `poisBetween`, factored out so one slot can be resolved without sampling a whole
+ * stretch of road — `tools/wreck-spacing.ts` reads a field that way.
  */
 export function poiAt(seed: number, index: number, spacing = POI_SPACING): Poi | null {
   if (index < 1) return null;
@@ -381,18 +381,17 @@ function makeFluidCan(
  * turn up often enough to be findable and rarely enough to be worth a detour. Small
  * cans for the engine fluids, because that is how they are sold.
  *
- * The petrol/diesel split is matched to the CATALOGUE, not chosen for flavour. Of
- * the 46 bodies, 8 run on diesel — the two Land-Rover-shaped utilities, three of
- * the five vans, the ambulance, the bullion van and the fire engine, plus the
- * tractor unit — so roughly one car in six is a diesel. Cars are found rather than
- * spawned, and the wreck pool draws from the whole catalogue, so that one-in-six is
- * the real exposure a player has.
+ * The petrol/diesel split is no longer matched to the CATALOGUE: since the pack that
+ * ran on diesel was dropped, no catalogue body ships with it. The two diesel engines
+ * in `parts/registry.ts` are parts a player can fit, so a diesel can is for a car
+ * somebody has already converted — which is why it stays a rarity here rather than a
+ * share of the fleet.
  *
  * The first cut had diesel at 0.26 against petrol's 0.40, which oversupplied it
  * about two to one: a quarter of every can in the desert would have been unusable
- * to five players out of six. The split below leaves diesel a slight surplus over
- * its share of the fleet, so a diesel driver is not starved by bad luck, without
- * littering the road with cans nobody can pour.
+ * to five players out of six. The split below keeps diesel rare but findable, so a
+ * diesel driver is not starved by bad luck, without littering the road with cans
+ * nobody can pour.
  */
 const FLUID_STOCK: readonly { fluid: FluidKind; weight: number; capacity: number }[] = [
   { fluid: 'petrol', weight: 0.5, capacity: 20 },
