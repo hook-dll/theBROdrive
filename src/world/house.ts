@@ -20,6 +20,7 @@ import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
 import { fitGround } from './footprint';
+import { createVariantInstance } from './poivariantbuild';
 import { oilCapacity } from '../parts/registry';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
@@ -43,27 +44,40 @@ type V3 = [number, number, number];
 // ---------------------------------------------------------------------------
 
 /** Arclength of the homestead, ahead of the player's spawn (z = -14). */
-const HOMESTEAD_S = 16;
+const HOMESTEAD_S = 116;
 /** -1 = left of travel, +1 = right. */
 const SIDE = -1;
 
-/** Garage interior, in (u, v). Open front (toward the road) at GARAGE_DOOR_U. */
+/**
+ * How much further from the road the whole homestead sits, metres.
+ *
+ * Added in ONE place — `toWorld` below — rather than to each coordinate, so every
+ * constant in this file stays a building-relative offset and the compound can be
+ * moved again by changing this number alone. It is also what keeps the house off the
+ * road now that it is a 29 by 19 m compound with its own drive: at the old setback
+ * that drive would have started in the verge.
+ */
+const HOMESTEAD_DEPTH_M = 50;
+
+/**
+ * Garage door line. The building's own garage front sits here, and the driveway ramps
+ * up to it from the road.
+ */
 const GARAGE_DOOR_U = 8.3;
-const GARAGE_BACK_U = 14.0;
-const GARAGE_V0 = 0.4;
-const GARAGE_V1 = 5.4;
-const GARAGE_WALL_H = 2.7;
 /** Small free-fall inside the low garage; the open-world 0.75 m drop hits its roof. */
 const GARAGE_CAR_DROP_METRES = 0.08;
 
-/** House interior (shares the garage's back wall). */
-const HOUSE_BACK_U = 20.0;
-const HOUSE_V0 = -3.6;
-const HOUSE_V1 = 3.6;
-const HOUSE_WALL_H = 2.9;
-
-const WALL_T = 0.14;
 const SLAB_THICK = 0.45;
+
+/**
+ * Intensity given to every authored lamp of the building and of the yard.
+ *
+ * The value is the light budget's business, not this file's: the budget picks the
+ * nearest few sources at night and leaves them dark by day, so anything non-zero is
+ * simply "eligible". Matching the POI buildings' value keeps a lit homestead and a
+ * lit petrol station at the same brightness.
+ */
+const HOMESTEAD_LAMP_INTENSITY = 0.55;
 /** The concrete pad tops this far above the highest terrain under it, so the
  *  heightfield can never poke through the floor. The slab is thick enough that the
  *  LOWEST corner of the footprint still has concrete below the sand: the runout is
@@ -76,17 +90,45 @@ const DRIVE_FAR_U = ROAD_HALF_WIDTH; // meet the road surface, not the shoulder
 const DRIVE_V0 = 0.7;
 const DRIVE_V1 = 5.1;
 
-/** Concrete pad footprint (house + garage share one slab). */
-const PAD_U0 = GARAGE_DOOR_U;
-const PAD_U1 = HOUSE_BACK_U + 0.1;
-const PAD_V0 = HOUSE_V0 - 0.1;
-const PAD_V1 = GARAGE_V1 + 0.1;
+/**
+ * The gallery variant this homestead is built from: `starter-homestead`, index 25.
+ *
+ * It is placed by its own local frame rather than by editing its geometry: local x
+ * runs FORWARD along the road and local z runs AWAY from it, so the variant's front
+ * (-Z) faces the road and its garage wing (+X) points down the road. That is a
+ * coordinate swap, which composes with `toWorld` into a proper rotation of the whole
+ * building — the compound is not mirrored — and it is how the house and garage end up
+ * side by side facing the drive, exactly as the hand-built version was arranged.
+ */
+const VARIANT_INDEX = 25;
+/** The variant's local origin, in (u, v). Its garage door lands on the drive. */
+const VARIANT_U = GARAGE_DOOR_U + 5;
+const VARIANT_V = (DRIVE_V0 + DRIVE_V1) / 2 - 8.68;
+/** Garage centre in the variant's own coordinates: door at local z = -5, centre at x = 8.68. */
+const GARAGE_CENTRE_U = VARIANT_U;
+const GARAGE_CENTRE_V = VARIANT_V + 8.68;
 
-/** Workbench against the garage's back wall. Items rest on top at `+0.9`. */
-const WB_U0 = 13.2;
-const WB_U1 = 13.9;
-const WB_V0 = 0.6;
-const WB_V1 = 1.8;
+/**
+ * The variant's own extent, MEASURED rather than taken from its declared footprint: a
+ * porch, a balcony and a garage wing all project past the declared box. These are the
+ * same numbers the world's POI placement measures for this variant.
+ */
+const VARIANT_HALF_X = 13.7;
+const VARIANT_HALF_Z = 7.8;
+/** Yard in front of the garage, beyond the building, for the junk and the fuel can. */
+const YARD_M = 3.2;
+
+/** Concrete pad: the building's own extent, plus that yard. */
+const PAD_V0 = VARIANT_V - VARIANT_HALF_X;
+const PAD_V1 = VARIANT_V + VARIANT_HALF_X + YARD_M;
+const PAD_U0 = VARIANT_U - VARIANT_HALF_Z;
+const PAD_U1 = VARIANT_U + VARIANT_HALF_Z;
+
+/** Workbench just inside the garage door. Items rest on top at `+WB_TOP`. */
+const WB_U0 = GARAGE_DOOR_U + 1.4;
+const WB_U1 = GARAGE_DOOR_U + 2.1;
+const WB_V0 = GARAGE_CENTRE_V - 2.6;
+const WB_V1 = GARAGE_CENTRE_V - 1.4;
 const WB_TOP = 0.9;
 
 /** Layout derived from the seed; shared by the chunk and the scatter helpers. */
@@ -120,8 +162,8 @@ function layout(road: Road, terrain: Terrain): HomesteadLayout {
   const az = -SIDE * Math.sin(ref.heading);
 
   const toWorld = (u: number, v: number): [number, number] => [
-    ref.x + ax * u + fx * v,
-    ref.z + az * u + fz * v,
+    ref.x + ax * (u + HOMESTEAD_DEPTH_M) + fx * v,
+    ref.z + az * (u + HOMESTEAD_DEPTH_M) + fz * v,
   ];
 
   // The slab tops the HIGHEST ground under its footprint (see SLAB_LIFT), which is
@@ -252,48 +294,6 @@ function cylinder(
   }
 }
 
-/** A window pane + dark frame on a wall whose normal is the `u` (away) axis. */
-function windowOnU(
-  ctx: BuildCtx,
-  u: number,
-  vCenter: number,
-  yCenter: number,
-  w: number,
-  h: number,
-  towardRoad: boolean,
-  glassMat: THREE.Material,
-  frameMat: THREE.Material,
-): void {
-  const d = towardRoad ? -1 : 1;
-  const v0 = vCenter - w / 2;
-  const v1 = vCenter + w / 2;
-  const y0 = yCenter - h / 2;
-  const y1 = yCenter + h / 2;
-  visual(ctx, boxUV(ctx.L, u + d * 0.02, v0 - 0.04, y0 - 0.04, u + d * 0.1, v1 + 0.04, y1 + 0.04), frameMat);
-  visual(ctx, boxUV(ctx.L, u + d * 0.05, v0, y0, u + d * 0.07, v1, y1), glassMat);
-}
-
-/** A window pane + dark frame on a wall whose normal is the `v` (along) axis. */
-function windowOnV(
-  ctx: BuildCtx,
-  v: number,
-  uCenter: number,
-  yCenter: number,
-  w: number,
-  h: number,
-  towardRoad: boolean,
-  glassMat: THREE.Material,
-  frameMat: THREE.Material,
-): void {
-  const d = towardRoad ? -1 : 1;
-  const u0 = uCenter - w / 2;
-  const u1 = uCenter + w / 2;
-  const y0 = yCenter - h / 2;
-  const y1 = yCenter + h / 2;
-  visual(ctx, boxUV(ctx.L, u0 - 0.04, v + d * 0.02, y0 - 0.04, u1 + 0.04, v + d * 0.1, y1 + 0.04), frameMat);
-  visual(ctx, boxUV(ctx.L, u0, v + d * 0.05, y0, u1, v + d * 0.07, y1), glassMat);
-}
-
 /**
  * The driveway as a filled gravel wedge: ramp top, buried bottom, closed ends.
  *
@@ -368,13 +368,8 @@ export class HomesteadProvider implements ChunkProvider {
       return m;
     };
 
-    const wallMat = mat(0x8a7f6d);
-    const roofMat = mat(0x5f4a3a, { metalness: 0.4, roughness: 0.75 });
     const floorMat = mat(0x9a978f, { roughness: 0.95 });
     const gravelMat = mat(0x7a6c56, { roughness: 1 });
-    const doorMat = mat(0x4a3a28);
-    const glassMat = mat(0x9fc3d0, { metalness: 0.1, roughness: 0.1, transparent: true, opacity: 0.35 });
-    const frameMat = mat(0x3d3a34);
     const drumMatA = mat(0x8b3a2a, { metalness: 0.5, roughness: 0.7 });
     const drumMatB = mat(0x5a6b3a, { metalness: 0.5, roughness: 0.7 });
     const tyreMat = mat(0x1a1a1a);
@@ -388,21 +383,59 @@ export class HomesteadProvider implements ChunkProvider {
     // --- Shared concrete pad (garage floor + house floor, one flush slab) ----
     solid(bctx, boxUV(L, PAD_U0, PAD_V0, fy - SLAB_THICK, PAD_U1, PAD_V1, fy), concrete, floorMat);
 
-    // --- Walls (all closed boxes; the house is solid scenery, the garage open) ---
-    // Shared wall: house front and garage back in one piece, so there is no
-    // double-wall seam where the two buildings meet.
-    solid(bctx, boxUV(L, GARAGE_BACK_U - WALL_T / 2, HOUSE_V0, fy, GARAGE_BACK_U + WALL_T / 2, GARAGE_V1, fy + HOUSE_WALL_H), concrete, wallMat);
-    // Garage side walls.
-    solid(bctx, boxUV(L, GARAGE_DOOR_U, GARAGE_V0 - WALL_T / 2, fy, GARAGE_BACK_U, GARAGE_V0 + WALL_T / 2, fy + GARAGE_WALL_H), concrete, wallMat);
-    solid(bctx, boxUV(L, GARAGE_DOOR_U, GARAGE_V1 - WALL_T / 2, fy, GARAGE_BACK_U, GARAGE_V1 + WALL_T / 2, fy + GARAGE_WALL_H), concrete, wallMat);
-    // House side + back walls.
-    solid(bctx, boxUV(L, GARAGE_BACK_U, HOUSE_V0 - WALL_T / 2, fy, HOUSE_BACK_U, HOUSE_V0 + WALL_T / 2, fy + HOUSE_WALL_H), concrete, wallMat);
-    solid(bctx, boxUV(L, GARAGE_BACK_U, HOUSE_V1 - WALL_T / 2, fy, HOUSE_BACK_U, HOUSE_V1 + WALL_T / 2, fy + HOUSE_WALL_H), concrete, wallMat);
-    solid(bctx, boxUV(L, HOUSE_BACK_U - WALL_T / 2, HOUSE_V0, fy, HOUSE_BACK_U + WALL_T / 2, HOUSE_V1, fy + HOUSE_WALL_H), concrete, wallMat);
+    // --- THE HOUSE AND GARAGE: the gallery's `starter-homestead` variant -------
+    //
+    // The building is not built here any more. It is the catalogue's own compound,
+    // placed as a unit and collided as a unit, which is what keeps this file from
+    // drifting away from the thing the POI gallery shows.
+    //
+    // Its local frame maps onto this one by a coordinate swap: the variant's front
+    // (-Z) faces the road, and its garage wing (+X) runs forward along it. Composed
+    // with `toWorld` that is a proper rotation of the whole building, so the compound
+    // is NOT mirrored — house and garage stand side by side facing the drive, which is
+    // how the hand-built version was arranged. `yaw` is the same angle the world's POI
+    // placement uses for the same reason: `atan2(awayX, awayZ)` turns a building's
+    // front toward the centreline.
+    {
+      const instance = createVariantInstance(VARIANT_INDEX);
+      const [bx, bz] = L.toWorld(VARIANT_U, VARIANT_V);
+      const yaw = Math.atan2(L.ax, L.az);
+      const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'));
 
-    // --- Roofs (closed slabs, collidable so you can't clip through) ---
-    solid(bctx, boxUV(L, GARAGE_DOOR_U - 0.2, GARAGE_V0 - 0.25, fy + GARAGE_WALL_H, GARAGE_BACK_U + 0.2, GARAGE_V1 + 0.25, fy + GARAGE_WALL_H + 0.15), concrete, roofMat);
-    solid(bctx, boxUV(L, GARAGE_BACK_U - 0.2, HOUSE_V0 - 0.2, fy + HOUSE_WALL_H, HOUSE_BACK_U + 0.2, HOUSE_V1 + 0.2, fy + HOUSE_WALL_H + 0.15), concrete, roofMat);
+      instance.group.position.set(bx - ox, fy, bz - oz);
+      instance.group.quaternion.copy(quat);
+      instance.group.updateMatrixWorld(true);
+      group.add(instance.group);
+
+      // Its wall lights become light-budget sources, so they carry the budget that
+      // every other artificial light in the world already obeys instead of adding
+      // eleven uncompiled lights to the scene the moment the player spawns.
+      for (const source of instance.lightSources) {
+        source.intensity = HOMESTEAD_LAMP_INTENSITY;
+        source.userData.lightBudgetSource = true;
+      }
+
+      if (ctx.hasPhysics) {
+        // One trimesh for the whole building. Roofs are excluded from `solid`, so the
+        // interior is entered through its doors rather than sealed by its roof, and
+        // the wall openings the catalogue builds stay openings.
+        const matrix = new THREE.Matrix4().compose(
+          new THREE.Vector3(bx, fy, bz),
+          quat,
+          new THREE.Vector3(1, 1, 1),
+        );
+        const position = instance.solid.getAttribute('position');
+        const v = new THREE.Vector3();
+        const verts: number[] = [];
+        for (let i = 0; i < position.count; i++) {
+          v.fromBufferAttribute(position, i).applyMatrix4(matrix);
+          verts.push(v.x, v.y, v.z);
+        }
+        const tris: number[] = [];
+        for (let i = 0; i < position.count; i++) tris.push(i);
+        concrete.addIndexed(verts, tris);
+      }
+    }
 
     // --- Driveway (gravel wedge, ramps flush to the road) ---
     {
@@ -431,46 +464,43 @@ export class HomesteadProvider implements ChunkProvider {
     solid(bctx, boxUV(L, WB_U0, WB_V0, fy, WB_U1, WB_V1, fy + WB_TOP), concrete, benchMat);
     visual(bctx, boxUV(L, WB_U0 - 0.1, WB_V0 - 0.1, fy + WB_TOP, WB_U1 + 0.1, WB_V1 + 0.1, fy + WB_TOP + 0.04), metalMat);
 
-    // --- House door + windows (visual only; the house is solid scenery) ---
-    // Front door on the road-facing wall, clear of the garage.
-    visual(bctx, boxUV(L, GARAGE_BACK_U - WALL_T / 2 - 0.03, -2.45, fy, GARAGE_BACK_U - WALL_T / 2 - 0.02, -1.55, fy + 2.0), doorMat);
-    windowOnU(bctx, GARAGE_BACK_U, -0.4, fy + 1.4, 0.9, 0.9, true, glassMat, frameMat);
-    windowOnU(bctx, GARAGE_BACK_U, -3.1, fy + 1.4, 0.9, 0.9, true, glassMat, frameMat);
-    windowOnV(bctx, HOUSE_V0, 16.5, fy + 1.4, 1.0, 0.9, true, glassMat, frameMat);
-    windowOnV(bctx, HOUSE_V1, 16.5, fy + 1.4, 1.0, 0.9, true, glassMat, frameMat);
-    windowOnU(bctx, HOUSE_BACK_U, 0.0, fy + 1.5, 1.0, 0.9, false, glassMat, frameMat);
-    windowOnV(bctx, GARAGE_V1, 11.5, fy + 1.6, 1.0, 0.8, true, glassMat, frameMat);
 
     // --- Junk: oil drums, tyre stack, jack stands ---
-    const [d1x, d1z] = L.toWorld(9.0, -1.0);
-    const [d2x, d2z] = L.toWorld(9.6, -0.5);
-    const [d3x, d3z] = L.toWorld(9.0, -2.0);
+    //
+    // On the YARD now, not beside the garage door: the building is the catalogue's
+    // and fills its own footprint, so anything this file adds would stand inside a
+    // wall. The yard is the strip the pad keeps in front of the garage for exactly
+    // this, and the cluster reads the same from the drive.
+    const yardU = PAD_U1 - YARD_M * 0.55;
+    const [d1x, d1z] = L.toWorld(yardU, GARAGE_CENTRE_V - 1.2);
+    const [d2x, d2z] = L.toWorld(yardU + 0.6, GARAGE_CENTRE_V - 0.7);
+    const [d3x, d3z] = L.toWorld(yardU, GARAGE_CENTRE_V - 2.2);
     cylinder(bctx, d1x, fy + 0.45, d1z, 0.32, 0.9, drumMatA, 18, concrete);
     cylinder(bctx, d2x, fy + 0.45, d2z, 0.32, 0.9, drumMatB, 18, concrete);
     cylinder(bctx, d3x, fy + 0.45, d3z, 0.32, 0.9, drumMatA, 18, concrete);
 
     // Tyre stack: three tyres lying flat.
-    const [tx, tz] = L.toWorld(8.7, -2.6);
+    const [tx, tz] = L.toWorld(yardU - 0.3, GARAGE_CENTRE_V - 2.8);
     for (let k = 0; k < 3; k++) {
       cylinder(bctx, tx, fy + 0.09 + k * 0.18, tz, 0.35, 0.18, tyreMat, 20, concrete);
     }
 
-    // Jack stands: small tripods near where the car's wheels will go.
-    const [j1x, j1z] = L.toWorld(10.4, 1.2);
-    const [j2x, j2z] = L.toWorld(10.4, 4.6);
+    // Jack stands: small tripods on the yard, where the car's wheels will go.
+    const [j1x, j1z] = L.toWorld(yardU + 0.9, GARAGE_CENTRE_V + 1.6);
+    const [j2x, j2z] = L.toWorld(yardU + 0.9, GARAGE_CENTRE_V + 3.0);
     visual(bctx, [ [j1x - 0.14, fy, j1z - 0.14], [j1x + 0.14, fy + 0.5, j1z + 0.14] ], metalMat);
     visual(bctx, [ [j2x - 0.14, fy, j2z - 0.14], [j2x + 0.14, fy + 0.5, j2z + 0.14] ], metalMat);
 
     // --- Water tank beside the house ---
     {
-      const [tx2, tz2] = L.toWorld(21.4, 1.4);
+      const [tx2, tz2] = L.toWorld(PAD_U1 + 0.2, GARAGE_CENTRE_V - 3.0);
       const ground = ctx.terrain.heightAt(tx2, tz2, HOMESTEAD_S);
       cylinder(bctx, tx2, ground + 1.1, tz2, 0.9, 2.2, tankMat, 24, concrete);
     }
 
     // --- Fence line behind the house ---
     {
-      const fenceU = 21.8;
+      const fenceU = PAD_U1 + 0.6;
       let refGround = 0;
       for (let i = 0; i < 5; i++) {
         const v = -5 + i * 2.5;
@@ -488,15 +518,16 @@ export class HomesteadProvider implements ChunkProvider {
     // --- Lights: modest pools at the garage door. Born dark; the LightBudget
     // (src/render/lights.ts) enables them only at night and only while the
     // homestead is within the light cutoff of the camera. ---
-    const [glx, glz] = L.toWorld((GARAGE_DOOR_U + GARAGE_BACK_U) / 2, (GARAGE_V0 + GARAGE_V1) / 2);
-    const garageLight = new THREE.PointLight(0xffd9a0, 8, 16, 2);
+    const [glx, glz] = L.toWorld(GARAGE_CENTRE_U + 2.0, GARAGE_CENTRE_V);
+    const garageLight = new THREE.PointLight(0xffd9a0, HOMESTEAD_LAMP_INTENSITY, 16, 2);
     garageLight.position.set(glx - ox, fy + 2.3, glz - oz);
     garageLight.name = 'garageLight';
     garageLight.visible = false;
     group.add(garageLight);
 
-    const [dlx, dlz] = L.toWorld(GARAGE_DOOR_U + 0.4, (GARAGE_V0 + GARAGE_V1) / 2);
-    const doorLight = new THREE.PointLight(0xffe0b0, 7, 12, 2);
+    // The yard lamp, which is what makes the compound read as inhabited from the road.
+    const [dlx, dlz] = L.toWorld(GARAGE_DOOR_U - 1.2, GARAGE_CENTRE_V);
+    const doorLight = new THREE.PointLight(0xffe0b0, HOMESTEAD_LAMP_INTENSITY, 12, 2);
     doorLight.position.set(dlx - ox, fy + 2.5, dlz - oz);
     doorLight.name = 'doorLight';
     doorLight.visible = false;
@@ -554,9 +585,8 @@ export function homesteadSpawn(
   terrain: Terrain,
 ): { x: number; y: number; z: number; yaw: number } {
   const L = layout(road, terrain);
-  // Same u as the car so they stand level with it, but one bay toward v0.
-  const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
-  const [x, z] = L.toWorld(carU, GARAGE_V0 + 0.7);
+  // Alongside the parked car, one bay toward the garage's -v wall.
+  const [x, z] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V - 2.2);
   // Facing out of the garage is the -away direction; yaw is measured from +Z.
   return { x, y: L.floorY, z, yaw: Math.atan2(-L.ax, -L.az) };
 }
@@ -583,11 +613,10 @@ export function createStartingCar(world: GameWorld): CarState {
   const waterLitres = bonnetWaterCapacity(bonnet) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
-  const carU = (GARAGE_DOOR_U + GARAGE_BACK_U) / 2;
-  const carV = (GARAGE_V0 + GARAGE_V1) / 2;
   const measure = carModelMeasure(def.id);
   const carY = carSpawnYAboveGround(measure, L.floorY, GARAGE_CAR_DROP_METRES);
-  const [cx, cz] = L.toWorld(carU, carV);
+  // The variant's own garage centre, so the car stands in the bay rather than beside it.
+  const [cx, cz] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V);
   // Face the door: body +Z -> "toward the road" (-away), i.e. world +X here.
   const yaw = Math.atan2(-L.ax, -L.az);
   const half = yaw / 2;
@@ -636,9 +665,11 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
   const terrain = new Terrain(world.seed, road);
   const L = layout(road, terrain);
 
+  // The can stands on the yard beside the garage door, where the player cannot miss
+  // it on the way out.
   const [canX, canZ] = L.toWorld(
-    10.0 + (hash01(world.seed, 0x94d, 2) - 0.5) * 0.2,
-    -1.8 + (hash01(world.seed, 0x95d, 2) - 0.5) * 0.2,
+    PAD_U1 - YARD_M * 0.5 + (hash01(world.seed, 0x94d, 2) - 0.5) * 0.2,
+    GARAGE_CENTRE_V + 0.4 + (hash01(world.seed, 0x95d, 2) - 0.5) * 0.2,
   );
   loose.spawnItem(
     {
@@ -655,7 +686,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
 
   // Camera and watch wait on the garage workbench, readable as deliberate
   // possessions rather than random scrap.
-  const [cameraX, cameraZ] = L.toWorld(13.45, 1.08);
+  const [cameraX, cameraZ] = L.toWorld((WB_U0 + WB_U1) / 2, WB_V0 + 0.2);
   loose.spawnItem(
     {
       type: 'camera',
@@ -666,7 +697,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     L.floorY + WB_TOP + 0.14,
     cameraZ,
   );
-  const [watchX, watchZ] = L.toWorld(13.45, 1.62);
+  const [watchX, watchZ] = L.toWorld((WB_U0 + WB_U1) / 2, WB_V0 + 0.7);
   loose.spawnItem(
     {
       type: 'pocket_watch',
@@ -680,7 +711,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
   // Two complete doses wait in the garage together: enough to teach the item's
   // value without making the rest of the road's rare POI finds redundant.
   for (let i = 0; i < 2; i++) {
-    const [medicineX, medicineZ] = L.toWorld(12.75, 1.18 + i * 0.34);
+    const [medicineX, medicineZ] = L.toWorld((WB_U0 + WB_U1) / 2, WB_V0 + 1.1 + i * 0.34);
     loose.spawnItem(
       {
         type: 'medicine',
@@ -695,7 +726,9 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
 
   // The ball starts on bare ground beside the drive, with the centre one radius
   // above the terrain so it neither floats nor spawns intersecting the sand.
-  const [ballX, ballZ] = L.toWorld(6.5, 5.9);
+  // Off the pad, on the sand: the ball belongs on bare ground, and the pad's near
+  // edge is where bare ground now starts.
+  const [ballX, ballZ] = L.toWorld(PAD_U0 - 1.0, GARAGE_CENTRE_V + 4.0);
   loose.spawnItem(
     {
       type: 'football',

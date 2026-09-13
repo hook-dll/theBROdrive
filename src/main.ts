@@ -25,6 +25,7 @@ import {
   type GraphicsQuality,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
+import { warmVariantAssets } from './world/poivariantbuild';
 import {
   CAMERA_FRAME_LIMIT,
   Inventory,
@@ -391,6 +392,11 @@ async function boot(): Promise<void> {
   // Warm only models already requested by the active set. Later models parse and
   // compile on demand, before their first Vehicle instance is attached.
   await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
+  // And warm every POI building, for the same reason: building one costs 3.7 ms on a
+  // 5950X — more than the whole 3 ms streaming budget — and a first use happens while
+  // the player is driving past. Paid here, once, behind the loading cover, later
+  // placements are Object3D wrapping at 0.06 ms. See world/poivariantbuild.ts.
+  warmVariantAssets();
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
   // at any moment carries what the player is holding. Registered before anything can

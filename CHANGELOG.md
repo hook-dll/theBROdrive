@@ -2,7 +2,68 @@
 
 ## Unreleased
 
+### Changed
+
+- EVERY ROADSIDE STOP IS ONE OF THE GALLERY'S 26 BUILDINGS. The world used to have four
+  hand-built kinds — a wreck field, a petrol station, a workshop and a camp — and the
+  twenty-six buildings in the POI gallery existed only in that gallery. Now the four are
+  gone and every slot draws one of the twenty-six, from one hash of the slot: having seen
+  a petrol station tells a player nothing about the next one, which is the whole point.
+- The setback is measured from the ROAD EDGE and scaled by the building. It used to be a
+  flat 12-40 m from the crown, which cannot serve a 5.8 m kiosk and a 30 m parts warehouse
+  at once: the same offset puts the warehouse in the lane or the kiosk in the middle of
+  nowhere. It is now `halfWidthAt(s) + verge + the building's own half-extent`, so every
+  building clears the asphalt by 10-22 m of verge whichever way the road has widened.
+- Rewards are granted BY CATEGORY rather than by kind, because "what is this place" and
+  "what does it give me" stopped being the same question. Forecourts carry fuel cans, the
+  gum pack and a trailer; shops carry tools and gum; houses carry medicine and a tool; and
+  the salvageable car field — the 1-3 wrecks, their trunks and the 34% chance of a working
+  car — moved to the container category, where a scrapyard's worth of cars belongs. The
+  supply of each resource is close to what it was.
+- The buildings' 65 authored lights would have recompiled the world's shaders the moment a
+  chunk streamed in, because Three compiles the light count into every material. They are
+  replaced by invisible marker lights that the existing `LightBudget` already budgets,
+  exactly as the streamed street lamps are. Their emissive fixtures stay, so a window
+  still glows.
+- A building is collided by ONE trimesh of its merged walls, floors and bulky props. The
+  catalogue's shells are built with real openings — `wallWithOpenings` leaves a hole and
+  trims it — so a trimesh is both solid and walkable and needs no hand-authored proxy.
+  Roofs are excluded, or the trimesh would enclose the interior from above.
+- THE STARTER HOMESTEAD IS THE GALLERY'S, MOVED 100 M ALONG THE ROAD AND 50 M DEEPER
+  INTO THE DESERT. It was a hand-built 705-line compound; it is now the catalogue's
+  `starter-homestead` — house and garage, furnished, with its own room lights — and the
+  file keeps only what the catalogue does not bring: the concrete pad, the gravel drive
+  from the asphalt to the garage door, the yard, the oil drums and tyre stack, the water
+  tank, the fence, the lamps, the spawn, the starter car and the starter items. The shift
+  is one constant (`HOMESTEAD_DEPTH_M`) applied inside the layout frame, so every other
+  coordinate in the file stayed a building-relative offset.
+- BUILDING A POI IS CACHED, and that is not an optimisation but a correctness fix. Merging
+  a variant costs 3.74 ms on a 5950X and 11.4 ms at worst, against a streaming budget of
+  3 ms per frame with one job per frame — so rebuilding per placement would have hitched
+  on every POI, one every 1.2 km. The merged result is position-independent (merging bakes
+  each mesh's transform into its geometry at the local origin), so it is built once per
+  session and shared, and placing a building is only wrapping it in fresh Object3Ds:
+  measured, 0.063 ms mean and 0.47 ms worst. All 26 are warmed behind the loading cover
+  (157 ms once), because a first use otherwise happens while the player is driving past.
+  It also stops the leak the old path had, where every streamed chunk built fresh geometry
+  that nothing disposed.
+- `tools/poi-placement.ts` holds the three properties nothing else checked: no building
+  stands inside the road's verge, every one of the 26 variants is actually reachable over
+  a long enough drive, and the homestead holds together — the compound is 63.3 m from the
+  centreline, the spawn stands 1.31 m above the sand on the pad, the car 0.86 m above the
+  player's feet inside the garage, and placing a building stays under the streaming budget.
+- `tools/poi-grounding.ts` and `tools/wreck-spacing.ts` follow the change: the grounding
+  bench groups by category rather than by the four dead kinds, and the wreck bench reads
+  the container category, which is where the car field is built now.
+
 ### Removed
+
+
+
+- THE FOUR HAND-BUILT POI KINDS: `roadside_wrecks`, `gas_stop`, `workshop` and `camp`,
+  with their builders, their forecourt/canopy/workshop-slab/camp constants and their
+  window helpers. `PoiKind` is gone with them; a slot names a variant index and the
+  variant's category is what the rewards read.
 
 - THE FULL-SCREEN SCENE BLUR. It was a `backdrop-filter` over the whole viewport, so the
   compositor had to read back the frame the 3D pass had just drawn and filter it before

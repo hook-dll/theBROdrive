@@ -23,6 +23,7 @@
 import { installAssetShim } from './assetshim';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import { POI_SPACING, layOutWreckField, poiAt } from '../src/world/poi';
+import { variantDef } from '../src/world/poivariantbuild';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import { hash01, pick } from '../src/core/rng';
 
@@ -109,7 +110,9 @@ const newFields: Placed[][] = [];
 for (const seed of SEEDS) {
   for (let index = 1; index <= SLOTS; index++) {
     const poi = poiAt(seed >>> 0, index);
-    if (poi === null || poi.kind !== 'roadside_wrecks') continue;
+    // The car field is granted to the container category now, so that is where a
+    // wreck layout is actually built.
+    if (poi === null || variantDef(poi.variant).category !== 'container') continue;
     oldFields.push(oldLayout(poi.variantSeed));
     newFields.push(layOutWreckField(poi).map((slot) => ({
       radius: slot.radius,

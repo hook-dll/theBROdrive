@@ -23,7 +23,8 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { PoiProvider, poisBetween, type PoiKind } from '../src/world/poi';
+import { PoiProvider, poisBetween, type PoiCategory } from '../src/world/poi';
+import { variantDef } from '../src/world/poivariantbuild';
 import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
 import type { WreckTrunkField } from '../src/world/wrecktrunks';
@@ -99,8 +100,8 @@ interface KindStat {
   worstS: number;
 }
 
-const stats = new Map<PoiKind | 'courier', KindStat>();
-function statFor(kind: PoiKind | 'courier'): KindStat {
+const stats = new Map<PoiCategory | 'courier', KindStat>();
+function statFor(kind: PoiCategory | 'courier'): KindStat {
   let stat = stats.get(kind);
   if (!stat) {
     stat = { pieces: 0, floating: 0, shortMembers: 0, worstGap: 0, worstS: 0 };
@@ -148,7 +149,7 @@ for (let chunk = 0; chunk < CHUNKS; chunk++) {
       const cz = (piece.minZ + piece.maxZ) / 2 - anchor.z;
       if (cx * cx + cz * cz < 30 * 30) owned.push(i);
     }
-    const stat = statFor(poi.kind);
+    const stat = statFor(variantDef(poi.variant).category);
     for (const i of owned) {
       const piece = pieces[i]!;
       stat.pieces++;

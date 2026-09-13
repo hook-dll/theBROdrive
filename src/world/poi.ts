@@ -33,6 +33,14 @@ import {
   type CourierStop,
 } from './couriers';
 import { fitGround, type GroundPlane } from './footprint';
+import { halfWidthAt } from './roadprofile';
+import {
+  createVariantInstance,
+  variantCount,
+  variantDef,
+  type PoiCategory,
+  type VariantInstance,
+} from './poivariantbuild';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
@@ -57,12 +65,17 @@ const POI_OCCUPANCY = 0.55;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
 const POI_DOMAIN = 0x504f4931; // 'POI1'
 
-/** Kind distribution is intentionally front-loaded on the scavenging stops. */
-const KIND_WRECK = 0.4;
-const KIND_GAS = 0.58;
-const KIND_CAMP = 0.9;
-
-export type PoiKind = 'roadside_wrecks' | 'gas_stop' | 'workshop' | 'camp';
+/**
+ * Clear verge between the ASPHALT EDGE and a building's nearest wall, metres.
+ *
+ * Measured from the edge rather than from the centreline because the road widens: one
+ * fixed offset from the crown is 12 m of clearance on a two-lane stretch and 6 m on a
+ * four-lane one, which is how a kiosk ends up at the paint. `halfWidthAt` is usable
+ * here because it is a pure function of the seed and the arclength — no road sampling —
+ * so the placement below stays as pure and as cheap as it was.
+ */
+const VARIANT_SETBACK_MIN_M = 10;
+const VARIANT_SETBACK_SPAN_M = 12;
 
 export interface Poi {
   /** Slot index; equals the POI's identity in `WorldState.lootedPois`. Stable forever. */
@@ -71,9 +84,30 @@ export interface Poi {
   readonly s: number;
   /** Signed lateral offset from the centreline; negative is left of travel. */
   readonly lateral: number;
-  readonly kind: PoiKind;
+  /** Index into `POI_VARIANTS`: the building that stands here. */
+  readonly variant: number;
   /** Deterministic per-POI variation seed for shape and loot. */
   readonly variantSeed: number;
+}
+
+/**
+ * How far out a slot sits: what this PARTICULAR building needs.
+ *
+ * A kiosk belongs at the verge and a parts warehouse does not, and one offset for both
+ * puts either a building in the road or a shed in the middle of nowhere. So the offset
+ * is the asphalt half width at this arclength, plus a verge, plus the building's own
+ * half-extent. The AUTHORED footprint is used rather than a measured one because this
+ * function is pure and cheap by contract — `poisBetween` resolves a stretch of road
+ * without building a single triangle — and a measured extent would be wrong here for
+ * the same reason: measuring means building.
+ */
+function variantLateral(seed: number, index: number, s: number, variant: number): number {
+  const def = variantDef(variant);
+  const halfBuilding = Math.max(def.footprint[0], def.footprint[1]) / 2;
+  const side = hash01(seed, POI_DOMAIN, index, 2) < 0.5 ? -1 : 1;
+  const verge =
+    VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, index, 3) * VARIANT_SETBACK_SPAN_M;
+  return side * (halfWidthAt(seed, s) + verge + halfBuilding);
 }
 
 /**
@@ -101,21 +135,22 @@ export function poisBetween(
       && !isCourierPoiSlot(seed, i, spacing)
     ) continue;
 
-    const kindRoll = hash01(seed, POI_DOMAIN, i, 1);
-    let kind: PoiKind;
-    if (kindRoll < KIND_WRECK) kind = 'roadside_wrecks';
-    else if (kindRoll < KIND_GAS) kind = 'gas_stop';
-    else if (kindRoll < KIND_CAMP) kind = 'camp';
-    else kind = 'workshop';
-
-    const side = hash01(seed, POI_DOMAIN, i, 2) < 0.5 ? -1 : 1;
-    const lateral = side * (12 + hash01(seed, POI_DOMAIN, i, 3) * 28);
+    // WHICH BUILDING STANDS HERE, and there is deliberately no progression to learn:
+    // the variant is one hash of the slot, so having seen a petrol station tells a
+    // player nothing about the next one. That is the whole feel this is after — the
+    // drive becomes a sequence of surprises rather than a route whose landmarks are
+    // known in advance.
+    const variant = Math.min(
+      variantCount() - 1,
+      Math.floor(hash01(seed, POI_DOMAIN, i, 1) * variantCount()),
+    );
+    const lateral = variantLateral(seed, i, s, variant);
 
     result.push({
       index: i,
       s,
       lateral,
-      kind,
+      variant,
       variantSeed: hash(seed, POI_DOMAIN, i, 4),
     });
   }
@@ -133,19 +168,19 @@ export function poiAt(seed: number, index: number, spacing = POI_SPACING): Poi |
   if (s <= 0 || s > ROAD_LENGTH) return null;
   if (hash01(seed, POI_DOMAIN, index) >= POI_OCCUPANCY) return null;
 
-  const kindRoll = hash01(seed, POI_DOMAIN, index, 1);
-  let kind: PoiKind;
-  if (kindRoll < KIND_WRECK) kind = 'roadside_wrecks';
-  else if (kindRoll < KIND_GAS) kind = 'gas_stop';
-  else if (kindRoll < KIND_CAMP) kind = 'camp';
-  else kind = 'workshop';
+  // Must stay roll-for-roll identical to `poisBetween`, or a bench reading one slot
+  // measures a POI the world will never build.
+  const variant = Math.min(
+    variantCount() - 1,
+    Math.floor(hash01(seed, POI_DOMAIN, index, 1) * variantCount()),
+  );
+  const lateral = variantLateral(seed, index, s, variant);
 
-  const side = hash01(seed, POI_DOMAIN, index, 2) < 0.5 ? -1 : 1;
   return {
     index,
     s,
-    lateral: side * (12 + hash01(seed, POI_DOMAIN, index, 3) * 28),
-    kind,
+    lateral,
+    variant,
     variantSeed: hash(seed, POI_DOMAIN, index, 4),
   };
 }
@@ -187,7 +222,7 @@ function rotateXZ(lx: number, lz: number, yaw: number): { x: number; z: number }
  * independent centre samples and carry a level roof between them, so on the 9-10%
  * ground this world is made of, two of them stood on air. Now the site knows its
  * slope, `lift` raises anything standing on a laid apron, and a part either follows
- * the plane (`sitePoint`), stands plumb on it (`seatY`), or tilts onto it
+ * the plane (`sitePoint`) or tilts onto it
  * (`plane.roll`/`plane.pitch`).
  */
 interface Site {
@@ -223,10 +258,6 @@ function sitePoint(site: Site, lx: number, lz: number): { x: number; y: number; 
   return { x: site.x + o.x, y: site.plane.yAt(lx, lz) + site.lift, z: site.z + o.z };
 }
 
-/** `GroundPlane.seatAt` lifted onto the site's apron. */
-function seatY(site: Site, lx: number, lz: number, halfRight: number, halfForward: number): number {
-  return site.plane.seatAt(lx, lz, halfRight, halfForward) + site.lift;
-}
 
 /** Terrain-grounded position offset along the road instead of in local space. */
 function groundPoint(
@@ -341,19 +372,6 @@ function addStaticMesh(
   addStaticCollider(ctx, geometry, matrix, surface, bodies, colliders);
 }
 
-/** Visual-only mesh (door paint, tools, logs): no collider, nothing to bump into. */
-function addVisual(
-  geometry: THREE.BufferGeometry,
-  material: THREE.Material,
-  matrix: THREE.Matrix4,
-  group: THREE.Group,
-): void {
-  const mesh = new THREE.Mesh(geometry, material);
-  setFromMatrix(mesh, matrix);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-}
 
 function makeFluidCan(
   world: GameWorld,
@@ -437,6 +455,309 @@ const TOOL_KINDS: readonly ToolKind[] = ['brush', 'sponge', 'wrench'];
 // static scenery and nothing falls off them — do not re-add part spawns here.
 // ---------------------------------------------------------------------------
 
+/**
+ * Fuel cans on a forecourt or in a shop, part-used rather than factory-sealed.
+ *
+ * The same stock the old gas stop carried, so a player who knew where fuel came from
+ * still finds it where they expect: this is a redistribution of the world's rewards
+ * across the new buildings, not a change to what the world pays out.
+ */
+function stockFluidCans(
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  loose: LoosePartField,
+  counter: LootCounter,
+  count: number,
+): void {
+  for (let i = 0; i < count; i++) {
+    const stock = pickFluid(hash01(poi.variantSeed, 31, i));
+    // A 20 L fuel can holds 12-20 L; a 5 L fluid can holds 3-5.
+    const litres =
+      Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
+    const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
+    const c = sitePoint(
+      site,
+      (hash01(poi.variantSeed, 33, i) - 0.5) * 4,
+      (hash01(poi.variantSeed, 34, i) - 0.5) * 3 - 0.4,
+    );
+    loose.spawnItem(can, c.x, c.y + 0.2, c.z);
+  }
+}
+
+/**
+ * One sealed five-piece gum pack. The roadside-only rescue resource: it was one per
+ * gas stop, and there is still one per stop that stocks anything, so the supply of
+ * the thing that gets a car unstuck is unchanged by the new buildings.
+ */
+function stockGum(
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  loose: LoosePartField,
+  counter: LootCounter,
+): void {
+  const spot = sitePoint(site, 2.6, -0.7);
+  const sub = counter.sub++;
+  loose.spawnItem(
+    {
+      type: 'bubble_gum',
+      id: ctx.world.generatedPartId('poi_item', poi.index, sub),
+      charges: 5,
+    },
+    spot.x,
+    spot.y + 0.18,
+    spot.z,
+  );
+}
+
+/**
+ * A trailer left on the forecourt. Take one, leave one: they are never owned, so this
+ * records a world object rather than giving the player a possession, and `shouldLoot`
+ * is what stops a stop growing a new one every reload.
+ */
+function stockTrailer(
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  trailers: TrailerField,
+  yaw: number,
+): void {
+  if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) >= TRAILER_STOP_CHANCE) return;
+  const spot = sitePoint(site, 6.4, -1.2);
+  const half = yaw / 2;
+  trailers.spawn({
+    id: `trailer:${poi.index}`,
+    hitchedTo: null,
+    cargoKg: 0,
+    x: spot.x,
+    // Clear of the ground so it drops onto its own suspension rather than starting
+    // inside the terrain trimesh.
+    y: spot.y + 0.9,
+    z: spot.z,
+    qx: 0,
+    qy: Math.sin(half),
+    qz: 0,
+    qw: Math.cos(half),
+  });
+}
+
+/** Tools, scattered around a site's middle. */
+function stockTools(
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  loose: LoosePartField,
+  counter: LootCounter,
+  count: number,
+): void {
+  for (let i = 0; i < count; i++) {
+    const tool = pick(TOOL_KINDS, poi.variantSeed, 98 + i);
+    const item = makeTool(ctx.world, poi, tool, counter);
+    const tp = sitePoint(
+      site,
+      (hash01(poi.variantSeed, 99, i) - 0.5) * 3,
+      (hash01(poi.variantSeed, 100, i) - 0.5) * 3,
+    );
+    loose.spawnItem(item, tp.x, tp.y + 0.25, tp.z);
+  }
+}
+
+/** A medicine pack, for the buildings that read as somebody's home. */
+function stockMedicine(
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  loose: LoosePartField,
+  counter: LootCounter,
+): void {
+  const spot = sitePoint(site, -1.8, 1.4);
+  const sub = counter.sub++;
+  loose.spawnItem(
+    { type: 'medicine', id: ctx.world.generatedPartId('poi_item', poi.index, sub) },
+    spot.x,
+    spot.y + 0.2,
+    spot.z,
+  );
+}
+
+/**
+ * What a building pays out, by its CATEGORY.
+ *
+ * The old world tied rewards to four hand-built kinds, so "what is this place" and
+ * "what does it give me" were the same question. They are not any more: there are
+ * twenty-six buildings and six things they are for, and the category is what carries
+ * the meaning. The mapping is chosen so the supply of each resource stays close to what
+ * it was — fuel still comes from forecourts, tools still come from anywhere with a
+ * workbench in it — and the salvageable car field that used to BE the wreck stop now
+ * lives with the containers, which is where a scrapyard's worth of cars belongs.
+ */
+function grantCategoryLoot(
+  category: PoiCategory,
+  ctx: ChunkContext,
+  poi: Poi,
+  site: Site,
+  loose: LoosePartField,
+  trailers: TrailerField,
+  counter: LootCounter,
+  yaw: number,
+): void {
+  switch (category) {
+    case 'gas':
+      // Fuel is the whole point of a petrol station, and a forecourt carries the engine
+      // fluids too: the stop that gets you moving is where you top up. 3-6 cans, the
+      // gum pack, and a trailer better than half the time.
+      stockFluidCans(
+        ctx,
+        poi,
+        site,
+        loose,
+        counter,
+        3 + Math.floor(hash01(poi.variantSeed, 30) * 4),
+      );
+      stockGum(ctx, poi, site, loose, counter);
+      stockTrailer(ctx, poi, site, trailers, yaw);
+      break;
+    case 'shop':
+      // A shop is where the tools are, and every shop keeps the gum behind the counter.
+      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 96) * 3));
+      stockGum(ctx, poi, site, loose, counter);
+      // A bigger store also has fluids out the back.
+      if (hash01(poi.variantSeed, 97) < 0.5) {
+        stockFluidCans(
+          ctx,
+          poi,
+          site,
+          loose,
+          counter,
+          1 + Math.floor(hash01(poi.variantSeed, 95) * 2),
+        );
+      }
+      break;
+    case 'house':
+      // Somebody lived here: a medicine pack, a tool they left out, sometimes a can.
+      stockMedicine(ctx, poi, site, loose, counter);
+      if (hash01(poi.variantSeed, 94) < 0.6) stockTools(ctx, poi, site, loose, counter, 1);
+      if (hash01(poi.variantSeed, 93) < 0.35) stockFluidCans(ctx, poi, site, loose, counter, 1);
+      break;
+    case 'container':
+      // The salvage stop. Cars are broken down here and their trunks are worth opening.
+      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 92) * 2));
+      if (hash01(poi.variantSeed, 91) < 0.4) stockFluidCans(ctx, poi, site, loose, counter, 1);
+      break;
+    case 'tower':
+      // A maintenance site: tools, and the fuel for whatever got you up there.
+      stockTools(ctx, poi, site, loose, counter, 1);
+      if (hash01(poi.variantSeed, 90) < 0.5) stockFluidCans(ctx, poi, site, loose, counter, 1);
+      break;
+    case 'wreck':
+      // A wrecked vessel or aircraft pays out in what can be salvaged from it.
+      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 89) * 2));
+      break;
+  }
+}
+
+/**
+ * Which way a building faces: toward the road it stands beside.
+ *
+ * "Toward the road" is not the road's heading. A building sits off to one side, so the
+ * direction it should face is the one that turns its front — authored as -Z — toward the
+ * centreline, which is its own lateral offset reversed. The sign convention matches
+ * `house.ts`'s garage, which faces the same way for the same reason. A small hash wobble
+ * keeps a row of them from looking stamped out.
+ */
+function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
+  const outward = heading + (lateral >= 0 ? -Math.PI / 2 : Math.PI / 2);
+  return outward + Math.PI + (hash01(variantSeed, 7) - 0.5) * 0.16;
+}
+
+/** Intensity of a building's authored lamps, as handed to the light budget. */
+const VARIANT_LAMP_INTENSITY = 0.55;
+
+/**
+ * One stop: a gallery building on a fitted apron, its collider, and its rewards.
+ *
+ * The apron is what makes the catalogue usable in a real world. Its slab top IS the
+ * fitted ground plane, so a building placed on it stands on ONE plane instead of taking
+ * a terrain sample per part — the same fix the old gas forecourt used, applied to every
+ * building at once. Without it a 30 m storefront on the 9-10% ground this world is made
+ * of stands on air at one corner and buries its front door at the other.
+ */
+function buildVariantPoi(
+  ctx: ChunkContext,
+  poi: Poi,
+  group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+  loose: LoosePartField,
+  trailers: TrailerField,
+  wreckTrunks: WreckTrunkField,
+  registeredWrecks: string[],
+  deferredVisuals: Array<() => void>,
+  counter: LootCounter,
+  shouldLoot: boolean,
+): void {
+  const instance = createVariantInstance(poi.variant);
+  const a = anchorXZ(ctx, poi);
+  const yaw = faceRoadYaw(a.heading, poi.lateral, poi.variantSeed);
+
+  // Measured, never authored: a porch, a fallen tower or a scattered aircraft projects
+  // well past its declared footprint, and the apron has to cover what is really there.
+  const halfX = instance.halfExtentX;
+  const halfZ = instance.halfExtentZ;
+  const site = apronSite(ctx, poi, a, yaw, halfX, halfZ);
+  addApron(ctx, site, halfX, halfZ, group, bodies, colliders);
+
+  const at = sitePoint(site, 0, 0);
+  instance.group.position.set(at.x - ctx.originX, at.y, at.z - ctx.originZ);
+  instance.group.rotation.set(site.plane.pitch, yaw, site.plane.roll, 'YXZ');
+  instance.group.updateMatrixWorld(true);
+  group.add(instance.group);
+
+  for (const source of instance.lightSources) {
+    // Lit, and the budget decides whether any of it is drawn: it takes the nearest few
+    // sources at night and leaves every pool dark by day. An intensity of zero would
+    // make the source ineligible, and the building would never light at all.
+    source.intensity = VARIANT_LAMP_INTENSITY;
+    source.userData.lightBudgetSource = true;
+  }
+
+  if (ctx.hasPhysics) {
+    const matrix = poseMatrix(
+      at.x,
+      at.y,
+      at.z,
+      yaw,
+      site.plane.roll,
+      site.plane.pitch,
+      ctx.originX,
+      ctx.originZ,
+    );
+    const trimesh = geometryToTrimesh(instance.solid, matrix);
+    if (trimesh.indices.length > 0) {
+      const collider = ctx.physics.addStaticTrimesh(
+        trimesh.vertices,
+        trimesh.indices,
+        SurfaceType.Concrete,
+      );
+      colliders.push(collider);
+      const parent = collider.parent();
+      if (parent) bodies.push(parent);
+    }
+  }
+
+  // The salvageable car field stayed with the containers. `buildWrecks` places its cars
+  // around the POI's own anchor, so it needs no knowledge of what was built here — it is
+  // the same field it always made, now standing beside a scrapyard rather than nothing.
+  if (instance.category === 'container') {
+    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals);
+  }
+
+  if (shouldLoot) {
+    grantCategoryLoot(instance.category, ctx, poi, site, loose, trailers, counter, yaw);
+  }
+}
+
 function buildPoi(
   ctx: ChunkContext,
   poi: Poi,
@@ -452,21 +773,20 @@ function buildPoi(
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
 
-  switch (poi.kind) {
-    case 'roadside_wrecks':
-      buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals);
-      break;
-    case 'gas_stop':
-      buildGasStop(ctx, poi, group, bodies, colliders, loose, trailers, counter, shouldLoot);
-      break;
-    case 'workshop':
-      buildWorkshop(ctx, poi, group, bodies, colliders, loose, counter, shouldLoot);
-      break;
-    case 'camp':
-      buildCamp(ctx, poi, group, bodies, colliders, loose, counter, shouldLoot);
-      break;
-  }
-
+  buildVariantPoi(
+    ctx,
+    poi,
+    group,
+    bodies,
+    colliders,
+    loose,
+    trailers,
+    wreckTrunks,
+    registeredWrecks,
+    deferredVisuals,
+    counter,
+    shouldLoot,
+  );
 
   // Record that this POI's loot is now materialised. The flag alone is the whole
   // idempotency guard across chunk promotion / unload / reload.
@@ -874,373 +1194,6 @@ function addApron(
     colliders,
   );
 }
-
-/** Forecourt slab: covers the canopy and the attendant shack beside it. */
-const FORECOURT_HALF_RIGHT = 5.4;
-const FORECOURT_HALF_FORWARD = 3.6;
-/** Headroom kept under the canopy at its HIGHEST post, metres. */
-const CANOPY_CLEARANCE = 2.9;
-/** Canopy posts, as (right, forward) offsets from the forecourt centre. */
-const CANOPY_POSTS: readonly (readonly [number, number])[] = [
-  [-4.4, -2.9],
-  [4.4, -2.9],
-  [-4.4, 2.9],
-  [4.4, 2.9],
-];
-
-/** Workshop slab: the shed, its overhang and the bench beside it. */
-const WORKSHOP_HALF_RIGHT = 3.0;
-const WORKSHOP_HALF_FORWARD = 2.4;
-
-/** Camp ground: tent, fire and the crates scattered around them. */
-const CAMP_HALF_RIGHT = 3.0;
-const CAMP_HALF_FORWARD = 3.0;
-
-function buildGasStop(
-  ctx: ChunkContext,
-  poi: Poi,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-  loose: LoosePartField,
-  trailers: TrailerField,
-  counter: LootCounter,
-  shouldLoot: boolean,
-): void {
-  const a = anchorXZ(ctx, poi);
-  const ox = ctx.originX;
-  const oz = ctx.originZ;
-  const yaw = a.heading;
-  const site = apronSite(ctx, poi, a, yaw, FORECOURT_HALF_RIGHT, FORECOURT_HALF_FORWARD);
-  addApron(ctx, site, FORECOURT_HALF_RIGHT, FORECOURT_HALF_FORWARD, group, bodies, colliders);
-
-  // Canopy roof, spanning the road direction so it reads as a forecourt. It is LEVEL
-  // and set above the highest post base, so the headroom is honest wherever the
-  // forecourt falls away; each post is then cut to reach its own footing.
-  let roofTop = -Infinity;
-  for (const [lx, lz] of CANOPY_POSTS) {
-    roofTop = Math.max(roofTop, sitePoint(site, lx, lz).y + CANOPY_CLEARANCE);
-  }
-  const roof = sitePoint(site, 0, 0);
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(9.6, 0.4, 6.2),
-    makeFlatMaterial(0x8fa0ad, 0.8),
-    poseMatrix(roof.x, roofTop + 0.2, roof.z, yaw, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-
-  for (const [lx, lz] of CANOPY_POSTS) {
-    const post = sitePoint(site, lx, lz);
-    // Into the slab at the bottom, into the roof slab at the top: no seam either end.
-    const base = post.y - 0.06;
-    const height = roofTop + 0.2 - base;
-    addStaticMesh(
-      ctx,
-      new THREE.BoxGeometry(0.36, height, 0.36),
-      makeFlatMaterial(0x70757a, 0.85),
-      poseMatrix(post.x, base + height / 2, post.z, yaw, 0, 0, ox, oz),
-      SurfaceType.Concrete,
-      group,
-      bodies,
-      colliders,
-    );
-  }
-
-  // Two pumps, one petrol (red) and one diesel (green).
-  for (let i = 0; i < 2; i++) {
-    const lx = i === 0 ? -1.6 : 1.6;
-    const pump = sitePoint(site, lx, 0.2);
-    const pumpBase = seatY(site, lx, 0.2, 0.45, 0.28);
-    addStaticMesh(
-      ctx,
-      new THREE.BoxGeometry(0.9, 1.5, 0.55),
-      makeFlatMaterial(i === 0 ? 0xc23b2e : 0x2f6f3f, 0.6),
-      poseMatrix(pump.x, pumpBase + 0.75, pump.z, yaw, 0, 0, ox, oz),
-      SurfaceType.Concrete,
-      group,
-      bodies,
-      colliders,
-    );
-    const face = sitePoint(site, lx, 0.55);
-    addStaticMesh(
-      ctx,
-      new THREE.BoxGeometry(0.6, 0.35, 0.1),
-      makeFlatMaterial(0x22252a, 0.5),
-      poseMatrix(face.x, pumpBase + 1.25, face.z, yaw, 0, 0, ox, oz),
-      SurfaceType.Concrete,
-      group,
-      bodies,
-      colliders,
-    );
-  }
-
-  // Small attendant shack off to one side.
-  const shack = sitePoint(site, 3.4, -2.0);
-  const shackBase = seatY(site, 3.4, -2.0, 1.3, 1.0);
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(2.6, 2.2, 2.0),
-    makeFlatMaterial(0x9a8f86, 0.9),
-    poseMatrix(shack.x, shackBase + 1.1, shack.z, yaw + 0.12, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(3.0, 0.18, 2.4),
-    makeFlatMaterial(0x7d4a35, 0.85),
-    poseMatrix(shack.x, shackBase + 2.35, shack.z, yaw + 0.12, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-
-  if (shouldLoot) {
-    // Fuel is the whole point of a gas stop, but a forecourt also carries the
-    // engine fluids: the same stop that gets you moving is where you top up.
-    const n = 3 + Math.floor(hash01(poi.variantSeed, 30) * 4); // 3..6
-    for (let i = 0; i < n; i++) {
-      const stock = pickFluid(hash01(poi.variantSeed, 31, i));
-      // Cans are found part-used, never factory-sealed. A 20 L fuel can holds
-      // 12-20 L; a 5 L fluid can holds 3-5.
-      const litres = Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
-      const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
-      const c = sitePoint(
-        site,
-        (hash01(poi.variantSeed, 33, i) - 0.5) * 4,
-        (hash01(poi.variantSeed, 34, i) - 0.5) * 3 - 0.4,
-      );
-      loose.spawnItem(can, c.x, c.y + 0.2, c.z);
-    }
-
-    // The roadside-only rescue resource: one sealed five-piece pack per gas stop.
-    // It sits by the attendant shack, not in the general POI loot tables.
-    const gumSpot = sitePoint(site, 2.6, -0.7);
-    const gumSub = counter.sub++;
-    loose.spawnItem(
-      {
-        type: 'bubble_gum',
-        id: ctx.world.generatedPartId('poi_item', poi.index, gumSub),
-        charges: 5,
-      },
-      gumSpot.x,
-      gumSpot.y + 0.18,
-      gumSpot.z,
-    );
-
-
-    // A trailer on the forecourt. Take one, leave one: they are never owned, so
-    // this records a world object rather than giving the player a possession, and
-    // the `shouldLoot` gate is what stops the stop growing a new one every reload.
-    if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) < TRAILER_STOP_CHANCE) {
-      const spot = sitePoint(site, 6.4, -1.2);
-      const half = yaw / 2;
-      trailers.spawn({
-        id: `trailer:${poi.index}`,
-        hitchedTo: null,
-        cargoKg: 0,
-        x: spot.x,
-        // Clear of the ground so it drops onto its own suspension rather than
-        // starting inside the terrain trimesh.
-        y: spot.y + 0.9,
-        z: spot.z,
-        qx: 0,
-        qy: Math.sin(half),
-        qz: 0,
-        qw: Math.cos(half),
-      });
-    }
-  }
-}
-
-function buildWorkshop(
-  ctx: ChunkContext,
-  poi: Poi,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-  loose: LoosePartField,
-  counter: LootCounter,
-  shouldLoot: boolean,
-): void {
-  const a = anchorXZ(ctx, poi);
-  const ox = ctx.originX;
-  const oz = ctx.originZ;
-  const yaw = a.heading + (hash01(poi.variantSeed, 40) - 0.5) * 0.3;
-  const site = apronSite(ctx, poi, a, yaw, WORKSHOP_HALF_RIGHT, WORKSHOP_HALF_FORWARD);
-  addApron(ctx, site, WORKSHOP_HALF_RIGHT, WORKSHOP_HALF_FORWARD, group, bodies, colliders);
-
-  // Corrugated shed: body + overhanging roof. Plumb, seated so its lowest corner
-  // meets the slab and the rest of the sill is buried rather than hanging.
-  const shed = sitePoint(site, 0, 0);
-  const shedBase = seatY(site, 0, 0, 2.3, 1.7);
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(4.6, 2.6, 3.4),
-    makeFlatMaterial(0x8a8f94, 0.85),
-    poseMatrix(shed.x, shedBase + 1.3, shed.z, yaw, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(5.2, 0.2, 4.0),
-    makeFlatMaterial(0x9a4a35, 0.9),
-    poseMatrix(shed.x, shedBase + 2.75, shed.z, yaw, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-  // Painted door opening on the near wall (visual only).
-  const door = sitePoint(site, 0, -1.75);
-  addVisual(
-    new THREE.BoxGeometry(1.1, 2.0, 0.12),
-    makeFlatMaterial(0x2a2a2a, 0.95),
-    poseMatrix(door.x, shedBase + 1.0, door.z, yaw, 0, 0, ox, oz),
-    group,
-  );
-
-  // Workbench: a level top on four legs, each cut to its own footing.
-  const bench = sitePoint(site, 1.6, -0.4);
-  const benchTop = bench.y + 0.85;
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(2.2, 0.12, 0.8),
-    makeFlatMaterial(0x7a5230, 0.85),
-    poseMatrix(bench.x, benchTop, bench.z, yaw, 0, 0, ox, oz),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-  for (const [llx, llz] of [
-    [-1.0, -0.3],
-    [1.0, -0.3],
-    [-1.0, 0.3],
-    [1.0, 0.3],
-  ] as const) {
-    const leg = sitePoint(site, 1.6 + llx, -0.4 + llz);
-    const legBase = leg.y - 0.03;
-    const legHeight = benchTop - legBase;
-    addStaticMesh(
-      ctx,
-      new THREE.BoxGeometry(0.12, legHeight, 0.12),
-      makeFlatMaterial(0x5d4326, 0.9),
-      poseMatrix(leg.x, legBase + legHeight / 2, leg.z, yaw, 0, 0, ox, oz),
-      SurfaceType.Concrete,
-      group,
-      bodies,
-      colliders,
-    );
-  }
-  // Two tool silhouettes on the bench (visual only).
-  for (let i = 0; i < 2; i++) {
-    const t = sitePoint(site, 1.4 + i * 0.5, -0.4);
-    addVisual(
-      new THREE.BoxGeometry(0.5, 0.06, 0.06),
-      makeFlatMaterial(0x3b3b3b, 0.6),
-      poseMatrix(t.x, benchTop + 0.09, t.z, yaw, 0, hash01(poi.variantSeed, 45, i) * 0.4, ox, oz),
-      group,
-    );
-  }
-
-  if (shouldLoot) {
-    const toolCount = 1 + Math.floor(hash01(poi.variantSeed, 62) * 2); // 1..2
-    for (let i = 0; i < toolCount; i++) {
-      const tool = pick(TOOL_KINDS, poi.variantSeed, 63, i);
-      const item = makeTool(ctx.world, poi, tool, counter);
-      loose.spawnItem(item, bench.x, benchTop + 0.15, bench.z);
-    }
-  }
-}
-
-function buildCamp(
-  ctx: ChunkContext,
-  poi: Poi,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-  loose: LoosePartField,
-  counter: LootCounter,
-  shouldLoot: boolean,
-): void {
-  const a = anchorXZ(ctx, poi);
-  const ox = ctx.originX;
-  const oz = ctx.originZ;
-  const yaw = a.heading + (hash01(poi.variantSeed, 80) - 0.5) * 0.5;
-  // A camp is pitched ON the slope, not on a slab: nothing here is plumb, so every
-  // piece takes the ground's own tilt.
-  const site = siteAt(ctx, poi, a, yaw, CAMP_HALF_RIGHT, CAMP_HALF_FORWARD);
-
-  // Teepee tent (visual only — cloth).
-  const tent = sitePoint(site, -1.8, 0.5);
-  const tentTilt = site.plane.tiltFor(-yaw);
-  addVisual(
-    new THREE.ConeGeometry(2.1, 2.2, 6),
-    makeFlatMaterial(0xc9b98a, 0.95),
-    poseMatrix(tent.x, tent.y + 1.1, tent.z, 0, tentTilt.roll, tentTilt.pitch, ox, oz),
-    group,
-  );
-
-  // Fire ring: flat stone torus plus two logs (visual only). The torus is already
-  // laid over by a quarter turn, so it takes the ground's height but not its tilt.
-  const fire = sitePoint(site, 1.4, -0.4);
-  addVisual(
-    new THREE.TorusGeometry(0.8, 0.16, 6, 18),
-    makeFlatMaterial(0x3a3a3a, 0.9),
-    poseMatrix(fire.x, fire.y + 0.12, fire.z, 0, 0, Math.PI / 2, ox, oz),
-    group,
-  );
-  for (let i = 0; i < 2; i++) {
-    addVisual(
-      new THREE.CylinderGeometry(0.08, 0.08, 0.9, 5),
-      makeFlatMaterial(0x2a2018, 0.95),
-      poseMatrix(fire.x, fire.y + 0.1, fire.z, 0, 0, hash01(poi.variantSeed, 81, i) * Math.PI, ox, oz),
-      group,
-    );
-  }
-
-  // Crates.
-  for (let i = 0; i < 3; i++) {
-    const lx = (hash01(poi.variantSeed, 84, i) - 0.5) * 4;
-    const lz = (hash01(poi.variantSeed, 85, i) - 0.5) * 4;
-    const c = sitePoint(site, lx, lz);
-    const crateYaw = hash01(poi.variantSeed, 86, i) * Math.PI;
-    const tilt = site.plane.tiltFor(crateYaw - yaw);
-    addStaticMesh(
-      ctx,
-      new THREE.BoxGeometry(0.7, 0.7, 0.7),
-      makeFlatMaterial(0x8a6238, 0.9),
-      poseMatrix(c.x, c.y + 0.34, c.z, crateYaw, tilt.roll, tilt.pitch, ox, oz),
-      SurfaceType.Concrete,
-      group,
-      bodies,
-      colliders,
-    );
-  }
-
-  if (shouldLoot) {
-    const tool = pick(TOOL_KINDS, poi.variantSeed, 98);
-    const item = makeTool(ctx.world, poi, tool, counter);
-    const tp = sitePoint(
-      site,
-      (hash01(poi.variantSeed, 99) - 0.5) * 3,
-      (hash01(poi.variantSeed, 100) - 0.5) * 3,
-    );
-    loose.spawnItem(item, tp.x, tp.y + 0.25, tp.z);
-  }
-}
-
 
 /**
  * Builds ordinary stops plus the sparse courier network. Static trunk registries
