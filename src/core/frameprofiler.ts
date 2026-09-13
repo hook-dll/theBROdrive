@@ -126,7 +126,7 @@ export class FrameProfiler {
    * occasionally stalls is a different problem from one that is uniformly slow, and the
    * mean cannot tell them apart.
    */
-  report(): string {
+  report(simulationHz = 60): string {
     const lines: string[] = [];
     const mean = (values: readonly number[]): number =>
       values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -159,10 +159,45 @@ export class FrameProfiler {
         `= ${busyMsPerFrame.toFixed(2)} ms of work`,
     );
 
+    // WHICH HALF A FRAME RATE CAN REACH.
+    //
+    // The simulation is fixed at `simulationHz` whatever the display does, so its cost
+    // per second is the same at every frame rate — presenting less often does not make
+    // the car cheaper to step. The render half is the opposite: it is paid once per
+    // PRESENTED frame, so it scales exactly with frame rate. That is the whole reason
+    // lowering the cap cools a device down, and it also says where the bottom is: the
+    // floor is the simulation, and no frame-rate cap can go below it.
+    const simPerSecond = simMs * framesPerSecond;
+    const renderPerSecond = renderWallMs * framesPerSecond;
+    lines.push(
+      `[perf] per second: simulation ${simPerSecond.toFixed(0)} ms (fixed at ${simulationHz} Hz, ` +
+        `a frame rate cannot change it) + render ${renderPerSecond.toFixed(0)} ms (scales with ` +
+        `${framesPerSecond.toFixed(0)} FPS)`,
+    );
+    if (framesPerSecond > 1) {
+      const atHalf = simPerSecond + renderPerSecond / 2;
+      lines.push(
+        `[perf] halving the frame rate would cost ${atHalf.toFixed(0)} ms/s ` +
+          `(floor ${simPerSecond.toFixed(0)} ms/s, reached only at zero frames)`,
+      );
+    }
+
+    // WHICH HALF EACH SECTION BELONGS TO, and a share measured against that half.
+    //
+    // A share of the WHOLE frame would be a lie: the sections nest, so adding them up
+    // gives more than the frame contains — measured, the shares came to 120%. A section's
+    // share of its own half is both true and the more useful question, because it says
+    // where the work sits within the part you can actually do something about.
     const TICK_SECTIONS: readonly FrameSection[] = ['physics', 'agents', 'streaming', 'inventory'];
+    const groupOf = (section: FrameSection): 'tick' | 'render' =>
+      section === 'sim' || TICK_SECTIONS.includes(section) ? 'tick' : 'render';
+    const groupTotal: Record<'tick' | 'render', number> = {
+      tick: simPerSecond,
+      render: renderPerSecond,
+    };
     const ranked = SECTIONS.map((section) => ({
       section,
-      group: TICK_SECTIONS.includes(section) ? 'tick' : 'render',
+      group: groupOf(section),
       msPerSecond: mean(this.samples.get(section) ?? []) * framesPerSecond,
       meanMs: mean(this.samples.get(section) ?? []),
       worstMs: percentile(this.samples.get(section) ?? [], 0.95),
@@ -171,14 +206,19 @@ export class FrameProfiler {
       .sort((a, b) => b.msPerSecond - a.msPerSecond);
 
     for (const entry of ranked) {
-      const share = busyMsPerSecond > 0 ? (entry.msPerSecond / busyMsPerSecond) * 100 : 0;
+      const total = groupTotal[entry.group];
+      // The group total has no share of itself.
+      const share = entry.section === 'sim'
+        ? '     '
+        : `${(total > 0 ? (entry.msPerSecond / total) * 100 : 0).toFixed(0).padStart(3)}% of ${entry.group}`;
       lines.push(
-        `[perf]   ${entry.section.padEnd(10)} ${entry.group.padEnd(6)} ` +
-          `${entry.msPerSecond.toFixed(0).padStart(5)} ms/s ${share.toFixed(1).padStart(5)}%  ` +
-          `(${entry.meanMs.toFixed(2)} ms/frame, p95 ${entry.worstMs.toFixed(2)})`,
+        `[perf]   ${entry.section.padEnd(10)} ${entry.msPerSecond.toFixed(0).padStart(5)} ms/s  ` +
+          `${share.padEnd(16)}(${entry.meanMs.toFixed(2)} ms/frame, p95 ${entry.worstMs.toFixed(2)})`,
       );
     }
-    lines.push('[perf]   sections are nested: tick ones sit inside the simulation, render ones inside the render');
+    lines.push(
+      '[perf]   sections nest: the tick ones sit inside the simulation, the rest inside the render call',
+    );
 
     if (ranked.length === 0) lines.push('[perf]   no section above the reporting floor');
     return lines.join('\n');

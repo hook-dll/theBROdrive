@@ -6,6 +6,7 @@ import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
 import { SURFACES, SurfaceType } from './core/surfaces';
 import { prefersMobilePresentation, Renderer } from './core/renderer';
+import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
@@ -13,6 +14,7 @@ import {
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
   presentationFpsFor,
+  shadowsFor,
   storeSettings,
   viewDistanceFogScaleFor,
   viewDistanceFor,
@@ -513,17 +515,24 @@ async function boot(): Promise<void> {
     ? (): string => {
         const s = world.state.settings;
         const gpuMs = renderer.gpuFrameMs;
+        // Both figures come from the one constant the loop steps at, so a change to the
+        // simulation rate can never leave the report describing a rate the game is not
+        // running. The header and the per-second split have to agree about it.
+        const simulationHz = Math.round(1 / FIXED_DT);
         const framesPerSecond =
           mobilePresentation ? `${s.mobileFrameRate} FPS (capped)` : 'uncapped';
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
           `pixels ${(renderer.resolutionScale * 100).toFixed(0)}% of ceiling, ` +
-            `dpr ${window.devicePixelRatio.toFixed(2)}, msaa ${s.msaa ? 'on' : 'off'}`,
-          `presenting ${framesPerSecond}, shadows ${s.graphicsQuality === 'acceptable' ? 'off' : 'see tier'}`,
+            `dpr ${window.devicePixelRatio.toFixed(2)}`,
+          `presenting ${framesPerSecond}, shadows ` +
+            `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
+            `msaa ${s.msaa ? 'on' : 'off'}`,
           `GPU ${gpuMs === null ? 'not measurable on this device' : `${gpuMs.toFixed(2)} ms per frame`}`,
-          `simulation 60 Hz, sim ticks per frame ${(60 / (mobilePresentation ? s.mobileFrameRate : 60)).toFixed(1)}`,
+          `simulation ${simulationHz} Hz, sim ticks per frame ` +
+            `${(simulationHz / (mobilePresentation ? s.mobileFrameRate : simulationHz)).toFixed(1)}`,
         ].join('\n');
-        return `${header}\n\n${frameProfiler?.report() ?? 'profiler unavailable'}`;
+        return `${header}\n\n${frameProfiler?.report(simulationHz) ?? 'profiler unavailable'}`;
       }
     : undefined;
   const modelWarmups = new Map<string, Promise<void>>();
@@ -2759,6 +2768,13 @@ async function boot(): Promise<void> {
   const AUTO_TIER_COMFORT = 0.95;
   const detectGraphicsTier = async (): Promise<void> => {
     if (!renderer.measuresGpuTime) return;
+    // The launch settle has already run by the time this is called, so if the controller
+    // never reached a verdict, this machine cannot measure itself and the scale it is
+    // sitting on says nothing about it. Bailing here is not a nicety: without a verdict
+    // the controller can never move, so every rung this walked would burn its own settle
+    // DEADLINE — a machine that cannot measure would pay twenty extra seconds of loading
+    // screen to learn nothing. Observed happening, which is why the guard exists.
+    if (!renderer.resolutionSettled) return;
     const ladder: GraphicsQuality[] = ['blessing', 'standard', 'acceptable'];
     const adopt = async (index: number): Promise<void> => {
       const tier = ladder[index]!;
