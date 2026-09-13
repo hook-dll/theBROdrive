@@ -69,6 +69,8 @@ import {
 } from '../render/carmodel';
 import { createPartMesh } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
+import type { ContactPatchField } from '../render/contactpatches';
+import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
 
 const GRAVITY = 9.81;
@@ -1598,8 +1600,16 @@ export interface WheelSprayState {
   /** Contact patch position in ABSOLUTE world coordinates (X and Z; Y never shifts). */
   absoluteContactX: number;
   absoluteContactZ: number;
-  /** Wheel-plane forward direction in world space (x, z), unit length. */
+  /**
+   * Wheel-plane forward direction in world space, unit length.
+   *
+   * All three components, because the contact patch's long axis is this direction
+   * PROJECTED INTO THE GROUND PLANE, and the projection needs the component along the
+   * normal to remove. With Y dropped, a patch on a 20-degree slope came out rotated by
+   * about fifteen degrees against the tyre that cast it.
+   */
   forwardX: number;
+  forwardY: number;
   forwardZ: number;
   /** Terrain contact normal in world axes, unit length. */
   normalX: number;
@@ -2770,6 +2780,7 @@ export class Vehicle implements Rebasable {
         absoluteContactX: 0,
         absoluteContactZ: 0,
         forwardX: 0,
+        forwardY: 0,
         forwardZ: 1,
         normalX: 0,
         normalY: 1,
@@ -4227,6 +4238,41 @@ export class Vehicle implements Rebasable {
    * A gain of zero claims no slot at all, so the pool always belongs to the beams
    * near enough to be seen.
    */
+  /**
+   * Offers this car's tyres to the shared contact-patch field, one per grounded wheel.
+   *
+   * `gain` is the same distance fade the projected lights use and for the same reason:
+   * a patch is worth having on the car being driven and on the traffic near enough to
+   * read, and worth nothing on a car two hundred metres away, where dropping it saves
+   * three vertices in a pool something else can use.
+   *
+   * The tyre's own width sizes the patch across and its radius sizes it along, so a
+   * truck's footprint is a truck's and a microcar's is not.
+   */
+  syncContactPatches(field: ContactPatchField, gain: number): void {
+    if (!(gain > 0)) return;
+    const halfWidth = Math.max(0.06, this.model.factory.tyreWidth * 0.62);
+    for (let i = 0; i < this.wheels.length; i++) {
+      const spray = this.wheelSpray[i];
+      const ride = this.wheelRide[i];
+      if (!spray.inContact || !ride.inContact) continue;
+      field.add(
+        spray.contactX,
+        spray.contactY,
+        spray.contactZ,
+        spray.forwardX,
+        spray.forwardY,
+        spray.forwardZ,
+        spray.normalX,
+        spray.normalY,
+        spray.normalZ,
+        halfWidth,
+        Math.max(0.2, this.wheels[i].radius * 0.95),
+        patchOpacity(ride.loadN, ride.staticLoadN, gain),
+      );
+    }
+  }
+
   syncProjectedLights(rig: VehicleLightRig, gain: number): void {
     if (!(gain > 0)) return;
     const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
@@ -4783,6 +4829,7 @@ export class Vehicle implements Rebasable {
       s.absoluteContactX = w.contactPoint.x + this.origin.x;
       s.absoluteContactZ = w.contactPoint.z + this.origin.z;
       s.forwardX = w.forwardDir.x;
+      s.forwardY = w.forwardDir.y;
       s.forwardZ = w.forwardDir.z;
       s.normalX = w.contactNormal.x;
       s.normalY = w.contactNormal.y;

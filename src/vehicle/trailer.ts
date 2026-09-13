@@ -387,6 +387,7 @@ export class Trailer implements Rebasable {
         absoluteContactX: 0,
         absoluteContactZ: 0,
         forwardX: 0,
+        forwardY: 0,
         forwardZ: 1,
         normalX: 0,
         normalY: 1,
