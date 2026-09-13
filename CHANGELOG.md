@@ -262,6 +262,55 @@
 
 ### Fixed
 
+- A DRIVE THAT WAS INTERRUPTED BY A PAGE RELOAD NOW COMES BACK TO THE CAR. Playing on a
+  phone, the screen sleeps, the player wakes it, and the game is at the title screen with
+  the drive apparently gone. It was not the sleep: it was the reload. The development
+  server injects `@vite/client` into every page it serves, and its socket handler reloads
+  the document when the connection comes back after being lost — and a sleeping tab is a
+  frozen tab whose socket dies. Measured three ways with the same stop-and-restart
+  sequence: the game from the dev server came back as a NEW document
+  (`navigation.type: reload`, new `timeOrigin`), a TRIVIAL HTML page from the same server
+  do too, and the built game did not (`pagehide` never fired, `timeOrigin` unchanged).
+  So the reload was never the game's.
+- WHY THE SCREEN SLEEPS AT ALL, recorded here so it is not re-investigated: the Wake Lock
+  API needs a secure context, and a phone is being served the game over plain HTTP on the
+  LAN. Measured in the same browser, same machine: `http://192.168.88.115:5173` gives
+  `isSecureContext: false` and no `navigator.wakeLock` at all, while `http://localhost`
+  gives both. `installScreenWakeLock` therefore warns and returns, and nothing on a phone
+  can see that warning. Serving over HTTPS — `tailscale serve --bg 4173`, on a machine
+  whose tailnet and Funnel are already up — is the way to actually keep the display on; the
+  auto-resume above is what makes the sleep survivable either way.
+- THE RELOAD IS ONLY HALF THE FIX, because it can arrive from anywhere: a discarded tab
+  Chrome restores, a crash, or the dev server above. Nothing in a save said the player was
+  mid-drive, and the title screen cannot tell a deliberate quit from an interrupted one,
+  so `save/resume.ts` holds the one bit that makes the distinction — in SESSION STORAGE,
+  whose lifetime is exactly the question being asked: a marker that outlived the tab would
+  resume a drive the player deliberately ended. It is written from the one place an
+  autosave is booked (`installVehicleAutosave`'s `onSaved`), so the marker can never name
+  a slot the autosave does not write, and it is cleared by the two reloads that are
+  deliberate: death and Quit.
+- THE ATTEMPT BUDGET IS THE POINT OF THAT POLICY, not a safety afterthought. Resuming
+  deliberately skips the only screen with a way out, so a reload that resumes into a world
+  that immediately reloads again would be an unbreakable loop. Each resume spends one of
+  two attempts, and a session that runs for twenty seconds proves itself and hands them
+  all back. A later autosave deliberately does NOT refill the budget — a reload arriving
+  seconds after each save is exactly the loop being bounded — and a slot that no longer
+  loads clears the marker instead of spending budget on every later reload.
+- Verified end to end on the built game, not only in the bench: a reload with a resume
+  booked came back to the world with the title screen never drawn; three reloads inside
+  the healthy window gave world, world, then the title screen, with the drive listed there
+  and loadable in one click, so a spent budget strands nobody; and the attempt count was
+  back to zero after that first resumed session had run past twenty seconds. The organic
+  write path was confirmed too — entering a car in the running game booked
+  `slot-<seed>` and the next reload resumed into the driving HUD.
+- `tools/resume.ts` holds the policy: an empty session resumes nothing, an autosave books
+  the slot it wrote, exactly two consecutive resumes are allowed and the third is handed
+  the menu, a healthy session hands the budget back, a cleared marker resumes nothing, a
+  later autosave does not refill the budget, and storage that throws degrades to the title
+  screen instead of propagating. Its first version failed two of its own checks and both
+  failures were the BENCH's fault — one check spent budget that the next one depended on —
+  which is why each scenario now starts from an empty marker.
+
 - THE CAR FIELD AT A SCRAPYARD NO LONGER STANDS INSIDE THE BUILDING. Both are placed
   from the POI's own anchor — the building centred on it, the 1-3 wrecks strung ±13 m
   along the road and ±6 m across it around it — and the field's rejection loop knew about

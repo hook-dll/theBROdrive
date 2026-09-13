@@ -101,6 +101,13 @@ import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
+import {
+  claimResumeSlot,
+  clearResumeSlot,
+  confirmResumeHealthy,
+  markResumeTarget,
+  RESUME_HEALTHY_SECONDS,
+} from './save/resume';
 import { bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
 import {
   TrailerField,
@@ -249,7 +256,29 @@ async function boot(): Promise<void> {
 
   const saves = new IndexedDbSaves();
   const menu = new MainMenu(uiRoot, loading);
-  const chosen = await menu.show(saves);
+
+  /**
+   * Resume the drive that was in progress, or ask.
+   *
+   * A reload is not always a decision: a phone that slept, a discarded tab that came
+   * back, a crash. `saves/resume.ts` holds the one bit that tells those apart from a
+   * deliberate quit, and this is the only place that acts on it. A slot that no longer
+   * loads — or whose attempt budget is spent — falls through to the title screen, so the
+   * player is never left with a black screen and no way forward.
+   */
+  const resumeSlot = claimResumeSlot();
+  const resumedState = resumeSlot === null
+    ? null
+    : await saves.load(resumeSlot).catch(() => null);
+  // A slot that no longer loads leaves nothing to resume, so the marker goes with it
+  // rather than being retried into the attempt budget on every later reload.
+  if (resumeSlot !== null && resumedState === null) clearResumeSlot();
+  const resumed = resumedState !== null;
+  // The title screen keeps the launch cover up until a drive is chosen; when a resume
+  // lands instead there is nothing to show, so the cover simply stays until boot ends.
+  const chosen = resumedState !== null
+    ? { seed: resumedState.seed, state: resumedState }
+    : await menu.show(saves);
 
   const loadedFromSave = chosen.state !== null;
   const world = new GameWorld(chosen.state ?? newWorldState(chosen.seed));
@@ -1008,10 +1037,20 @@ async function boot(): Promise<void> {
     vitals.flush();
     return world.state;
   };
-  installVehicleAutosave(saves, world, stateForSave, saveName, (error) => {
-    console.error('autosave failed', error);
-    hud.setToast('autosave failed');
-  });
+  installVehicleAutosave(
+    saves,
+    world,
+    stateForSave,
+    saveName,
+    (error) => {
+      console.error('autosave failed', error);
+      hud.setToast('autosave failed');
+    },
+    // Every autosave also marks this drive as resumable, so a reload that was not the
+    // player's decision — a slept phone, a discarded tab, a crash — comes back to the
+    // car instead of the title screen. See save/resume.ts.
+    markResumeTarget,
+  );
 
   world.onDelta((delta) => {
     if (delta.t === 'courier_storage' && delta.completedContractId) {
@@ -1937,6 +1976,9 @@ async function boot(): Promise<void> {
     }
     if (dying && camera.deathComplete && !deathReloadScheduled) {
       deathReloadScheduled = true;
+      // Death is an ending, not an interruption: clearing the marker is what stops the
+      // reload below from resuming straight back into the corpse.
+      clearResumeSlot();
       // Hold one fully black painted frame before navigation replaces the scene.
       window.setTimeout(() => window.location.reload(), 250);
     }
@@ -2683,7 +2725,12 @@ async function boot(): Promise<void> {
       paused = false;
       audio.setPaused(false);
       if (action !== 'quit') loop.start();
-      else window.location.reload();
+      else {
+        // Quit is the player's own decision, so the reload it performs must land on the
+        // title screen rather than resuming the drive they just walked away from.
+        clearResumeSlot();
+        window.location.reload();
+      }
     })();
   };
 
@@ -2914,6 +2961,16 @@ async function boot(): Promise<void> {
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
   loop.start();
+
+  /**
+   * A resumed session that is still running this long after boot has proved it works, so
+   * it earns its attempt budget back — otherwise a phone picked up twice would be handed
+   * the title screen on the second time. Armed only when this boot WAS a resume: a
+   * session the player started by hand has already reset the budget by starting.
+   */
+  if (resumed) {
+    window.setTimeout(() => confirmResumeHealthy(), RESUME_HEALTHY_SECONDS * 1000);
+  }
 }
 
 

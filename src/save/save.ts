@@ -52,6 +52,12 @@ export interface SaveBackend {
  *
  * `stateForSave` lets the runtime flush physics-owned car/trailer transforms and
  * throttled vehicle values before the backend snapshots the serialisable state.
+ *
+ * `onSaved` is called with the slot id as each autosave is BOOKED, not when it lands,
+ * and deliberately: it exists so a reload can find the drive that was in progress (see
+ * save/resume.ts), and a resumed session whose slot id was never written simply falls
+ * back to the title screen. Waiting for the write would add an await to the crash it is
+ * meant to survive, and a caller with nothing to remember simply omits it.
  */
 export function installVehicleAutosave(
   backend: Pick<SaveBackend, 'save'>,
@@ -59,6 +65,7 @@ export function installVehicleAutosave(
   stateForSave: () => WorldState,
   nameForState: (state: WorldState) => string,
   onError: (error: unknown) => void,
+  onSaved?: (slotId: string) => void,
 ): () => void {
   return world.onDelta((delta) => {
     switch (delta.t) {
@@ -78,9 +85,9 @@ export function installVehicleAutosave(
     }
     queueMicrotask(() => {
       const state = stateForSave();
-      void backend
-        .save(`slot-${state.seed}`, nameForState(state), state)
-        .catch(onError);
+      const slotId = `slot-${state.seed}`;
+      onSaved?.(slotId);
+      void backend.save(slotId, nameForState(state), state).catch(onError);
     });
   });
 }
