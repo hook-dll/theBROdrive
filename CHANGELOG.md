@@ -4,6 +4,26 @@
 
 ### Added
 
+- `tools/traffic-road.ts` MEASURES THE STREAM ON A REAL STRETCH OF THE REAL ROAD. Every
+  existing traffic bench builds its cars against an EMPTY hazard index, because each of
+  those checks wants one controlled thing in front of the car — the right shape for
+  plumbing, and the wrong shape for behaviour, because the complaints about traffic are
+  about a road with real props on it, real districts under it and other cars around it.
+  This drives the real `Terrain`, the real ribbon surfaces and the real `ScatterProvider`
+  output over 20 minutes of the road at the seed's own districts, and asks the five
+  questions a player asks: does it hold a line, is it moving, does it get where it is
+  going, does it hit things, and is it a road or a conveyor.
+- Its first run over seed 1337 is also the specification for the autopilot refactor, and
+  it fails three of its seven properties as things stand. Measured over 20 minutes at
+  90 km/h: 33.0 commanded-line direction reversals per kilometre while merely FOLLOWING —
+  one every two seconds, which is the "cars darting between lanes" a player sees — a
+  median speed of 45 km/h against stream speed caps of 58-105, and 39 contacts between
+  traffic cars in 19 car-km. Cars also reached 5.5 m past the asphalt edge, which is
+  outside the ribbon the bench builds. It passes on not being one speed (a 23 km/h p75-p25
+  spread), on leaving nothing standing (longest stop 2.9 s), on keeping the road populated
+  (same-direction road empty 18% of the run) and on variety (20 models, 3 character draws).
+
+
 - `/?road-lab`, A LABORATORY FOR THE ONE SURFACE YOU CANNOT GO AND LOOK AT. The road's
   detail lives at the 1-30 cm scale, its tile repeats every 24 m, and the stretch worth
   judging is usually minutes of driving away — so every question about how the asphalt
