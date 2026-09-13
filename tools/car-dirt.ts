@@ -59,7 +59,6 @@ function conditionState(id: string, x = 0, z = 0, y = 1.2): CarState {
   return {
     id,
     modelId: MODEL_ID,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

@@ -45,7 +45,6 @@ function carState(
   return {
     id: `vehicle-lights:${index}`,
     modelId: MODEL_ID,
-    gizmos: {},
     stickers: [],
     ...lamps,
     dirt: 0,

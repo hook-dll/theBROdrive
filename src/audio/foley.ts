@@ -256,7 +256,7 @@ export class Foley {
         this.mixer.burst(this.out, { gain: 0.18, frequency: 700, q: 1.5, decay: 0.07 });
         break;
       case 'mount':
-        // Bolting a gizmo on: two metallic hits and a short ring.
+        // Bolting a part into place: two metallic hits and a short ring.
         this.mixer.burst(this.out, { gain: 0.22, frequency: 1400, q: 3, decay: 0.06 });
         this.mixer.blip(this.out, { gain: 0.1, frequency: 2100, decay: 0.16 });
         break;

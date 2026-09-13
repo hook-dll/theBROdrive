@@ -44,7 +44,6 @@ function carState(id: string, radiatorVariantId?: string, x = 0, z = 0): CarStat
   return {
     id,
     modelId: MODEL_ID,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

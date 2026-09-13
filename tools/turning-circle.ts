@@ -220,7 +220,7 @@ const turn = new TurnaroundRoad(road, (x, z) => terrain.heightAt(x, z, 0));
   const def = carModel(MODEL_ID);
   const engine = variant(def.engineId).engine;
   const state: CarState = {
-    id: 'turner', modelId: MODEL_ID, gizmos: {}, stickers: [],
+    id: 'turner', modelId: MODEL_ID, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
     fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
     waterLitres: 10, oilLitres: 10, engineTempC: COLD_SOAK_C,

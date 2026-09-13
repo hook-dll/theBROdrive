@@ -135,6 +135,28 @@ export function staticSagM(hz: number): number {
 }
 
 /**
+ * The spring rate in N/m — the rate a real spring HAS — that puts a corner carrying
+ * `cornerMassKg` of sprung mass at `hz`.
+ *
+ * The per-kilogram form above is what Rapier's ray-cast suspension wants, because it
+ * multiplies the number it is given by the chassis mass. That makes it useless as a
+ * description of a spring: a car with a per-kilogram rate sags to the same ride height
+ * empty and loaded, which is the opposite of what a spring does. So the rate is kept
+ * in newtons per metre and divided by whatever mass is present at the boundary, and
+ * the corner then sits lower and rings slower as it is loaded.
+ */
+export function wheelSpringRateAbs(hz: number, cornerMassKg: number): number {
+  const omega = 2 * Math.PI * hz;
+  return omega * omega * cornerMassKg;
+}
+
+/** The absolute damping coefficient, N·s/m, for `ratio` of critical at that corner. */
+export function wheelDampingRateAbs(hz: number, ratio: number, cornerMassKg: number): number {
+  const omega = 2 * Math.PI * hz;
+  return 2 * ratio * omega * cornerMassKg;
+}
+
+/**
  * The everyday saloon: 1.15 Hz front, 1.32 Hz rear. Sag 188/143 mm, and a soft
  * damper that lets the body take a set before it comes back.
  */
@@ -340,29 +362,6 @@ export function frontWeightFraction(model: {
 }
 
 /**
- * A mount point for a gizmo, in model space (metres, origin on the ground between
- * the wheels — the model's own origin). Positions are fractions of the measured
- * body box rather than absolutes, so one table serves every body; the fractions are
- * resolved against real bounds in render/carmodel.ts.
- */
-export interface GizmoAnchorDef {
-  readonly id: string;
-  readonly label: string;
-  /** [x, y, z] as fractions: x of half-width, y of body height, z of half-length. */
-  readonly frac: readonly [number, number, number];
-  readonly yaw?: number;
-}
-
-/** Anchors every road vehicle has. Roof, both deck ends, both flanks. */
-const ROAD_ANCHORS: readonly GizmoAnchorDef[] = [
-  { id: 'gizmo_roof', label: 'roof', frac: [0, 1, 0.05] },
-  { id: 'gizmo_nose', label: 'bonnet', frac: [0, 0.62, 0.72] },
-  { id: 'gizmo_tail', label: 'tail', frac: [0, 0.62, -0.82] },
-  { id: 'gizmo_flank_l', label: 'left flank', frac: [0.95, 0.45, -0.1], yaw: Math.PI / 2 },
-  { id: 'gizmo_flank_r', label: 'right flank', frac: [-0.95, 0.45, -0.1], yaw: -Math.PI / 2 },
-];
-
-/**
  * Authored lamp selectors. A selector names a mesh node or material carrying one
  * independently controlled lamp channel. Normalized models provide those meshes
  * directly, so their bounds locate the light source without inspecting triangles
@@ -403,12 +402,6 @@ export interface CarModelFit {
     readonly pos: readonly [number, number, number];
     readonly radius: number;
     readonly isFront: boolean;
-  }[];
-  readonly anchors: readonly {
-    readonly id: string;
-    readonly label: string;
-    readonly pos: readonly [number, number, number];
-    readonly yaw: number;
   }[];
   readonly hoodPoint: readonly [number, number, number];
   readonly visualOffset: readonly [number, number, number];
@@ -496,8 +489,8 @@ export interface CarModelDef {
    * and set nothing.
    *
    * It is applied before measurement rather than at draw time on purpose. Every
-   * derived quantity — the chassis box, which axle is the front one and the gizmo
-   * anchors — comes out of the measured geometry, so rotating the geometry first is
+   * derived quantity — the chassis box, which axle is the front one and the bonnet
+   * camera mount — comes out of the measured geometry, so rotating the geometry first is
    * what keeps all of them agreeing with each other.
    */
   readonly yaw?: number;
@@ -535,7 +528,6 @@ export interface CarModelDef {
   readonly dragArea?: number;
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
-  readonly gizmoAnchors: readonly GizmoAnchorDef[];
   /** Every car body carries the shared 4x2 trunk. */
   readonly storageCells: number;
 }
@@ -549,7 +541,6 @@ type Entry = Omit<
   | 'scale'
   | 'suspension'
   | 'lights'
-  | 'gizmoAnchors'
   | 'storageCells'
   | 'handlingProfile'
 > & {
@@ -561,7 +552,6 @@ type Entry = Omit<
   readonly suspension?: SuspensionTuning;
   readonly handlingProfile?: HandlingProfile;
   readonly lights?: VehicleLightsDef;
-  readonly gizmoAnchors?: readonly GizmoAnchorDef[];
   /** Legacy authored hint; the catalogue normalizer now gives every body eight cells. */
   readonly storageCells?: number;
 };
@@ -1319,7 +1309,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   frontWeightShare: e.frontWeightShare,
   dragArea: e.dragArea,
   lights: e.lights,
-  gizmoAnchors: e.gizmoAnchors ?? ROAD_ANCHORS,
   storageCells: TRUNK_CELL_COUNT,
 }));
 

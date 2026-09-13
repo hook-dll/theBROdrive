@@ -126,7 +126,6 @@ function carState(modelId: string): CarState {
   return {
     id: 'bench',
     modelId,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

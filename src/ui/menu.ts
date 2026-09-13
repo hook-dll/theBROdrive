@@ -1441,8 +1441,8 @@ export class MainMenu {
         panel.appendChild(title);
 
         const list = el('div', 'menu-body-list');
-        // Grouped by kind, in registry order: the engines stay together and the trim
-        // does not interleave with the drivetrain halfway down a fifty-row list.
+        // Grouped by kind, in registry order: the engines stay together and the
+        // gearboxes do not interleave with them halfway down the list.
         const kinds: string[] = [];
         for (const part of ALL_VARIANTS) {
           if (!kinds.includes(part.kind)) kinds.push(part.kind);

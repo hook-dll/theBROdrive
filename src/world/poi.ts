@@ -593,7 +593,6 @@ function makeWorkingCar(
   return {
     id: carId,
     modelId: def.id,
-    gizmos: {},
     headlightMode: 'off',
     taillightsOn: false,
     reverseLightsOn: false,

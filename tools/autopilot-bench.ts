@@ -79,7 +79,7 @@ function carState(road: Road, startS: number, lateral = 0): CarState {
   const p = lateral === 0 ? road.sampleAt(startS) : road.offsetPoint(startS, lateral);
   const heading = road.sampleAt(startS).heading;
   return {
-    id: 'autopilot-bench', modelId: MODEL_ID, gizmos: {}, stickers: [],
+    id: 'autopilot-bench', modelId: MODEL_ID, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
     fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
     waterLitres: 10, oilLitres: 10,

@@ -73,7 +73,6 @@ function carState(): CarState {
   return {
     id: TOW_CAR_ID,
     modelId: TOW_MODEL_ID,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,
@@ -147,7 +146,7 @@ async function preloadModels(): Promise<void> {
 }
 
 function part(id: string) {
-  return { id, variantId: 'wheel_steel_13', dirt: 0.2, rust: 0.1 };
+  return { id, variantId: 'radiator_standard', dirt: 0.2, rust: 0.1 };
 }
 
 function tool(id: string): Item {

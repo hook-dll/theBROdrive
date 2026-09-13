@@ -22,7 +22,6 @@ const initial = newWorldState(1337);
 initial.cars['car:test'] = {
   id: 'car:test',
   modelId: DEFAULT_CAR_MODEL_ID,
-  gizmos: {},
   stickers: [],
   headlightMode: 'off',
   taillightsOn: false,
