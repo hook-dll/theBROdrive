@@ -7,15 +7,14 @@
  * materials so dirt and rust never bleed between instances.
  *
  * Car bodies are complete, authored GLB models (see render/carmodel.ts); this module
- * only builds the cosmetic parts and held items.
+ * only builds the service parts and held items.
  *
- * Origin conventions (load-bearing for the Vehicle and LoosePartField):
- *  - a part's origin is its mount point, in +X right / +Y up / +Z forward;
- *  - a wheel's origin is the wheel centre with the axle along local +X.
+ * Origin convention (load-bearing for the Vehicle and LoosePartField): a part's
+ * origin is its mount point, in +X right / +Y up / +Z forward.
  */
 import * as THREE from 'three';
 import { variant } from '../parts/registry';
-import type { EngineSpec, PartVariant, WheelSpec } from '../parts/registry';
+import type { EngineSpec, PartVariant } from '../parts/registry';
 import type {
   FluidKind,
   Item,
@@ -219,20 +218,9 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
   switch (v.kind) {
     case 'engine': return buildEngine(b, v);
     case 'gearbox': return buildGearbox(b, v);
-    case 'wheel': return buildWheel(b, v);
     case 'fuel_tank': return buildTank(b, v);
-    case 'door': return buildDoor(b, v);
-    case 'hood': return buildHood(b, v);
-    case 'trunk': return buildTrunk(b, v);
-    case 'seat': return buildSeat(b, v);
-    case 'mirror': return buildMirror(b, v);
-    case 'bumper': return buildBumper(b, v);
-    case 'battery': return buildBattery(b, v);
     case 'radiator': return buildRadiator(b, v);
     case 'turbine': return buildTurbine(b, v);
-    case 'headlight': return buildHeadlight(b, v);
-    case 'exhaust': return buildExhaust(b, v);
-    case 'dashboard': return buildDashboard(b, v);
   }
 }
 
@@ -384,41 +372,7 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
   }
 }
 
-// ----------------------------- wheels -----------------------------
 
-function buildWheel(b: MeshBuilder, v: PartVariant): void {
-  const spec = v.wheel as WheelSpec;
-  const R = spec.radius;
-  const W = spec.width;
-  const id = v.id;
-  const isKnobbly = v.id === 'wheel_offroad_15';
-  const isBald = v.id === 'wheel_bald_14';
-
-  const tyre = flat(isBald ? 0x1b1c1e : 0x151617, isBald ? 0.55 : 0.85);
-  const rim = cond(0x8b9096, 0.9, 0.32);
-  const hub = cond(0x565b60, 0.85, 0.45);
-
-  // Tyre radius is exactly the physics radius; axle along +X.
-  b.cylinder(`${id}_tyre`, R, R, W, 28, tyre, [0, 0, 0], AXIS_X);
-  b.cylinder(`${id}_rim`, R * 0.55, R * 0.55, W * 1.04, 20, rim, [0, 0, 0], AXIS_X);
-  b.cylinder(`${id}_hub`, R * 0.16, R * 0.16, W * 1.1, 10, hub, [0, 0, 0], AXIS_X);
-
-  if (isKnobbly) {
-    const lugs = 10;
-    for (let i = 0; i < lugs; i++) {
-      const a = (i / lugs) * Math.PI * 2;
-      b.box(
-        `${id}_lug_${i}`,
-        W * 0.7,
-        0.05,
-        0.06,
-        tyre,
-        [0, Math.cos(a) * R, Math.sin(a) * R],
-        [a, 0, 0],
-      );
-    }
-  }
-}
 
 // ----------------------------- fuel tanks -----------------------------
 
@@ -442,26 +396,12 @@ function buildTank(b: MeshBuilder, v: PartVariant): void {
   b.box(`${id}_strap2`, w * 1.02, 0.03, 0.03, steel, [0, 0, -d * 0.25]);
 }
 
-// ----------------------------- trim -----------------------------
 
 /**
  * The generic flat-panel door.
  *
  * Canonical face is -Z; the mount's ±90° yaw turns it onto the flank.
  */
-function buildDoor(b: MeshBuilder, v: PartVariant): void {
-  const panel = cond(0x9aa3ab, 0.85, 0.4);
-  const gls = glass(0xa8ccd4, 0.06);
-  const handle = cond(0xdadde2, 1.0, 0.15);
-  const id = v.id;
-  const w = id === 'door_truck' ? 1.15 : 0.95;
-  const h = id === 'door_truck' ? 1.05 : 0.85;
-  const d = 0.06;
-
-  b.box(`${id}_panel`, w, h, d, panel, [0, 0, 0]);
-  b.box(`${id}_glass`, w * 0.78, h * 0.42, d * 0.4, gls, [0, h * 0.22, -d * 0.45]);
-  b.box(`${id}_handle`, 0.16, 0.04, d * 0.8, handle, [w * 0.15, -h * 0.02, -d * 0.6]);
-}
 
 /**
  * Dashboards. Wide and shallow, sitting in front of the driver's eye.
@@ -469,155 +409,12 @@ function buildDoor(b: MeshBuilder, v: PartVariant): void {
  * Origin is the mount point; the binnacle stands above it and the fascia runs
  * forward, as it does in the car.
  */
-function buildDashboard(b: MeshBuilder, v: PartVariant): void {
-  const id = v.id;
-  const dark = flat(0x24262a, 0.85);
-  const dial = flat(0xd8d2c4, 0.4);
-  const chrome = cond(0xc6ccd2, 0.95, 0.2);
-  const wheelMat = flat(0x1b1d20, 0.7);
 
-  let w = 1.32;
-  let depth = 0.26;
-  let binnacle = true;
-  let wheelR = 0.19;
-  switch (id) {
-    case 'dash_std': w = 1.32; depth = 0.26; wheelR = 0.19; break;
-    case 'dash_truck': w = 1.6; depth = 0.32; wheelR = 0.23; break;
-    // Flat plastic shelf with a single binnacle: the real 2102 fascia.
-    case 'dash_lada': w = 1.36; depth = 0.22; wheelR = 0.185; break;
-    // Competition car: bare bulkhead, gauges on a plate, no padding at all.
-    case 'dash_rally': w = 1.1; depth = 0.14; binnacle = false; wheelR = 0.16; break;
-    default: break;
-  }
 
-  b.box(`${id}_fascia`, w, 0.14, depth, dark, [0, 0, -depth / 2]);
-  b.box(`${id}_top`, w, 0.035, depth * 0.9, dark, [0, 0.085, -depth / 2]);
-  if (binnacle) {
-    b.box(`${id}_binnacle`, 0.42, 0.16, 0.14, dark, [-w * 0.22, 0.1, -0.09]);
-    b.cylinder(`${id}_dial_big`, 0.07, 0.07, 0.02, 16, dial, [-w * 0.28, 0.1, -0.02], AXIS_Z);
-    b.cylinder(`${id}_dial_small`, 0.045, 0.045, 0.02, 14, dial, [-w * 0.13, 0.1, -0.02], AXIS_Z);
-  } else {
-    b.box(`${id}_gauge_plate`, 0.36, 0.12, 0.02, chrome, [-w * 0.2, 0.09, -0.02]);
-    for (let i = 0; i < 3; i++) {
-      b.cylinder(`${id}_gauge_${i}`, 0.035, 0.035, 0.018, 12, dial, [-w * 0.2 + (i - 1) * 0.1, 0.09, -0.03], AXIS_Z);
-    }
-  }
-  // Glovebox lid on the passenger side, and the wheel on its column.
-  b.box(`${id}_glovebox`, w * 0.3, 0.1, 0.02, dark, [w * 0.26, -0.01, -0.01]);
-  b.cylinder(`${id}_column`, 0.022, 0.022, 0.2, 8, dark, [-w * 0.21, 0.02, 0.08], [0.5, 0, 0]);
-  b.torus(`${id}_wheel`, wheelR, 0.016, 6, 18, wheelMat, [-w * 0.21, 0.09, 0.16], [1.15, 0, 0]);
-}
 
-function buildHood(b: MeshBuilder, v: PartVariant): void {
-  const panel = cond(0x9aa3ab, 0.85, 0.4);
-  const id = v.id;
-  // The estate's bonnet is narrower and longer than the generic lid, and carries
-  // the two pressed swages the real one has.
-  const w = id === 'hood_truck' ? 1.5 : id === 'hood_lada' ? 1.42 : 1.3;
-  const d = id === 'hood_truck' ? 1.35 : id === 'hood_lada' ? 0.88 : 1.0;
-  b.box(`${id}_panel`, w, 0.05, d, panel, [0, 0, 0]);
-  if (id === 'hood_lada') {
-    for (const s of [-1, 1] as const) {
-      b.box(`${id}_swage_${s < 0 ? 'l' : 'r'}`, 0.05, 0.018, d * 0.82, panel, [s * 0.3, 0.032, 0]);
-    }
-  }
-}
 
-function buildTrunk(b: MeshBuilder, v: PartVariant): void {
-  const panel = cond(0x9aa3ab, 0.85, 0.4);
-  if (v.id === 'trunk_lada') {
-    // A tailgate, not a boot lid: taller than it is deep, with the glass in it.
-    const gls = glass(0xa8ccd4, 0.06);
-    const chrome = cond(0xc6ccd2, 0.95, 0.2);
-    b.box('trunk_lada_panel', 1.34, 0.3, 0.05, panel, [0, -0.2, 0]);
-    b.box('trunk_lada_frame', 1.34, 0.42, 0.04, panel, [0, 0.17, 0]);
-    b.box('trunk_lada_glass', 1.2, 0.34, 0.02, gls, [0, 0.17, -0.02]);
-    b.box('trunk_lada_handle', 0.16, 0.035, 0.04, chrome, [0, -0.06, -0.04]);
-    return;
-  }
-  b.box(`${v.id}_panel`, 1.25, 0.05, 0.75, panel, [0, 0, 0]);
-}
 
-function buildSeat(b: MeshBuilder, v: PartVariant): void {
-  const id = v.id;
-  const isLada = id === 'seat_lada';
-  // Period Soviet vinyl: warmer and shinier than the generic cloth.
-  const fabric = isLada ? flat(0x6a5a48, 0.6) : flat(0x3a3f45, 0.9);
-  const frame = cond(0x23262a, 0.6, 0.6);
-  const w = id === 'seat_bench' ? 1.0 : isLada ? 0.5 : 0.52;
 
-  b.box(`${id}_cushion`, w, 0.12, 0.5, fabric, [0, 0.12, 0.04]);
-  b.box(`${id}_back`, w, isLada ? 0.54 : 0.62, 0.12, fabric, [0, isLada ? 0.38 : 0.42, -0.2]);
-  if (id === 'seat_bucket') {
-    b.box(`${id}_bolster_l`, 0.08, 0.1, 0.5, fabric, [-w / 2 - 0.02, 0.12, 0.04]);
-    b.box(`${id}_bolster_r`, 0.08, 0.1, 0.5, fabric, [w / 2 + 0.02, 0.12, 0.04]);
-  }
-  if (isLada) {
-    // Separate headrest on two posts, as on the 2102's front seats.
-    b.box(`${id}_headrest`, w * 0.62, 0.11, 0.1, fabric, [0, 0.75, -0.19]);
-    for (const s of [-1, 1] as const) {
-      b.cylinder(`${id}_post_${s < 0 ? 'l' : 'r'}`, 0.012, 0.012, 0.08, 6, frame, [s * w * 0.2, 0.68, -0.19]);
-    }
-  }
-  b.box(`${id}_rail1`, 0.04, 0.05, 0.5, frame, [-w * 0.35, 0.02, 0]);
-  b.box(`${id}_rail2`, 0.04, 0.05, 0.5, frame, [w * 0.35, 0.02, 0]);
-}
-
-function buildMirror(b: MeshBuilder, v: PartVariant): void {
-  const chrome = cond(0xdadde2, 1.0, 0.12);
-  const face = flat(0x9fb6c4, 0.08);
-
-  if (v.id === 'mirror_lada') {
-    // The Zhiguli wing mirror is not a round pod on a post: it is a small upright
-    // chrome housing, taller than it is wide, on a short cranked arm that stands off
-    // the wing. The glass faces rearward (-Z), which the mount's yaw then toes in.
-    b.cylinder('mirror_lada_foot', 0.016, 0.02, 0.03, 10, chrome, [0, 0.015, 0]);
-    // Cranked arm: up off the wing, then outboard to carry the head clear of the
-    // A-pillar so the driver can actually see past it.
-    b.cylinder('mirror_lada_arm', 0.011, 0.011, 0.075, 8, chrome, [0, 0.055, 0], [0, 0, 0.35]);
-    b.box('mirror_lada_head', 0.035, 0.105, 0.055, chrome, [-0.026, 0.115, 0]);
-    b.box('mirror_lada_glass', 0.012, 0.088, 0.042, face, [-0.04, 0.115, -0.006]);
-    return;
-  }
-
-  b.cylinder(`${v.id}_stalk`, 0.02, 0.02, 0.1, 8, chrome, [0, 0.05, 0]);
-  b.torus(`${v.id}_ring`, 0.09, 0.015, 8, 24, chrome, [0, 0.13, 0]);
-  b.cylinder(`${v.id}_face`, 0.075, 0.075, 0.012, 20, face, [0, 0.13, 0], AXIS_Z);
-}
-
-function buildBumper(b: MeshBuilder, v: PartVariant): void {
-  const id = v.id;
-  const isLada = id === 'bumper_lada';
-  const chrome = cond(0xdadde2, 1.0, 0.12);
-  const mat = id === 'bumper_chrome' || isLada ? chrome : cond(0x4a4f55, 0.85, 0.5);
-  const w = id === 'bumper_chrome' ? 1.6 : isLada ? 1.5 : 2.0;
-  const h = id === 'bumper_chrome' ? 0.12 : isLada ? 0.1 : 0.2;
-
-  b.box(`${id}_bar`, w, h, 0.1, mat, [0, 0, 0]);
-  if (id === 'bumper_steel') {
-    b.box(`${id}_strut_l`, 0.06, h, 0.3, mat, [-w * 0.4, 0, -0.12]);
-    b.box(`${id}_strut_r`, 0.06, h, 0.3, mat, [w * 0.4, 0, -0.12]);
-  }
-  if (isLada) {
-    // Thin chrome blade on two stalks, with the overriders the period car wore.
-    for (const s of [-1, 1] as const) {
-      const side = s < 0 ? 'l' : 'r';
-      b.box(`${id}_stalk_${side}`, 0.05, h * 0.8, 0.16, mat, [s * w * 0.32, 0, -0.1]);
-      b.box(`${id}_over_${side}`, 0.07, h * 1.7, 0.12, mat, [s * w * 0.24, 0.01, 0.02]);
-    }
-  }
-}
-
-function buildBattery(b: MeshBuilder, v: PartVariant): void {
-  const caseMat = flat(0x23262a, 0.7);
-  const terminal = cond(0xb0b4ba, 0.9, 0.3);
-  const id = v.id;
-  const w = id === 'battery_heavy' ? 0.42 : 0.32;
-  const h = id === 'battery_heavy' ? 0.28 : 0.22;
-  b.box(`${id}_case`, w, h, 0.2, caseMat, [0, h * 0.5, 0]);
-  b.cylinder(`${id}_t1`, 0.025, 0.025, 0.03, 10, terminal, [-w * 0.25, h, -0.05]);
-  b.cylinder(`${id}_t2`, 0.025, 0.025, 0.03, 10, terminal, [w * 0.25, h, 0.05]);
-}
 
 /**
  * Radiators range from the estate's narrow single-pass unit to a twin-pass copper
@@ -698,35 +495,6 @@ function buildTurbine(b: MeshBuilder, v: PartVariant): void {
   b.cylinder(`${v.id}_compressor`, 0.19, 0.19, 0.18, 20, steel, [0, 0, 0], AXIS_X);
   b.cylinder(`${v.id}_hub`, 0.07, 0.07, 0.22, 16, dark, [0, 0, 0], AXIS_X);
   b.cylinder(`${v.id}_inlet`, 0.09, 0.09, 0.2, 16, steel, [0.18, 0.08, 0], AXIS_Z);
-}
-
-function buildHeadlight(b: MeshBuilder, v: PartVariant): void {
-  const chrome = cond(0xdadde2, 1.0, 0.12);
-  const lens = flat(0xe8e4d8, 0.15);
-  b.cylinder(`${v.id}_housing`, 0.1, 0.085, 0.06, 20, chrome, [0, 0, 0], AXIS_Z);
-  b.cylinder(`${v.id}_lens`, 0.082, 0.082, 0.02, 20, lens, [0, 0, 0.035], AXIS_Z);
-}
-
-function buildExhaust(b: MeshBuilder, v: PartVariant): void {
-  const steel = cond(0x6f747a, 0.85, 0.5);
-
-  if (v.id === 'exhaust_lada') {
-    // Flat oval silencer rather than the generic fat cylinder. A 0.09 m radius
-    // drum hangs 90 mm below its mount, which on a car with 170 mm of clearance
-    // put the exhaust lower than the chassis itself and made it scrape on
-    // everything. A 70 mm deep box tucks under the floor pan and stays above the
-    // collider's underside, which is what the real car's pressed silencer does.
-    b.cylinder('exhaust_lada_pipe', 0.028, 0.028, 0.66, 10, steel, [0, 0.01, 0.16], AXIS_Z);
-    b.box('exhaust_lada_muffler', 0.17, 0.07, 0.36, steel, [0, 0, -0.3]);
-    b.box('exhaust_lada_muffler_end_f', 0.13, 0.055, 0.03, steel, [0, 0, -0.115]);
-    b.box('exhaust_lada_muffler_end_r', 0.13, 0.055, 0.03, steel, [0, 0, -0.485]);
-    b.cylinder('exhaust_lada_tail', 0.026, 0.026, 0.16, 10, steel, [0, 0.008, -0.56], AXIS_Z);
-    return;
-  }
-
-  b.cylinder(`${v.id}_pipe`, 0.04, 0.04, 0.7, 12, steel, [0, 0, 0.1], AXIS_Z);
-  b.cylinder(`${v.id}_muffler`, 0.09, 0.09, 0.32, 16, steel, [0, 0, -0.35], AXIS_Z);
-  b.cylinder(`${v.id}_tail`, 0.035, 0.035, 0.14, 10, steel, [0, 0, -0.55], AXIS_Z);
 }
 
 // ---------------------------------------------------------------------------

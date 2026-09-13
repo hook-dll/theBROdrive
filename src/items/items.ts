@@ -173,8 +173,13 @@ export type Item =
 /**
  * Density, kg/litre. Petrol and diesel are the light ones; water is water and oil
  * is a shade under it.
+ *
+ * Exported because mass is summed in two places — the pack's own carried weight in
+ * `itemMass`, and each reservoir's contribution to the car in `Vehicle.computeStats`
+ * — and a car whose tank weighed a different petrol per litre than the can that
+ * filled it would be two different games.
  */
-const FLUID_DENSITY: Record<FluidKind, number> = {
+export const FLUID_DENSITY: Record<FluidKind, number> = {
   petrol: 0.75,
   diesel: 0.84,
   water: 1.0,

@@ -7,11 +7,8 @@
  * Drivability comes from the four typed service cells under the bonnet: engine and
  * fuel tank are required, water and oil protect the engine, turbine is optional.
  *
- * Anchor gizmos remain cosmetic. They add mass and looks, never capability; unlike
- * the bonnet cells they are not service fittings.
- *
  * Ownership rules (see game/state.ts): the authoritative state lives in
- * `GameWorld` / `CarState`. This class reads `carState.gizmos`, reads/writes the
+ * `GameWorld` / `CarState`. This class reads `carState`, reads/writes the
  * chassis rigid body (the physics-derived view), and emits throttled deltas
  * through `world.apply`. It never mutates `CarState` directly.
  */
@@ -27,25 +24,35 @@ import {
   type CarState,
   type GameWorld,
 } from '../game/state';
-import { variant, OIL_LOSS_LPH } from '../parts/registry';
-import type { CarStats, EngineSpec, PartInstance } from '../parts/registry';
+import {
+  OIL_LOSS_LPH,
+  oilCapacity,
+  variant,
+  type CarStats,
+  type EngineSpec,
+  type FuelType,
+  type PartInstance,
+} from '../parts/registry';
+import { FLUID_DENSITY, itemMass } from '../items/items';
 import {
   carModel,
   frontWeightFraction,
   modelEngine,
   modelGearbox,
-  staticSagM,
-  wheelDampingRate,
-  wheelSpringRate,
+  wheelDampingRateAbs,
+  wheelSpringRateAbs,
   type CarModelDef,
   type HandlingProfile,
 } from './carmodels';
 import {
+  BONNET_SLOT_COUNT,
   bonnetCanRun,
   bonnetPart,
   bonnetRadiator,
+  bonnetWaterCapacity,
   destroyedEngineSpec,
   engineFailureReason,
+  stockBonnetVariants,
 } from './bonnet';
 import {
   EngineCoolingSystem,
@@ -209,48 +216,146 @@ const GRIP_MASS_EXPONENT = 0.3;
  * slip for real, so the knob is gone rather than left to imply something it never did.
  */
 /**
- * Speed-dependent lateral grip falloff. Below LATERAL_GRIP_FALLOFF_START_MPS the
- * lateral gain is untouched; above it it is scaled down on a smoothstep toward
- * 1 - LATERAL_GRIP_MAX_LOSS. The falloff scales only the lateral (side-friction)
- * channel, so drive, brake and steering are unaffected, and a straight line
- * carries no lateral slip to amplify — so it cannot introduce straight-line
- * wander.
+ * TYRE TEMPERATURE, and why it replaced a speed falloff.
  *
- * Bias-ply carcasses squirm and heat, and they lose cornering force with speed far
- * earlier than a radial does, so the falloff starts at town speeds (~50 km/h) and
- * takes a third of the grip by 144 km/h.
+ * The lateral channel used to shed up to 26% of its grip between 50 and 144 km/h,
+ * more of it at the rear, on the story that a bias-ply carcass squirms and heats at
+ * speed. The mechanism is real; the implementation was not a mechanism at all. Speed
+ * does not remove grip from a tyre — HEAT does, and only past the point where the
+ * tread compound has gone off. Written as a function of speed it could not tell a
+ * tyre that had just come up to temperature from one that had been sliding for a lap,
+ * and it charged the same 26% to a car cruising a straight as to one scrubbing a
+ * roundabout, which is not what temperature does to anything.
+ *
+ * So the tyre now has a temperature, and the temperature has the grip.
+ *
+ *   heat in   the power dissipated at the contact patch: force times true slip speed,
+ *             longitudinal plus lateral. This is the honest source — it is where the
+ *             energy in a sliding tyre goes — and it is why a hard-driven car heats
+ *             its tyres and a cruising one does not.
+ *   heat out  Newton's law against the air, with the film coefficient rising with
+ *             airflow: a tyre at 100 km/h sheds heat several times faster than one in
+ *             a car park, which is what keeps a long motorway run from cooking them.
+ *
+ * THE REFERENCE COEFFICIENT IS THE COLD ONE, so this changes nothing at ambient: a
+ * bench that runs for thirty seconds reads exactly the numbers it always did. Grip
+ * then RISES to an optimum as the tyre comes in, and falls away past it — which makes
+ * the thing a driver can feel: a car is quicker after a few corners than on its first
+ * one, and a tyre abused into overheating goes off and stays off until it cools.
+ *
+ * NOT MODELLED: tread wear, pressure, and what happens past the maximum. The
+ * temperature is clamped there rather than allowed to run away, because a model that
+ * can report 900 degrees is reporting the absence of a model.
  */
-const LATERAL_GRIP_FALLOFF_START_MPS = 14;
-/** Speed (m/s) at which the falloff reaches its full loss (~144 km/h). */
-const LATERAL_GRIP_FALLOFF_END_MPS = 40;
 /**
- * Maximum fraction of lateral grip shed at high speed (0 = none, 1 = all).
+ * THE HEAT CAPACITY THE MODEL ACTUALLY INTEGRATES, J/K, and why it is not the tyre's.
  *
- * This is the lever that makes instability SPEED-TRIGGERED rather than always-on:
- * planted in a straight line, honest through a slow curve, and something to catch
- * once too much speed has been carried in.
+ * The whole wheel really does hold about 22 kJ/K, and integrating that gives a time
+ * constant of an hour: a tyre on this model would take most of a session to reach
+ * anything, and the one thing the temperature exists to provide — a grip that is
+ * different after a hard corner than before it — would never arrive.
  *
- * Cut from 0.42 with the whole reason it existed inverted. Against Rapier's
- * velocity-cancelling constraint, shedding grip could not make the car floaty: an
- * infinitely stiff axle at 58% of its capacity is still infinitely stiff, so the
- * number only decided WHEN the rail let go. Against a real curve it removes
- * CORNERING STIFFNESS too, and that is what a car sliding "as if on an air cushion"
- * at speed is: reported from play, along with the rear stepping out slightly and
- * constantly in FWD and RWD alike, because the rear sheds REAR_SPEED_LOSS_GAIN more
- * of it than the front.
+ * What heats is the TREAD, not the rim. A couple of kilograms of rubber and the outer
+ * carcass is where the hysteresis and the sliding friction both land, and it is
+ * thermally much lighter than the wheel it is bonded to: 4 kJ/K is about 2.5 kg of
+ * rubber, which is a fair figure for the tread band of one of these tyres.
  *
- * There is a third symptom the same number caused, and it is the one that proves the
- * mechanism: TOP SPEED DROPPED. Side force acts perpendicular to the WHEEL, not to
- * the car's path, so a tyre carrying a slip angle spends `Fy · sin(alpha)` of it
- * pointing backwards. That is cornering drag, and it is real — but with soft tyres
- * the straight-line slip needed to hold a camber runs a few degrees, and a few
- * degrees of a 0.85 g tyre is several hundred newtons of it. On the same order as the
- * aerodynamic drag the top speed is set by.
- *
- * 0.18 keeps the character — a flat-out corner has meaningfully less grip than a
- * third-gear one — without paying for it in stiffness the car needs everywhere.
+ * So the model integrates the tread's capacity, not the wheel's. That is a real
+ * simplification rather than a fudge, and it is the one that makes the state usable:
+ * a hard-driven tyre reaches its optimum in a couple of minutes of abuse and a
+ * cruising one creeps up over a long run, which is what both of those feel like.
  */
-const LATERAL_GRIP_MAX_LOSS = 0.26;
+const TYRE_TREAD_CAPACITY_J_PER_K = 4_000;
+/**
+ * Convective loss per kelvin of tyre over ambient, W/K: a still one, and how much
+ * that rises per sqrt(m/s) of airflow.
+ *
+ * sqrt because forced convection over a cylinder goes with the square root of the
+ * Reynolds number, and Reynolds is linear in speed. A parked tyre therefore sits at
+ * whatever the sun put in it, and one at 30 m/s sheds roughly three times as fast.
+ */
+const TYRE_COOLING_STILL_W_PER_K = 3.2;
+const TYRE_COOLING_AIRFLOW_GAIN = 0.85;
+/**
+ * The share of the contact patch's slip power that ends up in the TYRE rather than in
+ * the road or carried off by the grit being scrubbed off it.
+ *
+ * A lumped stand-in for a brush model: only the rear of the contact patch is actually
+ * sliding, so the kinematic slip speed overstates the energy that reaches the carcass
+ * by roughly an order of magnitude. Sized so a car driven hard on a twisty road
+ * settles 20-30 K above ambient, which is what a road tyre does.
+ */
+const TYRE_SLIP_HEAT_SHARE = 0.1;
+/**
+ * Share of the ROLLING-RESISTANCE power that ends up in the tyre, and the reason this
+ * term has to exist at all.
+ *
+ * Slip power alone cannot bring a tyre up to temperature: driving in a straight line
+ * at a steady speed has almost no slip, so a model built only on `F · v_slip` reports
+ * a tyre that never warms — and a grip curve whose optimum sits 45 K away from where
+ * the car can actually get it is a curve with one dead half. What heats a tyre on the
+ * road is HYSTERESIS: the tread deforming and springing back through every revolution
+ * dissipates a fixed fraction of the energy the tyre loses to rolling drag, and that
+ * drag is exactly what rolling resistance IS. A real mechanism, not a fudge.
+ *
+ * A quarter, so a car cruising on asphalt settles 20-30 K above the air, which is what
+ * a road tyre actually reads — while a tyre being dragged sideways still heats far
+ * faster, because slip power dominates the moment there is any real sliding.
+ */
+const TYRE_ROLLING_HEAT_SHARE = 0.25;
+/**
+ * Temperature the reference grip coefficient is quoted at, degrees C, and the window
+ * either side of it.
+ *
+ * `TYRE_REFERENCE_C` is ambient in this desert and the factor is exactly 1 there, so
+ * nothing about the straight-line calibration moves.
+ *
+ * The optimum is a ROAD tyre's, not a racing one's: 60 C is where a cross-ply on a
+ * Soviet asphalt road actually makes its best grip, and it is deliberately close to
+ * what a car reaches cruising on this road (see the cooling figures). So a long run
+ * leaves the tyres near their best, a cold car is a little off it, and abuse takes
+ * them past it — which is the three states the model is for.
+ */
+const TYRE_REFERENCE_C = 30;
+const TYRE_OPTIMUM_C = 60;
+const TYRE_MAX_C = 120;
+/** Extra grip available at the optimum, as a fraction of the reference figure. */
+const TYRE_PEAK_GRIP_GAIN = 0.08;
+/** Grip lost by the maximum, as a fraction: a tyre that has gone off is greasy. */
+const TYRE_OVERHEAT_LOSS = 0.22;
+/**
+ * Floor on the friction ellipse's lateral term.
+ *
+ * A tyre that spends its entire budget on braking has none left for cornering, and
+ * the ellipse says so: the term is exactly zero at full longitudinal usage. Kept
+ * slightly off zero because a literal zero makes a locked wheel a perfect castor —
+ * numerically, not physically — and the slip-angle curve already gives the slide its
+ * shape. It is a numerical floor, not a handling one: at ordinary usage the term is
+ * the full ellipse.
+ */
+const ELLIPSE_LATERAL_FLOOR = 0.05;
+
+/**
+ * Grip multiplier for a tyre at this temperature, 1.0 at the reference.
+ *
+ * Rises smoothly to the optimum, then falls away: `smoothstep` at both ends so there
+ * is no kink at either shoulder, and the second leg is steeper than the first because
+ * a tyre goes off faster than it comes in.
+ */
+function tyreTemperatureGrip(tempC: number): number {
+  if (tempC <= TYRE_REFERENCE_C) return 1;
+  if (tempC <= TYRE_OPTIMUM_C) {
+    const t = (tempC - TYRE_REFERENCE_C) / (TYRE_OPTIMUM_C - TYRE_REFERENCE_C);
+    return 1 + TYRE_PEAK_GRIP_GAIN * t * t * (3 - 2 * t);
+  }
+  const t = Math.min(1, (tempC - TYRE_OPTIMUM_C) / (TYRE_MAX_C - TYRE_OPTIMUM_C));
+  return (
+    1 +
+    TYRE_PEAK_GRIP_GAIN -
+    (TYRE_PEAK_GRIP_GAIN + TYRE_OVERHEAT_LOSS) * t * t * (3 - 2 * t)
+  );
+}
+
 /**
  * Rear-axle lateral grip, as a fraction of the front's.
  *
@@ -303,14 +408,14 @@ const REAR_AXLE_SIDE_GRIP = 0.95;
  * THE REAR MATCHES THE FRONT PAST PEAK, and that is the difference between a slide
  * you can catch and one you cannot. The rear used to peak at 6 degrees against the
  * front's 8 and then fall to 0.62 against the front's 0.80 — earlier AND twice as
- * far. Stack that on REAR_AXLE_SIDE_GRIP and REAR_SPEED_LOSS_GAIN and the yaw
+ * far. Stack that on REAR_AXLE_SIDE_GRIP and the yaw
  * feedback is POSITIVE: more yaw gives more rear slip gives less rear grip gives more
  * yaw. At 100 km/h and 15 degrees of slip the rear ended on ~0.48 of lateral gain
  * against the front's ~0.72, so there was no restoring moment for a countersteer to
  * work against and the only outcomes were a spin or a lucky lift.
  *
  * The character is preserved by MAGNITUDE, not by falloff, which is the right split:
- * REAR_AXLE_SIDE_GRIP (0.89) and REAR_SPEED_LOSS_GAIN (1.32) are untouched, so the
+ * REAR_AXLE_SIDE_GRIP (0.95) is untouched, so the
  * tail still lets go first and still lets go earlier the faster you are going. What it
  * no longer does is keep letting go once it has gone — past peak it HOLDS, so a small
  * countersteer produces real force and the car comes back.
@@ -361,18 +466,7 @@ const DEFORMATION_DRAG_FULL_MPS = 8;
 /** Contact speed (m/s) floor in the slip-angle denominator, to keep it finite at rest. */
 const SLIP_ANGLE_REF_MPS = 2;
 /**
- * Extra share of the high-speed lateral loss (LATERAL_GRIP_MAX_LOSS) applied to the
- * REAR axle only. 1 = both axles lose the same; above 1 the tail is the end that speed
- * takes away from, so a bend taken 20 km/h too fast is an edgier car.
- *
- * Reduced from 1.32 with the same report. Against a constraint this only made the car
- * turn in more keenly at speed; against a real force it removes rear stiffness exactly
- * where the aerodynamic and yaw disturbances are largest, which is where the wag was
- * worst. 1.15 keeps the character and stops paying for it with stability.
- */
-const REAR_SPEED_LOSS_GAIN = 1.2;
-/**
- * Peak lateral coefficient on dry asphalt before load, speed and axle modifiers.
+ * Peak lateral coefficient on dry asphalt before load and axle modifiers.
  * Surface multipliers are normalized with asphalt = 1, so this carries the absolute
  * road coefficient previously split between `LATERAL_MU` and asphalt's misleading
  * `sideFriction: 2`.
@@ -446,8 +540,6 @@ interface HandlingTuning {
   readonly drivelineLag: number;
   readonly lateralGripFraction: number;
   readonly lateralMu: number;
-  readonly lateralGripMaxLoss: number;
-  readonly rearSpeedLossGain: number;
   readonly rearAxleSideGrip: number;
   readonly slipPeakFrontDeg: number;
   readonly slipPeakRearDeg: number;
@@ -467,8 +559,6 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     drivelineLag: DRIVELINE_LAG_S,
     lateralGripFraction: LATERAL_GRIP_FRACTION,
     lateralMu: LATERAL_MU,
-    lateralGripMaxLoss: LATERAL_GRIP_MAX_LOSS,
-    rearSpeedLossGain: REAR_SPEED_LOSS_GAIN,
     rearAxleSideGrip: REAR_AXLE_SIDE_GRIP,
     slipPeakFrontDeg: SLIP_PEAK_FRONT_DEG,
     slipPeakRearDeg: SLIP_PEAK_REAR_DEG,
@@ -486,8 +576,6 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     drivelineLag: 0.055,
     lateralGripFraction: 0.36,
     lateralMu: 1.84,
-    lateralGripMaxLoss: 0.13,
-    rearSpeedLossGain: 1.05,
     rearAxleSideGrip: 0.985,
     slipPeakFrontDeg: 5.9,
     slipPeakRearDeg: 5.5,
@@ -505,8 +593,6 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     drivelineLag: 0.035,
     lateralGripFraction: 0.39,
     lateralMu: 2.0,
-    lateralGripMaxLoss: 0.08,
-    rearSpeedLossGain: 1.02,
     rearAxleSideGrip: 0.99,
     slipPeakFrontDeg: 5.25,
     slipPeakRearDeg: 5,
@@ -524,8 +610,6 @@ const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
     drivelineLag: 0.075,
     lateralGripFraction: 0.34,
     lateralMu: 1.64,
-    lateralGripMaxLoss: 0.18,
-    rearSpeedLossGain: 1.1,
     rearAxleSideGrip: 0.97,
     slipPeakFrontDeg: 7,
     slipPeakRearDeg: 6.5,
@@ -642,21 +726,6 @@ const FOOT_BRAKE_REAR_BIAS = 0.42;
 const SLIDE_MIN_MPS = 2.5;
 /** Cone fraction the longitudinal channel may eat before side grip starts to go. */
 const SLIDE_CONE_THRESHOLD = 0.55;
-/**
- * Lateral grip retained by a fully sliding wheel.
- *
- * This number IS catchability. A sliding tyre that keeps most of its side force is a
- * car that has stepped out but is still listening: the slide develops, the driver has
- * something to steer against, and lifting or unwinding puts it back. Set it low and a
- * slide is an announcement that the corner is already lost.
- *
- * Raised from 0.45, alongside giving the rear a plateau it can hold (see the slip
- * angle block above). The two compound: a rear wheel that was both past peak AND
- * saturating its cone used to keep 0.45 x 0.62 = 0.28 of its side grip, which is a car
- * with no back axle at all. It now keeps 0.60 x 0.80 = 0.48, so a countersteer bites
- * on a wheel that is genuinely sliding rather than merely on one that is about to.
- */
-const SLIDE_SIDE_GRIP = 0.6;
 /**
  * Slide smoothing, seconds — deliberately asymmetric.
  *
@@ -1137,6 +1206,38 @@ const INERTIA_ROLL_GAIN = 1.35;
 const AIR_DENSITY = 1.225;
 const DRAG_CD = 0.35;
 
+/**
+ * A load smaller than this is not worth re-solving the springs for, kg.
+ *
+ * Fuel burns off in grams a second, so without a dead band every tick would re-size
+ * four springs for a change nobody could measure. A tenth of a kilogram is below the
+ * resolution of anything the player can feel and well above the rate the tank drains:
+ * at the thirstiest point in the catalogue the tank loses well under a gram in one
+ * fixed step, so the springs settle on a new rate about once a minute of driving.
+ */
+const CARRIED_MASS_EPSILON_KG = 0.1;
+
+/** Oil's density, kg/L. Water is 1.0 by definition and the fuel's is in the item table. */
+const FLUID_DENSITY_OIL = 0.87;
+
+/**
+ * The fuel's density, kg/L.
+ *
+ * `'mixed'` weighs as diesel because a tank holding both holds at least some of the
+ * heavier one, and a car with NO fuel kind is a dry tank — the term it feeds is
+ * measured against a full tank either way, so the density only has to be right for
+ * the litres actually present.
+ */
+function fuelDensity(kind: FuelType | 'mixed' | null): number {
+  if (kind === 'diesel' || kind === 'mixed') return FLUID_DENSITY.diesel;
+  return FLUID_DENSITY.petrol;
+}
+
+/** Water a stock radiator of this variant holds, litres. Zero if it holds none. */
+function stockRadiatorWater(variantId: string): number {
+  return variant(variantId).radiator?.capacity ?? 0;
+}
+
 /** Roll damping on the chassis for stability against low-speed flop. */
 const CHASSIS_ANGULAR_DAMPING = 0.1;
 
@@ -1235,10 +1336,28 @@ interface WheelVisual {
   sagM: number;
   /** What this corner carries when the car is parked and level, newtons. */
   staticLoadN: number;
-  /** Per-kilogram spring rate and damping coefficients handed to Rapier. */
-  springRate: number;
-  compressionRate: number;
-  relaxationRate: number;
+  /**
+   * This corner's SPRING and DAMPER, in absolute SI units — N/m and N·s/m.
+   *
+   * Absolute rather than per-kilogram on purpose: Rapier multiplies the rate it is
+   * given by the chassis mass, so a per-kilogram figure makes an unloaded car and a
+   * loaded one settle at the same ride height. These do not change with load, so the
+   * load does. `reloadSprings` divides by the current mass at the boundary.
+   */
+  springRateNPerM: number;
+  compressionRateNsPerM: number;
+  relaxationRateNsPerM: number;
+  /** Ride frequency this corner currently heaves at, Hz, at the mass it is carrying. */
+  rideHz: number;
+  /**
+   * Tread temperature, degrees C, and the grip multiplier it currently implies.
+   *
+   * The only tyre STATE in the model: it is what the three things that heat a tyre —
+   * slip power, drive torque and the sun — accumulate into, and what the grip budget
+   * is finally read against. See the thermal block above the constants.
+   */
+  tyreTempC: number;
+  tyreGrip: number;
   /** Progressive bump-stop force applied this step, newtons. */
   bumpStopN: number;
   /** This tyre's vertical carcass rate, N/m. Nothing to do with the springs. */
@@ -1288,7 +1407,6 @@ interface WheelVisual {
    * Share of this tyre's longitudinal capacity the last step spent, 0..1. Feeds the
    * friction ellipse that decides what is left for cornering.
    */
-  gripUsage: number;
   /**
    * Lateral force capacity (N) and the fraction of it this tyre's built slip angle
    * asks for, plus the wheel-plane right vector and the contact's sideways speed.
@@ -1311,12 +1429,6 @@ interface WheelVisual {
   contactPoint: { x: number; y: number; z: number };
   contactNormal: { x: number; y: number; z: number };
   contactVel: { x: number; y: number; z: number };
-}
-
-/** A gizmo mounted at one of the model's anchors. Cosmetic mass, nothing more. */
-interface GizmoVisual {
-  part: PartInstance;
-  mesh: THREE.Object3D;
 }
 
 /**
@@ -1664,6 +1776,14 @@ export class Vehicle implements Rebasable {
   private readonly drivetrain: Drivetrain;
 
   private statsValue: CarStats;
+  /**
+   * Mass the driver is carrying, kg, pushed in by the composition root.
+   *
+   * The pack is the player's, not the car's, so `Vehicle` cannot read it; see
+   * `setCarriedMass`. Kept as a field rather than folded into `computeStats` so the
+   * mass only refreshes when the number actually moves.
+   */
+  private carriedMassKg = 0;
 
   private readonly rootGroup = new THREE.Group();
 
@@ -1672,7 +1792,6 @@ export class Vehicle implements Rebasable {
   private wheelSprayStates: WheelSprayState[] = [];
   /** One ride report per wheel, written in place every fixed step. */
   private wheelRideStates: WheelRideState[] = [];
-  private gizmos: GizmoVisual[] = [];
   /** Wheel objects taken from the instantiated model, keyed by wheel id. */
   private readonly wheelMeshes = new Map<string, THREE.Object3D>();
   /**
@@ -2134,27 +2253,17 @@ export class Vehicle implements Rebasable {
   /**
    * Stable peak lateral acceleration available to an autonomous speed planner.
    *
-   * Uses the same model, tyre, mass, surface and high-speed losses as the live tyre
+   * Uses the same model, tyre, mass, surface and tyre temperature as the live tyre
    * pass, but not transient load transfer or slip. The controller applies its own
    * safety margin before treating this as a cornering budget.
+   *
+   * It reads the WORST wheel's temperature rather than assuming a cold tyre, because a
+   * planner that believes in grip the tyres have already lost is planning corners its
+   * own car cannot take — which is exactly the state a long, hard drive puts it in.
    */
-  estimatedLateralAccel(surfaceType: SurfaceType, speedMps: number): number {
-    const speedT = clamp(
-      (Math.abs(speedMps) - LATERAL_GRIP_FALLOFF_START_MPS) /
-        (LATERAL_GRIP_FALLOFF_END_MPS - LATERAL_GRIP_FALLOFF_START_MPS),
-      0,
-      1,
-    );
-    const lossT = speedT * speedT * (3 - 2 * speedT);
-    const front = 1 - this.handling.lateralGripMaxLoss * lossT;
-    const rear =
-      Math.max(
-        0.2,
-        1 -
-          this.handling.lateralGripMaxLoss *
-            this.handling.rearSpeedLossGain *
-            lossT,
-      ) * this.handling.rearAxleSideGrip;
+  estimatedLateralAccel(surfaceType: SurfaceType, _speedMps: number): number {
+    let worstTyreGrip = 1;
+    for (const w of this.wheels) worstTyreGrip = Math.min(worstTyreGrip, w.tyreGrip);
     const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
     return (
       GRAVITY *
@@ -2163,7 +2272,8 @@ export class Vehicle implements Rebasable {
       Math.pow(GRIP_REFERENCE_MASS / this.statsValue.mass, GRIP_MASS_EXPONENT) *
       SURFACES[surfaceType].sideFriction *
       compound.side *
-      Math.min(front, rear)
+      worstTyreGrip *
+      this.handling.rearAxleSideGrip
     );
   }
 
@@ -2320,7 +2430,7 @@ export class Vehicle implements Rebasable {
     this.tyreCompoundIndex = (this.tyreCompoundIndex + 1) % TYRE_COMPOUNDS.length;
   }
 
-  /** Rebuilds stats, drivetrain, controller and meshes from the model and its gizmos. */
+  /** Rebuilds stats, drivetrain, controller and meshes from the model and its parts. */
   rebuild(): void {
     if (this.controller) {
       this.controller.free();
@@ -2328,7 +2438,6 @@ export class Vehicle implements Rebasable {
     }
     this.clearVisuals();
     this.wheels = [];
-    this.gizmos = [];
     this.headlightMounts = [];
     this.taillightMounts = [];
     this.reverseLightMounts = [];
@@ -2373,7 +2482,8 @@ export class Vehicle implements Rebasable {
       this.world.apply({ t: 'car_engine_temp', carId: this.car.id, celsius: this.localTemp });
     }
 
-    // Fitted parts change the drivetrain; gizmos still change only mass.
+    // Fitted parts change the drivetrain AND the mass; the drivetrain is rebound just
+    // above, and the load these figures represent goes onto the springs here.
     this.applyChassisMass(stats.mass);
 
     const rapier = this.physics.rapier;
@@ -2420,13 +2530,13 @@ export class Vehicle implements Rebasable {
       const cornerShare = axleShare / Math.max(1, axleCount);
       const staticLoadN = Math.max(1, weightN * cornerShare);
       const hz = wheel.isFront ? suspension.frontHz : suspension.rearHz;
-      const sag = staticSagM(hz);
-      const stiffness = wheelSpringRate(hz, cornerShare);
-      const compression = wheelDampingRate(hz, suspension.compressionRatio, cornerShare);
-      const relaxation = wheelDampingRate(hz, suspension.reboundRatio, cornerShare);
-      // Travel is sized around the sag the frequency demands, so a soft spring gets
-      // the room it needs instead of riding on Rapier's clamp (see the travel note in
-      // carmodels.ts). The bump stop below catches the last of it progressively.
+      // Sized at the KERB load so a stock car reproduces its preset exactly; the load
+      // it is actually carrying then decides the sag and the frequency (`reloadSprings`).
+      const designCornerMass = this.model.mass * cornerShare;
+      const sag = staticLoadN / wheelSpringRateAbs(hz, designCornerMass);
+      // Travel is sized around that sag so a soft spring gets the room it needs
+      // instead of riding on Rapier's clamp (see the travel note in carmodels.ts). The
+      // bump stop below catches the last of it progressively.
       const maxTravel = sag + suspension.bumpTravel;
       const restLength = sag + MOUNT_ABOVE_WHEEL_CENTRE;
 
@@ -2442,15 +2552,24 @@ export class Vehicle implements Rebasable {
         wheel.radius,
       );
 
-      // Rapier's ray-cast suspension multiplies the spring force by the chassis
-      // mass internally (`force * chassis_mass` in update_suspension), so these rates
-      // are *per kilogram* of chassis mass — which is what makes them independent of
-      // load and the reason `cornerShare` has to appear in them explicitly. The force
-      // ceiling is absolute newtons, and is set from this corner's own static load so
-      // a heavy vehicle is not quietly given a stiffer landing than a light one.
-      this.controller.setWheelSuspensionStiffness(index, stiffness);
-      this.controller.setWheelSuspensionCompression(index, compression);
-      this.controller.setWheelSuspensionRelaxation(index, relaxation);
+      const springRateNPerM = wheelSpringRateAbs(hz, designCornerMass);
+      const compressionRateNsPerM = wheelDampingRateAbs(
+        hz,
+        suspension.compressionRatio,
+        designCornerMass,
+      );
+      const relaxationRateNsPerM = wheelDampingRateAbs(
+        hz,
+        suspension.reboundRatio,
+        designCornerMass,
+      );
+      // Rapier's ray-cast suspension multiplies the spring force by the chassis mass
+      // internally (`force * chassis_mass` in update_suspension), so the rates it is
+      // handed are per kilogram while the ones stored here are absolute. The division
+      // is the boundary, and it is what makes load sag the car — see `reloadSprings`.
+      this.controller.setWheelSuspensionStiffness(index, springRateNPerM / stats.mass);
+      this.controller.setWheelSuspensionCompression(index, compressionRateNsPerM / stats.mass);
+      this.controller.setWheelSuspensionRelaxation(index, relaxationRateNsPerM / stats.mass);
       this.controller.setWheelMaxSuspensionTravel(index, maxTravel);
       this.controller.setWheelMaxSuspensionForce(index, SUSPENSION_FORCE_HEADROOM * staticLoadN);
 
@@ -2469,9 +2588,12 @@ export class Vehicle implements Rebasable {
         maxTravelM: maxTravel,
         sagM: sag,
         staticLoadN,
-        springRate: stiffness,
-        compressionRate: compression,
-        relaxationRate: relaxation,
+        springRateNPerM,
+        compressionRateNsPerM,
+        relaxationRateNsPerM,
+        rideHz: hz,
+        tyreTempC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
+        tyreGrip: 1,
         bumpStopN: 0,
         tyreRateN: tyreVerticalRate(wheel.radius),
         profileHeight: 0,
@@ -2485,7 +2607,6 @@ export class Vehicle implements Rebasable {
         grounded: false,
         slideT: 0,
         slipAngleRad: 0,
-        gripUsage: 0,
         tcsCut: 0,
         locked: false,
         spinRadS: 0,
@@ -3307,28 +3428,8 @@ export class Vehicle implements Rebasable {
     // handed the grip to the wrong end. A heavier car still gets no free advantage
     // from sitting harder on its tyres; that is what GRIP_MASS_EXPONENT is for.
 
-    // Speed-dependent lateral grip (see constants above). Below the start speed
-    // the smoothstep evaluates to exactly 0, so the factor is exactly 1 and
-    // low-speed handling is untouched; above it the factor falls smoothly to
-    // 1 - LATERAL_GRIP_MAX_LOSS. The smoothstep's zero slope at both ends keeps
-    // the transition kink-free, so grip never changes abruptly.
-    const lateralGripT = clamp(
-      (Math.abs(fwd) - LATERAL_GRIP_FALLOFF_START_MPS) /
-        (LATERAL_GRIP_FALLOFF_END_MPS - LATERAL_GRIP_FALLOFF_START_MPS),
-      0,
-      1,
-    );
-    // The loss is split by axle: the rear sheds REAR_SPEED_LOSS_GAIN times as much
-    // of it, so speed does not just cost cornering power, it costs STABILITY.
-    const speedLossT = lateralGripT * lateralGripT * (3 - 2 * lateralGripT);
-    const lateralGripFront = 1 - this.handling.lateralGripMaxLoss * speedLossT;
-    const lateralGripRear = Math.max(
-      0.2,
-      1 -
-        this.handling.lateralGripMaxLoss *
-          this.handling.rearSpeedLossGain *
-          speedLossT,
-    );
+    // The air the tyres are cooling against, sampled once for the whole car.
+    const ambientC = ambientAirC(this.world.state.timeOfDay, DAY_LENGTH);
 
     // Slip angles are read off the CONTACT PATCH velocity measured on the previous
     // step (updateWheelDynamics fills `contactVel`/`forwardDir`), so the whole
@@ -3433,11 +3534,12 @@ export class Vehicle implements Rebasable {
       // of slip at the limit where the model's own constants say 4-6. Everything the
       // authored pipeline used to feed into this gain now sizes a real force below.
       controller.setWheelSideFrictionStiffness(w.index, 0);
+      w.tyreGrip = tyreTemperatureGrip(w.tyreTempC);
       w.lateralCapacityN =
         lateralMu *
         surface.sideFriction *
         compound.side *
-        (w.isFront ? lateralGripFront : lateralGripRear) *
+        w.tyreGrip *
         axleGrip *
         lockGrip *
         loadFactor *
@@ -3547,7 +3649,7 @@ export class Vehicle implements Rebasable {
       // apply the previous tick's yaw damping to a step that had no tyre forces at all.
       this.alignTorqueImpulse = 0;
     } else {
-      this.updateWheelDynamics(dt, longitudinalGrip, tyreGrip, fwd);
+      this.updateWheelDynamics(dt, longitudinalGrip, tyreGrip, fwd, ambientC);
     }
     this.refreshWheelSpray(fwd);
 
@@ -3943,10 +4045,6 @@ export class Vehicle implements Rebasable {
         this.steeringWheelRest +
         (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
-
-    // Gizmos are bolted to the shell: they never move relative to it, so all they
-    // need per frame is their condition, which a scrubbing player can change.
-    for (const g of this.gizmos) setPartCondition(g.mesh, g.part);
   }
 
   /**
@@ -4057,6 +4155,7 @@ export class Vehicle implements Rebasable {
     wheelGrip: number,
     tyreGrip: number,
     vehicleForwardSpeed: number,
+    airC: number,
   ): void {
     const controller = this.controller;
     if (!controller || dt <= 0) return;
@@ -4321,10 +4420,6 @@ export class Vehicle implements Rebasable {
 
       w.spinRadS = spin;
       w.drawnSpin += spin * dt;
-      // The next step's friction ellipse reads this. Published raw: the ellipse is a
-      // force trade, and lagging it here would put a time constant back into the one
-      // relationship that should be instantaneous.
-      w.gripUsage = gripUsage;
 
       const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
       w.slipRatio = (spin * w.radius - contactSpeed) / reference;
@@ -4350,9 +4445,11 @@ export class Vehicle implements Rebasable {
       // what the longitudinal channel has left over — a real friction ellipse on this
       // tyre's own usage, so drive and brake take their share of one budget.
       //
-      // The ellipse keeps SLIDE_SIDE_GRIP as a floor. A tyre that has spent everything
-      // on stopping does not become a castor: that floor IS catchability (see the
-      // constant), and it is the one place the shape is deliberately not the physics.
+      // The ellipse is the real one, read against the force this SAME tick's
+      // longitudinal pass just computed — which is why `gripUsage` above is a local
+      // rather than the wheel's published field. Its lateral term is floored at
+      // ELLIPSE_LATERAL_FLOOR purely so a locked wheel is not a numerical castor; see
+      // the constant.
       //
       // Applied at the contact patch's POSITION but at the centre of mass' HEIGHT, and
       // that is deliberate. The yaw geometry is what matters for balance and it is
@@ -4361,9 +4458,10 @@ export class Vehicle implements Rebasable {
       // 33 km/h turn to 81 degrees and laid the car on its side. Roll therefore stays
       // with the calibrated couple in `applyRollCouple`, which exists for exactly this
       // reason and is now the only thing supplying it.
+      let lateralForceN = 0;
       if (inContact && w.lateralCapacityN > 0) {
         const ellipse = Math.max(
-          SLIDE_SIDE_GRIP,
+          ELLIPSE_LATERAL_FLOOR,
           Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)),
         );
         const capacityImpulse = w.lateralCapacityN * ellipse * dt;
@@ -4385,6 +4483,7 @@ export class Vehicle implements Rebasable {
         const staticBlend = clamp(1 - Math.abs(contactSpeed) / LATERAL_STATIC_SPEED_MPS, 0, 1);
         const staticImpulse = Math.min(capacityImpulse, stopImpulse) * staticBlend;
         const magnitude = Math.min(stopImpulse, Math.max(curveImpulse, staticImpulse));
+        lateralForceN = magnitude / dt;
         const impulse = -Math.sign(w.lateralSpeed) * magnitude;
         if (impulse !== 0) {
           this.tyreImpulse.x = w.lateralRightX * impulse;
@@ -4464,8 +4563,8 @@ export class Vehicle implements Rebasable {
       // so the stiff tyre rate is stable at 60 Hz.
       if (inContact && w.loadN > 0) {
         const mUnsprung = unsprungMass(w.radius);
-        const kSusp = w.springRate * this.statsValue.mass;
-        const cSusp = (w.hopV > 0 ? w.compressionRate : w.relaxationRate) * this.statsValue.mass;
+        const kSusp = w.springRateNPerM;
+        const cSusp = w.hopV > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
         const cTyre = 2 * TYRE_DAMPING_RATIO * Math.sqrt(w.tyreRateN * mUnsprung);
 
         // Solved for the new velocity with BOTH springs and BOTH dampers evaluated at
@@ -4525,8 +4624,8 @@ export class Vehicle implements Rebasable {
       // It must be a force ratio. The first version divided slip by PEAK_SLIP_RATIO,
       // which is unbounded and reads 1.0 at a slip of 0.12 — and a car at full
       // throttle cruises at 0.28-0.34. So every driven wheel sat pinned at "fully
-      // sliding" whenever the throttle was open, cutting its side grip to
-      // SLIDE_SIDE_GRIP and never giving it back. On a rear-driven car that is the
+      // sliding" whenever the throttle was open, cutting its side grip to the
+      // ellipse's floor and never giving it back. On a rear-driven car that is the
       // tail letting go the moment you use the engine, with no recovery: reported as
       // the fastback going straight on and refusing to steer at speed.
       const slideTarget =
@@ -4536,6 +4635,33 @@ export class Vehicle implements Rebasable {
       w.slideT +=
         (slideTarget - w.slideT) *
         (slideTarget > w.slideT ? slideOnsetBlend : slideRecoverBlend);
+
+      // TYRE TEMPERATURE. Everything above has already computed the two forces and the
+      // two slip speeds, so the energy balance is four reads and no new state: the
+      // power dissipated at the contact patch, against the heat the air takes away.
+      //
+      // `spin` is the post-force wheel rate, so a locked wheel reports the full road
+      // speed as slip and a rolling one reports almost none — which is exactly the
+      // difference between a tyre being dragged and one being driven.
+      const slipSpeedLong = Math.abs(spin * w.radius - contactSpeed);
+      const rollingForceN = w.loadN * SURFACES[w.groundSurface].rollingResistance;
+      const slipPowerW =
+        (Math.abs(longitudinalForce) * slipSpeedLong +
+          lateralForceN * Math.abs(w.lateralSpeed)) *
+          TYRE_SLIP_HEAT_SHARE +
+        rollingForceN * Math.abs(contactSpeed) * TYRE_ROLLING_HEAT_SHARE;
+      const airflow = Math.abs(contactSpeed);
+      const coolingW =
+        (TYRE_COOLING_STILL_W_PER_K + TYRE_COOLING_AIRFLOW_GAIN * Math.sqrt(airflow)) *
+        (w.tyreTempC - airC);
+      // Bounded at both ends: the air is the floor (a tyre in this sun is never cooler
+      // than the air it stands in) and the model's own ceiling is the top, past which
+      // the tread compound is beyond anything this represents.
+      w.tyreTempC = clamp(
+        w.tyreTempC + ((slipPowerW - coolingW) * dt) / TYRE_TREAD_CAPACITY_J_PER_K,
+        airC,
+        TYRE_MAX_C,
+      );
     }
 
     // One torque impulse for the whole axle set. Applied after the loop so the four
@@ -4607,17 +4733,59 @@ export class Vehicle implements Rebasable {
   // Internals.
   // ---------------------------------------------------------------------------
 
-  /** Live drivetrain service parts override the catalogue defaults. */
+  /**
+   * The car's mass, as its own kerb weight plus everything that has since changed.
+   *
+   * `model.mass` IS the kerb weight: a complete car with its stock engine, radiator
+   * and tank, ALL RESERVOIRS FULL. That is what a factory figure means, and taking it
+   * as the reference is what lets a stock car weigh exactly what the catalogue says
+   * while still feeling everything the player does to it. So each term below is a
+   * DELTA from that state rather than an addition to it:
+   *
+   *   - fitted service parts, against the ones this model left the factory with;
+   *   - fuel, against a full tank — so a dry car is 45 kg lighter than kerb;
+   *   - water and oil, against their full capacities;
+   *   - cargo in the boot, and whatever the driver is carrying.
+   *
+   * Adding these outright instead would double-count the stock parts and the full
+   * fluids, and every car would start life tens of kilograms above its own published
+   * weight with its springs already part-compressed.
+   */
   private computeStats(): CarStats {
     const installedEngine = bonnetPart(this.car.bonnet, 0);
     const engine = installedEngine
       ? variant(installedEngine.variantId).engine ?? modelEngine(this.model)
       : modelEngine(this.model);
+
+    const stock = stockBonnetVariants(
+      this.model.engineId,
+      this.model.bodyClass,
+      this.model.tankLitres,
+    );
     let mass = this.model.mass;
-    for (const part of Object.values(this.gizmoParts())) mass += variant(part.variantId).mass;
+
+    // Service parts. Cell order is engine, turbine, radiator, tank; the turbine's
+    // factory state is EMPTY, so anything fitted there is pure addition.
+    const stockByCell = [stock.engine, null, stock.radiator, stock.tank] as const;
+    for (let cell = 0; cell < BONNET_SLOT_COUNT; cell++) {
+      const part = bonnetPart(this.car.bonnet, cell);
+      const fitted = part ? variant(part.variantId).mass : 0;
+      const stockId = stockByCell[cell];
+      mass += fitted - (stockId === null ? 0 : variant(stockId).mass);
+    }
+
+    // Fuel, water and oil, measured against full reservoirs. `fuelKind` decides the
+    // density, and a mixture weighs as the heavier of the two it could be.
+    mass += (this.car.fuelLitres - this.model.tankLitres) * fuelDensity(this.car.fuelKind);
+    mass += this.car.waterLitres - stockRadiatorWater(stock.radiator);
+    mass += (this.car.oilLitres - oilCapacity(engine)) * FLUID_DENSITY_OIL;
+
+    // Cargo: the boot's own cells, and whatever the driver brought with them.
+    for (const item of this.car.storage) if (item) mass += itemMass(item);
+    mass += this.carriedMassKg;
 
     return {
-      mass,
+      mass: Math.max(1, mass),
       engine,
       gearbox: modelGearbox(this.model),
       fuel: engine.fuel,
@@ -4628,8 +4796,109 @@ export class Vehicle implements Rebasable {
     };
   }
 
-  private gizmoParts(): Record<string, PartInstance> {
-    return this.car.gizmos ?? {};
+  /**
+   * Mass the driver is carrying, kg, pushed in by the composition root.
+   *
+   * The three hand slots are physically in the car with whoever is sitting in it, so
+   * they are part of what the springs carry. `Vehicle` cannot read them itself — the
+   * pack belongs to the player, not to the car — so `main` reports it, and this
+   * refreshes the load only when the number actually moves.
+   */
+  setCarriedMass(kilograms: number): void {
+    const next = Math.max(0, kilograms);
+    if (Math.abs(next - this.carriedMassKg) < CARRIED_MASS_EPSILON_KG) return;
+    this.carriedMassKg = next;
+    this.refreshLoad();
+  }
+
+  /**
+   * Puts a changed mass on the road without rebuilding anything, for the changes that
+   * happen while the car exists: filling the tank, loading the boot, dropping the
+   * throttle on a lighter car.
+   *
+   * A full `rebuild` would also work and would also free and recreate the vehicle
+   * controller, the drivetrain binding and every mesh — which is far too much to do
+   * for a fuel level. Everything a load actually changes is reachable directly: the
+   * chassis mass and its inertia, each wheel's static load, and the spring, damper,
+   * travel and bump stop that hang off that load.
+   */
+  refreshLoad(): void {
+    const previous = this.statsValue.mass;
+    this.statsValue = this.computeStats();
+    // The total is published every time — a caller reading `stats.mass` must never see
+    // a stale figure — but the two things that cost real work only run when the change
+    // is worth feeling. A tank drains a few grams a second, so an exact comparison here
+    // would re-solve four springs and rewrite the chassis inertia on EVERY tick, for a
+    // change no instrument could detect.
+    if (Math.abs(this.statsValue.mass - previous) < CARRIED_MASS_EPSILON_KG) return;
+    this.applyChassisMass(this.statsValue.mass);
+    this.reloadSprings();
+  }
+
+  /**
+   * Re-sizes every spring and damper for the mass the car is now carrying.
+   *
+   * THE RATES ARE ABSOLUTE, and that is the whole reason a load is felt at all.
+   * Rapier's ray-cast spring is `stiffness * compression * chassis_mass`, so a
+   * per-kilogram figure — which is what the catalogue's ride frequencies convert to —
+   * gives a car that sags to exactly the same ride height whether it is empty or
+   * carrying four hundred kilograms of engine. The spring rate a real car has does not
+   * change when you put something in the boot, so the rate is stored in newtons per
+   * metre and divided by the mass here: the same spring, now carrying more, sits lower
+   * and rings slower, and the bump stop arrives correspondingly sooner.
+   *
+   * The rates themselves come from the ride frequency at the KERB mass, so a stock car
+   * still sits and rides exactly where its preset says.
+   */
+  private reloadSprings(): void {
+    if (!this.controller) return;
+    const stats = this.statsValue;
+    const weightN = stats.mass * GRAVITY;
+    const suspension = this.model.suspension;
+    const axles = this.axleGeometry;
+
+    for (const w of this.wheels) {
+      const axleShare = w.isFront ? axles.frontWeightShare : 1 - axles.frontWeightShare;
+      const axleCount = w.isFront ? axles.frontCount : axles.rearCount;
+      const cornerShare = axleShare / Math.max(1, axleCount);
+      const hz = w.isFront ? suspension.frontHz : suspension.rearHz;
+      const compressionRatio = suspension.compressionRatio;
+      const reboundRatio = suspension.reboundRatio;
+
+      // Sized at the kerb load, then asked to carry the real one.
+      const designCornerMass = this.model.mass * cornerShare;
+      const staticLoadN = Math.max(1, weightN * cornerShare);
+      w.staticLoadN = staticLoadN;
+      w.springRateNPerM = wheelSpringRateAbs(hz, designCornerMass);
+      w.compressionRateNsPerM = wheelDampingRateAbs(hz, compressionRatio, designCornerMass);
+      w.relaxationRateNsPerM = wheelDampingRateAbs(hz, reboundRatio, designCornerMass);
+
+      // Ride frequency is no longer a preset constant once the car is loaded, so it is
+      // measured rather than assumed: this is what an instrument would read.
+      const cornerMass = staticLoadN / GRAVITY;
+      w.rideHz = Math.sqrt(w.springRateNPerM / Math.max(1, cornerMass)) / (2 * Math.PI);
+      w.sagM = staticLoadN / w.springRateNPerM;
+      w.maxTravelM = w.sagM + suspension.bumpTravel;
+
+      this.controller.setWheelSuspensionStiffness(w.index, w.springRateNPerM / stats.mass);
+      this.controller.setWheelSuspensionCompression(
+        w.index,
+        w.compressionRateNsPerM / stats.mass,
+      );
+      this.controller.setWheelSuspensionRelaxation(
+        w.index,
+        w.relaxationRateNsPerM / stats.mass,
+      );
+      this.controller.setWheelMaxSuspensionTravel(w.index, w.maxTravelM);
+      this.controller.setWheelSuspensionRestLength(
+        w.index,
+        w.sagM + MOUNT_ABOVE_WHEEL_CENTRE,
+      );
+      this.controller.setWheelMaxSuspensionForce(
+        w.index,
+        SUSPENSION_FORCE_HEADROOM * staticLoadN,
+      );
+    }
   }
 
   /**
@@ -4715,8 +4984,8 @@ export class Vehicle implements Rebasable {
           rightSum += w.compressionM;
           rightCount++;
         }
-        // The bar is sized against its own axle's wheel rate, which is per kilogram.
-        rate = w.springRate * this.statsValue.mass;
+        // The bar is sized against its own axle's wheel rate, in N/m.
+        rate = w.springRateNPerM;
       }
       if (!groundedBoth || leftCount === 0 || rightCount === 0) continue;
       const leftMean = leftSum / leftCount;
@@ -4916,7 +5185,7 @@ export class Vehicle implements Rebasable {
 
   /**
    * Instantiates the model: body into the chassis group, wheels held aside for
-   * `rebuild` to register with the controller, gizmos onto their anchors.
+   * `rebuild` to register with the controller.
    */
   private buildVisuals(): void {
     const instance = createCarModel(this.model.id, this.car.id);
@@ -4929,19 +5198,6 @@ export class Vehicle implements Rebasable {
 
     this.wheelMeshes.clear();
     for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
-
-    const anchors = new Map(this.measure.anchors.map((a) => [a.id, a]));
-    for (const [anchorId, part] of Object.entries(this.gizmoParts())) {
-      const anchor = anchors.get(anchorId);
-      if (!anchor) continue; // a gizmo saved against an anchor this model lacks
-      const mesh = createPartMesh(part.variantId);
-      mesh.name = anchorId;
-      mesh.position.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]);
-      mesh.rotation.y = anchor.yaw;
-      setPartCondition(mesh, part);
-      this.rootGroup.add(mesh);
-      this.gizmos.push({ part, mesh });
-    }
 
     this.bindVehicleLights();
     this.buildHeadlightMounts();

@@ -107,7 +107,7 @@ function carStateAt(road: Road, s: number, lateral: number): CarState {
   const point = road.offsetPoint(s, lateral);
   const heading = road.sampleAt(s).heading;
   return {
-    id: 'rescue-check', modelId: MODEL_ID, gizmos: {}, stickers: [],
+    id: 'rescue-check', modelId: MODEL_ID, stickers: [],
     headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
     fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
     waterLitres: 10, oilLitres: 10, engineTempC: COLD_SOAK_C,

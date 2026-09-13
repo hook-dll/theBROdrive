@@ -46,7 +46,6 @@ import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
-import { AnchorGhosts } from './render/slotghosts';
 import { VistaMesh } from './render/vista';
 import { DistantMirage } from './render/mirage';
 import { MirageTableau } from './render/mirage-tableau';
@@ -90,7 +89,7 @@ import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
-import { bonnetPart, bonnetWaterCapacity, hasServiceSlot } from './vehicle/bonnet';
+import { bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
 import {
   TrailerField,
   TRAILER_HALF_LENGTH,
@@ -373,7 +372,6 @@ async function boot(): Promise<void> {
   const trunkView = new TrunkView(renderer.scene);
   const stickerPreview = createStickerPreviewMesh();
   renderer.scene.add(stickerPreview);
-  const anchorGhosts = new AnchorGhosts(renderer.scene);
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene, origin);
@@ -505,6 +503,22 @@ async function boot(): Promise<void> {
   };
 
   const trailerVehicleFor = (carId: string): Vehicle | null => vehicles.get(carId) ?? null;
+
+  /**
+   * Which car is carrying the driver's pack.
+   *
+   * The three hand slots ride with the person, so they weigh on whatever he is
+   * sitting in and on nothing else. That makes it a single moving attachment rather
+   * than a per-car property: when he changes cars, or steps out, the last holder has
+   * to be told it no longer has them, or every car he has ever driven keeps the load.
+   */
+  let packHolder: Vehicle | null = null;
+  const syncPackMass = (target: Vehicle | null): void => {
+    if (packHolder !== target && packHolder !== null) packHolder.setCarriedMass(0);
+    packHolder = target;
+    if (target) target.setCarriedMass(inventory.carriedMass);
+  };
+
   const activeWorldAnchor = (): { x: number; y: number; z: number } => {
     const drivingId = world.state.player.drivingCarId;
     if (drivingId) {
@@ -1157,6 +1171,15 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
     touch.setDriving(driving !== null);
+
+    // MASS IS RE-DERIVED HERE EVERY STEP rather than wired to the deltas that can
+    // change it. Fuel burns, a can pours, the boot takes a parcel, the driver picks
+    // something up — four sources today and more later, each of which would have to
+    // remember to call in. `computeStats` is a couple of dozen reads, `refreshLoad`
+    // returns immediately when the total has not moved, and a live set is a handful
+    // of cars, so one unconditional call is both cheaper and impossible to forget.
+    for (const vehicle of vehicles.values()) vehicle.refreshLoad();
+    syncPackMass(driving);
 
     // Precise control is a preference, so M edits settings rather than a local flag:
     // the pause menu and hotkey always agree, and the held wheel survives save/load.
@@ -2010,24 +2033,6 @@ async function boot(): Promise<void> {
       watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
     });
-
-    // Ghosts are an on-foot mounting aid; while driving there is nothing to fit, and
-    // `interaction.lastAnchorTarget` is stale because anchor resolution is skipped.
-    const ghost = driving ? null : activeCar();
-    const ghostCar = ghost ? s.cars[ghost.id] : undefined;
-    anchorGhosts.update(
-      ghostCar && ghost ? ghost.vehicle : null,
-      ghost ? ghost.vehicle.modelMeasure.anchors : [],
-      ghostCar ? ghostCar.gizmos : {},
-      // Same rule the interaction resolve uses (`hasServiceSlot`): an engine, turbine,
-      // radiator or fuel tank cannot be mounted on a cosmetic anchor, so it must
-      // not be previewed on one either. Its home is a bonnet slot.
-      held && held.type === 'part' && !hasServiceSlot(held.part.variantId)
-        ? held.part.variantId
-        : null,
-      interaction.lastAnchorTarget,
-      frameDt,
-    );
 
     // GPU timer queries measure only render submission. The one startup PMREM bake
     // is excluded because it is a different GPU workload; ordinary frames, including

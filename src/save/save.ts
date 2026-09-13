@@ -70,8 +70,6 @@ export function installVehicleAutosave(
       case 'wreck_storage':
       case 'trailer_hitch':
       case 'trailer_cargo':
-      case 'gizmo_attach':
-      case 'gizmo_detach':
       case 'sticker_place':
       case 'inventory':
         break;
@@ -510,21 +508,13 @@ function migrateCar(raw: Record<string, unknown>): CarState {
 
   // A pre-cutover save carries a bodyId and a part layout that has no meaning
   // against a finished model, so it is not translated part-for-part: the car
-  // becomes the default model with no gizmos.
+  // becomes the default model. Any `gizmos` map it also carries is dropped with the
+  // mechanic — the anchors and the mounting interaction are gone, so there is
+  // nowhere for those parts to be, and inventing loose parts for them would put
+  // scrap in the world the player never dropped.
   const modelId = typeof raw.modelId === 'string' && hasCarModel(raw.modelId)
     ? raw.modelId
     : DEFAULT_CAR_MODEL_ID;
-
-  const gizmos: Record<string, PartInstance> = {};
-  const rawGizmos = raw.gizmos;
-  // Gizmos are absent on pre-cutover saves; a missing or non-object value is
-  // treated as empty rather than fatal. An anchor the model does not have is
-  // dropped harmlessly by the vehicle, so it is not validated here.
-  if (typeof rawGizmos === 'object' && rawGizmos !== null && !Array.isArray(rawGizmos)) {
-    for (const [anchor, value] of Object.entries(rawGizmos as Record<string, unknown>)) {
-      gizmos[anchor] = migratePart(value, `car "${raw.id}" gizmo "${anchor}"`);
-    }
-  }
 
   // Stickers are the car's whole history, so a malformed one is dropped rather than
   // failing the load: losing a mark is bad, losing the save is worse.
@@ -577,7 +567,6 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   return {
     id: raw.id,
     modelId,
-    gizmos,
     stickers,
     headlightMode,
     taillightsOn,

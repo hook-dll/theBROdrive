@@ -204,7 +204,6 @@ function carState(modelId: string, y: number): CarState {
   return {
     id: 'suspension-probe',
     modelId,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

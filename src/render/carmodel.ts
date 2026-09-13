@@ -25,7 +25,6 @@ import {
   carModel,
   type CarModelDef,
   type CarModelFit,
-  type GizmoAnchorDef,
 } from '../vehicle/carmodels';
 
 /** The four wheels the vehicle controller drives, in the order it expects them. */
@@ -107,19 +106,10 @@ export interface WheelMeasure {
   readonly isFront: boolean;
 }
 
-export interface GizmoAnchor {
-  readonly id: string;
-  readonly label: string;
-  /** Chassis-local metres. */
-  readonly pos: readonly [number, number, number];
-  readonly yaw: number;
-}
-
 export interface CarModelMeasure {
   /** Chassis box half-extents, metres. */
   readonly halfExtents: readonly [number, number, number];
   readonly wheels: readonly WheelMeasure[];
-  readonly anchors: readonly GizmoAnchor[];
   /** Bonnet camera mount in chassis-local metres, measured off the bodywork. */
   readonly hoodPoint: readonly [number, number, number];
   /** Where the model's own origin sits inside the chassis group. */
@@ -936,27 +926,6 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     });
   }
 
-  // Fractional anchor resolution, straight into CHASSIS-LOCAL metres: x of
-  // half-width, y through the body's height (0 = floor, 1 = roof), z of half-length.
-  //
-  // Chassis-local is the only frame these can be resolved in. Resolving them in the
-  // model's OWN space and subtracting `centre` afterwards silently breaks every body
-  // whose box is not centred on its own origin: `frac * half` measured from the
-  // origin comes out one offset wrong. Resolving in chassis space makes the
-  // fractions mean the same thing on every body.
-  const resolveFrac = (frac: readonly [number, number, number]): [number, number, number] => [
-    frac[0] * half.x,
-    (frac[1] * 2 - 1) * half.y,
-    frac[2] * half.z,
-  ];
-
-  const anchors: GizmoAnchor[] = def.gizmoAnchors.map((a: GizmoAnchorDef) => ({
-    id: a.id,
-    label: a.label,
-    pos: resolveFrac(a.frac),
-    yaw: a.yaw ?? 0,
-  }));
-
   // Hood camera mount, measured rather than authored.
   //
   // The bonnet is the highest bodywork over the front third of the car, on the
@@ -1010,7 +979,6 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   const measure: CarModelMeasure = {
     halfExtents: [half.x, half.y, half.z],
     wheels,
-    anchors,
     hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
   };

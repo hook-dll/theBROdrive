@@ -237,7 +237,92 @@
   ambient car spent the start of its life dark - which the traffic bench had been
   reporting, correctly, as "18 of 19 cars lit".
 
+### Removed
+
+- ANCHOR GIZMOS, and the eleven part kinds that existed only to hang on them. Bolting
+  a spare door to a car's roof was a mechanic with no gameplay behind it: nothing
+  spawns it — POI loot is tools and fuel cans, and `world/poi.ts` says in as many words
+  not to re-add part spawns there — so the only way to reach an anchor was the
+  pause-menu dev dispenser. Gone with it: the anchor table and its resolved positions
+  in `model-fits.json` (5 entries × 20 bodies), `render/slotghosts.ts`, the
+  `gizmo_attach`/`gizmo_detach` deltas, `CarState.gizmos`, and the save migration that
+  read them.
+  `wheel`, `door`, `hood`, `trunk`, `battery`, `seat`, `mirror`, `bumper`, `headlight`,
+  `exhaust` and `dashboard` are all deleted from the registry and the mesh builder:
+  eleven kinds and thirty-nine variants whose coordinates were read by nothing but the
+  mesh that drew them. What a car can actually be serviced with is unchanged — engine,
+  turbine, radiator and fuel tank in the four typed bonnet cells, plus the fourteen
+  gearbox variants that carry the catalogue's own ratios.
+  A save written before this keeps its cars, its fluids, its stickers and its boot;
+  the anchored parts are dropped rather than invented into the world as loose scrap.
+- `tools/anchor-parts.ts` and `tools/service.ts`. The first tested the mounting rule
+  that no longer exists. The second had not run since the abstract freight system was
+  removed in 0.14.0 — its `src/world/freight` import stopped resolving — and what it
+  covered lives in `cooling.ts`, `cooling-drive.ts` and `road-scale.ts`.
+- `tools/trunk-grid.ts` was calling `intersectTrunkGrid` and `trunkCellLocal`, which
+  had been renamed to `intersectStorageGrid` and `storageCellLocal` when the bonnet
+  grid landed; the bench had been failing to load ever since. Repaired rather than
+  retired, because it is the check that the aim ray still reaches all eight cells of a
+  grid nobody can see.
+- `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
+
 ### Changed
+
+- A CAR NOW WEIGHS WHAT IT IS CARRYING. Mass was the model's kerb figure plus
+  whatever hung on the cosmetic anchors, and nothing else: the engine in the bonnet,
+  the fuel in the tank, the water in the radiator, the oil in the sump and everything
+  in the boot and in the driver's hands weighed nothing at all. Swapping a 1.2 for the
+  6.6 diesel changed the torque and left the springs where they were; a full 60-litre
+  Volga tank weighed what an empty one did.
+  `Vehicle.computeStats` now builds the total as a DELTA from the kerb figure, because
+  a factory mass already includes a complete car with its stock parts and every
+  reservoir full. Fitted service parts are measured against the ones the model left
+  the factory with (`stockBonnetVariants`), the three fluids against full capacity,
+  and the boot and the driver's pack are added outright. A stock car therefore still
+  weighs exactly what the catalogue says — and a dry one is 45 kg lighter.
+  The pack follows the DRIVER, not the car: `main` hands the driven vehicle its
+  carried mass each step and tells the last holder it no longer has it, so changing
+  cars or stepping out cannot leave a phantom load behind. Re-derived every step
+  rather than wired to the four deltas that can move it — `refreshLoad` publishes the
+  total always and re-solves the springs only past a 0.1 kg dead band, so a tank
+  draining a few grams a second does not rewrite the chassis inertia every tick.
+- THE SPRINGS ARE ABSOLUTE NOW, and that is what makes load felt at all. Rapier's
+  ray-cast suspension multiplies the rate it is given by the chassis mass, so a
+  per-kilogram figure — which is what a ride frequency converts to — gives a car that
+  sags to exactly the same ride height empty and loaded. The catalogue's frequencies
+  are now converted to newtons per metre at the KERB mass and stored that way; the
+  same spring then carries whatever arrives, so a heavy engine drops the nose, a full
+  boot drops the tail, and each corner's ride frequency is read from the load rather
+  than assumed. `Vehicle.reloadSprings` applies a new load by re-sizing the four
+  springs, dampers, travel, rest length and bump stop in place — a full `rebuild`
+  would work too and would also free and rebuild the controller, the drivetrain
+  binding and every mesh.
+- TYRES HAVE A TEMPERATURE, and it is what the lateral grip is read against. The
+  speed falloff it replaces — up to 26% of the cornering grip shed between 50 and
+  144 km/h, more of it at the rear — carried a real mechanism (a bias-ply carcass
+  squirms and heats) on an implementation that could not be one: written as a
+  function of speed it charged a cruising car the same 26% as one scrubbing a
+  roundabout, and it had no state, so a tyre abused into overheating recovered on the
+  instant grip was asked for again.
+  Each wheel now integrates an energy balance. Heat in is the power at the contact
+  patch — force times true slip speed, longitudinal and lateral — plus the share of
+  the ROLLING-RESISTANCE power that lands in the tyre, which is hysteresis and is the
+  only reason a tyre warms on a straight road at all. Heat out is Newton's law against
+  the air with the film coefficient rising with airflow. The grip factor is exactly 1
+  at ambient, so nothing about the calibrated straight-line figures moved; it rises to
+  +8% at 60 C and falls to -22% at 120 C, so a tyre comes IN as it is worked and goes
+  OFF if it is abused. Measured through the live game: a car cruising this road climbs
+  from 29 C to 55 C over two minutes and gains 7.6% of cornering grip on the way, with
+  the front and rear axles reading different temperatures; a stopped car cools.
+  The heat capacity integrated is the TREAD's, not the whole wheel's — 4 kJ/K rather
+  than the wheel's real 22, which would give an hour-long time constant and a state
+  that never arrives.
+- The dead half of the tyre model is gone with it. `SLIDE_SIDE_GRIP` was a hard floor
+  under the friction ellipse's lateral term — a sliding tyre kept 60% of its grip
+  whatever it was doing — and the speed falloff above is deleted rather than tuned.
+  The ellipse itself is now the real one, read against the force the SAME tick's
+  longitudinal pass computed; the wheel field that stored it for "the next step" was
+  read by nobody, and the comment claiming the ellipse used it was simply wrong.
 
 - Medicine is now consumed with E from the selected hand slot. The two-second action
   uncorks the bottle, tips both modelled pills into the mouth, and releases the empty

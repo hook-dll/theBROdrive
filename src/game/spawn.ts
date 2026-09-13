@@ -40,7 +40,6 @@ export function createServiceableCarState(
   return {
     id,
     modelId,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

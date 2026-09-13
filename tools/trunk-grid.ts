@@ -5,9 +5,9 @@ import { Inventory, type BubbleGumItem } from '../src/items/items';
 import { operateTrunkCell } from '../src/player/interaction';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import {
-  intersectTrunkGrid,
+  intersectStorageGrid,
+  storageCellLocal,
   TRUNK_CELL_COUNT,
-  trunkCellLocal,
   type TrunkGridRayHit,
 } from '../src/vehicle/trunk';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
@@ -22,7 +22,6 @@ const state = newWorldState(1337);
 const car: CarState = {
   id: 'car:test',
   modelId: DEFAULT_CAR_MODEL_ID,
-  gizmos: {},
   headlightMode: 'off',
   taillightsOn: false,
   reverseLightsOn: false,
@@ -81,9 +80,11 @@ const direction = new THREE.Vector3(0, 0, 1);
 const rayHit: TrunkGridRayHit = { cell: -1, distance: 0 };
 let selectedAll = true;
 for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-  trunkCellLocal(cell, half, centre);
+  storageCellLocal(cell, half, 'trunk', centre);
   eye.copy(centre).addScaledVector(direction, -1);
-  if (!intersectTrunkGrid(eye, direction, half, rayHit) || rayHit.cell !== cell) selectedAll = false;
+  if (!intersectStorageGrid(eye, direction, half, 'trunk', rayHit) || rayHit.cell !== cell) {
+    selectedAll = false;
+  }
 }
 check('aim ray selects all eight cells', selectedAll, selectedAll ? '0..7 exact' : `stopped at ${rayHit.cell}`);
 

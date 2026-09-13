@@ -89,7 +89,6 @@ function carState(road: Road, lateral: number, groundY: number): CarState {
   return {
     id: 'surface-feel',
     modelId: MODEL_ID,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,

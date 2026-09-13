@@ -57,8 +57,6 @@ export interface CarState {
   readonly id: string;
   /** Complete car model id from the catalogue (vehicle/carmodels.ts). */
   readonly modelId: string;
-  /** Anchor id -> mounted gizmo, or absent when the anchor is bare. */
-  readonly gizmos: Record<string, PartInstance>;
   /** Earned stickers, in the order they were placed. Append-only, permanent. */
   readonly stickers: StickerState[];
   /** Dipped/high-beam selection, persisted independently of the day/night clock. */
@@ -264,8 +262,6 @@ export type WorldDelta =
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'trailer_hitch'; trailerId: string; carId: string | null }
   | { t: 'trailer_cargo'; trailerId: string; cargoKg: number }
-  | { t: 'gizmo_attach'; carId: string; anchor: string; part: PartInstance }
-  | { t: 'gizmo_detach'; carId: string; anchor: string }
   | { t: 'part_drop'; part: PartInstance; x: number; y: number; z: number }
   | { t: 'part_pickup'; partId: string }
   | { t: 'part_condition'; partId: string; dirt: number; rust: number }
@@ -432,7 +428,6 @@ export class GameWorld {
     if (state.player.wornSunShades) bump(state.player.wornSunShades.id);
     for (const car of Object.values(state.cars)) {
       bump(car.id);
-      for (const part of Object.values(car.gizmos)) bump(part.id);
       for (const item of car.storage) {
         if (item) bump(item.id);
       }
@@ -634,16 +629,6 @@ export class GameWorld {
         if (trailer) trailer.cargoKg = Math.max(0, delta.cargoKg);
         break;
       }
-      case 'gizmo_attach': {
-        const car = s.cars[delta.carId];
-        if (car) car.gizmos[delta.anchor] = delta.part;
-        break;
-      }
-      case 'gizmo_detach': {
-        const car = s.cars[delta.carId];
-        if (car) delete car.gizmos[delta.anchor];
-        break;
-      }
       case 'part_drop':
         s.looseParts[delta.part.id] = {
           part: delta.part,
@@ -656,20 +641,13 @@ export class GameWorld {
         delete s.looseParts[delta.partId];
         break;
       case 'part_condition': {
-        // Condition can live on a loose part or a fitted one; update wherever it is.
+        // Condition lives on the loose-part record: a part is only ever in one place,
+        // and the fitted ones live in a car's bonnet cells, which never carry a
+        // condition anyone can reach with a brush.
         const loose = s.looseParts[delta.partId];
         if (loose) {
           loose.part.dirt = delta.dirt;
           loose.part.rust = delta.rust;
-          break;
-        }
-        for (const car of Object.values(s.cars)) {
-          for (const part of Object.values(car.gizmos)) {
-            if (part.id === delta.partId) {
-              part.dirt = delta.dirt;
-              part.rust = delta.rust;
-            }
-          }
         }
         break;
       }

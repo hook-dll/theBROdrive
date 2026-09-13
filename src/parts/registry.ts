@@ -1,10 +1,10 @@
 /**
- * Physical service parts, cosmetic gizmos and drivetrain specification tables.
+ * Physical service parts and drivetrain specification tables.
  *
  * Parts are *data*, never prefabs: a `PartInstance` is an id, a variant reference
  * and three condition scalars. Meshes, colliders and physics tuning are all derived
  * from that data, which is what lets the same part lie in the sand, be carried in
- * the player's hands, or be mounted as a cosmetic gizmo on a complete car model's
+ * the player's hands, or be fitted into a service cell on a complete car model's
  * anchor point without changing representation.
  *
  * The authored model remains the car body, but engine, turbine, radiator and fuel
@@ -18,24 +18,11 @@
 export type FuelType = 'petrol' | 'diesel';
 
 export type PartKind =
-  | 'wheel'
-  | 'door'
-  | 'hood'
-  | 'trunk'
   | 'engine'
   | 'gearbox'
-  | 'battery'
   | 'radiator'
   | 'fuel_tank'
-  | 'turbine'
-  | 'seat'
-  | 'mirror'
-  | 'bumper'
-  | 'headlight'
-  | 'exhaust'
-  // Cosmetic-only, but it is the part you stare at from the driver's seat, so a
-  // mismatched one is the most visible cross-fit in the game.
-  | 'dashboard';
+  | 'turbine';
 
 export type BodyClass = 'car' | 'truck' | 'bus';
 
@@ -128,13 +115,6 @@ export interface GearboxSpec {
   readonly automatic: boolean;
 }
 
-export interface WheelSpec {
-  readonly radius: number;
-  readonly width: number;
-  /** Multiplies the surface's friction. Worn tyres are below 1. */
-  readonly grip: number;
-}
-
 export interface PartVariant {
   readonly id: string;
   readonly kind: PartKind;
@@ -145,7 +125,6 @@ export interface PartVariant {
   readonly gearbox?: GearboxSpec;
   /** Cooling capability, on radiator variants only. */
   readonly radiator?: RadiatorSpec;
-  readonly wheel?: WheelSpec;
   /** Fuel tank capacity, litres. */
   readonly capacity?: number;
   /** Which body classes this variant physically fits. */
@@ -347,49 +326,6 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
-export const WHEEL_VARIANTS: readonly PartVariant[] = [
-  {
-    id: 'wheel_steel_13',
-    kind: 'wheel',
-    label: '13" steel wheel',
-    mass: 17,
-    fits: ['car'],
-    wheel: { radius: 0.31, width: 0.17, grip: 0.95 },
-  },
-  {
-    id: 'wheel_steel_15',
-    kind: 'wheel',
-    label: '15" steel wheel',
-    mass: 22,
-    fits: ['car', 'truck'],
-    wheel: { radius: 0.35, width: 0.2, grip: 1.0 },
-  },
-  {
-    id: 'wheel_offroad_15',
-    kind: 'wheel',
-    label: '15" knobbly',
-    mass: 28,
-    fits: ['car', 'truck'],
-    wheel: { radius: 0.38, width: 0.26, grip: 1.12 },
-  },
-  {
-    id: 'wheel_bald_14',
-    kind: 'wheel',
-    label: '14" bald tyre',
-    mass: 19,
-    fits: ['car'],
-    wheel: { radius: 0.33, width: 0.18, grip: 0.68 },
-  },
-  {
-    id: 'wheel_truck_19',
-    kind: 'wheel',
-    label: '19" truck wheel',
-    mass: 61,
-    fits: ['truck', 'bus'],
-    wheel: { radius: 0.48, width: 0.29, grip: 1.05 },
-  },
-];
-
 export const TANK_VARIANTS: readonly PartVariant[] = [
   { id: 'tank_40', kind: 'fuel_tank', label: '40 L tank', mass: 14, capacity: 40, fits: ['car'] },
   {
@@ -410,34 +346,15 @@ export const TANK_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
-/** Parts with no behaviour beyond mass, condition and looking right. */
-const TRIM_VARIANTS: readonly PartVariant[] = [
-  { id: 'door_std', kind: 'door', label: 'door', mass: 31, fits: ['car'] },
-  { id: 'door_truck', kind: 'door', label: 'truck door', mass: 44, fits: ['truck', 'bus'] },
-  { id: 'hood_std', kind: 'hood', label: 'hood', mass: 21, fits: ['car'] },
-  { id: 'hood_truck', kind: 'hood', label: 'truck hood', mass: 34, fits: ['truck'] },
-  { id: 'trunk_std', kind: 'trunk', label: 'trunk lid', mass: 18, fits: ['car'] },
-  { id: 'seat_bucket', kind: 'seat', label: 'bucket seat', mass: 16, fits: ['car', 'truck'] },
-  { id: 'seat_bench', kind: 'seat', label: 'bench seat', mass: 24, fits: ['car', 'bus'] },
-  { id: 'mirror_round', kind: 'mirror', label: 'round mirror', mass: 2, fits: ['car', 'truck'] },
-  { id: 'bumper_chrome', kind: 'bumper', label: 'chrome bumper', mass: 13, fits: ['car'] },
-  { id: 'bumper_steel', kind: 'bumper', label: 'steel bumper', mass: 27, fits: ['truck', 'bus'] },
-  { id: 'battery_lead', kind: 'battery', label: 'lead-acid battery', mass: 17, fits: ['car'] },
-  { id: 'battery_heavy', kind: 'battery', label: 'heavy battery', mass: 29, fits: ['truck', 'bus'] },
-  {
-    id: 'headlight_round',
-    kind: 'headlight',
-    label: 'round headlight',
-    mass: 3,
-    fits: ['car', 'truck', 'bus'],
-  },
-  {
-    id: 'exhaust_single',
-    kind: 'exhaust',
-    label: 'exhaust',
-    mass: 9,
-    fits: ['car', 'truck', 'bus'],
-  },
+/**
+ * The turbocharger: the one optional service part a bonnet slot takes (cell 1).
+ *
+ * Everything else that used to live beside it — doors, bonnets, bumpers, seats,
+ * mirrors, lamps, batteries, exhausts, dashboards and loose wheels — was cosmetic
+ * trim for the anchor-mounting mechanic, which is gone. A part the player can pick up
+ * and put nowhere is not content; it is scrap with a mass.
+ */
+const TURBINE_VARIANTS: readonly PartVariant[] = [
   {
     id: 'turbine_standard',
     kind: 'turbine',
@@ -445,19 +362,6 @@ const TRIM_VARIANTS: readonly PartVariant[] = [
     mass: 12,
     fits: ['car', 'truck', 'bus'],
   },
-];
-
-/**
- * Dashboards. Pure mass and looks.
- *
- * `dash_std` is listed first so a generic spawn picker gives ordinary cars the
- * ordinary dash.
- */
-const DASH_VARIANTS: readonly PartVariant[] = [
-  { id: 'dash_std', kind: 'dashboard', label: 'dashboard', mass: 14, fits: ['car'] },
-  { id: 'dash_truck', kind: 'dashboard', label: 'truck dashboard', mass: 22, fits: ['truck', 'bus'] },
-  { id: 'dash_lada', kind: 'dashboard', label: '2102 dashboard', mass: 11, fits: ['car'] },
-  { id: 'dash_rally', kind: 'dashboard', label: 'stripped dash', mass: 6, fits: ['car'] },
 ];
 
 /**
@@ -504,23 +408,7 @@ const LADA_VARIANTS: readonly PartVariant[] = [
       automatic: false,
     },
   },
-  {
-    id: 'wheel_lada_13',
-    kind: 'wheel',
-    label: '13" 2102 wheel',
-    mass: 16,
-    fits: ['car'],
-    wheel: { radius: 0.3, width: 0.165, grip: 0.92 },
-  },
   { id: 'tank_lada_39', kind: 'fuel_tank', label: '39 L tank', mass: 13, capacity: 39, fits: ['car'] },
-  { id: 'battery_lada', kind: 'battery', label: '2102 battery', mass: 15, fits: ['car'] },
-  { id: 'seat_lada', kind: 'seat', label: '2102 seat', mass: 13, fits: ['car'] },
-  { id: 'hood_lada', kind: 'hood', label: '2102 bonnet', mass: 18, fits: ['car'] },
-  { id: 'trunk_lada', kind: 'trunk', label: '2102 tailgate', mass: 24, fits: ['car'] },
-  { id: 'bumper_lada', kind: 'bumper', label: '2102 bumper', mass: 11, fits: ['car'] },
-  { id: 'mirror_lada', kind: 'mirror', label: '2102 mirror', mass: 2, fits: ['car'] },
-  { id: 'headlight_lada', kind: 'headlight', label: '2102 headlamp', mass: 3, fits: ['car'] },
-  { id: 'exhaust_lada', kind: 'exhaust', label: '2102 exhaust', mass: 8, fits: ['car'] },
 ];
 
 /*
@@ -981,11 +869,9 @@ const RADIATOR_VARIANTS: readonly PartVariant[] = [
 export const ALL_VARIANTS: readonly PartVariant[] = [
   ...ENGINE_VARIANTS,
   ...GEARBOX_VARIANTS,
-  ...WHEEL_VARIANTS,
   ...TANK_VARIANTS,
   ...RADIATOR_VARIANTS,
-  ...TRIM_VARIANTS,
-  ...DASH_VARIANTS,
+  ...TURBINE_VARIANTS,
   ...LADA_VARIANTS,
   ...SOVIET_ENGINE_VARIANTS,
   ...SOVIET_GEARBOX_VARIANTS,
@@ -1156,7 +1042,7 @@ export const OIL_LOSS_LPH = 2.1;
  * so a car is always drivable and this carries no flag saying so.
  */
 export interface CarStats {
-  /** Total vehicle mass, kg: the model's kerb mass plus its gizmos. */
+  /** Total vehicle mass, kg: the model's kerb mass plus everything since loaded. */
   readonly mass: number;
   readonly engine: EngineSpec;
   readonly gearbox: GearboxSpec;

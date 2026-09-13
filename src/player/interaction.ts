@@ -44,7 +44,6 @@ import {
   bonnetSlotKind,
   bonnetWaterCapacity,
   partContainer,
-  hasServiceSlot,
 } from '../vehicle/bonnet';
 import { radiatorFit } from '../vehicle/cooling';
 import { setCarBodyCondition, setPartCondition } from '../render/materials';
@@ -76,19 +75,6 @@ const VEHICLE_RANGE = 3.5;
 const EXIT_SPEED_LIMIT_KMH = 5;
 /** Refusal shown while the driver holds interact above the exit speed. */
 const EXIT_REFUSED_PROMPT = 'slow down to step out';
-/** A filled anchor is picked for REMOVAL when the aim ray passes within this of it. */
-const ANCHOR_PICK_RADIUS = 0.6;
-/**
- * Reach and forgiveness for MOUNTING the gizmo you are holding.
- *
- * Deliberately more generous than removal picking, and than `RAY_RANGE`. Anchors are
- * picked by proximity to the aim ray rather than by a physics hit, so range is not a
- * line-of-sight question — the player aims at a spot on the shell, not through a
- * collider. The car is already gated by `VEHICLE_RANGE`, so matching it here costs
- * nothing and makes mounting feel fair.
- */
-const ANCHOR_FIT_RADIUS = 0.85;
-const ANCHOR_FIT_RANGE = VEHICLE_RANGE;
 /** Condition deltas are throttled; the visual updates every tick regardless. */
 const CONDITION_EMIT_INTERVAL = 0.25;
 /**
@@ -136,7 +122,7 @@ type Target =
       normal: THREE.Vector3;
       valid: boolean;
     }
-  | { kind: 'anchor'; carId: string; anchorId: string };
+  | { kind: 'loose-part'; partId: string };
 
 /**
  * What one tick of interaction produced: the prompt to draw, at most one
@@ -379,9 +365,6 @@ export class Interaction {
     y: number;
     z: number;
   } | null = null;
-
-  /** The anchor id under the crosshair on the last resolve, for ghost previews. */
-  public lastAnchorTarget: string | null = null;
 
   private readonly tScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
@@ -713,9 +696,9 @@ export class Interaction {
    * Holds an opened compartment open across a wandering aim, and closes it once the
    * player has walked `GRID_PERSIST_RANGE` from it.
    *
-   * The anchor is refreshed on every tick the aim is back on the compartment, so a car
-   * that rolls takes its grid with it; between those ticks the last known position is
-   * what the distance is measured against, which is also what makes this work while
+   * The grid's centre is refreshed on every tick the aim is back on the compartment, so
+   * a car that rolls takes its grid with it; between those ticks the last known position
+   * is what the distance is measured against, which is also what makes this work while
    * the compartment is behind the player and resolves to nothing at all.
    */
   private holdOpenStorage(resolved: Resolved, eyeX: number, eyeY: number, eyeZ: number): void {
@@ -803,16 +786,10 @@ export class Interaction {
 
     let bestDist = Infinity;
     let target: Target = { kind: 'none' };
-    // Written here rather than derived from `target` afterwards: TypeScript narrows
-    // `target` to its initial `{ kind: 'none' }` literal and will not widen it back
-    // for a closure assignment, so any later `target.kind === 'anchor'` test is a
-    // type error. `next` is an un-narrowed parameter, so the test is valid inside `keep`.
-    this.lastAnchorTarget = null;
     const keep = (dist: number, next: Target): void => {
       if (dist < bestDist) {
         bestDist = dist;
         target = next;
-        this.lastAnchorTarget = next.kind === 'anchor' ? next.anchorId : null;
       }
     };
 
@@ -841,8 +818,6 @@ export class Interaction {
       else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
     }
 
-    // Anchors have no colliders (a bare mount must be aimable), so project the ray
-    // against each anchor's world position instead.
     let vehicle: Vehicle | null = null;
     let carId: string | null = null;
     let vehicleDist = Infinity;
@@ -853,60 +828,6 @@ export class Interaction {
       const t = vehicle.chassis.translation(this.tScratch);
       vehicle.chassis.rotation(this.qScratch);
       vehicleDist = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ);
-
-      const anchors = vehicle.modelMeasure.anchors;
-      const carState = this.world.state.cars[carId];
-      const gizmos = carState.gizmos;
-      const held = this.inventory.held;
-      // A part with a bonnet slot is not gizmo junk: see `hasServiceSlot`. Resolved
-      // once per tick rather than per anchor — it is a table lookup, but the answer
-      // cannot differ between two anchors on the same car.
-      const heldPart =
-        held?.type === 'part' && !hasServiceSlot(held.part.variantId) ? held.part : null;
-
-      // An anchor is only a candidate for something the player can actually DO: mount
-      // the held part into an empty anchor, or pull a mounted gizmo out. Gizmos are
-      // junk, not fitted parts, so an empty anchor accepts whatever junk is held.
-      let bestFitAlong = Infinity;
-      let bestFit: Target | null = null;
-      let bestRemoveAlong = Infinity;
-      let bestRemove: Target | null = null;
-
-      for (const anchor of anchors) {
-        const isFilled = gizmos[anchor.id] !== undefined;
-        const fittable = !isFilled && heldPart !== null;
-        const removable = isFilled;
-        if (!fittable && !removable) continue;
-
-        this.vScratch.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]).applyQuaternion(this.qScratch);
-        const rx = this.vScratch.x + t.x - eyeX;
-        const ry = this.vScratch.y + t.y - eyeY;
-        const rz = this.vScratch.z + t.z - eyeZ;
-        const along = rx * dx + ry * dy + rz * dz;
-        if (along < 0) continue;
-        const perpX = rx - dx * along;
-        const perpY = ry - dy * along;
-        const perpZ = rz - dz * along;
-        const perpSq = perpX * perpX + perpY * perpY + perpZ * perpZ;
-
-        if (fittable && along <= ANCHOR_FIT_RANGE && perpSq < ANCHOR_FIT_RADIUS * ANCHOR_FIT_RADIUS) {
-          if (along < bestFitAlong) {
-            bestFitAlong = along;
-            bestFit = { kind: 'anchor', carId, anchorId: anchor.id };
-          }
-        }
-        if (removable && along <= RAY_RANGE && perpSq < ANCHOR_PICK_RADIUS * ANCHOR_PICK_RADIUS) {
-          if (along < bestRemoveAlong) {
-            bestRemoveAlong = along;
-            bestRemove = { kind: 'anchor', carId, anchorId: anchor.id };
-          }
-        }
-      }
-
-      // Mounting wins: if the player is holding a part that goes somewhere in reach,
-      // that is unambiguously the intent.
-      if (bestFit) keep(bestFitAlong, bestFit);
-      else if (bestRemove) keep(bestRemoveAlong, bestRemove);
 
       // Rear and front use the same deliberate close-range interaction. The nearer
       // plane wins, so a long bus cannot expose both ends at once.
@@ -993,7 +914,6 @@ export class Interaction {
       }
     }
 
-    // `lastAnchorTarget` was already recorded by `keep`.
     return { target, vehicle, carId, vehicleDist };
   }
 
@@ -1245,26 +1165,6 @@ export class Interaction {
       if (already && already.id !== t.trailerId) return 'that car is already towing';
       return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
     }
-
-    if (t.kind === 'anchor') {
-      const car = this.world.state.cars[t.carId];
-      if (!car) return null;
-      const anchor = resolved.vehicle?.modelMeasure.anchors.find((a) => a.id === t.anchorId);
-      if (!anchor) return null;
-      const fitted = car.gizmos[t.anchorId];
-
-      if (fitted) {
-        const toolPrompt = this.toolPrompt(held, fitted);
-        if (toolPrompt) return toolPrompt;
-        return `[F] remove ${variant(fitted.variantId).label}`;
-      }
-
-      if (held?.type === 'part') {
-        const v = variant(held.part.variantId);
-        return `[F] mount ${v.label}`;
-      }
-    }
-
 
     if (
       (t.kind === 'car-body' || t.kind === 'car-entry') &&
@@ -1682,17 +1582,6 @@ export class Interaction {
       this.sound = 'mount';
       return;
     }
-
-    if (t.kind === 'anchor') {
-      const car = this.world.state.cars[t.carId];
-      if (!car || !resolved.vehicle) return;
-      const anchor = resolved.vehicle.modelMeasure.anchors.find((a) => a.id === t.anchorId);
-      if (!anchor) return;
-      const fitted = car.gizmos[t.anchorId];
-      if (fitted) this.detach(t.carId, t.anchorId, fitted, resolved);
-      else if (held?.type === 'part') this.attach(t.carId, t.anchorId, held.part, resolved);
-      return;
-    }
   }
 
   /**
@@ -1740,46 +1629,9 @@ export class Interaction {
     this.sound = 'drop';
   }
 
-  private attach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
-    const car = this.world.state.cars[carId];
-    if (!car || !resolved.vehicle) return;
-    // Gizmos are junk, not fitted parts: any anchor takes any junk. Which parts count
-    // as junk is decided in `resolve` — a part with a bonnet slot never reaches here,
-    // because an empty anchor is not a candidate target while one is held.
-    this.world.apply({ t: 'gizmo_attach', carId, anchor: anchorId, part });
-    this.inventory.remove(part.id);
-    resolved.vehicle.rebuild();
-    this.sound = 'mount';
-  }
-
-  private detach(carId: string, anchorId: string, part: PartInstance, resolved: Resolved): void {
-    if (!resolved.vehicle) return;
-    const anchor = resolved.vehicle.modelMeasure.anchors.find((a) => a.id === anchorId);
-    if (!anchor) return; // a gizmo saved against an anchor this model lacks
-    const t = resolved.vehicle.chassis.translation(this.tScratch);
-    resolved.vehicle.chassis.rotation(this.qScratch);
-    this.vScratch.set(anchor.pos[0], anchor.pos[1], anchor.pos[2]).applyQuaternion(this.qScratch);
-    this.world.apply({ t: 'gizmo_detach', carId, anchor: anchorId });
-    // Drop the removed gizmo into the loose field at its anchor's world position.
-    // `t` is a relative chassis translation and `loose.spawn` stores an absolute,
-    // saved position, so the origin goes back on.
-    this.loose.spawn(
-      part,
-      this.vScratch.x + t.x + this.origin.x,
-      this.vScratch.y + t.y,
-      this.vScratch.z + t.z + this.origin.z,
-    );
-    resolved.vehicle.rebuild();
-    this.sound = 'detach';
-  }
-
   private targetPart(resolved: Resolved): PartInstance | null {
     const t = resolved.target;
     if (t.kind === 'loose-part') return this.world.state.looseParts[t.partId]?.part ?? null;
-    if (t.kind === 'anchor') {
-      const car = this.world.state.cars[t.carId];
-      return car ? (car.gizmos[t.anchorId] ?? null) : null;
-    }
     return null;
   }
 
@@ -1787,12 +1639,6 @@ export class Interaction {
     const t = resolved.target;
     if (t.kind === 'loose-part') {
       const mesh = this.loose.meshFor(t.partId);
-      if (mesh) setPartCondition(mesh, part);
-      return;
-    }
-    if (t.kind === 'anchor' && resolved.vehicle) {
-      // Mounted gizmo: its mesh is named by anchor id inside the vehicle root.
-      const mesh = resolved.vehicle.root.getObjectByName(t.anchorId);
       if (mesh) setPartCondition(mesh, part);
     }
   }

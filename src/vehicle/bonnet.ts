@@ -83,21 +83,6 @@ export function bonnetAccepts(cell: number, item: Item | null): item is PartItem
   return variant(item.part.variantId).kind === bonnetSlotKind(cell);
 }
 
-/**
- * True when this part has a SERVICE HOME on the car and is therefore not junk.
- *
- * The cosmetic anchors (`GizmoAnchor`, render/carmodel.ts) accept any part, because
- * a mirror or a bumper has nowhere else to go and hanging one off the roof is the
- * point. An ENGINE is not that: it belongs in a bonnet slot, so previewing it at
- * every anchor on the car — bonnet, flanks, roof — advertised eleven wrong places to
- * put it and one right one that is not an anchor at all. The four kinds a bonnet slot
- * takes are excluded from anchor mounting for exactly that reason; nothing else is.
- */
-export function hasServiceSlot(variantId: string): boolean {
-  const kind = variant(variantId).kind;
-  return BONNET_SLOT_KINDS.some((slot) => slot === kind);
-}
-
 function servicePart(carId: string, suffix: string, variantId: string): PartItem {
   return {
     type: 'part',
@@ -112,6 +97,32 @@ const FACTORY_RADIATOR: Readonly<Record<RadiatorClass, string>> = {
   standard: 'radiator_standard',
   large: 'radiator_copper',
 };
+
+/**
+ * The tank a body of this class and capacity leaves the factory with.
+ *
+ * Shared by `stockBonnetVariants` and the fresh-car build below so the two cannot
+ * disagree: a car's MASS is measured against this set, and a disagreement would
+ * make every car start life heavier or lighter than its own kerb weight.
+ */
+function stockTankVariant(bodyClass: BodyClass, tankCapacity: number): string {
+  if (bodyClass === 'bus' || bodyClass === 'truck') return 'tank_140';
+  return tankCapacity <= 45 ? 'tank_40' : 'tank_65';
+}
+
+/** The three parts a roadworthy car of this model leaves the factory with. */
+export function stockBonnetVariants(
+  engineVariantId: string,
+  bodyClass: BodyClass,
+  tankCapacity: number,
+): { readonly engine: string; readonly radiator: string; readonly tank: string } {
+  const engine = variant(engineVariantId).engine;
+  return {
+    engine: engineVariantId,
+    radiator: engine ? FACTORY_RADIATOR[preferredRadiatorClass(engine)] : 'radiator_standard',
+    tank: stockTankVariant(bodyClass, tankCapacity),
+  };
+}
 
 /**
  * Factory state for a roadworthy car. The turbine position starts empty: forced
@@ -133,20 +144,12 @@ export function createBonnetStorage(
    */
   radiatorVariantId?: string,
 ): (Item | null)[] {
-  const tankVariant = bodyClass === 'bus' || bodyClass === 'truck'
-    ? 'tank_140'
-    : tankCapacity <= 45
-      ? 'tank_40'
-      : 'tank_65';
-  const engine = variant(engineVariantId).engine;
-  const radiatorVariant =
-    radiatorVariantId ??
-    (engine ? FACTORY_RADIATOR[preferredRadiatorClass(engine)] : 'radiator_standard');
+  const stock = stockBonnetVariants(engineVariantId, bodyClass, tankCapacity);
   return [
-    servicePart(carId, 'engine', engineVariantId),
+    servicePart(carId, 'engine', stock.engine),
     null,
-    servicePart(carId, 'radiator', radiatorVariant),
-    servicePart(carId, 'fuel-tank', tankVariant),
+    servicePart(carId, 'radiator', radiatorVariantId ?? stock.radiator),
+    servicePart(carId, 'fuel-tank', stock.tank),
   ];
 }
 

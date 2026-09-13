@@ -563,7 +563,7 @@ export function homesteadSpawn(
 
 /**
  * Builds the starter car: a deterministic seed-based pick from the whole catalogue,
- * parked in the garage facing the door with no gizmos
+ * parked in the garage facing the door, bare
  * mounted yet. Fuel starts low but non-zero, clamped to the selected tank.
  */
 export function createStartingCar(world: GameWorld): CarState {
@@ -595,7 +595,6 @@ export function createStartingCar(world: GameWorld): CarState {
   return {
     id: 'car:start',
     modelId: def.id,
-    gizmos: {},
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,
