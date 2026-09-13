@@ -87,6 +87,30 @@
 
 ### Fixed
 
+- THE CAR FIELD AT A SCRAPYARD NO LONGER STANDS INSIDE THE BUILDING. Both are placed
+  from the POI's own anchor — the building centred on it, the 1-3 wrecks strung ±13 m
+  along the road and ±6 m across it around it — and the field's rejection loop knew about
+  the bodies already placed and nothing else, so it laid them through the walls. Measured
+  by `tools/wreck-spacing.ts` over 219 container stops: 62.1% put a body inside the
+  building's measured footprint, the deepest 2.53 m in, and where the stop rolls the
+  roadworthy find that is the car, created inside a static trimesh.
+  `layOutWreckField` now takes the building as `WreckKeepOut` — where it stands, which way
+  it faces, and its measured half extents — and clears it by the same margin it clears
+  another body. The test is in WORLD XZ rather than in the field's flat (arclength,
+  lateral) frame, because the flat frame left a body 0.28 m inside a wall on a curve.
+- WHEN NOTHING CLEARS, A LATTICE FINISHES THE FIELD. Accepting the roomiest draw however
+  deep it sat was survivable in an empty field and is not one with a 12 m building on its
+  anchor. A slot the hash stream cannot place now takes the first position on a 1 m
+  lattice over the same field that clears everything, so a field still always lays out,
+  never loops, and an impossible one — three lorries in one field — is as far from every
+  neighbour as the ground allows. Body-to-body placement is unchanged, and
+  `tools/poi-placement.ts`'s placement cost is unmoved: 0.116 ms mean, 0.68 ms worst
+  against its 3 ms budget.
+- `tools/wreck-spacing.ts` holds both properties: no body overlaps another, every pair
+  keeps a walking gap, the blind layout ran a body through the building in 62.1% of its
+  fields, and the shipped one does it nowhere. It places the building with the real
+  `faceRoadYaw`, which is exported for exactly that reason.
+
 - EVERY BUILDING WAS MISSING ITS ROOF, and every un-merged mesh with it. The variant
   cache stored each mesh as geometry and material only, then rebuilt it at the
   origin — but `mergePoiStatics` bakes the transform into the geometry of only the

@@ -3,7 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01, pick } from '../core/rng';
 import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
-import { ROAD_LENGTH } from './road';
+import { ROAD_LENGTH, type Road } from './road';
 import type { CarState, GameWorld } from '../game/state';
 import { oilCapacity, variant, type FuelType } from '../parts/registry';
 import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
@@ -667,8 +667,11 @@ function grantCategoryLoot(
  * centreline, which is its own lateral offset reversed. The sign convention matches
  * `house.ts`'s garage, which faces the same way for the same reason. A small hash wobble
  * keeps a row of them from looking stamped out.
+ *
+ * Exported because a bench that measures a building's footprint against the world has to
+ * place it the way the game does; `tools/wreck-spacing.ts` is that bench.
  */
-function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
+export function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
   const outward = heading + (lateral >= 0 ? -Math.PI / 2 : Math.PI / 2);
   return outward + Math.PI + (hash01(variantSeed, 7) - 0.5) * 0.16;
 }
@@ -786,10 +789,16 @@ function buildVariantPoi(
   }
 
   // The salvageable car field stayed with the containers. `buildWrecks` places its cars
-  // around the POI's own anchor, so it needs no knowledge of what was built here — it is
-  // the same field it always made, now standing beside a scrapyard rather than nothing.
+  // around the POI's own anchor, which is exactly where this building stands, so it is
+  // handed the footprint to lay out around.
   if (instance.category === 'container') {
-    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals);
+    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals, {
+      x: a.x,
+      z: a.z,
+      yaw,
+      halfX,
+      halfZ,
+    });
   }
 
   if (shouldLoot) {
@@ -996,16 +1005,33 @@ function makeWorkingCar(
  * them in a 16x12 m window collide most of the time, and a static shell is a solid
  * box collider, so the result was a car standing inside another car.
  *
- * So a slot is now REJECTION-SAMPLED against the bodies already placed: candidates
- * come off the same deterministic hash stream with the attempt index mixed in, and
- * the first one that clears every neighbour by WRECK_CLEARANCE_M is taken. If no
- * attempt clears — three lorries asked to share one field — the roomiest candidate
- * wins, so a field always lays out and never loops.
+ * So a slot is now REJECTION-SAMPLED: candidates come off the same deterministic hash
+ * stream with the attempt index mixed in, and the first one that clears everything by
+ * WRECK_CLEARANCE_M is taken.
+ *
+ * AND IT CLEARS THE BUILDING. The building at a stop stands on the POI's OWN anchor
+ * (`siteAt` is given the POI's `s` and `lateral`), so a field laid out blind runs
+ * through its walls — measured by `tools/wreck-spacing.ts` over 219 container stops,
+ * 62.1% put a body inside the building's measured footprint, the deepest 2.53 m in, and
+ * at a stop that rolls the roadworthy find the body inside the wall is the car itself.
+ * So the caller hands the layout the building (`WreckKeepOut`) and it is one more term in
+ * the same margin.
+ *
+ * WHEN NOTHING CLEARS, A LATTICE FINISHES THE JOB. Accepting the roomiest draw however
+ * deep it sat was survivable in an empty field and is not one with a 12 m building on
+ * its anchor. So a slot that the stream cannot place takes the first position on a
+ * WRECK_LATTICE_STEP_M lattice over the same field that clears everything. If even that
+ * finds none — three lorries asked to share one field — the roomiest lattice position is
+ * taken, so a field still always lays out, never loops, and an impossible one is as far
+ * from every neighbour as the ground allows.
  *
  * Separation uses each body's CIRCUMSCRIBED footprint radius, so the test holds at
- * whatever yaw, roll and sink the slot draws afterwards. Distance is measured in
- * (arclength, lateral) road coordinates; over a 25 m field the road's curvature
- * moves that by centimetres.
+ * whatever yaw, roll and sink the slot draws afterwards. Body-to-body distance is
+ * measured in (arclength, lateral) road coordinates; over a 25 m field the road's
+ * curvature moves that by centimetres. The building is NOT approximated that way: it is
+ * a real object in the world, so the keep-out test places each candidate on the road and
+ * measures it against the building where it actually stands. Doing it in the field's flat
+ * frame left a body 0.28 m inside a wall on a curve, which is what the bench caught.
  *
  * The whole field is laid out before anything is built, so a slot's position cannot
  * depend on whether an earlier working car has already been driven away.
@@ -1014,8 +1040,10 @@ const WRECK_CLEARANCE_M = 1.4;
 /** Metres of road the field is strung along, and its lateral spread. */
 const WRECK_S_SPREAD = 26;
 const WRECK_LAT_SPREAD = 12;
-/** Candidate draws per slot before the roomiest one is accepted. */
-const WRECK_PLACEMENT_ATTEMPTS = 12;
+/** Candidate draws per slot before the lattice takes over. */
+const WRECK_PLACEMENT_ATTEMPTS = 48;
+/** Lattice spacing the fallback searches the field at, metres. */
+const WRECK_LATTICE_STEP_M = 1;
 
 export interface WreckSlot {
   readonly def: CarModelDef;
@@ -1025,7 +1053,26 @@ export interface WreckSlot {
   readonly latDelta: number;
 }
 
-export function layOutWreckField(poi: Poi): WreckSlot[] {
+/**
+ * The building a field must lay out around: where it stands, which way it faces, and its
+ * measured half extents in its own frame, in world XZ.
+ *
+ * A rectangle is the only shape that fits — the circumscribed disc of a 12 x 10 m
+ * building is 7.8 m in radius and covers the field's whole 12 m lateral spread, so no
+ * field would lay out at all. The half extents are the measured ones the site fit and the
+ * collider already use, and they CONTAIN the merged solid the collider is cut from
+ * (roofs widen the bounds and are excluded from the trimesh), so clearing them clears the
+ * wall the player hits.
+ */
+export interface WreckKeepOut {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly halfX: number;
+  readonly halfZ: number;
+}
+
+export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): WreckSlot[] {
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
   const slots: WreckSlot[] = [];
 
@@ -1033,19 +1080,67 @@ export function layOutWreckField(poi: Poi): WreckSlot[] {
     const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
     const half = carModelMeasure(def.id).halfExtents;
     const radius = Math.hypot(half[0], half[2]);
-    let chosen = { sDelta: 0, latDelta: 0, margin: -Infinity };
 
-    for (let attempt = 0; attempt < WRECK_PLACEMENT_ATTEMPTS; attempt++) {
-      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * WRECK_S_SPREAD;
-      const latDelta = (hash01(poi.variantSeed, w, 12, attempt) - 0.5) * WRECK_LAT_SPREAD;
+    // A candidate's margin is the smaller of its gap off the building and its gap to
+    // every body already placed.
+    const marginAt = (sDelta: number, latDelta: number): number => {
       let margin = Infinity;
+      if (keepOut) {
+        // Distance to the building's oriented rectangle: negative inside it. The
+        // rotation is the inverse of `rotateXZ`, the convention the whole placement
+        // shares — local (x, z) maps to world (c·x + s·z, -s·x + c·z).
+        const point = road.offsetPoint(poi.s + sDelta, poi.lateral + latDelta);
+        const c = Math.cos(keepOut.yaw);
+        const s = Math.sin(keepOut.yaw);
+        const dx = point.x - keepOut.x;
+        const dz = point.z - keepOut.z;
+        const lx = c * dx - s * dz;
+        const lz = s * dx + c * dz;
+        margin =
+          Math.hypot(
+            Math.max(Math.abs(lx) - keepOut.halfX, 0),
+            Math.max(Math.abs(lz) - keepOut.halfZ, 0),
+          ) - radius;
+      }
       for (const other of slots) {
         const gap =
           Math.hypot(sDelta - other.sDelta, latDelta - other.latDelta) - radius - other.radius;
         if (gap < margin) margin = gap;
       }
+      return margin;
+    };
+
+    let chosen = { sDelta: 0, latDelta: 0, margin: -Infinity };
+    for (let attempt = 0; attempt < WRECK_PLACEMENT_ATTEMPTS; attempt++) {
+      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * WRECK_S_SPREAD;
+      const latDelta = (hash01(poi.variantSeed, w, 12, attempt) - 0.5) * WRECK_LAT_SPREAD;
+      const margin = marginAt(sDelta, latDelta);
       if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
       if (margin >= WRECK_CLEARANCE_M) break;
+    }
+
+    // Nothing in the stream cleared: walk a lattice over the same field and take the first
+    // position that does, or the roomiest one if even that finds none.
+    if (chosen.margin < WRECK_CLEARANCE_M) {
+      let settled = false;
+      for (
+        let sDelta = -WRECK_S_SPREAD / 2;
+        sDelta <= WRECK_S_SPREAD / 2 && !settled;
+        sDelta += WRECK_LATTICE_STEP_M
+      ) {
+        for (
+          let latDelta = -WRECK_LAT_SPREAD / 2;
+          latDelta <= WRECK_LAT_SPREAD / 2;
+          latDelta += WRECK_LATTICE_STEP_M
+        ) {
+          const margin = marginAt(sDelta, latDelta);
+          if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
+          if (margin >= WRECK_CLEARANCE_M) {
+            settled = true;
+            break;
+          }
+        }
+      }
     }
 
     slots.push({ def, radius, sDelta: chosen.sDelta, latDelta: chosen.latDelta });
@@ -1068,11 +1163,12 @@ function buildWrecks(
   wreckTrunks: WreckTrunkField,
   registeredWrecks: string[],
   deferredVisuals: Array<() => void>,
+  keepOut: WreckKeepOut,
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
   const oz = ctx.originZ;
-  const slots = layOutWreckField(poi);
+  const slots = layOutWreckField(poi, ctx.road, keepOut);
   const count = slots.length;
 
   const hasWorkingCar =
