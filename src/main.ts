@@ -562,6 +562,12 @@ async function boot(): Promise<void> {
             `${(simulationHz / (mobilePresentation ? s.mobileFrameRate : simulationHz)).toFixed(1)}`,
           `light slots ${spotSlots} spot + ${pointSlots} point = ${spotSlots + pointSlots} ` +
             `per lit fragment, stars to magnitude ${stars}`,
+          // The decisive pair. A frame whose `draw` is large because of FILL has a big
+          // triangle count or a big pixel count; one that is large because of ISSUING has
+          // a big call count. The two want opposite fixes, and this is the only place the
+          // difference is visible on a device with no GPU timer.
+          `draw calls ${renderer.drawCalls}, triangles ` +
+            `${(renderer.drawnTriangles / 1000).toFixed(0)}k`,
         ];
         // WHEN THERE IS NO GPU TIMER — every Android browser, which is the device whose
         // heat started this — the frame budget below is the whole of what can be known, and
