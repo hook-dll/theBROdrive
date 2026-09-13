@@ -23,6 +23,7 @@ import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
+import type { PoiSwitchField } from './poiswitches';
 import {
   courierDefaultStorage,
   courierId,
@@ -36,6 +37,7 @@ import { fitGround, type GroundPlane } from './footprint';
 import { halfWidthAt } from './roadprofile';
 import {
   createVariantInstance,
+  registerPlacedSwitches,
   variantCount,
   variantDef,
   type PoiCategory,
@@ -675,6 +677,15 @@ function faceRoadYaw(heading: number, lateral: number, variantSeed: number): num
 const VARIANT_LAMP_INTENSITY = 0.55;
 
 /**
+ * How far below the fitted plane a building is pushed, on top of the plane's own residual.
+ *
+ * The residual already guarantees no float; this is a hand's width of margin so that a
+ * single stray face of terrain, below the resolution the plane was fitted at, cannot show
+ * a hairline of daylight under a wall.
+ */
+const SEAT_BURY_MARGIN = 0.08;
+
+/**
  * One stop: a gallery building on a fitted apron, its collider, and its rewards.
  *
  * The apron is what makes the catalogue usable in a real world. Its slab top IS the
@@ -692,7 +703,9 @@ function buildVariantPoi(
   loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
+  switches: PoiSwitchField,
   registeredWrecks: string[],
+  registeredSwitches: string[],
   deferredVisuals: Array<() => void>,
   counter: LootCounter,
   shouldLoot: boolean,
@@ -701,14 +714,27 @@ function buildVariantPoi(
   const a = anchorXZ(ctx, poi);
   const yaw = faceRoadYaw(a.heading, poi.lateral, poi.variantSeed);
 
-  // Measured, never authored: a porch, a fallen tower or a scattered aircraft projects
-  // well past its declared footprint, and the apron has to cover what is really there.
+  // NO APRON. A building stands on the sand, pushed in far enough that the sand meets
+  // its walls wherever the ground rises.
+  //
+  // The apron was a slab whose top IS the fitted plane, and it was the wrong trade: on
+  // ground that varies, a level slab either floats at its low corner or shows its own
+  // thickness as a grey box around the building. Measured, the homestead's came out 0.82 m
+  // deep, which is a plinth, and a plinth is worse than the gap it replaced.
+  //
+  // What is left is what a building on uneven ground actually is. The site is one plane
+  // fitted to the ground under the whole footprint, the building is TILTED onto that plane
+  // so its base follows the slope, and it is then SUNK by the plane's own `residual` —
+  // measured at 0.22-0.44 m across the catalogue — which is by definition the most any
+  // point of ground under it can rise above the plane. So no wall can ever stand on air,
+  // and none of it stands on anything man-made.
   const halfX = instance.halfExtentX;
   const halfZ = instance.halfExtentZ;
-  const site = apronSite(ctx, poi, a, yaw, halfX, halfZ);
-  addApron(ctx, site, halfX, halfZ, group, bodies, colliders);
+  const site = siteAt(ctx, poi, a, yaw, halfX, halfZ);
+  const seatY = site.plane.centreY - site.plane.residual - SEAT_BURY_MARGIN;
 
   const at = sitePoint(site, 0, 0);
+  at.y = seatY;
   instance.group.position.set(at.x - ctx.originX, at.y, at.z - ctx.originZ);
   instance.group.rotation.set(site.plane.pitch, yaw, site.plane.roll, 'YXZ');
   instance.group.updateMatrixWorld(true);
@@ -721,6 +747,19 @@ function buildVariantPoi(
     source.intensity = VARIANT_LAMP_INTENSITY;
     source.userData.lightBudgetSource = true;
   }
+
+  // The switches, placed into the world. Their boxes are ORIENTED: the switch is built
+  // upright and yawed about Y inside the variant, and the variant is then yawed and tilted
+  // onto the ground here, so the plate's final orientation is the two composed — which is
+  // why the orientation is stored rather than approximated by an axis-aligned box.
+  registerPlacedSwitches(
+    switches,
+    instance,
+    `poi-switch:${poi.index}`,
+    registeredSwitches,
+    ctx.originX,
+    ctx.originZ,
+  );
 
   if (ctx.hasPhysics) {
     const matrix = poseMatrix(
@@ -768,7 +807,9 @@ function buildPoi(
   loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
+  switches: PoiSwitchField,
   registeredWrecks: string[],
+  registeredSwitches: string[],
 ): void {
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
@@ -782,7 +823,9 @@ function buildPoi(
     loose,
     trailers,
     wreckTrunks,
+    switches,
     registeredWrecks,
+    registeredSwitches,
     deferredVisuals,
     counter,
     shouldLoot,
@@ -1138,64 +1181,6 @@ const TRAILER_STOP_CHANCE = 0.45;
 const TRAILER_DOMAIN = 0x54524c31; // 'TRL1'
 
 /**
- * A laid concrete apron, and the reason the buildings above it need no terrain
- * sampling of their own.
- *
- * Its TOP IS THE FITTED PLANE: the slab follows the grade instead of cutting a
- * level terrace into a dune, so the only step it presents to a car is the ground's
- * own deviation from that plane — a few tens of centimetres — rather than the metre
- * and a half a horizontal pad would need. Everything standing on it is then placed
- * analytically, exactly, with `sitePoint`.
- */
-const APRON_LIFT_FRACTION = 0.6;
-/** Slab depth below the plane, beyond what the ground's unevenness already demands. */
-const APRON_BASE_THICKNESS = 0.5;
-
-/** A site whose parts stand on an apron rather than on bare sand. */
-function apronSite(
-  ctx: ChunkContext,
-  poi: Poi,
-  anchor: Anchor,
-  yaw: number,
-  halfRight: number,
-  halfForward: number,
-): Site {
-  const bare = siteAt(ctx, poi, anchor, yaw, halfRight, halfForward);
-  return { ...bare, lift: bare.plane.residual * APRON_LIFT_FRACTION };
-}
-
-function addApron(
-  ctx: ChunkContext,
-  site: Site,
-  halfRight: number,
-  halfForward: number,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-): void {
-  const thickness = site.plane.residual * 1.2 + APRON_BASE_THICKNESS;
-  addStaticMesh(
-    ctx,
-    new THREE.BoxGeometry(halfRight * 2, thickness, halfForward * 2),
-    makeFlatMaterial(0x9b968c, 0.92),
-    poseMatrix(
-      site.x,
-      site.plane.centreY + site.lift - thickness / 2,
-      site.z,
-      site.yaw,
-      site.plane.roll,
-      site.plane.pitch,
-      ctx.originX,
-      ctx.originZ,
-    ),
-    SurfaceType.Concrete,
-    group,
-    bodies,
-    colliders,
-  );
-}
-
-/**
  * Builds ordinary stops plus the sparse courier network. Static trunk registries
  * exist only for the live physics band; their edited contents remain in WorldState.
  */
@@ -1206,6 +1191,7 @@ export class PoiProvider implements ChunkProvider {
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly wreckTrunks: WreckTrunkField,
+    private readonly switches: PoiSwitchField,
     private readonly couriers: CourierField,
   ) {}
 
@@ -1223,6 +1209,7 @@ export class PoiProvider implements ChunkProvider {
     const colliders: RAPIER.Collider[] = [];
     const deferredVisuals: Array<() => void> = [];
     const registeredWrecks: string[] = [];
+    const registeredSwitches: string[] = [];
     const registeredCouriers: string[] = [];
 
     for (const poi of pois) {
@@ -1236,7 +1223,9 @@ export class PoiProvider implements ChunkProvider {
         this.loose,
         this.trailers,
         this.wreckTrunks,
+        this.switches,
         registeredWrecks,
+        registeredSwitches,
       );
     }
     for (const stop of couriersBetween(
@@ -1268,6 +1257,7 @@ export class PoiProvider implements ChunkProvider {
       colliders,
       dispose: () => {
         this.wreckTrunks.forget(registeredWrecks);
+        this.switches.forget(registeredSwitches);
         this.couriers.forget(registeredCouriers);
         for (const cancel of deferredVisuals) cancel();
       },

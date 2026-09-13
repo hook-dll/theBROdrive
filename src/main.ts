@@ -90,6 +90,7 @@ import { RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { setCarBodyCondition } from './render/materials';
 import { WreckTrunkField } from './world/wrecktrunks';
+import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
@@ -417,6 +418,9 @@ async function boot(): Promise<void> {
   // Static trunk registries follow streamed physics chunks; edited contents live in state.
   const wreckTrunks = new WreckTrunkField();
   const couriers = new CourierField();
+  // Light switches follow their buildings in and out of the streamed world; nothing
+  // about them is saved. See world/poiswitches.ts.
+  const switches = new PoiSwitchField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
@@ -489,7 +493,7 @@ async function boot(): Promise<void> {
     worldWork,
   );
   streamer.register(new RoadMeshProvider(world.seed));
-  streamer.register(new HomesteadProvider());
+  streamer.register(new HomesteadProvider(switches));
   streamer.register(new TerminusPadProvider());
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
   // is what lets the autopilot know a dirt pile from a rock without a physics query:
@@ -497,7 +501,7 @@ async function boot(): Promise<void> {
   streamer.register(new ScatterProvider(debris, hazards));
   streamer.register(new PoleProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers));
+  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -961,6 +965,7 @@ async function boot(): Promise<void> {
     loose,
     trailerField,
     wreckTrunks,
+    switches,
     couriers,
     () => {
       const active = activeCar();
@@ -1488,7 +1493,17 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
-    if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
+    // A LIGHT SWITCH TAKES E FROM THE HELD ITEM, and only while it is aimed.
+    //
+    // E is the key that works what is in your hands, and a switch is the one thing in the
+    // world that is worked rather than carried or got into — so the aimed switch wins, and
+    // only while aimed. Letting the item have it as well would mean switching a light off
+    // every time a player with a torchlight walked past a wall.
+    const aimedSwitch = f.useHeld ? interaction.aimedSwitch() : null;
+    if (driving === null && !dying && !medicineActive && aimedSwitch !== null) {
+      const lit = interaction.flipAimedSwitch();
+      if (lit !== null) hud.setToast(lit ? 'lights on' : 'lights off');
+    } else if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
       if (heldAfterSelection.type === 'medicine') {
         // Health and inventory change in one turn before the autosave microtask.
         // The removed item's viewmodel remains owned by the timed animation below.

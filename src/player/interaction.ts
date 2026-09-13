@@ -51,6 +51,7 @@ import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
+import type { PoiSwitchField } from '../world/poiswitches';
 import type { CourierField } from '../world/couriers';
 import { STICKER_SIZE } from '../render/stickers';
 
@@ -108,6 +109,63 @@ const HITCH_CAR_RANGE = 9;
  */
 const MIN_HIT_TOI = 0.05;
 
+/**
+ * How far the player may be from a light switch and still work it.
+ *
+ * Arm's length, generously: a switchplate sits about 1.3 m up a wall and the player walks
+ * past it, so this is the distance from a standing position to a switch he is beside
+ * rather than the distance he could reach with an outstretched hand.
+ */
+const SWITCH_RANGE = 2.2;
+/**
+ * Aim forgiveness around the switch, metres.
+ *
+ * A switchplate is 12 by 16 cm — a quarter of the crosshair at conversational distance —
+ * and requiring the reticle to be inside it would make the thing feel broken rather than
+ * small.
+ */
+const SWITCH_AIM_MARGIN = 0.12;
+
+/**
+ * Where a ray enters an axis-aligned box, or null when it misses.
+ *
+ * The ray is expected to have been rotated into the box's own frame already, which is what
+ * makes an oriented box test this cheap: the switch is placed on a wall at an arbitrary
+ * yaw and the variant it belongs to is tilted onto the ground, so its box is oriented in
+ * the world — but a ray transformed into that box's frame meets the same slab arithmetic
+ * as an axis-aligned one, and a ray is one point and one direction rather than a mesh.
+ */
+function rayBoxEntry(
+  origin: THREE.Vector3,
+  direction: THREE.Vector3,
+  half: readonly [number, number, number],
+): number | null {
+  let near = 0;
+  let far = Infinity;
+  for (let axis = 0; axis < 3; axis++) {
+    const o = axis === 0 ? origin.x : axis === 1 ? origin.y : origin.z;
+    const d = axis === 0 ? direction.x : axis === 1 ? direction.y : direction.z;
+    const h = half[axis]!;
+    if (Math.abs(d) < 1e-8) {
+      // Parallel to this slab: either always inside it or never.
+      if (o < -h || o > h) return null;
+      continue;
+    }
+    const inverse = 1 / d;
+    let t0 = (-h - o) * inverse;
+    let t1 = (h - o) * inverse;
+    if (t0 > t1) {
+      const swap = t0;
+      t0 = t1;
+      t1 = swap;
+    }
+    if (t0 > near) near = t0;
+    if (t1 < far) far = t1;
+    if (near > far) return null;
+  }
+  return near;
+}
+
 type Target =
   | { kind: 'none' }
   | { kind: 'loose-part'; partId: string }
@@ -115,6 +173,7 @@ type Target =
   | { kind: 'trailer'; trailerId: string }
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
+  | { kind: 'light-switch'; id: string }
   | {
       kind: 'car-body';
       carId: string;
@@ -379,6 +438,22 @@ export class Interaction {
   private readonly trunkRayHit: TrunkGridRayHit = { cell: 0, distance: 0 };
   private trunkPickedCell: number | null = null;
   private trunkPickedDistance = Infinity;
+  /** The light switch the aim ray is on this tick, if any. */
+  private pickedSwitch: string | null = null;
+  private pickedSwitchDistance = Infinity;
+  /**
+   * Whether the switch in reach is the thing the player is actually aiming at.
+   *
+   * `pickedSwitch` is found by a proximity-and-aim test BEFORE the targets are ranked, so
+   * on its own it means "a switch is in front of you", not "you are looking at it". A
+   * player standing at a car with a wall switch beside them has both, and the car door is
+   * nearer: without this flag, E would work the switch while the prompt says "open the
+   * door", which is the worst kind of mismatch — the prompt is right and the key is wrong.
+   */
+  private pickedSwitchIsTarget = false;
+  private readonly switchInverse = new THREE.Quaternion();
+  private readonly switchEye = new THREE.Vector3();
+  private readonly switchDirection = new THREE.Vector3();
   /** This tick's discrete sound and held action; reset at the top of every tick. */
   private sound: FoleyEvent | null = null;
   private continuous: FoleyContinuous = null;
@@ -408,6 +483,7 @@ export class Interaction {
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly wreckTrunks: WreckTrunkField,
+    private readonly switches: PoiSwitchField,
     private readonly couriers: CourierField,
     /** The car in reach, WITH its id. Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
@@ -771,6 +847,47 @@ export class Interaction {
     return true;
   }
 
+  /**
+   * The light switch the aim ray enters, if any, and how far away it is.
+   *
+   * Picked geometrically against the registry rather than by raycasting the scene: the
+   * switch is not a physics body (see world/poiswitches.ts) and the buildings it is
+   * mounted on are one merged mesh per material, so a scene raycast would report the wall
+   * and leave the switch unidentifiable.
+   */
+  private pickSwitch(
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+  ): void {
+    this.pickedSwitch = null;
+    this.pickedSwitchDistance = Infinity;
+    for (const entry of this.switches.values()) {
+      const dx = eyeX - entry.x;
+      const dy = eyeY - entry.y;
+      const dz = eyeZ - entry.z;
+      // Cheap reject before the box test: most of the world's switches are not near.
+      const reach = SWITCH_RANGE + SWITCH_AIM_MARGIN;
+      if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+      this.switchInverse.set(entry.qx, entry.qy, entry.qz, entry.qw).invert();
+      this.switchEye.set(dx, dy, dz).applyQuaternion(this.switchInverse);
+      this.switchDirection.set(dirX, dirY, dirZ).applyQuaternion(this.switchInverse);
+      const distance = rayBoxEntry(this.switchEye, this.switchDirection, [
+        entry.halfExtents[0] + SWITCH_AIM_MARGIN,
+        entry.halfExtents[1] + SWITCH_AIM_MARGIN,
+        entry.halfExtents[2] + SWITCH_AIM_MARGIN,
+      ]);
+      if (distance === null || distance > SWITCH_RANGE) continue;
+      if (distance < this.pickedSwitchDistance) {
+        this.pickedSwitchDistance = distance;
+        this.pickedSwitch = entry.id;
+      }
+    }
+  }
+
   private resolve(
     eyeX: number,
     eyeY: number,
@@ -784,12 +901,20 @@ export class Interaction {
     const dy = dirY / dirLen;
     const dz = dirZ / dirLen;
 
+    // Cleared here rather than after ranking, so an early return cannot leave last tick's
+    // answer standing.
+    this.pickedSwitchIsTarget = false;
+
     let bestDist = Infinity;
     let target: Target = { kind: 'none' };
     const keep = (dist: number, next: Target): void => {
       if (dist < bestDist) {
         bestDist = dist;
         target = next;
+        // Recorded HERE rather than by inspecting the winner afterwards, so it tracks the
+        // ranking itself: the switch counts as aimed only if it won on distance, exactly
+        // like every other target.
+        this.pickedSwitchIsTarget = next.kind === 'light-switch';
       }
     };
 
@@ -881,6 +1006,13 @@ export class Interaction {
           cell: this.trunkPickedCell,
         });
       }
+    }
+
+    // The switch is picked into the same nearest-target arbitration as everything else,
+    // so a switch behind a car cannot be worked through it.
+    this.pickSwitch(eyeX, eyeY, eyeZ, dx, dy, dz);
+    if (this.pickedSwitch !== null) {
+      keep(this.pickedSwitchDistance, { kind: 'light-switch', id: this.pickedSwitch });
     }
 
     for (const courier of this.couriers.values()) {
@@ -1050,9 +1182,43 @@ export class Interaction {
     return true;
   }
 
+  /**
+   * The light switch the player is aiming at, and what pressing E would do to it.
+   *
+   * Read BEFORE the press so the prompt says what will happen rather than what just did.
+   * E is the held-item key and the prompt has to speak for whichever of the two it will
+   * actually act on, which is why this is a question the caller asks rather than a case
+   * `promptFor` answers on its own.
+   */
+  aimedSwitch(): { id: string; isOn: boolean } | null {
+    if (this.pickedSwitch === null || !this.pickedSwitchIsTarget) return null;
+    const entry = this.switches.get(this.pickedSwitch);
+    return entry ? { id: entry.id, isOn: entry.isOn() } : null;
+  }
+
+  /**
+   * Works the aimed switch. Returns the state it moved to, or null when none is aimed.
+   *
+   * A no-op returns null rather than false, so a caller can tell "nothing to switch" from
+   * "switched off" without a second question.
+   */
+  flipAimedSwitch(): boolean | null {
+    if (this.pickedSwitch === null || !this.pickedSwitchIsTarget) return null;
+    const entry = this.switches.get(this.pickedSwitch);
+    return entry ? entry.toggle() : null;
+  }
+
   private promptFor(resolved: Resolved): string | null {
     const held = this.inventory.held;
     const t = resolved.target;
+
+    if (t.kind === 'light-switch') {
+      const entry = this.switches.get(t.id);
+      if (!entry) return null;
+      // E, not F: E is the key that works what is in your hands, and a switch is the one
+      // thing in the world that is worked rather than picked up or got into.
+      return entry.isOn() ? '[E] turn the lights off' : '[E] turn the lights on';
+    }
 
 
     if (t.kind === 'loose-part') {

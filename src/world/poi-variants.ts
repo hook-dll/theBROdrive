@@ -19,8 +19,69 @@ const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 const surfaceTextures = new Map<SurfacePattern, THREE.DataTexture>();
 const surfaceMaterials = new Map<string, THREE.MeshStandardMaterial>();
-const ROOM_LIGHT_INTENSITY = 62;
-const BULB_EMISSIVE_INTENSITY = 2.4;
+/**
+ * A room light's intensity, in the same units as the street lamps' `LAMP_POINT`.
+ *
+ * Exported because the placement builds the marker this describes. It is the catalogue's
+ * number either way: how brightly a room is lit is a decision about the building.
+ *
+ * It has to be those units because a room light is one now: it reaches the screen
+ * through the shared `LightBudget` as a point source, exactly like a street lamp, rather
+ * than as the spot light it used to be. Slightly under a street lamp's 90, because a room
+ * is lit to be lived in and a road is lit to be driven.
+ */
+export const ROOM_LIGHT_INTENSITY = 55;
+export const BULB_EMISSIVE_INTENSITY = 2.4;
+
+/**
+ * How much smaller the furniture is than it was drawn.
+ *
+ * One number for the whole catalogue, because "the furniture is too big" is one
+ * judgement about all of it: a chair, a bed and a shop counter are the same mistake at
+ * different scales, and tuning them separately would let them drift out of proportion
+ * with each other. Applied INSIDE each helper as a group scale, so every part of a piece
+ * — legs, backrest, the boxes stacked on a shelf — shrinks together and by the same
+ * amount, and a piece that stands on another piece stays standing on it.
+ *
+ * Two things it must not do, and both are checked rather than assumed:
+ *
+ *  - it must not lift anything off the floor. Every helper builds upward from its group
+ *    origin at y = 0, so scaling about that origin keeps the base on the ground.
+ *  - it must not break the register off its counter. `cashRegister` is a separate helper
+ *    from `counter` and stands on one, so both shrink by this factor and the gap between
+ *    them scales with them rather than changing.
+ */
+const FURNITURE_SCALE = 1 / 1.5;
+
+/**
+ * How much smaller the light switch is than it was drawn.
+ *
+ * Half, and the reason it is not simply the furniture factor is that a switch is not
+ * furniture: it is a fitting whose size reads against the human hand, and a switchplate
+ * shrunk to two thirds of a plausible size still reads as a switchplate while the old one
+ * read as a box.
+ */
+const SWITCH_SCALE = 0.5;
+/** Depth of the switchplate's housing, metres. The face the wall is measured from. */
+const SWITCH_PLATE_DEPTH = 0.055;
+/**
+ * How far below its ceiling a room light hangs, metres.
+ *
+ * One number for the fixture, the bulb and the light source, because they are one fitting:
+ * the light a room is lit by comes from where the visible fixture hangs. Anywhere else
+ * would put the bulb the player sees and the light that lights the room in two places.
+ */
+const LIGHT_DROP_Y = -0.43;
+/**
+ * How far a room light reaches, metres.
+ *
+ * Read by nobody: `LightBudget` takes a source's intensity and position into its own fixed
+ * slot and composes the reach from the slot, so this is the one number in the light path
+ * that is deliberately unused. It is exported anyway rather than deleted, so that the
+ * placement can build a light that would work on its own terms — a zero-range light is a
+ * shape that reads as a mistake.
+ */
+export const ROOM_LIGHT_REACH = 14;
 
 const C = {
   plaster: 0xb99b72,
@@ -490,6 +551,9 @@ function table(parent: THREE.Object3D, x: number, z: number, yaw = 0, color: num
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'table');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [1.6, 0.12, 0.85], [0, 0.82, 0], color);
   for (const sx of [-0.68, 0.68]) for (const sz of [-0.3, 0.3]) box(group, [0.1, 0.78, 0.1], [sx, 0.39, sz], C.darkTimber);
 }
@@ -500,6 +564,9 @@ function chair(parent: THREE.Object3D, x: number, z: number, yaw = 0, color: num
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'chair');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [0.62, 0.1, 0.62], [0, 0.48, 0], color);
   for (const sx of [-0.24, 0.24]) for (const sz of [-0.24, 0.24]) box(group, [0.08, 0.46, 0.08], [sx, 0.23, sz], C.darkTimber);
   box(group, [0.62, 0.72, 0.1], [0, 0.84, 0.27], color);
@@ -511,6 +578,9 @@ function bed(parent: THREE.Object3D, x: number, z: number, yaw = 0, color: numbe
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'bed');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [1.5, 0.28, 2.15], [0, 0.35, 0], C.darkTimber);
   box(group, [1.38, 0.18, 2.0], [0, 0.58, 0], color);
   box(group, [1.0, 0.16, 0.42], [0, 0.76, 0.7], C.white, [0.08, 0, -0.05]);
@@ -522,11 +592,50 @@ function sofa(parent: THREE.Object3D, x: number, z: number, yaw = 0, color: numb
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'sofa');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [2.1, 0.45, 0.82], [0, 0.42, 0], color);
   box(group, [2.1, 0.85, 0.2], [0, 0.82, 0.34], color, [-0.12, 0, 0]);
   box(group, [0.22, 0.62, 0.9], [-1.0, 0.55, 0], color);
   box(group, [0.22, 0.62, 0.9], [1.0, 0.55, 0], color);
 }
+
+/** The garage wing's offset from the variant's origin, metres. */
+const GARAGE_WING_X = 8.68;
+
+/**
+ * The starter garage's shelf, in the VARIANT's own frame, and what it is built from.
+ *
+ * Exported because the player's starting items are placed on this shelf by `house.ts`,
+ * which works in the homestead's own (u, v) frame. Sharing the numbers is what keeps the
+ * items on the shelf: restating them next door would put them in the sand the first time
+ * the shelf moved.
+ */
+export const STARTER_GARAGE_SHELF = {
+  /** Centre, in the variant's own coordinates: the garage's offset plus the shelf's own. */
+  centreX: GARAGE_WING_X + 3.6,
+  centreZ: 1.2,
+  /** Where `shelf()` is called, in the garage group's frame. */
+  localX: 3.6,
+  localZ: 1.2,
+  yaw: Math.PI / 2,
+  width: 4.5,
+  /** Half the usable depth of a plank along the shelf's own z, metres. */
+  halfDepth: 0.275 * FURNITURE_SCALE,
+  /** Half the shelf's own length along its own x, metres. */
+  halfWidth: (4.5 / 2) * FURNITURE_SCALE,
+} as const;
+
+/**
+ * Top surface of a shelf's plank `i`, above the shelf's own floor, metres.
+ *
+ * A shelf is four planks 0.55 m apart, each 0.08 m thick, all of it scaled as furniture.
+ * Exported because the starting items are placed ON a shelf from another module: sharing
+ * the expression rather than its result is what keeps a moved or resized shelf carrying
+ * whatever stands on it.
+ */
+export const SHELF_PLANK_TOP = (i: number): number => (0.26 + i * 0.55) * FURNITURE_SCALE;
 
 function shelf(parent: THREE.Object3D, x: number, z: number, width: number, yaw = 0, stocked = true): void {
   const group = new THREE.Group();
@@ -534,10 +643,15 @@ function shelf(parent: THREE.Object3D, x: number, z: number, width: number, yaw 
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'shelf');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [0.1, 2.05, 0.48], [-width / 2, 1.02, 0], C.darkMetal);
   box(group, [0.1, 2.05, 0.48], [width / 2, 1.02, 0], C.darkMetal);
   for (let i = 0; i < 4; i++) {
-    const y = 0.22 + i * 0.55;
+    // Derived from the exported plank top rather than stated twice: 0.04 is half the
+    // plank's own thickness.
+    const y = SHELF_PLANK_TOP(i) / FURNITURE_SCALE - 0.04;
     box(group, [width, 0.08, 0.55], [0, y, 0], C.metal);
     if (stocked && i < 3) {
       for (let j = 0; j < 3; j++) {
@@ -554,6 +668,9 @@ function counter(parent: THREE.Object3D, x: number, z: number, width: number, ya
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'counter');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [width, 0.82, 0.62], [0, 0.41, 0], C.timber);
   box(group, [width + 0.12, 0.1, 0.74], [0, 0.87, 0], C.darkTimber);
 }
@@ -564,6 +681,9 @@ function cashRegister(parent: THREE.Object3D, x: number, z: number, yaw = 0): vo
   group.rotation.y = yaw;
   parent.add(group);
   markDoorObstacle(group, 'cash register');
+  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
+  // keeps a piece in proportion and keeps whatever stands on it standing on it.
+  group.scale.setScalar(FURNITURE_SCALE);
   box(group, [0.52, 0.26, 0.42], [0, 1.08, 0], C.darkMetal);
   box(group, [0.36, 0.18, 0.06], [0, 1.25, -0.2], C.fadedGreen, [-0.25, 0, 0]);
 }
@@ -585,7 +705,15 @@ function barrel(parent: THREE.Object3D, x: number, z: number, color: number = C.
 }
 
 function rug(parent: THREE.Object3D, x: number, z: number, width: number, depth: number, color: number, yaw = 0): void {
-  box(parent, [width, 0.025, depth], [x, 0.205, z], color, [0, yaw, 0]);
+  // The footprint shrinks with the furniture around it; the pile does not, because a
+  // rug is a flat thing and its thickness is what a rug is.
+  box(
+    parent,
+    [width * FURNITURE_SCALE, 0.025, depth * FURNITURE_SCALE],
+    [x, 0.205, z],
+    color,
+    [0, yaw, 0],
+  );
 }
 
 function roomLights(
@@ -595,30 +723,26 @@ function roomLights(
   switchPosition: V3,
   switchYaw = 0,
 ): void {
-  const lights: THREE.SpotLight[] = [];
-  const bulbMaterials: THREE.MeshStandardMaterial[] = [];
+  // THE SWITCH DOES NOT BUILD ITS LIGHTS, AND THAT IS THE DESIGN.
+  //
+  // A variant is built ONCE and placed MANY times, so anything a switch controls has to
+  // belong to the PLACEMENT rather than to the build: two houses of the same variant must
+  // not share a light, or switching one off would darken the other. So this builds the
+  // fixtures and their bulbs — geometry like any other — and RECORDS what the switch
+  // drives for `poivariantbuild.ts` to create per placement.
+  //
+  // What those lights will be is that module's business, but the reason is worth stating
+  // here: a real light added to the scene compiles its own shader permutation, so a room
+  // light streaming in would recompile the world's materials. The world keeps its rendered
+  // lights in fixed budgets (`render/lights.ts`), so a room light is an invisible MARKER
+  // that `LightBudget` draws like any street lamp — and a switch that is off is genuinely
+  // off, because an unlit marker is not an eligible source to spend a slot on.
   for (const [x, z] of positions) {
     const fixture = new THREE.Group();
     fixture.position.set(x, ceilingY, z);
     parent.add(fixture);
     cylinder(fixture, 0.08, 0.08, 0.22, 8, [0, -0.11, 0], C.darkMetal);
     cylinder(fixture, 0.2, 0.08, 0.12, 12, [0, -0.24, 0], C.white);
-    const bulbMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffe6ad,
-      roughness: 0.22,
-      emissive: 0xffc66d,
-      emissiveIntensity: BULB_EMISSIVE_INTENSITY,
-    });
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), bulbMaterial);
-    bulb.position.y = -0.36;
-    fixture.add(bulb);
-    const light = new THREE.SpotLight(0xffd49a, ROOM_LIGHT_INTENSITY, ceilingY + 0.7, 0.72, 0.9, 2);
-    light.position.y = -0.43;
-    light.castShadow = false;
-    light.target.position.set(0, -ceilingY, 0);
-    fixture.add(light, light.target);
-    lights.push(light);
-    bulbMaterials.push(bulbMaterial);
   }
 
   const switchGroup = new THREE.Group();
@@ -627,20 +751,66 @@ function roomLights(
   switchGroup.rotation.y = switchYaw;
   parent.add(switchGroup);
   markDoorObstacle(switchGroup, 'light switch');
-  box(switchGroup, [0.24, 0.32, 0.055], [0, 0, 0], C.white);
-  const toggle = box(switchGroup, [0.08, 0.14, 0.045], [0, 0.01, -0.045], C.darkMetal, [-0.22, 0, 0]);
-  let switchedOn = true;
-  const toggleLight = (): boolean => {
-    switchedOn = !switchedOn;
-    for (const light of lights) light.intensity = switchedOn ? ROOM_LIGHT_INTENSITY : 0;
-    for (const bulbMaterial of bulbMaterials) bulbMaterial.emissiveIntensity = switchedOn ? BULB_EMISSIVE_INTENSITY : 0;
-    toggle.rotation.x = switchedOn ? -0.22 : 0.22;
-    return switchedOn;
-  };
-  switchGroup.traverse((object) => {
-    object.userData.poiLightToggle = toggleLight;
+  // A marker on the GROUP alone, so the world can find the switch — and so that
+  // `mergePoiStatics` leaves it and its plate out of the wall it is mounted on.
+  switchGroup.userData.poiLightSwitch = true;
+  // HALF SIZE, WITH THE PLATE'S BACK FACE LEFT EXACTLY WHERE IT WAS.
+  //
+  // Scaling about the group origin would not do: the plate is centred on that origin, so
+  // halving it would pull its back 0.014 m off the wall and leave the switch floating in
+  // front of its own mounting. Offsetting the scaled body by half the difference puts the
+  // back face back on the wall — and does so ARITHMETICALLY, for any scale, rather than
+  // for the one value that happens to be right today.
+  const body = new THREE.Group();
+  body.scale.setScalar(SWITCH_SCALE);
+  body.position.z = (SWITCH_PLATE_DEPTH / 2) * (1 - SWITCH_SCALE);
+  switchGroup.add(body);
+  box(body, [0.24, 0.32, SWITCH_PLATE_DEPTH], [0, 0, 0], C.white);
+  box(body, [0.08, 0.14, 0.045], [0, 0.01, -0.045], C.darkMetal, [-0.22, 0, 0]);
+
+  // What the switch drives, for the placement to build and to work: where each light hangs,
+  // measured FROM THE SWITCH. `positions` arrives in the caller's frame and the switch is
+  // placed and yawed inside that same frame, so the two are reconciled here, once, rather
+  // than leaving the placement to guess which frame it was handed. The bulbs are the
+  // placement's too — see `roomBulbMaterial`.
+  const toSwitch = new THREE.Matrix4()
+    .makeRotationY(-switchYaw)
+    .multiply(
+      new THREE.Matrix4().makeTranslation(
+        -switchPosition[0],
+        -switchPosition[1],
+        -switchPosition[2],
+      ),
+    );
+  switchGroup.userData.poiSwitchLights = positions.map(([x, z]) => {
+    const point = new THREE.Vector3(x, ceilingY + LIGHT_DROP_Y, z).applyMatrix4(toSwitch);
+    return [point.x, point.y, point.z] as V3;
   });
 }
+
+/**
+ * A fresh bulb material, plus the size of the bulb it goes on.
+ *
+ * A FACTORY, NOT A SHARED MATERIAL, and the difference is the whole reason the bulbs are
+ * built by the placement: two buildings of one variant share a catalogue, so a shared
+ * material would let one building's switch darken the other's bulbs. Handing out a new
+ * material per bulb makes that impossible by construction, rather than by remembering to
+ * clone at the right moment.
+ */
+export function roomBulbMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: 0xffe6ad,
+    roughness: 0.22,
+    emissive: 0xffc66d,
+    emissiveIntensity: BULB_EMISSIVE_INTENSITY,
+  });
+}
+
+/** Radius of a room bulb, metres. Its fixture is sized around it. */
+export const ROOM_BULB_RADIUS = 0.13;
+
+/** How far above the light's own height the bulb sits, metres, so it hangs in its shade. */
+export const ROOM_BULB_LIFT = 0.07;
 
 function roomLight(
   parent: THREE.Object3D,
@@ -794,7 +964,10 @@ function buildLongHouse(root: THREE.Group): void {
   crate(root, 5.1, 1.7, 0.4, 0.55);
   roomLight(root, -4.5, 0, h, [-2.92, 1.25, -2.05], Math.PI / 2);
   roomLight(root, -0.8, 0, h, [-2.68, 1.25, -0.35], -Math.PI / 2);
-  roomLight(root, 3.7, 0, h, [1.32, 1.25, 2.0], Math.PI / 2);
+  // Swung round to face the partition at x = 1.2: with its back toward +X it was mounted
+  // on nothing, since the wall it belongs to is behind it. Measured, it stood 8 cm off
+  // any surface with its back to open room.
+  roomLight(root, 3.7, 0, h, [1.32, 1.25, 2.0], -Math.PI / 2);
 }
 
 function buildCourtyardHouse(root: THREE.Group): void {
@@ -1205,7 +1378,7 @@ function buildStarterHome(root: THREE.Group): void {
   box(house, [0.8, 2.6, 0.8], [-6.7, 7.8, 3.8], C.brick);
 
   const garage = new THREE.Group();
-  garage.position.x = 8.68;
+  garage.position.x = GARAGE_WING_X;
   root.add(garage);
   buildingShell(garage, {
     width: 9, depth: 10, height: 3.8, wall: C.concreteLight, roof: C.roofTin, flatRoof: true, wallPattern: 'blocks', roofPattern: 'metal',
@@ -1215,7 +1388,14 @@ function buildStarterHome(root: THREE.Group): void {
     right: [[-3.5, -1.5, 1.0, 2.4], [1.5, 3.5, 1.0, 2.4]],
   });
   counter(garage, 0, 3.8, 5.5, 0);
-  shelf(garage, 3.6, 1.2, 4.5, Math.PI / 2, false);
+  shelf(
+    garage,
+    STARTER_GARAGE_SHELF.localX,
+    STARTER_GARAGE_SHELF.localZ,
+    STARTER_GARAGE_SHELF.width,
+    STARTER_GARAGE_SHELF.yaw,
+    false,
+  );
   crate(garage, -3.5, 3.8, 0.2, 0.65);
   roomLights(garage, [[-2.2, 0], [2.2, 0]], 3.8, [4.38, 1.35, 0], Math.PI / 2);
   box(garage, [10.0, 0.22, 1.8], [0, 3.45, -5.6], C.roofTin, [-0.1, 0, 0], true);
@@ -1826,6 +2006,20 @@ function validateDoorClearances(root: THREE.Group): void {
 }
 
 /**
+ * Whether `object`, or anything it hangs from, carries `flag` in its `userData`.
+ *
+ * Used to keep whole subtrees out of a merge: a marker is set on the GROUP that owns the
+ * part, but the geometry that would be merged is its grandchild, and a one-level parent
+ * test silently misses it.
+ */
+function hasAncestorFlag(object: THREE.Object3D, flag: string): boolean {
+  for (let node: THREE.Object3D | null = object; node !== null; node = node.parent) {
+    if (node.userData[flag] === true) return true;
+  }
+  return false;
+}
+
+/**
  * Collapses a prototype's static meshes into one mesh per material.
  *
  * A prototype is 100-250 individually positioned boxes and cylinders, and every
@@ -1848,7 +2042,14 @@ export function mergePoiStatics(root: THREE.Group): void {
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     if (object.userData.poiRoof === true) return;
-    if (typeof object.userData.poiLightToggle === 'function') return;
+    // Light switches must stay their own objects: they are aim targets, and merging them
+    // into the wall would leave the world unable to find one. Keyed on the marker the
+    // catalogue sets, which is why that marker exists.
+    // The WHOLE SUBTREE, not the marker object alone: the plate and its lever hang two
+    // levels below the switch group, and merging either would leave the switch group with
+    // no geometry — which does not look broken, it measures as a switch nought metres
+    // across at the origin. So walk up, rather than testing one parent.
+    if (hasAncestorFlag(object, 'poiLightSwitch')) return;
     if (typeof object.userData.poiDoorObstacle === 'string') return;
     if (Array.isArray(object.material)) return;
     const group = groups.get(object.material);

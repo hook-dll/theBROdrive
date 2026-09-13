@@ -70,6 +70,21 @@
   bench groups by category rather than by the four dead kinds, and the wreck bench reads
   the container category, which is where the car field is built now.
 
+- LIGHT SWITCHES ARE HALF SIZE AND WORK WITH E. Every variant's switch is built through
+  one `roomLights` call and was a full-size plate on a stub. It is now scaled to half, and
+  the scaling is done so the plate's BACK FACE STAYS ON THE WALL: scaling about the group
+  origin would pull the back 0.014 m off its own mounting, so the scaled body is offset by
+  `(depth / 2) * (1 - scale)`, which is arithmetic rather than the one value that happens
+  to be right today. E is `useHeld`, which is what the player reads as "interact"; an aimed
+  switch now wins over the held item, or carrying a torchlight would switch the lights off
+  while walking past every wall.
+- FURNITURE IS TWO THIRDS SIZE, ONE CONSTANT APPLIED AS A GROUP SCALE. Tables, chairs,
+  beds, sofas, shelves, counters and the cash register shrink together, so a piece stays in
+  proportion and whatever stands on it stays on it — the register on a counter is the case
+  that would have drifted under per-part numbers. Measured: the table's top lands at
+  0.587 m, which is 0.88 x 2/3 exactly. The rug scales its footprint and not its thickness,
+  which is how a rug behaves. Crates and barrels are outdoor props and are untouched.
+
 ### Fixed
 
 - EVERY BUILDING WAS MISSING ITS ROOF, and every un-merged mesh with it. The variant
@@ -91,9 +106,71 @@
   check, because the failure looked plausible in a screenshot — most of a building IS
   merged, so the walls were all there and only the roof was gone.
 
+- A LIGHT SWITCH CONTROLLED LIGHTS THAT WERE NOT THERE. The catalogue's toggle closure
+  drove spot lights created inside the variant, and the world replaces every authored light
+  with an invisible light-budget marker before anything streams in — so pressing a switch
+  flipped a boolean nobody could see. Measured over 20 km of road: pressing every switch
+  took 22 lit sources to 22.
+  A switch's lights now belong to the PLACEMENT, not to the build, because a variant is
+  built once and placed many times and two houses of one variant must not share a light.
+  The catalogue records where the lights hang and which bulbs glow; `createVariantInstance`
+  makes them, so each building gets its own markers, its own bulb materials and its own
+  closure. Measured again: 22 lit sources to 4.
+  `tools/poi-placement.ts` states the consequences rather than the wiring, because the
+  wiring is what looked correct while it did nothing. Each switch is pressed ON ITS OWN and
+  required to change the lit count, so one working switch cannot carry the rest. Every
+  switch must match the transform of the building it is screwed to. And the registry is in
+  ABSOLUTE coordinates while a chunk builds relative to its floating origin, so the road is
+  built twice, once at the origin and once 48 km from it, and the switches must land in the
+  same place both times — registered from the chunk-local matrix instead, they land a whole
+  origin away, which measured 41 km.
+  THE KEY AND THE PROMPT AGREE. `pickedSwitch` is found by a proximity test before the
+  targets are ranked, so on its own it means "a switch is in front of you" rather than "you
+  are looking at it" — and the failure is a mismatch, not an absence: standing at a car
+  with a switch on the wall beside it gave a prompt saying "open the door" and an E that
+  turned the lights off. `Interaction` is now driven directly in the bench, with a switch
+  aimed, a switch behind the player, a switch out of reach, and a loose part that wins the
+  ranking against a switch further away; E works the switch in the first case and does
+  nothing in the other three.
+  THE HOMESTEAD'S OWN SWITCHES ARE REGISTERED. It places the same catalogue building as the
+  road does but through its own provider, and it was registering nothing — so the first
+  building a player ever stands in was the one whose lights could not be worked. Both
+  providers now go through one `registerPlacedSwitches`, which also removes a hand-written
+  quaternion product that was wrong.
+
 ### Removed
 
+- THE CONCRETE APRON UNDER EVERY POI, and with it the plinth. The slab's top was the
+  fitted ground plane, so on uneven ground it either floated at its low corner or showed
+  its own thickness as a grey box around the building: measured, 0.82 m deep on the
+  homestead, which is a plinth, and a plinth is worse than the gap it replaced. A building
+  now sits on the fitted plane, tilted onto it, and is sunk by the plane's own `residual`
+  plus a hand's width — which is by definition the most any ground under it can rise above
+  the plane, so no wall can stand on air. `tools/poi-placement.ts` measures the ground
+  densely under every footprint rather than comparing one point: worst gap under a wall
+  0.001 m. Placing a building also got 38x cheaper, because the apron's geometry was most
+  of what a placement built: 0.115 ms mean, 0.665 ms worst against the 3 ms budget.
+  THE STARTER HOMESTEAD KEEPS ITS SLAB but no longer shows it. Its pad is the garage floor
+  and has to be LEVEL — the car parks on it and the sand would rise inside the garage
+  otherwise — while the ground under it varies 0.63 m, so the pad has to stand proud
+  somewhere: measured, 0.77 m of grey concrete along the building, which is a plinth and
+  the one thing a player sees from the drive. Its edges are now banked into the ground with
+  the ground's own colour at the ground's own slope, so the concrete meets the sand through
+  a graded bank instead of a wall. The run is exactly the 2.6 m of verge between the pad's
+  near edge and the asphalt, so the bank reaches the road edge and no further, and the
+  steepest it gets is 13 degrees — a bank a person walks up rather than a cliff.
+  `tools/poi-placement.ts` holds both numbers, and the bank is a walkable surface with its
+  own collider rather than a picture, so the player's feet follow it rather than the sand
+  under it.
 
+- THE STARTER WORKBENCH, and the starting items moved onto the garage shelf. The bench
+  stood just inside the garage door — which is where the car drives through and where the
+  player walks — for the sake of holding a camera, a pocket watch and two doses that a
+  shelf already standing in the garage holds just as well. A shelf's plank tops are now
+  exported by the catalogue that builds the shelf and the shelf's place is resolved through
+  the building's own transform, so the items stand on the shelf that exists rather than on
+  a remembered height: `tools/poi-placement.ts` holds all four within the planks and just
+  above one of them.
 
 - THE FOUR HAND-BUILT POI KINDS: `roadside_wrecks`, `gas_stop`, `workshop` and `camp`,
   with their builders, their forecourt/canopy/workshop-slab/camp constants and their
