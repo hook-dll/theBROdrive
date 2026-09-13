@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Added
+
+- `/?road-lab`, A LABORATORY FOR THE ONE SURFACE YOU CANNOT GO AND LOOK AT. The road's
+  detail lives at the 1-30 cm scale, its tile repeats every 24 m, and the stretch worth
+  judging is usually minutes of driving away — so every question about how the asphalt
+  reads was being answered from memory of a drive. The scene builds the REAL
+  `RoadMeshProvider` and `TerrainMeshProvider`, the same two the chunk streamer drives,
+  around any arclength, under the real `Renderer` and the real `Sky`, and gives the
+  camera six presets: hood, chase, a close 7 m look, the kerb, a straight-down view with
+  no grazing angle, and a landscape from the side. It is scriptable, so a capture can name
+  the state it photographed: `&s=22800`, `&pick=worst|sand|paint|gravel|concrete`,
+  `&view=top`, `&vc=0`, `&nm=0`, `&grid=1`, `&time=17.5`, and `window.__roadLab` exposes
+  the same knobs plus `render(): dataURL`.
+- THE THREE SWITCHES EXIST BECAUSE A SURFACE HAS THREE INDEPENDENT INPUTS, and an artefact
+  can belong to any of them: the tiled map, the tangent-space normals baked from it, and
+  the per-vertex weathering the mesh paints on top. Dropping the vertex colour leaves the
+  flat lane albedo brightness-corrected exactly the way the mesh corrects it, so the switch
+  is not also a brightness change and the comparison means something; dropping the normal
+  map tells a map artefact from a shading one; and the 24 m grid draws the tile's real
+  boundaries on the mat, which is the only way to see where the repeat falls — nobody can
+  count 24 m of road off a still frame, and a repeat is the easiest artefact to mistake for
+  wear.
+- The five `pick` scans walk the real `roadConditionAt` over the whole road and answer with
+  the strongest stretch for a property, which is what makes the lab useful without driving
+  there: the worst asphalt, the most sand-covered, the most intact lane paint, gravel and
+  concrete. Three bugs were found and fixed by using it before it was committed: the panel
+  had no class and so no styles at all, the straight-down preset put the eye ahead of the
+  target and looked along the road instead of down it, and handing `sky.update` an ABSOLUTE
+  camera position put the eye 18 km outside the sky's own 3 km dome — the dome is
+  re-centred on that point every frame and drawn `BackSide`, so the sky rendered as nothing.
+
 ### Changed
 
 - THE ROAD'S SURFACE WAS PIXEL ART, AND THE PIXELS WERE 7 CM SQUARES. `roadTextures` drew

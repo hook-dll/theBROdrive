@@ -2928,7 +2928,9 @@ const launch = query.has('poi-gallery')
       ? import('./playground').then(({ bootPlayground }) => bootPlayground())
       : query.has('mirage-lab')
         ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
-        : boot();
+        : query.has('road-lab')
+          ? import('./road-lab').then(({ bootRoadLab }) => bootRoadLab())
+          : boot();
 
 void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
