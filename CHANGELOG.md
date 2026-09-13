@@ -4,6 +4,19 @@
 
 ### Added
 
+- A FRAME COST REPORT, readable on the device whose heat is in question. The pause menu
+  grows a development-only `Frame Report` screen showing presented frame rate, GPU
+  milliseconds where the device can measure them, busy CPU milliseconds per SECOND, and
+  the simulated and drawn halves of the frame broken down and ranked by what they cost
+  per second. On a phone that is the difference between knowing and guessing: it was built
+  because the phone's heat was first attributed to resolution, and resolution is demonstrably
+  not it — a phone presenting a third of a megapixel at 30 FPS asks its GPU for roughly
+  15 megapixels per second, which is nothing, so the cost is elsewhere and only a reading
+  taken on the phone can say where. `tools/frame-report.ts` holds the arithmetic, and
+  caught a real defect in it: the sections NEST (the simulation contains the physics, the
+  render call contains the drawn sections), so the headline total has to be the two outer
+  measurements rather than a sum of every section, which was counting the same work twice.
+
 - `tools/spray-pool.ts` holds the wheel-spray pool to both halves of its new idle gate: a
   pool with nothing in flight must flag no uploads, and a pool that has motes in it must
   still fly. Breaking the gate either way is caught — leaving it open reports "an empty

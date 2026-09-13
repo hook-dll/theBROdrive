@@ -218,6 +218,14 @@ export interface PauseHooks {
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /**
+   * Frame cost breakdown, as preformatted text.
+   *
+   * Development only, and a HOOK rather than a value because the report has to be read
+   * on the device whose heat is in question. A phone has no console anyone can attach
+   * to in a car, so the numbers have to be able to appear on its screen.
+   */
+  frameReport?: () => string;
+  /**
    * Record a fully fuelled car into the world.
    *
    * Optional, and absent in a production build. Cars are meant to be found in the
@@ -516,7 +524,7 @@ export class MainMenu {
         return null;
       };
 
-      type Screen = 'main' | 'settings' | 'spawn' | 'item' | 'part';
+      type Screen = 'main' | 'settings' | 'spawn' | 'item' | 'part' | 'perf';
       let screen: Screen = 'main';
       /**
        * Settings section, remembered across visits: someone adjusting the horizon
@@ -587,6 +595,7 @@ export class MainMenu {
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
         else if (next === 'item') renderItem?.();
+        else if (next === 'perf') renderPerf();
         else if (next === 'part') renderPart?.();
         else renderSpawn?.();
       };
@@ -706,6 +715,14 @@ export class MainMenu {
             finish('resume');
           });
           panel.appendChild(seatBtn);
+        }
+        // Frame cost, folded like the rest: development only, and only where its hook
+        // exists. It opens a readout rather than resuming, because a measurement is
+        // something you read, not something you do.
+        if (import.meta.env.DEV && hooks.frameReport) {
+          const perfBtn = button('menu-button', 'Frame Report (dev)');
+          perfBtn.addEventListener('click', () => showScreen('perf'));
+          panel.appendChild(perfBtn);
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen
@@ -1254,6 +1271,26 @@ export class MainMenu {
 
         showTab(settingsTab);
         backBtn.focus();
+      };
+
+      /**
+       * What the frame costs, printed rather than graphed.
+       *
+       * Text because of where it is read: on a phone, held in a hand, after a drive that
+       * made it warm. A number that says "380 ms of CPU per second" can be sent in a
+       * message; a graph cannot.
+       */
+      const renderPerf = (): void => {
+        panel.textContent = '';
+        const backBtn = button('menu-button menu-back', 'Back');
+        backBtn.addEventListener('click', () => showScreen('main'));
+        const title = el('h1', 'menu-title');
+        title.textContent = 'Frame Report';
+        panel.append(backBtn, title);
+
+        const readout = el('div', 'menu-perf');
+        readout.textContent = hooks.frameReport?.() ?? 'no report available';
+        panel.appendChild(readout);
       };
 
       // Spawn selection resets per pause, so every visit starts at the first model.
