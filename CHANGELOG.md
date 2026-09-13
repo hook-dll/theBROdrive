@@ -35,6 +35,51 @@
 
 ### Changed
 
+- THE STREAM'S SIZE IS THE ROAD'S ANSWER NOW, NOT THE PLAYER'S. A two-lane road carries
+  twelve cars and a four-lane one twenty-four, interpolated across the taper so nothing
+  steps at a profile boundary, and the `Traffic` slider is gone from the pause menu with
+  its `trafficCount` setting, its four `gameplay.json` keys and its `config.ts` fields. It
+  used to be a player setting defaulting to OFF that only ever RAISED: a narrow road ran at
+  the setting and a widened one ran up to a fixed ceiling of thirty. That asked the player
+  a question they had no way to judge — how many cars a carriageway they have not seen yet
+  should hold — and the honest answer is a property of the road, which already knows it.
+- THE DENSITY ROTATES OVER THE WHOLE RANGE, A FIFTH TO ALL OF IT. The live count is one
+  draw in `[0.2 x cap, cap]`, re-rolled every 36-72 s, and the retained FRACTION is held
+  between re-rolls so a widening fills smoothly rather than stepping. The floor used to be
+  two thirds, which with a cap derived from the road left the stream within a couple of
+  cars of the same number for hours: measured over 900 s on a narrow stretch, the old range
+  top-to-bottom was a third of what the road can hold, so the stream read as a conveyor.
+  Measured after: 3-12 against a cap of 12, and 4.8-24 against 24.
+- `tools/traffic-bench.ts` now holds the cap itself — twelve on two lanes, twenty-four on
+  four, a target between a fifth of the cap and the cap, and a rotation that reaches both
+  ends over a drive — instead of holding a slider's value. Its three checks that asserted
+  against the old thirty-car ceiling are expressed against the cap, since a fixed nine-car
+  floor was asserting the width of the road rather than where the stream sits on it.
+
+- THE AUTOPILOT NO LONGER STANDS ON THE BRAKE FOR SOMETHING IN ITS WAY. Braking for an
+  obstacle is capped at half pedal, whatever the mode's own ceiling is, because that
+  ceiling is a personality — sleeper 0.55, hurried 0.8, frantic 1.0 — and spending it on a
+  rock in the lane is what puts a car on the loose half of this road with locked fronts and
+  no steering left. The brakes that exist to PREVENT a departure are deliberately not
+  capped: the verge brake, the edge-stability brake, and the hold that keeps a waiting car
+  from rolling backwards down a grade.
+- THE PLAN IS PRICED AT WHAT THE CAPPED PEDAL CAN DELIVER, and that is not a refinement —
+  without it the change is a regression. Measured: capping the pedal alone left a sleeper
+  unchanged (its 4.0 m/s² plan is what half pedal gives anyway) and took a frantic driver
+  from 16.9 to 108.4 commanded-line reversals per kilometre on a littered road, one
+  direction change every 9 m, because its 7.2 m/s² plan was no longer a stop it could make.
+  Obstacles are now priced with `min(the mode's plan, half the surface's braking + grade)`,
+  so the plan asks to slow earlier and the car still stops where it planned to; frantic is
+  back at 16.9 reversals/km. `tools/autopilot-bench.ts` asserts the cap directly: the worst
+  pedal requested while avoiding something is 0.500 of 1.000 in both modes.
+- KNOWN, AND CARRIED RATHER THAN HIDDEN: `tools/playground-lap.ts`'s "frantic at a parked
+  car with the oncoming lane free" fails before and after this change, and the failure
+  changed character — it was 2 impacts and 34.6 s stopped, it is now 0 impacts, 774 m of
+  real progress, and a 1.6 m crossing of the centre line where the check allows 0.4 m. Both
+  are failures; neither is a pass. It is left for play rather than tuned blind, since that
+  scenario has been failing independently of this work and a third consecutive change to
+  the same behaviour is likelier to be chasing the measurement than fixing the car.
+
 - THE ROAD'S SURFACE WAS PIXEL ART, AND THE PIXELS WERE 7 CM SQUARES. `roadTextures` drew
   its wearing course by quantising the tile into 3-pixel cells and giving each cell one flat
   tone, with independent white noise added per pixel on top. At 2.3 cm a texel that stamps an

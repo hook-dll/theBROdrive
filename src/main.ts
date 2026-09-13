@@ -2633,7 +2633,6 @@ async function boot(): Promise<void> {
     applySettings: (next) => {
       const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
-      traffic.setTargetCount(world.state.settings.trafficCount);
       // POI chunks rebuild one at a time after Resume. That keeps a slider drag and
       // a dense 500 m stop layout from turning the pause-menu interaction into a
       // multi-second main-thread task.

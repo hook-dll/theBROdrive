@@ -13,9 +13,6 @@ import {
   POI_SPACING_STEP_METRES,
   FRAME_RATE_LIMITS,
   TIME_OF_DAY_PRESETS,
-  TRAFFIC_COUNT_MAX,
-  TRAFFIC_COUNT_MIN,
-  TRAFFIC_COUNT_STEP,
 } from '../game/settings';
 import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
 import { GRAPHICS_TIERS } from '../game/settings';
@@ -480,7 +477,6 @@ export class MainMenu {
         mouseSensitivity: base.mouseSensitivity,
         masterVolume: base.masterVolume,
         radioVolume: base.radioVolume,
-        trafficCount: base.trafficCount,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         msaa: base.msaa,
@@ -496,7 +492,6 @@ export class MainMenu {
           mouseSensitivity: settings.mouseSensitivity,
           masterVolume: settings.masterVolume,
           radioVolume: settings.radioVolume,
-          trafficCount: settings.trafficCount,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           msaa: settings.msaa,
@@ -1119,19 +1114,6 @@ export class MainMenu {
               (value) => `${(value / 1000).toFixed(value < 1000 ? 1 : value % 1000 === 0 ? 0 : 1)} km`,
               (value) => {
                 settings.poiSpacingMetres = value;
-              },
-            ),
-            sliderField(
-              'Traffic',
-              'gameplay',
-              'Maximum road cars. The live stream varies below this cap; zero turns traffic off.',
-              TRAFFIC_COUNT_MIN,
-              TRAFFIC_COUNT_MAX,
-              TRAFFIC_COUNT_STEP,
-              () => settings.trafficCount,
-              (value) => (value === 0 ? 'Off' : `up to ${Math.round(value)} cars`),
-              (value) => {
-                settings.trafficCount = value;
               },
             ),
           );

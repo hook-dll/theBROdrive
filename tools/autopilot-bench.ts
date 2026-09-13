@@ -429,6 +429,8 @@ interface LitterMetrics {
   meanSpeed: number;
   progress: number;
   monotonic: boolean;
+  /** Worst brake pedal asked for while avoiding something in the way. */
+  worstAvoidBrake: number;
 }
 
 function litteredHazards(): RoadHazard[] {
@@ -464,6 +466,7 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
   let sumSteerSq = 0;
   let worstSteer = 0;
   let worstLateral = 0;
+  let worstAvoidBrake = 0;
   let sumSpeed = 0;
   let samples = 0;
   let previousLine = 0;
@@ -497,6 +500,14 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
     sumSteerSq += steer * steer;
     worstSteer = Math.max(worstSteer, steer);
     worstLateral = Math.max(worstLateral, Math.abs(p.lateral));
+    // THE PEDAL USED FOR SOMETHING IN THE WAY, and only that pedal: measured while the
+    // controller is in avoidance and the car is genuinely shedding speed. A standstill
+    // hold (0.6) and the verge/edge-stability brakes are different pedals for different
+    // problems and are not capped — the former is a stop, the latter exists to prevent
+    // exactly the departure this cap is about.
+    if (rig.autopilot.activity === 'avoid' && speed(rig.vehicle) > 3) {
+      worstAvoidBrake = Math.max(worstAvoidBrake, rig.input.brake);
+    }
     sumSpeed += speed(rig.vehicle);
     samples++;
     if (p.s >= START_S + 1_800) break;
@@ -511,6 +522,7 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
     meanSpeed: sumSpeed / samples,
     progress,
     monotonic,
+    worstAvoidBrake,
   };
 }
 
@@ -537,6 +549,17 @@ async function checkLitteredRoad(): Promise<void> {
       `${mode}: littered road stays inside the static-avoidance shoulder`,
       result.worstLateral <= STATIC_AVOID_EDGE,
       `worst |lateral| ${result.worstLateral.toFixed(2)} m against a ${STATIC_AVOID_EDGE.toFixed(2)} m edge`,
+    );
+    // THE PEDAL FOR SOMETHING IN THE WAY IS HALF, however the mode is configured.
+    // A mode's ceiling is a personality — sleeper 0.55, frantic 1.0 — and spending it on
+    // an obstacle is what put a car on the loose half of this road with locked fronts and
+    // no steering. The cap is what replaces that, so it is asserted here rather than
+    // described in a comment. Tolerance is one part in a hundred for the comparison the
+    // controller makes against the mode's own ceiling.
+    check(
+      `${mode}: obstacle braking never exceeds half pedal`,
+      result.worstAvoidBrake <= 0.505,
+      `worst ${result.worstAvoidBrake.toFixed(3)} of 1.000 while avoiding`,
     );
     // Dense scatter keeps the controller in the requested walking-pace avoidance
     // mode almost continuously. Progress, not the old cruise-speed floor, is the

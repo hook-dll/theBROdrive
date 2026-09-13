@@ -97,7 +97,6 @@ const traffic = new RoadTraffic(
   loadCarModel,
   () => true,
 );
-traffic.setTargetCount(30);
 traffic.setDaylightFactor(1);
 
 let largestCount = 0;
@@ -128,13 +127,13 @@ for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its thirty-car setting',
-  largestCount <= 30 && populated.count <= 30,
-  `largest ${largestCount}, live ${populated.count}`,
+  'traffic stays within its wide-road cap',
+  largestCount <= 24 && populated.count <= 24,
+  `largest ${largestCount}, live ${populated.count}, cap ${populated.cap}`,
 );
 check(
   'traffic forms a frequent local stream',
-  populated.count >= 9 && populated.nearestRoadDistance <= 300,
+  populated.count >= 3 && populated.nearestRoadDistance <= 300,
   `${populated.count} live, nearest ${populated.nearestRoadDistance.toFixed(0)} m away`,
 );
 check(
@@ -205,24 +204,29 @@ check(
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 check(
-  'traffic density varies below configured cap',
-  largestCount <= 30 && smallestPopulated < largestCount,
-  `${streamed.count} live, range ${smallestPopulated}-${largestCount}`,
+  'traffic density varies below the road cap',
+  largestCount <= 24 && smallestPopulated < largestCount,
+  `${streamed.count} live, range ${smallestPopulated}-${largestCount}, cap ${streamed.cap.toFixed(0)}`,
 );
 check(
   'dense queues always resume',
   longestStop < 30,
   `longest continuous stop ${longestStop.toFixed(1)} s`,
 );
-// THE SETTING IS JUDGED BY WHAT IS IN FRONT, NOT BY `count`.
+// THE STREAM IS JUDGED BY WHAT IS IN FRONT, NOT BY `count`.
 //
 // Cars spawn ahead and are collected behind, and the player overtakes most of the
 // stream, so the rear is where the quota goes to die: with a 700 m spawn band past
-// the collision window and an 850 m rear tail, two thirds of thirty cars sat behind
-// a cruising player and the road ahead held six. This fails if that returns.
+// the collision window and an 850 m rear tail, two thirds of the cars sat behind a
+// cruising player and the road ahead held six. This fails if that returns.
+//
+// The floor is a FRACTION of what is live rather than a fixed number of cars: the quota
+// is the road's now, and a narrow stretch legitimately holds a quarter of what a widened
+// one does, so a fixed nine would be asserting the width of the road rather than where
+// the stream sits on it.
 check(
-  'most of the quota stays where the player can see it',
-  meanAhead >= 9 && meanAhead >= meanLive * 0.4,
+  'most of the live stream stays where the player can see it',
+  meanAhead >= 3 && meanAhead >= meanLive * 0.4,
   `${meanAhead.toFixed(1)} of ${meanLive.toFixed(1)} live ahead at ${(PLAYER_MPS * 3.6).toFixed(0)} km/h`,
 );
 
@@ -235,21 +239,14 @@ check(
   traffic.status.count === 0,
   `${traffic.status.count} cars remain`,
 );
-traffic.setTargetCount(0);
-check(
-  'zero traffic setting leaves no live or pending traffic',
-  traffic.status.count === 0 && !traffic.status.pending && !traffic.enabled,
-  JSON.stringify(traffic.status),
-);
-
-// THE WIDENED ROAD CARRIES MORE CARS, AND STOPS THERE.
+// THE STREAM IS SIZED BY THE ROAD, NOT BY A SETTING.
 //
-// The setting is the narrow road's number; a stretch with two lanes each way runs up
-// to the configured maximum and no further, so a player who asked for twelve meets
-// twelve on the ordinary road and up to thirty on a highway section.
+// A two-lane stretch holds twelve cars and a four-lane one twenty-four, with the taper
+// between them interpolated. This is the property the menu slider used to stand in for,
+// and it is now the road's own answer.
 {
   const wideS = findWideS(road);
-  const wideTraffic = new RoadTraffic(
+  const narrowTraffic = new RoadTraffic(
     physics,
     new GameWorld(newWorldState(SEED)),
     new THREE.Scene(),
@@ -259,17 +256,72 @@ check(
     loadCarModel,
     () => true,
   );
-  wideTraffic.setTargetCount(12);
-  wideTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
-  const narrowTarget = wideTraffic.status.target;
-  wideTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0);
-  const wideTarget = wideTraffic.status.target;
+  narrowTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+  const narrowCap = narrowTraffic.status.cap;
+  const narrowTarget = narrowTraffic.status.target;
+  narrowTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0);
+  const wideCap = narrowTraffic.status.cap;
+  const wideTarget = narrowTraffic.status.target;
   check(
-    'a widened stretch raises the density toward the cap',
-    narrowTarget <= 12 && wideTarget > narrowTarget && wideTarget <= 30,
-    `${narrowTarget} asked for on the narrow road, ${wideTarget} on the wide one (cap 30)`,
+    'a two-lane stretch caps the stream at twelve',
+    Math.abs(narrowCap - 12) < 0.01,
+    `cap ${narrowCap.toFixed(2)}`,
   );
-  wideTraffic.dispose();
+  check(
+    'a four-lane stretch caps it at twenty-four',
+    Math.abs(wideCap - 24) < 0.01,
+    `cap ${wideCap.toFixed(2)}`,
+  );
+  check(
+    'the stream rotates between a fifth of the cap and all of it',
+    narrowTarget >= 12 * 0.2 && narrowTarget <= 12 && wideTarget >= 24 * 0.2 && wideTarget <= 24,
+    `${narrowTarget} of ${narrowCap.toFixed(0)} narrow, ${wideTarget} of ${wideCap.toFixed(0)} wide`,
+  );
+  narrowTraffic.dispose();
+  check(
+    'disposing the stream leaves nothing live or pending',
+    narrowTraffic.status.count === 0 && !narrowTraffic.status.pending,
+    JSON.stringify(narrowTraffic.status),
+  );
+}
+
+// THE DENSITY ACTUALLY ROTATES, AND THE ROTATION IS THE POINT.
+//
+// A single draw held for 36-72 s means the range has to be wide enough to reach both
+// "you own the road" and "you are in company" within a drive, which is what the old
+// two-thirds floor prevented. Sampled over many re-rolls rather than one, because one
+// draw proves nothing about a distribution.
+{
+  const rotating = new RoadTraffic(
+    physics,
+    new GameWorld(newWorldState(SEED)),
+    new THREE.Scene(),
+    new WorldOrigin(),
+    road,
+    new HazardIndex(),
+    loadCarModel,
+    () => true,
+  );
+  let lowest = Infinity;
+  let highest = 0;
+  // 900 s of driving, sampled per step: a re-roll is 36-72 s apart, so a short window
+  // proves nothing about a distribution — 200 s caught four consecutive draws inside a
+  // third of the range and read as a stuck rotation when the rotation was working.
+  for (let step = 0; step < Math.ceil(900 / FIXED_DT); step++) {
+    rotating.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+    const target = rotating.status.target;
+    if (target > 0) {
+      lowest = Math.min(lowest, target);
+      highest = Math.max(highest, target);
+    }
+  }
+  const cap = rotating.status.cap;
+  check(
+    'the density rotates over a long drive',
+    lowest <= cap * 0.6 && highest >= cap * 0.8,
+    `${lowest}-${highest} against a cap of ${cap.toFixed(0)}`,
+  );
+  rotating.dispose();
 }
 
 // A PROP IN THE ROAD MUST NOT STOP THE WORLD.
@@ -301,7 +353,6 @@ check(
     loadCarModel,
     () => true,
   );
-  blocked.setTargetCount(12);
   blocked.setDaylightFactor(1);
   const stopped = new Map<string, number>();
   let worstStop = 0;
@@ -393,7 +444,6 @@ check(
     loadCarModel,
     () => true,
   );
-  ending.setTargetCount(12);
   ending.setDaylightFactor(1);
   const reachedEnd = new Set<string>();
   const cameBack = new Set<string>();

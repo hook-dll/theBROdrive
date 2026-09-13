@@ -18,10 +18,40 @@ import { TurnaroundRoad, TURNAROUND_ENTRY_S } from './turnaround';
 import { PHYSICS_REACH_M } from './chunks';
 
 /**
- * Thirty physical cars is the upper setting: the live stream deliberately fluctuates
- * below this cap so a long drive does not become a perfectly repeated convoy.
+ * THE STREAM'S SIZE COMES FROM THE CARRIAGEWAY, not from a setting.
+ *
+ * A two-lane road — one lane each way, which is what the road is for its first
+ * kilometre and on every un-widened stretch after it — carries `NARROW_TRAFFIC` cars.
+ * A four-lane road, two lanes each way, carries `WIDE_TRAFFIC`. In between the cap
+ * follows the widening, so a car is never added or dropped by a profile step, and the
+ * stream is sampled across the spawn band rather than under one point (see
+ * `roadTargetCount`).
+ *
+ * It used to be a player setting with a menu slider, defaulting to OFF, that only ever
+ * RAISED: a narrow road ran at the setting and a widened one ran up to a fixed ceiling of
+ * thirty. That asked the player a question about a number they had no way to judge — the
+ * honest answer is a property of the road, and the road already knows it.
  */
-const MAX_TRAFFIC = 30;
+const NARROW_TRAFFIC = 12;
+const WIDE_TRAFFIC = 24;
+/**
+ * The smallest fraction of the cap the stream will hold, so a long drive keeps
+ * changing. The live count is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled
+ * every 36-72 s, and the retained FRACTION is held between re-rolls — which is what lets
+ * a widening fill smoothly instead of stepping at a profile boundary.
+ *
+ * A fifth, not the two thirds this used to be: with the cap now derived from the road,
+ * a range that narrow left the stream within a couple of cars of the same number for
+ * hours, so the road read as a conveyor. It is a rotation between "you own the road" and
+ * "you are in company", and both ends have to be reachable to be worth having.
+ */
+const DENSITY_FLOOR = 0.2;
+/**
+ * Above this the stream packs tighter (see `SPAWN_ROAD_GAP_M`). It is the narrow road's
+ * whole capacity, so the rule reads: a stream busier than a full two-lane road's worth
+ * is a busy road and queues up. Only a widened carriageway can reach it.
+ */
+const DENSE_TRAFFIC_THRESHOLD = NARROW_TRAFFIC;
 const SPAWN_MIN_M = 140;
 /**
  * THE BAND ENDS WHERE THE GROUND DOES.
@@ -208,20 +238,24 @@ interface PendingSpawn {
 }
 
 export interface TrafficStatus {
-  readonly enabled: boolean;
   /**
    * Live cars in front of the player — the part of the quota he can actually see.
    * The stream is spawned ahead and collected behind, so this is the number the
-   * traffic setting is judged by, not `count`.
+   * stream is judged by, not `count`.
    */
   readonly ahead: number;
   readonly count: number;
   /**
-   * Cars the stream is currently trying to hold. It is the user's setting on the
-   * ordinary road and rises toward the configured maximum where the carriageway
-   * opens out, so telemetry can tell "fewer cars" from "a narrower road".
+   * Cars the stream is currently trying to hold: one rotation of the density, between
+   * `DENSITY_FLOOR` of `cap` and `cap` itself.
    */
   readonly target: number;
+  /**
+   * The widest stream this stretch of road will hold, from its carriageway —
+   * `NARROW_TRAFFIC` on two lanes and `WIDE_TRAFFIC` on four. Telemetry needs it to
+   * tell "a quiet stream" from "a narrow road".
+   */
+  readonly cap: number;
   readonly sameDirection: number;
   readonly oncoming: number;
   readonly pending: boolean;
@@ -266,9 +300,12 @@ export class RoadTraffic {
   /** Reused coordinator scratch; allocating and sorting two fresh arrays at 60 Hz caused GC churn. */
   private readonly forwardQueue: TrafficCar[] = [];
   private readonly reverseQueue: TrafficCar[] = [];
-  /** User setting: the maximum number of live ambient cars. */
-  private targetCount = 0;
-  /** Current natural-looking density, always at or below targetCount. */
+  /**
+   * The widest stream this stretch of road will hold, from `widenessAt`. Recomputed
+   * every step because the widening changes under the stream as it drives.
+   */
+  private roadCap = NARROW_TRAFFIC;
+  /** Current natural-looking density, at or below `roadCap`. */
   private desiredCount = 0;
   /**
    * The present jitter draw as a fraction of the cap. Holding it between re-rolls
@@ -321,10 +358,9 @@ export class RoadTraffic {
     this.reverseHazards = new ReversedHazardIndex(hazards, road.length);
     this.random = mulberry32(sourceWorld.seed ^ 0x74726166);
     this.syncSettings();
-  }
-
-  get enabled(): boolean {
-    return this.targetCount > 0;
+    this.refreshRoadCap();
+    this.redrawDesiredCount();
+    this.densityTimer = this.drawDensityInterval();
   }
 
   get status(): TrafficStatus {
@@ -363,10 +399,10 @@ export class RoadTraffic {
       );
     }
     return {
-      enabled: this.targetCount > 0,
       count: this.carList.length,
       ahead,
       target: this.desiredCount,
+      cap: this.roadCap,
       sameDirection,
       oncoming: this.carList.length - sameDirection,
       pending: this.pending !== null,
@@ -384,26 +420,6 @@ export class RoadTraffic {
       highBeams,
       lowBeams,
     };
-  }
-
-  /** Sets the narrow-road upper bound; widening raises it toward `MAX_TRAFFIC`. */
-  setTargetCount(count: number): void {
-    const next = Math.min(MAX_TRAFFIC, Math.max(0, Math.round(count / 2) * 2));
-    // 120 is above MAX_TRAFFIC on purpose: overtaking is on at every density while
-    // the dense stream is being judged in play. Back to 12 restores the old gate.
-    for (const car of this.carList) car.autopilot.setPassingEnabled(next <= 120);
-    if (this.targetCount === next) return;
-    this.targetCount = next;
-    this.redrawDesiredCount();
-    this.densityTimer = next > 0 ? this.drawDensityInterval() : 0;
-    this.generation++;
-    this.pending = null;
-    this.spawnCooldown = next > 0 ? 0 : SPAWN_INTERVAL_S;
-    if (next === 0) {
-      this.clear();
-      return;
-    }
-    this.trimTo(Math.ceil(this.roadTargetCount()), true);
   }
 
   setDaylightFactor(daylightFactor: number): void {
@@ -551,7 +567,7 @@ export class RoadTraffic {
           (other.autopilot.activity === 'pass' || this.isAcrossCrown(other)) &&
           Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M,
       );
-      car.autopilot.setPassingEnabled(!blocked && this.targetCount <= 120);
+      car.autopilot.setPassingEnabled(!blocked);
     }
   }
 
@@ -655,8 +671,12 @@ export class RoadTraffic {
       this.pedestrianPrimed = true;
     }
     this.syncSettings();
-    if (this.targetCount === 0 && this.carList.length === 0) return;
-    this.trimTo(Math.ceil(this.roadTargetCount()), true);
+    // The widening may have changed under the stream since the last step, so the cap is
+    // re-derived here before anything is measured against it. `visible` is set on the
+    // trim below because a cap that just DROPPED — a carriageway closing — has to be
+    // honoured, and the ordinary soft target still waits for a car to fall behind.
+    this.refreshRoadCap();
+    this.trimTo(Math.ceil(this.roadCap), true);
     this.clockSync -= dt;
     if (this.clockSync <= 0) {
       this.trafficWorld.apply({
@@ -670,7 +690,7 @@ export class RoadTraffic {
       this.redrawDesiredCount();
       this.densityTimer = this.drawDensityInterval();
     } else {
-      this.desiredCount = this.scaleDesiredCount(this.roadTargetCount());
+      this.desiredCount = this.scaleDesiredCount(this.roadCap);
     }
     this.trimTo(this.desiredCount, false);
 
@@ -757,7 +777,7 @@ export class RoadTraffic {
     ) {
       this.queueSpawn();
       this.spawnCooldown =
-        this.desiredCount > 12 ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
+        this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
     }
   }
 
@@ -808,7 +828,6 @@ export class RoadTraffic {
   }
 
   dispose(): void {
-    this.targetCount = 0;
     this.generation++;
     this.pending = null;
     this.clear();
@@ -820,7 +839,6 @@ export class RoadTraffic {
       return;
     }
     this.settingsRef = source;
-    this.setTargetCount(source.trafficCount);
     this.trafficWorld.apply({
       t: 'settings',
       settings: {
@@ -956,7 +974,7 @@ export class RoadTraffic {
     // settle: for the first `DROP_SETTLE_S` of its life it stood there dark, which the
     // bench read - correctly - as "18 of 19 cars lit".
     vehicle.setHeadlights('low');
-    autopilot.setPassingEnabled(this.targetCount <= 120);
+    autopilot.setPassingEnabled(true);
     autopilot.setFollowingHeadway(request.headwayS);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
@@ -1078,7 +1096,7 @@ export class RoadTraffic {
 
   private roadGapClear(s: number, direction: TrafficDirection, lane: number): boolean {
     const sameDirectionGap =
-      this.desiredCount > 12 ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
+      this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
     for (const car of this.carList) {
       const gap = Math.abs(car.forwardS - s);
       if (car.direction === direction && car.lane === lane) {
@@ -1165,9 +1183,12 @@ export class RoadTraffic {
    * The player sees the live spawn band, not a point sample under the car. Averaging
    * five deterministic profile samples prevents a cell edge from pumping the stream
    * while still responding within the band traffic is about to occupy.
+   *
+   * The answer is the band's own carriageway size: a two-lane stretch holds
+   * `NARROW_TRAFFIC` and a four-lane one `WIDE_TRAFFIC`, with the taper between them
+   * interpolated so the cap follows the asphalt the stream is about to occupy.
    */
-  private roadTargetCount(): number {
-    if (this.targetCount === 0) return 0;
+  private refreshRoadCap(): void {
     let wideness = 0;
     for (let i = 0; i < DENSITY_PROFILE_SAMPLES; i++) {
       const t = i / (DENSITY_PROFILE_SAMPLES - 1);
@@ -1178,29 +1199,35 @@ export class RoadTraffic {
       wideness += widenessAt(this.sourceWorld.seed, s);
     }
     wideness /= DENSITY_PROFILE_SAMPLES;
-    return this.targetCount + (MAX_TRAFFIC - this.targetCount) * wideness;
+    this.roadCap = NARROW_TRAFFIC + (WIDE_TRAFFIC - NARROW_TRAFFIC) * wideness;
   }
 
   /**
-   * Re-roll at the established cadence, but against today's width-adjusted target.
+   * Re-roll at the established cadence, but against today's width-adjusted cap.
    * The retained fraction then expands or contracts continuously with the profile.
    */
   private redrawDesiredCount(): void {
-    const cap = this.roadTargetCount();
-    this.desiredCount = this.drawDesiredCount(Math.round(cap));
+    const cap = Math.round(this.roadCap);
+    this.desiredCount = this.drawDesiredCount(cap);
     this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
   }
 
   private scaleDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    return Math.min(MAX_TRAFFIC, Math.max(1, Math.round(cap * this.densityFraction)));
+    return Math.min(WIDE_TRAFFIC, Math.max(1, Math.round(cap * this.densityFraction)));
   }
 
-
+  /**
+   * One rotation of the density: a uniform draw in `[DENSITY_FLOOR * cap, cap]`.
+   *
+   * The floor moves WITH the cap rather than being a fixed number of cars, so a
+   * widening that doubles the road doubles the quiet end of the range too, and the
+   * stream never has to choose between being busier and being legible.
+   */
   private drawDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
     if (cap === 1) return 1;
-    const floor = Math.max(1, Math.ceil(cap * 0.65));
+    const floor = Math.max(1, Math.ceil(cap * DENSITY_FLOOR));
     return floor + Math.floor(this.random() * (cap - floor + 1));
   }
 

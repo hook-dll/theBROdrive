@@ -21,10 +21,6 @@ export interface GameplayConfig {
   readonly defaultMouseSensitivity: number;
   readonly mouseSensitivityMin: number;
   readonly mouseSensitivityMax: number;
-  readonly trafficCountMin: number;
-  readonly trafficCountMax: number;
-  readonly trafficCountStep: number;
-  readonly defaultTrafficCount: number;
 }
 
 export interface AudioConfig {
@@ -83,10 +79,6 @@ const GAMEPLAY_FIELDS: Fields<GameplayConfig> = {
   defaultMouseSensitivity: true,
   mouseSensitivityMin: true,
   mouseSensitivityMax: true,
-  trafficCountMin: true,
-  trafficCountMax: true,
-  trafficCountStep: true,
-  defaultTrafficCount: true,
 };
 
 const AUDIO_FIELDS: Fields<AudioConfig> = {

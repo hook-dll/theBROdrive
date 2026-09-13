@@ -604,6 +604,32 @@ const THROTTLE_FLOOR = 0.2;
 /** Below this target the car is waiting, and waiting is held on this much brake. */
 const HOLD_TARGET_MPS = 1;
 const HOLD_BRAKE = 0.6;
+/**
+ * MOST OF THE PEDAL THAT BRAKING FOR SOMETHING IN THE WAY MAY USE.
+ *
+ * The mode's own `brakeCeiling` is a personality — sleeper 0.55, hurried 0.8, frantic
+ * 1.0 — and it was also being spent on obstacles, so a hurried driver answered a rock in
+ * its lane by standing on the brake. On a sealed surface that is survivable; on the
+ * loose half of this road it is not, because a locked-front deceleration is exactly what
+ * gives up the steering. Frantic was already measured doing it: it arrived at a bend
+ * too fast, stood on the brake inside it, lost the front on the loose surface and ran
+ * 1.2 m past the asphalt before recovering (see `LATERAL_GRIP_RESERVE`).
+ *
+ * A HALF IS NOT A HALF OF THE DECELERATION, and that is why it still stops. The planner
+ * brakes on `brakeAccel` — 4.0 m/s² for a sleeper — which is already well under what the
+ * tyres can give on asphalt, so the margin the plan leaves is the pedals it is not
+ * using. Half pedal puts roughly 4-4.5 m/s² on the road, which is the figure the plan
+ * was built on; the car still stops where it planned to, it simply stops there having
+ * pressed half as hard for twice as long.
+ *
+ * What it deliberately does NOT cap: the road-departure and edge-stability brakes below,
+ * which exist to prevent exactly the "flew off the road" outcome and are raised with
+ * `Math.max` after this. Nor the `HOLD_BRAKE` that keeps a waiting car from rolling back
+ * down a grade, which is a standstill, not a manoeuvre.
+ */
+const OBSTACLE_BRAKE_MAX = 0.5;
+/** Speed difference, m/s, below which two limits are the same limit. */
+const BRAKE_LIMIT_EPSILON = 0.01;
 /** Generic stalls need enough evidence not to mistake a slow launch for a wedge. */
 const STUCK_AFTER_S = 3;
 /** A bumper already against a known road prop needs no such long confirmation. */
@@ -1127,6 +1153,31 @@ export class Autopilot {
       0.8,
       Math.abs(currentRoad.grade * GRAVITY) / Math.max(currentPhysicalBrake, 1),
     );
+    /**
+     * THE DECELERATION THE OBSTACLE BRAKE CAN ACTUALLY DELIVER.
+     *
+     * The pedals for something in the way are capped at `OBSTACLE_BRAKE_MAX`, so the plan
+     * has to be built on what that cap can produce — otherwise it promises a stop the
+     * car is not allowed to make, arrives at the obstacle hot, and improvises a line,
+     * which is a weave.
+     *
+     * Measured, and this is why the two have to move together: capping the pedal alone
+     * left a sleeper unchanged (its 4.0 m/s² plan is what half pedal gives anyway) and
+     * took a frantic driver from 16.9 to 108.4 steering reversals per kilometre on a
+     * littered road — one direction change every 9 m, on a car whose 7.2 m/s² plan half
+     * pedal cannot honour. With the plan priced at the capped figure it is back under
+     * the bar.
+     *
+     * The road's own limits are deliberately NOT priced with this: a bend is braked for
+     * at the mode's full ceiling, which is a different pedal from the same foot.
+     */
+    const obstacleBrakeAccel = Math.max(
+      MIN_PLANNED_BRAKE_MPS2,
+      Math.min(
+        currentBrakeAccel,
+        currentPhysicalBrake * OBSTACLE_BRAKE_MAX + currentRoad.grade * GRAVITY,
+      ),
+    );
     const currentLateralAccel = Math.min(
       config.lateralAccel,
       vehicle.estimatedLateralAccel(currentSurface, speed) *
@@ -1491,7 +1542,7 @@ export class Autopilot {
       crossingRearClear:
         this.laneProbe(vehicle, oncomingLine, ONCOMING_REAR_GAP_M, originX, originZ, -1) >=
         ONCOMING_REAR_GAP_M,
-      stopRoom: MUST_STOP_GAP_M + (speed * speed) / (2 * currentBrakeAccel),
+      stopRoom: MUST_STOP_GAP_M + (speed * speed) / (2 * obstacleBrakeAccel),
       obstacles,
     });
     this.corridorFeasible = plan.feasible || offRoad || recovering;
@@ -1713,6 +1764,10 @@ export class Autopilot {
     // car that had stopped could not move because the rule that stopped it was
     // reading the lane it was trying to leave.
     //
+    // The limit the ROAD asks for, before anything standing in it is priced. Kept so
+    // the pedal section can tell braking for an obstacle from braking for a bend: they
+    // are capped differently, and only the former was locking fronts on loose surfaces.
+    const roadLimitSpeed = targetSpeed;
     // One question now: what is in the corridor this car is actually going to
     // occupy? A stone the corridor passes is scenery. A car in it is followed. A
     // stopped thing in it is braked to a crawl and then gone round — and once the
@@ -1726,7 +1781,7 @@ export class Autopilot {
             : Math.max(FOLLOW_STANDOFF_M, config.brakeLead)),
       );
       const blockSpeed = Math.max(0, this.corridorBlockSpeed);
-      const braking = Math.sqrt(blockSpeed * blockSpeed + 2 * currentBrakeAccel * room);
+      const braking = Math.sqrt(blockSpeed * blockSpeed + 2 * obstacleBrakeAccel * room);
       // Something STILL in the corridor is approached at walking pace, not stopped
       // for: the car is going to ease past it, and a littered road is otherwise a
       // continuous emergency stop — measured at 0.9 m/s against a 30 m/s cruise,
@@ -1782,7 +1837,7 @@ export class Autopilot {
         targetSpeed,
         Math.sqrt(
           laneSpeed * laneSpeed +
-            2 * currentBrakeAccel * Math.max(0, this.corridorLaneBlockDistance - FOLLOW_STANDOFF_M),
+            2 * obstacleBrakeAccel * Math.max(0, this.corridorLaneBlockDistance - FOLLOW_STANDOFF_M),
         ),
         // Never below the leader's own pace: dropping back is not how a pass starts.
         Math.max(
@@ -1799,11 +1854,14 @@ export class Autopilot {
         Math.sqrt(
           AVOIDANCE_CRAWL_MPS * AVOIDANCE_CRAWL_MPS +
             2 *
-              currentBrakeAccel *
+              obstacleBrakeAccel *
               Math.max(0, this.corridorSqueezeDistance - config.brakeLead),
         ),
       );
     }
+    // Everything priced as being in the way has now been applied. Taken BEFORE the
+    // departure limits below, which are a different problem with a different pedal.
+    const obstacleLimitSpeed = targetSpeed;
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (edgeStability) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     // What the driver WANTED before the bumper veto. A nose scan against scenery is
@@ -1944,8 +2002,18 @@ export class Autopilot {
       speedError > 0
         ? clamp(speedError / (offRoad ? OFFROAD_THROTTLE_BAND : config.throttleBand), floor, 1)
         : 0;
-    out.brake =
-      speedError < 0 ? clamp(-speedError / config.brakeBand, 0, config.brakeCeiling) : 0;
+    // BRAKING FOR SOMETHING IN THE WAY IS NOT DONE AT FULL PEDAL. The mode's ceiling is
+    // a personality and stays the cap for braking at the road itself — a bend, a surface,
+    // a limit — but an obstacle gets the mode's ceiling reduced to OBSTACLE_BRAKE_MAX.
+    //
+    // The mode's own ceiling is NOT lowered: `edgeStability` and the off-road brake below
+    // deliberately keep it, because giving up the front on a loose verge is the outcome
+    // this cap exists to prevent and those two are the brakes that prevent it.
+    const brakeCeiling =
+      obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON
+        ? Math.min(config.brakeCeiling, OBSTACLE_BRAKE_MAX)
+        : config.brakeCeiling;
+    out.brake = speedError < 0 ? clamp(-speedError / config.brakeBand, 0, brakeCeiling) : 0;
     // WAITING IS DONE ON THE BRAKE.
     //
     // A target under walking pace and a car already at it leaves the proportional
