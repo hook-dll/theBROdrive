@@ -132,6 +132,13 @@
   aimed, a switch behind the player, a switch out of reach, and a loose part that wins the
   ranking against a switch further away; E works the switch in the first case and does
   nothing in the other three.
+  AND THE AIM IS IN THE SAME FRAME AS THE REGISTRY. The eye arrives relative to the floating
+  origin while the registry is absolute, which the trunk and courier loops already answer by
+  subtracting the origin — the switch pick did not, so switches were reachable only while the
+  origin sat at zero, which is the first few metres of a drive. Measured: a plate two metres
+  away stops being aimable the moment the world rebases. The aim ray's own first hit is also
+  used as an occlusion bound now, so a switch cannot be worked or even offered through the
+  wall the player is standing against.
   THE HOMESTEAD'S OWN SWITCHES ARE REGISTERED. It places the same catalogue building as the
   road does but through its own provider, and it was registering nothing — so the first
   building a player ever stands in was the one whose lights could not be worked. Both

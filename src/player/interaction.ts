@@ -862,13 +862,27 @@ export class Interaction {
     dirX: number,
     dirY: number,
     dirZ: number,
+    /**
+     * Distance to the first thing the aim ray actually hit, metres, or `Infinity`.
+     *
+     * A switch is a fitting with no collider of its own — the wall behind it is what the
+     * ray hits — so this is what stops a player working a switch through the wall they are
+     * standing against.
+     */
+    obstacle: number,
   ): void {
     this.pickedSwitch = null;
     this.pickedSwitchDistance = Infinity;
     for (const entry of this.switches.values()) {
-      const dx = eyeX - entry.x;
+      // THE EYE IS IN THE FLOATING FRAME AND THE REGISTRY IS NOT. Rays go into Rapier
+      // relative to the origin while everything the world saves — trunks, couriers,
+      // switches — is absolute, which is why the trunk and courier loops above subtract
+      // `this.origin` from their entries. The same conversion belongs here; without it a
+      // switch is reachable only while the origin happens to be at zero, which is the
+      // first few metres of a drive.
+      const dx = eyeX + this.origin.x - entry.x;
       const dy = eyeY - entry.y;
-      const dz = eyeZ - entry.z;
+      const dz = eyeZ + this.origin.z - entry.z;
       // Cheap reject before the box test: most of the world's switches are not near.
       const reach = SWITCH_RANGE + SWITCH_AIM_MARGIN;
       if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
@@ -881,6 +895,7 @@ export class Interaction {
         entry.halfExtents[2] + SWITCH_AIM_MARGIN,
       ]);
       if (distance === null || distance > SWITCH_RANGE) continue;
+      if (distance >= obstacle) continue;
       if (distance < this.pickedSwitchDistance) {
         this.pickedSwitchDistance = distance;
         this.pickedSwitch = entry.id;
@@ -1010,7 +1025,15 @@ export class Interaction {
 
     // The switch is picked into the same nearest-target arbitration as everything else,
     // so a switch behind a car cannot be worked through it.
-    this.pickSwitch(eyeX, eyeY, eyeZ, dx, dy, dz);
+    this.pickSwitch(
+      eyeX,
+      eyeY,
+      eyeZ,
+      dx,
+      dy,
+      dz,
+      hit && hit.toi >= MIN_HIT_TOI ? hit.toi : Infinity,
+    );
     if (this.pickedSwitch !== null) {
       keep(this.pickedSwitchDistance, { kind: 'light-switch', id: this.pickedSwitch });
     }

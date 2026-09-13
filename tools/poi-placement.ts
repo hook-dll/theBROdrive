@@ -989,7 +989,11 @@ const MAX_PAD_DEPTH_M = 1.2;
 
   const makeInteraction = (
     field: PoiSwitchField,
-    options: { hit?: unknown; loose?: Record<string, unknown> } = {},
+    options: {
+      hit?: unknown;
+      loose?: Record<string, unknown>;
+      origin?: { x: number; z: number };
+    } = {},
   ): Interaction =>
     new Interaction(
       { raycast: () => options.hit ?? null } as never,
@@ -1003,7 +1007,7 @@ const MAX_PAD_DEPTH_M = 1.2;
       () => null,
       (() => {}) as never,
       (() => {}) as never,
-      { x: 0, z: 0 } as never,
+      (options.origin ?? { x: 0, z: 0 }) as never,
     );
 
   const field = new PoiSwitchField();
@@ -1075,6 +1079,41 @@ const MAX_PAD_DEPTH_M = 1.2;
     contested.flipAimedSwitch() === null,
     'E worked a switch that did not win the ranking, so the key did something the prompt ' +
       'never offered',
+  );
+
+  // THE FLOATING FRAME, on the reading side this time. The eye arrives relative to the
+  // origin and the registry is absolute, so a switch is reachable only while the origin is
+  // at zero unless the conversion is done here too — which means the first few metres of a
+  // drive work and nothing after them does.
+  const ORIGIN = { x: 26_000, z: -41_000 };
+  // The eye's ABSOLUTE position is the same as in the first case — the plate two metres
+  // ahead — but expressed relative to an origin 48 km away, which is what `fixedUpdate`
+  // receives once the world has rebased.
+  const rebased = makeInteraction(field, { origin: ORIGIN });
+  rebased.fixedUpdate(1 / 60, frame(), 0 - ORIGIN.x, 1.2, 0 - ORIGIN.z, 0, 0, 1, 0);
+  check(
+    rebased.aimedSwitch()?.id === 'probe-plate',
+    'a switch two metres away could not be aimed once the world had rebased 48 km — the ' +
+      'aim is compared against the registry without converting the eye out of the ' +
+      'floating frame, so switches work only near the world origin',
+  );
+  check(
+    rebased.flipAimedSwitch() === false,
+    'E did not work the switch after the world rebased',
+  );
+
+  // A WALL BETWEEN THE EYE AND THE PLATE. The switch has no collider of its own, so the ray
+  // hits the wall — and a hit nearer than the plate means the plate is behind it. Without
+  // this, a player standing against a wall can work the light on the other side of it.
+  const throughWall = makeInteraction(field, { hit: { colliderHandle: 9, toi: 1.0 } });
+  const blocked = look(throughWall, 0, 1);
+  check(
+    throughWall.aimedSwitch() === null,
+    `a switch 2 m away is aimed through a wall 1 m away (prompt ${JSON.stringify(blocked.prompt)})`,
+  );
+  check(
+    throughWall.flipAimedSwitch() === null,
+    'E worked a switch through a wall',
   );
 
   // Out of reach: a switch three metres behind a wall still must not be offerable.
