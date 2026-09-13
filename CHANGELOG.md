@@ -4,6 +4,27 @@
 
 ### Added
 
+- THE FRAME RATE IS THE PLAYER'S ON EVERY DEVICE: 30, 60, 75, 120, 144, or no cap. It
+  was a phone-only choice of 30 or 60, and that was the wrong shape twice over.
+  It is the one lever that works everywhere, for opposite reasons. On a phone it is a
+  THERMAL control and has to be the player's, because no browser reports thermal state,
+  battery temperature or clock speed — the device cannot say it is hot, only the person
+  holding it can. On a desktop it is noise and power, which the game cannot see either. And
+  it is the largest lever there is: half the frames is half the render work and half the
+  presenting, while the simulation keeps its fixed 60 Hz so the car handles identically.
+  The rates offered are not taste. 30 and 60 are the thermal steps; 75, 120 and 144 exist
+  because panels have them and a cap that does not match the panel wastes what is being
+  paid for; no cap is offered because a desktop whose GPU is already the constraint gains
+  nothing from one — measured on a 4090 at 144 Hz, the GPU set the frame time at 6.94 ms
+  against a 6.81 ms interval, so a cap there would only cost smoothness. And there is a
+  HARD FLOOR under the ladder: the loop simulates whole fixed steps, at most
+  MAX_STEPS_PER_FRAME of them per frame, so a rate below `simulationHz / MAX_STEPS_PER_FRAME`
+  would make the simulation fall behind the clock rather than run slow. `tools/graphics-tiers.ts`
+  holds every offered rate to that, and adding a 10 FPS option makes it say why not.
+  A phone still starts at 30; a desktop starts uncapped. The old phone-only
+  `mobileFrameRate` is read once when sanitizing, so a save made before this keeps the cap
+  its player chose instead of silently becoming uncapped and hot.
+
 - A FRAME COST REPORT, readable on the device whose heat is in question. The pause menu
   grows a development-only `Frame Report` screen showing presented frame rate, GPU
   milliseconds where the device can measure them, busy CPU milliseconds per SECOND, and
@@ -363,6 +384,21 @@
 - `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
 
 ### Changed
+
+- THE FRAME BUDGET NO LONGER OVERCLAIMS. It said its remainder was "the CPU blocked, most
+  often on the GPU", and the first machine able to check it disproved that: measured on a
+  4090 at 144 Hz, the remainder was 1.63 ms while the GPU was busy 6.94 ms. Submission is
+  pipelined, so the CPU is already assembling the next frame while this one is drawn, and
+  the remainder bounds the CPU and nothing else. Reading it as "the GPU is the constraint"
+  was wrong, and the line says `not CPU` now. Where a GPU timer exists the report gives the
+  verdict outright, comparing the measured GPU time against the interval — `GPU 6.94 ms
+  against a 6.81 ms interval: the GPU sets the frame time`; where it does not, it says
+  plainly that the budget cannot answer the question.
+- `simulation ticks per frame` was a CONSTANT. It was computed as `simulationHz /
+  simulationHz`, so it read `1.0` at every frame rate and told the reader nothing. It is
+  measured now, in the profiler, where the real presented rate is known.
+- The "halving the frame rate would cost" line is printed only where a cap exists; on an
+  uncapped desktop it was advice about a setting the player had not made.
 
 - THE FRAME REPORT WAS UNREADABLE ON THE DEVICE IT WAS BUILT FOR. `white-space: pre`
   with `overflow-x: auto` meant a long line ran past the panel and scrolled silently away

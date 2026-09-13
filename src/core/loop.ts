@@ -9,8 +9,15 @@ import { FIXED_DT } from './physics';
  * multiplayer is impossible without a canonical tick number.
  */
 
-/** Never simulate more than this many steps in one frame. */
-const MAX_STEPS_PER_FRAME = 5;
+/**
+ * Never simulate more than this many steps in one frame.
+ *
+ * Exported because it sets a FLOOR on any presentation cap: presenting at `f` frames a
+ * second needs `simulationHz / f` whole steps per frame, and more than this many cannot be
+ * caught up in one frame, so the simulation would fall behind the clock rather than run
+ * slow. See the frame-rate bench, which holds the offered rates to it.
+ */
+export const MAX_STEPS_PER_FRAME = 5;
 
 export interface LoopCallbacks {
   /** Advance simulation by exactly `FIXED_DT`. `tick` is monotonic from 0. */

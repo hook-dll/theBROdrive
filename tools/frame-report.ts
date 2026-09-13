@@ -100,7 +100,7 @@ const expectedBusy = (perFrameSim + perFrameRender + SLACK) * fps;
 // be exactly the difference and nothing else.
 {
   const budget =
-    /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms waiting/
+    /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms not CPU/
       .exec(report);
   check('the frame budget is reported', budget !== null, budget?.[0] ?? 'missing from the report');
   const interval = Number(budget?.[1]);
@@ -119,7 +119,7 @@ const expectedBusy = (perFrameSim + perFrameRender + SLACK) * fps;
   check(
     'a frame the CPU fills has nothing waiting',
     waiting < 0.01,
-    `${waiting} ms waiting for a frame that is all work`,
+    `${waiting} ms not CPU for a frame that is all work`,
   );
 }
 
@@ -242,9 +242,9 @@ check(
       // Idle: after the frame is closed, so no section and no wall time absorbs it.
       clock.advance(idleMs);
     }
-    const text = fixed.report(60);
+    const text = fixed.report({ simulationHz: 60, presentationCapped: true });
     const budget =
-      /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms waiting/
+      /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms not CPU/
         .exec(text);
     // TOLERANCE, and where it comes from. A window of N frames spans N-1 intervals, and
     // the last frame is closed at the END of its work — its trailing idle has not happened
@@ -258,7 +258,7 @@ check(
       `at ${presentedFps} FPS the waiting is the rest of the interval`,
       Math.abs(Number(budget?.[1]) - 1000 / presentedFps) < boundaryMs + 0.01
         && Math.abs(Number(budget?.[3]) - idleMs) < boundaryMs + 0.01,
-      `${budget?.[3]} ms waiting against ${idleMs.toFixed(2)} ms of imposed idle, ` +
+      `${budget?.[3]} ms not CPU against ${idleMs.toFixed(2)} ms of imposed idle, ` +
         `within ${boundaryMs.toFixed(2)} ms of window boundary`,
     );
     return {
@@ -317,6 +317,76 @@ check(
     'an idle window still reports that it is idle',
     idle.includes('0 ms of CPU per second'),
     idle.split('\n')[0] ?? '',
+  );
+}
+
+// --- the verdict, and the lines that change with the settings ----------------
+//
+// These are the lines a reader acts on, so what they say has to follow the inputs rather
+// than the other way round. `gpuMs` and `presentationCapped` are passed in precisely so
+// that can be checked without a GPU.
+{
+  const fed = (): FrameProfiler => {
+    const target = new FrameProfiler(clock.now);
+    for (let i = 0; i < 60; i++) {
+      target.begin('sim');
+      clock.advance(2);
+      target.end('sim');
+      target.beginFrame();
+      target.begin('draw');
+      clock.advance(4);
+      target.end('draw');
+      target.endFrame();
+    }
+    return target;
+  };
+
+  const fitsText = fed().report({ simulationHz: 60, gpuMs: 1 });
+  check(
+    'a GPU smaller than the interval is reported as having spare',
+    /the GPU has .* spare — the limit is not fill/.test(fitsText),
+    fitsText.split('\n').find((line) => line.includes('against a')) ?? 'verdict missing',
+  );
+
+  const boundText = fed().report({ simulationHz: 60, gpuMs: 100_000 });
+  check(
+    'a GPU larger than the interval is reported as the constraint',
+    /the GPU sets the frame time, CPU has .* spare/.test(boundText),
+    boundText.split('\n').find((line) => line.includes('against a')) ?? 'verdict missing',
+  );
+
+  const noTimerText = fed().report({ simulationHz: 60, gpuMs: null });
+  check(
+    'without a GPU timer the report refuses to claim the GPU is the constraint',
+    /does NOT say whether the GPU is the constraint/.test(noTimerText),
+    'the reader is told what the budget can and cannot answer',
+  );
+
+  // The advice about a lower cap belongs only where there IS a cap. On a desktop
+  // presenting uncapped it was noise that read like a suggestion.
+  check(
+    'a capped presentation is told what halving it would cost',
+    /halving the frame rate would cost/.test(
+      fed().report({ simulationHz: 60, presentationCapped: true }),
+    ),
+    'the lever is quantified',
+  );
+  check(
+    'an uncapped presentation is given no advice about a cap it does not have',
+    !/halving the frame rate/.test(
+      fed().report({ simulationHz: 60, presentationCapped: false }),
+    ),
+    'no advice where there is no cap to change',
+  );
+
+  // And ticks per frame must be a READING. It was a constant on the desktop path,
+  // computed as simulationHz / simulationHz, which said "1.0" at every real frame rate.
+  const ticks = /simulation ticks per presented frame ([\d.]+)/.exec(fitsText)?.[1];
+  const measuredFps = Number(/([\d.]+) fps presented/.exec(fitsText)?.[1]);
+  check(
+    'simulation ticks per frame is derived from the measured rate, not written down',
+    ticks !== undefined && Math.abs(Number(ticks) - 60 / measuredFps) < 0.05,
+    `${ticks} ticks at ${measuredFps} fps against a 60 Hz simulation`,
   );
 }
 

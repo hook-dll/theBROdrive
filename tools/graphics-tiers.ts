@@ -19,15 +19,18 @@
  */
 
 import {
-  DEFAULT_MOBILE_FRAME_RATE,
+  DEFAULT_PHONE_FRAME_RATE,
+  FRAME_RATE_LIMITS,
+  frameRateLimitFrom,
   GRAPHICS_TIERS,
-  MOBILE_FRAME_RATES,
   presentationFpsFor,
   starMagnitudeFor,
   streetLightSlotsFor,
   vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../src/game/settings';
+import { FIXED_DT } from '../src/core/physics';
+import { MAX_STEPS_PER_FRAME } from '../src/core/loop';
 import { minimumScaleFor, renderScaleFor } from '../src/core/renderer';
 import { installAssetShim } from './assetshim';
 
@@ -218,22 +221,53 @@ for (const quality of LADDER) {
   }
 }
 
-// --- 1c. the frame-rate cap is offered, never derived -------------------------
+// --- 1c. the frame-rate cap is the player's, on every device ------------------
 {
-  for (const rate of MOBILE_FRAME_RATES) {
+  for (const rate of FRAME_RATE_LIMITS) {
     if (!Number.isFinite(rate) || rate <= 0) failures.push(`offered frame rate ${rate} is not a rate`);
   }
-  if (!MOBILE_FRAME_RATES.includes(DEFAULT_MOBILE_FRAME_RATE)) {
-    failures.push('the default frame rate is not one of the offered rates');
+  if (!FRAME_RATE_LIMITS.includes(DEFAULT_PHONE_FRAME_RATE)) {
+    failures.push('the phone default is not one of the offered rates');
   }
-  // A desktop presents uncapped: there is no battery to protect and the adaptive
-  // controller already holds the GPU at its target by moving resolution.
-  if (presentationFpsFor(false, DEFAULT_MOBILE_FRAME_RATE) !== null) {
-    failures.push('a desktop presentation was given a frame-rate cap');
+  // The cap is the ONLY input, on every device: it is not derived from the tier, not
+  // different by presentation, and `null` means uncapped. That is the whole point of it
+  // being a setting — a phone's heat and a desktop's noise are the same knob.
+  for (const rate of FRAME_RATE_LIMITS) {
+    if (presentationFpsFor(rate) !== rate) {
+      failures.push(`a cap of ${rate} FPS was not honoured`);
+    }
   }
-  for (const rate of MOBILE_FRAME_RATES) {
-    if (presentationFpsFor(true, rate) !== rate) {
-      failures.push(`a phone asked for ${rate} FPS and did not get it`);
+  if (presentationFpsFor(null) !== null) {
+    failures.push('an uncapped request was capped');
+  }
+
+  // HOW LOW A CAP MAY GO, which is not a matter of taste. The loop simulates whole fixed
+  // steps, up to MAX_STEPS_PER_FRAME of them in one frame, and cannot catch up more than
+  // that: present slower than `simulationHz / MAX_STEPS_PER_FRAME` and the simulation falls
+  // behind the clock instead of merely running slow. So no offered rate may be below it.
+  const simulationHz = Math.round(1 / FIXED_DT);
+  const lowestRate = simulationHz / MAX_STEPS_PER_FRAME;
+  for (const rate of FRAME_RATE_LIMITS) {
+    if (rate < lowestRate) {
+      failures.push(
+        `a cap of ${rate} FPS needs ${(simulationHz / rate).toFixed(1)} simulation steps per ` +
+          `frame, above the ${MAX_STEPS_PER_FRAME} the loop can take — the simulation would ` +
+          `fall behind the clock. The floor is ${lowestRate} FPS.`,
+      );
+    }
+  }
+
+  // And a hand-edited save cannot invent a rate the menu has no button for.
+  checkRates();
+}
+
+function checkRates(): void {
+  for (const rate of FRAME_RATE_LIMITS) {
+    if (frameRateLimitFrom(rate) !== rate) failures.push(`a saved cap of ${rate} was not kept`);
+  }
+  for (const garbage of [31, 144.5, -1, 0, '60', Number.NaN, undefined, null]) {
+    if (frameRateLimitFrom(garbage) !== null) {
+      failures.push(`a saved cap of ${String(garbage)} became something other than uncapped`);
     }
   }
 }

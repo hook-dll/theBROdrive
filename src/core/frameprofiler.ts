@@ -51,6 +51,20 @@ const WINDOW_FRAMES = 240;
 /** Sections under this many milliseconds per second are noise, not findings. */
 const REPORT_FLOOR_MS_PER_SECOND = 1;
 
+export interface ReportOptions {
+  /** Simulation rate, for the split between the fixed half and the presented half. */
+  readonly simulationHz?: number;
+  /** Mean measured GPU duration, where the device can measure it at all. */
+  readonly gpuMs?: number | null;
+  /**
+   * Whether the presentation is deliberately capped.
+   *
+   * The "halving the frame rate" line is advice about a cap, so it is printed only where a
+   * cap exists. On a desktop presenting uncapped it was noise that read as a suggestion.
+   */
+  readonly presentationCapped?: boolean;
+}
+
 /** A named section, plus the render call itself, which is not a section of its own. */
 type SampleKey = FrameSection | 'renderWall';
 
@@ -141,7 +155,9 @@ export class FrameProfiler {
    * occasionally stalls is a different problem from one that is uniformly slow, and the
    * mean cannot tell them apart.
    */
-  report(simulationHz = 60): string {
+  report(options: ReportOptions = {}): string {
+    const simulationHz = options.simulationHz ?? 60;
+    const gpuMs = options.gpuMs ?? null;
     const lines: string[] = [];
     const mean = (values: readonly number[]): number =>
       values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -174,24 +190,53 @@ export class FrameProfiler {
         `= ${busyMsPerFrame.toFixed(2)} ms of work`,
     );
 
-    // THE FRAME BUDGET, and the only handle on the GPU where there is no GPU timer.
+    // THE FRAME BUDGET: the interval, the CPU work inside it, and what is left.
     //
-    // `waiting` is time inside a presented frame that no measured CPU section accounts
-    // for. It is not idle: it is the CPU blocked, most often on the GPU finishing, on the
-    // compositor, or on the display. Which of those it is cannot be read from here — a
-    // browser exposes no GPU timer on most mobile platforms, deliberately — but its SIZE
-    // is the question that matters, and a change in the size across a change in the
-    // settings tells them apart by intervention.
+    // IT DOES NOT MEASURE THE GPU, and the difference matters. An earlier version of this
+    // comment claimed the remainder was "the CPU blocked, most often on the GPU" — which
+    // the first machine able to check it disproved. Measured on a 4090 at 144 Hz: the
+    // remainder was 1.63 ms while the GPU was busy 6.94 ms. The CPU is not blocked for the
+    // GPU's duration, because submission is pipelined — the CPU is already assembling the
+    // next frame while this one is still being drawn. So the remainder bounds the CPU and
+    // nothing else, and reading it as "the GPU is the constraint" is wrong.
     //
-    // The interval is the presented cadence, so while the machine is meeting its target
-    // this is the interval it meters and while it is not, it is what the frame really
-    // cost. Either reading is useful; neither is an estimate.
+    // What it IS good for: a machine whose CPU work fills its interval is CPU-bound and no
+    // pixel budget will help, and shrinking the remainder across a change in the settings
+    // says the change moved something. Attribution needs the GPU number below, or an
+    // intervention.
     const intervalMs = framesPerSecond > 0 ? 1000 / framesPerSecond : 0;
     const waitingMs = Math.max(0, intervalMs - busyMsPerFrame);
     lines.push(
       `[perf] frame budget: ${intervalMs.toFixed(2)} ms per presented frame = ` +
-        `${busyMsPerFrame.toFixed(2)} ms of CPU work + ${waitingMs.toFixed(2)} ms waiting`,
+        `${busyMsPerFrame.toFixed(2)} ms of CPU work + ${waitingMs.toFixed(2)} ms not CPU`,
     );
+    // How much of the simulation this frame actually contains. On a desktop presenting
+    // uncapped this is well under one tick — the loop steps whole ticks and most frames
+    // carry none — which is worth showing rather than stating as a constant.
+    if (intervalMs > 0) {
+      lines.push(
+        `[perf] simulation ticks per presented frame ${(simulationHz / framesPerSecond).toFixed(2)}`,
+      );
+    }
+
+    // THE VERDICT, where there is a GPU number to give one. The frame time is set by
+    // whichever half is larger, so that is the comparison, and the answer decides whether
+    // to go after pixels or after CPU work. Measured on a 4090 at 144 Hz: `GPU 6.94 ms
+    // against a 6.81 ms interval` — the GPU is the constraint and there is nothing left to
+    // win on the CPU side of that frame.
+    if (gpuMs !== null && intervalMs > 0) {
+      lines.push(
+        `[perf] GPU ${gpuMs.toFixed(2)} ms against a ${intervalMs.toFixed(2)} ms interval: ` +
+          (gpuMs >= intervalMs * 0.98
+            ? `the GPU sets the frame time, CPU has ${waitingMs.toFixed(2)} ms spare`
+            : `the GPU has ${(intervalMs - gpuMs).toFixed(2)} ms spare — the limit is not fill`),
+      );
+    } else if (intervalMs > 0) {
+      lines.push(
+        '[perf] no GPU timer on this device, so the budget above bounds the CPU only and ' +
+          'does NOT say whether the GPU is the constraint',
+      );
+    }
 
     // WHICH HALF A FRAME RATE CAN REACH.
     //
@@ -208,7 +253,7 @@ export class FrameProfiler {
         `a frame rate cannot change it) + render ${renderPerSecond.toFixed(0)} ms (scales with ` +
         `${framesPerSecond.toFixed(0)} FPS)`,
     );
-    if (framesPerSecond > 1) {
+    if (framesPerSecond > 1 && options.presentationCapped) {
       const atHalf = simPerSecond + renderPerSecond / 2;
       lines.push(
         `[perf] halving the frame rate would cost ${atHalf.toFixed(0)} ms/s ` +
