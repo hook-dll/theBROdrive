@@ -544,6 +544,54 @@ body.is-cinematic #ui {
 }
 
 /*
+ * The steering-position strip, under the segment display.
+ *
+ * It takes no height from the cluster: the gauge row is 124 px tall because of the two
+ * main dials and the centre column only reaches 84, so the strip sits in space that was
+ * already empty. `align-self: center` keeps it on the same centre line as everything
+ * above it.
+ *
+ * The panel is the display's own inset treatment so the two read as one instrument, and
+ * the marker is deliberately the largest thing on the strip — at a glance, in a bright
+ * desert, the position is what has to be legible, not the scale.
+ */
+.hud-steer-strip {
+  display: block;
+  width: 254px;
+  height: 10px;
+  margin-top: 1px;
+  box-sizing: border-box;
+  background: #11160d;
+  border: 2px inset rgba(176, 166, 140, 0.5);
+  box-shadow:
+    inset 0 0 6px rgba(0, 0, 0, 0.82),
+    0 1px 0 rgba(232, 221, 196, 0.12);
+}
+
+.hud-steer-bracket {
+  stroke: var(--hud-fg-dim);
+  stroke-width: 1.2;
+}
+
+.hud-steer-track {
+  stroke: rgba(232, 221, 196, 0.3);
+  stroke-width: 1;
+}
+
+/* The notch is brighter than the track because it is the answer to the question the
+   strip exists for: is the wheel straight? */
+.hud-steer-centre {
+  stroke: rgba(232, 221, 196, 0.62);
+  stroke-width: 1;
+}
+
+.hud-steer-thumb {
+  stroke: var(--hud-fg);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+/*
  * A fault message is already the only thing the display shows, and it scrolls when
  * it is longer than sixteen digits. Blinking it as well made the one line the player
  * actually has to READ the hardest on the dashboard: half the strobe cycle hid a

@@ -87,6 +87,7 @@ function paint(): void {
     engineRunning: sample.zone !== 'critical',
     engineDestroyed: false,
     handbrake: false,
+    steering: 0,
   });
   hud.setTravel(12.4, 3600 * 15);
   document.title = `coollab ${sample.zone}`;

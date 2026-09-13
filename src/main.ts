@@ -1942,6 +1942,7 @@ async function boot(): Promise<void> {
         engineDestroyed: driving.engineDestroyed,
         checkEngine,
         handbrake: lastInput.handbrake,
+        steering: driving.steeringFraction,
       });
     } else {
       hud.setDriving(null);
