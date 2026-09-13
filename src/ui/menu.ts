@@ -11,7 +11,7 @@ import {
   POI_SPACING_MAX_METRES,
   POI_SPACING_MIN_METRES,
   POI_SPACING_STEP_METRES,
-  MOBILE_FRAME_RATES,
+  FRAME_RATE_LIMITS,
   TIME_OF_DAY_PRESETS,
   TRAFFIC_COUNT_MAX,
   TRAFFIC_COUNT_MIN,
@@ -484,7 +484,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         msaa: base.msaa,
-        mobileFrameRate: base.mobileFrameRate,
+        frameRateLimit: base.frameRateLimit,
         inkStrength: base.inkStrength,
         preciseSteering: base.preciseSteering,
       };
@@ -500,7 +500,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           msaa: settings.msaa,
-          mobileFrameRate: settings.mobileFrameRate,
+          frameRateLimit: settings.frameRateLimit,
           inkStrength: settings.inkStrength,
           preciseSteering: settings.preciseSteering,
         });
@@ -1009,31 +1009,42 @@ export class MainMenu {
                 },
               },
             ]),
-            // ONLY on a phone, and the only control here that is about the device rather
-            // than the picture. Half the frames is half the GPU work, half the render-side
-            // CPU and half the presenting, while the simulation keeps its fixed 60 Hz, so
-            // the car still drives identically — which makes this the one lever a player
-            // has against a phone that runs fine and gets hot.
-            ...(mobilePresentation
-              ? [
-                  segmented(
-                    'Frame Rate',
-                    MOBILE_FRAME_RATES.map((rate) => ({
-                      label: rate === 60 ? 'Smooth' : 'Cool',
-                      icon: rate === 60 ? 'gfx3' : 'gfx1',
-                      hint:
-                        rate === 60
-                          ? '60 FPS. Smoother, and the warmest setting in the game.'
-                          : '30 FPS. The coolest the game can run: same picture, half the frames, and the car still handles identically.',
-                      active: () => settings.mobileFrameRate === rate,
-                      pick: () => {
-                        settings.mobileFrameRate = rate;
-                        apply();
-                      },
-                    })),
-                  ),
-                ]
-              : []),
+            // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
+            // offered on both. On a phone it is a thermal control and has to be the
+            // player's: no browser reports thermal state, battery temperature or clock
+            // speed, so the device cannot say it is hot — only the person holding it can.
+            // On a desktop it is noise and power, which the game cannot see either.
+            //
+            // It is also the largest lever there is: half the frames is half the render
+            // work and half the presenting, while the simulation keeps its fixed rate, so
+            // the car handles identically at every setting here. And its floor is that
+            // simulation — nothing below the fixed rate can be saved by presenting less.
+            segmented('Frame Rate', [
+              ...FRAME_RATE_LIMITS.map((rate) => ({
+                label: String(rate),
+                icon: 'gfx3',
+                hint:
+                  `${rate} FPS. Simulation is unaffected — the car handles the same at ` +
+                  'every rate here. Half the frames is half the render work and half the presenting.',
+                active: () => settings.frameRateLimit === rate,
+                pick: () => {
+                  settings.frameRateLimit = rate;
+                  apply();
+                },
+              })),
+              {
+                label: 'Max',
+                icon: 'gfx1',
+                hint:
+                  'No cap. The right choice when the GPU is already the constraint, ' +
+                  'because a cap there only costs smoothness.',
+                active: () => settings.frameRateLimit === null,
+                pick: () => {
+                  settings.frameRateLimit = null;
+                  apply();
+                },
+              },
+            ]),
             segmented('MSAA', [
               {
                 label: 'On',

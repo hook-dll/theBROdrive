@@ -10,6 +10,7 @@ import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
+  DEFAULT_PHONE_FRAME_RATE,
   GRAPHICS_TIERS,
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
@@ -276,12 +277,18 @@ async function boot(): Promise<void> {
     if (!stored && mobilePresentation) {
       // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
       // Once the player changes a display setting, the stored machine preference wins.
+      //
+      // The frame cap belongs here rather than in the authored defaults because it is the
+      // one default that differs by presentation, and this is the only place that knows
+      // which presentation it is: a phone starts cool at 30, a desktop starts uncapped
+      // because its GPU is already the constraint and a cap there only costs smoothness.
       world.apply({
         t: 'settings',
         settings: {
           ...world.state.settings,
           graphicsQuality: 'acceptable',
           msaa: false,
+          frameRateLimit: DEFAULT_PHONE_FRAME_RATE,
         },
       });
     }
@@ -549,7 +556,7 @@ async function boot(): Promise<void> {
         const pointSlots = streetLightSlotsFor(s.graphicsQuality, mobilePresentation);
         const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
         const framesPerSecond =
-          mobilePresentation ? `${s.mobileFrameRate} FPS (capped)` : 'uncapped';
+          s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
           `pixels ${(renderer.resolutionScale * 100).toFixed(0)}% of ceiling, ` +
@@ -558,8 +565,7 @@ async function boot(): Promise<void> {
             `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
             `msaa ${s.msaa ? 'on' : 'off'}`,
           gpuLine,
-          `simulation ${simulationHz} Hz, sim ticks per frame ` +
-            `${(simulationHz / (mobilePresentation ? s.mobileFrameRate : simulationHz)).toFixed(1)}`,
+          `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot + ${pointSlots} point = ${spotSlots + pointSlots} ` +
             `per lit fragment, stars to magnitude ${stars}`,
           // The decisive pair. A frame whose `draw` is large because of FILL has a big
@@ -581,7 +587,14 @@ async function boot(): Promise<void> {
             'Waiting that shrinks with it is the scene pass; waiting that does not is elsewhere.',
           );
         }
-        return `${header.join('\n')}\n\n${frameProfiler?.report(simulationHz) ?? 'profiler unavailable'}`;
+        return (
+          `${header.join('\n')}\n\n` +
+          (frameProfiler?.report({
+            simulationHz,
+            gpuMs: measuresGpu ? gpuMs : null,
+            presentationCapped: s.frameRateLimit !== null,
+          }) ?? 'profiler unavailable')
+        );
       }
     : undefined;
   const modelWarmups = new Map<string, Promise<void>>();
@@ -2243,7 +2256,7 @@ async function boot(): Promise<void> {
     render,
   });
   loop.setRenderFps(
-    presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate),
+    presentationFpsFor(world.state.settings.frameRateLimit),
   );
 
   /**
@@ -2581,7 +2594,7 @@ async function boot(): Promise<void> {
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
       loop.setRenderFps(
-        presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate),
+        presentationFpsFor(world.state.settings.frameRateLimit),
       );
     },
     applyTimePreset: (preset) => {
@@ -2839,7 +2852,7 @@ async function boot(): Promise<void> {
       const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
-      loop.setRenderFps(presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate));
+      loop.setRenderFps(presentationFpsFor(world.state.settings.frameRateLimit));
       await settleLaunchResolution();
     };
 

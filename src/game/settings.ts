@@ -278,18 +278,34 @@ export function shadowsFor(quality: GraphicsQuality, mobilePresentation: boolean
 /**
  * Presentation cap in FPS.
  *
- * On a phone this is the player's own thermal setting, because a browser exposes no
- * thermal state, no battery temperature and no clock speed — the machine cannot say
- * whether it is hot, only the person holding it can. On a desktop there is no cap at
- * all: the adaptive controller already holds the GPU at its target by moving resolution,
- * and nothing there is running on a battery.
+ * The player's own setting on every device, because it is the one lever that works
+ * everywhere for opposite reasons. On a phone it is a THERMAL control, and it has to be
+ * the player's: a browser exposes no thermal state, no battery temperature and no clock
+ * speed, so the machine cannot say whether it is hot, only the person holding it can. On a
+ * desktop it is a NOISE and POWER control, and a frame rate below the panel's own is a
+ * thing people want for reasons the game cannot see either.
+ *
+ * It is the largest lever there is: half the frames is half the render work and half the
+ * presenting, while the simulation keeps its fixed rate so the car handles identically.
+ * The floor is that simulation — no cap can go below it.
  */
-export function presentationFpsFor(
-  mobilePresentation: boolean,
-  mobileFrameRate: number,
-): number | null {
-  return mobilePresentation ? mobileFrameRate : null;
+export function presentationFpsFor(frameRateLimit: number | null): number | null {
+  return frameRateLimit;
 }
+
+/**
+ * The frame rates the player may choose, and `null` for no cap.
+ *
+ * 30 and 60 are the useful thermal steps. 75, 120 and 144 exist because panels have them
+ * and a cap that does not match the panel wastes the thing being paid for. `null` is
+ * offered because a desktop whose GPU is already the constraint gains nothing from a cap —
+ * measured on a 4090 at 144 Hz, the GPU set the frame time at 6.94 ms against a 6.81 ms
+ * interval, so a cap there would only add stutter.
+ */
+export const FRAME_RATE_LIMITS = [30, 60, 75, 120, 144] as const;
+export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
+/** A phone starts cool; a desktop starts uncapped, where its GPU is the constraint. */
+export const DEFAULT_PHONE_FRAME_RATE = 30;
 
 export interface Settings {
   gearboxMode: GearboxMode;
@@ -322,19 +338,16 @@ export interface Settings {
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
   /**
-   * Frames per second a phone presentation may present: 30 or 60.
+   * Frames per second the presentation may present, or null for no cap.
    *
-   * The one thermal control in the game, and it is the player's to make because nothing
-   * else can make it. It is also the largest lever there is: half the frames is half the
-   * GPU work, half the render-side CPU and half the presenting, while the simulation
-   * keeps its fixed 60 Hz so the car still handles identically.
-   *
-   * Deliberately NOT on the rendering rung, which is where it used to live, because that
-   * coupled a phone's sharpness to its heat: the only way off a blurry 960x540 picture on
-   * a 1440p screen was to accept 60 FPS with it. How sharp the picture is and how warm
-   * the phone gets are different questions and now have different answers.
+   * The one lever that works on every device, and it is the player's to make because
+   * nothing else can make it — see `presentationFpsFor`. Deliberately NOT on the rendering
+   * rung, which is where it used to live, because that coupled a phone's sharpness to its
+   * heat: the only way off a blurry 960x540 picture on a 1440p screen was to accept 60 FPS
+   * with it. How sharp the picture is and how warm the device gets are different questions
+   * and now have different answers.
    */
-  mobileFrameRate: number;
+  frameRateLimit: FrameRateLimit;
   /** Post-process landscape outline amount, 0..1. */
   inkStrength: number;
   /**
@@ -363,10 +376,6 @@ export const TRAFFIC_COUNT_MAX = GAMEPLAY_CONFIG.trafficCountMax;
 export const TRAFFIC_COUNT_STEP = GAMEPLAY_CONFIG.trafficCountStep;
 export const DEFAULT_TRAFFIC_COUNT = GAMEPLAY_CONFIG.defaultTrafficCount;
 
-/** The frame rates a phone may present at. Cool first: it is the default. */
-export const MOBILE_FRAME_RATES = [30, 60] as const;
-export const DEFAULT_MOBILE_FRAME_RATE = 30;
-
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
 
@@ -391,9 +400,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // key away.
   graphicsQuality: 'standard',
   msaa: true,
-  // Cool by default. A phone that is too slow can be made faster by moving up the
-  // ladder; a phone that is too hot has no such lever, and heat is what damages it.
-  mobileFrameRate: DEFAULT_MOBILE_FRAME_RATE,
+  // Uncapped by default: on a desktop the GPU is already the constraint, so a cap would
+  // only cost smoothness. A phone's FIRST launch is set to 30 by main, which is the only
+  // place that knows the presentation — see `DEFAULT_PHONE_FRAME_RATE`.
+  frameRateLimit: null,
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
@@ -422,6 +432,13 @@ for (const action of BINDABLE_ACTIONS) BINDABLE_IDS[action.id] = true;
  * clamped into [8, 128]. Returns a fresh object, never aliasing the input, so
  * the caller can store it in state without sharing mutable memory.
  */
+/** An offered rate, or null for no cap. Anything else is the default. */
+export function frameRateLimitFrom(raw: unknown): FrameRateLimit {
+  return typeof raw === 'number' && FRAME_RATE_LIMITS.some((rate) => rate === raw)
+    ? (raw as FrameRateLimit)
+    : null;
+}
+
 export function sanitizeSettings(raw: unknown): Settings {
   const obj =
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
@@ -490,13 +507,11 @@ export function sanitizeSettings(raw: unknown): Settings {
       typeof obj.msaa === 'boolean'
         ? obj.msaa
         : obj.graphicsQuality !== 'acceptable',
-    // Snap to an offered rate rather than clamping, so a hand-edited 31 or 144 cannot
-    // become a frame rate the menu has no button for.
-    mobileFrameRate:
-      typeof obj.mobileFrameRate === 'number'
-      && MOBILE_FRAME_RATES.some((rate) => rate === obj.mobileFrameRate)
-        ? obj.mobileFrameRate
-        : DEFAULT_MOBILE_FRAME_RATE,
+    // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
+    // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only
+    // name this setting had first; reading it is how a save made before this change keeps
+    // the cap its player chose instead of silently becoming uncapped and hot.
+    frameRateLimit: frameRateLimitFrom(obj.frameRateLimit ?? obj.mobileFrameRate),
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
