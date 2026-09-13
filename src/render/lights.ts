@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
 
 /**
  * GPU street-light budget.
@@ -31,9 +31,9 @@ import type { GraphicsQuality } from '../game/settings';
  * machine with fill rate to spare can afford two more lights everywhere.
  */
 const STREETLIGHT_SLOT_COUNT: Record<GraphicsQuality, number> = {
-  acceptable: 2,
-  standard: 6,
-  blessing: 8,
+  acceptable: GRAPHICS_TIERS.acceptable.streetLightSlots,
+  standard: GRAPHICS_TIERS.standard.streetLightSlots,
+  blessing: GRAPHICS_TIERS.blessing.streetLightSlots,
 };
 /** Three concrete-era poles can be ~255 m away. */
 const CUTOFF_DISTANCE = 300;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AdaptiveResolutionController } from './adaptivequality';
-import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from '../game/settings';
+import { DEFAULT_INK_STRENGTH, GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
 /**
@@ -66,38 +66,65 @@ const MAX_DEPTH_RATIO = 160000;
 export const CAMERA_BASE_FOV = 65;
 
 /**
- * Acceptable uses an absolute pixel budget rather than a display percentage. A
- * 1080p monitor therefore starts near 1600x900, a 720p panel remains native, and
- * a 4K television cannot accidentally ask a 6 W iGPU to shade millions of pixels.
+ * A DISPLAY can never ask for more pixels than the rung allows, and that is the whole
+ * of this file's resolution policy now.
+ *
+ * It used to be a display PERCENTAGE: `min(DPR x multiplier, DPR cap)`. On a screen whose
+ * device-pixel-ratio is 1 — every 4K television, every monitor at 100% scaling — that
+ * resolves to exactly 1.0 at every rung, so a mini-PC on a television and a workstation
+ * on the same television were both asked to shade 8.29 megapixels. Measured across the
+ * machines this game runs on, `standard` was the same load on an Intel N100 as on an RTX
+ * 4090, and the only rung beneath it was a 5.8x cliff with nothing in between.
+ *
+ * An absolute ceiling per rung fixes that at the root: below the ceiling the display's
+ * own sharpness still decides what to render, and above it a supersampling multiplier
+ * lets the top rung spend headroom it is told it has. `GRAPHICS_TIERS` owns the numbers;
+ * this is only the arithmetic that spends them.
  */
-const ACCEPTABLE_MAX_PIXELS = 1600 * 900;
-const ACCEPTABLE_MIN_PIXELS = 1280 * 720;
+/** Ceiling on device-pixel-ratio, whatever a display claims: past 2 it is not sharpness. */
+const MAX_PIXEL_RATIO = 2;
+
 /**
- * Phone screens make raw DPR a poor quality target: their small pixels invite the
- * browser to render several million scene pixels before MSAA and the post pass. Keep
- * the same tier ordering, shaders and geometry under an absolute portable budget.
+ * The drawing-buffer scale for a rung on a display, as a pure function.
+ *
+ * Pure and exported because it is the whole of the resolution policy and it is the part
+ * that was wrong: a policy reachable only through a live WebGL context is a policy nobody
+ * checks, and the bug it carried — a display percentage that resolved to exactly 1.0 on
+ * every ratio-1 screen, so a 4K television cost a mini-PC and a workstation the same
+ * 8.29 megapixels — survived because the only way to see it was to own the television.
+ * `tools/graphics-tiers.ts` drives this directly.
  */
-const MOBILE_MAX_PIXELS: Record<GraphicsQuality, number> = {
-  acceptable: 960 * 540,
-  standard: 1280 * 720,
-  blessing: 1600 * 900,
-};
-const MOBILE_MIN_PIXELS: Record<GraphicsQuality, number> = {
-  acceptable: 640 * 360,
-  standard: 960 * 540,
-  blessing: 1280 * 720,
-};
-const PIXEL_RATIO_SCALE: Record<GraphicsQuality, number> = {
-  acceptable: 1,
-  standard: 1,
-  blessing: 1.25,
-};
-/** Absolute guard against pathological browser DPR values and oversized targets. */
-const MAX_PIXEL_RATIO: Record<GraphicsQuality, number> = {
-  acceptable: 1,
-  standard: 2,
-  blessing: 2.5,
-};
+export function renderScaleFor(
+  quality: GraphicsQuality,
+  cssPixels: number,
+  devicePixelRatio: number,
+  mobilePresentation: boolean,
+): number {
+  const tier = GRAPHICS_TIERS[quality];
+  const ceiling = mobilePresentation ? tier.mobileMaxPixels : tier.maxPixels;
+  // Three terms, each answering a different question: what the display wants (`dpr`),
+  // what this rung is willing to supersample to (`supersample`), and what the rung's
+  // absolute budget will pay for. The smallest wins, so a 4K television can never
+  // exceed the budget and a small retina panel is never downscaled below its sharpness.
+  return Math.min(
+    devicePixelRatio * tier.supersample,
+    MAX_PIXEL_RATIO,
+    Math.sqrt(ceiling / Math.max(1, cssPixels)),
+  );
+}
+
+/** Where dynamic resolution stops for a rung, as the same kind of scale. */
+export function minimumScaleFor(
+  quality: GraphicsQuality,
+  cssPixels: number,
+  devicePixelRatio: number,
+  mobilePresentation: boolean,
+): number {
+  const tier = GRAPHICS_TIERS[quality];
+  const floor = mobilePresentation ? tier.mobileMinPixels : tier.minPixels;
+  const base = cssPixels * devicePixelRatio * devicePixelRatio;
+  return Math.min(1, Math.sqrt(floor / Math.max(1, base)));
+}
 /**
  * Four samples was the only useful multisampling level in measurement: 2x retained
  * almost all of the cost. Whether it is enabled is an independent display setting;
@@ -114,13 +141,18 @@ export function prefersMobilePresentation(): boolean {
   return coarse || phoneSized;
 }
 
-/** Never spend a phone's 90/120 Hz refresh budget on duplicate 60 Hz simulation states. */
+/**
+ * Never spend a phone's 90/120 Hz refresh budget on duplicate 60 Hz simulation states.
+ *
+ * Read from the rung, because a frame-rate target is a statement about the machine and
+ * belongs on the same rung as its pixel budget: the weakest rung buys resolution with
+ * frame rate, and the two are decided together or not at all.
+ */
 export function presentationFpsFor(
   quality: GraphicsQuality,
   mobilePresentation = prefersMobilePresentation(),
 ): number | null {
-  if (quality === 'acceptable') return 30;
-  return mobilePresentation ? 60 : null;
+  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileFps : null;
 }
 // ---------------------------------------------------------------------------
 // Heat haze: refraction through the hot layer over the sand, as a post pass.
@@ -857,7 +889,7 @@ export class Renderer {
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.enabled = quality !== 'acceptable';
+    this.renderer.shadowMap.enabled = GRAPHICS_TIERS[quality].shadows;
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
     // noise at this shadow resolution; plain PCF is visually near-identical and
     // materially cheaper on a low-end iGPU.
@@ -1050,28 +1082,36 @@ export class Renderer {
   }
 
   private pixelRatioFor(quality: GraphicsQuality): number {
-    const dpr = window.devicePixelRatio;
     const canvas = this.renderer.domElement;
-    const cssPixels = Math.max(1, canvas.clientWidth * canvas.clientHeight);
-    const desired = quality === 'acceptable'
-      ? Math.min(dpr, Math.sqrt(ACCEPTABLE_MAX_PIXELS / cssPixels))
-      : Math.min(dpr * PIXEL_RATIO_SCALE[quality], MAX_PIXEL_RATIO[quality]);
-    if (!this.mobilePresentation) return desired;
-    return Math.min(desired, Math.sqrt(MOBILE_MAX_PIXELS[quality] / cssPixels));
+    return renderScaleFor(
+      quality,
+      canvas.clientWidth * canvas.clientHeight,
+      window.devicePixelRatio,
+      this.mobilePresentation,
+    );
   }
 
+  /**
+   * Where dynamic resolution stops, as an ABSOLUTE pixel count rather than a fraction
+   * of the ceiling.
+   *
+   * A fraction says nothing about the picture: 0.55 of a phone's budget and 0.55 of a
+   * workstation's are different images entirely, and the one thing a floor has to
+   * guarantee is the image below which the machine is no longer worth looking at. Every
+   * rung used to answer this its own way — `acceptable` and both mobile paths in
+   * absolute pixels, `standard` and `blessing` in ratios — so whether a rung had a real
+   * floor depended on which rung it was.
+   */
   private updateAdaptiveFloor(): void {
-    const minimumPixels = this.mobilePresentation
-      ? MOBILE_MIN_PIXELS[this.quality]
-      : this.quality === 'acceptable'
-        ? ACCEPTABLE_MIN_PIXELS
-        : null;
-    if (minimumPixels === null) return;
-    const canvas = this.renderer.domElement;
     const basePixels =
-      canvas.clientWidth * canvas.clientHeight * this.basePixelRatio * this.basePixelRatio;
+      this.renderer.domElement.clientWidth * this.renderer.domElement.clientHeight;
     this.adaptiveResolution.setMinimumScale(
-      Math.min(1, Math.sqrt(minimumPixels / Math.max(1, basePixels))),
+      minimumScaleFor(
+        this.quality,
+        basePixels,
+        this.renderer.getPixelRatio(),
+        this.mobilePresentation,
+      ),
     );
   }
 

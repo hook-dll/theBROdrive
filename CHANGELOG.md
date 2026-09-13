@@ -4,6 +4,15 @@
 
 ### Added
 
+- `tools/graphics-tiers.ts` holds the rendering ladder to two properties that were both
+  false. The ladder must CLIMB, so that every rung is a purchase rather than a relabelling
+  — the star depth was limiting magnitude 8 on two of the three rungs, so choosing between
+  them changed nothing. And no display may talk a rung past its own pixel budget, which
+  `renderScaleFor` is now a pure exported function for, because a policy reachable only
+  through a live WebGL context is a policy nobody checks. The bench also catches the
+  specific failure it was written for: restoring the old unbounded middle rung makes it
+  report "standard costs 5.8x acceptable — a rung is missing between them".
+
 - `tools/contact-patches.ts` checks that the tyres are actually on the ground, by
   reading back the geometry that will be drawn: one quad per grounded wheel, centred on
   that wheel's own contact point, lying in the ground plane the wheel reported, with an
@@ -334,6 +343,52 @@
 - `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
 
 ### Changed
+
+- GRAPHICS IS ONE LADDER THAT OWNS EVERYTHING, and the pixel budget is absolute on every
+  rung. There were three defects, and the first one is why this game ran badly on a
+  mini-PC.
+  THE TIERS WERE A DISPLAY PERCENTAGE. Resolution resolved as `min(DPR x multiplier, DPR
+  cap)`, which on any screen whose device-pixel-ratio is 1 — every 4K television, every
+  monitor at 100% scaling — comes out at exactly 1.0 on EVERY rung. Measured across the
+  four machines this is played on: `standard` on an Intel N100 on a 4K television and
+  `standard` on an RTX 4090 on the same television both resolved to 8.29 megapixels. The
+  only rung with an absolute budget was `acceptable`, at 1.44 — so the sole choice a slow
+  machine had was to fall 5.8x, from 8.29 megapixels to 1.44, with nothing in between. It
+  now resolves as `min(DPR x supersample, 2, sqrt(ceiling / cssPixels))`, and each rung
+  carries its own absolute ceiling: 1600x900, 2560x1440, 4800x2700. The N100 on a 4K
+  television now gets 3.69 megapixels on `standard` — 2.2x less than before — and the
+  workstation keeps 12.96 on the top rung because supersampling is a rung's own business.
+  THE DISTANCE SETTING WAS NOT A SECOND AXIS. It never changed what the world STREAMS —
+  the desert tiles (±2 of 240 m) and road chunks (±6 of 200 m) are identical at every
+  tier. What it changed was the far plane, the vista's ring tessellation, how many mesas
+  are built and the fog, and measured on the vista that is 13.0 ms per cell load at
+  1.5 km against 32.8 ms at 25 km, with the mesa vertex count going from 897 to 16 419.
+  That is the same question the quality tier already answers, so as a free control it
+  only offered a player the chance to pick 25 km on a machine that cannot rebuild a cell
+  inside a frame. The horizon is on the rung now, an old save's `viewDistance` is
+  deliberately dropped rather than guessed at, and the menu's Horizon segment is gone.
+  HALF OF IT DID NOT APPLY. The two local-light pools are compiled into every lit
+  material as an array size, so they were built once at boot and a tier change left them
+  — while the menu implied the whole setting took effect on resume. They still wait for
+  the next load, because recompiling the world's shaders mid-session is worse, but the
+  menu now says so in the tier's own words, and the hint is GENERATED FROM THE TIER TABLE
+  so a label cannot describe a rung the player is not getting. That drift is exactly how
+  the old menu promised a horizon change on resume while the light change silently waited.
+  Two smaller ones went with it: choosing the weakest rung force-wrote the independent
+  MSAA preference to off, so the two controls contradicted each other, and the comment
+  claiming a tier change updated the sky's "probe resolution" described something
+  `Sky.setQuality` has never done.
+- THE FIRST LAUNCH MEASURES THE MACHINE. Nothing auto-detected the GPU, and the comment
+  defending that said guessing wrong either robs a capable machine or leaves a weak one
+  stuttering — true of guessing, and not true of measuring, which the launch already
+  does: it settles the drawing-buffer scale under the loading cover against real GPU
+  timer queries. So the rung is walked against that verdict, in both directions and
+  asymmetrically, because being wrong is not. DOWN while the machine is giving away more
+  than a fifth of the resolution it was promised — that is a stutter the player cannot
+  diagnose. UP while it is comfortable, and PUT BACK with its own settle if it does not
+  fit, so that a player who never opens the menu is not pushed into stutter by the
+  courtesy. The result is stored, so the next launch respects the answer instead of
+  measuring again.
 
 - CONTACT PATCHES UNDER EVERY CAR. A car is told apart from a car-shaped object by one
   thing: where its weight is. A tyre is a rigid mesh pinned to a ray and it does not

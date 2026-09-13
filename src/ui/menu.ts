@@ -16,7 +16,8 @@ import {
   TRAFFIC_COUNT_MIN,
   TRAFFIC_COUNT_STEP,
 } from '../game/settings';
-import type { GraphicsQuality, Settings, TimeOfDayPreset, ViewDistance } from '../game/settings';
+import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
+import { GRAPHICS_TIERS } from '../game/settings';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import { ALL_VARIANTS } from '../parts/registry';
@@ -39,6 +40,30 @@ function input(cls: string): HTMLInputElement {
   node.className = cls;
   node.type = 'text';
   return node;
+}
+
+/**
+ * What a rung means, spelled out from the rung's own numbers.
+ *
+ * Read out of `GRAPHICS_TIERS` rather than written here, so a label cannot describe a
+ * tier the player is not getting. That drift is exactly how the old menu came to
+ * promise a horizon change "applies on resume" while a light-source change silently
+ * waited for the next load: two halves of one rung described in two places, and only
+ * one of them true.
+ */
+function describeTier(quality: GraphicsQuality): string {
+  const tier = GRAPHICS_TIERS[quality];
+  const mpx = (pixels: number): string => `${(pixels / 1_000_000).toFixed(1)} Mpx`;
+  const horizon =
+    tier.horizonM >= 1000 ? `${Math.round(tier.horizonM / 1000)} km` : `${tier.horizonM} m`;
+  const frameRate =
+    tier.mobileFps === null ? 'uncapped on desktop' : `${tier.mobileFps} FPS on a phone`;
+  return (
+    `${mpx(tier.maxPixels)} max, ${horizon} horizon, ${frameRate}. ` +
+    `${tier.shadows ? 'Sun shadows.' : 'No sun shadows.'} ` +
+    `Stars to magnitude ${tier.starMagnitude}. ` +
+    'Visible light sources change on the next load.'
+  );
 }
 
 function button(cls: string, label: string): HTMLButtonElement {
@@ -187,7 +212,6 @@ export interface PauseHooks {
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /** Apply a view-distance tier immediately; main pushes it to the renderer. */
-  applyViewDistance: (v: ViewDistance) => void;
   /**
    * Record a fully fuelled car into the world.
    *
@@ -442,7 +466,6 @@ export class MainMenu {
         trafficCount: base.trafficCount,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
-        viewDistance: base.viewDistance,
         msaa: base.msaa,
         inkStrength: base.inkStrength,
         preciseSteering: base.preciseSteering,
@@ -458,7 +481,6 @@ export class MainMenu {
           trafficCount: settings.trafficCount,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
-          viewDistance: settings.viewDistance,
           msaa: settings.msaa,
           inkStrength: settings.inkStrength,
           preciseSteering: settings.preciseSteering,
@@ -929,20 +951,19 @@ export class MainMenu {
           pane.append(
             segmented('Graphics', [
               {
-                label: 'Acceptable',
+                label: 'Phone',
                 icon: 'gfx1',
-                hint: 'Recommended for phones: mobile pixel budget, 30 FPS, no shadows or shimmer.',
+                hint: describeTier('acceptable'),
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
-                  settings.msaa = false;
                   apply();
                 },
               },
               {
-                label: 'Standard',
+                label: 'Desktop',
                 icon: 'gfx2',
-                hint: 'Native desktop quality; phones cap the target at 1280×720 and 60 FPS.',
+                hint: describeTier('standard'),
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
@@ -950,48 +971,13 @@ export class MainMenu {
                 },
               },
               {
-                label: 'Blessing',
+                label: 'Workstation',
                 icon: 'gfx3',
-                hint: 'Supersampled desktop image; phones cap the target at 1600×900 and 60 FPS.',
+                hint: describeTier('blessing'),
                 active: () => settings.graphicsQuality === 'blessing',
                 pick: () => {
                   settings.graphicsQuality = 'blessing';
                   apply();
-                },
-              },
-            ]),
-            segmented('Horizon', [
-              {
-                label: '1.5 km',
-                icon: 'horizon1',
-                hint: 'Near: the authored horizon, and the cheapest. Applies on resume.',
-                active: () => settings.viewDistance === 'near',
-                pick: () => {
-                  settings.viewDistance = 'near';
-                  apply();
-                  hooks.applyViewDistance('near');
-                },
-              },
-              {
-                label: '8 km',
-                icon: 'horizon2',
-                hint: 'Far: a deep horizon with real ranges in it. Needs a GPU with headroom.',
-                active: () => settings.viewDistance === 'far',
-                pick: () => {
-                  settings.viewDistance = 'far';
-                  apply();
-                  hooks.applyViewDistance('far');
-                },
-              },
-              {
-                label: '25 km',
-                icon: 'horizon3',
-                hint: 'Vast: extravagant, and priced accordingly. For fast GPUs.',
-                active: () => settings.viewDistance === 'vast',
-                pick: () => {
-                  settings.viewDistance = 'vast';
-                  apply();
-                  hooks.applyViewDistance('vast');
                 },
               },
             ]),

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
 
 const CATALOG_URL = '/data/tycho2.bin';
 const MAGIC = 'TBR1';
@@ -27,9 +27,9 @@ const STAR_RADIUS = 2790;
  * desert sky read as crowded rather than plotted.
  */
 const MAGNITUDE_LIMIT: Record<GraphicsQuality, number> = {
-  acceptable: 8,
-  standard: 8,
-  blessing: 8.5,
+  acceptable: GRAPHICS_TIERS.acceptable.starMagnitude,
+  standard: GRAPHICS_TIERS.standard.starMagnitude,
+  blessing: GRAPHICS_TIERS.blessing.starMagnitude,
 };
 
 const STAR_VERTEX = /* glsl */ `
