@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.15.0 — 2026-09-13
+
 ### Added
 
 - THE FRAME RATE IS THE PLAYER'S ON EVERY DEVICE: 30, 60, 75, 120, 144, or no cap. It
