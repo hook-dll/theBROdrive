@@ -33,6 +33,15 @@ export interface DrivingReadout {
   oilFraction: number;
   /** Parking brake state. Keyboard and touch controls both latch it. */
   handbrake: boolean;
+  /**
+   * Where the steering RIM is, as a fraction of full lock, positive to the left.
+   *
+   * The rim's angle, not the road wheels': see `Vehicle.steeringFraction`. Drawn as the
+   * strip under the segment display, because with a keyboard there is no force on the
+   * hands to say where the wheel is pointing and no way to glance down at it — the
+   * whole of the missing feedback is this one number.
+   */
+  steering: number;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -79,6 +88,26 @@ const TACHOMETER_SCALE: MainDialScale = {
 };
 
 const LCD_DIGITS = 16;
+
+/**
+ * Steering-position strip, drawn under the segment display.
+ *
+ * Sized to the display's own width so the cluster keeps one bottom edge, and it costs
+ * the dashboard no height: the gauge row is already 124 px tall because of the two main
+ * dials, and the centre column — two auxiliary dials, the lamp panel and the display —
+ * reaches 84. The strip lives in the 40 px that was empty below it.
+ *
+ * The travel is inset from the panel edges so the end brackets have somewhere to sit,
+ * and the marker is a thick round-capped line rather than a dot so that a small
+ * deflection is still a readable position rather than a smudge.
+ */
+const STEER_STRIP_W = 254;
+const STEER_STRIP_H = 10;
+const STEER_STRIP_X0 = 9;
+const STEER_STRIP_X1 = STEER_STRIP_W - 9;
+const STEER_STRIP_Y = 5;
+const STEER_STRIP_CX = (STEER_STRIP_X0 + STEER_STRIP_X1) / 2;
+const STEER_STRIP_HALF_SPAN = (STEER_STRIP_X1 - STEER_STRIP_X0) / 2;
 const LCD_STEP_MS = 180;
 const LCD_INITIAL_PAUSE_STEPS = 4;
 const RADIO_OFF_MESSAGE = 'RADIO OFF';
@@ -196,6 +225,10 @@ export class Hud {
   private readonly checkEngineEl: HTMLElement;
   private readonly oilWarningEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
+  private readonly steerStripEl: SVGSVGElement;
+  private readonly steerThumb: SVGLineElement;
+  /** Last placed marker position, so a still wheel writes no attributes. */
+  private steerStripX = -1;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly persistentBlurEl: HTMLElement;
@@ -262,6 +295,10 @@ export class Hud {
     this.lcdEl = display.svg;
     this.lcdDigits = display.digits;
 
+    const steer = this.buildSteerStrip();
+    this.steerStripEl = steer.svg;
+    this.steerThumb = steer.thumb;
+
     this.gearEl = el('div', 'hud-gear');
     this.handbrakeEl = el('div', 'hud-handbrake');
     this.handbrakeEl.textContent = 'P';
@@ -286,7 +323,7 @@ export class Hud {
     const centreTop = el('div', 'hud-centre-top');
     centreTop.append(this.temperatureCluster, indicators, fuelCluster);
     const centreBlock = el('div', 'hud-centre-block');
-    centreBlock.append(centreTop, this.lcdEl);
+    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl);
 
     const gaugeRow = el('div', 'hud-gauge-row');
     gaugeRow.append(tach.svg, centreBlock, speed.svg);
@@ -602,6 +639,7 @@ export class Hud {
     this.oilWarningEl.classList.toggle('is-active', readout.oilFraction < FLUID_ALARM_FRACTION);
     this.refreshSegmentDisplay();
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
+    this.updateSteerStrip(readout.steering);
   }
 
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */
@@ -697,6 +735,67 @@ export class Hud {
     this.setAttr(needle, 'x2', tip.x.toFixed(2));
     this.setAttr(needle, 'y2', tip.y.toFixed(2));
     return rounded;
+  }
+
+  /**
+   * The steering-position strip: a track, its two end brackets, a centre notch and the
+   * marker the driver reads.
+   *
+   * `[---o---]` is the whole instrument. The brackets say where the ends of the travel
+   * are, the notch says straight ahead — which matters more than it looks, because the
+   * point of the thing is to tell a driver whose hands are on a keyboard whether the
+   * wheels are centred — and the marker carries the state.
+   */
+  private buildSteerStrip(): { svg: SVGSVGElement; thumb: SVGLineElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', 'hud-steer-strip');
+    svg.setAttribute('viewBox', `0 0 ${STEER_STRIP_W} ${STEER_STRIP_H}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Steering position');
+
+    const rule = (cls: string, x1: number, y1: number, x2: number, y2: number): SVGLineElement => {
+      const line = svgEl('line');
+      line.setAttribute('class', cls);
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      svg.appendChild(line);
+      return line;
+    };
+
+    // The brackets, at the ends of the travel.
+    rule('hud-steer-bracket', 3, 1.5, 3, 8.5);
+    rule('hud-steer-bracket', STEER_STRIP_W - 3, 1.5, STEER_STRIP_W - 3, 8.5);
+    // The track between them, and the notch at its centre.
+    rule('hud-steer-track', STEER_STRIP_X0, STEER_STRIP_Y, STEER_STRIP_X1, STEER_STRIP_Y);
+    rule('hud-steer-centre', STEER_STRIP_CX, 2.5, STEER_STRIP_CX, 7.5);
+
+    // Placed by the first update; parked at centre so the first frame is never drawn
+    // with the marker off the end of the track.
+    const thumb = rule('hud-steer-thumb', STEER_STRIP_CX, 1, STEER_STRIP_CX, 9);
+    return { svg, thumb };
+  }
+
+  /**
+   * Places the steering marker.
+   *
+   * POSITIVE IS LEFT, and in an SVG x grows to the right, so the sign is inverted here
+   * rather than at the source: the value the vehicle publishes is positive to the left
+   * because that is what the steering state means, and this is the one place that knows
+   * about the screen's axes.
+   */
+  private updateSteerStrip(fraction: number): void {
+    const f = Math.min(1, Math.max(-1, Number.isFinite(fraction) ? fraction : 0));
+    const x = STEER_STRIP_CX - f * STEER_STRIP_HALF_SPAN;
+    // A tenth of a unit is a tenth of a pixel width on screen, so rounding here is what
+    // keeps a held wheel from rewriting two attributes every frame.
+    const rounded = Math.round(x * 10) / 10;
+    if (rounded === this.steerStripX) return;
+    this.steerStripX = rounded;
+    const placed = String(rounded);
+    this.setAttr(this.steerThumb, 'x1', placed);
+    this.setAttr(this.steerThumb, 'x2', placed);
   }
 
   private updateAuxNeedle(

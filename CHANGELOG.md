@@ -4,6 +4,23 @@
 
 ### Added
 
+- A STEERING-POSITION STRIP on the dashboard, under the segment display: a track with
+  its two ends bracketed, a notch at straight ahead, and a marker at the rim's present
+  position. It exists because the keyboard is how most players steer this game, and a
+  keyboard has no force on the hands to say where the wheel is pointing and no way to
+  glance down at it — with `preciseSteering` in particular, which holds the angle the
+  driver built, there was nothing anywhere in the game that reported what that angle
+  was. The marker reads `steerCommand`, the RIM's position, not `steerAngle`, the road
+  wheels': the wheels lag the input by the steering box's backlash and by the rack rate,
+  so a needle reading them would move in two steps per correction and would wander while
+  the driver held the wheel still. A real rim is rigidly connected to the driver's hands,
+  and that is exactly why a driver can feel where the wheels are without looking.
+  It costs the dashboard no height: the gauge row is already 124 px tall because of the
+  two main dials, and the centre column reaches 84, so the strip sits in space that was
+  already empty. One `<svg>` and four `<line>`s, created once; the marker writes two
+  attributes only when its position moves by a tenth of a unit, so a held wheel costs
+  nothing per frame.
+
 - `tools/climb-sweep.ts` asks the question the desert actually poses, of every body in
   the catalogue: how steep a grade can this car still escape on? A real car, real
   Rapier, released from a parked start on a real incline and driven at full throttle,

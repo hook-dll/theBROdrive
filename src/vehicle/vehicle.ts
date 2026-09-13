@@ -2345,6 +2345,32 @@ export class Vehicle implements Rebasable {
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
+
+  /**
+   * Where the RIM is, as a fraction of full lock, positive to the left.
+   *
+   * This is `steerCommand` and not `steerAngle`, and the two are different on purpose.
+   * `steerAngle` is what the road wheels present after the steering box's backlash,
+   * which is the right number for the physics and the wrong one for a driver: it lags
+   * the input by the play and by the rack rate, so a needle reading it would move in
+   * two steps per correction — once when the slack is taken up and once when the
+   * backlash opens again — and would show the tyres wandering while the driver holds
+   * the wheel still. A real car's rim is rigidly connected to the driver's hands, and
+   * that is the whole reason a driver can feel where the wheels are pointing without
+   * looking at them. The rim's angle is what the hands need; the tyre's angle is what
+   * the tyre model needs.
+   *
+   * Normalised by this model's own lock, so a car with a slow rack and a car with a
+   * quick one both fill the indicator at full lock. Divided rather than clamped at the
+   * source: `targetSteer` is already bounded by `steerLock`, so the quotient lands in
+   * -1..1 on its own, and the clamp in `Hud.updateSteerStrip` is the only one needed.
+   *
+   * A front-driven car's power steer and this car's caster return both move it, which
+   * is the point — the driver is looking at a rubber band being stretched.
+   */
+  get steeringFraction(): number {
+    return this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0;
+  }
   /**
    * Stable peak lateral acceleration available to an autonomous speed planner.
    *
