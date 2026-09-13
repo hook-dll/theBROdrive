@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import { starMagnitudeFor, type GraphicsQuality } from '../game/settings';
 
 const CATALOG_URL = '/data/tycho2.bin';
 const MAGIC = 'TBR1';
@@ -26,12 +26,6 @@ const STAR_RADIUS = 2790;
  * roughly 32,000 more — the faint grain between the constellations that makes a
  * desert sky read as crowded rather than plotted.
  */
-const MAGNITUDE_LIMIT: Record<GraphicsQuality, number> = {
-  acceptable: GRAPHICS_TIERS.acceptable.starMagnitude,
-  standard: GRAPHICS_TIERS.standard.starMagnitude,
-  blessing: GRAPHICS_TIERS.blessing.starMagnitude,
-};
-
 const STAR_VERTEX = /* glsl */ `
 attribute vec3 aColor;
 attribute float aMagnitude;
@@ -126,8 +120,16 @@ export class StarField {
    * silently drops a star from the sky or draws one the tier did not ask for.
    */
   private readonly sortedMagnitudes: Float32Array;
+  /** Which presentation's star depth this field was built for. See `setQuality`. */
+  private readonly mobilePresentation: boolean;
 
-  constructor(buffer: ArrayBuffer, epoch: Date, quality: GraphicsQuality) {
+  constructor(
+    buffer: ArrayBuffer,
+    epoch: Date,
+    quality: GraphicsQuality,
+    mobilePresentation: boolean,
+  ) {
+    this.mobilePresentation = mobilePresentation;
     const view = new DataView(buffer);
     const magic = String.fromCharCode(...new Uint8Array(buffer, 0, 4));
     if (magic !== MAGIC) throw new Error(`Unsupported star catalogue: ${magic}`);
@@ -197,8 +199,8 @@ export class StarField {
    * draw range moves, so this is a per-frame-cost change and nothing else — safe
    * to call from the settings menu with the sky already on screen.
    */
-  setQuality(quality: GraphicsQuality): void {
-    const limit = MAGNITUDE_LIMIT[quality];
+  setQuality(quality: GraphicsQuality, mobilePresentation = this.mobilePresentation): void {
+    const limit = starMagnitudeFor(quality, mobilePresentation);
     const magnitudes = this.sortedMagnitudes;
     // Upper bound of the prefix, by bisection: the count of stars at or brighter
     // than the limit. Two tiers share a limit, so this runs at most twice a session.
@@ -241,8 +243,9 @@ export class StarField {
 export async function loadStarField(
   epoch: Date,
   quality: GraphicsQuality,
+  mobilePresentation: boolean,
 ): Promise<StarField> {
   const response = await fetch(CATALOG_URL);
   if (!response.ok) throw new Error(`Star catalogue failed to load: HTTP ${response.status}`);
-  return new StarField(await response.arrayBuffer(), epoch, quality);
+  return new StarField(await response.arrayBuffer(), epoch, quality, mobilePresentation);
 }

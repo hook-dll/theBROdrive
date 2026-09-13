@@ -95,6 +95,15 @@ export interface GraphicsTier {
   readonly mobileVista: GraphicsQuality;
   /** Catalogue star depth, as a limiting visual magnitude. */
   readonly starMagnitude: number;
+  /**
+   * The same under phone presentation.
+   *
+   * Stars are additive points, so this is a blend-rate cost, not a vertex cost, and on a
+   * phone it is one of the few places where the top rung asks for more than the screen can
+   * show. 8.5 is the whole catalogue — 77,667 points — against 45,617 at 8 and 15,447 at
+   * 7, and past roughly 8 a phone screen cannot resolve the extra ones anyway.
+   */
+  readonly mobileStarMagnitude: number;
   /** How far the desert is drawn before the fog dissolves it, metres. */
   readonly horizonM: number;
   /** Fog-density multiplier that keeps the horizon resolving instead of hazing out. */
@@ -107,8 +116,22 @@ export interface GraphicsTier {
    * change by recompiling the world's materials. That is why the menu says so.
    */
   readonly vehicleLightSlots: number;
+  /**
+   * The same under phone presentation, and the single largest per-PIXEL cost in the game.
+   *
+   * A slot is not a cheap thing. Three compiles the count into every lit material as a
+   * loop bound and UNROLLS it, so a fragment evaluates every slot whether or not a lamp
+   * claims it — which is why the rig keeps its unused lamps at an intensity of 1e-8
+   * instead of switching them off: toggling one would recompile the world. The bill is
+   * therefore pixels x slots, every frame, and it does not care that most of them are
+   * dark. Measured: the top rung's desktop budget is 18 spots plus 8 points, and a phone
+   * presenting 1.44 megapixels at 50 FPS was evaluating 26 lights on every lit fragment —
+   * 37 million light evaluations per frame, 1.9 billion per second. That is the heat.
+   */
+  readonly mobileVehicleLightSlots: number;
   /** The same, for the street-lamp pool. */
   readonly streetLightSlots: number;
+  readonly mobileStreetLightSlots: number;
   /** Reach multiplier for a projected headlamp beam; the top rung throws light further. */
   readonly headlightDistanceScale: number;
 }
@@ -140,10 +163,13 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     mobileVista: 'acceptable',
     starMagnitude: 7,
+    mobileStarMagnitude: 7,
     horizonM: 1500,
     fogScale: 1,
     vehicleLightSlots: 2,
+    mobileVehicleLightSlots: 2,
     streetLightSlots: 2,
+    mobileStreetLightSlots: 2,
     headlightDistanceScale: 1,
   },
   standard: {
@@ -157,10 +183,16 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     mobileVista: 'standard',
     starMagnitude: 8,
+    mobileStarMagnitude: 7.5,
     horizonM: 8000,
     fogScale: 0.42,
     vehicleLightSlots: 6,
+    // A phone gets two thirds of the desktop budget here, not half: the desktop six keeps
+    // three cars' lamps projected, which is the difference between traffic that reads as
+    // traffic and traffic that is only a lens flare.
+    mobileVehicleLightSlots: 4,
     streetLightSlots: 6,
+    mobileStreetLightSlots: 4,
     headlightDistanceScale: 1,
   },
   blessing: {
@@ -175,10 +207,17 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     mobileVista: 'standard',
     starMagnitude: 8.5,
+    mobileStarMagnitude: 8,
     horizonM: 25000,
     fogScale: 0.16,
     vehicleLightSlots: 18,
+    // Capped at the desktop STANDARD budget. The 18 above is chosen for a desktop's fill
+    // rate, and a phone at 1.44 megapixels is not a desktop; six spots and six points keep
+    // the lit road receding and three cars' beams drawn, which is everything a phone screen
+    // can show anyway.
+    mobileVehicleLightSlots: 6,
     streetLightSlots: 8,
+    mobileStreetLightSlots: 6,
     headlightDistanceScale: 3,
   },
 };
@@ -202,6 +241,33 @@ export function viewDistanceFogScaleFor(
   mobilePresentation: boolean,
 ): number {
   return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].fogScale;
+}
+
+/** Spotlight budget for vehicle lamps, as this presentation will compile it. */
+export function vehicleLightSlotsFor(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): number {
+  const tier = GRAPHICS_TIERS[quality];
+  return mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
+}
+
+/** Street-lamp budget, as this presentation will compile it. */
+export function streetLightSlotsFor(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): number {
+  const tier = GRAPHICS_TIERS[quality];
+  return mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
+}
+
+/** Catalogue star depth, as this presentation will draw it. */
+export function starMagnitudeFor(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): number {
+  const tier = GRAPHICS_TIERS[quality];
+  return mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude;
 }
 
 /** Whether this presentation pays for a sun shadow pass. */

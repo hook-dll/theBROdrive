@@ -1054,8 +1054,8 @@ export class Sky {
   }
 
   /** Applies the rendering tier to the catalogue star depth. */
-  setQuality(quality: GraphicsQuality): void {
-    this.starField.setQuality(quality);
+  setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
+    this.starField.setQuality(quality, mobilePresentation);
   }
 
   get didBakeEnvironmentThisFrame(): boolean {

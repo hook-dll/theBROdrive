@@ -5,6 +5,7 @@ import { PhysicsWorld } from './core/physics';
 import { SurfaceType } from './core/surfaces';
 import {
   DEFAULT_HEAT_MIRAGE,
+  prefersMobilePresentation,
   Renderer,
   type HeatMirageParameters,
 } from './core/renderer';
@@ -361,7 +362,11 @@ export async function bootMirageLab(): Promise<void> {
   const cameraPoint = road.sampleAt(CAMERA_S);
   const [physics, starField] = await Promise.all([
     PhysicsWorld.create(),
-    loadStarField(new Date(parseCalendarEpoch(CALENDAR)), state.quality),
+    loadStarField(
+      new Date(parseCalendarEpoch(CALENDAR)),
+      state.quality,
+      prefersMobilePresentation(),
+    ),
     loadCarModel(DEFAULT_CAR_MODEL_ID),
   ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
@@ -407,7 +412,7 @@ export async function bootMirageLab(): Promise<void> {
 
   const apply = (): void => {
     renderer.setQuality(state.quality);
-    starField.setQuality(state.quality);
+    starField.setQuality(state.quality, prefersMobilePresentation());
     renderer.setMsaa(state.msaa);
     renderer.setInkStrength(state.ink);
     renderer.setHeatMirageParameters(state.heat);
