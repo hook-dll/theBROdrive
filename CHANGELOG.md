@@ -4,6 +4,12 @@
 
 ### Added
 
+- `tools/contact-patches.ts` checks that the tyres are actually on the ground, by
+  reading back the geometry that will be drawn: one quad per grounded wheel, centred on
+  that wheel's own contact point, lying in the ground plane the wheel reported, with an
+  opacity that follows its load. It also asserts the ordering the whole feature exists
+  for — the darkest patch belongs to the most heavily loaded wheel.
+
 - `tools/pedal-dose.ts` measures what a keyboard press actually delivers to a pedal.
   A keyboard pedal is a switch, so the ONLY thing that turns a press into a dose is the
   shaping the input layer applies, and two properties are asserted: the dose is
@@ -328,6 +334,39 @@
 - `SUSP_FASTBACK` had no users and described a body from the dropped Stylized pack.
 
 ### Changed
+
+- CONTACT PATCHES UNDER EVERY CAR. A car is told apart from a car-shaped object by one
+  thing: where its weight is. A tyre is a rigid mesh pinned to a ray and it does not
+  squash, so nothing on screen reported whether a wheel was carrying anything — until
+  now four soft dark ellipses, sized to the footprint and DARKENED IN PROPORTION TO THE
+  LOAD, which report it twice: the car sits on its wheels rather than hovering over them,
+  and in a corner the inner tyres visibly lighten while the outer ones darken. That
+  transfer is the most useful thing a driver can be shown and nothing showed it.
+  NOT A SHADOW MAP, deliberately. The one that exists has 7 cm texels and stretches about
+  16:1 along the light at a low sun, so a wheel's shadow is a metre-wide smear that has
+  detached from the tyre; the cheapest graphics tier switches shadow maps off entirely.
+  A patch is affected by none of that and still works at midnight, which is also when it
+  matters most. One draw call for the whole frame, filled in nearest-first order so a
+  full pool refuses the patches nobody can see, and the quad is built from the contact
+  normal and the wheel plane's own forward PROJECTED into the ground, so a patch lies
+  flat on a banked or rutted surface instead of standing up through it.
+- CONTACT OCCLUSION in the fullscreen pass, from the depth the scene pass already wrote.
+  What it adds is the one thing a desert has none of and every object in one needs: the
+  darkening where something meets the ground. Rocks, poles, car bodies and tyres all sat
+  ON the sand with nothing under them. Six taps on a disc whose radius is a WORLD
+  distance, so an object is darkened by the same amount at any range, counting a sample
+  as an occluder when it is nearer the eye than the fragment's own plane and within a
+  depth band of it — the band being what stops a distant hillside darkening the road it
+  stands behind. Driven with a synthetic depth buffer against real GL: a 20-degree ramp
+  — the steepest face this world generates — darkens by nothing at all; a 0.4 m step at
+  its foot darkens by 32 of 255 levels; a 2 m cliff does not register, because a cliff is
+  the shadow map's job and this is for contact. Off on the cheapest tier, where the six
+  extra depth reads are exactly the kind of cost that tier exists to avoid.
+  The textbook slope correction — fitting a local plane from four extra taps — was built,
+  measured and REMOVED: a 0.35 m disc steps only 0.13 m along a face as shallow as this
+  world's, which the band already ignores, so it bought nothing and cost the contacts it
+  exists to find (a 0.4 m step's darkening fell from 32 levels to 22, and a 0.15 m one
+  vanished). The shader keeps the note so it is not re-added on principle.
 
 - KEYBOARD TAPS STEER THE CAR NOW. Two soft-centre terms sit in series — the input
   layer's smoothing of a binary key, and the vehicle's own shaping exponent — and the

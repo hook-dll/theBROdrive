@@ -54,6 +54,7 @@ import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
+import { ContactPatchField } from './render/contactpatches';
 import {
   createStickerMesh,
   createStickerPreviewMesh,
@@ -120,6 +121,17 @@ import { GameAudio, type RadioSpatialState } from './audio/gameaudio';
 const SPAWN_AHEAD_GAP = 6;
 /** Height above the eye the spawn ground probe starts from. */
 const SPAWN_PROBE_HEIGHT = 3;
+
+/**
+ * Range, metres, over which an ambient car's contact patches are drawn.
+ *
+ * Contact shadows are read at the scale of a tyre, so they stop carrying information
+ * long before a car stops being visible — but they are also cheap enough to keep well
+ * past where they stop mattering, and the fade is what stops a patch appearing as a
+ * step when a car crosses the boundary. The pool is the hard limit; this is only the
+ * offer.
+ */
+const CONTACT_PATCH_RANGE_M = 90;
 /** Trailer-only drop clearance; cars use model-aware `carSpawnYAboveGround`. */
 const TRAILER_DROP_CLEARANCE = 0.35;
 /**
@@ -315,6 +327,10 @@ async function boot(): Promise<void> {
     renderer.scene,
     world.state.settings.graphicsQuality,
   );
+  // Contact shadows are not a night effect and are not gated on the light rig: they are
+  // the only thing on screen that reports what each tyre is carrying, they are the one
+  // shadow source that survives the cheapest graphics tier, and they cost one draw call.
+  const contactPatches = new ContactPatchField(renderer.scene, origin);
   // Road texture canvases are one-time CPU work; create them under the loading cover
   // rather than letting RoadMeshProvider charge the first streamed road chunk.
   roadTextures();
@@ -1827,6 +1843,26 @@ async function boot(): Promise<void> {
       );
     }
     vehicleLights.endFrame();
+
+    // Tyres are offered to the patch pool in the same order and for the same reason:
+    // the driven car first, then the traffic by range, so a full pool refuses the
+    // patches nobody can see rather than the ones under the player's own car.
+    const patchGain = (position: THREE.Vector3): number =>
+      position.distanceTo(cam) < CONTACT_PATCH_RANGE_M
+        ? 1 - position.distanceTo(cam) / CONTACT_PATCH_RANGE_M
+        : 0;
+    contactPatches.beginFrame();
+    if (driving) {
+      driving.syncContactPatches(contactPatches, 1);
+    }
+    for (const vehicle of vehicles.values()) {
+      if (vehicle === driving) continue;
+      vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
+    }
+    traffic.forEachVehicle((_, vehicle) => {
+      vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
+    });
+    contactPatches.endFrame();
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
