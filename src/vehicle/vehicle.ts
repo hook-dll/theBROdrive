@@ -4267,7 +4267,13 @@ export class Vehicle implements Rebasable {
         spray.normalY,
         spray.normalZ,
         halfWidth,
-        Math.max(0.2, this.wheels[i].radius * 0.95),
+        // A tyre's footprint is about as long as it is wide — length is set by load and
+        // pressure, not by radius — and the first version took it from the radius at
+        // 0.95 of it, which made a patch 0.56 by 0.21 m on a Zhiguli: three to four
+        // times too long, a stripe rather than a footprint, and a stripe reads as a
+        // smeared shadow or a tyre mark rather than as a wheel standing on the ground.
+        // 0.35 of the radius is a real contact patch's half-length.
+        Math.max(0.1, this.wheels[i].radius * 0.35),
         patchOpacity(ride.loadN, ride.staticLoadN, gain),
       );
     }
