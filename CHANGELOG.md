@@ -543,6 +543,35 @@
 
 ### Fixed
 
+- A SHIPWRECK IS A SOLID NOW, and the fleet no longer draws itself as Xs. The wrecks
+  were flat cards, and a card is the wrong instrument for a seventy-metre hull: they were
+  TWO PERPENDICULAR copies of one hand-drawn profile, the trick that keeps a palm from
+  vanishing when you look down its edge. On a ship that second copy is a whole second
+  vessel at right angles, which is why the graveyard read as "/" and "\" crossing. It was
+  never a placement fault — across a whole fleet the closest two hulls sit 1.4 m clear,
+  and the report was of one hull crossing ITSELF.
+  Measured on the old geometry: of its 109 edges, 83 were open boundary, it had TWO
+  distinct normals between all 45 triangles, half its vertices had a perpendicular twin,
+  and its extent was the full length along both axes. Two shells, no volume.
+  The hull is now lofted as a closed body: a station list from stern to bow, each station
+  carrying its own half-beam and its own keel and deck heights, consecutive stations joined
+  into rings. The sheer line rising to the bow, the plan narrowing forward and the bilge
+  turning all fall out of two one-dimensional tables instead of being drawn face by face.
+  Deckhouse, funnel, mast and boom are solid boxes on top of it. Measured: 276 triangles,
+  120 distinct normals, ZERO open edges, positive signed volume, and a body 0.78 long by
+  0.08 in beam where the old one was 0.90 by 0.90.
+  The winding is settled by the geometry rather than by hand — a closed surface encloses a
+  positive signed volume, so the sign is measured and the triangles flipped when it comes
+  back negative — and the material drops to single-sided, because a solid does not need its
+  own inside drawn. That DoubleSide setting was the other half of why these read as planes.
+  Because a solid has a beam of its own, the wrecks no longer have to lie broadside to the
+  road to be legible, so they keep the angle the sea left them at.
+- `tools/wreck-hulls.ts` keeps all of it honest: that the hull is genuinely closed (every
+  edge shared by two triangles), that it has volume and more than two normals, that its
+  beam is a beam rather than a second length, and that no two hulls in a fleet intersect.
+  The bounds are the failure it was written against, so it reports the old geometry as
+  "NOT a solid (open 83, normals 2)".
+
 - A mesa dissolves in 18 seconds instead of 36. It starts fading with a kilometre of
   clearance, which a car at a cruising 80 km/h takes 45 seconds to cross — so the old
   fade occupied four fifths of the whole approach and the driver watched it for most of

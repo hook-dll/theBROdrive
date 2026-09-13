@@ -391,84 +391,218 @@ function cactusGeometry(): THREE.BufferGeometry {
  * has drifted against the low side. Authored one unit tall like every other card, so an
  * instance's height scales the whole wreck.
  */
+/**
+ * A wreck with VOLUME, not a drawn silhouette.
+ *
+ * The fleet used to be flat cards, and a card is the wrong instrument for a seventy-metre
+ * hull. It was two perpendicular copies of one hand-drawn profile, which is a trick that
+ * works for a palm — a small form needs a second plane or it vanishes when you look down
+ * its edge — and is nonsense for a ship, where the second copy is a whole second vessel at
+ * right angles. Measured on the shipped geometry: half of every vertex had a perpendicular
+ * twin, the extent was the full length along BOTH axes, and of its 109 edges 83 were open
+ * boundary — two shells with two normals between them. From the road that is literally an
+ * X, and the player reported exactly an X.
+ *
+ * So the hull is built as a solid. A station list runs from stern to bow, each station
+ * carrying its own half-beam and its own keel and deck heights, and consecutive stations
+ * are lofted into a closed ring. That is the cheapest way to make a recognisable ship:
+ * the sheer line rising to the bow, the plan narrowing forward, the bilge turning — all of
+ * it falls out of two one-dimensional tables rather than being drawn face by face.
+ *
+ * The winding is settled by the geometry itself rather than by hand. A closed surface's
+ * signed volume is positive when its normals face out, so the sign is measured and the
+ * triangles are flipped if it comes back negative. That is what lets the material drop to
+ * single-sided: a solid does not need its own inside drawn, and the old DoubleSide setting
+ * was the other half of why these read as planes.
+ *
+ * Colour is still the same painted palette, indexed by height up the hull, so the banding
+ * that made the flat ones legible survives the change to real form.
+ */
 function shipGeometry(): THREE.BufferGeometry {
-  return crossedCardGeometry((triangle) => {
-    const hullLit = displayColour(0xcf7a4e);
-    const hull = displayColour(0xb35f3c);
-    const bilge = displayColour(0x7d4029);
-    const rust = displayColour(0xe6a05c);
-    const deck = displayColour(0xd9c19c);
-    const dark = displayColour(0x4a2a1d);
-    const drift = displayColour(0xd9ab74);
-    const quad = (
-      ax: number, ay: number, bx: number, by: number,
-      cx: number, cy: number, dx: number, dy: number,
-      colour: THREE.Color, z = 0,
-    ): void => {
-      triangle(ax, ay, bx, by, cx, cy, colour, z);
-      triangle(ax, ay, cx, cy, dx, dy, colour, z);
-    };
-    /** The list, applied to every authored point: bow down to the right by ~7 degrees. */
-    const LEAN = -0.12;
-    const tilt = (x: number, y: number): readonly [number, number] => [x, y + x * LEAN];
-    const q = (
-      ax: number, ay: number, bx: number, by: number,
-      cx: number, cy: number, dx: number, dy: number,
-      colour: THREE.Color, z = 0,
-    ): void => {
-      const a = tilt(ax, ay);
-      const b = tilt(bx, by);
-      const c = tilt(cx, cy);
-      const d = tilt(dx, dy);
-      quad(a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1], colour, z);
-    };
-    const t = (
-      ax: number, ay: number, bx: number, by: number, cx: number, cy: number,
-      colour: THREE.Color, z = 0,
-    ): void => {
-      const a = tilt(ax, ay);
-      const b = tilt(bx, by);
-      const c = tilt(cx, cy);
-      triangle(a[0], a[1], b[0], b[1], c[0], c[1], colour, z);
-    };
+  const hullLit = displayColour(0xcf7a4e);
+  const hull = displayColour(0xb35f3c);
+  const bilge = displayColour(0x7d4029);
+  const rust = displayColour(0xe6a05c);
+  const deck = displayColour(0xd9c19c);
+  const dark = displayColour(0x4a2a1d);
+  const drift = displayColour(0xd9ab74);
 
-    // Hull in three horizontal bands, the deck line rising toward the bow on the right.
-    q(-0.5, 0.04, 0.52, 0.04, 0.56, 0.2, -0.48, 0.15, bilge);
-    q(-0.48, 0.15, 0.56, 0.2, 0.6, 0.3, -0.47, 0.27, hull);
-    q(-0.47, 0.27, 0.6, 0.3, 0.62, 0.42, -0.46, 0.35, hullLit);
-    // Raked bow: the stem rises past the deck and the flare cuts back under it.
-    t(0.6, 0.3, 0.86, 0.5, 0.62, 0.42, hullLit);
-    t(0.52, 0.04, 0.86, 0.5, 0.6, 0.3, hull);
-    // Torn stern: the plating has gone in three jagged steps.
-    t(-0.5, 0.04, -0.48, 0.15, -0.66, 0.12, bilge);
-    t(-0.48, 0.15, -0.47, 0.27, -0.62, 0.24, hull);
-    t(-0.47, 0.27, -0.46, 0.35, -0.58, 0.3, hullLit);
-    // Boot stripe along the old waterline, and the bleached deck edge above it.
-    q(-0.49, 0.12, 0.58, 0.24, 0.58, 0.28, -0.48, 0.16, rust, -0.001);
-    q(-0.46, 0.35, 0.62, 0.42, 0.62, 0.46, -0.46, 0.39, deck, -0.002);
-    // The hold, open to the sky: dark interior with frames standing in it.
-    q(-0.3, 0.36, 0.16, 0.4, 0.16, 0.56, -0.3, 0.52, dark, -0.003);
-    for (const x of [-0.26, -0.14, -0.02, 0.1]) {
-      q(x, 0.37, x + 0.016, 0.37, x + 0.016, 0.56, x, 0.56, rust, -0.004);
+  const positions: number[] = [];
+  const colours: number[] = [];
+  type P3 = readonly [number, number, number];
+  const tri = (a: P3, b: P3, c: P3, colour: THREE.Color): void => {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    for (let i = 0; i < 3; i++) colours.push(colour.r, colour.g, colour.b);
+  };
+  const quad = (a: P3, b: P3, c: P3, d: P3, colour: THREE.Color): void => {
+    tri(a, b, c, colour);
+    tri(a, c, d, colour);
+  };
+
+  /**
+   * Stations, stern to bow. `halfBeam` is the plan, `keelY` the bottom and `deckY` the
+   * deck edge: the sheer climbs forward and the plan narrows to a raked stem.
+   */
+  const stations: readonly { x: number; halfBeam: number; keelY: number; deckY: number }[] = [
+    { x: -0.58, halfBeam: 0.055, keelY: 0.16, deckY: 0.32 },
+    { x: -0.44, halfBeam: 0.068, keelY: 0.10, deckY: 0.36 },
+    { x: -0.26, halfBeam: 0.074, keelY: 0.06, deckY: 0.4 },
+    { x: -0.08, halfBeam: 0.076, keelY: 0.04, deckY: 0.43 },
+    { x: 0.1, halfBeam: 0.073, keelY: 0.04, deckY: 0.45 },
+    { x: 0.28, halfBeam: 0.065, keelY: 0.05, deckY: 0.46 },
+    { x: 0.44, halfBeam: 0.051, keelY: 0.07, deckY: 0.47 },
+    { x: 0.6, halfBeam: 0.032, keelY: 0.11, deckY: 0.5 },
+    { x: 0.72, halfBeam: 0.016, keelY: 0.15, deckY: 0.54 },
+    { x: 0.78, halfBeam: 0.007, keelY: 0.19, deckY: 0.58 },
+  ];
+
+  /** One station's closed cross-section, keel round the starboard side to the keel again. */
+  const ring = (s: (typeof stations)[number]): P3[] => {
+    const depth = s.deckY - s.keelY;
+    const w = s.halfBeam;
+    const at = (h: number, z: number): P3 => [s.x, s.keelY + depth * h, z];
+    return [
+      at(0, 0),
+      at(0.3, w * 0.78),
+      at(0.72, w),
+      at(1, w * 0.82),
+      at(1, 0),
+      at(1, -w * 0.82),
+      at(0.72, -w),
+      at(0.3, -w * 0.78),
+    ];
+  };
+  const bandColour = (s: (typeof stations)[number], y: number): THREE.Color => {
+    const h = (y - s.keelY) / Math.max(1e-6, s.deckY - s.keelY);
+    if (h >= 0.999) return deck;
+    if (h < 0.3) return bilge;
+    if (h < 0.78) return hull;
+    return hullLit;
+  };
+
+  const rings = stations.map(ring);
+  for (let i = 0; i + 1 < stations.length; i++) {
+    const a = rings[i]!;
+    const b = rings[i + 1]!;
+    for (let k = 0; k < a.length; k++) {
+      const k2 = (k + 1) % a.length;
+      const y = (a[k]![1] + a[k2]![1] + b[k]![1] + b[k2]![1]) * 0.25;
+      quad(a[k]!, a[k2]!, b[k2]!, b[k]!, bandColour(stations[i]!, y));
     }
-    // Deckhouse aft: three tiers, each set back, with a lit window band.
-    q(-0.44, 0.36, -0.32, 0.37, -0.32, 0.58, -0.44, 0.57, hull, -0.003);
-    q(-0.42, 0.58, -0.33, 0.58, -0.33, 0.72, -0.42, 0.72, hullLit, -0.004);
-    q(-0.41, 0.62, -0.34, 0.62, -0.34, 0.66, -0.41, 0.66, dark, -0.005);
-    q(-0.4, 0.72, -0.35, 0.72, -0.35, 0.8, -0.4, 0.8, hull, -0.004);
-    // Funnel, raked aft, with its band.
-    q(-0.24, 0.56, -0.16, 0.56, -0.14, 0.78, -0.22, 0.78, hull, -0.004);
-    q(-0.235, 0.7, -0.155, 0.7, -0.15, 0.75, -0.23, 0.75, dark, -0.005);
-    // Mast and boom forward, still standing.
-    q(0.3, 0.42, 0.318, 0.42, 0.318, 0.92, 0.3, 0.92, hull, -0.003);
-    t(0.16, 0.8, 0.318, 0.86, 0.318, 0.76, hull, -0.004);
-    // Sand drifted against the low side, and one plate lying where it fell.
-    t(-0.66, 0.12, -0.5, 0.04, -0.72, 0.02, drift, -0.001);
-    q(0.56, 0.02, 0.8, 0.02, 0.78, 0.06, 0.58, 0.07, drift, -0.001);
-    q(-0.9, 0.0, -0.74, 0.0, -0.76, 0.05, -0.9, 0.04, bilge, -0.002);
-  });
+  }
+  // Both ends closed, so the solid is watertight and needs no second side.
+  for (const [index, end] of [stations[0]!, stations[stations.length - 1]!].entries()) {
+    const r = rings[index === 0 ? 0 : rings.length - 1]!;
+    for (let k = 1; k + 1 < r.length; k++) {
+      tri(r[0]!, r[k]!, r[k + 1]!, index === 0 ? bilge : hull);
+    }
+  }
+
+  /**
+   * A solid box, for everything that stands on the deck. Six faces, twelve triangles, and
+   * it shares the ship's lean so the whole wreck lists together.
+   */
+  const box = (
+    cx: number,
+    cy: number,
+    cz: number,
+    hx: number,
+    hy: number,
+    hz: number,
+    lean: number,
+    colour: THREE.Color,
+    top: THREE.Color = colour,
+  ): void => {
+    const lift = (x: number, y: number, z: number): P3 => [x, y + (x - cx) * lean, z];
+    const x0 = cx - hx;
+    const x1 = cx + hx;
+    const y0 = cy - hy;
+    const y1 = cy + hy;
+    const z0 = cz - hz;
+    const z1 = cz + hz;
+    const v = (x: number, y: number, z: number): P3 => lift(x, y, z);
+    quad(v(x0, y1, z0), v(x1, y1, z0), v(x1, y1, z1), v(x0, y1, z1), top);
+    quad(v(x0, y0, z1), v(x1, y0, z1), v(x1, y0, z0), v(x0, y0, z0), colour);
+    quad(v(x0, y0, z0), v(x1, y0, z0), v(x1, y1, z0), v(x0, y1, z0), colour);
+    quad(v(x0, y1, z1), v(x1, y1, z1), v(x1, y0, z1), v(x0, y0, z1), colour);
+    quad(v(x0, y0, z1), v(x0, y1, z1), v(x0, y1, z0), v(x0, y0, z0), colour);
+    quad(v(x1, y0, z0), v(x1, y1, z0), v(x1, y1, z1), v(x1, y0, z1), colour);
+  };
+  /** The wreck's own lean: bow down to starboard by about seven degrees. */
+  const LEAN = -0.12;
+
+  // Deckhouse aft: three tiers, each set back, with a dark window band on the middle one.
+  box(-0.42, 0.38, 0, 0.075, 0.045, 0.052, LEAN, hull);
+  box(-0.41, 0.47, 0, 0.058, 0.045, 0.042, LEAN, hullLit);
+  box(-0.4, 0.545, 0, 0.042, 0.03, 0.03, LEAN, hull);
+  box(-0.41, 0.47, 0.043, 0.05, 0.02, 0.002, LEAN, dark);
+  box(-0.41, 0.47, -0.043, 0.05, 0.02, 0.002, LEAN, dark);
+  // Funnel, raked aft, with its band.
+  box(-0.2, 0.62, 0, 0.045, 0.09, 0.032, LEAN, hull);
+  box(-0.2, 0.665, 0, 0.046, 0.018, 0.033, LEAN, dark);
+  // Mast and boom forward, still standing; the boom is a slim box, not a line.
+  box(0.32, 0.62, 0, 0.011, 0.17, 0.011, LEAN, hull);
+  box(0.3, 0.66, 0, 0.09, 0.008, 0.008, LEAN, hull);
+  // Boot stripe along the old waterline, a thin proud box rather than a painted face.
+  box(0.05, 0.09, 0, 0.6, 0.006, 0.078, LEAN, rust);
+
+  // Debris on the sand: two plates and a drift of sand, which remain flat because they
+  // are lying on the ground and a plate has no third dimension to lose.
+  quad(
+    [-0.86, 0.01, -0.06], [-0.66, 0.01, 0.02], [-0.68, 0.05, 0.06], [-0.9, 0.05, -0.02],
+    bilge,
+  );
+  quad(
+    [-0.7, 0.005, 0.1], [-0.52, 0.005, 0.09], [-0.53, 0.055, 0.13], [-0.69, 0.055, 0.14],
+    drift,
+  );
+
+  // WINDING BY MEASUREMENT, not by hand: a closed surface encloses a positive signed
+  // volume, so the sign is read off the geometry and the triangles flipped when it comes
+  // back negative. Getting the loft's triangle order right on paper is not worth the
+  // effort when the answer is one sum away.
+  let volume = 0;
+  for (let i = 0; i < positions.length; i += 9) {
+    const ax = positions[i]!;
+    const ay = positions[i + 1]!;
+    const az = positions[i + 2]!;
+    const bx = positions[i + 3]!;
+    const by = positions[i + 4]!;
+    const bz = positions[i + 5]!;
+    const cx = positions[i + 6]!;
+    const cy = positions[i + 7]!;
+    const cz = positions[i + 8]!;
+    volume += (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6;
+  }
+  if (volume < 0) {
+    for (let i = 0; i < positions.length; i += 9) {
+      for (let k = 0; k < 3; k++) {
+        const t = positions[i + 3 + k]!;
+        positions[i + 3 + k] = positions[i + 6 + k]!;
+        positions[i + 6 + k] = t;
+      }
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
+/** A solid needs its outside drawn and nothing else. */
+function hullMaterial(): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    side: THREE.FrontSide,
+    transparent: true,
+    opacity: 0,
+    depthWrite: true,
+    fog: true,
+    toneMapped: true,
+  });
+}
 
 export function cardMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
@@ -643,9 +777,12 @@ export class MirageTableau {
    * off the geometry rather than guessed.
    *
    * Two hand-written constants in a row got this wrong and the fleet kept crossing.
-   * A hull is not centred on its origin and it is two perpendicular cards, so its
-   * footprint is neither a half-length nor a circle about the middle: it is the
-   * furthest vertex in the XZ plane, and only the geometry knows where that is.
+   * A hull is not centred on its origin: the bow runs to 0.78 of the length while the
+   * stern stops at 0.58, and the debris reaches further still, so its footprint is
+   * neither a half-length nor a circle about the middle. It is the furthest vertex in
+   * the XZ plane, and only the geometry knows where that is. What this guards against
+   * is hulls INTERSECTING; the crossing the player reported was the silhouette itself,
+   * which is a separate fault and is fixed in `shipGeometry`.
    */
   private readonly shipReach: number;
   private setbackM = 0;
@@ -667,7 +804,7 @@ export class MirageTableau {
     const accentMaterial = blockMaterial(true);
     const roofMaterial = blockMaterial(true);
     const streetMaterial = blockMaterial(false);
-    const shipMaterial = cardMaterial();
+    const shipMaterial = hullMaterial();
     this.materials = [
       palmMaterial,
       treeMaterial,
@@ -1309,7 +1446,12 @@ export class MirageTableau {
       const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI * 2;
       // A hull lies ALONG the dune it stranded on: the keel takes the ground's own
       // tilt, and the derelict lean is added to that rather than used instead of it.
-      const plane = fitGround(this.terrain, x, z, yaw, length * 0.5, length * 0.5, hintS, 2);
+      // The footprint the ground fit is taken over: half a LENGTH along the hull, but
+      // half a BEAM across it. These were equal while a wreck was a square card, and
+      // they are not any more — the hull is 0.14 of its length in beam, so fitting a
+      // square sampled ground the ship does not stand on and tilted it for terrain it
+      // never touches.
+      const plane = fitGround(this.terrain, x, z, yaw, length * 0.5, length * 0.07, hintS, 2);
       const roll = plane.roll + (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
       this.setTransform(
         this.ships,
