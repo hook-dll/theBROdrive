@@ -97,8 +97,17 @@ const MESA_CELL_SIZE = 2200;
 const MESA_OCCUPANCY = 0.18;
 /** Clear ground kept between the camera and a mesa when its dissolve begins. */
 const MESA_DISSOLVE_CLEARANCE = 1000;
-/** A slow, conspicuous disappearance that begins with one kilometre of clearance. */
-const MESA_DISSOLVE_SECONDS = 36;
+/**
+ * A conspicuous disappearance that begins with one kilometre of clearance.
+ *
+ * 18 seconds, halved from 36. A car crossing that kilometre at a cruising 80 km/h takes
+ * 45 seconds, so at 36 the dissolve occupied four fifths of the whole approach and the
+ * driver watched a mesa fade for most of the way in. At 18 it is over in the first
+ * 40 per cent and the rest of the approach is spent with the thing simply gone, which
+ * is what makes it read as an event that happened rather than as a long fade that ran
+ * alongside the drive.
+ */
+const MESA_DISSOLVE_SECONDS = 18;
 const MESA_MAX_DISTANCE = 18_000;
 const MESA_OUTER_FADE = 2000;
 const MESA_RESIDENCY_MARGIN = SAMPLE_CELL_SIZE * 2;
