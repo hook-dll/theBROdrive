@@ -19,8 +19,6 @@
   --hud-diesel: #c9a227;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  /* Permanent scene softness. Change this one value while tuning the look. */
-  --persistent-scene-blur: 0.08px;
 }
 
 * {
@@ -723,15 +721,30 @@ body.is-cinematic #ui {
  *  Hidden health and death                                           *
  * ------------------------------------------------------------------ */
 
-.hud-persistent-blur {
-  position: fixed;
-  inset: -24px;
-  z-index: 17;
-  pointer-events: none;
-  -webkit-backdrop-filter: blur(var(--persistent-scene-blur));
-  backdrop-filter: blur(var(--persistent-scene-blur));
-}
+/* THERE IS DELIBERATELY NO FULL-SCREEN SCENE BLUR, and it is worth saying why, because
+   one used to sit here and looked harmless.
 
+   It was a BACKDROP filter over the whole viewport, so the compositor had to read back
+   the frame the 3D pass had just drawn and filter it before anything else could land on
+   top — on every frame, for as long as it existed, because the scene beneath it is never
+   still. That is a full-frame read and write per frame, which on a phone is a real cost.
+
+   And the radius was 0.08 px, which at any device pixel ratio resolves to a fraction of
+   one screen pixel. Measured rather than assumed: with the game loop stopped and CSS
+   animations frozen so the composited frame was provably static (the same state captured
+   twice gave a byte-identical PNG), a probe element with `blur(0.08px)` produced a PNG
+   BYTE-IDENTICAL to the frame with no element at all — same SHA-256. The same probe at
+   6 px changed the output substantially, so the test could see a blur and the null result
+   is a real one, not a blind test.
+
+   So the whole thing paid a full-frame compositor pass per frame for an effect that does
+   not alter a single byte of the picture. That is the worst trade in the file.
+
+   If a softness of the scene is ever wanted again, it belongs in the renderer as a
+   deliberate pass with a visible radius — not as a CSS filter over the canvas. Note that
+   the MENU's background blur is a different thing and is still there on purpose: that is
+   a `filter` on a static image behind the title screen, not a `backdrop-filter` over the
+   live scene, and it costs nothing while driving. */
 .hud-damage-vignette {
   --damage-opacity: 0;
   --damage-inner: 72%;

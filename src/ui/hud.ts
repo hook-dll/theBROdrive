@@ -231,7 +231,6 @@ export class Hud {
   private steerStripX = -1;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
-  private readonly persistentBlurEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
   private readonly deathFadeEl: HTMLElement;
   private readonly root: HTMLElement;
@@ -339,7 +338,6 @@ export class Hud {
 
 
     this.toastEl = el('div', 'hud-toasts');
-    this.persistentBlurEl = el('div', 'hud-persistent-blur');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -352,12 +350,9 @@ export class Hud {
       this.toastEl,
       this.gumBubbleEl,
     ];
-    root.append(
-      ...this.tops,
-      this.persistentBlurEl,
-      this.damageVignetteEl,
-      this.deathFadeEl,
-    );
+    // No full-screen blur element: see the note in hud.css for why it was removed
+    // rather than tuned.
+    root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
   }
 
   private buildIconLamp(className: string, label: string, pathData: string): HTMLElement {
@@ -928,7 +923,6 @@ export class Hud {
     for (const node of this.tops) node.remove();
     this.tops.length = 0;
     this.damageVignetteEl.remove();
-    this.persistentBlurEl.remove();
     this.deathFadeEl.remove();
     this.root.classList.remove('is-death-sequence');
   }
