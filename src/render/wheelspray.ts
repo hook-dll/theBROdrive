@@ -199,6 +199,15 @@ export class WheelSpray {
 
   /** Ring head: the slot the next mote overwrites. */
   private cursor = 0;
+
+  /**
+   * Motes in flight, so an empty pool can be skipped instead of scanned.
+   *
+   * The pool is fixed at 400 and the ring overwrites dead slots first, so this is a
+   * cheap count rather than a search: a spawn only adds when it takes a slot that was
+   * not already burning, and `update` recomputes it exactly from the survivors.
+   */
+  private liveCount = 0;
   /** Fractional mote accumulator, so low emission rates still fire steadily. */
   private acc = 0;
 
@@ -363,6 +372,7 @@ export class WheelSpray {
       this.position[i3 + 1] = y + 0.02 + Math.random() * 0.05;
       this.position[i3 + 2] = z + (Math.random() - 0.5) * 0.08;
 
+      if (this.life[i] <= 0) this.liveCount++;
       this.life[i] = lifeMin + Math.random() * lifeSpan;
       this.age[i] = 0;
       this.spawnSize[i] = sizeMin + Math.random() * sizeSpan;
@@ -405,6 +415,7 @@ export class WheelSpray {
       this.position[i3] = x + (Math.random() - 0.5) * 0.3;
       this.position[i3 + 1] = y + Math.random() * 0.25;
       this.position[i3 + 2] = z + (Math.random() - 0.5) * 0.3;
+      if (this.life[i] <= 0) this.liveCount++;
       this.life[i] = 0.55 + Math.random() * 0.45;
       this.age[i] = 0;
       this.spawnSize[i] = 0.12 + Math.random() * 0.22;
@@ -434,6 +445,12 @@ export class WheelSpray {
     // so the uniform never allocates.
     spraySand.setHex(desertPaletteAt(s).spray);
     if (dt <= 0) return;
+    // NOTHING IN FLIGHT IS NOTHING TO DO. Without this the pool is scanned end to end and
+    // three dynamic attributes are flagged every frame a wheel is not slipping — which is
+    // most of them — for a draw that is 400 discarded points. Measured cost of the
+    // unconditional path: 400 slot tests plus 8,000 bytes of attribute flags per frame.
+    if (this.liveCount === 0) return;
+    let live = 0;
     for (let i = 0; i < POOL_SIZE; i++) {
       const life = this.life[i];
       if (life <= 0) continue;
@@ -453,7 +470,9 @@ export class WheelSpray {
       this.position[i3 + 2] += this.velocity[i3 + 2] * dt;
       this.alpha[i] = this.spawnAlpha[i] * (1 - t);
       this.size[i] = this.spawnSize[i] * (1 + (this.endSize[i] - 1) * t);
+      live++;
     }
+    this.liveCount = live;
     this.posAttr.needsUpdate = true;
     this.sizeAttr.needsUpdate = true;
     this.alphaAttr.needsUpdate = true;

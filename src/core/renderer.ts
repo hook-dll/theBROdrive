@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { AdaptiveResolutionController } from './adaptivequality';
-import { DEFAULT_INK_STRENGTH, GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import {
+  DEFAULT_INK_STRENGTH,
+  GRAPHICS_TIERS,
+  shadowsFor,
+  type GraphicsQuality,
+} from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
 /**
@@ -141,19 +146,6 @@ export function prefersMobilePresentation(): boolean {
   return coarse || phoneSized;
 }
 
-/**
- * Never spend a phone's 90/120 Hz refresh budget on duplicate 60 Hz simulation states.
- *
- * Read from the rung, because a frame-rate target is a statement about the machine and
- * belongs on the same rung as its pixel budget: the weakest rung buys resolution with
- * frame rate, and the two are decided together or not at all.
- */
-export function presentationFpsFor(
-  quality: GraphicsQuality,
-  mobilePresentation = prefersMobilePresentation(),
-): number | null {
-  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileFps : null;
-}
 // ---------------------------------------------------------------------------
 // Heat haze: refraction through the hot layer over the sand, as a post pass.
 //
@@ -870,7 +862,12 @@ export class Renderer {
       // backbuffer would allocate and resolve an image that cannot differ by one
       // pixel after the fullscreen pass.
       antialias: false,
-      powerPreference: 'high-performance',
+      // Never ask a phone for its highest-performance configuration. On a desktop this
+      // hint picks the discrete GPU, which is what it is for; on a phone there is only
+      // one GPU, and asking for maximum performance is asking the driver and the power
+      // governor for clocks the game does not need and the device cannot shed. The game
+      // wants a phone that stays cool, and says so.
+      powerPreference: this.mobilePresentation ? 'default' : 'high-performance',
     });
     this.adaptiveResolution = new AdaptiveResolutionController(quality);
     const context = this.renderer.getContext();
@@ -889,7 +886,7 @@ export class Renderer {
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.enabled = GRAPHICS_TIERS[quality].shadows;
+    this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
     // noise at this shadow resolution; plain PCF is visually near-identical and
     // materially cheaper on a low-end iGPU.
@@ -1103,13 +1100,15 @@ export class Renderer {
    * floor depended on which rung it was.
    */
   private updateAdaptiveFloor(): void {
-    const basePixels =
-      this.renderer.domElement.clientWidth * this.renderer.domElement.clientHeight;
+    const canvas = this.renderer.domElement;
+    // `this.basePixelRatio`, never the renderer's live ratio: `setQuality` recomputes the
+    // floor BEFORE it installs the new ratio, so reading it here would measure against the
+    // rung the machine just left and quietly hand back that rung's floor.
     this.adaptiveResolution.setMinimumScale(
       minimumScaleFor(
         this.quality,
-        basePixels,
-        this.renderer.getPixelRatio(),
+        canvas.clientWidth * canvas.clientHeight,
+        this.basePixelRatio,
         this.mobilePresentation,
       ),
     );
@@ -1427,7 +1426,10 @@ export class Renderer {
     this.quality = quality;
     this.adaptiveResolution.setQuality(quality);
     this.disposeGpuQueries();
-    this.renderer.shadowMap.enabled = quality !== 'acceptable';
+    // Read from the table, never re-derived: this line used to test the tier name
+    // directly, and a phone's shadow pass is now off on every rung, so a second copy of
+    // the rule here would silently disagree with the one the constructor used.
+    this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);

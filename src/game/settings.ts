@@ -72,8 +72,27 @@ export interface GraphicsTier {
   readonly shadows: boolean;
   /** Default for `Settings.msaa`; a player may still choose otherwise. */
   readonly msaa: boolean;
-  /** Presentation cap for phone-shaped devices. Simulation stays at 60 Hz regardless. */
-  readonly mobileFps: number | null;
+  /**
+   * Whether a phone presentation gets the sun shadow pass at this rung.
+   *
+   * Not a taste a rung may offer a phone. The shadow pass renders the world a SECOND
+   * time from the light, and on a phone that is the largest single GPU cost in a frame
+   * and a sustained one — the whole reason a phone gets warm rather than slow. A phone's
+   * rung buys sharpness, so this is off on every rung and only the desktop column keeps
+   * the choice.
+   */
+  readonly mobileShadows: boolean;
+  /**
+   * The desktop rung whose horizon and fog a phone presentation inherits.
+   *
+   * A phone's pixel cap does nothing for the vista, because the vista costs CPU terrain
+   * sampling and that is set by RADIUS, not by how many pixels the screen has. Measured
+   * on the vista with a 5950X: a cell rebuild costs 13.0 ms at 4 km, 17.3 ms at 8 km and
+   * 32.8 ms at 25 km, and a phone core is slower than that — so the 25 km map is a
+   * multi-frame hitch on every cell crossing. Naming an AUTHORED pair rather than
+   * inventing a horizon keeps the fog the tuned one.
+   */
+  readonly mobileVista: GraphicsQuality;
   /** Catalogue star depth, as a limiting visual magnitude. */
   readonly starMagnitude: number;
   /** How far the desert is drawn before the fog dissolves it, metres. */
@@ -97,13 +116,17 @@ export interface GraphicsTier {
 /**
  * The rungs, weakest first. Read them as three machines, not three presets:
  *
- *  - `acceptable` — a phone, or a mini-PC on a television. 30 FPS and no shadow pass,
- *    because at this size the resolution is worth more than the frame rate and the
- *    shadow pass is the one cost that cannot be paid in pixels. The authored horizon.
+ *  - `acceptable` — a phone, or a mini-PC on a television. No shadow pass, because it is
+ *    the one cost that cannot be paid in pixels. The authored horizon.
  *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
- *    Native on a 1440p display, 60 FPS on a phone, shadows on, 8 km of horizon.
+ *    Native on a 1440p display, shadows on, 8 km of horizon.
  *  - `blessing` — a machine with headroom to spare. Supersamples, 25 km of horizon,
  *    and a sky deep enough to be crowded rather than plotted.
+ *
+ * A rung is a statement about the MACHINE, and a phone is two machines at once: the one
+ * that draws the picture and the one that gets hot. Its pixel ceiling and its vista are
+ * the first; its shadow pass and its frame rate are the second — and the second is the
+ * player's, because no browser will tell the game how warm the phone is.
  */
 export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
   acceptable: {
@@ -114,7 +137,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1,
     shadows: false,
     msaa: false,
-    mobileFps: 30,
+    mobileShadows: false,
+    mobileVista: 'acceptable',
     starMagnitude: 7,
     horizonM: 1500,
     fogScale: 1,
@@ -130,7 +154,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1,
     shadows: true,
     msaa: true,
-    mobileFps: 60,
+    mobileShadows: false,
+    mobileVista: 'standard',
     starMagnitude: 8,
     horizonM: 8000,
     fogScale: 0.42,
@@ -147,7 +172,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1.25,
     shadows: true,
     msaa: true,
-    mobileFps: 60,
+    mobileShadows: false,
+    mobileVista: 'standard',
     starMagnitude: 8.5,
     horizonM: 25000,
     fogScale: 0.16,
@@ -157,17 +183,47 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
   },
 };
 
+/**
+ * The rung whose vista a presentation actually gets, which is not always its own: a
+ * phone inherits the authored pair its rung names. See `GraphicsTier.mobileVista`.
+ */
+function vistaRungFor(quality: GraphicsQuality, mobilePresentation: boolean): GraphicsQuality {
+  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileVista : quality;
+}
+
 /** Convenience readers, so callers ask the question they mean. */
-export const VIEW_DISTANCE_METRES: Record<GraphicsQuality, number> = {
-  acceptable: GRAPHICS_TIERS.acceptable.horizonM,
-  standard: GRAPHICS_TIERS.standard.horizonM,
-  blessing: GRAPHICS_TIERS.blessing.horizonM,
-};
-export const VIEW_DISTANCE_FOG_SCALE: Record<GraphicsQuality, number> = {
-  acceptable: GRAPHICS_TIERS.acceptable.fogScale,
-  standard: GRAPHICS_TIERS.standard.fogScale,
-  blessing: GRAPHICS_TIERS.blessing.fogScale,
-};
+export function viewDistanceFor(quality: GraphicsQuality, mobilePresentation: boolean): number {
+  return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].horizonM;
+}
+
+/** The fog that dissolves the horizon this presentation actually has. */
+export function viewDistanceFogScaleFor(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): number {
+  return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].fogScale;
+}
+
+/** Whether this presentation pays for a sun shadow pass. */
+export function shadowsFor(quality: GraphicsQuality, mobilePresentation: boolean): boolean {
+  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileShadows : GRAPHICS_TIERS[quality].shadows;
+}
+
+/**
+ * Presentation cap in FPS.
+ *
+ * On a phone this is the player's own thermal setting, because a browser exposes no
+ * thermal state, no battery temperature and no clock speed — the machine cannot say
+ * whether it is hot, only the person holding it can. On a desktop there is no cap at
+ * all: the adaptive controller already holds the GPU at its target by moving resolution,
+ * and nothing there is running on a battery.
+ */
+export function presentationFpsFor(
+  mobilePresentation: boolean,
+  mobileFrameRate: number,
+): number | null {
+  return mobilePresentation ? mobileFrameRate : null;
+}
 
 export interface Settings {
   gearboxMode: GearboxMode;
@@ -199,6 +255,20 @@ export interface Settings {
   graphicsQuality: GraphicsQuality;
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
+  /**
+   * Frames per second a phone presentation may present: 30 or 60.
+   *
+   * The one thermal control in the game, and it is the player's to make because nothing
+   * else can make it. It is also the largest lever there is: half the frames is half the
+   * GPU work, half the render-side CPU and half the presenting, while the simulation
+   * keeps its fixed 60 Hz so the car still handles identically.
+   *
+   * Deliberately NOT on the rendering rung, which is where it used to live, because that
+   * coupled a phone's sharpness to its heat: the only way off a blurry 960x540 picture on
+   * a 1440p screen was to accept 60 FPS with it. How sharp the picture is and how warm
+   * the phone gets are different questions and now have different answers.
+   */
+  mobileFrameRate: number;
   /** Post-process landscape outline amount, 0..1. */
   inkStrength: number;
   /**
@@ -227,6 +297,10 @@ export const TRAFFIC_COUNT_MAX = GAMEPLAY_CONFIG.trafficCountMax;
 export const TRAFFIC_COUNT_STEP = GAMEPLAY_CONFIG.trafficCountStep;
 export const DEFAULT_TRAFFIC_COUNT = GAMEPLAY_CONFIG.defaultTrafficCount;
 
+/** The frame rates a phone may present at. Cool first: it is the default. */
+export const MOBILE_FRAME_RATES = [30, 60] as const;
+export const DEFAULT_MOBILE_FRAME_RATE = 30;
+
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
 
@@ -251,6 +325,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // key away.
   graphicsQuality: 'standard',
   msaa: true,
+  // Cool by default. A phone that is too slow can be made faster by moving up the
+  // ladder; a phone that is too hot has no such lever, and heat is what damages it.
+  mobileFrameRate: DEFAULT_MOBILE_FRAME_RATE,
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
@@ -347,6 +424,13 @@ export function sanitizeSettings(raw: unknown): Settings {
       typeof obj.msaa === 'boolean'
         ? obj.msaa
         : obj.graphicsQuality !== 'acceptable',
+    // Snap to an offered rate rather than clamping, so a hand-edited 31 or 144 cannot
+    // become a frame rate the menu has no button for.
+    mobileFrameRate:
+      typeof obj.mobileFrameRate === 'number'
+      && MOBILE_FRAME_RATES.some((rate) => rate === obj.mobileFrameRate)
+        ? obj.mobileFrameRate
+        : DEFAULT_MOBILE_FRAME_RATE,
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
