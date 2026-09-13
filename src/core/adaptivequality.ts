@@ -85,6 +85,16 @@ export class AdaptiveResolutionController {
   }
 
   /**
+   * Exponential mean of the GPU durations measured so far, or null before any.
+   *
+   * Exposed for the development frame report, which is the only way to tell on a real
+   * phone whether a hot frame is waiting on the GPU or on the CPU.
+   */
+  get averageGpuMs(): number | null {
+    return this.average;
+  }
+
+  /**
    * Whether the current scale has been MEASURED rather than merely left alone.
    *
    * "Nothing changed recently" is not the same answer: a decision needs its

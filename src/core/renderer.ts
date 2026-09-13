@@ -1312,6 +1312,17 @@ export class Renderer {
     return this.timerQueryExt !== null;
   }
 
+  /**
+   * Mean measured GPU duration of a frame, or null without timer queries.
+   *
+   * Development only in practice: it exists so the on-device frame report can say
+   * whether the frame is waiting on the GPU or the CPU, which no other reading can
+   * separate on a phone.
+   */
+  get gpuFrameMs(): number | null {
+    return this.adaptiveResolution.averageGpuMs;
+  }
+
   /** Whether the live scale has been measured long enough to stand on its own. */
   get resolutionSettled(): boolean {
     return this.adaptiveResolution.verdictReached(performance.now());

@@ -1222,6 +1222,19 @@ body.is-cinematic #ui {
   min-width: 0;
 }
 
+/* The development frame readout: monospace and preformatted, because it is a table
+   of numbers that has to line up to be readable, and it is copied by eye. */
+.menu-perf {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--menu-text, #e8dcc4);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--menu-rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
 .menu-pane {
   display: flex;
   flex-direction: column;

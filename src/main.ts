@@ -494,6 +494,38 @@ async function boot(): Promise<void> {
   // rendering does not traverse every mesh when the condition is unchanged.
   const appliedBodyDirt = new WeakMap<Vehicle, number>();
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
+
+  /**
+   * The frame cost readout, as text, for the pause menu's development screen.
+   *
+   * WHY IT EXISTS. The game runs on four machines, and one of them is a phone that gets
+   * warm. Whether that warmth is the GPU or the CPU cannot be decided from a desktop, and
+   * cannot be guessed at either: a phone presenting a third of a megapixel at 30 FPS is
+   * asking almost nothing of its GPU, so if the same phone still heats, the cost is
+   * somewhere else and only a reading taken on the phone can say where. So the reading is
+   * put on the screen that the phone actually has.
+   *
+   * The first line is the verdict and the rest is the evidence. `GPU` beside a frame time
+   * near the presented interval means the GPU is the constraint; a busy-per-second figure
+   * that dwarfs it means the CPU is, and the ranked sections say which part.
+   */
+  const frameReport = import.meta.env.DEV
+    ? (): string => {
+        const s = world.state.settings;
+        const gpuMs = renderer.gpuFrameMs;
+        const framesPerSecond =
+          mobilePresentation ? `${s.mobileFrameRate} FPS (capped)` : 'uncapped';
+        const header = [
+          `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
+          `pixels ${(renderer.resolutionScale * 100).toFixed(0)}% of ceiling, ` +
+            `dpr ${window.devicePixelRatio.toFixed(2)}, msaa ${s.msaa ? 'on' : 'off'}`,
+          `presenting ${framesPerSecond}, shadows ${s.graphicsQuality === 'acceptable' ? 'off' : 'see tier'}`,
+          `GPU ${gpuMs === null ? 'not measurable on this device' : `${gpuMs.toFixed(2)} ms per frame`}`,
+          `simulation 60 Hz, sim ticks per frame ${(60 / (mobilePresentation ? s.mobileFrameRate : 60)).toFixed(1)}`,
+        ].join('\n');
+        return `${header}\n\n${frameProfiler?.report() ?? 'profiler unavailable'}`;
+      }
+    : undefined;
   const modelWarmups = new Map<string, Promise<void>>();
   const materializeVehicle = (car: CarState): Promise<Vehicle> => {
     const existing = vehicles.get(car.id);
@@ -1321,7 +1353,9 @@ async function boot(): Promise<void> {
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
+    frameProfiler?.begin('physics');
     physics.step();
+    frameProfiler?.end('physics');
     const injury = resolvePlayerImpacts(driving);
     if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
@@ -1597,6 +1631,7 @@ async function boot(): Promise<void> {
     // Fairly alternate first access to the one-job frame budget. Road remains first
     // on one frame and desert on the next; an idle subsystem consumes nothing, so
     // the other still proceeds without delay.
+    frameProfiler?.begin('streaming');
     if ((frameId & 1) === 0) {
       streamer.update(activeS, frameId, desertLateral);
       desert.update(desertX, desertZ, desertLateral, frameId);
@@ -1604,7 +1639,10 @@ async function boot(): Promise<void> {
       desert.update(desertX, desertZ, desertLateral, frameId);
       streamer.update(activeS, frameId, desertLateral);
     }
+    frameProfiler?.end('streaming');
+    frameProfiler?.begin('agents');
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
+    frameProfiler?.end('agents');
 
     // Props that come apart. The car is the only thing heavy enough to do it, so the
     // impactor is the driven chassis: absolute centre, its own forward,
@@ -1726,6 +1764,7 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
+    frameProfiler?.begin('vehicles');
     for (const vehicle of vehicles.values()) {
       vehicle.syncVisuals(alpha);
       // Dirt is read from the Vehicle's live accumulator rather than batched save
@@ -1743,12 +1782,14 @@ async function boot(): Promise<void> {
     // at its constructor pose, leaving an invisible trailer attached to the car.
     trailerField.syncVisuals(alpha);
     debris.syncVisuals();
+    frameProfiler?.end('vehicles');
 
     // Ground effects share one wheel report. Spray ages every frame; tracks retain the
     // bounded recent route. Nothing is emitted on a surface whose profile rejects it.
     //
     // Fed by the driven car AND every trailer: an unpowered or locked trailer tyre can
     // disturb sand exactly like a car tyre, and the shared state keeps both paths identical.
+    frameProfiler?.begin('effects');
     wheelSpray.update(frameDt, activeS);
     if (driving) {
       for (const ws of driving.wheelSpray) emitWheelEffects(ws, frameDt);
@@ -1810,6 +1851,7 @@ async function boot(): Promise<void> {
     touch.setZoomAvailable(!dying && camera.mode === 'chase');
 
     const cam = renderer.camera.position;
+    frameProfiler?.begin('sky');
     sky.update(
       s.calendarEpoch,
       s.timeOfDay,
@@ -1819,6 +1861,7 @@ async function boot(): Promise<void> {
       cam.y,
       cam.z,
     );
+    frameProfiler?.end('sky');
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
@@ -1878,6 +1921,7 @@ async function boot(): Promise<void> {
       vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
     });
     contactPatches.endFrame();
+    frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
@@ -1953,6 +1997,7 @@ async function boot(): Promise<void> {
     // stored relative to the origin their chunk was BUILT under, which after a rebase
     // is not the current one, so the chunk's own build origin is the bridge and only
     // an absolute camera makes the two sides comparable. See props.ts setLamps.
+    frameProfiler?.begin('lights');
     streamer.setLamps(night, cam.x + origin.x, cam.z + origin.z);
     const lampDirection = camera.eyeDirection;
     lightBudget.update(
@@ -1964,6 +2009,7 @@ async function boot(): Promise<void> {
       night,
       streamer.lampRevision,
     );
+    frameProfiler?.end('lights');
 
     if (driving) {
       const stats = driving.stats;
@@ -2121,11 +2167,23 @@ async function boot(): Promise<void> {
         hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
       }
     }
+    frameProfiler?.begin('draw');
     renderer.render();
+    frameProfiler?.end('draw');
     frameProfiler?.endFrame();
   };
 
-  const loop = new GameLoop({ fixedUpdate, render });
+  // The simulation is wrapped rather than instrumented from the inside: a tick is one
+  // unit of work, several of them run per presented frame, and the profiler accumulates
+  // repeats — so the timing pair belongs at the boundary where the repetition happens.
+  const loop = new GameLoop({
+    fixedUpdate: (dt: number): void => {
+      frameProfiler?.begin('sim');
+      fixedUpdate(dt);
+      frameProfiler?.end('sim');
+    },
+    render,
+  });
   loop.setRenderFps(
     presentationFpsFor(mobilePresentation, world.state.settings.mobileFrameRate),
   );
@@ -2437,6 +2495,7 @@ async function boot(): Promise<void> {
    */
   const pauseHooks: PauseHooks = {
     settings: () => world.state.settings,
+    frameReport,
     applySettings: (next) => {
       const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
