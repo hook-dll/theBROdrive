@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
 
 /**
  * Renderer spotlights for the vehicle lamps that are LIT, wherever they are.
@@ -47,16 +48,16 @@ import * as THREE from 'three';
  */
 /** Persistent spotlight budget compiled into every lit material for this session. */
 const SLOT_COUNT: Record<'acceptable' | 'standard' | 'blessing', number> = {
-  acceptable: 2,
-  standard: 6,
-  // Blessing assumes a capable GPU: nine cars can keep both headlamps projected.
-  blessing: 18,
+  acceptable: GRAPHICS_TIERS.acceptable.vehicleLightSlots,
+  standard: GRAPHICS_TIERS.standard.vehicleLightSlots,
+  // The top rung assumes a capable GPU: nine cars can keep both headlamps projected.
+  blessing: GRAPHICS_TIERS.blessing.vehicleLightSlots,
 };
-/** Blessing also keeps the projected headlight cone visible three times farther. */
+/** The top rung also keeps the projected cone visible three times farther. */
 const HEADLIGHT_DISTANCE_SCALE: Record<'acceptable' | 'standard' | 'blessing', number> = {
-  acceptable: 1,
-  standard: 1,
-  blessing: 3,
+  acceptable: GRAPHICS_TIERS.acceptable.headlightDistanceScale,
+  standard: GRAPHICS_TIERS.standard.headlightDistanceScale,
+  blessing: GRAPHICS_TIERS.blessing.headlightDistanceScale,
 };
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;

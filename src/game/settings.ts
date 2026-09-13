@@ -14,58 +14,159 @@ import { BINDABLE_ACTIONS } from '../core/input';
 export type GearboxMode = 'manual' | 'automatic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
- * Rendering tier. Acceptable uses an absolute 900p-to-720p desktop pixel budget and
- * a 30 FPS presentation target; simulation remains 60 Hz. Standard stays at native
- * desktop resolution, while Blessing supersamples. On phone-sized touch devices the
- * same tiers retain their shaders and geometry but cap at 540p, 720p and 900p
- * respectively; Standard and Blessing also stop at 60 FPS on high-refresh displays.
- * Shadow and local-light budgets follow the same low/standard/high ordering. MSAA
- * remains an independent option after a preset is selected.
+ * Rendering tier: the ONE ladder, and everything it owns.
  *
- *  - `acceptable`: desktop up to 1600x900; phones up to 960x540 at 30 FPS.
- *  - `standard`: authored desktop look; phones up to 1280x720 at 60 FPS.
- *  - `blessing`: 1.25x desktop supersampling; phones up to 1600x900 at 60 FPS.
+ * There used to be two controls — quality and view distance — and they were not two
+ * axes at all. The horizon setting never changed what the world STREAMS: the desert
+ * tiles (±2 of 240 m) and road chunks (±6 of 200 m) are the same at every tier. What it
+ * changed was the far plane, the vista's ring tessellation, how many mesas are built,
+ * and the fog. Measured on the vista, a cell load costs 13.0 ms at 1.5 km and 32.8 ms
+ * at 25 km, and the mesa vertex count goes from 897 to 16 419. That is a "how much can
+ * this machine afford" decision, which is exactly what the quality tier already is —
+ * so as a free control it only offered a player the chance to pick 25 km on a machine
+ * that cannot rebuild a cell inside a frame and hitch on every cell crossing.
+ *
+ * So one ladder owns all of it, and each rung is a coherent statement about a machine
+ * rather than a knob.
+ *
+ * THE PIXEL NUMBERS ARE ABSOLUTE CEILINGS, and that is the second half of the fix. The
+ * tiers used to resolve their resolution as `min(DPR x multiplier, DPR cap)` — a display
+ * PERCENTAGE — for everything except `acceptable`, which was the only tier with an
+ * absolute budget. On a display whose device-pixel-ratio is 1, which is every 4K
+ * television and every monitor at 100% scaling, the percentage resolves to exactly 1.0
+ * at every tier: a mini-PC on a 4K TV and a 4090 on a 4K TV were both asked for
+ * 8.29 megapixels. Measured across the four devices this game is played on, `standard`
+ * on an Intel N100 at 4K and `standard` on a 4090 at 4K were the same load, and the
+ * only way down was `acceptable` at 1.44 Mpx — a 5.8x cliff, with no rung in between.
+ *
+ * An absolute ceiling makes a rung mean the same thing on a phone, a mini-PC and a
+ * workstation. Below the ceiling the display's own sharpness still decides, and above
+ * it a supersampling multiplier lets the top rung spend headroom it is told it has.
  */
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 
 /**
- * View-distance tier. Three points on one axis: how far the desert is drawn
- * before the fog dissolves it. None of it touches the simulation, so a save
- * plays identically at any of them.
- *
- *  - `near`: 1.5 km, the authored horizon and the cheapest tier. It is what the
- *    game already drew before the setting existed.
- *  - `far`: 8 km, for a machine that can afford a deep horizon.
- *  - `vast`: 25 km, deliberately extravagant. An immersive horizon is a thing a
- *    player should be able to spend a machine on, and this is the top of that
- *    ladder; it is the most expensive tier by a wide margin because the far
- *    plane, and therefore the depth budget, must stretch to match.
- *
- * The fog scales below are why the tiers work at all (see
- * VIEW_DISTANCE_FOG_SCALE): the fog is exponential and tuned so the world
- * dissolves at ~1.5 km, so a wider draw distance without a matching thinning of
- * the fog draws nothing new.
+ * One rung. Every number here is a consequence of the same question — what can this
+ * machine afford — which is what makes it a tier rather than a collection of switches.
  */
-export type ViewDistance = 'near' | 'far' | 'vast';
-
-/** Draw distance per tier, metres from the player. */
-export const VIEW_DISTANCE_METRES: Record<ViewDistance, number> = {
-  near: 1500,
-  far: 8000,
-  vast: 25000,
-};
+export interface GraphicsTier {
+  /**
+   * Absolute ceiling on rendered scene pixels, on a desktop presentation. The render
+   * scale is `min(DPR x supersample, sqrt(ceiling / cssPixels))`, so a large display
+   * cannot exceed this and a small one is never downscaled below its own sharpness.
+   */
+  readonly maxPixels: number;
+  /** The same ceiling under phone presentation, where a DPR of 3 invites millions. */
+  readonly mobileMaxPixels: number;
+  /**
+   * Absolute FLOOR on rendered scene pixels: where dynamic resolution stops. Absolute
+   * rather than a fraction of the ceiling, because a fraction says nothing about what
+   * the image looks like — 0.55 of a phone's budget and 0.55 of a 4K workstation's are
+   * different pictures, and the whole point of a floor is the picture it guarantees.
+   */
+  readonly minPixels: number;
+  readonly mobileMinPixels: number;
+  /** Supersampling headroom above the display, for a rung told it has some. */
+  readonly supersample: number;
+  /** Sun shadow map. The one per-frame pass a weak machine cannot afford at any size. */
+  readonly shadows: boolean;
+  /** Default for `Settings.msaa`; a player may still choose otherwise. */
+  readonly msaa: boolean;
+  /** Presentation cap for phone-shaped devices. Simulation stays at 60 Hz regardless. */
+  readonly mobileFps: number | null;
+  /** Catalogue star depth, as a limiting visual magnitude. */
+  readonly starMagnitude: number;
+  /** How far the desert is drawn before the fog dissolves it, metres. */
+  readonly horizonM: number;
+  /** Fog-density multiplier that keeps the horizon resolving instead of hazing out. */
+  readonly fogScale: number;
+  /**
+   * Permanent spotlights compiled into every lit material, for car headlamps.
+   *
+   * A rung rather than a taste: the count is an ARRAY SIZE in the shader, so every lit
+   * fragment pays for it whether or not a lamp is claiming the slot, and it can only
+   * change by recompiling the world's materials. That is why the menu says so.
+   */
+  readonly vehicleLightSlots: number;
+  /** The same, for the street-lamp pool. */
+  readonly streetLightSlots: number;
+  /** Reach multiplier for a projected headlamp beam; the top rung throws light further. */
+  readonly headlightDistanceScale: number;
+}
 
 /**
- * Fog-density multiplier per tier. The fog is `FogExp2` — exponential — and
- * tuned so the world dissolves into the haze at ~1.5 km at density 1. A wider
- * draw distance without a matching thinning of the fog draws desert the fog has
- * already hidden, so each tier thins the fog to keep its horizon resolving
- * rather than turning into a haze wall a little further away.
+ * The rungs, weakest first. Read them as three machines, not three presets:
+ *
+ *  - `acceptable` — a phone, or a mini-PC on a television. 30 FPS and no shadow pass,
+ *    because at this size the resolution is worth more than the frame rate and the
+ *    shadow pass is the one cost that cannot be paid in pixels. The authored horizon.
+ *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
+ *    Native on a 1440p display, 60 FPS on a phone, shadows on, 8 km of horizon.
+ *  - `blessing` — a machine with headroom to spare. Supersamples, 25 km of horizon,
+ *    and a sky deep enough to be crowded rather than plotted.
  */
-export const VIEW_DISTANCE_FOG_SCALE: Record<ViewDistance, number> = {
-  near: 1,
-  far: 0.42,
-  vast: 0.16,
+export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
+  acceptable: {
+    maxPixels: 1600 * 900,
+    mobileMaxPixels: 960 * 540,
+    minPixels: 1280 * 720,
+    mobileMinPixels: 640 * 360,
+    supersample: 1,
+    shadows: false,
+    msaa: false,
+    mobileFps: 30,
+    starMagnitude: 7,
+    horizonM: 1500,
+    fogScale: 1,
+    vehicleLightSlots: 2,
+    streetLightSlots: 2,
+    headlightDistanceScale: 1,
+  },
+  standard: {
+    maxPixels: 2560 * 1440,
+    mobileMaxPixels: 1280 * 720,
+    minPixels: 1600 * 900,
+    mobileMinPixels: 960 * 540,
+    supersample: 1,
+    shadows: true,
+    msaa: true,
+    mobileFps: 60,
+    starMagnitude: 8,
+    horizonM: 8000,
+    fogScale: 0.42,
+    vehicleLightSlots: 6,
+    streetLightSlots: 6,
+    headlightDistanceScale: 1,
+  },
+  blessing: {
+    // 4800x2700, which is 4K with the 1.25x supersampling this rung always had.
+    maxPixels: 4800 * 2700,
+    mobileMaxPixels: 1600 * 900,
+    minPixels: 1920 * 1080,
+    mobileMinPixels: 1280 * 720,
+    supersample: 1.25,
+    shadows: true,
+    msaa: true,
+    mobileFps: 60,
+    starMagnitude: 8.5,
+    horizonM: 25000,
+    fogScale: 0.16,
+    vehicleLightSlots: 18,
+    streetLightSlots: 8,
+    headlightDistanceScale: 3,
+  },
+};
+
+/** Convenience readers, so callers ask the question they mean. */
+export const VIEW_DISTANCE_METRES: Record<GraphicsQuality, number> = {
+  acceptable: GRAPHICS_TIERS.acceptable.horizonM,
+  standard: GRAPHICS_TIERS.standard.horizonM,
+  blessing: GRAPHICS_TIERS.blessing.horizonM,
+};
+export const VIEW_DISTANCE_FOG_SCALE: Record<GraphicsQuality, number> = {
+  acceptable: GRAPHICS_TIERS.acceptable.fogScale,
+  standard: GRAPHICS_TIERS.standard.fogScale,
+  blessing: GRAPHICS_TIERS.blessing.fogScale,
 };
 
 export interface Settings {
@@ -96,12 +197,6 @@ export interface Settings {
    * here with the rest so it survives a reload like every other choice.
    */
   graphicsQuality: GraphicsQuality;
-  /**
-   * How far the desert is drawn. A machine preference like `graphicsQuality`,
-   * but stored here with the rest so it survives a reload like every other
-   * choice.
-   */
-  viewDistance: ViewDistance;
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
   /** Post-process landscape outline amount, 0..1. */
@@ -155,9 +250,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // capable machine or leaves a weak one stuttering, and the pause menu is one
   // key away.
   graphicsQuality: 'standard',
-  // The authored horizon. Like `graphicsQuality`, nothing auto-detects the GPU;
-  // the pause menu is one key away and the near tier is the safe floor.
-  viewDistance: 'near',
   msaa: true,
   inkStrength: DEFAULT_INK_STRENGTH,
   // Off by default; M switches it on, and the pause menu remembers which.
@@ -243,10 +335,11 @@ export function sanitizeSettings(raw: unknown): Settings {
       obj.graphicsQuality === 'acceptable' || obj.graphicsQuality === 'blessing'
         ? obj.graphicsQuality
         : 'standard',
-    // Anything unrecognised is near, so an old save (which has no such field)
-    // keeps the horizon it was made with.
-    viewDistance:
-      obj.viewDistance === 'far' || obj.viewDistance === 'vast' ? obj.viewDistance : 'near',
+    // A save's `viewDistance` is DELIBERATELY DROPPED rather than migrated. The horizon
+    // is a property of the rendering rung now, and the two ladders do not line up: an old
+    // save asking for `vast` on `acceptable` was a combination that should never have
+    // been offerable, and there is no honest way to guess which half the player meant.
+    // The tier they chose is the answer, and it is right there in the same object.
     // `eyeAdaptation` lived here once and is deliberately not migrated: exposure is
     // analytic now, so a stored preference has nothing left to select.
     // Preserve the old tier behavior once, then this becomes an independent choice.

@@ -9,11 +9,13 @@ import { presentationFpsFor, prefersMobilePresentation, Renderer } from './core/
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
+  GRAPHICS_TIERS,
   TIME_OF_DAY_PRESETS,
   VIEW_DISTANCE_FOG_SCALE,
   VIEW_DISTANCE_METRES,
   loadStoredSettings,
   storeSettings,
+  type GraphicsQuality,
 } from './game/settings';
 import { spawnCarState, type SpawnRequest } from './game/spawn';
 import {
@@ -248,11 +250,24 @@ async function boot(): Promise<void> {
   // another computer (or before the player last changed them) must not put them back.
   // Applied HERE because the renderer and the light budget both read them below, and
   // they only take a tier at construction. See game/settings.ts.
+  /**
+   * Whether this machine has never said what it can afford.
+   *
+   * A stored preference is the player's own answer and outranks anything measured; the
+   * absence of one means nobody has answered yet, and the default rung is a guess that
+   * a slow machine will be sitting on. Only a desktop can be in that position: a phone
+   * with no stored settings is already put on the weakest rung below, which is the
+   * floor, so there is nothing left to detect.
+   */
+  let tierUndetected = false;
   {
     const stored = loadStoredSettings();
     if (stored) {
       world.apply({ t: 'settings', settings: stored });
-    } else if (mobilePresentation) {
+    } else {
+      tierUndetected = !mobilePresentation;
+    }
+    if (!stored && mobilePresentation) {
       // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
       // Once the player changes a display setting, the stored machine preference wins.
       world.apply({
@@ -260,7 +275,6 @@ async function boot(): Promise<void> {
         settings: {
           ...world.state.settings,
           graphicsQuality: 'acceptable',
-          viewDistance: 'near',
           msaa: false,
         },
       });
@@ -419,7 +433,7 @@ async function boot(): Promise<void> {
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
-    const metres = VIEW_DISTANCE_METRES[world.state.settings.viewDistance];
+    const metres = VIEW_DISTANCE_METRES[world.state.settings.graphicsQuality];
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
@@ -1882,7 +1896,7 @@ async function boot(): Promise<void> {
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
     // is all there is and hides the vista completely when there is more: at the 'vast'
     // scale factor a 25 km range still fades, it just fades over 25 km.
-    renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.viewDistance];
+    renderer.fog.density *= VIEW_DISTANCE_FOG_SCALE[s.settings.graphicsQuality];
 
     // Render-only illusions: neither one owns physics, terrain, streamed props, or
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
@@ -2436,27 +2450,24 @@ async function boot(): Promise<void> {
       audio.applySettings(world.state.settings);
       renderer.setMsaa(world.state.settings.msaa);
       renderer.setInkStrength(world.state.settings.inkStrength);
-      // Resolution, shadows, MSAA and the sky (probe resolution and star depth)
-      // update in place. The lamp-slot count cannot: changing visible-light count
-      // would recompile every lit material, so graphics quality changes that
-      // budget only on the next load.
-      renderer.setQuality(world.state.settings.graphicsQuality);
-      sky.setQuality(world.state.settings.graphicsQuality);
+      // The tier owns six things and five of them apply in place: the pixel ceiling,
+      // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista
+      // disc), and the presentation cap. The sixth — the visible-light count — cannot,
+      // because it is compiled into every lit material as an array size, so changing it
+      // would recompile the world's shaders mid-session. That one waits for the next
+      // load, and the menu says so.
+      const tier = world.state.settings.graphicsQuality;
+      renderer.setQuality(tier);
+      sky.setQuality(tier);
+      const horizon = VIEW_DISTANCE_METRES[tier];
+      renderer.setViewDistance(horizon);
+      vista.setViewDistance(horizon);
       loop.setRenderFps(
         presentationFpsFor(world.state.settings.graphicsQuality, mobilePresentation),
       );
     },
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
-    },
-    // The draw distance moves three things at once: the far plane (and, at the top
-    // tier, the near plane with it), the fog thinning applied every frame in `render`,
-    // and how far the vista disc reaches. Applied here rather than read per frame
-    // because two of the three are one-off state on objects that already exist.
-    applyViewDistance: (tier) => {
-      const metres = VIEW_DISTANCE_METRES[tier];
-      renderer.setViewDistance(metres);
-      vista.setViewDistance(metres);
     },
     exportState: stateForSave,
     // Dev only. Cars are meant to be found in the world and kept — sticker rewards
@@ -2663,6 +2674,69 @@ async function boot(): Promise<void> {
     adaptationFrozen = false;
   };
 
+  /**
+   * WHAT RUNG IS THIS MACHINE, asked once, on the one launch where nobody has answered.
+   *
+   * Nothing auto-detected the GPU before this, and the comment defending that said
+   * guessing wrong either robs a capable machine or leaves a weak one stuttering. That
+   * is true of guessing. It is not true of MEASURING, and the measurement already
+   * exists: the launch settles the drawing-buffer scale under the loading cover against
+   * real GPU timer queries, so by the time the cover lifts the controller has said, in
+   * numbers, whether this machine holds the rung it was given.
+   *
+   * So the rung is WALKED, in both directions, against the settled scale — and the two
+   * directions are not symmetrical, because being wrong is not.
+   *
+   * Down is a rescue: a machine giving away more than a fifth of the resolution it was
+   * promised is stuttering, and nothing else will tell the player why.
+   *
+   * Up is a bonus that has to be paid for fairly. The default rung is deliberately
+   * modest, so a fast machine left on it renders less than its display can show — but a
+   * rung that does not fit must be PUT BACK, with its own settle to prove it, or a
+   * player who never opened the menu is pushed into stutter by the courtesy.
+   */
+  const AUTO_TIER_BACKOFF = 0.8;
+  const AUTO_TIER_COMFORT = 0.95;
+  const detectGraphicsTier = async (): Promise<void> => {
+    if (!renderer.measuresGpuTime) return;
+    const ladder: GraphicsQuality[] = ['blessing', 'standard', 'acceptable'];
+    const adopt = async (index: number): Promise<void> => {
+      const tier = ladder[index]!;
+      const settings = {
+        ...world.state.settings,
+        graphicsQuality: tier,
+        msaa: GRAPHICS_TIERS[tier].msaa,
+      };
+      world.apply({ t: 'settings', settings });
+      renderer.setMsaa(settings.msaa);
+      renderer.setQuality(tier);
+      sky.setQuality(tier);
+      const horizon = VIEW_DISTANCE_METRES[tier];
+      renderer.setViewDistance(horizon);
+      vista.setViewDistance(horizon);
+      loop.setRenderFps(presentationFpsFor(tier, mobilePresentation));
+      await settleLaunchResolution();
+    };
+
+    let index = Math.max(0, ladder.indexOf(world.state.settings.graphicsQuality));
+    while (index < ladder.length - 1 && renderer.resolutionScale < AUTO_TIER_BACKOFF) {
+      index += 1;
+      await adopt(index);
+    }
+    while (index > 0 && renderer.resolutionScale > AUTO_TIER_COMFORT) {
+      const previous = index;
+      index -= 1;
+      await adopt(index);
+      if (renderer.resolutionScale < AUTO_TIER_BACKOFF) {
+        index = previous;
+        await adopt(index);
+        break;
+      }
+    }
+    // Written once, so the next launch respects the player rather than measuring again.
+    storeSettings(world.state.settings);
+  };
+
   // Prime the exact live render path while the loading cover still owns the screen.
   // The first pass establishes sky/fog/post uniforms and bakes the environment.
   // compileAsync then waits for the exact offscreen scene and canvas post variants,
@@ -2673,6 +2747,10 @@ async function boot(): Promise<void> {
   render(0, 0);
   await renderer.waitForSubmittedFrame();
   await settleLaunchResolution();
+  if (tierUndetected) {
+    tierUndetected = false;
+    await detectGraphicsTier();
+  }
   loading.classList.add('is-hidden');
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
