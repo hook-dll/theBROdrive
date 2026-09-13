@@ -530,44 +530,61 @@ invariant(
   approachState.dissolvingMesas.has(targetMesa.key),
   'mesa did not begin dissolving 499 m from its footprint',
 );
-approachVista.update(triggerX, triggerZ, 0, 9);
-const fadingCandidate = approachState.mesaCandidates.find(
-  (candidate) => candidate.key === targetMesa.key,
+// THE DISSOLVE'S OWN LENGTH, MEASURED. The fade is stepped in fixed increments and the
+// time it takes to pass half, and to finish, are both read off the animation rather than
+// off the constant that feeds it, so this pins the duration a player actually sees and
+// does not care how `update` chooses to advance its clock.
+const dissolveStepS = 0.5;
+let elapsedS = 0;
+let halfwayS: number | null = null;
+let retiredS: number | null = null;
+let halfwayAlpha = 1;
+for (let step = 0; step < 200 && retiredS === null; step++) {
+  approachVista.update(triggerX, triggerZ, 0, dissolveStepS);
+  elapsedS += dissolveStepS;
+  // A retired mesa stays in `mesaCandidates` — the dissolve branch skips it there — so
+  // retirement is read from the retired set rather than from the candidate list.
+  if (approachState.retiredMesas.has(targetMesa.key)) {
+    retiredS = elapsedS;
+    break;
+  }
+  const candidateNow = approachState.mesaCandidates.find(
+    (candidate) => candidate.key === targetMesa.key,
+  );
+  invariant(candidateNow !== undefined, 'dissolving mesa left residency unexpectedly');
+  const meshesNow = approachScene.children.filter(
+    (child): child is THREE.Mesh => child instanceof THREE.Mesh,
+  )[1];
+  invariant(meshesNow !== undefined, 'mesa approach check has no mesa mesh');
+  const colorsNow = meshesNow.geometry.getAttribute('color');
+  invariant(
+    colorsNow instanceof THREE.BufferAttribute && colorsNow.itemSize === 4,
+    'mesa dissolve has no vertex alpha',
+  );
+  const alpha = colorsNow.getW(candidateNow.firstVertex);
+  if (halfwayS === null && alpha <= 0.5) {
+    halfwayS = elapsedS;
+    halfwayAlpha = alpha;
+  }
+}
+invariant(halfwayS !== null, 'mesa dissolve never passed half');
+invariant(retiredS !== null, 'mesa dissolve never finished');
+// 18 seconds, to the resolution of the step: half at nine, gone at eighteen. An 18 s
+// dissolve is over in the first 40 per cent of the kilometre a car covers approaching
+// the clearance, which is what makes it read as an event rather than a long fade.
+invariant(
+  Math.abs(halfwayS - 9) <= dissolveStepS && Math.abs(retiredS - 18) <= dissolveStepS,
+  `mesa dissolve ran ${halfwayS}s to half and ${retiredS}s to gone, expected 9 and 18`,
 );
-invariant(fadingCandidate !== undefined, 'dissolving mesa left residency unexpectedly');
 const approachMesas = approachScene.children.filter(
   (child): child is THREE.Mesh => child instanceof THREE.Mesh,
 )[1];
 invariant(approachMesas !== undefined, 'mesa approach check has no mesa mesh');
-const dissolveColors = approachMesas.geometry.getAttribute('color');
-invariant(
-  dissolveColors instanceof THREE.BufferAttribute && dissolveColors.itemSize === 4,
-  'mesa dissolve has no vertex alpha',
-);
-const halfwayAlpha = dissolveColors.getW(fadingCandidate.firstVertex);
-invariant(
-  halfwayAlpha > 0.45 && halfwayAlpha < 0.55,
-  `mesa dissolve alpha is ${halfwayAlpha.toFixed(3)} halfway through`,
-);
-const approachSparkles = approachScene.children.find(
-  (child): child is THREE.Points => child instanceof THREE.Points,
-);
-invariant(approachSparkles !== undefined, 'mesa dissolve has no sparkle pool');
-invariant(
-  approachSparkles.visible &&
-    approachSparkles.geometry.drawRange.count > 0 &&
-    approachSparkles.geometry.drawRange.count <= 64,
-  `mesa dissolve draws ${approachSparkles.geometry.drawRange.count} sparkles outside its fixed pool`,
-);
-approachVista.update(0, 0, 0, 9.1);
+approachVista.update(0, 0, 0, 0.1);
 invariant(
   approachState.retiredMesas.has(targetMesa.key) &&
     !approachState.dissolvingMesas.has(targetMesa.key),
   'retreat restored or paused a dissolving mesa',
-);
-invariant(
-  !approachSparkles.visible && approachSparkles.geometry.drawRange.count === 0,
-  'mesa sparkle pool remained visible after the dissolve',
 );
 approachVista.update(triggerX, triggerZ, 0, 0);
 invariant(
@@ -580,8 +597,7 @@ invariant(
   'mesa dissolve does not use hashed transparency',
 );
 console.log(
-  `mesa dissolve: triggered at 499 m clearance, halfway alpha ${halfwayAlpha.toFixed(2)}, ` +
-    `${approachSparkles.geometry.getAttribute('position').count} pooled sparkles, ` +
-    'retreat and revisit kept it retired',
+  `mesa dissolve: triggered at 499 m clearance, half at ${halfwayS}s (alpha ` +
+    `${halfwayAlpha.toFixed(2)}), gone at ${retiredS}s, retreat and revisit kept it retired`,
 );
 approachVista.dispose();

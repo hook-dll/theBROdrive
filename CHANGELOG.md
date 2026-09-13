@@ -543,6 +543,20 @@
 
 ### Fixed
 
+- A mesa dissolves in 18 seconds instead of 36. It starts fading with a kilometre of
+  clearance, which a car at a cruising 80 km/h takes 45 seconds to cross — so the old
+  fade occupied four fifths of the whole approach and the driver watched it for most of
+  the way in. At 18 it is over in the first 40 per cent and the rest of the approach is
+  spent with the thing simply gone, which is what makes it read as an event that happened
+  rather than as a long fade that ran alongside the drive. `tools/vista-check.ts` now
+  measures the duration rather than trusting the constant: it steps the animation in
+  fixed increments and reads off the times it takes to pass half and to finish, which
+  reported 9 s and 18 s.
+- The vista bench's sparkle-pool assertions are gone with the pool. They outlived the
+  animation they tested — `vista.ts` has no sparkle pool at all — so the bench failed at
+  every run on an invariant about apparatus that no longer exists, before reaching the
+  dissolve checks behind it.
+
 - THE SCREEN CAME BACK. The contact occlusion added in this release darkened FLAT OPEN
   GROUND under the driving camera — measured, empty desert went to 219 of 255 in a band
   three to six metres from the eye, a soft blob that followed the car because the camera
