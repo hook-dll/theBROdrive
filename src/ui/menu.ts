@@ -1282,14 +1282,35 @@ export class MainMenu {
        */
       const renderPerf = (): void => {
         panel.textContent = '';
+        const head = el('div', 'menu-settings-head');
         const backBtn = button('menu-button menu-back', 'Back');
         backBtn.addEventListener('click', () => showScreen('main'));
         const title = el('h1', 'menu-title');
         title.textContent = 'Frame Report';
-        panel.append(backBtn, title);
+        head.append(backBtn, title);
+        panel.appendChild(head);
+
+        const report = hooks.frameReport?.() ?? 'no report available';
+
+        // The report is read on a phone, in a car, by somebody who then has to get it
+        // somewhere else. Retyping eight lines of monospace off a screen is not a
+        // realistic way to move a measurement, so the measurement moves itself.
+        const copyBtn = button('menu-button', 'Copy Report');
+        copyBtn.addEventListener('click', () => {
+          // Exactly what is on screen, not a fresh reading: a button that copied a
+          // different set of numbers from the ones being looked at would make the two
+          // impossible to compare.
+          void copyText(report).then((ok) => {
+            copyBtn.textContent = ok ? 'Copied' : 'Copy failed';
+            window.setTimeout(() => {
+              copyBtn.textContent = 'Copy Report';
+            }, 1500);
+          });
+        });
+        panel.appendChild(copyBtn);
 
         const readout = el('div', 'menu-perf');
-        readout.textContent = hooks.frameReport?.() ?? 'no report available';
+        readout.textContent = report;
         panel.appendChild(readout);
       };
 

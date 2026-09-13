@@ -364,6 +364,35 @@
 
 ### Changed
 
+- THE FRAME REPORT COPIES ITSELF. The readout is read on a phone, held in a hand, by
+  somebody who then has to get the numbers somewhere else — retyping eight lines of
+  monospace off a screen is not a realistic way to move a measurement, so the report moves
+  itself. Verified end to end in a browser: the button reports `Copied` and the clipboard
+  holds the exact text on screen, which is captured rather than re-read so that what was
+  copied can never disagree with what was being looked at.
+- THE REPORT SAYS WHAT A FRAME RATE CAN AND CANNOT REACH, because that is the lever that
+  was found to work. The simulation runs at a fixed 60 Hz whatever the display does, so
+  its cost per second is identical at every presentation rate — a slower frame rate does
+  not make the car cheaper to step. The render half is the opposite: it is paid once per
+  PRESENTED frame, so it scales exactly with frame rate, and the report now shows the two
+  split apart along with what halving the rate would cost and the floor below which no
+  frame-rate cap can go. `tools/frame-report.ts` proves the claim by construction: the
+  same work presented at 30 and at 60 FPS gives 30 ms/s of simulation both times and
+  exactly double the render at 60.
+- Sections are grouped by the half of the frame they belong to, and each is given its
+  share of THAT half rather than of the whole. A share of the whole was a lie while the
+  sections nest: measured on a real machine, the shares added up to 120%. The outer
+  measurement gets no share of itself.
+- The GPU-is-unmeasurable case no longer costs a loading screen. `detectGraphicsTier`
+  walks rungs and re-settles after each one, and a settle that cannot reach a verdict
+  burns its full twenty-second deadline — so a machine whose driver reports no usable GPU
+  timing would have paid twenty extra seconds to learn nothing. It now refuses to run
+  without a verdict from the launch settle, which is the only thing that makes the
+  measurement mean anything. Observed happening while instrumenting.
+- The simulation rate in the report comes from `FIXED_DT` rather than being written as
+  literal 60s in the header and the split, so the two cannot drift from the loop they
+  describe.
+
 - A PHONE'S RUNG NOW BUYS SHARPNESS; ITS HEAT IS THE PLAYER'S. The rung owned both, and
   the coupling was the whole problem: a phone drawing a 1440p screen at the weakest rung's
   960x540 is visibly soft, and the only way off that picture was the next rung, which

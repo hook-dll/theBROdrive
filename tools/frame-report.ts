@@ -107,10 +107,10 @@ check(
 // and must not double-count the render wall they sit inside.
 const order: string[] = [];
 for (const line of lines) {
-  // A section line is a name, a group and a cost. The footer is a sentence, and must
-  // not be mistaken for one — this is what "ranked by cost per second" was checking
-  // when a stray line joined the list.
-  const match = /^\s*\[perf\]\s{3}(\w+)\s+(tick|render)\s+(-?[\d.]+) ms\/s/.exec(line);
+  // A section line is a name and a cost. The footer is a sentence and must not be
+  // mistaken for one — this is what "ranked by cost per second" was checking when a
+  // stray line joined the list.
+  const match = /^\s*\[perf\]\s{3}(\w+)\s+(-?[\d.]+) ms\/s/.exec(line);
   if (match) order.push(match[1]!);
 }
 check(
@@ -129,10 +129,112 @@ check(
   'physics and agents were never measured',
 );
 check(
-  'every listed section names the half of the frame it belongs to',
+  'every listed section is named, and only the measured ones',
   order.length === 4,
   `${order.length} sections listed: ${order.join(', ')}`,
 );
+
+// A share of the WHOLE frame is a lie while the sections nest — measured on a real
+// machine the shares came to 120%. Each section is therefore given its share of the
+// half it belongs to, and the outer measurement gets no share at all.
+{
+  const shares = lines
+    .map((line) => /^\s*\[perf\]\s{3}\w+\s+\d+ ms\/s\s+(\d+)% of (tick|render)/.exec(line))
+    .filter((match) => match !== null);
+  const totals = new Map<string, number>();
+  for (const match of shares) {
+    const value = Number(match![1]);
+    check(
+      `a share of ${match![2]} cannot exceed its half`,
+      value <= 100,
+      `${value}%`,
+    );
+    const key = match![2]!;
+    totals.set(key, (totals.get(key) ?? 0) + value);
+  }
+  check(
+    'no section claims a share of the tick while the tick is the whole of it',
+    !/^\s*\[perf\]\s{3}sim\s+\d+ ms\/s\s+\d+%/m.test(report),
+    'sim is the tick total and has no share of itself',
+  );
+  check(
+    'the render sections cannot exceed the render half between them',
+    (totals.get('render') ?? 0) <= 400,
+    `${totals.get('render') ?? 0}% across ${shares.length} render sections`,
+  );
+}
+
+// WHAT A FRAME RATE CAN AND CANNOT REACH.
+//
+// The report claims the simulation costs the same per second at every frame rate and the
+// render scales exactly with it. That claim is the whole basis for turning the frame rate
+// down to cool a device, and it is arithmetic, so it can be checked exactly: the same
+// simulation and render cost per frame, presented at two different rates, must give the
+// same simulation figure per second and a render figure in proportion.
+{
+  /**
+   * A run of frames presented at a chosen rate.
+   *
+   * The rate has to be IMPOSED rather than derived from the work, because that is the
+   * situation a frame-rate cap creates: a machine whose frame takes 13 ms is not thereby
+   * incapable of more than 30 FPS — it is being told to present only 30 times a second,
+   * and spends the rest of the interval idle. So each frame's work is measured and the
+   * remaining interval is idle time the clock passes through unmeasured.
+   */
+  const perSecond = (presentedFps: number): { sim: number; render: number; text: string } => {
+    const fixed = new FrameProfiler(clock.now);
+    const tickMs = 0.5;
+    const renderMs = 4;
+    const ticksPerFrame = 60 / presentedFps;
+    const workMs = ticksPerFrame * tickMs + renderMs;
+    const idleMs = 1000 / presentedFps - workMs;
+    check(
+      `at ${presentedFps} FPS a frame has room for its work`,
+      idleMs > 0,
+      `${workMs.toFixed(2)} ms of work in a ${(1000 / presentedFps).toFixed(2)} ms interval`,
+    );
+    // Short of a full window, so the report describes these frames rather than an empty
+    // window the roll just cleared.
+    for (let i = 0; i < 239; i++) {
+      for (let k = 0; k < ticksPerFrame; k++) {
+        fixed.begin('sim');
+        clock.advance(tickMs);
+        fixed.end('sim');
+      }
+      fixed.beginFrame();
+      fixed.begin('draw');
+      clock.advance(renderMs);
+      fixed.end('draw');
+      fixed.endFrame();
+      // Idle: after the frame is closed, so no section and no wall time absorbs it.
+      clock.advance(idleMs);
+    }
+    const text = fixed.report(60);
+    return {
+      sim: Number(/per second: simulation (\d+) ms/.exec(text)?.[1]),
+      render: Number(/\+ render (\d+) ms/.exec(text)?.[1]),
+      text,
+    };
+  };
+
+  const at30 = perSecond(30);
+  const at60 = perSecond(60);
+  check(
+    'the simulation costs the same per second however often the frame is presented',
+    Math.abs(at30.sim - at60.sim) <= 1,
+    `30 FPS ${at30.sim} ms/s against 60 FPS ${at60.sim} ms/s`,
+  );
+  check(
+    'the render cost per second halves when the presentation halves',
+    Math.abs(at60.render - 2 * at30.render) <= 2,
+    `30 FPS ${at30.render} ms/s against 60 FPS ${at60.render} ms/s`,
+  );
+  check(
+    'so a slower presentation is strictly cheaper, and the simulation is the floor',
+    at30.sim + at30.render < at60.sim + at60.render && at30.sim > 0,
+    `30 FPS total ${at30.sim + at30.render} ms/s against 60 FPS ${at60.sim + at60.render} ms/s`,
+  );
+}
 
 // The window rolls: a report taken later must describe the frames since the last roll,
 // not the whole session. Otherwise a coasting stretch would be averaged against a climb
