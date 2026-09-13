@@ -85,6 +85,34 @@
   0.587 m, which is 0.88 x 2/3 exactly. The rug scales its footprint and not its thickness,
   which is how a rug behaves. Crates and barrels are outdoor props and are untouched.
 
+- THE CHASE VIEW'S COMPOSITION IS NOW HELD BY A BENCH. Two constants set what the player
+  actually sees behind the car, and neither produced a number anyone could check: the arm's
+  elevation IS the view's depression angle, so the frame's horizon lands at
+  `(1 - tan(armPitch) / tan(fov / 2)) / 2` of the frame height from the top, and the FOV
+  ceiling decides how much of the outer frame is stretched. Measured with the real rig on the
+  real road at 0/60/130 km/h across the catalogue's shortest, middle and tallest bodies: the
+  horizon sat at 32.4% from the top at rest — higher up the frame than the 35-40% that leads
+  the eye down the road — so `ARM_PITCH_BASE` goes 0.22 to 0.189 and it now sits at 35.0%,
+  rising to 35.8-39.2% at 60 km/h and 36.5-42.0% at 130 (the ground-clearance probe lifting
+  the eye over rises is the spread's dominant term, not the FOV).
+- THE SPEED WIDENING IS CAPPED AT 70 DEGREES, not `BASE_FOV + 14` (79). At 16:9 that is 100
+  horizontal against 111, and a rectilinear projection stretches the picture along the
+  frame's radius by `1 / cos²(angle)`: 2.4x at the corners against the resting 65's 2.3x,
+  where 79 stretched them 3.1x. Five degrees of widening still carry the speed cue. Measured:
+  the car reads at 16-28% of the frame height at rest and 10-18% at 130 km/h, bounded by the
+  bench so it can never become a speck.
+- THE ARM'S ELEVATION IS COUPLED TO THE LIVE FOV, so the widening is spent on the periphery
+  instead of tilting the frame: a FIXED elevation drops the horizon from 35.0% to 36.3% over
+  65 to 70 degrees. Below the resting FOV it is left alone, which keeps the binoculars'
+  ten-power view exactly as it was.
+- `tools/chase-framing.ts` is new and holds five properties nothing else checked: the horizon
+  stays in the upper third, the car reads without filling the frame, it does not shrink away
+  at speed, the projection never steps or reverses, and the road ahead stays framed while the
+  road bends (mean 2.8 degrees of aim trail over a 30 km drive). It builds a real Rapier
+  heightfield under each measured stretch — verified against `Terrain.heightAt` to within
+  0.09 m — because the rig's ground probe is a raycast, and a bench with an empty physics
+  world measures a camera that is never lifted or occluded.
+
 ### Fixed
 
 - THE CAR FIELD AT A SCRAPYARD NO LONGER STANDS INSIDE THE BUILDING. Both are placed

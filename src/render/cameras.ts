@@ -58,8 +58,19 @@ const ZOOM_SENSITIVITY = 0.25;
 const DIST_MIN = 1.5;
 /** Furthest the chase arm may stand from the car, metres. */
 const DIST_MAX = 7;
-/** Constant elevation folded into the arm pitch so the car hides no road. */
-const ARM_PITCH_BASE = 0.22;
+/**
+ * Elevation of the arm over the car's centre, radians.
+ *
+ * This is the whole composition, because the arm always aims back at that centre: the eye's
+ * height above it IS the view's depression angle, so the frame's horizon lands at
+ * `(1 - tan(armPitch) / tan(fov / 2)) / 2` of the frame height from the top, whatever the
+ * car or the ground under it does. At 0.189 the horizon sits at 35% at rest and 36% at
+ * speed — the road fills the lower two thirds of the frame while the sky still reads as
+ * sky. It was 0.22, which put the horizon at 32%: the frame was closer to looking down AT
+ * the car than down the road. `tools/chase-framing.ts` drives a real car over real ground
+ * and holds the band this sits in.
+ */
+const ARM_PITCH_BASE = 0.189;
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
 /**
@@ -80,12 +91,23 @@ const GROUND_PROBE_DOWN = 40;
  */
 const BASE_FOV = CAMERA_BASE_FOV;
 /**
- * Speed-widened ceiling. Kept at the same +14 degrees over the resting value that
- * it was before, so lowering the base changes where the camera sits at rest without
- * altering how much the view stretches when moving. Drop this to BASE_FOV to switch
- * the speed effect off entirely.
+ * Speed-widened ceiling, degrees vertical.
+ *
+ * This was `BASE_FOV + 14`, which is 79 degrees vertical — 111 horizontal at 16:9, wider
+ * than the chase view of any racing game, and a rectilinear projection stretches the
+ * picture along the frame's radius by `1 / cos²(angle)`: 3.1x at the corners against the
+ * resting 65's 2.3x. An absolute 70 (100 horizontal at 16:9, 2.4x at the corners) keeps
+ * five degrees of widening, which is what carries the speed cue, without the outer frame
+ * turning into a fisheye. Measured: the car shrinks from 17% of the frame height at rest
+ * to 9% at 130 km/h with the old ceiling, and to ~10% with this one — the widening and the
+ * arm's own speed lag together, and this bounds the widening's share of it.
  */
-const MAX_FOV = BASE_FOV + 14;
+const MAX_FOV = 70;
+/**
+ * `tan(BASE_FOV / 2)`, the divisor that makes the arm's elevation coupling exact at the
+ * resting view. Declared here because it reads `BASE_FOV`, which is above.
+ */
+const BASE_HALF_TAN = Math.tan((BASE_FOV * Math.PI) / 360);
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
@@ -515,12 +537,33 @@ export class CameraRig {
     // The arm points from the look target to the eye, opposite the view heading.
     // Pitch moves an orbiting eye opposite the requested look direction: mouse-up
     // lowers armPitch until the eye sits below the target and therefore looks up.
-    const armPitch = ARM_PITCH_BASE - this.pitch;
+    const armPitch = this.armPitchForWidening() - this.pitch;
     const ca = Math.cos(armPitch);
     const sa = Math.sin(armPitch);
     _vD.set(-viewX * ca, sa, -viewZ * ca);
 
     _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance));
+  }
+
+  /**
+   * Elevation of the arm for the FOV of the moment, radians.
+   *
+   * Where the horizon lands in the frame is `tan(armPitch) / tan(fov / 2)`, so a FIXED arm
+   * elevation tilts the frame as the projection widens: over 65 to 70 degrees the horizon
+   * drops from 35.0% to 36.3% from the top. Holding the RATIO constant instead keeps the
+   * resting composition and spends the widening on the periphery, which is where a speed cue
+   * belongs. It is small — the horizon's spread over a real drive is dominated by the ground
+   * clearance probe lifting the eye, not by this — but it is exact and costs one multiply.
+   *
+   * Clamped so it only ever RAISES the arm. The binoculars drop the view to a tenth of the
+   * resting FOV, and the exact form would sink the eye toward the car's own centre — a chase
+   * view through the bodywork. Leaving the resting composition alone below the base FOV keeps
+   * that effect exactly as it was; above it the FOV ceiling is the only bound.
+   */
+  private armPitchForWidening(): number {
+    if (this.fov <= BASE_FOV) return ARM_PITCH_BASE;
+    const halfTan = Math.tan(THREE.MathUtils.degToRad(this.fov) / 2);
+    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / BASE_HALF_TAN));
   }
 
   /**
