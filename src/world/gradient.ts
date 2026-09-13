@@ -11,9 +11,10 @@ import { ROAD_LENGTH } from './road';
  *    back around.
  *  - Road quality and colour are stationary or cyclic in ABSOLUTE distance. Decay
  *    is a regional envelope plus a fine patch, so a pristine stretch is possible at
- *    39 000 km and a ruined one at 200 km; the desert palette (and the dust, haze
+ *    39 000 km and a badly-worn one at 200 km; the desert palette (and the dust, haze
  *    and sky tint that track it) cycles with a fixed period, so a driver who
- *    covers a full cycle sees every colour and then begins again.
+ *    covers a full cycle sees every colour and then begins again. Wear stops at
+ *    MAX_WEAR rather than running to ruin.
  *
  * Nothing else may hardcode a distance threshold. Road decay, pole design eras,
  * sky and monument placement all read from this module, which means the whole feel
@@ -44,7 +45,7 @@ export const PALETTE_CYCLE_M = 4_000_000;
 export interface RoadCondition {
   /** Dominant surface of the driving lanes at this distance. */
   readonly surface: SurfaceType;
-  /** 0 = pristine, 1 = the desert has almost taken it. Drives cracks and patches. */
+  /** 0 = pristine, MAX_WEAR = as broken as the desert is ever allowed to leave it. */
   readonly decay: number;
   /** Fraction of the lane width buried under drifted sand, 0..1. */
   readonly sandCover: number;
@@ -61,6 +62,26 @@ export interface RoadConditionBuffer {
 
 /** Distance over which local decay varies, so decay is patchy rather than uniform. */
 const DECAY_PATCH_WAVELENGTH = 900;
+
+/**
+ * THE DEEPEST WEAR THE WORLD IS EVER SHOWN, on any dial that ages with distance.
+ *
+ * Beyond it the road stops being a road: sand buries the lanes, the paint is gone, the
+ * potholes stop being a surface and become an obstacle course, the mat ravels into the
+ * verge, and the poles are lying in the sand. That is a wreck, not a drive, and a
+ * player who meets it reads the world as broken rather than as old — the desert is
+ * supposed to be worn, not unusable.
+ *
+ * Measured on the shipped road (200 000 samples, tools/road-condition.ts): raw decay
+ * runs 0.00..1.00 with a median of 0.49, and 31.9% of the road is above this ceiling.
+ * Those stretches now all read as the same deeply-worn road, which is the point: the
+ * ceiling is a state the generator clamps to, not a scale it compresses, so every
+ * stretch that was already inside 0..0.6 keeps exactly the condition it had.
+ *
+ * Read by `roadConditionAt` and `poleConditionAt`, and by the tools that have to be
+ * able to construct the worst case.
+ */
+export const MAX_WEAR = 0.6;
 
 const decayNoise = new Noise1D(0x51ed270b);
 
@@ -302,12 +323,17 @@ function districtSurface(k: number): SurfaceType {
  *  - MATERIAL comes from the 5-7 km surface districts above, weighted by the region.
  *  - DECAY is stationary in absolute distance, not a one-way ramp: the regional
  *    envelope summed with fine patch noise, so a pristine stretch is possible at
- *    39 000 km and a ruined one at 200 km. The garage ramp holds it pristine for the
+ *    39 000 km and a broken one at 200 km. The garage ramp holds it pristine for the
  *    first five kilometres and eases into the region by twenty-five, so the player
  *    always learns the car on a maintained road.
  *
+ * Decay is clamped to MAX_WEAR, so the broken half of that range stops at the worst
+ * road the world is willing to show. Everything downstream — sand cover, markings,
+ * bump amplitude, pothole density, the weather on the vertex colours — is a function of
+ * the clamped value, so the ceiling is one decision rather than eight.
+ *
  * A gravel district at low decay is a well-kept gravel road and an asphalt district at
- * high decay is a ruined one; both are things a desert road actually is, and neither
+ * high decay is a worn one; both are things a desert road actually is, and neither
  * was reachable while the material WAS a threshold on the decay.
  */
 export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondition {
@@ -324,7 +350,7 @@ export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondi
   // Fine patch: the existing 3-octave fbm, unchanged. It no longer moves the material
   // (districts own that), so it is purely how broken this stretch is.
   const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.28;
-  const decay = Math.min(1, Math.max(0, envelope + patch));
+  const decay = Math.min(MAX_WEAR, Math.max(0, envelope + patch));
   const surface = districtSurface(districtIndex(s));
   const condition = out ?? { surface, decay, sandCover: 0, markings: 0 };
   condition.surface = surface;
@@ -352,7 +378,7 @@ export interface PoleCondition {
   readonly era: PoleEra;
   /** Metres between poles. Later eras space them further apart. */
   readonly spacing: number;
-  /** 0 = upright and intact, 1 = collapsed. */
+  /** 0 = upright and intact, MAX_WEAR = as far gone as the world ever shows one. */
   readonly dilapidation: number;
   /** Probability a given pole still carries its wire span. */
   readonly wireChance: number;
@@ -415,7 +441,7 @@ export function poleEraSegments(): readonly PoleEraBand[] {
 export function poleConditionAt(s: number): PoleCondition {
   const band = poleBandAt(s);
   if (band.era === 'none') {
-    return { era: 'none', spacing: 0, dilapidation: 1, wireChance: 0, lampChance: 0 };
+    return { era: 'none', spacing: 0, dilapidation: MAX_WEAR, wireChance: 0, lampChance: 0 };
   }
 
   // Dilapidation resets at each era boundary: a new era means newer infrastructure.
@@ -424,7 +450,13 @@ export function poleConditionAt(s: number): PoleCondition {
   return {
     era: band.era,
     spacing: band.spacing,
-    dilapidation: Math.min(1, within * 1.15),
+    // Clamped like road decay, and for the same reason: an infrastructure generation
+    // ends with its poles leaning, not lying in the sand. See MAX_WEAR.
+    dilapidation: Math.min(MAX_WEAR, within * 1.15),
+    // Wires and lamps are NOT part of that ceiling, and deliberately. A span that has
+    // come down and a lamp that has failed are things that happened to a pole, not how
+    // worn the pole is: they are survival of attached equipment, already binary, and
+    // already tuned so most of the fleet is stripped long before the poles lean.
     wireChance: Math.max(0, 1 - within * 1.3),
     // Lamps die well before the poles fall over.
     lampChance: Math.max(0, 1 - within * 2.2),

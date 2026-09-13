@@ -164,12 +164,13 @@ let texturesAttached = false;
 function attachRoadTextures(): void {
   if (texturesAttached) return;
   texturesAttached = true;
-  const { map, bump, mean } = roadTextures();
+  const { map, normal, mean } = roadTextures();
   roadMaterial.map = map;
-  roadMaterial.bumpMap = bump;
-  // 1.5 mm of relief: enough for low sun to rake across the aggregate, small enough
-  // that it never reads as a bumpy road on its own.
-  roadMaterial.bumpScale = 0.0015;
+  // Tangent-space normals of the wearing course, baked from the same height field as
+  // the albedo. Flat strength: the relief is the aggregate, and a low sun is the only
+  // light that reads it, so half strength is already a visible rake on the road.
+  roadMaterial.normalMap = normal;
+  roadMaterial.normalScale.set(0.5, 0.5);
   roadMaterial.needsUpdate = true;
   textureGain = 1 / Math.max(0.2, mean);
 }

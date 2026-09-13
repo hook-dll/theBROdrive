@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SurfaceType } from './core/surfaces';
 import { applyComicShading } from './render/comic';
-import { PALETTE_CYCLE_M, desertPaletteAt, poleConditionAt, poleEraSegments } from './world/gradient';
+import { MAX_WEAR, PALETTE_CYCLE_M, desertPaletteAt, poleConditionAt, poleEraSegments } from './world/gradient';
 import type { PoleCondition, PoleEra } from './world/gradient';
 import { createPoleDisplay, desertPropForms } from './world/props';
 
@@ -152,7 +152,9 @@ export function bootPropGallery(): void {
     mesh.scale.setScalar(scale); mesh.position.y = -form.sink * form.baseRadius * scale; specimen.add(mesh); addEntry(form.id, specimen, desertPropForms(SurfaceType.Rock).includes(form));
   }
   const eras: readonly PoleEra[] = ['timber', 'lattice', 'concrete'];
-  for (const era of eras) for (const dilapidation of [0.1, 0.98]) addEntry(`${era} · износ ${Math.round(dilapidation * 100)}%`, createPoleDisplay(conditionForEra(era, dilapidation), 0xdecade, entries.length + 71), false);
+  // The second entry is MAX_WEAR, not the old 0.98: that is now the most dilapidated
+  // pole the world builds, so it is the one the gallery has to show.
+  for (const era of eras) for (const dilapidation of [0.1, MAX_WEAR]) addEntry(`${era} · износ ${Math.round(dilapidation * 100)}%`, createPoleDisplay(conditionForEra(era, dilapidation), 0xdecade, entries.length + 71), false);
 
 
   let yaw = 0; let pitch = -0.5; const keys = new Set<string>();

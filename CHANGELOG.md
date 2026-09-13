@@ -4,6 +4,87 @@
 
 ### Changed
 
+- THE ROAD'S SURFACE WAS PIXEL ART, AND THE PIXELS WERE 7 CM SQUARES. `roadTextures` drew
+  its wearing course by quantising the tile into 3-pixel cells and giving each cell one flat
+  tone, with independent white noise added per pixel on top. At 2.3 cm a texel that stamps an
+  axis-aligned 7 cm square on every stone, so the grain the eye reads is not aggregate at all:
+  it is the 3x3 texel grid, and no filter can remove it because the squares ARE the signal.
+  Measured by rendering one real `RoadMeshProvider` chunk with the real shared material
+  and looking at it (now the permanent `/?road-lab`, since the shipped road is minutes of
+  driving away and the whole question is what a surface looks like): "very conspicuous
+  square/rectangular pixel blocks cover the asphalt, roughly 1/50 to 1/100 of a lane
+  width near the camera… it looks strongly like procedural pixel noise, not natural
+  asphalt".
+- THE GRAIN IS NOW WRAPPING GRADIENT NOISE, TERRACED INTO THREE PLATEAUS. Four octaves
+  (64/128/256/512 lattice cells, i.e. 37/18/9/4.6 cm) sum into one chip field; alternate
+  octaves are transposed, which is a 90-degree rotation of the lattice and costs nothing, and
+  four octaves sharing one axis is what puts a rectangle on a surface that has none. The field
+  is then cut into binder / chip / pale quartz plateaus with narrow risers: the plateaus carry
+  the tones, so the relief and the colour agree by construction, and their boundaries are
+  iso-contours of smooth noise, so they are irregular and round where the old ones were square.
+  The first replacement tried value noise alone, which is smooth but puts its features on
+  lattice points, and that came back from the same render as "weakly rectangular blotches of
+  plaster" — hence gradient noise.
+- THE NORMAL MAP REPLACES THE BUMP MAP, and it is baked from the same height field the albedo
+  is drawn from rather than from a second, unrelated one. `bumpMap` shades from screen-space
+  derivatives of its own texture, which amplifies exactly what a tiled noise field should not
+  advertise; the map is low-passed once before the normals are differenced, which turns stone
+  risers into the rounded edges a stone actually has and drops the lattice out of the
+  derivative.
+- MOST OF THE TILE'S ENERGY MOVED TO ITS HIGH OCTAVES and its macro variation came down, in
+  the other direction from the first pass: a real asphalt mat is a fairly uniform grey, and
+  what varies across a road is the wheel tracks and the dust, which are geometry and vertex
+  colour, not the tile. The first replacement weighted the low frequencies and produced
+  half-metre blotches — the surface was less uniform than the thing it was imitating. Bleach
+  swing 15 -> 8 tone units, polished/ravelled tone swing 7 -> 4, and the coarse octave keeps
+  0.3 of its weight in the relief instead of 0.55.
+- CRACKS CAME DOWN FROM SIX PER TILE TO TWO, AND PATCHES FROM THREE TO TWO. A crack every
+  four metres of a 24 m tile is a pattern before it is damage, and long meandering loops are
+  the most memorable thing a repeating tile can carry, so they are the first thing the eye
+  locks onto once the grain stops being the obvious artefact. The road's real damage budget is
+  spent on potholes and ravelled edges, which are placed in world space and never repeat.
+- BUILDING THE TILE IS FAST AGAIN. Gradient noise costs more per sample than the value noise
+  it replaced, and the straightforward version measured 578 ms against the old 250 ms. The
+  waste was that a gradient-noise sample reads four lattice corners and each corner is shared
+  by every texel in its cell — 256 texels at the 64-cell octave, about 29 000 at the 6-cell
+  bleaching field — so the corners are hashed once into a table and the inner loop only reads
+  it. Measured in the browser, first build of the cached pair: 227 ms, with the albedo
+  numerically identical to the precomputed-free version (mean linear luminance 0.53333 both
+  ways). `tools/road-lanes.ts`, which builds real chunks through the canvas shim, still
+  reports the ribbon, the taper and the lane dividers unchanged.
+
+- THE WORLD NEVER SHOWS WEAR PAST 60%. Distance-aging drove two dials to full ruin: the
+  road's `decay` (which is sand cover, markings, bump amplitude, pothole density, wheel-path
+  polish, edge ravel and mottle) and the poles' `dilapidation` (which leaned a mast until it
+  tipped right over and lay in the sand). Those are wrecks rather than a long road, and a
+  player who meets one reads the world as broken. Both are now clamped to `MAX_WEAR = 0.6`,
+  exported from `world/gradient.ts` so the benches and the prop gallery can construct the
+  worst case that actually exists.
+- Measured over the whole road (`tools/road-condition.ts`, 200 000 samples): raw decay runs
+  0.00..1.00 with a mean of 0.475 and a median of 0.488, and 31.9% of the road is above the
+  ceiling. After it: max 0.600, mean 0.434, nothing above. Sand cover therefore stops at 0.24
+  instead of 0.85, and the bench's own properties are unmoved — first half 0.437 against
+  second half 0.430 (must be within 0.05), decay drift -0.0045 per 10 000 km (must be under
+  0.02), concrete share 7.6% against its 8% target, largest palette jump 1.00/255.
+- THE COST OF THE CEILING IS NAMED RATHER THAN HIDDEN: it is a clamp, not a rescale, so every
+  stretch that was already inside 0..0.6 keeps exactly the condition it had and the third of
+  the road that was worse now reads as the same deeply-worn road. Rescaling the whole axis by
+  0.6 would keep the variation instead, at the price of making the median stretch a third less
+  worn than it is today (median 0.29, and lane paint back on 45% of the road). The clamp was
+  chosen because it changes only the states the ceiling was aimed at.
+- A POLE LIES IN THE SAND NOWHERE, and the code that could have built one is gone rather than
+  left unreachable: `collapsed` needed `dilapidation > 0.72`, which the ceiling makes
+  impossible, so the field, its pose branches, the 0.12 m sink and the "flat poles are not
+  colliders" and "no wire to a fallen pole" skips are all removed. The lean remains and still
+  carries the era's silhouette: 0..0.378 rad (21.7 degrees) against the old 32.
+- WIRES AND LAMPS ARE NOT PART OF THAT CEILING, deliberately. A span that has come down and a
+  lamp that has failed are things that happened to a pole, not how worn the pole is; they are
+  survival probabilities for attached equipment, already binary and already tuned so most of
+  the fleet is stripped long before the poles lean. Measured over the road, 76.1% of sampled
+  pole positions still have some chance of a wire and 45.0% some chance of a working lamp.
+  Capping them as well would have meant re-rating both curves for every pole on the road, not
+  just the most worn ones, which is a larger change than the ceiling asked for.
+
 - A CAR THAT CANNOT LEAVE A HILL IS GIVEN A CRAWL. The road and the fleet were supposed to
   agree — the road is what the cars were designed around — and they did not. Measured: the
   starter VAZ-2101 escapes 10.9 degrees of honest asphalt from a parked start, while seed

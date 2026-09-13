@@ -1012,7 +1012,6 @@ interface PolePose {
   twist: number;
   leanAz: number;
   leanAngle: number;
-  collapsed: boolean;
   hasCrossarm: boolean;
   hasWire: boolean;
   height: number;
@@ -1078,7 +1077,6 @@ function describePoleAt(
   cond: PoleCondition,
 ): PolePose {
   const h1 = hash01(seed, TAG_POLE, index, 0);
-  const h2 = hash01(seed, TAG_POLE, index, 1);
   const h3 = hash01(seed, TAG_POLE, index, 2);
   const h4 = hash01(seed, TAG_POLE, index, 3);
   const h5 = hash01(seed, TAG_POLE, index, 4);
@@ -1089,9 +1087,11 @@ function describePoleAt(
   const d = cond.dilapidation;
 
   const leanAz = h1 * Math.PI * 2;
-  // High dilapidation eventually tips a pole right over, leaving it in the sand.
-  const collapsed = d > 0.72 && h2 < ((d - 0.72) / 0.28) * 0.9;
-  const leanAngle = collapsed ? Math.PI * 0.5 : d * 0.42 * (0.5 + h3);
+  // No pole is ever tipped right over: `dilapidation` stops at MAX_WEAR, because a
+  // mast lying in the sand is a wreck rather than a road going somewhere. What is left
+  // is the lean, which is what a pole that has stood through decades of wind looks
+  // like — and it is what makes the silhouette on the horizon change between eras.
+  const leanAngle = d * 0.42 * (0.5 + h3);
 
   // `twist` spins the pole about +Y so its local axes follow the road: rotating by
   // the heading maps local +X onto (cos h, 0, -sin h), which is `offsetPoint`'s
@@ -1100,13 +1100,13 @@ function describePoleAt(
   const jitter = (h4 - 0.5) * 0.14;
   const twist = heading + (cond.era === 'lattice' ? Math.PI * 0.25 : 0) + jitter;
 
-  const hasCrossarm = cond.era === 'timber' ? !collapsed && h5 > d * 0.8 : true;
+  const hasCrossarm = cond.era === 'timber' ? h5 > d * 0.8 : true;
   const lampWorks = h6 < cond.lampChance;
   const hasWire = h7 < cond.wireChance;
 
   const top = leanOffset(height, leanAngle, leanAz);
 
-  const ll = !collapsed ? lampLocal(cond.era, hasCrossarm) : null;
+  const ll = lampLocal(cond.era, hasCrossarm);
   const hasLamp = ll !== null;
   let lampX = 0;
   let lampY = 0;
@@ -1136,7 +1136,6 @@ function describePoleAt(
     twist,
     leanAz,
     leanAngle,
-    collapsed,
     hasCrossarm,
     hasWire,
     height,
@@ -1292,7 +1291,6 @@ function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
 export function createPoleDisplay(cond: PoleCondition, seed: number, index: number): THREE.Group {
   const pose = describePoleAt(seed, 0, index, 0, 0, 0, 0, cond);
   const group = new THREE.Group();
-  group.position.y = pose.collapsed ? -0.12 : 0;
   poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, group.quaternion);
   addPoleMeshes(group, pose);
   return group;
@@ -1394,7 +1392,7 @@ export class PoleProvider implements ChunkProvider {
       poses.push(pose);
 
       const poleGroup = new THREE.Group();
-      poleGroup.position.set(pose.baseX - ox, pose.baseY - (pose.collapsed ? 0.12 : 0), pose.baseZ - oz);
+      poleGroup.position.set(pose.baseX - ox, pose.baseY, pose.baseZ - oz);
       poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, poleGroup.quaternion);
       addPoleMeshes(poleGroup, pose);
       group.add(poleGroup);
@@ -1407,8 +1405,9 @@ export class PoleProvider implements ChunkProvider {
         workingLamps.push({ x: pose.lampX - ox, y: pose.lampY, z: pose.lampZ - oz });
       }
 
-      // Upright poles are solid obstacles; collapsed ones lie flat and are skipped.
-      if (ctx.hasPhysics && !pose.collapsed) {
+      // Every pole is a solid obstacle: nothing tips one over any more (see
+      // `describePoleAt`), so there is no flat-in-the-sand case to skip.
+      if (ctx.hasPhysics) {
         // The collider leans with the pole so a dilapidated mast is solid where
         // it visually is, not where it would have stood when new.
         const mid = leanOffset(pose.height * 0.5, pose.leanAngle, pose.leanAz);
@@ -1431,12 +1430,11 @@ export class PoleProvider implements ChunkProvider {
     // from the same pure function rather than read from a neighbour's content —
     // otherwise spans would flicker as chunks load around the boundary.
     for (const pose of poses) {
-      if (!pose.hasWire || pose.collapsed) continue;
+      if (!pose.hasWire) continue;
       const nextS = poleSByIndex(pose.index + 1);
       if (nextS === null) continue;
       if (poleConditionAt(nextS).era !== pose.era) continue; // no span across era boundary
       const nextPose = describePole(ctx.road, ctx.terrain, seed, nextS, pose.index + 1);
-      if (nextPose.collapsed) continue;
       const a = new THREE.Vector3(pose.topX - ox, pose.topY, pose.topZ - oz);
       const b = new THREE.Vector3(nextPose.topX - ox, nextPose.topY, nextPose.topZ - oz);
       const wireGeo = new THREE.TubeGeometry(
