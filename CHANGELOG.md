@@ -4,6 +4,14 @@
 
 ### Added
 
+- `tools/pedal-dose.ts` measures what a keyboard press actually delivers to a pedal.
+  A keyboard pedal is a switch, so the ONLY thing that turns a press into a dose is the
+  shaping the input layer applies, and two properties are asserted: the dose is
+  monotonic in press length, and the release is a release. The second is measured as an
+  equivalent hold — the impulse delivered AFTER the key comes up, expressed as seconds
+  of the pedal the press reached — which is the quantity that decides whether a driver
+  can ask for a light touch.
+
 - A STEERING-POSITION STRIP on the dashboard, under the segment display: a track with
   its two ends bracketed, a notch at straight ahead, and a marker at the rim's present
   position. It exists because the keyboard is how most players steer this game, and a
@@ -495,6 +503,28 @@
   approaching and receding cars remain legible against the desert.
 
 ### Fixed
+
+- LETTING GO OF A PEDAL NOW MEANS SOMETHING. A keyboard pedal is a switch, so the input
+  layer's ramp is the only thing that turns a press into a dose — and the release was
+  the half that was wrong. At a 0.3 s decay, releasing a key did not release the pedal:
+  measured as an equivalent hold, the tail delivered 0.28 SECONDS of pedal at every
+  press length, so a 40 ms tap put down EIGHT times its own press after the key came up.
+  That is the brake reported from play as an anchor — a tap was not a light touch, it
+  was an unmodulated heavy one, because the driver's release kept pushing the pedal in.
+  On the throttle it was the mirror image: the pedal took a third of a second to come
+  off, so lifting off did not lift, and the car kept pulling. Feathering, which is how a
+  keyboard driver modulates, could not reach below an AVERAGE of 0.26 pedal at any duty
+  cycle; it now reaches 0.08, and the whole band between is available.
+  The rise went the other way, 0.18 s to 0.3 s, and for the opposite reason: eleven
+  frames to cross the entire travel is less time than a human can time a release in, so
+  there was nowhere in the middle to stop and every press landed at 1.0. Measured with
+  the foot brake from 60 km/h, speed shed over two seconds — against 3.6 km/h of plain
+  coasting — a 30 ms press now takes 3.8, a 250 ms press 6.3 and a one-second press
+  18.6, where the old shaping gave 4.5, 10.0 and 23.8 with a 0.28 s tail on all three.
+  The rise is deliberately not made slower than 0.3 s: pedal travel has to stay
+  available quickly, because holding 1.0 rather than 0.8 is worth 33% of this car's
+  acceleration (0-100 in 22.4 s against 29.7 s) and 16 km/h of top speed. A keyboard
+  pedal is dosed by TIMING the press, not by capping the top of it.
 
 - The handbrake no longer launches the car. Reported from play: letting the handbrake
   off made the car jump. The parking hold works by teleporting the chassis back to the

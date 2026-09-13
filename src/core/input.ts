@@ -189,9 +189,33 @@ function resolveKeys(
   return cleaned !== null && cleaned.length > 0 ? cleaned : defaults;
 }
 
-/** Seconds for a digital key to ramp an analogue axis from 0 to 1. */
-const AXIS_RISE = 0.18;
-const AXIS_FALL = 0.3;
+/**
+ * Seconds for a digital key to ramp an analogue axis from 0 to 1, and to come back.
+ *
+ * THE RISE IS THE DOSE CONTROL AND THE FALL IS NOT, which is the whole of this pair.
+ * A keyboard pedal is a switch, so the only thing that turns a press into a dose is
+ * this shaping: how long the key is held selects the value, and everything that happens
+ * after the key comes up is pedal the driver did NOT ask for.
+ *
+ * The fall was 0.3 s, and at that decay a release was not a release — it was a second
+ * press of the same size. Measured with `tools/pedal-dose.ts`, as an equivalent hold:
+ * releasing added 0.28 SECONDS of pedal at every press length, so a 40 ms tap delivered
+ * EIGHT times its own press in the tail. That is the brake the player describes as "an
+ * anchor": a tap is not a light touch, it is an unmodulated heavy one, because the
+ * driver's release keeps pushing the pedal down.
+ *
+ * The rise was 0.18 s, which is 11 frames to cross the whole travel: the entire usable
+ * band passed in less time than a human can time a release in, so there was nowhere in
+ * the middle to stop. 0.3 s is three times the room, and a steady part-pedal becomes
+ * something a player can actually hold.
+ *
+ * The rise is deliberately NOT slower than this. Pedal travel has to stay available
+ * quickly — measured on this car, holding 1.0 rather than 0.8 is worth 33% of its
+ * acceleration (0-100 in 22.4 s against 29.7) and 16 km/h of top speed — so the way to
+ * dose a keyboard pedal is by TIMING the press, not by capping the top of it.
+ */
+const AXIS_RISE = 0.3;
+const AXIS_FALL = 0.12;
 /** A quick tap corrects a lane; a deliberate half-second hold approaches full lock. */
 const STEER_RISE = 0.45;
 /** Caster returns the input axis faster than it turns in, without snapping to centre. */
