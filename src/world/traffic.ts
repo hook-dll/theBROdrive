@@ -109,10 +109,26 @@ const PASSING_SPAWN_EXCLUSION_M = 300;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
 /**
  * The original exclusion stays on a one-lane road bit-for-bit. Once a second lane
- * exists it would reject valid side-by-side starts, so only body clearance remains.
+ * exists it would reject valid side-by-side starts, so only body clearance remains —
+ * and clearance has to mean a BODY, which 2.2 m of centre-to-centre distance is not.
+ *
+ * A car is 4.3 m long. A site 2.5 m behind another car's centre is inside that car,
+ * and Rapier resolves being inside another car by throwing one of them: measured on
+ * the real road, bodies logged 2-6 m BELOW the surface doing 150-200 km/h, each one a
+ * spawn whose history is a single sample at v0. The radial figure is what the player
+ * check gets, where a car must not appear alongside him at all; cars are checked
+ * against each other in the road frame below, where along and across are separable
+ * and a genuine side-by-side start is still allowed.
  */
 const SPAWN_WORLD_GAP_M = 30;
-const WIDE_SPAWN_WORLD_GAP_M = TRAFFIC_HALF_WIDTH_M * 2;
+const WIDE_SPAWN_WORLD_GAP_M = 6;
+/**
+ * Road-frame box a spawn keeps clear of every live body: one car length plus a margin
+ * along the road, one car width plus a margin across it. Adjacent lane centres are
+ * 2.9 m apart or more, so two cars may still be started abreast.
+ */
+const SPAWN_BODY_ALONG_M = 8;
+const SPAWN_BODY_ACROSS_M = 2.6;
 /**
  * Lateral, measured in a car's own direction sense, past which it has crossed the
  * crown into the other carriageway. Outer lanes remain on their own side whatever
@@ -1078,9 +1094,17 @@ export class RoadTraffic {
         ? WIDE_SPAWN_WORLD_GAP_M
         : SPAWN_WORLD_GAP_M;
     if (!this.isSpawnClear(x, z, worldGap)) return;
+    // WHERE THE OTHER CARS ARE, not which lane they were assigned. A driver in the
+    // middle of an overtake is physically in the opposing lane while its `lane` still
+    // says its own, and `roadGapClear` above — which compares nominal lanes — cannot
+    // see it. This one reads the measured arclength and lateral every car already
+    // maintains, in either direction, whatever it is doing.
+    // `forwardLateral` is already a ROAD-frame offset: it is what built x/z above.
     for (const car of this.carList) {
-      car.vehicle.absoluteTranslation(this.position);
-      if (Math.hypot(x - this.position.x, z - this.position.z) < WIDE_SPAWN_WORLD_GAP_M) {
+      if (
+        Math.abs(car.forwardS - request.forwardS) < SPAWN_BODY_ALONG_M &&
+        Math.abs(car.roadLateral - forwardLateral) < SPAWN_BODY_ACROSS_M
+      ) {
         return;
       }
     }

@@ -681,6 +681,36 @@ const PASS_SIGHT_CAP_S = 6;
 /** Below this speed advantage frantic stays put rather than sitting alongside. */
 const PASS_SPEED_MARGIN_MPS = 4;
 /**
+ * KICKDOWN: the extra share of its own pace a driver spends while it is shopping for
+ * a pass, before `passNerve` scales it.
+ *
+ * A crossing is priced on `(gap to the leader + clearance) / (own speed - leader's
+ * speed)`, and ambient traffic's differential over the car it has caught is 10-20
+ * km/h. That makes the manoeuvre 6-7 s long and the room it must prove some 300 m,
+ * which this road does not have: the gate refused most windows outright, and the ones
+ * it allowed closed while the car was still alongside, so the driver came back with
+ * nothing. A real driver does not overtake at its cruising speed — it uses the
+ * engine, and the cap ambient traffic is given is a cruising HABIT, not a limiter.
+ *
+ * Divided by `passNerve`, so frantic kicks down harder than hurried; a mode with no
+ * appetite for passing moving traffic never reaches it at all.
+ */
+const PASS_KICKDOWN_SHARE = 0.1;
+/**
+ * Share of its comfort headway a driver keeps while closing on a car it means to
+ * pass, and how many of those gaps away that car still counts as CAUGHT.
+ *
+ * The follower settles at `FOLLOW_STANDOFF_M + v·headwayS`, which is 39 m at 70 km/h,
+ * and every one of those metres is charged to the manoeuvre twice: once as road to be
+ * made up before the leader's bumper is even level, and once again through the
+ * oncoming car that is covering its own road while it happens. Tucking in before
+ * pulling out is what a driver does at the back of something slow, and it is the
+ * cheapest metre in the whole sum. Only the comfort term is shortened — the braking
+ * term beside it is untouched, so the stopping distance behind the leader remains.
+ */
+const PASS_APPROACH_HEADWAY_SHARE = 0.6;
+const PASS_APPROACH_REACH = 2;
+/**
  * Headway, in seconds of travel, a car must still have to its lead before a pass
  * may START.
  *
@@ -1007,6 +1037,12 @@ export class Autopilot {
    * driver behaves exactly as it did before the field existed.
    */
   private trafficField: TrafficField | null = null;
+  /**
+   * Did last step's plan want the OPPOSING lane — either refused it or was already
+   * out in it? A driver waiting for a window closes up on the car it means to pass;
+   * one that is merely following does not. See `followHeadwayS`.
+   */
+  private passShopping = false;
   private automaticLightsOn = false;
   /** Ambient traffic keeps dipped beams lit in daylight as a visibility aid. */
   private lowBeamsAlwaysOn = false;
@@ -1961,8 +1997,59 @@ export class Autopilot {
     // So the gate is now exactly "is there another candidate line", which is what
     // `laneCentres` already answers. An empty-road driver still has one candidate and
     // still pays for one probe.
-    const desiredSpeed = Math.min(config.cruiseMps * this.paceValue, this.speedCapValue);
     const probeAdjacentLanes = this.laneCentres.length > 1;
+    // A DRIVER THAT HAS CAUGHT SOMETHING SLOW DRIVES DIFFERENTLY FROM ONE ON A CLEAR
+    // ROAD: it closes up, and it uses the engine. See `PASS_KICKDOWN_SHARE`.
+    const desiredSpeed = Math.min(config.cruiseMps * this.paceValue, this.speedCapValue);
+    const comfortHeadwayS = this.followingHeadwayValue ?? config.headwayS;
+    // Last step's own-lane block, which is this step's leader to within a sixtieth of
+    // a second: something in the driver's own lane going somewhere, materially slower
+    // than it wants to go, and near enough to be what it is actually held up by rather
+    // than traffic in the distance.
+    //
+    // `PASS_MIN_SPEED_MPS` is what keeps this out of a jam. A queue shuffling at 10
+    // km/h is not a car to be overtaken, it is a road that is blocked, and treating it
+    // as the former closed the gaps a blocked queue needs to unwind through: measured
+    // on the real road at seed 1337, which is a seed with a blockage on it, 56% of
+    // car-time under 8 km/h and an 81 s standstill against 23% and 14 s.
+    const passUrge =
+      (config.overtakes || config.lanePasses) &&
+      this.corridorLaneBlockSpeed > PASS_MIN_SPEED_MPS &&
+      this.corridorLaneBlockSpeed < desiredSpeed - PASS_ADVANTAGE_MPS &&
+      this.corridorLaneBlockDistance <=
+        PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS);
+    /**
+     * AND IT HAS TO BE A DRIVER THAT ACTUALLY WANTS THE OTHER LANE, which is what
+     * `passShopping` records: last step's plan either asked for the crossing and was
+     * refused it, or was already out there.
+     *
+     * Spending the allowance on everything merely slower is a whole queue driving 15%
+     * harder into the back of itself for no extra pass, and that is what it measured:
+     * on the real road at seed 202, 18 stream contacts against 3 and two bodies
+     * launched, with one extra pass to show for it. The gate is self-starting because
+     * a refusal is the state a held-up driver is already in — the manoeuvre it cannot
+     * afford at its cruise is re-priced at its kickdown on the very next step.
+     */
+    const passAttempt = passUrge && this.passShopping;
+    /**
+     * The kickdown, and it is the SAME number the crossing gate sizes the manoeuvre
+     * with and the speed plan asks the pedal for: a pass committed to at a speed the
+     * driver will not then use is how a crossing becomes a head-on.
+     */
+    const crossingSpeed = passAttempt
+      ? desiredSpeed * (1 + PASS_KICKDOWN_SHARE / config.passNerve)
+      : desiredSpeed;
+    // The gap a driver shopping for a window keeps behind the car it means to pass.
+    //
+    // It is deliberately NOT conditioned on the pace already being matched. That was
+    // tried — tuck in only once the closing speed is under 2 m/s — and it is a control
+    // target that switches on the state it produces: tucking in raises the target, the
+    // car closes, the test fails, the target drops, the car brakes, the test passes
+    // again. Measured on the real road at seed 559316, that limit cycle turned a 1.6 s
+    // longest stop and 8% crawl into a 132 s standstill and 55%.
+    const followHeadwayS = passAttempt
+      ? comfortHeadwayS * PASS_APPROACH_HEADWAY_SHARE
+      : comfortHeadwayS;
     /**
      * WHAT A DRIVER DOES ABOUT A LOG IN THE ROAD: slow to the speed the way round can
      * be taken at, and take it. Not stop at it, not creep past it at walking pace.
@@ -2179,6 +2266,7 @@ export class Autopilot {
       // measured 150 m of room against arrived halfway through. Every head-on contact
       // in the real-road bench was this, in both directions at once.
       bypassSpeed,
+      crossingSpeed,
       // Nothing already coming up the opposing lane behind us: the search only ever
       // looks forward, so this is the one rearward fact it needs.
       crossingRearClear: crossingRearClear,
@@ -2200,6 +2288,9 @@ export class Autopilot {
     this.corridorBlockSpeed = plan.blockSpeed;
     this.corridorLaneBlockDistance = plan.laneBlockDistance;
     this.corridorLaneBlockSpeed = plan.laneBlockSpeed;
+    // Wanting the other lane and not having it yet is the state a driver tucks in
+    // from; being out there already is the state it must not lift off in.
+    this.passShopping = plan.crossingRefused || plan.usesOncomingLane;
     // Telemetry reads "pass" from where the CAR is, not from where the line points:
     // the planner re-decides every step, so a line that dips across the centre for
     // a moment is not an overtake, and counting those turned a bench's pass counter
@@ -2415,7 +2506,13 @@ export class Autopilot {
     // Build a local speed profile rather than applying one worst bend to the whole
     // horizon. Every sample contributes its surface, decay, grade and curvature;
     // braking distance then propagates that local limit back to the car.
-    const clearRoadSpeed = Math.min(config.cruiseMps * this.paceValue, this.speedCapValue);
+    //
+    // `crossingSpeed` ONLY while the plan is actually committed to the other lane.
+    // The gate sizes the manoeuvre on that number, so the pedal has to deliver it out
+    // there; spending it on the APPROACH as well simply arrives at the back of a queue
+    // 4 m/s faster, and the rear-end that follows is what launched bodies below the
+    // road in the real-road bench — 65 km/h into a car doing 3.
+    const clearRoadSpeed = plan.usesOncomingLane ? crossingSpeed : desiredSpeed;
     // What is left of the cornering budget once a pending lateral manoeuvre has taken
     // its share. `bypassSpeed` below the driver's own pace is exactly the statement
     // "there is a way round something to be made here".
@@ -2570,7 +2667,7 @@ export class Autopilot {
       if (blockSpeed > CRAWL_SPEED_MPS) {
         // Moving: keep a time headway behind it.
         const headwayGap =
-          FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
+          FOLLOW_STANDOFF_M + speed * followHeadwayS;
         targetSpeed = Math.min(
           targetSpeed,
           Math.max(0, blockSpeed + (this.corridorBlockDistance - headwayGap) / FOLLOW_RELAX_S),
@@ -2605,7 +2702,7 @@ export class Autopilot {
     ) {
       const laneSpeed = Math.max(0, this.corridorLaneBlockSpeed);
       const headwayGap =
-        FOLLOW_STANDOFF_M + speed * (this.followingHeadwayValue ?? config.headwayS);
+        FOLLOW_STANDOFF_M + speed * followHeadwayS;
       targetSpeed = Math.min(
         targetSpeed,
         Math.sqrt(

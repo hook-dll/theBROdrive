@@ -119,6 +119,19 @@ export interface CorridorRequest {
    */
   readonly bypassSpeed: number;
   /**
+   * Speed the driver will really make while it is out in the opposing lane with a
+   * CLEAR line — its cruise plus whatever kickdown it spends on a pass.
+   *
+   * Separate from `desiredSpeed`, which is what the driver wants on an empty road and
+   * therefore what decides which obstacles are in the way at all and what a slow one
+   * costs. Feeding a pass allowance into THAT number moved the whole cost search: more
+   * things counted as hard blocks, more drivers went round their own leaders onto the
+   * shoulder, and the road jammed — measured on the real road at seed 1337, 64% of
+   * car-time under 8 km/h against 23%, with 29% of it spent in recovery. The
+   * allowance belongs to the sums below and to nothing else.
+   */
+  readonly crossingSpeed: number;
+  /**
    * Is the opposing lane clear BEHIND us? Pulling out in front of something already
    * overtaking is a rear-end, and the corridor search has no rearward obstacles.
    */
@@ -317,6 +330,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     oncomingGap,
     oncomingSpeed,
     bypassSpeed,
+    crossingSpeed,
     laneCentres = [laneOffset],
     oncomingBoundary = 0,
     stopRoom,
@@ -428,7 +442,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
         if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return slowest;
         if (!overlaps(obstacle, laneOffset, halfWidth)) return slowest;
         return Math.min(slowest, obstacle.speed);
-      }, desiredSpeed);
+      }, crossingSpeed);
       // OVERHAULING SOMETHING MOVING AND GOING ROUND SOMETHING STOPPED ARE TIMED
       // DIFFERENTLY, and using the overhaul sum for both is how the crossing became a
       // head-on. Against a moving car the manoeuvre ends when the speed difference has
@@ -442,11 +456,11 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       // something in it. Pricing every crossing at the crawl locked the whole road:
       // measured, 77% of car-time below walking pace and nobody crossing at all.
       const squeezing = blockDistance < Number.POSITIVE_INFINITY;
-      const passSpeed = squeezing ? bypassSpeed : Math.max(speed, desiredSpeed);
+      const passSpeed = squeezing ? bypassSpeed : Math.max(speed, crossingSpeed);
       const manoeuvreSeconds =
         leaderSpeed > SHOULDER_BYPASS_MAX_SPEED
           ? (Math.min(ownLaneBlock, horizon) + CLEAR_M) /
-            Math.max(MIN_ADVANTAGE_MPS, desiredSpeed - leaderSpeed)
+            Math.max(MIN_ADVANTAGE_MPS, crossingSpeed - leaderSpeed)
           : (Math.min(ownLaneBlock, horizon) + STILL_CLEAR_M) /
             Math.max(MIN_ADVANTAGE_MPS, passSpeed);
       const roomNeeded = (Math.max(speed, passSpeed) + oncomingSpeed) * manoeuvreSeconds;

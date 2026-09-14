@@ -27,6 +27,7 @@ function request(overrides: Partial<CorridorRequest> = {}): CorridorRequest {
     laneOffset: LANE,
     speed: 20,
     desiredSpeed: 25,
+    crossingSpeed: 25,
     halfWidth: CAR_HALF_WIDTH_M,
     horizon: 200,
     lineRatePerMetre: 0.09,
