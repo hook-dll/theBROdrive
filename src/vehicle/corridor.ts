@@ -95,11 +95,42 @@ export interface CorridorRequest {
   readonly halfWidth: number;
   /** How far ahead obstacles were collected. Costs fade to zero at this range. */
   readonly horizon: number;
-  /** Lateral metres the commanded line may move per metre of road covered. */
-  readonly lineRatePerMetre: number;
+  /**
+   * Lateral acceleration, m/s², the commanded line may be moved with.
+   *
+   * NOT a rate. A rate is a slope, and a slope of 0.09 m per metre is 0.7 m/s of
+   * lateral speed at 30 km/h and 2.7 m/s at 108 — the same manoeuvre asking for
+   * fourteen times the lateral acceleration at road speed. The move is a pair of
+   * constant-acceleration arcs, so the road it consumes is `speed · 2·sqrt(shift/a)`,
+   * which is what the swept test below needs and is the same budget the speed plan
+   * prices the manoeuvre with.
+   */
+  readonly lineAccel: number;
   /** Outermost line that keeps the body on asphalt, and on the graded verge. */
   readonly asphaltLimit: number;
   readonly edgeLimit: number;
+  /**
+   * HOW FAR FROM ITS OWN LANE THIS DRIVER IS ENTITLED TO GO THIS STEP, metres.
+   *
+   * Defaults to the whole road, and that default was the hole. `laneCentres` decides
+   * which lane CENTRES are priced exactly and which lanes are probed for traffic, and
+   * it was doing duty as "may this driver change lane at all" — but the search also
+   * walks every quarter metre between the verges, so the next lane was a candidate for
+   * every driver on every tick whatever its character. `SLOW_COST_PER_MPS` is 6 per
+   * m/s and a lane is worth 2.9 in lane cost, so any car a metre per second slower
+   * than this driver's pace bought a lane change outright.
+   *
+   * Reported from play on a four-lane stretch, and it is two halves of one defect: a
+   * car in the inner lane undertaking on the right, and the car it had just passed
+   * pulling out into the lane it was vacating. Nobody had asked for either manoeuvre.
+   *
+   * The caller grants the whole road for what genuinely needs it — a driver entitled
+   * to pass, one whose own lane is blocked by something stopped, one already
+   * mid-manoeuvre, one with no feasible corridor — and otherwise grants its own lane
+   * and wherever the body already is, so a car away from its lane can always hold
+   * position or come home, and never go further out.
+   */
+  readonly lateralFreedom?: number;
   /**
    * What this driver thinks of the opposing lane, in cost. Low is bold: it is the
    * single knob that used to be a page of passing thresholds.
@@ -260,12 +291,12 @@ function overlaps(
  * went straight through the thing it was avoiding.
  *
  * BUT THE ROAD THAT MATTERS IS CLOSING DISTANCE, NOT OUR OWN TRAVEL. A lane
- * change costs about 32 m of travel, and measured against a car 30 m ahead that
+ * change costs tens of metres of travel, and measured against a car 30 m ahead that
  * looked like a certain collision — so a driver tucked in behind a slower car
  * could never choose the other lane, sat on its tail and followed it forever,
  * which is exactly what it did. The car ahead is MOVING: by the time the line has
  * crossed, it has gone its own way, and only the difference in speeds is spent.
- * At 20 m/s behind a car doing 16, that 32 m of travel is 6 m of closure.
+ * At 20 m/s behind a car doing 16, four fifths of that travel is not closure.
  */
 function sweptOverlap(
   obstacle: CorridorObstacle,
@@ -323,7 +354,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     desiredSpeed,
     halfWidth,
     horizon,
-    lineRatePerMetre,
+    lineAccel,
     asphaltLimit,
     edgeLimit,
     oncomingLaneCost,
@@ -332,6 +363,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     bypassSpeed,
     crossingSpeed,
     laneCentres = [laneOffset],
+    lateralFreedom = Number.POSITIVE_INFINITY,
     oncomingBoundary = 0,
     stopRoom,
     crossingRearClear,
@@ -342,6 +374,12 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
   let bestBlockDistance = Number.POSITIVE_INFINITY;
   let bestBlockSpeed = 0;
   const ownSide = Math.sign(laneOffset - oncomingBoundary || -1);
+  /**
+   * Is the body ALREADY on the other side of the crown? Two rules below are about
+   * entering the opposing lane and must not be re-asked of a car that is out there:
+   * see the rear-clearance gate.
+   */
+  const alreadyAcross = (ownLateral - oncomingBoundary) * ownSide < -halfWidth * 0.5;
   let bestFeasible = false;
   // What blocks the driver's OWN lane, once, for every candidate to reason about:
   // it is the thing a detour or an overtake exists to get past, and whether it is
@@ -376,8 +414,12 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
 
   const evaluate = (line: number): void => {
     if (Math.abs(line) > edgeLimit) return;
+    if (Math.abs(line - laneOffset) > lateralFreedom) return;
+    // Road covered while the line is being moved there, from the manoeuvre's own arc.
+    // A car that is barely moving covers almost none of it, which is what the old
+    // slope needed a standstill special case for.
     const transitionDistance =
-      Math.abs(line - ownLateral) / Math.max(lineRatePerMetre, 1e-4);
+      speed * 2 * Math.sqrt(Math.abs(line - ownLateral) / Math.max(lineAccel, 1e-3));
     let blockDistance = Number.POSITIVE_INFINITY;
     let blockSpeed = 0;
     let hardBlockDistance = Number.POSITIVE_INFINITY;
@@ -404,13 +446,26 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       // the test is the CLOSEST the body comes to it anywhere on the way there,
       // which is zero when it has to be driven through.
       if (obstacle.abeam) {
+        const reach = obstacle.halfWidth + halfWidth;
         const gapNow = Math.abs(obstacle.lateral - ownLateral);
         const gapThere = Math.abs(obstacle.lateral - line);
+        // ALREADY INSIDE ITS BAND IS NOT "ABOUT TO DRIVE THROUGH IT".
+        //
+        // `through` is for a line on the FAR side of a car in the next lane: getting
+        // there means crossing the space it occupies. A car in our OWN lane — the one
+        // tailgating us — overlaps our band by definition, so the test fired on it and
+        // reported zero clearance for every candidate line on either side. Every line
+        // was then refused, and a manoeuvre already under way was abandoned: reported
+        // from play as a car that had committed to an overtake going meekly back into
+        // its lane the moment the player closed up behind it. Moving sideways out of a
+        // band we are already in is not driving through anybody; the plain test below
+        // still refuses to CLOSE on whoever is in it.
         const through =
           obstacle.level === true &&
+          gapNow >= reach &&
           (obstacle.lateral - ownLateral) * (obstacle.lateral - line) <= 0;
         const closest = through ? 0 : Math.min(gapNow, gapThere);
-        if (closest < obstacle.halfWidth + halfWidth && closest < gapNow) return;
+        if (closest < reach && closest < gapNow) return;
         continue;
       }
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
@@ -501,7 +556,14 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       // rule read a yielding driver as a wedged one and started a reversing
       // manoeuvre, which put it across the carriageway in front of the very traffic
       // it was waiting for. Measured as 8% of all car-time spent in recovery.
-      if (!crossingRearClear) {
+      //
+      // AND THE REAR CLEARANCE IS AN ENTRY RULE, asked only of a car that is still on
+      // its own side. Its purpose is to stop a driver pulling out in front of somebody
+      // already overtaking; re-asked every step of a manoeuvre in progress, it means
+      // that anybody who pulls out BEHIND the passer sends the passer back across the
+      // crown — into the lane it is being overtaken from. The car behind is a follower,
+      // and the answer to a follower is to finish the pass and get back in.
+      if (!crossingRearClear && !alreadyAcross) {
         crossingRefused = true;
         if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
         return;

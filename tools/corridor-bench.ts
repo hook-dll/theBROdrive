@@ -30,7 +30,8 @@ function request(overrides: Partial<CorridorRequest> = {}): CorridorRequest {
     crossingSpeed: 25,
     halfWidth: CAR_HALF_WIDTH_M,
     horizon: 200,
-    lineRatePerMetre: 0.09,
+    // The manoeuvre's share of a dry-asphalt cornering budget, as `drive` computes it.
+    lineAccel: 2.2,
     asphaltLimit: ROAD_HALF_WIDTH,
     edgeLimit: STATIC_AVOID_LINE_M,
     oncomingLaneCost: 26,

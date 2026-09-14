@@ -508,9 +508,118 @@
   heightfield under each measured stretch — verified against `Terrain.heightAt` to within
   0.09 m — because the rig's ground probe is a raycast, and a bench with an empty physics
   world measures a camera that is never lifted or occluded.
+- LANE CHOICE BELONGS TO THE DRIVER, AND THE PLAYER'S AUTOPILOT NEVER HAD ANY. The lane
+  arrived through `Autopilot.requestLane`, which was the traffic coordinator's channel —
+  and nobody called it for the player, so his autopilot fell back to the lane beside the
+  crown, the PASSING lane, at all three of its characters on every four-lane stretch,
+  while the stream around him was placed by a rule he was not subject to. The method and
+  `RoadTraffic.assignRequestedLanes` are gone; the discipline lives in `drive` and reads
+  the same for the player's three autopilots and for the thirty ambient drivers.
+- A FOUR-LANE ROAD IS SORTED BY PACE, AND THEN STAYS SORTED. A driver's home lane is a
+  property of its own intended speed — 25 m/s, which lands between the stream's ordinary
+  driver (72-84 km/h) and its hurried one (95-115), and between the player's sleeper and
+  his hurried — so the arrangement maintains itself with nobody weaving to keep it.
+  "Keep right and overtake" was built first and is exactly the chaos it was meant to
+  remove: every driver with a slower car ahead had a reason to move, and the stream spent
+  its life changing lanes. Discretionary lane changes are frantic's alone again, and the
+  ambient stream contains no frantic drivers; the lane beside you as a way past something
+  STOPPED is still everybody's. A lane that ENDS is left under steering, read 110 m ahead
+  — a merge that used to be the coordinator's and therefore never happened to the player.
+- `lanePasses` HAD NEVER FORBIDDEN ANYTHING. `laneCentres` decides which lane centres are
+  priced exactly and which lanes are probed; the cost search walks every quarter metre
+  between the verges regardless, so the next lane was a candidate for every driver on
+  every tick whatever its character — and at 6 cost per m/s of lost pace against 2.9 for
+  a lane, any car a metre per second slower bought a lane change outright. Reported from
+  play as an inner-lane car undertaking on the right and the car it had just passed
+  pulling out into the lane being vacated, neither of which anybody had asked for.
+  `CorridorRequest.lateralFreedom` now states the entitlement: the whole road for a
+  driver allowed to pass, one whose lane is blocked by something stopped, one already
+  mid-manoeuvre or with no feasible corridor; otherwise its own lane and wherever the
+  body already is, so a car out of position can hold or come home but never go further
+  out.
+- THE COMMANDED LINE HAS AN ACCELERATION BUDGET INSTEAD OF A SLOPE. It moved a fixed
+  0.09 m per metre of road, and a slope is a lateral SPEED once the car is rolling: 0.7
+  m/s at 30 km/h and 2.7 m/s at 108, held at full value right up to the target line and
+  then stopped dead. Both ends of that profile are steps in lateral velocity — a demand
+  for unbounded lateral acceleration — which pure pursuit turned into a step in commanded
+  curvature, and the yaw-damping term multiplied the first by about 2.25. Reported from
+  play as an overtaking car cranking the wheel hard enough to nearly throw itself off the
+  road. The line is now driven like a car: the rate ramps in at `a` and the target rate is
+  `sqrt(2·a·e)`, the fastest it can still be brought to rest ON the line, so the peak
+  lateral acceleration is `a` by construction. The same `a` goes to the planner, whose
+  `transitionDistance` is `speed · 2·sqrt(shift/a)` — the honest road a move consumes,
+  where a flat 32 m used to stand for every speed.
+- AND THE BUDGET IS AS GENTLE AS THE ROOM ALLOWS. Inverting the arc gives the
+  acceleration a move needs to fit the room it has, `4·shift·v²/room²`, clamped between a
+  comfortable 0.6 m/s² and the grip share. An obstruction is first seen at the corridor
+  horizon, three seconds of travel, so the rate it asks for on the step it is decided is
+  1.29 m/s² at EVERY speed — an eighth of a g, the same manoeuvre for the sleeper and for
+  frantic — while an ordinary lane change, which has no deadline at all, is made at 0.6.
+- A MANOEUVRE BEGINS WHILE THERE IS STILL ROAD FOR IT. Leaving the lane took a blocker
+  within a constant 45 m, and a lateral move needs `v · 2·sqrt(d/a)` metres: seventy-odd
+  at 20 m/s and over a hundred at 30. The trigger fired with less road left than the
+  manoeuvre takes, by construction, at every road speed — so the line the planner had
+  already proposed was thrown away until it was too late to reach, the swept test
+  correctly reported that no line was reachable, and the driver braked at the obstruction
+  as though it were a wall, crept into it, and only found the way round once it was slow
+  enough for the sums to close. Reported from play as cars laying siege to obstacles. The
+  trigger and the release now share one distance, the road the move itself needs plus a
+  body length, with the old constants surviving as its floor and its margin.
+- THE SPEED A WAY ROUND IS TAKEN AT IS PRICED ON WHAT THE LINE ACTUALLY CLEARS, and on
+  closing distance rather than distance. The old sum took the nearest own-lane block or
+  indexed prop whatever line had been chosen, so a driver already out in the opposing
+  lane still lifted off for a rock in the lane it had left — the one obstacle it was
+  demonstrably clearing — and a lane change thirty metres behind a moving leader was
+  priced as if the leader were a rock, asking for 11 m/s, so every overtake began with
+  the driver braking from its cruise. Both reported from play, the second as "the
+  kickdown does not accelerate, it slows down".
+- AN OVERTAKE CLOSES UP FIRST AND THEN USES THE ENGINE. Tucking in was gated on a flag
+  that only comes on once a crossing has been refused or taken, so on a clear road it
+  never happened at all and the driver went out from a full comfort headway; the kickdown
+  was unreachable by construction on a four-lane road, where both of its conditions are
+  about the crown and a lane change never crosses it. The two are now separate decisions:
+  the gap closes on having caught something slower, the engine is spent only once the
+  other lane is actually being used.
+- AND THE THROTTLE STAYS SHUT DURING A CROSSING NO LONGER. A tenth of lock meant "the
+  tyres are working laterally", which is the right proxy for a corner and a double-charge
+  for a deliberate lateral move: the speed plan has already reserved that share of the
+  grip before asking for the speed. A lane change sits well past the threshold and
+  `speed >= 0.9 · target` is true the moment a driver at its cruise decides to pass, so
+  the pedal was closed for the whole manoeuvre. The line's own rate distinguishes the
+  two — a car holding a bend is not moving its line.
+- THE COORDINATOR'S PAIRWISE RULES RUN AT 10 Hz, NOT 60. Deadlock right-of-way, reverse
+  room and pass permission are each O(cars²) and were answered sixty times a second, as
+  was a linear oncoming scan per car that exists to dip a headlight; on a widened stretch
+  the stream is `WIDE_TRAFFIC` rather than `NARROW_TRAFFIC`, so the pair count more than
+  quadruples exactly where the road opens out. What they produce are permissions, latched
+  until re-evaluated and read by drivers that decide at 45 Hz about manoeuvres measured in
+  hundreds of metres: a tenth of a second is 4 m of closure against exclusion windows of
+  120 and 260 m.
+- `FrameProfiler` HAS A `traffic` SECTION. The simulation is the floor no frame-rate cap
+  can go below, and only `physics` and `streaming` were named inside it — three quarters
+  of the tick was unattributed, which is not something a report of "the simulation is
+  growing" can be acted on.
 
 ### Fixed
 
+- AN OVERTAKING CAR NO LONGER BRAKES BESIDE EVERY CAR IT PASSES. The imminent-contact
+  reflex — time-to-contact on the tracked lead, the last word over every other pedal
+  decision — was reading a gap the driver was not driving into. The tracker is fed the
+  minimum of every probe, including the keep-alive one down the driver's OWN lane, which
+  exists to hold the speed estimate of the car being overtaken while the line is
+  elsewhere; its distance goes to nothing as the bumpers draw level, the closing rate is
+  the overtaking speed, and the reflex stood on the brake. Reported from play on an empty
+  road with an empty opposing lane: the car pulls out, brakes as it comes level, waits a
+  second, accelerates, and does it again at the next car. It now reads the two probes
+  cast down lines the driver is actually using — which also finally excludes the nose
+  scan the comment above it has always said must not feed it.
+- AND THE HEADWAY IT KEEPS WHILE CROSSING FADES WITH THE CLEARANCE. A full following
+  headway was held for as long as the body was within a car's width of its own lane
+  centre, which is reached at about seventy per cent of the way across, so the last
+  second of every crossing told the driver to match the speed of the car it was drawing
+  level with. The constraint is now the one the rest of the controller uses — the move
+  has a duration and the gap has to outlast it — so closing is held to walking pace
+  mid-crossing with a few metres in hand, and opens up exactly as the clearance arrives.
 - A DRIVE THAT WAS INTERRUPTED BY A PAGE RELOAD NOW COMES BACK TO THE CAR. Playing on a
   phone, the screen sleeps, the player wakes it, and the game is at the title screen with
   the drive apparently gone. It was not the sleep: it was the reload. The development

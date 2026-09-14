@@ -1131,6 +1131,27 @@ async function boot(): Promise<void> {
     };
   }
 
+  /**
+   * WHY THE CAR DID THAT, ON SCREEN. Dev builds only, and only when the URL asks for
+   * it with `?apdebug`.
+   *
+   * Verifying a change to the driver by hand needs the numbers that all arrive as one
+   * speedometer reading: what the speed plan asked for, what a pending lateral move
+   * allows, and what is in the lane the car came from. "It slowed down" is not an
+   * observation a fix can be built on; "it slowed to the manoeuvre limit for a rock in
+   * the lane it had already left" is.
+   */
+  const autopilotDebug =
+    import.meta.env.DEV && new URLSearchParams(location.search).has('apdebug')
+      ? uiRoot.appendChild(document.createElement('pre'))
+      : null;
+  if (autopilotDebug !== null) {
+    autopilotDebug.style.cssText =
+      'position:absolute;left:8px;bottom:8px;margin:0;padding:6px 8px;' +
+      'font:11px/1.35 ui-monospace,monospace;color:#cfe;background:rgba(0,0,0,0.55);' +
+      'white-space:pre;pointer-events:none;z-index:40';
+  }
+
   // Reused every frame: the camera target is written in place, never allocated.
   const target: CameraTarget = {
     x: 0,
@@ -1469,7 +1490,9 @@ async function boot(): Promise<void> {
     }
     traffic.setDaylightFactor(sky.dayFactor);
     playerFieldSeat.forwardS = activeS;
+    frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
+    frameProfiler?.end('traffic');
 
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
@@ -2192,6 +2215,27 @@ async function boot(): Promise<void> {
       });
     } else {
       hud.setDriving(null);
+    }
+    if (autopilotDebug !== null) {
+      const laneGap = autopilot.laneBlockDistance;
+      autopilotDebug.textContent = autopilot.engaged
+        ? `autopilot ${autopilot.mode} — ${autopilot.activity}\n` +
+          `lane      home ${autopilot.homeLane}, line ${autopilot.commandedLine.toFixed(2)} m\n` +
+          `speed     want ${(autopilot.targetSpeed * 3.6).toFixed(0)}, ` +
+            `manoeuvre limit ${(autopilot.manoeuvreSpeed * 3.6).toFixed(0)} km/h\n` +
+          `own lane  ${
+            laneGap < Infinity
+              ? `${laneGap.toFixed(0)} m at ${(autopilot.laneBlockSpeed * 3.6).toFixed(0)} km/h`
+              : 'clear'
+          }\n` +
+          `ahead     ${
+            autopilot.obstacleGap < Infinity
+              ? `${autopilot.obstacleGap.toFixed(0)} m at ${(autopilot.obstacleSpeed * 3.6).toFixed(0)} km/h`
+              : 'clear'
+          }\n` +
+          `pass      urge ${autopilot.passUrge ? 'yes' : 'no'}, ` +
+            `kickdown ${autopilot.passAttempt ? 'yes' : 'no'}`
+        : 'autopilot off';
     }
 
     // Vehicle audio follows the driven car while its radio remains a spatial source

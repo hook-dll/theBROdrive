@@ -61,6 +61,13 @@ const PASSING_VERGE = 1.2;
 const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE;
 const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + 4;
 const PLANNED_CLEARANCE_M = 1.05 + 0.4;
+/**
+ * Outer edge of the outer tyre's contact patch, from the car's centreline: what has
+ * to stay on the asphalt. The body is wider than the track, so a saloon may hang a
+ * few centimetres of wing over the paint with all four tyres still on it.
+ */
+const WHEEL_HALF_TRACK_M =
+  (carModel(MODEL_ID).factory.frontTrack + carModel(MODEL_ID).factory.tyreWidth) * 0.5;
 const RIBBON_HALF_WIDTH = STATIC_AVOID_EDGE + 1;
 // The tuning is the shipped table, never a copy: this bench's own numbers had
 // drifted to a lateral budget 40% above the autopilot's, so every corner-speed
@@ -189,7 +196,7 @@ function speed(vehicle: Vehicle): number {
   return Math.hypot(v.x, v.z);
 }
 
-interface DriveMetrics { meanSpeed: number; meanLateral: number; maxLateral: number; rmsLateral: number; signChangesPerKm: number; progress: number; monotonic: boolean; tightRadius: number; tightSpeed: number; }
+interface DriveMetrics { meanSpeed: number; meanLateral: number; maxLateral: number; maxOverhang: number; rmsLateral: number; signChangesPerKm: number; progress: number; monotonic: boolean; tightRadius: number; tightSpeed: number; }
 
 async function measureMode(mode: AutopilotMode): Promise<DriveMetrics> {
   const rig = await makeRig();
@@ -202,6 +209,16 @@ async function measureMode(mode: AutopilotMode): Promise<DriveMetrics> {
   let sumLateralSq = 0;
   let sumLateral = 0;
   let maxLateral = 0;
+  /**
+   * Worst the OUTER TYRE hung past the asphalt edge, measured at its own arclength.
+   *
+   * The bound used to be the narrow road's half width, which said "the car sits in
+   * the lane beside the crown" — true only while that was the lane every driver was
+   * given. Drivers keep to the outermost lane now, so on a widened stretch a correct
+   * line is 4.2 m out and the old bound scored it as leaving the road. What the check
+   * exists for is whether the car is driving on the asphalt, and that is this.
+   */
+  let maxOverhang = -Infinity;
   let samples = 0;
   let signChanges = 0;
   let previousSign = 0;
@@ -220,12 +237,13 @@ async function measureMode(mode: AutopilotMode): Promise<DriveMetrics> {
     if (sign) previousSign = sign;
     const v = speed(rig.vehicle);
     sumSpeed += v; sumLateral += lateral; sumLateralSq += p.lateral * p.lateral; maxLateral = Math.max(maxLateral, lateral); samples++;
+    maxOverhang = Math.max(maxOverhang, lateral + WHEEL_HALF_TRACK_M - rig.road.halfWidthAt(p.s));
     const curvature = Math.abs(rig.road.sampleAt(p.s).curvature);
     if (curvature > tightCurvature) { tightCurvature = curvature; tightSpeed = v; }
     if (p.s >= START_S + ROUTE_METRES) break;
   }
   const progress = previousS - startS;
-  return { meanSpeed: sumSpeed / samples, meanLateral: sumLateral / samples, maxLateral, rmsLateral: Math.sqrt(sumLateralSq / samples), signChangesPerKm: signChanges / Math.max(progress / 1000, 0.001), progress, monotonic, tightRadius: 1 / Math.max(tightCurvature, 1e-9), tightSpeed };
+  return { meanSpeed: sumSpeed / samples, meanLateral: sumLateral / samples, maxLateral, maxOverhang, rmsLateral: Math.sqrt(sumLateralSq / samples), signChangesPerKm: signChanges / Math.max(progress / 1000, 0.001), progress, monotonic, tightRadius: 1 / Math.max(tightCurvature, 1e-9), tightSpeed };
 }
 
 const LOOSE_START_S = 12_250;
@@ -626,11 +644,20 @@ async function checkLitteredRoad(): Promise<void> {
 async function checkHazards(): Promise<void> {
   // The same seeded road every scenario here drives, asked only about its geometry.
   const hazardRoad = new Road(42);
+  // AND A NARROW ONE, BECAUSE EVERY SCENARIO BELOW IS ABOUT THE DRIVER'S OWN LANE.
+  //
+  // These props sit on or beside the crown, which is the driver's lane on a two-lane
+  // road and is nothing to do with it on a four-lane one: with the widening lattice
+  // over this arclength the car drove past a crown boulder 4.3 m away at full cruise,
+  // correctly, and the checks read that as a driver that had stopped avoiding things.
+  // The trunk scenario already had to learn this; it is the same fix and the same call.
+  const hazardStartS = narrowStart(hazardRoad, START_S, ROUTE_METRES);
   // A rock the width of the lane's centre: pass on the right at walking pace, then
   // settle back onto the normal lane only after the rear bumper is clear.
   const rock = await driveHazard(
-    { s: START_S + 300, lateral: 0, radius: 1.2, breakable: false },
+    { s: hazardStartS + 300, lateral: 0, radius: 1.2, breakable: false },
     100,
+    hazardStartS,
   );
   check(
     'non-breakable hazard is passed slowly on the right',
@@ -658,8 +685,9 @@ async function checkHazards(): Promise<void> {
   // zero speed is what kept the pile there. It stood beside it for the rest of the
   // session.
   const mound = await driveHazard(
-    { s: START_S + 300, lateral: -1.3, radius: 1.0, breakable: false },
+    { s: hazardStartS + 300, lateral: -1.3, radius: 1.0, breakable: false },
     90,
+    hazardStartS,
   );
   check(
     'a mound in the lane never parks the car',
@@ -676,13 +704,12 @@ async function checkHazards(): Promise<void> {
   // into the sand. The scenario had stopped describing its own road, so it now starts
   // at the first stretch that is narrow for the whole drive and places the trunk
   // against that road's real edge.
-  const trunkStartS = narrowStart(hazardRoad, START_S, ROUTE_METRES);
-  const trunkEdge = hazardRoad.halfWidthAt(trunkStartS + 300);
+  const trunkEdge = hazardRoad.halfWidthAt(hazardStartS + 300);
   const trunkLateral = -(trunkEdge - 0.6);
   const trunk = await driveHazard(
-    { s: trunkStartS + 300, lateral: trunkLateral, radius: 1.6, breakable: false },
+    { s: hazardStartS + 300, lateral: trunkLateral, radius: 1.6, breakable: false },
     120,
-    trunkStartS,
+    hazardStartS,
   );
   // A TRUNK AGAINST THE RIGHT VERGE IS PASSED ON THE LEFT, and that reverses what this
   // check used to demand.
@@ -711,8 +738,9 @@ async function checkHazards(): Promise<void> {
     `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body lateral ${trunk.closestLateral.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${trunk.worstLateral.toFixed(2)} m`,
   );
   const wall = await driveHazard(
-    { s: START_S + 300, lateral: 0, radius: 6, breakable: false },
+    { s: hazardStartS + 300, lateral: 0, radius: 6, breakable: false },
     45,
+    hazardStartS,
   );
   // Two attempts inside 45 s, not three: the approach is slower now that braking is
   // measured to the boulder's near edge rather than its centre, so each cycle takes
@@ -726,8 +754,9 @@ async function checkHazards(): Promise<void> {
   // collider cannot disappear, so passing it proves the autopilot did not rely on
   // charging the dirt pile hard enough to break it.
   const pile = await driveHazard(
-    { s: START_S + 300, lateral: 0, radius: 1.2, breakable: true },
+    { s: hazardStartS + 300, lateral: 0, radius: 1.2, breakable: true },
     100,
+    hazardStartS,
   );
   check(
     'breakable dirt pile is treated as solid and driven around',
@@ -977,13 +1006,14 @@ async function checkOvertake(): Promise<void> {
 }
 
 /**
- * PASSING WITHOUT CROSSING THE CROWN, on a stretch that offers two lanes each way.
+ * GETTING PAST A SLOWER CAR WITHOUT CROSSING THE CROWN, on a stretch with two lanes
+ * each way.
  *
- * The same geometry as the overtake above, moved to a widened section: the slower
- * car holds lane 0, and the driver behind should go round it by moving OUTWARD into
- * lane 1 and coming back, never using the oncoming carriageway and never asking for
- * the oncoming-clearance gate. On the narrow road nothing about this is available,
- * which is exactly what the check above still measures.
+ * The same geometry as the overtake above, moved to a widened section. Both cars start
+ * in the outer lane: the slow one belongs there and stays, and the fast one belongs in
+ * the lane beside the crown (`INNER_LANE_PACE_MPS`), so it should get there, go by,
+ * and never touch the oncoming carriageway or ask for the oncoming-clearance gate. On
+ * the narrow road none of this is available, which is what the check above measures.
  */
 async function checkLanePass(): Promise<void> {
   const leadAhead = 45;
@@ -1005,8 +1035,8 @@ async function checkLanePass(): Promise<void> {
   const hazards = new HazardIndex();
   const inner = road.laneCentreAt(wideS, 0);
   const outer = road.laneCentreAt(wideS, 1);
-  const chaserState = { ...carState(road, wideS, inner), id: 'lane-chaser' };
-  const leadState = { ...carState(road, wideS + leadAhead, inner), id: 'lane-lead' };
+  const chaserState = { ...carState(road, wideS, outer), id: 'lane-chaser' };
+  const leadState = { ...carState(road, wideS + leadAhead, outer), id: 'lane-lead' };
   world.state.cars[chaserState.id] = chaserState;
   world.state.cars[leadState.id] = leadState;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
@@ -1031,7 +1061,7 @@ async function checkLanePass(): Promise<void> {
   chaserPilot.setEngaged(true);
   leadPilot.setEngaged(true);
 
-  let reachedOuterLane = false;
+  let reachedInnerLane = false;
   let crossedCrown = false;
   let completed = false;
   let worstCrownSide = 0;
@@ -1052,8 +1082,8 @@ async function checkLanePass(): Promise<void> {
     const chaserRoad = road.project(chaserPosition.x, chaserPosition.z);
     const leadRoad = road.project(leadPosition.x, leadPosition.z);
     const along = leadRoad.s - chaserRoad.s;
-    // Lane centres are negative here; "outward" is more negative still.
-    if (chaserRoad.lateral <= outer + 0.6) reachedOuterLane = true;
+    // Lane centres are negative here; the inner lane is the less negative of the two.
+    if (chaserRoad.lateral >= inner - 0.6) reachedInnerLane = true;
     if (chaserRoad.lateral > 0) crossedCrown = true;
     worstCrownSide = Math.max(worstCrownSide, chaserRoad.lateral);
     if (Math.abs(along) < 4.6) {
@@ -1066,8 +1096,8 @@ async function checkLanePass(): Promise<void> {
   }
   check(
     'a slower car is passed in the next lane, not the oncoming one',
-    reachedOuterLane && completed && !crossedCrown,
-    `outer lane=${reachedOuterLane}, cleared by 8 m=${completed}, worst lateral toward the crown ${worstCrownSide.toFixed(2)} m`,
+    reachedInnerLane && completed && !crossedCrown,
+    `inner lane=${reachedInnerLane}, cleared by 8 m=${completed}, worst lateral toward the crown ${worstCrownSide.toFixed(2)} m`,
   );
   check(
     'the lane pass keeps its clearance',
@@ -1089,7 +1119,8 @@ async function checkLanePass(): Promise<void> {
  *
  * The scenario reproduces exactly that geometry: a slow leader in the driver's own
  * lane, giving it every reason to move out, and a second car holding the next lane
- * beside it.
+ * beside it. Both cars keep to the outer lane by character, so the neighbour has the
+ * mirror-image reason to move into the chaser — and neither may.
  */
 async function checkSideBySide(): Promise<void> {
   const seconds = 25;
@@ -1108,10 +1139,10 @@ async function checkSideBySide(): Promise<void> {
   const hazards = new HazardIndex();
   const inner = road.laneCentreAt(wideS, 0);
   const outer = road.laneCentreAt(wideS, 1);
-  const chaserState = { ...carState(road, wideS, inner), id: 'side-chaser' };
-  const leadState = { ...carState(road, wideS + 32, inner), id: 'side-lead' };
+  const chaserState = { ...carState(road, wideS, outer), id: 'side-chaser' };
+  const leadState = { ...carState(road, wideS + 32, outer), id: 'side-lead' };
   // Level with the chaser's door, in the lane it wants.
-  const neighbourState = { ...carState(road, wideS + 1, outer), id: 'side-neighbour' };
+  const neighbourState = { ...carState(road, wideS + 1, inner), id: 'side-neighbour' };
   for (const state of [chaserState, leadState, neighbourState]) world.state.cars[state.id] = state;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
   const lead = new Vehicle(physics, world, leadState, scene, origin);
@@ -1137,8 +1168,6 @@ async function checkSideBySide(): Promise<void> {
     pilot.setTrafficRecoveryPolicy(true);
     pilot.setEngaged(true);
   }
-  // The neighbour holds the outer lane; traffic would ask for it the same way.
-  pilots[2].requestLane(1);
 
   let impacts = 0;
   let closest = Infinity;
@@ -1258,7 +1287,6 @@ async function checkBoxedInHazard(): Promise<void> {
   neighbourPilot.setTrafficRecoveryPolicy(true);
   driverPilot.setEngaged(true);
   neighbourPilot.setEngaged(true);
-  neighbourPilot.requestLane(1);
 
   let minRockDistance = Infinity;
   let impacts = 0;
@@ -1494,7 +1522,14 @@ async function run(): Promise<void> {
   for (const [mode, result] of [['sleeper', sleeper], ['frantic', frantic]] as const) {
     const config = MODES[mode];
     const cornerLimit = Math.sqrt(config.lateralAccel * result.tightRadius);
-    check(`${mode}: stays on asphalt`, result.maxLateral <= ROAD_HALF_WIDTH, `mean/RMS/worst lateral ${result.meanLateral.toFixed(2)}/${result.rmsLateral.toFixed(2)}/${result.maxLateral.toFixed(2)} m`);
+    // A TYRE'S WIDTH, not zero, and not the 1.2 m verge the controller is allowed to
+    // use. Keep-right puts the driver beside the road edge instead of beside another
+    // lane, so the lane-keeping error that used to land on asphalt now lands near the
+    // paint: measured on this route, sleeper keeps every tyre inside it and frantic —
+    // which spends a deliberate half-metre of wander at 130 km/h — touches the verge
+    // with 2.5 cm of one contact patch on the worst bend. A car actually driving the
+    // verge is an order of magnitude past this.
+    check(`${mode}: stays on asphalt`, result.maxOverhang <= carModel(MODEL_ID).factory.tyreWidth, `mean/RMS/worst lateral ${result.meanLateral.toFixed(2)}/${result.rmsLateral.toFixed(2)}/${result.maxLateral.toFixed(2)} m, worst tyre past the asphalt ${result.maxOverhang.toFixed(3)} m`);
     check(`${mode}: does not oscillate across lane`, result.signChangesPerKm < 18, `${result.signChangesPerKm.toFixed(1)} sign changes/km (18 bound: a correction every 56 m)`);
     // The route loop breaks ON reaching the target, so the last sample lands a metre
     // or two short of it by construction.

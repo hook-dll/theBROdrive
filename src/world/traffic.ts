@@ -139,14 +139,6 @@ const DENSE_SPAWN_INTERVAL_S = 0.5;
 const DENSITY_CHANGE_MIN_S = 36;
 const DENSITY_CHANGE_MAX_S = 72;
 const DROP_SETTLE_S = 0.8;
-/**
- * A closing taper is 260 m long. Asking well before its end gives an outer-lane car
- * enough road to merge under steering rather than discovering the missing lane at
- * its bumper.
- */
-const MERGE_LOOKAHEAD_M = 110;
-/** A merge waits for this much longitudinal room in its destination lane. */
-const MERGE_LANE_CLEARANCE_M = 18;
 /** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
 const TRAFFIC_SPAWN_DROP_M = 0;
 const SPAWN_GROUND_PROBE_UP_M = 2;
@@ -178,6 +170,13 @@ const DEADLOCK_OVERLAP_M = 7;
 const YIELD_CHAIN_GAP_M = 14;
 /** While one car is out in the opposing lane, oncoming traffic this close waits. */
 const OPPOSING_PASS_EXCLUSION_M = 260;
+/**
+ * And the car BEHIND the passer, in the same direction, waits its turn from this far
+ * back. Shorter than the opposing figure on purpose: a driver 260 m behind an overtake
+ * is not queueing behind it and has its own window to judge, while one inside this
+ * distance is looking at the same gap in the same lane at the same moment.
+ */
+const LEADER_PASS_EXCLUSION_M = 120;
 const DEADLOCK_STOP_SPEED_MPS = 1.5;
 /**
  * Metres up the outgoing lane before a turning car is handed back to the ordinary road.
@@ -194,6 +193,14 @@ const TURN_REJOIN_M = 25;
  * physics step.
  */
 const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
+/**
+ * How often the coordinator's PAIRWISE rules are re-answered, seconds.
+ *
+ * Deadlock right-of-way, reverse room and pass permission are each O(cars²), and what
+ * they hand out is latched until the next pass. See the note at the call site for why
+ * a tenth of a second is not a staleness anybody can drive into.
+ */
+const COORDINATION_INTERVAL_S = 0.1;
 /**
  * Body half-extents the traffic field reports, metres. One figure for the catalogue
  * rather than a per-model measure: the field is consulted to decide whether a body is
@@ -248,7 +255,12 @@ interface TrafficCar {
   forwardS: number;
   settleFor: number;
   lifetimeTimer: number;
-  /** Lane currently requested from the autopilot, counted outward from the crown. */
+  /**
+   * The lane this car was PLACED in, counted outward from the crown. Spawn
+   * bookkeeping only: which lane it then drives in is its own driver's decision (see
+   * the home lane in `Autopilot.drive`), so this stops describing reality the first
+   * time the car passes anybody.
+   */
   lane: number;
   /** Edge-detects the autopilot's pass activity so a manoeuvre counts once. */
   wasPassing: boolean;
@@ -395,6 +407,7 @@ export class RoadTraffic {
   private readonly groundProbeDirection = { x: 0, y: -1, z: 0 };
   private settingsRef: Settings | null = null;
   private clockSync = 0;
+  private coordinationTimer = 0;
   private daylightFactor = 1;
   private impactCount = 0;
   private passCount = 0;
@@ -669,7 +682,7 @@ export class RoadTraffic {
   }
 
   /**
-   * ONE CAR AT A TIME IN THE OPPOSING LANE.
+   * ONE CAR AT A TIME IN THE OPPOSING LANE, AND ONE OVERTAKE AT A TIME IN A QUEUE.
    *
    * Each driver checks the opposing lane for itself and finds it clear, because the
    * car coming the other way is in its OWN lane, minding its own business — right
@@ -677,6 +690,13 @@ export class RoadTraffic {
    * meet head-on, and nothing inside a single car can see that coming. So the
    * coordinator owns it: while a car is out in the wrong lane, nothing coming the
    * other way within `OPPOSING_PASS_EXCLUSION_M` may start a pass of its own.
+   *
+   * THE CAR BEHIND THE PASSER IS THE OTHER HALF OF THE SAME RULE, and it was missing.
+   * A driver whose leader has just pulled out sees a lane that is suddenly clear, its
+   * own pace restored, and the same window — so it followed it out, two abreast in a
+   * lane that holds one. Nothing inside either car can price that either: from behind,
+   * the passer is simply traffic that has left the lane. The leader is the one who
+   * committed first, so the follower waits, which is also what a driver does.
    */
   private assignPassPermissions(): void {
     // THE PLAYER COUNTS, AND HE DID NOT USED TO.
@@ -685,53 +705,32 @@ export class RoadTraffic {
     // free to start an overtake into the one vehicle whose behaviour it could not
     // predict at all. If the player is out over the centreline — overtaking himself,
     // going round something, or simply wandering — nothing coming the other way near
-    // him may borrow that lane as well. His lateral arrives with `fixedUpdate`; his
-    // direction is the road's forward sense, which is what `activeS` is measured in.
+    // him may borrow that lane as well, and nothing following him may either. His
+    // lateral arrives with `fixedUpdate`; his direction is the road's forward sense,
+    // which is what `activeS` is measured in.
     const playerAcrossCrown =
       this.playerDriving && this.playerLateral > CROWN_CROSSING_INTRUSION_M;
     for (const car of this.carList) {
       if (car.turnS >= 0) continue;
+      const playerAhead = (this.playerS - car.forwardS) * car.direction;
       const blocked =
         (playerAcrossCrown &&
           car.direction === -1 &&
           Math.abs(this.playerS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M) ||
+        (playerAcrossCrown &&
+          car.direction === 1 &&
+          playerAhead > 0 &&
+          playerAhead < LEADER_PASS_EXCLUSION_M) ||
         this.carList.some(
           (other) =>
             other !== car &&
-            other.direction !== car.direction &&
             (other.autopilot.activity === 'pass' || this.isAcrossCrown(other)) &&
-            Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M,
+            (other.direction !== car.direction
+              ? Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M
+              : (other.forwardS - car.forwardS) * car.direction > 0 &&
+                (other.forwardS - car.forwardS) * car.direction < LEADER_PASS_EXCLUSION_M),
         );
       car.autopilot.setPassingEnabled(!blocked);
-    }
-  }
-
-  /**
-   * The road profile owns lane availability. A closing wedge is read ahead rather
-   * than under the wheels, leaving the controller 110 m to complete an outer-lane
-   * merge before the profile withdraws that lane at the car's actual arclength.
-   */
-  private assignRequestedLanes(): void {
-    for (const car of this.carList) {
-      if (car.turnS >= 0) continue;
-      const currentLanes = this.road.lanesPerSideAt(car.forwardS);
-      const aheadS = Math.max(
-        0,
-        Math.min(this.road.length, car.forwardS + car.direction * MERGE_LOOKAHEAD_M),
-      );
-      const aheadLanes = this.road.lanesPerSideAt(aheadS);
-      const requestedLane = Math.min(car.lane, currentLanes - 1, aheadLanes - 1);
-      const targetOccupied =
-        requestedLane < car.lane &&
-        this.carList.some(
-          (other) =>
-            other !== car &&
-            other.direction === car.direction &&
-            other.lane === requestedLane &&
-            Math.abs(other.forwardS - car.forwardS) < MERGE_LANE_CLEARANCE_M,
-        );
-      if (!targetOccupied || requestedLane === car.lane || currentLanes === 1) car.lane = requestedLane;
-      car.autopilot.requestLane(currentLanes === 1 ? null : car.lane);
     }
   }
 
@@ -860,11 +859,28 @@ export class RoadTraffic {
       car.forwardSpeed =
         velocity.x * Math.sin(sample.heading) + velocity.z * Math.cos(sample.heading);
     }
-    this.assignRequestedLanes();
 
-    this.assignDeadlockPermissions();
-    this.assignReverseRoom();
-    this.assignPassPermissions();
+    // THE PAIRWISE RULES DO NOT NEED THE SUSPENSION'S CLOCK.
+    //
+    // All three are O(cars²) — each asks "is anybody else doing X within N metres" for
+    // every car — and they were being answered sixty times a second. On a widened
+    // stretch the stream is `WIDE_TRAFFIC` rather than `NARROW_TRAFFIC`, so the pair
+    // count more than quadruples exactly where the road opens out, which is where the
+    // simulation was reported growing teeth. The same is true of the oncoming scan in
+    // the loop below, which is a linear pass per car and exists to dip a headlight.
+    //
+    // What they produce are PERMISSIONS, latched until re-evaluated, and read by
+    // drivers that decide at `TRAFFIC_CONTROL_INTERVAL_S` about manoeuvres measured in
+    // hundreds of metres. A tenth of a second of staleness is 4 m of closure between
+    // two cars meeting at 70 km/h, against exclusion windows of 120 and 260 m.
+    this.coordinationTimer -= dt;
+    const coordinate = this.coordinationTimer <= 0;
+    if (coordinate) {
+      this.coordinationTimer = COORDINATION_INTERVAL_S;
+      this.assignDeadlockPermissions();
+      this.assignReverseRoom();
+      this.assignPassPermissions();
+    }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
       if (this.pedestrianActive) {
@@ -877,10 +893,12 @@ export class RoadTraffic {
       } else {
         car.autopilot.clearPedestrianObstacle();
       }
-      car.autopilot.setLightingConditions(
-        this.daylightFactor,
-        this.nearestOncomingDistance(car.forwardS, car.direction, car.id),
-      );
+      if (coordinate) {
+        car.autopilot.setLightingConditions(
+          this.daylightFactor,
+          this.nearestOncomingDistance(car.forwardS, car.direction, car.id),
+        );
+      }
       car.lifetimeTimer -= dt;
       // A CAR THAT HAS BEEN STANDING STILL FOR HALF A MINUTE IS NOT TRAFFIC.
       //
@@ -947,14 +965,13 @@ export class RoadTraffic {
    * to, and was eventually recycled out of sight. Now it drives the bulb.
    *
    * The handover is one call each way because `Autopilot.retarget` resets everything the
-   * driver holds about where it is. Everything the STREAM holds is here: direction, the
-   * lane it asks for, and the arclength its "is it still moving" test is measured from.
+   * driver holds about where it is. Everything the STREAM holds is here: direction and
+   * the arclength its "is it still moving" test is measured from.
    */
   private serviceTurn(car: TrafficCar): void {
     if (car.turnS < 0) {
       if (car.direction !== -1 || car.forwardS > TURNAROUND_ENTRY_S) return;
       car.turnS = 0;
-      car.autopilot.requestLane(null);
       car.autopilot.setPassingEnabled(false);
       car.autopilot.retarget(this.turnaround, this.noHazards);
       car.autopilot.setEngaged(true);
@@ -965,10 +982,9 @@ export class RoadTraffic {
     if (car.turnS < this.turnaround.exitS + TURN_REJOIN_M) return;
     car.turnS = -1;
     car.direction = 1;
-    car.lane = 0;
+    car.lane = this.pickSpawnLane(car.forwardS, car.style);
     car.spawnS = car.forwardS;
     car.autopilot.retarget(this.road, this.hazards);
-    car.autopilot.requestLane(this.road.lanesPerSideAt(car.forwardS) === 1 ? null : 0);
     car.autopilot.setEngaged(true);
   }
 
@@ -1147,9 +1163,6 @@ export class RoadTraffic {
     autopilot.setPace(request.pace);
     autopilot.setTrafficRecoveryPolicy(true);
     autopilot.setLowBeamsAlwaysOn(true);
-    autopilot.requestLane(
-      this.road.lanesPerSideAt(request.forwardS) === 1 ? null : request.lane,
-    );
     autopilot.setEngaged(true);
     const record: TrafficCar = {
       id: request.id,
@@ -1237,14 +1250,23 @@ export class RoadTraffic {
     return null;
   }
   /**
-   * Slower traffic mostly stays beside the crown while hurried drivers are allowed
-   * to occupy the outer lane. No draw occurs on a narrow road, preserving its
-   * established seeded stream exactly.
+   * WHERE A CAR IS PUT WHEN IT IS CREATED, and it is put where it is going to drive.
+   *
+   * A driver's lane is a property of its own pace (`INNER_LANE_PACE_MPS` in the
+   * autopilot), so a spawn draw that disagrees with the sort buys nothing: the car
+   * simply changes lane once, in front of the player, for no reason he can see. The
+   * styles map exactly onto the threshold — cautious runs 58-70 km/h and the ordinary
+   * driver 72-84, both below it, while the hurried driver's 95-115 is above — so this
+   * is the same decision, taken with the only thing a spawn site knows.
+   *
+   * It costs the wide stretch some density, since one lane cannot be packed as tightly
+   * as two at the same 70 m of same-lane clearance. `findSpawnS` absorbs most of that
+   * by trying twelve different arclengths rather than twelve lanes.
    */
   private pickSpawnLane(s: number, style: TrafficDriverStyle): number {
-    if (this.road.lanesPerSideAt(s) === 1 || style === 'cautious') return 0;
-    const outerChance = style === 'hurried' ? 0.7 : 0.24;
-    return this.random() < outerChance ? 1 : 0;
+    const lanes = this.road.lanesPerSideAt(s);
+    if (lanes === 1) return 0;
+    return style === 'hurried' ? 0 : lanes - 1;
   }
 
   private spawnSiteClear(s: number, direction: TrafficDirection, lane: number): boolean {
@@ -1463,7 +1485,6 @@ export class RoadTraffic {
 
   private removeAt(index: number): void {
     const car = this.carList[index]!;
-    car.autopilot.requestLane(null);
     car.autopilot.setEngaged(false);
     car.vehicle.dispose();
     this.trafficWorld.apply({ t: 'car_remove', carId: car.id });

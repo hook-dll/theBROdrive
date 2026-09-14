@@ -19,6 +19,7 @@
 export type FrameSection =
   | 'sim'
   | 'physics'
+  | 'traffic'
   | 'agents'
   | 'streaming'
   | 'inventory'
@@ -33,6 +34,7 @@ export type FrameSection =
 const SECTIONS: readonly FrameSection[] = [
   'sim',
   'physics',
+  'traffic',
   'agents',
   'streaming',
   'inventory',
@@ -267,7 +269,17 @@ export class FrameProfiler {
     // gives more than the frame contains — measured, the shares came to 120%. A section's
     // share of its own half is both true and the more useful question, because it says
     // where the work sits within the part you can actually do something about.
-    const TICK_SECTIONS: readonly FrameSection[] = ['physics', 'agents', 'streaming', 'inventory'];
+    // `traffic` is the ambient stream's own decisions and bodies: thirty autopilots,
+    // each with lane probes and a proximity query, plus the coordinator's pairwise
+    // rules. It is the one tick cost that scales with what the ROAD is doing rather
+    // than with the player, so it belongs beside physics and streaming.
+    const TICK_SECTIONS: readonly FrameSection[] = [
+      'physics',
+      'traffic',
+      'agents',
+      'streaming',
+      'inventory',
+    ];
     const groupOf = (section: FrameSection): 'tick' | 'render' =>
       section === 'sim' || TICK_SECTIONS.includes(section) ? 'tick' : 'render';
     const groupTotal: Record<'tick' | 'render', number> = {
