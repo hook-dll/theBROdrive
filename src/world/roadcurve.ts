@@ -1,4 +1,5 @@
-import { hashUnit2, Noise1D } from '../core/rng';
+import { hashUnit2, hashUnit3, Noise1D } from '../core/rng';
+import { characterAt, characterOf, districtAt, districtStartOf, newCharacterBuffer, newDistrictBuffer, type RoadCharacter } from './roadcharacter';
 
 /**
  * The road's heading field and the one node recurrence that integrates it.
@@ -95,30 +96,92 @@ const ROUTE_OCTAVES = 2;
 const ROUTE_GAIN = 0.25;
 
 /**
- * Each 1.0 km section transitions from one signed bearing to the opposite sign.
- * Seeded magnitudes vary from 0.22 to 0.52 rad, so even the smallest transition is
- * 0.44 rad / 25.2 degrees and the largest is 1.04 rad / 59.6 degrees. Alternating
- * signs guarantee the turn; seeded timing, angle and radius stop the cadence reading
- * like a metronome.
+ * THE CORNER SEQUENCE, and every number in it now comes from the district.
  *
- * A quintic smootherstep supplies entry, one peak-curvature apex and exit with zero
- * curvature at both ends. Its maximum derivative is 1.875, so choosing transition
- * length as `1.875 * headingChange * radius` makes the requested 85-140 m peak radius
- * true by construction. The remaining section holds its new bearing as a straight or
- * broad route-driven sweeper; with the shorter sections, those straights are useful
- * breathing room rather than the dominant character of the road.
+ * The shape is unchanged and it is a good shape: each section transitions from one
+ * signed bearing to the opposite sign, so the turn is guaranteed, and seeded timing,
+ * angle and radius stop the cadence reading like a metronome. A quintic smootherstep
+ * supplies entry, one peak-curvature apex and exit with zero curvature at both ends.
+ *
+ * WHAT CHANGED IS THAT ONE SET OF CONSTANTS USED TO SERVE THE WHOLE ROAD: a corner
+ * every kilometre, 25-60 degrees, 85-140 m of peak radius, everywhere, for forty
+ * thousand kilometres. Measured over 40 km of it, the median radius came out at 3 km
+ * and the geometry allowed 350 km/h at the median — the road asked nothing of anyone.
+ * Cadence, radius, angle, route wander and the straight share are properties of the
+ * KIND of road, so they live in `roadcharacter.ts` and are read per section here.
+ *
+ * THE TRANSITION IS A CLOTHOID BUDGET, NOT A CONSTANT. Smootherstep's maximum
+ * derivative is 1.875, so a transition of `1.875 · Δθ · R` makes the requested peak
+ * radius true by construction — that is the geometry. What the length ALSO has to
+ * respect is how fast the curvature is allowed to arrive, because lateral jerk is
+ * `v³ · dκ/ds` and a corner entered in twenty metres is a flick of the wheel however
+ * correct its apex is. Road design sizes transition curves from exactly this, so the
+ * length is the longer of the two requirements: the geometric one, and `v³ · Δκ / j`
+ * at the speed the corner itself allows.
  */
-const TURN_SECTION_LENGTH = 1000;
-const TURN_MIN_HEADING = 0.22;
-const TURN_MAX_HEADING = 0.52;
 const TURN_START_MIN = 120;
 const TURN_START_MAX = 300;
-const TURN_RADIUS_MAX = 140;
 const SMOOTHERSTEP_MAX_SLOPE = 1.875;
+/**
+ * Lateral jerk the transition is sized for, m/s³, and the cornering budget the entry
+ * speed is derived from, m/s².
+ *
+ * 0.5 m/s³ sits inside the comfort range road guidance uses (0.3-0.6) and 4 m/s² is
+ * the cornering budget an ordinary traffic car actually spends — the careful mode's
+ * own figure is 3.2 and the hurried one's 4.7 — so the entry this sizes is the one a
+ * stream car will really arrive at. It is deliberately NOT the frantic figure: a
+ * transition long enough for the calm majority is comfortable for everybody, while
+ * one sized for the fastest driver is a flick for the rest.
+ */
+const TRANSITION_JERK_MPS3 = 0.5;
+const TRANSITION_LATERAL_MPS2 = 4;
 
 function smootherstep01(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
+
+/**
+ * Transition length for a bend of `radius` turning through `headingChange`, metres.
+ *
+ * `v = sqrt(a · R)` is the speed the apex allows, and `Δκ = 1 / R`, so the jerk
+ * requirement is `v³ / (j · R)` = `(a · R)^1.5 / (j · R)` — which grows with the
+ * radius, exactly as it should: a 600 m sweeper is entered at 49 m/s and needs a
+ * couple of hundred metres of winding on, while a 60 m hairpin taken at 15 m/s needs
+ * a hundred. The geometric requirement dominates for tight corners with a large
+ * heading change, the jerk requirement for fast open ones.
+ */
+function transitionLength(radius: number, headingChange: number): number {
+  const geometric = SMOOTHERSTEP_MAX_SLOPE * headingChange * radius;
+  const speed = Math.sqrt(TRANSITION_LATERAL_MPS2 * radius);
+  const jerk = (speed * speed * speed) / (TRANSITION_JERK_MPS3 * radius);
+  return Math.max(geometric, jerk);
+}
+
+
+/**
+ * SUPERELEVATION: how far a corner is banked, as a fraction of cross-slope.
+ *
+ * The old law was `drop = curvature * 3 * lateral`, which at a 100 m radius is a 3%
+ * cross-slope — a third of what a real road of that radius is built with — and it was
+ * the same everywhere whatever kind of road it was. Road design sizes banking from the
+ * speed the corner is FOR, by the point-mass relation
+ *
+ *     e + f = V² / (127 R)        (V in km/h, R in metres)
+ *
+ * so the bank is what the corner needs beyond the side friction a driver is expected
+ * to spend. `E_MAX` caps it as a real standard does — 8% where ice is not a
+ * consideration — and the district's `bankShare` says how much of that a road of this
+ * kind was actually built with: a maintained highway all of it, a bulldozed desert
+ * track none.
+ *
+ * It lives on the heading field because that is where the two things it needs already
+ * are: the curvature and the district's character. Both the mesh and the driver's
+ * speed plan read the SAME function — a copy in either would be a corner the car is
+ * banked into and does not know about, or the reverse.
+ */
+const E_MAX = 0.08;
+/** Side friction the design speed is expected to spend, leaving the rest to banking. */
+const F_DESIGN = 0.12;
 
 /** First stretch out of the house is dead straight, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
@@ -138,13 +201,22 @@ const CURVATURE_STEP = NODE_SPACING * 0.5;
  */
 export class RoadHeading {
   private readonly route: Noise1D;
+  private readonly seed: number;
   private readonly turnMagnitudeSeed: number;
   private readonly turnTimingSeed: number;
   private readonly turnRadiusSeed: number;
   private readonly turnParity: number;
+  /**
+   * Character scratch, reused. `at` is called ten million times for a spine walk and
+   * three times per curvature sample; a fresh object per call would be an allocation
+   * in the hottest path the world has.
+   */
+  private readonly character = newCharacterBuffer();
+  private readonly district = newDistrictBuffer();
 
   constructor(seed: number) {
     const s = seed >>> 0;
+    this.seed = s;
     this.route = new Noise1D(s ^ 0x9e3779b9);
     this.turnMagnitudeSeed = (s ^ 0x3c6ef372) >>> 0;
     this.turnTimingSeed = (s ^ 0x85ebca6b) >>> 0;
@@ -152,39 +224,102 @@ export class RoadHeading {
     this.turnParity = s & 1;
   }
 
-  private turnTarget(section: number): number {
+
+  /**
+   * The bearing the section holds, and every section belongs to ONE district.
+   *
+   * Sections are laid out by dividing the district's own length into a whole number of
+   * them, so a district boundary is always a section boundary and the cadence inside a
+   * district never moves. That is what keeps the heading field continuous: a section
+   * starts from its predecessor's bearing, and the predecessor of a district's first
+   * section is the LAST section of the district before it, computed from that
+   * district's own character.
+   */
+  private sectionTarget(district: number, index: number, c: RoadCharacter): number {
     const magnitude =
-      TURN_MIN_HEADING +
-      (TURN_MAX_HEADING - TURN_MIN_HEADING) *
-        hashUnit2(this.turnMagnitudeSeed, section);
-    return ((section + this.turnParity) & 1) === 0 ? magnitude : -magnitude;
+      c.headingMin +
+      (c.headingMax - c.headingMin) *
+        hashUnit3(this.turnMagnitudeSeed, district, index);
+    return ((district + index + this.turnParity) & 1) === 0 ? magnitude : -magnitude;
+  }
+
+  private sectionsIn(start: number, end: number, spacing: number): number {
+    return Math.max(1, Math.round((end - start) / spacing));
   }
 
   private turnAt(s: number): number {
-    const section = Math.floor(s / TURN_SECTION_LENGTH);
-    const local = s - section * TURN_SECTION_LENGTH;
-    const from = this.turnTarget(section - 1);
-    const to = this.turnTarget(section);
-    const start =
-      TURN_START_MIN +
-      (TURN_START_MAX - TURN_START_MIN) * hashUnit2(this.turnTimingSeed, section);
+    districtAt(this.seed, s, this.district);
+    const k = this.district.index;
+    const c = characterOf(this.seed, k);
+    const sections = this.sectionsIn(this.district.start, this.district.end, c.cornerSpacing);
+    const sectionLength = (this.district.end - this.district.start) / sections;
+    const index = Math.min(
+      sections - 1,
+      Math.max(0, Math.floor((s - this.district.start) / sectionLength)),
+    );
+    const local = s - this.district.start - index * sectionLength;
+
+    const from =
+      index > 0
+        ? this.sectionTarget(k, index - 1, c)
+        : this.previousDistrictTarget(k);
+    const drawn = this.sectionTarget(k, index, c);
     const radius =
-      MIN_CORNER_RADIUS +
-      (TURN_RADIUS_MAX - MIN_CORNER_RADIUS) * hashUnit2(this.turnRadiusSeed, section);
-    const length = SMOOTHERSTEP_MAX_SLOPE * Math.abs(to - from) * radius;
+      c.radiusMin +
+      (c.radiusMax - c.radiusMin) * hashUnit3(this.turnRadiusSeed, k, index);
+    // The turning part of a section is what the character leaves for it. A pan road
+    // holds its bearing for four fifths of four kilometres; an esses district gives its
+    // corner almost the whole 700 m and reads as one continuous rhythm.
+    const room = sectionLength * (1 - c.straightShare);
+    // WHEN THE ROOM IS SHORT, THE ANGLE GIVES WAY — NOT THE RADIUS.
+    //
+    // Both are authored, but only one can be honoured in a section that cannot hold the
+    // whole transition, and they fail differently: a clamped LENGTH makes the corner
+    // tighter than the character asked for, so a pan road would quietly acquire 700 m
+    // hairpins, while a reduced ANGLE makes it a kink instead of a corner — which is
+    // what a pan road's corners are. So the heading change is scaled to fit and the
+    // peak radius stays true by construction.
+    let change = drawn - from;
+    let length = transitionLength(radius, Math.abs(change));
+    if (length > room && room > 0) {
+      change *= room / length;
+      length = Math.min(room, transitionLength(radius, Math.abs(change)));
+    }
+    const start = Math.min(
+      Math.max(0, sectionLength - length),
+      TURN_START_MIN +
+        (TURN_START_MAX - TURN_START_MIN) * hashUnit3(this.turnTimingSeed, k, index),
+    );
 
     if (local <= start) return from;
-    if (local >= start + length) return to;
-    const blend = smootherstep01((local - start) / length);
-    return from + (to - from) * blend;
+    if (local >= start + length) return from + change;
+    return from + change * smootherstep01((local - start) / length);
+  }
+
+  /** The bearing the district before `k` ended on, in its own character's terms. */
+  private previousDistrictTarget(k: number): number {
+    if (k <= 0) return 0;
+    const previous = characterOf(this.seed, k - 1);
+    const start = districtStartOf(this.seed, k - 1);
+    const end = districtStartOf(this.seed, k);
+    const sections = this.sectionsIn(start, end, previous.cornerSpacing);
+    return this.sectionTarget(k - 1, sections - 1, previous);
   }
 
   at(s: number): number {
     const ramp = Math.min(1, Math.max(0, (s - STRAIGHT_RUNOUT) / STRAIGHT_RUNOUT));
+    const turn = this.turnAt(s);
+    // The route wander is the district's too — it is the difference between a road
+    // that is straight and one that is merely never quite straight — and it is read
+    // with the CROSSFADED character, because unlike the cadence it is a continuous
+    // quantity and a step in it would be a step in the heading.
+    characterAt(this.seed, s, this.character);
     const route =
-      this.route.fbm(s / ROUTE_WAVELENGTH, ROUTE_OCTAVES, 2.1, ROUTE_GAIN) * ROUTE_DEVIATION;
-    return (route + this.turnAt(s)) * ramp;
+      this.route.fbm(s / ROUTE_WAVELENGTH, ROUTE_OCTAVES, 2.1, ROUTE_GAIN) *
+      this.character.deviation;
+    return (route + turn) * ramp;
   }
+
 
   /**
    * Signed curvature, radians per metre, by central difference on the heading.
@@ -193,6 +328,22 @@ export class RoadHeading {
    * slow noise field, the runout clamp and seeded smootherstep transitions. Camber and
    * the HUD are the only consumers and neither can tell the difference.
    */
+  /**
+   * Cross-slope at `s`, signed so a positive curvature banks the mat down toward the
+   * inside of the bend. Zero on a straight and on a road nobody surveyed.
+   */
+  bankingAt(s: number): number {
+    const curvature = this.curvatureAt(s);
+    const magnitude = Math.abs(curvature);
+    if (magnitude < 1e-5) return 0;
+    characterAt(this.seed, s, this.character);
+    const demand =
+      (this.character.designSpeedKmh * this.character.designSpeedKmh) /
+        (127 / magnitude) -
+      F_DESIGN;
+    return Math.sign(curvature) * Math.min(E_MAX, Math.max(0, demand)) * this.character.bankShare;
+  }
+
   curvatureAt(s: number): number {
     return (this.at(s + CURVATURE_STEP) - this.at(s - CURVATURE_STEP)) / (2 * CURVATURE_STEP);
   }

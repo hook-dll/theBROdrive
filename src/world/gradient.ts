@@ -30,13 +30,19 @@ export function drift(s: number): number {
 }
 
 /**
- * Period of the desert colour cycle, metres. Exactly 4 000 km.
+ * Period of the desert colour cycle, metres.
  *
- * A driver who covers this distance sees the whole palette and then begins again.
- * The cyclic sky channels (dust, haze, sky tint) share this period so they move
- * with the colour; the remoteness channels deliberately do not.
+ * A driver who covers this distance has seen the whole palette and begins again. The
+ * cyclic sky channels (dust, haze, sky tint) share this period so they move with the
+ * colour; the remoteness channels deliberately do not.
+ *
+ * It was 4 000 km, which is the one figure in this file that nobody could ever have
+ * reached: it meant a 2 500 km drive saw five eighths of the palette and never the
+ * rest. 2 000 km is one full turn inside a drive of that length, so every colour the
+ * desert has is somewhere on it — and it is still long enough that consecutive hours
+ * look like the same country rather than a slideshow.
  */
-export const PALETTE_CYCLE_M = 4_000_000;
+export const PALETTE_CYCLE_M = 2_000_000;
 
 // ---------------------------------------------------------------------------
 // Road decay
@@ -183,18 +189,37 @@ const DISTRICT_SURFACES: readonly SurfaceType[] = [
  * decay of 0.45; cracked asphalt is the everywhere surface and rises with decay;
  * concrete is old maintained motorway, so it fades out as the region is abandoned.
  * Tuned against the census in `tools/road-condition.ts` to land near asphalt 30%,
- * cracked 35%, gravel 25%, concrete 10% — the mix the old thresholds were retuned for
- * — so the bumpiest surface still never dominates a drive.
+ * cracked 35%, gravel 25%, concrete 10%.
+ *
+ * THE GLOBAL SHARE WAS NEVER THE PROBLEM; THE LOCAL ONE WAS. Those figures are what
+ * the full road measures, and it does: gravel is 25.8% of forty thousand kilometres.
+ * But the regional envelope moves over 300 km, and the weights above let it take the
+ * sealed surfaces to ZERO — asphalt at a regional 0.79, concrete at 0.77 — so an
+ * abandoned region drew nothing but gravel and cracked asphalt for its whole length.
+ * Measured per 40 km window, which is about a session's driving: a median of 28% hard
+ * going, a p90 of 48% and a worst of 64%. The bench's own stretch at s 40 000 is one
+ * of those: 48% gravel, and the stream's pace there is a third below what the road
+ * elsewhere allows.
+ *
+ * So the region still decides the CHARACTER — a kept-up region is mostly sealed, an
+ * abandoned one is mostly broken — but it no longer decides the surface outright. The
+ * sealed floor keeps a good district available in the worst region, and the gravel
+ * ceiling stops it from taking the whole deck in the worst one. Hard going stays what
+ * it is meant to be: a quarter of the road, met as an event rather than as a carpet.
  *
  * Written into a module scratch array rather than returned: a block fill draws four
  * times and `roadConditionAt` is called per road-mesh vertex row.
  */
 const districtWeights = new Float64Array(4);
+/** Weight the sealed surfaces keep however abandoned the region is. */
+const SEALED_WEIGHT_FLOOR = 0.35;
+/** And the weight gravel may never exceed, so it cannot own a region's whole deck. */
+const GRAVEL_WEIGHT_CEILING = 0.65;
 
 function weighDistrict(regional: number): number {
-  districtWeights[0] = Math.max(0, 1.5 - 1.9 * regional);
+  districtWeights[0] = Math.max(SEALED_WEIGHT_FLOOR, 1.5 - 1.9 * regional);
   districtWeights[1] = 0.3 + 0.45 * regional;
-  districtWeights[2] = Math.max(0, 1.5 * regional - 0.3);
+  districtWeights[2] = Math.min(GRAVEL_WEIGHT_CEILING, Math.max(0, 1.5 * regional - 0.3));
   districtWeights[3] = 0.24 * Math.max(0, 1 - 1.3 * regional);
   return districtWeights[0]! + districtWeights[1]! + districtWeights[2]! + districtWeights[3]!;
 }
@@ -387,12 +412,18 @@ export interface PoleCondition {
 }
 
 /**
- * Pole eras are absolute-distance bands about 1 000 km long, not fractions of the
- * road, so a 4 000 km drive crosses three or four generations and a 40 000 km
- * drive crosses ~40. Each band's era is drawn from a fixed hash stream rather than
- * a repeating literal list, so the order never reads as a loop.
+ * Pole eras are absolute-distance bands, not fractions of the road, so the order
+ * never reads as a loop and each band's era is drawn from a fixed hash stream.
+ *
+ * THE LENGTH IS A COVERAGE FIGURE. At 1 000 km a 2 500 km drive crossed two or three
+ * bands and met two of the four eras — measured on seed 1337: concrete and lattice,
+ * nothing else, so half the roadside the world can build was content a player would
+ * never see. The requirement is that a drive of that length meets EVERYTHING, and for
+ * four kinds drawn per band that is the coupon collector's `4 · H(4) ≈ 8` bands. At
+ * 300 km a 2 500 km drive crosses eight, which covers the set and still gives each
+ * era three or four hours of driving to be the world's normal.
  */
-const POLE_ERA_BAND_M = 1_000_000;
+const POLE_ERA_BAND_M = 300_000;
 
 /** Domain tag separating the pole-era-band hash stream from every other hash01 use. */
 const POLE_ERA_TAG = 0x0e7a5e;

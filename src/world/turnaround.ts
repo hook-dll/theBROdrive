@@ -208,6 +208,19 @@ export class TurnaroundRoad implements DriveRoad {
     return leg.kind === 'straight' ? 0 : -leg.sense / leg.radius;
   }
 
+  /** The bulb is flat paving, laid without banking. */
+  bankingAt(): number {
+    return 0;
+  }
+
+  /**
+   * The bulb is flat paving with nothing on it and no profile of its own, so a driver
+   * on it sees as far as it asks. See `DriveRoad.sightDistanceAt`.
+   */
+  sightDistanceAt(_s: number, limit: number): number {
+    return limit;
+  }
+
   /**
    * Nearest point on the line.
    *

@@ -25,8 +25,9 @@
  */
 
 import { desertPaletteAt, poleEraSegments, roadConditionAt, PALETTE_CYCLE_M } from '../src/world/gradient';
-import { SURFACES } from '../src/core/surfaces';
-import type { SurfaceType } from '../src/core/surfaces';
+import type { RoadConditionBuffer } from '../src/world/gradient';
+import { SURFACES, SurfaceType } from '../src/core/surfaces';
+import { surfacePaceFactor } from '../src/vehicle/autopilot';
 import { ROAD_LENGTH } from '../src/world/road';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 
@@ -125,6 +126,65 @@ for (const t of types) {
   );
 }
 console.log(`  concrete share: ${concreteShare.toFixed(1)}% (target ~8%)`);
+
+// ---------------------------------------------------------------------------
+// What the surface COSTS A DRIVER, which is the number the road is felt through
+// ---------------------------------------------------------------------------
+//
+// Material share alone does not say how the road drives: the same gravel district is
+// a brisk graded highway at a low wear and a crawl at a high one, and it is the
+// product of the two that the speed planner uses. `surfacePaceFactor` is the
+// controller's own function, so this is what the cars actually get.
+console.log('');
+console.log('pace the surface allows (share of a mode cruise, sleeper, 100 m resolution)');
+{
+  const condition: RoadConditionBuffer = {
+    surface: SurfaceType.Asphalt,
+    decay: 0,
+    sandCover: 0,
+    markings: 0,
+  };
+  const unsorted: number[] = [];
+  for (let s = 0; s < ROAD_LENGTH; s += CENSUS_STEP_M) {
+    roadConditionAt(s, condition);
+    unsorted.push(surfacePaceFactor('sleeper', condition));
+  }
+  const factors = unsorted.slice().sort((a, b) => a - b);
+  const at = (q: number): number => factors[Math.min(factors.length - 1, Math.floor(q * factors.length))]!;
+  console.log(
+    `  p05 ${at(0.05).toFixed(2)}  p25 ${at(0.25).toFixed(2)}  median ${at(0.5).toFixed(2)}  ` +
+      `p75 ${at(0.75).toFixed(2)}  p95 ${at(0.95).toFixed(2)}`,
+  );
+  // "Hard going" is the share of road where the surface takes more than a quarter of
+  // the driver's pace away. A road whose every kilometre is hard going has no hard
+  // going in it: the contrast is the content.
+  const hard = factors.filter((f) => f < 0.75).length / factors.length;
+  const easy = factors.filter((f) => f >= 0.9).length / factors.length;
+  console.log(
+    `  hard going (<0.75 of cruise) ${(hard * 100).toFixed(1)}% of the road, ` +
+      `clear running (>=0.90) ${(easy * 100).toFixed(1)}%`,
+  );
+  // AND WHERE IT IS, WHICH IS THE HALF THAT IS FELT. A global quarter of hard going
+  // is not a quarter of every drive: the regional envelope makes abandoned districts
+  // draw loose material together, so a player can spend a whole session inside one.
+  // The window is a long evening's driving at stream pace.
+  const windowSamples = Math.floor(40_000 / CENSUS_STEP_M);
+  const windowShares: number[] = [];
+  for (let start = 0; start + windowSamples <= unsorted.length; start += windowSamples) {
+    let hardHere = 0;
+    for (let i = start; i < start + windowSamples; i++) {
+      if (unsorted[i]! < 0.75) hardHere++;
+    }
+    windowShares.push(hardHere / windowSamples);
+  }
+  windowShares.sort((a, b) => a - b);
+  const windowAt = (q: number): number =>
+    windowShares[Math.min(windowShares.length - 1, Math.floor(q * windowShares.length))]!;
+  console.log(
+    `  hard going per 40 km window: median ${(windowAt(0.5) * 100).toFixed(0)}%  ` +
+      `p90 ${(windowAt(0.9) * 100).toFixed(0)}%  worst ${(windowAt(1) * 100).toFixed(0)}%`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Regional envelope

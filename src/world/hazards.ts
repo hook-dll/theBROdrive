@@ -47,13 +47,27 @@ export class HazardIndex {
 
   /**
    * Visits hazards in [s, s + distance]. Sorting only when construction or teardown
-   * changed membership makes the 60 Hz read a forward scan with no transient arrays.
+   * changed membership makes the read allocation-free.
+   *
+   * THE START IS FOUND, NOT WALKED TO. The scan used to skip every entry behind the
+   * car one at a time, so a query cost the whole loaded window however short its
+   * range — and the window is every prop in a kilometre and a half of streamed road,
+   * read twice per driver per step. That cost is what made a long look expensive, and
+   * a long look is exactly what a crossing decision needs (see the pass horizon in
+   * `autopilot.ts`). With the lower bound bisected, range costs what it visits.
    */
   forEachAhead(s: number, distance: number, fn: (hazard: RoadHazard) => void): void {
     if (this.dirty) this.rebuildOrder();
     const end = s + Math.max(0, distance);
-    for (const hazard of this.ordered) {
-      if (hazard.s < s) continue;
+    let low = 0;
+    let high = this.ordered.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (this.ordered[middle]!.s < s) low = middle + 1;
+      else high = middle;
+    }
+    for (let i = low; i < this.ordered.length; i++) {
+      const hazard = this.ordered[i]!;
       if (hazard.s > end) break;
       fn(hazard);
     }

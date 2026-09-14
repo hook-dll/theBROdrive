@@ -36,6 +36,23 @@ export class ReversedRoad implements DriveRoad {
     return -this.forward.curvatureAt(this.forwardS(s));
   }
 
+  /**
+   * Curvature changes sign in this view and so does lateral, so the cross-slope a
+   * driver going the other way experiences is the same bank with the sign flipped —
+   * which is the same physical road, tilted the same way.
+   */
+  bankingAt(s: number): number {
+    return -this.forward.bankingAt(this.forwardS(s));
+  }
+
+  /**
+   * Looking "ahead" in this view is looking back down the forward road, which is what
+   * the direction argument is for: the profile is shared, only the march reverses.
+   */
+  sightDistanceAt(s: number, limit: number, direction: 1 | -1 = 1): number {
+    return this.forward.sightDistanceAt(this.forwardS(s), limit, direction === 1 ? -1 : 1);
+  }
+
   project(x: number, z: number, hintS?: number): RoadProjection {
     const projection = this.forward.project(
       x,

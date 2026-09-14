@@ -15,10 +15,26 @@ import { roadConditionAt } from './gradient';
  */
 
 /**
- * How strongly the road banks into corners. `drop = curvature * CAMBER_SCALE *
- * lateral`.
+ * SUPERELEVATION: how far a corner is banked, and it is now the road-design relation
+ * rather than a constant times curvature.
+ *
+ * The old law was `drop = curvature * 3 * lateral`, which at a 100 m radius is a 3%
+ * cross-slope — a third of what a real road of that radius is built with, and it was
+ * the same everywhere whatever the road was. Road design sizes it from the speed the
+ * corner is FOR: the point-mass relation is
+ *
+ *     e + f = V² / (127 R)        (V in km/h, R in metres)
+ *
+ * so the banking is what the corner needs beyond the side friction a driver is
+ * expected to spend. `E_MAX` caps it the way a real standard does — 8% is the usual
+ * figure where ice is not a consideration — and the district's own `bankShare` says
+ * how much of that a road of this kind was actually built with: a maintained highway
+ * all of it, a bulldozed desert track none.
+ *
+ * A banked corner is worth the trouble twice over: it raises the speed the geometry
+ * allows, and `Autopilot` is told about it (see `bankingAt`), so the traffic actually
+ * uses the extra grip instead of leaving it on the table.
  */
-const CAMBER_SCALE = 3;
 
 /**
  * Longitudinal sub-samples per road node. The mesh is densified 3x (a 1.333 m
@@ -305,6 +321,7 @@ export class SurfaceField {
  * function — the road ribbon samples it for every vertex and collider, and the
  * terrain samples it at the shoulder edge so the two surfaces meet flush.
  */
+
 export function roadSurfaceY(
   road: Road,
   field: SurfaceField,
@@ -315,11 +332,11 @@ export function roadSurfaceY(
 ): number {
   const sample = road.sampleAt(s);
   const cond = roadConditionAt(s);
-  // Camber remains curvature times the queried lateral: widening changes the edge,
-  // not the banking law of a given point on the mat.
+  // Banking is the cross-slope times the queried lateral: widening changes where the
+  // edge is, not the banking law of a given point on the mat.
   return (
     sample.y -
-    sample.curvature * CAMBER_SCALE * lateral +
+    road.bankingAt(s) * lateral +
     field.displacement(s, lateral, x, z, cond.decay, cond.surface, road.halfWidthAt(s))
   );
 }

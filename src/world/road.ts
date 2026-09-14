@@ -7,7 +7,7 @@ import {
   COARSE_SPACING,
   type RoadSpine,
 } from './roadspine';
-import { halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH } from './roadprofile';
+import { curveWidening, halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH } from './roadprofile';
 
 /**
  * The road is the spine of the world.
@@ -84,6 +84,21 @@ export const ROAD_LENGTH = 40_000_000;
  */
 const BLOCK_CACHE = 8;
 
+/**
+ * SIGHT GEOMETRY. Eye height is a saloon driver's, object height is what matters to
+ * see — a stopped car's bodywork rather than a stone, because the decision this feeds
+ * is "is the road ahead clear of traffic", and a rock is in the hazard index anyway.
+ * These are the figures road design uses for stopping sight distance, near enough.
+ *
+ * The march is capped at a fixed number of samples, so a long look costs the same as
+ * a short one and neither depends on the limit asked for: fifteen samples over 300 m
+ * is a 20 m step, which is finer than the crests this road makes.
+ */
+const SIGHT_EYE_HEIGHT_M = 1.08;
+const SIGHT_OBJECT_HEIGHT_M = 0.6;
+const SIGHT_STEP_M = 10;
+const SIGHT_MAX_SAMPLES = 15;
+
 export interface RoadSample {
   /** Arclength, clamped into the road's extent. */
   readonly s: number;
@@ -114,6 +129,19 @@ export interface DriveRoad {
   conditionAt(s: number, out: RoadConditionBuffer): void;
   sampleAt(s: number): RoadSample;
   curvatureAt(s: number): number;
+  /**
+   * Cross-slope the corner is banked at, as a fraction, signed like the curvature.
+   * A driver may spend `g · e` of extra lateral acceleration because of it, so the
+   * speed plan reads the same number the mesh is built from.
+   */
+  bankingAt(s: number): number;
+  /**
+   * Metres of road this driver can see, capped at `limit`. `direction` is +1 down the
+   * driver's own travel and -1 back the way it came; the reversed view flips it, so
+   * one profile march serves both carriageways. Implementers with no profile of their
+   * own (a test circuit, a turning bulb) answer `limit`.
+   */
+  sightDistanceAt(s: number, limit: number, direction?: 1 | -1): number;
   project(x: number, z: number, hintS?: number): RoadProjection;
   offsetPoint(
     s: number,
@@ -203,6 +231,11 @@ export class Road {
     return this.headingField.curvatureAt(s);
   }
 
+  /** Cross-slope of the banking at `s`; see `RoadHeading.bankingAt`. */
+  bankingAt(s: number): number {
+    return this.headingField.bankingAt(s);
+  }
+
   /**
    * How hilly the country is at `s`, 0..1. Delegates to the landscape, because
    * hilliness is a property of the ground the road crosses, not of the arclength.
@@ -210,6 +243,43 @@ export class Road {
   hillinessAt(s: number): number {
     const c = this.sampleAt(s);
     return this.landscape.hillinessAt(c.x, c.z);
+  }
+
+  /**
+   * HOW FAR A DRIVER CAN ACTUALLY SEE FROM HERE, metres, capped at `limit`.
+   *
+   * The desert has no cut slopes and no hedges, so what hides the road ahead is the
+   * road's own vertical profile: a crest cuts the line of sight long before the
+   * carriageway runs out. This is the same quantity road engineering calls available
+   * sight distance, and it is computed the same way — march forward from an eye height
+   * and ask whether an object height at each distance is still above every intervening
+   * ridge.
+   *
+   * It exists because the alternative is what the drivers were doing: casting a ray and
+   * reading its first STATIC hit as "the world ends here". That is free, but it is a
+   * lottery — a ray at a fixed 0.9 m clips the crown on a sag and passes over a car on
+   * a crest — and it cannot answer the question a crossing decision actually has, which
+   * is "how much road ahead have I proven". Fifteen samples of the profile answer it
+   * exactly, and the answer is a property of the ROAD, so it can be cached by whoever
+   * asks rather than recomputed per tick.
+   *
+   * `direction` is +1 to look up the road and -1 to look back down it, so the reversed
+   * view can share the implementation rather than keep its own.
+   */
+  sightDistanceAt(s: number, limit: number, direction: 1 | -1 = 1): number {
+    const eyeY = this.sampleAt(s).y + SIGHT_EYE_HEIGHT_M;
+    const step = Math.max(SIGHT_STEP_M, limit / SIGHT_MAX_SAMPLES);
+    let worstSlope = -Infinity;
+    for (let d = step; d <= limit; d += step) {
+      const target = s + direction * d;
+      if (target < 0 || target > this.length) return d;
+      const groundY = this.sampleAt(target).y;
+      // Anything at object height is visible only if it clears every ridge between.
+      if ((groundY + SIGHT_OBJECT_HEIGHT_M - eyeY) / d < worstSlope) return d - step;
+      const ridgeSlope = (groundY - eyeY) / d;
+      if (ridgeSlope > worstSlope) worstSlope = ridgeSlope;
+    }
+    return limit;
   }
 
   /**
@@ -336,7 +406,10 @@ export class Road {
 
   /** Half-width of the asphalt at an arclength, metres. See `roadprofile.ts`. */
   halfWidthAt(s: number): number {
-    return halfWidthAt(this.seed, s);
+    // The profile's lattice plus what the local bend is built wider by. Both the mesh
+    // and every driver read this one function, so a widened corner is widened for the
+    // geometry, the terrain junction and the planner alike.
+    return halfWidthAt(this.seed, s) + curveWidening(this.curvatureAt(s));
   }
 
   /** Driveable lanes in one direction at an arclength: 1 or 2. */

@@ -116,7 +116,7 @@ function sampleStoppedTraffic(): void {
   }
 }
 for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
-  traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+  traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
   physics.step();
   traffic.postStep();
   sampleStoppedTraffic();
@@ -152,7 +152,7 @@ check(
   `${populated.highBeams} high, ${populated.lowBeams} low / ${populated.count} cars`,
 );
 traffic.setDaylightFactor(0);
-traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
 check(
   'night traffic keeps every low beam lit',
   traffic.status.highBeams === 0 && traffic.status.lowBeams === traffic.status.count,
@@ -180,7 +180,7 @@ let liveSum = 0;
 let distributionSamples = 0;
 for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   const movingPlayerS = PLAYER_S + step * FIXED_DT * PLAYER_MPS;
-  traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0);
+  traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0, 0);
   physics.step();
   traffic.postStep();
   sampleStoppedTraffic();
@@ -233,7 +233,7 @@ check(
 
 // Beyond every range from where the stream actually ended, not from where it began:
 // the forward tail reaches `DESPAWN_M` past the last driven position.
-traffic.fixedUpdate(0.6, PLAYER_S + 120 * PLAYER_MPS + 4_000, 0, 0);
+traffic.fixedUpdate(0.6, PLAYER_S + 120 * PLAYER_MPS + 4_000, 0, 0, 0);
 check(
   'cars despawn beyond the active range',
   traffic.status.count === 0,
@@ -256,10 +256,10 @@ check(
     loadCarModel,
     () => true,
   );
-  narrowTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+  narrowTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
   const narrowCap = narrowTraffic.status.cap;
   const narrowTarget = narrowTraffic.status.target;
-  narrowTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0);
+  narrowTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0, 0);
   const wideCap = narrowTraffic.status.cap;
   const wideTarget = narrowTraffic.status.target;
   check(
@@ -308,7 +308,7 @@ check(
   // proves nothing about a distribution — 200 s caught four consecutive draws inside a
   // third of the range and read as a stuck rotation when the rotation was working.
   for (let step = 0; step < Math.ceil(900 / FIXED_DT); step++) {
-    rotating.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+    rotating.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
     const target = rotating.status.target;
     if (target > 0) {
       lowest = Math.min(lowest, target);
@@ -359,7 +359,7 @@ check(
   let passedTheRock = 0;
   const before = new Set<string>();
   for (let step = 0; step < Math.ceil(150 / FIXED_DT); step++) {
-    blocked.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0);
+    blocked.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
     physics.step();
     blocked.postStep();
     const live = new Set<string>();
@@ -452,7 +452,7 @@ check(
   const padTime = new Map<string, number>();
   const impactsBefore = ending.status.impacts;
   for (let i = 0; i < Math.ceil(180 / FIXED_DT); i++) {
-    ending.fixedUpdate(FIXED_DT, endS, 0, 0);
+    ending.fixedUpdate(FIXED_DT, endS, 0, 0, 0);
     physics.step();
     ending.postStep();
     ending.forEachVehicle((id, vehicle) => {

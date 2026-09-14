@@ -86,7 +86,7 @@ import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
-import { RoadTraffic } from './world/traffic';
+import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { setCarBodyCondition } from './render/materials';
 import { WreckTrunkField } from './world/wrecktrunks';
@@ -1072,6 +1072,19 @@ async function boot(): Promise<void> {
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
   const autopilot = new Autopilot(road, hazards, physics);
+  /**
+   * WHERE THE PLAYER IS, FOR THE RULES THAT ARBITRATE AROUND HIM.
+   *
+   * The stream's coordinator reasoned about its own cars and nothing else, so the one
+   * vehicle on the road that a driver most needs to know about was the one it could
+   * only find with a ray. This record is the player's seat in that field — updated
+   * with `activeS` every step, read live by `RoadTraffic.fieldFor` — and it works
+   * whether he is steering himself or letting his own autopilot do it. The direction
+   * is the road's forward sense, which is the frame the player's own `Autopilot` and
+   * `activeS` are already expressed in.
+   */
+  const playerFieldSeat = { forwardS: 0, direction: 1 as const };
+  autopilot.setTrafficField(traffic.fieldFor(playerFieldSeat, PLAYER_FIELD_ID));
 
   // Dev-only inspection hook. Lets a browser session read simulation state without
   // exporting it into the game's own API surface.
@@ -1455,7 +1468,8 @@ async function boot(): Promise<void> {
       traffic.clearPedestrianObstacle();
     }
     traffic.setDaylightFactor(sky.dayFactor);
-    traffic.fixedUpdate(dt, activeS, origin.x, origin.z);
+    playerFieldSeat.forwardS = activeS;
+    traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
 
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle

@@ -6,6 +6,7 @@ import { createServiceableCarState } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { Autopilot, type AutopilotMode } from '../vehicle/autopilot';
+import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import type { Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { Vehicle } from '../vehicle/vehicle';
@@ -177,6 +178,26 @@ const TURN_REJOIN_M = 25;
  * physics step.
  */
 const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
+/**
+ * Body half-extents the traffic field reports, metres. One figure for the catalogue
+ * rather than a per-model measure: the field is consulted to decide whether a body is
+ * in a lane and whether it is closing, and being slightly pessimistic about the widest
+ * saloon costs nothing while making every driver's answer the same.
+ */
+const NEIGHBOUR_HALF_WIDTH_M = 1.0;
+const NEIGHBOUR_HALF_LENGTH_M = 2.3;
+/** The id the player's own car is excluded by when it asks for a field of its own. */
+export const PLAYER_FIELD_ID = 'player';
+/**
+ * What the traffic field needs to know about the driver asking: where it is along the
+ * road and which way it is going. `TrafficCar` satisfies it, and so does a small
+ * record kept by a bench or by the player's own wiring — the point is that the field
+ * reads it LIVE, so a car that turns round at the road's end keeps a correct view.
+ */
+export interface FieldOwner {
+  readonly forwardS: number;
+  readonly direction: 1 | -1;
+}
 
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried';
@@ -200,6 +221,13 @@ interface TrafficCar {
   /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
   readonly pace: number;
   roadLateral: number;
+  /**
+   * Speed along the road's FORWARD direction, metres per second, refreshed with
+   * `forwardS` every step. Published through the traffic field so a driver can know
+   * what is catching it up without asking the physics for a ray it cannot trust; see
+   * `vehicle/trafficfield.ts`.
+   */
+  forwardSpeed: number;
   readonly input: InputFrame;
   forwardS: number;
   settleFor: number;
@@ -329,6 +357,14 @@ export class RoadTraffic {
    * driver can actually close on this; see `queueSpawn`.
    */
   private playerSpeed = 0;
+  /**
+   * The player's own lateral and whether he is in a car at all, maintained with
+   * `playerS` so the traffic field can carry him. A driver's rearward sensing cannot
+   * find him and the coordinator's rules ignored him entirely: he was the one vehicle
+   * on the road that nothing arbitrated around.
+   */
+  private playerLateral = 0;
+  private playerDriving = false;
   private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
   private pedestrianActive = false;
@@ -454,6 +490,70 @@ export class RoadTraffic {
   }
 
   /**
+   * A view of every OTHER vehicle near one driver, in that driver's own frame.
+   *
+   * The coordinator already refreshes arclength, lateral and road speed for every car
+   * once a step, and the player's arclength and pace arrive with `fixedUpdate`, so
+   * this is a projection of data that exists rather than a second source of truth.
+   * The player is in it: he is the one vehicle a driver most needs to know about, and
+   * the one a rearward ray is least able to find.
+   *
+   * `excludeId` keeps a car out of its own answer. The buffer is reused per visit,
+   * which is why `TrafficField` documents that it must not be retained.
+   */
+  fieldFor(owner: FieldOwner, excludeId: string): TrafficField {
+    const buffer = {
+      s: 0,
+      lateral: 0,
+      speed: 0,
+      halfWidth: NEIGHBOUR_HALF_WIDTH_M,
+      halfLength: NEIGHBOUR_HALF_LENGTH_M,
+    };
+    const visit = (
+      otherS: number,
+      otherLateral: number,
+      otherSpeed: number,
+      ownS: number,
+      ahead: number,
+      behind: number,
+      fn: (neighbour: TrafficNeighbour) => void,
+    ): void => {
+      const along = (otherS - ownS) * owner.direction;
+      // To the near face, both ways, so a gap is bumper to bumper like every other
+      // distance the driver reasons with.
+      const faced =
+        along > 0
+          ? along - NEIGHBOUR_HALF_LENGTH_M
+          : along + NEIGHBOUR_HALF_LENGTH_M;
+      if (faced > ahead || faced < -behind) return;
+      buffer.s = faced;
+      buffer.lateral = otherLateral * owner.direction;
+      buffer.speed = otherSpeed * owner.direction;
+      fn(buffer);
+    };
+    return {
+      forEachNear: (ahead, behind, fn) => {
+        const ownS = owner.forwardS;
+        for (const car of this.carList) {
+          if (car.id === excludeId || car.settleFor > 0 || car.turnS >= 0) continue;
+          visit(car.forwardS, car.roadLateral, car.forwardSpeed, ownS, ahead, behind, fn);
+        }
+        if (excludeId !== PLAYER_FIELD_ID && this.playerDriving) {
+          visit(
+            this.playerS,
+            this.playerLateral,
+            this.playerSpeed,
+            ownS,
+            ahead,
+            behind,
+            fn,
+          );
+        }
+      },
+    };
+  }
+
+  /**
    * Resolves an opposing-queue stalemate centrally instead of letting every driver
    * guess. Only the forward-direction head receives permission; cars behind either
    * head remain ordinary followers. Separate clusters may resolve concurrently.
@@ -563,15 +663,29 @@ export class RoadTraffic {
    * other way within `OPPOSING_PASS_EXCLUSION_M` may start a pass of its own.
    */
   private assignPassPermissions(): void {
+    // THE PLAYER COUNTS, AND HE DID NOT USED TO.
+    //
+    // The exclusion was computed over the coordinator's own cars, so a driver was
+    // free to start an overtake into the one vehicle whose behaviour it could not
+    // predict at all. If the player is out over the centreline — overtaking himself,
+    // going round something, or simply wandering — nothing coming the other way near
+    // him may borrow that lane as well. His lateral arrives with `fixedUpdate`; his
+    // direction is the road's forward sense, which is what `activeS` is measured in.
+    const playerAcrossCrown =
+      this.playerDriving && this.playerLateral > CROWN_CROSSING_INTRUSION_M;
     for (const car of this.carList) {
       if (car.turnS >= 0) continue;
-      const blocked = this.carList.some(
-        (other) =>
-          other !== car &&
-          other.direction !== car.direction &&
-          (other.autopilot.activity === 'pass' || this.isAcrossCrown(other)) &&
-          Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M,
-      );
+      const blocked =
+        (playerAcrossCrown &&
+          car.direction === -1 &&
+          Math.abs(this.playerS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M) ||
+        this.carList.some(
+          (other) =>
+            other !== car &&
+            other.direction !== car.direction &&
+            (other.autopilot.activity === 'pass' || this.isAcrossCrown(other)) &&
+            Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M,
+        );
       car.autopilot.setPassingEnabled(!blocked);
     }
   }
@@ -651,8 +765,21 @@ export class RoadTraffic {
   }
 
 
-  /** Writes every traffic controller before the shared physics step. */
-  fixedUpdate(dt: number, playerS: number, originX: number, originZ: number): void {
+  /**
+   * Writes every traffic controller before the shared physics step.
+   *
+   * `playerLateral` is the player's own signed offset from the centreline, in the
+   * road's forward frame, and it is not decoration: it is what puts him into the
+   * traffic field and therefore into the rules the stream arbitrates with. A negative
+   * lateral means he is left of the centreline as the road runs.
+   */
+  fixedUpdate(
+    dt: number,
+    playerS: number,
+    playerLateral: number,
+    originX: number,
+    originZ: number,
+  ): void {
     // A jump this large is a teleport (load, fast travel, the despawn-range test),
     // not motion, and must not be read as a speed no traffic could ever match.
     const advance = playerS - this.playerS;
@@ -660,6 +787,8 @@ export class RoadTraffic {
       dt > 0 && Math.abs(advance) < 50
         ? this.playerSpeed * 0.9 + (advance / dt) * 0.1
         : 0;
+    this.playerLateral = playerLateral;
+    this.playerDriving = this.sourceWorld.state.player.drivingCarId !== null;
     this.playerS = playerS;
     if (this.pedestrianActive) {
       const dx = this.pedestrianX - this.pedestrianPreviousX;
@@ -707,6 +836,13 @@ export class RoadTraffic {
       const projection = this.road.project(this.position.x, this.position.z, car.forwardS);
       car.forwardS = projection.s;
       car.roadLateral = projection.lateral;
+      // Along the road, not along the body: a car halfway through a manoeuvre still
+      // closes on what is in front of it at its road speed, and that is the number a
+      // driver behind it has to reason about.
+      const sample = this.road.sampleAt(projection.s);
+      const velocity = car.vehicle.chassis.linvel();
+      car.forwardSpeed =
+        velocity.x * Math.sin(sample.heading) + velocity.z * Math.cos(sample.heading);
     }
     this.assignRequestedLanes();
 
@@ -991,7 +1127,7 @@ export class RoadTraffic {
       this.road.lanesPerSideAt(request.forwardS) === 1 ? null : request.lane,
     );
     autopilot.setEngaged(true);
-    this.carList.push({
+    const record: TrafficCar = {
       id: request.id,
       direction: request.direction,
       vehicle,
@@ -999,6 +1135,7 @@ export class RoadTraffic {
       style: request.style,
       headwayS: request.headwayS,
       roadLateral: forwardLateral,
+      forwardSpeed: 0,
       speedCap: request.speedCap,
       pace: request.pace,
       spawnS: request.forwardS,
@@ -1013,7 +1150,11 @@ export class RoadTraffic {
       controlAccumulator:
         (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
       turnS: -1,
-    });
+    };
+    // The field reads the record's live arclength and direction, so it keeps working
+    // as the car drives and, after a turnaround, as its direction flips.
+    autopilot.setTrafficField(this.fieldFor(record, record.id));
+    this.carList.push(record);
   }
 
   /**

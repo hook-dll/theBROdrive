@@ -303,9 +303,31 @@ function addHazardCollider(rig: Rig, hazard: RoadHazard): void {
   );
 }
 
+/**
+ * First arclength at or after `from` whose whole drive stays one lane each way.
+ *
+ * Scenarios about a narrow road have to say so: the widening lattice draws a passing
+ * window in every cell, and a scenario anchored on a fixed arclength silently becomes
+ * a scenario about a dual carriageway when one lands there.
+ */
+function narrowStart(road: Road, from: number, routeMetres: number): number {
+  for (let s = from; s < from + 40_000; s += 50) {
+    let narrow = true;
+    for (let x = s - 40; x <= s + routeMetres; x += 20) {
+      if (road.lanesPerSideAt(x) > 1) {
+        narrow = false;
+        break;
+      }
+    }
+    if (narrow) return s;
+  }
+  return from;
+}
+
 async function driveHazard(
   hazard: RoadHazard,
   seconds: number,
+  startS = START_S,
 ): Promise<{
   minDistance: number;
   speedAtClosest: number;
@@ -328,7 +350,7 @@ async function driveHazard(
   const hazards = new HazardIndex();
   const chunk = 'autopilot-bench-hazards';
   hazards.add(chunk, hazard);
-  const rig = await makeRig(START_S, ROUTE_METRES, hazards);
+  const rig = await makeRig(startS, ROUTE_METRES, hazards);
   rig.autopilot.setTrafficRecoveryPolicy(true);
   rig.autopilot.setEngaged(true);
   addHazardCollider(rig, hazard);
@@ -350,7 +372,7 @@ async function driveHazard(
   // The projection hint MUST be carried. `project` searches locally around it, so a
   // fixed hint saturates a couple of hundred metres out and every distance measured
   // against a hazard further along the route silently freezes.
-  let hint = START_S;
+  let hint = startS;
   for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
     step(rig);
     const pos = rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
@@ -602,6 +624,8 @@ async function checkLitteredRoad(): Promise<void> {
 }
 
 async function checkHazards(): Promise<void> {
+  // The same seeded road every scenario here drives, asked only about its geometry.
+  const hazardRoad = new Road(42);
   // A rock the width of the lane's centre: pass on the right at walking pace, then
   // settle back onto the normal lane only after the rear bumper is clear.
   const rock = await driveHazard(
@@ -642,9 +666,23 @@ async function checkHazards(): Promise<void> {
     mound.passed && mound.rejoined,
     `passed/rejoined=${mound.passed}/${mound.rejoined}, closest ${mound.minDistance.toFixed(2)} m at ${mound.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${mound.worstLateral.toFixed(2)} m`,
   );
+  // THE TRUNK SCENARIO NEEDS A NARROW ROAD, SO IT ASKS FOR ONE.
+  //
+  // Its whole premise is that no right-hand line on the asphalt clears the trunk. That
+  // was written when the carriageway was 2.9 m everywhere the bench drove; the widening
+  // lattice then put a passing window over this arclength, the road became 5.8 m wide,
+  // and the driver correctly went round on the right — on asphalt, keeping the
+  // pass-immovable-things-on-the-right convention — which the check scored as driving
+  // into the sand. The scenario had stopped describing its own road, so it now starts
+  // at the first stretch that is narrow for the whole drive and places the trunk
+  // against that road's real edge.
+  const trunkStartS = narrowStart(hazardRoad, START_S, ROUTE_METRES);
+  const trunkEdge = hazardRoad.halfWidthAt(trunkStartS + 300);
+  const trunkLateral = -(trunkEdge - 0.6);
   const trunk = await driveHazard(
-    { s: START_S + 300, lateral: -2.3, radius: 1.6, breakable: false },
+    { s: trunkStartS + 300, lateral: trunkLateral, radius: 1.6, breakable: false },
     120,
+    trunkStartS,
   );
   // A TRUNK AGAINST THE RIGHT VERGE IS PASSED ON THE LEFT, and that reverses what this
   // check used to demand.
@@ -662,9 +700,9 @@ async function checkHazards(): Promise<void> {
     'right-edge trunk is passed on the road, not in the sand',
     trunk.passed &&
       trunk.rejoined &&
-      trunk.closestLateral > -2.3 &&
+      trunk.closestLateral > trunkLateral &&
       trunk.minDistance >= 1.6 &&
-      trunk.worstLateral <= ROAD_HALF_WIDTH + PASSING_VERGE &&
+      trunk.worstLateral <= trunkEdge + PASSING_VERGE &&
       // SLOWED FOR IT, rather than crawled past it. The bound used to be 8 m/s, which
       // was the flat crawl the controller happened to use; the property is that the
       // driver arrives at a speed the way round actually fits at, which on a clear

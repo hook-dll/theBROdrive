@@ -47,11 +47,12 @@ import {
 } from '../src/render/carmodel';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { Autopilot, type AutopilotMode } from '../src/vehicle/autopilot';
+import { Autopilot, roadPaceCeiling, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { installAssetShim } from './assetshim';
 import { HazardIndex } from '../src/world/hazards';
+import type { RoadConditionBuffer } from '../src/world/gradient';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
@@ -60,10 +61,9 @@ import { TerrainMeshProvider } from '../src/world/terrainmesh';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { ScatterProvider } from '../src/world/props';
 import { Terrain } from '../src/world/terrain';
-import { RoadTraffic } from '../src/world/traffic';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { installDocumentShim } from './domshim';
-
+import { PLAYER_FIELD_ID, RoadTraffic } from '../src/world/traffic';
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable = false;
   readonly loaded = 0;
@@ -105,10 +105,25 @@ const EGO_MODEL = 'sv_vaz2105r';
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH * 2 + 4;
 /**
  * Amplitude, metres, a lateral excursion has to reach before it counts as a weave
- * rather than as lane keeping. A tenth of a lane: below it nothing is visible from
- * outside the car, above it the body is visibly moving across its own line.
+ * rather than as lane keeping.
+ *
+ * 0.15 m WAS THIS NUMBER, AND IT MEASURED HEALTHY DRIVING. Lane keeping holds the
+ * body to an RMS of 0.07-0.10 m, so a 0.15 m retrace is under two sigma of ordinary
+ * wander and a peak counter fires on it continuously. Measured with the same counter
+ * at several amplitudes, per km of lane-holding, on seed 1337:
+ *
+ *     amplitude      0.15   0.20   0.30   0.40   0.60
+ *     ego, EMPTY     16.4   12.8    5.4    1.3    0.0     <- nothing to weave around
+ *     stream         13.3    6.0    3.4    0.6    0.0
+ *
+ * The empty-road car is the golden case: one driver, no traffic, 73 km/h, an RMS of
+ * 0.08 m and a commanded line that reverses 0.4 times a kilometre. Anything that
+ * scores it as weaving sixteen times a kilometre is measuring the road surface and
+ * the tyres, not the controller. At 0.40 m — an eighth of the carriageway, which is
+ * the point at which a body visibly leaves its line from outside the car — the same
+ * golden case reads 1.3/km, and that is a number a threshold can sit above.
  */
-const WEAVE_AMPLITUDE_M = 0.15;
+const WEAVE_AMPLITUDE_M = 0.4;
 /** Same, for the commanded line, and for the steering command as a fraction of lock. */
 const LINE_CHURN_AMPLITUDE_M = 0.15;
 const STEER_REVERSAL_AMPLITUDE = 0.08;
@@ -128,6 +143,16 @@ const CRAWL_KMH = 8;
 const STOPPED_KMH = 2;
 /** Bumper-to-bumper distance below which two cars in a lane count as a near miss. */
 const NEAR_MISS_M = 1.2;
+/**
+ * A body this far past the asphalt at this speed did not drive there: the road is
+ * 2.9-5.8 m of half width with a graded verge, so twelve metres out at highway pace
+ * is a car that has been pushed out of the mesh. The bare speed test catches the same
+ * defect where the body is still near the road — no catalogue car reaches 150 km/h on
+ * this surface, let alone sideways.
+ */
+const EJECTED_LATERAL_M = 12;
+const EJECTED_SPEED_KMH = 60;
+const IMPOSSIBLE_SPEED_KMH = 150;
 const BODY_LENGTH_M = 4.4;
 
 let failures = 0;
@@ -328,6 +353,10 @@ const traffic = new RoadTraffic(
   },
 );
 traffic.setDaylightFactor(1);
+// The ego is the player: it gets the same seat in the coordinator's field that
+// `main.ts` gives him, so what this bench measures is the driver the game ships.
+const egoFieldSeat = { forwardS: EGO_START_S, direction: 1 as const };
+egoAutopilot.setTrafficField(traffic.fieldFor(egoFieldSeat, PLAYER_FIELD_ID));
 
 interface StreamCar {
   id: string;
@@ -418,6 +447,9 @@ interface Track {
   longestStopWhy: string;
   worstOffRoad: number;
   worstOffRoadWhy: string;
+  /** Latched: this body was thrown out of the geometry and stopped being a driver. */
+  ejected: boolean;
+  ejectedWhy: string;
   activitySeconds: Map<string, number>;
 }
 const tracks = new Map<string, Track>();
@@ -430,6 +462,9 @@ let nearMisses = 0;
 let crownExposureSeconds = 0;
 let minSameLaneGap = Infinity;
 let egoImpacts = 0;
+/** Contacts caused by a body the physics threw out of the world; see `sampleCar`. */
+let ejectedImpacts = 0;
+let streamImpacts = 0;
 const contacts: string[] = [];
 const passedTheLine = new Set<string>();
 const PASS_LINE_M = EGO_START_S + 1_500;
@@ -487,6 +522,8 @@ function trackOf(
       longestStopWhy: "",
       worstOffRoad: 0,
       worstOffRoadWhy: "",
+      ejected: false,
+      ejectedWhy: "",
       activitySeconds: new Map(),
     };
     tracks.set(id, track);
@@ -527,6 +564,31 @@ function sampleCar(
   const roadHeading = road.sampleAt(s).heading + (direction < 0 ? Math.PI : 0);
   const headingError = wrapAngle(bodyHeading(vehicle) - roadHeading);
   const activity = autopilot.activity;
+  // A BODY THROWN OUT OF THE GEOMETRY IS NOT A DRIVER, AND IT MUST NOT BE COUNTED AS
+  // ONE.
+  //
+  // Measured repeatedly on this bench: a car appears tens of metres off the road
+  // doing 85-330 km/h, `saw nothing`, activity `offroad`. The terrain collider runs to
+  // `PHYSICS_LATERAL` = 600 m, so this is a hole or a fold in the mesh rather than a
+  // missing surface, and the car did not drive there. What it then does is collide
+  // with everything it passes and sit inside other bodies: on seed 7 one such car
+  // turned 5 contacts into 9 and 0 near-miss ticks into 3421, and on seed 1337 the
+  // same defect moved the furthest excursion from 8 m to 34 m.
+  //
+  // Left in the totals, that swamps the numbers every decision here is read from —
+  // two opposite verdicts on the same change, on two seeds, both of them noise. So an
+  // ejected body is latched as such and reported on its own line. It is a real defect
+  // and stays visible; it is simply not a traffic-AI defect.
+  const offAsphalt = Math.abs(baseLateral) - road.halfWidthAt(s);
+  if (
+    !track.ejected &&
+    ((offAsphalt > EJECTED_LATERAL_M && speedKmh > EJECTED_SPEED_KMH) ||
+      speedKmh > IMPOSSIBLE_SPEED_KMH)
+  ) {
+    track.ejected = true;
+    track.ejectedWhy =
+      `${offAsphalt.toFixed(0)} m out at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
+  }
   // SETTLED IN ITS LANE, AS A LATCHED STATE.
   //
   // A manoeuvre releases the commanded line the moment its reason is behind the
@@ -637,25 +699,29 @@ function sampleCar(
   // fault, and the two share no code.
   const impact = vehicle.lastImpact;
   if (impact && impact.severityMps > 1.8) {
-    contacts.push(
-      `${id} (${style}, dir ${direction > 0 ? '+' : '-'}) ${activity} at ${speedKmh.toFixed(0)} km/h, ` +
-        `${impact.severityMps.toFixed(1)} m/s, lateral ${localLateral.toFixed(1)} m, s ${(s - START_S).toFixed(0)}` +
-        `, saw ${
-          autopilot.obstacleGap === Infinity
-            ? 'nothing'
-            : `${autopilot.obstacleGap.toFixed(0)} m at ${(autopilot.obstacleSpeed * 3.6).toFixed(0)} km/h`
-        }`,
-    );
-    const log = history.get(id);
-    if (log && log.length) {
-      contacts.push(`      before it: ${log.filter((_, i) => i % 20 === 0).join(' | ')}`);
+    if (track.ejected) ejectedImpacts++;
+    else streamImpacts++;
+    if (!track.ejected) {
+      contacts.push(
+        `${id} (${style}, dir ${direction > 0 ? '+' : '-'}) ${activity} at ${speedKmh.toFixed(0)} km/h, ` +
+          `${impact.severityMps.toFixed(1)} m/s, lateral ${localLateral.toFixed(1)} m, s ${(s - START_S).toFixed(0)}` +
+          `, saw ${
+            autopilot.obstacleGap === Infinity
+              ? 'nothing'
+              : `${autopilot.obstacleGap.toFixed(0)} m at ${(autopilot.obstacleSpeed * 3.6).toFixed(0)} km/h`
+          }`,
+      );
+      const log = history.get(id);
+      if (log && log.length) {
+        contacts.push(`      before it: ${log.filter((_, i) => i % 20 === 0).join(' | ')}`);
+      }
     }
   }
   // Off the asphalt, and by how much — with who and what they were doing, because one
-  // number cannot tell a wheel on the verge from a car out in the desert.
-  const pastEdge = Math.abs(baseLateral) - road.halfWidthAt(s);
-  if (pastEdge > track.worstOffRoad) {
-    track.worstOffRoad = pastEdge;
+  // number cannot tell a wheel on the verge from a car out in the desert. An ejected
+  // body's excursion is the ejection, not a driving decision, so it is not this.
+  if (!track.ejected && offAsphalt > track.worstOffRoad) {
+    track.worstOffRoad = offAsphalt;
     track.worstOffRoadWhy = `${activity} at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
   }
   speedByCarSecond.push(speedKmh);
@@ -671,7 +737,8 @@ async function tick(): Promise<void> {
   egoAutopilot.setLightingConditions(1, traffic.nearestOncomingDistance(egoS, 1));
   egoAutopilot.drive(FIXED_DT, ego, egoInput, 0, 0);
   ego.fixedUpdate(FIXED_DT, egoInput);
-  if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, 0, 0);
+  egoFieldSeat.forwardS = egoS;
+  if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   physics.step();
   ego.postStep();
   traffic.postStep();
@@ -717,12 +784,16 @@ async function run(seconds: number, record: boolean): Promise<void> {
     if (!(nearestAhead <= 300)) anyDirectionEmpty += FIXED_DT;
     if (!(nearestSameAhead <= 300)) sameDirectionEmpty += FIXED_DT;
     // Closest same-direction pair, bumper to bumper, over all pairs sharing a lane.
+    // An ejected body is not in a lane and not following anyone: it sits INSIDE other
+    // cars while the physics carries it, which reads as thousands of near-miss ticks
+    // and a negative bumper gap. Measured: 3421 ticks from one such body on seed 7.
     for (let a = 0; a < cars.length; a++) {
       const first = cars[a]!;
-      if (first.settleFor > 0) continue;
+      if (first.settleFor > 0 || tracks.get(first.id)?.ejected === true) continue;
       for (let b = a + 1; b < cars.length; b++) {
         const second = cars[b]!;
         if (second.settleFor > 0 || second.direction !== first.direction) continue;
+        if (tracks.get(second.id)?.ejected === true) continue;
         if (Math.abs(first.roadLateral - second.roadLateral) > 1.6) continue;
         const gap = Math.abs(first.forwardS - second.forwardS) - BODY_LENGTH_M;
         if (gap < minSameLaneGap) minSameLaneGap = gap;
@@ -748,6 +819,36 @@ function per(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!;
 }
+/**
+ * WHAT THE ROAD ITSELF ALLOWS HERE, and why the pace checks are relative to it.
+ *
+ * A fixed "the stream must average 60 km/h" measures the road, not the driver: on a
+ * stretch that is half graded gravel under a 0.6 decay, the controller's own straight
+ * -line factors cap an ordinary traffic car well below that, and no amount of traffic
+ * AI moves the number. So the reference is the controller's own ceiling — surface,
+ * wear, drifted sand and the bend — sampled along the measured stretch, with no
+ * traffic, no obstacle and no personality pace in it. `roadPaceCeiling` is exported
+ * from the autopilot for exactly this: a copy of those factors here would drift.
+ *
+ * `sleeper` is the mode the ambient stream's cautious and normal drivers use, which
+ * is two thirds of the cars; the ego is judged against `hurried`, which is its own.
+ */
+const paceReferenceCondition: RoadConditionBuffer = {
+  surface: SurfaceType.Asphalt,
+  decay: 0,
+  sandCover: 0,
+  markings: 1,
+};
+function roadAllows(mode: AutopilotMode): number {
+  const ceilings: number[] = [];
+  for (let s = EGO_START_S; s <= lastS; s += 50) {
+    road.conditionAt(s, paceReferenceCondition);
+    ceilings.push(roadPaceCeiling(mode, paceReferenceCondition, road.curvatureAt(s)) * 3.6);
+  }
+  return per(ceilings, 0.5);
+}
+const streamCeilingKmh = roadAllows('sleeper');
+const egoCeilingKmh = roadAllows('hurried');
 /** A car's own mean pace over its life: km/h of road actually covered. */
 const paceByCar = measured.map((t) => (t.progress / Math.max(t.seconds, 1e-3)) * 3.6);
 const holdKm = measured.reduce((sum, t) => sum + t.holdProgress, 0) / 1000;
@@ -806,7 +907,8 @@ console.log(
 console.log(
   `  pace/car, km/h: p10 ${per(paceByCar, 0.1).toFixed(0)}  p25 ${per(paceByCar, 0.25).toFixed(0)}` +
     `  median ${per(paceByCar, 0.5).toFixed(0)}  p75 ${per(paceByCar, 0.75).toFixed(0)}` +
-    `  p90 ${per(paceByCar, 0.9).toFixed(0)}`,
+    `  p90 ${per(paceByCar, 0.9).toFixed(0)}` +
+    `  (road allows ${streamCeilingKmh.toFixed(0)} sleeper / ${egoCeilingKmh.toFixed(0)} hurried)`,
 );
 for (const [style, list] of [...paceByStyle].sort()) {
   console.log(
@@ -821,10 +923,22 @@ console.log(
     ` ${((anyDirectionEmpty / measuredSeconds) * 100).toFixed(0)}% either`,
 );
 console.log(
-  `  conflict:  ${traffic.status.impacts} stream contacts, ${egoImpacts} ego contacts, ` +
+  `  conflict:  ${streamImpacts} stream contacts, ${egoImpacts} ego contacts, ` +
     `${nearMisses} near-miss car-ticks, closest same-lane gap ${minSameLaneGap.toFixed(1)} m, ` +
     `${traffic.status.passes} passes, crown time ${(crownExposureSeconds / Math.max(carSeconds, 1e-3) * 100).toFixed(1)}%`,
 );
+{
+  const ejected = [...tracks.values()].filter((t) => t.ejected);
+  console.log(
+    `  ejected:   ${ejected.length} bodies thrown out of the geometry` +
+      (ejected.length === 0
+        ? ''
+        : `, ${ejectedImpacts} contacts from them  (${ejected
+            .slice(0, 3)
+            .map((t) => `${t.id} ${t.ejectedWhy}`)
+            .join('; ')})`),
+  );
+}
 console.log(
   `  progress:  longest stop ${longestStop.toFixed(1)} s, ` +
     `${(crawlShare * 100).toFixed(1)}% of car-time under ${CRAWL_KMH} km/h, ` +
@@ -902,52 +1016,107 @@ if (TRACE) {
 }
 
 // ---------------------------------------------------------------- the properties
+//
+// Two sets, because `--solo` is a different measurement. With no stream there is no
+// pace distribution, no contact between two cars and no queue, so asking those
+// questions of an empty road produced four guaranteed failures and a diagnostic run
+// that always looked broken. What `--solo` does measure is the single driver, and
+// that is what it is judged on.
+const egoPaceKmh = (egoTrack.progress / Math.max(egoTrack.seconds, 1e-3)) * 3.6;
+const egoWeavePerKm =
+  egoTrack.weave.count / Math.max(egoTrack.holdProgress / 1000, 1e-3);
+const egoLaneRms = Math.sqrt(egoTrack.holdSumErrSq / Math.max(egoTrack.holdSamples, 1));
+/**
+ * Shares of the road's own ceiling. Measured on seed 1337 before any of this
+ * campaign's fixes: the stream ran at 37 km/h against a 56 km/h ceiling (0.66) and the
+ * ego at 38 against 72 (0.53), while the SAME ego alone on the SAME stretch made 73
+ * (1.01). So the ceiling is reachable and these are not aspirational numbers; they are
+ * the gap traffic interaction currently costs.
+ */
+const STREAM_PACE_SHARE = 0.8;
+const EGO_PACE_SHARE = 0.85;
+/** And the spread a live stream needs, as a share of the same ceiling. */
+const STREAM_SPREAD_SHARE = 0.25;
 console.log('');
 check(
-  'cars hold their line',
-  weavePerKm <= 4,
-  `${weavePerKm.toFixed(1)} weaves/km, lane error RMS ${laneErrRms.toFixed(2)} m`,
+  'the driver holds its line',
+  (SOLO ? egoWeavePerKm : weavePerKm) <= 3 &&
+    (SOLO ? egoLaneRms : laneErrRms) <= 0.15,
+  `${(SOLO ? egoWeavePerKm : weavePerKm).toFixed(1)} weaves/km, ` +
+    `lane error RMS ${(SOLO ? egoLaneRms : laneErrRms).toFixed(2)} m`,
 );
 check(
   'the line the planner asks for is steady',
-  churnPerKm <= 6,
-  `${churnPerKm.toFixed(1)} commanded-line reversals/km`,
+  (SOLO
+    ? egoTrack.lineChurn.count / Math.max(egoTrack.progress / 1000, 1e-3)
+    : churnPerKm) <= 6,
+  `${(SOLO ? egoTrack.lineChurn.count / Math.max(egoTrack.progress / 1000, 1e-3) : churnPerKm).toFixed(1)} commanded-line reversals/km`,
 );
-check('the stream is not slow', per(paceByCar, 0.5) >= 60, `median ${per(paceByCar, 0.5).toFixed(0)} km/h`);
-check(
-  'the stream is not one speed',
-  per(paceByCar, 0.75) - per(paceByCar, 0.25) >= 15,
-  `p75-p25 ${(per(paceByCar, 0.75) - per(paceByCar, 0.25)).toFixed(0)} km/h`,
-);
-check(
-  'traffic meets traffic without contact',
-  traffic.status.impacts === 0 && egoImpacts === 0,
-  `${traffic.status.impacts} stream, ${egoImpacts} ego`,
-);
-check(
-  'nobody is left standing',
-  longestStop <= 20 && crawlShare <= 0.05,
-  `longest stop ${longestStop.toFixed(1)} s, ${(crawlShare * 100).toFixed(1)}% crawling`,
-);
-check(
-  'the stream stays on the asphalt',
-  worstOffRoad <= 0.8,
-  `furthest past the edge ${worstOffRoad.toFixed(2)} m`,
-);
-check(
-  'the road ahead is populated',
-  sameDirectionEmpty / measuredSeconds <= 0.35,
-  `empty ${((sameDirectionEmpty / measuredSeconds) * 100).toFixed(0)}% of the run`,
-);
-check(
-  'the stream is more than one kind of car',
-  models.size >= 6 && styles.size >= 3,
-  `${models.size} models, ${styles.size} styles`,
-);
+if (!SOLO) {
+  check(
+    'the stream keeps up with the road',
+    per(paceByCar, 0.5) >= STREAM_PACE_SHARE * streamCeilingKmh,
+    `median ${per(paceByCar, 0.5).toFixed(0)} km/h of the ${streamCeilingKmh.toFixed(0)} this road allows ` +
+      `(${((per(paceByCar, 0.5) / Math.max(streamCeilingKmh, 1e-3)) * 100).toFixed(0)}%)`,
+  );
+  check(
+    'the stream is not one speed',
+    per(paceByCar, 0.75) - per(paceByCar, 0.25) >= STREAM_SPREAD_SHARE * streamCeilingKmh,
+    `p75-p25 ${(per(paceByCar, 0.75) - per(paceByCar, 0.25)).toFixed(0)} km/h of ${streamCeilingKmh.toFixed(0)}`,
+  );
+  check(
+    'traffic meets traffic without contact',
+    streamImpacts === 0 && egoImpacts === 0,
+    `${streamImpacts} stream, ${egoImpacts} ego`,
+  );
+  check(
+    'nobody is left standing',
+    longestStop <= 20 && crawlShare <= 0.05,
+    `longest stop ${longestStop.toFixed(1)} s, ${(crawlShare * 100).toFixed(1)}% crawling`,
+  );
+  check(
+    'the stream stays on the asphalt',
+    worstOffRoad <= 0.8,
+    `furthest past the edge ${worstOffRoad.toFixed(2)} m`,
+  );
+  check(
+    'the physics keeps every body on the world',
+    [...tracks.values()].every((t) => !t.ejected),
+    `${[...tracks.values()].filter((t) => t.ejected).length} ejected, ` +
+      `${ejectedImpacts} contacts from them`,
+  );
+  check(
+    'the road ahead is populated',
+    sameDirectionEmpty / measuredSeconds <= 0.35,
+    `empty ${((sameDirectionEmpty / measuredSeconds) * 100).toFixed(0)}% of the run`,
+  );
+  check(
+    'the stream is more than one kind of car',
+    models.size >= 6 && styles.size >= 3,
+    `${models.size} models, ${styles.size} styles`,
+  );
+} else {
+  check(
+    'the lone driver hits nothing',
+    egoImpacts === 0,
+    `${egoImpacts} ego contacts`,
+  );
+  check(
+    'the lone driver stays on the asphalt',
+    egoTrack.worstOffRoad <= 0.8,
+    `furthest past the edge ${egoTrack.worstOffRoad.toFixed(2)} m`,
+  );
+  check(
+    'the lone driver never stands still',
+    egoTrack.longestStop <= 5,
+    `longest stop ${egoTrack.longestStop.toFixed(1)} s`,
+  );
+}
 check(
   'the ego driver gets down the road',
-  (egoTrack.progress / Math.max(egoTrack.seconds, 1e-3)) * 3.6 >= 55,
-  `${((egoTrack.progress / Math.max(egoTrack.seconds, 1e-3)) * 3.6).toFixed(0)} km/h over ${(egoTrack.progress / 1000).toFixed(1)} km`,
+  egoPaceKmh >= EGO_PACE_SHARE * egoCeilingKmh,
+  `${egoPaceKmh.toFixed(0)} km/h of the ${egoCeilingKmh.toFixed(0)} this road allows, ` +
+    `over ${(egoTrack.progress / 1000).toFixed(1)} km`,
 );
 
 console.log('');
