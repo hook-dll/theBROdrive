@@ -197,6 +197,8 @@ interface TrafficCar {
   readonly style: TrafficDriverStyle;
   readonly headwayS: number;
   readonly speedCap: number;
+  /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
+  readonly pace: number;
   roadLateral: number;
   readonly input: InputFrame;
   forwardS: number;
@@ -234,6 +236,8 @@ interface PendingSpawn {
   readonly headwayS: number;
   readonly mode: AutopilotMode;
   readonly speedCap: number;
+  /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
+  readonly pace: number;
   readonly lane: number;
   readonly rear: boolean;
 }
@@ -874,6 +878,7 @@ export class RoadTraffic {
       headwayS: driver.headwayS,
       mode: driver.mode,
       speedCap: driver.speedCap,
+      pace: driver.pace,
       lane: spawn.lane,
       rear: spawn.s < this.playerS,
     };
@@ -979,6 +984,7 @@ export class RoadTraffic {
     autopilot.setFollowingHeadway(request.headwayS);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
+    autopilot.setPace(request.pace);
     autopilot.setTrafficRecoveryPolicy(true);
     autopilot.setLowBeamsAlwaysOn(true);
     autopilot.requestLane(
@@ -994,6 +1000,7 @@ export class RoadTraffic {
       headwayS: request.headwayS,
       roadLateral: forwardLateral,
       speedCap: request.speedCap,
+      pace: request.pace,
       spawnS: request.forwardS,
       autopilot,
       input: emptyInput(),
@@ -1123,30 +1130,26 @@ export class RoadTraffic {
    *
    * WHY THESE SPEEDS.
    *
-   * A cap is the pace on CLEAN asphalt, and this road has almost none: measured on
-   * seed 1337 it is 50% cracked asphalt, 46% graded gravel and 4% clean, and the
-   * autopilot's surface factor scales the cap by the surface it is on. The old caps
-   * — 42-52, 58-70, 85-105 — therefore put ordinary traffic on a 26-31 km/h target
-   * over nearly half the drive, and the pedal law held it under 25. That is the
-   * Zhiguli the player watched creep up a hill.
+   * A CAP IN KM/H IS NOT A CHARACTER, because on this road it never binds.
    *
-   * The spread matters as much as the middle: an overtake is only an overtake if the
-   * differential survives being multiplied by the surface. An ordinary car and a
-   * hurried one used to differ by 15-47 km/h on clean asphalt but only by 12-21 on
-   * gravel — from a 26-31 km/h base, so a pass was two cars crawling side by side,
-   * which is what read as easing round rather than going past. They now sit at
-   * 46 and 61 km/h on gravel and 74 and 97 on cracked asphalt, so the same
-   * differential is spent from a pace where the manoeuvre is over in seconds.
+   * Measured on seed 1337 at s 40 000: the surface is 81% cracked asphalt and 19%
+   * gravel with a mean decay of 0.6, and the autopilot's own surface and condition
+   * factors hold the careful mode to 57 km/h and the hurried one to 75 whatever cap
+   * it is given. The three characters were capped at 58-70, 72-84 and 95-115, so not
+   * one of the three caps ever bound: the cautious and the ordinary driver share a
+   * mode and therefore drove at exactly the same speed, and the whole stream's pace
+   * spread came out at 10 km/h — a road of identical cars.
    *
-   * A cap above its mode's own cruise does nothing — the planner takes the lower of
-   * the two — so the top of each band is deliberately just past the ceiling it draws
-   * against (sleeper 80, hurried 105) rather than far past it.
+   * `setPace` is a fraction of what the mode would do on the road it is actually on,
+   * so it binds everywhere: on clean asphalt, on gravel, uphill. The cap stays as an
+   * absolute ceiling for the few stretches good enough for one to matter.
    */
   private drawDriver(direction: TrafficDirection): {
     style: TrafficDriverStyle;
     headwayS: number;
     mode: AutopilotMode;
     speedCap: number;
+    pace: number;
   } {
     const directionCount = this.carList.reduce(
       (count, car) => count + Number(car.direction === direction),
@@ -1159,6 +1162,7 @@ export class RoadTraffic {
         headwayS: 2.2 + this.random() * 0.8,
         mode: 'sleeper',
         speedCap: (58 + this.random() * 12) / 3.6,
+        pace: 0.68 + this.random() * 0.1,
       };
     }
     // One car in five is in a hurry, and it drives the HURRIED mode, not frantic:
@@ -1171,6 +1175,7 @@ export class RoadTraffic {
         headwayS: 1.0 + this.random() * 0.6,
         mode: 'hurried',
         speedCap: (95 + this.random() * 20) / 3.6,
+        pace: 0.94 + this.random() * 0.06,
       };
     }
     return {
@@ -1178,6 +1183,7 @@ export class RoadTraffic {
       headwayS: 1.5 + this.random() * 0.9,
       mode: 'sleeper',
       speedCap: (72 + this.random() * 12) / 3.6,
+      pace: 0.9 + this.random() * 0.1,
     };
   }
   /**

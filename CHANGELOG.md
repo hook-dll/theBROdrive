@@ -4,25 +4,34 @@
 
 ### Added
 
-- `tools/traffic-road.ts` MEASURES THE STREAM ON A REAL STRETCH OF THE REAL ROAD. Every
-  existing traffic bench builds its cars against an EMPTY hazard index, because each of
-  those checks wants one controlled thing in front of the car — the right shape for
-  plumbing, and the wrong shape for behaviour, because the complaints about traffic are
-  about a road with real props on it, real districts under it and other cars around it.
-  This drives the real `Terrain`, the real ribbon surfaces and the real `ScatterProvider`
-  output over 20 minutes of the road at the seed's own districts, and asks the five
-  questions a player asks: does it hold a line, is it moving, does it get where it is
-  going, does it hit things, and is it a road or a conveyor.
-- Its first run over seed 1337 is also the specification for the autopilot refactor, and
-  it fails three of its seven properties as things stand. Measured over 20 minutes at
-  90 km/h: 33.0 commanded-line direction reversals per kilometre while merely FOLLOWING —
-  one every two seconds, which is the "cars darting between lanes" a player sees — a
-  median speed of 45 km/h against stream speed caps of 58-105, and 39 contacts between
-  traffic cars in 19 car-km. Cars also reached 5.5 m past the asphalt edge, which is
-  outside the ribbon the bench builds. It passes on not being one speed (a 23 km/h p75-p25
-  spread), on leaving nothing standing (longest stop 2.9 s), on keeping the road populated
-  (same-direction road empty 18% of the run) and on variety (20 models, 3 character draws).
-
+- `tools/traffic-road.ts` MEASURES THE STREAM ON A REAL STRETCH OF THE REAL ROAD, WITH A
+  CAR IN IT. It drives the shipped `RoadMeshProvider`, `TerrainMeshProvider` and
+  `ScatterProvider` over a real seed's own districts, puts an EGO car — a real `Vehicle`
+  under a real `Autopilot`, fed the same oncoming-distance the game feeds the player's —
+  into the stream, and asks the questions a player asks: does a car hold its line, is the
+  stream moving, is it more than one speed, does it hit things, does it jam, does it stay
+  on the asphalt.
+- IT REPLACES A BENCH WHOSE NUMBERS COULD NOT BE READ, and all three faults decided the
+  answers. It laid its own asphalt — one flat ribbon tagged `Asphalt` edge to edge with
+  nothing beyond it — so the sand shoulder had asphalt grip and going round a boulder was
+  free, while cars that left the ribbon fell into the void and were thrown back out at
+  315 km/h, scored as autopilot excursions. Its distance accumulated SIGNED arclength, so
+  oncoming traffic subtracted from same-direction traffic and twenty minutes of stream
+  came out as 14 car-km. And it counted direction reversals of the commanded line with a
+  0.1 mm deadband, which answers "does this number ever go the other way" rather than
+  "does the car wobble": measured against two controllers, one moved the line in 2.9 m
+  lunges and scored 16 reversals/km while the other made 0.16 m corrections and scored
+  226 — with LESS total line travel.
+- WHAT IT MEASURES NOW. Weave is peak-to-peak excursion of the body against its own lane
+  centre, counted only once the driver has been settled in that lane for 1.5 seconds, so
+  the tail of a manoeuvre is not charged to lane keeping. Pace is each car's own mean over
+  its life, so one stopped car cannot outvote a moving stream with sixty samples a second.
+  A standstill under 2 km/h is reported separately from a queue crawl under 8, with the
+  reason attached: what the driver was doing, what it saw, whether it had a corridor,
+  whether it was allowed across the crown and how long it had been giving way. Contacts
+  are logged individually with speed and lateral, which is what turns "the stream crashes"
+  into "two opposing cars both left their lane and met". `--solo` runs the same stretch
+  with no stream at all, so the difference between two runs is exactly what traffic adds.
 
 - `/?road-lab`, A LABORATORY FOR THE ONE SURFACE YOU CANNOT GO AND LOOK AT. The road's
   detail lives at the 1-30 cm scale, its tile repeats every 24 m, and the stretch worth
@@ -54,6 +63,152 @@
   re-centred on that point every frame and drawn `BackSide`, so the sky rendered as nothing.
 
 ### Changed
+
+- A CAR IN THE NEXT LANE IS A BODY, NOT JUST A DIRECTION. The planner already refused to
+  steer TOWARD a neighbour, but it judged the destination alone — and a line on the far
+  side of that car is further from it than the lane the driver is in, so it read as
+  moving away and was allowed. The result was the opposite of the rule: the search
+  refused the occupied lane, walked outward, and settled on the sand BEYOND it, and the
+  rate-limited line then dragged the body straight over the car it had just refused to
+  touch. Measured on the side-by-side bench, a commanded line 7.0 m out with a
+  neighbour at 4.35 m and 1.54 m between two bodies while level; now 2.68 m and the
+  driver simply holds its lane. The test is the closest the body comes to that car
+  anywhere on the way to the line, which is zero when it has to be driven through.
+- IT APPLIES ONLY WHILE THE BODIES ACTUALLY OVERLAP ALONG THE ROAD. The abeam window
+  reaches a car length or two either way on purpose, because "do not steer toward it"
+  is right for a car in the next lane a few metres ahead as well as for one at the
+  door; "do not steer THROUGH it" is not, and the wide version closed the shoulder at
+  exactly the moment a queue needs it — the longest standstill on the real road went
+  from 18 to 55 seconds and the crawl from 5% to 22%.
+- A MANOEUVRE LATCH WHOSE THRESHOLDS BOTH FACE THE SAME WAY IS NOT HYSTERESIS. Leaving
+  the lane took a blocker within 45 m; calling the manoeuvre finished took the lane
+  clear for 40. A blocker between the two satisfies both at once, so the latch flipped
+  on every single fixed step: measured on the overtake bench, eighty indicator changes
+  in one manoeuvre and the commanded line buzzing between the lane and the crossing at
+  60 Hz for 1.2 s, all of it while the car was still 45 m behind the one it meant to
+  pass. Now six changes, and 26% less line travel per kilometre on the littered road.
+- AN ESCAPE CHOOSES ITS SIDE WHEN IT STARTS, NOT WHEN IT ENDS. The recovery bias was
+  set on the last tick of the pull-out, so for the whole reverse and the whole pull-out
+  the commanded line was dragged back to the lane centre and the manoeuvre finished
+  aimed at the prop it had just backed away from — with the entire offset still to
+  cover at 0.5 m/s while already rolling towards it. Measured on the wedged-on-road
+  bench: the first escape left the car 3.4 m short of a prop needing 2.8 m of line, it
+  managed 2.1, wedged again, and only the second escape — which inherited the bias from
+  the first — got round. Now one attempt, 157 m covered instead of 78.
+- "MY BUMPER IS AGAINST IT" IS BODIES OVERLAPPING, NOT A DISTANCE ALONG THE ROAD. The
+  one-second wedge confirmation read its distance from the scan that looks for props
+  NEAR THE LINE, whose reach carries the avoidance margin — so a car easing round a rock
+  on exactly the line that clears it was counted as leaning on it for the whole pass.
+  Measured: a squeeze past with 6 cm of clearance at 1.0 m/s, sent into a second
+  reversing manoeuvre one second later. Contact is now its own measurement, without the
+  margin.
+- WHAT THE FOUR ABOVE DID TO THE REAL ROAD, over six seeds, four minutes each: car-ticks
+  spent closer than a safe gap fell from 17,854 to 1,201 and fell on every seed;
+  contacts from 67 to 57; the worst standstill on seed 1337 from 129.8 s to 18.4 and its
+  crawl from 27.9% to 4.3%, on 545124 from 44.9 s to 0.8 and 6.0% to 1.9%. Seeds 7 and
+  20461 went the other way on jams (1.6 s to 15.9, 3.2 s to 18.2) while their contacts
+  and near-misses improved; removing any ONE of the four makes seed 7's contacts worse,
+  so that regression is an interaction and is written up in `autopilot_current.md` §15
+  rather than tuned away.
+- `tools/traffic-road.ts --trace` NOW PRINTS THE SIX SECONDS BEFORE EVERY CONTACT. A
+  contact line says two cars touched; only the history says whether the driver tracked
+  the other one all the way in and never lifted, never saw it at all, or was in a lane
+  the other one then moved into — three different defects sharing no code. It is what
+  identified the largest remaining one: `ln-1.4 -> ln-4.0` with `blk43 -> blk-` on a
+  single step, a driver moving out to pass, and the car it was passing merging into the
+  same lane five seconds later.
+- THE OPPOSING LANE IS NOW THE LAST RESORT IT IS SUPPOSED TO BE, AND A BYPASS IS A
+  CALCULATION RATHER THAN A CRAWL. Measured on the real road before this: 10.6% of all
+  car-time was spent past the centreline, and every contact in the run was a pair of
+  opposing cars that had each left their lane and met head-on, with the queues behind
+  them standing for up to a minute. Six rules, each of which was a separate failure:
+  - A second lane on the driver's own side makes the crown pointless, so it is refused
+    outright: overtakes and detours both happen inside the driver's own carriageway when
+    one exists. That second lane is now open to ANY driver whose own lane is blocked,
+    not only to the one shopping for pace — and every lane that is a candidate is
+    probed, because the first version of this change had drivers merging into traffic
+    they had never looked at.
+  - The crossing is timed at the speed it will really be driven. It used to be sized on
+    the driver's INTENDED speed while the speed plan eased past the stopped thing at
+    walking pace: a three-second commitment that took fifteen, with the oncoming car it
+    had measured 150 m of room against arriving halfway through.
+  - At an obstruction that blocks both lanes the room rule is symmetric and refused
+    both drivers, so the road stopped. The tie is now broken by geometry both cars can
+    measure alone — `oncomingGap - ownLaneBlock` is how far the other still has to come
+    to the same thing — so the nearer one goes and the further one waits.
+  - The rearward check on the opposing lane now asks whether anything is COMING, not
+    merely whether anything is there. A stationary bumper twenty metres back is not a
+    car overtaking into the gap, and while it counted as one two stopped queues locked
+    each other out permanently: measured, 264 seconds of standstill with the way past
+    open the whole time.
+  - A manoeuvre on the wrong side of the road is no longer latched: it survives only
+    while the gate still allows it, and once abandoned it is not retried for 60 m, or
+    the gate's answer flickering turns into the indicator flickering.
+  - Waiting for a gap is not being stuck. A driver held at an obstruction by oncoming
+    traffic used to be read as wedged and started a two-point turn across the
+    carriageway in front of the traffic it was waiting for — 8% of all car-time in
+    recovery. The patience is bounded, so a wait that never ends still escalates.
+- A CAR IN THE CORRIDOR IS A REASON TO SLOW DOWN, NEVER A REASON TO CONCLUDE THE ROAD IS
+  CLOSED. Feasibility now counts only what cannot drive away (`CorridorObstacle.movable`).
+  While a stopped car closed a corridor, every driver behind a stopped head found no way
+  through, decided it was wedged, and began reversing — a queue turning itself into a
+  pile of three-point turns.
+- GOING ROUND A LOG IS SLOWING TO THE SPEED IT FITS AT, NOT CREEPING PAST AT 3.5 m/s.
+  Shifting `Δ` metres sideways over `d` metres of road is two constant-lateral-acceleration
+  arcs, so `v = d/2 · sqrt(a/Δ)` — enormous far out, closing smoothly as the car
+  approaches, which is a driver lifting off. `a` is a SHARE of the cornering budget and
+  the bend is planned on what is left, because one set of tyres cannot spend the whole
+  budget twice: an obstruction on a downhill bend was otherwise gone round at exactly the
+  speed that leaves the road. The braking for it uses the capped obstacle pedal, not the
+  mode's full ceiling for a bend.
+- EVERYBODY SEES THE LOG, NOT ONLY THE LANE IT IS LYING IN. Hazards are indexed in the
+  road frame, so a driver in the clear lane already knows which car is going to have to
+  come across; it now lifts off and lets it in. Only the clear lane yields, so two
+  drivers cannot both wait for each other.
+- AN ESCAPE MANOEUVRE STAYS ON THE ASPHALT. The recovery bias was clamped to 1.2 m past
+  the paint, which on the real terrain is sand: the manoeuvre for getting unstuck drove
+  cars into the thing that gets them stuck.
+- A DRIVER'S CHARACTER IS A FRACTION OF THE ROAD'S OWN PACE, NOT A SPEED IN KM/H
+  (`Autopilot.setPace`). On seed 1337 the surface holds the careful mode to 57 km/h and
+  the hurried one to 75 whatever cap they are given, and the stream's three characters
+  were capped at 58-70, 72-84 and 95-115 — so no cap ever bound, the cautious and the
+  ordinary driver share a mode and drove at identical speeds, and the whole stream's
+  pace spread was 10 km/h.
+- MEASURED ON SEVEN SEEDS, four of them drawn at random after the work was done, against
+  the same bench before the change. Contacts across the set fall from 101 between stream
+  cars and 15 involving the ego to 58 and 7; the longest standstill improves on five of
+  the seven, and the share of car-time below walking pace on five. Per seed, before to
+  after: 1337 21+12 contacts, 59.9 s, 29.1% crawling to 12+2, 4.7 s, 4.6%; 7 6+1, 18.0 s,
+  6.5% to 2+1, 1.7 s, 4.1%; 99 0+0, 6.5 s, 3.3% to 4+1, 4.5 s, 6.0%; 545124 53+0, 18.4 s,
+  12.5% to 30+0, 21.0 s, 12.3%; 594920 7+0, 6.8 s, 5.2% to 8+2, 1.0 s, 2.2%; 759465 4+1,
+  1.0 s, 1.9% to 2+1, 0.9 s, 3.6%; 247558 10+1, 15.9 s, 12.8% to 0+0, 1.0 s, 2.3%. Time
+  spent past the centreline falls from 8.3/4.2/7.9% to 2.7/1.1/2.8% on the fixed seeds.
+- Fixing the same three seeds over and over is how the first attempt at this work
+  produced a change set that improved one seed and made two others worse; the seeds are
+  drawn at random now.
+- THE BENCH SPAWNED ITS OWN CAR INSIDE THE ROAD. It placed the ego at the height
+  `Road.offsetPoint` returns — the spine — while the slab its wheels rest on is
+  `roadSurfaceY`, which adds the crown, the camber and the surface's own bumps. Where
+  that is higher, the car starts inside the mesh and Rapier pins it. On seed 545124 the
+  ego sat on its own lane centre with a clear corridor and nothing in front of it for the
+  whole four-minute run, and the stream piling up around a permanently stopped player was
+  scored as thirty contacts and a jam. With the car spawned on the collider it drives:
+  38 km/h over 2.5 km, 23 contacts, 6.0% of car-time crawling instead of 12.3%, and 23
+  cars past the arclength instead of none. The ego's start is also moved off any indexed
+  hazard, the way the stream validates its own spawns.
+- WHAT IS LEFT, MEASURED: same-direction rear-ends while FOLLOWING. On seeds with no
+  overtakes at all the stream still logs 20-30 contacts in four minutes, every one a pair
+  four to five metres apart, both drivers in `follow`, at 27-40 km/h. It is pre-existing
+  and seed-dependent — seed 790944 goes 34+5 contacts to 21+2 with this work, seed 559316
+  goes 16+5 to 30+2 — and it is a different investigation from this one: the follow rule,
+  the lead-speed estimate and the half-pedal cap on braking for something in the way.
+  Across every seed measured the ego's own contacts fall from 27 to 14.
+- KNOWN REGRESSIONS, all in `autopilot-bench.ts`'s synthetic multi-lane scenarios and all
+  without contacts: an overtake now toggles its indicator 80 times where it toggled 6, and
+  a driver passing a car in the next lane keeps 1.54 m of lateral gap where it kept 2.90.
+  Both follow from the crown being closed on a wide road, which is the intended change;
+  the clearance while level is the thing to fix next. `a car wedged against a prop on the
+  road gets itself out` was already failing before this work.
 
 - THE LOOSE-SURFACE SPEED LIMIT IS NOW A PROPERTY OF THE DRIVER, NOT OF THE ROAD. The
   table read 0.50 for gravel and 0.45 for rock, against longitudinal grip coefficients of

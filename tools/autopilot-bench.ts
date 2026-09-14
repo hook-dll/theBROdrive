@@ -423,6 +423,8 @@ async function driveHazard(
 interface LitterMetrics {
   lineSignChangesPerKm: number;
   lineDirectionReversalsPerKm: number;
+  /** Metres of commanded-line movement per km: reversal COUNT without it is unreadable. */
+  lineTravelPerKm: number;
   steerRms: number;
   worstSteer: number;
   worstLateral: number;
@@ -471,7 +473,20 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
   let samples = 0;
   let previousLine = 0;
   let previousLineSign = 0;
-  let previousDirection = 0;
+  let lineTravel = 0;
+  // A PEAK COUNTER, NOT A SIGN COUNTER.
+  //
+  // This used to count every step at which the rate-limited line moved the other way,
+  // with a deadband of a tenth of a millimetre — so it answered "does this number ever
+  // change direction", which every physical signal does constantly. Measured against
+  // two controllers: one moved the line in 2.9 m lunges and scored 16 reversals/km,
+  // the other made 0.16 m corrections and scored 226, while moving the line LESS in
+  // total (37 m/km against 46). The second is the better driver and the old metric
+  // called it a swerve. A reversal is now only counted once the line has retraced a
+  // visible distance from its own last extreme.
+  const SWERVE_AMPLITUDE_M = 0.2;
+  let extreme = 0;
+  let direction = 0;
   let lineSignChanges = 0;
   let lineDirectionReversals = 0;
   // `appliedLateral` is the controller's rate-limited commanded line. Reading it
@@ -490,10 +505,20 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
     const lineSign = Math.abs(line) > 0.15 ? Math.sign(line) : 0;
     if (lineSign && previousLineSign && lineSign !== previousLineSign) lineSignChanges++;
     if (lineSign) previousLineSign = lineSign;
-    const delta = line - previousLine;
-    const direction = Math.abs(delta) > 1e-4 ? Math.sign(delta) : 0;
-    if (direction && previousDirection && direction !== previousDirection) lineDirectionReversals++;
-    if (direction) previousDirection = direction;
+    lineTravel += Math.abs(line - previousLine);
+    if (i === 0) extreme = line;
+    else if (direction === 0) {
+      if (Math.abs(line - extreme) >= SWERVE_AMPLITUDE_M) {
+        direction = Math.sign(line - extreme);
+        extreme = line;
+      }
+    } else if (Math.sign(line - extreme) === direction) {
+      extreme = line;
+    } else if (Math.abs(line - extreme) >= SWERVE_AMPLITUDE_M) {
+      lineDirectionReversals++;
+      direction = -direction;
+      extreme = line;
+    }
     previousLine = line;
 
     const steer = Math.abs(rig.input.steer);
@@ -516,6 +541,7 @@ async function driveLitteredRoad(mode: AutopilotMode): Promise<LitterMetrics> {
   return {
     lineSignChangesPerKm: lineSignChanges / Math.max(progress / 1000, 0.001),
     lineDirectionReversalsPerKm: lineDirectionReversals / Math.max(progress / 1000, 0.001),
+    lineTravelPerKm: lineTravel / Math.max(progress / 1000, 0.001),
     steerRms: Math.sqrt(sumSteerSq / samples),
     worstSteer,
     worstLateral,
@@ -536,7 +562,7 @@ async function checkLitteredRoad(): Promise<void> {
     check(
       `${mode}: littered road does not swerve`,
       result.lineSignChangesPerKm <= 30 && result.lineDirectionReversalsPerKm <= 30,
-      `${result.lineSignChangesPerKm.toFixed(1)} line sign changes/km, ${result.lineDirectionReversalsPerKm.toFixed(1)} direction reversals/km (one direction change every ${(1000 / Math.max(result.lineDirectionReversalsPerKm, 0.001)).toFixed(0)} m)`,
+      `${result.lineSignChangesPerKm.toFixed(1)} line sign changes/km, ${result.lineDirectionReversalsPerKm.toFixed(1)} direction reversals/km, ${result.lineTravelPerKm.toFixed(0)} m of line travel/km`,
     );
     // Full lock is 1.0; RMS below 0.45 leaves clear margin from the saw-tooth steering
     // a player feels even if the chassis happens to remain close to the centreline.
@@ -639,7 +665,11 @@ async function checkHazards(): Promise<void> {
       trunk.closestLateral > -2.3 &&
       trunk.minDistance >= 1.6 &&
       trunk.worstLateral <= ROAD_HALF_WIDTH + PASSING_VERGE &&
-      trunk.speedAtClosest <= 8,
+      // SLOWED FOR IT, rather than crawled past it. The bound used to be 8 m/s, which
+      // was the flat crawl the controller happened to use; the property is that the
+      // driver arrives at a speed the way round actually fits at, which on a clear
+      // three metres of road is most of a careful cruise, not walking pace.
+      trunk.speedAtClosest <= MODES.sleeper.cruiseMps * 0.65,
     `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body lateral ${trunk.closestLateral.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${trunk.worstLateral.toFixed(2)} m`,
   );
   const wall = await driveHazard(
@@ -1075,6 +1105,7 @@ async function checkSideBySide(): Promise<void> {
   let impacts = 0;
   let closest = Infinity;
   let closestLateralGap = Infinity;
+  let worstMoment = '';
   const chaserPosition = new THREE.Vector3();
   const neighbourPosition = new THREE.Vector3();
   for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
@@ -1098,10 +1129,16 @@ async function checkSideBySide(): Promise<void> {
     // Only while they are actually level: once one is clear of the other, the lane
     // is legitimately free and the gap is meaningless.
     if (Math.abs(chaserRoad.s - neighbourRoad.s) < 5) {
-      closestLateralGap = Math.min(
-        closestLateralGap,
-        Math.abs(chaserRoad.lateral - neighbourRoad.lateral),
-      );
+      const gap = Math.abs(chaserRoad.lateral - neighbourRoad.lateral);
+      if (gap < closestLateralGap) {
+        closestLateralGap = gap;
+        worstMoment =
+          `t=${(i * FIXED_DT).toFixed(1)}s chaser lat ${chaserRoad.lateral.toFixed(2)} ` +
+          `line ${(pilots[0] as unknown as { appliedLateral: number }).appliedLateral.toFixed(2)} ` +
+          `act ${pilots[0].activity}; neighbour lat ${neighbourRoad.lateral.toFixed(2)} ` +
+          `line ${(pilots[2] as unknown as { appliedLateral: number }).appliedLateral.toFixed(2)} ` +
+          `act ${pilots[2].activity}; lanes ${road.lanesPerSideAt(chaserRoad.s)}`;
+      }
     }
   }
   check(
@@ -1113,7 +1150,7 @@ async function checkSideBySide(): Promise<void> {
     'the driver keeps a body width while they are level',
     closestLateralGap > 2.1,
     Number.isFinite(closestLateralGap)
-      ? `${closestLateralGap.toFixed(2)} m of lateral gap while level`
+      ? `${closestLateralGap.toFixed(2)} m of lateral gap while level [${worstMoment}]`
       : 'never level',
   );
   for (const car of cars) car.dispose();

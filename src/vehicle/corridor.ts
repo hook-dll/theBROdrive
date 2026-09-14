@@ -48,6 +48,32 @@ export interface CorridorObstacle {
    * move in, so it is priced nowhere and only ever vetoes steering toward it.
    */
   readonly abeam?: boolean;
+  /**
+   * And of those, the ones whose BODIES actually overlap ours along the road.
+   *
+   * The abeam window is deliberately generous — it reaches a car length or two
+   * either way — because "do not steer toward it" is the right answer for a car in
+   * the next lane a few metres ahead as well as for one at the door. "Do not steer
+   * THROUGH it" is not: a car nine metres up the road is somewhere this driver can
+   * legitimately be by the time the line gets there, and refusing every line past it
+   * closes the shoulder at exactly the moment a queue needs it. Measured on the real
+   * road with the wider test: the longest standstill went from 18 to 55 seconds and
+   * the crawl from 5% to 22%.
+   */
+  readonly level?: boolean;
+  /**
+   * CAN THIS THING GO AWAY BY ITSELF?
+   *
+   * A rock cannot; a car can, and usually will. The difference decides whether a
+   * corridor with it inside is impassable or merely occupied — and conflating the two
+   * is how a queue became a pile of reversing cars: every driver behind a stopped head
+   * found no feasible corridor, concluded it was wedged, and started a two-point turn
+   * in the middle of the road. Measured at a single blocked lane: eight per cent of all
+   * car-time spent in recovery, and the longest stop of the run a hundred seconds.
+   *
+   * Defaults to immovable, so anything a caller forgets to mark is treated as scenery.
+   */
+  readonly movable?: boolean;
 }
 
 export interface CorridorRequest {
@@ -84,6 +110,15 @@ export interface CorridorRequest {
   /** Assumed speed of an unseen car coming the other way. */
   readonly oncomingSpeed: number;
   /**
+   * Speed the driver will actually make while it is alongside something STOPPED.
+   *
+   * Not the same number as `desiredSpeed`, and the difference is the whole reason
+   * opposing traffic used to meet head-on: the speed plan eases past a stopped thing
+   * at walking pace, so a crossing sized on the driver's intended speed is three
+   * seconds of plan and fifteen seconds of road.
+   */
+  readonly bypassSpeed: number;
+  /**
    * Is the opposing lane clear BEHIND us? Pulling out in front of something already
    * overtaking is a rear-end, and the corridor search has no rearward obstacles.
    */
@@ -98,6 +133,18 @@ export interface CorridorPlan {
   readonly line: number;
   /** Is there a line whose corridor has nothing immovable inside stopping range? */
   readonly feasible: boolean;
+  /**
+   * No corridor was found, and the reason is a car coming the other way rather than
+   * anything this driver can do about it. A driver in this state is yielding, not
+   * stuck: it stops short of the obstruction and waits for the road.
+   */
+  readonly waitingForOncoming: boolean;
+  /**
+   * A line across the crown was refused by the give-way gate this step. The only thing
+   * that ends a crossing already in progress: a re-priced plan is not a reason to
+   * swerve back, a car coming the other way is.
+   */
+  readonly crossingRefused: boolean;
   /** Nearest thing in the chosen corridor and how fast it is going, or Infinity. */
   readonly blockDistance: number;
   readonly blockSpeed: number;
@@ -139,6 +186,18 @@ const SLOW_COST_PER_MPS = 6;
 const SWITCH_COST = 3;
 /** Room wanted beyond an obstacle before the corridor counts as past it. */
 const CLEAR_M = 30;
+/**
+ * The same, for something STOPPED, and it is a third of the figure for a moving car
+ * on purpose.
+ *
+ * Overtaking traffic needs room to pull back in front of the car it has passed. A log
+ * needs the log's own length and this car's, and nothing else: measured on the real
+ * road, charging the 30 m overtake margin to a standing obstruction turned a 61 m
+ * window into a 211 m one, which a stream with 150 m between cars never offers. A
+ * cautious driver stood at a rock for the entire six-minute run with a clear line to
+ * take and the whole road queueing behind it.
+ */
+const STILL_CLEAR_M = 10;
 /** Slowest closing speed an overtake is planned at, so the sums stay finite. */
 const MIN_ADVANTAGE_MPS = 0.5;
 /**
@@ -257,6 +316,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     oncomingLaneCost,
     oncomingGap,
     oncomingSpeed,
+    bypassSpeed,
     laneCentres = [laneOffset],
     oncomingBoundary = 0,
     stopRoom,
@@ -284,6 +344,18 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     laneBlockLateral = obstacle.lateral;
   }
   const laneBlockIsStill = laneBlockSpeed <= SHOULDER_BYPASS_MAX_SPEED;
+  /**
+   * A line across the crown that this driver would otherwise have taken, refused only
+   * because of traffic coming the other way. See the note at the gate.
+   */
+  let waitingForOncoming = false;
+  /**
+   * A crossing candidate was REFUSED by the gate this step — as opposed to merely
+   * losing on price. A manoeuvre already under way out there is abandoned on this and
+   * on nothing else: the planner re-prices every step, and a line that is a penny
+   * dearer for one step is not a reason to come back across the road.
+   */
+  let crossingRefused = false;
 
   const nearness = (distance: number): number =>
     distance >= horizon ? 0 : 1 - distance / horizon;
@@ -295,18 +367,36 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     let blockDistance = Number.POSITIVE_INFINITY;
     let blockSpeed = 0;
     let hardBlockDistance = Number.POSITIVE_INFINITY;
+    /** The same, counting only what cannot drive away. See `CorridorObstacle.movable`. */
+    let wallDistance = Number.POSITIVE_INFINITY;
     for (const obstacle of obstacles) {
-      // NEVER STEER TOWARD A CAR ALONGSIDE, and never be trapped by one either.
+      // NEVER STEER TOWARD A CAR ALONGSIDE, NEVER STEER THROUGH ONE, and never be
+      // trapped by one either.
       //
       // Holding the present gap or widening it stays available whatever is beside
       // the body, so a driver pinned between two cars still has lines to choose
       // from; only closing on one is refused. Treating it as an ordinary obstacle
       // instead would make every line infeasible the moment a neighbour drew level
       // and stop the car dead in the middle of the carriageway.
+      //
+      // Judging the CANDIDATE alone is not enough, and the hole it left was the
+      // whole bug it was written to fix. A line past the neighbour is further from
+      // it than the lane the driver is in, so it read as moving away and was
+      // allowed: refused the next lane because it was occupied, the search walked
+      // outward and settled on the sand beyond it, and the rate-limited line then
+      // dragged the body straight over the car it had just refused to touch.
+      // Measured on the side-by-side bench: a commanded line 7.0 m out with a
+      // neighbour at 4.35 m, and 1.54 m of gap between two bodies while level. So
+      // the test is the CLOSEST the body comes to it anywhere on the way there,
+      // which is zero when it has to be driven through.
       if (obstacle.abeam) {
         const gapNow = Math.abs(obstacle.lateral - ownLateral);
         const gapThere = Math.abs(obstacle.lateral - line);
-        if (gapThere < obstacle.halfWidth + halfWidth && gapThere < gapNow) return;
+        const through =
+          obstacle.level === true &&
+          (obstacle.lateral - ownLateral) * (obstacle.lateral - line) <= 0;
+        const closest = through ? 0 : Math.min(gapNow, gapThere);
+        if (closest < obstacle.halfWidth + halfWidth && closest < gapNow) return;
         continue;
       }
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
@@ -319,15 +409,15 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       }
       // Anything that is not moving away from us has to be gone round, not
       // followed: for the lateral decision that is what "blocked" means.
-      if (obstacle.speed < desiredSpeed - MIN_ADVANTAGE_MPS && obstacle.s < hardBlockDistance) {
-        hardBlockDistance = obstacle.s;
-      }
+      if (obstacle.speed >= desiredSpeed - MIN_ADVANTAGE_MPS) continue;
+      if (obstacle.s < hardBlockDistance) hardBlockDistance = obstacle.s;
+      if (!obstacle.movable && obstacle.s < wallDistance) wallDistance = obstacle.s;
     }
     const crossesCentre =
       (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
     if (crossesCentre) {
       // Room for a car coming the other way is not a preference. The manoeuvre
-      // lasts as long as it takes to overhaul whatever is in our own lane, and an
+      // lasts as long as it takes to get past whatever is in our own lane, and an
       // oncoming car covers its own road while it happens.
       const ownLaneBlock = obstacles.reduce((nearest, obstacle) => {
         if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return nearest;
@@ -339,12 +429,69 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
         if (!overlaps(obstacle, laneOffset, halfWidth)) return slowest;
         return Math.min(slowest, obstacle.speed);
       }, desiredSpeed);
-      const advantage = Math.max(MIN_ADVANTAGE_MPS, desiredSpeed - leaderSpeed);
+      // OVERHAULING SOMETHING MOVING AND GOING ROUND SOMETHING STOPPED ARE TIMED
+      // DIFFERENTLY, and using the overhaul sum for both is how the crossing became a
+      // head-on. Against a moving car the manoeuvre ends when the speed difference has
+      // eaten the gap. Against a stopped one there is no speed difference to spend: it
+      // ends when the car has driven the length of the thing and got back.
+      //
+      // And the speed it drives that at is a property of THIS candidate line, not of
+      // the driver's mood. A line that clears the obstruction is driven past at road
+      // speed; a line that is still squeezing past it is driven at `bypassSpeed`,
+      // because that is what the speed plan will do with a corridor that still has
+      // something in it. Pricing every crossing at the crawl locked the whole road:
+      // measured, 77% of car-time below walking pace and nobody crossing at all.
+      const squeezing = blockDistance < Number.POSITIVE_INFINITY;
+      const passSpeed = squeezing ? bypassSpeed : Math.max(speed, desiredSpeed);
       const manoeuvreSeconds =
-        (Math.min(ownLaneBlock, horizon) + CLEAR_M) / advantage;
-      const roomNeeded = (Math.max(speed, desiredSpeed) + oncomingSpeed) * manoeuvreSeconds;
-      if (oncomingGap < roomNeeded) return;
-      if (!crossingRearClear) return;
+        leaderSpeed > SHOULDER_BYPASS_MAX_SPEED
+          ? (Math.min(ownLaneBlock, horizon) + CLEAR_M) /
+            Math.max(MIN_ADVANTAGE_MPS, desiredSpeed - leaderSpeed)
+          : (Math.min(ownLaneBlock, horizon) + STILL_CLEAR_M) /
+            Math.max(MIN_ADVANTAGE_MPS, passSpeed);
+      const roomNeeded = (Math.max(speed, passSpeed) + oncomingSpeed) * manoeuvreSeconds;
+      // ONE OBSTRUCTION, TWO DIRECTIONS, AND SOMEBODY HAS TO GO FIRST.
+      //
+      // A wreck wide enough to close both lanes is a bottleneck: the corridor past it
+      // exists, it is single file, and both streams want it. The room rule above is
+      // symmetric, so at a shared bottleneck it refuses BOTH drivers and the road
+      // stops — measured as two facing queues and 41% of car-time below walking pace.
+      //
+      // The tie is broken by geometry both drivers can measure without talking to each
+      // other: the one already nearer the obstruction goes, the one further away stops
+      // short of it. `oncomingGap - ownLaneBlock` is how far the approaching car still
+      // has to come to reach the same thing, so "nearer" is a comparison of two numbers
+      // this driver already has. It is exact, symmetric and produces opposite answers
+      // in the two cars, which is the whole requirement.
+      //
+      // If the oncoming car is NEARER than the obstruction it is not at a bottleneck
+      // with us at all; it is simply traffic in the lane we want, and the room rule is
+      // the right one.
+      const oncomingDistanceToBlock = oncomingGap - Math.min(ownLaneBlock, horizon);
+      const sharedBottleneck =
+        leaderSpeed <= SHOULDER_BYPASS_MAX_SPEED &&
+        ownLaneBlock < horizon &&
+        oncomingDistanceToBlock > 0;
+      const firstToTheGap =
+        sharedBottleneck && Math.min(ownLaneBlock, horizon) < oncomingDistanceToBlock;
+      if (!firstToTheGap && oncomingGap < roomNeeded) {
+        crossingRefused = true;
+        if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
+        return;
+      }
+      // A CROSSING REFUSED BECAUSE SOMETHING IS COMING IS NOT A DEAD END.
+      //
+      // The driver that would have taken this line is going to arrive at the
+      // obstruction, stop, and wait for the road — which is correct behaviour and not
+      // the same thing as having nowhere to go. Without the distinction the stall
+      // rule read a yielding driver as a wedged one and started a reversing
+      // manoeuvre, which put it across the carriageway in front of the very traffic
+      // it was waiting for. Measured as 8% of all car-time spent in recovery.
+      if (!crossingRearClear) {
+        crossingRefused = true;
+        if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
+        return;
+      }
     }
     const bodyEdge = Math.abs(line) + halfWidth;
     const leavesAsphalt = bodyEdge > asphaltLimit;
@@ -368,7 +515,12 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
         Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
     }
     if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;
-    const feasible = hardBlockDistance > stopRoom;
+    // FEASIBLE MEANS "NOTHING IMMOVABLE IN IT WITHIN STOPPING DISTANCE".
+    //
+    // A car in the corridor is a reason to slow down, never a reason to conclude the
+    // road has no way through: the driver in front is going somewhere, and the queue
+    // behind it is traffic behaving correctly. Only scenery closes a corridor.
+    const feasible = wallDistance > stopRoom;
     // A feasible corridor always beats an infeasible one, however cheap.
     const better =
       bestCost === Number.POSITIVE_INFINITY ||
@@ -394,6 +546,8 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
   return {
     line: bestLine,
     feasible: bestFeasible,
+    waitingForOncoming: waitingForOncoming && !bestFeasible,
+    crossingRefused,
     blockDistance: bestBlockDistance,
     blockSpeed: bestBlockSpeed,
     usesOncomingLane:
