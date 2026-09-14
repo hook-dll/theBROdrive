@@ -1,6 +1,7 @@
 import { itemLabel } from '../items/items';
 import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
+import type { WheelRideState } from '../vehicle/vehicle';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -42,6 +43,50 @@ export interface DrivingReadout {
    * whole of the missing feedback is this one number.
    */
   steering: number;
+  /**
+   * Live per-wheel tyre state, the vehicle's own buffer (never retained here).
+   *
+   * Drawn as four dots in wheel layout beside the gear, because tread temperature is
+   * a real part of how the car behaves — cold is a little off, hot is best, abused is
+   * greasy — and a keyboard driver has no hands on the wheel to feel any of it.
+   */
+  tyres: readonly WheelRideState[];
+}
+
+/**
+ * TYRE DOT COLOURS, and the temperatures are the model's, not a designer's.
+ *
+ * `tyreTemperatureGrip` in `vehicle.ts` has exactly three landmarks: the reference
+ * (grip 1.0), the optimum at +8%, and the maximum at -22%. So the dot is grey at the
+ * reference, green at the optimum and red at the maximum, interpolated between —
+ * which means the colour is the grip curve rather than a decoration of it. Reading
+ * them from the same constants would couple the HUD to the tyre model's internals, so
+ * they are duplicated here as THREE NUMBERS with this comment — which means a change
+ * to the tyre curve has to be reflected here by hand.
+ */
+const TYRE_COLD_C = 30;
+const TYRE_OPTIMUM_C = 60;
+const TYRE_MAX_C = 120;
+const TYRE_COLD_RGB = [138, 143, 148] as const;
+const TYRE_GOOD_RGB = [63, 191, 90] as const;
+const TYRE_HOT_RGB = [210, 59, 47] as const;
+
+function mixRgb(a: readonly number[], b: readonly number[], t: number): string {
+  const u = t * t * (3 - 2 * t);
+  const r = Math.round(a[0]! + (b[0]! - a[0]!) * u);
+  const g = Math.round(a[1]! + (b[1]! - a[1]!) * u);
+  const bl = Math.round(a[2]! + (b[2]! - a[2]!) * u);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+/** Dot colour for a tread temperature. Exported for the dash bench. */
+export function tyreDotColour(tempC: number): string {
+  if (tempC <= TYRE_COLD_C) return mixRgb(TYRE_COLD_RGB, TYRE_COLD_RGB, 0);
+  if (tempC <= TYRE_OPTIMUM_C) {
+    return mixRgb(TYRE_COLD_RGB, TYRE_GOOD_RGB, (tempC - TYRE_COLD_C) / (TYRE_OPTIMUM_C - TYRE_COLD_C));
+  }
+  const t = Math.min(1, (tempC - TYRE_OPTIMUM_C) / (TYRE_MAX_C - TYRE_OPTIMUM_C));
+  return mixRgb(TYRE_GOOD_RGB, TYRE_HOT_RGB, t);
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -213,6 +258,9 @@ export class Hud {
   private readonly tachNeedle: SVGLineElement;
   private readonly speedNeedle: SVGLineElement;
   private readonly gearEl: HTMLElement;
+  /** Front-left, front-right, rear-left, rear-right. */
+  private readonly tyreDots: HTMLElement[];
+  private readonly tyreColours: string[] = ['', '', '', ''];
   private readonly fuelEl: SVGSVGElement;
   private readonly fuelNeedle: SVGLineElement;
   private readonly temperatureCluster: HTMLElement;
@@ -314,8 +362,21 @@ export class Hud {
 
     const indicatorTop = el('div', 'hud-indicator-row');
     indicatorTop.append(this.checkEngineEl, this.oilWarningEl, this.handbrakeEl);
+    // FOUR DOTS IN WHEEL LAYOUT, WITH THE GEAR BETWEEN THEM: the left column sits to
+    // the left of the digit and the right column to its right, front on top. The
+    // digit is then the car, and a hot corner reads as a corner of it rather than as
+    // an index into a list.
+    this.tyreDots = [];
+    const leftColumn = el('div', 'hud-tyre-column');
+    const rightColumn = el('div', 'hud-tyre-column');
+    // Slot order is front-left, front-right, rear-left, rear-right; see `updateTyreDots`.
+    for (let i = 0; i < 4; i++) {
+      const dot = el('div', 'hud-tyre-dot');
+      this.tyreDots.push(dot);
+      (i % 2 === 0 ? leftColumn : rightColumn).append(dot);
+    }
     const indicatorBottom = el('div', 'hud-indicator-row');
-    indicatorBottom.append(this.gearEl);
+    indicatorBottom.append(leftColumn, this.gearEl, rightColumn);
     const indicators = el('div', 'hud-icon-panel');
     indicators.append(indicatorTop, indicatorBottom);
 
@@ -588,6 +649,7 @@ export class Hud {
     );
 
     this.setText(this.gearEl, readout.gearLabel);
+    this.updateTyreDots(readout.tyres);
 
     const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
     this.fuelDeg = this.updateAuxNeedle(
@@ -925,6 +987,36 @@ export class Hud {
     this.damageVignetteEl.remove();
     this.deathFadeEl.remove();
     this.root.classList.remove('is-death-sequence');
+  }
+
+  /**
+   * Paints the four tyre dots from the car's live wheel state.
+   *
+   * A car is not always four-wheeled and the wheels arrive in the model's own order,
+   * so the corner each dot shows is chosen by `isFront`/`sideSign` (negative is left,
+   * as everywhere else in the vehicle) rather than by index. A corner the car does not
+   * have is dimmed rather than hidden, so the grid never changes size.
+   */
+  private updateTyreDots(tyres: readonly WheelRideState[]): void {
+    for (let slot = 0; slot < 4; slot++) {
+      const wantFront = slot < 2;
+      const wantLeft = slot % 2 === 0;
+      let hottest: WheelRideState | null = null;
+      for (const tyre of tyres) {
+        if (tyre.isFront !== wantFront) continue;
+        if (tyre.sideSign < 0 !== wantLeft) continue;
+        // A six-wheeler has two corners on one side of one axle; the hotter of them is
+        // the one worth showing.
+        if (hottest === null || tyre.tyreTempC > hottest.tyreTempC) hottest = tyre;
+      }
+      const dot = this.tyreDots[slot]!;
+      const colour = hottest === null ? 'transparent' : tyreDotColour(hottest.tyreTempC);
+      if (this.tyreColours[slot] !== colour) {
+        this.tyreColours[slot] = colour;
+        dot.style.background = colour;
+      }
+      this.setVisible(dot, hottest !== null);
+    }
   }
 
   private setText(node: HTMLElement, value: string): void {

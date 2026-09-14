@@ -2188,6 +2188,7 @@ async function boot(): Promise<void> {
         checkEngine,
         handbrake: lastInput.handbrake,
         steering: driving.steeringFraction,
+        tyres: driving.wheelRide,
       });
     } else {
       hud.setDriving(null);

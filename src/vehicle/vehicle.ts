@@ -1736,6 +1736,16 @@ export interface WheelRideState {
   bumpStopN: number;
   /** Tyre carcass deflection from the sub-collider profile, metres (see WheelHop). */
   tyreDeflectionM: number;
+  /**
+   * Tread temperature, degrees C, and the grip multiplier it currently implies.
+   *
+   * Published because a driver cannot feel them through a keyboard and they are a
+   * real, live part of how the car behaves: cold tyres are a little off, hot ones are
+   * at their best, and abused ones are greasy. See `tyreTemperatureGrip` for the
+   * curve these two are the two ends of.
+   */
+  tyreTempC: number;
+  tyreGrip: number;
 }
 
 /**
@@ -2878,6 +2888,8 @@ export class Vehicle implements Rebasable {
         reserveM: w.maxTravelM - w.sagM,
         bumpStopN: 0,
         tyreDeflectionM: 0,
+        tyreTempC: w.tyreTempC,
+        tyreGrip: w.tyreGrip,
       });
     }
 
@@ -4942,6 +4954,8 @@ export class Vehicle implements Rebasable {
       r.reserveM = w.maxTravelM - w.compressionM;
       r.bumpStopN = w.bumpStopN;
       r.tyreDeflectionM = w.profileHeight - w.hopZ;
+      r.tyreTempC = w.tyreTempC;
+      r.tyreGrip = w.tyreGrip;
     }
   }
 

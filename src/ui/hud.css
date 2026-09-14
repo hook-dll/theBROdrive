@@ -494,6 +494,29 @@ body.is-cinematic #ui {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Tyre temperature: two dots each side of the gear digit, front on top. The left
+ * column is the left of the car, so the digit reads as the car itself. Deliberately
+ * unlabelled — the colour IS the reading, and a legend would take more room than the
+ * instrument it explains.
+ */
+.hud-tyre-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 3px;
+}
+
+.hud-tyre-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(138, 143, 148);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+}
+
 .hud-handbrake {
   color: var(--hud-alarm);
   font-size: 15px;
