@@ -53,6 +53,11 @@ pnpm-debug.log*
 /tycho2-vt88-source.tsv
 /tycho2-vt88-supplement.tsv
 /Low Poly Soviet Car Pack/
+/Stylized Vehicles Pack/
+# Downloaded vehicle mods, the input side of tools/import-yft-vehicle.py. 363 MB of
+# .rar that nothing in the build reads: the conversion is run by hand and only its
+# output under public/models/ is vendored.
+/carimport/
 
 # Local capture and visual-review artifacts created in the repository root.
 /Recording *.mp4
