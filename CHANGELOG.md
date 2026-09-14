@@ -620,6 +620,30 @@
   level with. The constraint is now the one the rest of the controller uses — the move
   has a duration and the gap has to outlast it — so closing is held to walking pace
   mid-crossing with a few metres in hand, and opens up exactly as the clearance arrives.
+- AN OVERTAKE IS TIMED ON CLOSING SPEED, NOT ON THE SPEEDOMETER, so it no longer begins
+  a lifetime behind the car it is passing. A rock arrives at the speed the car is doing
+  and a slower car arrives at the DIFFERENCE, which behind a leader four metres a second
+  slower is a sixth of it — so both the lateral rate a move asks for and the distance at
+  which the move starts were sized six times too large. Measured: a forty-metre gap to a
+  moving leader asked for 4.5 m/s², the whole grip share, and the trigger sized on that
+  rate fired sixty-odd metres back. Reported from play: on the two-lane road the pass
+  starts a long way behind the leader and the closing-up never happens. The trigger's
+  floor comes down from 45 m to fourteen with it — forty-five metres of gap to a slower
+  car is a comfortable following distance, not "close enough to act on", and a floor
+  that large simply reinstated the defect for every moving leader.
+- THE WIDE-ROAD PACE IS TAKEN AND GIVEN BACK OVER SECONDS, AND THE NARROWING IS READ
+  BEFORE IT ARRIVES. `lanesPerSideAt` is a step function, so a flat twelve per cent on it
+  was a step in the speed every driver wants, at one arclength, reached by each car at a
+  slightly different metre — and a step down is a brake, arriving exactly while they are
+  also being asked to merge. The bonus now fades as soon as the taper is visible, the
+  same 110 m the home lane already reads, and slews over five seconds either way.
+- AND SOMEBODY LETS THE MERGING CAR IN. A lane that ends is the same situation as a lane
+  blocked by a wreck, and it was the one case nothing yielded for: a taper is not an
+  obstacle, so the merge-yield rule could not see it, and the drivers whose lane survives
+  — the quick ones, sorted into the lane beside the crown — held their pace while the
+  outer lane emptied itself into them. Reported from play as the four-to-two transition
+  being untidy. The same rule also now checks which side of the crown the neighbour is
+  on, or an oncoming car in its own outer lane reads as one about to merge into us.
 - A DRIVE THAT WAS INTERRUPTED BY A PAGE RELOAD NOW COMES BACK TO THE CAR. Playing on a
   phone, the screen sleeps, the player wakes it, and the game is at the title screen with
   the drive apparently gone. It was not the sleep: it was the reload. The development

@@ -483,10 +483,12 @@ const LINE_SHIFT_PER_METRE = 0.09;
 const DETOUR_MIN_M = 0.8;
 /**
  * FLOOR on how close a blocker in the driver's own lane must be before the lane is
- * left for it. The real trigger is the road the move itself needs at this speed and
- * this lateral rate; see `manoeuvreRoom` in `commitLane`.
+ * left for it. The real trigger is the CLOSING distance the move itself needs at this
+ * rate; see `manoeuvreRoom` in `commitLane`. A few car lengths, because that is the
+ * only case the sum leaves unanswered — a driver barely closing at all, where the
+ * arithmetic says a couple of metres and a driver would still have started moving.
  */
-const DETOUR_TRIGGER_M = 45;
+const DETOUR_TRIGGER_FLOOR_M = 14;
 /**
  * How much FURTHER than that the blocker has to be for the manoeuvre to be over.
  *
@@ -676,6 +678,8 @@ const WIDE_ROAD_PACE = 1.12;
  * as `lineAccel`, so the road it charges a lane change is the road one really takes.
  */
 const LANE_CHANGE_LATERAL_ACCEL = 0.6;
+/** Seconds the wide-road bonus is worth, taken and given back. See its use in `drive`. */
+const WIDE_PACE_RAMP_S = 5;
 /**
  * HOW FAR THE COMMANDED LINE MAY LEAVE THE LANE CENTRE BEFORE IT IS A LANE CHANGE.
  *
@@ -698,6 +702,13 @@ const LANE_KEEP_FREEDOM_M = 0.6;
  * for frantic.
  */
 const LANE_SHIFT_REFERENCE_M = 2.9;
+/**
+ * Slowest closing speed a manoeuvre is timed at, m/s. Behind something going almost
+ * exactly our own pace the deadline is arbitrarily far away, and a sum that divides by
+ * the difference has to stay finite. The corridor planner floors its own overtake sums
+ * at the same figure.
+ */
+const MIN_CLOSING_MPS = 0.5;
 /**
  * FOLLOWING, in three numbers.
  *
@@ -1145,6 +1156,11 @@ export class Autopilot {
    * different decisions that all arrive as one speedometer reading.
    */
   private homeLaneValue = 0;
+  /**
+   * The wide-road pace bonus this driver is currently spending, 1 to `WIDE_ROAD_PACE`.
+   * State rather than a lookup, because it is slewed: see `drive`.
+   */
+  private widePaceValue = 1;
   private bypassSpeedValue = 0;
   private targetSpeedValue = 0;
   private passUrgeValue = false;
@@ -1481,8 +1497,19 @@ export class Autopilot {
     // laying siege to it before eventually getting round.
     //
     // A driver starts moving over when the obstruction is as far ahead as the move is
-    // long, plus a body length so the line arrives before the bumper does. The constant
-    // survives as the FLOOR, for a car so slow that the sum says a couple of metres.
+    // long, plus a body length so the line arrives before the bumper does.
+    //
+    // AND "AS FAR AHEAD AS THE MOVE IS LONG" IS MEASURED IN CLOSING DISTANCE. A rock
+    // closes at the speed the car is doing and a slower car closes at the difference,
+    // so timing both on the speedometer made every overtake begin a lifetime early:
+    // sixty-odd metres behind a leader four metres a second slower, where the gap is
+    // fifteen seconds of closing. Reported from play — on the two-lane road the pass
+    // starts a long way back, and the driver never does the closing-up it is told to.
+    //
+    // The floor is a few car lengths rather than the old forty-five for the same
+    // reason: forty-five metres of gap to a slower car is not "close enough to act on",
+    // it is a comfortable following distance, and a floor that large simply reinstated
+    // the defect for every moving leader.
     //
     // The RELEASE is the same distance plus a margin, and it has to be: with a fixed
     // 55 m release against a trigger that can now fire at a hundred, a manoeuvre begun
@@ -1490,9 +1517,11 @@ export class Autopilot {
     // early. The shift is taken from whichever line the state owns, so neither end of
     // the manoeuvre moves while it is in progress.
     const manoeuvreShift = Math.abs((this.detouring ? this.detourLine : proposed) - laneOffset);
+    const manoeuvreClosing = Math.max(speed - Math.max(0, laneBlockSpeed), MIN_CLOSING_MPS);
     const manoeuvreRoom = Math.max(
-      DETOUR_TRIGGER_M,
-      speed * 2 * Math.sqrt(manoeuvreShift / Math.max(lineAccel, 1e-3)) + CAR_HALF_LENGTH_M * 2,
+      DETOUR_TRIGGER_FLOOR_M,
+      manoeuvreClosing * 2 * Math.sqrt(manoeuvreShift / Math.max(lineAccel, 1e-3)) +
+        CAR_HALF_LENGTH_M * 2,
     );
     const committedCrossesCrown =
       this.detouring && this.detourLine * Math.sign(laneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
@@ -1759,7 +1788,25 @@ export class Autopilot {
     // exactly why it only ever happened to ambient traffic.
     const lanesAhead = this.road.lanesPerSideAt(this.hintS + HOME_LANE_LOOKAHEAD_M);
     const ownPace = Math.min(config.cruiseMps * this.paceValue, this.speedCapValue);
-    const desiredSpeed = lanesPerSide > 1 ? ownPace * WIDE_ROAD_PACE : ownPace;
+    /**
+     * THE WIDE-ROAD PACE IS TAKEN AND GIVEN BACK OVER SECONDS, NOT ON ONE STEP.
+     *
+     * `lanesPerSideAt` is a step function, so a flat multiplier on it is a twelve per
+     * cent jump in the speed every driver wants, at one arclength, in both directions —
+     * and a jump DOWN is a brake, arriving for each car at a slightly different metre
+     * while they are also being asked to merge. Reported from play: the four-to-two
+     * transition is untidy.
+     *
+     * Two things fix it, and both are what a driver does. The bonus is withdrawn as
+     * soon as the narrowing is VISIBLE — the same taper's warning the home lane already
+     * reads, so the lift-off happens before the merge rather than during it — and the
+     * factor is slewed rather than switched, so the whole twelve per cent is worth a
+     * few seconds of gentle throttle either way.
+     */
+    const widePaceTarget = lanesPerSide > 1 && lanesAhead > 1 ? WIDE_ROAD_PACE : 1;
+    const widePaceStep = ((WIDE_ROAD_PACE - 1) / WIDE_PACE_RAMP_S) * Math.max(dt, 0);
+    this.widePaceValue += clamp(widePaceTarget - this.widePaceValue, -widePaceStep, widePaceStep);
+    const desiredSpeed = ownPace * this.widePaceValue;
     const homeLane =
       ownPace >= INNER_LANE_PACE_MPS ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
     this.homeLaneValue = homeLane;
@@ -2376,11 +2423,27 @@ export class Autopilot {
      * The reference shift is a lane's worth rather than the line the planner has not
      * proposed yet; being a little conservative here asks for a slightly brisker rate
      * than the real shift needs, and the trigger in `commitLane` uses the real one.
+     *
+     * AND THE DEADLINE IS SET BY CLOSING SPEED, NOT BY THE SPEEDOMETER. A rock is
+     * arriving at the speed the car is doing; a car in the lane ahead is arriving at
+     * the DIFFERENCE, which behind a leader four metres a second slower is a sixth of
+     * it. Priced on the speedometer, a forty-metre gap to a moving leader asked for
+     * 4.5 m/s² — the whole grip share — so an overtake was steered like an escape and,
+     * worse, the trigger in `commitLane` sized on that rate fired sixty-odd metres
+     * back. Reported from play: on a two-lane road the pass starts a long way behind
+     * the car it is passing, with none of the closing-up that was asked for.
      */
+    const laneBlockClosing = Math.max(
+      speed - Math.max(0, this.corridorLaneBlockSpeed),
+      MIN_CLOSING_MPS,
+    );
+    const moveClosing = this.corridorLaneBlockDistance <= this.hazardDistance
+      ? laneBlockClosing
+      : speed;
     const moveRoom = Math.min(this.corridorLaneBlockDistance, this.hazardDistance);
     const neededLateralAccel =
       moveRoom > 0.5 && moveRoom < Number.POSITIVE_INFINITY
-        ? (4 * LANE_SHIFT_REFERENCE_M * speed * speed) / (moveRoom * moveRoom)
+        ? (4 * LANE_SHIFT_REFERENCE_M * moveClosing * moveClosing) / (moveRoom * moveRoom)
         : 0;
     const lineAccel = this.corridorFeasible
       ? clamp(
@@ -2662,12 +2725,31 @@ export class Autopilot {
     // one that yields a few seconds; it is what makes the obstruction cost the ROAD a
     // few seconds instead of a queue. Deliberately one-sided: only the clear lane
     // yields, so two drivers cannot both wait for each other.
+    //
+    // A LANE THAT ENDS IS THE SAME SITUATION, and it was the one case nobody yielded
+    // for. A taper is not an obstacle, so the wall loop below could never see it, and
+    // the drivers whose lane survives — the quick ones, sorted into the lane beside
+    // the crown — held their pace while the outer lane emptied itself into them.
+    // Reported from play as the four-to-two transition being untidy. The road says
+    // which lane ends and it says so a taper's warning ahead, which is the same
+    // question `homeLane` above already asked.
     let mergeYieldSpeed = Number.POSITIVE_INFINITY;
     if (lanesPerSide > 1) {
+      const laneEndsAhead = lanesAhead < lanesPerSide;
       for (const neighbour of obstacles) {
         if (!neighbour.abeam) continue;
-        // Somebody in another lane, level with this car.
+        // Somebody in another lane, level with this car — and on OUR side of the crown,
+        // or an oncoming car in its own outer lane reads as a neighbour about to merge
+        // into us.
+        if (neighbour.lateral * ownLaneOffset <= 0) continue;
         if (Math.abs(neighbour.lateral - ownLaneOffset) < CAR_HALF_WIDTH_M * 2) continue;
+        // And OUTSIDE it, so the lane that is about to go is theirs and not ours.
+        if (laneEndsAhead && Math.abs(neighbour.lateral) > Math.abs(ownLaneOffset)) {
+          mergeYieldSpeed = Math.min(
+            mergeYieldSpeed,
+            Math.max(AVOIDANCE_CRAWL_MPS, neighbour.speed - MERGE_YIELD_MARGIN_MPS),
+          );
+        }
         for (const wall of obstacles) {
           if (wall.abeam || wall.movable || wall.s < 0 || wall.s > MERGE_YIELD_LOOKAHEAD_M) continue;
           if (Math.abs(wall.lateral - neighbour.lateral) >= wall.halfWidth + CAR_HALF_WIDTH_M) continue;
