@@ -1292,9 +1292,20 @@ export class Renderer {
     const wanted = this.quality === 'acceptable' ? 0 : daylight;
     const active = Math.min(1, Math.max(0, wanted));
     this.hazeMaterial.uniforms.uStrength.value = active;
-    // A disabled warp never samples depth, so do not resolve the multisampled depth
-    // buffer at night or on Acceptable.
-    this.hazeTarget.resolveDepthBuffer = active > 0;
+    // THE WARP IS NOT THE ONLY THING THAT SAMPLES DEPTH, which is what this line
+    // used to assume. `tDepth` also decides where the sand veil begins and — far
+    // more visibly — which fragments the INK pass is allowed to outline: the sky,
+    // the stars and the planets are excluded by sitting at the far plane, and
+    // that test runs on every tier, every frame, warp or no warp.
+    //
+    // Leaving the multisampled depth unresolved therefore did not skip a sample
+    // nobody read. It handed the outline gate an UNDEFINED texture — three
+    // invalidates the attachment when the flag is off — for the whole night and
+    // for the entire lifetime of the cheapest tier, so the drawn look either
+    // vanished or spread into the sky depending on what the driver left behind.
+    // The resolve is skipped only when nothing in the pass reads depth at all.
+    const ink = this.hazeMaterial.uniforms.uInkStrength.value as number;
+    this.hazeTarget.resolveDepthBuffer = active > 0 || ink > 0 || daylight > 0;
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */

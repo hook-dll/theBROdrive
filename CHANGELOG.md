@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.16.1 — 2026-09-15
+
+### Fixed
+
+- THE MORNING AFTER A NIGHT OF DRIVING IS AS BRIGHT AS THE DAY BEFORE IT. Dynamic
+  resolution could enter a state it could not leave, and at the bottom of its ladder
+  the film grain is filtered away by the upscale, the ink outlines smear into a
+  general darkening and the surfaces lose their texture — which reads as "not all the
+  shaders applied" rather than as a lower resolution. The launch transient was fixed
+  by settling the scale under the loading cover; the same trap was still open for
+  every load change DURING a drive, and the day/night cycle is the largest one the
+  game has. A night of lit lamps and beams walks the scale down, dawn switches the
+  heat-mirage warp and its depth resolve back on, and recovery needed the frame to
+  fall under 7 ms while a reduction only needed 11 — the band between the two is
+  where a healthy frame on these machines lives, so the scale stayed where the night
+  left it for the rest of the drive.
+- THE CONTROLLER NOW MEASURES WHAT ITS OWN REDUCTIONS BUY. The ladder is geometric
+  and climbs by the inverse of the step it descends by, so a rung it can afford is
+  always reachable, and each rung change measures the frame at two pixel counts —
+  which is the only honest way to know how much of a frame is fill and how much is
+  not. That answers the other half: this game's frame is dominated by per-call work
+  (cutting a phone's pixel budget by nearly three times moved the cost of submitting
+  a frame by twenty per cent), so a stall, a driver compile or a burst of streamed
+  variants used to be answered by halving the picture and arriving at the same
+  duration. A reduction is now taken only where it is predicted to buy real time, and
+  pixels measured to be free are handed back — a draw-call-bound frame holds full
+  resolution instead of walking to the floor for nothing. `tools/adaptive-quality.ts`
+  asks both questions against a modelled machine rather than against the constants.
+- THE INK OUTLINES NO LONGER READ AN UNDEFINED DEPTH BUFFER AT NIGHT. The post pass
+  samples scene depth in three places, not one: the heat-mirage warp, the sand veil,
+  and the gate that decides which fragments may be outlined at all — the sky, stars
+  and planets are excluded by sitting at the far plane. The multisampled depth
+  resolve was switched off whenever the warp was off, on the assumption that nothing
+  else read it, so every night on `standard` and `blessing` and the whole lifetime of
+  `acceptable` handed that gate a texture three had just invalidated. The drawn look
+  either vanished or spread into the sky, depending on what the driver left in
+  memory. Depth is now resolved whenever anything in the pass reads it.
+
 ## 0.16.0 — 2026-09-15
 
 ### Added

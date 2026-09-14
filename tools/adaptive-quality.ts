@@ -48,6 +48,50 @@ function drive(
   return { action: null, samples: capMs };
 }
 
+/**
+ * Feeds a machine whose GPU cost is PROPORTIONAL to the pixels it is asked to
+ * shade, which is the worst case the controller predicts against: every rung it
+ * climbs costs it the full square of the step.
+ */
+function driveModelled(
+  controller: AdaptiveResolutionController,
+  fullScaleMs: number,
+  startMs: number,
+  durationMs: number,
+): { changes: number; scales: number[] } {
+  const scales: number[] = [];
+  for (let i = 0; i < durationMs; i++) {
+    const cost = fullScaleMs * controller.scale * controller.scale;
+    if (controller.sample(cost, true, true, startMs + i) !== null) scales.push(controller.scale);
+  }
+  return { changes: scales.length, scales };
+}
+
+/** Whether a fresh controller leaves full resolution alone at this cost. */
+function holdsFullScale(quality: 'acceptable' | 'standard' | 'blessing', costMs: number): boolean {
+  const controller = new AdaptiveResolutionController(quality);
+  for (let i = 0; i < 4_000; i++) {
+    if (controller.sample(costMs, true, true, i) === 'down') return false;
+  }
+  return true;
+}
+
+/**
+ * The most expensive frame a rung will carry at full resolution, discovered by
+ * bisection rather than read from the constants — so these checks keep asking the
+ * same question after the thresholds are retuned.
+ */
+function largestToleratedCost(quality: 'acceptable' | 'standard' | 'blessing'): number {
+  let affordable = 0;
+  let refused = 400;
+  for (let i = 0; i < 24; i++) {
+    const mid = (affordable + refused) / 2;
+    if (holdsFullScale(quality, mid)) affordable = mid;
+    else refused = mid;
+  }
+  return affordable;
+}
+
 function run(): void {
   // --- evidence, and the lack of it -----------------------------------------
   {
@@ -93,41 +137,76 @@ function run(): void {
   }
 
   // --- reductions stop at a floor --------------------------------------------
+  //
+  // The overloaded machine here is modelled as one whose cost FOLLOWS its pixel
+  // count, because that is the only overload resolution can answer — and, since the
+  // controller now measures whether its reductions are landing, the only one it is
+  // willing to spend the picture on. See the futility check further down for the
+  // other kind.
   {
     const floored = new AdaptiveResolutionController('standard');
-    let previous = floored.scale;
-    let steps = 0;
-    for (let round = 0; round < 40; round++) {
-      const { action } = drive(floored, SLOW_MS, true, true, 40_000 + round * 10_000);
-      if (action !== 'down') break;
-      steps++;
+    const overloaded = largestToleratedCost('standard') * 20;
+    const descent = driveModelled(floored, overloaded, 40_000, 200_000);
+    let previous = 1;
+    for (const [index, scale] of descent.scales.entries()) {
       check(
-        `floor: reduction ${steps} lowers the scale and not past it`,
-        floored.scale < previous && floored.scale > 0,
-        `scale ${floored.scale.toFixed(4)}`,
+        `floor: reduction ${index + 1} lowers the scale and not past it`,
+        scale < previous && scale > 0,
+        `scale ${scale.toFixed(4)}`,
       );
-      previous = floored.scale;
+      previous = scale;
     }
-    check('floor: sustained overload is answered more than once', steps > 1, `${steps} reductions`);
-    check('floor: the reductions stop at a floor', steps < 40, `${steps} reductions`);
+    check(
+      'floor: sustained overload is answered more than once',
+      descent.scales.length > 1,
+      `${descent.scales.length} reductions`,
+    );
     check('floor: the floor is still a picture', floored.scale > 0.1, `scale ${floored.scale}`);
 
     // And once at the floor, a machine that is still overloaded is not asked to give
     // more: the controller says nothing rather than emitting a no-op reduction.
-    const stuck = drive(floored, SLOW_MS, true, true, 40_000 + 40 * 10_000);
-    check('floor: overload at the floor reports no further reduction', stuck.action !== 'down', `scale ${floored.scale}`);
+    const stuck = driveModelled(floored, overloaded, 300_000, 60_000);
+    check(
+      'floor: overload at the floor reports no further reduction',
+      stuck.changes === 0,
+      `scale ${floored.scale}`,
+    );
+  }
+
+  // --- and the picture is not spent where it cannot buy anything ---------------
+  //
+  // The frame this game actually submits is dominated by per-call work: cutting a
+  // phone's pixel budget by nearly three times moved the cost of submitting a frame
+  // by twenty per cent. A controller that treats every millisecond as fill answers
+  // that by halving the picture and arriving at the same duration — the player pays
+  // in film grain, ink outlines and surface texture, and gets no frame rate for it.
+  {
+    const stalling = new AdaptiveResolutionController('standard');
+    const stall = largestToleratedCost('standard') * 2;
+    let clock = 3_000_000;
+    for (let i = 0; i < 200_000; i++) stalling.sample(stall, true, true, clock++);
+    check(
+      'a cost the pixel count does not move is not paid for with the picture',
+      stalling.scale >= 0.8,
+      `scale ${stalling.scale.toFixed(3)}`,
+    );
+
+    // ...and the moment the same machine is overloaded by something resolution CAN
+    // answer, the refusal above must not have locked it out of adapting.
+    const fell = driveModelled(stalling, stall * 2, clock, 200_000);
+    check(
+      'a measured refusal does not become a permanent one',
+      stalling.scale < 0.8 && fell.changes > 0,
+      `scale ${stalling.scale.toFixed(3)} after ${fell.changes} changes`,
+    );
   }
 
   // --- an installed floor is the one that counts ------------------------------
   {
     const installed = new AdaptiveResolutionController('blessing');
     installed.setMinimumScale(0.42);
-    let scale = installed.scale;
-    for (let round = 0; round < 40; round++) {
-      const { action } = drive(installed, SLOW_MS, true, true, 500_000 + round * 10_000);
-      if (action !== 'down') break;
-      scale = installed.scale;
-    }
+    driveModelled(installed, largestToleratedCost('blessing') * 20, 500_000, 200_000);
+    const scale = installed.scale;
     check(
       'a floor installed by the renderer is honoured',
       Math.abs(scale - 0.42) < 1e-9,
@@ -161,6 +240,68 @@ function run(): void {
     const up = drive(recovering, FAST_MS, true, true, 700_000);
     check('sustained headroom is spent on resolution', up.action === 'up', `after ${up.samples} samples`);
     check('the scale never passes the display', recovering.scale <= 1, `scale ${recovering.scale}`);
+  }
+
+  // --- the resolution the machine can afford is REACHABLE ---------------------
+  //
+  // The bug this answers: a load that lifts leaves the scale where it fell. The
+  // controller used to require the frame to become cheap in absolute terms before
+  // it would return a single pixel, while a much smaller cost was enough to take
+  // them — so any sustained load (a night of lit lamps, the dawn that switches the
+  // heat-mirage warp back on, a burst of streamed shader variants) walked the scale
+  // down and nothing walked it back for the rest of the session.
+  //
+  // Stated without reference to any threshold in the controller: a cost the rung
+  // comfortably CARRIES at full resolution is one it must also CLIMB BACK to. A
+  // fifth under its own measured tolerance is what "comfortably" means here —
+  // right ON the tolerance a controller is entitled to stop one rung short.
+  {
+    const tolerated = largestToleratedCost('standard');
+    check(
+      'the controller tolerates some cost at full resolution',
+      tolerated > 0,
+      `${tolerated.toFixed(2)} ms`,
+    );
+
+    const recovered = new AdaptiveResolutionController('standard');
+    let clock = 1_000_000;
+    // A night's worth of genuine overload first: it costs what its pixel count says,
+    // so the controller spends every rung it has on it and lands at the floor.
+    driveModelled(recovered, tolerated * 8, clock, 200_000);
+    clock += 200_000;
+    const floorScale = recovered.scale;
+    check('the transient put the scale on the floor', floorScale < 1, `scale ${floorScale.toFixed(3)}`);
+
+    // The load lifts. The frame now costs, at full resolution, a fifth less than
+    // what this controller has just said it would carry there.
+    const climb = driveModelled(recovered, tolerated * 0.8, clock, 120_000);
+    check(
+      'an affordable resolution is climbed back to, not merely permitted',
+      recovered.scale === 1,
+      `scale ${recovered.scale.toFixed(3)} after ${climb.changes} changes`,
+    );
+  }
+
+  // --- and the ladder settles instead of hunting ------------------------------
+  {
+    const settling = new AdaptiveResolutionController('standard');
+    const tolerated = largestToleratedCost('standard');
+    // Three times the affordable cost: the machine cannot hold full resolution, so
+    // the controller must find a rung and then leave it alone. A rung it steps off
+    // and back onto forever is a resolution that visibly pulses while driving.
+    driveModelled(settling, tolerated * 3, 2_000_000, 60_000);
+    const settled = settling.scale;
+    const quiet = driveModelled(settling, tolerated * 3, 2_060_000, 60_000);
+    check(
+      'a machine that cannot hold full resolution settles on one rung',
+      quiet.changes === 0 && settling.scale === settled,
+      `scale ${settled.toFixed(3)}, ${quiet.changes} further changes`,
+    );
+    check(
+      'the rung it settles on is a picture, not a postage stamp',
+      settled > 0.5,
+      `scale ${settled.toFixed(3)}`,
+    );
   }
 }
 
