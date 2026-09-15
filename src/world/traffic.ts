@@ -1,11 +1,12 @@
 import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
+import { SurfaceType } from '../core/surfaces';
 import { mulberry32 } from '../core/rng';
 import { createServiceableCarState } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
-import { Autopilot, type AutopilotMode } from '../vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import type { Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
@@ -17,16 +18,15 @@ import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 import { TurnaroundRoad, TURNAROUND_ENTRY_S } from './turnaround';
 import { PHYSICS_REACH_M } from './chunks';
+import type { RoadConditionBuffer } from './gradient';
 
 /**
  * THE STREAM'S SIZE COMES FROM THE CARRIAGEWAY, not from a setting.
  *
- * A two-lane road — one lane each way, which is what the road is for its first
- * kilometre and on every un-widened stretch after it — carries `NARROW_TRAFFIC` cars.
- * A four-lane road, two lanes each way, carries `WIDE_TRAFFIC`. In between the cap
- * follows the widening, so a car is never added or dropped by a profile step, and the
- * stream is sampled across the spawn band rather than under one point (see
- * `roadTargetCount`).
+ * A two-lane road replenishes up to `NARROW_TRAFFIC` cars; a four-lane road up to
+ * `WIDE_TRAFFIC`. In between the ceiling follows the widening. Existing visible
+ * cars drain naturally rather than disappearing at a profile step. The density
+ * samples the entire spawn band, not one point (see `refreshRoadCap`).
  *
  * It used to be a player setting with a menu slider, defaulting to OFF, that only ever
  * RAISED: a narrow road ran at the setting and a widened one ran up to a fixed ceiling of
@@ -36,8 +36,8 @@ import { PHYSICS_REACH_M } from './chunks';
 const NARROW_TRAFFIC = 12;
 const WIDE_TRAFFIC = 24;
 /**
- * The smallest fraction of the cap the stream will hold, so a long drive keeps
- * changing. The live count is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled
+ * The smallest target fraction of the cap, so a long drive keeps changing.
+ * The target is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled
  * every 36-72 s, and the retained FRACTION is held between re-rolls — which is what lets
  * a widening fill smoothly instead of stepping at a profile boundary.
  *
@@ -85,17 +85,11 @@ const REAR_SPAWN_CLOSING_MPS = 2.5;
  * finishing loading. See `finishSpawn`.
  */
 const SPAWN_ARRIVAL_SLACK_M = 60;
-const DESPAWN_M = 850;
-/**
- * Behind, the budget is spent much sooner. A car dropped by the player is invisible
- * from the moment it leaves the mirror, and past `PHYSICS_REACH_M` it has no road
- * under it at all — it free-falls while holding one of the thirty slots. Recycling
- * it into a spawn the player can see is worth the shorter tail.
- */
-const DESPAWN_BEHIND_M = PHYSICS_REACH_M;
+/** Extra room for numerical drift/acceleration beyond one step's measured travel. */
+const PHYSICS_EDGE_SLACK_M = 1;
 /**
  * A density trim may only take a car this far BEHIND the player, where its removal
- * cannot be watched. `DESPAWN_M` still applies in both directions.
+ * cannot be watched. The physical support boundary still applies in both directions.
  */
 const OFFSCREEN_TRIM_M = 90;
 /** Seconds between spawn attempts on an ordinary road; the dense mode halves it. */
@@ -244,6 +238,10 @@ interface TrafficCar {
   /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
   readonly pace: number;
   roadLateral: number;
+  /** Current body projection across the road, including yaw/roll. */
+  roadHalfWidth: number;
+  readonly halfExtents: readonly [number, number, number];
+  readonly bodyRadius: number;
   /**
    * Speed along the road's FORWARD direction, metres per second, refreshed with
    * `forwardS` every step. Published through the traffic field so a driver can know
@@ -273,8 +271,9 @@ interface TrafficCar {
    * of which reason about who is ahead of whom in ONE direction of travel.
    */
   turnS: number;
-  /** Time accumulated since this ambient driver's last route/control plan. */
+  /** Schedule remainder, independent of elapsed time actually sent to drive. */
   controlAccumulator: number;
+  controlElapsed: number;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -312,9 +311,9 @@ export interface TrafficStatus {
    */
   readonly target: number;
   /**
-   * The widest stream this stretch of road will hold, from its carriageway —
-   * `NARROW_TRAFFIC` on two lanes and `WIDE_TRAFFIC` on four. Telemetry needs it to
-   * tell "a quiet stream" from "a narrow road".
+   * Replenishment ceiling from the carriageway: `NARROW_TRAFFIC` on two lanes and
+   * `WIDE_TRAFFIC` on four. Existing visible cars can exceed it while a narrowing
+   * drains naturally; it is not a hard limit on the live count.
    */
   readonly cap: number;
   readonly sameDirection: number;
@@ -385,6 +384,7 @@ export class RoadTraffic {
    * driver can actually close on this; see `queueSpawn`.
    */
   private playerSpeed = 0;
+  private playerStepTravel = 0;
   /**
    * The player's own lateral and whether he is in a car at all, maintained with
    * `playerS` so the traffic field can carry him. A driver's rearward sensing cannot
@@ -405,6 +405,9 @@ export class RoadTraffic {
   private pedestrianVz = 0;
   private readonly groundProbeOrigin = { x: 0, y: 0, z: 0 };
   private readonly groundProbeDirection = { x: 0, y: -1, z: 0 };
+  private readonly spawnCondition: RoadConditionBuffer = {
+    surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 0,
+  };
   private settingsRef: Settings | null = null;
   private clockSync = 0;
   private coordinationTimer = 0;
@@ -548,12 +551,8 @@ export class RoadTraffic {
       fn: (neighbour: TrafficNeighbour) => void,
     ): void => {
       const along = (otherS - ownS) * owner.direction;
-      // To the near face, both ways, so a gap is bumper to bumper like every other
-      // distance the driver reasons with.
-      const faced =
-        along > 0
-          ? along - NEIGHBOUR_HALF_LENGTH_M
-          : along + NEIGHBOUR_HALF_LENGTH_M;
+      // Centre to near face, with longitudinal overlap included in both queries.
+      const faced = Math.sign(along) * Math.max(0, Math.abs(along) - NEIGHBOUR_HALF_LENGTH_M);
       if (faced > ahead || faced < -behind) return;
       buffer.s = faced;
       buffer.lateral = otherLateral * owner.direction;
@@ -673,11 +672,16 @@ export class RoadTraffic {
     for (let i = 0; i < queue.length; i++) {
       const ahead = queue[i]!;
       if (!ahead.autopilot.needsReverseRoom) continue;
-      const behind = queue[i + 1];
-      if (!behind) continue;
-      const gap = Math.abs(ahead.forwardS - behind.forwardS);
-      if (gap > YIELD_CHAIN_GAP_M) continue;
-      behind.autopilot.setYieldReverse(true);
+      for (let j = i + 1; j < queue.length; j++) {
+        const behind = queue[j]!;
+        const gap = Math.abs(ahead.forwardS - behind.forwardS);
+        if (gap > YIELD_CHAIN_GAP_M) break;
+        if (Math.abs(ahead.roadLateral - behind.roadLateral) >= ahead.roadHalfWidth + behind.roadHalfWidth) {
+          continue;
+        }
+        behind.autopilot.setYieldReverse(true);
+        break;
+      }
     }
   }
 
@@ -803,6 +807,7 @@ export class RoadTraffic {
         ? this.playerSpeed * 0.9 + (advance / dt) * 0.1
         : 0;
     this.playerLateral = playerLateral;
+    this.playerStepTravel = Math.abs(advance) < 50 ? Math.abs(advance) : 0;
     this.playerDriving = this.sourceWorld.state.player.drivingCarId !== null;
     this.playerS = playerS;
     if (this.pedestrianActive) {
@@ -820,12 +825,8 @@ export class RoadTraffic {
       this.pedestrianPrimed = true;
     }
     this.syncSettings();
-    // The widening may have changed under the stream since the last step, so the cap is
-    // re-derived here before anything is measured against it. `visible` is set on the
-    // trim below because a cap that just DROPPED — a carriageway closing — has to be
-    // honoured, and the ordinary soft target still waits for a car to fall behind.
+    // Narrowing limits replenishment, not the lifetime of cars still in view.
     this.refreshRoadCap();
-    this.trimTo(Math.ceil(this.roadCap), true);
     this.clockSync -= dt;
     if (this.clockSync <= 0) {
       this.trafficWorld.apply({
@@ -841,12 +842,11 @@ export class RoadTraffic {
     } else {
       this.desiredCount = this.scaleDesiredCount(this.roadCap);
     }
-    this.trimTo(this.desiredCount, false);
 
-    // Deadlock arbitration needs current ordering. The half-second lifetime sample is
-    // sufficient for despawning, but stale positions can grant a reversing manoeuvre
-    // after two opposing cars have already crossed.
-    for (const car of this.carList) {
+    // Refresh the shared road-frame snapshot before trimming or coordinating.
+    // Support is checked every physics step, not on the slower stuck-car timer.
+    for (let i = this.carList.length - 1; i >= 0; i--) {
+      const car = this.carList[i]!;
       car.vehicle.absoluteTranslation(this.position);
       const projection = this.road.project(this.position.x, this.position.z, car.forwardS);
       car.forwardS = projection.s;
@@ -856,9 +856,24 @@ export class RoadTraffic {
       // driver behind it has to reason about.
       const sample = this.road.sampleAt(projection.s);
       const velocity = car.vehicle.chassis.linvel();
+      const half = car.halfExtents;
+      const travelMargin = Math.hypot(velocity.x, velocity.z) * dt + this.playerStepTravel;
+      if (Math.abs(car.forwardS - playerS) + car.bodyRadius + travelMargin + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) {
+        this.removeAt(i);
+        continue;
+      }
+      const q = car.vehicle.chassis.rotation();
+      const rightX = Math.cos(sample.heading);
+      const rightZ = -Math.sin(sample.heading);
+      // Project each rotated chassis-box axis onto the road's lateral axis.
+      car.roadHalfWidth =
+        Math.abs(rightX * (1 - 2 * (q.y * q.y + q.z * q.z)) + rightZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
+        Math.abs(rightX * 2 * (q.x * q.y - q.w * q.z) + rightZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
+        Math.abs(rightX * 2 * (q.x * q.z + q.w * q.y) + rightZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
       car.forwardSpeed =
         velocity.x * Math.sin(sample.heading) + velocity.z * Math.cos(sample.heading);
     }
+    this.trimTo(this.desiredCount);
 
     // THE PAIRWISE RULES DO NOT NEED THE SUSPENSION'S CLOCK.
     //
@@ -913,10 +928,6 @@ export class RoadTraffic {
       if (car.lifetimeTimer <= 0) {
         car.lifetimeTimer = LIFETIME_SAMPLE_S;
         const offset = car.forwardS - playerS;
-        if (offset > DESPAWN_M || -offset > DESPAWN_BEHIND_M) {
-          this.removeAt(i);
-          continue;
-        }
         if (
           car.stoppedFor > STUCK_RECYCLE_S &&
           Math.abs(offset) > STUCK_RECYCLE_SIGHT_M &&
@@ -932,9 +943,11 @@ export class RoadTraffic {
       } else {
         this.serviceTurn(car);
         car.controlAccumulator += dt;
+        car.controlElapsed += dt;
         if (car.controlAccumulator >= TRAFFIC_CONTROL_INTERVAL_S) {
-          const controlDt = car.controlAccumulator;
-          car.controlAccumulator -= TRAFFIC_CONTROL_INTERVAL_S;
+          const controlDt = car.controlElapsed;
+          car.controlElapsed = 0;
+          car.controlAccumulator %= TRAFFIC_CONTROL_INTERVAL_S;
           car.autopilot.drive(controlDt, car.vehicle, car.input, originX, originZ);
         }
         car.vehicle.fixedUpdate(dt, car.input);
@@ -1076,7 +1089,7 @@ export class RoadTraffic {
     // screen can cover. Closer than THAT is a car appearing in view, and is still
     // refused. A REAR spawn drifts the other way — the player is driving away from
     // it — so its far edge is the one that has to hold, or the car materialises
-    // already outside `DESPAWN_BEHIND_M` and is collected on its first sample.
+    // already outside the physical support window.
     const offset = request.forwardS - this.playerS;
     const arrivalOk = request.rear
       ? -offset >= REAR_SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && -offset <= REAR_SPAWN_MAX_M
@@ -1090,12 +1103,15 @@ export class RoadTraffic {
     ) {
       return;
     }
+    const measure = carModelMeasure(request.modelId);
+    const bodyRadius = Math.hypot(...measure.halfExtents);
     if (
       request.lane >= this.road.lanesPerSideAt(request.forwardS) ||
-      !this.spawnSiteClear(request.forwardS, request.direction, request.lane)
+      !this.spawnSiteClear(request.forwardS, request.direction, request.lane, measure.halfExtents[0], bodyRadius)
     ) {
       return;
     }
+    if (Math.abs(offset) + bodyRadius + this.playerStepTravel + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) return;
 
     const roadPoint = this.road.sampleAt(request.forwardS);
     const forwardLateral = this.forwardLaneCentreAt(
@@ -1110,12 +1126,9 @@ export class RoadTraffic {
         ? WIDE_SPAWN_WORLD_GAP_M
         : SPAWN_WORLD_GAP_M;
     if (!this.isSpawnClear(x, z, worldGap)) return;
-    // WHERE THE OTHER CARS ARE, not which lane they were assigned. A driver in the
-    // middle of an overtake is physically in the opposing lane while its `lane` still
-    // says its own, and `roadGapClear` above — which compares nominal lanes — cannot
-    // see it. This one reads the measured arclength and lateral every car already
-    // maintains, in either direction, whatever it is doing.
-    // `forwardLateral` is already a ROAD-frame offset: it is what built x/z above.
+    // Keep the immediate spawn footprint clear of every body, in either direction,
+    // in addition to the same-direction stopping room checked by roadGapClear.
+    // `forwardLateral` is already the road-frame offset used to build x/z above.
     for (const car of this.carList) {
       if (
         Math.abs(car.forwardS - request.forwardS) < SPAWN_BODY_ALONG_M &&
@@ -1126,7 +1139,7 @@ export class RoadTraffic {
     }
     const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
     const y = carSpawnYAboveGround(
-      carModelMeasure(request.modelId),
+      measure,
       roadPoint.y,
       TRAFFIC_SPAWN_DROP_M,
     );
@@ -1172,6 +1185,9 @@ export class RoadTraffic {
       style: request.style,
       headwayS: request.headwayS,
       roadLateral: forwardLateral,
+      roadHalfWidth: measure.halfExtents[0],
+      halfExtents: measure.halfExtents,
+      bodyRadius,
       forwardSpeed: 0,
       speedCap: request.speedCap,
       pace: request.pace,
@@ -1186,6 +1202,7 @@ export class RoadTraffic {
       wasPassing: false,
       controlAccumulator:
         (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
+      controlElapsed: 0,
       turnS: -1,
     };
     // The field reads the record's live arclength and direction, so it keeps working
@@ -1269,10 +1286,13 @@ export class RoadTraffic {
     return style === 'hurried' ? 0 : lanes - 1;
   }
 
-  private spawnSiteClear(s: number, direction: TrafficDirection, lane: number): boolean {
+  private spawnSiteClear(
+    s: number, direction: TrafficDirection, lane: number,
+    halfWidth = TRAFFIC_HALF_WIDTH_M, halfLength = NEIGHBOUR_HALF_LENGTH_M,
+  ): boolean {
     const laneHalfWidth = laneHalfWidthFor(this.road.halfWidthAt(s), lane);
     if (laneHalfWidth < TRAFFIC_HALF_WIDTH_M) return false;
-    if (!this.roadGapClear(s, direction, lane)) return false;
+    if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength)) return false;
     const lateral = this.forwardLaneCentreAt(s, direction, lane);
     let clear = true;
     this.hazards.forEachAhead(
@@ -1289,14 +1309,36 @@ export class RoadTraffic {
     return this.hasSpawnGround(point.x, point.y, point.z);
   }
 
-  private roadGapClear(s: number, direction: TrafficDirection, lane: number): boolean {
+  private roadGapClear(
+    s: number, direction: TrafficDirection, lane: number,
+    halfWidth = TRAFFIC_HALF_WIDTH_M, halfLength = NEIGHBOUR_HALF_LENGTH_M,
+  ): boolean {
     const sameDirectionGap =
       this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
+    const lateral = this.forwardLaneCentreAt(s, direction, lane);
     for (const car of this.carList) {
       const gap = Math.abs(car.forwardS - s);
-      if (car.direction === direction && car.lane === lane) {
+      if (car.direction === direction && Math.abs(car.roadLateral - lateral) <= car.roadHalfWidth + halfWidth) {
         const spawnIsAhead = (s - car.forwardS) * direction > 0;
-        const requiredGap = spawnIsAhead ? SPAWN_ROAD_GAP_M : sameDirectionGap;
+        let requiredGap = sameDirectionGap;
+        if (spawnIsAhead) {
+          // A stationary spawn must leave a moving follower room to stop. Its
+          // recorded spawn lane is irrelevant after a merge, taper or overtake.
+          this.road.conditionAt(car.forwardS, this.spawnCondition);
+          const config = AUTOPILOT_MODES[car.autopilot.mode];
+          const grade = this.road.sampleAt(car.forwardS).grade * direction;
+          // Reserve half pedal, as ordinary obstacle following does, rather than
+          // relying on emergency full braking to make a newly created car safe.
+          const brake = Math.min(config.brakeAccel, car.vehicle.estimatedBrakeDecel(this.spawnCondition.surface) * 0.5) + grade * 9.81;
+          const speed = Math.max(0, car.forwardSpeed * direction);
+          const stop = speed > 0
+            ? brake > 0 ? speed * speed / (2 * brake) : Infinity
+            : 0;
+          requiredGap = Math.max(
+            SPAWN_ROAD_GAP_M,
+            car.bodyRadius + halfLength + config.brakeLead + speed * TRAFFIC_CONTROL_INTERVAL_S + stop,
+          );
+        }
         if (gap < requiredGap) return false;
       }
       if (
@@ -1442,25 +1484,22 @@ export class RoadTraffic {
    * at the player and blink out in the middle of the windscreen. Nothing can hide
    * that: a traffic car is a full Vehicle and removal is instant, with no fade.
    *
-   * `visible` is the escape hatch for the hard cap, which the player has just set
-   * and which MUST be honoured: with nothing behind, it gives up the farthest car
-   * in either direction. The soft density target instead stays unmet for a few
-   * seconds until something falls behind, which nobody can see.
+   * Both the rotating target and a natural road narrowing wait until a car falls
+   * behind. Neither is permission to make visible traffic vanish.
    */
-  private trimTo(count: number, visible: boolean): void {
+  private trimTo(count: number): void {
     while (this.carList.length > count) {
-      const index = this.pickTrimIndex(visible);
+      const index = this.pickTrimIndex();
       if (index < 0) return;
       this.removeAt(index);
     }
   }
 
   /**
-   * Farthest car behind the player, or — only for a hard cap — the farthest car in
-   * either direction. Traffic always spawns ahead and the player always drives with
-   * increasing `s`, so "behind" is exactly `playerS - forwardS`.
+   * Farthest car behind the player. The player's road frame runs with increasing
+   * `s`, so "behind" is exactly `playerS - forwardS`.
    */
-  private pickTrimIndex(visible: boolean): number {
+  private pickTrimIndex(): number {
     let best = -1;
     let bestBehind = OFFSCREEN_TRIM_M;
     for (let i = 0; i < this.carList.length; i++) {
@@ -1470,17 +1509,7 @@ export class RoadTraffic {
         best = i;
       }
     }
-    if (best >= 0 || !visible) return best;
-    let farthest = 0;
-    for (let i = 1; i < this.carList.length; i++) {
-      if (
-        Math.abs(this.carList[i]!.forwardS - this.playerS) >
-        Math.abs(this.carList[farthest]!.forwardS - this.playerS)
-      ) {
-        farthest = i;
-      }
-    }
-    return farthest;
+    return best;
   }
 
   private removeAt(index: number): void {

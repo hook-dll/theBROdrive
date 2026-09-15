@@ -731,14 +731,14 @@ function sampleCar(
 
 let ticks = 0;
 async function tick(): Promise<void> {
+  egoFieldSeat.forwardS = egoS;
+  if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   // The game feeds the player's own autopilot the stream's nearest approaching car
   // every step (`main.ts`), and the crown-crossing gate reads it. A bench that skips
   // it measures a driver with no idea what is coming.
   egoAutopilot.setLightingConditions(1, traffic.nearestOncomingDistance(egoS, 1));
   egoAutopilot.drive(FIXED_DT, ego, egoInput, 0, 0);
   ego.fixedUpdate(FIXED_DT, egoInput);
-  egoFieldSeat.forwardS = egoS;
-  if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   physics.step();
   ego.postStep();
   traffic.postStep();
@@ -1035,8 +1035,22 @@ const egoLaneRms = Math.sqrt(egoTrack.holdSumErrSq / Math.max(egoTrack.holdSampl
  */
 const STREAM_PACE_SHARE = 0.8;
 const EGO_PACE_SHARE = 0.85;
-/** And the spread a live stream needs, as a share of the same ceiling. */
-const STREAM_SPREAD_SHARE = 0.25;
+/**
+ * HOW MUCH FASTER THE HURRIED DRIVERS ARE THAN THE CAREFUL ONES, as a ratio.
+ *
+ * This used to be the aggregate quartile spread against the road's ceiling, and that
+ * proxy rewarded congestion: the spread is wide exactly when some cars are being held
+ * up, so a stream that stopped standing around scored WORSE. Measured on seed 1337
+ * after the queueing was fixed — crawl time 13.4% to 6.5%, cautious drivers 32 to 42
+ * km/h — the quartile spread fell from 21 to 7 km/h while the characters stayed
+ * ordered and separated: cautious 42, normal 46, hurried 52.
+ *
+ * So the property is measured where it lives: the styles must come out in order, and
+ * the hurried ones must be materially quicker than the careful ones. A ratio rather
+ * than km/h, because every absolute figure here is a property of the surface the
+ * district happens to have.
+ */
+const HURRIED_PACE_RATIO = 1.15;
 console.log('');
 check(
   'the driver holds its line',
@@ -1059,10 +1073,18 @@ if (!SOLO) {
     `median ${per(paceByCar, 0.5).toFixed(0)} km/h of the ${streamCeilingKmh.toFixed(0)} this road allows ` +
       `(${((per(paceByCar, 0.5) / Math.max(streamCeilingKmh, 1e-3)) * 100).toFixed(0)}%)`,
   );
+  const cautiousPace = per(paceByStyle.get('cautious') ?? [], 0.5);
+  const normalPace = per(paceByStyle.get('normal') ?? [], 0.5);
+  const hurriedPace = per(paceByStyle.get('hurried') ?? [], 0.5);
   check(
     'the stream is not one speed',
-    per(paceByCar, 0.75) - per(paceByCar, 0.25) >= STREAM_SPREAD_SHARE * streamCeilingKmh,
-    `p75-p25 ${(per(paceByCar, 0.75) - per(paceByCar, 0.25)).toFixed(0)} km/h of ${streamCeilingKmh.toFixed(0)}`,
+    cautiousPace > 0 &&
+      normalPace >= cautiousPace &&
+      hurriedPace >= normalPace &&
+      hurriedPace >= cautiousPace * HURRIED_PACE_RATIO,
+    `medians cautious ${cautiousPace.toFixed(0)}, normal ${normalPace.toFixed(0)}, ` +
+      `hurried ${hurriedPace.toFixed(0)} km/h (hurried/cautious ` +
+      `${(hurriedPace / Math.max(cautiousPace, 1e-3)).toFixed(2)}, bound ${HURRIED_PACE_RATIO})`,
   );
   check(
     'traffic meets traffic without contact',

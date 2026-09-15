@@ -31,6 +31,7 @@ import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { installAssetShim } from './assetshim';
+import type { DriveRoad } from '../src/world/road';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -306,7 +307,7 @@ async function measureLooseSurface(mode: AutopilotMode): Promise<LooseSurfaceMet
  * road never reaches the second hazard, so the breakable check would only ever be
  * measuring the first one's success.
  */
-function addHazardCollider(rig: Rig, hazard: RoadHazard): void {
+function addHazardCollider(rig: Rig, hazard: RoadHazard): () => void {
   const point = rig.road.offsetPoint(hazard.s, hazard.lateral);
   const body = rig.physics.world.createRigidBody(
     rig.physics.rapier.RigidBodyDesc.fixed().setTranslation(
@@ -319,6 +320,7 @@ function addHazardCollider(rig: Rig, hazard: RoadHazard): void {
     rig.physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
     body,
   );
+  return () => rig.physics.removeBody(body);
 }
 
 /**
@@ -364,6 +366,7 @@ async function driveHazard(
   rig: Rig;
   worstLateral: number;
   chunk: string;
+  removeCollider: () => void;
 }> {
   const hazards = new HazardIndex();
   const chunk = 'autopilot-bench-hazards';
@@ -371,7 +374,7 @@ async function driveHazard(
   const rig = await makeRig(startS, ROUTE_METRES, hazards);
   rig.autopilot.setTrafficRecoveryPolicy(true);
   rig.autopilot.setEngaged(true);
-  addHazardCollider(rig, hazard);
+  const removeCollider = addHazardCollider(rig, hazard);
   let minDistance = Infinity;
   let speedAtClosest = 0;
   let commandedAtClosest = 0;
@@ -457,6 +460,7 @@ async function driveHazard(
     rig,
     worstLateral,
     chunk,
+    removeCollider,
   };
 }
 
@@ -767,24 +771,39 @@ async function checkHazards(): Promise<void> {
       pile.speedAtClosest <= 6,
     `passed/rejoined=${pile.passed}/${pile.rejoined}, clearance ${pile.minDistance.toFixed(2)} m at ${pile.speedAtClosest.toFixed(2)} m/s`,
   );
-  // Unloading the chunk must give the road back.
-  wall.rig.hazards.forget(wall.chunk);
-  // The contract is that the road is given back, measured as ground covered: the
-  // bench's physical boulder is still in the world, so how much SPEED the car can
-  // reach afterwards is a fact about that collider, not about the hazard index.
-  const beforeForget = wall.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+  // RELEASING THE ROAD IS MEASURED ON A DRIVER THAT STILL HAS ONE.
+  //
+  // This used to reuse the 45 s wall rig above, which by then has spent two escape
+  // attempts and is sitting off the asphalt, immobile, with its corridor already
+  // clear — so the 0.2 m it then covered was a fact about the sand it was bogged in,
+  // not about the hazard index. A shorter run leaves the car stopped on the road in
+  // front of the boulder, with it still in the corridor and no escape attempt having
+  // taken the body off the asphalt yet: that is the state a release has to undo.
+  const release = await driveHazard(
+    { s: hazardStartS + 300, lateral: 0, radius: 6, breakable: false },
+    20,
+    hazardStartS,
+  );
+  const blockedBefore = release.rig.autopilot.laneBlockDistance;
+  release.rig.hazards.forget(release.chunk);
+  release.removeCollider();
+  const beforeForget = release.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
   const startX = beforeForget.x;
   const startZ = beforeForget.z;
   let covered = 0;
   for (let i = 0; i < Math.ceil(20 / FIXED_DT); i++) {
-    step(wall.rig);
-    const p = wall.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+    step(release.rig);
+    const p = release.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
     covered = Math.max(covered, Math.hypot(p.x - startX, p.z - startZ));
   }
   check(
-    'forget removes hazards and the car moves again',
-    covered > 3,
-    `${covered.toFixed(1)} m covered after forget`,
+    'forget removes hazards and the car drives away',
+    blockedBefore < Infinity &&
+      release.rig.autopilot.laneBlockDistance === Infinity &&
+      covered > 3,
+    `blocked at ${blockedBefore.toFixed(1)} m before, ${
+      release.rig.autopilot.laneBlockDistance === Infinity ? 'clear' : 'still blocked'
+    } after, ${covered.toFixed(1)} m covered`,
   );
 }
 
@@ -901,6 +920,114 @@ async function checkWedgedOffRoad(): Promise<void> {
 }
 
 /**
+ * Keep sensor targets physical, but remove road curvature and surface variation so
+ * these checks isolate which target owns emergency braking and passing pace.
+ */
+async function checkPassingSafety(): Promise<void> {
+  const rig = await makeRig();
+  const flat: DriveRoad = {
+    length: 100_000,
+    conditionAt(_s, out) { Object.assign(out, { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0 }); },
+    sampleAt(s) { return { s, x: 0, y: 0, z: s, heading: 0, grade: 0, curvature: 0 }; },
+    curvatureAt() { return 0; },
+    bankingAt() { return 0; },
+    sightDistanceAt(_s, limit) { return limit; },
+    project(x, z) { return { s: z, lateral: x, height: 0 }; },
+    offsetPoint(s, lateral, out = { x: 0, y: 0, z: 0 }) {
+      return Object.assign(out, { x: lateral, y: 0, z: s });
+    },
+    halfWidthAt() { return 2.9; },
+    lanesPerSideAt() { return 1; },
+    laneCentreAt() { return -1.45; },
+  };
+  const body = (x: number, z: number, speedMps: number) => {
+    const other = rig.physics.addDynamicBox(
+      { x: 0.9, y: 0.8, z: 2.3 }, { x, y: 1, z }, 1_000,
+    ).body;
+    other.setGravityScale(0, true);
+    other.setLinearDamping(0);
+    other.setLinvel({ x: 0, y: 0, z: speedMps }, true);
+    return other;
+  };
+  const lead = body(-1.45, 1012.3, 20);
+  const oncoming = body(1.45, 1022.3, -20);
+  const placeEgo = (): void => {
+    rig.vehicle.rescueTo(1.45, 1, 1_000, 0);
+    rig.vehicle.chassis.setGravityScale(0, true);
+    rig.vehicle.chassis.setLinvel({ x: 0, y: 0, z: 20 }, true);
+  };
+  placeEgo();
+  const emergency = new Autopilot(flat, new HazardIndex(), rig.physics);
+  emergency.setMode('hurried');
+  emergency.setSpeedCap(20);
+  emergency.setEngaged(true);
+  for (let i = 0; i < 2; i++) {
+    rig.physics.step();
+    emergency.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
+  }
+  check(
+    'a closer home-lane leader cannot mask oncoming emergency braking',
+    rig.input.brake === 1 && rig.input.throttle === 0,
+    `brake ${rig.input.brake.toFixed(2)}, throttle ${rig.input.throttle.toFixed(2)}`,
+  );
+
+  rig.physics.removeBody(oncoming);
+  lead.setTranslation({ x: -1.45, y: 1, z: 1032.3 }, true);
+  lead.setLinvel({ x: 0, y: 0, z: 16 }, true);
+  placeEgo();
+  const passing = new Autopilot(flat, new HazardIndex(), rig.physics);
+  passing.setMode('hurried');
+  passing.setSpeedCap(20);
+  passing.setEngaged(true);
+  for (let i = 0; i < 8; i++) {
+    rig.physics.step();
+    passing.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
+  }
+  check(
+    'a clear committed overtake keeps its kickdown allowance',
+    passing.passAttempt && passing.targetSpeed > 20 && rig.input.throttle > 0,
+    `pass ${passing.passAttempt}, target ${passing.targetSpeed.toFixed(2)} m/s, throttle ${rig.input.throttle.toFixed(2)}`,
+  );
+
+  const wide: DriveRoad = {
+    ...flat,
+    halfWidthAt() { return 5.8; },
+    lanesPerSideAt() { return 2; },
+    laneCentreAt(_s, lane) { return -1.45 - 2.9 * lane; },
+  };
+  rig.vehicle.rescueTo(-2.3, 1, 1_000, 0);
+  rig.vehicle.chassis.setLinvel({ x: 0, y: 0, z: 17 }, true);
+  lead.setTranslation({ x: -1.45, y: 1, z: 1027.3 }, true);
+  lead.setLinvel({ x: 0, y: 0, z: 10 }, true);
+  const rear = body(-4.35, 970, 35);
+  const merging = new Autopilot(wide, new HazardIndex(), rig.physics);
+  merging.setMode('frantic');
+  merging.setSpeedCap(30);
+  merging.setTrafficField({
+    forEachNear(ahead, behind, visit) {
+      const along = rear.translation().z - rig.vehicle.chassis.translation().z;
+      const s = Math.sign(along) * Math.max(0, Math.abs(along) - 2.3);
+      if (s > ahead || s < -behind) return;
+      visit({ s, lateral: -4.35, speed: rear.linvel().z, halfWidth: 0.9, halfLength: 2.3 });
+    },
+  });
+  merging.setEngaged(true);
+  let furthestRight = -2.3;
+  for (let i = 0; i < 60; i++) {
+    rig.physics.step();
+    merging.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
+    furthestRight = Math.min(furthestRight, merging.commandedLine);
+  }
+  check(
+    'a faster rear neighbour blocks lattice entries into its lane',
+    furthestRight >= -4.35 + 0.9 + 1.05 - 1e-6,
+    `furthest commanded line ${furthestRight.toFixed(2)} m, rear lane -4.35 m`,
+  );
+  rig.vehicle.dispose();
+  rig.physics.world.free();
+}
+
+/**
  * OVERTAKING A SLOWER CAR WITH THE OPPOSING LANE EMPTY, with a second real car on
  * the road rather than a hazard: the only scenario in which the driver's own line
  * leaves its lane while a moving body stays in it, and every fault this defends
@@ -913,15 +1040,16 @@ async function checkOvertake(): Promise<void> {
   const leadCap = 12;
   const seconds = 30;
   const road = new Road(42);
+  const startS = narrowStart(road, START_S, 2_400);
   const physics = await PhysicsWorld.create();
-  addRoadCollider(physics, road, START_S - 60, START_S + 2_400);
+  addRoadCollider(physics, road, startS - 60, startS + 2_400);
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
   const hazards = new HazardIndex();
   const lane = -ROAD_HALF_WIDTH / 2;
-  const chaserState = { ...carState(road, START_S, lane), id: 'overtake-chaser' };
-  const leadState = { ...carState(road, START_S + leadAhead, lane), id: 'overtake-lead' };
+  const chaserState = { ...carState(road, startS, lane), id: 'overtake-chaser' };
+  const leadState = { ...carState(road, startS + leadAhead, lane), id: 'overtake-lead' };
   world.state.cars[chaserState.id] = chaserState;
   world.state.cars[leadState.id] = leadState;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
@@ -1510,6 +1638,7 @@ async function run(): Promise<void> {
   console.log(`autopilot bench: real Road surface collider, ${carModel(MODEL_ID).label}, fixed 60 Hz`);
   checkHandover();
   await checkAutomaticLights();
+  await checkPassingSafety();
   if (process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
     await checkHazards();

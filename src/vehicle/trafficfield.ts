@@ -23,7 +23,10 @@
 
 /** One other vehicle, expressed in the asking driver's own road frame. */
 export interface TrafficNeighbour {
-  /** Road metres to its NEAR FACE, ahead of the asking driver; negative is behind. */
+  /**
+   * Road metres from the asking driver's centre to the other's near longitudinal
+   * face; negative is behind. Overlap is zero, included in both front/rear queries.
+   */
   readonly s: number;
   /** Signed lateral in the asking driver's frame: positive is to its left. */
   readonly lateral: number;
@@ -40,5 +43,6 @@ export interface TrafficNeighbour {
  * condition and sample buffers: read it, never retain it.
  */
 export interface TrafficField {
+  /** Inclusive ranges: zero-distance overlap is visited even when either range is zero. */
   forEachNear(ahead: number, behind: number, fn: (neighbour: TrafficNeighbour) => void): void;
 }

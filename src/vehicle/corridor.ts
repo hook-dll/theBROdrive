@@ -131,6 +131,10 @@ export interface CorridorRequest {
    * position or come home, and never go further out.
    */
   readonly lateralFreedom?: number;
+  /** Hard permission to occupy a line across the crown, independent of its price. */
+  readonly mayCrossCrown: boolean;
+  /** Hard permission for the entire transition to a line, not only its destination. */
+  readonly lineAllowed?: (line: number) => boolean;
   /**
    * What this driver thinks of the opposing lane, in cost. Low is bold: it is the
    * single knob that used to be a page of passing thresholds.
@@ -140,15 +144,8 @@ export interface CorridorRequest {
   readonly oncomingGap: number;
   /** Assumed speed of an unseen car coming the other way. */
   readonly oncomingSpeed: number;
-  /**
-   * Speed the driver will actually make while it is alongside something STOPPED.
-   *
-   * Not the same number as `desiredSpeed`, and the difference is the whole reason
-   * opposing traffic used to meet head-on: the speed plan eases past a stopped thing
-   * at walking pace, so a crossing sized on the driver's intended speed is three
-   * seconds of plan and fifteen seconds of road.
-   */
-  readonly bypassSpeed: number;
+  /** Slowest speed at which a pending lateral move may be driven. */
+  readonly manoeuvreFloorSpeed: number;
   /**
    * Speed the driver will really make while it is out in the opposing lane with a
    * CLEAR line — its cruise plus whatever kickdown it spends on a pass.
@@ -175,7 +172,9 @@ export interface CorridorRequest {
 export interface CorridorPlan {
   /** Lateral line to command. */
   readonly line: number;
-  /** Is there a line whose corridor has nothing immovable inside stopping range? */
+  /** The chosen line passed every hard permission and geometry gate. */
+  readonly admissible: boolean;
+  /** The line is admissible and has nothing immovable inside stopping range. */
   readonly feasible: boolean;
   /**
    * No corridor was found, and the reason is a car coming the other way rather than
@@ -192,6 +191,8 @@ export interface CorridorPlan {
   /** Nearest thing in the chosen corridor and how fast it is going, or Infinity. */
   readonly blockDistance: number;
   readonly blockSpeed: number;
+  /** Speed allowed by this line's pending lateral move; Infinity means no deadline. */
+  readonly manoeuvreSpeed: number;
   /** True while the chosen line is on the wrong side of the centre for this driver. */
   readonly usesOncomingLane: boolean;
   /** True while the chosen line puts the body past the asphalt. */
@@ -208,6 +209,11 @@ export interface CorridorPlan {
 
 /** Lateral resolution of the search. A quarter of a metre is a tenth of a car. */
 const LINE_STEP_M = 0.25;
+/**
+ * Shifts of at most 40 cm need no separate manoeuvre deadline. This is the existing
+ * controller's half-detour threshold; ordinary corridor braking still owns its blocks.
+ */
+const MANOEUVRE_SHIFT_MIN_M = 0.4;
 /** Cost per metre of deviation from the driver's own lane. */
 const LANE_COST_PER_M = 1;
 /**
@@ -346,6 +352,15 @@ function sweptOverlap(
  * whose corridor is clear and whose price is beaten by the speed it buys.
  */
 export function planCorridor(request: CorridorRequest): CorridorPlan {
+  return solveCorridor(request);
+}
+
+/** Evaluate an executable or held line with exactly the search's geometry and gates. */
+export function evaluateCorridorLine(request: CorridorRequest, line: number): CorridorPlan {
+  return solveCorridor(request, line);
+}
+
+function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPlan {
   const {
     ownLateral,
     previousLine,
@@ -360,7 +375,7 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     oncomingLaneCost,
     oncomingGap,
     oncomingSpeed,
-    bypassSpeed,
+    manoeuvreFloorSpeed,
     crossingSpeed,
     laneCentres = [laneOffset],
     lateralFreedom = Number.POSITIVE_INFINITY,
@@ -368,11 +383,15 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     stopRoom,
     crossingRearClear,
     obstacles,
+    mayCrossCrown,
+    lineAllowed,
   } = request;
   let bestLine = laneOffset;
   let bestCost = Number.POSITIVE_INFINITY;
   let bestBlockDistance = Number.POSITIVE_INFINITY;
   let bestBlockSpeed = 0;
+  let bestManoeuvreSpeed = Number.POSITIVE_INFINITY;
+  const manoeuvreCeilingSpeed = Math.max(desiredSpeed, crossingSpeed);
   const ownSide = Math.sign(laneOffset - oncomingBoundary || -1);
   /**
    * Is the body ALREADY on the other side of the crown? Two rules below are about
@@ -381,15 +400,19 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
    */
   const alreadyAcross = (ownLateral - oncomingBoundary) * ownSide < -halfWidth * 0.5;
   let bestFeasible = false;
+  let bestAdmissible = false;
   // What blocks the driver's OWN lane, once, for every candidate to reason about:
   // it is the thing a detour or an overtake exists to get past, and whether it is
   // moving decides which of the two is even allowed.
   let laneBlockDistance = Number.POSITIVE_INFINITY;
   let laneBlockSpeed = 0;
   let laneBlockLateral = laneOffset;
+  // The slowest own-lane body is not necessarily the nearest one.
+  let leaderSpeed = crossingSpeed;
   for (const obstacle of obstacles) {
     if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) continue;
     if (!overlaps(obstacle, laneOffset, halfWidth)) continue;
+    leaderSpeed = Math.min(leaderSpeed, obstacle.speed);
     if (obstacle.s >= laneBlockDistance) continue;
     laneBlockDistance = obstacle.s;
     laneBlockSpeed = obstacle.speed;
@@ -412,19 +435,28 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
   const nearness = (distance: number): number =>
     distance >= horizon ? 0 : 1 - distance / horizon;
 
-  const evaluate = (line: number): void => {
-    if (Math.abs(line) > edgeLimit) return;
-    if (Math.abs(line - laneOffset) > lateralFreedom) return;
+  const evaluate = (line: number, captureRejected = false): void => {
+    const crossesCentre =
+      (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
+    let admissible =
+      Math.abs(line) <= edgeLimit &&
+      Math.abs(line - laneOffset) <= lateralFreedom &&
+      (!crossesCentre || mayCrossCrown) &&
+      (lineAllowed?.(line) ?? true);
+    if (!admissible && !captureRejected) return;
+    const shift = Math.abs(line - ownLateral);
     // Road covered while the line is being moved there, from the manoeuvre's own arc.
     // A car that is barely moving covers almost none of it, which is what the old
     // slope needed a standstill special case for.
     const transitionDistance =
-      speed * 2 * Math.sqrt(Math.abs(line - ownLateral) / Math.max(lineAccel, 1e-3));
+      speed * 2 * Math.sqrt(shift / Math.max(lineAccel, 1e-3));
     let blockDistance = Number.POSITIVE_INFINITY;
     let blockSpeed = 0;
     let hardBlockDistance = Number.POSITIVE_INFINITY;
     /** The same, counting only what cannot drive away. See `CorridorObstacle.movable`. */
     let wallDistance = Number.POSITIVE_INFINITY;
+    let manoeuvreRoom = Number.POSITIVE_INFINITY;
+    let manoeuvrePastSpeed = 0;
     for (const obstacle of obstacles) {
       // NEVER STEER TOWARD A CAR ALONGSIDE, NEVER STEER THROUGH ONE, and never be
       // trapped by one either.
@@ -465,8 +497,22 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
           gapNow >= reach &&
           (obstacle.lateral - ownLateral) * (obstacle.lateral - line) <= 0;
         const closest = through ? 0 : Math.min(gapNow, gapThere);
-        if (closest < reach && closest < gapNow) return;
+        if (closest < reach && closest < gapNow) {
+          admissible = false;
+          if (!captureRejected) return;
+        }
         continue;
+      }
+      // Only a body the present band touches and the destination clears sets the
+      // move's deadline. A body still in the destination belongs to corridor braking.
+      if (
+        shift > MANOEUVRE_SHIFT_MIN_M &&
+        obstacle.s >= 0 && obstacle.s < manoeuvreRoom &&
+        overlaps(obstacle, ownLateral, halfWidth) &&
+        !overlaps(obstacle, line, halfWidth)
+      ) {
+        manoeuvreRoom = obstacle.s;
+        manoeuvrePastSpeed = Math.max(0, obstacle.speed);
       }
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
       if (!sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance, speed)) {
@@ -482,36 +528,34 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       if (obstacle.s < hardBlockDistance) hardBlockDistance = obstacle.s;
       if (!obstacle.movable && obstacle.s < wallDistance) wallDistance = obstacle.s;
     }
-    const crossesCentre =
-      (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
+    // Invert the same two lateral-acceleration arcs used by the swept test. The
+    // obstacle's speed matters: room is closing distance, not distance past a rock.
+    const manoeuvreSpeed = manoeuvreRoom < Number.POSITIVE_INFINITY
+      ? Math.max(
+          manoeuvreFloorSpeed,
+          Math.min(
+            manoeuvreCeilingSpeed,
+            manoeuvrePastSpeed + 0.5 * manoeuvreRoom * Math.sqrt(lineAccel / shift),
+          ),
+        )
+      : Number.POSITIVE_INFINITY;
     if (crossesCentre) {
       // Room for a car coming the other way is not a preference. The manoeuvre
       // lasts as long as it takes to get past whatever is in our own lane, and an
       // oncoming car covers its own road while it happens.
-      const ownLaneBlock = obstacles.reduce((nearest, obstacle) => {
-        if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return nearest;
-        if (!overlaps(obstacle, laneOffset, halfWidth)) return nearest;
-        return Math.min(nearest, obstacle.s);
-      }, Number.POSITIVE_INFINITY);
-      const leaderSpeed = obstacles.reduce((slowest, obstacle) => {
-        if (obstacle.abeam || obstacle.s < 0 || obstacle.s > horizon) return slowest;
-        if (!overlaps(obstacle, laneOffset, halfWidth)) return slowest;
-        return Math.min(slowest, obstacle.speed);
-      }, crossingSpeed);
+      const ownLaneBlock = laneBlockDistance;
       // OVERHAULING SOMETHING MOVING AND GOING ROUND SOMETHING STOPPED ARE TIMED
       // DIFFERENTLY, and using the overhaul sum for both is how the crossing became a
       // head-on. Against a moving car the manoeuvre ends when the speed difference has
       // eaten the gap. Against a stopped one there is no speed difference to spend: it
       // ends when the car has driven the length of the thing and got back.
       //
-      // And the speed it drives that at is a property of THIS candidate line, not of
-      // the driver's mood. A line that clears the obstruction is driven past at road
-      // speed; a line that is still squeezing past it is driven at `bypassSpeed`,
-      // because that is what the speed plan will do with a corridor that still has
-      // something in it. Pricing every crossing at the crawl locked the whole road:
-      // measured, 77% of car-time below walking pace and nobody crossing at all.
-      const squeezing = blockDistance < Number.POSITIVE_INFINITY;
-      const passSpeed = squeezing ? bypassSpeed : Math.max(speed, crossingSpeed);
+      // A pending move is driven at THIS candidate's executable speed. Once the
+      // current band already clears the obstacle there is no lateral deadline and
+      // the pass uses its full allowance. No previous line's cap enters this search.
+      const passSpeed = Number.isFinite(manoeuvreSpeed)
+        ? manoeuvreSpeed
+        : Math.max(speed, crossingSpeed);
       const manoeuvreSeconds =
         leaderSpeed > SHOULDER_BYPASS_MAX_SPEED
           ? (Math.min(ownLaneBlock, horizon) + CLEAR_M) /
@@ -546,7 +590,8 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       if (!firstToTheGap && oncomingGap < roomNeeded) {
         crossingRefused = true;
         if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
-        return;
+        admissible = false;
+        if (!captureRejected) return;
       }
       // A CROSSING REFUSED BECAUSE SOMETHING IS COMING IS NOT A DEAD END.
       //
@@ -566,7 +611,8 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
       if (!crossingRearClear && !alreadyAcross) {
         crossingRefused = true;
         if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
-        return;
+        admissible = false;
+        if (!captureRejected) return;
       }
     }
     const bodyEdge = Math.abs(line) + halfWidth;
@@ -574,32 +620,36 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     // The sand is for getting round something that is not going anywhere. Left
     // unpriced, the planner undertook moving traffic on the shoulder because sand
     // was cheaper than losing pace.
-    if (leavesAsphalt && !laneBlockIsStill) return;
-    let cost =
-      Math.abs(line - laneOffset) * LANE_COST_PER_M +
-      Math.max(0, bodyEdge - asphaltLimit) * SHOULDER_COST_PER_M +
-      (crossesCentre ? oncomingLaneCost : 0);
-    // Immovable things are passed on the right, so that two opposing streams go
-    // round the same one and still clear each other.
-    if (laneBlockDistance < Number.POSITIVE_INFINITY && laneBlockIsStill && line > laneBlockLateral) {
-      cost += LEFT_PASS_COST;
+    if (leavesAsphalt && !laneBlockIsStill) admissible = false;
+    if (!admissible && !captureRejected) return;
+    let cost = Number.POSITIVE_INFINITY;
+    if (admissible) {
+      cost =
+        Math.abs(line - laneOffset) * LANE_COST_PER_M +
+        Math.max(0, bodyEdge - asphaltLimit) * SHOULDER_COST_PER_M +
+        (crossesCentre ? oncomingLaneCost : 0);
+      // Immovable things are passed on the right, so that two opposing streams go
+      // round the same one and still clear each other.
+      if (laneBlockDistance < Number.POSITIVE_INFINITY && laneBlockIsStill && line > laneBlockLateral) {
+        cost += LEFT_PASS_COST;
+      }
+      if (hardBlockDistance < Number.POSITIVE_INFINITY) {
+        cost += BLOCK_COST * nearness(hardBlockDistance);
+      } else if (blockDistance < Number.POSITIVE_INFINITY) {
+        cost +=
+          Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
+      }
+      if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;
     }
-    if (hardBlockDistance < Number.POSITIVE_INFINITY) {
-      cost += BLOCK_COST * nearness(hardBlockDistance);
-    } else if (blockDistance < Number.POSITIVE_INFINITY) {
-      cost +=
-        Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
-    }
-    if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;
     // FEASIBLE MEANS "NOTHING IMMOVABLE IN IT WITHIN STOPPING DISTANCE".
     //
     // A car in the corridor is a reason to slow down, never a reason to conclude the
     // road has no way through: the driver in front is going somewhere, and the queue
     // behind it is traffic behaving correctly. Only scenery closes a corridor.
-    const feasible = wallDistance > stopRoom;
+    const feasible = admissible && wallDistance > stopRoom;
     // A feasible corridor always beats an infeasible one, however cheap.
     const better =
-      bestCost === Number.POSITIVE_INFINITY ||
+      !bestAdmissible ||
       (feasible && !bestFeasible) ||
       (feasible === bestFeasible && cost < bestCost);
     if (!better) return;
@@ -607,25 +657,40 @@ export function planCorridor(request: CorridorRequest): CorridorPlan {
     bestCost = cost;
     bestBlockDistance = blockDistance;
     bestBlockSpeed = blockSpeed;
+    bestManoeuvreSpeed = manoeuvreSpeed;
     bestFeasible = feasible;
+    bestAdmissible = admissible;
   };
 
   // Exact centres matter: the quarter-metre avoidance lattice would otherwise shave
   // clearance from a lane by centimetres. `laneCentres` includes every lane on this
   // side; only a line across the explicit crown boundary pays the opposing gate.
-  for (const laneCentre of laneCentres) evaluate(laneCentre);
-  const first = Math.ceil(-edgeLimit / LINE_STEP_M) * LINE_STEP_M;
-  for (let line = first; line <= edgeLimit + 1e-6; line += LINE_STEP_M) {
-    evaluate(line);
+  if (fixedLine !== undefined) {
+    evaluate(fixedLine, true);
+  } else {
+    for (const laneCentre of laneCentres) evaluate(laneCentre);
+    const first = Math.ceil(-edgeLimit / LINE_STEP_M) * LINE_STEP_M;
+    for (let line = first; line <= edgeLimit + 1e-6; line += LINE_STEP_M) {
+      evaluate(line);
+    }
+    if (!bestAdmissible) {
+      // Keep actual occupied-corridor metrics, but never advertise a failed search
+      // as a clear route just because its default line had no samples.
+      evaluate(ownLateral, true);
+      bestAdmissible = false;
+      bestFeasible = false;
+    }
   }
 
   return {
     line: bestLine,
+    admissible: bestAdmissible,
     feasible: bestFeasible,
     waitingForOncoming: waitingForOncoming && !bestFeasible,
     crossingRefused,
     blockDistance: bestBlockDistance,
     blockSpeed: bestBlockSpeed,
+    manoeuvreSpeed: bestManoeuvreSpeed,
     usesOncomingLane:
       (bestLine - oncomingBoundary) * ownSide < -halfWidth * 0.5,
     usesShoulder: Math.abs(bestLine) + halfWidth > asphaltLimit,

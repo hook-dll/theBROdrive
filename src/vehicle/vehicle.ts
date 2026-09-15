@@ -2020,6 +2020,8 @@ export class Vehicle implements Rebasable {
   private indicatorLit = false;
   /** One selected compound for every wheel; standard preserves existing handling. */
   private tyreCompoundIndex = 1;
+  /** Measured full-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
+  private measuredBrakeDecelValue = 0;
 
   /**
    * Seconds the dashboard's warning lamp still owes the player.
@@ -2488,6 +2490,15 @@ export class Vehicle implements Rebasable {
       worstTyreGrip *
       this.handling.rearAxleSideGrip
     );
+  }
+
+  /**
+   * Deceleration a floored foot brake really produced authority for on the last
+   * physics step, m/s². Zero until the first wheel pass has run, so a caller with no
+   * measurement yet falls back to `estimatedBrakeDecel`.
+   */
+  get measuredBrakeDecel(): number {
+    return this.measuredBrakeDecelValue;
   }
 
   /** Stable straight-line braking capacity on a named surface, in m/s². */
@@ -3623,6 +3634,17 @@ export class Vehicle implements Rebasable {
       FOOT_BRAKE_GRIP_RATIO * brakeCapacityN,
     );
     const footBrakeForce = brakeDenom > 0 ? footBrakeDemandN / brakeDenom : 0;
+    // WHAT A FLOORED PEDAL WILL REALLY PRODUCE, as an acceleration, published for the
+    // autonomous speed planner.
+    //
+    // `estimatedBrakeDecel` is an idealisation: nominal grip, nominal mass, no load
+    // history. This is the demand the pedal is actually scaled against this step, over
+    // the mass it has to stop, so it carries the low-passed wheel loads, the surface
+    // each wheel is standing on, an airborne wheel contributing nothing, and the tyre
+    // fitted. Measured on the boxed-in bench: the planner believed 4.0 m/s² of capped
+    // pedal and the car delivered 2.46, arrived at a rock it had braked for from 34 m
+    // still doing 5 m/s, and hit it.
+    this.measuredBrakeDecelValue = mass > 0 ? footBrakeDemandN / mass : 0;
     const parkingBrakeForce = input.handbrake
       ? (PARK_BRAKE_DECEL * mass) / Math.max(1, this.wheels.length)
       : 0;

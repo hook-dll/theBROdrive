@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
-import { loadCarModel } from '../src/render/carmodel';
+import { carModelMeasure, loadCarModel } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
+import type { Autopilot } from '../src/vehicle/autopilot';
+import type { Vehicle } from '../src/vehicle/vehicle';
 import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
@@ -11,7 +13,8 @@ import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { RoadTraffic } from '../src/world/traffic';
 import { Terrain } from '../src/world/terrain';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
-import { lanesPerSideAt } from '../src/world/roadprofile';
+import { widenessAt } from '../src/world/roadprofile';
+import { PHYSICS_REACH_M } from '../src/world/chunks';
 import { installAssetShim } from './assetshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
@@ -45,12 +48,19 @@ function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
 }
 
-/** First arclength where the carriageway offers two lanes each way. */
-function findWideS(road: Road): number {
-  for (let s = PLAYER_S; s < 400_000; s += 100) {
-    if (lanesPerSideAt(SEED, s) === 2) return s;
+/** Select a uniform density band, not just a narrow/wide point under the player. */
+function findUniformS(road: Road, wideness: 0 | 1): number {
+  for (let s = PLAYER_S; s < Math.min(road.length - PHYSICS_REACH_M, 400_000); s += 100) {
+    let uniform = true;
+    for (let offset = 0; offset <= PHYSICS_REACH_M; offset += 10) {
+      if (widenessAt(SEED, s + offset) !== wideness) {
+        uniform = false;
+        break;
+      }
+    }
+    if (uniform) return s;
   }
-  throw new Error('no widened stretch on this seed');
+  throw new Error(`no uniform ${wideness === 0 ? 'narrow' : 'wide'} density band on this seed`);
 }
 
 function addRoadCollider(physics: PhysicsWorld, road: Road): void {
@@ -115,15 +125,59 @@ function sampleStoppedTraffic(): void {
     if (!live.has(id)) stoppedFor.delete(id);
   }
 }
+// Observe dt delivered to real controllers, including their staggered first calls.
+type ClockCar = { settleFor: number; autopilot: Autopilot; vehicle: Vehicle; modelId: string; forwardS: number };
+// Bench-only access to the live records; controls are still the real Autopilots.
+const clockTraffic = traffic as unknown as { carList: ClockCar[] };
+const clocks = new Map<ClockCar, { elapsed: number; delivered: number }>();
+let clockCalls = 0;
+let clockError = 0;
+function observeControlClocks(): void {
+  for (const car of clockTraffic.carList) {
+    let clock = clocks.get(car);
+    if (!clock) {
+      clock = { elapsed: 0, delivered: 0 };
+      clocks.set(car, clock);
+      const observed = clock;
+      const drive = car.autopilot.drive.bind(car.autopilot);
+      car.autopilot.drive = (...args: Parameters<Autopilot['drive']>) => {
+        observed.delivered += args[0];
+        clockCalls++;
+        clockError = Math.max(clockError, Math.abs(observed.delivered - observed.elapsed));
+        return drive(...args);
+      };
+    }
+    if (car.settleFor <= 0) clock.elapsed += FIXED_DT;
+  }
+}
+let unsupportedSamples = 0;
+let supportSamples = 0;
+function sampleTrafficSupport(playerS: number): void {
+  const position = { x: 0, y: 0, z: 0 };
+  for (const car of clockTraffic.carList) {
+    car.vehicle.absoluteTranslation(position);
+    const s = road.project(position.x, position.z, car.forwardS).s;
+    const half = carModelMeasure(car.modelId).halfExtents;
+    if (Math.abs(s - playerS) + Math.hypot(...half) >= PHYSICS_REACH_M) unsupportedSamples++;
+    supportSamples++;
+  }
+}
 for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
+  observeControlClocks();
   traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
   physics.step();
   traffic.postStep();
+  sampleTrafficSupport(PLAYER_S);
   sampleStoppedTraffic();
   largestCount = Math.max(largestCount, traffic.status.count);
   if (traffic.status.count > 0) smallestPopulated = Math.min(smallestPopulated, traffic.status.count);
   if (step % 6 === 0) await Bun.sleep(0);
 }
+check(
+  'controller elapsed time never counts scheduler remainder twice',
+  clockCalls > 0 && clockError < 1e-9,
+  `${clockCalls} calls, maximum elapsed error ${clockError.toExponential(2)} s`,
+);
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
@@ -183,6 +237,7 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0, 0);
   physics.step();
   traffic.postStep();
+  sampleTrafficSupport(movingPlayerS);
   sampleStoppedTraffic();
   const sample = traffic.status;
   largestCount = Math.max(largestCount, sample.count);
@@ -195,6 +250,11 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   }
   if (step % 12 === 0) await Bun.sleep(0);
 }
+check(
+  'active traffic bodies stay within guaranteed physical support',
+  supportSamples > 0 && unsupportedSamples === 0,
+  `${unsupportedSamples} unsupported / ${supportSamples} live-body samples`,
+);
 const meanAhead = aheadSum / distributionSamples;
 const meanLive = liveSum / distributionSamples;
 const streamed = traffic.status;
@@ -204,7 +264,7 @@ check(
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 check(
-  'traffic density varies below the road cap',
+  'traffic density varies within the catalogue-wide ceiling',
   largestCount <= 24 && smallestPopulated < largestCount,
   `${streamed.count} live, range ${smallestPopulated}-${largestCount}, cap ${streamed.cap.toFixed(0)}`,
 );
@@ -232,7 +292,7 @@ check(
 
 
 // Beyond every range from where the stream actually ended, not from where it began:
-// the forward tail reaches `DESPAWN_M` past the last driven position.
+// the active body must remain inside the guaranteed physics window.
 traffic.fixedUpdate(0.6, PLAYER_S + 120 * PLAYER_MPS + 4_000, 0, 0, 0);
 check(
   'cars despawn beyond the active range',
@@ -245,7 +305,8 @@ check(
 // between them interpolated. This is the property the menu slider used to stand in for,
 // and it is now the road's own answer.
 {
-  const wideS = findWideS(road);
+  const wideS = findUniformS(road, 1);
+  const narrowS = findUniformS(road, 0);
   const narrowTraffic = new RoadTraffic(
     physics,
     new GameWorld(newWorldState(SEED)),
@@ -256,25 +317,25 @@ check(
     loadCarModel,
     () => true,
   );
-  narrowTraffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
+  narrowTraffic.fixedUpdate(FIXED_DT, narrowS, 0, 0, 0);
   const narrowCap = narrowTraffic.status.cap;
   const narrowTarget = narrowTraffic.status.target;
   narrowTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0, 0);
   const wideCap = narrowTraffic.status.cap;
   const wideTarget = narrowTraffic.status.target;
   check(
-    'a two-lane stretch caps the stream at twelve',
+    'a two-lane stretch limits replenishment to twelve',
     Math.abs(narrowCap - 12) < 0.01,
     `cap ${narrowCap.toFixed(2)}`,
   );
   check(
-    'a four-lane stretch caps it at twenty-four',
+    'a four-lane stretch limits replenishment to twenty-four',
     Math.abs(wideCap - 24) < 0.01,
     `cap ${wideCap.toFixed(2)}`,
   );
   check(
-    'the stream rotates between a fifth of the cap and all of it',
-    narrowTarget >= 12 * 0.2 && narrowTarget <= 12 && wideTarget >= 24 * 0.2 && wideTarget <= 24,
+    'density targets stay between the floor and replenishment cap',
+    narrowTarget >= Math.ceil(12 * 0.35) && narrowTarget <= 12 && wideTarget >= Math.ceil(24 * 0.35) && wideTarget <= 24,
     `${narrowTarget} of ${narrowCap.toFixed(0)} narrow, ${wideTarget} of ${wideCap.toFixed(0)} wide`,
   );
   narrowTraffic.dispose();
@@ -283,6 +344,120 @@ check(
     narrowTraffic.status.count === 0 && !narrowTraffic.status.pending,
     JSON.stringify(narrowTraffic.status),
   );
+}
+
+// A longitudinal overlap belongs to both protection windows, in either direction.
+{
+  const fieldWorld = new GameWorld(newWorldState(SEED));
+  fieldWorld.state.player.drivingCarId = 'field-bench-player';
+  const fieldTraffic = new RoadTraffic(
+    physics, fieldWorld, new THREE.Scene(), new WorldOrigin(), road,
+    new HazardIndex(), loadCarModel, () => false,
+  );
+  const owner: { forwardS: number; direction: 1 | -1 } = { forwardS: PLAYER_S, direction: 1 };
+  const field = fieldTraffic.fieldFor(owner, 'field-bench-observer');
+  let cases = 0;
+  let correct = true;
+  for (const direction of [1, -1] as const) {
+    owner.direction = direction;
+    for (const offset of [-3, -2.3, -1, 0, 1, 2.3, 3]) {
+      fieldTraffic.fixedUpdate(FIXED_DT, PLAYER_S + offset, 0, 0, 0);
+      const along = offset * direction;
+      const expected = Math.sign(along) * Math.max(0, Math.abs(along) - 2.3);
+      for (const [ahead, behind] of [[5, 0], [0, 5], [0, 0]]) {
+        let hits = 0;
+        field.forEachNear(ahead!, behind!, (other) => {
+          hits++;
+          correct &&= Math.abs(other.s - expected) < 1e-9;
+        });
+        correct &&= hits === (expected <= ahead! && expected >= -behind! ? 1 : 0);
+        cases++;
+      }
+    }
+  }
+  check('overlap remains in both forward and rear protection queries', correct, `${cases} boundary/direction queries`);
+  fieldTraffic.dispose();
+}
+
+// Interleaving two lanes in longitudinal order must not send reverse requests
+// sideways, or hide the actual bumper-to-bumper follower behind that other lane.
+{
+  const coordinator = new RoadTraffic(
+    physics, new GameWorld(newWorldState(SEED)), new THREE.Scene(), new WorldOrigin(),
+    road, new HazardIndex(), loadCarModel, () => false,
+  );
+  type QueueCar = {
+    forwardS: number;
+    roadLateral: number;
+    roadHalfWidth: number;
+    autopilot: { needsReverseRoom: boolean; setYieldReverse(enabled: boolean): void };
+  };
+  // Isolated coordinator fixture: no physical bodies needed for this road-frame rule.
+  const queueCoordinator = coordinator as unknown as {
+    assignReverseRoomInQueue(queue: readonly QueueCar[]): void;
+  };
+  let correct = true;
+  for (const direction of [1, -1]) {
+    const make = (s: number, lateral: number, reversing = false): QueueCar => ({
+      forwardS: s * direction, roadLateral: lateral, roadHalfWidth: 1,
+      autopilot: {
+        needsReverseRoom: reversing,
+        setYieldReverse(enabled) { this.needsReverseRoom = enabled; },
+      },
+    });
+    const head = make(100, -4, true);
+    const adjacent = make(97, -1);
+    const follower = make(93, -4);
+    const tail = make(86, -4);
+    queueCoordinator.assignReverseRoomInQueue([head, adjacent, follower, tail]);
+    correct &&= !adjacent.autopilot.needsReverseRoom
+      && follower.autopilot.needsReverseRoom && tail.autopilot.needsReverseRoom;
+  }
+  check('reverse requests stay in overlapping lanes and propagate in one tick', correct, 'both travel directions, interleaved adjacent lane');
+  coordinator.dispose();
+}
+
+// Nominal lane ids survive merges/tapers; spawn safety follows the actual body.
+{
+  const coordinator = new RoadTraffic(
+    physics, new GameWorld(newWorldState(SEED)), new THREE.Scene(), new WorldOrigin(),
+    road, new HazardIndex(), loadCarModel, () => false,
+  );
+  const s = findUniformS(road, 1);
+  const follower = {
+    direction: 1 as 1 | -1, lane: 0, forwardS: s - 26.4,
+    roadLateral: 0, roadHalfWidth: 1, bodyRadius: 2.6, forwardSpeed: 21.08,
+    autopilot: { mode: 'sleeper' as const },
+    vehicle: { estimatedBrakeDecel: () => 6 },
+  };
+  // Isolate the selection/re-check predicate; no fake car enters physical update.
+  const spawnCoordinator = coordinator as unknown as {
+    carList: typeof follower[];
+    forwardLaneCentreAt(s: number, direction: 1 | -1, lane: number): number;
+    roadGapClear(s: number, direction: 1 | -1, lane: number): boolean;
+  };
+  spawnCoordinator.carList.push(follower);
+  let correct = true;
+  for (const direction of [1, -1] as const) {
+    follower.direction = direction;
+    const spawnLateral = spawnCoordinator.forwardLaneCentreAt(s, direction, 1);
+    follower.roadLateral = spawnLateral + 0.15;
+    follower.forwardS = s - 26.4 * direction;
+    follower.forwardSpeed = 21.08 * direction;
+    correct &&= !spawnCoordinator.roadGapClear(s, direction, 1);
+    // A fixed 70m rule is insufficient for a faster follower.
+    follower.forwardS = s - 100 * direction;
+    follower.forwardSpeed = 40 * direction;
+    correct &&= !spawnCoordinator.roadGapClear(s, direction, 1);
+    follower.roadLateral = spawnLateral + 3;
+    correct &&= spawnCoordinator.roadGapClear(s, direction, 1);
+    follower.roadLateral = spawnLateral;
+    follower.forwardSpeed = 0;
+    correct &&= spawnCoordinator.roadGapClear(s, direction, 1);
+  }
+  check('spawns respect physical-lane followers and their stopping room', correct, 'stale lane id, fast approach, separate lane, stopped follower; both directions');
+  spawnCoordinator.carList.length = 0;
+  coordinator.dispose();
 }
 
 // THE DENSITY ACTUALLY ROTATES, AND THE ROTATION IS THE POINT.
