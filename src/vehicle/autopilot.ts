@@ -987,6 +987,60 @@ const RECOVERY_REARM_S = 30;
  * overlapped that corridor and drove the first attempt back into the obstruction.
  */
 const RECOVERY_BIAS_M = 3.2;
+/**
+ * A MANOEUVRE THAT DID NOT WORK IS NOT WORTH REPEATING UNCHANGED.
+ *
+ * Reported from play: a car that meets an obstacle reverses its 1.8 s, holds its 0.85
+ * lock, pulls forward into the very same thing, and then does it again — identically
+ * — a second and a third time, and stands there for a long time doing it. The escape
+ * had ONE fixed shape, so every repeat retraced the attempt that had just failed; the
+ * only state that grew across attempts was `recoveryAttempts`, and all that decides
+ * is WHEN TO STOP TRYING, never HOW TO TRY DIFFERENTLY.
+ *
+ * Attempts at the same place now each go one rung further out: longer reverse, more
+ * lock, and an escape line further from the lane — the three things a driver actually
+ * changes when the first go does not clear it. Three rungs take the manoeuvre from
+ * "back up a length and ease round" to "back most of two lengths at full lock and
+ * come back along the shoulder".
+ *
+ * The ladder is bounded because past that the manoeuvre stops being a two-point turn
+ * on a road: a bigger swing only puts more of the carriageway under a car that is
+ * already lying across it, which is the failure `RECOVERY_REARM_S` was written for.
+ */
+const RECOVERY_ESCALATION_MAX = 3;
+/** Seconds of reverse, and of pull-out, added per rung. */
+const RECOVERY_REVERSE_STEP_S = 1.2;
+const RECOVERY_PULLOUT_STEP_S = 0.6;
+/** Lock added per rung; the last rung is full lock. */
+const RECOVERY_STEER_STEP = 0.05;
+/**
+ * Escape line added per rung, and the same allowance for every line limit the
+ * manoeuvre is measured against. An ordinary escape is clamped to the asphalt — which
+ * is also the width the blocked corridor occupies, so an escape held inside it is an
+ * escape aimed back at the obstruction. A rung buys the shoulder, a metre at a time.
+ */
+const RECOVERY_BIAS_STEP_M = 0.9;
+/**
+ * Room the reverse keeps behind the tail, and how far back it looks for it.
+ *
+ * The one-off check in `beginRecovery` asks once, before the leg starts, and a 1.8 s
+ * reverse was short enough for that to be the whole story. Five seconds is not: the
+ * queue behind closes up while the car is using the space. Measured from the axis
+ * ray's own origin, which sits 1.5 m inside the tail, so this is about a metre of
+ * bumper clearance.
+ */
+const RECOVERY_REVERSE_STOP_M = 2.5;
+const RECOVERY_REVERSE_LOOK_M = 9;
+/**
+ * When a reverse leg is going nowhere: scenery no ray reports — a fence, a bank, a
+ * pole — is found by the car's own evidence, which is that it has selected reverse
+ * and is not moving. The grace covers the shift to R and the roll still to be killed;
+ * without it a leg that starts from a standstill reads as stalled on its first tick.
+ */
+const RECOVERY_LEG_GRACE_S = 1;
+const RECOVERY_LEG_CRAWL_MPS = 0.3;
+const RECOVERY_LEG_STALL_S = 0.8;
+
 
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
@@ -1121,6 +1175,20 @@ export class Autopilot {
   private recoveryOffRoad = false;
   private recoveryBias = 0;
   private recoveryBiasUntil = 0;
+  /**
+   * Rungs of escalation the manoeuvre in progress is using: 0 for a first attempt at
+   * a place, one more for each attempt that follows a failed one. Getting away resets
+   * it — an escape begun somewhere new starts at the bottom of the ladder.
+   *
+   * Deliberately NOT `recoveryAttempts`: that is a give-up budget, and it is reset to
+   * zero for every blockage worth retrying without limit (a rock the bumper touches,
+   * a wedge off the asphalt, a granted deadlock) — which is exactly the case that was
+   * repeating one failed manoeuvre for ever.
+   */
+  private recoveryEscalation = 0;
+  /** Seconds the current reverse leg has run, and how long it has been going nowhere. */
+  private recoveryLegElapsed = 0;
+  private recoveryLegStalled = 0;
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
   private speedCapValue = Infinity;
@@ -1725,6 +1793,9 @@ export class Autopilot {
     this.recoveryBiasUntil = 0;
     this.lastRecoveryAt = -Infinity;
     this.recoveryAttempts = 0;
+    this.recoveryEscalation = 0;
+    this.recoveryLegElapsed = 0;
+    this.recoveryLegStalled = 0;
     this.recoveryCommitted = false;
     this.deadlockPermission = false;
     this.yieldReverse = false;
@@ -1881,7 +1952,7 @@ export class Autopilot {
     let offRoad = this.roadRecoveryActive;
     const roadRecoveryBias =
       this.recoveryPhase !== 'none'
-        ? this.recoverySide * RECOVERY_BIAS_M
+        ? this.recoverySide * (RECOVERY_BIAS_M + this.recoveryEscalation * RECOVERY_BIAS_STEP_M)
         : this.travelled < this.recoveryBiasUntil
           ? this.recoveryBias
           : 0;
@@ -2799,12 +2870,17 @@ export class Autopilot {
       committedLineBlocked,
       staticAvoidLine,
     );
+    // An escape that has already failed here is allowed off the asphalt, a rung at a
+    // time: the ordinary clamp is the asphalt, which is also the width the thing it
+    // is escaping blocks. See RECOVERY_BIAS_STEP_M.
+    const recoveryLineLimit =
+      offRoadRecoveryLine + this.recoveryEscalation * RECOVERY_BIAS_STEP_M;
     const desiredLine = offRoad
       ? Math.abs(projection.lateral) <= offRoadRejoinLateral
         ? this.roadRecoveryTargetLine
         : Math.sign(projection.lateral || 1) * offRoadRecoveryLine
       : recovering || this.travelled < this.recoveryBiasUntil
-        ? clamp(ownLaneOffset + this.recoveryBias, -offRoadRecoveryLine, offRoadRecoveryLine)
+        ? clamp(ownLaneOffset + this.recoveryBias, -recoveryLineLimit, recoveryLineLimit)
         : committedLine;
     this.planLine = committedLine;
     // SIGNAL WHILE THE CAR IS STILL MOVING ACROSS, which is what the commanded line
@@ -3321,6 +3397,9 @@ export class Autopilot {
         forwardSpeed,
         projection.lateral,
         this.recoveryCommitted ? Infinity : gap,
+        vehicle,
+        originX,
+        originZ,
       );
       return;
     }
@@ -3616,6 +3695,11 @@ export class Autopilot {
    * onto the road: a car already past its own right-hand edge. Attempts at the same
    * place stay bounded for generic stalls, so rough ground cannot make a car reverse
    * indefinitely; a known roadblock or a granted deadlock retries without limit.
+   *
+   * THE SIDE NEVER CHANGES; THE SIZE DOES. An attempt that follows a failed one at the
+   * same place goes a rung further out — see RECOVERY_ESCALATION_MAX — because the
+   * thing that kept cars standing at an obstacle was not the number of tries, it was
+   * that every try was the same try.
    */
   private beginRecovery(
     vehicle: Vehicle,
@@ -3671,6 +3755,15 @@ export class Autopilot {
       : samePlace
         ? this.recoveryAttempts + 1
         : 1;
+    // ONE RUNG FURTHER THAN THE ATTEMPT THAT DID NOT WORK. `samePlace` is already the
+    // test for "this is the same blockage as last time" — the car has covered less
+    // than `RECOVERY_RETRY_METRES` since the last escape and did so recently — so a
+    // car that got away and wedged again somewhere else starts from the bottom.
+    this.recoveryEscalation = samePlace
+      ? Math.min(this.recoveryEscalation + 1, RECOVERY_ESCALATION_MAX)
+      : 0;
+    this.recoveryLegElapsed = 0;
+    this.recoveryLegStalled = 0;
     this.lastRecoveryAt = this.travelled;
     this.sinceRecovery = 0;
     this.stoppedFor = 0;
@@ -3688,7 +3781,8 @@ export class Autopilot {
     // reached 3.55 of them, wedged a second time, and only the SECOND escape — which
     // inherited the bias from the first — got round. A driver winds the wheel while
     // it is backing up.
-    this.recoveryBias = this.recoverySide * RECOVERY_BIAS_M;
+    this.recoveryBias =
+      this.recoverySide * (RECOVERY_BIAS_M + this.recoveryEscalation * RECOVERY_BIAS_STEP_M);
     this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
     // Reversing into the car behind is worse than the obstacle in front, so a blocked
     // tail skips straight to the pull-out and steers out of the problem instead.
@@ -3696,7 +3790,9 @@ export class Autopilot {
       this.axisScan(vehicle, originX, originZ, -1, RECOVERY_REAR_CLEAR_M + 2) >
       RECOVERY_REAR_CLEAR_M;
     this.recoveryPhase = rearClear ? 'reverse' : 'pullout';
-    this.recoveryTimer = rearClear ? RECOVERY_REVERSE_S : RECOVERY_PULLOUT_S;
+    this.recoveryTimer = rearClear
+      ? RECOVERY_REVERSE_S + this.recoveryEscalation * RECOVERY_REVERSE_STEP_S
+      : RECOVERY_PULLOUT_S + this.recoveryEscalation * RECOVERY_PULLOUT_STEP_S;
   }
 
   /**
@@ -3814,29 +3910,70 @@ export class Autopilot {
     forwardSpeed: number,
     lateral: number,
     gap: number,
+    vehicle: Vehicle,
+    originX: number,
+    originZ: number,
   ): void {
     out.handbrake = false;
+    // What this rung of the ladder steers with. Both legs escalate together: the
+    // pull-out has to follow the arc the reverse set up.
+    const reverseLock = Math.min(
+      1,
+      RECOVERY_REVERSE_STEER + this.recoveryEscalation * RECOVERY_STEER_STEP,
+    );
+    const pulloutLock = Math.min(
+      1,
+      RECOVERY_PULLOUT_STEER + this.recoveryEscalation * RECOVERY_STEER_STEP,
+    );
     if (this.recoveryPhase === 'reverse') {
       this.recoveryTimer -= dt;
+      this.recoveryLegElapsed += dt;
       out.throttle = 0;
       // In automatic mode, reverse=true selects R at rest and brake becomes reverse
       // throttle on the following tick, so the same pedal stops a car still rolling
       // forward and then backs it up.
       out.brake = RECOVERY_REVERSE_BRAKE;
       out.reverse = true;
-      out.steer = clamp(this.recoverySide * RECOVERY_REVERSE_STEER, -1, 1);
+      out.steer = clamp(this.recoverySide * reverseLock, -1, 1);
+      // A LONGER REVERSE HAS TO BE WATCHED WHILE IT RUNS.
+      //
+      // At 1.8 s the one-off rear check in `beginRecovery` was the whole story. An
+      // escalated leg is long enough for the queue behind to close the space up while
+      // the car is still using it, and long enough to spend itself pressed against
+      // static scenery no ray reports — a fence, a bank, a pole. The first is
+      // answered by re-measuring the room; the second by the car's own evidence,
+      // which is that it has selected reverse and is covering no ground. Either way
+      // the leg ends and the pull-out — the half that gets the car ROUND the
+      // obstacle — starts, rather than the car grinding backwards for five seconds.
+      const roomBehind = this.axisScan(vehicle, originX, originZ, -1, RECOVERY_REVERSE_LOOK_M);
+      this.recoveryLegStalled =
+        this.recoveryLegElapsed > RECOVERY_LEG_GRACE_S &&
+        forwardSpeed > -RECOVERY_LEG_CRAWL_MPS
+          ? this.recoveryLegStalled + dt
+          : 0;
       // The lateral test is "the reverse has taken the car far enough out to steer
       // round what blocked it". A car that was ALREADY out there — wedged on a pole
       // on the verge — satisfies it on the first tick, which ended the reverse
       // before the clutch had taken up and handed straight back to a pull-out that
       // drove into the same pole. Out there the timer owns the phase.
+      //
+      // The line it is measured against widens with the rung. Held at the verge, the
+      // reverse stops inside the width the obstruction blocks, and the pull-out that
+      // follows aims back down it: that is the second and third bump the ladder
+      // exists to break.
       if (
         this.recoveryTimer <= 0 ||
+        roomBehind < RECOVERY_REVERSE_STOP_M ||
+        this.recoveryLegStalled > RECOVERY_LEG_STALL_S ||
         (!this.recoveryOffRoad &&
-          Math.abs(lateral) > this.road.halfWidthAt(this.hintS) + PASSING_VERGE_M)
+          Math.abs(lateral) >
+            this.road.halfWidthAt(this.hintS) +
+            PASSING_VERGE_M +
+            this.recoveryEscalation * RECOVERY_BIAS_STEP_M)
       ) {
         this.recoveryPhase = 'pullout';
-        this.recoveryTimer = RECOVERY_PULLOUT_S;
+        this.recoveryTimer =
+          RECOVERY_PULLOUT_S + this.recoveryEscalation * RECOVERY_PULLOUT_STEP_S;
       }
       return;
     }
@@ -3846,14 +3983,14 @@ export class Autopilot {
     // the wheel before the car reverses its travel bends the tail back toward the
     // obstacle and also spends the pull-out timer without moving forward.
     if (forwardSpeed < -0.15) {
-      out.steer = clamp(this.recoverySide * RECOVERY_REVERSE_STEER, -1, 1);
+      out.steer = clamp(this.recoverySide * reverseLock, -1, 1);
       out.throttle = 0;
       out.brake = 0.5;
       return;
     }
 
     this.recoveryTimer -= dt;
-    out.steer = clamp(-this.recoverySide * RECOVERY_PULLOUT_STEER, -1, 1);
+    out.steer = clamp(-this.recoverySide * pulloutLock, -1, 1);
     out.brake = 0;
     out.throttle = forwardSpeed < RECOVERY_CRAWL_MPS ? 0.55 : 0;
     // The pull-out is what brings a car back from where the reverse put it, so its

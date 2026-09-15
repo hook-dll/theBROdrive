@@ -72,6 +72,21 @@
 
 ### Fixed
 
+- A CAR THAT DOES NOT GET ROUND AN OBSTACLE ON THE FIRST GO TRIES A BIGGER MANOEUVRE,
+  NOT THE SAME ONE AGAIN. The escape from a wedge had exactly one shape — reverse 1.8 s
+  at 0.85 lock, pull out at 0.85 the other way, hold a 3.2 m line — so a car that came
+  back out still inside the blocked corridor drove into the same rock, backed out
+  identically, and hit it again. The only state that grew across attempts was the
+  give-up counter, and that decides WHEN TO STOP TRYING, never HOW TO TRY DIFFERENTLY —
+  worse, it is reset to zero for exactly the blockages worth retrying (a prop the
+  bumper touches, a wedge off the asphalt, a granted deadlock), which is the case that
+  repeated one failed manoeuvre indefinitely. Attempts at the same place now climb
+  three rungs: reverse 1.8 -> 5.4 s, lock 0.85 -> full, escape line 3.2 -> 5.9 m, and
+  the clamp that held the line inside the asphalt — the same width the obstruction
+  blocks — opens onto the shoulder by the same step. A longer reverse is watched while
+  it runs rather than trusted to the one rear check it starts with: it ends where the
+  room behind ends, and ends early if the car has selected reverse and is covering no
+  ground, which is how scenery no ray reports — a fence, a bank, a pole — is found.
 - THE MORNING AFTER A NIGHT OF DRIVING IS AS BRIGHT AS THE DAY BEFORE IT. Dynamic
   resolution could enter a state it could not leave, and at the bottom of its ladder
   the film grain is filtered away by the upscale, the ink outlines smear into a
