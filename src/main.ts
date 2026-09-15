@@ -83,13 +83,21 @@ import { TerminusPadProvider } from './world/terminuspad';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { hasEscapedWorld } from './world/landscape';
-import { MonumentProvider, PoleProvider, ScatterProvider } from './world/props';
+import {
+  DelineatorProvider,
+  MonumentProvider,
+  PoleProvider,
+  ScatterProvider,
+} from './world/props';
+import { SidetrackProvider } from './world/sidetrack';
+import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { setCarBodyCondition } from './render/materials';
+import { advanceCloudShadows } from './render/cloudshadow';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -536,6 +544,21 @@ async function boot(): Promise<void> {
   // the generator already knew, and this is the only place that knowledge survives.
   streamer.register(new ScatterProvider(debris, hazards));
   streamer.register(new PoleProvider());
+  // The verge furniture the director schedules: reflector posts, and the graded
+  // tracks that leave the road for the desert. Both sit outside the asphalt edge at
+  // the width the road has there, so they follow the poles — and both take the
+  // SHARED road-distance lattice, because a post's foot and a track's ramp have to
+  // reproduce the drawn ground they stand on, which means asking the index the
+  // terrain mesh asked rather than a second one of their own.
+  // A post is a solid obstacle inside the physics window and comes apart when a car
+  // clips it, so the provider needs the same debris field the scatter registers with:
+  // one breakable registry for the whole world, not one per provider.
+  streamer.register(new DelineatorProvider(roadDistance, debris));
+  streamer.register(new SidetrackProvider(roadDistance));
+  // Distant weather: alpha sheets 600-1800 m out, no physics and no colliders. It
+  // streams like everything else so a virga shaft is built off the road frame at
+  // its own arclength and disposed with the chunk that owns it.
+  streamer.register(new WeatherProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers));
 
@@ -1429,6 +1452,20 @@ async function boot(): Promise<void> {
     }
     input.setPreciseSteering(!dying && s.settings.preciseSteering && driving !== null);
 
+    // Refresh the stream's road-frame snapshot before the player's autopilot reads it.
+    // Every controller still writes its intent before the shared physics step.
+    if (driving === null) {
+      const pedestrian = player.absolutePosition;
+      traffic.setPedestrianObstacle(pedestrian.x, pedestrian.z);
+    } else {
+      traffic.clearPedestrianObstacle();
+    }
+    traffic.setDaylightFactor(sky.dayFactor);
+    playerFieldSeat.forwardS = activeS;
+    frameProfiler?.begin('traffic');
+    traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
+    frameProfiler?.end('traffic');
+
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
@@ -1495,20 +1532,6 @@ async function boot(): Promise<void> {
       player.fixedUpdate(dt, f, camera.yaw);
       if (f.cycleCamera) camera.setMode('foot');
     }
-
-    // Session traffic owns separate Vehicles, so it writes its mixed autonomous
-    // drivers here and never enters the persistent `vehicles` map or save state.
-    if (driving === null) {
-      const pedestrian = player.absolutePosition;
-      traffic.setPedestrianObstacle(pedestrian.x, pedestrian.z);
-    } else {
-      traffic.clearPedestrianObstacle();
-    }
-    traffic.setDaylightFactor(sky.dayFactor);
-    playerFieldSeat.forwardS = activeS;
-    frameProfiler?.begin('traffic');
-    traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
-    frameProfiler?.end('traffic');
 
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
@@ -2134,6 +2157,23 @@ async function boot(): Promise<void> {
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
     mirage.update(activeS, sky.dayFactor);
     mirageTableau.update(activeS, activeLateral, sky.dayFactor);
+    // The drifting cloud shade every ground material samples. Driven by the RENDER
+    // frame's own dt, so a paused game's clouds stop with it, and given the f64
+    // origin because the field is anchored to the world rather than to the player —
+    // see `render/cloudshadow.ts`.
+    advanceCloudShadows(
+      world.seed,
+      frameDt,
+      sky.dayFactor,
+      origin.x,
+      origin.z,
+      s.settings.graphicsQuality,
+      mobilePresentation,
+    );
+    // The streamed distant weather fades on the same twilight band as the mirage
+    // above, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
+    // that a rebase cannot move them.
+    setWeatherFrame(sky.dayFactor, cam.x + origin.x, cam.z + origin.z);
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
     // absolute player position; the bake is sliced through the streaming budget the
     // terrain tiles use.

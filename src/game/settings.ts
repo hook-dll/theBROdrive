@@ -210,13 +210,22 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileStarMagnitude: 8,
     horizonM: 25000,
     fogScale: 0.16,
-    vehicleLightSlots: 18,
-    // Capped at the desktop STANDARD budget. The 18 above is chosen for a desktop's fill
-    // rate, and a phone at 1.44 megapixels is not a desktop; six spots and six points keep
-    // the lit road receding and three cars' beams drawn, which is everything a phone screen
-    // can show anyway.
+    // EIGHTEEN WAS A CLIFF, MEASURED. The lit-fragment shader costs almost nothing per
+    // light up to about thirteen slots and then a great deal per light after them — same
+    // scene, same pixels, on an M2 Pro at 2 Mpx: 11 slots 6.5 ms, 13 slots 7.5, 15 slots
+    // 10.0, 19 slots 17.9, and 25-26 slots 53-78. This rung asked for 18 spots + 8 points
+    // and so sat on the wrong side of that edge, which is why a machine that ran the
+    // standard rung at 120 frames a second ran this one at 22-26. Spots are also the
+    // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
+    // cut is taken out of the spots: eight keeps four cars' beams projected, and the lamp
+    // pools, which are what a lit road actually reads by, are unchanged. The tier keeps
+    // everything else it was chosen for: the supersampling, the 25 km horizon, the sky.
+    vehicleLightSlots: 8,
+    // Capped at the desktop STANDARD budget. A phone at 1.44 megapixels is not a desktop;
+    // six spots and six points keep the lit road receding and three cars' beams drawn,
+    // which is everything a phone screen can show anyway.
     mobileVehicleLightSlots: 6,
-    streetLightSlots: 8,
+    streetLightSlots: 6,
     mobileStreetLightSlots: 6,
     headlightDistanceScale: 3,
   },

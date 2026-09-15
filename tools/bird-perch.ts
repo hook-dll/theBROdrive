@@ -15,8 +15,12 @@
  *   flying     up at something like its species' cruise altitude
  *   HOVERING   stationary, metres up, on nothing — the bug this exists to catch
  *
+ * Standing birds are also checked to be on the VERGE: outside the asphalt edge at the
+ * width the road actually has there, and inside the shoulder band, never out in the
+ * scatter or under the poles.
+ *
  * It also drives a car past a flock and checks the round trip: they leave the road as
- * it arrives, and they are back down on it a while after it has gone.
+ * it arrives, and they are back down beside it a while after it has gone.
  *
  *   npx tsx tools/bird-perch.ts
  *
@@ -24,15 +28,18 @@
  */
 
 import * as THREE from 'three';
-import { BirdFlock } from '../src/agents/birds';
+import { BirdFlock, PERCH_VERGE_MAX, PERCH_VERGE_MIN } from '../src/agents/birds';
 import { WorldOrigin } from '../src/world/origin';
-import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
+import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 
 /** Height above the surface inside which a bird counts as standing on it. */
 const STANDING_TOLERANCE = 0.25;
 /** Height above the surface past which a stationary bird counts as hovering. */
 const HOVER_FLOOR = 0.6;
+/** Slack on the verge band: `road.project` refines an arclength, and the half-width it
+ *  is measured against moves with `s`, so the reconstructed offset is not bit-exact. */
+const VERGE_TOLERANCE = 0.35;
 const FIXED_DT = 1 / 60;
 
 const SEEDS = [1, 7, 42, 1337];
@@ -41,7 +48,7 @@ interface Census {
   standing: number;
   flying: number;
   hovering: number;
-  offRoad: number;
+  offVerge: number;
   worstHover: number;
 }
 
@@ -53,7 +60,7 @@ function census(
   hintS: number,
   previous: Map<number, THREE.Vector3>,
 ): Census {
-  const out: Census = { standing: 0, flying: 0, hovering: 0, offRoad: 0, worstHover: 0 };
+  const out: Census = { standing: 0, flying: 0, hovering: 0, offVerge: 0, worstHover: 0 };
   const m = new THREE.Matrix4();
   const p = new THREE.Vector3();
   for (let i = 0; i < count; i++) {
@@ -72,9 +79,16 @@ function census(
     const surface = terrain.heightFromFrame(p.x, p.z, proj.lateral, proj.s);
     const above = p.y - surface;
 
+    // Where it stands, measured outward from the asphalt edge at the width the road
+    // has at that arclength — the same quantity the placement is expressed in.
+    const toEdge = Math.abs(proj.lateral) - road.halfWidthAt(proj.s);
+    const onVerge =
+      toEdge >= PERCH_VERGE_MIN - VERGE_TOLERANCE &&
+      toEdge <= PERCH_VERGE_MAX + VERGE_TOLERANCE;
+
     if (above <= STANDING_TOLERANCE) {
       out.standing++;
-      if (Math.abs(proj.lateral) > ROAD_HALF_WIDTH) out.offRoad++;
+      if (!onVerge) out.offVerge++;
     } else if (moved) {
       out.flying++;
     } else if (above >= HOVER_FLOOR) {
@@ -82,6 +96,7 @@ function census(
       if (above > out.worstHover) out.worstHover = above;
     } else {
       out.standing++;
+      if (!onVerge) out.offVerge++;
     }
   }
   return out;
@@ -94,7 +109,7 @@ function check(label: string, ok: boolean, detail: string): void {
 }
 
 let totalStanding = 0;
-let totalOffRoad = 0;
+let totalOffVerge = 0;
 let totalHovering = 0;
 let worstHover = 0;
 let seedsThatScattered = 0;
@@ -130,7 +145,7 @@ for (const seed of SEEDS) {
     }
     const resting = census(mesh, mesh.count, road, terrain, parkedS, previous);
     totalStanding += resting.standing;
-    totalOffRoad += resting.offRoad;
+    totalOffVerge += resting.offVerge;
     totalHovering += resting.hovering;
     if (resting.worstHover > worstHover) worstHover = resting.worstHover;
     if (resting.standing > 0) returned++;
@@ -156,8 +171,8 @@ for (const seed of SEEDS) {
 }
 
 check('nothing sits in the sky', totalHovering === 0, `${totalHovering} hovering, worst ${worstHover.toFixed(2)} m up`);
-check('everything standing is on the road', totalOffRoad === 0, `${totalOffRoad} of ${totalStanding} off the asphalt`);
-check('birds do stand on the road', totalStanding > 0, `${totalStanding} sightings`);
+check('everything standing is on the verge', totalOffVerge === 0, `${totalOffVerge} of ${totalStanding} off the shoulder band`);
+check('birds do stand beside the road', totalStanding > 0, `${totalStanding} sightings`);
 check('a car puts them up', seedsThatScattered === SEEDS.length, `${seedsThatScattered}/${SEEDS.length} seeds`);
 check('they settle back onto it', seedsThatReturned === SEEDS.length, `${seedsThatReturned}/${SEEDS.length} seeds`);
 

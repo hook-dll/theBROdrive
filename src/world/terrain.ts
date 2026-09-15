@@ -1,5 +1,6 @@
 import { Noise2D } from '../core/rng';
 import { LakeBasins } from './lakes';
+import { corridorBatterAt, outcropBeltAt } from './corridorshape';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
@@ -178,7 +179,13 @@ const SCOOP_DEPTH = 0.32;
  * corrugation does not.
  */
 const DETAIL_FADE_IN = 10;
-const DETAIL_HOLD = 62;
+/**
+ * Lateral distance past which the fine band starts giving way to the coarse mesh, and
+ * the outer limit of the corridor landform in `corridorshape.ts`: inside it, the two
+ * detail functions below are the same function, which is what lets that landform ride
+ * in both without the tile lattice and the road-fan disagreeing about it.
+ */
+export const DETAIL_HOLD = 62;
 /**
  * The refined terrain grid ends here, so this layer must be exactly zero at the
  * boundary to keep its collider and the coarse mesh watertight.
@@ -189,6 +196,25 @@ export const DETAIL_REACH = 80;
 const OUTCROP_WAVELENGTH = 260;
 const OUTCROP_THRESHOLD = 0.56;
 const OUTCROP_AMPLITUDE = 7;
+/**
+ * What the director's `outcrop` belt does to the rock field it is standing on, and the
+ * reason the threshold moves as far as it does.
+ *
+ * A belt is a ribbon: 250 to 600 m of road by the 50 m of ground this feature reaches,
+ * and the rock field's wavelength is 260 m. Only 2.4% of the plain is over the open
+ * field's 0.56, so a belt that merely lifted that ground left two events in three with
+ * NOTHING IN THEM — measured, 3 belts of 12. A scheduled kind that does not appear is
+ * the schedule lying, so the belt's threshold is set from the other end: over 101 real
+ * belts on four seeds the highest the field reaches inside one is -0.085 at worst, and
+ * -0.4 is the threshold that still stands 1.8 m of rock up in THAT belt. About
+ * three quarters of a belt is then above it, which is the difference between a rock
+ * district and a boulder: the ground is up on rock for the length of the event, sand
+ * stays in the low ground between the shelves, and the shelves have an edge because
+ * the height uses `t * (2 - t)` rather than the open field's rounded `t * t`.
+ */
+const OUTCROP_BELT_AMPLITUDE = 5;
+const OUTCROP_BELT_THRESHOLD = -0.4;
+
 const WASH_WAVELENGTH_X = 700;
 const WASH_WAVELENGTH_Z = 1600;
 const WASH_THRESHOLD = 0.48;
@@ -269,6 +295,11 @@ function duneRise(value: number, threshold: number): number {
   return t * t;
 }
 
+/** The rock threshold at a belt strength: the open field's when there is no belt. */
+function beltRockThreshold(belt: number): number {
+  return OUTCROP_THRESHOLD + (OUTCROP_BELT_THRESHOLD - OUTCROP_THRESHOLD) * belt;
+}
+
 export class Terrain {
   private readonly duneNoise: Noise2D;
   private readonly rippleNoise: Noise2D;
@@ -280,11 +311,18 @@ export class Terrain {
   private readonly outcropNoise: Noise2D;
   private readonly washNoise: Noise2D;
   private readonly field: SurfaceField;
+  /**
+   * The world seed, kept because the variety director is asked per detail sample which
+   * horizon feature is running here (see `corridorshape.ts`). Every noise above has
+   * already folded the seed into its own hash; the director has not.
+   */
+  private readonly seed: number;
 
   constructor(
     seed: number,
     private readonly road: Road,
   ) {
+    this.seed = seed;
     this.duneNoise = new Noise2D(seed ^ 0xc2b2ae35);
     this.rippleNoise = new Noise2D(seed ^ 0x27d4eb2f);
     this.chopNoise = new Noise2D(seed ^ 0x9e3779b9);
@@ -429,8 +467,9 @@ export class Terrain {
   }
 
   /**
-   * The fine band for the legacy road-aligned refined grid. It fades to exactly zero
-   * at both of that mesh's seams; large-scale dune shape remains in `relief`.
+   * The fine band for the legacy road-aligned refined grid, plus the corridor
+   * landform. It fades to exactly zero at both of that mesh's seams; large-scale dune
+   * shape remains in `relief`.
    */
   detailAt(x: number, z: number, dist: number, s: number): number {
     const inner = this.road.halfWidthAt(s);
@@ -441,10 +480,17 @@ export class Terrain {
       smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner)) *
       (1 - smoothstep01((dist - DETAIL_HOLD) / (DETAIL_REACH - DETAIL_HOLD)));
     if (fade <= 0) return 0;
-    return this.fineRelief(x, z) * fade * (1 - paved);
+    // The corridor landform is added UNFADED, and it is safe to do that here because
+    // it is zero outside `CORRIDOR_KEEP_M`..`DETAIL_HOLD` by its own profile. The fade
+    // either side of it is a RESOLUTION fade for wheel-scale relief; multiplying a
+    // seven-metre crest by it would have thinned the crest over exactly the twenty
+    // metres it is supposed to climb, and cut its outer flank off at 62 m mid-air.
+    return (
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+    );
   }
 
-  /** Fine band used by the player-centred tile lattice and its distance morph. */
+  /** Fine band and corridor landform for the player-centred tile lattice. */
   explorationDetailAt(x: number, z: number, dist: number, s: number): number {
     const inner = this.road.halfWidthAt(s);
     if (dist <= inner) return 0;
@@ -453,7 +499,48 @@ export class Terrain {
     const paved = terminusWeight(x, z);
     if (paved >= 1) return 0;
     const fade = smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner));
-    return this.fineRelief(x, z) * fade * (1 - paved);
+    return (
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+    );
+  }
+
+  /**
+   * THE CORRIDOR LANDFORM at a point, in metres of ground movement: the director's
+   * cut, embankment and outcrop-belt events, which are the only scheduled thing in the
+   * terrain. See `corridorshape.ts` for the shape and for why it rides in the detail
+   * layer rather than in the base field.
+   *
+   * Public because two callers outside this file need the term on its own. The desert
+   * tile builder has to keep it out of the `detailOffsets` its shader fades away with
+   * distance — landform is not wheel-scale relief, and fading a five-metre embankment
+   * out would put the far tile surface above the trough the near mesh is drawing —
+   * and `tools/corridor-shape.ts` measures it: a crest can only be checked against the
+   * height it is supposed to reach by subtracting the desert it is standing on.
+   */
+  corridorShapeAt(x: number, z: number, dist: number, s: number): number {
+    return this.corridorShape(x, z, dist, s, this.road.halfWidthAt(s));
+  }
+
+  /**
+   * The same, for a caller that already has the local asphalt half-width. One
+   * `varietyEventAt` per kind, both memoised on the window, and the rock field is
+   * sampled only where a belt is actually running.
+   */
+  private corridorShape(x: number, z: number, dist: number, s: number, inner: number): number {
+    let h = corridorBatterAt(this.seed, s, dist, inner);
+    const belt = outcropBeltAt(this.seed, s, dist, inner);
+    if (belt > 0) {
+      const threshold = beltRockThreshold(belt);
+      const outcrop = this.outcropAt(x, z);
+      if (outcrop > threshold) {
+        const t = (outcrop - threshold) / (1 - threshold);
+        // `t * (2 - t)` where the open field uses `t * t`: flat-topped, so the belt is
+        // shelves and slabs with an edge to them. The open field's rounded cones are
+        // right at a kilometre and read as heaps of spoil at thirty metres.
+        h += t * (2 - t) * OUTCROP_BELT_AMPLITUDE * belt;
+      }
+    }
+    return h;
   }
 
   /**
@@ -645,17 +732,30 @@ export class Terrain {
 
   /** `surfaceAt` for a caller that already knows the lateral offset. */
   surfaceFromFrame(x: number, z: number, lateral: number, s: number): SurfaceType {
-    const toEdge = Math.abs(lateral) - this.road.halfWidthAt(s);
+    const inner = this.road.halfWidthAt(s);
+    const dist = Math.abs(lateral);
+    const toEdge = dist - inner;
     // Inside the paint the ROAD collider owns the contact and this answer is only
     // reachable if a wheel has slipped through the ribbon, so it keeps the district
     // material as a harmless default. Outside it is the shoulder, and past that the
     // open desert.
     if (toEdge <= 0) return SurfaceType.Gravel;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
-    return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
+    // An outcrop belt lowers the rock threshold by exactly what it lowers it by in
+    // `corridorShape`, so a shelf the belt stood up is rock under the wheels and not
+    // a sand-coloured ramp with sand grip.
+    const belt = outcropBeltAt(this.seed, s, dist, inner);
+    const threshold = belt > 0 ? beltRockThreshold(belt) : OUTCROP_THRESHOLD;
+    return this.outcropAt(x, z) > threshold ? SurfaceType.Rock : SurfaceType.Sand;
   }
 
-  /** Surface material beyond the graded road corridor, without a road projection. */
+  /**
+   * Surface material beyond the graded road corridor, without a road projection.
+   *
+   * No belt term, and it does not need one: its only caller is the desert tile prop
+   * pass, which skips every candidate inside 65 m of the road — outside
+   * `CORRIDOR_REACH_M`, where a belt is already zero.
+   */
   openSurfaceAt(x: number, z: number): SurfaceType {
     return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
   }
@@ -666,10 +766,14 @@ export class Terrain {
     // collider about that or a wheel that crosses the seam changes surface twice.
     if (onTerminusPad(x, z)) return SurfaceType.Asphalt;
     const p = this.road.project(x, z, hintS);
-    const toEdge = Math.abs(p.lateral) - this.road.halfWidthAt(p.s);
+    const inner = this.road.halfWidthAt(p.s);
+    const dist = Math.abs(p.lateral);
+    const toEdge = dist - inner;
     if (toEdge <= 0) return SurfaceType.Gravel;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
-    return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
+    const belt = outcropBeltAt(this.seed, p.s, dist, inner);
+    const threshold = belt > 0 ? beltRockThreshold(belt) : OUTCROP_THRESHOLD;
+    return this.outcropAt(x, z) > threshold ? SurfaceType.Rock : SurfaceType.Sand;
   }
 
   /**

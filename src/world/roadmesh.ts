@@ -1,9 +1,11 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { Noise1D, Noise2D } from '../core/rng';
+import { hash01, Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
+import { applyCloudShadow } from '../render/cloudshadow';
+import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
@@ -120,6 +122,172 @@ const PAINT_WEAR_WAVELENGTH = 11;
 const PAINT_GONE = 0.34;
 
 /**
+ * SURFACE VARIETY: the four things world/director.ts is allowed to do to the asphalt.
+ *
+ * All four are COLOUR, on vertices that already exist. The mat's vertices ARE the
+ * collider the car drives on (see the slab loop in `buildSteps`), so a feature that
+ * moved one to make a picture would move the road under the wheels, and the collider
+ * is indexed straight off the fixed row/column counts, so a feature that added one
+ * would tear the indexing. Every number below scales a coverage which is itself
+ * multiplied by `varietyWeightAt` — exactly 0 everywhere the feature is not running,
+ * so off-feature the arithmetic is bit-for-bit the road that was here before it
+ * (tools/surface-paint.ts carries the checksum that proves that, not an argument).
+ *
+ * The Surface channel runs ONE kind per window, so a patch, a skid, a marking change
+ * and a sand tongue can never overlap each other: each block below has to compose
+ * with the district's own weathering and with nothing else.
+ */
+
+/** Fresh bitumen: near black with the faintest warm cast. Tar, not paint. */
+const PATCH_LINEAR = new THREE.Color(0x2b2925);
+/**
+ * How far a fully covered vertex goes towards it. Short of 1 deliberately: a patch is
+ * a skin poured over the district's surface, and at 1 the repair read as a hole cut
+ * in the road rather than a layer laid on it, because the material underneath
+ * stopped showing at the rim.
+ */
+const PATCH_MIX = 0.62;
+/** Extra multiplicative darkening at full coverage: new binder looks wet. */
+const PATCH_GLOSS = 0.1;
+/** Wavelength of the blob field, metres: shovel-and-rake sized repairs. */
+const PATCH_BLOB_WAVELENGTH = 3.4;
+/**
+ * Where the blob field starts laying bitumen, and over how much of its range it
+ * reaches full cover. A hard threshold put the rim wherever the 1.33 m row grid
+ * happened to fall and rendered as a staircase; the soft band is also what lets the
+ * district's own material read through at the edge of the repair.
+ */
+const PATCH_BLOB_ON = 0.06;
+const PATCH_BLOB_SOFT = 0.26;
+/** Half-width of a sealed crack line, how far it wanders, and over what. */
+const PATCH_CRACK_HALF = 0.34;
+const PATCH_CRACK_WANDER = 1.5;
+const PATCH_CRACK_WAVELENGTH = 26;
+/** Length of one cut-and-fill cell, metres, and the share of cells holding a repair. */
+const PATCH_CUT_CELL = 9;
+const PATCH_CUT_DENSITY = 0.55;
+/** Hash domain for the cut-and-fill cells, distinct from every other stream here. */
+const PATCH_TAG = 0x50544348; // 'PTCH'
+
+/** Laid rubber. Blue-black, because tyre smoke is not brown. */
+const RUBBER_LINEAR = new THREE.Color(0x14130f);
+/** How far towards it a full-strength streak takes the surface. */
+const SKID_MIX = 0.72;
+/**
+ * Half-width of one streak, metres. Wider than a contact patch on purpose: the
+ * section columns around a wheel path are 0.35-0.45 m apart, so a tyre-width streak
+ * would fall between two of them and disappear. This is the narrowest mark the mesh
+ * can carry, and it is still narrower than the polished path it sits in.
+ */
+const SKID_HALF = 0.42;
+/**
+ * Distance from the mat edge over which a streak fades out, metres. Ravelled
+ * aggregate at the lip holds no rubber, and a mark that ran off the asphalt would be
+ * the one thing that gives away where the ribbon's edge actually is.
+ */
+const SKID_EDGE_FADE = 0.35;
+
+/**
+ * Sand tongues: extra reach INWARD from one shoulder, on top of whatever uniform
+ * cover `roadConditionAt` already gives the district.
+ *
+ * Visual only, and deliberately so. `RoadCondition.sandCover` is read by the
+ * autopilot's pace model (vehicle/autopilot.ts), so wiring the tongue into it would
+ * slow every AI car for free — but it would slow them for the whole ROW and for both
+ * sides, because sandCover has no lateral term at all. Grip is left alone for the
+ * same shape of reason: the surface registry is per collider slab, and a tongue is
+ * thinner than a slab is long.
+ */
+const TONGUE_MAX_REACH = LANE_WIDTH * 1.15;
+/**
+ * Metres between tongues, and how much of a cell the tongue's own centre may wander
+ * inside — so the spacing varies from about 5 m to 25 m rather than metronoming.
+ *
+ * A cell grid, not a noise threshold. The first attempt windowed an fbm and it is the
+ * wrong instrument for a feature that MUST appear: the shortest sandTongue span the
+ * director schedules is 40 m, and a threshold high enough to make a sharp finger was
+ * crossed in none of those 40 m about half the time. The event fired and the road did
+ * not change. One tongue per cell is a promise: even the shortest span carries two.
+ */
+const TONGUE_SPACING = 15;
+const TONGUE_JITTER = 0.7;
+/**
+ * Windward nose and downwind tail of one tongue, metres. Asymmetric because drifting
+ * sand is: it piles into a steep face and then feathers away for metres downwind.
+ */
+const TONGUE_NOSE_M = 2.5;
+const TONGUE_TAIL_M = 8;
+/** Hash domain for the tongue cells, distinct from every other stream here. */
+const TONGUE_TAG = 0x544e4745; // 'TNGE'
+/**
+ * Share of the half-width a tongue may never pass. Sand reaching across A LANE is a
+ * detail; sand over the crown is a road nobody can drive, and the asphalt wins.
+ */
+const TONGUE_MAX_SHARE = 0.95;
+
+/** What the paint is doing at an arclength. */
+const enum MarkingMode {
+  /** The road's own rule, untouched. */
+  Normal = 0,
+  /** Two solid lines either side of the crown. */
+  DoubleSolid = 1,
+  /** Nothing painted at all. */
+  None = 2,
+  /** The normal lines, plus a rumbled band inside the edge line. */
+  Rumble = 3,
+  /** A chalk centre line on a road whose own rule paints none. */
+  Ghost = 4,
+}
+
+/**
+ * Where a marking change happens, and why it is a HARD edge and not a fade.
+ *
+ * Every other variety feature multiplies by `varietyWeightAt` and smoothsteps over
+ * the event's ramp. Paint cannot. Coverage between 0 and 1 is already spoken for by
+ * `paintNoise`: partial coverage is what WEAR looks like on this road. Fading a
+ * double line up over 40 m would therefore read as "this stretch is less worn", not
+ * as "the markings change here". A crew starts painting at a point and stops at one.
+ *
+ * So the ramp is spent differently — as the slack that lets the hard edge move to a
+ * place the paint would plausibly stop, which is a dash boundary. Both cadences on
+ * this road (the 4 m crown dash, the 8 m divider dash) start ON at every multiple of
+ * 16 m, so snapping the span's ends to that grid puts each switch exactly where one
+ * dash ends and the next would have begun, and moves it by at most 8 m: a fifth of
+ * the 40 m ramp the director already set aside for this event.
+ */
+const MARKING_SNAP_M = 16;
+/**
+ * Coverage below which this road is painted in name only.
+ *
+ * `MARKING_MIN` lets a marking through at 0.03, but `PAINT_GONE` then throws away
+ * every quad whose worn coverage lands under 0.34 — so under roughly 0.47 nothing is
+ * actually drawn, whatever the gate says. Deciding the variant on MARKING_MIN put
+ * double lines on two stretches that drew no paint at all: the event fired, the mode
+ * changed, and the road did not (tools/surface-paint.ts measured 0% of both spans).
+ */
+const PAINT_EFFECTIVE = PAINT_GONE / 0.72;
+/** Offset of each line of a double centre line from the crown, metres. */
+const DOUBLE_SOLID_GAP = 0.17;
+/** Centre of the rumble band, measured in from the mat edge, and its half-width. */
+const RUMBLE_INSET = 0.52;
+const RUMBLE_HALF_WIDTH = 0.22;
+/** Ground-out grooves, and how far the band goes towards them. */
+const RUMBLE_LINEAR = new THREE.Color(0x1d1b18);
+const RUMBLE_MIX = 0.55;
+/** Coverage a ghost line is painted at: above PAINT_GONE, far below a fresh coat. */
+const GHOST_COVERAGE = 0.46;
+
+/**
+ * One-entry memo for the marking mode, keyed by the event's own centre. The marking
+ * pass walks rows in ascending arclength, so consecutive rows inside one event hit
+ * it, and the alternative was a `roadConditionAt` — two fbm fields — per row across
+ * up to 800 m of every window. Deterministic: the key and the value are both pure
+ * functions of the event, so a rebuilt chunk reads the same answer, memo or no memo.
+ */
+let markingModeAtS = Number.NaN;
+let markingModeValue = MarkingMode.Normal;
+
+/**
  * Static albedos, pre-converted to the linear working colour space. Sand, rock and
  * gravel are palette-driven (see `desertPaletteAt`), so only the sealed-lane
  * surfaces remain here.
@@ -139,24 +307,36 @@ const gravelLinear = new THREE.Color();
 const sandLinear = new THREE.Color();
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
+/**
+ * Base colour a ghost line is mixed from, for the one case the marking pass has no
+ * `SURFACE_LINEAR` entry: gravel, whose colour comes from the regional palette.
+ */
+const paintBase = new THREE.Color();
 
 // Shared across every chunk; never disposed by the streamer. The maps are built on
 // the first chunk build (they need a canvas, so not at module load) and the vertex
 // colours are divided by the albedo's mean so the surface keeps its old brightness.
-const roadMaterial = applyGroundSpotlightNormals(
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.93,
-    metalness: 0,
-  }),
+// Cloud shadow is the outermost wrap on all three, so it captures the ground-spotlight
+// patch each of them already carries instead of hiding it. A cloud crossing the road is
+// most of the effect: the ribbon is the one surface always in view.
+const roadMaterial = applyCloudShadow(
+  applyGroundSpotlightNormals(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.93,
+      metalness: 0,
+    }),
+  ),
 );
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
-const roadBedMaterial = applyGroundSpotlightNormals(
-  new THREE.MeshStandardMaterial({
-    color: 0x25231f,
-    roughness: 1,
-    metalness: 0,
-  }),
+const roadBedMaterial = applyCloudShadow(
+  applyGroundSpotlightNormals(
+    new THREE.MeshStandardMaterial({
+      color: 0x25231f,
+      roughness: 1,
+      metalness: 0,
+    }),
+  ),
 );
 let textureGain = 1;
 let texturesAttached = false;
@@ -187,26 +367,61 @@ export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
   return out.copy(SURFACE_LINEAR[roadConditionAt(0).surface]!).multiplyScalar(textureGain);
 }
 
-const markingMaterial = applyGroundSpotlightNormals(
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.94,
-    metalness: 0,
-    // Markings sit 2 mm above the road: enough to avoid coplanar depth fighting
-    // while remaining visually flush with the asphalt under a tyre.
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  }),
+const markingMaterial = applyCloudShadow(
+  applyGroundSpotlightNormals(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.94,
+      metalness: 0,
+      // Markings sit 2 mm above the road: enough to avoid coplanar depth fighting
+      // while remaining visually flush with the asphalt under a tyre.
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }),
+  ),
 );
 
-/** Fraction of sand covering a point at |lateral| = a, given sandCover (0..1). */
-function sandFactor(a: number, halfWidth: number, sandCover: number): number {
-  if (sandCover <= 0) return 0;
-  const tip = halfWidth * (1 - sandCover);
-  if (a <= tip) return 0;
-  if (a >= halfWidth) return 1;
-  return (a - tip) / (halfWidth - tip);
+/** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
+function softBand(v: number, lo: number, hi: number, soft: number): number {
+  const a = (v - lo) / soft;
+  const b = (hi - v) / soft;
+  const t = Math.min(1, Math.max(0, Math.min(a, b)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Fraction of sand covering a point at |lateral| = a.
+ *
+ * TWO wedges, and they are shaped differently on purpose.
+ *
+ * The district's own `sandCover` from `roadConditionAt` is a LINEAR wedge in from both
+ * edges — thin dust that thickens towards the shoulder, which is what a road that is
+ * slowly losing its edges looks like. Passing `tongueReach` 0 reproduces it exactly,
+ * including the no-sand case, and that is what keeps the off-feature road identical.
+ *
+ * The director's tongue is a DRIFT: something the wind piled up. A drift is opaque
+ * over nearly all of its reach and feathers only at the very tip, so its profile is a
+ * square root rather than a line. Built linear first, it measured as a 1.7 m reach
+ * that only became visible over the last 0.9 m of it — a gradient across the lane
+ * rather than a tongue lying on it.
+ */
+function sandFactor(a: number, halfWidth: number, sandCover: number, tongueReach: number): number {
+  const districtTip = halfWidth * (1 - sandCover);
+  let cover =
+    a <= districtTip || districtTip >= halfWidth
+      ? 0
+      : a >= halfWidth
+        ? 1
+        : (a - districtTip) / (halfWidth - districtTip);
+  if (tongueReach > 0) {
+    const tongueTip = halfWidth - tongueReach;
+    if (a > tongueTip) {
+      const drift = Math.sqrt(Math.min(1, (a - tongueTip) / tongueReach));
+      if (drift > cover) cover = drift;
+    }
+  }
+  return cover;
 }
 
 interface MarkingLine {
@@ -220,6 +435,79 @@ const MARKING_LINES: readonly MarkingLine[] = [
   { kind: 'divider', dashed: true },
 ];
 
+/**
+ * Row state for the two features that need more than a weight: which repair or which
+ * mark this event is, and where its geometry sits at THIS arclength. Module-level
+ * scratch for the same reason `roadprofile` keeps a window scratch — a fresh object
+ * per row would be one garbage allocation every 1.33 m of every chunk built.
+ */
+const patchRow = {
+  /** 0 blob field, 1 sealed crack line, 2 squared cut-and-fill. */
+  variant: 0,
+  /** The director's ramp. Zero means no repair on this row at all. */
+  weight: 0,
+  /** Lateral centre and half-width of the crack line or the cut, metres. */
+  centre: 0,
+  half: 0,
+  /** How much of this row the cut covers longitudinally, 0..1. */
+  along: 0,
+};
+
+const skidRow = {
+  /** Lateral centres of the two streaks, metres. */
+  left: 0,
+  right: 0,
+  /** Half-width of each streak at this row, metres. */
+  half: SKID_HALF,
+  /** Rubber laid at this row, 0..1, the director's ramp included. */
+  ink: 0,
+};
+
+/**
+ * Where the pair of streaks is, and how black, at one arclength.
+ *
+ * All three marks use LANE 0's wheel pair as their frame. The outer lane's paths fall
+ * between section columns on a widened row — its centres are +/-3.75 and +/-5.35 m
+ * against columns at 3.25, 4.05, 4.85 and 5.25 — so an outer-lane mark would render
+ * as a smear across two columns. Lane 0's are the +/-0.85 and +/-2.45 m columns, and
+ * those exist on every row of every width, narrow or open.
+ */
+function skidRowAt(s: number, halfWidth: number, event: VarietyEvent, weight: number): void {
+  const span = event.halfLength * 2;
+  const u = Math.min(1, Math.max(0, (s - (event.s - event.halfLength)) / span));
+  const lane = laneOffsetFor(halfWidth, 0) + WHEEL_TRACK_LANE_BIAS;
+  let centre: number;
+  let ink: number;
+  let half = SKID_HALF;
+  if (event.draw < 0.45) {
+    // LOCK-UP. Two straight streaks that blacken as the rubber goes down and then
+    // stop dead, where the car did. The director's 4 m ramp is the only softening on
+    // that end, and at any speed this road is driven at, 4 m is a tenth of a second.
+    centre = event.side * lane;
+    ink = 0.35 + 0.65 * u * u;
+  } else if (event.draw < 0.75) {
+    // TURN-AROUND. The pair sweeps from one carriageway's wheel path to the other's.
+    // Smoothstep rather than a straight sweep, because a car turning round lays most
+    // of its rubber at the two ends of the arc and crosses the crown quickly — which
+    // is also why the ink still sits in wheel paths on average (surface-paint.ts
+    // measures the share). The pair straddles the centre, so even mid-arc the crown
+    // itself stays clean: the streaks are 0.8 m either side of a centre passing zero.
+    const t = u * u * (3 - 2 * u);
+    centre = event.side * lane * (1 - 2 * t);
+    ink = 0.75;
+  } else {
+    // BURNOUT. One place, both tyres, long enough for the car to squirm: the pair
+    // wanders, and the scar is widest and blackest in the middle of the span.
+    centre = event.side * lane + Math.sin(s * 0.9) * 0.22;
+    ink = 4 * u * (1 - u);
+    half = SKID_HALF * 1.35;
+  }
+  skidRow.left = centre - WHEEL_TRACK_HALF;
+  skidRow.right = centre + WHEEL_TRACK_HALF;
+  skidRow.half = half;
+  skidRow.ink = ink * weight;
+}
+
 export class RoadMeshProvider implements ChunkProvider {
   readonly id = 'road';
 
@@ -227,11 +515,21 @@ export class RoadMeshProvider implements ChunkProvider {
   /** Coarse tonal mottling of the mat, and the paint's wear pattern. */
   private readonly mottleNoise: Noise2D;
   private readonly paintNoise: Noise1D;
+  /**
+   * Shape of a bitumen repair. Its own stream: driving it off `mottleNoise` would put
+   * every patch exactly where the mat is already dark, which reads as the mottling
+   * getting stronger rather than as somebody having repaired something.
+   */
+  private readonly patchNoise: Noise2D;
+  /** The world seed. The director is asked per row and per marking quad. */
+  private readonly seed: number;
 
   constructor(seed: number) {
+    this.seed = seed;
     this.field = new SurfaceField(seed);
     this.mottleNoise = new Noise2D(seed ^ 0x5bf03635);
     this.paintNoise = new Noise1D(seed ^ 0x2545f491);
+    this.patchNoise = new Noise2D(seed ^ 0x1f9a3c77);
   }
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -297,6 +595,30 @@ export class RoadMeshProvider implements ChunkProvider {
         sandLinear.setHex(palette.sand);
         gravelLinear.setHex(palette.gravel);
 
+        // The director's surface features, resolved once for the whole row. Three
+        // probes rather than three searches: these kinds share the Surface channel,
+        // so at most one of them can be live here, and each call is a memo hit on
+        // the window the previous row already looked up. Everything that depends on
+        // `s` alone finishes here; the column loop does distance arithmetic only.
+        const patchEvent = varietyEventOfKindAt(this.seed, 'patches', s);
+        if (patchEvent) {
+          this.patchRowAt(s, halfWidth, patchEvent, varietyWeightAt(this.seed, 'patches', s));
+        } else {
+          patchRow.weight = 0;
+        }
+        const skidEvent = varietyEventOfKindAt(this.seed, 'skid', s);
+        if (skidEvent) {
+          skidRowAt(s, halfWidth, skidEvent, varietyWeightAt(this.seed, 'skid', s));
+        } else {
+          skidRow.ink = 0;
+        }
+        const tongueEvent = varietyEventOfKindAt(this.seed, 'sandTongue', s);
+        const tongueReach = tongueEvent
+          ? this.tongueReachAt(s, halfWidth, tongueEvent.draw) *
+            varietyWeightAt(this.seed, 'sandTongue', s)
+          : 0;
+        const tongueSide = tongueEvent ? tongueEvent.side : 0;
+
         for (let li = 0; li < latCount; li++) {
           const lateral = sectionLateral(halfWidth, li);
           road.offsetPoint(s, lateral, point);
@@ -315,12 +637,37 @@ export class RoadMeshProvider implements ChunkProvider {
           uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
 
           const a = Math.abs(lateral);
+          // One shoulder only: `side` is the windward one, and the other side keeps
+          // the district's own uniform cover with nothing added.
           color.lerpColors(
             laneBase ?? gravelLinear,
             sandLinear,
-            sandFactor(a, halfWidth, cond.sandCover),
+            sandFactor(a, halfWidth, cond.sandCover, lateral * tongueSide > 0 ? tongueReach : 0),
           );
           this.weather(color, gravelLinear, s, lateral, a, halfWidth, cond.decay);
+          // Repair and rubber go on AFTER the weathering, in the order the road got
+          // them: the district wears, then somebody patches it, then somebody locks
+          // a wheel up on the patch.
+          if (patchRow.weight > 0) {
+            const coverage = this.patchCoverageAt(s, lateral, a, halfWidth);
+            if (coverage > 0) {
+              color.lerp(PATCH_LINEAR, coverage * PATCH_MIX);
+              color.multiplyScalar(1 - coverage * PATCH_GLOSS);
+            }
+          }
+          if (skidRow.ink > 0) {
+            const d = Math.min(
+              Math.abs(lateral - skidRow.left),
+              Math.abs(lateral - skidRow.right),
+            );
+            if (d < skidRow.half) {
+              const t = 1 - d / skidRow.half;
+              const edge = Math.min(1, (halfWidth - a) / SKID_EDGE_FADE);
+              if (edge > 0) {
+                color.lerp(RUBBER_LINEAR, skidRow.ink * t * t * (3 - 2 * t) * edge * SKID_MIX);
+              }
+            }
+          }
           color.multiplyScalar(textureGain);
           colors[vi * 3] = color.r;
           colors[vi * 3 + 1] = color.g;
@@ -548,6 +895,168 @@ export class RoadMeshProvider implements ChunkProvider {
     color.multiplyScalar(1 + mottle * MOTTLE_AMOUNT * (0.7 + decay));
   }
 
+  /**
+   * Picks which repair this patching event is, and resolves everything about it that
+   * depends on arclength alone. Called once per row; `patchCoverageAt` reads the
+   * result across the row's fifteen columns.
+   *
+   * The three variants are the mix a maintained-then-abandoned road shows: most
+   * repairs are a shovel and a rake, crack sealing is the next most common, and a
+   * squared cut-and-fill is the rare one somebody was paid properly for.
+   */
+  private patchRowAt(s: number, halfWidth: number, event: VarietyEvent, weight: number): void {
+    patchRow.weight = weight;
+    patchRow.variant = event.draw < 0.44 ? 0 : event.draw < 0.76 ? 1 : 2;
+    patchRow.along = 1;
+    if (patchRow.variant === 1) {
+      // A sealed crack wanders about the lane it started in. It does not run down
+      // the crown, because a crack THERE is the joint between the two pours, and
+      // sealing the joint is a different, straighter job than sealing a crack.
+      //
+      // Clamped to the mat, and that clamp is load-bearing: unclamped, the wander
+      // took the line up to 3.15 m out on a 2.9 m half-width, where the repair's own
+      // edge taper faded it to nothing — a crack-sealing event that darkened its
+      // lane by 0.46% against 15% for a blob repair, i.e. an event that fired and
+      // showed nothing (tools/surface-paint.ts, seed 7).
+      const lane = laneOffsetFor(halfWidth, 0) + WHEEL_TRACK_LANE_BIAS;
+      const wander =
+        this.patchNoise.fbm(s / PATCH_CRACK_WAVELENGTH, 17.3, 2, 2.1, 0.5) * PATCH_CRACK_WANDER;
+      const outermost = halfWidth - PATCH_CRACK_HALF - EDGE_RAVEL;
+      patchRow.centre =
+        event.side * Math.min(outermost, Math.max(PATCH_CRACK_HALF + 0.1, lane + wander));
+      patchRow.half = PATCH_CRACK_HALF;
+      return;
+    }
+    if (patchRow.variant === 2) {
+      // Cut-and-fill: rectangles squared to the road frame, about half the cells
+      // used. The cell index comes off ABSOLUTE arclength, never off the event's own
+      // start, so a rebuilt chunk lays the same rectangles in the same places.
+      const cell = Math.floor(s / PATCH_CUT_CELL);
+      if (hash01(PATCH_TAG, cell, this.seed) >= PATCH_CUT_DENSITY) {
+        patchRow.along = 0;
+        return;
+      }
+      // A repair is dug out lane-wide, so the rectangle is sized and centred off a
+      // real lane: that keeps it on the asphalt at every width, through a taper.
+      const band = hash01(PATCH_TAG ^ 0x11, cell, this.seed);
+      const lane = halfWidth > HW + 0.5 && band < 0.4 ? 1 : 0;
+      patchRow.centre = event.side * laneOffsetFor(halfWidth, lane);
+      patchRow.half = laneHalfWidthFor(halfWidth, lane) * (0.5 + 0.45 * band);
+      // Squared ends too, but softened over one row: the 1.33 m grid cannot place a
+      // true step, and an unsoftened one aliases along the row it lands on.
+      const length = PATCH_CUT_CELL * (0.35 + 0.45 * hash01(PATCH_TAG ^ 0x22, cell, this.seed));
+      const centreS = (cell + 0.5) * PATCH_CUT_CELL;
+      patchRow.along = softBand(s, centreS - length * 0.5, centreS + length * 0.5, SURFACE_STEP);
+      return;
+    }
+    patchRow.centre = 0;
+    patchRow.half = 0;
+  }
+
+  /** How much bitumen covers one vertex, 0..1, ramp included. */
+  private patchCoverageAt(s: number, lateral: number, a: number, halfWidth: number): number {
+    let coverage: number;
+    if (patchRow.variant === 0) {
+      // The only per-VERTEX noise the features add, and it is paid for only inside a
+      // patching event — at most 220 m of every 1500 m window, and only when that
+      // window drew 'patches' at all.
+      const n = this.patchNoise.fbm(
+        s / PATCH_BLOB_WAVELENGTH,
+        lateral / PATCH_BLOB_WAVELENGTH,
+        2,
+        2.1,
+        0.5,
+      );
+      const t = (n - PATCH_BLOB_ON) / PATCH_BLOB_SOFT;
+      if (t <= 0) return 0;
+      coverage = t >= 1 ? 1 : t * t * (3 - 2 * t);
+    } else {
+      if (patchRow.along <= 0) return 0;
+      coverage =
+        softBand(
+          lateral,
+          patchRow.centre - patchRow.half,
+          patchRow.centre + patchRow.half,
+          patchRow.variant === 1 ? PATCH_CRACK_HALF : SURFACE_STEP,
+        ) * patchRow.along;
+      if (coverage <= 0) return 0;
+    }
+    // The outer half metre is already ravelling into the verge. Bitumen laid over it
+    // restores the hard visual line that EDGE_RAVEL exists to break, so the repair
+    // stops where the mat starts fraying — which is also where a real one stops,
+    // because there is nothing solid out there to lay it on.
+    const edge = (halfWidth - a) / EDGE_RAVEL;
+    if (edge < 1) coverage *= Math.max(0, edge);
+    return coverage * patchRow.weight;
+  }
+
+  /**
+   * Metres of extra sand reach at this arclength, before the director's ramp.
+   *
+   * Separate fingers with bare asphalt between them, one per TONGUE_SPACING cell.
+   * Two cells are examined, not one, because a tail is longer than a cell: the tongue
+   * upwind of this one can still be feathering across here.
+   *
+   * The cell index comes off ABSOLUTE arclength, so a rebuilt chunk puts the same
+   * tongues in the same places — which is the whole reason this is a hash grid and
+   * not anything that accumulates along the road.
+   */
+  private tongueReachAt(s: number, halfWidth: number, draw: number): number {
+    const cell = Math.floor(s / TONGUE_SPACING);
+    let strongest = 0;
+    for (let k = cell - 1; k <= cell; k++) {
+      const centre =
+        (k + 0.15 + TONGUE_JITTER * hash01(TONGUE_TAG, k, this.seed)) * TONGUE_SPACING;
+      const d = s - centre;
+      const profile = d < 0 ? 1 + d / TONGUE_NOSE_M : 1 - d / TONGUE_TAIL_M;
+      if (profile <= 0) continue;
+      const shaped =
+        profile * profile * (3 - 2 * profile) *
+        (0.55 + 0.45 * hash01(TONGUE_TAG ^ 0x11, k, this.seed));
+      if (shaped > strongest) strongest = shaped;
+    }
+    if (strongest <= 0) return 0;
+    return Math.min(
+      halfWidth * TONGUE_MAX_SHARE,
+      TONGUE_MAX_REACH * (0.55 + 0.45 * draw) * strongest,
+    );
+  }
+
+  /**
+   * What the paint does at this arclength. See MARKING_SNAP_M for why the ends are
+   * hard edges snapped to a dash boundary instead of the usual ramp.
+   */
+  private markingModeAt(s: number): MarkingMode {
+    const event = varietyEventOfKindAt(this.seed, 'markings', s);
+    if (!event) return MarkingMode.Normal;
+    const from = Math.round((event.s - event.halfLength) / MARKING_SNAP_M) * MARKING_SNAP_M;
+    const to = Math.round((event.s + event.halfLength) / MARKING_SNAP_M) * MARKING_SNAP_M;
+    if (s < from || s >= to) return MarkingMode.Normal;
+    if (markingModeAtS !== event.s) {
+      markingModeAtS = event.s;
+      // A road with no paint on it cannot change its markings, and an event that
+      // fires and shows nothing makes the director's cadence a lie. So on an
+      // unpainted stretch the event runs the other way and puts a line BACK: the
+      // chalk ghost of the seal this gravel used to be, or the one coat somebody came
+      // out and laid. Either one is a change where the director promised one.
+      //
+      // Decided ONCE, at the event's centre, and deliberately not per row: decay
+      // drifts across an 800 m span, so a per-row decision let the paint flip between
+      // variants several times inside a single event — several boundaries where the
+      // feature promises exactly one. Measured as 53% of a 'none' span with 217 m of
+      // slop at its edge (tools/surface-paint.ts).
+      markingModeValue =
+        roadConditionAt(event.s).markings < PAINT_EFFECTIVE
+          ? MarkingMode.Ghost
+          : event.draw < 0.34
+            ? MarkingMode.DoubleSolid
+            : event.draw < 0.67
+              ? MarkingMode.None
+              : MarkingMode.Rumble;
+    }
+    return markingModeValue;
+  }
+
   private *buildMarkingsSteps(
     road: Road,
     sStart: number,
@@ -572,16 +1081,32 @@ export class RoadMeshProvider implements ChunkProvider {
         const s1 = s + SURFACE_STEP;
         const condition = roadConditionAt(s);
         const laneBase = SURFACE_LINEAR[condition.surface];
-        if (condition.markings >= MARKING_MIN && laneBase) {
-          const halfWidth0 = road.halfWidthAt(s);
-          const halfWidth1 = road.halfWidthAt(s1);
+        const mode = this.markingModeAt(s);
+        const halfWidth0 = road.halfWidthAt(s);
+        const halfWidth1 = road.halfWidthAt(s1);
+        if (mode === MarkingMode.Ghost) {
+          // One chalky crown stripe, solid, at a coverage far under a fresh coat.
+          // Emitted OUTSIDE the `condition.markings` gate on purpose: that gate is
+          // the road's own rule, and this event exists precisely to break it.
+          const base = laneBase ?? paintBase.setHex(desertPaletteAt(s).gravel);
+          color.lerpColors(base, PAINT_LINEAR, GHOST_COVERAGE);
+          this.emitMarkingQuad(
+            road, 0, 0, s, s1, MARKING_HALF_WIDTH,
+            ox, oz, point, color, positions, colors,
+          );
+        } else if (mode !== MarkingMode.None && condition.markings >= MARKING_MIN && laneBase) {
           for (const line of MARKING_LINES) {
             // Keep the old crown cadence exactly. The dividers use their own two-metre
             // phase and only paint a complete step inside an on dash, never a stretched
             // half dash. They also require both ends to be genuinely two-lane.
             const dividerOn0 = (Math.floor((s + 2) / 8) & 1) === 0;
             const dividerOn1 = (Math.floor((s1 + 2) / 8) & 1) === 0;
-            if (line.kind === 'crown' && ((si / SUB_DIVISIONS) | 0) & 1) continue;
+            // A double centre line is SOLID: the dash cadence is what it replaces.
+            if (
+              line.kind === 'crown' &&
+              mode !== MarkingMode.DoubleSolid &&
+              ((si / SUB_DIVISIONS) | 0) & 1
+            ) continue;
             if (
               line.kind === 'divider' &&
               (!dividerOn0 || !dividerOn1 ||
@@ -596,7 +1121,9 @@ export class RoadMeshProvider implements ChunkProvider {
                 ]
                 : line.kind === 'divider'
                   ? [[-LANE_WIDTH, -LANE_WIDTH], [LANE_WIDTH, LANE_WIDTH]]
-                  : [[0, 0]];
+                  : mode === MarkingMode.DoubleSolid
+                    ? [[-DOUBLE_SOLID_GAP, -DOUBLE_SOLID_GAP], [DOUBLE_SOLID_GAP, DOUBLE_SOLID_GAP]]
+                    : [[0, 0]];
             for (const [lateral0, lateral1] of laterals) {
               const wear = this.paintNoise.fbm(
                 (s + lateral0 * 130) / PAINT_WEAR_WAVELENGTH,
@@ -608,7 +1135,25 @@ export class RoadMeshProvider implements ChunkProvider {
               if (coverage < PAINT_GONE) continue;
               color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
               this.emitMarkingQuad(
-                road, lateral0, lateral1, s, s1,
+                road, lateral0, lateral1, s, s1, MARKING_HALF_WIDTH,
+                ox, oz, point, color, positions, colors,
+              );
+            }
+          }
+          if (mode === MarkingMode.Rumble) {
+            // A rumbled edge. The real thing is 0.3 m ribs, and marking quads are
+            // emitted one per SURFACE_STEP — 1.33 m — so ribs are four times finer
+            // than anything this mesh can carry and would alias into a flicker as
+            // the camera moved. What survives at the distance a driver reads it from
+            // is the strip's TONE, so it is drawn as one continuous dark band inside
+            // the edge line, which is what the ribbing looks like from a seat anyway.
+            color.lerpColors(laneBase, RUMBLE_LINEAR, RUMBLE_MIX);
+            for (const sign of [-1, 1]) {
+              this.emitMarkingQuad(
+                road,
+                sign * (halfWidth0 - RUMBLE_INSET),
+                sign * (halfWidth1 - RUMBLE_INSET),
+                s, s1, RUMBLE_HALF_WIDTH,
                 ox, oz, point, color, positions, colors,
               );
             }
@@ -643,6 +1188,8 @@ export class RoadMeshProvider implements ChunkProvider {
     lateral1: number,
     s0: number,
     s1: number,
+    /** Half-width of this stripe. A painted line and a rumble band differ only here. */
+    half: number,
     ox: number,
     oz: number,
     point: { x: number; y: number; z: number },
@@ -650,10 +1197,10 @@ export class RoadMeshProvider implements ChunkProvider {
     positions: number[],
     colors: number[],
   ): void {
-    const l00 = lateral0 - MARKING_HALF_WIDTH;
-    const l01 = lateral0 + MARKING_HALF_WIDTH;
-    const l10 = lateral1 - MARKING_HALF_WIDTH;
-    const l11 = lateral1 + MARKING_HALF_WIDTH;
+    const l00 = lateral0 - half;
+    const l01 = lateral0 + half;
+    const l10 = lateral1 - half;
+    const l11 = lateral1 + half;
     // Four corners [c00, c01, c10, c11]; emit triangles c00,c10,c01 and c10,c11,c01.
     this.markingCorner(road, s0, l00, ox, oz, point);
     const x00 = point.x; const y00 = point.y; const z00 = point.z;

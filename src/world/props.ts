@@ -18,11 +18,18 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../core/rng';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import { monumentsBetween, poleConditionAt, poleEraSegments } from './gradient';
+import {
+  varietyEventOfKindAt,
+  varietyEventsBetween,
+  type VarietyEvent,
+} from './director';
 
 import type { Monument, PoleCondition, PoleEra } from './gradient';
 import { HazardIndex } from './hazards';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { Terrain } from './terrain';
+import { drawnGroundY } from './terrainmesh';
+import type { RoadDistance } from './roaddistance';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 
 // ---------------------------------------------------------------------------
@@ -134,6 +141,131 @@ const SIGN_WIDTH = 2.4;
 const SIGN_HEIGHT = 0.9;
 const SIGN_CENTRE_Y = 1.9; // sign centre height above the ground
 
+// Delineators: the reflector-post runs the variety director schedules (kind
+// 'delineators' in `world/director.ts`). A run is 400-1200 m of road, so the posts
+// are the one thing on this list that arrives as a RUN rather than as an object.
+const TAG_DELINEATOR = 0xde11a7;
+/**
+ * MEASURED FROM THE ASPHALT EDGE, like every other setback in this file.
+ *
+ * 1.2 m is where a delineator belongs: far enough out that a wheel tracking the
+ * paint cannot clip one, close enough in that the run reads as edge marking rather
+ * than as a fence line retreating into the desert. It also lands the whole run
+ * inside the 3.5 m loose verge and nowhere near the 3.1 m pole line, so a post and
+ * a mast never fight for the same ground. Perched birds use 0.7-2.4 m of the same
+ * shoulder (`agents/birds.ts`); a post is 12 cm wide and carries no collider, so the
+ * two share the band the way a bird and a fence post share a fence post.
+ */
+export const DELINEATOR_SETBACK_M = 1.2;
+/**
+ * Station spacing, metres. Every consecutive gap lands in this exact range: the
+ * gaps are drawn per station rather than fixed, because a perfectly even run reads
+ * as a texture and an uneven one reads as something somebody installed.
+ */
+export const DELINEATOR_GAP_MIN = 40;
+export const DELINEATOR_GAP_MAX = 60;
+/** Post height, metres: knee-high plus a little, the height of the real article. */
+export const DELINEATOR_HEIGHT = 1.05;
+/** Width of the face that carries the reflector. */
+const DELINEATOR_FACE_W = 0.12;
+/** Planted this deep, so no post shows daylight under it on a rippled verge. */
+export const DELINEATOR_EMBED = 0.03;
+/**
+ * Reflector centre height. A saloon's headlamps sit near 0.7 m and the beam rises
+ * as it goes, so a reflector at 0.82 m is inside the hot part of the beam at the
+ * distance the run matters — a hundred metres ahead, where it draws the curve.
+ */
+const DELINEATOR_REFLECTOR_Y = 0.82;
+/**
+ * What `event.draw` buys. Below the first figure the run is posted on BOTH sides
+ * (the avenue), below the second it alternates sides (the cheap installation), above
+ * it stays on the event's own side. Three layouts, because one layout over 1.2 km is
+ * a fence and the player learns to stop seeing it.
+ */
+const DELINEATOR_BOTH_SIDES = 0.34;
+const DELINEATOR_ALTERNATING = 0.67;
+/**
+ * Radians the post's face is canted in toward the carriageway. A reflector square to
+ * the road returns light to a driver who is already past it; the cant turns it back
+ * up the road toward the headlights that are still coming.
+ */
+const DELINEATOR_CANT = 0.26;
+/** Yaw jitter, radians: these are hammered in from the back of a truck, not surveyed. */
+const DELINEATOR_YAW_JITTER = 0.1;
+/**
+ * Base of the delineator id band, and why it is a band of its own.
+ *
+ * A breakable's id is its identity in `state.flattenedProps`, which is a number array
+ * in every save: two props sharing one id means knocking down a post also erases some
+ * cactus three deserts away. The scatter's road obstacles use small negatives
+ * (`-1 - candidate * 2 - kind`) and the desert uses packed positive cells, so the
+ * delineators take a reserved negative band far above both — 2^24 is 16.7 million, an
+ * exact integer in a double and about six times the widest the road-obstacle stream
+ * can ever count to.
+ */
+const DELINEATOR_ID_BASE = 1 << 24;
+/** Slots reserved per run, so the band cannot collide with itself. A run is under 30. */
+const DELINEATOR_ID_SLOTS = 256;
+
+/** Stable identity of one post: the run's window, its station, and which side it is on. */
+function delineatorId(window: number, ordinal: number, side: -1 | 1): number {
+  return -(DELINEATOR_ID_BASE + window * DELINEATOR_ID_SLOTS + ordinal * 2 + (side > 0 ? 1 : 0));
+}
+/**
+ * Emissive intensity of a reflector at full night. It is NOT a light: the light
+ * budget is six real PointLights for the whole world (see `LightBudget` in main.ts)
+ * and a kilometre of posts would eat it twice over. An emissive chip that comes up
+ * over the same dusk ramp as the lamps is what makes the run read as an avenue.
+ */
+const REFLECTOR_EMISSIVE = 2.6;
+
+// Pole anomalies: the 2-4 consecutive poles the director's 'poleAnomaly' event turns
+// into something other than a pole standing there. These are a LOCAL OVERRIDE of the
+// era's own pole — same index, same station, same era — and never a second line.
+const TAG_POLE_ANOMALY = 0x90f1a9;
+const ANOMALY_RUN_MIN = 2;
+const ANOMALY_RUN_MAX = 4;
+/**
+ * Lean of a pole that is DOWN, radians. 1.46 is 84 degrees: the butt is still in its
+ * hole and the mast is in the sand, with the tip a few tens of centimetres up, which
+ * is what a pulled-over pole looks like. A right angle instead buried the tip.
+ */
+const DOWN_ANGLE = 1.46;
+/** Spread of the fall direction, radians, about straight out into the desert. */
+const DOWN_AZ_JITTER = 0.9;
+/**
+ * THE DERELICT: what a 'poleAnomaly' event leaves where there is no pole line at all.
+ *
+ * About one era band in four has no poles (`poleEraForBand` in gradient.ts), and an
+ * override has nothing to override there — so a quarter of the events on this kind
+ * used to schedule a change and produce nothing, which makes the director's cadence a
+ * lie. Measured at 151 of 602 events over 6000 km before this existed.
+ *
+ * The fix is NOT a ghost pole in the line. Pole form comes from
+ * `hash(seed, TAG_POLE, index)` over ONE global running index, so inserting a station
+ * anywhere renumbers every pole after it and rewrites the roadside for the remaining
+ * forty thousand kilometres. A derelict is therefore a discrete object at the event's
+ * own arclength that borrows the neighbouring era's silhouette: the remnant of a line
+ * nobody maintained, which is exactly what an empty band is the aftermath of.
+ */
+const TAG_DERELICT = 0x90f1d3;
+/** Half-buried: the mast is in the sand, not lying on top of it. */
+export const DERELICT_SINK_M = 0.28;
+/**
+ * 1.52 radians is 87 degrees — flatter than a fallen pole of the LIVE line, which is
+ * still in its hole at 84. This one snapped at the base decades ago and settled.
+ */
+const DERELICT_FALL_ANGLE = 1.52;
+/** Metres along the road to the second remnant, and the roll above which it exists. */
+const DERELICT_STUMP_GAP = 40;
+const DERELICT_STUMP_CHANCE = 0.35;
+const DERELICT_STUMP_HEIGHT = 0.85;
+/** Sag as a fraction of the span: a live span, and one hanging off a fallen pole. */
+const WIRE_SAG_TAUT = 0.03;
+const WIRE_SAG_SLACK = 0.14;
+/** Fraction of the chord's own clearance over the ground the sag may ever spend. */
+const WIRE_SAG_CLEARANCE = 0.55;
+
 // ---------------------------------------------------------------------------
 // Shared materials (never disposed; they live for the whole session)
 // ---------------------------------------------------------------------------
@@ -190,6 +322,41 @@ const matChrome = new THREE.MeshStandardMaterial({
 });
 const matSignPost = new THREE.MeshStandardMaterial({ color: 0x5a5a5e, roughness: 0.7, metalness: 0.4 });
 const matRust = new THREE.MeshStandardMaterial({ color: 0x6b4a32, roughness: 0.85, metalness: 0.25 });
+
+/**
+ * Delineator post and reflector.
+ *
+ * The post is bleached white-grey plastic, not white: a pure white post in this
+ * palette reads as a painted kerb stone. The reflector's own albedo is a dull amber
+ * so it is legible in daylight as a chip of glass rather than a hole in the post,
+ * and its EMISSIVE — not a light — is what makes it a bright dot after dark.
+ */
+const matDelineator = new THREE.MeshStandardMaterial({ color: 0xd6d1c3, roughness: 0.78, metalness: 0.05 });
+const matReflector = new THREE.MeshStandardMaterial({
+  color: 0xb9a179,
+  emissive: 0xffdca8,
+  emissiveIntensity: 0,
+  roughness: 0.22,
+  metalness: 0.2,
+});
+
+let reflectorEmissiveIntensity = -1;
+
+/** Shared with every run in the world, so this is one material write per frame. */
+function setReflectorEmission(on: number): void {
+  const value = on * REFLECTOR_EMISSIVE;
+  if (value === reflectorEmissiveIntensity) return;
+  reflectorEmissiveIntensity = value;
+  matReflector.emissiveIntensity = value;
+}
+
+// Anomaly fittings. The tarp is sun-bleached canvas — grey with the warmth burnt out
+// of it — because a saturated cloth on a pole reads as a flag and therefore as
+// somebody being here now, which is the opposite of what a wrapped pole says. The
+// gear is the pale green-grey of painted line equipment, the one manufactured colour
+// the desert never produces by itself.
+const matTarp = new THREE.MeshStandardMaterial({ color: 0x9c9686, roughness: 1.0, metalness: 0 });
+const matGear = new THREE.MeshStandardMaterial({ color: 0x69706a, roughness: 0.62, metalness: 0.35 });
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -431,6 +598,17 @@ function armPiece(mirror: number): THREE.BufferGeometry {
   return mergeGeometries([stub, rise]);
 }
 
+/**
+ * One length of a snapped delineator blade.
+ *
+ * Centred on its own origin because that is what `PropPiece.offset` composes with:
+ * the debris body is placed at `offset` and spun about its own centre, so a piece
+ * built offset inside its own geometry would orbit a point outside itself.
+ */
+function postPiece(height: number): THREE.BufferGeometry {
+  return new THREE.BoxGeometry(DELINEATOR_FACE_W, height, 0.04);
+}
+
 let _pieces: Record<string, readonly PropPiece[]> | null = null;
 
 /** Pieces for a form that comes apart, or null for one that does not. */
@@ -458,6 +636,15 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
         { geometry: lump(0.34, 0.65), material: matScrub, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4, looseSoil: true },
         { geometry: lump(0.24, 0.65), material: matScrub, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2, looseSoil: true },
         { geometry: lump(0.2, 0.65), material: matScrub, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2, looseSoil: true },
+      ],
+      // A post that has been hit: the blade snaps in two and the reflector chip goes
+      // its own way. Light parts with a low mass, so a car that clips one scatters
+      // plastic rather than being slowed by it — the whole point of making a solid
+      // post breakable in the first place.
+      delineator: [
+        { geometry: postPiece(0.44), material: matDelineator, offset: [0, 0.78, 0], capsule: [0.17, 0.055], mass: 1.6 },
+        { geometry: postPiece(0.34), material: matDelineator, offset: [0, 0.21, 0], capsule: [0.12, 0.055], mass: 1.4 },
+        { geometry: new THREE.BoxGeometry(0.075, 0.13, 0.014), material: matReflector, offset: [0, DELINEATOR_REFLECTOR_Y - DELINEATOR_EMBED, 0.027], capsule: [0.05, 0.045], mass: 0.2 },
       ],
     };
   }
@@ -994,6 +1181,143 @@ function forEachPole(sStart: number, sEnd: number, cb: (s: number, index: number
   }
 }
 
+/**
+ * Global index of the first pole at or after `s`, or null if the road has none left.
+ *
+ * The same walk as `forEachPole`, for one arclength instead of a range: the anomaly
+ * cluster has to name the poles it owns BY INDEX, because the index is the only
+ * identity a pole has that a chunk boundary cannot cut in half.
+ */
+function poleIndexAtOrAfter(s: number): number | null {
+  let indexBase = 0;
+  for (const seg of poleEraSegments()) {
+    const count = seg.spacing > 0 ? Math.floor((seg.end - seg.start) / seg.spacing) : 0;
+    if (seg.end > s && count > 0) {
+      const k = Math.max(0, Math.ceil((s - seg.start) / seg.spacing - 0.5 - POLE_EPS));
+      if (k < count) return indexBase + k;
+    }
+    indexBase += count;
+  }
+  return null;
+}
+
+/**
+ * What the pole at `index` is doing instead of standing there.
+ *
+ * Four forms, one per quarter of the event's own roll, so a cluster is all of one
+ * kind: two poles wrapped in the same tarp are a road crew, one of each is a
+ * showroom. The per-pole hash then varies the detail inside the form.
+ */
+export type PoleAnomaly = 'none' | 'down' | 'wrapped' | 'nest' | 'gear';
+
+/**
+ * The anomaly on a given pole, or 'none'.
+ *
+ * There is deliberately no second pole system here. The event names a STRETCH of
+ * road; the poles inside it are whatever the era already put there, and only their
+ * form changes. Two consequences worth stating, because both are load-bearing:
+ *
+ *  - `varietyEventOfKindAt` answers null outside the span, so the cluster cannot
+ *    leak past the event even when the run of 2-4 would have reached further. The
+ *    span is the authority, not the count.
+ *  - where the span holds no pole at all — an era band with no line, or a span that
+ *    falls in the gap before a band's first pole — this returns 'none' for everything
+ *    and `poleDerelictAt` takes the event instead. Between them the two cover every
+ *    scheduled event, which is the property `tools/verge-furniture.ts` measures over
+ *    6000 km: a cluster where there is a line, a derelict where there is not, never
+ *    nothing.
+ */
+export function poleAnomalyAt(seed: number, s: number, index: number): PoleAnomaly {
+  const event = varietyEventOfKindAt(seed, 'poleAnomaly', s);
+  if (!event) return 'none';
+  const first = poleIndexAtOrAfter(event.s - event.halfLength);
+  if (first === null) return 'none';
+  const run =
+    ANOMALY_RUN_MIN +
+    Math.floor(hash01(seed, TAG_POLE_ANOMALY, event.index) * (ANOMALY_RUN_MAX - ANOMALY_RUN_MIN + 1));
+  if (index < first || index >= first + run) return 'none';
+  if (event.draw < 0.25) return 'down';
+  if (event.draw < 0.5) return 'wrapped';
+  if (event.draw < 0.75) return 'nest';
+  return 'gear';
+}
+
+/**
+ * Does the era schedule put a pole inside this span at all?
+ *
+ * Asked of the SPAN and not of the band, because a span that straddles a band
+ * boundary can sit entirely in the gap before the next band's first pole while
+ * `poleConditionAt` at its centre still names an era. That case is rare and it is
+ * exactly the one that would otherwise schedule a change and show nothing.
+ */
+function poleLineInSpan(spanStart: number, spanEnd: number): boolean {
+  const index = poleIndexAtOrAfter(spanStart);
+  if (index === null) return false;
+  const s = poleSByIndex(index);
+  return s !== null && s <= spanEnd;
+}
+
+/**
+ * The silhouette a derelict wears: the era of the nearest band that HAS a line.
+ *
+ * Backwards first, because a derelict is the remnant of the line the drive has just
+ * been following — the one that stopped. Only at the very start of the road, where
+ * there is nothing behind, does it borrow from ahead.
+ */
+function derelictEra(s: number): PoleEra {
+  const bands = poleEraSegments();
+  let here = bands.length - 1;
+  for (let i = 0; i < bands.length; i++) {
+    if (s < bands[i]!.end) {
+      here = i;
+      break;
+    }
+  }
+  for (let i = here; i >= 0; i--) if (bands[i]!.era !== 'none') return bands[i]!.era;
+  for (let i = here + 1; i < bands.length; i++) if (bands[i]!.era !== 'none') return bands[i]!.era;
+  return 'timber';
+}
+
+/**
+ * A standalone derelict, and NOT a member of the pole line.
+ *
+ * One old mast down in the sand, snapped off at its stump, and often a second stump
+ * forty metres on: the remnant of a line that was never replaced. It carries no
+ * index, so it renumbers nothing (see `TAG_DERELICT` on why that matters), no wire,
+ * and no lamp — the whole read is that this one was abandoned rather than maintained.
+ */
+export interface PoleDerelict {
+  /** Arclength of the fallen mast. The event's own centre. */
+  readonly s: number;
+  readonly side: -1 | 1;
+  /** Borrowed silhouette; see `derelictEra`. */
+  readonly era: PoleEra;
+  /** Arclength of the surviving stump, or null when there is only the mast. */
+  readonly stumpS: number | null;
+}
+
+/**
+ * The derelict a 'poleAnomaly' event leaves at `s`, or null.
+ *
+ * Null in the ordinary case: where the era has a line, the event overrides poles and
+ * this is not needed. Exported so the measuring tool can ask the same question
+ * without building a chunk.
+ */
+export function poleDerelictAt(seed: number, s: number): PoleDerelict | null {
+  const event = varietyEventOfKindAt(seed, 'poleAnomaly', s);
+  if (!event) return null;
+  if (poleLineInSpan(event.s - event.halfLength, event.s + event.halfLength)) return null;
+  const stump = hash01(seed, TAG_DERELICT, event.index) > DERELICT_STUMP_CHANCE;
+  return {
+    s: event.s,
+    side: event.side,
+    era: derelictEra(event.s),
+    // Forward along the road, so the mast is what the driver meets first and the
+    // stump is the thing still there after it — a line ending rather than starting.
+    stumpS: stump ? event.s + DERELICT_STUMP_GAP : null,
+  };
+}
+
 interface PolePose {
   index: number;
   s: number;
@@ -1015,6 +1339,8 @@ interface PolePose {
   hasCrossarm: boolean;
   hasWire: boolean;
   height: number;
+  /** What this pole is doing instead of standing upright. Usually 'none'. */
+  anomaly: PoleAnomaly;
 }
 
 /**
@@ -1075,6 +1401,7 @@ function describePoleAt(
   baseZ: number,
   heading: number,
   cond: PoleCondition,
+  anomaly: PoleAnomaly,
 ): PolePose {
   const h1 = hash01(seed, TAG_POLE, index, 0);
   const h3 = hash01(seed, TAG_POLE, index, 2);
@@ -1086,12 +1413,25 @@ function describePoleAt(
   const height = POLE_HEIGHT[cond.era];
   const d = cond.dilapidation;
 
-  const leanAz = h1 * Math.PI * 2;
-  // No pole is ever tipped right over: `dilapidation` stops at MAX_WEAR, because a
-  // mast lying in the sand is a wreck rather than a road going somewhere. What is left
-  // is the lean, which is what a pole that has stood through decades of wind looks
-  // like — and it is what makes the silhouette on the horizon change between eras.
-  const leanAngle = d * 0.42 * (0.5 + h3);
+  // A pole in an anomaly cluster is the SAME pole: same index, same station, same
+  // era, same hashes. Only the two numbers that describe how it is standing are
+  // overridden, which is exactly why this lives inside the pose rather than beside it.
+  const down = anomaly === 'down';
+
+  // A downed pole falls INTO THE DESERT, never across the road. `leanOffset` sends the
+  // top along (sin az, cos az) and the pole line's outward normal is
+  // (-cos heading, sin heading), so `heading - PI/2` is the azimuth that lays a mast
+  // down away from the paint; the jitter is narrow enough that the outward component
+  // survives it. Any other azimuth drops eight metres of timber over a live lane, and
+  // where this feature meets the asphalt the asphalt wins.
+  const leanAz = down ? heading - Math.PI * 0.5 + (h1 - 0.5) * DOWN_AZ_JITTER : h1 * Math.PI * 2;
+  // No pole is ever tipped right over BY WEAR: `dilapidation` stops at MAX_WEAR,
+  // because a mast lying in the sand is a wreck rather than a road going somewhere.
+  // What is left is the lean, which is what a pole that has stood through decades of
+  // wind looks like — and it is what makes the silhouette on the horizon change
+  // between eras. A scheduled 'down' anomaly is the deliberate exception: one pole in
+  // a hundred kilometres is an event, a whole era of them is a junkyard.
+  const leanAngle = down ? DOWN_ANGLE + (h3 - 0.5) * 0.12 : d * 0.42 * (0.5 + h3);
 
   // `twist` spins the pole about +Y so its local axes follow the road: rotating by
   // the heading maps local +X onto (cos h, 0, -sin h), which is `offsetPoint`'s
@@ -1101,8 +1441,13 @@ function describePoleAt(
   const twist = heading + (cond.era === 'lattice' ? Math.PI * 0.25 : 0) + jitter;
 
   const hasCrossarm = cond.era === 'timber' ? h5 > d * 0.8 : true;
-  const lampWorks = h6 < cond.lampChance;
-  const hasWire = h7 < cond.wireChance;
+  // A lamp that has hit the sand does not come back on, and a pole nobody has
+  // maintained since somebody tied a tarp round it has had its fixture stripped with
+  // everything else worth carrying away.
+  const lampWorks = down || anomaly === 'wrapped' ? false : h6 < cond.lampChance;
+  // The span into a fallen pole is still attached, just slack. That is the whole read:
+  // a line that came DOWN, rather than one that was taken away.
+  const hasWire = down ? true : h7 < cond.wireChance;
 
   const top = leanOffset(height, leanAngle, leanAz);
 
@@ -1139,6 +1484,7 @@ function describePoleAt(
     hasCrossarm,
     hasWire,
     height,
+    anomaly,
   };
 }
 
@@ -1146,7 +1492,17 @@ function describePoleAt(
 function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number): PolePose {
   const sample = road.sampleAt(s);
   const p = road.offsetPoint(s, -(road.halfWidthAt(s) + POLE_SETBACK_M));
-  return describePoleAt(seed, s, index, p.x, terrain.heightAt(p.x, p.z, s), p.z, sample.heading, poleConditionAt(s));
+  return describePoleAt(
+    seed,
+    s,
+    index,
+    p.x,
+    terrain.heightAt(p.x, p.z, s),
+    p.z,
+    sample.heading,
+    poleConditionAt(s),
+    poleAnomalyAt(seed, s, index),
+  );
 }
 
 // --- Pole silhouette geometries (shared) ------------------------------------
@@ -1259,6 +1615,161 @@ function lampBulb(): THREE.BufferGeometry {
   return _lampBulb;
 }
 
+// --- Anomaly fittings (shared) ---------------------------------------------
+
+let _tarpWrap: THREE.BufferGeometry | null = null;
+/**
+ * Canvas tied round the foot of a pole, with the rope that holds it.
+ *
+ * Authored for the TIMBER shaft (0.16 m at the butt) and scaled per era at the mesh,
+ * because the lattice mast is 1 m across its legs down there and a wrap sized for
+ * timber vanished inside it. Slightly wider at the bottom than the top: cloth tied at
+ * the waist and left for a decade falls outward, and a straight cylinder read as a
+ * bollard rather than as cloth.
+ */
+function tarpWrap(): THREE.BufferGeometry {
+  if (!_tarpWrap) {
+    const cloth = new THREE.CylinderGeometry(0.26, 0.38, 1.55, 7, 1, true).translate(0, 0.78, 0);
+    const hem = new THREE.CylinderGeometry(0.38, 0.33, 0.16, 7, 1).translate(0, 0.08, 0);
+    _tarpWrap = mergeGeometries([cloth, hem]);
+  }
+  return _tarpWrap;
+}
+
+let _tarpRope: THREE.BufferGeometry | null = null;
+function tarpRope(): THREE.BufferGeometry {
+  if (!_tarpRope) _tarpRope = new THREE.TorusGeometry(0.29, 0.018, 4, 10).rotateX(Math.PI / 2).translate(0, 1.32, 0);
+  return _tarpRope;
+}
+
+let _stickNest: THREE.BufferGeometry | null = null;
+/**
+ * A nest: a squashed mass of twigs with loose sticks out of the sides.
+ *
+ * The deformed icosahedron is the same trick the boulders use — one weld, one radial
+ * push — and at 0.45 squash it is exactly the flattened dome a raptor builds. The
+ * loose sticks are what stop it reading as a rock somebody left on the crossarm; the
+ * angles are from a fixed hash, so every nest in the world is this one nest and the
+ * geometry is shared.
+ */
+function stickNest(): THREE.BufferGeometry {
+  if (!_stickNest) {
+    const parts: THREE.BufferGeometry[] = [deformIcosahedron(0x9e57, 0.45).scale(0.42, 0.42, 0.42)];
+    for (let i = 0; i < 6; i++) {
+      const yaw = hash01(0x9e57, i, 1) * Math.PI * 2;
+      const length = 0.34 + hash01(0x9e57, i, 2) * 0.3;
+      const stick = new THREE.CylinderGeometry(0.012, 0.016, length, 4, 1);
+      // `mergeGeometries` refuses a mixed attribute set, and the welded icosahedron
+      // above has had its UVs deleted (it is deformed per vertex, so a UV seam is a
+      // hole). The sticks are untextured too, so the UVs go rather than the weld.
+      stick.deleteAttribute('uv');
+      stick.rotateZ(Math.PI / 2 - (hash01(0x9e57, i, 3) - 0.5) * 0.5);
+      stick.rotateY(yaw);
+      stick.translate(Math.sin(yaw) * length * 0.3, 0.06 + hash01(0x9e57, i, 4) * 0.12, Math.cos(yaw) * length * 0.3);
+      parts.push(stick);
+    }
+    _stickNest = mergeGeometries(parts);
+  }
+  return _stickNest;
+}
+
+let _transformerCan: THREE.BufferGeometry | null = null;
+/** A pole-mounted transformer: a ribbed can on a bracket, bolted to the shaft. */
+function transformerCan(): THREE.BufferGeometry {
+  if (!_transformerCan) {
+    const can = new THREE.CylinderGeometry(0.19, 0.19, 0.52, 9, 1);
+    const lid = new THREE.CylinderGeometry(0.21, 0.2, 0.06, 9, 1).translate(0, 0.29, 0);
+    const bracket = new THREE.BoxGeometry(0.22, 0.06, 0.05).translate(0.16, 0.18, 0);
+    const bushing = new THREE.CylinderGeometry(0.03, 0.04, 0.14, 5, 1).translate(0.09, 0.37, 0);
+    _transformerCan = mergeGeometries([can, lid, bracket, bushing]);
+  }
+  return _transformerCan;
+}
+
+let _loudspeaker: THREE.BufferGeometry | null = null;
+/**
+ * A horn loudspeaker on a stub arm, mouth along local +X.
+ *
+ * +X is over the carriageway (see `applyPoleRotation`), and that is deliberate: a
+ * speaker bolted to a pole exists to be heard from the road. The mouth reaches 0.55 m
+ * from a pole standing 3.1 m outside the paint, so it is still two and a half metres
+ * clear of anything driving past.
+ */
+function loudspeaker(): THREE.BufferGeometry {
+  if (!_loudspeaker) {
+    const horn = new THREE.CylinderGeometry(0.23, 0.07, 0.42, 9, 1);
+    horn.rotateZ(-Math.PI / 2);
+    horn.translate(0.34, 0, 0);
+    const driver = new THREE.CylinderGeometry(0.08, 0.08, 0.14, 7, 1);
+    driver.rotateZ(-Math.PI / 2);
+    driver.translate(0.07, 0, 0);
+    const arm = new THREE.BoxGeometry(0.16, 0.05, 0.05).translate(-0.02, 0, 0);
+    _loudspeaker = mergeGeometries([horn, driver, arm]);
+  }
+  return _loudspeaker;
+}
+
+/**
+ * Where a nest sits on each era's pole: on the crossarm if there is one, on the mast
+ * cap if there is not. Read off the silhouette builders above rather than guessed —
+ * `timberCrossarm` puts its arm at y = 6.1 and `latticeMast` caps at 8.25.
+ */
+function nestLocal(era: PoleEra, hasCrossarm: boolean): [number, number, number] {
+  if (era === 'timber') return hasCrossarm ? [-0.52, 6.26, 0] : [0, 6.42, 0];
+  if (era === 'lattice') return [0, 8.36, 0];
+  return [0, 8.88, 0];
+}
+
+/** Height up the shaft that line gear is bolted at: chest height for a lineman on a ladder. */
+const GEAR_LOCAL_Y = 3.4;
+
+/**
+ * Adds whatever the anomaly hangs on the pole. Nothing here moves the pole: the
+ * 'down' form is entirely in the pose's lean, so this switch has no case for it.
+ */
+function addAnomalyMeshes(poleGroup: THREE.Group, pose: PolePose): void {
+  switch (pose.anomaly) {
+    case 'wrapped': {
+      // The lattice mast's legs stand 1 m apart at the base; the wrap is authored for
+      // a 0.3 m timber butt, so it is stretched to cover them instead of hiding in them.
+      const spread = pose.era === 'lattice' ? 1.9 : 1;
+      const cloth = new THREE.Mesh(tarpWrap(), matTarp);
+      cloth.scale.set(spread, 1, spread);
+      poleGroup.add(cloth);
+      const rope = new THREE.Mesh(tarpRope(), matWire);
+      rope.scale.set(spread, 1, spread);
+      poleGroup.add(rope);
+      break;
+    }
+    case 'nest': {
+      const local = nestLocal(pose.era, pose.hasCrossarm);
+      const nest = new THREE.Mesh(stickNest(), matDeadStick);
+      nest.position.set(local[0], local[1], local[2]);
+      nest.rotation.y = hash01(pose.index, TAG_POLE_ANOMALY, 1) * Math.PI * 2;
+      poleGroup.add(nest);
+      break;
+    }
+    case 'gear': {
+      // Which fitting is per POLE, not per event: a cluster where one pole carries a
+      // transformer and the next a loudspeaker is a line somebody kept adding to.
+      if (hash01(pose.index, TAG_POLE_ANOMALY, 2) < 0.5) {
+        const can = new THREE.Mesh(transformerCan(), matGear);
+        // On the desert side (-X), where a can hangs clear of the carriageway.
+        can.position.set(-0.26, GEAR_LOCAL_Y, 0);
+        poleGroup.add(can);
+      } else {
+        const horn = new THREE.Mesh(loudspeaker(), matGear);
+        horn.position.set(0.14, GEAR_LOCAL_Y + 0.7, 0);
+        poleGroup.add(horn);
+      }
+      break;
+    }
+    case 'down':
+    case 'none':
+      break;
+  }
+}
+
 function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
   switch (pose.era) {
     case 'timber':
@@ -1282,14 +1793,20 @@ function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
       poleGroup.add(bulb);
     }
   }
+  addAnomalyMeshes(poleGroup, pose);
 }
 
 /**
  * Builds the production pole silhouette at a gallery-friendly origin. This remains
  * intentionally pose-only: wires and light-budget source markers belong to chunks.
  */
-export function createPoleDisplay(cond: PoleCondition, seed: number, index: number): THREE.Group {
-  const pose = describePoleAt(seed, 0, index, 0, 0, 0, 0, cond);
+export function createPoleDisplay(
+  cond: PoleCondition,
+  seed: number,
+  index: number,
+  anomaly: PoleAnomaly = 'none',
+): THREE.Group {
+  const pose = describePoleAt(seed, 0, index, 0, 0, 0, 0, cond, anomaly);
   const group = new THREE.Group();
   poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, group.quaternion);
   addPoleMeshes(group, pose);
@@ -1315,6 +1832,21 @@ class CatenaryCurve extends THREE.Curve<THREE.Vector3> {
       this.a.z + (this.b.z - this.a.z) * t,
     );
   }
+}
+
+/**
+ * Metres the middle of a span hangs below its own chord.
+ *
+ * A live span is nearly drum-tight: three per cent of its length is the small curve
+ * that stops a wire reading as a drawn line. A span into a FALLEN pole is the
+ * opposite — slack is the whole point — but a flat fraction put seven metres of sag on
+ * a fifty-metre span whose chord already ran down to half a metre off the sand, i.e.
+ * the wire went underground and the anomaly read as a wire that simply stopped. So the
+ * sag is also capped by the clearance the chord has over the two poles' own ground.
+ */
+function wireSagMetres(slack: boolean, span: number, clearance: number): number {
+  const wanted = span * (slack ? WIRE_SAG_SLACK : WIRE_SAG_TAUT);
+  return Math.min(wanted, Math.max(0, clearance) * WIRE_SAG_CLEARANCE);
 }
 
 type LampPos = { x: number; y: number; z: number };
@@ -1372,6 +1904,98 @@ function setNearestLampSources(
   setLampSource(sources[2], third, on);
 }
 
+/**
+ * The stump of a mast that snapped: a short butt with one splinter still standing.
+ *
+ * The splinter is the whole point. A plain cylinder in the sand is a bollard; a
+ * cylinder with a sliver of itself torn up out of the break is a pole that failed.
+ */
+let _snappedStump: THREE.BufferGeometry | null = null;
+function snappedStump(): THREE.BufferGeometry {
+  if (!_snappedStump) {
+    const butt = new THREE.CylinderGeometry(0.13, 0.17, DERELICT_STUMP_HEIGHT, 7, 1).translate(
+      0,
+      DERELICT_STUMP_HEIGHT * 0.5,
+      0,
+    );
+    const splinter = new THREE.CylinderGeometry(0.02, 0.05, 0.42, 4, 1);
+    splinter.rotateZ(0.22);
+    splinter.translate(0.06, DERELICT_STUMP_HEIGHT + 0.16, 0);
+    _snappedStump = mergeGeometries([butt, splinter]);
+  }
+  return _snappedStump;
+}
+
+/** The era's own standing silhouette, for the derelict that borrows it. */
+function eraShaft(era: PoleEra): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
+  if (era === 'lattice') return { geometry: latticeMast(), material: matLattice };
+  if (era === 'concrete') return { geometry: concreteColumn(), material: matConcrete };
+  return { geometry: timberShaft(), material: matTimber };
+}
+
+/**
+ * Builds one derelict into a chunk: the fallen mast, its stump, and the collider for
+ * the mast if this chunk carries physics.
+ *
+ * The fall azimuth is derived, not rolled. `leanOffset` sends the top along
+ * (sin az, cos az) and the outward normal on side `side` is `side * (cos h, -sin h)`,
+ * so `h + side * PI/2` is the azimuth that lays the mast AWAY from the carriageway.
+ * A rolled azimuth would eventually put nine metres of concrete across a lane.
+ */
+function addDerelict(
+  ctx: ChunkContext,
+  group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+  derelict: PoleDerelict,
+): void {
+  const lateral = derelict.side * (ctx.road.halfWidthAt(derelict.s) + POLE_SETBACK_M);
+  const base = ctx.road.offsetPoint(derelict.s, lateral);
+  const baseY = ctx.terrain.heightAt(base.x, base.z, derelict.s) - DERELICT_SINK_M;
+  const heading = ctx.road.sampleAt(derelict.s).heading;
+  const az = heading + derelict.side * Math.PI * 0.5;
+  const height = POLE_HEIGHT[derelict.era];
+
+  const mast = new THREE.Group();
+  mast.position.set(base.x - ctx.originX, baseY, base.z - ctx.originZ);
+  poleQuaternion(heading, DERELICT_FALL_ANGLE, az, mast.quaternion);
+  const shaft = eraShaft(derelict.era);
+  mast.add(new THREE.Mesh(shaft.geometry, shaft.material));
+  group.add(mast);
+
+  // The stump sits where the mast's own butt would have been if it had stayed up, so
+  // the two read as one line rather than as two unrelated objects.
+  if (derelict.stumpS !== null) {
+    const stumpLateral = derelict.side * (ctx.road.halfWidthAt(derelict.stumpS) + POLE_SETBACK_M);
+    const stumpBase = ctx.road.offsetPoint(derelict.stumpS, stumpLateral);
+    const stump = new THREE.Group();
+    stump.position.set(
+      stumpBase.x - ctx.originX,
+      ctx.terrain.heightAt(stumpBase.x, stumpBase.z, derelict.stumpS) - DERELICT_SINK_M * 0.5,
+      stumpBase.z - ctx.originZ,
+    );
+    // Leaning the way the line fell: the same azimuth, a fraction of the angle.
+    poleQuaternion(heading, 0.18, az, stump.quaternion);
+    stump.add(new THREE.Mesh(snappedStump(), shaft.material));
+    group.add(stump);
+  }
+
+  if (!ctx.hasPhysics) return;
+  // Solid where it visibly lies, like the pole line's own leaning collider.
+  const mid = leanOffset(height * 0.5, DERELICT_FALL_ANGLE, az);
+  addStatic(
+    ctx,
+    bodies,
+    colliders,
+    base.x + mid.x,
+    baseY + mid.y,
+    base.z + mid.z,
+    RAPIER.ColliderDesc.capsule(height * 0.45, 0.16),
+    SurfaceType.Concrete,
+    leanRotation(DERELICT_FALL_ANGLE, az),
+  );
+}
+
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
@@ -1405,8 +2029,10 @@ export class PoleProvider implements ChunkProvider {
         workingLamps.push({ x: pose.lampX - ox, y: pose.lampY, z: pose.lampZ - oz });
       }
 
-      // Every pole is a solid obstacle: nothing tips one over any more (see
-      // `describePoleAt`), so there is no flat-in-the-sand case to skip.
+      // Every pole is a solid obstacle, including a scheduled 'down' one: the
+      // collider is built from the pose's own lean, so a mast lying in the sand is
+      // solid where it lies rather than where it stood. Nothing is skipped, which is
+      // why there is no flat-in-the-sand special case here.
       if (ctx.hasPhysics) {
         // The collider leans with the pole so a dilapidated mast is solid where
         // it visually is, not where it would have stood when new.
@@ -1437,8 +2063,12 @@ export class PoleProvider implements ChunkProvider {
       const nextPose = describePole(ctx.road, ctx.terrain, seed, nextS, pose.index + 1);
       const a = new THREE.Vector3(pose.topX - ox, pose.topY, pose.topZ - oz);
       const b = new THREE.Vector3(nextPose.topX - ox, nextPose.topY, nextPose.topZ - oz);
+      // Either end being down makes the span slack; the clearance is the mean height
+      // of the two tops above their own bases, which is what the chord has to spend.
+      const slack = pose.anomaly === 'down' || nextPose.anomaly === 'down';
+      const clearance = (pose.topY - pose.baseY + (nextPose.topY - nextPose.baseY)) * 0.5;
       const wireGeo = new THREE.TubeGeometry(
-        new CatenaryCurve(a, b, a.distanceTo(b) * 0.03),
+        new CatenaryCurve(a, b, wireSagMetres(slack, a.distanceTo(b), clearance)),
         20,
         WIRE_RADIUS,
         4,
@@ -1446,6 +2076,18 @@ export class PoleProvider implements ChunkProvider {
       );
       wireGeos.push(wireGeo);
       group.add(new THREE.Mesh(wireGeo, matWire));
+    }
+
+    // Derelicts. Built by the POLE provider and not by a provider of their own,
+    // because a derelict is the pole line's own remnant and the two must never both
+    // claim the same ground: `poleDerelictAt` returns null wherever the line exists.
+    // Owned by the chunk holding the event's centre, so a mast that reaches past the
+    // chunk end is still built exactly once.
+    for (const event of varietyEventsBetween(seed, ctx.sStart, ctx.sEnd)) {
+      if (event.kind !== 'poleAnomaly') continue;
+      if (event.s < ctx.sStart || event.s >= ctx.sEnd) continue;
+      const derelict = poleDerelictAt(seed, event.s);
+      if (derelict) addDerelict(ctx, group, bodies, colliders, derelict);
     }
 
     const lampSources = [
@@ -1480,6 +2122,252 @@ export class PoleProvider implements ChunkProvider {
       setLamps(on: number, nearX: number, nearZ: number): void {
         setLampEmission(on);
         setNearestLampSources(workingLamps, nearX, nearZ, ox, oz, on, lampSources);
+      },
+    };
+  }
+}
+
+// ===========================================================================
+// Delineators: runs of reflector posts
+// ===========================================================================
+
+let _delineatorPost: THREE.BufferGeometry | null = null;
+/**
+ * The post: a flat blade, not a round picket, with its reflector merged in.
+ *
+ * The wide face is what carries the reflector and what a headlight beam meets
+ * square-on, and 4 cm of thickness is what makes it read as a sheet of plastic at
+ * fifty metres rather than as a fence post. Twelve triangles per box, and it is
+ * instanced, so a 1.2 km run of thirty posts is one draw call either way.
+ *
+ * ONE geometry with two material GROUPS rather than two instanced meshes sharing a
+ * matrix, and the reason is the break. A post is a solid obstacle now, and a solid
+ * obstacle that cannot be knocked down is a car-wrecker; so a post is registered with
+ * the debris field as a breakable, and `BreakableProp` blanks ONE mesh instance when
+ * it goes. Two meshes meant either a second field in that interface or a reflector
+ * chip left hanging in the air at knee height after its blade had gone — glowing, at
+ * night, which is exactly when the run matters. Merging makes the two inseparable
+ * instead of merely kept in step.
+ */
+function delineatorPost(): THREE.BufferGeometry {
+  if (!_delineatorPost) {
+    // The reflector is carried in the post's own frame: it sits proud of the +Z face,
+    // which is the face the post's yaw turns back up the road toward oncoming lights.
+    const blade = new THREE.BoxGeometry(DELINEATOR_FACE_W, DELINEATOR_HEIGHT, 0.04).translate(
+      0,
+      DELINEATOR_HEIGHT * 0.5 - DELINEATOR_EMBED,
+      0,
+    );
+    const reflector = new THREE.BoxGeometry(0.075, 0.13, 0.014).translate(
+      0,
+      DELINEATOR_REFLECTOR_Y - DELINEATOR_EMBED,
+      0.027,
+    );
+    _delineatorPost = mergeGeometries([blade, reflector], true);
+  }
+  return _delineatorPost;
+}
+
+/** Material order for `delineatorPost`'s two groups. */
+const DELINEATOR_MATERIALS: THREE.Material[] = [matDelineator, matReflector];
+
+
+/**
+ * Every post station of one run that falls in `[fromS, toS)`.
+ *
+ * The run is walked FROM ITS OWN START every time, because the gaps are a hash
+ * CHAIN: station n is the sum of n drawn gaps, and a chain entered halfway is a
+ * different chain. A run is at most 1200 m of 40-60 m gaps, so the walk is at most
+ * thirty iterations of one hash — cheaper than the road query each surviving station
+ * then costs, and it is what makes the chunk holding the middle of a run agree with
+ * the chunk that held its beginning.
+ */
+function forEachDelineator(
+  seed: number,
+  event: VarietyEvent,
+  fromS: number,
+  toS: number,
+  cb: (s: number, side: -1 | 1, ordinal: number) => void,
+): void {
+  const end = event.s + event.halfLength;
+  const both = event.draw < DELINEATOR_BOTH_SIDES;
+  const alternating = !both && event.draw < DELINEATOR_ALTERNATING;
+  let s = event.s - event.halfLength;
+  for (let ordinal = 0; s < end; ordinal++) {
+    if (s >= fromS && s < toS) {
+      if (both) {
+        cb(s, -1, ordinal);
+        cb(s, 1, ordinal);
+      } else if (alternating) {
+        cb(s, ((ordinal & 1) === 0 ? event.side : -event.side) as -1 | 1, ordinal);
+      } else {
+        cb(s, event.side, ordinal);
+      }
+    }
+    s +=
+      DELINEATOR_GAP_MIN +
+      hash01(seed, TAG_DELINEATOR, event.index, ordinal) * (DELINEATOR_GAP_MAX - DELINEATOR_GAP_MIN);
+  }
+}
+
+/**
+ * Runs of roadside reflector posts, on the director's 'delineators' schedule.
+ *
+ * This is the cheapest thing in the world that changes the view: a run says the road
+ * is being maintained, it draws the curve ahead in daylight, and after dark the
+ * reflectors are the only thing in the desert that answers the headlights.
+ *
+ * THEY ARE SOLID, AND THEY COME APART. A post with no collider is a lie the first
+ * time a car drives through one; a post with a collider and nothing else is a worse
+ * lie, because 12 cm of plastic would stop two tonnes dead. So a post inside the
+ * physics window carries a collider AND is registered with the debris field as
+ * breakable, which is the same road the scatter's cacti and boulders take: the car
+ * clips it, the post bursts into its parts, and the parts are the debris. That is
+ * what the real article does, and it is why the run can be an obstacle without being
+ * a wall.
+ *
+ * The cost is bounded by the streaming radii and nothing else. Colliders are built
+ * only where `ctx.hasPhysics` is true — the player's chunk and its two neighbours,
+ * a kilometre of road — so a 40-60 m spacing puts eight to twenty-four of them in
+ * the world at once, against the hundreds the scatter field carries over the same
+ * kilometre. A run outside that window is instanced scenery and nothing more.
+ */
+export class DelineatorProvider implements ChunkProvider {
+  readonly id = 'delineators';
+
+  /**
+   * The SHARED road-distance index, for the same reason `TerrainMeshProvider` takes
+   * it: a post has to stand on the surface that is DRAWN, and `drawnGroundY` can only
+   * reproduce the mesh if it asks the same lattice the mesh asked. Sampling the height
+   * field instead left feet up to 4.6 cm off the drawn ground — measured, in
+   * `tools/verge-furniture.ts` — which on sand in a low sun is a visible gap.
+   *
+   * `breakables` is optional for the same reason it is on the scatter: a viewer with
+   * no debris field should still get the posts.
+   */
+  constructor(
+    private readonly roadDistance: RoadDistance,
+    private readonly breakables?: BreakableSink,
+  ) {}
+
+  build(ctx: ChunkContext): ChunkContent | null {
+    const seed = ctx.world.seed;
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
+
+    // One allocation per chunk, which is what `varietyEventsBetween` is for. A run is
+    // 400-1200 m against a 200 m chunk, so most chunks inside a run see exactly one
+    // event and most chunks outside one see none.
+    const posts: { x: number; y: number; z: number; yaw: number; id: number }[] = [];
+    for (const event of varietyEventsBetween(seed, ctx.sStart, ctx.sEnd)) {
+      if (event.kind !== 'delineators') continue;
+      forEachDelineator(seed, event, ctx.sStart, ctx.sEnd, (s, side, ordinal) => {
+        // A post already knocked down is not rebuilt, which is the same test the
+        // scatter makes: the piece is absent rather than re-created and blanked, so a
+        // saved flat post stays flat and costs nothing.
+        const id = delineatorId(event.index, ordinal, side);
+        if (this.breakables?.isBroken(id)) return;
+        // Outward from the LOCAL asphalt edge: the carriageway widens and narrows
+        // (`roadprofile.ts`), and a run authored at a fixed lateral would walk onto
+        // the paint of every widened stretch it crossed.
+        const lateral = side * (ctx.road.halfWidthAt(s) + DELINEATOR_SETBACK_M);
+        const p = ctx.road.offsetPoint(s, lateral);
+        const sample = ctx.road.sampleAt(s);
+        // `heading + PI` turns the face back DOWN the road at traffic that has not
+        // arrived yet; `+ side * cant` turns it in over the carriageway rather than
+        // out at the desert. The jitter is per post and per side, so a both-sides run
+        // does not read as a pair of rails.
+        const yaw =
+          sample.heading +
+          Math.PI +
+          side * DELINEATOR_CANT +
+          (hash01(seed, TAG_DELINEATOR, event.index, ordinal, side) - 0.5) * DELINEATOR_YAW_JITTER;
+        posts.push({
+          x: p.x,
+          y: drawnGroundY(ctx.road, ctx.terrain, this.roadDistance, s, lateral),
+          z: p.z,
+          yaw,
+          id,
+        });
+      });
+    }
+    if (posts.length === 0) return null;
+
+    const group = new THREE.Group();
+    const shafts = new THREE.InstancedMesh(delineatorPost(), DELINEATOR_MATERIALS, posts.length);
+    // Instances sit up to a chunk length from the mesh origin, so three's bounding
+    // sphere would cull the run early and it would pop; same reason as the scatter.
+    shafts.frustumCulled = false;
+
+    const bodies: RAPIER.RigidBody[] = [];
+    const colliders: RAPIER.Collider[] = [];
+    const registered: number[] = [];
+    // Half the blade's STANDING height — what is above ground once the planted depth
+    // is taken off. The collider's centre goes a half-blade above the foot the
+    // instance sits at, so the solid post occupies exactly the drawn post.
+    const halfHeight = (DELINEATOR_HEIGHT - DELINEATOR_EMBED) * 0.5;
+    for (let i = 0; i < posts.length; i++) {
+      const post = posts[i]!;
+      _dummy.position.set(post.x - ox, post.y, post.z - oz);
+      _dummy.rotation.set(0, post.yaw, 0);
+      _dummy.scale.setScalar(1);
+      _dummy.updateMatrix();
+      shafts.setMatrixAt(i, _dummy.matrix);
+
+      if (!ctx.hasPhysics) continue;
+      // A cuboid, not a capsule: the blade is 12 cm of face and 4 cm of thickness, and
+      // a capsule would give the car a round fence post to hit. It is solid for the
+      // whole height of the standing blade, so a wheel arch clips what a wheel misses.
+      const collider = addStatic(
+        ctx,
+        bodies,
+        colliders,
+        post.x,
+        post.y + halfHeight,
+        post.z,
+        RAPIER.ColliderDesc.cuboid(DELINEATOR_FACE_W * 0.5, halfHeight, 0.02),
+        // The post is plastic and breaks on the first touch; what a wheel is on when
+        // it clips one is the verge the post is planted in.
+        SurfaceType.LooseShoulder,
+        yawRotation(post.yaw),
+      );
+      if (this.breakables) {
+        registered.push(post.id);
+        this.breakables.register({
+          id: post.id,
+          pieces: propPieces('delineator')!,
+          x: post.x,
+          y: post.y,
+          z: post.z,
+          yaw: post.yaw,
+          scale: 1,
+          radius: DELINEATOR_FACE_W * 0.5,
+          height: DELINEATOR_HEIGHT - DELINEATOR_EMBED,
+          mesh: shafts,
+          instance: i,
+          collider,
+        });
+      }
+    }
+    shafts.instanceMatrix.needsUpdate = true;
+    group.add(shafts);
+
+    return {
+      group,
+      bodies,
+      colliders,
+      dispose: () => {
+        shafts.dispose();
+        if (registered.length > 0) this.breakables?.forget(registered);
+      },
+      /**
+       * The reflector material is shared by every run in the world, so this is one
+       * comparison and at most one write per frame however many runs are loaded. It
+       * takes the same dusk ramp the lamps do (see `setLampEmission`), which is why
+       * the run comes up over the twilight instead of switching on in a frame.
+       */
+      setLamps(on: number): void {
+        setReflectorEmission(on);
       },
     };
   }

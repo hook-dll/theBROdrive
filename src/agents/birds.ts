@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
-import { ROAD_HALF_WIDTH, type Road } from '../world/road';
+import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 
 /**
@@ -41,7 +41,7 @@ const MAX_FALLING = 8;
 const MIN_CLEARANCE = 1.4;
 /** Distance from the perch (m) inside which a landing bird may drop below that
  *  clearance to actually reach it. Short enough that the ground it descends over is
- *  the perch's own patch of road. */
+ *  the perch's own patch of verge. */
 const LAND_FLARE = 4;
 /** Birds are kept within this horizontal distance of their perch, so the road
  *  projection hint (the group's arclength) never goes stale. */
@@ -78,18 +78,24 @@ const SALT_BUDGET = 0x2944;
 const SALT_ALERT_DELAY = 0x35b7;
 const SALT_TAKEOFF_FAN = 0x46c9;
 
-// Perches. Small roadside species rest ON THE ROAD, whose exact surface is known at
-// arbitrary points. Large soaring species never enter a perched or landing state.
+// Perches. Small roadside species rest on the VERGE — the loose strip just outside the
+// asphalt — not on the road itself. Large soaring species never enter a perched or
+// landing state.
 //
-// Approximate pole and cactus perches were rejected because most put birds on empty
-// air. The road height comes from the same function as the ribbon vertices, including
-// camber, bumps and potholes, so the remaining roadside birds stand on real geometry.
-/** Widest lateral offset a bird stands at: on the asphalt, clear of the shoulder. */
-const PERCH_LATERAL = ROAD_HALF_WIDTH - 0.5;
+// The height there comes from the same frame function the terrain mesh is built from
+// (`heightFromFrame` = graded base + fine relief), so a standing bird is on real drawn
+// ground, exactly as the poles and monuments beside it are. Approximate pole and cactus
+// perches were rejected because most put birds on empty air.
+/** Nearest a perched bird stands to the asphalt edge, metres of clear shoulder. */
+export const PERCH_VERGE_MIN = 0.7;
+/** Farthest out it stands. The gravel verge is 3.5 m wide and poles are planted 3.1 m
+ *  out, so the band ends short of both: birds on the shoulder, never inside a pole,
+ *  and never inside the desert scatter which starts 6.1 m out. */
+export const PERCH_VERGE_MAX = 2.4;
 /** Metres of road a flock is strung along, so it is a scatter and not a line. */
 const PERCH_S_SPREAD = 7;
 /** Belly clearance above the surface. The geometry's belly sits 0.02 below its own
- *  origin, so this is the difference between standing on the road and standing in it. */
+ *  origin, so this is the difference between standing on the ground and standing in it. */
 const PERCH_STAND = 0.04;
 
 // ---------------------------------------------------------------------------
@@ -577,12 +583,19 @@ export class BirdFlock {
     for (let k = 0; k < count; k++) {
       if (this.activeCount >= MAX_BIRDS) break;
       // Each bird gets its OWN road frame point rather than a jittered copy of the
-      // group's. The road is cambered and has bumps and potholes in it, so a bird two
-      // metres away is standing at a different height; one shared height would leave
-      // half a flock hovering and the other half sunk, which is the bug this replaces
-      // in miniature.
+      // group's. The verge is graded, has relief on it and follows the road's camber,
+      // so a bird two metres away is standing at a different height; one shared height
+      // would leave half a flock hovering and the other half sunk, which is the bug this
+      // replaces in miniature.
       const bs = s + (hash01(seed, g, k, SALT_JITTER) - 0.5) * PERCH_S_SPREAD;
-      const lateral = side * PERCH_LATERAL * hash01(seed, g, k, SALT_OFFSET);
+      // Measured OUTWARD FROM THE EDGE, not from the crown: the asphalt half-width is a
+      // function of `s`, so a flock strung across a widening keeps the same clearance
+      // from the paint along its whole length instead of drifting onto it.
+      const lateral =
+        side *
+        (this.road.halfWidthAt(bs) +
+          PERCH_VERGE_MIN +
+          hash01(seed, g, k, SALT_OFFSET) * (PERCH_VERGE_MAX - PERCH_VERGE_MIN));
       this.road.offsetPoint(bs, lateral, this.scratchPerch);
       const surfaceY = this.terrain.heightFromFrame(
         this.scratchPerch.x,
@@ -888,7 +901,7 @@ export class BirdFlock {
     // last 1.4 m to a perch lower than that: it hovered at the clamp, still in
     // `landing`, forever. The old cactus and pole perches were 2.3 m and 6.4 m up and
     // so cleared it by accident. Inside the flare the floor is the perch itself, which
-    // is on the road and therefore cannot be inside anything.
+    // is the graded verge surface and therefore cannot be inside anything.
     const ground = this.terrain.heightAt(b.x + this.origin.x, b.z + this.origin.z, b.sHint);
     const floor = dist < LAND_FLARE ? b.landY : Math.max(b.landY, ground + MIN_CLEARANCE);
     if (b.y < floor) b.y = floor;

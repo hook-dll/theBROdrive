@@ -477,8 +477,7 @@ export class Road {
       bestDist = Infinity;
       for (let i = 0; i < count; i++) {
         const s = this.descend(x, z, candidates[i]!, COARSE_SPACING);
-        const c = this.sampleAt(s);
-        const d = (c.x - x) ** 2 + (c.z - z) ** 2;
+        const d = this.distanceSqAt(s, x, z);
         if (d < bestDist) {
           bestDist = d;
           bestS = s;
@@ -497,6 +496,37 @@ export class Road {
     };
   }
 
+  /** XZ-only sample for projection; keep Hermite operation order identical to sampleAt. */
+  private distanceSqAt(s: number, x: number, z: number): number {
+    const clamped = Math.min(Math.max(s, 0), this.length);
+    const fi = clamped / NODE_SPACING;
+    const i = Math.min(Math.floor(fi), this.lastNode - 1);
+    const t = fi - i;
+
+    const block = this.blockFor(i);
+    const k = i - block.index * CHECKPOINT_NODES;
+    const h0 = block.headings[k]!;
+    const h1 = block.headings[k + 1]!;
+
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const b0 = 2 * t3 - 3 * t2 + 1;
+    const m0 = t3 - 2 * t2 + t;
+    const b1 = -2 * t3 + 3 * t2;
+    const m1 = t3 - t2;
+    const sampleX =
+      b0 * block.xs[k]! +
+      m0 * Math.sin(h0) * NODE_SPACING +
+      b1 * block.xs[k + 1]! +
+      m1 * Math.sin(h1) * NODE_SPACING;
+    const sampleZ =
+      b0 * block.zs[k]! +
+      m0 * Math.cos(h0) * NODE_SPACING +
+      b1 * block.zs[k + 1]! +
+      m1 * Math.cos(h1) * NODE_SPACING;
+    return (sampleX - x) ** 2 + (sampleZ - z) ** 2;
+  }
+
   /**
    * Local descent to the nearest centreline point, starting at `fromS` and halving
    * `window` until it is under the refinement floor. Purely local: it finds the
@@ -505,17 +535,24 @@ export class Road {
    */
   private descend(x: number, z: number, fromS: number, window: number): number {
     let bestS = fromS;
-    const start = this.sampleAt(bestS);
-    let bestDist = (start.x - x) ** 2 + (start.z - z) ** 2;
+    let bestDist = this.distanceSqAt(bestS, x, z);
     let span = window;
     while (span > 0.05) {
-      for (const s of [bestS - span, bestS + span]) {
-        if (s < 0 || s > this.length) continue;
-        const c = this.sampleAt(s);
-        const d = (c.x - x) ** 2 + (c.z - z) ** 2;
+      // Both candidates belong to the same centre, even if the left one wins first.
+      const left = bestS - span;
+      const right = bestS + span;
+      if (left >= 0 && left <= this.length) {
+        const d = this.distanceSqAt(left, x, z);
         if (d < bestDist) {
           bestDist = d;
-          bestS = s;
+          bestS = left;
+        }
+      }
+      if (right >= 0 && right <= this.length) {
+        const d = this.distanceSqAt(right, x, z);
+        if (d < bestDist) {
+          bestDist = d;
+          bestS = right;
         }
       }
       span *= 0.5;

@@ -82,7 +82,10 @@ type SampleKey = FrameSection | 'renderWall';
 export type ProfileClock = () => number;
 
 export class FrameProfiler {
-  constructor(private readonly clock: ProfileClock = () => performance.now()) {}
+  constructor(private readonly clock: ProfileClock = () => performance.now()) {
+    for (const section of SECTIONS) this.samples.set(section, []);
+    this.samples.set('renderWall', []);
+  }
 
   private readonly samples = new Map<SampleKey, number[]>();
   private readonly open = new Map<SampleKey, number>();
@@ -129,11 +132,10 @@ export class FrameProfiler {
     // The render call itself, so that whatever the named sections do not cover is
     // still accounted for instead of looking like free time.
     this.current.set('renderWall', this.clock() - this.renderStart);
-    for (const [section, ms] of this.current) {
-      const list = this.samples.get(section) ?? [];
-      list.push(ms);
-      if (list.length > WINDOW_FRAMES) list.shift();
-      this.samples.set(section, list);
+    // All sections share the presented-frame denominator, including frames before a
+    // section first appears. Keeping their zeros also makes p95 a per-frame percentile.
+    for (const [section, list] of this.samples) {
+      list.push(this.current.get(section) ?? 0);
     }
     this.current.clear();
     this.windowFrames++;
@@ -212,26 +214,21 @@ export class FrameProfiler {
       `[perf] frame budget: ${intervalMs.toFixed(2)} ms per presented frame = ` +
         `${busyMsPerFrame.toFixed(2)} ms of CPU work + ${waitingMs.toFixed(2)} ms not CPU`,
     );
-    // How much of the simulation this frame actually contains. On a desktop presenting
-    // uncapped this is well under one tick — the loop steps whole ticks and most frames
-    // carry none — which is worth showing rather than stating as a constant.
+    // Expected ticks per frame at the configured simulation rate, not a tick counter.
+    // Uncapped presentation can exceed that rate and contain many zero-tick frames.
     if (intervalMs > 0) {
       lines.push(
         `[perf] simulation ticks per presented frame ${(simulationHz / framesPerSecond).toFixed(2)}`,
       );
     }
 
-    // THE VERDICT, where there is a GPU number to give one. The frame time is set by
-    // whichever half is larger, so that is the comparison, and the answer decides whether
-    // to go after pixels or after CPU work. Measured on a 4090 at 144 Hz: `GPU 6.94 ms
-    // against a 6.81 ms interval` — the GPU is the constraint and there is nothing left to
-    // win on the CPU side of that frame.
+    // The supplied GPU EMA and this CPU window do not cover the same frames. Submission
+    // is also pipelined, so their difference cannot measure GPU or CPU spare time.
     if (gpuMs !== null && intervalMs > 0) {
       lines.push(
-        `[perf] GPU ${gpuMs.toFixed(2)} ms against a ${intervalMs.toFixed(2)} ms interval: ` +
-          (gpuMs >= intervalMs * 0.98
-            ? `the GPU sets the frame time, CPU has ${waitingMs.toFixed(2)} ms spare`
-            : `the GPU has ${(intervalMs - gpuMs).toFixed(2)} ms spare — the limit is not fill`),
+        `[perf] GPU ${gpuMs.toFixed(2)} ms measured; presented interval ${intervalMs.toFixed(2)} ms. ` +
+          'Different averaging windows and pipelined execution: this comparison does not ' +
+          'identify the bottleneck or measure spare time.',
       );
     } else if (intervalMs > 0) {
       lines.push(

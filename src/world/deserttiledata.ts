@@ -106,7 +106,13 @@ export function sampleGroundHeight(
   // z-fighting while the fade leaves no ledge at the edge of the graded verge.
   const underRoad = 0.1 * (1 - transition * transition * (3 - 2 * transition));
   out.height = context.terrain.baseFromFrame(x, z, projection.lateral, projection.s) + detail - underRoad;
-  out.detail = detail;
+  // `detail` carries the corridor landform (world/corridorshape.ts) as well as the
+  // fine band, because everything that draws the corridor has to get it. What the
+  // shader is allowed to fade out past DESERT_TILE_FADE_FULL is the SMALL-SCALE half
+  // of that: fading a five-metre embankment away would lift the far tile surface
+  // above the trough the near terrain mesh is drawing, and the tile would sink
+  // through it as the player closed. Landform stays in the height and out of here.
+  out.detail = detail - context.terrain.corridorShapeAt(x, z, dist, projection.s);
 }
 
 /**

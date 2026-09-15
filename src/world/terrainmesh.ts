@@ -2,6 +2,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
+import { applyCloudShadow } from '../render/cloudshadow';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import {
@@ -255,18 +256,23 @@ function bilinear(
 export const DESERT_TILE_FADE_FULL = 300;
 export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
 function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial {
-  const material = applyComicShading(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.93,
-      metalness: 0,
-    }),
-    {
-      lightingStrength: 0,
-      shadowWarmth: 0,
-      reliefShadeStrength: 0.28,
-      spotlightNormals: 'smooth',
-    },
+  // Cloud shadow is the OUTERMOST wrap, so it also finds the detail-fade patch installed
+  // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
+  // decides only which patch runs first, never whether one is lost.
+  const material = applyCloudShadow(
+    applyComicShading(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.93,
+        metalness: 0,
+      }),
+      {
+        lightingStrength: 0,
+        shadowWarmth: 0,
+        reliefShadeStrength: 0.28,
+        spotlightNormals: 'smooth',
+      },
+    ),
   );
   if (!detailFade) return material;
 
@@ -334,7 +340,7 @@ interface BuiltTerrain {
  */
 let _rings: { magnitudes: number[]; laterals: number[] } | null = null;
 
-function fieldRings(): { magnitudes: number[]; laterals: number[] } {
+export function fieldRings(): { magnitudes: number[]; laterals: number[] } {
   if (_rings) return _rings;
   const magnitudes: number[] = [TERRAIN_INNER];
   let m = CORRIDOR_INNER;

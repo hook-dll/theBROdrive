@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { farPlaneForViewDistance } from '../core/renderer';
 import { hashUnit3 } from '../core/rng';
+import { applyCloudShadow } from './cloudshadow';
 import { applyComicShading } from './comic';
 
 import { DESERT_TILE_SIZE } from '../world/deserttiledata';
@@ -170,42 +171,50 @@ const mesaLinear = new THREE.Color();
  * on a sheer wall those screen-space lines read as printed cardboard. Polygon offset
  * resolves the last sub-pixel contact at the buried skirt without changing occlusion.
  */
-const MESA_MATERIAL = applyComicShading(
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.98,
-    metalness: 0,
-    alphaHash: true,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  }),
-  {
-    lightingStrength: 0.18,
-    shadowWarmth: 0.35,
-    reliefShadeStrength: 0.12,
-    contourStrength: 0,
-    stippleStrength: 0,
-  },
+// The drifting cloud shade is shared with the streamed terrain and the road (see
+// `render/cloudshadow.ts`): a patch that stopped at the edge of the near tiles
+// would draw its own boundary across the desert, which is the one place the effect
+// would be worse than not having it.
+const MESA_MATERIAL = applyCloudShadow(
+  applyComicShading(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.98,
+      metalness: 0,
+      alphaHash: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }),
+    {
+      lightingStrength: 0.18,
+      shadowWarmth: 0.35,
+      reliefShadeStrength: 0.12,
+      contourStrength: 0,
+      stippleStrength: 0,
+    },
+  ),
 );
 
 
 // Same authored shading as streamed terrain, used only where both terrain systems
 // overlap. It draws colour but not depth, so the fine tiles win without corrupting
 // the depth of the distant vista, mesas, fog, or the post-process.
-const VISTA_OVERLAP_MATERIAL = applyComicShading(
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.93,
-    metalness: 0,
-    depthWrite: false,
-  }),
-  {
-    lightingStrength: 0,
-    shadowWarmth: 0,
-    reliefShadeStrength: 0.28,
-    spotlightNormals: 'smooth',
-  },
+const VISTA_OVERLAP_MATERIAL = applyCloudShadow(
+  applyComicShading(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.93,
+      metalness: 0,
+      depthWrite: false,
+    }),
+    {
+      lightingStrength: 0,
+      shadowWarmth: 0,
+      reliefShadeStrength: 0.28,
+      spotlightNormals: 'smooth',
+    },
+  ),
 );
 
 
@@ -612,7 +621,8 @@ export class VistaMesh {
       const nx = nxLower + (nxUpper - nxLower) * tz;
       const ny = nyLower + (nyUpper - nyLower) * tz;
       const nz = nzLower + (nzUpper - nzLower) * tz;
-      const normalLength = Math.hypot(nx, ny, nz) || 1;
+      // Interpolated unit normals are bounded; no hypot overflow rescaling is needed.
+      const normalLength = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
       normals[vi] = nx / normalLength;
       normals[vi + 1] = ny / normalLength;
       normals[vi + 2] = nz / normalLength;

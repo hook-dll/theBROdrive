@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import '../render/lightshader';
 import { AdaptiveResolutionController } from './adaptivequality';
 import {
   DEFAULT_FIELD_OF_VIEW,

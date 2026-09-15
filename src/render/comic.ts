@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
+// Galleries use comic/materials without the game Renderer; install before any compile.
+import './lightshader';
 
 /**
  * Comic-book shading for the ground: banded light, strata contours, ink stipple.

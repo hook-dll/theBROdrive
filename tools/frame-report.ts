@@ -94,10 +94,8 @@ check(
 const fps = Number(/([\d.]+) fps presented/.exec(report)?.[1]);
 const busy = Number(/([\d.]+) ms of CPU per second/.exec(report)?.[1]);
 const expectedBusy = (perFrameSim + perFrameRender + SLACK) * fps;
-// THE FRAME BUDGET, which is the whole of what can be known about the GPU where there is
-// no GPU timer: the interval, the CPU work inside it, and the difference. The difference is
-// the number that decides whether to go after pixels or after the simulation, so it has to
-// be exactly the difference and nothing else.
+// The frame budget splits the measured interval into CPU work and time outside that
+// work. The latter is not a GPU measurement.
 {
   const budget =
     /frame budget: ([\d.]+) ms per presented frame = ([\d.]+) ms of CPU work \+ ([\d.]+) ms not CPU/
@@ -190,8 +188,114 @@ check(
   );
   check(
     'the render sections cannot exceed the render half between them',
-    (totals.get('render') ?? 0) <= 400,
+    (totals.get('render') ?? 0) <= 100,
     `${totals.get('render') ?? 0}% across ${shares.length} render sections`,
+  );
+}
+
+// A faster display must not charge every frame for a tick only half of them ran.
+// Nested and late-appearing sections use the same frame population, including for p95.
+{
+  const pacedClock = makeClock();
+  const paced = new FrameProfiler(pacedClock.now);
+  const frameCount = 120;
+  const intervalMs = 1000 / 120;
+  for (let i = 0; i < frameCount; i++) {
+    const tick = i % 2 === 0;
+    if (tick) {
+      paced.begin('sim');
+      paced.begin('physics');
+      pacedClock.advance(0.5);
+      paced.end('physics');
+      if (i === 118) {
+        paced.begin('agents');
+        pacedClock.advance(1);
+        paced.end('agents');
+        pacedClock.advance(0.5);
+      } else {
+        pacedClock.advance(1.5);
+      }
+      paced.end('sim');
+    }
+    paced.beginFrame();
+    const vistaMs = i >= 108 ? 0.5 : 0;
+    if (vistaMs > 0) {
+      paced.begin('vista');
+      pacedClock.advance(vistaMs);
+      paced.end('vista');
+    }
+    paced.begin('draw');
+    pacedClock.advance(1 - vistaMs);
+    paced.end('draw');
+    paced.endFrame();
+    pacedClock.advance(intervalMs - (tick ? 2 : 0) - 1);
+  }
+  const text = paced.report();
+  // The final idle interval is outside the window; all 120 ms of simulation and all
+  // 120 ms of rendering are inside it. Compare totals with that exact elapsed time.
+  const seconds = ((frameCount - 1) * intervalMs + 1) / 1000;
+  const totals = /per second: simulation (\d+) ms.*\+ render (\d+) ms/.exec(text);
+  const cpu = Number(/([\d.]+) ms of CPU per second/.exec(text)?.[1]);
+  check(
+    'zero-tick frames halve simulation cost per presented frame',
+    /per frame: simulation 1\.00 ms \+ render 1\.00 ms = 2\.00 ms/.test(text),
+    text.split('\n')[1] ?? 'missing per-frame costs',
+  );
+  check(
+    'the window conserves simulation and render milliseconds without counting nested work twice',
+    Number(totals?.[1]) === Math.round(120 / seconds)
+      && Number(totals?.[2]) === Math.round(120 / seconds)
+      && cpu === Math.round(240 / seconds),
+    `${totals?.[1]} ms/s simulation + ${totals?.[2]} ms/s render; ${cpu} ms/s CPU`,
+  );
+  const expectedSections = [
+    { name: 'sim', total: 120, p95: 2 },
+    { name: 'physics', total: 30, p95: 0.5 },
+    { name: 'agents', total: 1, p95: 0 },
+    { name: 'vista', total: 6, p95: 0.5 },
+    { name: 'draw', total: 114, p95: 1 },
+  ];
+  for (const { name, total, p95 } of expectedSections) {
+    const section = new RegExp(
+      `^\\[perf\\]\\s+${name}\\s+(\\d+) ms/s .*\\(([\\d.]+) ms/frame, p95 ([\\d.]+)\\)`,
+      'm',
+    ).exec(text);
+    check(
+      `${name} includes absent frames in its rate, mean and p95`,
+      Number(section?.[1]) === Math.round(total / seconds)
+        && Number(section?.[2]) === Number((total / frameCount).toFixed(2))
+        && Number(section?.[3]) === p95,
+      section?.[0] ?? 'missing section',
+    );
+  }
+}
+
+// Several ticks must still accumulate within one frame, rather than become separate
+// percentile samples or overwrite each other. Empty frames surround the busy frame.
+{
+  const tickClock = makeClock();
+  const ticks = new FrameProfiler(tickClock.now);
+  for (const count of [0, 2, 0]) {
+    for (let i = 0; i < count; i++) {
+      ticks.begin('sim');
+      ticks.begin('physics');
+      tickClock.advance(1);
+      ticks.end('physics');
+      tickClock.advance(2);
+      ticks.end('sim');
+    }
+    ticks.beginFrame();
+    tickClock.advance(1);
+    ticks.endFrame();
+  }
+  const text = ticks.report();
+  check(
+    'multiple ticks accumulate before averaging over all frames',
+    /per frame: simulation 2\.00 ms \+ render 1\.00 ms = 3\.00 ms/.test(text)
+      && /sim\s+667 ms\/s\s+\(2\.00 ms\/frame, p95 6\.00\)/.test(text)
+      && /physics\s+222 ms\/s\s+33% of tick\s+\(0\.67 ms\/frame, p95 2\.00\)/.test(text)
+      && /1000 ms of CPU per second/.test(text),
+    text.split('\n').filter((line) => /ms\/frame|per frame:/.test(line)).join('; '),
   );
 }
 
@@ -271,9 +375,7 @@ check(
 
   const at30 = perSecond(30);
   const at60 = perSecond(60);
-  // Waiting is the diagnostic: at 30 FPS there is more interval for the same work, so the
-  // waiting must grow by exactly the extra interval. That is the relationship a reader uses
-  // to decide whether a warm device is waiting on fill.
+  // For the same work, slower presentation leaves more of the CPU interval unused.
   // The same boundary artifact applies to each run, so a difference of two carries both.
   check(
     'a slower presentation has proportionally more waiting, for the same work',
@@ -302,11 +404,22 @@ check(
 // and both would read as average.
 {
   const rolled = new FrameProfiler(clock.now);
+  const rolledFrame = (ms: number): void => {
+    rolled.begin('sim');
+    clock.advance(ms);
+    rolled.end('sim');
+    rolled.beginFrame();
+    rolled.begin('draw');
+    clock.advance(ms);
+    rolled.end('draw');
+    rolled.endFrame();
+    clock.advance(1);
+  };
   // A full window of expensive frames, which rolls and clears the window on its last.
-  for (let i = 0; i < 240; i++) frame([2], { draw: 2 }, 0);
+  for (let i = 0; i < 240; i++) rolledFrame(2);
   // Then most of a window of idle ones — short of a roll, so the report below describes
   // exactly these and nothing earlier.
-  for (let i = 0; i < 239; i++) frame([0], { draw: 0 }, 0);
+  for (let i = 0; i < 239; i++) rolledFrame(0);
   const idle = rolled.report();
   check(
     'a report describes the recent window, not the whole session',
@@ -320,11 +433,7 @@ check(
   );
 }
 
-// --- the verdict, and the lines that change with the settings ----------------
-//
-// These are the lines a reader acts on, so what they say has to follow the inputs rather
-// than the other way round. `gpuMs` and `presentationCapped` are passed in precisely so
-// that can be checked without a GPU.
+// --- the numerical advice that depends on presentation settings --------------
 {
   const fed = (): FrameProfiler => {
     const target = new FrameProfiler(clock.now);
@@ -342,25 +451,6 @@ check(
   };
 
   const fitsText = fed().report({ simulationHz: 60, gpuMs: 1 });
-  check(
-    'a GPU smaller than the interval is reported as having spare',
-    /the GPU has .* spare — the limit is not fill/.test(fitsText),
-    fitsText.split('\n').find((line) => line.includes('against a')) ?? 'verdict missing',
-  );
-
-  const boundText = fed().report({ simulationHz: 60, gpuMs: 100_000 });
-  check(
-    'a GPU larger than the interval is reported as the constraint',
-    /the GPU sets the frame time, CPU has .* spare/.test(boundText),
-    boundText.split('\n').find((line) => line.includes('against a')) ?? 'verdict missing',
-  );
-
-  const noTimerText = fed().report({ simulationHz: 60, gpuMs: null });
-  check(
-    'without a GPU timer the report refuses to claim the GPU is the constraint',
-    /does NOT say whether the GPU is the constraint/.test(noTimerText),
-    'the reader is told what the budget can and cannot answer',
-  );
 
   // The advice about a lower cap belongs only where there IS a cap. On a desktop
   // presenting uncapped it was noise that read like a suggestion.

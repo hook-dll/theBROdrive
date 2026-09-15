@@ -270,7 +270,143 @@ const VERIFY_SPAN = Math.min(ROAD_LENGTH, 2_000_000);
   );
 }
 
-// --- 5. Resident cost -----------------------------------------------------
+// --- 5. Projection is bit-identical to the full-sample descent --------------
+//
+// Keep the old allocating search as the oracle, not a copy of the optimized XZ
+// evaluator. This guards Hermite arithmetic, strict ties, candidate order and the
+// final lateral/height frame together through the public projection API.
+{
+  const road = new Road(seed, spine);
+  const referenceRoad = new Road(seed, spine);
+  const distanceSq = (s: number, x: number, z: number): number => {
+    const c = referenceRoad.sampleAt(s);
+    return (c.x - x) ** 2 + (c.z - z) ** 2;
+  };
+  const descend = (x: number, z: number, fromS: number, window: number): number => {
+    let bestS = fromS;
+    let bestDist = distanceSq(bestS, x, z);
+    let span = window;
+    while (span > 0.05) {
+      for (const s of [bestS - span, bestS + span]) {
+        if (s < 0 || s > ROAD_LENGTH) continue;
+        const d = distanceSq(s, x, z);
+        if (d < bestDist) {
+          bestDist = d;
+          bestS = s;
+        }
+      }
+      span *= 0.5;
+    }
+    return bestS;
+  };
+  const referenceProject = (x: number, z: number, hintS?: number) => {
+    let bestS: number;
+    if (hintS === undefined) {
+      const { coarseX, coarseZ } = spine;
+      let bestCoarse = Infinity;
+      for (let k = 0; k < coarseX.length; k++) {
+        const dx = coarseX[k]! - x;
+        const dz = coarseZ[k]! - z;
+        const d = dx * dx + dz * dz;
+        if (d < bestCoarse) bestCoarse = d;
+      }
+      const limit = Math.sqrt(bestCoarse) + COARSE_SPACING;
+      const limitSq = limit * limit;
+      const candidates: number[] = [];
+      for (let k = 0; k < coarseX.length && candidates.length < 16; k++) {
+        const dx = coarseX[k]! - x;
+        const dz = coarseZ[k]! - z;
+        if (dx * dx + dz * dz <= limitSq) candidates.push(k * COARSE_SPACING);
+      }
+      bestS = candidates[0]!;
+      let bestDist = Infinity;
+      for (const candidate of candidates) {
+        const s = descend(x, z, candidate, COARSE_SPACING);
+        const d = distanceSq(s, x, z);
+        if (d < bestDist) {
+          bestDist = d;
+          bestS = s;
+        }
+      }
+    } else {
+      bestS = descend(x, z, Math.min(Math.max(hintS, 0), ROAD_LENGTH), 90);
+    }
+    const c = referenceRoad.sampleAt(bestS);
+    return {
+      s: bestS,
+      lateral: (x - c.x) * Math.cos(c.heading) + (z - c.z) * -Math.sin(c.heading),
+      height: c.y,
+    };
+  };
+  let checked = 0;
+  const compare = (x: number, z: number, hintS?: number): void => {
+    const want = referenceProject(x, z, hintS);
+    const got = road.project(x, z, hintS);
+    for (const key of ['s', 'lateral', 'height'] as const) {
+      if (!Object.is(got[key], want[key])) {
+        fail(`project(${x}, ${z}, ${hintS}).${key}: ${got[key]} !== ${want[key]}`);
+      }
+    }
+    checked++;
+  };
+
+  // Half of the final 90 / 1024 span on the straight runout is an exact tie.
+  // Accepting equal distance would move s from zero to 90 / 1024.
+  compare(0, 90 / 2048, 0);
+
+  // Scatter over the whole road, evicting blocks between queries. Include lane
+  // offsets, off-road positions, and hints on either side of the nearest point.
+  for (let k = 0; k < 2000; k++) {
+    const s = (k * 7919.375) % ROAD_LENGTH;
+    const point = referenceRoad.offsetPoint(s, ((k % 17) - 8) * 7.25);
+    compare(point.x, point.z, s + ((k % 7) - 3) * 29.75);
+    if (k % 100 === 0) compare(point.x, point.z);
+  }
+  // Exact nodes, interpolation on either side of a checkpoint, road ends, and
+  // clamped hints. At a centreline node the strict comparison must keep a zero.
+  for (const anchor of [0, CHECKPOINT_SPACING, ROAD_LENGTH - CHECKPOINT_SPACING, ROAD_LENGTH]) {
+    for (const delta of [-NODE_SPACING, -0.025, 0, 0.025, NODE_SPACING]) {
+      const s = Math.min(Math.max(anchor + delta, 0), ROAD_LENGTH);
+      const point = referenceRoad.sampleAt(s);
+      compare(point.x, point.z, s);
+      compare(point.x + 12, point.z - 8, s - 90);
+      compare(point.x - 12, point.z + 8, s + 90);
+      compare(point.x, point.z);
+    }
+  }
+
+  // Put a query beyond the centre of a bend so BOTH initial candidates improve,
+  // with the right one better. Recentring right after accepting left cannot get
+  // back above the original hint in the remaining spans; the old search can.
+  let candidateOrderCovered = false;
+  for (let k = 0; k < 1600 && !candidateOrderCovered; k++) {
+    const s = 1000 + k * 250;
+    if (s + 90 > ROAD_LENGTH) break;
+    const left = referenceRoad.sampleAt(s - 90);
+    const centre = referenceRoad.sampleAt(s);
+    const right = referenceRoad.sampleAt(s + 90);
+    const dx = right.x - left.x;
+    const dz = right.z - left.z;
+    const midX = (left.x + right.x) * 0.5;
+    const midZ = (left.z + right.z) * 0.5;
+    const side = Math.sign((midX - centre.x) * -dz + (midZ - centre.z) * dx);
+    const scale = side * 1_000_000 / Math.hypot(dx, dz);
+    const x = midX - dz * scale + dx * 0.25;
+    const z = midZ + dx * scale + dz * 0.25;
+    if (
+      distanceSq(s + 90, x, z) < distanceSq(s - 90, x, z) &&
+      distanceSq(s - 90, x, z) < distanceSq(s, x, z) &&
+      descend(x, z, s, 90) > s
+    ) {
+      compare(x, z, s);
+      candidateOrderCovered = true;
+    }
+  }
+  if (!candidateOrderCovered) fail('projection probes did not exercise left-then-right improvement');
+  console.log(`project bit-identical to full-sample descent: ${checked} probes`);
+}
+
+// --- 6. Resident cost -----------------------------------------------------
 {
   const checkpointBytes = spine.checkpointX.byteLength * 3;
   const coarseBytes = spine.coarseX.byteLength * 2;
