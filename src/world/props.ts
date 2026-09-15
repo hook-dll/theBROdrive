@@ -358,6 +358,13 @@ function setReflectorEmission(on: number): void {
 const matTarp = new THREE.MeshStandardMaterial({ color: 0x9c9686, roughness: 1.0, metalness: 0 });
 const matGear = new THREE.MeshStandardMaterial({ color: 0x69706a, roughness: 0.62, metalness: 0.35 });
 
+/**
+ * The two trees carry their bark and their canopy in VERTEX COLOURS on one material,
+ * so a tree is one instanced draw call instead of two. Everything else in this file
+ * is a single flat colour and does not need it.
+ */
+const matPlant = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
 // ---------------------------------------------------------------------------
@@ -392,6 +399,8 @@ interface PropForm {
   rotate3d: boolean;
   minScale: number;
   maxScale: number;
+  /** Relative selection weight inside its surface's form list. 1 is an ordinary member. */
+  readonly weight: number;
 }
 export type DesertPropForm = PropForm;
 
@@ -493,6 +502,192 @@ function buildScrub(): THREE.BufferGeometry {
   return mergeGeometries([lump(0.34, 0, 0.22, 0), lump(0.24, 0.28, 0.15, 0.1), lump(0.2, -0.2, 0.14, -0.22)]);
 }
 
+/**
+ * Paints every vertex of a part one colour, so merged parts keep their own look on
+ * one material.
+ *
+ * The hex is a DISPLAY colour, set through `LinearSRGBColorSpace` — the convention
+ * `render/mirage-tableau.ts` and `world/weatherfx.ts` already use for their
+ * vertex-coloured geometry, because the renderer writes the working colour space
+ * straight to the canvas (see the two-pass note in `core/renderer.ts`). Authored any
+ * other way a tree comes out a gamma darker than the props standing beside it.
+ */
+function paint(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const colour = new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
+  const count = geometry.getAttribute('position').count;
+  const colours = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geometry;
+}
+
+/** One limb: a tapered cylinder with its base at (x, y, z), tilted from vertical and turned to `az`. */
+function limb(
+  x: number,
+  y: number,
+  z: number,
+  tilt: number,
+  az: number,
+  length: number,
+  rBase: number,
+  rTip: number,
+  segments: number,
+): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(rTip, rBase, length, segments, 1);
+  g.translate(0, length / 2, 0);
+  g.rotateZ(tilt);
+  g.rotateY(az);
+  g.translate(x, y, z);
+  return g;
+}
+
+/** Where `limb` with these arguments ends: what stops a canopy floating off its branch. */
+function limbTip(
+  x: number,
+  y: number,
+  z: number,
+  tilt: number,
+  az: number,
+  length: number,
+): [number, number, number] {
+  const horizontal = -Math.sin(tilt) * length;
+  return [x + horizontal * Math.cos(az), y + Math.cos(tilt) * length, z - horizontal * Math.sin(az)];
+}
+
+/**
+ * One tuft of canopy: a flattened icosahedron, INDEXED.
+ *
+ * `IcosahedronGeometry` is non-indexed while cylinders and lathes are indexed, and
+ * `mergeGeometries` refuses the mix — it returns null, which is a tree that does not
+ * exist. `mergeVertices` costs one build and welds nothing here (the faceted normals
+ * differ), so the shape is exactly the icosahedron with an index on it.
+ */
+function canopyPad(
+  radius: number,
+  flatten: number,
+  x: number,
+  y: number,
+  z: number,
+): THREE.BufferGeometry {
+  const g = mergeVertices(new THREE.IcosahedronGeometry(radius, 0));
+  g.scale(1, flatten, 1);
+  g.translate(x, y, z);
+  return g;
+}
+
+/**
+ * Scales a finished tree so it really stands as tall as its form says it does.
+ *
+ * The parts are authored in comfortable round numbers and their sum lands wherever it
+ * lands; the form's `height` is what the capsule collider is built from, so the two
+ * have to be one number or a tree is a taller obstacle than it looks. One build per
+ * form, so it costs nothing at run time.
+ */
+function standTo(geometry: THREE.BufferGeometry, height: number): THREE.BufferGeometry {
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  if (!box) return geometry;
+  const grown = box.max.y - Math.min(0, box.min.y);
+  if (grown <= 1e-6) return geometry;
+  const k = height / grown;
+  geometry.scale(k, k, k);
+  return geometry;
+}
+
+/**
+ * THE SOCOTRA DRAGON TREE, Dracaena cinnabari.
+ *
+ * One silhouette is the whole species and nothing else in this desert has it: a stout
+ * pale trunk that forks in two, four times over, into forty-five limbs whose tips all
+ * reach the SAME height, and the canopy rides those tips as separate tufts. So the
+ * crown finishes WIDER THAN THE TREE IS TALL, and the fan of forks stays visible
+ * underneath it — the gaps between the tufts are the point, not an economy.
+ */
+function buildDragonTree(): THREE.BufferGeometry {
+  const bark = 0xa2957f;
+  const canopy = 0x5c6b45;
+  const parts: THREE.BufferGeometry[] = [
+    paint(new THREE.CylinderGeometry(0.46, 0.66, 2.15, 10, 1).translate(0, 1.07, 0), bark),
+  ];
+  const tips: Array<[number, number, number]> = [];
+  // Four levels of dichotomous forks. Each is shorter, thinner and more tilted than
+  // its parent, and carries the parent's own azimuth so the fan spreads outward
+  // instead of doubling back through itself.
+  const levels = [
+    { tilt: 0.5, length: 1.5, rBase: 0.3, rTip: 0.22, segments: 6, spread: 0 },
+    { tilt: 0.72, length: 1.15, rBase: 0.2, rTip: 0.145, segments: 5, spread: 0.52 },
+    { tilt: 1.0, length: 1.0, rBase: 0.13, rTip: 0.09, segments: 4, spread: 0.45 },
+    { tilt: 1.18, length: 0.7, rBase: 0.08, rTip: 0.05, segments: 4, spread: 0.38 },
+  ];
+  let nodes: Array<{ x: number; y: number; z: number; az: number }> = [];
+  for (let i = 0; i < 3; i++) nodes.push({ x: 0, y: 2.1, z: 0, az: (i * Math.PI * 2) / 3 });
+  for (let level = 0; level < levels.length; level++) {
+    const { tilt, length, rBase, rTip, segments, spread } = levels[level]!;
+    const grown: Array<{ x: number; y: number; z: number; az: number }> = [];
+    for (const node of nodes) {
+      const azimuths = level === 0 ? [node.az] : [node.az - spread, node.az + spread];
+      for (const az of azimuths) {
+        parts.push(paint(limb(node.x, node.y, node.z, tilt, az, length, rBase, rTip, segments), bark));
+        const [tx, ty, tz] = limbTip(node.x, node.y, node.z, tilt, az, length);
+        grown.push({ x: tx, y: ty, z: tz, az });
+      }
+    }
+    nodes = grown;
+    if (level === levels.length - 1) for (const n of nodes) tips.push([n.x, n.y, n.z]);
+  }
+  let crownY = 0;
+  for (const [, ty] of tips) crownY += ty;
+  crownY = crownY / tips.length + 0.28;
+  for (let i = 0; i < tips.length; i++) {
+    const [tx, ty, tz] = tips[i]!;
+    // Alternating heights: a rim at one level reads as a saucer, not as leaves.
+    parts.push(paint(canopyPad(0.68, 0.4, tx, ty + (i % 2 === 0 ? 0.1 : 0.24), tz), canopy));
+  }
+  // The middle of the fan has no tips of its own; one pad closes it.
+  parts.push(paint(canopyPad(1.1, 0.24, 0, crownY + 0.05, 0), canopy));
+  return standTo(mergeGeometries(parts)!, 6.3);
+}
+
+/**
+ * A BAOBAB, Adansonia. The bottle trunk is the whole tree; the crown is a wide, flat,
+ * sparse fan of thick bare branches, and it finishes WIDER THAN THE TREE IS TALL. The
+ * branches stay bare almost to their tips, so the crown reads as wood, not leaves,
+ * which is why the species is called the upside-down tree.
+ */
+function buildBaobab(): THREE.BufferGeometry {
+  const bark = 0x9a8b74;
+  const canopy = 0x55603f;
+  // The lathe is open at top and bottom: the foot stands in sand and the crown cap
+  // below covers the top, so neither opening is ever seen.
+  const profile = [
+    new THREE.Vector2(1.05, 0),
+    new THREE.Vector2(1.9, 0.8),
+    new THREE.Vector2(2.0, 2.2),
+    new THREE.Vector2(1.75, 4.5),
+    new THREE.Vector2(1.35, 6.6),
+    new THREE.Vector2(1.12, 7.3),
+  ];
+  const parts: THREE.BufferGeometry[] = [paint(new THREE.LatheGeometry(profile, 11), bark)];
+  for (let i = 0; i < 5; i++) {
+    const az = (i * Math.PI * 2) / 5;
+    parts.push(paint(limb(0, 7.15, 0, 1.25, az, 3.4, 0.46, 0.24, 6), bark));
+    const [tx, ty, tz] = limbTip(0, 7.15, 0, 1.25, az, 3.4);
+    // Each primary forks once, splayed about the parent azimuth: the second level is
+    // what turns five spokes into a fan.
+    for (const az2 of [az - 0.34, az + 0.34]) {
+      parts.push(paint(limb(tx, ty, tz, 1.35, az2, 1.6, 0.2, 0.12, 5), bark));
+      const [bx, by, bz] = limbTip(tx, ty, tz, 1.35, az2, 1.6);
+      parts.push(paint(canopyPad(1.15, 0.4, bx, by + 0.08, bz), canopy));
+    }
+  }
+  parts.push(paint(canopyPad(1.5, 0.34, 0, 7.5, 0), canopy));
+  return standTo(mergeGeometries(parts)!, 9.4);
+}
+
 let _scrubForm: PropForm | null = null;
 function scrubForm(): PropForm {
   _scrubForm ??= {
@@ -506,6 +701,7 @@ function scrubForm(): PropForm {
     rotate3d: false,
     minScale: 0.7,
     maxScale: 1.6,
+    weight: 1,
   };
   return _scrubForm;
 }
@@ -524,6 +720,7 @@ function trunkForm(): PropForm {
     rotate3d: false,
     minScale: 0.8,
     maxScale: 1.45,
+    weight: 1,
   };
   return _trunkForm;
 }
@@ -532,11 +729,19 @@ let _sandForms: PropForm[] | null = null;
 function sandForms(): PropForm[] {
   if (!_sandForms) {
     _sandForms = [
-      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35 },
-      { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7 },
-      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5 },
+      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1 },
+      { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7, weight: 1 },
+      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5, weight: 1 },
       trunkForm(),
       scrubForm(),
+      // A LANDMARK IS NOT A PROP, and the weight is what says so: a fifth of an
+      // ordinary member, so a driver can cross minutes of desert without meeting one.
+      // `baseRadius` is the trunk at its foot AFTER `standTo`, because the capsule
+      // collider's radius is derived from it.
+      { id: 'dragontree', geometry: buildDragonTree(), material: matPlant, baseRadius: 0.82, height: 6.3, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.85, maxScale: 1.2, weight: 0.18 },
+      // Rarer still, and the capsule is what makes nine metres of trunk a wall rather
+      // than scenery.
+      { id: 'baobab', geometry: buildBaobab(), material: matPlant, baseRadius: 2.04, height: 9.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.8, maxScale: 1.15, weight: 0.1 },
     ];
   }
   return _sandForms;
@@ -546,10 +751,10 @@ let _rockForms: PropForm[] | null = null;
 function rockForms(): PropForm[] {
   if (!_rockForms) {
     _rockForms = [
-      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6 },
-      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'hull', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9 },
+      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'hull', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9, weight: 1 },
     ];
   }
   return _rockForms;
@@ -557,6 +762,22 @@ function rockForms(): PropForm[] {
 /** Shared visual/collision forms for deterministic world-space desert scatter. */
 export function desertPropForms(surface: SurfaceType): readonly DesertPropForm[] {
   return surface === SurfaceType.Rock ? rockForms() : sandForms();
+}
+
+/**
+ * Weighted pick from a surface's forms. A uniform pick made every member equally
+ * likely, which is right for five ordinary props and wrong for a landmark: a tree
+ * that stands nine metres over the sand has to be rarer than a barrel cactus.
+ */
+export function pickDesertForm(forms: readonly DesertPropForm[], roll: number): DesertPropForm {
+  let total = 0;
+  for (const form of forms) total += form.weight;
+  let cursor = roll * total;
+  for (const form of forms) {
+    cursor -= form.weight;
+    if (cursor < 0) return form;
+  }
+  return forms[forms.length - 1]!;
 }
 
 
@@ -884,7 +1105,7 @@ export class ScatterProvider implements ChunkProvider {
           }
           if (roll >= density * fade) break cell;
 
-          const form = forms[Math.floor(hash01(seed, TAG_SCATTER, cs, cl, 3) * forms.length)]!;
+          const form = pickDesertForm(forms, hash01(seed, TAG_SCATTER, cs, cl, 3));
 
           // A prop already knocked down stays down. Same guard `lootedPois` is for a
           // looted stop: the chunk is rebuilt every time it crosses the physics radius,
@@ -952,9 +1173,11 @@ export class ScatterProvider implements ChunkProvider {
           let form: PropForm;
 
           if (kind === 0) {
-            // Most piles are low scrub; the occasional fallen trunk is the serious,
-            // visible trajectory choice that can unload a wheel or trip a car.
-            form = hash01(seed, tag, candidate, 7) < 0.22 ? trunkForm() : scrubForm();
+            // Road piles are low scrub and nothing else. A fallen trunk is desert
+            // scenery now — it is still in `sandForms()` — and never spawns on the
+            // carriageway: a log across a lane is the one piece of litter a driver
+            // cannot read in time at speed.
+            form = scrubForm();
           } else {
             const rocks = rockForms();
             form = rocks[Math.floor(hash01(seed, tag, candidate, 1) * rocks.length)]!;

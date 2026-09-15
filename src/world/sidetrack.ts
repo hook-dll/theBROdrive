@@ -10,7 +10,7 @@ import type { Terrain } from './terrain';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 
 /**
- * SIDETRACKS: the graded dirt tracks that leave the road for the desert.
+ * SIDETRACKS: the wheel tracks a heavy truck left going off the road into the desert.
  *
  * The director schedules one every few kilometres (kind 'sidetrack' in
  * `world/director.ts`). What it buys is not scenery but a QUESTION: a pair of ruts
@@ -18,13 +18,19 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
  * drove out there repeatedly, for a reason the road does not explain. It is the
  * cheapest thing in this world that implies a somewhere else.
  *
+ * It is drawn with the SAME RECIPE as the player's own tyre marks — two darkened
+ * bands pressed into the sand, nothing between them, lifted just clear of the surface
+ * (`render/tyretracks.ts`, `TRACK_WIDTH` / `SURFACE_LIFT` / `BASE_ALPHA`) — only at a
+ * truck's gauge and with bands better than twice as wide. The family resemblance is
+ * the point: a mark the player already knows how to read, made by something bigger.
+ *
  * It is a DECAL, not terrain. Three things follow from that, and all three are why
  * this file is short:
  *
  *  - no terrain height changes, so `terrain.ts` does not have to know this exists and
  *    a track can never make a dune undriveable or tear a hole in the collider;
  *  - no surface-type registration, so a wheel on a track still reads the sand it is
- *    actually on (a graded track IS sand, packed harder — and packing is not a
+ *    actually on (a pressed rut IS sand, packed harder — and packing is not a
  *    material this world models);
  *  - no collider at all, so a track costs one draw call and nothing else.
  *
@@ -53,9 +59,9 @@ const SIDETRACK_MAX_LENGTH = 150;
 
 /**
  * Angle the track leaves the road at, radians. A vehicle turning off a road at speed
- * cannot leave at a right angle: 16-30 degrees is the shallow peel a graded junction
- * actually has, and it is also what keeps the first twenty metres of the track inside
- * the player's view instead of sliding straight out of frame.
+ * cannot leave at a right angle: 16-30 degrees is the shallow peel a truck pulling off
+ * the carriageway actually leaves, and it is also what keeps the first twenty metres
+ * of the track inside the player's view instead of sliding straight out of frame.
  */
 const SIDETRACK_DEPART_MIN = 0.28;
 const SIDETRACK_DEPART_MAX = 0.52;
@@ -86,10 +92,10 @@ const SIDETRACK_MIN_ANGLE = 0.14;
  * A track therefore stops when it reaches `MAX_OUT` metres from the asphalt, or
  * `CURVE_FRACTION` of the local radius, whichever comes first. At three tenths of the
  * radius the frame is compressed by at most a third — a track on the inside of a bend
- * is a little shorter than its roll asked for, which is exactly what a real graded
- * track cutting the inside of a curve looks like — and it can never fold. Fifty metres
- * is the outer limit because the fade has started by 58% of the length anyway, so
- * everything past it is already transparent.
+ * is a little shorter than its roll asked for, which is exactly what a vehicle cutting
+ * the inside of a curve leaves behind — and it can never fold. Fifty metres is the
+ * outer limit because the fade has started by 58% of the length anyway, so everything
+ * past it is already transparent.
  */
 const SIDETRACK_MAX_OUT = 50;
 const SIDETRACK_CURVE_FRACTION = 0.3;
@@ -101,14 +107,15 @@ const SIDETRACK_MAX_ROWS = 64;
 /**
  * Where the track's CENTRELINE starts, as a setback from the LOCAL asphalt edge.
  *
- * 1.6 m, and the figure is the ribbon's own half-width rather than taste. The strip
- * is 1.5 m each side of its centre, so at the shallow departure angle its inner
- * corner lands about 0.3 m outside the paint: the track visually joins the road
- * without a single vertex of transparent sand lying over the asphalt or over the lane
- * paint that sits 2 mm above it. A 0.25 m setback — which is where this started — put
- * two of the ten columns on the carriageway, and a decal fighting the road surface for
- * the depth test is exactly the artefact the lift and the polygon offset exist to
- * avoid. The 3.5 m loose shoulder is wide enough to hold the junction on its own.
+ * 1.6 m, and the figure is the ribbon's own half-width rather than taste. The outer
+ * wheel band's soft edge is 1.42 m each side of the centre, so at the shallow
+ * departure angle its inner corner lands about 0.2 m outside the paint: the track
+ * visually joins the road without a single vertex of transparent sand lying over the
+ * asphalt or over the lane paint that sits 2 mm above it. A 0.25 m setback — which is
+ * where this started — put columns on the carriageway, and a decal fighting the road
+ * surface for the depth test is exactly the artefact the lift and the polygon offset
+ * exist to avoid. The 3.5 m loose shoulder is wide enough to hold the junction on its
+ * own.
  */
 export const SIDETRACK_START_SETBACK = 1.6;
 
@@ -122,12 +129,13 @@ export const SIDETRACK_LIFT = 0.03;
 /**
  * The ribbon's cross-section, as offsets from the track centre in metres.
  *
- * `rut` marks the two wheel paths, which are the darker packed lines; everything else
- * is the graded strip, which is LIGHTER than the desert around it because grading
- * turns over the crust and the crust is what the sun has darkened. The outermost
- * columns carry zero alpha, so the strip ends in a soft edge rather than in a cut
- * line — a hard-edged decal on sand is the single clearest tell that a ribbon is a
- * ribbon. A 1.6 m rut gauge is a light truck, which is what would be out here.
+ * Two PRESSED WHEEL BANDS and nothing else. `rut` marks the 0.38 m of each band that
+ * carries the mark's opacity — better than twice the 0.18 m band a car lays in
+ * `render/tyretracks.ts`, because this was a truck — and the columns 0.13 m outside
+ * and inside each band carry zero alpha, so a band fades out instead of ending in a
+ * cut line: a hard-edged decal on sand is the single clearest tell that a ribbon is a
+ * ribbon. The 2.2 m gauge is a heavy truck's. NOTHING is drawn between the wheels,
+ * because a truck presses its wheels into the sand rather than grading a strip.
  */
 interface SidetrackColumn {
   /** Lateral offset from the track centreline, metres. */
@@ -138,25 +146,25 @@ interface SidetrackColumn {
   readonly alpha: number;
 }
 const SIDETRACK_COLUMNS: readonly SidetrackColumn[] = [
-  { offset: -1.5, rut: false, alpha: 0 },
-  { offset: -1.08, rut: false, alpha: 0.6 },
-  { offset: -0.88, rut: true, alpha: 0.9 },
-  { offset: -0.72, rut: true, alpha: 0.9 },
-  { offset: -0.42, rut: false, alpha: 0.52 },
-  { offset: 0.42, rut: false, alpha: 0.52 },
-  { offset: 0.72, rut: true, alpha: 0.9 },
-  { offset: 0.88, rut: true, alpha: 0.9 },
-  { offset: 1.08, rut: false, alpha: 0.6 },
-  { offset: 1.5, rut: false, alpha: 0 },
+  { offset: -1.42, rut: false, alpha: 0 },
+  { offset: -1.29, rut: true, alpha: 0.5 },
+  { offset: -0.91, rut: true, alpha: 0.5 },
+  { offset: -0.78, rut: false, alpha: 0 },
+  { offset: 0.78, rut: false, alpha: 0 },
+  { offset: 0.91, rut: true, alpha: 0.5 },
+  { offset: 1.29, rut: true, alpha: 0.5 },
+  { offset: 1.42, rut: false, alpha: 0 },
 ];
 
 /** Fraction of the length at which the track begins to give up. */
 const SIDETRACK_FADE_FROM = 0.58;
 
-/** How far the graded strip is lifted toward the palette's thrown-sand lightness. */
-const STRIP_LIGHTEN = 0.6;
-/** How far a rut is pulled toward the palette's rock, which is its darkest member. */
-const RUT_DARKEN = 0.42;
+/**
+ * How far a rut is pulled toward the palette's rock, which is its darkest member. A
+ * truck presses the crust harder than a grader lifts it, so the mark is deeper than
+ * the lightened strip this replaced.
+ */
+const RUT_DARKEN = 0.5;
 
 /** One row of the track: its road-frame centre and the angle it is running at. */
 export interface SidetrackStation {
@@ -258,8 +266,6 @@ function smoothstep01(t: number): number {
 /** Palette scratch colours, so a track build does not allocate one per vertex. */
 const _sand = new THREE.Color();
 const _rock = new THREE.Color();
-const _spray = new THREE.Color();
-const _strip = new THREE.Color();
 const _rutColour = new THREE.Color();
 
 /**
@@ -282,11 +288,9 @@ function* buildSidetrackGeometry(
   const palette = desertPaletteAt(event.s);
   _sand.setHex(palette.sand);
   _rock.setHex(palette.rock);
-  _spray.setHex(palette.spray);
-  // The graded strip and the ruts are both the REGION's own sand, moved along the
-  // palette rather than picked: a track tinted with a fixed brown stopped matching
-  // the ground the moment the colour cycle moved off its opening desert.
-  _strip.copy(_sand).lerp(_spray, STRIP_LIGHTEN);
+  // The ruts are the REGION's own sand, moved along the palette rather than picked: a
+  // track tinted with a fixed brown stopped matching the ground the moment the colour
+  // cycle moved off its opening desert.
   _rutColour.copy(_sand).lerp(_rock, RUT_DARKEN);
 
   const cols = SIDETRACK_COLUMNS.length;
@@ -307,7 +311,7 @@ function* buildSidetrackGeometry(
     // The row runs across the TRACK, so its direction is the track tangent turned a
     // quarter turn in the (arclength, lateral) frame. Taking it perpendicular to the
     // ROAD instead sheared every row of a curving track and the ruts came out as
-    // zig-zags: a row is 3 m wide and the rows are 3 m apart, so the shear was visible.
+    // zig-zags: a row is 2.8 m wide and the rows are 3 m apart, so the shear was visible.
     const crossS = -plan.side * Math.sin(station.angle);
     const crossL = Math.cos(station.angle);
     for (let c = 0; c < cols; c++) {
@@ -323,10 +327,11 @@ function* buildSidetrackGeometry(
       positions[p + 1] = y;
       positions[p + 2] = point.z - originZ;
       const k = v * 4;
-      const colour = column.rut ? _rutColour : _strip;
-      colours[k] = colour.r;
-      colours[k + 1] = colour.g;
-      colours[k + 2] = colour.b;
+      // Every column carries the rut colour, including the soft-edge ones: they sit at
+      // zero alpha, so all they have to do is match the band they are fading out of.
+      colours[k] = _rutColour.r;
+      colours[k + 1] = _rutColour.g;
+      colours[k + 2] = _rutColour.b;
       colours[k + 3] = column.alpha * taper;
       v++;
     }
@@ -367,7 +372,7 @@ function* buildSidetrackGeometry(
  * already uses for tyre marks and lane paint: the ribbon has to lose the depth
  * argument with the terrain it lies on rather than win it, or every dune edge it
  * crosses turns into a z-fighting seam. It is a standard material and not an unlit
- * one on purpose — a graded track is ground, so it has to take the same sun, the same
+ * one on purpose — a wheel mark is ground, so it has to take the same sun, the same
  * night and the same fog as the sand it is lying on, or it glows at dusk.
  */
 const matSidetrack = new THREE.MeshStandardMaterial({

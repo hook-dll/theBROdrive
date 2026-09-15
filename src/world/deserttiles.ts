@@ -7,6 +7,7 @@ import { SurfaceType } from '../core/surfaces';
 import type { WorldOrigin } from './origin';
 import {
   desertPropForms,
+  pickDesertForm,
   propPieces,
   type BreakableSink,
   type DesertPropForm,
@@ -462,7 +463,7 @@ export class DesertTileStreamer {
       const localX = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 1) * 0.84) * DESERT_TILE_SIZE;
       const localZ = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 2) * 0.84) * DESERT_TILE_SIZE;
       const forms = desertPropForms(surface as SurfaceType);
-      const form = forms[Math.floor(hash01(this.seed, PROP_TAG, tx, tz, i, 3) * forms.length)]!;
+      const form = pickDesertForm(forms, hash01(this.seed, PROP_TAG, tx, tz, i, 3));
       const id = tilePropId(tx, tz, i);
       if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
 
