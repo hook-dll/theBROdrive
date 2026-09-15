@@ -10,6 +10,7 @@ import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
 import {
+  DEFAULT_INK_STRENGTH,
   DEFAULT_PHONE_FRAME_RATE,
   GRAPHICS_TIERS,
   TIME_OF_DAY_PRESETS,
@@ -291,19 +292,18 @@ async function boot(): Promise<void> {
   /**
    * Whether this machine has never said what it can afford.
    *
-   * A stored preference is the player's own answer and outranks anything measured; the
-   * absence of one means nobody has answered yet, and the default rung is a guess that
-   * a slow machine will be sitting on. Only a desktop can be in that position: a phone
-   * with no stored settings is already put on the weakest rung below, which is the
-   * floor, so there is nothing left to detect.
+   * `default` is the ONLY source a launch may measure over. A stored `chosen` is the
+   * player's own answer, a stored `measured` is a verdict this machine already reached,
+   * and re-measuring either would overrule an answer that exists — which is what the
+   * old test (the mere absence of stored preferences) could not tell apart. A phone is
+   * excluded because it is put on the weakest rung below, which is the floor: there is
+   * nothing left to detect, and walking it UP is exactly the heat its rung refuses.
    */
   let tierUndetected = false;
   {
     const stored = loadStoredSettings();
     if (stored) {
       world.apply({ t: 'settings', settings: stored });
-    } else {
-      tierUndetected = !mobilePresentation;
     }
     if (!stored && mobilePresentation) {
       // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
@@ -318,11 +318,16 @@ async function boot(): Promise<void> {
         settings: {
           ...world.state.settings,
           graphicsQuality: 'acceptable',
+          // Authored for the presentation, not measured and not chosen — so the menu can
+          // say which of those it is, and a `Measure again` can still be offered.
+          graphicsQualitySource: 'device',
           msaa: false,
           frameRateLimit: DEFAULT_PHONE_FRAME_RATE,
         },
       });
     }
+    tierUndetected =
+      world.state.settings.graphicsQualitySource === 'default' && !mobilePresentation;
   }
 
   // The spine (checkpoints + coarse index) is what makes a long road affordable: it
@@ -359,8 +364,10 @@ async function boot(): Promise<void> {
     canvas,
     world.state.settings.graphicsQuality,
     world.state.settings.msaa,
-    world.state.settings.inkStrength,
+    DEFAULT_INK_STRENGTH,
     mobilePresentation,
+    world.state.settings.renderScale,
+    world.state.settings.fieldOfView,
   );
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
@@ -598,8 +605,12 @@ async function boot(): Promise<void> {
           s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
-          `pixels ${(renderer.resolutionScale * 100).toFixed(0)}% of ceiling, ` +
-            `dpr ${window.devicePixelRatio.toFixed(2)}`,
+          `pixels ${(renderer.renderedPixels / 1_000_000).toFixed(2)} Mpx `
+            + `(${
+              s.renderScale === null
+                ? `auto, ${(renderer.resolutionScale * 100).toFixed(0)}% of the rung's ceiling`
+                : `${Math.round(s.renderScale * 100)}% of the display, fixed`
+            }), dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows ` +
             `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
             `msaa ${s.msaa ? 'on' : 'off'}`,
@@ -1065,7 +1076,12 @@ async function boot(): Promise<void> {
     }
   });
 
-  const camera = new CameraRig(renderer.camera, physics, origin);
+  const camera = new CameraRig(
+    renderer.camera,
+    physics,
+    origin,
+    world.state.settings.fieldOfView,
+  );
   camera.setMode('foot');
   camera.setYaw(initialYaw);
 
@@ -2212,6 +2228,9 @@ async function boot(): Promise<void> {
         handbrake: lastInput.handbrake,
         steering: driving.steeringFraction,
         tyres: driving.wheelRide,
+        // Null while the player steers, which is what keeps the faces black: the dash
+        // reports WHO is driving, not whether an autopilot exists.
+        autopilotMode: autopilot.engaged ? autopilot.mode : null,
       });
     } else {
       hud.setDriving(null);
@@ -2689,6 +2708,23 @@ async function boot(): Promise<void> {
   const pauseHooks: PauseHooks = {
     settings: () => world.state.settings,
     frameReport,
+    viewport: () => renderer.viewport(),
+    /**
+     * Throw away the recorded verdict and measure this machine again.
+     *
+     * A RELOAD rather than a live walk, because the measurement is a launch phase by
+     * construction: it needs the loading cover to hide thirty discarded frames and up
+     * to twenty seconds of settling, and it needs to step the rung with nobody driving.
+     * Running it from a pause menu would walk the resolution under a player who is
+     * parked in the middle of the road. The source is written first, so the launch this
+     * reload lands in is the one that asks the question.
+     */
+    remeasureGraphics: () => {
+      const settings = { ...world.state.settings, graphicsQualitySource: 'default' as const };
+      world.apply({ t: 'settings', settings });
+      storeSettings(settings);
+      window.location.reload();
+    },
     applySettings: (next) => {
       const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
@@ -2701,7 +2737,8 @@ async function boot(): Promise<void> {
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setMsaa(world.state.settings.msaa);
-      renderer.setInkStrength(world.state.settings.inkStrength);
+      renderer.setRenderScale(world.state.settings.renderScale);
+      camera.setFieldOfView(world.state.settings.fieldOfView);
       // The tier owns six things and five of them apply in place: the pixel ceiling,
       // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista
       // disc), and the presentation cap. The sixth — the visible-light count — cannot,
@@ -2997,8 +3034,12 @@ async function boot(): Promise<void> {
         break;
       }
     }
-    // Written once, so the next launch respects the player rather than measuring again.
-    storeSettings(world.state.settings);
+    // The verdict is the answer to the question this function asked, whether or not it
+    // moved the rung: recording it is what stops the next launch from asking again, and
+    // recording it as MEASURED is what lets the menu offer to ask once more.
+    const settings = { ...world.state.settings, graphicsQualitySource: 'measured' as const };
+    world.apply({ t: 'settings', settings });
+    storeSettings(settings);
   };
 
   // Prime the exact live render path while the loading cover still owns the screen.

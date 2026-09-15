@@ -18,6 +18,17 @@
      lying on a forecourt teach each other. */
   --hud-diesel: #c9a227;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
+  /* INSTRUMENT FACES, as properties rather than fills, because the autopilot paints
+     them: black is the player's own car and a coloured face is a car driving itself.
+     The ink travels with the face — a near-white needle on cream is not a needle — so
+     the tick, needle and track colours are here too and the mode classes rewrite the
+     whole set together. See `.hud-driving.is-autopilot-*` below. */
+  --hud-dial-face: #171714;
+  --hud-aux-dial-face: #141412;
+  --hud-dial-ink: #dbd7cc;
+  --hud-dial-ink-strong: #f0ede5;
+  --hud-dial-needle: #e4e1d9;
+  --hud-dial-track: rgba(232, 228, 218, 0.6);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -312,7 +323,7 @@ body.is-cinematic #ui {
 
 
 .hud-main-dial-face {
-  fill: #171714;
+  fill: var(--hud-dial-face);
   stroke: #5c5951;
   stroke-width: 2;
 }
@@ -324,7 +335,7 @@ body.is-cinematic #ui {
 }
 
 .hud-dial-tick {
-  stroke: #dbd7cc;
+  stroke: var(--hud-dial-ink);
   stroke-width: 0.7;
   opacity: 0.86;
 }
@@ -335,7 +346,7 @@ body.is-cinematic #ui {
 }
 
 .hud-dial-tick.is-major {
-  stroke: #f0ede5;
+  stroke: var(--hud-dial-ink-strong);
   stroke-width: 1.7;
   opacity: 1;
 }
@@ -347,7 +358,7 @@ body.is-cinematic #ui {
 
 
 .hud-dial-needle {
-  stroke: #e4e1d9;
+  stroke: var(--hud-dial-needle);
   stroke-width: 2.4;
   stroke-linecap: round;
 }
@@ -371,15 +382,44 @@ body.is-cinematic #ui {
 }
 
 .hud-aux-face {
-  fill: #141412;
+  fill: var(--hud-aux-dial-face);
   stroke: #47453f;
   stroke-width: 2;
 }
 
 .hud-aux-track {
   fill: none;
-  stroke: rgba(232, 228, 218, 0.6);
+  stroke: var(--hud-dial-track);
   stroke-width: 5;
+}
+
+/* AUTOPILOT FACES. One class per mode on the driving cluster, each rewriting the face
+   and its ink together: the two pale modes need dark ink to keep a needle readable, and
+   frantic's crimson is dark enough to keep the authored light one. The mode is worth the
+   whole face rather than a lamp because `sleeper` and `frantic` differ by roughly half
+   the cornering speed, and a driver about to take the wheel back needs to know which
+   one he is interrupting before he looks for an indicator. */
+.hud-driving.is-autopilot-sleeper {
+  --hud-dial-face: #fffdd0;
+  --hud-aux-dial-face: #fffdd0;
+  --hud-dial-ink: rgba(26, 24, 14, 0.7);
+  --hud-dial-ink-strong: #191708;
+  --hud-dial-needle: #221f0e;
+  --hud-dial-track: rgba(26, 24, 14, 0.5);
+}
+
+.hud-driving.is-autopilot-hurried {
+  --hud-dial-face: #ccff00;
+  --hud-aux-dial-face: #ccff00;
+  --hud-dial-ink: rgba(18, 26, 0, 0.7);
+  --hud-dial-ink-strong: #121a00;
+  --hud-dial-needle: #16200a;
+  --hud-dial-track: rgba(18, 26, 0, 0.5);
+}
+
+.hud-driving.is-autopilot-frantic {
+  --hud-dial-face: #91032b;
+  --hud-aux-dial-face: #91032b;
 }
 
 .hud-aux-zone {

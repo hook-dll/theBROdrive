@@ -21,6 +21,16 @@ export interface GameplayConfig {
   readonly defaultMouseSensitivity: number;
   readonly mouseSensitivityMin: number;
   readonly mouseSensitivityMax: number;
+  /**
+   * Resting vertical field of view, degrees, and the bounds a player may set it to.
+   *
+   * Here rather than in the renderer because it is a preference with a default, like
+   * the ink strength below it: `DEFAULT_FIELD_OF_VIEW` is what `Settings` starts at,
+   * and the camera reads the setting rather than a constant of its own.
+   */
+  readonly fieldOfViewDegrees: number;
+  readonly fieldOfViewMinDegrees: number;
+  readonly fieldOfViewMaxDegrees: number;
 }
 
 export interface AudioConfig {
@@ -79,6 +89,9 @@ const GAMEPLAY_FIELDS: Fields<GameplayConfig> = {
   defaultMouseSensitivity: true,
   mouseSensitivityMin: true,
   mouseSensitivityMax: true,
+  fieldOfViewDegrees: true,
+  fieldOfViewMinDegrees: true,
+  fieldOfViewMaxDegrees: true,
 };
 
 const AUDIO_FIELDS: Fields<AudioConfig> = {

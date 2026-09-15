@@ -24,6 +24,8 @@ import {
   frameRateLimitFrom,
   GRAPHICS_TIERS,
   presentationFpsFor,
+  RENDER_SCALES,
+  renderScaleFrom,
   starMagnitudeFor,
   streetLightSlotsFor,
   vehicleLightSlotsFor,
@@ -31,7 +33,7 @@ import {
 } from '../src/game/settings';
 import { FIXED_DT } from '../src/core/physics';
 import { MAX_STEPS_PER_FRAME } from '../src/core/loop';
-import { minimumScaleFor, renderScaleFor } from '../src/core/renderer';
+import { manualRenderScale, minimumScaleFor, offeredRenderScales, renderScaleFor } from '../src/core/renderer';
 import { installAssetShim } from './assetshim';
 
 installAssetShim();
@@ -351,10 +353,113 @@ for (const display of DISPLAYS) {
   }
 }
 
+// --- 3. the manual render scale ------------------------------------------------
+//
+// The rung is three points and a machine is not three machines, so a player may name a
+// fraction of his own display instead. Three things must hold, and each of them is a way
+// the control could quietly stop being one:
+//
+//  - THE ROW THE MENU SHOWS MOVES. Every fraction the menu OFFERS must give strictly
+//    more pixels than the one before it on that display. The absolute bound below
+//    flattens the top of the list on a large screen — on a 4K television 125% and 150%
+//    both land on the ceiling — so the offered row is derived from the display, and this
+//    is the check that the derivation is doing its job rather than the list being
+//    quietly presented as if it were.
+//  - IT IS BOUNDED. Not by the rung, but by the top rung's ceiling, which is the most
+//    this game ever draws on purpose. Without that bound 150% on a retina laptop asks
+//    for 20 megapixels and the menu that would undo it is unreachable.
+//  - 100% MEANS THE DISPLAY. One drawing-buffer pixel per device pixel, under the same
+//    ratio cap the automatic policy uses, so the readout in the menu is a resolution
+//    rather than a percentage of something unstated.
+console.log('\ndisplay                       offered   scale     Mpx       ratio');
+{
+  const top = GRAPHICS_TIERS.blessing;
+  for (const display of DISPLAYS) {
+    const cssPixels = display.css[0] * display.css[1];
+    const bound = (display.mobile ? top.mobileMaxPixels : top.maxPixels) / 1e6;
+    const offered = offeredRenderScales(cssPixels, display.dpr, display.mobile);
+    let previous = 0;
+    for (const fraction of RENDER_SCALES) {
+      const shown = offered.includes(fraction);
+      const ratio = manualRenderScale(cssPixels, display.dpr, display.mobile, fraction);
+      const rendered = (cssPixels * ratio * ratio) / 1e6;
+      console.log(
+        `${display.name.padEnd(29)} ${(shown ? 'yes' : 'no').padStart(7)} `
+          + `${`${Math.round(fraction * 100)}%`.padStart(5)} `
+          + `${rendered.toFixed(2).padStart(7)} ${ratio.toFixed(2).padStart(11)}`,
+      );
+      if (rendered > bound * 1.001) {
+        failures.push(
+          `${display.name} at ${Math.round(fraction * 100)}% renders ${rendered.toFixed(2)} Mpx, `
+            + `past the ${bound.toFixed(2)} Mpx the top rung would ever draw`,
+        );
+      }
+      if (!shown) continue;
+      // Equal is the failure: a clamped pair offered as two buttons has one outcome.
+      if (rendered <= previous) {
+        failures.push(
+          `${display.name} offers ${Math.round(fraction * 100)}% at ${rendered.toFixed(2)} Mpx, `
+            + `no more than the previous offered choice's ${previous.toFixed(2)} — two buttons, `
+            + 'one result',
+        );
+      }
+      previous = rendered;
+    }
+    if (offered.length === 0) {
+      failures.push(`${display.name} is offered no manual render scale at all`);
+    }
+  }
+
+  // A stored choice the display would clamp is still shown, or the player cannot see
+  // which button he is on after carrying his preferences to a bigger screen.
+  {
+    const cssPixels = 3840 * 2160;
+    const offered = offeredRenderScales(cssPixels, 1, false);
+    const withCurrent = offeredRenderScales(cssPixels, 1, false, 1.5);
+    if (offered.includes(1.5)) {
+      failures.push('a 4K television offers both 125% and 150%, which resolve to the same pixels');
+    }
+    if (!withCurrent.includes(1.5)) {
+      failures.push('a stored 150% is not shown on a display that clamps it — nothing is selected');
+    }
+  }
+
+  // 100% is the display's own pixels, capped the way the automatic policy caps them.
+  for (const display of DISPLAYS) {
+    const cssPixels = display.css[0] * display.css[1];
+    const ratio = manualRenderScale(cssPixels, display.dpr, display.mobile, 1);
+    const expected = Math.min(
+      display.dpr,
+      2,
+      Math.sqrt((display.mobile ? top.mobileMaxPixels : top.maxPixels) / cssPixels),
+    );
+    if (Math.abs(ratio - expected) > 1e-9) {
+      failures.push(
+        `${display.name} at 100% resolves ${ratio.toFixed(3)} rather than the display's own `
+          + `${expected.toFixed(3)}`,
+      );
+    }
+  }
+
+  // And a hand-edited preferences file cannot invent a fraction the menu has no button
+  // for: an unreachable resolution is one the player cannot get back from.
+  for (const fraction of RENDER_SCALES) {
+    if (renderScaleFrom(fraction) !== fraction) {
+      failures.push(`a saved render scale of ${fraction} was not kept`);
+    }
+  }
+  for (const garbage of [0.33, 2, 0, -1, '1', Number.NaN, undefined, null]) {
+    if (renderScaleFrom(garbage) !== null) {
+      failures.push(`a saved render scale of ${String(garbage)} became something other than Auto`);
+    }
+  }
+}
+
 if (failures.length > 0) {
   for (const failure of failures) console.log(`  FAIL  ${failure}`);
   throw new Error(`${failures.length} graphics-tier checks failed`);
 }
 console.log(
-  '\nthe ladder climbs at every rung, and no display can talk a rung past its budget',
+  '\nthe ladder climbs at every rung, no display can talk a rung past its budget, and '
+    + 'every render scale the menu offers is a different picture',
 );

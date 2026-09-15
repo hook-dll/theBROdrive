@@ -138,6 +138,8 @@ export class AdaptiveResolutionController {
    * expensive and therefore the safest assumption a prediction can make.
    */
   private fillSlope: number | null = null;
+  /** True while the scale is the player's fixed choice; see `setPinned`. */
+  private pinned = false;
 
   constructor(quality: GraphicsQuality) {
     this.quality = quality;
@@ -177,10 +179,33 @@ export class AdaptiveResolutionController {
   setQuality(quality: GraphicsQuality): void {
     this.quality = quality;
     this.minimumScale = DEFAULT_MIN_SCALE[quality];
+    this.reset();
+  }
+
+  /**
+   * Whether the scale belongs to the player rather than to this controller.
+   *
+   * A pinned controller still MEASURES — the average is what the development frame
+   * report reads, and dropping the samples would leave a phone with no way to say
+   * whether a hot frame is the GPU's fault — but it never acts. `Auto` is the adaptive
+   * mode; a named resolution that still drifts is not a named resolution.
+   */
+  setPinned(pinned: boolean): void {
+    if (pinned === this.pinned) return;
+    this.pinned = pinned;
+    this.reset();
+  }
+
+  /**
+   * Full resolution with nothing known.
+   *
+   * A rung change rewrites the frame itself — shadows, view distance, the pixel ceiling
+   * — so the cost slope measured on the old one describes nothing here. Pinning and
+   * unpinning change the pixel count under that same model, which is the same problem.
+   */
+  private reset(): void {
     this._scale = 1;
     this.forget();
-    // A rung change rewrites the frame itself — shadows, view distance, the pixel
-    // ceiling — so the cost slope measured on the old one describes nothing here.
     this.observedScale = null;
     this.observedAverage = 0;
     this.fillSlope = null;
@@ -217,6 +242,10 @@ export class AdaptiveResolutionController {
     if (this.samplesSinceChange === RESIZE_DISCARD_SAMPLES + SETTLE_SAMPLES) {
       this.observe(this.average);
     }
+    // A pinned scale is the player's number, so it is measured, reported and left
+    // alone. The average above is kept because the development frame report is the
+    // only way to tell a GPU-bound frame from a CPU-bound one on a real phone.
+    if (this.pinned) return null;
 
     const slow = SLOW_GPU_MS[this.quality];
     // A frame that costs materially more or materially less than the one the slope

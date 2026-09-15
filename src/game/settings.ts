@@ -307,6 +307,49 @@ export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
 /** A phone starts cool; a desktop starts uncapped, where its GPU is the constraint. */
 export const DEFAULT_PHONE_FRAME_RATE = 30;
 
+/**
+ * Offered manual render scales, as a fraction of the DISPLAY's own pixels.
+ *
+ * Not a fraction of the rung: the rung's ceiling is what `Auto` decides to spend, and
+ * a player overriding it is answering a different question — how many pixels do I want
+ * for this window — which only has a meaning against the window. 100% is one
+ * drawing-buffer pixel per device pixel; below that is the in-between a three-rung
+ * ladder cannot offer; above it is supersampling, which used to be reachable only by
+ * also buying a 25 km vista and eighteen headlamps.
+ *
+ * It exists because `Auto` cannot work everywhere: the measurement behind it is a GPU
+ * timer query, and a browser without `EXT_disjoint_timer_query_webgl2` — Safari, most
+ * Android WebViews — can never move the scale at all. There, three rungs was the whole
+ * of the choice.
+ */
+export const RENDER_SCALES = [0.5, 0.7, 0.85, 1, 1.25, 1.5] as const;
+/** One offered fraction. Named because the menu row and the bench both iterate them. */
+export type RenderScaleFraction = (typeof RENDER_SCALES)[number];
+/** A chosen fraction of the display, or null to let the rung and the GPU decide. */
+export type RenderScale = RenderScaleFraction | null;
+
+/** An offered fraction, or null. Anything else — hand-edited, stale — is automatic. */
+export function renderScaleFrom(raw: unknown): RenderScale {
+  return typeof raw === 'number' && RENDER_SCALES.some((scale) => scale === raw)
+    ? (raw as RenderScale)
+    : null;
+}
+
+/**
+ * WHO chose the graphics rung, which is the difference between a verdict and a taste.
+ *
+ *  - `default`  — nobody has answered. The one state that lets a launch measure.
+ *  - `device`   — the authored default for this presentation; a phone's first launch.
+ *  - `measured` — the launch measured this machine and walked the ladder to fit.
+ *  - `chosen`   — the player picked it, and nothing may overrule that.
+ *
+ * Stored because the alternative was the mere PRESENCE of the stored preferences,
+ * which conflated all four: one unlucky measurement — a cold shader cache, a busy
+ * machine, a throttling battery — was then permanent, with no way back but clearing
+ * browser storage. `Measure again` writes `default` and reloads into the launch.
+ */
+export type GraphicsQualitySource = 'default' | 'device' | 'measured' | 'chosen';
+
 export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
@@ -333,6 +376,30 @@ export interface Settings {
    * here with the rest so it survives a reload like every other choice.
    */
   graphicsQuality: GraphicsQuality;
+  /**
+   * Where `graphicsQuality` came from. Only `default` permits a launch measurement,
+   * so a player's explicit rung is never re-measured behind his back.
+   */
+  graphicsQualitySource: GraphicsQualitySource;
+  /**
+   * Manual drawing-buffer scale as a fraction of the display, or null for automatic.
+   *
+   * The rung answers "what can this machine afford" in three steps; this answers "how
+   * many pixels do I want" continuously, in both directions, and turns the adaptive
+   * controller off while it is set — `Auto` IS the adaptive mode, and a fixed number
+   * that still drifts is not a fixed number.
+   */
+  renderScale: RenderScale;
+  /**
+   * Resting vertical field of view, degrees.
+   *
+   * A real setting rather than a constant because the projection is Hor+: the vertical
+   * angle is fixed and the aspect decides the horizontal one, so a 21:9 window shows
+   * MORE world than a 16:9 one and a portrait phone shows almost nothing sideways.
+   * The speed widening and the ten-power binoculars are both derived from this, so
+   * changing it moves the resting composition and nothing else.
+   */
+  fieldOfView: number;
   /** Four-sample geometry-edge antialiasing on the scene render target. */
   msaa: boolean;
   /**
@@ -346,8 +413,6 @@ export interface Settings {
    * and now have different answers.
    */
   frameRateLimit: FrameRateLimit;
-  /** Post-process landscape outline amount, 0..1. */
-  inkStrength: number;
   /**
    * Persistent precise control: mouse travel and A/D move one linear virtual wheel
    * that stays where the player leaves it. Off by default because standard steering
@@ -369,6 +434,23 @@ export const DEFAULT_INK_STRENGTH = GAMEPLAY_CONFIG.defaultInkStrength;
 export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity;
 export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
 export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
+/**
+ * Resting vertical field of view, and how far a player may move it.
+ *
+ * The authored 65 matches The Long Drive, and it matters more than it sounds: FOV sets
+ * the apparent scale of the whole world, so a couple of degrees changes how big the car
+ * feels and how fast the road appears to move. Every camera mode rests here, and the
+ * speed widening and the ten-power binoculars are both measured from it.
+ *
+ * The bounds are the rectilinear projection's, not a taste: it stretches the picture
+ * along the frame's radius by `1 / cos²(angle)`, so at 16:9 the frame edge runs 2.28x
+ * at the authored 65 (97 degrees horizontal), 1.69x at 50 (79) and 3.65x at 85 (117).
+ * Past that the outer frame is a fisheye and the horizon bows; below it the view is a
+ * telephoto that makes 100 km/h look like 40.
+ */
+export const DEFAULT_FIELD_OF_VIEW = GAMEPLAY_CONFIG.fieldOfViewDegrees;
+export const FIELD_OF_VIEW_MIN = GAMEPLAY_CONFIG.fieldOfViewMinDegrees;
+export const FIELD_OF_VIEW_MAX = GAMEPLAY_CONFIG.fieldOfViewMaxDegrees;
 
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
@@ -388,16 +470,21 @@ export const DEFAULT_SETTINGS: Settings = {
   // design — Settings objects are replaced wholesale through world.apply
   // deltas, never mutated in place.
   keyBindings: {},
-  // The authored look. Nothing auto-detects the GPU: guessing wrong either robs a
-  // capable machine or leaves a weak one stuttering, and the pause menu is one
-  // key away.
+  // The modest rung, and `default` is the point of it: nobody has answered yet, so the
+  // launch is allowed to MEASURE this machine and walk the ladder to fit. Guessing
+  // wrong either robs a capable machine or leaves a weak one stuttering — true of
+  // guessing, and not true of measuring, which is what the launch settle already does.
   graphicsQuality: 'standard',
+  graphicsQualitySource: 'default',
+  // Automatic: the rung's own ceiling, walked down by GPU measurement if the machine
+  // cannot hold it. A player who would rather name the number picks one in the menu.
+  renderScale: null,
   msaa: true,
   // Uncapped by default: on a desktop the GPU is already the constraint, so a cap would
   // only cost smoothness. A phone's FIRST launch is set to 30 by main, which is the only
   // place that knows the presentation — see `DEFAULT_PHONE_FRAME_RATE`.
   frameRateLimit: null,
-  inkStrength: DEFAULT_INK_STRENGTH,
+  fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
 };
@@ -450,6 +537,10 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
       ? obj.mouseSensitivity
       : DEFAULT_MOUSE_SENSITIVITY;
+  const fieldOfViewRaw =
+    typeof obj.fieldOfView === 'number' && Number.isFinite(obj.fieldOfView)
+      ? obj.fieldOfView
+      : DEFAULT_FIELD_OF_VIEW;
 
   // Missing unit-interval settings mean an old save: use the authored default.
   const unitInterval = (value: unknown, fallback: number): number =>
@@ -470,7 +561,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     radioVolume: unitInterval(obj.radioVolume, DEFAULT_RADIO_VOLUME),
-    inkStrength: unitInterval(obj.inkStrength, DEFAULT_INK_STRENGTH),
     keyBindings: {},
     // Anything unrecognised is standard, so an old save (which has no such field)
     // keeps the look it was made with.
@@ -478,6 +568,24 @@ export function sanitizeSettings(raw: unknown): Settings {
       obj.graphicsQuality === 'acceptable' || obj.graphicsQuality === 'blessing'
         ? obj.graphicsQuality
         : 'standard',
+    // A MISSING source means preferences written before this field existed, and the
+    // honest reading of those is that the question has been answered — by whoever wrote
+    // them. Reading it as `default` instead would re-measure every existing player once
+    // and overrule rungs they had picked by hand.
+    graphicsQualitySource:
+      obj.graphicsQualitySource === 'default'
+        || obj.graphicsQualitySource === 'device'
+        || obj.graphicsQualitySource === 'measured'
+        ? obj.graphicsQualitySource
+        : 'chosen',
+    // Snapped to an offered fraction rather than clamped, so a hand-edited 0.33 cannot
+    // become a resolution the menu has no button for and the player cannot get back to.
+    renderScale: renderScaleFrom(obj.renderScale),
+    // Whole degrees: the slider steps in ones, and a stored 64.7 would paint as 65 and
+    // then render as something else.
+    fieldOfView: Math.round(
+      Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, fieldOfViewRaw)),
+    ),
     // A save's `viewDistance` is DELIBERATELY DROPPED rather than migrated. The horizon
     // is a property of the rendering rung now, and the two ladders do not line up: an old
     // save asking for `vast` on `acceptable` was a combination that should never have

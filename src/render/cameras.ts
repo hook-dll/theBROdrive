@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
-import { CAMERA_BASE_FOV, nearPlaneForFarPlane } from '../core/renderer';
+import { nearPlaneForFarPlane } from '../core/renderer';
+import {
+  DEFAULT_FIELD_OF_VIEW,
+  FIELD_OF_VIEW_MAX,
+  FIELD_OF_VIEW_MIN,
+} from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
 export type CameraMode = 'foot' | 'hood' | 'chase';
@@ -86,33 +91,28 @@ const GROUND_CLEARANCE = 0.45;
 const GROUND_PROBE_UP = 0.5;
 const GROUND_PROBE_DOWN = 40;
 /**
- * Resting FOV, shared with the initial camera in renderer.ts so the two cannot
- * disagree. 65 degrees on foot and in the car, matching The Long Drive.
- */
-const BASE_FOV = CAMERA_BASE_FOV;
-/**
- * Speed-widened ceiling, degrees vertical.
+ * Speed widening, degrees added to the resting FOV at `FOV_FULL_SPEED`.
  *
- * This was `BASE_FOV + 14`, which is 79 degrees vertical — 111 horizontal at 16:9, wider
- * than the chase view of any racing game, and a rectilinear projection stretches the
- * picture along the frame's radius by `1 / cos²(angle)`: 3.1x at the corners against the
- * resting 65's 2.3x. An absolute 70 (100 horizontal at 16:9, 2.4x at the corners) keeps
- * five degrees of widening, which is what carries the speed cue, without the outer frame
- * turning into a fisheye. Measured: the car shrinks from 17% of the frame height at rest
- * to 9% at 130 km/h with the old ceiling, and to ~10% with this one — the widening and the
- * arm's own speed lag together, and this bounds the widening's share of it.
+ * This was an absolute ceiling of 70 — `BASE_FOV + 14` before that, which is 79 degrees
+ * vertical, 111 horizontal at 16:9, wider than the chase view of any racing game, and a
+ * rectilinear projection stretches the picture along the frame's radius by
+ * `1 / cos²(angle)`: 3.15x at the frame edge against the authored 65's 2.28x. Five
+ * degrees is what carries the speed cue without the outer frame turning into a fisheye.
+ * Measured: the car shrinks from 17% of the frame height at rest to 9% at 130 km/h with
+ * the old ceiling and to ~10% with five — the widening and the arm's own speed lag
+ * together, and this bounds the widening's share of it.
+ *
+ * RELATIVE rather than absolute now that the resting view is a player setting: an
+ * absolute 70 would silently mean fourteen degrees of widening for someone at 56 and
+ * none at all for someone at 85, so the speed cue would depend on a taste it has
+ * nothing to do with.
  */
-const MAX_FOV = 70;
-/**
- * `tan(BASE_FOV / 2)`, the divisor that makes the arm's elevation coupling exact at the
- * resting view. Declared here because it reads `BASE_FOV`, which is above.
- */
-const BASE_HALF_TAN = Math.tan((BASE_FOV * Math.PI) / 360);
+const FOV_SPEED_WIDENING = 5;
 /** Speed (km/h) at which the speed-FOV widening is fully applied. */
 const FOV_FULL_SPEED = 130;
 const FOV_OMEGA = 6;
-/** Ten-power binoculars: magnification is the resting FOV divided by ten. */
-const BINOCULAR_FOV = BASE_FOV / 10;
+/** Ten-power binoculars: the view is the resting FOV divided by this. */
+const BINOCULAR_POWER = 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
@@ -168,7 +168,13 @@ export class CameraRig {
   /** Smoothed camera state — the only values exposed to the outside world. */
   private readonly eye = new THREE.Vector3();
   private readonly lookAt = new THREE.Vector3();
-  private fov = BASE_FOV;
+  /**
+   * The resting vertical FOV this rig returns to, and `tan` of its half — the divisor
+   * that makes the arm's elevation coupling exact at the resting view.
+   */
+  private baseFov = DEFAULT_FIELD_OF_VIEW;
+  private baseHalfTan = Math.tan((DEFAULT_FIELD_OF_VIEW * Math.PI) / 360);
+  private fov = DEFAULT_FIELD_OF_VIEW;
 
   private bobTime = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
@@ -191,8 +197,25 @@ export class CameraRig {
     private readonly camera: THREE.PerspectiveCamera,
     private readonly physics: PhysicsWorld,
     origin: WorldOrigin,
+    fieldOfView = DEFAULT_FIELD_OF_VIEW,
   ) {
+    this.setFieldOfView(fieldOfView);
     origin.register(this);
+  }
+
+  /**
+   * Sets the resting vertical FOV, from the pause menu, with no reload.
+   *
+   * The live `fov` follows it by the same difference rather than snapping, so a slider
+   * drag moves the view it is describing instead of jumping to rest: the speed widening
+   * and the binocular view are both derived from the resting value, and a player
+   * dragging this at 100 km/h keeps his widening while he does it.
+   */
+  setFieldOfView(degrees: number): void {
+    const next = Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, degrees));
+    this.fov += next - this.baseFov;
+    this.baseFov = next;
+    this.baseHalfTan = Math.tan((next * Math.PI) / 360);
   }
 
   /**
@@ -561,9 +584,9 @@ export class CameraRig {
    * that effect exactly as it was; above it the FOV ceiling is the only bound.
    */
   private armPitchForWidening(): number {
-    if (this.fov <= BASE_FOV) return ARM_PITCH_BASE;
+    if (this.fov <= this.baseFov) return ARM_PITCH_BASE;
     const halfTan = Math.tan(THREE.MathUtils.degToRad(this.fov) / 2);
-    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / BASE_HALF_TAN));
+    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / this.baseHalfTan));
   }
 
   /**
@@ -644,8 +667,8 @@ export class CameraRig {
 
   private updateFov(speedKmh: number, dt: number): void {
     const normalFov =
-      BASE_FOV + (MAX_FOV - BASE_FOV) * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
-    const targetFov = this.binoculars ? BINOCULAR_FOV : normalFov;
+      this.baseFov + FOV_SPEED_WIDENING * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
+    const targetFov = this.binoculars ? this.baseFov / BINOCULAR_POWER : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
     const targetNear = nearPlaneForFarPlane(this.camera.far);
     let projectionChanged = false;
@@ -678,7 +701,7 @@ export class CameraRig {
     }
     this.eye.set(target.x, target.y + EYE_HEIGHT, target.z);
     this.lookAt.copy(this.eye).addScaledVector(_vC, LOOK_AHEAD);
-    this.fov = BASE_FOV;
+    this.fov = this.baseFov;
   }
 
   /** Snap into the remembered driving pose on entry, preserving its arm exactly. */
@@ -694,6 +717,6 @@ export class CameraRig {
     }
     this.eye.copy(_vA);
     this.lookAt.copy(_vB);
-    this.fov = BASE_FOV;
+    this.fov = this.baseFov;
   }
 }

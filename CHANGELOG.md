@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.17.0 — 2026-09-15
+
+### Added
+
+- SHARPNESS IS A CONTROL NOW, AND IT IS SPELLED IN PIXELS. The ladder owns the pixel
+  budget, which was the right fix for a display percentage that meant nothing — but a
+  level is three points and a machine is not three machines: on a 4K television they are
+  1.44, 3.69 and 12.96 megapixels, and the only thing between them was a GPU
+  measurement the player could neither see nor overrule. Worse, that measurement is an
+  `EXT_disjoint_timer_query_webgl2` query, so on a browser without it — Safari, most
+  Android WebViews — the scale never moved at all and three levels were the whole of the
+  choice. `Sharpness` is a fraction of the DISPLAY's own pixels, both directions, quoted
+  as the resolution it costs ("2560x1440, 3.69 Mpx") rather than as a percentage of
+  something unstated. Up is the case the ladder could not express: supersampling used to
+  arrive only with a 25 km vista and eighteen headlamps attached. `Auto` is the old
+  behaviour and stays the default; naming a number pins it, because a fixed resolution
+  that still drifts is not a fixed resolution. The offered row is derived from the
+  display — the bound is the top level's ceiling, the most this game ever draws on
+  purpose, and on a 4K television it makes 125% and 150% the same picture, so the second
+  button is not shown. `tools/graphics-tiers.ts` checks that: no offered choice may cost
+  no more than the one before it.
+- THE DETAIL LEVEL SAYS WHO PICKED IT, AND THE GAME CAN BE ASKED TO PICK AGAIN. A
+  measured verdict and a chosen preference were the same bare string, and the only
+  record of who set it was that stored preferences existed at all — so one unlucky
+  measurement (a cold shader cache, a busy machine, a throttling battery) was permanent,
+  with no way back but clearing browser storage. The source is stored, and the row's own
+  head reads it out in the player's words: `not picked yet` is the one state a launch may
+  measure over, `phone default` is a phone's authored level, `picked by the game` is this
+  machine's own verdict, `picked by you` is never overruled. `Let the game pick` restarts
+  the game, because the timing needs the loading screen — thirty discarded frames and up
+  to twenty seconds of settling, with nobody driving. A phone is not offered it: its
+  level is the floor and the only direction a measurement could move it is the heat that
+  level exists to refuse.
+- FIELD OF VIEW, 50 to 85 DEGREES. The projection is Hor+ — the vertical angle is fixed
+  and the window decides the horizontal one — so the resting 65 was the only number the
+  game ever chose about how wide the world looks, and an ultrawide window was already
+  showing more of it. The bounds are the projection's: at 16:9 the frame edge is
+  stretched 2.28x at the authored 65, 1.69x at 50 and 3.65x at 85, and past that the
+  outer frame is a fisheye. The speed widening is five degrees RELATIVE to the resting
+  view now rather than an absolute 70 — an absolute ceiling would have meant fourteen
+  degrees of widening at 56 and none at all at 85 — and the ten-power binoculars and the
+  chase arm's elevation coupling both follow the setting.
+- THE INSTRUMENT FACES SAY WHO IS DRIVING. Black is the player's own car; the autopilot
+  paints them its mode — `sleeper` cream, `hurried` chartreuse, `frantic` crimson. The
+  mode is worth the whole face rather than a lamp because the modes differ by roughly
+  half the cornering speed, and a driver about to take the wheel back needs to know
+  which one he is interrupting before he goes looking for an indicator. The ink travels
+  with the face: a near-white needle on cream is not a needle, so the tick, needle and
+  track colours are custom properties the mode class rewrites together.
+
+### Removed
+
+- THE INK SLIDER. The drawn outline is part of the authored landscape look, not a
+  preference with two defensible answers, and it sat in a pane that has enough to say.
+
+### Changed
+
+- THE DISPLAY CONTROLS ARE NAMED AFTER WHAT THEY DO. `Graphics: Phone / Desktop /
+  Workstation` asked the player to classify his own computer and then guess which class
+  he was in — reasonable when the level WAS "what can this machine afford", and wrong
+  now that the launch measures that and `Sharpness` owns the pixels. It is `Detail: Low
+  / Medium / High`, and what it still owns is how much WORLD there is: the horizon and
+  its fog, the sun's shadow pass, the shaded light slots, the star depth. Its hint is
+  still generated from the tier table and no longer quotes megapixels, because two rows
+  naming one number is how the old menu came to promise a horizon change on resume while
+  a light change silently waited for the next load. `MSAA` is `Smooth Edges` — the
+  initialism explained nothing to anyone who did not already know it.
+
 ## 0.16.1 — 2026-09-15
 
 ### Fixed

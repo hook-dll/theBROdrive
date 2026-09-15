@@ -65,7 +65,6 @@ function paint(): void {
   hud.setDriving({
     speedKmh: 74,
     rpm: 3100,
-    redlineRpm: 5200,
     gearLabel: '3',
     fuelLitres: 42,
     tankCapacity: 65,
@@ -86,10 +85,14 @@ function paint(): void {
     oilFraction: 0.8,
     engineRunning: sample.zone !== 'critical',
     engineDestroyed: false,
+    checkEngine: false,
     handbrake: false,
     steering: 0,
+    // This bench exercises the temperature gauge, so the rest of the dash is given the
+    // quietest truthful state: no tyre dots, and the player's own black faces.
+    tyres: [],
+    autopilotMode: null,
   });
-  hud.setTravel(12.4, 3600 * 15);
   document.title = `coollab ${sample.zone}`;
 }
 

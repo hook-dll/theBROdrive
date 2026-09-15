@@ -6,6 +6,8 @@ import {
   DAY_CYCLE_MAX_MINUTES,
   DAY_CYCLE_MIN_MINUTES,
   DEFAULT_MOUSE_SENSITIVITY,
+  FIELD_OF_VIEW_MAX,
+  FIELD_OF_VIEW_MIN,
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
   POI_SPACING_MAX_METRES,
@@ -14,9 +16,19 @@ import {
   FRAME_RATE_LIMITS,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
-import type { GraphicsQuality, Settings, TimeOfDayPreset } from '../game/settings';
+import type {
+  GraphicsQuality,
+  GraphicsQualitySource,
+  Settings,
+  TimeOfDayPreset,
+} from '../game/settings';
 import { GRAPHICS_TIERS } from '../game/settings';
-import { prefersMobilePresentation } from '../core/renderer';
+import {
+  manualRenderScale,
+  offeredRenderScales,
+  prefersMobilePresentation,
+  renderScaleFor,
+} from '../core/renderer';
 import type { SpawnRequest } from '../game/spawn';
 import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
 import { ALL_VARIANTS } from '../parts/registry';
@@ -42,32 +54,34 @@ function input(cls: string): HTMLInputElement {
 }
 
 /**
- * What a rung means, spelled out from the rung's own numbers.
+ * What a detail level means, spelled out from the rung's own numbers.
  *
  * Read out of `GRAPHICS_TIERS` rather than written here, so a label cannot describe a
  * tier the player is not getting. That drift is exactly how the old menu came to
  * promise a horizon change "applies on resume" while a light-source change silently
  * waited for the next load: two halves of one rung described in two places, and only
  * one of them true.
+ *
+ * PIXELS ARE DELIBERATELY ABSENT. The rung still carries a ceiling, but `Sharpness` is
+ * the control that names a resolution and quotes it as one — and two rows quoting the
+ * same number is the same drift in a new place: a manual sharpness makes the rung's
+ * ceiling irrelevant, and this line would go on claiming it.
  */
 function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): string {
   const tier = GRAPHICS_TIERS[quality];
   // Read as the presentation in front of the player will actually get it. A phone is
-  // handed different numbers for the pixel ceiling, the vista and the shadow pass, and a
+  // handed different numbers for the vista, the shadow pass and the light slots, and a
   // label quoting the desktop column at a phone would be describing a rung nobody is on.
   const vista = mobilePresentation ? GRAPHICS_TIERS[tier.mobileVista] : tier;
-  const pixels = mobilePresentation ? tier.mobileMaxPixels : tier.maxPixels;
   const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
   const points = mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
-  const mpx = (value: number): string => `${(value / 1_000_000).toFixed(1)} Mpx`;
   const horizon =
     vista.horizonM >= 1000 ? `${Math.round(vista.horizonM / 1000)} km` : `${vista.horizonM} m`;
   return (
-    `${mpx(pixels)} max, ${horizon} horizon. ` +
-    `${shadows ? 'Sun shadows.' : 'No sun shadows.'} ` +
-    `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}, ` +
-    `${spots + points} light sources shaded per lit pixel. ` +
+    `${horizon} of desert, ${shadows ? 'sun shadows' : 'no sun shadows'}, ` +
+    `${spots + points} lights shaded on every lit pixel. ` +
+    `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
     'The light count is compiled into the world, so it changes on the next load.'
   );
 }
@@ -111,7 +125,13 @@ const ICONS: Record<string, readonly string[]> = {
   gfx1: ['M5 18v-3'],
   gfx2: ['M5 18v-3M12 18v-7'],
   gfx3: ['M5 18v-3M12 18v-7M19 18v-11'],
-  ink: ['M4 20l4-1L19 8l-3-3L5 16z', 'M14 7l3 3', 'M8 19l-3-3'],
+  /**
+   * A framed grid, for a control whose axis is PIXELS rather than quality: the render
+   * scale row is the one place in this menu where the player is naming a resolution.
+   */
+  pixels: ['M4 5h16v14H4z', 'M4 12h16M12 5v14'],
+  /** A view cone from the eye, for the field of view. */
+  fov: ['M5 12l15-7', 'M5 12l15 7', 'M5 12h5'],
   horizon1: ['M3 16h18'],
   horizon2: ['M3 16h18M6 12h12'],
   horizon3: ['M3 16h18M6 12h12M9 8h6'],
@@ -217,6 +237,23 @@ export interface PauseHooks {
   applySettings: (next: Settings) => void;
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
+  /**
+   * The canvas CSS size the resolution policy is resolved against.
+   *
+   * Not `window.innerWidth`: cinema mode shortens the CANVAS and not the window, so the
+   * two disagree by exactly 180 pixels while it is on — and a render-scale row that
+   * quotes a resolution the game is not rendering is the same drift this control exists
+   * to end.
+   */
+  viewport: () => { readonly cssWidth: number; readonly cssHeight: number };
+  /**
+   * Forget the recorded rung verdict and measure the machine again on the next launch.
+   *
+   * It reloads: the measurement needs the loading cover, thirty discarded frames and a
+   * settle of up to twenty seconds, none of which can happen behind a pause overlay
+   * with a car parked in the road.
+   */
+  remeasureGraphics: () => void;
   /**
    * Frame cost breakdown, as preformatted text.
    *
@@ -479,9 +516,11 @@ export class MainMenu {
         radioVolume: base.radioVolume,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
+        graphicsQualitySource: base.graphicsQualitySource,
+        renderScale: base.renderScale,
         msaa: base.msaa,
         frameRateLimit: base.frameRateLimit,
-        inkStrength: base.inkStrength,
+        fieldOfView: base.fieldOfView,
         preciseSteering: base.preciseSteering,
       };
       const apply = (): void => {
@@ -494,9 +533,11 @@ export class MainMenu {
           radioVolume: settings.radioVolume,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
+          graphicsQualitySource: settings.graphicsQualitySource,
+          renderScale: settings.renderScale,
           msaa: settings.msaa,
           frameRateLimit: settings.frameRateLimit,
-          inkStrength: settings.inkStrength,
+          fieldOfView: settings.fieldOfView,
           preciseSteering: settings.preciseSteering,
         });
       };
@@ -819,17 +860,36 @@ export class MainMenu {
         interface SegOption {
           readonly label: string;
           readonly icon: string;
-          readonly hint: string;
+          /**
+           * The hint line, or a function for one that depends on state the row does not
+           * own: the render-scale row quotes the pixel count the CURRENT rung would give,
+           * and a string captured at build time would keep quoting the rung just left.
+           */
+          readonly hint: string | (() => string);
           readonly active: () => boolean;
           readonly pick: () => void;
         }
 
-        const segmented = (labelText: string, options: readonly SegOption[]): HTMLElement => {
+        /** Four call sites below need this resolution in lockstep; see `SegOption.hint`. */
+        const hintOf = (option: SegOption): string =>
+          typeof option.hint === 'string' ? option.hint : option.hint();
+
+        /**
+         * `head` is for state and actions that belong to THIS row rather than beside it:
+         * the detail row carries who picked it and the button that hands the choice back
+         * to the game, and a separate field for those was a row whose label had to name
+         * a concept ("rung source") the player had never met.
+         */
+        const segmented = (
+          labelText: string,
+          options: readonly SegOption[],
+          head: readonly HTMLElement[] = [],
+        ): HTMLElement => {
           const field = el('div', 'menu-field');
           const fieldHead = el('div', 'menu-field-head');
           const label = el('span', 'menu-label');
           label.textContent = labelText;
-          fieldHead.append(label);
+          fieldHead.append(label, ...head);
           const row = el('div', 'menu-seg');
           const buttons = options.map((option) => {
             const btn = button('menu-seg-btn', '');
@@ -839,8 +899,10 @@ export class MainMenu {
             row.appendChild(btn);
             return { option, btn };
           });
-          const selectedHint = (): string =>
-            options.find((o) => o.active())?.hint ?? options[0]?.hint ?? '';
+          const selectedHint = (): string => {
+            const selected = options.find((o) => o.active()) ?? options[0];
+            return selected === undefined ? '' : hintOf(selected);
+          };
           const paint = (): void => {
             for (const { option, btn } of buttons) {
               btn.classList.toggle('is-selected', option.active());
@@ -850,12 +912,12 @@ export class MainMenu {
             entry.btn.addEventListener('click', () => {
               entry.option.pick();
               paint();
-              setHint(entry.option.hint);
+              setHint(hintOf(entry.option));
             });
             // Hover and focus preview their own option's hint; leaving restores the
             // selected one, so the line always describes something real.
-            entry.btn.addEventListener('pointerenter', () => setHint(entry.option.hint));
-            entry.btn.addEventListener('focus', () => setHint(entry.option.hint));
+            entry.btn.addEventListener('pointerenter', () => setHint(hintOf(entry.option)));
+            entry.btn.addEventListener('focus', () => setHint(hintOf(entry.option)));
             entry.btn.addEventListener('blur', () => setHint(selectedHint()));
             entry.btn.addEventListener('keydown', (ev) => {
               // Left/right walks the row, the way a segmented control should: the
@@ -966,43 +1028,187 @@ export class MainMenu {
           );
         };
 
+        /**
+         * WHO PICKED THE DETAIL LEVEL, in the player's words.
+         *
+         * A measured verdict and a chosen preference used to look identical — the rung
+         * was a bare string and the only record of who set it was that stored
+         * preferences existed at all — so one unlucky measurement was permanent and
+         * nothing could ask again. These are the four answers to "picked by", which is
+         * the only form the distinction survives in: `measured` and `chosen` are exact
+         * words for the code and mean nothing to the person reading a menu.
+         */
+        const PICKED_BY: Record<GraphicsQualitySource, string> = {
+          default: 'not picked yet',
+          device: 'phone default',
+          measured: 'picked by the game',
+          chosen: 'picked by you',
+        };
+        const PICKED_NOTES: Record<GraphicsQualitySource, string> = {
+          default: 'Nobody has picked yet. The next launch times your graphics chip and picks.',
+          device: 'Phones start on the lightest level so they stay cool.',
+          measured:
+            'The game timed your graphics chip while the game was loading, and picked this. '
+            + 'It will not change it again.',
+          chosen: 'You picked this. Nothing will change it unless you do.',
+        };
+        const PICK_FOR_ME_HINT =
+          'Let the game time your graphics chip and pick the level again. Restarts the game, '
+          + 'because the timing happens behind the loading screen: it throws away the first '
+          + 'thirty frames and can take up to twenty seconds, with nobody driving.';
+
         const renderDisplay = (): void => {
           // Nothing here previews: the simulation and the renderer are both stopped
           // while the pause overlay is up, so graphics and horizon changes are only
           // seen after Resume. Saying so in the hint is honest; fading the panel to
           // show a frozen frame was not.
+          //
+          // `Sharpness` quotes PIXELS, not a percentage of something unstated, and reads
+          // them from the canvas rather than the window: cinema mode shortens the canvas
+          // by two 90-pixel bars and leaves the window alone, and a row that names a
+          // resolution the game is not rendering is the drift this control exists to end.
+          const viewport = hooks.viewport();
+          const cssPixels = viewport.cssWidth * viewport.cssHeight;
+          const pixelsAt = (ratio: number): string => {
+            const width = Math.floor(viewport.cssWidth * ratio);
+            const height = Math.floor(viewport.cssHeight * ratio);
+            return `${width}x${height}, ${((width * height) / 1_000_000).toFixed(2)} Mpx`;
+          };
+
+          // WHO PICKED IT rides in the detail row's own head, next to the thing it
+          // describes, with the one action on it — shaped like the key-bindings field,
+          // which is the same kind of row: a piece of state and a button that resets it.
+          // It was a row of its own, and a row needs a label: that label had to name a
+          // concept ("rung source") the player had never met and could not guess.
+          const pickedChip = el('output', 'menu-chip');
+          const paintSource = (): void => {
+            pickedChip.textContent = PICKED_BY[settings.graphicsQualitySource];
+          };
+          paintSource();
+          pickedChip.addEventListener('pointerenter', () =>
+            setHint(PICKED_NOTES[settings.graphicsQualitySource]),
+          );
+          const detailHead: HTMLElement[] = [pickedChip];
+          // A phone is never timed: it is put on the lightest level, which is the floor,
+          // and the only direction a measurement could move it is up — which is the heat
+          // that level exists to refuse. Offering the button there would promise a
+          // measurement the launch declines to make.
+          if (!mobilePresentation) {
+            const pickBtn = button('menu-button menu-reset', 'Let the game pick');
+            pickBtn.addEventListener('click', () => hooks.remeasureGraphics());
+            pickBtn.addEventListener('pointerenter', () => setHint(PICK_FOR_ME_HINT));
+            pickBtn.addEventListener('focus', () => setHint(PICK_FOR_ME_HINT));
+            detailHead.push(pickBtn);
+          }
+
           pane.append(
-            segmented('Graphics', [
+            // ONE LADDER, AND IT IS NOT ABOUT PIXELS ANY MORE. `Sharpness` below owns the
+            // resolution; what is left here is how much WORLD there is — how far the
+            // desert is drawn, whether the sun casts, how many lamps are shaded, how deep
+            // the sky goes. The labels used to name machines (`Phone`, `Desktop`,
+            // `Workstation`), which asked the player to classify his own computer and
+            // then guess which class he was in; the measurement answers that now, and
+            // says so in the head, so the levels can describe the picture instead.
+            segmented('Detail', [
               {
-                label: 'Phone',
+                label: 'Low',
                 icon: 'gfx1',
                 hint: describeTier('acceptable', mobilePresentation),
                 active: () => settings.graphicsQuality === 'acceptable',
                 pick: () => {
                   settings.graphicsQuality = 'acceptable';
+                  settings.graphicsQualitySource = 'chosen';
+                  paintSource();
                   apply();
                 },
               },
               {
-                label: 'Desktop',
+                label: 'Medium',
                 icon: 'gfx2',
                 hint: describeTier('standard', mobilePresentation),
                 active: () => settings.graphicsQuality === 'standard',
                 pick: () => {
                   settings.graphicsQuality = 'standard';
+                  settings.graphicsQualitySource = 'chosen';
+                  paintSource();
                   apply();
                 },
               },
               {
-                label: 'Workstation',
+                label: 'High',
                 icon: 'gfx3',
                 hint: describeTier('blessing', mobilePresentation),
                 active: () => settings.graphicsQuality === 'blessing',
                 pick: () => {
                   settings.graphicsQuality = 'blessing';
+                  settings.graphicsQualitySource = 'chosen';
+                  paintSource();
                   apply();
                 },
               },
+            ], detailHead),
+            // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points — on a 4K
+            // television 1.44, 3.69 and 12.96 megapixels — and a machine is not three
+            // machines; worse, `Auto` is a GPU timer query, so a browser without
+            // `EXT_disjoint_timer_query_webgl2` cannot move the scale at all and three
+            // points were the whole of the choice there. Both directions are offered:
+            // down for the machine between two levels, up for the one with headroom that
+            // does not want a 25 km vista and eighteen headlamps to go with it.
+            segmented('Sharpness', [
+              {
+                label: 'Auto',
+                icon: 'display',
+                hint: () =>
+                  'The game watches your graphics chip and picks, lowering this if the '
+                  + 'machine cannot keep up. Full sharpness here is '
+                  + `${pixelsAt(
+                    renderScaleFor(
+                      settings.graphicsQuality,
+                      cssPixels,
+                      window.devicePixelRatio,
+                      mobilePresentation,
+                    ),
+                  )}. `
+                  + 'Some browsers will not let the game time the chip — Safari, and most '
+                  + 'phones inside an app. There it cannot watch, so pick a number yourself.',
+                active: () => settings.renderScale === null,
+                pick: () => {
+                  settings.renderScale = null;
+                  apply();
+                },
+              },
+              // Built from the display, not from the list: the absolute bound flattens
+              // the top of the row on a large screen, and two buttons with one outcome
+              // is the menu promising pixels it will not draw.
+              ...offeredRenderScales(
+                cssPixels,
+                window.devicePixelRatio,
+                mobilePresentation,
+                settings.renderScale,
+              ).map((scale) => ({
+                label: `${Math.round(scale * 100)}%`,
+                icon: 'pixels',
+                hint: () =>
+                  `${Math.round(scale * 100)}% of this display: `
+                  + `${pixelsAt(
+                    manualRenderScale(
+                      cssPixels,
+                      window.devicePixelRatio,
+                      mobilePresentation,
+                      scale,
+                    ),
+                  )}. `
+                  + (scale > 1
+                    ? 'Drawn bigger than the screen and shrunk down, which smooths every '
+                      + 'edge. Capped at what the game will ever draw. '
+                    : '')
+                  + 'Fixed: the game will not lower it for you.',
+                active: () => settings.renderScale === scale,
+                pick: () => {
+                  settings.renderScale = scale;
+                  apply();
+                },
+              })),
             ]),
             // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
             // offered on both. On a phone it is a thermal control and has to be the
@@ -1040,11 +1246,11 @@ export class MainMenu {
                 },
               },
             ]),
-            segmented('MSAA', [
+            segmented('Smooth Edges', [
               {
                 label: 'On',
                 icon: 'gfx3',
-                hint: 'Four-sample smoothing for geometry edges. Expensive on integrated GPUs.',
+                hint: 'Softens the jagged steps along edges. Costs a lot on a weak chip.',
                 active: () => settings.msaa,
                 pick: () => {
                   settings.msaa = true;
@@ -1054,7 +1260,7 @@ export class MainMenu {
               {
                 label: 'Off',
                 icon: 'gfx1',
-                hint: 'No multisampling. Resolution scaling and post-process outlines still apply.',
+                hint: 'Jagged edges left as they are. Sharpness and the drawn outlines still apply.',
                 active: () => !settings.msaa,
                 pick: () => {
                   settings.msaa = false;
@@ -1063,16 +1269,19 @@ export class MainMenu {
               },
             ]),
             sliderField(
-              'Ink',
-              'ink',
-              'Amount of drawn outline in the landscape shader. Applies on resume.',
-              0,
+              'Field of View',
+              'fov',
+              'How wide a view the camera has. Only the up-and-down angle is set here — a '
+                + 'wider window then shows MORE desert to the sides rather than squeezing '
+                + 'it. 65 is the authored view; the binoculars and the speed widening both '
+                + 'follow whatever you set.',
+              FIELD_OF_VIEW_MIN,
+              FIELD_OF_VIEW_MAX,
               1,
-              0.05,
-              () => settings.inkStrength,
-              (value) => `${Math.round(value * 100)}%`,
+              () => settings.fieldOfView,
+              (value) => `${Math.round(value)}\u00b0`,
               (value) => {
-                settings.inkStrength = value;
+                settings.fieldOfView = value;
               },
             ),
           );

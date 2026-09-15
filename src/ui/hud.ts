@@ -2,6 +2,7 @@ import { itemLabel } from '../items/items';
 import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { WheelRideState } from '../vehicle/vehicle';
+import type { AutopilotMode } from '../vehicle/autopilot';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -51,6 +52,17 @@ export interface DrivingReadout {
    * greasy — and a keyboard driver has no hands on the wheel to feel any of it.
    */
   tyres: readonly WheelRideState[];
+  /**
+   * The autopilot mode driving this car, or null while the PLAYER is driving it.
+   *
+   * The instrument faces carry it. Who is steering is the single most important thing
+   * a driver can be unsure about — a black dash is the player's own car, and a coloured
+   * one is a car going somewhere without him — and the mode matters as much as the fact,
+   * because `frantic` and `sleeper` differ by roughly half the cornering speed. It is on
+   * the FACES rather than in a lamp for the same reason the steering strip exists: it is
+   * read from the corner of the eye, without looking for it.
+   */
+  autopilotMode: AutopilotMode | null;
 }
 
 /**
@@ -291,6 +303,11 @@ export class Hud {
   private fuelDeg = -1;
   private temperatureDeg = -1;
   private warningsSignature = '';
+  /**
+   * The mode the faces are currently painted for, so the class writes happen on a
+   * mode CHANGE rather than on every frame the autopilot is engaged.
+   */
+  private autopilotFaces: AutopilotMode | null = null;
   private engineOff = false;
   private radioText: string | null = null;
   private radioOffUntil = 0;
@@ -634,6 +651,18 @@ export class Hud {
     }
     this.setVisible(this.drivingCluster, true);
     this.setVisible(this.crosshairEl, false);
+
+    // WHOSE CAR THIS IS, said by the instrument faces: black while the player drives,
+    // the mode's own colour while the autopilot does. The ink follows the face — a
+    // near-white needle on cream or chartreuse is not a needle — so the tick, needle
+    // and track colours are custom properties the mode class rewrites.
+    const mode = readout.autopilotMode;
+    if (mode !== this.autopilotFaces) {
+      this.autopilotFaces = mode;
+      this.drivingCluster.classList.toggle('is-autopilot-sleeper', mode === 'sleeper');
+      this.drivingCluster.classList.toggle('is-autopilot-hurried', mode === 'hurried');
+      this.drivingCluster.classList.toggle('is-autopilot-frantic', mode === 'frantic');
+    }
 
     this.tachDeg = this.updateMainNeedle(
       readout.rpm,

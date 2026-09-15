@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { AdaptiveResolutionController } from './adaptivequality';
 import {
+  DEFAULT_FIELD_OF_VIEW,
   DEFAULT_INK_STRENGTH,
   GRAPHICS_TIERS,
+  RENDER_SCALES,
   shadowsFor,
   type GraphicsQuality,
+  type RenderScale,
+  type RenderScaleFraction,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -57,18 +61,6 @@ export function farPlaneForViewDistance(metres: number): number {
  * buffer starts to z-fight on the panels, rather than sitting on that bound.
  */
 const MAX_DEPTH_RATIO = 160000;
-
-/**
- * Resting vertical field of view, degrees, for every camera mode — on foot and in
- * the car alike. 65 matches The Long Drive, and it matters more than it sounds: FOV
- * sets the apparent scale of the whole world, so a couple of degrees changes how big
- * the car feels and how fast the road appears to move.
- *
- * `Cameras` owns the speed-scaled widening on top of this; this is the value every
- * mode settles back to, and it lives here so the initial camera and the camera rig
- * cannot drift apart the way a duplicated literal did.
- */
-export const CAMERA_BASE_FOV = 65;
 
 /**
  * A DISPLAY can never ask for more pixels than the rung allows, and that is the whole
@@ -129,6 +121,65 @@ export function minimumScaleFor(
   const floor = mobilePresentation ? tier.mobileMinPixels : tier.minPixels;
   const base = cssPixels * devicePixelRatio * devicePixelRatio;
   return Math.min(1, Math.sqrt(floor / Math.max(1, base)));
+}
+
+/**
+ * The drawing-buffer scale a player's explicit render-scale choice asks for.
+ *
+ * A fraction of the DISPLAY, not of the rung. `renderScaleFor` above is a rung spending
+ * its own budget; this is a player refusing that budget in either direction — down,
+ * because three rungs on a 4K television are 1.44, 3.69 and 12.96 megapixels and a
+ * machine is not three machines, and up, because supersampling was reachable only by
+ * also buying a 25 km vista and eighteen headlamps. The DPR cap still applies before
+ * the fraction, because past 2 it is not sharpness, it is arithmetic.
+ *
+ * The one thing it will not be is unbounded. The top rung's ceiling is the most this
+ * game ever draws on purpose, so it bounds a manual choice too: without it, 150% on a
+ * retina laptop asks for 20 megapixels, and a player who cannot reach ten frames a
+ * second cannot reach the menu that would undo it either.
+ */
+export function manualRenderScale(
+  cssPixels: number,
+  devicePixelRatio: number,
+  mobilePresentation: boolean,
+  fraction: number,
+): number {
+  const top = GRAPHICS_TIERS.blessing;
+  const ceiling = mobilePresentation ? top.mobileMaxPixels : top.maxPixels;
+  return Math.min(
+    Math.min(devicePixelRatio, MAX_PIXEL_RATIO) * fraction,
+    Math.sqrt(ceiling / Math.max(1, cssPixels)),
+  );
+}
+
+/**
+ * The offered fractions that actually differ on THIS display, plus whichever one the
+ * player is already on.
+ *
+ * The bound in `manualRenderScale` is absolute, so it flattens the top of the row on a
+ * large display: on a 4K television 125% and 150% both resolve to the top rung's
+ * ceiling, and on a phone every choice from 100% up does — three buttons with one
+ * outcome, which is a menu describing a resolution it cannot deliver. The row is built
+ * from the display instead of from the list.
+ *
+ * `current` is retained whatever it resolves to, because a player who carried a stored
+ * 150% to a 4K television must still see which button he is on.
+ */
+export function offeredRenderScales(
+  cssPixels: number,
+  devicePixelRatio: number,
+  mobilePresentation: boolean,
+  current: RenderScale = null,
+): readonly RenderScaleFraction[] {
+  const offered: RenderScaleFraction[] = [];
+  let previous = 0;
+  for (const fraction of RENDER_SCALES) {
+    const ratio = manualRenderScale(cssPixels, devicePixelRatio, mobilePresentation, fraction);
+    if (ratio <= previous && fraction !== current) continue;
+    offered.push(fraction);
+    previous = Math.max(previous, ratio);
+  }
+  return offered;
 }
 /**
  * Four samples was the only useful multisampling level in measurement: 2x retained
@@ -852,6 +903,13 @@ export class Renderer {
     msaa = true,
     inkStrength = DEFAULT_INK_STRENGTH,
     private readonly mobilePresentation = prefersMobilePresentation(),
+    /**
+     * The player's fixed drawing-buffer fraction, or null for the rung's own budget
+     * adapted by measurement. While it is set the controller is pinned: a named
+     * resolution that still drifts is not a named resolution.
+     */
+    private renderScale: RenderScale = null,
+    fieldOfView = DEFAULT_FIELD_OF_VIEW,
   ) {
     this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
@@ -884,6 +942,7 @@ export class Renderer {
       this.timerQueryExt = null;
     }
     this.basePixelRatio = this.pixelRatioFor(quality);
+    this.adaptiveResolution.setPinned(renderScale !== null);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
@@ -905,7 +964,7 @@ export class Renderer {
     const viewportWidth = Math.max(1, canvas.clientWidth);
     const viewportHeight = Math.max(1, canvas.clientHeight);
     this.camera = new THREE.PerspectiveCamera(
-      CAMERA_BASE_FOV,
+      fieldOfView,
       viewportWidth / viewportHeight,
       CAMERA_NEAR,
       CAMERA_FAR,
@@ -949,7 +1008,7 @@ export class Renderer {
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
-        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(CAMERA_BASE_FOV) / 2) },
+        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -1086,14 +1145,22 @@ export class Renderer {
     }
   }
 
+  /**
+   * The drawing-buffer ratio this display gets before adaptation: the rung's budget,
+   * or the player's fraction when he has named one.
+   */
   private pixelRatioFor(quality: GraphicsQuality): number {
     const canvas = this.renderer.domElement;
-    return renderScaleFor(
-      quality,
-      canvas.clientWidth * canvas.clientHeight,
-      window.devicePixelRatio,
-      this.mobilePresentation,
-    );
+    const cssPixels = canvas.clientWidth * canvas.clientHeight;
+    if (this.renderScale !== null) {
+      return manualRenderScale(
+        cssPixels,
+        window.devicePixelRatio,
+        this.mobilePresentation,
+        this.renderScale,
+      );
+    }
+    return renderScaleFor(quality, cssPixels, window.devicePixelRatio, this.mobilePresentation);
   }
 
   /**
@@ -1327,6 +1394,19 @@ export class Renderer {
     return this.adaptiveResolution.scale;
   }
 
+  /**
+   * Pixels the scene is actually shaded at, both passes.
+   *
+   * A COUNT rather than a percentage, because a percentage needs a stated base and the
+   * base moved: with a manual render scale the resolution is a fraction of the display
+   * and `resolutionScale` stays at 1, so the old "% of ceiling" readout would report
+   * full resolution at every setting the player chose.
+   */
+  get renderedPixels(): number {
+    this.renderer.getDrawingBufferSize(this._drawSize);
+    return this._drawSize.x * this._drawSize.y;
+  }
+
   /** Whether this context can time the GPU. Without it the scale never moves. */
   get measuresGpuTime(): boolean {
     return this.timerQueryExt !== null;
@@ -1484,6 +1564,41 @@ export class Renderer {
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
+  }
+
+  /**
+   * Installs the player's render-scale choice, or returns the rung to automatic.
+   *
+   * The controller is RESET either way rather than kept: its cost slope and its live
+   * average were measured at a different pixel count, and coming back to `Auto` holding
+   * a reduction it earned before the change would hand the player a resolution he
+   * cannot account for.
+   */
+  setRenderScale(scale: RenderScale): void {
+    if (scale === this.renderScale) return;
+    this.renderScale = scale;
+    this.adaptiveResolution.setPinned(scale !== null);
+    this.disposeGpuQueries();
+    this.basePixelRatio = this.pixelRatioFor(this.quality);
+    this.updateAdaptiveFloor();
+    this.renderer.setPixelRatio(this.basePixelRatio);
+    this.resizeHazeTarget();
+  }
+
+  /**
+   * The CSS viewport the resolution policy is resolved against, for the menu.
+   *
+   * The menu cannot read `window.innerWidth`: cinema mode shortens the CANVAS, not the
+   * window, so the two disagree by 180 pixels exactly while it is on — and a readout
+   * that claims a resolution the game is not rendering is the drift this whole control
+   * exists to remove.
+   */
+  viewport(): { readonly cssWidth: number; readonly cssHeight: number } {
+    const canvas = this.renderer.domElement;
+    return {
+      cssWidth: Math.max(1, canvas.clientWidth),
+      cssHeight: Math.max(1, canvas.clientHeight),
+    };
   }
 
   /** Changes scene-target multisampling without changing resolution quality. */

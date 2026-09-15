@@ -303,6 +303,41 @@ function run(): void {
       `scale ${settled.toFixed(3)}`,
     );
   }
+
+  // --- a pinned scale is the player's, and stays his -------------------------
+  //
+  // `Auto` is this controller; a named render scale is the other answer, and the
+  // promise it makes is that the number does not move. It must still MEASURE, because
+  // the development frame report reads the average to say whether a hot frame is
+  // waiting on the GPU or the CPU — on a phone there is no other way to tell.
+  {
+    const pinned = new AdaptiveResolutionController('standard');
+    pinned.setPinned(true);
+    const overloaded = drive(pinned, SLOW_MS * 4, true, true, 3_000_000);
+    check(
+      'a pinned scale does not move under sustained overload',
+      overloaded.action === null && pinned.scale === 1,
+      `scale ${pinned.scale}`,
+    );
+    check(
+      'a pinned controller still measures the frame',
+      pinned.averageGpuMs !== null && pinned.averageGpuMs > SLOW_MS,
+      `average ${pinned.averageGpuMs?.toFixed(1) ?? 'none'} ms`,
+    );
+
+    // And returning to Auto starts from full resolution with nothing remembered: the
+    // slope and the average were measured at a pixel count that no longer applies.
+    const released = new AdaptiveResolutionController('standard');
+    drive(released, SLOW_MS, true, true, 4_000_000);
+    const reduced = released.scale;
+    released.setPinned(true);
+    released.setPinned(false);
+    check(
+      'leaving a pinned scale returns to full resolution, not to the old reduction',
+      reduced < 1 && released.scale === 1 && released.averageGpuMs === null,
+      `was ${reduced.toFixed(3)}, now ${released.scale}`,
+    );
+  }
 }
 
 run();
