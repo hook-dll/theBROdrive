@@ -1,5 +1,248 @@
 # Changelog
 
+## 0.18.0 — 2026-09-15
+
+### Added
+
+- THE VARIETY DIRECTOR: THE VIEW'S CADENCE IS A THING NOW, NOT AN EMERGENT PROPERTY OF
+  ELEVEN GENERATORS THAT NEVER MET. Measured end to end, the only thing that changed
+  inside three kilometres of this road was a POI sign: surfaces turn over every 6.2 km,
+  monuments ring at exactly 20, mirages average 43, and the horizon — the largest part of
+  the screen — held still for fifty kilometres at a time. Adding more generators with more
+  private cadences is how that was built, so the schedule is its own module.
+  `src/world/director.ts` is three CHANNELS, one per depth the eye actually reads — the
+  horizon, the verge rushing past, the surface under the wheels — each a lattice of fixed
+  windows with one event per window, jittered inside it, never repeating the kind before
+  it. The window guarantees the cadence and the jitter keeps the guarantee from sounding
+  like the monument bell. The floor is arithmetic rather than hope: the surface channel
+  alone fires every 1500 m with its centre inside the middle 40% of its window, so no two
+  events can be further apart than 2100 m, and the other two channels only narrow it.
+  `tools/variety-timeline.ts` measures the real distribution and fails on the bound —
+  across four seeds and 400 km the median gap is 0.76 km, the 95th percentile 1.64 km and
+  the worst 2.03 km. Every kind is a pure function of seed and arclength, so a chunk that
+  unloads and rebuilds schedules itself identically.
+- THE ROAD RUNS THROUGH CUTTINGS AND ALONG EMBANKMENTS NOW, AND THE HORIZON HAS A
+  SILHOUETTE. Three of the director's horizon events — a prism cut, a bank, a belt of
+  rock shelves — and the one thing they all avoid is the thing that made them hard: NOT
+  ONE OF THEM MOVES THE ROAD. The spine's elevation is the reference that traffic, the
+  autopilot, the poles, the POIs and the ribbon itself are all built from, so a cut is the
+  GROUND BESIDE the road climbing to 3-7 m over 27-31 m of lateral and falling back into
+  the open desert by 62 m, and an embankment is the mirror. The asphalt edge does not move
+  by so much as a millimetre (measured: 0.0000 m) and the first four metres of shoulder
+  keep their old ground exactly, so the 3.1 m poles, the 3.5 m verge and the birds sitting
+  on it stand on what they stood on. The landform rides in the terrain's DETAIL layer
+  rather than its base field, and that was decided by measurement, not taste: the field
+  lattice's rings are 8.3 m apart at 25 m out and 12 m from 43 m, so a 7 m crest chorded
+  across them misses its own surface by half a metre, while the detail layer is resampled
+  at 2.67 m. An outcrop belt is the same mechanism pulled the other way — the rock
+  threshold drops locally and the shelves crowd the roadside instead of sitting out in the
+  open: 101 belts over 400 km across four seeds, every one of them standing rock at least
+  1.8 m up.
+- CLOUDS NOW CAST SHADOWS ON THE DESERT, AND SOMETHING IS ALWAYS HAPPENING ON THE SKYLINE.
+  The largest surface on screen was lit identically for fifty kilometres at a time, and
+  the fix is one shared shader injection on the ground materials — two octaves of wrapped
+  value noise in world space, multiplying the outgoing light before fog and tone mapping.
+  It chains onto whatever `onBeforeCompile` the material already carries (the comic stack
+  on the terrain and the vista, the ground-spotlight stack on the road), is idempotent
+  through a `WeakSet`, and costs nothing at night or on the cheap graphics tier, where the
+  second octave is dropped. The lattice is exactly periodic and the uniform carries the
+  origin reduced modulo that period, so a patch does not jump when the floating origin
+  rebases — and it drifts on the render loop's own `frameDt` rather than wall-clock, so a
+  paused game's clouds stop. Measured: 31% of the ground in shade, a mean shaded run of
+  509 m, 85 s for a patch to pass, darkening up to 32%, and a 10-90% PENUMBRA of 170 m
+  median against a floor of 100 m that the tool enforces. That last number is the one the
+  first version got wrong: its edge crossed in 75 m, which on a 400 m patch reads as a
+  painted grey blob rather than as weather, so the edge band was widened from 0.20 of the
+  field to 0.40 about the same centre — coverage and the deep end unchanged, the
+  transition a little over twice as long — and the detail octave slowed and quieted so
+  the outline is irregular without being scalloped. THE FIELD IS EVALUATED PER VERTEX,
+  and that is not an optimisation but the fix for the only real regression this release
+  has: the first version hashed per fragment, and on a standard-tier desktop that cost
+  34 ms of GPU a frame — 87 frames a second to 36, measured by turning it off with a
+  temporary switch. Confirmed fixed on the same machine at the same spot: 51.64 ms and
+  35.6 frames a second before, 5.76 ms and 120 after, which is the panel's own refresh
+  rate and indistinguishable from the effect being absent. The arithmetic said one
+  millisecond, and the arithmetic was not
+  wrong about the noise; it was wrong about the shader, which already carries twelve
+  light slots, the comic stack and eight shadow taps, and spilled its registers the
+  moment a sampler's worth of temporaries were added to it. So the noise moved up a
+  stage and the fragment keeps one multiply by an interpolated float — which is exact
+  rather than approximate, because a patch is 420 m across, its penumbra is 170 m, and
+  the meshes under it are metre-scale. At night the vertex stage skips the field
+  entirely. `tools/sky-variety.ts` now fails if the hashing ever moves back down: the
+  cost of this effect is a property of the picture, and it is worth a check that
+  remembers why. And where the director schedules a `'weather'` event, something far off
+  is doing something: a virga shaft that stops 300 m above the ground, a 1.6 km dust wall
+  coloured from the region's own palette, or a leaning
+  smoke column, 600-1800 m off the road on the event's side. The tool caught a real bug
+  here rather than in the desert: the dissolve that keeps a phenomenon from being reached
+  assumed something 600 m off the road at one arclength stays 600 m from the road, and the
+  road turns back — the measured worst approach is 477 m, so phenomena were dissolving
+  while the player drove past looking straight at them.
+- THE SHOULDER HAS THINGS ON IT: REFLECTOR POSTS, DIRT TRACKS AND POLES THAT HAVE BEEN
+  THROUGH SOMETHING. Reflector posts run in 0.4-1.2 km stretches, 1.2 m outside the paint,
+  stations chained at 40-60 m gaps from the run's own start so the chunk holding the middle
+  of a run agrees with the chunk that held its beginning; the chip is an emissive material
+  driven on the same dusk ramp the lamps use, not a point light, because the light budget
+  is finite. A post is also SOLID now, and comes apart: it carries a cuboid collider inside
+  the physics window and only there, so a 40-60 m spacing puts eight to twenty-four of them
+  in the world against the hundreds the scatter carries over the same kilometre — and it is
+  registered with the debris field as breakable, so clipping one at ninety takes the post to
+  pieces rather than stopping two tonnes dead. That is why the blade and its reflector are
+  two material groups of ONE geometry: `BreakableProp` blanks one instance, and two meshes
+  would have left a glowing chip hanging in the air at knee height, at night, which is
+  exactly when the run matters. Measured in the running game: three posts down the shoulder
+  in five seconds at 90 km/h, each costing about 5 km/h — a knock you feel, not a wall —
+  and a post already down is not rebuilt from a save. A dirt track leaves the shoulder for
+  60-150 m of desert with a graded strip and two ruts at a 1.6 m gauge, integrated in the
+  road frame so that never returning to the asphalt is structural rather than measured,
+  laid on `drawnGroundY` with a 3 cm lift and the decal recipe the tyre tracks already use.
+  And the poles occasionally have something wrong: a mast down in the sand with its span
+  gone slack, a tarp lashed round one, a nest on the crossarm, a transformer can bolted on
+  — an override INSIDE the existing pole pipeline, so no pole moves and no index shifts. An
+  era band with no poles
+  at all (about one in four) has nothing to override, and the first version simply showed
+  nothing there, which would have made a quarter of the verge channel's pole events
+  invisible: it now leaves a derelict instead — a mast of the neighbouring era's pattern
+  down in the sand with a snapped stump at its butt and a second stump 40 m on. Six
+  thousand kilometres of census: 602 pole events, 602 of them visible.
+- THE ASPHALT REMEMBERS THINGS: PATCHING, RUBBER, PAINT THAT CHANGES ITS MIND, AND SAND
+  REACHING ACROSS A LANE. Bitumen repairs (irregular blobs, crack-following fills, squared
+  cut-and-fill), rubber (a lock-up pair in a wheel path, a turn-around arc, a burnout
+  scar — measured: 83-100% of the ink in wheel paths, none on the shoulder), markings that
+  change over a stretch (double solid, no paint at all, an edge rumble line) and sand
+  tongues that spike across a lane from the windward shoulder rather than creeping evenly
+  in from the edge. All four are painted into the ribbon's existing per-vertex colour
+  pipeline and strictly additive: across 31 917 rows of road outside every event the vertex
+  colours are identical to the bit. The marking change moves a hard edge rather than
+  fading opacity — paint ends, it does not dissolve — and the tool measures that the
+  boundary happens inside 96 m, which a 40 m fade could not do. The ribbon's vertex count,
+  column layout and index buffer are untouched, because the road collider is indexed from
+  the same rows and that is the one regression here that would have been silent.
+
+### Changed
+
+- BIRDS SIT ON THE SHOULDER, NOT ON THE ROAD. Perching on the asphalt was a decision
+  made when the road was one fixed narrow ribbon and the only surface whose height was
+  known at an arbitrary point was the road's own — a flock scattered from the crown
+  outwards, which is neither what a roadside bird does nor what a driver wants in his
+  lane. The offset is measured OUTWARD FROM THE EDGE now, 0.7 to 2.4 m of clear verge at
+  whatever width the road has at that arclength, so a flock strung across a widening
+  keeps its clearance from the paint instead of drifting onto it; the band stops short of
+  the 3.1 m poles and of the 6.1 m desert scatter, so nobody stands inside anything. The
+  side is still the group's own coin, the take-off is unchanged — away from the car, and
+  now that is away from the road as well. `tools/bird-perch.ts` checks the band it landed
+  on rather than the asphalt it used to: across four seeds, 42 standing sightings, none
+  off the verge and none hovering.
+
+### Fixed
+
+- WEATHER NO LONGER STANDS OVER THE ROAD. Reported from play as a yellow wall above the
+  asphalt, and it was the side edge of a 1.6 km haboob front with the camera inside it.
+  Three numbers met: the front is faced from the bearing it becomes clear on, so its span
+  runs ACROSS the road — at the minimum 600 m lateral the across-component is 0.83, which
+  on 800 m of half width reaches 664 m, past the carriageway and out the other side — the
+  proximity dissolve measured the ANCHOR rather than the sheets, so a camera a few metres
+  from a wall read 600 m of clearance and stayed at full opacity, and the census in
+  `tools/sky-variety.ts` measured that same anchor, which is why the class was never
+  caught. The dissolve now resolves the camera offset onto the span axis and measures the
+  nearest point of the footprint; the facing is chosen on clearance measured along the
+  road over the whole reach the fade keeps a phenomenon visible across, with the authored
+  bearing kept only as a tie-break; and what still does not fit the room the road leaves
+  is drawn smaller rather than drawn across the asphalt. Measured over 1600 km and four
+  seeds: nearest footprint-to-road distance was 2 m, now 371 m against a 320 m floor. It
+  is also cheaper — a full-screen transparent sheet at full opacity was pure overdraw.
+- THE AUTOPILOT NOW STEERS, BRAKES AND PRICES THE SAME MANOEUVRE. Four separate
+  disagreements between the line the car took and the numbers it reasoned with, each
+  measured before it was touched. "May not cross the crown" was a price of Infinity
+  rather than a permission, and a feasible corridor beats any price, so a forbidden
+  crossing won and put the commanded line 8.75 m out on the far shoulder; the rear
+  safety check removed the unsafe lane's exact centre from the candidates while the
+  0.25 m lattice still offered every line beside it, so a driver at 17 m/s planned to
+  move in front of a car closing at 35 m/s; a latched detour could keep a line with a
+  static prop 25 m down it while the speed plan used the metrics of the clear line the
+  search had just proposed instead; and the emergency reflex took its distance from
+  the nearest of every probe and its closing rate from a tracker fed by all of them,
+  so a leader 10 m ahead in the lane being left hid a body closing at 40 m/s in the
+  lane actually occupied, and the pedal never went past half. Permission is now a hard
+  constraint applied to every candidate and to the whole path toward it, admissibility
+  is reported separately from feasibility, the executable line is evaluated by the same
+  solver that searched, and each reflex pairs a gap with that same target's own speed.
+- ONE SET OF TYRES CANNOT BRAKE AND CORNER AT ONCE, AND THE GRAVEL BOUND WAS THE PROOF.
+  Frantic's loose-surface pace was held at 0.7 of the surface's grip ratio because that
+  is the fraction it was measured running off the road at — while braking at full pedal
+  INSIDE a gravel bend — so every straight metre of a loose district paid for a mistake
+  that only happens in a corner, and the three characters became three fractions of one
+  low number (frantic 63 km/h against sleeper 55). The pedal owes that debt now: the
+  share of the cornering budget the car is already using, from its own yaw rate against
+  the tyres' capacity rather than against the reserved plan, is share the ordinary brake
+  does not get. Frantic spends the whole ratio again — 89 km/h against sleeper's 55 on
+  the same district, with 1.62 m of worst lateral inside a 2.90 m half width — and the
+  brakes that exist to prevent a departure keep their full pedal.
+- A CAR THAT HAS BRAKED FOR A ROCK FROM 34 m NO LONGER ARRIVES AT IT DOING 5 m/s. The
+  plan believed the 4.0 m/s² its capped pedal was supposed to deliver and the car
+  delivered 2.46, because the estimate was nominal grip and nominal load; hazards were
+  also only collected over a reach sized on that same optimistic figure, so the rock
+  came into view 49 m out when stopping needed 51. Sensing reach, brake lead and the
+  target curve now all size on `Vehicle.measuredBrakeDecel` — the authority a floored
+  pedal actually had on the last step, over the low-passed wheel loads and each wheel's
+  own surface. And a prop the bumper is already against stops being invisible: the nose
+  scan counted only dynamic bodies, so the planner reported a clear road and applied
+  throttle into a boulder it was touching. Measured on the boxed-in bench: was one
+  contact at 4.14 m/s, now none, with 2.59 m of clearance to a 1.2 m rock.
+- TRAFFIC KEEPS ITS OWN CLOCK, ITS OWN GROUND AND ITS OWN LANES. Ambient drivers decide
+  at 45 Hz inside a 60 Hz simulation, and the scheduler handed each driver the whole
+  accumulator while keeping part of it, so ten seconds of physics delivered 14.96 s of
+  controller time and every timer, distance and closing rate derived from it ran fast:
+  now 9700 calls with 4.4e-13 s of accumulated error. A car was kept alive 850 m ahead
+  while road collision reaches 400-600 m, so support is checked every step against the
+  body's own radius and one step of travel. The neighbour field turned a car 1 m behind
+  into one 1.3 m ahead by subtracting a half length, which removed it from the rear
+  safety query exactly when the bodies overlapped; overlap is now zero and visible to
+  both queries. Reverse-yield and spawn separation both compared nominal lane indices,
+  which go stale through a taper: a spawn landed 26.4 m in front of a live car doing
+  21 m/s in the same physical lane, which then braked fully for 22 m and hit it. Both
+  now use measured lateral overlap, and a spawn ahead must clear the follower's own
+  stopping distance.
+- Skip the forward point-light loop body only for an exactly black light uniform.
+  All light slots, ranges, shadows, MSAA and resolution remain unchanged; the shared
+  shader installation also covers comic ground, loaded vehicles and prop galleries.
+  On a fixed 1.80 Mpx blessing scene on M2 Pro, paired browser measurements reduced
+  median draw-and-GPU-completion time from 12.6-13.0 ms to 10.3 ms in daylight.
+  Night timings overlapped; no universal FPS multiplier is claimed. Day, dusk and
+  visibly lit night/torch comparisons changed at most 19 scene colour components
+  out of 7.2 million by one byte; the final post-process differed by at most two.
+- Road projection now evaluates only squared XZ distance during its search, leaving
+  the final road frame and the search order/precision unchanged. In-browser 10,000
+  hinted projections took 16.2-16.5 ms instead of 66.9-68.3 ms. `spine-verify` checks
+  exact equivalence with the old full-sample search, including ties, candidate order,
+  checkpoint boundaries and hintless queries: 2,102 probes per seed on 1337 and 42.
+  Vista ground normalisation also avoids general-purpose `hypot` rescaling for its
+  bounded interpolated unit normals; update frequency and geometry are unchanged.
+- The frame report no longer charges zero-tick frames for a simulation tick. Every
+  section includes absent frames in its mean and p95, including frames before that
+  section first appears. A controlled 120 FPS / 60 Hz window now reports 1 ms of
+  simulation per rendered frame for 2 ms ticks, rather than 2 ms. GPU duration and
+  presentation interval are still shown, but their different averaging windows no
+  longer produce an unsupported bottleneck or spare-time verdict.
+- THE BLESSING RUNG SAT ON THE WRONG SIDE OF A MEASURED CLIFF, AND THAT IS WHY THE FASTEST
+  MACHINE RAN SLOWEST. A machine that held 120 frames a second on `standard` fell to 22-26
+  on `blessing`, with the profiler reporting idle CPU, an idle machine, and a frame that
+  was simply waiting — and every theory that fit the settings (pixels, supersampling, MSAA,
+  the horizon) died against the next measurement. The cost is the LIT-FRAGMENT shader, and
+  it is not linear in the number of lights: hiding the light slots outright took the same
+  scene from 78 ms of GPU to 4, and stepping the slot count one configuration at a time
+  gave 11 slots 6.5 ms, 13 slots 7.5, 15 slots 10.0, 19 slots 17.9, 25-26 slots 53-78 — at
+  2 megapixels, on an M2 Pro. The rung asked for 18 spots and 8 points and so sat past the
+  edge, where each further light costs several milliseconds instead of a fifth of one;
+  `standard`'s twelve sat just under it. Spots are also the dearer half — twelve spots
+  alone cost 13.2 ms where twelve points cost 6.0 — so the cut came out of the spots:
+  `blessing` is now 8 spots and 6 points, which keeps four cars' beams and every lamp pool
+  the rung had, and measured 8.9 ms in the running game. Everything else the rung was
+  chosen for — the supersampling, the 25 km horizon, the deep sky — is untouched. On a
+  discrete desktop GPU the old figure was affordable and this is a small loss; on Apple
+  silicon it was the difference between driving and not.
+
 ## 0.17.0 — 2026-09-15
 
 ### Added
