@@ -141,6 +141,8 @@ const ICONS: Record<string, readonly string[]> = {
   midnight: ['M15 3a8 8 0 1 0 5.6 9.6A6.4 6.4 0 0 1 15 3z'],
   clock: ['M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z', 'M12 7.5V12l3 2'],
   radio: ['M3 10h18v9H3z', 'M8 6.5l9-2.5', 'M7 14h4', 'M17 14h.01'],
+  /** A bouncing wave, for the Yaris-mode toggle. */
+  bounce: ['M3 18c2-8 4-8 6 0s4-8 6 0 4-8 6 0'],
 };
 
 /** One glyph, sized by CSS. Decorative: the control's own text is the label. */
@@ -522,6 +524,7 @@ export class MainMenu {
         frameRateLimit: base.frameRateLimit,
         fieldOfView: base.fieldOfView,
         preciseSteering: base.preciseSteering,
+        bouncyCars: base.bouncyCars,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -539,6 +542,7 @@ export class MainMenu {
           frameRateLimit: settings.frameRateLimit,
           fieldOfView: settings.fieldOfView,
           preciseSteering: settings.preciseSteering,
+          bouncyCars: settings.bouncyCars,
         });
       };
 
@@ -1021,6 +1025,28 @@ export class MainMenu {
                 active: () => settings.preciseSteering,
                 pick: () => {
                   settings.preciseSteering = true;
+                  apply();
+                },
+              },
+            ]),
+            segmented('Yaris mode', [
+              {
+                label: 'Off',
+                icon: 'drive',
+                hint: 'Cars sit still on their springs, same as any other drive.',
+                active: () => !settings.bouncyCars,
+                pick: () => {
+                  settings.bouncyCars = false;
+                  apply();
+                },
+              },
+              {
+                label: 'On',
+                icon: 'bounce',
+                hint: 'Every car on the road — yours and traffic — hops in place like the viral bouncing Yaris. Purely visual: handling, suspension and collisions are untouched.',
+                active: () => settings.bouncyCars,
+                pick: () => {
+                  settings.bouncyCars = true;
                   apply();
                 },
               },

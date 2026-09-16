@@ -428,6 +428,14 @@ export interface Settings {
    * is the familiar self-centering keyboard behavior.
    */
   preciseSteering: boolean;
+  /**
+   * Purely cosmetic joke toggle: every car — the one driven and every traffic
+   * car — hops in place like the viral "bouncing Yaris" clip. Applied only to
+   * the visual root in Vehicle.syncVisuals; the chassis body, its collider and
+   * the wheel suspension never move, so handling and physics are identical
+   * whether this is on or off. Off by default; nobody should be surprised by it.
+   */
+  bouncyCars: boolean;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
@@ -496,6 +504,8 @@ export const DEFAULT_SETTINGS: Settings = {
   fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
+  // Off by default; a joke should be opted into, not discovered mid-drive.
+  bouncyCars: false,
 };
 
 /**
@@ -615,6 +625,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
+    bouncyCars: obj.bouncyCars === true,
   };
 
   const rawBindings = obj.keyBindings;

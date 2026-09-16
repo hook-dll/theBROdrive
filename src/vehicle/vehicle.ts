@@ -18,6 +18,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
+import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import {
   DAY_LENGTH,
@@ -1443,6 +1444,48 @@ const IMPACT_UNEXPLAINED_FLOOR_MPS = 0.35;
 const TWO_PI = Math.PI * 2;
 
 /**
+ * `Settings.bouncyCars`: a purely cosmetic joke — the "bouncing Yaris" meme, a
+ * cartoon hop applied to the whole visual root (body, wheels, lights, stickers)
+ * after the physics pose is copied into it in `syncVisuals`. The chassis body,
+ * its collider and the ray-cast suspension never see this: it is drawn on top
+ * of the settled pose, so handling, contact patches and projected lights are
+ * exactly as if the toggle were off.
+ *
+ * One-sided (`Math.abs(Math.sin(...))`) rather than a plain sine: the resting
+ * pose IS the physics pose, so the hop only ever lifts the car above it and
+ * always returns to exactly zero, twice a cycle. A signed sine would either
+ * dip the wheels below the road surface on every trough or leave the car
+ * permanently floating above its resting height.
+ *
+ * The wheels hop with the body rather than staying planted: a raised body over
+ * grounded wheels would need the body drawn from a second local origin, and every
+ * sticker (parented to `rootGroup`, not to the body subtree — see main.ts) would
+ * visibly slide off its panel as the body moved out from under it. Bouncing the
+ * whole root avoids both for one extra Y write that the toggle already pays for.
+ */
+const BOUNCE_HOP_HZ = 2.4;
+/** Peak lift of a hop, metres. Cartoonish and unmissable; a car's own affair. */
+const BOUNCE_AMPLITUDE_METRES = 0.12;
+/**
+ * Body-only squash-and-stretch, synced to the same hop: the panel work at the heart
+ * of the meme, and cheap because it is one non-uniform `Object3D.scale` write on the
+ * body subtree alone — no extra geometry, shader or draw call, and the wheels are
+ * separate children of `rootGroup` so they stay round and never deform.
+ *
+ * Peaks at touchdown (`bounce01 === 0`) and relaxes to the stock shape at the top of
+ * the hop (`bounce01 === 1`): flatten on impact, spring back on the way up, exactly
+ * the read the clip has. Y compresses by up to this fraction; X/Z widen by half that,
+ * the standard volume-preserving approximation for a small squash.
+ *
+ * Pivots on the body subtree's OWN local origin, not the chassis origin — cheaper
+ * than computing a pivot, and correct here because `buildTemplate` (render/carmodel.ts)
+ * already recentres that origin to the body's own bounding box, itself built on the
+ * asset convention of an origin at ground level: squashing about it reads as the roof
+ * dropping toward the wheels, not as the whole car sinking through the road.
+ */
+const BOUNCE_SQUASH_MAX = 0.2;
+
+/**
  * Authored steering-wheel travel: 970 degrees lock-to-lock, or 485 degrees from
  * centre to either stop. Normalising by each model's tyre lock keeps the rim travel
  * identical across the catalogue despite their different steering geometries.
@@ -1976,6 +2019,18 @@ export class Vehicle implements Rebasable {
   private carriedMassKg = 0;
 
   private readonly rootGroup = new THREE.Group();
+  /** Per-car phase offset (turns) so traffic does not hop in unison; see `BOUNCE_HOP_HZ`. */
+  private readonly bouncePhase: number;
+  /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
+  private bodyGroup: THREE.Object3D | null = null;
+  /**
+   * `bodyGroup`'s scale AT REST, captured once in `buildVisuals`. `buildTemplate`
+   * (render/carmodel.ts) bakes each model's own unit-correction factor into this
+   * scale — for one catalogue car it is ~0.0107, not 1 — so the squash MUST multiply
+   * this rather than assign an absolute value: overwriting it with something near 1
+   * once inflated a body to roughly 100x its size instead of squashing it by 20%.
+   */
+  private readonly bodyRestScale = new THREE.Vector3(1, 1, 1);
 
   private wheels: WheelVisual[] = [];
   /** One spray report per wheel, written in place every fixed step. */
@@ -2279,6 +2334,7 @@ export class Vehicle implements Rebasable {
     this.measure = carModelMeasure(carState.modelId);
     this.axleGeometry = this.measureAxles();
     this.headlightMode = carState.headlightMode;
+    this.bouncePhase = hash01(...Array.from(carState.id, (c) => c.charCodeAt(0)));
 
     const half = this.measure.halfExtents;
     // Drag area is Cd·A, m². Authored where the real car's is known, because
@@ -4290,6 +4346,22 @@ export class Vehicle implements Rebasable {
     this.rootGroup.position.copy(this.pos);
     this.rootGroup.quaternion.copy(this.quat);
 
+    if (this.world.state.settings.bouncyCars) {
+      const turns = performance.now() * 0.001 * BOUNCE_HOP_HZ + this.bouncePhase;
+      const bounce01 = Math.abs(Math.sin(turns * Math.PI));
+      this.rootGroup.position.y += BOUNCE_AMPLITUDE_METRES * bounce01;
+      if (this.bodyGroup) {
+        const squash = BOUNCE_SQUASH_MAX * (1 - bounce01);
+        this.bodyGroup.scale.set(
+          this.bodyRestScale.x * (1 + squash * 0.5),
+          this.bodyRestScale.y * (1 - squash),
+          this.bodyRestScale.z * (1 + squash * 0.5),
+        );
+      }
+    } else if (this.bodyGroup) {
+      this.bodyGroup.scale.copy(this.bodyRestScale);
+    }
+
     this.applyRearLightState();
 
     // Wheels are chassis-local: suspension travel and spin are small, smooth and
@@ -5457,6 +5529,8 @@ export class Vehicle implements Rebasable {
   private buildVisuals(): void {
     const instance = createCarModel(this.model.id, this.car.id);
     this.rootGroup.add(instance.body);
+    this.bodyGroup = instance.body;
+    this.bodyRestScale.copy(instance.body.scale);
 
     // The body subtree is cloned per vehicle, so this node belongs to this car and
     // turning it cannot turn anybody else's wheel.
@@ -5713,6 +5787,8 @@ export class Vehicle implements Rebasable {
     for (const material of this.leftBlinkerMaterials) material.dispose();
     for (const material of this.rightBlinkerMaterials) material.dispose();
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
+    this.bodyGroup = null;
+    this.bodyRestScale.set(1, 1, 1);
     this.wheelMeshes.clear();
     this.steeringWheel = null;
     this.steeringWheelRest = 0;
