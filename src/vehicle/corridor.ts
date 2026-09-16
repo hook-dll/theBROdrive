@@ -183,9 +183,10 @@ export interface CorridorPlan {
    */
   readonly waitingForOncoming: boolean;
   /**
-   * A line across the crown was refused by the give-way gate this step. The only thing
-   * that ends a crossing already in progress: a re-priced plan is not a reason to
-   * swerve back, a car coming the other way is.
+   * A FRESH line across the crown was refused by the give-way gate this step because
+   * the room did not clear `PASS_ENTRY_MARGIN`. Never set for a crossing already in
+   * progress — see the gate's own comment for why re-litigating it there produced a
+   * dead stop astride the centre line instead of an aborted pass.
    */
   readonly crossingRefused: boolean;
   /** Nearest thing in the chosen corridor and how fast it is going, or Infinity. */
@@ -250,6 +251,17 @@ const CLEAR_M = 30;
 const STILL_CLEAR_M = 10;
 /** Slowest closing speed an overtake is planned at, so the sums stay finite. */
 const MIN_ADVANTAGE_MPS = 0.5;
+/**
+ * A FRESH DECISION TO CROSS ASKS FOR MORE ROOM THAN FINISHING ONE ALREADY UNDER WAY.
+ *
+ * `roomNeeded` below is the bare kinematic minimum: the gap that makes the sums come
+ * out exactly even, with no slack for a leader that eases off or an oncoming car
+ * doing a little more than assumed. A driver who has not committed can simply wait
+ * for a fatter window — that costs a few seconds of following and nothing else — so
+ * the decision to GO is priced at a margin over the minimum. A driver already across
+ * cannot buy the same safety by waiting; see the gate below for what it does instead.
+ */
+const PASS_ENTRY_MARGIN = 1.3;
 /**
  * THE SHOULDER IS FOR GETTING ROUND SOMETHING THAT IS NOT GOING ANYWHERE.
  *
@@ -587,7 +599,28 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
         oncomingDistanceToBlock > 0;
       const firstToTheGap =
         sharedBottleneck && Math.min(ownLaneBlock, horizon) < oncomingDistanceToBlock;
-      if (!firstToTheGap && oncomingGap < roomNeeded) {
+      // THE ROOM CHECK IS FOR THE DECISION TO GO, NOT FOR THE ONE TO KEEP GOING.
+      //
+      // `roomNeeded` is a snapshot estimate, re-taken every step, and refusing the
+      // crossing line on it here used to end a crossing already in progress: exactly
+      // the case `crossingRearClear` below is exempted for, and for the identical
+      // reason. While this driver is still ABEAM the car it is passing, the abeam
+      // veto a few lines up refuses every line back into its own lane — cutting in on
+      // top of the car beside it — whatever this gate decides. Refusing the crossing
+      // line as well then leaves NOTHING admissible, and the fallback for that is a
+      // full stop, delivered broadside across the lane the oncoming car is using: the
+      // most exposed place on the road to stand still. Measured in play as a frantic
+      // overtake braking to a dead stop astride the centre line with a clear leader
+      // gap and a car still hundreds of metres out.
+      //
+      // A real driver in that position does not brake into the middle of the road:
+      // it finishes the move it is already committed to — the kickdown it is already
+      // spending is exactly that — and takes its own lane back the moment the abeam
+      // veto lifts, which the cost search already prefers with nothing further owed
+      // here. So a FRESH decision to cross is priced at `PASS_ENTRY_MARGIN` over the
+      // bare minimum and may simply wait for a fatter window; a crossing already
+      // under way is not re-litigated on the same shrinking estimate.
+      if (!alreadyAcross && !firstToTheGap && oncomingGap < roomNeeded * PASS_ENTRY_MARGIN) {
         crossingRefused = true;
         if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
         admissible = false;

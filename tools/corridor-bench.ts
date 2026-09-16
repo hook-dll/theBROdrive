@@ -264,7 +264,7 @@ const crossingRequest = request({
   asphaltLimit: 6,
   edgeLimit: 5,
   obstacles: [car(30, -2, 20), car(100, -2, 5)],
-  oncomingGap: 150,
+  oncomingGap: 200,
 });
 const crossing = evaluateCorridorLine(crossingRequest, 2);
 const refused = evaluateCorridorLine({ ...crossingRequest, oncomingGap: 100 }, 2);
