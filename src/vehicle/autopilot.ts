@@ -3342,8 +3342,17 @@ export class Autopilot {
     } else {
       this.stoppedFor += dt;
     }
+    // TOUCHING IS NOT WEDGED, and the short timer used to treat them as one thing.
+    //
+    // A car easing past a prop spends SECONDS inside `CONTACT_STUCK_GAP_M` of it —
+    // that is what easing past means — and at the crawl the planner asks for there, it
+    // covers the `STALL_PROGRESS_M` that would reset the timer in 0.8 s, which is less
+    // than the 1 s the contact path allows. Measured on a two-lane prop: the car got
+    // itself 0.25 m clear and was rolling at 1.5 m/s when recovery fired at 11.2 s,
+    // cancelled the bypass that was working, and escalated from there into the desert.
+    // The fast path is for a bumper against something and no ground covered.
     const stuckAfter =
-      this.hazardContactDistance <= CONTACT_STUCK_GAP_M
+      this.hazardContactDistance <= CONTACT_STUCK_GAP_M && speed < ROLLBACK_MPS
         ? CONTACT_STUCK_AFTER_S
         : STUCK_AFTER_S;
 
