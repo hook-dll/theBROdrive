@@ -281,7 +281,7 @@ function groundPoint(
  * (`setFromMatrix`) and the collider (`geometryToTrimesh`) read it. The rebase
  * happens here, once, never in either consumer.
  */
-function poseMatrix(
+export function poseMatrix(
   x: number,
   y: number,
   z: number,
@@ -303,7 +303,7 @@ function setFromMatrix(obj: THREE.Object3D, matrix: THREE.Matrix4): void {
 }
 
 /** Bake a BufferGeometry's triangles through `matrix` into Rapier trimesh data. */
-function geometryToTrimesh(
+export function geometryToTrimesh(
   geometry: THREE.BufferGeometry,
   matrix: THREE.Matrix4,
 ): { vertices: Float32Array; indices: Uint32Array } {

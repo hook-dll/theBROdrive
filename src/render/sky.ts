@@ -30,6 +30,14 @@ import { PlanetField } from './planetfield';
 const DOME_RADIUS = 3000;
 /** Offset of the directional light along its direction; brackets the shadow frustum. */
 const SUN_DISTANCE = 240;
+/**
+ * Reference axes for building an orthonormal basis perpendicular to the shadow
+ * direction (see `stabilizeShadowTarget`). `WORLD_UP` is crossed with the shadow
+ * direction to get "right"; the fallback substitutes when the sun sits close enough
+ * to straight overhead that the cross product would be near zero.
+ */
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const WORLD_UP_FALLBACK = new THREE.Vector3(1, 0, 0);
 
 /** Sun elevation (radians) below this counts as night for headlight/lamp logic. */
 const NIGHT_ELEVATION = -0.08;
@@ -682,6 +690,9 @@ export class Sky {
   /** Light direction with its elevation clamped, for the shadow camera only. */
   private readonly _shadowDir = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
+  /** Orthonormal basis perpendicular to `_shadowDir`, rebuilt each frame it changes. */
+  private readonly _shadowRight = new THREE.Vector3();
+  private readonly _shadowUp = new THREE.Vector3();
   private readonly _zenith = new THREE.Color();
   private readonly _horizon = new THREE.Color();
   private readonly _sunColor = new THREE.Color();
@@ -1027,6 +1038,18 @@ export class Sky {
     } else {
       this._shadowDir.copy(dir);
     }
+    // `_targetPos` just followed the camera to a WORLD position that moves smoothly,
+    // a fraction of a shadow-map texel every frame. Left as-is, every point in the
+    // world lands on a slightly different texel each frame, and the shadow it casts
+    // swims with it — invisible against open desert, but under a low indoor ceiling,
+    // where a rafter or a doorframe is a metre or two overhead, the swimming shadow
+    // boundary of everything close by reads as a dark patch that follows the player
+    // around the room, because the frustum is by construction always centred on
+    // them. Snapping the target to the shadow map's own texel lattice makes every
+    // world point land on the SAME texel regardless of camera motion, which is what
+    // stops the crawl; the residual discretisation is one texel (a few centimetres),
+    // far below anything a player can see move.
+    this.stabilizeShadowTarget();
     this.sunLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
     // Fade the whole shadow out as the true sun sinks: at that point the ground is
     // in general shade anyway, and a clamped shadow under a horizon sun is the one
@@ -1034,6 +1057,27 @@ export class Sky {
     this.sunLight.shadow.intensity = smoothstep(0, SHADOW_FADE_ELEVATION, elevation);
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
+  }
+
+  /**
+   * Snaps `_targetPos` to the shadow map's texel grid, in the plane perpendicular
+   * to `_shadowDir` — the two axes the shadow camera actually samples. See the call
+   * site in `update()` for why: this is what stops an indoor shadow boundary from
+   * swimming as the camera it is centred on moves continuously.
+   */
+  private stabilizeShadowTarget(): void {
+    const reference = Math.abs(this._shadowDir.y) > 0.999 ? WORLD_UP_FALLBACK : WORLD_UP;
+    this._shadowRight.crossVectors(reference, this._shadowDir).normalize();
+    this._shadowUp.crossVectors(this._shadowDir, this._shadowRight).normalize();
+
+    const texel = (2 * GRAPHICS_CONFIG.shadowFrustumHalfSize) / GRAPHICS_CONFIG.shadowMapSize;
+    const right = this._targetPos.dot(this._shadowRight);
+    const up = this._targetPos.dot(this._shadowUp);
+    const snappedRight = Math.round(right / texel) * texel;
+    const snappedUp = Math.round(up / texel) * texel;
+    this._targetPos
+      .addScaledVector(this._shadowRight, snappedRight - right)
+      .addScaledVector(this._shadowUp, snappedUp - up);
   }
 
   /**

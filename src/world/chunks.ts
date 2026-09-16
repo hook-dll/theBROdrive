@@ -257,16 +257,38 @@ export class ChunkStreamer {
       this.travelDirection === 0 ? null : playerChunk + this.travelDirection * (VISUAL_RADIUS + 1);
 
     // Tear down anything that left the visual window and is not the one directional
-    // lookahead, or whose physics status no longer matches its distance. This also
-    // cancels partially staged and prefetched chunks without leaking their content.
+    // lookahead. A chunk that is still wanted but whose physics status no longer
+    // matches its distance is rebuilt IN PLACE, synchronously, rather than deleted
+    // and left to the incremental buildQueue below.
+    //
+    // Every provider's content differs from `hasPhysics` only in whether it also
+    // carries colliders (see ChunkContext.hasPhysics), so redoing it in full is not
+    // wasted work — it is the only way to add or drop those colliders, since none of
+    // the providers expose a narrower "just the physics" rebuild. Left to the
+    // ordinary per-frame budget (one provider step at a time), a chunk regaining
+    // physics exactly where the player is headed — which happens once every
+    // CHUNK_LENGTH of travel, at the PHYSICS_RADIUS boundary ahead — went missing for
+    // as many frames as it has providers: reported from play as the road and its
+    // scenery blinking out for about half a second every few seconds while driving.
+    // `prime()` already relies on the same synchronous drain for chunk 0 at boot;
+    // this is that same drain for one in-flight chunk, on the one frame it changes.
     for (const [index, chunk] of this.built) {
       const wanted = (index >= min && index <= max) || index === prefetch;
       const needsPhysics =
         Math.abs(playerLateral) < ROAD_PHYSICS_REACH &&
         Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
-      if (!wanted || chunk.hasPhysics !== needsPhysics) {
+      if (!wanted) {
         if (this.teardown(chunk)) this.lightRevision++;
         this.built.delete(index);
+      } else if (chunk.hasPhysics !== needsPhysics) {
+        if (chunk.complete) {
+          this.buildChunkSync(index, needsPhysics);
+        } else {
+          // Still mid-build when its physics need changed: no completed content to
+          // redo in place, so cancel and let the normal queue restart it below.
+          if (this.teardown(chunk)) this.lightRevision++;
+          this.built.delete(index);
+        }
       }
     }
 
@@ -346,15 +368,28 @@ export class ChunkStreamer {
     const clamped = Math.min(Math.max(playerS, 0), this.road.length);
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
     const hasPhysics = Math.abs(playerLateral) < ROAD_PHYSICS_REACH;
+    this.previousPlayerS = clamped;
+    this.travelDirection = 0;
+    this.buildQueue.length = 0;
+    this.buildChunkSync(playerChunk, hasPhysics);
+  }
 
-    const existing = this.built.get(playerChunk);
+  /**
+   * Builds one chunk fully, synchronously, replacing anything already staged there.
+   *
+   * Shared by `prime()` (chunk 0 at boot, where nothing may be staged yet) and by
+   * `update()`'s physics-eligibility rebuild (an already-complete chunk whose
+   * distance crossed the physics radius): both need the chunk COMPLETE before they
+   * return, not merely queued for the incremental scheduler to reach eventually.
+   */
+  private buildChunkSync(index: number, hasPhysics: boolean): void {
+    const existing = this.built.get(index);
     if (existing) {
       if (this.teardown(existing)) this.lightRevision++;
-      this.built.delete(playerChunk);
+      this.built.delete(index);
     }
-
     const chunk: BuiltChunk = {
-      index: playerChunk,
+      index,
       hasPhysics,
       contents: [],
       nextProvider: 0,
@@ -362,11 +397,7 @@ export class ChunkStreamer {
       originX: this.origin.x,
       originZ: this.origin.z,
     };
-    this.built.set(playerChunk, chunk);
-    this.previousPlayerS = clamped;
-    this.travelDirection = 0;
-    this.buildQueue.length = 0;
-
+    this.built.set(index, chunk);
     try {
       for (const provider of this.providers) {
         const content = provider.build(this.context(chunk));
@@ -380,10 +411,9 @@ export class ChunkStreamer {
       chunk.complete = true;
     } catch (error) {
       if (this.teardown(chunk)) this.lightRevision++;
-      this.built.delete(playerChunk);
+      this.built.delete(index);
       throw error;
     }
-
   }
   private nextRefresh(): { index: number; providerId: string } | null {
     for (let i = 0; i < this.refreshQueue.length; ) {

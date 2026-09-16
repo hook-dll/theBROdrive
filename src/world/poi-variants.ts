@@ -286,16 +286,26 @@ function trimOpening(
   const height = top - bottom;
   const depth = 0.26;
   const bar = 0.09;
+  // Every bar sits entirely INSIDE the opening's own void rather than straddling its
+  // edge. A bar centred exactly on the edge put half its thickness into whatever wall
+  // stood just outside that edge — fine when that wall is generous, but a sliver
+  // between two close openings (a thin mullion pier, or a shallow band of wall right
+  // under the eave) is easily thinner than half a bar. The two then occupy nearly the
+  // same plane over a real shared area: a coplanar overlap the GPU cannot consistently
+  // depth-sort, seen as flicker. Trim drawn only inward of the opening can never reach
+  // a neighbouring wall it does not open into. The four bars still meet at the corners
+  // exactly as before — jambs run the full opening height, so the top/bottom bars still
+  // overlap them there, the ordinary 3-axis corner join, not a coplanar sliver.
   if (axis === 'x') {
-    box(parent, [bar, height, depth], [start, bottom + height / 2, fixed], color);
-    box(parent, [bar, height, depth], [end, bottom + height / 2, fixed], color);
-    box(parent, [width + bar, bar, depth], [(start + end) / 2, top, fixed], color);
-    if (bottom > 0.05) box(parent, [width + bar, bar, depth], [(start + end) / 2, bottom, fixed], color);
+    box(parent, [bar, height, depth], [start + bar / 2, bottom + height / 2, fixed], color);
+    box(parent, [bar, height, depth], [end - bar / 2, bottom + height / 2, fixed], color);
+    box(parent, [width, bar, depth], [(start + end) / 2, top - bar / 2, fixed], color);
+    if (bottom > 0.05) box(parent, [width, bar, depth], [(start + end) / 2, bottom + bar / 2, fixed], color);
   } else {
-    box(parent, [depth, height, bar], [fixed, bottom + height / 2, start], color);
-    box(parent, [depth, height, bar], [fixed, bottom + height / 2, end], color);
-    box(parent, [depth, bar, width + bar], [fixed, top, (start + end) / 2], color);
-    if (bottom > 0.05) box(parent, [depth, bar, width + bar], [fixed, bottom, (start + end) / 2], color);
+    box(parent, [depth, height, bar], [fixed, bottom + height / 2, start + bar / 2], color);
+    box(parent, [depth, height, bar], [fixed, bottom + height / 2, end - bar / 2], color);
+    box(parent, [depth, bar, width], [fixed, top - bar / 2, (start + end) / 2], color);
+    if (bottom > 0.05) box(parent, [depth, bar, width], [fixed, bottom + bar / 2, (start + end) / 2], color);
   }
 }
 
@@ -741,8 +751,15 @@ function roomLights(
     const fixture = new THREE.Group();
     fixture.position.set(x, ceilingY, z);
     parent.add(fixture);
-    cylinder(fixture, 0.08, 0.08, 0.22, 8, [0, -0.11, 0], C.darkMetal);
-    cylinder(fixture, 0.2, 0.08, 0.12, 12, [0, -0.24, 0], C.white);
+    // Never a shadow caster: a ceiling fixture is metres from the floor and centimetres
+    // across, so its sun shadow is a dark disc that reads as a stray blob under whoever
+    // is standing nearby — not a shading cue anyone is meant to notice. The canopy roofs
+    // and wings elsewhere in this file are excluded from `castShadow` for the same
+    // reason; this is that same exclusion for every room light in every building.
+    const stem = cylinder(fixture, 0.08, 0.08, 0.22, 8, [0, -0.11, 0], C.darkMetal);
+    stem.castShadow = false;
+    const shade = cylinder(fixture, 0.2, 0.08, 0.12, 12, [0, -0.24, 0], C.white);
+    shade.castShadow = false;
   }
 
   const switchGroup = new THREE.Group();
@@ -1367,12 +1384,36 @@ function buildStarterHome(root: THREE.Group): void {
   roomLight(upper, -3.5, 0, floorHeight + 0.05, [1.03, 1.3, 1.8], Math.PI / 2);
   roomLight(upper, 5.0, 0, floorHeight + 0.05, [1.27, 1.3, 3.8], -Math.PI / 2);
 
-  box(house, [8.0, 0.18, 2.0], [3.2, floorHeight + 0.06, -7.1], C.timber);
-  for (const x of [-0.4, 1.4, 3.2, 5.0, 6.8]) box(house, [0.08, 1.0, 0.08], [x, floorHeight + 0.5, -8.0], C.darkTimber);
-  box(house, [7.3, 0.08, 0.08], [3.2, floorHeight + 0.96, -8.0], C.darkTimber);
+  // --- Upper balcony: a proper depth, and a railing closed on all three open
+  // sides (the fourth is the house wall the door is in) rather than a scatter of
+  // posts with one top rail and nothing between them. ---
+  box(house, [8.0, 0.18, 2.6], [3.2, floorHeight + 0.06, -7.4], C.timber);
+  for (const x of [1.4, 3.2, 5.0]) box(house, [0.08, 1.0, 0.08], [x, floorHeight + 0.5, -8.6], C.darkTimber);
+  box(house, [8.0, 0.08, 0.08], [3.2, floorHeight + 0.96, -8.6], C.darkTimber);
+  box(house, [8.0, 0.06, 0.06], [3.2, floorHeight + 0.15, -8.6], C.darkTimber);
+  for (const x of [0.3, 2.3, 4.1, 6.1]) box(house, [0.05, 0.82, 0.05], [x, floorHeight + 0.56, -8.6], C.darkTimber);
+  for (const side of [-0.8, 7.2]) {
+    // The corner post also closes the front rail's end, so front and side never
+    // double up a post 0.4 m apart from each other at the same corner.
+    box(house, [0.08, 1.0, 0.08], [side, floorHeight + 0.5, -8.6], C.darkTimber);
+    box(house, [0.08, 1.0, 0.08], [side, floorHeight + 0.5, -6.3], C.darkTimber);
+    box(house, [0.08, 0.08, 2.3], [side, floorHeight + 0.96, -7.45], C.darkTimber);
+  }
+
+  // --- Ground-floor porch: deck, its lean-to roof, and the posts that hold it up.
+  //
+  // The roof's tilt was `+0.08` — this same file's OWN garage canopy at the bottom
+  // of this function uses `-0.1` for the same shape at the same kind of eave, and
+  // that is the correct sign: a lean-to's high edge is where it meets the house
+  // wall, sloping DOWN and away so rain runs off the porch, not toward it. `+0.08`
+  // had it backwards — the eave over the door was the LOW one.
+  //
+  // The support posts were seven, evenly spaced through dead centre — exactly
+  // where the front door is, so one of them stood in the doorway. Eight posts,
+  // offset by half a bay, put the gap at centre instead of a post.
   box(house, [18.5, 0.18, 2.3], [0, 0.2, -7.6], C.timber);
-  box(house, [18.5, 0.18, 2.7], [0, 3.0, -7.5], C.roofTin, [0.08, 0, 0], true);
-  for (const x of [-7.8, -5.2, -2.6, 0, 2.6, 5.2, 7.8]) box(house, [0.14, 2.75, 0.14], [x, 1.5, -8.2], C.darkTimber);
+  box(house, [18.5, 0.18, 2.7], [0, 3.0, -7.5], C.roofTin, [-0.08, 0, 0], true);
+  for (const x of [-9.1, -6.5, -3.9, -1.3, 1.3, 3.9, 6.5, 9.1]) box(house, [0.14, 2.75, 0.14], [x, 1.5, -8.2], C.darkTimber);
   box(house, [1.3, 2.1, 0.45], [-7.65, 1.25, 3.8], C.brick);
   box(house, [1.5, 0.18, 0.7], [-7.65, 2.3, 3.8], C.darkTimber);
   box(house, [0.8, 2.6, 0.8], [-6.7, 7.8, 3.8], C.brick);

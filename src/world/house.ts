@@ -19,9 +19,9 @@ import { hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
-import { desertPaletteAt } from './gradient';
-import { fitGround } from './footprint';
+import { fitGround, type GroundPlane } from './footprint';
 import { createVariantInstance, registerPlacedSwitches } from './poivariantbuild';
+import { poseMatrix, geometryToTrimesh } from './poi';
 import type { PoiSwitchField } from './poiswitches';
 import { SHELF_PLANK_TOP, STARTER_GARAGE_SHELF } from './poi-variants';
 import { oilCapacity } from '../parts/registry';
@@ -52,32 +52,22 @@ const HOMESTEAD_S = 116;
 const SIDE = -1;
 
 /**
- * Garage door line: the building's garage front sits here, and the driveway ramps up to
- * it from the road. It is also the homestead's NEAREST point to the road, so this number
- * is the homestead's setback.
+ * Garage door line: the building's garage front sits here. It is also the
+ * homestead's NEAREST point to the road, so this number is the homestead's setback.
  *
- * WHY IT STAYS AT THE ROAD, and it is not a matter of taste. The terrain is fitted to the
- * road only inside the 30 m corridor (`terrain.ts`); past that the landscape's long bands
- * return, and they keep their slope everywhere — the origin-centred flattening in
- * `landscape.ts` suppresses the SHORT bands, not those. So distance from the road is
- * bought with relief, and a concrete pad cannot pay for it: measured under this
- * compound's own footprint, the ground varies 0.60 m at this setback and 1.62 m fifty
- * metres further out, where it also stands 1.5-3.1 m higher. The slab is 0.45 m thick
- * with a 0.12 m lift, so it absorbs the first and not the second — push the homestead out
- * and it ends up on a hill with the edge of its pad in the air. Move it outward only
- * after making the terrain answer for it.
+ * Kept inside the 30 m corridor the terrain is fitted to (`terrain.ts`): past that
+ * the landscape's long bands return and keep their slope everywhere, so distance
+ * from the road is bought with relief. The building is TILTED onto the ground
+ * rather than levelled on a slab (see `homesteadLayout`), so what this setback
+ * actually buys is a gentler grade to tilt onto, not a shallower pad —
+ * `tools/poi-placement.ts` measures the grade this site produces.
  */
-const GARAGE_DOOR_U = 8.3;
+const GARAGE_DOOR_U = 13.3;
 /** Small free-fall inside the low garage; the open-world 0.75 m drop hits its roof. */
 const GARAGE_CAR_DROP_METRES = 0.08;
-
-/**
- * Slab thickness below the pad's top surface, and the lift above the highest ground
- * under it. Exported because together they are the pad's CAPACITY to absorb uneven
- * ground, and `tools/poi-placement.ts` holds the terrain to it — a homestead placed
- * where the ground varies more than this stands on a hill with its edge in the air.
- */
-export const SLAB_THICK = 0.45;
+/** Clears the player's teleported feet strictly above the sand, not exactly on it,
+ *  so a float rounding error at spawn can never read as standing inside the ground. */
+const SPAWN_CLEARANCE_M = 0.05;
 
 /**
  * Intensity given to every authored lamp of the building and of the yard.
@@ -88,17 +78,21 @@ export const SLAB_THICK = 0.45;
  * lit petrol station at the same brightness.
  */
 const HOMESTEAD_LAMP_INTENSITY = 0.55;
-/** The concrete pad tops this far above the highest terrain under it, so the
- *  heightfield can never poke through the floor. The slab is thick enough that the
- *  LOWEST corner of the footprint still has concrete below the sand: the runout is
- *  level to a tenth of a metre, not exactly, since the landscape's long bands keep
- *  their slope everywhere (see landscape.ts). */
-export const SLAB_LIFT = 0.12;
 
-/** Gravel driveway: a filled wedge from the garage door down to the asphalt edge. */
-const DRIVE_FAR_U = ROAD_HALF_WIDTH; // meet the road surface, not the shoulder
+/**
+ * How far below the fitted ground plane the building is sunk, on top of the
+ * plane's own residual (see `GroundPlane` in `footprint.ts`). Mirrors the general
+ * POI system's own `SEAT_BURY_MARGIN` (`poi.ts`) so the one hand-placed building in
+ * the game is buried by the same rule as the whole catalogue.
+ */
+const SEAT_BURY_MARGIN = 0.08;
+
+/** Where the variant's garage door has to land relative to the road, so the car
+ *  drives straight out onto it. Not a physical strip any more — there is no
+ *  driveway mesh — just the anchor `VARIANT_V` is measured from. */
 const DRIVE_V0 = 0.7;
 const DRIVE_V1 = 5.1;
+
 
 /**
  * The gallery variant this homestead is built from: `starter-homestead`, index 25.
@@ -125,35 +119,19 @@ const GARAGE_CENTRE_V = VARIANT_V + 8.68;
  */
 const VARIANT_HALF_X = 13.7;
 const VARIANT_HALF_Z = 7.8;
-/** Exported for the same reason as the slab: the bench measures under this footprint. */
 /** Yard in front of the garage, beyond the building, for the junk and the fuel can. */
 const YARD_M = 3.2;
 
-/** Concrete pad: the building's own extent, plus that yard. */
+/** The compound's footprint: the building's own extent, plus that yard. Purely the
+ *  rectangle `homesteadLayout` fits its one ground plane under — there is no pad. */
 const PAD_V0 = VARIANT_V - VARIANT_HALF_X;
 const PAD_V1 = VARIANT_V + VARIANT_HALF_X + YARD_M;
 const PAD_U0 = VARIANT_U - VARIANT_HALF_Z;
 const PAD_U1 = VARIANT_U + VARIANT_HALF_Z;
 
-/**
- * How far a pad's edge is graded down into the ground, metres, and in how many steps.
- *
- * The pad's top has to clear the HIGHEST ground under it, or the sand rises inside the
- * garage; so on ground that varies it stands proud somewhere, and a vertical face there is
- * read as a plinth. Measured on this compound: 0.77 m of grey concrete along the building,
- * which is the one thing a player sees from the drive. A real pad on a slope is banked
- * instead, so the edges are given the ground's own material at the ground's own slope.
- *
- * The run is 2.6 m because the shoulder between the pad's near edge and the asphalt is
- * 2.6 m wide: the bank reaches the road edge exactly, and no further.
- */
-const BANK_RUN = 2.6;
-const BANK_SEGMENTS = 8;
-/** Exported so the placement bench measures the bank it actually builds. */
-export const HOMESTEAD_BANK = { run: BANK_RUN, segments: BANK_SEGMENTS } as const;
-
-/** The pad's extent, exported so the placement bench measures under the same footprint. */
-export const HOMESTEAD_PAD = {
+/** The compound's footprint, exported so the placement bench measures the ground
+ *  under the same rectangle the building is fitted to. */
+export const HOMESTEAD_FOOTPRINT = {
   s: HOMESTEAD_S,
   u0: PAD_U0,
   u1: PAD_U1,
@@ -164,29 +142,31 @@ export const HOMESTEAD_PAD = {
 
 /** Layout derived from the seed; shared by the chunk and the scatter helpers. */
 export interface HomesteadLayout {
-  floorY: number;
   /**
-   * Underside of the concrete pad, metres.
-   *
-   * DERIVED FROM THE GROUND rather than fixed, and that is the difference between a pad
-   * that works anywhere and one that works only where it was designed. The top is poured
-   * above the HIGHEST ground under the footprint, so the slab has to reach the LOWEST
-   * ground or its downhill edge hangs in the air — and the gap is the ground's full height
-   * range, not its deviation from a slope, because a garage floor is poured level.
-   *
-   * The compound is 39 m along the road, four times the hand-built house's pad, so it
-   * spans four times the relief: measured, 0.63 m of range against the 0.33 m a 0.45 m
-   * slab can bridge. Fixed thickness was therefore already not enough at the road, let
-   * alone anywhere else; this makes the pad size itself.
+   * One ground plane fitted under the whole compound. The building is tilted onto
+   * it (`plane.pitch`/`plane.roll`) rather than levelled on a slab — see
+   * `homesteadLayout` for why, and `poi.ts`'s `buildVariantPoi`, which retired the
+   * same slab from the general POI system after measuring this exact building's
+   * version of it at 0.82 m deep.
    */
-  baseY: number;
-  /** Lowest ground under the pad, so a caller can check the slab reached it. */
-  padMinGroundY: number;
-  roadY: number;
+  plane: GroundPlane;
+  /** World Y the building's local origin sits at: on the plane, sunk by its own
+   *  residual and `SEAT_BURY_MARGIN`, so no wall ever stands on air. */
+  seatY: number;
+  /** The building's own yaw: `atan2(away.x, away.z)`, turning its front to the road. */
+  yaw: number;
+  /** World-frame "away from the road" unit vector; `atan2(-ax, -az)` faces the road. */
   ax: number;
   az: number;
-  fx: number;
-  fz: number;
+  /**
+   * Height of the (tilted, sunk) floor surface at a homestead-frame (u, v) point.
+   *
+   * Not a single `floorY`: once the building is tilted its floor is a plane, not a
+   * height, so anything that has to stand exactly on it — the player's spawn feet,
+   * the parked car, an item on a shelf — asks for its own point rather than sharing
+   * one number that was only ever true at the plane's own centre.
+   */
+  floorYAt(u: number, v: number): number;
   toWorld(u: number, v: number): [number, number];
   /**
    * The inverse of `toWorld`: where a world point falls in the homestead's own frame.
@@ -203,14 +183,21 @@ export interface HomesteadLayout {
 }
 
 /**
- * Computes the homestead's frame and the concrete-pad height.
+ * Computes the homestead's frame, its fitted ground plane, and the tilt/bury that
+ * seats the building directly on the sand — no slab, no apron.
  *
- * `floorY` is the *top* of the pad, chosen to clear the tallest terrain point
- * under the footprint plus a lift. The driveway then ramps from `floorY` down to
- * `roadY`, so the garage floor is flush with the driveway and the driveway is
- * flush with the road — a car can roll out without catching a lip. The terrain
- * inside the road corridor is now the road surface itself (see terrain.ts), so
- * the wedge only needs a modest burial to stay below the ground it sits on.
+ * ONE plane is fitted under the whole compound (not a slab-sized patch at the
+ * garage): the building is tilted onto `plane.pitch`/`plane.roll` and sunk by
+ * `plane.residual + SEAT_BURY_MARGIN`, the same pattern `poi.ts`'s own
+ * `buildVariantPoi` uses for every other building in the game — see the comment
+ * there for why a level slab was the wrong trade, on this exact building, before
+ * this file even stopped building one of its own.
+ *
+ * `fitGround`'s own (right, forward) axes are the object's own (+X, +Z) once yawed
+ * by the angle passed in. Passing this building's own `yaw` below (not the road's
+ * `heading`, which is 90° off it) makes `right` the along-road (v) direction and
+ * `forward` the away-from-road (u) direction, so the half-extents passed to
+ * `fitGround` are `(v-extent, u-extent)`, not `(u-extent, v-extent)`.
  */
 export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
   const ref = road.sampleAt(HOMESTEAD_S);
@@ -231,9 +218,7 @@ export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
     (x - ref.x) * fx + (z - ref.z) * fz,
   ];
 
-  // The slab tops the HIGHEST ground under its footprint (see SLAB_LIFT), which is
-  // the one number `fitGround` is asked for here; the pad is poured level because a
-  // garage floor is, and its thickness carries the rest.
+  const yaw = Math.atan2(ax, az);
   const uc = (PAD_U0 + PAD_U1) / 2;
   const vc = (PAD_V0 + PAD_V1) / 2;
   const [cx, cz] = toWorld(uc, vc);
@@ -241,60 +226,26 @@ export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
     terrain,
     cx,
     cz,
-    ref.heading,
-    (PAD_U1 - PAD_U0) / 2,
+    yaw,
     (PAD_V1 - PAD_V0) / 2,
+    (PAD_U1 - PAD_U0) / 2,
     HOMESTEAD_S,
     9,
   );
-  const floorY = plane.maxY + SLAB_LIFT;
-  // At least SLAB_THICK of concrete, and ALWAYS below the lowest ground: the pad's job
-  // is to be underground at its shallowest point.
-  const baseY = Math.min(plane.minY - 0.05, floorY - SLAB_THICK);
+  const seatY = plane.centreY - plane.residual - SEAT_BURY_MARGIN;
+  // The floor is the SAME rigid tilted plane everywhere, so any point on it is
+  // buried by the same residual + margin as the centre, not just correct there.
+  const floorYAt = (u: number, v: number): number =>
+    plane.yAt(v - vc, u - uc) - plane.residual - SEAT_BURY_MARGIN;
 
-  // The same placement the building gets below: `toWorld` of the variant's origin, with
-  // the building yawed to face the road. Recomputed here rather than shared because the
-  // layout is what both this and the geometry are derived from — and `homesteadLayout` is
-  // pure, so the two agree by construction.
-  const variantYaw = Math.atan2(ax, az);
   const [vx0, vz0] = toWorld(VARIANT_U, VARIANT_V);
   const variantToUV = (x: number, z: number): [number, number] => {
-    const cos = Math.cos(variantYaw);
-    const sin = Math.sin(variantYaw);
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
     return toUV(vx0 + x * cos + z * sin, vz0 - x * sin + z * cos);
   };
 
-  return {
-    floorY,
-    baseY,
-    toUV,
-    variantToUV,
-    padMinGroundY: plane.minY,
-    roadY: ref.y,
-    ax,
-    az,
-    fx,
-    fz,
-    toWorld,
-  };
-}
-
-/** Local (u, v, y) box -> world axis-aligned box. Exact because the frame is flat. */
-function boxUV(
-  L: HomesteadLayout,
-  u0: number,
-  v0: number,
-  y0: number,
-  u1: number,
-  v1: number,
-  y1: number,
-): [V3, V3] {
-  const [x0, z0] = L.toWorld(u0, v0);
-  const [x1, z1] = L.toWorld(u1, v1);
-  return [
-    [Math.min(x0, x1), y0, Math.min(z0, z1)],
-    [Math.max(x0, x1), y1, Math.max(z0, z1)],
-  ];
+  return { plane, seatY, yaw, ax, az, floorYAt, toWorld, toUV, variantToUV };
 }
 
 /** Accumulates axis-aligned boxes into one merged triangle mesh per surface. */
@@ -325,7 +276,7 @@ class TrimeshAcc {
     );
   }
 
-  addIndexed(verts: number[], tris: number[]): void {
+  addIndexed(verts: Iterable<number>, tris: Iterable<number>): void {
     const base = this.verts.length / 3;
     for (const v of verts) this.verts.push(v);
     for (const t of tris) this.idx.push(base + t);
@@ -335,23 +286,11 @@ class TrimeshAcc {
 interface BuildCtx {
   group: THREE.Group;
   concrete: TrimeshAcc;
-  gravel: TrimeshAcc;
-  /** The graded banks around the pad, which the player walks on rather than through. */
-  bank: TrimeshAcc;
   geos: THREE.BufferGeometry[];
   L: HomesteadLayout;
   /** The chunk's floating origin; every f32/Rapier write subtracts these. */
   ox: number;
   oz: number;
-}
-
-/** Solid box: visual + collider. */
-function solid(ctx: BuildCtx, box: [V3, V3], acc: TrimeshAcc, material: THREE.Material): void {
-  visual(ctx, box, material);
-  acc.addBox(
-    [box[0][0] - ctx.ox, box[0][1], box[0][2] - ctx.oz],
-    [box[1][0] - ctx.ox, box[1][1], box[1][2] - ctx.oz],
-  );
 }
 
 /** Visual-only box (glass, frames, fence, jack stands). */
@@ -389,109 +328,6 @@ function cylinder(
   }
 }
 
-/**
- * The driveway as a filled gravel wedge: ramp top, buried bottom, closed ends.
- *
- * Winding requirement: every face must wind counter-clockwise as seen from
- * *outside* the solid, so the right-hand-rule normal points outward. A face
- * wound backwards renders as a dark hole — the exact bug that once ate the
- * ground in front of the garage. Corner indices are:
- *   0 near-top-lo, 1 near-top-hi, 2 far-top-lo, 3 far-top-hi,
- *   4 near-bot-lo, 5 near-bot-hi, 6 far-bot-lo, 7 far-bot-hi,
- * where near/far = garage door / road edge and lo/hi = DRIVE_V0 / DRIVE_V1.
- * The runout is axis-aligned, so near = -x, far = +x, lo = -z, hi = +z.
- */
-function drivewayData(L: HomesteadLayout): { verts: number[]; tris: number[] } {
-  // Buried as deep as the slab, for the same reason: the ground beside the runout is
-  // level to a tenth of a metre rather than exactly, so a shallow wedge shows its
-  // underside on the low side.
-  const base = Math.min(L.baseY, L.roadY - SLAB_THICK);
-  const top0 = L.floorY;
-  const top1 = L.roadY;
-  const corners: V3[] = [
-    [GARAGE_DOOR_U, DRIVE_V0, top0], [GARAGE_DOOR_U, DRIVE_V1, top0],
-    [DRIVE_FAR_U, DRIVE_V0, top1], [DRIVE_FAR_U, DRIVE_V1, top1],
-    [GARAGE_DOOR_U, DRIVE_V0, base], [GARAGE_DOOR_U, DRIVE_V1, base],
-    [DRIVE_FAR_U, DRIVE_V0, base], [DRIVE_FAR_U, DRIVE_V1, base],
-  ];
-  const verts: number[] = [];
-  for (const [u, v, y] of corners) {
-    const [x, z] = L.toWorld(u, v);
-    verts.push(x, y, z);
-  }
-  const tris = [
-    0, 1, 3, 0, 3, 2, // top ramp (outward +y)
-    6, 7, 5, 6, 5, 4, // bottom (outward -y)
-    0, 4, 5, 0, 5, 1, // near end, garage door (outward -x)
-    2, 3, 7, 2, 7, 6, // far end, road edge (outward +x)
-    0, 2, 6, 0, 6, 4, // v-lo side (outward -z)
-    1, 5, 7, 1, 7, 3, // v-hi side (outward +z)
-  ];
-  return { verts, tris };
-}
-
-/**
- * The pad's edges, graded into the ground.
- *
- * A STRIP, NOT A BOX, and its outer edge is the terrain itself: the inner edge is the
- * pad's top edge and the outer one is the ground `BANK_RUN` away, so the bank meets both
- * exactly and cannot leave a lip at either end. Its triangles are wound so their normals
- * point up, computed rather than reasoned about — a bank facing away from the sky is
- * invisible from the drive, which is the only place anyone looks at it.
- *
- * `skip` names one edge that the driveway crosses, because a bank through the middle of
- * the drive would be a ridge across the garage's own doorway.
- */
-function bankData(L: HomesteadLayout, terrain: Terrain): { verts: number[]; tris: number[] } {
-  const edges: { from: [number, number]; to: [number, number]; out: [number, number] }[] = [
-    // Near edge, split around the driveway (DRIVE_V0..DRIVE_V1).
-    { from: [PAD_U0, PAD_V0], to: [PAD_U0, DRIVE_V0], out: [-1, 0] },
-    { from: [PAD_U0, DRIVE_V1], to: [PAD_U0, PAD_V1], out: [-1, 0] },
-    { from: [PAD_U1, PAD_V0], to: [PAD_U1, PAD_V1], out: [1, 0] },
-    { from: [PAD_U0, PAD_V0], to: [PAD_U1, PAD_V0], out: [0, -1] },
-    { from: [PAD_U0, PAD_V1], to: [PAD_U1, PAD_V1], out: [0, 1] },
-  ];
-
-  const verts: number[] = [];
-  const tris: number[] = [];
-  for (const edge of edges) {
-    const base = verts.length / 3;
-    for (let i = 0; i <= BANK_SEGMENTS; i++) {
-      const f = i / BANK_SEGMENTS;
-      const u = edge.from[0] + (edge.to[0] - edge.from[0]) * f;
-      const v = edge.from[1] + (edge.to[1] - edge.from[1]) * f;
-      const outerU = u + edge.out[0] * BANK_RUN;
-      const outerV = v + edge.out[1] * BANK_RUN;
-      const [ix, iz] = L.toWorld(u, v);
-      const [ox, oz] = L.toWorld(outerU, outerV);
-      verts.push(ix, L.floorY, iz);
-      verts.push(ox, terrain.heightAt(ox, oz, HOMESTEAD_S), oz);
-    }
-    for (let i = 0; i < BANK_SEGMENTS; i++) {
-      const a = base + i * 2;
-      const b = a + 1;
-      const c = a + 2;
-      const d = a + 3;
-      // Up-facing normals, decided by arithmetic rather than by getting the winding
-      // right in the head: the cross product of the first two edges says which way the
-      // face points, and a bank pointing at the ground is a hole in the yard.
-      const ax = verts[b * 3]! - verts[a * 3]!;
-      const ay = verts[b * 3 + 1]! - verts[a * 3 + 1]!;
-      const az = verts[b * 3 + 2]! - verts[a * 3 + 2]!;
-      const bx = verts[d * 3]! - verts[a * 3]!;
-      const by = verts[d * 3 + 1]! - verts[a * 3 + 1]!;
-      const bz = verts[d * 3 + 2]! - verts[a * 3 + 2]!;
-      const ny = az * bx - ax * bz;
-      if (ny >= 0) {
-        tris.push(a, b, d, a, d, c);
-      } else {
-        tris.push(a, d, b, a, c, d);
-      }
-    }
-  }
-  return { verts, tris };
-}
-
 // ---------------------------------------------------------------------------
 // The chunk provider: static geometry only, chunk 0 alone.
 // ---------------------------------------------------------------------------
@@ -515,13 +351,11 @@ export class HomesteadProvider implements ChunkProvider {
     const oz = ctx.originZ;
     const group = new THREE.Group();
     const concrete = new TrimeshAcc();
-    const gravel = new TrimeshAcc();
-    const bank = new TrimeshAcc();
     const registeredSwitches: string[] = [];
     const geos: THREE.BufferGeometry[] = [];
     const mats: THREE.Material[] = [];
 
-    const bctx: BuildCtx = { group, concrete, gravel, bank, geos, L, ox, oz };
+    const bctx: BuildCtx = { group, concrete, geos, L, ox, oz };
 
     const mat = (color: number, o: { metalness?: number; roughness?: number; transparent?: boolean; opacity?: number } = {}) => {
       const m = new THREE.MeshStandardMaterial({
@@ -535,48 +369,12 @@ export class HomesteadProvider implements ChunkProvider {
       return m;
     };
 
-    const floorMat = mat(0x9a978f, { roughness: 0.95 });
-    // The ground's own colour at this arclength, so the bank is the ground and not a
-    // second kind of dirt beside it.
-    const bankMat = mat(desertPaletteAt(HOMESTEAD_S).sand, { roughness: 1 });
-    const gravelMat = mat(0x7a6c56, { roughness: 1 });
     const drumMatA = mat(0x8b3a2a, { metalness: 0.5, roughness: 0.7 });
     const drumMatB = mat(0x5a6b3a, { metalness: 0.5, roughness: 0.7 });
     const tyreMat = mat(0x1a1a1a);
     const metalMat = mat(0x4c4c50, { metalness: 0.6, roughness: 0.6 });
     const tankMat = mat(0x6e7b6a, { metalness: 0.5, roughness: 0.7 });
     const fenceMat = mat(0x6b5138);
-
-    const fy = L.floorY;
-
-    // --- Shared concrete pad (garage floor + house floor, one flush slab) ----
-    solid(bctx, boxUV(L, PAD_U0, PAD_V0, L.baseY, PAD_U1, PAD_V1, fy), concrete, floorMat);
-
-    // --- Its edges, graded into the ground --------------------------------
-    //
-    // Without this the pad presents a vertical face wherever the ground is lower than its
-    // top — measured 0.77 m of concrete along the building, which reads as a plinth. See
-    // `BANK_RUN`.
-    {
-      const { verts, tris } = bankData(L, ctx.terrain);
-      for (let i = 0; i < verts.length; i += 3) {
-        verts[i] = verts[i]! - ox;
-        verts[i + 2] = verts[i + 2]! - oz;
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-      geo.setIndex(tris);
-      geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, bankMat);
-      mesh.receiveShadow = true;
-      // Tagged so the placement bench can find the bank and check the one thing about it
-      // that is invisible when wrong: a strip whose faces point at the ground is a hole in
-      // the yard, and it looks like nothing at all from above.
-      mesh.userData.poiBank = true;
-      group.add(mesh);
-      geos.push(geo);
-      bank.addIndexed(verts, tris);
-    }
 
     // --- THE HOUSE AND GARAGE: the gallery's `starter-homestead` variant -------
     //
@@ -588,17 +386,20 @@ export class HomesteadProvider implements ChunkProvider {
     // (-Z) faces the road, and its garage wing (+X) runs forward along it. Composed
     // with `toWorld` that is a proper rotation of the whole building, so the compound
     // is NOT mirrored — house and garage stand side by side facing the drive, which is
-    // how the hand-built version was arranged. `yaw` is the same angle the world's POI
-    // placement uses for the same reason: `atan2(awayX, awayZ)` turns a building's
-    // front toward the centreline.
+    // how the hand-built version was arranged.
+    //
+    // NO PAD, NO SLAB: the building is TILTED onto `L.plane` (`plane.pitch`/`plane.roll`)
+    // and sunk by the plane's own residual, exactly the way `poi.ts`'s `buildVariantPoi`
+    // seats every other building in the game — see `homesteadLayout` for the reasoning.
+    // A tilted floor is the correct look here, not a defect: real sand under a real
+    // house is uneven, and the building now follows it instead of standing on a slab
+    // poured level to hide that.
     {
       const instance = createVariantInstance(VARIANT_INDEX);
       const [bx, bz] = L.toWorld(VARIANT_U, VARIANT_V);
-      const yaw = Math.atan2(L.ax, L.az);
-      const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'));
 
-      instance.group.position.set(bx - ox, fy, bz - oz);
-      instance.group.quaternion.copy(quat);
+      instance.group.position.set(bx - ox, L.seatY, bz - oz);
+      instance.group.rotation.set(L.plane.pitch, L.yaw, L.plane.roll, 'YXZ');
       instance.group.updateMatrixWorld(true);
       group.add(instance.group);
       registerPlacedSwitches(
@@ -621,76 +422,51 @@ export class HomesteadProvider implements ChunkProvider {
       if (ctx.hasPhysics) {
         // One trimesh for the whole building. Roofs are excluded from `solid`, so the
         // interior is entered through its doors rather than sealed by its roof, and
-        // the wall openings the catalogue builds stay openings.
-        const matrix = new THREE.Matrix4().compose(
-          new THREE.Vector3(bx, fy, bz),
-          quat,
-          new THREE.Vector3(1, 1, 1),
-        );
-        const position = instance.solid.getAttribute('position');
-        const v = new THREE.Vector3();
-        const verts: number[] = [];
-        for (let i = 0; i < position.count; i++) {
-          v.fromBufferAttribute(position, i).applyMatrix4(matrix);
-          verts.push(v.x, v.y, v.z);
-        }
-        const tris: number[] = [];
-        for (let i = 0; i < position.count; i++) tris.push(i);
-        concrete.addIndexed(verts, tris);
+        // the wall openings the catalogue builds stay openings. `ox`/`oz` of 0 here is
+        // deliberate: this accumulator's other entries (yard props, below) are ALSO
+        // baked in absolute coordinates, via each helper's own `ctx.ox`/`ctx.oz`
+        // subtraction happening once, at the call site — not twice.
+        const matrix = poseMatrix(bx, L.seatY, bz, L.yaw, L.plane.roll, L.plane.pitch, 0, 0);
+        const trimesh = geometryToTrimesh(instance.solid, matrix);
+        if (trimesh.indices.length > 0) concrete.addIndexed(trimesh.vertices, trimesh.indices);
       }
     }
-
-    // --- Driveway (gravel wedge, ramps flush to the road) ---
-    {
-      const { verts, tris } = drivewayData(L);
-      // Rebase the shared vertex set ONCE: `verts` feeds both the driveway mesh's
-      // Float32BufferAttribute and, via `gravel`, the trimesh collider below. A
-      // second subtraction in either consumer would offset the shell from its
-      // collider.
-      for (let i = 0; i < verts.length; i += 3) {
-        verts[i] -= ox;
-        verts[i + 2] -= oz;
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-      geo.setIndex(tris);
-      geo.computeVertexNormals();
-      // Closed solid with outward winding: default front-face culling is correct,
-      // so no DoubleSide workaround is needed here.
-      const mesh = new THREE.Mesh(geo, gravelMat);
-      group.add(mesh);
-      geos.push(geo);
-      gravel.addIndexed(verts, tris);
-    }
-
-    // --- Workbench (solid block; small parts rest on top) ---
-
 
     // --- Junk: oil drums, tyre stack, jack stands ---
     //
     // On the YARD now, not beside the garage door: the building is the catalogue's
     // and fills its own footprint, so anything this file adds would stand inside a
-    // wall. The yard is the strip the pad keeps in front of the garage for exactly
+    // wall. The yard is the strip beyond the garage's own footprint kept for exactly
     // this, and the cluster reads the same from the drive.
+    //
+    // Bare ground, not a shared floor height: there is no pad any more, so each prop
+    // samples the terrain under its own feet, the same as the water tank and the
+    // fence below have always done.
     const yardU = PAD_U1 - YARD_M * 0.55;
     const [d1x, d1z] = L.toWorld(yardU, GARAGE_CENTRE_V - 1.2);
     const [d2x, d2z] = L.toWorld(yardU + 0.6, GARAGE_CENTRE_V - 0.7);
     const [d3x, d3z] = L.toWorld(yardU, GARAGE_CENTRE_V - 2.2);
-    cylinder(bctx, d1x, fy + 0.45, d1z, 0.32, 0.9, drumMatA, 18, concrete);
-    cylinder(bctx, d2x, fy + 0.45, d2z, 0.32, 0.9, drumMatB, 18, concrete);
-    cylinder(bctx, d3x, fy + 0.45, d3z, 0.32, 0.9, drumMatA, 18, concrete);
+    const d1y = ctx.terrain.heightAt(d1x, d1z, HOMESTEAD_S);
+    const d2y = ctx.terrain.heightAt(d2x, d2z, HOMESTEAD_S);
+    const d3y = ctx.terrain.heightAt(d3x, d3z, HOMESTEAD_S);
+    cylinder(bctx, d1x, d1y + 0.45, d1z, 0.32, 0.9, drumMatA, 18, concrete);
+    cylinder(bctx, d2x, d2y + 0.45, d2z, 0.32, 0.9, drumMatB, 18, concrete);
+    cylinder(bctx, d3x, d3y + 0.45, d3z, 0.32, 0.9, drumMatA, 18, concrete);
 
     // Tyre stack: three tyres lying flat.
     const [tx, tz] = L.toWorld(yardU - 0.3, GARAGE_CENTRE_V - 2.8);
+    const ty = ctx.terrain.heightAt(tx, tz, HOMESTEAD_S);
     for (let k = 0; k < 3; k++) {
-      cylinder(bctx, tx, fy + 0.09 + k * 0.18, tz, 0.35, 0.18, tyreMat, 20, concrete);
+      cylinder(bctx, tx, ty + 0.09 + k * 0.18, tz, 0.35, 0.18, tyreMat, 20, concrete);
     }
 
     // Jack stands: small tripods on the yard, where the car's wheels will go.
     const [j1x, j1z] = L.toWorld(yardU + 0.9, GARAGE_CENTRE_V + 1.6);
     const [j2x, j2z] = L.toWorld(yardU + 0.9, GARAGE_CENTRE_V + 3.0);
-    visual(bctx, [ [j1x - 0.14, fy, j1z - 0.14], [j1x + 0.14, fy + 0.5, j1z + 0.14] ], metalMat);
-    visual(bctx, [ [j2x - 0.14, fy, j2z - 0.14], [j2x + 0.14, fy + 0.5, j2z + 0.14] ], metalMat);
+    const j1y = ctx.terrain.heightAt(j1x, j1z, HOMESTEAD_S);
+    const j2y = ctx.terrain.heightAt(j2x, j2z, HOMESTEAD_S);
+    visual(bctx, [ [j1x - 0.14, j1y, j1z - 0.14], [j1x + 0.14, j1y + 0.5, j1z + 0.14] ], metalMat);
+    visual(bctx, [ [j2x - 0.14, j2y, j2z - 0.14], [j2x + 0.14, j2y + 0.5, j2z + 0.14] ], metalMat);
 
     // --- Water tank beside the house ---
     {
@@ -718,10 +494,12 @@ export class HomesteadProvider implements ChunkProvider {
 
     // --- Lights: modest pools at the garage door. Born dark; the LightBudget
     // (src/render/lights.ts) enables them only at night and only while the
-    // homestead is within the light cutoff of the camera. ---
+    // homestead is within the light cutoff of the camera. On the tilted floor's own
+    // height at each light's point, not the bare yard: both hang right at the
+    // building, where the floor is what is actually underfoot. ---
     const [glx, glz] = L.toWorld(GARAGE_CENTRE_U + 2.0, GARAGE_CENTRE_V);
     const garageLight = new THREE.PointLight(0xffd9a0, HOMESTEAD_LAMP_INTENSITY, 16, 2);
-    garageLight.position.set(glx - ox, fy + 2.3, glz - oz);
+    garageLight.position.set(glx - ox, L.floorYAt(GARAGE_CENTRE_U + 2.0, GARAGE_CENTRE_V) + 2.3, glz - oz);
     garageLight.name = 'garageLight';
     garageLight.visible = false;
     group.add(garageLight);
@@ -729,7 +507,7 @@ export class HomesteadProvider implements ChunkProvider {
     // The yard lamp, which is what makes the compound read as inhabited from the road.
     const [dlx, dlz] = L.toWorld(GARAGE_DOOR_U - 1.2, GARAGE_CENTRE_V);
     const doorLight = new THREE.PointLight(0xffe0b0, HOMESTEAD_LAMP_INTENSITY, 12, 2);
-    doorLight.position.set(dlx - ox, fy + 2.5, dlz - oz);
+    doorLight.position.set(dlx - ox, L.floorYAt(GARAGE_DOOR_U - 1.2, GARAGE_CENTRE_V) + 2.5, dlz - oz);
     doorLight.name = 'doorLight';
     doorLight.visible = false;
     group.add(doorLight);
@@ -737,21 +515,15 @@ export class HomesteadProvider implements ChunkProvider {
     // --- Physics ---
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-    if (ctx.hasPhysics) {
-      const buildTrimesh = (acc: TrimeshAcc, surface: SurfaceType): void => {
-        if (acc.idx.length === 0) return;
-        const collider = ctx.physics.addStaticTrimesh(
-          new Float32Array(acc.verts),
-          new Uint32Array(acc.idx),
-          surface,
-        );
-        colliders.push(collider);
-        const bodyRef = collider.parent();
-        if (bodyRef) bodies.push(bodyRef);
-      };
-      buildTrimesh(concrete, SurfaceType.Concrete);
-      buildTrimesh(gravel, SurfaceType.Gravel);
-      buildTrimesh(bank, SurfaceType.Sand);
+    if (ctx.hasPhysics && concrete.idx.length > 0) {
+      const collider = ctx.physics.addStaticTrimesh(
+        new Float32Array(concrete.verts),
+        new Uint32Array(concrete.idx),
+        SurfaceType.Concrete,
+      );
+      colliders.push(collider);
+      const bodyRef = collider.parent();
+      if (bodyRef) bodies.push(bodyRef);
     }
 
     return {
@@ -790,8 +562,14 @@ export function homesteadSpawn(
   const L = homesteadLayout(road, terrain);
   // Alongside the parked car, one bay toward the garage's -v wall.
   const [x, z] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V - 2.2);
+  // On the bare ground directly underfoot, not `L.floorYAt`: the building's own
+  // floor is deliberately sunk below grade wherever it has to be to keep every
+  // wall clear of floating (see `homesteadLayout`), so it is not a safe surface
+  // to teleport a fixed FEET position onto — it can sit meaningfully below the
+  // sand the player would actually be standing on at that exact spot.
+  const groundY = terrain.heightAt(x, z, HOMESTEAD_S) + SPAWN_CLEARANCE_M;
   // Facing out of the garage is the -away direction; yaw is measured from +Z.
-  return { x, y: L.floorY, z, yaw: Math.atan2(-L.ax, -L.az) };
+  return { x, y: groundY, z, yaw: Math.atan2(-L.ax, -L.az) };
 }
 
 /**
@@ -817,9 +595,10 @@ export function createStartingCar(world: GameWorld): CarState {
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
   const measure = carModelMeasure(def.id);
-  const carY = carSpawnYAboveGround(measure, L.floorY, GARAGE_CAR_DROP_METRES);
-  // The variant's own garage centre, so the car stands in the bay rather than beside it.
   const [cx, cz] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V);
+  // Ground under the car's own spot, for the same reason `homesteadSpawn` uses
+  // bare ground rather than `L.floorYAt`.
+  const carY = carSpawnYAboveGround(measure, terrain.heightAt(cx, cz, HOMESTEAD_S), GARAGE_CAR_DROP_METRES);
   // Face the door: body +Z -> "toward the road" (-away), i.e. world +X here.
   const yaw = Math.atan2(-L.ax, -L.az);
   const half = yaw / 2;
@@ -869,8 +648,8 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
   const terrain = new Terrain(world.seed, road);
   const L = homesteadLayout(road, terrain);
 
-  // The can stands on the yard beside the garage door, where the player cannot miss
-  // it on the way out.
+  // The can stands on the yard beside the garage door, on bare ground like the rest
+  // of the yard's junk, where the player cannot miss it on the way out.
   const [canX, canZ] = L.toWorld(
     PAD_U1 - YARD_M * 0.5 + (hash01(world.seed, 0x94d, 2) - 0.5) * 0.2,
     GARAGE_CENTRE_V + 0.4 + (hash01(world.seed, 0x95d, 2) - 0.5) * 0.2,
@@ -884,7 +663,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },
     canX,
-    L.floorY + 0.28,
+    terrain.heightAt(canX, canZ, HOMESTEAD_S) + 0.28,
     canZ,
   );
 
@@ -896,19 +675,22 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
   //
   // A point on the shelf is given as a distance ALONG it and a distance across it, in the
   // shelf's own frame, and `variantToUV` resolves that into the homestead's. The plank
-  // heights come from the catalogue that builds the shelf, so moving or restacking it
-  // takes the items with it instead of leaving them in the sand.
-  const shelfAt = (along: number, across: number): [number, number] => {
-    // `variantToUV` answers in the homestead's own frame; `toWorld` is what turns that
-    // into somewhere to stand.
-    const [su, sv] = L.variantToUV(
+  // heights come from the catalogue that builds the shelf, added onto `floorYAt` AT THE
+  // SHELF'S OWN POINT rather than one shared floor height, so a plank at the far end of a
+  // tilted shelf still sits on the floor height under it, not the one under the near end.
+  const shelfUV = (along: number, across: number): [number, number] =>
+    L.variantToUV(
       STARTER_GARAGE_SHELF.centreX + across,
       STARTER_GARAGE_SHELF.centreZ - along,
     );
+  const shelfAt = (along: number, across: number): [number, number] => {
+    const [su, sv] = shelfUV(along, across);
     return L.toWorld(su, sv);
   };
-  const topPlank = L.floorY + SHELF_PLANK_TOP(3);
-  const middlePlank = L.floorY + SHELF_PLANK_TOP(2);
+  const shelfPlankY = (along: number, across: number, plankTop: number): number => {
+    const [su, sv] = shelfUV(along, across);
+    return L.floorYAt(su, sv) + plankTop;
+  };
 
   // The top plank, because the camera is the tallest thing here and the plank above a
   // lower one is only 0.37 m away — which a camera fits under only just.
@@ -920,7 +702,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
       framesRemaining: CAMERA_FRAME_LIMIT,
     },
     cameraX,
-    topPlank + 0.14,
+    shelfPlankY(-0.9, 0.02, SHELF_PLANK_TOP(3)) + 0.14,
     cameraZ,
   );
   const [watchX, watchZ] = shelfAt(-0.3, -0.02);
@@ -930,21 +712,22 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
       id: world.generatedPartId('home_item', 0, 4),
     },
     watchX,
-    topPlank + 0.08,
+    shelfPlankY(-0.3, -0.02, SHELF_PLANK_TOP(3)) + 0.08,
     watchZ,
   );
 
   // Two complete doses wait in the garage together: enough to teach the item's
   // value without making the rest of the road's rare POI finds redundant.
   for (let i = 0; i < 2; i++) {
-    const [medicineX, medicineZ] = shelfAt(0.4 + i * 0.55, 0);
+    const along = 0.4 + i * 0.55;
+    const [medicineX, medicineZ] = shelfAt(along, 0);
     loose.spawnItem(
       {
         type: 'medicine',
         id: world.generatedPartId('home_item', 0, 6 + i),
       },
       medicineX,
-      middlePlank + 0.12,
+      shelfPlankY(along, 0, SHELF_PLANK_TOP(2)) + 0.12,
       medicineZ,
     );
   }
@@ -952,8 +735,6 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
 
   // The ball starts on bare ground beside the drive, with the centre one radius
   // above the terrain so it neither floats nor spawns intersecting the sand.
-  // Off the pad, on the sand: the ball belongs on bare ground, and the pad's near
-  // edge is where bare ground now starts.
   const [ballX, ballZ] = L.toWorld(PAD_U0 - 1.0, GARAGE_CENTRE_V + 4.0);
   loose.spawnItem(
     {

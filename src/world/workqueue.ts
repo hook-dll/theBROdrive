@@ -35,7 +35,7 @@ export class WorldWorkScheduler {
 
   beginFrame(frameId: number): void {
     if (frameId === this.activeFrame) return;
-    if (import.meta.env.DEV && Number.isFinite(this.activeFrame) && this.frameWorstMs > 0) {
+    if (import.meta.env?.DEV && Number.isFinite(this.activeFrame) && this.frameWorstMs > 0) {
       console.debug(
         `[perf] streaming frame=${this.activeFrame} work=${this.workMs.toFixed(2)}ms ` +
         `worst=${this.frameWorstMs.toFixed(2)}ms job=${this.frameWorstTag ?? 'none'}`,

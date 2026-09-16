@@ -14,10 +14,11 @@
  * a property of the seed, not a guarantee; over a long enough stretch every variant
  * must actually appear, or some of the catalogue is content nobody will ever see.
  *
- * THE HOMESTEAD IS WHERE IT SAYS IT IS. The building sits on its pad, the starter car
- * stands inside the garage rather than beside it, the player spawns on the concrete,
- * and the drive reaches from the asphalt to the garage door. Those four are separate
- * constants in separate files, and nothing but this bench holds them together.
+ * THE HOMESTEAD IS WHERE IT SAYS IT IS. The building is tilted onto its own fitted
+ * ground plane, the starter car stands inside the garage rather than beside it, the
+ * player spawns on its floor, and the garage door lands where the drive from the
+ * road expects it. Those four are separate constants in separate files, and nothing
+ * but this bench holds them together.
  */
 
 import * as THREE from 'three';
@@ -41,8 +42,7 @@ import {
   STARTER_GARAGE_SHELF,
 } from '../src/world/poi-variants';
 import {
-  HOMESTEAD_BANK,
-  HOMESTEAD_PAD,
+  HOMESTEAD_FOOTPRINT,
   HomesteadProvider,
   createStartingCar,
   homesteadLayout,
@@ -69,8 +69,14 @@ const terrain = new Terrain(SEED, road);
 const MIN_VERGE_M = 10;
 /** The widest span the placement promises on top of it. */
 const MAX_VERGE_M = 22;
-/** Deepest a homestead slab may be before it is concrete poured to no purpose. */
-const MAX_PAD_DEPTH_M = 1.2;
+/**
+ * Worst residual the fitted ground plane may have before the compound's tilt is
+ * hiding real terrain the plane failed to fit, not just the ordinary slope this
+ * site is meant to absorb. `poi.ts`'s own catalogue measures 0.22-0.44 m across
+ * every other building; this compound is larger (39 m along the road) than any of
+ * them, so it is given headroom above that range rather than the same ceiling.
+ */
+const MAX_RESIDUAL_M = 0.6;
 
 // --- 1. every building clears the road ---------------------------------------
 {
@@ -178,142 +184,44 @@ const MAX_PAD_DEPTH_M = 1.2;
   // THE HOMESTEAD BELONGS AT THE ROAD, and this is the check for it.
   //
   // The terrain is fitted to the road only inside the 30 m corridor; past that the
-  // landscape's long bands return and keep their slope. So the pad's capacity to absorb
-  // uneven ground — its thickness plus its lift — is what limits how far out the compound
-  // may stand, and the relief under the pad is the number that decides it. Measured: 0.60 m
-  // at the road against 1.62 m fifty metres out, which the slab cannot answer for.
+  // landscape's long bands return and keep their slope. So it is the ground's own
+  // relief under the compound's footprint that limits how far out it may stand — the
+  // building is TILTED onto that ground rather than levelled on a slab, so a steeper
+  // site means a more tilted house, not a taller pad, and `MAX_RESIDUAL_M` is where
+  // "tilted" stops being the honest word for it.
   check(
-    HOMESTEAD_PAD.u0 < 30,
-    `the homestead's nearest edge is ${HOMESTEAD_PAD.u0.toFixed(1)} m from the centreline, ` +
+    HOMESTEAD_FOOTPRINT.u0 < 30,
+    `the homestead's nearest edge is ${HOMESTEAD_FOOTPRINT.u0.toFixed(1)} m from the centreline, ` +
       'outside the terrain corridor that is fitted to the road',
   );
   {
     const L = homesteadLayout(road, terrain);
     let min = Infinity;
     let max = -Infinity;
-    for (let u = HOMESTEAD_PAD.u0; u <= HOMESTEAD_PAD.u1; u += 2.5) {
-      for (let v = HOMESTEAD_PAD.v0; v <= HOMESTEAD_PAD.v1; v += 2.5) {
+    for (let u = HOMESTEAD_FOOTPRINT.u0; u <= HOMESTEAD_FOOTPRINT.u1; u += 2.5) {
+      for (let v = HOMESTEAD_FOOTPRINT.v0; v <= HOMESTEAD_FOOTPRINT.v1; v += 2.5) {
         const [x, z] = L.toWorld(u, v);
-        const y = terrain.heightAt(x, z, HOMESTEAD_PAD.s);
+        const y = terrain.heightAt(x, z, HOMESTEAD_FOOTPRINT.s);
         if (y < min) min = y;
         if (y > max) max = y;
       }
     }
     const spread = max - min;
 
-    // The slab reaches the ground BY CONSTRUCTION now, so the property that can still
-    // fail is depth: a pad whose underside has to reach 2 m down to meet the sand is
-    // 2 m of concrete poured to no purpose, and it is the measurement that says whether
-    // this site can hold a compound this size at all. What it can no longer do is read as
-    // a plinth — its edges are banked into the ground (see `HOMESTEAD_BANK`) — which is
-    // why this is a cost bound rather than an appearance one.
-    const depth = L.floorY - L.baseY;
+    // No pad to hide the ground's own relief in any more: the building follows it,
+    // and `plane.residual` is the honest number for how well one rigid tilt stands
+    // in for the terrain underneath — the most any point of real ground can still
+    // poke up past the plane the building is resting on.
     check(
-      depth <= MAX_PAD_DEPTH_M,
-      `the homestead pad has to be ${depth.toFixed(2)} m deep to reach the ground, past the ` +
-        `${MAX_PAD_DEPTH_M} m of concrete this site is worth — the ground is too sloped for a ` +
-        'compound this size, so move it nearer the road',
-    );
-    check(
-      L.baseY <= L.padMinGroundY,
-      `the pad's underside (${L.baseY.toFixed(2)} m) is above the lowest ground under it ` +
-        `(${L.padMinGroundY.toFixed(2)} m), so its downhill edge hangs in the air`,
+      L.plane.residual <= MAX_RESIDUAL_M,
+      `the homestead's fitted ground plane has a residual of ${L.plane.residual.toFixed(2)} m, ` +
+        `past the ${MAX_RESIDUAL_M} m this site is worth — the ground is too uneven for a ` +
+        'compound this size to sit on one tilt, so move it nearer the road',
     );
     console.log(
-      `  pad ground: ${min.toFixed(2)}..${max.toFixed(2)} m, spread ${spread.toFixed(2)} m, ` +
-        `slab ${depth.toFixed(2)} m deep`,
+      `  homestead ground: ${min.toFixed(2)}..${max.toFixed(2)} m, spread ${spread.toFixed(2)} m, ` +
+        `plane residual ${L.plane.residual.toFixed(2)} m, grade ${(L.plane.grade * 100).toFixed(1)}%`,
     );
-  }
-
-  // THE PAD'S EDGES ARE BANKED, and the two ways a bank can be wrong are both geometric.
-  //
-  // A bank whose run reaches past the pad's own verge lays a ridge across the road the
-  // player drives in on; a bank steeper than a person can walk is a cliff with a house on
-  // top. Both are numbers, so both are measured from the same terrain and frame the pad
-  // itself is.
-  {
-    const L = homesteadLayout(road, terrain);
-    const pad = HOMESTEAD_PAD;
-    const edges: { from: [number, number]; to: [number, number]; out: [number, number] }[] = [
-      { from: [pad.u0, pad.v0], to: [pad.u0, pad.v1], out: [-1, 0] },
-      { from: [pad.u1, pad.v0], to: [pad.u1, pad.v1], out: [1, 0] },
-      { from: [pad.u0, pad.v0], to: [pad.u1, pad.v0], out: [0, -1] },
-      { from: [pad.u0, pad.v1], to: [pad.u1, pad.v1], out: [0, 1] },
-    ];
-    let worstSlopeDeg = 0;
-    for (const edge of edges) {
-      for (let i = 0; i <= 8; i++) {
-        const f = i / 8;
-        const u = edge.from[0] + (edge.to[0] - edge.from[0]) * f + edge.out[0] * HOMESTEAD_BANK.run;
-        const v = edge.from[1] + (edge.to[1] - edge.from[1]) * f + edge.out[1] * HOMESTEAD_BANK.run;
-        const [x, z] = L.toWorld(u, v);
-        const drop = L.floorY - terrain.heightAt(x, z, HOMESTEAD_S);
-        const slope = Math.atan(Math.max(0, drop) / HOMESTEAD_BANK.run) * 180 / Math.PI;
-        if (slope > worstSlopeDeg) worstSlopeDeg = slope;
-        // The bank reaches the road only where the driveway is; everywhere else it must
-        // stop on the verge.
-        const onDrive = v > 0.7 && v < 5.1;
-        // A centimetre of grace, because the bank's outer edge is MEANT to land on the
-        // road edge exactly — the run is the width of the verge — and an exact equality
-        // decided by two independent floating-point paths is a coincidence, not a check.
-        if (!onDrive && u < roadEdge - 0.01) {
-          failures.push(
-            `the pad's bank reaches ${u.toFixed(2)} m from the centreline, inside the ` +
-              `${roadEdge.toFixed(2)} m of asphalt — it lays a ridge across the road`,
-          );
-          break;
-        }
-      }
-    }
-    check(
-      worstSlopeDeg < 35,
-      `the pad's bank is ${worstSlopeDeg.toFixed(1)} degrees at its steepest — a cliff, not a bank`,
-    );
-    console.log(
-      `  the pad's edges bank into the ground: steepest ${worstSlopeDeg.toFixed(1)} degrees, ` +
-        `filling the ${(pad.u0 - roadEdge).toFixed(1)} m verge and stopping at the asphalt`,
-    );
-  }
-
-  // And every face of the bank looks at the sky. The winding is decided by arithmetic in
-  // `bankData`, and a face pointing the other way is not a visible seam — it is a hole you
-  // fall through, from a camera that is level with it.
-  {
-    // Collected by traversal rather than by `getObjectByProperty`, which compares
-    // `userData` by reference and would have matched nothing — leaving the loop below
-    // skipped and the check passing while measuring nothing.
-    const banks: THREE.Mesh[] = [];
-    content!.group.traverse((object) => {
-      const mesh = object as THREE.Mesh;
-      if (mesh.isMesh && (mesh.userData as { poiBank?: boolean }).poiBank === true) banks.push(mesh);
-    });
-    check(banks.length === 1, `the homestead built ${banks.length} bank meshes, not one`);
-    const bankMesh = banks[0];
-    if (bankMesh?.geometry) {
-      const position = bankMesh.geometry.getAttribute('position');
-      const index = bankMesh.geometry.getIndex()!;
-      let down = 0;
-      const a = new THREE.Vector3();
-      const b = new THREE.Vector3();
-      const c = new THREE.Vector3();
-      for (let tri = 0; tri < index.count; tri += 3) {
-        a.fromBufferAttribute(position, index.getX(tri));
-        b.fromBufferAttribute(position, index.getX(tri + 1));
-        c.fromBufferAttribute(position, index.getX(tri + 2));
-        // The Y component of `(b - a) x (c - a)`, without normalising: three.js uses a
-        // counter-clockwise front face, and a triangle whose normal points at the sky has
-        // a positive Y. The sign was written the wrong way round here first, which
-        // reported all 80 faces as pointing down — worth remembering that a predicate is
-        // as likely to be wrong as the geometry it judges.
-        const ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
-        if (ny <= 0) down++;
-      }
-      check(
-        index.count > 0 && down === 0,
-        `${down} of the bank's ${index.count / 3} faces point at the ground`,
-      );
-      console.log(`  the bank is ${index.count / 3} faces, all of them facing the sky`);
-    }
   }
 
   // The car belongs INSIDE the building, not on the lawn: its centre must be within
@@ -332,13 +240,13 @@ const MAX_PAD_DEPTH_M = 1.2;
     'the starter car does not stand inside the building footprint');
   check(carBounds.min.y > 0, `the car spawns below ground at y=${car.y}`);
 
-  // The spawn is a FEET position and must stand ON THE CONCRETE.
+  // The spawn is a FEET position and must stand ON THE FLOOR.
   //
-  // Not by comparing against the provider's own bounding box: that box includes the
-  // driveway wedge, whose buried underside reaches a slab below the road, so it says
-  // nothing about the floor. The honest comparison is with the TERRAIN — the pad is
-  // poured above the highest ground under the building, so a spawn on the pad is
-  // strictly above the sand there and not far above it.
+  // Not by comparing against the provider's own bounding box: that box is the whole
+  // building's extent, roof and all, so it says nothing about where the floor itself
+  // is. The honest comparison is with the TERRAIN — the building is sunk by the
+  // fitted plane's own residual, so a spawn on its floor is strictly above the sand
+  // directly under it, and not far above it.
   const groundAtSpawn = terrain.heightAt(spawn.x, spawn.z, 116);
   check(
     spawn.y > groundAtSpawn,
@@ -347,7 +255,7 @@ const MAX_PAD_DEPTH_M = 1.2;
   check(
     spawn.y - groundAtSpawn < 3,
     `the player spawns ${(spawn.y - groundAtSpawn).toFixed(2)} m above the ground — ` +
-      'higher than a slab, so not on the pad',
+      'higher than a floor should be',
   );
   // And under the building's roof, in the garage, not on the lawn beside it.
   const standing = new THREE.Box3().setFromCenterAndSize(
@@ -470,7 +378,7 @@ const MAX_PAD_DEPTH_M = 1.2;
       // Above a plank's own top surface, and within an object's height of it: on the
       // shelf, neither sunk into a plank nor hovering over one.
       const heights = [0, 1, 2, 3]
-        .map((i) => item.y - (L.floorY + SHELF_PLANK_TOP(i)))
+        .map((i) => item.y - (L.floorYAt(item.u, item.v) + SHELF_PLANK_TOP(i)))
         .filter((d) => d > -0.03 && d < 0.3);
       check(
         heights.length === 1,
