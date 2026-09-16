@@ -277,10 +277,24 @@ const WIRE_SAG_CLEARANCE = 0.55;
 //    happened to sit on — grey litter — instead of warm mass catching the same low
 //    sun as the dunes. It is intentionally warmer than gravel (0x7a6c56) and darker
 //    than sand (0xbf9f6b), so a boulder reads against both.
-//  - Only the saguaro is green, and barely: a desiccated sage rather than leaf. The
-//    barrel form gets its own dry khaki, because at 0.8-1.7 scale it is a low round
-//    blob, and in green it reads as a lawn shrub that wandered into the desert.
-const matCactus = new THREE.MeshStandardMaterial({ color: 0x6d7d5c, roughness: 0.95, metalness: 0 });
+//  - The saguaro is the one green thing here, and it is far paler than a leaf: the
+//    pale sage green of a real Carnegiea gigantea, read off a photograph rather than
+//    guessed at. It is flat shaded because the flutes below are what a saguaro IS at
+//    any distance, and flat shading is what makes them read as ribs catching the low
+//    sun down one side instead of as a smooth tube. The barrel form gets its own dry
+//    khaki, because at 0.8-1.7 scale it is a low round blob, and in green it reads as
+//    a lawn shrub that wandered into the desert.
+const matCactus = new THREE.MeshStandardMaterial({
+  // Set against the RUNNING GAME, not a swatch: the desert sun here is bright enough
+  // that a colour picked off a photograph comes out neon — brighter than the sand the
+  // plant stands on, which the eye reads as signage rather than as a plant. The sample
+  // is cut by a tenth for that reason: still unmistakably sage, and now under the
+  // ground's own albedo instead of on top of it.
+  color: 0x7d9a63,
+  roughness: 0.95,
+  metalness: 0,
+  flatShading: true,
+});
 const matScrub = new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 });
 const matDeadStick = new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 });
 const matRock = new THREE.MeshStandardMaterial({
@@ -401,6 +415,18 @@ interface PropForm {
   maxScale: number;
   /** Relative selection weight inside its surface's form list. 1 is an ordinary member. */
   readonly weight: number;
+  /**
+   * Per-instance shape variation amplitudes, absent on everything that is not a plant.
+   * A boulder is a boulder; a tree is never the same tree twice.
+   */
+  readonly vary?: {
+    /** Height multiplier spread, ±: 0.16 means every instance stands 0.84 to 1.16 of the authored height. */
+    readonly stretch: number;
+    /** Width multiplier spread, ± the same way. */
+    readonly spread: number;
+    /** Largest lean from vertical, radians. */
+    readonly lean: number;
+  };
 }
 export type DesertPropForm = PropForm;
 
@@ -427,25 +453,47 @@ function deformIcosahedron(seed: number, squashY: number): THREE.BufferGeometry 
   return geo;
 }
 
+/**
+ * A fluted column: the cactus silhouette. A saguaro is not a cylinder — it is a ring
+ * of deep vertical ribs, and at any distance those ribs ARE the plant, because they
+ * are what catches the low sun down one side. The radius is modulated by a cosine of
+ * the angle, so the flutes cost nothing but a few more radial segments.
+ */
+function ribbedColumn(rTop: number, rBottom: number, height: number, segments: number, ribs: number, depth: number): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(rTop, rBottom, height, segments, 1);
+  const position = g.getAttribute('position');
+  for (let i = 0; i < position.count; i++) {
+    const x = position.getX(i);
+    const z = position.getZ(i);
+    const radius = Math.hypot(x, z);
+    if (radius < 1e-5) continue;
+    const flute = 1 + depth * Math.cos(ribs * Math.atan2(z, x));
+    position.setX(i, x * flute);
+    position.setZ(i, z * flute);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 function buildSaguaro(): THREE.BufferGeometry {
-  const trunk = new THREE.CylinderGeometry(0.16, 0.22, 2.6, 8, 1);
-  trunk.translate(0, 1.3, 0);
-  const arm = (radius: number, length: number) => new THREE.CylinderGeometry(radius, radius, length, 7, 1);
+  const trunk = ribbedColumn(0.27, 0.375, 6.4, 18, 9, 0.08);
+  trunk.translate(0, 3.2, 0);
+  const arm = (radius: number, length: number) => ribbedColumn(radius, radius, length, 12, 6, 0.07);
 
   // Right arm: a short horizontal stub then a vertical riser, the classic shape.
-  const rStub = arm(0.075, 0.45);
+  const rStub = arm(0.13, 0.8);
   rStub.rotateZ(Math.PI / 2);
-  rStub.translate(0.42, 1.5, 0);
-  const rRise = arm(0.07, 0.85);
-  rRise.translate(0.62, 1.92, 0);
+  rStub.translate(0.7, 3.5, 0);
+  const rRise = arm(0.12, 2.1);
+  rRise.translate(1.05, 4.55, 0);
 
   // Left arm, higher, mirrored to the far side.
-  const lStub = arm(0.075, 0.45);
+  const lStub = arm(0.13, 0.8);
   lStub.rotateZ(Math.PI / 2);
   lStub.rotateY(Math.PI);
-  lStub.translate(-0.42, 1.75, 0);
-  const lRise = arm(0.07, 0.9);
-  lRise.translate(-0.62, 2.17, 0);
+  lStub.translate(-0.7, 4.1, 0);
+  const lRise = arm(0.12, 2.1);
+  lRise.translate(-1.05, 5.15, 0);
 
   return mergeGeometries([trunk, rStub, rRise, lStub, lRise]);
 }
@@ -572,8 +620,9 @@ function canopyPad(
   x: number,
   y: number,
   z: number,
+  detail = 0,
 ): THREE.BufferGeometry {
-  const g = mergeVertices(new THREE.IcosahedronGeometry(radius, 0));
+  const g = mergeVertices(new THREE.IcosahedronGeometry(radius, detail));
   g.scale(1, flatten, 1);
   g.translate(x, y, z);
   return g;
@@ -601,38 +650,54 @@ function standTo(geometry: THREE.BufferGeometry, height: number): THREE.BufferGe
 /**
  * THE SOCOTRA DRAGON TREE, Dracaena cinnabari.
  *
- * One silhouette is the whole species and nothing else in this desert has it: a stout
- * pale trunk that forks in two, four times over, into forty-five limbs whose tips all
- * reach the SAME height, and the canopy rides those tips as separate tufts. So the
- * crown finishes WIDER THAN THE TREE IS TALL, and the fan of forks stays visible
- * underneath it — the gaps between the tufts are the point, not an economy.
+ * One trunk carries most of the height: a single tall stout column standing alone from
+ * the ground all the way to the crown. THAT column is what identifies the plant — a tree
+ * that forks at the ground is a shrub, not a Dracaena. Only just under the crown does the
+ * trunk break into a short fork band, and there it doubles FIVE times over, five limbs to
+ * ten to twenty to forty to eighty, so a dense basket fans out fast ABOVE the column and
+ * is seen through and under. The crown is not a lens laid over the basket: its rim IS the
+ * tips' own tufts, so every fork and every tip reads from outside instead of the whole
+ * plant being swallowed by an overhanging mat.
  */
 function buildDragonTree(): THREE.BufferGeometry {
-  const bark = 0xa2957f;
-  const canopy = 0x5c6b45;
+  const bark = 0x87796a;
+  // On screen, not in the swatch: vertex colours here are display-space (see `paint`),
+  // so this IS what the crown looks like — a dry olive, not a leaf green. Cut by a
+  // tenth from the olive it was tuned at, for the saguaro's reason: in a scatter where
+  // every other form is sand, rock or khaki, a plant's green is the one thing that
+  // reads as a signal, and a landmark may not out-read the ground it stands on.
+  const canopy = 0x5e7145;
   const parts: THREE.BufferGeometry[] = [
-    paint(new THREE.CylinderGeometry(0.46, 0.66, 2.15, 10, 1).translate(0, 1.07, 0), bark),
+    paint(new THREE.CylinderGeometry(0.44, 0.66, 3.4, 12, 1).translate(0, 1.7, 0), bark),
   ];
   const tips: Array<[number, number, number]> = [];
-  // Four levels of dichotomous forks. Each is shorter, thinner and more tilted than
-  // its parent, and carries the parent's own azimuth so the fan spreads outward
-  // instead of doubling back through itself.
+  // Five doublings, 5 -> 10 -> 20 -> 40 -> 80 limbs, every split inside a short band at the
+  // TOP of that column. Each is shorter, thinner and more tilted than its parent, and
+  // carries the parent's own azimuth so the fan spreads outward instead of doubling back
+  // through itself; the deepest levels are three-segment tubes, cheap to draw in bulk.
   const levels = [
-    { tilt: 0.5, length: 1.5, rBase: 0.3, rTip: 0.22, segments: 6, spread: 0 },
-    { tilt: 0.72, length: 1.15, rBase: 0.2, rTip: 0.145, segments: 5, spread: 0.52 },
-    { tilt: 1.0, length: 1.0, rBase: 0.13, rTip: 0.09, segments: 4, spread: 0.45 },
-    { tilt: 1.18, length: 0.7, rBase: 0.08, rTip: 0.05, segments: 4, spread: 0.38 },
+    { tilt: 0.80, length: 1.15, rBase: 0.3, rTip: 0.22, segments: 6, spread: 0 },
+    { tilt: 1.00, length: 0.90, rBase: 0.2, rTip: 0.15, segments: 5, spread: 0.5 },
+    { tilt: 1.12, length: 0.72, rBase: 0.13, rTip: 0.095, segments: 4, spread: 0.44 },
+    { tilt: 1.25, length: 0.62, rBase: 0.085, rTip: 0.06, segments: 3, spread: 0.36 },
+    { tilt: 1.35, length: 0.5, rBase: 0.055, rTip: 0.04, segments: 3, spread: 0.3 },
   ];
   let nodes: Array<{ x: number; y: number; z: number; az: number }> = [];
-  for (let i = 0; i < 3; i++) nodes.push({ x: 0, y: 2.1, z: 0, az: (i * Math.PI * 2) / 3 });
+  for (let i = 0; i < 5; i++) nodes.push({ x: 0, y: 3.35, z: 0, az: i * (Math.PI * 2 / 5) });
   for (let level = 0; level < levels.length; level++) {
     const { tilt, length, rBase, rTip, segments, spread } = levels[level]!;
     const grown: Array<{ x: number; y: number; z: number; az: number }> = [];
     for (const node of nodes) {
+      // Identical tilt and length at a level puts all sixteen descendants of a primary
+      // on one ring at one height, which is one silhouette rather than sixteen branches:
+      // the first child of every fork leans less than its parent and the second more, so
+      // the tips land on two rings and the basket reads as branch on branch.
       const azimuths = level === 0 ? [node.az] : [node.az - spread, node.az + spread];
-      for (const az of azimuths) {
-        parts.push(paint(limb(node.x, node.y, node.z, tilt, az, length, rBase, rTip, segments), bark));
-        const [tx, ty, tz] = limbTip(node.x, node.y, node.z, tilt, az, length);
+      for (let c = 0; c < azimuths.length; c++) {
+        const az = azimuths[c]!;
+        const childTilt = level === 0 ? tilt : tilt * (c === 0 ? 0.88 : 1.12);
+        parts.push(paint(limb(node.x, node.y, node.z, childTilt, az, length, rBase, rTip, segments), bark));
+        const [tx, ty, tz] = limbTip(node.x, node.y, node.z, childTilt, az, length);
         grown.push({ x: tx, y: ty, z: tz, az });
       }
     }
@@ -641,14 +706,18 @@ function buildDragonTree(): THREE.BufferGeometry {
   }
   let crownY = 0;
   for (const [, ty] of tips) crownY += ty;
-  crownY = crownY / tips.length + 0.28;
+  crownY = crownY / tips.length + 0.18;
+  // ONE mat closes the middle of the crown out to the inner tips, hung at the mean tip
+  // height so it sits INSIDE the tips and reads as the crown of a column rather than a cap
+  // laid on top of it, and eighty round clumps — each one a ball, not a plate, and smaller
+  // than the branch that carries it — sit on every tip: the mat reaches the ring of clumps
+  // with no bare annulus between them, so the rim stays torn while the crown is never
+  // perforated and no ground shows through.
+  parts.push(paint(canopyPad(2.7, 0.28, 0, crownY, 0, 1), canopy));
   for (let i = 0; i < tips.length; i++) {
     const [tx, ty, tz] = tips[i]!;
-    // Alternating heights: a rim at one level reads as a saucer, not as leaves.
-    parts.push(paint(canopyPad(0.68, 0.4, tx, ty + (i % 2 === 0 ? 0.1 : 0.24), tz), canopy));
+    parts.push(paint(canopyPad(0.65, 0.6, tx, ty + 0.06, tz), canopy));
   }
-  // The middle of the fan has no tips of its own; one pad closes it.
-  parts.push(paint(canopyPad(1.1, 0.24, 0, crownY + 0.05, 0), canopy));
   return standTo(mergeGeometries(parts)!, 6.3);
 }
 
@@ -660,7 +729,9 @@ function buildDragonTree(): THREE.BufferGeometry {
  */
 function buildBaobab(): THREE.BufferGeometry {
   const bark = 0x9a8b74;
-  const canopy = 0x55603f;
+  // A tenth down, like the dragon tree's olive: the two crowns are the only green in
+  // the scatter and neither may out-read the sand between them.
+  const canopy = 0x49522f;
   // The lathe is open at top and bottom: the foot stands in sand and the crown cap
   // below covers the top, so neither opening is ever seen.
   const profile = [
@@ -729,7 +800,7 @@ let _sandForms: PropForm[] | null = null;
 function sandForms(): PropForm[] {
   if (!_sandForms) {
     _sandForms = [
-      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.24, height: 2.6, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1 },
+      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.4, height: 6.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1, vary: { stretch: 0.18, spread: 0.1, lean: 0.07 } },
       { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7, weight: 1 },
       { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5, weight: 1 },
       trunkForm(),
@@ -738,10 +809,10 @@ function sandForms(): PropForm[] {
       // ordinary member, so a driver can cross minutes of desert without meeting one.
       // `baseRadius` is the trunk at its foot AFTER `standTo`, because the capsule
       // collider's radius is derived from it.
-      { id: 'dragontree', geometry: buildDragonTree(), material: matPlant, baseRadius: 0.82, height: 6.3, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.85, maxScale: 1.2, weight: 0.18 },
+      { id: 'dragontree', geometry: buildDragonTree(), material: matPlant, baseRadius: 0.82, height: 6.3, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.85, maxScale: 1.2, weight: 0.18, vary: { stretch: 0.16, spread: 0.18, lean: 0.1 } },
       // Rarer still, and the capsule is what makes nine metres of trunk a wall rather
       // than scenery.
-      { id: 'baobab', geometry: buildBaobab(), material: matPlant, baseRadius: 2.04, height: 9.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.8, maxScale: 1.15, weight: 0.1 },
+      { id: 'baobab', geometry: buildBaobab(), material: matPlant, baseRadius: 2.04, height: 9.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.8, maxScale: 1.15, weight: 0.1, vary: { stretch: 0.12, spread: 0.2, lean: 0.06 } },
     ];
   }
   return _sandForms;
@@ -811,11 +882,11 @@ export interface PropPiece {
 }
 
 function armPiece(mirror: number): THREE.BufferGeometry {
-  const stub = new THREE.CylinderGeometry(0.075, 0.075, 0.45, 6, 1);
+  const stub = ribbedColumn(0.13, 0.13, 0.8, 12, 6, 0.07);
   stub.rotateZ(Math.PI / 2);
-  stub.translate(-0.2 * mirror, -0.22, 0);
-  const rise = new THREE.CylinderGeometry(0.07, 0.07, 0.86, 6, 1);
-  rise.translate(0, 0.2, 0);
+  stub.translate(-0.35 * mirror, -1.02, 0);
+  const rise = ribbedColumn(0.12, 0.12, 2.1, 12, 6, 0.07);
+  rise.translate(0, 0.05, 0);
   return mergeGeometries([stub, rise]);
 }
 
@@ -841,12 +912,16 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
       return g;
     };
     _pieces = {
+      // Three trunk lifts and two arms, cut at the joints a real column fails at. The
+      // masses are still far under the tonne a real saguaro of this size weighs, ON
+      // PURPOSE, for the reason given above the interface: a tonne of anything stops a
+      // car dead, and these pieces exist so the car WALKS THROUGH the fallen plant.
       saguaro: [
-        { geometry: new THREE.CylinderGeometry(0.2, 0.225, 0.85, 8, 1), material: matCactus, offset: [0, 0.425, 0], capsule: [0.42, 0.21], mass: 26 },
-        { geometry: new THREE.CylinderGeometry(0.18, 0.2, 0.9, 8, 1), material: matCactus, offset: [0, 1.3, 0], capsule: [0.45, 0.19], mass: 19 },
-        { geometry: new THREE.CylinderGeometry(0.155, 0.18, 0.85, 8, 1), material: matCactus, offset: [0, 2.175, 0], capsule: [0.42, 0.17], mass: 15 },
-        { geometry: armPiece(1), material: matCactus, offset: [0.62, 1.72, 0], capsule: [0.43, 0.09], mass: 7 },
-        { geometry: armPiece(-1), material: matCactus, offset: [-0.62, 1.97, 0], capsule: [0.45, 0.09], mass: 7 },
+        { geometry: ribbedColumn(0.3, 0.375, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 1.05, 0], capsule: [1.05, 0.33], mass: 60 },
+        { geometry: ribbedColumn(0.29, 0.3, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 3.15, 0], capsule: [1.05, 0.3], mass: 45 },
+        { geometry: ribbedColumn(0.27, 0.29, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 5.25, 0], capsule: [1.05, 0.28], mass: 34 },
+        { geometry: armPiece(1), material: matCactus, offset: [1.05, 4.55, 0], capsule: [1.05, 0.14], mass: 16 },
+        { geometry: armPiece(-1), material: matCactus, offset: [-1.05, 5.15, 0], capsule: [1.05, 0.14], mass: 16 },
       ],
       barrel: [
         { geometry: lump(0.19), material: matScrub, offset: [0.1, 0.12, 0.05], capsule: [0.06, 0.16], mass: 4 },

@@ -72,6 +72,12 @@ const ROCK_COLLIDER_MIN = 0.55;
  */
 const RECYCLED_TILE_LIMIT = 12;
 const instanceScratch = new THREE.Object3D();
+/** Lean axis and the turn about it. A lean is measured from vertical in world space,
+ *  which the instance's own euler triple cannot express once it has a yaw. */
+const leanAxis = new THREE.Vector3();
+const leanQuat = new THREE.Quaternion();
+/** Collider centre offset in the instance's frame, carried out through its orientation. */
+const colliderOffset = new THREE.Vector3();
 let hullPoints = new Float32Array(0);
 
 interface DesertPropPlacement {
@@ -84,10 +90,51 @@ interface DesertPropPlacement {
   readonly ry: number;
   readonly rz: number;
   readonly scale: number;
+  /**
+   * Per-axis instance scale. A plant's `vary` moves the vertical axis and the two
+   * radial ones independently, so one dragon tree stands tall and narrow where the
+   * next is squat and broad. Every other form keeps all three at `scale`, which makes
+   * its matrix bit-identical to the uniform one it had before.
+   */
+  readonly sx: number;
+  readonly sy: number;
+  readonly sz: number;
+  /** Lean from vertical in radians, and the world-space horizontal axis it turns about. */
+  readonly lean: number;
+  readonly leanAxisX: number;
+  readonly leanAxisZ: number;
   renderScale: number;
   readonly radius: number;
   mesh: THREE.InstancedMesh | null;
   instance: number;
+}
+
+/**
+ * The one place an instance's orientation is decided.
+ *
+ * The lean is applied last and about a world-space horizontal axis, so it reads as an
+ * angle from vertical whatever yaw the instance happens to carry. Colliders are built
+ * through this same call: a tree that leans is met leaning, not as the upright capsule
+ * its authored geometry would suggest.
+ */
+function orientInstance(prop: DesertPropPlacement): void {
+  instanceScratch.rotation.set(prop.rx, prop.ry, prop.rz);
+  if (prop.lean === 0) return;
+  leanAxis.set(prop.leanAxisX, 0, prop.leanAxisZ);
+  leanQuat.setFromAxisAngle(leanAxis, prop.lean);
+  instanceScratch.quaternion.premultiply(leanQuat);
+}
+
+/**
+ * Position, orientation and per-axis scale of one instance, shrunk by a single fade
+ * factor. The fade multiplies every axis, so a fading plant shrinks towards its own
+ * foot rather than sliding along its lean the way a uniform scale would.
+ */
+function writeInstanceTransform(prop: DesertPropPlacement, fade: number): void {
+  instanceScratch.position.set(prop.x, prop.y, prop.z);
+  orientInstance(prop);
+  instanceScratch.scale.set(prop.sx * fade, prop.sy * fade, prop.sz * fade);
+  instanceScratch.updateMatrix();
 }
 
 interface DesertTile {
@@ -470,18 +517,43 @@ export class DesertTileStreamer {
       const scale =
         form.minScale +
         hash01(this.seed, PROP_TAG, tx, tz, i, 4) * (form.maxScale - form.minScale);
-      const radius = form.baseRadius * scale;
+      const vary = form.vary;
+      // Shape variation, drawn from the same (seed, tile, index) as the placement, so
+      // the tall tree the player passed at breakfast is the same tall tree on the way
+      // back. Slot numbers continue the sequence above: renumbering one would re-roll
+      // every prop in the world, and adding one must never shift the ones already used.
+      const stretch =
+        1 + (hash01(this.seed, PROP_TAG, tx, tz, i, 8) * 2 - 1) * (vary?.stretch ?? 0);
+      const spread =
+        1 + (hash01(this.seed, PROP_TAG, tx, tz, i, 9) * 2 - 1) * (vary?.spread ?? 0);
+      const lean = hash01(this.seed, PROP_TAG, tx, tz, i, 10) * (vary?.lean ?? 0);
+      // A lean needs a direction as well as a size; without one the axis is never read.
+      const leanAzimuth =
+        lean > 0 ? hash01(this.seed, PROP_TAG, tx, tz, i, 11) * Math.PI * 2 : 0;
+      const sx = scale * spread;
+      const sy = scale * stretch;
+      const radius = form.baseRadius * sx;
       const ground = heightFromTile(heights, localX, localZ);
+      // The sink hides the form's foot in the sand and is a vertical distance, so it
+      // follows the vertical factor: a squat instance buries the same share of the foot
+      // it actually has.
+      const sink = form.baseRadius * form.sink * sy;
       props.push({
         form,
         id,
         x: localX - DESERT_TILE_SIZE * 0.5,
-        y: ground - radius * form.sink,
+        y: ground - sink,
         z: localZ - DESERT_TILE_SIZE * 0.5,
         rx: form.rotate3d ? hash01(this.seed, PROP_TAG, tx, tz, i, 5) * Math.PI * 2 : 0,
         ry: hash01(this.seed, PROP_TAG, tx, tz, i, 6) * Math.PI * 2,
         rz: form.rotate3d ? hash01(this.seed, PROP_TAG, tx, tz, i, 7) * Math.PI * 2 : 0,
         scale,
+        sx,
+        sy,
+        sz: sx,
+        lean,
+        leanAxisX: Math.cos(leanAzimuth),
+        leanAxisZ: Math.sin(leanAzimuth),
         renderScale: scale,
         radius,
         mesh: null,
@@ -502,10 +574,7 @@ export class DesertTileStreamer {
       instances.receiveShadow = true;
       for (let i = 0; i < placements.length; i++) {
         const prop = placements[i]!;
-        instanceScratch.position.set(prop.x, prop.y, prop.z);
-        instanceScratch.rotation.set(prop.rx, prop.ry, prop.rz);
-        instanceScratch.scale.setScalar(prop.scale);
-        instanceScratch.updateMatrix();
+        writeInstanceTransform(prop, 1);
         instances.setMatrixAt(i, instanceScratch.matrix);
         prop.mesh = instances;
         prop.instance = i;
@@ -534,14 +603,12 @@ export class DesertTileStreamer {
         const t = Math.min(1, Math.max(0, (distance - DESERT_TILE_FADE_FULL) / fadeSpan));
         const smooth = t * t * (3 - 2 * t);
         const broken = propPieces(prop.form.id) && this.breakables?.isBroken(prop.id);
-        const renderScale = broken ? 0 : prop.scale * (1 - smooth);
+        const fade = broken ? 0 : 1 - smooth;
+        const renderScale = prop.scale * fade;
         if (Math.abs(renderScale - prop.renderScale) < 1e-4) continue;
 
         prop.renderScale = renderScale;
-        instanceScratch.position.set(prop.x, prop.y, prop.z);
-        instanceScratch.rotation.set(prop.rx, prop.ry, prop.rz);
-        instanceScratch.scale.setScalar(renderScale);
-        instanceScratch.updateMatrix();
+        writeInstanceTransform(prop, fade);
         prop.mesh.setMatrixAt(prop.instance, instanceScratch.matrix);
         prop.mesh.instanceMatrix.needsUpdate = true;
       }
@@ -905,8 +972,11 @@ export class DesertTileStreamer {
         z: tile.centreZ + prop.z,
         yaw: prop.ry,
         scale: prop.scale,
-        radius: prop.form.baseRadius * prop.scale * 0.8,
-        height: prop.form.height * prop.scale,
+        // The impact test is a coarse box around the standing prop, so it takes the
+        // footprint the instance actually has — spread wide or stretched tall — and
+        // not the authored one.
+        radius: prop.radius * 0.8,
+        height: prop.form.height * prop.sy,
         mesh: prop.mesh,
         instance: prop.instance,
         collider,
@@ -923,8 +993,14 @@ export class DesertTileStreamer {
     if (form.collider === 'none') return null;
 
     const rapier = this.physics.rapier;
+    // The collider is described in the instance's own frame and then carried into the
+    // world by the instance's orientation — the very one the drawn matrix uses — so a
+    // tree that leans, stretches or spreads is met where it is drawn. `colliderOffset`
+    // is the centre offset that frame shift needs; it stays zero for forms whose body
+    // already sits on the instance origin.
     let desc: RAPIER.ColliderDesc;
-    let y = prop.y;
+    orientInstance(prop);
+    colliderOffset.set(0, 0, 0);
     if (form.collider === 'hull') {
       if (prop.radius < ROCK_COLLIDER_MIN) return null;
       const position = form.geometry.getAttribute('position');
@@ -932,38 +1008,36 @@ export class DesertTileStreamer {
       if (hullPoints.length !== length) hullPoints = new Float32Array(length);
       for (let i = 0; i < position.count; i++) {
         const j = i * 3;
-        hullPoints[j] = position.getX(i) * prop.scale;
-        hullPoints[j + 1] = position.getY(i) * prop.scale;
-        hullPoints[j + 2] = position.getZ(i) * prop.scale;
+        hullPoints[j] = position.getX(i) * prop.sx;
+        hullPoints[j + 1] = position.getY(i) * prop.sy;
+        hullPoints[j + 2] = position.getZ(i) * prop.sz;
       }
       const hull = rapier.ColliderDesc.convexHull(hullPoints);
       if (!hull) throw new Error(`Desert prop ${form.id} did not produce a convex hull`);
       desc = hull;
-      instanceScratch.rotation.set(prop.rx, prop.ry, prop.rz);
       desc.setRotation(instanceScratch.quaternion);
     } else if (form.collider === 'box') {
       if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
       const [hx, hy, hz] = form.colliderHalf;
-      desc = rapier.ColliderDesc.cuboid(hx * prop.scale, hy * prop.scale, hz * prop.scale);
-      y += hy * prop.scale;
-      desc.setRotation({
-        x: 0,
-        y: Math.sin(prop.ry * 0.5),
-        z: 0,
-        w: Math.cos(prop.ry * 0.5),
-      });
+      desc = rapier.ColliderDesc.cuboid(hx * prop.sx, hy * prop.sy, hz * prop.sz);
+      colliderOffset.set(0, hy * prop.sy, 0).applyQuaternion(instanceScratch.quaternion);
+      desc.setRotation(instanceScratch.quaternion);
     } else {
-      const halfHeight = form.height * prop.scale * 0.42;
-      const radius = form.baseRadius * prop.scale * 0.8;
+      const halfHeight = form.height * prop.sy * 0.42;
+      const radius = form.baseRadius * prop.sx * 0.8;
       desc = rapier.ColliderDesc.capsule(halfHeight, radius);
-      y += halfHeight;
+      // A capsule is described about its middle, but an instance pivots about its foot:
+      // the centre goes through the same orientation, so a leaning trunk's collider
+      // leans with the trunk instead of swinging it out of the ground.
+      colliderOffset.set(0, halfHeight, 0).applyQuaternion(instanceScratch.quaternion);
+      desc.setRotation(instanceScratch.quaternion);
     }
 
     const body = this.physics.world.createRigidBody(
       rapier.RigidBodyDesc.fixed().setTranslation(
-        tile.centreX + prop.x - this.origin.x,
-        y,
-        tile.centreZ + prop.z - this.origin.z,
+        tile.centreX + prop.x + colliderOffset.x - this.origin.x,
+        prop.y + colliderOffset.y,
+        tile.centreZ + prop.z + colliderOffset.z - this.origin.z,
       ),
     );
     const collider = this.physics.world.createCollider(desc, body);
