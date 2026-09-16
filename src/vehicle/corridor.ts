@@ -568,10 +568,25 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
         blockDistance = obstacle.s;
         blockSpeed = obstacle.speed;
       }
-      // Anything that is not moving away from us has to be gone round, not
-      // followed: for the lateral decision that is what "blocked" means.
+      // ANYTHING THAT IS NOT MOVING AWAY FROM US HAS TO BE DEALT WITH — BUT ONLY
+      // SCENERY HAS TO BE GONE ROUND.
+      //
+      // `BLOCK_COST` is documented as the price of something IMMOVABLE, and until
+      // here it was charged to anything merely slower than desired, movable or not.
+      // That is right for the FRESH decision to overtake — it is the whole reason a
+      // slow leader with an empty opposing lane gets crossed rather than followed —
+      // and wrong for the return from one already under way: a driver aborting a
+      // pass is choosing to go back to following the very car it was passing, which
+      // this same price then read as "still practically a wall", worth exactly as
+      // much escaping as the real, closing oncoming car the driver was aborting
+      // FOR. Measured in play: a car that had barely started a pass, saw the
+      // oncoming lane taken, and could not price its own lane as home either —
+      // both directions "blocked" by the same number, so the cheapest line was
+      // neither, straddling the crown between two real cars for good. A body that
+      // can drive away by itself is followed, not routed round, and the ordinary
+      // speed plan already prices following it — see `SLOW_COST_PER_MPS` below.
       if (obstacle.speed >= desiredSpeed - MIN_ADVANTAGE_MPS) continue;
-      if (obstacle.s < hardBlockDistance) hardBlockDistance = obstacle.s;
+      if (!obstacle.movable && obstacle.s < hardBlockDistance) hardBlockDistance = obstacle.s;
       if (!obstacle.movable && obstacle.s < wallDistance) wallDistance = obstacle.s;
     }
     // Invert the same two lateral-acceleration arcs used by the swept test. The
