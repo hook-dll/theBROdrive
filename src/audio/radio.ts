@@ -6,7 +6,7 @@
  * allows the spatialised low-pass branch.
  */
 
-import { AudioMixer, ramp } from './mixer';
+import { AudioMixer, ramp, setPannerPosition } from './mixer';
 
 export interface RadioStation {
   readonly label: string;
@@ -167,9 +167,7 @@ export class Radio {
     const now = this.mixer.now;
     // The car is intentionally not snapped to the listener: PannerNode supplies
     // both distance attenuation and left/right localization from this pose.
-    this.panner.positionX.setTargetAtTime(x, now, SPATIAL_RAMP_SECONDS);
-    this.panner.positionY.setTargetAtTime(y, now, SPATIAL_RAMP_SECONDS);
-    this.panner.positionZ.setTargetAtTime(z, now, SPATIAL_RAMP_SECONDS);
+    setPannerPosition(this.panner, x, y, z, now, SPATIAL_RAMP_SECONDS);
   }
 
   setVolume(volume: number): void {

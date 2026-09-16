@@ -11,7 +11,7 @@
 import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
-import { AudioMixer } from './mixer';
+import { AudioMixer, setListenerPose } from './mixer';
 import { VehicleAudio } from './vehicleaudio';
 import { TrafficEngineAudio } from './trafficengine';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
@@ -139,17 +139,19 @@ export class GameAudio {
     this.listenerQz = z;
     this.listenerQw = w;
 
-    const listener = this.mixer.ctx.listener;
-    listener.positionX.value = spatial.listenerX;
-    listener.positionY.value = spatial.listenerY;
-    listener.positionZ.value = spatial.listenerZ;
-    // Camera local forward is -Z and local up is +Y.
-    listener.forwardX.value = -2 * (x * z + y * w);
-    listener.forwardY.value = 2 * (x * w - y * z);
-    listener.forwardZ.value = -1 + 2 * (x * x + y * y);
-    listener.upX.value = 2 * (x * y - z * w);
-    listener.upY.value = 1 - 2 * (x * x + z * z);
-    listener.upZ.value = 2 * (y * z + x * w);
+    setListenerPose(
+      this.mixer.ctx.listener,
+      spatial.listenerX,
+      spatial.listenerY,
+      spatial.listenerZ,
+      // Camera local forward is -Z and local up is +Y.
+      -2 * (x * z + y * w),
+      2 * (x * w - y * z),
+      -1 + 2 * (x * x + y * y),
+      2 * (x * y - z * w),
+      1 - 2 * (x * x + z * z),
+      2 * (y * z + x * w),
+    );
   }
 
   private radioFor(carId: string): Radio {

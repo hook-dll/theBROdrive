@@ -1,5 +1,5 @@
 import type { VehicleAudioState } from '../vehicle/vehicle';
-import { AudioMixer, ramp } from './mixer';
+import { AudioMixer, ramp, setPannerPosition } from './mixer';
 
 /** A restrained exterior voice using the same combustion shape as the player's engine. */
 export class TrafficEngineAudio {
@@ -59,9 +59,7 @@ export class TrafficEngineAudio {
     const fire = Math.max(12, (state.rpm / 60) * (state.cylinders / 2));
     const rev = Math.max(0, Math.min(1, (state.rpm - state.idleRpm) / Math.max(1, state.redlineRpm - state.idleRpm)));
     const load = Math.max(0, Math.min(1, state.throttle));
-    this.panner.positionX.setTargetAtTime(x, now, 0.08);
-    this.panner.positionY.setTargetAtTime(y, now, 0.08);
-    this.panner.positionZ.setTargetAtTime(z, now, 0.08);
+    setPannerPosition(this.panner, x, y, z, now, 0.08);
     this.fireOsc.frequency.setTargetAtTime(fire, now, 0.04);
     this.bodyOsc.frequency.setTargetAtTime(Math.max(20, fire * 0.5), now, 0.04);
     this.lowpass.frequency.setTargetAtTime(

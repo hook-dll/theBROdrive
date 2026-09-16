@@ -193,3 +193,59 @@ export class AudioMixer {
 export function ramp(param: AudioParam, value: number, now: number, tau = 0.05): void {
   param.setTargetAtTime(value, now, tau);
 }
+
+/**
+ * Sets a spatial node's position, using the per-axis AudioParams every current
+ * desktop and mobile browser ships and falling back to the deprecated
+ * `setPosition()` method when they are absent.
+ *
+ * Some engines (older WebKit builds, embedded/WebView browsers) still implement
+ * Web Audio's spatialisation without `PannerNode.positionX` at all, and the type
+ * declarations claim it always exists — so reading `undefined.value` there is not
+ * a degraded fallback, it is a hard crash the first time any spatial sound plays.
+ */
+export function setPannerPosition(
+  panner: PannerNode,
+  x: number,
+  y: number,
+  z: number,
+  now: number,
+  tau: number,
+): void {
+  if (panner.positionX) {
+    panner.positionX.setTargetAtTime(x, now, tau);
+    panner.positionY.setTargetAtTime(y, now, tau);
+    panner.positionZ.setTargetAtTime(z, now, tau);
+  } else {
+    panner.setPosition(x, y, z);
+  }
+}
+
+/** The context's one `AudioListener` pose, with the same fallback and for the same reason. */
+export function setListenerPose(
+  listener: AudioListener,
+  x: number,
+  y: number,
+  z: number,
+  forwardX: number,
+  forwardY: number,
+  forwardZ: number,
+  upX: number,
+  upY: number,
+  upZ: number,
+): void {
+  if (listener.positionX) {
+    listener.positionX.value = x;
+    listener.positionY.value = y;
+    listener.positionZ.value = z;
+    listener.forwardX.value = forwardX;
+    listener.forwardY.value = forwardY;
+    listener.forwardZ.value = forwardZ;
+    listener.upX.value = upX;
+    listener.upY.value = upY;
+    listener.upZ.value = upZ;
+  } else {
+    listener.setPosition(x, y, z);
+    listener.setOrientation(forwardX, forwardY, forwardZ, upX, upY, upZ);
+  }
+}
