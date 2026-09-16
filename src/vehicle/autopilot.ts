@@ -1673,6 +1673,25 @@ export class Autopilot {
     // ordinary line rate, with the head-on escape floor doing the last, urgent part
     // of it — but the escape floor only speeds up a return already under way; it
     // cannot start one, which is what `headOn` is for here.
+    //
+    // COMING HOME IS NOT AN ABANDONMENT, AND IT DOES NOT NEED ITS OWN GATE.
+    //
+    // Every exit below asks a QUESTION about the manoeuvre — is it refused, is
+    // something closing, is the lane clear — and only then hands the answer to the
+    // latch. But the search this driver is latched OVER already answers all of
+    // those every single step: `proposed` is its cheapest admissible line, chosen
+    // fresh, with no memory of the crossing at all. If that fresh answer is already
+    // this driver's own lane, every reason to be out here has already gone —
+    // whatever combination of "the passed car cleared the abeam window" and "the
+    // lane ahead reads clear" made it so — and there is nothing left for a separate
+    // gate to re-confirm. Waiting for `laneIsClear` below to notice independently
+    // only adds its own margin on top of a decision the search already made,
+    // measured in play as a car that had plainly finished a pass coasting the
+    // crown for several car-lengths before the line so much as started home.
+    if (committedCrossesCrown && proposed === laneOffset) {
+      this.detouring = false;
+      return held;
+    }
     if (committedCrossesCrown && (crossingRefused || headOn)) {
       this.detouring = false;
       // AND IT STAYS ABANDONED FOR A WHILE. The gate is re-asked every fixed step, so
