@@ -74,6 +74,25 @@ export interface CorridorObstacle {
    * Defaults to immovable, so anything a caller forgets to mark is treated as scenery.
    */
   readonly movable?: boolean;
+  /**
+   * ONLY MEANINGFUL TOGETHER WITH `abeam`: this body's own reference point is behind
+   * this driver's, rather than ahead of it or level with it.
+   *
+   * The abeam veto exists so a driver never steers INTO the lateral space a nearby
+   * body occupies — and while that body is still ahead, or genuinely alongside, that
+   * protection has to hold whatever its speed is doing, because it can still be
+   * there when the lateral move finishes. Once it is unambiguously BEHIND, the same
+   * question has a different physical answer: a body a driver has already drawn
+   * ahead of cannot be driven into by moving sideways, only followed into, and a
+   * driver finishing a pass moves into exactly the lane a slower body is vacating.
+   * Conflating the two directions is why a return that had cleanly cleared its
+   * leader kept refusing its own lane for several more car-lengths — measured in
+   * play as passes that took an extra `ABEAM_BEHIND_M` or more of road, straddling
+   * the crown, after the leader was already receding and no longer any kind of
+   * hazard. See its one use, gated on the leader still being the slower car, in
+   * `solveCorridor`.
+   */
+  readonly trailing?: boolean;
 }
 
 export interface CorridorRequest {
@@ -508,7 +527,22 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
           obstacle.level === true &&
           gapNow >= reach &&
           (obstacle.lateral - ownLateral) * (obstacle.lateral - line) <= 0;
-        const closest = through ? 0 : Math.min(gapNow, gapThere);
+        // A LEADER ALREADY BEHIND US AND SLOWER IS NOT A LEADER WE ARE CUTTING OFF.
+        //
+        // The plain `gapThere` test below reads "destination coincides with this
+        // body" as "driving into it" whichever direction the body actually lies —
+        // correct for one still ahead or genuinely alongside, since it can still be
+        // there when the lateral move finishes, but wrong for one this driver has
+        // already drawn ahead of and is pulling away from: that body is vacating the
+        // lane, not occupying it, and returning to it is how a pass ends. Gated on
+        // `trailing` (this driver's own probe already put it behind us) AND on speed
+        // (still catching up is still a hazard whichever side it is on), so a body
+        // merely alongside, or one keeping pace, keeps the ordinary veto.
+        const recedingLeader =
+          obstacle.trailing === true &&
+          gapNow >= reach &&
+          obstacle.speed < speed - MIN_ADVANTAGE_MPS;
+        const closest = through ? 0 : recedingLeader ? gapNow : Math.min(gapNow, gapThere);
         if (closest < reach && closest < gapNow) {
           admissible = false;
           if (!captureRejected) return;

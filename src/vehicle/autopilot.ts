@@ -1557,6 +1557,23 @@ export class Autopilot {
     /** Lateral acceleration the commanded line will really be moved with. */
     lineAccel: number,
     crossingRefused: boolean,
+    /**
+     * A REAL body, physically probed on the line this driver is actually using, is
+     * closing faster than `HEAD_ON_MARGIN_MPS` right now. This is what a driver
+     * reacts to, not the pre-commit room estimate `crossingRefused` is sized from:
+     * that estimate is deliberately pessimistic while this car is still ABEAM the
+     * one it is passing (see the corridor's own comment on `PASS_ENTRY_MARGIN`), so
+     * gating the abort on it re-asked "should I have started this" of a driver who
+     * cannot currently undo it, and produced a dead stop astride the centre line —
+     * fixed by no longer asking that question of a crossing already under way. But
+     * a crossing already under way still needs to end EARLY when the one thing that
+     * actually matters — a car really coming, really close — shows up, rather than
+     * waiting out `laneIsClear`'s ordinary, unhurried comfort margin below. Measured
+     * in play as passes that no longer stopped dead, but then held the opposing lane
+     * through a real closing car because nothing woke the latch until the passed
+     * leader was a full `manoeuvreRoom + DETOUR_RELEASE_MARGIN_M` behind.
+     */
+    headOn: boolean,
     /** Outermost line the road allows HERE. A latched one was planned somewhere else. */
     edgeLimit: number,
   ): number {
@@ -1651,9 +1668,12 @@ export class Autopilot {
     // effect at all. Measured on the real road: two opposing drivers each committed to
     // a crossing while the other was far away, both kept it as they converged, and met.
     //
-    // So a crossing survives only while the planner still offers one. Coming back is
-    // handled by the ordinary line rate, with the head-on escape floor behind it.
-    if (committedCrossesCrown && crossingRefused) {
+    // So a crossing survives while the planner still offers one, AND while nothing on
+    // the line it is using is actually closing. Coming back is handled by the
+    // ordinary line rate, with the head-on escape floor doing the last, urgent part
+    // of it — but the escape floor only speeds up a return already under way; it
+    // cannot start one, which is what `headOn` is for here.
+    if (committedCrossesCrown && (crossingRefused || headOn)) {
       this.detouring = false;
       // AND IT STAYS ABANDONED FOR A WHILE. The gate is re-asked every fixed step, so
       // a car coming the other way that is only just too close flickers the answer —
@@ -2211,6 +2231,15 @@ export class Autopilot {
       : nearestGap === bodyLaneGap ? bodyLaneSpeed
       : bodyScanSpeed;
     this.updateLead(dt, nearestGap, speed, nearestSpeed);
+    /**
+     * A REAL body on the line this driver is actually using, closing faster than a
+     * driver would read as "going the same way as a slightly slower car". Computed
+     * here — before the corridor plan, not after it — because `commitLane` needs it
+     * to know when to give up a crossing already in progress; see its own comment.
+     */
+    const headOn =
+      (laneGap < Infinity && laneProbeSpeed < -HEAD_ON_MARGIN_MPS) ||
+      (bodyLaneGap < Infinity && bodyLaneSpeed < -HEAD_ON_MARGIN_MPS);
     const gap = this.obstacleGapValue;
     const leadSpeed = this.obstacleSpeedValue;
     // A recovery is normally an escape from unexplained static blockage, and
@@ -2767,6 +2796,7 @@ export class Autopilot {
       speed,
       lineAccel,
       proposal.crossingRefused || !mayCrossCrown,
+      headOn,
       staticAvoidLine,
     );
     // An escape that has already failed here is allowed off the asphalt, a rung at a
@@ -2916,9 +2946,6 @@ export class Autopilot {
     // which is exactly the dangerous state.
     const onWrongSide =
       projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
-    const headOn =
-      (laneGap < Infinity && laneProbeSpeed < -HEAD_ON_MARGIN_MPS) ||
-      (bodyLaneGap < Infinity && bodyLaneSpeed < -HEAD_ON_MARGIN_MPS);
     const lineError = desiredLine - this.appliedLateral;
     const lineRateCeiling = Math.max(
       LINE_SHIFT_PER_METRE * speed,
@@ -3784,6 +3811,7 @@ export class Autopilot {
           speed: velocity.x * roadForwardX + velocity.z * roadForwardZ,
           abeam: true,
           level: Math.abs(along) < CAR_HALF_LENGTH_M * 2,
+          trailing: along < 0,
           movable: true,
         });
         return true;
