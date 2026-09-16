@@ -230,6 +230,9 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
   const spec = v.engine as EngineSpec;
   switch (v.id) {
     case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
+    // The UAZ/IZH van engine — same displacement class as the Volga pair below
+    // but a distinct unit (registry.ts), not a third name for the same block.
+    case 'engine_i4_2445': return buildInline(b, spec, 1.09, false);
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
     // The Soviet fours, scaled by displacement against the 1.6 at 1.0.
     case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
