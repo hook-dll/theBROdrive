@@ -1885,8 +1885,9 @@ export class Interaction {
     chassis.rotation(this.qScratch);
 
     // The left flank is a featureless shell with baked doors, so exit at the
-    // measured left edge stepped a further 1.1 m outward.
-    this.vScratch.set(-measure.halfExtents[0] - 1.1, 0, 0).applyQuaternion(this.qScratch);
+    // measured left edge stepped a further 1.1 m outward. Model convention:
+    // +X is left, the models face +Z (see render/carmodel.ts).
+    this.vScratch.set(measure.halfExtents[0] + 1.1, 0, 0).applyQuaternion(this.qScratch);
     const exitX = t.x + this.vScratch.x;
     const exitZ = t.z + this.vScratch.z;
 
