@@ -13,6 +13,7 @@
  * origin is its mount point, in +X right / +Y up / +Z forward.
  */
 import * as THREE from 'three';
+import { maxAnisotropy } from './texturequality';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant } from '../parts/registry';
 import type {
@@ -908,11 +909,11 @@ function footballMaterial(): THREE.MeshStandardMaterial {
   map.colorSpace = THREE.SRGBColorSpace;
   map.wrapS = THREE.RepeatWrapping;
   map.wrapT = THREE.RepeatWrapping;
-  map.anisotropy = 4;
+  map.anisotropy = maxAnisotropy();
   const bumpMap = new THREE.CanvasTexture(reliefCanvas);
   bumpMap.wrapS = THREE.RepeatWrapping;
   bumpMap.wrapT = THREE.RepeatWrapping;
-  bumpMap.anisotropy = 4;
+  bumpMap.anisotropy = maxAnisotropy();
   footballSurfaceMaterial = applyComicShading(
     new THREE.MeshStandardMaterial({
       color: 0xffffff,

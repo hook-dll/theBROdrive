@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { maxAnisotropy } from './texturequality';
 import type { StickerState } from '../game/state';
 
 /**
@@ -63,7 +64,7 @@ function starTexture(): THREE.CanvasTexture {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = maxAnisotropy();
   _starTexture = tex;
   return tex;
 }

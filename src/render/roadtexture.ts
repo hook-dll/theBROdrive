@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
+import { maxAnisotropy } from './texturequality';
 
 /**
  * Procedural weathered-asphalt textures for the road ribbon.
@@ -514,14 +515,14 @@ export function roadTextures(): RoadTextures {
   map.wrapS = THREE.RepeatWrapping;
   map.wrapT = THREE.RepeatWrapping;
   map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = 8;
+  map.anisotropy = maxAnisotropy();
 
   const normal = new THREE.CanvasTexture(paintNormals(height));
   normal.wrapS = THREE.RepeatWrapping;
   normal.wrapT = THREE.RepeatWrapping;
   // Tangent-space normals are directions, not colour: they must not be sRGB-decoded.
   normal.colorSpace = THREE.NoColorSpace;
-  normal.anisotropy = 8;
+  normal.anisotropy = maxAnisotropy();
 
   cached = { map, normal, mean };
   return cached;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { primeMaxAnisotropy } from './render/texturequality';
 import { AdaptiveResolutionController } from './core/adaptivequality';
 import { makeFlatMaterial } from './render/materials';
 import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './world/poi-variants';
@@ -142,6 +143,7 @@ export function bootPoiGallery(): void {
   // backbuffer (an N100 iGPU pays MSAA bandwidth on every one of these pixels) and
   // a hard pixel budget, because this viewer is fill-rate bound, not geometry bound.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  primeMaxAnisotropy(renderer);
   renderer.setPixelRatio(pixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;

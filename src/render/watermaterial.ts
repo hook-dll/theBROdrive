@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { maxAnisotropy } from './texturequality';
 
 /**
  * The water surface's material: stock `MeshStandardMaterial` with a procedural
@@ -83,7 +84,7 @@ function createWaveNormalMap(): THREE.DataTexture {
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
-  texture.anisotropy = 4;
+  texture.anisotropy = maxAnisotropy();
   texture.needsUpdate = true;
   return texture;
 }

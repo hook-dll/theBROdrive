@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { primeMaxAnisotropy } from './render/texturequality';
 import { SurfaceType } from './core/surfaces';
 import { applyComicShading } from './render/comic';
 import { MAX_WEAR, PALETTE_CYCLE_M, desertPaletteAt, poleConditionAt, poleEraSegments } from './world/gradient';
@@ -118,6 +119,7 @@ export function bootPropGallery(): void {
   document.title = 'Prop gallery · the BRO drive';
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  primeMaxAnisotropy(renderer);
   renderer.setPixelRatio(pixelRatio()); renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;

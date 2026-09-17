@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { maxAnisotropy } from './texturequality';
 import { GRAPHICS_CONFIG } from '../config';
 import type { GraphicsQuality } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
@@ -732,7 +733,7 @@ export class Sky {
     // along with it and returns the mean grey of the whole map; anisotropic
     // filtering averages only the axis that is actually compressed, so the maria
     // survive into the horns.
-    this.moonTexture.anisotropy = webgl.capabilities.getMaxAnisotropy();
+    this.moonTexture.anisotropy = maxAnisotropy();
     this.scene = scene;
     this.fog = fog;
     this.pmrem = new THREE.PMREMGenerator(webgl);

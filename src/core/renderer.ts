@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import '../render/lightshader';
+import { primeMaxAnisotropy } from '../render/texturequality';
 import { AdaptiveResolutionController } from './adaptivequality';
 import {
   DEFAULT_FIELD_OF_VIEW,
@@ -928,6 +929,7 @@ export class Renderer {
       // wants a phone that stays cool, and says so.
       powerPreference: this.mobilePresentation ? 'default' : 'high-performance',
     });
+    primeMaxAnisotropy(this.renderer);
     this.adaptiveResolution = new AdaptiveResolutionController(quality);
     const context = this.renderer.getContext();
     if (

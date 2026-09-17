@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { primeMaxAnisotropy } from './render/texturequality';
 import { FIXED_DT, PhysicsWorld } from './core/physics';
 import { emptyInput, type InputFrame } from './core/input';
 import { GameWorld, newWorldState, DAY_LENGTH } from './game/state';
@@ -137,7 +138,7 @@ export async function bootPlayground(): Promise<void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-
+  primeMaxAnisotropy(renderer);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9fb4c8);
   scene.fog = new THREE.Fog(0x9fb4c8, 400, 2_600);

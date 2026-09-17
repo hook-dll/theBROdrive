@@ -12,6 +12,7 @@
  */
 
 import * as THREE from 'three';
+import { maxAnisotropy } from '../render/texturequality';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 
@@ -2702,7 +2703,7 @@ function makeSignTexture(
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = maxAnisotropy();
   return tex;
 }
 
