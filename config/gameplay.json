@@ -12,7 +12,7 @@
   "defaultMouseSensitivity": 0.0022,
   "mouseSensitivityMin": 0.0004,
   "mouseSensitivityMax": 0.006,
-  "fieldOfViewDegrees": 65,
+  "fieldOfViewDegrees": 58,
   "fieldOfViewMinDegrees": 50,
   "fieldOfViewMaxDegrees": 85
 }

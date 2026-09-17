@@ -454,16 +454,16 @@ export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
 /**
  * Resting vertical field of view, and how far a player may move it.
  *
- * The authored 65 matches The Long Drive, and it matters more than it sounds: FOV sets
- * the apparent scale of the whole world, so a couple of degrees changes how big the car
- * feels and how fast the road appears to move. Every camera mode rests here, and the
- * speed widening and the ten-power binoculars are both measured from it.
+ * FOV matters more than it sounds: it sets the apparent scale of the whole world, so a
+ * couple of degrees changes how big the car feels and how fast the road appears to
+ * move. Every camera mode rests here, and the speed widening and the ten-power
+ * binoculars are both measured from it.
  *
  * The bounds are the rectilinear projection's, not a taste: it stretches the picture
- * along the frame's radius by `1 / cos²(angle)`, so at 16:9 the frame edge runs 2.28x
- * at the authored 65 (97 degrees horizontal), 1.69x at 50 (79) and 3.65x at 85 (117).
- * Past that the outer frame is a fisheye and the horizon bows; below it the view is a
- * telephoto that makes 100 km/h look like 40.
+ * along the frame's radius by `1 / cos²(angle)`, so at 16:9 the frame edge runs 1.69x
+ * at the minimum 50 (79 degrees horizontal) and 3.65x at the maximum 85 (117 degrees).
+ * Past that the outer frame is a fisheye and the horizon bows; below the minimum the
+ * view is a telephoto that makes 100 km/h look like 40.
  */
 export const DEFAULT_FIELD_OF_VIEW = GAMEPLAY_CONFIG.fieldOfViewDegrees;
 export const FIELD_OF_VIEW_MIN = GAMEPLAY_CONFIG.fieldOfViewMinDegrees;
