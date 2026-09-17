@@ -97,6 +97,33 @@ const SPAWN_INTERVAL_S = 1;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
 const SPAWN_ROAD_GAP_M = 70;
 const DENSE_SPAWN_ROAD_GAP_M = 32;
+/**
+ * REAL TRAFFIC ARRIVES IN GROUPS, NOT AT AN EVEN SPACING.
+ *
+ * Every ordinary spawn draws an independent, uniformly-random arclength and is only
+ * rejected if it lands inside another car's minimum gap (`roadGapClear`). Thinning a
+ * uniform process by a hard minimum distance is a Matérn hard-core process, and its
+ * signature is near-regular spacing: once the stream is near its cap, almost every
+ * accepted gap sits close to the enforced floor. That reads as artificial exactly
+ * where a two-lane road makes the player watch the oncoming lane closely, to plan a
+ * pass — a four-lane road has two oncoming lanes to look at and the player is not
+ * timing a crossing of them, so the same regularity there goes unnoticed.
+ *
+ * A real stream instead has a two-scale structure: cars that left the same junction,
+ * merged together, or were held behind one slow driver arrive bunched, separated by
+ * open road where nobody happens to be. So a spawn occasionally drags a second
+ * (rarely third) car in behind it at a genuine close-following gap — the distance its
+ * own headway would ask for at its own target speed, so the pair is already in trim
+ * and does not visibly adjust — while solo spawns are untouched and still obey the
+ * ordinary floor. The chance compounds per extra car (`P(pair) = 32%`,
+ * `P(triplet+) = 10%`, `P(quad+) = 3%`), which matches groups being common,
+ * three-plus rare, and never runaway.
+ */
+const PLATOON_CHANCE = 0.32;
+/** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
+const PLATOON_MAX_CHAIN = 4;
+/** Floor under the headway-derived follow gap: body clearance, not a target distance. */
+const PLATOON_MIN_GAP_M = 15;
 const SPAWN_HAZARD_GAP_M = 18;
 /** Never materialize an opposing car inside a pass that was clear when committed. */
 const PASSING_SPAWN_EXCLUSION_M = 300;
@@ -295,6 +322,8 @@ interface PendingSpawn {
   readonly pace: number;
   readonly lane: number;
   readonly rear: boolean;
+  /** Remaining chain budget for a platoon mate spawned off this one; see `queuePlatoonMate`. */
+  readonly platoonChain?: number;
 }
 
 export interface TrafficStatus {
@@ -1062,6 +1091,7 @@ export class RoadTraffic {
       pace: driver.pace,
       lane: spawn.lane,
       rear: spawn.s < this.playerS,
+      platoonChain: PLATOON_MAX_CHAIN,
     };
     this.pending = request;
     void this.prepareModel(request.modelId)
@@ -1209,6 +1239,59 @@ export class RoadTraffic {
     // as the car drives and, after a turnaround, as its direction flips.
     autopilot.setTrafficField(this.fieldFor(record, record.id));
     this.carList.push(record);
+    this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
+  }
+
+  /**
+   * Occasionally drags a second car in right behind one that just finished spawning,
+   * at the distance its own headway would ask for at its own target speed — see
+   * `PLATOON_CHANCE` for why. Goes through the same async model-load path as an
+   * ordinary spawn, so a slow-loading model degrades exactly like any other spawn
+   * (silently dropped, never blocking) rather than needing its own error handling.
+   */
+  private queuePlatoonMate(leader: TrafficCar, chainRemaining: number): void {
+    if (chainRemaining <= 0) return;
+    if (this.pending !== null) return;
+    if (this.carList.length >= this.desiredCount) return;
+    if (this.random() >= PLATOON_CHANCE) return;
+    const followGap = Math.max(PLATOON_MIN_GAP_M, leader.speedCap * leader.headwayS);
+    const s = leader.forwardS - leader.direction * followGap;
+    if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) return;
+    const lane = leader.lane;
+    if (!this.spawnSiteClear(s, leader.direction, lane, TRAFFIC_HALF_WIDTH_M, NEIGHBOUR_HALF_LENGTH_M, leader.id)) {
+      return;
+    }
+    // Reuses the leader's own model rather than drawing a fresh random one: the
+    // leader's model just finished loading (it is instantiated and on screen), so
+    // this spawn is guaranteed warm. A platoon mate fires the moment its leader
+    // does, bypassing the ordinary `spawnCooldown` that spaces solo spawns out — a
+    // fresh random pick here could land on a model nothing has used yet and start a
+    // second GLTF fetch/parse/upload back-to-back with the first, which is a stutter,
+    // not a frame-time average, so it would not show up in the aggregate report.
+    const request: PendingSpawn = {
+      generation: this.generation,
+      direction: leader.direction,
+      forwardS: s,
+      modelId: leader.modelId,
+      id: `${TRAFFIC_ID_PREFIX}${(this.serial++).toString(36)}`,
+      // Rides in convoy: the same character as the car it is tucked behind, so the
+      // pair does not immediately pull apart onto a different target speed.
+      style: leader.style,
+      headwayS: leader.headwayS,
+      mode: leader.autopilot.mode,
+      speedCap: leader.speedCap,
+      pace: leader.pace,
+      lane,
+      rear: s < this.playerS,
+      platoonChain: chainRemaining - 1,
+    };
+    this.pending = request;
+    void this.prepareModel(request.modelId)
+      .then(() => this.finishSpawn(request))
+      .catch((error: unknown) => console.error(`failed to load traffic model "${request.modelId}"`, error))
+      .finally(() => {
+        if (this.pending === request) this.pending = null;
+      });
   }
 
   /**
@@ -1258,7 +1341,15 @@ export class RoadTraffic {
       const behind = fromBehind && attempt < 6;
       const distance = behind
         ? -(REAR_SPAWN_MIN_M + this.random() * (REAR_SPAWN_MAX_M - REAR_SPAWN_MIN_M))
-        : SPAWN_MIN_M + this.random() * (SPAWN_MAX_M - SPAWN_MIN_M);
+        // Skewed toward SPAWN_MAX_M: `sqrt(u)` for `u` uniform on [0,1] has CDF `x^2`,
+        // so it under-samples near 0 and over-samples near 1. A flat draw put half its
+        // mass inside the first 130 m of this 260 m band, so the median spawn sat
+        // close enough that "a car appears" was a distinct, watched event rather than
+        // something resolving out of the fog. SPAWN_MAX_M cannot move — it is exactly
+        // PHYSICS_REACH_M, the edge of the road's own collision support, past which
+        // `hasSpawnGround` has nothing to raycast against — so this reshapes the same
+        // band instead of widening it.
+        : SPAWN_MIN_M + Math.sqrt(this.random()) * (SPAWN_MAX_M - SPAWN_MIN_M);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
       const lane = this.pickSpawnLane(s, style);
@@ -1289,10 +1380,17 @@ export class RoadTraffic {
   private spawnSiteClear(
     s: number, direction: TrafficDirection, lane: number,
     halfWidth = TRAFFIC_HALF_WIDTH_M, halfLength = NEIGHBOUR_HALF_LENGTH_M,
+    /**
+     * When set, this one car's gap requirement is a genuine following distance
+     * (`PLATOON_MIN_GAP_M` floor) instead of the flat same-lane spacing floor. Every
+     * other car, hazard and ground check is unaffected — this only lets a deliberate
+     * platoon mate sit close behind the specific leader it was placed for.
+     */
+    platoonLeaderId: string | null = null,
   ): boolean {
     const laneHalfWidth = laneHalfWidthFor(this.road.halfWidthAt(s), lane);
     if (laneHalfWidth < TRAFFIC_HALF_WIDTH_M) return false;
-    if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength)) return false;
+    if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength, platoonLeaderId)) return false;
     const lateral = this.forwardLaneCentreAt(s, direction, lane);
     let clear = true;
     this.hazards.forEachAhead(
@@ -1312,6 +1410,7 @@ export class RoadTraffic {
   private roadGapClear(
     s: number, direction: TrafficDirection, lane: number,
     halfWidth = TRAFFIC_HALF_WIDTH_M, halfLength = NEIGHBOUR_HALF_LENGTH_M,
+    platoonLeaderId: string | null = null,
   ): boolean {
     const sameDirectionGap =
       this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
@@ -1320,7 +1419,7 @@ export class RoadTraffic {
       const gap = Math.abs(car.forwardS - s);
       if (car.direction === direction && Math.abs(car.roadLateral - lateral) <= car.roadHalfWidth + halfWidth) {
         const spawnIsAhead = (s - car.forwardS) * direction > 0;
-        let requiredGap = sameDirectionGap;
+        let requiredGap = car.id === platoonLeaderId ? PLATOON_MIN_GAP_M : sameDirectionGap;
         if (spawnIsAhead) {
           // A stationary spawn must leave a moving follower room to stop. Its
           // recorded spawn lane is irrelevant after a merge, taper or overtake.
