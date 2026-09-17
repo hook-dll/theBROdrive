@@ -7,7 +7,9 @@
     "dev": "vite",
     "dev:poi": "vite --open /?poi-gallery",
     "build": "tsc --noEmit && vite build",
+    "build:dev": "tsc --noEmit && vite build --mode development",
     "preview": "vite preview",
+    "preview:dev": "vite preview --port 5173",
     "check": "tsc --noEmit",
     "package:local": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-local.ps1"
   },

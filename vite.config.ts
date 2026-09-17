@@ -5,7 +5,20 @@ import { defineConfig } from 'vite';
  * package serves only on 127.0.0.1, and touch steering is an on-screen slider, so
  * neither a certificate nor device-motion permissions are required.
  */
-export default defineConfig(() => ({
+export default defineConfig(({ mode }) => ({
+  /**
+   * `vite build` hardcodes `process.env.NODE_ENV` to `"production"` regardless of
+   * `--mode`, so `import.meta.env.DEV` (the flag every dev-menu button and the
+   * `window.__bro` debug surface is gated behind) stays false even under
+   * `--mode development`. Override the two defines directly from the resolved
+   * `mode` instead: a plain `vite build` (mode "production") is untouched, while
+   * `vite build --mode development` compiles the dev tooling into an otherwise
+   * normal minified/bundled/tree-shaken production build.
+   */
+  define:
+    mode === 'production'
+      ? {}
+      : { 'import.meta.env.DEV': 'true', 'import.meta.env.PROD': 'false' },
   server: {
     host: true,
     port: 5173,
