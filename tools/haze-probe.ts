@@ -153,8 +153,6 @@ function makeProbe(): Probe {
       // both are switched off; they are unrelated to what this tool checks.
       uInkStrength: { value: 0 },
       uInkThreshold: { value: 1 },
-      uPaletteStrength: { value: 0 },
-      uPaletteLevels: { value: 6 },
       uViewTint: { value: new THREE.Color(1, 1, 1) },
       uViewTintStrength: { value: 0 },
       uBinoculars: { value: 0 },

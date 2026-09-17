@@ -536,8 +536,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uCameraFar;
   uniform float uInkStrength;
   uniform float uInkThreshold;
-  uniform float uPaletteStrength;
-  uniform float uPaletteLevels;
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
@@ -814,20 +812,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
     color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
 
-    // EXPERIMENTAL: limited-palette look. Ordered-dither quantisation reusing the
-    // same per-pixel hash already computed for film grain above, rather than a new
-    // noise source: naive quantisation stairsteps the desert's graded colour ramps
-    // (world/gradient.ts spends real effort keeping those continuous), so the noise
-    // that already hides grain as texture is reused to hide the quantisation step
-    // as texture too — the ramp still reads as smooth at normal viewing distance,
-    // and only breaks into flat bands under close, static scrutiny.
-    if (uPaletteStrength > 0.0) {
-      float levels = max(2.0, uPaletteLevels);
-      vec3 dithered = clamp(color.rgb + grain / levels, 0.0, 1.0);
-      vec3 quantised = floor(dithered * levels + 0.5) / levels;
-      color.rgb = mix(color.rgb, quantised, uPaletteStrength);
-    }
-
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
     // retained channels stay bright while the others are absorbed.
     color.rgb *= mix(vec3(1.0), uViewTint, uViewTintStrength);
@@ -1032,8 +1016,6 @@ export class Renderer {
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
-        uPaletteStrength: { value: 0 },
-        uPaletteLevels: { value: 6 },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
@@ -1634,17 +1616,6 @@ export class Renderer {
   /** Changes post-process outline opacity without rebuilding the shader pass. */
   setInkStrength(strength: number): void {
     this.hazeMaterial.uniforms.uInkStrength.value = Math.min(1, Math.max(0, strength));
-  }
-
-  /**
-   * EXPERIMENTAL: drives the limited-palette post-process. `strength` 0 is the
-   * ordinary continuous image; 1 is fully quantised. `levels` is steps per colour
-   * channel — 4-8 reads as a deliberate limited palette, higher fades toward
-   * imperceptible from the ordinary image.
-   */
-  setPaletteStrength(strength: number, levels = 6): void {
-    this.hazeMaterial.uniforms.uPaletteStrength.value = Math.min(1, Math.max(0, strength));
-    this.hazeMaterial.uniforms.uPaletteLevels.value = Math.max(2, levels);
   }
 
   /**

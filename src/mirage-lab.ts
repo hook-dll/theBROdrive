@@ -74,8 +74,6 @@ interface LabState {
   quality: GraphicsQuality;
   msaa: boolean;
   ink: number;
-  palette: number;
-  paletteLevels: number;
   heatStrength: number;
   heat: HeatMirageParameters;
   opacity: number;
@@ -241,8 +239,6 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
       <label><span>MSAA</span><input data-control="msaa" type="checkbox"><output></output></label>
       <label><span>Контур</span><input data-control="ink" type="range" min="0" max="1" step="0.01"><output></output></label>
-      <label><span>Палитра</span><input data-control="palette" type="range" min="0" max="1" step="0.01"><output></output></label>
-      <label><span>Ступеней палитры</span><input data-control="paletteLevels" type="range" min="2" max="16" step="1"><output></output></label>
     </fieldset>
     <fieldset><legend>Жаркое марево · все параметры</legend>
       <label><span>Сила</span><input data-control="heatStrength" type="range" min="0" max="1" step="0.01"><output></output></label>
@@ -322,8 +318,6 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
     state.variation = 7;
     state.length = 760;
     state.density = 1;
-    state.palette = 0;
-    state.paletteLevels = 6;
     sync();
     apply();
   });
@@ -349,8 +343,6 @@ export async function bootMirageLab(): Promise<void> {
     quality: 'standard',
     msaa: true,
     ink: DEFAULT_INK_STRENGTH,
-    palette: 0,
-    paletteLevels: 6,
     heatStrength: 1,
     heat: { ...DEFAULT_HEAT_MIRAGE },
     opacity: 0.82,
@@ -423,7 +415,6 @@ export async function bootMirageLab(): Promise<void> {
     starField.setQuality(state.quality, prefersMobilePresentation());
     renderer.setMsaa(state.msaa);
     renderer.setInkStrength(state.ink);
-    renderer.setPaletteStrength(state.palette, state.paletteLevels);
     renderer.setHeatMirageParameters(state.heat);
     const selection = SELECTIONS[state.selection] ?? SELECTIONS[0]!;
     if (selection.system === 'distant') {
