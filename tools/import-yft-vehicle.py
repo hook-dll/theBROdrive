@@ -645,14 +645,21 @@ MATERIALS = {
     "car_paint": ([0.055, 0.15, 0.11, 1], 0.68, 0.08),
     "car_trim": ([0.035, 0.04, 0.045, 1], 0.82, 0.0),
     "car_glass": ([0.025, 0.045, 0.055, 1], 0.08, 0.10),
-    "Headlights": ([0.72, 0.76, 0.74, 1], 0.18, 0.0),
+    # Lamp roughness used to sit at 0.18-0.35: near-mirror. A lens or reflector
+    # this small has too little curvature per triangle for that to read as
+    # "glossy plastic" -- it reads as a hard-edged, fully clipped white glint
+    # wherever the surface (however gently it curves, or however flat a
+    # panel some of these donors actually modelled it as) lines up with the
+    # sun, confirmed by rendering the same GLTFLoader + MeshoptDecoder path
+    # the game uses. Softer here trades a little shine for not blowing out.
+    "Headlights": ([0.72, 0.76, 0.74, 1], 0.5, 0.0),
     # sRGB #f26716 from the VAZ-2104 atlas, converted to glTF linear RGB.
-    "IndicatorLights": ([0.887923, 0.135633, 0.008023, 1], 0.20, 0.0),
-    "TailLights": ([0.24, 0.006, 0.003, 1], 0.28, 0.0),
-    "BrakeLights": ([0.32, 0.008, 0.004, 1], 0.28, 0.0),
-    "ReverseLights": ([0.78, 0.80, 0.76, 1], 0.20, 0.0),
-    "PassiveRearLights": ([0.20, 0.005, 0.003, 1], 0.32, 0.0),
-    "AuxiliaryLights": ([0.30, 0.32, 0.31, 1], 0.35, 0.0),
+    "IndicatorLights": ([0.887923, 0.135633, 0.008023, 1], 0.5, 0.0),
+    "TailLights": ([0.24, 0.006, 0.003, 1], 0.6, 0.0),
+    "BrakeLights": ([0.32, 0.008, 0.004, 1], 0.6, 0.0),
+    "ReverseLights": ([0.78, 0.80, 0.76, 1], 0.5, 0.0),
+    "PassiveRearLights": ([0.20, 0.005, 0.003, 1], 0.6, 0.0),
+    "AuxiliaryLights": ([0.30, 0.32, 0.31, 1], 0.6, 0.0),
     "Tyres": ([0.018, 0.02, 0.022, 1], 0.94, 0.0),
 }
 # Runtime role -> (node name, mesh name, material).
