@@ -1260,7 +1260,7 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
 const GTAV_SPECS: readonly Entry[] = [
   {
     id: 'gt_vaz2110',
-    label: 'VAZ-2110',
+    label: 'VAZ-2110 (AKROM)',
     dir: GTAV,
     glb: 'vaz2110.glb',
     bodyClass: 'car',
@@ -1280,7 +1280,7 @@ const GTAV_SPECS: readonly Entry[] = [
   {
     // Wheelbase-derived scale: 2.800 m factory / 2.98628 m source (model units).
     id: 'gt_gaz31029',
-    label: 'GAZ-31029 Volga',
+    label: 'GAZ-31029 Volga (AKROM)',
     dir: GTAV,
     glb: 'gaz31029.glb',
     bodyClass: 'car',
@@ -1307,7 +1307,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gaz3102',
-    label: 'GAZ-3102 Volga',
+    label: 'GAZ-3102 Volga (AKROM)',
     dir: GTAV,
     glb: 'gaz3102.glb',
     bodyClass: 'car',
@@ -1331,7 +1331,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_niva_bronto',
-    label: 'Lada Niva Bronto',
+    label: 'Lada Niva Bronto (AKROM)',
     dir: GTAV,
     glb: 'niva_bronto.glb',
     bodyClass: 'car',
@@ -1355,7 +1355,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_uaz469',
-    label: 'UAZ-469',
+    label: 'UAZ-469 (AKROM)',
     dir: GTAV,
     glb: 'uaz469.glb',
     bodyClass: 'car',
@@ -1385,7 +1385,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_zil130',
-    label: 'ZIL-130',
+    label: 'ZIL-130 (AKROM)',
     dir: GTAV,
     glb: 'zil130.glb',
     bodyClass: 'truck',
@@ -1404,7 +1404,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_izh412',
-    label: 'IZH-412 Moskvich',
+    label: 'IZH-412 Moskvich (AKROM)',
     dir: GTAV,
     glb: 'izh412.glb',
     bodyClass: 'car',
@@ -1429,7 +1429,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_paz3205',
-    label: 'PAZ-3205',
+    label: 'PAZ-3205 (AKROM)',
     dir: GTAV,
     glb: 'paz3205.glb',
     bodyClass: 'bus',
@@ -1448,7 +1448,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz21099',
-    label: 'VAZ-21099',
+    label: 'VAZ-21099 (AKROM)',
     dir: GTAV,
     glb: 'vaz21099.glb',
     bodyClass: 'car',
@@ -1473,7 +1473,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2101',
-    label: 'VAZ-2101 Zhiguli',
+    label: 'VAZ-2101 Zhiguli (AKROM)',
     dir: GTAV,
     glb: 'vaz2101.glb',
     bodyClass: 'car',
@@ -1497,7 +1497,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gaz2412',
-    label: 'GAZ-2412 Volga Universal',
+    label: 'GAZ-2412 Volga Universal (AKROM)',
     dir: GTAV,
     glb: 'gaz2412.glb',
     bodyClass: 'car',
@@ -1518,10 +1518,19 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
+    // No separate brake lamp bone in this donor: taillights carries the
+    // combined tail+brake material. Reverse and blinkers ARE split.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
   },
   {
     id: 'gt_vaz2108',
-    label: 'VAZ-2108 Sputnik',
+    label: 'VAZ-2108 Sputnik (AKROM)',
     dir: GTAV,
     glb: 'vaz2108.glb',
     bodyClass: 'car',
@@ -1546,7 +1555,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2114',
-    label: 'VAZ-2114 Samara',
+    label: 'VAZ-2114 Samara (AKROM)',
     dir: GTAV,
     glb: 'vaz2114.glb',
     bodyClass: 'car',
@@ -1571,7 +1580,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gaz3110',
-    label: 'GAZ-3110 Volga',
+    label: 'GAZ-3110 Volga (AKROM)',
     dir: GTAV,
     glb: 'gaz3110.glb',
     bodyClass: 'car',
@@ -1595,7 +1604,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gaz2410',
-    label: 'GAZ-24-10 Volga',
+    label: 'GAZ-24-10 Volga (AKROM)',
     dir: GTAV,
     glb: 'gaz2410.glb',
     bodyClass: 'car',
@@ -1625,7 +1634,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_azlk2140',
-    label: 'AZLK-2140',
+    label: 'AZLK-2140 (AKROM)',
     dir: GTAV,
     glb: 'azlk2140.glb',
     bodyClass: 'car',
@@ -1649,7 +1658,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2103',
-    label: 'VAZ-2103 Zhiguli',
+    label: 'VAZ-2103 Zhiguli (AKROM)',
     dir: GTAV,
     glb: 'vaz2103.glb',
     bodyClass: 'car',
@@ -1673,7 +1682,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2102',
-    label: 'VAZ-2102 Lada estate',
+    label: 'VAZ-2102 Lada estate (AKROM)',
     dir: GTAV,
     glb: 'vaz2102.glb',
     bodyClass: 'car',
@@ -1697,7 +1706,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gaz31022',
-    label: 'GAZ-31022 Volga wagon',
+    label: 'GAZ-31022 Volga wagon (AKROM)',
     dir: GTAV,
     glb: 'gaz31022.glb',
     bodyClass: 'car',
@@ -1721,7 +1730,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2105',
-    label: 'VAZ-2105',
+    label: 'VAZ-2105 (AKROM)',
     dir: GTAV,
     glb: 'vaz2105.glb',
     bodyClass: 'car',
@@ -1745,7 +1754,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_vaz2104',
-    label: 'VAZ-2104 estate',
+    label: 'VAZ-2104 estate (AKROM)',
     dir: GTAV,
     glb: 'vaz2104.glb',
     bodyClass: 'car',
@@ -1769,7 +1778,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gazel',
-    label: 'GAZelle GAZ-2705',
+    label: 'GAZelle GAZ-2705 (AKROM)',
     dir: GTAV,
     glb: 'gazel.glb',
     bodyClass: 'truck',
@@ -1786,10 +1795,19 @@ const GTAV_SPECS: readonly Entry[] = [
     frontWeightShare: 0.525,
     dragArea: 1.53,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    // No separate brake lamp bone in this donor: taillights carries the
+    // combined tail+brake material. Reverse and blinkers ARE split.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
   },
   {
     id: 'gt_uaz3962',
-    label: 'UAZ-3962',
+    label: 'UAZ-3962 (AKROM)',
     dir: GTAV,
     glb: 'uaz3962.glb',
     bodyClass: 'truck',
@@ -1816,7 +1834,7 @@ const GTAV_SPECS: readonly Entry[] = [
   },
   {
     id: 'gt_gazm20',
-    label: 'GAZ-M20 Pobeda',
+    label: 'GAZ-M20 Pobeda (AKROM)',
     dir: GTAV,
     glb: 'gazm20.glb',
     bodyClass: 'car',

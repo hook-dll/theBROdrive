@@ -8,13 +8,19 @@ large smooth panel).
 Usage:
     blender --background --factory-startup --python tools/decimate-glb.py -- \
         <in.glb> <out.glb> --target car_paint=9000 --target car_trim=9000 \
-        [--weld 0.0008] [--angle 32] [--default-ratio 1.0]
+        [--weld 0.0008] [--angle 32]
 
 `--target <node>=<tris>` caps that node's triangle count (skipped if already
-under budget: this never subdivides). Nodes without an explicit `--target`
-keep `--default-ratio` of their input triangles (1.0 = untouched, matching
-`--simplify false` downstream: nothing here is a second uncontrolled pass,
-every ratio is an explicit per-node decision from `stage_inspect`'s numbers).
+under budget: this never subdivides). A node with no `--target` is left
+completely alone -- no Weld, no Edge Split, no Decimate. Weld and Edge Split
+used to run unconditionally on every node "for consistency"; Edge Split
+hardens normals wherever adjacent faces exceed the split angle, which is
+invisible on this tool's flat preview material but reads as shattered facets
+on curved glass and paint under the game's own specular/reflective shading.
+There is no exterior-visible reason to touch a node nobody asked to shrink:
+call this only for the genuinely oversized roles (a lamp lens authored at
+absurd density is the recurring case), and leave everything else at its
+source triangle count.
 """
 from __future__ import annotations
 
@@ -38,13 +44,12 @@ def main() -> None:
     if len(argv) < 2:
         raise SystemExit(
             "usage: blender --background --python tools/decimate-glb.py -- "
-            "<in.glb> <out.glb> [--target node=tris ...] [--weld d] [--angle deg] [--default-ratio r]"
+            "<in.glb> <out.glb> [--target node=tris ...] [--weld d] [--angle deg]"
         )
     src, dst = Path(argv[0]).resolve(), Path(argv[1]).resolve()
     targets: dict[str, int] = {}
     weld = 0.0008
     angle = 32.0
-    default_ratio = 1.0
     i = 2
     while i < len(argv):
         if argv[i] == "--target":
@@ -57,9 +62,6 @@ def main() -> None:
         elif argv[i] == "--angle":
             angle = float(argv[i + 1])
             i += 2
-        elif argv[i] == "--default-ratio":
-            default_ratio = float(argv[i + 1])
-            i += 2
         else:
             raise SystemExit(f"unknown argument {argv[i]!r}")
 
@@ -69,10 +71,22 @@ def main() -> None:
     for obj in list(bpy.context.scene.objects):
         if obj.type != "MESH":
             continue
+        target_tris = targets.get(obj.name)
+        before = len(obj.data.polygons)
+        if target_tris is None:
+            # No explicit decision for this node: leave it completely alone.
+            # Weld and Edge Split were previously applied unconditionally here,
+            # which hardened normals (Edge Split at ~32 degrees) on every glass
+            # pane and untouched panel in the file. A flat-lit preview render
+            # never showed it, but the game's specular/reflective shading turned
+            # every hardened edge on curved glass and paint into visible facets
+            # -- "shattered glass" on rear windows, a crumpled look on fenders.
+            print(f"  {obj.name:22s} {before:6d} -> untouched (no --target)")
+            continue
+
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
 
-        before = len(obj.data.polygons)
         weld_mod = obj.modifiers.new("weld", "WELD")
         weld_mod.merge_threshold = weld
         split_mod = obj.modifiers.new("edge_split", "EDGE_SPLIT")
@@ -83,11 +97,7 @@ def main() -> None:
         bpy.ops.object.modifier_apply(modifier=split_mod.name)
 
         welded = len(obj.data.polygons)
-        target_tris = targets.get(obj.name)
-        if target_tris is None:
-            ratio = default_ratio
-        else:
-            ratio = min(1.0, target_tris / max(1, welded))
+        ratio = min(1.0, target_tris / max(1, welded))
         if ratio < 0.999:
             dec = obj.modifiers.new("decimate", "DECIMATE")
             dec.decimate_type = "COLLAPSE"
