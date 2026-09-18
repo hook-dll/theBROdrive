@@ -826,6 +826,14 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     throw new Error(`Car model "${def.id}": could not identify four wheels by shape`);
   }
   const parts = takeOwnWheels(def, scene);
+  // Cabin geometry (seats, dash, steering wheel) sits inside the shell and must
+  // never feed the measurements below: the lower-body width sweep and the hood
+  // skin sweep both sample "every mesh in the scene", and a steering wheel or
+  // gauge cluster reads as taller/wider than the actual bodywork at exactly the
+  // Z/X window those sweeps look at. Pull it out for the whole fitting pass and
+  // put it back once every measurement that assumes an exterior-only scene is done.
+  const interiorNode = scene.getObjectByName('interior');
+  if (interiorNode) scene.remove(interiorNode);
   // Published width excludes mirrors, but the affected source meshes include them
   // in their full Box3. Fitting that box made the actual shell 8-14% too narrow, so
   // a correct factory track visibly sat outside the arches. Measure the lower 55%
@@ -971,6 +979,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
+  if (interiorNode) scene.add(interiorNode);
   prepareMaterials(scene, true);
   scene.updateMatrixWorld(true);
 

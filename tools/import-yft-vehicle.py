@@ -434,6 +434,12 @@ def profile_for(model_id: str) -> Profile:
     return PROFILES.get(model_id, Profile(model_id=model_id, drop_bones=frozenset()))
 
 
+# Cabin surface materials: seat cloth, dash plastic, gauge-cluster backlight.
+# All of it sits behind glass with no interior camera in this runtime, so it
+# was previously dropped outright to save triangles. Kept now, routed to its
+# own `interior` role rather than folded into `car_trim`: `buildTemplate` in
+# carmodel.ts needs to find and exclude it by node name from the sweeps that
+# assume every mesh in the scene is exterior bodywork.
 SHADER_ROLE = {
     "vehicle_paint1": "car_paint", "vehicle_paint2": "car_paint",
     "vehicle_paint3": "car_paint", "vehicle_paint4": "car_paint",
@@ -443,17 +449,40 @@ SHADER_ROLE = {
     "vehicle_generic": "car_trim", "vehicle_tire": "car_trim",
     "vehicle_vehglass": "car_glass", "vehicle_vehglass_inner": "car_glass",
     "vehicle_lightsemissive": "lamp", "vehicle_lights": "lamp",
-    "vehicle_interior": None, "vehicle_interior2": None,
-    "vehicle_dash_emissive": None, "vehicle_dash_emissive_opaque": None,
-    "vehicle_cloth": None, "vehicle_cloth2": None,
+    "vehicle_interior": "interior", "vehicle_interior2": "interior",
+    "vehicle_dash_emissive": "interior", "vehicle_dash_emissive_opaque": "interior",
+    "vehicle_cloth": "interior", "vehicle_cloth2": "interior",
 }
+
+# Cabin bones named individually per donor in `drop_bones` (steering wheel,
+# gauge cluster, seats, the cabin shell itself): same reasoning as
+# `SHADER_ROLE` above, checked before `profile.drop_bones` so a donor's
+# per-car drop list does not have to be hand-edited to stop cutting them.
+# Everything else still named in `drop_bones` -- duplicate/low-LOD chassis,
+# alternate-drivetrain transmission tunnels, GTA "extras" attachment slots,
+# damage-state decals -- keeps being cut: those really do overlap or
+# contradict the geometry that ships, not just add invisible triangles.
+SAFE_INTERIOR_RE = re.compile(
+    r"^(z_salon|steeringwheel|dials|z_pribory(_night)?|z_panel_plastik|"
+    r"seat_(d|p)side_(f|r))$",
+    re.I,
+)
 
 
 def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -> str | None:
-    if bone_name in profile.drop_bones:
+    safe_interior = SAFE_INTERIOR_RE.match(bone_name)
+    if bone_name in profile.drop_bones and not safe_interior:
         return None
     if bone_name in profile.lamp_roles:
         return profile.lamp_roles[bone_name]
+    # Every triangle on a safe-interior bone goes to `interior`, not just the
+    # ones whose own shader happens to be one of the cabin materials -- a
+    # steering wheel's metal column is `vehicle_mesh` (the same shader as
+    # exterior trim), and left to shader-only routing it lands in `car_trim`,
+    # which is exactly the node the exterior-shell sweeps in carmodel.ts do
+    # not exclude.
+    if safe_interior:
+        return "interior"
     role = SHADER_ROLE.get(shader, "car_trim")
     if role is None:
         return None
@@ -470,6 +499,88 @@ def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -
             return "taillights"
         return "car_trim"
     return role
+
+
+def _connected_components(positions: np.ndarray, tris: np.ndarray) -> list[np.ndarray]:
+    """Split one bone's triangles (indexing `positions`) into island triangle arrays."""
+    used = np.unique(tris)
+    remap = np.zeros(len(positions), dtype=np.int64)
+    remap[used] = np.arange(len(used))
+    n = len(used)
+    parent = np.arange(n)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for t in tris:
+        a, b, c = remap[t[0]], remap[t[1]], remap[t[2]]
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+        rb, rc = find(b), find(c)
+        if rb != rc:
+            parent[rb] = rc
+
+    roots = np.array([find(i) for i in range(n)])
+    vroot = np.full(len(positions), -1, dtype=np.int64)
+    vroot[used] = roots
+    tri_root = vroot[tris[:, 0]]
+    return [tris[tri_root == r] for r in np.unique(roots)]
+
+
+def route_hub_corners(corner_tris: dict[str, list[tuple[np.ndarray, np.ndarray, np.ndarray]]]):
+    """Tell apart a hub cap from a rear coil spring/strut weighted to the same bone.
+
+    Some AKROM donors weight the rear coil spring/strut to the same `hub_lr`/
+    `hub_rr` bone as the visible hub cap, so a naive per-bone role assignment
+    puts the spring in the same node as the cap -- which `CarModelDef.wheelNodes`
+    then spins with the wheel. Shape heuristics (bounding-box aspect ratio, tri
+    count) do not separate them reliably: the cap itself is built from dozens
+    of small, genuinely thin, disconnected mechanical details (bolts, flanges)
+    that read just as "elongated" as a spring under any such metric.
+
+    What does separate them: the front hub on the same car carries no spring,
+    but shares every other part of the cap assembly with the rear hub on the
+    same side (identical islands, down to the exact triangle count -- these
+    are mirrored/reused sub-parts, not independently authored per corner). So
+    each rear island is matched against the front side's island sizes; islands
+    with no size match on the front are the extra parts -- spring, strut,
+    mounting bracket -- unique to the rear, and get routed to `car_trim`
+    instead of the hub role so they stay fixed to the chassis.
+
+    `corner_tris`: "fl"/"fr"/"rl"/"rr" -> list of (bone-matching triangles,
+    that geom's positions, that geom's normals). Returns the same shape with
+    each geom's triangles broken into islands, each tagged "hub" or "car_trim".
+    """
+    islands = {
+        corner: [
+            (len(tris), tris, pos, normal)
+            for tri_group, pos, normal in items
+            for tris in _connected_components(pos, tri_group)
+        ]
+        for corner, items in corner_tris.items()
+    }
+
+    def route_rear(front_key: str, rear_key: str):
+        budget = collections.Counter(size for size, _, _, _ in islands.get(front_key, []))
+        routed = []
+        for size, tris, pos, normal in sorted(islands.get(rear_key, []), key=lambda c: -c[0]):
+            if budget[size] > 0:
+                budget[size] -= 1
+                routed.append(("hub", tris, pos, normal))
+            else:
+                routed.append(("car_trim", tris, pos, normal))
+        return routed
+
+    return {
+        "fl": [("hub", tris, pos, normal) for _, tris, pos, normal in islands.get("fl", [])],
+        "fr": [("hub", tris, pos, normal) for _, tris, pos, normal in islands.get("fr", [])],
+        "rl": route_rear("fl", "rl"),
+        "rr": route_rear("fr", "rr"),
+    }
 
 
 # --------------------------------------------------------------- glTF writing
@@ -492,6 +603,12 @@ MATERIALS = {
 NODE_CONTRACT = {
     "car_paint": ("chassisbody", "paint", "car_paint"),
     "car_trim": ("chassis_trim", "trim", "car_trim"),
+    # Same material as car_trim (there is no dedicated cabin-plastic shader in
+    # the runtime palette) but its own node: `buildTemplate` in carmodel.ts
+    # pulls this node out before the shell-width/hood-skin sweeps that assume
+    # "every mesh is exterior bodywork" and would otherwise measure a
+    # steering wheel or gauge cluster as if it were part of the panel line.
+    "interior": ("interior", "interior", "car_trim"),
     "car_glass": ("glass", "glass", "car_glass"),
     "headlights": ("headlights", "headlights", "Headlights"),
     "front_blinker_left": ("front_blinker_left", "front_blinker_left", "IndicatorLights"),
@@ -787,22 +904,45 @@ def stage_extract(archive: Path, out_dir: Path, profile: Profile):
     names = [b["name"] for b in skeleton]
     roles: dict[str, list] = collections.defaultdict(list)
     stats = collections.Counter()
+    corner_tris: dict[str, list] = collections.defaultdict(list)
+
     for g in geoms:
         bones = g["bone"] if g["bone"] is not None else np.full(len(g["position"]), g["model_bone"])
         tri_bone = bones[g["indices"][:, 0]]
+
+        def add_part(role: str, tri_subset: np.ndarray, position=g["position"], normal=g["normal"]) -> None:
+            used = np.unique(tri_subset)
+            remap = np.zeros(len(position), np.int64)
+            remap[used] = np.arange(len(used))
+            roles[role].append(
+                (to_game_axes(position[used]), to_game_axes(normal[used]), remap[tri_subset])
+            )
+
         for bone in np.unique(tri_bone):
             tris = g["indices"][tri_bone == bone]
             name = names[bone] if bone < len(names) else f"bone{bone}"
-            centroid_y = float(g["position"][np.unique(tris)][:, 1].mean())
             hub_match = HUB_BONE_RE.match(name)
-            role = f"hub_{HUB_CORNER[hub_match.group(1).lower()]}" if hub_match else classify(profile, name, g["shader"], centroid_y)
+            if hub_match:
+                corner = HUB_CORNER[hub_match.group(1).lower()]
+                corner_tris[corner].append((tris, g["position"], g["normal"]))
+                stats[(name, g["shader"], f"hub_{corner}")] += len(tris)
+                continue
+            centroid_y = float(g["position"][np.unique(tris)][:, 1].mean())
+            role = classify(profile, name, g["shader"], centroid_y)
             stats[(name, g["shader"], role)] += len(tris)
             if role is None:
                 continue
+            add_part(role, tris)
+
+    for corner, islands in route_hub_corners(corner_tris).items():
+        for target, tris, pos, normal in islands:
+            role = f"hub_{corner}" if target == "hub" else "car_trim"
             used = np.unique(tris)
-            remap = np.zeros(len(g["position"]), np.int64)
+            remap = np.zeros(len(pos), np.int64)
             remap[used] = np.arange(len(used))
-            roles[role].append((to_game_axes(g["position"][used]), to_game_axes(g["normal"][used]), remap[tris]))
+            roles[role].append((to_game_axes(pos[used]), to_game_axes(normal[used]), remap[tris]))
+            if target != "hub":
+                stats[(f"hub_{corner}", "?", "car_trim (spring/strut)")] += len(tris)
 
     parts = {role: merge(chunks) for role, chunks in roles.items()}
     for role, part in sorted(parts.items()):
