@@ -18,5 +18,7 @@
     "indicator_rr": "rear_blinker_right",
     "brakelight_m": "brake_lights"
   },
-  "lamp_split_y": 0.5
+  "lamp_split_y": 0.5,
+  "_foreign_lamp_diagonal_m_note": "z_kuzf also carries this wagon's roof rack + rear glass, confirmed by render (build/vehicles/_lampcheck_vaz2102_zkuzf-render); its own islands top out at 0.298m, the rack starts at 0.457m",
+  "foreign_lamp_diagonal_m": 0.4
 }

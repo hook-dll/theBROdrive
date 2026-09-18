@@ -1445,6 +1445,16 @@ const GTAV_SPECS: readonly Entry[] = [
     handlingProfile: 'utility',
     frontWeightShare: 0.449,
     dragArea: 5.06,
+    // No separate brake lamp bone in this donor: taillights carries the
+    // combined tail+brake material. No rear-mounted blinker bones either --
+    // both indicator functions live on the front bones only.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
+    },
   },
   {
     id: 'gt_vaz21099',
@@ -1469,6 +1479,15 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_fr: ['wheel_fr', 'hub_fr'],
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
+    },
+    // No separate reverse lamp bone in this donor. No rear-mounted blinker
+    // bones either -- both indicator functions live on the front bones only.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
     },
   },
   {
@@ -1552,6 +1571,15 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
+    // No separate reverse lamp bone in this donor. No rear-mounted blinker
+    // bones either -- both indicator functions live on the front bones only.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
+    },
   },
   {
     id: 'gt_vaz2114',
@@ -1576,6 +1604,16 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_fr: ['wheel_fr', 'hub_fr'],
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
+    },
+    // No separate brake lamp bone in this donor: taillights carries the
+    // combined tail+brake material. No rear-mounted blinker bones either --
+    // both indicator functions live on the front bones only.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
     },
   },
   {

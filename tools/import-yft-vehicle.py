@@ -396,6 +396,16 @@ class Profile(NamedTuple):
     #: A lamp mesh this far from the car's centre plane is a headlamp or a
     #: tail lamp; anything between is a side repeater or a courtesy light.
     lamp_split_y: float = 0.5
+    #: Opt-in per-donor size cutoff for `lamp_bone_role`: a (bone, shader)
+    #: triangle group past this bounding-box diagonal, in metres, is treated
+    #: as a foreign object weighted to the lamp bone by mistake rather than
+    #: part of the lamp, and routed through ordinary shader-based
+    #: classification instead. Left unset by default -- this pack has no
+    #: single scale a lamp part stays under (a genuine truck indicator lens
+    #: measures bigger than a confirmed foreign object on a compact car) --
+    #: and set only for a donor where a specific oversized island has
+    #: already been confirmed foreign by inspection.
+    foreign_lamp_diagonal_m: float | None = None
 
 
 # Each donor's classification lives in its own `tools/vehicle_profiles/<id>.json`
@@ -421,6 +431,9 @@ def _load_profiles() -> dict[str, Profile]:
             rear_lens_bones=frozenset(raw.get("rear_lens_bones", ())),
             lamp_roles=dict(raw.get("lamp_roles", {})),
             lamp_split_y=float(raw.get("lamp_split_y", 0.5)),
+            foreign_lamp_diagonal_m=(
+                float(raw["foreign_lamp_diagonal_m"]) if "foreign_lamp_diagonal_m" in raw else None
+            ),
         )
     return profiles
 
@@ -469,20 +482,11 @@ SAFE_INTERIOR_RE = re.compile(
 )
 
 
-def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -> str | None:
-    safe_interior = SAFE_INTERIOR_RE.match(bone_name)
-    if bone_name in profile.drop_bones and not safe_interior:
-        return None
-    if bone_name in profile.lamp_roles:
-        return profile.lamp_roles[bone_name]
-    # Every triangle on a safe-interior bone goes to `interior`, not just the
-    # ones whose own shader happens to be one of the cabin materials -- a
-    # steering wheel's metal column is `vehicle_mesh` (the same shader as
-    # exterior trim), and left to shader-only routing it lands in `car_trim`,
-    # which is exactly the node the exterior-shell sweeps in carmodel.ts do
-    # not exclude.
-    if safe_interior:
-        return "interior"
+def _shader_role(profile: Profile, bone_name: str, shader: str, centroid_y: float) -> str | None:
+    """Role a shader alone implies, ignoring any bone-name override. Shared by
+    `classify` (for bones with no override) and by the lamp-contamination
+    fallback below (for the part of a lamp bone that turns out not to be a
+    lamp at all)."""
     role = SHADER_ROLE.get(shader, "car_trim")
     if role is None:
         return None
@@ -499,6 +503,58 @@ def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -
             return "taillights"
         return "car_trim"
     return role
+
+
+# A few donors also reuse `lamp_roles` as a general per-bone override for
+# something that plainly is not a lamp at all (mapped straight to
+# "car_trim") -- that use predates this filter and is unrelated to it, so it
+# is excluded here by name rather than swept up by an unqualified "any
+# lamp_roles bone" check.
+LAMP_ROLE_NAMES = frozenset({
+    "headlights", "front_blinker_left", "front_blinker_right", "front_auxiliary",
+    "taillights", "brake_lights", "reverse_lights", "rear_blinker_left",
+    "rear_blinker_right", "rear_passive",
+})
+
+# A donor's own bone hierarchy sometimes puts a whole unrelated part on a
+# bone the profile maps to a lamp role -- a spare tire, a roof rack -- simply
+# because that is where the rigger's skeleton happened to have a slot.
+# `vehicle_tire` shader is never legitimate anywhere near a lamp (every
+# appearance found on this pack's lamp bones turned out to be a duplicate
+# spare wheel) and is checked unconditionally. A size cutoff catches
+# everything else, but this pack's lamp parts do not share one scale -- a
+# genuine ZIL-130 truck indicator lens measured bigger than the largest
+# confirmed foreign object on a compact car -- so it is opt-in per donor via
+# `Profile.foreign_lamp_diagonal_m` rather than one pack-wide constant.
+# Either tell routes that specific (bone, shader) triangle group through the
+# ordinary shader-based role instead of the bone's assigned lamp role.
+def lamp_bone_role(
+    profile: Profile, bone_name: str, shader: str, centroid_y: float, positions: np.ndarray
+) -> str | None:
+    if shader == "vehicle_tire":
+        return _shader_role(profile, bone_name, shader, centroid_y)
+    if profile.foreign_lamp_diagonal_m is not None:
+        diagonal = float(np.linalg.norm(positions.max(0) - positions.min(0)))
+        if diagonal > profile.foreign_lamp_diagonal_m:
+            return _shader_role(profile, bone_name, shader, centroid_y)
+    return profile.lamp_roles[bone_name]
+
+
+def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -> str | None:
+    safe_interior = SAFE_INTERIOR_RE.match(bone_name)
+    if bone_name in profile.drop_bones and not safe_interior:
+        return None
+    if bone_name in profile.lamp_roles:
+        return profile.lamp_roles[bone_name]
+    # Every triangle on a safe-interior bone goes to `interior`, not just the
+    # ones whose own shader happens to be one of the cabin materials -- a
+    # steering wheel's metal column is `vehicle_mesh` (the same shader as
+    # exterior trim), and left to shader-only routing it lands in `car_trim`,
+    # which is exactly the node the exterior-shell sweeps in carmodel.ts do
+    # not exclude.
+    if safe_interior:
+        return "interior"
+    return _shader_role(profile, bone_name, shader, centroid_y)
 
 
 def _connected_components(positions: np.ndarray, tris: np.ndarray) -> list[np.ndarray]:
@@ -928,7 +984,10 @@ def stage_extract(archive: Path, out_dir: Path, profile: Profile):
                 stats[(name, g["shader"], f"hub_{corner}")] += len(tris)
                 continue
             centroid_y = float(g["position"][np.unique(tris)][:, 1].mean())
-            role = classify(profile, name, g["shader"], centroid_y)
+            if name in profile.lamp_roles and profile.lamp_roles[name] in LAMP_ROLE_NAMES:
+                role = lamp_bone_role(profile, name, g["shader"], centroid_y, g["position"][np.unique(tris)])
+            else:
+                role = classify(profile, name, g["shader"], centroid_y)
             stats[(name, g["shader"], role)] += len(tris)
             if role is None:
                 continue
