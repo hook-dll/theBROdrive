@@ -1,0 +1,22 @@
+{
+  "model_id": "gt_gaz2412",
+  "drop_bones": [
+    "steeringwheel", "transmission_r",
+    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
+    "extra_1", "extra_2", "extra_ten", "extra_11", "extra_12"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights", "headlight_r": "headlights",
+    "svet 1": "headlights", "svet 2": "headlights",
+    "indicator_lf": "front_blinker_left", "indicator_rf": "front_blinker_right",
+    "indicator_lr": "rear_blinker_left", "indicator_rr": "rear_blinker_right",
+    "brakelight_l": "brake_lights", "brakelight_r": "brake_lights",
+    "reversinglight_l": "reverse_lights", "reversinglight_r": "reverse_lights",
+    "taillight_l": "taillights", "taillight_r": "taillights",
+    "extralight_1": "front_auxiliary", "extralight_2": "front_auxiliary",
+    "misc_a": "front_auxiliary", "misc_b": "front_auxiliary"
+  },
+  "lamp_split_y": 0.5
+}

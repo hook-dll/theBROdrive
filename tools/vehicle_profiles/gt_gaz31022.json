@@ -1,0 +1,20 @@
+{
+  "model_id": "gt_gaz31022",
+  "drop_bones": [
+    "steeringwheel", "transmission_r",
+    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
+    "extra_1", "extra_2", "extra_ten", "extra_11", "extra_12"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights", "headlight_r": "headlights",
+    "indicator_lf": "front_blinker_left", "indicator_rf": "front_blinker_right",
+    "indicator_lr": "rear_blinker_left", "indicator_rr": "rear_blinker_right",
+    "window_lr_misc": "taillights", "window_rr_misc": "taillights",
+    "taillight_l": "brake_lights", "taillight_r": "brake_lights",
+    "reversinglight_l": "reverse_lights", "reversinglight_r": "reverse_lights",
+    "extralight_1": "front_auxiliary", "extralight_2": "front_auxiliary"
+  },
+  "lamp_split_y": 0.5
+}

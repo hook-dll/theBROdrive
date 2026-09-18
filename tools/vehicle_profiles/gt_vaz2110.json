@@ -1,0 +1,18 @@
+{
+  "model_id": "gt_vaz2110",
+  "drop_bones": [
+    "torpedo.008_torpedo.009", "torpeda", "steeringwheel", "Pioneer", "dials",
+    "Retopo_SPEED.003_mesh", "steklo", "kovrik", "DVIG", "engine", "exhaust",
+    "chassis_lowlod", "Cylinder_Cylinder", "extra_1", "extra_2", "llhprod", "SED",
+    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
+    "seat_dside_f", "seat_dside_r", "seat_pside_f", "seat_pside_r",
+    "neon_l", "neon_r", "neon_f", "neon_b", "overheat", "overheat_2",
+    "door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004",
+    "door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004",
+    "ssssss", "sssssssssssssssssss"
+  ],
+  "front_lens_bones": ["fars_2110_006_fars_2110_012.002_fars_2110_006_fars_2110_012.002"],
+  "rear_lens_bones": ["stfar", "reflector"],
+  "lamp_roles": {},
+  "lamp_split_y": 0.5
+}

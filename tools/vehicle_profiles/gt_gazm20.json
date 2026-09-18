@@ -1,0 +1,16 @@
+{
+  "model_id": "gt_gazm20",
+  "drop_bones": [
+    "steeringwheel", "transmission_f", "transmission_r",
+    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
+    "extra_1", "extra_3", "extra_ten", "extra_11", "extra_12"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights", "headlight_r": "headlights",
+    "taillight_l": "taillights", "taillight_r": "taillights",
+    "indicator_lr": "taillights", "indicator_rr": "taillights"
+  },
+  "lamp_split_y": 0.5
+}

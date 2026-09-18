@@ -1,0 +1,22 @@
+{
+  "model_id": "gt_vaz2102",
+  "drop_bones": [
+    "steeringwheel", "dials", "z_salon", "transmission_r",
+    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
+    "extra_11", "extra_12"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights",
+    "headlight_r": "headlights",
+    "indicator_lf": "front_blinker_left",
+    "indicator_rf": "front_blinker_right",
+    "taillight_l": "taillights",
+    "z_kuzf": "reverse_lights",
+    "indicator_lr": "rear_blinker_left",
+    "indicator_rr": "rear_blinker_right",
+    "brakelight_m": "brake_lights"
+  },
+  "lamp_split_y": 0.5
+}

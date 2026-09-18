@@ -33,12 +33,16 @@ from __future__ import annotations
 import argparse
 import collections
 import json
+import re
 import struct
 import sys
 import zlib
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------- RPF7 archive
 
@@ -104,7 +108,42 @@ def size_from_flags(flags: int) -> int:
 
 
 def find_yft(path: Path) -> tuple[bytes, str]:
-    """Inflate the first non-`_hi` .yft in the archive's nested vehicles.rpf."""
+    """Load the source vehicle fragment.
+
+    Three input shapes:
+
+    - a directory holding a loose `Model/*.yft` (an AKROM-style mod pack,
+      extracted from its archive but never repacked into an RPF);
+    - a bare `.yft` file;
+    - an RPF7 `dlc.rpf` with a nested `vehicles.rpf` (the original production
+      path this tool was written for).
+
+    A loose mod file needs no RPF at all: it is already RSC7-wrapped and
+    zlib-deflated exactly as an RPF entry's bytes would be, and its own
+    16-byte header carries the same system/graphics flags an RPF directory
+    entry otherwise duplicates for fast access.
+    """
+    if path.is_dir():
+        candidates = sorted(p for p in path.rglob("*.yft") if "_hi" not in p.stem.lower())
+        if not candidates:
+            raise SystemExit(f"no non-_hi .yft under {path}")
+        if len(candidates) > 1:
+            names = ", ".join(str(c) for c in candidates)
+            raise SystemExit(f"{len(candidates)} candidate .yft files under {path}, pass the exact file: {names}")
+        path = candidates[0]
+
+    if path.suffix.lower() == ".yft":
+        raw = path.read_bytes()
+        if raw[:4] != b"RSC7":
+            raise SystemExit(f"{path}: not an RSC7 resource")
+        _, sys_flags, gfx_flags = struct.unpack_from("<3I", raw, 4)
+        system_size = size_from_flags(sys_flags)
+        data = zlib.decompressobj(-15).decompress(raw[16:])
+        expect = system_size + size_from_flags(gfx_flags)
+        if len(data) != expect:
+            raise SystemExit(f"inflated {len(data)} bytes, flags claim {expect}")
+        return data, path.name
+
     blob = memoryview(path.read_bytes())
     top = _rpf_entries(blob, 0)
     nested = [k for k in top if k.lower().endswith("vehicles.rpf")]
@@ -115,6 +154,9 @@ def find_yft(path: Path) -> tuple[bytes, str]:
     yfts = [k for k in inner if k.lower().endswith(".yft") and "_hi" not in k.lower()]
     if not yfts:
         raise SystemExit("no .yft inside vehicles.rpf")
+    if len(yfts) > 1:
+        names = ", ".join(yfts)
+        raise SystemExit(f"{len(yfts)} candidate .yft entries, pass the exact archive: {names}")
     e = inner[yfts[0]]
     raw = bytes(blob[e["offset"] : e["offset"] + e["size"]])
     if raw[:4] != b"RSC7":
@@ -323,31 +365,74 @@ def read_children(res: Resource):
 
 # ------------------------------------------------------------- classification
 
-# Bones whose triangles never ship: cabin, engine bay, damage-only and neon
-# geometry. The body is one skinned mesh, so this is the only handle on them.
-#
-# The door cards (`door_lf_ok`, `door_rf_ok` and the two `ssss` bones) go with
-# the cabin. This pack authors them as a second shell a few centimetres inside
-# the painted door skin; with the seats and dashboard gone there is nothing for
-# them to trim, and at the runtime's triangle budget the two coincident sheets
-# decimate into each other and punch craters through the doors.
-DROP_BONES = {
-    "torpedo.008_torpedo.009", "torpeda", "steeringwheel", "Pioneer", "dials",
-    "Retopo_SPEED.003_mesh", "steklo", "kovrik", "DVIG", "engine", "exhaust",
-    "chassis_lowlod", "Cylinder_Cylinder", "extra_1", "extra_2", "llhprod", "SED",
-    "suspension_lf", "suspension_rf", "suspension_lr", "suspension_rr",
-    "seat_dside_f", "seat_dside_r", "seat_pside_f", "seat_pside_r",
-    "neon_l", "neon_r", "neon_f", "neon_b", "overheat", "overheat_2",
-    "door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004"
-    "_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004_door_lf_ok.004",
-    "door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004"
-    "_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004_door_rf_ok.004",
-    "ssssss", "sssssssssssssssssss",
-}
-# Lamp lenses authored as glass. Leaving them in `car_glass` would put a
-# translucent sheet in front of the emissive lens, which then lights invisibly.
-FRONT_LENS_BONES = {"fars_2110_006_fars_2110_012.002_fars_2110_006_fars_2110_012.002"}
-REAR_LENS_BONES = {"stfar", "reflector"}
+
+class Profile(NamedTuple):
+    """Everything about classification that is specific to one donor YFT.
+
+    Bone names come straight from the modder's own DCC scene, so they carry
+    no meaning across packs -- two AKROM cars sharing a Russian word like
+    "torpeda" is a coincidence of authoring habit, not a contract. Every new
+    donor gets its own entry, built from a `stage_inspect` pass.
+    """
+
+    model_id: str
+    #: Bones whose triangles never ship: cabin, engine bay, damage-only and
+    #: neon geometry. The body is one skinned mesh, so this is the only
+    #: handle on them.
+    drop_bones: frozenset[str]
+    #: Lamp lenses authored as glass. Leaving them in `car_glass` would put a
+    #: translucent sheet in front of the emissive lens, which then lights
+    #: invisibly.
+    front_lens_bones: frozenset[str] = frozenset()
+    rear_lens_bones: frozenset[str] = frozenset()
+    #: Explicit bone -> `NODE_CONTRACT` role for packs that already separate
+    #: lamp functions into named bones (`indicator_lf`, `brakelight_r`, ...).
+    #: Checked before `front_lens_bones`/`rear_lens_bones`/the shader-based
+    #: front/rear split, and applies to every shader a matching bone carries
+    #: -- a lamp bone's own glass-shader triangles (a lens modelled as
+    #: "glass") get the same semantic role as its emissive triangles, so
+    #: nothing translucent is left sitting in front of the lit lens.
+    lamp_roles: dict[str, str] = {}
+    #: A lamp mesh this far from the car's centre plane is a headlamp or a
+    #: tail lamp; anything between is a side repeater or a courtesy light.
+    lamp_split_y: float = 0.5
+
+
+# Each donor's classification lives in its own `tools/vehicle_profiles/<id>.json`
+# (schema: model_id, drop_bones, front_lens_bones, rear_lens_bones, lamp_roles,
+# lamp_split_y) rather than one shared table, so adding a car never touches this
+# file or collides with another car's edit to it.
+PROFILES_DIR = ROOT / "tools" / "vehicle_profiles"
+
+
+def _load_profiles() -> dict[str, Profile]:
+    profiles: dict[str, Profile] = {}
+    if not PROFILES_DIR.is_dir():
+        return profiles
+    for path in sorted(PROFILES_DIR.glob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf8"))
+        model_id = raw["model_id"]
+        if model_id != path.stem:
+            raise SystemExit(f"{path}: model_id {model_id!r} does not match filename")
+        profiles[model_id] = Profile(
+            model_id=model_id,
+            drop_bones=frozenset(raw.get("drop_bones", ())),
+            front_lens_bones=frozenset(raw.get("front_lens_bones", ())),
+            rear_lens_bones=frozenset(raw.get("rear_lens_bones", ())),
+            lamp_roles=dict(raw.get("lamp_roles", {})),
+            lamp_split_y=float(raw.get("lamp_split_y", 0.5)),
+        )
+    return profiles
+
+
+PROFILES: dict[str, Profile] = _load_profiles()
+
+def profile_for(model_id: str) -> Profile:
+    """A curated profile if one exists, otherwise an empty one for a first
+    `stage_inspect` pass: bone-name drops are opt-in, so an unknown model
+    starts by keeping everything the shader table alone would keep."""
+    return PROFILES.get(model_id, Profile(model_id=model_id, drop_bones=frozenset()))
+
 
 SHADER_ROLE = {
     "vehicle_paint1": "car_paint", "vehicle_paint2": "car_paint",
@@ -362,27 +447,26 @@ SHADER_ROLE = {
     "vehicle_dash_emissive": None, "vehicle_dash_emissive_opaque": None,
     "vehicle_cloth": None, "vehicle_cloth2": None,
 }
-# A lamp mesh this far from the car's centre plane is a headlamp or a tail lamp;
-# anything between is a side repeater or a door courtesy light, which is trim.
-LAMP_SPLIT_Y = 0.5
 
 
-def classify(bone_name: str, shader: str, centroid_y: float) -> str | None:
-    if bone_name in DROP_BONES:
+def classify(profile: Profile, bone_name: str, shader: str, centroid_y: float) -> str | None:
+    if bone_name in profile.drop_bones:
         return None
+    if bone_name in profile.lamp_roles:
+        return profile.lamp_roles[bone_name]
     role = SHADER_ROLE.get(shader, "car_trim")
     if role is None:
         return None
     if role == "car_glass":
-        if bone_name in FRONT_LENS_BONES:
+        if bone_name in profile.front_lens_bones:
             return "headlights"
-        if bone_name in REAR_LENS_BONES:
+        if bone_name in profile.rear_lens_bones:
             return "taillights"
         return "car_glass"
     if role == "lamp":
-        if centroid_y > LAMP_SPLIT_Y:
+        if centroid_y > profile.lamp_split_y:
             return "headlights"
-        if centroid_y < -LAMP_SPLIT_Y:
+        if centroid_y < -profile.lamp_split_y:
             return "taillights"
         return "car_trim"
     return role
@@ -420,7 +504,19 @@ NODE_CONTRACT = {
     "rear_blinker_right": ("rear_blinker_right", "rear_blinker_right", "IndicatorLights"),
     "rear_passive": ("rear_passive", "rear_passive", "PassiveRearLights"),
     "wheel": ("wheel", "wheel", "Tyres"),
+    "hub_fl": ("hub_fl", "hub_fl", "car_trim"),
+    "hub_fr": ("hub_fr", "hub_fr", "car_trim"),
+    "hub_rl": ("hub_rl", "hub_rl", "car_trim"),
+    "hub_rr": ("hub_rr", "hub_rr", "car_trim"),
 }
+
+# Some packs (the GAZ-31029 donor among them) weight a visible hub/axle island
+# to its own body-skin bone instead of folding it into the wheel drawable. Left
+# in `car_trim` it stays fixed to the chassis while the wheel travels with
+# suspension, so it is routed to its own runtime node and paired with its
+# wheel via `CarModelDef.wheelNodes` instead of going through `classify`.
+HUB_BONE_RE = re.compile(r"^hub_(lf|rf|lr|rr)$", re.I)
+HUB_CORNER = {"lf": "fl", "rf": "fr", "lr": "rl", "rr": "rr"}
 
 
 def write_glb(path: Path, parts: dict[str, dict], nodes: list[dict], materials: dict | None = None):
@@ -587,7 +683,7 @@ INSPECT_COLOURS = {
 DEFAULT_INSPECT_COLOUR = ([0.55, 0.55, 0.58, 1], 0.7, 0.0)
 
 
-def stage_inspect(archive: Path, out_dir: Path):
+def stage_inspect(archive: Path, out_dir: Path, profile: Profile):
     """Export the source at full density, nothing dropped, one object per part.
 
     This is the file to open in Blender before deciding anything: every bone
@@ -620,8 +716,9 @@ def stage_inspect(archive: Path, out_dir: Path):
                 (to_game_axes(g["position"][used]), to_game_axes(g["normal"][used]), remap[tris])
             )
             centroid_y = float(g["position"][used][:, 1].mean())
-            meta.setdefault(key, {"bone": bone_name, "shader": g["shader"],
-                                  "role": classify(bone_name, g["shader"], centroid_y)})
+            hub_match = HUB_BONE_RE.match(bone_name)
+            role = f"hub_{HUB_CORNER[hub_match.group(1).lower()]}" if hub_match else classify(profile, bone_name, g["shader"], centroid_y)
+            meta.setdefault(key, {"bone": bone_name, "shader": g["shader"], "role": role})
 
     parts = {}
     for key, group in chunks.items():
@@ -651,7 +748,7 @@ def stage_inspect(archive: Path, out_dir: Path):
         for key in parts
     ]
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_glb(out_dir / "vaz2110-source.glb", parts, nodes, materials=palette)
+    write_glb(out_dir / f"{profile.model_id}-source.glb", parts, nodes, materials=palette)
 
     rows = []
     for key, part in parts.items():
@@ -664,7 +761,7 @@ def stage_inspect(archive: Path, out_dir: Path):
     lines = [
         "# Source parts, full density",
         "",
-        f"`{member}` -> `vaz2110-source.glb`. Axes are the game's: nose +Z, up +Y, left +X.",
+        f"`{member}` -> `{profile.model_id}-source.glb`. Axes are the game's: nose +Z, up +Y, left +X.",
         "",
         "`now` is what `tools/import-yft-vehicle.py extract` currently does with the part.",
         "",
@@ -675,10 +772,10 @@ def stage_inspect(archive: Path, out_dir: Path):
     total = sum(r[0] for r in rows)
     lines += ["", f"{len(rows)} objects, {total} triangles."]
     (out_dir / "parts.md").write_text("\n".join(lines) + "\n", encoding="utf8")
-    print(f"  {len(parts)} objects, {total} triangles -> {out_dir / 'vaz2110-source.glb'}")
+    print(f"  {len(parts)} objects, {total} triangles -> {out_dir / f'{profile.model_id}-source.glb'}")
 
 
-def stage_extract(archive: Path, out_dir: Path):
+def stage_extract(archive: Path, out_dir: Path, profile: Profile):
     data, member = find_yft(archive)
     system_size = len(data)  # graphics flags are zero for this resource class
     res = Resource(data, system_size)
@@ -697,7 +794,8 @@ def stage_extract(archive: Path, out_dir: Path):
             tris = g["indices"][tri_bone == bone]
             name = names[bone] if bone < len(names) else f"bone{bone}"
             centroid_y = float(g["position"][np.unique(tris)][:, 1].mean())
-            role = classify(name, g["shader"], centroid_y)
+            hub_match = HUB_BONE_RE.match(name)
+            role = f"hub_{HUB_CORNER[hub_match.group(1).lower()]}" if hub_match else classify(profile, name, g["shader"], centroid_y)
             stats[(name, g["shader"], role)] += len(tris)
             if role is None:
                 continue
@@ -776,6 +874,12 @@ def stage_assemble(build_dir: Path, out_path: Path):
 
     role_of = {node: role for role, (node, _, _) in NODE_CONTRACT.items()}
     parts = {role_of[name]: part for name, part in body.items()}
+    # A combined tail+brake cluster (no separate `brake_lights` node) is styled
+    # with the brake-capable material so it reads as lit under braking; a split
+    # cluster keeps `taillights` on its own always-on material. Mirrors the
+    # same rule tools/dff-pack-audit.mjs checks for.
+    if "brake_lights" not in parts and "taillights" in parts:
+        parts["taillights"] = {**parts["taillights"], "material": "BrakeLights", "mesh_name": "taillights"}
     parts["wheel"] = wheel
 
     # A right-hand wheel is the left one turned half a turn about the vertical
@@ -800,17 +904,21 @@ def main():
     i = sub.add_parser("inspect")
     i.add_argument("archive", type=Path)
     i.add_argument("out_dir", type=Path)
+    i.add_argument("--model", "-m", default="gt_vaz2110", help="profile id (see PROFILES); unknown ids drop nothing")
     e = sub.add_parser("extract")
     e.add_argument("archive", type=Path)
     e.add_argument("out_dir", type=Path)
+    e.add_argument("--model", "-m", default="gt_vaz2110", help="profile id, must exist in PROFILES")
     a = sub.add_parser("assemble")
     a.add_argument("build_dir", type=Path)
     a.add_argument("out_path", type=Path)
     args = ap.parse_args()
     if args.stage == "inspect":
-        stage_inspect(args.archive, args.out_dir)
+        stage_inspect(args.archive, args.out_dir, profile_for(args.model))
     elif args.stage == "extract":
-        stage_extract(args.archive, args.out_dir)
+        if args.model not in PROFILES:
+            raise SystemExit(f"no curated profile for {args.model!r}; run `inspect` first and add one to PROFILES")
+        stage_extract(args.archive, args.out_dir, PROFILES[args.model])
     else:
         stage_assemble(args.build_dir, args.out_path)
 

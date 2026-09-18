@@ -1,0 +1,23 @@
+{
+  "model_id": "gt_gazel",
+  "drop_bones": [
+    "steeringwheel", "transmission_r", "transmission_f"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights",
+    "headlight_r": "headlights",
+    "indicator_lf": "front_blinker_left",
+    "indicator_rf": "front_blinker_right",
+    "indicator_lr": "rear_blinker_left",
+    "indicator_rr": "rear_blinker_right",
+    "taillight_l": "taillights",
+    "taillight_r": "taillights",
+    "reversinglight_l": "reverse_lights",
+    "reversinglight_r": "reverse_lights",
+    "extralight_1": "front_auxiliary",
+    "extralight_2": "front_auxiliary"
+  },
+  "lamp_split_y": 0.5
+}

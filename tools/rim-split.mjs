@@ -72,10 +72,18 @@ const tyre = findOrCreate('Tyres', () =>
 );
 
 let split = 0;
+const processedMeshes = new Set();
 for (const node of root.listNodes()) {
   if (!/^wheel_(fl|fr|rl|rr)$/.test(node.getName())) continue;
   const mesh = node.getMesh();
   if (!mesh) continue;
+  // A donor that reuses one wheel mesh at all four corners (the YFT path
+  // instances a single drawable) would otherwise have this loop revisit an
+  // already-split mesh once per extra node: on that second pass every
+  // primitive is purely one class already, which used to fall through to
+  // the single-class branch below and relabel an all-rim primitive `tyre`.
+  if (processedMeshes.has(mesh)) continue;
+  processedMeshes.add(mesh);
 
   // The axle is the wheel's shortest extent; packs disagree on which axis carries
   // it, so it is measured rather than assumed.
@@ -116,7 +124,10 @@ for (const node of root.listNodes()) {
       target.push(...triangle);
     }
     if (rimIndices.length === 0 || tyreIndices.length === 0) {
-      primitive.setMaterial(tyre);
+      // Every triangle in this primitive landed on one side of the radius
+      // cut, so there is nothing to split here: keep whichever material
+      // that side actually is, not always `tyre`.
+      primitive.setMaterial(tyreIndices.length === 0 ? rim : tyre);
       continue;
     }
 

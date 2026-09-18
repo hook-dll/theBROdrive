@@ -493,6 +493,193 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // ZMZ-402.10, GAZ-31029/GAZ-3102: same 2.445 litre block a generation on, with
+    // EGR added. Published 98-105 hp (100 hp nominal, 73.5 kW) and 182.4 Nm
+    // (18.6 kgf·m) at 2400-2600 rpm net.
+    id: 'engine_zmz_402',
+    kind: 'engine',
+    label: '2.4 Volga four (402)',
+    mass: 168,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 73.5,
+      peakTorqueNm: 198,
+      torquePeakRpm: 2500,
+      redlineRpm: 4700,
+      idleRpm: 550,
+      bsfc: 0.34,
+      brakingCoeff: 0.0376,
+      cylinders: 4,
+      heat: { operatingC: 85 },
+    },
+  },
+  {
+    // ZMZ-4062.10, GAZ-3102 (2000s trim): the same 2.3 litre 16-valve DOHC head
+    // as the 3110's injected option, distributed fuel injection. Published
+    // 96 kW at 5200 rpm and 188 Nm net at 4000 rpm.
+    id: 'engine_zmz_4062',
+    kind: 'engine',
+    label: '2.3 Volga four (4062)',
+    mass: 187,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 96,
+      peakTorqueNm: 210,
+      torquePeakRpm: 4000,
+      redlineRpm: 6000,
+      idleRpm: 850,
+      bsfc: 0.32,
+      brakingCoeff: 0.0376,
+      cylinders: 4,
+      heat: { operatingC: 85 },
+    },
+  },
+  {
+    // UZAM-412, IZH-412/AZLK-2140: a distinct aluminium-block SOHC 1480 cc four,
+    // not the VAZ 1.5. Published 55 kW (75 hp) at 5800 rpm and 108 Nm net at
+    // 3800 rpm.
+    id: 'engine_uzam_412',
+    kind: 'engine',
+    label: '1.5 UZAM-412 four',
+    mass: 118,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 55,
+      peakTorqueNm: 118,
+      torquePeakRpm: 3800,
+      redlineRpm: 6000,
+      idleRpm: 850,
+      bsfc: 0.33,
+      brakingCoeff: 0.0172,
+      cylinders: 4,
+    },
+  },
+  {
+    // VAZ-2111, VAZ-2114: injected SOHC eight-valve 1499 cc, the fuel-injected
+    // sibling of the carburetted VAZ-21083. Published 57.4 kW (78 hp) at
+    // 5400 rpm and 116 Nm net at 3000 rpm.
+    id: 'engine_vaz_2111_1500i',
+    kind: 'engine',
+    label: '1.5 VAZ-2111 injection four',
+    mass: 118,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 57.4,
+      peakTorqueNm: 125,
+      torquePeakRpm: 3000,
+      redlineRpm: 5600,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0176,
+      cylinders: 4,
+    },
+  },
+  {
+    // GAZ-M20 Pobeda (1946-1958): a low-compression 2.1 litre side-valve-derived
+    // four. Published 41 kW (55 hp) and 127 Nm net at 2200 rpm, 3600 rpm max.
+    id: 'engine_gaz_m20',
+    kind: 'engine',
+    label: '2.1 Pobeda four',
+    mass: 190,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 41,
+      peakTorqueNm: 130,
+      torquePeakRpm: 2200,
+      redlineRpm: 3600,
+      idleRpm: 500,
+      bsfc: 0.3,
+      brakingCoeff: 0.012,
+      cylinders: 4,
+    },
+  },
+  {
+    // ZMZ-5234.10, PAZ-3205: a 4.67 litre carburetted petrol V8. Factory manual
+    // gives gross 96 kW at 3200-3400 rpm and 314 Nm at 1600-2000 rpm; the
+    // catalogue's indicated-torque conversion is applied to the gross figure
+    // since no separate net rating is published.
+    id: 'engine_paz_zmz5234',
+    kind: 'engine',
+    label: '4.67 V8 (ZMZ-5234)',
+    mass: 304,
+    fits: ['bus', 'truck'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 96,
+      peakTorqueNm: 342,
+      torquePeakRpm: 1800,
+      redlineRpm: 3600,
+      idleRpm: 600,
+      bsfc: 0.42,
+      brakingCoeff: 0.095,
+      cylinders: 8,
+    },
+  },
+  {
+    // ZIL-130's own carburetted petrol V8, 6.0 litre. Published 110.3 kW
+    // (150 hp) at 3200 rpm and 401.8 Nm net at 1800-2000 rpm.
+    id: 'engine_zil130_v8',
+    kind: 'engine',
+    label: '6.0 V8 (ZIL-130)',
+    mass: 440,
+    fits: ['truck'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 110.3,
+      peakTorqueNm: 434,
+      torquePeakRpm: 1900,
+      redlineRpm: 3600,
+      idleRpm: 600,
+      bsfc: 0.36,
+      brakingCoeff: 0.095,
+      cylinders: 8,
+    },
+  },
+  {
+    // UMZ-451M, UAZ-469: published 55.2 kW (75 hp) and 198 Nm net at 2200 rpm.
+    id: 'engine_umz_451m',
+    kind: 'engine',
+    label: '2.4 UMZ-451M four',
+    mass: 175,
+    fits: ['car', 'truck'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 55.2,
+      peakTorqueNm: 220,
+      torquePeakRpm: 2200,
+      redlineRpm: 4500,
+      idleRpm: 700,
+      bsfc: 0.34,
+      brakingCoeff: 0.068,
+      cylinders: 4,
+    },
+  },
+  {
+    // UMZ-4178, UAZ-3962: a later, more powerful UAZ four than the 451M.
+    // Published 66 kW at 4000 rpm and 171.6 Nm net at 2200-2500 rpm.
+    id: 'engine_uaz_4178',
+    kind: 'engine',
+    label: '2.4 UMZ-4178 four',
+    mass: 166,
+    fits: ['car', 'truck'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 66,
+      peakTorqueNm: 195,
+      torquePeakRpm: 2500,
+      redlineRpm: 4000,
+      idleRpm: 700,
+      bsfc: 0.34,
+      brakingCoeff: 0.068,
+      cylinders: 4,
+    },
+  },
+  {
     // VAZ-2105: 1.294 litre, 64 hp, 94 Nm at 3400. The belt-driven cam version of
     // the 2101 unit, and the one under most square-lamp saloons.
     id: 'engine_lada_1300',
@@ -704,6 +891,108 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       reverse: 3.54,
       finalDrive: 4.1,
       shiftTime: 0.45,
+      automatic: false,
+    },
+  },
+  {
+    // The 5-speed Volga box, GAZ-3110/GAZ-3102: a taller-geared successor to
+    // the 4-speed, shared across the late-1990s/2000s Volga range.
+    id: 'gearbox_gaz_5',
+    kind: 'gearbox',
+    label: '5-speed Volga',
+    mass: 46,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.786, 2.188, 1.304, 1.0, 0.794],
+      reverse: 3.28,
+      finalDrive: 3.9,
+      shiftTime: 0.4,
+      automatic: false,
+    },
+  },
+  {
+    // Moskvich 412/2140 four-speed, shared by the IZH-412 and AZLK-2140:
+    // the same physical gearbox behind the UZAM-412 engine in both cars.
+    id: 'gearbox_moskvich_4',
+    kind: 'gearbox',
+    label: 'Moskvich 412 four-speed',
+    mass: 33,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.49, 2.04, 1.33, 1.0],
+      reverse: 3.39,
+      finalDrive: 4.22,
+      shiftTime: 0.34,
+      automatic: false,
+    },
+  },
+  {
+    id: 'gearbox_gazelle_5',
+    kind: 'gearbox',
+    label: '5-speed Gazelle manual',
+    mass: 52,
+    fits: ['truck'],
+    gearbox: {
+      ratios: [4.05, 2.34, 1.395, 1.0, 0.849],
+      reverse: 3.51,
+      finalDrive: 5.125,
+      shiftTime: 0.3,
+      automatic: false,
+    },
+  },
+  {
+    id: 'gearbox_paz_4',
+    kind: 'gearbox',
+    label: 'PAZ-3205 4-speed',
+    mass: 56,
+    fits: ['bus', 'truck'],
+    gearbox: {
+      ratios: [6.65, 3.09, 1.71, 1.0],
+      reverse: 7.77,
+      finalDrive: 6.83,
+      shiftTime: 0.65,
+      automatic: false,
+    },
+  },
+  {
+    id: 'gearbox_zil130_5',
+    kind: 'gearbox',
+    label: 'ZIL-130 5-speed crashbox',
+    mass: 110,
+    fits: ['truck'],
+    gearbox: {
+      ratios: [7.44, 4.10, 2.29, 1.47, 1.0],
+      reverse: 7.09,
+      finalDrive: 6.32,
+      shiftTime: 0.7,
+      automatic: false,
+    },
+  },
+  {
+    id: 'gearbox_uaz469_4',
+    kind: 'gearbox',
+    label: 'UAZ-469 4-speed',
+    mass: 34,
+    fits: ['car', 'truck'],
+    gearbox: {
+      ratios: [4.124, 2.641, 1.58, 1.0],
+      reverse: 5.224,
+      finalDrive: 5.125,
+      shiftTime: 0.35,
+      automatic: false,
+    },
+  },
+  {
+    id: 'gearbox_uaz3962_4',
+    kind: 'gearbox',
+    label: 'UAZ-3962 4-speed',
+    mass: 34,
+    fits: ['car', 'truck'],
+    gearbox: {
+      ratios: [3.78, 2.6, 1.55, 1.0],
+      reverse: 4.1,
+      finalDrive: 4.625,
+      shiftTime: 0.35,
       automatic: false,
     },
   },

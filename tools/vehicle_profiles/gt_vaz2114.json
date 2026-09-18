@@ -1,0 +1,21 @@
+{
+  "model_id": "gt_vaz2114",
+  "drop_bones": [
+    "z_pribory_night", "dials", "steeringwheel", "suspension_lf", "suspension_rf",
+    "transmission_r", "extra_11", "extra_12"
+  ],
+  "front_lens_bones": [],
+  "rear_lens_bones": [],
+  "lamp_roles": {
+    "headlight_l": "headlights", "headlight_r": "headlights",
+    "misc_m": "headlights", "misc_u": "headlights",
+    "indicator_lf": "front_blinker_left", "indicator_rf": "front_blinker_right",
+    "indicator_lr": "rear_blinker_left", "indicator_rr": "rear_blinker_right",
+    "brakelight_l": "brake_lights", "brakelight_r": "brake_lights",
+    "reversinglight_l": "reverse_lights", "reversinglight_r": "reverse_lights",
+    "taillight_l": "taillights", "taillight_r": "taillights",
+    "brakelight_m": "brake_lights",
+    "extralight_1": "front_auxiliary", "extralight_2": "front_auxiliary"
+  },
+  "lamp_split_y": 0.5
+}

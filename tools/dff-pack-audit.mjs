@@ -43,13 +43,6 @@ const baseMaterials = new Set([
   // whole wheel as one dark material, so this one is allowed rather than demanded.
   'wheel_rim',
 ]);
-const splitLampMaterials = [
-  'IndicatorLights',
-  'TailLights',
-  'ReverseLights',
-  'PassiveRearLights',
-  'AuxiliaryLights',
-];
 const requiredNodes = [
   'headlights', 'taillights',
   'wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr',
@@ -113,10 +106,30 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
   const json = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'));
   if ((json.images?.length ?? 0) !== 0) fail(file, `contains ${json.images.length} images`);
   if ((json.textures?.length ?? 0) !== 0) fail(file, `contains ${json.textures.length} textures`);
-  const splitLamps = (json.nodes ?? []).some((node) => node.name === 'brake_lights');
+  const nodeNames = new Set((json.nodes ?? []).map((node) => node.name));
+  // Every lamp function is checked by its own node's presence rather than one
+  // split/unsplit mode switch: a real car may split its blinkers from a
+  // combined tail+brake cluster, or split brake from tail but not indicators,
+  // and every combination is a legitimate factory design (see
+  // tools/vehicle-lamp-authoring.md). `hasBrakeLights` only decides which
+  // material the always-required `taillights` node itself carries: a split
+  // cluster keeps tail on its own always-on material, a combined cluster
+  // carries the brake-capable one so it reads as lit under braking.
+  const hasBrakeLights = nodeNames.has('brake_lights');
+  const optionalLampMaterials = [
+    ['brake_lights', 'BrakeLights'],
+    ['reverse_lights', 'ReverseLights'],
+    ['front_blinker_left', 'IndicatorLights'],
+    ['front_blinker_right', 'IndicatorLights'],
+    ['rear_blinker_left', 'IndicatorLights'],
+    ['rear_blinker_right', 'IndicatorLights'],
+    ['rear_passive', 'PassiveRearLights'],
+    ['front_auxiliary', 'AuxiliaryLights'],
+  ];
   const expectedMaterials = new Set(baseMaterials);
-  if (splitLamps) {
-    for (const name of splitLampMaterials) expectedMaterials.add(name);
+  if (hasBrakeLights) expectedMaterials.add('TailLights');
+  for (const [nodeName, materialName] of optionalLampMaterials) {
+    if (nodeNames.has(nodeName)) expectedMaterials.add(materialName);
   }
   const declaredMaterials = new Set((json.materials ?? []).map((material) => material.name));
   const missingMaterials = [...expectedMaterials].filter(
@@ -144,50 +157,21 @@ for (const file of readdirSync(dir).filter((name) => extname(name).toLowerCase()
     }
   });
   if (nodes.size !== requiredNodes.length) continue;
-  if (splitLamps) {
-    let missingSplitLamp = false;
-    for (const name of [
-      'brake_lights',
-      'reverse_lights',
-      'front_blinker_left',
-      'front_blinker_right',
-      'rear_blinker_left',
-      'rear_blinker_right',
-      'rear_passive',
-      'front_auxiliary',
-    ]) {
-      const node = scene.getObjectByName(name);
-      if (!node) {
-        fail(file, `missing node ${name}`);
-        missingSplitLamp = true;
-      } else {
-        nodes.set(name, node);
-      }
-    }
-    if (missingSplitLamp) continue;
+  for (const [nodeName] of optionalLampMaterials) {
+    if (!nodeNames.has(nodeName)) continue;
+    const node = scene.getObjectByName(nodeName);
+    if (!node) fail(file, `declares node ${nodeName} but the scene graph does not resolve it`);
+    else nodes.set(nodeName, node);
   }
 
   // `underbody` is only authored where the source DFF is an open shell, so it is
   // checked when present rather than demanded of every body.
-  const authoredMaterials = splitLamps
-    ? [
-        ['headlights', 'Headlights'],
-        ['taillights', 'TailLights'],
-        ['brake_lights', 'BrakeLights'],
-        ['reverse_lights', 'ReverseLights'],
-        ['front_blinker_left', 'IndicatorLights'],
-        ['front_blinker_right', 'IndicatorLights'],
-        ['rear_blinker_left', 'IndicatorLights'],
-        ['rear_blinker_right', 'IndicatorLights'],
-        ['rear_passive', 'PassiveRearLights'],
-        ['front_auxiliary', 'AuxiliaryLights'],
-        ['underbody', 'car_trim'],
-      ]
-    : [
-        ['headlights', 'Headlights'],
-        ['taillights', 'BrakeLights'],
-        ['underbody', 'car_trim'],
-      ];
+  const authoredMaterials = [
+    ['headlights', 'Headlights'],
+    ['taillights', hasBrakeLights ? 'TailLights' : 'BrakeLights'],
+    ['underbody', 'car_trim'],
+    ...optionalLampMaterials,
+  ];
   for (const [nodeName, materialName] of authoredMaterials) {
     const node = nodes.get(nodeName) ?? scene.getObjectByName(nodeName);
     if (!node) continue;
