@@ -453,11 +453,14 @@ def profile_for(model_id: str) -> Profile:
 # own `interior` role rather than folded into `car_trim`: `buildTemplate` in
 # carmodel.ts needs to find and exclude it by node name from the sweeps that
 # assume every mesh in the scene is exterior bodywork.
+# `vehicle_detail2` is the donor's textured damage overlay, not intact trim.
+# Without the original alpha texture it renders as an opaque, torn second skin
+# over the paint. The runtime only ships the undamaged car, so never export it.
 SHADER_ROLE = {
     "vehicle_paint1": "car_paint", "vehicle_paint2": "car_paint",
     "vehicle_paint3": "car_paint", "vehicle_paint4": "car_paint",
     "vehicle_mesh": "car_trim", "vehicle_mesh_enveff": "car_trim",
-    "vehicle_detail": "car_trim", "vehicle_detail2": "car_trim",
+    "vehicle_detail": "car_trim", "vehicle_detail2": None,
     "vehicle_badges": "car_trim", "vehicle_shuts": "car_trim",
     "vehicle_generic": "car_trim", "vehicle_tire": "car_trim",
     "vehicle_vehglass": "car_glass", "vehicle_vehglass_inner": "car_glass",
@@ -841,7 +844,118 @@ def merge(chunks: list[tuple[np.ndarray, np.ndarray, np.ndarray]], weld: bool = 
     index = remap[index]
     # A collapsed edge leaves a zero-area triangle, which no renderer wants.
     index = index[(index[:, 0] != index[:, 1]) & (index[:, 1] != index[:, 2]) & (index[:, 0] != index[:, 2])]
+    index = drop_coincident(position, index)
     return {"position": position, "normal": normal, "indices": index}
+
+
+def surface_keys(position: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """One key per triangle identifying the surface it covers, and from which side.
+
+    Half-millimetre-quantised corners, hashed to one integer each and sorted,
+    so the same surface keys the same however the donor ordered its corners;
+    the quantised face normal rides along so a coincident pair wound the
+    opposite way -- a deliberately two-sided sheet -- stays distinct.
+    """
+    corners = position[index]  # (tris, 3 corners, xyz)
+    quantised = np.round(corners * 2000.0).astype(np.int64)
+    codes = np.sort(
+        quantised[:, :, 0] * np.int64(73856093)
+        ^ quantised[:, :, 1] * np.int64(19349663)
+        ^ quantised[:, :, 2] * np.int64(83492791),
+        axis=1,
+    )
+    facing = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    lengths = np.linalg.norm(facing, axis=1, keepdims=True)
+    facing = np.divide(facing, lengths, out=np.zeros_like(facing), where=lengths > 1e-12)
+    return np.concatenate([codes, np.round(facing * 16.0).astype(np.int64)], axis=1)
+
+
+def drop_coincident(position: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Drop triangles that re-cover a surface another triangle already covers.
+
+    These donors ship the same surface two and three times over: 6.5% of the
+    VAZ-2108 donor's own triangles are exact positional duplicates, both
+    inside one draw call and across consecutive ones. RAGE draws those copies
+    in separate passes, so they never fight there; merged into one mesh per
+    runtime role they land at identical depth and the depth buffer picks per
+    pixel, which is precisely the torn, high-contrast, jagged mottling that
+    shows up on painted panels and glass -- black patches where the copy
+    behind wins, white where the lit one does.
+
+    Only same-facing duplicates go: a coincident pair wound the opposite way
+    is a deliberately two-sided sheet, one side of which is culled anyway, so
+    it never fights and dropping it would make the sheet vanish edge-on.
+    """
+    if len(index) == 0:
+        return index
+    _, first = np.unique(surface_keys(position, index), axis=0, return_index=True)
+    return index[np.sort(first)]
+
+
+# Rear lamp clusters in this pack are usually ONE physical lens that the donor
+# copied once per lamp function, because RAGE lights whichever copy the state
+# machine wants and leaves the others unrendered. Drawn all at once they sit at
+# identical depth in four different colours and tear against each other -- the
+# jagged red/white/amber shredding across a taillight.
+#
+# The copies are NOT triangle-for-triangle identical: the same lens comes once
+# finely tessellated and once as a handful of big quads, so matching triangles
+# misses it and leaves exactly the few large sheets that do the tearing. What
+# identifies a copy is that its whole surface lies on a surface an earlier lamp
+# already covers. Roles are resolved in this order -- the lamp lit most of the
+# time wins -- and a function that turns out to be a copy simply has no node,
+# the same "this donor has no separate lamp for that" case the catalogue
+# already handles with an explicit `lights:` override.
+LAMP_KEEP_ORDER = (
+    "headlights",
+    "taillights",
+    "brake_lights",
+    "reverse_lights",
+    "rear_blinker_left",
+    "rear_blinker_right",
+    "front_blinker_left",
+    "front_blinker_right",
+    "front_auxiliary",
+    "rear_passive",
+)
+#: How close a probe point counts as sitting ON an already-kept lamp surface.
+LAMP_COPY_DISTANCE_M = 0.002
+#: A copy lands most of its own surface exactly on the lamp it copies, so its
+#: median probe distance is zero and most probes are touching; only the coarse
+#: quads that bridge a curve stand off by a centimetre. Every genuinely
+#: separate lamp measured across this pack sits at a median of 19 mm or more
+#: with at most a quarter of its probes touching, so the two cases are an
+#: order of magnitude apart and these cutoffs fall in the gap.
+LAMP_COPY_MEDIAN_M = 0.001
+LAMP_COPY_SHARE = 0.5
+
+
+def drop_cross_lamp_coincident(parts: dict[str, dict]) -> dict[str, dict]:
+    from scipy.spatial import cKDTree
+
+    kept_points: list[np.ndarray] = []
+    tree: cKDTree | None = None
+    for role in LAMP_KEEP_ORDER:
+        part = parts.get(role)
+        if part is None:
+            continue
+        corners = part["position"][part["indices"]]
+        # Centroids and corners together: a coarse quad laid over a finely
+        # tessellated lens has corners off the lens edge but a centroid right
+        # on it, and a small sliver has the opposite problem.
+        probes = np.concatenate([corners.mean(axis=1), corners.reshape(-1, 3)])
+        if tree is not None:
+            distance, _ = tree.query(probes)
+            median = float(np.median(distance))
+            share = float((distance < LAMP_COPY_DISTANCE_M).mean())
+            if median <= LAMP_COPY_MEDIAN_M and share >= LAMP_COPY_SHARE:
+                print(f"  {role:12s} dropped: a re-tessellated copy of a lamp already kept "
+                      f"(median {median * 1000:.2f} mm, {share:.0%} touching)")
+                del parts[role]
+                continue
+        kept_points.append(part["position"])
+        tree = cKDTree(np.concatenate(kept_points))
+    return parts
 
 
 # ------------------------------------------------------------------- stages
@@ -1010,7 +1124,7 @@ def stage_extract(archive: Path, out_dir: Path, profile: Profile):
             if target != "hub":
                 stats[(f"hub_{corner}", "?", "car_trim (spring/strut)")] += len(tris)
 
-    parts = {role: merge(chunks) for role, chunks in roles.items()}
+    parts = drop_cross_lamp_coincident({role: merge(chunks) for role, chunks in roles.items()})
     for role, part in sorted(parts.items()):
         print(f"  {role:12s} {len(part['position']):7d} verts {len(part['indices']):7d} tris")
     dropped = sum(n for (_, _, role), n in stats.items() if role is None)

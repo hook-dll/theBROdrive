@@ -1372,10 +1372,10 @@ const GTAV_SPECS: readonly Entry[] = [
     frontWeightShare: 0.53,
     dragArea: 2.999,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
-    // No separate brake or reverse lamp bones in this donor: the rear
-    // cluster combines tail and stop into one node, already carrying the
-    // brake-capable material (see the taillights-material rule in
-    // tools/import-yft-vehicle.py's stage_assemble).
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
@@ -1445,16 +1445,6 @@ const GTAV_SPECS: readonly Entry[] = [
     handlingProfile: 'utility',
     frontWeightShare: 0.449,
     dragArea: 5.06,
-    // No separate brake lamp bone in this donor: taillights carries the
-    // combined tail+brake material. No rear-mounted blinker bones either --
-    // both indicator functions live on the front bones only.
-    lights: {
-      headlights: ['headlights'],
-      taillights: ['taillights'],
-      reverseLights: ['reverse_lights'],
-      leftBlinkers: ['front_blinker_left'],
-      rightBlinkers: ['front_blinker_right'],
-    },
   },
   {
     id: 'gt_vaz21099',
@@ -1480,12 +1470,13 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // No separate reverse lamp bone in this donor. No rear-mounted blinker
-    // bones either -- both indicator functions live on the front bones only.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
-      brakeLights: ['brake_lights'],
       leftBlinkers: ['front_blinker_left'],
       rightBlinkers: ['front_blinker_right'],
     },
@@ -1537,8 +1528,10 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // No separate brake lamp bone in this donor: taillights carries the
-    // combined tail+brake material. Reverse and blinkers ARE split.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
@@ -1571,12 +1564,13 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // No separate reverse lamp bone in this donor. No rear-mounted blinker
-    // bones either -- both indicator functions live on the front bones only.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
-      brakeLights: ['brake_lights'],
       leftBlinkers: ['front_blinker_left'],
       rightBlinkers: ['front_blinker_right'],
     },
@@ -1605,13 +1599,13 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // No separate brake lamp bone in this donor: taillights carries the
-    // combined tail+brake material. No rear-mounted blinker bones either --
-    // both indicator functions live on the front bones only.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
-      reverseLights: ['reverse_lights'],
       leftBlinkers: ['front_blinker_left'],
       rightBlinkers: ['front_blinker_right'],
     },
@@ -1663,8 +1657,10 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // Only headlights/taillights nodes are present in this donor: no
-    // separate brake, reverse or blinker lamps to select.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
@@ -1716,6 +1712,17 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_fr: ['wheel_fr', 'hub_fr'],
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
+    },
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
     },
   },
   {
@@ -1789,6 +1796,17 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
   },
   {
     id: 'gt_vaz2104',
@@ -1813,6 +1831,18 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
+    },
   },
   {
     id: 'gt_gazel',
@@ -1833,8 +1863,10 @@ const GTAV_SPECS: readonly Entry[] = [
     frontWeightShare: 0.525,
     dragArea: 1.53,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
-    // No separate brake lamp bone in this donor: taillights carries the
-    // combined tail+brake material. Reverse and blinkers ARE split.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
@@ -1862,7 +1894,10 @@ const GTAV_SPECS: readonly Entry[] = [
     frontWeightShare: 0.551,
     dragArea: 1.85,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
-    // No separate brake or reverse lamp bones in this donor; see gt_uaz469.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
@@ -1893,9 +1928,10 @@ const GTAV_SPECS: readonly Entry[] = [
       wheel_rl: ['wheel_rl', 'hub_rl'],
       wheel_rr: ['wheel_rr', 'hub_rr'],
     },
-    // Only headlights/taillights nodes are present in this donor (a 1940s
-    // Pobeda predates mandatory turn signals): no separate brake, reverse
-    // or blinker lamps to select.
+    // Lamp selectors follow what this donor actually ships: copies of one
+    // lens it made per lamp function were dropped as coincident duplicates
+    // (see drop_cross_lamp_coincident in tools/import-yft-vehicle.py), so the
+    // functions without a lens of their own are simply not selected.
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],

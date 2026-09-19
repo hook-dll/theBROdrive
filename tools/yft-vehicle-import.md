@@ -28,17 +28,18 @@ one RSC7 resource per file. The `.yft` is a fragment:
 
 ## Keep and remove
 
-- Keep the exterior: shell, panels, doors, bumpers, grille, glass, lamps, underbody.
-- Remove the cabin, the engine bay, the damage-only and neon geometry. The body is a
-  single mesh, so this is done by BONE, in `DROP_BONES` — "the dashboard" is not an
-  object, it is the triangles weighted to `torpedo`.
-- Remove the door cards. This pack authors them as a second shell a few centimetres
-  inside the painted door skin; with the interior gone they trim nothing, and at the
-  runtime's triangle budget the two coincident sheets decimate into each other and
-  punch craters through the doors.
-- Vehicle shaders map to runtime roles in `SHADER_ROLE`: `vehicle_paint*` -> `car_paint`,
-  `vehicle_mesh`/`detail2`/`badges` -> `car_trim`, `vehicle_vehglass` -> `car_glass`,
-  `vehicle_lightsemissive` -> lamps, `vehicle_interior2`/`dash_emissive` -> dropped.
+- Keep the intact exterior and visible cabin: shell, panels, doors, bumpers,
+  grille, glass, lamps, underbody, seats and dashboard. Remove the engine bay,
+  damage-only and neon geometry. The body is a single skinned mesh, so named
+  damage bones are excluded through each donor profile's `drop_bones`.
+- Remove duplicate door-card shells. This pack authors some as a second sheet a
+  few centimetres inside the painted door skin; the coincident sheets otherwise
+  intersect and punch craters through the doors.
+- Vehicle shaders map to runtime roles in `SHADER_ROLE`: `vehicle_paint*` ->
+  `car_paint`, `vehicle_mesh`/`badges` -> `car_trim`, `vehicle_vehglass` ->
+  `car_glass`, lamp shaders -> lamp nodes, and cabin shaders -> `interior`.
+  `vehicle_detail2` is the alpha-textured damaged skin and is always excluded;
+  without its texture it becomes an opaque shredded layer over the intact body.
 - Lamp lenses authored as glass (`fars_2110`, `stfar`, `reflector`) first become the
   coarse `headlights` and `taillights` meshes, never `car_glass`: a translucent sheet
   in front of an emissive lens leaves the lamp lighting invisibly.
