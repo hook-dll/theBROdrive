@@ -579,6 +579,7 @@ type Entry = Omit<
 const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sv_gaz21:       { length: 4.830, width: 1.800, height: 1.620, clearance: 0.190, wheelbase: 2.700, frontTrack: 1.410, rearTrack: 1.420, wheelRadius: 0.365, tyreWidth: 0.170 },
   sv_gaz24:       { length: 4.735, width: 1.800, height: 1.490, clearance: 0.174, wheelbase: 2.800, frontTrack: 1.470, rearTrack: 1.420, wheelRadius: 0.354, tyreWidth: 0.187 },
+  sv_gaz31029:    { length: 4.885, width: 1.800, height: 1.476, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.495, rearTrack: 1.425, wheelRadius: 0.321, tyreWidth: 0.205 },
   sv_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155 },
   sv_vaz2102:     { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297, tyreWidth: 0.165 },
   sv_vaz2103:     { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
@@ -1141,6 +1142,45 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   frontWeightShare: spec.frontWeightShare,
   dragArea: spec.dragArea,
 }));
+
+/**
+ * First remaster experiment: Soviet GAZ-24 topology and material language,
+ * reshaped against the AKROM GAZ-31029 reference. The AKROM wheel face survives
+ * at one quarter of its source density; the body remains Soviet-pack weight.
+ */
+const REMASTER_CARS: readonly Entry[] = [{
+  id: 'sv_gaz31029',
+  label: 'GAZ-31029 Volga (remaster)',
+  dir: SOVIET,
+  glb: 'gz31029.glb',
+  paintStyle: 'solid-paint',
+  glassMaterial: 'proto_car_glass',
+  bodyClass: 'car',
+  scale: 1,
+  mass: 1390,
+  engineId: 'engine_zmz_402',
+  gearboxId: 'gearbox_gaz_4',
+  tankLitres: 55,
+  wheelGrip: 0.58,
+  suspension: SUSP_VOLGA_24,
+  steerLock: 0.5,
+  rearDriveBias: 1,
+  frontWeightShare: 0.49,
+  dragArea: 1.0,
+  lights: {
+    headlights: ['headlight_left', 'headlight_right'],
+    taillights: ['taillight_left', 'taillight_right'],
+    reverseLights: ['reverse_left', 'reverse_right'],
+    leftBlinkers: ['front_blinker_left_lens', 'side_marker_left'],
+    rightBlinkers: ['front_blinker_right_lens', 'side_marker_right'],
+  },
+  wheelNodes: {
+    wheel_fl: ['wheel_fl'],
+    wheel_fr: ['wheel_fr'],
+    wheel_rl: ['wheel_rl'],
+    wheel_rr: ['wheel_rr'],
+  },
+}];
 
 /**
  * Texture-free GTA SA conversions. Scale is fitted from each DFF dummy axle
@@ -1970,6 +2010,7 @@ const ENTRIES: readonly Entry[] = [
   // palette atlas. Life-size in centimetres, nose-first down +Z, 4-6k triangles.
   // -------------------------------------------------------------------------
   ...SOVIET_CARS,
+  ...REMASTER_CARS,
 
   // -------------------------------------------------------------------------
   // Private GTA SA mod conversions. Their DFF-specific hierarchy and material
