@@ -68,6 +68,7 @@ import {
   createCarModel,
   type CarModelMeasure,
 } from '../render/carmodel';
+import { SandCarDamage } from '../render/sandcardamage';
 import { createPartMesh } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
 import type { ContactPatchField } from '../render/contactpatches';
@@ -2023,6 +2024,8 @@ export class Vehicle implements Rebasable {
   private readonly bouncePhase: number;
   /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
   private bodyGroup: THREE.Object3D | null = null;
+  /** Experimental local erosion for the damage-ready GAZ-31029 shell only. */
+  private sandDamage: SandCarDamage | null = null;
   /**
    * `bodyGroup`'s scale AT REST, captured once in `buildVisuals`. `buildTemplate`
    * (render/carmodel.ts) bakes each model's own unit-correction factor into this
@@ -4142,6 +4145,7 @@ export class Vehicle implements Rebasable {
         this.impactState.localY = this.localVelScratch.y;
         this.impactState.localZ = this.localVelScratch.z;
         this.impactThisStep = true;
+        this.sandDamage?.applyImpact(this.impactState);
 
         // Above 1.8 m/s, 0.06 per unexplained m/s reaches the 0.3 cap at 6.8 m/s;
         // capping there keeps even a high-speed single crash below a full repaint.
@@ -5531,6 +5535,9 @@ export class Vehicle implements Rebasable {
     this.rootGroup.add(instance.body);
     this.bodyGroup = instance.body;
     this.bodyRestScale.copy(instance.body.scale);
+    if (this.model.id === 'sv_gaz31029') {
+      this.sandDamage = new SandCarDamage(instance.body, this.measure);
+    }
 
     // The body subtree is cloned per vehicle, so this node belongs to this car and
     // turning it cannot turn anybody else's wheel.
@@ -5780,6 +5787,8 @@ export class Vehicle implements Rebasable {
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */
   private clearVisuals(): void {
+    this.sandDamage?.dispose();
+    this.sandDamage = null;
     for (const material of this.headlightLensMaterials) material.dispose();
     for (const material of this.taillightMaterials) material.dispose();
     for (const material of this.brakeLightMaterials) material.dispose();
