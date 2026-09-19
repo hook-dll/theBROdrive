@@ -1144,9 +1144,9 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
 }));
 
 /**
- * First remaster experiment: Soviet GAZ-24 topology and material language,
- * reshaped against the AKROM GAZ-31029 reference. The AKROM wheel face survives
- * at one quarter of its source density; the body remains Soviet-pack weight.
+ * GAZ-31029 remaster retaining the AKROM exterior shell and glazing silhouette.
+ * Interior-only geometry is removed; trim and wheels are reduced to Soviet-pack
+ * density without substituting a different car's body topology.
  */
 const REMASTER_CARS: readonly Entry[] = [{
   id: 'sv_gaz31029',
@@ -1154,7 +1154,6 @@ const REMASTER_CARS: readonly Entry[] = [{
   dir: SOVIET,
   glb: 'gz31029.glb',
   paintStyle: 'solid-paint',
-  glassMaterial: 'proto_car_glass',
   bodyClass: 'car',
   scale: 1,
   mass: 1390,
@@ -1171,8 +1170,8 @@ const REMASTER_CARS: readonly Entry[] = [{
     headlights: ['headlight_left', 'headlight_right'],
     taillights: ['taillight_left', 'taillight_right'],
     reverseLights: ['reverse_left', 'reverse_right'],
-    leftBlinkers: ['front_blinker_left_lens', 'side_marker_left'],
-    rightBlinkers: ['front_blinker_right_lens', 'side_marker_right'],
+    leftBlinkers: ['front_blinker_left_lens', 'rear_blinker_left'],
+    rightBlinkers: ['front_blinker_right_lens', 'rear_blinker_right'],
   },
   wheelNodes: {
     wheel_fl: ['wheel_fl'],
