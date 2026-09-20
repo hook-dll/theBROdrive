@@ -461,6 +461,8 @@ export interface CarModelDef {
    * flat runtime materials whose paint slots are recoloured outright.
    */
   readonly paintStyle?: 'soviet-atlas' | 'solid-paint';
+  /** Paint material that receives a deterministic contrasting colour. */
+  readonly secondaryPaintMaterial?: string;
   /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
   readonly paintUvCell?: readonly [number, number];
   /**
@@ -612,6 +614,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   gt_gaz2412    : { length: 4.735, width: 1.800, height: 1.476, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.496, rearTrack: 1.428, wheelRadius: 0.3213, tyreWidth: 0.2050 },
   gt_vaz2108    : { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.2810, tyreWidth: 0.1650 },
   gt_vaz2114    : { length: 4.090, width: 1.680, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.390, rearTrack: 1.360, wheelRadius: 0.2473, tyreWidth: 0.1850 },
+  gt_vaz2115    : { length: 4.330, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
   gt_gaz3110    : { length: 4.870, width: 1.800, height: 1.422, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.510, rearTrack: 1.450, wheelRadius: 0.3172, tyreWidth: 0.1950 },
   gt_gaz2410    : { length: 4.735, width: 1.800, height: 1.476, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.496, rearTrack: 1.428, wheelRadius: 0.3213, tyreWidth: 0.2050 },
   gt_azlk2140   : { length: 4.250, width: 1.550, height: 1.480, clearance: 0.173, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.2960, tyreWidth: 0.1650 },
@@ -1244,6 +1247,14 @@ const SAAS_SPECS: readonly Entry[] = [
     frontWeightShare: 0.52,
     dragArea: 1.85,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    secondaryPaintMaterial: 'car_bed_paint',
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['brake_light_left', 'brake_light_right'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
   },
   {
     id: 'sa_izh2715',
@@ -1271,7 +1282,7 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
   ...spec,
   glassMaterial: 'car_glass',
   paintStyle: 'solid-paint',
-  lights: {
+  lights: spec.lights ?? {
     headlights: ['headlights'],
     taillights: ['taillights'],
   },
@@ -1645,6 +1656,41 @@ const GTAV_SPECS: readonly Entry[] = [
     lights: {
       headlights: ['headlights'],
       taillights: ['taillights'],
+      leftBlinkers: ['front_blinker_left'],
+      rightBlinkers: ['front_blinker_right'],
+    },
+  },
+  {
+    // Wheelbase-derived scale: 2.460 m factory / 2.6421 m source.
+    id: 'gt_vaz2115',
+    label: 'VAZ-2115 Samara (add-on)',
+    dir: GTAV,
+    glb: 'vaz2115.glb',
+    bodyClass: 'car',
+    scale: 0.93108,
+    mass: 1000,
+    engineId: 'engine_vaz_2111_1500i',
+    gearboxId: 'gearbox_samara_5',
+    tankLitres: 43,
+    wheelGrip: 0.66,
+    suspension: SUSP_SAMARA,
+    steerLock: 0.58,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    dragArea: 0.82,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    wheelNodes: {
+      wheel_fl: ['wheel_fl', 'hub_fl'],
+      wheel_fr: ['wheel_fr', 'hub_fr'],
+      wheel_rl: ['wheel_rl', 'hub_rl'],
+      wheel_rr: ['wheel_rr', 'hub_rr'],
+    },
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      brakeLights: ['brake_lights'],
+      reverseLights: ['reverse_lights'],
       leftBlinkers: ['front_blinker_left'],
       rightBlinkers: ['front_blinker_right'],
     },
@@ -2030,6 +2076,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   fit: modelFit(e.id),
   textureFile: e.textureFile,
   paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
+  secondaryPaintMaterial: e.secondaryPaintMaterial,
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,

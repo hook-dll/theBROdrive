@@ -199,6 +199,7 @@ const CAR_PAINT_COLORS: readonly number[] = [
   0x444b52, // charcoal
 ];
 const paintScratch = new THREE.Color();
+const secondaryPaintScratch = new THREE.Color();
 
 /**
  * Stable string avalanche: a saved/generated car keeps its colour and its wear
@@ -221,6 +222,16 @@ function appearanceHash(modelId: string, appearanceKey: string): number {
 function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
   const h = appearanceHash(modelId, appearanceKey);
   return paintScratch.setHex(CAR_PAINT_COLORS[h % CAR_PAINT_COLORS.length]!);
+}
+
+function secondaryPaintColorFor(modelId: string, appearanceKey: string): THREE.Color {
+  const h = appearanceHash(modelId, appearanceKey);
+  const primaryIndex = h % CAR_PAINT_COLORS.length;
+  // Skip neighbouring swatches: they can read as one paint under desert sunlight.
+  const offset = 3 + ((h >>> 8) % (CAR_PAINT_COLORS.length - 5));
+  return secondaryPaintScratch.setHex(
+    CAR_PAINT_COLORS[(primaryIndex + offset) % CAR_PAINT_COLORS.length]!,
+  );
 }
 
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
@@ -325,6 +336,9 @@ function prepareSovietShellFaces(root: THREE.Object3D, def: CarModelDef): void {
 function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey: string): void {
   if (!def.paintStyle) return;
   const color = paintColorFor(def.id, appearanceKey);
+  const secondaryColor = def.secondaryPaintMaterial
+    ? secondaryPaintColorFor(def.id, appearanceKey)
+    : color;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
     for (const material of materialsOf(child)) {
@@ -332,7 +346,9 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
       if (!isPaintSlot(material, def)) continue;
       if (def.paintStyle === 'solid-paint') {
         material.map = null;
-        material.color.copy(color);
+        material.color.copy(
+          material.name === def.secondaryPaintMaterial ? secondaryColor : color,
+        );
         material.needsUpdate = true;
       } else if (def.paintUvCell) {
         setCarBodyPalettePaint(material, color, def.paintUvCell);
