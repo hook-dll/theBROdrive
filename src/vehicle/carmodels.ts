@@ -446,6 +446,8 @@ export interface CarModelDef {
    * flat runtime materials whose paint slots are recoloured outright.
    */
   readonly paintStyle?: 'soviet-atlas' | 'solid-paint';
+  /** Paint material that receives a deterministic contrasting colour. */
+  readonly secondaryPaintMaterial?: string;
   /** Original Soviet body-paint cell, in the FBX UV coordinate system. */
   readonly paintUvCell?: readonly [number, number];
   /**
@@ -1165,6 +1167,14 @@ const SAAS_SPECS: readonly Entry[] = [
     frontWeightShare: 0.52,
     dragArea: 1.85,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    secondaryPaintMaterial: 'car_bed_paint',
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['brake_light_left', 'brake_light_right'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
   },
   {
     id: 'sa_izh2715',
@@ -1192,7 +1202,7 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
   ...spec,
   glassMaterial: 'car_glass',
   paintStyle: 'solid-paint',
-  lights: {
+  lights: spec.lights ?? {
     headlights: ['headlights'],
     taillights: ['taillights'],
   },
@@ -1287,6 +1297,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   fit: modelFit(e.id),
   textureFile: e.textureFile,
   paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
+  secondaryPaintMaterial: e.secondaryPaintMaterial,
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
