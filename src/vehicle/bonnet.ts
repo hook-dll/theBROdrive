@@ -106,8 +106,10 @@ const FACTORY_RADIATOR: Readonly<Record<RadiatorClass, string>> = {
  * make every car start life heavier or lighter than its own kerb weight.
  */
 function stockTankVariant(bodyClass: BodyClass, tankCapacity: number): string {
-  if (bodyClass === 'bus' || bodyClass === 'truck') return 'tank_140';
-  return tankCapacity <= 45 ? 'tank_40' : 'tank_65';
+  if (tankCapacity <= 45) return 'tank_40';
+  if (tankCapacity <= 65) return 'tank_65';
+  if (bodyClass === 'truck' || bodyClass === 'bus') return 'tank_140';
+  return 'tank_65';
 }
 
 /** The three parts a roadworthy car of this model leaves the factory with. */

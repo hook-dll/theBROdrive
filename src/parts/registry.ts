@@ -170,6 +170,27 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // UZAM-331: 1.584 litre, 80 hp (59 kW) at 5400 rpm, 127 Nm at 3400 rpm.
+    // The drivetrain subtracts the authored Soviet friction term from the curve,
+    // so the indicated peak is set above the catalogue's net crank figure.
+    id: 'engine_uzam_331',
+    kind: 'engine',
+    label: '1.6 UZAM-331 inline-four',
+    mass: 121,
+    fits: ['truck'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 59,
+      peakTorqueNm: 138,
+      torquePeakRpm: 3400,
+      redlineRpm: 5600,
+      idleRpm: 850,
+      bsfc: 0.32,
+      brakingCoeff: 0.0199,
+      cylinders: 4,
+    },
+  },
+  {
     // UMZ-4213.10-10 from the long-wheelbase UAZ-330364: 2.89 litres,
     // 99 hp (73 kW) at 4000 rpm and 201 Nm net at 3000 rpm. Drivetrain subtracts
     // WOT friction from the authored curve, so 221 Nm here is the indicated value
@@ -689,6 +710,22 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       reverse: 3.738,
       finalDrive: 4.55,
       shiftTime: 0.6,
+      automatic: false,
+    },
+  },
+  {
+    // IZH/Moskvich four-speed: 3.49, 2.04, 1.33, 1.00; reverse 3.39;
+    // the working-vehicle final drive is the 4.22 pair.
+    id: 'gearbox_izh_4',
+    kind: 'gearbox',
+    label: 'IZH/Moskvich four-speed',
+    mass: 33,
+    fits: ['truck'],
+    gearbox: {
+      ratios: [3.49, 2.04, 1.33, 1.0],
+      reverse: 3.39,
+      finalDrive: 4.22,
+      shiftTime: 0.4,
       automatic: false,
     },
   },

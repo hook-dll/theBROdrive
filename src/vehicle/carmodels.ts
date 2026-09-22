@@ -589,7 +589,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
   sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260, tyreWidth: 0.135 },
   sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
-  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.390, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.165 },
+  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
@@ -1204,16 +1204,54 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'truck',
     scale: 0.863496,
     mass: 1015,
-    engineId: 'engine_lada_1500',
-    gearboxId: 'gearbox_lada_4',
+    // Late 2715-016-01: UZAM-331, 1584 cc, 80 hp, 127 Nm.
+    engineId: 'engine_uzam_331',
+    // Moskvich/IZH four-speed with the 4.22 working-vehicle final drive.
+    gearboxId: 'gearbox_izh_4',
     tankLitres: 46,
+    // 175/80 R13 period road tyre; same dry-road calibration as the 2104 estate.
     wheelGrip: 0.56,
-    suspension: SUSP_ZHIGULI_ESTATE,
-    steerLock: 0.55,
+    // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
+    suspension: SUSP_TRUCK,
+    // Drom gives a 5.25 m outer-front turning radius; life-size track/wheelbase
+    // produce atan(2.4 / (5.25 - 1.27 / 2)) plus the classic steering play.
+    steerLock: 0.488,
     rearDriveBias: 1,
     handlingProfile: 'classic',
     frontWeightShare: 0.53,
+    // No factory Cd is published; retained as the current box-van CdA estimate.
     dragArea: 1.0,
+    lights: {
+      // Late PF10 front units: amber upper indicators and clear lower position
+      // lenses. UP112 triangular rear indicators are independent of the FP112 /
+      // IZHFS4 running-stop blocks and their clear reversing sections.
+      headlights: [
+        'headlights_left_0', 'headlights_left_1', 'headlights_left_2',
+        'headlights_left_3', 'headlights_left_4', 'headlights_left_5', 'headlights_left_6',
+        'headlights_right_0', 'headlights_right_1', 'headlights_right_2', 'headlights_right_3',
+        'front_position_left_0', 'front_position_left_1',
+        'front_position_left_2', 'front_position_left_3',
+      ],
+      taillights: [
+        'taillights_left_0', 'taillights_left_1', 'taillights_left_2',
+        'taillights_left_3', 'taillights_left_4', 'taillights_left_5', 'taillights_left_6',
+        'taillights_right_0', 'taillights_right_1', 'taillights_right_2',
+        'taillights_right_3', 'taillights_right_4', 'taillights_right_5', 'taillights_right_6',
+      ],
+      reverseLights: ['reverse_lights_left_0', 'reverse_lights_right_0'],
+      leftBlinkers: [
+        'front_blinker_left_0', 'front_blinker_left_1',
+        'front_blinker_left_2', 'front_blinker_left_3',
+        'rear_blinker_left_0', 'rear_blinker_left_1',
+        'rear_blinker_left_2', 'rear_blinker_left_3',
+      ],
+      rightBlinkers: [
+        'front_blinker_right_0', 'front_blinker_right_1',
+        'front_blinker_right_2', 'front_blinker_right_3',
+        'rear_blinker_right_0', 'rear_blinker_right_1',
+        'rear_blinker_right_2', 'rear_blinker_right_3',
+      ],
+    },
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
 ];
