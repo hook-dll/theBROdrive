@@ -589,7 +589,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
   sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260, tyreWidth: 0.135 },
   sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
-  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
+  sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.185, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
@@ -1198,14 +1198,15 @@ const SAAS_SPECS: readonly Entry[] = [
   },
   {
     id: 'sa_izh2715',
-    label: 'IZH-2715',
+    label: 'IZH-2715-01',
     dir: SAAS,
     glb: 'izh2715.glb',
     bodyClass: 'truck',
     scale: 0.863496,
     mass: 1015,
-    // Late 2715-016-01: UZAM-331, 1584 cc, 80 hp, 127 Nm.
-    engineId: 'engine_uzam_331',
+    // 1984-1997 2715-01 in its factory low-octane commercial specification:
+    // UZAM-412DE, 1478 cc, 49 kW and 102 Nm.
+    engineId: 'engine_uzam_412de',
     // Moskvich/IZH four-speed with the 4.22 working-vehicle final drive.
     gearboxId: 'gearbox_izh_4',
     tankLitres: 46,
@@ -1213,14 +1214,16 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelGrip: 0.56,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
-    // Drom gives a 5.25 m outer-front turning radius; life-size track/wheelbase
+    // Factory outer-front turning radius is 5.25 m; life-size track/wheelbase
     // produce atan(2.4 / (5.25 - 1.27 / 2)) plus the classic steering play.
     steerLock: 0.488,
     rearDriveBias: 1,
     handlingProfile: 'classic',
-    frontWeightShare: 0.53,
-    // No factory Cd is published; retained as the current box-van CdA estimate.
-    dragArea: 1.0,
+    // Factory unladen axle loads: 550 kg front, 465 kg rear.
+    frontWeightShare: 550 / 1015,
+    // No factory Cd is published. CdA 1.52 m² is derived from the factory
+    // 125 km/h maximum with this engine, gearing, tyre and asphalt rolling loss.
+    dragArea: 1.52,
     lights: {
       // Late PF10 front units: amber upper indicators and clear lower position
       // lenses. UP112 triangular rear indicators are independent of the FP112 /

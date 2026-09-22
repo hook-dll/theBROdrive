@@ -231,7 +231,7 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
   const spec = v.engine as EngineSpec;
   switch (v.id) {
     case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
-    case 'engine_uzam_331': return buildInline(b, spec, 1.0, false);
+    case 'engine_uzam_412de': return buildInline(b, spec, 0.97, false);
     // The UAZ's tall 2.89-litre UMZ four is physically larger than the 1.6 family.
     case 'engine_umz_4213': return buildInline(b, spec, 1.16, false);
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);

@@ -170,23 +170,24 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // UZAM-331: 1.584 litre, 80 hp (59 kW) at 5400 rpm, 127 Nm at 3400 rpm.
-    // The drivetrain subtracts the authored Soviet friction term from the curve,
-    // so the indicated peak is set above the catalogue's net crank figure.
-    id: 'engine_uzam_331',
+    // IZH-2715-01 catalogue option 412DE: 1.478 litre, 49 kW at 5800 rpm and
+    // 102 Nm at 3000-3800 rpm on A-76. The 112 Nm authored peak leaves 102 Nm
+    // after Drivetrain subtracts its open-throttle friction at 3400 rpm.
+    id: 'engine_uzam_412de',
     kind: 'engine',
-    label: '1.6 UZAM-331 inline-four',
-    mass: 121,
+    label: '1.5 UZAM-412DE inline-four',
+    // Factory aggregate: engine with equipment and gearbox 166 kg, gearbox 22 kg.
+    mass: 144,
     fits: ['truck'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 59,
-      peakTorqueNm: 138,
+      peakPowerKw: 49,
+      peakTorqueNm: 112,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.32,
-      brakingCoeff: 0.0199,
+      brakingCoeff: 0.019,
       cylinders: 4,
     },
   },
@@ -719,7 +720,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     id: 'gearbox_izh_4',
     kind: 'gearbox',
     label: 'IZH/Moskvich four-speed',
-    mass: 33,
+    mass: 22,
     fits: ['truck'],
     gearbox: {
       ratios: [3.49, 2.04, 1.33, 1.0],
