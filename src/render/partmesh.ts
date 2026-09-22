@@ -231,9 +231,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
   const spec = v.engine as EngineSpec;
   switch (v.id) {
     case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
-    // The UAZ/IZH van engine — same displacement class as the Volga pair below
-    // but a distinct unit (registry.ts), not a third name for the same block.
-    case 'engine_i4_2445': return buildInline(b, spec, 1.09, false);
+    // The UAZ's tall 2.89-litre UMZ four is physically larger than the 1.6 family.
+    case 'engine_umz_4213': return buildInline(b, spec, 1.16, false);
     case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
     // The Soviet fours, scaled by displacement against the 1.6 at 1.0.
     case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
@@ -335,7 +334,7 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
   let manual = true;
   let fins = false;
   switch (v.id) {
-    case 'gearbox_manual4': scale = 1.0; manual = true; fins = false; break;
+    case 'gearbox_uaz_4': scale = 1.1; manual = true; fins = false; break;
     // Small four-speed: the estate's own box, noticeably shorter than the 5-speed.
     case 'gearbox_lada_4': scale = 0.92; manual = true; fins = false; break;
     case 'gearbox_manual5': scale = 1.15; manual = true; fins = false; break;

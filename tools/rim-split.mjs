@@ -59,8 +59,9 @@ function findOrCreate(name, build) {
 const rim = findOrCreate('wheel_rim', () =>
   document
     .createMaterial('wheel_rim')
-    .setBaseColorFactor([0.3, 0.31, 0.32, 1])
-    .setMetallicFactor(0.2)
+    // Match the UAZ load-bed's painted steel, not a shared silver road rim.
+    .setBaseColorFactor([0.40, 0.41, 0.42, 1])
+    .setMetallicFactor(0.1)
     .setRoughnessFactor(0.5),
 );
 const tyre = findOrCreate('Tyres', () =>

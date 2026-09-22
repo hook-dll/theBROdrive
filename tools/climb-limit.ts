@@ -143,7 +143,7 @@ function ceilingFor(def: CarModelDef): Ceiling {
   const drivenShare =
     def.rearDriveBias >= 0.99 ? 1 - front : def.rearDriveBias <= 0.01 ? front : 1;
   const gripForce =
-    ROAD.frictionSlip *
+    ROAD.longitudinalMu *
     def.wheelGrip *
     (def.longitudinalGripScale ?? 1) *
     drivenShare *

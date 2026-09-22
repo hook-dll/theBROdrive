@@ -11,12 +11,11 @@
  * for that one id.
  *
  * `tools/soviet-reality.ts` already builds a mesh for every driveline id it exercises,
- * but only for cars whose id starts with `sv_` — which is exactly how `engine_i4_2445`
- * (the UAZ van and IZH pickup's own engine, not a Volga one) went unbuildable for a
- * while after the Soviet pack's own Volga engines were split out under the same id
- * range: the switch case was replaced instead of extended, and no bench outside the
- * `sv_` cars ever tried to build that one id. This bench has no such blind spot: it
- * is every id in `ALL_VARIANTS`, which is the same list the dev menu's part dispenser
+ * but only for cars whose id starts with `sv_`. That is exactly how an imported
+ * UAZ-specific engine once went unbuildable after the Soviet pack's Volga engines
+ * were split out: no bench outside the `sv_` cars tried to draw it. This bench has
+ * no such blind spot: it builds every id in `ALL_VARIANTS`, the same list the dev
+ * menu's part dispenser
  * draws from, so a hole here is a hole a player can actually reach.
  */
 import { ALL_VARIANTS } from '../src/parts/registry';

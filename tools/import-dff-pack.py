@@ -5,11 +5,12 @@ Run through Blender, not CPython:
 
 The script deliberately ignores TXD files. It keeps the authored exterior and door
 cards, removes cabin/engine/damage/collision geometry, creates explicit moving wheel
-and hub nodes, and exports texture-free GLBs for glTF-Transform post-processing.
+nodes, and exports texture-free GLBs for glTF-Transform post-processing.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import math
 import re
 import sys
@@ -22,7 +23,7 @@ from mathutils import Matrix, Vector
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DIST = ROOT / "dist" / "models" / "saas"
+DIST = ROOT / "build" / "vehicles" / "sa_uaz330364" / "20-normalized"
 
 
 class Model(NamedTuple):
@@ -42,17 +43,59 @@ class Model(NamedTuple):
     #: Blank off the empty engine bay behind the grille. A cab-over has no bay to
     #: blank: the plate would land inside the cabin and stick out of the windscreen.
     needs_bulkhead: bool
-    #: Paint the load bed in the wheel colour instead of the coachwork colour, the
-    #: way a working pickup leaves the factory. The cabin's rear wall is the split.
+    #: Paint the load bed in the wheel colour instead of the coachwork colour.
     has_cargo_bed: bool
+    #: Explicit source-space split for bodies whose rear wall extends beyond the doors.
+    bed_start_y: float | None
+    #: Connected islands below this source-space centre height are frame/running gear.
+    running_gear_center_z: float | None
+    #: Radius around each wheel dummy whose loose islands travel with that wheel.
+    hub_island_radius: float
+    #: Source-space inset that keeps authored brake hardware behind the rim face.
+    hub_inset: float
+    #: Drop the loose brake hardware; the wheel mesh already contains its own hub face.
+    drop_hub_hardware: bool
+    #: Centre of the authored axle housings; DFF wheel dummies sit visibly above it.
+    source_axle_z: float
+    #: Local transverse correction at axle height. It fades to zero at the frame,
+    #: keeping prop shafts and suspension attached while matching factory track.
+    running_gear_x_scale: float
+    #: Factory longitudinal anchors used to repair source-art axle placement.
+    target_length: float
+    target_wheelbase: float
+    target_front_overhang: float
+    target_height: float
+    target_clearance: float
+    target_wheel_radius: float
+    tyre_width: float
 
 
 # The pack's other five bodies (both Samaras, the 2110, the Sobol and the UAZ-469)
 # were cut from the catalogue: better source models are wanted for those cars.
 MODELS = (
-    Model("oka", ROOT / "SARUS" / "ОКА" / "manana.dff", 30_000, False, True, True, False),
-    Model("uaz330364", ROOT / "SARUS" / "УАЗ 330364" / "yankee.dff", 30_000, False, False, False, True),
-    Model("izh2715", ROOT / "SARUS" / "ИЖ 2715" / "bobcat.dff", 30_000, False, True, True, False),
+    Model(
+        "uaz330364",
+        ROOT / "vehicle_import" / "uaz_330364" / "yankee.dff",
+        30_000,
+        False,
+        False,
+        False,
+        True,
+        0.66,
+        -0.35,
+        0.20,
+        0.075,
+        True,
+        -1.070,
+        0.9345,
+        4.535,
+        2.550,
+        1.054,
+        2.355,
+        0.205,
+        0.372,
+        0.225,
+    ),
 )
 
 # The Soviet pack's own road wheel, reused rather than re-modelled. `09.wheel_fr`
@@ -67,7 +110,17 @@ SOVIET_WHEEL_OBJECT = "09.wheel_fr"
 BED_ROLE = "wheel_rim"
 
 ROLES = ("car_paint", "car_trim", "car_glass", "Headlights", "BrakeLights")
+SPLIT_LAMP_ROLES = {
+    "taillights_split": ("taillights", "TailLights"),
+    "reverse_lights": ("reverse_lights", "ReverseLights"),
+    "front_blinker_left": ("front_blinker_left", "IndicatorLights"),
+    "front_blinker_right": ("front_blinker_right", "IndicatorLights"),
+    "rear_blinker_left": ("rear_blinker_left", "IndicatorLights"),
+    "rear_blinker_right": ("rear_blinker_right", "IndicatorLights"),
+}
 WHEEL_KEYS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
+HUB_ROLES = ("hub_fl", "hub_fr", "hub_rl", "hub_rr")
+HUB_WHEELS = {role: role.replace("hub", "wheel") for role in HUB_ROLES}
 
 DAMAGE_RE = re.compile(r"(^|[_ .])(dam|damage|vlo|lod)([_ .]|$)", re.I)
 COLLISION_RE = re.compile(r"colmesh|colsphere|shadowmesh|collision|sentinel_col|_col\b", re.I)
@@ -192,7 +245,9 @@ def excluded(obj: bpy.types.Object) -> bool:
     current = obj
     while current is not None:
         name = plain_name(current.name)
-        if DAMAGE_RE.search(name) or COLLISION_RE.search(name) or INTERIOR_RE.search(name) or EXTRA_RE.fullmatch(name):
+        if name in {"extra3", "extra4", "extra6"}:
+            return True
+        if DAMAGE_RE.search(name) or COLLISION_RE.search(name) or INTERIOR_RE.search(name):
             return True
         current = current.parent
     return False
@@ -258,6 +313,9 @@ def new_runtime_material(name: str) -> bpy.types.Material:
         "car_glass": (0.035, 0.075, 0.11, 1.0),
         "Headlights": (0.72, 0.78, 0.72, 1.0),
         "BrakeLights": (0.45, 0.012, 0.008, 1.0),
+        "TailLights": (0.45, 0.012, 0.008, 1.0),
+        "ReverseLights": (0.82, 0.84, 0.76, 1.0),
+        "IndicatorLights": (0.95, 0.19, 0.005, 1.0),
         "Tyres": (0.018, 0.02, 0.022, 1.0),
         BED_ROLE: (0.40, 0.41, 0.42, 1.0),
     }
@@ -334,10 +392,206 @@ def lamp_group_areas(
     return areas
 
 
+def polygon_island_bounds(
+    mesh: bpy.types.Mesh,
+    world_vertices: list[Vector],
+) -> list[tuple[float, float, float, float, float, float]]:
+    """Return XYZ bounds of each polygon's connected island."""
+    vertex_polygons: list[list[int]] = [[] for _ in mesh.vertices]
+    for polygon in mesh.polygons:
+        for vertex_index in polygon.vertices:
+            vertex_polygons[vertex_index].append(polygon.index)
+
+    result: list[tuple[float, float, float, float, float, float] | None] = [None] * len(mesh.polygons)
+    unseen = set(range(len(mesh.polygons)))
+    while unseen:
+        seed = unseen.pop()
+        stack = [seed]
+        polygon_indices = [seed]
+        vertex_indices: set[int] = set()
+        while stack:
+            polygon_index = stack.pop()
+            polygon = mesh.polygons[polygon_index]
+            vertex_indices.update(polygon.vertices)
+            for vertex_index in polygon.vertices:
+                for neighbour in vertex_polygons[vertex_index]:
+                    if neighbour in unseen:
+                        unseen.remove(neighbour)
+                        stack.append(neighbour)
+                        polygon_indices.append(neighbour)
+        points = [world_vertices[index] for index in vertex_indices]
+        bounds = (
+            min(point.x for point in points),
+            max(point.x for point in points),
+            min(point.y for point in points),
+            max(point.y for point in points),
+            min(point.z for point in points),
+            max(point.z for point in points),
+        )
+        for polygon_index in polygon_indices:
+            result[polygon_index] = bounds
+    return [bounds for bounds in result if bounds is not None]
+
+def uaz_lamp_role(
+    role: str,
+    face_x: float,
+    island_bounds: tuple[float, float, float, float, float, float],
+    map_y: Callable[[float], float],
+    map_z: Callable[[float], float],
+) -> str:
+    """Separate the UAZ-3303's factory lens sections after dimensional fitting."""
+    min_x, max_x, min_y, max_y, min_z, max_z = island_bounds
+    final_x = -(min_x + max_x) * 0.5
+    final_face_x = -face_x
+    final_y = sorted((-map_y(min_y), -map_y(max_y)))
+    final_z = sorted((map_z(min_z), map_z(max_z)))
+
+    # Each small front lamp is factory-split across its diameter: amber indicator
+    # above, white position lamp below. The DFF stores the lower semicircle among
+    # the trim faces, so both source roles must be corrected.
+    is_small_front_lamp = (
+        final_y[0] < -2.40
+        and abs(final_x) > 0.73
+        and final_z[1] < -0.30
+    )
+    if is_small_front_lamp:
+        if role == "Headlights":
+            side = "left" if final_x > 0 else "right"
+            return f"front_blinker_{side}"
+        if role == "car_trim":
+            return "Headlights"
+
+    if role == "BrakeLights" and final_y[1] > 2.44:
+        # One separate clear reversing lamp sits inboard on the vehicle's left.
+        if 0.55 < final_x < 0.72:
+            return "reverse_lights"
+        if abs(final_x) > 0.70:
+            if abs(final_face_x) > 0.88:
+                side = "left" if final_x > 0 else "right"
+                return f"rear_blinker_{side}"
+            return "taillights_split"
+
+    # The broad red running/stop lenses use an unhelpfully generic source
+    # material. Their exact connected panels occupy the inboard part of each
+    # FP-132 lamp; promote them out of trim without touching its black housing.
+    if (
+        role == "car_trim"
+        and final_y[1] > 2.52
+        and 0.70 < abs(final_x) < 0.905
+        and final_z[0] > -0.56
+        and final_z[1] < -0.44
+    ):
+        return "taillights_split"
+    return role
+
+
+def geometry_mappers(
+    body_vertices: list[Vector],
+    dummy_positions: dict[str, Vector],
+    model: Model,
+) -> tuple[Callable[[float], float], Callable[[float], float], float]:
+    """Warp body ends/axles/roof onto the factory drawing without changing bounds."""
+    low_y = min(point.y for point in body_vertices)
+    high_y = max(point.y for point in body_vertices)
+    span_y = high_y - low_y
+    source_front = (dummy_positions["wheel_fl"].y + dummy_positions["wheel_fr"].y) * 0.5
+    source_rear = (dummy_positions["wheel_rl"].y + dummy_positions["wheel_rr"].y) * 0.5
+    target_front = high_y - span_y * model.target_front_overhang / model.target_length
+    target_rear = target_front - span_y * model.target_wheelbase / model.target_length
+    if not low_y < source_rear < source_front < high_y:
+        raise RuntimeError("Wheel dummies do not lie between the body ends")
+    if not low_y < target_rear < target_front < high_y:
+        raise RuntimeError("Factory axle anchors do not lie between the body ends")
+
+    low_z = min(point.z for point in body_vertices)
+    high_z = max(point.z for point in body_vertices)
+    span_z = high_z - low_z
+    source_axle_z = model.source_axle_z
+    target_body_height = model.target_height - model.target_clearance
+    target_axle_z = low_z + span_z * (
+        (model.target_wheel_radius - model.target_clearance) / target_body_height
+    )
+    if not low_z < source_axle_z < high_z or not low_z < target_axle_z < high_z:
+        raise RuntimeError("Axle height does not lie between the body bounds")
+
+    def remap_y(value: float) -> float:
+        if value <= source_rear:
+            source_a, source_b = low_y, source_rear
+            target_a, target_b = low_y, target_rear
+        elif value <= source_front:
+            source_a, source_b = source_rear, source_front
+            target_a, target_b = target_rear, target_front
+        else:
+            source_a, source_b = source_front, high_y
+            target_a, target_b = target_front, high_y
+        t = (value - source_a) / (source_b - source_a)
+        return target_a + (target_b - target_a) * t
+
+    def remap_z(value: float) -> float:
+        if value <= source_axle_z:
+            source_a, source_b = low_z, source_axle_z
+            target_a, target_b = low_z, target_axle_z
+        else:
+            source_a, source_b = source_axle_z, high_z
+            target_a, target_b = target_axle_z, high_z
+        t = (value - source_a) / (source_b - source_a)
+        return target_a + (target_b - target_a) * t
+
+    return remap_y, remap_z, model.target_length / span_y
+
+
+def smooth_falloff(distance: float, full: float, zero: float) -> float:
+    """One inside `full`, zero beyond `zero`, smooth and monotonic between."""
+    if distance <= full:
+        return 1.0
+    if distance >= zero:
+        return 0.0
+    t = (distance - full) / (zero - full)
+    return 1.0 - t * t * (3.0 - 2.0 * t)
+
+
+def align_running_gear_track(
+    obj: bpy.types.Object,
+    dummy_positions: dict[str, Vector],
+    axle_scale: float,
+) -> None:
+    """Bring fixed running gear onto the wheel axes without moving the body.
+
+    The runtime fits the body width and wheel track independently. Applying the
+    body-width scale to the authored axles therefore leaves their ends outboard of
+    the wheel centres. A continuous local X warp fixes that mismatch: full strength
+    around each axle, fading to zero towards the frame and along suspension links.
+    Central prop shafts barely move because X=0 is invariant, and no island is
+    detached or translated independently.
+    """
+    axles = (
+        (dummy_positions["wheel_fl"] + dummy_positions["wheel_fr"]) * 0.5,
+        (dummy_positions["wheel_rl"] + dummy_positions["wheel_rr"]) * 0.5,
+    )
+    for vertex in obj.data.vertices:
+        point = vertex.co
+        axle = min(axles, key=lambda candidate: abs(point.y - candidate.y))
+        longitudinal = smooth_falloff(abs(point.y - axle.y), 0.34, 1.02)
+        vertical = smooth_falloff(max(0.0, point.z - axle.z), 0.125, 0.75)
+        weight = longitudinal * vertical
+        point.x = axle.x + (point.x - axle.x) * (1.0 + (axle_scale - 1.0) * weight)
+    obj.data.update()
+
+
+
+
 def collect_body(
     objects: list[bpy.types.Object],
+    model_id: str,
     lamp_zone: tuple[float, float],
     bed_limit: float | None,
+    running_gear_center_z: float | None,
+    hub_island_radius: float,
+    hub_inset: float,
+    source_dummy_positions: dict[str, Vector],
+    fitted_dummy_positions: dict[str, Vector],
+    map_y: Callable[[float], float],
+    map_z: Callable[[float], float],
 ) -> dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]]:
     areas = lamp_group_areas(objects, lamp_zone)
     # A quarter of the biggest lens at that end of the car: enough to keep a second
@@ -346,24 +600,73 @@ def collect_body(
         end: 0.25 * max((area for (_, _, at), area in areas.items() if at == end), default=0.0)
         for end in ("front", "rear")
     }
-    buckets = {role: ([], []) for role in (*ROLES, BED_ROLE)}
+    buckets = {
+        role: ([], [])
+        for role in (*ROLES, BED_ROLE, *HUB_ROLES, *SPLIT_LAMP_ROLES)
+    }
     for obj in objects:
         mesh = obj.data
         mirrored = is_mirrored(obj)
         world_vertices = [obj.matrix_world @ vertex.co for vertex in mesh.vertices]
+        island_bounds = polygon_island_bounds(mesh, world_vertices)
         per_role_maps: dict[str, dict[int, int]] = {role: {} for role in buckets}
         for polygon in mesh.polygons:
             face_y = sum(world_vertices[index].y for index in polygon.vertices) / len(polygon.vertices)
             material = obj.material_slots[polygon.material_index].material if polygon.material_index < len(obj.material_slots) else None
             role = material_role(obj, material, polygon.material_index, face_y, lamp_zone)
-            if role in ("Headlights", "BrakeLights"):
+            (
+                island_min_x,
+                island_max_x,
+                island_min_y,
+                _island_max_y,
+                island_min_z,
+                island_max_z,
+            ) = island_bounds[polygon.index]
+            island_centre = Vector((
+                (island_min_x + island_max_x) * 0.5,
+                (island_min_y + _island_max_y) * 0.5,
+                (island_min_z + island_max_z) * 0.5,
+            ))
+            nearest_wheel = min(
+                WHEEL_KEYS,
+                key=lambda key: (island_centre - source_dummy_positions[key]).length,
+            )
+            if (
+                plain_name(obj.name) == "chassis"
+                and (island_centre - source_dummy_positions[nearest_wheel]).length
+                <= hub_island_radius
+            ):
+                role = nearest_wheel.replace("wheel", "hub")
+            elif role in ("Headlights", "BrakeLights"):
                 end = "front" if role == "Headlights" else "rear"
                 if areas.get((obj.name, polygon.material_index, end), 0.0) < floors[end]:
                     role = "car_trim"
-            # A pickup's load bed is painted like its wheels, not like its cabin, so
-            # the coachwork behind the cabin's rear wall changes material.
-            if role == "car_paint" and bed_limit is not None and face_y <= bed_limit:
+            # Material names alone are insufficient: the DFF uses body reflection
+            # on the frame, axles, shafts and suspension. Classify those connected
+            # low islands as fixed chassis trim, never repaintable coachwork.
+            island_center_z = (island_min_z + island_max_z) * 0.5
+            if (
+                role == "car_paint"
+                and running_gear_center_z is not None
+                and island_center_z <= running_gear_center_z
+            ):
+                role = "car_trim"
+            # Bed latches and front-wall details cross the nominal split plane.
+            # Classify the whole connected painted island from its rear-most point,
+            # rather than recolouring individual faces by centroid.
+            elif role == "car_paint" and bed_limit is not None and island_min_y <= bed_limit:
                 role = BED_ROLE
+            if model_id == "uaz330364":
+                face_x = sum(
+                    world_vertices[index].x for index in polygon.vertices
+                ) / len(polygon.vertices)
+                role = uaz_lamp_role(
+                    role,
+                    face_x,
+                    island_bounds[polygon.index],
+                    map_y,
+                    map_z,
+                )
             vertices, faces = buckets[role]
             index_map = per_role_maps[role]
             face = []
@@ -373,7 +676,16 @@ def collect_body(
             for source_index in source_indices:
                 target_index = index_map.get(source_index)
                 if target_index is None:
-                    point = world_vertices[source_index]
+                    source_point = world_vertices[source_index]
+                    point = Vector((
+                        source_point.x,
+                        map_y(source_point.y),
+                        map_z(source_point.z),
+                    ))
+                    if role in HUB_WHEELS:
+                        wheel_key = HUB_WHEELS[role]
+                        point = point - fitted_dummy_positions[wheel_key]
+                        point.x -= math.copysign(hub_inset, source_dummy_positions[wheel_key].x)
                     target_index = len(vertices)
                     vertices.append((point.x, point.y, point.z))
                     index_map[source_index] = target_index
@@ -530,9 +842,13 @@ def load_soviet_wheel() -> tuple[list[Vector], list[tuple[int, ...]], float]:
 def create_wheels(
     root: bpy.types.Object,
     source_geometry: dict[str, tuple[list[Vector], list[tuple[int, ...]], Vector, float]],
+    hub_geometry: dict[str, tuple[list[tuple[float, float, float]], list[tuple[int, ...]]]],
     dummy_positions: dict[str, Vector],
     materials: dict[str, bpy.types.Material],
     soviet_wheel: tuple[list[Vector], list[tuple[int, ...]], float] | None,
+    catalogue_scale: float,
+    tyre_width: float,
+    drop_hub_hardware: bool,
 ) -> float:
     available = [key for key in WHEEL_KEYS if key in source_geometry]
     if not available:
@@ -552,6 +868,13 @@ def create_wheels(
             source_vertices, faces, _source_centre, _radius = source_geometry[source_key]
             vertices = [vertex.copy() for vertex in source_vertices]
             source_side_left = source_key.endswith("l")
+        # Runtime corrects the rolling plane to factory radius but deliberately keeps
+        # the axle dimension at catalogue scale. Correct the DFF's overly wide tyre
+        # here, so its final section is 225 mm rather than a 265 mm balloon tyre.
+        source_width = max(point.x for point in vertices) - min(point.x for point in vertices)
+        target_source_width = tyre_width / catalogue_scale
+        axle_scale = target_source_width / source_width
+        vertices = [Vector((point.x * axle_scale, point.y, point.z)) for point in vertices]
         # A wheel taken from the other side is TURNED about the vertical axis, never
         # mirrored: a mirror reverses winding and renders the assembly inside out.
         if key.endswith("l") != source_side_left:
@@ -570,20 +893,33 @@ def create_wheels(
         wheel.location = dummy_positions[key]
         decimate(wheel, 2_200)
         radii.append(radius)
+        if drop_hub_hardware:
+            continue
 
-        bpy.ops.mesh.primitive_cylinder_add(
-            vertices=16,
-            radius=max(0.07, radius * 0.30),
-            depth=max(0.08, radius * 0.22),
-            location=dummy_positions[key],
-            rotation=(0.0, math.pi / 2, 0.0),
-        )
-        hub = bpy.context.object
-        hub.name = key.replace("wheel", "hub")
-        hub.data.name = f"{hub.name}_mount"
-        hub.data.materials.append(materials["car_trim"])
-        hub.parent = root
-        radii.append(radius)
+        hub_role = key.replace("wheel", "hub")
+        hub_vertices, hub_faces = hub_geometry[hub_role]
+        if hub_faces:
+            hub = mesh_object(
+                hub_role,
+                hub_vertices,
+                hub_faces,
+                materials["car_trim"],
+                root,
+            )
+            hub.location = dummy_positions[key]
+            harden_edges(hub)
+        else:
+            bpy.ops.mesh.primitive_cylinder_add(
+                vertices=16,
+                radius=max(0.07, radius * 0.30),
+                depth=max(0.08, radius * 0.22),
+                location=dummy_positions[key],
+                rotation=(0.0, math.pi / 2, 0.0),
+            )
+            hub = bpy.context.object
+            hub.name = hub_role
+            hub.data.materials.append(materials["car_trim"])
+            hub.parent = root
     return sum(radii) / len(radii)
 
 
@@ -677,12 +1013,12 @@ def normalize(model: Model) -> None:
     import_dff(source)
 
     meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
-    dummy_positions: dict[str, Vector] = {}
+    source_dummy_positions: dict[str, Vector] = {}
     for obj in bpy.context.scene.objects:
         key = wheel_key(obj.name)
         if key is not None:
-            dummy_positions[key] = obj.matrix_world.translation.copy()
-    missing_dummies = [key for key in WHEEL_KEYS if key not in dummy_positions]
+            source_dummy_positions[key] = obj.matrix_world.translation.copy()
+    missing_dummies = [key for key in WHEEL_KEYS if key not in source_dummy_positions]
     if missing_dummies:
         raise RuntimeError(f"Missing wheel dummies in {source}: {missing_dummies}")
 
@@ -699,23 +1035,57 @@ def normalize(model: Model) -> None:
     if not body_objects:
         raise RuntimeError(f"No exterior meshes retained for {source}")
 
-    materials = {name: new_runtime_material(name) for name in (*ROLES, "Tyres", BED_ROLE)}
-    body_vertices = [
+    material_names = tuple(dict.fromkeys((
+        *ROLES,
+        "Tyres",
+        BED_ROLE,
+        *(material for _, material in SPLIT_LAMP_ROLES.values()),
+    )))
+    materials = {name: new_runtime_material(name) for name in material_names}
+    source_body_vertices = [
         obj.matrix_world @ vertex.co
         for obj in body_objects
         for vertex in obj.data.vertices
     ]
-    # The nose and tail bands a lamp lens may live in: a tenth of the car's length
-    # at each end, which reaches the whole lamp glass and nothing behind the wheel
-    # arch.
-    body_min_y = min(point.y for point in body_vertices)
-    body_max_y = max(point.y for point in body_vertices)
+    map_y, map_z, catalogue_scale = geometry_mappers(
+        source_body_vertices,
+        source_dummy_positions,
+        model,
+    )
+    fitted_axle_z = map_z(model.source_axle_z)
+    dummy_positions = {
+        key: Vector((point.x, map_y(point.y), fitted_axle_z))
+        for key, point in source_dummy_positions.items()
+    }
+    body_vertices = [
+        Vector((point.x, map_y(point.y), map_z(point.z)))
+        for point in source_body_vertices
+    ]
+    # Lamp classification still reads source-space faces, so its end bands do too.
+    body_min_y = min(point.y for point in source_body_vertices)
+    body_max_y = max(point.y for point in source_body_vertices)
     lamp_band = (body_max_y - body_min_y) * 0.10
     lamp_zone = (body_min_y + lamp_band, body_max_y - lamp_band)
-    # The cabin's rear wall, taken from the doors themselves: on a pickup everything
-    # behind the door shuts is load bed, and no name in the file says so.
-    bed_limit = cabin_rear(body_objects) if model.has_cargo_bed else None
-    buckets = collect_body(body_objects, lamp_zone, bed_limit)
+    # The UAZ cab continues behind the doors. Use its measured rear-wall plane
+    # instead of the door's front-most vertex; the latter starts the bed too early.
+    bed_limit = (
+        model.bed_start_y
+        if model.bed_start_y is not None
+        else cabin_rear(body_objects)
+    ) if model.has_cargo_bed else None
+    buckets = collect_body(
+        body_objects,
+        model_id,
+        lamp_zone,
+        bed_limit,
+        model.running_gear_center_z,
+        model.hub_island_radius,
+        model.hub_inset,
+        source_dummy_positions,
+        dummy_positions,
+        map_y,
+        map_z,
+    )
     wheel_geometry_by_key = {
         key: wheel_geometry(objects)
         for key, objects in wheel_sources.items()
@@ -734,34 +1104,59 @@ def normalize(model: Model) -> None:
     root = bpy.data.objects.new(model_id, None)
     bpy.context.scene.collection.objects.link(root)
 
-    total_faces = sum(len(faces) for _vertices, faces in buckets.values())
-    for role in (*ROLES, BED_ROLE):
+    output_roles = (*ROLES, BED_ROLE, *SPLIT_LAMP_ROLES)
+    total_faces = sum(len(buckets[role][1]) for role in output_roles)
+    required_split_roles = set(SPLIT_LAMP_ROLES) if model_id == "uaz330364" else set()
+    base_nodes = {
+        "car_paint": ("paint", "car_paint"),
+        "car_trim": ("trim", "car_trim"),
+        "car_glass": ("glass", "car_glass"),
+        "Headlights": ("headlights", "Headlights"),
+        "BrakeLights": ("taillights", "BrakeLights"),
+        BED_ROLE: ("bed", BED_ROLE),
+    }
+    for role in output_roles:
         vertices, faces = buckets[role]
         if not faces:
-            if role == BED_ROLE:
-                continue
-            raise RuntimeError(f"{model_id} has no geometry for required role {role}")
+            optional = (
+                role == BED_ROLE
+                or role in SPLIT_LAMP_ROLES
+                or (model_id == "uaz330364" and role == "BrakeLights")
+            )
+            if role in required_split_roles or not optional:
+                raise RuntimeError(f"{model_id} has no geometry for required role {role}")
+            continue
+        if model_id == "uaz330364" and role == "BrakeLights":
+            raise RuntimeError(f"{model_id} left unsplit rear-lamp geometry")
+        node_name, material_name = (
+            SPLIT_LAMP_ROLES[role] if role in SPLIT_LAMP_ROLES else base_nodes[role]
+        )
         obj = mesh_object(
-            {
-                "car_paint": "paint",
-                "car_trim": "trim",
-                "car_glass": "glass",
-                "Headlights": "headlights",
-                "BrakeLights": "taillights",
-                BED_ROLE: "bed",
-            }[role],
+            node_name,
             vertices,
             faces,
-            materials[role],
+            materials[material_name],
             root,
         )
+        if role == "car_trim":
+            align_running_gear_track(obj, dummy_positions, model.running_gear_x_scale)
         weld(obj)
         share = max(64, round(body_target * len(faces) / max(1, total_faces)))
         decimate(obj, share)
         harden_edges(obj)
 
     wheel = load_soviet_wheel() if model.soviet_wheels else None
-    wheel_radius = create_wheels(root, wheel_geometry_by_key, dummy_positions, materials, wheel)
+    wheel_radius = create_wheels(
+        root,
+        wheel_geometry_by_key,
+        buckets,
+        dummy_positions,
+        materials,
+        wheel,
+        catalogue_scale,
+        model.tyre_width,
+        model.drop_hub_hardware,
+    )
     if model.needs_bulkhead:
         add_nose_bulkhead(root, body_vertices, materials["car_trim"])
     if model.needs_underbody:

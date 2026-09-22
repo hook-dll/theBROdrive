@@ -819,6 +819,62 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
 const HOOD_CAMERA_CLEARANCE_M = 0.1;
 /** Scratch for the bonnet sweep; measuring a body must not allocate per vertex. */
 const _sample = new THREE.Vector3();
+const _ridePoint = new THREE.Vector3();
+const _rideInverse = new THREE.Matrix4();
+
+function rideFalloff(distance: number, full: number, zero: number): number {
+  if (distance <= full) return 1;
+  if (distance >= zero) return 0;
+  const t = (distance - full) / (zero - full);
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/**
+ * Settles the sprung visual body without translating either axle assembly.
+ *
+ * Every affected mesh stays connected. Around each axle the displacement is zero;
+ * along springs, dampers and prop shafts it fades continuously to the full body
+ * drop. This is a visual full-load stance, not a second suspension simulation.
+ */
+function applyLoadedRideDrop(
+  scene: THREE.Group,
+  wheels: readonly WheelMeasure[],
+  drop: number,
+): void {
+  if (!(drop > 0)) return;
+  const frontY = (wheels[0]!.pos[1] + wheels[1]!.pos[1]) * 0.5;
+  const frontZ = (wheels[0]!.pos[2] + wheels[1]!.pos[2]) * 0.5;
+  const rearY = (wheels[2]!.pos[1] + wheels[3]!.pos[1]) * 0.5;
+  const rearZ = (wheels[2]!.pos[2] + wheels[3]!.pos[2]) * 0.5;
+  scene.updateMatrixWorld(true);
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    node.geometry = node.geometry.clone();
+    const position = node.geometry.getAttribute('position');
+    if (!(position instanceof THREE.BufferAttribute)) return;
+    _rideInverse.copy(node.matrixWorld).invert();
+    const fixedAxles = node.name === 'trim';
+    for (let i = 0; i < position.count; i++) {
+      _ridePoint.fromBufferAttribute(position, i).applyMatrix4(node.matrixWorld);
+      let sprung = 1;
+      if (fixedAxles) {
+        const frontLock =
+          rideFalloff(Math.abs(_ridePoint.z - frontZ), 0.30, 1.05) *
+          rideFalloff(Math.abs(_ridePoint.y - frontY), 0.19, 0.55);
+        const rearLock =
+          rideFalloff(Math.abs(_ridePoint.z - rearZ), 0.30, 1.05) *
+          rideFalloff(Math.abs(_ridePoint.y - rearY), 0.19, 0.55);
+        sprung -= Math.max(frontLock, rearLock);
+      }
+      _ridePoint.y -= drop * sprung;
+      _ridePoint.applyMatrix4(_rideInverse);
+      position.setXYZ(i, _ridePoint.x, _ridePoint.y, _ridePoint.z);
+    }
+    position.needsUpdate = true;
+    node.geometry.computeBoundingBox();
+    node.geometry.computeBoundingSphere();
+  });
+}
 
 /** The node every pack names for the animated steering wheel. */
 export const STEERING_WHEEL_NODE = 'steering_wheel';
@@ -916,11 +972,14 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
       parts.positions.get('wheel_rr')!.z) *
       0.5 -
     sourceOriginZ;
-  // Axle midpoint follows the body length correction; track and wheelbase themselves
-  // are catalogue authorities.
-  const axleMidZ = ((frontSourceZ + rearSourceZ) * 0.5) * bodyScaleZ;
+  // Axle midpoint normally follows the source art. Factory drawings override it
+  // where the source has the right wheelbase but distributes the overhangs wrongly.
   const frontDirection = Math.sign(frontSourceZ - rearSourceZ) || 1;
-
+  const axleMidZ = def.factory.frontOverhang === undefined
+    ? ((frontSourceZ + rearSourceZ) * 0.5) * bodyScaleZ
+    : frontDirection * (
+      half.z - def.factory.frontOverhang - def.factory.wheelbase * 0.5
+    );
   const wheels: WheelMeasure[] = [];
   for (const id of WHEEL_IDS) {
     const p: [number, number, number] = [0, 0, 0];
@@ -941,6 +1000,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
       isFront,
     });
   }
+  applyLoadedRideDrop(scene, wheels, def.loadedRideDrop ?? 0);
 
   // Hood camera mount, measured rather than authored.
   //

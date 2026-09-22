@@ -170,26 +170,24 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // A lazy 2.4 litre four: peak torque at 2200 rpm and a 4500 rpm limit. This is
-    // the UAZ van's engine, NOT a Volga one — the GAZ pair have their own
-    // (`engine_zmz_21`/`engine_zmz_24`) in the Soviet driveline table, with that
-    // pack's own friction convention. Do not merge them: this one's figures are what
-    // the imported working vehicle was tuned against. It fits trucks because the body
-    // that runs it is one.
-    id: 'engine_i4_2445',
+    // UMZ-4213.10-10 from the long-wheelbase UAZ-330364: 2.89 litres,
+    // 99 hp (73 kW) at 4000 rpm and 201 Nm net at 3000 rpm. Drivetrain subtracts
+    // WOT friction from the authored curve, so 221 Nm here is the indicated value
+    // that leaves the factory 201 Nm at the crank.
+    id: 'engine_umz_4213',
     kind: 'engine',
-    label: '2.4 inline-four',
-    mass: 165,
+    label: '2.9 UMZ inline-four',
+    mass: 170,
     fits: ['car', 'truck'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 52,
-      peakTorqueNm: 167,
-      torquePeakRpm: 2200,
+      peakPowerKw: 73,
+      peakTorqueNm: 221,
+      torquePeakRpm: 3000,
       redlineRpm: 4500,
-      idleRpm: 700,
-      bsfc: 0.34,
-      brakingCoeff: 0.068,
+      idleRpm: 750,
+      bsfc: 0.30,
+      brakingCoeff: 0.044,
       cylinders: 4,
     },
   },
@@ -269,16 +267,17 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
 
 export const GEARBOX_VARIANTS: readonly PartVariant[] = [
   {
-    id: 'gearbox_manual4',
+    // UAZ four-speed with the 33036-series axle ratio; high-range transfer is 1:1.
+    id: 'gearbox_uaz_4',
     kind: 'gearbox',
-    label: '4-speed manual',
+    label: 'UAZ 4-speed manual',
     mass: 46,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
-      ratios: [3.65, 2.05, 1.35, 1.0],
-      reverse: 3.4,
-      finalDrive: 3.9,
-      shiftTime: 0.35,
+      ratios: [3.78, 2.60, 1.55, 1.0],
+      reverse: 4.12,
+      finalDrive: 4.625,
+      shiftTime: 0.40,
       automatic: false,
     },
   },

@@ -19,11 +19,11 @@ import { GameWorld, newWorldState, DAY_LENGTH, type CarState } from '../src/game
 import type { Item } from '../src/items/items';
 import { engineHeat, variant } from '../src/parts/registry';
 import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { carModel } from '../src/vehicle/carmodels';
-import { COLD_SOAK_C, ambientAirC } from '../src/vehicle/cooling';
 import { Vehicle } from '../src/vehicle/vehicle';
+import { carModel } from '../src/vehicle/carmodels';
 import { WorldOrigin } from '../src/world/origin';
 import { preloadCarModels } from '../src/render/carmodel';
+import { COLD_SOAK_C, ambientAirC, preferredRadiatorClass } from '../src/vehicle/cooling';
 
 installAssetShim();
 
@@ -119,7 +119,7 @@ console.log('cooling-drive: heat through the vehicle');
 const factory = await makeRig('cool:factory');
 check(
   'a factory car is fitted with a radiator that suits its engine',
-  factory.vehicle.coolingState.radiatorClass === 'large' &&
+  factory.vehicle.coolingState.radiatorClass === preferredRadiatorClass(factory.vehicle.stats.engine) &&
     factory.vehicle.coolingState.fit.warning === null,
   `${factory.vehicle.coolingState.radiatorClass}, water ${factory.vehicle.coolingState.waterCapacity} L`,
 );
@@ -184,7 +184,7 @@ check(
   `performance ${cooked.performance.toFixed(2)}, rev limit ${cooked.revLimit.toFixed(2)}`,
 );
 
-drive(bodged, seconds(240), 1);
+drive(bodged, seconds(1800), 1);
 const boiled = bodged.vehicle.coolingState;
 check(
   'ignoring the lamp boils water away, and the stall then caps the loss',

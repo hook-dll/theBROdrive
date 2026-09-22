@@ -418,6 +418,8 @@ export interface FactoryGeometry {
   readonly rearTrack: number;
   readonly wheelRadius: number;
   readonly tyreWidth: number;
+  /** Nose to front axle; set when source-art axle bias disagrees with factory drawings. */
+  readonly frontOverhang?: number;
 }
 
 
@@ -470,6 +472,11 @@ export interface CarModelDef {
    * only; this car's own factory radius and axle positions remain authoritative.
    */
   readonly wheelSetPool?: readonly string[];
+  /**
+   * Loaded visual settle in metres. Applied only to the sprung body; axle centres
+   * stay fixed and connected suspension geometry deforms continuously.
+   */
+  readonly loadedRideDrop?: number;
   /**
    * Set when the model carries its own wheels but under the modeller's names
    * (`Wheel_1`, `Cylinder006`, ...). The loader then finds the four discs by shape
@@ -581,7 +588,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343, tyreWidth: 0.175 },
   sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
   sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260, tyreWidth: 0.135 },
-  sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.220, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.430, tyreWidth: 0.225 },
+  sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
   sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.193, wheelbase: 2.400, frontTrack: 1.390, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.165 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
@@ -1154,23 +1161,36 @@ const SAAS_SPECS: readonly Entry[] = [
     dir: SAAS,
     glb: 'uaz330364.glb',
     bodyClass: 'truck',
-    scale: 0.950393,
+    scale: 0.880927,
     mass: 1845,
-    engineId: 'engine_i4_2445',
-    gearboxId: 'gearbox_manual4',
+    engineId: 'engine_umz_4213',
+    gearboxId: 'gearbox_uaz_4',
     tankLitres: 56,
     wheelGrip: 0.59,
     suspension: SUSP_TRUCK,
     steerLock: 0.55,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
-    frontWeightShare: 0.52,
-    dragArea: 1.85,
-    wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:
+    // 1.97 m × 2.355 m frontal envelope at an effective Cd near 0.56.
+    frontWeightShare: 1180 / 1845,
+    dragArea: 2.6,
+    // This working 4x4 keeps its authored heavy-duty wheels. It neither borrows
+    // from the shared road-wheel pool nor donates its set to that pool.
+    wheelSetPool: [],
+    loadedRideDrop: 0.037,
     secondaryPaintMaterial: 'car_bed_paint',
+    wheelNodes: {
+      wheel_fl: ['wheel_fl'],
+      wheel_fr: ['wheel_fr'],
+      wheel_rl: ['wheel_rl'],
+      wheel_rr: ['wheel_rr'],
+    },
     lights: {
+      // The lower front semicircles are white position lamps and therefore share
+      // the headlight control; the upper semicircles are the actual indicators.
       headlights: ['headlights'],
-      taillights: ['brake_light_left', 'brake_light_right'],
+      taillights: ['taillights'],
       reverseLights: ['reverse_lights'],
       leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
       rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
@@ -1206,7 +1226,7 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
     headlights: ['headlights'],
     taillights: ['taillights'],
   },
-  wheelNodes: {
+  wheelNodes: spec.wheelNodes ?? {
     wheel_fl: ['wheel_fl', 'hub_fl'],
     wheel_fr: ['wheel_fr', 'hub_fr'],
     wheel_rl: ['wheel_rl', 'hub_rl'],
@@ -1303,6 +1323,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   glassUvCell: e.glassUvCell,
   factory: factoryGeometry(e.id),
   wheelSetPool: e.wheelSetPool,
+  loadedRideDrop: e.loadedRideDrop,
   wheelNodes: e.wheelNodes,
   bodyClass: e.bodyClass,
   scale: e.scale ?? 1,
