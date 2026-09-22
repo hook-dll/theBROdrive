@@ -40,15 +40,18 @@ interface Real {
   to100: number | null;
   /** Turning radius m, by the outer front wheel, as the factory quotes it. */
   turn: number;
-  /** Steady-state lateral acceleration, g, and 100-0 km/h braking distance, m. */
-  lat: number;
+  /**
+   * Steady-state lateral acceleration, g (null where no period test is known), and
+   * 100-0 km/h braking distance, m.
+   */
+  lat: number | null;
   brake: number;
   /** Design front heave frequency, Hz. */
   hz: number;
 }
 
 /**
- * Factory and period-road-test reference data for the fifteen cars.
+ * Factory and period-road-test reference data for the fifteen pack cars and the Oka.
  *
  * Two of these columns need saying out loud, because using the modern equivalent
  * makes the pack look badly tuned when it is not:
@@ -80,6 +83,11 @@ const REAL: Readonly<Record<string, Real>> = {
   sv_vaz21099: { wb: 2.46, track: 1.4, radius: 0.281, top: 156, to100: 14, turn: 5.2, lat: 0.78, brake: 66, hz: 1.3 },
   sv_niva: { wb: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 21, turn: 5.5, lat: 0.66, brake: 75, hz: 1.15 },
   sv_niva_long: { wb: 2.7, track: 1.44, radius: 0.343, top: 137, to100: 24, turn: 6.2, lat: 0.64, brake: 78, hz: 1.15 },
+  // VAZ-1111 factory manual: 120 km/h and 0-100 in 30 s, 4.8 m by the outer wheel,
+  // and the Samara's 38 m-from-80 braking norm, so the Samara's 100-0 equivalent.
+  // The bench's automatic changes up at 80% of the redline and so reaches 100 km/h
+  // later than the factory's flat-out manual run. No period cornering test is known.
+  sa_oka: { wb: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30, turn: 4.8, lat: null, brake: 66, hz: 1.3 },
 };
 
 /** `value` against `real`, as a signed percentage, or a dash when there is no target. */
@@ -157,7 +165,7 @@ async function main(): Promise<void> {
       )}   ${pad(
         r.skidpadG.toFixed(2),
         4,
-      )} ${pad(real.lat.toFixed(2), 5)} ${dev(r.skidpadG, real.lat)}  ${pad(
+      )} ${pad(real.lat?.toFixed(2) ?? '-', 5)} ${dev(r.skidpadG, real.lat)}  ${pad(
         r.bounceHz.toFixed(2),
         5,
       )} ${pad(real.hz.toFixed(2), 5)}  ${pad(r.brakeDistM.toFixed(1), 6)} ${pad(

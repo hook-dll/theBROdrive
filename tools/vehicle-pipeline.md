@@ -526,6 +526,7 @@ npx gltf-transform optimize build/vehicles/<id>/50-assembled/car-rim.glb \
 - один body mesh на material role, если свет не требует большего;
 - четыре wheel nodes и все относящиеся к ним moving parts;
 - только необходимые `underbody`, `bulkhead`, `bed`;
+- `mirrors`, если наружное зеркало опускается ниже 55% высоты кузова: runtime исключает этот node из измерения заводской ширины (`buildTemplate` в `render/carmodel.ts`), иначе зеркало раздувает измеренную оболочку и сжимает весь кузов;
 - semantic lamp nodes;
 - ноль source cameras/lights/animations;
 - ноль engine/interior/damage/collision/shadow/LOD nodes;

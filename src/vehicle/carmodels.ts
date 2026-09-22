@@ -587,7 +587,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sv_niva:        { length: 3.720, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.200, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343, tyreWidth: 0.175 },
   sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343, tyreWidth: 0.175 },
   sa_azlk2141:    { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
-  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.210, rearTrack: 1.200, wheelRadius: 0.260, tyreWidth: 0.135 },
+  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
   sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
   sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.185, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
@@ -1137,22 +1137,42 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
+    // VAZ-1111, 1988-1996, per its factory manual: 635 kg kerb, 0.65 litre twin,
+    // four-speed transaxle on a 4.54 final drive, 135/80 R12 on 4B-12 rims, 30
+    // litre tank, a 4.8 m turning radius by the outer wheel's track, and 120 km/h
+    // and 0-100 in 30 s with a driver and one passenger aboard.
     id: 'sa_oka',
     label: 'VAZ-1111 Oka',
     dir: SAAS,
     glb: 'oka.glb',
     bodyClass: 'car',
     scale: 0.97465,
-    mass: 645,
-    engineId: 'engine_lada_1200',
-    gearboxId: 'gearbox_lada_4',
+    mass: 635,
+    engineId: 'engine_vaz_1111',
+    gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
     wheelGrip: 0.61,
+    // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
+    // the Samara's layout, and its preset.
     suspension: SUSP_SAMARA,
-    steerLock: 0.62,
+    steerLock: 0.54,
     rearDriveBias: 0,
     handlingProfile: 'road',
+    // No factory axle loads are published; transverse front-drive default.
     frontWeightShare: 0.62,
+    dragArea: 0.73,
+    lights: {
+      // Headlamps carry the position lamps inside them. Amber indicators sit in the
+      // bumper and on each front wing. The OSVAR 43.3716 rear lamp stacks a clear
+      // reversing block, an amber indicator and red running/stop on one 21/5 W
+      // bulb. The red fog lamp in the left of the rear bumper is `rear_passive`:
+      // nothing in the game switches it.
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {

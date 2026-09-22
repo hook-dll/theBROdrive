@@ -878,6 +878,12 @@ function applyLoadedRideDrop(
 
 /** The node every pack names for the animated steering wheel. */
 export const STEERING_WHEEL_NODE = 'steering_wheel';
+/**
+ * The node a normalized body names its exterior mirrors. A mirror is not part of
+ * the published body width, and one mounted low enough — the Oka's, at 54% of body
+ * height — would otherwise widen the measured shell and squeeze the whole body.
+ */
+const MIRRORS_NODE = 'mirrors';
 
 
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
@@ -901,8 +907,9 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   // Published width excludes mirrors, but the affected source meshes include them
   // in their full Box3. Fitting that box made the actual shell 8-14% too narrow, so
   // a correct factory track visibly sat outside the arches. Measure the lower 55%
-  // of the detached body: sills, wings and bumpers, but not mirrors. Height and
-  // length still use the complete body.
+  // of the detached body: sills, wings and bumpers, but not mirrors — the height
+  // cut keeps an unnamed mirror out, and a body whose mirror hangs below it names
+  // the node `mirrors`. Height and length still use the complete body.
   const sourceBodyBox = boundsOf(scene);
   const sourceBodyCentre = sourceBodyBox.getCenter(new THREE.Vector3());
   const sourceBodySize = sourceBodyBox.getSize(new THREE.Vector3());
@@ -910,7 +917,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   let shellMinX = Infinity;
   let shellMaxX = -Infinity;
   scene.traverse((node) => {
-    if (!(node instanceof THREE.Mesh)) return;
+    if (!(node instanceof THREE.Mesh) || node.name === MIRRORS_NODE) return;
     const positions = node.geometry.getAttribute('position');
     if (!positions) return;
     for (let i = 0; i < positions.count; i++) {

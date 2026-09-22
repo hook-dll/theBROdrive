@@ -612,6 +612,30 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // VAZ-1111: the 2108 engine cut in half — two cylinders, 76 x 71 mm, 0.649
+    // litre, one overhead cam. AvtoVAZ's catalogue gives 21.5 kW (29.3 hp) at 5600
+    // and 44.1 Nm at 3400 (the later GOST 14846-88 net rating is 20.7 kW at 5000
+    // and 44.0 Nm at 3000). 48.2 Nm indicated leaves the catalogue's 44.1 Nm after
+    // this model's friction at 3400; friction per Nm is the 1.3 it came from.
+    // Mass is the catalogue's bare engine without clutch or gearbox.
+    id: 'engine_vaz_1111',
+    kind: 'engine',
+    label: '0.65 VAZ-1111 twin',
+    mass: 66.5,
+    fits: ['car'],
+    engine: {
+      fuel: 'petrol',
+      peakPowerKw: 21.5,
+      peakTorqueNm: 48.2,
+      torquePeakRpm: 3400,
+      redlineRpm: 5600,
+      idleRpm: 850,
+      bsfc: 0.33,
+      brakingCoeff: 0.0073,
+      cylinders: 2,
+    },
+  },
+  {
     // VAZ-2121: the 2106 block with the Niva's own head and manifolds, 80 hp and
     // 121 Nm at 3400. It spends its life under load, so it needs the cooling.
     //
@@ -816,6 +840,24 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       ratios: [3.636, 1.95, 1.357, 0.941, 0.784],
       reverse: 3.53,
       finalDrive: 3.706,
+      shiftTime: 0.36,
+      automatic: false,
+    },
+  },
+  {
+    // VAZ-1111 transaxle: four synchronised speeds, 3.70 / 2.06 / 1.27 / 0.90,
+    // reverse 3.67, and the 1111's 4.54 final drive in the same casing (the 11113
+    // got 4.10). Catalogue mass with the differential. Top gear puts 120 km/h, the
+    // factory maximum, at 5000 rpm on 135/80 R12.
+    id: 'gearbox_oka_4',
+    kind: 'gearbox',
+    label: '1111 four-speed',
+    mass: 24.5,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.7, 2.06, 1.27, 0.9],
+      reverse: 3.67,
+      finalDrive: 4.54,
       shiftTime: 0.36,
       automatic: false,
     },

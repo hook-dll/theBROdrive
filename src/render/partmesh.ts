@@ -241,6 +241,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_samara_1300': return buildInline(b, spec, 0.91, false);
     case 'engine_lada_1500':
     case 'engine_samara_1500': return buildInline(b, spec, 0.96, false);
+    // Half a 2108: the 1.3's 76 mm bore and block section, two cylinders long.
+    case 'engine_vaz_1111': return buildInline(b, spec, 0.91, false);
     case 'engine_lada_1600':
     case 'engine_lada_rally':
     case 'engine_niva_1600': return buildInline(b, spec, 1.0, false);
@@ -350,6 +352,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_gaz_4': scale = 1.1; manual = true; fins = false; break;
     case 'gearbox_samara_5':
     case 'gearbox_samara_5_tall': scale = 1.08; manual = true; fins = true; break;
+    // The Oka's transaxle: the Samara layout at a smaller scale, final drive included.
+    case 'gearbox_oka_4': scale = 0.86; manual = true; fins = true; break;
     case 'gearbox_niva_4': scale = 1.2; manual = true; fins = false; break;
     case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
