@@ -227,6 +227,12 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.111 },
   },
+  sa_vaz2109: {
+    wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
+    source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.125 },
+  },
   sv_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,

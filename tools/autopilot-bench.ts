@@ -46,7 +46,7 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 // off disk rather than building its car in code.
 installAssetShim();
 
-const MODEL_ID = 'sv_vaz2105r';
+const MODEL_ID = new URL(import.meta.url).searchParams.get('model') ?? 'sv_vaz2105r';
 const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;
@@ -1629,11 +1629,11 @@ async function run(): Promise<void> {
   checkHandover();
   await checkAutomaticLights();
   await checkPassingSafety();
-  if (process.argv.includes('--traffic-behavior')) {
+  if (typeof process !== 'undefined' && process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
     await checkHazards();
     await checkPedestrianObstacle();
-    if (failures) process.exitCode = 1;
+    if (failures && typeof process !== 'undefined') process.exitCode = 1;
     return;
   }
   const sleeper = await measureMode('sleeper');
@@ -1701,7 +1701,7 @@ async function run(): Promise<void> {
   await checkWedgedOnRoad();
   await checkHazards();
   await checkPedestrianObstacle();
-  if (failures) process.exitCode = 1;
+  if (failures && typeof process !== 'undefined') process.exitCode = 1;
 }
 
 void run();

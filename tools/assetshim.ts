@@ -28,9 +28,15 @@
  * Nothing here is part of the game bundle.
  */
 
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
+
+const bunFile = async (url: string): Promise<Uint8Array> => {
+  const bun = (globalThis as typeof globalThis & {
+    Bun?: { file(path: string): { arrayBuffer(): Promise<ArrayBuffer> } };
+  }).Bun;
+  if (!bun) throw new Error(`file URL requires Bun: ${url}`);
+  return new Uint8Array(await bun.file(decodeURIComponent(new URL(url).pathname)).arrayBuffer());
+};
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -67,7 +73,10 @@ export function installBlankTextures(): void {
 export function installAssetShim(): void {
   if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 
-  const root = new URL('../public/', import.meta.url).href;
+  const root =
+    typeof globalThis.location !== 'undefined'
+      ? `${globalThis.location.origin}/`
+      : new URL('../public/', import.meta.url).href;
   THREE.DefaultLoadingManager.setURLModifier((url) =>
     url.startsWith('/') ? root + url.slice(1) : url,
   );
@@ -76,7 +85,7 @@ export function installAssetShim(): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith('file:')) {
-      return new Response(new Uint8Array(await readFile(fileURLToPath(url))));
+      return new Response(await bunFile(url));
     }
     return upstream(input, init);
   }) as typeof fetch;
