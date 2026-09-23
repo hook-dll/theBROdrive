@@ -28,18 +28,14 @@ import { installAssetShim } from './assetshim';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
+import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { benchCarState } from './benchcar';
 import {
-  carModel,
   heaveFrequencyHz,
   suspensionDampingRatio,
   wheelSpringRate,
 } from '../src/vehicle/carmodels';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -198,37 +194,6 @@ function lawSection(): void {
  * Section 2: the real car.
  * ------------------------------------------------------------------------- */
 
-function carState(modelId: string, y: number): CarState {
-  const def = carModel(modelId);
-  const engine = variant(def.engineId).engine;
-  return {
-    id: 'suspension-probe',
-    modelId,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('suspension-probe', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: 0,
-    y,
-    z: 0,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
-  };
-}
-
 interface Rig {
   physics: PhysicsWorld;
   vehicle: Vehicle;
@@ -247,7 +212,7 @@ async function makeRig(modelId: string): Promise<Rig> {
     SurfaceType.Asphalt,
   );
   const world = new GameWorld(newWorldState(42));
-  const state = carState(modelId, 1.4);
+  const state = benchCarState(modelId, { id: 'suspension-probe', y: 1.4 });
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const input = emptyInput();

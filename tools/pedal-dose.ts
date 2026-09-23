@@ -1,7 +1,7 @@
 /**
  * Pedal dose: does a key press deliver what the driver asked for?
  *
- *   npx tsx tools/pedal-dose.ts
+ *   bun tools/pedal-dose.ts
  *
  * A keyboard pedal is a switch, so the ONLY thing that turns it into a dose is the
  * shaping the input layer applies: a rate-limited rise while the key is down, and a
@@ -19,9 +19,10 @@
  *   driver's intent.
  *
  * "Dose" is the integral of the pedal axis over the press, which is what the tyre
- * actually receives. The pedal itself is not simulated here — the vehicle's own response
- * to a constant axis is measured by `tools/tmp-pedal-curve.ts` (brake) and the throttle
- * sweep, and it is progressive on both.
+ * actually receives. The pedal itself is not simulated here: what the car does with a
+ * given axis value is the drivetrain's part-throttle blend and the brake model, which
+ * `tools/handling-cli.ts` and `tools/tap-response.ts` drive through the real Vehicle.
+ * This bench owns only the step between the key and the axis.
  */
 
 import { FIXED_DT } from '../src/core/physics';

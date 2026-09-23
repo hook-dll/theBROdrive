@@ -3,8 +3,8 @@
  *
  * Measures the heat-haze pass instead of describing it.
  *
- * The effect makes five claims that are all geometric, and every one of them is
- * checkable without a human looking at anything:
+ * The effect makes claims that are all geometric, and every one of them is checkable
+ * without a human looking at anything:
  *
  *   1. WHERE IT IS. Displacement follows the length of each pixel's view ray inside
  *      the hot layer over the sand. So it must be near zero well above the horizon
@@ -13,18 +13,28 @@
  *   2. IT IS NOT A SCREEN BAND. Roll the camera 40 degrees and the shimmer must roll
  *      with the world, i.e. the profile against the RAY'S elevation angle must not
  *      move at all, while the profile against the screen ROW must.
- *   3. IT IS ANGULAR. Halve the field of view and the same piece of world must show
- *      twice the displacement in pixels, because that is what magnification means.
- *   4. IT IS ANCHORED TO A DIRECTION at a fixed range around the player, so moving
- *      the eye must change nothing and only time may.
+ *   3. IT IS ANGULAR. Quarter the field of view and the same piece of world must show
+ *      the same displacement in milliradians, i.e. four times as many pixels.
+ *   4. IT IS ANCHORED TO A DIRECTION, so panning finds the same air and only time
+ *      moves the field.
  *   5. IT RESPECTS SCENE DEPTH. A nearby rendered surface must remain rigid even
- *      when its pixel lies on the horizon ray where distant scenery boils hardest.
+ *      when its pixel lies on the horizon ray where distant scenery boils hardest,
+ *      and the path is cut at the surface: a plane 150 m out boils less than the far
+ *      desert on the same rays.
+ *   6. NOTHING LEAKS ACROSS A SILHOUETTE. Far pixels beside a near object may never
+ *      take their colour from it.
+ *   7. IT BELONGS TO THE GROUND. Over a real ground plane, the band reaches no
+ *      further into the open sky than into the ground, give or take the eye height.
+ *   8. THE MIRAGE MIRRORS. Over hot flat ground just below the horizon, pixels take
+ *      part of their colour from the same angle ABOVE the horizon, and nowhere else.
  *
  * The measurement is exact rather than statistical: the pass is fed a floating-point
  * texture whose red and green channels ARE the u and v of each texel, so whatever the
  * shader samples, it writes back the source coordinate it sampled from. Subtracting
  * the destination coordinate gives the displacement field in UV, to full float
- * precision, for every pixel at once.
+ * precision, for every pixel at once. The pass is compiled with
+ * `HAZE_MEASURE_SOURCE`, which skips its colour finish (grade, grain, lenses) and
+ * nothing else — those would otherwise add tens of milliradians of false motion.
  *
  * It needs a GPU, so like tools/handling-bench.ts it is loaded from the dev server:
  *
@@ -35,7 +45,13 @@
  */
 
 import * as THREE from 'three';
-import { createHeatMirageUniforms, HAZE_FRAGMENT, HAZE_VERTEX } from '../src/core/renderer';
+import {
+  advanceHazePhase,
+  createHeatMirageUniforms,
+  DEFAULT_HEAT_MIRAGE,
+  HAZE_FRAGMENT,
+  HAZE_VERTEX,
+} from '../src/core/renderer';
 
 const WIDTH = 480;
 const HEIGHT = 270;
@@ -43,6 +59,8 @@ const HEIGHT = 270;
 const BASE_FOV = 70;
 /** Eye height above the sand, metres: a standing player. */
 const EYE_ABOVE = 1.6;
+/** A chase camera's eye height over the road, metres. */
+const CHASE_EYE_ABOVE = 3;
 const PROBE_NEAR = 0.1;
 const PROBE_FAR = 4000;
 
@@ -56,23 +74,61 @@ export interface ElevationBin {
 export interface HazeProbeResult {
   readonly byElevation: readonly ElevationBin[];
   readonly byScreenRow: readonly ElevationBin[];
+  readonly failures: number;
+}
+
+/**
+ * Positive camera-forward depth of the surface a pixel shows, metres. Receives the
+ * pixel's view-space and world-space unit rays.
+ */
+type DepthScene = (x: number, y: number, view: THREE.Vector3, world: THREE.Vector3) => number;
+
+interface RenderConfig {
+  pitchDeg: number;
+  rollDeg: number;
+  yawDeg: number;
+  fovDeg: number;
+  time: number;
+  /** Scene depth; the far plane everywhere by default (open sky in every direction). */
+  depth?: DepthScene;
+  /** Shimmer strength; one by default, zero models night/Acceptable. */
+  strength?: number;
+  /** Mirage strength; zero by default so the shimmer is measured alone. */
+  mirage?: number;
+  eyeAbove?: number;
 }
 
 interface Probe {
-  render(config: {
-    pitchDeg: number;
-    rollDeg: number;
-    yawDeg: number;
-    fovDeg: number;
-    time: number;
-    /** Positive camera-forward depth for a synthetic scene surface; far plane by default. */
-    viewDepthM?: number;
-    /** Direct shader strength; one by default, zero models night/Acceptable. */
-    strength?: number;
-  }): Float32Array;
+  render(config: RenderConfig): Float32Array;
   /** Wall-clock cost of the fullscreen pass at 1080p, with and without the field. */
   cost(): { warpOnMs: number; warpOffMs: number };
   dispose(): void;
+}
+
+/** A ground plane `eyeAbove` metres below the eye, open sky above the horizon. */
+function groundPlane(eyeAbove: number): DepthScene {
+  return (_x, _y, view, world) =>
+    world.y < -1e-5 ? Math.min(PROBE_FAR, eyeAbove / -world.y) * -view.z : PROBE_FAR;
+}
+
+/** One opaque plane perpendicular to the view axis. */
+function planeAt(viewDepthM: number): DepthScene {
+  return () => viewDepthM;
+}
+
+/**
+ * A near object — a car ten metres out — covering the middle of the frame from the
+ * bottom edge to `topDeg` above the horizon, in front of open far desert.
+ */
+const BOX_X0 = 0.42;
+const BOX_X1 = 0.58;
+function nearBox(topDeg: number): DepthScene {
+  return (x, _y, view, world) => {
+    const u = (x + 0.5) / WIDTH;
+    const inside =
+      u >= BOX_X0 && u <= BOX_X1 && Math.asin(world.y) <= THREE.MathUtils.degToRad(topDeg);
+    return inside ? 10 : PROBE_FAR * 0.999 * -view.z;
+  };
 }
 
 /**
@@ -97,7 +153,7 @@ function makeProbe(): Probe {
       data[i] = (x + 0.5) / WIDTH;
       data[i + 1] = (y + 0.5) / HEIGHT;
       // A reference channel keeps the coordinate measurement independent of any
-      // later colour-only view treatment (such as shades or binocular masks).
+      // colour scaling the pass might still apply.
       data[i + 2] = 1;
     }
   }
@@ -106,9 +162,8 @@ function makeProbe(): Probe {
   source.magFilter = THREE.LinearFilter;
   source.needsUpdate = true;
 
-  // Synthetic scene depth. Most measurements expose the far plane; one regression
-  // check places opaque geometry ten metres from the eye to prove that the real depth
-  // gate, rather than a screen-ray guess, keeps it rigid.
+  // Synthetic scene depth, rebuilt for every render from the scene function and the
+  // camera attitude, so a ground plane stays a ground plane when the camera rolls.
   const depthData = new Float32Array(WIDTH * HEIGHT * 4);
   depthData.fill(1);
   const depthSource = new THREE.DataTexture(
@@ -121,7 +176,6 @@ function makeProbe(): Probe {
   depthSource.minFilter = THREE.NearestFilter;
   depthSource.magFilter = THREE.NearestFilter;
   depthSource.needsUpdate = true;
-  let currentViewDepth = PROBE_FAR;
 
   const target = new THREE.WebGLRenderTarget(WIDTH, HEIGHT, {
     type: THREE.FloatType,
@@ -131,7 +185,7 @@ function makeProbe(): Probe {
 
   const material = new THREE.ShaderMaterial({
     vertexShader: HAZE_VERTEX,
-    fragmentShader: HAZE_FRAGMENT,
+    fragmentShader: `#define HAZE_MEASURE_SOURCE\n${HAZE_FRAGMENT}`,
     toneMapped: false,
     depthTest: false,
     depthWrite: false,
@@ -141,16 +195,17 @@ function makeProbe(): Probe {
       uResolution: { value: new THREE.Vector2(WIDTH, HEIGHT) },
       uTime: { value: 0 },
       uStrength: { value: 1 },
+      uMirage: { value: 0 },
+      uHazePhase: { value: new THREE.Vector2() },
       ...createHeatMirageUniforms(),
       uDaylight: { value: 1 },
       uEyeAbove: { value: EYE_ABOVE },
+      uGroundSlope: { value: 0 },
       uHorizon: { value: 0.5 },
       uCameraRotation: { value: new THREE.Matrix3() },
       uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) },
       uCameraNear: { value: PROBE_NEAR },
       uCameraFar: { value: PROBE_FAR },
-      // The ink and lens passes multiply colour. Here colour IS the measurement, so
-      // both are switched off; they are unrelated to what this tool checks.
       uInkStrength: { value: 0 },
       uInkThreshold: { value: 1 },
       uViewTint: { value: new THREE.Color(1, 1, 1) },
@@ -172,7 +227,35 @@ function makeProbe(): Probe {
 
   const euler = new THREE.Euler();
   const matrix = new THREE.Matrix4();
+  const rotation = new THREE.Matrix3();
   const pixels = new Float32Array(WIDTH * HEIGHT * 4);
+  const view = new THREE.Vector3();
+  const world = new THREE.Vector3();
+
+  const setPhase = (time: number): void => {
+    (material.uniforms.uHazePhase.value as THREE.Vector2).set(
+      advanceHazePhase(0, time, DEFAULT_HEAT_MIRAGE.broadRiseHz),
+      advanceHazePhase(0, time, DEFAULT_HEAT_MIRAGE.fineRiseHz),
+    );
+  };
+
+  const fillDepth = (depth: DepthScene, fovDeg: number): void => {
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
+    const aspect = WIDTH / HEIGHT;
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const ndcX = ((x + 0.5) / WIDTH) * 2 - 1;
+        const ndcY = ((y + 0.5) / HEIGHT) * 2 - 1;
+        view.set(ndcX * aspect * tanHalf, ndcY * tanHalf, -1).normalize();
+        world.copy(view).applyMatrix3(rotation);
+        const viewDepth = Math.min(PROBE_FAR, Math.max(PROBE_NEAR, depth(x, y, view, world)));
+        const viewZ = -viewDepth;
+        depthData[(y * WIDTH + x) * 4] =
+          ((PROBE_NEAR + viewZ) * PROBE_FAR) / ((PROBE_FAR - PROBE_NEAR) * viewZ);
+      }
+    }
+    depthSource.needsUpdate = true;
+  };
 
   return {
     render({
@@ -181,8 +264,10 @@ function makeProbe(): Probe {
       yawDeg,
       fovDeg,
       time,
-      viewDepthM = PROBE_FAR,
+      depth = planeAt(PROBE_FAR),
       strength = 1,
+      mirage = 0,
+      eyeAbove = EYE_ABOVE,
     }) {
       euler.set(
         THREE.MathUtils.degToRad(pitchDeg),
@@ -191,20 +276,14 @@ function makeProbe(): Probe {
         'YXZ',
       );
       matrix.makeRotationFromEuler(euler);
-      (material.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(matrix);
+      rotation.setFromMatrix4(matrix);
+      (material.uniforms.uCameraRotation.value as THREE.Matrix3).copy(rotation);
       material.uniforms.uTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
-      material.uniforms.uTime.value = time;
+      setPhase(time);
       material.uniforms.uStrength.value = strength;
-      const clampedViewDepth = Math.min(PROBE_FAR, Math.max(PROBE_NEAR, viewDepthM));
-      if (clampedViewDepth !== currentViewDepth) {
-        currentViewDepth = clampedViewDepth;
-        const viewZ = -clampedViewDepth;
-        const depth =
-          ((PROBE_NEAR + viewZ) * PROBE_FAR) /
-          ((PROBE_FAR - PROBE_NEAR) * viewZ);
-        for (let i = 0; i < depthData.length; i += 4) depthData[i] = depth;
-        depthSource.needsUpdate = true;
-      }
+      material.uniforms.uMirage.value = mirage;
+      material.uniforms.uEyeAbove.value = eyeAbove;
+      fillDepth(depth, fovDeg);
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
       renderer.readRenderTargetPixels(target, 0, 0, WIDTH, HEIGHT, pixels);
@@ -215,8 +294,24 @@ function makeProbe(): Probe {
       return pixels.slice();
     },
     cost() {
+      // The SHIPPED pass, colour finish and all, not the measuring build: the cost that
+      // matters is the one the game pays. Same uniforms, so the same depth and phase.
+      const shipped = new THREE.ShaderMaterial({
+        vertexShader: HAZE_VERTEX,
+        fragmentShader: HAZE_FRAGMENT,
+        toneMapped: false,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: material.uniforms,
+      });
+      const shippedScene = new THREE.Scene();
+      shippedScene.add(new THREE.Mesh(geometry, shipped));
       // A one-pixel read after each batch, purely to make the GPU finish the work
       // before the clock is read: without it the timings are queue-submission times.
+      // Measured on whatever depth the last render left: the probe's last render is
+      // the open far plane, which is the worst case — every pixel near the horizon
+      // is a candidate for the field. Best of three batches, because a laptop GPU
+      // changes clock between them.
       const big = new THREE.WebGLRenderTarget(1920, 1080, {
         type: THREE.UnsignedByteType,
         depthBuffer: false,
@@ -227,21 +322,25 @@ function makeProbe(): Probe {
         material.uniforms.uStrength.value = strength;
         material.uniforms.uResolution.value.set(1920, 1080);
         renderer.setRenderTarget(big);
-        for (let i = 0; i < 20; i++) renderer.render(scene, camera);
+        for (let i = 0; i < 20; i++) renderer.render(shippedScene, camera);
         renderer.readRenderTargetPixels(big, 0, 0, 1, 1, drain);
-        const started = performance.now();
-        for (let i = 0; i < 60; i++) {
-          material.uniforms.uTime.value = i * 0.01;
-          renderer.render(scene, camera);
+        let best = Infinity;
+        for (let batch = 0; batch < 3; batch++) {
+          const started = performance.now();
+          for (let i = 0; i < 60; i++) {
+            setPhase(i * 0.01);
+            renderer.render(shippedScene, camera);
+          }
+          renderer.readRenderTargetPixels(big, 0, 0, 1, 1, drain);
+          best = Math.min(best, (performance.now() - started) / 60);
         }
-        renderer.readRenderTargetPixels(big, 0, 0, 1, 1, drain);
-        const elapsed = (performance.now() - started) / 60;
         renderer.setRenderTarget(null);
-        return elapsed;
+        return best;
       };
       const warpOnMs = time(1);
       const warpOffMs = time(0);
       big.dispose();
+      shipped.dispose();
       material.uniforms.uStrength.value = 1;
       material.uniforms.uResolution.value.set(WIDTH, HEIGHT);
       return { warpOnMs, warpOffMs };
@@ -345,11 +444,55 @@ function meanWhere(
   return kept.reduce((sum, bin) => sum + bin.milliradians, 0) / kept.length;
 }
 
+/**
+ * How far the band reaches on each side of the horizon: the outermost bins, above
+ * and below, still carrying half the peak.
+ */
+function halfExtent(bins: readonly ElevationBin[]): { upDeg: number; downDeg: number } {
+  const half = peakOf(bins).milliradians * 0.5;
+  let upDeg = 0;
+  let downDeg = 0;
+  for (const bin of bins) {
+    if (bin.milliradians < half) continue;
+    upDeg = Math.max(upDeg, bin.elevationDeg);
+    downDeg = Math.max(downDeg, -bin.elevationDeg);
+  }
+  return { upDeg, downDeg };
+}
+
+/**
+ * Share of the displacement within six degrees of the horizon that lies above it,
+ * the horizon bin split evenly. Bins are 0.5 degrees wide there, so a plain sum is
+ * an integral.
+ */
+function skyShare(bins: readonly ElevationBin[]): number {
+  let sky = 0;
+  let total = 0;
+  for (const bin of bins) {
+    if (Math.abs(bin.elevationDeg) > 6) continue;
+    total += bin.milliradians;
+    if (bin.elevationDeg > 0) sky += bin.milliradians;
+    else if (bin.elevationDeg === 0) sky += bin.milliradians * 0.5;
+  }
+  return total > 0 ? sky / total : 0;
+}
+
+function printProfile(title: string, bins: readonly ElevationBin[]): void {
+  console.log(title);
+  for (const bin of bins) {
+    if (Math.abs(bin.elevationDeg) > 6) continue;
+    const bar = '#'.repeat(Math.round(bin.milliradians * 40));
+    console.log(
+      `  ${String(bin.elevationDeg).padStart(4)} deg  ${bin.milliradians.toFixed(3)} mrad  ${bar}`,
+    );
+  }
+}
+
 let failures = 0;
 
 function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(52)} ${detail}`);
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(54)} ${detail}`);
 }
 
 export async function runHazeProbe(): Promise<HazeProbeResult> {
@@ -359,13 +502,7 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
     // --- 1. Where the shimmer is, against the ray's own elevation --------------
     const level = probe.render({ pitchDeg: 0, rollDeg: 0, yawDeg: 0, fovDeg: BASE_FOV, time: 3 });
     const byElevation = binned(level, BASE_FOV, rotationOf(0, 0), false);
-    console.log('heat haze, level camera: displacement against ray elevation');
-    for (const bin of byElevation) {
-      const bar = '#'.repeat(Math.round(bin.milliradians * 6));
-      console.log(
-        `  ${String(bin.elevationDeg).padStart(4)} deg  ${bin.milliradians.toFixed(3)} mrad  ${bar}`,
-      );
-    }
+    printProfile('heat haze, level camera, open far plane: displacement against ray elevation', byElevation);
 
     const peak = peakOf(byElevation);
     const highSky = meanWhere(byElevation, (b) => b.elevationDeg >= 12);
@@ -464,6 +601,15 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
       compare(byElevation, laterByElevation) < 0.25,
       `profile change ${(compare(byElevation, laterByElevation) * 100).toFixed(1)}%`,
     );
+    // The phase is wrapped on the CPU so the shader never sees a large number. The
+    // wrap must be invisible: one full lattice period later is the same field.
+    const period = 256 / Math.min(DEFAULT_HEAT_MIRAGE.broadRiseHz, DEFAULT_HEAT_MIRAGE.fineRiseHz);
+    const wrapped = probe.render({ pitchDeg: 0, rollDeg: 0, yawDeg: 0, fovDeg: BASE_FOV, time: 3 + period * 3 });
+    check(
+      'the phase wrap is seamless',
+      fieldChange(level, wrapped) < 0.02,
+      `field change ${(fieldChange(level, wrapped) * 100).toFixed(2)}% after ${(period * 3).toFixed(0)} s`,
+    );
 
     // --- 6. Real scene depth keeps nearby geometry rigid -----------------------
     const nearSurface = probe.render({
@@ -472,7 +618,7 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
       yawDeg: 0,
       fovDeg: BASE_FOV,
       time: 3,
-      viewDepthM: 10,
+      depth: planeAt(10),
     });
     const nearHorizon = meanWhere(
       binned(nearSurface, BASE_FOV, rotationOf(0, 0), false),
@@ -484,16 +630,204 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
       `${nearHorizon.toFixed(4)} mrad at 10 m against ${horizon.toFixed(3)} at the far plane`,
     );
 
+    // The path is cut at the surface. Level rays to a wall 150 m out cross 150 m of
+    // hot air; the same rays to the far desert cross kilometres.
+    const horizonOnly = (b: ElevationBin): boolean => Math.abs(b.elevationDeg) <= 0.5;
+    const farLevel = meanWhere(byElevation, horizonOnly);
+    const at150 = meanWhere(
+      binned(
+        probe.render({ pitchDeg: 0, rollDeg: 0, yawDeg: 0, fovDeg: BASE_FOV, time: 3, depth: planeAt(150) }),
+        BASE_FOV,
+        rotationOf(0, 0),
+        false,
+      ),
+      horizonOnly,
+    );
+    const at600 = meanWhere(
+      binned(
+        probe.render({ pitchDeg: 0, rollDeg: 0, yawDeg: 0, fovDeg: BASE_FOV, time: 3, depth: planeAt(600) }),
+        BASE_FOV,
+        rotationOf(0, 0),
+        false,
+      ),
+      horizonOnly,
+    );
+    check(
+      'a surface 150 m out boils less than the far desert',
+      at150 < farLevel * 0.5 && at150 < at600 && at600 <= farLevel * 1.05,
+      `${at150.toFixed(3)} mrad at 150 m, ${at600.toFixed(3)} at 600 m, ${farLevel.toFixed(3)} at the far plane`,
+    );
+
+    // --- 7. Silhouettes: a far pixel never takes a near object's colour --------
+    //
+    // A car ten metres out, standing a degree above the horizon, in front of the far
+    // desert. Every pixel outside it is far and on the boiling band; a displaced
+    // sample that lands inside the car's rectangle is exactly the fringe.
+    const boxTopDeg = 1;
+    const box = probe.render({
+      pitchDeg: 0,
+      rollDeg: 0,
+      yawDeg: 0,
+      fovDeg: BASE_FOV,
+      time: 3,
+      depth: nearBox(boxTopDeg),
+    });
+    const levelRotation = rotationOf(0, 0);
+    let leaks = 0;
+    let edgeShimmer = 0;
+    let edgeCount = 0;
+    const halfTexelU = 0.5 / WIDTH;
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const u = (x + 0.5) / WIDTH;
+        const elevation = rayElevationDeg(x, y, BASE_FOV, levelRotation);
+        const insideBox = u >= BOX_X0 && u <= BOX_X1 && elevation <= boxTopDeg;
+        if (insideBox) continue;
+        const i = (y * WIDTH + x) * 4;
+        const gain = box[i + 2] || 1;
+        const su = box[i] / gain;
+        const sv = box[i + 1] / gain;
+        const sx = Math.floor(su * WIDTH);
+        const sy = Math.floor(sv * HEIGHT);
+        const sourceElevation = rayElevationDeg(sx, sy, BASE_FOV, levelRotation);
+        const sourceInBox =
+          su >= BOX_X0 + halfTexelU &&
+          su <= BOX_X1 - halfTexelU &&
+          sourceElevation <= boxTopDeg - 0.2;
+        if (sourceInBox) leaks++;
+        // Within ten pixels of the car's side, on the horizon band.
+        const nearSide = Math.min(Math.abs(u - BOX_X0), Math.abs(u - BOX_X1)) * WIDTH < 10;
+        if (nearSide && Math.abs(elevation) <= 0.5) {
+          edgeShimmer += displacementMrad(box, i, x, y, BASE_FOV);
+          edgeCount++;
+        }
+      }
+    }
+    const edgeMean = edgeCount > 0 ? edgeShimmer / edgeCount : 0;
+    check(
+      'no far pixel takes its colour from a near car',
+      leaks === 0,
+      `${leaks} leaking pixels`,
+    );
+    check(
+      'the far desert beside the car still boils',
+      edgeMean > farLevel * 0.5,
+      `${edgeMean.toFixed(3)} mrad within 10 px of the car against ${farLevel.toFixed(3)} in the open`,
+    );
+
+    // --- 8. Over a real ground plane: the band belongs to the ground ----------
+    const standing = binned(
+      probe.render({
+        pitchDeg: 0,
+        rollDeg: 0,
+        yawDeg: 0,
+        fovDeg: BASE_FOV,
+        time: 3,
+        depth: groundPlane(EYE_ABOVE),
+      }),
+      BASE_FOV,
+      levelRotation,
+      false,
+    );
+    const chase = binned(
+      probe.render({
+        pitchDeg: 0,
+        rollDeg: 0,
+        yawDeg: 0,
+        fovDeg: BASE_FOV,
+        time: 3,
+        depth: groundPlane(CHASE_EYE_ABOVE),
+        eyeAbove: CHASE_EYE_ABOVE,
+      }),
+      BASE_FOV,
+      levelRotation,
+      false,
+    );
+    printProfile(`\nground plane, eye ${EYE_ABOVE} m`, standing);
+    printProfile(`\nground plane, eye ${CHASE_EYE_ABOVE} m`, chase);
+    const standingExtent = halfExtent(standing);
+    const chaseExtent = halfExtent(chase);
+    const standingSky = skyShare(standing);
+    const chaseSky = skyShare(chase);
+    check(
+      'standing: the band reaches under 1.5 deg into the sky',
+      standingExtent.upDeg <= 1.5,
+      `half-strength up to +${standingExtent.upDeg} deg, down to -${standingExtent.downDeg} deg`,
+    );
+    check(
+      'standing: open sky above 3 deg is still',
+      meanWhere(standing, (b) => b.elevationDeg >= 3) < peakOf(standing).milliradians * 0.1,
+      `${meanWhere(standing, (b) => b.elevationDeg >= 3).toFixed(3)} mrad above 3 deg against a ${peakOf(standing).milliradians.toFixed(3)} peak`,
+    );
+    // The eye stands INSIDE the hot layer, so from head height the air above it is
+    // genuinely about as much as the air below; what must not happen is the old
+    // five-degrees-up, under-one-down. From a car's chase camera, higher in the layer,
+    // the ground must win outright.
+    check(
+      'standing: the sky holds at most two thirds of the band',
+      standingSky <= 2 / 3,
+      `${(standingSky * 100).toFixed(0)}% of the displacement within 6 deg lies above the horizon`,
+    );
+    check(
+      'chase camera: the ground carries more than the sky',
+      chaseSky < 0.5 && chaseExtent.upDeg <= chaseExtent.downDeg,
+      `${(chaseSky * 100).toFixed(0)}% above the horizon; half-strength +${chaseExtent.upDeg}/-${chaseExtent.downDeg} deg`,
+    );
+
+    // --- 9. The inferior mirage mirrors the sky, and only in its band ---------
+    const critical = DEFAULT_HEAT_MIRAGE.mirageCriticalMrad / 1000;
+    const mirrored = probe.render({
+      pitchDeg: 0,
+      rollDeg: 0,
+      yawDeg: 0,
+      fovDeg: BASE_FOV,
+      time: 3,
+      depth: groundPlane(EYE_ABOVE),
+      strength: 0,
+      mirage: 1,
+    });
+    let inBand = 0;
+    let pulledUp = 0;
+    let outside = 0;
+    let strayed = 0;
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x += 3) {
+        const i = (y * WIDTH + x) * 4;
+        const gain = mirrored[i + 2] || 1;
+        const dv = mirrored[i + 1] / gain - (y + 0.5) / HEIGHT;
+        const graze = -THREE.MathUtils.degToRad(rayElevationDeg(x, y, BASE_FOV, levelRotation));
+        if (graze > critical * 0.15 && graze < critical * 0.5) {
+          inBand++;
+          if (dv > 0) pulledUp++;
+        } else if (graze > critical * 1.02 || graze < 0) {
+          outside++;
+          if (displacementMrad(mirrored, i, x, y, BASE_FOV) > 1e-3) strayed++;
+        }
+      }
+    }
+    check(
+      'mirage band takes colour from above the horizon',
+      inBand > 0 && pulledUp / inBand > 0.95,
+      `${pulledUp} of ${inBand} band pixels pulled upward`,
+    );
+    check(
+      'no mirage outside the critical band',
+      strayed === 0,
+      `${strayed} of ${outside} pixels outside the band moved`,
+    );
+
     const disabled = probe.render({
       pitchDeg: 0,
       rollDeg: 0,
       yawDeg: 0,
       fovDeg: BASE_FOV,
       time: 3,
+      depth: groundPlane(EYE_ABOVE),
       strength: 0,
+      mirage: 0,
     });
     const disabledHorizon = meanWhere(
-      binned(disabled, BASE_FOV, rotationOf(0, 0), false),
+      binned(disabled, BASE_FOV, levelRotation, false),
       (b) => Math.abs(b.elevationDeg) <= 3,
     );
     check(
@@ -502,11 +836,12 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
       `${disabledHorizon.toFixed(4)} mrad`,
     );
 
-    // --- 7. What the field costs ----------------------------------------------
+    // --- 10. What the field costs ---------------------------------------------
     //
     // The whole effect is one fullscreen pass, so its cost is one number: how much
     // longer the pass takes with the field switched on. Measured at 1080p, which is
-    // what the graphics tiers that run it are drawing at.
+    // what the graphics tiers that run it are drawing at, over the open far plane.
+    probe.render({ pitchDeg: 0, rollDeg: 0, yawDeg: 0, fovDeg: BASE_FOV, time: 3 });
     const cost = probe.cost();
     console.log(
       `\nfullscreen pass at 1920x1080: ${cost.warpOffMs.toFixed(3)} ms without the field, ` +
@@ -514,7 +849,7 @@ export async function runHazeProbe(): Promise<HazeProbeResult> {
     );
 
     console.log(failures === 0 ? '\nall checks passed' : `\n${failures} FAILED`);
-    return { byElevation, byScreenRow: tiltedRows };
+    return { byElevation, byScreenRow: tiltedRows, failures };
   } finally {
     probe.dispose();
   }

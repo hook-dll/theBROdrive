@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 import { hash01 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
+import { freezeStaticSubtree } from './chunks';
 import type { WorldOrigin } from './origin';
 import {
   desertPropForms,
@@ -351,6 +352,8 @@ export class DesertTileStreamer {
     for (const tile of this.tiles.values()) {
       tile.group.position.x = tile.centreX - this.origin.x;
       tile.group.position.z = tile.centreZ - this.origin.z;
+      // Frozen at attach (see `freezeStaticSubtree`): the root recomposes, the rest follows.
+      tile.group.updateMatrix();
     }
   }
 
@@ -470,6 +473,7 @@ export class DesertTileStreamer {
       data.propSurfaces,
       group,
     );
+    freezeStaticSubtree(group);
     this.scene.add(group);
 
     const tile: DesertTile = {
@@ -580,6 +584,15 @@ export class DesertTileStreamer {
         prop.instance = i;
       }
       instances.instanceMatrix.needsUpdate = true;
+      // Culling bounds over the instances at FULL size, computed now, before the first
+      // fade write. Left to three, the sphere was computed lazily at the first cull —
+      // after `syncPropFades` had already shrunk a freshly streamed tile's props towards
+      // zero — and then never again, so a tile that grew to full size kept bounds a
+      // fraction of its props (measured: 52 of 61 live meshes, a lone cactus at radius
+      // 0), and a prop vanished as soon as its origin left the view. Fades and breaks
+      // only ever shrink an instance, so the full-size sphere stays conservative for
+      // the tile's whole life, and a rebase moves the tile group it is local to.
+      instances.computeBoundingSphere();
       group.add(instances);
       meshes.push(instances);
     }

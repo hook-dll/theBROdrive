@@ -1,11 +1,16 @@
 /**
- * Deterministic car-body-condition harness.
+ * Deterministic car-body-condition harness: dirt, scratches and dents, from the
+ * simulation through authoritative state and the save to the deformed shell.
  *
- * This builds private Rapier worlds and advances real Vehicles at FIXED_DT. It
- * defends against cosmetic wear being tied to the wrong surface, persisted too
- * late, or shared by cars that happen to use the same rendered model. Headless
- * Three has no material inspection, so the sharing case intentionally asserts
- * the Vehicle getters and authoritative CarState rather than render materials.
+ * Builds private Rapier worlds and advances real Vehicles at FIXED_DT on the real
+ * catalogue models. It defends against wear tied to the wrong surface or at the
+ * wrong rate, one crash recorded as a stack of dents, dents lost or invented by a
+ * save round trip, a dented panel folding through itself or into a wheel, and the
+ * same save replaying to a different shell. Headless Three compiles no shaders, so
+ * paint uniforms are left to the car lab (`?car-lab`); the dent geometry is plain
+ * CPU work and is measured here directly.
+ *
+ *   ~/.bun/bin/bun tools/car-dirt.ts
  */
 
 import * as THREE from 'three';
@@ -13,75 +18,32 @@ import { installAssetShim } from './assetshim';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { SurfaceType } from '../src/core/surfaces';
+import { createServiceableCarState } from '../src/game/spawn';
 import {
   GameWorld,
-  MAX_BODY_DAMAGE_IMPACTS,
+  MAX_BODY_DENT_DEPTH_M,
+  MAX_BODY_DENTS,
   newWorldState,
+  type BodyDent,
   type CarState,
 } from '../src/game/state';
 import { encodeSaveCode, decodeSaveCode, migrateState } from '../src/save/save';
-import { preloadCarModels } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { carModel } from '../src/vehicle/carmodels';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { Vehicle } from '../src/vehicle/vehicle';
+import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
+import { impactDent, Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 
-class BunProgressEvent extends Event implements ProgressEvent {
-  readonly lengthComputable: boolean;
-  readonly loaded: number;
-  readonly total: number;
-
-  constructor(type: string, init: ProgressEventInit = {}) {
-    super(type, init);
-    this.lengthComputable = init.lengthComputable ?? false;
-    this.loaded = init.loaded ?? 0;
-    this.total = init.total ?? 0;
-  }
-}
-
-// The catalogue is all imported models now, so this harness loads real FBX bodies
-// off disk rather than building one in code.
 installAssetShim();
 
 const MODEL_ID = 'gt_vaz2110';
+/** One car from each source pack for the geometry checks. */
+const PACK_MODELS = ['sv_vaz2101', 'sa_oka', 'gt_vaz2110'] as const;
 const SETTLE_STEPS = 180;
 const DIRT_RUN_STEPS = 1_200;
 let failures = 0;
 
 function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(54)} ${detail}`);
-}
-
-function conditionState(id: string, x = 0, z = 0, y = 1.2): CarState {
-  const def = carModel(MODEL_ID);
-  return {
-    id,
-    modelId: MODEL_ID,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: 'petrol',
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array(def.storageCells).fill(null),
-    bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x,
-    y,
-    z,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
-  };
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(58)} ${detail}`);
 }
 
 interface Rig {
@@ -103,11 +65,16 @@ function addGround(physics: PhysicsWorld, surface: SurfaceType): void {
   );
 }
 
-async function makeRig(id: string, surface: SurfaceType, x = 0, z = 0, y = 1.2): Promise<Rig> {
+async function makeRig(
+  id: string,
+  surface: SurfaceType,
+  modelId: string = MODEL_ID,
+  y = 1.2,
+): Promise<Rig> {
   const physics = await PhysicsWorld.create();
   addGround(physics, surface);
   const world = new GameWorld(newWorldState(41));
-  const state = conditionState(id, x, z, y);
+  const state = createServiceableCarState(id, modelId, 0, y, 0, 0);
   world.state.cars[id] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const rig = { physics, world, vehicle, state, input: emptyInput() };
@@ -129,17 +96,13 @@ function roadDistance(rig: Rig, before: { x: number; z: number }): number {
   return Math.hypot(after.x - before.x, after.z - before.z);
 }
 
-async function dirtRun(surface: SurfaceType, id: string): Promise<{ rig: Rig; roadMetres: number; tyreMetres: number }> {
+async function dirtRun(surface: SurfaceType, id: string): Promise<{ rig: Rig; roadMetres: number }> {
   const rig = await makeRig(id, surface);
   const before = rig.vehicle.chassis.translation();
   step(rig, DIRT_RUN_STEPS, (_, input) => {
     input.throttle = 1;
-    input.brake = 0;
-    input.steer = 0;
-    input.handbrake = false;
   });
-  const roadMetres = roadDistance(rig, before);
-  return { rig, roadMetres, tyreMetres: roadMetres * 4 };
+  return { rig, roadMetres: roadDistance(rig, before) };
 }
 
 function addObstacle(physics: PhysicsWorld, z: number): void {
@@ -151,73 +114,104 @@ function addObstacle(physics: PhysicsWorld, z: number): void {
 }
 
 /**
- * Drives into a fixed wall UNDER POWER rather than injecting velocity.
+ * Drives into a fixed wall UNDER POWER rather than injecting velocity, then lifts
+ * and brakes at the first blow so the result is exactly one collision.
  *
  * `setLinvel` is itself an unexplained velocity change, and the detector is right to
- * report it: an external shove is exactly what it is built to notice. Accelerating
- * into the obstacle is both the honest scenario and the only one whose strongest
- * impact is the collision.
+ * report it: an external shove is exactly what it is built to notice.
  */
-async function crash(speedMps: number): Promise<{
-  rig: Rig;
-  scratches: number;
-  impacts: Array<{ severity: number; localZ: number }>;
-}> {
+async function crash(speedMps: number): Promise<{ rig: Rig; strongest: number; strongestLocalZ: number }> {
   const rig = await makeRig(`crash:${speedMps}`, SurfaceType.Asphalt);
   const start = rig.vehicle.chassis.translation();
-  // Room to reach the target speed, then the wall. 20 m/s needs a few seconds.
   addObstacle(rig.physics, start.z + 240);
-  const impacts: Array<{ severity: number; localZ: number }> = [];
+  let strongest = 0;
+  let strongestLocalZ = 0;
+  let hit = false;
   step(rig, 1_800, (_, input) => {
-    // Held, not latched: coasting 200 m from 20 m/s bleeds most of the speed to drag
-    // and rolling resistance, and the wall then gets a nudge instead of a crash.
     const speed = rig.vehicle.speedKmh / 3.6;
-    input.throttle = speed < speedMps ? 1 : 0;
-    input.brake = 0;
-    input.steer = 0;
-    input.handbrake = false;
+    input.throttle = !hit && speed < speedMps ? 1 : 0;
+    input.brake = hit ? 1 : 0;
     const impact = rig.vehicle.lastImpact;
-    if (impact) impacts.push({ severity: impact.severityMps, localZ: impact.localZ });
+    if (!impact) return;
+    hit = true;
+    if (impact.severityMps > strongest) {
+      strongest = impact.severityMps;
+      strongestLocalZ = impact.localZ;
+    }
   });
-  return { rig, scratches: rig.vehicle.bodyScratches, impacts };
+  rig.vehicle.pushState();
+  return { rig, strongest, strongestLocalZ };
 }
 
-async function freeFall(): Promise<{ scratches: number; damage: number }> {
-  const rig = await makeRig('free-fall', SurfaceType.Asphalt, 0, 0, 8);
-  step(rig, 300, (_, input) => {
-    input.throttle = 0;
-    input.brake = 0;
-    input.steer = 0;
+/** Renders nothing, but runs the visual sync that applies dents to the shell. */
+function syncShell(rig: Rig): void {
+  rig.vehicle.syncVisuals(1);
+}
+
+/** Every body vertex position of a car, in order, for replay comparison. */
+function shellPositions(vehicle: Vehicle): number[] {
+  const out: number[] = [];
+  vehicle.root.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const position = node.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i++) out.push(position.getX(i), position.getY(i), position.getZ(i));
   });
-  return { scratches: rig.vehicle.bodyScratches, damage: rig.vehicle.bodyDamage.length };
+  return out;
+}
+
+/** A spread of the hardest dents a car can take, all round the body. */
+function worstCaseDents(modelId: string): BodyDent[] {
+  const measure = carModelMeasure(modelId);
+  const half = measure.halfExtents;
+  const floor = Math.max(-half[1], measure.wheels[0]!.pos[1]);
+  const dents: BodyDent[] = [];
+  for (let i = 0; i < MAX_BODY_DENTS; i++) {
+    const angle = (i / MAX_BODY_DENTS) * Math.PI * 2 + 0.2;
+    const fromX = Math.sin(angle);
+    const fromZ = Math.cos(angle);
+    const reach = Math.min(half[0] / Math.max(1e-6, Math.abs(fromX)), half[2] / Math.max(1e-6, Math.abs(fromZ)));
+    const y = floor + (i % 3) * 0.3 * (half[1] - floor);
+    const dent = impactDent(40, fromX * reach, y, fromZ * reach, -fromX, -fromZ);
+    if (dent) dents.push(dent);
+  }
+  return dents;
 }
 
 async function run(): Promise<void> {
-  await preloadCarModels([MODEL_ID]);
+  await preloadCarModels([MODEL_ID, ...PACK_MODELS]);
 
+  // --- Dirt ---------------------------------------------------------------
   const sand = await dirtRun(SurfaceType.Sand, 'sand');
+  const gravel = await dirtRun(SurfaceType.Gravel, 'gravel');
   const asphalt = await dirtRun(SurfaceType.Asphalt, 'asphalt');
-  const sandPerKm = sand.rig.vehicle.bodyDirt / sand.roadMetres * 1_000;
-  const asphaltPerKm = asphalt.rig.vehicle.bodyDirt / asphalt.roadMetres * 1_000;
-  const metresToFull = sand.roadMetres / sand.rig.vehicle.bodyDirt;
+  const kmToFull = (run: { rig: Rig; roadMetres: number }): number =>
+    run.roadMetres / run.rig.vehicle.bodyDirt / 1_000;
   check(
-    'surface-driven accumulation',
-    sand.rig.vehicle.bodyDirt > 0.0001 && asphalt.rig.vehicle.bodyDirt < sand.rig.vehicle.bodyDirt * 0.01,
-    `sand=${sand.rig.vehicle.bodyDirt.toFixed(6)}, asphalt=${asphalt.rig.vehicle.bodyDirt.toFixed(6)}, tyre-metres=${sand.tyreMetres.toFixed(1)}`,
+    'sand dirties the body far faster than asphalt',
+    sand.rig.vehicle.bodyDirt > asphalt.rig.vehicle.bodyDirt * 8,
+    `sand=${sand.rig.vehicle.bodyDirt.toFixed(5)}, asphalt=${asphalt.rig.vehicle.bodyDirt.toFixed(5)} over ${sand.roadMetres.toFixed(0)}/${asphalt.roadMetres.toFixed(0)} m`,
   );
-  // Four tyres nominally reach full dirt around 25 km; this 10–100 km band catches
-  // unit-scale regressions without making one short off-road excursion instantly opaque.
   check(
-    'sand rate becomes visible within a drive, not instantly',
-    metresToFull >= 10_000 && metresToFull <= 100_000,
-    `${(metresToFull / 1_000).toFixed(1)} km to full (asserted band 10–100 km)`,
+    'sand: visibly dirty within a few km, not instantly',
+    kmToFull(sand) >= 3 && kmToFull(sand) <= 10,
+    `${kmToFull(sand).toFixed(2)} km to full (band 3-10 km)`,
+  );
+  check(
+    'gravel: between sand and asphalt',
+    kmToFull(gravel) > kmToFull(sand) && kmToFull(gravel) <= 16,
+    `${kmToFull(gravel).toFixed(2)} km to full (band sand..16 km)`,
+  );
+  check(
+    'asphalt: slow road film, not zero',
+    asphalt.rig.vehicle.bodyDirt > 0 && kmToFull(asphalt) >= 60 && kmToFull(asphalt) <= 300,
+    `${kmToFull(asphalt).toFixed(1)} km to full (band 60-300 km)`,
   );
 
   const sharedPhysics = await PhysicsWorld.create();
   addGround(sharedPhysics, SurfaceType.Sand);
   const sharedWorld = new GameWorld(newWorldState(42));
-  const movingState = conditionState('shared:moving', -8, 0);
-  const parkedState = conditionState('shared:parked', 8, 0);
+  const movingState = createServiceableCarState('shared:moving', MODEL_ID, -8, 1.2, 0, 0);
+  const parkedState = createServiceableCarState('shared:parked', MODEL_ID, 8, 1.2, 0, 0);
   sharedWorld.state.cars[movingState.id] = movingState;
   sharedWorld.state.cars[parkedState.id] = parkedState;
   const scene = new THREE.Scene();
@@ -236,112 +230,196 @@ async function run(): Promise<void> {
   moving.pushState();
   parked.pushState();
   check(
-    'same-model cars retain independent live dirt',
-    moving.bodyDirt > parked.bodyDirt + 0.0001,
-    `moving=${moving.bodyDirt.toFixed(6)}, parked=${parked.bodyDirt.toFixed(6)}`,
+    'same-model cars keep independent dirt (live and persisted)',
+    moving.bodyDirt > parked.bodyDirt + 0.001 && movingState.dirt > parkedState.dirt + 0.001,
+    `moving=${movingState.dirt.toFixed(5)}, parked=${parkedState.dirt.toFixed(5)}`,
   );
   check(
-    'same-model cars persist independent dirt',
-    movingState.dirt > parkedState.dirt + 0.0001,
-    `moving=${movingState.dirt.toFixed(6)}, parked=${parkedState.dirt.toFixed(6)}`,
+    'each car owns its paint materials',
+    (moving.bodySurface?.paint.length ?? 0) > 0 &&
+      moving.bodySurface?.paint.every((material) => !parked.bodySurface?.paint.includes(material)) === true,
+    `${moving.bodySurface?.paint.length ?? 0} paint slot(s) per car, none shared`,
   );
 
-  sand.rig.vehicle.pushState();
-  const roundTrip = decodeSaveCode(encodeSaveCode(sand.rig.world.state));
-  const savedSand = roundTrip.cars[sand.rig.state.id]!;
+  // A wash writes state directly; a parked car must adopt it without a fixed step.
+  sand.rig.state.dirt = 0.05;
+  sand.rig.state.scratches = 0.08;
+  syncShell(sand.rig);
   check(
-    'save-code round trip preserves body condition',
-    savedSand.dirt === sand.rig.state.dirt && savedSand.scratches === sand.rig.state.scratches,
-    `dirt=${savedSand.dirt.toFixed(6)}, scratches=${savedSand.scratches.toFixed(6)}`,
-  );
-  const legacyRaw = structuredClone(sand.rig.world.state) as unknown as Record<string, unknown>;
-  const legacyCar = (legacyRaw.cars as Record<string, Record<string, unknown>>)[sand.rig.state.id]!;
-  delete legacyCar.dirt;
-  delete legacyCar.scratches;
-  delete legacyCar.damage;
-  const legacy = migrateState(legacyRaw);
-  check(
-    'old save without body-condition fields defaults clean',
-    legacy.cars[sand.rig.state.id]!.dirt === 0 &&
-      legacy.cars[sand.rig.state.id]!.scratches === 0 &&
-      legacy.cars[sand.rig.state.id]!.damage.length === 0,
-    `dirt=${legacy.cars[sand.rig.state.id]!.dirt}, scratches=${legacy.cars[sand.rig.state.id]!.scratches}, damage=${legacy.cars[sand.rig.state.id]!.damage.length}`,
+    'a wash of a parked car reaches the live condition',
+    sand.rig.vehicle.bodyDirt === 0.05 && sand.rig.vehicle.bodyScratches === 0.08,
+    `dirt=${sand.rig.vehicle.bodyDirt}, scratches=${sand.rig.vehicle.bodyScratches}`,
   );
 
-  const hardCrash = await crash(20);
-  const strongest = hardCrash.impacts.reduce((best, impact) => impact.severity > best.severity ? impact : best, { severity: 0, localZ: 0 });
+  // --- Scratches and dents from a real collision ----------------------------
+  const hard = await crash(20);
+  const hardDents = hard.rig.state.dents;
+  const half = carModelMeasure(MODEL_ID).halfExtents;
   check(
-    'hard frontal obstacle impact reports a scratch-worthy impact',
-    hardCrash.scratches > 0 && strongest.severity > 2.5 && strongest.localZ > 0.25,
-    `scratches=${hardCrash.scratches.toFixed(6)}, severity=${strongest.severity.toFixed(3)}, localZ=${strongest.localZ.toFixed(3)}`,
+    'hard frontal crash scratches and reads as frontal',
+    hard.rig.vehicle.bodyScratches > 0 && hard.strongest > 3 && hard.strongestLocalZ > 0.25,
+    `scratches=${hard.rig.vehicle.bodyScratches.toFixed(3)}, severity=${hard.strongest.toFixed(2)} m/s, localZ=${hard.strongestLocalZ.toFixed(2)}`,
   );
-  const localized = hardCrash.rig.vehicle.bodyDamage;
-  const strongestMark = localized.reduce(
-    (best, impact) => (impact.strength > best.strength ? impact : best),
-    localized[0]!,
+  const dent = hardDents[0];
+  check(
+    'one collision records exactly one dent',
+    hardDents.length === 1,
+    `${hardDents.length} dent record(s)`,
   );
   check(
-    'hard impact creates a localized front-panel record',
-    localized.length > 0 &&
-      strongestMark.z > 0.5 &&
-      strongestMark.radius >= 0.18 &&
-      strongestMark.strength > 0,
-    `count=${localized.length}, point=(${strongestMark.x.toFixed(3)},${strongestMark.y.toFixed(3)},${strongestMark.z.toFixed(3)}), radius=${strongestMark.radius.toFixed(3)}, strength=${strongestMark.strength.toFixed(3)}, type=${strongestMark.type}`,
+    'a square hit dents the middle of the nose, pushed rearward',
+    dent !== undefined &&
+      dent.z > half[2] * 0.8 &&
+      Math.abs(dent.x) < half[0] * 0.3 &&
+      dent.nz < -0.9 &&
+      Math.abs(dent.ny) < 1e-9,
+    dent ? `at (${dent.x.toFixed(2)}, ${dent.y.toFixed(2)}, ${dent.z.toFixed(2)}) of half-length ${half[2].toFixed(2)}, push (${dent.nx.toFixed(2)}, ${dent.nz.toFixed(2)})` : 'none',
   );
-  const crashRoundTrip = decodeSaveCode(encodeSaveCode(hardCrash.rig.world.state));
+  const expected = impactDent(hard.strongest, 0, 0, 0, 0, -1);
   check(
-    'save-code round trip preserves localized impact records',
-    JSON.stringify(crashRoundTrip.cars[hardCrash.rig.state.id]!.damage) ===
-      JSON.stringify(hardCrash.rig.state.damage),
-    `${crashRoundTrip.cars[hardCrash.rig.state.id]!.damage.length} marks`,
+    'dent size is the strongest step, not a sum of steps',
+    dent !== undefined && expected !== null && Math.abs(dent.depth - expected.depth) < 1e-9 && Math.abs(dent.radius - expected.radius) < 1e-9,
+    dent ? `depth=${dent.depth.toFixed(4)} m (expected ${expected?.depth.toFixed(4)}), radius=${dent.radius.toFixed(3)} m` : 'none',
   );
 
-  const boundedState = conditionState('bounded');
-  const boundedWorld = new GameWorld(newWorldState(43));
-  boundedWorld.state.cars[boundedState.id] = boundedState;
-  for (let i = 0; i < MAX_BODY_DAMAGE_IMPACTS + 2; i++) {
-    boundedWorld.apply({
-      t: 'car_body_impact',
-      carId: boundedState.id,
-      impact: {
-        x: i,
-        y: 0,
-        z: 1,
-        nx: 0,
-        ny: 0,
-        nz: 1,
-        radius: 0.2,
-        strength: 0.5,
-        type: 'dent',
-        seed: i / (MAX_BODY_DAMAGE_IMPACTS + 2),
-      },
+  syncShell(hard.rig);
+  const stats = hard.rig.vehicle.bodySurface?.dentStats;
+  check(
+    'the dent deforms the shell',
+    stats !== undefined && stats.movedVertices > 50 && stats.maxDisplacementM > 0.01 && stats.dentedMeshes > 0,
+    stats ? `${stats.movedVertices} vertices in ${stats.dentedMeshes} meshes, max ${(stats.maxDisplacementM * 1000).toFixed(1)} mm` : 'no surface',
+  );
+  check(
+    'the dented panel does not fold or reach a wheel',
+    stats !== undefined && stats.minJacobian > 0.2 && stats.wheelPenetrationM < 0.002,
+    stats ? `min Jacobian ${stats.minJacobian.toFixed(3)}, wheel penetration ${(stats.wheelPenetrationM * 1000).toFixed(2)} mm` : 'no surface',
+  );
+
+  const saved = decodeSaveCode(encodeSaveCode(hard.rig.world.state));
+  const savedCar = saved.cars[hard.rig.state.id]!;
+  check(
+    'save round trip preserves dirt, scratches and dents',
+    savedCar.dirt === hard.rig.state.dirt &&
+      savedCar.scratches === hard.rig.state.scratches &&
+      JSON.stringify(savedCar.dents) === JSON.stringify(hardDents),
+    `dirt=${savedCar.dirt.toFixed(5)}, scratches=${savedCar.scratches.toFixed(3)}, dents=${savedCar.dents.length}`,
+  );
+  // The same save on a fresh load must rebuild the same shell, vertex for vertex.
+  const replayPhysics = await PhysicsWorld.create();
+  addGround(replayPhysics, SurfaceType.Asphalt);
+  const replayWorld = new GameWorld(saved);
+  const replay = new Vehicle(replayPhysics, replayWorld, savedCar, new THREE.Scene(), new WorldOrigin());
+  replay.syncVisuals(1);
+  const original = shellPositions(hard.rig.vehicle);
+  const replayed = shellPositions(replay);
+  const identical = original.length === replayed.length && original.every((value, i) => value === replayed[i]);
+  check(
+    'a loaded save replays the identical dented shell',
+    identical && replay.bodySurface?.dentStats.movedVertices === stats?.movedVertices,
+    `${original.length / 3} vertices compared`,
+  );
+
+  const legacyRaw: unknown = JSON.parse(JSON.stringify(hard.rig.world.state));
+  if (typeof legacyRaw === 'object' && legacyRaw !== null && 'cars' in legacyRaw) {
+    const legacyCars = legacyRaw.cars;
+    if (typeof legacyCars === 'object' && legacyCars !== null) {
+      for (const car of Object.values(legacyCars)) {
+        if (typeof car !== 'object' || car === null) continue;
+        Reflect.deleteProperty(car, 'dirt');
+        Reflect.deleteProperty(car, 'scratches');
+        Reflect.deleteProperty(car, 'dents');
+        // The removed shader-mark system wrote this; it must be ignored, not revived.
+        Reflect.set(car, 'damage', [{ x: 0, y: 0, z: 1, nx: 0, ny: 0, nz: 1, radius: 0.2, strength: 1, type: 'dent', seed: 0 }]);
+      }
+    }
+  }
+  const legacyCar = migrateState(legacyRaw).cars[hard.rig.state.id]!;
+  check(
+    'an old save loads clean and straight',
+    legacyCar.dirt === 0 && legacyCar.scratches === 0 && legacyCar.dents.length === 0,
+    `dirt=${legacyCar.dirt}, scratches=${legacyCar.scratches}, dents=${legacyCar.dents.length}`,
+  );
+
+  // --- The dent ring ---------------------------------------------------------
+  const ringWorld = new GameWorld(newWorldState(43));
+  const ringCar = createServiceableCarState('ring', MODEL_ID, 0, 0, 0, 0);
+  ringWorld.state.cars[ringCar.id] = ringCar;
+  for (let i = 0; i < MAX_BODY_DENTS + 2; i++) {
+    ringWorld.apply({
+      t: 'car_body_dent',
+      carId: ringCar.id,
+      dent: { x: -2 + i * 0.4, y: 0, z: half[2], nx: 0, ny: 0, nz: -1, radius: 0.25, depth: 0.05 },
     });
   }
   check(
-    'impact accumulation is bounded and retains newest marks',
-    boundedState.damage.length === MAX_BODY_DAMAGE_IMPACTS && boundedState.damage[0]!.x === 2,
-    `count=${boundedState.damage.length}, oldest-x=${boundedState.damage[0]!.x}`,
+    'the ring is bounded and forgets the oldest',
+    ringCar.dents.length === MAX_BODY_DENTS && Math.abs(ringCar.dents[0]!.x - (-2 + 2 * 0.4)) < 1e-9,
+    `count=${ringCar.dents.length}, oldest x=${ringCar.dents[0]!.x.toFixed(2)}`,
   );
-  const gentleCrash = await crash(1);
+  const mergeWorld = new GameWorld(newWorldState(44));
+  const mergeCar = createServiceableCarState('merge', MODEL_ID, 0, 0, 0, 0);
+  mergeWorld.state.cars[mergeCar.id] = mergeCar;
+  for (let i = 0; i < 6; i++) {
+    mergeWorld.apply({
+      t: 'car_body_dent',
+      carId: mergeCar.id,
+      dent: { x: 0.02 * i, y: 0, z: half[2], nx: 0, ny: 0, nz: -1, radius: 0.3, depth: 0.06 },
+    });
+  }
   check(
-    'gentle obstacle roll does not scratch',
-    gentleCrash.scratches === 0,
-    `scratches=${gentleCrash.scratches.toFixed(6)}`,
+    'repeat blows to one panel deepen one dent, to a ceiling',
+    mergeCar.dents.length === 1 && mergeCar.dents[0]!.depth > 0.06 && mergeCar.dents[0]!.depth <= MAX_BODY_DENT_DEPTH_M,
+    `count=${mergeCar.dents.length}, depth=${mergeCar.dents[0]!.depth.toFixed(3)} m`,
   );
-  const fall = await freeFall();
+
+  // --- Worst case on one car from every pack --------------------------------
+  for (const modelId of PACK_MODELS) {
+    const rig = await makeRig(`worst:${modelId}`, SurfaceType.Asphalt, modelId);
+    syncShell(rig);
+    check(
+      `${modelId}: a clean car owns no dented geometry`,
+      rig.vehicle.bodySurface?.dentStats.dentedMeshes === 0,
+      `${rig.vehicle.bodySurface?.dentStats.dentedMeshes} dented meshes`,
+    );
+    for (const worst of worstCaseDents(modelId)) {
+      rig.world.apply({ t: 'car_body_dent', carId: rig.state.id, dent: worst });
+    }
+    syncShell(rig);
+    const worst = rig.vehicle.bodySurface?.dentStats;
+    check(
+      `${modelId}: ${rig.state.dents.length} hardest dents stay sane`,
+      worst !== undefined &&
+        worst.movedVertices > 0 &&
+        worst.minJacobian > 0.2 &&
+        worst.wheelPenetrationM < 0.002 &&
+        worst.maxDisplacementM <= MAX_BODY_DENT_DEPTH_M * 1.5,
+      worst ? `${worst.movedVertices} vertices, max ${(worst.maxDisplacementM * 1000).toFixed(0)} mm, min Jacobian ${worst.minJacobian.toFixed(3)}, wheel penetration ${(worst.wheelPenetrationM * 1000).toFixed(2)} mm` : 'no surface',
+    );
+  }
+
+  // --- Things that must NOT damage the car ----------------------------------
+  const gentle = await crash(1);
   check(
-    'free fall and ordinary landing do not damage the shell',
-    fall.scratches === 0 && fall.damage === 0,
-    `scratches=${fall.scratches.toFixed(6)}, damage=${fall.damage}`,
+    'a gentle roll into an obstacle neither scratches nor dents',
+    gentle.rig.vehicle.bodyScratches === 0 && gentle.rig.state.dents.length === 0,
+    `scratches=${gentle.rig.vehicle.bodyScratches}, dents=${gentle.rig.state.dents.length}`,
   );
-  const conditions = [sand.rig.vehicle, asphalt.rig.vehicle, moving, parked];
+  const fall = await makeRig('free-fall', SurfaceType.Asphalt, MODEL_ID, 8);
+  step(fall, 300);
+  fall.vehicle.pushState();
   check(
-    'all live and persisted values stay clamped to 0..1',
-    conditions.every((vehicle) => vehicle.bodyDirt >= 0 && vehicle.bodyDirt <= 1 && vehicle.bodyScratches >= 0 && vehicle.bodyScratches <= 1) &&
-      Object.values(sharedWorld.state.cars).every((state) => state.dirt >= 0 && state.dirt <= 1 && state.scratches >= 0 && state.scratches <= 1),
-    'checked live Vehicle getters and pushed CarState values',
+    'a drop onto the wheels neither scratches nor dents',
+    fall.vehicle.bodyScratches === 0 && fall.state.dents.length === 0,
+    `scratches=${fall.vehicle.bodyScratches}, dents=${fall.state.dents.length}`,
   );
-  console.log(`dirt per km: sand=${sandPerKm.toFixed(6)}, asphalt=${asphaltPerKm.toFixed(6)}`);
+  const everyone = [sand.rig.vehicle, gravel.rig.vehicle, asphalt.rig.vehicle, moving, parked, hard.rig.vehicle];
+  check(
+    'live condition stays within 0..1',
+    everyone.every((v) => v.bodyDirt >= 0 && v.bodyDirt <= 1 && v.bodyScratches >= 0 && v.bodyScratches <= 1),
+    `${everyone.length} vehicles`,
+  );
+
+  console.log(failures === 0 ? 'car-dirt: all checks passed' : `car-dirt: ${failures} check(s) FAILED`);
   if (failures > 0) process.exitCode = 1;
 }
 

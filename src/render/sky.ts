@@ -60,6 +60,23 @@ const LAMP_FULL_ELEVATION = -0.14;
  */
 const SHADOW_MIN_ELEVATION = 0.06;
 const SHADOW_FADE_ELEVATION = 0.035;
+/**
+ * The key light's share of the scene's light at which its shadow fades out, and the
+ * share at which it is fully drawn.
+ *
+ * A shadow can darken a surface by at most key / (key + fill) of what it receives, so
+ * a key that is a sliver of the lighting casts a shadow nobody can see — and it still
+ * paid for the whole 2048² map, re-rendered every frame. That is every night: the Moon
+ * is the key from dusk to dawn, and under the fifty-fold exposure ceiling a FULL moon at
+ * the zenith is 0.25 lx / 40 000 × 50 = 3.1e-4 of display light against a moonlit fill
+ * that never drops below 0.022 (the pre-dawn trough), so its shadow could take at most
+ * 1.4 % off the ground it falls on. Measured across a whole day at the default epoch:
+ * 0.05-0.29 % all night, 16 % a minute before sunset and 50 % by day. Fading between 2
+ * and 5 % leaves every daylight and golden-hour shadow exactly as it was and makes the
+ * night's exactly zero, which is what lets `update` stop drawing the map.
+ */
+const SHADOW_KEY_SHARE_GONE = 0.02;
+const SHADOW_KEY_SHARE_FULL = 0.05;
 
 
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
@@ -1054,8 +1071,27 @@ export class Sky {
     this.sunLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
     // Fade the whole shadow out as the true sun sinks: at that point the ground is
     // in general shade anyway, and a clamped shadow under a horizon sun is the one
-    // case where the cheat above would be visible.
-    this.sunLight.shadow.intensity = smoothstep(0, SHADOW_FADE_ELEVATION, elevation);
+    // case where the cheat above would be visible. It also fades with the key's share
+    // of the light, which is what takes the Moon's invisible shadow away at night (see
+    // SHADOW_KEY_SHARE_GONE). `hemiLight` was written above, this same frame.
+    const key = this.sunLight.intensity;
+    const keyShare = key / Math.max(1e-9, key + this.hemiLight.intensity);
+    const shadowStrength =
+      smoothstep(0, SHADOW_FADE_ELEVATION, elevation) *
+      smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare);
+    this.sunLight.shadow.intensity = shadowStrength;
+    // A zero-strength shadow is never drawn again until it returns. Freezing the map
+    // rather than clearing `castShadow` is the point: `castShadow` is compiled into
+    // every lit program, so switching it at dusk recompiled the world, while three
+    // simply skips a light whose shadow does not auto-update. The frozen map and its
+    // matrix stay a matching pair (both are written only by the shadow pass), and the
+    // first frame with any strength renders a fresh one before it is sampled.
+    //
+    // Except before the map exists. A drive that launches at night would otherwise
+    // allocate the map and compile every caster's depth program at DAWN, with the player
+    // watching; one pass while there is no map puts both under the loading cover.
+    const shadow = this.sunLight.shadow;
+    shadow.autoUpdate = shadowStrength > 0 || shadow.map === null;
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
   }

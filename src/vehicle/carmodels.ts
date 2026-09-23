@@ -626,11 +626,18 @@ function factoryGeometry(id: string): FactoryGeometry {
  * ---- everything else is the real car's ----
  *
  * Engines, gearboxes and final drives are the factory's, from the pack's own Soviet
- * driveline table (parts/registry.ts). Masses are kerb masses, weight distribution
- * is the factory axle split, `dragArea` is the body's real Cd·A, steering lock is
- * derived from the published turning circle at each body's own measured wheelbase,
- * and the grip ladder is what period tyres actually pull (see the note above the
- * table).
+ * driveline table (parts/registry.ts). Masses are catalogue kerb masses, weight
+ * distribution is the factory axle split, steering lock is derived from the published
+ * turning circle at each body's own measured wheelbase, and the grip ladder is what
+ * period tyres actually pull (see the note above the table).
+ *
+ * `dragArea` is calibrated, in this order and never before the others: real mass,
+ * ratios and driveline efficiency, then the engine's factory curve, then Cd·A as the
+ * one number that puts the car on its catalogue top speed at the tools/reality.ts
+ * test load. Where AvtoVAZ published a wind-tunnel Cd the result is checked against
+ * it and agrees (Samaras); elsewhere no factory Cd or frontal area exists, and one
+ * value per BODY SHELL is fitted to its family's top speeds together (2101/2103/2106,
+ * 2105/2107, 2102/2104), so a shared shell cannot hide a different engine's error.
  */
 interface SovietSpec {
   readonly id: string;
@@ -650,7 +657,7 @@ interface SovietSpec {
   readonly handlingProfile?: HandlingProfile;
   /** Factory front-axle share of the kerb mass. */
   readonly frontWeightShare: number;
-  /** The real body's drag area, Cd·A in m². */
+  /** Drag area, Cd·A in m²: see the note above on how it is calibrated. */
   readonly dragArea: number;
   readonly suspension: SuspensionTuning;
   readonly storageCells?: number;
@@ -688,12 +695,15 @@ interface SovietSpec {
  * less half a track, and the bicycle-model lock that produces it at this body's own
  * (now life-size) wheelbase is `atan(wheelbase / R) + steerPlay`. The play term is
  * there because the classic profile's 0.024 rad of backlash is subtracted from the
- * rack command before it reaches the tyre.
+ * rack command before it reaches the tyre. The Niva's tyres scrub wider than that
+ * bicycle model, so its lock is the one that puts tools/reality.ts on its factory
+ * 5.5 m; the same holds for the working vehicles and the Moskvich below.
  */
 const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // GAZ-21 Volga: 2.445 litre, 70 hp at 4000, three speeds on the column, and
     // 1.46 tonnes of chrome on cross-plies. Turning radius 6.3 m, top speed 130.
+    // Cd·A 1.12 from that top speed; no factory Cd exists.
     // Nothing about this car is quick, and its 0.48 rearward weight bias plus a
     // 0.95 Hz front end is why it heaves onto its outside front tyre and stays
     // there.
@@ -709,13 +719,16 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.519,
     rearDriveBias: 1,
     frontWeightShare: 0.48,
-    dragArea: 1.05,
+    dragArea: 1.12,
     suspension: SUSP_VOLGA_21,
   },
   {
     // GAZ-24 Volga: the same idea fifteen years later. 95 hp, four speeds on the
-    // floor, 145 km/h, and a 5.65 m turning radius on a longer wheelbase — so it
-    // needs MORE lock than the 21 to match it.
+    // floor, 145 km/h, and a 5.5 m turning radius on a longer wheelbase (GAZ-24
+    // manual) — so it needs MORE lock than the 21 to match it. Cd·A 1.37 from the
+    // factory 145 km/h, i.e. Cd ~0.65 on ~2.1 m²: well above ru.wikipedia's unsourced
+    // 0.45, which is what 95 hp would need to be a gross rather than a net figure to
+    // explain. The catalogue power is used as printed; the drag area carries it.
     id: 'sv_gaz24',
     label: 'GAZ-24 Volga',
     file: 'gz24.fbx',
@@ -728,13 +741,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.598,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
-    dragArea: 1.0,
+    dragArea: 1.37,
     suspension: SUSP_VOLGA_24,
   },
   {
-    // VAZ-2101, the Zhiguli. 1.198 litre, 62 hp, 955 kg, 140 km/h at the redline in
-    // a direct fourth on a 4.30 axle. The default car, and the one everything else
-    // in this table is judged against.
+    // VAZ-2101, the Zhiguli. 1.198 litre, 64 hp, 955 kg, 142 km/h in a direct
+    // fourth on a 4.30 axle, 0-100 in 20 s (1982 catalogue). The default car, and
+    // the one everything else in this table is judged against. Cd·A 0.95 is the
+    // 2101/2103/2106 shell's, fitted to the three cars' top speeds together.
     id: 'sv_vaz2101',
     label: 'VAZ-2101 Zhiguli',
     file: 'vz01.fbx',
@@ -747,25 +761,26 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.52,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
-    dragArea: 0.82,
+    dragArea: 0.95,
     suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2102: the 2101 as an estate. Same running gear, 430 kg of payload rating
-    // in the back, and the empty-estate rear end that comes with it.
+    // VAZ-2102: the 2101 as an estate. Same engine on a shorter 4.44 axle, 430 kg
+    // of payload rating in the back, and the empty-estate rear end that comes with
+    // it. Cd·A 1.07 is the estate shell's, shared with the 2104.
     id: 'sv_vaz2102',
     label: 'VAZ-2102 estate',
     file: 'vz02.fbx',
     scale: 0.010632,
     mass: 1010,
     engineId: 'engine_lada_1200',
-    gearboxId: 'gearbox_lada_4',
+    gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
     wheelGrip: 0.551,
     steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
-    dragArea: 0.92,
+    dragArea: 1.07,
     suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
@@ -784,44 +799,45 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.525,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
-    dragArea: 0.82,
+    dragArea: 0.95,
     suspension: SUSP_ZHIGULI,
   },
   {
-    // VAZ-2104: the 2105's estate on the 1.5. The workhorse of the line, and the
-    // heaviest of the classics.
+    // VAZ-2104: the 2105's estate, in its base form with the 2105's 1.3 and 4.3
+    // axle (autoopt.ru: 1020 kg, 137 km/h, 18.5 s). The workhorse of the line.
     id: 'sv_vaz2104',
     label: 'VAZ-2104 estate',
     file: 'vz04.fbx',
     scale: 0.010585,
-    mass: 1050,
-    engineId: 'engine_lada_1500',
-    gearboxId: 'gearbox_lada_4',
+    mass: 1020,
+    engineId: 'engine_lada_1300',
+    gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.56,
     steerLock: 0.521,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
-    dragArea: 0.92,
+    dragArea: 1.07,
     suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
   {
-    // VAZ-2105: square lights, the belt-cam 1.3, 64 hp. The one everyone's uncle
-    // had, and mechanically the plainest car here.
+    // VAZ-2105: square lights, the belt-cam 1.3, 47 kW, the close-ratio box on a
+    // 4.3 axle. The one everyone's uncle had, and mechanically the plainest car here.
+    // Cd·A 0.92 is the 2105/2107 shell's.
     id: 'sv_vaz2105',
     label: 'VAZ-2105',
     file: 'vz05.fbx',
     scale: 0.010632,
     mass: 995,
     engineId: 'engine_lada_1300',
-    gearboxId: 'gearbox_lada_4',
+    gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.57,
     steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
-    dragArea: 0.83,
+    dragArea: 0.92,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -865,7 +881,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.52,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
-    dragArea: 0.82,
+    dragArea: 0.95,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -875,7 +891,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     label: 'VAZ-2107',
     file: 'vz07.fbx',
     scale: 0.010632,
-    mass: 1050,
+    mass: 1030,
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
@@ -883,14 +899,15 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     steerLock: 0.521,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
-    dragArea: 0.84,
+    dragArea: 0.92,
     suspension: SUSP_ZHIGULI,
   },
   {
     // VAZ-2108 Sputnik: the break with everything above it. Front-wheel drive on a
     // transaxle, five speeds, MacPherson struts, rack-and-pinion steering, 900 kg
     // and 62% of it over the front axle. It steers like a different decade because
-    // it is one, so it is the first Soviet body on the `road` profile.
+    // it is one, so it is the first Soviet body on the `road` profile. Cd·A 0.88 from
+    // its 148 km/h, which is AvtoVAZ's own wind-tunnel Cd of 0.47 on 1.87 m².
     id: 'sv_vaz2108',
     label: 'VAZ-2108 Sputnik',
     file: 'vz08.fbx',
@@ -904,7 +921,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
-    dragArea: 0.72,
+    dragArea: 0.88,
     suspension: SUSP_SAMARA,
     storageCells: 2,
   },
@@ -914,7 +931,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     label: 'VAZ-2109 Samara',
     file: 'vz09.fbx',
     scale: 0.010123,
-    mass: 920,
+    mass: 915,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -923,45 +940,47 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.615,
-    dragArea: 0.72,
+    dragArea: 0.88,
     suspension: SUSP_SAMARA,
     storageCells: 3,
   },
   {
-    // VAZ-21099: the Samara with a boot grafted on, the 1.5 and the tall 3.706
-    // axle. 156 km/h makes it the fastest thing in the pack that was sold as one.
+    // VAZ-21099: the Samara with a boot grafted on, the 1.5, and the manual's 3.9-
+    // class axle (it lists 3.7 or 3.9). 154 km/h makes it the fastest thing in the
+    // pack that was sold as one. Cd·A 0.84: AvtoVAZ's Cd 0.45 on 1.87 m².
     id: 'sv_vaz21099',
     label: 'VAZ-21099',
     file: 'vz099.fbx',
     scale: 0.010082,
-    mass: 960,
+    mass: 970,
     engineId: 'engine_samara_1500',
-    gearboxId: 'gearbox_samara_5_tall',
+    gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
     steerLock: 0.56,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.6,
-    dragArea: 0.7,
+    dragArea: 0.84,
     suspension: SUSP_SAMARA,
   },
   {
-    // VAZ-2121 Niva: 1.6, 80 hp, permanent four-wheel drive through a locking centre
+    // VAZ-2121 Niva: 1.6, 73 hp, permanent four-wheel drive through a locking centre
     // diff, 220 mm of clearance and a 2.20 m wheelbase — the shortest in the pack.
-    // Its transfer case's high range is folded into the 4.68 final drive, so it is
+    // Its transfer case's high range is folded into the 4.92 final drive, so it is
     // geared a fifth shorter than the 2106 it shares a block with: 132 km/h flat
-    // out, and it will pull away from anything here on a surface.
+    // out, and it will pull away from anything here on a surface. Cd·A 1.30 from that
+    // 132, Cd 0.536 (ru.wikipedia) on about 2.4 m²; the 2131 shares the nose.
     id: 'sv_niva',
     label: 'VAZ-2121 Niva',
     file: 'vz21.fbx',
     scale: 0.009649,
-    mass: 1210,
+    mass: 1150,
     engineId: 'engine_niva_1600',
     gearboxId: 'gearbox_niva_4',
     tankLitres: 42,
     wheelGrip: 0.576,
-    steerLock: 0.482,
+    steerLock: 0.496,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.53,
@@ -974,7 +993,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     label: 'VAZ-2131 Niva',
     file: 'vz31.fbx',
     scale: 0.009783,
-    mass: 1400,
+    mass: 1350,
     engineId: 'engine_niva_1700',
     gearboxId: 'gearbox_niva_5',
     tankLitres: 42,
@@ -983,7 +1002,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.52,
-    dragArea: 1.2,
+    dragArea: 1.3,
     suspension: SUSP_NIVA,
     storageCells: 6,
   },
@@ -1117,30 +1136,36 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
  */
 const SAAS_SPECS: readonly Entry[] = [
   {
+    // AZLK-2141-01 as the 1998 catalogue lists it (autoopt.ru): the VAZ-2106-70 1.6,
+    // the 2141 five-speed on a 3.9 axle, 1055 kg, 158 km/h, 0-100 in 14.9 s and a
+    // 5.0 m turning radius. Cd·A 0.86 from that 158: the period literature's Cd of
+    // 0.35-0.38 on 1.89 m² would give 172 km/h from this engine, so either figure
+    // is optimistic and the top speed, the one the catalogue stands behind, wins.
     id: 'sa_azlk2141',
     label: 'AZLK-2141 Svyatogor',
     dir: SAAS,
     glb: 'azlk2141.glb',
     bodyClass: 'car',
     scale: 0.86595,
-    mass: 1070,
+    mass: 1055,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
     wheelGrip: 0.65,
     suspension: SUSP_SAMARA,
-    steerLock: 0.58,
+    steerLock: 0.617,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
-    dragArea: 0.74,
+    dragArea: 0.86,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
     // VAZ-1111, 1988-1996, per its factory manual: 635 kg kerb, 0.65 litre twin,
     // four-speed transaxle on a 4.54 final drive, 135/80 R12 on 4B-12 rims, 30
     // litre tank, a 4.8 m turning radius by the outer wheel's track, and 120 km/h
-    // and 0-100 in 30 s with a driver and one passenger aboard.
+    // and 0-100 in 30 s with a driver and one passenger aboard. Cd·A 0.68: Za
+    // Rulyom's Cd 0.40 on the textbook's 1.69 m².
     id: 'sa_oka',
     label: 'VAZ-1111 Oka',
     dir: SAAS,
@@ -1160,7 +1185,7 @@ const SAAS_SPECS: readonly Entry[] = [
     handlingProfile: 'road',
     // No factory axle loads are published; transverse front-drive default.
     frontWeightShare: 0.62,
-    dragArea: 0.73,
+    dragArea: 0.68,
     lights: {
       // Headlamps carry the position lamps inside them. Amber indicators sit in the
       // bumper and on each front wing. The OSVAR 43.3716 rear lamp stacks a clear
@@ -1188,13 +1213,15 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 56,
     wheelGrip: 0.59,
     suspension: SUSP_TRUCK,
-    steerLock: 0.55,
+    steerLock: 0.501,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:
-    // 1.97 m × 2.355 m frontal envelope at an effective Cd near 0.56.
+    // Cd·A 3.45 from the 330364's 105 km/h (truck-and-bus.ru), 0.74 of the
+    // 1.97 m × 2.355 m frontal envelope. No factory Cd exists. Lock puts it on the
+    // UAZ-2206's 6.3 m (autoopt.ru, the same chassis).
     frontWeightShare: 1180 / 1845,
-    dragArea: 2.6,
+    dragArea: 3.45,
     // This working 4x4 keeps its authored heavy-duty wheels. It neither borrows
     // from the shared road-wheel pool nor donates its set to that pool.
     wheelSetPool: [],
@@ -1234,16 +1261,17 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelGrip: 0.56,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
-    // Factory outer-front turning radius is 5.25 m; life-size track/wheelbase
-    // produce atan(2.4 / (5.25 - 1.27 / 2)) plus the classic steering play.
-    steerLock: 0.488,
+    // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the
+    // leaf-sprung pickup scrubs wider than the bicycle model, so the lock is the one
+    // that measures 5.25 on tools/reality.ts rather than atan(2.4 / 4.615) + play.
+    steerLock: 0.533,
     rearDriveBias: 1,
     handlingProfile: 'classic',
     // Factory unladen axle loads: 550 kg front, 465 kg rear.
     frontWeightShare: 550 / 1015,
-    // No factory Cd is published. CdA 1.52 m² is derived from the factory
-    // 125 km/h maximum with this engine, gearing, tyre and asphalt rolling loss.
-    dragArea: 1.52,
+    // No factory Cd is published. CdA 1.42 m² is derived from the factory
+    // 125 km/h maximum with this engine, gearing, efficiency and tyre.
+    dragArea: 1.42,
     lights: {
       // Late PF10 front units: amber upper indicators and clear lower position
       // lenses. UP112 triangular rear indicators are independent of the FP112 /
@@ -1305,8 +1333,10 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
  *
  * The 2110 is a Samara underneath: MacPherson struts in front, a trailing-arm
  * torsion beam behind, transverse 1.5 and a five-speed transaxle driving the
- * front wheels. Cd is the one number the car was actually famous for: 0.334,
- * over 1.89 m² of frontal area.
+ * front wheels, and the 1.5 is the 21083's derivative (the 2110 manual's carburettor
+ * rating, 52.0 kW and 103.9 Nm, is within 1% and 2.5% of it). Cd is the one number
+ * the car was actually famous for: 0.33-0.334 in AvtoVAZ's tunnel, on 2.04 m² of
+ * frontal area, so 0.68 m² of drag area.
  */
 const GTAV_SPECS: readonly Entry[] = [
   {
@@ -1316,7 +1346,7 @@ const GTAV_SPECS: readonly Entry[] = [
     glb: 'vaz2110.glb',
     bodyClass: 'car',
     scale: 0.89255,
-    mass: 1030,
+    mass: 1010,
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1326,7 +1356,7 @@ const GTAV_SPECS: readonly Entry[] = [
     rearDriveBias: 0,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
     frontWeightShare: 0.62,
-    dragArea: 0.63,
+    dragArea: 0.68,
   },
 ];
 

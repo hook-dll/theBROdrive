@@ -30,13 +30,9 @@ import * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
+import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { carModel } from '../src/vehicle/carmodels';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { WorldOrigin } from '../src/world/origin';
@@ -79,40 +75,6 @@ const SETTLE_STEPS = 240;
 
 const speedKmh = Number(process.argv[2] ?? 60);
 const targetSpeed = speedKmh / 3.6;
-
-function carState(road: Road, lateral: number, groundY: number): CarState {
-  const def = carModel(MODEL_ID);
-  const engine = variant(def.engineId).engine;
-  const p = road.sampleAt(START_S);
-  const point = { x: 0, y: 0, z: 0 };
-  road.offsetPoint(START_S, lateral, point);
-  return {
-    id: 'surface-feel',
-    modelId: MODEL_ID,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('surface-feel', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: point.x,
-    y: groundY + 2,
-    z: point.z,
-    qx: 0,
-    qy: Math.sin(p.heading / 2),
-    qz: 0,
-    qw: Math.cos(p.heading / 2),
-  };
-}
 
 /**
  * The real asphalt ribbon, at the real cross-section.
@@ -233,11 +195,13 @@ async function makeRig(lateral: number, ground: Ground): Promise<Rig> {
   const origin = new WorldOrigin();
   const spawn = { x: 0, y: 0, z: 0 };
   road.offsetPoint(START_S, lateral, spawn);
-  const state = carState(
-    road,
-    lateral,
-    ground === 'flat' ? spawnGroundY : terrain.heightAt(spawn.x, spawn.z, START_S),
-  );
+  const state = benchCarState(MODEL_ID, {
+    id: 'surface-feel',
+    x: spawn.x,
+    y: (ground === 'flat' ? spawnGroundY : terrain.heightAt(spawn.x, spawn.z, START_S)) + 2,
+    z: spawn.z,
+    heading: road.sampleAt(START_S).heading,
+  });
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
   const input = emptyInput();

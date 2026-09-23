@@ -14,12 +14,13 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import {
+  CAR_BODY_POSITION_ATTRIBUTE,
   makeCarBodyConditionMaterial,
-  makeCarPaintFinishMaterial,
-  makeCarPalettePaintMaterial,
+  setCarBodyCondition,
   setCarBodyPalettePaint,
-  setConditionFieldOrigin,
+  type CarBodyFrame,
 } from './materials';
+import { CarBodySurface, type CarBodyWheel } from './carsurface';
 import {
   CAR_MODELS,
   carModel,
@@ -123,6 +124,10 @@ interface Template {
   readonly body: THREE.Object3D;
   /** One template per wheel id, already scaled. */
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
+  /** Where the road reaches this body, for the paint's dirt placement. */
+  readonly frame: CarBodyFrame;
+  /** The wheels as the dent clamp keeps panels clear of them. */
+  readonly dentWheels: readonly CarBodyWheel[];
 }
 
 const templates = new Map<string, Template>();
@@ -135,7 +140,7 @@ const paletteLoads = new Map<string, Promise<THREE.Texture>>();
  * that one-off CPU work behind the loading screen.
  */
 const warmDrivingInstances = new Map<string, CarModelInstance>();
-const warmStaticInstances = new Map<string, THREE.Object3D>();
+const warmStaticInstances = new Map<string, StaticCarInstance>();
 let gltf: GLTFLoader | null = null;
 let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
@@ -256,67 +261,87 @@ function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
 }
 
 /**
- * Gives each car independent condition uniforms while preserving the exact paint
- * slot. Packs with a paint style name their paint; a pack without one is repainted
- * whole, which is what its single-material bodies describe.
+ * Gives one car instance its own condition-shaded copy of each paint slot, leaving
+ * glass, lamps and trim on their shared materials, and returns those copies.
+ *
+ * The returned list IS the car's paint handle. Everything that later writes dirt,
+ * scratches or dent marks writes it through this list, so nothing has to walk the
+ * car's scene graph to find its paint again.
  */
 function cloneCarBodyPaintMaterials(
   root: THREE.Object3D,
-  def: CarModelDef,
+  t: Template,
   appearanceKey: string,
-): void {
+): THREE.Material[] {
+  const def = t.def;
   const seed = appearanceHash(def.id, appearanceKey);
   const clones = new Map<THREE.Material, THREE.Material>();
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    const material = makeCarBodyConditionMaterial(source);
-    // Wear is sampled in the body's own frame now, so two cars of one model would
-    // otherwise rust in identical places. The car's own hash spreads them apart.
-    setConditionFieldOrigin(material, seed);
+    const material = makeCarBodyConditionMaterial(source, t.frame, seed);
     clones.set(source, material);
     return material;
   };
 
   root.traverse((mesh) => {
-    if (!(mesh instanceof THREE.Mesh)) return;
-    if (def.paintStyle && !isRandomPaintMesh(mesh, def)) return;
+    if (!(mesh instanceof THREE.Mesh) || !isRandomPaintMesh(mesh, def)) return;
     const eligible = (source: THREE.Material): THREE.Material =>
       isPaintSlot(source, def) ? paint(source) : source;
     mesh.material = Array.isArray(mesh.material)
       ? mesh.material.map(eligible)
       : eligible(mesh.material);
   });
+  return [...clones.values()];
 }
 
 /**
- * Gives static cars independent paint without dynamic body-dirt shading. Parked
- * cars never accumulate dirt; paying that FBM cost for each one can saturate an
- * integrated GPU as POIs enter the scene.
+ * Stamps every paint vertex of a freshly fitted template with its chassis-local
+ * position (`CAR_BODY_POSITION_ATTRIBUTE`), which is what the paint's dirt and
+ * scratch placement is computed in.
+ *
+ * Runs once per model at load, after the fit, the ride drop and the rest of
+ * `buildTemplate` have placed the body, so the stamp is exactly where the metal is.
+ * The scene has no parent here, so each mesh's world matrix IS its chassis frame.
+ * A geometry shared by two meshes under different transforms (a mirrored pair) is
+ * split first: one attribute cannot hold two positions.
  */
-function cloneStaticPaintMaterials(root: THREE.Object3D, def: CarModelDef): void {
-  if (!def.paintStyle) return;
-  const clones = new Map<THREE.Material, THREE.Material>();
-  const paint = (source: THREE.Material): THREE.Material => {
-    const existing = clones.get(source);
-    if (existing) return existing;
-    // Soviet paint additionally needs atlas recolouring; both packs use the same
-    // metallic automotive finish.
-    const material = def.paintStyle === 'soviet-atlas'
-      ? makeCarPalettePaintMaterial(source)
-      : makeCarPaintFinishMaterial(source);
-    clones.set(source, material);
-    return material;
-  };
-
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
-    const eligible = (source: THREE.Material): THREE.Material =>
-      isPaintSlot(source, def) ? paint(source) : source;
-    child.material = Array.isArray(child.material)
-      ? child.material.map(eligible)
-      : eligible(child.material);
+function stampCarBodyPositions(scene: THREE.Group, def: CarModelDef): void {
+  scene.updateMatrixWorld(true);
+  const stamped = new Map<THREE.BufferGeometry, THREE.Matrix4>();
+  scene.traverse((mesh) => {
+    if (!(mesh instanceof THREE.Mesh) || !isRandomPaintMesh(mesh, def)) return;
+    if (!materialsOf(mesh).some((material) => isPaintSlot(material, def))) return;
+    const owner = stamped.get(mesh.geometry);
+    if (owner) {
+      if (owner.equals(mesh.matrixWorld)) return;
+      mesh.geometry = mesh.geometry.clone();
+    }
+    const position = mesh.geometry.getAttribute('position');
+    const values = new Float32Array(position.count * 3);
+    for (let i = 0; i < position.count; i++) {
+      _sample.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      values[i * 3] = _sample.x;
+      values[i * 3 + 1] = _sample.y;
+      values[i * 3 + 2] = _sample.z;
+    }
+    mesh.geometry.setAttribute(CAR_BODY_POSITION_ATTRIBUTE, new THREE.BufferAttribute(values, 3));
+    stamped.set(mesh.geometry, mesh.matrixWorld.clone());
   });
+}
+
+/**
+ * The fixed condition of a static shell. Every static car is a roadside wreck or a
+ * working find seen from afar, and both have stood in the desert: the key decides
+ * how long, so the same wreck is equally sand-blasted on every pass. No per-frame
+ * cost — this is written into its paint once, when the shell is made.
+ */
+function derelictCondition(modelId: string, appearanceKey: string): { dirt: number; scratches: number } {
+  const h = appearanceHash(`${modelId}:derelict`, appearanceKey);
+  return {
+    dirt: 0.55 + ((h & 0xffff) / 0xffff) * 0.4,
+    scratches: 0.35 + ((h >>> 16) / 0xffff) * 0.45,
+  };
 }
 
 /**
@@ -1055,7 +1080,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   ];
 
   prepareMaterials(scene, true);
-  scene.updateMatrixWorld(true);
+  stampCarBodyPositions(scene, def);
 
   // Geometry is now expressed directly in chassis-local metres; keeping the source
   // origin offset in the fit manifest remains useful for asset diagnostics.
@@ -1065,8 +1090,23 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
   };
+  const [fl, fr, rl, rr] = wheels;
+  const frame: CarBodyFrame = {
+    halfExtents: measure.halfExtents,
+    frontAxleZ: (fl!.pos[2] + fr!.pos[2]) * 0.5,
+    rearAxleZ: (rl!.pos[2] + rr!.pos[2]) * 0.5,
+    wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
+    wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
+  };
+  const dentWheels = wheels.map((wheel) => ({
+    x: wheel.pos[0],
+    y: wheel.pos[1],
+    z: wheel.pos[2],
+    radius: wheel.radius,
+    halfWidth: def.factory.tyreWidth * 0.5,
+  }));
 
-  return { def, measure, body: scene, wheels: parts.objects };
+  return { def, measure, body: scene, wheels: parts.objects, frame, dentWheels };
 }
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
@@ -1227,17 +1267,28 @@ export interface CarModelInstance {
   readonly body: THREE.Object3D;
   /** Wheel id -> its own object, to be parented and driven by the vehicle. */
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
+  /** This car's paint condition and dents; see render/carsurface.ts. */
+  readonly surface: CarBodySurface;
+}
+
+/** A static shell and the paint materials it was instanced with. */
+interface StaticCarInstance {
+  readonly model: THREE.Object3D;
+  readonly paint: readonly THREE.Material[];
 }
 
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const wheels = cloneWheels(t, appearanceKey);
   const body = t.body.clone(true);
-  cloneCarBodyPaintMaterials(body, t.def, appearanceKey);
+  const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
-  return { body, wheels };
+  // Captured now, while the body is unparented and at rest: the surface records
+  // each mesh's chassis frame, which bounce squash and parenting would disturb.
+  const surface = new CarBodySurface(paint, body, t.dentWheels, STEERING_WHEEL_NODE);
+  return { body, wheels, surface };
 }
 
 /** A fresh instance of a loaded model, sharing geometry but owning its paint state. */
@@ -1258,12 +1309,12 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
  * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
  * factory track, wheelbase and clearance used by the driven chassis.
  */
-function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
+function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
   const t = template(id);
   const group = new THREE.Group();
   group.name = id;
   const body = t.body.clone(true);
-  cloneStaticPaintMaterials(body, t.def);
+  const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   applyRandomPaint(body, t.def, appearanceKey);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
@@ -1272,7 +1323,7 @@ function cloneStaticModel(id: string, appearanceKey = id): THREE.Object3D {
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
     group.add(mesh);
   }
-  return group;
+  return { model: group, paint };
 }
 /**
  * Clones instances only for templates already resident. Lazy models warm on their
@@ -1294,41 +1345,54 @@ export async function warmCarModelInstances(
     drivingBodies.push(drivingModel.body);
     compileGroup.add(drivingModel.body);
     const staticModel = cloneStaticModel(def.id);
-    staticModel.traverse((object) => {
+    staticModel.model.traverse((object) => {
       object.frustumCulled = false;
     });
     warmStaticInstances.set(def.id, staticModel);
-    compileGroup.add(staticModel);
+    compileGroup.add(staticModel.model);
   }
   await renderer.compileAsync(scene, camera);
   scene.remove(compileGroup);
-  for (const model of warmStaticInstances.values()) compileGroup.remove(model);
+  for (const instance of warmStaticInstances.values()) compileGroup.remove(instance.model);
   for (const body of drivingBodies) compileGroup.remove(body);
 }
 
-
-/**
- * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
- * model puts them. This is what wrecks and scenery cars use.
- */
-export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
+/** A warmed static shell when one fits the key, otherwise a fresh clone. */
+function staticCarInstance(id: string, appearanceKey: string): StaticCarInstance {
   const t = template(id);
   const warmed = warmStaticInstances.get(id);
   if (warmed) {
     warmStaticInstances.delete(id);
     if (appearanceKey === id) {
-      applyRandomPaint(warmed, t.def, appearanceKey);
+      applyRandomPaint(warmed.model, t.def, appearanceKey);
       return warmed;
     }
   }
   return cloneStaticModel(id, appearanceKey);
 }
 
-/** Static, solid courier with the same deterministic body and a unique shader finish. */
+/**
+ * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
+ * model puts them. This is what wrecks and scenery cars use, and it arrives already
+ * weathered (`derelictCondition`).
+ */
+export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
+  const instance = staticCarInstance(id, appearanceKey);
+  const condition = derelictCondition(id, appearanceKey);
+  setCarBodyCondition(instance.paint, condition.dirt, condition.scratches);
+  return instance.model;
+}
+
+/**
+ * Static, solid courier with the same deterministic body and a unique shader finish.
+ * It is the one static car kept showroom-clean, so its paint skips the condition
+ * noise entirely.
+ */
 export function createCourierCarModel(id: string, appearanceKey: string): THREE.Object3D {
-  const model = createStaticCarModel(id, appearanceKey);
-  applyCourierAppearance(model, carModel(id));
-  return model;
+  const instance = staticCarInstance(id, appearanceKey);
+  setCarBodyCondition(instance.paint, 0, 0);
+  applyCourierAppearance(instance.model, carModel(id));
+  return instance.model;
 }
 
 export function disposeCarModelCache(): void {

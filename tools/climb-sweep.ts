@@ -191,8 +191,14 @@ const WEAKEST_RWD = 'sv_gaz21';
  * A margin rather than a bare pass: the bisection's own resolution is 0.4 degrees, and
  * a requirement met by a tenth of a degree is a requirement that will be broken by the
  * next unrelated change to the tyre model.
+ *
+ * It was 2 until the drivetrain gained a driveline efficiency. The GAZ-21's factory
+ * 166.7 Nm is the same at the crank as the torque it launched on before, but a period
+ * box and hypoid axle keep only 90% of it at the hubs, and that moved its escapes from
+ * 22.3-23.1 degrees to 20.2-21.0. 1.2 is three bisection steps of clearance, and it is
+ * the honest one: the alternative was an engine stronger than the one GAZ built.
  */
-const WEAKEST_RWD_MARGIN_DEG = 2;
+const WEAKEST_RWD_MARGIN_DEG = 1.2;
 
 const models = ALL ? CAR_MODELS.map((m) => m.id) : ['sv_gaz21', 'sv_vaz2101', 'sa_oka'];
 console.log(

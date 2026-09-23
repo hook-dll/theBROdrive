@@ -22,6 +22,8 @@ import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import {
   DAY_LENGTH,
+  MAX_BODY_DENT_DEPTH_M,
+  type BodyDent,
   type CarState,
   type GameWorld,
 } from '../game/state';
@@ -68,6 +70,7 @@ import {
   createCarModel,
   type CarModelMeasure,
 } from '../render/carmodel';
+import type { CarBodySurface } from '../render/carsurface';
 import { createPartMesh } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
 import type { ContactPatchField } from '../render/contactpatches';
@@ -1417,24 +1420,76 @@ const OIL_STARVE_SECONDS = 30;
  */
 const BODY_CONDITION_EMIT_INTERVAL = 0.5;
 /**
- * Four rolling tyres cover 100 km of tyre-track over 25 km of road, so sand
- * (`dust = 1`) reaches full dirt after roughly 25 km. The first visible layer
- * arrives within a couple of off-road kilometres, while a 2x slip/slide multiplier
- * still makes a digging wheel throw more material.
+ * Tyre-track metres over sand (`dust = 1`) to full dirt. Four rolling tyres cover
+ * 24 km of track over 6 km of desert, so the first clearly visible crust (a quarter)
+ * arrives within about a kilometre and a half of sand or two and a half of graded
+ * gravel, and one ordinary off-road leg leaves the car the colour of the desert. The
+ * former 100 km took 25 km of sand, which no drive in the game ever reached. The
+ * bounded slip multiplier below still makes a digging wheel throw more.
  */
-const BODY_DIRT_TYRE_METRES_TO_FULL = 100_000;
+const BODY_DIRT_TYRE_METRES_TO_FULL = 24_000;
+/**
+ * Floor on how dusty any surface is FOR THE BODY. Sealed road reports `dust = 0`,
+ * which is right for the spray effect (a tyre on tarmac throws no plume) and wrong
+ * for paint: road film, sand blown across the carriageway and the spray of passing
+ * traffic still settle. At 0.05 a car picks up a light film over some tens of
+ * kilometres of asphalt, an order of magnitude slower than off it.
+ */
+const BODY_DIRT_ROAD_FILM = 0.05;
 /** A kerb nudge is under this unexplained loss; shell damage starts above it. */
 const SCRATCH_IMPACT_THRESHOLD_MPS = 1.8;
 /**
  * Each m/s above the threshold adds this much shell damage, up to one impact's cap.
  *
  * A 5 m/s shunt (18 km/h into a rock) lands 0.19 rather than the former 0.06.
- * Localized mark depth is now carried by that impact's own normalized strength;
- * this aggregate remains the cleaning/UI summary and cannot make global damage.
+ * This is the aggregate the paint draws as streak density and the brush and sponge
+ * polish back; where the shell was actually pushed in is the dents' business.
  */
 const SCRATCH_PER_SEVERITY_MPS = 0.06;
 /** One collision cannot add more than this much cosmetic damage. */
 const SCRATCH_PER_IMPACT_CAP = 0.3;
+/**
+ * Unexplained speed loss that dents rather than only scuffs, m/s. Above the scratch
+ * threshold on purpose: brushing a post marks the paint, it takes a real blow — a
+ * rock at town speed, another car — to move the metal.
+ */
+const DENT_IMPACT_THRESHOLD_MPS = 3;
+/** Dent depth per m/s over the threshold, metres, before the ceiling. */
+const DENT_DEPTH_PER_SEVERITY_M = 0.012;
+/** A dent's smallest and largest spread across the panel, metres. */
+const DENT_RADIUS_MIN_M = 0.2;
+const DENT_RADIUS_MAX_M = 0.45;
+const DENT_RADIUS_PER_SEVERITY_M = 0.02;
+
+/**
+ * The dent a collision of `severityMps` leaves at a struck point on the chassis box,
+ * pushed horizontally along (pushX, pushZ); null below the dent threshold. A harder
+ * blow both deepens and widens it — a shunt folds a wide area in, it does not punch a
+ * deep narrow hole. Exported so the car lab's "random dents" are the same dents a
+ * real crash makes.
+ */
+export function impactDent(
+  severityMps: number,
+  x: number,
+  y: number,
+  z: number,
+  pushX: number,
+  pushZ: number,
+): BodyDent | null {
+  const over = severityMps - DENT_IMPACT_THRESHOLD_MPS;
+  if (!(over > 0)) return null;
+  return {
+    x,
+    y,
+    z,
+    nx: pushX,
+    ny: 0,
+    nz: pushZ,
+    radius: clamp(DENT_RADIUS_MIN_M + over * DENT_RADIUS_PER_SEVERITY_M, DENT_RADIUS_MIN_M, DENT_RADIUS_MAX_M),
+    depth: Math.min(MAX_BODY_DENT_DEPTH_M, 0.015 + over * DENT_DEPTH_PER_SEVERITY_M),
+  };
+}
+
 /**
  * Suspension and solver noise are below 0.35 m/s once the tyres' force ceiling is
  * removed; keeping that margin stops ordinary road seams becoming collision signals.
@@ -2023,6 +2078,8 @@ export class Vehicle implements Rebasable {
   private readonly bouncePhase: number;
   /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
   private bodyGroup: THREE.Object3D | null = null;
+  /** This car's paint and dents, created with its visuals; see render/carsurface.ts. */
+  private surface: CarBodySurface | null = null;
   /**
    * `bodyGroup`'s scale AT REST, captured once in `buildVisuals`. `buildTemplate`
    * (render/carmodel.ts) bakes each model's own unit-correction factor into this
@@ -2199,6 +2256,17 @@ export class Vehicle implements Rebasable {
   private previousOwnDragRollingDeltaMps = 0;
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
+  /**
+   * The dent the collision in progress is making. One crash is classified as an
+   * impact on several consecutive steps while the solver works the car's momentum
+   * off; recording each as its own dent would deepen one blow by however many steps
+   * the solver needed. The strongest step stands for the whole collision, and the
+   * dent is recorded once the blows stop (or the car is saved mid-crash).
+   */
+  private pendingDent: BodyDent | null = null;
+  private pendingDentSeverityMps = 0;
+  private readonly contactScratch = { x: 0, y: 0, z: 0 };
+  private readonly contactNormalScratch = { x: 0, y: 0, z: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
@@ -3283,6 +3351,7 @@ export class Vehicle implements Rebasable {
     this.lastAuthBodyDirt = this.localBodyDirt;
     this.lastAuthBodyScratches = this.localBodyScratches;
     this.bodyConditionEmitTimer = 0;
+    this.flushPendingDent();
 
     if (this.odoAccum > 0) {
       this.world.apply({ t: 'car_odometer', carId: this.car.id, metres: this.odoAccum });
@@ -3359,15 +3428,7 @@ export class Vehicle implements Rebasable {
       this.cooling.setTemperature(this.localTemp);
     }
 
-    if (
-      this.car.dirt !== this.lastAuthBodyDirt ||
-      this.car.scratches !== this.lastAuthBodyScratches
-    ) {
-      this.localBodyDirt = clamp(this.car.dirt, 0, 1);
-      this.localBodyScratches = clamp(this.car.scratches, 0, 1);
-      this.lastAuthBodyDirt = this.localBodyDirt;
-      this.lastAuthBodyScratches = this.localBodyScratches;
-    }
+    this.resyncBodyCondition();
 
     // The solver runs between fixedUpdate calls. Sampling here therefore compares
     // its completed result against the velocity cached before the prior solve.
@@ -3988,7 +4049,7 @@ export class Vehicle implements Rebasable {
       if (!w.grounded) continue;
       dirtGain +=
         (wheelDistance *
-          SURFACES[w.groundSurface].dust *
+          Math.max(BODY_DIRT_ROAD_FILM, SURFACES[w.groundSurface].dust) *
           (1 + clamp(Math.abs(w.slipRatio), 0, 2) + w.slideT)) /
         BODY_DIRT_TYRE_METRES_TO_FULL;
     }
@@ -4154,7 +4215,12 @@ export class Vehicle implements Rebasable {
           this.localBodyScratches = clamp(this.localBodyScratches + scratchGain, 0, 1);
           bodyConditionChanged = true;
         }
+        if (severityMps > DENT_IMPACT_THRESHOLD_MPS) this.recordDentBlow(severityMps);
       }
+    }
+    // The collision is over once a step passes without a dent-worthy blow.
+    if (!this.impactThisStep || this.impactState.severityMps <= DENT_IMPACT_THRESHOLD_MPS) {
+      this.flushPendingDent();
     }
 
     // Odometer: metres travelled forward this tick, emitted in throttled batches.
@@ -4338,6 +4404,108 @@ export class Vehicle implements Rebasable {
     this.snapshotPrimed = false;
   }
 
+  /**
+   * Turns one classified blow into the collision's dent: where the chassis box was
+   * struck, pushed along the direction the blow travelled.
+   *
+   * The point comes from the contact the solver actually resolved against this
+   * car's box — a corner clipped on a rock dents the corner — ignoring near-vertical
+   * contacts, which are a rolled car resting on the ground rather than what hit it.
+   * Without a usable contact (the blow came from a shove, not a collider) the blow's
+   * own direction is followed out from the box centre to its surface instead.
+   */
+  private recordDentBlow(severityMps: number): void {
+    const fromX = this.impactState.localX;
+    const fromZ = this.impactState.localZ;
+    const horizontal = Math.hypot(fromX, fromZ);
+    if (!(horizontal > 1e-6)) return;
+    const pushX = -fromX / horizontal;
+    const pushZ = -fromZ / horizontal;
+    if (
+      this.pendingDent &&
+      this.pendingDent.nx * pushX + this.pendingDent.nz * pushZ < 0.5
+    ) {
+      this.flushPendingDent();
+    }
+    if (this.pendingDent && severityMps <= this.pendingDentSeverityMps) return;
+
+    const half = this.measure.halfExtents;
+    const offset = this.chassisCollider.translationWrtParent() ?? { x: 0, y: 0, z: 0 };
+    const point = this.contactScratch;
+    const normal = this.contactNormalScratch;
+    // The manifold that took the most impulse, at its impulse-weighted centre: a
+    // square hit on a wall touches all four nose corners of the box and dents the
+    // middle, a rock clipped with one corner dents that corner.
+    let bestImpulse = 0;
+    this.physics.world.contactPairsWith(this.chassisCollider, (other) => {
+      this.physics.world.contactPair(this.chassisCollider, other, (manifold, flipped) => {
+        if (manifold.numSolverContacts() === 0) return;
+        manifold.normal(normal);
+        if (Math.abs(normal.y) > 0.7) return;
+        let total = 0;
+        let sx = 0;
+        let sy = 0;
+        let sz = 0;
+        for (let i = 0; i < manifold.numContacts(); i++) {
+          const impulse = manifold.contactImpulse(i);
+          if (!(impulse > 0)) continue;
+          const local = flipped
+            ? manifold.localContactPoint2(i, normal)
+            : manifold.localContactPoint1(i, normal);
+          if (!local) continue;
+          total += impulse;
+          sx += local.x * impulse;
+          sy += local.y * impulse;
+          sz += local.z * impulse;
+        }
+        if (total <= bestImpulse) return;
+        bestImpulse = total;
+        point.x = sx / total + offset.x;
+        point.y = sy / total + offset.y;
+        point.z = sz / total + offset.z;
+      });
+    });
+    if (bestImpulse <= 0) {
+      const reach = Math.min(
+        Math.abs(fromX) > 1e-6 ? half[0] / Math.abs(fromX / horizontal) : Infinity,
+        Math.abs(fromZ) > 1e-6 ? half[2] / Math.abs(fromZ / horizontal) : Infinity,
+      );
+      point.x = (fromX / horizontal) * reach;
+      point.y = offset.y;
+      point.z = (fromZ / horizontal) * reach;
+    }
+
+    this.pendingDentSeverityMps = severityMps;
+    this.pendingDent = impactDent(severityMps, point.x, point.y, point.z, pushX, pushZ);
+  }
+
+  /** Records the collision in progress as one dent in authoritative state. */
+  private flushPendingDent(): void {
+    if (!this.pendingDent) return;
+    this.world.apply({ t: 'car_body_dent', carId: this.car.id, dent: this.pendingDent });
+    this.pendingDent = null;
+    this.pendingDentSeverityMps = 0;
+  }
+
+  /** Adopts a shell condition some other system (the brush and sponge) wrote into state. */
+  private resyncBodyCondition(): void {
+    if (
+      this.car.dirt === this.lastAuthBodyDirt &&
+      this.car.scratches === this.lastAuthBodyScratches
+    ) {
+      return;
+    }
+    this.localBodyDirt = clamp(this.car.dirt, 0, 1);
+    this.localBodyScratches = clamp(this.car.scratches, 0, 1);
+    this.lastAuthBodyDirt = this.localBodyDirt;
+    this.lastAuthBodyScratches = this.localBodyScratches;
+  }
+
+  /** This car's body-condition renderer; null until its visuals are built. */
+  get bodySurface(): CarBodySurface | null {
+    return this.surface;
+  }
+
   syncVisuals(alpha: number): void {
     const controller = this.controller;
     if (!controller) return;
@@ -4361,6 +4529,15 @@ export class Vehicle implements Rebasable {
     } else if (this.bodyGroup) {
       this.bodyGroup.scale.copy(this.bodyRestScale);
     }
+
+    // Uniform writes only when a value moved, and a dent pass only when the ring
+    // changed; both are no-ops on an ordinary frame. Dirt comes from the live
+    // accumulator, so fresh road dust lands on the shell this frame rather than at
+    // the next throttled state emit. The resync first is for a PARKED car being
+    // washed: nothing runs its fixed step, and the sponge writes state directly.
+    this.resyncBodyCondition();
+    this.surface?.setCondition(this.localBodyDirt, this.localBodyScratches);
+    this.surface?.setDents(this.car.dents);
 
     this.applyRearLightState();
 
@@ -5549,6 +5726,12 @@ export class Vehicle implements Rebasable {
       this.reverseLightMounts,
     );
     this.applyRearLightState();
+
+    // After the lamp mounts on purpose: beams are aimed from the authored lamp
+    // bounds, so a crumpled nose bends its lamps without swinging its beams.
+    this.surface = instance.surface;
+    this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
+    this.surface.setDents(this.car.dents);
   }
 
   private bindLampMaterials(
@@ -5786,6 +5969,8 @@ export class Vehicle implements Rebasable {
     for (const material of this.reverseLightMaterials) material.dispose();
     for (const material of this.leftBlinkerMaterials) material.dispose();
     for (const material of this.rightBlinkerMaterials) material.dispose();
+    this.surface?.dispose();
+    this.surface = null;
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.bodyGroup = null;
     this.bodyRestScale.set(1, 1, 1);

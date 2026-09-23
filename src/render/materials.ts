@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { MATERIALS_CONFIG } from '../config';
+import { MAX_BODY_DENTS } from '../game/state';
 import { applyComicShading } from './comic';
 
 /** Per-instance uniforms for condition-shaded materials. */
@@ -25,7 +26,43 @@ interface ConditionUniforms {
   readonly fieldOrigin: { value: THREE.Vector3 };
 }
 
-interface CarPaletteUniforms extends ConditionUniforms {
+/**
+ * Where on a car the road reaches, per model, in chassis-local metres.
+ *
+ * Desert dust is not a uniform film: the tyres throw it up behind each wheel and
+ * along the sills, and the low-pressure wake behind a moving car holds a cloud of it
+ * against the tail. Placing that needs to know how tall the body is and where its
+ * wheels are, which is exactly what `CarModelMeasure` already carries.
+ */
+export interface CarBodyFrame {
+  /** Chassis-box half extents. */
+  readonly halfExtents: readonly [number, number, number];
+  readonly frontAxleZ: number;
+  readonly rearAxleZ: number;
+  /** Wheel-centre height at rest. */
+  readonly wheelCentreY: number;
+  readonly wheelRadius: number;
+}
+
+/** A dent as the paint sees it: where the panel was struck, and how wide. */
+export interface CarDentMark {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+interface CarBodyUniforms {
+  readonly dirt: { value: number };
+  readonly scratches: { value: number };
+  /** Offset into the noise field, so same-model cars do not wear identically. */
+  readonly fieldOrigin: { value: THREE.Vector3 };
+  readonly bodyHalf: { value: THREE.Vector3 };
+  /** Front axle Z, rear axle Z, wheel-centre Y, wheel radius. */
+  readonly axles: { value: THREE.Vector4 };
+  /** Dent centres on the skin plus radius; the first `dentCount` are live. */
+  readonly dents: { value: THREE.Vector4[] };
+  readonly dentCount: { value: number };
   readonly palettePaint: { value: number };
   readonly paintColor: { value: THREE.Color };
   readonly paintCell: { value: THREE.Vector2 };
@@ -38,7 +75,7 @@ interface CarPaletteUniforms extends ConditionUniforms {
  * compiled program is holding. A WeakMap keeps the objects alive for exactly as long
  * as the material, and lets setCondition write values even before first render.
  */
-const carBodyUniforms = new WeakMap<THREE.Material, CarPaletteUniforms>();
+const carBodyUniforms = new WeakMap<THREE.Material, CarBodyUniforms>();
 const conditionUniforms = new WeakMap<THREE.Material, ConditionUniforms>();
 
 
@@ -60,12 +97,19 @@ function flatKey(color: number, roughness: number): string {
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v2';
 
 /**
- * Driven-car paint keeps independent dirt and palette uniforms without the removed
- * localized dent program.
+ * Every car's paint — driven, traffic, parked wreck and courier — shares this one
+ * program. What differs between a showroom car and a sand-blasted wreck is uniform
+ * VALUES, so a POI full of wrecks entering the view compiles nothing.
  */
-const CAR_BODY_PROGRAM_KEY = 'condition-rust-dirt-body-v11';
-/** Static Soviet cars need atlas recolouring, but no dynamic wear calculations. */
-const CAR_PALETTE_PROGRAM_KEY = 'car-palette-paint-v1';
+const CAR_BODY_PROGRAM_KEY = 'car-body-condition-v1';
+
+/**
+ * Name of the vertex attribute carrying each paint vertex's chassis-local position
+ * (see `render/carmodel.ts`). Car bodies are several meshes, each with its own local
+ * frame and a non-uniform fit scale, so neither the mesh-local nor the world position
+ * can say "this is the sill" or "this is the tail" — only the chassis frame can.
+ */
+export const CAR_BODY_POSITION_ATTRIBUTE = 'carBodyPos';
 
 // ---------------------------------------------------------------------------
 // GLSL patch
@@ -97,13 +141,11 @@ const WORLD_POS_HOOK =
   '\tvCondBodyPos = transformed * condScale + uCondFieldOrigin;\n' +
   '\tvCondBodyBasis = mat3( condAxX / condScale.x, condAxY / condScale.y, condAxZ / condScale.z );';
 
-const CONDITION_PARS = `
-uniform float uDirt;
-uniform float uRust;
-uniform float uPalettePaint;
-uniform vec3 uPalettePaintColor;
-uniform vec2 uPalettePaintCell;
-
+/**
+ * 3D value noise on a cheap arithmetic hash, shared by the part and car programs.
+ * Returns 0..1 with a mean of 0.5.
+ */
+const CONDITION_NOISE = `
 float condHash( vec3 p ) {
   p = fract( p * 0.3183099 + vec3( 0.1, 0.2, 0.3 ) );
   p *= 17.0;
@@ -125,6 +167,12 @@ float condNoise( vec3 p ) {
       f.y ),
     f.z );
 }
+`;
+
+const CONDITION_PARS = `
+uniform float uDirt;
+uniform float uRust;
+${CONDITION_NOISE}
 
 float condFbm( vec3 p ) {
   return condNoise( p ) * 0.55
@@ -150,28 +198,200 @@ vec2 condRust( vec3 p ) {
 #define COND_PIT_DEPTH 0.015
 
 #include <map_pars_fragment>`;
-const PALETTE_PAINT_PARS = `
+// ---------------------------------------------------------------------------
+// Car paint
+// ---------------------------------------------------------------------------
+
+/**
+ * The car program's vertex side: nothing but a hand-off of the chassis-local
+ * position. The fit, the ride drop and any dents have already been baked into the
+ * geometry on the CPU, so the vertex shader stays stock.
+ */
+const CAR_BODY_VERTEX_PARS = `#include <common>
+attribute vec3 ${CAR_BODY_POSITION_ATTRIBUTE};
+varying vec3 vCarBodyPos;`;
+const CAR_BODY_VERTEX_HOOK = `#include <worldpos_vertex>
+vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
+
+/**
+ * Fragment declarations for car paint.
+ *
+ * `carArch` is the dust fan one axle's tyres throw: it starts at the tyre and
+ * reaches further BEHIND the wheel than in front of it, which is where the arch lip
+ * and the next panel back catch it on every real car driven off tarmac.
+ *
+ * `carScratchLayer` is one layer of fine scratches: at most one short straight
+ * streak per cell, present with probability `density`, running mostly along the
+ * panel the way a kerb, a branch or another car's bumper drags across it. Its pixel
+ * footprint is taken before the per-cell early-out, because a derivative inside
+ * non-uniform control flow is undefined.
+ */
+const CAR_BODY_PARS = `#include <common>
+#define CAR_DENT_MARKS ${MAX_BODY_DENTS}
+uniform float uDirt;
+uniform float uScratch;
+uniform vec3 uCarFieldOrigin;
+uniform vec3 uCarBodyHalf;
+uniform vec4 uCarAxles;
+uniform vec4 uCarDents[ CAR_DENT_MARKS ];
+uniform int uCarDentCount;
 uniform float uPalettePaint;
 uniform vec3 uPalettePaintColor;
 uniform vec2 uPalettePaintCell;
+varying vec3 vCarBodyPos;
+${CONDITION_NOISE}
+float carArch( vec3 p, float axleZ, float forward ) {
+  float ahead = ( p.z - axleZ ) * forward;
+  vec2 d = vec2( p.y - uCarAxles.z, ahead * ( ahead < 0.0 ? 0.55 : 1.25 ) );
+  return 1.0 - smoothstep( uCarAxles.w * 0.95, uCarAxles.w * 2.1, length( d ) );
+}
 
-#include <map_pars_fragment>`;
+float carScratchLayer( vec2 uv, float cell, float density, float seed ) {
+  vec2 g = uv / cell;
+  float aa = max( fwidth( g.x ) + fwidth( g.y ), 1e-4 );
+  vec2 id = floor( g );
+  if ( condHash( vec3( id, seed ) ) > density ) return 0.0;
+  float h1 = condHash( vec3( id, seed + 19.0 ) );
+  float h2 = condHash( vec3( id, seed + 43.0 ) );
+  float angle = ( h1 - 0.5 ) * 0.8 + step( 0.82, h2 ) * ( h1 - 0.5 ) * 2.4;
+  vec2 dir = vec2( cos( angle ), sin( angle ) );
+  vec2 f = fract( g ) - 0.5 - ( vec2( h1, h2 ) - 0.5 ) * 0.3;
+  float across = abs( dot( f, vec2( -dir.y, dir.x ) ) );
+  float along = abs( dot( f, dir ) );
+  float halfLength = 0.3 + 0.18 * h2;
+  float width = 0.008 + 0.012 * h1;
+  float line = 1.0 - smoothstep( width, width + aa, across );
+  line *= 1.0 - smoothstep( halfLength * 0.7, halfLength, along );
+  // A scratch thinner than a pixel cannot be drawn, only averaged: fading it by its
+  // coverage is what stops a distant car sparkling instead of looking scuffed.
+  return line * min( 1.0, 3.0 * width / aa );
+}`;
 
 /**
  * The Soviet atlas is a 9x2 sheet of flat colour swatches. Only the main body mesh
  * receives this material, and only its authored paint cell is replaced; glass,
  * chrome, lamps, wheels and rally decals keep their original cells.
+ *
+ * `carPaintPanel` tells the condition chunk which fragments are paint. Scratches in
+ * chrome, rubber and black trim cells barely show, so they are drawn faintly there.
  */
-const CAR_PAINT_MAP = `
+const CAR_PAINT_MAP = `float carPaintPanel = 1.0;
 #include <map_fragment>
 #ifdef USE_MAP
 if ( uPalettePaint > 0.5 ) {
   vec2 carPaintCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
   if ( all( equal( carPaintCell, uPalettePaintCell ) ) ) {
     diffuseColor.rgb = uPalettePaintColor;
+  } else {
+    carPaintPanel = 0.3;
   }
 }
 #endif`;
+
+/**
+ * Dirt and scratches on car paint, in the car's own chassis frame.
+ *
+ * Injected after the normal is final but before `lights_physical_fragment` builds
+ * the BRDF inputs, so it can both read the shading normal and still change
+ * diffuseColor, roughnessFactor and metalnessFactor.
+ *
+ * THE GATE. Everything below sits behind one uniform test that is coherent across a
+ * whole draw call, so a clean car — a fresh spawn, a courier — pays one comparison
+ * per fragment and none of the noise. Each half has its own gate as well, so a car
+ * that is only dusty never evaluates a scratch cell.
+ *
+ * DIRT reads like the desert that threw it: a warm sand crust, heaviest along the
+ * sills and valances, in a fan behind each wheel and across the tail (the wake of a
+ * moving car holds a dust cloud against it), climbing the body as the level rises;
+ * above that only a light film that settles more on the roof and bonnet. It is
+ * matt, and it hides whatever paint and scratches are under it.
+ *
+ * SCRATCHES are sparse fine streaks of paler, duller paint whose density follows
+ * `uScratch`, weighted towards the nose and tail corners, the flanks at bumper to
+ * belt height, and around every dent — the places a body actually meets the world.
+ * The streaks run along whichever panel face the fragment lies on, found from the
+ * screen-space derivative of the chassis position; swirl marks too fine to draw are
+ * averaged into a general loss of gloss.
+ *
+ * Both are sampled at the UNDENTED chassis position the attribute carries, so a
+ * scratch or a dust patch stays on the metal it formed on when that metal later
+ * moves.
+ */
+const CAR_BODY_CONDITION = `#include <normal_fragment_maps>
+if ( uDirt + uScratch > 0.0005 ) {
+  vec3 carP = vCarBodyPos;
+  vec3 carH = uCarBodyHalf;
+  vec3 carQ = abs( carP ) / carH;
+  float carHeight = clamp( ( carP.y + carH.y ) / ( 2.0 * carH.y ), 0.0, 1.0 );
+  float carForward = uCarAxles.x >= uCarAxles.y ? 1.0 : -1.0;
+  float carAlong = carP.z * carForward / carH.z;
+
+  if ( uScratch > 0.0005 ) {
+    // Where a body meets the world: bumper corners at either end, the sills and door
+    // bottoms that kerbs and scrub brush reach, the arch lips stones are thrown at,
+    // and every dent. The roof and the upper flanks stay nearly clean.
+    float belt = 1.0 - smoothstep( 0.45, 0.8, carHeight );
+    float ends = smoothstep( 0.72, 0.98, carQ.z ) * ( 0.35 + 0.65 * belt );
+    float corners = ends * ( 0.6 + 0.4 * smoothstep( 0.55, 0.95, carQ.x ) );
+    float sills = smoothstep( 0.8, 0.98, carQ.x ) * ( 1.0 - smoothstep( 0.18, 0.5, carHeight ) );
+    float lips = max(
+      carArch( carP, uCarAxles.x, carForward ),
+      carArch( carP, uCarAxles.y, carForward )
+    );
+    float zone = max( max( corners, sills * 0.75 ), lips * 0.55 );
+    for ( int i = 0; i < CAR_DENT_MARKS; i++ ) {
+      if ( i >= uCarDentCount ) break;
+      vec4 dent = uCarDents[ i ];
+      zone += 1.0 - smoothstep( dent.w * 0.5, dent.w * 1.8, distance( carP, dent.xyz ) );
+    }
+    zone = min( zone, 1.0 );
+    float density = uScratch * ( 0.04 + 0.96 * zone );
+    vec3 carFace = abs( cross( dFdx( carP ), dFdy( carP ) ) );
+    vec2 carUv = carFace.x > max( carFace.y, carFace.z )
+      ? carP.zy
+      : ( carFace.z > carFace.y ? carP.xy : carP.xz );
+    carUv += uCarFieldOrigin.xy;
+    // Fine marks, then the long horizontal scrapes a kerb or another car leaves.
+    float lines = max(
+      carScratchLayer( carUv, 0.12, density * 0.8, 3.0 ),
+      carScratchLayer( vec2( carUv.x * 0.35, carUv.y ), 0.14, density * 0.45, 11.0 )
+    ) * carPaintPanel;
+    // Through the clear top of the paint to the grey primer and bare steel under it:
+    // pale on dark paint, dark on pale paint, dull on both.
+    vec3 scratched = mix( diffuseColor.rgb, vec3( 0.3, 0.29, 0.27 ), 0.8 );
+    float swirl = density * 0.45 * carPaintPanel;
+    diffuseColor.rgb = mix( diffuseColor.rgb, scratched, max( lines * 0.85, swirl * 0.12 ) );
+    roughnessFactor = mix( roughnessFactor, 0.7, swirl );
+    roughnessFactor = mix( roughnessFactor, 0.82, lines );
+  }
+
+  if ( uDirt > 0.0005 ) {
+    vec3 carN = carP + uCarFieldOrigin;
+    float low = 1.0 - smoothstep( 0.04, 0.6, carHeight );
+    float flank = smoothstep( 0.45, 0.9, carQ.x );
+    float arch = max(
+      carArch( carP, uCarAxles.x, carForward ),
+      carArch( carP, uCarAxles.y, carForward )
+    ) * ( 0.35 + 0.65 * flank );
+    float tail = smoothstep( 0.6, 0.97, -carAlong ) * ( 1.0 - 0.5 * carHeight );
+    float exposure = max( max( low, arch ), tail );
+    float mottle = condNoise( carN * 2.4 );
+    // Run-off streaks: long vertically, short across, on the lower body only.
+    float drip = condNoise( vec3( carN.x * 6.0, carN.y * 0.8, carN.z * 6.0 ) );
+    float crust = uDirt * ( 0.15 + 1.5 * exposure )
+      + ( mottle - 0.5 ) * 0.55 * uDirt
+      + ( drip - 0.5 ) * 0.35 * uDirt * low;
+    crust = smoothstep( 0.1, 0.9, crust );
+    // View-space normal back to world: settling dust only knows which way is up.
+    float carUp = saturate( ( vec4( normal, 0.0 ) * viewMatrix ).y );
+    float film = uDirt * ( 0.22 + 0.33 * carUp ) * ( 0.65 + 0.7 * mottle );
+    float cover = saturate( max( crust, film ) );
+    vec3 dust = mix( vec3( 0.58, 0.46, 0.3 ), vec3( 0.4, 0.29, 0.16 ), crust );
+    diffuseColor.rgb = mix( diffuseColor.rgb, dust, cover * ( 0.6 + 0.35 * crust ) );
+    roughnessFactor = mix( roughnessFactor, 0.96, cover );
+    metalnessFactor = mix( metalnessFactor, 0.0, cover );
+  }
+}`;
 
 // Injected after the stock roughness/metalness factors are computed but before the
 // BRDF consumes them, so we modify the *inputs* (diffuseColor, roughnessFactor,
@@ -262,40 +482,30 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
     .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
 }
 
-/** Binds driven-car dirt and palette paint without localized collision shading. */
+/** Binds one car's paint uniforms: palette recolour, dirt, scratches and dent marks. */
 function patchCarBodyShader(
   shader: WebGLProgramParametersWithUniforms,
-  uniforms: CarPaletteUniforms,
+  uniforms: CarBodyUniforms,
 ): void {
   shader.uniforms.uDirt = uniforms.dirt;
-  shader.uniforms.uRust = uniforms.rust;
+  shader.uniforms.uScratch = uniforms.scratches;
+  shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
+  shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
+  shader.uniforms.uCarAxles = uniforms.axles;
+  shader.uniforms.uCarDents = uniforms.dents;
+  shader.uniforms.uCarDentCount = uniforms.dentCount;
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
-  shader.uniforms.uCondFieldOrigin = uniforms.fieldOrigin;
 
   shader.vertexShader = shader.vertexShader
-    .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
-    .replace('#include <worldpos_vertex>', WORLD_POS_HOOK);
+    .replace('#include <common>', CAR_BODY_VERTEX_PARS)
+    .replace('#include <worldpos_vertex>', CAR_BODY_VERTEX_HOOK);
 
   shader.fragmentShader = shader.fragmentShader
-    .replace('varying vec3 vViewPosition;', VERTEX_VARYING)
-    .replace('#include <map_pars_fragment>', CONDITION_PARS)
+    .replace('#include <common>', CAR_BODY_PARS)
     .replace('#include <map_fragment>', CAR_PAINT_MAP)
-    .replace('#include <normal_fragment_maps>', CONDITION_NORMAL)
-    .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
-}
-/** Cheap atlas recolouring for static cars; deliberately excludes dynamic wear. */
-function patchCarPaletteShader(
-  shader: WebGLProgramParametersWithUniforms,
-  uniforms: CarPaletteUniforms,
-): void {
-  shader.uniforms.uPalettePaint = uniforms.palettePaint;
-  shader.uniforms.uPalettePaintColor = uniforms.paintColor;
-  shader.uniforms.uPalettePaintCell = uniforms.paintCell;
-  shader.fragmentShader = shader.fragmentShader
-    .replace('#include <map_pars_fragment>', PALETTE_PAINT_PARS)
-    .replace('#include <map_fragment>', CAR_PAINT_MAP);
+    .replace('#include <normal_fragment_maps>', CAR_BODY_CONDITION);
 }
 
 
@@ -316,17 +526,6 @@ function wearFieldOrigin(seed: number): THREE.Vector3 {
 
 /** Parts carry no id here, so their patterns are spread by creation order. */
 let wearFieldSerial = 0;
-
-/**
- * Places one material's wear pattern within the body-space noise field. Cars pass a
- * hash of their id, so a saved car rusts in the same places every time it loads.
- */
-export function setConditionFieldOrigin(material: THREE.Material, seed: number): void {
-  const uniforms = carBodyUniforms.get(material) ?? conditionUniforms.get(material);
-  if (uniforms === undefined) return;
-  uniforms.fieldOrigin.value.copy(wearFieldOrigin(seed));
-}
-
 
 /**
  * A MeshStandardMaterial that rusts and dirties. Returns a fresh instance every call
@@ -394,7 +593,7 @@ const CAR_PAINT_METALNESS = MATERIALS_CONFIG.paintMetalness;
  * Clones an authored paint slot with one shared automotive finish.
  * Both model packs now differ only in their colour/texture, not in their BRDF.
  */
-export function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
+function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
   if (source instanceof THREE.MeshStandardMaterial) {
     const material = source.clone();
     material.roughness = CAR_PAINT_ROUGHNESS;
@@ -438,15 +637,35 @@ export function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Materi
 /**
  * Clones one eligible paint slot for a car instance and gives it independent body
  * condition uniforms. The source remains untouched for every other car sharing it.
+ *
+ * `seed` is the car's appearance hash: wear is sampled in the body's own frame, so
+ * without it two cars of one model would scuff and dust in identical places, and
+ * with it a saved car wears in the same places every time it loads.
  */
-export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Material {
+export function makeCarBodyConditionMaterial(
+  source: THREE.Material,
+  frame: CarBodyFrame,
+  seed: number,
+): THREE.Material {
   const material = makeCarPaintFinishMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
 
-  const uniforms: CarPaletteUniforms = {
+  const half = frame.halfExtents;
+  const uniforms: CarBodyUniforms = {
     dirt: { value: 0 },
-    rust: { value: 0 },
-    fieldOrigin: { value: wearFieldOrigin(++wearFieldSerial) },
+    scratches: { value: 0 },
+    fieldOrigin: { value: wearFieldOrigin(seed) },
+    bodyHalf: { value: new THREE.Vector3(half[0], half[1], half[2]) },
+    axles: {
+      value: new THREE.Vector4(
+        frame.frontAxleZ,
+        frame.rearAxleZ,
+        frame.wheelCentreY,
+        frame.wheelRadius,
+      ),
+    },
+    dents: { value: Array.from({ length: MAX_BODY_DENTS }, () => new THREE.Vector4()) },
+    dentCount: { value: 0 },
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
@@ -454,29 +673,6 @@ export function makeCarBodyConditionMaterial(source: THREE.Material): THREE.Mate
   carBodyUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
   material.customProgramCacheKey = () => CAR_BODY_PROGRAM_KEY;
-  return material;
-}
-/**
- * Clones a static Soviet paint slot with only its atlas-colour replacement. Static
- * scenery never accumulates wear, so running body dirt noise on every parked car
- * wastes fragment work.
- */
-export function makeCarPalettePaintMaterial(source: THREE.Material): THREE.Material {
-  const material = makeCarPaintFinishMaterial(source);
-  if (!(material instanceof THREE.MeshStandardMaterial)) return material;
-
-  const uniforms: CarPaletteUniforms = {
-    dirt: { value: 0 },
-    rust: { value: 0 },
-    // Static bodies never wear, but the field origin is part of the shared shape.
-    fieldOrigin: { value: new THREE.Vector3() },
-    palettePaint: { value: 0 },
-    paintColor: { value: new THREE.Color() },
-    paintCell: { value: new THREE.Vector2() },
-  };
-  carBodyUniforms.set(material, uniforms);
-  material.onBeforeCompile = (shader) => patchCarPaletteShader(shader, uniforms);
-  material.customProgramCacheKey = () => CAR_PALETTE_PROGRAM_KEY;
   return material;
 }
 
@@ -494,24 +690,39 @@ export function setCarBodyPalettePaint(
   uniforms.paintCell.value.set(cell[0], cell[1]);
 }
 
-/** Writes cosmetic shell dirt for one car; collisions no longer alter its shader. */
-export function setCarBodyCondition(carRoot: THREE.Object3D, dirt: number): void {
-  carRoot.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const material = mesh.material as THREE.Material | THREE.Material[];
-    if (Array.isArray(material)) {
-      for (const m of material) writeCarBodyCondition(m, dirt);
-    } else {
-      writeCarBodyCondition(material, dirt);
-    }
-  });
+/**
+ * Writes one car's shell dirt and scratches into the paint materials it was
+ * instanced with. Uniform writes into handles captured once, so a car driving
+ * through dust can call this every frame without walking its scene graph.
+ */
+export function setCarBodyCondition(
+  paint: readonly THREE.Material[],
+  dirt: number,
+  scratches: number,
+): void {
+  for (const material of paint) {
+    const uniforms = carBodyUniforms.get(material);
+    if (uniforms === undefined) continue;
+    uniforms.dirt.value = dirt;
+    uniforms.scratches.value = scratches;
+  }
 }
 
-function writeCarBodyCondition(material: THREE.Material, dirt: number): void {
-  const uniforms = carBodyUniforms.get(material);
-  if (uniforms === undefined) return;
-  uniforms.dirt.value = dirt;
+/** Tells one car's paint where its dents are, so scratches gather around them. */
+export function setCarBodyDentMarks(
+  paint: readonly THREE.Material[],
+  marks: readonly CarDentMark[],
+): void {
+  const count = Math.min(marks.length, MAX_BODY_DENTS);
+  for (const material of paint) {
+    const uniforms = carBodyUniforms.get(material);
+    if (uniforms === undefined) continue;
+    for (let i = 0; i < count; i++) {
+      const mark = marks[i]!;
+      uniforms.dents.value[i]!.set(mark.x, mark.y, mark.z, mark.radius);
+    }
+    uniforms.dentCount.value = count;
+  }
 }
 
 /** Applies cosmetic wear, with irreversible engine destruction forced visibly burnt. */

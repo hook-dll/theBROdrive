@@ -345,6 +345,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     // The Soviet boxes: the classics' own casings, the Volga's longer three- and
     // four-speeds, the Samara transaxle (which carries its final drive) and the
     // Nivas, which carry a transfer case as well.
+    case 'gearbox_lada_4_2102':
+    case 'gearbox_lada_4_2105':
     case 'gearbox_lada_4_tall':
     case 'gearbox_lada_4_1600': scale = 0.92; manual = true; fins = false; break;
     case 'gearbox_lada_5': scale = 1.0; manual = true; fins = false; break;

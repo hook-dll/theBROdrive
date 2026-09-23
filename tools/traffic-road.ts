@@ -36,19 +36,15 @@ import * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
+import { GameWorld, newWorldState } from '../src/game/state';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
   loadCarModel,
   preloadCarModels,
 } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { benchCarState } from './benchcar';
 import { Autopilot, roadPaceCeiling, type AutopilotMode } from '../src/vehicle/autopilot';
-import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { installAssetShim } from './assetshim';
 import { HazardIndex } from '../src/world/hazards';
@@ -264,52 +260,26 @@ if (EGO_START_S !== START_S) {
   console.log(`  ego starts at s ${EGO_START_S} — ${EGO_START_S - START_S} m past the first clear point`);
 }
 
-function egoState(): CarState {
-  const def = carModel(EGO_MODEL);
-  const engine = variant(def.engineId).engine;
-  const sample = road.sampleAt(EGO_START_S);
-  const point = road.offsetPoint(EGO_START_S, road.laneCentreAt(EGO_START_S, 0));
-  return {
-    id: 'ego',
-    modelId: EGO_MODEL,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('ego', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: point.x,
-    // THE HEIGHT OF THE COLLIDER, NOT THE HEIGHT OF THE SPINE.
-    //
-    // `offsetPoint` returns the road's centreline geometry; the slab the wheels
-    // actually touch is `roadSurfaceY`, which adds the crown, the camber and the
-    // surface's own bumps on top of it. Where that is higher than the spine the car
-    // spawns INSIDE the mesh, and Rapier resolves the penetration by pinning it:
-    // measured on seed 545124 as an ego that sat on its own lane centre, with a clear
-    // corridor and nothing in front of it, for the whole four-minute run.
-    y: carSpawnYAboveGround(
-      carModelMeasure(EGO_MODEL),
-      roadSurfaceY(road, surface, EGO_START_S, road.laneCentreAt(EGO_START_S, 0), point.x, point.z),
-      0,
-    ),
-    z: point.z,
-    qx: 0,
-    qy: Math.sin(sample.heading / 2),
-    qz: 0,
-    qw: Math.cos(sample.heading / 2),
-  };
-}
-
-const egoCarState = egoState();
+const egoPoint = road.offsetPoint(EGO_START_S, road.laneCentreAt(EGO_START_S, 0));
+const egoCarState = benchCarState(EGO_MODEL, {
+  id: 'ego',
+  x: egoPoint.x,
+  // THE HEIGHT OF THE COLLIDER, NOT THE HEIGHT OF THE SPINE.
+  //
+  // `offsetPoint` returns the road's centreline geometry; the slab the wheels
+  // actually touch is `roadSurfaceY`, which adds the crown, the camber and the
+  // surface's own bumps on top of it. Where that is higher than the spine the car
+  // spawns INSIDE the mesh, and Rapier resolves the penetration by pinning it:
+  // measured on seed 545124 as an ego that sat on its own lane centre, with a clear
+  // corridor and nothing in front of it, for the whole four-minute run.
+  y: carSpawnYAboveGround(
+    carModelMeasure(EGO_MODEL),
+    roadSurfaceY(road, surface, EGO_START_S, road.laneCentreAt(EGO_START_S, 0), egoPoint.x, egoPoint.z),
+    0,
+  ),
+  z: egoPoint.z,
+  heading: road.sampleAt(EGO_START_S).heading,
+});
 // The stream treats the player's car as a real participant: it keeps its spawns clear
 // of it and reports it to oncoming drivers. A bench whose ego is not the driven car
 // measures a stream that cannot see the thing it is supposed to be driving around.

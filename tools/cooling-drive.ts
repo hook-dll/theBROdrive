@@ -17,10 +17,9 @@ import { emptyInput, type InputFrame } from '../src/core/input';
 import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState, DAY_LENGTH, type CarState } from '../src/game/state';
 import type { Item } from '../src/items/items';
-import { engineHeat, variant } from '../src/parts/registry';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
+import { engineHeat } from '../src/parts/registry';
+import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { carModel } from '../src/vehicle/carmodels';
 import { WorldOrigin } from '../src/world/origin';
 import { preloadCarModels } from '../src/render/carmodel';
 import { COLD_SOAK_C, ambientAirC, preferredRadiatorClass } from '../src/vehicle/cooling';
@@ -40,32 +39,14 @@ function check(label: string, ok: boolean, detail: string): void {
 }
 
 function carState(id: string, radiatorVariantId?: string, x = 0, z = 0): CarState {
-  const def = carModel(MODEL_ID);
   return {
-    id,
-    modelId: MODEL_ID,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
+    ...benchCarState(MODEL_ID, { id, x, z, radiatorVariantId }),
+    // Several tanks' worth, on purpose: the overheat and cool-down runs are long,
+    // and running dry mid-check would stall the engine for the wrong reason.
     fuelLitres: 200,
-    fuelKind: variant(def.engineId).engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
+    // Far more water than any core holds, also on purpose: "it can only hold the
+    // water its own core holds" checks that the fitted radiator clamps it.
     waterLitres: 40,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres, radiatorVariantId),
-    odometer: 0,
-    x,
-    y: 1.2,
-    z,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
   };
 }
 

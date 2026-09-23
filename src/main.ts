@@ -96,8 +96,8 @@ import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
-import { setCarBodyCondition } from './render/materials';
 import { advanceCloudShadows } from './render/cloudshadow';
+import { HeatHaze } from './render/heathaze';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -492,6 +492,8 @@ async function boot(): Promise<void> {
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
+  // Heat-haze inputs: surface heat and the ground the view is grazing.
+  const heatHaze = new HeatHaze(terrain);
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -577,9 +579,6 @@ async function boot(): Promise<void> {
   const vehicles = new Map<string, Vehicle>();
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
   const loadingModels = new Set<string>();
-  // Body dirt is the only dynamic shell material input. Cache its last value so
-  // rendering does not traverse every mesh when the condition is unchanged.
-  const appliedBodyDirt = new WeakMap<Vehicle, number>();
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
 
   /**
@@ -1972,16 +1971,7 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     frameProfiler?.begin('vehicles');
-    for (const vehicle of vehicles.values()) {
-      vehicle.syncVisuals(alpha);
-      // Dirt is read from the Vehicle's live accumulator rather than batched save
-      // state, so fresh road dust lands on the shell this frame.
-      const dirt = vehicle.bodyDirt;
-      if (appliedBodyDirt.get(vehicle) !== dirt) {
-        setCarBodyCondition(vehicle.root, dirt);
-        appliedBodyDirt.set(vehicle, dirt);
-      }
-    }
+    for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     traffic.syncVisuals(alpha);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
@@ -2135,18 +2125,6 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
-    // Eye height for heat haze. The exact local road frame is still useful near the
-    // corridor; farther out the same terrain method is the player-centred fine field.
-    const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
-    renderer.setHazeEyeHeight(
-      cam.y -
-        terrain.explorationHeightFromFrame(
-          cam.x + origin.x,
-          cam.z + origin.z,
-          camProjection.lateral,
-          camProjection.s,
-        ),
-    );
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
     // is all there is and hides the vista completely when there is more: at the 'vast'
@@ -2169,6 +2147,20 @@ async function boot(): Promise<void> {
       origin.z,
       s.settings.graphicsQuality,
       mobilePresentation,
+    );
+    // Heat haze, after the cloud field has advanced: the shade over the ground ahead
+    // is one of its inputs (render/heathaze.ts).
+    renderer.setHeatHaze(
+      heatHaze.update(frameDt, {
+        camera: renderer.camera,
+        originX: origin.x,
+        originZ: origin.z,
+        hintS: activeS,
+        sunHeight: sky.sunDirection.y,
+        timeOfDay: s.timeOfDay,
+        dayLength: DAY_LENGTH,
+        seed: world.seed,
+      }),
     );
     // The streamed distant weather fades on the same twilight band as the mirage
     // above, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
@@ -2389,7 +2381,7 @@ async function boot(): Promise<void> {
     const adaptationEligible = !adaptationFrozen && !sky.didBakeEnvironmentThisFrame;
     renderer.adaptResolution(adaptationEligible, true);
     rebasedThisFrame = false;
-    renderer.setHazeStrength(sky.dayFactor);
+    renderer.setDaylight(sky.dayFactor);
     renderer.setItemViewEffects(
       s.player.wornSunShades?.tint ?? null,
       usingBinoculars,
@@ -3126,7 +3118,9 @@ const launch = query.has('poi-gallery')
         ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
         : query.has('road-lab')
           ? import('./road-lab').then(({ bootRoadLab }) => bootRoadLab())
-          : boot();
+          : import.meta.env.DEV && query.has('car-lab')
+            ? import('./car-lab').then(({ bootCarLab }) => bootCarLab())
+            : boot();
 
 void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

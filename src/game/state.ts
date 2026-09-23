@@ -49,6 +49,91 @@ export interface StickerState {
   readonly roll: number;
 }
 
+/**
+ * One permanent dent in the shell.
+ *
+ * Car-local like a sticker, and for the same reason: the collision is converted once
+ * into the car's own frame, so a dent neither slides over a moving car nor jumps when
+ * the floating origin rebases. The point is where the chassis COLLIDER was struck,
+ * and the rendered skin sits somewhere inside that box, so the direction is what
+ * makes the record usable without the mesh: the renderer walks inward along it to
+ * find the panel. The simulation, the save and the headless benches never need a
+ * vertex.
+ */
+export interface BodyDent {
+  /** Struck point on the chassis box, car-local metres. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Unit direction the panel was pushed — into the body — car-local. */
+  readonly nx: number;
+  readonly ny: number;
+  readonly nz: number;
+  /** Falloff radius across the panel, metres. */
+  readonly radius: number;
+  /** Push at the centre, metres, before the renderer's panel-safety clamp. */
+  readonly depth: number;
+}
+
+/**
+ * How many dents a car remembers. A ring, not a list: the eleventh blow forgets the
+ * oldest rather than growing a save and the per-car deformation pass without limit.
+ * Ten is more distinct damage than one shell reads as anyway; repeated blows to the
+ * same panel merge (see `addBodyDent`) instead of spending slots.
+ */
+export const MAX_BODY_DENTS = 10;
+/** Deepest repeated blows to one place can drive a dent, metres. */
+export const MAX_BODY_DENT_DEPTH_M = 0.16;
+/** Widest a merged dent can spread, metres: about half a door. */
+export const MAX_BODY_DENT_RADIUS_M = 0.6;
+
+/**
+ * Records a dent in a car's bounded ring, merging a blow that lands on an existing
+ * dent from the same side.
+ *
+ * Merging is what keeps a car that keeps nosing into the same rock from pushing all
+ * of its other history out of the ring, and it is also the honest physics: a second
+ * hit on a crumpled wing deepens that crumple. The merged record is a NEW object and
+ * moves to the newest end, so it is the last to be forgotten and a renderer that
+ * compares records by identity sees that it changed.
+ */
+export function addBodyDent(dents: BodyDent[], dent: BodyDent): void {
+  for (let i = 0; i < dents.length; i++) {
+    const old = dents[i]!;
+    const reach = Math.max(old.radius, dent.radius) * 0.5;
+    const dx = old.x - dent.x;
+    const dy = old.y - dent.y;
+    const dz = old.z - dent.z;
+    const facing = old.nx * dent.nx + old.ny * dent.ny + old.nz * dent.nz;
+    if (dx * dx + dy * dy + dz * dz > reach * reach || facing < 0.8) continue;
+    const weight = old.depth + dent.depth;
+    const a = weight > 0 ? old.depth / weight : 0.5;
+    const b = 1 - a;
+    const nx = old.nx * a + dent.nx * b;
+    const ny = old.ny * a + dent.ny * b;
+    const nz = old.nz * a + dent.nz * b;
+    const length = Math.hypot(nx, ny, nz) || 1;
+    dents.splice(i, 1);
+    dents.push({
+      x: old.x * a + dent.x * b,
+      y: old.y * a + dent.y * b,
+      z: old.z * a + dent.z * b,
+      nx: nx / length,
+      ny: ny / length,
+      nz: nz / length,
+      radius: Math.min(MAX_BODY_DENT_RADIUS_M, Math.max(old.radius, dent.radius) * 1.06),
+      depth: Math.min(
+        MAX_BODY_DENT_DEPTH_M,
+        Math.max(old.depth, dent.depth) + Math.min(old.depth, dent.depth) * 0.6,
+      ),
+    });
+    return;
+  }
+  dents.push(dent);
+  if (dents.length > MAX_BODY_DENTS) dents.splice(0, dents.length - MAX_BODY_DENTS);
+}
+
+
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -114,6 +199,11 @@ export interface CarState {
    */
   dirt: number;
   scratches: number;
+  /**
+   * Where the shell has been pushed in, oldest first; at most `MAX_BODY_DENTS`.
+   * Nothing undoes a dent, for the same reason nothing fully undoes a scratch.
+   */
+  readonly dents: BodyDent[];
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -246,6 +336,7 @@ export type WorldDelta =
   | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
+  | { t: 'car_body_dent'; carId: string; dent: BodyDent }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
@@ -543,10 +634,14 @@ export class GameWorld {
         const car = s.cars[delta.carId];
         if (car) {
           // Fractions written by both the accumulating simulation and cleaning tools.
-          // Dirt also feeds the body material; scratches remain persistent condition.
           car.dirt = clamp01(delta.dirt);
           car.scratches = clamp01(delta.scratches);
         }
+        break;
+      }
+      case 'car_body_dent': {
+        const car = s.cars[delta.carId];
+        if (car) addBodyDent(car.dents, delta.dent);
         break;
       }
       case 'car_fuel': {

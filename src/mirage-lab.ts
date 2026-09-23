@@ -31,6 +31,7 @@ import {
   MirageTableau,
   type MirageKind,
 } from './render/mirage-tableau';
+import { HeatHaze } from './render/heathaze';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { desertPaletteAt } from './world/gradient';
@@ -96,21 +97,23 @@ interface RangeSpec {
 }
 
 const HEAT_RANGES: readonly RangeSpec[] = [
-  { key: 'scaleHeightM', label: 'Высота горячего слоя', min: 0.5, max: 30, step: 0.1, unit: 'м' },
+  { key: 'scaleHeightM', label: 'Высота горячего слоя', min: 0.5, max: 12, step: 0.1, unit: 'м' },
   { key: 'referencePathM', label: 'Путь полного эффекта', min: 40, max: 1_000, step: 5, unit: 'м' },
   { key: 'nearClearM', label: 'Чистая ближняя зона', min: 0, max: 180, step: 1, unit: 'м' },
   { key: 'nearFullM', label: 'Полный эффект объектов', min: 20, max: 420, step: 1, unit: 'м' },
   { key: 'groundClearM', label: 'Чистая зона земли', min: 0, max: 250, step: 1, unit: 'м' },
   { key: 'groundFullM', label: 'Полный эффект земли', min: 20, max: 600, step: 1, unit: 'м' },
-  { key: 'angleMrad', label: 'Амплитуда преломления', min: 0, max: 14, step: 0.05, unit: 'мрад' },
-  { key: 'liftMrad', label: 'Вертикальный подъём', min: -3, max: 5, step: 0.05, unit: 'мрад' },
-  { key: 'sampleRangeM', label: 'Радиус поля конвекции', min: 2, max: 80, step: 0.5, unit: 'м' },
-  { key: 'broadCellM', label: 'Размер крупных ячеек', min: 0.1, max: 5, step: 0.05, unit: 'м' },
-  { key: 'fineCellM', label: 'Размер мелких ячеек', min: 0.05, max: 2.5, step: 0.05, unit: 'м' },
-  { key: 'broadRiseMps', label: 'Скорость крупных потоков', min: -4, max: 6, step: 0.05, unit: 'м/с' },
-  { key: 'fineRiseMps', label: 'Скорость мелких потоков', min: -6, max: 10, step: 0.05, unit: 'м/с' },
-  { key: 'plumeStretch', label: 'Вытяжение потоков', min: 0.2, max: 6, step: 0.05, unit: '×' },
+  { key: 'angleMrad', label: 'Амплитуда преломления', min: 0, max: 8, step: 0.05, unit: 'мрад' },
   { key: 'lateralShare', label: 'Доля бокового сдвига', min: 0, max: 1, step: 0.01, unit: '' },
+  { key: 'broadCellMrad', label: 'Высота крупных слоёв', min: 1, max: 30, step: 0.1, unit: 'мрад' },
+  { key: 'fineCellMrad', label: 'Высота мелких слоёв', min: 0.5, max: 15, step: 0.1, unit: 'мрад' },
+  { key: 'striation', label: 'Вытяжение слоёв', min: 1, max: 12, step: 0.1, unit: '×' },
+  { key: 'broadRiseHz', label: 'Подъём крупных слоёв', min: -4, max: 6, step: 0.05, unit: 'Гц' },
+  { key: 'fineRiseHz', label: 'Подъём мелких слоёв', min: -8, max: 12, step: 0.05, unit: 'Гц' },
+  { key: 'fineOnsetM', label: 'Мелкие слои с', min: 0, max: 1_500, step: 10, unit: 'м' },
+  { key: 'fineFullM', label: 'Мелкие слои полностью', min: 50, max: 3_000, step: 10, unit: 'м' },
+  { key: 'mirageCriticalMrad', label: 'Критический угол миража', min: 0, max: 20, step: 0.1, unit: 'мрад' },
+  { key: 'mirageBlend', label: 'Сила отражения', min: 0, max: 1, step: 0.01, unit: '' },
   { key: 'minimumEyeHeightM', label: 'Минимальная высота глаза', min: 0, max: 5, step: 0.05, unit: 'м' },
 ];
 
@@ -256,6 +259,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
     </fieldset>
     <div class="buttons"><button data-action="reset">Сбросить параметры</button><button data-action="game">Вернуться в игру</button></div>
     <div class="footer" data-drive-status>0 км/ч · камера: погоня</div>
+    <div class="footer" data-heat-readout></div>
     <div class="footer">Heat haze остаётся доступным поверх каждого визуального миража для совместной настройки.</div>`;
   document.body.appendChild(root);
 
@@ -373,6 +377,7 @@ export async function bootMirageLab(): Promise<void> {
   await sky.waitForAssets();
   const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin);
   const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin);
+  const heatHaze = new HeatHaze(terrain);
   const landscape = makeLandscape(road, terrain);
   const roadMesh = makeRoad(road);
   landscape.position.set(-origin.x, 0, -origin.z);
@@ -446,6 +451,7 @@ export async function bootMirageLab(): Promise<void> {
   };
   const interfaceRoot = createInterface(state, apply);
   const driveStatus = interfaceRoot.querySelector<HTMLElement>('[data-drive-status]');
+  const heatReadout = interfaceRoot.querySelector<HTMLElement>('[data-heat-readout]');
   apply();
 
   const target: CameraTarget = {
@@ -524,16 +530,31 @@ export async function bootMirageLab(): Promise<void> {
     vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);
     tableau.setPreviewDayFactor(sky.dayFactor, projection.lateral);
-    renderer.setHazeStrength(state.heatStrength * sky.dayFactor);
-    const camProjection = road.project(cam.x + origin.x, cam.z + origin.z, activeS);
-    renderer.setHazeEyeHeight(
-      cam.y - terrain.explorationHeightFromFrame(
-        cam.x + origin.x,
-        cam.z + origin.z,
-        camProjection.lateral,
-        camProjection.s,
-      ),
-    );
+    // Daylight and heat are separate inputs on purpose: the strength slider scales
+    // the heat the game would have at this hour and nothing else, so the colour
+    // finish here is the game's at any slider position.
+    renderer.setDaylight(sky.dayFactor);
+    const heat = heatHaze.update(frameDt, {
+      camera: renderer.camera,
+      originX: origin.x,
+      originZ: origin.z,
+      hintS: activeS,
+      sunHeight: sky.sunDirection.y,
+      timeOfDay: daySeconds,
+      dayLength: DAY_LENGTH,
+      seed: SEED,
+    });
+    renderer.setHeatHaze({
+      shimmer: heat.shimmer * state.heatStrength,
+      mirage: heat.mirage * state.heatStrength,
+      eyeAboveM: heat.eyeAboveM,
+      groundSlope: heat.groundSlope,
+    });
+    if (heatReadout) {
+      heatReadout.textContent =
+        `марево ${heat.shimmer.toFixed(2)} · мираж ${heat.mirage.toFixed(2)} · ` +
+        `глаз ${heat.eyeAboveM.toFixed(1)} м · уклон ${(heat.groundSlope * 100).toFixed(1)}%`;
+    }
     if (driveStatus) {
       const cameraLabel = camera.mode === 'hood' ? 'капот' : 'погоня';
       driveStatus.textContent = `${Math.round(vehicle.speedKmh)} км/ч · камера: ${cameraLabel}`;

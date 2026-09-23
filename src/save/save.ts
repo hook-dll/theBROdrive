@@ -1,7 +1,13 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { newWorldState } from '../game/state';
+import {
+  MAX_BODY_DENT_DEPTH_M,
+  MAX_BODY_DENT_RADIUS_M,
+  MAX_BODY_DENTS,
+  newWorldState,
+} from '../game/state';
 import type {
+  BodyDent,
   CarState,
   HeadlightMode,
   PlayerState,
@@ -596,6 +602,11 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     // parked it, the game just was not looking.
     dirt: clamp01(numOr(raw.dirt, 0)),
     scratches: clamp01(numOr(raw.scratches, 0)),
+    // Absent on every save written before the shell could dent, and those cars load
+    // straight. A pre-cutover `damage` list (localized shader marks from a removed
+    // system, a different shape) is deliberately not translated into dents: it was
+    // never geometry, so turning it into some would be inventing a crash.
+    dents: migrateBodyDents(raw.dents),
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),
@@ -605,6 +616,51 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     qz: numOr(raw.qz, 0),
     qw: numOr(raw.qw, 1),
   };
+}
+
+/**
+ * Dents from a save. A malformed record is dropped rather than failing the load, as
+ * a sticker is, and values are clamped to what the simulation could have produced so
+ * a hand-edited save cannot fold a panel through the car. The ring keeps the NEWEST.
+ */
+function migrateBodyDents(raw: unknown): BodyDent[] {
+  if (!Array.isArray(raw)) return [];
+  const dents: BodyDent[] = [];
+  for (const value of raw) {
+    if (typeof value !== 'object' || value === null) continue;
+    const d = value as Record<string, unknown>;
+    const nx = numOr(d.nx, NaN);
+    const ny = numOr(d.ny, NaN);
+    const nz = numOr(d.nz, NaN);
+    // Renormalised only when a hand edit broke it: dividing a unit vector by its own
+    // float length can move the last bit, and a save must round-trip exactly.
+    const hypot = Math.hypot(nx, ny, nz);
+    const length = Math.abs(hypot - 1) < 1e-9 ? 1 : hypot;
+    const x = numOr(d.x, NaN);
+    const y = numOr(d.y, NaN);
+    const z = numOr(d.z, NaN);
+    const radius = numOr(d.radius, NaN);
+    const depth = numOr(d.depth, NaN);
+    if (
+      !(length > 1e-6) ||
+      !Number.isFinite(x + y + z) ||
+      !(radius > 0) ||
+      !(depth > 0)
+    ) {
+      continue;
+    }
+    dents.push({
+      x,
+      y,
+      z,
+      nx: nx / length,
+      ny: ny / length,
+      nz: nz / length,
+      radius: Math.min(radius, MAX_BODY_DENT_RADIUS_M),
+      depth: Math.min(depth, MAX_BODY_DENT_DEPTH_M),
+    });
+  }
+  return dents.slice(-MAX_BODY_DENTS);
 }
 
 /**

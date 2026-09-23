@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
-import { mulberry32 } from '../core/rng';
+import { hash01, mulberry32 } from '../core/rng';
 import { createServiceableCarState } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
@@ -1181,6 +1181,13 @@ export class RoadTraffic {
       z,
       heading,
     );
+    // Nobody meets a traffic car at the start of its journey: it has already driven
+    // the desert road to get here, so it arrives carrying that road's film and the
+    // odd scuff, and its own driving adds to it from there. Hashed from the id rather
+    // than drawn from `random`, which would shift every later spawn decision.
+    const idKey = Array.from(request.id, (c) => c.charCodeAt(0));
+    state.dirt = 0.12 + hash01(0x64697274, ...idKey) * 0.5;
+    state.scratches = hash01(0x73637261, ...idKey) * 0.35;
     this.trafficWorld.apply({ t: 'car_add', car: state });
     const vehicle = new Vehicle(
       this.physics,

@@ -6,8 +6,9 @@
  * the lowest of them is the answer:
  *
  *   1. TORQUE, from a standstill. First gear times the final drive against the
- *      wheel radius, at the engine's own peak torque, minus rolling resistance.
- *      Analytic, from parts/registry.ts and the model catalogue.
+ *      wheel radius, at the engine's own peak torque through the gearbox's own
+ *      efficiency, minus rolling resistance. Analytic, from parts/registry.ts and
+ *      the model catalogue; the curve is `engineTorqueNm`, the one the car drives on.
  *
  *   2. TRACTION. The driven axle's share of the weight times the surface's
  *      longitudinal grip. Analytic here and MEASURED by `--sweep`, which drives the
@@ -28,7 +29,7 @@
  * full of water, so the thermostat, the fit multiplier and the airflow curve are the
  * shipped ones rather than copies of them.
  *
- *   npx tsx tools/climb-limit.ts [--sweep] [modelId ...]
+ *   bun tools/climb-limit.ts [--sweep] [modelId ...]
  *
  * Nothing here is part of the game bundle.
  */
@@ -56,9 +57,8 @@ import {
 import fits from '../src/vehicle/model-fits.json';
 import { installAssetShim } from './assetshim';
 import { runInclineLaunchCheck } from './handling-bench';
+import { engineTorqueNm } from '../src/vehicle/drivetrain';
 
-/** Driveline efficiency, crank to contact patch: a period manual box and hypoid axle. */
-const DRIVELINE_EFFICIENCY = 0.88;
 /** Wheel radius used when a body has no measured fit, metres. */
 const FALLBACK_WHEEL_RADIUS = 0.35;
 const GRAVITY = 9.81;
@@ -77,10 +77,6 @@ const STOCK_RADIATOR: Record<RadiatorClass, RadiatorSpec> = {
 
 /** Seconds of simulated running the thermal fixed point is read after. */
 const SETTLE_SECONDS = 3600;
-
-/** The torque curve's own endpoints, as `Drivetrain` states them. */
-const IDLE_TORQUE_FRACTION = 0.62;
-const REDLINE_TORQUE_FRACTION = 0.82;
 
 interface Ceiling {
   readonly def: CarModelDef;
@@ -134,7 +130,7 @@ function ceilingFor(def: CarModelDef): Ceiling {
   const gearbox = modelGearbox(def);
   const radius = wheelRadiusOf(def);
   const firstGearTotal = gearbox.ratios[0]! * gearbox.finalDrive;
-  const driveForce = (engine.peakTorqueNm * firstGearTotal * DRIVELINE_EFFICIENCY) / radius;
+  const driveForce = (engine.peakTorqueNm * firstGearTotal * gearbox.efficiency) / radius;
   // A trailer adds mass to be dragged up but no grip: its own wheels are unpowered,
   // so the driven axle still carries only the car's share.
   const total = def.mass + towKg;
@@ -160,21 +156,6 @@ function ceilingFor(def: CarModelDef): Ceiling {
     tractionGrade: gradeForForce(gripForce, total),
     powerPerTonne: engine.peakPowerKw / (total / 1000),
   };
-}
-
-/**
- * Normalised engine torque at `rpm`, the same three-segment curve `Drivetrain`
- * applies (idle 0.62, peak 1.0, redline 0.82). Duplicated rather than imported
- * because the class wants a whole car around it to answer this.
- */
-function torqueAt(engine: EngineSpec, rpm: number): number {
-  if (rpm <= engine.idleRpm) return IDLE_TORQUE_FRACTION * engine.peakTorqueNm;
-  if (rpm < engine.torquePeakRpm) {
-    const t = (rpm - engine.idleRpm) / (engine.torquePeakRpm - engine.idleRpm);
-    return (IDLE_TORQUE_FRACTION + (1 - IDLE_TORQUE_FRACTION) * t) * engine.peakTorqueNm;
-  }
-  const t = (rpm - engine.torquePeakRpm) / (engine.redlineRpm - engine.torquePeakRpm);
-  return (1 - (1 - REDLINE_TORQUE_FRACTION) * t) * engine.peakTorqueNm;
 }
 
 /**
@@ -238,7 +219,7 @@ function bestClimb(def: CarModelDef, grade: number, ambientC: number): ClimbStat
     for (let speedMps = 1; speedMps <= 34; speedMps += 0.5) {
       const rpm = ((speedMps / radius) * total * 60) / (2 * Math.PI);
       if (rpm < engine.idleRpm || rpm > engine.redlineRpm) continue;
-      const maxForce = (torqueAt(engine, rpm) * total * DRIVELINE_EFFICIENCY) / radius;
+      const maxForce = (engineTorqueNm(engine, rpm) * total * gearbox.efficiency) / radius;
       const need = resistance + 0.5 * AIR_DENSITY * def.dragArea * speedMps * speedMps;
       if (need > maxForce) continue;
       const load = need / maxForce;

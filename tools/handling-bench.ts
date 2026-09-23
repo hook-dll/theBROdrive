@@ -27,15 +27,12 @@
 import * as THREE from 'three';
 import { PhysicsWorld, FIXED_DT } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
+import { GameWorld, newWorldState } from '../src/game/state';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { preloadCarModels } from '../src/render/carmodel';
-import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { variant } from '../src/parts/registry';
-import type { Item } from '../src/items/items';
+import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { benchCarState } from './benchcar';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -115,42 +112,6 @@ export interface BenchResult {
   cadenceBrakeDistM: number;
 }
 
-/**
- * A roadworthy bench car. The bonnet cells and fuel kind are not decoration: the
- * vehicle's stats read the fitted engine through them, and a car with an empty
- * bonnet has no engine to bench.
- */
-function carState(modelId: string): CarState {
-  const def = carModel(modelId);
-  const engine = variant(def.engineId).engine;
-  return {
-    id: 'bench',
-    modelId,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: engine?.fuel ?? null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('bench', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: 0,
-    y: 1.2,
-    z: 0,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
-  };
-}
-
 /** Compass heading of a body quaternion, degrees. */
 function headingDeg(q: { x: number; y: number; z: number; w: number }): number {
   const siny = 2 * (q.w * q.y + q.z * q.x);
@@ -225,6 +186,8 @@ function addRollbackGround(physics: PhysicsWorld): void {
 
 export interface Rig {
   physics: PhysicsWorld;
+  /** The rig's own world; its settings are what the vehicle reads (gearbox mode). */
+  world: GameWorld;
   vehicle: Vehicle;
   scene: THREE.Scene;
   input: InputFrame;
@@ -250,7 +213,10 @@ export async function makeRig(
   const world = new GameWorld(newWorldState(1));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const state = carState(modelId);
+  // The game's own serviced spawn state (see benchcar.ts). The bonnet cells and fuel
+  // kind are not decoration: the vehicle's stats read the fitted engine through them,
+  // and a car with an empty bonnet has no engine to bench.
+  const state = benchCarState(modelId);
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
   const input = emptyInput();
@@ -276,7 +242,7 @@ export async function makeRig(
     trailer.hitchTo(vehicle, state.id);
   }
 
-  const rig: Rig = { physics, vehicle, scene, input, trailer };
+  const rig: Rig = { physics, world, vehicle, scene, input, trailer };
   // Let it settle onto its springs before anything is measured. A towed rig needs
   // longer: the drawbar has to straighten and both bodies have to stop bobbing.
   const settleSteps = trailer ? 420 : 180;
@@ -324,7 +290,7 @@ export function drive(rig: Rig, seconds: number, shape: (t: number, f: InputFram
  * a fixed window makes such a test depend on how quickly the springs settle, which is
  * not what it is checking.
  */
-function driveUntil(
+export function driveUntil(
   rig: Rig,
   seconds: number,
   shape: (t: number, f: InputFrame) => void,
@@ -341,6 +307,73 @@ function driveUntil(
     if (until(i * FIXED_DT)) return true;
   }
   return false;
+}
+
+/**
+ * Flat-out speed on level ground: full throttle until a four-second window gains
+ * less than 0.15 km/h, reported as the MEAN of that last window of HORIZONTAL speed,
+ * not the highest speed seen. Three things this guards against, all of which were
+ * observed:
+ *
+ *  - a maximum is not a top speed: one bad step becomes the record and stays.
+ *    `spikeKmh` keeps that number beside the mean instead of reporting it.
+ *  - `speedKmh` includes the vertical component, so a car that leaves the ground
+ *    reads faster the further it falls.
+ *  - the plate is finite. A car that needs more run than `runLimitM` from the start
+ *    drives off the edge and free-falls: the VAZ-2107 measured a 1213 km/h "plateau"
+ *    this way on the 8 km plate, which is terminal velocity, not fifth gear. Past the
+ *    limit the run ends and keeps what it had.
+ *
+ * Drives whatever gearbox mode the rig's world is set to; the automatic's wide-open
+ * upshift is power-optimal, so it finds top gear the way a driver would.
+ */
+export function measureTopSpeed(
+  rig: Rig,
+  runLimitM: number,
+): { plateauKmh: number; spikeKmh: number; reachedPlateau: boolean } {
+  const body = rig.vehicle.chassis;
+  const start = body.translation();
+  const startX = start.x;
+  const startZ = start.z;
+  const groundY = start.y;
+  let windowStartKmh = 0;
+  let nextWindowS = 4;
+  let windowSum = 0;
+  let windowCount = 0;
+  let plateauKmh = 0;
+  let spikeKmh = 0;
+  let reachedPlateau = false;
+  driveUntil(
+    rig,
+    240,
+    (_, f) => {
+      f.throttle = 1;
+      f.brake = 0;
+      f.steer = 0;
+    },
+    (t) => {
+      const v = body.linvel();
+      const speed = Math.hypot(v.x, v.z) * 3.6;
+      spikeKmh = Math.max(spikeKmh, speed);
+      windowSum += speed;
+      windowCount++;
+      const p = body.translation();
+      if (Math.hypot(p.x - startX, p.z - startZ) > runLimitM || p.y < groundY - 1) {
+        if (windowCount > 0) plateauKmh = windowSum / windowCount;
+        return true;
+      }
+      if (t < nextWindowS) return false;
+      const gain = speed - windowStartKmh;
+      plateauKmh = windowSum / windowCount;
+      windowSum = 0;
+      windowCount = 0;
+      windowStartKmh = speed;
+      nextWindowS += 4;
+      reachedPlateau = gain < 0.15;
+      return reachedPlateau;
+    },
+  );
+  return { plateauKmh, spikeKmh, reachedPlateau };
 }
 
 /**
@@ -450,61 +483,11 @@ export async function benchOne(
   }
 
   // --- top speed: wait for a level-road plateau -----------------------------
-  //
-  // Reported as the MEAN of the last window of HORIZONTAL speed, not the highest
-  // speed seen. Three things this guards against, all of which were observed:
-  //
-  //  - a maximum is not a top speed: one bad step becomes the record and stays.
-  //    `spikeKmh` keeps that number beside the mean instead of reporting it.
-  //  - `speedKmh` includes the vertical component, so a car that leaves the ground
-  //    reads faster the further it falls.
-  //  - `addGround` is 8 km square, i.e. 4 km of run. A car that needs more than
-  //    that drives off the edge and free-falls: the VAZ-2107 measured a 1213 km/h
-  //    "plateau" this way, which is terminal velocity, not fifth gear.
   {
     const rig = await makeRig(modelId, addGround, false, towKg);
-    const body = rig.vehicle.chassis;
-    const start = body.translation();
-    const groundY = start.y;
-    let windowStartKmh = 0;
-    let nextWindowS = 4;
-    let windowSum = 0;
-    let windowCount = 0;
-    let plateauKmh = 0;
-    let spikeKmh = 0;
-    driveUntil(
-      rig,
-      180,
-      (_, f) => {
-        f.throttle = 1;
-        f.brake = 0;
-        f.steer = 0;
-      },
-      (t) => {
-        const v = body.linvel();
-        const speed = Math.hypot(v.x, v.z) * 3.6;
-        spikeKmh = Math.max(spikeKmh, speed);
-        windowSum += speed;
-        windowCount++;
-        const p = body.translation();
-        // Off the plate, or fallen off it: the run is over, keep what it had.
-        if (Math.abs(p.x) > 3500 || Math.abs(p.z) > 3500 || p.y < groundY - 1) {
-          if (windowCount > 0) plateauKmh = windowSum / windowCount;
-          return true;
-        }
-        if (t < nextWindowS) return false;
-        const gain = speed - windowStartKmh;
-        plateauKmh = windowSum / windowCount;
-        windowSum = 0;
-        windowCount = 0;
-        windowStartKmh = speed;
-        nextWindowS += 4;
-        // Less than 0.15 km/h gained across a four-second window: flat out.
-        return gain < 0.15;
-      },
-    );
-    out.topSpeedKmh = +plateauKmh.toFixed(1);
-    out.topSpeedSpikeKmh = +spikeKmh.toFixed(1);
+    const top = measureTopSpeed(rig, 3500);
+    out.topSpeedKmh = +top.plateauKmh.toFixed(1);
+    out.topSpeedSpikeKmh = +top.spikeKmh.toFixed(1);
     rig.vehicle.dispose();
   }
 

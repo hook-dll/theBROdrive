@@ -14,15 +14,12 @@ import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
   preloadCarModels,
 } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { benchCarState } from './benchcar';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
@@ -82,26 +79,19 @@ function check(label: string, ok: boolean, detail: string): void {
 }
 
 function carState(road: Road, startS: number, lateral = 0): CarState {
-  const def = carModel(MODEL_ID);
-  const engine = variant(def.engineId).engine;
   const p = lateral === 0 ? road.sampleAt(startS) : road.offsetPoint(startS, lateral);
-  const heading = road.sampleAt(startS).heading;
-  return {
-    id: 'autopilot-bench', modelId: MODEL_ID, stickers: [],
-    headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
-    fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
-    waterLitres: 10, oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('autopilot-bench', def.engineId, def.bodyClass, def.tankLitres),
+  return benchCarState(MODEL_ID, {
+    id: 'autopilot-bench',
     // The SAME placement the world uses for a spawned car, with no clear air under
     // it. A hand-picked 1.2 m of drop put the wheels above their own suspension
     // travel, so the chassis met the ribbon itself: Rapier resolved that penetration
     // by throwing the car off the road at up to 200 km/h, at a handful of road
     // positions that moved whenever the ribbon was retessellated.
-    odometer: 0, x: p.x, y: carSpawnYAboveGround(carModelMeasure(MODEL_ID), p.y, 0), z: p.z,
-    qx: 0, qy: Math.sin(heading / 2), qz: 0, qw: Math.cos(heading / 2),
-  };
+    x: p.x,
+    y: carSpawnYAboveGround(carModelMeasure(MODEL_ID), p.y, 0),
+    z: p.z,
+    heading: road.sampleAt(startS).heading,
+  });
 }
 
 /** Builds only the real, narrow asphalt ribbon needed by this run; no visual mesh needed. */

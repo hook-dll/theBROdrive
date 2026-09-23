@@ -1,7 +1,7 @@
 /**
  * Every catalogue part builds a mesh, so the dev menu can spawn it without hanging.
  *
- *   npx tsx tools/part-mesh-coverage.ts
+ *   bun tools/part-mesh-coverage.ts
  *
  * `partmesh.ts`'s per-kind builders switch on `PartVariant.id` and `default: throw`
  * on anything they don't recognise. That throw is synchronous, inside the first
@@ -10,13 +10,12 @@
  * dev menu's own part dispenser, which iterates every variant in the catalogue) asks
  * for that one id.
  *
- * `tools/soviet-reality.ts` already builds a mesh for every driveline id it exercises,
- * but only for cars whose id starts with `sv_`. That is exactly how an imported
+ * `tools/reality.ts` builds a mesh for every driveline id a catalogue CAR is fitted
+ * with, but a loose part nobody's car carries is just as reachable: an imported
  * UAZ-specific engine once went unbuildable after the Soviet pack's Volga engines
- * were split out: no bench outside the `sv_` cars tried to draw it. This bench has
- * no such blind spot: it builds every id in `ALL_VARIANTS`, the same list the dev
- * menu's part dispenser
- * draws from, so a hole here is a hole a player can actually reach.
+ * were split out, because no bench tried to draw it. This bench has no such blind
+ * spot: it builds every id in `ALL_VARIANTS`, the same list the dev menu's part
+ * dispenser draws from, so a hole here is a hole a player can actually reach.
  */
 import { ALL_VARIANTS } from '../src/parts/registry';
 import { createPartMesh } from '../src/render/partmesh';

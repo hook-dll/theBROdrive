@@ -46,7 +46,7 @@ import {
   partContainer,
 } from '../vehicle/bonnet';
 import { radiatorFit } from '../vehicle/cooling';
-import { setCarBodyCondition, setPartCondition } from '../render/materials';
+import { setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
@@ -1501,8 +1501,9 @@ export class Interaction {
 
   /**
    * Cleans the permanent shell condition, with the same quarter-second delta cadence
-   * as parts. The material still receives every successful stroke, otherwise a held
-   * sponge would visibly update in distracting 0.25-second jumps.
+   * as parts. Each stroke writes the car's state directly, and the Vehicle adopts
+   * any value it did not write itself on its next rendered frame (`syncVisuals`), so
+   * a held sponge visibly works stroke by stroke rather than in 0.25-second jumps.
    */
   private scrubBody(dt: number, tool: ToolKind, resolved: Resolved): void {
     const t = resolved.target;
@@ -1530,7 +1531,6 @@ export class Interaction {
     if (car.dirt === oldDirt && car.scratches === oldScratches) return;
 
     this.continuous = 'scrub';
-    setCarBodyCondition(resolved.vehicle.root, car.dirt);
     this.conditionEmitTimer += dt;
     if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
       this.conditionEmitTimer = 0;

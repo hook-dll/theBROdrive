@@ -37,6 +37,28 @@ export const PHYSICS_REACH_M = CHUNK_LENGTH * PHYSICS_RADIUS;
 /** Past this lateral distance road content carries no physics or prop colliders. */
 const ROAD_PHYSICS_REACH = 1200;
 
+/**
+ * Stops Three recomputing the local matrices of a finished, static subtree every frame.
+ *
+ * Streamed scenery never moves once it is built: every chunk and tile is placed once
+ * and then only its ROOT is shifted, by a rebase. Left on automatic, `updateMatrixWorld`
+ * still recomposed the local matrix of every one of those nodes on every render — 566
+ * of the scene's 928 nodes in a measured drive. Freezing keeps the world matrices exact:
+ * a frozen child is still re-multiplied whenever its parent's world matrix changes, so
+ * whoever moves a frozen root afterwards (a rebase) only has to call its `updateMatrix`.
+ *
+ * Street-lamp source markers are the one thing in the scenery that a provider moves
+ * after building it (`setNearestLampSources`), so anything the light budget reads keeps
+ * its automatic matrix.
+ */
+export function freezeStaticSubtree(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    if (object.userData.lightBudgetSource === true) return;
+    object.matrixAutoUpdate = false;
+    object.updateMatrix();
+  });
+}
+
 export interface ChunkContext {
   chunkIndex: number;
   sStart: number;
@@ -618,11 +640,14 @@ export class ChunkStreamer {
     }
 
     // Complete chunks remain valid; only their group offsets need to follow the
-    // newly rebased world origin.
+    // newly rebased world origin. The groups are frozen (see `attachContent`), so the
+    // moved root recomposes its own matrix and its children follow it.
     for (const chunk of this.built.values()) {
       for (const entry of chunk.contents) {
-        entry.content.group.position.x = chunk.originX - this.origin.x;
-        entry.content.group.position.z = chunk.originZ - this.origin.z;
+        const group = entry.content.group;
+        group.position.x = chunk.originX - this.origin.x;
+        group.position.z = chunk.originZ - this.origin.z;
+        group.updateMatrix();
       }
     }
   }
@@ -645,6 +670,8 @@ export class ChunkStreamer {
   private attachContent(content: ChunkContent, originX: number, originZ: number): void {
     content.group.position.x = originX - this.origin.x;
     content.group.position.z = originZ - this.origin.z;
+    // Complete, placed, and never moved again except by `rebase`.
+    freezeStaticSubtree(content.group);
     this.scene.add(content.group);
     // The one place a chunk's colliders join the simulation. Incremental providers
     // yield mid-build, so a collider created early must not be solid until the mesh

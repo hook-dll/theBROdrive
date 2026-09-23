@@ -26,19 +26,38 @@ export type PartKind =
 
 export type BodyClass = 'car' | 'truck' | 'bus';
 
+/**
+ * An engine, authored in the FACTORY's own numbers: the two points of the published
+ * external speed characteristic, measured net at the crank on a brake, and the speed
+ * the fuel is cut at. `engineTorqueNm` (vehicle/drivetrain.ts) builds the whole
+ * full-throttle curve through exactly those two points, so a catalogue figure is
+ * copied here as printed and never adjusted for the model.
+ */
 export interface EngineSpec {
   readonly fuel: FuelType;
-  /** Peak crank power, kW. */
+  /** Factory net power at `powerPeakRpm`, kW. The curve's power point. */
   readonly peakPowerKw: number;
-  /** Peak torque, Nm. */
+  /** Crank speed of the rated power. Must be above `torquePeakRpm`. */
+  readonly powerPeakRpm: number;
+  /** Factory net torque at `torquePeakRpm`, Nm. The curve's torque point. */
   readonly peakTorqueNm: number;
   /** Crank speed at peak torque. Diesels peak low, which is what makes them torquey. */
   readonly torquePeakRpm: number;
+  /**
+   * The fuel cut: torque fades to zero over the last 150 rpm before it. At or
+   * above `powerPeakRpm` — the limiter or tachometer red zone where the factory states
+   * one, otherwise the rated speed plus the modest margin each entry justifies.
+   */
   readonly redlineRpm: number;
   readonly idleRpm: number;
   /** Brake-specific fuel consumption, litres per kWh. Diesel is more efficient. */
   readonly bsfc: number;
-  /** Drag torque per rad/s of crank speed. This is what engine braking is made of. */
+  /**
+   * Friction drag per rad/s of crank speed, Nm·s. The factory figures are already
+   * net of it, so it does NOT shape the full-throttle curve: it is what closed-throttle
+   * engine braking is built from, and what the part-throttle blend charges the pedal
+   * for (see `Drivetrain.update`).
+   */
   readonly brakingCoeff: number;
   readonly cylinders: number;
   /**
@@ -113,6 +132,19 @@ export interface GearboxSpec {
   /** Seconds of torque interruption on a shift. */
   readonly shiftTime: number;
   readonly automatic: boolean;
+  /**
+   * Share of crank torque that reaches the hubs while driving: gearbox, propshaft,
+   * transfer case and final drive together. Applied to drive torque only; engine
+   * braking is left alone (see `Drivetrain.update`). The catalogue uses four bands,
+   * from the period efficiencies of each part — a manual box 0.96-0.97, a propshaft
+   * joint pair 0.99, a hypoid axle 0.95-0.96, a helical transaxle final drive 0.97-0.98:
+   *
+   *   rear drive through a live hypoid axle   0.90
+   *   front-drive transaxle, no propshaft     0.92
+   *   4x4 through a transfer case and two axles 0.85
+   *   three-speed automatic (torque converter) 0.85
+   */
+  readonly efficiency: number;
 }
 
 export interface PartVariant {
@@ -150,29 +182,48 @@ export interface SuspensionTuning {
   readonly bumpTravel: number;
 }
 
+/*
+ * ---- the loose-part engines ----
+ *
+ * Each of these is one real period engine, named in its entry, authored from its
+ * maker's published figures. Five used to be generic "a 1.6", "a V8" guesses with
+ * no unit behind them, and their numbers disagreed with each other by up to 27%.
+ *
+ * `redlineRpm` is the fuel cut. Where the maker states no limiter or red zone it is
+ * the rated speed plus about 7%, the margin the VAZ family's own tachometer red zone
+ * sits above its rated speed (5600 -> 6000), and a diesel's is its governor's
+ * cut-off, about 5% above the rated speed.
+ *
+ * `brakingCoeff` is sized to about 10% of peak torque at the fuel cut for a petrol
+ * engine and 15% for a diesel (the Soviet driveline note below explains the scale).
+ */
 export const ENGINE_VARIANTS: readonly PartVariant[] = [
   {
+    // VAZ-2106-70, the 1.6 AZLK fitted to the Moskvich-2141-01 before its own UZAM
+    // units were ready: 1.57 litre, 56.3 kW (76.4 hp) at 5400 and 121 Nm at 3000
+    // (autoopt.ru, AZLK-2141 1998 catalogue). The VAZ family's 6000 rpm red zone.
     id: 'engine_i4_1600',
     kind: 'engine',
-    label: '1.6 inline-four',
+    label: '1.6 VAZ-2106-70 inline-four',
     mass: 118,
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 54,
-      peakTorqueNm: 125,
-      torquePeakRpm: 3200,
-      redlineRpm: 5600,
+      peakPowerKw: 56.3,
+      powerPeakRpm: 5400,
+      peakTorqueNm: 121,
+      torquePeakRpm: 3000,
+      redlineRpm: 6000,
       idleRpm: 820,
       bsfc: 0.31,
-      brakingCoeff: 0.055,
+      brakingCoeff: 0.0199,
       cylinders: 4,
     },
   },
   {
-    // IZH-2715-01 catalogue option 412DE: 1.478 litre, 49 kW at 5800 rpm and
-    // 102 Nm at 3000-3800 rpm on A-76. The 112 Nm authored peak leaves 102 Nm
-    // after Drivetrain subtracts its open-throttle friction at 3400 rpm.
+    // IZH-2715-01 catalogue option 412DE: 1.478 litre, 49.0 kW at 5800 rpm and
+    // 102 Nm across 3000-3800 on A-76 (autoopt.ru, Moskvich-412 catalogue); the
+    // torque point is the middle of that plateau. No red zone is published.
     id: 'engine_uzam_412de',
     kind: 'engine',
     label: '1.5 UZAM-412DE inline-four',
@@ -182,9 +233,10 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     engine: {
       fuel: 'petrol',
       peakPowerKw: 49,
-      peakTorqueNm: 112,
+      powerPeakRpm: 5800,
+      peakTorqueNm: 102,
       torquePeakRpm: 3400,
-      redlineRpm: 6000,
+      redlineRpm: 6200,
       idleRpm: 850,
       bsfc: 0.32,
       brakingCoeff: 0.019,
@@ -192,10 +244,9 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // UMZ-4213.10-10 from the long-wheelbase UAZ-330364: 2.89 litres,
-    // 99 hp (73 kW) at 4000 rpm and 201 Nm net at 3000 rpm. Drivetrain subtracts
-    // WOT friction from the authored curve, so 221 Nm here is the indicated value
-    // that leaves the factory 201 Nm at the crank.
+    // UMZ-4213.10-10 from the long-wheelbase UAZ-330364: 2.89 litres, 99 hp
+    // (72.8 kW) at 4000 rpm and 201 Nm at 3000 (truck-and-bus.ru's 330364 sheet;
+    // UMZ's own table rates the plain 4213.10 at 84.5 kW GROSS, GOST 14846-81).
     id: 'engine_umz_4213',
     kind: 'engine',
     label: '2.9 UMZ inline-four',
@@ -203,10 +254,11 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car', 'truck'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 73,
-      peakTorqueNm: 221,
+      peakPowerKw: 72.8,
+      powerPeakRpm: 4000,
+      peakTorqueNm: 201,
       torquePeakRpm: 3000,
-      redlineRpm: 4500,
+      redlineRpm: 4300,
       idleRpm: 750,
       bsfc: 0.30,
       brakingCoeff: 0.044,
@@ -214,6 +266,9 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // Nissan L28E, the fuel-injected 2.8 of the 1979-80 Datsun 280ZX: 2.753 litres,
+    // 135 hp (100.7 kW) SAE net at 5200 and 144 lb-ft (195 Nm) at 4400, per the
+    // Nissan factory service manual figures quoted by xenonzcar.com.
     id: 'engine_i6_2800',
     kind: 'engine',
     label: '2.8 inline-six',
@@ -221,35 +276,44 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car', 'truck'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 96,
-      peakTorqueNm: 225,
-      torquePeakRpm: 3000,
-      redlineRpm: 5400,
+      peakPowerKw: 100.7,
+      powerPeakRpm: 5200,
+      peakTorqueNm: 195,
+      torquePeakRpm: 4400,
+      redlineRpm: 5600,
       idleRpm: 760,
       bsfc: 0.33,
-      brakingCoeff: 0.072,
+      brakingCoeff: 0.033,
       cylinders: 6,
     },
   },
   {
+    // ZMZ-13, the GAZ-13 Chaika's 5.53 litre V8: 143.4 kW (195 hp) at 4400 and
+    // 400.9 Nm (42 kgf·m) across 2000-2500, idle 500 (ZMZ spare-supply datasheet,
+    // parm.mybb.ru/viewtopic.php?id=398). The closest Soviet V8 to five litres.
     id: 'engine_v8_5000',
     kind: 'engine',
-    label: '5.0 V8',
+    label: '5.5 ZMZ-13 V8',
     mass: 245,
     fits: ['car', 'truck'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 143,
-      peakTorqueNm: 390,
-      torquePeakRpm: 2800,
-      redlineRpm: 5200,
-      idleRpm: 700,
+      peakPowerKw: 143.4,
+      powerPeakRpm: 4400,
+      peakTorqueNm: 401,
+      torquePeakRpm: 2250,
+      redlineRpm: 4700,
+      idleRpm: 500,
       bsfc: 0.36,
-      brakingCoeff: 0.095,
+      brakingCoeff: 0.085,
       cylinders: 8,
     },
   },
   {
+    // Mercedes-Benz OM615 in the W123 200 D, 1976-79: 1.988 litres, 55 PS
+    // (40.5 kW) at 4200 and 113 Nm at 2400, naturally aspirated (automobile-
+    // catalog.com; rpm as Wikipedia gives them for the sister OM615.941). The
+    // governor cuts about 5% over the rated speed.
     id: 'engine_d4_2000',
     kind: 'engine',
     label: '2.0 diesel four',
@@ -257,31 +321,38 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car', 'truck'],
     engine: {
       fuel: 'diesel',
-      peakPowerKw: 44,
-      peakTorqueNm: 168,
-      torquePeakRpm: 1900,
-      redlineRpm: 4200,
+      peakPowerKw: 40.5,
+      powerPeakRpm: 4200,
+      peakTorqueNm: 113,
+      torquePeakRpm: 2400,
+      redlineRpm: 4400,
       idleRpm: 680,
       bsfc: 0.24,
-      brakingCoeff: 0.11,
+      brakingCoeff: 0.037,
       cylinders: 4,
     },
   },
   {
+    // Mercedes-Benz OM366 LA, the turbocharged and intercooled 5.958 litre six of
+    // the late-1980s light trucks and buses: 150 kW (204 hp) at 2600 and 640 Nm at
+    // 1400-1500 (Mercedes-Benz archive, 1987 press kit). A naturally aspirated six
+    // of this size (MAN D0826, 450 Nm) cannot make the torque a truck-diesel slot
+    // is for.
     id: 'engine_d6_6600',
     kind: 'engine',
-    label: '6.6 diesel six',
+    label: '6.0 OM366 diesel six',
     mass: 402,
     fits: ['truck', 'bus'],
     engine: {
       fuel: 'diesel',
-      peakPowerKw: 118,
-      peakTorqueNm: 620,
-      torquePeakRpm: 1500,
-      redlineRpm: 3000,
+      peakPowerKw: 150,
+      powerPeakRpm: 2600,
+      peakTorqueNm: 640,
+      torquePeakRpm: 1450,
+      redlineRpm: 2750,
       idleRpm: 560,
       bsfc: 0.22,
-      brakingCoeff: 0.19,
+      brakingCoeff: 0.33,
       cylinders: 6,
     },
   },
@@ -289,7 +360,9 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
 
 export const GEARBOX_VARIANTS: readonly PartVariant[] = [
   {
-    // UAZ four-speed with the 33036-series axle ratio; high-range transfer is 1:1.
+    // UAZ four-speed with the 33036-series axle ratio; high-range transfer is 1:1
+    // (autoopt.ru, UAZ-2206 catalogue: 3.78 / 2.60 / 1.55 / 1.00, R 4.12, 4.625).
+    // Part-time 4x4 through a transfer case and two axles: 0.85.
     id: 'gearbox_uaz_4',
     kind: 'gearbox',
     label: 'UAZ 4-speed manual',
@@ -301,23 +374,30 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.625,
       shiftTime: 0.40,
       automatic: false,
+      efficiency: 0.85,
     },
   },
   {
+    // AZLK-2141 five-speed transaxle: 3.308 / 2.05 / 1.367 / 0.946 / 0.732, R 3.357,
+    // on the 3.9 final drive the 2141-01 got with the VAZ 1.6 (autoopt.ru, AZLK-2141
+    // 1998 catalogue). Front drive, final drive in the casing: 0.92.
     id: 'gearbox_manual5',
     kind: 'gearbox',
-    label: '5-speed manual',
+    label: 'AZLK-2141 five-speed',
     mass: 52,
     fits: ['car', 'truck'],
     gearbox: {
-      ratios: [3.8, 2.16, 1.42, 1.0, 0.82],
-      reverse: 3.6,
-      finalDrive: 3.7,
+      ratios: [3.308, 2.05, 1.367, 0.946, 0.732],
+      reverse: 3.357,
+      finalDrive: 3.9,
       shiftTime: 0.3,
       automatic: false,
+      efficiency: 0.92,
     },
   },
   {
+    // Period three-speed torque-converter automatic: the converter at lock-up
+    // speed ratio plus the pump drive take far more than a manual's gears, 0.85.
     id: 'gearbox_auto3',
     kind: 'gearbox',
     label: '3-speed automatic',
@@ -329,9 +409,12 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 3.55,
       shiftTime: 0.55,
       automatic: true,
+      efficiency: 0.85,
     },
   },
   {
+    // Truck crashbox behind a heavy rear axle: box 0.96, propshaft 0.99, a double-
+    // reduction axle 0.93, so 0.88.
     id: 'gearbox_truck6',
     kind: 'gearbox',
     label: '6-speed crashbox',
@@ -343,6 +426,7 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.9,
       shiftTime: 0.7,
       automatic: false,
+      efficiency: 0.88,
     },
   },
 ];
@@ -386,15 +470,16 @@ const TURBINE_VARIANTS: readonly PartVariant[] = [
 ];
 
 /**
- * The 2102's own running gear and trim, kept as distinct loose-part variants —
- * plus the 2101 engine and gearbox, which the catalogue does resolve for the
- * Zhiguli saloons and the estate.
- *
- * Figures are the real car's: 1.198 litre, 62 hp, 87 Nm at 3400, four-speed on a
- * 4.30 axle, 39 litre tank, 13-inch wheels on 155-section tyres.
+ * The 2101's engine and gearbox and the Zhiguli tank, which the catalogue resolves
+ * for the first saloons and the estates.
  */
 const LADA_VARIANTS: readonly PartVariant[] = [
   {
+    // VAZ-2101: 1.198 litre, 64 hp (47 kW) at 5600 and 8.9 kgf·m (87.3 Nm) at 3400,
+    // per the 1982 AvtoVAZ catalogue (autoopt.ru, VAZ-2101). The later GOST 14846-81
+    // net rating of the same unit is 43.2 kW; the car's own catalogue is what its
+    // top speed and 0-100 were quoted against. Fuel cut 6000: the red zone of the
+    // TX-193 tachometer the family's later cars carry (1987 VAZ album).
     id: 'engine_lada_1200',
     kind: 'engine',
     label: '1.2 inline-four',
@@ -402,13 +487,11 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 46,
-      // Indicated, so the net figure at 3400 rpm is the real car's 87 Nm; friction
-      // is a period 1.2's, not the 0.052 the whole pack used to share. See the
-      // Soviet driveline note below.
-      peakTorqueNm: 95,
+      peakPowerKw: 47,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 87.3,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.33,
       brakingCoeff: 0.0144,
@@ -416,9 +499,12 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // VAZ-2101: 3.753 / 2.303 / 1.49 / 1.00, reverse 3.867, on the 4.30 hypoid axle
+    // (autoopt.ru VAZ-2103 page for the box, ru.wikipedia VAZ-2101 for the axle).
+    // Rear drive through a live hypoid axle: 0.90.
     id: 'gearbox_lada_4',
     kind: 'gearbox',
-    label: '2102 four-speed',
+    label: '2101 four-speed',
     mass: 33,
     fits: ['car'],
     gearbox: {
@@ -427,6 +513,7 @@ const LADA_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.3,
       shiftTime: 0.34,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   { id: 'tank_lada_39', kind: 'fuel_tank', label: '39 L tank', mass: 13, capacity: 39, fits: ['car'] },
@@ -442,37 +529,37 @@ const LADA_VARIANTS: readonly PartVariant[] = [
  * all. Every engine and every gearbox a Soviet body can be fitted with is here, with
  * the real unit's figures.
  *
- * ---- indicated torque, and why these numbers are above the factory's ----
+ * ---- the numbers are the factory's, as printed ----
  *
- * `Drivetrain.update` subtracts an open-throttle loss from the curve on EVERY step:
+ * Each engine states its catalogue power point and torque point, net at the crank,
+ * and `engineTorqueNm` (vehicle/drivetrain.ts) passes through both exactly. Nothing
+ * here is adjusted to make a car hit a time: where a car misses its target, the
+ * mass, gearing, efficiency or drag area is what gets looked at (tools/reality.ts).
+ * Where two period sources disagree, the one printed beside the car's own top speed
+ * and 0-100 wins, because that is the engine those figures were measured with.
  *
- *     net = normalised(rpm) * peakTorqueNm - (brakingCoeff * omega + 0.03 * peakTorqueNm)
+ * The fuel cut is the tachometer red zone where one is published — VAZ's TX-193
+ * reads red from 6000 rpm on the classics and the Samaras alike — and otherwise the
+ * rated speed plus about 7%, the same margin that red zone keeps over 5600.
  *
- * A factory torque figure is measured AT THE CRANK on a brake, so it is already net
- * of that loss; handing it to `peakTorqueNm` subtracts the engine's friction twice.
- * So `peakTorqueNm` here is INDICATED torque — the factory net figure plus the loss
- * this model will take back off it at the same speed — and the net torque each
- * engine actually delivers at its own peak is the real car's, stated per entry.
+ * ---- brakingCoeff is mechanical friction ----
  *
- * ---- brakingCoeff is mechanical friction, not overrun drag ----
- *
- * The same coefficient is used for both, but the closed-throttle path multiplies it
- * by ENGINE_BRAKE_FACTOR (2.5, drivetrain.ts), so the field itself has to be the
- * WOT figure and the pumping loss of a shut throttle comes out of that factor. The
- * Soviet entries are sized as a period petrol four's real friction — about 13% of
- * peak torque at the redline, which is 1.2 bar FMEP for these displacements — so
- * that the 2.5x closed-throttle figure lands on a believable overrun drag too
- * (18 Nm at 3000 rpm for the 1.2, 43 Nm for the Volga 2.4).
- *
- * The old shared engines carried 0.052-0.055 for a 1.2-1.6, i.e. 29 Nm of friction
- * at 5600 rpm against a real 12, and 73 Nm of overrun against a real 30. That is
- * where the whole pack's missing top end went: every car ran out of breath below
- * its real maximum and had to be geared short to move at all.
+ * A factory figure is already net of the engine's friction, so the coefficient no
+ * longer touches the full-throttle curve. It is what closed-throttle engine braking
+ * is built from (×2.5, CLOSED_THROTTLE_BRAKE_FACTOR in drivetrain.ts) and what the
+ * part-throttle blend charges the pedal for. The Soviet entries are sized as a
+ * period petrol four's real friction — about 13% of peak torque at the redline,
+ * which is 1.2 bar FMEP for these displacements — so the overrun drag lands on
+ * believable figures (18 Nm at 3000 rpm for the 1.2, 43 Nm for the Volga 2.4).
  */
 const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
   {
-    // ZMZ-21A, GAZ-21 Volga: 2.445 litre, 70 hp at 4000, 17 kgf·m (167 Nm) at 2200,
-    // and an aluminium head on a wet-linered block that will not rev. Net 167 Nm.
+    // ZMZ-21A, GAZ-21 Volga: 2.445 litre, 70 hp (51.5 kW) at 4000 and 17 kgf·m
+    // (166.7 Nm), per the GAZ-21 manual (garage-m21.narod.ru); the torque speed, 2200,
+    // is ru.wikipedia's. No red zone is published, and the rated speed plus the usual
+    // 7% is not enough: the car's own 130 km/h in direct top on the 4.55 axle and
+    // 6.70-15 tyres turns the crank at 4300, so the engine demonstrably ran there.
+    // The cut is 4500, a 200 rpm margin over that.
     id: 'engine_zmz_21',
     kind: 'engine',
     label: '2.4 Volga four',
@@ -480,21 +567,22 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 52,
-      peakTorqueNm: 181,
+      peakPowerKw: 51.5,
+      powerPeakRpm: 4000,
+      peakTorqueNm: 166.7,
       torquePeakRpm: 2200,
-      redlineRpm: 4200,
+      redlineRpm: 4500,
       idleRpm: 500,
       bsfc: 0.35,
       brakingCoeff: 0.037,
       cylinders: 4,
-      // A long-stroke 2.4 turning 4200 rpm makes little heat for its size, and a
-      // Volga's radiator is enormous. It is the one Soviet engine that runs cool.
       heat: { operatingC: 82, coolingRequirementKwPerK: 0.62 },
     },
   },
   {
-    // ZMZ-2401, GAZ-24: same block, 95 hp at 4500 and 19 kgf·m (186 Nm) at 2400.
+    // ZMZ-24D, GAZ-24: the same block with a new head, 95 hp (69.9 kW) at 4500 and
+    // 19.0 kgf·m (186.3 Nm) at 2200-2400, idle 600 (GAZ-24 manual, long-vehicle.narod.ru;
+    // gaz24.info gives the torque at 2400). Cut at the rated speed plus 7%.
     id: 'engine_zmz_24',
     kind: 'engine',
     label: '2.4 Volga four (24)',
@@ -502,11 +590,12 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 62,
-      peakTorqueNm: 202,
+      peakPowerKw: 69.9,
+      powerPeakRpm: 4500,
+      peakTorqueNm: 186.3,
       torquePeakRpm: 2400,
-      redlineRpm: 4600,
-      idleRpm: 550,
+      redlineRpm: 4800,
+      idleRpm: 600,
       bsfc: 0.34,
       brakingCoeff: 0.0376,
       cylinders: 4,
@@ -514,8 +603,8 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-2105: 1.294 litre, 64 hp, 94 Nm at 3400. The belt-driven cam version of
-    // the 2101 unit, and the one under most square-lamp saloons.
+    // VAZ-2105: 1.29 litre, the belt-driven cam version of the 2101 unit, 47.0 kW at
+    // 5600 and 92 Nm (9.4 kgf·m) at 3400 (autoopt.ru, VAZ-2105 catalogue).
     id: 'engine_lada_1300',
     kind: 'engine',
     label: '1.3 inline-four',
@@ -524,9 +613,10 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     engine: {
       fuel: 'petrol',
       peakPowerKw: 47,
-      peakTorqueNm: 103,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 92,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.32,
       brakingCoeff: 0.0156,
@@ -534,7 +624,9 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-2103: 1.452 litre, 71 hp, 104 Nm at 3400.
+    // VAZ-2103: 1.45 litre, 53.3 kW (72.5 hp) at 5600 and 104 Nm at 3400 under GOST
+    // 14846-81 (autoopt.ru, VAZ-2103 and VAZ-2107 catalogues). The TX-193 tachometer
+    // fitted with it reads red from 6000.
     id: 'engine_lada_1500',
     kind: 'engine',
     label: '1.5 inline-four',
@@ -542,10 +634,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 53,
-      peakTorqueNm: 114,
+      peakPowerKw: 53.3,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 104,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.32,
       brakingCoeff: 0.0172,
@@ -553,8 +646,8 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-2106: 1.569 litre, 75 hp, 116 Nm at 3400. The strongest of the classics,
-    // and the engine both the 2107 and the first Nivas were built around.
+    // VAZ-2106: 1.57 litre, 55.5 kW (75.5 hp) at 5400 and 116 Nm (11.8 kgf·m) at 3000
+    // (autoopt.ru, VAZ-2106 catalogue). Red zone 6000 on its TX-193 tachometer.
     id: 'engine_lada_1600',
     kind: 'engine',
     label: '1.6 inline-four (VAZ)',
@@ -562,10 +655,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 55,
-      peakTorqueNm: 127,
-      torquePeakRpm: 3400,
-      redlineRpm: 5400,
+      peakPowerKw: 55.5,
+      powerPeakRpm: 5400,
+      peakTorqueNm: 116,
+      torquePeakRpm: 3000,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.32,
       brakingCoeff: 0.0199,
@@ -573,8 +667,9 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-2108: 1.288 litre, 64 hp, 95 Nm at 3400, and it revs 200 rpm past the
-    // classics because it is a transverse engine with a lighter valvetrain.
+    // VAZ-2108: 1.29 litre transverse four, 47.0 kW at 5600 and 94 Nm at 3400
+    // (autoopt.ru, VAZ-2109 1991 catalogue; the 2108 page prints 94 Nm at 3500). The
+    // Samara tachometer reads red above 6000 (2108 manual).
     id: 'engine_samara_1300',
     kind: 'engine',
     label: '1.3 Samara four',
@@ -582,10 +677,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 48,
-      peakTorqueNm: 104,
+      peakPowerKw: 47,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 94,
       torquePeakRpm: 3400,
-      redlineRpm: 5800,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.3,
       brakingCoeff: 0.0152,
@@ -593,7 +689,8 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-21083: 1.499 litre, 70 hp, 106 Nm at 3400.
+    // VAZ-21083: 1.5 litre, 51.5 kW (70 hp) at 5600 and 106.4 Nm at 3400 (autoopt.ru,
+    // VAZ-2109 catalogue; the 21099 manual rates it GOST 14846-81 net).
     id: 'engine_samara_1500',
     kind: 'engine',
     label: '1.5 Samara four',
@@ -601,10 +698,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 52,
-      peakTorqueNm: 116,
+      peakPowerKw: 51.5,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 106.4,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.3,
       brakingCoeff: 0.0176,
@@ -612,12 +710,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-1111: the 2108 engine cut in half — two cylinders, 76 x 71 mm, 0.649
-    // litre, one overhead cam. AvtoVAZ's catalogue gives 21.5 kW (29.3 hp) at 5600
-    // and 44.1 Nm at 3400 (the later GOST 14846-88 net rating is 20.7 kW at 5000
-    // and 44.0 Nm at 3000). 48.2 Nm indicated leaves the catalogue's 44.1 Nm after
-    // this model's friction at 3400; friction per Nm is the 1.3 it came from.
-    // Mass is the catalogue's bare engine without clutch or gearbox.
+    // VAZ-1111: the 2108 engine cut in half — two cylinders, 76 x 71 mm, 0.649 litre.
+    // AvtoVAZ's 1998 catalogue gives 21.5 kW (29.3 hp) at 5600 and 44.1 Nm at 3400
+    // (autoopt.ru, VAZ-1111; the manual's later GOST 14846-88 rating is 20.7 kW at
+    // 5000 and 44.0 Nm at 3000). Cut at the Samara family's 6000. Mass is the
+    // catalogue's bare engine without clutch or gearbox.
     id: 'engine_vaz_1111',
     kind: 'engine',
     label: '0.65 VAZ-1111 twin',
@@ -626,9 +723,10 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     engine: {
       fuel: 'petrol',
       peakPowerKw: 21.5,
-      peakTorqueNm: 48.2,
+      powerPeakRpm: 5600,
+      peakTorqueNm: 44.1,
       torquePeakRpm: 3400,
-      redlineRpm: 5600,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.33,
       brakingCoeff: 0.0073,
@@ -636,16 +734,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-2121: the 2106 block with the Niva's own head and manifolds, 80 hp and
-    // 121 Nm at 3400. It spends its life under load, so it needs the cooling.
-    //
-    // Its indicated torque is 10% under the arithmetic for 121 Nm net, and that is
-    // the transfer case: a Niva sends everything through a second gearset, two
-    // propshafts and three differentials, which costs about a tenth of the crank's
-    // output before it reaches a tyre. Nothing in the drivetrain model has an
-    // efficiency term, so the only honest place to put a real parasitic loss is in
-    // the engine that has to overcome it. Without it a 2121 reaches its rev limit
-    // in top gear and does 150 km/h, against the factory's 132.
+    // VAZ-2121: the 2106 block with the Niva's own head and manifolds, 53.7 kW (73 hp)
+    // at 5400 and 114 Nm (11.6 kgf·m) at 3400 (autoopt.ru, VAZ-2121 catalogue — the
+    // same page as the car's 132 km/h and 23 s). The 2106 block's 6000 red zone. It
+    // spends its life under load, so it needs the cooling. The transfer case's loss is
+    // the gearbox's efficiency now, not a deduction from this engine.
     id: 'engine_niva_1600',
     kind: 'engine',
     label: '1.6 Niva four',
@@ -653,10 +746,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 58,
-      peakTorqueNm: 119,
+      peakPowerKw: 53.7,
+      powerPeakRpm: 5400,
+      peakTorqueNm: 114,
       torquePeakRpm: 3400,
-      redlineRpm: 5400,
+      redlineRpm: 6000,
       idleRpm: 850,
       bsfc: 0.33,
       brakingCoeff: 0.0208,
@@ -665,9 +759,9 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // VAZ-21213: 1.69 litre, 80 hp, 127 Nm as low as 3000. The long-stroke Niva
-    // engine, which is the whole reason a 2131 will crawl. Same transfer-case
-    // deduction as the 1.6 above.
+    // VAZ-21213: 1.69 litre, 58.0 kW (78.9 hp) at 5200 and 127 Nm at 3000, GOST
+    // 14846-81 net (21213 manual, lada-niva.ru). The long-stroke Niva engine, which is
+    // the whole reason a 2131 will crawl. Cut at the rated speed plus 7%.
     id: 'engine_niva_1700',
     kind: 'engine',
     label: '1.7 Niva four',
@@ -675,10 +769,11 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 59,
-      peakTorqueNm: 124,
+      peakPowerKw: 58,
+      powerPeakRpm: 5200,
+      peakTorqueNm: 127,
       torquePeakRpm: 3000,
-      redlineRpm: 5200,
+      redlineRpm: 5600,
       idleRpm: 800,
       bsfc: 0.33,
       brakingCoeff: 0.0227,
@@ -687,9 +782,10 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // The rally 2105's 1.6: twin Webers, a rally cam, a lightened flywheel and a
-    // 6800 rpm limit. 100 hp and 132 Nm, but the torque peak has moved to 4200 and
-    // there is nothing below it — which is exactly what makes the car a handful.
+    // The rally 2105's 1.6: twin Webers, a rally cam, a lightened flywheel and a 6800
+    // rpm limit. Not a catalogue engine — it is the pack's own build — so its figures
+    // are the build's: 100 hp (73.5 kW) at 6400 and 132 Nm at 4200, with nothing below
+    // it, which is exactly what makes the car a handful.
     id: 'engine_lada_rally',
     kind: 'engine',
     label: '1.6 rally four',
@@ -697,8 +793,9 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     fits: ['car'],
     engine: {
       fuel: 'petrol',
-      peakPowerKw: 74,
-      peakTorqueNm: 144,
+      peakPowerKw: 73.5,
+      powerPeakRpm: 6400,
+      peakTorqueNm: 132,
       torquePeakRpm: 4200,
       redlineRpm: 6800,
       idleRpm: 1100,
@@ -713,18 +810,22 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
 /*
  * The pack's gearboxes. Ratios and final drives are the factory's, and they are
  * the reason these cars pull the way they do: the classics run a 4.30 or 4.10 axle
- * behind a direct top gear, so top speed arrives AT the redline; the Samaras are
- * a five-speed transaxle with a 0.784 overdrive, so theirs arrives well below it.
+ * behind a direct top gear, so top speed arrives near the rated speed; the Samaras
+ * are a five-speed transaxle with a 0.784 overdrive, so theirs arrives below it.
  *
  * The Niva has no transfer-case field to put its reduction in, so its HIGH range
- * (1.20:1) is folded into the final drive: 3.90 x 1.20 = 4.68. Low range is not
- * modelled; what is modelled is that a Niva is geared a fifth shorter than the
- * saloon it shares an engine with, which is what it feels like from the seat.
+ * (1.20:1) is folded into the final drive. Low range is not modelled. What IS
+ * modelled of the transfer case now is its loss: a second gearset, two propshafts
+ * and a third differential take the 4x4 boxes down to 0.85 efficiency.
+ *
+ * Efficiency bands (see `GearboxSpec.efficiency`): rear drive through a live hypoid
+ * axle 0.90, a front-drive transaxle 0.92, a 4x4 through its transfer case 0.85.
  */
 const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
   {
-    // GAZ-21: three speeds on the column, no synchro on first, and a change that
-    // takes the best part of a second if you are honest about it.
+    // GAZ-21: three speeds on the column, 3.115 / 1.772 / 1.000, reverse 3.738, on a
+    // 4.55 axle (autoopt.ru GAZ-21; 41:9 in the manual). No synchro on first, and a
+    // change that takes the best part of a second if you are honest about it.
     id: 'gearbox_gaz_3',
     kind: 'gearbox',
     label: '3-speed column shift',
@@ -736,11 +837,12 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.55,
       shiftTime: 0.6,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
-    // IZH/Moskvich four-speed: 3.49, 2.04, 1.33, 1.00; reverse 3.39;
-    // the working-vehicle final drive is the 4.22 pair.
+    // IZH/Moskvich four-speed: 3.49, 2.04, 1.33, 1.00; reverse 3.39 (autoopt.ru,
+    // Moskvich-412); the working-vehicle final drive is the 4.22 pair (IZH-2715).
     id: 'gearbox_izh_4',
     kind: 'gearbox',
     label: 'IZH/Moskvich four-speed',
@@ -752,9 +854,12 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.22,
       shiftTime: 0.4,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
+    // GAZ-24: 3.5 / 2.26 / 1.45 / 1.0, reverse 3.54, on a 4.1 hypoid axle (GAZ-24
+    // manual, long-vehicle.narod.ru).
     id: 'gearbox_gaz_4',
     kind: 'gearbox',
     label: '4-speed Volga',
@@ -766,25 +871,63 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.1,
       shiftTime: 0.45,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
-    // The 2103's close-ratio four-speed on a 4.10 axle: the "touring" gearing.
+    // VAZ-2102: the 2101's box on a shorter axle for the estate's load, "from 3.9 to
+    // 4.4" in the catalogue's words (autoopt.ru, VAZ-2102): the 40:9 pair, 4.44.
+    id: 'gearbox_lada_4_2102',
+    kind: 'gearbox',
+    label: '2102 four-speed',
+    mass: 33,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.75, 2.3, 1.49, 1.0],
+      reverse: 3.87,
+      finalDrive: 4.44,
+      shiftTime: 0.34,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
+  {
+    // VAZ-2105 / 2104: the later close-ratio box, 3.67 / 2.10 / 1.36 / 1.00, reverse
+    // 3.53, on the 4.3 axle the 1.3 was sold with (autoopt.ru, VAZ-2105 and VAZ-2104).
+    id: 'gearbox_lada_4_2105',
+    kind: 'gearbox',
+    label: '2105 four-speed',
+    mass: 33,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.67, 2.1, 1.36, 1.0],
+      reverse: 3.53,
+      finalDrive: 4.3,
+      shiftTime: 0.34,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
+  {
+    // VAZ-2103: 3.75 / 2.3 / 1.49 / 1.0, reverse 3.87, on the 4.1 axle (autoopt.ru,
+    // VAZ-2103 catalogue).
     id: 'gearbox_lada_4_tall',
     kind: 'gearbox',
     label: '2103 four-speed',
     mass: 33,
     fits: ['car'],
     gearbox: {
-      ratios: [3.67, 2.1, 1.36, 1.0],
-      reverse: 3.53,
+      ratios: [3.75, 2.3, 1.49, 1.0],
+      reverse: 3.87,
       finalDrive: 4.1,
       shiftTime: 0.34,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
-    // Same box behind the 1.6, on the 3.90 axle the 2106 was given for it.
+    // VAZ-2106: the 2106-10 box, 3.67 / 2.10 / 1.36 / 1.00, reverse 3.53, on the 3.9
+    // axle it was paired with (autoopt.ru, VAZ-2106).
     id: 'gearbox_lada_4_1600',
     kind: 'gearbox',
     label: '2106 four-speed',
@@ -796,10 +939,12 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 3.9,
       shiftTime: 0.34,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
-    // The classics' five-speed: fifth is an 0.82 overdrive on the same 3.90 axle.
+    // The classics' five-speed: 3.67 / 2.10 / 1.36 / 1.00 and an 0.82 overdrive, on the
+    // 3.9 axle (autoopt.ru, VAZ-2107).
     id: 'gearbox_lada_5',
     kind: 'gearbox',
     label: '2107 five-speed',
@@ -811,11 +956,13 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 3.9,
       shiftTime: 0.32,
       automatic: false,
+      efficiency: 0.9,
     },
   },
   {
-    // Samara transaxle, 1.3 axle (3.94). Box and final drive are one casting, so
-    // its mass carries the differential the rear-drive cars keep in the axle.
+    // Samara transaxle, 3.636 / 1.95 / 1.357 / 0.941 / 0.784, reverse 3.53, 1.3 axle
+    // 3.94 (autoopt.ru, VAZ-2109). Box and final drive are one casting, so its mass
+    // carries the differential the rear-drive cars keep in the axle.
     id: 'gearbox_samara_5',
     kind: 'gearbox',
     label: '2108 five-speed',
@@ -827,10 +974,12 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 3.94,
       shiftTime: 0.36,
       automatic: false,
+      efficiency: 0.92,
     },
   },
   {
-    // The same transaxle on the 1.5's taller 3.706 axle: the fastest Samara.
+    // The same transaxle on the 1.5's taller 3.7 axle (21099 manual, vaz-sputnik.ru):
+    // the fastest Samara.
     id: 'gearbox_samara_5_tall',
     kind: 'gearbox',
     label: '21083 five-speed',
@@ -842,13 +991,13 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 3.706,
       shiftTime: 0.36,
       automatic: false,
+      efficiency: 0.92,
     },
   },
   {
-    // VAZ-1111 transaxle: four synchronised speeds, 3.70 / 2.06 / 1.27 / 0.90,
-    // reverse 3.67, and the 1111's 4.54 final drive in the same casing (the 11113
-    // got 4.10). Catalogue mass with the differential. Top gear puts 120 km/h, the
-    // factory maximum, at 5000 rpm on 135/80 R12.
+    // VAZ-1111 transaxle: four synchronised speeds, 3.70 / 2.06 / 1.27 / 0.90, reverse
+    // 3.67, and the 1111's 4.54 final drive in the same casing (the 11113 got 4.10).
+    // Catalogue mass with the differential (1111 manual, autoprospect.ru).
     id: 'gearbox_oka_4',
     kind: 'gearbox',
     label: '1111 four-speed',
@@ -860,10 +1009,12 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.54,
       shiftTime: 0.36,
       automatic: false,
+      efficiency: 0.92,
     },
   },
   {
-    // 2121: four speeds, and the transfer case's high range folded into the axle.
+    // VAZ-2121: 3.667 / 2.100 / 1.361 / 1.000, reverse 3.526, a 1.2 high range and a
+    // 4.1 axle (autoopt.ru, VAZ-2121): 4.1 x 1.2 = 4.92 folded into the final drive.
     id: 'gearbox_niva_4',
     kind: 'gearbox',
     label: 'Niva four-speed',
@@ -872,12 +1023,15 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0],
       reverse: 3.53,
-      finalDrive: 4.68,
+      finalDrive: 4.92,
       shiftTime: 0.38,
       automatic: false,
+      efficiency: 0.85,
     },
   },
   {
+    // VAZ-21213/2131: the five-speed, 3.67 / 2.1 / 1.36 / 1 / 0.82, reverse 3.53, the
+    // 1.2 high range and the 3.9 axle (21213 manual, lada-niva.ru): 3.9 x 1.2 = 4.68.
     id: 'gearbox_niva_5',
     kind: 'gearbox',
     label: 'Niva five-speed',
@@ -889,6 +1043,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       finalDrive: 4.68,
       shiftTime: 0.38,
       automatic: false,
+      efficiency: 0.85,
     },
   },
 ];

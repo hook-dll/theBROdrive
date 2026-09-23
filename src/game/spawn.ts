@@ -46,6 +46,7 @@ export function createServiceableCarState(
     reverseLightsOn: false,
     dirt: 0,
     scratches: 0,
+    dents: [],
     fuelLitres: def.tankLitres,
     fuelKind: engine?.fuel ?? null,
     waterLitres: bonnetWaterCapacity(bonnet),

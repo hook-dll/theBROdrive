@@ -16,10 +16,44 @@ const RPM_PER_RAD_PER_SEC = 60 / (2 * Math.PI);
 const GEAR_REVERSE = -1;
 const GEAR_NEUTRAL = 0;
 
-/** Normalised torque at idle. High enough to launch from a standstill. */
+/*
+ * ---- the wide-open-throttle curve ----
+ *
+ * `engineTorqueNm` is the engine's external speed characteristic: NET crank torque
+ * at full throttle, the curve a factory brake records and the one a catalogue's two
+ * figures are points on. It is built so that both of those points are exact:
+ *
+ *   torque peak  (torquePeakRpm, peakTorqueNm), with zero slope, because it is a peak;
+ *   power peak   (powerPeakRpm, peakPowerKw / omega), with dT/domega = -T/omega,
+ *                which is exactly the slope that makes T*omega stationary there.
+ *
+ * Idle to torque peak is a cubic Hermite segment, peak to power peak a shape-
+ * preserving segment that meets the power point's slope (see `fallingSegment`), and
+ * past the power peak power follows Leiderman's external-characteristic polynomial
+ * P/Pmax = x + x^2 - x^3 (x = n / n_P, the textbook form for a carburettor petrol
+ * engine), which is stationary at x = 1 and loses power gently: 1% at 7% over the
+ * power peak, 2% at 10%. The last LIMITER_RAMP_RPM before the fuel cut then fade the
+ * torque smoothly to zero, which is what a soft limiter does and what stops the
+ * engine hitting a wall of zero torque at one exact crank speed.
+ */
+
+/**
+ * Net full-throttle torque at idle, as a fraction of peak. A carburettor four at
+ * 800 rpm is running far below the speed its manifold and cam are tuned for; the
+ * curve this replaced delivered 0.63 of peak net here, and the standing-start and
+ * climb checks (handling-cli, climb-sweep) were built on that, so the net figure
+ * keeps it. Launches do not depend on it: first gear slips the clutch at the torque
+ * peak (see `update`).
+ */
 const IDLE_TORQUE_FRACTION = 0.62;
-/** Normalised torque remaining at the redline before the fuel cut. */
-const REDLINE_TORQUE_FRACTION = 0.82;
+/**
+ * Start slope of the idle-to-peak segment, as a multiple of that segment's secant.
+ * 1.5 is inside the Fritsch-Carlson monotone region (<= 3) and gives the full early
+ * rise and flat top of a real curve: 88% of peak halfway between idle and the peak.
+ */
+const IDLE_RISE_SLOPE = 1.5;
+/** Crank speed over which the fuel cut fades torque to zero, rpm. */
+const LIMITER_RAMP_RPM = 150;
 
 /**
  * Pumping loss as a fraction of peak torque. This is the constant (RPM-
@@ -37,20 +71,19 @@ const PUMPING_LOSS_FRACTION = 0.03;
  * strong vacuum and the engine must pump against itself, so the retarding
  * torque is several times that open-throttle figure.
  *
- * Derivation (reference car: 1008 kg wagon, engine_i4_1600 brakingCoeff 0.055 /
- * peakTorque 125 Nm, 4-speed finalDrive 3.9, wheel radius 0.35 m, coasting at
- * 70 km/h ≈ 19.4 m/s):
- *   4th gear runs the crank at 2069 rpm = 216.7 rad/s, so open-throttle drag is
- *   0.055×216.7 + 0.03×125 = 15.7 Nm at the crank. Through 3.9:1 that is
- *   174.6 N at the contact patch, i.e. 0.17 m/s² on 1008 kg. A real 1.6 L
- *   petrol engine coasts down around 0.5 m/s² in top gear, so the closed-
- *   throttle retarding torque is ~2.9× the open-throttle figure; 2.5 lands 4th
- *   at ~0.43 m/s², 2nd at ~1.6 m/s² and 1st, through its deep 3.65:1 ratio, far
- *   harder (~3.6 m/s² once the over-redline rev is soft-capped below).
+ * Derivation (VAZ-2101 1.2, brakingCoeff 0.0144, peak torque 87 Nm): at 3000 rpm
+ *   = 314 rad/s the open-throttle drag is 0.0144×314 + 0.03×87 = 7.1 Nm, which is
+ *   1.2 bar of friction mean effective pressure on 1.2 litres — a period petrol
+ *   four's figure. A shut throttle adds the pumping loop on top, and overrun
+ *   measurements of such engines put the total at two to three times the open-
+ *   throttle drag; 2.5 lands the 1.2 on 18 Nm at 3000 rpm and the Volga 2.4 on
+ *   about 43 Nm, the believable overrun figures the Soviet driveline note in
+ *   parts/registry.ts is sized to.
  *
  * It MUST be applied only to the closed-throttle engine-braking branch. Scaling
- * the drive path instead would bleed the engine friction out of the produced
- * torque and regress the measured acceleration figures.
+ * the drive path instead would bleed engine friction out of the part-throttle
+ * blend (`update`) and move every part-throttle response the traffic and the
+ * autopilot are tuned on.
  */
 const CLOSED_THROTTLE_BRAKE_FACTOR = 2.5;
 /**
@@ -63,9 +96,21 @@ const CLOSED_THROTTLE_BRAKE_FACTOR = 2.5;
  */
 const OVER_REV_BRAKE_GAIN = 0.2;
 
-/** Automatic shift points, as fractions of redline. The wide gap is hysteresis. */
+/**
+ * Part-throttle automatic shift points, as fractions of redline. The wide gap is
+ * hysteresis. At wide-open throttle the upshift is instead power-optimal (see
+ * `automaticShift`): a driver asking for everything wants the gear that pushes
+ * hardest, not the one that is quietest.
+ */
 const UP_SHIFT_RPM_FRACTION = 0.8;
 const DOWN_SHIFT_RPM_FRACTION = 0.4;
+/**
+ * Throttle at and above which the automatic treats the request as wide open and
+ * shifts on wheel force. Below it the 0.8-redline rule holds, which is what keeps
+ * traffic and the autopilot, driving on a speed controller's part throttle, from
+ * revving every car out between gears.
+ */
+const WOT_SHIFT_THROTTLE = 0.95;
 /**
  * An upshift must leave the taller gear at least this multiple of idle rpm, or the
  * box would immediately hunt back down. 1.25 keeps a real margin without blocking
@@ -122,22 +167,128 @@ export function wheelTorqueToForce(torqueNm: number, wheelRadius: number): numbe
  *
  * Peak torque is the size of an engine. For a four-stroke, torque is
  * `BMEP · displacement / 4π`, and BMEP is roughly constant across a class of engine —
- * about 8-10 bar for these naturally aspirated period units — so displacement in
- * litres is close to `peakTorqueNm / TORQUE_PER_LITRE`. The catalogue agrees with
- * itself on that: 125 N·m for the 1.6, 225 for the 2.8, 390 for the 5.0.
+ * about 9 bar for these naturally aspirated period units — so displacement in litres
+ * is close to `peakTorqueNm / TORQUE_PER_LITRE`. The catalogue's factory net figures
+ * agree with themselves on that: 87 N·m from 1.198 litres (73 per litre), 116 from
+ * 1.569 (74), 186 from 2.445 (76), 44 from the 0.649 Oka twin (68).
  *
  * Inertia is then a fixed clutch-and-input-shaft term plus a term that grows with
  * displacement, which is what a bigger crank and a bigger flywheel are. The result
- * lands 0.19 kg·m² for the small four and 0.47 for the truck diesel — the range real
+ * lands 0.17 kg·m² for the 1.2 and about 0.5 for a truck diesel — the range real
  * assemblies of this era occupy.
  */
-const TORQUE_PER_LITRE = 80;
+const TORQUE_PER_LITRE = 72;
 const CRANK_INERTIA_BASE = 0.1;
 const CRANK_INERTIA_PER_LITRE = 0.055;
 
 function crankInertiaKgM2(engine: EngineSpec): number {
   const litres = Math.max(0, engine.peakTorqueNm) / TORQUE_PER_LITRE;
   return CRANK_INERTIA_BASE + CRANK_INERTIA_PER_LITRE * litres;
+}
+
+/**
+ * Shape of the torque-peak-to-power-peak segment on u = 0..1: s(0) = 0, s(1) = 1,
+ * zero slope at the torque peak and slope `beta` (in units of the segment's secant)
+ * at the power peak. Up to beta = 3 that is the cubic Hermite segment, which stays
+ * monotone exactly there (the Fritsch-Carlson bound for a zero start slope); a
+ * steeper power point — a flat torque curve that falls hard just before its rated
+ * speed, as the Zhiguli fours do — needs u^beta, which meets both slopes, has no
+ * overshoot, and is the same curve as the cubic at beta = 3.
+ */
+function fallingSegment(u: number, beta: number): number {
+  if (beta <= 3) return (beta - 2) * u * u * u + (3 - beta) * u * u;
+  return Math.pow(u, beta);
+}
+
+/**
+ * NET crank torque at wide-open throttle, Nm: the external speed characteristic
+ * described above the constants, passing exactly through the catalogue's torque
+ * point and power point.
+ *
+ * `cutRpm` is the fuel cut. It defaults to the engine's `redlineRpm`; `Drivetrain`
+ * lowers it with the thermal rev limit, so a boiling engine refuses the top of its
+ * range instead of making less torque everywhere. Pure and exported so every tool
+ * asking "what can this engine do here" reads the one curve the car drives on.
+ *
+ * Inconsistent data is clamped rather than trusted: a power point below the torque
+ * peak's rpm is moved just above it, and a power point whose torque exceeds the peak
+ * torque (a catalogue typo, or a power figure from a different rating standard) is
+ * held at the peak, so the curve never rises past `peakTorqueNm`.
+ */
+export function engineTorqueNm(
+  engine: EngineSpec,
+  rpm: number,
+  cutRpm: number = engine.redlineRpm,
+): number {
+  if (!(rpm > 0) || rpm >= cutRpm) return 0;
+  const peakNm = engine.peakTorqueNm;
+  const peakRpm = engine.torquePeakRpm;
+  const powerRpm = Math.max(engine.powerPeakRpm, peakRpm + 1);
+  const powerNm = Math.min(
+    peakNm,
+    (engine.peakPowerKw * 1000) / (powerRpm * RAD_PER_SEC_PER_RPM),
+  );
+
+  let torque: number;
+  if (rpm <= engine.idleRpm) {
+    torque = IDLE_TORQUE_FRACTION * peakNm;
+  } else if (rpm < peakRpm) {
+    const u = (rpm - engine.idleRpm) / (peakRpm - engine.idleRpm);
+    const a = IDLE_RISE_SLOPE;
+    const rise = (a - 2) * u * u * u + (3 - 2 * a) * u * u + a * u;
+    torque = peakNm * (IDLE_TORQUE_FRACTION + (1 - IDLE_TORQUE_FRACTION) * rise);
+  } else if (rpm < powerRpm) {
+    const drop = peakNm - powerNm;
+    if (drop <= 1e-9) {
+      torque = peakNm;
+    } else {
+      // Stationary power at the power point: dT/drpm = -T / rpm there, expressed in
+      // units of this segment's secant slope.
+      const beta = ((powerNm / powerRpm) * (powerRpm - peakRpm)) / drop;
+      torque = peakNm - drop * fallingSegment((rpm - peakRpm) / (powerRpm - peakRpm), beta);
+    }
+  } else {
+    // Leiderman past the power peak: P ∝ x + x² - x³, so T ∝ 1 + x - x².
+    const x = rpm / powerRpm;
+    torque = powerNm * (1 + x - x * x);
+  }
+
+  const ramp = (cutRpm - rpm) / LIMITER_RAMP_RPM;
+  if (ramp < 1) torque *= ramp * ramp * (3 - 2 * ramp);
+  return torque > 0 ? torque : 0;
+}
+
+/**
+ * Whether a driver at full throttle gains by changing up now: the next, taller gear
+ * (`nextRatio`) puts at least as much force on the road at this road speed as the
+ * current one (`ratio`, turning the crank at `rpm`), or the current gear has run
+ * into the limiter ramp and cannot go on.
+ *
+ * Wheel force is `T(rpm) · ratio · final drive · efficiency / radius`, and everything
+ * after the ratio is shared by both gears, so the comparison is `T · ratio`. That is
+ * the power-optimal change point: below it the lower gear pulls harder, above it the
+ * taller one does. Below the torque peak it can never fire — the taller gear turns
+ * the crank slower, where this curve makes no more torque — and at or below idle
+ * there is nothing to compare, so it needs no speed gate.
+ *
+ * Pure and exported because it is one definition of "shifting well": the automatic
+ * uses it at wide-open throttle, and the reality bench drives its factory-style
+ * manual 0-100 runs on it.
+ */
+export function fullThrottleUpshiftDue(
+  engine: EngineSpec,
+  rpm: number,
+  ratio: number,
+  nextRatio: number,
+  cutRpm: number = engine.redlineRpm,
+): boolean {
+  if (!(ratio > 0) || !(nextRatio > 0) || !(rpm > engine.idleRpm)) return false;
+  if (rpm >= cutRpm - LIMITER_RAMP_RPM) return true;
+  const nextRpm = (rpm * nextRatio) / ratio;
+  return (
+    engineTorqueNm(engine, nextRpm, cutRpm) * nextRatio >=
+    engineTorqueNm(engine, rpm, cutRpm) * ratio
+  );
 }
 
 export class Drivetrain {
@@ -285,32 +436,18 @@ export class Drivetrain {
   }
 
   /**
-   * Normalised torque shape, scaled by peak torque: rises from idle to a peak,
-   * falls gently toward the redline, then cuts completely at the redline so the
-   * engine can never be fuelled past it.
+   * Net full-throttle crank torque this engine can make at `rpm` right now: the
+   * catalogue curve (`engineTorqueNm`) with the cooling system's two limits applied.
    *
    * The cut moves DOWN with the thermal rev limit, which is what makes an
    * overheating engine refuse the last part of its rev range instead of simply
    * making less torque everywhere: holding a boiling engine off the redline is the
    * one thing that lets it cool while still moving the car.
    */
-  torqueCurve(rpm: number): number {
+  private wotTorqueNm(rpm: number): number {
     const e = this.engine;
-    const ceiling = e == null ? 0 : e.redlineRpm * this.thermalRevLimit;
-    if (e == null || rpm <= 0 || rpm >= ceiling) return 0;
-
-    let normalised: number;
-    if (rpm <= e.idleRpm) {
-      normalised = IDLE_TORQUE_FRACTION;
-    } else if (rpm < e.torquePeakRpm) {
-      const t = (rpm - e.idleRpm) / (e.torquePeakRpm - e.idleRpm);
-      normalised = IDLE_TORQUE_FRACTION + (1 - IDLE_TORQUE_FRACTION) * t;
-    } else {
-      const t = (rpm - e.torquePeakRpm) / (e.redlineRpm - e.torquePeakRpm);
-      normalised = 1 - (1 - REDLINE_TORQUE_FRACTION) * t;
-    }
-
-    return normalised * e.peakTorqueNm * this.thermalPerformance;
+    if (e == null) return 0;
+    return engineTorqueNm(e, rpm, e.redlineRpm * this.thermalRevLimit) * this.thermalPerformance;
   }
 
   /**
@@ -401,19 +538,28 @@ export class Drivetrain {
     ) {
       const total = this.gearRatio() * gearbox.finalDrive; // signed (reverse is -)
 
-      const driveCrank = this.torqueCurve(this.rpmValue) * demand; // >= 0
-      // Mechanical friction + pumping at OPEN throttle. This is subtracted from
-      // the produced torque below and is the base the closed-throttle engine
-      // braking is built from; it is already calibrated into the acceleration
-      // figures, so it must never be scaled on the drive side.
+      // Mechanical friction + pumping at OPEN throttle, from the TRUE geared crank
+      // speed. It is the base the closed-throttle engine braking is built from, and
+      // the part-throttle blend below runs through it: the catalogue curve is NET
+      // torque, so full throttle must return exactly that curve and a shut throttle
+      // exactly minus the friction,
+      //
+      //   net = (T_wot + friction) * demand - friction,
+      //
+      // which is the engine's gross torque scaled by the pedal and then charged its
+      // own losses — engine braking and part-throttle response as the traffic and
+      // the autopilot were tuned on.
       const frictionCrank =
         engine.brakingCoeff * crankSpeedAbs + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
+      const driveCrank = (this.wotTorqueNm(this.rpmValue) + frictionCrank) * demand; // >= 0
 
       const netCrank = driveCrank - frictionCrank; // signed Nm at the crank
 
       if (netCrank >= 0) {
-        // Driving: the gear carries the direction (forward or reverse).
-        driveTorqueNm = netCrank * total;
+        // Driving: the gear carries the direction (forward or reverse), and the
+        // gearbox's efficiency is what the gears, bearings, propshafts and
+        // differentials take out of the crank's torque on the way to the hubs.
+        driveTorqueNm = netCrank * total * gearbox.efficiency;
       } else {
         // Engine braking, reported as a magnitude of retarding wheel torque
         // (Nm). It is computed from the TRUE geared crank speed (unclamped), so
@@ -424,6 +570,13 @@ export class Drivetrain {
         //
         // Past the redline the viscous contribution is soft-capped (see
         // OVER_REV_BRAKE_GAIN) so the drag keeps rising but cannot runaway.
+        //
+        // No efficiency term here, deliberately. Driven backwards the driveline's
+        // own losses ADD to the drag instead of taking a share of it, so the
+        // physical correction would be a division, not a multiplication — and it
+        // would be a few per cent of an overrun drag whose factor
+        // (CLOSED_THROTTLE_BRAKE_FACTOR) is itself only known to that precision.
+        // Leaving it out keeps engine braking exactly where it was tuned.
         const brakeCrankSpeed = this.brakeCrankSpeed(crankSpeedAbs, engine);
         const brakeFriction =
           engine.brakingCoeff * brakeCrankSpeed + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
@@ -494,6 +647,10 @@ export class Drivetrain {
    * at full throttle sits above the upshift threshold no matter how slowly the
    * car is moving: deciding on it walked a standing car straight up through every
    * gear and left it unable to pull away at all.
+   *
+   * At wide-open throttle the upshift is power-optimal (`fullThrottleUpshiftDue`);
+   * below it the 0.8-redline rule holds. The downshift rule and the idle margin
+   * guard both, so neither upshift rule can hunt.
    */
   private automaticShift(
     engine: EngineSpec | null,
@@ -536,14 +693,29 @@ export class Drivetrain {
     }
 
     const wheelAbs = Math.abs(wheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC;
-    const current = wheelAbs * Math.abs(this.ratioOfGear(this.gear));
+    const ratio = Math.abs(this.ratioOfGear(this.gear));
+    const current = wheelAbs * ratio;
 
-    if (this.gear < n && current > engine.redlineRpm * UP_SHIFT_RPM_FRACTION) {
+    if (this.gear < n) {
+      const nextRatio = Math.abs(this.ratioOfGear(this.gear + 1));
+      const due =
+        throttle >= WOT_SHIFT_THROTTLE
+          ? fullThrottleUpshiftDue(
+              engine,
+              current,
+              ratio,
+              nextRatio,
+              engine.redlineRpm * this.thermalRevLimit,
+            )
+          : current > engine.redlineRpm * UP_SHIFT_RPM_FRACTION;
       // Never upshift into a gear that cannot pull: the taller gear must still
       // leave the engine clear of idle, or the box would hunt straight back down.
-      const next = wheelAbs * Math.abs(this.ratioOfGear(this.gear + 1));
-      if (next > engine.idleRpm * UP_SHIFT_IDLE_MARGIN) this.setGear(this.gear + 1);
-    } else if (this.gear > 1 && current < engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION) {
+      if (due && wheelAbs * nextRatio > engine.idleRpm * UP_SHIFT_IDLE_MARGIN) {
+        this.setGear(this.gear + 1);
+        return;
+      }
+    }
+    if (this.gear > 1 && current < engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION) {
       this.setGear(this.gear - 1);
     }
   }

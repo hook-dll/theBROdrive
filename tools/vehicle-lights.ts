@@ -17,9 +17,7 @@ import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { disposeCarModelCache, preloadCarModels } from '../src/render/carmodel';
 import { ambientBeamGain, VehicleLightRig } from '../src/render/vehiclelights';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { carModel } from '../src/vehicle/carmodels';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { benchCarState } from './benchcar';
 import { WorldOrigin } from '../src/world/origin';
 import { installAssetShim } from './assetshim';
 
@@ -43,31 +41,8 @@ function carState(
   },
 ): CarState {
   return {
-    id: `vehicle-lights:${index}`,
-    modelId: MODEL_ID,
-    stickers: [],
+    ...benchCarState(MODEL_ID, { id: `vehicle-lights:${index}`, x: index * 12, z: index * -7 }),
     ...lamps,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    bonnet: createBonnetStorage(
-      `vehicle-lights:${index}`,
-      carModel(MODEL_ID).engineId,
-      carModel(MODEL_ID).bodyClass,
-      carModel(MODEL_ID).tankLitres,
-    ),
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: [],
-    odometer: 0,
-    x: index * 12,
-    y: 1.2,
-    z: index * -7,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
   };
 }
 

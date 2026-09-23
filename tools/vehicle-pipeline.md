@@ -340,7 +340,7 @@ node tools/strip-glb-maps.mjs <input.glb> <output.glb>
 - силуэт на контрастном фоне;
 - арки и колёса в движении;
 - день, сумерки и ночь;
-- чистый кузов и dent/dirt shader.
+- чистый, пыльный, поцарапанный и помятый кузов (`/?car-lab`).
 
 Последовательность кандидатов: например `100% -> 50% -> 35% -> 25%`. Выбирается самый лёгкий кандидат, который не отличается от предыдущего одобренного на gameplay-дистанции и не имеет явно ломаного силуэта close-up. Автоматическая image metric может отсеивать грубые ошибки, но финальное решение принимает visual gate.
 
@@ -825,7 +825,7 @@ bun tools/vehicle-lights.ts
 npm run dev
 ```
 
-- `car-dirt.ts` сейчас hard-coded на `gt_vaz2110`; проверяет накопление dirt, crashes, per-instance state и save round-trip.
+- `car-dirt.ts` ведёт реальные Vehicle (`gt_vaz2110`, плюс `sv_vaz2101` и `sa_oka` для геометрии вмятин) и проверяет: скорость запыления по покрытиям (песок полностью за 3–10 км, гравий медленнее, асфальт — медленная дорожная плёнка 60–300 км), независимость одинаковых моделей, мойку припаркованной машины, одну вмятину на одно столкновение в правильном месте, деформацию без выворачивания панели и без захода в колесо, save round-trip dirt/scratches/dents, побитовое воспроизведение помятого кузова после загрузки, миграцию старого сейва и ограниченное кольцо вмятин.
 - `vehicle-lights.ts` сейчас hard-coded на `gt_vaz2110` и проверяет projected-light pool/lifecycle, а не правильность faces каждой лампы.
 - На текущем headless Bun path `vehicle-lights.ts` загружает Soviet donor wheels через FBX и требует `window` shim; пока он использует только `installBlankTextures()`, команда может завершиться `window is not defined`. Исправить harness или использовать полный `installAssetShim()` до объявления этого gate зелёным.
 
@@ -841,11 +841,7 @@ npm run dev
 - save, reload, exit/enter car;
 - статическая копия в POI и активная копия в traffic.
 
-Для быстрого визуального damage review:
-
-```text
-/tools/dentlab/?model=<modelId>&damage=0,0.12,0.3,1&z=15
-```
+Для визуальной проверки пыли, царапин и вмятин (только dev-сборка): `/?car-lab` — все модели каталога рядами по пакам под настоящими Renderer и Sky. Слайдеры пыли, царапин и времени суток, кнопка случайных вмятин (те же вмятины, что даёт `impactDent` при реальном ударе). Параметры URL `dirt`, `scratches`, `dents`, `time`, `focus=<modelId>` задают то же состояние для воспроизводимых скриншотов; `window.__carLab` даёт то же из автоматизации.
 
 `/tools/coollab/` нужен только при добавлении нового radiator mesh или изменении dashboard temperature zones.
 
@@ -875,7 +871,7 @@ npm run build
 - traffic distance;
 - night beams on ground;
 - repaint swatches;
-- dent/dirt levels.
+- уровни пыли и царапин, вмятины (`/?car-lab`).
 
 Reject при любом из признаков:
 

@@ -9,15 +9,13 @@
 
 import * as THREE from 'three';
 import { PhysicsWorld } from '../src/core/physics';
-import { GameWorld, newWorldState, type CarState, type TrailerState } from '../src/game/state';
+import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
 import { type Item } from '../src/items/items';
 import { LoosePartField } from '../src/parts/loose';
 import { preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
 import { TRAILER_MODEL_FIT, TrailerField } from '../src/vehicle/trailer';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { carModel } from '../src/vehicle/carmodels';
+import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin, type RebaseShift } from '../src/world/origin';
 import { installAssetShim } from './assetshim';
@@ -66,39 +64,6 @@ function samePosition(
     Math.abs(actual.y - expected.y) < 1e-6 &&
     Math.abs(actual.z - expected.z) < 1e-6
   );
-}
-
-function carState(): CarState {
-  const def = carModel(TOW_MODEL_ID);
-  return {
-    id: TOW_CAR_ID,
-    modelId: TOW_MODEL_ID,
-    stickers: [],
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    fuelLitres: 40,
-    fuelKind: def.bodyClass === 'car' ? 'petrol' : null,
-    dirt: 0,
-    scratches: 0,
-    damage: [],
-    waterLitres: 10,
-    oilLitres: 10,
-    engineTempC: COLD_SOAK_C,
-    storage: [],
-    // A CarState without its four bonnet cells is not a car: every service lookup
-    // indexes this array, so leaving it out crashed the harness before it reached a
-    // single assertion.
-    bonnet: createBonnetStorage(TOW_CAR_ID, def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: FAR_CENTER.x,
-    y: 2,
-    z: 0,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
-  };
 }
 
 /**
@@ -358,7 +323,7 @@ if (failures === 0) {
     // A real, preloaded catalogue vehicle proves the exceptional retention path:
     // a hitched trailer remains materialised even when both bodies are far from the
     // active center, and TrailerField restores the real Rapier coupling.
-    const towState = carState();
+    const towState = benchCarState(TOW_MODEL_ID, { id: TOW_CAR_ID, x: FAR_CENTER.x, y: 2, z: 0 });
     world.apply({ t: 'car_add', car: towState });
     const hitchedState = trailer('lifecycle:hitched', FAR_CENTER.x, 2, 0);
     hitchedState.hitchedTo = TOW_CAR_ID;

@@ -1311,9 +1311,6 @@ export class ScatterProvider implements ChunkProvider {
     }
     for (const [form, list] of byForm) {
       const mesh = new THREE.InstancedMesh(form.geometry, form.material, list.length);
-      // Instances sit up to a chunk radius from the mesh's own origin, so three's
-      // geometry bounding-sphere cull would pop; disable it.
-      mesh.frustumCulled = false;
       for (let i = 0; i < list.length; i++) {
         const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);
@@ -1325,6 +1322,13 @@ export class ScatterProvider implements ChunkProvider {
         pl.instance = i;
       }
       mesh.instanceMatrix.needsUpdate = true;
+      // Culled on the bounds of its INSTANCES, which three computes over every instance
+      // matrix — not on the form's own geometry sphere, which sits at the mesh origin
+      // and would pop a whole chunk's scatter out while half of it was still on screen.
+      // Computed here, once, at full scale: the only later writes are a break's zero-
+      // scale blank, which only ever shrinks what the sphere has to hold. A rebase moves
+      // the chunk GROUP, and the sphere is local to it, so it never needs redoing.
+      mesh.computeBoundingSphere();
       group.add(mesh);
       meshes.push(mesh);
       yield;
@@ -2594,9 +2598,6 @@ export class DelineatorProvider implements ChunkProvider {
 
     const group = new THREE.Group();
     const shafts = new THREE.InstancedMesh(delineatorPost(), DELINEATOR_MATERIALS, posts.length);
-    // Instances sit up to a chunk length from the mesh origin, so three's bounding
-    // sphere would cull the run early and it would pop; same reason as the scatter.
-    shafts.frustumCulled = false;
 
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
@@ -2649,6 +2650,9 @@ export class DelineatorProvider implements ChunkProvider {
       }
     }
     shafts.instanceMatrix.needsUpdate = true;
+    // Culled on its instances' own bounds, for the scatter's reasons (see `buildSteps`):
+    // computed once over the standing run; a broken post is only ever blanked smaller.
+    shafts.computeBoundingSphere();
     group.add(shafts);
 
     return {

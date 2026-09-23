@@ -207,12 +207,25 @@ export function prefersMobilePresentation(): boolean {
 // stirred by convection, and everything below follows from that one sentence:
 //
 //   WHERE     the hot air is a shallow layer lying on the ground. For each pixel the
-//             shader integrates that layer along the pixel's own world-space view ray.
-//             The scene depth then limits the effect to light that has actually
-//             travelled far enough through it. A steep ray leaves the layer at once
-//             and gets nothing, which is why the sky is still. A grazing ray runs for
-//             hundreds of metres, which is why the horizon boils. The road and nearby
-//             objects remain rigid because their real depth never reaches the haze.
+//             shader integrates that layer along the pixel's own world-space view ray,
+//             FROM THE EYE TO THE SURFACE THE PIXEL SHOWS. Light from a pole 150 m
+//             away has crossed 150 m of hot air, not the three kilometres that light
+//             from the terrain behind it has, and it boils that much less; the old
+//             integral ran every ray to infinity and only used depth as a gate, so a
+//             nearby object on the horizon line shimmered exactly as hard as the far
+//             desert. A steep ray leaves the layer at once and gets nothing, which is
+//             why the sky is still. A grazing ray runs for hundreds of metres, which is
+//             why the horizon boils. The road and nearby objects remain rigid because
+//             their real depth never reaches the haze.
+//
+//             "The ground" is not the ground under the camera. It is a line fitted to
+//             the terrain the view actually grazes, hundreds of metres out along the
+//             look direction (render/heathaze.ts), supplied as a height over it and a
+//             slope. From a crest thirty metres above a plain the eye is thirty metres
+//             above the hot air, and the horizon over the valley barely moves; looking
+//             up a dune field that rises toward the skyline, the line rises with it and
+//             the distant crests stay inside the layer. That is what lets the layer
+//             itself be thin, which is what keeps the shimmer out of the open sky.
 //
 //             Nothing about this is measured in screen rows, and that is the point:
 //             the old version decayed from a computed horizon ROW, so pitching the
@@ -224,37 +237,55 @@ export function prefersMobilePresentation(): boolean {
 //             saturates. In ANGLE, not in pixels: converted through the live field of
 //             view, so zooming in with the binoculars magnifies the boil exactly as
 //             it magnifies everything else. The old fixed pixel amplitude did not,
-//             and read as a distortion filter welded to the screen.
+//             and read as a distortion filter welded to the screen. The strength
+//             itself follows how hot the ground is (render/heathaze.ts), not how high
+//             the sun is: nothing at dawn, a peak in the early afternoon, gone before
+//             the sun is down.
 //
-//   OF WHAT   a field of convection cells sampled on a sphere of fixed radius around
-//             the eye — the "constant range around the player". A DIRECTION, not a
-//             position: pan, and the pattern stays over the same part of the desert,
-//             because that is what looking at the same air twice means. Translation
-//             is deliberately absent. The coherent part of the perturbation is set by
-//             the far half of the ray, hundreds of metres out, which does not change
-//             when the car moves thirty metres; letting position in would smear the
-//             field past the eye at v/cellSize — tens of Hz at road speed, which is
-//             scintillation, not shimmer. All the motion comes from the field's own
-//             convection, which is where a real one's comes from too.
+//   OF WHAT   a field of thin horizontal strata in DIRECTION space — azimuth round the
+//             eye and elevation — not a field in world position. Pan, and the pattern
+//             stays over the same part of the desert, because that is what looking at
+//             the same air twice means. Translation is deliberately absent. The
+//             coherent part of the perturbation is set by the far half of the ray,
+//             hundreds of metres out, which does not change when the car moves thirty
+//             metres; letting position in would smear the field past the eye at
+//             v/cellSize — tens of Hz at road speed, which is scintillation, not
+//             shimmer. All the motion comes from the field's own rise.
+//
+//   AND THE MIRROR  where the hot ground is flat and the sight line meets it more
+//             steeply than nothing but less steeply than its critical angle, the
+//             layer turns the ray back up: the ground a few hundred metres ahead shows
+//             the sky above the horizon, upside down. That is the "wet road". It is
+//             the one part of an inferior mirage that is ever big enough to see; the
+//             other part, distant ground appearing sunk by a milliradian, is a
+//             fraction of a pixel and is not drawn. (The old pass drew it anyway, as a
+//             LIFT, and with the sign of a superior mirage: hot air below cool bends
+//             the ray up, so the eye sees ground from above its true position and the
+//             image sinks, it does not rise.)
 // ---------------------------------------------------------------------------
 
 /**
  * Scale height of the hot air over the sand, metres.
  *
  * NOT a hard-edged slab, and the difference matters. A slab clipped at head height is
- * geometrically exact over a flat plane and useless over this desert: the sight line to
- * a dune four hundred metres away and fifteen metres tall leaves a two-metre slab in
- * the first hundred, so the one thing in the frame that should boil hardest would get
- * nothing at all. Measured on the real pass (tools/haze-probe.ts), a hard slab put
- * every last milliradian inside one degree of the horizon and left a razor line.
+ * geometrically exact over a flat plane and useless over this desert: measured on the
+ * real pass (tools/haze-probe.ts), a hard slab put every last milliradian inside one
+ * degree of the horizon and left a razor line. So the air thins with height instead
+ * of stopping, `exp(-y / H)`, and the shader integrates that along the ray in closed
+ * form.
  *
- * So the air thins with height instead of stopping, `exp(-y / H)`, and the shader
- * integrates that along the ray in closed form. Eight metres is the height over which
- * "close to hot ground" stops being true out here — a few metres of genuinely
- * superheated air, plus the tens of metres of relief the ground itself has, which is
- * what keeps a distant dune crest inside the hot air all the way to the eye.
+ * WAS EIGHT METRES, and eight was the problem. It was inflated to stand in for relief
+ * — a dune four hundred metres away and fifteen tall had to stay inside the layer —
+ * and the price was paid in the sky: a climbing ray kept most of its path for degrees
+ * above the horizon, so the boil reached about five degrees up and under one down,
+ * which is upside down. Relief is now the grazed-ground line's job (see WHERE above),
+ * and two and a half metres is the depth of air a sunlit sand surface genuinely
+ * stirs: a metre or so of superheated air plus the convective mixing just above it.
+ * From a standing eye, half of full shimmer is then about 0.6 degrees above the
+ * horizon and 0.5 below it; from a car's chase camera, three metres up, the ground
+ * side is the larger of the two, as it should be (tools/haze-probe.ts measures both).
  */
-const HAZE_SCALE_HEIGHT_M = 8.0;
+const HAZE_SCALE_HEIGHT_M = 2.5;
 /**
  * Path length inside the layer, metres, at which the shimmer is fully developed.
  *
@@ -264,12 +295,22 @@ const HAZE_SCALE_HEIGHT_M = 8.0;
  * away before it is large enough on screen to be seen at all — sqrt puts a fifth of
  * full shimmer on ground twenty metres away, which nobody sees in reality. The onset
  * below is therefore shaped: nothing for the first tens of metres, building through
- * the middle distance, saturated at the horizon.
+ * the middle distance, saturated at the horizon. 250 m against the thinner layer
+ * above puts full development on flat ground about 340 m out from a standing eye.
  */
-const HAZE_REF_PATH_M = 350;
+const HAZE_REF_PATH_M = 250;
 /** Scene geometry closer than this many metres remains completely free of shimmer. */
 const HAZE_NEAR_CLEAR_M = 45;
-/** Scene distance by which the actual depth buffer may receive full path-based haze. */
+/**
+ * Scene distance by which the actual depth buffer may receive full path-based haze.
+ *
+ * Also the line for the silhouette test: a displaced sample may never land on a
+ * surface nearer than this that is also well in front of the pixel being drawn. Light
+ * that reached the eye along a ray which missed the car cannot have come FROM the car,
+ * and taking its colour anyway is what drew a wobbling fringe of paint round every
+ * nearby silhouette against the boiling horizon — tens of pixels of it under the
+ * binoculars.
+ */
 const HAZE_NEAR_FULL_M = 140;
 /**
  * A second, deliberately conservative ground-ray guard.
@@ -281,50 +322,77 @@ const HAZE_NEAR_FULL_M = 140;
  * asphalt/gravel material and only backs up depth; its transition is too far away to
  * form the old moving foreground patch.
  */
-const HAZE_GROUND_CLEAR_M = 90;
-const HAZE_GROUND_FULL_M = 220;
+const HAZE_GROUND_CLEAR_M = 70;
+const HAZE_GROUND_FULL_M = 180;
 /**
  * Peak angular displacement, milliradians, at full development.
  *
- * The previous 7.2 mrad peak was reported as a very strong displacement wave in the
- * shipped desert. Halving the physical angle preserves the path/depth behavior while
- * removing the gelatinous motion; binocular tuning can then amplify this controlled
- * atmosphere rather than an already excessive base.
+ * Under two pixels at 1080p and the default field of view. It was 3.6, and 7.2 before
+ * that, on cells several degrees across, which read as jelly. On the fine strata below
+ * a displacement larger than about half a stratum folds the image over itself and
+ * stops reading as refraction at all, so the amplitude came down with the cells. The
+ * real thing is smaller still — tenths of a milliradian — but real eyes resolve a
+ * tenth of a milliradian and a 1080p frame does not.
  */
-const HAZE_ANGLE_MRAD = 3.6;
-/**
- * Upward bias, milliradians at full development: the inferior mirage.
- *
- * Hot air below cool bends a ray upward, so distant ground appears RAISED and
- * vertically squeezed toward the horizon. It scales with the shimmer reduction above
- * so the whole refractive movement becomes quieter without changing its shape.
- */
-const HAZE_LIFT_MRAD = 0.88;
-/**
- * Radius of the sphere the convection field is sampled on, metres, and the cell sizes
- * on it.
- *
- * The pair sets the ANGULAR size of a cell — `size / range` — and that is the only
- * thing the screen sees: 1.1 m at 20 m is 3.2 degrees, 0.45 m is 1.3. Both are broad,
- * soft blobs rather than texture, which is what refraction through metre-scale eddies
- * looks like.
- */
-const HAZE_SAMPLE_RANGE_M = 20;
-const HAZE_CELL_BROAD_M = 1.1;
-const HAZE_CELL_FINE_M = 0.45;
-/**
- * How fast each scale of the field rises, m/s. Convective plumes over hot ground climb
- * at around a metre a second, and small eddies live and die faster than large ones —
- * so the fine scale is given the quicker drift. Against the cell sizes above that is
- * roughly 1 Hz of slow boil with 4 Hz of flicker inside it, which is the rate a real
- * one flickers at.
- */
-const HAZE_RISE_BROAD_MPS = 1.1;
-const HAZE_RISE_FINE_MPS = 1.9;
-/** Vertical stretch of the cells: rising plumes are taller than they are wide. */
-const HAZE_PLUME_STRETCH = 1.7;
+const HAZE_ANGLE_MRAD = 1.8;
 /** Share of the displacement that is lateral. Stratified air bends light vertically. */
-const HAZE_LATERAL_SHARE = 0.34;
+const HAZE_LATERAL_SHARE = 0.3;
+/**
+ * Angular size of the field's strata, milliradians, measured vertically.
+ *
+ * Two octaves on a direction-space lattice. The old cells were 1.3 and 3.2 DEGREES
+ * and stretched upright, as if the air were a stack of rising plumes; at grazing
+ * incidence it is the opposite, a layered medium whose eddies are flattened against
+ * the ground, and the shimmer over a hot plain is fine, horizontal and ribbed. So
+ * each stratum is `HAZE_STRIATION` times wider than it is tall: seven milliradians
+ * is about six pixels at 1080p and the default field of view, 2.8 about two and a
+ * half.
+ */
+const HAZE_BROAD_CELL_MRAD = 7;
+const HAZE_FINE_CELL_MRAD = 2.8;
+/** Width over height of a stratum. */
+const HAZE_STRIATION = 4;
+/**
+ * How fast each octave climbs, strata per second.
+ *
+ * In strata rather than metres because what the eye sees is a flicker rate, and that
+ * is the same at every range: about one hertz of slow boil with three of flicker
+ * inside it.
+ */
+const HAZE_BROAD_RISE_HZ = 1.0;
+const HAZE_FINE_RISE_HZ = 3.0;
+/**
+ * Distance band over which the fine octave takes over from the broad one, metres.
+ *
+ * The angular size of an eddy is its size over its range, so the same air seen from
+ * further away ripples at a higher angular frequency: the ground two hundred metres
+ * out swims in broad strata and the skyline three kilometres out shivers in fine ones.
+ * Both octaves are fixed in angle and only their MIX follows the depth. Scaling one
+ * lattice by depth instead would zoom it about its origin whenever the depth under a
+ * pixel changed — which it does continuously while driving — and slide the whole
+ * pattern at many strata per second.
+ */
+const HAZE_FINE_ONSET_M = 160;
+const HAZE_FINE_FULL_M = 900;
+/**
+ * Critical grazing angle of the hot ground at full heat, milliradians.
+ *
+ * A ray that meets a layer whose refractive index falls by Δn toward the ground is
+ * turned back up if it arrives flatter than `sqrt(2·Δn)`. Sand and asphalt thirty
+ * degrees hotter than the air above them give Δn ≈ 3e-5, so about eight milliradians
+ * — under half a degree. From a driver's eye that is the ground from about 150 m out;
+ * from a standing player's, about 230 m. The angle grows with the square root of the
+ * heating, so a mild morning mirage sits further off than an afternoon one.
+ */
+const HAZE_MIRAGE_CRITICAL_MRAD = 8;
+/**
+ * How much of the mirrored sky replaces the ground in the mirage band, at full heat.
+ *
+ * Not all of it. The reflection is total only for the rays that reach the hottest
+ * few centimetres; the rest of the pixel's footprint is ordinary ground, and on a
+ * rough desert surface it is patchy. Past about two thirds it reads as painted water.
+ */
+const HAZE_MIRAGE_BLEND = 0.55;
 /**
  * Floor on the camera's height above the sand, metres.
  *
@@ -337,6 +405,18 @@ const HAZE_LATERAL_SHARE = 0.34;
 const HAZE_MIN_EYE_ABOVE_M = 0.5;
 /** Eye height assumed before the loop has supplied a real one: a standing player. */
 const DEFAULT_EYE_HEIGHT_M = 1.6;
+/**
+ * Period of the rise phases, in strata. The lattice wraps its vertical index at this
+ * count, so the phase can be reduced modulo it on the CPU and the shader only ever
+ * sees a number below 256 — see `advanceHazePhase`.
+ */
+export const HAZE_PHASE_PERIOD = 256;
+/**
+ * Period of the pass's own clock, seconds. The grain seed steps at 12 Hz through 64
+ * frames, and 1600 s is exactly 300 of those cycles, so the wrap is invisible.
+ */
+const HAZE_CLOCK_PERIOD_S = 1600;
+
 export interface HeatMirageParameters {
   readonly scaleHeightM: number;
   readonly referencePathM: number;
@@ -345,14 +425,16 @@ export interface HeatMirageParameters {
   readonly groundClearM: number;
   readonly groundFullM: number;
   readonly angleMrad: number;
-  readonly liftMrad: number;
-  readonly sampleRangeM: number;
-  readonly broadCellM: number;
-  readonly fineCellM: number;
-  readonly broadRiseMps: number;
-  readonly fineRiseMps: number;
-  readonly plumeStretch: number;
   readonly lateralShare: number;
+  readonly broadCellMrad: number;
+  readonly fineCellMrad: number;
+  readonly striation: number;
+  readonly broadRiseHz: number;
+  readonly fineRiseHz: number;
+  readonly fineOnsetM: number;
+  readonly fineFullM: number;
+  readonly mirageCriticalMrad: number;
+  readonly mirageBlend: number;
   readonly minimumEyeHeightM: number;
 }
 
@@ -364,38 +446,131 @@ export const DEFAULT_HEAT_MIRAGE: HeatMirageParameters = {
   groundClearM: HAZE_GROUND_CLEAR_M,
   groundFullM: HAZE_GROUND_FULL_M,
   angleMrad: HAZE_ANGLE_MRAD,
-  liftMrad: HAZE_LIFT_MRAD,
-  sampleRangeM: HAZE_SAMPLE_RANGE_M,
-  broadCellM: HAZE_CELL_BROAD_M,
-  fineCellM: HAZE_CELL_FINE_M,
-  broadRiseMps: HAZE_RISE_BROAD_MPS,
-  fineRiseMps: HAZE_RISE_FINE_MPS,
-  plumeStretch: HAZE_PLUME_STRETCH,
   lateralShare: HAZE_LATERAL_SHARE,
+  broadCellMrad: HAZE_BROAD_CELL_MRAD,
+  fineCellMrad: HAZE_FINE_CELL_MRAD,
+  striation: HAZE_STRIATION,
+  broadRiseHz: HAZE_BROAD_RISE_HZ,
+  fineRiseHz: HAZE_FINE_RISE_HZ,
+  fineOnsetM: HAZE_FINE_ONSET_M,
+  fineFullM: HAZE_FINE_FULL_M,
+  mirageCriticalMrad: HAZE_MIRAGE_CRITICAL_MRAD,
+  mirageBlend: HAZE_MIRAGE_BLEND,
   minimumEyeHeightM: HAZE_MIN_EYE_ABOVE_M,
 };
 
-/** Fresh uniform cells for every material that compiles the production mirage pass. */
+/**
+ * What the world tells the pass about the heat this frame. Produced by
+ * render/heathaze.ts, which is the only thing that knows the terrain, the sun, the
+ * air and the cloud shade at once.
+ */
+export interface HeatHazeFrame {
+  /** Shimmer strength, 0..1. */
+  readonly shimmer: number;
+  /** Inferior-mirage strength, 0..1: heat, flat ground and sun on it. */
+  readonly mirage: number;
+  /** Eye height over the grazed-ground line, metres. */
+  readonly eyeAboveM: number;
+  /** Rise of that line per metre along the view. */
+  readonly groundSlope: number;
+}
+
+/**
+ * Advances one octave's rise phase by `dt` seconds, wrapped into the lattice period.
+ *
+ * The phase used to be `uTime * rate` in the shader, with uTime the page's uptime:
+ * after a few hours of play that product is large enough that a float32 steps in
+ * visible fractions of a stratum, and after a day the boil would stutter. Reducing it
+ * here, in doubles, against a period the lattice itself repeats at, keeps the number
+ * the GPU sees below 256 forever and makes the wrap seamless.
+ */
+export function advanceHazePhase(phase: number, dt: number, rateHz: number): number {
+  const next = (phase + dt * rateHz) % HAZE_PHASE_PERIOD;
+  return next < 0 ? next + HAZE_PHASE_PERIOD : next;
+}
+
+/** Strata round the full circle of azimuth: a whole number, so the lattice closes. */
+function strataAround(cellMrad: number, striation: number): number {
+  return Math.max(1, Math.round((2 * Math.PI * 1000) / (Math.max(0.1, cellMrad) * Math.max(0.1, striation))));
+}
+
+/** The pass's physical constants as uniform cells, one per shader name. */
+export interface HeatMirageUniforms {
+  readonly SCALE_HEIGHT_M: { value: number };
+  readonly REF_PATH_M: { value: number };
+  readonly NEAR_CLEAR_M: { value: number };
+  readonly NEAR_FULL_M: { value: number };
+  readonly GROUND_CLEAR_M: { value: number };
+  readonly GROUND_FULL_M: { value: number };
+  readonly ANGLE_RAD: { value: number };
+  readonly LATERAL_SHARE: { value: number };
+  readonly BROAD_AROUND: { value: number };
+  readonly BROAD_UP: { value: number };
+  readonly FINE_AROUND: { value: number };
+  readonly FINE_UP: { value: number };
+  readonly FINE_ONSET_M: { value: number };
+  readonly FINE_FULL_M: { value: number };
+  readonly MIRAGE_CRITICAL_RAD: { value: number };
+  readonly MIRAGE_BLEND: { value: number };
+}
+
+/**
+ * Fresh uniform cells for every material that compiles the production mirage pass.
+ * The cells are spread into the material, so the object returned here stays the
+ * live handle: `writeHeatMirageUniforms` on it retunes the compiled pass.
+ */
 export function createHeatMirageUniforms(
   parameters: HeatMirageParameters = DEFAULT_HEAT_MIRAGE,
-): Record<string, { value: number }> {
-  return {
-    SCALE_HEIGHT_M: { value: parameters.scaleHeightM },
-    REF_PATH_M: { value: parameters.referencePathM },
-    NEAR_CLEAR_M: { value: parameters.nearClearM },
-    NEAR_FULL_M: { value: parameters.nearFullM },
-    GROUND_CLEAR_M: { value: parameters.groundClearM },
-    GROUND_FULL_M: { value: parameters.groundFullM },
-    ANGLE_RAD: { value: parameters.angleMrad / 1000 },
-    LIFT_RAD: { value: parameters.liftMrad / 1000 },
-    SAMPLE_RANGE_M: { value: parameters.sampleRangeM },
-    CELL_BROAD: { value: parameters.broadCellM },
-    CELL_FINE: { value: parameters.fineCellM },
-    RISE_BROAD: { value: parameters.broadRiseMps },
-    RISE_FINE: { value: parameters.fineRiseMps },
-    PLUME_STRETCH: { value: parameters.plumeStretch },
-    LATERAL_SHARE: { value: parameters.lateralShare },
+): HeatMirageUniforms {
+  const uniforms: HeatMirageUniforms = {
+    SCALE_HEIGHT_M: { value: 0 },
+    REF_PATH_M: { value: 0 },
+    NEAR_CLEAR_M: { value: 0 },
+    NEAR_FULL_M: { value: 0 },
+    GROUND_CLEAR_M: { value: 0 },
+    GROUND_FULL_M: { value: 0 },
+    ANGLE_RAD: { value: 0 },
+    LATERAL_SHARE: { value: 0 },
+    BROAD_AROUND: { value: 0 },
+    BROAD_UP: { value: 0 },
+    FINE_AROUND: { value: 0 },
+    FINE_UP: { value: 0 },
+    FINE_ONSET_M: { value: 0 },
+    FINE_FULL_M: { value: 0 },
+    MIRAGE_CRITICAL_RAD: { value: 0 },
+    MIRAGE_BLEND: { value: 0 },
   };
+  writeHeatMirageUniforms(uniforms, parameters);
+  return uniforms;
+}
+
+/**
+ * The one place parameters become uniform values, shared by construction and the
+ * lab's live edits so the two cannot disagree about a clamp or a unit.
+ */
+function writeHeatMirageUniforms(
+  uniforms: HeatMirageUniforms,
+  parameters: HeatMirageParameters,
+): void {
+  uniforms.SCALE_HEIGHT_M.value = Math.max(0.1, parameters.scaleHeightM);
+  uniforms.REF_PATH_M.value = Math.max(1, parameters.referencePathM);
+  const nearClear = Math.max(0, parameters.nearClearM);
+  uniforms.NEAR_CLEAR_M.value = nearClear;
+  uniforms.NEAR_FULL_M.value = Math.max(nearClear + 1, parameters.nearFullM);
+  const groundClear = Math.max(0, parameters.groundClearM);
+  uniforms.GROUND_CLEAR_M.value = groundClear;
+  uniforms.GROUND_FULL_M.value = Math.max(groundClear + 1, parameters.groundFullM);
+  uniforms.ANGLE_RAD.value = Math.max(0, parameters.angleMrad) / 1000;
+  uniforms.LATERAL_SHARE.value = Math.min(1, Math.max(0, parameters.lateralShare));
+  uniforms.BROAD_AROUND.value = strataAround(parameters.broadCellMrad, parameters.striation);
+  uniforms.BROAD_UP.value = 1000 / Math.max(0.1, parameters.broadCellMrad);
+  uniforms.FINE_AROUND.value = strataAround(parameters.fineCellMrad, parameters.striation);
+  uniforms.FINE_UP.value = 1000 / Math.max(0.1, parameters.fineCellMrad);
+  const fineOnset = Math.max(0, parameters.fineOnsetM);
+  uniforms.FINE_ONSET_M.value = fineOnset;
+  uniforms.FINE_FULL_M.value = Math.max(fineOnset + 1, parameters.fineFullM);
+  uniforms.MIRAGE_CRITICAL_RAD.value = Math.max(0, parameters.mirageCriticalMrad) / 1000;
+  uniforms.MIRAGE_BLEND.value = Math.min(1, Math.max(0, parameters.mirageBlend));
 }
 
 // ---------------------------------------------------------------------------
@@ -527,8 +702,11 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform vec2 uResolution;
   uniform float uTime;
   uniform float uStrength;
+  uniform float uMirage;
   uniform float uDaylight;
   uniform float uEyeAbove;
+  uniform float uGroundSlope;
+  uniform vec2 uHazePhase;
   uniform float uHorizon;
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
@@ -545,19 +723,24 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float REF_PATH_M;
   uniform float NEAR_CLEAR_M;
   uniform float NEAR_FULL_M;
-  uniform float ANGLE_RAD;
-  uniform float LIFT_RAD;
-  uniform float SAMPLE_RANGE_M;
-  uniform float CELL_BROAD;
-  uniform float CELL_FINE;
-  uniform float RISE_BROAD;
-  uniform float RISE_FINE;
-  uniform float PLUME_STRETCH;
-  uniform float LATERAL_SHARE;
-
-  varying vec2 vUv;
   uniform float GROUND_CLEAR_M;
   uniform float GROUND_FULL_M;
+  uniform float ANGLE_RAD;
+  uniform float LATERAL_SHARE;
+  uniform float BROAD_AROUND;
+  uniform float BROAD_UP;
+  uniform float FINE_AROUND;
+  uniform float FINE_UP;
+  uniform float FINE_ONSET_M;
+  uniform float FINE_FULL_M;
+  uniform float MIRAGE_CRITICAL_RAD;
+  uniform float MIRAGE_BLEND;
+
+  varying vec2 vUv;
+
+  /** Strata the lattice repeats at vertically; see HAZE_PHASE_PERIOD. */
+  const float PHASE_PERIOD = ${HAZE_PHASE_PERIOD.toFixed(1)};
+  const float TURN = 6.28318530718;
 
   /** Unit view-space direction for a pixel. */
   vec3 cameraRay(vec2 uv) {
@@ -576,93 +759,98 @@ export const HAZE_FRAGMENT = /* glsl */ `
       ((uCameraFar - uCameraNear) * depth - uCameraFar);
   }
 
-
-  /** Actual distance from the eye to the first rendered surface on this pixel ray. */
-  float sceneDistance(vec2 uv, vec3 viewDir) {
-    float viewZ = perspectiveDepthToViewZ(texture2D(tDepth, uv).x);
+  /** Distance along a view ray to a surface at the given view-space Z. */
+  float rayDistance(float viewZ, vec3 viewDir) {
     return min(uCameraFar, -viewZ / max(1e-4, -viewDir.z));
   }
 
   /**
    * Effective length of hot air on this ray, metres: the integral of the air's own
-   * density profile along it.
+   * density profile from the eye to the surface the pixel shows.
    *
-   * The hot air thins as exp(-y / H) above the sand, with y measured from the ground
-   * under the eye, so what the ray accumulates is the integral of that from the eye to
-   * wherever the ray ends. Both cases close in one exponential:
+   * The hot air thins as exp(-a / H) with a the height above the grazed-ground line,
+   * and along the ray a = h + climb·t, so the integral over the ray's first \`run\`
+   * metres closes in one line:
    *
-   *   climbing   the ray never lands, and the tail integrates to  (H / dy)·e^(-y0/H)
-   *   descending it lands at y = 0, and the run integrates to  (H / |dy|)·(1 - e^(-y0/H))
+   *   (e^(-h/H) - e^(-a_end/H)) · H / climb        (level ray: e^(-h/H) · run)
    *
-   * Level rays diverge, which is correct — they graze the hot air forever — so the
-   * result is clamped at REF_PATH_M, the distance past which the fog has taken the
-   * scene anyway.
+   * A descending ray is in the ground once it has fallen the eye height, so its run is
+   * cut there whatever the depth says. That also keeps a_end >= 0, which is why the
+   * form above is written with the END height rather than as e^(-h/H)·(1 - e^(-x)):
+   * with x negative, as it is for every descending ray, that product overflows a
+   * float from an eye a hundred metres up, and this one cannot.
    *
-   * The near-zero guard on dy is not cosmetic: the level ray divides by it, and its
-   * path is the one that matters most.
+   * The depth truncation is the whole difference from the old pass, which ran every
+   * ray to infinity: a mast 150 m out on the horizon line has crossed 150 m of hot
+   * air, not the three kilometres the desert behind it has.
    */
-  float layerPath(vec3 dir) {
-    float dy = abs(dir.y) < 1e-4 ? (dir.y >= 0.0 ? 1e-4 : -1e-4) : dir.y;
+  float layerPath(float climb, float distance) {
+    float run = climb < 0.0 ? min(distance, uEyeAbove / -climb) : distance;
     float atEye = exp(-uEyeAbove / SCALE_HEIGHT_M);
-    float span = SCALE_HEIGHT_M / abs(dy);
-    float integral = dy > 0.0 ? span * atEye : span * (1.0 - atEye);
+    float x = climb * run / SCALE_HEIGHT_M;
+    float endAbove = max(0.0, uEyeAbove + climb * run);
+    float integral = abs(x) < 1e-3
+      ? atEye * run
+      : (atEye - exp(-endAbove / SCALE_HEIGHT_M)) * SCALE_HEIGHT_M / climb;
     return clamp(integral, 0.0, REF_PATH_M);
   }
 
-  /** Hash of an integer lattice point to [0, 1). */
-  float cellHash(vec3 p) {
-    vec3 q = fract(p * 0.1031);
+  /** Hash of a lattice point to [0, 1). The inputs are whole numbers below ~600. */
+  float strataHash(vec2 cell) {
+    vec3 q = fract(cell.xyx * 0.1031);
     q += dot(q, q.yzx + 33.33);
-    return fract((q.x + q.y + q.z) * q.z);
+    return fract((q.x + q.y) * q.z);
   }
 
   /**
-   * Smooth 3D value noise, in [-1, 1].
+   * Smooth value noise on a lattice in (azimuth, elevation), in [-1, 1].
    *
-   * THREE dimensions, where the previous version projected the sphere of view
-   * directions onto a plane and sampled 2D. That projection folds: two directions on
-   * opposite sides of the sky map to the same place, so panning far enough replayed
-   * the same cells mirrored. A field on a sphere has to be sampled in the space the
-   * sphere lives in.
+   * TWO dimensions, on the sphere's own coordinates rather than in the 3D space
+   * around it: \`around\` strata close the circle of azimuth exactly and the vertical
+   * index repeats at PHASE_PERIOD, so both wraps are seamless and every number the
+   * hash sees is a small whole one. The azimuth lattice pinches toward the zenith,
+   * where this field is never asked for — a ray there has no path through the layer.
+   * Half the taps of the 3D lattice it replaces.
    */
-  float cellNoise(vec3 p) {
-    vec3 i = floor(p);
-    vec3 f = p - i;
-    vec3 w = f * f * (3.0 - 2.0 * f);
-    float c000 = cellHash(i);
-    float c100 = cellHash(i + vec3(1.0, 0.0, 0.0));
-    float c010 = cellHash(i + vec3(0.0, 1.0, 0.0));
-    float c110 = cellHash(i + vec3(1.0, 1.0, 0.0));
-    float c001 = cellHash(i + vec3(0.0, 0.0, 1.0));
-    float c101 = cellHash(i + vec3(1.0, 0.0, 1.0));
-    float c011 = cellHash(i + vec3(0.0, 1.0, 1.0));
-    float c111 = cellHash(i + vec3(1.0, 1.0, 1.0));
-    float x00 = mix(c000, c100, w.x);
-    float x10 = mix(c010, c110, w.x);
-    float x01 = mix(c001, c101, w.x);
-    float x11 = mix(c011, c111, w.x);
-    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z) * 2.0 - 1.0;
+  float strataNoise(vec2 p, float around) {
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 w = f * f * (3.0 - 2.0 * f);
+    vec2 i0 = mod(i, vec2(around, PHASE_PERIOD));
+    vec2 i1 = mod(i + 1.0, vec2(around, PHASE_PERIOD));
+    float a = strataHash(i0);
+    float b = strataHash(vec2(i1.x, i0.y));
+    float c = strataHash(vec2(i0.x, i1.y));
+    float d = strataHash(i1);
+    return mix(mix(a, b, w.x), mix(c, d, w.x), w.y) * 2.0 - 1.0;
   }
 
   /**
-   * The convection field, sampled on a sphere of fixed radius around the eye and
-   * animated by its own rise. Returns a displacement direction in (lateral, vertical),
-   * each roughly in [-1, 1].
+   * The stirred layer's refraction at a direction, as a displacement direction in
+   * (lateral, vertical), each roughly in [-1, 1].
    *
-   * Cells are stretched vertically because a plume is. The same two decorrelated
-   * scales form both channels with different weights; evaluating two more 3D fields
-   * for the much smaller lateral component doubled the full-screen cost without adding
-   * visible structure.
+   * Two octaves of flat strata climbing at their own rates. Which octave dominates is
+   * a matter of range: the same eddies further off subtend less, so distant surfaces
+   * ripple finely and the middle distance broadly. Only the MIX follows depth — see
+   * HAZE_FINE_ONSET_M for why the lattices themselves may not. The same two noises
+   * form both channels with swapped weights; a second pair for the small lateral part
+   * would double the cost without adding visible structure.
    */
-  vec2 hazeWarp(vec3 dir) {
-    vec3 p = dir * SAMPLE_RANGE_M;
-    vec3 broadP = vec3(p.x, p.y / PLUME_STRETCH - uTime * RISE_BROAD, p.z) / CELL_BROAD;
-    vec3 fineP = vec3(p.x, p.y / PLUME_STRETCH - uTime * RISE_FINE, p.z) / CELL_FINE;
-    float broad = cellNoise(broadP);
-    float fine = cellNoise(fineP);
-    float vertical = broad * 0.72 + fine * 0.28;
-    float lateral = broad * 0.28 - fine * 0.72;
-    return vec2(lateral, vertical);
+  vec2 hazeWarp(vec3 dir, float distance) {
+    float around = atan(dir.x, dir.z) / TURN + 0.5;
+    float broad = strataNoise(
+      vec2(around * BROAD_AROUND, dir.y * BROAD_UP - uHazePhase.x),
+      BROAD_AROUND
+    );
+    float fine = strataNoise(
+      vec2(around * FINE_AROUND, dir.y * FINE_UP - uHazePhase.y),
+      FINE_AROUND
+    );
+    float broadShare = mix(0.8, 0.3, smoothstep(FINE_ONSET_M, FINE_FULL_M, distance));
+    return vec2(
+      (1.0 - broadShare) * broad - broadShare * fine,
+      broadShare * broad + (1.0 - broadShare) * fine
+    );
   }
 
   /**
@@ -700,52 +888,102 @@ export const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    // The warp is skipped outright when shimmer is off. This is a uniform branch, so
-    // every fragment takes the same side and the field is not evaluated at all on the
-    // cheapest graphics tier or at night.
     vec2 uv = vUv;
-    float shimmerWeight = 0.0;
-    if (uStrength > 0.0) {
+    // One depth tap every pixel pays whatever happens: the veil, the ink gate and
+    // the warp all read it.
+    float ownViewZ = perspectiveDepthToViewZ(texture2D(tDepth, vUv).x);
+    float airViewZ = ownViewZ;
+    float mirageWeight = 0.0;
+    vec2 mirrorUv = vUv;
+    // A uniform branch, so every fragment takes the same side: at night and on the
+    // cheapest tier nothing below is evaluated at all.
+    if (uStrength > 0.0 || uMirage > 0.0) {
       vec3 viewDir = cameraRay(vUv);
       vec3 dir = normalize(uCameraRotation * viewDir);
-      // Everything the pixel gets follows from how far its ray runs through hot air.
-      float path = layerPath(dir) / REF_PATH_M;
-      // The former mask relied only on ray elevation and a flat ground plane. The
-      // scene pass now supplies the real first-surface depth, keeping nearby geometry
-      // rigid regardless of where it appears on screen.
-      float depthClear = smoothstep(
-        NEAR_CLEAR_M,
-        NEAR_FULL_M,
-        sceneDistance(vUv, viewDir)
-      );
+      float distance = rayDistance(ownViewZ, viewDir);
+      // The ray's climb over the grazed-ground line, per metre of ray: what decides
+      // how long it stays in the hot air.
+      float climb = dir.y - uGroundSlope * length(dir.xz);
+      float path = layerPath(climb, distance) / REF_PATH_M;
+      // Real first-surface depth keeps nearby geometry rigid wherever it is on screen.
+      float depthClear = smoothstep(NEAR_CLEAR_M, NEAR_FULL_M, distance);
       // Ground is uniquely intolerant of a missing depth sample: one cleared texel at
       // an MSAA edge would otherwise make the road boil underfoot. A conservative
-      // ray/plane backup excludes only descending rays whose ground intersection is
-      // nearby; actual depth remains authoritative for every object and distant slope.
-      float groundClear = 1.0;
-      if (dir.y < -1e-4) {
-        float groundDistance = uEyeAbove / -dir.y;
-        groundClear = smoothstep(GROUND_CLEAR_M, GROUND_FULL_M, groundDistance);
-      }
-      // Shaped atmospheric onset plus both real-depth and ground safeguards.
-      shimmerWeight =
+      // ray/line backup excludes descending rays whose ground intersection is nearby;
+      // actual depth remains authoritative for every object and distant slope.
+      float groundClear = climb < -1e-4
+        ? smoothstep(GROUND_CLEAR_M, GROUND_FULL_M, uEyeAbove / -climb)
+        : 1.0;
+      float shimmerWeight =
         uStrength * path * path * (3.0 - 2.0 * path) * min(depthClear, groundClear);
-      vec2 warp = hazeWarp(dir);
 
-      // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
-      // the frame height, and the same over the width with the aspect divided out —
-      // which is what makes the boil magnify correctly under the binoculars instead of
-      // staying a fixed number of pixels wide.
       float aspect = uResolution.x / uResolution.y;
       float perRadian = 0.5 / uTanHalfFov;
-      float vertical = warp.y * ANGLE_RAD - LIFT_RAD;
-      vec2 offset = vec2(
-        (warp.x * LATERAL_SHARE * ANGLE_RAD * perRadian) / aspect,
-        vertical * perRadian
-      ) * shimmerWeight;
-      uv = clamp(vUv + offset, 0.0, 1.0);
+      vec2 offset = vec2(0.0);
+      // Most of the frame — steep sky, the road, the car — has no path through hot
+      // air at all, and it skips the field and the second depth tap here.
+      if (shimmerWeight > 1e-3) {
+        vec2 warp = hazeWarp(dir, distance);
+        // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
+        // the frame height, and the same over the width with the aspect divided out —
+        // which is what makes the boil magnify correctly under the binoculars instead
+        // of staying a fixed number of pixels wide.
+        offset = vec2(
+          (warp.x * LATERAL_SHARE * ANGLE_RAD * perRadian) / aspect,
+          warp.y * ANGLE_RAD * perRadian
+        ) * shimmerWeight;
+        // The silhouette test. Light that reached the eye along a ray which missed the
+        // car cannot have come from the car, so a displaced sample that lands on
+        // anything the near gate keeps rigid is not taken: the pixel keeps its own
+        // colour instead of a wobbling fringe of somebody's paint.
+        vec2 candidate = clamp(vUv + offset, 0.0, 1.0);
+        float candidateViewZ = perspectiveDepthToViewZ(texture2D(tDepth, candidate).x);
+        float keep = smoothstep(
+          NEAR_CLEAR_M,
+          NEAR_FULL_M,
+          rayDistance(candidateViewZ, viewDir)
+        );
+        offset *= keep;
+        uv = clamp(vUv + offset, 0.0, 1.0);
+        airViewZ = keep > 0.5 ? candidateViewZ : ownViewZ;
+      }
+
+      // The wet road. A ray arriving at the hot ground flatter than the critical angle
+      // is turned back up and leaves as steeply as it came, so this pixel shows what
+      // lies the same angle ABOVE the ground line: the sky and the far horizon, upside
+      // down. The critical angle grows with the square root of the heating.
+      float graze = -climb;
+      float critical = MIRAGE_CRITICAL_RAD * sqrt(uMirage);
+      if (graze > 0.0 && graze < critical) {
+        // Only over ground that actually lies on the line: a ray stopped well short of
+        // where the line says it lands has hit a dune face, a verge or a car.
+        float onGround = smoothstep(0.6, 0.85, distance * graze / uEyeAbove);
+        // World up as it runs across the screen at this camera roll; the mirrored
+        // direction is 2·graze up it.
+        vec3 up = vec3(uCameraRotation[0][1], uCameraRotation[1][1], uCameraRotation[2][1]);
+        vec2 upScreen = vec2(up.x / aspect, up.y) / max(1e-3, length(up.xy));
+        mirrorUv = clamp(vUv + upScreen * (2.0 * graze * perRadian) + offset, 0.0, 1.0);
+        // What is mirrored must stand beyond the point of reflection: a car between the
+        // eye and the hot patch is not in its reflection.
+        float mirrored = rayDistance(
+          perspectiveDepthToViewZ(texture2D(tDepth, mirrorUv).x),
+          viewDir
+        );
+        mirageWeight = MIRAGE_BLEND * uMirage * onGround
+          * smoothstep(critical, critical * 0.55, graze)
+          * step(distance, mirrored);
+      }
     }
     vec4 color = texture2D(tDiffuse, uv);
+    if (mirageWeight > 0.0) {
+      color.rgb = mix(color.rgb, texture2D(tDiffuse, mirrorUv).rgb, mirageWeight);
+    }
+
+    // Everything from here on is colour, not refraction. tools/haze-probe.ts reads the
+    // SOURCE COORDINATE this pass sampled out of a coordinate-coded image, and any
+    // colour operation — grade, grain, the lenses — would corrupt that measurement, so
+    // it compiles the real pass with this one define and the rest skipped.
+    #ifndef HAZE_MEASURE_SOURCE
 
     // ACES' toe is intentionally cinematic, but in a sunlit desert it crushed
     // backlit paint and props into the same near-black. A small display-space
@@ -760,7 +998,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // above the geometric horizon lets the suspended dust soften that boundary
     // without tinting the open sky. This complements the world's distance fog rather
     // than replacing it, so regional haze and view-distance settings remain sovereign.
-    float airDistance = -perspectiveDepthToViewZ(texture2D(tDepth, uv).x);
+    float airDistance = -airViewZ;
     float horizonAir =
       1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, vUv.y);
     float sandVeil =
@@ -832,6 +1070,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float finderMask = 1.0 - smoothstep(0.82, 1.04, finderShape);
     color.rgb *= mix(1.0, finderMask, uCameraViewfinder);
 
+    #endif
+
     gl_FragColor = color;
   }
 `;
@@ -869,11 +1109,23 @@ export class Renderer {
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
   /**
-   * Camera height above the ground, metres, for the hot-layer integration. Defaulted
-   * to a standing eye so the very first frame is sensible before the loop supplies one.
+   * Camera height above the grazed-ground line, metres, for the hot-layer
+   * integration. Defaulted to a standing eye so the very first frame is sensible
+   * before the loop supplies one.
    */
   private hazeEyeHeight = DEFAULT_EYE_HEIGHT_M;
   private hazeMinimumEyeHeight = DEFAULT_HEAT_MIRAGE.minimumEyeHeightM;
+  /** Live handle on the pass's physical constants; see createHeatMirageUniforms. */
+  private readonly heatUniforms = createHeatMirageUniforms();
+  /** Rise rates of the two strata octaves, strata per second. */
+  private hazeBroadRiseHz = DEFAULT_HEAT_MIRAGE.broadRiseHz;
+  private hazeFineRiseHz = DEFAULT_HEAT_MIRAGE.fineRiseHz;
+  /** Wall clock of the previous frame, seconds; negative until the first one. */
+  private hazeClockS = -1;
+  /** What the pass was last told, kept for the depth-resolve decision. */
+  private daylight = 0;
+  private shimmerStrength = 0;
+  private mirageStrength = 0;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -1006,9 +1258,12 @@ export class Renderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uTime: { value: 0 },
         uStrength: { value: 0 },
-        ...createHeatMirageUniforms(),
+        uMirage: { value: 0 },
+        uHazePhase: { value: new THREE.Vector2() },
+        ...this.heatUniforms,
         uDaylight: { value: 0 },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
+        uGroundSlope: { value: 0 },
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
@@ -1262,9 +1517,20 @@ export class Renderer {
 
   private drawFrame(): void {
     this.renderer.info.reset();
-    // Seconds. The field's drift rates are metres per second in its own sampled
-    // space, so time here has to be real time and nothing else.
-    this.hazeMaterial.uniforms.uTime.value = performance.now() * 0.001;
+    // Real time, not game time: the strata climb at a flicker rate the eye knows,
+    // which a time-scaled or paused game clock would slow or freeze. The phases are
+    // integrated here in doubles and wrapped (see advanceHazePhase), and the clock
+    // the grain reads is wrapped at a whole number of its own cycles, so no uniform
+    // grows with uptime and the float32 the shader holds never loses the pattern.
+    const nowS = performance.now() * 0.001;
+    const dt = this.hazeClockS < 0 ? 0 : Math.min(0.1, Math.max(0, nowS - this.hazeClockS));
+    this.hazeClockS = nowS;
+    const phase = this.hazeMaterial.uniforms.uHazePhase.value as THREE.Vector2;
+    phase.set(
+      advanceHazePhase(phase.x, dt, this.hazeBroadRiseHz),
+      advanceHazePhase(phase.y, dt, this.hazeFineRiseHz),
+    );
+    this.hazeMaterial.uniforms.uTime.value = nowS % HAZE_CLOCK_PERIOD_S;
     this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
     this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
       this.hazeMinimumEyeHeight,
@@ -1290,7 +1556,7 @@ export class Renderer {
     // So this is deliberate, not an oversight: skipping the pass on the cheapest
     // tier made it the only correctly encoded tier, which read as washed out
     // beside the other two. Acceptable keeps the pass and drops the WARP instead
-    // (see `setHazeStrength`), which is where the cost actually was.
+    // (see `setHeatHaze`), which is where the cost actually was.
     this.renderer.setRenderTarget(this.hazeTarget);
     this.renderer.render(this.scene, this.camera);
     this.renderer.setRenderTarget(null);
@@ -1318,50 +1584,44 @@ export class Renderer {
 
   /** Updates every physical parameter in the production heat-mirage shader. */
   setHeatMirageParameters(parameters: HeatMirageParameters): void {
-    const uniforms = this.hazeMaterial.uniforms;
-    uniforms.SCALE_HEIGHT_M.value = Math.max(0.1, parameters.scaleHeightM);
-    uniforms.REF_PATH_M.value = Math.max(1, parameters.referencePathM);
-    uniforms.NEAR_CLEAR_M.value = Math.max(0, parameters.nearClearM);
-    uniforms.NEAR_FULL_M.value = Math.max(uniforms.NEAR_CLEAR_M.value + 1, parameters.nearFullM);
-    uniforms.GROUND_CLEAR_M.value = Math.max(0, parameters.groundClearM);
-    uniforms.GROUND_FULL_M.value = Math.max(
-      uniforms.GROUND_CLEAR_M.value + 1,
-      parameters.groundFullM,
-    );
-    uniforms.ANGLE_RAD.value = Math.max(0, parameters.angleMrad) / 1000;
-    uniforms.LIFT_RAD.value = parameters.liftMrad / 1000;
-    uniforms.SAMPLE_RANGE_M.value = Math.max(0.1, parameters.sampleRangeM);
-    uniforms.CELL_BROAD.value = Math.max(0.01, parameters.broadCellM);
-    uniforms.CELL_FINE.value = Math.max(0.01, parameters.fineCellM);
-    uniforms.RISE_BROAD.value = parameters.broadRiseMps;
-    uniforms.RISE_FINE.value = parameters.fineRiseMps;
-    uniforms.PLUME_STRETCH.value = Math.max(0.1, parameters.plumeStretch);
-    uniforms.LATERAL_SHARE.value = Math.min(1, Math.max(0, parameters.lateralShare));
+    writeHeatMirageUniforms(this.heatUniforms, parameters);
+    this.hazeBroadRiseHz = parameters.broadRiseHz;
+    this.hazeFineRiseHz = parameters.fineRiseHz;
     this.hazeMinimumEyeHeight = parameters.minimumEyeHeightM;
-  }
-  /**
-   * How far the camera is above the ground it is looking across, metres. Supplied by
-   * the composition root, which is the only thing that knows both the camera and the
-   * terrain; the shader turns it into the ray's path through the hot layer.
-   */
-  setHazeEyeHeight(metres: number): void {
-    this.hazeEyeHeight = metres;
   }
 
   /**
-   * Heat-haze strength, clamped to 0..1, and always zero on the cheapest tier.
-   *
-   * The procedural grains are the expensive half of this pass. Acceptable pays
-   * the copy and outlines, which define the drawn look, and skips the shimmer:
-   * at zero strength the shader branches past the warp on a uniform every fragment
-   * agrees on.
+   * How much of the day's light the colour finish should assume, 0..1: the sand
+   * veil and the toe lift. Deliberately separate from the heat: the two used to be
+   * one number, so the mirage lab's heat slider re-graded the whole picture.
    */
-  setHazeStrength(strength: number): void {
-    const daylight = Math.min(1, Math.max(0, strength));
-    this.hazeMaterial.uniforms.uDaylight.value = daylight;
-    const wanted = this.quality === 'acceptable' ? 0 : daylight;
-    const active = Math.min(1, Math.max(0, wanted));
-    this.hazeMaterial.uniforms.uStrength.value = active;
+  setDaylight(dayFactor: number): void {
+    this.daylight = Math.min(1, Math.max(0, dayFactor));
+    this.hazeMaterial.uniforms.uDaylight.value = this.daylight;
+    this.updateDepthResolve();
+  }
+
+  /**
+   * This frame's heat: shimmer and mirage strength, and the grazed-ground line the
+   * shader integrates the hot layer against (render/heathaze.ts).
+   *
+   * Both strengths are always zero on the cheapest tier. The procedural field is the
+   * expensive half of this pass; Acceptable pays the copy and outlines, which define
+   * the drawn look, and skips the heat: at zero strength the shader branches past it
+   * on a uniform every fragment agrees on.
+   */
+  setHeatHaze(frame: HeatHazeFrame): void {
+    const enabled = this.quality !== 'acceptable';
+    this.shimmerStrength = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
+    this.mirageStrength = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
+    this.hazeMaterial.uniforms.uStrength.value = this.shimmerStrength;
+    this.hazeMaterial.uniforms.uMirage.value = this.mirageStrength;
+    this.hazeEyeHeight = frame.eyeAboveM;
+    this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
+    this.updateDepthResolve();
+  }
+
+  private updateDepthResolve(): void {
     // THE WARP IS NOT THE ONLY THING THAT SAMPLES DEPTH, which is what this line
     // used to assume. `tDepth` also decides where the sand veil begins and — far
     // more visibly — which fragments the INK pass is allowed to outline: the sky,
@@ -1375,7 +1635,8 @@ export class Renderer {
     // vanished or spread into the sky depending on what the driver left behind.
     // The resolve is skipped only when nothing in the pass reads depth at all.
     const ink = this.hazeMaterial.uniforms.uInkStrength.value as number;
-    this.hazeTarget.resolveDepthBuffer = active > 0 || ink > 0 || daylight > 0;
+    this.hazeTarget.resolveDepthBuffer =
+      this.shimmerStrength > 0 || this.mirageStrength > 0 || ink > 0 || this.daylight > 0;
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */

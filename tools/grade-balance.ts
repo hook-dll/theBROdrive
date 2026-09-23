@@ -23,13 +23,21 @@
  *      of the drive sits in long (>= 500 m) runs of each sign.
  *
  *   3. TIME, which is what perception actually integrates. Speed is a plain
- *      power-balance estimate for the starting car (mass, Cd·A and peak power read
- *      from the catalogue below, rolling resistance and a top-speed cap stated as
- *      constants) — an approximation of the sim, not the sim.
+ *      power-balance estimate for the starting car — kerb mass, Cd·A, rated power
+ *      and driveline efficiency read from the catalogue, so it cannot drift from the
+ *      car it describes; rolling resistance is asphalt's own and the cruise cap is a
+ *      stated constant — an approximation of the sim, not the sim.
  *
- *   npx tsx tools/grade-balance.ts [seeds] [km]
+ *   bun tools/grade-balance.ts [seeds] [km]
  */
 
+import { SURFACES, SurfaceType } from '../src/core/surfaces';
+import {
+  carModel,
+  DEFAULT_CAR_MODEL_ID,
+  modelEngine,
+  modelGearbox,
+} from '../src/vehicle/carmodels';
 import { Landscape } from '../src/world/landscape';
 import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
 
@@ -75,13 +83,13 @@ const SIGHT_STEP_M = 20;
 /** Road distance between eye points, metres. */
 const SIGHT_SPACING_M = 100;
 
-// --- the speed estimate's car: VAZ-2101 kerb mass, its 1.2 Cd·A, its 46 kW ------
-const CAR_MASS_KG = 955;
-const CAR_DRAG_AREA = 0.72;
-const CAR_POWER_KW = 46;
-/** Fraction of crank power at the wheels. */
-const DRIVELINE_EFFICIENCY = 0.85;
-const ROLLING_RESISTANCE = 0.014;
+// --- the speed estimate's car: the game's starting car, straight from the catalogue ---
+const CAR = carModel(DEFAULT_CAR_MODEL_ID);
+const CAR_MASS_KG = CAR.mass;
+const CAR_DRAG_AREA = CAR.dragArea ?? 0.8;
+/** Rated power at the hubs: the engine's catalogue figure through its gearbox. */
+const WHEEL_POWER_W = modelEngine(CAR).peakPowerKw * 1000 * modelGearbox(CAR).efficiency;
+const ROLLING_RESISTANCE = SURFACES[SurfaceType.Asphalt].rollingResistance;
 const AIR_DENSITY = 1.2;
 const GRAVITY = 9.81;
 /** Cruise the driver holds when the road does not stop them, m/s (~95 km/h). */
@@ -97,7 +105,7 @@ const MIN_MS = 4;
  * accelerate downhill would only widen the time asymmetry this reports.
  */
 function speedOnGrade(grade: number): number {
-  const power = CAR_POWER_KW * 1000 * DRIVELINE_EFFICIENCY;
+  const power = WHEEL_POWER_W;
   const resist = (v: number) =>
     v * (CAR_MASS_KG * GRAVITY * (grade + ROLLING_RESISTANCE) + 0.5 * AIR_DENSITY * CAR_DRAG_AREA * v * v);
   if (resist(CRUISE_MS) <= power) return CRUISE_MS;

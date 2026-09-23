@@ -21,14 +21,10 @@ import * as THREE from 'three';
 import { emptyInput } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
+import { GameWorld, newWorldState } from '../src/game/state';
 import { carModelMeasure, carSpawnYAboveGround, preloadCarModels } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { benchCarState } from './benchcar';
 import { Autopilot } from '../src/vehicle/autopilot';
-import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
@@ -217,21 +213,13 @@ const turn = new TurnaroundRoad(road, (x, z) => terrain.heightAt(x, z, 0));
 
   const world = new GameWorld(newWorldState(SEED));
   const start = turn.sampleAt(4);
-  const def = carModel(MODEL_ID);
-  const engine = variant(def.engineId).engine;
-  const state: CarState = {
-    id: 'turner', modelId: MODEL_ID, stickers: [],
-    headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
-    fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
-    waterLitres: 10, oilLitres: 10, engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('turner', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
+  const state = benchCarState(MODEL_ID, {
+    id: 'turner',
     x: start.x,
     y: carSpawnYAboveGround(carModelMeasure(MODEL_ID), start.y, 0),
     z: start.z,
-    qx: 0, qy: Math.sin(start.heading / 2), qz: 0, qw: Math.cos(start.heading / 2),
-  };
+    heading: start.heading,
+  });
   world.state.cars['turner'] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const autopilot = new Autopilot(turn, new HazardIndex(), physics);

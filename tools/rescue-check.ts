@@ -17,12 +17,8 @@ import { emptyInput } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
-import type { Item } from '../src/items/items';
-import { variant } from '../src/parts/registry';
 import { preloadCarModels } from '../src/render/carmodel';
-import { createBonnetStorage } from '../src/vehicle/bonnet';
-import { COLD_SOAK_C } from '../src/vehicle/cooling';
-import { carModel } from '../src/vehicle/carmodels';
+import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { hasEscapedWorld, UNDERWORLD_DROP_M } from '../src/world/landscape';
 import { WorldOrigin } from '../src/world/origin';
@@ -102,21 +98,14 @@ function steepestDescent(road: Road, from: number, to: number): { s: number; gra
 }
 
 function carStateAt(road: Road, s: number, lateral: number): CarState {
-  const def = carModel(MODEL_ID);
-  const engine = variant(def.engineId).engine;
   const point = road.offsetPoint(s, lateral);
-  const heading = road.sampleAt(s).heading;
-  return {
-    id: 'rescue-check', modelId: MODEL_ID, stickers: [],
-    headlightMode: 'off', taillightsOn: false, reverseLightsOn: false,
-    fuelLitres: 40, fuelKind: engine?.fuel ?? null, dirt: 0, scratches: 0, damage: [],
-    waterLitres: 10, oilLitres: 10, engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
-    bonnet: createBonnetStorage('rescue-check', def.engineId, def.bodyClass, def.tankLitres),
-    odometer: 0,
-    x: point.x, y: point.y + 1.2, z: point.z,
-    qx: 0, qy: Math.sin(heading / 2), qz: 0, qw: Math.cos(heading / 2),
-  };
+  return benchCarState(MODEL_ID, {
+    id: 'rescue-check',
+    x: point.x,
+    y: point.y + 1.2,
+    z: point.z,
+    heading: road.sampleAt(s).heading,
+  });
 }
 
 const seed = 1337;
