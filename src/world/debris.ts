@@ -4,7 +4,7 @@ import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
 import type { GameWorld } from '../game/state';
 import type { WorldOrigin } from './origin';
-import type { BreakableProp, PropPiece } from './props';
+import type { BreakableProp, PropPiece } from './props/forms';
 import {
   createMedicineRemnantMesh,
   disposeItemMeshResources,

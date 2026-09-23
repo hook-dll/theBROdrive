@@ -16,6 +16,7 @@ import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { disposeCarModelCache, preloadCarModels } from '../src/render/carmodel';
 import { ambientBeamGain, VehicleLightRig } from '../src/render/vehiclelights';
+import { GRAPHICS_TIERS } from '../src/game/settings';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { benchCarState } from './benchcar';
 import { WorldOrigin } from '../src/world/origin';
@@ -153,7 +154,9 @@ async function run(): Promise<void> {
     rig = new VehicleLightRig(scene);
     const blessingScene = new THREE.Scene();
     const blessingRig = new VehicleLightRig(blessingScene, 'blessing');
-    check('blessing quality allocates eighteen lamp slots', blessingRig.lightCount === 18, `${blessingRig.lightCount} slots`);
+    // The tier table is the contract; the old literal 18 predates the measured slot cliff.
+    const blessingSlots = GRAPHICS_TIERS.blessing.vehicleLightSlots;
+    check('blessing quality allocates its tier lamp slots', blessingRig.lightCount === blessingSlots, `${blessingRig.lightCount} of ${blessingSlots} slots`);
     check('blessing quality triples headlight reach', blessingRig.headlightDistanceScale === 3, `${blessingRig.headlightDistanceScale}x`);
     blessingRig.dispose();
     const identities = spotlights(scene);

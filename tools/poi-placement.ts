@@ -35,12 +35,9 @@ import {
   variantDef,
   warmVariantAssets,
 } from '../src/world/poivariantbuild';
-import {
-  createPoiVariant,
-  mergePoiStatics,
-  SHELF_PLANK_TOP,
-  STARTER_GARAGE_SHELF,
-} from '../src/world/poi-variants';
+import { SHELF_PLANK_TOP } from '../src/world/poi/kit';
+import { STARTER_GARAGE_SHELF } from '../src/world/poi/starter';
+import { createPoiVariant, mergePoiStatics } from '../src/world/poi-variants';
 import {
   HOMESTEAD_FOOTPRINT,
   HomesteadProvider,

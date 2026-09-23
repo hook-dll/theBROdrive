@@ -26,7 +26,8 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { DebrisField, type Impactor } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
-import { ScatterProvider, propPieces, type BreakableProp } from '../src/world/props';
+import { propPieces, type BreakableProp } from '../src/world/props/forms';
+import { ScatterProvider } from '../src/world/props/scatter';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 

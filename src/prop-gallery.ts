@@ -4,7 +4,8 @@ import { SurfaceType } from './core/surfaces';
 import { applyComicShading } from './render/comic';
 import { MAX_WEAR, PALETTE_CYCLE_M, desertPaletteAt, poleConditionAt, poleEraSegments } from './world/gradient';
 import type { PoleCondition, PoleEra } from './world/gradient';
-import { createPoleDisplay, desertPropForms } from './world/props';
+import { desertPropForms } from './world/props/forms';
+import { createPoleDisplay } from './world/props/poles';
 
 const GRID_COLUMNS = 5;
 const CELL_X = 24;

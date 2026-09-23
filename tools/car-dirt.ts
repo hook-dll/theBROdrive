@@ -29,7 +29,8 @@ import {
 } from '../src/game/state';
 import { encodeSaveCode, decodeSaveCode, migrateState } from '../src/save/save';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
-import { impactDent, Vehicle } from '../src/vehicle/vehicle';
+import { Vehicle } from '../src/vehicle/vehicle';
+import { impactDent } from '../src/vehicle/vehicletuning';
 import { WorldOrigin } from '../src/world/origin';
 
 installAssetShim();

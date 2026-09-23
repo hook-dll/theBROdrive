@@ -46,15 +46,13 @@ import * as THREE from 'three';
 import type { PoiSwitchField } from './poiswitches';
 import {
   BULB_EMISSIVE_INTENSITY,
-  createPoiVariant,
-  mergePoiStatics,
-  POI_VARIANTS,
   ROOM_BULB_LIFT,
   ROOM_BULB_RADIUS,
   ROOM_LIGHT_INTENSITY,
   ROOM_LIGHT_REACH,
   roomBulbMaterial,
-} from './poi-variants';
+} from './poi/kit';
+import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './poi-variants';
 
 export type PoiCategory = 'house' | 'shop' | 'gas' | 'wreck' | 'tower' | 'container';
 

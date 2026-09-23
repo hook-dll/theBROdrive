@@ -307,7 +307,7 @@ export interface WorldState {
   lootedPois: number[];
   /**
    * Scatter props knocked to pieces, by packed cell identity (`propCellId` in
-   * world/props.ts). Presence means "do not stand this one up again".
+   * world/props/scatter.ts). Presence means "do not stand this one up again".
    *
    * The same guard `lootedPois` is, for the same reason: a chunk is rebuilt every time
    * it crosses the physics radius, so without a record every cactus you flattened would

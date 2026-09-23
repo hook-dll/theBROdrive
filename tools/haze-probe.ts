@@ -51,7 +51,7 @@ import {
   DEFAULT_HEAT_MIRAGE,
   HAZE_FRAGMENT,
   HAZE_VERTEX,
-} from '../src/core/renderer';
+} from '../src/render/hazeshader';
 
 const WIDTH = 480;
 const HEIGHT = 270;

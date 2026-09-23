@@ -55,7 +55,7 @@ import { RoadMeshProvider } from '../src/world/roadmesh';
 import { RoadDistance } from '../src/world/roaddistance';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
-import { ScatterProvider } from '../src/world/props';
+import { ScatterProvider } from '../src/world/props/scatter';
 import { Terrain } from '../src/world/terrain';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { installDocumentShim } from './domshim';

@@ -486,6 +486,7 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
 function patchCarBodyShader(
   shader: WebGLProgramParametersWithUniforms,
   uniforms: CarBodyUniforms,
+  unified: boolean,
 ): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uScratch = uniforms.scratches;
@@ -502,12 +503,208 @@ function patchCarBodyShader(
     .replace('#include <common>', CAR_BODY_VERTEX_PARS)
     .replace('#include <worldpos_vertex>', CAR_BODY_VERTEX_HOOK);
 
+  // Under the unified car style the atlas's non-paint swatches are re-shaded by the
+  // table, which has to arrive with the rest of the fragment declarations and run
+  // BEFORE the wear below: dirt is what covers a cleaned-up bumper, not the reverse.
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', CAR_BODY_PARS)
+    .replace('#include <common>', unified ? CAR_BODY_PARS + CAR_ATLAS_FINISH : CAR_BODY_PARS)
     .replace('#include <map_fragment>', CAR_PAINT_MAP)
-    .replace('#include <normal_fragment_maps>', CAR_BODY_CONDITION);
+    .replace(
+      '#include <normal_fragment_maps>',
+      unified ? CAR_ATLAS_FINISH_PAINT + CAR_BODY_CONDITION : CAR_BODY_CONDITION,
+    );
 }
 
+
+// ---------------------------------------------------------------------------
+// Unified car style (`?carstyle=unified`, DEV only)
+// ---------------------------------------------------------------------------
+
+/**
+ * The non-paint surfaces every pack is snapped to by the unified car style, so a
+ * Soviet bumper, a GTA trim strip and a wheel rim are the same material whichever
+ * car they were imported on.
+ *
+ * Four finishes is what a period car actually has: painted black, rubber, painted
+ * steel and chrome. One palette rather than a per-pack opinion is the whole point —
+ * a car's finish must not be able to say which pack it came from.
+ */
+export interface CarSurfaceFinish {
+  readonly color: number;
+  readonly roughness: number;
+  readonly metalness: number;
+}
+
+export const CAR_SURFACE_FINISH = {
+  /** Bumper-to-bumper black plastic, mouldings and grille surrounds. */
+  trim: { color: 0x1b1d1f, roughness: 0.6, metalness: 0 },
+  /** Tyres and rub strips: matte enough to swallow a highlight. */
+  rubber: { color: 0x131415, roughness: 0.9, metalness: 0 },
+  /** Painted steel wheel: half metallic, visibly duller than chrome. */
+  rim: { color: 0x8e9296, roughness: 0.45, metalness: 0.3 },
+  /** Chromed bumpers, grilles and hubcaps: the one mirror on a period car. */
+  chrome: { color: 0xb8bec3, roughness: 0.25, metalness: 0.8 },
+} as const satisfies Record<string, CarSurfaceFinish>;
+
+/** How the unified style dresses one authored material. */
+export interface UnifiedMaterialOptions {
+  /** The palette surface this material becomes. */
+  readonly finish: CarSurfaceFinish;
+  /** Keep the source's own base colour — for a surface the palette does not name. */
+  readonly keepColor?: boolean;
+}
+
+/**
+ * A palette colour as GLSL, in the working space three shades in (linear): the
+ * shader writes these straight into `diffuseColor`, so converting twice would
+ * darken every bumper.
+ */
+function glslColor(color: number): string {
+  const c = new THREE.Color(color);
+  return `vec3( ${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)} )`;
+}
+
+/**
+ * The atlas's non-paint swatches, as a cell -> finish table.
+ *
+ * The 9x2 sheet is fifteen flat swatches and the body mesh and the wheels draw
+ * everything out of it. Measured over all fifteen Soviet bodies, only three of those
+ * cells are surfaces this palette owns:
+ *
+ *   (0, 1) the grey steel: a body's bumpers and grille, and every wheel's own rim
+ *   (1, 1) the dark grey:  bumper rubbers and side mouldings
+ *   (2, 1) the black:      tyres, black trim and the underbody
+ *
+ * Everything else keeps the swatch the pack painted it — the car's own paint cell
+ * (whichever cell that model uses), the teal glass, the lamp lenses, the whitewall
+ * and the rally stripes.
+ *
+ * `wheel` picks between the two readings of the grey steel cell: the same swatch is
+ * a chromed bumper on a body and a painted steel rim on a wheel, and the palette
+ * keeps those two surfaces apart. It is a constant at every call site, so the driver
+ * folds the branch away.
+ */
+const CAR_ATLAS_FINISH = `
+bool carAtlasFinish( vec2 cell, bool wheel, out vec3 color, out float roughness, out float metalness ) {
+  if ( all( equal( cell, vec2( 0.0, 1.0 ) ) ) ) {
+    color = wheel ? ${glslColor(CAR_SURFACE_FINISH.rim.color)} : ${glslColor(CAR_SURFACE_FINISH.chrome.color)};
+    roughness = wheel ? ${CAR_SURFACE_FINISH.rim.roughness.toFixed(3)} : ${CAR_SURFACE_FINISH.chrome.roughness.toFixed(3)};
+    metalness = wheel ? ${CAR_SURFACE_FINISH.rim.metalness.toFixed(3)} : ${CAR_SURFACE_FINISH.chrome.metalness.toFixed(3)};
+    return true;
+  }
+  if ( all( equal( cell, vec2( 1.0, 1.0 ) ) ) ) {
+    color = ${glslColor(CAR_SURFACE_FINISH.trim.color)};
+    roughness = ${CAR_SURFACE_FINISH.trim.roughness.toFixed(3)};
+    metalness = ${CAR_SURFACE_FINISH.trim.metalness.toFixed(3)};
+    return true;
+  }
+  if ( all( equal( cell, vec2( 2.0, 1.0 ) ) ) ) {
+    color = ${glslColor(CAR_SURFACE_FINISH.rubber.color)};
+    roughness = ${CAR_SURFACE_FINISH.rubber.roughness.toFixed(3)};
+    metalness = ${CAR_SURFACE_FINISH.rubber.metalness.toFixed(3)};
+    return true;
+  }
+  return false;
+}`;
+
+/**
+ * The body's copy of the table, applied where the BRDF inputs are already computed
+ * so it can rewrite colour, roughness and metalness together — and BEFORE the wear
+ * block that follows it, which mixes its own values over whatever the surface
+ * started as. Dirt covers a bumper; a bumper does not cover dirt.
+ *
+ * A car's own paint cell is left to `uPalettePaintColor`, which is how the per-car
+ * factory colour has always arrived.
+ */
+const CAR_ATLAS_FINISH_PAINT = `#ifdef USE_MAP
+{
+  vec2 carAtlasCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
+  if ( uPalettePaint < 0.5 || !all( equal( carAtlasCell, uPalettePaintCell ) ) ) {
+    vec3 carAtlasColor; float carAtlasRoughness; float carAtlasMetalness;
+    if ( carAtlasFinish( carAtlasCell, false, carAtlasColor, carAtlasRoughness, carAtlasMetalness ) ) {
+      diffuseColor.rgb = carAtlasColor;
+      roughnessFactor = carAtlasRoughness;
+      metalnessFactor = carAtlasMetalness;
+    }
+  }
+}
+#endif
+`;
+
+/** The wheel's copy: no paint cell to protect, and the grey steel is a rim. */
+const CAR_ATLAS_FINISH_WHEEL = `#ifdef USE_MAP
+{
+  vec2 carAtlasCell = floor( vMapUv * vec2( 9.0, 2.0 ) );
+  vec3 carAtlasColor; float carAtlasRoughness; float carAtlasMetalness;
+  if ( carAtlasFinish( carAtlasCell, true, carAtlasColor, carAtlasRoughness, carAtlasMetalness ) ) {
+    diffuseColor.rgb = carAtlasColor;
+    roughnessFactor = carAtlasRoughness;
+    metalnessFactor = carAtlasMetalness;
+  }
+}
+#endif
+`;
+
+/** Stable program key for every unified atlas material. */
+const UNIFIED_ATLAS_PROGRAM_KEY = 'car-atlas-finish-v1';
+
+/**
+ * Patches one atlas material: the pack's tyre, rim and trim swatches become the
+ * palette, in place of the flat colours and Blinn response the FBX shipped.
+ */
+function patchUnifiedAtlasShader(shader: WebGLProgramParametersWithUniforms): void {
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>' + CAR_ATLAS_FINISH)
+    .replace('#include <normal_fragment_maps>', CAR_ATLAS_FINISH_WHEEL + '#include <normal_fragment_maps>');
+}
+
+/**
+ * One car model material under the unified style. The pack's own map is kept, so
+ * whatever the palette does not name — a whitewall, a rally stripe — is still the
+ * swatch that pack painted, and the table re-shades only the surfaces it owns.
+ *
+ * `wheel` decides how the shared grey steel swatch reads, and is the only thing that
+ * differs between a wheel and a bodywork mesh that would otherwise carry the atlas.
+ */
+export function makeUnifiedAtlasMaterial(source: THREE.Material, wheel: boolean): THREE.Material {
+  if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) {
+    return source.clone();
+  }
+  // The carried colour stays the source's — white on the atlas — because the map IS
+  // the palette here: tinting it would shift every swatch the table leaves alone.
+  // `trim` is the base for the cells the table does not claim: a plain dielectric is
+  // the safest reading of a swatch no pack ever named.
+  const material = cloneAsStandard(
+    source,
+    source.color,
+    CAR_SURFACE_FINISH.trim.roughness,
+    CAR_SURFACE_FINISH.trim.metalness,
+  );
+  material.onBeforeCompile = (shader) => patchUnifiedAtlasShader(shader);
+  material.customProgramCacheKey = () => `${UNIFIED_ATLAS_PROGRAM_KEY}${wheel ? '-wheel' : '-body'}`;
+  return material;
+}
+
+/**
+ * One authored car material as its unified-style counterpart: the palette's colour
+ * and finish, keeping the source's map, emissive, name and sidedness. This is what
+ * turns the GTA packs' named `car_trim`, `Tyres` and `wheel_rim` into the same
+ * surfaces the Soviet atlas cells become.
+ */
+export function makeUnifiedSurfaceMaterial(
+  source: THREE.Material,
+  options: UnifiedMaterialOptions,
+): THREE.Material {
+  if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) {
+    return source.clone();
+  }
+  return cloneAsStandard(
+    source,
+    options.keepColor ? source.color : options.finish.color,
+    options.finish.roughness,
+    options.finish.metalness,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -594,19 +791,41 @@ const CAR_PAINT_METALNESS = MATERIALS_CONFIG.paintMetalness;
  * Both model packs now differ only in their colour/texture, not in their BRDF.
  */
 function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
+  if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) {
+    return source.clone();
+  }
+  return cloneAsStandard(source, source.color, CAR_PAINT_ROUGHNESS, CAR_PAINT_METALNESS);
+}
+
+/**
+ * Clones an authored car material under one finish: the colour it is given, and the
+ * roughness/metalness pair that says what the surface IS.
+ *
+ * Every channel the source can carry comes across — map, emissive, normal, alpha,
+ * sidedness, depth state — because a car part's identity lives in its map and its
+ * cutout, not in its BRDF. The maps that would MODULATE the finish are dropped
+ * instead: an authored roughness or metalness map is the pack's own opinion about a
+ * surface this finish now owns, and leaving it on would fight every value written.
+ */
+function cloneAsStandard(
+  source: THREE.MeshStandardMaterial | THREE.MeshPhongMaterial,
+  color: THREE.ColorRepresentation,
+  roughness: number,
+  metalness: number,
+): THREE.MeshStandardMaterial {
   if (source instanceof THREE.MeshStandardMaterial) {
     const material = source.clone();
-    material.roughness = CAR_PAINT_ROUGHNESS;
-    material.metalness = CAR_PAINT_METALNESS;
+    material.color.set(color);
+    material.roughness = roughness;
+    material.metalness = metalness;
     material.roughnessMap = null;
     material.metalnessMap = null;
     material.envMapIntensity = 1;
     return material;
   }
-  if (!(source instanceof THREE.MeshPhongMaterial)) return source.clone();
 
   const material = new THREE.MeshStandardMaterial({
-    color: source.color,
+    color,
     map: source.map,
     emissive: source.emissive,
     emissiveMap: source.emissiveMap,
@@ -620,8 +839,8 @@ function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
     alphaTest: source.alphaTest,
     side: source.side,
     vertexColors: source.vertexColors,
-    roughness: CAR_PAINT_ROUGHNESS,
-    metalness: CAR_PAINT_METALNESS,
+    roughness,
+    metalness,
   });
   material.name = source.name;
   material.depthTest = source.depthTest;
@@ -641,11 +860,17 @@ function makeCarPaintFinishMaterial(source: THREE.Material): THREE.Material {
  * `seed` is the car's appearance hash: wear is sampled in the body's own frame, so
  * without it two cars of one model would scuff and dust in identical places, and
  * with it a saved car wears in the same places every time it loads.
+ *
+ * `unified` is the DEV-only car-style switch. It adds the shared palette's per-atlas-
+ * cell finishes to this same program, and is carried on the material rather than read
+ * here because `?carstyle` is carmodel.ts's flag — and the two variants must not share
+ * a compiled program.
  */
 export function makeCarBodyConditionMaterial(
   source: THREE.Material,
   frame: CarBodyFrame,
   seed: number,
+  unified: boolean,
 ): THREE.Material {
   const material = makeCarPaintFinishMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
@@ -671,8 +896,9 @@ export function makeCarBodyConditionMaterial(
     paintCell: { value: new THREE.Vector2() },
   };
   carBodyUniforms.set(material, uniforms);
-  material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms);
-  material.customProgramCacheKey = () => CAR_BODY_PROGRAM_KEY;
+  material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms, unified);
+  material.customProgramCacheKey = () =>
+    unified ? `${CAR_BODY_PROGRAM_KEY}-unified` : CAR_BODY_PROGRAM_KEY;
   return material;
 }
 

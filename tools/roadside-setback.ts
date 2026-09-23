@@ -17,14 +17,16 @@ import * as THREE from 'three';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { MonumentProvider, PoleProvider, ScatterProvider } from '../src/world/props';
+import { MonumentProvider } from '../src/world/props/monuments';
+import { PoleProvider } from '../src/world/props/poles';
+import { ScatterProvider } from '../src/world/props/scatter';
 import { lanesPerSideAt } from '../src/world/roadprofile';
 import { installDocumentShim } from './domshim';
 
 installDocumentShim();
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
-/** Authored setbacks, metres from the asphalt edge. See props.ts. */
+/** Authored setbacks, metres from the asphalt edge. See world/props/. */
 const POLE_SETBACK_M = 3.1;
 const SCATTER_SETBACK_M = 6.1;
 const MONUMENT_MIN_SETBACK_M = 3.6;

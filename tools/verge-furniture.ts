@@ -49,14 +49,16 @@ import {
   DELINEATOR_GAP_MIN,
   DELINEATOR_HEIGHT,
   DELINEATOR_SETBACK_M,
-  DERELICT_SINK_M,
   DelineatorProvider,
+} from '../src/world/props/delineators';
+import {
+  DERELICT_SINK_M,
   PoleProvider,
   createPoleDisplay,
   poleAnomalyAt,
   poleDerelictAt,
   type PoleAnomaly,
-} from '../src/world/props';
+} from '../src/world/props/poles';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import {
@@ -900,7 +902,7 @@ function leanOf(group: THREE.Object3D): number {
   return Math.acos(Math.min(1, Math.max(-1, up.y)));
 }
 
-/** Authored era heights, for the fallen-pole tip test. See POLE_HEIGHT in props.ts. */
+/** Authored era heights, for the fallen-pole tip test. See POLE_HEIGHT in world/props/poles.ts. */
 const POLE_HEIGHT: Record<string, number> = { timber: 6.5, lattice: 8.5, concrete: 9, none: 0 };
 
 let anomalyEvents = 0;

@@ -3,12 +3,7 @@ import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { PhysicsWorld } from './core/physics';
 import { SurfaceType } from './core/surfaces';
-import {
-  DEFAULT_HEAT_MIRAGE,
-  prefersMobilePresentation,
-  Renderer,
-  type HeatMirageParameters,
-} from './core/renderer';
+import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { parseCalendarEpoch } from './game/calendar';
 import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from './game/settings';
 import { DAY_LENGTH, GameWorld, newWorldState } from './game/state';
@@ -32,6 +27,7 @@ import {
   type MirageKind,
 } from './render/mirage-tableau';
 import { HeatHaze } from './render/heathaze';
+import { DEFAULT_HEAT_MIRAGE, type HeatMirageParameters } from './render/hazeshader';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { desertPaletteAt } from './world/gradient';

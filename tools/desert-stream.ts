@@ -8,7 +8,7 @@ import {
   DESERT_TILE_SIZE,
 } from '../src/world/deserttiles';
 import { generateDesertTileData } from '../src/world/deserttiledata';
-import { desertPropForms, type BreakableSink, type BreakableProp } from '../src/world/props';
+import { desertPropForms, type BreakableSink, type BreakableProp } from '../src/world/props/forms';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';

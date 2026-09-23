@@ -12,7 +12,7 @@ import {
   propPieces,
   type BreakableSink,
   type DesertPropForm,
-} from './props';
+} from './props/forms';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';

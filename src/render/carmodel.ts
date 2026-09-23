@@ -13,12 +13,17 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   CAR_BODY_POSITION_ATTRIBUTE,
+  CAR_SURFACE_FINISH,
   makeCarBodyConditionMaterial,
+  makeUnifiedAtlasMaterial,
+  makeUnifiedSurfaceMaterial,
   setCarBodyCondition,
   setCarBodyPalettePaint,
   type CarBodyFrame,
+  type CarSurfaceFinish,
 } from './materials';
 import { CarBodySurface, type CarBodyWheel } from './carsurface';
 import {
@@ -27,6 +32,39 @@ import {
   type CarModelDef,
   type CarModelFit,
 } from '../vehicle/carmodels';
+
+/**
+ * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
+ * other lab flag.
+ *
+ * Read ONCE, at module load, because a template is measured, creased and given its
+ * materials exactly once and every car in the world is then cloned from it —
+ * switching style mid-session would have to rebuild all of it, so the car lab
+ * reloads instead (see `car-lab.ts`).
+ *
+ * `import.meta.env.DEV` folds to a constant false in a production build, and it is
+ * tested first so nothing below can run there. The optional chaining lets this
+ * module load under the headless tools, which have neither Vite's env object nor a
+ * window.
+ */
+export const CAR_STYLE_UNIFIED: boolean =
+  import.meta.env?.DEV === true &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('carstyle') === 'unified';
+
+/** How far apart two faces must point before their normals stop being averaged. */
+const CAR_CREASE_ANGLE = (35 * Math.PI) / 180;
+
+/**
+ * The surfaces the GTA conversions name outright. Forcing them to the palette is what
+ * makes a GTA car's black trim read as the same black as the Soviet atlas moulding
+ * cell the paint shader re-shades.
+ */
+const NAMED_SURFACE_FINISH: Readonly<Record<string, CarSurfaceFinish>> = {
+  car_trim: CAR_SURFACE_FINISH.trim,
+  Tyres: CAR_SURFACE_FINISH.rubber,
+  wheel_rim: CAR_SURFACE_FINISH.rim,
+};
 
 /** The four wheels the vehicle controller drives, in the order it expects them. */
 const WHEEL_IDS = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'] as const;
@@ -279,7 +317,7 @@ function cloneCarBodyPaintMaterials(
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    const material = makeCarBodyConditionMaterial(source, t.frame, seed);
+    const material = makeCarBodyConditionMaterial(source, t.frame, seed, CAR_STYLE_UNIFIED);
     clones.set(source, material);
     return material;
   };
@@ -544,6 +582,83 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean): void {
     // the depth stored under them is metres away: they can receive safely, and a
     // wheel darkening under its own arch is worth having.
     for (const material of materialsOf(child)) material.shadowSide = THREE.BackSide;
+  });
+}
+
+/**
+ * Every node or material name the vehicle controller binds a lamp by (see
+ * `Vehicle.bindLampMaterials`, which matches a mesh name first and a material name
+ * second).
+ */
+function lampNames(def: CarModelDef): Set<string> {
+  const names = new Set<string>();
+  const lights = def.lights;
+  if (!lights) return names;
+  for (const selectors of [
+    lights.headlights,
+    lights.taillights,
+    lights.brakeLights,
+    lights.reverseLights,
+    lights.leftBlinkers,
+    lights.rightBlinkers,
+  ]) {
+    for (const name of selectors ?? []) names.add(name);
+  }
+  return names;
+}
+
+/**
+ * DEV-only `?carstyle=unified`: one material set for every car model.
+ *
+ * The packs arrive with incompatible materials. The Soviet FBXs are all Phong and
+ * draw paint, bumpers, glass, tyres and everything between out of ONE shared swatch
+ * atlas, while the GTA conversions are texture-free Standard materials whose
+ * `car_trim`, `Tyres` and `wheel_rim` each carry their own authored finish. This
+ * pass converts every authored Phong material to Standard and hands each non-paint
+ * surface the palette's version of itself, so paint — already per-car and already
+ * Standard on both packs — is the one thing a pack can still be told apart by.
+ *
+ * Runs once per model, from `loadModel` and BEFORE `buildTemplate`: the wheel
+ * wrappers `takeOwnWheels` builds and the shadow sides `prepareMaterials` writes are
+ * both created later, so that this pass's materials are the ones every instance then
+ * clones. It also means a mesh is still named by its pack here, which is how the
+ * lamps and the wheels are recognised.
+ *
+ * Two kinds of material are deliberately left alone: anything the light rig binds (a
+ * lamp is a lens the vehicle drives, not a palette surface), and everything that is
+ * already Standard, which is the whole GTA pack plus the shared glass `isolateGlass`
+ * is about to install.
+ *
+ * Flag off, this returns before it reads a single mesh.
+ */
+function unifyCarMaterials(scene: THREE.Group, def: CarModelDef): void {
+  if (!CAR_STYLE_UNIFIED) return;
+  const lamps = lampNames(def);
+  // A wheel's grey steel swatch is its own rim, not a bumper: see CAR_ATLAS_FINISH.
+  // Packs that mark wheels only by shape are renamed too late for this pass, and no
+  // shipped pack with an atlas does that (the Soviet pack names all four nodes).
+  const wheelNodes = new Set<string>();
+  for (const wheelId of WHEEL_IDS) {
+    for (const name of def.wheelNodes?.[wheelId] ?? []) wheelNodes.add(name);
+  }
+
+  scene.traverse((mesh) => {
+    if (!(mesh instanceof THREE.Mesh)) return;
+    const lampMesh = lamps.has(mesh.name);
+    const wheel = wheelNodes.has(mesh.name);
+    const unify = (source: THREE.Material): THREE.Material => {
+      if (lampMesh || lamps.has(source.name)) return source;
+      const shared = NAMED_SURFACE_FINISH[source.name];
+      if (shared) return makeUnifiedSurfaceMaterial(source, { finish: shared });
+      if (!(source instanceof THREE.MeshPhongMaterial)) return source;
+      // An atlas material: its surfaces are told apart by UV cell, not by slot.
+      return source.map === null
+        ? makeUnifiedSurfaceMaterial(source, { finish: CAR_SURFACE_FINISH.trim, keepColor: true })
+        : makeUnifiedAtlasMaterial(source, wheel);
+    };
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(unify)
+      : unify(mesh.material);
   });
 }
 
@@ -911,6 +1026,47 @@ export const STEERING_WHEEL_NODE = 'steering_wheel';
 const MIRRORS_NODE = 'mirrors';
 
 
+/**
+ * DEV-only `?carstyle=unified`: one normal convention for every car body.
+ *
+ * The packs disagree at the source. The Soviet FBXs ship faceted normals — every
+ * panel carries its own — while the GTA bodies were welded within 32 to 40 degrees
+ * when they were imported, so a curved wing reads as a chain of flat facets beside a
+ * smooth one, and the eye can read a car's origin off its shading alone. Recomputing
+ * every body's normals through ONE crease angle removes that: faces within 35 degrees
+ * of each other share a smooth normal and a genuine panel edge stays hard.
+ *
+ * Bodywork only. By the time this runs `takeOwnWheels` has already detached the
+ * wheels, so the discs keep the normals their own art was authored with.
+ *
+ * Two things downstream read the geometry this replaces, which is why it is called
+ * from exactly one place, immediately before both:
+ *   - `stampCarBodyPositions` writes the paint's chassis attribute onto each mesh
+ *     geometry, and creasing rebuilds them de-indexed, so the stamp must come after;
+ *   - `CarBodySurface` pushes dents through positions and normals per vertex, and a
+ *     de-indexed geometry is exactly what it already handles — it copies the index
+ *     when there is one and flattens the attributes either way — so dents and the
+ *     dirt that is placed around them are unaffected by the change of indexing.
+ */
+function creaseCarBodyNormals(scene: THREE.Group): void {
+  if (!CAR_STYLE_UNIFIED) return;
+  // Two meshes can share one geometry (a mirrored pair, or a body applied twice).
+  // Creasing is a pure function of the geometry in its own local frame, so the
+  // second mesh takes the first mesh's creased copy rather than paying for its own.
+  const creased = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const shared = creased.get(node.geometry);
+    if (shared) {
+      node.geometry = shared;
+      return;
+    }
+    const geometry = toCreasedNormals(node.geometry, CAR_CREASE_ANGLE);
+    creased.set(node.geometry, geometry);
+    node.geometry = geometry;
+  });
+}
+
 /** Measures a loaded scene and splits it into a body template plus wheel templates. */
 function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   if (def.yaw) applyModelYaw(scene, def.yaw);
@@ -1079,6 +1235,10 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
+  // The unified style's normals, before the chassis stamp below reads the buffers
+  // this replaces.
+  creaseCarBodyNormals(scene);
+
   prepareMaterials(scene, true);
   stampCarBodyPositions(scene, def);
 
@@ -1155,6 +1315,7 @@ function loadModel(def: CarModelDef): Promise<void> {
       applyTexture(scene, paletteTextures.get(def.textureFile)!);
     }
     tuneMaps(scene);
+    unifyCarMaterials(scene, def);
     templates.set(def.id, buildTemplate(def, scene));
   })().catch((error) => {
     modelLoads.delete(def.id);

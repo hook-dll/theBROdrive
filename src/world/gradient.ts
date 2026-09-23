@@ -454,7 +454,7 @@ interface PoleEraBand {
 
 let poleEraBands: readonly PoleEraBand[] | null = null;
 
-/** The pole era schedule, so props.ts stops rediscovering it by probing. */
+/** The pole era schedule, so world/props/poles.ts stops rediscovering it by probing. */
 export function poleEraSegments(): readonly PoleEraBand[] {
   if (poleEraBands) return poleEraBands;
   const count = Math.ceil(ROAD_LENGTH / POLE_ERA_BAND_M);

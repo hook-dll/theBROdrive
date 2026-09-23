@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import type { HeatHazeFrame } from '../core/renderer';
+
 import { ambientAirC } from '../vehicle/cooling';
 import type { Terrain } from '../world/terrain';
 import { CLOUD_DARKEN_MAX, cloudShadowFrame, cloudShadowShadeAt } from './cloudshadow';
+import type { HeatHazeFrame } from './hazeshader';
 
 /**
  * HEAT HAZE INPUTS: how hot the ground is, and which ground the view is grazing.

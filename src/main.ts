@@ -1,10 +1,11 @@
+
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { SURFACES, SurfaceType } from './core/surfaces';
+import {  } from './core/surfaces';
 import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
@@ -12,7 +13,6 @@ import { parseCalendarEpoch } from './game/calendar';
 import {
   DEFAULT_INK_STRENGTH,
   DEFAULT_PHONE_FRAME_RATE,
-  GRAPHICS_TIERS,
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
   presentationFpsFor,
@@ -23,24 +23,18 @@ import {
   vehicleLightSlotsFor,
   viewDistanceFogScaleFor,
   viewDistanceFor,
-  type GraphicsQuality,
 } from './game/settings';
-import { spawnCarState, type SpawnRequest } from './game/spawn';
+import {  } from './game/spawn';
 import { warmVariantAssets } from './world/poivariantbuild';
 import {
-  CAMERA_FRAME_LIMIT,
   Inventory,
-  itemLabel,
   type CameraItem,
-  type Item,
 } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { oilCapacity, variant, type PartInstance } from './parts/registry';
+import { oilCapacity, variant } from './parts/registry';
 import { TouchControls } from './core/touch';
 import {
-  carModelMeasure,
-  carSpawnYAboveGround,
   loadCarModel,
   warmCarModelInstances,
 } from './render/carmodel';
@@ -83,12 +77,10 @@ import { TerminusPadProvider } from './world/terminuspad';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { hasEscapedWorld } from './world/landscape';
-import {
-  DelineatorProvider,
-  MonumentProvider,
-  PoleProvider,
-  ScatterProvider,
-} from './world/props';
+import { DelineatorProvider } from './world/props/delineators';
+import { MonumentProvider } from './world/props/monuments';
+import { PoleProvider } from './world/props/poles';
+import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider } from './world/sidetrack';
 import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
 import { Road, ROAD_LENGTH } from './world/road';
@@ -106,9 +98,9 @@ import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
-import { TERRAIN_COLLIDER_SURFACE } from './world/terrainmesh';
+import {  } from './world/terrainmesh';
 import { Hud } from './ui/hud';
-import { MainMenu, type DevSpawnItemRequest, type PauseHooks } from './ui/menu';
+import { MainMenu, type PauseHooks } from './ui/menu';
 import { IndexedDbSaves, installVehicleAutosave } from './save/save';
 import {
   claimResumeSlot,
@@ -120,13 +112,15 @@ import {
 import { bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
 import {
   TrailerField,
-  TRAILER_HALF_LENGTH,
   TRAILER_MODEL_FIT,
-  TRAILER_SPAWN_HEIGHT,
 } from './vehicle/trailer';
-import { Vehicle, type WheelSprayState } from './vehicle/vehicle';
+import { Vehicle } from './vehicle/vehicle';
 import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio, type RadioSpatialState } from './audio/gameaudio';
+import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
+import { installDevTools } from './app/devtools';
+import { createPlayerImpacts } from './app/playerimpacts';
+import { createWheelEffects } from './app/wheeleffects';
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -138,18 +132,6 @@ import { GameAudio, type RadioSpatialState } from './audio/gameaudio';
  */
 
 /**
- * Gap between the player and the NEAR END of a spawned vehicle, metres.
- *
- * A gap, not a centre distance: the drop point is this plus the model's own
- * half-length, because a fixed 6 m centre distance is measured from the middle of a
- * body that may be 16 m long, which spawned the low-poly semi straight through the
- * player and left them stuck inside its box while the solver tried to push them out.
- */
-const SPAWN_AHEAD_GAP = 6;
-/** Height above the eye the spawn ground probe starts from. */
-const SPAWN_PROBE_HEIGHT = 3;
-
-/**
  * Range, metres, over which an ambient car's contact patches are drawn.
  *
  * Contact shadows are read at the scale of a tyre, so they stop carrying information
@@ -159,8 +141,6 @@ const SPAWN_PROBE_HEIGHT = 3;
  * offer.
  */
 const CONTACT_PATCH_RANGE_M = 90;
-/** Trailer-only drop clearance; cars use model-aware `carSpawnYAboveGround`. */
-const TRAILER_DROP_CLEARANCE = 0.35;
 /**
  * Objects enter the active physics/render world at the smaller radius and leave at
  * the larger one. The gap prevents lifetime churn at the streaming boundary.
@@ -172,31 +152,6 @@ const ACTIVE_UNLOAD_RADIUS_SQUARED = ACTIVE_UNLOAD_RADIUS * ACTIVE_UNLOAD_RADIUS
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
-/**
- * Slip-speed floor for spray strength, m/s. Mirrors the tyre model's
- * SLIP_REFERENCE_MPS: a slip ratio is (ωr − v)/ref, so a wheel's surface speed
- * ωr ≈ v + slip·ref. Without the floor a held burnout (wheels spinning, chassis
- * still) reads zero speed and throws no tail.
- */
-const SPRAY_REF_SPEED = 1.5;
-/**
- * Slip below which a wheel throws nothing.
- *
- * A tyre rolling honestly still reports a small non-zero slip ratio — that is how
- * the tyre model makes force at all — so without a floor every wheel would trickle
- * motes down every straight. 0.06 is above that noise and well below the slip a
- * locked or spinning wheel reaches.
- */
-const SPRAY_MIN_SLIP = 0.06;
-/**
- * How much visible material a smoking tyre yields against a digging one.
- *
- * `SurfaceProps.dust` and `.smoke` say WHICH of the two a surface produces; this says
- * how much less there is of the second. A wheel scrubbing on asphalt makes a thin
- * wisp, a wheel spinning in sand makes a rooster tail, and the difference is close to
- * an order of magnitude once the emitter's own lower smoke rate is applied on top.
- */
-const SPRAY_SMOKE_YIELD = 0.4;
 /** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
 const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
@@ -206,18 +161,6 @@ const GUM_FLIP_RADIUS = 0.5;
 /** Four dial hours in the game's 24-minute clock. */
 const WATCH_FAST_FORWARD_SECONDS = DAY_LENGTH / 6;
 const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
-/**
- * Reach of the dev pause-menu flip, metres, measured from the player to a body
- * centre. Wide enough to right a car from wherever you got out of it, and short
- * enough that it cannot reach past one wreck to another at a gas stop.
- */
-const DEV_FLIP_RADIUS = 12;
-/**
- * How far past the searched window `devJumpToLake` sets the player down. Outside it, so
- * whatever hollow the desert offered is in front of the camera rather than under it, and
- * well outside the approach fade, so the water is at full opacity.
- */
-const DEV_LAKE_WINDOW_MARGIN_M = 40;
 
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
@@ -225,28 +168,6 @@ const GUM_PACK_ANIM_SECONDS = 1;
 const MEDICINE_USE_SECONDS = 2;
 /** The lid leaves the held mesh here and continues as a world rigid body. */
 const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
-
-/**
- * Streaming budget while playing: one small job per rendered frame, which is what
- * keeps road and desert attachment out of the frame time.
- */
-const STREAM_FRAME_BUDGET_MS = 3;
-const STREAM_JOBS_PER_FRAME = 1;
-/**
- * Streaming budget while the loading cover still owns the screen. Nothing is being
- * displayed and nothing is being simulated, so the only reason to stay small would
- * be to hand the player an unfinished world — which is the bug this exists to fix.
- */
-const BOOT_STREAM_BUDGET_MS = 12;
-const BOOT_STREAM_JOBS_PER_FRAME = 64;
-/** Streamer calls per warm-up pass; each one admits at most a single job. */
-const BOOT_STREAM_CALLS_PER_PASS = 8;
-/**
- * Ceiling on the boot warm-up. A worker that never answers, or a machine slow enough
- * that the whole window cannot be built, must still reach the road: the world then
- * finishes arriving during play exactly as it used to.
- */
-const BOOT_WARMUP_LIMIT_MS = 25_000;
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -1124,51 +1045,6 @@ async function boot(): Promise<void> {
   const playerFieldSeat = { forwardS: 0, direction: 1 as const };
   autopilot.setTrafficField(traffic.fieldFor(playerFieldSeat, PLAYER_FIELD_ID));
 
-  // Dev-only inspection hook. Lets a browser session read simulation state without
-  // exporting it into the game's own API surface.
-  if (import.meta.env.DEV) {
-    (window as unknown as Record<string, unknown>)['__bro'] = {
-      world,
-      renderer,
-      vista,
-      physics,
-      interaction,
-      input,
-      loose,
-      debris,
-      couriers,
-      sky,
-      trailers: trailerField,
-      road,
-      terrain,
-      player,
-      birds,
-      camera,
-      inventory,
-      vehicles,
-      audio,
-      origin,
-      vehicleLights,
-      worldWork,
-      streamer,
-      desert,
-      lakeWater,
-      // Same shortcut as the pause-menu button, for a console or a scripted session.
-      jumpToLake: (index = 0) => devJumpToLake(index),
-      tumbleweeds,
-      traffic,
-      vitals,
-      autopilot,
-      state: () => world.state,
-      view: () => ({
-        eye: camera.eyePosition,
-        dir: camera.eyeDirection,
-        yaw: camera.yaw,
-        mode: camera.mode,
-      }),
-    };
-  }
-
   /**
    * WHY THE CAR DID THAT, ON SCREEN. Dev builds only, and only when the URL asks for
    * it with `?apdebug`.
@@ -1253,17 +1129,45 @@ async function boot(): Promise<void> {
     prompt = null;
     boot = null;
   };
-  if (import.meta.env.DEV) {
-    const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
-    dev['killPlayer'] = (): void => {
-      if (!vitals.dead) {
-        vitals.beginCollisionFrame('foot');
-        vitals.recordContact(-1, 70);
-        vitals.endCollisionFrame();
-      }
-      beginDeathSequence();
-    };
-  }
+  // Dev-only, behind one compile-time fold. `import.meta.env.DEV` is constant, so a
+  // production build folds this branch away and drops `app/devtools` with it — the
+  // console handle, the spawn / flip / lake / seat tools, and the pause screen's
+  // buttons for them.
+  const devTools = import.meta.env.DEV
+    ? installDevTools({
+        world,
+        renderer,
+        vista,
+        physics,
+        interaction,
+        input,
+        loose,
+        debris,
+        couriers,
+        sky,
+        trailers: trailerField,
+        road,
+        terrain,
+        player,
+        birds,
+        camera,
+        inventory,
+        vehicles,
+        audio,
+        origin,
+        vehicleLights,
+        worldWork,
+        streamer,
+        desert,
+        lakeWater,
+        tumbleweeds,
+        traffic,
+        vitals,
+        autopilot,
+        hud,
+        beginDeathSequence,
+      })
+    : null;
   /** Held devices are edge-toggled by E and reset when their item leaves the hand. */
   let binocularsActive = false;
   let torchlightActive = false;
@@ -1295,96 +1199,7 @@ async function boot(): Promise<void> {
     listenerQz: 0,
     listenerQw: 1,
   };
-
-  // Collision severity reads pre-solver velocity. Rapier resolves most of that
-  // velocity away on the same step that creates the contact, so sampling afterwards
-  // would make the hardest crash look like the slowest. The weak pool keeps one
-  // scratch vector per live Vehicle without retaining despawned traffic.
-  const impactVelocityPool = new WeakMap<Vehicle, THREE.Vector3>();
-  const impactVelocityByBody = new Map<number, THREE.Vector3>();
-  const impactPlayerVelocity = new THREE.Vector3();
-  const impactOtherVelocity = new THREE.Vector3();
-  const impactRelativeVelocity = new THREE.Vector3();
-  const impactNormal = new THREE.Vector3();
-  const captureImpactVelocities = (): void => {
-    impactVelocityByBody.clear();
-    const capture = (vehicle: Vehicle): void => {
-      let velocity = impactVelocityPool.get(vehicle);
-      if (velocity === undefined) {
-        velocity = new THREE.Vector3();
-        impactVelocityPool.set(vehicle, velocity);
-      }
-      vehicle.chassis.linvel(velocity);
-      impactVelocityByBody.set(vehicle.chassis.handle, velocity);
-    };
-    for (const vehicle of vehicles.values()) capture(vehicle);
-    traffic.forEachVehicle((_id, vehicle) => capture(vehicle));
-    player.rigidBody.linvel(impactPlayerVelocity);
-  };
-
-  /**
-   * Converts post-solver contact manifolds into debounced injuries. Only the velocity
-   * closing along the contact normal contributes: a tyre or chassis sliding quickly
-   * along the road is not a high-speed collision with the road.
-   */
-  const resolvePlayerImpacts = (driving: Vehicle | null): number => {
-    const collider = driving?.collisionCollider ?? player.collisionCollider;
-    const targetBody = collider.parent();
-    if (targetBody === null) return 0;
-    const targetVelocity =
-      (driving ? impactVelocityByBody.get(targetBody.handle) : impactPlayerVelocity)
-      ?? impactPlayerVelocity;
-    vitals.beginCollisionFrame(driving ? 'car' : 'foot');
-
-    physics.world.contactPairsWith(collider, (otherCollider) => {
-      const otherBody = otherCollider.parent();
-      if (otherBody === null) return;
-      const otherVehicleVelocity = impactVelocityByBody.get(otherBody.handle);
-      if (driving === null) {
-        // On foot, terrain and buildings cannot reach the harmful walking threshold;
-        // only a moving vehicle is a hard body capable of striking the capsule.
-        if (otherVehicleVelocity === undefined) return;
-      } else if (
-        !otherBody.isFixed()
-        && otherVehicleVelocity === undefined
-        && otherBody.mass() < 100
-      ) {
-        // Loose cans, tools and footballs are contacts, not hard-object crashes.
-        return;
-      }
-
-      if (otherBody.isFixed()) {
-        impactOtherVelocity.set(0, 0, 0);
-      } else if (otherVehicleVelocity !== undefined) {
-        impactOtherVelocity.copy(otherVehicleVelocity);
-      } else {
-        otherBody.linvel(impactOtherVelocity);
-      }
-      impactRelativeVelocity.subVectors(targetVelocity, impactOtherVelocity);
-
-      let strongestClosingMps = 0;
-      physics.world.contactPair(collider, otherCollider, (manifold) => {
-        if (manifold.numSolverContacts() === 0) return;
-        let impulse = 0;
-        for (let i = 0; i < manifold.numContacts(); i++) {
-          impulse = Math.max(impulse, manifold.contactImpulse(i));
-        }
-        // Speculative manifolds appear just before contact. They must not consume
-        // the debounce key before the first solver impulse actually lands.
-        if (impulse <= 0) return;
-        manifold.normal(impactNormal);
-        strongestClosingMps = Math.max(
-          strongestClosingMps,
-          Math.abs(impactRelativeVelocity.dot(impactNormal)),
-        );
-      });
-      if (strongestClosingMps > 0) {
-        vitals.recordContact(otherCollider.handle, strongestClosingMps * 3.6);
-      }
-    });
-
-    return vitals.endCollisionFrame();
-  };
+  const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
@@ -1545,14 +1360,14 @@ async function boot(): Promise<void> {
     trailerField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
 
 
-    captureImpactVelocities();
+    playerImpacts.capture();
     // Advance the simulation only after every controller has written its intent for
     // this tick (wheel forces, kinematic character motion). Interaction raycasts
     // below then query the post-step world, so prompts match what is on screen.
     frameProfiler?.begin('physics');
     physics.step();
     frameProfiler?.end('physics');
-    const injury = resolvePlayerImpacts(driving);
+    const injury = playerImpacts.resolve(driving);
     if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
 
@@ -1902,58 +1717,13 @@ async function boot(): Promise<void> {
   const targetPos = new THREE.Vector3();
   const targetQuat = new THREE.Quaternion();
 
-  /**
-   * Resolves the exact surface beneath a terrain-collider contact. Tiles use one
-   * collider registration while their field still contains sand, gravel and rock.
-   */
-  const wheelSurface = (ws: WheelSprayState): SurfaceType => {
-    if (ws.surface !== TERRAIN_COLLIDER_SURFACE) return ws.surface;
-    const p = road.project(ws.absoluteContactX, ws.absoluteContactZ, activeS);
-    return terrain.surfaceFromFrame(ws.absoluteContactX, ws.absoluteContactZ, p.lateral, p.s);
-  };
-
-  /**
-   * Leaves a pooled ground mark and throws spray from one wheel contact. Both effects
-   * share the resolved surface so terrain projection is paid once per wheel.
-   *
-   * Tracks accept honest rolling contact on sand; slip only widens and darkens them.
-   * Spray retains its slip floor, because a rolling tyre leaves a track without
-   * necessarily throwing material into the air.
-   */
-  const emitWheelEffects = (ws: WheelSprayState, frameDt: number): void => {
-    if (!ws.inContact) {
-      tyreTracks.sample(ws, false);
-      return;
-    }
-    const terrainContact = ws.surface === TERRAIN_COLLIDER_SURFACE;
-    const surface = wheelSurface(ws);
-    // The visible verge is the same loose ground mesh and should mark immediately at
-    // the asphalt edge; its finer gravel/sand classification remains relevant to spray.
-    tyreTracks.sample(ws, terrainContact);
-    const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
-    if (slip <= SPRAY_MIN_SLIP) return;
-
-    const props = SURFACES[surface];
-
-    // A tyre flings at its surface speed, not the chassis'. Chassis speed reads
-    // zero during a held burnout (wheels spinning, car stationary), so floor it at
-    // the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
-    const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
-    const raise = props.dust + props.smoke * SPRAY_SMOKE_YIELD;
-    const strength = raise * slip * speed;
-    if (strength <= 0) return;
-    wheelSpray.emit(
-      ws.contactX,
-      ws.contactY,
-      ws.contactZ,
-      ws.forwardX,
-      ws.forwardZ,
-      strength,
-      (props.smoke * SPRAY_SMOKE_YIELD) / raise,
-      frameDt,
-    );
-  };
-
+  const wheelEffects = createWheelEffects({
+    spray: wheelSpray,
+    tracks: tyreTracks,
+    road,
+    terrain,
+    trailers: trailerField,
+  });
   /**
    * Holds the adaptive-resolution controller off the frames that are not worth
    * judging. Every measurement taken before `settleLaunchResolution` has finished
@@ -1981,17 +1751,8 @@ async function boot(): Promise<void> {
     debris.syncVisuals();
     frameProfiler?.end('vehicles');
 
-    // Ground effects share one wheel report. Spray ages every frame; tracks retain the
-    // bounded recent route. Nothing is emitted on a surface whose profile rejects it.
-    //
-    // Fed by the driven car AND every trailer: an unpowered or locked trailer tyre can
-    // disturb sand exactly like a car tyre, and the shared state keeps both paths identical.
     frameProfiler?.begin('effects');
-    wheelSpray.update(frameDt, activeS);
-    if (driving) {
-      for (const ws of driving.wheelSpray) emitWheelEffects(ws, frameDt);
-    }
-    trailerField.forEachSpray((ws) => emitWheelEffects(ws, frameDt));
+    wheelEffects.frame(driving, frameDt, activeS);
 
     if (driving) {
       driving.interpolatedTransform(alpha, targetPos, targetQuat);
@@ -2178,28 +1939,7 @@ async function boot(): Promise<void> {
       worldWork,
       frameDt,
     );
-    // A site is only an attempt, and about two in three windows hold no hollow worth
-    // filling. Rather than make a tester press the button until one does, the dev jump
-    // leaves a marker and this walks it forward until a site comes up wet — then sets
-    // them down somewhere the water is actually in front of them.
-    if (import.meta.env.DEV && devLakeSeek >= 0) {
-      if (lakeWater.ready) {
-        devLakeSeek = -1;
-        const view = lakeWater.viewpoint();
-        if (view) {
-          player.teleport(view.x, view.y + 1.2, view.z, activeS);
-          player.pushState();
-          camera.setYaw(view.yaw);
-        }
-      } else if (lakeWater.phaseName === 'dry') {
-        devLakeSeek++;
-        if (devLakeSeek < lakeWater.sites.length) devJumpToLake(devLakeSeek);
-        else {
-          devLakeSeek = -1;
-          hud.setToast('no lake left on this seed');
-        }
-      }
-    }
+    devTools?.updateLakeSeek(activeS);
 
     // Night lamps expose exactly three lit pools ahead and three behind the view.
     // The renderer keeps six persistent slots, so crossing a lamp boundary does not
@@ -2215,7 +1955,7 @@ async function boot(): Promise<void> {
     // `setLamps` takes an ABSOLUTE camera position: the lamps it compares against were
     // stored relative to the origin their chunk was BUILT under, which after a rebase
     // is not the current one, so the chunk's own build origin is the bridge and only
-    // an absolute camera makes the two sides comparable. See props.ts setLamps.
+    // an absolute camera makes the two sides comparable. See world/props/poles.ts setLamps.
     frameProfiler?.begin('lights');
     streamer.setLamps(night, cam.x + origin.x, cam.z + origin.z);
     const lampDirection = camera.eyeDirection;
@@ -2433,306 +2173,6 @@ async function boot(): Promise<void> {
   );
 
   /**
-   * The dev spawn tool behind `PauseHooks.spawnVehicle`. Defined unconditionally so
-   * it typechecks in both builds; referenced only under `import.meta.env.DEV`, which
-   * is how the bundler drops it from a production build.
-   */
-  const devSpawnVehicle = (request: SpawnRequest): void => {
-    // Put the car on the ground ahead of the view, not at the player's feet: a
-    // chassis spawned inside the player (or inside the car being driven) would be
-    // resolved by the solver as an explosion.
-    const eye = camera.eyePosition;
-    const dir = camera.eyeDirection;
-    const flat = Math.hypot(dir.x, dir.z) || 1;
-    const measure = carModelMeasure(request.modelId);
-    // Spawned nose-in ahead of the player, so the drop point is a gap plus the
-    // body's own half-length: the semi is 12 m long and its middle has to be 6 m
-    // further out than a hatchback's.
-    const ahead = SPAWN_AHEAD_GAP + measure.halfExtents[2];
-    const dropX = eye.x + (dir.x / flat) * ahead;
-    const dropZ = eye.z + (dir.z / flat) * ahead;
-    const ground = physics.raycast(
-      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
-      { x: 0, y: -1, z: 0 },
-      SPAWN_PROBE_HEIGHT + 12,
-      player.rigidBody,
-    );
-    const groundY = ground ? ground.point.y : eye.y;
-
-    // Keep the complete model clear of the surface. Gravity and the ray-cast
-    // suspension establish its real resting height after materialisation.
-    const y = carSpawnYAboveGround(measure, groundY);
-    const heading = Math.atan2(dir.x / flat, dir.z / flat);
-    // `dropX`/`dropZ` are relative — they came off the camera and fed a Rapier ray.
-    // `spawnCarState` writes a saved `CarState`, which is absolute.
-    spawnCarState(world, request, dropX + origin.x, y, dropZ + origin.z, heading);
-    hud.setToast(`spawned ${carModel(request.modelId).label}`);
-  };
-
-  /**
-   * The dev spawn tool behind `PauseHooks.spawnTrailer`. Mirrors `devSpawnVehicle`:
-   * dropped ahead of the view on a ground raycast, clear of the player and any car
-   * so the solver cannot resolve a trailer spawned inside a chassis as an explosion.
-   */
-  const devSpawnTrailer = (): void => {
-    const eye = camera.eyePosition;
-    const dir = camera.eyeDirection;
-    const flat = Math.hypot(dir.x, dir.z) || 1;
-    const ahead = SPAWN_AHEAD_GAP + TRAILER_HALF_LENGTH;
-    const dropX = eye.x + (dir.x / flat) * ahead;
-    const dropZ = eye.z + (dir.z / flat) * ahead;
-    const ground = physics.raycast(
-      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
-      { x: 0, y: -1, z: 0 },
-      SPAWN_PROBE_HEIGHT + 12,
-      player.rigidBody,
-    );
-    const groundY = ground ? ground.point.y : eye.y;
-    const y = groundY + TRAILER_SPAWN_HEIGHT + TRAILER_DROP_CLEARANCE;
-    const heading = Math.atan2(dir.x / flat, dir.z / flat);
-    const half = heading / 2;
-    trailerField.spawn({
-      id: world.runtimePartId(),
-      hitchedTo: null,
-      cargoKg: 0,
-      x: dropX + origin.x,
-      y,
-      z: dropZ + origin.z,
-      qx: 0,
-      qy: Math.sin(half),
-      qz: 0,
-      qw: Math.cos(half),
-    });
-    hud.setToast('spawned trailer');
-  };
-
-  /**
-   * The dev item dispenser behind `PauseHooks.spawnItem`.
-   *
-   * Dropped just in front of the player rather than out on the ground raycast the
-   * vehicle spawns use: these are pickups, and the useful thing is to have one in
-   * reach immediately. They go through `loose.spawnItem` like found stock, so the
-   * dev picker exercises the real pickup, storage and use paths.
-   */
-  const devSpawnItem = (request: DevSpawnItemRequest): void => {
-    const eye = camera.eyePosition;
-    const dir = camera.eyeDirection;
-    const flat = Math.hypot(dir.x, dir.z) || 1;
-    const dropX = eye.x + (dir.x / flat) * 1.2;
-    const dropZ = eye.z + (dir.z / flat) * 1.2;
-    const ground = physics.raycast(
-      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
-      { x: 0, y: -1, z: 0 },
-      SPAWN_PROBE_HEIGHT + 12,
-      player.rigidBody,
-    );
-    const groundY = ground ? ground.point.y : eye.y;
-    let item: Item;
-    switch (request.type) {
-      case 'fluid_can':
-        item = {
-          type: 'fluid_can',
-          id: world.runtimePartId(),
-          fluid: request.fluid,
-          capacity: request.capacity,
-          litres: request.capacity,
-        };
-        break;
-      case 'bubble_gum':
-        item = { type: 'bubble_gum', id: world.runtimePartId(), charges: 5 };
-        break;
-      case 'medicine':
-        item = { type: 'medicine', id: world.runtimePartId() };
-        break;
-      case 'binoculars':
-        item = { type: 'binoculars', id: world.runtimePartId() };
-        break;
-      case 'torchlight':
-        item = { type: 'torchlight', id: world.runtimePartId() };
-        break;
-      case 'sun_shades':
-        item = { type: 'sun_shades', id: world.runtimePartId(), tint: request.tint };
-        break;
-      case 'camera':
-        item = {
-          type: 'camera',
-          id: world.runtimePartId(),
-          framesRemaining: CAMERA_FRAME_LIMIT,
-        };
-        break;
-      case 'football':
-        item = { type: 'football', id: world.runtimePartId() };
-        break;
-      case 'pocket_watch':
-        item = { type: 'pocket_watch', id: world.runtimePartId() };
-        break;
-    }
-    loose.spawnItem(item, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
-    hud.setToast(`spawned ${itemLabel(item)}`);
-  };
-
-  /**
-   * The dev part dispenser behind `PauseHooks.spawnPart`.
-   *
-   * Same drop as `devSpawnItem` — a step in front of the player, on the ground the
-   * raycast finds — because a part is picked up, carried and mounted by hand. It is
-   * recorded through `loose.spawn`, so the picker exercises the real loose-part
-   * lifecycle rather than a menu-only shortcut, and the part arrives factory-fresh:
-   * no dirt, no rust, nothing to clean off before it can be fitted.
-   */
-  const devSpawnPart = (variantId: string): void => {
-    const eye = camera.eyePosition;
-    const dir = camera.eyeDirection;
-    const flat = Math.hypot(dir.x, dir.z) || 1;
-    const dropX = eye.x + (dir.x / flat) * 1.2;
-    const dropZ = eye.z + (dir.z / flat) * 1.2;
-    const ground = physics.raycast(
-      { x: dropX, y: eye.y + SPAWN_PROBE_HEIGHT, z: dropZ },
-      { x: 0, y: -1, z: 0 },
-      SPAWN_PROBE_HEIGHT + 12,
-      player.rigidBody,
-    );
-    const groundY = ground ? ground.point.y : eye.y;
-    const part: PartInstance = { id: world.runtimePartId(), variantId, dirt: 0, rust: 0 };
-    loose.spawn(part, dropX + origin.x, groundY + 0.3, dropZ + origin.z);
-    hud.setToast(`spawned ${variant(variantId).label}`);
-  };
-
-  /**
-   * The dev righting tool behind `PauseHooks.flipVehicle`.
-   *
-   * Seated, it targets the car being driven — no proximity test can be wrong about
-   * that one. On foot it takes the nearest car or trailer within `DEV_FLIP_RADIUS`.
-   * This explicit developer action is the only instant righting shortcut.
-   */
-  const devFlipVehicle = (): void => {
-    // `world.state.player.drivingCarId`, NOT `activeCar()`: that helper falls back to
-    // the nearest car with no distance limit, so on foot it would right a car a
-    // kilometre away and never consider a trailer.
-    const drivingId = world.state.player.drivingCarId;
-    const driven = drivingId ? vehicles.get(drivingId) : undefined;
-    if (driven) {
-      driven.flipOver();
-      hud.setToast('flipped the car you are driving');
-      return;
-    }
-    const p = player.position;
-    let nearest: { flipOver(): void } | null = null;
-    let nearestKind: 'car' | 'trailer' | null = null;
-    let nearestDistSq = DEV_FLIP_RADIUS * DEV_FLIP_RADIUS;
-    for (const vehicle of vehicles.values()) {
-      const t = vehicle.chassis.translation();
-      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
-      if (distSq < nearestDistSq) {
-        nearest = vehicle;
-        nearestKind = 'car';
-        nearestDistSq = distSq;
-      }
-    }
-    trailerField.forEach((trailer) => {
-      const t = trailer.rigidBody.translation();
-      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
-      if (distSq < nearestDistSq) {
-        nearest = trailer;
-        nearestKind = 'trailer';
-        nearestDistSq = distSq;
-      }
-    });
-    nearest?.flipOver();
-    hud.setToast(
-      nearestKind === null
-        ? `no car or trailer within ${DEV_FLIP_RADIUS} m`
-        : `flipped the nearest ${nearestKind}`,
-    );
-  };
-
-  /**
-   * The dev shortcut behind `PauseHooks.jumpToLake`.
-   *
-   * A lake is attempted once per 200-300 km, so reaching one by driving is hours. This
-   * puts the player on the road side of the searched window, far enough out that the
-   * water is at full opacity (the approach fade is metres, not hundreds —
-   * render/lakewater.ts), facing into it. The driven car comes along through the same
-   * `rescueTo` the underworld recovery uses, so the two never end up in different
-   * counties.
-   *
-   * A site is only an ATTEMPT: about two in three windows hold no hollow worth filling.
-   * The index is left in `devLakeSeek`, and the render loop walks it forward until a
-   * site comes up wet, so one press lands on water.
-   */
-  let devLakeSeek = -1;
-  const devJumpToLake = (index: number): void => {
-    const sites = lakeWater.sites;
-    if (sites.length === 0) {
-      hud.setToast('no lake sites on this seed');
-      return;
-    }
-    const clamped = Math.min(sites.length - 1, Math.max(0, Math.floor(index)));
-    devLakeSeek = clamped;
-    const site = sites[clamped]!;
-    const centre = road.offsetPoint(site.s, site.lateral);
-    const roadPoint = road.sampleAt(site.s);
-    // Outward from the window's centre toward the centreline, then back off past its edge.
-    const toRoadX = roadPoint.x - centre.x;
-    const toRoadZ = roadPoint.z - centre.z;
-    const span = Math.hypot(toRoadX, toRoadZ) || 1;
-    const standOff = LakeWater.lattice.reach + DEV_LAKE_WINDOW_MARGIN_M;
-    const standX = centre.x + (toRoadX / span) * standOff;
-    const standZ = centre.z + (toRoadZ / span) * standOff;
-    const standY = terrain.heightAt(standX, standZ, site.s);
-    // Facing the window: the road frame's forward is (sin h, cos h), and so is the
-    // player's yaw, so one `atan2` serves both.
-    const yaw = Math.atan2(centre.x - standX, centre.z - standZ);
-
-    const drivingId = world.state.player.drivingCarId;
-    const driven = drivingId ? vehicles.get(drivingId) : undefined;
-    if (driven) {
-      driven.rescueTo(standX, standY - driven.contactPlaneLocalY, standZ, yaw, 0);
-      driven.pushTransform();
-    }
-    player.teleport(standX, standY + 1.2, standZ, site.s);
-    player.pushState();
-    // The camera's yaw only: the player's own is private and follows the look anyway.
-    camera.setYaw(yaw);
-    hud.setToast(
-      `lake site ${site.index + 1} of ${sites.length}, ${(site.s / 1000).toFixed(0)} km, ` +
-        `${Math.abs(site.lateral).toFixed(0)} m off the road`,
-    );
-  };
-  /**
-   * The dev shortcut behind `PauseHooks.seatInNearestCar`.
-   *
-   * Getting into a car needs a look ray at a door, which a human does without
-   * thinking and an automated test session cannot do at all — so every attempt to
-   * observe the autopilot in the REAL game, rather than in a bench, stalled on
-   * walking round a bonnet. This puts the player in the nearest car within
-   * `DEV_FLIP_RADIUS`, and exists only while developing.
-   */
-  const devSeatInNearestCar = (): void => {
-    if (world.state.player.drivingCarId) {
-      hud.setToast('already driving');
-      return;
-    }
-    const p = player.position;
-    let nearestId: string | null = null;
-    let nearestDistSq = DEV_FLIP_RADIUS * DEV_FLIP_RADIUS;
-    for (const [id, vehicle] of vehicles) {
-      const t = vehicle.chassis.translation();
-      const distSq = (t.x - p.x) ** 2 + (t.y - p.y) ** 2 + (t.z - p.z) ** 2;
-      if (distSq < nearestDistSq) {
-        nearestId = id;
-        nearestDistSq = distSq;
-      }
-    }
-    if (nearestId === null) {
-      hud.setToast(`no car within ${DEV_FLIP_RADIUS} m`);
-      return;
-    }
-    world.apply({ t: 'enter_car', carId: nearestId });
-    hud.setToast('seated in the nearest car');
-  };
-
-  /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
    * rather than being held in the menu: the menu is a view, not an owner.
@@ -2791,31 +2231,21 @@ async function boot(): Promise<void> {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
     exportState: stateForSave,
-    // Dev only. Cars are meant to be found in the world and kept — sticker rewards
-    // are permanent and do not transfer between vehicles, which is worth nothing if
-    // a fully fuelled replacement is two clicks away. `import.meta.env.DEV` is a
-    // compile-time constant, so a production build drops the closure and the pause
-    // screen that calls it together.
-    spawnVehicle: import.meta.env.DEV ? devSpawnVehicle : undefined,
-    // Same fold as the car spawn; the trailer button and its closure both vanish
-    // from a production build.
-    spawnTrailer: import.meta.env.DEV ? devSpawnTrailer : undefined,
-    // Same fold again: found consumables are the whole supply economy, so the
-    // item dispenser exists only while developing.
-    spawnItem: import.meta.env.DEV ? devSpawnItem : undefined,
-    // And once more for the parts picker: scavenging parts off wrecks is the loop a
-    // free engine on demand would retire.
-    spawnPart: import.meta.env.DEV ? devSpawnPart : undefined,
-    // Same fold once more: righting a rolled car is what a gum charge is FOR, so the
-    // free instant version is a development tool and nothing else.
-    flipVehicle: import.meta.env.DEV ? devFlipVehicle : undefined,
-    // Development only, and for one reason: a scripted session cannot aim a look
-    // ray at a door, so without this the real game is unobservable to automation.
-    seatInNearestCar: import.meta.env.DEV ? devSeatInNearestCar : undefined,
-    // A lake is one per 200-300 km, so reaching one by driving is a couple of hours.
-    // Development only, and for the same reason the seat shortcut exists: without it
-    // the feature cannot be looked at.
-    jumpToLake: import.meta.env.DEV ? devJumpToLake : undefined,
+    // Dev only, all seven of them, and behind one fold: `devTools` is `null` unless
+    // `import.meta.env.DEV`, which is a compile-time constant, so a production build
+    // drops the module, these hooks, and the pause screen's buttons for them together.
+    // Each exists because the real thing it stands for cannot be reached from a test
+    // session — a car or trailer to inspect, a consumable to exercise the supply
+    // economy, a part to fit without scavenging a wreck, a rolled car to right without
+    // a gum charge, a seat to take without aiming a look ray at a door, and the one
+    // lake per 200-300 km that is hours of driving away.
+    spawnVehicle: devTools?.spawnVehicle,
+    spawnTrailer: devTools?.spawnTrailer,
+    spawnItem: devTools?.spawnItem,
+    spawnPart: devTools?.spawnPart,
+    flipVehicle: devTools?.flipVehicle,
+    seatInNearestCar: devTools?.seatInNearestCar,
+    jumpToLake: devTools?.jumpToLake,
   };
 
   /**
@@ -2886,209 +2316,30 @@ async function boot(): Promise<void> {
     cinema: toggleCinema,
   });
   input.attachTouch(touch);
-  /**
-   * WHY THE WORLD IS FINISHED BEFORE THE LOOP STARTS.
-   *
-   * Streaming is amortized: one bounded job per rendered frame, which is correct
-   * while driving and wrong at boot. `prime` guarantees only the tile the player
-   * stands on plus the nine-tile desert patch, so the loop used to start over a
-   * world that was still arriving — road chunks ahead unbuilt, their colliders
-   * absent — and a resumed save that was already rolling drove straight off the
-   * built ground and under the terrain. Waiting here costs launch seconds nobody
-   * is looking at and removes the failure entirely.
-   *
-   * The anchor is the boot projection, so this builds exactly the window the first
-   * fixed step will ask for. `setTimeout` rather than a frame callback: the desert
-   * and vista workers answer on macrotasks, and the render loop is not running yet.
-   */
-  const warmStreamedWorld = async (): Promise<void> => {
-    const label = loading.querySelector<HTMLElement>('.launch-loading-text');
-    worldWork.setFrameBudget(BOOT_STREAM_BUDGET_MS, BOOT_STREAM_JOBS_PER_FRAME);
-    const deadline = performance.now() + BOOT_WARMUP_LIMIT_MS;
-    try {
-      for (;;) {
-        frameId++;
-        worldWork.beginFrame(frameId);
-        for (let call = 0; call < BOOT_STREAM_CALLS_PER_PASS; call++) {
-          streamer.update(initialProjection.s, frameId, initialProjection.lateral);
-        }
-        desert.update(
-          initialGround.x,
-          initialGround.z,
-          initialProjection.lateral,
-          frameId,
-        );
-        const roadWindow = streamer.readiness;
-        const sandWindow = desert.readiness;
-        const built = roadWindow.ready + sandWindow.ready;
-        const total = Math.max(1, roadWindow.wanted + sandWindow.wanted);
-        const complete =
-          !worldWork.hasPending &&
-          roadWindow.ready >= roadWindow.wanted &&
-          sandWindow.ready >= sandWindow.wanted;
-        if (label) {
-          label.textContent = complete
-            ? 'the road is ready'
-            : `building the world — ${Math.min(99, Math.floor((built / total) * 100))}%`;
-        }
-        if (complete || performance.now() >= deadline) return;
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 0);
-        });
-      }
-    } finally {
-      worldWork.setFrameBudget(STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME);
-    }
-  };
-  await warmStreamedWorld();
-
-  /**
-   * WHY THE LAUNCH WAITS FOR THE PICTURE TO STOP CHANGING.
-   *
-   * The barrier above guarantees that everything is BUILT: the world is streamed,
-   * both live shader variants are linked, and a GPU fence has retired the first
-   * real frame. It does not guarantee that the frame the player is about to see is
-   * the frame he will keep. Resolution is measured, and the frames straddling the
-   * reveal are the most expensive of the session — the remaining shader variants,
-   * the first uploads, the boot GC — so the adaptive controller used to read that
-   * transient as a machine that could not cope and walk the drawing buffer down,
-   * step after step, to its floor. At 55% the film grain is filtered away by the
-   * upscale, the ink outlines smear into a general darkening, and the road loses
-   * its aggregate: the drive looked unfinished, and a second launch — with a warm
-   * cache and therefore fewer slow frames — looked right.
-   *
-   * So the same real frame path runs here, under the cover, at display pace. The
-   * first frames are rendered but not judged (`adaptationFrozen`), which is what
-   * throws the transient away; the rest are judged exactly as they will be in the
-   * drive. The cover leaves when the controller has actually MEASURED the scale it
-   * is holding, so the first frame the player sees is the finished one.
-   */
-  const SETTLE_DISCARD_FRAMES = 30;
-  /**
-   * Wall-clock ceiling, not a frame count: the frames being settled are the slowest
-   * of the session, so counting them measures the machine rather than the wait. A
-   * descent is bounded — each step needs its discarded resize frames, its half
-   * second of evidence and a 1.5 s cooldown, and the floor is four steps below full
-   * resolution — so twenty seconds covers the worst honest case. A machine with
-   * headroom reaches its verdict in about a second and a half and leaves then.
-   *
-   * Leaving early would be worse than waiting: the remaining steps would then be
-   * taken with the player watching, which is the resolution walking down under him
-   * — precisely the thing this phase exists to prevent.
-   */
-  const SETTLE_MAX_MS = 20_000;
-  const settleLaunchResolution = async (): Promise<void> => {
-    // Without GPU timing nothing can move the scale, so there is nothing to settle.
-    if (!renderer.measuresGpuTime) {
-      adaptationFrozen = false;
-      return;
-    }
-    const label = loading.querySelector<HTMLElement>('.launch-loading-text');
-    if (label) label.textContent = 'settling the picture';
-    const deadline = performance.now() + SETTLE_MAX_MS;
-    for (let frame = 0; performance.now() < deadline; frame++) {
-      adaptationFrozen = frame < SETTLE_DISCARD_FRAMES;
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
-      render(0, 0);
-      if (adaptationFrozen) continue;
-      if (renderer.resolutionSettled) break;
-    }
-    adaptationFrozen = false;
-  };
-
-  /**
-   * WHAT RUNG IS THIS MACHINE, asked once, on the one launch where nobody has answered.
-   *
-   * Nothing auto-detected the GPU before this, and the comment defending that said
-   * guessing wrong either robs a capable machine or leaves a weak one stuttering. That
-   * is true of guessing. It is not true of MEASURING, and the measurement already
-   * exists: the launch settles the drawing-buffer scale under the loading cover against
-   * real GPU timer queries, so by the time the cover lifts the controller has said, in
-   * numbers, whether this machine holds the rung it was given.
-   *
-   * So the rung is WALKED, in both directions, against the settled scale — and the two
-   * directions are not symmetrical, because being wrong is not.
-   *
-   * Down is a rescue: a machine giving away more than a fifth of the resolution it was
-   * promised is stuttering, and nothing else will tell the player why.
-   *
-   * Up is a bonus that has to be paid for fairly. The default rung is deliberately
-   * modest, so a fast machine left on it renders less than its display can show — but a
-   * rung that does not fit must be PUT BACK, with its own settle to prove it, or a
-   * player who never opened the menu is pushed into stutter by the courtesy.
-   */
-  const AUTO_TIER_BACKOFF = 0.8;
-  const AUTO_TIER_COMFORT = 0.95;
-  const detectGraphicsTier = async (): Promise<void> => {
-    if (!renderer.measuresGpuTime) return;
-    // The launch settle has already run by the time this is called, so if the controller
-    // never reached a verdict, this machine cannot measure itself and the scale it is
-    // sitting on says nothing about it. Bailing here is not a nicety: without a verdict
-    // the controller can never move, so every rung this walked would burn its own settle
-    // DEADLINE — a machine that cannot measure would pay twenty extra seconds of loading
-    // screen to learn nothing. Observed happening, which is why the guard exists.
-    if (!renderer.resolutionSettled) return;
-    const ladder: GraphicsQuality[] = ['blessing', 'standard', 'acceptable'];
-    const adopt = async (index: number): Promise<void> => {
-      const tier = ladder[index]!;
-      const settings = {
-        ...world.state.settings,
-        graphicsQuality: tier,
-        msaa: GRAPHICS_TIERS[tier].msaa,
-      };
-      world.apply({ t: 'settings', settings });
-      renderer.setMsaa(settings.msaa);
-      renderer.setQuality(tier);
-      sky.setQuality(tier, mobilePresentation);
-      const horizon = viewDistanceFor(tier, mobilePresentation);
-      renderer.setViewDistance(horizon);
-      vista.setViewDistance(horizon);
-      loop.setRenderFps(presentationFpsFor(world.state.settings.frameRateLimit));
-      await settleLaunchResolution();
-    };
-
-    let index = Math.max(0, ladder.indexOf(world.state.settings.graphicsQuality));
-    while (index < ladder.length - 1 && renderer.resolutionScale < AUTO_TIER_BACKOFF) {
-      index += 1;
-      await adopt(index);
-    }
-    while (index > 0 && renderer.resolutionScale > AUTO_TIER_COMFORT) {
-      const previous = index;
-      index -= 1;
-      await adopt(index);
-      if (renderer.resolutionScale < AUTO_TIER_BACKOFF) {
-        index = previous;
-        await adopt(index);
-        break;
-      }
-    }
-    // The verdict is the answer to the question this function asked, whether or not it
-    // moved the rung: recording it is what stops the next launch from asking again, and
-    // recording it as MEASURED is what lets the menu offer to ask once more.
-    const settings = { ...world.state.settings, graphicsQualitySource: 'measured' as const };
-    world.apply({ t: 'settings', settings });
-    storeSettings(settings);
-  };
-
-  // Prime the exact live render path while the loading cover still owns the screen.
-  // The first pass establishes sky/fog/post uniforms and bakes the environment.
-  // compileAsync then waits for the exact offscreen scene and canvas post variants,
-  // not a different direct-to-canvas scene variant. The second draw uploads every
-  // remaining texture, shadow and PMREM result; its GPU fence is the final barrier.
-  render(0, 0);
-  await renderer.waitForFrameShaders();
-  render(0, 0);
-  await renderer.waitForSubmittedFrame();
-  await settleLaunchResolution();
-  if (tierUndetected) {
-    tierUndetected = false;
-    await detectGraphicsTier();
-  }
-  loading.classList.add('is-hidden');
+  await warmUpBoot({
+    loading,
+    worldWork,
+    streamer,
+    desert,
+    renderer,
+    sky,
+    vista,
+    loop,
+    world,
+    mobilePresentation,
+    bootProjection: initialProjection,
+    bootGround: initialGround,
+    render,
+    nextFrameId: () => ++frameId,
+    setAdaptationFrozen: (frozen) => {
+      adaptationFrozen = frozen;
+    },
+    takeTierUndetected: () => {
+      const undetected = tierUndetected;
+      tierUndetected = false;
+      return undetected;
+    },
+  });
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
   loop.start();

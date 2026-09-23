@@ -3,7 +3,7 @@
  *
  * Are the roadside masts and monuments actually SOLID?
  *
- * `props.ts addStatic` returns every pole, sign, shrine, cairn and wreck-marker
+ * `world/props/scatter.ts addStatic` returns every pole, sign, shrine, cairn and wreck-marker
  * collider DISABLED, and for a long time it was each provider's own job to switch its
  * own colliders back on once its chunk was complete. `ScatterProvider` and
  * `RoadMeshProvider` did. `PoleProvider` and `MonumentProvider` never did, so a car
@@ -34,7 +34,9 @@ import {
 } from '../src/world/chunks';
 import { WorldOrigin } from '../src/world/origin';
 import { monumentsBetween } from '../src/world/gradient';
-import { MonumentProvider, PoleProvider, ScatterProvider } from '../src/world/props';
+import { MonumentProvider } from '../src/world/props/monuments';
+import { PoleProvider } from '../src/world/props/poles';
+import { ScatterProvider } from '../src/world/props/scatter';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';

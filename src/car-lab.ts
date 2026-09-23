@@ -14,6 +14,13 @@
  * chosen factory, keeping every car's condition and dents, so A/B is one click on
  * identical wear. Nothing else in the lab needs to know.
  *
+ * The unified car-style A/B (`?carstyle=unified`) is a reload rather than a factory:
+ * that style is decided ONCE, in render/carmodel.ts, when a model's template is
+ * measured, creased and given its materials, and every car in the world is a clone of
+ * that template afterwards. The toggle therefore flips the flag and reloads, keeping
+ * every other query parameter, so the two screenshots are the same cars under two
+ * material sets.
+ *
  * Automation: `window.__carLab` (see `CarLabApi`) sets state and focuses cars without
  * the UI, which is how report screenshots are taken reproducibly. Query parameters
  * `dirt`, `scratches`, `dents`, `time` and `focus` seed the same state from the URL.
@@ -27,6 +34,7 @@ import { parseCalendarEpoch } from './game/calendar';
 import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from './game/settings';
 import { addBodyDent, DAY_LENGTH, newWorldState, type BodyDent } from './game/state';
 import {
+  CAR_STYLE_UNIFIED,
   carModelMeasure,
   carSpawnYAboveGround,
   createCarModel,
@@ -37,7 +45,7 @@ import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
-import { impactDent } from './vehicle/vehicle';
+import { impactDent } from './vehicle/vehicletuning';
 
 const CALENDAR = newWorldState(1337).calendarEpoch;
 const CELL_X = 6.5;
@@ -134,6 +142,9 @@ function createInterface(
   const styleRow = CAR_FACTORIES.length > 1
     ? `<label><span>Стиль</span><select data-control="factory">${CAR_FACTORIES.map((f, i) => `<option value="${i}">${f.label}</option>`).join('')}</select><output></output></label>`
     : '';
+  // The unified car style is a compile-time flag in carmodel.ts, so its control
+  // reloads the lab rather than rebuilding the grid (see the module note).
+  const unifiedRow = '<label class="toggle"><span>Единый стиль</span><input data-toggle="carstyle" type="checkbox"><output></output></label>';
   root.innerHTML = `
     <style>
       .car-lab{position:fixed;z-index:50;left:14px;top:14px;width:min(360px,calc(100vw - 28px));padding:14px;color:#eadfca;background:rgba(19,17,13,.9);border:1px solid #82735b;font:12px/1.3 Consolas,monospace;box-shadow:0 8px 35px #0008}
@@ -141,6 +152,8 @@ function createInterface(
       .car-lab label{display:grid;grid-template-columns:1fr 150px 44px;gap:7px;align-items:center;margin:6px 0}.car-lab input[type=range]{width:100%}.car-lab output{text-align:right;color:#f2d59b}
       .car-lab select,.car-lab button{color:#eadfca;background:#2b251b;border:1px solid #6b5c44;padding:6px;font:12px Consolas,monospace}.car-lab select{width:100%}
       .car-lab .buttons{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.car-lab button:hover{background:#5c4930}
+      .car-lab label.toggle{display:flex;justify-content:space-between;align-items:center}
+      .car-lab label.toggle input{width:16px;height:16px;margin:0;accent-color:#f2d59b}
     </style>
     <h1>ЛАБОРАТОРИЯ СОСТОЯНИЯ КУЗОВА</h1>
     <p>${cars.length} машин · мышь — орбита, колесо — дистанция</p>
@@ -148,6 +161,7 @@ function createInterface(
     <label><span>Царапины</span><input data-control="scratches" type="range" min="0" max="1" step="0.01"><output></output></label>
     <label><span>Время суток</span><input data-control="timeHours" type="range" min="0" max="24" step="0.05"><output></output></label>
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
+    ${unifiedRow}
     ${styleRow}
     <div class="buttons"><button data-action="dent">Случайные вмятины</button><button data-action="clear">Убрать вмятины</button></div>
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.pack} · ${car.def.label}</option>`).join('')}</select>
@@ -165,11 +179,23 @@ function createInterface(
         input.value = state.quality;
       }
     });
+    // Reads the flag carmodel.ts parsed, not the URL again: the checkbox then shows
+    // what the cars on screen were actually built with.
+    const toggle = root.querySelector<HTMLInputElement>('[data-toggle="carstyle"]');
+    if (toggle) {
+      toggle.checked = CAR_STYLE_UNIFIED;
+      const output = toggle.parentElement?.querySelector('output');
+      if (output) output.textContent = CAR_STYLE_UNIFIED ? 'unified' : 'source';
+    }
   };
   root.addEventListener('input', (event) => {
     const input = event.target;
     if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement)) return;
+    // Only the controls this handler owns: the style toggle fires an input event of
+    // its own, and running sync() for it would write the loaded flag back over the
+    // box the player just clicked, before its change event is even delivered.
     const key = input.dataset.control;
+    if (key === undefined) return;
     if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'factory') {
       state[key] = Number(input.value);
     } else if (key === 'quality' && input instanceof HTMLSelectElement) {
@@ -186,6 +212,15 @@ function createInterface(
   });
   root.querySelector('[data-action="dent"]')?.addEventListener('click', () => api.addDents(1));
   root.querySelector('[data-action="clear"]')?.addEventListener('click', () => api.clearDents());
+  root.querySelector('[data-toggle="carstyle"]')?.addEventListener('change', (event) => {
+    const unified = event.target instanceof HTMLInputElement && event.target.checked;
+    // Every other lab flag is kept, so the same cars, wear and camera come back and
+    // the only difference between the two screenshots is the style.
+    const query = new URLSearchParams(window.location.search);
+    if (unified) query.set('carstyle', 'unified');
+    else query.delete('carstyle');
+    window.location.search = query.toString();
+  });
   root.querySelector('[data-action="game"]')?.addEventListener('click', () => {
     window.location.href = window.location.pathname;
   });

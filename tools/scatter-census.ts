@@ -22,7 +22,7 @@ import type { ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/chunks';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { ScatterProvider } from '../src/world/props';
+import { ScatterProvider } from '../src/world/props/scatter';
 
 /** Chunks kept alive either side of the player, from chunks.ts VISUAL_RADIUS. */
 const VISUAL_RADIUS = 6;
