@@ -26,7 +26,7 @@ import {
   type CarBodyFrame,
   type CarSurfaceFinish,
 } from './materials';
-import { CarBodySurface, type CarBodyWheel } from './carsurface';
+import { CarBodySurface } from './carsurface';
 import {
   CAR_MODELS,
   carModel,
@@ -165,8 +165,6 @@ interface Template {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
   /** Where the road reaches this body, for the paint's dirt placement. */
   readonly frame: CarBodyFrame;
-  /** The wheels as the dent clamp keeps panels clear of them. */
-  readonly dentWheels: readonly CarBodyWheel[];
 }
 
 const templates = new Map<string, Template>();
@@ -303,9 +301,9 @@ function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
  * Gives one car instance its own condition-shaded copy of each paint slot, leaving
  * glass, lamps and trim on their shared materials, and returns those copies.
  *
- * The returned list IS the car's paint handle. Everything that later writes dirt,
- * scratches or dent marks writes it through this list, so nothing has to walk the
- * car's scene graph to find its paint again.
+ * The returned list IS the car's paint handle. Everything that later writes dirt or
+ * scratches writes it through this list, so nothing has to walk the car's scene graph
+ * to find its paint again.
  */
 function cloneCarBodyPaintMaterials(
   root: THREE.Object3D,
@@ -1038,14 +1036,9 @@ const MIRRORS_NODE = 'mirrors';
  * Bodywork only. By the time this runs `takeOwnWheels` has already detached the
  * wheels, so the discs keep the normals their own art was authored with.
  *
- * Two things downstream read the geometry this replaces, which is why it is called
- * from exactly one place, immediately before both:
- *   - `stampCarBodyPositions` writes the paint's chassis attribute onto each mesh
- *     geometry, and creasing rebuilds them de-indexed, so the stamp must come after;
- *   - `CarBodySurface` pushes dents through positions and normals per vertex, and a
- *     de-indexed geometry is exactly what it already handles — it copies the index
- *     when there is one and flattens the attributes either way — so dents and the
- *     dirt that is placed around them are unaffected by the change of indexing.
+ * `stampCarBodyPositions` reads the geometry this replaces — it writes the paint's
+ * chassis attribute onto each mesh geometry, and creasing rebuilds them de-indexed —
+ * which is why this is called from exactly one place, immediately before the stamp.
  */
 function creaseCarBodyNormals(scene: THREE.Group): void {
   if (!CAR_STYLE_UNIFIED) return;
@@ -1257,15 +1250,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
     wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
   };
-  const dentWheels = wheels.map((wheel) => ({
-    x: wheel.pos[0],
-    y: wheel.pos[1],
-    z: wheel.pos[2],
-    radius: wheel.radius,
-    halfWidth: def.factory.tyreWidth * 0.5,
-  }));
-
-  return { def, measure, body: scene, wheels: parts.objects, frame, dentWheels };
+  return { def, measure, body: scene, wheels: parts.objects, frame };
 }
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
@@ -1427,7 +1412,7 @@ export interface CarModelInstance {
   readonly body: THREE.Object3D;
   /** Wheel id -> its own object, to be parented and driven by the vehicle. */
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
-  /** This car's paint condition and dents; see render/carsurface.ts. */
+  /** This car's paint condition; see render/carsurface.ts. */
   readonly surface: CarBodySurface;
 }
 
@@ -1445,9 +1430,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   applyRandomPaint(body, t.def, appearanceKey);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
-  // Captured now, while the body is unparented and at rest: the surface records
-  // each mesh's chassis frame, which bounce squash and parenting would disturb.
-  const surface = new CarBodySurface(paint, body, t.dentWheels, STEERING_WHEEL_NODE);
+  const surface = new CarBodySurface(paint);
   return { body, wheels, surface };
 }
 

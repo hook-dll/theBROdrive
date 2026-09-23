@@ -1,13 +1,7 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import {
-  MAX_BODY_DENT_DEPTH_M,
-  MAX_BODY_DENT_RADIUS_M,
-  MAX_BODY_DENTS,
-  newWorldState,
-} from '../game/state';
+import { newWorldState } from '../game/state';
 import type {
-  BodyDent,
   CarState,
   HeadlightMode,
   PlayerState,
@@ -51,15 +45,16 @@ export interface SaveBackend {
 }
 
 /**
- * Saves after vehicle entry/exit, a dent in a kept car, and discrete mutations made
- * while on foot. The microtask is load-bearing: exit teleports the player and trunk
- * transfers update inventory immediately before storage, so the save must observe the
- * completed interaction rather than the first delta in it.
+ * Saves after vehicle entry/exit and discrete mutations made while on foot. The
+ * microtask is load-bearing: exit teleports the player and trunk transfers update
+ * inventory immediately before storage, so the save must observe the completed
+ * interaction rather than the first delta in it.
  *
- * A dent is saved the moment it is recorded because it is the one piece of body
- * condition a reload would visibly undo — the car would come back straight. It is
- * booked only for the world's own cars: traffic runs in a world of its own, so a
- * pile-up never reaches this listener.
+ * Nothing that happens behind the wheel is a trigger — not a crash, not the
+ * headlights. A save booked mid-drive can capture the fatal crash, and the reload then
+ * drops the player into a wreck they can no longer avoid. Wear and the rest live in
+ * state and ride along with the next exit; a player who wrecks the car can reload the
+ * drive from where they got in.
  *
  * `stateForSave` lets the runtime flush physics-owned car/trailer transforms and
  * throttled vehicle values — among them the shell's dirt, which accumulates every
@@ -82,11 +77,10 @@ export function installVehicleAutosave(
 ): () => void {
   return world.onDelta((delta) => {
     switch (delta.t) {
-      case 'car_body_dent':
-        if (!world.state.cars[delta.carId]) return;
-        break;
+      // Listeners run after the reducer: on entry the player is already driving.
       case 'enter_car':
       case 'exit_car':
+        break;
       case 'car_storage':
       case 'car_bonnet':
       case 'car_lights':
@@ -95,6 +89,7 @@ export function installVehicleAutosave(
       case 'trailer_cargo':
       case 'sticker_place':
       case 'inventory':
+        if (world.state.player.drivingCarId) return;
         break;
       default:
         return;
@@ -627,11 +622,8 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     // parked it, the game just was not looking.
     dirt: clamp01(numOr(raw.dirt, 0)),
     scratches: clamp01(numOr(raw.scratches, 0)),
-    // Absent on every save written before the shell could dent, and those cars load
-    // straight. A pre-cutover `damage` list (localized shader marks from a removed
-    // system, a different shape) is deliberately not translated into dents: it was
-    // never geometry, so turning it into some would be inventing a crash.
-    dents: migrateBodyDents(raw.dents),
+    // `dents` (shell deformation) and the older `damage` list (shader marks) are both
+    // removed systems; a save that carries either loads the car straight.
     odometer: numOr(raw.odometer, 0),
     x: numOr(raw.x, 0),
     y: numOr(raw.y, 0),
@@ -641,51 +633,6 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     qz: numOr(raw.qz, 0),
     qw: numOr(raw.qw, 1),
   };
-}
-
-/**
- * Dents from a save. A malformed record is dropped rather than failing the load, as
- * a sticker is, and values are clamped to what the simulation could have produced so
- * a hand-edited save cannot fold a panel through the car. The ring keeps the NEWEST.
- */
-function migrateBodyDents(raw: unknown): BodyDent[] {
-  if (!Array.isArray(raw)) return [];
-  const dents: BodyDent[] = [];
-  for (const value of raw) {
-    if (typeof value !== 'object' || value === null) continue;
-    const d = value as Record<string, unknown>;
-    const nx = numOr(d.nx, NaN);
-    const ny = numOr(d.ny, NaN);
-    const nz = numOr(d.nz, NaN);
-    // Renormalised only when a hand edit broke it: dividing a unit vector by its own
-    // float length can move the last bit, and a save must round-trip exactly.
-    const hypot = Math.hypot(nx, ny, nz);
-    const length = Math.abs(hypot - 1) < 1e-9 ? 1 : hypot;
-    const x = numOr(d.x, NaN);
-    const y = numOr(d.y, NaN);
-    const z = numOr(d.z, NaN);
-    const radius = numOr(d.radius, NaN);
-    const depth = numOr(d.depth, NaN);
-    if (
-      !(length > 1e-6) ||
-      !Number.isFinite(x + y + z) ||
-      !(radius > 0) ||
-      !(depth > 0)
-    ) {
-      continue;
-    }
-    dents.push({
-      x,
-      y,
-      z,
-      nx: nx / length,
-      ny: ny / length,
-      nz: nz / length,
-      radius: Math.min(radius, MAX_BODY_DENT_RADIUS_M),
-      depth: Math.min(depth, MAX_BODY_DENT_DEPTH_M),
-    });
-  }
-  return dents.slice(-MAX_BODY_DENTS);
 }
 
 /**

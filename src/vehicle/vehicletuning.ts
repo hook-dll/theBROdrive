@@ -10,7 +10,6 @@
  */
 
 import { SurfaceType } from '../core/surfaces';
-import { MAX_BODY_DENT_DEPTH_M, type BodyDent } from '../game/state';
 import { FLUID_DENSITY } from '../items/items';
 import { variant, type FuelType } from '../parts/registry';
 import type { HandlingProfile } from './carmodels';
@@ -1381,63 +1380,11 @@ export const SCRATCH_IMPACT_THRESHOLD_MPS = 1.8;
  *
  * A 5 m/s shunt (18 km/h into a rock) lands 0.19 rather than the former 0.06.
  * This is the aggregate the paint draws as streak density and the brush and sponge
- * polish back; where the shell was actually pushed in is the dents' business.
+ * polish back.
  */
 export const SCRATCH_PER_SEVERITY_MPS = 0.06;
 /** One collision cannot add more than this much cosmetic damage. */
 export const SCRATCH_PER_IMPACT_CAP = 0.3;
-/**
- * Unexplained speed loss that dents rather than only scuffs, m/s. Above the scratch
- * threshold on purpose: brushing a post marks the paint, it takes a real blow — a
- * rock at town speed, another car — to move the metal.
- */
-export const DENT_IMPACT_THRESHOLD_MPS = 3;
-/**
- * Dent depth per m/s over the threshold, metres, before the ceiling.
- *
- * Set by what a car body actually gives: a frontal hit on a rigid barrier at 56 km/h
- * crushes the front of a period saloon by about half a metre, so the shell yields some
- * three to four centimetres per m/s. The renderer cannot fold a shell that far without
- * turning panels inside out, so its depth-per-radius clamp and the state's ceiling cut
- * the top: 30 km/h leaves a dent about 17 cm deep across 45 cm, and 60 km/h or more
- * caves in about 32 cm across the whole nose. It was 1.2 cm per m/s, which made a
- * 60 km/h hit a 13 cm dimple.
- */
-export const DENT_DEPTH_PER_SEVERITY_M = 0.03;
-/** A dent's smallest and largest spread across the panel, metres. */
-export const DENT_RADIUS_MIN_M = 0.2;
-export const DENT_RADIUS_MAX_M = 0.8;
-export const DENT_RADIUS_PER_SEVERITY_M = 0.045;
-
-/**
- * The dent a collision of `severityMps` leaves at a struck point on the chassis box,
- * pushed horizontally along (pushX, pushZ); null below the dent threshold. A harder
- * blow both deepens and widens it — a shunt folds a wide area in, it does not punch a
- * deep narrow hole. Exported so the car lab's "random dents" are the same dents a
- * real crash makes.
- */
-export function impactDent(
-  severityMps: number,
-  x: number,
-  y: number,
-  z: number,
-  pushX: number,
-  pushZ: number,
-): BodyDent | null {
-  const over = severityMps - DENT_IMPACT_THRESHOLD_MPS;
-  if (!(over > 0)) return null;
-  return {
-    x,
-    y,
-    z,
-    nx: pushX,
-    ny: 0,
-    nz: pushZ,
-    radius: clamp(DENT_RADIUS_MIN_M + over * DENT_RADIUS_PER_SEVERITY_M, DENT_RADIUS_MIN_M, DENT_RADIUS_MAX_M),
-    depth: Math.min(MAX_BODY_DENT_DEPTH_M, 0.015 + over * DENT_DEPTH_PER_SEVERITY_M),
-  };
-}
-
 /**
  * Suspension and solver noise are below 0.35 m/s once the tyres' force ceiling is
  * removed; keeping that margin stops ordinary road seams becoming collision signals.

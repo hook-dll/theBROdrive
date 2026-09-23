@@ -87,7 +87,6 @@ import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
 import { HeatHaze } from './render/heathaze';
-import { beginDentFrame } from './render/carsurface';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -1111,15 +1110,17 @@ async function boot(): Promise<void> {
   let medicineCapReleased = false;
   let dying = vitals.dead;
   let deathReloadScheduled = false;
-  // Dust, fuel and the car's pose change every tick and are only written through when
-  // something saves. Leaving the page — another tab, a closed window, a phone put to
-  // sleep — is the last moment the game is sure to run, so it saves then too. It does
-  // not mark the drive resumable: a quit or a death clears that on purpose right
-  // before the reload that hides this page, and the autosave that ran during the drive
-  // has already marked it otherwise. A death is never written: the slot keeps the
-  // drive from before it.
+  // Dust, fuel and the player's pose change every tick and are only written through
+  // when something saves. Leaving the page — another tab, a closed window, a phone put
+  // to sleep — is the last moment the game is sure to run, so it saves then too, but
+  // only on foot. Behind the wheel the slot keeps the drive as it was at entry: a hide
+  // is also what a Quit or an F5 does, and saving there would write a wrecked car over
+  // the drive the player is reloading to get back. It does not mark the drive
+  // resumable: a quit or a death clears that on purpose right before the reload that
+  // hides this page, and the autosave that ran during the drive has already marked it
+  // otherwise. A death is never written: the slot keeps the drive from before it.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'hidden' || dying) return;
+    if (document.visibilityState !== 'hidden' || dying || world.state.player.drivingCarId) return;
     autosaveNow(saves, stateForSave, saveName, (error) => {
       console.error('autosave failed', error);
     });
@@ -1741,13 +1742,6 @@ async function boot(): Promise<void> {
    * judge those walked a healthy machine straight down to its resolution floor.
    */
   let adaptationFrozen = true;
-  /**
-   * Milliseconds per rendered frame that every car's dent passes may share. A crash
-   * that dents a high-detail body is ten-odd milliseconds of vertex work; spread at
-   * two a frame it crumples over a handful of frames, and the player's own car, synced
-   * first, is served first.
-   */
-  const DENT_FRAME_BUDGET_MS = 2;
 
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
@@ -1757,7 +1751,6 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     frameProfiler?.begin('vehicles');
-    beginDentFrame(DENT_FRAME_BUDGET_MS);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     traffic.syncVisuals(alpha);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,

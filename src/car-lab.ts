@@ -4,14 +4,12 @@
  * Every car in the catalogue, parked in rows by source pack, lit by the game's own
  * Renderer and Sky — the same probe, tone map, ink and daylight grade the road has —
  * so what the paint does here is what it does on the road. Sliders set every car's
- * dirt and scratches at once; "random dents" deals each car the dent a real
- * collision of random severity would (`impactDent`, the function the crash
- * classifier itself uses), so the lab and the game cannot drift apart.
+ * dirt and scratches at once.
  *
  * VARIANTS. Each car is built through a `LabCarFactory`. There is one today, the
  * game's own `createCarModel`. A visual-style experiment adds a second entry to
  * `CAR_FACTORIES`; the lab then shows a style selector and rebuilds the grid from the
- * chosen factory, keeping every car's condition and dents, so A/B is one click on
+ * chosen factory, keeping every car's condition, so A/B is one click on
  * identical wear. Nothing else in the lab needs to know.
  *
  * The unified car-style A/B (`?carstyle=unified`) is a reload rather than a factory:
@@ -23,16 +21,15 @@
  *
  * Automation: `window.__carLab` (see `CarLabApi`) sets state and focuses cars without
  * the UI, which is how report screenshots are taken reproducibly. Query parameters
- * `dirt`, `scratches`, `dents`, `time` and `focus` seed the same state from the URL.
+ * `dirt`, `scratches`, `time` and `focus` seed the same state from the URL.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { prefersMobilePresentation, Renderer } from './core/renderer';
-import { mulberry32 } from './core/rng';
 import { parseCalendarEpoch } from './game/calendar';
 import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from './game/settings';
-import { addBodyDent, DAY_LENGTH, newWorldState, type BodyDent } from './game/state';
+import { DAY_LENGTH, newWorldState } from './game/state';
 import {
   CAR_STYLE_UNIFIED,
   carModelMeasure,
@@ -45,7 +42,6 @@ import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
-import { impactDent } from './vehicle/vehicletuning';
 
 const CALENDAR = newWorldState(1337).calendarEpoch;
 const CELL_X = 6.5;
@@ -78,17 +74,12 @@ interface LabCar {
   readonly pack: string;
   readonly anchor: THREE.Group;
   readonly label: THREE.Sprite;
-  /** Kept across factory swaps so a style change compares identical damage. */
-  readonly dents: BodyDent[];
   instance: CarModelInstance | null;
 }
 
 /** What `window.__carLab` exposes. */
 export interface CarLabApi {
   set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory'>>): void;
-  /** Adds `count` random collision dents to every car (or only `modelId`). */
-  addDents(count: number, modelId?: string): void;
-  clearDents(): void;
   /** Frames one car from `azimuth` radians around it, or the whole grid with no id. */
   focus(modelId?: string, azimuth?: number): void;
   /** Renders a frame now and returns the canvas as a PNG data URL. */
@@ -163,7 +154,6 @@ function createInterface(
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
     ${unifiedRow}
     ${styleRow}
-    <div class="buttons"><button data-action="dent">Случайные вмятины</button><button data-action="clear">Убрать вмятины</button></div>
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.pack} · ${car.def.label}</option>`).join('')}</select>
     <div class="buttons"><button data-action="game">Вернуться в игру</button></div>`;
   document.body.appendChild(root);
@@ -210,8 +200,6 @@ function createInterface(
     sync();
     apply();
   });
-  root.querySelector('[data-action="dent"]')?.addEventListener('click', () => api.addDents(1));
-  root.querySelector('[data-action="clear"]')?.addEventListener('click', () => api.clearDents());
   root.querySelector('[data-toggle="carstyle"]')?.addEventListener('change', (event) => {
     const unified = event.target instanceof HTMLInputElement && event.target.checked;
     // Every other lab flag is kept, so the same cars, wear and camera come back and
@@ -277,7 +265,7 @@ export async function bootCarLab(): Promise<void> {
       label.position.set(0, 2.7, 0);
       anchor.add(label);
       renderer.scene.add(anchor);
-      cars.push({ def, pack, anchor, label, dents: [], instance: null });
+      cars.push({ def, pack, anchor, label, instance: null });
     });
     row += Math.ceil(defs.length / COLUMNS);
   }
@@ -301,32 +289,10 @@ export async function bootCarLab(): Promise<void> {
       car.anchor.add(mesh);
     }
     instance.surface.setCondition(state.dirt, state.scratches);
-    instance.surface.setDents(car.dents);
     car.instance = instance;
   };
   let builtFactory = state.factory;
   for (const car of cars) buildCar(car);
-
-  const random = mulberry32(0xca7);
-  /**
-   * The dent a real blow of random severity from a random side would leave: the
-   * blow's direction followed out to the chassis box, as the crash classifier does
-   * when it has no contact point, at a height the box can actually be struck.
-   */
-  const randomDent = (car: LabCar): BodyDent | null => {
-    const measure = carModelMeasure(car.def.id);
-    const half = measure.halfExtents;
-    const angle = random() * Math.PI * 2;
-    const fromX = Math.sin(angle);
-    const fromZ = Math.cos(angle);
-    const reach = Math.min(
-      Math.abs(fromX) > 1e-6 ? half[0] / Math.abs(fromX) : Infinity,
-      Math.abs(fromZ) > 1e-6 ? half[2] / Math.abs(fromZ) : Infinity,
-    );
-    const floor = Math.max(-half[1], measure.wheels[0]!.pos[1]);
-    const y = floor + random() * (half[1] - floor) * 0.7;
-    return impactDent(4 + random() * 10, fromX * reach, y, fromZ * reach, -fromX, -fromZ);
-  };
 
   const controls = new OrbitControls(renderer.camera, canvas);
   controls.enableDamping = true;
@@ -368,22 +334,6 @@ export async function bootCarLab(): Promise<void> {
         if (key === 'dirt' || key === 'scratches' || key === 'timeHours') input.value = String(state[key]);
       });
     },
-    addDents(count, modelId) {
-      for (const car of cars) {
-        if (modelId && car.def.id !== modelId) continue;
-        for (let i = 0; i < count; i++) {
-          const dent = randomDent(car);
-          if (dent) addBodyDent(car.dents, dent);
-        }
-        car.instance?.surface.setDents(car.dents);
-      }
-    },
-    clearDents() {
-      for (const car of cars) {
-        car.dents.length = 0;
-        car.instance?.surface.setDents(car.dents);
-      }
-    },
     focus(modelId, azimuth = 0.9) {
       const car = cars.find((candidate) => candidate.def.id === modelId);
       // Name boards help find a car in the grid and only get in the way of a close-up.
@@ -406,8 +356,6 @@ export async function bootCarLab(): Promise<void> {
   const interfaceRoot = createInterface(state, cars, apply, api);
   Object.assign(window, { __carLab: api });
 
-  const dentCount = Math.max(0, Math.floor(queryNumber(query, 'dents', 0)));
-  if (dentCount > 0) api.addDents(dentCount);
   api.focus(query.get('focus') ?? undefined);
   apply();
 

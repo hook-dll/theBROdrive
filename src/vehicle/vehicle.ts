@@ -20,12 +20,7 @@ import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import {
-  DAY_LENGTH,
-  type BodyDent,
-  type CarState,
-  type GameWorld,
-} from '../game/state';
+import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
 import {
   OIL_LOSS_LPH,
   oilCapacity,
@@ -96,7 +91,6 @@ import {
   COUNTERSTEER_RELEASE_START_DEG,
   DEFORMATION_DRAG_FULL_MPS,
   DEFORMATION_DRAG_START_MPS,
-  DENT_IMPACT_THRESHOLD_MPS,
   DESTROYED_ENGINE_SPEED_CAP_MPS,
   DIG_FIRM_MU,
   DIG_FIRM_RR,
@@ -185,7 +179,6 @@ import {
   WHEEL_REFERENCE_RADIUS,
   clamp,
   fuelDensity,
-  impactDent,
   rotateVector,
   stockRadiatorWater,
   tyreTemperatureGrip,
@@ -504,7 +497,7 @@ export class Vehicle implements Rebasable {
   private readonly bouncePhase: number;
   /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
   private bodyGroup: THREE.Object3D | null = null;
-  /** This car's paint and dents, created with its visuals; see render/carsurface.ts. */
+  /** This car's paint, created with its visuals; see render/carsurface.ts. */
   private surface: CarBodySurface | null = null;
   /**
    * `bodyGroup`'s scale AT REST, captured once in `buildVisuals`. `buildTemplate`
@@ -659,17 +652,6 @@ export class Vehicle implements Rebasable {
   private previousOwnDragRollingDeltaMps = 0;
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
-  /**
-   * The dent the collision in progress is making. One crash is classified as an
-   * impact on several consecutive steps while the solver works the car's momentum
-   * off; recording each as its own dent would deepen one blow by however many steps
-   * the solver needed. The strongest step stands for the whole collision, and the
-   * dent is recorded once the blows stop (or the car is saved mid-crash).
-   */
-  private pendingDent: BodyDent | null = null;
-  private pendingDentSeverityMps = 0;
-  private readonly contactScratch = { x: 0, y: 0, z: 0 };
-  private readonly contactNormalScratch = { x: 0, y: 0, z: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
@@ -1742,7 +1724,6 @@ export class Vehicle implements Rebasable {
     this.lastAuthBodyDirt = this.localBodyDirt;
     this.lastAuthBodyScratches = this.localBodyScratches;
     this.bodyConditionEmitTimer = 0;
-    this.flushPendingDent();
 
     if (this.odoAccum > 0) {
       this.world.apply({ t: 'car_odometer', carId: this.car.id, metres: this.odoAccum });
@@ -2587,12 +2568,7 @@ export class Vehicle implements Rebasable {
           this.localBodyScratches = clamp(this.localBodyScratches + scratchGain, 0, 1);
           bodyConditionChanged = true;
         }
-        if (severityMps > DENT_IMPACT_THRESHOLD_MPS) this.recordDentBlow(severityMps);
       }
-    }
-    // The collision is over once a step passes without a dent-worthy blow.
-    if (!this.impactThisStep || this.impactState.severityMps <= DENT_IMPACT_THRESHOLD_MPS) {
-      this.flushPendingDent();
     }
 
     // Odometer: metres travelled forward this tick, emitted in throttled batches.
@@ -2776,89 +2752,6 @@ export class Vehicle implements Rebasable {
     this.snapshotPrimed = false;
   }
 
-  /**
-   * Turns one classified blow into the collision's dent: where the chassis box was
-   * struck, pushed along the direction the blow travelled.
-   *
-   * The point comes from the contact the solver actually resolved against this
-   * car's box — a corner clipped on a rock dents the corner — ignoring near-vertical
-   * contacts, which are a rolled car resting on the ground rather than what hit it.
-   * Without a usable contact (the blow came from a shove, not a collider) the blow's
-   * own direction is followed out from the box centre to its surface instead.
-   */
-  private recordDentBlow(severityMps: number): void {
-    const fromX = this.impactState.localX;
-    const fromZ = this.impactState.localZ;
-    const horizontal = Math.hypot(fromX, fromZ);
-    if (!(horizontal > 1e-6)) return;
-    const pushX = -fromX / horizontal;
-    const pushZ = -fromZ / horizontal;
-    if (
-      this.pendingDent &&
-      this.pendingDent.nx * pushX + this.pendingDent.nz * pushZ < 0.5
-    ) {
-      this.flushPendingDent();
-    }
-    if (this.pendingDent && severityMps <= this.pendingDentSeverityMps) return;
-
-    const half = this.measure.halfExtents;
-    const offset = this.chassisCollider.translationWrtParent() ?? { x: 0, y: 0, z: 0 };
-    const point = this.contactScratch;
-    const normal = this.contactNormalScratch;
-    // The manifold that took the most impulse, at its impulse-weighted centre: a
-    // square hit on a wall touches all four nose corners of the box and dents the
-    // middle, a rock clipped with one corner dents that corner.
-    let bestImpulse = 0;
-    this.physics.world.contactPairsWith(this.chassisCollider, (other) => {
-      this.physics.world.contactPair(this.chassisCollider, other, (manifold, flipped) => {
-        if (manifold.numSolverContacts() === 0) return;
-        manifold.normal(normal);
-        if (Math.abs(normal.y) > 0.7) return;
-        let total = 0;
-        let sx = 0;
-        let sy = 0;
-        let sz = 0;
-        for (let i = 0; i < manifold.numContacts(); i++) {
-          const impulse = manifold.contactImpulse(i);
-          if (!(impulse > 0)) continue;
-          const local = flipped
-            ? manifold.localContactPoint2(i, normal)
-            : manifold.localContactPoint1(i, normal);
-          if (!local) continue;
-          total += impulse;
-          sx += local.x * impulse;
-          sy += local.y * impulse;
-          sz += local.z * impulse;
-        }
-        if (total <= bestImpulse) return;
-        bestImpulse = total;
-        point.x = sx / total + offset.x;
-        point.y = sy / total + offset.y;
-        point.z = sz / total + offset.z;
-      });
-    });
-    if (bestImpulse <= 0) {
-      const reach = Math.min(
-        Math.abs(fromX) > 1e-6 ? half[0] / Math.abs(fromX / horizontal) : Infinity,
-        Math.abs(fromZ) > 1e-6 ? half[2] / Math.abs(fromZ / horizontal) : Infinity,
-      );
-      point.x = (fromX / horizontal) * reach;
-      point.y = offset.y;
-      point.z = (fromZ / horizontal) * reach;
-    }
-
-    this.pendingDentSeverityMps = severityMps;
-    this.pendingDent = impactDent(severityMps, point.x, point.y, point.z, pushX, pushZ);
-  }
-
-  /** Records the collision in progress as one dent in authoritative state. */
-  private flushPendingDent(): void {
-    if (!this.pendingDent) return;
-    this.world.apply({ t: 'car_body_dent', carId: this.car.id, dent: this.pendingDent });
-    this.pendingDent = null;
-    this.pendingDentSeverityMps = 0;
-  }
-
   /** Adopts a shell condition some other system (the brush and sponge) wrote into state. */
   private resyncBodyCondition(): void {
     if (
@@ -2902,14 +2795,13 @@ export class Vehicle implements Rebasable {
       this.bodyGroup.scale.copy(this.bodyRestScale);
     }
 
-    // Uniform writes only when a value moved, and a dent pass only when the ring
-    // changed; both are no-ops on an ordinary frame. Dirt comes from the live
-    // accumulator, so fresh road dust lands on the shell this frame rather than at
-    // the next throttled state emit. The resync first is for a PARKED car being
-    // washed: nothing runs its fixed step, and the sponge writes state directly.
+    // Uniform writes only when a value moved, so an ordinary frame is a no-op. Dirt
+    // comes from the live accumulator, so fresh road dust lands on the shell this
+    // frame rather than at the next throttled state emit. The resync first is for a
+    // PARKED car being washed: nothing runs its fixed step, and the sponge writes
+    // state directly.
     this.resyncBodyCondition();
     this.surface?.setCondition(this.localBodyDirt, this.localBodyScratches);
-    this.surface?.setDents(this.car.dents);
 
     this.lamps.applyRearLightState();
 
@@ -4019,11 +3911,8 @@ export class Vehicle implements Rebasable {
 
     this.lamps.build(this.measure.halfExtents, this.contactPlaneY);
 
-    // After the lamp mounts on purpose: beams are aimed from the authored lamp
-    // bounds, so a crumpled nose bends its lamps without swinging its beams.
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
-    this.surface.setDents(this.car.dents);
   }
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */

@@ -10,7 +10,6 @@
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { MATERIALS_CONFIG } from '../config';
-import { MAX_BODY_DENTS } from '../game/state';
 import { applyComicShading } from './comic';
 
 /** Per-instance uniforms for condition-shaded materials. */
@@ -44,14 +43,6 @@ export interface CarBodyFrame {
   readonly wheelRadius: number;
 }
 
-/** A dent as the paint sees it: where the panel was struck, and how wide. */
-export interface CarDentMark {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly radius: number;
-}
-
 interface CarBodyUniforms {
   readonly dirt: { value: number };
   readonly scratches: { value: number };
@@ -60,9 +51,6 @@ interface CarBodyUniforms {
   readonly bodyHalf: { value: THREE.Vector3 };
   /** Front axle Z, rear axle Z, wheel-centre Y, wheel radius. */
   readonly axles: { value: THREE.Vector4 };
-  /** Dent centres on the skin plus radius; the first `dentCount` are live. */
-  readonly dents: { value: THREE.Vector4[] };
-  readonly dentCount: { value: number };
   readonly palettePaint: { value: number };
   readonly paintColor: { value: THREE.Color };
   readonly paintCell: { value: THREE.Vector2 };
@@ -204,8 +192,8 @@ vec2 condRust( vec3 p ) {
 
 /**
  * The car program's vertex side: nothing but a hand-off of the chassis-local
- * position. The fit, the ride drop and any dents have already been baked into the
- * geometry on the CPU, so the vertex shader stays stock.
+ * position. The fit and the ride drop have already been baked into the geometry on
+ * the CPU, so the vertex shader stays stock.
  */
 const CAR_BODY_VERTEX_PARS = `#include <common>
 attribute vec3 ${CAR_BODY_POSITION_ATTRIBUTE};
@@ -227,14 +215,11 @@ vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
  * non-uniform control flow is undefined.
  */
 const CAR_BODY_PARS = `#include <common>
-#define CAR_DENT_MARKS ${MAX_BODY_DENTS}
 uniform float uDirt;
 uniform float uScratch;
 uniform vec3 uCarFieldOrigin;
 uniform vec3 uCarBodyHalf;
 uniform vec4 uCarAxles;
-uniform vec4 uCarDents[ CAR_DENT_MARKS ];
-uniform int uCarDentCount;
 uniform float uPalettePaint;
 uniform vec3 uPalettePaintColor;
 uniform vec2 uPalettePaintCell;
@@ -308,14 +293,10 @@ if ( uPalettePaint > 0.5 ) {
  *
  * SCRATCHES are sparse fine streaks of paler, duller paint whose density follows
  * `uScratch`, weighted towards the nose and tail corners, the flanks at bumper to
- * belt height, and around every dent — the places a body actually meets the world.
- * The streaks run along whichever panel face the fragment lies on, found from the
- * screen-space derivative of the chassis position; swirl marks too fine to draw are
- * averaged into a general loss of gloss.
- *
- * Both are sampled at the UNDENTED chassis position the attribute carries, so a
- * scratch or a dust patch stays on the metal it formed on when that metal later
- * moves.
+ * belt height — the places a body actually meets the world. The streaks run along
+ * whichever panel face the fragment lies on, found from the screen-space derivative
+ * of the chassis position; swirl marks too fine to draw are averaged into a general
+ * loss of gloss.
  */
 const CAR_BODY_CONDITION = `#include <normal_fragment_maps>
 if ( uDirt + uScratch > 0.0005 ) {
@@ -328,8 +309,8 @@ if ( uDirt + uScratch > 0.0005 ) {
 
   if ( uScratch > 0.0005 ) {
     // Where a body meets the world: bumper corners at either end, the sills and door
-    // bottoms that kerbs and scrub brush reach, the arch lips stones are thrown at,
-    // and every dent. The roof and the upper flanks stay nearly clean.
+    // bottoms that kerbs and scrub brush reach, and the arch lips stones are thrown
+    // at. The roof and the upper flanks stay nearly clean.
     float belt = 1.0 - smoothstep( 0.45, 0.8, carHeight );
     float ends = smoothstep( 0.72, 0.98, carQ.z ) * ( 0.35 + 0.65 * belt );
     float corners = ends * ( 0.6 + 0.4 * smoothstep( 0.55, 0.95, carQ.x ) );
@@ -339,12 +320,6 @@ if ( uDirt + uScratch > 0.0005 ) {
       carArch( carP, uCarAxles.y, carForward )
     );
     float zone = max( max( corners, sills * 0.75 ), lips * 0.55 );
-    for ( int i = 0; i < CAR_DENT_MARKS; i++ ) {
-      if ( i >= uCarDentCount ) break;
-      vec4 dent = uCarDents[ i ];
-      zone += 1.0 - smoothstep( dent.w * 0.5, dent.w * 1.8, distance( carP, dent.xyz ) );
-    }
-    zone = min( zone, 1.0 );
     float density = uScratch * ( 0.04 + 0.96 * zone );
     vec3 carFace = abs( cross( dFdx( carP ), dFdy( carP ) ) );
     vec2 carUv = carFace.x > max( carFace.y, carFace.z )
@@ -482,7 +457,7 @@ function patchConditionShader(shader: WebGLProgramParametersWithUniforms, unifor
     .replace('#include <metalnessmap_fragment>', CONDITION_BODY);
 }
 
-/** Binds one car's paint uniforms: palette recolour, dirt, scratches and dent marks. */
+/** Binds one car's paint uniforms: palette recolour, dirt and scratches. */
 function patchCarBodyShader(
   shader: WebGLProgramParametersWithUniforms,
   uniforms: CarBodyUniforms,
@@ -493,8 +468,6 @@ function patchCarBodyShader(
   shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
   shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
   shader.uniforms.uCarAxles = uniforms.axles;
-  shader.uniforms.uCarDents = uniforms.dents;
-  shader.uniforms.uCarDentCount = uniforms.dentCount;
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
@@ -889,8 +862,6 @@ export function makeCarBodyConditionMaterial(
         frame.wheelRadius,
       ),
     },
-    dents: { value: Array.from({ length: MAX_BODY_DENTS }, () => new THREE.Vector4()) },
-    dentCount: { value: 0 },
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
@@ -956,23 +927,6 @@ export function weatherStaticCarPaint(paint: readonly THREE.Material[], dust: nu
     if (!palette) material.color.lerp(STATIC_DUST_COLOR, dust);
     material.roughness += (0.96 - material.roughness) * dust;
     material.metalness *= 1 - dust;
-  }
-}
-
-/** Tells one car's paint where its dents are, so scratches gather around them. */
-export function setCarBodyDentMarks(
-  paint: readonly THREE.Material[],
-  marks: readonly CarDentMark[],
-): void {
-  const count = Math.min(marks.length, MAX_BODY_DENTS);
-  for (const material of paint) {
-    const uniforms = carBodyUniforms.get(material);
-    if (uniforms === undefined) continue;
-    for (let i = 0; i < count; i++) {
-      const mark = marks[i]!;
-      uniforms.dents.value[i]!.set(mark.x, mark.y, mark.z, mark.radius);
-    }
-    uniforms.dentCount.value = count;
   }
 }
 

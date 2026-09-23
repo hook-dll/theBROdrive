@@ -16,7 +16,7 @@
  *    surface; a typo in either the table or the shader's cells silently un-unifies the
  *    whole catalogue.
  *  - CREASING IS POSITION-PRESERVING. The unified style recomputes car-body normals at
- *    a 35 degree crease angle. Dents push positions and the paint places its dirt by
+ *    a 35 degree crease angle. The paint places its dirt by
  *    chassis position, so creasing may move no vertex and must keep one normal per
  *    vertex; the crease angle itself is pinned with two synthetic folds, one just
  *    under it and one well over.

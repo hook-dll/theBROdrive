@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- NOTHING BEHIND THE WHEEL AUTOSAVES ANY MORE: THE SLOT KEEPS THE DRIVE AS IT WAS AT
+  ENTRY. A dent booked its own save the moment it was recorded, so a fatal crash was
+  written before the death sequence began and the reload put the player back into the
+  wreck with nothing left to do about it. The headlights and the rest of what changes
+  at the wheel now ride along with the next exit. The page-hide save is on foot
+  only for the same reason: Quit and F5 both hide the page, and saving there would write
+  a wrecked car over the drive the player reloads to get back. The cost is that a phone
+  that sleeps mid-drive resumes at the point where the player got in.
+
+### Removed
+
+- BODY DENTS ARE GONE. Damage the game cannot do well is worse than none: 20 of the 21
+  catalogue bodies are 1,900–20,000 triangles with edges of 22–95 cm at the 90th
+  percentile, so a vertex dent drew a wedge through a Zhiguli's grille or a rubbery bowl
+  in a door, and repeated blows to one corner stopped deepening after the second and
+  spread across the bonnet instead. The whole system goes — the dent record in car
+  state, the `car_body_dent` delta, the time-sliced CPU deformation pass, the paint's
+  dent marks and the car lab's dent buttons. Impacts still scratch the paint. A save
+  that carries `dents` loads the car straight.
+
 ## 0.18.0 — 2026-09-15
 
 ### Added
