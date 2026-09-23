@@ -44,7 +44,7 @@ const START_S = 12_000;
 /** Chunks either side of the player carry colliders; see PHYSICS_RADIUS in chunks.ts. */
 const PHYSICS_REACH_M = 2 * CHUNK_LENGTH;
 const SAMPLE_STEP_M = 25;
-/** The production boot budget and its ceiling (see main.ts BOOT_STREAM_*). */
+/** The production boot budget and its ceiling (see src/app/bootwarmup.ts BOOT_STREAM_*). */
 const BOOT_BUDGET_MS = 12;
 const BOOT_JOBS_PER_FRAME = 64;
 const BOOT_CALLS_PER_PASS = 8;

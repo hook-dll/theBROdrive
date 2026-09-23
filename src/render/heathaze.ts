@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { ambientAirC } from '../vehicle/cooling';
+import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { CLOUD_DARKEN_MAX, cloudShadowFrame, cloudShadowShadeAt } from './cloudshadow';
 import type { HeatHazeFrame } from './hazeshader';
@@ -67,6 +68,13 @@ const ROUGH_RMS_M = 2.5;
 const MAX_SLOPE = 0.08;
 /** Time constant of the line's smoothing, seconds, so a glance aside does not pop it. */
 const SMOOTHING_S = 0.3;
+/**
+ * Bound on how fast the road's arclength may be extrapolated to move per metre along
+ * the view. A straight line's projection on a gently curving road advances at most
+ * about a metre per metre; a larger step means the previous sample jumped branch, and
+ * following it would start the next descent in the wrong valley.
+ */
+const MAX_S_PER_METRE = 1.5;
 
 export interface HeatHazeInput {
   /** The render camera; its position is origin-relative. */
@@ -112,7 +120,10 @@ export class HeatHaze {
   private primed = false;
   private readonly heights = new Float64Array(SAMPLE_DISTANCES_M.length);
 
-  constructor(private readonly terrain: Terrain) {}
+  constructor(
+    private readonly terrain: Terrain,
+    private readonly road: Road,
+  ) {}
 
   /** The frame's heat, written into one reused object the renderer reads at once. */
   update(dt: number, input: HeatHazeInput): HeatHazeFrame {
@@ -128,13 +139,27 @@ export class HeatHaze {
     }
 
     // Least-squares line through the terrain ahead: height = intercept + slope·d.
+    //
+    // Each sample descends from ITS OWN arclength, extrapolated along the view from the
+    // two before it (the eye stands at `hintS`). A projection descent reaches only about
+    // 180 m from where it starts, so one shared hint put every sample past that on the
+    // road frame near the player and read its height metres to tens of metres wrong.
     let sumD = 0;
     let sumH = 0;
     let sumDD = 0;
     let sumDH = 0;
+    let previousD = 0;
+    let previousS = input.hintS;
+    let sPerMetre = 0;
     for (let i = 0; i < SAMPLE_DISTANCES_M.length; i++) {
       const d = SAMPLE_DISTANCES_M[i];
-      const h = this.terrain.heightAt(eyeX + this.forwardX * d, eyeZ + this.forwardZ * d, input.hintS);
+      const x = eyeX + this.forwardX * d;
+      const z = eyeZ + this.forwardZ * d;
+      const s = this.road.project(x, z, previousS + sPerMetre * (d - previousD)).s;
+      const h = this.terrain.heightAt(x, z, s);
+      sPerMetre = Math.min(MAX_S_PER_METRE, Math.max(-MAX_S_PER_METRE, (s - previousS) / (d - previousD)));
+      previousD = d;
+      previousS = s;
       this.heights[i] = h;
       sumD += d;
       sumH += h;

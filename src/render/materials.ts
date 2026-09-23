@@ -934,6 +934,31 @@ export function setCarBodyCondition(
   }
 }
 
+/** The condition shader's own sand, so a weathered wreck reads as the same dust. */
+const STATIC_DUST_COLOR = new THREE.Color(0.58, 0.46, 0.3);
+
+/**
+ * Weathers a static shell's paint at no per-frame cost: its colour is pulled toward the
+ * desert's dust and its finish dulled, once, on the CPU, and the condition shader's gate
+ * stays shut. A wreck never changes, and the per-fragment noise that makes a driven
+ * car's dust patchy was a full wear shader on every wreck in view.
+ */
+export function weatherStaticCarPaint(paint: readonly THREE.Material[], dust: number): void {
+  for (const material of paint) {
+    const uniforms = carBodyUniforms.get(material);
+    if (uniforms) {
+      uniforms.dirt.value = 0;
+      uniforms.scratches.value = 0;
+    }
+    const palette = uniforms !== undefined && uniforms.palettePaint.value > 0;
+    if (palette) uniforms.paintColor.value.lerp(STATIC_DUST_COLOR, dust);
+    if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+    if (!palette) material.color.lerp(STATIC_DUST_COLOR, dust);
+    material.roughness += (0.96 - material.roughness) * dust;
+    material.metalness *= 1 - dust;
+  }
+}
+
 /** Tells one car's paint where its dents are, so scratches gather around them. */
 export function setCarBodyDentMarks(
   paint: readonly THREE.Material[],

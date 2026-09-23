@@ -1,8 +1,10 @@
 /**
  * The player's collisions, turned into injuries.
  *
- * Reads pre-solver velocities for every body that can hurt the player — a vehicle, a
- * trailer, a loose can — and converts the post-solver manifolds into debounced damage.
+ * Reads pre-solver velocities for the player, every vehicle and every traffic car, and
+ * converts the post-solver manifolds into debounced damage. Any other dynamic body — a
+ * trailer, a loose can — is read post-solver, so its strike is judged on the velocity
+ * the contact has already reduced.
  * Built by the composition root with an explicit context, so the module holds no
  * reference to the boot closure it was lifted out of.
  */

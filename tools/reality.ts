@@ -8,9 +8,10 @@
  * with its sources, and the real bench (`Vehicle.fixedUpdate` on Rapier, through
  * `handling-bench.ts`) is measured against it:
  *
- *   engine     net full-throttle power at the rated speed and torque at the torque
- *              peak, read off `engineTorqueNm` — the curve the car drives on — and
- *              held to the catalogue within 1%
+ *   engine     every engine in the registry against its maker's printed figures,
+ *              kept in `FACTORY_ENGINES` below in the source's own units: the
+ *              registry's numbers within 1% and its rpm points on the maker's, and
+ *              the full-throttle curve the car drives on through both points
  *   geometry   wheelbase, front track and rolling radius of the LOADED model
  *   top        flat-out on level asphalt, at the test load
  *   0-100      at the test load, measured the way a factory measures it: a manual
@@ -23,7 +24,8 @@
  * A column with no credible factory figure prints a dash and is not judged: a
  * missing target is stated, never invented. The run EXITS NON-ZERO if any judged
  * column is out of tolerance. A 0-100 the owner has accepted is printed as a KNOWN
- * deviation with its cause (see the note above the manifest's shorthands).
+ * deviation with its cause, and is held to the deviation that was accepted: moving
+ * more than `KNOWN_DRIFT` from it either way fails (see the note above the manifest).
  *
  *   bun tools/reality.ts [modelId ...]      (default: every catalogue model)
  *
@@ -36,6 +38,7 @@ import { SurfaceType } from '../src/core/surfaces';
 import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import { createPartMesh } from '../src/render/partmesh';
+import { variantsOfKind } from '../src/parts/registry';
 import { engineTorqueNm, fullThrottleUpshiftDue } from '../src/vehicle/drivetrain';
 import { benchOne, drive, driveUntil, makeRig, measureTopSpeed, type Rig } from './handling-bench';
 
@@ -50,6 +53,19 @@ const TOLERANCE = {
   turn: 0.03,
   brake: 0.1,
 } as const;
+/**
+ * How far a KNOWN 0-100 may move from the deviation the owner accepted, as a fraction
+ * of the factory time. The runs are deterministic, so any drift is a change in the car
+ * and has to be looked at and re-accepted, not absorbed.
+ */
+const KNOWN_DRIFT = 0.03;
+
+/** A 0-100 deviation the owner has accepted: its cause and its size when accepted. */
+interface KnownDeviation {
+  readonly reason: string;
+  /** Signed fraction of the factory time, as measured when the note was written. */
+  readonly dev: number;
+}
 
 /** Driver and one passenger at 75 kg each: the condition VAZ's manuals state. */
 const DRIVER_AND_PASSENGER_KG = 150;
@@ -76,12 +92,14 @@ interface Target {
   readonly hz: number;
   readonly source: string;
   /**
-   * A 0-100 deviation the owner has accepted, with its physical cause. It is still
-   * measured and printed; it is reported as KNOWN instead of failing, and a known
-   * deviation that comes back inside tolerance FAILS, so the note cannot outlive the
-   * reason for it. Never a wider tolerance: the target stays the factory's.
+   * A 0-100 deviation the owner has accepted, with its physical cause and its size.
+   * It is still measured and printed; it is reported as KNOWN instead of failing, but
+   * only while it stays within `KNOWN_DRIFT` of the size that was accepted, and a
+   * known deviation that comes back inside tolerance FAILS, so the note can neither
+   * outlive the reason for it nor hide a regression. Never a wider tolerance: the
+   * target stays the factory's.
    */
-  readonly known0to100?: string;
+  readonly known0to100?: KnownDeviation;
 }
 
 /*
@@ -175,13 +193,13 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 137, to100: 18.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 76, lat: 0.69, hz: 1.1,
     source: 'AO vaz-2104 (base 2104, 1.3); turn per AO vaz-2105',
-    known0to100: LAUNCH_TRACTION,
+    known0to100: { reason: LAUNCH_TRACTION, dev: 0.137 },
   },
   sv_vaz2105: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 145, to100: 18,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.71, hz: 1.1,
     source: 'AO vaz-2105',
-    known0to100: LAUNCH_TRACTION,
+    known0to100: { reason: LAUNCH_TRACTION, dev: 0.12 },
   },
   // Not a catalogue car: the pack's own rally build, held to the targets it was
   // built to rather than to any factory's.
@@ -189,61 +207,61 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.424, track: 1.365, radius: 0.3, top: 170, to100: 11,
     loadKg: 75, load: 'driver only (build target)', turn: 5.6, brake: 51, lat: 0.85, hz: 1.55,
     source: 'pack build targets, not factory',
-    known0to100: LAUNCH_TRACTION,
+    known0to100: { reason: LAUNCH_TRACTION, dev: 0.115 },
   },
   sv_vaz2106: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2106',
-    known0to100: LAUNCH_TRACTION,
+    known0to100: { reason: LAUNCH_TRACTION, dev: 0.109 },
   },
   sv_vaz2107: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2107 (VAZ-2103 engine)',
-    known0to100: LAUNCH_TRACTION,
+    known0to100: { reason: LAUNCH_TRACTION, dev: 0.1 },
   },
   sv_vaz2108: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.111 },
   },
   sv_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.125 },
   },
   sv_vaz21099: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 154, to100: 13.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'man. vaz-sputnik.ru/21099/1.html',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.228 },
   },
   sv_niva: {
     wheelbase: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 23,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, brake: 75, lat: 0.66, hz: 1.15,
     source: 'AO vaz-2121; lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
-    known0to100: NIVA_LOSSES,
+    known0to100: { reason: NIVA_LOSSES, dev: -0.114 },
   },
   sv_niva_long: {
     wheelbase: 2.7, track: 1.44, radius: 0.343, top: 132, to100: 25,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: 78, lat: 0.64, hz: 1.15,
     source: 'AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg',
-    known0to100: NIVA_LOSSES,
+    known0to100: { reason: NIVA_LOSSES, dev: -0.137 },
   },
   sa_azlk2141: {
     wheelbase: 2.58, track: 1.44, radius: 0.31, top: 158, to100: 14.9,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, brake: null, lat: null, hz: 1.15,
     source: 'AO moskvich-2141 (2141-01, VAZ-2106-70 engine)',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.088 },
   },
   sa_oka: {
     wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, brake: null, lat: null, hz: 1.3,
     source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html (no Oka brake test; the manual quotes the Samara norm)',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.126 },
   },
   sa_uaz330364: {
     wheelbase: 2.55, track: 1.445, radius: 0.372, top: 105, to100: null,
@@ -259,9 +277,68 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.41, radius: 0.288, top: 162, to100: 15,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.3,
     source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor)',
-    known0to100: CATALOGUE_OPTIMISTIC,
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.119 },
   },
 };
+
+/*
+ * ---- the engines, as their makers print them ----
+ *
+ * One entry per engine in the registry, in the units the source itself uses, so a
+ * conversion slip in the registry (hp for kW, kgf·m for Nm) shows up here instead of
+ * passing through: `ps` is metric horsepower (735.5 W), `hp` the SAE mechanical one
+ * (745.7 W). A torque peak the maker states as a plateau is a range, and the
+ * registry's single peak must sit inside it. An engine added to the registry without
+ * an entry here fails the run: its figures have to come from somewhere.
+ *
+ * Transcribed from the sources the registry entries cite. Where a car's own
+ * catalogue and a later rating disagree, the car's catalogue wins, as in the registry.
+ */
+type MakerPower = { readonly kw: number } | { readonly ps: number } | { readonly hp: number };
+type MakerTorque = { readonly nm: number } | { readonly kgfm: number } | { readonly lbft: number };
+interface MakerEngine {
+  readonly power: MakerPower;
+  readonly powerRpm: number;
+  readonly torque: MakerTorque;
+  readonly torqueRpm: number | readonly [number, number];
+  readonly source: string;
+}
+
+const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
+  engine_i4_1600: { power: { kw: 56.3 }, powerRpm: 5400, torque: { nm: 121 }, torqueRpm: 3000, source: 'VAZ-2106-70; AO AZLK-2141 1998 catalogue' },
+  engine_uzam_412de: { power: { kw: 49 }, powerRpm: 5800, torque: { nm: 102 }, torqueRpm: [3000, 3800], source: 'UZAM-412DE; AO Moskvich-412 catalogue' },
+  engine_umz_4213: { power: { ps: 99 }, powerRpm: 4000, torque: { nm: 201 }, torqueRpm: 3000, source: 'UMZ-4213.10-10; truck-and-bus.ru UAZ-330364 sheet' },
+  engine_i6_2800: { power: { hp: 135 }, powerRpm: 5200, torque: { lbft: 144 }, torqueRpm: 4400, source: 'Nissan L28E, SAE net; 280ZX factory service manual' },
+  engine_d4_2000: { power: { ps: 55 }, powerRpm: 4200, torque: { nm: 113 }, torqueRpm: 2400, source: 'Mercedes-Benz OM615 (W123 200 D); automobile-catalog.com' },
+  engine_d6_6600: { power: { kw: 150 }, powerRpm: 2600, torque: { nm: 640 }, torqueRpm: [1400, 1500], source: 'Mercedes-Benz OM366 LA; 1987 press kit' },
+  engine_lada_1200: { power: { ps: 64 }, powerRpm: 5600, torque: { kgfm: 8.9 }, torqueRpm: 3400, source: 'VAZ-2101; AO 1982 AvtoVAZ catalogue' },
+  engine_zmz_21: { power: { ps: 70 }, powerRpm: 4000, torque: { kgfm: 17 }, torqueRpm: 2200, source: 'ZMZ-21A; GAZ-21 manual (rpm: ru.wikipedia)' },
+  engine_zmz_24: { power: { ps: 95 }, powerRpm: 4500, torque: { kgfm: 19 }, torqueRpm: [2200, 2400], source: 'ZMZ-24D; GAZ-24 manual' },
+  engine_lada_1300: { power: { kw: 47 }, powerRpm: 5600, torque: { kgfm: 9.4 }, torqueRpm: 3400, source: 'VAZ-2105; AO VAZ-2105 catalogue' },
+  engine_lada_1500: { power: { kw: 53.3 }, powerRpm: 5600, torque: { nm: 104 }, torqueRpm: 3400, source: 'VAZ-2103, GOST 14846-81; AO VAZ-2103 and VAZ-2107 catalogues' },
+  engine_lada_1600: { power: { kw: 55.5 }, powerRpm: 5400, torque: { kgfm: 11.8 }, torqueRpm: 3000, source: 'VAZ-2106; AO VAZ-2106 catalogue' },
+  engine_samara_1300: { power: { kw: 47 }, powerRpm: 5600, torque: { nm: 94 }, torqueRpm: [3400, 3500], source: 'VAZ-2108; AO VAZ-2109 1991 catalogue (the 2108 page: 3500)' },
+  engine_samara_1500: { power: { kw: 51.5 }, powerRpm: 5600, torque: { nm: 106.4 }, torqueRpm: 3400, source: 'VAZ-21083; AO VAZ-2109 catalogue' },
+  engine_vaz_1111: { power: { kw: 21.5 }, powerRpm: 5600, torque: { nm: 44.1 }, torqueRpm: 3400, source: 'VAZ-1111; AO 1998 AvtoVAZ catalogue' },
+  engine_niva_1600: { power: { kw: 53.7 }, powerRpm: 5400, torque: { kgfm: 11.6 }, torqueRpm: 3400, source: 'VAZ-2121; AO VAZ-2121 catalogue' },
+  engine_niva_1700: { power: { kw: 58 }, powerRpm: 5200, torque: { nm: 127 }, torqueRpm: 3000, source: 'VAZ-21213, GOST 14846-81; 21213 manual (lada-niva.ru)' },
+  // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
+  engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
+};
+
+/** A maker's power figure in kilowatts. */
+function kilowatts(power: MakerPower): number {
+  if ('kw' in power) return power.kw;
+  if ('ps' in power) return power.ps * 0.73549875;
+  return power.hp * 0.745699872;
+}
+
+/** A maker's torque figure in newton metres. */
+function newtonMetres(torque: MakerTorque): number {
+  if ('nm' in torque) return torque.nm;
+  if ('kgfm' in torque) return torque.kgfm * 9.80665;
+  return torque.lbft * 1.3558179483;
+}
 
 /** A 20 km square of asphalt: a Volga needs several kilometres to settle at its top. */
 function addLongGround(physics: PhysicsWorld): void {
@@ -364,23 +441,34 @@ function judged(label: string, id: string, dev: number | null, tolerance: number
 
 /**
  * `judged`, for a column the manifest has an accepted deviation on. Out of tolerance
- * it is listed as KNOWN; back inside tolerance the stale note is itself a failure.
+ * it is listed as KNOWN while it stays within `KNOWN_DRIFT` of the accepted size;
+ * drifting further, or coming back inside tolerance, is a failure.
  */
 function judgedKnown(
   label: string,
   id: string,
   dev: number | null,
   tolerance: number,
-  reason: string | undefined,
+  accepted: KnownDeviation | undefined,
 ): string {
-  if (reason === undefined || dev === null) return judged(label, id, dev, tolerance);
+  if (accepted === undefined || dev === null) return judged(label, id, dev, tolerance);
   const out = Math.abs(dev) > tolerance;
-  if (out) known.push(`${id} ${label} ${(dev * 100).toFixed(1)}%: ${reason}`);
-  else {
+  const drift = dev - accepted.dev;
+  const drifted = Math.abs(drift) > KNOWN_DRIFT;
+  const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+  if (!out) {
     failures++;
     failed.push(`${id} ${label}: known deviation is back inside tolerance; remove the note`);
+  } else if (drifted) {
+    failures++;
+    failed.push(
+      `${id} ${label} ${percent(dev)}: moved ${percent(drift)} from the accepted ${percent(accepted.dev)}; ` +
+        'find what changed, then fix it or re-accept the new size',
+    );
+  } else {
+    known.push(`${id} ${label} ${percent(dev)} (accepted ${percent(accepted.dev)}): ${accepted.reason}`);
   }
-  return `${pad(`${(dev * 100).toFixed(1)}%`, 6)}${out ? '~' : ' '}`;
+  return `${pad(percent(dev), 6)}${out && !drifted ? '~' : '!'}`;
 }
 
 const argv = process.argv.slice(2);
@@ -399,18 +487,54 @@ for (const id of ids) {
 for (const id of drivelineIds) createPartMesh(id);
 console.log(`--- driveline meshes: ${drivelineIds.size} built ---\n`);
 
-console.log('--- engine: net full-throttle curve at the catalogue points ---');
-console.log('model            engine              kW@rated  factory   dev    Nm@peak factory   dev');
-for (const id of ids) {
-  const def = carModel(id);
-  const e = modelEngine(def);
-  const kw = (engineTorqueNm(e, e.powerPeakRpm) * e.powerPeakRpm * 2 * Math.PI) / 60 / 1000;
-  const nm = engineTorqueNm(e, e.torquePeakRpm);
+console.log('--- engine: the registry against the maker\'s printed figures ---');
+console.log(
+  'engine               kW   maker   dev    rpm  maker   curve kW  dev     Nm   maker   dev    rpm  maker        curve Nm  dev',
+);
+const engines = variantsOfKind('engine');
+for (const id of Object.keys(FACTORY_ENGINES)) {
+  if (!engines.some((v) => v.id === id)) {
+    failures++;
+    failed.push(`${id}: factory figures for an engine the registry no longer has`);
+  }
+}
+for (const v of engines) {
+  const e = v.engine!;
+  const maker = FACTORY_ENGINES[v.id];
+  if (!maker) {
+    failures++;
+    failed.push(`${v.id}: no maker's figures in FACTORY_ENGINES; add them with their source`);
+    console.log(`${v.id.padEnd(18)} no maker's figures`);
+    continue;
+  }
+  const makerKw = kilowatts(maker.power);
+  const makerNm = newtonMetres(maker.torque);
+  const [torqueFrom, torqueTo] = typeof maker.torqueRpm === 'number' ? [maker.torqueRpm, maker.torqueRpm] : maker.torqueRpm;
+  // The curve is read at the MAKER'S rpm, so a registry rpm typed wrong cannot move the
+  // point it is judged at. Torque over a stated plateau is read where the registry puts
+  // its peak, after that peak has been held to the plateau.
+  const curveKw = (engineTorqueNm(e, maker.powerRpm) * maker.powerRpm * 2 * Math.PI) / 60 / 1000;
+  const curveNm = engineTorqueNm(e, e.torquePeakRpm);
+  const powerRpmOk = e.powerPeakRpm === maker.powerRpm;
+  const torqueRpmOk = e.torquePeakRpm >= torqueFrom && e.torquePeakRpm <= torqueTo;
+  if (!powerRpmOk) {
+    failures++;
+    failed.push(`${v.id} power rpm ${e.powerPeakRpm}: the maker rates it at ${maker.powerRpm}`);
+  }
+  if (!torqueRpmOk) {
+    failures++;
+    failed.push(`${v.id} torque rpm ${e.torquePeakRpm}: the maker's peak is ${torqueFrom}-${torqueTo}`);
+  }
+  const makerTorqueRpm = torqueFrom === torqueTo ? String(torqueFrom) : `${torqueFrom}-${torqueTo}`;
   console.log(
-    `${id.padEnd(16)} ${def.engineId.padEnd(18)} ${pad(kw.toFixed(2), 7)}@${e.powerPeakRpm} ` +
-      `${pad(e.peakPowerKw, 6)} ${judged('kW', id, deviation(kw, e.peakPowerKw), TOLERANCE.engine)} ` +
-      `${pad(nm.toFixed(1), 6)} ${pad(e.peakTorqueNm, 6)} ` +
-      `${judged('Nm', id, deviation(nm, e.peakTorqueNm), TOLERANCE.engine)}`,
+    `${v.id.padEnd(18)} ${pad(e.peakPowerKw, 6)} ${pad(makerKw.toFixed(1), 6)} ` +
+      `${judged('registry kW', v.id, deviation(e.peakPowerKw, makerKw), TOLERANCE.engine)} ` +
+      `${pad(e.powerPeakRpm, 5)}${powerRpmOk ? ' ' : '!'} ${pad(maker.powerRpm, 5)}  ` +
+      `${pad(curveKw.toFixed(1), 7)} ${judged('curve kW', v.id, deviation(curveKw, makerKw), TOLERANCE.engine)} ` +
+      `${pad(e.peakTorqueNm, 6)} ${pad(makerNm.toFixed(1), 6)} ` +
+      `${judged('registry Nm', v.id, deviation(e.peakTorqueNm, makerNm), TOLERANCE.engine)} ` +
+      `${pad(e.torquePeakRpm, 5)}${torqueRpmOk ? ' ' : '!'} ${makerTorqueRpm.padStart(9)}  ` +
+      `${pad(curveNm.toFixed(1), 7)} ${judged('curve Nm', v.id, deviation(curveNm, makerNm), TOLERANCE.engine)}`,
   );
 }
 

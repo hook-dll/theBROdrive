@@ -250,7 +250,6 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
     case 'engine_zmz_21':
     case 'engine_zmz_24': return buildInline(b, spec, 1.09, false);
-    case 'engine_v8_5000': return buildV8(b);
     case 'engine_d4_2000': return buildInline(b, spec, 1.18, true);
     case 'engine_d6_6600': return buildInline(b, spec, 1.62, true);
     default: throw new Error(`unhandled engine variant: ${v.id}`);
@@ -302,29 +301,6 @@ function buildInline(b: MeshBuilder, spec: EngineSpec, scale: number, turbo: boo
     b.torus(`${id}_turbo`, 0.11 * scale, 0.045 * scale, 8, 18, rusty, [-ex - 0.06 * scale, blockTop * 0.75, tz]);
     b.cylinder(`${id}_turboin`, 0.07 * scale, 0.07 * scale, 0.16 * scale, 10, dark, [-ex - 0.06 * scale, blockTop * 0.75, tz], AXIS_X);
     b.cylinder(`${id}_airintake`, 0.05 * scale, 0.05 * scale, 0.3 * scale, 10, dark, [w * 0.35, headTop + coverH * 0.5, len * 0.42], AXIS_Z);
-  }
-}
-
-/** V8: two tilted banks form the V; exhaust runners count to four per side. */
-function buildV8(b: MeshBuilder): void {
-  const iron = cond(0x3a3f45, 0.8, 0.5);
-  const alloy = cond(0xaab0b6, 0.9, 0.3);
-  const dark = cond(0x23262a, 0.5, 0.7);
-  const rusty = cond(0x6a4a35, 0.85, 0.55);
-  const len = 0.72;
-
-  b.box('v8_crank', 0.52, 0.12, len, iron, [0, 0.07, 0]);
-  b.box('v8_bank_l', 0.3, 0.24, len * 0.9, alloy, [-0.15, 0.22, 0], [0, 0, 0.45]);
-  b.box('v8_bank_r', 0.3, 0.24, len * 0.9, alloy, [0.15, 0.22, 0], [0, 0, -0.45]);
-  b.box('v8_intake', 0.22, 0.08, len * 0.7, dark, [0, 0.32, 0]);
-
-  for (const side of [-1, 1]) {
-    const ex = side * 0.36;
-    b.cylinder(`v8_expipe_${side}`, 0.05, 0.05, len * 0.85, 12, rusty, [ex, 0.2, 0], AXIS_Z);
-    for (let i = 0; i < 4; i++) {
-      const z = (i / 3 - 0.5) * len * 0.6;
-      b.cylinder(`v8_runner_${side}_${i}`, 0.03, 0.03, 0.14, 8, rusty, [side * 0.29, 0.22, z], AXIS_X);
-    }
   }
 }
 

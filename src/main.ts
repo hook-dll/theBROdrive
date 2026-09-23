@@ -1,11 +1,9 @@
-
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import {  } from './core/surfaces';
 import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
@@ -24,7 +22,6 @@ import {
   viewDistanceFogScaleFor,
   viewDistanceFor,
 } from './game/settings';
-import {  } from './game/spawn';
 import { warmVariantAssets } from './world/poivariantbuild';
 import {
   Inventory,
@@ -90,6 +87,7 @@ import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
 import { HeatHaze } from './render/heathaze';
+import { beginDentFrame } from './render/carsurface';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -98,10 +96,9 @@ import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
-import {  } from './world/terrainmesh';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
-import { IndexedDbSaves, installVehicleAutosave } from './save/save';
+import { autosaveNow, IndexedDbSaves, installVehicleAutosave } from './save/save';
 import {
   claimResumeSlot,
   clearResumeSlot,
@@ -414,7 +411,7 @@ async function boot(): Promise<void> {
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
   // Heat-haze inputs: surface heat and the ground the view is grazing.
-  const heatHaze = new HeatHaze(terrain);
+  const heatHaze = new HeatHaze(terrain, road);
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -431,7 +428,7 @@ async function boot(): Promise<void> {
   }
   // One streaming unit per rendered frame prevents road and desert attachment from
   // stacking into the periodic 3-4 ms main-thread spikes visible on fast displays.
-  // Boot widens this deliberately; see `warmStreamedWorld`.
+  // Boot widens this deliberately; see `warmStreamedWorld` in app/bootwarmup.ts.
   const worldWork = new WorldWorkScheduler(STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME);
   const desert = new DesertTileStreamer(
     world.seed,
@@ -1005,7 +1002,6 @@ async function boot(): Promise<void> {
     // car instead of the title screen. See save/resume.ts.
     markResumeTarget,
   );
-
   world.onDelta((delta) => {
     if (delta.t === 'courier_storage' && delta.completedContractId) {
       hud.setToast('delivered — signed sticker envelope received');
@@ -1115,6 +1111,19 @@ async function boot(): Promise<void> {
   let medicineCapReleased = false;
   let dying = vitals.dead;
   let deathReloadScheduled = false;
+  // Dust, fuel and the car's pose change every tick and are only written through when
+  // something saves. Leaving the page — another tab, a closed window, a phone put to
+  // sleep — is the last moment the game is sure to run, so it saves then too. It does
+  // not mark the drive resumable: a quit or a death clears that on purpose right
+  // before the reload that hides this page, and the autosave that ran during the drive
+  // has already marked it otherwise. A death is never written: the slot keeps the
+  // drive from before it.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden' || dying) return;
+    autosaveNow(saves, stateForSave, saveName, (error) => {
+      console.error('autosave failed', error);
+    });
+  });
   const beginDeathSequence = (): void => {
     if (dying) return;
     dying = true;
@@ -1726,12 +1735,19 @@ async function boot(): Promise<void> {
   });
   /**
    * Holds the adaptive-resolution controller off the frames that are not worth
-   * judging. Every measurement taken before `settleLaunchResolution` has finished
+   * judging. Every measurement taken before `settleLaunchResolution` (app/bootwarmup.ts) has finished
    * belongs to the launch transient — freshly compiled shader variants, first
    * texture uploads, the boot GC — not to the cost of the drive, and letting it
    * judge those walked a healthy machine straight down to its resolution floor.
    */
   let adaptationFrozen = true;
+  /**
+   * Milliseconds per rendered frame that every car's dent passes may share. A crash
+   * that dents a high-detail body is ten-odd milliseconds of vertex work; spread at
+   * two a frame it crumples over a handful of frames, and the player's own car, synced
+   * first, is served first.
+   */
+  const DENT_FRAME_BUDGET_MS = 2;
 
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
@@ -1741,6 +1757,7 @@ async function boot(): Promise<void> {
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
 
     frameProfiler?.begin('vehicles');
+    beginDentFrame(DENT_FRAME_BUDGET_MS);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     traffic.syncVisuals(alpha);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,

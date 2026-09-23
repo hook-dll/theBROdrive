@@ -83,29 +83,32 @@ export interface BodyDent {
  */
 export const MAX_BODY_DENTS = 10;
 /** Deepest repeated blows to one place can drive a dent, metres. */
-export const MAX_BODY_DENT_DEPTH_M = 0.16;
-/** Widest a merged dent can spread, metres: about half a door. */
-export const MAX_BODY_DENT_RADIUS_M = 0.6;
+export const MAX_BODY_DENT_DEPTH_M = 0.35;
+/** Widest a merged dent can spread, metres: most of a nose or a whole door. */
+export const MAX_BODY_DENT_RADIUS_M = 0.9;
 
 /**
- * Records a dent in a car's bounded ring, merging a blow that lands on an existing
- * dent from the same side.
+ * Records a dent in a car's bounded ring, merging a blow whose bowl overlaps an
+ * existing dent's core from the same side.
  *
  * Merging is what keeps a car that keeps nosing into the same rock from pushing all
  * of its other history out of the ring, and it is also the honest physics: a second
- * hit on a crumpled wing deepens that crumple. The merged record is a NEW object and
- * moves to the newest end, so it is the last to be forgotten and a renderer that
- * compares records by identity sees that it changed.
+ * hit on a crumpled wing deepens and widens that crumple. It is also what keeps the
+ * shell a shell: two deep bowls side by side would ADD where they overlap, and at
+ * these depths the sum folds the skin through itself, where one wider dent does not.
+ * The merged record is a NEW object and moves to the newest end, so it is the last to
+ * be forgotten and a renderer that compares records by identity sees that it changed.
  */
 export function addBodyDent(dents: BodyDent[], dent: BodyDent): void {
   for (let i = 0; i < dents.length; i++) {
     const old = dents[i]!;
-    const reach = Math.max(old.radius, dent.radius) * 0.5;
+    const reach = (old.radius + dent.radius) * 0.5;
     const dx = old.x - dent.x;
     const dy = old.y - dent.y;
     const dz = old.z - dent.z;
+    const distance2 = dx * dx + dy * dy + dz * dz;
     const facing = old.nx * dent.nx + old.ny * dent.ny + old.nz * dent.nz;
-    if (dx * dx + dy * dy + dz * dz > reach * reach || facing < 0.8) continue;
+    if (distance2 > reach * reach || facing < 0.8) continue;
     const weight = old.depth + dent.depth;
     const a = weight > 0 ? old.depth / weight : 0.5;
     const b = 1 - a;
@@ -121,7 +124,11 @@ export function addBodyDent(dents: BodyDent[], dent: BodyDent): void {
       nx: nx / length,
       ny: ny / length,
       nz: nz / length,
-      radius: Math.min(MAX_BODY_DENT_RADIUS_M, Math.max(old.radius, dent.radius) * 1.06),
+      // Wide enough to cover both blows: the crumple spreads between them.
+      radius: Math.min(
+        MAX_BODY_DENT_RADIUS_M,
+        Math.max(old.radius, dent.radius) * 1.06 + Math.sqrt(distance2) * 0.5,
+      ),
       depth: Math.min(
         MAX_BODY_DENT_DEPTH_M,
         Math.max(old.depth, dent.depth) + Math.min(old.depth, dent.depth) * 0.6,

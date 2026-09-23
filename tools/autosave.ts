@@ -29,6 +29,7 @@ initial.cars['car:test'] = {
   fuelLitres: 20,
   dirt: 0,
   scratches: 0,
+  dents: [],
   waterLitres: 4,
   oilLitres: 3,
   engineTempC: COLD_SOAK_C,
@@ -139,6 +140,34 @@ check('save code keeps trunk item', roundTrip.cars['car:test']?.storage[3]?.id =
 check('save code keeps car pose', roundTrip.cars['car:test']?.x === 104, `x ${roundTrip.cars['car:test']?.x}`);
 check('save code keeps trailer state', roundTrip.trailers['trailer:test']?.x === 204 && roundTrip.trailers['trailer:test']?.hitchedTo === 'car:test', `x ${roundTrip.trailers['trailer:test']?.x}, hitch ${roundTrip.trailers['trailer:test']?.hitchedTo}`);
 
+// Body condition. Dust accumulates every tick and is not itself a save trigger, but the
+// next save must carry it; a dent is saved the moment it is recorded, and a dent on a
+// car the world does not keep (traffic runs in its own world) must not write at all.
+world.apply({ t: 'car_body_condition', carId: 'car:test', dirt: 0.42, scratches: 0.17 });
+await Promise.resolve();
+check('dust alone does not save', calls.length === 4, `${calls.length} writes`);
+const dent = { x: 0.1, y: 0.2, z: 2.1, nx: 0, ny: 0, nz: -1, radius: 0.5, depth: 0.2 };
+world.apply({ t: 'car_body_dent', carId: 'car:test', dent });
+await Promise.resolve();
+check('a dent autosaves', calls.length === 5, `${calls.length} writes`);
+const dented = calls[4]?.state.cars['car:test'];
+check(
+  'the autosave keeps dust and the dent',
+  dented?.dirt === 0.42 && dented.scratches === 0.17 && dented.dents.length === 1 && dented.dents[0]?.depth === 0.2,
+  `dirt ${dented?.dirt}, scratches ${dented?.scratches}, dents ${dented?.dents.length}`,
+);
+const bodyRoundTrip = decodeSaveCode(encodeSaveCode(calls[4]!.state)).cars['car:test'];
+check(
+  'save code keeps dust and the dent',
+  bodyRoundTrip?.dirt === 0.42 &&
+    bodyRoundTrip.dents.length === 1 &&
+    JSON.stringify(bodyRoundTrip.dents[0]) === JSON.stringify(dent),
+  JSON.stringify(bodyRoundTrip?.dents),
+);
+world.apply({ t: 'car_body_dent', carId: 'traffic:elsewhere', dent });
+await Promise.resolve();
+check('a dent on a car the world does not keep does not save', calls.length === 5, `${calls.length} writes`);
+
 stop();
 world.apply({
   t: 'car_lights',
@@ -157,7 +186,7 @@ check(
 );
 world.apply({ t: 'enter_car', carId: 'car:test' });
 await Promise.resolve();
-check('unsubscribe stops autosaves', calls.length === 4, `${calls.length} writes`);
+check('unsubscribe stops autosaves', calls.length === 5, `${calls.length} writes`);
 
 console.log(failures === 0 ? 'all checks passed' : `${failures} CHECK(S) FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;

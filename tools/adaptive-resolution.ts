@@ -168,7 +168,7 @@ function drive(
 
 // --- 5. The launch settle leaves on a verdict, not on quiet ---------------------
 //
-// This mirrors `settleLaunchResolution` in main.ts: discard the transient, then run
+// This mirrors `settleLaunchResolution` in src/app/bootwarmup.ts: discard the transient, then run
 // the real frame path until the controller has MEASURED the scale it is holding.
 // The first version of that loop left as soon as 60 frames passed without a change,
 // which on a machine that needs to step down is before the controller has said

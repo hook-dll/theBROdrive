@@ -1392,12 +1392,22 @@ export const SCRATCH_PER_IMPACT_CAP = 0.3;
  * rock at town speed, another car — to move the metal.
  */
 export const DENT_IMPACT_THRESHOLD_MPS = 3;
-/** Dent depth per m/s over the threshold, metres, before the ceiling. */
-export const DENT_DEPTH_PER_SEVERITY_M = 0.012;
+/**
+ * Dent depth per m/s over the threshold, metres, before the ceiling.
+ *
+ * Set by what a car body actually gives: a frontal hit on a rigid barrier at 56 km/h
+ * crushes the front of a period saloon by about half a metre, so the shell yields some
+ * three to four centimetres per m/s. The renderer cannot fold a shell that far without
+ * turning panels inside out, so its depth-per-radius clamp and the state's ceiling cut
+ * the top: 30 km/h leaves a dent about 17 cm deep across 45 cm, and 60 km/h or more
+ * caves in about 32 cm across the whole nose. It was 1.2 cm per m/s, which made a
+ * 60 km/h hit a 13 cm dimple.
+ */
+export const DENT_DEPTH_PER_SEVERITY_M = 0.03;
 /** A dent's smallest and largest spread across the panel, metres. */
 export const DENT_RADIUS_MIN_M = 0.2;
-export const DENT_RADIUS_MAX_M = 0.45;
-export const DENT_RADIUS_PER_SEVERITY_M = 0.02;
+export const DENT_RADIUS_MAX_M = 0.8;
+export const DENT_RADIUS_PER_SEVERITY_M = 0.045;
 
 /**
  * The dent a collision of `severityMps` leaves at a struck point on the chassis box,

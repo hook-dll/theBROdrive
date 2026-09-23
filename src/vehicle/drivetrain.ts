@@ -253,9 +253,19 @@ export function engineTorqueNm(
     torque = powerNm * (1 + x - x * x);
   }
 
+  return torque > 0 ? torque * fuelCutFade(rpm, cutRpm) : 0;
+}
+
+/**
+ * Share of fuelling the soft limiter leaves at this crank speed: 1 below its ramp,
+ * easing to 0 at the cut. It scales the GROSS torque, so an engine on its cut is
+ * motored — it still costs its friction — rather than running free.
+ */
+export function fuelCutFade(rpm: number, cutRpm: number): number {
   const ramp = (cutRpm - rpm) / LIMITER_RAMP_RPM;
-  if (ramp < 1) torque *= ramp * ramp * (3 - 2 * ramp);
-  return torque > 0 ? torque : 0;
+  if (ramp >= 1) return 1;
+  if (ramp <= 0) return 0;
+  return ramp * ramp * (3 - 2 * ramp);
 }
 
 /**
@@ -551,7 +561,12 @@ export class Drivetrain {
       // the autopilot were tuned on.
       const frictionCrank =
         engine.brakingCoeff * crankSpeedAbs + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
-      const driveCrank = (this.wotTorqueNm(this.rpmValue) + frictionCrank) * demand; // >= 0
+      // The limiter cuts FUEL, so it fades the gross torque, friction's share included:
+      // floored at the cut the net is minus the friction (the engine is motored and
+      // brakes), not zero, and there is no positive work left to burn fuel on.
+      const fuelled = fuelCutFade(this.rpmValue, engine.redlineRpm * this.thermalRevLimit);
+      const driveCrank =
+        (this.wotTorqueNm(this.rpmValue) + frictionCrank * fuelled) * demand; // >= 0
 
       const netCrank = driveCrank - frictionCrank; // signed Nm at the crank
 

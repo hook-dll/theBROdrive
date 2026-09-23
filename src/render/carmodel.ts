@@ -22,6 +22,7 @@ import {
   makeUnifiedSurfaceMaterial,
   setCarBodyCondition,
   setCarBodyPalettePaint,
+  weatherStaticCarPaint,
   type CarBodyFrame,
   type CarSurfaceFinish,
 } from './materials';
@@ -369,17 +370,15 @@ function stampCarBodyPositions(scene: THREE.Group, def: CarModelDef): void {
 }
 
 /**
- * The fixed condition of a static shell. Every static car is a roadside wreck or a
- * working find seen from afar, and both have stood in the desert: the key decides
- * how long, so the same wreck is equally sand-blasted on every pass. No per-frame
- * cost — this is written into its paint once, when the shell is made.
+ * How long a static shell has stood in the desert, as the share of its paint the dust
+ * has taken (0..1). Every static car is a roadside wreck or a working find seen from
+ * afar: the key decides how long, so the same wreck is equally sand-blasted on every
+ * pass. Written into its paint once (`weatherStaticCarPaint`), with the wear shader's
+ * gate left shut, so a POI full of wrecks costs what clean cars cost.
  */
-function derelictCondition(modelId: string, appearanceKey: string): { dirt: number; scratches: number } {
+function derelictDust(modelId: string, appearanceKey: string): number {
   const h = appearanceHash(`${modelId}:derelict`, appearanceKey);
-  return {
-    dirt: 0.55 + ((h & 0xffff) / 0xffff) * 0.4,
-    scratches: 0.35 + ((h >>> 16) / 0xffff) * 0.45,
-  };
+  return 0.35 + ((h & 0xffff) / 0xffff) * 0.25;
 }
 
 /**
@@ -1535,12 +1534,11 @@ function staticCarInstance(id: string, appearanceKey: string): StaticCarInstance
 /**
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
  * model puts them. This is what wrecks and scenery cars use, and it arrives already
- * weathered (`derelictCondition`).
+ * weathered (`derelictDust`).
  */
 export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
   const instance = staticCarInstance(id, appearanceKey);
-  const condition = derelictCondition(id, appearanceKey);
-  setCarBodyCondition(instance.paint, condition.dirt, condition.scratches);
+  weatherStaticCarPaint(instance.paint, derelictDust(id, appearanceKey));
   return instance.model;
 }
 

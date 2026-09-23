@@ -288,28 +288,6 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // ZMZ-13, the GAZ-13 Chaika's 5.53 litre V8: 143.4 kW (195 hp) at 4400 and
-    // 400.9 Nm (42 kgf·m) across 2000-2500, idle 500 (ZMZ spare-supply datasheet,
-    // parm.mybb.ru/viewtopic.php?id=398). The closest Soviet V8 to five litres.
-    id: 'engine_v8_5000',
-    kind: 'engine',
-    label: '5.5 ZMZ-13 V8',
-    mass: 245,
-    fits: ['car', 'truck'],
-    engine: {
-      fuel: 'petrol',
-      peakPowerKw: 143.4,
-      powerPeakRpm: 4400,
-      peakTorqueNm: 401,
-      torquePeakRpm: 2250,
-      redlineRpm: 4700,
-      idleRpm: 500,
-      bsfc: 0.36,
-      brakingCoeff: 0.085,
-      cylinders: 8,
-    },
-  },
-  {
     // Mercedes-Benz OM615 in the W123 200 D, 1976-79: 1.988 litres, 55 PS
     // (40.5 kW) at 4200 and 113 Nm at 2400, naturally aspirated (automobile-
     // catalog.com; rpm as Wikipedia gives them for the sister OM615.941). The
@@ -1059,7 +1037,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
  *
  *   small     1.10 kW/K   holds a four-cylinder (needs ~0.7-0.9)
  *   standard  1.65 kW/K   holds a six (needs ~1.5)
- *   large     2.45 kW/K   holds the V8 and the 6.6 truck diesel (needs ~1.9-2.3)
+ *   large     2.45 kW/K   holds the 6.6 truck diesel (needs ~2.3)
  *
  * Undersizing does not forbid the fit: the engine simply cannot hold temperature
  * under load, which is the failure the player is meant to diagnose. The mass

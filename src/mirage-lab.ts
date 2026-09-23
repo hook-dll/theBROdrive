@@ -373,7 +373,7 @@ export async function bootMirageLab(): Promise<void> {
   await sky.waitForAssets();
   const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin);
   const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin);
-  const heatHaze = new HeatHaze(terrain);
+  const heatHaze = new HeatHaze(terrain, road);
   const landscape = makeLandscape(road, terrain);
   const roadMesh = makeRoad(road);
   landscape.position.set(-origin.x, 0, -origin.z);

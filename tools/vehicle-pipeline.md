@@ -679,7 +679,7 @@ Runtime переводит частоты в per-kilogram spring rate с учё�
 
 `handlingProfile` выбирает механизм эпохи: люфт/скорость руля, driveline lag, bias-ply/radial response, relaxation и axle balance. Сначала выбрать ближайший существующий профиль. Новый профиль допустим только если у класса есть другой физический механизм, а не потому, что одна машина не попала в top speed.
 
-`wheelGrip` калибруется по period road-test lateral/braking data, не по ощущению «слишком скользко». `steerLock` калибруется turning radius. Не путать radius траектории центра кузова из `handling-bench` с factory outer-wheel radius: `tools/soviet-reality.ts` явно приводит их к одному определению.
+`wheelGrip` калибруется по period road-test lateral/braking data, не по ощущению «слишком скользко». `steerLock` калибруется turning radius. Не путать radius траектории центра кузова из `handling-bench` с factory outer-wheel radius: `tools/reality.ts` явно приводит их к одному определению.
 
 Рекомендуемые стартовые допуски при достоверном reference:
 
@@ -756,10 +756,10 @@ npx tsx tools/suspension-probe.ts <modelId>
 Для measured-vs-real таблицы существует:
 
 ```sh
-npx tsx tools/soviet-reality.ts [modelId ...]
+bun tools/reality.ts [modelId ...]      # или npm run bench:reality
 ```
 
-Но `REAL` сейчас содержит только Soviet pack ids. Новый pipeline должен иметь общий per-model reality manifest или расширенный bench; голые числа `handling-cli` без реальных targets не доказывают соответствие.
+`TARGETS` в `tools/reality.ts` — общий per-model manifest заводских цифр (геометрия, top, 0–100, разворот, торможение). Новая модель без записи в `TARGETS` не проходит gate: голые числа `handling-cli` без реальных targets не доказывают соответствие. Новый двигатель в registry без записи в `FACTORY_ENGINES` (мощность и момент в единицах первоисточника — kW/л.с./кгс·м — с оборотами и источником) тоже не проходит: registry и кривая сверяются с ней в пределах 1%. Принятое отклонение 0–100 записывается вместе с величиной (`known0to100: { reason, dev }`), и уход больше чем на 3 п.п. от неё валит прогон — заново принять можно только осознанно.
 
 ### Gate 4: cooling/service при новом агрегате
 
@@ -942,7 +942,7 @@ Reject при любом из признаков:
 1. Нет безопасного универсального unpack/intake wrapper.
 2. YFT/DFF classification пока находится в model/pack-specific code, а не в job profile.
 3. Нет автоматического `model-fits.json` generator без provisional entry.
-4. Нет общей таблицы real-world targets; `soviet-reality.ts` покрывает только Soviet ids.
+4. Цифры в `FACTORY_ENGINES` переписаны из источников, на которые ссылается registry; повторно по первоисточникам они не сверялись.
 5. `autopilot-bench.ts`, `playground-lap.ts`, `surface-feel.ts`, `vehicle-lights.ts`, `car-dirt.ts`, `cooling-drive.ts` и часть lifecycle checks имеют hard-coded model ids.
 6. Traffic bench не умеет forced model id.
 7. Нет автоматического screenshot A/B и per-distance visual report.

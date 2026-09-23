@@ -261,7 +261,7 @@ const matCrate = new THREE.MeshStandardMaterial({ color: 0x8a6238, roughness: 0.
 /** Trailer local forward, for turning body rotation into a world heading. */
 const FORWARD_LOCAL = { x: 0, y: 0, z: 1 } as const;
 /**
- * Slip-speed floor, m/s. Mirrors main.ts's SPRAY_REF_SPEED and the tyre model's
+ * Slip-speed floor, m/s. Mirrors app/wheeleffects.ts's SPRAY_REF_SPEED and the tyre model's
  * reference: without it a stationary trailer with turning wheels reports infinite
  * slip.
  */

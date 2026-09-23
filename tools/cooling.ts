@@ -35,7 +35,6 @@ const engineOf = (id: string): EngineSpec => variant(id).engine!;
 const radiatorOf = (id: string): RadiatorSpec => variant(id).radiator!;
 
 const SMALL_ENGINE = engineOf('engine_i4_1600');
-const BIG_ENGINE = engineOf('engine_v8_5000');
 const TRUCK_DIESEL = engineOf('engine_d6_6600');
 const SMALL_RAD = radiatorOf('radiator_small');
 const STANDARD_RAD = radiatorOf('radiator_standard');
@@ -87,15 +86,14 @@ check(
   'each catalogue engine maps onto a radiator class',
   preferredRadiatorClass(SMALL_ENGINE) === 'small' &&
     preferredRadiatorClass(engineOf('engine_i6_2800')) === 'standard' &&
-    preferredRadiatorClass(BIG_ENGINE) === 'large' &&
     preferredRadiatorClass(TRUCK_DIESEL) === 'large',
-  `1.6=${preferredRadiatorClass(SMALL_ENGINE)} 2.8=${preferredRadiatorClass(engineOf('engine_i6_2800'))} v8=${preferredRadiatorClass(BIG_ENGINE)} d6=${preferredRadiatorClass(TRUCK_DIESEL)}`,
+  `1.6=${preferredRadiatorClass(SMALL_ENGINE)} 2.8=${preferredRadiatorClass(engineOf('engine_i6_2800'))} d6=${preferredRadiatorClass(TRUCK_DIESEL)}`,
 );
 check(
   'an undersized radiator fits, derated, with a stated reason',
-  radiatorFit(BIG_ENGINE, SMALL_RAD).multiplier < 1 &&
-    radiatorFit(BIG_ENGINE, SMALL_RAD).warning !== null,
-  `${radiatorFit(BIG_ENGINE, SMALL_RAD).warning}`,
+  radiatorFit(TRUCK_DIESEL, SMALL_RAD).multiplier < 1 &&
+    radiatorFit(TRUCK_DIESEL, SMALL_RAD).warning !== null,
+  `${radiatorFit(TRUCK_DIESEL, SMALL_RAD).warning}`,
 );
 check(
   'an oversized radiator is allowed and capped, not a bonus',
@@ -148,13 +146,13 @@ check(
   `${warmUpTime.toFixed(0)} s to reach ${smallHeat.optimalMinC} C`,
 );
 
-const bigOnSmall = run(BIG_ENGINE, SMALL_RAD, {
+const bigOnSmall = run(TRUCK_DIESEL, SMALL_RAD, {
   seconds: 180,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
-const bigOnLarge = run(BIG_ENGINE, LARGE_RAD, {
+const bigOnLarge = run(TRUCK_DIESEL, LARGE_RAD, {
   seconds: 180,
   load: 1,
   revs: 0.8,
@@ -162,12 +160,12 @@ const bigOnLarge = run(BIG_ENGINE, LARGE_RAD, {
 });
 check(
   'big engine on a small radiator overheats under load',
-  bigOnSmall.temperature > engineHeat(BIG_ENGINE).warningC,
-  `${bigOnSmall.temperature.toFixed(1)} C vs warning ${engineHeat(BIG_ENGINE).warningC}`,
+  bigOnSmall.temperature > engineHeat(TRUCK_DIESEL).warningC,
+  `${bigOnSmall.temperature.toFixed(1)} C vs warning ${engineHeat(TRUCK_DIESEL).warningC}`,
 );
 check(
   'the same load on the right radiator copes',
-  bigOnLarge.temperature < engineHeat(BIG_ENGINE).warningC &&
+  bigOnLarge.temperature < engineHeat(TRUCK_DIESEL).warningC &&
     bigOnLarge.temperature < bigOnSmall.temperature - 20,
   `${bigOnLarge.temperature.toFixed(1)} C vs ${bigOnSmall.temperature.toFixed(1)} C`,
 );
@@ -248,17 +246,18 @@ check(
   `${cooling.temperature.toFixed(1)} C after 10 min stopped (air ${CRUISE_AMBIENT})`,
 );
 
-// Air temperature on a MARGINAL setup: the V8 on a standard core has no capability
-// to spare, so the afternoon is what decides whether it holds temperature. A car
-// that is comfortably cooled must NOT behave this way — see the next check.
-const hotDay = run(BIG_ENGINE, STANDARD_RAD, {
+// Air temperature on a MARGINAL setup: the six on a four-cylinder's core has no
+// capability to spare, so the afternoon is what decides whether it holds temperature.
+// A car that is comfortably cooled must NOT behave this way — see the next check.
+const MARGINAL_ENGINE = engineOf('engine_i6_2800');
+const hotDay = run(MARGINAL_ENGINE, SMALL_RAD, {
   seconds: 240,
   load: 0.8,
   revs: 0.7,
   speedMps: CRUISE_SPEED,
   ambientC: 46,
 });
-const coolNight = run(BIG_ENGINE, STANDARD_RAD, {
+const coolNight = run(MARGINAL_ENGINE, SMALL_RAD, {
   seconds: 240,
   load: 0.8,
   revs: 0.7,
@@ -268,8 +267,8 @@ const coolNight = run(BIG_ENGINE, STANDARD_RAD, {
 check(
   'desert afternoon cooks a marginal radiator that copes at night',
   hotDay.temperature > coolNight.temperature + 25 &&
-    hotDay.temperature > engineHeat(BIG_ENGINE).warningC &&
-    coolNight.temperature < engineHeat(BIG_ENGINE).warningC,
+    hotDay.temperature > engineHeat(MARGINAL_ENGINE).warningC &&
+    coolNight.temperature < engineHeat(MARGINAL_ENGINE).warningC,
   `46 C air -> ${hotDay.temperature.toFixed(1)} C, 14 C air -> ${coolNight.temperature.toFixed(1)} C`,
 );
 check(
@@ -305,21 +304,21 @@ check(
 
 console.log('cooling: robustness');
 
-const fast = run(BIG_ENGINE, SMALL_RAD, {
+const fast = run(TRUCK_DIESEL, SMALL_RAD, {
   seconds: 120,
   dt: 1 / 240,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
-const slow = run(BIG_ENGINE, SMALL_RAD, {
+const slow = run(TRUCK_DIESEL, SMALL_RAD, {
   seconds: 120,
   dt: 0.2,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
-const stutter = run(BIG_ENGINE, SMALL_RAD, {
+const stutter = run(TRUCK_DIESEL, SMALL_RAD, {
   seconds: 120,
   dt: 2,
   load: 1,
@@ -400,10 +399,10 @@ check(
 console.log('cooling: consequences');
 
 const cooked = (() => {
-  const system = new EngineCoolingSystem(engineHeat(BIG_ENGINE).operatingC);
-  system.configure(BIG_ENGINE, SMALL_RAD);
+  const system = new EngineCoolingSystem(engineHeat(TRUCK_DIESEL).operatingC);
+  system.configure(TRUCK_DIESEL, SMALL_RAD);
   system.setWater(0);
-  system.setTemperature(engineHeat(BIG_ENGINE).operatingC);
+  system.setTemperature(engineHeat(TRUCK_DIESEL).operatingC);
   let sawHot = false;
   let sawCritical = false;
   let seized = false;
@@ -474,7 +473,7 @@ check(
   'cold penalty present, warm engine unpenalised',
 );
 
-const boiled = run(BIG_ENGINE, SMALL_RAD, {
+const boiled = run(TRUCK_DIESEL, SMALL_RAD, {
   seconds: 600,
   load: 1,
   revs: 0.9,
@@ -518,8 +517,8 @@ check(
 console.log(
   `\nequilibria at 38 C air, 90 km/h: ` +
     `1.6+small ${warmUp.temperature.toFixed(0)} C, ` +
-    `V8+large ${bigOnLarge.temperature.toFixed(0)} C, ` +
-    `V8+small ${bigOnSmall.temperature.toFixed(0)} C`,
+    `d6+large ${bigOnLarge.temperature.toFixed(0)} C, ` +
+    `d6+small ${bigOnSmall.temperature.toFixed(0)} C`,
 );
 console.log(failures === 0 ? 'ALL OK' : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

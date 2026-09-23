@@ -51,13 +51,20 @@ export interface SaveBackend {
 }
 
 /**
- * Saves after vehicle entry/exit and discrete mutations made while on foot. The
- * microtask is load-bearing: exit teleports the player and trunk transfers update
- * inventory immediately before storage, so the save must observe the completed
- * interaction rather than the first delta in it.
+ * Saves after vehicle entry/exit, a dent in a kept car, and discrete mutations made
+ * while on foot. The microtask is load-bearing: exit teleports the player and trunk
+ * transfers update inventory immediately before storage, so the save must observe the
+ * completed interaction rather than the first delta in it.
+ *
+ * A dent is saved the moment it is recorded because it is the one piece of body
+ * condition a reload would visibly undo — the car would come back straight. It is
+ * booked only for the world's own cars: traffic runs in a world of its own, so a
+ * pile-up never reaches this listener.
  *
  * `stateForSave` lets the runtime flush physics-owned car/trailer transforms and
- * throttled vehicle values before the backend snapshots the serialisable state.
+ * throttled vehicle values — among them the shell's dirt, which accumulates every
+ * tick and is written through on every save — before the backend snapshots the
+ * serialisable state.
  *
  * `onSaved` is called with the slot id as each autosave is BOOKED, not when it lands,
  * and deliberately: it exists so a reload can find the drive that was in progress (see
@@ -75,6 +82,9 @@ export function installVehicleAutosave(
 ): () => void {
   return world.onDelta((delta) => {
     switch (delta.t) {
+      case 'car_body_dent':
+        if (!world.state.cars[delta.carId]) return;
+        break;
       case 'enter_car':
       case 'exit_car':
       case 'car_storage':
@@ -90,12 +100,27 @@ export function installVehicleAutosave(
         return;
     }
     queueMicrotask(() => {
-      const state = stateForSave();
-      const slotId = `slot-${state.seed}`;
-      onSaved?.(slotId);
-      void backend.save(slotId, nameForState(state), state).catch(onError);
+      autosaveNow(backend, stateForSave, nameForState, onError, onSaved);
     });
   });
+}
+
+/**
+ * Writes the autosave slot now: the booking every autosave trigger shares, and what
+ * the runtime calls when the page is hidden, so a drive left mid-road keeps its dust,
+ * fuel and position rather than those of the last discrete event.
+ */
+export function autosaveNow(
+  backend: Pick<SaveBackend, 'save'>,
+  stateForSave: () => WorldState,
+  nameForState: (state: WorldState) => string,
+  onError: (error: unknown) => void,
+  onSaved?: (slotId: string) => void,
+): void {
+  const state = stateForSave();
+  const slotId = `slot-${state.seed}`;
+  onSaved?.(slotId);
+  void backend.save(slotId, nameForState(state), state).catch(onError);
 }
 
 const DB_NAME = 'thebrodrive-saves';

@@ -126,7 +126,7 @@ const EYE_BELOW_WATER_M = 0.3;
 const VANISH_GONE_M = 2;
 const VANISH_FULL_M = VANISH_GONE_M + MIRAGE_FADE_BAND_M;
 /**
- * Where the dev jump in main.ts parks to look at a lake. Nothing to do with the fade any
+ * Where the dev jump in app/devtools.ts parks to look at a lake. Nothing to do with the fade any
  * more: the water is fully drawn from a couple of metres out, so the standoff is only
  * about seeing the whole sheet and its fringe at once.
  */
@@ -1022,7 +1022,7 @@ export class LakeWater {
    * the hollow keeps going past the shoreline — so neither the window's centre nor a
    * fixed radius finds solid ground with a view. This walks out from the water's centre
    * toward the road and stops at the first lattice point that stands clear of the surface
-   * and clear of the approach fade. Only the dev jump in main.ts uses it.
+   * and clear of the approach fade. Only the dev jump in app/devtools.ts uses it.
    */
   viewpoint(): { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number } | null {
     if (this.phase !== 'ready') return null;
