@@ -59,6 +59,11 @@ questions live in `docs/country.md`.
   water towers, elevators, masts, slim power-line masts across the fields.
 - ROADSIDE: ditches, hummocks, ravines to 14 m from the asphalt; timber poles on
   concrete stubs and square concrete poles.
+- TREES REDREW THEMSELVES AS THE CAR APPROACHED: the near level's leaf masses were
+  built four times finer than the far level's, so every crown in view changed shape at
+  the 60 m swap and a wood rippled constantly. Leaf masses are now one shape at every
+  level (20 faces each); only bark marks and trunk facets differ, below a pixel at the
+  swap. Rowan bunches likewise. A birch wood costs 16 ms of GPU a frame instead of 35.
 - Lighter palette and a violet fill in shade; the desert's ink dots are off the ground.
 
 #### Fixed

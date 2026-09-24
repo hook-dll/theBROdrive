@@ -224,11 +224,24 @@ function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side
 }
 
 /**
+ * Subdivision of every leaf mass, near and far alike (see `blob`). 0: twenty faces a
+ * mass. At 1 (eighty) for every tree out to 420 m a birch wood cost 35 ms of GPU a
+ * frame instead of 17; the crown lighting (`finishCrown`) rounds the coarse masses.
+ */
+const CROWN_DETAIL = 0;
+
+/**
  * One mass of leaves: a lumpy ellipsoid. The lumps come from the direction alone, so
  * the faces stay joined; neighbouring faces take slightly different tones of the same
  * green, which is what makes a crown read as foliage and not as a gem. A `hanging`
  * mass narrows to a point below — a birch's leaves stream down from the twig — where
  * an ordinary one has a soft flat shelf underneath.
+ *
+ * THE SAME AT EVERY LEVEL. A crown's outline is what the eye tracks as a tree comes
+ * near; built finer for the near level, every crown in view changed shape at the swap
+ * distance, and driving through a wood was a constant ripple of trees redrawing
+ * themselves. The levels differ only in bark marks, trunk facets and stubs, which are
+ * below a pixel where they swap.
  */
 function blob(
   cx: number,
@@ -237,12 +250,11 @@ function blob(
   rx: number,
   ry: number,
   rz: number,
-  near: boolean,
   tones: readonly number[],
   seed: number,
   hanging = false,
 ): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(1, near ? 1 : 0);
+  const g = new THREE.IcosahedronGeometry(1, CROWN_DETAIL);
   const p = g.getAttribute('position');
   for (let k = 0; k < p.count; k++) {
     const x = p.getX(k);
@@ -434,17 +446,17 @@ function birchGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     parts.push(limb(from, bend, to, 0.06, 0.02, near ? 4 : 3, pal.twig));
     junctions.push([y, a]);
     const r = (1.2 - 0.5 * k) * (0.8 + rnd() * 0.35);
-    leaves.push(blob(to.x, to.y - 0.3, to.z, r, r * (1.3 + rnd() * 0.3), r, near, rotated(pal.birchLeaf, j), seed * 31 + j, true));
+    leaves.push(blob(to.x, to.y - 0.3, to.z, r, r * (1.3 + rnd() * 0.3), r, rotated(pal.birchLeaf, j), seed * 31 + j, true));
     // A second, smaller mass half-way out: the branch is leafy along its length.
     const r2 = r * (0.6 + rnd() * 0.2);
-    leaves.push(blob(bend.x, bend.y - 0.2, bend.z, r2, r2 * 1.3, r2, near, rotated(pal.birchLeaf, j + 1), seed * 31 + j + 40, true));
+    leaves.push(blob(bend.x, bend.y - 0.2, bend.z, r2, r2 * 1.3, r2, rotated(pal.birchLeaf, j + 1), seed * 31 + j + 40, true));
   }
   // The leader and the crown's heart, so it is one crown and not a mobile.
   const top = axisAt(rings, H * 0.94, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.9, top.z, 0.8, 1.5, 0.8, near, pal.birchLeaf, seed * 31 + 90, true));
+  leaves.push(blob(top.x, H * 0.9, top.z, 0.8, 1.5, 0.8, pal.birchLeaf, seed * 31 + 90, true));
   const heart = axisAt(rings, H * 0.62, new THREE.Vector3());
   const fill = 1.3 + rnd() * 0.3;
-  leaves.push(blob(heart.x, H * 0.62, heart.z, fill, fill * 1.6, fill, near, rotated(pal.birchLeaf, 1), seed * 31 + 91, true));
+  leaves.push(blob(heart.x, H * 0.62, heart.z, fill, fill * 1.6, fill, rotated(pal.birchLeaf, 1), seed * 31 + 91, true));
   const crownMidY = (crownBase + H) / 2;
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), heart.x, crownMidY, heart.z, crownW + 0.8, (H - crownBase) / 2 + 0.8, crownW + 0.8);
   if (near) {
@@ -587,7 +599,7 @@ function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: 
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
   const cy = H - ry;
-  leaves.push(blob(top.x, cy, top.z, rx * 0.8, ry * 0.85, rx * 0.8, near, tones, seed * 17 + 50));
+  leaves.push(blob(top.x, cy, top.z, rx * 0.8, ry * 0.85, rx * 0.8, tones, seed * 17 + 50));
   const masses = 8 + Math.floor(rnd() * 3);
   const turn = rnd() * Math.PI * 2;
   let limbs = 0;
@@ -599,7 +611,7 @@ function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: 
     const py = cy + e * ry * 0.72;
     const pz = top.z + Math.sin(a) * flat * rx * 0.72;
     const r = (0.48 + rnd() * 0.2) * rx * (1 - 0.2 * Math.max(0, e));
-    leaves.push(blob(px, py, pz, r, r * 0.9, r, near, rotated(tones, j), seed * 17 + j));
+    leaves.push(blob(px, py, pz, r, r * 0.9, r, rotated(tones, j), seed * 17 + j));
     // Limbs to the lower masses: what shows of the wood under a full crown.
     if (e < 0.35 && limbs < 4) {
       limbs++;
@@ -650,12 +662,12 @@ function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     parts.push(limb(from, bend, to, 0.1, 0.04, near ? 4 : 3, pal.pineBark));
     // Pine needles sit in flat plates on top of their limbs, not in balls.
     const r = 1.5 + rnd() * 0.6;
-    leaves.push(blob(to.x, to.y + 0.25, to.z, r, r * 0.55, r * (0.8 + rnd() * 0.3), near, rotated(pal.pine, j), seed * 23 + j));
+    leaves.push(blob(to.x, to.y + 0.25, to.z, r, r * 0.55, r * (0.8 + rnd() * 0.3), rotated(pal.pine, j), seed * 23 + j));
     const r2 = r * 0.75;
-    leaves.push(blob(bend.x, bend.y + 0.45, bend.z, r2, r2 * 0.6, r2, near, rotated(pal.pine, j + 1), seed * 23 + j + 40));
+    leaves.push(blob(bend.x, bend.y + 0.45, bend.z, r2, r2 * 0.6, r2, rotated(pal.pine, j + 1), seed * 23 + j + 40));
   }
   const top = axisAt(rings, H * 0.92, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.93, top.z, 1.6, 0.9, 1.6, near, pal.pine, seed * 23 + 90));
+  leaves.push(blob(top.x, H * 0.93, top.z, 1.6, 0.9, 1.6, pal.pine, seed * 23 + 90));
   // Dead stubs on the bare stem: short, pointing down, a pine's bare trunk is never clean.
   if (near) {
     const stubs = 6 + Math.floor(rnd() * 5);
@@ -711,12 +723,12 @@ function aspenGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     parts.push(limb(from, bend, to, 0.055, 0.02, near ? 4 : 3, pal.twig));
     junctions.push([y, a]);
     const r = (1.05 - 0.35 * k) * (0.85 + rnd() * 0.3);
-    leaves.push(blob(to.x, to.y, to.z, r, r * 1.1, r, near, rotated(pal.aspenLeaf, j), seed * 29 + j));
+    leaves.push(blob(to.x, to.y, to.z, r, r * 1.1, r, rotated(pal.aspenLeaf, j), seed * 29 + j));
   }
   const top = axisAt(rings, H * 0.95, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.92, top.z, 0.9, 1.3, 0.9, near, pal.aspenLeaf, seed * 29 + 90));
+  leaves.push(blob(top.x, H * 0.92, top.z, 0.9, 1.3, 0.9, pal.aspenLeaf, seed * 29 + 90));
   const heart = axisAt(rings, H * 0.72, new THREE.Vector3());
-  leaves.push(blob(heart.x, H * 0.72, heart.z, 1.3, 1.8, 1.3, near, rotated(pal.aspenLeaf, 1), seed * 29 + 91));
+  leaves.push(blob(heart.x, H * 0.72, heart.z, 1.3, 1.8, 1.3, rotated(pal.aspenLeaf, 1), seed * 29 + 91));
   if (near) {
     // Dark diamonds: short, tall lenses — the aspen's lenticels are upright, a birch's lie flat.
     const marks = 10 + Math.floor(rnd() * 7);
@@ -755,7 +767,7 @@ function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const rx = 4.6 + rnd() * 1.3;
   const ry = (H - fork) / 2 + 0.4;
   const cy = fork + ry - 0.3;
-  leaves.push(blob(top.x, cy + 0.4, top.z, rx * 0.68, ry * 0.75, rx * 0.68, near, pal.oakLeaf, seed * 31 + 70));
+  leaves.push(blob(top.x, cy + 0.4, top.z, rx * 0.68, ry * 0.75, rx * 0.68, pal.oakLeaf, seed * 31 + 70));
   const limbs = 4 + Math.floor(rnd() * 3);
   const turn = rnd() * Math.PI * 2;
   for (let j = 0; j < limbs; j++) {
@@ -771,9 +783,9 @@ function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     to.set(from.x + dx * L, from.y + dy * L + 0.5, from.z + dz * L);
     parts.push(limb(from, bend, to, 0.26, 0.09, near ? 5 : 4, pal.oakBark));
     const r = 1.8 + rnd() * 0.7;
-    leaves.push(blob(to.x, to.y + 0.6, to.z, r, r * 0.75, r, near, rotated(pal.oakLeaf, j), seed * 31 + j));
+    leaves.push(blob(to.x, to.y + 0.6, to.z, r, r * 0.75, r, rotated(pal.oakLeaf, j), seed * 31 + j));
     const r2 = 1.3 + rnd() * 0.5;
-    leaves.push(blob(bend.x, bend.y + 1.0, bend.z, r2, r2 * 0.8, r2, near, rotated(pal.oakLeaf, j + 1), seed * 31 + j + 40));
+    leaves.push(blob(bend.x, bend.y + 1.0, bend.z, r2, r2 * 0.8, r2, rotated(pal.oakLeaf, j + 1), seed * 31 + j + 40));
   }
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), top.x, cy, top.z, rx + 0.8, ry + 0.8, rx + 0.8);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
@@ -814,10 +826,10 @@ function alderGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     for (const side of [0, Math.PI]) {
       const r = (1.35 - 0.5 * k) * (0.85 + rnd() * 0.3);
       const d = ring * (0.35 + rnd() * 0.25);
-      leaves.push(blob(Math.cos(a + side) * d, y + (rnd() - 0.5) * 0.8, Math.sin(a + side) * d, r, r * 1.2, r, near, rotated(pal.alderLeaf, j), seed * 37 + j * 2 + (side ? 1 : 0)));
+      leaves.push(blob(Math.cos(a + side) * d, y + (rnd() - 0.5) * 0.8, Math.sin(a + side) * d, r, r * 1.2, r, rotated(pal.alderLeaf, j), seed * 37 + j * 2 + (side ? 1 : 0)));
     }
   }
-  leaves.push(blob(0, H - 0.9, 0, 0.8, 1.1, 0.8, near, pal.alderLeaf, seed * 37 + 90));
+  leaves.push(blob(0, H - 0.9, 0, 0.8, 1.1, 0.8, pal.alderLeaf, seed * 37 + 90));
   const cy = (crownBase + H) / 2;
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), 0, cy, 0, rx + 0.8, (H - crownBase) / 2 + 0.8, rx + 0.8);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
@@ -850,10 +862,10 @@ function willowGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     to.set(from.x + Math.cos(a) * out, from.y + up, from.z + Math.sin(a) * out);
     parts.push(limb(from, bend, to, 0.2, 0.07, near ? 5 : 4, pal.willowBark));
     const r = 1.6 + rnd() * 0.6;
-    leaves.push(blob(to.x, to.y, to.z, r, r * 0.9, r, near, rotated(pal.willowLeaf, j), seed * 41 + j));
+    leaves.push(blob(to.x, to.y, to.z, r, r * 0.9, r, rotated(pal.willowLeaf, j), seed * 41 + j));
   }
   const cy = H - 2.4;
-  leaves.push(blob(from.x, cy, from.z, rx * 0.7, 2.2, rx * 0.7, near, pal.willowLeaf, seed * 41 + 60));
+  leaves.push(blob(from.x, cy, from.z, rx * 0.7, 2.2, rx * 0.7, pal.willowLeaf, seed * 41 + 60));
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), from.x, cy, from.z, rx + 0.8, 3.2, rx + 0.8);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
 }
@@ -897,23 +909,24 @@ function rowanGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     to.set(from.x + Math.cos(a) * reach, y + reach * 0.7, from.z + Math.sin(a) * reach);
     parts.push(limb(from, bend, to, 0.04, 0.015, 3, pal.twig));
     const r = (0.8 - 0.25 * k) * (0.85 + rnd() * 0.3);
-    leaves.push(blob(to.x, to.y, to.z, r, r * 0.85, r, near, rotated(pal.rowanLeaf, j), seed * 43 + j));
+    leaves.push(blob(to.x, to.y, to.z, r, r * 0.85, r, rotated(pal.rowanLeaf, j), seed * 43 + j));
     // Clusters hang under the outer side of a mass, where the sun finds them.
-    // Flat bunches, many and small: a few big balls read as apples.
-    const clusters = near ? 3 : 1;
+    // Flat bunches, many and small: a few big balls read as apples. The same at both
+    // levels: a bunch appearing at the swap distance is a pop like any other.
+    const clusters = 2;
     for (let c = 0; c < clusters; c++) {
       const ca = a + (rnd() - 0.5) * 1.6;
-      const cr = near ? 0.11 + rnd() * 0.04 : 0.2;
+      const cr = 0.12 + rnd() * 0.04;
       berries.push([to.x + Math.cos(ca) * r * 0.9, to.y - r * (0.1 + rnd() * 0.4), to.z + Math.sin(ca) * r * 0.9, cr]);
     }
   }
   const heart = axisAt(rings, (crownBase + H) / 2, new THREE.Vector3());
-  leaves.push(blob(heart.x, heart.y, heart.z, crownW * 0.7, crownW * 0.9, crownW * 0.7, near, pal.rowanLeaf, seed * 43 + 90));
+  leaves.push(blob(heart.x, heart.y, heart.z, crownW * 0.7, crownW * 0.9, crownW * 0.7, pal.rowanLeaf, seed * 43 + 90));
   // A bunch is a few berries, not one disc: three small balls hanging together.
   for (const [x, y, z, r] of berries) {
     for (let b = 0; b < 3; b++) {
       const ba = b * 2.1 + x;
-      parts.push(blob(x + Math.cos(ba) * r * 0.9, y - b * r * 0.5, z + Math.sin(ba) * r * 0.9, r, r, r, false, [pal.rowanBerry], seed + b));
+      parts.push(blob(x + Math.cos(ba) * r * 0.9, y - b * r * 0.5, z + Math.sin(ba) * r * 0.9, r, r, r, [pal.rowanBerry], seed + b));
     }
   }
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), heart.x, heart.y, heart.z, crownW + 0.7, (H - crownBase) / 2 + 0.7, crownW + 0.7);
@@ -940,7 +953,7 @@ function bushGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     const h = 1.5 + rnd() * 0.8 - d * 0.5;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
-    leaves.push(blob(x, h, z, r, r * 1.15, r, near, rotated(pal.bush, i), seed * 19 + i));
+    leaves.push(blob(x, h, z, r, r * 1.15, r, rotated(pal.bush, i), seed * 19 + i));
     from.set(x * 0.15, -0.2, z * 0.15);
     to.set(x * 0.8, h - r * 0.5, z * 0.8);
     bend.set(x * 0.4, (h - r * 0.5) * 0.5, z * 0.4);
