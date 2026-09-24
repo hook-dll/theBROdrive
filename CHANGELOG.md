@@ -38,9 +38,15 @@ questions live in `docs/country.md`.
   spruce. Crowns are lit as one volume and do not shadow themselves. The downloaded
   Quaternius models, their prep script and the country lab are gone.
 - THE FOREST IS DRAWN IN FOUR LEVELS — near to 60 m, the far model still shadowed to
-  110 m, unshadowed to 420 m, baked impostors to 2 km over a canopy blanket — never by
-  scaling. Planting follows woods, copses, shelter belts two to three rows wide, ravine
-  floors, ditch willow and fallow birch; lone trees are one in several square kilometres.
+  110 m, unshadowed to 420 m, baked impostors beyond — never by scaling. A tree of a
+  wood is an impostor to 2 km and then the canopy blanket; a tree OUTSIDE a wood (belt,
+  copse, a wood's edge, a lone tree) stays an impostor to 6 km, since the blanket draws
+  only woods and a farmland horizon is made of exactly those trees. Far tiles carry only
+  their open trees and are fetched whole as they come within 2 km. Planting follows
+  woods, copses, shelter belts two to three rows wide, ravine floors, ditch willow and
+  fallow birch; lone trees are one in several square kilometres.
+- A WOOD SEEN AS A MASS IS DARKER THAN ANY FIELD. The canopy blanket's birch colour was
+  the birch leaf's own, the meadow's colour: birch woods on the horizon vanished.
 - GRASS IS GPU TUFTS TO 95 M in the ground's own colour, lit as the ground, shadowed at
   the root, flattened by wheels and feet and standing back up over 25 s.
 - DEPTH WITHOUT MESAS: aerial perspective in the post pass, and landmarks — churches,
@@ -53,6 +59,11 @@ questions live in `docs/country.md`.
 
 - DARK SHARDS ACROSS EVERY MEADOW: grass back faces were lit from below. The patch meant
   to light both sides replaced a line that was still an `#include`, so it never applied.
+- THE DISTANCE WAS BARE AND TREES APPEARED OUT OF NOWHERE: only the first 16,384 far
+  trees were ever drawn. three.js fixes an instanced draw's maximum count at the first
+  draw and keeps it when the buffer is replaced, so once the impostor buffer grew, 95% of
+  the trees planted out to 2 km were stored and never shown — the land stood empty past
+  about a kilometre and filled in only as the player drove up to it.
 
 #### Removed
 

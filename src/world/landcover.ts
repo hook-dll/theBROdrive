@@ -108,8 +108,11 @@ const SUMMER: Palette = {
   meadowLush: hex(0x93aa5e),
   margin: hex(0xa3ad6a),
   forestFloor: hex(0x7f8a55),
-  canopySpruce: hex(0x3f7a60),
-  canopyBirch: hex(0x8dab53),
+  // A wood seen as a mass is darker than any field: its crowns shade one another. At
+  // the birch's own leaf colour (0x8dab53) a birch wood two kilometres out was the
+  // meadow's colour and vanished; only spruce woods showed on the horizon.
+  canopySpruce: hex(0x2f5e4c),
+  canopyBirch: hex(0x5f843f),
   crops: [
     hex(0xe8cf7a), // wheat, ripe
     hex(0xd9c98f), // rye, greyer

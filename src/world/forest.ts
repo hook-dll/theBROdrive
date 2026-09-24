@@ -18,6 +18,9 @@ import type { Road } from './road';
  *   FAR    to `IMPOSTOR_FROM_M`: the thinned model, no shadow.
  *   IMPOSTOR  to `IMPOSTOR_TO_M`: a camera-facing quad baked from the far model
  *          (world/impostors.ts), dissolving into the canopy blanket at the far end.
+ *          A tree standing OUTSIDE a wood — belt, copse, a wood's edge, a lone tree —
+ *          goes on as an impostor to `IMPOSTOR_OPEN_TO_M`: the blanket only draws
+ *          woods, and a farmland horizon is made of exactly those trees.
  *
  * Models come from the near tiles (world/deserttiles.ts plants them with exact ground
  * heights and collides their trunks); impostors from this module's own worker, which
@@ -35,13 +38,26 @@ const NEAR_M = 60;
 const SHADOW_M = 110;
 export const IMPOSTOR_FROM_M = 420;
 export const IMPOSTOR_TO_M = 2000;
+/** How far a tree outside a wood stays drawn: the horizon's belts and copses. */
+export const IMPOSTOR_OPEN_TO_M = 6000;
 const REBUCKET_M = 14;
 const VARIANT_TAG = 0x46524553;
 const SHAPE_TAG = 0x53484150;
-/** Impostor tiles are kept out to this many tiles past the impostor radius. */
-const IMPOSTOR_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 1;
+/** Impostor tiles are kept out to this many tiles: the open trees' reach. */
+const IMPOSTOR_TILE_RADIUS = Math.ceil(IMPOSTOR_OPEN_TO_M / DESERT_TILE_SIZE) + 1;
+/** Within this many tiles a tile carries all its trees; past it only the open ones. */
+const FULL_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 1;
 /** Re-anchor the impostor buffer when the camera strays this far from its anchor. */
 const ANCHOR_REBASE_M = 20_000;
+
+/** A far tile's trees, as the worker planted them; `openOnly` when the woods are left out. */
+interface ImpostorTile {
+  readonly tx: number;
+  readonly tz: number;
+  readonly trees: Float32Array;
+  readonly count: number;
+  readonly openOnly: boolean;
+}
 
 interface TileTrees {
   readonly centreX: number;
@@ -130,7 +146,11 @@ export class ForestRenderer {
   private worker: Worker | null = null;
   private workerReady = false;
   private inFlight: string | null = null;
-  private readonly impostorTiles = new Map<string, { tx: number; tz: number; trees: Float32Array; count: number }>();
+  /**
+   * Impostor tiles. A tree's tint (float 6) is stored NEGATIVE when it stands outside
+   * a wood: the impostor shader reads the sign as its reach, the magnitude as tint.
+   */
+  private readonly impostorTiles = new Map<string, ImpostorTile>();
   private centreTx = Number.NaN;
   private centreTz = Number.NaN;
 
@@ -164,7 +184,7 @@ export class ForestRenderer {
   private maybeBake(): void {
     if (this.atlas || !this.renderer || !this.variants) return;
     this.atlas = bakeImpostorAtlas(this.renderer, this.variants);
-    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_TO_M);
+    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_TO_M, IMPOSTOR_OPEN_TO_M);
     this.scene.add(this.impostors.mesh);
     // Tiles that arrived before the atlas existed are written now.
     for (const [key, tile] of this.impostorTiles) this.writeImpostorTile(key, tile);
@@ -196,6 +216,9 @@ export class ForestRenderer {
     const key = `${message.tx},${message.tz}`;
     if (this.inFlight === key) this.inFlight = null;
     if (this.wantsImpostorTile(message.tx, message.tz)) {
+      for (let i = 0; i < message.count; i++) {
+        if (message.open[i]) message.trees[i * TREE_STRIDE + 6] = -message.trees[i * TREE_STRIDE + 6]!;
+      }
       const cleared = clearTrees(
         this.clearings,
         (message.tx + 0.5) * DESERT_TILE_SIZE,
@@ -203,7 +226,7 @@ export class ForestRenderer {
         message.trees,
         message.count,
       );
-      const tile = { tx: message.tx, tz: message.tz, trees: cleared.trees, count: cleared.count };
+      const tile = { tx: message.tx, tz: message.tz, trees: cleared.trees, count: cleared.count, openOnly: message.openOnly };
       this.impostorTiles.set(key, tile);
       this.writeImpostorTile(key, tile);
     }
@@ -214,7 +237,14 @@ export class ForestRenderer {
     return Math.abs(tx - this.centreTx) <= IMPOSTOR_TILE_RADIUS && Math.abs(tz - this.centreTz) <= IMPOSTOR_TILE_RADIUS;
   }
 
-  /** Requests the nearest missing impostor tile, one at a time. */
+  private wantsFullTile(tx: number, tz: number): boolean {
+    return Math.abs(tx - this.centreTx) <= FULL_TILE_RADIUS && Math.abs(tz - this.centreTz) <= FULL_TILE_RADIUS;
+  }
+
+  /**
+   * Requests the nearest tile that is missing — or holds only its open trees but has
+   * come within the woods' reach — one at a time.
+   */
   private pump(): void {
     if (!this.worker || !this.workerReady || this.inFlight !== null || !Number.isFinite(this.centreTx)) return;
     let best: [number, number] | null = null;
@@ -226,18 +256,19 @@ export class ForestRenderer {
         if (d > (R + 0.5) * (R + 0.5) || d >= bestD) continue;
         const tx = this.centreTx + dx;
         const tz = this.centreTz + dz;
-        if (this.impostorTiles.has(`${tx},${tz}`)) continue;
+        const have = this.impostorTiles.get(`${tx},${tz}`);
+        if (have && !(have.openOnly && this.wantsFullTile(tx, tz))) continue;
         best = [tx, tz];
         bestD = d;
       }
     }
     if (!best) return;
     this.inFlight = `${best[0]},${best[1]}`;
-    const request: ForestWorkerRequest = { type: 'tile', tx: best[0], tz: best[1] };
+    const request: ForestWorkerRequest = { type: 'tile', tx: best[0], tz: best[1], openOnly: !this.wantsFullTile(best[0], best[1]) };
     this.worker.postMessage(request);
   }
 
-  private writeImpostorTile(key: string, tile: { tx: number; tz: number; trees: Float32Array; count: number }): void {
+  private writeImpostorTile(key: string, tile: ImpostorTile): void {
     const field = this.impostors;
     const atlas = this.atlas;
     const variants = this.variants;

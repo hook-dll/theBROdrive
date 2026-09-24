@@ -147,11 +147,15 @@ export class ImpostorField {
     uBucketCentre: { value: new THREE.Vector2() },
     uFrom: { value: 0 },
     uTo: { value: 0 },
-    uDissolve: { value: 0 },
+    uOpenTo: { value: 0 },
     uCells: { value: new THREE.Vector2() },
   };
 
-  constructor(atlas: ImpostorAtlas, from: number, to: number) {
+  /**
+   * `to`: where a tree of a wood dissolves into the canopy blanket. `openTo`: where a
+   * tree outside a wood does (its tint is stored negative, see world/forest.ts).
+   */
+  constructor(atlas: ImpostorAtlas, from: number, to: number, openTo: number) {
     this.capacity = 16384;
     this.a0 = new Float32Array(this.capacity * A);
     this.a1 = new Float32Array(this.capacity * A);
@@ -164,7 +168,7 @@ export class ImpostorField {
     this.attach();
     this.uniforms.uFrom.value = from;
     this.uniforms.uTo.value = to;
-    this.uniforms.uDissolve.value = to * 0.82;
+    this.uniforms.uOpenTo.value = openTo;
     this.uniforms.uCells.value.set(atlas.cols, atlas.rows);
 
     const material = applyComicShading(
@@ -185,7 +189,7 @@ attribute vec4 aImp1;
 uniform vec2 uBucketCentre;
 uniform float uFrom;
 uniform float uTo;
-uniform float uDissolve;
+uniform float uOpenTo;
 uniform vec2 uCells;
 varying vec2 vImpUv;
 varying float vImpTint;
@@ -206,12 +210,14 @@ vec3 objectNormal = normalize( impFwd * 0.8 + impRight * position.x * 1.4 + vec3
           `float impCell = aImp1.x;
 float impDist = length( impBase.xz - uBucketCentre );
 float impCam = length( impTo );
+// A tree of a wood gives way to the canopy blanket; one outside a wood carries on.
+float impReach = aImp1.w < 0.0 ? uOpenTo : uTo;
 vec3 transformed = impBase + impRight * position.x * aImp1.y + vec3( 0.0, position.y * aImp1.z - aImp0.w, 0.0 );
-if ( impDist < uFrom || impCam > uTo || aImp1.y <= 0.0 ) transformed = impBase;
+if ( impDist < uFrom || impCam > impReach || aImp1.y <= 0.0 ) transformed = impBase;
 vec2 impCellXY = vec2( mod( impCell, uCells.x ), floor( impCell / uCells.x ) );
 vImpUv = ( impCellXY + uv ) / uCells;
-vImpTint = aImp1.w;
-vImpFade = smoothstep( uDissolve, uTo, impCam );
+vImpTint = abs( aImp1.w );
+vImpFade = smoothstep( impReach * 0.82, impReach, impCam );
 vImpHash = fract( sin( dot( impBase.xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );`,
         );
       shader.fragmentShader = shader.fragmentShader
@@ -232,7 +238,7 @@ diffuseColor.rgb *= vImpTint;`,
         );
     };
     const comicKey = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v1`;
+    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v2`;
     this.material = material;
     this.mesh = new THREE.Mesh(this.geometry, material);
     this.mesh.frustumCulled = false;
@@ -248,6 +254,13 @@ diffuseColor.rgb *= vImpTint;`,
     this.geometry.setAttribute('aImp0', a0);
     this.geometry.setAttribute('aImp1', a1);
     this.geometry.instanceCount = this.highWater;
+    // three.js caps an instanced draw at `_maxInstanceCount`, which it works out ONCE,
+    // from the attributes bound at the first draw, and never again. Grown past the first
+    // buffer's 16384, every impostor after it was stored and never drawn: only the
+    // nearest kilometre of trees showed and the rest of the land stood bare.
+    // Unchecked cast: `_maxInstanceCount` is a real three.js field the typings omit.
+    const cached = this.geometry as THREE.InstancedBufferGeometry & { _maxInstanceCount?: number };
+    cached._maxInstanceCount = this.capacity;
   }
 
   /** The point both the CPU model buckets and this shader measure the swap from. */
