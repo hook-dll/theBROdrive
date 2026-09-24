@@ -688,6 +688,16 @@ export const HAZE_FRAGMENT = /* glsl */ `
 
     float airDistance = -airViewZ;
 
+    // AERIAL PERSPECTIVE: the plain's depth. With no mesas to measure by, what tells
+    // the eye a far ridge is far is that it is paler and bluer than the near one; each
+    // wooded rise behind the last steps back into the haze. Real depth only (the sky
+    // sits at the far plane and is left alone), exponential in distance, capped so the
+    // farthest ground keeps a silhouette.
+    if (airDistance < uCameraFar * 0.999) {
+      float veil = (1.0 - exp(-airDistance * 0.00035)) * 0.8 * uDaylight;
+      color.rgb = mix(color.rgb, vec3(0.70, 0.77, 0.84), veil);
+    }
+
     // ACES has already supplied the filmic shoulder and soft contrast in the scene
     // pass. This display-space finish stays deliberately smaller: a modest
     // luminance-preserving colour separation, then warm highlights against slightly

@@ -69,8 +69,46 @@ const tint = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 const shape = { variant: 0, sx: 1, sy: 1 };
 
+/** A round patch no tree may stand in: a POI's yard. Absolute metres. */
+export interface Clearing {
+  readonly x: number;
+  readonly z: number;
+  readonly r: number;
+}
+
+/** Clearings touching a square of ground centred on (x, z) with half-side `half`. */
+export type ClearingSource = (x: number, z: number, half: number) => readonly Clearing[];
+
+/**
+ * A tile's trees minus those standing in a clearing, as a new packed array (or the
+ * input itself when nothing is cleared).
+ */
+export function clearTrees(
+  source: ClearingSource | null,
+  centreX: number,
+  centreZ: number,
+  trees: Float32Array,
+  count: number,
+): { trees: Float32Array; count: number } {
+  const clearings = source ? source(centreX, centreZ, DESERT_TILE_SIZE / 2) : [];
+  if (clearings.length === 0) return { trees, count };
+  const out = new Float32Array(count * TREE_STRIDE);
+  let n = 0;
+  for (let i = 0; i < count; i++) {
+    const o = i * TREE_STRIDE;
+    const x = centreX + trees[o]!;
+    const z = centreZ + trees[o + 2]!;
+    if (clearings.some((c) => Math.hypot(x - c.x, z - c.z) < c.r)) continue;
+    out.set(trees.subarray(o, o + TREE_STRIDE), n * TREE_STRIDE);
+    n++;
+  }
+  return { trees: out, count: n };
+}
+
 export class ForestRenderer {
   private readonly tiles = new Map<string, TileTrees>();
+  /** Where no tree may stand (POI yards); set by the game, read on every tile. */
+  clearings: ClearingSource | null = null;
   private variants: readonly TreeVariant[][] | null = null;
   /** [kind][variant][lod] -> one bucket per part. */
   private buckets: Bucket[][][][] = [];
@@ -150,7 +188,14 @@ export class ForestRenderer {
     const key = `${message.tx},${message.tz}`;
     if (this.inFlight === key) this.inFlight = null;
     if (this.wantsImpostorTile(message.tx, message.tz)) {
-      const tile = { tx: message.tx, tz: message.tz, trees: message.trees, count: message.count };
+      const cleared = clearTrees(
+        this.clearings,
+        (message.tx + 0.5) * DESERT_TILE_SIZE,
+        (message.tz + 0.5) * DESERT_TILE_SIZE,
+        message.trees,
+        message.count,
+      );
+      const tile = { tx: message.tx, tz: message.tz, trees: cleared.trees, count: cleared.count };
       this.impostorTiles.set(key, tile);
       this.writeImpostorTile(key, tile);
     }
@@ -237,6 +282,17 @@ export class ForestRenderer {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.scene.add(mesh);
     return mesh;
+  }
+
+  /**
+   * Drops every impostor tile so the worker plants them again against the current
+   * clearings (after the POI spacing changed).
+   */
+  refreshImpostors(): void {
+    for (const key of this.impostorTiles.keys()) this.impostors?.remove(key);
+    this.impostorTiles.clear();
+    this.inFlight = null;
+    this.pump();
   }
 
   /** A tile's trees, copied: the tile's own buffer goes back to the worker. */

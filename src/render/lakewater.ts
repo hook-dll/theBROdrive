@@ -220,7 +220,9 @@ const MAX_PALMS = 120;
 const MAX_TREES = 60;
 /** Instances per shoreline cell, per form. The ceiling above is only a ceiling. */
 const GRASS_PER_CELL = 5;
-const PALMS_PER_CELL = 0.5;
+// Countryside: a pond on the plain has reeds and willow round it, never palms. The
+// forest's own planting stands the trees; the palm fringe is the desert oasis's.
+const PALMS_PER_CELL = 0;
 const TREES_PER_CELL = 0.24;
 /** Metres an instance may wander off its shoreline cell. */
 const GRASS_JITTER_M = 2.6;

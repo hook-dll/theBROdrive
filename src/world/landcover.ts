@@ -107,9 +107,9 @@ const SUMMER: Palette = {
   meadowDry: hex(0x9a9468),
   meadowLush: hex(0x6f7f4f),
   margin: hex(0x7f8758),
-  forestFloor: hex(0x52573a),
-  canopySpruce: hex(0x33503a),
-  canopyBirch: hex(0x71883f),
+  forestFloor: hex(0x646b45),
+  canopySpruce: hex(0x46663f),
+  canopyBirch: hex(0x86a04c),
   crops: [
     hex(0xd6bd72), // wheat, ripe
     hex(0xc4b486), // rye, greyer

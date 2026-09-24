@@ -794,7 +794,7 @@ export class Terrain {
     if (ravine > 0.55) w = Math.max(w, (ravine - 0.55) / 0.45);
     // Puddled hollows: a sparse, blotchy field of a few tens of metres.
     const hollow = this.scoopNoise.fbm(x / 60 + 11, z / 60 - 7, 2, 2.1, 0.5);
-    if (hollow > 0.42) w = Math.max(w, (hollow - 0.42) / 0.2);
+    if (hollow > 0.52) w = Math.max(w, (hollow - 0.52) / 0.18);
     return Math.min(1, w);
   }
 

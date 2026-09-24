@@ -43,6 +43,9 @@ import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
 import { GrassField } from './world/grass';
+import { poisBetween } from './world/poi';
+import { variantDef } from './world/poivariantbuild';
+import { Landmarks } from './world/landmarks';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
@@ -115,6 +118,9 @@ import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app
 import { installDevTools } from './app/devtools';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
+
+/** Metres of open ground round a POI's building, for its yard and wreck field. */
+const POI_TREE_CLEARANCE_M = 28;
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -435,6 +441,24 @@ async function boot(): Promise<void> {
     worldWork,
   );
   desert.forest.attachRenderer(renderer.renderer);
+  // POI yards are kept clear of trees: the forest plants blind in its workers, and the
+  // stop layout depends on a player setting, so the clearing is applied here.
+  desert.forest.clearings = (x, z, half) => {
+    const s = roadDistance.ownerAt(x, z, 50);
+    const reach = half * 1.5 + 300;
+    const out: { x: number; z: number; r: number }[] = [];
+    for (const poi of poisBetween(world.seed, Math.max(0, s - reach), s + reach, world.state.settings.poiSpacingMetres)) {
+      const p = road.offsetPoint(poi.s, poi.lateral);
+      const [w, d] = variantDef(poi.variant).footprint;
+      const r = Math.max(w, d) / 2 + POI_TREE_CLEARANCE_M;
+      if (Math.abs(p.x - x) > half + r || Math.abs(p.z - z) > half + r) continue;
+      out.push({ x: p.x, z: p.z, r });
+    }
+    return out;
+  };
+  // Far anchors for the eye: churches, water towers, elevators, masts, power lines.
+  const landmarks = new Landmarks(renderer.scene, origin, terrain, roadDistance, world.seed);
+  if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__landmarks'] = landmarks;
   // Grass within a few tens of metres of the camera, stood on the tiles' own surface.
   const grass = new GrassField(renderer.scene, origin, terrain, road, roadDistance, (x, z) =>
     desert.groundHeightAt(x, z),
@@ -1896,6 +1920,7 @@ async function boot(): Promise<void> {
     vista.update(cam.x, cam.z, activeS, frameDt);
     desert.forest.update(cam.x + origin.x, cam.z + origin.z);
     grass.update(cam.x + origin.x, cam.z + origin.z, frameDt);
+    landmarks.update(cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('vista');
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
@@ -2195,7 +2220,10 @@ async function boot(): Promise<void> {
       // POI chunks rebuild one at a time after Resume. That keeps a slider drag and
       // a dense 500 m stop layout from turning the pause-menu interaction into a
       // multi-second main-thread task.
-      if (world.state.settings.poiSpacingMetres !== poiSpacing) streamer.refreshProvider('poi');
+      if (world.state.settings.poiSpacingMetres !== poiSpacing) {
+        streamer.refreshProvider('poi');
+        desert.refreshTrees();
+      }
       // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);

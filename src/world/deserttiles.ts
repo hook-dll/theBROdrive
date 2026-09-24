@@ -27,7 +27,7 @@ import {
   type DesertTileData,
 } from './deserttiledata';
 import { TREE_TRUNK_RADIUS } from './props/trees';
-import { ForestRenderer } from './forest';
+import { clearTrees, ForestRenderer } from './forest';
 import type {
   DesertTileWorkerRequest,
   DesertTileWorkerResponse,
@@ -163,6 +163,8 @@ interface DesertTile {
   readonly farFromRoad: boolean;
   bodies: RAPIER.RigidBody[];
   hasPhysics: boolean;
+  /** The trees left standing after POI clearings: drawn and collided. */
+  standing: { trees: Float32Array; count: number };
 }
 
 function tileKey(tx: number, tz: number): string {
@@ -265,6 +267,19 @@ export class DesertTileStreamer {
 
   /** Draws the trees every live tile planted (world/forest.ts). */
   readonly forest: ForestRenderer;
+
+  /** Re-applies the forest's clearings to every live tile: drawn trees and trunks. */
+  refreshTrees(): void {
+    for (const tile of this.tiles.values()) {
+      tile.standing = clearTrees(this.forest.clearings, tile.centreX, tile.centreZ, tile.data.trees, tile.data.treeCount);
+      this.forest.addTile(tile.key, tile.centreX, tile.centreZ, tile.standing.trees, tile.standing.count);
+      if (tile.hasPhysics) {
+        this.demote(tile);
+        this.promote(tile);
+      }
+    }
+    this.forest.refreshImpostors();
+  }
 
   /**
    * The drawn ground's height at an ABSOLUTE point, off the live tile lattice, or null
@@ -497,7 +512,8 @@ export class DesertTileStreamer {
       group,
     );
     const meshes = propMeshes;
-    this.forest.addTile(key, centreX, centreZ, data.trees, data.treeCount);
+    const standing = clearTrees(this.forest.clearings, centreX, centreZ, data.trees, data.treeCount);
+    this.forest.addTile(key, centreX, centreZ, standing.trees, standing.count);
     freezeStaticSubtree(group);
     this.scene.add(group);
 
@@ -517,6 +533,7 @@ export class DesertTileStreamer {
       farFromRoad,
       bodies: [],
       hasPhysics: false,
+      standing,
     };
     this.tiles.set(key, tile);
     return tile;
@@ -1030,13 +1047,13 @@ export class DesertTileStreamer {
    * the solver never needs to tell apart.
    */
   private addTreeColliders(tile: DesertTile): void {
-    const trees = tile.data.trees;
-    if (tile.data.treeCount === 0) return;
+    const trees = tile.standing.trees;
+    if (tile.standing.count === 0) return;
     const rapier = this.physics.rapier;
     const body = this.physics.world.createRigidBody(
       rapier.RigidBodyDesc.fixed().setTranslation(tile.centreX - this.origin.x, 0, tile.centreZ - this.origin.z),
     );
-    for (let i = 0; i < tile.data.treeCount; i++) {
+    for (let i = 0; i < tile.standing.count; i++) {
       const o = i * TREE_STRIDE;
       const radius = TREE_TRUNK_RADIUS[trees[o + 5]!]! * trees[o + 3]!;
       if (radius <= 0) continue;

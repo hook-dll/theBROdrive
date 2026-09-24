@@ -62,9 +62,9 @@ export interface TreeVariant {
  */
 const BARK_TINT: Record<TreeKind, number> = {
   [TreeKind.Birch]: 0xffffff,
-  [TreeKind.Spruce]: 0x6a5f55,
+  [TreeKind.Spruce]: 0x7c7066,
   [TreeKind.Bush]: 0xffffff,
-  [TreeKind.Broadleaf]: 0x77736c,
+  [TreeKind.Broadleaf]: 0x8e8a82,
 };
 /** Kinds whose bark texture is reduced to luminance and coloured by `BARK_TINT`. */
 const GREY_BARK: Record<TreeKind, boolean> = {
@@ -106,10 +106,10 @@ const SOURCES: Record<TreeKind, KindSource> = {
 /** Foliage colour per kind and season, sRGB. */
 const FOLIAGE: Record<Season, Record<TreeKind, number>> = {
   summer: {
-    [TreeKind.Birch]: 0x7d9a3e,
-    [TreeKind.Spruce]: 0x3b5a34,
-    [TreeKind.Bush]: 0x6c8a3a,
-    [TreeKind.Broadleaf]: 0x5f7f34,
+    [TreeKind.Birch]: 0x8ea552,
+    [TreeKind.Spruce]: 0x4a6a45,
+    [TreeKind.Bush]: 0x7a9548,
+    [TreeKind.Broadleaf]: 0x71904a,
   },
 };
 
@@ -132,11 +132,14 @@ function greyFoliage(texture: THREE.Texture): THREE.Texture {
     count++;
   }
   const mean = count > 0 ? sum / count : 128;
-  // A mean of ~200/255 leaves headroom for the lighter veins without clipping.
-  const gain = 200 / mean;
+  // COMIC, NOT PHOTO: two flat tones, split at the texture's own mean. The painted
+  // leaf detail was what made a crown read as a photograph and the wood as oppressive;
+  // what is left is its shape (alpha) and one light/dark split for the banded light
+  // to work with, the way an inker fills a crown.
   for (let i = 0; i < px.length; i += 4) {
-    const l = Math.min(255, (0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!) * gain);
-    px[i] = px[i + 1] = px[i + 2] = l;
+    const l = 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!;
+    const tone = l > mean * 0.92 ? 255 : 212;
+    px[i] = px[i + 1] = px[i + 2] = tone;
   }
   g.putImageData(data, 0, 0);
   const out = new THREE.CanvasTexture(canvas);

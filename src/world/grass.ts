@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { hash01 } from '../core/rng';
+import { applyCloudShadow } from '../render/cloudshadow';
 import { applyComicShading } from '../render/comic';
 import { CoverKind, Crop, newCoverSample } from './landcover';
 import type { WorldOrigin } from './origin';
@@ -9,201 +9,89 @@ import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 
 /**
- * GRASS: the ground under the wheels, within a few tens of metres of the camera.
+ * GRASS, drawn by the GPU.
  *
- * The meadow's colour and the comic shading carry the ground from afar; close to,
- * the eye wants the stuff itself. So a camera-centred ring of `PATCH_M` patches is
- * filled with instanced tufts — short grass, tall grass, meadow flowers, wheat —
- * chosen by the land cover under each one, and planted on the drawn tile surface.
+ * WHY IT LOOKS LIKE A CARPET AND NOT LIKE TUFTS. Every blade takes the colour of the
+ * ground it grows from, so what shows between blades is the same colour as the blades'
+ * roots and the eye reads one continuous sward — seen from above too. Tips are only a
+ * little lighter. The comic ground shading lights blades on an upward normal, exactly
+ * as it lights the ground, so a blade is the ground with height rather than an object
+ * standing on it.
  *
- * Every tuft is a pure function of its cell: a patch that leaves and comes back is
- * the same patch. At the ring's edge a tuft dissolves by dither, never by shrinking.
+ * WHY IT DOES NOT POP. Three rings, each a square grid of clumps fixed to WORLD cells
+ * (a clump never moves as the camera does), denser near and wider-bladed far, out to
+ * `RADIUS_M`. In the last `SETTLE_M` a blade lies down into the ground; since it is the
+ * ground's colour, that is invisible — there is no edge to see, near or behind.
  *
- * Normals point straight up, so a tuft is lit exactly as the ground it grows from and
- * the grass reads as the meadow's own surface with depth, not as cut-outs on it.
+ * WHERE THE NUMBERS COME FROM. A camera-centred cache of `CACHE_N`² one-metre texels —
+ * ground height, ground colour, and grass parameters (height, wheat, flowers) — filled
+ * from the land cover and the drawn tiles, wrapped toroidally and topped up a strip
+ * at a time as the camera moves, so the vertex shader only reads textures.
  */
 
-const PATCH_M = 10;
-const CELL_M = 1.0;
-const CELLS = Math.round(PATCH_M / CELL_M);
-const RADIUS_M = 58;
-const DISSOLVE_FROM_M = 42;
-const TAG = 0x47524153;
-
-export const enum GrassKind {
-  Short = 0,
-  Tall = 1,
-  Flowers = 2,
-  Wheat = 3,
-}
-
-const KINDS = 4;
-
-/** Blade texture: one cell per kind in a 4x1 atlas, drawn once on a canvas. */
-function grassAtlas(): THREE.CanvasTexture {
-  const W = 128;
-  const H = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = W * KINDS;
-  canvas.height = H;
-  const g = canvas.getContext('2d')!;
-  let seed = 7;
-  const rnd = (): number => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
-  const blade = (ox: number, x: number, h: number, lean: number, width: number, colour: string): void => {
-    g.strokeStyle = colour;
-    g.lineWidth = width;
-    g.lineCap = 'round';
-    g.beginPath();
-    g.moveTo(ox + x, H);
-    g.quadraticCurveTo(ox + x + lean * 0.3, H - h * 0.55, ox + x + lean, H - h);
-    g.stroke();
-  };
-  // The meadow's own olive, not a lawn's: the blades must read as the ground's texture.
-  const greens = (): string => `hsl(${70 + rnd() * 22}, ${16 + rnd() * 14}%, ${24 + rnd() * 16}%)`;
-  // Short: dense low blades.
-  for (let i = 0; i < 70; i++) blade(0, 8 + rnd() * 112, 30 + rnd() * 50, (rnd() - 0.5) * 30, 2 + rnd() * 2, greens());
-  // Tall: longer, some seed heads.
-  for (let i = 0; i < 45; i++) {
-    const x = 10 + rnd() * 108;
-    const h = 70 + rnd() * 55;
-    const lean = (rnd() - 0.5) * 44;
-    blade(W, x, h, lean, 2 + rnd() * 1.5, greens());
-    if (rnd() < 0.3) {
-      g.fillStyle = `hsl(45, 30%, ${55 + rnd() * 15}%)`;
-      g.beginPath();
-      g.ellipse(W + x + lean, H - h, 2.2, 6, lean * 0.02, 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  // Flowers: blades with heads — chamomile white, buttercup yellow, fireweed pink.
-  for (let i = 0; i < 40; i++) blade(W * 2, 8 + rnd() * 112, 28 + rnd() * 55, (rnd() - 0.5) * 30, 2, greens());
-  for (let i = 0; i < 14; i++) {
-    const x = W * 2 + 14 + rnd() * 100;
-    const h = 45 + rnd() * 65;
-    const kind = rnd();
-    g.strokeStyle = greens();
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(x, H);
-    g.lineTo(x + (rnd() - 0.5) * 10, H - h);
-    g.stroke();
-    if (kind < 0.4) {
-      g.fillStyle = '#f2efe4';
-      g.beginPath();
-      g.arc(x, H - h, 5, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = '#e7c23a';
-      g.beginPath();
-      g.arc(x, H - h, 2, 0, Math.PI * 2);
-      g.fill();
-    } else if (kind < 0.75) {
-      g.fillStyle = '#e8c52e';
-      g.beginPath();
-      g.arc(x, H - h, 3.5, 0, Math.PI * 2);
-      g.fill();
-    } else {
-      g.fillStyle = '#c0508a';
-      g.beginPath();
-      g.ellipse(x, H - h + 10, 3, 12, 0, 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  // Wheat: straight golden stalks with ears.
-  for (let i = 0; i < 60; i++) {
-    const x = W * 3 + 6 + rnd() * 116;
-    const h = 80 + rnd() * 40;
-    const lean = (rnd() - 0.5) * 14;
-    g.strokeStyle = `hsl(44, ${45 + rnd() * 15}%, ${48 + rnd() * 14}%)`;
-    g.lineWidth = 1.6;
-    g.beginPath();
-    g.moveTo(x, H);
-    g.lineTo(x + lean, H - h);
-    g.stroke();
-    g.fillStyle = `hsl(42, ${50 + rnd() * 15}%, ${52 + rnd() * 12}%)`;
-    g.beginPath();
-    g.ellipse(x + lean, H - h - 6, 2.4, 8, lean * 0.03, 0, Math.PI * 2);
-    g.fill();
-  }
-  const t = new THREE.CanvasTexture(canvas);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-
-/** Height and width of a tuft of each kind at scale 1, metres. */
-const SIZE: readonly [number, number][] = [
-  [0.35, 0.9],
-  [0.8, 1.0],
-  [0.6, 0.95],
-  [0.95, 1.1],
+const CACHE_N = 256;
+const RADIUS_M = 95;
+const SETTLE_M = 22;
+/** Rings: [inner, outer, cell, blade width]. */
+const RINGS: readonly [number, number, number, number][] = [
+  [0, 24, 0.2, 0.045],
+  [24, 55, 0.45, 0.07],
+  [55, RADIUS_M, 0.9, 0.13],
 ];
+const BLADES_PER_CLUMP = 3;
+const SEGMENTS = 3;
+/** Texels re-sampled per frame while a strip or a tile is pending. */
+const FILL_BUDGET = 3000;
 
-/** Three crossed quads per kind, the uv mapped to the kind's atlas cell. */
-function tuftGeometry(kind: number): THREE.BufferGeometry {
-  const [h, w] = SIZE[kind]!;
-  const parts: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 3; i++) {
-    const q = new THREE.PlaneGeometry(w, h).translate(0, h / 2, 0).rotateY((i * Math.PI) / 3);
-    const uv = q.getAttribute('uv');
-    for (let k = 0; k < uv.count; k++) uv.setX(k, (kind + uv.getX(k)) / KINDS);
-    const n = q.getAttribute('normal');
-    for (let k = 0; k < n.count; k++) n.setXYZ(k, 0, 1, 0);
-    parts.push(q);
-  }
-  const merged = new THREE.BufferGeometry();
-  const pos: number[] = [];
-  const nor: number[] = [];
-  const uvs: number[] = [];
-  const idx: number[] = [];
-  let base = 0;
-  for (const p of parts) {
-    const P = p.getAttribute('position');
-    const N = p.getAttribute('normal');
-    const U = p.getAttribute('uv');
-    for (let k = 0; k < P.count; k++) {
-      pos.push(P.getX(k), P.getY(k), P.getZ(k));
-      nor.push(N.getX(k), N.getY(k), N.getZ(k));
-      uvs.push(U.getX(k), U.getY(k));
+function bladeGeometry(): THREE.BufferGeometry {
+  // A clump of blades, each a tapering strip of SEGMENTS quads and a tip. `aBlade`
+  // is (blade index, height 0..1, side -1..1); the shader shapes everything else.
+  const vertsPerBlade = SEGMENTS * 2 + 1;
+  const blade: number[] = [];
+  const index: number[] = [];
+  for (let b = 0; b < BLADES_PER_CLUMP; b++) {
+    const base = b * vertsPerBlade;
+    for (let k = 0; k < SEGMENTS; k++) {
+      const t = k / SEGMENTS;
+      blade.push(b, t, -1, b, t, 1);
     }
-    const I = p.index!;
-    for (let k = 0; k < I.count; k++) idx.push(I.getX(k) + base);
-    base += P.count;
+    blade.push(b, 1, 0);
+    for (let k = 0; k < SEGMENTS - 1; k++) {
+      const a = base + k * 2;
+      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const a = base + (SEGMENTS - 1) * 2;
+    index.push(a, a + 1, a + 2);
   }
-  merged.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  merged.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  merged.setIndex(idx);
-  return merged;
+  const g = new THREE.InstancedBufferGeometry();
+  const count = blade.length / 3;
+  g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(count * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(count * 3).fill(1), 3));
+  g.setAttribute('aBlade', new THREE.Float32BufferAttribute(blade, 3));
+  g.setIndex(index);
+  return g;
 }
 
-interface Patch {
-  readonly key: string;
-  /** Per kind: the instance slots this patch owns. */
-  readonly slots: number[][];
-}
-
-const matrix = new THREE.Matrix4();
-const quat = new THREE.Quaternion();
-const pos = new THREE.Vector3();
-const scl = new THREE.Vector3();
-const col = new THREE.Color();
-const UP = new THREE.Vector3(0, 1, 0);
-const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+const cover = newCoverSample();
 
 export class GrassField {
-  private readonly meshes: THREE.InstancedMesh[] = [];
-  private readonly free: number[][] = [];
-  private readonly highWater: number[] = [];
-  private readonly patches = new Map<string, Patch>();
-  private readonly cover = newCoverSample();
-  private readonly uniforms = { uGrassTime: { value: 0 }, uGrassCamera: { value: new THREE.Vector2() } };
-  private lastPx = Number.NaN;
-  private lastPz = Number.NaN;
-  private lastOriginX = Number.NaN;
-  private lastOriginZ = Number.NaN;
+  private readonly heightData = new Float32Array(CACHE_N * CACHE_N);
+  private readonly colourData = new Uint8Array(CACHE_N * CACHE_N * 4);
+  private readonly paramData = new Uint8Array(CACHE_N * CACHE_N * 4);
+  private readonly heightTex: THREE.DataTexture;
+  private readonly colourTex: THREE.DataTexture;
+  private readonly paramTex: THREE.DataTexture;
+  /** World cell of each texel's current content, or NaN: which cell a slot holds. */
+  private readonly cellX = new Int32Array(CACHE_N * CACHE_N).fill(0x7fffffff);
+  private readonly cellZ = new Int32Array(CACHE_N * CACHE_N).fill(0x7fffffff);
+  private readonly pending: number[] = [];
+  private pendingHead = 0;
+  private windowX = Number.NaN;
+  private windowZ = Number.NaN;
+  private readonly uniforms: Record<string, THREE.IUniform>;
+  private readonly meshes: THREE.Mesh[] = [];
+  private time = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -213,217 +101,290 @@ export class GrassField {
     private readonly roadDistance: RoadDistance,
     private readonly groundHeightAt: (x: number, z: number) => number | null,
   ) {
-    const material = this.createMaterial();
-    const capacity = Math.ceil((Math.PI * (RADIUS_M + PATCH_M) ** 2) / (CELL_M * CELL_M));
-    for (let kind = 0; kind < KINDS; kind++) {
-      const mesh = new THREE.InstancedMesh(tuftGeometry(kind), material, capacity);
-      mesh.count = 0;
+    this.heightTex = new THREE.DataTexture(this.heightData, CACHE_N, CACHE_N, THREE.RedFormat, THREE.FloatType);
+    this.colourTex = new THREE.DataTexture(this.colourData, CACHE_N, CACHE_N, THREE.RGBAFormat, THREE.UnsignedByteType);
+    this.paramTex = new THREE.DataTexture(this.paramData, CACHE_N, CACHE_N, THREE.RGBAFormat, THREE.UnsignedByteType);
+    for (const t of [this.heightTex, this.colourTex, this.paramTex]) {
+      t.minFilter = THREE.NearestFilter;
+      t.magFilter = THREE.NearestFilter;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.generateMipmaps = false;
+      t.needsUpdate = true;
+    }
+    this.uniforms = {
+      uGrassHeight: { value: this.heightTex },
+      uGrassColour: { value: this.colourTex },
+      uGrassParams: { value: this.paramTex },
+      uOriginMod: { value: new THREE.Vector2() },
+      uCamRel: { value: new THREE.Vector2() },
+      uTime: { value: 0 },
+    };
+    const geometry = bladeGeometry();
+    for (const [rin, rout, cell, width] of RINGS) {
+      const side = Math.ceil((rout * 2) / cell) + 2;
+      const g = geometry.clone() as THREE.InstancedBufferGeometry;
+      g.instanceCount = side * side;
+      const material = this.createMaterial(rin, rout, cell, side, width);
+      const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.castShadow = false;
       mesh.receiveShadow = true;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.setColorAt(0, col.setScalar(1));
+      mesh.userData.snap = { cell, side };
       scene.add(mesh);
       this.meshes.push(mesh);
-      this.free.push([]);
-      this.highWater.push(0);
     }
   }
 
-  private createMaterial(): THREE.MeshStandardMaterial {
-    const material = applyComicShading(
-      new THREE.MeshStandardMaterial({
-        map: grassAtlas(),
-        alphaTest: 0.5,
-        side: THREE.DoubleSide,
-        roughness: 1,
-        metalness: 0,
-      }),
-      { contourStrength: 0, stippleStrength: 0, shadowWarmth: 0.3 },
+  private createMaterial(rin: number, rout: number, cell: number, side: number, width: number): THREE.MeshStandardMaterial {
+    // Lit EXACTLY as the ground (world/terrainmesh.ts), cloud shadow included: a blade
+    // is the ground's own surface with height, and any difference in the light shows
+    // up as a band where the grass ends.
+    const material = applyCloudShadow(
+      applyComicShading(
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, side: THREE.DoubleSide }),
+        { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
+      ),
     );
-    const compileComic = material.onBeforeCompile;
     const u = this.uniforms;
+    const local = {
+      uSnapIndex: { value: new THREE.Vector2() },
+      uSnapRel: { value: new THREE.Vector2() },
+    };
+    material.userData.local = local;
+    const compileComic = material.onBeforeCompile;
     material.onBeforeCompile = (shader, renderer) => {
       compileComic.call(material, shader, renderer);
-      Object.assign(shader.uniforms, u);
+      Object.assign(shader.uniforms, u, local);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float uGrassTime;\nuniform vec2 uGrassCamera;\nvarying float vGrassFade;\nvarying float vGrassHash;')
+        .replace(
+          '#include <common>',
+          `#include <common>
+attribute vec3 aBlade;
+uniform sampler2D uGrassHeight;
+uniform sampler2D uGrassColour;
+uniform sampler2D uGrassParams;
+uniform vec2 uOriginMod;
+uniform vec2 uCamRel;
+uniform float uTime;
+uniform vec2 uSnapIndex;
+uniform vec2 uSnapRel;
+float gHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+ivec2 gTexel( vec2 rel ) {
+  vec2 m = mod( floor( rel + uOriginMod ), ${CACHE_N.toFixed(1)} );
+  return ivec2( m );
+}
+float gHeightAt( vec2 rel ) {
+  vec2 f = fract( rel + uOriginMod );
+  float a = texelFetch( uGrassHeight, gTexel( rel ), 0 ).r;
+  float b = texelFetch( uGrassHeight, gTexel( rel + vec2( 1.0, 0.0 ) ), 0 ).r;
+  float c = texelFetch( uGrassHeight, gTexel( rel + vec2( 0.0, 1.0 ) ), 0 ).r;
+  float d = texelFetch( uGrassHeight, gTexel( rel + vec2( 1.0, 1.0 ) ), 0 ).r;
+  return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );
+}`,
+        )
+        .replace(
+          '#include <color_vertex>',
+          `float gSide = ${side.toFixed(1)};
+float gCell = ${cell.toFixed(3)};
+vec2 gGrid = vec2( mod( float( gl_InstanceID ), gSide ), floor( float( gl_InstanceID ) / gSide ) ) - floor( gSide * 0.5 );
+vec2 gIndex = mod( uSnapIndex + gGrid, 8192.0 );
+vec2 gJit = vec2( gHash( gIndex ), gHash( gIndex + 17.3 ) );
+vec2 gRel = uSnapRel + ( gGrid + gJit ) * gCell;
+float gDist = length( gRel - uCamRel );
+vec4 gParam = texelFetch( uGrassParams, gTexel( gRel ), 0 );
+vec3 gGround = texelFetch( uGrassColour, gTexel( gRel ), 0 ).rgb;
+gGround = pow( gGround, vec3( 2.2 ) );
+float gRand = gHash( gIndex + 3.1 );
+float gUsed = step( ${rin.toFixed(1)}, gDist ) * step( gDist, ${rout.toFixed(1)} );
+float gSettle = 1.0 - smoothstep( ${(RADIUS_M - SETTLE_M).toFixed(1)}, ${RADIUS_M.toFixed(1)}, gDist );
+float gWheat = gParam.g;
+float gFlower = step( 1.0 - gParam.b * 0.12, gHash( gIndex + 9.7 ) ) * step( 0.5, aBlade.y );
+float gTall = gParam.r * ( 0.55 + 0.9 * gRand ) * gSettle * gUsed;
+vec3 gTip = mix( gGround * vec3( 1.1, 1.1, 1.0 ), vec3( 0.62, 0.46, 0.16 ), gWheat );
+vec3 gFlowerColour = gHash( gIndex + 5.5 ) < 0.5 ? vec3( 0.9, 0.88, 0.8 ) : vec3( 0.85, 0.66, 0.08 );
+vColor = vec4( 1.0 );
+vColor.rgb = mix( gGround, gTip, smoothstep( 0.0, 1.0, aBlade.y ) );
+vColor.rgb = mix( vColor.rgb, gFlowerColour, gFlower * step( 0.99, aBlade.y ) );`,
+        )
+      // Both faces of a blade are lit as its upward normal: three.js flips the normal
+      // of a back face, which turned half of every sward toward the ground and dark.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;',
+        'float faceDirection = 1.0;',
+      );
+      shader.vertexShader = shader.vertexShader
         .replace(
           '#include <begin_vertex>',
-          `vec3 transformed = vec3( position );
-#ifdef USE_INSTANCING
-{
-  vec4 foot = modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
-  // Wind: tips sway, roots do not; a slow wave rolls across the meadow.
-  float phase = uGrassTime * 1.7 + foot.x * 0.21 + foot.z * 0.17;
-  float sway = ( sin( phase ) * 0.6 + sin( phase * 2.3 + 1.7 ) * 0.25 ) * position.y * position.y * 0.35;
-  transformed.x += sway;
-  transformed.z += sway * 0.4;
-  vGrassFade = smoothstep( ${DISSOLVE_FROM_M.toFixed(1)}, ${RADIUS_M.toFixed(1)}, length( foot.xz - uGrassCamera ) );
-  vGrassHash = fract( sin( dot( foot.xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
-}
-#endif`,
+          `float gYaw = ( gHash( gIndex + 1.7 ) + aBlade.x / ${BLADES_PER_CLUMP.toFixed(1)} ) * 6.2832;
+vec2 gAcross = vec2( cos( gYaw ), sin( gYaw ) );
+vec2 gLean = vec2( -gAcross.y, gAcross.x ) * ( 0.25 + 0.35 * gHash( gIndex + aBlade.x ) );
+float gWind = sin( uTime * 1.6 + ( gRel.x + uOriginMod.x ) * 0.23 + ( gRel.y + uOriginMod.y ) * 0.19 ) * 0.25 + 0.1;
+float gT = aBlade.y;
+float gW = ${width.toFixed(3)} * ( 1.0 - gT ) * ( 0.8 + 0.4 * gRand );
+// Each blade of a clump stands a little way from the others: from one point they
+// read as a star, spread they read as a tussock.
+float gSpreadA = ( gHash( gIndex + aBlade.x * 3.7 ) ) * 6.2832;
+vec2 gSpread = vec2( cos( gSpreadA ), sin( gSpreadA ) ) * gCell * 0.45 * step( 0.5, aBlade.x );
+vec2 gOff = gSpread + gAcross * aBlade.z * gW + ( gLean + vec2( gWind, gWind * 0.5 ) ) * gT * gT * gTall;
+float gY = gHeightAt( gRel + gOff ) - 0.05 + gT * gTall * ( 1.0 - 0.25 * gT * gT );
+vec3 transformed = vec3( gRel.x + gOff.x, gY, gRel.y + gOff.y );
+if ( gTall <= 0.001 ) transformed = vec3( uCamRel.x, -1e4, uCamRel.y );`,
         );
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vGrassFade;\nvarying float vGrassHash;')
-        .replace('#include <map_fragment>', 'if ( vGrassHash < vGrassFade ) discard;\n#include <map_fragment>');
     };
     const key = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${key.call(material)}:grass-v1`;
+    material.customProgramCacheKey = () => `${key.call(material)}:gpu-grass-v1:${cell}`;
     return material;
   }
 
   /** `x`/`z`: the camera's ABSOLUTE position; `dt`: seconds, for the wind. */
   update(x: number, z: number, dt: number): void {
-    this.uniforms.uGrassTime.value = (this.uniforms.uGrassTime.value + dt) % 3600;
-    this.uniforms.uGrassCamera.value.set(x - this.origin.x, z - this.origin.z);
-    const px = Math.floor(x / PATCH_M);
-    const pz = Math.floor(z / PATCH_M);
-    if (this.origin.x !== this.lastOriginX || this.origin.z !== this.lastOriginZ) {
-      // Instances are origin-relative: a rebase moves every one of them.
-      for (const key of [...this.patches.keys()]) this.drop(key);
-      this.lastOriginX = this.origin.x;
-      this.lastOriginZ = this.origin.z;
-      this.lastPx = Number.NaN;
+    this.time = (this.time + dt) % 3600;
+    this.uniforms.uTime!.value = this.time;
+    (this.uniforms.uOriginMod!.value as THREE.Vector2).set(
+      ((this.origin.x % CACHE_N) + CACHE_N) % CACHE_N,
+      ((this.origin.z % CACHE_N) + CACHE_N) % CACHE_N,
+    );
+    (this.uniforms.uCamRel!.value as THREE.Vector2).set(x - this.origin.x, z - this.origin.z);
+    for (const mesh of this.meshes) {
+      const { cell } = mesh.userData.snap as { cell: number };
+      const ix = Math.floor(x / cell);
+      const iz = Math.floor(z / cell);
+      const local = (mesh.material as THREE.Material).userData.local as {
+        uSnapIndex: THREE.IUniform<THREE.Vector2>;
+        uSnapRel: THREE.IUniform<THREE.Vector2>;
+      };
+      local.uSnapIndex.value.set(((ix % 8192) + 8192) % 8192, ((iz % 8192) + 8192) % 8192);
+      local.uSnapRel.value.set(ix * cell - this.origin.x, iz * cell - this.origin.z);
     }
-    if (px === this.lastPx && pz === this.lastPz) return;
-    this.lastPx = px;
-    this.lastPz = pz;
-    const R = Math.ceil(RADIUS_M / PATCH_M);
-    const wanted = new Set<string>();
-    for (let dx = -R; dx <= R; dx++) {
-      for (let dz = -R; dz <= R; dz++) {
-        const cx = (px + dx + 0.5) * PATCH_M;
-        const cz = (pz + dz + 0.5) * PATCH_M;
-        if (Math.hypot(cx - x, cz - z) > RADIUS_M + PATCH_M * 0.75) continue;
-        wanted.add(`${px + dx},${pz + dz}`);
+    this.refreshWindow(x, z);
+    this.fill();
+  }
+
+  /** Queues every texel whose slot now belongs to a different world cell. */
+  private refreshWindow(x: number, z: number): void {
+    const wx = Math.floor(x) - CACHE_N / 2;
+    const wz = Math.floor(z) - CACHE_N / 2;
+    if (wx === this.windowX && wz === this.windowZ) return;
+    const full = !Number.isFinite(this.windowX) || Math.abs(wx - this.windowX) >= CACHE_N || Math.abs(wz - this.windowZ) >= CACHE_N;
+    const ox = this.windowX;
+    const oz = this.windowZ;
+    this.windowX = wx;
+    this.windowZ = wz;
+    // Nearest first, so the ground under the car is always ready before the horizon.
+    const add: number[] = [];
+    for (let cz = wz; cz < wz + CACHE_N; cz++) {
+      for (let cx = wx; cx < wx + CACHE_N; cx++) {
+        if (!full && cx >= ox && cx < ox + CACHE_N && cz >= oz && cz < oz + CACHE_N) continue;
+        add.push(cx, cz);
       }
     }
-    for (const key of [...this.patches.keys()]) if (!wanted.has(key)) this.drop(key);
-    let built = 0;
-    for (const key of wanted) {
-      if (this.patches.has(key)) continue;
-      // A tile not loaded yet leaves its patch for a later frame.
-      if (this.build(key)) built++;
-      else this.lastPx = Number.NaN;
-      if (built >= 12) {
-        this.lastPx = Number.NaN;
-        break;
-      }
+    const cx0 = x;
+    const cz0 = z;
+    const order = new Array(add.length / 2).fill(0).map((_, i) => i);
+    order.sort((a, b) => Math.hypot(add[a * 2]! - cx0, add[a * 2 + 1]! - cz0) - Math.hypot(add[b * 2]! - cx0, add[b * 2 + 1]! - cz0));
+    if (full) {
+      this.pending.length = 0;
+      this.pendingHead = 0;
     }
-    for (let kind = 0; kind < KINDS; kind++) {
-      const mesh = this.meshes[kind]!;
-      mesh.count = this.highWater[kind]!;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    for (const i of order) this.pending.push(add[i * 2]!, add[i * 2 + 1]!);
+  }
+
+  private fill(): void {
+    let done = 0;
+    let dirty = false;
+    const retry: number[] = [];
+    while (this.pendingHead < this.pending.length && done < FILL_BUDGET) {
+      const cx = this.pending[this.pendingHead++]!;
+      const cz = this.pending[this.pendingHead++]!;
+      done++;
+      // Stale: the window has moved on past this cell.
+      if (cx < this.windowX || cx >= this.windowX + CACHE_N || cz < this.windowZ || cz >= this.windowZ + CACHE_N) continue;
+      if (!this.sampleTexel(cx, cz)) retry.push(cx, cz);
+      dirty = true;
+    }
+    if (this.pendingHead >= this.pending.length) {
+      this.pending.length = 0;
+      this.pendingHead = 0;
+    }
+    // Cells whose tile had not arrived go to the back of the queue.
+    for (const v of retry) this.pending.push(v);
+    if (dirty) {
+      this.heightTex.needsUpdate = true;
+      this.colourTex.needsUpdate = true;
+      this.paramTex.needsUpdate = true;
     }
   }
 
-  private drop(key: string): void {
-    const patch = this.patches.get(key);
-    if (!patch) return;
-    this.patches.delete(key);
-    for (let kind = 0; kind < KINDS; kind++) {
-      const mesh = this.meshes[kind]!;
-      for (const slot of patch.slots[kind]!) {
-        mesh.setMatrixAt(slot, ZERO);
-        this.free[kind]!.push(slot);
+  /** Samples one world cell into its slot. False if its ground is not loaded yet. */
+  private sampleTexel(cx: number, cz: number): boolean {
+    const slot = (((cz % CACHE_N) + CACHE_N) % CACHE_N) * CACHE_N + (((cx % CACHE_N) + CACHE_N) % CACHE_N);
+    const x = cx + 0.5;
+    const z = cz + 0.5;
+    const y = this.groundHeightAt(x, z);
+    const o = slot * 4;
+    if (y === null) {
+      this.paramData[o] = 0;
+      return false;
+    }
+    this.heightData[slot] = y;
+    this.cellX[slot] = cx;
+    this.cellZ[slot] = cz;
+    let roadDist = this.roadDistance.distAt(x, z, 20);
+    let toEdge = 99;
+    if (roadDist < 45) {
+      const p = this.road.project(x, z, this.roadDistance.ownerAt(x, z, 20));
+      roadDist = Math.abs(p.lateral);
+      toEdge = roadDist - this.road.halfWidthAt(p.s);
+    }
+    this.terrain.cover.sample(x, z, roadDist, cover);
+    let r = cover.r;
+    let g = cover.g;
+    let b = cover.b;
+    let height = 0.3 + 0.25 * cover.lush;
+    let wheat = 0;
+    let flowers = cover.lush;
+    const wet = this.terrain.wetnessAt(x, z);
+    if (cover.kind === CoverKind.Field) {
+      const crop = cover.crop;
+      if (crop === Crop.Wheat || crop === Crop.Rye) {
+        height = 0.9;
+        wheat = 1;
+        flowers = 0.1;
+      } else if (crop === Crop.GreenCrop) {
+        height = 0.55;
+        flowers = 0;
+      } else if (crop === Crop.Stubble) {
+        height = 0.12;
+        flowers = 0;
+      } else if (crop === Crop.Ploughed) {
+        height = 0;
+      } else {
+        height = 0.45;
       }
+    } else if (cover.kind === CoverKind.Forest) {
+      height = 0.18;
+      flowers = 0;
     }
-  }
-
-  private slot(kind: number): number | null {
-    const free = this.free[kind]!;
-    if (free.length > 0) return free.pop()!;
-    const mesh = this.meshes[kind]!;
-    if (this.highWater[kind]! >= mesh.instanceMatrix.count) return null;
-    return this.highWater[kind]!++;
-  }
-
-  private build(key: string): boolean {
-    const [px, pz] = key.split(',').map(Number) as [number, number];
-    const x0 = px * PATCH_M;
-    const z0 = pz * PATCH_M;
-    if (this.groundHeightAt(x0 + PATCH_M / 2, z0 + PATCH_M / 2) === null) return false;
-    const patch: Patch = { key, slots: [[], [], [], []] };
-    // One road frame per patch: the lateral of each cell is its offset along the
-    // centre's normal, which is exact enough across ten metres of road.
-    const approx = this.roadDistance.distAt(x0 + PATCH_M / 2, z0 + PATCH_M / 2, 20);
-    let frame: { s: number; lateral: number; nx: number; nz: number; half: number } | null = null;
-    if (approx < 40) {
-      const p = this.road.project(x0 + PATCH_M / 2, z0 + PATCH_M / 2);
-      const c = this.road.sampleAt(p.s);
-      frame = { s: p.s, lateral: p.lateral, nx: Math.cos(c.heading), nz: -Math.sin(c.heading), half: this.road.halfWidthAt(p.s) };
+    if (toEdge < 1.0) height = 0;
+    else if (toEdge < 4) height *= 0.7;
+    else if (toEdge < 9) height *= 1.6; // the uncut ditch
+    if (wet > 0.55) height = 0;
+    // The ground's colour, as the tiles paint it: mud where it is wet.
+    if (wet > 0) {
+      const m = Math.min(1, wet * 1.4) * 0.85;
+      r += (0.0685 - r) * m;
+      g += (0.0467 - g) * m;
+      b += (0.0273 - b) * m;
     }
-    for (let i = 0; i < CELLS; i++) {
-      for (let j = 0; j < CELLS; j++) {
-        const gx = px * CELLS + i;
-        const gz = pz * CELLS + j;
-        const x = x0 + (i + hash01(TAG, gx, gz, 1)) * CELL_M;
-        const z = z0 + (j + hash01(TAG, gx, gz, 2)) * CELL_M;
-        let roadDist = approx;
-        let toEdge = 99;
-        if (frame) {
-          const lat = frame.lateral + (x - x0 - PATCH_M / 2) * frame.nx + (z - z0 - PATCH_M / 2) * frame.nz;
-          roadDist = Math.abs(lat);
-          toEdge = roadDist - frame.half;
-          // Nothing on the asphalt; a bare gravel verge; then the grass.
-          if (toEdge < 1.2) continue;
-        }
-        const r = hash01(TAG, gx, gz, 3);
-        const r2 = hash01(TAG, gx, gz, 4);
-        this.terrain.cover.sample(x, z, roadDist, this.cover);
-        let kind: GrassKind;
-        let keep: number;
-        let tint = 0.85 + 0.3 * r2;
-        if (this.cover.kind === CoverKind.Field) {
-          const crop = this.cover.crop;
-          if (crop === Crop.Wheat || crop === Crop.Rye) {
-            kind = GrassKind.Wheat;
-            keep = 0.95;
-          } else if (crop === Crop.GreenCrop) {
-            kind = GrassKind.Tall;
-            keep = 0.8;
-            tint *= 1.1;
-          } else if (crop === Crop.Fallow || crop === Crop.Hay) {
-            kind = r2 < 0.2 ? GrassKind.Flowers : GrassKind.Short;
-            keep = 0.55;
-          } else {
-            continue; // ploughed, stubble
-          }
-        } else if (this.cover.kind === CoverKind.Forest) {
-          kind = GrassKind.Short;
-          keep = 0.2;
-          tint *= 0.8;
-        } else {
-          const wet = this.terrain.wetnessAt(x, z);
-          if (wet > 0.55) continue; // mud
-          // Tall in the ditch and the uncut margins, flowers in lush meadow.
-          const ditch = toEdge > 4 && toEdge < 9;
-          kind = ditch || r2 > 0.9 ? GrassKind.Tall : r2 < 0.14 + 0.12 * this.cover.lush ? GrassKind.Flowers : GrassKind.Short;
-          keep = 0.7 + 0.25 * this.cover.lush;
-          if (toEdge < 3) {
-            kind = GrassKind.Short;
-            keep *= 0.5;
-          }
-        }
-        if (r > keep) continue;
-        const y = this.groundHeightAt(x, z);
-        if (y === null) continue;
-        const slot = this.slot(kind);
-        if (slot === null) continue;
-        const s = 0.75 + 0.6 * hash01(TAG, gx, gz, 5);
-        pos.set(x - this.origin.x, y - 0.03, z - this.origin.z);
-        quat.setFromAxisAngle(UP, hash01(TAG, gx, gz, 6) * Math.PI);
-        scl.set(s, s * (0.8 + 0.45 * r2), s);
-        matrix.compose(pos, quat, scl);
-        const mesh = this.meshes[kind]!;
-        mesh.setMatrixAt(slot, matrix);
-        mesh.setColorAt(slot, col.setScalar(tint));
-        patch.slots[kind]!.push(slot);
-      }
-    }
-    this.patches.set(key, patch);
+    // Stored gamma-encoded (8 bits), decoded in the shader.
+    this.colourData[o] = Math.round(Math.pow(r, 1 / 2.2) * 255);
+    this.colourData[o + 1] = Math.round(Math.pow(g, 1 / 2.2) * 255);
+    this.colourData[o + 2] = Math.round(Math.pow(b, 1 / 2.2) * 255);
+    this.colourData[o + 3] = 255;
+    this.paramData[o] = Math.round(Math.min(1, height) * 255);
+    this.paramData[o + 1] = wheat * 255;
+    this.paramData[o + 2] = Math.round(Math.min(1, flowers) * 255);
+    this.paramData[o + 3] = 255;
     return true;
   }
 }
