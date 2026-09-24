@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Country (branch `country`)
+
+The Russian countryside replaces the desert on this branch. Design, rules and open
+questions live in `docs/country.md`.
+
+#### Decisions
+
+- THE DESERT IS REPLACED WHOLE, NOT MIXED. `main` keeps the desert; the photo puzzle
+  lives on `puzzle`. One region first (central Russia, summer) as a vertical slice; the
+  region later changes along the road, the season is a DEV switch until its mechanic is
+  decided. First iteration is nature and road infrastructure only, no villages. No
+  mirages of any kind. CC0 assets only.
+- THE LOOK IS LIGHT LOW-POLY WITH A PINCH OF INK, BETWEEN A SHORT HIKE AND FIREWATCH.
+  Realism was turned down (the eye hunts for its flaws and gets bored), soft
+  stylisation as seen-it-all; realism with comic outlines turned out the worst of both.
+  Silhouette over detail, no photo or painted textures, a small light warm palette,
+  coloured shade, thin structures, air between things.
+- THE QUALITY BAR IS THE AGENT'S TO HOLD. Tidewater (dgreenheck) was shown as proof that
+  far higher bars exist — not an engine or a realism target. Every asset is judged up
+  close, at 30 m and in the game frame, and criticised honestly before it is shown.
+- NATURE GROWS AS IT DOES: woods, copses and belts or nothing, lone trees rare; nothing
+  pops or grows out of the ground; the wood sometimes reaches the road; mud, not sand;
+  a bumpy verge; grass everywhere, flattened by wheels and feet.
+
+#### Changed
+
+- RELIEF AND LAND COVER. The Russian plain: moraine hummocks, ravines and lowlands for
+  dunes, low uplands for mountains. Farmland districts with crop plots and margins,
+  mottled meadows, woods cleared back from the road — one source (`world/landcover.ts`)
+  for tile colours, the vista, tree planting and wheel surfaces. Grass, Soil and Mud
+  surface types; mud is slick and sinks, painted warm brown.
+- TREES ARE BUILT IN CODE. Silver birch (white stem, lens-shaped dark marks, rough grey
+  foot rising in tongues, narrow crown of hanging masses), lime/oak, hazel/willow bush,
+  spruce. Crowns are lit as one volume and do not shadow themselves. The downloaded
+  Quaternius models, their prep script and the country lab are gone.
+- THE FOREST IS DRAWN IN FOUR LEVELS — near to 60 m, the far model still shadowed to
+  110 m, unshadowed to 420 m, baked impostors to 2 km over a canopy blanket — never by
+  scaling. Planting follows woods, copses, shelter belts two to three rows wide, ravine
+  floors, ditch willow and fallow birch; lone trees are one in several square kilometres.
+- GRASS IS GPU TUFTS TO 95 M in the ground's own colour, lit as the ground, shadowed at
+  the root, flattened by wheels and feet and standing back up over 25 s.
+- DEPTH WITHOUT MESAS: aerial perspective in the post pass, and landmarks — churches,
+  water towers, elevators, masts, slim power-line masts across the fields.
+- ROADSIDE: ditches, hummocks, ravines to 14 m from the asphalt; timber poles on
+  concrete stubs and square concrete poles.
+- Lighter palette and a violet fill in shade; the desert's ink dots are off the ground.
+
+#### Fixed
+
+- DARK SHARDS ACROSS EVERY MEADOW: grass back faces were lit from below. The patch meant
+  to light both sides replaced a line that was still an `#include`, so it never applied.
+
+#### Removed
+
+- Mirages, heat haze, film grain, sand veil, mesas, cacti, tumbleweeds, dust walls,
+  desert monuments, desert tile props, road debris, oasis palms, smoke columns.
+
 ### Fixed
 
 - NOTHING BEHIND THE WHEEL AUTOSAVES ANY MORE: THE SLOT KEEPS THE DRIVE AS IT WAS AT
