@@ -39,6 +39,7 @@ import { desertPaletteAt } from './gradient';
 /** The three families, in the order `event.draw` selects them. */
 export const WEATHER_FAMILIES = ['virga', 'dustWall', 'smokeColumn'] as const;
 export type WeatherFamily = (typeof WEATHER_FAMILIES)[number];
+const COUNTRY_WEATHER_FAMILIES: readonly WeatherFamily[] = ['virga', 'virga', 'smokeColumn'];
 
 /**
  * How far off the road a phenomenon stands, metres.
@@ -141,8 +142,11 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
  * equally likely and the answer is a pure function of the event.
  */
 export function weatherFamilyFor(draw: number): WeatherFamily {
-  const index = Math.min(WEATHER_FAMILIES.length - 1, Math.floor(draw * WEATHER_FAMILIES.length));
-  return WEATHER_FAMILIES[index]!;
+  // Countryside: rain out of a cloud base, or a leaning column of smoke where somebody
+  // is burning off last year's grass. No dust walls on a green plain.
+  const families = COUNTRY_WEATHER_FAMILIES;
+  const index = Math.min(families.length - 1, Math.floor(draw * families.length));
+  return families[index]!;
 }
 
 /** Signed lateral offset of an event's phenomenon, metres. Pure in the event. */

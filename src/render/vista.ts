@@ -6,6 +6,7 @@ import { applyComicShading } from './comic';
 
 import { DESERT_TILE_SIZE } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
+import { vistaGroundAt } from '../world/vistaground';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -337,7 +338,7 @@ export class VistaMesh {
   private readonly prefetchQueue: { cornerX: number; cornerZ: number }[] = [];
   /** Scratch field values for the synchronous path; sized with the disc. */
   private horizonScratch: Float32Array | null = null;
-  private baseScratch: Float32Array | null = null;
+  private colorScratch: Float32Array | null = null;
   private readonly dissolvingMesas = new Map<string, number>();
   private readonly retiredMesas = new Set<string>();
   private mesaVisibleOuter = 0;
@@ -489,17 +490,17 @@ export class VistaMesh {
       return;
     }
     const horizon = new Float32Array(result.horizon);
-    const base = new Float32Array(result.base);
+    const colors = new Float32Array(result.colors);
     const vertexCount = this.radii.length * SECTORS;
     if (
       horizon.length === vertexCount
-      && base.length === vertexCount
+      && colors.length === vertexCount * 3
       && !this.groundSampleCache.has(pending.key)
       && this.groundLocalPositions !== null
     ) {
       this.groundSampleCache.set(
         pending.key,
-        this.buildGroundSample(pending.cornerX, pending.cornerZ, horizon, base),
+        this.buildGroundSample(pending.cornerX, pending.cornerZ, horizon, colors),
       );
       this.trimGroundSampleCache();
     }
@@ -939,14 +940,8 @@ export class VistaMesh {
     this.sampleCellX = cellX;
     this.sampleCellZ = cellZ;
     invariantLocalPositions(this.groundLocalPositions);
-    this.buildMesas(
-      x0 + SAMPLE_CELL_SIZE * 0.5,
-      z0 + SAMPLE_CELL_SIZE * 0.5,
-      this.groundLocalPositions,
-      samples,
-      x0,
-      z0,
-    );
+    // No mesas on the Russian plain: `buildMesas` is left in place for the desert's
+    // sake but never called, so the mesa mesh stays empty and hidden.
 
     this.trimGroundSampleCache();
     // Queue the corners of the eight neighbouring cells. Whichever way the camera
@@ -973,10 +968,10 @@ export class VistaMesh {
     const vertexCount = this.radii.length * SECTORS;
     if (this.horizonScratch?.length !== vertexCount) {
       this.horizonScratch = new Float32Array(vertexCount);
-      this.baseScratch = new Float32Array(vertexCount);
+      this.colorScratch = new Float32Array(vertexCount * 3);
     }
     const horizon = this.horizonScratch;
-    const base = this.baseScratch!;
+    const colorsIn = this.colorScratch!;
     const ox = this.origin.x;
     const oz = this.origin.z;
     for (let r = 0; r < this.radii.length; r++) {
@@ -988,11 +983,10 @@ export class VistaMesh {
         const vi = i * 3;
         const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
         const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
-        base[i] = this.terrain.baseHeight(absoluteX, absoluteZ, radius);
+        horizon[i] = vistaGroundAt(this.terrain, absoluteX, absoluteZ, radius, reliefWeight, colorsIn, vi);
       }
     }
-    const sample = this.buildGroundSample(cx, cz, horizon, base);
+    const sample = this.buildGroundSample(cx, cz, horizon, colorsIn);
     this.groundSampleCache.set(key, sample);
     return sample;
   }
@@ -1006,7 +1000,7 @@ export class VistaMesh {
     cx: number,
     cz: number,
     horizon: Float32Array,
-    base: Float32Array,
+    colorsIn: Float32Array,
   ): GroundSample {
     invariantLocalPositions(this.groundLocalPositions);
     const vertexCount = this.radii.length * SECTORS;
@@ -1023,7 +1017,6 @@ export class VistaMesh {
         const i = r * SECTORS + a;
         const vi = i * 3;
         const horizonY = horizon[i]!;
-        const rockWeight = smoothstep01((horizonY - base[i]!) / ROCK_ALTITUDE);
         if (radius <= ROAD_UNDERLAY_RADIUS) {
           const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
           const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
@@ -1031,9 +1024,9 @@ export class VistaMesh {
         } else {
           heights[i] = horizonY - bias;
         }
-        colors[vi] = sandLinear.r + (rockLinear.r - sandLinear.r) * rockWeight;
-        colors[vi + 1] = sandLinear.g + (rockLinear.g - sandLinear.g) * rockWeight;
-        colors[vi + 2] = sandLinear.b + (rockLinear.b - sandLinear.b) * rockWeight;
+        colors[vi] = colorsIn[vi]!;
+        colors[vi + 1] = colorsIn[vi + 1]!;
+        colors[vi + 2] = colorsIn[vi + 2]!;
       }
     }
     return { heights, colors, normals: this.groundNormalsFor(heights) };

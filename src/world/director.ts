@@ -115,7 +115,9 @@ const KINDS: readonly KindDef[] = [
   /** The road rides up onto a bank above the plain: the view opens and the verge falls away. */
   { kind: 'embankment', channel: VarietyChannel.Horizon, weight: 0.3, minLength: 200, maxLength: 500, ramp: 80 },
   /** A belt where the rock shelves crowd in to the corridor instead of staying out in the open. */
-  { kind: 'outcrop', channel: VarietyChannel.Horizon, weight: 0.25, minLength: 250, maxLength: 600, ramp: 120 },
+  // Countryside: the rock shelves this belt stood up are switched off (terrain.ts),
+  // so the belt would schedule an event with nothing in it.
+  { kind: 'outcrop', channel: VarietyChannel.Horizon, weight: 0, minLength: 250, maxLength: 600, ramp: 120 },
   /** Something far out doing something: virga, a dust wall, a smoke column. */
   { kind: 'weather', channel: VarietyChannel.Horizon, weight: 0.15, minLength: 900, maxLength: 1200, ramp: 300 },
 

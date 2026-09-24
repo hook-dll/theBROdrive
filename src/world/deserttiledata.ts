@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
-import { desertPaletteAt } from './gradient';
+import { CoverKind, Crop, newCoverSample, type CoverSample } from './landcover';
+import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
@@ -46,7 +47,40 @@ export interface DesertTileData {
   readonly colors: Float32Array;
   readonly indices: Uint32Array;
   readonly propSurfaces: Uint8Array;
+  /**
+   * Canopy blanket per vertex: linear rgb of the crowns, then their height over the
+   * ground (world/vistaground.ts). The tile shader raises it past `CANOPY_FROM_M`.
+   */
+  readonly canopy: Float32Array;
+  /** `treeCount` trees of `TREE_STRIDE` floats each: see `TreeField`. */
+  readonly trees: Float32Array;
+  readonly treeCount: number;
 }
+
+/** Kinds of planted thing, stored as a float in a tree record. */
+export const enum TreeKind {
+  Birch = 0,
+  Spruce = 1,
+  Bush = 2,
+}
+
+/**
+ * One tree record: local x, ground y, local z, scale, yaw, kind, tint. Local x/z are
+ * relative to the tile centre, like the tile's own positions.
+ */
+export const TREE_STRIDE = 7;
+/** Candidate spacing in a wood, metres. One candidate per cell, jittered. */
+const TREE_CELL = 6.5;
+const TREE_CELLS = Math.floor(DESERT_TILE_SIZE / TREE_CELL);
+/** A candidate can yield one tree and one bush. */
+export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 2;
+const TREE_TAG = 0x54524545;
+/** Nothing is planted closer than this to the road's centreline: verge and ditch. */
+const TREE_ROAD_KEEP = 9.5;
+/** Past the asphalt edge: the verge and the ditch stay clear whatever the road's width. */
+const TREE_VERGE_KEEP = 5.5;
+/** Below this lattice distance a candidate's distance is measured exactly. */
+const TREE_EXACT_GATE = TREE_ROAD_KEEP + DIST_LATTICE * 1.5;
 
 
 export interface GroundHeightSample {
@@ -158,11 +192,14 @@ export function generateDesertTileData(
   const detailOffsets = fit(into?.detailOffsets, vertexCount, Float32Array);
   const normals = fit(into?.normals, vertexCount * 3, Float32Array);
   const colors = fit(into?.colors, vertexCount * 3, Float32Array);
+  const canopy = fit(into?.canopy, vertexCount * 4, Float32Array);
   const ground = { height: 0, detail: 0 };
   const paletteDistance = farFromRoad
     ? Math.abs(centreZ)
     : context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
-  const palette = new THREE.Color(desertPaletteAt(paletteDistance).sand);
+  void paletteDistance;
+  const cover = context.terrain.cover;
+  const coverSample = newCoverSample();
   // One lattice node for the whole tile: the far path needs an arclength only to find
   // a lake basin, and a basin is 860 m across, so the tile's own nearest branch is
   // exact enough. See `sampleGroundHeight`.
@@ -181,9 +218,22 @@ export function generateDesertTileData(
       positions[vi * 3] = worldX - centreX;
       positions[vi * 3 + 1] = y;
       positions[vi * 3 + 2] = worldZ - centreZ;
-      colors[vi * 3] = palette.r;
-      colors[vi * 3 + 1] = palette.g;
-      colors[vi * 3 + 2] = palette.b;
+      // Ground colour is the land cover's. The road distance is the shared lattice
+      // interpolation: a colour needs to be right to a metre, not to a centimetre.
+      const roadDist = farFromRoad ? 1e6 : context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE);
+      cover.sample(worldX, worldZ, roadDist, coverSample);
+      colors[vi * 3] = coverSample.r;
+      colors[vi * 3 + 1] = coverSample.g;
+      colors[vi * 3 + 2] = coverSample.b;
+      if (coverSample.forest > 0) {
+        cover.canopyColour(worldX, worldZ, coverSample.birch, canopy, vi * 4);
+        canopy[vi * 4 + 3] = canopyHeight(worldX, worldZ, coverSample.forest, coverSample.birch);
+      } else {
+        canopy[vi * 4] = coverSample.r;
+        canopy[vi * 4 + 1] = coverSample.g;
+        canopy[vi * 4 + 2] = coverSample.b;
+        canopy[vi * 4 + 3] = 0;
+      }
     }
   }
 
@@ -236,10 +286,120 @@ export function generateDesertTileData(
     // Roadside scatter owns the corridor. Once this tile is definitely far away, do
     // not ask the whole-road grid at all.
     if (!farFromRoad && context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;
-    propSurfaces[i] = context.terrain.openSurfaceAt(worldX, worldZ);
+    // Countryside: the desert's lone cacti and boulders are gone, and what stands
+    // on open ground is planted by `plantTrees` instead.
+    void worldX;
+    void worldZ;
   }
 
-  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces };
+  const trees = fit(into?.trees, MAX_TILE_TREES * TREE_STRIDE, Float32Array);
+  const treeCount = plantTrees(context, tx, tz, farFromRoad, heights, trees, coverSample);
+
+  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces, canopy, trees, treeCount };
+}
+
+/**
+ * Plants the tile's trees into `out` and returns how many.
+ *
+ * A jittered candidate per `TREE_CELL`, kept with probability equal to the wood's
+ * density there, so a wood's edge thins out on its own rather than stopping at a line.
+ * What is not a tree may be a bush: undergrowth along a wood's edge, willow scrub in
+ * the roadside ditch, a lone birch in a meadow, a young birch in a field nobody
+ * ploughs any more — the one sight that says "Russian back country" before anything
+ * else does.
+ */
+function plantTrees(
+  context: DesertTileGenerationContext,
+  tx: number,
+  tz: number,
+  farFromRoad: boolean,
+  heights: Float32Array,
+  out: Float32Array,
+  cover: CoverSample,
+): number {
+  const startX = tx * DESERT_TILE_SIZE;
+  const startZ = tz * DESERT_TILE_SIZE;
+  const centreX = startX + DESERT_TILE_SIZE * 0.5;
+  const centreZ = startZ + DESERT_TILE_SIZE * 0.5;
+  const land = context.terrain.cover;
+  const seed = context.seed;
+  let n = 0;
+  const put = (x: number, z: number, kind: TreeKind, scale: number, key: number): void => {
+    const lx = x - startX;
+    const lz = z - startZ;
+    const o = n * TREE_STRIDE;
+    out[o] = x - centreX;
+    out[o + 1] = tileHeightAt(heights, lx, lz);
+    out[o + 2] = z - centreZ;
+    out[o + 3] = scale;
+    out[o + 4] = hash01(seed, TREE_TAG, key, 5) * Math.PI * 2;
+    out[o + 5] = kind;
+    out[o + 6] = 0.84 + hash01(seed, TREE_TAG, key, 6) * 0.32;
+    n++;
+  };
+  for (let ci = 0; ci < TREE_CELLS; ci++) {
+    for (let cj = 0; cj < TREE_CELLS; cj++) {
+      const gx = tx * TREE_CELLS + ci;
+      const gz = tz * TREE_CELLS + cj;
+      const key = (gx * 73856093) ^ (gz * 19349663);
+      const x = startX + (ci + 0.1 + hash01(seed, TREE_TAG, gx, gz, 1) * 0.8) * TREE_CELL;
+      const z = startZ + (cj + 0.1 + hash01(seed, TREE_TAG, gx, gz, 2) * 0.8) * TREE_CELL;
+      if (terminusWeight(x, z) > 0) continue;
+      let roadDist = farFromRoad ? 1e6 : context.roadDistance.distAt(x, z, DIST_LATTICE);
+      // The lattice distance is only good to about its own spacing, and a bush 4 m out
+      // stands on the carriageway. Near the road, ask the road itself.
+      if (roadDist < TREE_EXACT_GATE) {
+        const p = context.road.project(x, z, context.roadDistance.ownerAt(x, z, DIST_LATTICE));
+        roadDist = Math.abs(p.lateral);
+        if (roadDist < context.road.halfWidthAt(p.s) + TREE_VERGE_KEEP) continue;
+      }
+      if (roadDist < TREE_ROAD_KEEP) continue;
+      const forest = land.forestAt(x, z, roadDist);
+      const r = hash01(seed, TREE_TAG, gx, gz, 3);
+      const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
+      if (r < forest * 0.93) {
+        const birch = land.birchAt(x, z);
+        const kind = r2 < birch * 0.9 + 0.05 ? TreeKind.Birch : TreeKind.Spruce;
+        // Edge trees are younger and shorter; the interior is a mature stand.
+        put(x, z, kind, (0.62 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7)) * (0.7 + 0.3 * forest), key);
+        continue;
+      }
+      if (forest > 0.02 && forest < 0.75 && r2 < 0.4) {
+        put(x, z, TreeKind.Bush, 0.7 + 0.6 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+        continue;
+      }
+      if (roadDist < 20 && r2 < 0.07) {
+        put(x, z, TreeKind.Bush, 0.6 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+        continue;
+      }
+      if (forest === 0 && r2 < 0.05) {
+        land.sample(x, z, roadDist, cover);
+        if (cover.crop === Crop.Fallow && r2 < 0.045) {
+          put(x, z, TreeKind.Birch, 0.3 + 0.3 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+        } else if (cover.kind === CoverKind.Meadow && r2 < 0.0035) {
+          put(x, z, TreeKind.Birch, 0.85 + 0.35 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+        } else if (cover.kind === CoverKind.Meadow && r2 < 0.012) {
+          put(x, z, TreeKind.Bush, 0.8 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+        }
+      }
+    }
+  }
+  return n;
+}
+
+/** Bilinear height on the tile's regular lattice, local metres from its corner. */
+function tileHeightAt(heights: Float32Array, localX: number, localZ: number): number {
+  const fx = Math.min(DESERT_TILE_CELLS, Math.max(0, localX / DESERT_TILE_STEP));
+  const fz = Math.min(DESERT_TILE_CELLS, Math.max(0, localZ / DESERT_TILE_STEP));
+  const ix = Math.min(DESERT_TILE_CELLS - 1, Math.floor(fx));
+  const iz = Math.min(DESERT_TILE_CELLS - 1, Math.floor(fz));
+  const u = fx - ix;
+  const v = fz - iz;
+  const a = heights[ix * DESERT_TILE_VERTS + iz]!;
+  const b = heights[(ix + 1) * DESERT_TILE_VERTS + iz]!;
+  const c = heights[ix * DESERT_TILE_VERTS + iz + 1]!;
+  const d = heights[(ix + 1) * DESERT_TILE_VERTS + iz + 1]!;
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
 /** Buffers are moved from the worker; the main thread builds BufferAttributes over them. */
@@ -252,5 +412,7 @@ export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
     data.colors.buffer as ArrayBuffer,
     data.indices.buffer as ArrayBuffer,
     data.propSurfaces.buffer as ArrayBuffer,
+    data.canopy.buffer as ArrayBuffer,
+    data.trees.buffer as ArrayBuffer,
   ];
 }

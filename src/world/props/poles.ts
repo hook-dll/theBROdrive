@@ -125,7 +125,12 @@ const WIRE_SAG_CLEARANCE = 0.55;
 // Shared materials (never disposed; they live for the whole session)
 // ---------------------------------------------------------------------------
 
-export const matTimber = new THREE.MeshStandardMaterial({ color: 0x2f251c, roughness: 0.9, metalness: 0 });
+// Timber that has stood forty winters goes silver-grey, not brown.
+export const matTimber = new THREE.MeshStandardMaterial({ color: 0x5d554b, roughness: 0.95, metalness: 0 });
+/** Pin insulators: the pale green glass of the Soviet line, catching the light. */
+const matInsulator = new THREE.MeshStandardMaterial({ color: 0x8fb8a6, roughness: 0.18, metalness: 0.05 });
+/** Galvanised steel: crossarms of the concrete line, and the bands tying timber to its stub. */
+const matSteel = new THREE.MeshStandardMaterial({ color: 0x5f6266, roughness: 0.6, metalness: 0.5 });
 const matLattice = new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 0.55, metalness: 0.65 });
 const matConcrete = new THREE.MeshStandardMaterial({
   color: SURFACES[SurfaceType.Concrete].color,
@@ -555,8 +560,6 @@ function timberCrossarm(): THREE.BufferGeometry {
     const arm = new THREE.CylinderGeometry(0.06, 0.06, 1.7, 6, 1);
     arm.rotateZ(Math.PI / 2);
     arm.translate(0, 6.1, 0);
-    const ins1 = new THREE.CylinderGeometry(0.04, 0.05, 0.18, 5, 1).translate(-0.5, 6.24, 0);
-    const ins2 = new THREE.CylinderGeometry(0.04, 0.05, 0.18, 5, 1).translate(0.5, 6.24, 0);
     // Outrigger + drop bracket carrying the lamp head out over the carriageway.
     // +X is the road side (see `lampLocal`); the crossarm alone only reaches 0.85,
     // which left the head above the gravel, so the pool of light missed the lane
@@ -572,9 +575,67 @@ function timberCrossarm(): THREE.BufferGeometry {
       TIMBER_LAMP_LOCAL[1] + 0.21,
       0,
     );
-    _timberCrossarm = mergeGeometries([arm, ins1, ins2, outrigger, drop]);
+    _timberCrossarm = mergeGeometries([arm, outrigger, drop]);
   }
   return _timberCrossarm;
+}
+
+/** A pin insulator: a glass bell on its steel pin. Stood at the local origin. */
+function insulatorAt(x: number, y: number, z: number): THREE.BufferGeometry {
+  const bell = new THREE.CylinderGeometry(0.045, 0.075, 0.13, 7, 1).translate(x, y + 0.1, z);
+  const skirt = new THREE.CylinderGeometry(0.075, 0.08, 0.03, 7, 1).translate(x, y + 0.03, z);
+  return mergeGeometries([bell, skirt]);
+}
+
+let _timberInsulators: THREE.BufferGeometry | null = null;
+function timberInsulators(): THREE.BufferGeometry {
+  if (!_timberInsulators) {
+    _timberInsulators = mergeGeometries([insulatorAt(-0.62, 6.13, 0), insulatorAt(0.62, 6.13, 0), insulatorAt(-0.2, 6.13, 0)]);
+  }
+  return _timberInsulators;
+}
+
+let _timberStub: THREE.BufferGeometry | null = null;
+/**
+ * THE STUB (pasynok): the concrete foot a Russian timber pole is strapped to, so the
+ * wood never stands in wet ground. It stands on the field side of the shaft, two
+ * metres of it showing, the shaft's butt lifted clear of the grass.
+ */
+function timberStub(): THREE.BufferGeometry {
+  if (!_timberStub) {
+    _timberStub = new THREE.BoxGeometry(0.17, 2.6, 0.2).translate(-0.19, 0.95, 0);
+  }
+  return _timberStub;
+}
+
+let _timberBands: THREE.BufferGeometry | null = null;
+function timberBands(): THREE.BufferGeometry {
+  if (!_timberBands) {
+    const band = (y: number): THREE.BufferGeometry =>
+      new THREE.CylinderGeometry(0.25, 0.25, 0.05, 8, 1, true).scale(1, 1, 0.75).translate(-0.09, y, 0);
+    _timberBands = mergeGeometries([band(0.9), band(1.9)]);
+  }
+  return _timberBands;
+}
+
+let _concreteHardware: THREE.BufferGeometry | null = null;
+/** Steel crossarm at the head of a concrete pole. */
+function concreteCrossarm(): THREE.BufferGeometry {
+  if (!_concreteHardware) {
+    const arm = new THREE.BoxGeometry(1.9, 0.07, 0.07).translate(0, 8.55, 0);
+    const brace = cylinderBetween(new THREE.Vector3(-0.6, 8.52, 0), new THREE.Vector3(0, 8.0, 0), 0.025, 4);
+    const brace2 = cylinderBetween(new THREE.Vector3(0.6, 8.52, 0), new THREE.Vector3(0, 8.0, 0), 0.025, 4);
+    _concreteHardware = mergeGeometries([arm, brace, brace2]);
+  }
+  return _concreteHardware;
+}
+
+let _concreteInsulators: THREE.BufferGeometry | null = null;
+function concreteInsulators(): THREE.BufferGeometry {
+  if (!_concreteInsulators) {
+    _concreteInsulators = mergeGeometries([insulatorAt(-0.85, 8.59, 0), insulatorAt(0.85, 8.59, 0), insulatorAt(0, 8.98, 0)]);
+  }
+  return _concreteInsulators;
 }
 
 let _latticeMast: THREE.BufferGeometry | null = null;
@@ -618,7 +679,9 @@ function latticeMast(): THREE.BufferGeometry {
 let _concreteColumn: THREE.BufferGeometry | null = null;
 function concreteColumn(): THREE.BufferGeometry {
   if (!_concreteColumn) {
-    const col = new THREE.CylinderGeometry(0.12, 0.3, 9.0, 10, 1).translate(0, 4.5, 0);
+    // The SV pole: a SQUARE section tapering to the head, not a round column. Four
+    // radial segments turned 45 degrees give the flat faces the comic light bands.
+    const col = new THREE.CylinderGeometry(0.1, 0.2, 9.0, 4, 1).rotateY(Math.PI / 4).translate(0, 4.5, 0);
     // Curved lamp arm sweeping out toward the road and down to the lamp head.
     // Local +X is LEFT of travel (see `applyPoleRotation`); the pole line stands
     // to the RIGHT of the road, outside the paint, so the arm must reach along +X to
@@ -800,13 +863,20 @@ function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
   switch (pose.era) {
     case 'timber':
       poleGroup.add(new THREE.Mesh(timberShaft(), matTimber));
-      if (pose.hasCrossarm) poleGroup.add(new THREE.Mesh(timberCrossarm(), matTimber));
+      poleGroup.add(new THREE.Mesh(timberStub(), matConcrete));
+      poleGroup.add(new THREE.Mesh(timberBands(), matSteel));
+      if (pose.hasCrossarm) {
+        poleGroup.add(new THREE.Mesh(timberCrossarm(), matTimber));
+        poleGroup.add(new THREE.Mesh(timberInsulators(), matInsulator));
+      }
       break;
     case 'lattice':
       poleGroup.add(new THREE.Mesh(latticeMast(), matLattice));
       break;
     case 'concrete':
       poleGroup.add(new THREE.Mesh(concreteColumn(), matConcrete));
+      poleGroup.add(new THREE.Mesh(concreteCrossarm(), matSteel));
+      poleGroup.add(new THREE.Mesh(concreteInsulators(), matInsulator));
       break;
     case 'none':
       return;

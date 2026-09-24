@@ -23,8 +23,11 @@ import {
   DESERT_TILE_VERTS as TILE_VERTS,
   desertTileDataTransfers,
   generateDesertTileData,
+  TREE_STRIDE,
   type DesertTileData,
 } from './deserttiledata';
+import { TREE_TRUNK_RADIUS } from './props/trees';
+import { ForestRenderer } from './forest';
 import type {
   DesertTileWorkerRequest,
   DesertTileWorkerResponse,
@@ -80,6 +83,8 @@ const leanQuat = new THREE.Quaternion();
 /** Collider centre offset in the instance's frame, carried out through its orientation. */
 const colliderOffset = new THREE.Vector3();
 let hullPoints = new Float32Array(0);
+/** Half height of a trunk collider: tall enough that nothing drives over it. */
+const TREE_COLLIDER_HALF_HEIGHT = 2.5;
 
 interface DesertPropPlacement {
   readonly form: DesertPropForm;
@@ -255,7 +260,11 @@ export class DesertTileStreamer {
     private readonly workerFactory?: DesertTileWorkerFactory,
   ) {
     this.worker = this.createWorker();
+    this.forest = new ForestRenderer(scene, origin);
   }
+
+  /** Draws the trees every live tile planted (world/forest.ts). */
+  readonly forest: ForestRenderer;
 
 
   /**
@@ -457,6 +466,7 @@ export class DesertTileStreamer {
     geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(data.detailOffsets, 1));
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    geometry.setAttribute('aCanopy', new THREE.BufferAttribute(data.canopy, 4));
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const group = new THREE.Group();
@@ -466,13 +476,15 @@ export class DesertTileStreamer {
     mesh.castShadow = false;
     group.add(mesh);
 
-    const { props, meshes } = this.buildProps(
+    const { props, meshes: propMeshes } = this.buildProps(
       tx,
       tz,
       data.heights,
       data.propSurfaces,
       group,
     );
+    const meshes = propMeshes;
+    this.forest.addTile(key, centreX, centreZ, data.trees, data.treeCount);
     freezeStaticSubtree(group);
     this.scene.add(group);
 
@@ -970,6 +982,7 @@ export class DesertTileStreamer {
     );
     const terrainBody = terrainCollider.parent();
     if (terrainBody) tile.bodies.push(terrainBody);
+    this.addTreeColliders(tile);
 
     for (const prop of tile.props) {
       const pieces = propPieces(prop.form.id);
@@ -996,6 +1009,35 @@ export class DesertTileStreamer {
       });
     }
     tile.hasPhysics = true;
+  }
+
+  /**
+   * Trunks as one fixed body per tile carrying a cylinder per tree: a wood is
+   * hundreds of trunks, and a body each would be hundreds of broad-phase proxies
+   * the solver never needs to tell apart.
+   */
+  private addTreeColliders(tile: DesertTile): void {
+    const trees = tile.data.trees;
+    if (tile.data.treeCount === 0) return;
+    const rapier = this.physics.rapier;
+    const body = this.physics.world.createRigidBody(
+      rapier.RigidBodyDesc.fixed().setTranslation(tile.centreX - this.origin.x, 0, tile.centreZ - this.origin.z),
+    );
+    for (let i = 0; i < tile.data.treeCount; i++) {
+      const o = i * TREE_STRIDE;
+      const radius = TREE_TRUNK_RADIUS[trees[o + 5]!]! * trees[o + 3]!;
+      if (radius <= 0) continue;
+      const collider = this.physics.world.createCollider(
+        rapier.ColliderDesc.cylinder(TREE_COLLIDER_HALF_HEIGHT, radius).setTranslation(
+          trees[o]!,
+          trees[o + 1]! + TREE_COLLIDER_HALF_HEIGHT - 0.3,
+          trees[o + 2]!,
+        ),
+        body,
+      );
+      this.physics.surfaces.register(collider.handle, SurfaceType.Rock);
+    }
+    tile.bodies.push(body);
   }
 
   private addPropCollider(
@@ -1072,6 +1114,7 @@ export class DesertTileStreamer {
   private teardown(tile: DesertTile): void {
     if (tile.hasPhysics) this.demote(tile);
     this.scene.remove(tile.group);
+    this.forest.removeTile(tile.key);
     tile.geometry.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
     // Every caller drops the tile from `tiles` around this call, and the geometry

@@ -15,6 +15,7 @@ import {
 } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
 import { desertPaletteAt } from './gradient';
+import { CANOPY_FROM_M, CANOPY_FULL_M } from './vistaground';
 import { DESERT_TILE_SIZE } from './deserttiledata';
 
 /**
@@ -115,7 +116,7 @@ const ROAD_SEAM_DROP = 0.015;
  * by comparing against this constant. Register it anywhere else and the spray will
  * treat that collider as open desert.
  */
-export const TERRAIN_COLLIDER_SURFACE = SurfaceType.Sand;
+export const TERRAIN_COLLIDER_SURFACE = SurfaceType.Grass;
 
 /**
  * Ring spacing across the berm's face, metres. It climbs its 22 m over 70 m of lateral
@@ -282,18 +283,30 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nattribute float aTerrainDetail;\n',
+        '#include <common>\nattribute float aTerrainDetail;\nattribute vec4 aCanopy;\n',
+      )
+      // The canopy blanket (world/vistaground.ts): past the near trees the wood is the
+      // ground raised to the crowns and painted their colour. `color_vertex` runs
+      // before `begin_vertex`, so the ramp is worked out here and reused below.
+      .replace(
+        '#include <color_vertex>',
+        `#include <color_vertex>
+float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
+float canopyRamp = smoothstep( ${CANOPY_FROM_M.toFixed(1)}, ${CANOPY_FULL_M.toFixed(1)}, tileDistance );
+#ifdef USE_COLOR
+vColor.rgb = mix( vColor.rgb, aCanopy.rgb, canopyRamp );
+#endif`,
       )
       .replace(
         '#include <begin_vertex>',
         `vec3 transformed = vec3( position );
-float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
 float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
-transformed.y -= aTerrainDetail * detailFade;`,
+transformed.y -= aTerrainDetail * detailFade;
+transformed.y += aCanopy.w * canopyRamp;`,
       );
   };
   const comicProgramKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v1`;
+  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v2`;
   return material;
 }
 export const TERRAIN_MATERIAL = createTerrainMaterial(false);

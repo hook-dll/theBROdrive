@@ -33,6 +33,13 @@ export const enum SurfaceType {
    * and a puff of dust — without being the desert.
    */
   LooseShoulder = 6,
+  /**
+   * Meadow: turf over firm soil. The countryside's open ground, and the one terrain
+   * collider surface there (see `TERRAIN_COLLIDER_SURFACE`).
+   */
+  Grass = 7,
+  /** Bare earth: a ploughed field, a forest floor, a dirt track's ruts. */
+  Soil = 8,
 }
 
 /**
@@ -204,7 +211,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
     // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
     texture: 0.006,
-    color: 0x9e9c9d,
+    // Countryside: old grey asphalt, darker and a touch warm. The desert's pale grey
+    // read blue-white under the sky fill once there was no sand bounce to warm it.
+    color: 0x77736e,
     dust: 0.0,
     smoke: 1.0,
   },
@@ -223,7 +232,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     hummock: 0,
     // Older cracked districts stay distinct, but no longer collapse back to wet black.
     texture: 0.011,
-    color: 0x888482,
+    color: 0x837e77,
     dust: 0.1,
     smoke: 0.85,
   },
@@ -356,6 +365,45 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     color: 0x8a7d63,
     dust: 0.8,
     smoke: 0.1,
+  },
+  [SurfaceType.Grass]: {
+    label: 'grass',
+    // Dry turf: about 0.55 of mu, a little less laterally-sure than it feels, because
+    // the grass lies flat and the tyre rides the stems before it bites the soil. Rolling
+    // resistance of firm meadow is 0.05-0.08 for a car tyre; the low end, since late
+    // summer ground is dry.
+    longitudinalMu: 0.56,
+    lateralMu: 0.9,
+    optimalSlip: 0.2,
+    rollingResistance: 0.055,
+    // Turf tears rather than ploughs: a little drag in a broadside, far less than sand.
+    deformationDrag: 0.12,
+    roughness: 0.06,
+    // Tussocks and old furrows under the grass: soft, but never smooth.
+    microRelief: 0.018,
+    hummock: 0.05,
+    texture: 0.006,
+    color: 0x7c9254,
+    dust: 0.25,
+    smoke: 0.0,
+  },
+  [SurfaceType.Soil]: {
+    label: 'soil',
+    // Loose, dry arable soil: the tyre sinks a few centimetres, so grip is modest and
+    // it costs a lot to roll through — close to sand in rolling resistance, well
+    // ahead of it in grip, because soil has cohesion that sand does not.
+    longitudinalMu: 0.5,
+    lateralMu: 0.75,
+    optimalSlip: 0.26,
+    rollingResistance: 0.11,
+    deformationDrag: 0.35,
+    roughness: 0.07,
+    microRelief: 0.024,
+    hummock: 0.07,
+    texture: 0.008,
+    color: 0x76604a,
+    dust: 0.7,
+    smoke: 0.0,
   },
 };
 

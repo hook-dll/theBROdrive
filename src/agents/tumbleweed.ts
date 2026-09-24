@@ -45,7 +45,9 @@ const AHEAD_METRES = 220;
 /** Keeping a short rear margin prevents pop-out at the chase camera edge. */
 const BEHIND_METRES = 160;
 /** One slot in eight is taken; with SLOT_SPACING that is a weed about every 3.2 km. */
-const SLOT_CHANCE = 0.125;
+// Countryside: no tumbleweed grows on a Russian meadow. The field stays wired so the
+// desert can have it back by restoring 0.125.
+const SLOT_CHANCE = 0;
 /**
  * STAGING: how far out on the verge a weed starts, so that its crossing and the car's
  * arrival coincide.

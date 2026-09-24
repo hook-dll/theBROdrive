@@ -49,8 +49,6 @@ import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { VistaMesh } from './render/vista';
-import { DistantMirage } from './render/mirage';
-import { MirageTableau } from './render/mirage-tableau';
 import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
@@ -86,7 +84,6 @@ import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
-import { HeatHaze } from './render/heathaze';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -407,10 +404,6 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
-  const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
-  const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
-  // Heat-haze inputs: surface heat and the ground the view is grazing.
-  const heatHaze = new HeatHaze(terrain, road);
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -478,7 +471,7 @@ async function boot(): Promise<void> {
   // streams like everything else so a virga shaft is built off the road frame at
   // its own arclength and disposed with the chunk that owns it.
   streamer.register(new WeatherProvider());
-  streamer.register(new MonumentProvider());
+  // No desert monuments in the countryside (world/props/monuments.ts).
   streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
@@ -1895,6 +1888,7 @@ async function boot(): Promise<void> {
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
+    desert.forest.update(cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('vista');
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
@@ -1902,10 +1896,6 @@ async function boot(): Promise<void> {
     // scale factor a 25 km range still fades, it just fades over 25 km.
     renderer.fog.density *= viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
 
-    // Render-only illusions: neither one owns physics, terrain, streamed props, or
-    // permanent world state. Tableaus dissolve as soon as the player leaves the road.
-    mirage.update(activeS, sky.dayFactor);
-    mirageTableau.update(activeS, activeLateral, sky.dayFactor);
     // The drifting cloud shade every ground material samples. Driven by the RENDER
     // frame's own dt, so a paused game's clouds stop with it, and given the f64
     // origin because the field is anchored to the world rather than to the player —
@@ -1919,22 +1909,7 @@ async function boot(): Promise<void> {
       s.settings.graphicsQuality,
       mobilePresentation,
     );
-    // Heat haze, after the cloud field has advanced: the shade over the ground ahead
-    // is one of its inputs (render/heathaze.ts).
-    renderer.setHeatHaze(
-      heatHaze.update(frameDt, {
-        camera: renderer.camera,
-        originX: origin.x,
-        originZ: origin.z,
-        hintS: activeS,
-        sunHeight: sky.sunDirection.y,
-        timeOfDay: s.timeOfDay,
-        dayLength: DAY_LENGTH,
-        seed: world.seed,
-      }),
-    );
-    // The streamed distant weather fades on the same twilight band as the mirage
-    // above, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
+    // The streamed distant weather fades on the twilight band, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
     // that a rebase cannot move them.
     setWeatherFrame(sky.dayFactor, cam.x + origin.x, cam.z + origin.z);
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
@@ -2377,6 +2352,8 @@ const launch = query.has('poi-gallery')
       ? import('./playground').then(({ bootPlayground }) => bootPlayground())
       : query.has('mirage-lab')
         ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
+        : query.has('country-lab')
+          ? import('./country-lab').then(({ bootCountryLab }) => bootCountryLab())
         : query.has('road-lab')
           ? import('./road-lab').then(({ bootRoadLab }) => bootRoadLab())
           : import.meta.env.DEV && query.has('car-lab')

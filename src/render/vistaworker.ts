@@ -1,6 +1,7 @@
 import { Road } from '../world/road';
 import type { RoadSpine } from '../world/roadspine';
 import { Terrain } from '../world/terrain';
+import { vistaGroundAt } from '../world/vistaground';
 
 /**
  * Terrain sampling for the distant vista disc.
@@ -59,7 +60,8 @@ export interface VistaWorkerSampleResult {
   readonly originZ: number;
   /** Raw field values per disc vertex; the main thread shapes them into a sample. */
   readonly horizon: ArrayBuffer;
-  readonly base: ArrayBuffer;
+  /** Linear ground colour per disc vertex, three floats each (world/vistaground.ts). */
+  readonly colors: ArrayBuffer;
 }
 
 export type VistaWorkerResponse = VistaWorkerReady | VistaWorkerSampleResult;
@@ -113,7 +115,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
 
   const rings = radii.length;
   const horizon = new Float32Array(rings * SECTORS);
-  const base = new Float32Array(rings * SECTORS);
+  const colors = new Float32Array(rings * SECTORS * 3);
   for (let r = 0; r < rings; r++) {
     const radius = radii[r]!;
     const reliefWeight =
@@ -123,8 +125,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
       const vi = i * 3;
       const absoluteX = request.cornerX + positions[vi]! + request.originX;
       const absoluteZ = request.cornerZ + positions[vi + 2]! + request.originZ;
-      horizon[i] = terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
-      base[i] = terrain.baseHeight(absoluteX, absoluteZ, radius);
+      horizon[i] = vistaGroundAt(terrain, absoluteX, absoluteZ, radius, reliefWeight, colors, vi);
     }
   }
 
@@ -137,7 +138,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
     originX: request.originX,
     originZ: request.originZ,
     horizon: horizon.buffer,
-    base: base.buffer,
+    colors: colors.buffer,
   };
-  scope.postMessage(response, [response.horizon, response.base]);
+  scope.postMessage(response, [response.horizon, response.colors]);
 };

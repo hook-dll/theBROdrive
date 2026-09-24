@@ -140,7 +140,9 @@ const CELESTIAL_ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
 // Palette (authored as sRGB hex; THREE converts to linear working space)
 // ---------------------------------------------------------------------------
 
-const C_DAY_ZENITH = new THREE.Color().setStyle('#4d8ede');
+// Countryside: a paler, softer zenith than the desert's; mid-latitude summer air
+// carries more moisture and the sky is less deep.
+const C_DAY_ZENITH = new THREE.Color().setStyle('#5a90cf');
 /**
  * The pale band the daytime sky fades to at the horizon, and — because `fog.color`
  * copies it — the colour the far desert dissolves into.
@@ -156,9 +158,9 @@ const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
 const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
-const C_GROUND = new THREE.Color().setStyle('#d8a45c'); // warm ochre sand bounce
+const C_GROUND = new THREE.Color().setStyle('#707a52'); // meadow bounce: grass-green, dull
 /** Daylight sky illumination gain; the warm ground bounce is compensated below. */
-const DAY_SKY_FILL_BOOST = 1.5;
+const DAY_SKY_FILL_BOOST = 1.2;
 /**
  * MOONLIT FILL. The dome's night palette above is what the SKY looks like, and it
  * is nearly black on purpose — that is what lets the stars read. The hemisphere
@@ -1005,7 +1007,7 @@ export class Sky {
     const skyFillBoost = 1 + (DAY_SKY_FILL_BOOST - 1) * day;
     this._hemiSky.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.025, 0.0)
-      .lerp(C_DAY_HORIZON, 0.32)
+      .lerp(C_DAY_HORIZON, 0.45)
       .lerp(C_SUN_HIGH, 0.025)
       .lerp(C_NIGHT_FILL_SKY, night);
     this._hemiGround.copy(C_GROUND)

@@ -1,3 +1,4 @@
+import { Crop, LandCover, newCoverSample } from './landcover';
 import { Noise2D } from '../core/rng';
 import { LakeBasins } from './lakes';
 import { corridorBatterAt, outcropBeltAt } from './corridorshape';
@@ -36,7 +37,25 @@ export const CORRIDOR_OUTER = 30;
  * is deliberately broad: the tallest landforms can rise more than fifty metres,
  * and introducing that height over the old 130 m span made the fade itself a bank.
  */
-const RELIEF_FULL = 200;
+const RELIEF_FULL = 160;
+
+/** Moraine hummocks: rounded, isotropic, a few metres tall. */
+const MORAINE_WAVELENGTH = 240;
+const MORAINE_AMPLITUDE = 4.5;
+
+/**
+ * Ravines. `RAVINE_HALF_WIDTH` is in units of the line field, so the cut's real width
+ * is about `RAVINE_HALF_WIDTH * RAVINE_WAVELENGTH * 2` — around 35 m lip to lip, 6 m
+ * deep. They never reach the road: `RAVINE_CLEAR` metres outside the asphalt they
+ * have not started, and they deepen over the following eighty.
+ */
+const RAVINE_WAVELENGTH = 420;
+const RAVINE_HALF_WIDTH = 0.045;
+const RAVINE_DEPTH = 6;
+const RAVINE_WARP = 70;
+const RAVINE_CLEAR = 30;
+const RAVINE_PATCH_WAVELENGTH = 2600;
+const RAVINE_PATCH_THRESHOLD = -0.1;
 
 /** Width of the loose verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
@@ -78,7 +97,7 @@ const DUNE_THRESHOLD = -0.35;
  * Low sand ripples provide a little surface scale without changing the silhouette.
  * They are directional too; isotropic two-metre ripples were the visible crumpling.
  */
-const RIPPLE_AMPLITUDE = 0.55;
+const RIPPLE_AMPLITUDE = 0;
 const RIPPLE_LENGTH = 260;
 const RIPPLE_WIDTH = 75;
 const RIPPLE_FULL = 55;
@@ -137,7 +156,7 @@ const RIPPLE_FULL = 55;
  */
 const CORRUGATION_SPACING = 5;
 const CORRUGATION_COHERENCE = 48;
-const CORRUGATION_AMPLITUDE = 0.36;
+const CORRUGATION_AMPLITUDE = 0.05;
 const CORRUGATION_BEND_WAVELENGTH = 420;
 const CORRUGATION_BEND = 26;
 const CORRUGATION_PATCH_LENGTH = 1500;
@@ -145,7 +164,7 @@ const CORRUGATION_PATCH_WIDTH = 430;
 const CORRUGATION_PATCH_FLOOR = 0.4;
 
 const CHOP_WAVELENGTH = 20;
-const CHOP_AMPLITUDE = 0.3;
+const CHOP_AMPLITUDE = 0.22;
 
 /**
  * SCOOPS: the discrete events, and the reason an excursion has a worst moment rather
@@ -170,7 +189,7 @@ const CHOP_AMPLITUDE = 0.3;
  */
 const SCOOP_WAVELENGTH = 26;
 const SCOOP_THRESHOLD = 0.5;
-const SCOOP_DEPTH = 0.32;
+const SCOOP_DEPTH = 0.18;
 
 /**
  * Lateral distance at which the fine band is fully in. Short on purpose: the player
@@ -195,7 +214,7 @@ export const DETAIL_REACH = 80;
 /** Sparse rock shelves and broad dry washes interrupt the sand without shredding it. */
 const OUTCROP_WAVELENGTH = 260;
 const OUTCROP_THRESHOLD = 0.56;
-const OUTCROP_AMPLITUDE = 7;
+const OUTCROP_AMPLITUDE = 0;
 /**
  * What the director's `outcrop` belt does to the rock field it is standing on, and the
  * reason the threshold moves as far as it does.
@@ -212,13 +231,13 @@ const OUTCROP_AMPLITUDE = 7;
  * stays in the low ground between the shelves, and the shelves have an edge because
  * the height uses `t * (2 - t)` rather than the open field's rounded `t * t`.
  */
-const OUTCROP_BELT_AMPLITUDE = 5;
+const OUTCROP_BELT_AMPLITUDE = 0;
 const OUTCROP_BELT_THRESHOLD = -0.4;
 
 const WASH_WAVELENGTH_X = 700;
 const WASH_WAVELENGTH_Z = 1600;
 const WASH_THRESHOLD = 0.48;
-const WASH_DEPTH = 4.5;
+const WASH_DEPTH = 2.5;
 const WASH_FULL = 220;
 
 /**
@@ -333,6 +352,7 @@ export class Terrain {
     this.outcropNoise = new Noise2D(seed ^ 0xd3a2646c);
     this.washNoise = new Noise2D(seed ^ 0x94d049bb);
     this.field = new SurfaceField(seed);
+    this.cover = new LandCover(seed);
     this.basins = new LakeBasins(road, seed);
     // The grade a basin is cut into is the open desert at its centre, which is this
     // object's own height function minus the basins themselves. Handing it over
@@ -343,6 +363,8 @@ export class Terrain {
 
   /** Lake basins dug into this terrain, and the schedule they come from. */
   readonly basins: LakeBasins;
+  /** What grows where: wood, field, meadow (world/landcover.ts). */
+  readonly cover: LandCover;
 
   /** Strength of the rock-outcrop field at a point, used for both height and material. */
   private outcropAt(x: number, z: number): number {
@@ -354,68 +376,33 @@ export class Terrain {
    * position; `dist` only grades the maintained corridor into the dune field.
    */
   private relief(x: number, z: number, dist: number, inner: number): number {
-    const duneFade = smoothstep01(
-      (dist - inner) / (RELIEF_FULL - inner),
-    );
-    const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
-    const across = -x * DUNE_AXIS_Z + z * DUNE_AXIS_X;
-    const warp =
-      this.rippleNoise.fbm(
-        along / DUNE_WARP_WAVELENGTH,
-        across / DUNE_WARP_WAVELENGTH,
-        2,
-        2,
-        0.45,
-      ) * DUNE_WARP_AMPLITUDE;
-    const warpedAcross = across + warp;
+    const fade = smoothstep01((dist - inner) / (RELIEF_FULL - inner));
 
-    const megadune = duneRise(
-      this.duneNoise.fbm(
-        (along + 3100) / MEGADUNE_LENGTH,
-        (warpedAcross - 1900) / MEGADUNE_WIDTH,
-        2,
-        2,
-        0.42,
-      ),
-      MEGADUNE_THRESHOLD,
-    );
-    const dune = duneRise(
-      this.duneNoise.fbm(
-        (along - 1700) / DUNE_LENGTH,
-        (warpedAcross + 900) / DUNE_WIDTH,
-        2,
-        2.05,
-        0.4,
-      ),
-      DUNE_THRESHOLD,
-    );
-    let h =
-      (megadune * MEGADUNE_AMPLITUDE + dune * DUNE_AMPLITUDE) *
-      duneFade;
+    // Moraine: the rounded, directionless hummocking an ice sheet leaves behind.
+    // Isotropic on purpose — the dune axis was wind, and there is no wind in this.
+    let h = this.duneNoise.fbm(x / MORAINE_WAVELENGTH, z / MORAINE_WAVELENGTH, 3, 2.1, 0.45) *
+      MORAINE_AMPLITUDE * fade;
 
-    h +=
-      this.rippleNoise.fbm(
-        (along + 800) / RIPPLE_LENGTH,
-        (warpedAcross - 400) / RIPPLE_WIDTH,
-        2,
-        2,
-        0.35,
-      ) *
-      RIPPLE_AMPLITUDE *
-      smoothstep01((dist - inner) / (RIPPLE_FULL - inner));
-
-    const outcrop = this.outcropAt(x, z);
-    if (outcrop > OUTCROP_THRESHOLD) {
-      const t = (outcrop - OUTCROP_THRESHOLD) / (1 - OUTCROP_THRESHOLD);
-      h += t * t * OUTCROP_AMPLITUDE * duneFade;
+    // Ravines (ovragi): narrow, meandering V-cuts where the zero set of a warped
+    // noise field runs. `patch` switches whole districts of them on and off, so
+    // some country is dissected and some is not.
+    const patch = this.washNoise.at(x / RAVINE_PATCH_WAVELENGTH, z / RAVINE_PATCH_WAVELENGTH);
+    if (patch > RAVINE_PATCH_THRESHOLD) {
+      const wx = x + this.rippleNoise.at(x / 380, z / 380) * RAVINE_WARP;
+      const wz = z + this.rippleNoise.at(z / 380 + 17, x / 380 - 9) * RAVINE_WARP;
+      const line = Math.abs(this.chopNoise.fbm(wx / RAVINE_WAVELENGTH, wz / RAVINE_WAVELENGTH, 2, 2.2, 0.35));
+      if (line < RAVINE_HALF_WIDTH) {
+        const t = 1 - line / RAVINE_HALF_WIDTH;
+        const onset = smoothstep01((patch - RAVINE_PATCH_THRESHOLD) / 0.15);
+        // `t * t * (3 - 2t)` rounds the lip and the floor; the flanks stay steep.
+        h -= t * t * (3 - 2 * t) * RAVINE_DEPTH * onset *
+          smoothstep01((dist - inner - RAVINE_CLEAR) / (RIPPLE_FULL + 60));
+      }
     }
-    const wash = this.washNoise.fbm(
-      x / WASH_WAVELENGTH_X,
-      z / WASH_WAVELENGTH_Z,
-      2,
-      1.8,
-      0.55,
-    );
+
+    // Lowlands: broad shallow hollows where water stands in spring. Kept from the
+    // desert's washes, which were the same shape for a different reason.
+    const wash = this.washNoise.fbm(x / WASH_WAVELENGTH_X, z / WASH_WAVELENGTH_Z, 2, 1.8, 0.55);
     if (wash > WASH_THRESHOLD) {
       const t = (wash - WASH_THRESHOLD) / (1 - WASH_THRESHOLD);
       const washFade = smoothstep01((dist - inner) / (WASH_FULL - inner));
@@ -741,13 +728,16 @@ export class Terrain {
     // open desert.
     if (toEdge <= 0) return SurfaceType.Gravel;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
-    // An outcrop belt lowers the rock threshold by exactly what it lowers it by in
-    // `corridorShape`, so a shelf the belt stood up is rock under the wheels and not
-    // a sand-coloured ramp with sand grip.
-    const belt = outcropBeltAt(this.seed, s, dist, inner);
-    const threshold = belt > 0 ? beltRockThreshold(belt) : OUTCROP_THRESHOLD;
-    return this.outcropAt(x, z) > threshold ? SurfaceType.Rock : SurfaceType.Sand;
+    return this.coverSurface(x, z, dist);
   }
+
+  /** Countryside ground: bare soil on ploughland, turf everywhere else. */
+  private coverSurface(x: number, z: number, roadDist: number): SurfaceType {
+    this.cover.sample(x, z, roadDist, this.coverScratch);
+    return this.coverScratch.crop === Crop.Ploughed ? SurfaceType.Soil : SurfaceType.Grass;
+  }
+
+  private readonly coverScratch = newCoverSample();
 
   /**
    * Surface material beyond the graded road corridor, without a road projection.
@@ -757,7 +747,7 @@ export class Terrain {
    * `CORRIDOR_REACH_M`, where a belt is already zero.
    */
   openSurfaceAt(x: number, z: number): SurfaceType {
-    return this.outcropAt(x, z) > OUTCROP_THRESHOLD ? SurfaceType.Rock : SurfaceType.Sand;
+    return this.coverSurface(x, z, 1e6);
   }
 
   /** Surface material of the open ground at a point. The road itself is separate. */
@@ -771,9 +761,7 @@ export class Terrain {
     const toEdge = dist - inner;
     if (toEdge <= 0) return SurfaceType.Gravel;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
-    const belt = outcropBeltAt(this.seed, p.s, dist, inner);
-    const threshold = belt > 0 ? beltRockThreshold(belt) : OUTCROP_THRESHOLD;
-    return this.outcropAt(x, z) > threshold ? SurfaceType.Rock : SurfaceType.Sand;
+    return this.coverSurface(x, z, dist);
   }
 
   /**

@@ -686,18 +686,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float toeWeight = (1.0 - smoothstep(0.06, 0.42, sceneLum)) * uDaylight * 0.11;
     color.rgb = mix(color.rgb, sqrt(max(color.rgb, vec3(0.0))), toeWeight);
 
-    // A thin sand veil where the sight line has crossed kilometres of desert air.
-    // Real scene depth keeps the foreground, cabin and car untouched; a narrow fade
-    // above the geometric horizon lets the suspended dust soften that boundary
-    // without tinting the open sky. This complements the world's distance fog rather
-    // than replacing it, so regional haze and view-distance settings remain sovereign.
     float airDistance = -airViewZ;
-    float horizonAir =
-      1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, vUv.y);
-    float sandVeil =
-      smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
-    color.rgb = mix(color.rgb, vec3(0.78, 0.69, 0.56), sandVeil);
-
 
     // ACES has already supplied the filmic shoulder and soft contrast in the scene
     // pass. This display-space finish stays deliberately smaller: a modest
@@ -730,18 +719,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       // black lines on sand read as dirt, dark-sand lines read as ink.
       color.rgb = mix(color.rgb, color.rgb * 0.34, ink);
     }
-
-    // Sub-code-value film grain: visible as texture in broad flat areas, never as
-    // snow. The seed advances at 12 Hz rather than every display frame so a high
-    // refresh-rate panel does not turn this tiny texture into rapid scintillation.
-    float grainFrame = mod(floor(uTime * 12.0), 64.0);
-    vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
-    float grain =
-      fract(52.9829189 * fract(dot(grainPixel, vec2(0.06711056, 0.00583715)))) - 0.5;
-    float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float grainMask =
-      smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
-    color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
     // retained channels stay bright while the others are absorbed.

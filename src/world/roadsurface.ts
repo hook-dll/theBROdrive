@@ -98,6 +98,8 @@ const BUMP_AMP: Record<SurfaceType, number> = {
   // Between the district's packed course and the open desert: the grader's spoil is
   // coarser than the road it came off and nothing has ever rolled it flat.
   [SurfaceType.LooseShoulder]: 0.07,
+  [SurfaceType.Grass]: 0.05,
+  [SurfaceType.Soil]: 0.07,
 };
 
 /** Long undulation: broad enough to pitch the car over a visible rise and fall. */

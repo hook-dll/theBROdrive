@@ -62,11 +62,13 @@ import { hashUnit3 } from '../core/rng';
 const FADE_PEAK_SLOPE = 1.5;
 
 /**
- * Experimental macro-relief multiplier. Amplitude and every horizontal control
- * distance use the same factor, so possible height/depth grow fivefold while the
- * derivative — and therefore the road's maximum grade — stays unchanged.
+ * Macro-relief multiplier. The desert ran at 5 (tall basins and kilometre-long drags);
+ * the countryside is the Russian plain, whose whole character is that it is NOT tall:
+ * uplands and river valleys a few tens of metres apart, a road that climbs for a
+ * minute and not for ten. The band table below is written in countryside metres and
+ * this stays at 1 so the arithmetic in the comments reads directly.
  */
-const RELIEF_SCALE = 5;
+const RELIEF_SCALE = 1;
 
 /** Cubic smoothstep, used as the lattice fade. Derivative peaks at 1.5. */
 function fade(t: number): number {
@@ -157,26 +159,34 @@ interface Band {
   readonly short?: { readonly amplitude: number; readonly wavelength: number };
 }
 
+/*
+ * COUNTRYSIDE NUMBERS. The Russian plain: a continental swell of under a hundred
+ * metres, uplands and valleys half that, and the felt relief is the UVAL — a long low
+ * rise a road takes in one gear — plus the crest-and-dip of old moraine under the
+ * bonnet. Peak grades land near 12% (a valley side), typical ones at 2-4%, which is
+ * what the regional roads there actually do. The tempo pairs keep their meaning: the
+ * long tempo is broad open country, the short one is knotted, hummocky ground.
+ */
 const BANDS: readonly Band[] = [
   /** Continental: broad altitude changes, almost no slope. */
-  { amplitude: 140 * RELIEF_SCALE, wavelength: 45_000 * RELIEF_SCALE, hilliness: false, home: false },
-  /** Regional: basins and divides, several minutes of driving across. */
-  { amplitude: 70 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
-  /** Hills: a climb or descent that lasts long enough to choose a gear. */
+  { amplitude: 90 * RELIEF_SCALE, wavelength: 45_000 * RELIEF_SCALE, hilliness: false, home: false },
+  /** Regional: uplands and river lowlands, several minutes of driving across. */
+  { amplitude: 45 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
+  /** Uvals: a rise or a descent that lasts long enough to notice the engine. */
   {
-    amplitude: 58 * RELIEF_SCALE,
-    wavelength: 2500 * RELIEF_SCALE,
+    amplitude: 30 * RELIEF_SCALE,
+    wavelength: 2000 * RELIEF_SCALE,
     hilliness: true,
     home: true,
-    short: { amplitude: 90, wavelength: 6000 },
+    short: { amplitude: 14, wavelength: 900 },
   },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
   {
-    amplitude: 18 * RELIEF_SCALE,
+    amplitude: 8 * RELIEF_SCALE,
     wavelength: 420 * RELIEF_SCALE,
     hilliness: false,
     home: true,
-    short: { amplitude: 14, wavelength: 250 },
+    short: { amplitude: 4, wavelength: 200 },
   },
 ];
 
@@ -187,7 +197,7 @@ const HILLINESS_WAVELENGTH = 9000 * RELIEF_SCALE;
  * stretches should breathe, or the contrast makes them read as broken rather than
  * flat.
  */
-const HILLINESS_FLOOR = 0.45;
+const HILLINESS_FLOOR = 0.25;
 
 /**
  * Wavelength of the tempo field, metres: how far you drive before the road's pace
@@ -307,9 +317,13 @@ const MOUNTAIN_BANDS: readonly { readonly amplitude: number; readonly wavelength
    * pale swell rather than as mountains. At 14 km there is usually something inside ten,
    * where the same height is eight degrees.
    */
-  { amplitude: 1300, wavelength: 14_000 },
-  /** Spurs and saddles, so a range is not one smooth mound. */
-  { amplitude: 340, wavelength: 5000 },
+  // COUNTRYSIDE: there are no mountains on the Russian plain. What the far horizon
+  // carries instead is a line of higher ground — an upland, a watershed ridge — a
+  // hundred-odd metres over the valley, dark with forest. Same field, same gating,
+  // an order of magnitude lower.
+  { amplitude: 120, wavelength: 14_000 },
+  /** Spurs and saddles, so an upland is not one smooth mound. */
+  { amplitude: 40, wavelength: 5000 },
 ];
 /** Field value below which there is no mountain at all. Fraction of the band's range. */
 const MOUNTAIN_THRESHOLD = 0.15;

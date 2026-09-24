@@ -358,6 +358,8 @@ const SURFACE_SPEED_FACTOR: Readonly<Record<SurfaceType, number>> = {
   [SurfaceType.Sand]: 0.3,
   [SurfaceType.Concrete]: 0.96,
   [SurfaceType.LooseShoulder]: 0.45,
+  [SurfaceType.Grass]: 0.5,
+  [SurfaceType.Soil]: 0.35,
 };
 const DECAY_SPEED_LOSS = 0.14;
 const SAND_COVER_SPEED_LOSS = 0.28;

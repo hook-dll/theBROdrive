@@ -438,11 +438,11 @@ const POLE_SPACING: Record<Exclude<PoleEra, 'none'>, number> = {
 /** The era a band gets, from the fixed hash stream. Roughly one band in four is
  * 'none': a long stretch with no poles at all is what makes their return startling. */
 function poleEraForBand(band: number): PoleEra {
-  if (hash01(POLE_ERA_TAG, band) < 0.25) return 'none';
-  const pick = hash01(POLE_ERA_TAG, band, 1);
-  if (pick < 0.25) return 'timber';
-  if (pick < 0.6) return 'lattice';
-  return 'concrete';
+  // Countryside: the Russian back road's line is either timber on concrete stubs or
+  // the square concrete SV poles that replaced them. The steel lattice mast was the
+  // desert's, and a long empty band is rarer here: somebody always ran a line.
+  if (hash01(POLE_ERA_TAG, band) < 0.12) return 'none';
+  return hash01(POLE_ERA_TAG, band, 1) < 0.5 ? 'timber' : 'concrete';
 }
 
 interface PoleEraBand {
@@ -575,6 +575,8 @@ export function skyGradientAt(s: number): SkyGradient {
 // Desert palette
 // ---------------------------------------------------------------------------
 
+const COUNTRYSIDE = true;
+
 export interface DesertPalette {
   /** Open sand albedo, 0xRRGGBB. */
   readonly sand: number;
@@ -696,6 +698,12 @@ const WARM_FALLOFF_POWER = 6;
  * is irrelevant — do not 'optimise' it into a shared buffer.
  */
 export function desertPaletteAt(s: number): DesertPalette {
+  // COUNTRYSIDE. The loose materials of the Russian plain do not travel round a colour
+  // wheel: the "sand" is dry grey-brown earth and road dust, the gravel is crushed
+  // grey stone, and the rock is the odd glacial boulder. Every consumer (road edges,
+  // gravel districts, wheel spray, dirt tracks, weather) reads them from here, so this
+  // is the one switch. The desert cycle below is kept for the desert branch.
+  if (COUNTRYSIDE) return COUNTRY_PALETTE;
   const t = s / PALETTE_CYCLE_M + PALETTE_START_HUE;
   const hue = t - Math.floor(t);
 
@@ -727,6 +735,13 @@ export function desertPaletteAt(s: number): DesertPalette {
     spray: hslToHex(hue, sandSat, sandLight + (1 - sandLight) * SPRAY_LIGHT_LIFT),
   };
 }
+
+const COUNTRY_PALETTE: DesertPalette = {
+  sand: 0x8f8266,
+  rock: 0x6c6961,
+  gravel: 0x8b877d,
+  spray: 0xb9b09a,
+};
 
 // ---------------------------------------------------------------------------
 // Monuments
