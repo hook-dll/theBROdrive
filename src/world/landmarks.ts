@@ -32,7 +32,7 @@ const TAG = 0x4c414e44;
 const LINE_BAND_M = 5200;
 const LINE_SPAN_M = 300;
 const LINE_ROAD_KEEP_M = 45;
-const PYLON_HEIGHT = 31;
+const PYLON_HEIGHT = 24;
 
 type Rgb = readonly [number, number, number];
 function rgb(hex: number): Rgb {
@@ -139,21 +139,23 @@ function mast(): THREE.BufferGeometry {
   return mergeGeometries(lattice(92, 2.2, 0.6, 14, 0.18, (l) => (l % 2 === 0 ? RED : WHITE)));
 }
 
-/** A high-voltage "barrel" tower: lattice body, two tiers of crossarms. Arms along X. */
+/**
+ * A power-line mast in the countryside's language: one slim tapered post and a
+ * crossarm — a stroke on the sky, not a lattice. Arms along X.
+ */
 function pylon(): THREE.BufferGeometry {
-  const parts = lattice(PYLON_HEIGHT, 3.2, 0.8, 7, 0.14, () => STEEL);
-  for (const [y, reach] of [[PYLON_HEIGHT * 0.72, 7], [PYLON_HEIGHT * 0.9, 5]] as const) {
-    parts.push(paint(new THREE.BoxGeometry(reach * 2, 0.5, 0.9).translate(0, y, 0), STEEL));
-  }
-  parts.push(paint(new THREE.ConeGeometry(1.2, 4, 4).rotateY(Math.PI / 4).translate(0, PYLON_HEIGHT + 2, 0), STEEL));
-  return mergeGeometries(parts);
+  return mergeGeometries([
+    paint(new THREE.CylinderGeometry(0.22, 0.5, PYLON_HEIGHT, 4).rotateY(Math.PI / 4).translate(0, PYLON_HEIGHT / 2, 0), STEEL),
+    paint(new THREE.BoxGeometry(11, 0.35, 0.35).translate(0, PYLON_HEIGHT * 0.86, 0), STEEL),
+    paint(new THREE.BoxGeometry(6, 0.3, 0.3).translate(0, PYLON_HEIGHT * 0.97, 0), STEEL),
+  ]);
 }
 
 /** Where the conductors hang, in a pylon's own frame (arms along X). */
 const CONDUCTORS: readonly [number, number][] = [
-  [-6.5, PYLON_HEIGHT * 0.72 - 1.6],
-  [6.5, PYLON_HEIGHT * 0.72 - 1.6],
-  [0, PYLON_HEIGHT * 0.9 - 1.6],
+  [-5.2, PYLON_HEIGHT * 0.86 - 0.4],
+  [5.2, PYLON_HEIGHT * 0.86 - 0.4],
+  [0, PYLON_HEIGHT * 0.97 - 0.4],
 ];
 
 const KINDS = ['church', 'waterTower', 'elevator', 'mast'] as const;
@@ -232,7 +234,7 @@ export class Landmarks {
     make('pylon', pylon(), 512);
     this.wires = new THREE.LineSegments(
       new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: 0x2c2f33, transparent: true, opacity: 0.8, fog: true }),
+      new THREE.LineBasicMaterial({ color: 0x3a3848, transparent: true, opacity: 0.35, fog: true }),
     );
     this.wires.frustumCulled = false;
     scene.add(this.wires);
@@ -316,7 +318,7 @@ export class Landmarks {
     const bands = Math.ceil(VIEW_M / LINE_BAND_M) + 1;
     const b0 = Math.floor(camZ / LINE_BAND_M);
     for (let b = b0 - bands; b <= b0 + bands; b++) {
-      if (hashUnit3(this.seed ^ TAG ^ 0x51, b, 0) < 0.35) continue;
+      if (hashUnit3(this.seed ^ TAG ^ 0x51, b, 0) < 0.65) continue;
       const angle = (hashUnit3(this.seed ^ TAG ^ 0x52, b, 0) - 0.5) * 1.2;
       const dx = Math.cos(angle);
       const dz = Math.sin(angle);

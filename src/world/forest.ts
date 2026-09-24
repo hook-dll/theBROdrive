@@ -9,10 +9,13 @@ import { loadTreeVariants, type TreeLod, type TreeVariant } from './props/trees'
 import type { Road } from './road';
 
 /**
- * THE FOREST: every tree, drawn in three ways by distance, none of them by scaling.
+ * THE FOREST: every tree, drawn in four ways by distance, none of them by scaling.
  *
- *   NEAR   within `NEAR_M`: the full model, casting shadows.
- *   FAR    to `IMPOSTOR_FROM_M`: the thinned model.
+ *   NEAR   within `NEAR_M`: the full model — bark marks, round leaf masses — casting
+ *          shadows. Its detail is under a pixel past that.
+ *   MID    to `SHADOW_M`: the thinned model, still casting shadows, so the edge where
+ *          trees stop throwing shadows stays out at the shadow map's own reach.
+ *   FAR    to `IMPOSTOR_FROM_M`: the thinned model, no shadow.
  *   IMPOSTOR  to `IMPOSTOR_TO_M`: a camera-facing quad baked from the far model
  *          (world/impostors.ts), dissolving into the canopy blanket at the far end.
  *
@@ -23,12 +26,13 @@ import type { Road } from './road';
  * which tree is there.
  *
  * Model buckets are world-wide instanced meshes — one per kind, variant, level and
- * part, about thirty draws for the whole wood — refilled every `REBUCKET_M` of camera
+ * part, a hundred-odd instanced draws for the whole wood — refilled every `REBUCKET_M` of camera
  * travel. The impostor shader measures its side of the swap from the same point the
  * refill used (`setBucketCentre`), so no tree is ever drawn twice or not at all.
  */
 
-const NEAR_M = 110;
+const NEAR_M = 60;
+const SHADOW_M = 110;
 export const IMPOSTOR_FROM_M = 420;
 export const IMPOSTOR_TO_M = 2000;
 const REBUCKET_M = 14;
@@ -139,7 +143,11 @@ export class ForestRenderer {
     void loadTreeVariants().then((variants) => {
       this.variants = variants;
       this.buckets = variants.map((kind) =>
-        kind.map((variant) => [this.makeBuckets(variant.near, true), this.makeBuckets(variant.far, false)]),
+        kind.map((variant) => [
+          this.makeBuckets(variant.near, true),
+          this.makeBuckets(variant.far, true),
+          this.makeBuckets(variant.far, false),
+        ]),
       );
       this.dirty = true;
       this.maybeBake();
@@ -367,7 +375,7 @@ export class ForestRenderer {
         if (d >= IMPOSTOR_FROM_M) continue;
         const kind = t[o + 5]!;
         treeShape(wx, wz, variants[kind]!.length, shape);
-        const lod = d < NEAR_M ? 0 : 1;
+        const lod = d < NEAR_M ? 0 : d < SHADOW_M ? 1 : 2;
         const s = t[o + 3]!;
         pos.set(wx - this.origin.x, t[o + 1]! - 0.15, wz - this.origin.z);
         quat.setFromAxisAngle(UP, t[o + 4]!);

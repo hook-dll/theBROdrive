@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyComicShading } from '../render/comic';
-import { CoverKind, Crop, newCoverSample } from './landcover';
+import { CoverKind, Crop, MUD, newCoverSample } from './landcover';
 import type { WorldOrigin } from './origin';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
@@ -34,12 +34,19 @@ const RADIUS_M = 95;
 const SETTLE_M = 22;
 /** Rings: [inner, outer, cell, blade width]. */
 const RINGS: readonly [number, number, number, number][] = [
-  [0, 24, 0.2, 0.045],
-  [24, 55, 0.45, 0.07],
-  [55, RADIUS_M, 0.9, 0.13],
+  [0, 30, 0.55, 0.2],
+  [30, 60, 0.9, 0.26],
+  [60, RADIUS_M, 1.4, 0.34],
 ];
-const BLADES_PER_CLUMP = 3;
-const SEGMENTS = 3;
+/**
+ * A tuft: a handful of broad blades fanning out of one spot. The low-poly language
+ * wants a few chunky shapes, not a carpet of hairs — the meadow's colour is the
+ * ground's; the tufts are accents in it.
+ */
+const BLADES_PER_CLUMP = 5;
+const SEGMENTS = 2;
+/** Seconds for flattened grass to stand back up. */
+const RECOVER_S = 25;
 /** Texels re-sampled per frame while a strip or a tile is pending. */
 const FILL_BUDGET = 3000;
 
@@ -128,7 +135,12 @@ export class GrassField {
       const mesh = new THREE.Mesh(g, material);
       mesh.frustumCulled = false;
       mesh.castShadow = false;
+      // Shadowed as the ground it stands on: see the root lookup in the shader.
       mesh.receiveShadow = true;
+      // No depth written: the ink pass outlines by depth, and inked grass is a field of
+      // scribbles. Drawn last, so it still hides behind the car, trees and posts that
+      // did write depth; blades over blades are all ground-coloured anyway.
+      mesh.renderOrder = 10;
       mesh.userData.snap = { cell, side };
       scene.add(mesh);
       this.meshes.push(mesh);
@@ -141,7 +153,7 @@ export class GrassField {
     // up as a band where the grass ends.
     const material = applyCloudShadow(
       applyComicShading(
-        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, side: THREE.DoubleSide }),
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, side: THREE.DoubleSide, depthWrite: false }),
         { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
       ),
     );
@@ -198,9 +210,13 @@ float gRand = gHash( gIndex + 3.1 );
 float gUsed = step( ${rin.toFixed(1)}, gDist ) * step( gDist, ${rout.toFixed(1)} );
 float gSettle = 1.0 - smoothstep( ${(RADIUS_M - SETTLE_M).toFixed(1)}, ${RADIUS_M.toFixed(1)}, gDist );
 float gWheat = gParam.g;
-float gFlower = step( 1.0 - gParam.b * 0.12, gHash( gIndex + 9.7 ) ) * step( 0.5, aBlade.y );
-float gTall = gParam.r * ( 0.55 + 0.9 * gRand ) * gSettle * gUsed;
-vec3 gTip = mix( gGround * vec3( 1.1, 1.1, 1.0 ), vec3( 0.62, 0.46, 0.16 ), gWheat );
+float gFlower = step( 1.0 - gParam.b * 0.07, gHash( gIndex + 9.7 ) ) * step( 0.5, aBlade.y );
+// Tufts gather in clumps: density is the share of cells that carry one here.
+float gHere = step( gHash( gIndex + 21.3 ), gParam.a );
+// Flattened by a wheel or a boot: lies at a quarter height until it recovers.
+float gUpright = texelFetch( uGrassColour, gTexel( gRel ), 0 ).a;
+float gTall = gParam.r * 0.7 * ( 0.6 + 0.6 * gRand ) * gSettle * gUsed * gHere * ( 0.22 + 0.78 * gUpright );
+vec3 gTip = mix( gGround * vec3( 1.07, 1.08, 1.0 ), vec3( 0.66, 0.5, 0.18 ), gWheat );
 vec3 gFlowerColour = gHash( gIndex + 5.5 ) < 0.5 ? vec3( 0.9, 0.88, 0.8 ) : vec3( 0.85, 0.66, 0.08 );
 vColor = vec4( 1.0 );
 vColor.rgb = mix( gGround, gTip, smoothstep( 0.0, 1.0, aBlade.y ) );
@@ -208,32 +224,91 @@ vColor.rgb = mix( vColor.rgb, gFlowerColour, gFlower * step( 0.99, aBlade.y ) );
         )
       // Both faces of a blade are lit as its upward normal: three.js flips the normal
       // of a back face, which turned half of every sward toward the ground and dark.
+      // The chunk is still an `#include` here, so it is inlined with the flip removed.
       shader.fragmentShader = shader.fragmentShader.replace(
-        'float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;',
-        'float faceDirection = 1.0;',
+        '#include <normal_fragment_begin>',
+        THREE.ShaderChunk.normal_fragment_begin.replace(
+          'float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;',
+          'float faceDirection = 1.0;',
+        ),
       );
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <begin_vertex>',
           `float gYaw = ( gHash( gIndex + 1.7 ) + aBlade.x / ${BLADES_PER_CLUMP.toFixed(1)} ) * 6.2832;
 vec2 gAcross = vec2( cos( gYaw ), sin( gYaw ) );
-vec2 gLean = vec2( -gAcross.y, gAcross.x ) * ( 0.25 + 0.35 * gHash( gIndex + aBlade.x ) );
-float gWind = sin( uTime * 1.6 + ( gRel.x + uOriginMod.x ) * 0.23 + ( gRel.y + uOriginMod.y ) * 0.19 ) * 0.25 + 0.1;
+vec2 gLean = vec2( -gAcross.y, gAcross.x ) * ( 0.15 + 0.2 * gHash( gIndex + aBlade.x ) ) * ( 1.0 + ( 1.0 - gUpright ) * 4.0 );
+float gWind = gUpright * sin( uTime * 1.6 + ( gRel.x + uOriginMod.x ) * 0.23 + ( gRel.y + uOriginMod.y ) * 0.19 ) * 0.25 + 0.1;
 float gT = aBlade.y;
 float gW = ${width.toFixed(3)} * ( 1.0 - gT ) * ( 0.8 + 0.4 * gRand );
 // Each blade of a clump stands a little way from the others: from one point they
 // read as a star, spread they read as a tussock.
 float gSpreadA = ( gHash( gIndex + aBlade.x * 3.7 ) ) * 6.2832;
-vec2 gSpread = vec2( cos( gSpreadA ), sin( gSpreadA ) ) * gCell * 0.45 * step( 0.5, aBlade.x );
+vec2 gSpread = vec2( cos( gSpreadA ), sin( gSpreadA ) ) * 0.08 * step( 0.5, aBlade.x );
 vec2 gOff = gSpread + gAcross * aBlade.z * gW + ( gLean + vec2( gWind, gWind * 0.5 ) ) * gT * gT * gTall;
 float gY = gHeightAt( gRel + gOff ) - 0.05 + gT * gTall * ( 1.0 - 0.25 * gT * gT );
 vec3 transformed = vec3( gRel.x + gOff.x, gY, gRel.y + gOff.y );
 if ( gTall <= 0.001 ) transformed = vec3( uCamRel.x, -1e4, uCamRel.y );`,
+        )
+        // The shadow is looked up at the tuft's ROOT, not along the blade. A near-vertical
+        // blade in the shadow map is mostly acne and came out darker than its ground;
+        // unshadowed, tufts glowed in the shade of a tree. From the root, a tuft is in
+        // shadow exactly where the ground under it is.
+        .replace(
+          '#include <shadowmap_vertex>',
+          `#ifdef USE_SHADOWMAP
+worldPosition = modelMatrix * vec4( gRel.x, gHeightAt( gRel ) + 0.02, gRel.y, 1.0 );
+#endif
+#include <shadowmap_vertex>`,
         );
     };
     const key = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${key.call(material)}:gpu-grass-v1:${cell}`;
+    material.customProgramCacheKey = () => `${key.call(material)}:gpu-grass-v3:${cell}`;
     return material;
+  }
+
+  /** Slots currently flattened, standing back up over `RECOVER_S`. */
+  private readonly flattened = new Set<number>();
+  private recoverCarry = 0;
+
+  /**
+   * Flattens the grass in a disc at an ABSOLUTE point: a wheel or a boot passing. It
+   * springs back over `RECOVER_S`, so a track across a meadow is visible behind the
+   * car and fades after it.
+   */
+  trample(x: number, z: number, radius: number): void {
+    const r = Math.ceil(radius);
+    const cx0 = Math.floor(x);
+    const cz0 = Math.floor(z);
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const cx = cx0 + dx;
+        const cz = cz0 + dz;
+        if (Math.hypot(cx + 0.5 - x, cz + 0.5 - z) > radius) continue;
+        const slot = (((cz % CACHE_N) + CACHE_N) % CACHE_N) * CACHE_N + (((cx % CACHE_N) + CACHE_N) % CACHE_N);
+        if (this.cellX[slot] !== cx || this.cellZ[slot] !== cz) continue;
+        const o = slot * 4 + 3;
+        if (this.colourData[o]! === 0) continue;
+        this.colourData[o] = 0;
+        this.flattened.add(slot);
+        this.colourTex.needsUpdate = true;
+      }
+    }
+  }
+
+  private recover(dt: number): void {
+    if (this.flattened.size === 0) return;
+    this.recoverCarry += (dt / RECOVER_S) * 255;
+    const step = Math.floor(this.recoverCarry);
+    if (step < 1) return;
+    this.recoverCarry -= step;
+    for (const slot of this.flattened) {
+      const o = slot * 4 + 3;
+      const v = Math.min(255, this.colourData[o]! + step);
+      this.colourData[o] = v;
+      if (v >= 255) this.flattened.delete(slot);
+    }
+    this.colourTex.needsUpdate = true;
   }
 
   /** `x`/`z`: the camera's ABSOLUTE position; `dt`: seconds, for the wind. */
@@ -258,6 +333,7 @@ if ( gTall <= 0.001 ) transformed = vec3( uCamRel.x, -1e4, uCamRel.y );`,
     }
     this.refreshWindow(x, z);
     this.fill();
+    this.recover(dt);
   }
 
   /** Queues every texel whose slot now belongs to a different world cell. */
@@ -340,51 +416,61 @@ if ( gTall <= 0.001 ) transformed = vec3( uCamRel.x, -1e4, uCamRel.y );`,
     let r = cover.r;
     let g = cover.g;
     let b = cover.b;
-    let height = 0.3 + 0.25 * cover.lush;
+    let height = 0.4 + 0.25 * cover.lush;
     let wheat = 0;
     let flowers = cover.lush;
+    // Tufts come in clumps: a slow blotchy field, lusher where the meadow is lush.
+    const clump = this.terrain.cover.clumpAt(x, z);
+    let density = Math.max(0, Math.min(1, clump * (0.55 + 0.6 * cover.lush)));
     const wet = this.terrain.wetnessAt(x, z);
     if (cover.kind === CoverKind.Field) {
       const crop = cover.crop;
       if (crop === Crop.Wheat || crop === Crop.Rye) {
-        height = 0.9;
+        // A standing crop is a crop everywhere in its plot: dense, golden.
+        height = 0.95;
         wheat = 1;
-        flowers = 0.1;
+        flowers = 0.04;
+        density = 0.9;
       } else if (crop === Crop.GreenCrop) {
         height = 0.55;
         flowers = 0;
-      } else if (crop === Crop.Stubble) {
-        height = 0.12;
-        flowers = 0;
-      } else if (crop === Crop.Ploughed) {
+        density = 0.75;
+      } else if (crop === Crop.Stubble || crop === Crop.Ploughed) {
         height = 0;
       } else {
-        height = 0.45;
+        height = 0.5;
       }
     } else if (cover.kind === CoverKind.Forest) {
-      height = 0.18;
+      height = 0.3;
       flowers = 0;
+      density *= 0.4;
     }
     if (toEdge < 1.0) height = 0;
-    else if (toEdge < 4) height *= 0.7;
-    else if (toEdge < 9) height *= 1.6; // the uncut ditch
+    else if (toEdge < 4) density *= 0.35;
+    else if (toEdge < 9) {
+      // The uncut ditch: tall and thick.
+      height *= 1.5;
+      density = Math.max(density, 0.65);
+    }
     if (wet > 0.55) height = 0;
     // The ground's colour, as the tiles paint it: mud where it is wet.
     if (wet > 0) {
       const m = Math.min(1, wet * 1.4) * 0.85;
-      r += (0.0685 - r) * m;
-      g += (0.0467 - g) * m;
-      b += (0.0273 - b) * m;
+      r += (MUD[0] - r) * m;
+      g += (MUD[1] - g) * m;
+      b += (MUD[2] - b) * m;
     }
     // Stored gamma-encoded (8 bits), decoded in the shader.
     this.colourData[o] = Math.round(Math.pow(r, 1 / 2.2) * 255);
     this.colourData[o + 1] = Math.round(Math.pow(g, 1 / 2.2) * 255);
     this.colourData[o + 2] = Math.round(Math.pow(b, 1 / 2.2) * 255);
+    // Alpha is how upright the grass stands: a fresh cell is untrampled.
     this.colourData[o + 3] = 255;
+    this.flattened.delete(slot);
     this.paramData[o] = Math.round(Math.min(1, height) * 255);
     this.paramData[o + 1] = wheat * 255;
     this.paramData[o + 2] = Math.round(Math.min(1, flowers) * 255);
-    this.paramData[o + 3] = 255;
+    this.paramData[o + 3] = Math.round(density * 255);
     return true;
   }
 }

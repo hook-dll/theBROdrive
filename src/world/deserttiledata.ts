@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
-import { CoverKind, Crop, newCoverSample, type CoverSample } from './landcover';
+import { CoverKind, Crop, MUD, newCoverSample, type CoverSample } from './landcover';
 import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
@@ -76,10 +76,6 @@ const TREE_CELLS = Math.floor(DESERT_TILE_SIZE / TREE_CELL);
 /** A candidate can yield one tree and one bush. */
 export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 2;
 const TREE_TAG = 0x54524545;
-/** Wet clay, linear rgb (sRGB 0x4a3d2e). */
-const MUD_R = 0.0685;
-const MUD_G = 0.0467;
-const MUD_B = 0.0273;
 /** Nothing is planted closer than this to the road's centreline: verge and ditch. */
 const TREE_ROAD_KEEP = 9.5;
 /** Past the asphalt edge: the verge and the ditch stay clear whatever the road's width. */
@@ -231,9 +227,9 @@ export function generateDesertTileData(
       const wet = roadDist < 7 ? 0 : context.terrain.wetnessAt(worldX, worldZ);
       if (wet > 0) {
         const m = Math.min(1, wet * 1.4) * 0.85;
-        coverSample.r += (MUD_R - coverSample.r) * m;
-        coverSample.g += (MUD_G - coverSample.g) * m;
-        coverSample.b += (MUD_B - coverSample.b) * m;
+        coverSample.r += (MUD[0] - coverSample.r) * m;
+        coverSample.g += (MUD[1] - coverSample.g) * m;
+        coverSample.b += (MUD[2] - coverSample.b) * m;
       }
       colors[vi * 3] = coverSample.r;
       colors[vi * 3 + 1] = coverSample.g;
@@ -409,10 +405,11 @@ export function plantTrees(
         continue;
       }
 
-      // Ravines grow over with scrub and alder, the floor thickest.
+      // Ravines grow over with scrub and alder along the floor, in a continuous ribbon.
+      // Thin odds over the whole flank dotted lone trees in lines across the meadow.
       const ravine = terrain.ravineAt(x, z);
       if (ravine > 0.15) {
-        if (r < ravine * 0.55) {
+        if (r < THREE.MathUtils.smoothstep(ravine, 0.45, 0.8) * 0.8) {
           put(x, z, r2 < 0.55 ? TreeKind.Bush : TreeKind.Broadleaf, 0.5 + 0.6 * r3, key);
         }
         continue;
@@ -421,9 +418,10 @@ export function plantTrees(
       // Shelter belts: a row, dense, one or two kinds along its length.
       const belt = land.beltAt(x, z);
       if (belt > 0.5) {
-        if (r < 0.8) {
+        if (r < 0.92) {
           const kind = r2 < 0.15 ? TreeKind.Bush : land.broadleafAt(x, z) > 0.5 ? TreeKind.Broadleaf : TreeKind.Birch;
-          put(x, z, kind, 0.65 + 0.4 * r3, key);
+          // Full-grown and close: a belt reads as one dark line, crowns touching.
+          put(x, z, kind, 0.85 + 0.35 * r3, key);
         }
         continue;
       }
@@ -452,8 +450,10 @@ export function plantTrees(
         if (r < thicket * 0.6) put(x, z, TreeKind.Birch, 0.28 + 0.3 * r3, key);
         continue;
       }
-      // The exception: an old tree on its own, most often where plots meet.
-      if (r < 0.0012 && cover.plot < 0.5) {
+      // The exception: an old tree on its own where plots meet. Rare enough that an
+      // open plain shows one or two, not a scatter: at 0.0012 a square kilometre of
+      // meadow carried ten, and they read as sticks on an empty horizon.
+      if (r < 0.0003 && cover.plot < 0.5) {
         put(x, z, r2 < 0.6 ? TreeKind.Birch : TreeKind.Broadleaf, 0.95 + 0.3 * r3, key);
       }
     }

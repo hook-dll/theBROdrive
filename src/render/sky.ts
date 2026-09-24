@@ -158,9 +158,11 @@ const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
 const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
-const C_GROUND = new THREE.Color().setStyle('#707a52'); // meadow bounce: grass-green, dull
+// Countryside: the fill from below is a soft violet, so shade reads as colour (the
+// Firewatch / A Short Hike shade), never as a dark hole.
+const C_GROUND = new THREE.Color().setStyle('#8f89b5');
 /** Daylight sky illumination gain; the warm ground bounce is compensated below. */
-const DAY_SKY_FILL_BOOST = 1.2;
+const DAY_SKY_FILL_BOOST = 1.6;
 /**
  * MOONLIT FILL. The dome's night palette above is what the SKY looks like, and it
  * is nearly black on purpose — that is what lets the stars read. The hemisphere

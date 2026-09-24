@@ -39,7 +39,8 @@ import { desertPaletteAt } from './gradient';
 /** The three families, in the order `event.draw` selects them. */
 export const WEATHER_FAMILIES = ['virga', 'dustWall', 'smokeColumn'] as const;
 export type WeatherFamily = (typeof WEATHER_FAMILIES)[number];
-const COUNTRY_WEATHER_FAMILIES: readonly WeatherFamily[] = ['virga', 'virga', 'smokeColumn'];
+// The smoke column read as a scratch on the sky at a distance; rain only for now.
+const COUNTRY_WEATHER_FAMILIES: readonly WeatherFamily[] = ['virga'];
 
 /**
  * How far off the road a phenomenon stands, metres.

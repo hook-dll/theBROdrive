@@ -1756,6 +1756,7 @@ async function boot(): Promise<void> {
     road,
     terrain,
     trailers: trailerField,
+    trample: (x, z, r) => grass.trample(x, z, r),
   });
   /**
    * Holds the adaptive-resolution controller off the frames that are not worth
@@ -1920,6 +1921,11 @@ async function boot(): Promise<void> {
     vista.update(cam.x, cam.z, activeS, frameDt);
     desert.forest.update(cam.x + origin.x, cam.z + origin.z);
     grass.update(cam.x + origin.x, cam.z + origin.z, frameDt);
+    if (!driving) {
+      // A walker leaves a path too, narrower than a wheel's.
+      const feet = player.absolutePosition;
+      grass.trample(feet.x, feet.z, 0.45);
+    }
     landmarks.update(cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('vista');
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
@@ -2387,8 +2393,6 @@ const launch = query.has('poi-gallery')
       ? import('./playground').then(({ bootPlayground }) => bootPlayground())
       : query.has('mirage-lab')
         ? import('./mirage-lab').then(({ bootMirageLab }) => bootMirageLab())
-        : query.has('country-lab')
-          ? import('./country-lab').then(({ bootCountryLab }) => bootCountryLab())
         : query.has('road-lab')
           ? import('./road-lab').then(({ bootRoadLab }) => bootRoadLab())
           : import.meta.env.DEV && query.has('car-lab')

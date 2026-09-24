@@ -271,6 +271,9 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
         lightingStrength: 0,
         shadowWarmth: 0,
         reliefShadeStrength: 0.28,
+        // The desert's ink dots said "sand"; on a meadow they read as pits. The
+        // country's ground is flat colour: the grass and the light carry it.
+        stippleStrength: 0,
         spotlightNormals: 'smooth',
       },
     ),

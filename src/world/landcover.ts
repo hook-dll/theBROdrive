@@ -104,24 +104,31 @@ interface Palette {
  * wood that is darker than anything around it.
  */
 const SUMMER: Palette = {
-  meadowDry: hex(0x9a9468),
-  meadowLush: hex(0x6f7f4f),
-  margin: hex(0x7f8758),
-  forestFloor: hex(0x646b45),
-  canopySpruce: hex(0x46663f),
-  canopyBirch: hex(0x86a04c),
+  meadowDry: hex(0xbdb67c),
+  meadowLush: hex(0x93aa5e),
+  margin: hex(0xa3ad6a),
+  forestFloor: hex(0x7f8a55),
+  canopySpruce: hex(0x3f7a60),
+  canopyBirch: hex(0x8dab53),
   crops: [
-    hex(0xd6bd72), // wheat, ripe
-    hex(0xc4b486), // rye, greyer
-    hex(0xd2c79c), // stubble, pale
-    hex(0x76604a), // ploughed
-    hex(0x86a052), // oats / potatoes, still green
-    hex(0x9aa064), // fallow, going back to meadow
-    hex(0xb3ae70), // hay meadow, mown
+    hex(0xe8cf7a), // wheat, ripe
+    hex(0xd9c98f), // rye, greyer
+    hex(0xe3d8a8), // stubble, pale
+    hex(0xa98a67), // ploughed
+    hex(0x9dbd5f), // oats / potatoes, still green
+    hex(0xadb46f), // fallow, going back to meadow
+    hex(0xc8c27f), // hay meadow, mown
   ],
 };
 
 const PALETTES: Record<Season, Palette> = { summer: SUMMER };
+
+/**
+ * Wet clay, linear rgb: the ground where it is mud underfoot, for the tiles and the
+ * grass alike. Darker and warmer than ploughland, but a colour, not a hole: at sRGB
+ * 0x4a3d2e the wet hollows read as black pits in a sunny meadow.
+ */
+export const MUD: Rgb = hex(0x7d6a55);
 
 /** Relative frequency of each crop, same order as `Crop`. */
 const CROP_WEIGHTS = [5, 2, 3, 3, 3, 3, 2];
@@ -212,6 +219,14 @@ export class LandCover {
     return smoothstep(0.52, 0.62, this.forestNoise.fbm(x / 95 - 41, z / 95 + 13, 2, 2.2, 0.5));
   }
 
+  /**
+   * Where tall grass gathers in a meadow, 0..1: tussocky patches a few metres across
+   * with open sward between, so the tufts come in clumps and not as a lawn.
+   */
+  clumpAt(x: number, z: number): number {
+    return smoothstep(-0.15, 0.35, this.lushNoise.fbm(x / 7 + 101, z / 7 - 57, 2, 2.3, 0.5));
+  }
+
   /** Share of broadleaf (lime, aspen, alder) among a wood's deciduous trees, 0..1. */
   broadleafAt(x: number, z: number): number {
     return smoothstep(-0.2, 0.35, this.birchNoise.fbm(x / 260 + 19, z / 260 - 5, 2, 2, 0.5));
@@ -227,12 +242,14 @@ export class LandCover {
     const farm = this.farmlandAt(x, z);
     if (farm < 0.3) return 0;
     let w = 0;
-    // Belts run along whole grid lines: the choice is per line, not per plot.
+    // Belts run along whole grid lines: the choice is per line, not per plot. Two or
+    // three rows wide, about 14 m: narrower than the planting grid's two cells and a
+    // belt came out as a dotted line of lone trees.
     if (hashUnit3(this.seed ^ 0x61, b.rx * 131 + b.rz, b.iu) < 0.4) {
-      w = Math.max(w, 1 - smoothstep(2, 6, Math.min(b.fu, b.su - b.fu)));
+      w = Math.max(w, 1 - smoothstep(5, 9, Math.min(b.fu, b.su - b.fu)));
     }
     if (hashUnit3(this.seed ^ 0x62, b.rx * 131 + b.rz, b.iv) < 0.25) {
-      w = Math.max(w, 1 - smoothstep(2, 6, Math.min(b.fv, b.sv - b.fv)));
+      w = Math.max(w, 1 - smoothstep(5, 9, Math.min(b.fv, b.sv - b.fv)));
     }
     return w * smoothstep(0.3, 0.5, farm);
   }

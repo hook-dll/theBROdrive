@@ -52,6 +52,8 @@ export interface WheelEffectsContext {
   readonly terrain: Terrain;
   /** A trailer tyre disturbs sand through the same path as a car tyre. */
   readonly trailers: TrailerField;
+  /** Flattens the grass under a wheel (world/grass.ts). */
+  readonly trample?: (x: number, z: number, radius: number) => void;
 }
 
 /** The per-frame ground effects, bound to one world. */
@@ -85,6 +87,8 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
       return;
     }
     const terrainContact = ws.surface === TERRAIN_COLLIDER_SURFACE;
+    // A tyre on open ground lays the grass down in a track as wide as itself.
+    if (terrainContact) ctx.trample?.(ws.absoluteContactX, ws.absoluteContactZ, 0.75);
     const surface = wheelSurface(ws, activeS);
     // The visible verge is the same loose ground mesh and should mark immediately at
     // the asphalt edge; its finer gravel/sand classification remains relevant to spray.
