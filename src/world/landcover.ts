@@ -230,9 +230,17 @@ export class LandCover {
     return smoothstep(-0.15, 0.35, this.lushNoise.fbm(x / 7 + 101, z / 7 - 57, 2, 2.3, 0.5));
   }
 
-  /** Share of broadleaf (lime, aspen, alder) among a wood's deciduous trees, 0..1. */
+  /** Share of broad-leaved trees (lime, oak, maple) among a wood's deciduous ones, 0..1. */
   broadleafAt(x: number, z: number): number {
     return smoothstep(-0.2, 0.35, this.birchNoise.fbm(x / 260 + 19, z / 260 - 5, 2, 2, 0.5));
+  }
+
+  /**
+   * Share of pine among a wood's conifers, 0..1: pine forest (bor) on its own tracts of
+   * a kilometre or two — the sandy rises — and spruce everywhere else.
+   */
+  pineAt(x: number, z: number): number {
+    return smoothstep(0.05, 0.3, this.forestNoise.fbm(x / 1500 + 311, z / 1500 - 207, 2, 2, 0.5));
   }
 
   /**

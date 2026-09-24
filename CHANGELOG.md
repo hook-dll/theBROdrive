@@ -33,10 +33,16 @@ questions live in `docs/country.md`.
   mottled meadows, woods cleared back from the road — one source (`world/landcover.ts`)
   for tile colours, the vista, tree planting and wheel surfaces. Grass, Soil and Mud
   surface types; mud is slick and sinks, painted warm brown.
-- TREES ARE BUILT IN CODE. Silver birch (white stem, lens-shaped dark marks, rough grey
-  foot rising in tongues, narrow crown of hanging masses), lime/oak, hazel/willow bush,
-  spruce. Crowns are lit as one volume and do not shadow themselves. The downloaded
-  Quaternius models, their prep script and the country lab are gone.
+- TREES ARE BUILT IN CODE, ELEVEN KINDS OF THE CENTRAL BELT. Silver birch (white stem,
+  lens-shaped dark marks, rough grey foot rising in tongues, narrow crown of hanging
+  masses), Scots pine (copper stem, flat plates of dark needles, on pine tracts of its
+  own), aspen (grey-green stem with upright dark diamonds), oak (thick furrowed trunk,
+  crooked limbs, the broad lone tree at a field corner), lime and maple, alder (several
+  stems, a narrow cone, on wet ground and in ravines), white willow (a short leaning trunk
+  and a silvery fountain, in ditches and ravines), rowan with orange bunches at the
+  wood's edge, hazel, spruce. Each keeps a green of its own. Crowns are lit as one volume
+  and do not shadow themselves. The downloaded Quaternius models, their prep script and
+  the country lab are gone.
 - THE FOREST IS DRAWN IN FOUR LEVELS — near to 60 m, the far model still shadowed to
   110 m, unshadowed to 420 m, baked impostors beyond — never by scaling. A tree of a
   wood is an impostor to 2 km and then the canopy blanket; a tree OUTSIDE a wood (belt,

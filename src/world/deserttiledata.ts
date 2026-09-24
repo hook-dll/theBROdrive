@@ -57,13 +57,40 @@ export interface DesertTileData {
   readonly treeCount: number;
 }
 
-/** Kinds of planted thing, stored as a float in a tree record. */
+/**
+ * Kinds of planted thing, stored as a float in a tree record. The trees of the central
+ * Russian belt: what grows where is `plantTrees`' business, how each looks is
+ * world/props/trees.ts'.
+ */
 export const enum TreeKind {
   Birch = 0,
   Spruce = 1,
+  /** Hazel and willow scrub. */
   Bush = 2,
-  Broadleaf = 3,
+  Lime = 3,
+  Pine = 4,
+  Aspen = 5,
+  Oak = 6,
+  Maple = 7,
+  Alder = 8,
+  Willow = 9,
+  Rowan = 10,
 }
+
+/** Every kind, in enum order: the index of per-kind tables. */
+export const TREE_KINDS: readonly TreeKind[] = [
+  TreeKind.Birch,
+  TreeKind.Spruce,
+  TreeKind.Bush,
+  TreeKind.Lime,
+  TreeKind.Pine,
+  TreeKind.Aspen,
+  TreeKind.Oak,
+  TreeKind.Maple,
+  TreeKind.Alder,
+  TreeKind.Willow,
+  TreeKind.Rowan,
+];
 
 /**
  * One tree record: local x, ground y, local z, scale, yaw, kind, tint. Local x/z are
@@ -362,9 +389,16 @@ export function plantTrees(
     out[o + 6] = 0.84 + hash01(seed, TREE_TAG, key, 6) * 0.32;
     n++;
   };
-  /** Deciduous of the kind the place favours. */
-  const deciduous = (x: number, z: number, r: number): TreeKind =>
-    r < land.broadleafAt(x, z) * 0.7 ? TreeKind.Broadleaf : TreeKind.Birch;
+  /**
+   * A deciduous tree of the kind the place favours: in broad-leaved country lime, oak
+   * and maple; elsewhere the small-leaved pair, birch and its companion aspen.
+   */
+  const deciduous = (x: number, z: number, r: number, r5: number): TreeKind => {
+    if (r < land.broadleafAt(x, z) * 0.7) return r5 < 0.4 ? TreeKind.Lime : r5 < 0.72 ? TreeKind.Oak : TreeKind.Maple;
+    return r5 < 0.72 ? TreeKind.Birch : TreeKind.Aspen;
+  };
+  /** A conifer: pine on its tracts, spruce everywhere else. */
+  const conifer = (x: number, z: number, r5: number): TreeKind => (r5 < land.pineAt(x, z) * 0.9 ? TreeKind.Pine : TreeKind.Spruce);
   for (let ci = 0; ci < TREE_CELLS; ci++) {
     for (let cj = 0; cj < TREE_CELLS; cj++) {
       const gx = tx * TREE_CELLS + ci;
@@ -386,20 +420,25 @@ export function plantTrees(
       const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
       const r3 = hash01(seed, TREE_TAG, gx, gz, 7);
       const r4 = hash01(seed, TREE_TAG, gx, gz, 8);
+      const r5 = hash01(seed, TREE_TAG, gx, gz, 9);
 
       // Woods.
       const forest = land.forestAt(x, z, roadDist);
       if (forest > 0) {
         if (r < forest * 0.93) {
           const birch = land.birchAt(x, z);
-          const kind = r2 < birch * 0.85 + 0.08 ? deciduous(x, z, r4) : TreeKind.Spruce;
+          let kind = r2 < birch * 0.85 + 0.08 ? deciduous(x, z, r4, r5) : conifer(x, z, r5);
+          // Wet ground in a wood is alder carr.
+          if (kind !== TreeKind.Pine && r4 < 0.7 && terrain.wetnessAt(x, z) > 0.3) kind = TreeKind.Alder;
           // Mature interior, younger edge: size follows density, then a wide spread.
           const size = (0.55 + 0.45 * forest) * (0.72 + 0.56 * r3);
           put(x, z, kind, size, key);
           continue;
         }
+        // The edge's undergrowth: hazel mostly, and rowan standing out of it.
         if (forest < 0.8 && r2 < 0.45) {
-          put(x, z, TreeKind.Bush, 0.6 + 0.7 * r3, key);
+          if (r5 < 0.22) put(x, z, TreeKind.Rowan, 0.7 + 0.4 * r3, key);
+          else put(x, z, TreeKind.Bush, 0.6 + 0.7 * r3, key);
           continue;
         }
         continue;
@@ -410,26 +449,38 @@ export function plantTrees(
       const ravine = terrain.ravineAt(x, z);
       if (ravine > 0.15) {
         if (r < THREE.MathUtils.smoothstep(ravine, 0.45, 0.8) * 0.8) {
-          put(x, z, r2 < 0.55 ? TreeKind.Bush : TreeKind.Broadleaf, 0.5 + 0.6 * r3, key);
+          // Scrub, alder and willow: the trees that follow water.
+          const kind = r2 < 0.45 ? TreeKind.Bush : r2 < 0.8 ? TreeKind.Alder : TreeKind.Willow;
+          put(x, z, kind, 0.55 + 0.55 * r3, key);
         }
         continue;
       }
 
-      // Shelter belts: a row, dense, one or two kinds along its length.
+      // Shelter belts: dense rows of the planted kinds — birch, oak, maple, lime.
       const belt = land.beltAt(x, z);
       if (belt > 0.5) {
         if (r < 0.92) {
-          const kind = r2 < 0.15 ? TreeKind.Bush : land.broadleafAt(x, z) > 0.5 ? TreeKind.Broadleaf : TreeKind.Birch;
+          const broad = land.broadleafAt(x, z) > 0.5;
+          const kind =
+            r2 < 0.15
+              ? TreeKind.Bush
+              : broad
+                ? r5 < 0.4 ? TreeKind.Oak : r5 < 0.7 ? TreeKind.Maple : TreeKind.Lime
+                : r5 < 0.8 ? TreeKind.Birch : TreeKind.Maple;
           // Full-grown and close: a belt reads as one dark line, crowns touching.
           put(x, z, kind, 0.85 + 0.35 * r3, key);
         }
         continue;
       }
 
-      // Roadside willow scrub in the ditch, clumped by a slow field along the road.
+      // Roadside scrub in the ditch, clumped by a slow field along the road, with a
+      // young willow (rakita) standing out of it here and there.
       if (roadDist < 22) {
         const clump = land.copseAt(x * 3.1 + 500, z * 3.1 - 700);
-        if (r < clump * 0.7) put(x, z, TreeKind.Bush, 0.55 + 0.6 * r3, key);
+        if (r < clump * 0.7) {
+          if (r5 < 0.25) put(x, z, TreeKind.Willow, 0.5 + 0.3 * r3, key);
+          else put(x, z, TreeKind.Bush, 0.55 + 0.6 * r3, key);
+        }
         continue;
       }
 
@@ -440,21 +491,24 @@ export function plantTrees(
       const copse = land.copseAt(x, z);
       if (copse > 0) {
         if (r < copse * 0.85) {
-          const kind = r2 < 0.2 ? TreeKind.Bush : r2 < 0.3 ? TreeKind.Spruce : deciduous(x, z, r4);
+          const kind = r2 < 0.2 ? TreeKind.Bush : r2 < 0.3 ? conifer(x, z, r5) : deciduous(x, z, r4, r5);
           put(x, z, kind, (0.5 + 0.5 * copse) * (0.7 + 0.5 * r3), key);
         }
         continue;
       }
+      // Fallow goes back to birch first, with aspen among it.
       if (cover.crop === Crop.Fallow) {
         const thicket = land.copseAt(x * 1.9 - 300, z * 1.9 + 900);
-        if (r < thicket * 0.6) put(x, z, TreeKind.Birch, 0.28 + 0.3 * r3, key);
+        if (r < thicket * 0.6) put(x, z, r5 < 0.8 ? TreeKind.Birch : TreeKind.Aspen, 0.28 + 0.3 * r3, key);
         continue;
       }
-      // The exception: an old tree on its own where plots meet. Rare enough that an
-      // open plain shows one or two, not a scatter: at 0.0012 a square kilometre of
-      // meadow carried ten, and they read as sticks on an empty horizon.
+      // The exception: an old tree on its own where plots meet — most often an oak.
+      // Rare enough that an open plain shows one or two, not a scatter: at 0.0012 a
+      // square kilometre of meadow carried ten, and they read as sticks on an empty
+      // horizon.
       if (r < 0.0003 && cover.plot < 0.5) {
-        put(x, z, r2 < 0.6 ? TreeKind.Birch : TreeKind.Broadleaf, 0.95 + 0.3 * r3, key);
+        const kind = r2 < 0.45 ? TreeKind.Oak : r2 < 0.75 ? TreeKind.Birch : r2 < 0.9 ? TreeKind.Lime : TreeKind.Willow;
+        put(x, z, kind, 0.95 + 0.3 * r3, key);
       }
     }
   }
