@@ -42,6 +42,22 @@ const RELIEF_FULL = 160;
 /** Moraine hummocks: rounded, isotropic, a few metres tall. */
 const MORAINE_WAVELENGTH = 240;
 const MORAINE_AMPLITUDE = 4.5;
+/** Past the asphalt edge, where the moraine starts to rise and over how far. */
+const MORAINE_CLEAR = 8;
+const MORAINE_ONSET = 70;
+/** Hummocks: metre-scale unevenness from just beyond the ditch. */
+const HUMMOCK_WAVELENGTH = 28;
+const HUMMOCK_AMPLITUDE = 1.1;
+const HUMMOCK_CLEAR = 7;
+const HUMMOCK_ONSET = 12;
+
+/**
+ * The roadside ditch (kyuvet): a shallow drain either side, just past the verge. Its
+ * depth wanders along the road and in places it has silted up to nothing.
+ */
+const DITCH_FROM = 4.2;
+const DITCH_WIDTH = 4.6;
+const DITCH_DEPTH = 0.85;
 
 /**
  * Ravines. `RAVINE_HALF_WIDTH` is in units of the line field, so the cut's real width
@@ -53,7 +69,9 @@ const RAVINE_WAVELENGTH = 420;
 const RAVINE_HALF_WIDTH = 0.045;
 const RAVINE_DEPTH = 6;
 const RAVINE_WARP = 70;
-const RAVINE_CLEAR = 30;
+const RAVINE_CLEAR = 14;
+/** Metres over which a ravine deepens once it has started. */
+const RAVINE_ONSET = 45;
 const RAVINE_PATCH_WAVELENGTH = 2600;
 const RAVINE_PATCH_THRESHOLD = -0.1;
 
@@ -238,6 +256,8 @@ const WASH_WAVELENGTH_X = 700;
 const WASH_WAVELENGTH_Z = 1600;
 const WASH_THRESHOLD = 0.48;
 const WASH_DEPTH = 2.5;
+/** Wetness past which the ground is mud. */
+const MUD_WETNESS = 0.55;
 const WASH_FULL = 220;
 
 /**
@@ -376,28 +396,30 @@ export class Terrain {
    * position; `dist` only grades the maintained corridor into the dune field.
    */
   private relief(x: number, z: number, dist: number, inner: number): number {
-    const fade = smoothstep01((dist - inner) / (RELIEF_FULL - inner));
+    // The moraine is not held back for a graded corridor any more: a back road runs
+    // through the land as it lies, and the ground beside it rises and falls from the
+    // far side of the ditch.
+    const fade = smoothstep01((dist - inner - MORAINE_CLEAR) / MORAINE_ONSET);
+    const nearFade = smoothstep01((dist - inner - HUMMOCK_CLEAR) / HUMMOCK_ONSET);
+
+    // Hummocks: tussock mounds and old spoil, a metre or so, the unevenness a walker
+    // feels and a car rolls over. Right from beyond the ditch.
+    let h = this.corrugationPatchNoise.fbm(x / HUMMOCK_WAVELENGTH, z / HUMMOCK_WAVELENGTH, 2, 2.3, 0.5) *
+      HUMMOCK_AMPLITUDE * nearFade;
 
     // Moraine: the rounded, directionless hummocking an ice sheet leaves behind.
     // Isotropic on purpose — the dune axis was wind, and there is no wind in this.
-    let h = this.duneNoise.fbm(x / MORAINE_WAVELENGTH, z / MORAINE_WAVELENGTH, 3, 2.1, 0.45) *
+    h += this.duneNoise.fbm(x / MORAINE_WAVELENGTH, z / MORAINE_WAVELENGTH, 3, 2.1, 0.45) *
       MORAINE_AMPLITUDE * fade;
 
     // Ravines (ovragi): narrow, meandering V-cuts where the zero set of a warped
     // noise field runs. `patch` switches whole districts of them on and off, so
     // some country is dissected and some is not.
-    const patch = this.washNoise.at(x / RAVINE_PATCH_WAVELENGTH, z / RAVINE_PATCH_WAVELENGTH);
-    if (patch > RAVINE_PATCH_THRESHOLD) {
-      const wx = x + this.rippleNoise.at(x / 380, z / 380) * RAVINE_WARP;
-      const wz = z + this.rippleNoise.at(z / 380 + 17, x / 380 - 9) * RAVINE_WARP;
-      const line = Math.abs(this.chopNoise.fbm(wx / RAVINE_WAVELENGTH, wz / RAVINE_WAVELENGTH, 2, 2.2, 0.35));
-      if (line < RAVINE_HALF_WIDTH) {
-        const t = 1 - line / RAVINE_HALF_WIDTH;
-        const onset = smoothstep01((patch - RAVINE_PATCH_THRESHOLD) / 0.15);
-        // `t * t * (3 - 2t)` rounds the lip and the floor; the flanks stay steep.
-        h -= t * t * (3 - 2 * t) * RAVINE_DEPTH * onset *
-          smoothstep01((dist - inner - RAVINE_CLEAR) / (RIPPLE_FULL + 60));
-      }
+    const ravine = this.ravineAt(x, z);
+    if (ravine > 0) {
+      // `t * t * (3 - 2t)` rounds the lip and the floor; the flanks stay steep.
+      h -= ravine * ravine * (3 - 2 * ravine) * RAVINE_DEPTH *
+        smoothstep01((dist - inner - RAVINE_CLEAR) / RAVINE_ONSET);
     }
 
     // Lowlands: broad shallow hollows where water stands in spring. Kept from the
@@ -409,6 +431,21 @@ export class Terrain {
       h -= t * t * WASH_DEPTH * washFade;
     }
     return h;
+  }
+
+  /**
+   * How deep into a ravine a point is, 0 (none, or outside its lip) .. 1 (its floor),
+   * before the road-clearance fade. Public because the planting reads it: a ravine is
+   * where the scrub and the alder grow.
+   */
+  ravineAt(x: number, z: number): number {
+    const patch = this.washNoise.at(x / RAVINE_PATCH_WAVELENGTH, z / RAVINE_PATCH_WAVELENGTH);
+    if (patch <= RAVINE_PATCH_THRESHOLD) return 0;
+    const wx = x + this.rippleNoise.at(x / 380, z / 380) * RAVINE_WARP;
+    const wz = z + this.rippleNoise.at(z / 380 + 17, x / 380 - 9) * RAVINE_WARP;
+    const line = Math.abs(this.chopNoise.fbm(wx / RAVINE_WAVELENGTH, wz / RAVINE_WAVELENGTH, 2, 2.2, 0.35));
+    if (line >= RAVINE_HALF_WIDTH) return 0;
+    return (1 - line / RAVINE_HALF_WIDTH) * smoothstep01((patch - RAVINE_PATCH_THRESHOLD) / 0.15);
   }
 
   /**
@@ -515,6 +552,12 @@ export class Terrain {
    */
   private corridorShape(x: number, z: number, dist: number, s: number, inner: number): number {
     let h = corridorBatterAt(this.seed, s, dist, inner);
+    const toEdge = dist - inner;
+    if (toEdge > DITCH_FROM && toEdge < DITCH_FROM + DITCH_WIDTH) {
+      const t = (toEdge - DITCH_FROM) / DITCH_WIDTH;
+      const depth = smoothstep01(0.5 + this.washNoise.at(s / 260 + 91, 3));
+      h -= Math.sin(Math.PI * t) ** 1.6 * DITCH_DEPTH * depth;
+    }
     const belt = outcropBeltAt(this.seed, s, dist, inner);
     if (belt > 0) {
       const threshold = beltRockThreshold(belt);
@@ -733,8 +776,26 @@ export class Terrain {
 
   /** Countryside ground: bare soil on ploughland, turf everywhere else. */
   private coverSurface(x: number, z: number, roadDist: number): SurfaceType {
+    if (this.wetnessAt(x, z) > MUD_WETNESS) return SurfaceType.Mud;
     this.cover.sample(x, z, roadDist, this.coverScratch);
     return this.coverScratch.crop === Crop.Ploughed ? SurfaceType.Soil : SurfaceType.Grass;
+  }
+
+  /**
+   * How wet the ground is, 0..1: the floor of a lowland or a ravine, and scattered
+   * hollows where the water stands after rain. Past `MUD_WETNESS` it is mud underfoot,
+   * and the ground is painted with it (world/deserttiledata.ts).
+   */
+  wetnessAt(x: number, z: number): number {
+    let w = 0;
+    const wash = this.washNoise.fbm(x / WASH_WAVELENGTH_X, z / WASH_WAVELENGTH_Z, 2, 1.8, 0.55);
+    if (wash > WASH_THRESHOLD) w = Math.max(w, (wash - WASH_THRESHOLD) / (1 - WASH_THRESHOLD) * 1.6);
+    const ravine = this.ravineAt(x, z);
+    if (ravine > 0.55) w = Math.max(w, (ravine - 0.55) / 0.45);
+    // Puddled hollows: a sparse, blotchy field of a few tens of metres.
+    const hollow = this.scoopNoise.fbm(x / 60 + 11, z / 60 - 7, 2, 2.1, 0.5);
+    if (hollow > 0.42) w = Math.max(w, (hollow - 0.42) / 0.2);
+    return Math.min(1, w);
   }
 
   private readonly coverScratch = newCoverSample();

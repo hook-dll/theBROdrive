@@ -4,7 +4,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { applyComicShading } from '../../render/comic';
 import { TreeKind } from '../deserttiledata';
 import type { Season } from '../landcover';
-import { CANOPY_FROM_M, CANOPY_FULL_M } from '../vistaground';
 
 /**
  * THE WOOD'S TREES: spruce, birch and bush models (CC0, Quaternius; prepared by
@@ -23,8 +22,30 @@ import { CANOPY_FROM_M, CANOPY_FULL_M } from '../vistaground';
 
 export interface TreePart {
   readonly geometry: THREE.BufferGeometry;
-  readonly material: THREE.Material;
+  readonly material: THREE.MeshStandardMaterial;
+  /**
+   * Shadow-map material for foliage: the cards' alpha cut-out, so a crown casts the
+   * shadow of its leaves and not of the square cards they are painted on. Without it
+   * every card was an opaque square in the shadow map, and the crowns wore a
+   * crawling lattice of their own card shadows.
+   */
+  readonly depthMaterial: THREE.MeshDepthMaterial | null;
   readonly foliage: boolean;
+}
+
+const depthCache = new Map<string, THREE.MeshDepthMaterial>();
+
+function foliageDepth(material: THREE.MeshStandardMaterial): THREE.MeshDepthMaterial {
+  const hit = depthCache.get(material.uuid);
+  if (hit) return hit;
+  const depth = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+    map: material.map,
+    alphaTest: material.alphaTest,
+    side: THREE.DoubleSide,
+  });
+  depthCache.set(material.uuid, depth);
+  return depth;
 }
 
 /** One model at one level of detail: its parts, in the tree's own metres. */
@@ -41,12 +62,20 @@ export interface TreeVariant {
  */
 const BARK_TINT: Record<TreeKind, number> = {
   [TreeKind.Birch]: 0xffffff,
-  [TreeKind.Spruce]: 0x8c8378,
+  [TreeKind.Spruce]: 0x6a5f55,
   [TreeKind.Bush]: 0xffffff,
+  [TreeKind.Broadleaf]: 0x77736c,
+};
+/** Kinds whose bark texture is reduced to luminance and coloured by `BARK_TINT`. */
+const GREY_BARK: Record<TreeKind, boolean> = {
+  [TreeKind.Birch]: false,
+  [TreeKind.Spruce]: true,
+  [TreeKind.Bush]: false,
+  [TreeKind.Broadleaf]: true,
 };
 
 /** Trunk collider radius per kind at scale 1, metres; 0 for things a car drives through. */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.24, 0.32, 0];
+export const TREE_TRUNK_RADIUS: readonly number[] = [0.24, 0.32, 0, 0.3];
 
 interface KindSource {
   readonly files: readonly string[];
@@ -54,12 +83,24 @@ interface KindSource {
   readonly meshes: readonly string[];
   /** Height a scale-1 instance stands, metres. */
   readonly height: number;
+  /**
+   * Share of the height sunk into the ground. A bush is a crown with no trunk: stood
+   * on its lowest leaf it hovers, so its base goes into the grass it grows out of.
+   */
+  readonly sink?: number;
+  /**
+   * Trunk thickness multiplier, applied to the bark below the first branches and
+   * eased out above them. The MegaKit broadleaves are storybook oaks with flared
+   * trunks; a Russian lime or aspen is a slim grey bole.
+   */
+  readonly girth?: number;
 }
 
 const SOURCES: Record<TreeKind, KindSource> = {
   [TreeKind.Birch]: { files: ['birch'], meshes: ['BirchTree_1', 'BirchTree_2', 'BirchTree_4', 'BirchTree_5'], height: 17 },
-  [TreeKind.Spruce]: { files: ['spruce-1', 'spruce-2', 'spruce-3'], meshes: [], height: 21 },
-  [TreeKind.Bush]: { files: ['bush'], meshes: [], height: 2.3 },
+  [TreeKind.Spruce]: { files: ['spruce-1', 'spruce-2', 'spruce-3', 'spruce-4', 'spruce-5'], meshes: [], height: 21 },
+  [TreeKind.Bush]: { files: ['bush'], meshes: [], height: 2.6, sink: 0.35 },
+  [TreeKind.Broadleaf]: { files: ['broad-1', 'broad-2', 'broad-3', 'broad-4'], meshes: [], height: 17, girth: 0.55 },
 };
 
 /** Foliage colour per kind and season, sRGB. */
@@ -68,30 +109,9 @@ const FOLIAGE: Record<Season, Record<TreeKind, number>> = {
     [TreeKind.Birch]: 0x7d9a3e,
     [TreeKind.Spruce]: 0x3b5a34,
     [TreeKind.Bush]: 0x6c8a3a,
+    [TreeKind.Broadleaf]: 0x5f7f34,
   },
 };
-
-function patchFade(material: THREE.MeshStandardMaterial, key: string): void {
-  const compileComic = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    compileComic.call(material, shader, renderer);
-    // Far trees shrink to their foot over the band in which the canopy blanket rises
-    // (world/vistaground.ts), so a wood hands over without anything being streamed.
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `vec3 transformed = vec3( position );
-#ifdef USE_INSTANCING
-{
-  vec4 treeFoot = modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
-  float treeDistance = length( treeFoot.xz - cameraPosition.xz );
-  transformed *= 1.0 - smoothstep( ${CANOPY_FROM_M.toFixed(1)} - 20.0, ${CANOPY_FULL_M.toFixed(1)}, treeDistance );
-}
-#endif`,
-    );
-  };
-  const comicKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-${key}-v2`;
-}
 
 /** Luminance of a texture, normalised to a mean of about one, as a new texture. */
 function greyFoliage(texture: THREE.Texture): THREE.Texture {
@@ -134,7 +154,9 @@ function partMaterial(source: THREE.MeshStandardMaterial, foliage: boolean, kind
   if (hit) return hit;
   const material = applyComicShading(
     new THREE.MeshStandardMaterial({
-      map: foliage && source.map ? greyFoliage(source.map) : source.map,
+      // Foliage always, and bark where the kind asks for it: the source bark textures are
+      // a storybook red-brown that no Russian spruce or lime has.
+      map: source.map && (foliage || GREY_BARK[kind]) ? greyFoliage(source.map) : source.map,
       color: foliage ? FOLIAGE[season][kind] : BARK_TINT[kind],
       vertexColors,
       roughness: 0.95,
@@ -143,9 +165,9 @@ function partMaterial(source: THREE.MeshStandardMaterial, foliage: boolean, kind
       alphaTest: foliage ? 0.45 : 0,
       transparent: false,
     }),
-    { contourStrength: 0, stippleStrength: 0.1, stippleRange: 50, shadowWarmth: 0.3 },
+    // No stipple on trees: at card scale the dots alias into a crawl across the crown.
+    { contourStrength: 0, stippleStrength: 0, shadowWarmth: 0.3 },
   );
-  patchFade(material, foliage ? 'leaf' : 'bark');
   materialCache.set(key, material);
   return material;
 }
@@ -154,7 +176,10 @@ function partMaterial(source: THREE.MeshStandardMaterial, foliage: boolean, kind
  * The parts of one tree inside a loaded scene: every mesh under `root` (or the named
  * one), baked into the scene's frame, stood on the origin and scaled to `height`.
  */
-function extractTree(root: THREE.Object3D, meshName: string | null, height: number, kind: TreeKind, season: Season): TreeLod {
+function extractTree(root: THREE.Object3D, meshName: string | null, source: KindSource, kind: TreeKind, season: Season): TreeLod {
+  const { height } = source;
+  const sink = source.sink ?? 0;
+  const girth = source.girth ?? 1;
   root.updateMatrixWorld(true);
   const meshes: THREE.Mesh[] = [];
   root.traverse((o) => {
@@ -182,12 +207,24 @@ function extractTree(root: THREE.Object3D, meshName: string | null, height: numb
   const scale = height / Math.max(0.01, box.max.y - box.min.y);
   const cx = (box.min.x + box.max.x) / 2;
   const cz = (box.min.z + box.max.z) / 2;
-  return parts.map(({ geometry, source }) => {
+  return parts.map(({ geometry, source: partSource }) => {
     geometry.translate(-cx, -box.min.y, -cz).scale(scale, scale, scale);
+    const foliage = /leaf|leaves/i.test(partSource.name);
+    if (girth !== 1 && !foliage) {
+      const p = geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i) / height;
+        const k = girth + (1 - girth) * Math.min(1, Math.max(0, (y - 0.3) / 0.25));
+        p.setXYZ(i, p.getX(i) * k, p.getY(i), p.getZ(i) * k);
+      }
+      geometry.computeVertexNormals();
+    }
+    geometry.translate(0, -sink * height, 0);
     geometry.computeBoundingSphere();
-    const foliage = /leaf|leaves/i.test(source.name);
+    const source = partSource;
     const vertexColors = geometry.getAttribute('color') !== undefined;
-    return { geometry, material: partMaterial(source, foliage, kind, season, vertexColors), foliage };
+    const material = partMaterial(source, foliage, kind, season, vertexColors);
+    return { geometry, material, depthMaterial: foliage ? foliageDepth(material) : null, foliage };
   });
 }
 
@@ -208,7 +245,7 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
   const loader = new GLTFLoader();
   const load = (name: string): Promise<THREE.Object3D> =>
     loader.loadAsync(`${import.meta.env.BASE_URL}models/nature/${name}.glb`).then((g) => g.scene);
-  const kinds = [TreeKind.Birch, TreeKind.Spruce, TreeKind.Bush];
+  const kinds = [TreeKind.Birch, TreeKind.Spruce, TreeKind.Bush, TreeKind.Broadleaf];
   loading = Promise.all(
     kinds.map(async (kind) => {
       const source = SOURCES[kind];
@@ -218,8 +255,8 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
         const names = source.meshes.length > 0 ? source.meshes : [null];
         for (const name of names) {
           variants.push({
-            near: extractTree(near, name, source.height, kind, season),
-            far: extractTree(far, name, source.height, kind, season),
+            near: extractTree(near, name, source, kind, season),
+            far: extractTree(far, name, source, kind, season),
           });
         }
       }

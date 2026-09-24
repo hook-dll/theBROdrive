@@ -40,6 +40,11 @@ export const enum SurfaceType {
   Grass = 7,
   /** Bare earth: a ploughed field, a forest floor, a dirt track's ruts. */
   Soil = 8,
+  /**
+   * Mud: wet clay in a lowland, a ravine floor, a hollow that never dries. The
+   * countryside's trap: slick under power and deep enough to swallow a wheel.
+   */
+  Mud = 9,
 }
 
 /**
@@ -403,6 +408,25 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     texture: 0.008,
     color: 0x76604a,
     dust: 0.7,
+    smoke: 0.0,
+  },
+  [SurfaceType.Mud]: {
+    label: 'mud',
+    // Wet clay: 0.3 of mu driven, the tyre's tread packed smooth in a turn of the
+    // wheel, and a quarter-metre of sinkage that makes rolling cost as much as sand.
+    // It is laterally worse than it is longitudinally: a car in a rut slides out of
+    // it sideways long before it pulls itself forward.
+    longitudinalMu: 0.32,
+    lateralMu: 0.42,
+    optimalSlip: 0.32,
+    rollingResistance: 0.17,
+    deformationDrag: 0.55,
+    roughness: 0.05,
+    microRelief: 0.02,
+    hummock: 0.06,
+    texture: 0.005,
+    color: 0x4a3c2d,
+    dust: 1.0,
     smoke: 0.0,
   },
 };

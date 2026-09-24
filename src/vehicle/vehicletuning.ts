@@ -946,6 +946,9 @@ export const DIG_FIRM_RR = 0.012;
 export const DIG_SURFACES: ReadonlySet<SurfaceType> = new Set([
   SurfaceType.Sand,
   SurfaceType.LooseShoulder,
+  // Mud gets the same concession: a car can bog down and has to rock and dig its way
+  // out, but it is never sealed in for good.
+  SurfaceType.Mud,
 ]);
 
 /**

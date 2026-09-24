@@ -141,11 +141,14 @@ const FOREST_EDGE = 0.045;
 const BIRCH_WAVELENGTH = 340;
 
 /**
- * The cleared strip either side of the road, metres from the centreline. The edge of
- * the wood wanders between these two, so it is a line with bays in it, not a ruler.
+ * The cleared strip either side of the road, metres from the centreline. How far back
+ * the wood stands changes along the road — for a kilometre it crowds the ditch, then it
+ * stands off across a strip of meadow — and inside that the edge wanders in bays.
  */
-const CLEAR_NEAR = 24;
-const CLEAR_FAR = 46;
+const CLEAR_NEAR = 11;
+const CLEAR_FAR = 62;
+const CLEAR_WAVELENGTH = 700;
+const CLEAR_BAYS = 12;
 /** Fields do not run right up to the road: a meadow strip and the ditch come first. */
 const FIELD_CLEAR = 30;
 
@@ -194,8 +197,65 @@ export class LandCover {
 
   /** Road clearing, 0 (cleared) .. 1 (wood allowed), from the distance to the road. */
   private clearing(x: number, z: number, roadDist: number): number {
-    const edge = CLEAR_NEAR + (CLEAR_FAR - CLEAR_NEAR) * (0.5 + 0.5 * this.edgeNoise.at(x / 90, z / 90));
+    if (roadDist > CLEAR_FAR + CLEAR_BAYS) return 1;
+    const stand = smoothstep(-0.4, 0.4, this.edgeNoise.fbm(x / CLEAR_WAVELENGTH + 7, z / CLEAR_WAVELENGTH - 3, 2, 2, 0.5));
+    const edge = CLEAR_NEAR + (CLEAR_FAR - CLEAR_NEAR) * stand * stand +
+      CLEAR_BAYS * (0.5 + 0.5 * this.edgeNoise.at(x / 70, z / 70));
     return smoothstep(edge - 4, edge + 2, roadDist);
+  }
+
+  /**
+   * A copse (kolok, perelesok) at a point, 0..1: a clump of trees standing out in the
+   * open, tens of metres across. Rare, and never where a field is ploughed.
+   */
+  copseAt(x: number, z: number): number {
+    return smoothstep(0.52, 0.62, this.forestNoise.fbm(x / 95 - 41, z / 95 + 13, 2, 2.2, 0.5));
+  }
+
+  /** Share of broadleaf (lime, aspen, alder) among a wood's deciduous trees, 0..1. */
+  broadleafAt(x: number, z: number): number {
+    return smoothstep(-0.2, 0.35, this.birchNoise.fbm(x / 260 + 19, z / 260 - 5, 2, 2, 0.5));
+  }
+
+  /**
+   * A shelter belt (lesopolosa) at a point, 0..1: a row of trees a few metres wide
+   * along some of the field boundaries of farmland. The planted wind-breaks are the
+   * single most characteristic line in Russian field country.
+   */
+  beltAt(x: number, z: number): number {
+    const b = this.plotFrame(x, z);
+    const farm = this.farmlandAt(x, z);
+    if (farm < 0.3) return 0;
+    let w = 0;
+    // Belts run along whole grid lines: the choice is per line, not per plot.
+    if (hashUnit3(this.seed ^ 0x61, b.rx * 131 + b.rz, b.iu) < 0.4) {
+      w = Math.max(w, 1 - smoothstep(2, 6, Math.min(b.fu, b.su - b.fu)));
+    }
+    if (hashUnit3(this.seed ^ 0x62, b.rx * 131 + b.rz, b.iv) < 0.25) {
+      w = Math.max(w, 1 - smoothstep(2, 6, Math.min(b.fv, b.sv - b.fv)));
+    }
+    return w * smoothstep(0.3, 0.5, farm);
+  }
+
+  private readonly frameScratch = { rx: 0, rz: 0, iu: 0, iv: 0, fu: 0, fv: 0, su: 1, sv: 1 };
+
+  /** The plot grid at a point: region, cell, position inside the cell, cell size. */
+  private plotFrame(x: number, z: number): { rx: number; rz: number; iu: number; iv: number; fu: number; fv: number; su: number; sv: number } {
+    const f = this.frameScratch;
+    f.rx = Math.floor(x / PLOT_REGION);
+    f.rz = Math.floor(z / PLOT_REGION);
+    const angle = hashUnit3(this.seed ^ 0x51, f.rx, f.rz) * Math.PI;
+    const ca = Math.cos(angle);
+    const sa = Math.sin(angle);
+    const u = x * ca - z * sa;
+    const v = x * sa + z * ca;
+    f.su = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x52, f.rx, f.rz);
+    f.sv = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x53, f.rx, f.rz) * 0.7;
+    f.iu = Math.floor(u / f.su);
+    f.iv = Math.floor(v / f.sv);
+    f.fu = u - f.iu * f.su;
+    f.fv = v - f.iv * f.sv;
+    return f;
   }
 
   /** Wood density only, for callers that need nothing else (tree planting). */
@@ -238,7 +298,9 @@ export class LandCover {
       const plot = this.plotAt(x, z);
       if (plot.crop >= 0) {
         const c = pal.crops[plot.crop]!;
-        const inside = plot.inside * farm * smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
+        // A shelter belt takes its strip out of the crop, so the plough stops short of it.
+        const belt = this.beltAt(x, z);
+        const inside = plot.inside * (1 - belt) * farm * smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
         // Margin grass between plots, then the crop.
         r += (pal.margin[0] - r) * farm;
         g += (pal.margin[1] - g) * farm;
@@ -287,19 +349,7 @@ export class LandCover {
    */
   private plotAt(x: number, z: number): { crop: number; inside: number } {
     const out = this.plotScratch;
-    const rx = Math.floor(x / PLOT_REGION);
-    const rz = Math.floor(z / PLOT_REGION);
-    const angle = hashUnit3(this.seed ^ 0x51, rx, rz) * Math.PI;
-    const ca = Math.cos(angle);
-    const sa = Math.sin(angle);
-    const u = x * ca - z * sa;
-    const v = x * sa + z * ca;
-    const su = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x52, rx, rz);
-    const sv = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x53, rx, rz) * 0.7;
-    const iu = Math.floor(u / su);
-    const iv = Math.floor(v / sv);
-    const fu = u - iu * su;
-    const fv = v - iv * sv;
+    const { rx, rz, iu, iv, fu, fv, su, sv } = this.plotFrame(x, z);
     const edge = Math.min(fu, su - fu, fv, sv - fv);
     // Some cells are not fields at all: meadow, or left for the wood to take.
     const pickT = hashUnit3(this.seed ^ 0x54, iu * 7919 + rx, iv * 104729 + rz);

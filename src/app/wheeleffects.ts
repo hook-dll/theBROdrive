@@ -101,6 +101,9 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
     const raise = props.dust + props.smoke * SPRAY_SMOKE_YIELD;
     const strength = raise * slip * speed;
     if (strength <= 0) return;
+    // Thrown material is the colour of what the wheel is standing on: clods of mud,
+    // torn turf, grey grit. One tint for the pool, so the latest wheel sets it.
+    ctx.spray.setGroundColour(props.color);
     ctx.spray.emit(
       ws.contactX,
       ws.contactY,

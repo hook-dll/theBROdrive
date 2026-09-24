@@ -42,6 +42,7 @@ import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
+import { GrassField } from './world/grass';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
@@ -432,6 +433,11 @@ async function boot(): Promise<void> {
     origin,
     debris,
     worldWork,
+  );
+  desert.forest.attachRenderer(renderer.renderer);
+  // Grass within a few tens of metres of the camera, stood on the tiles' own surface.
+  const grass = new GrassField(renderer.scene, origin, terrain, road, roadDistance, (x, z) =>
+    desert.groundHeightAt(x, z),
   );
 
   // Scratches for the impact test in the fixed step: never allocated per tick.
@@ -1889,6 +1895,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     desert.forest.update(cam.x + origin.x, cam.z + origin.z);
+    grass.update(cam.x + origin.x, cam.z + origin.z, frameDt);
     frameProfiler?.end('vista');
     // Then thin the whole thing for the chosen draw distance. The exponential fog is
     // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km

@@ -171,7 +171,8 @@ void main() {
  * neutral cream that did not look like that desert. The palette raises lightness in
  * HSL instead and keeps hue and saturation, so thrown sand is the same sand.
  */
-const spraySand = new THREE.Color();
+const spraySand = new THREE.Color(0x8f8266);
+const SPRAY_LIFT = new THREE.Color(0xd8d0bc);
 
 export class WheelSpray {
   private readonly geometry = new THREE.BufferGeometry();
@@ -439,11 +440,19 @@ export class WheelSpray {
    * rather than from constants, because the pool holds sand and smoke at the same
    * time — a car crossing from the verge onto the road has both in flight.
    */
+  /**
+   * Tints the thrown material after the ground it came off (`SurfaceProps.color`),
+   * lifted a little: a clod in the air is lit on every side, the ground it left is not.
+   */
+  setGroundColour(hex: number): void {
+    spraySand.setHex(hex).lerp(SPRAY_LIFT, 0.22);
+  }
+
   update(dt: number, s: number): void {
     // Re-tint to the thrown-sand colour of the ground at the player's distance, which
     // the palette derives from that ground's own hue and saturation. Mutated in place,
     // so the uniform never allocates.
-    spraySand.setHex(desertPaletteAt(s).spray);
+    void s;
     if (dt <= 0) return;
     // NOTHING IN FLIGHT IS NOTHING TO DO. Without this the pool is scanned end to end and
     // three dynamic attributes are flagged every frame a wheel is not slipping — which is

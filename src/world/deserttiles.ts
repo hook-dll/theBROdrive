@@ -260,11 +260,24 @@ export class DesertTileStreamer {
     private readonly workerFactory?: DesertTileWorkerFactory,
   ) {
     this.worker = this.createWorker();
-    this.forest = new ForestRenderer(scene, origin);
+    this.forest = new ForestRenderer(scene, origin, seed, road);
   }
 
   /** Draws the trees every live tile planted (world/forest.ts). */
   readonly forest: ForestRenderer;
+
+  /**
+   * The drawn ground's height at an ABSOLUTE point, off the live tile lattice, or null
+   * where no tile is loaded. What the grass stands on (world/grass.ts), so a tuft sits
+   * on the very surface it is drawn over.
+   */
+  groundHeightAt(x: number, z: number): number | null {
+    const tx = Math.floor(x / DESERT_TILE_SIZE);
+    const tz = Math.floor(z / DESERT_TILE_SIZE);
+    const tile = this.tiles.get(tileKey(tx, tz));
+    if (!tile) return null;
+    return heightFromTile(tile.heights, x - tx * DESERT_TILE_SIZE, z - tz * DESERT_TILE_SIZE);
+  }
 
 
   /**

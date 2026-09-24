@@ -4,22 +4,19 @@ import type { Terrain } from './terrain';
 /**
  * THE CANOPY BLANKET, and the far ground's colour.
  *
- * Past `CANOPY_FROM_M` a wood is not trees. It is the ground itself raised to the
- * height of the crowns and painted their colour: at four hundred metres a spruce is a
- * few pixels wide and a wood is a dark mass with a ragged top, and a raised,
- * outlined heightfield is exactly that for no draw calls at all. The comic ink pass
- * draws its skyline the way it draws any other silhouette.
- *
- * The near trees (world/forest.ts) stop at the same radius the blanket rises from, and
- * the desert tile shader raises the same blanket on the tiles (`aCanopy`), so the
- * handover is one surface drawn by whichever mesh owns that ground.
+ * Past the far forest's impostor radius (world/forest.ts) a wood is not trees. It is
+ * the ground raised to the height of the crowns and painted their colour: at two
+ * kilometres a spruce is a couple of pixels and a wood is a dark mass with a ragged
+ * top, and a raised, outlined heightfield is exactly that for no draw calls at all.
+ * The impostors dissolve over the same band the blanket rises in, and at that range
+ * the rise is half a degree of the view, inside the haze.
  */
 
 /** Crowns of a closed wood, metres over the ground. Spruce stand a little taller. */
 export const CANOPY_HEIGHT_M = 17;
 /** Radius from the camera over which the blanket rises, and the near trees end. */
-export const CANOPY_FROM_M = 380;
-export const CANOPY_FULL_M = 430;
+export const CANOPY_FROM_M = 1800;
+export const CANOPY_FULL_M = 2300;
 
 const sample = newCoverSample();
 const canopy = new Float32Array(3);

@@ -40,6 +40,12 @@ const SOURCES = [
   { src: 'mk-rfnxJv0Rqa.glb', out: 'spruce-1', cards: [1, 1] },
   { src: 'mk-79gmlLnweB.glb', out: 'spruce-2', cards: [1, 1] },
   { src: 'mk-699sFuLCN2.glb', out: 'spruce-3', cards: [1, 1] },
+  { src: 'mk-igSu0cPoBz.glb', out: 'spruce-4', cards: [1, 1] },
+  { src: 'mk-Zt62gceKXZ.glb', out: 'spruce-5', cards: [1, 1] },
+  { src: 'mk-QVOop92WmG.glb', out: 'broad-1', cards: [0.5, 0.16] },
+  { src: 'mk-aVOxaHRPWe.glb', out: 'broad-2', cards: [0.5, 0.16] },
+  { src: 'mk-qZtx0AHhcy.glb', out: 'broad-3', cards: [0.5, 0.16] },
+  { src: 'mk-t9KbsfYdXz.glb', out: 'broad-4', cards: [0.5, 0.16] },
   { src: 'birch-trees.glb', out: 'birch', cards: [0.45, 0.14] },
   { src: 'mk-EoTERLq3z2.glb', out: 'bush', cards: [0.6, 0.25] },
 ];

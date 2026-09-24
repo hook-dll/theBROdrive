@@ -100,6 +100,7 @@ const BUMP_AMP: Record<SurfaceType, number> = {
   [SurfaceType.LooseShoulder]: 0.07,
   [SurfaceType.Grass]: 0.05,
   [SurfaceType.Soil]: 0.07,
+  [SurfaceType.Mud]: 0.05,
 };
 
 /** Long undulation: broad enough to pitch the car over a visible rise and fall. */

@@ -62,6 +62,7 @@ export const enum TreeKind {
   Birch = 0,
   Spruce = 1,
   Bush = 2,
+  Broadleaf = 3,
 }
 
 /**
@@ -75,6 +76,10 @@ const TREE_CELLS = Math.floor(DESERT_TILE_SIZE / TREE_CELL);
 /** A candidate can yield one tree and one bush. */
 export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 2;
 const TREE_TAG = 0x54524545;
+/** Wet clay, linear rgb (sRGB 0x4a3d2e). */
+const MUD_R = 0.0685;
+const MUD_G = 0.0467;
+const MUD_B = 0.0273;
 /** Nothing is planted closer than this to the road's centreline: verge and ditch. */
 const TREE_ROAD_KEEP = 9.5;
 /** Past the asphalt edge: the verge and the ditch stay clear whatever the road's width. */
@@ -222,6 +227,14 @@ export function generateDesertTileData(
       // interpolation: a colour needs to be right to a metre, not to a centimetre.
       const roadDist = farFromRoad ? 1e6 : context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE);
       cover.sample(worldX, worldZ, roadDist, coverSample);
+      // Wet ground darkens toward mud, fully where it is mud underfoot.
+      const wet = roadDist < 7 ? 0 : context.terrain.wetnessAt(worldX, worldZ);
+      if (wet > 0) {
+        const m = Math.min(1, wet * 1.4) * 0.85;
+        coverSample.r += (MUD_R - coverSample.r) * m;
+        coverSample.g += (MUD_G - coverSample.g) * m;
+        coverSample.b += (MUD_B - coverSample.b) * m;
+      }
       colors[vi * 3] = coverSample.r;
       colors[vi * 3 + 1] = coverSample.g;
       colors[vi * 3 + 2] = coverSample.b;
@@ -293,27 +306,43 @@ export function generateDesertTileData(
   }
 
   const trees = fit(into?.trees, MAX_TILE_TREES * TREE_STRIDE, Float32Array);
-  const treeCount = plantTrees(context, tx, tz, farFromRoad, heights, trees, coverSample);
+  const treeCount = plantTrees(
+    context,
+    tx,
+    tz,
+    (localX, localZ) => tileHeightAt(heights, localX, localZ),
+    trees,
+    coverSample,
+  );
 
   return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces, canopy, trees, treeCount };
 }
 
 /**
- * Plants the tile's trees into `out` and returns how many.
+ * Plants a tile's trees into `out` and returns how many.
  *
- * A jittered candidate per `TREE_CELL`, kept with probability equal to the wood's
- * density there, so a wood's edge thins out on its own rather than stopping at a line.
- * What is not a tree may be a bush: undergrowth along a wood's edge, willow scrub in
- * the roadside ditch, a lone birch in a meadow, a young birch in a field nobody
- * ploughs any more — the one sight that says "Russian back country" before anything
- * else does.
+ * TREES DO NOT GROW AT RANDOM, and the rules below are the whole of that sentence:
+ *
+ *   WOODS      the land cover's forest density, one candidate per `TREE_CELL`, kept
+ *              with that probability so an edge thins out on its own. Mixed: spruce
+ *              against deciduous by the birch share, deciduous split into birch and
+ *              broadleaf (lime, aspen, alder). A wood's edge carries undergrowth and
+ *              younger, shorter trees — the ecotone, not a wall.
+ *   COPSES     clumps of a few dozen trees standing out in meadow and fallow.
+ *   BELTS      rows along some field boundaries in farmland (world/landcover.ts).
+ *   RAVINES    alder, willow and scrub down a ravine's sides and floor.
+ *   DITCHES    willow scrub in clumps along the roadside, never a spaced row.
+ *   FALLOW     young birch coming up in patches on fields nobody ploughs.
+ *   LONE TREES very rare: an old birch or lime at a field corner.
+ *
+ * A pure function of the seed and the tile: it does not depend on where the player
+ * is, so the same ground always carries the same trees, near or far.
  */
-function plantTrees(
+export function plantTrees(
   context: DesertTileGenerationContext,
   tx: number,
   tz: number,
-  farFromRoad: boolean,
-  heights: Float32Array,
+  heightAt: (localX: number, localZ: number, worldX: number, worldZ: number) => number,
   out: Float32Array,
   cover: CoverSample,
 ): number {
@@ -322,14 +351,14 @@ function plantTrees(
   const centreX = startX + DESERT_TILE_SIZE * 0.5;
   const centreZ = startZ + DESERT_TILE_SIZE * 0.5;
   const land = context.terrain.cover;
+  const terrain = context.terrain;
   const seed = context.seed;
   let n = 0;
   const put = (x: number, z: number, kind: TreeKind, scale: number, key: number): void => {
-    const lx = x - startX;
-    const lz = z - startZ;
+    if (n >= MAX_TILE_TREES) return;
     const o = n * TREE_STRIDE;
     out[o] = x - centreX;
-    out[o + 1] = tileHeightAt(heights, lx, lz);
+    out[o + 1] = heightAt(x - startX, z - startZ, x, z);
     out[o + 2] = z - centreZ;
     out[o + 3] = scale;
     out[o + 4] = hash01(seed, TREE_TAG, key, 5) * Math.PI * 2;
@@ -337,6 +366,9 @@ function plantTrees(
     out[o + 6] = 0.84 + hash01(seed, TREE_TAG, key, 6) * 0.32;
     n++;
   };
+  /** Deciduous of the kind the place favours. */
+  const deciduous = (x: number, z: number, r: number): TreeKind =>
+    r < land.broadleafAt(x, z) * 0.7 ? TreeKind.Broadleaf : TreeKind.Birch;
   for (let ci = 0; ci < TREE_CELLS; ci++) {
     for (let cj = 0; cj < TREE_CELLS; cj++) {
       const gx = tx * TREE_CELLS + ci;
@@ -345,7 +377,7 @@ function plantTrees(
       const x = startX + (ci + 0.1 + hash01(seed, TREE_TAG, gx, gz, 1) * 0.8) * TREE_CELL;
       const z = startZ + (cj + 0.1 + hash01(seed, TREE_TAG, gx, gz, 2) * 0.8) * TREE_CELL;
       if (terminusWeight(x, z) > 0) continue;
-      let roadDist = farFromRoad ? 1e6 : context.roadDistance.distAt(x, z, DIST_LATTICE);
+      let roadDist = context.roadDistance.distAt(x, z, DIST_LATTICE);
       // The lattice distance is only good to about its own spacing, and a bush 4 m out
       // stands on the carriageway. Near the road, ask the road itself.
       if (roadDist < TREE_EXACT_GATE) {
@@ -354,33 +386,75 @@ function plantTrees(
         if (roadDist < context.road.halfWidthAt(p.s) + TREE_VERGE_KEEP) continue;
       }
       if (roadDist < TREE_ROAD_KEEP) continue;
-      const forest = land.forestAt(x, z, roadDist);
       const r = hash01(seed, TREE_TAG, gx, gz, 3);
       const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
-      if (r < forest * 0.93) {
-        const birch = land.birchAt(x, z);
-        const kind = r2 < birch * 0.9 + 0.05 ? TreeKind.Birch : TreeKind.Spruce;
-        // Edge trees are younger and shorter; the interior is a mature stand.
-        put(x, z, kind, (0.62 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7)) * (0.7 + 0.3 * forest), key);
-        continue;
-      }
-      if (forest > 0.02 && forest < 0.75 && r2 < 0.4) {
-        put(x, z, TreeKind.Bush, 0.7 + 0.6 * hash01(seed, TREE_TAG, gx, gz, 7), key);
-        continue;
-      }
-      if (roadDist < 20 && r2 < 0.07) {
-        put(x, z, TreeKind.Bush, 0.6 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7), key);
-        continue;
-      }
-      if (forest === 0 && r2 < 0.05) {
-        land.sample(x, z, roadDist, cover);
-        if (cover.crop === Crop.Fallow && r2 < 0.045) {
-          put(x, z, TreeKind.Birch, 0.3 + 0.3 * hash01(seed, TREE_TAG, gx, gz, 7), key);
-        } else if (cover.kind === CoverKind.Meadow && r2 < 0.0035) {
-          put(x, z, TreeKind.Birch, 0.85 + 0.35 * hash01(seed, TREE_TAG, gx, gz, 7), key);
-        } else if (cover.kind === CoverKind.Meadow && r2 < 0.012) {
-          put(x, z, TreeKind.Bush, 0.8 + 0.5 * hash01(seed, TREE_TAG, gx, gz, 7), key);
+      const r3 = hash01(seed, TREE_TAG, gx, gz, 7);
+      const r4 = hash01(seed, TREE_TAG, gx, gz, 8);
+
+      // Woods.
+      const forest = land.forestAt(x, z, roadDist);
+      if (forest > 0) {
+        if (r < forest * 0.93) {
+          const birch = land.birchAt(x, z);
+          const kind = r2 < birch * 0.85 + 0.08 ? deciduous(x, z, r4) : TreeKind.Spruce;
+          // Mature interior, younger edge: size follows density, then a wide spread.
+          const size = (0.55 + 0.45 * forest) * (0.72 + 0.56 * r3);
+          put(x, z, kind, size, key);
+          continue;
         }
+        if (forest < 0.8 && r2 < 0.45) {
+          put(x, z, TreeKind.Bush, 0.6 + 0.7 * r3, key);
+          continue;
+        }
+        continue;
+      }
+
+      // Ravines grow over with scrub and alder, the floor thickest.
+      const ravine = terrain.ravineAt(x, z);
+      if (ravine > 0.15) {
+        if (r < ravine * 0.55) {
+          put(x, z, r2 < 0.55 ? TreeKind.Bush : TreeKind.Broadleaf, 0.5 + 0.6 * r3, key);
+        }
+        continue;
+      }
+
+      // Shelter belts: a row, dense, one or two kinds along its length.
+      const belt = land.beltAt(x, z);
+      if (belt > 0.5) {
+        if (r < 0.8) {
+          const kind = r2 < 0.15 ? TreeKind.Bush : land.broadleafAt(x, z) > 0.5 ? TreeKind.Broadleaf : TreeKind.Birch;
+          put(x, z, kind, 0.65 + 0.4 * r3, key);
+        }
+        continue;
+      }
+
+      // Roadside willow scrub in the ditch, clumped by a slow field along the road.
+      if (roadDist < 22) {
+        const clump = land.copseAt(x * 3.1 + 500, z * 3.1 - 700);
+        if (r < clump * 0.7) put(x, z, TreeKind.Bush, 0.55 + 0.6 * r3, key);
+        continue;
+      }
+
+      land.sample(x, z, roadDist, cover);
+      if (cover.kind === CoverKind.Field) continue;
+
+      // Copses in the open, and young birch coming up in fallow.
+      const copse = land.copseAt(x, z);
+      if (copse > 0) {
+        if (r < copse * 0.85) {
+          const kind = r2 < 0.2 ? TreeKind.Bush : r2 < 0.3 ? TreeKind.Spruce : deciduous(x, z, r4);
+          put(x, z, kind, (0.5 + 0.5 * copse) * (0.7 + 0.5 * r3), key);
+        }
+        continue;
+      }
+      if (cover.crop === Crop.Fallow) {
+        const thicket = land.copseAt(x * 1.9 - 300, z * 1.9 + 900);
+        if (r < thicket * 0.6) put(x, z, TreeKind.Birch, 0.28 + 0.3 * r3, key);
+        continue;
+      }
+      // The exception: an old tree on its own, most often where plots meet.
+      if (r < 0.0012 && cover.plot < 0.5) {
+        put(x, z, r2 < 0.6 ? TreeKind.Birch : TreeKind.Broadleaf, 0.95 + 0.3 * r3, key);
       }
     }
   }

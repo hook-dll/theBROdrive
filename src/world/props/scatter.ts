@@ -49,6 +49,7 @@ const TAG_SCATTER = 0x5ca17e2;
 const TAG_ROAD_PILE = 0x6a5a41;
 const TAG_ROAD_ROCK = 0x6a5a52;
 /** Each independent stream varies every consecutive gap inside this exact range. */
+const ROAD_HAZARD_KINDS = 0;
 const ROAD_HAZARD_GAP_MIN = 1800;
 const ROAD_HAZARD_GAP_MAX = 4200;
 /**
@@ -349,7 +350,9 @@ export class ScatterProvider implements ChunkProvider {
     // Dirt piles, fallen trunks and solid rocks have independent deterministic
     // streams. Complementary gaps keep hazards irregular without walking every
     // previous placement to locate an arbitrary streamed chunk.
-    for (let kind = 0; kind < 2; kind++) {
+    // Countryside: none. Dirt piles and rocks lying on the asphalt were the desert's;
+    // `ROAD_HAZARD_KINDS` = 2 brings both streams back.
+    for (let kind = 0; kind < ROAD_HAZARD_KINDS; kind++) {
       const tag = kind === 0 ? TAG_ROAD_PILE : TAG_ROAD_ROCK;
       const streamStart =
         ROAD_HAZARD_START + hash01(seed, tag, 0x51a47) * ROAD_HAZARD_GAP_MAX;

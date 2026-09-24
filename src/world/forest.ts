@@ -1,29 +1,43 @@
 import * as THREE from 'three';
 
 import { hashUnit3 } from '../core/rng';
-import { TREE_STRIDE } from './deserttiledata';
+import { DESERT_TILE_SIZE, TREE_STRIDE } from './deserttiledata';
+import type { ForestWorkerRequest, ForestWorkerResponse } from './forestworker';
+import { bakeImpostorAtlas, ImpostorField, type ImpostorAtlas } from './impostors';
 import type { WorldOrigin } from './origin';
 import { loadTreeVariants, type TreeLod, type TreeVariant } from './props/trees';
-import { CANOPY_FULL_M } from './vistaground';
+import type { Road } from './road';
 
 /**
- * THE FOREST: every tree the tiles planted, drawn as a handful of world-wide
- * instanced meshes — one per kind, variant, level of detail and part.
+ * THE FOREST: every tree, drawn in three ways by distance, none of them by scaling.
  *
- * Tiles plant (world/deserttiledata.ts) and collide (world/deserttiles.ts); this
- * draws. Drawing per tile was the first version and it cost a draw per kind per
- * part per tile — well over a hundred for a wooded window. Here the count is fixed by
- * the catalogue, about twenty, whatever the window holds.
+ *   NEAR   within `NEAR_M`: the full model, casting shadows.
+ *   FAR    to `IMPOSTOR_FROM_M`: the thinned model.
+ *   IMPOSTOR  to `IMPOSTOR_TO_M`: a camera-facing quad baked from the far model
+ *          (world/impostors.ts), dissolving into the canopy blanket at the far end.
  *
- * Every `REBUCKET_M` of camera travel (or when a tile arrives or leaves) each tree is
- * put in its level: NEAR within `NEAR_M` (full model, casts shadows), FAR out to
- * `CANOPY_FULL_M` (the thinned model, no shadow), and nowhere past that, where the
- * canopy blanket on the ground has taken over.
+ * Models come from the near tiles (world/deserttiles.ts plants them with exact ground
+ * heights and collides their trunks); impostors from this module's own worker, which
+ * plants every tile out to the impostor radius with the same function. Both hold the
+ * same trees, so the swap at `IMPOSTOR_FROM_M` changes how a tree is drawn, never
+ * which tree is there.
+ *
+ * Model buckets are world-wide instanced meshes — one per kind, variant, level and
+ * part, about thirty draws for the whole wood — refilled every `REBUCKET_M` of camera
+ * travel. The impostor shader measures its side of the swap from the same point the
+ * refill used (`setBucketCentre`), so no tree is ever drawn twice or not at all.
  */
 
 const NEAR_M = 110;
+export const IMPOSTOR_FROM_M = 420;
+export const IMPOSTOR_TO_M = 2000;
 const REBUCKET_M = 14;
 const VARIANT_TAG = 0x46524553;
+const SHAPE_TAG = 0x53484150;
+/** Impostor tiles are kept out to this many tiles past the impostor radius. */
+const IMPOSTOR_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 1;
+/** Re-anchor the impostor buffer when the camera strays this far from its anchor. */
+const ANCHOR_REBASE_M = 20_000;
 
 interface TileTrees {
   readonly centreX: number;
@@ -33,8 +47,18 @@ interface TileTrees {
 }
 
 interface Bucket {
-  readonly mesh: THREE.InstancedMesh;
+  mesh: THREE.InstancedMesh;
   count: number;
+}
+
+/** Variant, and the height and width multipliers, of the tree at a world position. */
+export function treeShape(wx: number, wz: number, variants: number, out: { variant: number; sx: number; sy: number }): void {
+  const ix = Math.round(wx * 4);
+  const iz = Math.round(wz * 4);
+  out.variant = Math.floor(hashUnit3(VARIANT_TAG, ix, iz) * variants);
+  // Height and girth vary independently: a tall thin one, a short broad one.
+  out.sy = 0.82 + 0.4 * hashUnit3(SHAPE_TAG, ix, iz);
+  out.sx = 0.85 + 0.32 * hashUnit3(SHAPE_TAG + 1, ix, iz);
 }
 
 const matrix = new THREE.Matrix4();
@@ -43,6 +67,7 @@ const pos = new THREE.Vector3();
 const scl = new THREE.Vector3();
 const tint = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
+const shape = { variant: 0, sx: 1, sy: 1 };
 
 export class ForestRenderer {
   private readonly tiles = new Map<string, TileTrees>();
@@ -55,9 +80,23 @@ export class ForestRenderer {
   private lastOriginX = Number.NaN;
   private lastOriginZ = Number.NaN;
 
+  private renderer: THREE.WebGLRenderer | null = null;
+  private atlas: ImpostorAtlas | null = null;
+  private impostors: ImpostorField | null = null;
+  private anchorX = 0;
+  private anchorZ = 0;
+  private worker: Worker | null = null;
+  private workerReady = false;
+  private inFlight: string | null = null;
+  private readonly impostorTiles = new Map<string, { tx: number; tz: number; trees: Float32Array; count: number }>();
+  private centreTx = Number.NaN;
+  private centreTz = Number.NaN;
+
   constructor(
     private readonly scene: THREE.Scene,
     private readonly origin: WorldOrigin,
+    private readonly seed: number,
+    private readonly road: Road,
   ) {
     void loadTreeVariants().then((variants) => {
       this.variants = variants;
@@ -65,20 +104,139 @@ export class ForestRenderer {
         kind.map((variant) => [this.makeBuckets(variant.near, true), this.makeBuckets(variant.far, false)]),
       );
       this.dirty = true;
+      this.maybeBake();
+    });
+    this.startWorker();
+  }
+
+  /** The WebGL renderer the impostor atlas is baked with. */
+  attachRenderer(renderer: THREE.WebGLRenderer): void {
+    this.renderer = renderer;
+    this.maybeBake();
+  }
+
+  private maybeBake(): void {
+    if (this.atlas || !this.renderer || !this.variants) return;
+    this.atlas = bakeImpostorAtlas(this.renderer, this.variants);
+    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_TO_M);
+    this.scene.add(this.impostors.mesh);
+    // Tiles that arrived before the atlas existed are written now.
+    for (const [key, tile] of this.impostorTiles) this.writeImpostorTile(key, tile);
+  }
+
+  private startWorker(): void {
+    if (typeof Worker === 'undefined') return;
+    try {
+      const worker = new Worker(new URL('./forestworker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (event: MessageEvent<ForestWorkerResponse>) => this.onWorker(event.data);
+      worker.onerror = () => {
+        worker.terminate();
+        this.worker = null;
+      };
+      const init: ForestWorkerRequest = { type: 'init', seed: this.seed, spine: this.road.spine };
+      worker.postMessage(init);
+      this.worker = worker;
+    } catch {
+      this.worker = null;
+    }
+  }
+
+  private onWorker(message: ForestWorkerResponse): void {
+    if (message.type === 'ready') {
+      this.workerReady = true;
+      this.pump();
+      return;
+    }
+    const key = `${message.tx},${message.tz}`;
+    if (this.inFlight === key) this.inFlight = null;
+    if (this.wantsImpostorTile(message.tx, message.tz)) {
+      const tile = { tx: message.tx, tz: message.tz, trees: message.trees, count: message.count };
+      this.impostorTiles.set(key, tile);
+      this.writeImpostorTile(key, tile);
+    }
+    this.pump();
+  }
+
+  private wantsImpostorTile(tx: number, tz: number): boolean {
+    return Math.abs(tx - this.centreTx) <= IMPOSTOR_TILE_RADIUS && Math.abs(tz - this.centreTz) <= IMPOSTOR_TILE_RADIUS;
+  }
+
+  /** Requests the nearest missing impostor tile, one at a time. */
+  private pump(): void {
+    if (!this.worker || !this.workerReady || this.inFlight !== null || !Number.isFinite(this.centreTx)) return;
+    let best: [number, number] | null = null;
+    let bestD = Infinity;
+    const R = IMPOSTOR_TILE_RADIUS;
+    for (let dx = -R; dx <= R; dx++) {
+      for (let dz = -R; dz <= R; dz++) {
+        const d = dx * dx + dz * dz;
+        if (d > (R + 0.5) * (R + 0.5) || d >= bestD) continue;
+        const tx = this.centreTx + dx;
+        const tz = this.centreTz + dz;
+        if (this.impostorTiles.has(`${tx},${tz}`)) continue;
+        best = [tx, tz];
+        bestD = d;
+      }
+    }
+    if (!best) return;
+    this.inFlight = `${best[0]},${best[1]}`;
+    const request: ForestWorkerRequest = { type: 'tile', tx: best[0], tz: best[1] };
+    this.worker.postMessage(request);
+  }
+
+  private writeImpostorTile(key: string, tile: { tx: number; tz: number; trees: Float32Array; count: number }): void {
+    const field = this.impostors;
+    const atlas = this.atlas;
+    const variants = this.variants;
+    if (!field || !atlas || !variants) return;
+    const centreX = (tile.tx + 0.5) * DESERT_TILE_SIZE;
+    const centreZ = (tile.tz + 0.5) * DESERT_TILE_SIZE;
+    const t = tile.trees;
+    field.add(key, tile.count, (i, a0, a1, at) => {
+      const o = i * TREE_STRIDE;
+      const wx = centreX + t[o]!;
+      const wz = centreZ + t[o + 2]!;
+      const kind = t[o + 5]!;
+      treeShape(wx, wz, variants[kind]!.length, shape);
+      const cell = atlas.cells[kind]![shape.variant]!;
+      const s = t[o + 3]!;
+      a0[at] = wx - this.anchorX;
+      a0[at + 1] = t[o + 1]! - 0.15;
+      a0[at + 2] = wz - this.anchorZ;
+      a0[at + 3] = cell.drop * s * shape.sy;
+      a1[at] = cell.index;
+      a1[at + 1] = cell.width * s * shape.sx;
+      a1[at + 2] = cell.height * s * shape.sy;
+      a1[at + 3] = t[o + 6]!;
     });
   }
 
   private makeBuckets(lod: TreeLod, near: boolean): Bucket[] {
     return lod.map((part) => {
-      const mesh = new THREE.InstancedMesh(part.geometry, part.material, 64);
-      mesh.count = 0;
-      mesh.frustumCulled = false;
-      mesh.castShadow = near;
-      mesh.receiveShadow = true;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      this.scene.add(mesh);
+      const mesh = this.makeMesh(part.geometry, part.material, part.depthMaterial, part.foliage, near, 64);
       return { mesh, count: 0 };
     });
+  }
+
+  private makeMesh(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    depth: THREE.Material | null,
+    foliage: boolean,
+    near: boolean,
+    capacity: number,
+  ): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.castShadow = near;
+    // Crowns take no shadow of their own: card foliage self-shadowing is what crawls.
+    mesh.receiveShadow = !foliage;
+    if (depth) mesh.customDepthMaterial = depth;
+    mesh.userData.foliage = foliage;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(mesh);
+    return mesh;
   }
 
   /** A tile's trees, copied: the tile's own buffer goes back to the worker. */
@@ -93,6 +251,7 @@ export class ForestRenderer {
 
   /** `x`/`z` are the camera's ABSOLUTE world position. */
   update(x: number, z: number): void {
+    this.updateImpostorWindow(x, z);
     if (!this.variants) return;
     const moved = Math.hypot(x - this.lastX, z - this.lastZ);
     if (
@@ -109,13 +268,37 @@ export class ForestRenderer {
     this.lastOriginX = this.origin.x;
     this.lastOriginZ = this.origin.z;
     this.rebucket(x, z);
+    if (this.impostors) {
+      this.impostors.mesh.position.set(this.anchorX - this.origin.x, 0, this.anchorZ - this.origin.z);
+      this.impostors.mesh.updateMatrix();
+      this.impostors.setBucketCentre(x - this.anchorX, z - this.anchorZ);
+    }
+  }
+
+  private updateImpostorWindow(x: number, z: number): void {
+    const tx = Math.floor(x / DESERT_TILE_SIZE);
+    const tz = Math.floor(z / DESERT_TILE_SIZE);
+    if (Math.hypot(x - this.anchorX, z - this.anchorZ) > ANCHOR_REBASE_M || !Number.isFinite(this.centreTx)) {
+      this.anchorX = Math.round(x);
+      this.anchorZ = Math.round(z);
+      for (const [key, tile] of this.impostorTiles) this.writeImpostorTile(key, tile);
+      this.dirty = true;
+    }
+    if (tx === this.centreTx && tz === this.centreTz) return;
+    this.centreTx = tx;
+    this.centreTz = tz;
+    for (const [key, tile] of this.impostorTiles) {
+      if (this.wantsImpostorTile(tile.tx, tile.tz)) continue;
+      this.impostorTiles.delete(key);
+      this.impostors?.remove(key);
+    }
+    this.pump();
   }
 
   private rebucket(camX: number, camZ: number): void {
     const variants = this.variants!;
     for (const kind of this.buckets) for (const variant of kind) for (const lod of variant) for (const b of lod) b.count = 0;
-    const far = CANOPY_FULL_M + 5;
-    const reach = far + 240;
+    const reach = IMPOSTOR_FROM_M + DESERT_TILE_SIZE;
     for (const tile of this.tiles.values()) {
       // A whole tile out of reach is skipped without looking at its trees.
       if (Math.abs(tile.centreX - camX) > reach || Math.abs(tile.centreZ - camZ) > reach) continue;
@@ -125,19 +308,17 @@ export class ForestRenderer {
         const wx = tile.centreX + t[o]!;
         const wz = tile.centreZ + t[o + 2]!;
         const d = Math.hypot(wx - camX, wz - camZ);
-        if (d > far) continue;
+        if (d >= IMPOSTOR_FROM_M) continue;
         const kind = t[o + 5]!;
-        const kindVariants = variants[kind]!;
-        const variant = Math.floor(hashUnit3(VARIANT_TAG, Math.round(wx * 4), Math.round(wz * 4)) * kindVariants.length);
+        treeShape(wx, wz, variants[kind]!.length, shape);
         const lod = d < NEAR_M ? 0 : 1;
         const s = t[o + 3]!;
-        const shade = t[o + 6]!;
         pos.set(wx - this.origin.x, t[o + 1]! - 0.15, wz - this.origin.z);
         quat.setFromAxisAngle(UP, t[o + 4]!);
-        scl.set(s, s * (0.92 + 0.5 * (shade - 0.84)), s);
+        scl.set(s * shape.sx, s * shape.sy, s * shape.sx);
         matrix.compose(pos, quat, scl);
-        tint.setScalar(shade);
-        for (const bucket of this.buckets[kind]![variant]![lod]!) this.push(bucket, matrix, tint);
+        tint.setScalar(t[o + 6]!);
+        for (const bucket of this.buckets[kind]![shape.variant]![lod]!) this.push(bucket, matrix, tint);
       }
     }
     for (const kind of this.buckets) {
@@ -158,11 +339,14 @@ export class ForestRenderer {
     const capacity = mesh.instanceMatrix.count;
     if (bucket.count >= capacity) {
       // Grow by doubling: a fresh mesh over the same geometry and material.
-      const grown = new THREE.InstancedMesh(mesh.geometry, mesh.material, capacity * 2);
-      grown.frustumCulled = false;
-      grown.castShadow = mesh.castShadow;
-      grown.receiveShadow = true;
-      grown.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const grown = this.makeMesh(
+        mesh.geometry,
+        mesh.material as THREE.Material,
+        (mesh.customDepthMaterial as THREE.Material | undefined) ?? null,
+        mesh.userData.foliage === true,
+        mesh.castShadow,
+        capacity * 2,
+      );
       (grown.instanceMatrix.array as Float32Array).set(mesh.instanceMatrix.array as Float32Array);
       if (mesh.instanceColor) {
         grown.setColorAt(0, c);
@@ -170,8 +354,7 @@ export class ForestRenderer {
       }
       this.scene.remove(mesh);
       mesh.dispose();
-      this.scene.add(grown);
-      (bucket as { mesh: THREE.InstancedMesh }).mesh = grown;
+      bucket.mesh = grown;
       mesh = grown;
     }
     mesh.setMatrixAt(bucket.count, m);
