@@ -8,17 +8,25 @@ import * as THREE from 'three';
  * them. The owner: "coarse, unrealistic, not Shishkin".
  *
  * WHAT THEY ARE (docs/research-2026-09-26.md). Volumetric clouds raymarched ONCE, at
- * load, into an atlas, then drawn as camera-facing cards lit by the live sun — the same
- * trick as the trees' impostors, and the cheap end of what Sea of Thieves and the
- * volumetric renderers do. The bake keeps, per texel:
- *   atlas A  rgb: the cloud's surface normal where the view ray entered it
+ * load, into an atlas, then drawn as cards lit by the live sun — the same trick as the
+ * trees' impostors, and the cheap end of what Sea of Thieves and the volumetric
+ * renderers do. The bake keeps, per texel:
+ *   atlas A  rgb: light reaching the visible surface from up, +x and -x
  *            a:   coverage (1 - transmittance through the whole cloud)
- *   atlas B  r: height inside the cloud (0 at its flat base, 1 at its top)
- *            g: how much cloud the ray crossed (thin edges transmit the sun)
+ *   atlas B  rg: light from +z and -z
+ *            b:  height inside the cloud (0 at its flat base, 1 at its top)
+ *            a:  how much cloud the ray crossed (thin edges transmit the sun)
  * At draw time a card is lit from those: the sunward side warm, the shade cool and
  * blue-grey, the base darker, a silver lining where the sun is behind a thin edge
  * (Shishkin's "Rye", "Midday"). Near the horizon clouds sink into the haze as the land
  * does.
+ *
+ * TWO VIEWS. A card that only turns about the vertical is seen edge-on from under the
+ * cloud: overhead, a cloud was a smeared streak. So every shape is baked twice — from
+ * the side (atlas rows 0..2) and from below (rows 3..5: the flat base with the heads
+ * showing round its rim) — and each cloud is two quads, an upright one facing the
+ * camera and a flat one at its base, cross-faded by how high the cloud stands in the
+ * view (`VIEW_FADE_*`). The impostors' view blend, with two views.
  *
  * THE FIELD. `COUNT` clouds scattered over a square of `FIELD_M` that wraps round the
  * camera, so there are always clouds and they keep their world places: driving under
@@ -31,7 +39,17 @@ import * as THREE from 'three';
 
 const SHAPES = 12;
 const ATLAS_COLS = 4;
-const ATLAS_ROWS = 3;
+/** Rows per view: the side view in rows 0..2, the view from below in rows 3..5. */
+const VIEW_ROWS = 3;
+const ATLAS_ROWS = VIEW_ROWS * 2;
+/**
+ * Sine of the cloud's elevation over which the side view hands over to the view from
+ * below: ~20 to ~44 degrees. A big cloud a kilometre or two off spans tens of degrees,
+ * so its upright card already reads as a streak toward its near edge at 30; the first
+ * try, 30..53, left exactly that streak in the sky.
+ */
+const VIEW_FADE_LOW = 0.35;
+const VIEW_FADE_HIGH = 0.7;
 const CELL_W = 320;
 const CELL_H = 160;
 /** Clouds in the field, the field's side, and how high they float over the camera. */
@@ -164,10 +182,15 @@ void main() {
   vec2 cellF = vUv * vec2( ${ATLAS_COLS}.0, ${ATLAS_ROWS}.0 );
   vec2 cell = floor( cellF );
   vec2 inCell = fract( cellF );
-  shapeSeed = cell.y * ${ATLAS_COLS}.0 + cell.x + 1.0;
+  bool below = cell.y >= ${VIEW_ROWS}.0;
+  shapeSeed = mod( cell.y, ${VIEW_ROWS}.0 ) * ${ATLAS_COLS}.0 + cell.x + 1.0;
   buildPuffs();
   vec2 q = ( inCell - 0.5 ) / 0.9 + 0.5;
-  vec3 ro = vec3( q.x * 2.0 - 1.0, q.y, 0.6 );
+  // Side view: marching -z from the viewer's side. From below: marching +y up from
+  // under the base, the cell's v across z (so 0.7 of x's scale: the flat quad is 0.7
+  // as deep as it is wide).
+  vec3 ro = below ? vec3( q.x * 2.0 - 1.0, -0.02, ( q.y * 2.0 - 1.0 ) * 0.7 ) : vec3( q.x * 2.0 - 1.0, q.y, 0.6 );
+  vec3 rd = below ? vec3( 0.0, 1.0, 0.0 ) : vec3( 0.0, 0.0, -1.0 );
   const int STEPS = 36;
   float dz = 1.2 / float( STEPS );
   float T = 1.0;
@@ -179,7 +202,7 @@ void main() {
   bool inside = all( greaterThanEqual( q, vec2( 0.0 ) ) ) && all( lessThanEqual( q, vec2( 1.0 ) ) );
   for ( int i = 0; i < STEPS; i++ ) {
     if ( !inside || T < 0.02 ) break;
-    vec3 p = ro - vec3( 0.0, 0.0, dz * ( float( i ) + 0.5 ) );
+    vec3 p = ro + rd * ( dz * ( float( i ) + 0.5 ) );
     float d = density( p, true );
     if ( d < 0.01 ) continue;
     float a = 1.0 - exp( -d * dz * 11.0 );
@@ -211,6 +234,7 @@ void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }
 const DRAW_VERTEX = /* glsl */ `
 attribute vec4 aCloud; // x, z in the field, altitude, width
 attribute vec2 aShape; // atlas cell, own random
+attribute float aView; // 0: the upright side card, 1: the flat card under the base
 uniform vec2 uCamAbs;
 uniform vec2 uWind;
 uniform float uCover;
@@ -220,6 +244,7 @@ varying vec3 vFwd;
 varying float vElev;
 varying float vRnd;
 varying float vShow;
+varying vec3 vDir;
 void main() {
   float F = ${FIELD_M.toFixed(1)};
   vec2 at = aCloud.xy + uWind;
@@ -227,16 +252,30 @@ void main() {
   // Fewer as the cover falls: each cloud has its own threshold.
   vShow = smoothstep( aShape.y, aShape.y + 0.08, uCover ) * ( 1.0 - smoothstep( F * 0.4, F * 0.5, length( rel ) ) );
   vec3 centre = vec3( rel.x, aCloud.z, rel.y );
-  vec3 fwd = normalize( vec3( -rel.x, 0.0, -rel.y ) + vec3( 1e-4, 0.0, 0.0 ) );
-  vec3 right = vec3( fwd.z, 0.0, -fwd.x );
   float w = aCloud.w * ( 0.35 + 0.65 * vShow );
-  vec3 p = centre + right * position.x * w + vec3( 0.0, ( position.y + 0.5 ) * w * 0.5, 0.0 );
-  vRight = right;
-  vFwd = fwd;
+  float cell = aShape.x;
+  vec2 cellUv = vec2( mod( cell, ${ATLAS_COLS}.0 ), floor( cell / ${ATLAS_COLS}.0 ) + aView * ${VIEW_ROWS}.0 );
+  vec3 p;
+  if ( aView < 0.5 ) {
+    // Upright, turned to face the camera about the vertical.
+    vec3 fwd = normalize( vec3( -rel.x, 0.0, -rel.y ) + vec3( 1e-4, 0.0, 0.0 ) );
+    vRight = vec3( fwd.z, 0.0, -fwd.x );
+    vFwd = fwd;
+    p = centre + vRight * position.x * w + vec3( 0.0, ( position.y + 0.5 ) * w * 0.5, 0.0 );
+  } else {
+    // Flat at the base, on the cloud's own heading (fixed in the world, so it does not
+    // spin as the camera passes beneath). 0.7 as deep as wide, as baked.
+    float a = aShape.y * 6.2831853;
+    vFwd = vec3( -sin( a ), 0.0, cos( a ) );
+    vRight = vec3( vFwd.z, 0.0, -vFwd.x );
+    p = centre + vRight * position.x * w + vFwd * position.y * w * 0.7;
+  }
+  // The hand-over between the views, by the cloud's elevation in the view.
+  float up = smoothstep( ${VIEW_FADE_LOW}, ${VIEW_FADE_HIGH}, centre.y / length( centre ) );
+  vShow *= aView < 0.5 ? 1.0 - up : up;
+  vDir = p;
   vElev = normalize( p ).y;
   vRnd = aShape.y;
-  float cell = aShape.x;
-  vec2 cellUv = vec2( mod( cell, ${ATLAS_COLS}.0 ), floor( cell / ${ATLAS_COLS}.0 ) );
   vUv = ( cellUv + vec2( position.x + 0.5, position.y + 0.5 ) ) / vec2( ${ATLAS_COLS}.0, ${ATLAS_ROWS}.0 );
   // The camera's own position: the field is built round it, in camera-relative metres.
   gl_Position = projectionMatrix * viewMatrix * vec4( cameraPosition + p, 1.0 );
@@ -263,6 +302,7 @@ varying vec3 vFwd;
 varying float vElev;
 varying float vRnd;
 varying float vShow;
+varying vec3 vDir;
 void main() {
   vec4 a = texture2D( uAtlasA, vUv );
   vec4 b = texture2D( uAtlasB, vUv );
@@ -280,8 +320,9 @@ void main() {
   float lit = ( a.r * w.x + a.g * w.y + a.b * w.z + b.r * w.w + b.g * wBack ) / max( w.x + w.y + w.z + w.w + wBack, 1e-4 );
   float height = b.b;
   float thick = b.a;
-  // Silver lining: the sun behind a thin edge, seen through it.
-  float rim = pow( max( dot( -vFwd, L ), 0.0 ), 5.0 ) * ( 1.0 - thick ) * 0.9;
+  // Silver lining: the sun behind a thin edge, seen through it. The real view ray, so
+  // it holds for the flat card under the cloud as for the upright one.
+  float rim = pow( max( dot( normalize( vDir ), L ), 0.0 ), 5.0 ) * ( 1.0 - thick ) * 0.9;
   // Shade is the sky's cool blue-grey, deeper under the cloud; light the sun's warm
   // white (Shishkin's clouds: warm where lit, cold in their own shadow).
   // Part of the shade is the sky round the cloud, lower down the horizon's. At dusk the
@@ -403,14 +444,35 @@ export class Clouds {
         uDusk: { value: 0 },
       },
       transparent: true,
+      // The flat card under the base is seen from below, the upright one from either
+      // side of its turn: no winding is "front" for both.
+      side: THREE.DoubleSide,
       depthWrite: false,
       depthTest: true,
     });
+    // Two quads per cloud (see TWO VIEWS): the flat one first, so where both show
+    // during the hand-over the upright one blends over it.
     const quad = new THREE.PlaneGeometry(1, 1);
+    const quadPos = quad.getAttribute('position').array as Float32Array;
+    const quadIndex = quad.index!.array;
+    const positions = new Float32Array(quadPos.length * 2);
+    positions.set(quadPos, 0);
+    positions.set(quadPos, quadPos.length);
+    const views = new Float32Array([1, 1, 1, 1, 0, 0, 0, 0]);
+    const indices = new Uint16Array(quadIndex.length * 2);
+    for (let k = 0; k < quadIndex.length; k++) {
+      indices[k] = quadIndex[k]!;
+      indices[k + quadIndex.length] = quadIndex[k]! + 4;
+    }
+    const position = new THREE.BufferAttribute(positions, 3);
+    const view = new THREE.BufferAttribute(views, 1);
+    const index = new THREE.BufferAttribute(indices, 1);
+    quad.dispose();
     const geom = (): THREE.InstancedBufferGeometry => {
       const g = new THREE.InstancedBufferGeometry();
-      g.index = quad.index;
-      g.setAttribute('position', quad.getAttribute('position'));
+      g.setIndex(index);
+      g.setAttribute('position', position);
+      g.setAttribute('aView', view);
       g.setAttribute('aCloud', new THREE.InstancedBufferAttribute(new Float32Array(COUNT * 4), 4));
       g.setAttribute('aShape', new THREE.InstancedBufferAttribute(new Float32Array(COUNT * 2), 2));
       g.instanceCount = 0;
