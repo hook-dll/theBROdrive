@@ -1983,7 +1983,7 @@ async function boot(): Promise<void> {
       mobilePresentation,
     );
     // Rain and snow round the camera, from the weather set before the sky this frame.
-    precipitation.update(frameDt, cam, weather, sky.dayFactor);
+    precipitation.update(frameDt, cam, cam.x + origin.x, cam.z + origin.z, weather, sky.dayFactor, renderer.renderer.domElement.height);
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
     // absolute player position; the bake is sliced through the streaming budget the
     // terrain tiles use.

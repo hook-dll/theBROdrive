@@ -128,7 +128,13 @@ function channelsAt(seed: number, s: number, startDay: number, out: WeatherState
   // to the grey sky it leaves behind.
   const lift = kindA === 'fog' ? 1 - smoothstep01((s - start - FOG_BANK_M) / FOG_LIFT_M) : 1;
   out.overcast = a.overcast + (b.overcast - a.overcast) * t;
-  out.precip = a.precip + (b.precip - a.precip) * t;
+  // Rain falls out of cloud, never out of a clear sky: whatever the spell says, the
+  // drops wait until the cloud has closed in (overcast past ~0.6) and stop as it
+  // breaks. Spells blend all their channels together, so without this a shower's
+  // front brought drops and cloud in step — rain from a half-clear sky — and its
+  // tail left rain falling under the blue. Cloud without rain stays possible: the
+  // `cloudy` and `overcast` spells carry no precipitation at all.
+  out.precip = (a.precip + (b.precip - a.precip) * t) * smoothstep01((out.overcast - 0.6) / 0.3);
   out.fog = a.fog * lift + (b.fog - a.fog * lift) * t;
   return out;
 }

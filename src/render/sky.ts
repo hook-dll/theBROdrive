@@ -796,7 +796,7 @@ export class Sky {
     // day factor falls long before the cloud's does), so the heap keeps its volume.
     const day = Math.max(smoothstep(-0.12, 0.3, this.sunElevation), 0.7 * dusk);
     const light = Math.max(0.1, day) * (1 - 0.6 * this.weather.overcast);
-    this.clouds.update(absX, absZ, this._lightDir, this._lightColor, light, this.uCumulus.value, this.weather.overcast, 1 - 0.7 * this.weather.fog, dusk);
+    this.clouds.update(absX, absZ, this._lightDir, this._lightColor, light, this.uCumulus.value, this.weather.overcast, this.weather.precip, 1 - 0.7 * this.weather.fog, dusk);
   }
 
   /** The weather to draw this frame's sky, light and air for. */
@@ -1054,9 +1054,10 @@ export class Sky {
     // --- Weather (world/weather.ts) ---
     // Under cloud the whole sky greys: the zenith toward the layer's grey, the horizon
     // toward a pale grey-white; in fog, everything toward the fog's own white. The
-    // layer's colour dims with the day.
+    // layer's colour dims with the day, and deepens in rain: a raining deck is thick
+    // enough to take a third of the light the same grey sky lets through dry.
     const w = this.weather;
-    this._overcast.copy(C_OVERCAST).multiplyScalar(0.25 + 0.75 * day).lerp(C_NIGHT_ZENITH, night * 0.8);
+    this._overcast.copy(C_OVERCAST).multiplyScalar((0.25 + 0.75 * day) * (1 - 0.35 * w.precip)).lerp(C_NIGHT_ZENITH, night * 0.8);
     this._zenith.lerp(this._overcast, w.overcast * 0.85);
     this._horizon.lerp(this._overcastHorizon.copy(C_OVERCAST_HORIZON).multiplyScalar(0.3 + 0.7 * day), Math.max(w.overcast * 0.6, w.fog * 0.95));
     // In fog the sky is the fog: zenith and cloud go to the horizon's pale grey.
@@ -1169,7 +1170,7 @@ export class Sky {
       (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
       GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
     this.hemiLight.intensity = Math.max(
-      photometricFill * (1 + 0.35 * this.weather.overcast),
+      photometricFill * (1 + 0.35 * this.weather.overcast - 0.4 * this.weather.precip),
       NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,
     );
 

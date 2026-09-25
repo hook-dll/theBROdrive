@@ -238,6 +238,7 @@ attribute float aView; // 0: the upright side card, 1: the flat card under the b
 uniform vec2 uCamAbs;
 uniform vec2 uWind;
 uniform float uCover;
+uniform float uOvercast;
 varying vec2 vUv;
 varying vec3 vRight;
 varying vec3 vFwd;
@@ -251,8 +252,11 @@ void main() {
   vec2 rel = mod( at - uCamAbs + F * 0.5, F ) - F * 0.5;
   // Fewer as the cover falls: each cloud has its own threshold.
   vShow = smoothstep( aShape.y, aShape.y + 0.08, uCover ) * ( 1.0 - smoothstep( F * 0.4, F * 0.5, length( rel ) ) );
-  vec3 centre = vec3( rel.x, aCloud.z, rel.y );
-  float w = aCloud.w * ( 0.35 + 0.65 * vShow );
+  // Rain cloud: as the sky closes in, the heaps swell and sink (a nimbostratus base
+  // sits at half fair-weather cumulus height) until the cards overlap into one deck
+  // with a lumpy underside, instead of fair-weather puffs pasted on a grey dome.
+  vec3 centre = vec3( rel.x, aCloud.z * ( 1.0 - 0.45 * uOvercast ), rel.y );
+  float w = aCloud.w * ( 0.35 + 0.65 * vShow ) * ( 1.0 + 0.8 * uOvercast );
   float cell = aShape.x;
   vec2 cellUv = vec2( mod( cell, ${ATLAS_COLS}.0 ), floor( cell / ${ATLAS_COLS}.0 ) + aView * ${VIEW_ROWS}.0 );
   vec3 p;
@@ -295,6 +299,7 @@ uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform float uAmount;
 uniform float uGrey;
+uniform float uRain;
 uniform float uDusk;
 varying vec2 vUv;
 varying vec3 vRight;
@@ -338,8 +343,12 @@ void main() {
   // clouds are mostly low heaps (height under 0.5), so a slow falloff tints them all.
   float under = uDusk * ( 1.0 - smoothstep( 0.12, 0.38, height ) ) * ( 0.55 + 0.45 * ( 1.0 - thick ) );
   col += mix( uHorizon, uLightColor, 0.6 ) * under * 0.9;
-  // Overcast: the clouds go grey and flat.
-  col = mix( col, mix( uHorizon, uZenith, 0.4 ) * ( 0.8 + 0.25 * height ), uGrey );
+  // Overcast: the clouds go grey, and in rain dark — darker than the sky between
+  // them, darkest at the base, keeping some of their own light and shade so the deck
+  // still has a body. The old grey was a flat tone LIGHTER than the overcast dome:
+  // pale cut-outs where there should be storm cloud.
+  vec3 storm = mix( uHorizon, uZenith, 0.4 ) * mix( 0.5, 1.0, height ) * ( 0.75 + 0.35 * lit ) * ( 1.0 - 0.5 * uRain );
+  col = mix( col, storm, uGrey );
   // Low clouds sink into the horizon's haze, as the land does.
   col = mix( uHorizon, col, 0.25 + 0.75 * smoothstep( 0.0, 0.22, vElev ) );
   gl_FragColor = vec4( col, alpha );
@@ -441,6 +450,8 @@ export class Clouds {
         uHorizon: { value: shared.horizon },
         uAmount: { value: 1 },
         uGrey: { value: 0 },
+        uOvercast: { value: 0 },
+        uRain: { value: 0 },
         uDusk: { value: 0 },
       },
       transparent: true,
@@ -499,11 +510,12 @@ export class Clouds {
   /**
    * Once a frame. `camX`/`camZ` the camera's ABSOLUTE world position (the field is in
    * world metres), `light` the key light (sun or moon) direction and colour and its
-   * strength against full day, `cover` the cumulus cover 0..1, `overcast` 0..1,
-   * `amount` 0..1 how visible clouds are at all (they fade into the night), `dusk` 0..1
-   * how strongly a low sun lights the bases from underneath.
+   * strength against full day, `cover` the cumulus cover 0..1, `overcast` 0..1, `rain`
+   * 0..1 how hard it is raining out of it, `amount` 0..1 how visible clouds are at all
+   * (they fade into the night), `dusk` 0..1 how strongly a low sun lights the bases
+   * from underneath.
    */
-  update(camX: number, camZ: number, lightDir: THREE.Vector3, lightColor: THREE.Color, light: number, cover: number, overcast: number, amount: number, dusk: number): void {
+  update(camX: number, camZ: number, lightDir: THREE.Vector3, lightColor: THREE.Color, light: number, cover: number, overcast: number, rain: number, amount: number, dusk: number): void {
     const u = this.material.uniforms;
     this.camAbs.set(camX, camZ);
     // The wind: its own clock, wrapped on the field, so it never jumps.
@@ -517,7 +529,9 @@ export class Clouds {
     (u.uLightDir!.value as THREE.Vector3).copy(lightDir);
     (u.uLightColor!.value as THREE.Color).copy(lightColor);
     u.uLight!.value = light;
-    u.uGrey!.value = overcast * 0.85;
+    u.uGrey!.value = overcast * 0.9;
+    u.uOvercast!.value = overcast;
+    u.uRain!.value = rain;
     u.uAmount!.value = amount;
     u.uDusk!.value = dusk;
     if (!(Math.hypot(camX - this.sortedAtX, camZ - this.sortedAtZ) < RESORT_M)) this.sort(camX, camZ);
