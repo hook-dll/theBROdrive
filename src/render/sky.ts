@@ -7,6 +7,7 @@ import { skyGradientAt } from '../world/gradient';
 import { newWeatherState, type WeatherState } from '../world/weather';
 import { hash01 } from '../core/rng';
 import { AstronomySystem } from './astronomy';
+import { Clouds } from './clouds';
 import { StarField } from './starcatalog';
 import { PlanetField } from './planetfield';
 
@@ -588,35 +589,7 @@ void main() {
   vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
   col = mix(col, cloudCol, deck * 0.55);
 
-  // --- Cumulus ---------------------------------------------------------------
-  //
-  // The middle belt's summer sky is not a clear dome with a veil of ice: it is fair-
-  // weather cumulus, white heaped tops over flat grey-lilac bases, thickest toward the
-  // horizon where perspective crowds them (Shishkin's "Rye" and "Glade",
-  // docs/shishkin.md). A lower, coarser plane than the cirrus: its perspective packs
-  // the puffs into banks near the horizon for nothing. Shading is two taps: how thick
-  // the cloud is here (thick is darker, the base), and how thick it is a step toward
-  // the sun (cloud between here and the sun puts this side in shade). The rim that
-  // faces the sun and is thin is lit through: a silver lining.
-  {
-    // Projected onto a plane seen from well below it (the + 0.22), so the puffs near
-    // the horizon are foreshortened but keep their heads, not drawn out into streaks.
-    vec2 cu = dir.xz / (max(dir.y, 0.0) + 0.22) * 1.1 + vec2(uCloudTime * 0.004, uCloudTime * 0.0015);
-    float body = cumulusBody(cu);
-    float th = 0.58 - 0.3 * uCumulus;
-    float dens = smoothstep(th, th + 0.035, body);
-    float thick = smoothstep(th + 0.08, th + 0.4, body);
-    vec2 toSun = normalize(uSunDir.xz + vec2(1e-4)) * 0.18;
-    float shaded = smoothstep(th + 0.05, th + 0.35, cumulusBody(cu + toSun)) * (1.0 - smoothstep(-0.2, 0.6, sd) * 0.4);
-    vec3 cuLit = mix(vec3(1.0), uSunColor, 0.25);
-    vec3 cuShade = mix(uZenith, vec3(0.6, 0.61, 0.67), 0.7);
-    vec3 cuCol = mix(cuLit, cuShade, clamp(0.45 * thick + 0.45 * shaded, 0.0, 1.0));
-    cuCol += uSunColor * (1.0 - thick) * pow(max(sd, 0.0), 5.0) * 0.35;
-    // Distant cloud sinks into the horizon's haze, as the far land does.
-    cuCol = mix(uHorizon, cuCol, 0.35 + 0.65 * smoothstep(0.02, 0.3, dir.y));
-    dens *= smoothstep(0.012, 0.08, dir.y) * uCloudAmount * (1.0 - uSkyFog) * (1.0 - 0.6 * uOvercast);
-    col = mix(col, cuCol, dens);
-  }
+  // Cumulus are cards of their own now, lit volumes baked at load (render/clouds.ts).
 
   // Disc edges are one-pixel derivative transitions. The old fixed dot-product
   // width was wider than the Moon itself and mixed its dark limb into nearby sky.
@@ -809,6 +782,23 @@ export class Sky {
   /** The weather along the road (world/weather.ts), set by `setWeather`. */
   private readonly weather: WeatherState = newWeatherState();
 
+  private readonly clouds: Clouds;
+
+  /**
+   * The cumulus for this frame, after `update`: `absX`/`absZ` the camera's ABSOLUTE
+   * world position, which the cloud field is anchored to (render/clouds.ts).
+   */
+  updateClouds(absX: number, absZ: number): void {
+    // Underlight: from the sun touching the horizon (clouds 1.6 km up still see it a
+    // little after it has set for the ground) until it climbs past ~15 degrees.
+    const dusk = smoothstep(-0.09, 0.0, this.sunElevation) * (1 - smoothstep(0.08, 0.28, this.sunElevation)) * (1 - this.weather.overcast);
+    // A low sun still lights the cloud's sunward side at full strength (the ground's
+    // day factor falls long before the cloud's does), so the heap keeps its volume.
+    const day = Math.max(smoothstep(-0.12, 0.3, this.sunElevation), 0.7 * dusk);
+    const light = Math.max(0.1, day) * (1 - 0.6 * this.weather.overcast);
+    this.clouds.update(absX, absZ, this._lightDir, this._lightColor, light, this.uCumulus.value, this.weather.overcast, 1 - 0.7 * this.weather.fog, dusk);
+  }
+
   /** The weather to draw this frame's sky, light and air for. */
   setWeather(weather: WeatherState): void {
     Object.assign(this.weather, weather);
@@ -922,6 +912,10 @@ export class Sky {
     this.dome.renderOrder = 5;
     this.dome.frustumCulled = false;
     this.root.add(this.dome);
+
+    // --- Cumulus: baked volumes as cards, in the world (not the camera-following root).
+    this.clouds = new Clouds(webgl, { zenith: this.uZenith, horizon: this.uHorizon });
+    scene.add(this.clouds.mesh);
 
     // --- Environment probe dome: same geometry and uniform objects as the
     // visible dome, so the probe tracks the time of day for free. Only the

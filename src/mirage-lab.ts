@@ -523,6 +523,7 @@ export async function bootMirageLab(): Promise<void> {
       cam.y,
       cam.z,
     );
+    sky.updateClouds(cam.x + origin.x, cam.z + origin.z);
     vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);
     tableau.setPreviewDayFactor(sky.dayFactor, projection.lateral);

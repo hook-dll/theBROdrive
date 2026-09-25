@@ -386,6 +386,7 @@ class RoadLookLab {
     // the arclengths this lab is pointed at, and the dome renders as nothing at all.
     const eye = this.renderer.camera.position;
     this.sky.update(CALENDAR, daySeconds, 0, s, eye.x, eye.y, eye.z);
+    this.sky.updateClouds(eye.x + this.originX, eye.z + this.originZ);
     this.renderer.render();
 
     const condition = roadConditionAt(s);
