@@ -53,6 +53,7 @@ import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { Precipitation } from './render/precipitation';
+import { WetGlints } from './render/wetglints';
 import { setSeasonUniforms, setWeatherWet } from './render/season';
 import { VistaMesh } from './render/vista';
 import { LakeWater } from './render/lakewater';
@@ -418,6 +419,7 @@ async function boot(): Promise<void> {
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   const weather = newWeatherState();
   const precipitation = new Precipitation(renderer.scene);
+  const wetGlints = new WetGlints(renderer.scene);
   let seasonEpoch = '';
   let seasonStartDay = 0;
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
@@ -1911,6 +1913,21 @@ async function boot(): Promise<void> {
       );
     }
     vehicleLights.endFrame();
+
+    // Every lit lamp's reflection on the wet road, at the lamp's own brightness and
+    // any range (render/wetglints.ts): the spotlight pool above is rationed by
+    // distance, a mirror image is not. `weather` is last frame's here, which a wet
+    // road that changes over kilometres cannot tell apart.
+    wetGlints.beginFrame();
+    let eyeGround = 0;
+    if (weather.wet > 0.01) {
+      eyeGround = terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS);
+      for (const vehicle of litVehicles) {
+        const at = vehicle.root.position;
+        vehicle.offerGlints(wetGlints, terrain.heightAt(at.x + origin.x, at.z + origin.z, activeS));
+      }
+    }
+    wetGlints.endFrame(weather.wet, renderer.fog.density, eyeGround, frameDt);
 
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the

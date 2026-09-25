@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import type { WetGlints } from '../render/wetglints';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
 
@@ -312,6 +313,46 @@ export class VehicleLamps {
         REVERSE_LIGHT_BEAM,
       );
     }
+  }
+
+  /**
+   * Offers this vehicle's lit lamps to the wet-road reflections (render/wetglints.ts)
+   * at their OWN brightness — no range gain: a mirror image does not fade with the
+   * distance the ground light does, which is the whole point of drawing it apart
+   * from the spotlight pool. `ground` is the road height under the car.
+   */
+  offerGlints(glints: WetGlints, ground: number): void {
+    const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
+    const headlight = this.headlightMode === 'off' ? 0 : headlightBeam.intensity * this.headlightEnvironmentFactor;
+    for (let i = 0; i < 2; i++) {
+      // Lens lobes: a headlight throws most of its light down its axis, a tail lamp is
+      // meant to be seen from wide behind, a reversing lamp between the two.
+      this.offerGlint(glints, ground, this.headlightMounts[i], HEADLIGHT_BEAM_TINT, headlight, this.headlightMode === 'high' ? 10 : 6);
+      this.offerGlint(glints, ground, this.taillightMounts[i], TAILLIGHT_EMISSIVE, this.taillightBeamIntensity, 2);
+      this.offerGlint(glints, ground, this.reverseLightMounts[i], REVERSE_LIGHT_EMISSIVE, this.reverseLightBeamIntensity, 3);
+    }
+  }
+
+  private offerGlint(
+    glints: WetGlints,
+    ground: number,
+    mount: VehicleBeamMount | undefined,
+    color: THREE.ColorRepresentation,
+    brightness: number,
+    lobe: number,
+  ): void {
+    if (!mount || !(brightness > 0)) return;
+    const source = this.projectedLightSource
+      .copy(mount.sourceLocal)
+      .applyQuaternion(this.ctx.rootGroup.quaternion)
+      .add(this.ctx.rootGroup.position);
+    const axis = this.projectedLightTarget
+      .copy(mount.aimLocal)
+      .applyQuaternion(this.ctx.rootGroup.quaternion)
+      .add(this.ctx.rootGroup.position)
+      .sub(source)
+      .normalize();
+    glints.addLamp(source, ground, axis, lobe, color, brightness);
   }
 
   private projectBeam(

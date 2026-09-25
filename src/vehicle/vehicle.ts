@@ -64,6 +64,7 @@ import type { CarBodySurface } from '../render/carsurface';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import type { WetGlints } from '../render/wetglints';
 
 import {
   AIR_DENSITY,
@@ -2845,6 +2846,11 @@ export class Vehicle implements Rebasable {
    */
   syncProjectedLights(rig: VehicleLightRig, gain: number): void {
     this.lamps.syncProjectedLights(rig, gain);
+  }
+
+  /** Offers this vehicle's lit lamps to the wet-road reflections; see vehiclelamps.ts. */
+  offerGlints(glints: WetGlints, ground: number): void {
+    this.lamps.offerGlints(glints, ground);
   }
 
   /**

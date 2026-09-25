@@ -1088,7 +1088,8 @@ export class Sky {
     this.uSunColor.copy(this._sunColor);
     this.uSunGlowColor.copy(this._sunGlow);
     this.uSunGlowIntensity.value = sunGlowIntensity * (1 - 0.7 * this.weather.overcast);
-    this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y);
+    // The disc goes behind a closed deck with the stars (see `skyClear` below).
+    this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y) * (1 - smoothstep(0.45, 0.9, this.weather.overcast));
     this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
 
     // --- Cirrus deck ---
@@ -1128,7 +1129,11 @@ export class Sky {
       1,
       (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
     );
-    const starVisibility = smoothstep(0.12, -0.12, this.sunElevation);
+    // A closed deck hides the night sky. The cloud itself is not drawn at night (the
+    // cards and the dome's layer fade with the light), so without this a rainy night
+    // was a starry one — the very complaint the cumulus cards were built to answer.
+    const skyClear = 1 - smoothstep(0.45, 0.9, this.weather.overcast);
+    const starVisibility = smoothstep(0.12, -0.12, this.sunElevation) * skyClear;
     this.starField.update(
       celestial.equatorialToWorld,
       celestialExposure / 18_000,
@@ -1136,7 +1141,7 @@ export class Sky {
       celestial.moon.direction,
       visibleMoonRadius,
     );
-    this.planetField.update(celestial, celestialExposure / 18_000);
+    this.planetField.update(celestial, (celestialExposure / 18_000) * skyClear);
 
     // One shadow-casting key light. Astronomy blends the Sun/Moon direction and
     // exposes the same blend for colour, so the horizon hand-off cannot step.
