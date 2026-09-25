@@ -516,6 +516,9 @@ export class Renderer {
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
         uCameraViewfinder: { value: 0 },
+        uSunUv: { value: new THREE.Vector2(0.5, 2) },
+        uSunRays: { value: 0 },
+        uSunRayColor: { value: new THREE.Color() },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -785,6 +788,7 @@ export class Renderer {
       THREE.MathUtils.degToRad(this.camera.fov) / 2,
     );
     this.hazeMaterial.uniforms.uCameraNear.value = this.camera.near;
+    this.updateSunRays();
     this.hazeMaterial.uniforms.uCameraFar.value = this.camera.far;
     // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
     //
@@ -878,6 +882,36 @@ export class Renderer {
     const ink = this.hazeMaterial.uniforms.uInkStrength.value as number;
     this.hazeTarget.resolveDepthBuffer =
       this.shimmerStrength > 0 || this.mirageStrength > 0 || ink > 0 || this.daylight > 0;
+  }
+
+  /**
+   * The sun for the post pass's light shafts: direction (world, unit), colour and
+   * strength (render/sky.ts `sunRayStrength`), set once a frame.
+   */
+  setSunRays(direction: THREE.Vector3, colour: THREE.Color, strength: number): void {
+    this.sunRayDir.copy(direction);
+    (this.hazeMaterial.uniforms.uSunRayColor.value as THREE.Color).copy(colour);
+    this.sunRayStrength = strength;
+  }
+
+  private readonly sunRayDir = new THREE.Vector3(0, 1, 0);
+  private sunRayStrength = 0;
+  private readonly sunRayScratch = new THREE.Vector3();
+  private readonly sunRayForward = new THREE.Vector3();
+
+  /** Projects the sun onto the screen; shafts fade as it leaves the view's front. */
+  private updateSunRays(): void {
+    const u = this.hazeMaterial.uniforms;
+    this.camera.getWorldDirection(this.sunRayForward);
+    const facing = this.sunRayForward.dot(this.sunRayDir);
+    if (this.sunRayStrength <= 0 || facing <= 0.05) {
+      u.uSunRays.value = 0;
+      return;
+    }
+    this.sunRayScratch.copy(this.camera.position).addScaledVector(this.sunRayDir, 1000).project(this.camera);
+    (u.uSunUv.value as THREE.Vector2).set(this.sunRayScratch.x * 0.5 + 0.5, this.sunRayScratch.y * 0.5 + 0.5);
+    // Full when the sun is in or near the frame, gone when it is well out to the side.
+    u.uSunRays.value = this.sunRayStrength * smoothstep(0.05, 0.6, facing);
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */

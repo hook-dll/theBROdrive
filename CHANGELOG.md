@@ -60,6 +60,12 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- LIGHT THROUGH THE TREES. In the morning and evening the sun shines through the wood:
+  the post pass steps twelve times from each pixel toward the sun on screen and counts
+  the sky it finds between the trunks and crowns, a warm veil and shafts under the
+  canopy on the sun's side (Shishkin's "Morning in a pine forest"). Off with the sun
+  above about 28° and at night, and only near the sun on screen; measured within the
+  stand's ±1 ms noise. It was 2.3 ms before those gates.
 - "RYE". About once in ten kilometres a group of five to nine old pines stands in the
   fields by the road, as in Shishkin's "Rye": a new kind, the field pine, grown in the
   open, its crown from a third of its height, wide and ragged, low limbs sagging, on a

@@ -1256,7 +1256,7 @@ export class Sky {
   }
 
   /** Unit vector pointing toward the sun. Live internal vector — do not retain across frames. */
-  get sunDirection(): { x: number; y: number; z: number } {
+  get sunDirection(): THREE.Vector3 {
     return this._sunDir;
   }
 
@@ -1289,6 +1289,23 @@ export class Sky {
    */
   get dayFactor(): number {
     return smoothstep(-0.12, 0.3, this.sunElevation);
+  }
+
+  /** The sun disc's colour now: warm when low, near white overhead. */
+  get sunColor(): THREE.Color {
+    return this._sunColor;
+  }
+
+  /**
+   * How strongly the sun draws shafts through the trees (core/renderer.ts
+   * `setSunRays`): most in the morning and evening, when the light slants through the
+   * woods as in Shishkin's "Morning in a pine forest"; none from mid-morning to mid-
+   * afternoon, when a high sun makes no shafts worth their 1–2 ms, and none at night.
+   */
+  get sunRayStrength(): number {
+    const up = smoothstep(-0.02, 0.06, this.sunElevation);
+    const low = 1 - smoothstep(0.2, 0.5, this.sunElevation);
+    return up * 0.6 * low;
   }
 
   /**

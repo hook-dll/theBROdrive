@@ -411,6 +411,10 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uViewTintStrength;
   uniform float uBinoculars;
   uniform float uCameraViewfinder;
+  /** The sun on screen (uv, may lie outside 0..1), its shafts' strength and colour. */
+  uniform vec2 uSunUv;
+  uniform float uSunRays;
+  uniform vec3 uSunRayColor;
 
   uniform float SCALE_HEIGHT_M;
   uniform float REF_PATH_M;
@@ -732,6 +736,29 @@ export const HAZE_FRAGMENT = /* glsl */ `
       }
     }
     color.rgb = clamp(color.rgb, 0.0, 1.0);
+
+    // Light shafts. From each pixel, twelve steps toward the sun on screen, counting
+    // where the sky shows through (the far plane: the sky writes no depth). Where
+    // trunks and crowns stand between, the count drops and the light falls in streaks.
+    // A uniform branch: nothing is paid with the sun behind the camera or at night.
+    vec2 toSun = uSunUv - vUv;
+    float reach = exp(-1.5 * length(toSun * vec2(uResolution.x / uResolution.y, 1.0)));
+    // Only near the sun: past this the shafts add less than a step of 8-bit colour.
+    if (uSunRays * reach > 0.02) {
+      vec2 stepUv = toSun * (0.85 / 12.0);
+      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+      vec2 at = vUv + stepUv * jitter;
+      float lit = 0.0;
+      for (int i = 0; i < 12; i++) {
+        lit += step(0.99995, texture2D(tDepth, clamp(at, vec2(0.001), vec2(0.999))).x);
+        at += stepUv;
+      }
+      lit /= 12.0;
+      // Contrast, so a gap reads as a shaft rather than the whole view as a glow.
+      lit = lit * lit;
+      float ownSky = step(0.99995, texture2D(tDepth, vUv).x);
+      color.rgb += uSunRayColor * lit * reach * uSunRays * (1.0 - 0.75 * ownSky);
+    }
 
     // Ink is for surfaces, and "surface" is a depth question rather than a screen-height
     // one. The gate used to be a screen-height test against uHorizon, which kept the

@@ -1868,6 +1868,7 @@ async function boot(): Promise<void> {
       skyViewDir.z,
     );
     frameProfiler?.end('sky');
+    renderer.setSunRays(sky.sunDirection, sky.sunColor, sky.sunRayStrength);
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
