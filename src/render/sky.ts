@@ -11,7 +11,7 @@ import { PlanetField } from './planetfield';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
- * the Sun, Moon and planets. Celestial coordinates are anchored at Laayoune;
+ * the Sun, Moon and planets. Celestial coordinates are anchored at the observer (game/calendar.ts, near Vladimir);
  * procedural dust, cirrus and twilight remain visual weather only.
  */
 

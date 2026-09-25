@@ -1,15 +1,21 @@
 const DAY_MILLISECONDS = 86_400_000;
 
-/** Fixed observer: Laayoune, Western Sahara. World +X is east and +Z is north. */
-export const OBSERVER_LATITUDE_DEG = 27.15;
-export const OBSERVER_LONGITUDE_DEG = -13.2;
-export const OBSERVER_ELEVATION_M = 70;
+/**
+ * Fixed observer: the middle belt, near Vladimir. World +X is east and +Z is north.
+ *
+ * It was Laayoune (27° N) for the desert. At 56° the sun stands 34° lower at a summer
+ * noon and barely 30° in autumn: the long shadows and the warm slanting light of the
+ * painted woods (docs/shishkin.md) come from the latitude, not from a grade.
+ */
+export const OBSERVER_LATITUDE_DEG = 56.13;
+export const OBSERVER_LONGITUDE_DEG = 40.4;
+export const OBSERVER_ELEVATION_M = 150;
 
 const SOLAR_OFFSET_MILLISECONDS =
   (OBSERVER_LONGITUDE_DEG / 360) * DAY_MILLISECONDS;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** Calendar date at Laayoune's local mean-solar longitude for a real instant. */
+/** Calendar date at the observer's local mean-solar longitude for a real instant. */
 export function localSolarDateAt(realMilliseconds = Date.now()): string {
   return new Date(realMilliseconds + SOLAR_OFFSET_MILLISECONDS)
     .toISOString()

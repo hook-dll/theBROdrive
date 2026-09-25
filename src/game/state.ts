@@ -176,7 +176,7 @@ export interface TrailerState {
 
 export interface WorldState {
   readonly seed: number;
-  /** Real Laayoune local-solar date corresponding to dayIndex zero. */
+  /** Real local-solar date at the observer (game/calendar.ts) corresponding to dayIndex zero. */
   readonly calendarEpoch: string;
   /** Seconds since midnight of the in-game clock. */
   timeOfDay: number;

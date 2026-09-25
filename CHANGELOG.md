@@ -60,6 +60,11 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE SUN OF THE MIDDLE BELT. The observer moves from Laayoune (27° N) to near Vladimir
+  (56.1° N, 40.4° E): a summer noon sun 34° lower, barely 30° in autumn, long shadows
+  and slanting warm light all day, long summer evenings. `tools/astronomy-audit.mjs`
+  checks the new equinox noon (33.9°) and Polaris (56°). The sun still follows the
+  world's calendar date, not the season along the road.
 - DIRT TRACKS. Two ruts worn to earth with a strip of real grass between them leave the
   asphalt every few hundred metres for a field or a wood, 90–220 m long, wandering and
   fading out (`world/tracks.ts`: a curve in the road's frame, so grass, trees and the

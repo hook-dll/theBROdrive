@@ -7,11 +7,13 @@ import {
 } from 'astronomy-engine';
 import { performance } from 'node:perf_hooks';
 
-const observer = new Observer(27.15, -13.2, 70);
-const localSolarNoonUtc = new Date('2026-03-20T12:52:48.000Z');
+const observer = new Observer(56.13, 40.4, 150);
+// Mean-solar noon at 40.4° E: 12:00 less 40.4 × 4 minutes.
+const localSolarNoonUtc = new Date('2026-03-20T09:18:24.000Z');
 const sunEq = Equator(Body.Sun, localSolarNoonUtc, observer, true, true);
 const sun = Horizon(localSolarNoonUtc, observer, sunEq.ra, sunEq.dec, 'normal');
-if (sun.altitude < 61.5 || sun.altitude > 64.5) {
+// 90° less the latitude at an equinox: about 33.9°.
+if (sun.altitude < 32.4 || sun.altitude > 35.4) {
   throw new Error(`Equinox noon Sun altitude out of range: ${sun.altitude}`);
 }
 if (sun.azimuth < 175 || sun.azimuth > 185) {
@@ -19,7 +21,7 @@ if (sun.azimuth < 175 || sun.azimuth > 185) {
 }
 
 const polaris = Horizon(localSolarNoonUtc, observer, 2 + 31 / 60 + 49 / 3600, 89.2641, 'normal');
-if (polaris.altitude < 26 || polaris.altitude > 28.5) {
+if (polaris.altitude < 55 || polaris.altitude > 57.5) {
   throw new Error(`Polaris altitude does not match observer latitude: ${polaris.altitude}`);
 }
 
