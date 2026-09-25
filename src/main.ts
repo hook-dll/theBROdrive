@@ -52,7 +52,8 @@ import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
-import { setSeasonUniforms } from './render/season';
+import { Precipitation } from './render/precipitation';
+import { setSeasonUniforms, setWeatherWet } from './render/season';
 import { VistaMesh } from './render/vista';
 import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
@@ -83,7 +84,7 @@ import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
 import { TrackProvider } from './world/trackmesh';
 import { dayOfYear, SEASON_OVERRIDE, seasonAt, seasonOfDay } from './world/season';
-import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
+import { newWeatherState, WEATHER_OVERRIDE, weatherAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
@@ -415,6 +416,8 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
+  const weather = newWeatherState();
+  const precipitation = new Precipitation(renderer.scene);
   let seasonEpoch = '';
   let seasonStartDay = 0;
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
@@ -508,7 +511,6 @@ async function boot(): Promise<void> {
   // Distant weather: alpha sheets 600-1800 m out, no physics and no colliders. It
   // streams like everything else so a virga shaft is built off the road frame at
   // its own arclength and disposed with the chunk that owns it.
-  streamer.register(new WeatherProvider());
   // No desert monuments in the countryside (world/props/monuments.ts).
   streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers));
 
@@ -1939,6 +1941,11 @@ async function boot(): Promise<void> {
     if (SEASON_OVERRIDE.day !== null) seasonOfDay(SEASON_OVERRIDE.day, vista.season);
     else seasonAt(activeS, seasonStartDay, vista.season);
     setSeasonUniforms(vista.season);
+    // The weather along the road (world/weather.ts): sky, light, fog, rain, wet ground.
+    weatherAt(world.seed, activeS, seasonStartDay, vista.season, weather);
+    if (WEATHER_OVERRIDE.state) Object.assign(weather, WEATHER_OVERRIDE.state);
+    setWeatherWet(weather.wet);
+    sky.setWeather(weather);
     vista.update(cam.x, cam.z, activeS, frameDt);
     desert.forest.update(
       cam.x + origin.x,
@@ -1974,9 +1981,8 @@ async function boot(): Promise<void> {
       s.settings.graphicsQuality,
       mobilePresentation,
     );
-    // The streamed distant weather fades on the twilight band, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
-    // that a rebase cannot move them.
-    setWeatherFrame(sky.dayFactor, cam.x + origin.x, cam.z + origin.z);
+    // Rain and snow round the camera, from the weather set before the sky this frame.
+    precipitation.update(frameDt, cam, weather, sky.dayFactor);
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
     // absolute player position; the bake is sliced through the streaming budget the
     // terrain tiles use.

@@ -130,6 +130,18 @@ questions live in `docs/country.md`.
   Grown birch bark is darker and greyer still.
 - SPRUCE'S CORE is part of the crown, not the wood: as wood it took the boughs' shadow
   and went black between every whorl.
+- WEATHER ALONG THE ROAD (`world/weather.ts`). The road is cut into spells of 6–22 km,
+  blending into each other over 2.5 km so a front is seen coming; each spell is clear,
+  fair, cloudy, overcast, rain or fog, with odds by season (summer fair with showers,
+  autumn grey, rain and fog, winter overcast with snow and frosty clear days). A pure
+  function of arclength, like the season. Overcast draws a grey stratus layer over the
+  cumulus and hides the sun, greys the sky and dims the direct light (and so the
+  shadows) while the diffuse fill rises; fog lies in banks of a few km that lift, the
+  sky going to the fog's own pale grey; rain falls as streaks and in winter as flakes,
+  one instanced draw round the camera anchored to the world (`render/precipitation.ts`),
+  about 0.4 ms; the road goes dark and glossy and the ground darker while wet, drying
+  over 5 km after the rain. The desert's distant weather is no longer registered.
+  DEV: `__bro.weather({ overcast: 1, precip: 0.8 })`.
 - WINTER. The season's other channels drawn: in October–November broad-leaved trees drop
   their leaves one painted leaf at a time, each tree at its own point, and what stays of
   a crown is a grey-brown twig haze (models and impostors alike; fallen leaves cast no

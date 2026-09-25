@@ -4,6 +4,7 @@ import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyGroundPaint, SEASON_GROUND_MARK } from '../render/groundpaint';
+import { applyWetness } from '../render/season';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import {
@@ -280,6 +281,8 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
       // The vista's colours are made for the season on the CPU; the tiles' in here.
     ), { season: detailFade }),
   );
+  // Wet ground is darker: tiles only, the vista is too far to tell.
+  if (detailFade) applyWetness(material, 0.22, null);
   if (!detailFade) return material;
 
   const compileComic = material.onBeforeCompile;

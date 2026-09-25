@@ -6,7 +6,7 @@ import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyComicShading, applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
-import { applySnowCover } from '../render/season';
+import { applySnowCover, applyWetness } from '../render/season';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
@@ -324,7 +324,8 @@ const paintBase = new THREE.Color();
 // Cloud shadow is the outermost wrap on all three, so it captures the ground-spotlight
 // patch each of them already carries instead of hiding it. A cloud crossing the road is
 // most of the effect: the ribbon is the one surface always in view.
-const roadMaterial = applyCloudShadow(
+// In the rain the asphalt goes dark and shines back the grey sky (render/season.ts).
+const roadMaterial = applyWetness(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -332,7 +333,7 @@ const roadMaterial = applyCloudShadow(
       metalness: 0,
     }),
   ),
-);
+), 0.38, 0.32);
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyCloudShadow(
   applyGroundSpotlightNormals(
@@ -346,7 +347,7 @@ const roadBedMaterial = applyCloudShadow(
 /** The country's bare shoulder (world/shoulder.ts). */
 const COUNTRY_SHOULDER = true;
 /** Lit as the ground is, so the strip is the ground's own colour where it meets it. */
-const shoulderMaterial = applySnowCover(applyCloudShadow(
+const shoulderMaterial = applyWetness(applySnowCover(applyCloudShadow(
   applyComicShading(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -363,7 +364,7 @@ const shoulderMaterial = applySnowCover(applyCloudShadow(
     }),
     { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
   ),
-), 0.92);
+), 0.92), 0.3, null);
 const shoulderEarth = new THREE.Color(0xb3a48c);
 const shoulderGravel = new THREE.Color(0xbcb7ab);
 const shoulderColour = new THREE.Color();

@@ -32,6 +32,8 @@ export const SEASON_UNIFORMS = {
   uSeasonFresh: { value: 0 },
   /** `canopyTurn(turn)`: how far a far wood as a whole has turned. */
   uSeasonCanopy: { value: 0 },
+  /** The weather's wetness (world/weather.ts): darker ground, a shining road. */
+  uWeatherWet: { value: 0 },
 } satisfies Record<string, THREE.IUniform<number>>;
 
 export function setSeasonUniforms(season: SeasonState): void {
@@ -74,6 +76,7 @@ uniform float uSeasonBare;
 uniform float uSeasonSnow;
 uniform float uSeasonFresh;
 uniform float uSeasonCanopy;
+uniform float uWeatherWet;
 float seasonLuma( vec3 c ) { return dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ); }
 /**
  * How much snow lies at a point, 0..1: the snow channel, less under trees, and patchy
@@ -213,6 +216,38 @@ export const SEASON_TREE_RANDOM_GLSL = 'fract( abs( tint ) * 91.7 )';
  * packed rut is greyer than a drift). For the strips laid on the ground, the shoulder
  * and the dirt tracks, which must go white with the ground they lie on.
  */
+/** The weather's wetness, set once a frame with the season. */
+export function setWeatherWet(wet: number): void {
+  SEASON_UNIFORMS.uWeatherWet.value = wet;
+}
+
+/**
+ * Wets a material in the rain: darker by `darken`, and glossy (roughness down to
+ * `gloss`) so the road shines back the grey sky. The ground only darkens.
+ */
+export function applyWetness<T extends THREE.Material>(material: T, darken: number, gloss: number | null): T {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
+    injectSeason(shader);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+diffuseColor.rgb *= 1.0 - ${darken.toFixed(3)} * uWeatherWet * ( 1.0 - uSeasonSnow );`,
+    );
+    if (gloss !== null) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+roughnessFactor = mix( roughnessFactor, ${gloss.toFixed(3)}, uWeatherWet * ( 1.0 - uSeasonSnow ) );`,
+      );
+    }
+  };
+  const previousKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:wet-${darken}-${gloss}`;
+  return material;
+}
+
 export function applySnowCover<T extends THREE.Material>(material: T, amount: number, shade = 1): T {
   const previous = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {

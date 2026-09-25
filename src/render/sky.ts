@@ -4,6 +4,7 @@ import { GRAPHICS_CONFIG } from '../config';
 import type { GraphicsQuality } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
 import { skyGradientAt } from '../world/gradient';
+import { newWeatherState, type WeatherState } from '../world/weather';
 import { hash01 } from '../core/rng';
 import { AstronomySystem } from './astronomy';
 import { StarField } from './starcatalog';
@@ -180,6 +181,9 @@ const C_MOON = new THREE.Color().setStyle('#a9c6e6');
 // as a dark hole — Shishkin's shade is olive and umber (docs/shishkin.md). It was a
 // soft violet, which with the sky's blue turned every shaded needle teal.
 const C_GROUND = new THREE.Color().setStyle('#a39373');
+/** An overcast sky's grey, and its horizon: cool, a little blue, never neutral. */
+const C_OVERCAST = new THREE.Color().setStyle('#9aa1aa');
+const C_OVERCAST_HORIZON = new THREE.Color().setStyle('#c9ccce');
 /** Daylight sky illumination gain; the warm ground bounce is compensated below. */
 const DAY_SKY_FILL_BOOST = 1.6;
 /**
@@ -384,6 +388,12 @@ uniform float uAntiSolar;
 uniform float uCloudCover;
 /** How much of the sky fair-weather cumulus covers, 0..1. */
 uniform float uCumulus;
+/** A closed grey layer over everything (world/weather.ts), 0..1. */
+uniform float uOvercast;
+/** Fog (world/weather.ts): the sky's features sink into it. */
+uniform float uSkyFog;
+/** The layer's colour at its lit parts. */
+uniform vec3 uOvercastColor;
 /** Overall visibility of the deck: 1 in daylight, 0 in deep night. */
 uniform float uCloudAmount;
 /** Seconds, wrapped. Drifts the deck downwind. */
@@ -604,7 +614,7 @@ void main() {
     cuCol += uSunColor * (1.0 - thick) * pow(max(sd, 0.0), 5.0) * 0.35;
     // Distant cloud sinks into the horizon's haze, as the far land does.
     cuCol = mix(uHorizon, cuCol, 0.35 + 0.65 * smoothstep(0.02, 0.3, dir.y));
-    dens *= smoothstep(0.012, 0.08, dir.y) * uCloudAmount;
+    dens *= smoothstep(0.012, 0.08, dir.y) * uCloudAmount * (1.0 - uSkyFog) * (1.0 - 0.6 * uOvercast);
     col = mix(col, cuCol, dens);
   }
 
@@ -616,8 +626,22 @@ void main() {
   // Keep the white-hot centre, but concentrate both lobes so the clipped region
   // does not spread across a large part of a clear high-altitude sky.
   float glow = pow(max(sd, 0.0), 12.0) * 0.45 + pow(max(sd, 0.0), 96.0) * 1.5;
-  col += uSunColor * disc * 2.0;
-  col += uSunGlowColor * glow * uSunGlowIntensity;
+  // --- Overcast ----------------------------------------------------------------
+  //
+  // A stratus layer: grey, lighter where it is thin, heavier in slow rolls, closing
+  // over the cumulus and the blue. The sun shows through only as a paler patch, and
+  // not at all once the layer is closed.
+  float ovY = max(dir.y, 0.02);
+  vec2 ovUv = dir.xz / (ovY + 0.3) * 0.35 + vec2(uCloudTime * 0.003, 0.0);
+  float ovN = cloudFbm(ovUv) * 0.7 + cloudFbm(ovUv * 3.1 + 5.0) * 0.3;
+  float ovCover = smoothstep(0.62 - 0.7 * uOvercast, 0.8 - 0.7 * uOvercast, ovN + 0.15);
+  vec3 ovCol = uOvercastColor * (0.84 + 0.3 * ovN) + uSunColor * pow(max(sd, 0.0), 6.0) * 0.12 * (1.0 - uOvercast);
+  ovCol = mix(uHorizon, ovCol, smoothstep(0.0, 0.25, dir.y));
+  col = mix(col, ovCol, ovCover * uOvercast * uCloudAmount * (1.0 - 0.7 * uSkyFog));
+  float sunClear = 1.0 - smoothstep(0.35, 0.85, uOvercast * mix(1.0, ovCover, 0.5));
+
+  col += uSunColor * disc * 2.0 * sunClear;
+  col += uSunGlowColor * glow * uSunGlowIntensity * sunClear;
 
   // --- Moon ------------------------------------------------------------------
   //
@@ -779,6 +803,16 @@ export class Sky {
   private readonly uCloudCover = { value: 0 };
   /** Cumulus cover (see the dome shader), from the same sky gradient. */
   private readonly uCumulus = { value: 0 };
+  private readonly uOvercast = { value: 0 };
+  private readonly uSkyFog = { value: 0 };
+  private readonly uOvercastColor = { value: new THREE.Color() };
+  /** The weather along the road (world/weather.ts), set by `setWeather`. */
+  private readonly weather: WeatherState = newWeatherState();
+
+  /** The weather to draw this frame's sky, light and air for. */
+  setWeather(weather: WeatherState): void {
+    Object.assign(this.weather, weather);
+  }
   /**
    * Overall deck visibility. Falls to zero as night lands, because the dome cannot
    * depth-test against the star field and so cannot occlude a star — see the note in
@@ -791,6 +825,8 @@ export class Sky {
 
   // --- Scratch state, reused every frame (no allocation in the hot path) ---
   private readonly _sunDir = new THREE.Vector3();
+  private readonly _overcast = new THREE.Color();
+  private readonly _overcastHorizon = new THREE.Color();
   private readonly _lightDir = new THREE.Vector3();
   /** Light direction with its elevation clamped, for the shadow camera only. */
   private readonly _shadowDir = new THREE.Vector3(0, 0, 0);
@@ -865,6 +901,9 @@ export class Sky {
         uAntiSolar: this.uAntiSolar,
         uCloudCover: this.uCloudCover,
         uCumulus: this.uCumulus,
+        uOvercast: this.uOvercast,
+        uSkyFog: this.uSkyFog,
+        uOvercastColor: this.uOvercastColor,
         uCloudAmount: this.uCloudAmount,
         uCloudTime: this.uCloudTime,
       },
@@ -1018,9 +1057,25 @@ export class Sky {
       authoredSunGlow,
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
     ) * 0.65;
+    // --- Weather (world/weather.ts) ---
+    // Under cloud the whole sky greys: the zenith toward the layer's grey, the horizon
+    // toward a pale grey-white; in fog, everything toward the fog's own white. The
+    // layer's colour dims with the day.
+    const w = this.weather;
+    this._overcast.copy(C_OVERCAST).multiplyScalar(0.25 + 0.75 * day).lerp(C_NIGHT_ZENITH, night * 0.8);
+    this._zenith.lerp(this._overcast, w.overcast * 0.85);
+    this._horizon.lerp(this._overcastHorizon.copy(C_OVERCAST_HORIZON).multiplyScalar(0.3 + 0.7 * day), Math.max(w.overcast * 0.6, w.fog * 0.95));
+    // In fog the sky is the fog: zenith and cloud go to the horizon's pale grey.
+    this._zenith.lerp(this._horizon, w.fog * 0.85);
+    this.uOvercast.value = w.overcast;
+    this.uSkyFog.value = w.fog;
+    this.uOvercastColor.value.copy(this._overcast).lerp(this._horizon, w.fog * 0.85);
+
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     this.fog.color.copy(this._horizon);
-    this.fog.density = BASE_FOG_DENSITY * g.haze;
+    // Rain and cloud thicken the air a little; fog brings the world in to a few
+    // hundred metres.
+    this.fog.density = BASE_FOG_DENSITY * g.haze * (1 + 0.8 * w.overcast + 1.2 * w.precip) * (1 + 110 * w.fog * w.fog);
 
     // --- Dome uniforms ---
     this.uSunDir.copy(celestial.sun.direction);
@@ -1037,7 +1092,7 @@ export class Sky {
     this.uHorizon.copy(this._horizon);
     this.uSunColor.copy(this._sunColor);
     this.uSunGlowColor.copy(this._sunGlow);
-    this.uSunGlowIntensity.value = sunGlowIntensity;
+    this.uSunGlowIntensity.value = sunGlowIntensity * (1 - 0.7 * this.weather.overcast);
     this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y);
     this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
 
@@ -1092,7 +1147,10 @@ export class Sky {
     // exposes the same blend for colour, so the horizon hand-off cannot step.
     this._lightDir.copy(celestial.keyDirection);
     this._lightColor.copy(C_MOON).lerp(this._sunColor, celestial.keySunWeight);
-    this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure;
+    // Cloud takes the direct sun (and with its share, the shadows: see below); the sky's
+    // diffuse fill rises a little, as an overcast day is flat but not dark.
+    const sunThrough = 1 - 0.85 * smoothstep(0.3, 0.9, this.weather.overcast) - 0.5 * this.weather.fog;
+    this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure * Math.max(0.05, sunThrough);
     this.sunLight.color.copy(this._lightColor);
 
     // Diffuse sky/ground bounce retains real day-to-night ratios by day, and floors
@@ -1117,7 +1175,7 @@ export class Sky {
       (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
       GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
     this.hemiLight.intensity = Math.max(
-      photometricFill,
+      photometricFill * (1 + 0.35 * this.weather.overcast),
       NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,
     );
 
