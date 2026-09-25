@@ -52,6 +52,7 @@ import { TrunkView } from './render/trunkview';
 import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
+import { setSeasonUniforms } from './render/season';
 import { VistaMesh } from './render/vista';
 import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
@@ -81,6 +82,7 @@ import { MonumentProvider } from './world/props/monuments';
 import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider } from './world/sidetrack';
+import { dayOfYear, SEASON_OVERRIDE, seasonAt, seasonOfDay } from './world/season';
 import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -121,6 +123,8 @@ import { createWheelEffects } from './app/wheeleffects';
 
 /** Metres of open ground round a POI's building, for its yard and wreck field. */
 const POI_TREE_CLEARANCE_M = 28;
+/** The camera's look direction, handed to the sky so the shadow map leads the view. */
+const skyViewDir = new THREE.Vector3();
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -411,6 +415,8 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
+  let seasonEpoch = '';
+  let seasonStartDay = 0;
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -478,7 +484,7 @@ async function boot(): Promise<void> {
     origin,
     worldWork,
   );
-  streamer.register(new RoadMeshProvider(world.seed));
+  streamer.register(new RoadMeshProvider(world.seed, roadDistance));
   streamer.register(new HomesteadProvider(switches));
   streamer.register(new TerminusPadProvider());
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
@@ -1846,6 +1852,7 @@ async function boot(): Promise<void> {
     touch.setZoomAvailable(!dying && camera.mode === 'chase');
 
     const cam = renderer.camera.position;
+    renderer.camera.getWorldDirection(skyViewDir);
     frameProfiler?.begin('sky');
     sky.update(
       s.calendarEpoch,
@@ -1855,6 +1862,8 @@ async function boot(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
+      skyViewDir.x,
+      skyViewDir.z,
     );
     frameProfiler?.end('sky');
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);
@@ -1918,9 +1927,24 @@ async function boot(): Promise<void> {
     contactPatches.endFrame();
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
+    // The season along the road, from the day the world was made (world/season.ts).
+    // Before the vista, which colours the cells it samples for it.
+    if (seasonEpoch !== world.state.calendarEpoch) {
+      seasonEpoch = world.state.calendarEpoch;
+      seasonStartDay = dayOfYear(seasonEpoch);
+    }
+    if (SEASON_OVERRIDE.day !== null) seasonOfDay(SEASON_OVERRIDE.day, vista.season);
+    else seasonAt(activeS, seasonStartDay, vista.season);
+    setSeasonUniforms(vista.season);
     vista.update(cam.x, cam.z, activeS, frameDt);
-    desert.forest.update(cam.x + origin.x, cam.z + origin.z);
-    grass.update(cam.x + origin.x, cam.z + origin.z, frameDt);
+    desert.forest.update(
+      cam.x + origin.x,
+      cam.z + origin.z,
+      skyViewDir.x,
+      skyViewDir.z,
+      Math.atan(Math.tan(THREE.MathUtils.degToRad(renderer.camera.fov) / 2) * renderer.camera.aspect),
+    );
+    grass.update(cam.x + origin.x, cam.z + origin.z, skyViewDir.x, skyViewDir.z, frameDt);
     if (!driving) {
       // A walker leaves a path too, narrower than a wheel's.
       const feet = player.absolutePosition;

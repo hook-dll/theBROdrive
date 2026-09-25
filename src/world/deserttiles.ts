@@ -495,6 +495,7 @@ export class DesertTileStreamer {
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
     geometry.setAttribute('aCanopy', new THREE.BufferAttribute(data.canopy, 4));
+    geometry.setAttribute('aGround', new THREE.BufferAttribute(data.ground, 4));
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const group = new THREE.Group();
@@ -1055,6 +1056,8 @@ export class DesertTileStreamer {
     );
     for (let i = 0; i < tile.standing.count; i++) {
       const o = i * TREE_STRIDE;
+      // Saplings (undergrowth and fallow thickets) bend under a car rather than stop it.
+      if (trees[o + 3]! < 0.45) continue;
       const radius = TREE_TRUNK_RADIUS[trees[o + 5]!]! * trees[o + 3]!;
       if (radius <= 0) continue;
       const collider = this.physics.world.createCollider(

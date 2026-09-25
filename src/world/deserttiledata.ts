@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
-import { CoverKind, Crop, MUD, newCoverSample, type CoverSample } from './landcover';
+import { CoverKind, Crop, MUD, newCoverSample, writeGroundWeights, type CoverSample } from './landcover';
 import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
@@ -52,6 +52,11 @@ export interface DesertTileData {
    * ground (world/vistaground.ts). The tile shader raises it past `CANOPY_FROM_M`.
    */
   readonly canopy: Float32Array;
+  /**
+   * Ground paint weights per vertex: meadow, crop, forest floor, bare earth
+   * (render/groundpaint.ts).
+   */
+  readonly ground: Float32Array;
   /** `treeCount` trees of `TREE_STRIDE` floats each: see `TreeField`. */
   readonly trees: Float32Array;
   readonly treeCount: number;
@@ -75,6 +80,10 @@ export const enum TreeKind {
   Alder = 8,
   Willow = 9,
   Rowan = 10,
+  /** Undergrowth: bracken and lady fern on the floor of spruce and mixed woods. */
+  Fern = 11,
+  /** Undergrowth: the bor's juniper. */
+  Juniper = 12,
 }
 
 /** Every kind, in enum order: the index of per-kind tables. */
@@ -90,7 +99,10 @@ export const TREE_KINDS: readonly TreeKind[] = [
   TreeKind.Alder,
   TreeKind.Willow,
   TreeKind.Rowan,
+  TreeKind.Fern,
+  TreeKind.Juniper,
 ];
+
 
 /**
  * One tree record: local x, ground y, local z, scale, yaw, kind, tint. Local x/z are
@@ -101,8 +113,9 @@ export const TREE_STRIDE = 7;
 const TREE_CELL = 6.5;
 const TREE_CELLS = Math.floor(DESERT_TILE_SIZE / TREE_CELL);
 /** A candidate can yield one tree and one bush. */
-export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 2;
+export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 3;
 const TREE_TAG = 0x54524545;
+const UNDER_TAG = 0x554e4452;
 /** Nothing is planted closer than this to the road's centreline: verge and ditch. */
 const TREE_ROAD_KEEP = 9.5;
 /** Past the asphalt edge: the verge and the ditch stay clear whatever the road's width. */
@@ -221,6 +234,7 @@ export function generateDesertTileData(
   const normals = fit(into?.normals, vertexCount * 3, Float32Array);
   const colors = fit(into?.colors, vertexCount * 3, Float32Array);
   const canopy = fit(into?.canopy, vertexCount * 4, Float32Array);
+  const groundPaint = fit(into?.ground, vertexCount * 4, Float32Array);
   const ground = { height: 0, detail: 0 };
   const paletteDistance = farFromRoad
     ? Math.abs(centreZ)
@@ -258,6 +272,7 @@ export function generateDesertTileData(
         coverSample.g += (MUD[1] - coverSample.g) * m;
         coverSample.b += (MUD[2] - coverSample.b) * m;
       }
+      writeGroundWeights(coverSample, wet, groundPaint, vi * 4);
       colors[vi * 3] = coverSample.r;
       colors[vi * 3 + 1] = coverSample.g;
       colors[vi * 3 + 2] = coverSample.b;
@@ -338,7 +353,7 @@ export function generateDesertTileData(
     coverSample,
   );
 
-  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces, canopy, trees, treeCount };
+  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces, canopy, ground: groundPaint, trees, treeCount };
 }
 
 /**
@@ -368,6 +383,11 @@ export function plantTrees(
   heightAt: (localX: number, localZ: number, worldX: number, worldZ: number) => number,
   out: Float32Array,
   cover: CoverSample,
+  /**
+   * Whether to plant the undergrowth too. The model tiles do; the impostor worker does
+   * not: a fern or a hazel at a kilometre is a pixel for the price of a tree.
+   */
+  undergrowth = true,
 ): number {
   const startX = tx * DESERT_TILE_SIZE;
   const startZ = tz * DESERT_TILE_SIZE;
@@ -394,11 +414,16 @@ export function plantTrees(
    * and maple; elsewhere the small-leaved pair, birch and its companion aspen.
    */
   const deciduous = (x: number, z: number, r: number, r5: number): TreeKind => {
-    if (r < land.broadleafAt(x, z) * 0.7) return r5 < 0.4 ? TreeKind.Lime : r5 < 0.72 ? TreeKind.Oak : TreeKind.Maple;
-    return r5 < 0.72 ? TreeKind.Birch : TreeKind.Aspen;
+    if (r < land.broadleafAt(x, z) * 0.3) return r5 < 0.4 ? TreeKind.Lime : r5 < 0.72 ? TreeKind.Oak : TreeKind.Maple;
+    return r5 < 0.78 ? TreeKind.Birch : TreeKind.Aspen;
   };
-  /** A conifer: pine on its tracts, spruce everywhere else. */
-  const conifer = (x: number, z: number, r5: number): TreeKind => (r5 < land.pineAt(x, z) * 0.9 ? TreeKind.Pine : TreeKind.Spruce);
+  /**
+   * Whether a wood here is a pine wood (bor). Pine grows on its own tracts of sandy
+   * ground and holds them: a bor is pine with the odd birch, no spruce, no undergrowth
+   * to speak of, and pine is not found as a lone tree or mixed through other woods.
+   * The tract's edge is jittered per tree over a narrow band so it is not a ruled line.
+   */
+  const inBor = (x: number, z: number, r5: number): boolean => land.pineAt(x, z) > 0.35 + 0.3 * r5;
   for (let ci = 0; ci < TREE_CELLS; ci++) {
     for (let cj = 0; cj < TREE_CELLS; cj++) {
       const gx = tx * TREE_CELLS + ci;
@@ -425,17 +450,32 @@ export function plantTrees(
       // Woods.
       const forest = land.forestAt(x, z, roadDist);
       if (forest > 0) {
+        const bor = inBor(x, z, r5);
         if (r < forest * 0.93) {
           const birch = land.birchAt(x, z);
-          let kind = r2 < birch * 0.85 + 0.08 ? deciduous(x, z, r4, r5) : conifer(x, z, r5);
-          // Wet ground in a wood is alder carr.
-          if (kind !== TreeKind.Pine && r4 < 0.7 && terrain.wetnessAt(x, z) > 0.3) kind = TreeKind.Alder;
+          // What the middle belt's woods are made of (Moscow region: birch 35%, spruce
+          // 27%, pine 23%, aspen 9%, oak 2%, lime under 1%): the birch field picks
+          // between spruce wood (ельник, at its low end) and birch-and-aspen wood, with
+          // mixed wood between; and a wood's edge is birch and aspen far more than
+          // spruce, which fills the interior.
+          const interior = 0.35 + 0.65 * THREE.MathUtils.smoothstep(forest, 0.55, 0.95);
+          const spruce = Math.pow(1 - birch, 1.4) * 0.88 * interior;
+          let kind = bor
+            ? r2 < 0.05 ? TreeKind.Birch : TreeKind.Pine
+            : r2 < spruce ? TreeKind.Spruce : deciduous(x, z, r4, r5);
+          // Wet ground in a wood is alder carr. Not in a bor: its sand is dry.
+          if (!bor && r4 < 0.7 && terrain.wetnessAt(x, z) > 0.3) kind = TreeKind.Alder;
           // Mature interior, younger edge: size follows density, then a wide spread.
           const size = (0.55 + 0.45 * forest) * (0.72 + 0.56 * r3);
           put(x, z, kind, size, key);
           continue;
         }
-        // The edge's undergrowth: hazel mostly, and rowan standing out of it.
+        // The edge's undergrowth: hazel mostly, and rowan standing out of it. A bor has
+        // next to none: now and then a rowan.
+        if (bor) {
+          if (forest < 0.8 && r2 < 0.04) put(x, z, TreeKind.Rowan, 0.6 + 0.3 * r3, key);
+          continue;
+        }
         if (forest < 0.8 && r2 < 0.45) {
           if (r5 < 0.22) put(x, z, TreeKind.Rowan, 0.7 + 0.4 * r3, key);
           else put(x, z, TreeKind.Bush, 0.6 + 0.7 * r3, key);
@@ -491,7 +531,7 @@ export function plantTrees(
       const copse = land.copseAt(x, z);
       if (copse > 0) {
         if (r < copse * 0.85) {
-          const kind = r2 < 0.2 ? TreeKind.Bush : r2 < 0.3 ? conifer(x, z, r5) : deciduous(x, z, r4, r5);
+          const kind = r2 < 0.2 ? TreeKind.Bush : r2 < 0.3 ? TreeKind.Spruce : deciduous(x, z, r4, r5);
           put(x, z, kind, (0.5 + 0.5 * copse) * (0.7 + 0.5 * r3), key);
         }
         continue;
@@ -510,6 +550,70 @@ export function plantTrees(
         const kind = r2 < 0.45 ? TreeKind.Oak : r2 < 0.75 ? TreeKind.Birch : r2 < 0.9 ? TreeKind.Lime : TreeKind.Willow;
         put(x, z, kind, 0.95 + 0.3 * r3, key);
       }
+    }
+  }
+
+  // UNDERGROWTH: the woods' middle and lower storeys, on a grid twice as fine. A wood
+  // had its trees and a bare floor; the middle belt's woods stand in hazel, rowan and
+  // young spruce, over bracken (docs/shishkin.md, the Moscow forest surveys). Spruce
+  // and mixed woods: fern thickest where the wood is darkest, hazel and rowan where
+  // light gets in, spruce seedlings under spruce. A bor: juniper and the odd young pine
+  // on bare sand. Edges carry more shrubs than the interior.
+  if (!undergrowth) return n;
+  const UNDER_CELLS = TREE_CELLS * 2;
+  const UNDER_CELL = DESERT_TILE_SIZE / UNDER_CELLS;
+  for (let ci = 0; ci < UNDER_CELLS; ci++) {
+    for (let cj = 0; cj < UNDER_CELLS; cj++) {
+      const gx = tx * UNDER_CELLS + ci;
+      const gz = tz * UNDER_CELLS + cj;
+      const r = hash01(seed, UNDER_TAG, gx, gz, 3);
+      // Most cells carry nothing: decide before paying for any field.
+      if (r > 0.42) continue;
+      const x = startX + (ci + 0.1 + hash01(seed, UNDER_TAG, gx, gz, 1) * 0.8) * UNDER_CELL;
+      const z = startZ + (cj + 0.1 + hash01(seed, UNDER_TAG, gx, gz, 2) * 0.8) * UNDER_CELL;
+      let roadDist = context.roadDistance.distAt(x, z, DIST_LATTICE);
+      if (roadDist < TREE_EXACT_GATE) {
+        const p = context.road.project(x, z, context.roadDistance.ownerAt(x, z, DIST_LATTICE));
+        roadDist = Math.abs(p.lateral);
+        if (roadDist < context.road.halfWidthAt(p.s) + TREE_VERGE_KEEP) continue;
+      }
+      if (roadDist < TREE_ROAD_KEEP) continue;
+      if (terminusWeight(x, z) > 0) continue;
+      const forest = land.forestAt(x, z, roadDist);
+      const r2 = hash01(seed, UNDER_TAG, gx, gz, 4);
+      const r3 = hash01(seed, UNDER_TAG, gx, gz, 7);
+      // A key of its own, apart from the trees': yaw and tint hash off it.
+      const key = ((gx * 83492791) ^ (gz * 2971215073)) + 0x55;
+      if (forest < 0.15) {
+        // SCRUB IN THE OPEN. Where a wood was cleared back for the road, the strip
+        // between the ditch and the trees grows over with hazel, willow, rowan and
+        // young birch; out in the meadows scrub stands in thickets. Never on a field.
+        const cleared = land.forestAt(x, z, 1e6);
+        const thicket = land.copseAt(x * 2.7 + 900, z * 2.7 - 400);
+        const p = 0.13 * THREE.MathUtils.smoothstep(cleared, 0.1, 0.6) + 0.16 * thicket;
+        if (r >= p) continue;
+        land.sample(x, z, roadDist, cover);
+        if (cover.kind === CoverKind.Field) continue;
+        const kind = r2 < 0.55 ? TreeKind.Bush : r2 < 0.7 ? TreeKind.Willow : r2 < 0.8 ? TreeKind.Rowan : TreeKind.Birch;
+        const size = kind === TreeKind.Bush ? 0.5 + 0.5 * r3 : 0.3 + 0.2 * r3;
+        put(x, z, kind, size, key);
+        continue;
+      }
+      const edge = 1 - THREE.MathUtils.smoothstep(forest, 0.55, 0.95);
+      if (inBor(x, z, r2)) {
+        if (r < 0.035 * forest) put(x, z, TreeKind.Juniper, 0.7 + 0.6 * r3, key);
+        else if (r < 0.05 * forest) put(x, z, TreeKind.Pine, 0.2 + 0.15 * r3, key);
+        continue;
+      }
+      const spruce = Math.pow(1 - land.birchAt(x, z), 1.4);
+      const pFern = forest * 0.3 * (0.35 + 0.65 * spruce);
+      const pShrub = forest * (0.1 + 0.2 * edge) * (1 - 0.55 * spruce);
+      const pSeedling = forest * 0.035 * spruce;
+      const pBirch = forest * 0.02 * (1 - spruce) + 0.03 * edge;
+      if (r < pFern) put(x, z, TreeKind.Fern, 0.75 + 0.55 * r3, key);
+      else if (r < pFern + pShrub) put(x, z, r2 < 0.8 ? TreeKind.Bush : TreeKind.Rowan, (r2 < 0.8 ? 0.5 : 0.45) + 0.4 * r3, key);
+      else if (r < pFern + pShrub + pSeedling) put(x, z, TreeKind.Spruce, 0.18 + 0.2 * r3, key);
+      else if (r < pFern + pShrub + pSeedling + pBirch) put(x, z, TreeKind.Birch, 0.22 + 0.2 * r3, key);
     }
   }
   return n;
@@ -541,6 +645,7 @@ export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
     data.indices.buffer as ArrayBuffer,
     data.propSurfaces.buffer as ArrayBuffer,
     data.canopy.buffer as ArrayBuffer,
+    data.ground.buffer as ArrayBuffer,
     data.trees.buffer as ArrayBuffer,
   ];
 }

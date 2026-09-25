@@ -10,6 +10,7 @@
  */
 
 import * as THREE from 'three';
+import { compileSafely } from './compilesafe';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
@@ -1494,7 +1495,9 @@ export async function warmCarModelInstances(
     warmStaticInstances.set(def.id, staticModel);
     compileGroup.add(staticModel.model);
   }
-  await renderer.compileAsync(scene, camera);
+  // Only the cars, lit by the scene's lights: compiling the whole scene waited on every
+  // material in it for seconds (see render/compilesafe.ts).
+  await compileSafely(renderer, compileGroup, camera, scene);
   scene.remove(compileGroup);
   for (const instance of warmStaticInstances.values()) compileGroup.remove(instance.model);
   for (const body of drivingBodies) compileGroup.remove(body);

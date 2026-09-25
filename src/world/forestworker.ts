@@ -10,6 +10,7 @@ import {
   type DesertTileGenerationContext,
   type GroundHeightSample,
 } from './deserttiledata';
+import { isFarKeeper } from './farwoods';
 import { newCoverSample } from './landcover';
 import { Terrain } from './terrain';
 
@@ -40,8 +41,12 @@ export interface ForestWorkerTileRequest {
   readonly type: 'tile';
   readonly tx: number;
   readonly tz: number;
-  /** Only the trees standing outside a wood: a tile past the woods' impostor reach. */
+  /**
+   * Past the woods' full reach: only the trees outside a wood, and a wood's far keepers
+   * (world/farwoods.ts) when `keepers` is set.
+   */
   readonly openOnly: boolean;
+  readonly keepers: boolean;
 }
 
 export type ForestWorkerRequest = ForestWorkerInit | ForestWorkerTileRequest;
@@ -52,9 +57,13 @@ export interface ForestWorkerTileResult {
   readonly tz: number;
   readonly trees: Float32Array;
   readonly count: number;
-  /** Per tree, 1 when it stands outside a wood (belt, copse, edge, lone tree). */
+  /**
+   * Per tree: 1 when it stands outside a wood (belt, copse, edge, lone tree), 2 when it
+   * is a wood's far keeper (world/farwoods.ts), 0 otherwise.
+   */
   readonly open: Uint8Array;
   readonly openOnly: boolean;
+  readonly keepers: boolean;
 }
 
 export type ForestWorkerResponse = { readonly type: 'ready' } | ForestWorkerTileResult;
@@ -91,6 +100,7 @@ scope.onmessage = (event: MessageEvent<ForestWorkerRequest>) => {
     },
     scratch,
     cover,
+    false,
   );
   const centreX = (request.tx + 0.5) * DESERT_TILE_SIZE;
   const centreZ = (request.tz + 0.5) * DESERT_TILE_SIZE;
@@ -98,15 +108,18 @@ scope.onmessage = (event: MessageEvent<ForestWorkerRequest>) => {
   let kept = 0;
   for (let i = 0; i < count; i++) {
     const o = i * TREE_STRIDE;
-    const isOpen = ctx.terrain.cover.forestAt(centreX + scratch[o]!, centreZ + scratch[o + 2]!, 1e6) < OPEN_FOREST_MAX;
-    if (request.openOnly && !isOpen) continue;
+    const x = centreX + scratch[o]!;
+    const z = centreZ + scratch[o + 2]!;
+    const isOpen = ctx.terrain.cover.forestAt(x, z, 1e6) < OPEN_FOREST_MAX;
+    const keeper = !isOpen && isFarKeeper(x, z);
+    if (request.openOnly && !isOpen && !(request.keepers && keeper)) continue;
     if (kept !== i) scratch.copyWithin(kept * TREE_STRIDE, o, o + TREE_STRIDE);
-    flags[kept++] = isOpen ? 1 : 0;
+    flags[kept++] = isOpen ? 1 : keeper ? 2 : 0;
   }
   const trees = scratch.slice(0, kept * TREE_STRIDE);
   const open = flags.slice(0, kept);
   scope.postMessage(
-    { type: 'tile', tx: request.tx, tz: request.tz, trees, count: kept, open, openOnly: request.openOnly },
+    { type: 'tile', tx: request.tx, tz: request.tz, trees, count: kept, open, openOnly: request.openOnly, keepers: request.keepers },
     [trees.buffer, open.buffer],
   );
 };

@@ -707,10 +707,30 @@ export const HAZE_FRAGMENT = /* glsl */ `
     color.rgb = mix(vec3(gradeLum), color.rgb, 1.055);
     float highlightWarmth = smoothstep(0.16, 0.82, gradeLum);
     color.rgb *= mix(
-      vec3(0.993, 0.998, 1.006),
+      vec3(1.008, 1.0, 0.982),
       vec3(1.012, 1.003, 0.985),
       highlightWarmth
     );
+    // Shishkin's greens (docs/shishkin.md): lit foliage olive and ochre at 50-65
+    // degrees of hue where ours sat at 80-90, and no teal anywhere. The palettes carry
+    // most of that shift; this only nudges what light and haze add on top, and drains
+    // teal. Blue sky and warm earth are outside both bands and untouched.
+    {
+      vec3 c = color.rgb;
+      float mx = max(c.r, max(c.g, c.b));
+      float mn = min(c.r, min(c.g, c.b));
+      float d = mx - mn;
+      if (d > 0.002) {
+        float h = mx == c.r ? mod((c.g - c.b) / d, 6.0) : mx == c.g ? (c.b - c.r) / d + 2.0 : (c.r - c.g) / d + 4.0;
+        h /= 6.0;
+        float green = smoothstep(0.16, 0.22, h) * (1.0 - smoothstep(0.47, 0.53, h));
+        float teal = smoothstep(0.36, 0.42, h) * (1.0 - smoothstep(0.5, 0.55, h));
+        h -= 0.015 * green;
+        float sat = d / max(mx, 1e-4) * (1.0 - 0.04 * green - 0.35 * teal);
+        vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+        color.rgb = mx * mix(vec3(1.0), k, sat);
+      }
+    }
     color.rgb = clamp(color.rgb, 0.0, 1.0);
 
     // Ink is for surfaces, and "surface" is a depth question rather than a screen-height

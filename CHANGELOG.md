@@ -25,8 +25,162 @@ questions live in `docs/country.md`.
 - NATURE GROWS AS IT DOES: woods, copses and belts or nothing, lone trees rare; nothing
   pops or grows out of the ground; the wood sometimes reaches the road; mud, not sand;
   a bumpy verge; grass everywhere, flattened by wheels and feet.
+- IT HAS TO BE LIGHT FIRST (2026-09-25). A test drive stuttered: 664 draws and 6.4
+  million triangles a frame, 22 ms of GPU, three quarters of it trees, grass and the
+  shadow map. slowroads.io, measured with the same WebGL counter, draws its Medium frame
+  in about 90 draws and 270 thousand triangles on the same three.js: the world's
+  knowledge is baked into terrain vertices at generation (tree shade, road proximity,
+  field), seasons are a uniform and an atlas. `docs/slowroads.md` has the study, the
+  numbers and the proposed move to that foundation, under our own visual language.
+- TREES, STEP ONE: 22 ms OF GPU TO ABOUT 12.5, 6.4 MILLION TRIANGLES TO 2.4. Models end
+  at 150 m instead of 420 and dissolve into their impostors over 135–165 m; impostors end
+  at 1.2 km in a wood and 3 km outside one, the canopy blanket rising from 1 km. The
+  impostor atlas is baked a second time in the model's normals and lit by them, so a far
+  crown keeps its shaded side (lit by a guessed normal it was flat and pale); gutters
+  between atlas cells stop a neighbour's trunk showing as a dash over a crown. Wood and
+  leaves of a tree are one geometry, leaves refusing the shadow per vertex: 664 draws
+  to 524.
+- STAGES TWO TO FIVE OF THE NEW WORLD RENDER: 532 DRAWS TO ABOUT 340, 3.3 MILLION
+  TRIANGLES TO 1.56, 112 FRAMES A SECOND TO 150 on the forest bench. Per pixel the frame
+  is now about slowroads Medium's. Grass is painted cards (below). A chunk's power-line
+  poles and wires are one mesh per material, where each pole was six draws and each span
+  one: 232 draws of 476. Only near tree models cast into the shadow map and sun shadows
+  fade out by 55 m; a wood's floor carries its shade baked, at every distance. Far-tree
+  impostors are sent to the GPU only for the tiles in a cone round the view, re-culled
+  after 10° of turn or 40 m of travel: 1.24 million triangles to 0.35. Haze lies low:
+  the fog thins with height above the eye, so a valley fills with it and a hill stands
+  clear. Details and numbers in `docs/slowroads.md`.
+
+- THE SEASON AND THE WEATHER CHANGE ALONG THE ROAD (2026-09-25). The season rarely and
+  unnoticeably, as the desert's sand colour once drifted; the weather often. The desert's
+  weather (virga, dust wall, smoke column) is not reused at all.
+- THE WOODS ARE THE MIDDLE BELT'S. Moscow region by area: birch 35%, spruce 27%, pine
+  23%, aspen 9%, oak 2%, lime under 1%. Pine grows in its own woods (bor) on sandy
+  tracts, almost pure and with next to no undergrowth, never as a lone tree or mixed
+  through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE FRAME BACK UNDER 12.5 ms. After the day's additions a Retina frame took 17 ms of
+  GPU at the dynamic floor (0.63 scale, 1.44 Mpx): about 56 FPS. Measured with the
+  resolution held still (the adaptive controller rescaled under every toggle before):
+  the sky dome cost 3.1 ms because it was drawn first over the whole screen and its new
+  cloud shader then painted over; it now draws after the opaque world on the far plane,
+  depth-tested, 0.9 ms. The vista (2.7 ms) was drawn before the tiles and shaded in full
+  beneath them; it now draws after them, its inner overlap band writing depth only at
+  the far plane so the tiles still win and the post pass still reads it as far.
+  Undergrowth dissolves by coverage over 55–75 m, is not drawn past it, and casts no
+  shadow. 17.0 → 12.3 ms on the same stand.
+- SHISHKIN AS THE REFERENCE FOR THE LOOK (`docs/shishkin.md`). Fourteen public-domain
+  paintings measured with the same script as our frames: his lit foliage sits at 50–65°
+  of hue (olive, ochre), ours sat at 80–92°; his shade is warm olive and umber, ours was
+  teal (160–167°, the spruce palette and a violet ground bounce); warm earth tones fill
+  10–45% of his canvases and none of ours. Palettes moved to olive (trees, meadows, wood
+  floors, the far canopy), the ground bounce from violet to warm earth, the sky greyer
+  with a warm grey-white horizon, and the final grade nudges greens toward olive and
+  drains teal. After: lit foliage 57–64°, shade 90–108°.
+- A MIDDLE-BELT SKY. The desert's air is gone from the countryside: no dust (the turbid
+  tan horizon, the long red sunsets), haze 1.15–1.5× instead of up to 3.2×, no hue drift,
+  a softer sun bloom. Fair-weather cumulus drawn in the dome shader, heaped round heads
+  over grey-lilac bases, gathered in fields with blue lanes between, crowding toward the
+  horizon; the cirrus deck stays, fainter.
+- UNDERGROWTH. A second planting pass on a grid twice as fine: bracken under spruce and
+  mixed woods, hazel and rowan where light gets in and thickest at the edges, spruce and
+  birch seedlings; juniper and young pine in a bor. Where a wood was cleared back for the
+  road the strip grows over with hazel, willow, rowan and young birch, and scrub stands in
+  thickets out in the meadows. Fern and juniper are new kinds (a crown of frond cards; a
+  dark needle column). Undergrowth is a model near the road only, never an impostor;
+  saplings take no collider.
+- BARK IS A TEXTURE, NOT FACE COLOURS. Trunks carried their fissures and patches as the
+  colours of flat facets, which read as a chessboard up close. Bark is now painted in
+  code into the leaf atlas (rough: fissured plates; smooth: birch and aspen lenticels and
+  grey patches) and mapped round each trunk in whole tiles and up it in metres; face
+  colours keep only the broad changes (the black foot of a birch, pine's copper crown).
+  Grown birch bark is darker and greyer still.
+- SPRUCE'S CORE is part of the crown, not the wood: as wood it took the boughs' shadow
+  and went black between every whorl.
+- SEASONS ALONG THE ROAD. A year is 1 200 km of road and the drive opens on the day the
+  world was made (`world/season.ts`). The season is a handful of smooth channels of the
+  day of the year — leaves turning, ground going over, bare, snow, spring green — read
+  by every renderer as shared uniforms (`render/season.ts`) that recolour the summer
+  colours in the shader, so nothing is rebuilt and nothing pops: a turn of season takes
+  a hundred-odd kilometres. Autumn is drawn: birch gold, aspen, maple and rowan amber to
+  brick, oak ochre and late, alder nearly green, conifers unchanged; each tree turns at
+  its own point, the same for its model and its impostor (a leaf mask is baked into the
+  impostor normals' alpha). Meadow goes khaki, fields to stubble, the wood floor to
+  litter; the wheat is cut and the flowers are over. The vista colours its cells for the
+  season on the CPU from the same tables. Bare trees, snow and spring are channels
+  without a picture yet. DEV: `__bro.seasonDay(280)`.
+- CROWNS ARE LEAF CARDS, NOT LUMPS. Every tree's leaf masses are crossed cards painted
+  with clusters of leaves drawn in code at boot (`render/leafpaint.ts`: small leaves,
+  broad leaves, pine needles, birch's hanging sprays, spruce boughs), their normals bent
+  to the crown's ellipsoid so a crown is lit as one soft volume. Wood samples a solid cell
+  of the same atlas: one material, one draw a tree. Edges by alpha-to-coverage, cast
+  shadows by the painted outline. The spruce is a stem, a narrow dark core and whorls of
+  drooping boughs. The impostors are baked from the same cards. GPU 12.6 → 14.1 ms at
+  2.1 Mpx on the forest stand, 1.94 → 1.76 million triangles.
+- PINE WOODS ARE PINE. A bor is pine with a rare birch and no spruce, alder or hazel,
+  on a paler floor of sand, moss and lichen, and its canopy is pine from afar too; pine
+  no longer appears in copses or mixed woods. Spruce thins toward a wood's edge.
+- BIRCH BARK IS A GROWN BIRCH'S: cream-grey with lichen patches rather than snow white,
+  black and furrowed at the foot for 1.5–3 m.
+- A BARE SHOULDER. 0.5–0.9 m of trodden earth and crushed stone along both asphalt edges
+  (`world/shoulder.ts`), ragged where the grass meets it, textured with stones painted in
+  code; the grass keeps off it and thins just past it. It is laid on the ground as the
+  tiles draw it (their 3 m lattice and triangles, 10 cm under the corridor), not on the
+  terrain function: on the function it floated up to 15 cm over the grass with an inked
+  rim, and a wheel sank through it. It ramps down from the asphalt's edge, tucks its
+  outer edge 4 cm into the ground, and has a collider, so the wheels ride what is seen.
+
+- FAR TREES ARE BAKED FROM SIX SIDES AND BLEND THE TWO NEAREST THE VIEW, turned by the
+  tree's own yaw, as slowroads does: a crooked oak no longer swings round with the car.
+  The atlas is eight-bit (albedo sRGB), 2016×2304.
+- A GRASS TUFT'S MEAN TONE IS ITS GROUND'S. Darker, the verge was lighter from above
+  than across, a boundary that ran with the chase camera.
+- THE DRY MEADOW IS STRAW, NOT LEMON (0xa8a870 for 0xbdb67c; lush 0x8aa65a, margin
+  0x9ba767).
+- NO CRASH WHILE SHADERS WARM. `compileAsync` waited on every material in the scene and
+  threw on one the streamer disposed meanwhile; the car warm-up now compiles only the
+  cars, and both waits go through `render/compilesafe.ts`.
+- EMPTY TREE BUCKETS ARE HIDDEN: 88 tree draws in a wood instead of 117, 57 shadow draws
+  instead of 78.
+- FAR WOODS ARE TREES TO 4.5 KM, NOT A RAISED GROUND. From a hill the canopy blanket
+  read as bare green bands. One tree of a wood in five (a hash of its position,
+  `world/farwoods.ts`) stays an impostor to 4.5 km, widening as the rest of its wood
+  dissolves past 2 km; the blanket rises only beyond, in the haze.
+- A MODEL BECOMES ITS IMPOSTOR BY ALPHA TO COVERAGE, NOT A SCREEN DITHER: the impostor
+  fades in over the band's first half and the model out over its second, so there is
+  no hole, and under MSAA the coverage resolves to a blend instead of grain.
+- SUN SHADOWS FADE AT 78–100 M AGAIN AND THE MID TREES CAST AGAIN. Cut to 55 m, the edge
+  of the tree shade ran round the car along a wooded road.
+- GRASS AS SLOWROADS GROWS IT: one grid of constant density to 70 m, sinking into the
+  ground at the far edge, tufts half as tall as wide, tips the ground's colour. Seen
+  from a chase camera every vertical tuft is a streak towards the point under the
+  camera, and tall ones swung round as the car moved.
+- FAR TREES ON A 2X SCREEN WERE SCRAPS OF THEIR NEIGHBOURS — floating trunks, half
+  crowns, dark rectangles. The impostor atlas was baked through `renderer.setViewport`,
+  which three scales by the device pixel ratio even into a texture, so on a Retina
+  screen every cell landed twice as big and twice as far. The cell is now set on the
+  bake targets themselves.
+- GRASS NO LONGER COMBS ITSELF ROUND THE CAR. Cards turned to face the camera swept the
+  near grass round as it moved; then density thinned with distance by shrinking tufts,
+  so a belt of grass rose ahead of the car and lay down behind it, like a wheel ten
+  metres wide. Now nothing about a tuft within 45 m depends on the camera's distance:
+  one grid of constant density, each tuft two crossed cards turned once in the world.
+  A second ring, half as dense with wider cards, takes over at 45 m tuft by tuft. A
+  check renders one frame twice with the grass told the camera is 12 m back: within
+  45 m not one pixel changes.
+- GRASS IS PAINTED CARDS. A tuft is painted cards from an atlas painted in code
+  at boot — a meadow tuft, a tussock, grass in flower, standing crop, two paintings each:
+  broad tapering blades with a dark root, a light tip and a thin dark rim. The atlas holds
+  shade, accent and coverage, not colour: the root takes the ground's colour, mottled as
+  the ground paint mottles it, so a season stays a change of palette. About 11 thousand
+  triangles of grass a frame instead of 740 thousand; edges by alpha-to-coverage with no
+  sorting; no depth written (the ink pass would scribble it), so each ring is drawn from
+  its far side toward the camera. Tufts behind and beside the camera are dropped in the
+  vertex shader.
+- THE GROUND PAINT'S PERIODS DIVIDE THE ORIGIN'S REBASE STEP (4, 12.5 and 125 m against
+  1000): at 4.2, 11.5 and 140 m the pattern under the car would have jumped at every
+  rebase.
 
 - RELIEF AND LAND COVER. The Russian plain: moraine hummocks, ravines and lowlands for
   dunes, low uplands for mountains. Farmland districts with crop plots and margins,
@@ -43,8 +197,8 @@ questions live in `docs/country.md`.
   wood's edge, hazel, spruce. Each keeps a green of its own. Crowns are lit as one volume
   and do not shadow themselves. The downloaded Quaternius models, their prep script and
   the country lab are gone.
-- THE FOREST IS DRAWN IN FOUR LEVELS — near to 60 m, the far model still shadowed to
-  110 m, unshadowed to 420 m, baked impostors beyond — never by scaling. A tree of a
+- THE FOREST IS DRAWN IN THREE LEVELS — near to 60 m and the only trees that cast, the
+  far model unshadowed to 150 m, baked impostors beyond — never by scaling. A tree of a
   wood is an impostor to 2 km and then the canopy blanket; a tree OUTSIDE a wood (belt,
   copse, a wood's edge, a lone tree) stays an impostor to 6 km, since the blanket draws
   only woods and a farmland horizon is made of exactly those trees. Far tiles carry only

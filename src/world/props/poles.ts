@@ -1092,6 +1092,55 @@ function addDerelict(
   );
 }
 
+/**
+ * Pieces of a chunk's pole line gathered by material, to be drawn as one mesh each.
+ *
+ * Built as a group per pole, the line cost six draws a pole and one a span: 232 of a
+ * frame's 476 draws in a measured drive, for about 600 triangles a chunk. Nothing on
+ * a pole moves once it is built, so each piece is baked into chunk space and merged.
+ */
+class PoleBatch {
+  private readonly pieces = new Map<THREE.Material, THREE.BufferGeometry[]>();
+
+  /** Bakes every mesh under `root` (which must have no parent) into the batch. */
+  add(root: THREE.Object3D): void {
+    root.updateMatrixWorld(true);
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      this.addGeometry(object.geometry as THREE.BufferGeometry, object.material as THREE.Material, object.matrixWorld);
+    });
+  }
+
+  addGeometry(geometry: THREE.BufferGeometry, material: THREE.Material, matrix?: THREE.Matrix4): void {
+    const piece = new THREE.BufferGeometry();
+    piece.setAttribute('position', geometry.getAttribute('position').clone());
+    const normal = geometry.getAttribute('normal');
+    if (normal) piece.setAttribute('normal', normal.clone());
+    else piece.computeVertexNormals();
+    const index = geometry.getIndex();
+    if (index) piece.setIndex(Array.from(index.array as ArrayLike<number>));
+    else piece.setIndex(Array.from({ length: piece.getAttribute('position').count }, (_, i) => i));
+    if (matrix) piece.applyMatrix4(matrix);
+    let list = this.pieces.get(material);
+    if (!list) this.pieces.set(material, (list = []));
+    list.push(piece);
+  }
+
+  /** One mesh per material into `group`; returns the merged geometries to dispose. */
+  flush(group: THREE.Group): THREE.BufferGeometry[] {
+    const merged: THREE.BufferGeometry[] = [];
+    for (const [material, list] of this.pieces) {
+      const geometry = mergeGeometries(list);
+      for (const piece of list) piece.dispose();
+      if (!geometry) continue;
+      group.add(new THREE.Mesh(geometry, material));
+      merged.push(geometry);
+    }
+    this.pieces.clear();
+    return merged;
+  }
+}
+
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
@@ -1099,7 +1148,7 @@ export class PoleProvider implements ChunkProvider {
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-    const wireGeos: THREE.BufferGeometry[] = [];
+    const batch = new PoleBatch();
     const workingLamps: LampPos[] = [];
     const poses: PolePose[] = [];
 
@@ -1115,7 +1164,7 @@ export class PoleProvider implements ChunkProvider {
       poleGroup.position.set(pose.baseX - ox, pose.baseY, pose.baseZ - oz);
       poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, poleGroup.quaternion);
       addPoleMeshes(poleGroup, pose);
-      group.add(poleGroup);
+      batch.add(poleGroup);
 
       if (pose.hasLamp && pose.lampWorks) {
         // Lamps are stored relative to the chunk origin: these positions also set
@@ -1170,8 +1219,8 @@ export class PoleProvider implements ChunkProvider {
         4,
         false,
       );
-      wireGeos.push(wireGeo);
-      group.add(new THREE.Mesh(wireGeo, matWire));
+      batch.addGeometry(wireGeo, matWire);
+      wireGeo.dispose();
     }
 
     // Derelicts. Built by the POLE provider and not by a provider of their own,
@@ -1185,6 +1234,7 @@ export class PoleProvider implements ChunkProvider {
       const derelict = poleDerelictAt(seed, event.s);
       if (derelict) addDerelict(ctx, group, bodies, colliders, derelict);
     }
+    const merged = batch.flush(group);
 
     const lampSources = [
       new THREE.PointLight(LAMP_COLOR, 0, LAMP_DISTANCE, 2),
@@ -1204,7 +1254,7 @@ export class PoleProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
-        for (const g of wireGeos) g.dispose();
+        for (const g of merged) g.dispose();
         for (const source of lampSources) source.dispose();
       },
       /**

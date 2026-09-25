@@ -47,6 +47,7 @@ import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { RoadTraffic } from '../world/traffic';
 import type { Terrain } from '../world/terrain';
+import { SEASON_OVERRIDE } from '../world/season';
 import type { WorldWorkScheduler } from '../world/workqueue';
 
 /**
@@ -500,6 +501,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
+  // Holds the season at a day of the year (0 = 1 January), or back on the road's with null.
+  dev['seasonDay'] = (day: number | null): void => {
+    SEASON_OVERRIDE.day = day;
+  };
   dev['killPlayer'] = (): void => {
     if (!ctx.vitals.dead) {
       ctx.vitals.beginCollisionFrame('foot');

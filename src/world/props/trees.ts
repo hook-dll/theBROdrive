@@ -2,6 +2,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { applyComicShading } from '../../render/comic';
+import {
+  applyBarkMapping,
+  BARK_ROUGH_U,
+  BARK_SMOOTH_U,
+  BARK_TILE_AROUND_M,
+  BARK_TILE_UP_M,
+  leafAtlas,
+  leafCellUv,
+  SOLID_UV,
+  type LeafSprite,
+} from '../../render/leafpaint';
+import { injectSeason, SEASON_TREE_RANDOM_GLSL } from '../../render/season';
 import { TREE_KINDS, TreeKind } from '../deserttiledata';
 import type { Season } from '../landcover';
 
@@ -22,11 +34,15 @@ import type { Season } from '../landcover';
  */
 
 export interface TreePart {
+  /**
+   * Wood and leaves in one geometry, so a tree is one draw per level, not two. The
+   * `aWood` attribute (1 wood, 0 leaves) keeps the one difference the two parts had:
+   * leaves take no shadow of their own (see `material`).
+   */
   readonly geometry: THREE.BufferGeometry;
   readonly material: THREE.MeshStandardMaterial;
-  /** Shadow material for alpha-cut foliage; null, since nothing here is cut out. */
+  /** Shadow material for the alpha-cut leaf cards: they cast their painted outline. */
   readonly depthMaterial: THREE.MeshDepthMaterial | null;
-  readonly foliage: boolean;
 }
 
 export type TreeLod = readonly TreePart[];
@@ -40,7 +56,7 @@ export interface TreeVariant {
  * Trunk collider radius per kind at scale 1, metres, in `TreeKind` order; 0 for things
  * a car drives through.
  */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.28, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12];
+export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.28, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0];
 
 interface Palette {
   readonly spruce: readonly number[];
@@ -55,7 +71,10 @@ interface Palette {
   readonly alderLeaf: readonly number[];
   readonly willowLeaf: readonly number[];
   readonly rowanLeaf: readonly number[];
+  readonly fern: readonly number[];
+  readonly juniper: readonly number[];
   readonly birchBark: number;
+  readonly birchGrey: number;
   readonly birchMark: number;
   readonly birchButt: number;
   readonly pineBark: number;
@@ -80,26 +99,33 @@ interface Palette {
  */
 const PALETTES: Record<Season, Palette> = {
   summer: {
-    spruce: [0x3f7a60, 0x4c886a],
-    spruceUnder: 0x34664f,
-    birchLeaf: [0xa9bd6a, 0x9db463, 0xb6c776],
-    limeLeaf: [0x76a055, 0x70984f, 0x7ea85c],
-    mapleLeaf: [0x86ac50, 0x7da34a, 0x91b65a],
-    bush: [0x6f9150, 0x69894b, 0x779757],
-    pine: [0x3e6d5a, 0x467661, 0x376352],
-    aspenLeaf: [0x92a973, 0x889f6a, 0x9db37e],
-    oakLeaf: [0x5b8541, 0x547c3c, 0x64904a],
-    alderLeaf: [0x557c46, 0x4f7441, 0x5d864d],
-    willowLeaf: [0xa6b690, 0x9aab86, 0xb1c09b],
-    rowanLeaf: [0x7ea557, 0x749a50, 0x88ae60],
-    birchBark: 0xeeece4,
-    birchMark: 0x3d3b42,
-    birchButt: 0x857e76,
+    // Olive-grey, never teal (docs/shishkin.md): 0x3f7a60 sat at 155 degrees and read
+    // as plastic against every painted spruce.
+    spruce: [0x557552, 0x62805b],
+    spruceUnder: 0x4e6247,
+    birchLeaf: [0xb0b56a, 0xa3a962, 0xbcbd76],
+    limeLeaf: [0x829a52, 0x7b924d, 0x8aa25a],
+    mapleLeaf: [0x92a64e, 0x899d49, 0x9cae58],
+    bush: [0x7a8a4f, 0x73824a, 0x829256],
+    pine: [0x516b45, 0x5a744c, 0x4a623f],
+    aspenLeaf: [0x9ba673, 0x919c6a, 0xa5ae7d],
+    oakLeaf: [0x68803f, 0x61783a, 0x718a48],
+    alderLeaf: [0x5e7644, 0x586e3f, 0x667f4b],
+    willowLeaf: [0xabb18e, 0x9fa684, 0xb5ba99],
+    rowanLeaf: [0x8a9e55, 0x80944f, 0x93a75e],
+    fern: [0x7d9448, 0x87a052, 0x738a42],
+    juniper: [0x55684c, 0x5e7253, 0x4d6045],
+    // Grown birch is not snow-white: a creamy grey, patched greyer with lichen and
+    // weather, and black and furrowed at the foot. Only a young one is white.
+    birchBark: 0xcac6bb,
+    birchGrey: 0x9d998f,
+    birchMark: 0x35333a,
+    birchButt: 0x5f5852,
     pineBark: 0xc27a4c,
     pineBarkLow: 0x75655a,
     aspenBark: 0xb6bea5,
     aspenButt: 0x55534e,
-    oakBark: 0x61574e,
+    oakBark: 0x857b6c,
     oakFissure: 0x463f3a,
     alderBark: 0x5f5c59,
     willowBark: 0x7e756a,
@@ -136,43 +162,103 @@ function flatColour(g: THREE.BufferGeometry, colour: (x: number, y: number, z: n
   return geo;
 }
 
-function spruceGeometry(seed: number, pal: Palette): TreeShape {
+/**
+ * A spruce: a straight stem to the top, a dark narrow cone for the crown's depth, and
+ * round it whorls of branches as cards painted with spruce sprays (render/leafpaint.ts),
+ * each drooping from the stem and lifting a little at the tip. Whorls are wide at the
+ * foot and shrink to the leader. The cone is what the eye takes for the shade inside
+ * a spruce; the sprays give it the ragged, layered edge the solid tiers never had.
+ */
+function spruceGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const rnd = (i: number): number => hash2(seed * 31 + i, seed * 7 - i);
-  const parts: THREE.BufferGeometry[] = [];
-  parts.push(flatColour(new THREE.CylinderGeometry(0.12, 0.26, 4, 5).translate(0, 2, 0), () => pal.trunk));
-  const tiers = 6 + Math.floor(rnd(0) * 2);
   const H = 17 + rnd(1) * 5;
-  const base = 2.2;
-  for (let t = 0; t < tiers; t++) {
-    const k = t / tiers;
-    const y0 = base + k * (H - base - 2.5);
-    const y1 = y0 + ((H - base) / tiers) * 1.55;
-    const R = (3.3 + rnd(t + 60) * 0.5) * (1 - k * 0.82) + 0.35;
-    const points = 8 + Math.floor(rnd(t + 70) * 3);
-    const pos: number[] = [];
+  const base = 1.6;
+  const parts: THREE.BufferGeometry[] = [
+    flatColour(new THREE.CylinderGeometry(0.06, 0.26, H, 5).translate(0, H / 2, 0), () => pal.trunk),
+  ];
+  // The core: darker than the boughs and narrower, so it shows only between them. It
+  // is part of the crown, not the wood: as wood it took the boughs' shadow and went
+  // black between every whorl.
+  const core = asFlat(flatColour(new THREE.ConeGeometry(1.5 + rnd(2) * 0.3, H - base - 0.8, 7, 1, true).translate(0, base + (H - base - 0.8) / 2, 0), () => pal.spruceUnder));
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const uv: number[] = [];
+  const col: number[] = [];
+  const c = new THREE.Color();
+  // The far level (60 m on, and the impostor bake) keeps the outline on fewer, wider
+  // boughs: most of a spruce's cost is the overdraw of its cards.
+  const whorls = near ? 12 + Math.floor(rnd(0) * 3) : 8 + Math.floor(rnd(0) * 2);
+  for (let t = 0; t < whorls; t++) {
+    const k = t / whorls;
+    const y = base + k * (H - base - 1.2);
+    const R = (3.3 + rnd(t + 60) * 0.5) * (1 - k * 0.88) + 0.35;
+    const branches = near ? 6 + Math.floor(rnd(t + 70) * 2) : 5;
     const twist = rnd(t + 10) * 3;
-    for (let i = 0; i < points * 2; i++) {
-      const a0 = twist + (i / (points * 2)) * Math.PI * 2;
-      const a1 = twist + ((i + 1) / (points * 2)) * Math.PI * 2;
-      const r0 = i % 2 === 0 ? R * (0.9 + rnd(t * 50 + i) * 0.2) : R * 0.6;
-      const r1 = (i + 1) % 2 === 0 ? R * (0.9 + rnd(t * 50 + i + 1) * 0.2) : R * 0.6;
-      // Outer points droop; the notches between them sit higher: a ragged skirt.
-      const d0 = i % 2 === 0 ? -0.55 - rnd(t * 40 + i) * 0.4 : 0.25;
-      const d1 = (i + 1) % 2 === 0 ? -0.55 - rnd(t * 40 + i + 1) * 0.4 : 0.25;
-      const p0 = [Math.cos(a0) * r0, y0 + d0, Math.sin(a0) * r0];
-      const p1 = [Math.cos(a1) * r1, y0 + d1, Math.sin(a1) * r1];
-      pos.push(0, y1, 0, p1[0]!, p1[1]!, p1[2]!, p0[0]!, p0[1]!, p0[2]!);
-      // Underside back to the trunk: a skirt is solid, not a lampshade.
-      pos.push(0, y0 + 0.6, 0, p0[0]!, p0[1]!, p0[2]!, p1[0]!, p1[1]!, p1[2]!);
+    for (let b = 0; b < branches; b++) {
+      const a = twist + (b / branches) * Math.PI * 2 + (rnd(t * 50 + b) - 0.5) * 0.4;
+      const dx = Math.cos(a);
+      const dz = Math.sin(a);
+      const reach = R * (0.85 + rnd(t * 40 + b) * 0.3);
+      // Down at the middle, the tip lifting again: the classic spruce bough.
+      const droop = reach * (0.28 + rnd(t * 30 + b) * 0.12);
+      const width = reach * (near ? 1.15 : 1.35);
+      // Rolled well off flat, either way: seen level, a flat spray is a line.
+      const roll = (rnd(t * 20 + b) < 0.5 ? -1 : 1) * (0.45 + rnd(t * 25 + b) * 0.6);
+      // Across the branch: horizontal, then rolled about the branch.
+      const px = -dz * Math.cos(roll);
+      const py = Math.sin(roll);
+      const pz = dx * Math.cos(roll);
+      const cell = leafCellUv('fir', rnd(t * 90 + b));
+      c.setHex(pal.spruce[(t + b) % pal.spruce.length]!);
+      const ax = dx * 0.25;
+      const az = dz * 0.25;
+      const ay = y + 0.2;
+      const bx = dx * reach;
+      const bz = dz * reach;
+      const by = y - droop;
+      const corner = (along: number, across: number, u: number, v: number): void => {
+        const x = ax + (bx - ax) * along + px * across * width * 0.5;
+        const yy = ay + (by - ay) * along + py * across * width * 0.5 + along * (1 - along) * droop * -0.6;
+        const z = az + (bz - az) * along + pz * across * width * 0.5;
+        pos.push(x, yy, z);
+        nor.push(0, 1, 0);
+        uv.push(u, v);
+        col.push(c.r, c.g, c.b);
+      };
+      // Two quads along the bough, so it can bend.
+      for (const [a0, a1] of near ? ([[0, 0.5], [0.5, 1]] as const) : ([[0, 1]] as const)) {
+        const v0 = cell.v0 + (cell.v1 - cell.v0) * a0;
+        const v1 = cell.v0 + (cell.v1 - cell.v0) * a1;
+        corner(a0, -1, cell.u0, v0);
+        corner(a0, 1, cell.u1, v0);
+        corner(a1, 1, cell.u1, v1);
+        corner(a0, -1, cell.u0, v0);
+        corner(a1, 1, cell.u1, v1);
+        corner(a1, -1, cell.u0, v1);
+      }
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    const shade = pal.spruce[t % pal.spruce.length]!;
-    parts.push(flatColour(g, (_x, y) => (y < y0 + 0.15 ? pal.spruceUnder : shade)));
   }
-  // A spruce's tiers SHOULD shade the ones below: that is the dark band under every
-  // skirt. It is solid enough not to crawl, so it stays one part that takes shadows.
-  return { wood: mergeGeometries(parts), leaves: null };
+  // The leader: a last upright spray at the top.
+  const lead = leafCellUv('fir', rnd(99));
+  c.setHex(pal.spruce[0]!);
+  for (const [a, b2] of [[0, 1], [Math.PI / 2, 1]] as const) {
+    const qx = Math.cos(a) * 0.3 * b2;
+    const qz = Math.sin(a) * 0.3 * b2;
+    const quad = [[-1, 0, lead.u0, lead.v0], [1, 0, lead.u1, lead.v0], [1, 1, lead.u1, lead.v1], [-1, 0, lead.u0, lead.v0], [1, 1, lead.u1, lead.v1], [-1, 1, lead.u0, lead.v1]] as const;
+    for (const [sx, sy, u, v] of quad) {
+      pos.push(qx * sx, H - 1.4 + sy * 1.6, qz * sx);
+      nor.push(0, 1, 0);
+      uv.push(u, v);
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  const boughs = new THREE.BufferGeometry();
+  boughs.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  boughs.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  boughs.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  boughs.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const crown = finishCrown(boughs, 0, base + (H - base) * 0.4, 0, 3.6, (H - base) * 0.6, 3.6);
+  return { wood: mergeGeometries(parts.map(asFlat)), leaves: mergeGeometries([core, crown]) };
 }
 
 type Rnd = () => number;
@@ -197,9 +283,26 @@ interface Ring {
 }
 
 /** A faceted tube through horizontal rings, open at both ends. Flat colour per quad. */
-function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side: number) => number): THREE.BufferGeometry {
+/**
+ * A tube through `rings`, `sides` faces round, coloured per face. Its bark is a texture
+ * (render/leafpaint.ts `applyBarkMapping`): u runs round the trunk in whole tiles, v up
+ * it in metres, so the bark's fissures and lenticels keep their size on any girth. Face
+ * colours carry only broad changes (the dark foot, pine's copper crown); a pattern in
+ * face colours shows as a chessboard of flat facets.
+ */
+function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side: number) => number, bark: 'rough' | 'smooth' = 'rough'): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
+  const uv: number[] = [];
+  const girth = rings.reduce((m, r) => Math.max(m, r.r), 0) * Math.PI * 2;
+  const around = Math.max(1, Math.round(girth / BARK_TILE_AROUND_M));
+  const u0 = bark === 'smooth' ? BARK_SMOOTH_U : BARK_ROUGH_U;
+  const heights: number[] = [0];
+  for (let i = 1; i < rings.length; i++) {
+    const a = rings[i - 1]!;
+    const b = rings[i]!;
+    heights.push(heights[i - 1]! + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+  }
   const c = new THREE.Color();
   const at = (ring: Ring, s: number): [number, number, number] => {
     const a = (s / sides) * Math.PI * 2;
@@ -212,6 +315,11 @@ function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side
       const u = at(rings[i + 1]!, s);
       const d = at(rings[i + 1]!, s + 1);
       pos.push(...a, ...u, ...b, ...b, ...u, ...d);
+      const ua = u0 + (s / sides) * around;
+      const ub = u0 + ((s + 1) / sides) * around;
+      const va = heights[i]! / BARK_TILE_UP_M;
+      const vb = heights[i + 1]! / BARK_TILE_UP_M;
+      uv.push(ua, va, ua, vb, ub, va, ub, va, ua, vb, ub, vb);
       c.setHex(colour(i, s));
       for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
     }
@@ -219,6 +327,7 @@ function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.computeVertexNormals();
   return g;
 }
@@ -230,6 +339,84 @@ function tube(rings: readonly Ring[], sides: number, colour: (ring: number, side
  */
 const CROWN_DETAIL = 0;
 
+/**
+ * The leaf sprite the crown being built is painted with (render/leafpaint.ts), set
+ * per kind by `loadTreeVariants` before each build.
+ */
+let leafSprite: LeafSprite = 'broad';
+
+/**
+ * A MASS OF LEAVES as cards: three upright quads crossed and one lying nearly flat, each
+ * painted with a cluster of leaves from the leaf atlas and scattered a little inside
+ * the mass's ellipsoid. `finishCrown` then bends every normal to the crown's own
+ * ellipsoid, so the crown is lit as one soft volume and the cards never show as flat.
+ * The flat one is for the view from above: a chase camera looks down into crowns.
+ * Eight triangles, where a solid lump took twenty and read as a toy.
+ */
+function blob(
+  cx: number,
+  cy: number,
+  cz: number,
+  rx: number,
+  ry: number,
+  rz: number,
+  tones: readonly number[],
+  seed: number,
+  hanging = false,
+): THREE.BufferGeometry {
+  const rnd = rng(seed * 2654435761 + 97);
+  const sprite: LeafSprite = hanging && leafSprite === 'small' && rnd() < 0.5 ? 'hanging' : leafSprite;
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const uv: number[] = [];
+  const col: number[] = [];
+  const c = new THREE.Color();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const yaw0 = rnd() * Math.PI;
+  const reach = Math.max(rx, rz);
+  for (let k = 0; k < 4; k++) {
+    const flat = k === 3;
+    const yaw = yaw0 + k * (Math.PI / 3) + (rnd() - 0.5) * 0.5;
+    // Upright cards lean a little; the flat one is tipped most of the way over.
+    const tilt = flat ? 1.25 + rnd() * 0.25 : (rnd() - 0.5) * 0.6;
+    right.set(Math.cos(yaw), 0, Math.sin(yaw));
+    normal.set(-Math.sin(yaw), 0, Math.cos(yaw));
+    up.set(0, 1, 0).multiplyScalar(Math.cos(tilt)).addScaledVector(normal, -Math.sin(tilt));
+    normal.crossVectors(right, up).normalize();
+    const hw = (flat ? reach : Math.max(reach, ry * 0.8)) * (1.2 + rnd() * 0.12);
+    const hh = (flat ? reach : ry) * (1.2 + rnd() * 0.12) * (hanging && !flat ? 1.15 : 1);
+    const ox = cx + (rnd() - 0.5) * rx * 0.4;
+    const oy = cy + (rnd() - 0.5) * ry * 0.3 - (hanging && !flat ? ry * 0.15 : 0);
+    const oz = cz + (rnd() - 0.5) * rz * 0.4;
+    const cell = leafCellUv(flat && sprite === 'hanging' ? leafSprite : sprite, rnd());
+    const flip = rnd() < 0.5;
+    const u0 = flip ? cell.u1 : cell.u0;
+    const u1 = flip ? cell.u0 : cell.u1;
+    c.setHex(tones[k % tones.length]!);
+    const corner = (a: number, b: number, u: number, v: number): void => {
+      pos.push(ox + right.x * a * hw + up.x * b * hh, oy + right.y * a * hw + up.y * b * hh, oz + right.z * a * hw + up.z * b * hh);
+      nor.push(normal.x, normal.y, normal.z);
+      uv.push(u, v);
+      col.push(c.r, c.g, c.b);
+    };
+    corner(-1, -1, u0, cell.v0);
+    corner(1, -1, u1, cell.v0);
+    corner(1, 1, u1, cell.v1);
+    corner(-1, -1, u0, cell.v0);
+    corner(1, 1, u1, cell.v1);
+    corner(-1, 1, u0, cell.v1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return g;
+}
+
+/** A solid lump: what a crown mass used to be, now only for rowan's berry bunches. */
 /**
  * One mass of leaves: a lumpy ellipsoid. The lumps come from the direction alone, so
  * the faces stay joined; neighbouring faces take slightly different tones of the same
@@ -243,7 +430,7 @@ const CROWN_DETAIL = 0;
  * themselves. The levels differ only in bark marks, trunk facets and stubs, which are
  * below a pixel where they swap.
  */
-function blob(
+function lump(
   cx: number,
   cy: number,
   cz: number,
@@ -405,20 +592,21 @@ interface TreeShape {
 function birchGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const rnd = rng(seed * 7919 + 13);
   const H = 12 + rnd() * 4;
-  const butt = 0.8 + rnd() * 0.7;
-  const rings = refine(trunkRings(rnd, H * 0.94, 0.19, 0.8, 0.35, near ? 10 : 6), near ? [0.35, 0.75, 1.2, 1.7, 2.3] : [0.8, 1.6]);
+  // The dark furrowed foot of a grown birch stands a metre and a half to three high.
+  const butt = 1.4 + rnd() * 1.6;
+  const rings = refine(trunkRings(rnd, H * 0.94, 0.19, 0.8, 0.35, near ? 10 : 6), near ? [0.35, 0.75, 1.2, 1.7, 2.3, 3.0, 3.8] : [0.8, 1.6, 2.6]);
   const sides = near ? 7 : 5;
   const parts: THREE.BufferGeometry[] = [
     tube(rings, sides, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
-      const h = hash2(side * 7 + seed, ring * 3 + 1);
+      const h = hash2(side * 7 + seed, 1);
       // The far level paints the butt on its faces; the near level lays plates over a
       // white stem (see below), so its faces stay white above the ground line.
       if (near) return y < 0.2 ? pal.birchButt : pal.birchBark;
-      if (y < butt * 0.6) return h < 0.35 ? pal.birchMark : pal.birchButt;
-      if (y < butt * 1.5) return h < 0.3 ? pal.birchButt : pal.birchBark;
-      return pal.birchBark;
-    }),
+      // The far level paints the foot by side, in tongues: never face by face.
+      const foot = butt * (0.7 + 0.6 * h);
+      return y < foot ? pal.birchButt : y < foot * 1.4 ? pal.birchGrey : pal.birchBark;
+    }, 'smooth'),
   ];
   const leaves: THREE.BufferGeometry[] = [];
   const from = new THREE.Vector3();
@@ -555,11 +743,18 @@ function rotated(tones: readonly number[], k: number): number[] {
   return tones.map((_, i) => tones[(i + k) % tones.length]!);
 }
 
-/** Every part non-indexed with position and colour only, so they merge. */
+/** Every part non-indexed with position, colour, normal and uv only, so they merge. */
 function asFlat(g: THREE.BufferGeometry): THREE.BufferGeometry {
   const geo = g.index ? g.toNonIndexed() : g;
   for (const name of Object.keys(geo.attributes)) {
-    if (name !== 'position' && name !== 'color' && name !== 'normal') geo.deleteAttribute(name);
+    if (name !== 'position' && name !== 'color' && name !== 'normal' && name !== 'uv') geo.deleteAttribute(name);
+  }
+  // Wood and anything else untextured samples the atlas's solid white cell.
+  if (!geo.getAttribute('uv')) {
+    const count = geo.getAttribute('position').count;
+    const uv = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) uv.set(SOLID_UV, i * 2);
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   }
   return geo;
 }
@@ -637,7 +832,7 @@ function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
-      const edge = copper + (hash2(side + seed, ring) - 0.5) * 2.5;
+      const edge = copper + (hash2(side + seed, 7) - 0.5) * 2.5;
       return y < edge ? pal.pineBarkLow : pal.pineBark;
     }),
   ];
@@ -699,8 +894,8 @@ function aspenGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
-      return y < butt + (hash2(side * 3 + seed, ring) - 0.5) * 0.6 ? pal.aspenButt : pal.aspenBark;
-    }),
+      return y < butt + (hash2(side * 3 + seed, 5) - 0.5) * 0.6 ? pal.aspenButt : pal.aspenBark;
+    }, 'smooth'),
   ];
   const leaves: THREE.BufferGeometry[] = [];
   const from = new THREE.Vector3();
@@ -757,7 +952,8 @@ function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const sides = near ? 9 : 6;
   const parts: THREE.BufferGeometry[] = [
     // Furrowed: bark ridges and dark fissures alternate round the stem.
-    tube(rings, sides, (ring, side) => (side % 2 === 1 && hash2(side + seed, ring) < 0.8 ? pal.oakFissure : pal.oakBark)),
+    // The fissures are the bark texture's; faces coloured in stripes read as a chessboard.
+    tube(rings, sides, () => pal.oakBark),
   ];
   const leaves: THREE.BufferGeometry[] = [];
   const top = rings[rings.length - 1]!;
@@ -844,7 +1040,7 @@ function willowGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const H = 8.5 + rnd() * 3;
   const trunkH = H * (0.26 + rnd() * 0.08);
   const rings = trunkRings(rnd, trunkH, 0.42, 0.25, 1.1, near ? 4 : 3);
-  const parts: THREE.BufferGeometry[] = [tube(rings, near ? 8 : 5, (ring, side) => (hash2(side + seed, ring) < 0.35 ? pal.willowFissure : pal.willowBark))];
+  const parts: THREE.BufferGeometry[] = [tube(rings, near ? 8 : 5, () => pal.willowBark)];
   const leaves: THREE.BufferGeometry[] = [];
   const top = rings[rings.length - 1]!;
   const from = new THREE.Vector3(top.x, trunkH, top.z);
@@ -926,7 +1122,7 @@ function rowanGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   for (const [x, y, z, r] of berries) {
     for (let b = 0; b < 3; b++) {
       const ba = b * 2.1 + x;
-      parts.push(blob(x + Math.cos(ba) * r * 0.9, y - b * r * 0.5, z + Math.sin(ba) * r * 0.9, r, r, r, [pal.rowanBerry], seed + b));
+      parts.push(lump(x + Math.cos(ba) * r * 0.9, y - b * r * 0.5, z + Math.sin(ba) * r * 0.9, r, r, r, [pal.rowanBerry], seed + b));
     }
   }
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), heart.x, heart.y, heart.z, crownW + 0.7, (H - crownBase) / 2 + 0.7, crownW + 0.7);
@@ -965,10 +1161,227 @@ function bushGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   };
 }
 
+/**
+ * A fern: a crown of fronds from one root, each a card painted with a frond
+ * (render/leafpaint.ts), rising and then arching out and down in two segments. Bracken
+ * and lady fern stand knee to waist high; the instance scale spreads that.
+ */
+function fernGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+  const rnd = rng(seed * 6007 + 3);
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const uv: number[] = [];
+  const col: number[] = [];
+  const c = new THREE.Color();
+  const fronds = near ? 9 : 6;
+  const cell = leafCellUv('frond', 0);
+  for (let f = 0; f < fronds; f++) {
+    const a = (f / fronds) * Math.PI * 2 + rnd() * 0.5;
+    const dx = Math.cos(a);
+    const dz = Math.sin(a);
+    const L = 0.8 + rnd() * 0.45;
+    const rise = 0.55 + rnd() * 0.35;
+    const width = 0.34 + rnd() * 0.1;
+    c.setHex(pal.fern[f % pal.fern.length]!);
+    // Spine: root, the arch's top two thirds out, the drooping tip.
+    const spine = [
+      [0, 0.02, 0],
+      [dx * L * 0.45, L * rise, dz * L * 0.45],
+      [dx * L, L * rise * 0.55, dz * L],
+    ];
+    // Across: horizontal, tipped a little so a frond is seen from above and from the side.
+    const tilt = 0.35 + rnd() * 0.3;
+    const px = -dz * Math.cos(tilt);
+    const py = Math.sin(tilt);
+    const pz = dx * Math.cos(tilt);
+    for (let seg = 0; seg < 2; seg++) {
+      const p0 = spine[seg]!;
+      const p1 = spine[seg + 1]!;
+      const v0 = cell.v0 + (cell.v1 - cell.v0) * (seg / 2);
+      const v1 = cell.v0 + (cell.v1 - cell.v0) * ((seg + 1) / 2);
+      const w0 = width * (seg === 0 ? 0.55 : 1);
+      const w1 = width * (seg === 0 ? 1 : 0.6);
+      const corner = (p: number[], w: number, side: number, u: number, v: number): void => {
+        pos.push(p[0]! + px * w * side, p[1]! + py * w * side, p[2]! + pz * w * side);
+        nor.push(0, 1, 0);
+        uv.push(u, v);
+        col.push(c.r, c.g, c.b);
+      };
+      corner(p0, w0, -1, cell.u0, v0);
+      corner(p0, w0, 1, cell.u1, v0);
+      corner(p1, w1, 1, cell.u1, v1);
+      corner(p0, w0, -1, cell.u0, v0);
+      corner(p1, w1, 1, cell.u1, v1);
+      corner(p1, w1, -1, cell.u0, v1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return { wood: null, leaves: finishCrown(g, 0, 0.35, 0, 1.1, 0.6, 1.1) };
+}
+
+/**
+ * A juniper: the bor's dark column, taller than wide, of needle masses stacked on a
+ * short stem, narrowing to a blunt point.
+ */
+function juniperGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+  const rnd = rng(seed * 4099 + 11);
+  const H = 2.2 + rnd() * 1.2;
+  const wood = [tube([{ x: 0, y: -0.2, z: 0, r: 0.07 }, { x: 0, y: H * 0.5, z: 0, r: 0.04 }], near ? 5 : 4, () => pal.twig)];
+  const leaves: THREE.BufferGeometry[] = [];
+  const masses = near ? 5 : 3;
+  for (let k = 0; k < masses; k++) {
+    const t = (k + 0.5) / masses;
+    const r = 0.55 * (1 - 0.55 * t) + 0.12;
+    leaves.push(blob((rnd() - 0.5) * 0.15, H * (0.12 + 0.8 * t), (rnd() - 0.5) * 0.15, r, H / masses * 0.8, r, rotated(pal.juniper, k), seed * 17 + k));
+  }
+  return {
+    wood: mergeGeometries(wood.map(asFlat)),
+    leaves: finishCrown(mergeGeometries(leaves.map(asFlat)), 0, H * 0.5, 0, 0.7, H * 0.55, 0.7),
+  };
+}
+
 const material = applyComicShading(
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+  // Leaves are cards (see `blob`): textured, seen from both sides, cut out by the
+  // atlas's alpha. Wood samples the atlas's solid cell and is closed, so its back faces
+  // are never seen.
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, map: leafAtlas(), side: THREE.DoubleSide }),
   { contourStrength: 0, stippleStrength: 0, shadowWarmth: 0.3 },
 );
+/**
+ * Leaf cards cast their painted outline, not their square, from either face. Wood casts
+ * from its back faces only, as three's default shadow side does for a closed solid:
+ * drawn from both, its lit faces shadowed themselves in fine stripes.
+ */
+const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide });
+depthMaterial.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float aWood;\nattribute float aKind;\nvarying float vWood;\nvarying float vKind;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWood = aWood;\nvKind = aKind;');
+  // Undergrowth (fern, juniper) casts no shadow: under the trees it would be shadow in
+  // shadow, and it was a shadow-pass draw for every bucket of it.
+  shader.fragmentShader = `varying float vWood;\nvarying float vKind;\n${shader.fragmentShader.replace(
+    'void main() {',
+    'void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;',
+  )}`;
+};
+depthMaterial.customProgramCacheKey = () => 'tree-depth-v2';
+applyBarkMapping(depthMaterial);
+// Leaves take no sun shadow: self-shadowed crowns crawl with triangle-sized acne. Wood
+// does. One program for both, told apart per vertex by `aWood`.
+{
+  const compileComic = material.onBeforeCompile;
+  const shadowTest = '( directLight.visible && receiveShadow )';
+  material.onBeforeCompile = (shader, renderer) => {
+    compileComic.call(material, shader, renderer);
+    // The test that guards the DIRECTIONAL shadow lookup: the last one before it.
+    const lookup = shader.fragmentShader.indexOf('directionalShadowMap[ i ]');
+    const at = lookup < 0 ? -1 : shader.fragmentShader.lastIndexOf(shadowTest, lookup);
+    if (at < 0) throw new Error('Tree shader: directional shadow test not found');
+    shader.fragmentShader =
+      shader.fragmentShader.slice(0, at) +
+      '( directLight.visible && receiveShadow && vWood > 0.5 )' +
+      shader.fragmentShader.slice(at + shadowTest.length);
+    injectSeason(shader);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute float aWood;
+attribute float aKind;
+varying float vWood;
+varying float vUnderFade;`)
+      // Leaves take the season's colour, each tree at its own pace: its random comes
+      // from the tint the impostor also carries, so model and impostor turn together.
+      .replace('#include <color_vertex>', `#include <color_vertex>
+#if defined( USE_COLOR ) && defined( USE_INSTANCING_COLOR )
+{
+  float tint = instanceColor.r;
+  if ( aWood < 0.5 ) vColor.rgb = seasonLeaf( vColor.rgb, int( aKind + 0.5 ), ${SEASON_TREE_RANDOM_GLSL} );
+}
+#endif`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vWood = aWood;
+// Undergrowth dissolves over UNDERGROWTH_FADE, tree by tree at its foot, by coverage:
+// past it the forest stops drawing it at all (world/forest.ts).
+vUnderFade = 1.0;
+#ifdef USE_INSTANCING
+if ( aKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) {
+  vec3 underFoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+  vUnderFade = 1.0 - smoothstep( ${UNDERGROWTH_FADE_FROM_M.toFixed(1)}, ${UNDERGROWTH_FADE_TO_M.toFixed(1)}, length( cameraPosition.xz - underFoot.xz ) );
+}
+#endif`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying float vWood;
+varying float vUnderFade;`)
+      // A leaf card's edge from the atlas's coverage, sharpened to about a pixel and
+      // widened as it minifies (mips average leaf and gap and would thin the crown with
+      // distance), as the grass does. Under MSAA the coverage resolves to a soft edge.
+      .replace('#include <map_fragment>', `#include <map_fragment>
+// Only the leaf cards are two-sided. Wood draws its front faces as before: the
+// spruce's tiers are open shells, and their backs fought their fronts in stripes.
+if ( vWood > 0.5 && !gl_FrontFacing ) discard;
+{
+  vec2 leafTexel = vMapUv * vec2( textureSize( map, 0 ) );
+  float leafMip = max( 0.0, 0.5 * log2( max( dot( dFdx( leafTexel ), dFdx( leafTexel ) ), dot( dFdy( leafTexel ), dFdy( leafTexel ) ) ) ) );
+  float leafA = diffuseColor.a * ( 1.0 + leafMip * 0.22 );
+  diffuseColor.a = clamp( ( leafA - 0.5 ) / max( fwidth( leafA ), 0.0001 ) + 0.5, 0.0, 1.0 ) * vUnderFade;
+  if ( diffuseColor.a < 0.02 ) discard;
+}`)
+      // Both faces of a leaf card are lit by its crown normal (see \`finishCrown\`): three
+      // flips the normal of a back face, which turned half the cards of a crown dark.
+      .replace(
+        '#include <normal_fragment_begin>',
+        THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', 'normal *= vWood > 0.5 ? faceDirection : 1.0;'),
+      );
+  };
+  const comicKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-cards-v3`;
+}
+// Bark (render/leafpaint.ts): wood whose texture coordinates carry a bark offset.
+applyBarkMapping(material);
+
+/** Wood and leaves merged, tagged per vertex: see `TreePart`. */
+function mergeTreeParts(wood: THREE.BufferGeometry | null, leaves: THREE.BufferGeometry | null, kind: TreeKind): THREE.BufferGeometry {
+  const tagged = ([[wood, 1], [leaves, 0]] as const)
+    .filter(([g]) => g !== null)
+    .map(([g, tag]) => {
+      // Every part needs texture coordinates now, the spruce's untextured cones too.
+      g = asFlat(g!);
+      g.setAttribute('aWood', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(tag), 1));
+      return g;
+    });
+  const merged = tagged.length === 1 ? tagged[0]! : mergeGeometries(tagged);
+  if (!merged) throw new Error('Tree parts could not be merged');
+  // The kind, for the season's leaf colours (render/season.ts).
+  merged.setAttribute('aKind', new THREE.Float32BufferAttribute(new Float32Array(merged.getAttribute('position').count).fill(kind), 1));
+  return merged;
+}
+
+/** Which leaf painting each kind's crown wears (render/leafpaint.ts). */
+const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
+  [TreeKind.Birch]: 'small',
+  [TreeKind.Spruce]: 'needle',
+  [TreeKind.Bush]: 'broad',
+  [TreeKind.Lime]: 'broad',
+  [TreeKind.Pine]: 'needle',
+  [TreeKind.Aspen]: 'small',
+  [TreeKind.Oak]: 'broad',
+  [TreeKind.Maple]: 'broad',
+  [TreeKind.Alder]: 'small',
+  [TreeKind.Willow]: 'small',
+  [TreeKind.Rowan]: 'small',
+  [TreeKind.Fern]: 'frond',
+  [TreeKind.Juniper]: 'needle',
+};
+
+/** Kinds from this one on are undergrowth: fern and juniper. */
+export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
+/** Undergrowth dissolves between these camera distances and is not drawn past them. */
+export const UNDERGROWTH_FADE_FROM_M = 55;
+export const UNDERGROWTH_FADE_TO_M = 75;
 
 const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Birch]: 5,
@@ -982,6 +1395,8 @@ const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Alder]: 3,
   [TreeKind.Willow]: 3,
   [TreeKind.Rowan]: 3,
+  [TreeKind.Fern]: 4,
+  [TreeKind.Juniper]: 3,
 };
 
 let variants: readonly TreeVariant[][] | null = null;
@@ -1002,22 +1417,21 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
       [TreeKind.Alder]: alderGeometry,
       [TreeKind.Willow]: willowGeometry,
       [TreeKind.Rowan]: rowanGeometry,
+      [TreeKind.Fern]: fernGeometry,
+      [TreeKind.Juniper]: juniperGeometry,
     };
-    const lod = ({ wood, leaves }: TreeShape): TreeLod => {
-      const parts: TreePart[] = [];
-      for (const [geometry, foliage] of [[wood, false], [leaves, true]] as const) {
-        if (!geometry) continue;
-        geometry.computeBoundingSphere();
-        parts.push({ geometry, material, depthMaterial: null, foliage });
-      }
-      return parts;
+    const lod = ({ wood, leaves }: TreeShape, kind: TreeKind): TreeLod => {
+      const geometry = mergeTreeParts(wood, leaves, kind);
+      geometry.computeBoundingSphere();
+      return [{ geometry, material, depthMaterial }];
     };
-    variants = TREE_KINDS.map((kind) =>
-      Array.from({ length: VARIANTS[kind] }, (_, seed) => ({
-        near: lod(build[kind](seed + 1, pal, true)),
-        far: lod(build[kind](seed + 1, pal, false)),
-      })),
-    );
+    variants = TREE_KINDS.map((kind) => {
+      leafSprite = LEAF_SPRITES[kind];
+      return Array.from({ length: VARIANTS[kind] }, (_, seed) => ({
+        near: lod(build[kind](seed + 1, pal, true), kind),
+        far: lod(build[kind](seed + 1, pal, false), kind),
+      }));
+    });
   }
   return Promise.resolve(variants);
 }

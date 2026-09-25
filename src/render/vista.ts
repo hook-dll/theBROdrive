@@ -6,6 +6,7 @@ import { applyComicShading } from './comic';
 
 import { DESERT_TILE_SIZE } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
+import { newSeasonState, type SeasonState } from '../world/season';
 import { vistaGroundAt } from '../world/vistaground';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
@@ -199,15 +200,17 @@ const MESA_MATERIAL = applyCloudShadow(
 
 
 // Same authored shading as streamed terrain, used only where both terrain systems
-// overlap. It draws colour but not depth, so the fine tiles win without corrupting
-// the depth of the distant vista, mesas, fog, or the post-process.
-const VISTA_OVERLAP_MATERIAL = applyCloudShadow(
+// overlap. The fine tiles must win over it, so it writes depth only AT the far plane
+// (see `farDepthOnly`): nearer than the sky dome, which is drawn after the opaque
+// world and depth-tested there, and farther than anything real, so the tiles still
+// replace it and the post pass still reads it as far as it did when it wrote none.
+const VISTA_OVERLAP_MATERIAL = farDepthOnly(applyCloudShadow(
   applyComicShading(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.93,
       metalness: 0,
-      depthWrite: false,
+      depthWrite: true,
     }),
     {
       lightingStrength: 0,
@@ -216,7 +219,22 @@ const VISTA_OVERLAP_MATERIAL = applyCloudShadow(
       spotlightNormals: 'smooth',
     },
   ),
-);
+));
+
+/** Puts a material's depth just inside the far plane, in front of the sky dome's. */
+function farDepthOnly<T extends THREE.Material>(material: T): T {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      '#include <project_vertex>\ngl_Position.z = gl_Position.w * 0.99999;',
+    );
+  };
+  const previousKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:far-depth`;
+  return material;
+}
 
 
 function smoothstep01(t: number): number {
@@ -296,6 +314,12 @@ function renderedGroundHeightAt(
 }
 
 export class VistaMesh {
+  /**
+   * The season the ground is coloured for, updated every frame by the caller. A cell
+   * takes it when it is sampled, and keeps it while cached: the cache holds the last
+   * few kilometres, over which the season does not visibly move.
+   */
+  readonly season: SeasonState = newSeasonState();
   private readonly mesh: THREE.Mesh;
   private readonly mesaMesh: THREE.Mesh;
   private geometry: THREE.BufferGeometry | null = null;
@@ -373,7 +397,12 @@ export class VistaMesh {
       new THREE.BufferGeometry(),
       [VISTA_OVERLAP_MATERIAL, TERRAIN_MATERIAL],
     );
-    this.mesh.renderOrder = -1;
+    // After the tiles (0): the vista lies under them wherever both are drawn, and drawn
+    // first it was shaded in full there and then painted over — 2.7 ms at 1.4 Mpx. The
+    // outer band is ordinary depth-written ground, so order changes only who pays; the
+    // inner band writes its depth at the far plane (`farDepthOnly`), so the tiles in
+    // front of it still win. Before the sky dome (5), which fills only what is left.
+    this.mesh.renderOrder = 1;
     this.mesaMesh = new THREE.Mesh(new THREE.BufferGeometry(), MESA_MATERIAL);
     // Draw mesas before both vista bands. The colour-only inner vista can then cover
     // mesa fragments that are behind its ground without writing the overlap depth that
@@ -460,6 +489,7 @@ export class VistaMesh {
         cornerZ: next.cornerZ,
         originX: ox,
         originZ: oz,
+        season: this.season,
       };
       this.worker.postMessage(request);
       return;
@@ -983,7 +1013,7 @@ export class VistaMesh {
         const vi = i * 3;
         const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
         const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-        horizon[i] = vistaGroundAt(this.terrain, absoluteX, absoluteZ, radius, reliefWeight, colorsIn, vi);
+        horizon[i] = vistaGroundAt(this.terrain, absoluteX, absoluteZ, radius, reliefWeight, colorsIn, vi, this.season);
       }
     }
     const sample = this.buildGroundSample(cx, cz, horizon, colorsIn);

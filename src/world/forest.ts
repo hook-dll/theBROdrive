@@ -3,21 +3,33 @@ import * as THREE from 'three';
 import { hashUnit3 } from '../core/rng';
 import { DESERT_TILE_SIZE, TREE_STRIDE } from './deserttiledata';
 import type { ForestWorkerRequest, ForestWorkerResponse } from './forestworker';
-import { bakeImpostorAtlas, ImpostorField, type ImpostorAtlas } from './impostors';
+import { FAR_WOODS_TO_M } from './farwoods';
+import { applyModelDissolve, bakeImpostorAtlas, ImpostorField, type ImpostorAtlas } from './impostors';
 import type { WorldOrigin } from './origin';
-import { loadTreeVariants, type TreeLod, type TreeVariant } from './props/trees';
+import {
+  loadTreeVariants,
+  UNDERGROWTH_FADE_TO_M,
+  UNDERGROWTH_KIND_FROM,
+  type TreeLod,
+  type TreeVariant,
+} from './props/trees';
 import type { Road } from './road';
 
 /**
  * THE FOREST: every tree, drawn in four ways by distance, none of them by scaling.
  *
  *   NEAR   within `NEAR_M`: the full model — bark marks, round leaf masses — casting
- *          shadows. Its detail is under a pixel past that.
- *   MID    to `SHADOW_M`: the thinned model, still casting shadows, so the edge where
- *          trees stop throwing shadows stays out at the shadow map's own reach.
- *   FAR    to `IMPOSTOR_FROM_M`: the thinned model, no shadow.
+ *          shadows.
+ *   MID    to `SHADOW_M`: the thinned model, still casting, past the range at which
+ *          every sun shadow has faded out (render/lightshader.ts), so the ring where
+ *          trees stop casting is never seen. Cut to 55 m, the edge of the tree shade
+ *          ran round the car along a wooded road: dappled grass near, lit grass past.
+ *   FAR    to `IMPOSTOR_FROM_M`: the thinned model, no shadow, handing over to its
+ *          impostor across `IMPOSTOR_BLEND_M`.
  *   IMPOSTOR  to `IMPOSTOR_TO_M`: a camera-facing quad baked from the far model
- *          (world/impostors.ts), dissolving into the canopy blanket at the far end.
+ *          (world/impostors.ts). Past it one tree of a wood in five goes on, widened,
+ *          to `FAR_WOODS_TO_M` (world/farwoods.ts), and the canopy blanket rises only
+ *          beyond that, in the haze.
  *          A tree standing OUTSIDE a wood — belt, copse, a wood's edge, a lone tree —
  *          goes on as an impostor to `IMPOSTOR_OPEN_TO_M`: the blanket only draws
  *          woods, and a farmland horizon is made of exactly those trees.
@@ -28,25 +40,35 @@ import type { Road } from './road';
  * same trees, so the swap at `IMPOSTOR_FROM_M` changes how a tree is drawn, never
  * which tree is there.
  *
- * Model buckets are world-wide instanced meshes — one per kind, variant, level and
- * part, a hundred-odd instanced draws for the whole wood — refilled every `REBUCKET_M` of camera
- * travel. The impostor shader measures its side of the swap from the same point the
- * refill used (`setBucketCentre`), so no tree is ever drawn twice or not at all.
+ * Model buckets are world-wide instanced meshes — one per kind, variant and level,
+ * about a hundred instanced draws for the whole wood — refilled every `REBUCKET_M` of camera
+ * travel. The handover to impostors does NOT wait for a refill: models are bucketed a
+ * refill's travel past the band, and both sides measure the band from the camera every
+ * frame, dissolving into each other (see world/impostors.ts).
  */
 
 const NEAR_M = 60;
 const SHADOW_M = 110;
-export const IMPOSTOR_FROM_M = 420;
+export const IMPOSTOR_FROM_M = 150;
+/** Width of the band, centred on `IMPOSTOR_FROM_M`, where a model becomes its impostor. */
+const IMPOSTOR_BLEND_M = 30;
 export const IMPOSTOR_TO_M = 2000;
 /** How far a tree outside a wood stays drawn: the horizon's belts and copses. */
 export const IMPOSTOR_OPEN_TO_M = 6000;
 const REBUCKET_M = 14;
+/**
+ * Models are bucketed out to here: a tree that was just outside at one refill can
+ * still reach the far edge of the handover band before the next.
+ */
+const MODEL_REACH_M = IMPOSTOR_FROM_M + IMPOSTOR_BLEND_M / 2 + REBUCKET_M;
 const VARIANT_TAG = 0x46524553;
 const SHAPE_TAG = 0x53484150;
 /** Impostor tiles are kept out to this many tiles: the open trees' reach. */
 const IMPOSTOR_TILE_RADIUS = Math.ceil(IMPOSTOR_OPEN_TO_M / DESERT_TILE_SIZE) + 1;
 /** Within this many tiles a tile carries all its trees; past it only the open ones. */
 const FULL_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 1;
+/** Within this many tiles a far tile also carries its woods' far keepers (world/farwoods.ts). */
+const KEEPER_TILE_RADIUS = Math.ceil(FAR_WOODS_TO_M / DESERT_TILE_SIZE) + 1;
 /** Re-anchor the impostor buffer when the camera strays this far from its anchor. */
 const ANCHOR_REBASE_M = 20_000;
 
@@ -57,6 +79,8 @@ interface ImpostorTile {
   readonly trees: Float32Array;
   readonly count: number;
   readonly openOnly: boolean;
+  /** Whether an open-only tile also carries its woods' far keepers. */
+  readonly keepers: boolean;
 }
 
 interface TileTrees {
@@ -162,6 +186,11 @@ export class ForestRenderer {
   ) {
     void loadTreeVariants().then((variants) => {
       this.variants = variants;
+      for (const kind of variants) {
+        for (const variant of kind) {
+          for (const part of [...variant.near, ...variant.far]) applyModelDissolve(part.material, IMPOSTOR_FROM_M, IMPOSTOR_BLEND_M);
+        }
+      }
       this.buckets = variants.map((kind) =>
         kind.map((variant) => [
           this.makeBuckets(variant.near, true),
@@ -184,7 +213,7 @@ export class ForestRenderer {
   private maybeBake(): void {
     if (this.atlas || !this.renderer || !this.variants) return;
     this.atlas = bakeImpostorAtlas(this.renderer, this.variants);
-    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_TO_M, IMPOSTOR_OPEN_TO_M);
+    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_BLEND_M, IMPOSTOR_TO_M, IMPOSTOR_OPEN_TO_M, FAR_WOODS_TO_M);
     this.scene.add(this.impostors.mesh);
     // Tiles that arrived before the atlas existed are written now.
     for (const [key, tile] of this.impostorTiles) this.writeImpostorTile(key, tile);
@@ -216,8 +245,11 @@ export class ForestRenderer {
     const key = `${message.tx},${message.tz}`;
     if (this.inFlight === key) this.inFlight = null;
     if (this.wantsImpostorTile(message.tx, message.tz)) {
+      // The tint carries the tree's reach (world/impostors.ts): negative outside a wood,
+      // plus 10 for a wood's far keeper.
       for (let i = 0; i < message.count; i++) {
-        if (message.open[i]) message.trees[i * TREE_STRIDE + 6] = -message.trees[i * TREE_STRIDE + 6]!;
+        if (message.open[i] === 1) message.trees[i * TREE_STRIDE + 6] = -message.trees[i * TREE_STRIDE + 6]!;
+        else if (message.open[i] === 2) message.trees[i * TREE_STRIDE + 6] = message.trees[i * TREE_STRIDE + 6]! + 10;
       }
       const cleared = clearTrees(
         this.clearings,
@@ -226,7 +258,7 @@ export class ForestRenderer {
         message.trees,
         message.count,
       );
-      const tile = { tx: message.tx, tz: message.tz, trees: cleared.trees, count: cleared.count, openOnly: message.openOnly };
+      const tile = { tx: message.tx, tz: message.tz, trees: cleared.trees, count: cleared.count, openOnly: message.openOnly, keepers: message.keepers };
       this.impostorTiles.set(key, tile);
       this.writeImpostorTile(key, tile);
     }
@@ -235,6 +267,10 @@ export class ForestRenderer {
 
   private wantsImpostorTile(tx: number, tz: number): boolean {
     return Math.abs(tx - this.centreTx) <= IMPOSTOR_TILE_RADIUS && Math.abs(tz - this.centreTz) <= IMPOSTOR_TILE_RADIUS;
+  }
+
+  private wantsKeepers(tx: number, tz: number): boolean {
+    return Math.abs(tx - this.centreTx) <= KEEPER_TILE_RADIUS && Math.abs(tz - this.centreTz) <= KEEPER_TILE_RADIUS;
   }
 
   private wantsFullTile(tx: number, tz: number): boolean {
@@ -257,14 +293,20 @@ export class ForestRenderer {
         const tx = this.centreTx + dx;
         const tz = this.centreTz + dz;
         const have = this.impostorTiles.get(`${tx},${tz}`);
-        if (have && !(have.openOnly && this.wantsFullTile(tx, tz))) continue;
+        if (have && !(have.openOnly && (this.wantsFullTile(tx, tz) || (!have.keepers && this.wantsKeepers(tx, tz))))) continue;
         best = [tx, tz];
         bestD = d;
       }
     }
     if (!best) return;
     this.inFlight = `${best[0]},${best[1]}`;
-    const request: ForestWorkerRequest = { type: 'tile', tx: best[0], tz: best[1], openOnly: !this.wantsFullTile(best[0], best[1]) };
+    const request: ForestWorkerRequest = {
+      type: 'tile',
+      tx: best[0],
+      tz: best[1],
+      openOnly: !this.wantsFullTile(best[0], best[1]),
+      keepers: this.wantsKeepers(best[0], best[1]),
+    };
     this.worker.postMessage(request);
   }
 
@@ -288,16 +330,18 @@ export class ForestRenderer {
       a0[at + 1] = t[o + 1]! - 0.15;
       a0[at + 2] = wz - this.anchorZ;
       a0[at + 3] = cell.drop * s * shape.sy;
-      a1[at] = cell.index;
+      // The first view's cell, plus the tree's own turn as a fraction (world/impostors.ts).
+      const turn = t[o + 4]! / (Math.PI * 2);
+      a1[at] = cell.index + (turn - Math.floor(turn)) * 0.999;
       a1[at + 1] = cell.width * s * shape.sx;
       a1[at + 2] = cell.height * s * shape.sy;
       a1[at + 3] = t[o + 6]!;
-    });
+    }, centreX - this.anchorX, centreZ - this.anchorZ, DESERT_TILE_SIZE * 0.75);
   }
 
   private makeBuckets(lod: TreeLod, near: boolean): Bucket[] {
     return lod.map((part) => {
-      const mesh = this.makeMesh(part.geometry, part.material, part.depthMaterial, part.foliage, near, 64);
+      const mesh = this.makeMesh(part.geometry, part.material, part.depthMaterial, near, 64);
       return { mesh, count: 0 };
     });
   }
@@ -306,7 +350,6 @@ export class ForestRenderer {
     geometry: THREE.BufferGeometry,
     material: THREE.Material,
     depth: THREE.Material | null,
-    foliage: boolean,
     near: boolean,
     capacity: number,
   ): THREE.InstancedMesh {
@@ -314,10 +357,10 @@ export class ForestRenderer {
     mesh.count = 0;
     mesh.frustumCulled = false;
     mesh.castShadow = near;
-    // Crowns take no shadow of their own: card foliage self-shadowing is what crawls.
-    mesh.receiveShadow = !foliage;
+    // Wood only: the tree material keeps shadow off its leaves (world/props/trees.ts).
+    mesh.receiveShadow = true;
     if (depth) mesh.customDepthMaterial = depth;
-    mesh.userData.foliage = foliage;
+    mesh.userData.tree = true;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.scene.add(mesh);
     return mesh;
@@ -344,9 +387,14 @@ export class ForestRenderer {
     if (this.tiles.delete(key)) this.dirty = true;
   }
 
-  /** `x`/`z` are the camera's ABSOLUTE world position. */
-  update(x: number, z: number): void {
+  /**
+   * `x`/`z` are the camera's ABSOLUTE world position; `fx`/`fz` its look direction on
+   * the ground and `halfFov` half its horizontal field of view, radians: impostors
+   * out of view are not drawn (world/impostors.ts).
+   */
+  update(x: number, z: number, fx: number, fz: number, halfFov: number): void {
     this.updateImpostorWindow(x, z);
+    this.impostors?.cull(x - this.anchorX, z - this.anchorZ, fx, fz, halfFov);
     if (!this.variants) return;
     const moved = Math.hypot(x - this.lastX, z - this.lastZ);
     if (
@@ -366,7 +414,6 @@ export class ForestRenderer {
     if (this.impostors) {
       this.impostors.mesh.position.set(this.anchorX - this.origin.x, 0, this.anchorZ - this.origin.z);
       this.impostors.mesh.updateMatrix();
-      this.impostors.setBucketCentre(x - this.anchorX, z - this.anchorZ);
     }
   }
 
@@ -393,7 +440,7 @@ export class ForestRenderer {
   private rebucket(camX: number, camZ: number): void {
     const variants = this.variants!;
     for (const kind of this.buckets) for (const variant of kind) for (const lod of variant) for (const b of lod) b.count = 0;
-    const reach = IMPOSTOR_FROM_M + DESERT_TILE_SIZE;
+    const reach = MODEL_REACH_M + DESERT_TILE_SIZE;
     for (const tile of this.tiles.values()) {
       // A whole tile out of reach is skipped without looking at its trees.
       if (Math.abs(tile.centreX - camX) > reach || Math.abs(tile.centreZ - camZ) > reach) continue;
@@ -403,8 +450,10 @@ export class ForestRenderer {
         const wx = tile.centreX + t[o]!;
         const wz = tile.centreZ + t[o + 2]!;
         const d = Math.hypot(wx - camX, wz - camZ);
-        if (d >= IMPOSTOR_FROM_M) continue;
+        if (d >= MODEL_REACH_M) continue;
         const kind = t[o + 5]!;
+        // Undergrowth has dissolved by here (world/props/trees.ts).
+        if (kind >= UNDERGROWTH_KIND_FROM && d >= UNDERGROWTH_FADE_TO_M) continue;
         treeShape(wx, wz, variants[kind]!.length, shape);
         const lod = d < NEAR_M ? 0 : d < SHADOW_M ? 1 : 2;
         const s = t[o + 3]!;
@@ -421,6 +470,9 @@ export class ForestRenderer {
         for (const lod of variant) {
           for (const b of lod) {
             b.mesh.count = b.count;
+            // An empty bucket is still a draw, and its shadow another: most kinds are
+            // absent from any one stretch of road.
+            b.mesh.visible = b.count > 0;
             b.mesh.instanceMatrix.needsUpdate = true;
             if (b.mesh.instanceColor) b.mesh.instanceColor.needsUpdate = true;
           }
@@ -438,7 +490,6 @@ export class ForestRenderer {
         mesh.geometry,
         mesh.material as THREE.Material,
         (mesh.customDepthMaterial as THREE.Material | undefined) ?? null,
-        mesh.userData.foliage === true,
         mesh.castShadow,
         capacity * 2,
       );

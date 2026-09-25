@@ -61,6 +61,24 @@ const LAMP_FULL_ELEVATION = -0.14;
 const SHADOW_MIN_ELEVATION = 0.06;
 const SHADOW_FADE_ELEVATION = 0.035;
 /**
+ * The shadow direction moves in steps of this many radians (0.15°), never smoothly.
+ *
+ * The Sun turns a quarter of a degree a second at the default day length. A shadow
+ * map re-aimed every frame lays a new texel lattice over the world every frame, and
+ * every shadow edge crawls through it — a shimmer along every trunk and crown shadow
+ * that the comic light bands turn into flicker. Held still between steps, the lattice
+ * is fixed to the world (see `stabilizeShadowTarget`); a step moves the tip of a 15 m
+ * tree's shadow 4 cm, under one 7 cm texel.
+ */
+const SHADOW_DIR_STEP = 0.0026;
+/**
+ * How far ahead of the camera, as a share of the frustum's half-size, the shadow map
+ * is centred. Centred on the eye, half its texels were spent behind the camera and the
+ * edge where shadows stop sat 72 m ahead, in plain view; led forward, the edge sits
+ * past the range at which shadows fade out (`SHADOW_FADE_TO_M` in lightshader.ts).
+ */
+const SHADOW_LEAD = 0.42;
+/**
  * The key light's share of the scene's light at which its shadow fades out, and the
  * share at which it is fully drawn.
  *
@@ -142,7 +160,7 @@ const CELESTIAL_ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
 
 // Countryside: a paler, softer zenith than the desert's; mid-latitude summer air
 // carries more moisture and the sky is less deep.
-const C_DAY_ZENITH = new THREE.Color().setStyle('#5a90cf');
+const C_DAY_ZENITH = new THREE.Color().setStyle('#6c93bf');
 /**
  * The pale band the daytime sky fades to at the horizon, and — because `fog.color`
  * copies it — the colour the far desert dissolves into.
@@ -151,16 +169,17 @@ const C_DAY_ZENITH = new THREE.Color().setStyle('#5a90cf');
  * only a restrained cyan bias, so the saturated blue remains overhead instead of
  * reaching the desert skyline.
  */
-const C_DAY_HORIZON = new THREE.Color().setStyle('#dceff8');
+const C_DAY_HORIZON = new THREE.Color().setStyle('#e4e8e2');
 const C_NIGHT_ZENITH = new THREE.Color().setStyle('#03040a');
 const C_NIGHT_HORIZON = new THREE.Color().setStyle('#0d1424');
 const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
 const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
-// Countryside: the fill from below is a soft violet, so shade reads as colour (the
-// Firewatch / A Short Hike shade), never as a dark hole.
-const C_GROUND = new THREE.Color().setStyle('#8f89b5');
+// Countryside: the fill from below is warm earth, so shade reads as colour and never
+// as a dark hole — Shishkin's shade is olive and umber (docs/shishkin.md). It was a
+// soft violet, which with the sky's blue turned every shaded needle teal.
+const C_GROUND = new THREE.Color().setStyle('#a39373');
 /** Daylight sky illumination gain; the warm ground bounce is compensated below. */
 const DAY_SKY_FILL_BOOST = 1.6;
 /**
@@ -336,6 +355,9 @@ void main() {
   // from the camera: normalising it gives the view ray direction directly.
   vDir = normalize(position);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  // On the far plane (a hair inside it, so it is not clipped): drawn after the opaque
+  // world, the dome is depth-tested there and shades only the sky left showing.
+  gl_Position.z = gl_Position.w * 0.999999;
 }
 `;
 
@@ -360,6 +382,8 @@ uniform float uMoonAmount;
 uniform float uAntiSolar;
 /** Fraction of the sky the cirrus deck covers, 0..1. */
 uniform float uCloudCover;
+/** How much of the sky fair-weather cumulus covers, 0..1. */
+uniform float uCumulus;
 /** Overall visibility of the deck: 1 in daylight, 0 in deep night. */
 uniform float uCloudAmount;
 /** Seconds, wrapped. Drifts the deck downwind. */
@@ -417,6 +441,33 @@ vec2 moonTextureUv(vec3 offset) {
   return vec2(dot(offset, right), dot(offset, up));
 }
 
+
+/** Distance to the nearest of one jittered point per cell: round cells, 0 at a point. */
+float cumulusCells(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float best = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 o = vec2(float(x), float(y));
+      vec2 c = vec2(cloudHash(i + o), cloudHash(i + o + 17.31));
+      best = min(best, length(o + c - f));
+    }
+  }
+  return best;
+}
+
+/**
+ * Cumulus as heaped puffs: round cells at two sizes (the heads and the cauliflower on
+ * them), gated by slow noise so they gather in fields and leave blue lanes between,
+ * and edged by fine noise so no puff is a clean circle.
+ */
+float cumulusBody(vec2 p) {
+  float heads = 1.0 - cumulusCells(p * 0.9);
+  float florets = 1.0 - cumulusCells(p * 2.6 + 3.7);
+  float field = cloudFbm(p * 0.22 + 11.0);
+  return (heads * 0.55 + florets * 0.3 + cloudNoise(p * 7.0) * 0.1) * smoothstep(0.3, 0.58, field) + 0.08 * field;
+}
 
 /**
  * McEwen's lunar-Lambert photometric function.
@@ -525,7 +576,37 @@ void main() {
   // low sun and go gold at dusk, with no second palette to author or keep in step.
   float lit = 0.45 + 0.55 * max(sd, 0.0);
   vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
-  col = mix(col, cloudCol, deck);
+  col = mix(col, cloudCol, deck * 0.55);
+
+  // --- Cumulus ---------------------------------------------------------------
+  //
+  // The middle belt's summer sky is not a clear dome with a veil of ice: it is fair-
+  // weather cumulus, white heaped tops over flat grey-lilac bases, thickest toward the
+  // horizon where perspective crowds them (Shishkin's "Rye" and "Glade",
+  // docs/shishkin.md). A lower, coarser plane than the cirrus: its perspective packs
+  // the puffs into banks near the horizon for nothing. Shading is two taps: how thick
+  // the cloud is here (thick is darker, the base), and how thick it is a step toward
+  // the sun (cloud between here and the sun puts this side in shade). The rim that
+  // faces the sun and is thin is lit through: a silver lining.
+  {
+    // Projected onto a plane seen from well below it (the + 0.22), so the puffs near
+    // the horizon are foreshortened but keep their heads, not drawn out into streaks.
+    vec2 cu = dir.xz / (max(dir.y, 0.0) + 0.22) * 1.1 + vec2(uCloudTime * 0.004, uCloudTime * 0.0015);
+    float body = cumulusBody(cu);
+    float th = 0.58 - 0.3 * uCumulus;
+    float dens = smoothstep(th, th + 0.035, body);
+    float thick = smoothstep(th + 0.08, th + 0.4, body);
+    vec2 toSun = normalize(uSunDir.xz + vec2(1e-4)) * 0.18;
+    float shaded = smoothstep(th + 0.05, th + 0.35, cumulusBody(cu + toSun)) * (1.0 - smoothstep(-0.2, 0.6, sd) * 0.4);
+    vec3 cuLit = mix(vec3(1.0), uSunColor, 0.25);
+    vec3 cuShade = mix(uZenith, vec3(0.6, 0.61, 0.67), 0.7);
+    vec3 cuCol = mix(cuLit, cuShade, clamp(0.45 * thick + 0.45 * shaded, 0.0, 1.0));
+    cuCol += uSunColor * (1.0 - thick) * pow(max(sd, 0.0), 5.0) * 0.35;
+    // Distant cloud sinks into the horizon's haze, as the far land does.
+    cuCol = mix(uHorizon, cuCol, 0.35 + 0.65 * smoothstep(0.02, 0.3, dir.y));
+    dens *= smoothstep(0.012, 0.08, dir.y) * uCloudAmount;
+    col = mix(col, cuCol, dens);
+  }
 
   // Disc edges are one-pixel derivative transitions. The old fixed dot-product
   // width was wider than the Moon itself and mixed its dark limb into nearby sky.
@@ -696,6 +777,8 @@ export class Sky {
   private readonly uAntiSolar = { value: 0 };
   /** Fraction of sky the cirrus deck covers; straight from the sky gradient. */
   private readonly uCloudCover = { value: 0 };
+  /** Cumulus cover (see the dome shader), from the same sky gradient. */
+  private readonly uCumulus = { value: 0 };
   /**
    * Overall deck visibility. Falls to zero as night lands, because the dome cannot
    * depth-test against the star field and so cannot occlude a star — see the note in
@@ -710,7 +793,9 @@ export class Sky {
   private readonly _sunDir = new THREE.Vector3();
   private readonly _lightDir = new THREE.Vector3();
   /** Light direction with its elevation clamped, for the shadow camera only. */
-  private readonly _shadowDir = new THREE.Vector3();
+  private readonly _shadowDir = new THREE.Vector3(0, 0, 0);
+  /** Where `_shadowDir` would point this frame; it follows in SHADOW_DIR_STEP steps. */
+  private readonly _shadowDirWanted = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
   /** Orthonormal basis perpendicular to `_shadowDir`, rebuilt each frame it changes. */
   private readonly _shadowRight = new THREE.Vector3();
@@ -779,17 +864,23 @@ export class Sky {
         uMoonRadiance: this.uMoonRadiance,
         uAntiSolar: this.uAntiSolar,
         uCloudCover: this.uCloudCover,
+        uCumulus: this.uCumulus,
         uCloudAmount: this.uCloudAmount,
         uCloudTime: this.uCloudTime,
       },
       side: THREE.BackSide,
-      // The sky is the backdrop: draw first, never write depth, never test it,
-      // so opaque geometry simply paints over it.
+      // The sky is the backdrop, but drawn AFTER the opaque world, on the far plane and
+      // depth-tested, so its shader runs only where sky shows. Drawn first with no
+      // test (as it was), the cloud shader ran on every pixel of the screen and was
+      // then painted over: 3 ms of a 16 ms frame. Never writes depth: the post pass
+      // tells sky from ground by the far plane.
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
     });
     this.dome = new THREE.Mesh(domeGeometry, domeMaterial);
-    this.dome.renderOrder = -10;
+    // After everything opaque (0), before the grass (10+), which writes no depth and
+    // must lie over it; stars and planets are transparent and come after in any case.
+    this.dome.renderOrder = 5;
     this.dome.frustumCulled = false;
     this.root.add(this.dome);
 
@@ -856,6 +947,8 @@ export class Sky {
     cameraX: number,
     cameraY: number,
     cameraZ: number,
+    viewDirX = 0,
+    viewDirZ = 0,
   ): void {
     this.didBakeEnvironment = false;
     const g = skyGradientAt(s);
@@ -919,10 +1012,12 @@ export class Sky {
       smoothstep(0.0, 0.6, this.sunElevation) * 0.22;
     // A clear high Sun still overwhelms the eye. Sunset keeps its stronger,
     // mood-driven bloom; this floor prevents noon from becoming a safe white dot.
+    // Softer than the desert's: moist air spreads a high sun into the sky instead of
+    // leaving a hard white bloom round it, and the middle belt's noon is not a glare.
     const sunGlowIntensity = Math.max(
       authoredSunGlow,
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
-    );
+    ) * 0.65;
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     this.fog.color.copy(this._horizon);
     this.fog.density = BASE_FOG_DENSITY * g.haze;
@@ -952,6 +1047,7 @@ export class Sky {
     // gone by the time `night` reaches 1, past nautical dusk, because the dome cannot
     // occlude a star.
     this.uCloudCover.value = g.cloudCover;
+    this.uCumulus.value = g.cloudCover;
     this.uCloudAmount.value = 1 - night;
     this.uCloudTime.value = (performance.now() * 0.001) % 3600;
 
@@ -1044,6 +1140,13 @@ export class Sky {
     // metres away and the shadow camera no longer looks at you, so shadows
     // vanish. Follow the camera every frame to keep shadows alive anywhere.
     this._targetPos.set(cameraX, cameraY, cameraZ);
+    // Led forward along the view, flattened: see SHADOW_LEAD.
+    const viewFlat = Math.hypot(viewDirX, viewDirZ);
+    if (viewFlat > 1e-4) {
+      const lead = (SHADOW_LEAD * GRAPHICS_CONFIG.shadowFrustumHalfSize) / viewFlat;
+      this._targetPos.x += viewDirX * lead;
+      this._targetPos.z += viewDirZ * lead;
+    }
 
     // Shadow direction: the light's own direction, with its elevation lifted to
     // SHADOW_MIN_ELEVATION so a horizon sun cannot stretch every shadow across the
@@ -1056,9 +1159,14 @@ export class Sky {
     const elevation = Math.atan2(dir.y, horizontal);
     if (elevation < SHADOW_MIN_ELEVATION && horizontal > 1e-4) {
       const flat = Math.cos(SHADOW_MIN_ELEVATION) / horizontal;
-      this._shadowDir.set(dir.x * flat, Math.sin(SHADOW_MIN_ELEVATION), dir.z * flat);
+      this._shadowDirWanted.set(dir.x * flat, Math.sin(SHADOW_MIN_ELEVATION), dir.z * flat);
     } else {
-      this._shadowDir.copy(dir);
+      this._shadowDirWanted.copy(dir);
+    }
+    // Stepped, not smooth: see SHADOW_DIR_STEP. A jump (a new drive, the watch's fast
+    // forward) is simply a large step.
+    if (this._shadowDir.lengthSq() === 0 || this._shadowDir.angleTo(this._shadowDirWanted) >= SHADOW_DIR_STEP) {
+      this._shadowDir.copy(this._shadowDirWanted);
     }
     // `_targetPos` just followed the camera to a WORLD position that moves smoothly,
     // a fraction of a shadow-map texel every frame. Left as-is, every point in the

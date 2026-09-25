@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compileSafely } from '../render/compilesafe';
 import '../render/lightshader';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import {
@@ -570,9 +571,9 @@ export class Renderer {
     const previousTarget = this.renderer.getRenderTarget();
     try {
       this.renderer.setRenderTarget(this.hazeTarget);
-      const sceneReady = this.renderer.compileAsync(this.scene, this.camera);
+      const sceneReady = compileSafely(this.renderer, this.scene, this.camera);
       this.renderer.setRenderTarget(null);
-      const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
+      const postReady = compileSafely(this.renderer, this.hazeScene, this.hazeCamera);
       await Promise.all([sceneReady, postReady]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);

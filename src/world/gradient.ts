@@ -556,6 +556,21 @@ const AURORA_ONSET = 0.55;
 export function skyGradientAt(s: number): SkyGradient {
   const p = drift(s);
   const t = s / PALETTE_CYCLE_M;
+  if (COUNTRYSIDE) {
+    // THE MIDDLE BELT'S AIR. No desert dust: the turbid tan horizon, the long red
+    // sunsets and the haze thickening to three times the fog were a desert's, and they
+    // turned a Russian summer into a hot day. Moist air instead: a little haze that
+    // varies gently, no hue drift, and cloud (render/sky.ts draws cumulus off it).
+    return {
+      dust: 0.06 + 0.06 * (0.5 - 0.5 * Math.cos(2 * Math.PI * t)),
+      starDensity: 1 + p * 3.5,
+      galaxy: Math.min(1, Math.max(0, (p - 0.18) * 1.8)),
+      aurora: Math.min(1, Math.max(0, (p - AURORA_ONSET) / (1 - AURORA_ONSET)) ** 1.6),
+      skyHueShift: 0,
+      haze: 1.15 + 0.35 * (0.5 - 0.5 * Math.cos(4 * Math.PI * t)),
+      cloudCover: 0.55 + 0.2 * Math.sin(2 * Math.PI * 10 * t),
+    };
+  }
   return {
     dust: 0.5 - 0.5 * Math.cos(2 * Math.PI * t),
     starDensity: 1 + p * 3.5,

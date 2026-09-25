@@ -1,6 +1,7 @@
 import { Road } from '../world/road';
 import type { RoadSpine } from '../world/roadspine';
 import { Terrain } from '../world/terrain';
+import type { SeasonState } from '../world/season';
 import { vistaGroundAt } from '../world/vistaground';
 
 /**
@@ -39,6 +40,8 @@ export interface VistaWorkerSampleRequest {
   readonly cornerZ: number;
   readonly originX: number;
   readonly originZ: number;
+  /** The season to colour for (world/season.ts). */
+  readonly season: SeasonState;
 }
 
 export type VistaWorkerRequest =
@@ -125,7 +128,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
       const vi = i * 3;
       const absoluteX = request.cornerX + positions[vi]! + request.originX;
       const absoluteZ = request.cornerZ + positions[vi + 2]! + request.originZ;
-      horizon[i] = vistaGroundAt(terrain, absoluteX, absoluteZ, radius, reliefWeight, colors, vi);
+      horizon[i] = vistaGroundAt(terrain, absoluteX, absoluteZ, radius, reliefWeight, colors, vi, request.season);
     }
   }
 

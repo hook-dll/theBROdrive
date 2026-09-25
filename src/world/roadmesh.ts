@@ -3,11 +3,15 @@ import * as THREE from 'three';
 import { hash01, Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
-import { applyGroundSpotlightNormals } from '../render/comic';
+import { applyComicShading, applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
+import { DESERT_TILE_STEP, sampleGroundHeight } from './deserttiledata';
+import type { RoadDistance } from './roaddistance';
+import { shoulderWidthAt } from './shoulder';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
@@ -338,6 +342,30 @@ const roadBedMaterial = applyCloudShadow(
     }),
   ),
 );
+/** The country's bare shoulder (world/shoulder.ts). */
+const COUNTRY_SHOULDER = true;
+/** Lit as the ground is, so the strip is the ground's own colour where it meets it. */
+const shoulderMaterial = applyCloudShadow(
+  applyComicShading(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      // Crushed stone in earth (render/gravelpaint.ts), shade over the vertex colour.
+      map: gravelTexture(),
+      roughness: 0.95,
+      metalness: 0,
+      // It lies on the ground a few centimetres up; this keeps it on top where the
+      // tiles' interpolation brings them level with it.
+      polygonOffset: true,
+      // Units only: a slope factor would pull the tucked edge back out of the ground.
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: -2,
+    }),
+    { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
+  ),
+);
+const shoulderEarth = new THREE.Color(0xb3a48c);
+const shoulderGravel = new THREE.Color(0xbcb7ab);
+const shoulderColour = new THREE.Color();
 let textureGain = 1;
 let texturesAttached = false;
 
@@ -524,7 +552,11 @@ export class RoadMeshProvider implements ChunkProvider {
   /** The world seed. The director is asked per row and per marking quad. */
   private readonly seed: number;
 
-  constructor(seed: number) {
+  /**
+   * `roadDistance` lets the bare shoulder find the ground as the tiles draw it; without
+   * it (the labs) there is no shoulder.
+   */
+  constructor(seed: number, private readonly roadDistance: RoadDistance | null = null) {
     this.seed = seed;
     this.field = new SurfaceField(seed);
     this.mottleNoise = new Noise2D(seed ^ 0x5bf03635);
@@ -537,6 +569,152 @@ export class RoadMeshProvider implements ChunkProvider {
     let result = iterator.next();
     while (!result.done) result = iterator.next();
     return result.value;
+  }
+
+  /**
+   * The bare shoulder either side (world/shoulder.ts): a compacted ramp from the
+   * asphalt's edge down onto the ground, tucked under it at its outer edge.
+   *
+   * THE GROUND BESIDE THE ROAD IS NOT WHERE THE TERRAIN FUNCTION SAYS. The tiles are
+   * sunk 10 cm under the corridor (world/deserttiledata.ts `sampleGroundHeight`) and
+   * drawn from a 3 m lattice, so between their nodes the ground is a plane, not the
+   * function. Laid on the function, the strip floated up to 15 cm over the grass, with
+   * an inked rim along it and a wheel sinking through it. So it is laid on the tiles'
+   * own triangles (`visibleGroundY`), it has a collider, and its last column goes
+   * 4 cm under the ground so the grass cuts its edge.
+   */
+  private buildShoulder(ctx: ChunkContext, positions: Float32Array, sCount: number, latCount: number): { mesh: THREE.Mesh; vertices: Float32Array; indices: Uint32Array } {
+    const { sStart, road } = ctx;
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
+    const COLS = 4;
+    const ACROSS = [0, 0.3, 0.65, 1];
+    const verts = sCount * 2 * COLS;
+    const pos = new Float32Array(verts * 3);
+    const col = new Float32Array(verts * 3);
+    const uv = new Float32Array(verts * 2);
+    // The gravel tiles in road coordinates, from a base that is a whole number of
+    // tiles, so neighbouring chunks meet in phase and no float grows large.
+    const GRAVEL_BASE_M = GRAVEL_TILE_M * 200;
+    const uvBase = Math.floor(sStart / GRAVEL_BASE_M) * GRAVEL_BASE_M;
+    const index = new Uint32Array((sCount - 1) * 2 * (COLS - 1) * 6);
+    const p = new THREE.Vector3();
+    const ground = this.visibleGround(ctx);
+    let w = 0;
+    for (let si = 0; si < sCount; si++) {
+      const s = sStart + si * SURFACE_STEP;
+      const halfWidth = road.halfWidthAt(s);
+      for (let side = 0; side < 2; side++) {
+        const sign = side === 0 ? -1 : 1;
+        // Ragged where the grass meets it: a jitter per row on top of the slow wander.
+        const width = shoulderWidthAt(s, sign) + (hash01(this.seed, 0x5d, si + Math.round(sStart / SURFACE_STEP), side) - 0.5) * 0.3;
+        // The asphalt's own outermost vertex: the strip starts exactly on its edge.
+        const edge = (si * latCount + (side === 0 ? 0 : latCount - 1)) * 3;
+        const edgeY = positions[edge + 1]!;
+        const edgeGround = ground(positions[edge]! + ox, positions[edge + 2]! + oz);
+        for (let c = 0; c < COLS; c++) {
+          const t = ACROSS[c]!;
+          const vi = (si * 2 + side) * COLS + c;
+          if (c === 0) {
+            pos[vi * 3] = positions[edge]!;
+            pos[vi * 3 + 1] = edgeY - 0.004;
+            pos[vi * 3 + 2] = positions[edge + 2]!;
+          } else {
+            road.offsetPoint(s, sign * (halfWidth + width * t), p);
+            const g = ground(p.x, p.z);
+            // Down from the asphalt's edge to 2.5 cm over the ground by two thirds of the
+            // way, then under it.
+            const ramp = Math.max(0, 1 - t / 0.65);
+            pos[vi * 3] = p.x - ox;
+            pos[vi * 3 + 1] = c === COLS - 1 ? g - 0.04 : g + 0.025 + (edgeY - edgeGround - 0.025) * ramp * ramp;
+            pos[vi * 3 + 2] = p.z - oz;
+          }
+          // Trodden earth with gravel in it, in patches along the road; the outer
+          // edge a little darker where the grass roots start.
+          const g = 0.5 + 0.5 * this.mottleNoise.at(s / 3.1 + sign * 17, t * 1.3);
+          shoulderColour.copy(shoulderEarth).lerp(shoulderGravel, g * 0.8).multiplyScalar(1 - 0.12 * t);
+          uv[vi * 2] = (halfWidth + width * t) / GRAVEL_TILE_M;
+          uv[vi * 2 + 1] = (s - uvBase) / GRAVEL_TILE_M;
+          col[vi * 3] = shoulderColour.r;
+          col[vi * 3 + 1] = shoulderColour.g;
+          col[vi * 3 + 2] = shoulderColour.b;
+        }
+      }
+    }
+    for (let si = 0; si < sCount - 1; si++) {
+      for (let side = 0; side < 2; side++) {
+        for (let c = 0; c < COLS - 1; c++) {
+          const a = (si * 2 + side) * COLS + c;
+          const b = ((si + 1) * 2 + side) * COLS + c;
+          index.set([a, b, a + 1, a + 1, b, b + 1], w);
+          w += 6;
+        }
+      }
+    }
+    // Wind every triangle to face up: which way a row runs depends on the road's side.
+    for (let t = 0; t < w; t += 3) {
+      const i0 = index[t]! * 3;
+      const i1 = index[t + 1]! * 3;
+      const i2 = index[t + 2]! * 3;
+      const ux = pos[i1]! - pos[i0]!;
+      const uz = pos[i1 + 2]! - pos[i0 + 2]!;
+      const vx = pos[i2]! - pos[i0]!;
+      const vz = pos[i2 + 2]! - pos[i0 + 2]!;
+      // y of (u x v); counter-clockwise seen from above is up-facing.
+      if (uz * vx - ux * vz < 0) {
+        const keep = index[t + 1]!;
+        index[t + 1] = index[t + 2]!;
+        index[t + 2] = keep;
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    // Lit straight up, as the road and the ground beside it are: a strip lit by its own
+    // slope read as a stripe.
+    const normals = new Float32Array(pos.length);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    const mesh = new THREE.Mesh(geometry, shoulderMaterial);
+    mesh.receiveShadow = true;
+    return { mesh, vertices: pos, indices: index };
+  }
+
+  /**
+   * Height of the ground as the tiles draw it: their lattice nodes, sampled exactly as
+   * the tile builder samples them, and the same two triangles per cell (split on the
+   * b-c diagonal, world/deserttiledata.ts). Nodes are memoised for the chunk.
+   */
+  private visibleGround(ctx: ChunkContext): (x: number, z: number) => number {
+    const context = { seed: this.seed, road: ctx.road, terrain: ctx.terrain, roadDistance: this.roadDistance! };
+    const nodes = new Map<number, number>();
+    const sample = { height: 0, detail: 0 };
+    const node = (i: number, j: number): number => {
+      const key = i * 1_000_003 + j;
+      let h = nodes.get(key);
+      if (h === undefined) {
+        sampleGroundHeight(context, i * DESERT_TILE_STEP, j * DESERT_TILE_STEP, false, sample);
+        h = sample.height;
+        nodes.set(key, h);
+      }
+      return h;
+    };
+    return (x, z) => {
+      const fx = x / DESERT_TILE_STEP;
+      const fz = z / DESERT_TILE_STEP;
+      const i = Math.floor(fx);
+      const j = Math.floor(fz);
+      const u = fx - i;
+      const v = fz - j;
+      if (u + v <= 1) {
+        const a = node(i, j);
+        return a + (node(i + 1, j) - a) * u + (node(i, j + 1) - a) * v;
+      }
+      const d = node(i + 1, j + 1);
+      return d + (node(i, j + 1) - d) * (1 - u) + (node(i + 1, j) - d) * (1 - v);
+    };
   }
 
   *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
@@ -762,6 +940,19 @@ export class RoadMeshProvider implements ChunkProvider {
       const bedMesh = new THREE.Mesh(bedGeometry, roadBedMaterial);
       bedMesh.receiveShadow = true;
       group.add(bedMesh);
+      if (COUNTRY_SHOULDER && this.roadDistance) {
+        const shoulder = this.buildShoulder(ctx, positions, sCount, latCount);
+        disposables.push(shoulder.mesh.geometry);
+        group.add(shoulder.mesh);
+        // Solid: the wheels ride the strip they see, not the sunk ground under it.
+        if (hasPhysics) {
+          const collider = physics.addStaticTrimesh(shoulder.vertices, shoulder.indices, SurfaceType.Gravel);
+          collider.setEnabled(false);
+          colliders.push(collider);
+          const body = collider.parent();
+          if (body) bodies.push(body);
+        }
+      }
       yield;
 
       if (hasPhysics) {

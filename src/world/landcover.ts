@@ -1,4 +1,5 @@
 import { hashUnit3, Noise2D } from '../core/rng';
+import { CANOPY } from './season';
 
 /**
  * LAND COVER: what grows at a point. The countryside's answer to "what colour is the
@@ -91,6 +92,7 @@ interface Palette {
   readonly meadowLush: Rgb;
   readonly margin: Rgb;
   readonly forestFloor: Rgb;
+  readonly borFloor: Rgb;
   /** Canopy as seen from afar: spruce and birch ends. */
   readonly canopySpruce: Rgb;
   readonly canopyBirch: Rgb;
@@ -104,15 +106,17 @@ interface Palette {
  * wood that is darker than anything around it.
  */
 const SUMMER: Palette = {
-  meadowDry: hex(0xbdb67c),
-  meadowLush: hex(0x93aa5e),
-  margin: hex(0xa3ad6a),
-  forestFloor: hex(0x7f8a55),
+  // Straw going over, not lemon: 0xbdb67c read acid yellow under a noon sun.
+  meadowDry: hex(0xa8a670),
+  meadowLush: hex(0x8ea45a),
+  margin: hex(0x9ca466),
+  forestFloor: hex(0x848055),
+  borFloor: hex(0xa89670),
   // A wood seen as a mass is darker than any field: its crowns shade one another. At
   // the birch's own leaf colour (0x8dab53) a birch wood two kilometres out was the
   // meadow's colour and vanished; only spruce woods showed on the horizon.
-  canopySpruce: hex(0x2f5e4c),
-  canopyBirch: hex(0x5f843f),
+  canopySpruce: CANOPY.spruce,
+  canopyBirch: CANOPY.birch,
   crops: [
     hex(0xe8cf7a), // wheat, ripe
     hex(0xd9c98f), // rye, greyer
@@ -236,8 +240,8 @@ export class LandCover {
   }
 
   /**
-   * Share of pine among a wood's conifers, 0..1: pine forest (bor) on its own tracts of
-   * a kilometre or two — the sandy rises — and spruce everywhere else.
+   * Pine country, 0..1: pine forest (bor) on its own tracts of a kilometre or two — the
+   * sandy rises. A wood there is pine and little else (world/deserttiledata.ts).
    */
   pineAt(x: number, z: number): number {
     return smoothstep(0.05, 0.3, this.forestNoise.fbm(x / 1500 + 311, z / 1500 - 207, 2, 2, 0.5));
@@ -305,7 +309,9 @@ export class LandCover {
     const pal = PALETTES[this.season];
     const farm = this.farmlandAt(x, z);
     const forest = this.rawForest(x, z, farm) * this.clearing(x, z, roadDist);
-    const birch = this.birchAt(x, z);
+    // A bor is pine with barely a birch in it, whatever the birch field says.
+    const bor = forest > 0 ? smoothstep(0.35, 0.65, this.pineAt(x, z)) : 0;
+    const birch = this.birchAt(x, z) * (1 - bor);
     const lush = smoothstep(-0.45, 0.45, this.lushNoise.fbm(x / 70, z / 70, 3, 2.2, 0.5));
     out.forest = forest;
     out.birch = birch;
@@ -345,9 +351,13 @@ export class LandCover {
     }
 
     if (forest > 0) {
-      r += (pal.forestFloor[0] - r) * forest;
-      g += (pal.forestFloor[1] - g) * forest;
-      b += (pal.forestFloor[2] - b) * forest;
+      // A bor's floor is dry sand under moss and lichen: paler than a spruce wood's.
+      const fr = pal.forestFloor[0] + (pal.borFloor[0] - pal.forestFloor[0]) * bor;
+      const fg = pal.forestFloor[1] + (pal.borFloor[1] - pal.forestFloor[1]) * bor;
+      const fb = pal.forestFloor[2] + (pal.borFloor[2] - pal.forestFloor[2]) * bor;
+      r += (fr - r) * forest;
+      g += (fg - g) * forest;
+      b += (fb - b) * forest;
       if (forest > 0.5) out.kind = CoverKind.Forest;
     }
     out.r = r;
@@ -396,4 +406,25 @@ export class LandCover {
     out.inside = smoothstep(MARGIN_M * 0.5, MARGIN_M * 1.5, edge);
     return out;
   }
+}
+
+/**
+ * Which painted ground a vertex shows (render/groundpaint.ts), as weights of meadow,
+ * standing crop, forest floor and bare earth. Stubble reads as crop; ploughland and
+ * mud as earth; hay and fallow as the meadow they are going back to.
+ */
+export function writeGroundWeights(cover: CoverSample, wet: number, out: Float32Array, at: number): void {
+  let crop = 0;
+  let earth = 0;
+  if (cover.crop >= 0) {
+    if (cover.crop === Crop.Ploughed) earth = cover.plot;
+    else if (cover.crop !== Crop.Hay && cover.crop !== Crop.Fallow) crop = cover.plot;
+  }
+  earth = Math.max(earth, Math.min(1, wet * 1.4));
+  const forest = cover.forest * (1 - earth);
+  crop *= 1 - earth;
+  out[at] = Math.max(0, 1 - crop - forest - earth);
+  out[at + 1] = crop;
+  out[at + 2] = forest;
+  out[at + 3] = earth;
 }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { applyGroundPaint, SEASON_GROUND_MARK } from '../render/groundpaint';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import {
@@ -261,7 +262,7 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
   // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
   // decides only which patch runs first, never whether one is lost.
   const material = applyCloudShadow(
-    applyComicShading(
+    applyGroundPaint(applyComicShading(
       new THREE.MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.93,
@@ -276,7 +277,8 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
         stippleStrength: 0,
         spotlightNormals: 'smooth',
       },
-    ),
+      // The vista's colours are made for the season on the CPU; the tiles' in here.
+    ), { season: detailFade }),
   );
   if (!detailFade) return material;
 
@@ -290,14 +292,15 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
       )
       // The canopy blanket (world/vistaground.ts): past the near trees the wood is the
       // ground raised to the crowns and painted their colour. `color_vertex` runs
-      // before `begin_vertex`, so the ramp is worked out here and reused below.
+      // before `begin_vertex`, so the ramp is worked out here and reused below. After
+      // the season's ground colour, and with the season's own canopy colour.
       .replace(
-        '#include <color_vertex>',
-        `#include <color_vertex>
+        SEASON_GROUND_MARK,
+        `${SEASON_GROUND_MARK}
 float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
 float canopyRamp = smoothstep( ${CANOPY_FROM_M.toFixed(1)}, ${CANOPY_FULL_M.toFixed(1)}, tileDistance );
 #ifdef USE_COLOR
-vColor.rgb = mix( vColor.rgb, aCanopy.rgb, canopyRamp );
+vColor.rgb = mix( vColor.rgb, seasonCanopy( aCanopy.rgb ), canopyRamp );
 #endif`,
       )
       .replace(
@@ -309,7 +312,7 @@ transformed.y += aCanopy.w * canopyRamp;`,
       );
   };
   const comicProgramKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v2`;
+  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v3`;
   return material;
 }
 export const TERRAIN_MATERIAL = createTerrainMaterial(false);
