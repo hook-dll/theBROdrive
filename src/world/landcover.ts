@@ -107,10 +107,13 @@ interface Palette {
  */
 const SUMMER: Palette = {
   // Straw going over, not lemon: 0xbdb67c read acid yellow under a noon sun.
-  meadowDry: hex(0xa8a670),
-  meadowLush: hex(0x8ea45a),
-  margin: hex(0x9ca466),
-  forestFloor: hex(0x848055),
+  // Quieter than it was: at 0xa8a670 a sunlit meadow read lemon beside Shishkin's
+  // olive (docs/shishkin.md).
+  meadowDry: hex(0x9e9a6a),
+  meadowLush: hex(0x869658),
+  margin: hex(0x959962),
+  // Needle and leaf litter: brown under the green, as the painted woods have it.
+  forestFloor: hex(0x86785a),
   borFloor: hex(0xa89670),
   // A wood seen as a mass is darker than any field: its crowns shade one another. At
   // the birch's own leaf colour (0x8dab53) a birch wood two kilometres out was the

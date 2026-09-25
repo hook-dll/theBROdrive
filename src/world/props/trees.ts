@@ -56,7 +56,7 @@ export interface TreeVariant {
  * Trunk collider radius per kind at scale 1, metres, in `TreeKind` order; 0 for things
  * a car drives through.
  */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.28, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0];
+export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.28, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0];
 
 interface Palette {
   readonly spruce: readonly number[];
@@ -73,6 +73,11 @@ interface Palette {
   readonly rowanLeaf: readonly number[];
   readonly fern: readonly number[];
   readonly juniper: readonly number[];
+  /** Grey weathered wood, a stump's or a fallen trunk's. */
+  readonly deadwood: number;
+  /** A cut face, pale and warm. */
+  readonly deadwoodCut: number;
+  readonly moss: number;
   readonly birchBark: number;
   readonly birchGrey: number;
   readonly birchMark: number;
@@ -115,6 +120,9 @@ const PALETTES: Record<Season, Palette> = {
     rowanLeaf: [0x8a9e55, 0x80944f, 0x93a75e],
     fern: [0x7d9448, 0x87a052, 0x738a42],
     juniper: [0x55684c, 0x5e7253, 0x4d6045],
+    deadwood: 0x8a7d6c,
+    deadwoodCut: 0xc4a77c,
+    moss: 0x6e7a46,
     // Grown birch is not snow-white: a creamy grey, patched greyer with lichen and
     // weather, and black and furrowed at the foot. Only a young one is white.
     birchBark: 0xcac6bb,
@@ -1224,6 +1232,63 @@ function fernGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
 }
 
 /**
+ * A stump: a short broad trunk with a flared foot, its top a pale cut face or, when old,
+ * a ragged grey break, a cushion of moss on one side. Sits a little into the ground.
+ */
+function stumpGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+  const rnd = rng(seed * 7717 + 5);
+  const r = 0.28 + rnd() * 0.12;
+  const h = 0.35 + rnd() * 0.35;
+  const rings: Ring[] = [
+    { x: 0, y: -0.15, z: 0, r: r * 1.45 },
+    { x: 0, y: 0.08, z: 0, r: r * 1.15 },
+    { x: 0, y: h, z: 0, r },
+  ];
+  const sides = near ? 9 : 6;
+  const parts = [tube(rings, sides, () => pal.deadwood)];
+  // The cut: a flat disc, tilted a touch, pale if fresh and grey if old.
+  const fresh = rnd() < 0.5;
+  const top = new THREE.CircleGeometry(r * 0.98, sides).rotateX(-Math.PI / 2).rotateZ((rnd() - 0.5) * 0.25).translate(0, h, 0);
+  parts.push(flatColour(top, () => (fresh ? pal.deadwoodCut : pal.deadwood)));
+  const moss = lump(r * 0.7, 0.12, 0, r * 0.7, 0.18, r * 0.8, [pal.moss], seed * 13);
+  moss.rotateY(rnd() * Math.PI * 2);
+  return { wood: mergeGeometries(parts.map(asFlat)), leaves: asFlat(moss) };
+}
+
+/**
+ * A fallen trunk: a long tube lying along x on the ground, thinning toward the top end,
+ * a few broken branch stubs, its root end a cut or a torn plate. Grey with moss on top.
+ */
+function logGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+  const rnd = rng(seed * 9973 + 17);
+  const L = 5 + rnd() * 5;
+  const r0 = 0.2 + rnd() * 0.1;
+  const steps = near ? 5 : 3;
+  const rings: Ring[] = [];
+  for (let k = 0; k <= steps; k++) {
+    const t = k / steps;
+    rings.push({ x: 0, y: -L / 2 + t * L, z: 0, r: r0 * (1 - 0.55 * t) });
+  }
+  // Built upright (the tube is vertical), then laid down: rotated onto x, raised to
+  // rest on the ground, a little sunk.
+  const wood = tube(rings, near ? 7 : 5, () => pal.deadwood);
+  const parts = [wood];
+  const stubs = 2 + Math.floor(rnd() * 3);
+  for (let k = 0; k < stubs; k++) {
+    const y = -L / 2 + (0.3 + rnd() * 0.6) * L;
+    const a = rnd() * Math.PI * 2;
+    const from = new THREE.Vector3(0, y, 0);
+    const to = new THREE.Vector3(Math.cos(a) * 0.7, y + 0.5, Math.sin(a) * 0.7);
+    const bend = from.clone().lerp(to, 0.5);
+    parts.push(limb(from, bend, to, 0.06, 0.03, 3, pal.deadwood));
+  }
+  const g = mergeGeometries(parts.map(asFlat));
+  g.rotateZ(Math.PI / 2).translate(0, r0 * 0.75, 0);
+  const moss = lump(0, r0 * 1.5, 0, L * 0.3, 0.1, r0 * 0.8, [pal.moss], seed * 29);
+  return { wood: g, leaves: asFlat(moss) };
+}
+
+/**
  * A juniper: the bor's dark column, taller than wide, of needle masses stacked on a
  * short stem, narrowing to a blunt point.
  */
@@ -1265,10 +1330,10 @@ depthMaterial.onBeforeCompile = (shader) => {
   // shadow, and it was a shadow-pass draw for every bucket of it.
   shader.fragmentShader = `varying float vWood;\nvarying float vKind;\n${shader.fragmentShader.replace(
     'void main() {',
-    'void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;',
+    `void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;`,
   )}`;
 };
-depthMaterial.customProgramCacheKey = () => 'tree-depth-v2';
+depthMaterial.customProgramCacheKey = () => 'tree-depth-v3';
 applyBarkMapping(depthMaterial);
 // Leaves take no sun shadow: self-shadowed crowns crawl with triangle-sized acne. Wood
 // does. One program for both, told apart per vertex by `aWood`.
@@ -1375,6 +1440,8 @@ const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
   [TreeKind.Rowan]: 'small',
   [TreeKind.Fern]: 'frond',
   [TreeKind.Juniper]: 'needle',
+  [TreeKind.Stump]: 'broad',
+  [TreeKind.Log]: 'small',
 };
 
 /** Kinds from this one on are undergrowth: fern and juniper. */
@@ -1397,6 +1464,8 @@ const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Rowan]: 3,
   [TreeKind.Fern]: 4,
   [TreeKind.Juniper]: 3,
+  [TreeKind.Stump]: 3,
+  [TreeKind.Log]: 3,
 };
 
 let variants: readonly TreeVariant[][] | null = null;
@@ -1419,6 +1488,8 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
       [TreeKind.Rowan]: rowanGeometry,
       [TreeKind.Fern]: fernGeometry,
       [TreeKind.Juniper]: juniperGeometry,
+      [TreeKind.Stump]: stumpGeometry,
+      [TreeKind.Log]: logGeometry,
     };
     const lod = ({ wood, leaves }: TreeShape, kind: TreeKind): TreeLod => {
       const geometry = mergeTreeParts(wood, leaves, kind);

@@ -84,6 +84,10 @@ export const enum TreeKind {
   Fern = 11,
   /** Undergrowth: the bor's juniper. */
   Juniper = 12,
+  /** The forest floor: a stump, old and grey or freshly cut. */
+  Stump = 13,
+  /** The forest floor: a fallen trunk, lying where it fell. */
+  Log = 14,
 }
 
 /** Every kind, in enum order: the index of per-kind tables. */
@@ -101,6 +105,8 @@ export const TREE_KINDS: readonly TreeKind[] = [
   TreeKind.Rowan,
   TreeKind.Fern,
   TreeKind.Juniper,
+  TreeKind.Stump,
+  TreeKind.Log,
 ];
 
 
@@ -600,6 +606,18 @@ export function plantTrees(
         continue;
       }
       const edge = 1 - THREE.MathUtils.smoothstep(forest, 0.55, 0.95);
+      // The floor's dead wood (Shishkin paints it into every wood: stumps, windfall,
+      // a trunk across the path): stumps where somebody has cut, fallen trunks where
+      // the wood is old. Rare, and never at the road's edge of a wood.
+      const deadwood = forest * (1 - edge);
+      if (r > 0.4 && r < 0.4 + 0.012 * deadwood) {
+        put(x, z, TreeKind.Stump, 0.8 + 0.5 * r3, key);
+        continue;
+      }
+      if (r > 0.38 && r < 0.38 + 0.009 * deadwood) {
+        put(x, z, TreeKind.Log, 0.8 + 0.4 * r3, key);
+        continue;
+      }
       if (inBor(x, z, r2)) {
         if (r < 0.035 * forest) put(x, z, TreeKind.Juniper, 0.7 + 0.6 * r3, key);
         else if (r < 0.05 * forest) put(x, z, TreeKind.Pine, 0.2 + 0.15 * r3, key);

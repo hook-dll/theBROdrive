@@ -60,7 +60,11 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
-- THE FRAME BACK UNDER 12.5 ms. After the day's additions a Retina frame took 17 ms of
+- DEAD WOOD AND A QUIETER MEADOW. Stumps (a cut face or an old grey break, moss on one
+  side) and fallen trunks with broken stubs lie in the interior of woods, rarely, as
+  every painted wood has them. The meadow's sunlit tone is olive rather than lemon, and
+  the wood floor is brown litter under the green.
+- THE FRAME FROM 17 TO 13.7 ms. After the day's additions a Retina frame took 17 ms of
   GPU at the dynamic floor (0.63 scale, 1.44 Mpx): about 56 FPS. Measured with the
   resolution held still (the adaptive controller rescaled under every toggle before):
   the sky dome cost 3.1 ms because it was drawn first over the whole screen and its new
@@ -69,7 +73,8 @@ questions live in `docs/country.md`.
   beneath them; it now draws after them, its inner overlap band writing depth only at
   the far plane so the tiles still win and the post pass still reads it as far.
   Undergrowth dissolves by coverage over 55–75 m, is not drawn past it, and casts no
-  shadow. 17.0 → 12.3 ms on the same stand.
+  shadow. 17.0 → 13.7 ms on the same stand. (12.3 was first reported: the trees' shadow
+  shader had stopped compiling and that frame had no tree shadows.)
 - SHISHKIN AS THE REFERENCE FOR THE LOOK (`docs/shishkin.md`). Fourteen public-domain
   paintings measured with the same script as our frames: his lit foliage sits at 50–65°
   of hue (olive, ochre), ours sat at 80–92°; his shade is warm olive and umber, ours was

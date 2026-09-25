@@ -130,14 +130,14 @@ export function luma(c: Rgb | Float32Array | number[]): number {
 export const AUTUMN_GROUND = {
   /** Khaki going brown. Keeps a share of its summer colour: a meadow is never all straw. */
   meadow: linearHex(0x9d9468),
-  meadowRef: linearHex(0x9ba564),
+  meadowRef: linearHex(0x929861),
   meadowKeep: 0.28,
   /** Stubble and harvested ground. */
   crop: linearHex(0xc2ad7c),
   cropRef: linearHex(0xdcca86),
   /** Leaf litter. */
   floor: linearHex(0x8f7550),
-  floorRef: linearHex(0x848055),
+  floorRef: linearHex(0x86785a),
   /** Earth only darkens: autumn is wet. */
   earthShade: 0.9,
 } as const;
@@ -180,6 +180,8 @@ export const AUTUMN_LEAVES: readonly AutumnLeaf[] = [
   leaf(0xc2663a, 0xa44536, 0x8a9e55, 0.02), // rowan: rust to brick
   leaf(0xb07a3c, 0x9a6634, 0x7d9448, 0.3), // fern: bracken goes rust
   leaf(0x55684c, 0x55684c, 0x55684c, 0, 0), // juniper
+  leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // stump: moss does not turn
+  leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // log
 ];
 
 /**
