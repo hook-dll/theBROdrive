@@ -274,8 +274,10 @@ vTuftAccent = gKind > 2.5 ? vec3( 0.78, 0.6, 0.24 )
   : gHue < 0.45 ? vec3( 0.9, 0.88, 0.8 )
   : gHue < 0.8 ? vec3( 0.88, 0.68, 0.08 )
   : vec3( 0.28, 0.36, 0.85 );
-// Autumn: the wheat is cut to stubble and the flowers are over.
+// Autumn: the wheat is cut to stubble and the flowers are over. Winter: under the snow,
+// patch by patch as the ground takes it (render/groundpaint.ts).
 gTall *= 1.0 - 0.6 * uSeasonDry * gWheat;
+gTall *= 1.0 - seasonSnowAt( 0.0, seasonPatch( gRel ) );
 vTuftAccent = mix( vTuftAccent, vTuftTip * 0.8, uSeasonDry * 0.85 );`,
         )
         .replace(

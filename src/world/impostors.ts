@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import { applyComicShading } from '../render/comic';
 import { applyBarkMapping } from '../render/leafpaint';
-import { injectSeason, SEASON_TREE_RANDOM_GLSL } from '../render/season';
+import { injectSeason, SEASON_TREE_RANDOM_GLSL, SNOW_GLSL } from '../render/season';
 import { TREE_KINDS } from './deserttiledata';
 import type { TreeVariant } from './props/trees';
 
@@ -368,6 +368,8 @@ uniform vec2 uCells;
 uniform float uImpKindFrom[${TREE_KINDS.length}];
 varying vec3 vImpAutumn;
 varying float vImpTurn;
+varying float vImpBare;
+varying float vImpEvergreen;
 varying vec2 vImpUv;
 varying vec2 vImpUv2;
 varying float vImpView;
@@ -423,7 +425,9 @@ int impKind = 0;
 for ( int k = 1; k < ${TREE_KINDS.length}; k++ ) if ( impCell >= uImpKindFrom[ k ] - 0.5 ) impKind = k;
 float tint = vImpTint;
 vImpTurn = seasonLeafTurn( impKind, ${SEASON_TREE_RANDOM_GLSL} );
-vImpAutumn = seasonLeafTarget( impKind, ${SEASON_TREE_RANDOM_GLSL} );`,
+vImpAutumn = seasonLeafTarget( impKind, ${SEASON_TREE_RANDOM_GLSL} );
+vImpBare = seasonLeafBare( impKind, ${SEASON_TREE_RANDOM_GLSL} );
+vImpEvergreen = seasonIsEvergreen( impKind );`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -440,6 +444,8 @@ varying vec3 vImpRight;
 varying vec3 vImpFwd;
 varying vec3 vImpAutumn;
 varying float vImpTurn;
+varying float vImpBare;
+varying float vImpEvergreen;
 uniform sampler2D uImpNormals;`,
         )
         .replace(
@@ -461,10 +467,17 @@ vec4 sampledDiffuseColor = mix( texture2D( map, vImpUv ), texture2D( map, vImpUv
 // Leaves recoloured for the season, as the model's are (render/season.ts). The leaf
 // mask is averaged with the empty texels by the mips just as coverage is, so the
 // share of leaves among what is there is the one over the other.
-if ( vImpTurn > 0.0 ) {
-  float impLeafA = mix( texture2D( uImpNormals, vImpUv ).a, texture2D( uImpNormals, vImpUv2 ).a, vImpView );
-  float impLeaf = clamp( impLeafA / max( sampledDiffuseColor.a, 0.004 ), 0.0, 1.0 );
-  sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, vImpAutumn * seasonLuma( sampledDiffuseColor.rgb ), vImpTurn * impLeaf );
+if ( vImpTurn > 0.0 || vImpBare > 0.0 || uSeasonSnow > 0.0 ) {
+  vec4 impN = mix( texture2D( uImpNormals, vImpUv ), texture2D( uImpNormals, vImpUv2 ), vImpView );
+  float impLeaf = clamp( impN.a / max( sampledDiffuseColor.a, 0.004 ), 0.0, 1.0 );
+  float impShade = seasonLuma( sampledDiffuseColor.rgb );
+  sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, vImpAutumn * impShade, vImpTurn * impLeaf );
+  // Fallen leaves: the leaf share of the texel goes, the wood stays.
+  sampledDiffuseColor.a *= 1.0 - impLeaf * ( 1.0 - seasonLeafKeep( vImpBare, impShade * 3.1 ) );
+  sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, seasonTwigs( sampledDiffuseColor.rgb, vImpBare ), impLeaf );
+  // Snow on an evergreen's upper side, by the baked normal (y is up in the bake).
+  float impUp = impN.y * 2.0 - 1.0;
+  sampledDiffuseColor.rgb = mix( sampledDiffuseColor.rgb, ${SNOW_GLSL} * sampledDiffuseColor.a, vImpEvergreen * uSeasonSnow * smoothstep( 0.15, 0.7, impUp ) * 0.8 * impLeaf );
 }
 // Alpha lost to mip averaging, given back: see the header.
 vec2 impTexel = vImpUv * vec2( textureSize( map, 0 ) );
@@ -485,7 +498,7 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
       );
     };
     const comicKey = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v9`;
+    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v10`;
     this.material = material;
     this.mesh = new THREE.Mesh(this.geometry, material);
     this.mesh.frustumCulled = false;

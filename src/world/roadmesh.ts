@@ -6,6 +6,7 @@ import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyComicShading, applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
+import { applySnowCover } from '../render/season';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
@@ -345,7 +346,7 @@ const roadBedMaterial = applyCloudShadow(
 /** The country's bare shoulder (world/shoulder.ts). */
 const COUNTRY_SHOULDER = true;
 /** Lit as the ground is, so the strip is the ground's own colour where it meets it. */
-const shoulderMaterial = applyCloudShadow(
+const shoulderMaterial = applySnowCover(applyCloudShadow(
   applyComicShading(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -362,7 +363,7 @@ const shoulderMaterial = applyCloudShadow(
     }),
     { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
   ),
-);
+), 0.92);
 const shoulderEarth = new THREE.Color(0xb3a48c);
 const shoulderGravel = new THREE.Color(0xbcb7ab);
 const shoulderColour = new THREE.Color();

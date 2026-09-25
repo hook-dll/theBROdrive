@@ -268,11 +268,16 @@ export function applyGroundPaint<T extends THREE.Material>(material: T, options:
     // Meshes whose colours are made for the season on the CPU (the vista) opt out.
     if (options.season) {
       injectSeason(shader);
+      shader.vertexShader = `#define GROUND_SEASON\n${shader.vertexShader}`;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <color_vertex>',
         `#include <color_vertex>
 #ifdef USE_COLOR
-vColor.rgb = seasonGround( vColor.rgb, aGround );
+{
+  float groundPatch = seasonPatch( ( modelMatrix * vec4( position, 1.0 ) ).xz );
+  vGroundSnow = seasonSnowAt( aGround.z / max( aGround.x + aGround.y + aGround.z + aGround.w, 0.01 ), groundPatch );
+  vColor.rgb = seasonGround( vColor.rgb, aGround, groundPatch );
+}
 #endif
 ${SEASON_GROUND_MARK}`,
       );
@@ -285,14 +290,19 @@ ${SEASON_GROUND_MARK}`,
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 attribute vec4 aGround;
-varying vec4 vGround;`)
+varying vec4 vGround;
+varying float vGroundSnow;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vGround = aGround;`);
+vGround = aGround;
+#ifndef GROUND_SEASON
+vGroundSnow = 0.0;
+#endif`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform sampler2D uGroundPaint;
 uniform sampler2D uGroundVary;
-varying vec4 vGround;`)
+varying vec4 vGround;
+varying float vGroundSnow;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   vec2 groundAt = vComicWorld.xz;
@@ -301,16 +311,18 @@ varying vec4 vGround;`)
   vec4 paintNear = texture2D( uGroundPaint, groundAt / ${SCALE_NEAR_M.toFixed(2)} );
   vec4 paintFar = texture2D( uGroundPaint, mat2( 0.8, -0.6, 0.6, 0.8 ) * groundAt / ${SCALE_FAR_M.toFixed(2)} + 0.37 );
   float strokes = dot( groundW, paintNear ) * 0.6 + dot( groundW, paintFar ) * 0.4;
-  diffuseColor.rgb *= 1.0 + ( strokes - 0.5 ) * 1.1;
-  diffuseColor.rgb *= 1.0 - ${FOREST_SHADE.toFixed(2)} * groundW.z;
+  // Under snow the grass strokes are gone; a faint drift of them stays as its texture.
+  float groundBare = 1.0 - 0.8 * vGroundSnow;
+  diffuseColor.rgb *= 1.0 + ( strokes - 0.5 ) * 1.1 * groundBare;
+  diffuseColor.rgb *= 1.0 - ${FOREST_SHADE.toFixed(2)} * groundW.z * groundBare;
   // Mottling over tens of metres: lighter and darker, and on grass warmer and cooler.
   vec4 groundVary = texture2D( uGroundVary, groundAt / ${VARY_M.toFixed(1)} );
   diffuseColor.rgb *= 0.88 + 0.24 * groundVary.r;
-  float groundWarm = ( groundVary.g - 0.5 ) * 2.0 * ( groundW.x + groundW.y );
+  float groundWarm = ( groundVary.g - 0.5 ) * 2.0 * ( groundW.x + groundW.y ) * groundBare;
   diffuseColor.rgb *= mix( vec3( 1.0 ), groundWarm > 0.0 ? vec3( 1.06, 1.01, 0.86 ) : vec3( 0.93, 1.02, 1.02 ), abs( groundWarm ) * 0.6 );
 }`);
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${previousKey.call(material)}:ground-paint-v3${options.season ? '-season' : ''}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:ground-paint-v4${options.season ? '-season' : ''}`;
   return material;
 }

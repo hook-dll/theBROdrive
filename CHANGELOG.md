@@ -130,6 +130,15 @@ questions live in `docs/country.md`.
   Grown birch bark is darker and greyer still.
 - SPRUCE'S CORE is part of the crown, not the wood: as wood it took the boughs' shadow
   and went black between every whorl.
+- WINTER. The season's other channels drawn: in October–November broad-leaved trees drop
+  their leaves one painted leaf at a time, each tree at its own point, and what stays of
+  a crown is a grey-brown twig haze (models and impostors alike; fallen leaves cast no
+  shadow); the meadow goes dull brown. From mid-November snow lies: blue-white, less of
+  it under trees, arriving and thawing in patches of tens of metres (a noise that
+  repeats on the origin's rebase step), the grass under it, the ground paint's strokes
+  gone. Snow sits on the upper side of spruce and pine boughs, on logs, stumps and far
+  woods; the shoulder and the dirt tracks go white with the ground, the ruts greyer.
+  The thaw in April bares the ground patch by patch onto last year's brown grass.
 - SEASONS ALONG THE ROAD. A year is 1 200 km of road and the drive opens on the day the
   world was made (`world/season.ts`). The season is a handful of smooth channels of the
   day of the year — leaves turning, ground going over, bare, snow, spring green — read

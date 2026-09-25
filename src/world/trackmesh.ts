@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyComicShading } from '../render/comic';
+import { applySnowCover } from '../render/season';
 import { TRACK_TILE_M, trackTexture } from '../render/trackpaint';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 import { tileSurfaceSampler } from './deserttiledata';
@@ -20,7 +21,8 @@ const STEP_M = 1.5;
 /** Columns across a row: enough to follow the ground's cross-fall. */
 const ACROSS = [-1, -0.5, 0, 0.5, 1];
 
-const material = applyCloudShadow(
+// Winter: the ruts are packed snow, greyer than the drifts beside them.
+const material = applySnowCover(applyCloudShadow(
   applyComicShading(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -42,7 +44,7 @@ const material = applyCloudShadow(
     }),
     { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
   ),
-);
+), 0.85, 0.86);
 /** Packed earth of a rut, warm; a little darker where the track is wetter. */
 const EARTH = new THREE.Color(0x8e7a5c);
 

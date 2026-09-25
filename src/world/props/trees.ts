@@ -13,7 +13,7 @@ import {
   SOLID_UV,
   type LeafSprite,
 } from '../../render/leafpaint';
-import { injectSeason, SEASON_TREE_RANDOM_GLSL } from '../../render/season';
+import { injectSeason, SEASON_TREE_RANDOM_GLSL, SNOW_GLSL } from '../../render/season';
 import { TREE_KINDS, TreeKind } from '../deserttiledata';
 import type { Season } from '../landcover';
 
@@ -1340,17 +1340,35 @@ const material = applyComicShading(
  */
 const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide });
 depthMaterial.onBeforeCompile = (shader) => {
+  injectSeason(shader);
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute float aWood;\nattribute float aKind;\nvarying float vWood;\nvarying float vKind;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWood = aWood;\nvKind = aKind;');
+    .replace('#include <common>', '#include <common>\nattribute float aWood;\nattribute float aKind;\nvarying float vWood;\nvarying float vKind;\nvarying float vLeafBare;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+vWood = aWood;
+vKind = aKind;
+vLeafBare = 0.0;
+#ifdef USE_INSTANCING_COLOR
+{
+  float tint = instanceColor.r;
+  if ( aWood < 0.5 ) vLeafBare = seasonLeafBare( int( aKind + 0.5 ), ${SEASON_TREE_RANDOM_GLSL} );
+}
+#endif`);
+  // A leaf that has fallen casts no shadow either (see the main material).
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <alphatest_fragment>',
+    `#include <alphatest_fragment>
+#ifdef USE_MAP
+if ( vWood < 0.5 && seasonLeafKeep( vLeafBare, texture2D( map, vMapUv ).r ) < 0.5 ) discard;
+#endif`,
+  );
   // Undergrowth (fern, juniper) casts no shadow: under the trees it would be shadow in
   // shadow, and it was a shadow-pass draw for every bucket of it.
-  shader.fragmentShader = `varying float vWood;\nvarying float vKind;\n${shader.fragmentShader.replace(
+  shader.fragmentShader = `varying float vWood;\nvarying float vKind;\nvarying float vLeafBare;\n${shader.fragmentShader.replace(
     'void main() {',
     `void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} && vKind < ${(UNDERGROWTH_KIND_TO + 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;`,
   )}`;
 };
-depthMaterial.customProgramCacheKey = () => 'tree-depth-v3';
+depthMaterial.customProgramCacheKey = () => 'tree-depth-v4';
 applyBarkMapping(depthMaterial);
 // Leaves take no sun shadow: self-shadowed crowns crawl with triangle-sized acne. Wood
 // does. One program for both, told apart per vertex by `aWood`.
@@ -1373,18 +1391,34 @@ applyBarkMapping(depthMaterial);
 attribute float aWood;
 attribute float aKind;
 varying float vWood;
-varying float vUnderFade;`)
+varying float vUnderFade;
+varying float vLeafBare;`)
       // Leaves take the season's colour, each tree at its own pace: its random comes
       // from the tint the impostor also carries, so model and impostor turn together.
       .replace('#include <color_vertex>', `#include <color_vertex>
 #if defined( USE_COLOR ) && defined( USE_INSTANCING_COLOR )
 {
   float tint = instanceColor.r;
-  if ( aWood < 0.5 ) vColor.rgb = seasonLeaf( vColor.rgb, int( aKind + 0.5 ), ${SEASON_TREE_RANDOM_GLSL} );
+  int kind = int( aKind + 0.5 );
+  if ( aWood < 0.5 ) {
+    vColor.rgb = seasonLeaf( vColor.rgb, kind, ${SEASON_TREE_RANDOM_GLSL} );
+    vLeafBare = seasonLeafBare( kind, ${SEASON_TREE_RANDOM_GLSL} );
+    // What stays of a bare crown is twigs: their colour, here, where the leaf colour
+    // lives (the fragment multiplies the atlas by it).
+    vColor.rgb = seasonTwigs( vColor.rgb, vLeafBare );
+    // Snow on an evergreen's upper side: the crown's bent normals face up on top.
+    vColor.rgb = mix( vColor.rgb, ${SNOW_GLSL}, seasonEvergreenSnow( kind, normal.y ) );
+  } else {
+    // Snow along the top of a fallen trunk, a stump's cut, a limb.
+    vColor.rgb = mix( vColor.rgb, ${SNOW_GLSL}, uSeasonSnow * smoothstep( 0.55, 0.9, normal.y ) * 0.85 );
+  }
 }
 #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vWood = aWood;
+#ifndef USE_INSTANCING_COLOR
+vLeafBare = 0.0;
+#endif
 // Undergrowth dissolves over UNDERGROWTH_FADE, tree by tree at its foot, by coverage:
 // past it the forest stops drawing it at all (world/forest.ts).
 vUnderFade = 1.0;
@@ -1397,7 +1431,8 @@ if ( aKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} && aKind < ${(UNDERGROW
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying float vWood;
-varying float vUnderFade;`)
+varying float vUnderFade;
+varying float vLeafBare;`)
       // A leaf card's edge from the atlas's coverage, sharpened to about a pixel and
       // widened as it minifies (mips average leaf and gap and would thin the crown with
       // distance), as the grass does. Under MSAA the coverage resolves to a soft edge.
@@ -1410,6 +1445,10 @@ if ( vWood > 0.5 && !gl_FrontFacing ) discard;
   float leafMip = max( 0.0, 0.5 * log2( max( dot( dFdx( leafTexel ), dFdx( leafTexel ) ), dot( dFdy( leafTexel ), dFdy( leafTexel ) ) ) ) );
   float leafA = diffuseColor.a * ( 1.0 + leafMip * 0.22 );
   diffuseColor.a = clamp( ( leafA - 0.5 ) / max( fwidth( leafA ), 0.0001 ) + 0.5, 0.0, 1.0 ) * vUnderFade;
+  // Autumn's fall: each painted leaf drops at its own point (render/season.ts).
+  if ( vWood < 0.5 && vLeafBare > 0.0 ) {
+    diffuseColor.a *= seasonLeafKeep( vLeafBare, texture2D( map, vMapUv ).r );
+  }
   if ( diffuseColor.a < 0.02 ) discard;
 }`)
       // Both faces of a leaf card are lit by its crown normal (see \`finishCrown\`): three
@@ -1420,7 +1459,7 @@ if ( vWood > 0.5 && !gl_FrontFacing ) discard;
       );
   };
   const comicKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-cards-v3`;
+  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-cards-v4`;
 }
 // Bark (render/leafpaint.ts): wood whose texture coordinates carry a bark offset.
 applyBarkMapping(material);

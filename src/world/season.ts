@@ -194,7 +194,29 @@ export const CANOPY = {
   spruce: linearHex(0x364b36),
   birch: linearHex(0x6b7a3e),
   birchAutumn: linearHex(0x94813f),
+  /** A leafless birch or aspen wood from afar: twigs, grey-brown with a lilac cast. */
+  birchBare: linearHex(0x857a78),
 } as const;
+
+/**
+ * SNOW, and how much of it lies. Blue-white rather than white: in the comic light the
+ * lit side reads white and the shade blue, as in Shishkin's "Winter".
+ */
+export const SNOW = linearHex(0xcfd6df);
+/**
+ * A leafless crown: its twigs, grey-brown. A bare tree keeps this much of its crown's
+ * cards as twig mass (\`BARE_TWIGS\`): from any distance a winter birch is a fine grey
+ * haze round its limbs, not a dead fork.
+ */
+export const BARE_TWIG = linearHex(0x6f655f);
+export const BARE_TWIGS = 0.35;
+/**
+ * Late autumn's ground, when the leaves are down: the meadow's straw gone dull brown,
+ * as it lies under the snow and comes out of it in spring.
+ */
+export const DEAD_GRASS = linearHex(0x8a7f62);
+/** Less of the snow reaches a wood's floor than an open field. */
+export const SNOW_UNDER_TREES = 0.35;
 
 /**
  * Recolours a linear summer ground colour for the season. `w` are the four ground
@@ -203,7 +225,7 @@ export const CANOPY = {
  */
 export function seasonGround(rgb: Float32Array | number[], at: number, w0: number, w1: number, w2: number, w3: number, season: SeasonState): void {
   const k = season.dry;
-  if (k <= 0) return;
+  if (k <= 0 && season.snow <= 0) return;
   const sum = w0 + w1 + w2 + w3;
   if (sum < 0.01) { w0 = 1; w1 = w2 = w3 = 0; } else { w0 /= sum; w1 /= sum; w2 /= sum; w3 /= sum; }
   const G = AUTUMN_GROUND;
@@ -211,11 +233,16 @@ export function seasonGround(rgb: Float32Array | number[], at: number, w0: numbe
   const m = l / luma(G.meadowRef);
   const c = l / luma(G.cropRef);
   const f = l / luma(G.floorRef);
+  const snow = season.snow * (1 - SNOW_UNDER_TREES * w2);
+  const dead = season.bare * season.dry;
+  const dm = l / luma(G.meadowRef);
   for (let i = 0; i < 3; i++) {
     const col = rgb[at + i]!;
-    const meadow = G.meadow[i]! * m + (col - G.meadow[i]! * m) * G.meadowKeep;
+    let meadow = G.meadow[i]! * m + (col - G.meadow[i]! * m) * G.meadowKeep;
+    meadow += (DEAD_GRASS[i]! * dm - meadow) * dead * 0.8;
     const autumn = meadow * w0 + G.crop[i]! * c * w1 + G.floor[i]! * f * w2 + col * G.earthShade * w3;
-    rgb[at + i] = col + (autumn - col) * k;
+    const dry = col + (autumn - col) * k;
+    rgb[at + i] = dry + (SNOW[i]! - dry) * snow;
   }
 }
 
@@ -230,12 +257,21 @@ export function canopyTurn(turn: number): number {
  */
 export function seasonCanopy(rgb: Float32Array | number[], at: number, birch: number, season: SeasonState): void {
   const t = canopyTurn(season.turn);
-  if (t <= 0 || birch <= 0) return;
+  const bare = season.bare;
+  const snow = season.snow;
+  if (t <= 0 && bare <= 0 && snow <= 0) return;
   // Per channel, as a ratio: the canopy colour carries a per-crown brightness that the
-  // ratio keeps.
+  // ratio keeps. Birch end: summer, then autumn, then bare twigs. The whole wood then
+  // takes a little snow on top.
   for (let i = 0; i < 3; i++) {
     const summer = CANOPY.spruce[i]! + (CANOPY.birch[i]! - CANOPY.spruce[i]!) * birch;
-    const autumn = CANOPY.spruce[i]! + (CANOPY.birchAutumn[i]! - CANOPY.spruce[i]!) * birch;
-    rgb[at + i] = rgb[at + i]! * (1 + (autumn / summer - 1) * t);
+    const leaf = CANOPY.birch[i]! + (CANOPY.birchAutumn[i]! - CANOPY.birch[i]!) * t;
+    const birchNow = leaf + (CANOPY.birchBare[i]! - leaf) * bare;
+    const now = CANOPY.spruce[i]! + (birchNow - CANOPY.spruce[i]!) * birch;
+    const v = rgb[at + i]! * (now / summer);
+    rgb[at + i] = v + (SNOW[i]! * 0.8 - v) * snow * CANOPY_SNOW;
   }
 }
+
+/** How much a far wood's colour goes toward the snow: the crowns' tops and gaps. */
+export const CANOPY_SNOW = 0.28;
