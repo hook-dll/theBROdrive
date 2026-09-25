@@ -60,6 +60,14 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- NOTHING APPEARS AT ONCE. Far trees leave their reach each at its own distance over
+  the last 30% of it and fade over their own 12% by coverage (they switched whole);
+  woods are requested two tiles earlier, so a tile's trees are in before they are in
+  reach; ferns and juniper fade each over its own 30 m between 50 and 110 m (all
+  together over 20 m before); grass sprouts over 40-70 m instead of 55-70 and is the
+  ground's flat tone before it rises, so tall ditch grass no longer reads as bushes
+  appearing. Spruce is one shape at every level: the far level's fewer boughs showed the
+  dark core and filled in at 60 m.
 - STUTTER, MEASURED AND CUT (`docs/research-2026-09-26.md`). The owner saw a constant
   jitter at 144 Hz. Uncapped, a drive had 132 hitches in 20 s, the worst frame 122 ms:
   about 30 GB went to the GPU in those 20 s. The impostor draw buffer, a million trees,

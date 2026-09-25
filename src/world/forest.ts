@@ -67,7 +67,9 @@ const SHAPE_TAG = 0x53484150;
 /** Impostor tiles are kept out to this many tiles: the open trees' reach. */
 const IMPOSTOR_TILE_RADIUS = Math.ceil(IMPOSTOR_OPEN_TO_M / DESERT_TILE_SIZE) + 1;
 /** Within this many tiles a tile carries all its trees; past it only the open ones. */
-const FULL_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 1;
+// Two tiles of margin: a tile's woods must be in before its nearest trees come within
+// reach, or a whole tile's worth of them arrived at once, already inside it.
+const FULL_TILE_RADIUS = Math.ceil(IMPOSTOR_TO_M / DESERT_TILE_SIZE) + 3;
 /** Within this many tiles a far tile also carries its woods' far keepers (world/farwoods.ts). */
 const KEEPER_TILE_RADIUS = Math.ceil(FAR_WOODS_TO_M / DESERT_TILE_SIZE) + 1;
 /** Re-anchor the impostor buffer when the camera strays this far from its anchor. */

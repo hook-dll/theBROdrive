@@ -472,8 +472,13 @@ float impCellB = impCell + mod( impView0 + 1.0, ${IMPOSTOR_VIEWS.toFixed(1)} );
 vImpUv = ( vec2( mod( impCellA, uCells.x ), floor( impCellA / uCells.x ) ) + impInCell ) / uCells;
 vImpUv2 = ( vec2( mod( impCellB, uCells.x ), floor( impCellB / uCells.x ) ) + impInCell ) / uCells;
 vImpTint = impKeeper ? aImp1.w - 10.0 : abs( aImp1.w );
-vImpFade = smoothstep( impReach * 0.82, impReach, impCam );
 vImpHash = fract( sin( dot( impBase.xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+// Past its reach a tree goes, but each at its own distance (over the last 30% of the
+// reach) and never at once: over its own 12% of the reach it fades by coverage, which
+// MSAA resolves to a blend. Switched whole it "materialised out of thin air" at the
+// sides of the view as the car drove up (the owner's words).
+float impGone = impReach * ( 0.7 + 0.3 * vImpHash );
+vImpFade = 1.0 - smoothstep( impGone - impReach * 0.12, impGone, impCam );
 // The season, as the model takes it: the same kind, the same random from the same tint.
 int impKind = 0;
 for ( int k = 1; k < ${TREE_KINDS.length}; k++ ) if ( impCell >= uImpKindFrom[ k ] - 0.5 ) impKind = k;
@@ -513,9 +518,8 @@ normal = normalize( ( viewMatrix * vec4( impWorldNormal, 0.0 ) ).xyz );`,
         )
         .replace(
           '#include <map_fragment>',
-          `// Nothing before the model hands over (see applyModelDissolve); past its reach a tree
-// goes whole, one at a time: dithered at two kilometres it read as a haze of dots.
-if ( vImpSwap <= 0.0 || vImpHash < vImpFade ) discard;
+          `// Nothing before the model hands over (see applyModelDissolve), nothing past its reach.
+if ( vImpSwap <= 0.0 || vImpFade <= 0.0 ) discard;
 // The two baked views either side of the camera's, blended by how far between.
 vec4 sampledDiffuseColor = mix( texture2D( map, vImpUv ), texture2D( map, vImpUv2 ), vImpView );
 // Leaves recoloured for the season, as the model's are (render/season.ts). The leaf
@@ -548,11 +552,11 @@ diffuseColor.rgb *= vImpTint;`,
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <alphatest_fragment>',
         `#include <alphatest_fragment>
-diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
+diffuseColor.a *= min( 1.0, 2.0 * vImpSwap ) * vImpFade;`,
       );
     };
     const comicKey = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v11`;
+    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v12`;
     this.material = material;
     this.mesh = new THREE.Group();
     this.mesh.matrixAutoUpdate = false;

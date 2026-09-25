@@ -61,7 +61,7 @@ import type { Terrain } from './terrain';
 const CACHE_N = 256;
 const RADIUS_M = 70;
 /** Band at the outer edge over which tufts grow out of the ground. */
-const SPROUT_M = 15;
+const SPROUT_M = 30;
 /** Width of the band in which two neighbouring rings hand over. */
 const RING_BLEND_M = 8;
 /** Rings: [inner, outer, cell, card width]. */
@@ -271,6 +271,11 @@ float gKind = gWheat > 0.5 ? 3.0
 // is a tone that changes with the view angle — a ring round the car.
 vTuftRoot = gGround * 0.66;
 vTuftTip = mix( min( gGround * 1.24, vec3( 1.0 ) ), vec3( 0.7, 0.53, 0.2 ), gWheat );
+// Near its far edge a tuft is the ground's own flat tone before it shrinks away: tall
+// ditch grass sprouting with its dark roots and light tips read as bushes appearing.
+float gFlat = smoothstep( 0.0, 0.6, gSprout );
+vTuftRoot = mix( gGround, vTuftRoot, gFlat );
+vTuftTip = mix( gGround, vTuftTip, gFlat );
 float gHue = gHash( gIndex + 5.5 );
 vTuftAccent = gKind > 2.5 ? vec3( 0.78, 0.6, 0.24 )
   : gHue < 0.45 ? vec3( 0.9, 0.88, 0.8 )
@@ -280,7 +285,8 @@ vTuftAccent = gKind > 2.5 ? vec3( 0.78, 0.6, 0.24 )
 // patch by patch as the ground takes it (render/groundpaint.ts).
 gTall *= 1.0 - 0.6 * uSeasonDry * gWheat;
 gTall *= 1.0 - seasonSnowAt( 0.0, seasonPatch( gRel ) );
-vTuftAccent = mix( vTuftAccent, vTuftTip * 0.8, uSeasonDry * 0.85 );`,
+vTuftAccent = mix( vTuftAccent, vTuftTip * 0.8, uSeasonDry * 0.85 );
+vTuftAccent = mix( gGround, vTuftAccent, gFlat );`,
         )
         .replace(
           '#include <begin_vertex>',
@@ -357,7 +363,7 @@ varying vec3 vTuftAccent;`,
         );
     };
     const key = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${key.call(material)}:grass-cards-v8:${cell}`;
+    material.customProgramCacheKey = () => `${key.call(material)}:grass-cards-v9:${cell}`;
     return material;
   }
 

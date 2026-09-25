@@ -200,14 +200,15 @@ function spruceGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const uv: number[] = [];
   const col: number[] = [];
   const c = new THREE.Color();
-  // The far level (60 m on, and the impostor bake) keeps the outline on fewer, wider
-  // boughs: most of a spruce's cost is the overdraw of its cards.
-  const whorls = near ? 12 + Math.floor(rnd(0) * 3) : 8 + Math.floor(rnd(0) * 2);
+  // ONE SHAPE AT EVERY LEVEL. A far level with fewer, wider boughs showed its dark core
+  // between them and filled in at 60 m as the near level took over: a spruce that grew
+  // its branches as you drove up. The levels differ only in each bough's segments.
+  const whorls = 12 + Math.floor(rnd(0) * 3);
   for (let t = 0; t < whorls; t++) {
     const k = t / whorls;
     const y = base + k * (H - base - 1.2);
     const R = (3.3 + rnd(t + 60) * 0.5) * (1 - k * 0.88) + 0.35;
-    const branches = near ? 6 + Math.floor(rnd(t + 70) * 2) : 5;
+    const branches = 6 + Math.floor(rnd(t + 70) * 2);
     const twist = rnd(t + 10) * 3;
     for (let b = 0; b < branches; b++) {
       const a = twist + (b / branches) * Math.PI * 2 + (rnd(t * 50 + b) - 0.5) * 0.4;
@@ -216,7 +217,7 @@ function spruceGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
       const reach = R * (0.85 + rnd(t * 40 + b) * 0.3);
       // Down at the middle, the tip lifting again: the classic spruce bough.
       const droop = reach * (0.28 + rnd(t * 30 + b) * 0.12);
-      const width = reach * (near ? 1.15 : 1.35);
+      const width = reach * 1.15;
       // Rolled well off flat, either way: seen level, a flat spray is a line.
       const roll = (rnd(t * 20 + b) < 0.5 ? -1 : 1) * (0.45 + rnd(t * 25 + b) * 0.6);
       // Across the branch: horizontal, then rolled about the branch.
@@ -1425,7 +1426,11 @@ vUnderFade = 1.0;
 #ifdef USE_INSTANCING
 if ( aKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} && aKind < ${(UNDERGROWTH_KIND_TO + 0.5).toFixed(1)} ) {
   vec3 underFoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
-  vUnderFade = 1.0 - smoothstep( ${UNDERGROWTH_FADE_FROM_M.toFixed(1)}, ${UNDERGROWTH_FADE_TO_M.toFixed(1)}, length( cameraPosition.xz - underFoot.xz ) );
+  // Each plant at its own distance, over its own 30 m: a band crossed in under a second
+  // at speed was plants appearing out of nothing.
+  float tint = instanceColor.r;
+  float underAt = mix( ${(UNDERGROWTH_FADE_FROM_M + 15).toFixed(1)}, ${(UNDERGROWTH_FADE_TO_M - 15).toFixed(1)}, ${SEASON_TREE_RANDOM_GLSL} );
+  vUnderFade = 1.0 - smoothstep( underAt - 15.0, underAt + 15.0, length( cameraPosition.xz - underFoot.xz ) );
 }
 #endif`);
     shader.fragmentShader = shader.fragmentShader
@@ -1459,7 +1464,7 @@ if ( vWood > 0.5 && !gl_FrontFacing ) discard;
       );
   };
   const comicKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-cards-v4`;
+  material.customProgramCacheKey = () => `${comicKey.call(material)}:tree-cards-v5`;
 }
 // Bark (render/leafpaint.ts): wood whose texture coordinates carry a bark offset.
 applyBarkMapping(material);
@@ -1505,8 +1510,8 @@ const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
 export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
 export const UNDERGROWTH_KIND_TO = TreeKind.Log;
 /** Undergrowth dissolves between these camera distances and is not drawn past them. */
-export const UNDERGROWTH_FADE_FROM_M = 55;
-export const UNDERGROWTH_FADE_TO_M = 75;
+export const UNDERGROWTH_FADE_FROM_M = 50;
+export const UNDERGROWTH_FADE_TO_M = 110;
 
 const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Birch]: 5,
