@@ -7,6 +7,7 @@ import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
 import { terminusWeight } from './terminus';
+import { TRACK_HALF_WIDTH_M, TRACK_MAX_LENGTH_M, trackAt, trackPossibleNear, type TrackSample } from './tracks';
 
 
 /** Side length of one absolute, deterministic desert tile. */
@@ -430,6 +431,19 @@ export function plantTrees(
    * The tract's edge is jittered per tree over a narrow band so it is not a ruled line.
    */
   const inBor = (x: number, z: number, r5: number): boolean => land.pineAt(x, z) > 0.35 + 0.3 * r5;
+  /**
+   * Whether a point is on a dirt track (world/tracks.ts), within `clear` metres of its
+   * centreline: a projection is paid for only where a track can be.
+   */
+  const trackSample: TrackSample = { dist: Infinity, fade: 0 };
+  const onTrack = (x: number, z: number, roadDist: number, clear: number): boolean => {
+    if (roadDist > TRACK_MAX_LENGTH_M + 20) return false;
+    const hint = context.roadDistance.ownerAt(x, z, DIST_LATTICE);
+    if (!trackPossibleNear(seed, hint)) return false;
+    const p = context.road.project(x, z, hint);
+    trackAt(seed, p.s, p.lateral, context.road.halfWidthAt(p.s), trackSample);
+    return trackSample.dist < clear && trackSample.fade > 0.2;
+  };
   for (let ci = 0; ci < TREE_CELLS; ci++) {
     for (let cj = 0; cj < TREE_CELLS; cj++) {
       const gx = tx * TREE_CELLS + ci;
@@ -447,6 +461,8 @@ export function plantTrees(
         if (roadDist < context.road.halfWidthAt(p.s) + TREE_VERGE_KEEP) continue;
       }
       if (roadDist < TREE_ROAD_KEEP) continue;
+      // A track is cut through the wood: the trees keep a lane either side of it.
+      if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 2.2)) continue;
       const r = hash01(seed, TREE_TAG, gx, gz, 3);
       const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
       const r3 = hash01(seed, TREE_TAG, gx, gz, 7);
@@ -585,6 +601,7 @@ export function plantTrees(
       }
       if (roadDist < TREE_ROAD_KEEP) continue;
       if (terminusWeight(x, z) > 0) continue;
+      if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 0.6)) continue;
       const forest = land.forestAt(x, z, roadDist);
       const r2 = hash01(seed, UNDER_TAG, gx, gz, 4);
       const r3 = hash01(seed, UNDER_TAG, gx, gz, 7);
@@ -635,6 +652,43 @@ export function plantTrees(
     }
   }
   return n;
+}
+
+/**
+ * Height of the ground AS THE TILES DRAW IT, anywhere: their lattice nodes, sampled
+ * exactly as the tile builder samples them, and the same two triangles per cell (split
+ * on the b-c diagonal, as the index buffer above writes them). Between nodes the drawn
+ * ground is a plane, up to decimetres off the terrain function, so anything laid on the
+ * ground (the shoulder, a track) must ask this rather than the function. Nodes are
+ * memoised for the sampler's life: make one per build.
+ */
+export function tileSurfaceSampler(context: DesertTileGenerationContext): (x: number, z: number) => number {
+  const nodes = new Map<number, number>();
+  const sample: GroundHeightSample = { height: 0, detail: 0 };
+  const node = (i: number, j: number): number => {
+    const key = i * 1_000_003 + j;
+    let h = nodes.get(key);
+    if (h === undefined) {
+      sampleGroundHeight(context, i * DESERT_TILE_STEP, j * DESERT_TILE_STEP, false, sample);
+      h = sample.height;
+      nodes.set(key, h);
+    }
+    return h;
+  };
+  return (x, z) => {
+    const fx = x / DESERT_TILE_STEP;
+    const fz = z / DESERT_TILE_STEP;
+    const i = Math.floor(fx);
+    const j = Math.floor(fz);
+    const u = fx - i;
+    const v = fz - j;
+    if (u + v <= 1) {
+      const a = node(i, j);
+      return a + (node(i + 1, j) - a) * u + (node(i, j + 1) - a) * v;
+    }
+    const d = node(i + 1, j + 1);
+    return d + (node(i, j + 1) - d) * (1 - u) + (node(i + 1, j) - d) * (1 - v);
+  };
 }
 
 /** Bilinear height on the tile's regular lattice, local metres from its corner. */

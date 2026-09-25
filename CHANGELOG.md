@@ -60,6 +60,18 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- DIRT TRACKS. Two ruts worn to earth with a strip of real grass between them leave the
+  asphalt every few hundred metres for a field or a wood, 90–220 m long, wandering and
+  fading out (`world/tracks.ts`: a curve in the road's frame, so grass, trees and the
+  ribbon all ask the same pure function). The ribbon lies on the tiles' own surface
+  (`tileSurfaceSampler`, shared with the shoulder), painted in code, cut by coverage; no
+  grass on the ruts, short grass between, trees keep a lane either side. The desert's
+  sidetracks, laid on the corridor mesh, are no longer registered.
+- PINE AS SHISHKIN PAINTS IT: ochre-copper above a grey fissured foot with a zone of
+  both between (it was neon orange at a hard line), a thicker mast stem, lighter olive
+  crowns.
+- THE VISTA IS NOT EXPENSIVE: split by band it costs about 0.5 ms; the 2.1 ms blamed on it
+  was the measuring stand counting the corridor terrain as vista.
 - DEAD WOOD AND A QUIETER MEADOW. Stumps (a cut face or an old grey break, moss on one
   side) and fallen trunks with broken stubs lie in the interior of woods, rarely, as
   every painted wood has them. The meadow's sunlit tone is olive rather than lemon, and

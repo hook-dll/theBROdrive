@@ -9,6 +9,15 @@ import { CoverKind, Crop, MUD, newCoverSample } from './landcover';
 import type { WorldOrigin } from './origin';
 import type { Road } from './road';
 import { shoulderWidthAt } from './shoulder';
+import {
+  TRACK_HALF_WIDTH_M,
+  TRACK_MAX_LENGTH_M,
+  TRACK_RUT_HALF_M,
+  TRACK_RUT_OFFSET_M,
+  trackAt,
+  trackPossibleNear,
+  type TrackSample,
+} from './tracks';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 
@@ -76,6 +85,8 @@ function cardGeometry(): THREE.InstancedBufferGeometry {
 }
 
 const cover = newCoverSample();
+
+const track: TrackSample = { dist: Infinity, fade: 0 };
 
 export class GrassField {
   private readonly heightData = new Float32Array(CACHE_N * CACHE_N);
@@ -494,11 +505,14 @@ varying vec3 vTuftAccent;`,
     let roadDist = this.roadDistance.distAt(x, z, 20);
     let toEdge = 99;
     let shoulder = 0;
-    if (roadDist < 45) {
+    track.dist = Infinity;
+    if (roadDist < 45 || (roadDist < TRACK_MAX_LENGTH_M + 30 && trackPossibleNear(this.road.seed, this.roadDistance.ownerAt(x, z, 20)))) {
       const p = this.road.project(x, z, this.roadDistance.ownerAt(x, z, 20));
       roadDist = Math.abs(p.lateral);
-      toEdge = roadDist - this.road.halfWidthAt(p.s);
+      const edge = this.road.halfWidthAt(p.s);
+      toEdge = roadDist - edge;
       shoulder = shoulderWidthAt(p.s, Math.sign(p.lateral));
+      trackAt(this.road.seed, p.s, p.lateral, edge, track);
     }
     this.terrain.cover.sample(x, z, roadDist, cover);
     let r = cover.r;
@@ -546,6 +560,13 @@ varying vec3 vTuftAccent;`,
       density = Math.max(density, 0.65);
     }
     if (wet > 0.55) height = 0;
+    // A dirt track (world/tracks.ts): nothing on the ruts, short grass on the strip
+    // between them, the verges trodden low.
+    if (track.dist < TRACK_HALF_WIDTH_M + 0.6 && track.fade > 0.3) {
+      const fromRut = Math.abs(track.dist - TRACK_RUT_OFFSET_M);
+      if (fromRut < TRACK_RUT_HALF_M + 0.2) height = 0;
+      else height *= 0.55;
+    }
     // The ground's colour, as the tiles paint it: mud where it is wet.
     if (wet > 0) {
       const m = Math.min(1, wet * 1.4) * 0.85;

@@ -171,7 +171,7 @@ export const AUTUMN_LEAVES: readonly AutumnLeaf[] = [
   leaf(0x557552, 0x557552, 0x557552, 0, 0), // spruce
   leaf(0xb39447, 0x96683a, 0x7a8a4f, 0.1), // bush: hazel yellow, willow rust
   leaf(0xc4a446, 0xa99243, 0x829a52, 0.12), // lime
-  leaf(0x516b45, 0x516b45, 0x516b45, 0, 0), // pine
+  leaf(0x61744a, 0x61744a, 0x61744a, 0, 0), // pine
   leaf(0xcf8f3c, 0xb0553a, 0x9ba673, 0.05), // aspen: amber to brick
   leaf(0x9a7a3c, 0x827a45, 0x68803f, 0.3), // oak: ochre, olive brown, and late
   leaf(0xd08236, 0xb34e33, 0x92a64e, 0.08), // maple: orange to brick red

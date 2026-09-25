@@ -81,7 +81,7 @@ import { DelineatorProvider } from './world/props/delineators';
 import { MonumentProvider } from './world/props/monuments';
 import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
-import { SidetrackProvider } from './world/sidetrack';
+import { TrackProvider } from './world/trackmesh';
 import { dayOfYear, SEASON_OVERRIDE, seasonAt, seasonOfDay } from './world/season';
 import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
 import { Road, ROAD_LENGTH } from './world/road';
@@ -502,7 +502,9 @@ async function boot(): Promise<void> {
   // clips it, so the provider needs the same debris field the scatter registers with:
   // one breakable registry for the whole world, not one per provider.
   streamer.register(new DelineatorProvider(roadDistance, debris));
-  streamer.register(new SidetrackProvider(roadDistance));
+  // The countryside's dirt tracks, on the tiles' own ground (world/tracks.ts). The
+  // desert's sidetracks lay on the corridor mesh and would float over the tiles.
+  streamer.register(new TrackProvider(roadDistance));
   // Distant weather: alpha sheets 600-1800 m out, no physics and no colliders. It
   // streams like everything else so a virga shaft is built off the road frame at
   // its own arclength and disposed with the chunk that owns it.

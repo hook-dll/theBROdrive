@@ -56,7 +56,7 @@ export interface TreeVariant {
  * Trunk collider radius per kind at scale 1, metres, in `TreeKind` order; 0 for things
  * a car drives through.
  */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.28, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0];
+export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.34, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0];
 
 interface Palette {
   readonly spruce: readonly number[];
@@ -83,6 +83,8 @@ interface Palette {
   readonly birchMark: number;
   readonly birchButt: number;
   readonly pineBark: number;
+  /** Where the grey fissured foot gives way to the thin copper bark above. */
+  readonly pineBarkMid: number;
   readonly pineBarkLow: number;
   readonly aspenBark: number;
   readonly aspenButt: number;
@@ -112,7 +114,9 @@ const PALETTES: Record<Season, Palette> = {
     limeLeaf: [0x829a52, 0x7b924d, 0x8aa25a],
     mapleLeaf: [0x92a64e, 0x899d49, 0x9cae58],
     bush: [0x7a8a4f, 0x73824a, 0x829256],
-    pine: [0x516b45, 0x5a744c, 0x4a623f],
+    // Lighter and warmer than spruce: a pine crown against the sky is olive, lit
+    // through ("Rye", "Pines sunlit"), never the dark mass a spruce is.
+    pine: [0x61744a, 0x6b7e52, 0x586a44],
     aspenLeaf: [0x9ba673, 0x919c6a, 0xa5ae7d],
     oakLeaf: [0x68803f, 0x61783a, 0x718a48],
     alderLeaf: [0x5e7644, 0x586e3f, 0x667f4b],
@@ -129,8 +133,11 @@ const PALETTES: Record<Season, Palette> = {
     birchGrey: 0x9d998f,
     birchMark: 0x35333a,
     birchButt: 0x5f5852,
-    pineBark: 0xc27a4c,
-    pineBarkLow: 0x75655a,
+    // Ochre-copper, not orange: Shishkin's pines glow where the sun is on them, and
+    // the light does that, not the paint (docs/shishkin.md).
+    pineBark: 0xb08058,
+    pineBarkMid: 0x937262,
+    pineBarkLow: 0x6e6159,
     aspenBark: 0xb6bea5,
     aspenButt: 0x55534e,
     oakBark: 0x857b6c,
@@ -836,12 +843,14 @@ function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const rnd = rng(seed * 2654435 + 11);
   const H = 18 + rnd() * 6;
   const copper = H * (0.42 + rnd() * 0.12);
-  const rings = trunkRings(rnd, H * 0.92, 0.28, 0.72, 0.7, near ? 10 : 6);
+  // A mast pine's stem: thick at the foot for its height.
+  const rings = trunkRings(rnd, H * 0.92, 0.34, 0.72, 0.7, near ? 10 : 6);
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
+      // Grey foot, a band of both, copper above: the change is a zone, in tongues.
       const edge = copper + (hash2(side + seed, 7) - 0.5) * 2.5;
-      return y < edge ? pal.pineBarkLow : pal.pineBark;
+      return y < edge - 1.6 ? pal.pineBarkLow : y < edge + 1.2 ? pal.pineBarkMid : pal.pineBark;
     }),
   ];
   const leaves: THREE.BufferGeometry[] = [];

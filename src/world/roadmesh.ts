@@ -9,7 +9,7 @@ import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
-import { DESERT_TILE_STEP, sampleGroundHeight } from './deserttiledata';
+import { tileSurfaceSampler } from './deserttiledata';
 import type { RoadDistance } from './roaddistance';
 import { shoulderWidthAt } from './shoulder';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
@@ -599,7 +599,7 @@ export class RoadMeshProvider implements ChunkProvider {
     const uvBase = Math.floor(sStart / GRAVEL_BASE_M) * GRAVEL_BASE_M;
     const index = new Uint32Array((sCount - 1) * 2 * (COLS - 1) * 6);
     const p = new THREE.Vector3();
-    const ground = this.visibleGround(ctx);
+    const ground = tileSurfaceSampler({ seed: this.seed, road: ctx.road, terrain: ctx.terrain, roadDistance: this.roadDistance! });
     let w = 0;
     for (let si = 0; si < sCount; si++) {
       const s = sStart + si * SURFACE_STEP;
@@ -682,40 +682,6 @@ export class RoadMeshProvider implements ChunkProvider {
     return { mesh, vertices: pos, indices: index };
   }
 
-  /**
-   * Height of the ground as the tiles draw it: their lattice nodes, sampled exactly as
-   * the tile builder samples them, and the same two triangles per cell (split on the
-   * b-c diagonal, world/deserttiledata.ts). Nodes are memoised for the chunk.
-   */
-  private visibleGround(ctx: ChunkContext): (x: number, z: number) => number {
-    const context = { seed: this.seed, road: ctx.road, terrain: ctx.terrain, roadDistance: this.roadDistance! };
-    const nodes = new Map<number, number>();
-    const sample = { height: 0, detail: 0 };
-    const node = (i: number, j: number): number => {
-      const key = i * 1_000_003 + j;
-      let h = nodes.get(key);
-      if (h === undefined) {
-        sampleGroundHeight(context, i * DESERT_TILE_STEP, j * DESERT_TILE_STEP, false, sample);
-        h = sample.height;
-        nodes.set(key, h);
-      }
-      return h;
-    };
-    return (x, z) => {
-      const fx = x / DESERT_TILE_STEP;
-      const fz = z / DESERT_TILE_STEP;
-      const i = Math.floor(fx);
-      const j = Math.floor(fz);
-      const u = fx - i;
-      const v = fz - j;
-      if (u + v <= 1) {
-        const a = node(i, j);
-        return a + (node(i + 1, j) - a) * u + (node(i, j + 1) - a) * v;
-      }
-      const d = node(i + 1, j + 1);
-      return d + (node(i, j + 1) - d) * (1 - u) + (node(i + 1, j) - d) * (1 - v);
-    };
-  }
 
   *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
     const { sStart, sEnd, road, physics, hasPhysics } = ctx;
