@@ -56,7 +56,7 @@ export interface TreeVariant {
  * Trunk collider radius per kind at scale 1, metres, in `TreeKind` order; 0 for things
  * a car drives through.
  */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.34, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0];
+export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.34, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0, 0.42];
 
 interface Palette {
   readonly spruce: readonly number[];
@@ -839,12 +839,17 @@ function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: 
  * bare but for dead stubs until a flat, uneven crown of dark blue-green clouds on
  * short upswept limbs at the very top.
  */
-function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
-  const rnd = rng(seed * 2654435 + 11);
-  const H = 18 + rnd() * 6;
+/**
+ * A Scots pine. In a wood (`open` false) a mast: a long bare stem and a flat crown at
+ * the top. Grown in the open (`open`, Shishkin's "Rye"), the crown starts a third of
+ * the way up, wide and ragged, the lower limbs long and drooping, on a stouter stem.
+ */
+function pineGeometry(seed: number, pal: Palette, near: boolean, open = false): TreeShape {
+  const rnd = rng(seed * 2654435 + 11 + (open ? 977 : 0));
+  const H = open ? 16 + rnd() * 5 : 18 + rnd() * 6;
   const copper = H * (0.42 + rnd() * 0.12);
   // A mast pine's stem: thick at the foot for its height.
-  const rings = trunkRings(rnd, H * 0.92, 0.34, 0.72, 0.7, near ? 10 : 6);
+  const rings = trunkRings(rnd, H * 0.92, open ? 0.42 : 0.34, 0.72, 0.7, near ? 10 : 6);
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
@@ -857,21 +862,23 @@ function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const from = new THREE.Vector3();
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const crownBase = H * (0.62 + rnd() * 0.06);
+  const crownBase = H * (open ? 0.3 + rnd() * 0.08 : 0.62 + rnd() * 0.06);
   // Many limbs, each carrying a plate at its tip and one half-way: the plates overlap
   // into one ragged, flat-topped mass. Four or five lone plates read as a savanna
   // acacia, not a pine.
-  const limbs = 8 + Math.floor(rnd() * 3);
+  const limbs = open ? 15 + Math.floor(rnd() * 4) : 8 + Math.floor(rnd() * 3);
   const turn = rnd() * Math.PI * 2;
   for (let j = 0; j < limbs; j++) {
     const k = j / limbs;
     const y = crownBase + (H * 0.9 - crownBase) * k;
     const a = turn + j * 2.3 + rnd() * 0.6;
-    const out = (1.6 + rnd() * 1.4) * (1 - 0.4 * k);
+    const out = open ? (2.6 + rnd() * 2.4) * (1 - 0.6 * k) : (1.6 + rnd() * 1.4) * (1 - 0.4 * k);
+    // An open-grown pine's low limbs reach out and sag; high ones rise.
+    const sag = open ? (1 - k) * (0.6 + rnd() * 0.8) : 0;
     axisAt(rings, y, from);
     bend.set(from.x + Math.cos(a) * out * 0.5, y + 0.3 + rnd() * 0.4, from.z + Math.sin(a) * out * 0.5);
-    to.set(from.x + Math.cos(a) * out, y + 0.6 + rnd() * 0.9, from.z + Math.sin(a) * out);
-    parts.push(limb(from, bend, to, 0.1, 0.04, near ? 4 : 3, pal.pineBark));
+    to.set(from.x + Math.cos(a) * out, y + 0.6 + rnd() * 0.9 - sag * 1.6, from.z + Math.sin(a) * out);
+    parts.push(limb(from, bend, to, open ? 0.16 : 0.1, 0.04, near ? 4 : 3, pal.pineBark));
     // Pine needles sit in flat plates on top of their limbs, not in balls.
     const r = 1.5 + rnd() * 0.6;
     leaves.push(blob(to.x, to.y + 0.25, to.z, r, r * 0.55, r * (0.8 + rnd() * 0.3), rotated(pal.pine, j), seed * 23 + j));
@@ -894,7 +901,8 @@ function pineGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     }
   }
   const cy = (crownBase + H) / 2 + 0.5;
-  const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), top.x, cy, top.z, 3.4, (H - crownBase) / 2 + 1, 3.4);
+  const reach = open ? 5 : 3.4;
+  const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), top.x, cy, top.z, reach, (H - crownBase) / 2 + 1, reach);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
 }
 
@@ -1339,7 +1347,7 @@ depthMaterial.onBeforeCompile = (shader) => {
   // shadow, and it was a shadow-pass draw for every bucket of it.
   shader.fragmentShader = `varying float vWood;\nvarying float vKind;\n${shader.fragmentShader.replace(
     'void main() {',
-    `void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;`,
+    `void main() {\n\tif ( vKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} && vKind < ${(UNDERGROWTH_KIND_TO + 0.5).toFixed(1)} ) discard;\n\tif ( vWood > 0.5 && gl_FrontFacing ) discard;`,
   )}`;
 };
 depthMaterial.customProgramCacheKey = () => 'tree-depth-v3';
@@ -1381,7 +1389,7 @@ vWood = aWood;
 // past it the forest stops drawing it at all (world/forest.ts).
 vUnderFade = 1.0;
 #ifdef USE_INSTANCING
-if ( aKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} ) {
+if ( aKind > ${(UNDERGROWTH_KIND_FROM - 0.5).toFixed(1)} && aKind < ${(UNDERGROWTH_KIND_TO + 0.5).toFixed(1)} ) {
   vec3 underFoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
   vUnderFade = 1.0 - smoothstep( ${UNDERGROWTH_FADE_FROM_M.toFixed(1)}, ${UNDERGROWTH_FADE_TO_M.toFixed(1)}, length( cameraPosition.xz - underFoot.xz ) );
 }
@@ -1451,10 +1459,12 @@ const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
   [TreeKind.Juniper]: 'needle',
   [TreeKind.Stump]: 'broad',
   [TreeKind.Log]: 'small',
+  [TreeKind.FieldPine]: 'needle',
 };
 
-/** Kinds from this one on are undergrowth: fern and juniper. */
+/** Kinds from this one to `UNDERGROWTH_KIND_TO` are undergrowth and floor: fern, juniper, stump, log. */
 export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
+export const UNDERGROWTH_KIND_TO = TreeKind.Log;
 /** Undergrowth dissolves between these camera distances and is not drawn past them. */
 export const UNDERGROWTH_FADE_FROM_M = 55;
 export const UNDERGROWTH_FADE_TO_M = 75;
@@ -1475,6 +1485,7 @@ const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Juniper]: 3,
   [TreeKind.Stump]: 3,
   [TreeKind.Log]: 3,
+  [TreeKind.FieldPine]: 3,
 };
 
 let variants: readonly TreeVariant[][] | null = null;
@@ -1499,6 +1510,7 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
       [TreeKind.Juniper]: juniperGeometry,
       [TreeKind.Stump]: stumpGeometry,
       [TreeKind.Log]: logGeometry,
+      [TreeKind.FieldPine]: (seed, p, near) => pineGeometry(seed, p, near, true),
     };
     const lod = ({ wood, leaves }: TreeShape, kind: TreeKind): TreeLod => {
       const geometry = mergeTreeParts(wood, leaves, kind);

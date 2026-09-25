@@ -60,6 +60,10 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- "RYE". About once in ten kilometres a group of five to nine old pines stands in the
+  fields by the road, as in Shishkin's "Rye": a new kind, the field pine, grown in the
+  open, its crown from a third of its height, wide and ragged, low limbs sagging, on a
+  stouter stem.
 - THE SUN OF THE MIDDLE BELT. The observer moves from Laayoune (27° N) to near Vladimir
   (56.1° N, 40.4° E): a summer noon sun 34° lower, barely 30° in autumn, long shadows
   and slanting warm light all day, long summer evenings. `tools/astronomy-audit.mjs`

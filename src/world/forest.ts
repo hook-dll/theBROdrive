@@ -10,6 +10,7 @@ import {
   loadTreeVariants,
   UNDERGROWTH_FADE_TO_M,
   UNDERGROWTH_KIND_FROM,
+  UNDERGROWTH_KIND_TO,
   type TreeLod,
   type TreeVariant,
 } from './props/trees';
@@ -453,7 +454,7 @@ export class ForestRenderer {
         if (d >= MODEL_REACH_M) continue;
         const kind = t[o + 5]!;
         // Undergrowth has dissolved by here (world/props/trees.ts).
-        if (kind >= UNDERGROWTH_KIND_FROM && d >= UNDERGROWTH_FADE_TO_M) continue;
+        if (kind >= UNDERGROWTH_KIND_FROM && kind <= UNDERGROWTH_KIND_TO && d >= UNDERGROWTH_FADE_TO_M) continue;
         treeShape(wx, wz, variants[kind]!.length, shape);
         const lod = d < NEAR_M ? 0 : d < SHADOW_M ? 1 : 2;
         const s = t[o + 3]!;

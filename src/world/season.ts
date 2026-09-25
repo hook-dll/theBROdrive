@@ -182,6 +182,7 @@ export const AUTUMN_LEAVES: readonly AutumnLeaf[] = [
   leaf(0x55684c, 0x55684c, 0x55684c, 0, 0), // juniper
   leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // stump: moss does not turn
   leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // log
+  leaf(0x61744a, 0x61744a, 0x61744a, 0, 0), // field pine
 ];
 
 /**

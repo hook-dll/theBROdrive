@@ -89,6 +89,8 @@ export const enum TreeKind {
   Stump = 13,
   /** The forest floor: a fallen trunk, lying where it fell. */
   Log = 14,
+  /** A pine grown in the open: crown from a third of its height, wide and low. */
+  FieldPine = 15,
 }
 
 /** Every kind, in enum order: the index of per-kind tables. */
@@ -108,6 +110,7 @@ export const TREE_KINDS: readonly TreeKind[] = [
   TreeKind.Juniper,
   TreeKind.Stump,
   TreeKind.Log,
+  TreeKind.FieldPine,
 ];
 
 
@@ -544,6 +547,20 @@ export function plantTrees(
           else put(x, z, TreeKind.Bush, 0.55 + 0.6 * r3, key);
         }
         continue;
+      }
+
+      // SHISHKIN'S "RYE": now and then a group of old pines stands in the open fields
+      // by the road, left when the wood around them was cleared, crowns wide and low
+      // from growing in the open. Rare: a few in a long drive.
+      if (roadDist < 260) {
+        const relic = land.copseAt(x * 0.7 + 1234, z * 0.7 - 777);
+        // Only in a quarter of the 2 km districts: about one group every dozen km.
+        const district = hash01(seed, TREE_TAG, Math.floor(x / 2000), Math.floor(z / 2000), 11);
+        if (relic > 0.9 && district < 0.25 && land.farmlandAt(x, z) > 0.4) {
+          // Five to nine of them over a patch forty to sixty metres across.
+          if (r < 0.07) put(x, z, TreeKind.FieldPine, 1.0 + 0.3 * r3, key);
+          continue;
+        }
       }
 
       land.sample(x, z, roadDist, cover);
