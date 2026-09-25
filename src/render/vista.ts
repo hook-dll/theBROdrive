@@ -32,6 +32,8 @@ import type {
 
 /** Forty metres of hidden overlap beneath the nearest guaranteed tile edge. */
 const INNER_RADIUS = DESERT_TILE_SIZE - 40;
+/** Metres the camera may move before the disc is rebuilt round it. */
+const VISTA_STEP_M = 3;
 /** Only the overlap covered by the settled 5x5 desert-tile window is non-occluding. */
 const NON_OCCLUDING_RADIUS = DESERT_TILE_SIZE * 2;
 /**
@@ -333,6 +335,8 @@ export class VistaMesh {
   private sampleCellX = Number.NaN;
   private sampleCellZ = Number.NaN;
   private interpolationX = 0;
+  private builtAtX = Number.NaN;
+  private builtAtZ = Number.NaN;
   private interpolationZ = 0;
 
   /** CPU-only mesa animation data; none of these buffers are uploaded as attributes. */
@@ -582,7 +586,15 @@ export class VistaMesh {
       0,
       Math.min(1, (cameraZ - cellZ * SAMPLE_CELL_SIZE) / SAMPLE_CELL_SIZE),
     );
-    this.updateGroundPositions(cameraX, cameraZ);
+    // Not every frame: rebuilding the disc is three 175 KB uploads, 3-4 ms a frame on
+    // ANGLE/Metal (measured). The disc is kept where it was last built, so it stays
+    // exactly consistent with itself; the camera can stray `VISTA_STEP_M` from its
+    // centre, which at the disc's inner edge, 200 m out and under the tiles, is nothing.
+    if (cellChanged || Math.hypot(cameraX - this.builtAtX, cameraZ - this.builtAtZ) >= VISTA_STEP_M) {
+      this.builtAtX = cameraX;
+      this.builtAtZ = cameraZ;
+      this.updateGroundPositions(cameraX, cameraZ);
+    }
     this.updateMesaPositions(cameraX, cameraZ);
     if (cellChanged) this.refreshMesaNormals();
   }

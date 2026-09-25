@@ -214,7 +214,7 @@ export class ForestRenderer {
   private maybeBake(): void {
     if (this.atlas || !this.renderer || !this.variants) return;
     this.atlas = bakeImpostorAtlas(this.renderer, this.variants);
-    this.impostors = new ImpostorField(this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_BLEND_M, IMPOSTOR_TO_M, IMPOSTOR_OPEN_TO_M, FAR_WOODS_TO_M);
+    this.impostors = new ImpostorField(this.renderer, this.atlas, IMPOSTOR_FROM_M, IMPOSTOR_BLEND_M, IMPOSTOR_TO_M, IMPOSTOR_OPEN_TO_M, FAR_WOODS_TO_M);
     this.scene.add(this.impostors.mesh);
     // Tiles that arrived before the atlas existed are written now.
     for (const [key, tile] of this.impostorTiles) this.writeImpostorTile(key, tile);
@@ -474,8 +474,18 @@ export class ForestRenderer {
             // An empty bucket is still a draw, and its shadow another: most kinds are
             // absent from any one stretch of road.
             b.mesh.visible = b.count > 0;
+            if (b.count === 0) continue;
+            // Only what is used: the buffers are sized for the densest stretch of wood
+            // seen, and uploading their whole length every 14 m was a stall of tens of
+            // milliseconds (the GPU is still reading them).
+            b.mesh.instanceMatrix.clearUpdateRanges();
+            b.mesh.instanceMatrix.addUpdateRange(0, b.count * 16);
             b.mesh.instanceMatrix.needsUpdate = true;
-            if (b.mesh.instanceColor) b.mesh.instanceColor.needsUpdate = true;
+            if (b.mesh.instanceColor) {
+              b.mesh.instanceColor.clearUpdateRanges();
+              b.mesh.instanceColor.addUpdateRange(0, b.count * 3);
+              b.mesh.instanceColor.needsUpdate = true;
+            }
           }
         }
       }

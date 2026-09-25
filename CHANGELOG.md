@@ -60,6 +60,18 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- STUTTER, MEASURED AND CUT (`docs/research-2026-09-26.md`). The owner saw a constant
+  jitter at 144 Hz. Uncapped, a drive had 132 hitches in 20 s, the worst frame 122 ms:
+  about 30 GB went to the GPU in those 20 s. The impostor draw buffer, a million trees,
+  was repacked and uploaded whole (34 MB in one frame) every 40 m and on every arriving
+  tile; the grass cache uploaded three whole textures every frame; model instance
+  buffers went up whole every 14 m; the vista re-uploaded 525 KB every frame. Now the
+  impostors' data lives in two store textures written only where a tile arrives, the
+  draw buffers hold 4-byte indices, are double-buffered and filled in slices into our
+  own GL buffers that have been out of the draw for four frames, and repack every
+  120 m; the grass cache uploads changed rectangles; instance buffers their used part;
+  the vista rebuilds every 3 m. Worst frame 25 ms, 33-45 hitches, uneven frames 22.6% ->
+  4-5%.
 - LIGHT THROUGH THE TREES. In the morning and evening the sun shines through the wood:
   the post pass steps twelve times from each pixel toward the sun on screen and counts
   the sky it finds between the trunks and crowns, a warm veil and shafts under the

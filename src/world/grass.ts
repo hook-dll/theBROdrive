@@ -152,6 +152,8 @@ export class GrassField {
       mesh.userData.snap = { cell, side };
       scene.add(mesh);
       this.meshes.push(mesh);
+      // The cache's changed pieces go up just before the grass draws (see `upload`).
+      if (ring === 0) mesh.onBeforeRender = (renderer) => this.upload(renderer);
     });
   }
 
@@ -383,7 +385,7 @@ varying vec3 vTuftAccent;`,
         if (this.colourData[o]! === 0) continue;
         this.colourData[o] = 0;
         this.flattened.add(slot);
-        this.colourTex.needsUpdate = true;
+        this.markDirty(cx, cz, true);
       }
     }
   }
@@ -399,8 +401,8 @@ varying vec3 vTuftAccent;`,
       const v = Math.min(255, this.colourData[o]! + step);
       this.colourData[o] = v;
       if (v >= 255) this.flattened.delete(slot);
+      this.markSlotDirty(slot, true);
     }
-    this.colourTex.needsUpdate = true;
   }
 
   /**
@@ -464,6 +466,95 @@ varying vec3 vTuftAccent;`,
     for (const i of order) this.pending.push(add[i * 2]!, add[i * 2 + 1]!);
   }
 
+  /**
+   * THE CACHE IS UPLOADED IN PIECES. Three uploads a whole DataTexture when it changes;
+   * the window moves a cell every metre, so that was all three textures, 768 KB, every
+   * frame of a drive. What changed is tracked per slot row as a span of columns and
+   * uploaded as rectangles of rows with the same span: a new column of the window is
+   * one 1 x 256 rectangle, a new row one 256 x 1.
+   */
+  private readonly rowMin = new Int32Array(CACHE_N).fill(CACHE_N);
+  private readonly rowMax = new Int32Array(CACHE_N).fill(-1);
+  /** Rows whose change is to the colour texture only (trampling). */
+  private readonly rowColourOnly = new Uint8Array(CACHE_N).fill(1);
+  private cacheDirtyAll = false;
+  private uploadedOnce = false;
+
+  private markDirty(cx: number, cz: number, colourOnly = false): void {
+    this.markSlotDirty((((cz % CACHE_N) + CACHE_N) % CACHE_N) * CACHE_N + (((cx % CACHE_N) + CACHE_N) % CACHE_N), colourOnly);
+  }
+
+  private markSlotDirty(slot: number, colourOnly = false): void {
+    const y = Math.floor(slot / CACHE_N);
+    const x = slot - y * CACHE_N;
+    if (x < this.rowMin[y]!) this.rowMin[y] = x;
+    if (x > this.rowMax[y]!) this.rowMax[y] = x;
+    if (!colourOnly) this.rowColourOnly[y] = 0;
+  }
+
+  /** Uploads the changed rectangles, or the whole textures the first time. */
+  private upload(renderer: THREE.WebGLRenderer): void {
+    const props = renderer.properties;
+    const ready = this.uploadedOnce && [this.heightTex, this.colourTex, this.paramTex].every(
+      (t) => (props.get(t) as { __webglTexture?: WebGLTexture }).__webglTexture,
+    );
+    if (!ready) {
+      if (this.cacheDirtyAll || !this.uploadedOnce) {
+        this.heightTex.needsUpdate = true;
+        this.colourTex.needsUpdate = true;
+        this.paramTex.needsUpdate = true;
+        this.uploadedOnce = true;
+      }
+      this.rowMin.fill(CACHE_N);
+      this.rowMax.fill(-1);
+      this.rowColourOnly.fill(1);
+      this.cacheDirtyAll = false;
+      return;
+    }
+    const gl = renderer.getContext() as WebGL2RenderingContext;
+    const state = renderer.state;
+    state.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    state.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    state.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    state.pixelStorei(gl.UNPACK_ROW_LENGTH, CACHE_N);
+    const put = (tex: THREE.DataTexture, format: number, type: number, data: ArrayBufferView, x: number, y: number, w: number, h: number): void => {
+      state.bindTexture(gl.TEXTURE_2D, (props.get(tex) as { __webglTexture: WebGLTexture }).__webglTexture);
+      state.pixelStorei(gl.UNPACK_SKIP_PIXELS, x);
+      state.pixelStorei(gl.UNPACK_SKIP_ROWS, y);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, format, type, data);
+    };
+    let y = 0;
+    while (y < CACHE_N) {
+      if (this.rowMax[y]! < 0) {
+        y++;
+        continue;
+      }
+      const x0 = this.rowMin[y]!;
+      const x1 = this.rowMax[y]!;
+      const colourOnly = this.rowColourOnly[y]!;
+      let y1 = y + 1;
+      while (y1 < CACHE_N && this.rowMin[y1] === x0 && this.rowMax[y1] === x1 && this.rowColourOnly[y1] === colourOnly) y1++;
+      const w = x1 - x0 + 1;
+      const h = y1 - y;
+      put(this.colourTex, gl.RGBA, gl.UNSIGNED_BYTE, this.colourData, x0, y, w, h);
+      if (!colourOnly) {
+        put(this.heightTex, gl.RED, gl.FLOAT, this.heightData, x0, y, w, h);
+        put(this.paramTex, gl.RGBA, gl.UNSIGNED_BYTE, this.paramData, x0, y, w, h);
+      }
+      for (let k = y; k < y1; k++) {
+        this.rowMin[k] = CACHE_N;
+        this.rowMax[k] = -1;
+        this.rowColourOnly[k] = 1;
+      }
+      y = y1;
+    }
+    state.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    state.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    state.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    state.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    this.cacheDirtyAll = false;
+  }
+
   private fill(): void {
     let done = 0;
     let dirty = false;
@@ -475,6 +566,7 @@ varying vec3 vTuftAccent;`,
       // Stale: the window has moved on past this cell.
       if (cx < this.windowX || cx >= this.windowX + CACHE_N || cz < this.windowZ || cz >= this.windowZ + CACHE_N) continue;
       if (!this.sampleTexel(cx, cz)) retry.push(cx, cz);
+      this.markDirty(cx, cz);
       dirty = true;
     }
     if (this.pendingHead >= this.pending.length) {
@@ -483,11 +575,7 @@ varying vec3 vTuftAccent;`,
     }
     // Cells whose tile had not arrived go to the back of the queue.
     for (const v of retry) this.pending.push(v);
-    if (dirty) {
-      this.heightTex.needsUpdate = true;
-      this.colourTex.needsUpdate = true;
-      this.paramTex.needsUpdate = true;
-    }
+    if (dirty) this.cacheDirtyAll = true;
   }
 
   /** Samples one world cell into its slot. False if its ground is not loaded yet. */

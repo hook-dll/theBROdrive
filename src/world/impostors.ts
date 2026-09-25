@@ -259,6 +259,39 @@ if ( diffuseColor.a < 0.004 ) discard;`);
 
 /** Floats per impostor in each of the two instance attributes. */
 const A = 4;
+/** Impostors packed and uploaded per frame while a repack is under way: 1 MB a frame. */
+const PACK_SLICE = 32768;
+
+/**
+ * Impostors per draw chunk: 1 MB an attribute. A draw buffer is cut into chunks this
+ * size, each its own GPU buffer and draw, because ANGLE on Metal copies a whole buffer
+ * the GPU may still be reading before it lets a write into it: a slice written into a
+ * 16 MB buffer cost the copy of all 16 MB, 8 ms, every frame of a repack.
+ */
+const CHUNK = 65536;
+/** Texels a row of the store textures. */
+const STORE_WIDTH = 1024;
+/** Frames a draw buffer stays out of the draw before it is written again. */
+const IDLE_FRAMES = 4;
+
+
+interface DrawChunk {
+  readonly geometry: THREE.InstancedBufferGeometry;
+  readonly mesh: THREE.Mesh;
+  /** Store indices of the impostors it draws. */
+  readonly index: Float32Array;
+  /** Our own GPU buffer (see `addChunk`), and what of it awaits upload. */
+  readonly buf: WebGLBuffer;
+  dirtyFrom: number;
+  dirtyTo: number;
+  count: number;
+}
+
+interface DrawSlot {
+  readonly chunks: DrawChunk[];
+  /** Impostors written, over all its chunks. */
+  count: number;
+}
 
 interface Range {
   start: number;
@@ -273,7 +306,7 @@ interface Range {
 const CULL_NEAR_M = 400;
 /** Degrees the view may turn, and metres the camera may travel, before a re-cull. */
 const RECULL_TURN = (10 * Math.PI) / 180;
-const RECULL_MOVE_M = 40;
+const RECULL_MOVE_M = 120;
 
 /**
  * The impostor buffer: one instanced quad draw for every far tree in view. Tiles own
@@ -285,16 +318,24 @@ const RECULL_MOVE_M = 40;
  * The draw buffer is the store's tiles that stand in a cone round the view, copied
  * together, and rebuilt only when the view has turned or travelled far enough that
  * the cone's margin could be used up (`RECULL_TURN`, `RECULL_MOVE_M`).
+ *
+ * NEVER IN ONE FRAME. The cone holds up to a million impostors, 34 MB; packed and
+ * uploaded in one frame that was a 40–110 ms hitch every 40 m of road, the stutter the
+ * owner saw at 144 Hz. So there are two draw buffers: the front one is drawn while the
+ * back one is packed and uploaded `PACK_SLICE` impostors a frame, and they swap when it
+ * is whole. A tile that arrives meanwhile is appended to the front buffer as it is.
  */
 export class ImpostorField {
-  readonly mesh: THREE.Mesh;
-  private readonly geometry: THREE.InstancedBufferGeometry;
+  /** Holds both draw buffers' meshes: position it, the pair follows. */
+  readonly mesh: THREE.Group;
+  private readonly slots: [DrawSlot, DrawSlot];
+  private front = 0;
+  private frame = 0;
+  private swapFrame = -1000;
+  private job: { ranges: Range[]; index: number; written: number } | null = null;
   private readonly material: THREE.MeshStandardMaterial;
   private a0: Float32Array;
   private a1: Float32Array;
-  /** The draw buffers: the tiles in view, packed (see the class comment). */
-  private d0: Float32Array;
-  private d1: Float32Array;
   private capacity: number;
   private cullDirty = true;
   private cullX = Number.NaN;
@@ -313,6 +354,9 @@ export class ImpostorField {
     uImpNormals: { value: null as THREE.Texture | null },
     /** The first atlas cell of each tree kind, so a cell knows its kind. */
     uImpKindFrom: { value: [] as number[] },
+    /** The store: every impostor's two vec4s, one texel each, `STORE_WIDTH` a row. */
+    uImpData0: { value: null as THREE.DataTexture | null },
+    uImpData1: { value: null as THREE.DataTexture | null },
   };
 
   /**
@@ -321,19 +365,24 @@ export class ImpostorField {
    * into the canopy blanket. `openTo`: where a tree outside a wood does (its tint is
    * stored negative, see world/forest.ts).
    */
-  constructor(atlas: ImpostorAtlas, from: number, blend: number, to: number, openTo: number, keepTo: number) {
-    this.capacity = 16384;
+  constructor(
+    private readonly renderer: THREE.WebGLRenderer,
+    atlas: ImpostorAtlas,
+    from: number,
+    blend: number,
+    to: number,
+    openTo: number,
+    keepTo: number,
+  ) {
+    this.capacity = 65536;
     this.a0 = new Float32Array(this.capacity * A);
     this.a1 = new Float32Array(this.capacity * A);
-    this.d0 = new Float32Array(this.capacity * A);
-    this.d1 = new Float32Array(this.capacity * A);
-    this.geometry = new THREE.InstancedBufferGeometry();
-    const quad = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
-    this.geometry.index = quad.index;
-    this.geometry.setAttribute('position', quad.getAttribute('position'));
-    this.geometry.setAttribute('normal', quad.getAttribute('normal'));
-    this.geometry.setAttribute('uv', quad.getAttribute('uv'));
-    this.attach();
+    this.data0 = this.storeTexture(this.a0);
+    this.data1 = this.storeTexture(this.a1);
+    this.uniforms.uImpData0.value = this.data0;
+    this.uniforms.uImpData1.value = this.data1;
+    this.quad = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+    this.slots = [{ chunks: [], count: 0 }, { chunks: [], count: 0 }];
     this.uniforms.uFrom.value = from;
     this.uniforms.uBlend.value = blend;
     this.uniforms.uTo.value = to;
@@ -357,8 +406,9 @@ export class ImpostorField {
         .replace(
           '#include <common>',
           `#include <common>
-attribute vec4 aImp0;
-attribute vec4 aImp1;
+attribute float aImpIndex;
+uniform highp sampler2D uImpData0;
+uniform highp sampler2D uImpData1;
 uniform float uFrom;
 uniform float uBlend;
 uniform float uTo;
@@ -382,7 +432,11 @@ varying vec3 vImpFwd;`,
         )
         .replace(
           '#include <beginnormal_vertex>',
-          `vec3 impBase = aImp0.xyz;
+          `// The impostor's data, by its index into the store (see \`ImpostorField\`).
+ivec2 impTexel = ivec2( int( aImpIndex ) % ${STORE_WIDTH}, int( aImpIndex ) / ${STORE_WIDTH} );
+vec4 aImp0 = texelFetch( uImpData0, impTexel, 0 );
+vec4 aImp1 = texelFetch( uImpData1, impTexel, 0 );
+vec3 impBase = aImp0.xyz;
 vec3 impWorld = ( modelMatrix * vec4( impBase, 1.0 ) ).xyz;
 vec2 impTo = cameraPosition.xz - impWorld.xz;
 vec3 impFwd = normalize( vec3( impTo.x, 0.0, impTo.y ) + vec3( 1e-4, 0.0, 0.0 ) );
@@ -498,30 +552,148 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
       );
     };
     const comicKey = material.customProgramCacheKey;
-    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v10`;
+    material.customProgramCacheKey = () => `${comicKey.call(material)}:impostor-v11`;
     this.material = material;
-    this.mesh = new THREE.Mesh(this.geometry, material);
-    this.mesh.frustumCulled = false;
-    this.mesh.castShadow = false;
-    this.mesh.receiveShadow = false;
+    this.mesh = new THREE.Group();
+    this.mesh.matrixAutoUpdate = false;
   }
 
-  private attach(): void {
-    const a0 = new THREE.InstancedBufferAttribute(this.d0, A);
-    const a1 = new THREE.InstancedBufferAttribute(this.d1, A);
-    a0.setUsage(THREE.DynamicDrawUsage);
-    a1.setUsage(THREE.DynamicDrawUsage);
-    this.geometry.setAttribute('aImp0', a0);
-    this.geometry.setAttribute('aImp1', a1);
-    this.geometry.instanceCount = 0;
-    this.cullDirty = true;
-    // three.js caps an instanced draw at `_maxInstanceCount`, which it works out ONCE,
-    // from the attributes bound at the first draw, and never again. Grown past the first
-    // buffer's 16384, every impostor after it was stored and never drawn: only the
-    // nearest kilometre of trees showed and the rest of the land stood bare.
-    // Unchecked cast: `_maxInstanceCount` is a real three.js field the typings omit.
-    const cached = this.geometry as THREE.InstancedBufferGeometry & { _maxInstanceCount?: number };
-    cached._maxInstanceCount = this.capacity;
+  private readonly quad: THREE.BufferGeometry;
+
+  /**
+   * A new chunk for `slot`: its own geometry, mesh and GPU buffers.
+   *
+   * THE BUFFERS ARE OURS, not three's (`GLBufferAttribute`), for one reason: three
+   * uploads a mesh's attributes only while it draws it, so a chunk being filled had to
+   * be drawn (with no instances), and a buffer bound to a draw is one the GPU is using:
+   * every write into it waited for the GPU, 8-14 ms, measured. Now a chunk being filled
+   * is hidden, written only after it has been out of the draw for `IDLE_FRAMES`, and
+   * uploaded here (`flush`) when we choose.
+   */
+  private addChunk(slot: DrawSlot): DrawChunk {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.index = this.quad.index;
+    geometry.setAttribute('position', this.quad.getAttribute('position'));
+    geometry.setAttribute('normal', this.quad.getAttribute('normal'));
+    geometry.setAttribute('uv', this.quad.getAttribute('uv'));
+    const index = new Float32Array(CHUNK);
+    const buf = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, CHUNK * 4, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    const attribute = new THREE.GLBufferAttribute(buf, gl.FLOAT, 1, 4, CHUNK);
+    // Read as per-instance by three's binding (it checks the flag, not the class).
+    Object.assign(attribute, { isInstancedBufferAttribute: true, meshPerAttribute: 1 });
+    geometry.setAttribute('aImpIndex', attribute as unknown as THREE.BufferAttribute);
+    geometry.instanceCount = 0;
+    // three.js caps an instanced draw at `_maxInstanceCount`, worked out once from the
+    // attributes bound at the first draw. Unchecked cast: a real field the typings omit.
+    (geometry as THREE.InstancedBufferGeometry & { _maxInstanceCount?: number })._maxInstanceCount = CHUNK;
+    const mesh = new THREE.Mesh(geometry, this.material);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.visible = false;
+    this.mesh.add(mesh);
+    const chunk = { geometry, mesh, index, buf, dirtyFrom: CHUNK, dirtyTo: 0, count: 0 };
+    slot.chunks.push(chunk);
+    return chunk;
+  }
+
+  /** Uploads what has been written into `slot`'s chunks since the last flush. */
+  private flush(slot: DrawSlot): void {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    for (const c of slot.chunks) {
+      if (c.dirtyTo <= c.dirtyFrom) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, c.dirtyFrom * 4, c.index, c.dirtyFrom, c.dirtyTo - c.dirtyFrom);
+      c.dirtyFrom = CHUNK;
+      c.dirtyTo = 0;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  }
+
+  /**
+   * Copies `count` impostors of store range `range` from `from` into `slot` at its end,
+   * chunk by chunk, marking just what was written for upload. `live`: the slot is being
+   * drawn, so its chunks draw what they hold at once.
+   */
+  private appendTo(slot: DrawSlot, range: Range, from = 0, count = range.count - from, live = false): void {
+    let src = range.start + from;
+    let left = count;
+    while (left > 0) {
+      const index = Math.floor(slot.count / CHUNK);
+      const chunk = slot.chunks[index] ?? this.addChunk(slot);
+      const at = slot.count - index * CHUNK;
+      const take = Math.min(left, CHUNK - at);
+      for (let k = 0; k < take; k++) chunk.index[at + k] = src + k;
+      chunk.dirtyFrom = Math.min(chunk.dirtyFrom, at);
+      chunk.dirtyTo = Math.max(chunk.dirtyTo, at + take);
+      chunk.count = at + take;
+      if (live) {
+        chunk.geometry.instanceCount = chunk.count;
+        chunk.mesh.visible = true;
+      }
+      slot.count += take;
+      src += take;
+      left -= take;
+    }
+  }
+
+  /** Empties a slot: its chunks draw nothing and are written over from the start. */
+  private clearSlot(slot: DrawSlot): void {
+    for (const c of slot.chunks) {
+      c.count = 0;
+      c.geometry.instanceCount = 0;
+      c.mesh.visible = false;
+    }
+    slot.count = 0;
+  }
+
+  /** Whether a tile's range stands in the cone the last cull was made for. */
+  private inCone(range: Range, camX: number, camZ: number, ux: number, uz: number, cosCone: number): boolean {
+    const dx = range.x - camX;
+    const dz = range.z - camZ;
+    const d = Math.hypot(dx, dz);
+    if (d <= CULL_NEAR_M + range.r + RECULL_MOVE_M) return true;
+    const cosAt = (dx * ux + dz * uz) / d;
+    const spread = Math.asin(Math.min(1, (range.r + RECULL_MOVE_M) / d));
+    return Math.acos(Math.max(-1, Math.min(1, cosAt))) - spread <= Math.acos(cosCone);
+  }
+
+  private coneUx = 0;
+  private coneUz = 1;
+  private coneCos = -1;
+
+  /** Packs the next slice of the back buffer; swaps it to the front when whole. */
+  private pump(): void {
+    const job = this.job;
+    if (!job) return;
+    const back = this.slots[1 - this.front]!;
+    let budget = PACK_SLICE;
+    while (budget > 0 && job.index < job.ranges.length) {
+      const range = job.ranges[job.index]!;
+      const take = Math.min(budget, range.count - job.written);
+      this.appendTo(back, range, job.written, take);
+      budget -= take;
+      job.written += take;
+      if (job.written >= range.count) {
+        job.index++;
+        job.written = 0;
+      }
+    }
+    this.flush(back);
+    if (job.index < job.ranges.length) return;
+    const front = this.slots[this.front]!;
+    for (const c of back.chunks) {
+      c.geometry.instanceCount = c.count;
+      c.mesh.visible = c.count > 0;
+    }
+    this.clearSlot(front);
+    this.front = 1 - this.front;
+    this.swapFrame = this.frame;
+    this.job = null;
   }
 
   has(key: string): boolean {
@@ -549,7 +721,13 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
     const range = this.allocate(count, x, z, r);
     for (let i = 0; i < count; i++) fill(i, this.a0, this.a1, (range.start + i) * A);
     this.owned.set(key, range);
-    this.cullDirty = true;
+    this.storeDirtyFrom = Math.min(this.storeDirtyFrom, range.start);
+    this.storeDirtyTo = Math.max(this.storeDirtyTo, range.start + count);
+    // Not into the buffer being drawn: a write into a buffer the GPU may still be
+    // reading waits for the GPU (8 ms a write, measured). Into the repack under way, or
+    // the next one, which a new tile asks for.
+    if (this.job) this.job.ranges.push(range);
+    else this.cullDirty = true;
   }
 
   remove(key: string): void {
@@ -558,7 +736,8 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
     this.owned.delete(key);
     if (range.count === 0) return;
     this.free.push({ start: range.start, count: range.count, x: 0, z: 0, r: 0 });
-    this.cullDirty = true;
+    // Not repacked for: the draw buffers hold copies, and a removed tile is one that
+    // has fallen out of the window, far behind; the next repack drops it.
   }
 
   /**
@@ -567,47 +746,36 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
    * look direction on the ground; `halfFov` half its horizontal field of view.
    */
   cull(camX: number, camZ: number, fx: number, fz: number, halfFov: number): void {
+    this.frame++;
+    this.flushStore();
+    this.pump();
     const yaw = Math.atan2(fx, fz);
     let turn = Math.abs(yaw - this.cullYaw);
     if (turn > Math.PI) turn = 2 * Math.PI - turn;
     const moved = Math.hypot(camX - this.cullX, camZ - this.cullZ);
+    // One repack at a time: a new one starts once the last has swapped in, and not until
+    // the buffer it will write into has been out of the draw for a few frames — until
+    // the GPU is surely done reading it.
+    if (this.job || this.frame - this.swapFrame < IDLE_FRAMES) return;
     if (!this.cullDirty && !(turn > RECULL_TURN) && !(moved > RECULL_MOVE_M)) return;
     this.cullDirty = false;
     this.cullX = camX;
     this.cullZ = camZ;
     this.cullYaw = yaw;
     const flat = Math.hypot(fx, fz) || 1;
-    const ux = fx / flat;
-    const uz = fz / flat;
-    // The cone must still cover the view after the largest turn allowed between culls.
-    const cosCone = Math.cos(Math.min(Math.PI, halfFov + RECULL_TURN + 0.08));
-    let n = 0;
+    this.coneUx = fx / flat;
+    this.coneUz = fz / flat;
+    // The cone must still cover the view after the largest turn allowed between culls,
+    // and the frames the repack takes.
+    this.coneCos = Math.cos(Math.min(Math.PI, halfFov + RECULL_TURN + 0.15));
+    const ranges: Range[] = [];
     for (const range of this.owned.values()) {
-      if (range.count === 0) continue;
-      const dx = range.x - camX;
-      const dz = range.z - camZ;
-      const d = Math.hypot(dx, dz);
-      const near = CULL_NEAR_M + range.r + RECULL_MOVE_M;
-      if (d > near) {
-        // The tile's widest angle off the view: its centre's, less what its radius
-        // (and the travel allowed between culls) subtends.
-        const cosAt = (dx * ux + dz * uz) / d;
-        const spread = Math.asin(Math.min(1, (range.r + RECULL_MOVE_M) / d));
-        if (Math.acos(Math.max(-1, Math.min(1, cosAt))) - spread > Math.acos(cosCone)) continue;
-      }
-      const from = range.start * A;
-      const to = (range.start + range.count) * A;
-      this.d0.set(this.a0.subarray(from, to), n * A);
-      this.d1.set(this.a1.subarray(from, to), n * A);
-      n += range.count;
+      if (range.count > 0 && this.inCone(range, camX, camZ, this.coneUx, this.coneUz, this.coneCos)) ranges.push(range);
     }
-    this.geometry.instanceCount = n;
-    for (const name of ['aImp0', 'aImp1']) {
-      const attribute = this.geometry.getAttribute(name) as THREE.InstancedBufferAttribute;
-      attribute.clearUpdateRanges();
-      attribute.addUpdateRange(0, Math.max(1, n) * A);
-      attribute.needsUpdate = true;
-    }
+    this.clearSlot(this.slots[1 - this.front]!);
+    this.job = { ranges, index: 0, written: 0 };
+    // The first frame: the very first cull has nothing in front to show meanwhile.
+    this.pump();
   }
 
   keys(): IterableIterator<string> {
@@ -643,6 +811,7 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
   }
 
   private grow(needed: number): void {
+    // The store is CPU-side only: the draw chunks never grow.
     let capacity = this.capacity;
     while (capacity < needed) capacity *= 2;
     const a0 = new Float32Array(capacity * A);
@@ -651,9 +820,62 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap );`,
     a1.set(this.a1);
     this.a0 = a0;
     this.a1 = a1;
-    this.d0 = new Float32Array(capacity * A);
-    this.d1 = new Float32Array(capacity * A);
     this.capacity = capacity;
-    this.attach();
+    // New textures, uploaded whole by three: rare, the store only grows early on.
+    this.data0.dispose();
+    this.data1.dispose();
+    this.data0 = this.storeTexture(a0);
+    this.data1 = this.storeTexture(a1);
+    this.uniforms.uImpData0.value = this.data0;
+    this.uniforms.uImpData1.value = this.data1;
+    this.storeDirtyFrom = Number.POSITIVE_INFINITY;
+    this.storeDirtyTo = 0;
+  }
+
+  private data0: THREE.DataTexture;
+  private data1: THREE.DataTexture;
+  private storeDirtyFrom = Number.POSITIVE_INFINITY;
+  private storeDirtyTo = 0;
+
+  private storeTexture(data: Float32Array): THREE.DataTexture {
+    const t = new THREE.DataTexture(data, STORE_WIDTH, data.length / A / STORE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    t.minFilter = THREE.NearestFilter;
+    t.magFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    return t;
+  }
+
+  /**
+   * Uploads the store's rows written since the last call: a new tile is one run of
+   * rows. Once three has made the textures (their first draw), by hand, as the grass
+   * cache does, so only those rows go up.
+   */
+  private flushStore(): void {
+    if (this.storeDirtyTo <= this.storeDirtyFrom) return;
+    const props = this.renderer.properties;
+    const t0 = (props.get(this.data0) as { __webglTexture?: WebGLTexture }).__webglTexture;
+    const t1 = (props.get(this.data1) as { __webglTexture?: WebGLTexture }).__webglTexture;
+    if (!t0 || !t1) {
+      this.data0.needsUpdate = true;
+      this.data1.needsUpdate = true;
+      this.storeDirtyFrom = Number.POSITIVE_INFINITY;
+      this.storeDirtyTo = 0;
+      return;
+    }
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const state = this.renderer.state;
+    const y0 = Math.floor(this.storeDirtyFrom / STORE_WIDTH);
+    const y1 = Math.floor((this.storeDirtyTo - 1) / STORE_WIDTH) + 1;
+    state.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    state.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    state.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    state.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    for (const [tex, data] of [[t0, this.a0], [t1, this.a1]] as const) {
+      state.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y0, STORE_WIDTH, y1 - y0, gl.RGBA, gl.FLOAT, data, y0 * STORE_WIDTH * A);
+    }
+    this.storeDirtyFrom = Number.POSITIVE_INFINITY;
+    this.storeDirtyTo = 0;
   }
 }
