@@ -152,9 +152,20 @@ const FAMILY_UNIFORMS = {
  */
 const VIEW_FADE_LOW = 0.35;
 const VIEW_FADE_HIGH = 0.7;
-/** Cell pixels. 2:1 was a side-view cell's proportion; the below view wants square. */
-const CELL_W = 320;
-const CELL_H = 256;
+/**
+ * Cell pixels at the reference screen. 2:1 was a side-view cell's proportion; the below
+ * view wants square. Scaled to the drawing buffer by `cellPixels` below: measured over
+ * the field's own clouds at the top rung's 4800x2700, the median card is drawn 144 px
+ * wide and the ones overhead three thousand, so 320 texels is 2.2 texels a pixel for the
+ * median and about one for the largest — right at the reference screen, and four times
+ * more than a phone's 640x360 can show.
+ */
+const CELL_W_REFERENCE = 320;
+const CELL_H_REFERENCE = 256;
+/** Drawing buffer height the reference cell was measured at (settings.ts, top rung). */
+const CELL_REFERENCE_PX = 2700;
+/** Coarsest cell, for a screen small enough to want less. */
+const CELL_W_MIN = 32;
 /** Clouds in the field, the field's side, and how high they float over the camera. */
 const COUNT = 220;
 const FIELD_M = 36000;
@@ -525,10 +536,19 @@ void main() {
     h31( vec3( gl_FragCoord.xy, 3.0 ) ) - 0.5,
     h31( vec3( gl_FragCoord.xy, 4.0 ) ) - 0.5
   ) * dn;
-  outA = vec4( lA.x * inv, lA.y * inv, lA.z * inv, alpha ) + dither;
-  outB = vec4( lB.x * inv, lB.y * inv, clamp( hgt * inv, 0.0, 1.0 ), clamp( depth * 1.8, 0.0, 1.0 ) );
-  outB.rg += dither.xy;
-  outB.ba += dither.zw;
+  // PREMULTIPLIED. The light and the height are the mean over what the ray crossed, and
+  // every texel the cloud does not reach has none of either — written straight, the
+  // bilinear filter and every mip level average the cloud's own values with those zeros,
+  // which darkens the light it is lit by, lowers its height, and left every cloud with a
+  // dark fringe and a rose rim at dusk, worse the smaller it is drawn. Multiplied by the
+  // coverage here and divided back out in the draw, a filtered texel is the mean over
+  // its covered part instead, which is what the mean is a mean of. The crossing depth in
+  // outB.a is written as it is: it is an integral along the ray, so averaging it with
+  // the rays that met nothing is exactly right.
+  outA = vec4( lA.xyz * inv * alpha, alpha ) + dither;
+  outB = vec4( lB * inv * alpha, clamp( hgt * inv, 0.0, 1.0 ) * alpha, clamp( depth * 1.8, 0.0, 1.0 ) );
+  outB.rgb += dither.rgb;
+  outB.a += dither.a;
 }
 `
 
@@ -559,6 +579,7 @@ varying vec3 vFwd;
 varying float vElev;
 varying float vShow;
 varying vec3 vDir;
+varying float vMir;
 void main() {
   float F = ${FIELD_M.toFixed(1)};
   vec2 at = aCloud.xy + uWind;
@@ -578,8 +599,12 @@ void main() {
     // Upright, turned to face the camera about the vertical. The cell holds the shape's
     // bounding box, so its height here is the family's aspect times the width — a
     // humilis a third as tall as it is wide, a congestus half again as tall. Mirrored
-    // where this cloud took the coin's other side; the cell is read mirrored with the
-    // geometry, so the baked light stays on the side the sun really is on.
+    // where this cloud took the coin's other side, and the cell is read straight: the
+    // texel under a vertex is the vertex's own, so the SHAPE is what turns over, not the
+    // picture of it. Reading the picture mirrored with the geometry (as this did) put
+    // every texel back where it started and the coin decided nothing: half the sky's
+    // shapes were shapes it already had. The light, though, is in the card's frame and
+    // does have to turn with it, so the two side channels are swapped below.
     vec3 fwd = normalize( vec3( -rel.x, 0.0, -rel.y ) + vec3( 1e-4, 0.0, 0.0 ) );
     vRight = vec3( fwd.z, 0.0, -fwd.x );
     vFwd = fwd;
@@ -601,7 +626,8 @@ void main() {
   vShow *= aView < 0.5 ? 1.0 - up : smoothstep( 0.45, 0.78, elevSin );
   vDir = p;
   vElev = normalize( p ).y;
-  vUv = ( vec2( aShape.x, aLook.w + aView * ${VIEW_ROWS}.0 ) + vec2( position.x * ( aView < 0.5 ? mir : 1.0 ) + 0.5, position.y + 0.5 ) ) / vec2( ${ATLAS_COLS}.0, ${ATLAS_ROWS}.0 );
+  vMir = aView < 0.5 ? mir : 1.0;
+  vUv = ( vec2( aShape.x, aLook.w + aView * ${VIEW_ROWS}.0 ) + vec2( position.x + 0.5, position.y + 0.5 ) ) / vec2( ${ATLAS_COLS}.0, ${ATLAS_ROWS}.0 );
   // The camera's own position: the field is built round it, in camera-relative metres.
   gl_Position = projectionMatrix * viewMatrix * vec4( cameraPosition + p, 1.0 );
   // On the far plane (in front of the sky dome): behind everything real.
@@ -628,11 +654,22 @@ varying vec3 vFwd;
 varying float vElev;
 varying vec3 vDir;
 varying float vShow;
+varying float vMir;
 void main() {
   vec4 a = texture2D( uAtlasA, vUv );
   vec4 b = texture2D( uAtlasB, vUv );
   float alpha = a.a * vShow * uAmount;
   if ( alpha < 0.004 ) discard;
+  // The light and the height were baked multiplied by the coverage so that filtering
+  // them averages over the cloud and not over the empty sky beside it (see the bake):
+  // divided back out here, and only here, where a texel with nothing on it is discarded
+  // above. The crossing depth in b.a is an integral and is read as it is.
+  float invCover = 1.0 / max( a.a, 0.004 );
+  a.rgb *= invCover;
+  b.rgb *= invCover;
+  // A mirrored cloud carries its light mirrored with it: the atlas's +x and -x channels
+  // are the card's, and the card turned over.
+  if ( vMir < 0.0 ) a.gb = a.bg;
   // The sun in the card's own frame (x right, y up, z toward the viewer), and the
   // light baked from the five sides it could come from, blended by it.
   vec3 L = normalize( uLightDir );
@@ -684,9 +721,26 @@ void main() {
 }
 `;
 
+/**
+ * The cell size this machine's atlas is baked at: the reference cell for every screen
+ * that tall or taller, and in proportion for a smaller one. A card multiplies its cell
+ * over the screen, so a screen with half the pixels wants half the cell — the field is
+ * the same field and the clouds land in the same places, they are simply drawn with the
+ * detail that screen can resolve. A phone drawing 640x360 gets a 72x64 cell, an atlas a
+ * sixteenth the area, and a bake that costs a sixteenth as much.
+ */
+function cellPixels(renderer: THREE.WebGLRenderer): { cellW: number; cellH: number } {
+  const buffer = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
+  const scale = Math.min(1, Math.max(CELL_W_MIN / CELL_W_REFERENCE, buffer / CELL_REFERENCE_PX));
+  return {
+    cellW: Math.max(CELL_W_MIN, 8 * Math.round((CELL_W_REFERENCE * scale) / 8)),
+    cellH: Math.max(CELL_W_MIN, 8 * Math.round((CELL_H_REFERENCE * scale) / 8)),
+  };
+}
+
 /** The atlas pair, baked once, both in one pass (two render targets). */
-function bake(renderer: THREE.WebGLRenderer): [THREE.Texture, THREE.Texture] {
-  const target = new THREE.WebGLRenderTarget(CELL_W * ATLAS_COLS, CELL_H * ATLAS_ROWS, {
+function bake(renderer: THREE.WebGLRenderer, cellW: number, cellH: number): [THREE.Texture, THREE.Texture] {
+  const target = new THREE.WebGLRenderTarget(cellW * ATLAS_COLS, cellH * ATLAS_ROWS, {
     count: 2,
     type: THREE.UnsignedByteType,
     generateMipmaps: true,
@@ -883,7 +937,8 @@ export class Clouds {
   private readonly camAbs = new THREE.Vector2();
 
   constructor(renderer: THREE.WebGLRenderer, shared: CloudUniforms) {
-    const [atlasA, atlasB] = bake(renderer);
+    const cell = cellPixels(renderer);
+    const [atlasA, atlasB] = bake(renderer, cell.cellW, cell.cellH);
     this.base = new Float32Array(COUNT * 4);
     this.shape = new Float32Array(COUNT * 2);
     this.look = new Float32Array(COUNT * 4);

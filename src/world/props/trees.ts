@@ -14,7 +14,7 @@ import {
   type LeafSprite,
 } from '../../render/leafpaint';
 import { injectSeason, SEASON_TREE_RANDOM_GLSL, SNOW_GLSL } from '../../render/season';
-import { TREE_KINDS, TreeKind } from '../deserttiledata';
+import { TREE_KINDS, TreeKind, UNDERGROWTH_KIND_FROM, UNDERGROWTH_KIND_TO } from '../deserttiledata';
 import type { Season } from '../landcover';
 
 /**
@@ -2109,9 +2109,6 @@ const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
   [TreeKind.FieldPine]: 'needle',
 };
 
-/** Kinds from this one to `UNDERGROWTH_KIND_TO` are undergrowth and floor: fern, juniper, stump, log. */
-export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
-export const UNDERGROWTH_KIND_TO = TreeKind.Log;
 /** Undergrowth dissolves between these camera distances and is not drawn past them. */
 export const UNDERGROWTH_FADE_FROM_M = 50;
 export const UNDERGROWTH_FADE_TO_M = 110;

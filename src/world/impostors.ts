@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { applyComicShading } from '../render/comic';
 import { applyBarkMapping } from '../render/leafpaint';
 import { injectSeason, SEASON_TREE_RANDOM_GLSL, SNOW_GLSL } from '../render/season';
-import { TREE_KINDS } from './deserttiledata';
+import { isImpostorKind, TREE_KINDS, UNDERGROWTH_KIND_FROM, UNDERGROWTH_KIND_TO } from './deserttiledata';
 import type { TreeVariant } from './props/trees';
 
 /**
@@ -40,8 +40,23 @@ import type { TreeVariant } from './props/trees';
  * and pale.
  */
 
-const CELL_W = 96;
-const CELL_H = 192;
+/**
+ * Cell height in texels per pixel of drawing buffer height: 192 texels at 2700 px, the
+ * 4K television on the top rung the measured sheet was taken from (see `impostorLayout`).
+ */
+const CELL_TEXELS_PER_BUFFER_PX = 192 / 2700;
+/** Cells are 1:2, as the bake camera's frustum is: a cell is half as wide as tall. */
+const CELL_ASPECT = 2;
+/** Texel multiples a cell height snaps to, so every mip level is a whole number of texels. */
+const CELL_STEP = 16;
+/** Coarsest and finest cell heights. */
+const CELL_H_MIN = 32;
+const CELL_H_MAX = 192;
+/**
+ * Atlas columns before the height is spent. Twenty-one is what made the sheet 2016 px
+ * wide (21 * 96) at the reference cell, which every WebGL2 device allows; a wider sheet
+ * would use the height limit faster than it needs to.
+ */
 const COLS = 21;
 /**
  * Sides every variant is baked from, evenly round it. A tree seen from one side only
@@ -50,15 +65,31 @@ const COLS = 21;
  * views nearest the real one, as slowroads does.
  */
 export const IMPOSTOR_VIEWS = 6;
+/** Sides the layout holds to before the cell is made coarse (see `impostorLayout`). */
+const PREFERRED_VIEWS: readonly number[] = [IMPOSTOR_VIEWS, 5, 4];
+/** The sides a GPU too small to hold four is left with: below three the swing shows. */
+const FALLBACK_VIEWS: readonly number[] = [3, 2];
 /**
- * Empty texels round every cell. Without them a mip level blends a cell's edge with
- * its neighbour's, and a far crown wore the foot of the tree baked above it as a dash
- * over its top.
+ * Empty texels round every cell, as a share of the cell's width. Without them a mip
+ * level blends a cell's edge with its neighbour's, and a far crown wore the foot of the
+ * tree baked above it as a dash over its top.
  */
-const GUTTER = 5;
+const GUTTER_SHARE = 5 / 96;
+
+/** How one machine's atlas is laid out: see `impostorLayout`. */
+export interface ImpostorLayout {
+  /** Sides each variant is baked from, evenly round it. */
+  readonly views: number;
+  readonly cellW: number;
+  readonly cellH: number;
+  /** Empty texels round each cell. */
+  readonly gutter: number;
+  readonly cols: number;
+  readonly rows: number;
+}
 
 export interface ImpostorCell {
-  /** The first of the variant's `IMPOSTOR_VIEWS` consecutive cells. */
+  /** The first of the variant's `layout.views` consecutive cells. */
   readonly index: number;
   /** Quad size at scale 1, metres. */
   readonly width: number;
@@ -71,28 +102,107 @@ export interface ImpostorAtlas {
   readonly texture: THREE.Texture;
   /** The same cells in normals, bake-camera space, packed to 0..1. */
   readonly normals: THREE.Texture;
-  readonly cols: number;
-  readonly rows: number;
+  readonly layout: ImpostorLayout;
   /** [kind][variant] */
   readonly cells: readonly (readonly ImpostorCell[])[];
 }
 
 /**
- * Renders every variant's far model from `IMPOSTOR_VIEWS` sides into one atlas, and its
+ * The atlas one machine gets: a cell its own drawing buffer can read, and as many sides
+ * as its GPU can hold.
+ *
+ * CELL SIZE. A cell's texels are spent on the quad's screen pixels: at the hand-over
+ * distance (`world/forest.ts`) the median quad is 278 px tall on a 2700 px buffer, so
+ * 192 texels is under two texels a pixel there and a smaller cell is a visible loss —
+ * but a phone drawing 640x360 renders that same quad under 70 px tall, and 192 texels
+ * over 70 pixels was 194 MB of its memory spent on texels it never resolves. The cell
+ * therefore scales with the drawing buffer and is *capped* at the measured 192: every
+ * screen this large or larger gets the sheet measured today (a 4K television on the top
+ * rung draws 4800x2700, settings.ts), and every smaller one gets the sheet its own pixels
+ * ask for.
+ *
+ * VIEWS. Six sides, blended two at a time by the shader. A GPU whose `maxTextureSize`
+ * cannot hold the whole sheet gives up sides before detail, because that is what
+ * measurement says is cheaper: against the models at the hand-over distance and out to
+ * 300 m, four sides moved the mean pixel error from 3.40 to 3.47 (+2%), three sides to
+ * 3.67, where halving the cell to 96 moved it to 3.75 (+10%) and to 64 to 3.85 — and the
+ * cell is the loss the eye sees on every frame, not only while turning.
+ *
+ * Neither can be unbounded. 164 variants at six sides is 2016 x 9024, which is past the
+ * 8192 most Android GPUs stop at and four times what 4096 allows: the sheets would come
+ * back incomplete, and every far tree would sample a texture that failed to allocate.
+ */
+export function impostorLayout(
+  variants: readonly TreeVariant[][],
+  maxTextureSize: number,
+  bufferHeight: number,
+): ImpostorLayout {
+  let cells = 0;
+  variants.forEach((kind, index) => {
+    if (isImpostorKind(index)) cells += kind.length;
+  });
+  const limit = Math.max(64, Math.floor(maxTextureSize));
+  const wanted = CELL_STEP * Math.round(((Math.max(1, bufferHeight) * CELL_TEXELS_PER_BUFFER_PX) / CELL_STEP));
+  const tallest = Math.min(CELL_H_MAX, Math.max(CELL_H_MIN, wanted));
+  const fit = (views: number, cellH: number): ImpostorLayout | null => {
+    const cellW = Math.max(8, Math.round(cellH / CELL_ASPECT));
+    // As many columns as the sheet's width allows: fewer, wider rows fit a small GPU.
+    const cols = Math.min(COLS, Math.max(1, Math.floor(limit / cellW)));
+    const rows = Math.ceil((cells * views) / cols);
+    if (rows * cellH > limit) return null;
+    return { views, cellW, cellH, gutter: Math.max(1, Math.round(cellW * GUTTER_SHARE)), cols, rows };
+  };
+  // Sides first (six, five, four), the cell only after those: measured above the cell is
+  // the dearer trade, and four sides at the screen's own cell read better than six over
+  // a cell made coarse to pay for them. Below four the swing the sides exist to prevent
+  // comes back, so a GPU that small is served by three or two sides at the finest cell
+  // that fits instead.
+  for (const views of PREFERRED_VIEWS) {
+    const layout = fit(views, tallest);
+    if (layout) return layout;
+  }
+  for (let cellH = tallest; cellH >= CELL_H_MIN; cellH -= CELL_STEP) {
+    for (const views of PREFERRED_VIEWS) {
+      const layout = fit(views, cellH);
+      if (layout) return layout;
+    }
+  }
+  for (const views of FALLBACK_VIEWS) {
+    for (let cellH = tallest; cellH >= CELL_H_MIN; cellH -= CELL_STEP) {
+      const layout = fit(views, cellH);
+      if (layout) return layout;
+    }
+  }
+  // WebGL2 guarantees 2048 texels a side and two sides at the coarsest cell fit in that
+  // with room to spare, so no working device gets here: it stands for a capability report
+  // too broken to size a sheet from, and gives the smallest one there is.
+  return { views: 2, cellW: 16, cellH: 32, gutter: 1, cols: 8, rows: Math.ceil((cells * 2) / 8) };
+}
+
+/**
+ * Renders every variant's far model from the layout's sides into one atlas, and its
  * normals into another. Eight bits a channel: the albedo is stored sRGB, so its darks
  * keep their steps.
  */
-export function bakeImpostorAtlas(renderer: THREE.WebGLRenderer, variants: readonly TreeVariant[][]): ImpostorAtlas {
-  const total = variants.reduce((n, k) => n + k.length, 0) * IMPOSTOR_VIEWS;
-  const rows = Math.ceil(total / COLS);
-  const target = new THREE.WebGLRenderTarget(COLS * CELL_W, rows * CELL_H, {
+export function bakeImpostorAtlas(
+  renderer: THREE.WebGLRenderer,
+  variants: readonly TreeVariant[][],
+  layout = impostorLayout(
+    variants,
+    renderer.capabilities.maxTextureSize,
+    renderer.getDrawingBufferSize(new THREE.Vector2()).y,
+  ),
+): ImpostorAtlas {
+  const { views, cellW, cellH, gutter, cols, rows } = layout;
+  const total = variants.reduce((n, kind, index) => (isImpostorKind(index) ? n + kind.length : n), 0) * views;
+  const target = new THREE.WebGLRenderTarget(cols * cellW, rows * cellH, {
     type: THREE.UnsignedByteType,
     generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter,
     magFilter: THREE.LinearFilter,
   });
   target.texture.colorSpace = THREE.SRGBColorSpace;
-  const normalTarget = new THREE.WebGLRenderTarget(COLS * CELL_W, rows * CELL_H, {
+  const normalTarget = new THREE.WebGLRenderTarget(cols * cellW, rows * cellH, {
     type: THREE.UnsignedByteType,
     generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter,
@@ -141,8 +251,14 @@ ${leafMap ? 'if ( texture2D( uLeafMap, vLeafUv ).a < 0.5 ) discard;' : ''}`)
   const cells: ImpostorCell[][] = [];
   let index = 0;
   const box = new THREE.Box3();
-  for (const kind of variants) {
+  for (const [kindIndex, kind] of variants.entries()) {
     const kindCells: ImpostorCell[] = [];
+    // The undergrowth never stands as an impostor (see `isImpostorKind`): baking its
+    // cells was a quarter of the sheet, and its models are the only thing that draws it.
+    if (!isImpostorKind(kindIndex)) {
+      cells.push(kindCells);
+      continue;
+    }
     for (const variant of kind) {
       turntable.clear();
       box.makeEmpty();
@@ -177,20 +293,25 @@ ${leafMap ? 'if ( texture2D( uLeafMap, vLeafUv ).a < 0.5 ) discard;' : ''}`)
       camera.bottom = box.min.y;
       camera.top = box.min.y + quadH;
       camera.updateProjectionMatrix();
-      for (let view = 0; view < IMPOSTOR_VIEWS; view++) {
+      for (let view = 0; view < views; view++) {
         const cell = index + view;
-        const col = cell % COLS;
-        const row = Math.floor(cell / COLS);
-        // Seen from the side at angle view / IMPOSTOR_VIEWS of a turn round the model.
-        turntable.rotation.y = -(view / IMPOSTOR_VIEWS) * Math.PI * 2;
+        const col = cell % cols;
+        const row = Math.floor(cell / cols);
+        // Seen from the side at angle view / views of a turn round the model.
+        turntable.rotation.y = -(view / views) * Math.PI * 2;
         // The cell is set on the targets, not through `renderer.setViewport`: that one is
         // in CSS pixels and three multiplies it by the device pixel ratio even when
         // drawing into a texture. On a 2x screen every cell landed twice as big and
         // twice as far, and far trees wore scraps of their neighbours: floating trunks,
         // half crowns, dark rectangles.
+        //
+        // The margin is the same on both axes, and the frustum is squeezed into the cell
+        // by exactly as much as the draw stretches it back out (see below): the two
+        // anisotropies cancel, and the measured impostor silhouette is 0.983 of its
+        // model's height, the same as at the cell this layout is capped at.
         for (const t of [target, normalTarget]) {
-          t.viewport.set(col * CELL_W + GUTTER, row * CELL_H + GUTTER, CELL_W - 2 * GUTTER, CELL_H - 2 * GUTTER);
-          t.scissor.set(col * CELL_W, row * CELL_H, CELL_W, CELL_H);
+          t.viewport.set(col * cellW + gutter, row * cellH + gutter, cellW - 2 * gutter, cellH - 2 * gutter);
+          t.scissor.set(col * cellW, row * cellH, cellW, cellH);
           t.scissorTest = true;
         }
         renderer.setRenderTarget(target);
@@ -202,7 +323,7 @@ ${leafMap ? 'if ( texture2D( uLeafMap, vLeafUv ).a < 0.5 ) discard;' : ''}`)
       }
       for (const child of turntable.children) ((child as THREE.Mesh).material as THREE.Material).dispose();
       kindCells.push({ index, width: quadW, height: quadH, drop: -box.min.y });
-      index += IMPOSTOR_VIEWS;
+      index += views;
     }
     cells.push(kindCells);
   }
@@ -211,7 +332,7 @@ ${leafMap ? 'if ( texture2D( uLeafMap, vLeafUv ).a < 0.5 ) discard;' : ''}`)
   renderer.setClearColor(prevClear, prevAlpha);
   renderer.setRenderTarget(prevTarget);
   normalMaterial.dispose();
-  return { texture: target.texture, normals: normalTarget.texture, cols: COLS, rows, cells };
+  return { texture: target.texture, normals: normalTarget.texture, layout, cells };
 }
 
 /**
@@ -351,6 +472,10 @@ export class ImpostorField {
     uOpenTo: { value: 0 },
     uKeepTo: { value: 0 },
     uCells: { value: new THREE.Vector2() },
+    /** Which of the layout's sides the atlas holds, and where a cell's content sits in it. */
+    uImpViews: { value: IMPOSTOR_VIEWS },
+    uImpInset: { value: new THREE.Vector2() },
+    uImpCell: { value: new THREE.Vector2(1, 1) },
     uImpNormals: { value: null as THREE.Texture | null },
     /** The first atlas cell of each tree kind, so a cell knows its kind. */
     uImpKindFrom: { value: [] as number[] },
@@ -388,7 +513,10 @@ export class ImpostorField {
     this.uniforms.uTo.value = to;
     this.uniforms.uOpenTo.value = openTo;
     this.uniforms.uKeepTo.value = keepTo;
-    this.uniforms.uCells.value.set(atlas.cols, atlas.rows);
+    this.uniforms.uCells.value.set(atlas.layout.cols, atlas.layout.rows);
+    this.uniforms.uImpViews.value = atlas.layout.views;
+    this.uniforms.uImpInset.value.set(atlas.layout.gutter / atlas.layout.cellW, atlas.layout.gutter / atlas.layout.cellH);
+    this.uniforms.uImpCell.value.set(1 - (2 * atlas.layout.gutter) / atlas.layout.cellW, 1 - (2 * atlas.layout.gutter) / atlas.layout.cellH);
     this.uniforms.uImpNormals.value = atlas.normals;
     this.uniforms.uImpKindFrom.value = atlas.cells.map((kind) => kind[0]?.index ?? 1e9);
 
@@ -415,6 +543,9 @@ uniform float uTo;
 uniform float uOpenTo;
 uniform float uKeepTo;
 uniform vec2 uCells;
+uniform float uImpViews;
+uniform vec2 uImpInset;
+uniform vec2 uImpCell;
 uniform float uImpKindFrom[${TREE_KINDS.length}];
 varying vec3 vImpAutumn;
 varying float vImpTurn;
@@ -462,13 +593,13 @@ vec3 transformed = impBase + impRight * position.x * aImp1.y * impWiden + vec3( 
 if ( impCam < uFrom - uBlend * 0.5 || impCam > impReach || aImp1.y <= 0.0 ) transformed = impBase;
 vImpSwap = smoothstep( uFrom - uBlend * 0.5, uFrom + uBlend * 0.5, impCam );
 // Which side of the tree the camera sees, in the tree's own frame (the bake turned
-// the model by -view / VIEWS of a turn), and the two baked views either side of it.
-float impSide = mod( ( atan( impTo.x, impTo.y ) - impYaw ) / 6.2832 * ${IMPOSTOR_VIEWS.toFixed(1)}, ${IMPOSTOR_VIEWS.toFixed(1)} );
+// the model by -view / views of a turn), and the two baked views either side of it.
+float impSide = mod( ( atan( impTo.x, impTo.y ) - impYaw ) / 6.2832 * uImpViews, uImpViews );
 float impView0 = floor( impSide );
 vImpView = impSide - impView0;
-vec2 impInCell = vec2( ${(GUTTER / CELL_W).toFixed(5)}, ${(GUTTER / CELL_H).toFixed(5)} ) + uv * vec2( ${(1 - (2 * GUTTER) / CELL_W).toFixed(5)}, ${(1 - (2 * GUTTER) / CELL_H).toFixed(5)} );
+vec2 impInCell = uImpInset + uv * uImpCell;
 float impCellA = impCell + impView0;
-float impCellB = impCell + mod( impView0 + 1.0, ${IMPOSTOR_VIEWS.toFixed(1)} );
+float impCellB = impCell + mod( impView0 + 1.0, uImpViews );
 vImpUv = ( vec2( mod( impCellA, uCells.x ), floor( impCellA / uCells.x ) ) + impInCell ) / uCells;
 vImpUv2 = ( vec2( mod( impCellB, uCells.x ), floor( impCellB / uCells.x ) ) + impInCell ) / uCells;
 vImpTint = impKeeper ? aImp1.w - 10.0 : abs( aImp1.w );
