@@ -1,19 +1,12 @@
 import * as THREE from 'three';
 
 import { hashUnit3 } from '../core/rng';
-import { DESERT_TILE_SIZE, TREE_STRIDE } from './deserttiledata';
+import { DESERT_TILE_SIZE, TREE_STRIDE, UNDERGROWTH_KIND_FROM, UNDERGROWTH_KIND_TO } from './deserttiledata';
 import type { ForestWorkerRequest, ForestWorkerResponse } from './forestworker';
 import { FAR_WOODS_TO_M } from './farwoods';
 import { applyModelDissolve, bakeImpostorAtlas, ImpostorField, type ImpostorAtlas } from './impostors';
 import type { WorldOrigin } from './origin';
-import {
-  loadTreeVariants,
-  UNDERGROWTH_FADE_TO_M,
-  UNDERGROWTH_KIND_FROM,
-  UNDERGROWTH_KIND_TO,
-  type TreeLod,
-  type TreeVariant,
-} from './props/trees';
+import { loadTreeVariants, UNDERGROWTH_FADE_TO_M, type TreeLod, type TreeVariant } from './props/trees';
 import type { Road } from './road';
 
 /**

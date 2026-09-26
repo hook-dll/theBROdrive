@@ -26,6 +26,13 @@ import { villagesAlongRoad } from '../src/world/village';
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 const L = LakeWater.lattice;
+/**
+ * The frame budget the game gives a streaming slice (`STREAM_FRAME_BUDGET_MS` in
+ * app/bootwarmup.ts). The search is handed this as a deadline, so what the check below
+ * measures is the slice the game actually runs: a slice that overruns it is a slice the
+ * stages could not stop inside it.
+ */
+const SLICE_BUDGET_MS = 3;
 /** Sites searched. Each is a full window of terrain samples, so this is the slow part. */
 const SITES_SEARCHED = 14;
 
@@ -164,7 +171,7 @@ for (let i = 0; i < SITES_SEARCHED; i++) {
   for (;;) {
     const stage = water.phaseName;
     const started = performance.now();
-    const done = water.advanceForTest();
+    const done = water.advanceForTest(started + SLICE_BUDGET_MS);
     const elapsed = performance.now() - started;
     slices++;
     if (elapsed > worstSliceMs) {
@@ -255,7 +262,10 @@ check(
   worst('shore') > 40,
   `fewest ${worst('shore')} shoreline cells`,
 );
-const instanced = root.children.filter(
+// The newest sheet's group: one basin's water is drawn at a time in a bench like this,
+// and every basin that settles keeps a sheet of its own (`render/lakewater.ts`).
+const sheetGroup = root.children[root.children.length - 1] as THREE.Group;
+const instanced = sheetGroup.children.filter(
   (child): child is THREE.InstancedMesh => (child as THREE.InstancedMesh).isInstancedMesh,
 );
 const matrix = new THREE.Matrix4();
@@ -338,7 +348,13 @@ const approach = (out: number): { x: number; z: number } => ({
 /** Opacity with the eye where a driver's actually is: on the ground, 1.6 m up. */
 const opacityAt = (out: number): number => {
   const p = approach(out);
-  const eyeY = terrain.heightAt(p.x, p.z) + 1.6;
+  // WITH THE SITE'S OWN ARCLENGTH AS THE HINT, which is what every consumer in the game
+  // passes: `Road.descend` can only travel about 180 m from its hint, so a hint-less call
+  // from fifty kilometres down the road projects onto a road point that is nowhere near,
+  // and the ground it returns is the open desert rather than this basin. The check below
+  // reads how the WATER behaves against the ground a player stands on, and that ground is
+  // only this basin's when the hint is.
+  const eyeY = terrain.heightAt(p.x, p.z, wetSite.s) + 1.6;
   for (let f = 0; f < 600; f++) {
     water.update(p.x, eyeY, p.z, wetSite.s, f + 1, scheduler as never, 0.016);
     if (water.ready) break;

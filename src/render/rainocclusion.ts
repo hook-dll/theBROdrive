@@ -127,6 +127,8 @@ export class ShelterMap {
   /** Where the eye stood when the map was last drawn, and the world origin it was drawn under. */
   private readonly drawnAt = new THREE.Vector3(Number.NaN, 0, Number.NaN);
   private readonly drawnOrigin = new THREE.Vector2(Number.NaN, Number.NaN);
+  /** Whether the scene's lights have been put on this layer; see `draw`. */
+  private lightsMarked = false;
   private age = 0;
   private drawn = false;
 
@@ -170,15 +172,24 @@ export class ShelterMap {
   /**
    * Redraws the map when it is due and does nothing else the rest of the time.
    *
-   * `eye` is the camera in scene coordinates, `absX`/`absZ` the same point in the
-   * absolute world — their difference is the floating origin, and a rebase moves every
-   * mesh in the scene at once, which strands the last map rather than merely ageing it.
+   * `eye` is the camera in scene coordinates; `originX`/`originZ` are the floating
+   * origin that scene shares with the absolute world — a rebase moves every mesh in the
+   * scene at once and strands the last map rather than merely ageing it.
+   *
+   * THE ORIGIN IS PASSED, NOT RECONSTRUCTED. It used to arrive as the absolute camera
+   * position (`cam + origin`) and be rebuilt here as `absX - eye.x`, then compared for
+   * EXACT equality with the origin the last draw was under. `(c + O) - c` is not always
+   * `O` in f64: measured with the camera moving 0.3 m a frame across ±1500 m, the rebuilt
+   * value changed from one frame to the next on a quarter of all frames (27.4% at
+   * O=1000, 21.7% at O=16000; 0% at 5000 and 100000). Each flip drew the map again, with
+   * the lights-state churn a redraw drags behind it — about 36 redraws a second in the
+   * rain, where the rule is one per 3 m or per half second.
    */
   advance(
     renderer: THREE.WebGLRenderer,
     eye: THREE.Vector3,
-    absX: number,
-    absZ: number,
+    originX: number,
+    originZ: number,
     dt: number,
     raining: boolean,
   ): void {
@@ -190,8 +201,6 @@ export class ShelterMap {
       return;
     }
     this.age += dt;
-    const originX = absX - eye.x;
-    const originZ = absZ - eye.z;
     const moved = Math.abs(eye.x - this.drawnAt.x) + Math.abs(eye.y - this.drawnAt.y) + Math.abs(eye.z - this.drawnAt.z);
     if (
       this.drawn &&
@@ -218,6 +227,23 @@ export class ShelterMap {
    * middle of a frame, between the camera update and the main render.
    */
   private draw(renderer: THREE.WebGLRenderer, eye: THREE.Vector3): void {
+    // THE PASS MUST SEE THE SAME LIGHTS THE MAIN RENDER DOES, even though it draws none
+    // of them. It renders the scene through a camera on `SHELTER_LAYER` alone, and three
+    // collects only the lights that camera's layers accept: with none on the layer the
+    // pass saw N lights become 0, and the main render that followed turned 0 back into n.
+    // `WebGLLights.setup` bumps `lights.state.version` whenever that count changes, so
+    // every redraw bumped it twice, and every lit material then failed
+    // `lightsStateVersion === lights.state.version` in the main render and had its
+    // parameters and program cache key rebuilt (`setProgram`). Nothing recompiled and
+    // nothing changed on screen; it was pure per-material bookkeeping on every redraw
+    // while it rains. Marking the lights is free — the layer is added, so they stay on
+    // layer 0 and the main render is untouched — and it makes the two passes agree.
+    if (!this.lightsMarked) {
+      this.lightsMarked = true;
+      this.scene.traverse((object) => {
+        if ((object as THREE.Light).isLight) object.layers.enable(SHELTER_LAYER);
+      });
+    }
     this.camera.position.set(eye.x, eye.y + MAP_CEIL_M, eye.z);
     this.camera.updateMatrixWorld(true);
 

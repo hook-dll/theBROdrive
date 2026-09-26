@@ -306,42 +306,64 @@ export class LakeBasins {
    * The dug height at a point, given the open-desert height there and an arclength
    * near it. Returns `open` untouched — the overwhelmingly common case — when no
    * basin reaches the point.
+   *
+   * EVERY basin in reach is applied, not the nearest one. The schedule holds a village
+   * pond every 8.5 km as well as the lakes, so two basins stand within each other's reach
+   * often — 121 pairs of centres within 900 m in the first 4000 sites of seed 4. While
+   * only `nearest(hintS)` dug, the ground switched between the two basins' profiles the
+   * moment the hint crossed their midpoint: measured across the lake at s=157728, a
+   * 20.23 m step in 0.5 m, in the drawn ground AND in the collided ground, with the
+   * planting and the tile colours (which walk every basin, `placementsNear`) disagreeing
+   * with both.
+   *
+   * Composing them rather than choosing one is what makes the seam go away: each basin
+   * pulls the running height toward its own profile by its own blend, and a blend reaches
+   * zero at the basin's outer radius, so two basins that do not overlap are unaffected and
+   * two that do meet in a slope, not a wall.
    */
   shape(x: number, z: number, open: number, hintS: number): number {
-    const site = this.nearest(hintS);
-    if (site === null) return open;
-    // A basin reaches `BASIN_OUTER_M` from its centre, and the caller's arclength is
-    // only APPROXIMATE — a tile passes the nearest road branch to its middle. The
-    // margin is the slack that makes a crude hint safe.
-    if (Math.abs(site.s - hintS) > BASIN_OUTER_M + HINT_SLACK_M) return open;
-    const placed = this.place(site);
-    const r = Math.hypot(x - placed.x, z - placed.z);
+    // A basin reaches `BASIN_OUTER_M` from its centre, and the caller's arclength is only
+    // APPROXIMATE — a tile passes the nearest road branch to its middle. The margin is the
+    // slack that makes a crude hint safe.
+    const from = hintS - (BASIN_OUTER_M + HINT_SLACK_M);
+    const sites = this.sites;
+    let lo = 0;
+    let hi = sites.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sites[mid]!.s < from) lo = mid + 1;
+      else hi = mid;
+    }
+    let height = open;
+    for (let i = lo; i < sites.length; i++) {
+      const site = sites[i]!;
+      if (site.s > hintS + (BASIN_OUTER_M + HINT_SLACK_M)) break;
+      const centre = this.centreOf(site);
+      const inner = site.radius;
+      const rimWidth = Math.max(RIM_WIDTH_M * 0.5, inner * 0.12);
+      const blendWidth = Math.max(RIM_WIDTH_M * 2, inner);
+      const rimAt = inner + rimWidth;
+      const outer = rimAt + blendWidth;
+      const r = Math.hypot(x - centre.x, z - centre.z);
+      if (r >= outer) continue;
 
-    // A pond and a lake are the same shape at different sizes: the rim and the blend scale
-    // with the basin, or a fifty-metre pond would be ringed by a twenty-four metre rampart
-    // and leave a crater two hundred metres wide around itself.
-    const inner = site.radius;
-    const rimWidth = Math.max(RIM_WIDTH_M * 0.5, inner * 0.12);
-    const blendWidth = Math.max(RIM_WIDTH_M * 2, inner);
-    const rimAt = inner + rimWidth;
-    const outer = rimAt + blendWidth;
-    if (r >= outer) return open;
-
-    // THE LIP IS SET BY THE LOWEST GROUND AROUND THE BASIN, NOT BY THE CENTRE.
-    //
-    // Cutting a bowl relative to the height at the middle of the site was the first
-    // attempt, and on a dune slope it built a water tower: the desert 300 m away is
-    // metres lower than the middle, so the water stood above the ground the player
-    // walked in on. Taking the MINIMUM of the surrounding ring and dropping a little
-    // below it makes the lip lower than every point around it, which does two things
-    // at once — the surface can never be seen from below, and the basin is CLOSED, so
-    // the flood in `render/lakewater.ts` fills it to that lip and no further.
-    const lip = this.lipAt(placed);
-    const floor = lip - site.depth;
-    const bowl = 1 - smoothstep01(r / inner);
-    const target = r <= inner ? floor + (lip - floor) * (1 - bowl) : lip;
-    const blend = 1 - smoothstep01((r - rimAt) / blendWidth);
-    return open + (target - open) * blend;
+      // THE LIP IS SET BY THE LOWEST GROUND AROUND THE BASIN, NOT BY THE CENTRE.
+      //
+      // Cutting a bowl relative to the height at the middle of the site was the first
+      // attempt, and on a dune slope it built a water tower: the desert 300 m away is
+      // metres lower than the middle, so the water stood above the ground the player
+      // walked in on. Taking the MINIMUM of the surrounding ring and dropping a little
+      // below it makes the lip lower than every point around it, which does two things
+      // at once — the surface can never be seen from below, and the basin is CLOSED, so
+      // the flood in `render/lakewater.ts` fills it to that lip and no further.
+      const lip = this.lipAt(this.place(site));
+      const floor = lip - site.depth;
+      const bowl = 1 - smoothstep01(r / inner);
+      const target = r <= inner ? floor + (lip - floor) * (1 - bowl) : lip;
+      const blend = 1 - smoothstep01((r - rimAt) / blendWidth);
+      height += (target - height) * blend;
+    }
+    return height;
   }
 
   /** The basin's lip: the lowest surrounding ground, less `LIP_DROP_M`. */

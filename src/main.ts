@@ -1923,13 +1923,32 @@ async function boot(): Promise<void> {
     if (weather.wet > 0.01) {
       eyeGround = terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS);
       for (const vehicle of litVehicles) {
-        const at = vehicle.root.position;
-        vehicle.offerGlints(wetGlints, terrain.heightAt(at.x + origin.x, at.z + origin.z, activeS));
+        // THE GROUND UNDER A CAR IS THE CAR'S OWN CONTACT PLANE, not a terrain query.
+        // `terrain.heightAt` projects through `Road.descend`, whose hint can only travel
+        // about 180 m on a curved road, and traffic offers its lamps from 250-600 m away
+        // — where the query returned off-corridor ground, measured high by up to 14 m on
+        // seeds 1337 and 42. A high reading culled the streak outright (`h < 0.05` in the
+        // vertex shader); a low one laid the quad along a plane under the road, where it
+        // was depth-hidden or misplaced. Both hit exactly the far oncoming cars the
+        // glints exist for, and the query was one `heightAt` per lit car per frame.
+        // The chassis knows where its wheels are: the contact plane sits
+        // `contactPlaneLocalY` below the origin the car is drawn at, which is the same
+        // relation the rescue path uses to put it back on the road.
+        vehicle.offerGlints(wetGlints, vehicle.root.position.y + vehicle.contactPlaneLocalY);
       }
       // Street lamps after the cars: a full buffer refuses fixtures, never a car.
       streamer.offerGlints(wetGlints);
     }
-    wetGlints.endFrame(weather.wet, renderer.fog.density, eyeGround, frameDt);
+    // THE FOG THE SCENE RENDERS WITH, which is this frame's haze thinned for the chosen
+    // draw distance — the same number installed on the camera below, computed once.
+    // The glint shader fogs with exp(−(density·d)²), so handing it the unthinned density
+    // fogged a streak as if it stood `1/scale` times farther away: 2.4× on the standard
+    // rung and 6.25× on the tall one, where in a fog spell the streaks of lamps still
+    // plainly visible vanished first. On a real wet road they are what you see of a car
+    // first, at the lamp's own brightness and any range, which is the whole feature.
+    const fogDensity =
+      renderer.fog.density * viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
+    wetGlints.endFrame(weather.wet, fogDensity, eyeGround, frameDt);
 
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the
@@ -1982,11 +2001,12 @@ async function boot(): Promise<void> {
     }
     landmarks.update(cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('vista');
-    // Then thin the whole thing for the chosen draw distance. The exponential fog is
-    // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
-    // is all there is and hides the vista completely when there is more: at the 'vast'
-    // scale factor a 25 km range still fades, it just fades over 25 km.
-    renderer.fog.density *= viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
+    // The scene's fog: the density computed above, which is the haze thinned for the
+    // chosen draw distance. The exponential fog is tuned so the world dissolves around
+    // 1.5 km, which is exactly right when 1.5 km is all there is and hides the vista
+    // completely when there is more: at the 'vast' scale factor a 25 km range still
+    // fades, it just fades over 25 km.
+    renderer.fog.density = fogDensity;
 
     // The drifting cloud shade every ground material samples. Driven by the RENDER
     // frame's own dt, so a paused game's clouds stop with it, and given the f64
@@ -2002,7 +2022,7 @@ async function boot(): Promise<void> {
       mobilePresentation,
     );
     // Rain and snow round the camera, from the weather set before the sky this frame.
-    precipitation.update(frameDt, cam, cam.x + origin.x, cam.z + origin.z, weather, sky.dayFactor, renderer.renderer.domElement.height);
+    precipitation.update(frameDt, cam, origin.x, origin.z, weather, sky.dayFactor, renderer.renderer.domElement.height);
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
     // absolute player position; the bake is sliced through the streaming budget the
     // terrain tiles use.

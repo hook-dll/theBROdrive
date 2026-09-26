@@ -207,12 +207,19 @@ export class Precipitation {
   }
 
   /**
-   * `camera` in scene (origin-relative) coordinates, `absX`/`absZ` its absolute world
-   * position (for its velocity, which a rebase must not jolt), `viewHeightPx` the
-   * drawing buffer's height; `daylight` 0..1 dims the drops at night.
+   * `camera` in scene (origin-relative) coordinates, `originX`/`originZ` the floating
+   * origin that scene shares with the absolute world; `viewHeightPx` the drawing
+   * buffer's height; `daylight` 0..1 dims the drops at night.
+   *
+   * The origin arrives EXACT rather than as the absolute camera position: the shelter
+   * map is anchored to the scene and has to know when the origin moves, and
+   * `(camera + origin) - camera` is not always `origin` in f64 (see
+   * `ShelterMap.advance`).
    */
-  update(dt: number, camera: THREE.Vector3, absX: number, absZ: number, weather: WeatherState, daylight: number, viewHeightPx: number): void {
+  update(dt: number, camera: THREE.Vector3, originX: number, originZ: number, weather: WeatherState, daylight: number, viewHeightPx: number): void {
     this.time = (this.time + dt) % 3600;
+    const absX = camera.x + originX;
+    const absZ = camera.z + originZ;
     // The eye's velocity, smoothed over a few frames: it is what slants the streaks.
     if (dt > 0 && Number.isFinite(this.lastAbs.x)) {
       const vx = (absX - this.lastAbs.x) / dt;
@@ -252,6 +259,6 @@ export class Precipitation {
     u.uAlpha!.value = (0.45 + 0.43 * weather.snowing) * Math.min(1, weather.precip * 1.5);
     // The roofs over the camera, redrawn only when they may have changed, and not at all
     // while it is dry. Snow shelters under exactly the same ones.
-    this.shelter.advance(this.renderer, camera, absX, absZ, dt, share > 0);
+    this.shelter.advance(this.renderer, camera, originX, originZ, dt, share > 0);
   }
 }

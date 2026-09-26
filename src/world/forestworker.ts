@@ -3,6 +3,7 @@ import type { RoadSpine } from './roadspine';
 import { RoadDistance } from './roaddistance';
 import {
   DESERT_TILE_SIZE,
+  isImpostorKind,
   MAX_TILE_TREES,
   TREE_STRIDE,
   plantTrees,
@@ -108,6 +109,10 @@ scope.onmessage = (event: MessageEvent<ForestWorkerRequest>) => {
   let kept = 0;
   for (let i = 0; i < count; i++) {
     const o = i * TREE_STRIDE;
+    // The undergrowth is faded out by 110 m and no longer drawn (world/forest.ts), and
+    // the impostors only begin at 135: it has no far form at all, and a quarter of the
+    // far forest's tiles were ferns and stumps no one could ever see.
+    if (!isImpostorKind(scratch[o + 5]!)) continue;
     const x = centreX + scratch[o]!;
     const z = centreZ + scratch[o + 2]!;
     const isOpen = ctx.terrain.cover.forestAt(x, z, 1e6) < OPEN_FOREST_MAX;

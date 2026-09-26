@@ -277,7 +277,6 @@ type Phase =
   | 'measuring'
   | 'measuring2'
   | 'baking'
-  | 'baking2'
   | 'baking3'
   | 'planting'
   | 'planting2'
@@ -285,22 +284,150 @@ type Phase =
   | 'ready'
   | 'dry';
 
-export class LakeWater {
-  private readonly root = new THREE.Group();
-  private readonly geometry = new THREE.BufferGeometry();
-  private readonly water: WaterMaterial = createWaterMaterial();
-  private readonly grass: THREE.InstancedMesh;
-  private readonly palms: THREE.InstancedMesh;
-  private readonly trees: THREE.InstancedMesh;
+/**
+ * The fringe's card geometries: one set for every sheet, because every pool in this
+ * country is planted with the same reeds.
+ */
+const GRASS_CARD = grassTuftGeometry();
+const PALM_CARD = palmGeometry();
+const TREE_CARD = treeGeometry();
+
+/**
+ * One basin's finished sheet: its water, its fringe, and the field the fade is read off.
+ *
+ * WHY A SHEET OUTLIVES ITS SEARCH. The search is one machine with one set of scratch
+ * lattices and it runs for one basin at a time — but a village pond and a lake can stand a
+ * kilometre apart on the same road (the home lake and the first village are 1.6 km apart),
+ * so two basins sit inside `BUILD_LEAD_M` for kilometres of driving. While only the basin
+ * the machine was serving could be drawn, the second basin's search hid the first basin's
+ * water: the sheet vanished the moment the player's arclength passed the midpoint between
+ * them and did not come back. A settled basin is data, so it is kept — its own geometry,
+ * its own fringe and its own field — until its basin leaves the reach.
+ */
+class BasinSheet {
+  readonly group = new THREE.Group();
+  readonly geometry = new THREE.BufferGeometry();
+  readonly water: WaterMaterial = createWaterMaterial();
+  readonly grass: THREE.InstancedMesh;
+  readonly palms: THREE.InstancedMesh;
+  readonly trees: THREE.InstancedMesh;
   private readonly fringeMaterials: readonly THREE.MeshBasicMaterial[];
+
+  /** The lattice this basin settled with, at full size: the fade and the dev view read it. */
+  readonly heights = new Float32Array(SITE_POINTS);
+  readonly wet = new Uint8Array(SITE_POINTS);
+  readonly edgeDistance = new Float32Array(SITE_POINTS);
+  readonly positions = new Float32Array(SITE_POINTS * 3);
+  readonly uvs = new Float32Array(SITE_POINTS * 2);
+  readonly colours = new Float32Array(SITE_POINTS * 4);
+  indices = new Uint32Array(0);
+
+  centreX = 0;
+  centreZ = 0;
+  waterY = 0;
+  floorY = 0;
+  triangles = 0;
+  wetCells = 0;
+  wetRadius = 0;
+  shoreCount = 0;
+  opacity = 0;
+
+  constructor(readonly site: LakeSite) {
+    const surface = new THREE.Mesh(this.geometry, this.water.material);
+    surface.castShadow = false;
+    surface.receiveShadow = false;
+    surface.frustumCulled = false;
+    this.group.add(surface);
+
+    const grassMaterial = cardMaterial();
+    const palmMaterial = cardMaterial();
+    const treeMaterial = cardMaterial();
+    this.fringeMaterials = [grassMaterial, palmMaterial, treeMaterial];
+    this.grass = new THREE.InstancedMesh(GRASS_CARD, grassMaterial, MAX_GRASS);
+    this.palms = new THREE.InstancedMesh(PALM_CARD, palmMaterial, MAX_PALMS);
+    this.trees = new THREE.InstancedMesh(TREE_CARD, treeMaterial, MAX_TREES);
+    for (const mesh of [this.grass, this.palms, this.trees]) {
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      this.group.add(mesh);
+    }
+
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colours, 4));
+    // A flat sheet: one normal for every vertex and the wave map does the rest.
+    const normals = new Float32Array(SITE_POINTS * 3);
+    for (let i = 0; i < SITE_POINTS; i++) normals[i * 3 + 1] = 1;
+    this.geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    this.geometry.setDrawRange(0, 0);
+    this.group.visible = false;
+  }
+
+  /** Back where the floating origin now is: the group holds the sheet's own centre. */
+  place(originX: number, originZ: number): void {
+    this.group.position.set(this.centreX - originX, 0, this.centreZ - originZ);
+  }
+
+  setOpacity(opacity: number): void {
+    this.opacity = opacity;
+    this.water.material.opacity = opacity;
+    for (const material of this.fringeMaterials) material.opacity = opacity;
+    this.group.visible = opacity > 0.002;
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    this.water.dispose();
+    for (const mesh of [this.grass, this.palms, this.trees]) mesh.dispose();
+    for (const material of this.fringeMaterials) material.dispose();
+    this.group.removeFromParent();
+  }
+}
+
+/**
+ * The search's slices are sized by TIME, not by a chosen number of rows.
+ *
+ * The search is admitted by the shared streaming scheduler, whose contract is a
+ * millisecond budget for the rendered frame — and one 76-point row of the lattice is not a
+ * millisecond-sized unit: `sampleGroundHeight` costs 36 µs away from the road, so a row is
+ * 1.3-3.6 ms on its own, and the worst slice measured 10.80 ms in `tools/water.ts` against
+ * a 3 ms budget. A fixed rows-per-slice also sizes the slice for whichever machine
+ * happened to be measuring. So every stage below runs until a deadline and leaves its
+ * cursor where it stopped: a fast machine does more per frame and the lake arrives sooner,
+ * a slow one does less and the frame stays whole.
+ */
+const SLICE_BUDGET_MS = 2.5;
+
+export class LakeWater {
+  /**
+   * Everything the lake draws, under one node: each basin's sheet is a child group, so a
+   * rebase or a teardown walks one subtree rather than a list of them.
+   */
+  private readonly root = new THREE.Group();
   private readonly siteList: readonly LakeSite[];
+  /** Basins in reach this frame, nearest first. Reused: a drive allocates none of this. */
+  private readonly reachable: LakeSite[] = [];
+  /** Settled basins by schedule index, until their basin leaves the reach. */
+  private readonly sheets = new Map<number, BasinSheet>();
+  /** Sites that were searched and held no lake. A basin is attempted once, not per frame. */
+  private readonly drySites = new Set<number>();
+  /** The basin the search machine is working on. */
+  private searchSite: LakeSite | null = null;
+  /** The site the machine last looked at and refused: what the dev seek advances past. */
+  private lastDry: LakeSite | null = null;
+  /** The sheet the search is building, between the pool being chosen and the fringe. */
+  private sheet: BasinSheet | null = null;
+  /** The player's arclength, for the accessors that describe the basin being served. */
+  private lastPlayerS = Number.NaN;
 
   /** One lattice, rewritten per site. A live drive allocates none of this. */
   private readonly heights = new Float32Array(SITE_POINTS);
   private readonly positions = new Float32Array(SITE_POINTS * 3);
   private readonly uvs = new Float32Array(SITE_POINTS * 2);
   private readonly colours = new Float32Array(SITE_POINTS * 4);
-  private readonly normals = new Float32Array(SITE_POINTS * 3);
   private readonly indices = new Uint32Array(SITE_CELLS * SITE_CELLS * 6);
   /** 1 where the filled sheet stands. */
   private readonly wet = new Uint8Array(SITE_POINTS);
@@ -317,11 +444,32 @@ export class LakeWater {
   private shoreCount = 0;
 
   private phase: Phase = 'idle';
-  private siteIndex = -1;
+  /** Cursors: where each stage stopped when its slice ran out. */
+  private sampleRow = 0;
+  private sampleCol = 0;
+  private seedCursor = 0;
+  private heapSize = 0;
+  private poppedLevel = 0;
+  private poolReset = false;
+  private poolScan = 0;
+  private poolHead = 0;
+  private poolTail = 0;
+  private poolFloor = 0;
+  private poolLip = 0;
+  private bestCount = 0;
+  private bestLevel = 0;
+  private bestFloor = 0;
+  private wetCursor = 0;
+  private scanCursor = 0;
+  private bakeCursor = 0;
+  private quadRow = 0;
+  private quadCol = 0;
+  private indexCount = 0;
+  private plantCursor = 0;
+  private shoreCursor = 0;
+
   /** Arclength of the site being searched: the hint the far ground sampler needs. */
   private siteS = 0;
-  private readyIndex = -1;
-  private buildRow = 0;
   private centreX = 0;
   private centreZ = 0;
   private waterY = 0;
@@ -329,7 +477,6 @@ export class LakeWater {
   private triangles = 0;
   private wetCells = 0;
   private wetRadius = 0;
-  private opacity = 0;
   private readonly ground: GroundHeightSample = { height: 0, detail: 0, water: 0 };
 
   private readonly matrix = new THREE.Matrix4();
@@ -338,51 +485,15 @@ export class LakeWater {
   private readonly scratchScale = new THREE.Vector3();
   private readonly scratchPosition = new THREE.Vector3();
   private readonly colour = new THREE.Color();
-  private readonly sandColour = new THREE.Color();
-  private readonly deepColour = new THREE.Color();
-  private readonly shallowColour = new THREE.Color();
-  private readonly foamColour = new THREE.Color();
-  private readonly hsl = { h: 0, s: 0, l: 0 };
 
   constructor(
     scene: THREE.Scene,
     private readonly context: DesertTileGenerationContext,
     private readonly origin: WorldOrigin,
   ) {
-    const surface = new THREE.Mesh(this.geometry, this.water.material);
-    surface.castShadow = false;
-    surface.receiveShadow = false;
-    surface.frustumCulled = false;
-    this.root.add(surface);
-
-    const grassMaterial = cardMaterial();
-    const palmMaterial = cardMaterial();
-    const treeMaterial = cardMaterial();
-    this.fringeMaterials = [grassMaterial, palmMaterial, treeMaterial];
-    this.grass = new THREE.InstancedMesh(grassTuftGeometry(), grassMaterial, MAX_GRASS);
-    this.palms = new THREE.InstancedMesh(palmGeometry(), palmMaterial, MAX_PALMS);
-    this.trees = new THREE.InstancedMesh(treeGeometry(), treeMaterial, MAX_TREES);
-    for (const mesh of [this.grass, this.palms, this.trees]) {
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.count = 0;
-      mesh.frustumCulled = false;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      this.root.add(mesh);
-    }
-
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colours, 4));
-    this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3));
-    this.geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
-    this.geometry.setDrawRange(0, 0);
-    // A flat sheet: one normal for every vertex and the wave map does the rest.
-    for (let i = 0; i < SITE_POINTS; i++) this.normals[i * 3 + 1] = 1;
-
+    this.siteList = context.terrain.basins.schedule;
     this.root.visible = false;
     scene.add(this.root);
-    this.siteList = context.terrain.basins.schedule;
   }
 
   /**
@@ -418,6 +529,9 @@ export class LakeWater {
    * `scheduler` and `frameId` are the shared streaming budget, so the search is sliced
    * exactly like a terrain tile and a lake arriving mid-drive costs no more per frame
    * than the ground under the car does.
+   *
+   * EVERY basin in `BUILD_LEAD_M` is drawn, not only the nearest: a basin that has settled
+   * keeps its sheet whether or not the machine has moved on to another one.
    */
   update(
     playerX: number,
@@ -428,43 +542,92 @@ export class LakeWater {
     scheduler: WorldWorkScheduler,
     dt: number,
   ): void {
-    const site = this.siteNearest(playerS);
-    if (site === null || Math.abs(site.s - playerS) > BUILD_LEAD_M) {
-      this.root.visible = false;
+    this.lastPlayerS = playerS;
+
+    // The basins in reach, nearest first. `BUILD_LEAD_M` and the schedule's own spacing
+    // bound this at a handful; the sort is over that handful, not over the schedule.
+    this.reachable.length = 0;
+    let lo = 0;
+    let hi = this.siteList.length;
+    const from = playerS - BUILD_LEAD_M;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.siteList[mid]!.s < from) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < this.siteList.length; i++) {
+      const site = this.siteList[i]!;
+      if (site.s > playerS + BUILD_LEAD_M) break;
+      this.reachable.push(site);
+    }
+    if (this.reachable.length > 1) {
+      this.reachable.sort((a, b) => Math.abs(a.s - playerS) - Math.abs(b.s - playerS));
+    }
+
+    // A basin that has left the reach gives up its sheet: holding every lake ever passed
+    // would be a leak, and none of them can be seen from `BUILD_LEAD_M` away.
+    if (this.sheets.size > 0) {
+      for (const [index, sheet] of this.sheets) {
+        if (Math.abs(sheet.site.s - playerS) <= BUILD_LEAD_M) continue;
+        this.sheets.delete(index);
+        sheet.dispose();
+      }
+    }
+
+    // A search whose basin has left the reach dies with it. Its cursors are abandoned, not
+    // finished: the verdict would be for a basin nobody can see, and completing it would
+    // clobber the scratch the next basin needs.
+    if (this.searchSite !== null && Math.abs(this.searchSite.s - playerS) > BUILD_LEAD_M) {
+      this.searchSite = null;
+      this.sheet = null;
       this.phase = 'idle';
-      this.siteIndex = -1;
-      this.readyIndex = -1;
-      this.opacity = 0;
-      return;
+    }
+    // A settled or refused site frees the machine for the next basin in reach.
+    if (this.searchSite !== null && (this.sheets.has(this.searchSite.index) || this.phase === 'dry')) {
+      this.searchSite = null;
+    }
+    if (this.searchSite === null) {
+      const next = this.reachable.find(
+        (site) => !this.sheets.has(site.index) && !this.drySites.has(site.index),
+      );
+      if (next) this.beginSearch(next);
+    }
+    if (this.searchSite !== null) {
+      scheduler.tryRun(frameId, 'lake-water', (deadlineMs) => this.advance(deadlineMs));
     }
 
-    if (site.index !== this.siteIndex) this.beginSearch(site);
-    if (this.phase !== 'idle' && this.phase !== 'ready' && this.phase !== 'dry') {
-      scheduler.tryRun(frameId, 'lake-water', () => this.advance());
+    // Draw every settled basin in reach. The fade is per sheet, because the basins stand at
+    // different levels: ground outside one pool's shoreline can lie below its surface while
+    // the other's is metres away, and a shared opacity would hide one of them outright.
+    for (const sheet of this.sheets.values()) {
+      const opacity = smoothstep(
+        sheet.waterY - EYE_BELOW_WATER_M,
+        sheet.waterY + EYE_ABOVE_WATER_M,
+        playerY,
+      );
+      sheet.place(this.origin.x, this.origin.z);
+      sheet.setOpacity(opacity);
+      if (sheet.group.visible) sheet.water.advance(dt);
     }
-    if (this.phase !== 'ready' || this.readyIndex !== site.index) {
-      this.root.visible = false;
-      this.opacity = 0;
-      return;
+  }
+
+  /**
+   * The basin the dev and test accessors describe: the one the machine is serving, or —
+   * with no search in flight — the last one it settled.
+   */
+  private primarySheet(): BasinSheet | null {
+    if (this.searchSite !== null) {
+      const sheet = this.sheets.get(this.searchSite.index);
+      if (sheet) return sheet;
     }
-
-    // The one fade: the hollow the lake sits in does not stop at the shoreline, and
-    // ground outside the pool can lie below the water's level; standing there puts the
-    // eye UNDER a transparent sheet that then fills the screen with turquoise. The
-    // surface is only ever drawn to someone standing above it.
-    this.opacity = smoothstep(this.waterY - EYE_BELOW_WATER_M, this.waterY + EYE_ABOVE_WATER_M, playerY);
-    this.root.visible = this.opacity > 0.002;
-    if (!this.root.visible) return;
-
-    this.water.material.opacity = this.opacity;
-    for (const material of this.fringeMaterials) material.opacity = this.opacity;
-    this.root.position.set(this.centreX - this.origin.x, 0, this.centreZ - this.origin.z);
-    this.water.advance(dt);
+    let last: BasinSheet | null = null;
+    for (const sheet of this.sheets.values()) last = sheet;
+    return last;
   }
 
   /**
    * Metres from a world position to the nearest water, by lookup into the baked distance
-   * field.
+   * field of the nearest sheet.
    *
    * Outside the window the point is clamped onto the window's edge and the two distances
    * are added, which is a true lower bound and accurate to the lattice. The obvious
@@ -474,130 +637,174 @@ export class LakeWater {
    * kilometre away.
    */
   waterlineDistance(x: number, z: number): number {
-    if (this.phase !== 'ready') return Number.POSITIVE_INFINITY;
-    const localX = x - this.centreX;
-    const localZ = z - this.centreZ;
-    const clampedX = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localX));
-    const clampedZ = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localZ));
-    const outside = Math.hypot(localX - clampedX, localZ - clampedZ);
-    // BILINEAR, not nearest. The lattice is 8 m and the whole approach fade is 10, so a
-    // nearest-sample lookup handed the fade a staircase with two treads in it - which is
-    // exactly the two-step vanish this fade exists to avoid. Interpolating a distance
-    // field is safe for the same reason it is in world/roaddistance.ts: the field is
-    // 1-Lipschitz, so the interpolant can never overshoot the true distance by more than
-    // the cell it was read from.
-    const fx = (clampedX + SITE_REACH_M) / SITE_STEP_M;
-    const fz = (clampedZ + SITE_REACH_M) / SITE_STEP_M;
-    const ix = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fx)));
-    const iz = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fz)));
-    const tx = fx - ix;
-    const tz = fz - iz;
-    const d00 = this.edgeDistance[ix * SITE_VERTS + iz]!;
-    const d10 = this.edgeDistance[(ix + 1) * SITE_VERTS + iz]!;
-    const d01 = this.edgeDistance[ix * SITE_VERTS + iz + 1]!;
-    const d11 = this.edgeDistance[(ix + 1) * SITE_VERTS + iz + 1]!;
-    const near = d00 + (d10 - d00) * tx;
-    const far = d01 + (d11 - d01) * tx;
-    return outside + near + (far - near) * tz;
+    let best = Number.POSITIVE_INFINITY;
+    for (const sheet of this.sheets.values()) {
+      const localX = x - sheet.centreX;
+      const localZ = z - sheet.centreZ;
+      const clampedX = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localX));
+      const clampedZ = Math.min(SITE_REACH_M, Math.max(-SITE_REACH_M, localZ));
+      // BILINEAR, not nearest. The lattice is 8 m and the whole approach fade is 10, so a
+      // nearest-sample lookup handed the fade a staircase with two treads in it - which is
+      // exactly the two-step vanish this fade exists to avoid. Interpolating a distance
+      // field is safe for the same reason it is in world/roaddistance.ts: the field is
+      // 1-Lipschitz, so the interpolant can never overshoot the true distance by more than
+      // the cell it was read from.
+      const outside = Math.hypot(localX - clampedX, localZ - clampedZ);
+      const fx = (clampedX + SITE_REACH_M) / SITE_STEP_M;
+      const fz = (clampedZ + SITE_REACH_M) / SITE_STEP_M;
+      const ix = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fx)));
+      const iz = Math.min(SITE_CELLS - 1, Math.max(0, Math.floor(fz)));
+      const tx = fx - ix;
+      const tz = fz - iz;
+      const d = sheet.edgeDistance;
+      const d00 = d[ix * SITE_VERTS + iz]!;
+      const d10 = d[(ix + 1) * SITE_VERTS + iz]!;
+      const d01 = d[ix * SITE_VERTS + iz + 1]!;
+      const d11 = d[(ix + 1) * SITE_VERTS + iz + 1]!;
+      const near = d00 + (d10 - d00) * tx;
+      const far = d01 + (d11 - d01) * tx;
+      const distance = outside + near + (far - near) * tz;
+      if (distance < best) best = distance;
+    }
+    return best;
   }
 
   private beginSearch(site: LakeSite): void {
     const centre = this.context.road.offsetPoint(site.s, site.lateral);
-    this.siteIndex = site.index;
+    this.searchSite = site;
+    this.lastDry = null;
     this.siteS = site.s;
     this.centreX = centre.x;
     this.centreZ = centre.z;
-    this.buildRow = 0;
-    this.readyIndex = -1;
+    this.sheet = null;
+    this.shoreCount = 0;
+    this.resetCursors();
     this.phase = 'sampling';
-    this.root.visible = false;
+  }
+
+  /** Every stage's cursor back to its start, for a new basin. */
+  private resetCursors(): void {
+    this.sampleRow = 0;
+    this.sampleCol = 0;
+    this.seedCursor = 0;
+    this.heapSize = 0;
+    this.poolReset = false;
+    this.poolScan = 0;
+    this.poolHead = 0;
+    this.poolTail = 0;
+    this.bestCount = 0;
+    this.bestLevel = 0;
+    this.bestFloor = 0;
+    this.wetCursor = 0;
+    this.scanCursor = 0;
+    this.bakeCursor = 0;
+    this.quadRow = 0;
+    this.quadCol = 0;
+    this.indexCount = 0;
+    this.plantCursor = 0;
+    this.shoreCursor = 0;
   }
 
   /**
-   * One slice of the search, sized to the streaming budget. Every stage is its own slice
-   * because running them together measured 3.5 ms in a single call against a 3 ms budget
-   * — a hitch arriving exactly as the lake does.
+   * One slice of the search, running until the scheduler's deadline.
+   *
+   * Every stage leaves its cursor where it stopped, so a slice is exactly as long as the
+   * budget allows and no longer. Running the stages together measured 3.5 ms in a single
+   * call against a 3 ms budget, and a fixed rows-per-slice put the worst at 10.80 ms.
    */
-  private advance(): void {
+  private advance(deadlineMs: number): void {
     switch (this.phase) {
       case 'sampling':
-        this.sampleRows();
+        this.sampleRows(deadlineMs);
         return;
       case 'filling':
-        this.fillDepressions();
-        this.phase = 'pooling';
+        this.fillDepressions(deadlineMs);
         return;
-      case 'pooling':
-        this.phase = this.keepLargestPool(this.drainLevel) ? 'measuring' : 'dry';
+      case 'pooling': {
+        if (!this.keepLargestPool(deadlineMs)) return;
+        const enough =
+          this.bestCount > 0 &&
+          this.wetCells * SITE_STEP_M * SITE_STEP_M >= MIN_LAKE_AREA_M2 &&
+          this.waterY - this.floorY >= MIN_LAKE_DEPTH_M;
+        if (enough) {
+          this.phase = 'measuring';
+          return;
+        }
+        // Remembered, not merely reported: a basin with no hollow is a verdict about the
+        // world, so it must not be re-searched every time the player comes round again.
+        this.drySites.add(this.searchSite!.index);
+        this.lastDry = this.searchSite;
+        this.phase = 'dry';
         return;
+      }
       case 'measuring':
-        this.buildEdgeDistanceForward();
-        this.phase = 'measuring2';
+        this.buildEdgeDistanceForward(deadlineMs);
         return;
       case 'measuring2':
-        this.buildEdgeDistanceBackward();
-        this.phase = 'baking';
+        this.buildEdgeDistanceBackward(deadlineMs);
         return;
       case 'baking':
-        // Three slices over the lattice: half the vertices, the other half, then the
-        // quads. All of it in one slice measured 3.5 ms against a 3 ms budget, and
-        // vertices-then-quads still sat exactly on the line with a browser running.
-        this.bakeVertices(0, SITE_VERTS >> 1);
-        this.phase = 'baking2';
-        return;
-      case 'baking2':
-        this.bakeVertices(SITE_VERTS >> 1, SITE_VERTS);
-        this.phase = 'baking3';
+        if (this.bakeVertices(deadlineMs)) this.phase = 'baking3';
         return;
       case 'baking3':
-        this.bakeQuads();
-        this.phase = 'planting';
+        if (this.bakeQuads(deadlineMs)) this.phase = 'planting';
         return;
       case 'planting':
-        // Three slices, because a dug basin has a 500 m shoreline: finding it, then
-        // the grass, then the woody bands. All of it in one slice measured 3.1 ms
-        // against a 3 ms budget, and the grass alone measured 3.04 ms with it.
-        this.findShore();
-        this.phase = 'planting2';
+        this.findShore(deadlineMs);
         return;
       case 'planting2':
-        this.plantGrass();
-        this.phase = 'planting3';
+        if (this.plantGrass(deadlineMs)) this.phase = 'planting3';
         return;
       case 'planting3':
-        this.plantWoody();
-        this.phase = 'ready';
-        this.readyIndex = this.siteIndex;
+        if (this.plantWoody(deadlineMs)) {
+          this.finishSheet();
+          this.phase = 'ready';
+        }
         return;
       default:
         return;
     }
   }
 
-  private sampleRows(): void {
-    const end = Math.min(SITE_VERTS, this.buildRow + ROWS_PER_SLICE);
+  /**
+   * Ground for the whole window, through the tiles' own sampler.
+   *
+   * A second opinion here would put the shoreline a few centimetres off the sand it is cut
+   * from.
+   *
+   * `farFromRoad` is TRUE and that is exact, not an approximation: the whole window sits
+   * past `RELIEF_FULL`, where the tile lattice itself stops asking about the road and
+   * evaluates the dune band at full strength. See `LATERAL_MIN_M`.
+   */
+  private sampleRows(deadlineMs: number): void {
     const startX = this.centreX - SITE_REACH_M;
     const startZ = this.centreZ - SITE_REACH_M;
-    for (let ix = this.buildRow; ix < end; ix++) {
-      const worldX = startX + ix * SITE_STEP_M;
-      for (let iz = 0; iz < SITE_VERTS; iz++) {
-        // The exact drawn ground, through the tiles' own sampler. A second opinion here
-        // would put the shoreline a few centimetres off the sand it is cut from.
-        //
-        // `farFromRoad` is TRUE and that is exact, not an approximation: the whole window
-        // sits past `RELIEF_FULL`, where the tile lattice itself stops asking about the
-        // road and evaluates the dune band at full strength. See `LATERAL_MIN_M`.
-        sampleGroundHeight(this.context, worldX, startZ + iz * SITE_STEP_M, true, this.ground, this.siteS);
-        this.heights[ix * SITE_VERTS + iz] = this.ground.height;
+    while (this.sampleRow < SITE_VERTS) {
+      const worldX = startX + this.sampleRow * SITE_STEP_M;
+      while (this.sampleCol < SITE_VERTS) {
+        sampleGroundHeight(
+          this.context,
+          worldX,
+          startZ + this.sampleCol * SITE_STEP_M,
+          true,
+          this.ground,
+          this.siteS,
+        );
+        this.heights[this.sampleRow * SITE_VERTS + this.sampleCol] = this.ground.height;
+        this.sampleCol++;
+        // Checked per SAMPLE, not per row: one row is 1.3-3.6 ms on this machine, which is
+        // more than the whole frame budget the scheduler gave this slice.
+        if (performance.now() >= deadlineMs) return;
       }
+      this.sampleCol = 0;
+      this.sampleRow++;
     }
-    this.buildRow = end;
-    if (this.buildRow >= SITE_VERTS) this.phase = 'filling';
+    this.phase = 'filling';
   }
 
   /**
-   * Finds every depression in the window, fills them all to their own lips, and keeps the
-   * biggest. Reports whether that is a lake worth drawing.
+   * Finds every depression in the window, fills them all to their own lips, and lets
+   * `keepLargestPool` pick one.
    *
    * PRIORITY FLOOD FROM THE BOUNDARY, which is the textbook depression fill and the one
    * thing here that had to be got right. The first attempt started at the window's lowest
@@ -612,65 +819,31 @@ export class LakeWater {
    * that cell is under water, and the depth is the difference. One pass finds every hollow
    * in the window at once, with the window's edge as the sea the country drains to.
    */
-  private fillDepressions(): void {
-    this.seen.fill(0);
-    let heapSize = 0;
-
-    const push = (cell: number, level: number): void => {
-      this.seen[cell] = 1;
-      let i = heapSize++;
-      while (i > 0) {
-        const parent = (i - 1) >> 1;
-        if (this.heapKey[parent]! <= level) break;
-        this.heapKey[i] = this.heapKey[parent]!;
-        this.heapCell[i] = this.heapCell[parent]!;
-        i = parent;
-      }
-      this.heapKey[i] = level;
-      this.heapCell[i] = cell;
-    };
-    let poppedLevel = 0;
-    const pop = (): number => {
-      const top = this.heapCell[0]!;
-      poppedLevel = this.heapKey[0]!;
-      heapSize--;
-      if (heapSize > 0) {
-        const key = this.heapKey[heapSize]!;
-        const cell = this.heapCell[heapSize]!;
-        let i = 0;
-        for (;;) {
-          const left = i * 2 + 1;
-          if (left >= heapSize) break;
-          const right = left + 1;
-          const child =
-            right < heapSize && this.heapKey[right]! < this.heapKey[left]! ? right : left;
-          if (this.heapKey[child]! >= key) break;
-          this.heapKey[i] = this.heapKey[child]!;
-          this.heapCell[i] = this.heapCell[child]!;
-          i = child;
-        }
-        this.heapKey[i] = key;
-        this.heapCell[i] = cell;
-      }
-      return top;
-    };
-
-    for (let i = 0; i < SITE_VERTS; i++) {
+  private fillDepressions(deadlineMs: number): void {
+    if (this.seedCursor === 0) {
+      this.seen.fill(0);
+      this.heapSize = 0;
+    }
+    // The boundary ring's four sides, seeded across as many slices as it takes.
+    while (this.seedCursor < SITE_VERTS) {
+      const i = this.seedCursor;
       for (const cell of [
         i,
         i + SITE_CELLS * SITE_VERTS,
         i * SITE_VERTS,
         i * SITE_VERTS + SITE_CELLS,
       ]) {
-        if (this.seen[cell] === 0) push(cell, this.heights[cell]!);
+        if (this.seen[cell] === 0) this.heapPush(cell, this.heights[cell]!);
       }
+      this.seedCursor++;
+      if (performance.now() >= deadlineMs) return;
     }
-    // `absorbed` doubles as the drain level of every cell: the height the water would
-    // stand at there if the window drained to its own edge.
+    // `drainLevel` is the height the water would stand at in each cell if the window
+    // drained to its own edge.
     const drain = this.drainLevel;
-    while (heapSize > 0) {
-      const cell = pop();
-      const level = poppedLevel;
+    while (this.heapSize > 0) {
+      const cell = this.heapPop();
+      const level = this.poppedLevel;
       drain[cell] = level;
       const ix = (cell / SITE_VERTS) | 0;
       const iz = cell - ix * SITE_VERTS;
@@ -680,66 +853,123 @@ export class LakeWater {
         if (nx < 0 || nz < 0 || nx > SITE_CELLS || nz > SITE_CELLS) continue;
         const next = nx * SITE_VERTS + nz;
         if (this.seen[next] !== 0) continue;
-        push(next, Math.max(level, this.heights[next]!));
+        this.heapPush(next, Math.max(level, this.heights[next]!));
       }
+      if (performance.now() >= deadlineMs) return;
     }
+    this.phase = 'pooling';
+  }
 
+  private heapPush(cell: number, level: number): void {
+    this.seen[cell] = 1;
+    let i = this.heapSize++;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.heapKey[parent]! <= level) break;
+      this.heapKey[i] = this.heapKey[parent]!;
+      this.heapCell[i] = this.heapCell[parent]!;
+      i = parent;
+    }
+    this.heapKey[i] = level;
+    this.heapCell[i] = cell;
+  }
+
+  /** Pops the lowest cell, leaving its own level in `poppedLevel`. */
+  private heapPop(): number {
+    const top = this.heapCell[0]!;
+    this.poppedLevel = this.heapKey[0]!;
+    this.heapSize--;
+    if (this.heapSize > 0) {
+      const key = this.heapKey[this.heapSize]!;
+      const cell = this.heapCell[this.heapSize]!;
+      let i = 0;
+      for (;;) {
+        const left = i * 2 + 1;
+        if (left >= this.heapSize) break;
+        const right = left + 1;
+        const child =
+          right < this.heapSize && this.heapKey[right]! < this.heapKey[left]! ? right : left;
+        if (this.heapKey[child]! >= key) break;
+        this.heapKey[i] = this.heapKey[child]!;
+        this.heapCell[i] = this.heapCell[child]!;
+        i = child;
+      }
+      this.heapKey[i] = key;
+      this.heapCell[i] = cell;
+    }
+    return top;
   }
 
   /**
-   * Picks the biggest connected pool out of the filled depressions and makes it the lake.
+   * Picks the biggest connected pool out of the filled depressions and makes it the lake,
+   * and reports whether every pool has been weighed.
    *
    * Biggest by AREA, not by depth: a deep narrow slot reads as a puddle from the road
    * whatever its bottom is doing, and the window usually holds several hollows at once.
+   * The scan, the flood and the wet marking each keep their cursor, so a slice can end in
+   * the middle of any of them.
    */
-  private keepLargestPool(drain: Float32Array): boolean {
-    this.seen.fill(0);
-    let bestCount = 0;
-    let bestLevel = 0;
-    let bestFloor = 0;
-
-    for (let start = 0; start < SITE_POINTS; start++) {
-      if (this.seen[start] !== 0 || drain[start]! <= this.heights[start]!) continue;
-      // One pool: every connected cell standing under the same drain level.
-      let head = 0;
-      let tail = 0;
-      this.seen[start] = 1;
-      this.absorbed[tail++] = start;
-      let floor = this.heights[start]!;
-      let lip = drain[start]!;
-      while (head < tail) {
-        const cell = this.absorbed[head++]!;
-        if (this.heights[cell]! < floor) floor = this.heights[cell]!;
-        if (drain[cell]! > lip) lip = drain[cell]!;
-        const ix = (cell / SITE_VERTS) | 0;
-        const iz = cell - ix * SITE_VERTS;
-        for (let n = 0; n < 4; n++) {
-          const nx = ix + (n === 0 ? -1 : n === 1 ? 1 : 0);
-          const nz = iz + (n === 2 ? -1 : n === 3 ? 1 : 0);
-          if (nx < 0 || nz < 0 || nx > SITE_CELLS || nz > SITE_CELLS) continue;
-          const next = nx * SITE_VERTS + nz;
-          if (this.seen[next] !== 0 || drain[next]! <= this.heights[next]!) continue;
-          this.seen[next] = 1;
-          this.absorbed[tail++] = next;
-        }
-      }
-      if (tail > bestCount) {
-        bestCount = tail;
-        bestLevel = lip;
-        bestFloor = floor;
-      }
+  private keepLargestPool(deadlineMs: number): boolean {
+    const drain = this.drainLevel;
+    if (!this.poolReset) {
+      this.seen.fill(0);
+      this.poolReset = true;
     }
-    if (bestCount === 0) return false;
+    while (true) {
+      if (this.poolHead < this.poolTail) {
+        while (this.poolHead < this.poolTail) {
+          const cell = this.absorbed[this.poolHead++]!;
+          if (this.heights[cell]! < this.poolFloor) this.poolFloor = this.heights[cell]!;
+          if (drain[cell]! > this.poolLip) this.poolLip = drain[cell]!;
+          const ix = (cell / SITE_VERTS) | 0;
+          const iz = cell - ix * SITE_VERTS;
+          for (let n = 0; n < 4; n++) {
+            const nx = ix + (n === 0 ? -1 : n === 1 ? 1 : 0);
+            const nz = iz + (n === 2 ? -1 : n === 3 ? 1 : 0);
+            if (nx < 0 || nz < 0 || nx > SITE_CELLS || nz > SITE_CELLS) continue;
+            const next = nx * SITE_VERTS + nz;
+            if (this.seen[next] !== 0 || drain[next]! <= this.heights[next]!) continue;
+            this.seen[next] = 1;
+            this.absorbed[this.poolTail++] = next;
+          }
+          if (performance.now() >= deadlineMs) return false;
+        }
+        if (this.poolTail > this.bestCount) {
+          this.bestCount = this.poolTail;
+          this.bestLevel = this.poolLip;
+          this.bestFloor = this.poolFloor;
+        }
+        this.poolHead = 0;
+        this.poolTail = 0;
+        continue;
+      }
+      if (this.poolScan >= SITE_POINTS) break;
+      const start = this.poolScan++;
+      if (this.seen[start] !== 0 || drain[start]! <= this.heights[start]!) {
+        if (performance.now() >= deadlineMs) return false;
+        continue;
+      }
+      // One pool: every connected cell standing under the same drain level.
+      this.seen[start] = 1;
+      this.absorbed[0] = start;
+      this.poolHead = 0;
+      this.poolTail = 1;
+      this.poolFloor = this.heights[start]!;
+      this.poolLip = drain[start]!;
+    }
+    if (this.bestCount === 0) return true;
 
-    // Capped, because a broad shallow depression can accept far more than a lake's worth
-    // before it spills and would flood the whole window.
-    this.floorY = bestFloor;
-    this.waterY = Math.min(bestLevel, bestFloor + MAX_FILL_M);
-
-    this.wet.fill(0);
-    this.wetCells = 0;
-    this.wetRadius = 0;
-    for (let vi = 0; vi < SITE_POINTS; vi++) {
+    if (this.wetCursor === 0) {
+      // Capped, because a broad shallow depression can accept far more than a lake's worth
+      // before it spills and would flood the whole window.
+      this.floorY = this.bestFloor;
+      this.waterY = Math.min(this.bestLevel, this.bestFloor + MAX_FILL_M);
+      this.wet.fill(0);
+      this.wetCells = 0;
+      this.wetRadius = 0;
+    }
+    while (this.wetCursor < SITE_POINTS) {
+      const vi = this.wetCursor++;
       if (drain[vi]! <= this.heights[vi]! || this.heights[vi]! >= this.waterY) continue;
       this.wet[vi] = 1;
       this.wetCells++;
@@ -747,10 +977,9 @@ export class LakeWater {
       const iz = vi - ix * SITE_VERTS;
       const r = Math.hypot(ix * SITE_STEP_M - SITE_REACH_M, iz * SITE_STEP_M - SITE_REACH_M);
       if (r > this.wetRadius) this.wetRadius = r;
+      if (performance.now() >= deadlineMs) return false;
     }
-
-    const area = this.wetCells * SITE_STEP_M * SITE_STEP_M;
-    return area >= MIN_LAKE_AREA_M2 && this.waterY - this.floorY >= MIN_LAKE_DEPTH_M;
+    return true;
   }
 
   /**
@@ -758,126 +987,125 @@ export class LakeWater {
    * chamfer transform.
    *
    * This is what lets the approach fade key off the WATERLINE rather than off the site
-   * centre. A shoreline cut against real dunes is not a circle — it has bays and spits
-   * tens of metres deep — and a radial test would make the water vanish while the player
-   * was still a hundred metres from it on one bearing and let them drive into it on
-   * another.
+   * centre. A shoreline cut against real dunes is not a circle — it has bays and spits tens
+   * of metres deep — and a radial test would make the water vanish while the player was
+   * still a hundred metres from it on one bearing and let them drive into it on another.
    */
-  private buildEdgeDistanceForward(): void {
+  private buildEdgeDistanceForward(deadlineMs: number): void {
     const far = SITE_REACH_M * 4;
     const orth = SITE_STEP_M;
     const diag = SITE_STEP_M * Math.SQRT2;
-    for (let vi = 0; vi < SITE_POINTS; vi++) {
-      this.edgeDistance[vi] = this.wet[vi] !== 0 ? 0 : far;
-    }
-    for (let ix = 0; ix < SITE_VERTS; ix++) {
-      for (let iz = 0; iz < SITE_VERTS; iz++) {
-        const vi = ix * SITE_VERTS + iz;
-        let best = this.edgeDistance[vi]!;
-        if (ix > 0) best = Math.min(best, this.edgeDistance[vi - SITE_VERTS]! + orth);
-        if (iz > 0) best = Math.min(best, this.edgeDistance[vi - 1]! + orth);
-        if (ix > 0 && iz > 0) best = Math.min(best, this.edgeDistance[vi - SITE_VERTS - 1]! + diag);
-        if (ix > 0 && iz < SITE_CELLS) {
-          best = Math.min(best, this.edgeDistance[vi - SITE_VERTS + 1]! + diag);
-        }
-        this.edgeDistance[vi] = best;
+    if (this.scanCursor === 0) {
+      for (let vi = 0; vi < SITE_POINTS; vi++) {
+        this.edgeDistance[vi] = this.wet[vi] !== 0 ? 0 : far;
       }
     }
+    while (this.scanCursor < SITE_POINTS) {
+      const vi = this.scanCursor++;
+      const ix = (vi / SITE_VERTS) | 0;
+      const iz = vi - ix * SITE_VERTS;
+      let best = this.edgeDistance[vi]!;
+      if (ix > 0) best = Math.min(best, this.edgeDistance[vi - SITE_VERTS]! + orth);
+      if (iz > 0) best = Math.min(best, this.edgeDistance[vi - 1]! + orth);
+      if (ix > 0 && iz > 0) best = Math.min(best, this.edgeDistance[vi - SITE_VERTS - 1]! + diag);
+      if (ix > 0 && iz < SITE_CELLS) {
+        best = Math.min(best, this.edgeDistance[vi - SITE_VERTS + 1]! + diag);
+      }
+      this.edgeDistance[vi] = best;
+      if (performance.now() >= deadlineMs) return;
+    }
+    this.phase = 'measuring2';
   }
 
-  /** The backward half. Its own slice: the pair together measured 2.88 ms of a 3 ms budget. */
-  private buildEdgeDistanceBackward(): void {
+  /** The backward half. */
+  private buildEdgeDistanceBackward(deadlineMs: number): void {
     const orth = SITE_STEP_M;
     const diag = SITE_STEP_M * Math.SQRT2;
-    for (let ix = SITE_VERTS - 1; ix >= 0; ix--) {
-      for (let iz = SITE_VERTS - 1; iz >= 0; iz--) {
-        const vi = ix * SITE_VERTS + iz;
-        let best = this.edgeDistance[vi]!;
-        if (ix < SITE_CELLS) best = Math.min(best, this.edgeDistance[vi + SITE_VERTS]! + orth);
-        if (iz < SITE_CELLS) best = Math.min(best, this.edgeDistance[vi + 1]! + orth);
-        if (ix < SITE_CELLS && iz < SITE_CELLS) {
-          best = Math.min(best, this.edgeDistance[vi + SITE_VERTS + 1]! + diag);
-        }
-        if (ix < SITE_CELLS && iz > 0) {
-          best = Math.min(best, this.edgeDistance[vi + SITE_VERTS - 1]! + diag);
-        }
-        this.edgeDistance[vi] = best;
+    if (this.scanCursor === 0) this.scanCursor = SITE_POINTS;
+    while (this.scanCursor > 0) {
+      const vi = --this.scanCursor;
+      const ix = (vi / SITE_VERTS) | 0;
+      const iz = vi - ix * SITE_VERTS;
+      let best = this.edgeDistance[vi]!;
+      if (ix < SITE_CELLS) best = Math.min(best, this.edgeDistance[vi + SITE_VERTS]! + orth);
+      if (iz < SITE_CELLS) best = Math.min(best, this.edgeDistance[vi + 1]! + orth);
+      if (ix < SITE_CELLS && iz < SITE_CELLS) {
+        best = Math.min(best, this.edgeDistance[vi + SITE_VERTS + 1]! + diag);
       }
+      if (ix < SITE_CELLS && iz > 0) {
+        best = Math.min(best, this.edgeDistance[vi + SITE_VERTS - 1]! + diag);
+      }
+      this.edgeDistance[vi] = best;
+      if (performance.now() >= deadlineMs) return;
     }
+    this.scanCursor = 0;
+    this.phase = 'baking';
   }
-
 
   /** Positions, wave UVs and the baked RGBA shoreline for the filled sheet. */
-  private bakeVertices(fromX: number, toX: number): void {
-    const { deep, shallow, foam } = waterPaletteAt(this.siteList[this.siteIndex]!.s);
+  private bakeVertices(deadlineMs: number): boolean {
+    const { deep, shallow, foam } = waterPaletteAt(this.searchSite!.s);
     const startX = this.centreX - SITE_REACH_M;
     const startZ = this.centreZ - SITE_REACH_M;
+    while (this.bakeCursor < SITE_POINTS) {
+      const vi = this.bakeCursor++;
+      const ix = (vi / SITE_VERTS) | 0;
+      const iz = vi - ix * SITE_VERTS;
+      this.positions[vi * 3] = -SITE_REACH_M + ix * SITE_STEP_M;
+      this.positions[vi * 3 + 1] = this.waterY;
+      this.positions[vi * 3 + 2] = -SITE_REACH_M + iz * SITE_STEP_M;
+      // UVs from ABSOLUTE world position, so the wave field does not slide when the
+      // floating origin moves (world/origin.ts).
+      this.uvs[vi * 2] = (startX + ix * SITE_STEP_M) / WAVE_TILE_METRES;
+      this.uvs[vi * 2 + 1] = (startZ + iz * SITE_STEP_M) / WAVE_TILE_METRES;
 
-    for (let ix = fromX; ix < toX; ix++) {
-      const localX = -SITE_REACH_M + ix * SITE_STEP_M;
-      for (let iz = 0; iz < SITE_VERTS; iz++) {
-        const vi = ix * SITE_VERTS + iz;
-        const localZ = -SITE_REACH_M + iz * SITE_STEP_M;
-        this.positions[vi * 3] = localX;
-        this.positions[vi * 3 + 1] = this.waterY;
-        this.positions[vi * 3 + 2] = localZ;
-        // UVs from ABSOLUTE world position, so the wave field does not slide when the
-        // floating origin moves (world/origin.ts).
-        this.uvs[vi * 2] = (startX + ix * SITE_STEP_M) / WAVE_TILE_METRES;
-        this.uvs[vi * 2 + 1] = (startZ + iz * SITE_STEP_M) / WAVE_TILE_METRES;
-
-        const depth = this.wet[vi] !== 0 ? this.waterY - this.heights[vi]! : 0;
-        const shore = smoothstep(0, SHORE_FADE_M, depth);
-        const deepness = smoothstep(0, DEEP_FULL_M, depth);
-        const surf = (1 - smoothstep(0, FOAM_BAND_M, depth)) * shore;
-        const tint = FOAM_STRENGTH * surf;
-        const o = vi * 4;
-        this.colours[o] =
-          (shallow.r + (deep.r - shallow.r) * deepness) * (1 - tint) + foam.r * tint;
-        this.colours[o + 1] =
-          (shallow.g + (deep.g - shallow.g) * deepness) * (1 - tint) + foam.g * tint;
-        this.colours[o + 2] =
-          (shallow.b + (deep.b - shallow.b) * deepness) * (1 - tint) + foam.b * tint;
-        this.colours[o + 3] = Math.min(
-          1,
-          shore * (ALPHA_SHALLOW + ALPHA_DEEP_GAIN * deepness) + surf * FOAM_ALPHA,
-        );
-      }
+      const depth = this.wet[vi] !== 0 ? this.waterY - this.heights[vi]! : 0;
+      const shore = smoothstep(0, SHORE_FADE_M, depth);
+      const deepness = smoothstep(0, DEEP_FULL_M, depth);
+      const surf = (1 - smoothstep(0, FOAM_BAND_M, depth)) * shore;
+      const tint = FOAM_STRENGTH * surf;
+      const o = vi * 4;
+      this.colours[o] =
+        (shallow.r + (deep.r - shallow.r) * deepness) * (1 - tint) + foam.r * tint;
+      this.colours[o + 1] =
+        (shallow.g + (deep.g - shallow.g) * deepness) * (1 - tint) + foam.g * tint;
+      this.colours[o + 2] =
+        (shallow.b + (deep.b - shallow.b) * deepness) * (1 - tint) + foam.b * tint;
+      this.colours[o + 3] = Math.min(
+        1,
+        shore * (ALPHA_SHALLOW + ALPHA_DEEP_GAIN * deepness) + surf * FOAM_ALPHA,
+      );
+      if (performance.now() >= deadlineMs) return false;
     }
-
+    return true;
   }
 
-  private bakeQuads(): void {
-    // Only quads with a wet corner are drawn: the dry part of the window never reaches
-    // the index buffer, so the draw is the lake and not the box it was cut from.
-    let io = 0;
-    for (let ix = 0; ix < SITE_CELLS; ix++) {
-      for (let iz = 0; iz < SITE_CELLS; iz++) {
+  /** The indices: only quads with a wet corner, so the draw is the lake, not its box. */
+  private bakeQuads(deadlineMs: number): boolean {
+    while (this.quadRow < SITE_CELLS) {
+      const ix = this.quadRow;
+      while (this.quadCol < SITE_CELLS) {
+        // Checked before the quad is taken, so a stopped slice resumes on the same quad.
+        if (performance.now() >= deadlineMs) return false;
+        const iz = this.quadCol++;
         const a = ix * SITE_VERTS + iz;
         const b = (ix + 1) * SITE_VERTS + iz;
         const c = a + 1;
         const d = b + 1;
-        if (this.wet[a] === 0 && this.wet[b] === 0 && this.wet[c] === 0 && this.wet[d] === 0) {
-          continue;
+        if (this.wet[a] !== 0 || this.wet[b] !== 0 || this.wet[c] !== 0 || this.wet[d] !== 0) {
+          this.indices[this.indexCount++] = a;
+          this.indices[this.indexCount++] = c;
+          this.indices[this.indexCount++] = b;
+          this.indices[this.indexCount++] = b;
+          this.indices[this.indexCount++] = c;
+          this.indices[this.indexCount++] = d;
         }
-        this.indices[io++] = a;
-        this.indices[io++] = c;
-        this.indices[io++] = b;
-        this.indices[io++] = b;
-        this.indices[io++] = c;
-        this.indices[io++] = d;
       }
+      this.quadCol = 0;
+      this.quadRow++;
     }
-    this.triangles = io / 3;
-    this.geometry.setDrawRange(0, io);
-    this.geometry.getAttribute('position').needsUpdate = true;
-    this.geometry.getAttribute('uv').needsUpdate = true;
-    this.geometry.getAttribute('color').needsUpdate = true;
-    this.geometry.index!.needsUpdate = true;
-    this.geometry.boundingSphere = new THREE.Sphere(
-      new THREE.Vector3(0, this.waterY, 0),
-      SITE_REACH_M * Math.SQRT2,
-    );
+    this.triangles = this.indexCount / 3;
+    return true;
   }
 
   /**
@@ -888,12 +1116,12 @@ export class LakeWater {
    * grass then follows every bay and spit, which is the whole reason the boundary was
    * worth knowing exactly.
    */
-  private findShore(): void {
-    this.shoreCount = 0;
-    for (let ix = 0; ix < SITE_VERTS; ix++) {
-      for (let iz = 0; iz < SITE_VERTS; iz++) {
-        const vi = ix * SITE_VERTS + iz;
-        if (this.wet[vi] !== 0) continue;
+  private findShore(deadlineMs: number): void {
+    while (this.shoreCursor < SITE_POINTS) {
+      const vi = this.shoreCursor++;
+      const ix = (vi / SITE_VERTS) | 0;
+      const iz = vi - ix * SITE_VERTS;
+      if (this.wet[vi] === 0) {
         const wetNeighbour =
           (ix > 0 && this.wet[vi - SITE_VERTS] !== 0) ||
           (ix < SITE_CELLS && this.wet[vi + SITE_VERTS] !== 0) ||
@@ -901,17 +1129,65 @@ export class LakeWater {
           (iz < SITE_CELLS && this.wet[vi + 1] !== 0);
         if (wetNeighbour) this.shore[this.shoreCount++] = vi;
       }
+      if (performance.now() >= deadlineMs) return;
     }
-
+    this.shoreCursor = 0;
+    this.phase = 'planting2';
   }
 
-  private plantGrass(): void {
-    this.fill(this.grass, MAX_GRASS, GRASS_PER_CELL, 0, GRASS_HEIGHT, GRASS_JITTER_M, GRASS_TINT);
+  private plantGrass(deadlineMs: number): boolean {
+    if (!this.sheet) this.sheet = new BasinSheet(this.searchSite!);
+    const done = this.fill(
+      this.sheet.grass,
+      MAX_GRASS,
+      GRASS_PER_CELL,
+      0,
+      GRASS_HEIGHT,
+      GRASS_JITTER_M,
+      GRASS_TINT,
+      deadlineMs,
+    );
+    if (done) this.plantCursor = 0;
+    return done;
   }
 
-  private plantWoody(): void {
-    this.fill(this.palms, MAX_PALMS, PALMS_PER_CELL, 1, PALM_HEIGHT, PLANT_JITTER_M, PALM_TINT);
-    this.fill(this.trees, MAX_TREES, TREES_PER_CELL, 2, TREE_HEIGHT, PLANT_JITTER_M, TREE_TINT);
+  private plantWoody(deadlineMs: number): boolean {
+    const sheet = this.sheet;
+    if (!sheet) return true;
+    const palmQuota = this.quotaFor(MAX_PALMS, PALMS_PER_CELL);
+    const treeQuota = this.quotaFor(MAX_TREES, TREES_PER_CELL);
+    while (this.plantCursor < palmQuota + treeQuota) {
+      const i = this.plantCursor;
+      if (i < palmQuota) {
+        this.plantOne(sheet.palms, i, 1, PALM_HEIGHT, PLANT_JITTER_M, PALM_TINT);
+      } else {
+        this.plantOne(sheet.trees, i - palmQuota, 2, TREE_HEIGHT, PLANT_JITTER_M, TREE_TINT);
+      }
+      this.plantCursor++;
+      if (performance.now() >= deadlineMs) return false;
+    }
+    if (palmQuota > 0) {
+      sheet.palms.count = palmQuota;
+      sheet.palms.instanceMatrix.needsUpdate = true;
+      if (sheet.palms.instanceColor) sheet.palms.instanceColor.needsUpdate = true;
+    } else {
+      sheet.palms.count = 0;
+    }
+    if (treeQuota > 0) {
+      sheet.trees.count = treeQuota;
+      sheet.trees.instanceMatrix.needsUpdate = true;
+      if (sheet.trees.instanceColor) sheet.trees.instanceColor.needsUpdate = true;
+    } else {
+      sheet.trees.count = 0;
+    }
+    sheet.shoreCount = this.shoreCount;
+    return true;
+  }
+
+  /** Scaled to the shore there is, so a small lake gets a small fringe rather than a pile. */
+  private quotaFor(ceiling: number, perCell: number): number {
+    if (this.shoreCount === 0) return 0;
+    return Math.round(Math.min(ceiling, Math.max(1, this.shoreCount * perCell)));
   }
 
   private fill(
@@ -922,110 +1198,185 @@ export class LakeWater {
     heightBand: readonly [number, number],
     jitter: number,
     tint: THREE.Color,
-  ): void {
-    if (this.shoreCount === 0) {
+    deadlineMs: number,
+  ): boolean {
+    const quota = this.quotaFor(ceiling, perCell);
+    if (quota === 0) {
       mesh.count = 0;
-      return;
+      return true;
     }
-    // Scaled to the shore there actually is, so a small lake gets a small fringe rather
-    // than the same quota standing several deep in one cell.
-    const quota = Math.round(Math.min(ceiling, Math.max(1, this.shoreCount * perCell)));
-    const seed = this.context.seed;
-    for (let i = 0; i < quota; i++) {
-      const key = this.siteIndex * 8192 + form * 2048 + i;
-      const pick = Math.floor(hashUnit3(seed, key, SALT_PLANT) * this.shoreCount);
-      const cell = this.shore[Math.min(this.shoreCount - 1, pick)]!;
-      const ix = (cell / SITE_VERTS) | 0;
-      const iz = cell - ix * SITE_VERTS;
-      const localX =
-        -SITE_REACH_M + ix * SITE_STEP_M + (hashUnit3(seed, key, SALT_PLANT + 1) - 0.5) * 2 * jitter;
-      const localZ =
-        -SITE_REACH_M + iz * SITE_STEP_M + (hashUnit3(seed, key, SALT_PLANT + 2) - 0.5) * 2 * jitter;
-      // Its own cell's ground, not a fresh terrain sample: the fringe has to stand on the
-      // same surface the shoreline was cut against or it floats above the water.
-      const ground = Math.max(this.heights[cell]!, this.waterY);
-      const height =
-        heightBand[0] + hashUnit3(seed, key, SALT_SHAPE) * (heightBand[1] - heightBand[0]);
-      const width = height * (0.82 + hashUnit3(seed, key, SALT_SHAPE + 1) * 0.36);
-      const yaw = hashUnit3(seed, key, SALT_SHAPE + 2) * Math.PI;
-
-      this.euler.set(0, yaw, 0);
-      this.quaternion.setFromEuler(this.euler);
-      this.scratchPosition.set(localX, ground, localZ);
-      this.scratchScale.set(width, height, width);
-      this.matrix.compose(this.scratchPosition, this.quaternion, this.scratchScale);
-      mesh.setMatrixAt(i, this.matrix);
-      // The instance colour MULTIPLIES the card palette, so it is a tint near white
-      // rather than a second base colour (see mirage-tableau.ts).
-      this.colour.copy(tint).multiplyScalar(0.9 + hashUnit3(seed, key, SALT_COLOUR) * 0.2);
-      mesh.setColorAt(i, this.colour);
+    while (this.plantCursor < quota) {
+      this.plantOne(mesh, this.plantCursor, form, heightBand, jitter, tint);
+      this.plantCursor++;
+      if (performance.now() >= deadlineMs) return false;
     }
     mesh.count = quota;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    return true;
+  }
+
+  private plantOne(
+    mesh: THREE.InstancedMesh,
+    i: number,
+    form: number,
+    heightBand: readonly [number, number],
+    jitter: number,
+    tint: THREE.Color,
+  ): void {
+    const seed = this.context.seed;
+    const key = this.searchSite!.index * 8192 + form * 2048 + i;
+    const pick = Math.floor(hashUnit3(seed, key, SALT_PLANT) * this.shoreCount);
+    const cell = this.shore[Math.min(this.shoreCount - 1, pick)]!;
+    const ix = (cell / SITE_VERTS) | 0;
+    const iz = cell - ix * SITE_VERTS;
+    const localX =
+      -SITE_REACH_M + ix * SITE_STEP_M + (hashUnit3(seed, key, SALT_PLANT + 1) - 0.5) * 2 * jitter;
+    const localZ =
+      -SITE_REACH_M + iz * SITE_STEP_M + (hashUnit3(seed, key, SALT_PLANT + 2) - 0.5) * 2 * jitter;
+    // Its own cell's ground, not a fresh terrain sample: the fringe has to stand on the
+    // same surface the shoreline was cut against or it floats above the water.
+    const ground = Math.max(this.heights[cell]!, this.waterY);
+    const height =
+      heightBand[0] + hashUnit3(seed, key, SALT_SHAPE) * (heightBand[1] - heightBand[0]);
+    const width = height * (0.82 + hashUnit3(seed, key, SALT_SHAPE + 1) * 0.36);
+    const yaw = hashUnit3(seed, key, SALT_SHAPE + 2) * Math.PI;
+
+    this.euler.set(0, yaw, 0);
+    this.quaternion.setFromEuler(this.euler);
+    this.scratchPosition.set(localX, ground, localZ);
+    this.scratchScale.set(width, height, width);
+    this.matrix.compose(this.scratchPosition, this.quaternion, this.scratchScale);
+    mesh.setMatrixAt(i, this.matrix);
+    // The instance colour MULTIPLIES the card palette, so it is a tint near white
+    // rather than a second base colour (see mirage-tableau.ts).
+    this.colour.copy(tint).multiplyScalar(0.9 + hashUnit3(seed, key, SALT_COLOUR) * 0.2);
+    mesh.setColorAt(i, this.colour);
+  }
+
+  /**
+   * The search is over: the scratch lattices become a sheet of their own.
+   *
+   * A COPY, and the copy is the point. The search's buffers are reused for the next basin,
+   * so a settled basin has to own what it draws. Done here rather than at `beginSearch`
+   * because two of every three sites hold no hollow worth filling, and a basin with no
+   * water must cost nothing but the sampling.
+   */
+  private finishSheet(): void {
+    const site = this.searchSite!;
+    const sheet = this.sheet ?? new BasinSheet(site);
+    this.sheet = null;
+    sheet.positions.set(this.positions);
+    sheet.uvs.set(this.uvs);
+    sheet.colours.set(this.colours);
+    sheet.heights.set(this.heights);
+    sheet.wet.set(this.wet);
+    sheet.edgeDistance.set(this.edgeDistance);
+    sheet.indices = this.indices.slice(0, this.indexCount);
+    sheet.centreX = this.centreX;
+    sheet.centreZ = this.centreZ;
+    sheet.waterY = this.waterY;
+    sheet.floorY = this.floorY;
+    sheet.triangles = this.triangles;
+    sheet.wetCells = this.wetCells;
+    sheet.wetRadius = this.wetRadius;
+    sheet.geometry.setIndex(new THREE.BufferAttribute(sheet.indices, 1));
+    sheet.geometry.setDrawRange(0, this.indexCount);
+    sheet.geometry.getAttribute('position').needsUpdate = true;
+    sheet.geometry.getAttribute('uv').needsUpdate = true;
+    sheet.geometry.getAttribute('color').needsUpdate = true;
+    sheet.geometry.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3(0, this.waterY, 0),
+      SITE_REACH_M * Math.SQRT2,
+    );
+    sheet.place(this.origin.x, this.origin.z);
+    this.sheets.get(site.index)?.dispose();
+    this.sheets.set(site.index, sheet);
+    this.root.visible = true;
+    this.root.add(sheet.group);
   }
 
   /** Diagnostics for `tools/water.ts` and the dev handle. */
   get ready(): boolean {
-    return this.phase === 'ready';
+    if (this.searchSite !== null) return this.sheets.has(this.searchSite.index);
+    const site = this.siteNearest(this.lastPlayerS);
+    return site !== null && this.sheets.has(site.index);
   }
   get phaseName(): string {
-    return this.phase;
+    if (this.searchSite !== null) {
+      return this.sheets.has(this.searchSite.index) ? 'ready' : this.phase;
+    }
+    const site = this.siteNearest(this.lastPlayerS);
+    if (site !== null && this.sheets.has(site.index)) return 'ready';
+    if (this.lastDry !== null && (site === null || site.index === this.lastDry.index)) return 'dry';
+    return this.sheets.size > 0 ? 'ready' : 'idle';
   }
   get triangleCount(): number {
-    return this.triangles;
+    return this.primarySheet()?.triangles ?? this.triangles;
   }
   get waterLevel(): number {
-    return this.waterY;
+    return this.primarySheet()?.waterY ?? this.waterY;
   }
   /** Lowest ground in the searched window: the bottom of the hollow being filled. */
   get floorLevel(): number {
-    return this.floorY;
+    return this.primarySheet()?.floorY ?? this.floorY;
   }
   get wetCellCount(): number {
-    return this.wetCells;
+    return this.primarySheet()?.wetCells ?? this.wetCells;
   }
   /** Radius of the furthest water from the window centre, metres. */
   get wetRadiusM(): number {
-    return this.wetRadius;
+    return this.primarySheet()?.wetRadius ?? this.wetRadius;
   }
   get shorelineCells(): number {
-    return this.shoreCount;
+    return this.primarySheet()?.shoreCount ?? this.shoreCount;
   }
   get fringeCount(): number {
-    return this.grass.count + this.palms.count + this.trees.count;
+    const sheet = this.primarySheet();
+    if (!sheet) return 0;
+    return sheet.grass.count + sheet.palms.count + sheet.trees.count;
   }
   get currentOpacity(): number {
-    return this.opacity;
+    let best = 0;
+    for (const sheet of this.sheets.values()) {
+      if (sheet.opacity > best) best = sheet.opacity;
+    }
+    return best;
   }
   get centre(): { readonly x: number; readonly z: number } {
-    return { x: this.centreX, z: this.centreZ };
+    const sheet = this.primarySheet();
+    return sheet ? { x: sheet.centreX, z: sheet.centreZ } : { x: this.centreX, z: this.centreZ };
+  }
+  /** Basins holding water at once: two is a lake beside a village pond. */
+  get liveSheetCount(): number {
+    return this.sheets.size;
   }
   /**
    * A place to stand and look at the lake: on the road side of the water, back from the
    * shore, on ground that is above the surface.
    *
    * The lake sits wherever the hollow was, which is rarely the middle of the window, and
-   * the hollow keeps going past the shoreline — so neither the window's centre nor a
-   * fixed radius finds solid ground with a view. This walks out from the water's centre
-   * toward the road and stops at the first lattice point that stands clear of the surface
-   * and clear of the approach fade. Only the dev jump in app/devtools.ts uses it.
+   * the hollow keeps going past the shoreline — so neither the window's centre nor a fixed
+   * radius finds solid ground with a view. This walks out from the water's centre toward
+   * the road and stops at the first lattice point that stands clear of the surface and
+   * clear of the approach fade. Only the dev jump in app/devtools.ts uses it.
    */
   viewpoint(): { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number } | null {
-    if (this.phase !== 'ready') return null;
+    const sheet = this.primarySheet();
+    if (!sheet) return null;
     let wet = 0;
     let sumX = 0;
     let sumZ = 0;
     for (let vi = 0; vi < SITE_POINTS; vi++) {
-      if (this.wet[vi] === 0) continue;
+      if (sheet.wet[vi] === 0) continue;
       wet++;
       sumX += -SITE_REACH_M + (((vi / SITE_VERTS) | 0) * SITE_STEP_M);
       sumZ += -SITE_REACH_M + ((vi % SITE_VERTS) * SITE_STEP_M);
     }
     if (wet === 0) return null;
-    const waterX = this.centreX + sumX / wet;
-    const waterZ = this.centreZ + sumZ / wet;
-    const road = this.context.road.sampleAt(this.siteList[this.siteIndex]!.s);
+    const waterX = sheet.centreX + sumX / wet;
+    const waterZ = sheet.centreZ + sumZ / wet;
+    const road = this.context.road.sampleAt(sheet.site.s);
     const dirX = road.x - waterX;
     const dirZ = road.z - waterZ;
     const span = Math.hypot(dirX, dirZ) || 1;
@@ -1033,23 +1384,23 @@ export class LakeWater {
     for (let out = VIEWPOINT_STANDOFF_M; out <= SITE_REACH_M * 2; out += SITE_STEP_M) {
       const x = waterX + (dirX / span) * out;
       const z = waterZ + (dirZ / span) * out;
-      const localX = x - this.centreX;
-      const localZ = z - this.centreZ;
+      const localX = x - sheet.centreX;
+      const localZ = z - sheet.centreZ;
       if (Math.abs(localX) > SITE_REACH_M || Math.abs(localZ) > SITE_REACH_M) break;
       const ix = Math.round((localX + SITE_REACH_M) / SITE_STEP_M);
       const iz = Math.round((localZ + SITE_REACH_M) / SITE_STEP_M);
-      const groundY = this.heights[ix * SITE_VERTS + iz]!;
-      if (groundY < this.waterY + EYE_ABOVE_WATER_M) continue;
-      if (this.edgeDistance[ix * SITE_VERTS + iz]! <= VIEWPOINT_STANDOFF_M * 0.5) continue;
+      const groundY = sheet.heights[ix * SITE_VERTS + iz]!;
+      if (groundY < sheet.waterY + EYE_ABOVE_WATER_M) continue;
+      if (sheet.edgeDistance[ix * SITE_VERTS + iz]! <= VIEWPOINT_STANDOFF_M * 0.5) continue;
       return { x, y: groundY, z, yaw: Math.atan2(waterX - x, waterZ - z) };
     }
     return null;
   }
   get wetMask(): Uint8Array {
-    return this.wet;
+    return this.primarySheet()?.wet ?? this.wet;
   }
   get siteHeights(): Float32Array {
-    return this.heights;
+    return this.primarySheet()?.heights ?? this.heights;
   }
   static get lattice(): {
     readonly reach: number;
@@ -1073,17 +1424,20 @@ export class LakeWater {
   beginSiteForTest(site: LakeSite): void {
     this.beginSearch(site);
   }
-  /** Runs exactly one slice and reports whether the site has settled. */
-  advanceForTest(): boolean {
-    if (this.phase !== 'ready' && this.phase !== 'dry') this.advance();
+  /**
+   * Runs exactly one slice and reports whether the site has settled.
+   *
+   * The deadline is the caller's: `tools/water.ts` passes the scheduler's own budget, so
+   * the slice it measures is the slice the game runs.
+   */
+  advanceForTest(deadlineMs = performance.now() + SLICE_BUDGET_MS): boolean {
+    if (this.phase !== 'ready' && this.phase !== 'dry') this.advance(deadlineMs);
     return this.phase === 'ready' || this.phase === 'dry';
   }
 
   dispose(): void {
-    this.geometry.dispose();
-    this.water.dispose();
-    for (const mesh of [this.grass, this.palms, this.trees]) mesh.geometry.dispose();
-    for (const material of this.fringeMaterials) material.dispose();
+    for (const sheet of this.sheets.values()) sheet.dispose();
+    this.sheets.clear();
     this.root.removeFromParent();
   }
 }

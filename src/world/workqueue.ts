@@ -50,7 +50,17 @@ export class WorldWorkScheduler {
     this.frameWorstTag = null;
   }
 
-  tryRun(frameId: number, tag: string, work: () => void): boolean {
+  /**
+   * Runs one job if the frame's budget admits it.
+   *
+   * The job is handed the ABSOLUTE DEADLINE its slice must end by, so a stage that is
+   * made of many small units — the 76-point rows of a lake search, say — can stop where
+   * the budget ends instead of guessing how many units fit. A job that ignores the
+   * argument is still bounded by the frame's total, but only in units as coarse as its
+   * own loop: the lake's sampling row measured 1.3-3.6 ms by itself against a 3 ms
+   * budget, so the coarse version overran every time.
+   */
+  tryRun(frameId: number, tag: string, work: (deadlineMs: number) => void): boolean {
     this.beginFrame(frameId);
     if (this.workMs >= this.budgetMs || this.jobsRun >= this.maxJobsPerFrame) return false;
 
@@ -59,7 +69,7 @@ export class WorldWorkScheduler {
     this.jobsRun++;
     this.lastTag = tag;
     try {
-      work();
+      work(started + (this.budgetMs - this.workMs));
     } finally {
       const elapsed = performance.now() - started;
       this.workMs += elapsed;

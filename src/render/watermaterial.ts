@@ -42,6 +42,18 @@ const WAVES: readonly (readonly [number, number, number])[] = [
 /** Height-to-normal steepness. Tuned by eye at the shore, where the slope shows most. */
 const RELIEF = 2.6;
 
+/**
+ * The wave field, built ONCE for every water surface in the world.
+ *
+ * It is a 256x256 map with mipmaps and a five-train sine field: measured at 28.9 ms to
+ * build, which is ten frames' worth of a 60 Hz budget and was being paid again for every
+ * basin's sheet — and, in the search, paid inside a 3 ms streaming slice, where it took
+ * the worst slice of a whole lake search from 2.5 ms to 29.4 ms. The wave field is the
+ * same field everywhere, so there is exactly one of it and every material scrolls the
+ * same offset.
+ */
+const SHARED_WAVE_MAP = createWaveNormalMap();
+
 function createWaveNormalMap(): THREE.DataTexture {
   const heights = new Float32Array(MAP_SIZE * MAP_SIZE);
   let norm = 0;
@@ -101,7 +113,7 @@ export interface WaterMaterial {
 }
 
 export function createWaterMaterial(): WaterMaterial {
-  const normalMap = createWaveNormalMap();
+  const normalMap = SHARED_WAVE_MAP;
   const material = new THREE.MeshStandardMaterial({
     // The mesh bakes depth into an RGBA colour attribute: shoreline alpha, shallow
     // tint and foam all arrive as vertex data, so none of them costs a shader or a
@@ -134,7 +146,9 @@ export function createWaterMaterial(): WaterMaterial {
       offset.y = (offset.y + DRIFT_V * dt) % 1;
     },
     dispose(): void {
-      normalMap.dispose();
+      // The map is SHARED: disposing a material must not take the wave field away from
+      // every other water surface in the world. It dies with the process, which is what
+      // a module-level constant does.
       material.dispose();
     },
   };

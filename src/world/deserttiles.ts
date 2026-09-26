@@ -529,6 +529,9 @@ export class DesertTileStreamer {
       const interleaved = new THREE.InterleavedBuffer(data.water, WATER_VERTEX_STRIDE);
       waterGeometry.setAttribute('position', new THREE.InterleavedBufferAttribute(interleaved, 3, 0));
       waterGeometry.setAttribute('color', new THREE.InterleavedBufferAttribute(interleaved, 4, 3));
+      // The wave map's uv, without which the surface is a flat mirror; see
+      // `WATER_VERTEX_STRIDE` in world/deserttiledata.ts.
+      waterGeometry.setAttribute('uv', new THREE.InterleavedBufferAttribute(interleaved, 2, 7));
       waterGeometry.setIndex(new THREE.BufferAttribute(data.waterIndices, 1));
       const waterMesh = new THREE.Mesh(waterGeometry, STREAM_WATER.material);
       waterMesh.receiveShadow = false;
