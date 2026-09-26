@@ -64,7 +64,13 @@ const LATERAL_MIN_M = 300;
 const LATERAL_RANGE_M = 350;
 
 /** How wrong a caller's arclength hint may be before a basin could be missed. */
-const HINT_SLACK_M = 400;
+/**
+ * How much further than `BASIN_OUTER_M` a basin's own arclength may be from a caller's
+ * before it can be ignored, metres. The road wanders: the heading guarantee allows 66
+ * degrees a section over sections of 100-300 m, so two basins whose arclengths differ by
+ * this much can still stand within a few hundred metres of each other in the world.
+ */
+const HINT_SLACK_M = 2500;
 
 const SALT_GAP = 0x1a4e;
 const SALT_SIDE = 0x2b71;
@@ -177,9 +183,33 @@ interface PlacedSite extends LakeSite {
  * 200 km apart, so the lookup is a binary search that almost always returns nothing,
  * and the road sample that resolves a centre into world XZ is paid once per site.
  */
+/**
+ * A basin's dug footprint, resolved to world XZ — everything the planting and the ground
+ * colours need, and nothing that costs a noise read.
+ *
+ * WHY THIS EXISTS. `shape()` answers the terrain's question ("how high is the ground
+ * here"), and it answers it with a road search and a lip sampled from 32 azimuths. The
+ * planting and the tile colours ask a much simpler question thousands of times per tile —
+ * "is this point inside a basin's water, or on its shore" — and they must get the SAME
+ * answer the water does, because the water is drawn from the basin's own geometry: a tree
+ * planted inside the bowl stands in the lake, and the first version of this world did
+ * exactly that. So the footprint is computed once from the deterministic site (centre,
+ * bowl radius, blend radius) and then tested with plain arithmetic.
+ */
+export interface BasinFootprint {
+  readonly x: number;
+  readonly z: number;
+  /** Radius of the bowl, metres: the water stands inside this. */
+  readonly inner: number;
+  /** Radius at which the basin's blend has returned to the open ground. */
+  readonly outer: number;
+}
+
 export class LakeBasins {
   private readonly sites: readonly LakeSite[];
   private readonly placed = new Map<number, PlacedSite>();
+  /** Basin centres for `placementsNear`, resolved per site on first use. */
+  private readonly centres = new Map<number, { x: number; z: number }>();
 
   constructor(
     private readonly road: Road,
@@ -190,6 +220,68 @@ export class LakeBasins {
 
   get schedule(): readonly LakeSite[] {
     return this.sites;
+  }
+
+  /**
+   * Every basin whose dug ground can reach a point, written into `out`; returns how many.
+   *
+   * `hintS` is a nearby arclength and decides WHICH SLICE of the schedule is looked at, not
+   * the answer: the basins are sorted by arclength and one reaches at most `BASIN_OUTER_M`
+   * from its centre, so a slice of `±(BASIN_OUTER_M + HINT_SLACK_M + radius)` around the
+   * caller's own arclength is guaranteed to hold every basin that can be within `radius` of
+   * the point as long as the road does not double back further than `HINT_SLACK_M` inside
+   * that reach — the heading guarantee (66 degrees a section, sections of 100-300 m) makes
+   * that a matter of a couple of hundred metres of wander, which the slack covers.
+   *
+   * WHY THE SLICE IS NOT OPTIONAL. The obvious version of this walks the WHOLE schedule and
+   * keeps what is near the point, and it cannot be paid for: a basin's centre is
+   * `Road.offsetPoint(s, lateral)`, and `Road` builds itself up to `s` on demand, so asking
+   * for a centre far ahead of where anything has walked GENERATES that much road. The
+   * schedule runs to 40 000 km, which measured 100 seconds for one call — five hundred
+   * tiles' worth. The slice makes a call touch one or two centres at most.
+   */
+  placementsNear(x: number, z: number, hintS: number, radius: number, out: BasinFootprint[]): number {
+    out.length = 0;
+    const sites = this.sites;
+    const slack = BASIN_OUTER_M + HINT_SLACK_M + radius;
+    // Binary search to the first site at or after the slice's start.
+    let lo = 0;
+    let hi = sites.length;
+    const from = hintS - slack;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sites[mid]!.s < from) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < sites.length; i++) {
+      const site = sites[i]!;
+      if (site.s > hintS + slack) break;
+      const centre = this.centreOf(site);
+      const inner = site.radius;
+      const outer = inner + Math.max(RIM_WIDTH_M * 0.5, inner * 0.12) + Math.max(RIM_WIDTH_M * 2, inner);
+      const dx = x - centre.x;
+      const dz = z - centre.z;
+      const reach = radius + outer;
+      if (dx * dx + dz * dz > reach * reach) continue;
+      out.push({ x: centre.x, z: centre.z, inner, outer });
+    }
+    return out.length;
+  }
+
+  /**
+   * A basin's centre in world XZ, resolved once per site: `road.offsetPoint(s, lateral)` and
+   * no lip sampling, because a footprint is the bowl's radius and the blend's, which the
+   * site already carries. Not cached across processes: the resolver's own `placed` map holds
+   * the same centre for the terrain, and this one exists so that the planting and the grass
+   * can ask WITHOUT a terrain height (and so without waking the terrain up).
+   */
+  private centreOf(site: LakeSite): { x: number; z: number } {
+    const hit = this.centres.get(site.index);
+    if (hit) return hit;
+    const point = this.road.offsetPoint(site.s, site.lateral);
+    const centre = { x: point.x, z: point.z };
+    this.centres.set(site.index, centre);
+    return centre;
   }
 
   /** The scheduled site nearest an arclength, or null on an empty road. */

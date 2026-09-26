@@ -135,6 +135,25 @@ questions live in `docs/country.md`.
   Measured: sparse wood (forest 0.05-0.5) 1.4% -> 5.3-5.8% of the ground (the thickening
   fallow, neither field nor wood), strip wood 18.2 -> 25.0%, and a field still in view on
   52.6-84.3% of the drive.
+- WATER IS NOT A MIRAGE (`docs/research-2026-09-26-landscape.md`, section 15). The owner,
+  after a drive: "озёра / пруды / заболоченность являются миражами — исчезают при
+  приближении, а возле них миражные деревья из пустыни". One cause for all of it: the water
+  is drawn as GEOMETRY, and the planting and the ground colours knew nothing about it. A
+  basin's bowl is deterministic (`lakes.ts`) and the tiles planted straight through it — so a
+  lake read as trees from a distance and as a walk among trunks under water up close, which
+  is precisely what a mirage is: two different places at two distances. `LakeBasins`
+  .placementsNear now answers "which bowls reach this point" (centre, bowl radius, blend
+  radius), the planter keeps the bowl empty and gives its 12 m bank the willow, rakita and
+  alder a stream's bank already gets, the bottom is painted silt rather than peat-dark mud,
+  `grass.ts` keeps its cards out of the water, and `vistaground.ts` knows a bog's peat — so the
+  far ground of a mire is already a mire and its water on arrival is detail, not an appearance.
+  THE COST OF THIS TURNED OUT TO BE IN THE HINT, NOT IN THE TEST. The first version looked up
+  the schedule around an ARCLENGTH, and `RoadDistance.ownerAt` costs 98.7 ms on a cache miss in
+  this scene (hence the warning comment in `deserttiledata`: "NO OWNER LOOKUP OUT HERE"): the
+  240 m tile build went from 19 ms to 100 ms. Each site's centre is now its own schedule
+  position (`road.offsetPoint(s, lateral)`, an interpolation and no search), built once per
+  process, and a query is a distance against a flat array of 4949 cent
+res.
 - THE COUNTRY HAS A GRAIN (`docs/research-2026-09-26-landscape.md`, section 10). Every
   relief band was isotropic, so the ground had no axis — hills that could be anywhere.
   The middle belt's most recognisable relief is directional: end moraines and kames lying

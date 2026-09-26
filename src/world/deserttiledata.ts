@@ -6,6 +6,7 @@ import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, PEAT, type Terrain } from './terrain';
+import { BASIN_OUTER_M, type BasinFootprint } from './lakes';
 import { terminusWeight } from './terminus';
 import { TRACK_HALF_WIDTH_M, TRACK_MAX_LENGTH_M, trackAt, trackPossibleNear, type TrackSample } from './tracks';
 
@@ -40,6 +41,83 @@ const WATER_DEEP_FULL_M = 1.2;
  * of a bank the lattice rounds off do not become water.
  */
 const WATER_MIN_DEPTH = 0.03;
+/**
+ * How far inside a basin's bowl nothing is planted, and how wide the shore band that is
+ * planted with willows is, metres.
+ *
+ * The water's edge is the bowl's edge (`site.radius`), because the water fills the bowl to
+ * its lip; the shore band straddles it, so the willows stand on the bank rather than in the
+ * water. Silt is painted for `SILT_BAND_M` past the edge, which is the shallow bottom the
+ * sheet is transparent over.
+ */
+const BASIN_KEEP_M = 1.5;
+const SHORE_BAND_M = 12;
+const SILT_BAND_M = 6;
+/**
+ * How far from a tile's centre a basin still has to be resolved, metres: a basin's dug
+ * ground reaches 484 m from its centre, and a 240 m tile's corner is 170 m from the middle.
+ * The lookup itself is a distance against a flat array of centres, so the margin is free.
+ */
+const BASIN_REACH_M = BASIN_OUTER_M + 190;
+
+/**
+ * Fills the scratch with the basins that reach a tile, and returns how many.
+ *
+ * THE HINT IS FREE HERE. `placementsNear` needs a nearby arclength, and getting one is the
+ * expensive part of this whole mechanism: `RoadDistance` answers in microseconds where its
+ * lattice is already dense and in one to three MILLISECONDS at a point nobody has asked
+ * about — a road query a tile does not already make is a fresh neighbourhood, and 24 of them
+ * across the diagonal measured 70 ms of a 20 ms tile. So the tile does not make one. Its
+ * ground vertex loop already asks `distAt` for every vertex in order, and `ownerAt` at a
+ * point whose `distAt` has just been read is one of the cheap ones (measured: 0.1 ms for 400
+ * such pairs), so the fill happens at the FIRST vertex of the tile, on the distance the
+ * colour pass has already paid for, and the planting reuses it.
+ */
+function fillTileBasins(context: DesertTileGenerationContext, x: number, z: number): number {
+  basinReach = context.terrain.basins.placementsNear(
+    x,
+    z,
+    context.roadDistance.ownerAt(x, z, DIST_LATTICE),
+    BASIN_REACH_M,
+    basinScratch,
+  );
+  return basinReach;
+}
+
+/** Which tile the scratch holds, so the planting does not fill it a second time. */
+let basinTile = Number.NaN;
+
+/** The identity of the tile the scratch was filled for. */
+function tileKeyOf(tx: number, tz: number): number {
+  return tx * 100003 + tz;
+}
+
+/**
+ * Silt, linear rgb: the bottom of a lake or a pond, under a sheet of water.
+ *
+ * A bed painted with the mud used elsewhere — or worse with the peat of a bog — reads
+ * through clear shallows as a black hole with water on top of it. This is what a bottom
+ * actually is: grey-green, wet, and a little lighter than the water it lies under.
+ */
+const SILT: readonly [number, number, number] = [0.16, 0.16, 0.12];
+
+/** Scratch for the basin footprints that reach one tile, and how many are in it. */
+const basinScratch: BasinFootprint[] = [];
+let basinReach = 0;
+
+/**
+ * How far INSIDE a basin's shore band a point stands, metres, or 0 outside it. The band
+ * runs `SHORE_BAND_M` from the water's edge outward, so a value greater than
+ * `SHORE_BAND_M - BASIN_KEEP_M` means the water: nothing woody is planted there.
+ */
+function shoreMargin(x: number, z: number): number {
+  for (let i = 0; i < basinReach; i++) {
+    const basin = basinScratch[i]!;
+    const r = Math.hypot(x - basin.x, z - basin.z);
+    if (r < basin.inner + SHORE_BAND_M) return basin.inner + SHORE_BAND_M - r;
+  }
+  return 0;
+}
 /**
  * Per-vertex water level for the tile being built. One buffer reused by every tile in
  * the worker: the generator is synchronous and single-threaded, and a tile is 6561
@@ -339,9 +417,24 @@ export function generateDesertTileData(
         coverSample.g += (MUD[1] - coverSample.g) * m;
         coverSample.b += (MUD[2] - coverSample.b) * m;
       }
+      // The tile's basins, resolved on the distance this vertex has already asked for: see
+      // `fillTileBasins`. Before this, the planting and the grass fill it themselves.
+      if (basinTile !== tileKeyOf(tx, tz)) {
+        basinTile = tileKeyOf(tx, tz);
+        fillTileBasins(context, worldX, worldZ);
+      }
+      // A basin's bottom is SILT while the water is over it, and it takes precedence over
+      // the bog's peat: a mire's peat under a lake is a black hole seen through the sheet.
+      const shore = shoreMargin(worldX, worldZ);
+      if (shore > SHORE_BAND_M - SILT_BAND_M) {
+        const m = Math.min(1, (shore - (SHORE_BAND_M - SILT_BAND_M)) / SILT_BAND_M + 0.35);
+        coverSample.r += (SILT[0] - coverSample.r) * m;
+        coverSample.g += (SILT[1] - coverSample.g) * m;
+        coverSample.b += (SILT[2] - coverSample.b) * m;
+      }
       // A bog's ground is PEAT, and it is not a tuft of anything: the colour goes to the
       // peat's own, over the top of the meadow the cover field painted.
-      const bog = context.terrain.bogAt(worldX, worldZ);
+      const bog = shore > 0 ? 0 : context.terrain.bogAt(worldX, worldZ);
       if (bog > 0) {
         const m = Math.min(1, bog * 0.9);
         coverSample.r += (PEAT[0] - coverSample.r) * m;
@@ -576,6 +669,25 @@ export function plantTrees(
   const terrain = context.terrain;
   const seed = context.seed;
   let n = 0;
+  /**
+   * THE BASINS THAT REACH THIS TILE, and the reason the planting has to know about them
+   * (see `BasinFootprint`): the water is drawn from the basin's own bowl, so a tree planted
+   * inside the bowl is a tree standing in the lake — and the first version of this world
+   * did exactly that, which read from a distance as a lake with trees in it and up close as
+   * a walk under the water among trunks.
+   */
+  // The colour pass of `generateDesertTileData` has already filled this from a distance it
+  // had paid for; a direct call to `plantTrees` (a test, a tool) fills it here instead.
+  if (basinTile !== tileKeyOf(tx, tz)) {
+    basinTile = tileKeyOf(tx, tz);
+    basinReach = context.terrain.basins.placementsNear(
+      centreX,
+      centreZ,
+      context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE),
+      BASIN_REACH_M,
+      basinScratch,
+    );
+  }
   const put = (x: number, z: number, kind: TreeKind, scale: number, key: number): void => {
     if (n >= MAX_TILE_TREES) return;
     const o = n * TREE_STRIDE;
@@ -651,6 +763,19 @@ export function plantTrees(
       const r4 = hash01(seed, TREE_TAG, gx, gz, 8);
       const r5 = hash01(seed, TREE_TAG, gx, gz, 9);
 
+      // A LAKE OR A POND. Nothing stands inside the bowl, and the bank carries the same
+      // willows a stream's does: rakita and hazel with alder behind, in a band measured
+      // from the water's edge outward.
+      const shore = shoreMargin(x, z);
+      if (shore > SHORE_BAND_M - BASIN_KEEP_M + 0.0001) continue;
+      if (shore > 0) {
+        if (r < 0.5) {
+          const kind =
+            r2 < 0.35 ? TreeKind.Willow : r2 < 0.62 ? TreeKind.Bush : r2 < 0.82 ? TreeKind.Alder : TreeKind.Birch;
+          put(x, z, kind, 0.6 + 0.5 * r3, key);
+        }
+        continue;
+      }
       if (bog > 0.35) {
         if (r < Math.min(0.5, bog * 0.5)) {
           const kind =
@@ -822,6 +947,7 @@ export function plantTrees(
       if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 0.6)) continue;
       const dug = context.road.landscape.streams.at(x, z);
       if (dug.bed > 0 || dug.bowl > 0.15) continue;
+      if (shoreMargin(x, z) > SHORE_BAND_M - BASIN_KEEP_M + 0.0001) continue;
       const forest = land.forestAt(x, z, roadDist);
       const r2 = hash01(seed, UNDER_TAG, gx, gz, 4);
       const r3 = hash01(seed, UNDER_TAG, gx, gz, 7);

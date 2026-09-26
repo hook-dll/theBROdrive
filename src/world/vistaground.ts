@@ -1,7 +1,7 @@
 import { FAR_WOODS_TO_M } from './farwoods';
 import { newCoverSample, writeGroundWeights } from './landcover';
 import { seasonCanopy, seasonGround, type SeasonState } from './season';
-import type { Terrain } from './terrain';
+import { PEAT, type Terrain } from './terrain';
 
 /**
  * THE CANOPY BLANKET, and the far ground's colour.
@@ -62,6 +62,19 @@ export function vistaGroundAt(
   let r = colors[at]!;
   let g = colors[at + 1]!;
   let b = colors[at + 2]!;
+  // A BOG IS A MIRE FROM FAR AWAY TOO. The tiles draw its water as geometry and this disc
+  // has no water at all, so without the peat here a bog is ordinary field on the horizon and
+  // turns into a mire as you arrive — which is the owner's "заболоченность является
+  // миражом", seen from the other end: nothing vanishes, but something APPEARS, and an
+  // appearance at a distance is exactly what a mirage is. Peat makes the far ground and the
+  // near ground the same place, and the water in it is then detail rather than a reveal.
+  const bog = terrain.bogAt(x, z);
+  if (bog > 0) {
+    const m = Math.min(1, bog * 0.9);
+    r += (PEAT[0] - r) * m;
+    g += (PEAT[1] - g) * m;
+    b += (PEAT[2] - b) * m;
+  }
   if (sample.forest > 0) {
     const ramp = radius <= CANOPY_FROM_M ? 0 : Math.min(1, (radius - CANOPY_FROM_M) / (CANOPY_FULL_M - CANOPY_FROM_M));
     h += canopyHeight(x, z, sample.forest, sample.birch) * ramp;

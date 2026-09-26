@@ -9,6 +9,7 @@ import { CoverKind, Crop, MUD, newCoverSample } from './landcover';
 import type { WorldOrigin } from './origin';
 import type { Road } from './road';
 import { shoulderWidthAt } from './shoulder';
+import type { BasinFootprint } from './lakes';
 import {
   TRACK_HALF_WIDTH_M,
   TRACK_MAX_LENGTH_M,
@@ -102,6 +103,16 @@ export class GrassField {
   private pendingHead = 0;
   private windowX = Number.NaN;
   private windowZ = Number.NaN;
+  /**
+   * Basins whose water covers part of the grass window, refreshed when the window moves.
+   *
+   * Nothing grows in a lake: the water is drawn from the basin's own bowl, and a grass card
+   * standing in it is a tuft in the water — the owner's "озёра являются миражами" came
+   * partly from exactly that. The footprints are resolved once per window (a handful of
+   * them), so the per-texel test is a distance against a list, not a search.
+   */
+  private readonly basinScratch: BasinFootprint[] = [];
+  private basinCount = 0;
   private readonly uniforms: Record<string, THREE.IUniform>;
   private readonly meshes: THREE.Mesh[] = [];
   private time = 0;
@@ -453,6 +464,33 @@ varying vec3 vTuftAccent;`,
     const oz = this.windowZ;
     this.windowX = wx;
     this.windowZ = wz;
+    // A basin reaches 484 m from its centre and the window is CACHE_N metres square, so the
+    // radius is half the diagonal plus that reach. No road lookup: the basins resolve their
+    // own centres (a hint would cost `ownerAt`, which is ~90 ms on a miss).
+    const cx = wx + CACHE_N / 2;
+    const cz = wz + CACHE_N / 2;
+    // The arclength comes from the nearest road point (the window is 256 m across, so one
+    // of its own quads is against the carriageway whenever the road is anywhere near), and
+    // `ownerAt` up close is microseconds — see the note on `tileArclength`.
+    let best = Number.POSITIVE_INFINITY;
+    let bestX = cx;
+    let bestZ = cz;
+    for (let i = 0; i < 13; i++) {
+      const x = wx + (i / 12) * CACHE_N;
+      const d = Math.abs(this.roadDistance.distAt(x, cz, 20));
+      if (d < best) {
+        best = d;
+        bestX = x;
+        bestZ = cz;
+      }
+    }
+    this.basinCount = this.terrain.basins.placementsNear(
+      cx,
+      cz,
+      this.roadDistance.ownerAt(bestX, bestZ, 20),
+      CACHE_N * 0.71 + 484,
+      this.basinScratch,
+    );
     // Nearest first, so the ground under the car is always ready before the horizon.
     const add: number[] = [];
     for (let cz = wz; cz < wz + CACHE_N; cz++) {
@@ -594,6 +632,16 @@ varying vec3 vTuftAccent;`,
     if (y === null) {
       this.paramData[o] = 0;
       return false;
+    }
+    for (let i = 0; i < this.basinCount; i++) {
+      const basin = this.basinScratch[i]!;
+      const dx = x - basin.x;
+      const dz = z - basin.z;
+      const wet = basin.inner - 0.5;
+      if (dx * dx + dz * dz < wet * wet) {
+        this.paramData[o] = 0;
+        return true;
+      }
     }
     this.heightData[slot] = y;
     this.cellX[slot] = cx;
