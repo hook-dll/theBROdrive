@@ -50,6 +50,15 @@ const UPLOAD_CALLS: readonly string[] = [
 
 /** An upload slower than this is worth a stack, to name the code that made it. */
 const STACK_FROM_MS = 0.6;
+/**
+ * Or bigger than this, whatever it cost on the CPU side.
+ *
+ * The volume is the other half of the problem and it does not show up in a call's own
+ * duration: on ANGLE over Metal a `bufferSubData`/`texSubImage2D` can hand 1.7 MB to the
+ * driver in a few hundred microseconds and still stall the frame on the GPU. So a big
+ * upload is named by its stack whether or not it was slow here.
+ */
+const STACK_FROM_BYTES = 32 * 1024;
 /** Events kept per run before the oldest are dropped. */
 const EVENT_CAP = 200_000;
 
@@ -67,6 +76,9 @@ interface FrameSample {
   uploadsMs: number;
   uploadBytes: number;
   uploadCalls: number;
+  /** Streaming work the world scheduler did inside this frame, and its worst job. */
+  streamMs: number;
+  streamJob: string | null;
 }
 
 interface BenchState {
@@ -191,6 +203,7 @@ function installUploadTiming(): void {
       const original = holder[kind];
       if (typeof original !== 'function') continue;
       holder[kind] = function timed(this: unknown, ...args: unknown[]): unknown {
+        const bytes = uploadBytes(kind, args);
         const started = performance.now();
         const result = original.apply(this, args);
         const elapsed = performance.now() - started;
@@ -198,9 +211,12 @@ function installUploadTiming(): void {
           record.uploads.push({
             t: started,
             kind,
-            bytes: uploadBytes(kind, args),
+            bytes,
             ms: elapsed,
-            stack: elapsed >= STACK_FROM_MS ? (new Error().stack ?? null) : null,
+            stack:
+              elapsed >= STACK_FROM_MS || bytes >= STACK_FROM_BYTES
+                ? (new Error().stack ?? null)
+                : null,
           });
         }
         return result;
@@ -220,7 +236,18 @@ function installFrameTiming(): void {
       callback(timestamp);
       const ms = performance.now() - t0;
       if (record.frames.length < EVENT_CAP) {
-        record.frames.push({ t0, ms, uploadsMs: 0, uploadBytes: 0, uploadCalls: 0 });
+        // The scheduler resets its counters when the NEXT frame's id first arrives, so
+        // what it holds right here is this frame's own streaming work and its worst job.
+        const work = (window as unknown as Record<string, { worldWork?: { frameWorkMs: number; lastJobTag: string | null } }>)['__bro']?.worldWork;
+        record.frames.push({
+          t0,
+          ms,
+          uploadsMs: 0,
+          uploadBytes: 0,
+          uploadCalls: 0,
+          streamMs: work ? work.frameWorkMs : 0,
+          streamJob: work ? work.lastJobTag : null,
+        });
       }
     });
 }
@@ -277,6 +304,10 @@ export interface StutterFrame {
   ms: number;
   uploadsMs: number;
   uploadBytes: number;
+  uploadCalls: number;
+  /** Streaming work the world scheduler did inside this frame, and its worst job. */
+  streamMs: number;
+  streamJob: string | null;
 }
 
 export interface StutterReport {
@@ -300,6 +331,8 @@ export interface StutterReport {
   /** Uploads at least `STACK_FROM_MS` slow, named by the code that made them. */
   slowUploads: { kind: string; ms: number; bytes: number; stack: string | null }[];
   slowestStacks: { stack: string; calls: number; ms: number }[];
+  /** Where the BYTES went, by the code that sent them: the volume table. */
+  biggestStacks: { stack: string; calls: number; KiB: number; ms: number }[];
   /** The frame profiler's own windows seen during the run. */
   profile: string[];
   /** What the renderer was doing: the numbers the adaptor moves. */
@@ -380,6 +413,19 @@ function summarise(
     entry.ms += event.ms;
     stacks.set(name, entry);
   }
+  // The same grouping by VOLUME, which is a different question from cost: the frame-time
+  // offender on this platform is the bytes handed to the driver, not the microseconds the
+  // call itself took.
+  const byteStacks = new Map<string, { stack: string; calls: number; bytes: number; ms: number }>();
+  for (const event of uploads) {
+    if (event.bytes < STACK_FROM_BYTES) continue;
+    const name = topOfStack(event.stack) ?? event.kind;
+    const entry = byteStacks.get(name) ?? { stack: name, calls: 0, bytes: 0, ms: 0 };
+    entry.calls++;
+    entry.bytes += event.bytes;
+    entry.ms += event.ms;
+    byteStacks.set(name, entry);
+  }
 
   const worstFrames = [...charged].sort((a, b) => b.ms - a.ms).slice(0, 12);
 
@@ -417,6 +463,10 @@ function summarise(
     worstFrames,
     slowUploads: slow,
     slowestStacks: [...stacks.values()].sort((a, b) => b.ms - a.ms).slice(0, 12),
+    biggestStacks: [...byteStacks.values()]
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, 12)
+      .map((entry) => ({ stack: entry.stack, calls: entry.calls, KiB: entry.bytes / 1024, ms: entry.ms })),
     profile: consoleLines.filter((line) => !line.startsWith('[perf] streaming')),
     render: renderedNow,
     streaming: { frames: streamingFrames, totalMs: streamingTotal, worstMs: streamingWorst, worstJob: streamingWorstJob },
@@ -556,7 +606,13 @@ export function formatStutterReports(reports: readonly StutterReport[]): string 
     for (const frame of report.worstFrames.slice(0, 4)) {
       lines.push(
         `    worst frame ${frame.ms.toFixed(1)} ms, uploads ${frame.uploadsMs.toFixed(1)} ms / ` +
-          `${(frame.uploadBytes / 1024).toFixed(0)} KiB`,
+          `${(frame.uploadBytes / 1024).toFixed(0)} KiB in ${frame.uploadCalls} calls, ` +
+          `streaming ${frame.streamMs.toFixed(1)} ms (${frame.streamJob ?? 'none'})`,
+      );
+    }
+    for (const entry of report.biggestStacks.slice(0, 5)) {
+      lines.push(
+        `    ${entry.KiB.toFixed(0).padStart(7)} KiB in ${entry.calls} calls from ${entry.stack}`,
       );
     }
   }

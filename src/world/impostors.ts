@@ -856,8 +856,15 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap ) * vImpFade;`,
     const range = this.allocate(count, x, z, r);
     for (let i = 0; i < count; i++) fill(i, this.a0, this.a1, (range.start + i) * A);
     this.owned.set(key, range);
-    this.storeDirtyFrom = Math.min(this.storeDirtyFrom, range.start);
-    this.storeDirtyTo = Math.max(this.storeDirtyTo, range.start + count);
+    // THE RUNS THEMSELVES, NOT THEIR SPAN. A tile is one contiguous run of rows
+    // (`allocate` hands back one), so recording the run is enough to upload exactly what
+    // changed. It used to record `min(start)` and `max(start + count)` and upload
+    // everything between them, which is a different thing entirely once rows are RECYCLED:
+    // a tile placed in a freed low row while another sits at the high-water mark made the
+    // span cover every row in between — measured on the bench, 193 rows = 6.05 MB per
+    // flush of mostly unchanged data, 3.1-6.5 GB per 20 s of driving, 97% of every byte
+    // the frame uploaded, and 52-292 ms frames on ANGLE over Metal.
+    this.storeRuns.push([Math.floor(range.start / STORE_WIDTH), Math.floor((range.start + count - 1) / STORE_WIDTH) + 1]);
     // Not into the buffer being drawn: a write into a buffer the GPU may still be
     // reading waits for the GPU (8 ms a write, measured). Into the repack under way, or
     // the next one, which a new tile asks for.
@@ -963,14 +970,18 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap ) * vImpFade;`,
     this.data1 = this.storeTexture(a1);
     this.uniforms.uImpData0.value = this.data0;
     this.uniforms.uImpData1.value = this.data1;
-    this.storeDirtyFrom = Number.POSITIVE_INFINITY;
-    this.storeDirtyTo = 0;
+    // The new textures are uploaded whole by three, so the runs recorded against the old
+    // ones describe nothing.
+    this.storeRuns.length = 0;
   }
 
   private data0: THREE.DataTexture;
   private data1: THREE.DataTexture;
-  private storeDirtyFrom = Number.POSITIVE_INFINITY;
-  private storeDirtyTo = 0;
+  /**
+   * Row runs written since the last upload, as `[y0, y1)` pairs. Cleared by `flushStore`,
+   * dropped wholesale when `grow` replaces the textures (which are then uploaded whole).
+   */
+  private readonly storeRuns: [number, number][] = [];
 
   private storeTexture(data: Float32Array): THREE.DataTexture {
     const t = new THREE.DataTexture(data, STORE_WIDTH, data.length / A / STORE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
@@ -982,35 +993,61 @@ diffuseColor.a *= min( 1.0, 2.0 * vImpSwap ) * vImpFade;`,
   }
 
   /**
-   * Uploads the store's rows written since the last call: a new tile is one run of
-   * rows. Once three has made the textures (their first draw), by hand, as the grass
-   * cache does, so only those rows go up.
+   * Uploads the store's rows written since the last call, ONE RECTANGLE PER RUN.
+   *
+   * A tile is a contiguous run of rows, so a tile costs its own rows (2 rows, 64 KiB, for
+   * a five-hundred-tree tile) rather than everything between the lowest and the highest
+   * row written this frame. Overlapping and adjacent runs are merged first, and the runs
+   * are sorted once per flush: the list holds one entry per tile added, which is a handful
+   * per second, not per frame.
+   *
+   * Once three has made the textures (their first draw), the upload is done by hand, as
+   * the grass cache does, so only those rows go up.
    */
   private flushStore(): void {
-    if (this.storeDirtyTo <= this.storeDirtyFrom) return;
+    if (this.storeRuns.length === 0) return;
     const props = this.renderer.properties;
     const t0 = (props.get(this.data0) as { __webglTexture?: WebGLTexture }).__webglTexture;
     const t1 = (props.get(this.data1) as { __webglTexture?: WebGLTexture }).__webglTexture;
     if (!t0 || !t1) {
       this.data0.needsUpdate = true;
       this.data1.needsUpdate = true;
-      this.storeDirtyFrom = Number.POSITIVE_INFINITY;
-      this.storeDirtyTo = 0;
+      this.storeRuns.length = 0;
       return;
     }
     const gl = this.renderer.getContext() as WebGL2RenderingContext;
     const state = this.renderer.state;
-    const y0 = Math.floor(this.storeDirtyFrom / STORE_WIDTH);
-    const y1 = Math.floor((this.storeDirtyTo - 1) / STORE_WIDTH) + 1;
     state.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     state.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     state.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     state.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
-    for (const [tex, data] of [[t0, this.a0], [t1, this.a1]] as const) {
-      state.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y0, STORE_WIDTH, y1 - y0, gl.RGBA, gl.FLOAT, data, y0 * STORE_WIDTH * A);
+    this.storeRuns.sort((a, b) => a[0] - b[0]);
+    let runStart = this.storeRuns[0]![0];
+    let runEnd = this.storeRuns[0]![1];
+    for (let i = 1; i <= this.storeRuns.length; i++) {
+      const next = this.storeRuns[i];
+      if (next && next[0] <= runEnd) {
+        if (next[1] > runEnd) runEnd = next[1];
+        continue;
+      }
+      for (const [tex, data] of [[t0, this.a0], [t1, this.a1]] as const) {
+        state.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          runStart,
+          STORE_WIDTH,
+          runEnd - runStart,
+          gl.RGBA,
+          gl.FLOAT,
+          data,
+          runStart * STORE_WIDTH * A,
+        );
+      }
+      runStart = next ? next[0] : 0;
+      runEnd = next ? next[1] : 0;
     }
-    this.storeDirtyFrom = Number.POSITIVE_INFINITY;
-    this.storeDirtyTo = 0;
+    this.storeRuns.length = 0;
   }
 }
