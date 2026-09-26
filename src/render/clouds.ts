@@ -669,8 +669,15 @@ void main() {
   // pale cut-outs where there should be storm cloud.
   vec3 storm = mix( uHorizon, uZenith, 0.4 ) * mix( 0.5, 1.0, height ) * ( 0.75 + 0.35 * lit ) * ( 1.0 - 0.5 * uRain );
   col = mix( col, storm, uGrey );
-  // Low clouds sink into the horizon's haze, as the land does.
-  col = mix( uHorizon, col, 0.25 + 0.75 * smoothstep( 0.0, 0.22, vElev ) );
+  // Low clouds sink into the horizon's haze, as the land does. Under a closed deck the
+  // haze is much stronger again: the deck is the whole sky there, its field ends 18 km
+  // out (a degree or two above the horizon under a sunk overcast base), and if the deck's
+  // own colour does not converge on the dome's by then, the edge of the field draws a
+  // straight line right across the sky. Merging it into the horizon colour — which is
+  // what the dome shows at that elevation — takes the line out.
+  float haze = 0.25 + 0.75 * smoothstep( 0.0, 0.22, vElev );
+  haze = mix( haze, 1.0 - 0.65 * smoothstep( 0.0, 0.12, vElev ), uGrey );
+  col = mix( uHorizon, col, haze );
   gl_FragColor = vec4( col, alpha );
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
