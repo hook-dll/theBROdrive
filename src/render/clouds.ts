@@ -963,13 +963,30 @@ export class Clouds {
         uRain: { value: 0 },
         uDusk: { value: 0 },
       },
-      transparent: true,
       // The flat card under the base is seen from below, the upright one from either
       // side of its turn: no winding is "front" for both.
       side: THREE.DoubleSide,
       depthWrite: false,
       depthTest: true,
+      transparent: false,
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.OneFactor,
+      blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
     });
+    // IN THE OPAQUE LIST, though it blends. A transparent material is drawn after every
+    // opaque one, and the grass is opaque with `depthWrite: false` (world/grass.ts): on a
+    // blade standing against the sky the depth buffer is still the cleared 1.0, the card's
+    // far-plane depth passes, and the cloud was painted over the blade. The cloud must be
+    // drawn BEFORE the grass, which only the opaque list can do — and `transparent: false`
+    // with `blending: NormalBlending` is the one combination three silently turns into no
+    // blending at all (WebGLRenderer.setMaterial), so the blend the card needs is asked for
+    // by name instead. Same factors as NormalBlending without premultiplied alpha:
+    // (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) for the colour, (ONE, ONE_MINUS_SRC_ALPHA) for the
+    // alpha channel. Its own order 6 puts it after the dome (5) and the stars and planets
+    // (5.5, 5.7) and before the grass (10+).
     // Two quads per cloud (see TWO VIEWS): the flat one first, so where both show
     // during the hand-over the upright one blends over it.
     const quad = new THREE.PlaneGeometry(1, 1);
@@ -1004,7 +1021,8 @@ export class Clouds {
     const card = (g: THREE.InstancedBufferGeometry): THREE.Mesh => {
       const m = new THREE.Mesh(g, this.material);
       m.frustumCulled = false;
-      // After the stars (-8) and planets (-7), so a cloud hides them.
+      // After the dome (5) and the stars and planets (5.5, 5.7), so a cloud hides them;
+      // before the grass (10+), which must lie over the clouds it stands against.
       m.renderOrder = 6;
       m.visible = false;
       this.mesh.add(m);

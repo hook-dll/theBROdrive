@@ -182,14 +182,20 @@ export class StarField {
         uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
         uMoonAngularRadius: { value: 0.0045 },
       },
-      transparent: true,
+      // Opaque list, though it is additive light: the sky dome (renderOrder 5), this and
+      // the planets, and the clouds (6) have to be drawn in that order, and a transparent
+      // material is always drawn after every opaque one — clouds included — so a star
+      // would be painted over the cloud that should hide it. Additive blending survives
+      // `transparent: false` (only NormalBlending is turned off by it, WebGLRenderer
+      // .setMaterial), and its 5.5 puts it after the dome and before the clouds.
+      transparent: false,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     });
     this.points = new THREE.Points(geometry, this.material);
     this.points.frustumCulled = false;
-    this.points.renderOrder = -8;
+    this.points.renderOrder = 5.5;
     this.points.matrixAutoUpdate = false;
     this.setQuality(quality);
   }

@@ -77,13 +77,15 @@ export class PlanetField {
       fragmentShader: FRAGMENT,
       uniforms: { uExposure: { value: 0 } },
       depthWrite: false,
-      transparent: true,
+      // As the stars (render/starcatalog.ts): in the opaque list, after the dome and
+      // before the clouds, so a cloud hides a planet instead of the other way round.
+      transparent: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     });
     this.points = new THREE.Points(geometry, this.material);
     this.points.frustumCulled = false;
-    this.points.renderOrder = -7;
+    this.points.renderOrder = 5.7;
   }
 
   update(frame: CelestialFrame, exposure: number): void {
