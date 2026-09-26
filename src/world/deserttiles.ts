@@ -28,8 +28,8 @@ import {
   WATER_VERTEX_STRIDE,
   type DesertTileData,
 } from './deserttiledata';
-import { TREE_TRUNK_RADIUS } from './props/trees';
-import { clearTrees, ForestRenderer } from './forest';
+import { treeVariantCount, trunkColliderRadius } from './props/trees';
+import { clearTrees, ForestRenderer, treeShape } from './forest';
 import type {
   DesertTileWorkerRequest,
   DesertTileWorkerResponse,
@@ -87,6 +87,8 @@ const colliderOffset = new THREE.Vector3();
 let hullPoints = new Float32Array(0);
 /** Half height of a trunk collider: tall enough that nothing drives over it. */
 const TREE_COLLIDER_HALF_HEIGHT = 2.5;
+/** Scratch for `treeShape` while the trunks are collided; never read across calls. */
+const treeShapeScratch = { variant: 0, sx: 1, sy: 1 };
 
 interface DesertPropPlacement {
   readonly form: DesertPropForm;
@@ -1093,8 +1095,13 @@ export class DesertTileStreamer {
     for (let i = 0; i < tile.standing.count; i++) {
       const o = i * TREE_STRIDE;
       // Saplings (undergrowth and fallow thickets) bend under a car rather than stop it.
-      if (trees[o + 3]! < 0.45) continue;
-      const radius = TREE_TRUNK_RADIUS[trees[o + 5]!]! * trees[o + 3]!;
+      const scale = trees[o + 3]!;
+      if (scale < 0.45) continue;
+      // The drawn trunk's own width: the variant's habit girth, and the per-tree width
+      // multiplier the renderer scales the model by (forest.ts, `rebucket`).
+      const kind = trees[o + 5]!;
+      treeShape(tile.centreX + trees[o]!, tile.centreZ + trees[o + 2]!, treeVariantCount(kind), treeShapeScratch);
+      const radius = trunkColliderRadius(kind, treeShapeScratch.variant) * scale * treeShapeScratch.sx;
       if (radius <= 0) continue;
       const collider = this.physics.world.createCollider(
         rapier.ColliderDesc.cylinder(TREE_COLLIDER_HALF_HEIGHT, radius).setTranslation(

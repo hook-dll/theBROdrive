@@ -53,10 +53,11 @@ export interface TreeVariant {
 }
 
 /**
- * Trunk collider radius per kind at scale 1, metres, in `TreeKind` order; 0 for things
- * a car drives through.
+ * Trunk collider radius per kind at scale 1 and girth 1, metres, in `TreeKind` order; 0
+ * for things a car drives through. Read through `trunkColliderRadius`, which applies the
+ * variant's habit.
  */
-export const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.34, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0, 0.42];
+const TREE_TRUNK_RADIUS: readonly number[] = [0.2, 0.26, 0, 0.3, 0.34, 0.2, 0.46, 0.26, 0.2, 0.4, 0.12, 0, 0, 0.3, 0, 0.42];
 
 interface Palette {
   readonly spruce: readonly number[];
@@ -2113,26 +2114,44 @@ const LEAF_SPRITES: Record<TreeKind, LeafSprite> = {
 export const UNDERGROWTH_FADE_FROM_M = 50;
 export const UNDERGROWTH_FADE_TO_M = 110;
 
-const VARIANTS: Record<TreeKind, number> = {
-  [TreeKind.Birch]: BIRCH_HABITS.length,
+/** Every kind's habits, one variant each. */
+const HABITS: Record<TreeKind, readonly (Habit | SpruceHabit)[]> = {
+  [TreeKind.Birch]: BIRCH_HABITS,
   // One variant per habit (see `SPRUCE_HABITS`): the spruce is the kind the wood has
   // most of, and the one whose shapes the owner reads first.
-  [TreeKind.Spruce]: SPRUCE_HABITS.length,
-  [TreeKind.Bush]: BUSH_HABITS.length,
-  [TreeKind.Lime]: LIME_HABITS.length,
-  [TreeKind.Pine]: PINE_HABITS.length,
-  [TreeKind.Aspen]: ASPEN_HABITS.length,
-  [TreeKind.Oak]: OAK_HABITS.length,
-  [TreeKind.Maple]: MAPLE_HABITS.length,
-  [TreeKind.Alder]: ALDER_HABITS.length,
-  [TreeKind.Willow]: WILLOW_HABITS.length,
-  [TreeKind.Rowan]: ROWAN_HABITS.length,
-  [TreeKind.Fern]: FERN_HABITS.length,
-  [TreeKind.Juniper]: JUNIPER_HABITS.length,
-  [TreeKind.Stump]: STUMP_HABITS.length,
-  [TreeKind.Log]: LOG_HABITS.length,
-  [TreeKind.FieldPine]: FIELD_PINE_HABITS.length,
+  [TreeKind.Spruce]: SPRUCE_HABITS,
+  [TreeKind.Bush]: BUSH_HABITS,
+  [TreeKind.Lime]: LIME_HABITS,
+  [TreeKind.Pine]: PINE_HABITS,
+  [TreeKind.Aspen]: ASPEN_HABITS,
+  [TreeKind.Oak]: OAK_HABITS,
+  [TreeKind.Maple]: MAPLE_HABITS,
+  [TreeKind.Alder]: ALDER_HABITS,
+  [TreeKind.Willow]: WILLOW_HABITS,
+  [TreeKind.Rowan]: ROWAN_HABITS,
+  [TreeKind.Fern]: FERN_HABITS,
+  [TreeKind.Juniper]: JUNIPER_HABITS,
+  [TreeKind.Stump]: STUMP_HABITS,
+  [TreeKind.Log]: LOG_HABITS,
+  [TreeKind.FieldPine]: FIELD_PINE_HABITS,
 };
+
+/** How many variants a kind has: the count `treeShape` picks among. */
+export function treeVariantCount(kind: TreeKind): number {
+  return HABITS[kind].length;
+}
+
+/**
+ * Trunk collider radius of one variant at scale 1, metres. The habit's girth is the
+ * drawn trunk's own multiplier (every builder passes it to `trunkRings`), so the
+ * collider follows it: before the habits carried it, an old oak of girth 1.9 was driven
+ * into up to its heartwood and a sapling-thin birch stopped a car short of its bark. A
+ * spruce habit has no girth — its trunk is drawn at one width whatever the habit.
+ */
+export function trunkColliderRadius(kind: TreeKind, variant: number): number {
+  const habit = HABITS[kind][variant]!;
+  return TREE_TRUNK_RADIUS[kind]! * ('girth' in habit ? habit.girth : 1);
+}
 
 let variants: readonly TreeVariant[][] | null = null;
 
@@ -2167,7 +2186,7 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
     };
     variants = TREE_KINDS.map((kind) => {
       leafSprite = LEAF_SPRITES[kind];
-      return Array.from({ length: VARIANTS[kind] }, (_, seed) => ({
+      return Array.from({ length: HABITS[kind].length }, (_, seed) => ({
         near: lod(build[kind](seed + 1, pal, true), kind),
         far: lod(build[kind](seed + 1, pal, false), kind),
       }));

@@ -55,6 +55,14 @@ interface ShimCanvasContext {
   restore(): void;
   translate(x: number, y: number): void;
   fillRect(x: number, y: number, width: number, height: number): void;
+  // The leaf atlas (render/leafpaint.ts), which props/trees.ts paints at import.
+  rect(x: number, y: number, width: number, height: number): void;
+  clip(): void;
+  closePath(): void;
+  fill(): void;
+  rotate(angle: number): void;
+  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): void;
+  ellipse(x: number, y: number, rx: number, ry: number, rotation: number, start: number, end: number): void;
 }
 
 class ShimCanvas {
@@ -99,6 +107,13 @@ class ShimCanvas {
     restore: () => {},
     translate: () => {},
     fillRect: () => {},
+    rect: () => {},
+    clip: () => {},
+    closePath: () => {},
+    fill: () => {},
+    rotate: () => {},
+    quadraticCurveTo: () => {},
+    ellipse: () => {},
   };
 
   getContext(contextId: string): ShimCanvasContext | null {
