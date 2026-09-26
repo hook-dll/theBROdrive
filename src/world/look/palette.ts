@@ -373,9 +373,9 @@ const NODE: Record<'night' | 'dawn' | 'dusk' | 'morning' | 'evening' | 'day', Ro
   morning: {
     a: 0xc9cfd4, b: 0x74a0d2, c: 0xcbc4b2,
     near: 0.5, vis: 11000, haze: [80, 0.4],
-    sun: [0xffe3bc, 1.1],
-    amb: [0x6d707a, 0.5],
-    hemi: [0x7d97bd, 0x6b5b45, 1.3, 0],
+    sun: [0xffe3bc, 1.9],
+    amb: [0x6d707a, 0.4],
+    hemi: [0x99aecb, 0x6b5b45, 0.95, 0],
     shade: [0.35, 1.4, 0.85],
     cloud: [0xf0e0cc, 0x8d95ab, 0.4, 0.6],
   },
@@ -383,21 +383,33 @@ const NODE: Record<'night' | 'dawn' | 'dusk' | 'morning' | 'evening' | 'day', Ro
   evening: {
     a: 0xc4b295, b: 0x7c8aa6, c: 0xbda98c,
     near: 0.55, vis: 16000, haze: [50, 0.3],
-    sun: [0xffdcae, 1.15],
-    amb: [0x6b6b70, 0.55],
-    hemi: [0x7a90b8, 0x6e5b41, 1.35, 0],
+    sun: [0xffdcae, 2.0],
+    amb: [0x6b6b70, 0.42],
+    hemi: [0x9aa5bd, 0x6e5b41, 1.0, 0],
     shade: [0.4, 1.5, 0.85],
     cloud: [0xe4c3a6, 0x82788c, 0.45, 0.6],
   },
   // Noon: a saturated blue twenty degrees up over a pale horizon, and no fog at all
   // until the last tenth of the view — the crisp middle ground and the hazy band.
+  //
+  // THE KEY IS MOST OF THE LIGHT, AND THAT IS A LOOK DECISION (2026-09-26, stage 3).
+  // Measured against `img/autumn-day-*.jpg` and `summer-day-clear-8s.jpg`, our frames
+  // were about a third darker than slowroads and the meadow read as a dark saturated
+  // green. The reason was the split, not the total: on a flat up-facing surface the
+  // fill (a hemisphere under a strong blue sky plus a blue ambient) put three quarters
+  // of the irradiance in, and leaf albedo is blue-starved by four, so most of that
+  // light fell on a channel the grass barely reflects while the lane that does carry
+  // the picture — the warm key — stood at 1.0 against slowroads' 6.2 beside an ambient
+  // of 2.4. The key goes to 2.2 and the fill comes down and loses its blue to match
+  // that ratio: the fill is still what lights a leaf out of the sun, so it stays a real
+  // hemisphere, only no longer the dominant term of the frame.
   day: {
     a: 0xb3cde8, b: 0x4d86cc, c: 0x9dc2e2,
     near: 0.9, vis: 30000, haze: [0, 0],
-    sun: [0xfff8ea, 1],
-    amb: [0x71859a, 0.5],
-    hemi: [0x87a7d1, 0x8b7b61, 1.6, 0],
-    shade: [0.3, 1.5, 0.85],
+    sun: [0xfff8ea, 2.05],
+    amb: [0x71859a, 0.4],
+    hemi: [0xa9c2d8, 0x8b7b61, 1.15, 0],
+    shade: [0.3, 1.2, 0.85],
     cloud: [0xfdfdfd, 0xc2c8d8, 0.35, 0.55],
   },
 };
@@ -550,10 +562,10 @@ const SEASONS: Record<SeasonName, SeasonRow> = {
     lightTint: 0xfff6f4,
     fogTint: 0xfff2f0,
     paleness: 0.2,
-    grassA: 0x97ba63,
-    grassB: 0xcfcb8c,
-    peakA: 0xf4ecb3,
-    peakB: 0xfffbc9,
+    grassA: 0xa2ba7d,
+    grassB: 0xcfcca0,
+    peakA: 0xf4eec6,
+    peakB: 0xfffcd9,
     field: 0xc0bc84,
     tree: 0xb6c98a,
     soil: 0xf8f4ea,
@@ -570,10 +582,10 @@ const SEASONS: Record<SeasonName, SeasonRow> = {
     lightTint: 0xffffff,
     fogTint: 0xffffff,
     paleness: 0,
-    grassA: 0x8db05a,
-    grassB: 0xbcb77a,
-    peakA: 0xe2d9a0,
-    peakB: 0xfffbd4,
+    grassA: 0x98b074,
+    grassB: 0xbcb88e,
+    peakA: 0xe2dcb4,
+    peakB: 0xfffce1,
     field: 0xd2cc90,
     tree: 0xffffff,
     soil: 0xf6eee4,
@@ -596,10 +608,25 @@ const SEASONS: Record<SeasonName, SeasonRow> = {
     // same week show green herbs with dry patches. So the FIRST colour stays a green and
     // the second carries the season, which is what the noise blend then reads as a country
     // of green meadows with mown and drying patches.
-    grassA: 0x90b05d,
-    grassB: 0xcfc585,
-    peakA: 0xede0a5,
-    peakB: 0xffe7a3,
+    //
+    // THE CHROMA IS 0.7 OF THE PHOTOGRAPH'S, IN EVERY SEASON (stage 3). Measured on the
+    // field frame, the ground came out at saturation 0.75 against the reference frames'
+    // 0.48-0.60 for the same green field, because our frame reaches the display through
+    // ACES with the key carrying most of the light, and that curve spends the blue end of
+    // a saturated green early: an albedo of B/G 0.53 arrived at B/G 0.12. Hue and value
+    // are the authored ones; only the chroma of the four tones moves, once, for all four
+    // seasons, so a meadow that was acid becomes the sage the references show.
+    grassA: 0x97ab84,
+    grassB: 0xc6c3a4,
+    // THE PEAK TONES ARE GREY-KHAKI, NOT YELLOW (stage 3). These two are the pale, dry
+    // half of the tint, and the blade term hands them to every bright tip: slowroads'
+    // autumn pair is a PINKISH pale (#E3BEA0) against a dark olive (#A28125), and the
+    // first pass here had two yellows (#EDE0A5 / #FFE7A3). Under our warm key a yellow
+    // peak turns the whole meadow acid, because the tip term only ever ADDS to the sun's
+    // own warmth — measured on our field frame, (169,148,74) against the reference's
+    // (137,136,79). A greyer pale keeps the tips bright without the cast.
+    peakA: 0xe4d6b6,
+    peakB: 0xd2be83,
     field: 0xd0b98a,
     tree: 0xd8b878,
     soil: 0xf2e8d8,
@@ -616,8 +643,8 @@ const SEASONS: Record<SeasonName, SeasonRow> = {
     lightTint: 0xeff4ff,
     fogTint: 0xeef4ff,
     paleness: 0.42,
-    grassA: 0xcbcabe,
-    grassB: 0xe7e7db,
+    grassA: 0xcbcac2,
+    grassB: 0xe7e7df,
     peakA: 0xffffff,
     peakB: 0xffffff,
     field: 0xd4d6da,

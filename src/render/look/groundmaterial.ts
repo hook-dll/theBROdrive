@@ -251,31 +251,30 @@ function fragmentBody(near: boolean): string {
 vec2 gdW = vGroundWorld.xz;
 float gdView = length( vViewPosition );
 
-// --- The noise fields. The 7 m and the 100 m ones pick between the meadow's two tones,
-// the 500 m and 2 km ones are the patch map — the "this part of the country is not that
-// part" the eye reads at a glance — and the 4 km one says how pale and high the ground
-// is.
-float gdVariation = texture2D( ${textureUniform('noiseVariation')}, gdW / ${n(GROUND_SCALE.fade2000)} ).r - 0.5;
-float gdCloseVar = ( 1.0 - texture2D( ${textureUniform('noiseVariation')}, gdW / ${n(GROUND_SCALE.fade500)} ).r ) - 0.5;
-float gdFade100 = texture2D( ${textureUniform('noiseFine')}, gdW / ${n(GROUND_SCALE.fade100)} ).r;
-float gdFade500 = texture2D( ${textureUniform('noiseFine')}, gdW / ${n(GROUND_SCALE.fade500)} ).r;
-float gdFade4000 = texture2D( ${textureUniform('noiseFine')}, gdW / ${n(GROUND_SCALE.fade4000)} ).r;
-${near
-  ? `float gdFade7 = texture2D( ${textureUniform('noiseFine')}, gdW / ${n(GROUND_SCALE.fine)} ).r;`
-  : `float gdFade7 = 0.5;`}
+// --- The meadow's own inputs, from the one function the tufts call too (\`groundMeadowAt\`,
+// groundcolor.glsl.ts): the fades, the patch maps, and how pale this country is.
+GroundMeadow gdMeadow = groundMeadowAt( gdW, vGroundWorld.y, vGroundRoad.y, ${near ? '0.0' : '0.5'} );
+float gdVariation = gdMeadow.variation;
+float gdCloseVar = gdMeadow.closeVar;
+float gdFade100 = gdMeadow.fade100;
+float gdFade500 = gdMeadow.fade500;
+float gdFade7 = gdMeadow.fade7;
 
 float gdLush = vGroundCover.x;
 float gdForest = vGroundCover.y;
 float gdWet = vGroundAux.x;
 float gdSnow = seasonSnowAt( gdForest, seasonPatch( gdW ) );
 
-// --- The meadow. \'lightGrass\' is slowroads' altitudinal paleness, scaled back hard
-// right beside the road, because a gravel verge fringed with straw-coloured grass is the
-// one place the eye stands close enough to catch the lie.
-float gdHeightVal = clamp( ( vGroundWorld.y - ( 30.0 + gdFade4000 * 40.0 ) ) / 150.0, 0.0, 1.0 );
-float gdLight = min( 1.0, gdHeightVal * ( gdFade500 + gdHeightVal * 0.5 ) );
-float gdDark = clamp( ( gdFade100 - 0.25 ) * 2.0, 0.0, 1.0 );
-gdLight *= max( 0.25, max( 0.0, vGroundRoad.y ) / ( 0.5 + gdFade7 ) );
+// --- The meadow. The paleness the tint's peak reads comes from \`groundMeadowAt\`, which
+// is also where the tufts get theirs: it is slowroads' altitudinal lightness, and the
+// two notes that used to hang off this block belong to it (stage 3) — the gate sits at
+// OUR country's altitudes rather than a downland's 30-180 m, because a gate set at 30 m
+// left the pale, dry "peak" half of the tint — the half that stops a meadow reading as
+// green felt — out of almost every frame; and the knee beside the road is gentler than
+// slowroads', because a gravel verge fringed with straw-coloured grass is the one place
+// the eye stands close enough to catch the lie.
+float gdLight = gdMeadow.light;
+float gdDark = gdMeadow.dark;
 
 vec3 gdGrassTex;
 ${near
@@ -411,21 +410,14 @@ if ( gdSnow > 0.001 ) {
   gdCol = mix( gdCol, ${SNOW_GLSL} * ( 0.88 + 0.35 * groundLuma( gdCol ) ), gdSnow );
 }
 
-// --- Multi-scale detail, applied last so that every layer above carries it: the 100 m
-// speckle and the 500 m blotches that stop a repeated photograph from reading as one.
-// Weakest underfoot, full at three hundred metres — the distance at which a tiling
-// pattern starts to show — and never a flat multiply, because a mask sampled at three
-// scales is a pattern with no period.
-float gdDetailFar = texture2D( ${textureUniform('detailFar')}, gdW / ${n(GROUND_SCALE.fade2000)} ).r;
-float gdBlend = ( 1.0 - gdDetailFar ) * ( 0.6 + 0.4 * gdLight ) * 2.0;
-float gdBlendB = groundScreen( 1.0 - texture2D( ${textureUniform('detailFar')}, gdW / ${n(GROUND_SCALE.fade100)} ).r, 1.0 - texture2D( ${textureUniform('detailFar')}, gdW / ${n(GROUND_SCALE.fade500)} ).r ) * min( 1.0, gdBlend * 10.0 );
-gdBlend = mix( gdBlendB, gdBlend, clamp( gdView / 800.0, 0.0, 1.0 ) ) * clamp( 0.4 + 0.6 * gdView / 300.0, 0.0, 1.0 );
-gdBlend += ( 1.0 - ${near
-  ? `mix( texture2D( ${textureUniform('detailNear')}, gdW / ${n(GROUND_SCALE.fade100)} ).r, 1.0, gdSnow )`
-  : `${n(DETAIL_NEAR_MEAN)}`} ) * ( 0.45 + 0.25 * gdLight );
-// Clamped: the mask is a MULTIPLIER on an albedo, and an unclamped one could take a dark
-// texel under a dark blotch past zero and print a black hole in a green field.
-gdCol *= 1.0 - min( 0.8, gdBlend );
+// --- Multi-scale detail, applied last so that every layer above carries it, from the one
+// function the tufts call too (\`groundMeadowDetail\`): the 100 m speckle and the 500 m
+// blotches that stop a repeated photograph from reading as one. Clamped: the mask is a
+// MULTIPLIER on an albedo, and an unclamped one could take a dark texel under a dark
+// blotch past zero and print a black hole in a green field.
+gdCol *= 1.0 - min( 0.8, groundMeadowDetail( gdW, gdLight, gdView, ${near
+  ? `1.0 - mix( texture2D( ${textureUniform('detailNear')}, gdW / ${n(GROUND_SCALE.fade100)} ).r, 1.0, gdSnow )`
+  : `1.0 - ${n(DETAIL_NEAR_MEAN)}`} ) );
 
 // --- Snow over everything it can lie on: patchy, thinner under a wood, and never pure
 // white, because a Russian winter is grey.

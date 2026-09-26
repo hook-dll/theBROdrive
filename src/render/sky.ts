@@ -9,6 +9,7 @@ import { newSeasonState, type SeasonState } from '../world/season';
 import { MOONLIGHT, newLookPalette, paletteAt, type LookPalette } from '../world/look/palette';
 import { fogMaterialUniforms, FOG_PARS_GLSL, FOG_SKY_GRADIENT_GLSL, writeFog } from './look/fog';
 import { setGroundLook } from './look/groundmaterial';
+import { setBushLook } from './look/bushmaterial';
 import { setWorldLighting } from './look/lighting';
 import { AstronomySystem } from './astronomy';
 import { Clouds } from './clouds';
@@ -529,6 +530,9 @@ export class Sky {
     // The ground's own colours, from the same table: the meadow's four tones, the season's
     // layer tints and the crop colours, written once for every ground material there is.
     setGroundLook(this.palette);
+    // The bushes' two atlases and the mix between them, off the ground's own season pair,
+    // so a bush changes season on the frame its ground does.
+    setBushLook(this.palette);
 
     // --- Dome ------------------------------------------------------------------
     this.uSunDir.copy(celestial.sun.direction);

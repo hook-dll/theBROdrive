@@ -53,6 +53,17 @@ const SPECS = {
   detailNear: { file: 'detail_near.webp', srgb: false, role: 'near multiplicative detail' },
   detailFar: { file: 'detail_far.webp', srgb: false, role: 'far multiplicative detail' },
   detailFarWinter: { file: 'detail_far_winter.webp', srgb: false, role: 'far detail, winter' },
+  // The vegetation atlases of stage 3. `grassAtlas` is a LUMINANCE sprite sheet — the
+  // plants' own unlit brightness, cut out in alpha — so it is decoded as sRGB like every
+  // other photograph; `grassFlora` is a mask and stays linear. The four bush atlases are
+  // photographed colour with an alpha cut-out, one per season, and they keep the same
+  // four slots every season so a bush is placed once and merely re-rendered.
+  grassAtlas: { file: 'grass_atlas.webp', srgb: true, role: 'grass sprite sheet, 8 cells' },
+  grassFlora: { file: 'grass_flora.webp', srgb: false, role: 'grass flower mask' },
+  bushSpring: { file: 'bush_spring.webp', srgb: true, role: 'bush sprites, spring' },
+  bushSummer: { file: 'bush_summer.webp', srgb: true, role: 'bush sprites, summer' },
+  bushAutumn: { file: 'bush_autumn.webp', srgb: true, role: 'bush sprites, autumn' },
+  bushWinter: { file: 'bush_winter.webp', srgb: true, role: 'bush sprites, winter' },
 } as const;
 
 export type GroundTextureName = keyof typeof SPECS;

@@ -2,7 +2,7 @@
 //
 //   node tools/look/build.mjs                    # everything (needs the Blender runs)
 //   node tools/look/build.mjs --only ground,road # one group; groups: noise ground
-//                                                # road grass bush trees
+//                                                # road grass bush trees stumps
 //   node tools/look/build.mjs --manifest         # rewrite manifest.json from metadata only
 //
 // Each builder module exports:
@@ -19,7 +19,7 @@ import { readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { LOOK, OUTDIR, ROOT, flags, hasFlag, ensureDirs } from './lib/util.mjs';
 
-const GROUPS = ['noise', 'ground', 'road', 'grass', 'bush', 'trees'];
+const GROUPS = ['noise', 'ground', 'road', 'grass', 'bush', 'trees', 'stumps'];
 
 function selected() {
   const only = [...flags].find((f) => f.startsWith('--only'));
@@ -54,7 +54,7 @@ async function writeManifest(modules) {
   const files = {};
   let total = 0;
   let missing = 0;
-  const order = ['noise', 'ground', 'road', 'grass', 'bush', 'trees'];
+  const order = ['noise', 'ground', 'road', 'grass', 'bush', 'trees', 'stumps'];
   const mods = [...modules].sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
   for (const mod of mods) {
     for (const o of mod.outputs ?? []) {

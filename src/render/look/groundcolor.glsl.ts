@@ -130,6 +130,9 @@ export function setGroundColours(palette: LookPalette): void {
   for (let i = 0; i < 21; i++) crops[i] = src[i]!;
 }
 
+/** A world scale as GLSL source: the metres are compile-time constants of the shader. */
+const num = (value: number): string => value.toFixed(4);
+
 /**
  * The declarations and the maths, for insertion after `#include <common>` in whichever
  * stage needs it. `SEASON_GLSL` (render/season.ts) supplies the season channels, which
@@ -172,7 +175,7 @@ vec3 groundGrassTint( float fade7, float fade100, float variation, float closeVa
   float t = clamp( blend, -0.25, 1.25 );
   vec3 base = mix( uGroundGrassA, uGroundGrassB, t );
   vec3 peak = mix( uGroundPeakA, uGroundPeakB, t );
-  float tip = clamp( clamp( lightGrass + variation - closeVar, 0.0, 1.0 ) * 2.0 * blade, 0.0, 1.0 );
+  float tip = clamp( clamp( lightGrass + variation - closeVar, 0.0, 1.0 ) * 1.45 * blade, 0.0, 1.0 );
   return mix( base, peak, tip );
 }
 
@@ -192,5 +195,81 @@ vec3 groundHeightBlend( vec3 a, float ha, vec3 b, float hb, float w, float depth
   float bb = max( hb + w - top, 0.0 );
   float sum = ba + bb;
   return sum < 1e-4 ? mix( a, b, w ) : ( a * ba + b * bb ) / sum;
+}
+
+/**
+ * THE MEADOW'S OWN INPUTS, AT ONE POINT ON THE GROUND.
+ *
+ * Everything \`groundGrassTint\` needs that is a fact about the place rather than about a
+ * photograph: the two fades that pick between the meadow's two tones, the 2 km and 500 m
+ * patch maps, and the two terms the tint and the detail masks both read — how pale and
+ * high this piece of country is, and how much its hollows darken. All of them are pure
+ * functions of the world position, the height and the distance past the asphalt edge.
+ *
+ * WHY IT IS A FUNCTION AND NOT A PARAGRAPH IN EACH SHADER. It was a paragraph in each
+ * shader, and the two copies drifted: the tufts read the 4 km fade off the wrong field,
+ * wrote the height gate with the wrong sign, and fed the tint a lightness four times the
+ * ground's, so a tuft stood in front of its own ground as a pale straw card while the
+ * ground under it stayed green. A tuft's whole colour is the ground's colour, so the two
+ * must not be able to disagree — the same reason the palette hands out one set of
+ * uniforms.
+ *
+ * THE SAMPLERS ARE THE GROUND'S OWN (\`uGroundTexNoiseFine\`, \`uGroundTexNoiseVariation\`),
+ * declared by the caller: a material that paints a meadow has them bound already.
+ *
+ * \`fade7Forced\` is the one caller-specific input: the 7 m field is the nearest thing in
+ * the whole look and aliases at two hundred metres, so the vista forces it to a constant
+ * rather than sampling it. Zero samples the field; a positive value is used as it is.
+ */
+struct GroundMeadow {
+  /** The 7 m, 100 m and 500 m fades, and the two patch maps already centred on zero. */
+  float fade7;
+  float fade100;
+  float fade500;
+  float variation;
+  float closeVar;
+  /** How pale this country is (slowroads' altitudinal lightness), and how dark the hollows. */
+  float light;
+  float dark;
+};
+
+GroundMeadow groundMeadowAt( vec2 w, float y, float pastEdge, float fade7Forced ) {
+  GroundMeadow m;
+  m.fade7 = fade7Forced > 0.0
+    ? fade7Forced
+    : texture2D( uGroundTexNoiseFine, w / ${num(GROUND_SCALE.fine)} ).r;
+  m.fade100 = texture2D( uGroundTexNoiseFine, w / ${num(GROUND_SCALE.fade100)} ).r;
+  m.fade500 = texture2D( uGroundTexNoiseFine, w / ${num(GROUND_SCALE.fade500)} ).r;
+  float fade4000 = texture2D( uGroundTexNoiseFine, w / ${num(GROUND_SCALE.fade4000)} ).r;
+  m.variation = texture2D( uGroundTexNoiseVariation, w / ${num(GROUND_SCALE.fade2000)} ).r - 0.5;
+  m.closeVar = ( 1.0 - texture2D( uGroundTexNoiseVariation, w / ${num(GROUND_SCALE.fade500)} ).r ) - 0.5;
+  float heightVal = clamp( ( y - ( -12.0 + fade4000 * 28.0 ) ) / 78.0, 0.0, 1.0 );
+  m.light = min( 1.0, heightVal * ( m.fade500 + heightVal * 0.5 ) );
+  m.light *= max( 0.45, max( 0.0, pastEdge ) / ( 0.5 + m.fade7 ) );
+  m.dark = clamp( ( m.fade100 - 0.25 ) * 2.0, 0.0, 1.0 );
+  return m;
+}
+
+/**
+ * THE MULTI-SCALE DETAIL MASK, at the same point: the 100 m speckle and the 500 m
+ * blotches that stop a repeated photograph from reading as one. Weakest underfoot and
+ * full at three hundred metres, the distance at which a tiling pattern starts to show,
+ * and never a flat multiply, because a mask sampled at three scales is a pattern with no
+ * period. The caller subtracts it from one and clamps, because it is a multiplier on an
+ * albedo and an unclamped one would print a black hole in a green field.
+ *
+ * \`nearSpeckle\` is the near detail mask's own value: a fetch where the material has that
+ * sampler bound (the tiles and the tufts), the layer's mean where the sampler budget does
+ * not stretch to it (the vista).
+ */
+float groundMeadowDetail( vec2 w, float light, float view, float nearSpeckle ) {
+  float far1 = texture2D( uGroundTexDetailFar, w / ${num(GROUND_SCALE.fade2000)} ).r;
+  float blend = ( 1.0 - far1 ) * ( 0.6 + 0.4 * light ) * 2.0;
+  float blendB = groundScreen(
+    1.0 - texture2D( uGroundTexDetailFar, w / ${num(GROUND_SCALE.fade100)} ).r,
+    1.0 - texture2D( uGroundTexDetailFar, w / ${num(GROUND_SCALE.fade500)} ).r ) * min( 1.0, blend * 10.0 );
+  float d = mix( blendB, blend, clamp( view / 800.0, 0.0, 1.0 ) );
+  d *= clamp( 0.4 + 0.6 * view / 300.0, 0.0, 1.0 );
+  return d + nearSpeckle * ( 0.32 + 0.18 * light );
 }
 `;

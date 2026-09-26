@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { hashUnit3 } from '../core/rng';
-import { DESERT_TILE_SIZE, TREE_STRIDE, UNDERGROWTH_KIND_FROM, UNDERGROWTH_KIND_TO } from './deserttiledata';
+import { DESERT_TILE_SIZE, TREE_STRIDE, TreeKind, UNDERGROWTH_KIND_FROM, UNDERGROWTH_KIND_TO } from './deserttiledata';
 import type { ForestWorkerRequest, ForestWorkerResponse } from './forestworker';
 import { FAR_WOODS_TO_M } from './farwoods';
 import { applyModelDissolve, bakeImpostorAtlas, ImpostorField, type ImpostorAtlas } from './impostors';
@@ -55,6 +55,17 @@ const REBUCKET_M = 14;
  * still reach the far edge of the handover band before the next.
  */
 const MODEL_REACH_M = IMPOSTOR_FROM_M + IMPOSTOR_BLEND_M / 2 + REBUCKET_M;
+/**
+ * The kinds the bush layer draws (stage 3): hazel, rowan, bracken, juniper. Their own
+ * procedural models are still built — stage 4 deletes `world/props/trees.ts` whole —
+ * but this renderer never draws them again, the bushes' atlas does.
+ */
+const BUSH_KINDS: ReadonlySet<number> = new Set([
+  TreeKind.Bush,
+  TreeKind.Rowan,
+  TreeKind.Fern,
+  TreeKind.Juniper,
+]);
 const VARIANT_TAG = 0x46524553;
 const SHAPE_TAG = 0x53484150;
 /** Impostor tiles are kept out to this many tiles: the open trees' reach. */
@@ -180,6 +191,16 @@ export class ForestRenderer {
   private readonly tiles = new Map<string, TileTrees>();
   /** Where no tree may stand (POI yards); set by the game, read on every tile. */
   clearings: ClearingSource | null = null;
+  /**
+   * The undergrowth, handed out instead of drawn (stage 3). The four small kinds —
+   * hazel, rowan, bracken, juniper — are the bush layer's own atlas now
+   * (`world/bushes.ts`), and this renderer visits every tree within reach once per
+   * refill, so it is also the one place that knows where they stand. `beginBush`
+   * clears the layer's list, `endBush` closes it.
+   */
+  onBush: ((kind: number, x: number, y: number, z: number, yaw: number, scale: number, tint: number) => void) | null = null;
+  beginBush: (() => void) | null = null;
+  endBush: (() => void) | null = null;
   private variants: readonly TreeVariant[][] | null = null;
   /** [kind][variant][lod] -> one bucket per part. */
   private buckets: Bucket[][][][] = [];
@@ -467,6 +488,7 @@ export class ForestRenderer {
   private rebucket(camX: number, camZ: number): void {
     const variants = this.variants!;
     for (const kind of this.buckets) for (const variant of kind) for (const lod of variant) for (const b of lod) b.count = 0;
+    this.beginBush?.();
     const reach = MODEL_REACH_M + DESERT_TILE_SIZE;
     for (const tile of this.tiles.values()) {
       // A whole tile out of reach is skipped without looking at its trees.
@@ -479,6 +501,13 @@ export class ForestRenderer {
         const d = Math.hypot(wx - camX, wz - camZ);
         if (d >= MODEL_REACH_M) continue;
         const kind = t[o + 5]!;
+        // The bushes are not drawn here at all: they are handed to the bush layer, which
+        // stands them in its own cards and fades them by ITS distance law (world/bushes.ts).
+        // That is also why the undergrowth's own dissolve is checked after this.
+        if (BUSH_KINDS.has(kind)) {
+          this.onBush?.(kind, wx, t[o + 1]!, wz, t[o + 4]!, t[o + 3]!, t[o + 6]!);
+          continue;
+        }
         // Undergrowth has dissolved by here (world/props/trees.ts).
         if (kind >= UNDERGROWTH_KIND_FROM && kind <= UNDERGROWTH_KIND_TO && d >= UNDERGROWTH_FADE_TO_M) continue;
         treeShape(wx, wz, variants[kind]!.length, shape);
@@ -492,6 +521,7 @@ export class ForestRenderer {
         for (const bucket of this.buckets[kind]![shape.variant]![lod]!) this.push(bucket, matrix, tint);
       }
     }
+    this.endBush?.();
     for (const kind of this.buckets) {
       for (const variant of kind) {
         for (const lod of variant) {

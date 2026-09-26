@@ -41,6 +41,7 @@ import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
+import { BushField } from './world/bushes';
 import { GrassField } from './world/grass';
 import { poisBetween } from './world/poi';
 import { variantDef } from './world/poivariantbuild';
@@ -474,10 +475,33 @@ async function boot(): Promise<void> {
   // Far anchors for the eye: churches, water towers, elevators, masts, power lines.
   const landmarks = new Landmarks(renderer.scene, origin, terrain, roadDistance, world.seed);
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__landmarks'] = landmarks;
-  // Grass within a few tens of metres of the camera, stood on the tiles' own surface.
-  const grass = new GrassField(renderer.scene, origin, terrain, road, roadDistance, (x, z) =>
-    desert.groundHeightAt(x, z),
+  // The verge: the band of tufts either side of the road, stood on the tiles' own surface.
+  // Its band, pitch and reach are the rung's (see `GRASS_TIERS`), so the rung is passed in
+  // and follows the settings from `applySettings` below.
+  const grass = new GrassField(
+    renderer.scene,
+    origin,
+    terrain,
+    road,
+    roadDistance,
+    (x, z) => desert.groundHeightAt(x, z),
+    world.state.settings.graphicsQuality,
   );
+  if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__grass'] = grass;
+  // The bushes: the woods' undergrowth, handed over by the forest renderer, plus the
+  // road ditch's own weeds (see `world/bushes.ts`).
+  const bushes = new BushField(
+    renderer.scene,
+    origin,
+    terrain,
+    road,
+    roadDistance,
+    (x, z) => desert.groundHeightAt(x, z),
+  );
+  desert.forest.onBush = bushes.onTreeBush;
+  desert.forest.beginBush = () => bushes.beginTreeRefill();
+  desert.forest.endBush = () => bushes.endTreeRefill();
+  if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__bushes'] = bushes;
 
   // Scratches for the impact test in the fixed step: never allocated per tick.
   const impactForward = new THREE.Vector3();
@@ -1998,6 +2022,7 @@ async function boot(): Promise<void> {
       Math.atan(Math.tan(THREE.MathUtils.degToRad(renderer.camera.fov) / 2) * renderer.camera.aspect),
     );
     grass.update(cam.x + origin.x, cam.z + origin.z, skyViewDir.x, skyViewDir.z, frameDt);
+    bushes.update(cam.x + origin.x, cam.z + origin.z, skyViewDir.x, skyViewDir.z, frameDt);
     if (!driving) {
       // A walker leaves a path too, narrower than a wheel's.
       const feet = player.absolutePosition;
@@ -2319,6 +2344,7 @@ async function boot(): Promise<void> {
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
       sky.setQuality(tier, mobilePresentation);
+      grass.setQuality(tier);
       const horizon = viewDistanceFor(tier, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);

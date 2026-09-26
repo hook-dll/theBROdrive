@@ -61,9 +61,11 @@
 | id | что стало | как получено |
 |---|---|---|
 | `plants.py bush render` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp`, `bush_winter.webp` | tools/look/blender/plants.py — 4 slots x 4 seasons, 512 px, unlit photo colour with a season grade |
-| `plants.py cell renders` | `grass_atlas.webp`, `grass_flora.webp` | tools/look/blender/plants.py — 8 orthographic cells, unlit luminance, no alpha cards |
+| `plants.py cell renders` | `grass_atlas.webp`, `grass_flora.webp` | tools/look/blender/plants.py — 8 orthographic cells, 256 px, unlit luminance, no alpha cards; each cell is a scene of many CC0 plants sized and scattered to fill its own frame |
 | `plants.py crossed-card bush mesh` | `bush.glb` | tools/look/blender/plants.py — four crossed cards, UVs over the first atlas column |
+| `plants.py generated umbel head` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp` | tools/look/blender/plants.py — umbel_head_texture(): 150 white florets scattered over a shallow dome on transparent, 256 px |
 | `trees.py renders and models` | `trees_deciduous_*.webp`, `trees_deciduous_*_n.webp`, `trees_conifer_*_m.webp`, `trees_conifer_*_a.webp`, `imposters_deciduous_*.webp`, `imposters_conifer_*.webp`, `tree_*.glb` | tools/look/trees/trees.py — branch modules, whole-tree sprite, impostor bakes, bark cylinder, GLB export |
+| `trees/trees.py decimation` | `tree_stump_0.glb`, `tree_stump_1.glb`, `tree_log_0.glb`, `tree_log_1.glb`, `stump.webp` | tools/look/trees/trees.py — job stumps: re-centre, remap UVs into the atlas tile, Decimate |
 
 ## Сгенерировано кодом (our code)
 
@@ -87,9 +89,11 @@
 | `coast_sand_02` | `sand.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/coast_sand_02/coast_sand_02_diff_1k.jpg |
 | `dandelion_01` | `grass_atlas.webp`, `grass_flora.webp` | https://polyhaven.com/a/dandelion_01 |
 | `dandelion_01` | `bush_summer.webp` | https://polyhaven.com/a/dandelion_01 |
+| `dead_tree_trunk` | `tree_log_0.glb`, `stump.webp` | https://polyhaven.com/a/dead_tree_trunk |
+| `dead_tree_trunk_02` | `tree_log_1.glb`, `stump.webp` | https://polyhaven.com/a/dead_tree_trunk_02 |
 | `dry_branches_medium_01` | `bush_winter.webp` | https://polyhaven.com/a/dry_branches_medium_01 |
 | `fern_02` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp` | https://polyhaven.com/a/fern_02 |
-| `fir_tree_01` | `trees_conifer_*_m.webp`, `imposters_conifer_*_d.webp` | https://polyhaven.com/a/fir_tree_01 |
+| `fir_sapling` | `trees_conifer_*_m.webp`, `imposters_conifer_*_d.webp` | https://polyhaven.com/a/fir_sapling |
 | `grass_bermuda_01` | `grass_atlas.webp` | https://polyhaven.com/a/grass_bermuda_01 |
 | `grass_medium_01` | `grass_atlas.webp` | https://polyhaven.com/a/grass_medium_01 |
 | `grass_medium_01 dry diffuse` | `grass_atlas.webp` | https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_dry_diff_1k.jpg |
@@ -97,14 +101,19 @@
 | `gravel` | `gravel.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravel/gravel_diff_1k.jpg |
 | `leaves_forest_ground` | `road_overlay_autumn.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/leaves_forest_ground/leaves_forest_ground_diff_1k.jpg |
 | `nettle_plant` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp` | https://polyhaven.com/a/nettle_plant |
-| `pine_sapling_small` | `trees_conifer_*_m.webp`, `imposters_conifer_*_d.webp` | https://polyhaven.com/a/pine_sapling_small |
+| `pine_sapling_medium` | `trees_conifer_*_m.webp`, `imposters_conifer_*_d.webp` | https://polyhaven.com/a/pine_sapling_medium |
 | `road_damaged` | `road_asphalt.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/road_damaged/road_damaged_diff_1k.jpg |
 | `road_damaged_clean` | `road_asphalt.webp`, `road_snow.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/road_damaged_clean/road_damaged_clean_diff_1k.jpg |
+| `shrub_01` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp`, `bush_winter.webp` | https://polyhaven.com/a/shrub_01 |
 | `shrub_02` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp`, `bush_winter.webp` | https://polyhaven.com/a/shrub_02 |
+| `shrub_03` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp`, `bush_winter.webp` | https://polyhaven.com/a/shrub_03 |
 | `shrub_04` | `bush_spring.webp`, `bush_summer.webp` | https://polyhaven.com/a/shrub_04 |
 | `snow_02` | `road_snow.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_02/snow_02_diff_1k.jpg |
 | `snow_03` | `road_snow.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_03/snow_03_diff_1k.jpg |
 | `snow_floor` | `road_snow.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_floor/snow_floor_diff_1k.jpg |
+| `tree_stump_01` | `tree_stump_0.glb`, `stump.webp` | https://polyhaven.com/a/tree_stump_01 |
+| `tree_stump_02` | `tree_stump_1.glb`, `stump.webp` | https://polyhaven.com/a/tree_stump_02 |
+| `weed_plant_02` | `bush_spring.webp`, `bush_summer.webp`, `bush_autumn.webp` | https://polyhaven.com/a/weed_plant_02 |
 | `worn_asphalt` | `road_asphalt.webp`, `road_snow.webp` | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/worn_asphalt/worn_asphalt_diff_1k.jpg |
 
 ## Обработка

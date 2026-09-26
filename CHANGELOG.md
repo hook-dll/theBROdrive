@@ -79,6 +79,36 @@ questions live in `docs/country.md`.
 
 #### Changed
 
+- THE VERGE IS GRASS AND THE UNDERGROWTH IS BUSHES (2026-09-26, renderer v2 stage 3).
+  The band of tufts along the road had been drawn but came out as black silhouettes: the
+  four ground colours it is painted with were never bound to its shader at all —
+  `Object.assign( shader.uniforms, uniforms, ...Object.entries( groundColourUniforms() ) )`
+  spreads the entries into numeric keys instead of merging them, so `uGroundGrassA/B` and
+  `uGroundPeakA/B` read as zero and the tuft's colour was `vec3(0)`. With them bound the
+  tuft is now painted by the ground's own function: `groundMeadowAt`/`groundMeadowDetail`
+  (`render/look/groundcolor.glsl.ts`) are called by the tiles, the tufts and the bushes
+  alike, at the same world scales and off the same samplers, which also retires two copies
+  of that arithmetic that had drifted (the tufts read the 4 km fade off the wrong field and
+  the height gate with the wrong sign, so they stood in front of their ground as pale
+  straw). Tufts no longer take the shadow map — the tiles refuse it outright, so a tuft
+  that took it stood in shade on a sunlit verge — the short cells of the atlas (0.28 and
+  0.34 m) are no longer drawn, and the alpha cut tightens with distance instead of being
+  widened by the mip level, which had turned a band of tufts at forty metres into a grid of
+  opaque rectangles. The verge's own numbers, measured against `img/autumn-day-*.jpg`, are
+  luma 76 / saturation 0.32 / local contrast 10.9 where slowroads measures 87 / 0.30 / 8.1
+  (they were 106 / 0.52 / 21.5), and the meadow at 30-150 m is 99 against its 122.
+  The four small kinds `plantTrees` grows — hazel, rowan, bracken, juniper — are no longer
+  drawn by the tree renderer: they are handed to a new bush layer (`world/bushes.ts` +
+  `render/look/bushmaterial.ts`, one instanced draw) that puts the wood's undergrowth on
+  `public/look/bush.glb`'s crossed cards and `bush_{season}.webp`'s four slots, with the
+  same placement randomness and no colliders. The same layer plants the road's own ditch —
+  a lattice of world cells 4.5-15 m past the asphalt edge, filtered by crop and wetness,
+  umbellifers and willowherb in the first metres and scrub beyond, willow scrub where the
+  ground never drains — with sink, shrink and a rising alpha test by distance. Honest
+  weaknesses (tuft cards still read as rectangles at 10-60 m, the atlas's dense cells being
+  the cause; tufts darker than their ground on flat light; a quilted near ground at golden
+  hour; fewer acceptance frames than asked) are in `docs/renderer-v2-log.md`, §Этап 3.
+
 - THE ROAD IS A PHOTOGRAPH OF A ROAD NOW (2026-09-26, renderer v2 stage 5). The
   carriageway was a procedural canvas tile of uniform aggregate with a hard polygon edge,
   weathered per vertex into wheel paths and a dusty rim, and it looked like poured
