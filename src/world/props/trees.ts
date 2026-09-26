@@ -178,64 +178,205 @@ function flatColour(g: THREE.BufferGeometry, colour: (x: number, y: number, z: n
 }
 
 /**
- * A spruce: a straight stem to the top, a dark narrow cone for the crown's depth, and
- * round it whorls of branches as cards painted with spruce sprays (render/leafpaint.ts),
- * each drooping from the stem and lifting a little at the tip. Whorls are wide at the
- * foot and shrink to the leader. The cone is what the eye takes for the shade inside
- * a spruce; the sprays give it the ragged, layered edge the solid tiers never had.
+ * A habit a spruce grows in. Twelve of them, because a wood of one spruce repeated is
+ * not a wood: the trees differ in height first of all, then in where the crown begins,
+ * how wide its skirts are, how uneven their gaps, how deep they hang and what became
+ * of the top. Each variant is one habit built by the same code, and every level builds
+ * the same habit (commit ddc13bc), so a tree keeps its shape as it hands over to its
+ * impostor.
  */
-function spruceGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+interface SpruceHabit {
+  /** For the docs and the tree lab. */
+  readonly name: string;
+  /** Height, metres, before the per-tree scale. */
+  readonly height: readonly [number, number];
+  /** Height of the lowest tier: the bare stem below it. */
+  readonly skirt: number;
+  /** Tiers, lowest and highest count. */
+  readonly tiers: readonly [number, number];
+  /** Spread of the gaps between tiers: 0 even, 1 gaps from twice to half the mean. */
+  readonly uneven: number;
+  /** Crown half-width at the foot, metres. */
+  readonly width: readonly [number, number];
+  /** Crown radius over height: 0.8 bulges the foot, 1.0 is near straight, 1.4 pinches. */
+  readonly taper: number;
+  /** How far a bough's tip falls over the tier below, in gaps between tiers: 1.0
+   *  puts the tip level with the whorl below it, and the tiers just touch. */
+  readonly droop: number;
+  /** Boughs of a tier, low and high count. */
+  readonly branches: readonly [number, number];
+  /** Fraction of boughs missing: the holes a crown has. */
+  readonly loss: number;
+  /** Long boughs on the clear side: 1 even, 1.45 a tree grown at the edge of a wood. */
+  readonly lean: number;
+  /** How far the crown's axis bends toward the light: 0..0.5, over four metres. */
+  readonly bend: number;
+  /** How far the boughs lie toward the wind: 0..0.6 of the way. */
+  readonly sweep: number;
+  /** Where the lean, the bend and the wind point, degrees. */
+  readonly toward: number;
+  /** What became of the top. */
+  readonly top: 'spire' | 'stub' | 'twin';
+}
+
+const SPRUCE_HABITS: readonly SpruceHabit[] = [
+  // The spruce of a closed wood: tall, its crown starting low, tiers close and even.
+  { name: 'ельник', height: [20, 26], skirt: 2.6, tiers: [13, 15], uneven: 0.35, width: [2.9, 3.3], taper: 1.05, droop: 0.85, branches: [6, 7], loss: 0.05, lean: 1.03, bend: 0.05, sweep: 0.05, toward: 0, top: 'spire' },
+  // Grown in the open: short, a broad skirt of long boughs nearly to the ground.
+  { name: 'выгон', height: [11, 14], skirt: 0.9, tiers: [11, 13], uneven: 0.45, width: [3.7, 4.3], taper: 0.8, droop: 1.0, branches: [7, 8], loss: 0.07, lean: 1.06, bend: 0.12, sweep: 0.08, toward: 60, top: 'spire' },
+  // A thicket of young spruce: narrow, dense, a green cone head to foot.
+  { name: 'молодняк', height: [6.5, 9.5], skirt: 0.5, tiers: [11, 13], uneven: 0.28, width: [1.7, 2.2], taper: 0.95, droop: 0.9, branches: [6, 7], loss: 0.04, lean: 1.02, bend: 0.06, sweep: 0.06, toward: 30, top: 'spire' },
+  // Old: the lower tiers died off, and a bare grey stem stands five metres clear.
+  { name: 'оголённый ствол', height: [21, 26], skirt: 5.0, tiers: [11, 13], uneven: 0.5, width: [3.4, 4.2], taper: 0.85, droop: 0.9, branches: [6, 8], loss: 0.08, lean: 1.08, bend: 0.16, sweep: 0.1, toward: 210, top: 'spire' },
+  // At the edge of a wood: boughs long on the clear side and short in the shade, and
+  // the crown's axis leaning after the light.
+  { name: 'кривобокая', height: [15, 20], skirt: 1.7, tiers: [12, 14], uneven: 0.55, width: [3.0, 3.8], taper: 1.0, droop: 0.95, branches: [6, 7], loss: 0.1, lean: 1.45, bend: 0.4, sweep: 0.22, toward: 45, top: 'spire' },
+  // On a ridge: every bough laid the way the wind blows, the crown streaming aside.
+  { name: 'ветровая', height: [13, 18], skirt: 1.5, tiers: [12, 14], uneven: 0.55, width: [2.8, 3.4], taper: 1.1, droop: 1.0, branches: [6, 7], loss: 0.12, lean: 1.3, bend: 0.3, sweep: 0.5, toward: 300, top: 'spire' },
+  // The weeping spruce: narrow, and every tier hangs far below its whorl.
+  { name: 'плакучая', height: [14, 18], skirt: 1.2, tiers: [10, 12], uneven: 0.5, width: [2.9, 3.5], taper: 1.35, droop: 1.45, branches: [6, 7], loss: 0.08, lean: 1.05, bend: 0.1, sweep: 0.08, toward: 90, top: 'spire' },
+  // Grown in the shade: thin, sparse, the boughs reaching out for the light.
+  { name: 'теневая', height: [11, 15], skirt: 1.1, tiers: [8, 10], uneven: 0.6, width: [1.6, 2.0], taper: 1.2, droop: 0.85, branches: [5, 6], loss: 0.34, lean: 1.08, bend: 0.15, sweep: 0.15, toward: 150, top: 'spire' },
+  // On bog and in wet ground: short, thin, ragged, the tiers far apart.
+  { name: 'болотная', height: [8, 12], skirt: 1.4, tiers: [9, 11], uneven: 0.7, width: [2.0, 2.6], taper: 1.15, droop: 1.0, branches: [5, 6], loss: 0.3, lean: 1.05, bend: 0.12, sweep: 0.2, toward: 240, top: 'spire' },
+  // Twinned: frost or a bud took the leader, and two tops grew.
+  { name: 'двухвершинная', height: [16, 21], skirt: 1.8, tiers: [12, 14], uneven: 0.45, width: [3.0, 3.8], taper: 1.0, droop: 0.9, branches: [6, 7], loss: 0.1, lean: 1.12, bend: 0.2, sweep: 0.12, toward: 0, top: 'twin' },
+  // Broken: the top snapped under wet snow, and a blunt ring of boughs is what is left.
+  { name: 'сломанная', height: [12, 17], skirt: 1.6, tiers: [11, 13], uneven: 0.5, width: [2.8, 3.6], taper: 1.0, droop: 0.95, branches: [6, 7], loss: 0.12, lean: 1.15, bend: 0.25, sweep: 0.18, toward: 120, top: 'stub' },
+  // The dark spruce of a damp gully: many tiers, dense boughs, near black.
+  { name: 'глухая', height: [15, 19], skirt: 1.2, tiers: [14, 16], uneven: 0.28, width: [2.8, 3.4], taper: 1.15, droop: 0.8, branches: [7, 8], loss: 0.03, lean: 1.02, bend: 0.08, sweep: 0.05, toward: 200, top: 'spire' },
+];
+
+/**
+ * A spruce: a slim stem, then tiers of drooping boughs — cards painted with spruce
+ * sprays (render/leafpaint.ts) — shortening to a spire.
+ *
+ * Nothing solid stands inside it. A dark cone of mesh used to: it read as what it was,
+ * a smooth surface wherever the boughs left a gap, with its rim the one straight line
+ * in a ragged tree, and above the top tier it stood bare as the dark spike the eye took
+ * for the cone of the trunk. In its place a few ragged cards hang inside the crown.
+ * They have no outline to follow, they wear the boughs' own colour family, and they
+ * take the crown's lighting (`finishCrown`), so a gap between tiers opens on depth.
+ *
+ * Tiers stand at uneven heights. Even ones stack into a cone, and the eye reads the
+ * straight line of their tips instead of counting tiers — which is what made a spruce
+ * of one silhouette repeated look like a cone with boughs stuck on it.
+ */
+function spruceGeometry(seed: number, pal: Palette, near: boolean, habit: SpruceHabit): TreeShape {
   const rnd = (i: number): number => hash2(seed * 31 + i, seed * 7 - i);
-  const H = 17 + rnd(1) * 5;
-  const base = 1.6;
+  const H = habit.height[0] + rnd(1) * (habit.height[1] - habit.height[0]);
+  const skirt = habit.skirt * (0.88 + rnd(2) * 0.24);
+  const span = H - skirt - 1.1;
+  const low = habit.tiers[0];
+  const whorls = low + Math.floor(rnd(0) * (habit.tiers[1] - low + 1));
+  const toward = (habit.toward * Math.PI) / 180;
+  const leanX = Math.cos(toward);
+  const leanZ = Math.sin(toward);
+  const sideX = -leanZ;
+  const sideZ = leanX;
+  // Tier heights: gaps drawn one by one and then stretched over the crown's span, so
+  // the ladder stays inside the tree whatever the draws come out like.
+  const gaps: number[] = [];
+  let drawn = 0;
+  for (let t = 0; t < whorls; t++) {
+    const g = 1 + (rnd(t + 200) - 0.5) * 2 * habit.uneven;
+    gaps.push(g);
+    drawn += g;
+  }
+  const tierY: number[] = [];
+  let at = skirt;
+  for (const g of gaps) {
+    at += (g / drawn) * span;
+    tierY.push(at);
+  }
+  /** How far the crown's axis leans at the height fraction `k`, metres. */
+  const axisAt = (k: number): number => habit.bend * 4 * Math.pow(Math.max(0, k), 1.6);
+  const R0 = habit.width[0] + rnd(60) * (habit.width[1] - habit.width[0]);
+  /** Crown radius at the height fraction `k`, with tier `t`'s own unevenness. */
+  const crownR = (k: number, t: number): number => (R0 * Math.pow(Math.max(0, 1 - k), habit.taper) + 0.3) * (0.9 + rnd(t + 240) * 0.2);
+  const trunkTop = tierY[whorls - 1]!;
   const parts: THREE.BufferGeometry[] = [
-    flatColour(new THREE.CylinderGeometry(0.06, 0.26, H, 5).translate(0, H / 2, 0), () => pal.trunk),
+    // The stem ends with the last tier. Run to the tip it showed as a bare stick through
+    // the crown, and the wood above the top tier was that cone. Its rings flare at the
+    // foot, slim to a pole, and follow the crown's axis.
+    tube(
+      [
+        { x: 0, y: 0, z: 0, r: 0.3 },
+        { x: leanX * axisAt(0.05), y: 0.8, z: leanZ * axisAt(0.05), r: 0.16 },
+        { x: leanX * axisAt(0.45), y: skirt + span * 0.45, z: leanZ * axisAt(0.45), r: 0.11 },
+        { x: leanX * axisAt(1), y: trunkTop, z: leanZ * axisAt(1), r: 0.055 },
+      ],
+      5,
+      () => pal.trunk,
+    ),
   ];
-  // The core: darker than the boughs and narrower, so it shows only between them. It
-  // is part of the crown, not the wood: as wood it took the boughs' shadow and went
-  // black between every whorl.
-  const core = asFlat(flatColour(new THREE.ConeGeometry(1.5 + rnd(2) * 0.3, H - base - 0.8, 7, 1, true).translate(0, base + (H - base - 0.8) / 2, 0), () => pal.spruceUnder));
   const pos: number[] = [];
   const nor: number[] = [];
   const uv: number[] = [];
   const col: number[] = [];
   const c = new THREE.Color();
-  // ONE SHAPE AT EVERY LEVEL. A far level with fewer, wider boughs showed its dark core
-  // between them and filled in at 60 m as the near level took over: a spruce that grew
-  // its branches as you drove up. The levels differ only in each bough's segments.
-  const whorls = 12 + Math.floor(rnd(0) * 3);
+  const under = new THREE.Color();
+  const lift = new THREE.Color();
+  /** One card of four corners, each corner (x, y, z, u, v), from the crown's colour. */
+  const card = (corners: readonly (readonly [number, number, number, number, number])[]): void => {
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      const p = corners[i]!;
+      pos.push(p[0], p[1], p[2]);
+      nor.push(0, 1, 0);
+      uv.push(p[3], p[4]);
+      col.push(c.r, c.g, c.b);
+    }
+  };
+  // ONE SHAPE AT EVERY LEVEL. A far level with fewer, wider boughs showed its dark
+  // inside between them and filled in at 60 m as the near level took over: a spruce
+  // that grew its branches as you drove up. The levels differ only in each bough's
+  // segments.
   for (let t = 0; t < whorls; t++) {
-    const k = t / whorls;
-    const y = base + k * (H - base - 1.2);
-    const R = (3.3 + rnd(t + 60) * 0.5) * (1 - k * 0.88) + 0.35;
-    const branches = 6 + Math.floor(rnd(t + 70) * 2);
+    const y = tierY[t]!;
+    const k = (y - skirt) / span;
+    const R = crownR(k, t);
+    const gap = y - (t === 0 ? skirt : tierY[t - 1]!);
+    const ox = leanX * axisAt(k);
+    const oz = leanZ * axisAt(k);
+    const count = habit.branches[0] + Math.floor(rnd(t + 70) * (habit.branches[1] - habit.branches[0] + 1));
     const twist = rnd(t + 10) * 3;
-    for (let b = 0; b < branches; b++) {
-      const a = twist + (b / branches) * Math.PI * 2 + (rnd(t * 50 + b) - 0.5) * 0.4;
-      const dx = Math.cos(a);
-      const dz = Math.sin(a);
-      const reach = R * (0.85 + rnd(t * 40 + b) * 0.3);
-      // Down at the middle, the tip lifting again: the classic spruce bough.
-      const droop = reach * (0.28 + rnd(t * 30 + b) * 0.12);
-      const width = reach * 1.15;
+    for (let b = 0; b < count; b++) {
+      // A tier is not a closed ring: a bough here and there is gone, and the hole it
+      // leaves is part of the crown.
+      if (rnd(t * 33 + b + 300) < habit.loss) continue;
+      const a = twist + (b / count) * Math.PI * 2 + (rnd(t * 50 + b) - 0.5) * 0.4;
+      const facing = Math.cos(a) * leanX + Math.sin(a) * leanZ;
+      // The bough's direction, laid over toward the wind where the tree grew windily.
+      let dx = Math.cos(a) * (1 - habit.sweep) + leanX * habit.sweep;
+      let dz = Math.sin(a) * (1 - habit.sweep) + leanZ * habit.sweep;
+      const flat = Math.hypot(dx, dz) || 1;
+      dx /= flat;
+      dz /= flat;
+      // Long on the clear side, short in the shade: most of an edge tree's character.
+      const reach = R * (0.78 + rnd(t * 40 + b) * 0.36) * (1 + 0.75 * (habit.lean - 1) * facing);
+      // The tip falls over the tier below but not onto it: the gap under a tier is what
+      // makes a tier read as one, and the lowest hang deepest.
+      const droop = reach * (0.12 + rnd(t * 30 + b) * 0.1) + gap * habit.droop * (1 + 0.2 * (1 - k));
+      // As wide across as it reaches: a narrower card leaves the tier below it bare and
+      // the crown reads through, and the spray's own painted taper does the shaping.
+      const width = reach * (0.95 + rnd(t * 44 + b + 400) * 0.35);
       // Rolled well off flat, either way: seen level, a flat spray is a line.
       const roll = (rnd(t * 20 + b) < 0.5 ? -1 : 1) * (0.45 + rnd(t * 25 + b) * 0.6);
-      // Across the branch: horizontal, then rolled about the branch.
       const px = -dz * Math.cos(roll);
       const py = Math.sin(roll);
       const pz = dx * Math.cos(roll);
       const cell = leafCellUv('fir', rnd(t * 90 + b));
       c.setHex(pal.spruce[(t + b) % pal.spruce.length]!);
-      const ax = dx * 0.25;
-      const az = dz * 0.25;
-      const ay = y + 0.2;
-      const bx = dx * reach;
-      const bz = dz * reach;
-      const by = y - droop;
+      const ex = ox + dx * 0.25;
+      const ez = oz + dz * 0.25;
+      const fy = y + 0.2;
+      const tx = ox + dx * reach;
+      const tz = oz + dz * reach;
+      const ty = y - droop;
       const corner = (along: number, across: number, u: number, v: number): void => {
-        const x = ax + (bx - ax) * along + px * across * width * 0.5;
-        const yy = ay + (by - ay) * along + py * across * width * 0.5 + along * (1 - along) * droop * -0.6;
-        const z = az + (bz - az) * along + pz * across * width * 0.5;
+        const x = ex + (tx - ex) * along + px * across * width * 0.5;
+        const yy = fy + (ty - fy) * along + py * across * width * 0.5 + along * (1 - along) * droop * -0.6;
+        const z = ez + (tz - ez) * along + pz * across * width * 0.5;
         pos.push(x, yy, z);
         nor.push(0, 1, 0);
         uv.push(u, v);
@@ -254,27 +395,90 @@ function spruceGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
       }
     }
   }
-  // The leader: a last upright spray at the top.
-  const lead = leafCellUv('fir', rnd(99));
-  c.setHex(pal.spruce[0]!);
-  for (const [a, b2] of [[0, 1], [Math.PI / 2, 1]] as const) {
-    const qx = Math.cos(a) * 0.3 * b2;
-    const qz = Math.sin(a) * 0.3 * b2;
-    const quad = [[-1, 0, lead.u0, lead.v0], [1, 0, lead.u1, lead.v0], [1, 1, lead.u1, lead.v1], [-1, 0, lead.u0, lead.v0], [1, 1, lead.u1, lead.v1], [-1, 1, lead.u0, lead.v1]] as const;
-    for (const [sx, sy, u, v] of quad) {
-      pos.push(qx * sx, H - 1.4 + sy * 1.6, qz * sx);
-      nor.push(0, 1, 0);
-      uv.push(u, v);
-      col.push(c.r, c.g, c.b);
+  // Inside the crown: dark ragged cards where the cone used to stand. Each hangs from
+  // the height of one tier past the one below, off the axis and off the others' planes,
+  // so no view finds them all edge-on. Narrower than the crown: they are what shows
+  // between the boughs, not a shape of their own at the silhouette.
+  const inner = 7 + Math.floor(rnd(3) * 3);
+  const gapMean = span / whorls;
+  for (let n = 0; n < inner; n++) {
+    const f = (n + 0.5) / inner;
+    const y = skirt + f * span;
+    const R = (R0 * Math.pow(Math.max(0, 1 - f), habit.taper) + 0.3) * (0.4 + rnd(n * 13 + 500) * 0.24);
+    const height = gapMean * (1.6 + rnd(n * 17 + 520) * 1.0);
+    const a = rnd(n * 11 + 540) * Math.PI * 2;
+    const dx = Math.cos(a);
+    const dz = Math.sin(a);
+    const px = -dz;
+    const pz = dx;
+    const half = R * (0.9 + rnd(n * 23 + 560) * 0.5);
+    const lean = 0.35 + rnd(n * 19 + 580) * 0.3;
+    const cx = leanX * axisAt(f);
+    const cz = leanZ * axisAt(f);
+    const cy = y + height * 0.35;
+    const by = y - height * 0.65;
+    const cell = leafCellUv('fir', rnd(n * 31 + 620));
+    under.setHex(pal.spruceUnder);
+    c.copy(under).lerp(lift.setHex(pal.spruce[0]), rnd(n * 37 + 640) * 0.3);
+    card([
+      [cx + px * half + dx * R * 0.1, cy, cz + pz * half + dz * R * 0.1, cell.u0, cell.v0],
+      [cx - px * half + dx * R * 0.1, cy, cz - pz * half + dz * R * 0.1, cell.u1, cell.v0],
+      [cx - px * half * lean + dx * R * (0.1 + lean * 0.45), by, cz - pz * half * lean + dz * R * (0.1 + lean * 0.45), cell.u1, cell.v1],
+      [cx + px * half * lean + dx * R * (0.1 + lean * 0.45), by, cz + pz * half * lean + dz * R * (0.1 + lean * 0.45), cell.u0, cell.v1],
+    ]);
+  }
+  // The top: tiers of tiny boughs shrinking to the leader's tuft, or what a broken or
+  // twinned leader left. Cards, never a solid — a tip of geometry there was the dark
+  // cone all over again — and never two crossed quads, which read as a star on the sky.
+  const tip = (ox: number, oz: number, from: number, to: number, wide: number, levels: number): void => {
+    for (let p = 0; p < levels; p++) {
+      const f = levels === 1 ? 0 : p / (levels - 1);
+      const y = from + f * Math.max(0, to - from - 0.55);
+      const R = wide * (1 - 0.55 * f);
+      const cards = p === 0 ? 3 : 2;
+      const turn = rnd(p * 53 + 700) * Math.PI * 2;
+      c.setHex(pal.spruce[0]!);
+      for (let q = 0; q < cards; q++) {
+        const a = turn + (q / cards) * Math.PI * 2;
+        const dx = Math.cos(a);
+        const dz = Math.sin(a);
+        const px = -dz;
+        const pz = dx;
+        const cell = leafCellUv('fir', rnd(p * 41 + q * 7 + 660));
+        const ex = ox + dx * 0.12;
+        const ez = oz + dz * 0.12;
+        const tx = ox + dx * R;
+        const tz = oz + dz * R;
+        const drop = R * 0.6;
+        card([
+          [ex + px * R * 0.4, y + 0.05, ez + pz * R * 0.4, cell.u0, cell.v0],
+          [ex - px * R * 0.4, y + 0.05, ez - pz * R * 0.4, cell.u1, cell.v0],
+          [tx - px * R * 0.16, y - drop, tz - pz * R * 0.16, cell.u1, cell.v1],
+          [tx + px * R * 0.16, y - drop, tz + pz * R * 0.16, cell.u0, cell.v1],
+        ]);
+      }
     }
+  };
+  const apex = leanX * axisAt(1);
+  const apexZ = leanZ * axisAt(1);
+  const topY = tierY[whorls - 1]!;
+  if (habit.top === 'twin') {
+    // Two leaders: the taller off the axis, the shorter starting lower beside it.
+    tip(apex, apexZ, topY - 0.4, H, 0.42, 3);
+    tip(apex + sideX * 0.6, apexZ + sideZ * 0.6, topY - 1.6, H - 1.3, 0.4, 3);
+  } else if (habit.top === 'stub') {
+    // Wet snow took the leader: a blunt ragged crown where the spire was.
+    tip(apex, apexZ, topY - 0.7, H - 1.1, 0.6, 2);
+  } else {
+    tip(apex, apexZ, topY - 0.2, H, 0.46, 3);
   }
   const boughs = new THREE.BufferGeometry();
   boughs.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   boughs.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   boughs.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   boughs.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  const crown = finishCrown(boughs, 0, base + (H - base) * 0.4, 0, 3.6, (H - base) * 0.6, 3.6);
-  return { wood: mergeGeometries(parts.map(asFlat)), leaves: mergeGeometries([core, crown]) };
+  const crown = finishCrown(boughs, apex * 0.5, skirt + span * 0.5, apexZ * 0.5, R0 * 1.05, (H - skirt) * 0.6, R0 * 1.05);
+  return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
 }
 
 type Rnd = () => number;
@@ -1515,7 +1719,9 @@ export const UNDERGROWTH_FADE_TO_M = 110;
 
 const VARIANTS: Record<TreeKind, number> = {
   [TreeKind.Birch]: 5,
-  [TreeKind.Spruce]: 5,
+  // One variant per habit (see `SPRUCE_HABITS`): the spruce is the kind the wood has
+  // most of, and the one whose shapes the owner reads first.
+  [TreeKind.Spruce]: SPRUCE_HABITS.length,
   [TreeKind.Bush]: 3,
   [TreeKind.Lime]: 3,
   [TreeKind.Pine]: 4,
@@ -1540,7 +1746,9 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
     const pal = PALETTES[season];
     const build: Record<TreeKind, (seed: number, pal: Palette, near: boolean) => TreeShape> = {
       [TreeKind.Birch]: birchGeometry,
-      [TreeKind.Spruce]: spruceGeometry,
+      // The seed handed to a builder is the variant's index plus one, so a spruce can
+      // wear its own habit rather than draw one.
+      [TreeKind.Spruce]: (seed, p, near) => spruceGeometry(seed, p, near, SPRUCE_HABITS[(seed - 1) % SPRUCE_HABITS.length]!),
       [TreeKind.Bush]: bushGeometry,
       [TreeKind.Lime]: (seed, p, near) => roundCrownGeometry(LIME, seed, p, near),
       [TreeKind.Pine]: pineGeometry,
