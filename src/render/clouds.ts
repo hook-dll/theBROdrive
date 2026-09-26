@@ -107,8 +107,8 @@ interface CloudFamily {
 }
 const FAMILY_TABLE: readonly CloudFamily[] = [
   { name: 'humilis', aspect: 0.3, depth: 0.75, size: 1.0, flatten: 1.3, billow: 0.3, wispy: 0.2, density: 1.0, base: 1.0 },
-  { name: 'mediocris', aspect: 0.62, depth: 0.85, size: 1.05, flatten: 1.05, billow: 0.34, wispy: 0.22, density: 1.0, base: 1.0 },
-  { name: 'congestus', aspect: 1.3, depth: 0.9, size: 1.15, flatten: 0.6, billow: 0.36, wispy: 0.24, density: 1.05, base: 1.0 },
+  { name: 'mediocris', aspect: 0.85, depth: 0.85, size: 1.05, flatten: 1.05, billow: 0.34, wispy: 0.22, density: 1.0, base: 1.0 },
+  { name: 'congestus', aspect: 1.15, depth: 0.9, size: 1.15, flatten: 0.6, billow: 0.36, wispy: 0.24, density: 1.05, base: 1.0 },
   { name: 'fractus', aspect: 0.4, depth: 0.6, size: 0.6, flatten: 1.1, billow: 0.3, wispy: 0.26, density: 0.85, base: 0.35 },
   { name: 'stratocumulus', aspect: 0.12, depth: 1.0, size: 1.05, flatten: 2.0, billow: 0.22, wispy: 0.18, density: 0.95, base: 0.85 },
 ];
@@ -220,11 +220,16 @@ float vnoise( vec3 p ) {
  * between them.
  */
 float worley( vec3 p ) {
-  vec3 i = floor( p ), f = p - i, o, r;
+  vec3 i = floor( p ), f = p - i;
+  // The full 3x3x3 neighbourhood. Searching only the eight cells at the floor corner —
+  // the usual cheap shortcut — misses feature points in the cells BELOW the sample, and
+  // the field then creases along every integer boundary: a lattice of squares, plainly
+  // visible once a cell is magnified a few times on a 4K screen. Twenty-seven cells it
+  // is.
   float best = 8.0;
-  for ( int k = 0; k < 8; k++ ) {
-    o = vec3( float( k & 1 ), float( ( k >> 1 ) & 1 ), float( ( k >> 2 ) & 1 ) );
-    r = o - f + vec3( h31( i + o ), h31( i + o + 31.0 ), h31( i + o + 71.0 ) );
+  for ( int k = 0; k < 27; k++ ) {
+    vec3 o = vec3( float( k % 3 - 1 ), float( ( k / 3 ) % 3 - 1 ), float( ( k / 9 ) % 3 - 1 ) );
+    vec3 r = o - f + vec3( h31( i + o ), h31( i + o + 31.0 ), h31( i + o + 71.0 ) );
     best = min( best, dot( r, r ) );
   }
   return clamp( 1.0 - sqrt( best ), 0.0, 1.0 );
@@ -234,7 +239,7 @@ int shapeFam;
 float shapeH;
 float shapeDepth;
 float shapeFlatten;
-const int PUFFS = 36;
+const int PUFFS = 44;
 vec4 puffs[ PUFFS ];
 int puffCount;
 void put( float x, float y, float z, float r ) {
@@ -306,17 +311,21 @@ void buildPuffs() {
     // vertically (flatten 0.6), which is what lets twelve tiers cover a tower of 2.5
     // widths. A small tattered row closes the crown. The cauliflower is the erosion's.
     row( 9.0, 0.80, H * 0.03, 0.32, 1.5 * D, 0.0, s * 3.3 );
-    for ( int n = 0; n < 12; n++ ) {
+    for ( int n = 0; n < 9; n++ ) {
       i = float( n );
-      t = i / 11.0;
+      t = i / 8.0;
       j = h11( s * 15.1 + i );
-      float y = H * ( 0.06 + 0.075 * i );
-      float cx = ( h11( s * 11.7 + i ) - 0.5 ) * 0.5 * ( 1.0 - 0.5 * t );
-      float r = 0.44 - 0.014 * i;
-      put( cx - r * 0.26, y, ( h11( s * 21.3 + i ) - 0.5 ) * 0.9 * D, r );
-      put( cx + r * 0.26, y + H * 0.01, ( h11( s * 26.9 + i ) - 0.5 ) * 0.9 * D, r * ( 0.92 + 0.08 * j ) );
+      float y = H * ( 0.06 + 0.1 * i );
+      float cx = ( h11( s * 11.7 + i ) - 0.5 ) * 0.22 * ( 1.0 - 0.6 * t );
+      float r = 0.5 - 0.02 * i;
+      // Three heads a tier, half a radius apart, so a tier is one wide lobed head and the
+      // tower it builds is nearly as wide as the cloud's base — a column of spheres is
+      // what a reader calls "a pillar", wide boiling heads are a congestus.
+      put( cx - r * 0.45, y, ( h11( s * 21.3 + i ) - 0.5 ) * 0.9 * D, r );
+      put( cx, y + H * 0.012, ( h11( s * 26.9 + i ) - 0.5 ) * 0.9 * D, r * ( 0.94 + 0.06 * j ) );
+      put( cx + r * 0.45, y + H * 0.004, ( h11( s * 31.7 + i ) - 0.5 ) * 0.9 * D, r * ( 0.92 + 0.08 * j ) );
     }
-    row( 3.0, 0.28, H * 0.93, 0.24, 0.6 * D, 0.0, s * 41.3 );
+    row( 3.0, 0.42, H * 0.95, 0.3, 0.6 * D, 0.0, s * 41.3 );
   } else if ( f == ${FRACTUS} ) {
     // Torn shreds: no flat base and no tower, only a strand of puffs, thin enough for the
     // sky to show through. Ragged is the edge, not the middle: every puff lies well
@@ -465,8 +474,24 @@ void main() {
   }
   float alpha = 1.0 - T;
   float inv = 1.0 / max( W, 1e-4 );
-  outA = vec4( lA.x * inv, lA.y * inv, lA.z * inv, alpha );
+  // DITHER. The atlas is eight bits a channel, and these four fields are smooth: written
+  // straight they become a staircase of flat plateaus a few thousandths apart, and a card
+  // magnified three to six times on a 4K screen shows that staircase as a grid of squares
+  // lying over the cloud. Half a step of dither, hashed from the texel, scatters each
+  // plateau into fine grain instead; the card's own bilinear filter averages neighbouring
+  // texels back to the value that was meant. This is the whole reason the 8-bit target is
+  // allowed here at all.
+  float dn = 1.0 / 255.0;
+  vec4 dither = vec4(
+    h31( vec3( gl_FragCoord.xy, 1.0 ) ) - 0.5,
+    h31( vec3( gl_FragCoord.xy, 2.0 ) ) - 0.5,
+    h31( vec3( gl_FragCoord.xy, 3.0 ) ) - 0.5,
+    h31( vec3( gl_FragCoord.xy, 4.0 ) ) - 0.5
+  ) * dn;
+  outA = vec4( lA.x * inv, lA.y * inv, lA.z * inv, alpha ) + dither;
   outB = vec4( lB.x * inv, lB.y * inv, clamp( hgt * inv, 0.0, 1.0 ), clamp( depth * 1.8, 0.0, 1.0 ) );
+  outB.rg += dither.xy;
+  outB.ba += dither.zw;
 }
 `
 
@@ -694,11 +719,11 @@ const CONVECTION_SCALE_M = 11000;
 const SHEET_SCALE_M = 15000;
 /** Which families show at which cover: [first cover it needs, last]. */
 const COVER_BAND: readonly (readonly [number, number])[] = [
-  [0.06, 0.46], // humilis
-  [0.38, 0.72], // mediocris
-  [0.58, 0.95], // congestus
-  [0.02, 0.34], // fractus
-  [0.2, 0.65], // stratocumulus
+  [0.06, 0.5], // humilis
+  [0.35, 0.75], // mediocris
+  [0.66, 0.98], // congestus: the last to appear, and only in a built-up sky
+  [0.02, 0.3], // fractus
+  [0.2, 0.7], // stratocumulus
 ];
 
 /**
@@ -706,14 +731,15 @@ const COVER_BAND: readonly (readonly [number, number])[] = [
  * species a region: real air has shreds under the domes and domes around the towers, and
  * a region of nothing but shreds is a swarm of gnats in the sky. `sheet` regions are
  * mostly deck with a few domes breaking through, fair regions mostly humilis with a
- * scattering of fractus, and the more convective the region the more of the sky is in
- * mediocris and congestus.
+ * scattering of fractus, convective ones mostly mediocris — and a congestus is an EVENT,
+ * a tenth even where the air is most unstable. A fair-weather middle-belt sky that is a
+ * field of towers is not the sky the owner is painting.
  */
 function pickFamily(conv: number, sheet: number, coin: number): number {
-  if (sheet > 0.66) return coin < 0.68 ? STRATOCUMULUS : HUMILIS;
-  if (conv < 0.4) return coin < 0.76 ? HUMILIS : coin < 0.9 ? FRACTUS : MEDIOCRIS;
-  if (conv < 0.62) return coin < 0.12 ? FRACTUS : coin < 0.72 ? MEDIOCRIS : CONGESTUS;
-  return coin < 0.1 ? FRACTUS : coin < 0.42 ? MEDIOCRIS : CONGESTUS;
+  if (sheet > 0.66) return coin < 0.6 ? STRATOCUMULUS : coin < 0.85 ? HUMILIS : MEDIOCRIS;
+  if (conv < 0.4) return coin < 0.74 ? HUMILIS : coin < 0.82 ? FRACTUS : MEDIOCRIS;
+  if (conv < 0.62) return coin < 0.3 ? HUMILIS : coin < 0.9 ? MEDIOCRIS : CONGESTUS;
+  return coin < 0.26 ? HUMILIS : coin < 0.9 ? MEDIOCRIS : CONGESTUS;
 }
 
 /**
