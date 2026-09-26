@@ -18,7 +18,6 @@ import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import type { DesertTileGenerationContext } from '../src/world/deserttiledata';
-import { MIRAGE_FADE_BAND_M } from '../src/render/mirage-tableau';
 import { LakeWater, waterPaletteAt } from '../src/render/lakewater';
 import { desertPaletteAt } from '../src/world/gradient';
 
@@ -26,13 +25,6 @@ const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 const L = LakeWater.lattice;
 /** Sites searched. Each is a full window of terrain samples, so this is the slow part. */
 const SITES_SEARCHED = 14;
-
-/** The same smoothstep the renderer uses, for reasoning about its own fade curve. */
-function smoothstepAt(edge0: number, edge1: number, value: number): number {
-  const t = (value - edge0) / (edge1 - edge0);
-  const c = t < 0 ? 0 : t > 1 ? 1 : t;
-  return c * c * (3 - 2 * c);
-}
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -332,54 +324,29 @@ const opacityAt = (out: number): number => {
 };
 const far = opacityAt(L.reach + 120);
 // Walk in along the bearing a driver arrives on until the baked waterline distance says
-// the shore is under a wheel. A radial test would be wrong here by as much as the lake
-// is irregular, which is the whole reason the fade uses a distance field.
+// the shore is under a wheel: the water must still be there. It was a mirage in the
+// desert and vanished on the approach; a pond on the plain does not.
 let atShoreOut = 0;
 let waterline = Number.POSITIVE_INFINITY;
 for (let out = L.reach + 120; out >= -L.reach; out -= 1) {
   const p = approach(out);
   const edge = water.waterlineDistance(p.x, p.z);
-  if (edge <= L.vanishGone * 0.4) {
+  if (edge <= 1) {
     atShoreOut = out;
     waterline = edge;
     break;
   }
 }
 const atShore = opacityAt(atShoreOut);
-const backAway = opacityAt(L.reach + 120);
 check(
   'the water is fully there on the approach',
   far > 0.99,
   `opacity ${far.toFixed(3)} at ${L.reach + 120} m from the window centre`,
 );
 check(
-  'it is gone by the time you could put a wheel in it',
-  atShore === 0,
+  'and still there at the shore',
+  atShore > 0.99,
   `opacity ${atShore.toFixed(3)} at ${atShoreOut} m out, ${waterline.toFixed(1)} m from water`,
-);
-check(
-  'and it comes back when you pull away',
-  backAway > 0.99,
-  `opacity ${backAway.toFixed(3)} after retreating; the fade is a function of position, not a latch`,
-);
-// THE TABLEAUS' OWN BAND. The lake is a mirage and so is the mirage town, and a player
-// who has learned one has learned the other: leave the asphalt and the town evaporates
-// over ten metres; walk to the shore and the water evaporates over the same ten. The
-// width is imported, not retyped, so the two cannot drift; what is checked here is that
-// the lake actually uses it, that the ramp is monotonic rather than a pair of steps, and
-// that the water survives to within a couple of metres of its own edge.
-let fadeMonotonic = true;
-let previousOpacity = -1;
-for (let out = L.vanishFull + 4; out >= L.vanishGone - 4; out -= 0.25) {
-  const opacity = smoothstepAt(L.vanishGone, L.vanishFull, out);
-  if (opacity > previousOpacity + 1e-6 && previousOpacity >= 0) fadeMonotonic = false;
-  previousOpacity = opacity;
-}
-check(
-  'the water evaporates over exactly a tableau-leaving',
-  L.vanishFull - L.vanishGone === MIRAGE_FADE_BAND_M && L.vanishGone <= 3 && fadeMonotonic,
-  `full water at ${L.vanishFull} m from the waterline, none at ${L.vanishGone} m, ` +
-    `band ${L.vanishFull - L.vanishGone} m against the tableaus' ${MIRAGE_FADE_BAND_M} m, monotonic=${fadeMonotonic}`,
 );
 
 // --- 6. The water reads against whatever colour the sand has got to ------------

@@ -19,7 +19,6 @@ import {
   PALM_TINT,
   TREE_TINT,
 } from './mirage-tableau';
-import { MIRAGE_FADE_BAND_M } from './mirage-tableau';
 import { createWaterMaterial, WAVE_TILE_METRES, type WaterMaterial } from './watermaterial';
 
 /**
@@ -51,12 +50,11 @@ import { createWaterMaterial, WAVE_TILE_METRES, type WaterMaterial } from './wat
  * the reflection, not the ripples — is what makes cheap water look cheap. Knowing the
  * boundary exactly is also what lets the grass ring the water instead of the site.
  *
- * WHY IT VANISHES BY APPROACH. The tableaus in mirage-tableau.ts fade when you leave the
- * road, because they straddle it and there is nowhere to go and look. A lake is half a
- * kilometre out: driving to it IS the encounter. So the fade is the approach — full water
- * in the last ten metres — the tableaus' own band — gone inside `VANISH_GONE_M` of the waterline, and back
- * when you pull away. No latch: the opacity is a function of where you stand, so it is
- * reversible by construction, and nobody has to write hydrolock, buoyancy or a walk home.
+ * IT DOES NOT VANISH. In the desert this water was a mirage by design: it evaporated in
+ * the last ten metres of the approach, on the mirage tableaus' own fade band. On the
+ * Russian plain a pond is a pond — the owner drove up to one and watched it disappear,
+ * which read as a bug, not as a desert trick. The surface is drawn whenever the eye is
+ * above it; the only fade left is the eye-height guard below.
  */
 
 /** Arclength between attempts at a lake. A genuine curiosity, not a landmark. */
@@ -105,26 +103,14 @@ const MAX_FILL_M = 7;
 /**
  * The band the eye height fades the sheet over, around the water's own level.
  *
- * NARROW, and deliberately low. Its only job is the case the first drive to a lake
- * found: ground outside the pool that lies below the water's level puts the eye UNDER a
- * transparent sheet, which then fills the screen with turquoise. It is NOT an approach
- * fade — when it was four metres tall, a lake seen across low ground from the road came
- * up half-drawn, and the fade the player is supposed to notice is the one below.
+ * Its only job: ground outside the pool can lie below the water's level, and an eye
+ * UNDER the transparent sheet sees the screen fill with turquoise. So the sheet goes
+ * only once the eye is actually at or below the surface. It used to start 1.2 m above
+ * it, which on the plain's shallow ponds — whose rims sit at the water's own height —
+ * took the pond away from a driver standing on the bank: a mirage again, by another road.
  */
-const EYE_ABOVE_WATER_M = 1.2;
+const EYE_ABOVE_WATER_M = 0.1;
 const EYE_BELOW_WATER_M = 0.3;
-/**
- * The approach fade, in metres from the waterline: full water outside `VANISH_FULL_M`,
- * nothing inside `VANISH_GONE_M`.
- *
- * The band is the TABLEAUS' band, imported rather than tuned, and it is the point of
- * the whole effect: you drive the whole way across the desert to the shore with the
- * water fully drawn, and it evaporates in the last ten metres, exactly as a mirage town
- * evaporates in the ten metres after you leave the asphalt. Two metres of it are kept
- * so the water is gone before a wheel could be in it.
- */
-const VANISH_GONE_M = 2;
-const VANISH_FULL_M = VANISH_GONE_M + MIRAGE_FADE_BAND_M;
 /**
  * Where the dev jump in app/devtools.ts parks to look at a lake. Nothing to do with the fade any
  * more: the water is fully drawn from a couple of metres out, so the standoff is only
@@ -223,7 +209,9 @@ const GRASS_PER_CELL = 5;
 // Countryside: a pond on the plain has reeds and willow round it, never palms. The
 // forest's own planting stands the trees; the palm fringe is the desert oasis's.
 const PALMS_PER_CELL = 0;
-const TREES_PER_CELL = 0.24;
+// Nor the desert tableau's card trees: they are the mirage's own silhouettes and read as
+// such beside a real pond. The forest planting and the stream banks' willows stand here.
+const TREES_PER_CELL = 0;
 /** Metres an instance may wander off its shoreline cell. */
 const GRASS_JITTER_M = 2.6;
 const PLANT_JITTER_M = 4;
@@ -460,14 +448,11 @@ export class LakeWater {
       return;
     }
 
-    // TWO fades, and the second one is not decoration. The hollow the lake sits in does
-    // not stop at the shoreline: ground outside the pool can lie below the water's level,
-    // and standing there puts the eye UNDER a transparent sheet that then fills the
-    // screen with turquoise. Measured in the real game on the first drive to one. The
+    // The one fade: the hollow the lake sits in does not stop at the shoreline, and
+    // ground outside the pool can lie below the water's level; standing there puts the
+    // eye UNDER a transparent sheet that then fills the screen with turquoise. The
     // surface is only ever drawn to someone standing above it.
-    this.opacity =
-      smoothstep(VANISH_GONE_M, VANISH_FULL_M, this.waterlineDistance(playerX, playerZ)) *
-      smoothstep(this.waterY - EYE_BELOW_WATER_M, this.waterY + EYE_ABOVE_WATER_M, playerY);
+    this.opacity = smoothstep(this.waterY - EYE_BELOW_WATER_M, this.waterY + EYE_ABOVE_WATER_M, playerY);
     this.root.visible = this.opacity > 0.002;
     if (!this.root.visible) return;
 
@@ -1071,8 +1056,6 @@ export class LakeWater {
     readonly step: number;
     readonly verts: number;
     readonly cells: number;
-    readonly vanishGone: number;
-    readonly vanishFull: number;
     readonly minArea: number;
     readonly minDepth: number;
   } {
@@ -1081,8 +1064,6 @@ export class LakeWater {
       step: SITE_STEP_M,
       verts: SITE_VERTS,
       cells: SITE_CELLS,
-      vanishGone: VANISH_GONE_M,
-      vanishFull: VANISH_FULL_M,
       minArea: MIN_LAKE_AREA_M2,
       minDepth: MIN_LAKE_DEPTH_M,
     };
