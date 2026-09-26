@@ -955,13 +955,27 @@ export class BirdFlock {
       shapes[shapeOffset + 2] = sp.wingSweep;
       shapes[shapeOffset + 3] = sp.bodyDepth;
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-    this.phaseAttr.needsUpdate = true;
-    this.flapAttr.needsUpdate = true;
-    this.shapeAttr.needsUpdate = true;
-    this.wingPoseAttr.needsUpdate = true;
-    this.mesh.count = this.activeCount;
+    // Only the live birds go up: the buffers hold the whole flock's capacity, and a
+    // bare `needsUpdate` re-sends all of it every frame for the handful in the sky. An
+    // empty sky sends nothing — and must not send a range of 0, which WebGL2's
+    // bufferSubData reads as "to the end of the buffer".
+    const live = this.activeCount;
+    this.mesh.count = live;
+    if (live === 0) return;
+    const attributes: (THREE.BufferAttribute | null)[] = [
+      this.mesh.instanceMatrix,
+      this.mesh.instanceColor,
+      this.phaseAttr,
+      this.flapAttr,
+      this.shapeAttr,
+      this.wingPoseAttr,
+    ];
+    for (const attribute of attributes) {
+      if (!attribute) continue;
+      attribute.clearUpdateRanges();
+      attribute.addUpdateRange(0, live * attribute.itemSize);
+      attribute.needsUpdate = true;
+    }
   }
 
   private spawnFalling(b: Bird): void {

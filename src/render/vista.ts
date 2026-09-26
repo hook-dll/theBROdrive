@@ -324,7 +324,15 @@ export class VistaMesh {
   readonly season: SeasonState = newSeasonState();
   private readonly mesh: THREE.Mesh;
   private readonly mesaMesh: THREE.Mesh;
+  /**
+   * The disc as drawn, and the copy the next rebuild writes into. A rebuild is three
+   * 175 KB uploads; written into the buffer the GPU may still be reading, each one waits
+   * for it on ANGLE over Metal (4-8 ms, docs/research-2026-09-26.md, «Дёрганье»). So the
+   * rebuild goes into the copy that has been out of the draw since the previous rebuild —
+   * several frames at any driving speed — and the two swap.
+   */
   private geometry: THREE.BufferGeometry | null = null;
+  private backGeometry: THREE.BufferGeometry | null = null;
   private mesaGeometry: THREE.BufferGeometry | null = null;
   /** Reused scratch geometry for normal generation; cell loads must not allocate it. */
   private normalGeometry: THREE.BufferGeometry | null = null;
@@ -614,10 +622,11 @@ export class VistaMesh {
   }
 
   private updateGroundPositions(cameraX: number, cameraZ: number): void {
-    if (!this.geometry || !this.groundSamples) return;
-    const position = this.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const color = this.geometry.getAttribute('color') as THREE.BufferAttribute;
-    const normal = this.geometry.getAttribute('normal') as THREE.BufferAttribute;
+    if (!this.geometry || !this.backGeometry || !this.groundSamples) return;
+    const target = this.backGeometry;
+    const position = target.getAttribute('position') as THREE.BufferAttribute;
+    const color = target.getAttribute('color') as THREE.BufferAttribute;
+    const normal = target.getAttribute('normal') as THREE.BufferAttribute;
     const xyz = position.array as Float32Array;
     const rgb = color.array as Float32Array;
     const normals = normal.array as Float32Array;
@@ -681,6 +690,9 @@ export class VistaMesh {
     position.needsUpdate = true;
     color.needsUpdate = true;
     normal.needsUpdate = true;
+    this.backGeometry = this.geometry;
+    this.geometry = target;
+    this.mesh.geometry = target;
   }
 
   private updateMesaPositions(cameraX: number, cameraZ: number): void {
@@ -937,11 +949,10 @@ export class VistaMesh {
       }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
-    geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    // Two copies of the disc (see `backGeometry`), sharing one index. Each carries its
+    // own position array: the rebuild writes heights into it, and the local x/z the
+    // road underlay reads come from `groundLocalPositions`, which no rebuild touches.
+    const indexAttribute = new THREE.BufferAttribute(index, 1);
     let overlapPairs = 0;
     while (
       overlapPairs < rings - 1 &&
@@ -950,12 +961,22 @@ export class VistaMesh {
       overlapPairs++;
     }
     const overlapIndexCount = overlapPairs * SECTORS * 6;
-    geometry.addGroup(0, overlapIndexCount, 0);
-    geometry.addGroup(overlapIndexCount, index.length - overlapIndexCount, 1);
+    const makeDisc = (): THREE.BufferGeometry => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
+      geometry.setIndex(indexAttribute);
+      geometry.addGroup(0, overlapIndexCount, 0);
+      geometry.addGroup(overlapIndexCount, index.length - overlapIndexCount, 1);
+      return geometry;
+    };
     this.geometry?.dispose();
-    this.geometry = geometry;
+    this.backGeometry?.dispose();
+    this.geometry = makeDisc();
+    this.backGeometry = makeDisc();
     this.groundLocalPositions = positions;
-    this.mesh.geometry = geometry;
+    this.mesh.geometry = this.geometry;
     // A new disc invalidates the worker's layout, every queued corner and anything
     // still in flight: they were all sized for the previous ring count.
     this.layoutId++;
@@ -1425,9 +1446,11 @@ export class VistaMesh {
     this.scene.remove(this.mesh);
     this.scene.remove(this.mesaMesh);
     this.geometry?.dispose();
+    this.backGeometry?.dispose();
     this.mesaGeometry?.dispose();
     this.normalGeometry?.dispose();
     this.geometry = null;
+    this.backGeometry = null;
     this.mesaGeometry = null;
     this.normalGeometry = null;
     this.normalPositions = null;
