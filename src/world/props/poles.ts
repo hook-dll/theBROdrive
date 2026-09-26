@@ -16,6 +16,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash01 } from '../../core/rng';
 import { SURFACES, SurfaceType } from '../../core/surfaces';
+import type { WetGlints } from '../../render/wetglints';
 import { varietyEventOfKindAt, varietyEventsBetween } from '../director';
 import { poleConditionAt, poleEraSegments, type PoleCondition, type PoleEra } from '../gradient';
 import type { Road } from '../road';
@@ -65,6 +66,13 @@ const LAMP_DISTANCE = 46;
 // Brighter warm pools at full night. The renderer keeps only six real lights.
 const LAMP_POINT = 90;
 const LAMP_EMISSIVE = 2.8;
+/**
+ * A street lamp's brightness to the wet-road reflections, in the headlights' units
+ * (render/wetglints.ts): a sodium head seen at a glance is about a dipped headlight.
+ */
+const LAMP_GLINT = 9;
+const DOWN = new THREE.Vector3(0, -1, 0);
+const glintScratch = new THREE.Vector3();
 /**
  * How far the concrete lamp arm reaches from its pole, metres. The poles stand at
  * poles stand `POLE_SETBACK_M` = 3.1 m outside the asphalt edge and the gravel verge
@@ -945,7 +953,7 @@ function wireSagMetres(slack: boolean, span: number, clearance: number): number 
   return Math.min(wanted, Math.max(0, clearance) * WIRE_SAG_CLEARANCE);
 }
 
-type LampPos = { x: number; y: number; z: number };
+type LampPos = { x: number; y: number; z: number; ground: number };
 
 function setLampSource(light: THREE.PointLight, pos: LampPos | null, on: number): void {
   const intensity = pos ? on * LAMP_POINT : 0;
@@ -1171,7 +1179,7 @@ export class PoleProvider implements ChunkProvider {
         // the invisible source-marker PointLights (children of `group`), so they
         // must be group-local. The distance test against the camera re-adds the
         // captured build origin in `setLamps` (see `setNearestLampSources`).
-        workingLamps.push({ x: pose.lampX - ox, y: pose.lampY, z: pose.lampZ - oz });
+        workingLamps.push({ x: pose.lampX - ox, y: pose.lampY, z: pose.lampZ - oz, ground: pose.baseY });
       }
 
       // Every pole is a solid obstacle, including a scheduled 'down' one: the
@@ -1248,6 +1256,7 @@ export class PoleProvider implements ChunkProvider {
       source.userData.lightBudgetSource = true;
       group.add(source);
     }
+    let lampsOn = 0;
 
     return {
       group,
@@ -1266,8 +1275,21 @@ export class PoleProvider implements ChunkProvider {
        * build-origin-relative `workingLamps` below.
        */
       setLamps(on: number, nearX: number, nearZ: number): void {
+        lampsOn = on;
         setLampEmission(on);
         setNearestLampSources(workingLamps, nearX, nearZ, ox, oz, on, lampSources);
+      },
+      /**
+       * Every working lamp of the chunk, at its fixture's own brightness: the light
+       * budget above lights the ground from three of them, the reflections take all.
+       * Stored positions are group-local; the group's position carries the rebase.
+       */
+      offerGlints(glints: WetGlints): void {
+        if (!(lampsOn > 0)) return;
+        for (const lamp of workingLamps) {
+          glintScratch.set(lamp.x + group.position.x, lamp.y, lamp.z + group.position.z);
+          glints.addLamp(glintScratch, lamp.ground, DOWN, 0, LAMP_COLOR, LAMP_GLINT * lampsOn);
+        }
       },
     };
   }

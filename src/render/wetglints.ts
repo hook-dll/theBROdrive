@@ -35,8 +35,11 @@ import * as THREE from 'three';
  * per-frame `bufferSubData` into a buffer the GPU may still read waits for it (see
  * docs/research-2026-09-26.md, «Дёрганье»), and a texture upload does not.
  */
-/** Lamps offered per frame at most: two headlights, two tails, two reversing per car. */
-const CAPACITY = 192;
+/**
+ * Lamps offered per frame at most: six per car, then every working street lamp in the
+ * streamed chunks. The texture is CAPACITY × 3 floats, a few kilobytes.
+ */
+const CAPACITY = 512;
 /**
  * How far the streak spreads along the view, as a ratio either side of the mirror
  * point: from xr / SPREAD to xr * SPREAD metres from the eye. The water film on

@@ -2,6 +2,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 import type { GameWorld } from '../game/state';
+import type { WetGlints } from '../render/wetglints';
 import type { Road } from './road';
 import type { Terrain } from './terrain';
 import type { WorldOrigin } from './origin';
@@ -123,6 +124,12 @@ export interface ChunkContent {
    * position; providers without lamps simply omit it.
    */
   setLamps?(on: number, nearX: number, nearZ: number): void;
+  /**
+   * Offers this chunk's lit lamps to the wet-road reflections (render/wetglints.ts),
+   * every one of them rather than the three nearest the light budget takes: a mirror
+   * image does not fade with distance the way a lamp's pool of light does.
+   */
+  offerGlints?(glints: WetGlints): void;
 }
 
 export interface ChunkProvider {
@@ -237,6 +244,13 @@ export class ChunkStreamer {
   setLamps(on: number, nearX: number, nearZ: number): void {
     for (const chunk of this.built.values()) {
       for (const entry of chunk.contents) entry.content.setLamps?.(on, nearX, nearZ);
+    }
+  }
+
+  /** Every built chunk's lit lamps to the wet-road reflections; see `ChunkContent`. */
+  offerGlints(glints: WetGlints): void {
+    for (const chunk of this.built.values()) {
+      for (const entry of chunk.contents) entry.content.offerGlints?.(glints);
     }
   }
 

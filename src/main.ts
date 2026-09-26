@@ -1926,6 +1926,8 @@ async function boot(): Promise<void> {
         const at = vehicle.root.position;
         vehicle.offerGlints(wetGlints, terrain.heightAt(at.x + origin.x, at.z + origin.z, activeS));
       }
+      // Street lamps after the cars: a full buffer refuses fixtures, never a car.
+      streamer.offerGlints(wetGlints);
     }
     wetGlints.endFrame(weather.wet, renderer.fog.density, eyeGround, frameDt);
 
