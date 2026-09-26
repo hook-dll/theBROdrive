@@ -21,30 +21,39 @@ const STEP_M = 1.5;
 /** Columns across a row: enough to follow the ground's cross-fall. */
 const ACROSS = [-1, -0.5, 0, 0.5, 1];
 
-// Winter: the ruts are packed snow, greyer than the drifts beside them.
-const material = applySnowCover(applyCloudShadow(
-  applyComicShading(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      map: trackTexture(),
-      // Coverage, not a cut: the ruts' soft edges and the fade at a track's end resolve
-      // to a blend under MSAA.
-      alphaTest: 0.02,
-      alphaToCoverage: true,
-      roughness: 0.95,
-      metalness: 0,
-      // Both faces: where the track bends hard two rows can cross, and a triangle folded
-      // under by that was culled as a notch in the ruts.
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      // By slope as well: the tiles' ground creases along its triangle diagonals, and a
-      // ridge between two of the ribbon's rows poked through it as a straight cut.
-      polygonOffsetFactor: -1.5,
-      polygonOffsetUnits: -4,
-    }),
-    { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
-  ),
-), 0.85, 0.86);
+/**
+ * Winter: the ruts are packed snow, greyer than the drifts beside them.
+ *
+ * RESOLVED ON FIRST USE, not at import: `trackTexture()` paints onto a 2D canvas, so
+ * building this at module scope made importing the file depend on a DOM existing first.
+ * `render/stickers.ts` keeps its own material the same way.
+ */
+let trackMat: THREE.MeshStandardMaterial | null = null;
+function trackMaterial(): THREE.MeshStandardMaterial {
+  return (trackMat ??= applySnowCover(applyCloudShadow(
+    applyComicShading(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        map: trackTexture(),
+        // Coverage, not a cut: the ruts' soft edges and the fade at a track's end resolve
+        // to a blend under MSAA.
+        alphaTest: 0.02,
+        alphaToCoverage: true,
+        roughness: 0.95,
+        metalness: 0,
+        // Both faces: where the track bends hard two rows can cross, and a triangle folded
+        // under by that was culled as a notch in the ruts.
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        // By slope as well: the tiles' ground creases along its triangle diagonals, and a
+        // ridge between two of the ribbon's rows poked through it as a straight cut.
+        polygonOffsetFactor: -1.5,
+        polygonOffsetUnits: -4,
+      }),
+      { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
+    ),
+  ), 0.85, 0.86));
+}
 /** Packed earth of a rut, warm; a little darker where the track is wetter. */
 const EARTH = new THREE.Color(0x8e7a5c);
 
@@ -62,7 +71,7 @@ export class TrackProvider implements ChunkProvider {
     for (const track of tracks) {
       const g = buildTrack(ctx, track, ground);
       geometries.push(g);
-      const mesh = new THREE.Mesh(g, material);
+      const mesh = new THREE.Mesh(g, trackMaterial());
       mesh.receiveShadow = true;
       group.add(mesh);
     }

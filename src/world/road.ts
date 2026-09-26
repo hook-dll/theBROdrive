@@ -449,31 +449,80 @@ export class Road {
    * distance. Refining all of those protects the query if the spacing or routing
    * guarantee is changed again without reintroducing the historical single-winner bug.
    */
+  /**
+   * Index of the first coarse sample whose Z is at or above `value`, or the sample count
+   * when there is none. The coarse table is sorted by Z (see `project`'s comment), so this
+   * is a plain lower bound and the three places that need a Z window share it.
+   */
+  private coarseAtOrAbove(value: number): number {
+    const coarseZ = this.spine.coarseZ;
+    let lo = 0;
+    let hi = coarseZ.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (coarseZ[mid]! < value) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
   project(x: number, z: number, hintS?: number): RoadProjection {
     let bestS: number;
     let bestDist: number;
 
     if (hintS === undefined) {
+      // THE COARSE TABLE IS SORTED BY Z, so the nearest sample of it is a binary search
+      // and a short expansion rather than a walk of the whole road. What makes it sorted
+      // is the header's own guarantee: the heading stays below 90 degrees from the trunk
+      // bearing, so +Z is strictly increasing along the road — measured over four seeds,
+      // 200 001 samples each, no descent and the shortest step 57 m. That is enough to
+      // prune exactly, because a sample's distance to the query is at least its |dz|: once
+      // the nearest unvisited sample in Z is further in Z than the best distance so far,
+      // nothing left can win.
+      //
+      // This was a linear scan of the table, which was free while the road was 400 km and
+      // is not at 40 000: at 200 001 samples a single hintless call measured half a
+      // millisecond, and the player, `main.ts` and the terrain's basin lip all make them.
+      // `RoadDistance` was fixed for exactly this scaling and its comment records the same
+      // numbers; this is the same fix, in the one place that still walked the road.
       const { coarseX, coarseZ } = this.spine;
+      const end = coarseX.length;
+      let left = this.coarseAtOrAbove(z) - 1;
+      let right = left + 1;
+      let bestK = 0;
       let bestCoarse = Infinity;
-      for (let k = 0; k < coarseX.length; k++) {
+      while (left >= 0 || right < end) {
+        const leftGap = left >= 0 ? z - coarseZ[left]! : Infinity;
+        const rightGap = right < end ? coarseZ[right]! - z : Infinity;
+        const gap = leftGap < rightGap ? leftGap : rightGap;
+        if (bestCoarse <= gap * gap) break;
+        const k = leftGap < rightGap ? left-- : right++;
         const dx = coarseX[k]! - x;
         const dz = coarseZ[k]! - z;
         const d = dx * dx + dz * dz;
-        if (d < bestCoarse) bestCoarse = d;
+        if (d < bestCoarse) {
+          bestCoarse = d;
+          bestK = k;
+        }
       }
 
+      // The candidate set the linear scan collected, reached through a Z window instead.
+      // Distances only shrink as Z does, and Z is sorted, so "within `limit` of the query"
+      // is a contiguous run of samples — the same samples, tested the same way.
       const limit = Math.sqrt(bestCoarse) + COARSE_SPACING;
       const limitSq = limit * limit;
       const candidates = this.candidates;
       let count = 0;
-      for (let k = 0; k < coarseX.length && count < candidates.length; k++) {
+      const to = Math.min(end, this.coarseAtOrAbove(z + limit) + 1);
+      for (let k = this.coarseAtOrAbove(z - limit); k < to && count < candidates.length; k++) {
         const dx = coarseX[k]! - x;
         const dz = coarseZ[k]! - z;
         if (dx * dx + dz * dz <= limitSq) candidates[count++] = k * COARSE_SPACING;
       }
 
-      bestS = candidates[0]!;
+      // The expansion above is exact, so the winner is always among the candidates; the
+      // fallback only keeps a stale slot out of the answer if the table were ever empty.
+      bestS = count > 0 ? candidates[0]! : bestK * COARSE_SPACING;
       bestDist = Infinity;
       for (let i = 0; i < count; i++) {
         const s = this.descend(x, z, candidates[i]!, COARSE_SPACING);

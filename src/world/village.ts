@@ -1,5 +1,7 @@
 import { hash01 } from '../core/rng';
 import { POI_VARIANTS } from './poi-variants';
+import type { Road } from './road';
+import type { Terrain } from './terrain';
 
 /**
  * VILLAGES: where the country is inhabited, and how.
@@ -104,6 +106,79 @@ export interface Village {
   readonly side: -1 | 1;
   readonly houses: readonly VillageHouse[];
   readonly pond: VillagePond;
+}
+
+/**
+ * How far the ground under a house must stand ABOVE the water level for the house to be
+ * built there, metres.
+ *
+ * It is not zero, and the reason is the building's own seating: a stop is SUNK by its fit's
+ * `residual` plus `SEAT_BURY_MARGIN` (0.08) so that no wall stands on air, and the object's
+ * own origin is its base — so a house on ground that is merely level with the water has its
+ * base the whole burial depth UNDER it and reads as standing in the water. Measured across
+ * the catalogue the fit residual is 0.22-0.44 m, and 0.52 m on the roughest site in it; 0.75
+ * is that plus the seat margin plus a hand's breadth, and it is a CONSERVATIVE bound on
+ * purpose: the failure it buys is a house dropped from a street plan, never a drowned one,
+ * and `tools/drowned.ts` measures the built world to prove the bound holds.
+ */
+const HOUSE_FOOTING_CLEARANCE_M = 0.75;
+/**
+ * How far a house may be moved along its own street side to find ground that carries it,
+ * metres. Its setback band is 14 m wide (`STREET_LATERAL_MIN..+SPAN`), so this stays inside
+ * the street's own proportions.
+ */
+const HOUSE_RESEAT_REACH_M = 8;
+
+/**
+ * The lateral a house of the street plan is actually built at — its own, the other side of
+ * the street, or a step further out — or `null` where the ground cannot carry it anywhere.
+ *
+ * WHY THE PLAN ITSELF IS NOT GROUND-AWARE. `villageSpanAt` is what the ROAD's heading bends
+ * over, and it comes out of the slot's own hashes; a village that moved when the ground
+ * changed would move the road with it, and every arclength in the world with it. So the plan
+ * is a plan of where the street RUNS — its arclength, its span, its pond — and this is where
+ * the street meets the ground. A watercourse crosses the corridor at any angle it likes, and
+ * a house line authored 21-35 m off the centreline can land in one: measured over 600 km of
+ * seed 1337, 735 houses in 61 villages, of which 3 stood in water on their own side; two are
+ * re-seated and one has no footing the ground can carry at any lateral within reach.
+ *
+ * The lateral is free to move precisely because the span is not: it is measured from the
+ * outermost houses' ARCLENGTH, so a house may be re-seated across or further out without
+ * moving the road, the pond or the loot identity, all of which are keyed on `number` and `s`.
+ */
+export function houseFooting(
+  road: Road,
+  terrain: Terrain,
+  house: VillageHouse,
+): number | null {
+  // THE WHOLE FOOTPRINT, not the anchor. A house is 8-29 m across and its centre says
+  // nothing about its far corner: measured at seed 1337, village 4, a house whose anchor
+  // stood 0.75 m clear of the water had its far end 1.21 m under it — the stream crosses the
+  // street diagonally, and a 29 m house straddles the crossing. The variant's local X runs
+  // along the road and its local Z across (faceRoadYaw), so the declared box maps onto
+  // (arclength, lateral) directly.
+  const [alongM, acrossM] = POI_VARIANTS[house.variant]?.footprint ?? [10, 10];
+  const carries = (lateral: number): boolean => {
+    for (const ds of [-alongM / 2, 0, alongM / 2]) {
+      for (const dl of [-acrossM / 2, 0, acrossM / 2]) {
+        const point = road.offsetPoint(house.s + ds, lateral + dl);
+        const level = terrain.waterLevelAt(point.x, point.z);
+        if (!Number.isFinite(level)) continue;
+        if (level - terrain.heightAt(point.x, point.z, house.s) > -HOUSE_FOOTING_CLEARANCE_M) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  if (carries(house.lateral)) return house.lateral;
+  if (carries(-house.lateral)) return -house.lateral;
+  const outward = house.lateral < 0 ? -1 : 1;
+  for (let step = 1; step <= HOUSE_RESEAT_REACH_M; step++) {
+    if (carries(house.lateral + outward * step)) return house.lateral + outward * step;
+    if (carries(house.lateral - outward * step)) return house.lateral - outward * step;
+  }
+  return null;
 }
 
 /**

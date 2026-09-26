@@ -646,6 +646,25 @@ function contextFor(
     }
   }
 
+  // THE COUNTRY'S OWN FAMILIES, ASKED OF THE SHIPPED SELECTOR. `WEATHER_FAMILIES` is the
+  // desert's three; `weatherfx.ts` selects out of its own country list, which is rain
+  // alone — "no dust walls on a green plain". Reading the reachable set off the selector
+  // rather than restating the list keeps this in step with the source instead of with a
+  // second copy of it, and it is what the census and the census's print below iterate.
+  const reachable: WeatherFamily[] = [];
+  let familyCuts = 0;
+  {
+    let previous = weatherFamilyFor(0);
+    reachable.push(previous);
+    for (let i = 1; i <= 1000; i++) {
+      const family = weatherFamilyFor(i / 1000);
+      if (family === previous) continue;
+      familyCuts++;
+      if (!reachable.includes(family)) reachable.push(family);
+      previous = family;
+    }
+  }
+
   console.log(
     `  ${built} phenomena over ${((CHUNKS * CHUNK_LENGTH * SEEDS.length) / 1000).toFixed(0)} km ` +
       `of road (one every ${(
@@ -654,7 +673,7 @@ function contextFor(
         Math.max(1, built)
       ).toFixed(1)} km)`,
   );
-  for (const family of WEATHER_FAMILIES) {
+  for (const family of reachable) {
     console.log(`    ${family.padEnd(13)} ${String(familyCount[family]).padStart(3)}`);
   }
   console.log(
@@ -668,9 +687,10 @@ function contextFor(
     `${wrongChunk} chunks built something they do not own`,
   );
   check(
-    'every family does appear',
-    WEATHER_FAMILIES.every((f) => familyCount[f] > 0),
-    WEATHER_FAMILIES.map((f) => `${f} ${familyCount[f]}`).join(', '),
+    'every family the country can pick does appear',
+    reachable.every((f) => familyCount[f] > 0),
+    `${reachable.map((f) => `${f} ${familyCount[f]}`).join(', ')} ` +
+      `of the desert's ${WEATHER_FAMILIES.length}`,
   );
   check('each stands on the event\'s own side', wrongSide === 0, `${wrongSide} on the wrong side`);
   check(
@@ -708,10 +728,9 @@ function contextFor(
     }
     check(
       'a known draw picks a known family',
-      weatherFamilyFor(0.1) === 'virga' &&
-        weatherFamilyFor(0.5) === 'dustWall' &&
-        weatherFamilyFor(0.9) === 'smokeColumn',
-      'thirds of draw select virga, dustWall, smokeColumn',
+      familyCuts === reachable.length - 1 && reachable.includes(weatherFamilyFor(0.5)),
+      `the draw selects ${reachable.join(', ')} — ${familyCuts} cut` +
+        `${familyCuts === 1 ? '' : 's'} across it, in that order`,
     );
   }
 

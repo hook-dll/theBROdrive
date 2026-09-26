@@ -14,14 +14,14 @@
  * and a second hand-written stub would drift the moment a painter calls one more
  * context method.
  *
- * IMPORT IT FIRST. Four modules resolve a painted texture while they are being
- * evaluated rather than on first use (`world/roadmesh.ts` builds the shoulder's gravel
- * map, `world/trackmesh.ts` the track's, `world/props/trees.ts` the leaf atlas,
- * `render/stickers.ts` the star), and an import list is evaluated in source order. A
- * tool whose `src/` imports come before this one therefore dies at module scope with
- * `document is not defined` before its own first statement runs — which is what
- * `roadside-solid.ts` and `long-drive-soak.ts` did. The shim installs itself on import
- * so the only rule left is the order.
+ * IMPORT IT FIRST. One module still resolves a painted texture while it is being
+ * evaluated rather than on first use (`world/props/trees.ts` builds the leaf atlas;
+ * `world/roadmesh.ts` the shoulder's gravel map, `world/trackmesh.ts` the track's and
+ * `render/stickers.ts` the star are all resolved on first use now), and an import list
+ * is evaluated in source order. A tool whose `src/` imports come before this one
+ * therefore dies at module scope with `document is not defined` before its own first
+ * statement runs — which is what `roadside-solid.ts` and `long-drive-soak.ts` did. The
+ * shim installs itself on import so the only rule left is the order.
  *
  * Nothing here is part of the game bundle.
  */

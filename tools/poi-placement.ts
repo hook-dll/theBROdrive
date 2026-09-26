@@ -787,23 +787,38 @@ const MAX_RESIDUAL_M = 0.6;
   // so ground that resolves BELOW that plane at any point under the footprint is daylight
   // under a wall. Sampling the ground densely is the point: `fitGround` fits to a grid, and
   // the gap it cannot see is the one between its own samples.
+  //
+  // THE RECTANGLE IS THE MESH'S OWN, MEASURED, not the catalogue's declared footprint. The
+  // declared box is nominal — padded, and centred on the instance's origin — and measured
+  // over the catalogue it is up to 8.5 m wider than the geometry (a `scattered-plane`
+  // declares 34 x 28 m and its mesh measures 25.5 x 22.8) while several meshes sit a metre
+  // or more off their own origin (`starter-homestead` 1.01 m, `scattered-plane` 3.22 m).
+  // Probing the declared box therefore asks about ground the building does not stand on —
+  // and it did: it reported 0.36 m of "daylight under a wall" on the starter homestead at
+  // its local (3.6, 9.5), which is 2.7 m past the wall, where a ray cast down the column
+  // meets nothing at all. `poi.ts` fits its plane to the mesh's own reach for the same
+  // reason; this measures the property that fit is supposed to guarantee.
+  const meshBoxes = new Map<string, THREE.Box3>();
+  for (let index = 0; index < variantCount(); index++) {
+    const instance = createVariantInstance(index);
+    instance.group.updateMatrixWorld(true);
+    meshBoxes.set(variantDef(index).id, new THREE.Box3().setFromObject(instance.group));
+  }
   let worstGap = 0;
   let worstGapId = '';
   let worstGapPoint = '';
   const inverse = new THREE.Matrix4();
   const probe = new THREE.Vector3();
   for (const { object: building, s: nearS } of placed) {
-    const index = Array.from({ length: variantCount() }, (_, i) => i).find(
-      (i) => variantDef(i).id === building.userData.poiVariant,
-    );
-    if (index === undefined) continue;
-    const [footX, footZ] = variantDef(index).footprint;
+    const id = String(building.userData.poiVariant);
+    const box = meshBoxes.get(id);
+    if (!box) continue;
     inverse.copy(building.matrixWorld).invert();
     const steps = 8;
     for (let i = 0; i <= steps; i++) {
       for (let j = 0; j <= steps; j++) {
-        const lx = (i / steps - 0.5) * footX;
-        const lz = (j / steps - 0.5) * footZ;
+        const lx = box.min.x + (i / steps) * (box.max.x - box.min.x);
+        const lz = box.min.z + (j / steps) * (box.max.z - box.min.z);
         probe.set(lx, 0, lz).applyMatrix4(building.matrixWorld);
         const ground = groundAt(probe.x, probe.z, nearS);
         probe.y = ground;
@@ -813,8 +828,10 @@ const MAX_RESIDUAL_M = 0.6;
         const gap = -probe.y;
         if (gap > worstGap) {
           worstGap = gap;
-          worstGapId = String(building.userData.poiVariant);
-          worstGapPoint = `local (${lx.toFixed(1)}, ${lz.toFixed(1)}) of (${footX.toFixed(1)} x ${footZ.toFixed(1)})`;
+          worstGapId = id;
+          worstGapPoint =
+            `local (${lx.toFixed(1)}, ${lz.toFixed(1)}) of the mesh's ` +
+            `${(box.max.x - box.min.x).toFixed(1)} x ${(box.max.z - box.min.z).toFixed(1)} m box`;
         }
       }
     }

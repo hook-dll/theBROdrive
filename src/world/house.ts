@@ -114,28 +114,31 @@ const GARAGE_CENTRE_U = VARIANT_U;
 const GARAGE_CENTRE_V = VARIANT_V + 8.68;
 
 /**
- * The variant's own extent, MEASURED rather than taken from its declared footprint: a
- * porch, a balcony and a garage wing all project past the declared box. These are the
- * same numbers the world's POI placement measures for this variant.
+ * The compound's own extent ALONG the road (the variant's local X), and it has to cover
+ * the MESH: the rectangle built from it below is what the single ground plane is fitted
+ * to, and the residual of that fit is what the whole building is sunk by
+ * (`homesteadLayout`). A rectangle narrower than the mesh leaves ground the fit never
+ * sampled, and the building floats there.
  *
- * AND THEY HAVE TO COVER THE MESH, because the rectangle built from them below is what the
- * compound's single ground plane is fitted to, and the residual of that fit is what the whole
- * building is sunk by (`homesteadLayout`). A rectangle narrower or shorter than the building
- * leaves ground the fit never sampled, and the building FLOATS there: measured by
- * `tools/poi-placement.ts`, the mesh is 29.0 x 19.0 m across and at 13.7/7.8 the ground at its
- * own edge fell 0.36 m below the seated floor — 'daylight under a wall'. At 14.5 and 10 the
- * rectangle contains the footprint whatever the axis pairing, and a residual over a rectangle
- * that contains the footprint cannot leave it floating.
+ * The variant is placed by a coordinate swap (see `VARIANT_U` below), so its local X is
+ * this axis. Measured off the merged mesh in the variant's own frame: local x spans
+ * -13.75..13.68 and local z -8.85..6.82, so the reach is 13.75 along this axis and 8.85
+ * across it. 14.5 and 10 (below) are a hand's breadth past the mesh, because the seam is
+ * where it shows.
+ *
+ * The 0.36 m of "daylight under a wall" that `tools/poi-placement.ts` once reported for
+ * this building was NOT this rectangle being too small: the bench was probing the
+ * catalogue's declared 29.0 x 19.0 m box, centred on the variant's origin, which reaches
+ * 2.7 m past the mesh at the +z edge — where a ray cast down the column meets no geometry
+ * at all. Both are fixed: the bench probes the mesh's own box, and the world's POI fit
+ * reaches as far as the mesh on the far side of the origin (`poi.ts`).
  */
 const VARIANT_HALF_X = 14.5;
 /**
- * Half the building's extent ACROSS the driveway, and it has to COVER THE MESH: the pad is
- * the rectangle the one ground plane is fitted to, a fit measures only the ground it covers,
- * and the residual it reports is the whole basis of the seating — the building is sunk by
- * exactly that. At 7.8 the mesh's own edge (9.5 m) fell outside the fitted rectangle, so the
- * ground there was never sampled and stood ABOVE the seated floor: measured by
- * `tools/poi-placement.ts` at the building's local (3.6, 9.5) of (29.0 x 19.0), 0.36 m of
- * daylight under a wall. A hand's breadth past the mesh, because the seam is where it shows.
+ * Half the compound's extent ACROSS the road (the variant's local Z). It has to cover the
+ * mesh for the same reason as `VARIANT_HALF_X`, and the mesh is not centred on the
+ * variant's own origin: local z runs -8.85..6.82, so the reach is 8.85 and not the 7.84
+ * half-width a symmetric rectangle would suggest. See `VARIANT_HALF_X` for the rest.
  */
 const VARIANT_HALF_Z = 10;
 /** Yard in front of the garage, beyond the building, for the junk and the fuel can. */

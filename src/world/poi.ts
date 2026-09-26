@@ -18,7 +18,7 @@ import {
 } from '../render/carmodel';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
-import { villagesBetween, type Village } from './village';
+import { houseFooting, villagesBetween, type Village } from './village';
 import { box, C } from './poi/kit';
 import type { LoosePartField } from '../parts/loose';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
@@ -736,16 +736,22 @@ function buildVariantPoi(
   // measured at 0.22-0.44 m across the catalogue — which is by definition the most any
   // point of ground under it can rise above the plane. So no wall can ever stand on air,
   // and none of it stands on anything man-made.
-  // THE FITTED FOOTPRINT IS THE BUILDING'S OWN, not the catalogue's nominal half extents: a
-  // porch, a canopy or a roof overhang reaches past them, and the residual that seats the
-  // building is measured over the rectangle it covers. `tools/poi-placement.ts` probes the
-  // mesh's own bounds, and it is right to: measured on the starter homestead, the ground
-  // under the MESH's rectangle spreads 1.25 m where the fitted rectangle's residual is
-  // 0.38 m, and the difference is 0.40 m of daylight under a wall.
+  // THE FITTED FOOTPRINT IS THE BUILDING'S OWN MESH, MEASURED — not the catalogue's
+  // declared box, which is nominal. A porch, a canopy or a roof overhang reaches past the
+  // declared numbers, and the residual that seats the building is only a bound over the
+  // rectangle it was measured on.
+  //
+  // AND THE RECTANGLE IS CENTRED ON THE INSTANCE'S ORIGIN, so it has to reach as far as the
+  // mesh does on the FAR side of it — half the mesh's width is not that, whenever a variant
+  // is not centred on its own origin, and most are not. Measured over the catalogue: the
+  // starter homestead's mesh sits 1.01 m off centre across the road, a `standing-tower`
+  // 0.97 m, a `relay-cluster` 1.19 m, a `scattered-plane` 3.22 m. With the half extent the
+  // rectangle stopped short on that side, that strip of wall was never sampled, and the
+  // residual — the whole basis of the seating — did not bound the ground under it.
   const bounds = new THREE.Box3().setFromObject(instance.group);
-  const halfX = Math.max(instance.halfExtentX, (bounds.max.x - bounds.min.x) / 2);
-  const halfZ = Math.max(instance.halfExtentZ, (bounds.max.z - bounds.min.z) / 2);
-  const site = siteAt(ctx, poi, a, yaw, halfX, halfZ);
+  const reachX = Math.max(instance.halfExtentX, Math.abs(bounds.min.x), Math.abs(bounds.max.x));
+  const reachZ = Math.max(instance.halfExtentZ, Math.abs(bounds.min.z), Math.abs(bounds.max.z));
+  const site = siteAt(ctx, poi, a, yaw, reachX, reachZ);
   const seatY = site.plane.centreY - site.plane.residual - SEAT_BURY_MARGIN;
 
   const at = sitePoint(site, 0, 0);
@@ -802,14 +808,15 @@ function buildVariantPoi(
 
   // The salvageable car field stayed with the containers. `buildWrecks` places its cars
   // around the POI's own anchor, which is exactly where this building stands, so it is
-  // handed the footprint to lay out around.
+  // handed the footprint to lay out around — the same rectangle the ground plane was
+  // fitted to, so the keep-out and the seating cannot drift apart.
   if (instance.category === 'container') {
     buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals, {
       x: a.x,
       z: a.z,
       yaw,
-      halfX,
-      halfZ,
+      halfX: reachX,
+      halfZ: reachZ,
     });
   }
 
@@ -832,6 +839,12 @@ const FENCE_HEIGHT_M = 0.95;
 const GARDEN_FROM_M = 9;
 const GARDEN_TO_M = 24;
 const GARDEN_HALF_WIDTH_M = 7;
+/**
+ * How far a garden wall's ground may sit under the water level before the plot is left
+ * unfenced, metres. Unlike a building the fence is not sunk — its base IS the ground it
+ * stands on — so this is the depth at which the tiles start drawing a sheet there.
+ */
+const FENCE_DRY_M = 0.05;
 /** The drop: poles between the road's own line and the village's street. */
 const DROP_POLE_HEIGHT_M = 7.4;
 const DROP_POLE_GAP_M = 9;
@@ -875,10 +888,16 @@ function buildVillage(
     // and `PoiSwitchField` is keyed by switch id, so the copies overwrote each other's
     // switch state, and the loot roll was made once per copy.
     if (house.s < ctx.sStart || house.s >= ctx.sEnd) continue;
+    // WHERE THE STREET MEETS THE GROUND. The plan's lateral is a hash; a watercourse
+    // crossing the corridor puts water under it at 21-35 m out often enough to matter (see
+    // `houseFooting`). `null` means the ground cannot carry a house anywhere near this spot,
+    // and a house standing in a brook is worse than a gap in the row.
+    const lateral = houseFooting(ctx.road, ctx.terrain, house);
+    if (lateral === null) continue;
     const poi: Poi = {
       index: VILLAGE_LOOT_BASE + village.index * 64 + house.number,
       s: house.s,
-      lateral: house.lateral,
+      lateral,
       variant: house.variant,
       variantSeed: house.variantSeed,
     };
@@ -900,7 +919,7 @@ function buildVillage(
       shouldLoot,
     );
     if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
-    buildGardenFence(ctx, village, house.s, house.lateral, group);
+    buildGardenFence(ctx, village, house.s, lateral, group);
   }
   // The drop is ONE structure rather than one per house, so it belongs to the chunk the
   // village's own middle falls in.
@@ -925,22 +944,34 @@ function buildGardenFence(
   const y = ctx.terrain.heightAt(centre.x, centre.z, s);
   const back = road.offsetPoint(s, outward * far);
   const backY = ctx.terrain.heightAt(back.x, back.z, s);
-  const paint = (x: number, z: number, size: readonly [number, number, number], yaw: number, baseY: number): void => {
-    box(
-      group,
-      [size[0], size[1], size[2]],
-      [x - ctx.originX, baseY + size[1] / 2, z - ctx.originZ],
-      C.darkTimber,
-      [0, yaw, 0],
-    );
-  };
   const length = far - near;
-  // The two side walls run out from the house, the back one closes them.
+  // THREE WALLS, and the two side ones run out from the house rather than closing on it, so
+  // each stands on the ground at its own arclength while sharing the middle's base height.
+  const walls: Array<{ x: number; z: number; baseY: number; size: readonly [number, number, number] }> = [
+    { x: back.x, z: back.z, baseY: backY, size: [GARDEN_HALF_WIDTH_M * 2, FENCE_HEIGHT_M, FENCE_PLANK_M] },
+  ];
   for (const side of [-1, 1]) {
     const p = road.offsetPoint(s + side * GARDEN_HALF_WIDTH_M, outward * mid);
-    paint(p.x, p.z, [FENCE_PLANK_M, FENCE_HEIGHT_M, length], heading, y);
+    walls.push({ x: p.x, z: p.z, baseY: y, size: [FENCE_PLANK_M, FENCE_HEIGHT_M, length] });
   }
-  paint(back.x, back.z, [GARDEN_HALF_WIDTH_M * 2, FENCE_HEIGHT_M, FENCE_PLANK_M], heading, backY);
+  // A GARDEN THE WATER HAS TAKEN IS NOT FENCED. The plot runs 9-24 m BACK from the house, so
+  // it reaches further out than the house does — and a watercourse runs along the corridor's
+  // side, which is exactly where the far end of a plot is. Measured over 120 km of seed 1337
+  // at the village the stream runs through: the fence's far wall stood 1.28 m under the
+  // surface. A fence in a brook is worse than no fence, and the brook IS the plot's edge.
+  for (const wall of walls) {
+    const level = ctx.terrain.waterLevelAt(wall.x, wall.z);
+    if (Number.isFinite(level) && level - wall.baseY > FENCE_DRY_M) return;
+  }
+  for (const wall of walls) {
+    box(
+      group,
+      [wall.size[0], wall.size[1], wall.size[2]],
+      [wall.x - ctx.originX, wall.baseY + wall.size[1] / 2, wall.z - ctx.originZ],
+      C.darkTimber,
+      [0, heading, 0],
+    );
+  }
 }
 
 /** Three poles and their wire, from the road's verge to the village's houses. */

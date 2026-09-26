@@ -3,15 +3,15 @@
  *
  * Does the ground beside the road actually do what the director scheduled?
  *
- * The variety director promises a horizon event every few kilometres; three of its
- * kinds — `cut`, `embankment`, `outcrop` — are modulations of the corridor ground in
+ * The variety director promises a horizon event every few kilometres; two of its
+ * kinds — `cut`, `embankment` — are modulations of the corridor ground in
  * `src/world/corridorshape.ts`, applied by the real `Terrain`. This drives those
  * shipped classes over real events on real seeds and measures the five things that can
  * each turn the feature into a defect:
  *
  *   reaches      a cut's crest and an embankment's trough are the height the kind
  *                promises (3 + draw * 4, -(2 + draw * 3)) at a lateral the driver can
- *                see them at, and an outcrop belt stands real rock up beside the road
+ *                see them at
  *   continuous   no step along the road anywhere across the feature or its ramps. A
  *                slope is not a step, so this measures both: the worst 1 m difference,
  *                and the same difference resampled sixteen times finer, which shrinks
@@ -23,6 +23,12 @@
  *                standing in the air
  *   drawn        the height is in the DRAWN MESH, not just in the field: the built
  *                chunk's own vertices, which are what the collider is baked from
+ *
+ * A third kind, `outcrop`, is NOT walked: the country switched its rock shelves off in
+ * two places (director weight 0, `terrain.ts` belt amplitude 0), so the check here is
+ * that no belt appears at all. Two measurements also exclude the watercourse: a stream
+ * is a term of the base field the road is graded across, and a bridge's ground is its
+ * own bed on purpose — neither is the corridor landform's roughness.
  *
  *   npx tsx tools/corridor-shape.ts
  *
@@ -83,6 +89,8 @@ const EDGE_TOLERANCE = 0.01;
 const MESH_TOLERANCE = 0.15;
 
 const CHANNEL_KINDS: readonly VarietyKind[] = ['cut', 'embankment', 'outcrop'];
+/** Paint-edge samples left out because the road is over its own bed there (a bridge). */
+let bridgedEdgeSamples = 0;
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -291,23 +299,44 @@ for (const seed of SEEDS) {
     // player drives past is the sum. Walked at the crest lateral over the same range,
     // splitting the samples by whether the landform is running there, so the two
     // numbers say directly what the feature costs the desert in smoothness.
+    //
+    // THE WATERCOURSE IS NOT THE FEATURE'S ROUGHNESS. A stream cuts through the corridor
+    // wherever it likes (`relief` carves its bed and its valley right through the graded
+    // ground, because the road goes over it), and its bank is a term of the SAME base the
+    // open walk measures — measured at seed 1337, s 18.55 km, the ground 30 m outside the
+    // paint falls 1.9 m, 2.2 m and 1.1 m over three consecutive metres where the reach's
+    // edge crosses, with the landform's own contribution flat at 4.06 m across it. Counting
+    // that against the landform measures the stream, so a sample standing in a watercourse
+    // ends the run: no step across one is recorded at all.
     for (const side of [-1, 1]) {
       let previous = Number.NaN;
+      let previousBase = Number.NaN;
       let previousShape = 0;
       for (let s = from; s <= to; s += WALK_STEP) {
         const dist = road.halfWidthAt(s) + 30;
         const p = road.offsetPoint(s, side * dist);
         const shape = terrain.corridorShapeAt(p.x, p.z, dist, s);
+        const base = terrain.baseFromFrame(p.x, p.z, side * dist, s);
         const ground = terrain.explorationHeightFromFrame(p.x, p.z, side * dist, s);
-        if (Number.isFinite(previous)) {
-          const step = Math.abs(ground - previous);
+        const stream = road.landscape.streams.at(p.x, p.z);
+        const inWater = stream.bed > 0 || stream.bowl > 0 || stream.span > 0;
+        if (Number.isFinite(previous) && !inWater) {
+          // THE FEATURE LIVES IN THE DETAIL LAYER, so what it costs is the step that layer
+          // adds on top of the ground it was added to: `explorationHeightFromFrame` minus
+          // `baseFromFrame` IS the detail layer, so the difference of the two steps is its
+          // own. Measuring the whole ground instead charges the landform for the base's own
+          // roughness — a moraine edge or a ravine wall that happens to fall inside the
+          // feature's span — which is why this measured 0.70 m against the open ground's
+          // own 0.40 m before it was split.
+          const extra = Math.abs((ground - previous) - (base - previousBase));
           if (shape === 0 && previousShape === 0) {
-            record(worstOpenGroundStep, step, seed, s, side * dist);
+            record(worstOpenGroundStep, Math.abs(base - previousBase), seed, s, side * dist);
           } else {
-            record(worstFeatureGroundStep, step, seed, s, side * dist);
+            record(worstFeatureGroundStep, extra, seed, s, side * dist);
           }
         }
-        previous = ground;
+        previous = inWater ? Number.NaN : ground;
+        previousBase = inWater ? Number.NaN : base;
         previousShape = shape;
       }
     }
@@ -334,6 +363,14 @@ for (const seed of SEEDS) {
     // The road's own elevation is the thing this design refuses to move. Compared
     // against `roadSurfaceY` — the function the ribbon itself is built from — just
     // outside the paint, inside the feature and 400 m clear of it.
+    //
+    // EXCEPT WHERE THE ROAD DELIBERATELY STEPS ASIDE. Where the road spans its own bed
+    // (`span > 0`, `gradedBase`) the ground under and beside the deck IS the bed, however
+    // deep it has been cut — that is what a bridge is, and `streamcrossings.ts` builds the
+    // structure there. Measured at seed 7, s 6.4 km: span 1.0 at the paint edge and the
+    // ground 2.9 m below the ribbon, on an embankment event, with no defect anywhere — the
+    // grading is not carrying that reach, the structure is. Those samples are skipped and
+    // counted, so a reach that stopped being bridged would show up as a step here again.
     for (const s of [event.s, event.s + event.halfLength * 0.5, to + 200]) {
       const inner = road.halfWidthAt(s);
       for (const side of [-1, 1]) {
@@ -341,6 +378,11 @@ for (const seed of SEEDS) {
         const ribbon = roadSurfaceY(road, field, s, side * inner, edge.x, edge.z);
         const just = inner + 0.02;
         const p = road.offsetPoint(s, side * just);
+        const span = road.landscape.streams.at(p.x, p.z).span;
+        if (span > 0) {
+          bridgedEdgeSamples++;
+          continue;
+        }
         const ground = terrain.explorationHeightFromFrame(p.x, p.z, side * just, s);
         record(worstEdge, Math.abs(ground - ribbon), seed, s, side * just);
       }
@@ -385,9 +427,15 @@ for (const seed of SEEDS) {
   }
 
   // -- every belt in 400 km, not just the ones walked ------------------------
-  // The director promises a horizon event every few kilometres, so a belt that lands
-  // where the rock field happens to be low and stands nothing up is the promise
-  // failing. That cannot be sampled: it has to be every one of them.
+  // THE COUNTRY HAS NO ROCK BELTS, and that is what this counts. The desert scheduled
+  // `outcrop` events and expected each one to stand real rock up beside the road; the
+  // country switched the whole path off in two places and both are deliberate — the
+  // director's weight for the kind is 0 (`world/director.ts`), so no event is ever rolled,
+  // and `terrain.ts`'s `OUTCROP_BELT_AMPLITUDE` is 0, so an event would add nothing to the
+  // height if one were. The walk below therefore finds nothing to walk, and the check is
+  // that it keeps finding nothing: turning either switch back on has to come here and say
+  // what a belt is supposed to measure, rather than silently re-enabling a feature whose
+  // rock was left in the desert.
   for (const event of events.filter((e) => e.kind === 'outcrop')) {
     beltsScanned++;
     let tallest = 0;
@@ -411,7 +459,6 @@ for (const seed of SEEDS) {
     if (tallest < BELT_MIN_RISE) beltsTooThin++;
   }
 }
-
 console.log('');
 console.log('worst measurement over every event walked');
 console.log(
@@ -435,24 +482,27 @@ console.log(
 );
 console.log(
   `  whole ground at the crest lateral, worst step per ${WALK_STEP} m:\n` +
-    `    where the landform runs  ${worstFeatureGroundStep.value.toFixed(4)} m` +
+    `    landform's own cost       ${worstFeatureGroundStep.value.toFixed(4)} m` +
     `   (seed ${worstFeatureGroundStep.seed} at ${(worstFeatureGroundStep.s / 1000).toFixed(1)} km)\n` +
-    `    open desert, same walk   ${worstOpenGroundStep.value.toFixed(4)} m` +
+    `    the ground it sits on    ${worstOpenGroundStep.value.toFixed(4)} m` +
     `   (seed ${worstOpenGroundStep.seed} at ${(worstOpenGroundStep.s / 1000).toFixed(1)} km)`,
 );
 console.log(`  verge band movement  ${worstVerge.value.toFixed(6)} m`);
 console.log(
   `  asphalt edge         ${worstEdge.value.toFixed(4)} m  ` +
-    `(seed ${worstEdge.seed} at ${(worstEdge.s / 1000).toFixed(1)} km)`,
+    `(seed ${worstEdge.seed} at ${(worstEdge.s / 1000).toFixed(1)} km; ` +
+    `${bridgedEdgeSamples} samples skipped as bridged reaches)`,
 );
 console.log(
   `  mesh against field   ${worstMesh.value.toFixed(4)} m over ${meshVerticesChecked} drawn vertices  ` +
     `(tallest landform on a drawn vertex ${worstMeshCrest.toFixed(2)} m)`,
 );
 console.log(
-  `  belts in 400 km      ${beltsScanned} over ${SEEDS.length} seeds, tallest shelf ` +
-    `${worstBeltRise.toFixed(2)} m, thinnest belt ${weakestBelt.toFixed(2)} m ` +
-    `(at ${(weakestBeltAt / 1000).toFixed(1)} km)`,
+  `  belts in 400 km      ${beltsScanned} over ${SEEDS.length} seeds` +
+    (beltsScanned === 0
+      ? ' (none scheduled)'
+      : `, tallest shelf ${worstBeltRise.toFixed(2)} m, thinnest belt ` +
+        `${weakestBelt.toFixed(2)} m (at ${(weakestBeltAt / 1000).toFixed(1)} km)`),
 );
 console.log('');
 
@@ -510,10 +560,12 @@ check(
   `tallest landform standing on a drawn vertex ${worstMeshCrest.toFixed(2)} m`,
 );
 check(
-  'every outcrop belt stands rock up',
-  beltsTooThin === 0 && beltsScanned > 0,
-  `${beltsScanned - beltsTooThin}/${beltsScanned} belts over ${BELT_MIN_RISE} m, ` +
-    `thinnest ${weakestBelt.toFixed(2)} m`,
+  'the country schedules no rock belt',
+  beltsScanned === 0,
+  `${beltsScanned} belts in 400 km over ${SEEDS.length} seeds` +
+    (beltsScanned === 0
+      ? ' — the kind is off in the director and its amplitude is 0 in terrain.ts'
+      : `, ${beltsTooThin} of them standing less than ${BELT_MIN_RISE} m of rock`),
 );
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} CHECK(S) FAILED`);

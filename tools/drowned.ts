@@ -33,7 +33,7 @@ import { Terrain } from '../src/world/terrain';
 import { PoiProvider } from '../src/world/poi';
 import { PoleProvider } from '../src/world/props/poles';
 import { ScatterProvider } from '../src/world/props/scatter';
-import { VILLAGE_SLOT_M, villageCovering, villagesAlongRoad } from '../src/world/village';
+import { VILLAGE_SLOT_M, houseFooting, villageCovering, villagesAlongRoad } from '../src/world/village';
 import type { BasinFootprint } from '../src/world/lakes';
 import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
@@ -120,15 +120,24 @@ function contextFor(chunkIndex: number, world: GameWorld): ChunkContext {
   } as unknown as ChunkContext;
 }
 
-// --- 1. No house stands in the village pond ------------------------------------
+// --- 1. No house stands in its village pond ------------------------------------
 // The pond is the village's own hole in the ground and the street is its row of houses;
 // the two are rolled from the same slot but from different numbers, so this is an
 // invariant to measure rather than one to assume.
+//
+// AND NO HOUSE STANDS IN A BROOK. The street plan is a pure function of the slot — it has
+// to be, because the ROAD's heading bends over the street's span — so the plan's lateral is
+// a hash and knows nothing about the ground. `houseFooting` is where the street meets the
+// ground: it moves a house across the street or a step further out, and refuses to build it
+// at all where the ground cannot carry it. This walks the plan through that rule, so what it
+// measures is the row the game builds, and `unbuildable` is the part of the requirement the
+// rule cannot meet by moving a house — a street plan the ground cannot carry at all.
 {
   const villages = villagesAlongRoad(SEED, VILLAGES_WALKED * VILLAGE_SLOT_M);
   let houses = 0;
   let insideBowl = 0;
   let underWater = 0;
+  let unbuildable = 0;
   let underWhere = '';
   let deepest = 0;
   let closest = Number.POSITIVE_INFINITY;
@@ -137,13 +146,22 @@ function contextFor(chunkIndex: number, world: GameWorld): ChunkContext {
     const pond = road.offsetPoint(village.pond.s, village.pond.lateral);
     for (const house of village.houses) {
       houses++;
-      const point = road.offsetPoint(house.s, house.lateral);
-      const clearance = Math.hypot(point.x - pond.x, point.z - pond.z) - village.pond.radius;
+      const nominal = road.offsetPoint(house.s, house.lateral);
+      const clearance = Math.hypot(nominal.x - pond.x, nominal.z - pond.z) - village.pond.radius;
       if (clearance < closest) {
         closest = clearance;
         closestWhere = `village ${village.index}, house ${house.number}`;
       }
       if (clearance < 0) insideBowl++;
+      const lateral = houseFooting(road, terrain, house);
+      if (lateral === null) {
+        unbuildable++;
+        continue;
+      }
+      const point = road.offsetPoint(house.s, lateral);
+      // `waterAt`, not `terrain.waterLevelAt`: this is the sheet the player sees, basins
+      // included, and it is the belt to `houseFooting`'s braces — the rule runs on the
+      // watercourse and the bog, and a house inside a lake's bowl would slip past it.
       const level = waterAt(point.x, point.z, house.s);
       const ground = terrain.heightAt(point.x, point.z, house.s);
       const depth = level - ground;
@@ -153,7 +171,7 @@ function contextFor(chunkIndex: number, world: GameWorld): ChunkContext {
           deepest = depth;
           underWhere =
             `village ${village.index}, house ${house.number} at s ${(house.s / 1000).toFixed(1)} km, ` +
-            `lateral ${house.lateral.toFixed(0)} m, ${depth.toFixed(2)} m under`;
+            `lateral ${lateral.toFixed(0)} m, ${depth.toFixed(2)} m under`;
         }
       }
     }
@@ -162,7 +180,9 @@ function contextFor(chunkIndex: number, world: GameWorld): ChunkContext {
     'no house stands in its village pond',
     villages.length > 0 && houses > 0 && insideBowl === 0 && underWater === 0,
     `${houses} houses in ${villages.length} villages, ${insideBowl} inside a bowl, ` +
-      `${underWater} with ground under water${underWhere}, closest to the pond ${closest.toFixed(1)} m (${closestWhere})`,
+      `${underWater} with ground under water${underWhere}, ` +
+      `${unbuildable} the ground cannot carry anywhere near its spot (left unbuilt), ` +
+      `closest to the pond ${closest.toFixed(1)} m (${closestWhere})`,
   );
 }
 

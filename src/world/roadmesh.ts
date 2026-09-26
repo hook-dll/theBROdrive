@@ -348,25 +348,36 @@ const roadBedMaterial = applyCloudShadow(
 );
 /** The country's bare shoulder (world/shoulder.ts). */
 const COUNTRY_SHOULDER = true;
-/** Lit as the ground is, so the strip is the ground's own colour where it meets it. */
-const shoulderMaterial = applyWetness(applySnowCover(applyCloudShadow(
-  applyComicShading(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      // Crushed stone in earth (render/gravelpaint.ts), shade over the vertex colour.
-      map: gravelTexture(),
-      roughness: 0.95,
-      metalness: 0,
-      // It lies on the ground a few centimetres up; this keeps it on top where the
-      // tiles' interpolation brings them level with it.
-      polygonOffset: true,
-      // Units only: a slope factor would pull the tucked edge back out of the ground.
-      polygonOffsetFactor: 0,
-      polygonOffsetUnits: -2,
-    }),
-    { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
-  ),
-), 0.92), 0.3, null);
+/**
+ * Lit as the ground is, so the strip is the ground's own colour where it meets it.
+ *
+ * RESOLVED ON FIRST USE, not at import. `gravelTexture()` paints its map onto a 2D canvas,
+ * which needs a DOM — so building the material at module scope made importing this file
+ * depend on a canvas existing first, which is an ordering dependency between a headless
+ * bench's import list and a texture. The painter is already memoised; this is the same
+ * laziness one level up, and `render/stickers.ts` does it this way for the same reason.
+ */
+let shoulderMat: THREE.MeshStandardMaterial | null = null;
+function shoulderMaterial(): THREE.MeshStandardMaterial {
+  return (shoulderMat ??= applyWetness(applySnowCover(applyCloudShadow(
+    applyComicShading(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        // Crushed stone in earth (render/gravelpaint.ts), shade over the vertex colour.
+        map: gravelTexture(),
+        roughness: 0.95,
+        metalness: 0,
+        // It lies on the ground a few centimetres up; this keeps it on top where the
+        // tiles' interpolation brings them level with it.
+        polygonOffset: true,
+        // Units only: a slope factor would pull the tucked edge back out of the ground.
+        polygonOffsetFactor: 0,
+        polygonOffsetUnits: -2,
+      }),
+      { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
+    ),
+  ), 0.92), 0.3, null));
+}
 const shoulderEarth = new THREE.Color(0xb3a48c);
 const shoulderGravel = new THREE.Color(0xbcb7ab);
 const shoulderColour = new THREE.Color();
@@ -681,7 +692,7 @@ export class RoadMeshProvider implements ChunkProvider {
     const normals = new Float32Array(pos.length);
     for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    const mesh = new THREE.Mesh(geometry, shoulderMaterial);
+    const mesh = new THREE.Mesh(geometry, shoulderMaterial());
     mesh.receiveShadow = true;
     return { mesh, vertices: pos, indices: index };
   }
