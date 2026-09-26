@@ -247,6 +247,307 @@ const SPRUCE_HABITS: readonly SpruceHabit[] = [
   { name: 'глухая', height: [15, 19], skirt: 1.2, tiers: [14, 16], uneven: 0.28, width: [2.8, 3.4], taper: 1.15, droop: 0.8, branches: [7, 8], loss: 0.03, lean: 1.02, bend: 0.08, sweep: 0.05, toward: 200, top: 'spire' },
 ];
 
+/** What became of a tree's top. */
+type HabitTop = 'whole' | 'broken' | 'twin' | 'flat' | 'droop' | 'layered';
+
+/**
+ * A habit of growth: what one tree of a kind is that its neighbour is not. Every kind
+ * reads the fields that mean anything to it and ignores the rest, so the tables stay
+ * comparable across species and a reader can see what a kind varies (docs/research-
+ * 2026-09-26.md, §6.6).
+ *
+ *   height  metres at scale 1                crown  where the crown starts, of height
+ *   width   crown half-width, metres         tall   crown half-height over half-width
+ *   stems   stems from one foot              lean   0 upright, 1 a real lean
+ *   gaps    share of the crown's masses gone hang   share of branches that hang
+ *   taper   1 a cone, .5 a dome, 0 flat      top    what became of the top
+ *   limbs   limbs, of the count the kind usually grows
+ *   girth   trunk radius multiplier
+ */
+interface Habit {
+  readonly name: string;
+  readonly height: readonly [number, number];
+  readonly crown: readonly [number, number];
+  readonly width: readonly [number, number];
+  readonly tall: number;
+  readonly stems: number;
+  readonly lean: number;
+  readonly gaps: number;
+  readonly hang: number;
+  readonly taper: number;
+  readonly top: HabitTop;
+  readonly limbs: number;
+  readonly girth: number;
+}
+
+const HABIT_DEFAULTS: Habit = {
+  name: '',
+  height: [12, 16],
+  crown: [0.32, 0.42],
+  width: [2.0, 2.8],
+  tall: 1,
+  stems: 1,
+  lean: 0,
+  gaps: 0,
+  hang: 0,
+  taper: 0.7,
+  top: 'whole',
+  limbs: 1,
+  girth: 1,
+};
+
+/** A table is written as the differences from `HABIT_DEFAULTS`: only what a habit changes. */
+function habits(rows: readonly (Partial<Habit> & { readonly name: string })[]): readonly Habit[] {
+  return rows.map((row) => ({ ...HABIT_DEFAULTS, ...row }));
+}
+
+/**
+ * Scots pines of the middle belt. In a bor a pine is a mast: a bare stem clean to
+ * two-thirds, grey below and copper above, and a flat crown of dark plates on
+ * upswept limbs at the very top. In the open it is Shishkin's "Rye" pine: stout,
+ * crowned from a third up, its low limbs sagging. On bog it is short and crooked;
+ * a burnt pine keeps only a stem and its whorls of dead stubs.
+ */
+const PINE_HABITS: readonly Habit[] = habits([
+  { name: 'бор', height: [20, 26], crown: [0.62, 0.7], width: [2.6, 3.2], tall: 0.5, taper: 0.55, top: 'flat', limbs: 0.9, girth: 1.35 },
+  { name: 'бор, старая', height: [24, 29], crown: [0.68, 0.76], width: [3.0, 3.8], tall: 0.45, taper: 0.45, top: 'flat', limbs: 1.1, girth: 1.6 },
+  { name: 'молодая, конус', height: [8, 12], crown: [0.22, 0.3], width: [1.5, 2.0], tall: 1.5, taper: 1.2, top: 'whole', limbs: 1.15, girth: 0.7 },
+  { name: 'на просторе', height: [15, 19], crown: [0.3, 0.38], width: [4.6, 5.6], tall: 0.6, taper: 0.5, top: 'flat', limbs: 1.5, girth: 1.25, hang: 0.5 },
+  { name: 'лира', height: [18, 23], crown: [0.6, 0.68], width: [2.8, 3.4], tall: 0.5, taper: 0.5, top: 'twin', limbs: 0.95, girth: 1.2 },
+  { name: 'наклонная', height: [17, 22], crown: [0.58, 0.66], width: [2.6, 3.2], tall: 0.5, taper: 0.5, top: 'flat', lean: 0.6, limbs: 0.9, girth: 1.2 },
+  { name: 'сломанная', height: [10, 15], crown: [0.4, 0.5], width: [2.2, 2.8], tall: 0.55, taper: 0.5, top: 'broken', limbs: 1.0, girth: 1.1 },
+  { name: 'низкая, ветровая', height: [11, 15], crown: [0.45, 0.55], width: [2.4, 3.0], tall: 0.55, taper: 0.5, top: 'flat', lean: 0.4, limbs: 1.1, girth: 1.0, hang: 0.25 },
+  { name: 'болотная', height: [6, 10], crown: [0.2, 0.32], width: [1.6, 2.2], tall: 0.75, taper: 0.9, top: 'layered', gaps: 0.3, limbs: 0.65, girth: 0.6 },
+  { name: 'подсвечник', height: [7, 12], crown: [0.85, 0.95], width: [0.6, 1.0], tall: 0.5, taper: 0.3, top: 'layered', gaps: 0.55, limbs: 0.3, girth: 0.8 },
+  { name: 'редкая, теневая', height: [16, 21], crown: [0.5, 0.6], width: [2.0, 2.6], tall: 0.7, taper: 0.8, top: 'layered', gaps: 0.4, limbs: 0.6, girth: 0.85 },
+]);
+
+/** Pines of the open field: the same habit table read with `open` set (a low, wide crown). */
+const FIELD_PINE_HABITS: readonly Habit[] = habits([
+  { name: 'поле, широкая', height: [13, 17], crown: [0.26, 0.34], width: [4.4, 5.4], tall: 0.6, taper: 0.5, top: 'flat', limbs: 1.5, girth: 1.2, hang: 0.5 },
+  { name: 'поле, низкая', height: [9, 12], crown: [0.2, 0.28], width: [3.6, 4.6], tall: 0.65, taper: 0.55, top: 'flat', limbs: 1.4, girth: 1.0, hang: 0.6 },
+  { name: 'поле, высокая', height: [16, 20], crown: [0.34, 0.42], width: [4.0, 5.0], tall: 0.55, taper: 0.5, top: 'flat', limbs: 1.4, girth: 1.35, hang: 0.4 },
+  { name: 'поле, лира', height: [12, 16], crown: [0.28, 0.36], width: [4.0, 5.0], tall: 0.6, taper: 0.5, top: 'twin', limbs: 1.5, girth: 1.1, hang: 0.5 },
+  { name: 'поле, наклонная', height: [12, 16], crown: [0.26, 0.34], width: [4.2, 5.2], tall: 0.6, taper: 0.5, top: 'flat', lean: 0.7, limbs: 1.4, girth: 1.15, hang: 0.5 },
+  { name: 'поле, сломанная', height: [8, 12], crown: [0.3, 0.4], width: [3.4, 4.2], tall: 0.6, taper: 0.5, top: 'broken', limbs: 1.3, girth: 1.05, hang: 0.5 },
+  { name: 'поле, редкая', height: [11, 15], crown: [0.24, 0.32], width: [3.8, 4.8], tall: 0.65, taper: 0.55, top: 'layered', gaps: 0.35, limbs: 1.2, girth: 0.95, hang: 0.45 },
+  { name: 'поле, кривая', height: [10, 14], crown: [0.22, 0.3], width: [3.4, 4.4], tall: 0.7, taper: 0.6, top: 'flat', lean: 0.9, gaps: 0.15, limbs: 1.35, girth: 0.9, hang: 0.55 },
+  { name: 'поле, старая', height: [17, 22], crown: [0.36, 0.44], width: [4.6, 5.6], tall: 0.5, taper: 0.45, top: 'flat', limbs: 1.6, girth: 1.5, hang: 0.35 },
+  { name: 'поле, тонкая', height: [9, 13], crown: [0.3, 0.4], width: [3.0, 3.8], tall: 0.8, taper: 0.7, top: 'droop', gaps: 0.25, limbs: 1.1, girth: 0.8, hang: 0.7 },
+]);
+
+/**
+ * Birches. A silver birch is a white stem and a crown that does not close: thin limbs,
+ * hanging twigs and sky between the masses. In a closed stand it is a slender mast with
+ * a small high crown; in the open, a broad tree with a skirt down to eye level. Clumps
+ * of two or three stems from one root are what grows where a birch was cut, and old
+ * trees fork, lose the leader, or are broken by ice.
+ */
+const BIRCH_HABITS: readonly Habit[] = habits([
+  { name: 'лесная, тонкая', height: [15, 19], crown: [0.34, 0.42], width: [1.7, 2.2], taper: 0.3, limbs: 1.0, hang: 0.4, girth: 0.8 },
+  { name: 'повислая', height: [13, 17], crown: [0.26, 0.34], width: [2.4, 3.0], taper: 0.35, limbs: 0.95, hang: 0.85, gaps: 0.1 },
+  { name: 'на просторе', height: [12, 16], crown: [0.2, 0.28], width: [3.2, 4.0], taper: 0.6, limbs: 1.4, hang: 0.55 },
+  { name: 'куст из трёх стволов', height: [9, 13], crown: [0.3, 0.4], width: [2.4, 3.0], stems: 3, taper: 0.6, limbs: 1.2, hang: 0.5, girth: 0.6 },
+  { name: 'два ствола', height: [12, 16], crown: [0.3, 0.38], width: [2.2, 2.8], stems: 2, taper: 0.5, limbs: 1.1, hang: 0.5, girth: 0.8 },
+  { name: 'старая, чёрный низ', height: [18, 23], crown: [0.4, 0.48], width: [2.2, 2.8], taper: 0.45, limbs: 0.9, hang: 0.45, girth: 1.3 },
+  { name: 'раздвоенная', height: [14, 19], crown: [0.3, 0.4], width: [2.2, 2.8], taper: 0.5, top: 'twin', limbs: 1.0, hang: 0.5 },
+  { name: 'сломанная', height: [10, 14], crown: [0.25, 0.35], width: [2.0, 2.6], taper: 0.5, top: 'broken', limbs: 1.2, hang: 0.4 },
+  { name: 'кривая, у дороги', height: [11, 16], crown: [0.3, 0.4], width: [2.0, 2.6], taper: 0.45, lean: 0.8, limbs: 1.1, hang: 0.6 },
+  { name: 'редкая, в тени', height: [14, 18], crown: [0.5, 0.58], width: [1.6, 2.1], taper: 0.5, limbs: 0.7, hang: 0.35, gaps: 0.4 },
+  { name: 'молодая чаща', height: [8, 12], crown: [0.18, 0.26], width: [1.5, 2.0], taper: 0.35, limbs: 1.1, hang: 0.3, girth: 0.55 },
+]);
+
+/**
+ * Aspens. A straight pale stem clean to half its height, and a dense narrow crown of
+ * grey-green that is rounder and fuller than a birch's — and, unlike a birch, does not
+ * hang. Old aspens are hollow, broken, or forked.
+ */
+const ASPEN_HABITS: readonly Habit[] = habits([
+  { name: 'лесная', height: [16, 21], crown: [0.5, 0.58], width: [1.8, 2.3], taper: 0.5, limbs: 1.0 },
+  { name: 'широкая', height: [14, 18], crown: [0.42, 0.5], width: [2.6, 3.2], taper: 0.6, limbs: 1.3 },
+  { name: 'высокая, чистая', height: [20, 25], crown: [0.6, 0.68], width: [1.7, 2.2], taper: 0.45, limbs: 0.85, girth: 1.2 },
+  { name: 'раздвоенная', height: [15, 19], crown: [0.45, 0.55], width: [2.0, 2.6], taper: 0.5, top: 'twin', limbs: 1.05 },
+  { name: 'сломанная, дуплистая', height: [10, 14], crown: [0.35, 0.45], width: [2.0, 2.6], taper: 0.6, top: 'broken', limbs: 1.2, girth: 1.15 },
+  { name: 'кривая', height: [12, 17], crown: [0.45, 0.55], width: [2.0, 2.6], taper: 0.5, lean: 0.7, limbs: 1.0 },
+  { name: 'редкая, теневая', height: [13, 17], crown: [0.55, 0.65], width: [1.6, 2.1], taper: 0.5, limbs: 0.7, gaps: 0.35 },
+  { name: 'молодая', height: [7, 11], crown: [0.25, 0.35], width: [1.3, 1.8], taper: 0.4, limbs: 1.1, girth: 0.5 },
+  { name: 'толстая, старая', height: [18, 23], crown: [0.5, 0.6], width: [2.2, 2.8], taper: 0.55, limbs: 1.0, girth: 1.5 },
+  { name: 'придорожная', height: [13, 18], crown: [0.42, 0.52], width: [2.2, 2.8], taper: 0.55, lean: 0.5, limbs: 1.15, gaps: 0.15 },
+]);
+
+/**
+ * Oaks. Grown in the open an oak is a broad crooked tent of heavy limbs, wider than it
+ * is tall; in a closed stand it is a tall straight mast with a small high crown. A
+ * pollarded or an old, hollow oak is what stands in a village.
+ */
+const OAK_HABITS: readonly Habit[] = habits([
+  { name: 'шатёр', height: [11, 14], crown: [0.3, 0.38], width: [4.6, 5.6], tall: 0.85, taper: 0.75, top: 'flat', limbs: 1.2 },
+  { name: 'дубрава, узкий', height: [18, 23], crown: [0.45, 0.55], width: [2.8, 3.4], tall: 1.1, taper: 0.5, limbs: 0.9, girth: 0.9 },
+  { name: 'высокий шатёр', height: [16, 20], crown: [0.32, 0.4], width: [5.0, 6.2], tall: 0.7, taper: 0.8, top: 'flat', limbs: 1.3, girth: 1.2 },
+  { name: 'корявый', height: [9, 13], crown: [0.24, 0.34], width: [4.2, 5.2], tall: 0.8, taper: 0.8, top: 'flat', lean: 0.5, gaps: 0.2, limbs: 1.4 },
+  { name: 'сломанный', height: [8, 12], crown: [0.4, 0.5], width: [3.4, 4.2], tall: 0.7, taper: 0.7, top: 'broken', limbs: 1.5, girth: 1.3 },
+  { name: 'раздвоенный', height: [12, 16], crown: [0.3, 0.4], width: [4.0, 4.8], tall: 0.85, taper: 0.75, top: 'twin', limbs: 1.15 },
+  { name: 'наклонный', height: [11, 15], crown: [0.28, 0.36], width: [4.2, 5.2], tall: 0.8, taper: 0.75, lean: 0.9, limbs: 1.25 },
+  { name: 'редкий, клён-дуб', height: [13, 17], crown: [0.4, 0.5], width: [3.4, 4.2], tall: 0.9, taper: 0.7, gaps: 0.35, limbs: 0.9 },
+  { name: 'толстый, старый', height: [13, 17], crown: [0.26, 0.34], width: [5.2, 6.4], tall: 0.75, taper: 0.8, top: 'flat', limbs: 1.4, girth: 1.9 },
+  { name: 'низкий, выпас', height: [6, 9], crown: [0.2, 0.3], width: [3.6, 4.6], tall: 0.8, taper: 0.8, top: 'flat', limbs: 1.5, girth: 1.6, gaps: 0.15 },
+]);
+
+/**
+ * Willows, the rakita of ditches: a short thick leaning trunk that breaks into a
+ * fountain of upswept limbs. The white willow hangs its long shoots; the brittle
+ * willow is broad and rank; a pollarded one is a knot with brooms.
+ */
+const WILLOW_HABITS: readonly Habit[] = habits([
+  { name: 'белая, плакучая', height: [9, 12], crown: [0.2, 0.3], width: [3.6, 4.4], taper: 0.5, hang: 0.9, limbs: 1.1 },
+  { name: 'ракita у канавы', height: [7, 10], crown: [0.25, 0.35], width: [3.0, 3.8], taper: 0.6, lean: 0.5, limbs: 1.0 },
+  { name: 'широкая, ломкая', height: [10, 14], crown: [0.22, 0.3], width: [4.4, 5.4], taper: 0.7, limbs: 1.4 },
+  { name: 'старая, дуплистая', height: [8, 12], crown: [0.24, 0.32], width: [4.0, 5.0], taper: 0.6, top: 'flat', limbs: 1.2, girth: 1.6 },
+  { name: 'сломанная', height: [5, 8], crown: [0.3, 0.42], width: [3.0, 4.0], taper: 0.7, top: 'broken', limbs: 1.3, girth: 1.2 },
+  { name: 'куст из стволов', height: [6, 9], crown: [0.2, 0.3], width: [3.4, 4.4], stems: 3, taper: 0.6, limbs: 1.2, girth: 0.7 },
+  { name: 'наклонная над водой', height: [7, 11], crown: [0.2, 0.3], width: [3.6, 4.6], taper: 0.55, lean: 1.1, hang: 0.5, limbs: 1.2 },
+  { name: 'низкая, стриженая', height: [4, 6], crown: [0.2, 0.3], width: [2.8, 3.6], taper: 0.8, top: 'flat', limbs: 1.5, girth: 1.4 },
+  { name: 'редкая', height: [8, 12], crown: [0.3, 0.4], width: [2.8, 3.6], taper: 0.6, gaps: 0.4, limbs: 0.8 },
+  { name: 'молодая, тонкая', height: [5, 8], crown: [0.25, 0.35], width: [2.2, 3.0], taper: 0.5, limbs: 1.0, girth: 0.5, hang: 0.4 },
+]);
+
+/**
+ * Alder and rowan: the alder of wet ground, often two or three stems and always slight
+ * of crown; the rowan of a wood's edge, small, open, with its berries.
+ */
+const ALDER_HABITS: readonly Habit[] = habits([
+  { name: 'ольшаник, один ствол', height: [11, 15], crown: [0.3, 0.38], width: [2.0, 2.6], taper: 0.35 },
+  { name: 'два ствола', height: [9, 13], crown: [0.3, 0.4], width: [2.2, 2.8], stems: 2, taper: 0.4 },
+  { name: 'три ствола', height: [8, 12], crown: [0.28, 0.38], width: [2.4, 3.0], stems: 3, taper: 0.4, girth: 0.7 },
+  { name: 'высокая', height: [15, 19], crown: [0.35, 0.45], width: [2.0, 2.6], taper: 0.3, girth: 1.2 },
+  { name: 'наклонная над водой', height: [10, 14], crown: [0.28, 0.36], width: [2.2, 2.8], taper: 0.4, lean: 0.9 },
+  { name: 'сломанная', height: [7, 11], crown: [0.4, 0.5], width: [2.0, 2.6], taper: 0.5, top: 'broken', gaps: 0.2 },
+  { name: 'раздвоенная', height: [11, 15], crown: [0.32, 0.4], width: [2.2, 2.8], top: 'twin', taper: 0.35 },
+  { name: 'редкая, в тени', height: [9, 13], crown: [0.4, 0.5], width: [1.8, 2.4], taper: 0.4, gaps: 0.4, limbs: 0.8 },
+  { name: 'низкая, болотная', height: [6, 9], crown: [0.25, 0.35], width: [2.0, 2.6], taper: 0.5, girth: 0.6 },
+  { name: 'толстая, старая', height: [12, 16], crown: [0.3, 0.4], width: [2.6, 3.2], taper: 0.35, girth: 1.6, stems: 2 },
+]);
+
+const ROWAN_HABITS: readonly Habit[] = habits([
+  { name: 'у опушки', height: [6, 8], crown: [0.4, 0.48], width: [1.4, 1.8], taper: 0.5 },
+  { name: 'два ствола', height: [5, 7], crown: [0.38, 0.48], width: [1.5, 1.9], stems: 2, taper: 0.5 },
+  { name: 'три ствола', height: [4.5, 6.5], crown: [0.35, 0.45], width: [1.5, 2.0], stems: 3, taper: 0.5, girth: 0.7 },
+  { name: 'высокая, тонкая', height: [8, 10], crown: [0.45, 0.55], width: [1.3, 1.7], taper: 0.4, girth: 0.8 },
+  { name: 'широкая', height: [5, 7], crown: [0.3, 0.4], width: [1.9, 2.4], taper: 0.7, limbs: 1.3 },
+  { name: 'кривая', height: [5, 7], crown: [0.35, 0.45], width: [1.5, 2.0], lean: 0.9, taper: 0.5 },
+  { name: 'сломанная', height: [3.5, 5.5], crown: [0.4, 0.5], width: [1.4, 1.8], top: 'broken', taper: 0.6 },
+  { name: 'раздвоенная', height: [5, 7], crown: [0.38, 0.48], width: [1.5, 1.9], top: 'twin', taper: 0.5 },
+  { name: 'редкая, в тени', height: [6, 8], crown: [0.5, 0.6], width: [1.2, 1.6], gaps: 0.4, limbs: 0.7, taper: 0.4 },
+  { name: 'низкая, у пня', height: [3, 4.5], crown: [0.3, 0.4], width: [1.3, 1.7], limbs: 1.2, taper: 0.6 },
+]);
+
+/**
+ * Undergrowth and the floor. A hazel-and-willow bush, a bracken clump, a juniper, a
+ * stump and a fallen trunk: small things, but the same rule — sixteen of one shape is
+ * not a wood's floor.
+ */
+const BUSH_HABITS: readonly Habit[] = habits([
+  { name: 'лещина, куст', height: [2.4, 3.4], crown: [0.1, 0.2], width: [1.5, 2.0], taper: 0.6, stems: 5 },
+  { name: 'низкий, стелющийся', height: [1.2, 1.8], crown: [0.1, 0.2], width: [1.4, 1.9], taper: 0.8, stems: 6 },
+  { name: 'высокий, вытянутый', height: [3.2, 4.4], crown: [0.08, 0.16], width: [1.2, 1.6], taper: 0.4, stems: 3 },
+  { name: 'широкий, в поле', height: [1.8, 2.6], crown: [0.12, 0.22], width: [2.0, 2.6], taper: 0.9, stems: 4 },
+  { name: 'редкий', height: [2.0, 3.0], crown: [0.15, 0.25], width: [1.4, 1.9], taper: 0.6, gaps: 0.4, stems: 3 },
+  { name: 'ивняк, прутья', height: [2.6, 3.6], crown: [0.06, 0.14], width: [1.3, 1.7], taper: 0.3, stems: 7, hang: 0.5 },
+  { name: 'один стволик', height: [2.2, 3.2], crown: [0.2, 0.3], width: [1.3, 1.7], taper: 0.5, stems: 1 },
+  { name: 'сломанный', height: [1.4, 2.2], crown: [0.2, 0.3], width: [1.5, 2.0], taper: 0.7, top: 'broken', stems: 4 },
+  { name: 'двойной', height: [2.0, 3.0], crown: [0.12, 0.2], width: [1.8, 2.4], taper: 0.7, top: 'twin', stems: 4 },
+  { name: 'наклонный', height: [1.8, 2.8], crown: [0.1, 0.2], width: [1.6, 2.1], taper: 0.6, lean: 0.9, stems: 3 },
+]);
+
+/**
+ * Lime and maple: two species of one build (a full crown on a short stem), told apart
+ * by proportion and by what the crown does. A lime is an egg with a skirt of low
+ * branches and the densest shade in the wood; a maple is wider than tall, with limbs
+ * showing under it. Both are cut, coppiced, broken and grown in the open.
+ */
+const LIME_HABITS: readonly Habit[] = habits([
+  { name: 'липа, яйцо', height: [13, 17], crown: [0.3, 0.38], width: [3.0, 3.8], tall: 1.35, taper: 0.8, limbs: 1.0 },
+  { name: 'с юбкой', height: [11, 15], crown: [0.18, 0.26], width: [3.2, 4.0], tall: 1.2, taper: 0.85, limbs: 1.3 },
+  { name: 'высокая, узкая', height: [16, 20], crown: [0.4, 0.48], width: [2.4, 3.0], tall: 1.6, taper: 0.6, limbs: 0.9 },
+  { name: 'широкая', height: [10, 14], crown: [0.26, 0.34], width: [4.0, 5.0], tall: 1.0, taper: 0.9, limbs: 1.2 },
+  { name: 'раздвоенная', height: [12, 16], crown: [0.3, 0.4], width: [3.0, 3.8], tall: 1.3, top: 'twin', taper: 0.8 },
+  { name: 'сломанная', height: [8, 12], crown: [0.4, 0.5], width: [3.0, 3.8], tall: 1.1, top: 'broken', taper: 0.85, limbs: 1.25 },
+  { name: 'кривая', height: [11, 15], crown: [0.28, 0.36], width: [3.0, 3.8], tall: 1.25, lean: 0.8, taper: 0.8 },
+  { name: 'редкая, в тени', height: [14, 18], crown: [0.45, 0.55], width: [2.4, 3.0], tall: 1.4, gaps: 0.4, limbs: 0.7, taper: 0.7 },
+  { name: 'подрост, куст', height: [4, 7], crown: [0.16, 0.24], width: [2.0, 2.6], tall: 1.1, taper: 0.75, limbs: 1.3, girth: 0.6 },
+  { name: 'толстая, старая', height: [15, 19], crown: [0.24, 0.32], width: [3.6, 4.4], tall: 1.3, taper: 0.85, girth: 1.7, limbs: 1.1 },
+]);
+
+const MAPLE_HABITS: readonly Habit[] = habits([
+  { name: 'клён, шар', height: [10, 13], crown: [0.28, 0.36], width: [3.4, 4.2], tall: 0.95, taper: 0.85 },
+  { name: 'высокий', height: [14, 18], crown: [0.4, 0.5], width: [3.2, 4.0], tall: 1.15, taper: 0.7 },
+  { name: 'широкий', height: [9, 12], crown: [0.24, 0.32], width: [4.4, 5.4], tall: 0.8, taper: 0.9, limbs: 1.25 },
+  { name: 'с ветвями', height: [11, 15], crown: [0.3, 0.4], width: [3.6, 4.4], tall: 1.0, taper: 0.85, limbs: 1.4 },
+  { name: 'раздвоенный', height: [11, 14], crown: [0.3, 0.4], width: [3.4, 4.2], tall: 1.0, top: 'twin', taper: 0.85 },
+  { name: 'сломанный', height: [7, 10], crown: [0.4, 0.5], width: [3.0, 3.8], tall: 0.9, top: 'broken', taper: 0.9, limbs: 1.3 },
+  { name: 'наклонный', height: [10, 13], crown: [0.26, 0.34], width: [3.4, 4.2], tall: 0.95, lean: 0.85, taper: 0.85 },
+  { name: 'редкий, в тени', height: [12, 16], crown: [0.5, 0.6], width: [2.8, 3.4], tall: 1.1, gaps: 0.4, limbs: 0.7, taper: 0.75 },
+  { name: 'подрост', height: [4, 7], crown: [0.18, 0.26], width: [2.2, 2.8], tall: 1.0, taper: 0.8, limbs: 1.3, girth: 0.6 },
+  { name: 'толстый, старый', height: [13, 17], crown: [0.24, 0.32], width: [4.0, 4.8], tall: 1.0, taper: 0.9, girth: 1.7 },
+]);
+
+/**
+ * The floor and the undergrowth: bracken, juniper, stumps and fallen trunks. Their
+ * habits are the things a wood's floor is: fresh cut and grey, broken, twin, burnt,
+ * mossy, uprooted, split, leaning, a clump of two or three.
+ */
+const FERN_HABITS: readonly Habit[] = habits([
+  { name: 'орляк, высокий', height: [1.1, 1.5], width: [0.34, 0.44], taper: 0.9, limbs: 1.1 },
+  { name: 'орляк, широкий', height: [0.9, 1.3], width: [0.44, 0.56], taper: 1.1, limbs: 1.3, hang: 0.5 },
+  { name: 'низкий, у дороги', height: [0.5, 0.8], width: [0.3, 0.4], taper: 1.0, limbs: 1.2 },
+  { name: 'щитовник, узкий', height: [0.7, 1.0], width: [0.2, 0.28], taper: 0.7, limbs: 1.0 },
+  { name: 'редкий', height: [0.8, 1.2], width: [0.3, 0.42], taper: 1.0, gaps: 0.4, limbs: 0.8 },
+  { name: 'сломанный, прибитый', height: [0.4, 0.7], width: [0.34, 0.46], taper: 1.3, limbs: 1.2, hang: 0.8 },
+  { name: 'молодой завиток', height: [0.3, 0.5], width: [0.18, 0.26], taper: 0.8, limbs: 1.0 },
+  { name: 'двойной куст', height: [0.7, 1.1], width: [0.36, 0.48], taper: 1.15, top: 'twin', limbs: 1.4 },
+  { name: 'наклонный', height: [0.6, 1.0], width: [0.3, 0.42], taper: 1.0, lean: 0.9, limbs: 1.1 },
+  { name: 'густой, в тени', height: [0.9, 1.4], width: [0.3, 0.4], taper: 0.85, limbs: 1.5 },
+]);
+
+const JUNIPER_HABITS: readonly Habit[] = habits([
+  { name: 'столбик', height: [2.6, 3.6], width: [0.5, 0.65], taper: 0.45 },
+  { name: 'низкий, стелющийся', height: [1.0, 1.6], width: [0.7, 0.95], taper: 0.9, top: 'flat' },
+  { name: 'высокий, тонкий', height: [3.6, 5.0], width: [0.45, 0.6], taper: 0.3 },
+  { name: 'широкий', height: [1.8, 2.6], width: [0.85, 1.1], taper: 0.7, limbs: 1.3 },
+  { name: 'раздвоенный', height: [2.2, 3.2], width: [0.6, 0.8], taper: 0.5, top: 'twin' },
+  { name: 'сломанный', height: [1.2, 2.0], width: [0.55, 0.75], taper: 0.6, top: 'broken' },
+  { name: 'кривой', height: [2.0, 3.0], width: [0.55, 0.75], taper: 0.5, lean: 0.9 },
+  { name: 'редкий', height: [1.6, 2.6], width: [0.5, 0.7], taper: 0.6, gaps: 0.4, limbs: 0.7 },
+  { name: 'молодой', height: [0.7, 1.2], width: [0.35, 0.5], taper: 0.5, limbs: 0.8, girth: 0.6 },
+  { name: 'два стволика', height: [1.8, 2.8], width: [0.6, 0.85], taper: 0.6, stems: 2 },
+]);
+
+const STUMP_HABITS: readonly Habit[] = habits([
+  { name: 'свежий рез', height: [0.35, 0.55], width: [0.28, 0.36], crown: [0.75, 0.95], girth: 1.0 },
+  { name: 'старый, серый', height: [0.2, 0.4], width: [0.3, 0.4], crown: [0.05, 0.2], taper: 0.4 },
+  { name: 'высокий пень', height: [0.8, 1.3], width: [0.24, 0.32], crown: [0.6, 0.85], taper: 0.9 },
+  { name: 'низкий, вросший', height: [0.12, 0.25], width: [0.34, 0.44], crown: [0.1, 0.3], taper: 0.3 },
+  { name: 'толстый', height: [0.4, 0.7], width: [0.42, 0.55], crown: [0.6, 0.9], girth: 1.6 },
+  { name: 'расколотый', height: [0.4, 0.8], width: [0.3, 0.4], crown: [0.2, 0.4], top: 'broken', taper: 0.7 },
+  { name: 'сломанный', height: [0.5, 0.9], width: [0.26, 0.34], crown: [0.15, 0.35], top: 'broken', taper: 0.8 },
+  { name: 'двойной', height: [0.3, 0.6], width: [0.24, 0.32], crown: [0.5, 0.8], top: 'twin', stems: 2 },
+  { name: 'наклонный', height: [0.3, 0.6], width: [0.28, 0.38], crown: [0.4, 0.7], lean: 0.9 },
+  { name: 'обгоревший', height: [0.3, 0.7], width: [0.26, 0.36], crown: [0.05, 0.2], taper: 0.2, gaps: 0.6 },
+]);
+
+const LOG_HABITS: readonly Habit[] = habits([
+  { name: 'бурелом, длинный', height: [7, 11], width: [0.2, 0.28], taper: 0.5 },
+  { name: 'короткий обрубок', height: [2.5, 4], width: [0.22, 0.3], taper: 0.7 },
+  { name: 'тонкий, жердь', height: [6, 10], width: [0.12, 0.18], taper: 0.4, girth: 0.6 },
+  { name: 'толстый, комель', height: [5, 8], width: [0.34, 0.46], taper: 0.5, girth: 1.6 },
+  { name: 'с сучьями', height: [5, 9], width: [0.2, 0.3], taper: 0.5, limbs: 1.8 },
+  { name: 'голый', height: [4, 8], width: [0.18, 0.26], taper: 0.5, limbs: 0.3 },
+  { name: 'наклонный, в яме', height: [4, 7], width: [0.2, 0.3], taper: 0.5, lean: 0.8 },
+  { name: 'расколотый', height: [3, 6], width: [0.24, 0.34], taper: 0.6, top: 'broken' },
+  { name: 'два ствола', height: [5, 9], width: [0.18, 0.26], taper: 0.5, stems: 2 },
+  { name: 'короткий, сломанный', height: [1.8, 3], width: [0.2, 0.3], taper: 0.8, top: 'broken', limbs: 1.4 },
+]);
+
 /**
  * A spruce: a slim stem, then tiers of drooping boughs — cards painted with spruce
  * sprays (render/leafpaint.ts) — shortening to a spire.
@@ -809,12 +1110,12 @@ interface TreeShape {
  * branches out of the upper half carrying a narrow, tall crown of hanging masses with
  * sky between them.
  */
-function birchGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function birchGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 7919 + 13);
-  const H = 12 + rnd() * 4;
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
   // The dark furrowed foot of a grown birch stands a metre and a half to three high.
   const butt = 1.4 + rnd() * 1.6;
-  const rings = refine(trunkRings(rnd, H * 0.94, 0.19, 0.8, 0.35, near ? 10 : 6), near ? [0.35, 0.75, 1.2, 1.7, 2.3, 3.0, 3.8] : [0.8, 1.6, 2.6]);
+  const rings = refine(trunkRings(rnd, H * 0.94, 0.19 * habit.girth, 0.8 * (0.4 + habit.lean), 0.35, near ? 10 : 6), near ? [0.35, 0.75, 1.2, 1.7, 2.3, 3.0, 3.8] : [0.8, 1.6, 2.6]);
   const sides = near ? 7 : 5;
   const parts: THREE.BufferGeometry[] = [
     tube(rings, sides, (ring, side) => {
@@ -833,24 +1134,41 @@ function birchGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
   const junctions: [number, number][] = [];
-  const limbs = 8 + Math.floor(rnd() * 3);
+  // A clump: the other stems of one root, each thin, leaning its own way, and each
+  // carrying its own small crown at the top. What grows where a birch was cut.
   const turn = rnd() * Math.PI * 2;
+  for (let stem = 1; stem < habit.stems; stem++) {
+    const a = turn + (stem / habit.stems) * Math.PI * 2;
+    const own = trunkRings(rnd, H * (0.8 - 0.08 * stem), 0.19 * habit.girth * 0.7, 0.4, 0.3, near ? 7 : 4).map((ring) => {
+      const t = Math.max(0, ring.y) / H;
+      return { ...ring, x: ring.x + Math.cos(a) * (0.35 + 1.1 * t), z: ring.z + Math.sin(a) * (0.35 + 1.1 * t) };
+    });
+    parts.push(tube(own, near ? 5 : 4, () => pal.birchBark, 'smooth'));
+    const tip = own[own.length - 1]!;
+    for (const [dy, r] of [[0.2, 1.0], [1.3, 0.7]] as const) {
+      const rr = r * (0.8 + rnd() * 0.3);
+      leaves.push(blob(tip.x, tip.y + dy, tip.z, rr, rr * 1.3, rr, rotated(pal.birchLeaf, stem), seed * 31 + stem * 5 + dy));
+    }
+  }
+  const limbs = Math.max(3, Math.round(habit.limbs * 9));
   // The crown takes the upper two thirds: a birch in the open is leafy far down.
-  const crownBase = H * (0.28 + rnd() * 0.06);
-  const crownW = 2.0 + rnd() * 0.6;
+  const crownBase = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const crownW = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
   for (let j = 0; j < limbs; j++) {
     const k = j / limbs;
     const y = crownBase + (H * 0.84 - crownBase) * k + rnd() * 0.4;
     const a = turn + j * 2.4 + rnd() * 0.5;
+    // A birch's crown is open: a limb here and there never grew, and the sky shows.
+    if (rnd() < habit.gaps) continue;
     // Lower branches reach furthest and hang lowest: the crown is an upright oval,
     // widest below its middle, and its lower skirt droops.
-    const reach = crownW * (1.25 - 0.7 * k) * (0.8 + rnd() * 0.3);
+    const reach = crownW * 1.25 * (1 - (1 - habit.taper) * k) * (0.8 + rnd() * 0.3);
     axisAt(rings, y, from);
     const dx = Math.cos(a);
     const dz = Math.sin(a);
     bend.set(from.x + dx * reach * 0.5, y + reach * (0.45 + 0.3 * k), from.z + dz * reach * 0.5);
     // The tip hangs: a weeping birch's branch rises, then falls away.
-    to.set(from.x + dx * reach, y + reach * (0.1 + 0.45 * k), from.z + dz * reach);
+    to.set(from.x + dx * reach, y + reach * ((1 - habit.hang) * (0.1 + 0.45 * k) - habit.hang * (0.35 + 0.35 * k)), from.z + dz * reach);
     parts.push(limb(from, bend, to, 0.06, 0.02, near ? 4 : 3, pal.twig));
     junctions.push([y, a]);
     const r = (1.2 - 0.5 * k) * (0.8 + rnd() * 0.35);
@@ -861,9 +1179,14 @@ function birchGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   }
   // The leader and the crown's heart, so it is one crown and not a mobile.
   const top = axisAt(rings, H * 0.94, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.9, top.z, 0.8, 1.5, 0.8, pal.birchLeaf, seed * 31 + 90, true));
+  const lead = 0.8 * (0.5 + habit.taper);
+  leaves.push(blob(top.x, H * (habit.top === 'broken' ? 0.86 : 0.9), top.z, lead, lead * 1.6, lead, pal.birchLeaf, seed * 31 + 90, true));
+  if (habit.top === 'twin') {
+    // A birch forks where the leader was lost: two equal crowns, the second lower.
+    leaves.push(blob(top.x + lead * 1.3, H * 0.82, top.z + lead * 0.7, lead * 0.85, lead * 1.3, lead * 0.85, pal.birchLeaf, seed * 31 + 92, true));
+  }
   const heart = axisAt(rings, H * 0.62, new THREE.Vector3());
-  const fill = 1.3 + rnd() * 0.3;
+  const fill = (1.3 + rnd() * 0.3) * (1 - habit.gaps * 0.5) * (0.75 + habit.taper * 0.35);
   leaves.push(blob(heart.x, H * 0.62, heart.z, fill, fill * 1.6, fill, rotated(pal.birchLeaf, 1), seed * 31 + 91, true));
   const crownMidY = (crownBase + H) / 2;
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), heart.x, crownMidY, heart.z, crownW + 0.8, (H - crownBase) / 2 + 0.8, crownW + 0.8);
@@ -982,30 +1305,27 @@ function asFlat(g: THREE.BufferGeometry): THREE.BufferGeometry {
 /** Shape of a tree with one full crown on a short stem: lime and maple. */
 interface RoundCrown {
   readonly salt: number;
-  readonly height: readonly [number, number];
   readonly trunkR: number;
-  /** Crown half-width range, metres. */
-  readonly width: readonly [number, number];
-  /** Crown half-height over half-width: lime is an egg, maple nearly a ball. */
+  /** The kind's own crown shape: lime is an egg, maple nearly a ball. */
   readonly tall: number;
   readonly leaves: (pal: Palette) => readonly number[];
 }
 
-const LIME: RoundCrown = { salt: 104729, height: [10, 14], trunkR: 0.32, width: [2.6, 3.3], tall: 1.3, leaves: (p) => p.limeLeaf };
-const MAPLE: RoundCrown = { salt: 130363, height: [9, 12], trunkR: 0.28, width: [3.1, 3.8], tall: 0.92, leaves: (p) => p.mapleLeaf };
+const LIME: RoundCrown = { salt: 104729, trunkR: 0.32, tall: 1.3, leaves: (p) => p.limeLeaf };
+const MAPLE: RoundCrown = { salt: 130363, trunkR: 0.28, tall: 0.92, leaves: (p) => p.mapleLeaf };
 
 /**
  * A short stout grey stem, a few limbs showing under the crown, and one full crown on
  * the upper two thirds — a core with lumps of leaves pushed out of its surface, most
  * on top and at the sides.
  */
-function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: boolean): TreeShape {
+function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * spec.salt + 7);
-  const H = spec.height[0] + rnd() * (spec.height[1] - spec.height[0]);
-  const rx = spec.width[0] + rnd() * (spec.width[1] - spec.width[0]);
-  const ry = rx * spec.tall;
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const rx = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const ry = rx * spec.tall * habit.tall;
   const fork = Math.max(2.2, H - ry * 2 + 0.4);
-  const rings = trunkRings(rnd, fork + 0.6, spec.trunkR, 0.3, 0.25, near ? 5 : 3);
+  const rings = trunkRings(rnd, fork + 0.6, spec.trunkR * habit.girth, 0.3 * (0.4 + habit.lean), 0.25, near ? 5 : 3);
   const tones = spec.leaves(pal);
   const parts: THREE.BufferGeometry[] = [tube(rings, near ? 7 : 5, () => pal.trunk)];
   const leaves: THREE.BufferGeometry[] = [];
@@ -1014,12 +1334,17 @@ function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: 
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
   const cy = H - ry;
-  leaves.push(blob(top.x, cy, top.z, rx * 0.8, ry * 0.85, rx * 0.8, tones, seed * 17 + 50));
-  const masses = 8 + Math.floor(rnd() * 3);
+  // A full crown, a broken one, a flat one and a twin: what the crown's own centre is.
+  const spread = habit.top === 'flat' ? 0.95 : 0.8;
+  const rise = habit.top === 'flat' ? 0.62 : habit.top === 'broken' ? 0.6 : 0.85;
+  leaves.push(blob(top.x, cy, top.z, rx * spread, ry * rise, rx * spread, tones, seed * 17 + 50));
+  if (habit.top === 'twin') leaves.push(blob(top.x + rx * 0.5, cy + ry * 0.35, top.z + rx * 0.3, rx * 0.6, ry * 0.5, rx * 0.6, tones, seed * 17 + 52));
+  const masses = Math.max(3, Math.round(habit.limbs * 9));
   const turn = rnd() * Math.PI * 2;
   let limbs = 0;
   for (let j = 0; j < masses; j++) {
     const a = turn + j * 2.4 + rnd() * 0.4;
+    if (rnd() < habit.gaps) continue;
     const e = -0.25 + rnd() * 1.1;
     const flat = Math.sqrt(Math.max(0, 1 - e * e));
     const px = top.x + Math.cos(a) * flat * rx * 0.72;
@@ -1049,12 +1374,22 @@ function roundCrownGeometry(spec: RoundCrown, seed: number, pal: Palette, near: 
  * the top. Grown in the open (`open`, Shishkin's "Rye"), the crown starts a third of
  * the way up, wide and ragged, the lower limbs long and drooping, on a stouter stem.
  */
-function pineGeometry(seed: number, pal: Palette, near: boolean, open = false): TreeShape {
+function pineGeometry(seed: number, pal: Palette, near: boolean, open: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 2654435 + 11 + (open ? 977 : 0));
-  const H = open ? 16 + rnd() * 5 : 18 + rnd() * 6;
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
   const copper = H * (0.42 + rnd() * 0.12);
-  // A mast pine's stem: thick at the foot for its height.
-  const rings = trunkRings(rnd, H * 0.92, open ? 0.42 : 0.34, 0.72, 0.7, near ? 10 : 6);
+  // A broken or a twinned pine is a shorter tree: nothing grows above the break.
+  const topY = habit.top === 'broken' ? 0.84 : habit.top === 'twin' ? 0.9 : 1;
+  const turn = rnd() * Math.PI * 2;
+  // A leaning pine leans whole, stem and crown together: the stem's rings are moved,
+  // not its geometry, so the bark mapping and everything hung off the axis follow.
+  const leanX = Math.cos(turn) * habit.lean;
+  const leanZ = Math.sin(turn) * habit.lean;
+  const rings = trunkRings(rnd, H * 0.92, habit.girth * 0.34, 0.72, 0.7, near ? 10 : 6).map((ring) => ({
+    ...ring,
+    x: ring.x + leanX * Math.max(0, ring.y) * 0.3,
+    z: ring.z + leanZ * Math.max(0, ring.y) * 0.3,
+  }));
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
@@ -1067,36 +1402,46 @@ function pineGeometry(seed: number, pal: Palette, near: boolean, open = false): 
   const from = new THREE.Vector3();
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const crownBase = H * (open ? 0.3 + rnd() * 0.08 : 0.62 + rnd() * 0.06);
+  const crownBase = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
   // Many limbs, each carrying a plate at its tip and one half-way: the plates overlap
   // into one ragged, flat-topped mass. Four or five lone plates read as a savanna
   // acacia, not a pine.
-  const limbs = open ? 15 + Math.floor(rnd() * 4) : 8 + Math.floor(rnd() * 3);
-  const turn = rnd() * Math.PI * 2;
+  const limbs = Math.max(3, Math.round(habit.limbs * (open ? 17 : 9)));
   for (let j = 0; j < limbs; j++) {
     const k = j / limbs;
-    const y = crownBase + (H * 0.9 - crownBase) * k;
+    const y = crownBase + (H * topY * 0.9 - crownBase) * k;
     const a = turn + j * 2.3 + rnd() * 0.6;
-    const out = open ? (2.6 + rnd() * 2.4) * (1 - 0.6 * k) : (1.6 + rnd() * 1.4) * (1 - 0.4 * k);
-    // An open-grown pine's low limbs reach out and sag; high ones rise.
-    const sag = open ? (1 - k) * (0.6 + rnd() * 0.8) : 0;
+    // A limb here and there is gone: a crown of a pine is never closed.
+    if (rnd() < habit.gaps) continue;
+    const out = (habit.width[0] + rnd() * (habit.width[1] - habit.width[0])) * (1 - (1 - habit.taper) * k);
+    // A sagging limb is the open pine's: it reaches out and falls, where a bor pine's rise.
+    const sag = habit.hang * (1 - k) * (0.6 + rnd() * 0.8);
     axisAt(rings, y, from);
     bend.set(from.x + Math.cos(a) * out * 0.5, y + 0.3 + rnd() * 0.4, from.z + Math.sin(a) * out * 0.5);
     to.set(from.x + Math.cos(a) * out, y + 0.6 + rnd() * 0.9 - sag * 1.6, from.z + Math.sin(a) * out);
-    parts.push(limb(from, bend, to, open ? 0.16 : 0.1, 0.04, near ? 4 : 3, pal.pineBark));
+    parts.push(limb(from, bend, to, 0.1 * (1 + habit.girth * 0.4), 0.04, near ? 4 : 3, pal.pineBark));
     // Pine needles sit in flat plates on top of their limbs, not in balls.
     const r = 1.5 + rnd() * 0.6;
     leaves.push(blob(to.x, to.y + 0.25, to.z, r, r * 0.55, r * (0.8 + rnd() * 0.3), rotated(pal.pine, j), seed * 23 + j));
     const r2 = r * 0.75;
     leaves.push(blob(bend.x, bend.y + 0.45, bend.z, r2, r2 * 0.6, r2, rotated(pal.pine, j + 1), seed * 23 + j + 40));
   }
-  const top = axisAt(rings, H * 0.92, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.93, top.z, 1.6, 0.9, 1.6, pal.pine, seed * 23 + 90));
+  // The leader: a broad flat plate on a mast pine, a ragged clump on a young one, and
+  // on a broken or a burnt one almost nothing.
+  const top = axisAt(rings, H * topY * 0.92, new THREE.Vector3());
+  const lead = habit.width[1] * (habit.top === 'flat' ? 0.8 : habit.top === 'layered' ? 0.4 : 0.6);
+  const leadY = habit.top === 'flat' ? 0.32 : habit.top === 'droop' ? 0.55 : 0.55;
+  const leadDrop = habit.top === 'droop' ? 0.9 : 0.15;
+  leaves.push(blob(top.x, H * topY * 0.93 - leadDrop, top.z, lead, lead * leadY, lead, pal.pine, seed * 23 + 90));
+  if (habit.top === 'twin') {
+    // Two leaders: a bud or frost took the first, and the second grew beside it.
+    leaves.push(blob(top.x + lead * 0.9, H * 0.8, top.z + lead * 0.5, lead * 0.7, lead * 0.8, lead * 0.7, pal.pine, seed * 23 + 91));
+  }
   // Dead stubs on the bare stem: short, pointing down, a pine's bare trunk is never clean.
   if (near) {
-    const stubs = 6 + Math.floor(rnd() * 5);
+    const stubs = Math.round((6 + rnd() * 5) * (habit.top === 'layered' ? 1.8 : 1));
     for (let s = 0; s < stubs; s++) {
-      const y = 3 + rnd() * (crownBase - 3.5);
+      const y = 2.2 + rnd() * Math.max(1, (habit.top === 'layered' ? H * topY * 0.94 : crownBase) - 3);
       const a = rnd() * Math.PI * 2;
       const len = 0.35 + rnd() * 0.5;
       axisAt(rings, y, from);
@@ -1105,9 +1450,9 @@ function pineGeometry(seed: number, pal: Palette, near: boolean, open = false): 
       parts.push(limb(from, bend, to, 0.035, 0.012, 3, pal.twig));
     }
   }
-  const cy = (crownBase + H) / 2 + 0.5;
-  const reach = open ? 5 : 3.4;
-  const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), top.x, cy, top.z, reach, (H - crownBase) / 2 + 1, reach);
+  const cy = (crownBase + H * topY) / 2 + 0.5;
+  const reach = habit.width[1] * 1.2 + 0.6;
+  const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), top.x, cy, top.z, reach, (H * topY - crownBase) / 2 + 1, reach);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
 }
 
@@ -1116,11 +1461,11 @@ function pineGeometry(seed: number, pal: Palette, near: boolean, open = false): 
  * darkening at the foot, under a narrow, high, round-lumped crown of a greyer green
  * than the birch beside it.
  */
-function aspenGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function aspenGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 40503 + 29);
-  const H = 14 + rnd() * 5;
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
   const butt = 0.6 + rnd() * 0.7;
-  const rings = trunkRings(rnd, H * 0.95, 0.2, 0.75, 0.15, near ? 10 : 6);
+  const rings = trunkRings(rnd, H * 0.95, 0.2 * habit.girth, 0.75 * (0.4 + habit.lean), 0.15, near ? 10 : 6);
   const parts: THREE.BufferGeometry[] = [
     tube(rings, near ? 7 : 5, (ring, side) => {
       const y = (rings[ring]!.y + rings[ring + 1]!.y) / 2;
@@ -1132,28 +1477,32 @@ function aspenGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
   const junctions: [number, number][] = [];
-  const crownBase = H * (0.5 + rnd() * 0.06);
-  const crownW = 1.6 + rnd() * 0.5;
-  const limbs = 7 + Math.floor(rnd() * 3);
+  const crownBase = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const crownW = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const limbs = Math.max(3, Math.round(habit.limbs * 8));
   const turn = rnd() * Math.PI * 2;
   for (let j = 0; j < limbs; j++) {
     const k = j / limbs;
     const y = crownBase + (H * 0.86 - crownBase) * k + rnd() * 0.3;
     const a = turn + j * 2.4 + rnd() * 0.5;
-    const reach = crownW * (1.1 - 0.5 * k) * (0.8 + rnd() * 0.3);
+    if (rnd() < habit.gaps) continue;
+    const reach = crownW * 1.1 * (1 - (1 - habit.taper) * k) * (0.8 + rnd() * 0.3);
     axisAt(rings, y, from);
     // Aspen limbs climb: no weeping tips.
     bend.set(from.x + Math.cos(a) * reach * 0.5, y + reach * 0.6, from.z + Math.sin(a) * reach * 0.5);
-    to.set(from.x + Math.cos(a) * reach, y + reach * 0.85, from.z + Math.sin(a) * reach);
+    to.set(from.x + Math.cos(a) * reach, y + reach * (0.85 - habit.hang * 1.0), from.z + Math.sin(a) * reach);
     parts.push(limb(from, bend, to, 0.055, 0.02, near ? 4 : 3, pal.twig));
     junctions.push([y, a]);
     const r = (1.05 - 0.35 * k) * (0.85 + rnd() * 0.3);
     leaves.push(blob(to.x, to.y, to.z, r, r * 1.1, r, rotated(pal.aspenLeaf, j), seed * 29 + j));
   }
   const top = axisAt(rings, H * 0.95, new THREE.Vector3());
-  leaves.push(blob(top.x, H * 0.92, top.z, 0.9, 1.3, 0.9, pal.aspenLeaf, seed * 29 + 90));
+  const lead = 0.9 * (0.6 + habit.taper * 0.5);
+  leaves.push(blob(top.x, H * (habit.top === 'broken' ? 0.88 : 0.92), top.z, lead, lead * 1.4, lead, pal.aspenLeaf, seed * 29 + 90));
+  if (habit.top === 'twin') leaves.push(blob(top.x + lead * 1.1, H * 0.85, top.z + lead * 0.5, lead * 0.8, lead * 1.2, lead * 0.8, pal.aspenLeaf, seed * 29 + 92));
   const heart = axisAt(rings, H * 0.72, new THREE.Vector3());
-  leaves.push(blob(heart.x, H * 0.72, heart.z, 1.3, 1.8, 1.3, rotated(pal.aspenLeaf, 1), seed * 29 + 91));
+  const rHeart = (1.3 + rnd() * 0.3) * (1 - habit.gaps * 0.5);
+  leaves.push(blob(heart.x, H * 0.72, heart.z, rHeart, rHeart * 1.4, rHeart, rotated(pal.aspenLeaf, 1), seed * 29 + 91));
   if (near) {
     // Dark diamonds: short, tall lenses — the aspen's lenticels are upright, a birch's lie flat.
     const marks = 10 + Math.floor(rnd() * 7);
@@ -1174,11 +1523,11 @@ function aspenGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * An oak: a thick, dark, furrowed trunk that forks low into a few heavy crooked limbs
  * reaching out rather than up, under a broad, dark, lumpy crown wider than it is tall.
  */
-function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function oakGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 69069 + 5);
-  const H = 11 + rnd() * 4;
-  const fork = H * (0.3 + rnd() * 0.06);
-  const rings = trunkRings(rnd, fork + 0.5, 0.48, 0.3, 0.35, near ? 5 : 3);
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const fork = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const rings = trunkRings(rnd, fork + 0.5, 0.48 * habit.girth, 0.3 * (0.4 + habit.lean), 0.35, near ? 5 : 3);
   const sides = near ? 9 : 6;
   const parts: THREE.BufferGeometry[] = [
     // Furrowed: bark ridges and dark fissures alternate round the stem.
@@ -1190,14 +1539,19 @@ function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const from = new THREE.Vector3(top.x, fork, top.z);
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const rx = 4.6 + rnd() * 1.3;
-  const ry = (H - fork) / 2 + 0.4;
+  const rx = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const ry = (H - fork) * 0.5 * habit.tall + 0.4;
   const cy = fork + ry - 0.3;
-  leaves.push(blob(top.x, cy + 0.4, top.z, rx * 0.68, ry * 0.75, rx * 0.68, pal.oakLeaf, seed * 31 + 70));
-  const limbs = 4 + Math.floor(rnd() * 3);
+  // A tent is broader and flatter than a wood oak's crown; a broken one is a stump of
+  // its old self, and a twinned one forked where the leader was lost.
+  const spread = habit.top === 'flat' ? 0.86 : 0.68;
+  const rise = habit.top === 'flat' ? 0.52 : 0.75;
+  leaves.push(blob(top.x, cy + 0.4, top.z, rx * spread, ry * rise, rx * spread, pal.oakLeaf, seed * 31 + 70));
+  const limbs = Math.max(3, Math.round(habit.limbs * 5));
   const turn = rnd() * Math.PI * 2;
   for (let j = 0; j < limbs; j++) {
     const a = turn + (j / limbs) * Math.PI * 2 + (rnd() - 0.5) * 0.7;
+    if (rnd() < habit.gaps) continue;
     const elev = 0.35 + rnd() * 0.45;
     const L = rx * (0.62 + rnd() * 0.28);
     const dx = Math.cos(a) * Math.cos(elev);
@@ -1221,17 +1575,17 @@ function oakGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * An alder by the water: often two or three stems from one foot, dark grey, under a
  * narrow crown tapering to a blunt point, the darkest green of the broadleaves.
  */
-function alderGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function alderGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 92821 + 17);
-  const H = 10 + rnd() * 4;
-  const stems = 1 + (rnd() < 0.55 ? 1 : 0) + (rnd() < 0.3 ? 1 : 0);
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const stems = habit.stems;
   const parts: THREE.BufferGeometry[] = [];
   const turn = rnd() * Math.PI * 2;
   for (let s = 0; s < stems; s++) {
     const a = turn + (s / stems) * Math.PI * 2;
     const spread = stems === 1 ? 0 : 0.25;
-    const lean = stems === 1 ? 0 : 0.9 + rnd() * 0.6;
-    const own = trunkRings(rnd, H * (0.88 - s * 0.08), 0.2 - s * 0.03, 0.75, 0.2, near ? 8 : 5);
+    const lean = stems === 1 ? 0 : (0.9 + rnd() * 0.6) * (0.4 + habit.lean);
+    const own = trunkRings(rnd, H * (0.88 - s * 0.08), (0.2 - s * 0.03) * habit.girth, 0.75, 0.2, near ? 8 : 5);
     const moved = own.map((ring) => {
       const t = Math.max(0, ring.y) / H;
       return { ...ring, x: ring.x + Math.cos(a) * (spread + lean * t), z: ring.z + Math.sin(a) * (spread + lean * t) };
@@ -1239,23 +1593,26 @@ function alderGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     parts.push(tube(moved, near ? 6 : 4, () => pal.alderBark));
   }
   const leaves: THREE.BufferGeometry[] = [];
-  const crownBase = H * (0.32 + rnd() * 0.06);
-  const rx = 2.0 + rnd() * 0.6 + (stems - 1) * 0.5;
-  const levels = 6 + Math.floor(rnd() * 2);
+  const crownBase = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const rx = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]) + (stems - 1) * 0.5;
+  const levels = Math.max(3, Math.round(habit.limbs * 7));
   for (let j = 0; j < levels; j++) {
     const k = j / levels;
     const y = crownBase + (H - 1.2 - crownBase) * k;
     // A cone: wide low, narrowing up to a blunt top. Two masses a level, on opposite
     // sides and overlapping the axis: one mass a level stacked into a topiary.
-    const ring = rx * (1 - 0.7 * k);
+    const ring = rx * (1 - (1 - habit.taper) * k);
     const a = turn + j * 2.2 + rnd() * 0.6;
+    if (rnd() < habit.gaps) continue;
     for (const side of [0, Math.PI]) {
       const r = (1.35 - 0.5 * k) * (0.85 + rnd() * 0.3);
       const d = ring * (0.35 + rnd() * 0.25);
       leaves.push(blob(Math.cos(a + side) * d, y + (rnd() - 0.5) * 0.8, Math.sin(a + side) * d, r, r * 1.2, r, rotated(pal.alderLeaf, j), seed * 37 + j * 2 + (side ? 1 : 0)));
     }
   }
-  leaves.push(blob(0, H - 0.9, 0, 0.8, 1.1, 0.8, pal.alderLeaf, seed * 37 + 90));
+  const lead = 0.8 * (0.6 + habit.taper * 0.5);
+  leaves.push(blob(0, H * (habit.top === 'broken' ? 0.88 : 1) - 0.9, 0, lead, lead * 1.4, lead, pal.alderLeaf, seed * 37 + 90));
+  if (habit.top === 'twin') leaves.push(blob(0.7, H * 0.82, 0.4, lead * 0.8, lead * 1.2, lead * 0.8, pal.alderLeaf, seed * 37 + 92));
   const cy = (crownBase + H) / 2;
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), 0, cy, 0, rx + 0.8, (H - crownBase) / 2 + 0.8, rx + 0.8);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
@@ -1265,24 +1622,26 @@ function alderGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * A white willow, the rakita of ditches and ponds: a short, thick, leaning trunk that
  * breaks into a fountain of upswept limbs, and a broad, rounded, silvery crown.
  */
-function willowGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function willowGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 48271 + 41);
-  const H = 8.5 + rnd() * 3;
-  const trunkH = H * (0.26 + rnd() * 0.08);
-  const rings = trunkRings(rnd, trunkH, 0.42, 0.25, 1.1, near ? 4 : 3);
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const trunkH = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const rings = trunkRings(rnd, trunkH, 0.42 * habit.girth, 0.25, 1.1 * (0.6 + habit.lean), near ? 4 : 3);
   const parts: THREE.BufferGeometry[] = [tube(rings, near ? 8 : 5, () => pal.willowBark)];
   const leaves: THREE.BufferGeometry[] = [];
   const top = rings[rings.length - 1]!;
   const from = new THREE.Vector3(top.x, trunkH, top.z);
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const rx = 3.6 + rnd() * 1.0;
-  const limbs = 4 + Math.floor(rnd() * 3);
+  const rx = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const limbs = Math.max(3, Math.round(habit.limbs * 5));
   const turn = rnd() * Math.PI * 2;
   for (let j = 0; j < limbs; j++) {
     const a = turn + (j / limbs) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+    if (rnd() < habit.gaps) continue;
     const out = rx * (0.5 + rnd() * 0.3);
-    const up = (H - trunkH) * (0.6 + rnd() * 0.25);
+    // Up first then out is the fountain; the white willow's limbs then hang.
+    const up = (H - trunkH) * (0.6 + rnd() * 0.25) * (1 - habit.hang * 0.7);
     // Up first, then out: the fountain.
     bend.set(from.x + Math.cos(a) * out * 0.25, from.y + up * 0.6, from.z + Math.sin(a) * out * 0.25);
     to.set(from.x + Math.cos(a) * out, from.y + up, from.z + Math.sin(a) * out);
@@ -1290,8 +1649,8 @@ function willowGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     const r = 1.6 + rnd() * 0.6;
     leaves.push(blob(to.x, to.y, to.z, r, r * 0.9, r, rotated(pal.willowLeaf, j), seed * 41 + j));
   }
-  const cy = H - 2.4;
-  leaves.push(blob(from.x, cy, from.z, rx * 0.7, 2.2, rx * 0.7, pal.willowLeaf, seed * 41 + 60));
+  const cy = H * (habit.top === 'flat' ? 0.78 : 1) - 2.4 * habit.taper;
+  leaves.push(blob(from.x, cy, from.z, rx * 0.7, 2.2 * (habit.top === 'flat' ? 0.6 : 1), rx * 0.7, pal.willowLeaf, seed * 41 + 60));
   const crown = finishCrown(mergeGeometries(leaves.map(asFlat)), from.x, cy, from.z, rx + 0.8, 3.2, rx + 0.8);
   return { wood: mergeGeometries(parts.map(asFlat)), leaves: crown };
 }
@@ -1300,10 +1659,10 @@ function willowGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * A rowan at a wood's edge: small, slender, sometimes two stems, an open oval crown
  * of light leaves, and the orange-red berry clusters that are the whole point of it.
  */
-function rowanGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function rowanGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 16807 + 53);
-  const H = 5.5 + rnd() * 2.5;
-  const stems = rnd() < 0.4 ? 2 : 1;
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const stems = habit.stems;
   const parts: THREE.BufferGeometry[] = [];
   const turn = rnd() * Math.PI * 2;
   let rings: Ring[] = [];
@@ -1321,15 +1680,16 @@ function rowanGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
   const from = new THREE.Vector3();
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const crownBase = H * (0.4 + rnd() * 0.06);
-  const crownW = 1.4 + rnd() * 0.4;
-  const masses = 6 + Math.floor(rnd() * 3);
+  const crownBase = H * (habit.crown[0] + rnd() * (habit.crown[1] - habit.crown[0]));
+  const crownW = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const masses = Math.max(3, Math.round(habit.limbs * 7));
   const berries: [number, number, number, number][] = [];
   for (let j = 0; j < masses; j++) {
     const k = j / masses;
     const y = crownBase + (H * 0.85 - crownBase) * k;
     const a = turn + j * 2.4 + rnd() * 0.5;
-    const reach = crownW * (1.05 - 0.4 * k) * (0.8 + rnd() * 0.3);
+    if (rnd() < habit.gaps) continue;
+    const reach = crownW * 1.05 * (1 - (1 - habit.taper) * k) * (0.8 + rnd() * 0.3);
     axisAt(rings, y, from);
     bend.set(from.x + Math.cos(a) * reach * 0.5, y + reach * 0.5, from.z + Math.sin(a) * reach * 0.5);
     to.set(from.x + Math.cos(a) * reach, y + reach * 0.7, from.z + Math.sin(a) * reach);
@@ -1364,30 +1724,33 @@ function rowanGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * upright masses of leaves — taller than wide, narrow at the foot, its stems showing
  * under it.
  */
-function bushGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function bushGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 15485863 + 3);
   const wood: THREE.BufferGeometry[] = [];
   const leaves: THREE.BufferGeometry[] = [];
   const from = new THREE.Vector3();
   const bend = new THREE.Vector3();
   const to = new THREE.Vector3();
-  const n = 4 + Math.floor(rnd() * 3);
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const W = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const n = Math.max(1, habit.stems);
   for (let i = 0; i < n; i++) {
     const a = rnd() * Math.PI * 2;
-    const d = i === 0 ? 0 : 0.45 + rnd() * 0.55;
-    const r = (i === 0 ? 0.95 : 0.7) + rnd() * 0.3;
-    const h = 1.5 + rnd() * 0.8 - d * 0.5;
-    const x = Math.cos(a) * d;
-    const z = Math.sin(a) * d;
-    leaves.push(blob(x, h, z, r, r * 1.15, r, rotated(pal.bush, i), seed * 19 + i));
+    if (i > 0 && rnd() < habit.gaps) continue;
+    const d = (i === 0 ? 0 : 0.45 + rnd() * 0.55) * (0.6 + habit.lean);
+    const r = (i === 0 ? 0.95 : 0.7) * (0.7 + habit.taper * 0.5) + rnd() * 0.3;
+    const h = H * (1.1 + rnd() * 0.5) - d * 0.5 - habit.hang * (0.3 + rnd() * 0.4);
+    const x = Math.cos(a) * d * (0.6 + W * 0.4);
+    const z = Math.sin(a) * d * (0.6 + W * 0.4);
+    leaves.push(blob(x, h * (habit.top === 'broken' ? 0.75 : 1), z, r, r * 1.15, r, rotated(pal.bush, i), seed * 19 + i));
     from.set(x * 0.15, -0.2, z * 0.15);
     to.set(x * 0.8, h - r * 0.5, z * 0.8);
     bend.set(x * 0.4, (h - r * 0.5) * 0.5, z * 0.4);
-    wood.push(limb(from, bend, to, 0.045, 0.02, 3, pal.twig));
+    wood.push(limb(from, bend, to, 0.045 * habit.girth, 0.02, 3, pal.twig));
   }
   return {
     wood: mergeGeometries(wood.map(asFlat)),
-    leaves: finishCrown(mergeGeometries(leaves.map(asFlat)), 0, 1.5, 0, 1.6, 1.3, 1.6),
+    leaves: finishCrown(mergeGeometries(leaves.map(asFlat)), 0, H, 0, W, H * 0.7, W),
   };
 }
 
@@ -1396,22 +1759,25 @@ function bushGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * (render/leafpaint.ts), rising and then arching out and down in two segments. Bracken
  * and lady fern stand knee to waist high; the instance scale spreads that.
  */
-function fernGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function fernGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 6007 + 3);
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const W = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
   const pos: number[] = [];
   const nor: number[] = [];
   const uv: number[] = [];
   const col: number[] = [];
   const c = new THREE.Color();
-  const fronds = near ? 9 : 6;
+  const fronds = Math.max(3, Math.round((near ? 9 : 6) * habit.limbs));
   const cell = leafCellUv('frond', 0);
   for (let f = 0; f < fronds; f++) {
-    const a = (f / fronds) * Math.PI * 2 + rnd() * 0.5;
+    const a = (f / fronds) * Math.PI * 2 + rnd() * 0.5 + habit.lean;
+    if (rnd() < habit.gaps) continue;
     const dx = Math.cos(a);
     const dz = Math.sin(a);
-    const L = 0.8 + rnd() * 0.45;
-    const rise = 0.55 + rnd() * 0.35;
-    const width = 0.34 + rnd() * 0.1;
+    const L = H * (0.85 + rnd() * 0.35);
+    const rise = (0.55 + rnd() * 0.35) * (1 - habit.hang * 0.5);
+    const width = W * (0.85 + rnd() * 0.3);
     c.setHex(pal.fern[f % pal.fern.length]!);
     // Spine: root, the arch's top two thirds out, the drooping tip.
     const spine = [
@@ -1457,45 +1823,54 @@ function fernGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * A stump: a short broad trunk with a flared foot, its top a pale cut face or, when old,
  * a ragged grey break, a cushion of moss on one side. Sits a little into the ground.
  */
-function stumpGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function stumpGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 7717 + 5);
-  const r = 0.28 + rnd() * 0.12;
-  const h = 0.35 + rnd() * 0.35;
+  const r = (habit.width[0] + rnd() * (habit.width[1] - habit.width[0])) * 0.5;
+  const h = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const lean = habit.lean * (rnd() - 0.5) * 0.6;
   const rings: Ring[] = [
     { x: 0, y: -0.15, z: 0, r: r * 1.45 },
     { x: 0, y: 0.08, z: 0, r: r * 1.15 },
-    { x: 0, y: h, z: 0, r },
+    { x: lean * h, y: h, z: 0, r },
   ];
   const sides = near ? 9 : 6;
   const parts = [tube(rings, sides, () => pal.deadwood)];
-  // The cut: a flat disc, tilted a touch, pale if fresh and grey if old.
-  const fresh = rnd() < 0.5;
-  const top = new THREE.CircleGeometry(r * 0.98, sides).rotateX(-Math.PI / 2).rotateZ((rnd() - 0.5) * 0.25).translate(0, h, 0);
-  parts.push(flatColour(top, () => (fresh ? pal.deadwoodCut : pal.deadwood)));
-  const moss = lump(r * 0.7, 0.12, 0, r * 0.7, 0.18, r * 0.8, [pal.moss], seed * 13);
+  // The cut: a flat disc, tilted a touch, pale if fresh and grey if old; a broken one
+  // has a ragged grey break instead, and a burnt one no cut at all.
+  const fresh = rnd() < (habit.crown[0] + habit.crown[1]) / 2;
+  if (habit.top !== 'broken') {
+    const top = new THREE.CircleGeometry(r * 0.98, sides).rotateX(-Math.PI / 2).rotateZ((rnd() - 0.5) * 0.25).translate(lean * h, h, 0);
+    parts.push(flatColour(top, () => (fresh ? pal.deadwoodCut : pal.deadwood)));
+  }
+  if (habit.stems > 1) {
+    // Two trunks out of one root, one cut lower: a stump beside a stump.
+    const own = trunkRings(rnd, h * 0.7, r * 0.7, 0.2, 0.1, near ? 6 : 4).map((ring) => ({ ...ring, x: ring.x + r * 1.3 }));
+    parts.push(tube(own, near ? 6 : 4, () => pal.deadwood));
+  }
+  const moss = lump(r * 0.7, 0.12, 0, r * 0.7 * (1 - habit.taper), 0.18, r * 0.8, [pal.moss], seed * 13);
   moss.rotateY(rnd() * Math.PI * 2);
-  return { wood: mergeGeometries(parts.map(asFlat)), leaves: asFlat(moss) };
+  return { wood: mergeGeometries(parts.map(asFlat)), leaves: habit.gaps > 0.4 ? null : asFlat(moss) };
 }
 
 /**
  * A fallen trunk: a long tube lying along x on the ground, thinning toward the top end,
  * a few broken branch stubs, its root end a cut or a torn plate. Grey with moss on top.
  */
-function logGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function logGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 9973 + 17);
-  const L = 5 + rnd() * 5;
-  const r0 = 0.2 + rnd() * 0.1;
+  const L = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const r0 = (habit.width[0] + rnd() * (habit.width[1] - habit.width[0])) * 0.5;
   const steps = near ? 5 : 3;
   const rings: Ring[] = [];
   for (let k = 0; k <= steps; k++) {
     const t = k / steps;
-    rings.push({ x: 0, y: -L / 2 + t * L, z: 0, r: r0 * (1 - 0.55 * t) });
+    rings.push({ x: 0, y: -L / 2 + t * L, z: 0, r: r0 * (1 - habit.taper * 0.8 * t) });
   }
   // Built upright (the tube is vertical), then laid down: rotated onto x, raised to
   // rest on the ground, a little sunk.
   const wood = tube(rings, near ? 7 : 5, () => pal.deadwood);
   const parts = [wood];
-  const stubs = 2 + Math.floor(rnd() * 3);
+  const stubs = Math.max(0, Math.round((2 + rnd() * 3) * habit.limbs));
   for (let k = 0; k < stubs; k++) {
     const y = -L / 2 + (0.3 + rnd() * 0.6) * L;
     const a = rnd() * Math.PI * 2;
@@ -1504,8 +1879,14 @@ function logGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
     const bend = from.clone().lerp(to, 0.5);
     parts.push(limb(from, bend, to, 0.06, 0.03, 3, pal.deadwood));
   }
+  if (habit.stems > 1) {
+    // A second trunk lying across the first: what a windthrow leaves.
+    const own = trunkRings(rnd, L * 0.6, r0 * 0.8, 0.3, 0.2, near ? 5 : 3);
+    parts.push(tube(own, near ? 5 : 4, () => pal.deadwood).rotateZ(Math.PI / 2).rotateY(0.5).translate(r0 * 2.2, r0 * 1.6, 0));
+  }
   const g = mergeGeometries(parts.map(asFlat));
-  g.rotateZ(Math.PI / 2).translate(0, r0 * 0.75, 0);
+  // Laid down along x, resting on the ground, leaning a little where it fell.
+  g.rotateZ(Math.PI / 2 + habit.lean * 0.35).translate(0, r0 * 0.75, 0);
   const moss = lump(0, r0 * 1.5, 0, L * 0.3, 0.1, r0 * 0.8, [pal.moss], seed * 29);
   return { wood: g, leaves: asFlat(moss) };
 }
@@ -1514,20 +1895,38 @@ function logGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
  * A juniper: the bor's dark column, taller than wide, of needle masses stacked on a
  * short stem, narrowing to a blunt point.
  */
-function juniperGeometry(seed: number, pal: Palette, near: boolean): TreeShape {
+function juniperGeometry(seed: number, pal: Palette, near: boolean, habit: Habit): TreeShape {
   const rnd = rng(seed * 4099 + 11);
-  const H = 2.2 + rnd() * 1.2;
-  const wood = [tube([{ x: 0, y: -0.2, z: 0, r: 0.07 }, { x: 0, y: H * 0.5, z: 0, r: 0.04 }], near ? 5 : 4, () => pal.twig)];
+  const H = habit.height[0] + rnd() * (habit.height[1] - habit.height[0]);
+  const W = habit.width[0] + rnd() * (habit.width[1] - habit.width[0]);
+  const leanX = Math.cos(rnd() * Math.PI * 2) * habit.lean * 0.4;
+  const stems = Math.max(1, habit.stems);
+  const wood: THREE.BufferGeometry[] = [];
+  for (let s = 0; s < stems; s++) {
+    const off = s === 0 ? 0 : W * 0.5;
+    wood.push(tube([
+      { x: off, y: -0.2, z: 0, r: 0.07 * habit.girth },
+      { x: off + leanX * H * 0.4, y: H * 0.5, z: off * 0.3, r: 0.04 },
+    ], near ? 5 : 4, () => pal.twig));
+  }
   const leaves: THREE.BufferGeometry[] = [];
-  const masses = near ? 5 : 3;
+  const masses = Math.max(2, Math.round((near ? 5 : 3) * habit.limbs));
   for (let k = 0; k < masses; k++) {
     const t = (k + 0.5) / masses;
-    const r = 0.55 * (1 - 0.55 * t) + 0.12;
-    leaves.push(blob((rnd() - 0.5) * 0.15, H * (0.12 + 0.8 * t), (rnd() - 0.5) * 0.15, r, H / masses * 0.8, r, rotated(pal.juniper, k), seed * 17 + k));
+    if (rnd() < habit.gaps) continue;
+    const r = W * (1 - (1 - habit.taper) * t) * (0.8 + rnd() * 0.3);
+    const top = habit.top === 'broken' ? 0.82 : 1;
+    leaves.push(blob(
+      (rnd() - 0.5) * W * 0.5 + leanX * H * t * 0.5,
+      H * (0.12 + 0.8 * t) * top,
+      (rnd() - 0.5) * W * 0.5,
+      r, (H / masses) * 0.8 * (habit.top === 'flat' ? 0.6 : 1), r,
+      rotated(pal.juniper, k), seed * 17 + k,
+    ));
   }
   return {
     wood: mergeGeometries(wood.map(asFlat)),
-    leaves: finishCrown(mergeGeometries(leaves.map(asFlat)), 0, H * 0.5, 0, 0.7, H * 0.55, 0.7),
+    leaves: finishCrown(mergeGeometries(leaves.map(asFlat)), leanX * H * 0.5, H * 0.5, 0, W + 0.2, H * 0.55, W + 0.2),
   };
 }
 
@@ -1718,24 +2117,24 @@ export const UNDERGROWTH_FADE_FROM_M = 50;
 export const UNDERGROWTH_FADE_TO_M = 110;
 
 const VARIANTS: Record<TreeKind, number> = {
-  [TreeKind.Birch]: 5,
+  [TreeKind.Birch]: BIRCH_HABITS.length,
   // One variant per habit (see `SPRUCE_HABITS`): the spruce is the kind the wood has
   // most of, and the one whose shapes the owner reads first.
   [TreeKind.Spruce]: SPRUCE_HABITS.length,
-  [TreeKind.Bush]: 3,
-  [TreeKind.Lime]: 3,
-  [TreeKind.Pine]: 4,
-  [TreeKind.Aspen]: 3,
-  [TreeKind.Oak]: 4,
-  [TreeKind.Maple]: 3,
-  [TreeKind.Alder]: 3,
-  [TreeKind.Willow]: 3,
-  [TreeKind.Rowan]: 3,
-  [TreeKind.Fern]: 4,
-  [TreeKind.Juniper]: 3,
-  [TreeKind.Stump]: 3,
-  [TreeKind.Log]: 3,
-  [TreeKind.FieldPine]: 3,
+  [TreeKind.Bush]: BUSH_HABITS.length,
+  [TreeKind.Lime]: LIME_HABITS.length,
+  [TreeKind.Pine]: PINE_HABITS.length,
+  [TreeKind.Aspen]: ASPEN_HABITS.length,
+  [TreeKind.Oak]: OAK_HABITS.length,
+  [TreeKind.Maple]: MAPLE_HABITS.length,
+  [TreeKind.Alder]: ALDER_HABITS.length,
+  [TreeKind.Willow]: WILLOW_HABITS.length,
+  [TreeKind.Rowan]: ROWAN_HABITS.length,
+  [TreeKind.Fern]: FERN_HABITS.length,
+  [TreeKind.Juniper]: JUNIPER_HABITS.length,
+  [TreeKind.Stump]: STUMP_HABITS.length,
+  [TreeKind.Log]: LOG_HABITS.length,
+  [TreeKind.FieldPine]: FIELD_PINE_HABITS.length,
 };
 
 let variants: readonly TreeVariant[][] | null = null;
@@ -1745,24 +2144,24 @@ export function loadTreeVariants(season: Season = 'summer'): Promise<readonly Tr
   if (!variants) {
     const pal = PALETTES[season];
     const build: Record<TreeKind, (seed: number, pal: Palette, near: boolean) => TreeShape> = {
-      [TreeKind.Birch]: birchGeometry,
+      [TreeKind.Birch]: (seed, p, near) => birchGeometry(seed, p, near, BIRCH_HABITS[(seed - 1) % BIRCH_HABITS.length]!),
       // The seed handed to a builder is the variant's index plus one, so a spruce can
       // wear its own habit rather than draw one.
       [TreeKind.Spruce]: (seed, p, near) => spruceGeometry(seed, p, near, SPRUCE_HABITS[(seed - 1) % SPRUCE_HABITS.length]!),
-      [TreeKind.Bush]: bushGeometry,
-      [TreeKind.Lime]: (seed, p, near) => roundCrownGeometry(LIME, seed, p, near),
-      [TreeKind.Pine]: pineGeometry,
-      [TreeKind.Aspen]: aspenGeometry,
-      [TreeKind.Oak]: oakGeometry,
-      [TreeKind.Maple]: (seed, p, near) => roundCrownGeometry(MAPLE, seed, p, near),
-      [TreeKind.Alder]: alderGeometry,
-      [TreeKind.Willow]: willowGeometry,
-      [TreeKind.Rowan]: rowanGeometry,
-      [TreeKind.Fern]: fernGeometry,
-      [TreeKind.Juniper]: juniperGeometry,
-      [TreeKind.Stump]: stumpGeometry,
-      [TreeKind.Log]: logGeometry,
-      [TreeKind.FieldPine]: (seed, p, near) => pineGeometry(seed, p, near, true),
+      [TreeKind.Bush]: (seed, p, near) => bushGeometry(seed, p, near, BUSH_HABITS[(seed - 1) % BUSH_HABITS.length]!),
+      [TreeKind.Lime]: (seed, p, near) => roundCrownGeometry(LIME, seed, p, near, LIME_HABITS[(seed - 1) % LIME_HABITS.length]!),
+      [TreeKind.Pine]: (seed, p, near) => pineGeometry(seed, p, near, false, PINE_HABITS[(seed - 1) % PINE_HABITS.length]!),
+      [TreeKind.Aspen]: (seed, p, near) => aspenGeometry(seed, p, near, ASPEN_HABITS[(seed - 1) % ASPEN_HABITS.length]!),
+      [TreeKind.Oak]: (seed, p, near) => oakGeometry(seed, p, near, OAK_HABITS[(seed - 1) % OAK_HABITS.length]!),
+      [TreeKind.Maple]: (seed, p, near) => roundCrownGeometry(MAPLE, seed, p, near, MAPLE_HABITS[(seed - 1) % MAPLE_HABITS.length]!),
+      [TreeKind.Alder]: (seed, p, near) => alderGeometry(seed, p, near, ALDER_HABITS[(seed - 1) % ALDER_HABITS.length]!),
+      [TreeKind.Willow]: (seed, p, near) => willowGeometry(seed, p, near, WILLOW_HABITS[(seed - 1) % WILLOW_HABITS.length]!),
+      [TreeKind.Rowan]: (seed, p, near) => rowanGeometry(seed, p, near, ROWAN_HABITS[(seed - 1) % ROWAN_HABITS.length]!),
+      [TreeKind.Fern]: (seed, p, near) => fernGeometry(seed, p, near, FERN_HABITS[(seed - 1) % FERN_HABITS.length]!),
+      [TreeKind.Juniper]: (seed, p, near) => juniperGeometry(seed, p, near, JUNIPER_HABITS[(seed - 1) % JUNIPER_HABITS.length]!),
+      [TreeKind.Stump]: (seed, p, near) => stumpGeometry(seed, p, near, STUMP_HABITS[(seed - 1) % STUMP_HABITS.length]!),
+      [TreeKind.Log]: (seed, p, near) => logGeometry(seed, p, near, LOG_HABITS[(seed - 1) % LOG_HABITS.length]!),
+      [TreeKind.FieldPine]: (seed, p, near) => pineGeometry(seed, p, near, true, FIELD_PINE_HABITS[(seed - 1) % FIELD_PINE_HABITS.length]!),
     };
     const lod = ({ wood, leaves }: TreeShape, kind: TreeKind): TreeLod => {
       const geometry = mergeTreeParts(wood, leaves, kind);

@@ -102,10 +102,41 @@ interface Bucket {
 export function treeShape(wx: number, wz: number, variants: number, out: { variant: number; sx: number; sy: number }): void {
   const ix = Math.round(wx * 4);
   const iz = Math.round(wz * 4);
-  out.variant = Math.floor(hashUnit3(VARIANT_TAG, ix, iz) * variants);
+  out.variant = mixInRegion(wx, wz, variants, VARIANT_TAG);
   // Height and girth vary independently: a tall thin one, a short broad one.
   out.sy = 0.82 + 0.4 * hashUnit3(SHAPE_TAG, ix, iz);
   out.sx = 0.85 + 0.32 * hashUnit3(SHAPE_TAG + 1, ix, iz);
+}
+
+/** Side of one region of habit, metres: a stand's own set of variants. */
+const HABIT_REGION_M = 260;
+/**
+ * Habits a region grows. Two: a stand has one age and one history, and two forms of a
+ * species among its neighbours read as variety (a young spruce among old ones), where
+ * ten read as a catalogue. It is also the lever on cost — see the measurement in
+ * docs/research-2026-09-26.md, §6.7: two habits a region drew 45 tree slots in a wood
+ * where a uniform mix of the same catalogue drew 89.
+ */
+const HABIT_MIX = 2;
+/**
+ * Which of a kind's variants a region grows. A wood is not a random mix of everything
+ * its species can be: a stand has one age and one history, so a region grows three of a
+ * kind's habits and the next region another three, sharing one or two with its
+ * neighbour. The player meets the whole catalogue in a few kilometres of driving, and
+ * any one view shows a few habits — which is what keeps the number of *drawn* variants,
+ * and so the number of draw calls, where one species stood before the habits existed
+ * (docs/research-2026-09-26.md, §6.6; measured in §6.7).
+ */
+function mixInRegion(wx: number, wz: number, variants: number, tag: number): number {
+  if (variants <= HABIT_MIX) return Math.floor(hashUnit3(tag, Math.round(wx * 4), Math.round(wz * 4)) * variants);
+  const rx = Math.floor(wx / HABIT_REGION_M);
+  const rz = Math.floor(wz / HABIT_REGION_M);
+  const start = Math.floor(hashUnit3(tag, rx, rz) * variants);
+  // The stride is odd against the catalogue, so three habits of a region are spread
+  // across the whole of it rather than three neighbours in the table.
+  const stride = 5 + 2 * Math.floor(hashUnit3(tag ^ 0x9e37, rx, rz) * Math.floor(variants / HABIT_MIX));
+  const pick = Math.floor(hashUnit3(tag ^ 0x85eb, Math.round(wx * 4), Math.round(wz * 4)) * HABIT_MIX);
+  return (start + pick * stride) % variants;
 }
 
 const matrix = new THREE.Matrix4();
