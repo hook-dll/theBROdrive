@@ -26,9 +26,9 @@ import { GRAPHICS_TIERS, streetLightSlotsFor, type GraphicsQuality } from '../ga
  * (see the recompile note above), so the low tier simply keeps fewer: two lit
  * pools, one each way, which is a dimmer night rather than a different one.
  *
- * `blessing` gets eight — four each way — so a lit road recedes further ahead of
- * you before the pools stop. It is the same per-pixel cost story in reverse: a
- * machine with fill rate to spare can afford two more lights everywhere.
+ * `standard` and `blessing` both keep six — three each way. The top rung was given
+ * eight once, and then its spotlights cut to eight to stay under the lit-fragment
+ * loop's fourteen-slot cliff (game/settings.ts); two more lamps would push it over.
  */
 /** Three concrete-era poles can be ~255 m away. */
 const CUTOFF_DISTANCE = 300;

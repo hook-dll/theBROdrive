@@ -218,8 +218,10 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // standard rung at 120 frames a second ran this one at 22-26. Spots are also the
     // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
     // cut is taken out of the spots: eight keeps four cars' beams projected, and the lamp
-    // pools, which are what a lit road actually reads by, are unchanged. The tier keeps
-    // everything else it was chosen for: the supersampling, the 25 km horizon, the sky.
+    // pools stay at the standard rung's six, which with the eight spots is fourteen slots,
+    // the most the loop takes before the cliff (tools/graphics-tiers.ts holds the rung to
+    // it). The tier keeps everything else it was chosen for: the supersampling, the 25 km
+    // horizon, the sky.
     vehicleLightSlots: 8,
     // Capped at the desktop STANDARD budget. A phone at 1.44 megapixels is not a desktop;
     // six spots and six points keep the lit road receding and three cars' beams drawn,

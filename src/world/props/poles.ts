@@ -197,8 +197,13 @@ function poleSByIndex(index: number): number | null {
 }
 
 const POLE_EPS = 1e-6;
-/** Invokes cb(s, index) for every pole whose arclength lies in [sStart, sEnd). */
-function forEachPole(sStart: number, sEnd: number, cb: (s: number, index: number) => void): void {
+/**
+ * Invokes cb(s, index) for every pole whose arclength lies in [sStart, sEnd). Exported
+ * with `describePole` as the pole line's pure description: the chunk batches each pole's
+ * meshes into one geometry, so the line can only be measured from here
+ * (tools/roadside-setback.ts).
+ */
+export function forEachPole(sStart: number, sEnd: number, cb: (s: number, index: number) => void): void {
   let indexBase = 0;
   for (const seg of poleEraSegments()) {
     const count = seg.spacing > 0 ? Math.floor((seg.end - seg.start) / seg.spacing) : 0;
@@ -357,7 +362,7 @@ export function poleDerelictAt(seed: number, s: number): PoleDerelict | null {
   };
 }
 
-interface PolePose {
+export interface PolePose {
   index: number;
   s: number;
   era: PoleEra;
@@ -528,7 +533,7 @@ function describePoleAt(
 }
 
 /** Pure, chunk-independent description of the pole at global index `index`. */
-function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number): PolePose {
+export function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number): PolePose {
   const sample = road.sampleAt(s);
   const p = road.offsetPoint(s, -(road.halfWidthAt(s) + POLE_SETBACK_M));
   return describePoleAt(

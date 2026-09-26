@@ -67,12 +67,20 @@ const COST_KEYS = [
   'starMagnitude',
   'mobileStarMagnitude',
   'horizonM',
-  'vehicleLightSlots',
   'mobileVehicleLightSlots',
-  'streetLightSlots',
   'mobileStreetLightSlots',
 ] as const;
 const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
+/**
+ * THE DESKTOP LIGHTS ARE ONE BUDGET, AND IT HAS A CLIFF. Spots and points are evaluated by
+ * the same lit-fragment loop, which costs almost nothing per light up to about fourteen
+ * slots and a great deal per light past them (settings.ts, the `blessing` rung: 11 slots
+ * 6.5 ms, 13 slots 7.5, 15 slots 10.0, 19 slots 17.9 on an M2 Pro at 2 Mpx). So a rung
+ * must spend MORE lights than the one below it in total — not necessarily more of each
+ * kind, which is how the top rung reached eighteen spots and ran at a quarter of the
+ * speed — and no rung may cross the cliff.
+ */
+const DESKTOP_LIGHT_CLIFF = 14;
 
 console.log('rung         Mpx ceiling   Mpx floor   horizon   stars   car lamps   street lamps');
 let previous: GraphicsQuality | null = null;
@@ -91,6 +99,12 @@ for (const quality of LADDER) {
   if (tier.mobileMinPixels >= tier.mobileMaxPixels) {
     failures.push(`${quality}: the mobile floor is at or above its own ceiling`);
   }
+  if (tier.vehicleLightSlots + tier.streetLightSlots > DESKTOP_LIGHT_CLIFF) {
+    failures.push(
+      `${quality}: ${tier.vehicleLightSlots + tier.streetLightSlots} desktop light slots, past the ` +
+        `${DESKTOP_LIGHT_CLIFF}-slot cliff`,
+    );
+  }
   if (previous !== null) {
     const below = GRAPHICS_TIERS[previous];
     for (const key of COST_KEYS) {
@@ -100,6 +114,14 @@ for (const quality of LADDER) {
             `this rung costs nothing more than the one below it`,
         );
       }
+    }
+    const lights = tier.vehicleLightSlots + tier.streetLightSlots;
+    const lightsBelow = below.vehicleLightSlots + below.streetLightSlots;
+    if (lights <= lightsBelow) {
+      failures.push(
+        `${quality}: ${lights} desktop light slots, not above ${previous}'s ${lightsBelow} — ` +
+          `this rung lights nothing more than the one below it`,
+      );
     }
     for (const key of WILLINGNESS_KEYS) {
       if (tier[key] < below[key]) {

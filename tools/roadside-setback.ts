@@ -19,7 +19,7 @@ import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { MonumentProvider } from '../src/world/props/monuments';
-import { PoleProvider } from '../src/world/props/poles';
+import { describePole, forEachPole } from '../src/world/props/poles';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { lanesPerSideAt } from '../src/world/roadprofile';
 
@@ -78,8 +78,8 @@ function setbacks(group: THREE.Object3D, hintS: number): number[] {
   return out;
 }
 
-/** First chunk whose whole span offers `lanes` lanes each way. */
-function findChunk(lanes: number): number {
+/** Chunks, from 5 on, whose whole span offers `lanes` lanes each way. */
+function* chunksWith(lanes: number): Generator<number> {
   for (let chunk = 5; chunk < 4_000; chunk++) {
     const sStart = chunk * CHUNK_LENGTH;
     let all = true;
@@ -89,56 +89,75 @@ function findChunk(lanes: number): number {
         break;
       }
     }
-    if (all) return chunk;
+    if (all) yield chunk;
   }
-  throw new Error(`no ${lanes}-lane chunk found`);
 }
 
-const narrowChunk = findChunk(1);
-const wideChunk = findChunk(2);
-console.log(
-  `seed ${SEED}: narrow chunk ${narrowChunk} (s ${narrowChunk * CHUNK_LENGTH}), ` +
-    `wide chunk ${wideChunk} (s ${wideChunk * CHUNK_LENGTH})`,
-);
+/**
+ * Builds chunks of one width until `enough` measurements are in. The first chunk of a
+ * width used to be taken as it came, and in the countryside a pole line has gaps (an
+ * era band with no line) and scatter is placed by land cover, so that one chunk often
+ * carried nothing and four checks passed judgement on empty sets.
+ */
+function measureOver(
+  lanes: number,
+  enough: number,
+  build: (context: ChunkContext) => { group: THREE.Group; dispose?: () => void } | null | undefined,
+  measure: (group: THREE.Group, hintS: number) => number[],
+): { values: number[]; chunks: number } {
+  let values: number[] = [];
+  let chunks = 0;
+  for (const chunk of chunksWith(lanes)) {
+    const content = build(contextFor(chunk));
+    chunks++;
+    if (content) {
+      values = values.concat(measure(content.group, chunk * CHUNK_LENGTH + CHUNK_LENGTH * 0.5));
+      content.dispose?.();
+    }
+    if (values.length >= enough || chunks >= 200) break;
+  }
+  return { values, chunks };
+}
 
 // --- poles ---------------------------------------------------------------------
-// A pole's own group sits at its base; the lean and the lamp arm move the meshes off
-// it, so the BASE is what the setback is about and it is read from the group.
-const poles = new PoleProvider();
-for (const [label, chunk] of [['narrow', narrowChunk], ['wide', wideChunk]] as const) {
-  const content = poles.build(contextFor(chunk));
-  const hintS = chunk * CHUNK_LENGTH + CHUNK_LENGTH * 0.5;
+// A chunk batches every pole's meshes into one geometry, so the line is read from its
+// own pure description — the pose the provider builds each pole from — and the BASE is
+// what the setback is about (the lean and the lamp arm move the meshes off it).
+for (const [label, lanes] of [['narrow', 1], ['wide', 2]] as const) {
   const bases: number[] = [];
-  for (const child of content.group.children) {
-    if (!(child instanceof THREE.Group)) continue;
-    const projection = road.project(child.position.x, child.position.z, hintS);
-    bases.push(Math.abs(projection.lateral) - road.halfWidthAt(projection.s));
+  let chunks = 0;
+  for (const chunk of chunksWith(lanes)) {
+    chunks++;
+    forEachPole(chunk * CHUNK_LENGTH, (chunk + 1) * CHUNK_LENGTH, (s, index) => {
+      const pose = describePole(road, terrain, SEED, s, index);
+      const projection = road.project(pose.baseX, pose.baseZ, s);
+      bases.push(Math.abs(projection.lateral) - road.halfWidthAt(projection.s));
+    });
+    if (bases.length >= 12 || chunks >= 200) break;
   }
   const worst = bases.reduce((far, value) => Math.max(far, Math.abs(value - POLE_SETBACK_M)), 0);
   check(
     `the ${label} road's poles stand ${POLE_SETBACK_M} m off its edge`,
     bases.length > 0 && worst < 0.05,
-    `${bases.length} poles, worst error ${(worst * 1000).toFixed(0)} mm`,
+    `${bases.length} poles over ${chunks} chunks, worst error ${(worst * 1000).toFixed(0)} mm`,
   );
-  content.dispose?.();
 }
 
 // --- scatter -------------------------------------------------------------------
+// The desert's rocks and cacti stand on Sand and Rock surfaces, which the countryside
+// does not have, and the road hazards are off (props/scatter.ts, ROAD_HAZARD_KINDS). So
+// the country's requirement is that the provider puts nothing by the road at all; if
+// it ever emits again, the desert's setback check applies to what it emits.
 const scatter = new ScatterProvider();
-for (const [label, chunk] of [['narrow', narrowChunk], ['wide', wideChunk]] as const) {
-  const content = scatter.build(contextFor(chunk));
-  if (!content) continue;
-  const hintS = chunk * CHUNK_LENGTH + CHUNK_LENGTH * 0.5;
-  const measured = setbacks(content.group, hintS);
+for (const [label, lanes] of [['narrow', 1], ['wide', 2]] as const) {
+  const { values: measured, chunks } = measureOver(lanes, 20, (context) => scatter.build(context), setbacks);
   const nearest = measured.length > 0 ? Math.min(...measured) : Infinity;
   check(
     `no ${label}-road scatter reaches the verge`,
-    measured.length > 0 && nearest >= SCATTER_SETBACK_M - 0.3,
-    `${measured.length} props, nearest ${nearest.toFixed(2)} m from the edge`,
+    measured.length === 0 || nearest >= SCATTER_SETBACK_M - 0.3,
+    `${measured.length} props over ${chunks} chunks` + (measured.length > 0 ? `, nearest ${nearest.toFixed(2)} m from the edge` : ' (the country scatters none)'),
   );
-  content.dispose?.();
 }
-
 // --- monuments -----------------------------------------------------------------
 // They stand every 20 km, so a chunk almost never holds one: walk enough chunks to
 // find some on each width instead of demanding them in the sampled pair.
