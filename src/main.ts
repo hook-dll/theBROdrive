@@ -1948,7 +1948,7 @@ async function boot(): Promise<void> {
     // first, at the lamp's own brightness and any range, which is the whole feature.
     const fogDensity =
       renderer.fog.density * viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
-    wetGlints.endFrame(weather.wet, fogDensity, eyeGround, frameDt);
+    wetGlints.endFrame(weather.wet, weather.precip * (1 - weather.snowing), fogDensity, eyeGround, frameDt);
 
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the

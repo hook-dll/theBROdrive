@@ -36,16 +36,25 @@ import * as THREE from 'three';
  * docs/research-2026-09-26.md, «Дёрганье»), and a texture upload does not.
  */
 /**
+ * The stencil bit the asphalt and its markings write where they are the visible surface
+ * (world/roadmesh.ts). The streaks are drawn only there: their strip runs from a lamp's
+ * foot toward the eye, and seen from the verge that line lies across the grass, where
+ * there is no water film to mirror anything and the flickering bands ran like a stream.
+ */
+export const ASPHALT_STENCIL = 1;
+/**
  * Lamps offered per frame at most: six per car, then every working street lamp in the
  * streamed chunks. The texture is CAPACITY × 3 floats, a few kilobytes.
  */
 const CAPACITY = 512;
 /**
  * How far the streak spreads along the view, as a ratio either side of the mirror
- * point: from xr / SPREAD to xr * SPREAD metres from the eye. The water film on
- * rain-rippled asphalt; a still puddle would be nearly 1.
+ * point: from xr / spread to xr * spread metres from the eye. The water film on
+ * rain-rippled asphalt spreads it most; a road still wet after the rain has stopped is
+ * a calmer film and a shorter streak (a still puddle would be nearly 1).
  */
-const SPREAD = 2.4;
+const SPREAD_RAIN = 2.4;
+const SPREAD_STILL = 1.6;
 /** Streak half-width: about a lens, plus a little lateral spread with distance. */
 const HALF_WIDTH_M = 0.09;
 const HALF_WIDTH_PER_M = 0.003;
@@ -60,6 +69,7 @@ attribute vec2 aCorner; // x across, y along (-1 near the eye .. 1 toward the la
 uniform sampler2D uLamps;
 uniform float uFogDensity;
 uniform float uEyeGround;
+uniform float uSpread;
 varying vec2 vCorner;
 varying vec3 vColor;
 varying float vAlong;
@@ -86,7 +96,7 @@ void main() {
   // crosses the road.
   float xr = d * e / ( e + h );
   // Spread either side of it, geometric so the halves are alike in angle.
-  float x = clamp( xr * pow( ${SPREAD.toFixed(2)}, aCorner.y ), 0.5, d );
+  float x = clamp( xr * pow( uSpread, aCorner.y ), 0.5, d );
   float halfW = ${HALF_WIDTH_M.toFixed(2)} + ${HALF_WIDTH_PER_M.toFixed(4)} * xr;
   vec2 xz = cameraPosition.xz + u * x + v * aCorner.x * halfW;
   // Just over the road, and over its painted markings, which the wet film covers too.
@@ -112,6 +122,7 @@ void main() {
 const FRAGMENT = /* glsl */ `
 uniform float uWet;
 uniform float uTime;
+uniform float uRain;
 varying vec2 vCorner;
 varying vec3 vColor;
 varying float vAlong;
@@ -122,11 +133,15 @@ void main() {
   float across = 1.0 - smoothstep( 0.0, 1.0, abs( vCorner.x ) );
   // Rain ripples break the streak into bright and dim bands a few decimetres long,
   // fixed to the road and flickering as drops land — a smooth pillar reads as paint.
+  // Only while it rains: after the rain the film is still, the bands stop and fade to
+  // a faint unevenness of the surface. Flickering on a road nothing falls on is what
+  // made the streaks read as running water.
   float cell = vAlong * 3.0;
   float k = floor( cell );
   float f = smoothstep( 0.0, 1.0, fract( cell ) );
-  float beat = floor( uTime * 7.0 );
+  float beat = floor( uTime * 7.0 ) * step( 0.02, uRain );
   float ripple = mix( glintHash( k + beat * 17.0 ), glintHash( k + 1.0 + beat * 17.0 ), f );
+  ripple = mix( 0.5 + 0.3 * ( ripple - 0.5 ), ripple, uRain );
   vec3 col = vColor * along * across * across * uWet * ( 0.45 + 0.8 * ripple );
   if ( max( col.r, max( col.g, col.b ) ) < 0.002 ) discard;
   gl_FragColor = vec4( col, 1.0 );
@@ -162,6 +177,8 @@ export class WetGlints {
       uniforms: {
         uLamps: { value: this.texture },
         uWet: { value: 0 },
+        uRain: { value: 0 },
+        uSpread: { value: SPREAD_STILL },
         uFogDensity: { value: 0 },
         uEyeGround: { value: 0 },
         uTime: { value: 0 },
@@ -172,6 +189,16 @@ export class WetGlints {
       depthTest: true,
       side: THREE.DoubleSide,
       fog: false,
+      // Only where the asphalt is the visible surface (see ASPHALT_STENCIL): the strip
+      // is laid along the line from the lamp's foot to the eye, whatever lies under it.
+      stencilWrite: true,
+      stencilRef: ASPHALT_STENCIL,
+      stencilFuncMask: ASPHALT_STENCIL,
+      stencilWriteMask: 0,
+      stencilFunc: THREE.EqualStencilFunc,
+      stencilFail: THREE.KeepStencilOp,
+      stencilZFail: THREE.KeepStencilOp,
+      stencilZPass: THREE.KeepStencilOp,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.frustumCulled = false;
@@ -213,17 +240,21 @@ export class WetGlints {
   }
 
   /**
-   * `wet` 0..1 how wet the road is; `fogDensity` the scene's exponential-squared fog;
-   * `eyeGround` the road height under the camera; `dt` seconds, for the ripples.
+   * `wet` 0..1 how wet the road is; `rain` 0..1 how hard rain is falling on it now (not
+   * snow); `fogDensity` the scene's exponential-squared fog; `eyeGround` the road height
+   * under the camera; `dt` seconds, for the ripples.
    */
-  endFrame(wet: number, fogDensity: number, eyeGround: number, dt: number): void {
+  endFrame(wet: number, rain: number, fogDensity: number, eyeGround: number, dt: number): void {
     const u = this.material.uniforms;
     u.uTime!.value = (u.uTime!.value + dt) % 600;
     this.mesh.visible = this.count > 0 && wet > 0.01;
     if (!this.mesh.visible) return;
     this.geometry.instanceCount = this.count;
     this.texture.needsUpdate = true;
+    const ripples = Math.min(1, Math.max(0, rain / 0.3));
     u.uWet!.value = wet;
+    u.uRain!.value = ripples;
+    u.uSpread!.value = SPREAD_STILL + (SPREAD_RAIN - SPREAD_STILL) * ripples;
     u.uFogDensity!.value = fogDensity;
     u.uEyeGround!.value = eyeGround;
   }

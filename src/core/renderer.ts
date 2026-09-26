@@ -475,12 +475,21 @@ export class Renderer {
     // only the haze warp; standard and blessing sample the resolved depth so nearby
     // geometry never inherits a horizon-shaped screen mask.
     // The independent MSAA setting decides geometry-edge samples.
-    const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
+    // It carries a STENCIL too, for one job: the asphalt marks its pixels (world/
+    // roadmesh.ts) and the wet-road reflections of lamps are drawn only there
+    // (render/wetglints.ts). A reflection strip runs from the lamp's foot to the eye, so
+    // from the verge it lay across the grass and shone there like a stream. The stencil
+    // is only tested inside the scene pass, so it is never resolved out of the MSAA
+    // buffer; the depth texture keeps its old meaning for the fullscreen pass.
+    const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedInt248Type);
+    hazeDepth.format = THREE.DepthStencilFormat;
     hazeDepth.minFilter = THREE.NearestFilter;
     hazeDepth.magFilter = THREE.NearestFilter;
     this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
       samples: msaa ? MSAA_SAMPLES : 0,
       depthTexture: hazeDepth,
+      stencilBuffer: true,
+      resolveStencilBuffer: false,
     });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 

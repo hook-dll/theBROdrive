@@ -8,6 +8,7 @@ import { applyCloudShadow } from '../render/cloudshadow';
 import { markShelter } from '../render/rainocclusion';
 import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
 import { applySnowCover, applyWetness } from '../render/season';
+import { ASPHALT_STENCIL } from '../render/wetglints';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
@@ -315,6 +316,20 @@ const sandLinear = new THREE.Color();
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
 /**
+ * The asphalt writes its stencil bit (render/wetglints.ts) wherever it is the visible
+ * surface, and the wet-road reflections of lamps are drawn only there. The markings
+ * write it too: they can be drawn first and then hide the asphalt under them from the
+ * depth test.
+ */
+function markAsphalt<M extends THREE.Material>(material: M): M {
+  material.stencilWrite = true;
+  material.stencilRef = ASPHALT_STENCIL;
+  material.stencilWriteMask = ASPHALT_STENCIL;
+  material.stencilFunc = THREE.AlwaysStencilFunc;
+  material.stencilZPass = THREE.ReplaceStencilOp;
+  return material;
+}
+/**
  * Base colour a ghost line is mixed from, for the one case the marking pass has no
  * `SURFACE_LINEAR` entry: gravel, whose colour comes from the regional palette.
  */
@@ -327,7 +342,7 @@ const paintBase = new THREE.Color();
 // patch each of them already carries instead of hiding it. A cloud crossing the road is
 // most of the effect: the ribbon is the one surface always in view.
 // In the rain the asphalt goes dark and shines back the grey sky (render/season.ts).
-const roadMaterial = applyWetness(applyCloudShadow(
+const roadMaterial = markAsphalt(applyWetness(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -335,7 +350,7 @@ const roadMaterial = applyWetness(applyCloudShadow(
       metalness: 0,
     }),
   ),
-), 0.38, 0.32);
+), 0.38, 0.32));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyCloudShadow(
   applyGroundSpotlightNormals(
@@ -410,7 +425,7 @@ export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
   return out.copy(SURFACE_LINEAR[roadConditionAt(0).surface]!).multiplyScalar(textureGain);
 }
 
-const markingMaterial = applyCloudShadow(
+const markingMaterial = markAsphalt(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -423,7 +438,7 @@ const markingMaterial = applyCloudShadow(
       polygonOffsetUnits: -1,
     }),
   ),
-);
+));
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
