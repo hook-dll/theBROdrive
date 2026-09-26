@@ -1,9 +1,10 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
-import { ROAD_TILE_METRES } from '../render/roadtexture';
+
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
-import { roadAsphaltMaterial, roadAsphaltVertexColorAtStart } from './roadmesh';
+import { roadAsphaltMaterial } from '../render/look/roadsurface';
+import { roadAsphaltVertexColorAtStart } from './roadmesh';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from './terminus';
 
 /** About 1.5 m between outer-ring vertices, matching the road's dense ribbon. */
@@ -31,12 +32,19 @@ export class TerminusPadProvider implements ChunkProvider {
     const oz = ctx.originZ;
     const centreZ = -TERMINUS_CENTRE_M;
 
+    // The carriageway's own layout — u across, v along — stretched over the bulb from
+    // its centre, so the pad reads as one pour of the same asphalt. Not the road's own
+    // metre scale: the photograph's ragged rim sits about 1.4 % inside each edge, and
+    // laid at 24 m it would print four fringes across the middle of the pad. At the
+    // pad's own size the interior of the file covers it and the edge is a cut, which is
+    // what a hardened turning bulb has.
+    const UV_SPAN = TERMINUS_PAD_M * 1.1;
     const writeVertex = (index: number, x: number, z: number): void => {
       positions[index * 3] = x - ox;
       positions[index * 3 + 1] = ctx.terrain.terminusSurfaceY(x, z);
       positions[index * 3 + 2] = z - oz;
-      uvs[index * 2] = x / ROAD_TILE_METRES;
-      uvs[index * 2 + 1] = z / ROAD_TILE_METRES;
+      uvs[index * 2] = 0.5 + x / UV_SPAN;
+      uvs[index * 2 + 1] = 0.5 + (z - centreZ) / UV_SPAN;
     };
 
     writeVertex(0, 0, centreZ);

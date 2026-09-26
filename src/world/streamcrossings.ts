@@ -374,9 +374,4 @@ export function buildStreamCrossings(
   };
 }
 
-/** Concrete, in the branch's flat-colour voice: no texture, no metal, light relief. */
-export const STREAM_CROSSING_MATERIAL = new THREE.MeshStandardMaterial({
-  vertexColors: true,
-  roughness: 0.92,
-  metalness: 0,
-});
+

@@ -1,7 +1,7 @@
 import { installDocumentShim } from './domshim';
 import * as THREE from 'three';
 
-import { roadTextures } from '../src/render/roadtexture';
+import { roadTextures } from '../src/render/look/roadsurface';
 import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { ChunkStreamer, CHUNK_LENGTH } from '../src/world/chunks';
@@ -87,8 +87,8 @@ function assertSteadyStatePlateau(
 }
 
 const restoreDocument = installDocumentShim();
-// Match production boot: texture canvas generation is a loading-phase cost, not
-// scheduler work charged to the first streamed road chunk.
+// Match production boot: the road's textures are requested in the loading phase, not
+// charged to the first streamed road chunk.
 roadTextures();
 
 const road = new Road(SEED);

@@ -1,21 +1,23 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { hash01, Noise1D, Noise2D } from '../core/rng';
-import { SurfaceType, SURFACES } from '../core/surfaces';
-import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
-import { applyComicShading, applyGroundSpotlightNormals } from '../render/comic';
-import { applyCloudShadow } from '../render/cloudshadow';
+import { SURFACES, SurfaceType } from '../core/surfaces';
+import {
+  ROAD_SURFACE_TINT,
+  ROAD_TILE_M,
+  roadAlbedoTint,
+  roadMaterials,
+  SHOULDER_LEVEL,
+} from '../render/look/roadsurface';
 import { markShelter } from '../render/rainocclusion';
-import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
-import { applySnowCover, applyWetness } from '../render/season';
-import { ASPHALT_STENCIL } from '../render/wetglints';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
-import { desertPaletteAt, roadConditionAt } from './gradient';
+import { roadConditionAt } from './gradient';
+import type { LandCover } from './landcover';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import { tileSurfaceSampler } from './deserttiledata';
 import type { RoadDistance } from './roaddistance';
 import { shoulderWidthAt } from './shoulder';
-import { buildStreamCrossings, STREAM_CROSSING_MATERIAL } from './streamcrossings';
+import { buildStreamCrossings } from './streamcrossings';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
@@ -76,54 +78,100 @@ const COLLIDER_SLAB_QUADS = 15;
 const ROAD_BED_DEPTH = 0.35;
 
 const MARKING_LIFT = 0.002;
-const MARKING_HALF_WIDTH = 0.12;
+/**
+ * A painted line's half-width, metres: 16 cm across, which is GOST's 1.5 centre dash and
+ * 1.2 edge line (10-15 cm) with a margin for the wear that thins them. It used to be
+ * 24 cm, which reads as a hand-painted slab of a stripe from the driver's eye and was
+ * twice the width of the same line in the reference frames.
+ */
+const MARKING_HALF_WIDTH = 0.08;
+/**
+ * How far inside the asphalt's edge an edge line is painted, metres.
+ *
+ * In the reference frames the edge line has a strip of asphalt outside it and then the
+ * crumb; ours ran its outer edge along the mat's own edge, which reads as the road being
+ * outlined rather than marked. 25 cm is the upper end of the 15-30 cm a rural road's edge
+ * line is set in at.
+ */
+const MARKING_EDGE_INSET = 0.25;
 const MARKING_MIN = 0.03;
 
 /**
- * Weathering of the driving surface, as three things a photograph of an old road
- * shows and this road did not.
+ * Weathering of the driving surface that the PHOTOGRAPH cannot carry.
  *
- *  1. WHEEL PATHS. Tyres polish two strips per lane and grind dust out of them.
- *     Each lane supplies its own pair, so opening a lane extends the traffic story
- *     rather than scaling narrow-road tracks across empty asphalt.
- *  2. A DUSTY CROWN AND ROAD EDGE. Between the wheel paths and out at the edges
- *     nothing sweeps the surface, so wind-blown dust settles and bitumen bleaches.
- *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre ravels into the verge before
- *     the asphalt ends rather than stopping in a hard visual line.
- *
- * All three are applied to the vertex colour, on top of the tiled asphalt texture
- * (render/roadtexture.ts) that carries aggregate, cracks and patches.
+ * It used to be three things, per vertex: polished wheel paths, a dusty crown, and a
+ * ravel into the verge. All three are in `road_asphalt.webp` now — the file was made
+ * with wheel paths, a crown-to-edge grade and a crumb edge whose own alpha ends the mat
+ * — so applying them here as well would have doubled every one of them and, worse, put
+ * the wheel paths at this mesh's laterals instead of the photograph's. What is left is
+ * the one thing a 24 m repeat cannot say: that this stretch of road is darker than the
+ * last one. Where the district's own surface ends and the worn mat begins is the texture
+ * job; how worn the DISTRICT is, is the palette's (`ROAD_SURFACE_TINT`).
  */
 /**
  * The inherited polished pair is centred 0.2 m outward of each nominal lane centre:
  * it preserves the narrow road's ±0.85/±2.45 m tracks while carrying that real-world
- * camber bias into every added lane.
+ * camber bias into every added lane. The rubber the director lays uses it as its frame.
  */
 const WHEEL_TRACK_LANE_BIAS = 0.2;
 /** A 1.6 m tyre track places each path 0.8 m either side of its lane centre. */
 const WHEEL_TRACK_HALF = 0.8;
-/** Half-width of a polished strip, metres. */
-const WHEEL_PATH_HALF = 0.5;
-/** Darkening at the centre of a wheel path, as a fraction of the lane colour. */
-const WHEEL_PATH_DARKEN = 0.16;
-/** Lightening of the dusty, unswept surface between and beside the wheel paths. */
-const DUST_LIGHTEN = 0.11;
-/** How much of that dust reads as colour rather than brightness (towards gravel). */
-const DUST_TINT = 0.3;
-/** Width of the ravelled band inside the mat's edge, metres. */
-const EDGE_RAVEL = 0.55;
-/** Fraction of the way to gravel colour the very edge of the mat reaches. */
-const EDGE_RAVEL_MIX = 0.4;
 /** Wavelength (m) of the coarse tonal mottling applied per vertex. */
 const MOTTLE_WAVELENGTH = 7;
 /** Peak brightness swing of that mottling. */
 const MOTTLE_AMOUNT = 0.07;
+/** Scratch for the shoulder's own vertex colour: no allocation per vertex. */
+const shoulderColour = new THREE.Color();
+/**
+ * Width of the frayed rim the photograph ends the mat with, metres: `road_asphalt.webp`'s
+ * 0.75 alpha contour sits about 1.4 % of its span inside the mesh edge, which is 8 cm of
+ * a 5.8 m carriageway. Nothing is laid over that band — the asphalt is not there — so a
+ * repair and a rubber mark both stop short of it.
+ */
+const MAT_CRUMB_M = 0.09;
+/**
+ * How far outside the asphalt's edge the canopy that shades the road is sampled, metres.
+ * The trees stand further out than this (the planting keeps a verge); what is wanted is
+ * the wood the road is running through, which is a property of the land cover here and
+ * not of where a particular trunk landed.
+ */
+const ROAD_SHADE_REACH_M = 1.5;
 
 /**
- * Paint wear. Nothing repaints this road, so the markings are chalky rather than
- * white, they thin out in patches, and whole dashes are simply gone.
+ * THE SIGHT RULE'S OWN NUMBERS, for the solid crown line (see `centreLineSolidAt`).
+ *
+ *  - `SIGHT_LIMIT_M` is how far the profile is marched: past this everything a country
+ *    road does to a driver's view has already happened, and the march costs 15 road
+ *    samples either way.
+ *  - `SOLID_SIGHT_M` is where a stretched line gives way to a solid one. Road practice
+ *    draws a solid centre line under the stopping distance for the road's speed, which
+ *    for a 2-lane country road at 90 km/h is around 130-160 m of sight; 190 m is a
+ *    shade generous, so a solid line means a crest or a bend and not every rise.
+ *  - `CURVE_CLEARANCE_M` is the lateral clearance the chord through a bend is taken
+ *    over — the verge plus the first metre of whatever stands on the inside of it.
+ *  - `CURVE_CANOPY_MIN` is how much wood has to be standing on the inside for that
+ *    chord to be the limit at all: a bend across an open field is seen through, and
+ *    only a bend with something to hide behind is a bend you cannot read.
+ *  - `SIGHT_OPEN_M` / `SIGHT_WOODS_M` are what the road's edge canopy holds the sight
+ *    to: open country does not limit it, a closed wood holds it under 90 m.
  */
-const PAINT_COLOR = 0xd9d4c6;
+const SIGHT_LIMIT_M = 400;
+const SOLID_SIGHT_M = 190;
+const CURVE_CLEARANCE_M = 1.2;
+const CURVE_CANOPY_MIN = 0.25;
+const SIGHT_OPEN_M = 400;
+const SIGHT_WOODS_M = 90;
+
+/**
+ * Paint wear. Nothing repaints this road, so the markings are chalky rather than white,
+ * they thin out in patches, and whole dashes are simply gone.
+ *
+ * NEUTRAL, and that is a correction: it used to be a warm off-white (0xd9d4c6) that was
+ * mixed INTO the lane's own colour, so it inherited the surface's coolness. As a layer
+ * of its own over the photograph it kept the warmth and the reference frames' lines are
+ * white — a road marked in cream reads as a different road.
+ */
+const PAINT_COLOR = 0xdee0dd;
 /** Wavelength (m) over which paint coverage varies. */
 const PAINT_WEAR_WAVELENGTH = 11;
 /** Coverage below which a marking quad is not drawn at all. */
@@ -147,7 +195,9 @@ const PAINT_GONE = 0.34;
  */
 
 /** Fresh bitumen: near black with the faintest warm cast. Tar, not paint. */
-const PATCH_LINEAR = new THREE.Color(0x2b2925);
+const PATCH_ALBEDO = new THREE.Color(0x2b2925);
+/** The same colour as a VERTEX TINT: what the multiplier is for the photograph to reach it. */
+const PATCH_TINT = roadAlbedoTint(PATCH_ALBEDO, new THREE.Color());
 /**
  * How far a fully covered vertex goes towards it. Short of 1 deliberately: a patch is
  * a skin poured over the district's surface, and at 1 the repair read as a hole cut
@@ -178,7 +228,8 @@ const PATCH_CUT_DENSITY = 0.55;
 const PATCH_TAG = 0x50544348; // 'PTCH'
 
 /** Laid rubber. Blue-black, because tyre smoke is not brown. */
-const RUBBER_LINEAR = new THREE.Color(0x14130f);
+const RUBBER_ALBEDO = new THREE.Color(0x14130f);
+const RUBBER_TINT = roadAlbedoTint(RUBBER_ALBEDO, new THREE.Color());
 /** How far towards it a full-strength streak takes the surface. */
 const SKID_MIX = 0.72;
 /**
@@ -207,6 +258,14 @@ const SKID_EDGE_FADE = 0.35;
  * thinner than a slab is long.
  */
 const TONGUE_MAX_REACH = LANE_WIDTH * 1.15;
+/**
+ * Drifted sand is the surface palette's own sand, as a tint (`core/surfaces.ts` is where
+ * a sand's colour is decided, and physics already reads the same row for its grip). The
+ * wind-blown cover this paints is dust off the verge, which is paler and warmer than
+ * weathered bitumen by a great deal — and it is laid on by `sandFactor`, which is zero
+ * on a road whose own decay says there is no sand to drift.
+ */
+const DUST_TINT = roadAlbedoTint(new THREE.Color(SURFACES[SurfaceType.Sand].color), new THREE.Color());
 /**
  * Metres between tongues, and how much of a cell the tongue's own centre may wander
  * inside — so the spacing varies from about 5 m to 25 m rather than metronoming.
@@ -295,150 +354,16 @@ const GHOST_COVERAGE = 0.46;
 let markingModeAtS = Number.NaN;
 let markingModeValue = MarkingMode.Normal;
 
-/**
- * Static albedos, pre-converted to the linear working colour space. Sand, rock and
- * gravel are palette-driven (see `desertPaletteAt`), so only the sealed-lane
- * surfaces remain here.
- */
-const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
-  [SurfaceType.Asphalt]: new THREE.Color(SURFACES[SurfaceType.Asphalt].color),
-  [SurfaceType.CrackedAsphalt]: new THREE.Color(SURFACES[SurfaceType.CrackedAsphalt].color),
-  [SurfaceType.Concrete]: new THREE.Color(SURFACES[SurfaceType.Concrete].color),
-};
-
-/**
- * Palette scratch colours, updated once per arclength row and reused across the
- * row's vertices so no palette lookup allocates. Gravel tints weathered asphalt;
- * sand colours wind-blown cover at the edge.
- */
-const gravelLinear = new THREE.Color();
-const sandLinear = new THREE.Color();
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
 /**
- * The asphalt writes its stencil bit (render/wetglints.ts) wherever it is the visible
- * surface, and the wet-road reflections of lamps are drawn only there. The markings
- * write it too: they can be drawn first and then hide the asphalt under them from the
- * depth test.
+ * The carriageway's vertex tint for the road's start condition — what the terminus pad
+ * (world/terminuspad.ts) draws its own asphalt with, so the pad and the ribbon it is
+ * attached to are the same surface. `roadConditionAt(0)` is the garage's own district.
  */
-function markAsphalt<M extends THREE.Material>(material: M): M {
-  material.stencilWrite = true;
-  material.stencilRef = ASPHALT_STENCIL;
-  material.stencilWriteMask = ASPHALT_STENCIL;
-  material.stencilFunc = THREE.AlwaysStencilFunc;
-  material.stencilZPass = THREE.ReplaceStencilOp;
-  return material;
-}
-/**
- * Base colour a ghost line is mixed from, for the one case the marking pass has no
- * `SURFACE_LINEAR` entry: gravel, whose colour comes from the regional palette.
- */
-const paintBase = new THREE.Color();
-
-// Shared across every chunk; never disposed by the streamer. The maps are built on
-// the first chunk build (they need a canvas, so not at module load) and the vertex
-// colours are divided by the albedo's mean so the surface keeps its old brightness.
-// Cloud shadow is the outermost wrap on all three, so it captures the ground-spotlight
-// patch each of them already carries instead of hiding it. A cloud crossing the road is
-// most of the effect: the ribbon is the one surface always in view.
-// In the rain the asphalt goes dark and shines back the grey sky (render/season.ts).
-const roadMaterial = markAsphalt(applyWetness(applyCloudShadow(
-  applyGroundSpotlightNormals(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.93,
-      metalness: 0,
-    }),
-  ),
-), 0.38, 0.32));
-/** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
-const roadBedMaterial = applyCloudShadow(
-  applyGroundSpotlightNormals(
-    new THREE.MeshStandardMaterial({
-      color: 0x25231f,
-      roughness: 1,
-      metalness: 0,
-    }),
-  ),
-);
-/** The country's bare shoulder (world/shoulder.ts). */
-const COUNTRY_SHOULDER = true;
-/**
- * Lit as the ground is, so the strip is the ground's own colour where it meets it.
- *
- * RESOLVED ON FIRST USE, not at import. `gravelTexture()` paints its map onto a 2D canvas,
- * which needs a DOM — so building the material at module scope made importing this file
- * depend on a canvas existing first, which is an ordering dependency between a headless
- * bench's import list and a texture. The painter is already memoised; this is the same
- * laziness one level up, and `render/stickers.ts` does it this way for the same reason.
- */
-let shoulderMat: THREE.MeshStandardMaterial | null = null;
-function shoulderMaterial(): THREE.MeshStandardMaterial {
-  return (shoulderMat ??= applyWetness(applySnowCover(applyCloudShadow(
-    applyComicShading(
-      new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        // Crushed stone in earth (render/gravelpaint.ts), shade over the vertex colour.
-        map: gravelTexture(),
-        roughness: 0.95,
-        metalness: 0,
-        // It lies on the ground a few centimetres up; this keeps it on top where the
-        // tiles' interpolation brings them level with it.
-        polygonOffset: true,
-        // Units only: a slope factor would pull the tucked edge back out of the ground.
-        polygonOffsetFactor: 0,
-        polygonOffsetUnits: -2,
-      }),
-      { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
-    ),
-  ), 0.92), 0.3, null));
-}
-const shoulderEarth = new THREE.Color(0xb3a48c);
-const shoulderGravel = new THREE.Color(0xbcb7ab);
-const shoulderColour = new THREE.Color();
-let textureGain = 1;
-let texturesAttached = false;
-
-function attachRoadTextures(): void {
-  if (texturesAttached) return;
-  texturesAttached = true;
-  const { map, normal, mean } = roadTextures();
-  roadMaterial.map = map;
-  // Tangent-space normals of the wearing course, baked from the same height field as
-  // the albedo. Flat strength: the relief is the aggregate, and a low sun is the only
-  // light that reads it, so half strength is already a visible rake on the road.
-  roadMaterial.normalMap = normal;
-  roadMaterial.normalScale.set(0.5, 0.5);
-  roadMaterial.needsUpdate = true;
-  textureGain = 1 / Math.max(0.2, mean);
-}
-
-/** Shared road finish for small paved features outside the ribbon. */
-export function roadAsphaltMaterial(): THREE.MeshStandardMaterial {
-  attachRoadTextures();
-  return roadMaterial;
-}
-
-/** Texture-brightness-corrected vertex colour for the road's start condition. */
 export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
-  attachRoadTextures();
-  return out.copy(SURFACE_LINEAR[roadConditionAt(0).surface]!).multiplyScalar(textureGain);
+  return out.copy(ROAD_SURFACE_TINT[roadConditionAt(0).surface]);
 }
-
-const markingMaterial = markAsphalt(applyCloudShadow(
-  applyGroundSpotlightNormals(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.94,
-      metalness: 0,
-      // Markings sit 2 mm above the road: enough to avoid coplanar depth fighting
-      // while remaining visually flush with the asphalt under a tyre.
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-    }),
-  ),
-));
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
@@ -581,6 +506,18 @@ export class RoadMeshProvider implements ChunkProvider {
   private readonly patchNoise: Noise2D;
   /** The world seed. The director is asked per row and per marking quad. */
   private readonly seed: number;
+  /**
+   * The road and the land cover of the chunk being built, for the sight rule below.
+   * Set on entry to `buildSteps` rather than held as a reference: a provider outlives
+   * the world it was made for (the road lab builds one per run), and a stale land cover
+   * would answer with the wrong country's woods.
+   */
+  private road: Road | null = null;
+  private cover: LandCover | null = null;
+  /** Memo for `centreLineSolidAt`: the cell and the answer it produced. */
+  private solidAtCell = Number.NaN;
+  private solidAtValue = false;
+  private readonly sightPoint = { x: 0, y: 0, z: 0 };
 
   /**
    * `roadDistance` lets the bare shoulder find the ground as the tiles draw it; without
@@ -613,7 +550,7 @@ export class RoadMeshProvider implements ChunkProvider {
    * own triangles (`visibleGroundY`), it has a collider, and its last column goes
    * 4 cm under the ground so the grass cuts its edge.
    */
-  private buildShoulder(ctx: ChunkContext, positions: Float32Array, sCount: number, latCount: number): { mesh: THREE.Mesh; vertices: Float32Array; indices: Uint32Array } {
+  private buildShoulder(ctx: ChunkContext, positions: Float32Array, roadShade: Float32Array, sCount: number, latCount: number): { mesh: THREE.Mesh; vertices: Float32Array; indices: Uint32Array } {
     const { sStart, road } = ctx;
     const ox = ctx.originX;
     const oz = ctx.originZ;
@@ -622,11 +559,9 @@ export class RoadMeshProvider implements ChunkProvider {
     const verts = sCount * 2 * COLS;
     const pos = new Float32Array(verts * 3);
     const col = new Float32Array(verts * 3);
-    const uv = new Float32Array(verts * 2);
-    // The gravel tiles in road coordinates, from a base that is a whole number of
-    // tiles, so neighbouring chunks meet in phase and no float grows large.
-    const GRAVEL_BASE_M = GRAVEL_TILE_M * 200;
-    const uvBase = Math.floor(sStart / GRAVEL_BASE_M) * GRAVEL_BASE_M;
+    // The canopy density at this side of the verge: the shade the strip is lit in, and
+    // the reason a wooded shoulder is dark while a field one is not.
+    const shade = new Float32Array(verts);
     const index = new Uint32Array((sCount - 1) * 2 * (COLS - 1) * 6);
     const p = new THREE.Vector3();
     const ground = tileSurfaceSampler({ seed: this.seed, road: ctx.road, terrain: ctx.terrain, roadDistance: this.roadDistance! });
@@ -659,12 +594,13 @@ export class RoadMeshProvider implements ChunkProvider {
             pos[vi * 3 + 1] = c === COLS - 1 ? g - 0.04 : g + 0.025 + (edgeY - edgeGround - 0.025) * ramp * ramp;
             pos[vi * 3 + 2] = p.z - oz;
           }
-          // Trodden earth with gravel in it, in patches along the road; the outer
-          // edge a little darker where the grass roots start.
-          const g = 0.5 + 0.5 * this.mottleNoise.at(s / 3.1 + sign * 17, t * 1.3);
-          shoulderColour.copy(shoulderEarth).lerp(shoulderGravel, g * 0.8).multiplyScalar(1 - 0.12 * t);
-          uv[vi * 2] = (halfWidth + width * t) / GRAVEL_TILE_M;
-          uv[vi * 2 + 1] = (s - uvBase) / GRAVEL_TILE_M;
+          // The strip's own level and mottle, darkening slightly outward where the
+          // grass roots start. The colour itself is the palette's gravel tint and the
+          // photograph is the ground's own (render/look/roadsurface.ts), so this number
+          // is only how trodden THIS metre of verge is.
+          const mottle = 0.5 + 0.5 * this.mottleNoise.at(s / 3.1 + sign * 17, t * 1.3);
+          shoulderColour.setScalar(SHOULDER_LEVEL * (0.88 + 0.24 * mottle) * (1 - 0.08 * t));
+          shade[vi] = roadShade[si * 2 + (sign > 0 ? 1 : 0)]!;
           col[vi * 3] = shoulderColour.r;
           col[vi * 3 + 1] = shoulderColour.g;
           col[vi * 3 + 2] = shoulderColour.b;
@@ -700,14 +636,14 @@ export class RoadMeshProvider implements ChunkProvider {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geometry.setAttribute('aRoadShade', new THREE.BufferAttribute(shade, 1));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
     // Lit straight up, as the road and the ground beside it are: a strip lit by its own
     // slope read as a stripe.
     const normals = new Float32Array(pos.length);
     for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    const mesh = new THREE.Mesh(geometry, shoulderMaterial());
+    const mesh = new THREE.Mesh(geometry, roadMaterials().shoulder);
     mesh.receiveShadow = true;
     return { mesh, vertices: pos, indices: index };
   }
@@ -716,7 +652,11 @@ export class RoadMeshProvider implements ChunkProvider {
   *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
     const { sStart, sEnd, road, physics, hasPhysics } = ctx;
     if (sEnd <= sStart) return null;
-    attachRoadTextures();
+    this.road = road;
+    // Absent in the benches that build the ribbon without a world (`tools/*.ts`): there
+    // is then no land cover to ask, and both the shade and the sight rule fall back to
+    // what they can still answer — the road's own profile.
+    this.cover = ctx.terrain?.cover ?? null;
     // The floating origin, frozen at build time. Sampling stays absolute — the road
     // surface's 2D bump noise is a function of world position — and the subtraction
     // happens only where a coordinate is about to live in f32.
@@ -733,7 +673,34 @@ export class RoadMeshProvider implements ChunkProvider {
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
     const uvs = new Float32Array(vertexCount * 2);
+    // The corridor's own per-vertex block (render/look/roadsurface.ts):
+    // (canopy shade at this side, unsealed district, wear).
+    const look = new Float32Array(vertexCount * 3);
     const indices = new Uint32Array((sCount - 1) * (latCount - 1) * 6);
+
+    // THE CANOPY AT THE ROAD'S EDGE, per row and per side.
+    //
+    // This is slowroads' `shadowLeft/Right` annotation (SrRoad §6), computed the way
+    // stage 2 computes every other ground attribute: from the land cover's own wood
+    // density at a point — the SAME field the tiles read for their forest floor and
+    // their baked shade — rather than from a shadow map, which never reaches far enough
+    // down a country road to dim it. It is what makes a forest road dark under its own
+    // trees, and it is what gates the autumn litter and the spring moss on the mat.
+    const roadShade = new Float32Array(sCount * 2);
+    if (this.cover) {
+      const cover = this.cover;
+      const p = { x: 0, y: 0, z: 0 };
+      // Side 0 (the even slots) is the negative-lateral edge, side 1 the positive one:
+      // the same pairing `buildShoulder` walks with its own `side` index.
+      for (let si = 0; si < sCount; si++) {
+        const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        const reach = road.halfWidthAt(s) + ROAD_SHADE_REACH_M;
+        road.offsetPoint(s, -reach, p);
+        roadShade[si * 2] = cover.forestAt(p.x, p.z, reach);
+        road.offsetPoint(s, reach, p);
+        roadShade[si * 2 + 1] = cover.forestAt(p.x, p.z, reach);
+      }
+    }
 
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
@@ -750,8 +717,7 @@ export class RoadMeshProvider implements ChunkProvider {
       // exactly like heat haze on high-contrast gravel. The modulo preserves the
       // world-space tile phase; the local delta remains continuous through this chunk.
       const textureVStart =
-        (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES) /
-        ROAD_TILE_METRES;
+        (((sStart % ROAD_TILE_M) + ROAD_TILE_M) % ROAD_TILE_M) / ROAD_TILE_M;
 
       for (let si = 0; si < sCount; si++) {
         // Endpoint-exact rows: si * (sEnd - sStart) / (sCount - 1) makes the shared
@@ -762,12 +728,12 @@ export class RoadMeshProvider implements ChunkProvider {
         // collider is indexed from these same fixed-count rows as the visible mat.
         const halfWidth = road.halfWidthAt(s);
         const cond = roadConditionAt(s);
-        const laneBase = SURFACE_LINEAR[cond.surface] ?? null;
-        // Palette colour is a function of arclength alone: sample once per row, so
-        // neighbouring chunks share the seam row and a rebuild is identical.
-        const palette = desertPaletteAt(s);
-        sandLinear.setHex(palette.sand);
-        gravelLinear.setHex(palette.gravel);
+        // The district's own surface tint, and how much of this row is unsealed: both
+        // are functions of arclength alone, so neighbouring chunks share the seam row.
+        const tint = ROAD_SURFACE_TINT[cond.surface];
+        const unsealed = cond.surface === SurfaceType.Gravel ? 1 : 0;
+        const shadeLow = roadShade[si * 2]!;
+        const shadeHigh = roadShade[si * 2 + 1]!;
 
         // The director's surface features, resolved once for the whole row. Three
         // probes rather than three searches: these kinds share the Surface channel,
@@ -805,27 +771,35 @@ export class RoadMeshProvider implements ChunkProvider {
           positions[vi * 3 + 1] = y;
           positions[vi * 3 + 2] = point.z - oz;
 
-          // Absolute lateral / 24 m is world-scale texture space: widening neither
-          // stretches aggregate nor bakes lane paint into this texture.
-          uvs[vi * 2] = lateral / ROAD_TILE_METRES;
-          uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
+          // u runs ACROSS the carriageway, 0 at one edge and 1 at the other, so the
+          // photograph's ragged rim — and both overlays', which share its layout —
+          // lands exactly on the mat's edge at every width. A widened road therefore
+          // stretches the aggregate by the same few per cent rather than gaining a
+          // second rim and a hole in the middle of the surface.
+          uvs[vi * 2] = 0.5 + lateral / (2 * halfWidth);
+          uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_M;
+          // The two edges' canopies meet under the crown: a road running between a wood
+          // and a field is shaded from the wood's side first, and by the middle of the
+          // carriageway it is under the wood.
+          const shadeMix = Math.min(1, Math.max(0, (lateral + 1.2) / 2.4));
+          look[vi * 3] = shadeLow + (shadeHigh - shadeLow) * shadeMix;
+          look[vi * 3 + 1] = unsealed;
+          look[vi * 3 + 2] = cond.decay;
 
           const a = Math.abs(lateral);
+          color.copy(tint);
           // One shoulder only: `side` is the windward one, and the other side keeps
           // the district's own uniform cover with nothing added.
-          color.lerpColors(
-            laneBase ?? gravelLinear,
-            sandLinear,
-            sandFactor(a, halfWidth, cond.sandCover, lateral * tongueSide > 0 ? tongueReach : 0),
-          );
-          this.weather(color, gravelLinear, s, lateral, a, halfWidth, cond.decay);
+          const drift = sandFactor(a, halfWidth, cond.sandCover, lateral * tongueSide > 0 ? tongueReach : 0);
+          if (drift > 0) color.lerp(DUST_TINT, drift);
+          this.weather(color, s, lateral, cond.decay);
           // Repair and rubber go on AFTER the weathering, in the order the road got
           // them: the district wears, then somebody patches it, then somebody locks
           // a wheel up on the patch.
           if (patchRow.weight > 0) {
             const coverage = this.patchCoverageAt(s, lateral, a, halfWidth);
             if (coverage > 0) {
-              color.lerp(PATCH_LINEAR, coverage * PATCH_MIX);
+              color.lerp(PATCH_TINT, coverage * PATCH_MIX);
               color.multiplyScalar(1 - coverage * PATCH_GLOSS);
             }
           }
@@ -838,11 +812,10 @@ export class RoadMeshProvider implements ChunkProvider {
               const t = 1 - d / skidRow.half;
               const edge = Math.min(1, (halfWidth - a) / SKID_EDGE_FADE);
               if (edge > 0) {
-                color.lerp(RUBBER_LINEAR, skidRow.ink * t * t * (3 - 2 * t) * edge * SKID_MIX);
+                color.lerp(RUBBER_TINT, skidRow.ink * t * t * (3 - 2 * t) * edge * SKID_MIX);
               }
             }
           }
-          color.multiplyScalar(textureGain);
           colors[vi * 3] = color.r;
           colors[vi * 3 + 1] = color.g;
           colors[vi * 3 + 2] = color.b;
@@ -872,6 +845,7 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setAttribute('aRoadLook', new THREE.BufferAttribute(look, 3));
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       // The road uses the same upward lighting basis as the desert. Actual slope
       // normals made it read as a dark shadow strip on grades.
@@ -879,7 +853,7 @@ export class RoadMeshProvider implements ChunkProvider {
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
-      const roadMesh = new THREE.Mesh(geometry, roadMaterial);
+      const roadMesh = new THREE.Mesh(geometry, roadMaterials().road);
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
@@ -933,11 +907,11 @@ export class RoadMeshProvider implements ChunkProvider {
       bedGeometry.setAttribute('position', new THREE.BufferAttribute(bedPositions, 3));
       bedGeometry.setIndex(new THREE.BufferAttribute(bedIndices, 1));
       bedGeometry.computeVertexNormals();
-      const bedMesh = new THREE.Mesh(bedGeometry, roadBedMaterial);
+      const bedMesh = new THREE.Mesh(bedGeometry, roadMaterials().bed);
       bedMesh.receiveShadow = true;
       group.add(bedMesh);
-      if (COUNTRY_SHOULDER && this.roadDistance) {
-        const shoulder = this.buildShoulder(ctx, positions, sCount, latCount);
+      if (this.roadDistance) {
+        const shoulder = this.buildShoulder(ctx, positions, roadShade, sCount, latCount);
         disposables.push(shoulder.mesh.geometry);
         group.add(shoulder.mesh);
         // Solid: the wheels ride the strip they see, not the sunk ground under it.
@@ -955,7 +929,7 @@ export class RoadMeshProvider implements ChunkProvider {
       const crossings = buildStreamCrossings(road, this.field, sStart, sEnd, ox, oz);
       if (crossings) {
         disposables.push(crossings.geometry);
-        const crossingMesh = new THREE.Mesh(crossings.geometry, STREAM_CROSSING_MATERIAL);
+        const crossingMesh = new THREE.Mesh(crossings.geometry, roadMaterials().crossing);
         crossingMesh.receiveShadow = true;
         // A deck and its parapets are a roof over the water: rain and snow stop at them
         // (render/rainocclusion.ts), which is what standing under a bridge should be.
@@ -1013,9 +987,7 @@ export class RoadMeshProvider implements ChunkProvider {
         }
       }
 
-      const markings = yield* this.buildMarkingsSteps(
-        road, sStart, sEnd, sCount, ox, oz,
-      );
+      const markings = yield* this.buildMarkingsSteps(ctx, roadShade, sCount);
       if (markings) {
         disposables.push(markings.geometry);
         group.add(markings);
@@ -1044,57 +1016,17 @@ export class RoadMeshProvider implements ChunkProvider {
   }
 
   /**
-   * Wears the lane colour at one vertex: polished wheel paths, dust on the crown and
-   * verge side, a ravelled outer edge, and coarse tonal mottling on top. See the
-   * WHEEL_PATH_* block for why these three and not others.
+   * The one thing the tiled photograph cannot say: that THIS stretch of road is greyer,
+   * dirtier or darker than the last one.
    *
-   * Everything scales with `decay` in the direction the desert takes it: an
-   * abandoned road loses its polished tracks (nothing drives it) and gains dust.
+   * A 24 m photograph repeated forty thousand times is, at any distance, one surface —
+   * and the district's own decay already changes the tint between districts. This is the
+   * third scale, coarse tonal mottling at a wavelength several times the tile, so the
+   * repetition never lines up with anything the eye can hold on to. It is multiplied in
+   * as a TINT now rather than painted as an albedo: the photograph decides what the
+   * surface looks like, and this decides how washed it is.
    */
-  private weather(
-    color: THREE.Color,
-    gravel: THREE.Color,
-    s: number,
-    lateral: number,
-    a: number,
-    halfWidth: number,
-    decay: number,
-  ): void {
-    let track = 0;
-    if (halfWidth === HW) {
-      // Keep the original literal centres, rather than reconstructing them through
-      // arithmetic, so the narrow road's weather field remains bit-identical.
-      for (const centre of [-2.45, -0.85, 0.85, 2.45]) {
-        const t = 1 - Math.min(1, Math.abs(lateral - centre) / WHEEL_PATH_HALF);
-        if (t > track) track = t;
-      }
-    } else {
-      for (const side of [-1, 1]) {
-        for (let lane = 0; lane < 2; lane++) {
-          const centre = side * (laneOffsetFor(halfWidth, lane) + WHEEL_TRACK_LANE_BIAS);
-          for (const wheel of [-WHEEL_TRACK_HALF, WHEEL_TRACK_HALF]) {
-            const t = 1 - Math.min(1, Math.abs(lateral - (centre + wheel)) / WHEEL_PATH_HALF);
-            if (t > track) track = t;
-          }
-        }
-      }
-    }
-    const smoothTrack = track * track * (3 - 2 * track);
-    const polish = smoothTrack * WHEEL_PATH_DARKEN * (1 - decay * 0.7);
-    const dust = (1 - smoothTrack) * DUST_LIGHTEN * (0.5 + decay);
-
-    color.multiplyScalar(1 - polish + dust);
-    if (dust > 0) color.lerp(gravel, dust * DUST_TINT);
-
-    // Ravelled edge: the mat frays into the verge rather than ending at a line.
-    const intoEdge = 1 - Math.min(1, (halfWidth - a) / EDGE_RAVEL);
-    if (intoEdge > 0) {
-      const t = intoEdge * intoEdge;
-      color.lerp(gravel, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
-    }
-
-    // Coarse mottling: patchy pours and old repairs at a scale the tiled texture
-    // cannot carry, since the tile repeats every ROAD_TILE_METRES.
+  private weather(color: THREE.Color, s: number, lateral: number, decay: number): void {
     const mottle = this.mottleNoise.fbm(
       s / MOTTLE_WAVELENGTH,
       lateral / MOTTLE_WAVELENGTH,
@@ -1131,7 +1063,7 @@ export class RoadMeshProvider implements ChunkProvider {
       const lane = laneOffsetFor(halfWidth, 0) + WHEEL_TRACK_LANE_BIAS;
       const wander =
         this.patchNoise.fbm(s / PATCH_CRACK_WAVELENGTH, 17.3, 2, 2.1, 0.5) * PATCH_CRACK_WANDER;
-      const outermost = halfWidth - PATCH_CRACK_HALF - EDGE_RAVEL;
+      const outermost = halfWidth - PATCH_CRACK_HALF - MAT_CRUMB_M;
       patchRow.centre =
         event.side * Math.min(outermost, Math.max(PATCH_CRACK_HALF + 0.1, lane + wander));
       patchRow.half = PATCH_CRACK_HALF;
@@ -1191,11 +1123,11 @@ export class RoadMeshProvider implements ChunkProvider {
         ) * patchRow.along;
       if (coverage <= 0) return 0;
     }
-    // The outer half metre is already ravelling into the verge. Bitumen laid over it
-    // restores the hard visual line that EDGE_RAVEL exists to break, so the repair
-    // stops where the mat starts fraying — which is also where a real one stops,
+    // The rim the photograph ends the mat with is already crumbling into the gravel.
+    // Bitumen laid over it would restore the hard visual line that crumb exists to
+    // break, so the repair stops short of it — which is also where a real one stops,
     // because there is nothing solid out there to lay it on.
-    const edge = (halfWidth - a) / EDGE_RAVEL;
+    const edge = (halfWidth - a) / MAT_CRUMB_M;
     if (edge < 1) coverage *= Math.max(0, edge);
     return coverage * patchRow.weight;
   }
@@ -1236,6 +1168,61 @@ export class RoadMeshProvider implements ChunkProvider {
    * What the paint does at this arclength. See MARKING_SNAP_M for why the ends are
    * hard edges snapped to a dash boundary instead of the usual ramp.
    */
+  /**
+   * Whether the crown line is SOLID at this arclength, because there is no sight
+   * through the road here.
+   *
+   * This is the notes' rule (SrRoad §3): a centre line goes solid where a driver cannot
+   * see far enough to overtake, which road engineering states as a sight distance and
+   * slowroads computes from the turn, the canopy, the lateral gradient and the crests.
+   * This world already has the whole of it:
+   *
+   *   - the road's own available sight distance (`road.sightDistanceAt`), which marches
+   *     the vertical profile at eye and object height — the crests;
+   *   - the CURVATURE, turned into the chord a bend of that radius allows across
+   *     `CURVE_CLEARANCE_M` of clearance — but only where something is standing on the
+   *     inside of the bend to hide behind, which is the canopy;
+   *   - the canopy at the road's edge, which closes the view even where the profile is
+   *     open — a forest road is short-sighted by nature.
+   *
+   * Decided once per `MARKING_SNAP_M` cell, not per row, and therefore held for 16 m at
+   * a time: a rule evaluated per 1.33 m row would flicker between dash and solid
+   * wherever the sight distance sat on the threshold, and paint does not do that. The
+   * cell is keyed off absolute arclength and memoised, so a rebuilt chunk and its
+   * neighbours agree.
+   */
+  private centreLineSolidAt(s: number): boolean {
+    const cell = Math.floor(s / MARKING_SNAP_M);
+    if (cell === this.solidAtCell) return this.solidAtValue;
+    this.solidAtCell = cell;
+    const centre = (cell + 0.5) * MARKING_SNAP_M;
+    const road = this.road!;
+    let sight = Math.min(
+      road.sightDistanceAt(centre, SIGHT_LIMIT_M, 1),
+      road.sightDistanceAt(centre, SIGHT_LIMIT_M, -1),
+    );
+    const cover = this.cover;
+    const halfWidth = road.halfWidthAt(centre);
+    const reach = halfWidth + ROAD_SHADE_REACH_M;
+    const p = this.sightPoint;
+    let canopy = 0;
+    if (cover) {
+      road.offsetPoint(centre, -reach, p);
+      canopy = cover.forestAt(p.x, p.z, reach);
+      road.offsetPoint(centre, reach, p);
+      canopy = Math.max(canopy, cover.forestAt(p.x, p.z, reach));
+    }
+    const curvature = Math.abs(road.curvatureAt(centre));
+    if (canopy > CURVE_CANOPY_MIN && curvature > 1e-5) {
+      // The chord through a bend of radius 1/κ with `m` of clearance on the inside:
+      // what a driver can see across the corner rather than around it.
+      sight = Math.min(sight, Math.sqrt((CURVE_CLEARANCE_M * 8) / curvature));
+    }
+    sight = Math.min(sight, SIGHT_OPEN_M + (SIGHT_WOODS_M - SIGHT_OPEN_M) * Math.min(1, canopy * 1.6));
+    this.solidAtValue = sight < SOLID_SIGHT_M;
+    return this.solidAtValue;
+  }
+
   private markingModeAt(s: number): MarkingMode {
     const event = varietyEventOfKindAt(this.seed, 'markings', s);
     if (!event) return MarkingMode.Normal;
@@ -1268,19 +1255,18 @@ export class RoadMeshProvider implements ChunkProvider {
   }
 
   private *buildMarkingsSteps(
-    road: Road,
-    sStart: number,
-    sEnd: number,
+    ctx: ChunkContext,
+    roadShade: Float32Array,
     sCount: number,
-    ox: number,
-    oz: number,
   ): Generator<void, THREE.Mesh | null> {
+    const { road, sStart, sEnd, originX: ox, originZ: oz } = ctx;
     let geometry: THREE.BufferGeometry | null = null;
     let completed = false;
 
     try {
       const positions: number[] = [];
       const colors: number[] = [];
+      const shades: number[] = [];
       const point = { x: 0, y: 0, z: 0 };
       const color = new THREE.Color();
 
@@ -1290,31 +1276,58 @@ export class RoadMeshProvider implements ChunkProvider {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
         const s1 = s + SURFACE_STEP;
         const condition = roadConditionAt(s);
-        const laneBase = SURFACE_LINEAR[condition.surface];
+        // A line's own albedo is the paint, and its COVERAGE is the vertex alpha: the
+        // coat thins until the aggregate shows through it, which is what worn paint is.
+        // The road under it is already drawn, so the alpha blends rather than cuts.
         const mode = this.markingModeAt(s);
+        // The crown line is SOLID where a driver cannot see far enough to pass
+        // (`centreLineSolidAt`): the road's own rule, from the notes, and this world has
+        // the data for it — the road's own sight distance, its curvature and the canopy
+        // at its edge, all of them already sampled for the road itself.
+        //
+        // ONLY ON A STRETCH THE DIRECTOR HAS NOT RE-MARKED. An event is somebody coming
+        // out and painting this stretch, and what they painted is the whole mark on it;
+        // letting the road's own rule also draw there would put a second, contradictory
+        // line inside a span whose one job is to be a pattern of its own.
+        const solidCentre = mode === MarkingMode.Normal && this.centreLineSolidAt(s);
         const halfWidth0 = road.halfWidthAt(s);
         const halfWidth1 = road.halfWidthAt(s1);
+        // The paint is under the same canopy the road is, so it is lit in the same
+        // shade: a bright line through a dark wood was the one thing that gave away
+        // that the shade was baked rather than cast.
+        const shade = Math.max(roadShade[si * 2]!, roadShade[si * 2 + 1]!);
+        // Wear: how much of a coat is left at this arclength and this lateral. The
+        // wavelength is longer than the 4 m dash so a line thins along its length in
+        // patches rather than dash by dash.
+        const wearAt = (lateral: number): number => this.paintNoise.fbm(
+          (s + lateral * 130) / PAINT_WEAR_WAVELENGTH,
+          2,
+          2.3,
+          0.5,
+        );
         if (mode === MarkingMode.Ghost) {
           // One chalky crown stripe, solid, at a coverage far under a fresh coat.
           // Emitted OUTSIDE the `condition.markings` gate on purpose: that gate is
           // the road's own rule, and this event exists precisely to break it.
-          const base = laneBase ?? paintBase.setHex(desertPaletteAt(s).gravel);
-          color.lerpColors(base, PAINT_LINEAR, GHOST_COVERAGE);
+          color.copy(PAINT_LINEAR);
           this.emitMarkingQuad(
             road, 0, 0, s, s1, MARKING_HALF_WIDTH,
-            ox, oz, point, color, positions, colors,
+            ox, oz, point, color, GHOST_COVERAGE * (0.75 + wearAt(0) * 0.5), shade,
+            positions, colors, shades,
           );
-        } else if (mode !== MarkingMode.None && condition.markings >= MARKING_MIN && laneBase) {
+        } else if (mode !== MarkingMode.None && condition.markings >= MARKING_MIN) {
           for (const line of MARKING_LINES) {
             // Keep the old crown cadence exactly. The dividers use their own two-metre
             // phase and only paint a complete step inside an on dash, never a stretched
             // half dash. They also require both ends to be genuinely two-lane.
             const dividerOn0 = (Math.floor((s + 2) / 8) & 1) === 0;
             const dividerOn1 = (Math.floor((s1 + 2) / 8) & 1) === 0;
-            // A double centre line is SOLID: the dash cadence is what it replaces.
+            // A double centre line is SOLID — the dash cadence is what it replaces —
+            // and so is a crown line through a stretch with no sight through it.
             if (
               line.kind === 'crown' &&
               mode !== MarkingMode.DoubleSolid &&
+              !solidCentre &&
               ((si / SUB_DIVISIONS) | 0) & 1
             ) continue;
             if (
@@ -1326,8 +1339,10 @@ export class RoadMeshProvider implements ChunkProvider {
             const laterals: readonly [number, number][] =
               line.kind === 'edge'
                 ? [
-                  [-(halfWidth0 - MARKING_HALF_WIDTH), -(halfWidth1 - MARKING_HALF_WIDTH)],
-                  [halfWidth0 - MARKING_HALF_WIDTH, halfWidth1 - MARKING_HALF_WIDTH],
+                  [-(halfWidth0 - MARKING_EDGE_INSET - MARKING_HALF_WIDTH),
+                    -(halfWidth1 - MARKING_EDGE_INSET - MARKING_HALF_WIDTH)],
+                  [halfWidth0 - MARKING_EDGE_INSET - MARKING_HALF_WIDTH,
+                    halfWidth1 - MARKING_EDGE_INSET - MARKING_HALF_WIDTH],
                 ]
                 : line.kind === 'divider'
                   ? [[-LANE_WIDTH, -LANE_WIDTH], [LANE_WIDTH, LANE_WIDTH]]
@@ -1335,18 +1350,18 @@ export class RoadMeshProvider implements ChunkProvider {
                     ? [[-DOUBLE_SOLID_GAP, -DOUBLE_SOLID_GAP], [DOUBLE_SOLID_GAP, DOUBLE_SOLID_GAP]]
                     : [[0, 0]];
             for (const [lateral0, lateral1] of laterals) {
-              const wear = this.paintNoise.fbm(
-                (s + lateral0 * 130) / PAINT_WEAR_WAVELENGTH,
-                2,
-                2.3,
-                0.5,
-              );
+              const wear = wearAt(lateral0);
               const coverage = condition.markings * (0.72 + wear * 0.55);
               if (coverage < PAINT_GONE) continue;
-              color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
+              color.copy(PAINT_LINEAR);
+              // The stripe's own width wanders with the same field, over about ten
+              // metres: a line that was painted by hand and then worn is not a
+              // constant-width band, and a constant width is what reads as printed.
               this.emitMarkingQuad(
-                road, lateral0, lateral1, s, s1, MARKING_HALF_WIDTH,
-                ox, oz, point, color, positions, colors,
+                road, lateral0, lateral1, s, s1,
+                MARKING_HALF_WIDTH * (0.82 + 0.36 * wear),
+                ox, oz, point, color, Math.min(1, coverage), shade,
+                positions, colors, shades,
               );
             }
           }
@@ -1357,14 +1372,15 @@ export class RoadMeshProvider implements ChunkProvider {
             // the camera moved. What survives at the distance a driver reads it from
             // is the strip's TONE, so it is drawn as one continuous dark band inside
             // the edge line, which is what the ribbing looks like from a seat anyway.
-            color.lerpColors(laneBase, RUMBLE_LINEAR, RUMBLE_MIX);
+            color.copy(RUMBLE_LINEAR);
             for (const sign of [-1, 1]) {
               this.emitMarkingQuad(
                 road,
                 sign * (halfWidth0 - RUMBLE_INSET),
                 sign * (halfWidth1 - RUMBLE_INSET),
                 s, s1, RUMBLE_HALF_WIDTH,
-                ox, oz, point, color, positions, colors,
+                ox, oz, point, color, RUMBLE_MIX, shade,
+                positions, colors, shades,
               );
             }
           }
@@ -1379,11 +1395,14 @@ export class RoadMeshProvider implements ChunkProvider {
 
       geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
-      geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 4));
       const normals = new Float32Array(positions.length);
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-      const markings = new THREE.Mesh(geometry, markingMaterial);
+      // The same shade channel the carriageway carries, per vertex: the paint is lit in
+      // the shade of the canopy it stands under.
+      geometry.setAttribute('aRoadShade', new THREE.BufferAttribute(Float32Array.from(shades), 1));
+      const markings = new THREE.Mesh(geometry, roadMaterials().marking);
       markings.receiveShadow = true;
       completed = true;
       return markings;
@@ -1404,8 +1423,13 @@ export class RoadMeshProvider implements ChunkProvider {
     oz: number,
     point: { x: number; y: number; z: number },
     color: THREE.Color,
+    /** How much of this quad is painted, 0..1: the rest is the road showing through. */
+    coverage: number,
+    /** The canopy shade at this row, which the marking material lights the paint with. */
+    shade: number,
     positions: number[],
     colors: number[],
+    shades: number[],
   ): void {
     const l00 = lateral0 - half;
     const l01 = lateral0 + half;
@@ -1427,7 +1451,8 @@ export class RoadMeshProvider implements ChunkProvider {
     const zs = [z00, z01, z10, z11];
     for (const i of order) {
       positions.push(xs[i]!, ys[i]!, zs[i]!);
-      colors.push(color.r, color.g, color.b);
+      colors.push(color.r, color.g, color.b, coverage);
+      shades.push(shade);
     }
   }
 

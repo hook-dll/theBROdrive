@@ -70,7 +70,12 @@ const FOREST_GAIN = 1.7;
  * palette keeps deciding the colour and only the exposure of the photograph is corrected.
  */
 const SOIL_GAIN = 1.9;
-const GRAVEL_GAIN = 1.35;
+/**
+ * Exported for the road corridor (`render/look/roadsurface.ts`), which lays the same
+ * gravel photograph on the shoulder: one number decides how bright that file is in both
+ * places, or the strip and the band beside it would meet at a brightness step.
+ */
+export const GRAVEL_GAIN = 1.35;
 const SHORE_GAIN = 1.35;
 const ROCK_GAIN = 1.35;
 /** Peat stays dark — a mire is dark — but muddy ground is earth, not a shadow. */

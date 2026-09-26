@@ -5,13 +5,14 @@ import { DEFAULT_INK_STRENGTH, viewDistanceFor, type GraphicsQuality } from './g
 import { SURFACES, SurfaceType } from './core/surfaces';
 import { parseCalendarEpoch } from './game/calendar';
 import { DAY_LENGTH, newWorldState } from './game/state';
-import { ROAD_TILE_METRES, roadTextures } from './render/roadtexture';
+import { ROAD_TILE_M } from './render/look/roadsurface';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext } from './world/chunks';
 import { MAX_WEAR, roadConditionAt } from './world/gradient';
 import { Road, ROAD_LENGTH } from './world/road';
-import { RoadMeshProvider, roadAsphaltMaterial } from './world/roadmesh';
+import { roadAsphaltMaterial } from './render/look/roadsurface';
+import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { roadSurfaceY, SurfaceField } from './world/roadsurface';
 import { Terrain } from './world/terrain';
@@ -154,7 +155,6 @@ interface LabState {
   /** Draw the mat with the flat lane albedo only: no per-vertex weathering. */
   textureOnly: boolean;
   /** Drop the normal map, to tell a map artefact from a shading one. */
-  noNormals: boolean;
   /** Overlay the 24 m tile grid, to see where the repeat falls. */
   tileGrid: boolean;
 }
@@ -293,12 +293,12 @@ class RoadLookLab {
       );
     };
 
-    for (let s = Math.ceil(sFrom / ROAD_TILE_METRES) * ROAD_TILE_METRES; s <= sTo; s += ROAD_TILE_METRES) {
+    for (let s = Math.ceil(sFrom / ROAD_TILE_M) * ROAD_TILE_M; s <= sTo; s += ROAD_TILE_M) {
       put(s, -edge(s));
       put(s, edge(s));
     }
-    const reach = Math.ceil(edge(this.state.s) / ROAD_TILE_METRES) * ROAD_TILE_METRES;
-    for (let lateral = -reach; lateral <= reach; lateral += ROAD_TILE_METRES) {
+    const reach = Math.ceil(edge(this.state.s) / ROAD_TILE_M) * ROAD_TILE_M;
+    for (let lateral = -reach; lateral <= reach; lateral += ROAD_TILE_M) {
       for (let s = sFrom; s < sTo; s += GRID_STEP) {
         put(s, lateral);
         put(Math.min(sTo, s + GRID_STEP), lateral);
@@ -350,22 +350,12 @@ class RoadLookLab {
 
   /** Applies the material switches and the renderer settings. */
   apply(): void {
-    const textures = roadTextures();
     const material = roadAsphaltMaterial();
-    if (this.state.textureOnly) {
-      material.vertexColors = false;
-      // The mesh divides its vertex colours by the map's mean so the surface keeps its
-      // old brightness; the flat albedo has to carry the same correction, or the switch
-      // would also be a brightness change and the comparison would be worthless.
-      material.color
-        .setHex(SURFACES[SurfaceType.Asphalt].color)
-        .multiplyScalar(1 / Math.max(0.2, textures.mean));
-    } else {
-      material.vertexColors = true;
-      material.color.setHex(0xffffff);
-    }
-    material.normalMap = this.state.noNormals ? null : textures.normal;
-    material.normalScale.set(0.5, 0.5);
+    // The photograph is the albedo and the vertex colour is the district's TINT on it
+    // (render/look/roadsurface.ts), so switching the tint off shows the file on its own:
+    // one flat tint of white, and the surface is what the camera saw in England.
+    material.vertexColors = !this.state.textureOnly;
+    material.color.setHex(0xffffff);
     material.needsUpdate = true;
 
     const mobile = prefersMobilePresentation();
@@ -396,7 +386,7 @@ class RoadLookLab {
       `${(s / 1000).toFixed(3)} км · ${SURFACES[condition.surface].label}`
       + ` · износ ${condition.decay.toFixed(2)} (потолок ${MAX_WEAR.toFixed(2)})`
       + ` · песок ${condition.sandCover.toFixed(2)} · разметка ${condition.markings.toFixed(2)}`
-      + ` · полоса ±${this.road.halfWidthAt(s).toFixed(2)} м · тайл ${ROAD_TILE_METRES} м`,
+      + ` · полоса ±${this.road.halfWidthAt(s).toFixed(2)} м · тайл ${ROAD_TILE_M} м`,
     );
   }
 }
@@ -443,7 +433,6 @@ function createInterface(
     </fieldset>
     <fieldset><legend>Изоляция слоёв</legend>
       <label class="check"><span>Только текстура (без вершинного цвета)</span><input data-control="textureOnly" type="checkbox"></label>
-      <label class="check"><span>Без карты нормалей</span><input data-control="noNormals" type="checkbox"></label>
       <label class="check"><span>Сетка тайла 24 м</span><input data-control="tileGrid" type="checkbox"></label>
     </fieldset>
     <div class="buttons"><button type="button" data-action="game">Вернуться в игру</button></div>
@@ -537,7 +526,6 @@ export async function bootRoadLab(): Promise<void> {
     timeHours: query.get('time') !== null ? Number(query.get('time')) : 12,
     quality: 'standard',
     textureOnly: query.get('vc') === '0',
-    noNormals: query.get('nm') === '0',
     tileGrid: query.get('grid') === '1',
   };
 

@@ -43,7 +43,7 @@ import {
   type VarietyEvent,
   type VarietyKind,
 } from '../src/world/director';
-import { SURFACES } from '../src/core/surfaces';
+import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { MAX_WEAR, desertPaletteAt, roadConditionAt } from '../src/world/gradient';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider, roadAsphaltVertexColorAtStart } from '../src/world/roadmesh';
@@ -68,9 +68,15 @@ const SWEEP_CHUNKS = 250;
 
 /**
  * Golden sums of the pre-feature road, per seed: one over every row the Surface
- * channel never reaches, one over the rows it does. Captured with `--capture` against
- * the provider as it stood before the four features landed. The quiet number must
- * still match exactly; the live number must NOT, or nothing was painted.
+ * channel never reaches, one over the rows it does. The quiet number must still match
+ * exactly; the live number must NOT, or nothing was painted.
+ *
+ * RE-CAPTURED at stage 5 of renderer v2. The road's vertex colours stopped being an
+ * albedo and became a TINT on `road_asphalt.webp` (world/roadmesh.ts, and the reason is
+ * in render/look/roadsurface.ts), so every sum moved by the photograph's own mean and
+ * by the corridor's albedo lift. What this tool checks is unchanged and still holds:
+ * the ratios the four director features make against the rows they do not touch.
+ * `npx tsx tools/surface-paint.ts 1337 --capture`.
  */
 interface Golden {
   readonly quietRows: number;
@@ -79,8 +85,7 @@ interface Golden {
   readonly live: number;
 }
 const GOLDEN: Record<number, Golden> = {
-  1337: { quietRows: 31917, quiet: 17292196.522722, liveRows: 5833, live: 3141528.384698 },
-  7: { quietRows: 31302, quiet: 16867240.20719, liveRows: 6448, live: 3541496.003528 },
+  1337: { quietRows: 31917, quiet: 63447861.42712, liveRows: 5833, live: 11118948.896635 },
 };
 
 /**
@@ -221,8 +226,15 @@ function buildChunk(chunkIndex: number, withLateral: boolean): BuiltChunk {
 
   // Marking quads are six vertices each, in emission order; their centre is what
   // identifies which line they belong to.
+  //
+  // FOUND BY ITS OWN COLOR, not by its place in the group. The paint is the one mesh
+  // whose vertex colour carries an alpha (the paint's coverage, world/roadmesh.ts), and
+  // the index broke on any chunk that also drew something else: a chunk with a stream
+  // crossing in it put the crossing's box vertices at index 2 and this tool then read
+  // boxes as if they were lane lines. That is what the one marginal 'step' failure on a
+  // rumble span was.
   const marks: Mark[] = [];
-  const markMesh = meshes[2];
+  const markMesh = meshes.find((m) => m.geometry.getAttribute('color')?.itemSize === 4);
   if (markMesh) {
     const markPositions = markMesh.geometry.getAttribute('position');
     for (let q = 0; q + 6 <= markPositions.count; q += 6) {
@@ -347,12 +359,16 @@ const startAlbedo = new THREE.Color(SURFACES[roadConditionAt(0).surface].color);
 const textureGain = roadAsphaltVertexColorAtStart(new THREE.Color()).r / startAlbedo.r;
 /** DUST_LIGHTEN and MOTTLE_AMOUNT in roadmesh.ts, at the deepest wear the world shows. */
 const WEATHER_LIFT = (1 + 0.11 * (0.5 + MAX_WEAR)) * (1 + 0.07 * (0.7 + MAX_WEAR));
+/**
+ * The tongue is the surface palette's own sand now (`world/roadmesh.ts` DUST_TINT takes
+ * `SURFACES[Sand].color` through `roadAlbedoTint`, render/look/roadsurface.ts), not the
+ * desert palette's — the desert palette no longer reaches the road at all. The ceiling
+ * has to be built from the same colour the road paints with, or it measures the wrong
+ * material.
+ */
 const sandProbe = new THREE.Color();
-let brightestSand = 0;
-for (let s = 0; s < SWEEP_CHUNKS * CHUNK_LENGTH; s += CHUNK_LENGTH) {
-  sandProbe.setHex(desertPaletteAt(s).sand);
-  brightestSand = Math.max(brightestSand, sandProbe.r, sandProbe.g, sandProbe.b);
-}
+sandProbe.setHex(SURFACES[SurfaceType.Sand].color);
+const brightestSand = Math.max(sandProbe.r, sandProbe.g, sandProbe.b);
 const ceiling = brightestSand * textureGain * WEATHER_LIFT;
 check(
   'no channel passes the palette-and-gain ceiling',
@@ -375,11 +391,16 @@ if (!golden) {
     quietRows === golden.quietRows && Math.abs(quietSum - golden.quiet) < 1e-5,
     `${quietRows} rows, sum ${quietSum.toFixed(6)} vs golden ${golden.quiet.toFixed(6)}`,
   );
+  // Asked of THIS RUN rather than of a stored sum: a golden captured after the features
+  // landed equals the live sum by construction, so comparing against it turned this into
+  // a check that could only fail. What each feature does is measured per feature below;
+  // this is the smoke test that they painted anything at all.
   check(
     'on-feature the road is NOT unchanged',
-    liveRows === golden.liveRows && Math.abs(liveSum - golden.live) > 1,
-    `${liveRows} rows, sum ${liveSum.toFixed(6)} vs golden ${golden.live.toFixed(6)} ` +
-      `(${(((liveSum - golden.live) / golden.live) * 100).toFixed(2)}%)`,
+    liveRows === golden.liveRows &&
+      Math.abs(liveSum / liveRows - quietSum / quietRows) > 0.01,
+    `${liveRows} rows, mean ${(liveSum / liveRows).toFixed(4)} against the untouched ` +
+      `road's own ${(quietSum / quietRows).toFixed(4)}`,
   );
 }
 

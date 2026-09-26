@@ -79,6 +79,48 @@ questions live in `docs/country.md`.
 
 #### Changed
 
+- THE ROAD IS A PHOTOGRAPH OF A ROAD NOW (2026-09-26, renderer v2 stage 5). The
+  carriageway was a procedural canvas tile of uniform aggregate with a hard polygon edge,
+  weathered per vertex into wheel paths and a dusty rim, and it looked like poured
+  concrete. It is `public/look/road_asphalt.webp` now — 24 m of chip seal with polished
+  wheel paths, tar-seamed repairs, a longitudinal crack and a crumb edge whose own alpha
+  ends the mat about 1.4 % inside the mesh, cut with `alphaTest 0.75` over the gravel
+  verge beneath (`render/look/roadsurface.ts`, new). The palette's per-district surface
+  colour rides on the vertex as a multiplier, so fresh, cracked, concrete and gravel
+  districts stay different surfaces with `core/surfaces.ts` still the one place the
+  colour is decided. The shoulder is the same `gravel.webp` at the same world period and
+  the same palette tint the tiles use for their own verge — one band, not two — and it
+  no longer reflects the sky (`envMapIntensity 0`), which is what the saturated blue
+  strip in the winter frames was. Autumn's leaves and spring's moss are laid on the
+  carriageway only where the roadside canopy covers it, winter is `road_snow.webp` on
+  the snow channel with the ruts worn through, and the wet look keeps its darkening,
+  its gloss and the lamp-streak stencil, with the sky coming back off the road and not
+  the verge. Markings keep their system and their director events, but the paint is a
+  worn transparent layer (coverage in the vertex alpha, 16 cm wide, 25 cm in from the
+  mat's edge) and the centre line goes solid where the road's own sight distance, a
+  bend with a canopy on its inside, or the wood at its edge say a driver cannot see far
+  enough to pass. Dirt tracks are two ruts computed from the lateral coordinate over the
+  same gravel photograph, with the ground's real grass between them. `render/roadtexture.ts`,
+  `render/gravelpaint.ts` and `render/trackpaint.ts` are deleted. Numbers, the reference
+  comparison and the honest gaps are in `docs/renderer-v2-log.md`.
+
+ The first
+  build was reviewed and rejected: tree sprites were assembled from 20-40 large flat
+  cards, so a whole tree read as a bare skeleton with green cardboard in it (23 % alpha
+  coverage inside the crown, 56 % of the cell width), grass cells were a few lone stalks
+  and bushes were twigs. `tools/look/trees/trees.py` now grows a tree — four branch
+  orders with species habits, 30-38k leaf quads on the terminal twigs, a crown radius
+  that turns a branch upward instead of outward — and every sprite is a render of *that*:
+  whole tree, six crown modules cut from its own subtrees, sixteen-view impostor row, all
+  per-leaf occlusion baked into a vertex attribute rather than a simulated sun (35-40 %
+  coverage, 87 % of the cell width). Leaves are 10-17 cm because a sprite leaf is a
+  cluster, not one blade, and the game model stays at 164-184 vertices but is no longer
+  used for any sprite. Conifer impostors come from the full CC0 model, grass and bush
+  cells are dense scenes filling their frame, the umbellifer slot generates its white
+  heads (`umbel_head_texture`), and stumps and logs are Poly Haven scans decimated to
+  420-520 triangles with one shared `stump.webp` (a new build group, `--only stumps`).
+  Comparison sheets in `/tmp/omp-shots/veg-cmp-*.jpg`, numbers and honest gaps in
+  `docs/renderer-v2-log.md`.
 - ЭТАП 2 РЕНДЕРА МИРА: земля. Один шейдер на тайлы и даль
   (`render/look/groundmaterial.ts`) вместо комикс-шейдинга, процедурной живописи и
   CPU-цвета из данных покрова: атрибуты вершин теперь говорят, ЧТО здесь за земля

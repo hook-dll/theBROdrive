@@ -56,7 +56,7 @@ import { WetGlints } from './render/wetglints';
 import { setSeasonUniforms, setWeatherWet } from './render/season';
 import { VistaMesh } from './render/vista';
 import { LakeWater } from './render/lakewater';
-import { roadTextures } from './render/roadtexture';
+import { roadTextures } from './render/look/roadsurface';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
@@ -331,8 +331,9 @@ async function boot(): Promise<void> {
   // the only thing on screen that reports what each tyre is carrying, they are the one
   // shadow source that survives the cheapest graphics tier, and they cost one draw call.
   const contactPatches = new ContactPatchField(renderer.scene, origin);
-  // Road texture canvases are one-time CPU work; create them under the loading cover
-  // rather than letting RoadMeshProvider charge the first streamed road chunk.
+  // The road's photographs are committed files, but a boot should still not wait for
+  // them: requesting them here puts the fetch under the loading cover rather than on the
+  // first streamed road chunk.
   roadTextures();
   /**
    * Rendered-frame counter. The chunk streamer is driven from the fixed step,

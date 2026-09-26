@@ -69,13 +69,29 @@ let loaded: GroundTextures | null = null;
 let vary: { texture: THREE.Texture; metres: number } | null = null;
 
 /**
+ * An image loader, or null where this environment cannot decode one.
+ *
+ * A `document` IS NOT ENOUGH, and that is what this checks for now: three's `ImageLoader`
+ * builds its `<img>` with `document.createElementNS`, which the headless tools' document
+ * shim (`tools/domshim.ts`) does not provide — so a tool that built a real material died
+ * at module scope with `document.createElementNS is not a function`. The road corridor's
+ * materials (`render/look/roadsurface.ts`) are built by `tools/surface-paint.ts` through
+ * the real provider, which is how this was found.
+ */
+export function imageLoader(): THREE.TextureLoader | null {
+  return typeof document === 'undefined' || typeof document.createElementNS !== 'function'
+    ? null
+    : new THREE.TextureLoader();
+}
+
+/**
  * The whole set, loading it on the first request. One object for the session: the same
  * `THREE.Texture` must reach every material, or the GPU uploads and the filters are
  * duplicated per material.
  */
 export function groundTextures(): GroundTextures {
   if (loaded) return loaded;
-  const loader = typeof document === 'undefined' ? null : new THREE.TextureLoader();
+  const loader = imageLoader();
   const out = {} as Record<GroundTextureName, THREE.Texture>;
   for (const [name, spec] of Object.entries(SPECS) as [GroundTextureName, GroundTextureSpec][]) {
     // THE LOADER'S OWN TEXTURE, configured here before it is ever uploaded. Its callback
