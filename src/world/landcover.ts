@@ -359,8 +359,25 @@ export class LandCover {
 
   /** Wood density only, for callers that need nothing else (tree planting). */
   forestAt(x: number, z: number, roadDist: number): number {
-    const f = this.rawForest(x, z, this.farmlandAt(x, z));
-    return f === 0 ? 0 : f * this.clearing(x, z, roadDist);
+    const raw = this.rawForest(x, z, this.farmlandAt(x, z)) * this.clearing(x, z, roadDist);
+    // The regrowth counts here TOO, and that is the whole point: see `overgrowth`.
+    return Math.max(raw, this.overgrowth(x, z, this.plotAt(x, z)));
+  }
+
+  /**
+   * The share of a point that is REGROWTH rather than the wood the ice left, 0..0.95.
+   *
+   * A third of this country's arable was abandoned between 1990 and 2000 and a field nobody
+   * ploughs is birch in twenty years, so an old plot is a wood — `sample` has always folded
+   * this into its `forest`, and its comment promised the planting would fill it. But the
+   * planting reads `forestAt`, which did NOT: past `age` 0.72 the overgrowth reached the
+   * 0.5 that makes `sample` call a point a wood, and the trees saw open ground there. The
+   * tile canopy, the forest-floor colour and `CoverKind.Forest` all said wood; only the
+   * trees disagreed, and the trees are what the owner sees. One field, both readers.
+   */
+  private overgrowth(x: number, z: number, plot: { crop: number; age: number }): number {
+    if (plot.crop >= 0 && plot.crop !== Crop.Fallow) return 0;
+    return smoothstep(0.45, 0.95, plot.age) * 0.95 * (1 - this.streams.at(x, z).flood);
   }
 
   /** Birch share of a wood, 0..1. */
@@ -383,11 +400,7 @@ export class LandCover {
     // One plot sample for the whole cover: the overgrowth below and the crop further down
     // are the same cell of the same grid, and `plotAt` is two hashes and a rotation.
     const plot = this.plotAt(x, z);
-    const overgrown =
-      plot.crop < 0 || plot.crop === Crop.Fallow
-        ? smoothstep(0.45, 0.95, plot.age) * (1 - this.streams.at(x, z).flood)
-        : 0;
-    const forest = Math.max(rawForestCleared, overgrown * 0.95);
+    const forest = Math.max(rawForestCleared, this.overgrowth(x, z, plot));
     const flood = this.streams.at(x, z).flood;
     // A bor is pine with barely a birch in it, whatever the birch field says.
     const bor = forest > 0 ? smoothstep(0.35, 0.65, this.pineAt(x, z)) : 0;

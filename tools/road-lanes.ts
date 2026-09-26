@@ -13,19 +13,17 @@
  * Nothing here is part of the game bundle.
  */
 
+import './domshim';
 import * as THREE from 'three';
 
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
-import { installDocumentShim } from './domshim';
 import { LANE_WIDTH, halfWidthAt, lanesPerSideAt } from '../src/world/roadprofile';
 import { roadConditionAt } from '../src/world/gradient';
 
 // The provider paints its asphalt maps on a 2D canvas; the shim lets the REAL
 // provider run headless rather than verifying a stand-in.
-installDocumentShim();
-
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 /** Half-width of a painted line: a quad's corners sit this far either side of it. */
 const MARKING_HALF_WIDTH_M = 0.12;

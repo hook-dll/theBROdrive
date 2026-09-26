@@ -31,6 +31,7 @@
  *   bun tools/traffic-road.ts [seed] [--minutes N] [--start S] [--trace]
  */
 
+import './domshim';
 import * as THREE from 'three';
 
 import { emptyInput, type InputFrame } from '../src/core/input';
@@ -58,7 +59,6 @@ import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { Terrain } from '../src/world/terrain';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
-import { installDocumentShim } from './domshim';
 import { PLAYER_FIELD_ID, RoadTraffic } from '../src/world/traffic';
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable = false;
@@ -72,8 +72,6 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 installAssetShim();
 // The road ribbon paints its asphalt maps on a canvas; the shim lets the REAL provider
 // run headless rather than measuring a stand-in surface.
-installDocumentShim();
-
 // ---------------------------------------------------------------- configuration
 const args = process.argv.slice(2);
 function flag(name: string, fallback: number): number {

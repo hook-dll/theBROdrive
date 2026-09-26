@@ -19,6 +19,7 @@
  * Nothing here is part of the game bundle.
  */
 
+import { installDocumentShim } from './domshim';
 import * as THREE from 'three';
 
 import { PhysicsWorld } from '../src/core/physics';
@@ -36,7 +37,6 @@ import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { WorldWorkScheduler } from '../src/world/workqueue';
 import { installAssetShim } from './assetshim';
-import { installDocumentShim } from './domshim';
 
 const SEED = 1337;
 /** Far enough along that the drive is ordinary road rather than the homestead. */

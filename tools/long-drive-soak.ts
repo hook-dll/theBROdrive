@@ -1,3 +1,4 @@
+import { installDocumentShim } from './domshim';
 import * as THREE from 'three';
 
 import { roadTextures } from '../src/render/roadtexture';
@@ -14,7 +15,6 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { WorldWorkScheduler } from '../src/world/workqueue';
-import { installDocumentShim } from './domshim';
 
 const SEED = 1337;
 const START_S = 1_000;

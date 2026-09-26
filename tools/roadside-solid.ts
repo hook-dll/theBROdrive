@@ -21,6 +21,7 @@
  * Nothing here is part of the game bundle.
  */
 
+import { installDocumentShim } from './domshim';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { PhysicsWorld } from '../src/core/physics';
@@ -41,7 +42,6 @@ import { Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { WorldWorkScheduler } from '../src/world/workqueue';
-import { installDocumentShim } from './domshim';
 
 const SEED = 1337;
 /**

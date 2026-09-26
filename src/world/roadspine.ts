@@ -42,8 +42,16 @@ export const COARSE_SPACING = 200;
  *    built to real secondary-road proportions (a bend every 200-340 m). Every section
  *    now reaches its bearing, so the heading no longer steps where a transition did not
  *    fit; the radius tightens instead.
+ * 8: three heading changes from 9a356c1 and its review. The village's bend is now ADDED
+ *    to the section's own direction instead of drawing its own sign, so it can no longer
+ *    cancel a narrow section's bend (roadcurve.ts `villageBend`); the corner-radius
+ *    bisection is the right way round at last, so a section slightly short of its room
+ *    gets the LARGEST corner that fits rather than one near the floor (roadcurve.ts
+ *    `turnAt`); and the sections were lengthened again to pay for the village's added
+ *    bend. All three change positions, so a checkpoint cached under 7 is a position this
+ *    field would not integrate to — measured drift against 7: 27-147 m on seed 1337.
  */
-export const SPINE_FORMAT = 7;
+export const SPINE_FORMAT = 8;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

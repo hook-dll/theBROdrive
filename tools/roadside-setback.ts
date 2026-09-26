@@ -12,6 +12,7 @@
  * Nothing here is part of the game bundle.
  */
 
+import './domshim';
 import * as THREE from 'three';
 
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
@@ -21,9 +22,6 @@ import { MonumentProvider } from '../src/world/props/monuments';
 import { PoleProvider } from '../src/world/props/poles';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { lanesPerSideAt } from '../src/world/roadprofile';
-import { installDocumentShim } from './domshim';
-
-installDocumentShim();
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 /** Authored setbacks, metres from the asphalt edge. See world/props/. */

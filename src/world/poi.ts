@@ -857,6 +857,14 @@ function buildVillage(
 ): void {
   const counter: LootCounter = { sub: 0 };
   for (const house of village.houses) {
+    // ONE CHUNK BUILDS A HOUSE, and it is the chunk whose own span covers it. A street runs
+    // 136-668 m and a chunk is 200 m, so a village used to be built in EVERY chunk its span
+    // touched: measured over the first 2000 km of seed 1337, 204 villages with 2493 houses
+    // produced 7339 house builds, 2.94 each. The copies landed at identical world positions
+    // — duplicate meshes and draw calls, duplicate trimesh colliders, coplanar geometry —
+    // and `PoiSwitchField` is keyed by switch id, so the copies overwrote each other's
+    // switch state, and the loot roll was made once per copy.
+    if (house.s < ctx.sStart || house.s >= ctx.sEnd) continue;
     const poi: Poi = {
       index: VILLAGE_LOOT_BASE + village.index * 64 + house.number,
       s: house.s,
@@ -884,7 +892,9 @@ function buildVillage(
     if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
     buildGardenFence(ctx, village, house.s, house.lateral, group);
   }
-  buildPowerDrop(ctx, village, group);
+  // The drop is ONE structure rather than one per house, so it belongs to the chunk the
+  // village's own middle falls in.
+  if (village.s >= ctx.sStart && village.s < ctx.sEnd) buildPowerDrop(ctx, village, group);
 }
 
 /** The kitchen garden behind one house: three sides of a plank fence, no collider. */

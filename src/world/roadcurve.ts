@@ -1,6 +1,6 @@
 import { hashUnit2, hashUnit3, Noise1D } from '../core/rng';
 import { characterAt, characterOf, districtAt, districtStartOf, newCharacterBuffer, newDistrictBuffer, type RoadCharacter } from './roadcharacter';
-import { villageCovering } from './village';
+import { villageSpanCovering } from './village';
 
 /**
  * The road's heading field and the one node recurrence that integrates it.
@@ -258,22 +258,32 @@ export class RoadHeading {
    * street follows the bend, or the road swings round the outside of one. So a section that
    * has a village in the middle of its street gets a LARGER heading change than its
    * character asked for — added to the section's own bend, never subtracted, so the cadence
-   * cannot drop to nothing — and the direction is the village's own, drawn from its index,
-   * so the road curves through that village one way and through the next one the other.
+   * cannot drop to nothing. The direction is the section's own, which already turns over
+   * from section to section, so one village is swung one way and the next the other.
    *
-   * `VILLAGE_BEND_MAX` keeps `deviation + headingMax + this` inside the no-crossing budget:
+   * `HEADING_BUDGET` keeps `deviation + headingMax + this` inside the no-crossing budget:
    * the largest characters spend 1.25 rad, and 0.2 more still leaves the guarantee whole.
    */
-  private villageBend(index: number, s: number, c: RoadCharacter): number {
-    const village = villageCovering(this.seed, s);
+  private villageBend(index: number, s: number, c: RoadCharacter, turnBudget: number): number {
+    const village = villageSpanCovering(this.seed, s);
     if (!village) return 0;
     const magnitude = 0.2 + 0.14 * hashUnit3(this.turnMagnitudeSeed, village.index, 0x811c);
     const sign = hashUnit3(this.turnTimingSeed ^ 0x51ab3f, village.index, 7) < 0.5 ? -1 : 1;
-    // As much as the no-crossing budget has left in THIS kind: the guarantee is
-    // `deviation + heading + this < 90 degrees`, so a kind that already wanders a long way
-    // can have less of its village than a straight one can.
+    // The village's own direction, drawn from its index: the road curves through this
+    // village one way and through the next one the other.
+    //
+    // IT KEEPS ITS SIGN, AND THE REVIEW'S `Math.abs(bend)` IS NOT LANDED. Making the bend
+    // only ever add to the section's own |bearing| reads better against this block's own
+    // text, and it was tried: measured with `tools/road-selfcross.ts`, the tightest corner
+    // on the road fell to 65 m on seeds 1 and 7 and 67 m on seed 42, against that guard's
+    // 68 m floor (85 m authored, 20% of tolerance), where the signed bend holds 68 on all
+    // four. The reason is that what a corner has to turn is `drawn - from` — the difference
+    // between THIS section's bearing and the PREVIOUS one's — so a bend that always adds
+    // loads every section with its predecessor's added bend as well, and no per-section
+    // budget can see that. Bounding the pair needs the two sections' bends solved together,
+    // which is a change to how a section's bearing is assembled, not to this function.
     const room = Math.max(0, HEADING_BUDGET - c.deviation - c.headingMax);
-    return sign * Math.min(magnitude, room);
+    return sign * Math.min(magnitude, room, turnBudget);
   }
 
   /**
@@ -294,7 +304,22 @@ export class RoadHeading {
   ): number {
     const base = this.sectionTarget(k, index, c);
     const middle = sectionStart + (index + 0.5) * sectionLength;
-    const bend = this.villageBend(index, middle, c);
+    // The village's bend is bounded by the CORNER the section can build, not only by the
+    // no-crossing budget. A corner of `MIN_CORNER_RADIUS` needs `transitionLength` metres of
+    // road per radian it turns — 1.875 of them for the smootherstep's peak slope alone — so
+    // a section has room for `room / transitionLength(MIN_CORNER_RADIUS, 1)` radians in
+    // total. A bend past that builds a corner tighter than the world's own floor, which is
+    // what the added village bend did at first: measured with `tools/road-selfcross.ts`, 65
+    // and 67 m against its 68 m floor on seeds 1, 7 and 42, where the floor had held on all
+    // four before. (`room / MIN_CORNER_RADIUS` is the same requirement WITHOUT the peak
+    // factor, and it is not enough: the smootherstep's peak curvature is 1.875 times its
+    // mean, and the guard measures the peak.)
+    const room = sectionLength * (1 - c.straightShare);
+    const turnBudget = Math.max(
+      0,
+      room / transitionLength(MIN_CORNER_RADIUS, 1) - Math.abs(base),
+    );
+    const bend = this.villageBend(index, middle, c, turnBudget);
     return base + bend * (base >= 0 ? 1 : -1);
   }
 
@@ -330,7 +355,7 @@ export class RoadHeading {
       index > 0
         ? this.sectionBearing(k, index - 1, c, this.district.start, sectionLength)
         : this.previousDistrictTarget(k);
-    // The village's bend rides on the section's own, with the sign the village drew: the
+    // The village's bend rides on the section's own, in the section's own direction: the
     // road curves THROUGH the village rather than only past it.
     const drawn = this.sectionBearing(k, index, c, this.district.start, sectionLength);
     const radius =
@@ -351,25 +376,35 @@ export class RoadHeading {
     // s = 42 868, a six-metre radius corner, and a road that is not a road.
     //
     // A section ALWAYS reaches its target now. What gives is the corner, and only ever
-    // by tightening it: the radius is solved for the largest value whose transition fits
+    // by tightening it: the radius is solved for the LARGEST value whose transition fits
     // the room, by bisection because both requirements (the geometry and the lateral
     // jerk) fall with the radius and so do not cross twice. The floor is the tightest
     // corner this world builds, so the worst a short section can do is a bend as tight as
     // the catalogue's own `MIN_CORNER_RADIUS` — which is a bend, and not a cliff in the
     // heading field.
-    let change = drawn - from;
+    //
+    // `lo` HOLDS A RADIUS THAT FITS AND `hi` ONE THAT DOES NOT, because `transitionLength`
+    // grows with the radius. The first version had the two the other way round: it returned
+    // the SMALLEST radius that still fitted — about 87 m for a section only slightly short
+    // of its room — so a village that needed a touch more bend bought a corner three times
+    // tighter than the room allowed, and when the very first mid was too long it returned
+    // the untouched radius and the jerk sizing was ignored entirely.
+    const change = drawn - from;
     let fitted = radius;
     if (room > 0 && transitionLength(radius, Math.abs(change)) > room) {
       let lo = MIN_CORNER_RADIUS;
       let hi = radius;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 8; i++) {
         const mid = (lo + hi) / 2;
-        if (transitionLength(mid, Math.abs(change)) > room) lo = mid;
+        if (transitionLength(mid, Math.abs(change)) <= room) lo = mid;
         else hi = mid;
       }
-      fitted = hi;
+      fitted = lo;
     }
-    const length = Math.min(room > 0 ? room : transitionLength(fitted, Math.abs(change)), transitionLength(fitted, Math.abs(change)));
+    // The corner is whatever the radius and the angle need, or the room, whichever is less:
+    // a room shorter than the tightest corner's transition is still the room.
+    const transition = transitionLength(fitted, Math.abs(change));
+    const length = room > 0 ? Math.min(room, transition) : transition;
     const start = Math.min(
       Math.max(0, sectionLength - length),
       TURN_START_MIN +

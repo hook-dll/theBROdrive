@@ -33,6 +33,7 @@
  * Nothing here is part of the game bundle.
  */
 
+import './domshim';
 import * as THREE from 'three';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import {
@@ -48,12 +49,9 @@ import { Road } from '../src/world/road';
 import { RoadMeshProvider, roadAsphaltVertexColorAtStart } from '../src/world/roadmesh';
 import { laneOffsetFor } from '../src/world/roadprofile';
 import { SURFACE_STEP } from '../src/world/roadsurface';
-import { installDocumentShim } from './domshim';
 
 // The provider paints its asphalt maps on a 2D canvas; the shim lets the REAL
 // provider run headless rather than verifying a stand-in.
-installDocumentShim();
-
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 const CAPTURE = process.argv.includes('--capture');
 

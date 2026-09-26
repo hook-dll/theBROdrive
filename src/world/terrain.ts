@@ -33,6 +33,17 @@ export const CORRIDOR_INNER = ROAD_HALF_WIDTH;
 /** Beyond this lateral distance the terrain is open desert. */
 export const CORRIDOR_OUTER = 30;
 /**
+ * How close the road has to run for its own surface to count as a basin's bank, metres
+ * from the centreline.
+ *
+ * The corridor plus a bank, and wide enough to catch every village pond there is: a pond's
+ * water starts 42 m out (`village.ts` POND_EDGE_MIN) and its rim is sampled 24 m outside
+ * that, so the nearest rim sample of the closest possible pond sits 18 m from the
+ * centreline and of the furthest 48 m. A laker's rim is 276 m out at the least, so the gate
+ * leaves lakes alone. See `basinGrade`.
+ */
+const BASIN_BANK_REACH_M = 50;
+/**
  * Large dune relief fades in from the maintained road cut. The full-height point
  * is deliberately broad: the tallest landforms can rise more than fifty metres,
  * and introducing that height over the old 130 m span made the fade itself a bank.
@@ -134,6 +145,11 @@ const BOG_TUSSOCK_WAVELENGTH = 34;
 export const PEAT: readonly [number, number, number] = [0.052, 0.043, 0.03];
 /** The bog's weight above which its hollows stand water. */
 const BOG_POOL_LEVEL = 1.18;
+/**
+ * How far the pools stand above the ground at the gate: a hand's breadth, and the whole of
+ * the waterline they have. See `waterLevelAt`.
+ */
+const BOG_POOL_FREEBOARD_M = 0.06;
 
 /** Width of the loose verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
@@ -453,7 +469,36 @@ export class Terrain {
     // object's own height function minus the basins themselves. Handing it over
     // rather than letting `LakeBasins` call back into `openBase` is what keeps the
     // two from recursing.
-    this.basins.setGradeReader((x, z) => this.undugOpen(x, z, RELIEF_FULL, 0));
+    //
+    // THE ROAD IS PART OF THE GROUND A BASIN STANDS IN. A basin's lip is the LOWEST point
+    // around it, and the carriageway is a point around it that the open field does not
+    // carry: the road is graded smooth and can run well below the hillside beside it.
+    // Measured on seed 1337, 11 of 92 village ponds came out with their water level ABOVE
+    // the road they are dug beside — worst 6.04 m above — and the flood then runs down the
+    // corridor and paints water over the asphalt (checked against the real flood: 5 wet
+    // cells on the carriageway at s 12.34 km, level 0.06 m above the deck). Bounding the
+    // lip by the deck wherever the road is close enough to be the basin's bank is the same
+    // rule the corridor already follows — a road is not built in a pond — read the other
+    // way: a pond beside a road stands at or below it.
+    this.basins.setGradeReader((x, z) => this.basinGrade(x, z));
+  }
+
+  /**
+   * Ground a basin's lip may be sampled against: the open field, bounded by the road's own
+   * surface where the road is close enough to be the basin's bank.
+   *
+   * The gate is the corridor and a bank either side of it: beyond that the deck belongs to
+   * a road the water cannot reach anyway, and using it there would dig a crater into a
+   * hillside six hundred metres from the carriageway.
+   */
+  private basinGrade(x: number, z: number): number {
+    const open = this.undugOpen(x, z, RELIEF_FULL, 0);
+    const projection = this.road.project(x, z);
+    if (Math.abs(projection.lateral) > BASIN_BANK_REACH_M) return open;
+    return Math.min(
+      open,
+      roadSurfaceY(this.road, this.field, projection.s, projection.lateral, x, z),
+    );
   }
 
   /** Lake basins dug into this terrain, and the schedule they come from. */
@@ -1024,8 +1069,16 @@ export class Terrain {
     // lattice a level that follows the ground by centimetres per quad draws itself as a
     // staircase of dark seams.
     if (bog > BOG_POOL_LEVEL) {
-      const panFloor = this.road.landscape.heightAt(x, z) - BOG_DEPTH_M;
-      const level = panFloor + BOG_DEPTH_M * 0.55 + (bog - 1) * BOG_DEPTH_M * 0.5;
+      // The level is the ground AT THE GATE plus a hand's breadth, INDEPENDENT of how deep
+      // the hollow at this point is. It used to be `panFloor + 0.605 + 0.55 * (bog - 1)`,
+      // which grew with the bog's own weight: the very first cell inside the gate already
+      // stood 0.90 m below the level, so a pool had no waterline at all — each one ended in
+      // a sheet hanging three quarters of a metre over the peat across a single 3 m cell —
+      // and the deepest hollows were over a metre deep, where the design is a hand's
+      // breadth. The undulation stays where it belongs, in the GROUND (`bogAt`), so the
+      // hollows are pools and the tussocks between them are dry.
+      const panFloor = this.road.landscape.heightAt(x, z) - BOG_DEPTH_M * BOG_POOL_LEVEL;
+      const level = panFloor + BOG_POOL_FREEBOARD_M;
       return Math.round(level * 12) / 12;
     }
     // NaN, not 0, for "no water" — and this is the whole difference between a stream and
@@ -1033,7 +1086,16 @@ export class Terrain {
     // height: using it as the sentinel made every tile of ground that happened to lie
     // below sea level read as standing under water at y = 0, which is exactly what the
     // first version of the tile water did (it drew sheets across half the sky).
-    if (sample.water <= 0 || sample.bed <= 0) return Number.NaN;
+    //
+    // A DAMMED REACH IS WATER TOO. This gate used to ask about the CHANNEL only
+    // (`bed <= 0`), and the bowl a pond is dug into is `POND_HALF` 34 m across against a
+    // channel 5-16 m wide, so every vertex of the bowl outside the channel returned no
+    // water: a dry pit around a channel-width strip, with the sheet hanging over the bowl
+    // floor. Measured on seed 1337, all eight lattice points found with `bowl > 0.4`,
+    // `bed == 0` and `water > 0` returned NaN, the deepest 1.13 m below the pond's own
+    // level. `Streams.waterSurface` already accepts a bowl, and it is the authority on
+    // what carries water — this is the same test it makes.
+    if (sample.water <= 0 || (sample.bed <= 0 && sample.bowl <= 0)) return Number.NaN;
     // Read the floor at the stream's OWN centreline, not here: the level is flat across
     // the section and the ground is not (see `Streams.thalwegInto`).
     streams.thalwegInto(x, z, this.thalwegPoint);

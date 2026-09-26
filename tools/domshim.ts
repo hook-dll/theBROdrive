@@ -14,6 +14,15 @@
  * and a second hand-written stub would drift the moment a painter calls one more
  * context method.
  *
+ * IMPORT IT FIRST. Four modules resolve a painted texture while they are being
+ * evaluated rather than on first use (`world/roadmesh.ts` builds the shoulder's gravel
+ * map, `world/trackmesh.ts` the track's, `world/props/trees.ts` the leaf atlas,
+ * `render/stickers.ts` the star), and an import list is evaluated in source order. A
+ * tool whose `src/` imports come before this one therefore dies at module scope with
+ * `document is not defined` before its own first statement runs — which is what
+ * `roadside-solid.ts` and `long-drive-soak.ts` did. The shim installs itself on import
+ * so the only rule left is the order.
+ *
  * Nothing here is part of the game bundle.
  */
 
@@ -98,8 +107,20 @@ class ShimCanvas {
   }
 }
 
-/** Installs the shim and returns the undo, so a tool leaves the global as it found it. */
+/** Undo of the installation in place, or null when the shim is not installed. */
+let uninstall: (() => void) | null = null;
+
+/**
+ * Installs the shim if it is not already in place, and returns the undo so a tool leaves
+ * the global as it found it.
+ *
+ * Called once at module scope below, because the four modules the header names paint while
+ * they are being evaluated and the import list is evaluated in source order: a tool that
+ * imports this after them is already dead. A tool that calls it a second time gets the
+ * FIRST undo, so what it restores is the global it actually found.
+ */
 export function installDocumentShim(): () => void {
+  if (uninstall) return uninstall;
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const documentShim: Pick<Document, 'createElement'> = {
     createElement: ((tagName: string): HTMLCanvasElement => {
@@ -112,11 +133,16 @@ export function installDocumentShim(): () => void {
     value: documentShim,
     writable: true,
   });
-  return () => {
+  const undo = (): void => {
+    uninstall = null;
     if (previousDocument) {
       Object.defineProperty(globalThis, 'document', previousDocument);
     } else {
       Reflect.deleteProperty(globalThis, 'document');
     }
   };
+  uninstall = undo;
+  return undo;
 }
+
+installDocumentShim();

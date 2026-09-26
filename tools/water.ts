@@ -1,12 +1,14 @@
 /**
- * The lakes: how often the desert actually offers one, whether what comes out is a lake
+ * The lakes and ponds: how often the country offers one, whether what comes out is a lake
  * rather than a puddle or a flood, and whether it keeps its bargain about vanishing.
  *
  * There is nothing here about terrain damage, rim gradients or the road corridor, and
  * that absence is the point. An earlier version dug the basin into `Terrain.relief`,
  * which is collided ground shared with the tile worker, and needed six interlocking
- * checks to prove it had not broken the world. This one reads the terrain and writes
- * nothing, so the only thing that can be wrong is a picture.
+ * checks to prove it had not broken the world. The basin is dug into the ground now
+ * (`world/lakes.ts`) and the schedule is the only thing that decides where one is: an
+ * authored lake by the homestead, a rolled lake every thirty to fifty kilometres, and a
+ * pond in every village, which is what a driver actually passes.
  *
  * Run with `bun tools/water.ts [seed]`.
  */
@@ -19,7 +21,8 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import type { DesertTileGenerationContext } from '../src/world/deserttiledata';
 import { LakeWater, waterPaletteAt } from '../src/render/lakewater';
-import { desertPaletteAt } from '../src/world/gradient';
+import { newCoverSample } from '../src/world/landcover';
+import { villagesAlongRoad } from '../src/world/village';
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 const L = LakeWater.lattice;
@@ -92,8 +95,18 @@ check(
 );
 
 // --- 2. Rarity ---------------------------------------------------------------
-// The first lake is authored at the house; the rarity rule is about the rest.
-const schedule = water.sites.slice(1, 25);
+// The schedule is TWO things now, and only one of them is rare. This is the country's
+// requirement, not the desert's: a LAKE is rare here — 8-21 of over a hectare per
+// 1000 km2, two per 100 km2 even in lake-rich Тверская — so `world/lakes.ts` rolls one
+// every 32-54 km (its `MIN_GAP_M` 32 km plus a 22 km range), and no oftener. A POND is
+// not rare at all: it belongs to a village and arrives on the village's schedule, which
+// is why it can sit a kilometre from a lake. Measuring both together is what turned the
+// old "every 200-300 km" assertion into noise the moment the ponds joined the list.
+const villagePonds = new Set(
+  villagesAlongRoad(SEED, road.length).map((village) => `${village.pond.s}|${village.pond.lateral}`),
+);
+const lakes = water.sites.filter((site) => !villagePonds.has(`${site.s}|${site.lateral}`));
+const schedule = lakes.slice(1, 25);
 let minGap = Number.POSITIVE_INFINITY;
 let maxGap = 0;
 for (let i = 1; i < schedule.length; i++) {
@@ -102,9 +115,9 @@ for (let i = 1; i < schedule.length; i++) {
   if (gap > maxGap) maxGap = gap;
 }
 check(
-  'a lake is attempted every 200-300 km and no oftener',
-  minGap >= 200_000 && maxGap <= 300_000,
-  `gaps ${(minGap / 1000).toFixed(0)}-${(maxGap / 1000).toFixed(0)} km over ${schedule.length} sites`,
+  'a lake is attempted every 30-55 km and no oftener',
+  minGap >= 30_000 && maxGap <= 55_000,
+  `gaps ${(minGap / 1000).toFixed(0)}-${(maxGap / 1000).toFixed(0)} km over ${schedule.length} lakes`,
 );
 const leftSides = schedule.filter((site) => site.lateral < 0).length;
 check(
@@ -112,8 +125,25 @@ check(
   leftSides > 2 && leftSides < schedule.length - 2,
   `${leftSides} left of travel, ${schedule.length - leftSides} right`,
 );
+// What a driver actually passes are the PONDS: a lake every thirty to fifty kilometres
+// plus a pond in every village, which is 6-12 dug basins per 60 km (research:
+// docs/research-2026-09-26-landscape.md, 5). A village without its pond is a hole in the
+// country, and a basin every couple of kilometres is a lake district.
+const villages = villagesAlongRoad(SEED, road.length);
+const basinsPerSixty = (water.sites.length * 60_000) / road.length;
+check(
+  'every village has its pond, and the country is not a lake district',
+  villagePonds.size === villages.length && basinsPerSixty >= 6 && basinsPerSixty <= 12,
+  `${villagePonds.size} ponds for ${villages.length} villages, ${basinsPerSixty.toFixed(1)} basins per 60 km`,
+);
 
-// --- 3. What the desert offers ----------------------------------------------
+// --- 3. What the ground offers -----------------------------------------------
+// The basin is DUG (world/lakes.ts): a site is not a candidate the terrain may refuse,
+// it is a hole in the ground with a lip level of its own, so every site the schedule
+// names has to hold water. The desert could only ask the dune field for a hollow, and
+// answered its schedule with dry windows; the country digs, and the schedule is the only
+// thing that decides where a lake is. A site that comes up dry means the terrain and the
+// water have stopped agreeing — the one failure this file exists to catch.
 interface Found {
   readonly index: number;
   readonly area: number;
@@ -125,7 +155,6 @@ interface Found {
   readonly touchedEdge: number;
 }
 const found: Found[] = [];
-let dry = 0;
 let worstSliceMs = 0;
 let worstSliceStage = 'none';
 let worstSlices = 0;
@@ -145,10 +174,7 @@ for (let i = 0; i < SITES_SEARCHED; i++) {
     if (done) break;
   }
   if (slices > worstSlices) worstSlices = slices;
-  if (!water.ready) {
-    dry++;
-    continue;
-  }
+  if (!water.ready) continue;
 
   const mask = water.wetMask;
   let wet = 0;
@@ -181,13 +207,11 @@ for (let i = 0; i < SITES_SEARCHED; i++) {
 }
 
 const hitRate = found.length / SITES_SEARCHED;
-console.log(
-  `  ${found.length} of ${SITES_SEARCHED} sites held a lake; the rest were open ground.`,
-);
 check(
-  'the desert offers a lake often enough to be worth the schedule',
-  found.length >= 3,
-  `${(hitRate * 100).toFixed(0)}% of sites, about one lake per ${(250 / Math.max(hitRate, 0.01)).toFixed(0)} km`,
+  'every site the schedule names is a dug basin that holds water',
+  found.length === SITES_SEARCHED,
+  `${found.length} of ${SITES_SEARCHED} sites held water (${(hitRate * 100).toFixed(0)}%); ` +
+    `a dry one would mean the ground and the water disagree about the basin`,
 );
 const worst = <K extends keyof Found>(key: K): number =>
   found.reduce((lowest, f) => Math.min(lowest, f[key] as number), Number.POSITIVE_INFINITY);
@@ -349,29 +373,77 @@ check(
   `opacity ${atShore.toFixed(3)} at ${atShoreOut} m out, ${waterline.toFixed(1)} m from water`,
 );
 
-// --- 6. The water reads against whatever colour the sand has got to ------------
-// `desertPaletteAt` walks the sand's hue right around the wheel over the length of the
-// road, so a fixed water colour sinks into the ground at one mileage and fights it at
-// another. Sampled across a full cycle, the water must stay both distinct in hue and
-// darker in value than the sand beside it.
-let worstHueGap = 1;
-let worstValueGap = 1;
-const sandHsl = { h: 0, s: 0, l: 0 };
-const waterHsl = { h: 0, s: 0, l: 0 };
-for (let km = 0; km <= 40_000; km += 500) {
-  const sand = new THREE.Color(desertPaletteAt(km * 1000).sand).getHSL(sandHsl);
-  const deep = waterPaletteAt(km * 1000).deep.getHSL(waterHsl);
-  const raw = Math.abs(sand.h - deep.h);
-  const hueGap = Math.min(raw, 1 - raw);
-  if (hueGap < worstHueGap) worstHueGap = hueGap;
-  if (sand.l - deep.l < worstValueGap) worstValueGap = sand.l - deep.l;
+// --- 6. The water reads against the ground it lies in --------------------------
+// The desert walked the sand's hue right around the wheel, so a fixed water colour sank
+// into the ground at one mileage and fought it at another, and the guarantee was a minimum
+// gap measured over a full palette cycle. The country's ground is not a cycle: the loose
+// materials are one constant earth (`COUNTRY_PALETTE`), and the colours the tiles paint
+// come out of the cover sampler — a summer meadow, ripe wheat, a wood's floor, wet clay.
+//
+// So the ground is MEASURED, where the basins are: the real cover colour on each basin's
+// shore, against the water palette that basin's own arclength produces. The old form of
+// this check also compared a LINEAR-space lightness against an sRGB one, which is not a
+// measurement of anything — the two numbers were not in the same space.
+//
+// WHAT THE COUNTRY'S GUARANTEE IS. The desert needed both hue and value to separate the
+// water from sand that could come close on both. The country's ground is green, straw and
+// brown and its water is pinned blue (world/render/lakewater.ts `WATER_HUE`), so the
+// separation the eye actually gets is the hue, and the value is the backup for a bank that
+// ever goes blue. Either one clearing its gap is the water reading as water, which is why
+// the requirement is a disjunction and not two hurdles.
+const shoreColour = new THREE.Color();
+const shoreSrgb = new THREE.Vector3();
+const groundScratch = newCoverSample();
+const shoreHsl = { h: 0, s: 0, l: 0 };
+const deepHsl = { h: 0, s: 0, l: 0 };
+let minHue = 1;
+let minValue = 1;
+let brightestGround = 0;
+let tightest = 1;
+let closestBank = '';
+/** Shores sampled per basin, and the rings the cover is read on. */
+const SHORE_AZIMUTHS = 12;
+for (let i = 0; i < Math.min(water.sites.length, 12); i++) {
+  const site = water.sites[i]!;
+  const centre = road.offsetPoint(site.s, site.lateral);
+  const deep = new THREE.Color(waterPaletteAt(site.s).deep.getHex());
+  deep.getHSL(deepHsl, THREE.SRGBColorSpace);
+  deep.getRGB(shoreSrgb, THREE.SRGBColorSpace);
+  const waterLuma = 0.2126 * shoreSrgb.x + 0.7152 * shoreSrgb.y + 0.0722 * shoreSrgb.z;
+  for (let a = 0; a < SHORE_AZIMUTHS; a++) {
+    const angle = (a / SHORE_AZIMUTHS) * Math.PI * 2;
+    for (const ring of [site.radius + 30, site.radius * 1.7]) {
+      const x = centre.x + Math.cos(angle) * ring;
+      const z = centre.z + Math.sin(angle) * ring;
+      const cover = terrain.cover.sample(x, z, 1e6, groundScratch);
+      // The cover sample is linear rgb — its own space — and both sides are read in the
+      // one the screen uses, so the numbers compared are the same quantity.
+      shoreColour.setRGB(cover.r, cover.g, cover.b, THREE.LinearSRGBColorSpace);
+      shoreColour.getHSL(shoreHsl, THREE.SRGBColorSpace);
+      shoreColour.getRGB(shoreSrgb, THREE.SRGBColorSpace);
+      const groundLuma = 0.2126 * shoreSrgb.x + 0.7152 * shoreSrgb.y + 0.0722 * shoreSrgb.z;
+      if (groundLuma > brightestGround) brightestGround = groundLuma;
+      const raw = Math.abs(shoreHsl.h - deepHsl.h);
+      const hueGap = Math.min(raw, 1 - raw);
+      const valueGap = groundLuma - waterLuma;
+      if (hueGap < minHue) minHue = hueGap;
+      if (valueGap < minValue) minValue = valueGap;
+      // Whichever of the two is doing the work at the bank where the water comes closest
+      // to reading as ground; the report names it.
+      if (Math.min(hueGap, valueGap) < tightest) {
+        tightest = Math.min(hueGap, valueGap);
+        closestBank =
+          `tightest at s ${(site.s / 1000).toFixed(1)} km, ${ring.toFixed(0)} m out: ` +
+          `bank luminance ${groundLuma.toFixed(2)} against water ${waterLuma.toFixed(2)}`;
+      }
+    }
+  }
 }
 check(
-  // Not opposition — separation. Water is pinned blue and only slides off the sand when
-  // the sand itself goes blue, so the guarantee is a minimum gap, not a half turn.
-  'the water never takes the colour of the sand it sits in',
-  worstHueGap >= 0.135 && worstValueGap > 0.2,
-  `closest hue ${worstHueGap.toFixed(2)} turns apart, least value gap ${worstValueGap.toFixed(2)}, over a full palette cycle`,
+  'the water never takes the colour of the ground it lies in',
+  minHue >= 0.135 || minValue > 0.2,
+  `closest hue ${minHue.toFixed(2)} turns apart, least value gap ${minValue.toFixed(2)}, ` +
+    `bank up to ${brightestGround.toFixed(2)} in relative luminance; ${closestBank}`,
 );
 // The hollow does not stop at the shoreline: ground outside the pool can lie below the
 // water's level, and an eye there sits UNDER a transparent sheet that then fills the

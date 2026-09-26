@@ -32,6 +32,7 @@
  * Nothing here is part of the game bundle.
  */
 
+import './domshim';
 import * as THREE from 'three';
 
 import type RAPIER from '@dimforge/rapier3d-compat';
@@ -69,9 +70,6 @@ import {
 } from '../src/world/sidetrack';
 import { Terrain } from '../src/world/terrain';
 import { drawnGroundY } from '../src/world/terrainmesh';
-import { installDocumentShim } from './domshim';
-
-installDocumentShim();
 
 const SEEDS = [1, 7, 42, 1337];
 if (Number.isFinite(Number(process.argv[2]))) SEEDS.push(Number(process.argv[2]) >>> 0);
