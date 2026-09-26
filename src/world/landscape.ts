@@ -277,6 +277,13 @@ const RIDGE_ACROSS = 800;
 const RIDGE_AMPLITUDE = 20;
 const RIDGE_DIRECTION_CELL = 9000;
 const RIDGE_DIRECTIONS = 8;
+/**
+ * Width of the hand-over between two districts' ridge directions, metres (see `ridgeAt`).
+ * The two surfaces can differ by twice the amplitude, so over this width the extra
+ * slope is at most ~2 × 20 m × 1.5 / 1800 m ≈ 3 %: inside what `MAX_SLOPE` already
+ * budgets for the ridge's own flanks.
+ */
+const RIDGE_BLEND_M = 1800;
 /** The gate's own field, metres: a district of ridges twice the size of the direction. */
 const RIDGE_GATE_WAVELENGTH = 14_000;
 /** `cos`/`sin` for the eight directions, so the sample is arithmetic and never a `cos`. */
@@ -445,25 +452,50 @@ export class Landscape {
    * directions, so a district's ridges lie at a consistent angle) and the gate is a 14 km
    * swell that fades whole districts of them in and out, which keeps the grain a thing
    * you notice in some country and not in others.
+   *
+   * THE DISTRICTS ARE BLENDED AT THEIR BORDERS. A ridge field rotated one way and the
+   * same field rotated another are different surfaces: switching between them at a cell
+   * edge is a cliff of up to twice the amplitude. The first version did exactly that, and
+   * the road — which takes its elevation from this field — climbed a 40 m wall in four
+   * metres at every border it crossed (grades of 900-1000 % on every seed scanned;
+   * autopilot traffic piled up at its foot). So each axis hands over from one cell's
+   * direction to the next across `RIDGE_BLEND_M` centred on the border: inside a cell only
+   * its own band is read (the common case, one sample); near a border two, near a corner
+   * four, weighted so the sum is continuous and its slope is bounded by the blend width.
    */
   ridgeAt(x: number, z: number): number {
     const gateN = band(this.ridgeGateTag, x / RIDGE_GATE_WAVELENGTH, z / RIDGE_GATE_WAVELENGTH);
     if (gateN <= -0.1) return 0;
     const gate = smoothstep01((gateN + 0.1) / 0.5);
     if (gate <= 0) return 0;
-    const cellX = Math.floor(x / RIDGE_DIRECTION_CELL);
-    const cellZ = Math.floor(z / RIDGE_DIRECTION_CELL);
-    const direction = Math.min(
-      RIDGE_DIRECTIONS - 1,
-      Math.floor(hashUnit3(this.ridgeAxisTag, cellX, cellZ) * RIDGE_DIRECTIONS),
-    );
-    const ca = RIDGE_COS[direction]!;
-    const sa = RIDGE_SIN[direction]!;
-    const along = x * ca + z * sa;
-    const across = z * ca - x * sa;
-    return (
-      RIDGE_AMPLITUDE * gate * band(this.ridgeTag, along / RIDGE_ALONG, across / RIDGE_ACROSS)
-    );
+    // Cell coordinates shifted by half a cell: `ix` and `ix + 1` are the two cells whose
+    // border lies between them at fraction 0.5, where the hand-over is centred.
+    const gx = x / RIDGE_DIRECTION_CELL - 0.5;
+    const gz = z / RIDGE_DIRECTION_CELL - 0.5;
+    const ix = Math.floor(gx);
+    const iz = Math.floor(gz);
+    const half = RIDGE_BLEND_M / RIDGE_DIRECTION_CELL / 2;
+    const wx = smoothstep01((gx - ix - (0.5 - half)) / (2 * half));
+    const wz = smoothstep01((gz - iz - (0.5 - half)) / (2 * half));
+    let sum = 0;
+    for (let dz = 0; dz <= 1; dz++) {
+      const weightZ = dz === 0 ? 1 - wz : wz;
+      if (weightZ <= 0) continue;
+      for (let dx = 0; dx <= 1; dx++) {
+        const weight = (dx === 0 ? 1 - wx : wx) * weightZ;
+        if (weight <= 0) continue;
+        const direction = Math.min(
+          RIDGE_DIRECTIONS - 1,
+          Math.floor(hashUnit3(this.ridgeAxisTag, ix + dx, iz + dz) * RIDGE_DIRECTIONS),
+        );
+        const ca = RIDGE_COS[direction]!;
+        const sa = RIDGE_SIN[direction]!;
+        const along = x * ca + z * sa;
+        const across = z * ca - x * sa;
+        sum += weight * band(this.ridgeTag, along / RIDGE_ALONG, across / RIDGE_ACROSS);
+      }
+    }
+    return RIDGE_AMPLITUDE * gate * sum;
   }
 
   /**
