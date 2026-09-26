@@ -60,6 +60,38 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- PONDS AND LAKES YOU CAN ACTUALLY SEE (`docs/research-2026-09-26-landscape.md`, section 7).
+  A village pond in this country is a dam across a brook in a balka, so a pond is a
+  feature OF THE WATERCOURSE and not a site on a list: a slow 340 m field gates a reach
+  as dammed (never a river, never a dry one), the ground digs a hollow 1.5 m deeper than
+  the stream's own bed, and the water stands 18 cm below the ground that holds it, so the
+  pool comes out level without a pond surface of its own. Measured: 2-4 ponds per 60 km
+  with water visible from the road within 400 m (one every 15-30 km), a hollow 56-68 m
+  across where a stream crosses the road. Lakes went from one per 200-300 km — nobody saw
+  one in a long drive — to one per 32-54 km, 300-650 m to the side. The dam itself is a
+  village's, and lands with villages.
+- THE ROAD CROSSES WATER NOW (`docs/research-2026-09-26-landscape.md`, section 6). The
+  country had no streams at all: the middle belt is cut by small rivers the way a hand is
+  cut by lines, and a regional road there crosses a mapped watercourse every 5-8 km and
+  carries a bridge every 15-18 km. Water is a FIELD here and not a list of features
+  (`src/world/streams.ts`), because a river is a line and the road, the ground, the water
+  and the bridge all have to agree about where it runs: one fractal's zero set carries the
+  network, and one slow size field decides which reach is a dry balka, which is a brook
+  and which is a river big enough to be bridged. The valley is a term of
+  `Landscape.heightAt`, so the road DESCENDS into a river valley and climbs out (p99 grade
+  7.2% -> 8.3%; `MAX_SLOPE` 17.4% -> 22.3%, honestly budgeted). The bed is the one
+  landform here that is NOT faded away from the road, because the road goes over it: where
+  the reach is big the corridor grading steps aside and the bed stays open under the
+  asphalt (a bridge, with concrete parapets, a rail and piers every 14 m in
+  `src/world/streamcrossings.ts`), and where it is small the graded embankment fills the
+  bed and the stream goes through a culvert with a headwall and a dark portal at each face.
+  Measured over 6 seeds x 60 km: a watercourse every 3.4 km, water every 5.0 km, a bridge
+  every 13.8 km; every bridge's bed is open under the deck (median clearance 1.55 m) and
+  97% of culverts stand above the water (0.86 m). Willows and hazel hold the banks with
+  alder behind, the floodplain is meadow because it floods every spring, and the road's
+  own tile water costs 11.75% of tiles, ~31k vertices and 20 draw calls across the visible
+  window. Cost on the worker: tile build 13.5-14.7 -> 15.8-17.1 ms (+15%, three extra noise
+  reads a vertex); nothing added to the frame itself.
 - THE COUNTRYSIDE HAS BOTH COUNTRIES IN IT (`docs/research-2026-09-26-landscape.md`). A
   long drive read as "кругом только лес с редкими прогалинами", and the measurement
   agreed with the drive rather than with the land share: over 60 km of road the strip
