@@ -60,6 +60,37 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE AIR, THE SKY AND THE CLOUDS ARE ONE SYSTEM NOW (`docs/renderer-v2.md`, stage 1;
+  `docs/renderer-v2-log.md`). Three atmospheres that did not know about each other — an
+  exponential `FogExp2`, a height haze spliced into three's fog chunk and an aerial veil
+  painted over the whole frame by the post pass — are replaced by one three-colour model
+  (`src/render/look/fog.ts`): cylindrical distance, desaturate by d/far, tint toward the
+  haze colour by (d/far)², then dissolve into the sky's own horizon→zenith gradient at
+  2·sin(elevation). It is installed as a global `ShaderChunk` replacement, so every
+  fogged material in the world — tiles, vista, trees, grass, road, props — gets it, and
+  the sky dome is painted with the same formula at full depth; the ground therefore melts
+  into the sky that is actually behind it. A clear day keeps a crisp middle ground and a
+  hazy band at the horizon (`near` at 0.9 of the far plane and an EXP2 ramp), and the
+  air's own far plane is the presentation's draw distance, so a short tier fogs a short
+  world. Visibility is now a weather property rather than a density multiplier: overcast
+  13 km, rain 3.2 km, a fog spell 420 m, mixed logarithmically. The noisy fog height
+  stays, with both signs: valley mist in the morning, hilltops in the cloud under a
+  closed deck. The card cumulus system is deleted; the deck is one curved plane over the
+  camera (`src/render/clouds.ts`) with two noise shelves at different virtual heights
+  giving real parallax, a third offset sample along the sun's azimuth for shading, a
+  code-generated 256² tileable texture, both fades and the same fog. Colours, light and
+  clouds now come from a season × hour × weather palette (`src/world/look/palette.ts`,
+  pure data): six authored hours at fixed sun elevations (dawn and dusk split by the
+  azimuth's sign), weather and season as continuous channel-driven modulations, the sun's
+  disc and halo, the moon and the real star field on the dome. Shadows move to the near
+  field only: 2048²/±72 m becomes 1024²/±25 m for the car, the player and the props
+  beside them (stage 4 stops trees casting; stage 2 bakes forest shade into the ground),
+  with the fade retuned to 16–24 m. `src/render/look/lighting.ts` is the shared world
+  lighting patch for stages 2–5 — baked shade, grazing sheen, radiance — and the terrain
+  is its first consumer. The post pass loses the aerial veil (and its dead `uHorizon`),
+  the graphics tiers lose `fogScale`, and the environment probe is rebuilt when the air
+  has actually changed instead of once at boot.
+
 - THE ROAD BENDS AT ITS VILLAGES (`docs/research-2026-09-26-landscape.md`, section 14). The
   one land tie the heading can make, and the reason is architectural rather than rural: the
   heading is a pure function of arclength, so only a feature PLACED ALONG THE ROAD can bend

@@ -19,7 +19,6 @@ import {
   storeSettings,
   streetLightSlotsFor,
   vehicleLightSlotsFor,
-  viewDistanceFogScaleFor,
   viewDistanceFor,
 } from './game/settings';
 import { warmVariantAssets } from './world/poivariantbuild';
@@ -91,7 +90,7 @@ import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
-import { advanceCloudShadows } from './render/cloudshadow';
+import { advanceCloudShadows, setCloudCoverage } from './render/cloudshadow';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -360,6 +359,10 @@ async function boot(): Promise<void> {
     mobilePresentation,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  // The sky's own tier: the star field's depth, the cloud deck's size, and the far plane
+  // the whole fog model is scaled to (render/look/fog.ts).
+  sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
+  sky.setWorldSeed(world.seed);
   await sky.waitForAssets();
   // Warm only models already requested by the active set. Later models parse and
   // compile on demand, before their first Vehicle instance is attached.
@@ -1864,7 +1867,6 @@ async function boot(): Promise<void> {
       s.calendarEpoch,
       s.timeOfDay,
       s.dayIndex,
-      activeS,
       cam.x,
       cam.y,
       cam.z,
@@ -1873,7 +1875,9 @@ async function boot(): Promise<void> {
     );
     frameProfiler?.end('sky');
     renderer.setSunRays(sky.sunDirection, sky.sunColor, sky.sunRayStrength);
-    sky.updateClouds(cam.x + origin.x, cam.z + origin.z);
+    // The deck is placed at the camera itself, in the scene's own origin-relative
+    // coordinates — the same frame the dome and the shadow target use.
+    sky.updateClouds(cam.x, cam.y, cam.z, frameDt);
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);
     const headlightVisibility = sky.artificialLightFactor;
     for (const vehicle of vehicles.values()) {
@@ -1939,15 +1943,11 @@ async function boot(): Promise<void> {
       // Street lamps after the cars: a full buffer refuses fixtures, never a car.
       streamer.offerGlints(wetGlints);
     }
-    // THE FOG THE SCENE RENDERS WITH, which is this frame's haze thinned for the chosen
-    // draw distance — the same number installed on the camera below, computed once.
-    // The glint shader fogs with exp(−(density·d)²), so handing it the unthinned density
-    // fogged a streak as if it stood `1/scale` times farther away: 2.4× on the standard
-    // rung and 6.25× on the tall one, where in a fog spell the streaks of lamps still
-    // plainly visible vanished first. On a real wet road they are what you see of a car
-    // first, at the lamp's own brightness and any range, which is the whole feature.
-    const fogDensity =
-      renderer.fog.density * viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
+    // THE FOG THE SCENE RENDERS WITH, which the sky has already written for this frame
+    // (render/look/fog.ts): one air for every material, at the presentation's own scale.
+    // The glint shader fogs its streaks with the same exp(−(density·d)²) curve, so it
+    // reads the same number rather than one computed a second time.
+    const fogDensity = renderer.fog.density;
     wetGlints.endFrame(weather.wet, weather.precip * (1 - weather.snowing), fogDensity, eyeGround, frameDt);
 
     // Tyres are offered to the patch pool in the same order and for the same reason:
@@ -1985,6 +1985,9 @@ async function boot(): Promise<void> {
     if (WEATHER_OVERRIDE.state) Object.assign(weather, WEATHER_OVERRIDE.state);
     setWeatherWet(weather.wet);
     sky.setWeather(weather);
+    // The season the sky tints its air with is the same object the ground is coloured
+    // from, so the two cannot disagree about what month it is.
+    sky.setSeason(vista.season);
     vista.update(cam.x, cam.z, activeS, frameDt);
     desert.forest.update(
       cam.x + origin.x,
@@ -2001,17 +2004,13 @@ async function boot(): Promise<void> {
     }
     landmarks.update(cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('vista');
-    // The scene's fog: the density computed above, which is the haze thinned for the
-    // chosen draw distance. The exponential fog is tuned so the world dissolves around
-    // 1.5 km, which is exactly right when 1.5 km is all there is and hides the vista
-    // completely when there is more: at the 'vast' scale factor a 25 km range still
-    // fades, it just fades over 25 km.
-    renderer.fog.density = fogDensity;
-
     // The drifting cloud shade every ground material samples. Driven by the RENDER
     // frame's own dt, so a paused game's clouds stop with it, and given the f64
     // origin because the field is anchored to the world rather than to the player —
     // see `render/cloudshadow.ts`.
+    // The deck the palette asked for this frame: the ground's cloud shade follows it, so
+    // a closed overcast leaves no drifting patches behind.
+    setCloudCoverage(sky.cloudCover);
     advanceCloudShadows(
       world.seed,
       frameDt,

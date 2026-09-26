@@ -385,8 +385,10 @@ class RoadLookLab {
     // so handing it an absolute coordinate puts the eye 18 km outside its own sky at
     // the arclengths this lab is pointed at, and the dome renders as nothing at all.
     const eye = this.renderer.camera.position;
-    this.sky.update(CALENDAR, daySeconds, 0, s, eye.x, eye.y, eye.z);
-    this.sky.updateClouds(eye.x + this.originX, eye.z + this.originZ);
+    this.sky.update(CALENDAR, daySeconds, 0, eye.x, eye.y, eye.z);
+    // A lab frame is a one-off shot, not a running clock: a fixed step keeps the deck
+    // exactly where the same shot put it last time.
+    this.sky.updateClouds(eye.x, eye.y, eye.z, 1 / 60);
     this.renderer.render();
 
     const condition = roadConditionAt(s);

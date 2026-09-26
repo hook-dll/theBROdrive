@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { compileSafely } from '../render/compilesafe';
 import '../render/lightshader';
+// The world's air: replaces three's fog chunks before any program is built.
+import '../render/look/fog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import {
   advanceHazePhase,
@@ -514,7 +516,6 @@ export class Renderer {
         uDaylight: { value: 0 },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uGroundSlope: { value: 0 },
-        uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
         uCameraNear: { value: CAMERA_NEAR },
@@ -784,7 +785,6 @@ export class Renderer {
       advanceHazePhase(phase.y, dt, this.hazeFineRiseHz),
     );
     this.hazeMaterial.uniforms.uTime.value = nowS % HAZE_CLOCK_PERIOD_S;
-    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
     this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
       this.hazeMinimumEyeHeight,
       this.hazeEyeHeight,
@@ -827,14 +827,6 @@ export class Renderer {
    * correct through the camera rig's roll and spring, and clamping a little way
    * outside the frame keeps the falloff sensible when the horizon is off-screen.
    */
-  private horizonScreenY(): number {
-    this.camera.getWorldDirection(this._forward);
-    const horizontal = Math.hypot(this._forward.x, this._forward.z);
-    const pitch = Math.atan2(this._forward.y, horizontal);
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
-    const ndc = -Math.tan(pitch) / Math.tan(halfFov);
-    return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
-  }
 
   /** Updates every physical parameter in the production heat-mirage shader. */
   setHeatMirageParameters(parameters: HeatMirageParameters): void {

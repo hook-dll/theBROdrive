@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { applyWorldLighting } from '../render/look/lighting';
 import { applyGroundPaint, SEASON_GROUND_MARK } from '../render/groundpaint';
 import { applyWetness } from '../render/season';
 import { type Road } from './road';
@@ -262,12 +263,21 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
   // Cloud shadow is the OUTERMOST wrap, so it also finds the detail-fade patch installed
   // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
   // decides only which patch runs first, never whether one is lost.
-  const material = applyCloudShadow(
+  // The world lighting patch is the OUTERMOST wrap, so it also sees the cloud shade
+  // installed below it: it lifts the ambient fill under a wood and boosts the direct
+  // light on what the sun does reach. Its baked shade is the ground's own forest weight
+  // for now — stage 2 bakes a proper one into the vertices and this line changes to
+  // read it.
+  const material = applyWorldLighting(applyCloudShadow(
     applyGroundPaint(applyComicShading(
       new THREE.MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.93,
         metalness: 0,
+        // The ground takes no environment: it is rough, it faces up, and a hemisphere of
+        // bright sky used as a reflection paints the fields rather than lighting them.
+        // What reflects the sky is car paint and a wet road, and both keep their maps.
+        envMapIntensity: 0,
       }),
       {
         lightingStrength: 0,
@@ -280,7 +290,7 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
       },
       // The vista's colours are made for the season on the CPU; the tiles' in here.
     ), { season: detailFade }),
-  );
+  ), { shade: 'vGround.z' });
   // Wet ground is darker: tiles only, the vista is too far to tell.
   if (detailFade) applyWetness(material, 0.22, null);
   if (!detailFade) return material;

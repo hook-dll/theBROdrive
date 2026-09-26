@@ -135,6 +135,32 @@ export const CLOUD_DRIFT_MPS = 6;
 /** Mirage's own twilight band, so the two illusions leave together. */
 export const CLOUD_DAY_LOW = 0.12;
 export const CLOUD_DAY_HIGH = 0.42;
+/**
+ * The sky's own cloud cover, 0..1, written by `setCloudCoverage` once a frame.
+ *
+ * The patch scale and the deck's own scale cannot be made equal (one is a noise field on
+ * the ground, the other a deck kilometres up), but they must not CONTRADICT each other:
+ * patches of shade sliding over a field under a closed overcast lid read as dirt, and
+ * patches under a clear blue sky read as nothing at all. A closed deck therefore takes
+ * the patches away — the palette has already cut the sun for it — and a sky with no cloud
+ * in it keeps the field out of the frame entirely.
+ */
+let skyCover = 0.35;
+
+/** The palette's cloud cover for this frame; see the note above. */
+export function setCloudCoverage(cover: number): void {
+  skyCover = Math.min(1, Math.max(0, cover));
+}
+
+/**
+ * How patchy the sky is: 1 with scattered cumulus, 0 under a closed lid and 0 under an
+ * empty one.
+ */
+function cloudPatchiness(): number {
+  const scattered = smoothstep(0.06, 0.22, skyCover);
+  const closed = 1 - smoothstep(0.82, 1, skyCover);
+  return scattered * closed;
+}
 
 /** Hash domains. Distinct from every other system's. */
 const TAG_WIND = 0x43534831; // 'CSH1'
@@ -292,7 +318,7 @@ export function cloudShadowFactorAt(
 
 /** Deepest darkening the current daylight allows. Zero is the shader's early-out. */
 export function cloudShadowStrength(dayFactor: number): number {
-  return CLOUD_DARKEN_MAX * smoothstep(CLOUD_DAY_LOW, CLOUD_DAY_HIGH, dayFactor);
+  return CLOUD_DARKEN_MAX * smoothstep(CLOUD_DAY_LOW, CLOUD_DAY_HIGH, dayFactor) * cloudPatchiness();
 }
 
 /**

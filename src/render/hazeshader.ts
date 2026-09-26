@@ -400,7 +400,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uEyeAbove;
   uniform float uGroundSlope;
   uniform vec2 uHazePhase;
-  uniform float uHorizon;
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
   uniform float uCameraNear;
@@ -692,16 +691,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
 
     float airDistance = -airViewZ;
 
-    // AERIAL PERSPECTIVE: the plain's depth. With no mesas to measure by, what tells
-    // the eye a far ridge is far is that it is paler and bluer than the near one; each
-    // wooded rise behind the last steps back into the haze. Real depth only (the sky
-    // sits at the far plane and is left alone), exponential in distance, capped so the
-    // farthest ground keeps a silhouette.
-    if (airDistance < uCameraFar * 0.999) {
-      float veil = (1.0 - exp(-airDistance * 0.00035)) * 0.8 * uDaylight;
-      color.rgb = mix(color.rgb, vec3(0.70, 0.77, 0.84), veil);
-    }
-
     // ACES has already supplied the filmic shoulder and soft contrast in the scene
     // pass. This display-space finish stays deliberately smaller: a modest
     // luminance-preserving colour separation, then warm highlights against slightly
@@ -761,10 +750,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
     }
 
     // Ink is for surfaces, and "surface" is a depth question rather than a screen-height
-    // one. The gate used to be a screen-height test against uHorizon, which kept the
-    // outline pass off the sky and every star point — but it also left everything whose
-    // silhouette rises above the horizon undrawn, so a tree got a line round its trunk
-    // and none round its crown.
+    // one. A screen-height test kept the outline pass off the sky and every star point,
+    // but it also left everything whose silhouette rises above the horizon undrawn, so a
+    // tree got a line round its trunk and none round its crown.
     //
     // The sky, the stars and the planets all render with depthWrite off, so they
     // leave depth at the far plane while real geometry does not. Testing the depth this

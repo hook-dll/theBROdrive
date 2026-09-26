@@ -1,352 +1,128 @@
 import * as THREE from 'three';
 import { maxAnisotropy } from './texturequality';
 import { GRAPHICS_CONFIG } from '../config';
-import type { GraphicsQuality } from '../game/settings';
+import { viewDistanceFor, type GraphicsQuality } from '../game/settings';
+import { farPlaneForViewDistance } from '../core/renderer';
 import { DAY_LENGTH } from '../game/state';
-import { skyGradientAt } from '../world/gradient';
 import { newWeatherState, type WeatherState } from '../world/weather';
-import { hash01 } from '../core/rng';
+import { newSeasonState, type SeasonState } from '../world/season';
+import { MOONLIGHT, newLookPalette, paletteAt, type LookPalette } from '../world/look/palette';
+import { fogMaterialUniforms, FOG_PARS_GLSL, FOG_SKY_GRADIENT_GLSL, writeFog } from './look/fog';
+import { setWorldLighting } from './look/lighting';
 import { AstronomySystem } from './astronomy';
 import { Clouds } from './clouds';
 import { StarField } from './starcatalog';
 import { PlanetField } from './planetfield';
 
 /**
- * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
- * the Sun, Moon and planets. Celestial coordinates are anchored at the observer (game/calendar.ts, near Vladimir);
- * procedural dust, cirrus and twilight remain visual weather only.
+ * THE SKY, AND THE LIGHT THAT COMES OUT OF IT.
+ *
+ * There is no physical scattering model here, and no post-processing. The whole
+ * atmosphere is the three-colour fog of render/look/fog.ts, and the dome is simply that
+ * fog at an infinite distance: it paints itself with `fogSkyColour`, the same gradient
+ * every fogged material in the world dissolves into, so the ground and the sky can
+ * never disagree about what colour the horizon is. The cloud deck (render/clouds.ts)
+ * sits on the same gradient.
+ *
+ * On top of it are the few things a screenshot needs and the fog cannot give: the sun's
+ * disc and halo in the key light's own colour, the Moon with its phase, and the real
+ * Tycho-2 star field. Time is continuous — a real sun path from astronomy, with the
+ * palette interpolating between six authored hours and the weather and season channels
+ * moving the air on top.
+ *
+ * The lights are the palette's colours and relative strengths over the physical
+ * illuminance astronomy reports, with one global exposure so that a 50-fold range from
+ * noon to a moonless night still lands on the display. Night keeps an authored floor
+ * under the sky's fill: fifty-fold adaptation is honest but it left the ground at
+ * nothing at all, and a world you cannot see is not a dark world, it is a broken one.
  */
 
 // ---------------------------------------------------------------------------
-// Placement constants
+// Constants
 // ---------------------------------------------------------------------------
 
-/**
- * Dome radius. It has to sit OUTSIDE the terrain's draw distance, not level with
- * it: the dome is re-centred on the camera every frame and drawn as a solid
- * inside-out sphere, so ground further from the camera than this gets occluded by
- * it — and since terrain chunks stretch far up and down the road, that showed as a
- * hard curved edge cutting across the distant desert. 3 km clears the 1.5 km
- * lateral reach plus a couple of chunks of road, and still sits inside the 4 km far
- * plane.
- */
+/** Dome radius, metres. The dome is re-centred on the camera every frame. */
 const DOME_RADIUS = 3000;
 /** Offset of the directional light along its direction; brackets the shadow frustum. */
 const SUN_DISTANCE = 240;
-/**
- * Reference axes for building an orthonormal basis perpendicular to the shadow
- * direction (see `stabilizeShadowTarget`). `WORLD_UP` is crossed with the shadow
- * direction to get "right"; the fallback substitutes when the sun sits close enough
- * to straight overhead that the cross product would be near zero.
- */
+/** Reference axes for the shadow map's texel lattice (see `stabilizeShadowTarget`). */
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const WORLD_UP_FALLBACK = new THREE.Vector3(1, 0, 0);
 
-/** Sun elevation (radians) below this counts as night for headlight/lamp logic. */
+/** Sun elevation (radians) below this counts as night for headlight and lamp logic. */
 const NIGHT_ELEVATION = -0.08;
-/**
- * Sun elevation (radians) at which roadside lamps reach full output. Eight degrees
- * below the horizon: the end of civil twilight, where a lamp finally out-lights
- * the sky. Above the horizon they are off; between the two they ramp.
- */
+/** Sun elevation at which roadside lamps reach full output: the end of civil twilight. */
 const LAMP_FULL_ELEVATION = -0.14;
 
 /**
- * Shadow direction is clamped only in the last few degrees above the horizon.
+ * Shadow direction is held no lower than this above the horizon, radians.
  *
- * A mathematically exact horizon light makes kilometre-long shadows that cannot fit
- * the local shadow map. Holding the caster direction at roughly 3.5 degrees keeps the
- * map finite while preserving the long, raking shadows that make dawn and sunset
- * readable. Shadows fade only as the actual key reaches the horizon; golden hour is
- * not faded away.
+ * The shadow map covers the near field only (see `shadowFrustumHalfSize`), so an exact
+ * horizon light would throw a car's shadow out of the map entirely and leave a hole
+ * where it used to be. Ten degrees keeps a 1.5 m car's shadow inside ±25 m and still
+ * reads as a low sun; the elevation itself is untouched everywhere else — the disc, the
+ * light and the fade all use the real one.
  */
-const SHADOW_MIN_ELEVATION = 0.06;
-const SHADOW_FADE_ELEVATION = 0.035;
+const SHADOW_MIN_ELEVATION = 0.18;
+/** Shadows appear as the true sun rises through this band, radians above the horizon. */
+const SHADOW_FADE_ELEVATION = 0.05;
 /**
  * The shadow direction moves in steps of this many radians (0.15°), never smoothly.
  *
- * The Sun turns a quarter of a degree a second at the default day length. A shadow
- * map re-aimed every frame lays a new texel lattice over the world every frame, and
- * every shadow edge crawls through it — a shimmer along every trunk and crown shadow
- * that the comic light bands turn into flicker. Held still between steps, the lattice
- * is fixed to the world (see `stabilizeShadowTarget`); a step moves the tip of a 15 m
- * tree's shadow 4 cm, under one 7 cm texel.
+ * A shadow map re-aimed every frame lays a new texel lattice over the world every frame,
+ * and every shadow edge crawls through it. Held still between steps the lattice is fixed
+ * to the world (see `stabilizeShadowTarget`); a step moves a nearby shadow by less than
+ * one texel.
  */
 const SHADOW_DIR_STEP = 0.0026;
-/**
- * How far ahead of the camera, as a share of the frustum's half-size, the shadow map
- * is centred. Centred on the eye, half its texels were spent behind the camera and the
- * edge where shadows stop sat 72 m ahead, in plain view; led forward, the edge sits
- * past the range at which shadows fade out (`SHADOW_FADE_TO_M` in lightshader.ts).
- */
+/** How far ahead of the camera, as a share of the frustum's half-size, its centre sits. */
 const SHADOW_LEAD = 0.42;
 /**
- * The key light's share of the scene's light at which its shadow fades out, and the
- * share at which it is fully drawn.
+ * The key's share of the light at which its shadow is gone, and at which it is full.
  *
- * A shadow can darken a surface by at most key / (key + fill) of what it receives, so
- * a key that is a sliver of the lighting casts a shadow nobody can see — and it still
- * paid for the whole 2048² map, re-rendered every frame. That is every night: the Moon
- * is the key from dusk to dawn, and under the fifty-fold exposure ceiling a FULL moon at
- * the zenith is 0.25 lx / 40 000 × 50 = 3.1e-4 of display light against a moonlit fill
- * that never drops below 0.022 (the pre-dawn trough), so its shadow could take at most
- * 1.4 % off the ground it falls on. Measured across a whole day at the default epoch:
- * 0.05-0.29 % all night, 16 % a minute before sunset and 50 % by day. Fading between 2
- * and 5 % leaves every daylight and golden-hour shadow exactly as it was and makes the
- * night's exactly zero, which is what lets `update` stop drawing the map.
+ * A shadow can darken a surface by at most key / (key + fill), so a key that is a sliver
+ * of the lighting casts a shadow nobody can see — and it still pays for the whole map.
+ * That is every night, when the Moon is the key. Fading between 2 and 5 % leaves every
+ * daylight shadow as it was and makes the night's exactly zero.
  */
 const SHADOW_KEY_SHARE_GONE = 0.02;
 const SHADOW_KEY_SHARE_FULL = 0.05;
 
-
-/** Deliberate presentation scale: physical lunar disc is too small in play. */
+/** Deliberate presentation scale: the physical lunar disc is too small in play. */
 const MOON_VISUAL_SCALE = 3;
 /**
- * Display-referred radiance of sunlit lunar regolith, day and night, in the same
- * authored units as the palette below.
+ * Display-referred radiance of sunlit lunar regolith, day and night.
  *
  * Sunlit regolith does not change brightness with phase — the shader's photometric
- * function carries every angle-dependent term per pixel — so the only thing these
- * two numbers encode is EXPOSURE, and the dome has none of its own. Three disables
- * tone mapping for anything drawn into a render target, and renderer.ts always
- * draws the scene into one, so `col` in the dome shader reaches the display
- * verbatim and clamps at 1. That is the same reason the palette carries a night
- * sky a thousand times darker than its day sky rather than one exposure stop:
- * adaptation is authored in, not computed. The Moon has to be authored the same
- * way, and the two ends are set by what the display can still show:
- *
- *  - day: a daylight sky is already at 0.75 in blue, so the disc has about 0.65 of
- *    headroom before it flattens into a white hole. At this value the crescent's
- *    bright limb saturates blue only, which is exactly what makes it read white
- *    against blue while red and green keep the maria and the terminator gradient.
- *  - night: the full disc's highlands land just under 1, so a full Moon is white
- *    and dazzling while the maria stay a clear half-tone below it.
+ * function carries every angle-dependent term — so these two numbers encode EXPOSURE,
+ * which the dome has none of its own: the scene pass is not tone mapped (three disables
+ * tone mapping for render targets), and the post pass copies texels through. The two
+ * ends are set by what the display can still show: by day the disc has about 0.65 of
+ * headroom before it flattens into a white hole, and at night a full Moon must land
+ * just under 1 so the maria stay a clear half-tone below the highlands.
  */
 const MOON_RADIANCE_DAY = 0.75;
 const MOON_RADIANCE_NIGHT = 1.15;
-/** The enlarged disc is three times the physical angular radius: twice its prior size. */
+/** The disc is drawn this many times its physical angular radius. */
 const SUN_VISUAL_SCALE = 3;
-/** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
-const BASE_FOG_DENSITY = 0.00035;
-
 /**
- * Total display-referred light the key and the sky bounce are exposed to between
- * them. The two lights below are written as their share of the real illuminance
- * times this exposure, so under full adaptation they always sum to it and only
- * their SPLIT — and the palette they are tinted with — carries the time of day.
+ * Total display-referred light the key and the sky bounce are exposed to between them.
+ * The two lights are written as their share of the real illuminance times this exposure,
+ * so under full adaptation they sum to it and only their split carries the time of day.
  */
 export const EXPOSURE_TARGET = 5;
 /**
- * Soft floor under normalized scene illuminance. This is the limit of visual
- * adaptation, not a numerical epsilon: `EXPOSURE_TARGET / ADAPTATION_FLOOR` is a
- * maximum 50x exposure.
- *
- * The previous 25,000x maximum divided almost all real day-to-night variation back
- * out of the lights. The desert retained essentially full daylight through civil
- * twilight and stayed readable under 0.002 lux night-sky illumination. Fifty-fold
- * adaptation preserves detail at sunset, then lets the world become genuinely dark.
- * Adding the floor in the denominator keeps that transition smooth without a clamp.
+ * Soft floor under normalized scene illuminance: the limit of visual adaptation, not a
+ * numerical epsilon. `EXPOSURE_TARGET / ADAPTATION_FLOOR` is a maximum 50x exposure,
+ * which preserves detail at sunset and then lets the world become genuinely dark.
  */
 export const ADAPTATION_FLOOR = 0.1;
-/**
- * The sky's own dark adaptation remains exactly as authored. Stars and unresolved
- * planets are display-space lights, not illumination cast onto the desert; coupling
- * them to the ground exposure would erase the night sky while fixing the ground.
- */
+/** The sky's own dark adaptation for stars and planets, exactly as authored. */
 const CELESTIAL_ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
-
-
-// ---------------------------------------------------------------------------
-// Palette (authored as sRGB hex; THREE converts to linear working space)
-// ---------------------------------------------------------------------------
-
-// Countryside: a paler, softer zenith than the desert's; mid-latitude summer air
-// carries more moisture and the sky is less deep.
-const C_DAY_ZENITH = new THREE.Color().setStyle('#6c93bf');
-/**
- * The pale band the daytime sky fades to at the horizon, and — because `fog.color`
- * copies it — the colour the far desert dissolves into.
- *
- * Taken off a reference screenshot of the genre's own noon sky: almost white with
- * only a restrained cyan bias, so the saturated blue remains overhead instead of
- * reaching the desert skyline.
- */
-const C_DAY_HORIZON = new THREE.Color().setStyle('#e4e8e2');
-const C_NIGHT_ZENITH = new THREE.Color().setStyle('#03040a');
-const C_NIGHT_HORIZON = new THREE.Color().setStyle('#0d1424');
-const C_SUN_LOW = new THREE.Color().setStyle('#ffb166');
-const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
-const C_TURBID = new THREE.Color().setStyle('#c9b18c');
-const C_MOON = new THREE.Color().setStyle('#a9c6e6');
-// Countryside: the fill from below is warm earth, so shade reads as colour and never
-// as a dark hole — Shishkin's shade is olive and umber (docs/shishkin.md). It was a
-// soft violet, which with the sky's blue turned every shaded needle teal.
-const C_GROUND = new THREE.Color().setStyle('#a39373');
-/** An overcast sky's grey, and its horizon: cool, a little blue, never neutral. */
-const C_OVERCAST = new THREE.Color().setStyle('#9aa1aa');
-const C_OVERCAST_HORIZON = new THREE.Color().setStyle('#c9ccce');
-/** Daylight sky illumination gain; the warm ground bounce is compensated below. */
-const DAY_SKY_FILL_BOOST = 1.6;
-/**
- * MOONLIT FILL. The dome's night palette above is what the SKY looks like, and it
- * is nearly black on purpose — that is what lets the stars read. The hemisphere
- * bounce used to inherit those same numbers at a strictly photometric intensity,
- * and the result at midnight was a desert of absolute zero: no dune, no verge, no
- * silhouette, nothing but stars and whatever a headlight happened to be pointing
- * at. That is what made night driving hostile rather than quiet. The beam was not
- * too bright; it was the ONLY thing on screen, so the eye had nothing to adapt to
- * and read it as glare.
- *
- * So the FILL — and only the fill, never the dome, the stars, the environment map
- * or the direct key light — carries an authored floor: a cool moonlit sky bounce
- * over a dim warm sand bounce, at about a hundredth of daylight. Enough that a
- * dune keeps an edge and the road keeps its verges; far too little to compete with
- * the lamps or to wash out a magnitude-8 star.
- */
-const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
-const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
-const NIGHT_FILL_INTENSITY = 0.09;
-
-// ---------------------------------------------------------------------------
-// Twilight moods
-// ---------------------------------------------------------------------------
-
-/**
- * Five dawn/dusk palettes, one picked per twilight.
- *
- * The old sky had exactly one sunset — C_SUNSET, a single orange — so every morning
- * and every evening of a 900 km drive were the same two minutes of colour. Real
- * twilights differ because the air differs: how much water is in it, how high the
- * dust is, whether there is cloud aloft catching light the horizon has already lost.
- * None of that is simulated here, so it is authored: five plausible skies, chosen
- * deterministically per event, blended so nothing ever pops.
- *
- * Each mood owns four things, and all four matter — swapping only the horizon colour
- * reads as a filter rather than as a different evening:
- *
- *  - `horizon`: the band the sun sets into, and (via `fog.color`) the colour the far
- *    desert dissolves into. The dominant impression.
- *  - `glow` and `glowScale`: the halo around the disc. A humid sky throws a wide soft
- *    glow; cold clean air barely glows at all.
- *  - `zenith` and `zenithWeight`: how far up the twilight reaches. This is what makes
- *    'rose' feel like a different SKY rather than a different sunset, because the
- *    colour is overhead as well as on the horizon.
- *  - `widthScale`: how long the whole thing lasts, as a multiplier on the elevation
- *    window. Dust already widens twilight; this lets a mood be brief and sharp or
- *    drawn out.
- *
- * The progression gradient still multiplies all of it: km 900's dust reddens and
- * lengthens whichever mood came up, so late-run twilights are recognisably late-run
- * whatever the roll.
- */
-interface TwilightMood {
-  readonly label: string;
-  readonly horizon: THREE.Color;
-  readonly glow: THREE.Color;
-  readonly glowScale: number;
-  readonly zenith: THREE.Color;
-  readonly zenithWeight: number;
-  readonly widthScale: number;
-}
-
-const TWILIGHT_MOODS: readonly TwilightMood[] = [
-  {
-    // The desert default: dust-fired orange-red, hard and brief. This is the sky the
-    // game had, kept as one of five so nothing familiar is lost.
-    label: 'ember',
-    horizon: new THREE.Color().setStyle('#ff6a38'),
-    glow: new THREE.Color().setStyle('#ff6a38'),
-    glowScale: 1,
-    zenith: new THREE.Color().setStyle('#3f5f9c'),
-    zenithWeight: 0.12,
-    widthScale: 1,
-  },
-  {
-    // Clean, humid air: a soft peach horizon under a lilac sky, no hard edge
-    // anywhere. The glow is wide and weak because the light is scattered, not fired.
-    label: 'peach',
-    horizon: new THREE.Color().setStyle('#ffb48a'),
-    glow: new THREE.Color().setStyle('#ffd0a8'),
-    glowScale: 0.72,
-    zenith: new THREE.Color().setStyle('#8f7fb8'),
-    zenithWeight: 0.3,
-    widthScale: 1.25,
-  },
-  {
-    // A hot, hazy day burning out: brassy gold on the horizon, the glow doing most
-    // of the work, and a long slow fade because the haze holds the light.
-    label: 'gold',
-    horizon: new THREE.Color().setStyle('#ffb02e'),
-    glow: new THREE.Color().setStyle('#ffcf5e'),
-    glowScale: 1.35,
-    zenith: new THREE.Color().setStyle('#5a6f9e'),
-    zenithWeight: 0.16,
-    widthScale: 1.4,
-  },
-  {
-    // High cloud catching light the ground has lost: magenta-rose low down, violet
-    // well overhead. The one mood that colours the whole dome.
-    label: 'rose',
-    horizon: new THREE.Color().setStyle('#f0577f'),
-    glow: new THREE.Color().setStyle('#ff7ea0'),
-    glowScale: 0.9,
-    zenith: new THREE.Color().setStyle('#6a4d97'),
-    zenithWeight: 0.42,
-    widthScale: 1.1,
-  },
-  {
-    // Cold clean morning: almost no colour at all, a thin copper line on a grey-blue
-    // sky. Rare-feeling because it is the one that refuses to perform.
-    label: 'ash',
-    horizon: new THREE.Color().setStyle('#b98a6d'),
-    glow: new THREE.Color().setStyle('#e0a882'),
-    glowScale: 0.45,
-    zenith: new THREE.Color().setStyle('#44577a'),
-    zenithWeight: 0.2,
-    widthScale: 0.78,
-  },
-];
-
-/** Fixed seed for deterministic per-twilight palette selection. */
-const MOOD_SEED = 0x5eed10ad;
-
-/**
- * Fraction of a half-day over which one mood hands over to the next.
- *
- * Handover happens at noon and at midnight — the two moments the twilight weight is
- * exactly zero — so this window only exists to keep the sun's own glow colour from
- * stepping at midday, where it still carries 0.22 of intensity. A quarter of a
- * half-day is hours of game time for a colour nobody can point at.
- */
-const MOOD_BLEND = 0.25;
-
-/**
- * Raw mood roll for one twilight event. `event` counts half-days: even is the
- * morning of `event/2`, odd is that evening.
- */
-function moodRoll(event: number): number {
-  return Math.min(
-    TWILIGHT_MOODS.length - 1,
-    Math.floor(hash01(MOOD_SEED, event, 0x11) * TWILIGHT_MOODS.length),
-  );
-}
-
-/**
- * Mood for one twilight event, with immediate repeats pushed off.
- *
- * A raw 1-in-5 roll repeats about a fifth of the time, and two identical skies in a
- * row is exactly the complaint this exists to answer — it reads as "the sky never
- * changes" even when it does. Comparing against the previous event's RAW roll keeps
- * this a pure function of the event number (no recursion, no stored history); a
- * repeat can still slip through when the previous event was itself pushed off, which
- * is rare enough to be texture rather than a pattern.
- */
-function moodFor(event: number): TwilightMood {
-  const roll = moodRoll(event);
-  if (roll !== moodRoll(event - 1)) return TWILIGHT_MOODS[roll]!;
-  const step = 1 + Math.floor(hash01(MOOD_SEED, event, 0x12) * (TWILIGHT_MOODS.length - 1));
-  return TWILIGHT_MOODS[(roll + step) % TWILIGHT_MOODS.length]!;
-}
+/** How far the air must drift before the reflection probe is worth rebuilding. */
+const ENV_REBAKE_DELTA = 0.03;
+/** And how long, at least, between two rebuilds: a probe per twilight is a stall. */
+const ENV_REBAKE_INTERVAL_S = 0.25;
 
 // ---------------------------------------------------------------------------
 // Shaders
@@ -356,369 +132,145 @@ const SKY_VERTEX = /* glsl */ `
 varying vec3 vDir;
 
 void main() {
-  // The dome is centred on the camera, so local position is the world offset
-  // from the camera: normalising it gives the view ray direction directly.
+  // The dome is centred on the camera, so local position is the world offset from the
+  // eye: normalising it gives the view ray direction directly.
   vDir = normalize(position);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  // On the far plane (a hair inside it, so it is not clipped): drawn after the opaque
-  // world, the dome is depth-tested there and shades only the sky left showing.
+  // On the far plane, a hair inside it: drawn after the opaque world, the dome is
+  // depth-tested there and shades only the sky left showing.
   gl_Position.z = gl_Position.w * 0.999999;
 }
 `;
 
 const SKY_FRAGMENT = /* glsl */ `
-uniform float uSunAngularRadius;
-uniform float uMoonAngularRadius;
-/** Radiance of sunlit lunar regolith, in the dome's own display-referred units. */
-uniform float uMoonRadiance;
-uniform sampler2D uMoonTexture;
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
-uniform vec3 uZenith;
-uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform vec3 uSunGlowColor;
 uniform float uSunGlowIntensity;
+uniform float uSunDiscGain;
+/** 0 with a clear sky, 1 when the deck or the fog has closed over the disc. */
+uniform float uSunVeil;
+uniform float uSunAngularRadius;
+uniform float uMoonAngularRadius;
+uniform float uMoonRadiance;
 uniform float uMoonAmount;
-/**
- * How strongly the sky away from the sun is pulled down, 0..1. Peaks when the sun
- * is near the horizon and is zero at midday and through the night.
- */
-uniform float uAntiSolar;
-/** Fraction of the sky the cirrus deck covers, 0..1. */
-uniform float uCloudCover;
-/** How much of the sky fair-weather cumulus covers, 0..1. */
-uniform float uCumulus;
-/** A closed grey layer over everything (world/weather.ts), 0..1. */
-uniform float uOvercast;
-/** Fog (world/weather.ts): the sky's features sink into it. */
-uniform float uSkyFog;
-/** The layer's colour at its lit parts. */
-uniform vec3 uOvercastColor;
-/** Overall visibility of the deck: 1 in daylight, 0 in deep night. */
-uniform float uCloudAmount;
-/** Seconds, wrapped. Drifts the deck downwind. */
-uniform float uCloudTime;
+uniform sampler2D uMoonTexture;
 
 varying vec3 vDir;
 
-/**
- * CIRRUS, procedurally, inside the dome fragment.
- *
- * No geometry and no draw call, which buys three things beyond the cost. It cannot be
- * outlined: the ink pass works on object edges, and a cloud shaded into the dome's own
- * fragment has none, where a billboard layer would have come back ringed in ink. It
- * cannot break the fog seam, because the deck is faded out before it reaches the
- * horizon band that the fog colour is copied from. And it is in the environment probe
- * for free, since the probe shares this shader — so an overcast sky genuinely lights
- * the car slightly differently.
- *
- * What it cannot do: occlude stars. The dome writes no depth and the star field is
- * separate geometry, so a night cloud would have stars shining through it. Rather than
- * fake that, uCloudAmount fades the deck out as night falls — which is close to
- * honest anyway, since unlit cirrus over a desert is not visible.
- */
-float cloudHash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float cloudNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(cloudHash(i), cloudHash(i + vec2(1.0, 0.0)), u.x),
-    mix(cloudHash(i + vec2(0.0, 1.0)), cloudHash(i + vec2(1.0, 1.0)), u.x),
-    u.y
-  );
-}
-
-/** Four octaves. Enough for a fibrous edge; a fifth is invisible at this scale. */
-float cloudFbm(vec2 p) {
-  float sum = 0.0;
-  float amp = 0.5;
-  for (int k = 0; k < 4; k++) {
-    sum += amp * cloudNoise(p);
-    p *= 2.03;
-    amp *= 0.5;
-  }
-  return sum;
-}
-
-/** Disc-plane coordinates in a world-up tangent basis, stable as the camera moves. */
-vec2 moonTextureUv(vec3 offset) {
-  vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), uMoonDir) + vec3(0.00001, 0.0, 0.0));
-  vec3 up = cross(uMoonDir, right);
-  return vec2(dot(offset, right), dot(offset, up));
-}
-
-
-/** Distance to the nearest of one jittered point per cell: round cells, 0 at a point. */
-float cumulusCells(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  float best = 8.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 o = vec2(float(x), float(y));
-      vec2 c = vec2(cloudHash(i + o), cloudHash(i + o + 17.31));
-      best = min(best, length(o + c - f));
-    }
-  }
-  return best;
-}
-
-/**
- * Cumulus as heaped puffs: round cells at two sizes (the heads and the cauliflower on
- * them), gated by slow noise so they gather in fields and leave blue lanes between,
- * and edged by fine noise so no puff is a clean circle.
- */
-float cumulusBody(vec2 p) {
-  float heads = 1.0 - cumulusCells(p * 0.9);
-  float florets = 1.0 - cumulusCells(p * 2.6 + 3.7);
-  float field = cloudFbm(p * 0.22 + 11.0);
-  return (heads * 0.55 + florets * 0.3 + cloudNoise(p * 7.0) * 0.1) * smoothstep(0.3, 0.58, field) + 0.08 * field;
-}
+${FOG_PARS_GLSL}
+${FOG_SKY_GRADIENT_GLSL}
 
 /**
  * McEwen's lunar-Lambert photometric function.
  *
- * Regolith is not Lambertian, and that difference is most of what makes a Moon
- * look like the Moon. It is a porous, strongly backscattering powder: a full Moon
- * reads as a flat, evenly lit disc rather than a shaded ball, and a crescent keeps
- * bright horns that taper to points.
- *
- * mu0 = cos(incidence), mu = cos(emission). The Lommel-Seeliger ratio
- * mu0/(mu0 + mu) is what saves the horns: they lie against the limb, where mu -> 0,
- * so the ratio stays near one however grazing the sunlight is there. A plain
- * Lambert cos() fades them out instead and leaves a bright cap around the sub-solar
- * limb — a parachute canopy, not a crescent. McEwen's weight l runs between the
- * two: one at zero phase, falling as the phase angle opens, which is what gives a
- * crescent's terminator its gradual fade into shadow.
+ * Regolith is not Lambertian, and that difference is most of what makes a Moon look like
+ * the Moon: it is a porous, strongly backscattering powder, so a full Moon reads as a
+ * flat, evenly lit disc and a crescent keeps bright horns. The Lommel-Seeliger ratio
+ * mu0/(mu0+mu) is what saves the horns — they lie against the limb, where mu -> 0 — and
+ * the weight l between the two terms is what gives a crescent's terminator its fade.
  */
-float lunarLambert(float mu0, float mu, float phaseAngle) {
-  // exp(-g / 60deg) tracks McEwen (1991) to within 0.05 across 0..90 degrees
-  // (0.607 vs 0.608 at 30, 0.223 vs 0.186 at 90) and, unlike his cubic fit, stays
-  // positive beyond 100 degrees — which is where every daylight crescent lives.
-  float l = exp(-phaseAngle * 0.9549);
-  return 2.0 * l * mu0 / max(mu0 + mu, 0.0001) + (1.0 - l) * mu0;
+float lunarLambert( float mu0, float mu, float phaseAngle ) {
+  float l = exp( -phaseAngle * 0.9549 );
+  return 2.0 * l * mu0 / max( mu0 + mu, 0.0001 ) + ( 1.0 - l ) * mu0;
+}
+
+vec2 moonTextureUv( vec3 offset, float mu ) {
+  vec3 right = normalize( cross( vec3( 0.0, 1.0, 0.0 ), uMoonDir ) + vec3( 0.00001, 0.0, 0.0 ) );
+  vec3 up = cross( uMoonDir, right );
+  vec2 plane = vec2( dot( offset, right ), dot( offset, up ) );
+  return vec2(
+    0.5 + atan( plane.x, mu ) / 6.28318530718,
+    0.5 + asin( clamp( plane.y, -1.0, 1.0 ) ) / 3.14159265359
+  );
 }
 
 void main() {
-  vec3 dir = normalize(vDir);
-  float h = clamp(dir.y, 0.0, 1.0);
+  vec3 dir = normalize( vDir );
 
-  // Zenith-to-horizon gradient; the pow keeps most of the blue band high.
-  vec3 col = mix(uHorizon, uZenith, pow(h, 0.62));
+  // The whole sky: the fog's own gradient at full depth, which is exactly what the far
+  // ground dissolves into along the horizon.
+  vec3 col = fogSkyColour( fogColor, fogColorB, dir.y );
 
-  float sd = dot(dir, uSunDir);
+  float sd = dot( dir, uSunDir );
+  // Disc edges are one-pixel derivative transitions: a fixed width would be wider than
+  // the disc itself and mix its surroundings in.
+  float sunEdge = cos( uSunAngularRadius );
+  float sunAa = max( fwidth( sd ) * 0.5, 0.0000001 );
+  float disc = smoothstep( sunEdge - sunAa, sunEdge + sunAa, sd );
+  // Two lobes: a wide warm spread, which is what a low sun in moist air actually does,
+  // and a tight core so a high sun stays a recognisable disc rather than a bright patch.
+  float glow = pow( max( sd, 0.0 ), 8.0 ) * 0.30 + pow( max( sd, 0.0 ), 64.0 ) * 1.10;
 
-  // Anti-solar darkening.
-  //
-  // The gradient above is a function of ELEVATION only, so without this the horizon
-  // is equally bright all the way around the compass and turning your back on a
-  // sunset looks the same as facing it. The sun's own terms below cannot fix that:
-  // they are additive and clamped to the solar hemisphere by max(sd, 0.0), so they
-  // brighten one side and never darken the other.
-  //
-  // What is missing is that a sunset's glow is scattered light from a low sun, and
-  // the sky opposite has none of it — it is already night down there, which is why
-  // the anti-twilight arch is a deep blue-grey. So the far horizon is mixed toward
-  // the ZENITH colour (already the darker, cooler end of this time of day's
-  // palette) rather than being multiplied down, which would leave a muddy brown
-  // instead of a cold one.
-  //
-  //  - "away" is 0 at the sun and 1 at the anti-solar point; squaring it keeps the
-  //    transition broad and centred behind you rather than a visible edge.
-  //  - "lowBand" confines the effect to the horizon, so the zenith is untouched
-  //    and the two hemispheres still meet seamlessly overhead.
-  //  - uAntiSolar switches the whole thing off away from dawn and dusk.
-  // pow 1.5 rather than a square: the darkening reaches further round toward the
-  // sides, so the transition is a slow wash across the whole back half of the sky
-  // instead of a patch centred behind you.
-  float away = pow(max(-sd, 0.0), 1.5);
-  float lowBand = 1.0 - smoothstep(0.0, 0.45, h);
-  col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
-
-  // --- Cirrus deck -----------------------------------------------------------
-  //
-  // The view ray is intersected with a flat plane at unit height: dir.xz / dir.y is
-  // the standard cloud-plane parameterisation, and it is what gives the deck
-  // perspective for nothing. Wisps overhead are broad and round; the same wisps
-  // toward the horizon compress into long streaks, which is exactly how a high deck
-  // looks and is the whole reason not to just paint noise on the dome directly.
-  //
-  // dir.y is floored because the projection diverges at the horizon: the uv goes to
-  // infinity, the noise goes to hash grain, and the result is a shimmering band. The
-  // floor bounds the frequency and the fade below hides where it bites.
-  float deckY = max(dir.y, 0.06);
-  vec2 cuv = dir.xz / deckY;
-
-  // Near-isotropic scale before the noise. The old 0.55 / 2.1 squash dragged every
-  // feature along the other axis into combed filaments; the small difference kept
-  // here is only enough to stop the deck reading as a tiled repeat. The drift is
-  // slow and on x, so the deck still slides sideways like a high wind deck should.
-  vec2 combed = cuv * vec2(0.75, 0.9) + vec2(uCloudTime * 0.0035, 0.0);
-  float n = cloudFbm(combed);
-
-  // Multiply by a second sample at half the frequency instead of domain-warping.
-  // The old warp smeared the weave into filaments; a coarse factor that drops low
-  // punches real holes and, where it stays high, lets the fine noise through, so
-  // the deck breaks into isolated rounded puffs with clear sky between them.
-  n *= cloudFbm(combed * 0.5);
-
-  // Cover is a threshold on the noise, so raising it does not fade cloud in
-  // everywhere at once — it grows the patches outward from where cloud already is,
-  // which is how a sky actually fills in. The multiply above cuts the field's
-  // values to about 0.4 of their former size, so the band is re-scaled by that same
-  // 0.4 and narrowed so the deck reads as separate spots rather than one soft veil.
-  float edge = 1.0 - uCloudCover;
-  float deck = smoothstep(edge * 0.4, edge * 0.4 + 0.20, n);
-
-  // Out before the horizon band, which must stay pure gradient: the fog colour is
-  // copied from it, and a cloud reaching down into it would put a hard line along
-  // the join where the far desert dissolves into the sky.
-  deck *= smoothstep(0.02, 0.22, dir.y);
-  deck *= uCloudAmount;
-
-  // Cirrus is ice: bright, and it takes its colour from the sun rather than owning
-  // one. Toward the sun it is lit through and nearly white; away from it, it settles
-  // to the pale horizon tone. That single term is also what makes the deck catch a
-  // low sun and go gold at dusk, with no second palette to author or keep in step.
-  float lit = 0.45 + 0.55 * max(sd, 0.0);
-  vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
-  col = mix(col, cloudCol, deck * 0.55);
-
-  // Cumulus are cards of their own now, lit volumes baked at load (render/clouds.ts).
-
-  // Disc edges are one-pixel derivative transitions. The old fixed dot-product
-  // width was wider than the Moon itself and mixed its dark limb into nearby sky.
-  float sunEdge = cos(uSunAngularRadius);
-  float sunAa = max(fwidth(sd) * 0.5, 0.0000001);
-  float disc = smoothstep(sunEdge - sunAa, sunEdge + sunAa, sd);
-  // Keep the white-hot centre, but concentrate both lobes so the clipped region
-  // does not spread across a large part of a clear high-altitude sky.
-  float glow = pow(max(sd, 0.0), 12.0) * 0.45 + pow(max(sd, 0.0), 96.0) * 1.5;
-  // --- Overcast ----------------------------------------------------------------
-  //
-  // A stratus layer: grey, lighter where it is thin, heavier in slow rolls, closing
-  // over the cumulus and the blue. The sun shows through only as a paler patch, and
-  // not at all once the layer is closed.
-  float ovY = max(dir.y, 0.02);
-  vec2 ovUv = dir.xz / (ovY + 0.3) * 0.35 + vec2(uCloudTime * 0.003, 0.0);
-  float ovN = cloudFbm(ovUv) * 0.7 + cloudFbm(ovUv * 3.1 + 5.0) * 0.3;
-  float ovCover = smoothstep(0.62 - 0.7 * uOvercast, 0.8 - 0.7 * uOvercast, ovN + 0.15);
-  vec3 ovCol = uOvercastColor * (0.84 + 0.3 * ovN) + uSunColor * pow(max(sd, 0.0), 6.0) * 0.12 * (1.0 - uOvercast);
-  ovCol = mix(uHorizon, ovCol, smoothstep(0.0, 0.25, dir.y));
-  col = mix(col, ovCol, ovCover * uOvercast * uCloudAmount * (1.0 - 0.7 * uSkyFog));
-  float sunClear = 1.0 - smoothstep(0.35, 0.85, uOvercast * mix(1.0, ovCover, 0.5));
-
-  col += uSunColor * disc * 2.0 * sunClear;
-  col += uSunGlowColor * glow * uSunGlowIntensity * sunClear;
+  col += uSunColor * disc * uSunDiscGain * uSunVeil;
+  col += uSunGlowColor * glow * uSunGlowIntensity * uSunVeil;
 
   // --- Moon ------------------------------------------------------------------
-  //
-  // Composited ADDITIVELY, which is the whole reason the daytime Moon works. The
-  // Moon sits beyond the atmosphere, so what reaches the eye is lunar radiance
-  // PLUS the airlight of the entire column in front of it — and that airlight is
-  // the sky colour already in col. Mixing toward a "moon colour" instead claims
-  // the disc REPLACES the sky, and against a bright sky that can only produce a
-  // grey stone darker than its surroundings. Three things the blend had to author,
-  // and got wrong, then fall out of the physics for nothing:
-  //
-  //  - the disc can only ever be brighter than the sky around it, never grey;
-  //  - the unlit side is exactly sky, so it vanishes in daylight and returns as
-  //    earthshine at night, with no day/night presence term to tune;
-  //  - the daylight pedestal compresses the maria's contrast by itself, so the
-  //    rock needs one albedo rather than a night palette and a day palette.
-  float md = dot(dir, uMoonDir);
-  float moonEdge = cos(uMoonAngularRadius);
-  float moonAa = max(fwidth(md) * 0.5, 0.0000001);
-  float mdisc = smoothstep(moonEdge - moonAa, moonEdge + moonAa, md);
+  // Composited ADDITIVELY, which is the whole reason the daytime Moon works: what
+  // reaches the eye is lunar radiance PLUS the airlight of the entire column in front of
+  // it, and that airlight is the sky colour already in col. Three things the blend had
+  // to author, and got wrong, then fall out for nothing: the disc can only ever be
+  // brighter than the sky around it; the unlit side is exactly sky, so it vanishes by
+  // day and returns as earthshine at night; and the daylight pedestal compresses the
+  // maria's contrast by itself.
+  float md = dot( dir, uMoonDir );
+  float moonEdge = cos( uMoonAngularRadius );
+  float moonAa = max( fwidth( md ) * 0.5, 0.0000001 );
+  float mdisc = smoothstep( moonEdge - moonAa, moonEdge + moonAa, md );
 
-  // Disc-plane offset in lunar radii, then the near-side sphere point under it.
-  vec3 moonOffset = (dir - uMoonDir * md) / max(sin(uMoonAngularRadius), 0.0001);
-  // cos(emission): one at disc centre, zero at the limb. It falls as a square
-  // root, so one pixel inside the limb of a binocular-sized disc it is already
-  // about 0.4 — that is how far into a crescent the limb term reaches.
-  float mu = sqrt(max(0.0, 1.0 - dot(moonOffset, moonOffset)));
-  // Near-side normal, unit length by construction: -uMoonDir at disc centre.
+  vec3 moonOffset = ( dir - uMoonDir * md ) / max( sin( uMoonAngularRadius ), 0.0001 );
+  float mu = sqrt( max( 0.0, 1.0 - dot( moonOffset, moonOffset ) ) );
   vec3 moonNormal = moonOffset - uMoonDir * mu;
-  float mu0 = max(dot(moonNormal, uSunDir), 0.0);
-  // Phase angle at the Moon. The Sun is far enough away that the elongation
-  // measured here at the eye is its supplement to within a tenth of a degree.
-  float cosPhase = -dot(uSunDir, uMoonDir);
-  float sunlit = lunarLambert(mu0, mu, acos(clamp(cosPhase, -1.0, 1.0)));
-  // No terminator feather. Brightness reaches the terminator as a linear ramp in
-  // mu0, which is both the honest fade and already antialiased; the fixed 0.03
-  // smoothstep it replaces was wider than a thin crescent is, and smeared one into
-  // a blob several times its true size.
+  float mu0 = max( dot( moonNormal, uSunDir ), 0.0 );
+  float cosPhase = -dot( uSunDir, uMoonDir );
+  float sunlit = lunarLambert( mu0, mu, acos( clamp( cosPhase, -1.0, 1.0 ) ) );
+  // Earthshine: the Earth's phase as seen from the Moon is the Moon's own complement, so
+  // the ashen light peaks exactly when the crescent is thinnest.
+  float earthshine = ( 0.5 - 0.5 * cosPhase ) * 0.015 * ( 0.35 + mu * 0.65 );
 
-  // Earthshine, the ashen light on the unlit side. The Earth's phase as seen from
-  // the Moon is the complement of the Moon's own, so this peaks exactly when the
-  // crescent is thinnest — which is when the ashen light really is visible.
-  // Centre-weighted, the Earth being behind the eye. It needs no daylight
-  // cut-off: at this level the additive composite loses it against a lit sky.
-  float earthshine = (0.5 - 0.5 * cosPhase) * 0.015 * (0.35 + mu * 0.65);
+  vec3 lunarAlbedo = texture2D( uMoonTexture, moonTextureUv( moonOffset, mu ) ).rgb;
+  // The map is a near-neutral grey photograph, but regolith is about a quarter less blue
+  // than sunlight for the same green — the only thing that can turn the ivory of a high
+  // full Moon back on, because an additive disc inherits the sky's blue pedestal.
+  lunarAlbedo *= vec3( 1.10, 1.0, 0.84 );
+  col += lunarAlbedo * ( sunlit + earthshine ) * uMoonRadiance * mdisc * uMoonAmount;
 
-  // Orthographic inverse onto the equirectangular map; the near hemisphere spans
-  // half of it, so u stays inside 0.25..0.75. Longitude compresses without bound
-  // toward the limb, which is what the texture's anisotropic filtering is for —
-  // isotropic mipmapping answers that footprint by averaging latitude as well and
-  // hands back the mean grey of the whole map, right where the crescent lives.
-  vec2 moonPlane = moonTextureUv(moonOffset);
-  vec2 moonMapUv = vec2(
-    0.5 + atan(moonPlane.x, mu) / 6.28318530718,
-    0.5 + asin(clamp(moonPlane.y, -1.0, 1.0)) / 3.14159265359
-  );
-  // The map is a near-neutral grey photograph, but regolith is not neutral: the
-  // Moon's B-V is about 0.27 magnitudes redder than sunlight, roughly a quarter
-  // less blue for the same green. Restoring that is what turns the ivory of a high
-  // full Moon back on — and, in daylight, it is the only thing that can, because
-  // an additive disc inherits the sky's blue pedestal and a neutral albedo can
-  // only ever land somewhere on the blue side of white.
-  vec3 lunarAlbedo = texture2D(uMoonTexture, moonMapUv).rgb * vec3(1.10, 1.0, 0.84);
-  col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
+  gl_FragColor = vec4( col, 1.0 );
 
-
-  gl_FragColor = vec4(col, 1.0);
-
-  // The correct terminator for a dome drawn straight to the canvas, and kept for
-  // that reason — but INERT on the path renderer.ts actually uses. Three compiles
-  // tone mapping out of anything drawn into a render target, and the colour-space
-  // conversion is the identity into a linear one, so the colour above reaches the
-  // display verbatim and clamps at 1. That is why this whole shader, palette and
-  // Moon alike, is authored display-referred rather than in radiance.
+  // Inert on the path renderer.ts uses (three compiles tone mapping out of anything drawn
+  // into a render target and the colour-space conversion is the identity into a linear
+  // one), and correct for any path that draws the dome straight to the canvas.
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `;
 
 /**
- * Linear-radiance twin of SKY_FRAGMENT, used only for the environment probe.
+ * Share of the sky's own value the environment probe carries.
  *
- * The visible dome ends with `tonemapping_fragment` + `colorspace_fragment` so it
- * matches the scene's ACES + sRGB output exactly. An environment map must carry
- * *linear radiance* instead: feeding it display-referred sRGB would tonemap the
- * sky once into the probe and again when the reflection is shaded, which reads as
- * washed-out, low-contrast chrome. Derived by deleting those two includes from
- * the one source above, so the gradient, sun disc and glow can never drift apart.
+ * A sky is bright, and a hemisphere of it used as a reflection lights everything rough
+ * that faces up: with the full value, the grass on a verge came back as white frost and
+ * the fields as paint. The probe is for what a *reflective* surface shows of the sky —
+ * car paint, glass, a wet road — so it carries this share and leaves the fill to the
+ * hemisphere light, which is where the reference implementation puts it too (their
+ * terrain runs with `envMapIntensity 0`).
  */
+const ENV_RADIANCE_SCALE = 0.55;
+
+/** Linear-radiance twin of the dome shader, used only for the environment probe. */
 const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
   .replace('#include <tonemapping_fragment>', '')
-  .replace('#include <colorspace_fragment>', '');
-
-
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+  .replace('#include <colorspace_fragment>', '')
+  .replace(
+    'gl_FragColor = vec4( col, 1.0 );',
+    `gl_FragColor = vec4( col * ${ENV_RADIANCE_SCALE.toFixed(2)}, 1.0 );`,
+  );
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
-
 
 // ---------------------------------------------------------------------------
 // Sky
@@ -730,115 +282,76 @@ export class Sky {
 
   /** Camera-centred dome, real catalogue stars and unresolved planets. */
   private readonly root = new THREE.Group();
-
   private readonly dome: THREE.Mesh;
   private readonly starField: StarField;
-
   private readonly planetField = new PlanetField();
+  private readonly clouds: Clouds;
+
   private readonly sunLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
+  private readonly ambientLight: THREE.AmbientLight;
   /** Solar System Scope lunar map, CC BY 4.0; attribution is in LICENSE. */
   private readonly moonTexture: THREE.Texture;
   private readonly astronomy = new AstronomySystem();
-  /** Network/decode completion for the only external texture owned by the sky. */
   private readonly moonReady: Promise<void>;
-  private exposure = 1;
 
-  // --- Environment probe: what makes metal read as metal (see refreshEnvironment) ---
+  /** This frame's look, built from the table: the air, the light and the clouds. */
+  private readonly palette: LookPalette = newLookPalette();
+  /** The weather and season along the road, set by `setWeather` / `setSeason`. */
+  private readonly weather: WeatherState = newWeatherState();
+  private readonly season: SeasonState = newSeasonState();
+  private readonly look = {
+    sunElevation: -1,
+    sunAzimuth: 0,
+    overcast: 0,
+    precip: 0,
+    fog: 0,
+    season: this.season,
+  };
+  /** Coverage of the deck this frame, 0..1: the ground shadows follow it. */
+  cloudCover = 0.3;
+
+  private exposure = 1;
+  /** The presentation's far plane: the scale of the whole fog model. */
+  private fogFar = 8000;
+
+  // --- Environment probe: what makes metal read as metal ----------------------
   private readonly pmrem: THREE.PMREMGenerator;
   private readonly envScene = new THREE.Scene();
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
   private readonly envMaterial: THREE.ShaderMaterial;
   private envTarget: THREE.WebGLRenderTarget | null = null;
+  private envBakedAtS = -1e9;
+  private readonly envKey = { a: 0, b: 0, sunY: -2, sunR: 0 };
 
   /** True only for the update that successfully replaced the environment target. */
   private didBakeEnvironment = false;
 
-  // --- Dome shader uniforms (typed references; mutated in place each frame) ---
+  // --- Dome uniforms (typed references; mutated in place each frame) ----------
   private readonly uSunDir = new THREE.Vector3(0, 1, 0);
   private readonly uMoonDir = new THREE.Vector3(0, -1, 0);
-  private readonly uZenith = new THREE.Color();
-  private readonly uHorizon = new THREE.Color();
   private readonly uSunColor = new THREE.Color();
   private readonly uSunGlowColor = new THREE.Color();
   private readonly uSunGlowIntensity = { value: 0 };
+  private readonly uSunDiscGain = { value: 2 };
+  private readonly uSunVeil = { value: 1 };
   private readonly uMoonAmount = { value: 0 };
   private readonly uSunAngularRadius = { value: 0.00465 };
   private readonly uMoonAngularRadius = { value: 0.0045 };
   private readonly uMoonRadiance = { value: MOON_RADIANCE_DAY };
-  /**
-   * Anti-solar darkening weight. Peaks with the sun on the horizon and falls to
-   * zero both at midday (when the sky genuinely is even all round) and once night
-   * has fallen (when there is no glow left to be asymmetric about).
-   */
-  private readonly uAntiSolar = { value: 0 };
-  /** Fraction of sky the cirrus deck covers; straight from the sky gradient. */
-  private readonly uCloudCover = { value: 0 };
-  /** Cumulus cover (see the dome shader), from the same sky gradient. */
-  private readonly uCumulus = { value: 0 };
-  private readonly uOvercast = { value: 0 };
-  private readonly uSkyFog = { value: 0 };
-  private readonly uOvercastColor = { value: new THREE.Color() };
-  /** The weather along the road (world/weather.ts), set by `setWeather`. */
-  private readonly weather: WeatherState = newWeatherState();
 
-  private readonly clouds: Clouds;
-
-  /**
-   * The cumulus for this frame, after `update`: `absX`/`absZ` the camera's ABSOLUTE
-   * world position, which the cloud field is anchored to (render/clouds.ts).
-   */
-  updateClouds(absX: number, absZ: number): void {
-    // Underlight: from the sun touching the horizon (clouds 1.6 km up still see it a
-    // little after it has set for the ground) until it climbs past ~15 degrees.
-    const dusk = smoothstep(-0.09, 0.0, this.sunElevation) * (1 - smoothstep(0.08, 0.28, this.sunElevation)) * (1 - this.weather.overcast);
-    // A low sun still lights the cloud's sunward side at full strength (the ground's
-    // day factor falls long before the cloud's does), so the heap keeps its volume.
-    const day = Math.max(smoothstep(-0.12, 0.3, this.sunElevation), 0.7 * dusk);
-    const light = Math.max(0.1, day) * (1 - 0.6 * this.weather.overcast);
-    this.clouds.update(absX, absZ, this._lightDir, this._lightColor, light, this.uCumulus.value, this.weather.overcast, this.weather.precip, 1 - 0.7 * this.weather.fog, dusk);
-  }
-
-  /** The weather to draw this frame's sky, light and air for. */
-  setWeather(weather: WeatherState): void {
-    Object.assign(this.weather, weather);
-  }
-  /**
-   * Overall deck visibility. Falls to zero as night lands, because the dome cannot
-   * depth-test against the star field and so cannot occlude a star — see the note in
-   * SKY_FRAGMENT.
-   */
-  private readonly uCloudAmount = { value: 0 };
-  /** Deck drift clock, seconds, wrapped well inside float precision. */
-  private readonly uCloudTime = { value: 0 };
-
-
-  // --- Scratch state, reused every frame (no allocation in the hot path) ---
-  private readonly _sunDir = new THREE.Vector3();
-  private readonly _overcast = new THREE.Color();
-  private readonly _overcastHorizon = new THREE.Color();
-  private readonly _lightDir = new THREE.Vector3();
-  /** Light direction with its elevation clamped, for the shadow camera only. */
+  // --- Scratch state, reused every frame (no allocation in the hot path) ------
+  private readonly _sunDirection = new THREE.Vector3();
+  private readonly _keyDirection = new THREE.Vector3(0, 1, 0);
+  private readonly _keyColor = new THREE.Color();
+  private readonly _hazeTint = new THREE.Color();
   private readonly _shadowDir = new THREE.Vector3(0, 0, 0);
-  /** Where `_shadowDir` would point this frame; it follows in SHADOW_DIR_STEP steps. */
   private readonly _shadowDirWanted = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
-  /** Orthonormal basis perpendicular to `_shadowDir`, rebuilt each frame it changes. */
   private readonly _shadowRight = new THREE.Vector3();
   private readonly _shadowUp = new THREE.Vector3();
-  private readonly _zenith = new THREE.Color();
-  private readonly _horizon = new THREE.Color();
-  private readonly _sunColor = new THREE.Color();
-  private readonly _sunGlow = new THREE.Color();
-  /** This twilight's mood, already blended out of the neighbouring two. */
-  private readonly _moodHorizon = new THREE.Color();
-  private readonly _moodGlow = new THREE.Color();
-  private readonly _moodZenith = new THREE.Color();
-  private readonly _lightColor = new THREE.Color();
-  private readonly _hemiSky = new THREE.Color();
-  private readonly _hemiGround = new THREE.Color();
-
-  private sunElevation = -1.0; // radians; starts below the horizon (night)
+  private sunElevation = -1.0;
+  private sunAzimuth = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -851,21 +364,17 @@ export class Sky {
       this.moonTexture.image = image;
       this.moonTexture.needsUpdate = true;
     });
-    // Raw sampling: the map is a display-referred photograph of the Moon, and its
-    // sRGB numbers used directly as reflectance land close to the contrast the eye
-    // reports. The true linear albedo map is a far harsher 4:1 maria-to-highland
-    // step than anyone has ever seen looking up.
+    // Raw sampling: the map is a display-referred photograph of the Moon, and its sRGB
+    // numbers used directly as reflectance land close to the contrast the eye reports.
     this.moonTexture.colorSpace = THREE.NoColorSpace;
     this.moonTexture.wrapS = THREE.RepeatWrapping;
     this.moonTexture.minFilter = THREE.LinearMipmapLinearFilter;
     this.moonTexture.magFilter = THREE.LinearFilter;
-    // The disc's orthographic-to-equirectangular mapping compresses lunar
-    // longitude without bound toward the limb, which is precisely where a crescent
-    // lives. Isotropic mipmapping answers that footprint by averaging latitude
-    // along with it and returns the mean grey of the whole map; anisotropic
-    // filtering averages only the axis that is actually compressed, so the maria
-    // survive into the horns.
+    // The disc's orthographic-to-equirectangular mapping compresses lunar longitude
+    // without bound toward the limb, which is precisely where a crescent lives; isotropic
+    // mipmapping answers that by returning the mean grey of the whole map.
     this.moonTexture.anisotropy = maxAnisotropy();
+
     this.scene = scene;
     this.fog = fog;
     this.pmrem = new THREE.PMREMGenerator(webgl);
@@ -876,50 +385,43 @@ export class Sky {
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
       uniforms: {
+        ...fogMaterialUniforms(),
         uSunDir: { value: this.uSunDir },
         uMoonDir: { value: this.uMoonDir },
-        uZenith: { value: this.uZenith },
-        uHorizon: { value: this.uHorizon },
         uSunColor: { value: this.uSunColor },
         uSunGlowColor: { value: this.uSunGlowColor },
         uSunGlowIntensity: this.uSunGlowIntensity,
+        uSunDiscGain: this.uSunDiscGain,
+        uSunVeil: this.uSunVeil,
         uMoonTexture: { value: this.moonTexture },
         uMoonAmount: this.uMoonAmount,
         uSunAngularRadius: this.uSunAngularRadius,
         uMoonAngularRadius: this.uMoonAngularRadius,
         uMoonRadiance: this.uMoonRadiance,
-        uAntiSolar: this.uAntiSolar,
-        uCloudCover: this.uCloudCover,
-        uCumulus: this.uCumulus,
-        uOvercast: this.uOvercast,
-        uSkyFog: this.uSkyFog,
-        uOvercastColor: this.uOvercastColor,
-        uCloudAmount: this.uCloudAmount,
-        uCloudTime: this.uCloudTime,
       },
       side: THREE.BackSide,
-      // The sky is the backdrop, but drawn AFTER the opaque world, on the far plane and
-      // depth-tested, so its shader runs only where sky shows. Drawn first with no
-      // test (as it was), the cloud shader ran on every pixel of the screen and was
-      // then painted over: 3 ms of a 16 ms frame. Never writes depth: the post pass
-      // tells sky from ground by the far plane.
+      // Drawn AFTER the opaque world, on the far plane and depth-tested, so its shader
+      // runs only where sky shows. Never writes depth: the post pass tells sky from
+      // ground by the far plane.
       depthWrite: false,
       depthTest: true,
+      fog: true,
     });
     this.dome = new THREE.Mesh(domeGeometry, domeMaterial);
-    // After everything opaque (0), before the grass (10+), which writes no depth and
-    // must lie over it; stars and planets are transparent and come after in any case.
+    // After everything opaque (0), before the stars (5.5, additive) and long before the
+    // cloud deck, which is transparent and therefore drawn after all of them.
     this.dome.renderOrder = 5;
     this.dome.frustumCulled = false;
     this.root.add(this.dome);
 
-    // --- Cumulus: baked volumes as cards, in the world (not the camera-following root).
-    this.clouds = new Clouds(webgl, { zenith: this.uZenith, horizon: this.uHorizon });
-    scene.add(this.clouds.mesh);
+    // --- The cloud deck: one curved plane, following the camera ---
+    // The tier arrives through `setQuality`, which the game applies at boot and again
+    // whenever the player changes it.
+    this.clouds = new Clouds('standard');
 
-    // --- Environment probe dome: same geometry and uniform objects as the
-    // visible dome, so the probe tracks the time of day for free. Only the
-    // fragment shader differs (linear radiance, see SKY_FRAGMENT_LINEAR).
+    // --- Environment probe dome: same geometry and uniform objects as the visible
+    // dome, so the probe tracks the time of day for free. Only the fragment shader
+    // differs (linear radiance, see SKY_FRAGMENT_LINEAR).
     this.envMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT_LINEAR,
@@ -927,22 +429,21 @@ export class Sky {
       side: THREE.BackSide,
       depthWrite: false,
       depthTest: false,
+      fog: true,
     });
     const envDome = new THREE.Mesh(domeGeometry, this.envMaterial);
     envDome.frustumCulled = false;
     this.envScene.add(envDome);
 
-    // --- Real Tycho-2 star field ---
+    // --- Real Tycho-2 star field, and the naked-eye planets ---
     this.starField = starField;
     this.root.add(starField.points);
     this.root.add(this.planetField.points);
 
-    // --- Sun / moon directional light ---
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 3.0);
+    // --- The key light: the Sun by day, the Moon by night ---
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 0);
     this.sunLight.castShadow = true;
     const shadow = this.sunLight.shadow;
-    // The shadow map follows the camera, so a tighter frustum spends its texels on
-    // the road, car and nearby props instead of wasting resolution on empty desert.
     shadow.mapSize.set(GRAPHICS_CONFIG.shadowMapSize, GRAPHICS_CONFIG.shadowMapSize);
     shadow.camera.near = GRAPHICS_CONFIG.shadowNear;
     shadow.camera.far = GRAPHICS_CONFIG.shadowFar;
@@ -951,7 +452,6 @@ export class Sky {
     shadow.camera.right = shadowHalfSize;
     shadow.camera.top = shadowHalfSize;
     shadow.camera.bottom = -shadowHalfSize;
-    // Small bias preserves contact shadows without acne on the terrain.
     shadow.bias = GRAPHICS_CONFIG.shadowBias;
     shadow.normalBias = GRAPHICS_CONFIG.shadowNormalBias;
     shadow.camera.updateProjectionMatrix();
@@ -959,11 +459,14 @@ export class Sky {
     // The target must be in the scene graph for its matrixWorld to update.
     scene.add(this.sunLight.target);
 
-    // --- Hemisphere bounce ---
-    this.hemiLight = new THREE.HemisphereLight(0x88b4e6, 0xd8a45c, 1.0);
+    // --- Fill: a flat ambient for overcast, and the sky/ground hemisphere over it ---
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0);
+    scene.add(this.ambientLight);
+    this.hemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, 0);
     scene.add(this.hemiLight);
 
     scene.add(this.root);
+    scene.add(this.clouds.mesh);
   }
 
   /** Prevents the launch cover from leaving while the lunar texture is still decoding. */
@@ -971,12 +474,30 @@ export class Sky {
     await this.moonReady;
   }
 
+  /** The weather to draw this frame's sky, light and air for. */
+  setWeather(weather: WeatherState): void {
+    Object.assign(this.weather, weather);
+  }
+
+  /** The season along the road: what the air and the ground are tinted by. */
+  setSeason(season: SeasonState): void {
+    Object.assign(this.season, season);
+  }
+
+  /** The world's seed, so the deck and the ground shadows ride the same wind. */
+  setWorldSeed(seed: number): void {
+    this.clouds.setWindSeed(seed);
+  }
+
+  /** Places the deck where the camera is (origin-relative, as the scene is). */
+  updateClouds(relX: number, relY: number, relZ: number, dt: number): void {
+    this.clouds.update(relX, relY, relZ, dt, this.palette, this._keyDirection);
+  }
 
   update(
     calendarEpoch: string,
     timeOfDay: number,
     dayIndex: number,
-    s: number,
     cameraX: number,
     cameraY: number,
     cameraZ: number,
@@ -984,156 +505,115 @@ export class Sky {
     viewDirZ = 0,
   ): void {
     this.didBakeEnvironment = false;
-    const g = skyGradientAt(s);
+    const nowS = performance.now() * 0.001;
+
     const celestial = this.astronomy.update(calendarEpoch, dayIndex, timeOfDay);
-    this._sunDir.copy(celestial.sun.direction);
+    this._sunDirection.copy(celestial.sun.direction);
     this.sunElevation = THREE.MathUtils.degToRad(celestial.sun.altitudeDeg);
+    this.sunAzimuth = THREE.MathUtils.degToRad(celestial.sun.azimuthDeg);
 
-    const dayFrac = (((timeOfDay % DAY_LENGTH) + DAY_LENGTH) % DAY_LENGTH) / DAY_LENGTH;
+    // --- The look for this moment -------------------------------------------
+    this.look.sunElevation = this.sunElevation;
+    this.look.sunAzimuth = this.sunAzimuth;
+    this.look.overcast = this.weather.overcast;
+    this.look.precip = this.weather.precip;
+    this.look.fog = this.weather.fog;
+    paletteAt(this.look, this.palette);
+    this.cloudCover = this.palette.cloudCover;
 
-    // --- Twilight mood ---
-    // Half-day events: even is this day's morning, odd is its evening. The boundary
-    // between them is noon (and midnight), which is exactly where `sunset` below is
-    // zero — so a mood only ever changes hands while none of it is being shown.
-    const event = dayIndex * 2 + (dayFrac < 0.5 ? 0 : 1);
-    const eventT = dayFrac < 0.5 ? dayFrac * 2 : (dayFrac - 0.5) * 2;
-    const moodBlend = smoothstep(0, MOOD_BLEND, eventT);
-    const prevMood = moodFor(event - 1);
-    const mood = moodFor(event);
-    this._moodHorizon.copy(prevMood.horizon).lerp(mood.horizon, moodBlend);
-    this._moodGlow.copy(prevMood.glow).lerp(mood.glow, moodBlend);
-    this._moodZenith.copy(prevMood.zenith).lerp(mood.zenith, moodBlend);
-    const moodGlowScale =
-      prevMood.glowScale + (mood.glowScale - prevMood.glowScale) * moodBlend;
-    const moodZenithWeight =
-      prevMood.zenithWeight + (mood.zenithWeight - prevMood.zenithWeight) * moodBlend;
-    const moodWidthScale =
-      prevMood.widthScale + (mood.widthScale - prevMood.widthScale) * moodBlend;
+    // One air for the whole frame: the fog every material is drawn in, the sky the dome
+    // is painted with, and the light colours the world uses.
+    writeFog(this.palette, this.fogFar, this.fog);
+    setWorldLighting(this.palette);
 
-    // Day/night factors.
-    const day = smoothstep(-0.12, 0.3, this.sunElevation);
-    const night = smoothstep(0.02, -0.4, this.sunElevation);
-    // 1 while the sun is near the horizon, widening with dust (longer sunsets) and
-    // with the mood: some evenings are brief and hard, others hold on for an hour.
-    const sunset =
-      1 -
-      smoothstep(0.02, (0.4 + 0.55 * g.dust) * moodWidthScale, Math.abs(this.sunElevation));
-
-    // --- Sky colours ---
-    // Zenith: day blue, nudged away from familiar blue by skyHueShift, fading to
-    // night navy, then pulled toward the mood's own upper colour while the sun is
-    // near the horizon. That last term is what makes a mood a SKY rather than a
-    // filter on the horizon line.
-    this._zenith.copy(C_DAY_ZENITH)
-      .offsetHSL(g.skyHueShift * 0.5, 0.02, 0.0)
-      .lerp(C_NIGHT_ZENITH, night)
-      .lerp(this._moodZenith, sunset * moodZenithWeight);
-
-    // Horizon: day/night base, this twilight's own band (reddened by dust), then a
-    // dust-driven turbid tan so the horizon mutes as the air thickens.
-    this._horizon.copy(C_DAY_HORIZON).lerp(C_NIGHT_HORIZON, night);
-    this._horizon.lerp(this._moodHorizon, sunset * (0.45 + 0.55 * g.dust));
-    this._horizon.lerp(C_TURBID, g.dust * 0.35 * day);
-
-    // Sun disc: warm at low angle, white overhead.
-    this._sunColor.copy(C_SUN_LOW).lerp(C_SUN_HIGH, smoothstep(0.0, 0.55, this.sunElevation));
-    // Twilight owns the halo colour only near the horizon. A high Sun blooms
-    // toward its own warm-white disc instead of carrying a sunset mood overhead.
-    this._sunGlow.copy(this._sunColor).lerp(this._moodGlow, sunset);
-    const authoredSunGlow =
-      sunset * (0.9 + 1.6 * g.dust) * moodGlowScale +
-      smoothstep(0.0, 0.6, this.sunElevation) * 0.22;
-    // A clear high Sun still overwhelms the eye. Sunset keeps its stronger,
-    // mood-driven bloom; this floor prevents noon from becoming a safe white dot.
-    // Softer than the desert's: moist air spreads a high sun into the sky instead of
-    // leaving a hard white bloom round it, and the middle belt's noon is not a glare.
-    const sunGlowIntensity = Math.max(
-      authoredSunGlow,
-      smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
-    ) * 0.65;
-    // --- Weather (world/weather.ts) ---
-    // Under cloud the whole sky greys: the zenith toward the layer's grey, the horizon
-    // toward a pale grey-white; in fog, everything toward the fog's own white. The
-    // layer's colour dims with the day, and deepens in rain: a raining deck is thick
-    // enough to take a third of the light the same grey sky lets through dry.
-    const w = this.weather;
-    this._overcast.copy(C_OVERCAST).multiplyScalar((0.25 + 0.75 * day) * (1 - 0.35 * w.precip)).lerp(C_NIGHT_ZENITH, night * 0.8);
-    this._zenith.lerp(this._overcast, w.overcast * 0.85);
-    this._horizon.lerp(this._overcastHorizon.copy(C_OVERCAST_HORIZON).multiplyScalar(0.3 + 0.7 * day), Math.max(w.overcast * 0.6, w.fog * 0.95));
-    // In fog the sky is the fog: zenith and cloud go to the horizon's pale grey.
-    this._zenith.lerp(this._horizon, w.fog * 0.85);
-    this.uOvercast.value = w.overcast;
-    this.uSkyFog.value = w.fog;
-    this.uOvercastColor.value.copy(this._overcast).lerp(this._horizon, w.fog * 0.85);
-
-    // --- Fog tracks the horizon so distant terrain melts into the sky ---
-    this.fog.color.copy(this._horizon);
-    // Rain and cloud thicken the air a little; fog brings the world in to a few
-    // hundred metres.
-    this.fog.density = BASE_FOG_DENSITY * g.haze * (1 + 0.8 * w.overcast + 1.2 * w.precip) * (1 + 110 * w.fog * w.fog);
-
-    // --- Dome uniforms ---
+    // --- Dome ------------------------------------------------------------------
     this.uSunDir.copy(celestial.sun.direction);
     this.uMoonDir.copy(celestial.moon.direction);
-    this.uSunAngularRadius.value = celestial.sun.angularRadiusRad * SUN_VISUAL_SCALE;
+    const lowSun = 1 - smoothstep(0.03, 0.4, this.sunElevation);
+    // The disc grows and softens as the sun comes down: three times its physical radius
+    // overhead, half again as much at the horizon, where the halo does the rest.
+    this.uSunAngularRadius.value = celestial.sun.angularRadiusRad * SUN_VISUAL_SCALE * (1 + 0.5 * lowSun);
+    this.uSunColor.setRGB(this.palette.sunColor.r, this.palette.sunColor.g, this.palette.sunColor.b);
+    this.uSunGlowColor.copy(this.uSunColor);
+    // The halo takes the haze tint at dusk, which is what puts a warm spread around a
+    // setting sun instead of a white dot in a coloured sky.
+    this._hazeTint.setRGB(this.palette.fogC.r, this.palette.fogC.g, this.palette.fogC.b);
+    this.uSunGlowColor.lerp(this._hazeTint, lowSun * 0.55);
+    this.uSunGlowIntensity.value = (0.1 + 0.6 * lowSun) * (1 - 0.85 * this.weather.overcast) * (1 - 0.8 * this.weather.fog);
+    this.uSunDiscGain.value = 2 * (1 - 0.3 * this.weather.overcast);
+    // What the deck and the fog take off the disc: a closed deck hides the sun behind it,
+    // and a fog spell swallows it too.
+    this.uSunVeil.value =
+      Math.max(0, smoothstep(-0.05, 0.02, this.sunElevation)) *
+      (1 - 0.9 * smoothstep(0.35, 0.85, this.weather.overcast)) *
+      (1 - 0.9 * this.weather.fog);
     const visibleMoonRadius = celestial.moon.angularRadiusRad * MOON_VISUAL_SCALE;
     this.uMoonAngularRadius.value = visibleMoonRadius;
-    // The disc's authored exposure rides the SAME night factor as the palette, so
-    // the Moon and the sky it sits in are always adapted to each other. See
-    // MOON_RADIANCE_DAY/NIGHT for why the dome has to carry adaptation at all.
-    this.uMoonRadiance.value =
-      MOON_RADIANCE_DAY + (MOON_RADIANCE_NIGHT - MOON_RADIANCE_DAY) * night;
-    this.uZenith.copy(this._zenith);
-    this.uHorizon.copy(this._horizon);
-    this.uSunColor.copy(this._sunColor);
-    this.uSunGlowColor.copy(this._sunGlow);
-    this.uSunGlowIntensity.value = sunGlowIntensity * (1 - 0.7 * this.weather.overcast);
-    // The disc goes behind a closed deck with the stars (see `skyClear` below).
-    this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y) * (1 - smoothstep(0.45, 0.9, this.weather.overcast));
-    this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
+    // The disc's authored exposure rides the SAME night factor as the palette, so the
+    // Moon and the sky it sits in are always adapted to each other.
+    // The night floor, and where it takes over from the photometric fill: from a few
+    // degrees above the horizon (the sun is already too weak to light anything) down to
+    // about ten degrees below, so the ground keeps some light through twilight instead of
+    // dropping to black at the horizon and being lifted again after it.
+    const night = smoothstep(0.05, -0.2, this.sunElevation);
+    this.uMoonRadiance.value = MOON_RADIANCE_DAY + (MOON_RADIANCE_NIGHT - MOON_RADIANCE_DAY) * night;
+    this.uMoonAmount.value =
+      Math.max(0, smoothstep(-0.01, 0.005, celestial.moon.direction.y)) *
+      (1 - 0.95 * smoothstep(0.4, 0.85, this.weather.overcast)) *
+      (1 - 0.9 * this.weather.fog);
 
-    // --- Cirrus deck ---
-    // Cover comes from the sky gradient (weather, on a 400 km cycle). Visibility is
-    // held through dusk — a lit deck at sunset is the best the sky ever looks — and
-    // gone by the time `night` reaches 1, past nautical dusk, because the dome cannot
-    // occlude a star.
-    this.uCloudCover.value = g.cloudCover;
-    this.uCumulus.value = g.cloudCover;
-    this.uCloudAmount.value = 1 - night;
-    this.uCloudTime.value = (performance.now() * 0.001) % 3600;
-
-    // --- Photometric exposure and real catalogue stars ---
+    // --- Exposure and the light rig -------------------------------------------
     //
-    // No temporal adaptation. The exposure IS the analytic answer for the current
-    // illuminance, applied the moment the illuminance changes.
-    //
-    // Easing it used to be the "eye adaptation" setting, and over an uninterrupted
-    // cycle it bought nothing: illuminance is already a smooth function of sun
-    // elevation, so the eased value only ever lagged the correct one — by up to
-    // twelve seconds of a twilight that lasts about thirty at the default clock.
-    // Worse, a jump to another time of day teleports the illuminance but not the
-    // eased exposure, so a night exposure briefly met full daylight and whited the
-    // screen out. There is no interior, tunnel or muzzle flash here for adaptation
-    // to earn its keep on, so the lag was the only thing it reliably delivered.
+    // No temporal adaptation: the exposure IS the analytic answer for the current
+    // illuminance, applied the moment it changes. Easing it only ever lagged the correct
+    // value, and a jump to another time of day whited the screen out for a second.
     const sceneIlluminance =
-      celestial.keyIlluminanceLux / 40_000 +
-      celestial.diffuseIlluminanceLux / 10_000;
+      celestial.keyIlluminanceLux / 40_000 + celestial.diffuseIlluminanceLux / 10_000;
     this.exposure = EXPOSURE_TARGET / (sceneIlluminance + ADAPTATION_FLOOR);
-    const celestialExposure =
-      EXPOSURE_TARGET / (sceneIlluminance + CELESTIAL_ADAPTATION_FLOOR);
-    // The probe is intentionally baked once, then scaled continuously. Re-baking a
-    // PMREM through twilight caused recurrent main-thread/GPU stalls; leaving a bright
-    // daytime probe at full strength instead made night materials glow. The exposed
-    // light budget is the exact scalar both problems need.
-    this.scene.environmentIntensity = Math.min(
-      1,
-      (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
+    const celestialExposure = EXPOSURE_TARGET / (sceneIlluminance + CELESTIAL_ADAPTATION_FLOOR);
+    const fill = (celestial.diffuseIlluminanceLux / 10_000) * this.exposure;
+
+    // One shadow-casting key: astronomy blends the Sun/Moon direction, and the palette
+    // carries the colour of whichever is up.
+    this._keyDirection.copy(celestial.keyDirection);
+    this._keyColor
+      .setRGB(MOONLIGHT.r, MOONLIGHT.g, MOONLIGHT.b)
+      .lerp(this.uSunColor, celestial.keySunWeight);
+    this.sunLight.color.copy(this._keyColor);
+    this.sunLight.intensity =
+      (celestial.keyIlluminanceLux / 40_000) * this.exposure * this.palette.sunIntensity;
+
+    this.ambientLight.color.setRGB(
+      this.palette.ambientColor.r,
+      this.palette.ambientColor.g,
+      this.palette.ambientColor.b,
     );
-    // A closed deck hides the night sky. The cloud itself is not drawn at night (the
-    // cards and the dome's layer fade with the light), so without this a rainy night
-    // was a starry one — the very complaint the cumulus cards were built to answer.
-    const skyClear = 1 - smoothstep(0.45, 0.9, this.weather.overcast);
-    const starVisibility = smoothstep(0.12, -0.12, this.sunElevation) * skyClear;
+    this.ambientLight.intensity = fill * this.palette.ambientIntensity;
+
+    this.hemiLight.color.setRGB(this.palette.hemiSky.r, this.palette.hemiSky.g, this.palette.hemiSky.b);
+    this.hemiLight.groundColor.setRGB(
+      this.palette.hemiGround.r,
+      this.palette.hemiGround.g,
+      this.palette.hemiGround.b,
+    );
+    // The night floor is absolute, not photometric: once the sun is gone the sky's fill
+    // is the only light there is, and fifty-fold adaptation on an illuminance of nothing
+    // is still nothing.
+    this.hemiLight.intensity = Math.max(fill * this.palette.hemiIntensity, this.palette.nightFill);
+
+    // The probe is baked, then its intensity is scaled continuously: re-baking a PMREM
+    // every frame through twilight stalls the frame, and a stale bright probe makes night
+    // materials glow.
+    this.scene.environmentIntensity = Math.min(1, (sceneIlluminance * this.exposure) / EXPOSURE_TARGET);
+    this.refreshEnvironment(nowS);
+
+    // --- Stars -----------------------------------------------------------------
+    // A closed deck hides the night sky: the star field has no depth test against the
+    // clouds (both are drawn without writing depth), so visibility is what keeps a
+    // rainy night from being a starry one.
+    const clearSky = 1 - smoothstep(0.25, 0.75, this.cloudCover);
+    const starVisibility =
+      smoothstep(0.12, -0.12, this.sunElevation) * clearSky * (1 - 0.9 * this.weather.fog);
     this.starField.update(
       celestial.equatorialToWorld,
       celestialExposure / 18_000,
@@ -1141,64 +621,19 @@ export class Sky {
       celestial.moon.direction,
       visibleMoonRadius,
     );
-    this.planetField.update(celestial, (celestialExposure / 18_000) * skyClear);
+    this.planetField.update(celestial, (celestialExposure / 18_000) * clearSky);
 
-    // One shadow-casting key light. Astronomy blends the Sun/Moon direction and
-    // exposes the same blend for colour, so the horizon hand-off cannot step.
-    this._lightDir.copy(celestial.keyDirection);
-    this._lightColor.copy(C_MOON).lerp(this._sunColor, celestial.keySunWeight);
-    // Cloud takes the direct sun (and with its share, the shadows: see below); the sky's
-    // diffuse fill rises a little, as an overcast day is flat but not dark.
-    const sunThrough = 1 - 0.85 * smoothstep(0.3, 0.9, this.weather.overcast) - 0.5 * this.weather.fog;
-    this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure * Math.max(0.05, sunThrough);
-    this.sunLight.color.copy(this._lightColor);
-
-    // Diffuse sky/ground bounce retains real day-to-night ratios by day, and floors
-    // at an authored moonlit fill by night (see NIGHT_FILL_INTENSITY): photometric
-    // adaptation alone left the desert at absolute zero, which is what turned a
-    // headlight into the only object on screen. Daylight receives 50% more SKY fill,
-    // while reciprocal compensation keeps the warm sand bounce at its former energy.
-    // This opens upward and vertical shadow detail with a blue-cyan cast without
-    // touching the direct Sun, the shadow map, the dome, or global exposure.
-    const skyFillBoost = 1 + (DAY_SKY_FILL_BOOST - 1) * day;
-    this._hemiSky.copy(C_DAY_ZENITH)
-      .offsetHSL(g.skyHueShift * 0.5, 0.025, 0.0)
-      .lerp(C_DAY_HORIZON, 0.45)
-      .lerp(C_SUN_HIGH, 0.025)
-      .lerp(C_NIGHT_FILL_SKY, night);
-    this._hemiGround.copy(C_GROUND)
-      .lerp(C_NIGHT_FILL_GROUND, night)
-      .multiplyScalar(1 / skyFillBoost);
-    this.hemiLight.color.copy(this._hemiSky);
-    this.hemiLight.groundColor.copy(this._hemiGround);
-    const photometricFill =
-      (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
-      GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
-    this.hemiLight.intensity = Math.max(
-      photometricFill * (1 + 0.35 * this.weather.overcast - 0.4 * this.weather.precip),
-      NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,
-    );
-
-    this.refreshEnvironment();
-
-    // --- Reposition the sky with the camera ---
+    // --- Reposition the sky with the camera -----------------------------------
     //
     // The origin makes every scene-graph position RELATIVE, and the camera is no
-    // exception: `cameraX/Y/Z` here are the relative eye straight off
-    // `renderer.camera.position`. The sky must stay relative too, so the root, the
-    // sun light and its shadow target below are all written with those same relative
-    // coordinates and nothing in this block adds or subtracts the origin. Catalogue
-    // stars and planets are children of `root`, laid out as direction × radius, so
-    // they remain camera-relative and are never rebased. `skyGradientAt(s)` takes
-    // arclength and is deliberately origin-independent.
+    // exception: the sky must stay relative too, so the root, the sun light and its
+    // shadow target are all written with those same relative coordinates.
     this.root.position.set(cameraX, cameraY, cameraZ);
 
-    // The classic shadow bug: a DirectionalLight's shadow frustum is defined
-    // around its target, which defaults to the origin. Drive a few hundred
-    // metres away and the shadow camera no longer looks at you, so shadows
-    // vanish. Follow the camera every frame to keep shadows alive anywhere.
+    // The classic shadow bug: a DirectionalLight's shadow frustum is defined around its
+    // target, which defaults to the origin, so a few hundred metres of driving put the
+    // shadow camera somewhere else entirely. It follows the camera every frame.
     this._targetPos.set(cameraX, cameraY, cameraZ);
-    // Led forward along the view, flattened: see SHADOW_LEAD.
     const viewFlat = Math.hypot(viewDirX, viewDirZ);
     if (viewFlat > 1e-4) {
       const lead = (SHADOW_LEAD * GRAPHICS_CONFIG.shadowFrustumHalfSize) / viewFlat;
@@ -1206,13 +641,10 @@ export class Sky {
       this._targetPos.z += viewDirZ * lead;
     }
 
-    // Shadow direction: the light's own direction, with its elevation lifted to
-    // SHADOW_MIN_ELEVATION so a horizon sun cannot stretch every shadow across the
-    // whole frame (see the constants). Azimuth is untouched, so shadows still fall
-    // away from the sun; only their length is capped. The light's POSITION is what
-    // three derives the shadow direction from, so this is the one place to do it —
-    // the disc, colour and intensity above are all left alone.
-    const dir = this._lightDir;
+    // The shadow direction is the key's, with its elevation held off the horizon (see
+    // SHADOW_MIN_ELEVATION): the light's POSITION is what three derives the direction
+    // from, so this is the only place to do it. Azimuth is untouched.
+    const dir = this._keyDirection;
     const horizontal = Math.hypot(dir.x, dir.z);
     const elevation = Math.atan2(dir.y, horizontal);
     if (elevation < SHADOW_MIN_ELEVATION && horizontal > 1e-4) {
@@ -1221,56 +653,35 @@ export class Sky {
     } else {
       this._shadowDirWanted.copy(dir);
     }
-    // Stepped, not smooth: see SHADOW_DIR_STEP. A jump (a new drive, the watch's fast
-    // forward) is simply a large step.
     if (this._shadowDir.lengthSq() === 0 || this._shadowDir.angleTo(this._shadowDirWanted) >= SHADOW_DIR_STEP) {
       this._shadowDir.copy(this._shadowDirWanted);
     }
-    // `_targetPos` just followed the camera to a WORLD position that moves smoothly,
-    // a fraction of a shadow-map texel every frame. Left as-is, every point in the
-    // world lands on a slightly different texel each frame, and the shadow it casts
-    // swims with it — invisible against open desert, but under a low indoor ceiling,
-    // where a rafter or a doorframe is a metre or two overhead, the swimming shadow
-    // boundary of everything close by reads as a dark patch that follows the player
-    // around the room, because the frustum is by construction always centred on
-    // them. Snapping the target to the shadow map's own texel lattice makes every
-    // world point land on the SAME texel regardless of camera motion, which is what
-    // stops the crawl; the residual discretisation is one texel (a few centimetres),
-    // far below anything a player can see move.
     this.stabilizeShadowTarget();
     this.sunLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
-    // Fade the whole shadow out as the true sun sinks: at that point the ground is
-    // in general shade anyway, and a clamped shadow under a horizon sun is the one
-    // case where the cheat above would be visible. It also fades with the key's share
-    // of the light, which is what takes the Moon's invisible shadow away at night (see
-    // SHADOW_KEY_SHARE_GONE). `hemiLight` was written above, this same frame.
+
+    // Fade the whole shadow out as the true sun sinks, and with the key's share of the
+    // light — which is what takes the Moon's invisible shadow away at night.
     const key = this.sunLight.intensity;
-    const keyShare = key / Math.max(1e-9, key + this.hemiLight.intensity);
+    const keyShare = key / Math.max(1e-9, key + this.hemiLight.intensity + this.ambientLight.intensity);
     const shadowStrength =
       smoothstep(0, SHADOW_FADE_ELEVATION, elevation) *
       smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare);
-    this.sunLight.shadow.intensity = shadowStrength;
-    // A zero-strength shadow is never drawn again until it returns. Freezing the map
-    // rather than clearing `castShadow` is the point: `castShadow` is compiled into
-    // every lit program, so switching it at dusk recompiled the world, while three
-    // simply skips a light whose shadow does not auto-update. The frozen map and its
-    // matrix stay a matching pair (both are written only by the shadow pass), and the
-    // first frame with any strength renders a fresh one before it is sampled.
-    //
-    // Except before the map exists. A drive that launches at night would otherwise
-    // allocate the map and compile every caster's depth program at DAWN, with the player
-    // watching; one pass while there is no map puts both under the loading cover.
     const shadow = this.sunLight.shadow;
+    shadow.intensity = shadowStrength;
+    // A zero-strength shadow is never drawn again until it returns; freezing the map
+    // rather than clearing `castShadow` is the point, because `castShadow` is compiled
+    // into every lit program. Except before the map exists: one pass while there is no
+    // map puts the allocation and the compile under the loading cover.
     shadow.autoUpdate = shadowStrength > 0 || shadow.map === null;
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
   }
 
   /**
-   * Snaps `_targetPos` to the shadow map's texel grid, in the plane perpendicular
-   * to `_shadowDir` — the two axes the shadow camera actually samples. See the call
-   * site in `update()` for why: this is what stops an indoor shadow boundary from
-   * swimming as the camera it is centred on moves continuously.
+   * Snaps the shadow target to the shadow map's texel grid, in the plane perpendicular
+   * to the shadow direction — the two axes the shadow camera actually samples. Without
+   * it, every world point lands on a slightly different texel each frame and every
+   * nearby shadow edge crawls.
    */
   private stabilizeShadowTarget(): void {
     const reference = Math.abs(this._shadowDir.y) > 0.999 ? WORLD_UP_FALLBACK : WORLD_UP;
@@ -1288,34 +699,55 @@ export class Sky {
   }
 
   /**
-   * Bakes the reflection probe once. Its intensity follows the analytic light budget
-   * every frame above; rebuilding the cubemap cannot add useful detail worth a hitch.
+   * Rebuilds the reflection probe when the air has actually changed.
+   *
+   * The probe is what a car's paint reflects, so it has to be the sky of this hour — but
+   * a PMREM per frame stalls the main thread, and one baked at boot is the wrong sky for
+   * every other hour of the day. Instead it is rebuilt when the horizon or the zenith
+   * colour has moved by a visible amount, at most four times a second, which is a
+   * fraction of a millisecond and cannot be seen.
    */
-  private refreshEnvironment(): void {
-    if (this.envTarget !== null) return;
-    this.envTarget = this.pmrem.fromScene(
-      this.envScene,
-      0,
-      1,
-      DOME_RADIUS * 2,
-      { size: 128 },
+  private refreshEnvironment(nowS: number): void {
+    const p = this.palette;
+    const key = this.envKey;
+    const airMoved = Math.max(
+      Math.abs(p.fogA.r - key.a),
+      Math.abs(p.fogA.g - key.b),
+      Math.abs(p.fogB.b - key.a),
+      Math.abs(p.fogB.g - key.b),
     );
+    const sunMoved = Math.abs(p.sunColor.r - key.sunR);
+    const settled = airMoved < ENV_REBAKE_DELTA && sunMoved < ENV_REBAKE_DELTA;
+    if (this.envTarget !== null && (settled || nowS - this.envBakedAtS < ENV_REBAKE_INTERVAL_S)) return;
+    key.a = p.fogA.r;
+    key.b = p.fogB.g;
+    key.sunY = this._keyDirection.y;
+    key.sunR = p.sunColor.r;
+    this.envBakedAtS = nowS;
+    this.envTarget?.dispose();
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0, 1, DOME_RADIUS * 2, { size: 128 });
     this.scene.environment = this.envTarget.texture;
     this.didBakeEnvironment = true;
   }
 
-  /** Applies the rendering tier to the catalogue star depth. */
-  setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
+  /** Applies the rendering tier: the star field's depth and the deck's own size. */
+  setQuality(quality: GraphicsQuality, mobilePresentation = false): void {
     this.starField.setQuality(quality, mobilePresentation);
+    this.clouds.setQuality(quality);
+    // The fog's whole scale is the presentation's far plane — the distance the world
+    // actually ends at — so a short draw distance fogs a short world and the sky is fully
+    // fogged at exactly the distance the last hill dissolves at.
+    this.fogFar = farPlaneForViewDistance(viewDistanceFor(quality, mobilePresentation));
+    this.clouds.setFarPlane(this.fogFar);
   }
 
   get didBakeEnvironmentThisFrame(): boolean {
     return this.didBakeEnvironment;
   }
 
-  /** Unit vector pointing toward the sun. Live internal vector — do not retain across frames. */
+  /** Unit vector pointing toward the sun. Live internal vector — do not retain it. */
   get sunDirection(): THREE.Vector3 {
-    return this._sunDir;
+    return this._sunDirection;
   }
 
   get isNight(): boolean {
@@ -1326,39 +758,30 @@ export class Sky {
    * How lit the roadside lamps should be, 0..1.
    *
    * `isNight` is a threshold and has to stay one — a lamp either counts as on for
-   * gameplay or it does not. What it cannot do is drive the LOOK: switching every
-   * lamp in view within one frame is the most conspicuous step in the whole dusk,
-   * and `setLamps` already takes a continuous factor for emissive and point
-   * intensity, so the binary was thrown away for nothing.
-   *
-   * The band runs from the geometric horizon to roughly eight degrees below it,
-   * which is about where civil twilight gives out and a lamp starts contributing
-   * more than the sky does.
+   * gameplay or it does not — but switching every lamp in view within one frame is the
+   * most conspicuous step in the whole dusk, so the look gets its own continuous band,
+   * from the geometric horizon to eight degrees below it, where civil twilight gives out
+   * and a lamp starts contributing more than the sky does.
    */
   get lampFactor(): number {
     return smoothstep(0, LAMP_FULL_ELEVATION, this.sunElevation);
   }
 
-  /**
-   * How "day" the sun position reads, 0..1. Drives the daytime-only heat haze:
-   * zero at night and through the dawn/dusk dip, one under a clear daytime sun.
-   * Reuses the same curve as the update loop's day/night sky blend, so the haze
-   * disappears exactly when the sky goes dark.
-   */
+  /** How "day" the sun position reads, 0..1: zero at night and through the dawn dip. */
   get dayFactor(): number {
     return smoothstep(-0.12, 0.3, this.sunElevation);
   }
 
-  /** The sun disc's colour now: warm when low, near white overhead. */
+  /** The key light's colour now: warm when low, near white overhead, moonlight at night. */
   get sunColor(): THREE.Color {
-    return this._sunColor;
+    return this.uSunColor;
   }
 
   /**
    * How strongly the sun draws shafts through the trees (core/renderer.ts
    * `setSunRays`): most in the morning and evening, when the light slants through the
-   * woods as in Shishkin's "Morning in a pine forest"; none from mid-morning to mid-
-   * afternoon, when a high sun makes no shafts worth their 1–2 ms, and none at night.
+   * woods; none from mid-morning to mid-afternoon, when a high sun makes no shafts worth
+   * their cost, and none at night.
    */
   get sunRayStrength(): number {
     const up = smoothstep(-0.02, 0.06, this.sunElevation);
@@ -1367,31 +790,33 @@ export class Sky {
   }
 
   /**
-   * Perceptual visibility of local lights under the current solar illuminance.
-   * The lamps still exist at noon, but a dark-adapted night beam cannot remain
-   * equally visible against roughly 100,000 lux of daylight.
+   * Perceptual visibility of local lights under the current solar illuminance. The lamps
+   * still exist at noon, but a dark-adapted night beam cannot remain equally visible
+   * against a hundred thousand lux of daylight.
    */
   get artificialLightFactor(): number {
     return 1 - this.dayFactor * 0.995;
   }
 
-
   dispose(): void {
     this.scene.remove(this.root);
+    this.scene.remove(this.clouds.mesh);
     this.scene.remove(this.sunLight);
     this.scene.remove(this.sunLight.target);
     this.scene.remove(this.hemiLight);
+    this.scene.remove(this.ambientLight);
 
     this.dome.geometry.dispose();
     (this.dome.material as THREE.ShaderMaterial).dispose();
     this.moonTexture.dispose();
+    this.clouds.dispose();
 
     this.starField.dispose();
     this.planetField.dispose();
 
     this.scene.environment = null;
     this.envMaterial.dispose();
-    if (this.envTarget !== null) this.envTarget.dispose();
+    this.envTarget?.dispose();
     this.pmrem.dispose();
   }
 }

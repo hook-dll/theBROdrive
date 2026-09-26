@@ -22,9 +22,17 @@ function installPointLightZeroGuard(): void {
 
 installPointLightZeroGuard();
 
-/** Sun shadows fade out between these view distances, metres. */
-const SHADOW_FADE_FROM_M = 78;
-const SHADOW_FADE_TO_M = 100;
+/**
+ * Sun shadows fade out between these view distances, metres.
+ *
+ * The shadow map covers the near field only (config/graphics.json
+ * `shadowFrustumHalfSize`): the car, the player and the props beside them. A tree over
+ * the road used to cast into a ±72 m map, but that is stage 4's job to bake into the
+ * ground, and a map that big spent its resolution on empty fields. The fade has to end
+ * before the map's own edge or the edge itself becomes a line of popping shadows.
+ */
+const SHADOW_FADE_FROM_M = 16;
+const SHADOW_FADE_TO_M = 24;
 /** Share of the shadow map, at each edge, over which its shadows fade out. */
 const SHADOW_EDGE_FADE = 0.07;
 
@@ -77,54 +85,3 @@ ${pars
 
 installShadowStabiliser();
 
-/** Metres over which the haze thins by a factor of e, rising. */
-const HAZE_SCALE_HEIGHT_M = 70;
-/** Bounds on how much thicker or thinner than at eye level a sight line's haze is. */
-const HAZE_THINNEST = 0.35;
-const HAZE_THICKEST = 2.2;
-
-/**
- * HAZE LIES LOW. Three's exponential fog is the same air at every height; real haze
- * thins upward, so a valley below the road fills with it and a hill above stands
- * clear. The fog's density is scaled by the mean density along the sight line through
- * air thinning as exp(-height / H) from the eye:
- *
- *   mean = (1 - exp(-k Δ)) / (k Δ),  k = 1 / H,  Δ = target height - eye height
- *
- * Measured from the eye, not from sea level: the land drifts by hundreds of metres
- * from region to region, and haze pooled at an absolute height would bury one region
- * and leave the next bare. On level ground the mean is 1 and nothing changes, so the
- * fog's colour and density (render/sky.ts) keep their meaning.
- */
-function installHeightHaze(): void {
-  const marker = '/* height-haze */';
-  if (THREE.ShaderChunk.fog_pars_vertex.includes(marker)) return;
-  const exp2 = 'float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );';
-  if (!THREE.ShaderChunk.fog_fragment.includes(exp2) || !THREE.ShaderChunk.fog_vertex.includes('vFogDepth = - mvPosition.z;')) {
-    throw new Error('Three fog shader layout changed');
-  }
-  THREE.ShaderChunk.fog_pars_vertex = `${marker}
-#ifdef USE_FOG
-	varying float vFogDepth;
-	varying float vFogRise;
-#endif`;
-  THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
-	vFogDepth = - mvPosition.z;
-	// World height from the view position: every shader that fogs has mvPosition.
-	vFogRise = ( transpose( mat3( viewMatrix ) ) * ( mvPosition.xyz - viewMatrix[ 3 ].xyz ) ).y - cameraPosition.y;
-#endif`;
-  THREE.ShaderChunk.fog_pars_fragment = THREE.ShaderChunk.fog_pars_fragment.replace(
-    'varying float vFogDepth;',
-    'varying float vFogDepth;\n\tvarying float vFogRise;',
-  );
-  const k = 1 / HAZE_SCALE_HEIGHT_M;
-  THREE.ShaderChunk.fog_fragment = THREE.ShaderChunk.fog_fragment.replace(
-    exp2,
-    `float fogRiseK = vFogRise * ${k.toFixed(5)};
-		float fogMean = abs( fogRiseK ) < 0.001 ? 1.0 - 0.5 * fogRiseK : ( 1.0 - exp( - fogRiseK ) ) / fogRiseK;
-		float fogAmount = fogDensity * vFogDepth * clamp( fogMean, ${HAZE_THINNEST.toFixed(2)}, ${HAZE_THICKEST.toFixed(2)} );
-		float fogFactor = 1.0 - exp( - fogAmount * fogAmount );`,
-  );
-}
-
-installHeightHaze();

@@ -104,10 +104,14 @@ export interface GraphicsTier {
    * 7, and past roughly 8 a phone screen cannot resolve the extra ones anyway.
    */
   readonly mobileStarMagnitude: number;
-  /** How far the desert is drawn before the fog dissolves it, metres. */
+  /**
+   * How far the world is drawn before the fog dissolves it, metres.
+   *
+   * This is also the fog's whole scale: the air's far plane IS this distance
+   * (render/look/fog.ts), so the horizon always dissolves exactly where the last hill
+   * ends rather than at a second, separately tuned range.
+   */
   readonly horizonM: number;
-  /** Fog-density multiplier that keeps the horizon resolving instead of hazing out. */
-  readonly fogScale: number;
   /**
    * Permanent spotlights compiled into every lit material, for car headlamps.
    *
@@ -165,7 +169,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     starMagnitude: 7,
     mobileStarMagnitude: 7,
     horizonM: 1500,
-    fogScale: 1,
     vehicleLightSlots: 2,
     mobileVehicleLightSlots: 2,
     streetLightSlots: 2,
@@ -185,7 +188,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     starMagnitude: 8,
     mobileStarMagnitude: 7.5,
     horizonM: 8000,
-    fogScale: 0.42,
     vehicleLightSlots: 6,
     // A phone gets two thirds of the desktop budget here, not half: the desktop six keeps
     // three cars' lamps projected, which is the difference between traffic that reads as
@@ -209,7 +211,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     starMagnitude: 8.5,
     mobileStarMagnitude: 8,
     horizonM: 25000,
-    fogScale: 0.16,
     // EIGHTEEN WAS A CLIFF, MEASURED. The lit-fragment shader costs almost nothing per
     // light up to about thirteen slots and then a great deal per light after them — same
     // scene, same pixels, on an M2 Pro at 2 Mpx: 11 slots 6.5 ms, 13 slots 7.5, 15 slots
@@ -244,14 +245,6 @@ function vistaRungFor(quality: GraphicsQuality, mobilePresentation: boolean): Gr
 /** Convenience readers, so callers ask the question they mean. */
 export function viewDistanceFor(quality: GraphicsQuality, mobilePresentation: boolean): number {
   return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].horizonM;
-}
-
-/** The fog that dissolves the horizon this presentation actually has. */
-export function viewDistanceFogScaleFor(
-  quality: GraphicsQuality,
-  mobilePresentation: boolean,
-): number {
-  return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].fogScale;
 }
 
 /** Spotlight budget for vehicle lamps, as this presentation will compile it. */

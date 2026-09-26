@@ -99,7 +99,7 @@ for (const [index, item] of SELECTED.entries()) {
   camera.up.set(0, 1, 0);
   // allowEnvironmentRefresh: true so the first case bakes the PMREM probe, which is
   // the only path that compiles SKY_FRAGMENT_LINEAR.
-  sky.update(EPOCH, item.timeOfDay, item.dayIndex, 0, 0, 0, 0, true);
+  sky.update(EPOCH, item.timeOfDay, item.dayIndex, 0, 0, 0);
   camera.lookAt(moon.x * 100, moon.y * 100, moon.z * 100);
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
