@@ -60,6 +60,30 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE ROAD BENDS AT ITS VILLAGES (`docs/research-2026-09-26-landscape.md`, section 14). The
+  one land tie the heading can make, and the reason is architectural rather than rural: the
+  heading is a pure function of arclength, so only a feature PLACED ALONG THE ROAD can bend
+  it — and a village is one (a schedule in world/village.ts), while a stream, a ravine, a
+  ridge or a wood edge is a two-dimensional field whose meeting point depends on where the
+  road already is. A section whose street contains a village now gets an extra bearing change
+  (0.2 rad and up, the sign drawn from the village's own index, so the road curves through
+  one village one way and the next the other), added to the section's own bend and capped by
+  the no-crossing budget: `deviation + headingMax + village < 90 degrees`, which is why a
+  village turns the road by ten to twenty degrees rather than by ninety. Measured over 60 km:
+  the heading through a village turns 20 degrees on average against 17 for a random 600 m of
+  the same road, 13 of 27 villages turning more than 17. The addition is capped by the budget
+  (about 10 degrees on a просёлок, up to 35 on the regional kind), and making room for it
+  needed longer sections (190->220, 220->240, 160->190 m) and a slightly crisper transition
+  (lateral jerk 0.5 -> 0.75 m/s3): with the old numbers the village pushed the transition
+  past the room and the 68 m corner floor was violated (55-58 m measured). `tools/road-selfcross.ts`
+  is green again. And the same fault this file had
+  once before appeared again in the new term — the village's addition was applied to the
+  section's target but not inherited by the next section, so the heading stepped 17.3
+  degrees in four metres. A section's bearing is assembled in one function now and the next
+  section inherits it; the worst step is 3.5 degrees. NOT done, and named in the plan: a
+  bridge square to its stream, skirting ravine heads and ridge ends, entering a wood on a
+  curve — all four need the heading to depend on the road's own position, which is the ODE
+  the module's header forbids and its own piece of work.
 - THE ROAD IS A ПРОСЁЛОК THAT WINDS NOW (`docs/research-2026-09-26-landscape.md`, section 13).
   The owner drove it: "дорога стала значительно более прямой и не петляет так, как в
   пустыне". He was right, and by an order of magnitude: the whole-drive median radius was

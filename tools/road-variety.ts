@@ -26,6 +26,7 @@ import { roadConditionAt, poleEraSegments } from '../src/world/gradient';
 import type { RoadConditionBuffer } from '../src/world/gradient';
 import { Road } from '../src/world/road';
 import { CHARACTERS, characterAt, newCharacterBuffer } from '../src/world/roadcharacter';
+import { villagesBetween } from '../src/world/village';
 import { roadPaceCeiling, surfacePaceFactor } from '../src/vehicle/autopilot';
 
 const SEED = Number(process.argv[2] ?? 1337);
@@ -256,6 +257,27 @@ console.log('');
       `  peak radius: p10 ${peakRadius(0.1)}, median ${peakRadius(0.5)}, p90 ${peakRadius(0.9)}` +
         `  |  turning ${(turning / km).toFixed(0)} deg/km` +
         `  |  [real secondary roads: 4-5 curves/km, 36-43% in curves, curves ~100 m, 94 deg/km, peak radii mostly 50-250 m]`,
+    );
+  }
+  // THE VILLAGE BEND, measured where it acts: the heading change across a village's own
+  // span against the same-length change at every other arclength of the drive. A road that
+  // bends at its villages shows a distribution with a shoulder where the villages are.
+  {
+    const span = (from: number, to: number): number =>
+      Math.abs(road.sampleAt(to).heading - road.sampleAt(Math.max(0, from)).heading);
+    const villageChanges: number[] = [];
+    for (const village of villagesBetween(SEED, 0, driveM)) {
+      villageChanges.push(span(village.from - 40, village.to + 40));
+    }
+    const anywhere: number[] = [];
+    for (let s = 0; s + 600 < driveM; s += 50) anywhere.push(span(s, s + 600));
+    anywhere.sort((a, b) => a - b);
+    const median = anywhere[Math.floor(anywhere.length / 2)] ?? 0;
+    const mean = villageChanges.length ? villageChanges.reduce((a, b) => a + b, 0) / villageChanges.length : 0;
+    const bent = villageChanges.filter((v) => v > 0.3).length;
+    console.log(
+      `village bends: ${villageChanges.length} villages, mean heading change ${((mean * 180) / Math.PI).toFixed(0)} deg` +
+        `  |  ${bent} of them turn more than 17 deg  |  a random 600 m of the road turns ${((median * 180) / Math.PI).toFixed(0)} deg (median)`,
     );
   }
   console.log('whole drive');

@@ -26,7 +26,8 @@ import { POI_VARIANTS } from './poi-variants';
  */
 
 /** Arclength between village slots, metres, and how far inside a slot one may sit. */
-const SLOT_M = 8500;
+export const VILLAGE_SLOT_M = 8500;
+const SLOT_M = VILLAGE_SLOT_M;
 const JITTER_M = 1700;
 /** Fraction of slots with a village: the gaps between them are then 6-11 km. */
 const ODDS = 0.85;
@@ -88,6 +89,24 @@ export interface Village {
   readonly side: -1 | 1;
   readonly houses: readonly VillageHouse[];
   readonly pond: VillagePond;
+}
+
+/**
+ * The village whose street covers an arclength, or null.
+ *
+ * Read by the road itself (world/roadcurve.ts): a bend belongs at a village, and this is
+ * the one lookup the heading field can make, because a village is placed ALONG the road
+ * and the heading is a pure function of arclength. Only the slots either side of `s` are
+ * asked, so it stays O(1).
+ */
+export function villageCovering(seed: number, s: number): Village | null {
+  const slot = Math.floor(s / SLOT_M);
+  for (let index = slot - 1; index <= slot + 1; index++) {
+    if (index < 0) continue;
+    const village = villageAt(seed, index);
+    if (village && s >= village.from && s <= village.to) return village;
+  }
+  return null;
 }
 
 /** The village in a slot, or null where the slot is empty country. */

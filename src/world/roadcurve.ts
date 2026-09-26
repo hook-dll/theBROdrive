@@ -1,5 +1,6 @@
 import { hashUnit2, hashUnit3, Noise1D } from '../core/rng';
 import { characterAt, characterOf, districtAt, districtStartOf, newCharacterBuffer, newDistrictBuffer, type RoadCharacter } from './roadcharacter';
+import { villageCovering } from './village';
 
 /**
  * The road's heading field and the one node recurrence that integrates it.
@@ -126,14 +127,14 @@ const SMOOTHERSTEP_MAX_SLOPE = 1.875;
  * Lateral jerk the transition is sized for, m/s³, and the cornering budget the entry
  * speed is derived from, m/s².
  *
- * 0.5 m/s³ sits inside the comfort range road guidance uses (0.3-0.6) and 4 m/s² is
+ * 0.75 m/s³ sits at the top of the range road guidance uses (0.3-0.6) and 4 m/s² is
  * the cornering budget an ordinary traffic car actually spends — the careful mode's
  * own figure is 3.2 and the hurried one's 4.7 — so the entry this sizes is the one a
  * stream car will really arrive at. It is deliberately NOT the frantic figure: a
  * transition long enough for the calm majority is comfortable for everybody, while
  * one sized for the fastest driver is a flick for the rest.
  */
-const TRANSITION_JERK_MPS3 = 0.5;
+const TRANSITION_JERK_MPS3 = 0.75;
 const TRANSITION_LATERAL_MPS2 = 4;
 
 function smootherstep01(t: number): number {
@@ -182,6 +183,12 @@ function transitionLength(radius: number, headingChange: number): number {
 const E_MAX = 0.08;
 /** Side friction the design speed is expected to spend, leaving the rest to banking. */
 const F_DESIGN = 0.12;
+
+/**
+ * The heading budget the no-crossing theorem gives: `deviation + headingMax + village`
+ * must stay under 90 degrees. 1.42 rad leaves the theorem three degrees of slack.
+ */
+const HEADING_BUDGET = 1.42;
 
 /** First stretch out of the house is dead straight, for the garage exit. */
 const STRAIGHT_RUNOUT = 260;
@@ -235,6 +242,62 @@ export class RoadHeading {
    * section is the LAST section of the district before it, computed from that
    * district's own character.
    */
+  /**
+   * The bend a VILLAGE gets, radians, or 0 where the section has no village in it.
+   *
+   * THE ONE LAND TIE THE HEADING CAN MAKE, and the reason is in the architecture rather
+   * than in the countryside: the heading is a pure function of arclength, so a feature can
+   * bend the road only if it is PLACED ALONG THE ROAD. A village is — it is a schedule in
+   * `world/village.ts`, exactly as the surface changes and the roadside eras are — while a
+   * stream, a ravine, a ridge or a wood edge is a two-dimensional field, and where the road
+   * meets one of those depends on where the road has already got to. That is an ODE, not a
+   * function of `s`, and it is the thing the three integrators must agree on bit for bit
+   * (see the header); it is named in the plan as its own piece of work.
+   *
+   * WHAT THE BEND IS. A road does not pass a village in a straight line for no reason: the
+   * street follows the bend, or the road swings round the outside of one. So a section that
+   * has a village in the middle of its street gets a LARGER heading change than its
+   * character asked for — added to the section's own bend, never subtracted, so the cadence
+   * cannot drop to nothing — and the direction is the village's own, drawn from its index,
+   * so the road curves through that village one way and through the next one the other.
+   *
+   * `VILLAGE_BEND_MAX` keeps `deviation + headingMax + this` inside the no-crossing budget:
+   * the largest characters spend 1.25 rad, and 0.2 more still leaves the guarantee whole.
+   */
+  private villageBend(index: number, s: number, c: RoadCharacter): number {
+    const village = villageCovering(this.seed, s);
+    if (!village) return 0;
+    const magnitude = 0.2 + 0.14 * hashUnit3(this.turnMagnitudeSeed, village.index, 0x811c);
+    const sign = hashUnit3(this.turnTimingSeed ^ 0x51ab3f, village.index, 7) < 0.5 ? -1 : 1;
+    // As much as the no-crossing budget has left in THIS kind: the guarantee is
+    // `deviation + heading + this < 90 degrees`, so a kind that already wanders a long way
+    // can have less of its village than a straight one can.
+    const room = Math.max(0, HEADING_BUDGET - c.deviation - c.headingMax);
+    return sign * Math.min(magnitude, room);
+  }
+
+  /**
+   * THE BEARING A SECTION ENDS ON, and the ONE place a section's bend is assembled.
+   *
+   * Both the section's own target and the bend its village adds, because the NEXT
+   * section starts from whatever this one actually reached: adding a village to the
+   * target in one place and not in the other is a heading step of the village's own
+   * size at the section's boundary — measured, 17 degrees in four metres, which is the
+   * same fault this file already had once.
+   */
+  private sectionBearing(
+    k: number,
+    index: number,
+    c: RoadCharacter,
+    sectionStart: number,
+    sectionLength: number,
+  ): number {
+    const base = this.sectionTarget(k, index, c);
+    const middle = sectionStart + (index + 0.5) * sectionLength;
+    const bend = this.villageBend(index, middle, c);
+    return base + bend * (base >= 0 ? 1 : -1);
+  }
+
   private sectionTarget(district: number, index: number, c: RoadCharacter): number {
     const magnitude =
       c.headingMin +
@@ -265,9 +328,11 @@ export class RoadHeading {
 
     const from =
       index > 0
-        ? this.sectionTarget(k, index - 1, c)
+        ? this.sectionBearing(k, index - 1, c, this.district.start, sectionLength)
         : this.previousDistrictTarget(k);
-    const drawn = this.sectionTarget(k, index, c);
+    // The village's bend rides on the section's own, with the sign the village drew: the
+    // road curves THROUGH the village rather than only past it.
+    const drawn = this.sectionBearing(k, index, c, this.district.start, sectionLength);
     const radius =
       c.radiusMin +
       (c.radiusMax - c.radiusMin) * hashUnit3(this.turnRadiusSeed, k, index);
@@ -323,7 +388,7 @@ export class RoadHeading {
     const start = districtStartOf(this.seed, k - 1);
     const end = districtStartOf(this.seed, k);
     const sections = this.sectionsIn(start, end, previous.cornerSpacing);
-    return this.sectionTarget(k - 1, sections - 1, previous);
+    return this.sectionBearing(k - 1, sections - 1, previous, start, (end - start) / sections);
   }
 
   at(s: number): number {
