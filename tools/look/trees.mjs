@@ -17,7 +17,7 @@ import { createRequire } from 'node:module';
 import { LOOK, CACHE, OUTDIR, ensureDirs, exists } from './lib/util.mjs';
 import { asset as acgAsset, map as acgMap } from './lib/ambientcg.mjs';
 import { asset as phAsset } from './lib/polyhaven.mjs';
-import { loadImage, saveWebp, img, paste, dilateRGB } from './lib/image.mjs';
+import { loadImage, saveWebp, savePng, img, paste, dilateRGB } from './lib/image.mjs';
 
 const run = promisify(execFile);
 const sharp = createRequire(import.meta.url)('sharp');
@@ -31,26 +31,20 @@ export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 
 /**
  * One entry per species. `column` is the column it owns in its group's atlas,
- * `bark` the ambientCG bark id, `conifer` the Poly Haven pack and which tree of
- * it, `height_m` the model's height at instance scale 1 (the game scales it).
+ * `bark` the ambientCG bark id, `height_m` the model's height at instance scale 1
+ * (the game scales it). A conifer has no `pack`: it is grown, not scanned.
  */
 export const SPECIES = {
   birch: { group: 'deciduous', column: 0, height_m: 11.5, bark: 'Bark011', kind: 'deciduous', autumn: 'gold' },
   aspen: { group: 'deciduous', column: 1, height_m: 11.2, bark: 'Bark009', kind: 'deciduous', autumn: 'orange-red' },
   oak: { group: 'deciduous', column: 2, height_m: 10.9, bark: 'Bark014', kind: 'deciduous', autumn: 'ochre-brown' },
   lime: { group: 'deciduous', column: 3, height_m: 11.4, bark: 'Bark004', kind: 'deciduous', autumn: 'yellow' },
-  // fir_sapling, not the fir_tree_01 scan: the scan is a forest fir whose crown
-  // starts at half its height, so at the species' 11.6 m it was a bare pole with a
-  // tuft. The game's spruce model is a cone with whorls from 1.4 m, and the sapling
-  // is a fir with its branches to the ground.
-  spruce: { group: 'conifer', column: 0, height_m: 11.6, bark: 'Bark006', kind: 'conifer', pack: 'fir_sapling', tree: 'a' },
-  // pine_tree_01's published mesh is 948 MB (79 M vertices) and cannot be imported,
-  // and pine_sapling_small is a 1.3 m seedling — a bare pole with a tuft, which is
-  // what the first conifer pass rendered. pine_sapling_medium is a real 11.5 x 5.2 m
-  // pine with proper whorled tiers (clump `a`, the tallest of the three), and is the
-  // usable CC0 pine on Poly Haven. Every conifer render scales the pack tree to the
-  // species' own height (11.6 m / 12.0 m), so the sprite and the game model agree.
-  pine: { group: 'conifer', column: 1, height_m: 12.0, bark: 'Bark012', kind: 'conifer', pack: 'pine_sapling_medium', tree: 'a' }
+  // Norway spruce and Scots pine are grown by trees/trees.py like the deciduous
+  // species — a whorled skeleton with a drawn needle card per shoot. The height is
+  // what fits the cells: the whole-tree sprite is 8 x 12 m at 64 px/m, so a 12 m
+  // tree would put its apex on the cell's top edge.
+  spruce: { group: 'conifer', column: 0, height_m: 11.3, bark: 'Bark006', kind: 'conifer' },
+  pine: { group: 'conifer', column: 1, height_m: 11.6, bark: 'Bark012', kind: 'conifer' }
 };
 
 const GROUPS = ['deciduous', 'conifer'];
@@ -85,18 +79,18 @@ export const sources = [
     usedFor: ['trees_conifer_*_m.webp'],
     note: 'bark strip: spruce / pine columns'
   })),
-  ...['fir_sapling', 'pine_sapling_medium'].map((id) => ({
-    id,
-    provider: 'Poly Haven',
-    url: `https://polyhaven.com/a/${id}`,
+  {
+    id: 'needle shoots (drawn)',
+    provider: 'Blender render',
+    url: 'tools/look/trees/trees.py — needle_sheet(): four drawn shoots per species on transparent',
     license: 'CC0 1.0',
     usedFor: ['trees_conifer_*_m.webp', 'imposters_conifer_*_d.webp'],
-    note: 'real needle-level tree, sliced top-down by the camera clip planes into the whorl sprites and baked whole into the impostor rows; each material slot keeps its own base-colour texture (bark, trunk, twig), so needles are needles and not bark'
-  })),
+    note: 'the needle texture itself, drawn rather than scanned: a shoot is 9-36 cm of twig with strands raked off it, ~30 strands a card, shaded dark at the twig and lighter at the tips. A photograph cannot fill a needle card — a real spruce needle is 1.5-2 cm, which is one texel at the sprite cell\'s 64 px/m and a third of one in an impostor cell — so the shoot is drawn at the scale the card is seen at, the same way plants.py draws its umbel heads because Poly Haven has no CC0 umbellifer. Colour is the species\': dark blue-green for the spruce, longer grey-green fascicles for the pine'
+  },
   {
     id: 'trees.py renders and models',
     provider: 'Blender render',
-    url: 'tools/look/trees/trees.py — branch modules, whole-tree sprite, impostor bakes, bark cylinder, GLB export',
+    url: 'tools/look/trees/trees.py — grown trees, branch modules, whole-tree sprite, top-down star, impostor bakes, bark strip, GLB export',
     license: 'CC0 1.0',
     usedFor: [
       'trees_deciduous_*.webp',
@@ -116,11 +110,7 @@ const WHOLE = { x: 0, y: 0, w: 512, h: 768 };
 const BARK = { x: 0, y: 768, w: 1024, h: 256 };
 const CLUMPS = [];
 for (const y of [0, 256, 512]) for (const x of [512, 768]) CLUMPS.push({ x, y, w: 256, h: 256 });
-const WHORLS = [
-  { x: 0, y: 0, w: 512, h: 512, m: 5.6 },
-  { x: 512, y: 0, w: 512, h: 512, m: 4.4 },
-  { x: 0, y: 512, w: 512, h: 512, m: 3.4 }
-];
+const STAR = { x: 512, y: 0, w: 512, h: 512, m: 5.6 };
 const BRANCH = { x: 512, y: 512, w: 512, h: 256, m: [4.0, 2.0] };
 
 const uvOf = (c) => ({ u: [c.x / 1024, (c.x + c.w) / 1024], v: [1 - (c.y + c.h) / 1024, 1 - c.y / 1024] });
@@ -133,9 +123,10 @@ const columnLayoutDeciduous = {
 };
 
 const columnLayoutConifer = {
-  whorl_slices: WHORLS.map((c, i) => ({ index: i, px: c, world_m: [c.m, c.m], ...uvOf(c), note: `top-down whorl layer ${i} (lowest and widest first): the widest tier of the tree takes the 5.6 m cell and the two smaller cells sit higher up the crown, 2 m of the tree passing the clip planes, the star centred on the trunk axis at that height and scaled so it fills the cell` })),
-  side_branch: { px: BRANCH, world_m: BRANCH.m, ...uvOf(BRANCH), note: 'a whorl tier seen 18 degrees above the horizon, aimed at the slice the 5.6 m cell uses and clipped 14 m deep so the whole crown across the frame is in it: the model\'s side cards' },
-  bark_strip: { px: BARK, world_m: [2.0, 0.5], ...uvOf(BARK) }
+  whole_tree_sprite: { px: WHOLE, world_m: [8.0, 12.0], ...uvOf(WHOLE), note: 'the grown tree at instance scale 1, base on the cell bottom edge, 64 px/m, exactly as in a deciduous column: an 11.3-11.6 m conifer fills 94-97 % of the cell height and its crown 84-92 % of the width. It is the same tree the star, the side cell, the model and the impostors are all drawn from' },
+  whorl_star: { px: STAR, world_m: [STAR.m, STAR.m], ...uvOf(STAR), note: 'the top-down star the model\'s whorl fans sample, 91 px/m: a real view from directly above the tree\'s own widest whorl plus the two tiers either side of it, centred on the trunk axis, scaled so the star fills 94 % of the cell. No clip planes and no slice height guessed from a radius profile, so it cannot land in the gap between two tiers and it cannot show a trunk section — the band is whole whorls. The fans scale it to their own radius, so an upper whorl samples the inner part of the star' },
+  side_branch: { px: BRANCH, world_m: BRANCH.m, ...uvOf(BRANCH), note: 'one whole whorl branch of the same tree, turned to run across the cell and scaled to fill it: a spruce\'s hanging comb branch, a pine\'s foliage plate. The model\'s side cards carry a real branch of the tree the sprites show' },
+  bark_strip: { px: BARK, world_m: { spruce: [2.0, 0.5], pine: [11.6, 2.9] }, ...uvOf(BARK), note: 'the trunk surface unrolled: u along the trunk, v around it. The spruce\'s cell repeats every 2 m (512 px/m on both axes) with its thin grey-brown scale mosaic; the pine\'s cell is its *whole trunk* — 11.6 m along u by 2.9 m around v, so the cell\'s 4:1 pixels come out at 88 px/m both ways — because that is the only way one sheet can hold the two zones a pine is known by: grey-brown furrowed bark to 40 % of the height, orange-red flaky plates above. Half of the round direction is a 0.5 m trunk\'s own wrap, and the model and the sprite both sample it by height, so the trunk keeps the two-tone and the limbs stay in the flaky zone' }
 };
 
 const IMPOSTOR_LAYOUT = {
@@ -199,7 +190,7 @@ for (const season of SEASONS) {
         uv_per_column: 'u = (column + u_col) / 2',
         height_m: Object.fromEntries(Object.entries(SPECIES).filter(([, v]) => v.group === 'conifer').map(([k, v]) => [k, v.height_m]))
       },
-      note: `spruce and pine needle sprites, ${season}: each part keeps its own Poly Haven texture (bark, trunk, needles) and carries a baked cone occlusion — lit outside, darker toward the trunk axis and toward the lower tiers`
+      note: `spruce and pine needle sprites, ${season}: the whole tree, the top-down whorl star and the side branch of each species, all three rendered from the *same grown tree* the species' model and impostors are grown from. The needles are drawn shoots (see the needle-shoot source) and carry a baked per-card occlusion — lit outside, dark toward the trunk axis and toward the lower tiers`
     },
     {
       file: `trees_conifer_${season}_a.webp`,
@@ -234,8 +225,8 @@ for (const season of SEASONS) {
       channels: 'RGB + A (dilated)',
       tiling_m: null,
       role: 'conifer impostor atlas',
-      layout: { ...IMPOSTOR_LAYOUT, rows: 2, row_species: ['spruce', 'pine'], tree_height_m: { spruce: 11.6, pine: 12.0 } },
-      note: `16 views x 2 species rows from the full CC0 models, ${season}`
+      layout: { ...IMPOSTOR_LAYOUT, rows: 2, row_species: ['spruce', 'pine'], tree_height_m: { spruce: 11.3, pine: 11.6 } },
+      note: `16 views x 2 species rows from the full-detail grown trees, ${season}`
     }
   );
   if (season === 'summer') {
@@ -245,7 +236,7 @@ for (const season of SEASONS) {
       channels: 'RGB (view-space normal)',
       tiling_m: null,
       role: 'conifer impostor normals (all seasons)',
-      layout: { ...IMPOSTOR_LAYOUT, rows: 2, row_species: ['spruce', 'pine'], tree_height_m: { spruce: 11.6, pine: 12.0 }, note: 'cone normal (tilted upward toward the top) with the crown bend; shared by every season' },
+      layout: { ...IMPOSTOR_LAYOUT, rows: 2, row_species: ['spruce', 'pine'], tree_height_m: { spruce: 11.3, pine: 11.6 }, note: 'cone normal — the outward direction tilted 0.30 up at the skirt and 0.75 at the leader — with the crown bend; shared by every season' },
       note: 'conifer impostor normals, baked once'
     });
   }
@@ -266,10 +257,12 @@ for (const [id, spec] of Object.entries(SPECIES)) {
         ? 'UVs point into column ' + spec.column + ' of trees_deciduous_<season>.webp (u in [column/4, (column+1)/4])'
         : 'UVs point into column ' + spec.column + ' of trees_conifer_<season>_m.webp (u in [column/2, (column+1)/2]), with the cutout in trees_conifer_<season>_a.webp',
       note: spec.kind === 'deciduous'
-        ? 'trunk and main limbs plus 22 crown cards cut from the six clump sprites, 164-184 verts; the crown volume comes from the game shader\'s capsule masking, not from the geometry'
-        : '5-sided trunk plus 26 radial whorl fans cut from the top-down slices, with the cone normal applied in the shader'
+        ? 'trunk and main limbs plus 22 crown cards cut from the six clump sprites, 212-292 verts. The wood is built as pieces of one bark repeat each and every UV is derived from the cell rects above, so a trunk samples the bark band and a card its own clump cell; the crown volume comes from the game shader\'s capsule masking, not from the geometry'
+        : (spec.spruce === undefined ? '' : '') + (id === 'spruce'
+          ? '5-sided trunk plus 22 radial whorl fans cut from the top-down star: each fan is one of the grown tree\'s own whorls, scaled so its radius is the whorl\'s radius in the star cell, and raised or drooping by its height in the crown. The cone normal is applied in the shader'
+          : '5-sided trunk — its bark cell is the whole trunk, so the lower third is grey-brown and the rest orange-red — plus 22 crossed crown cards cut from the side cell and 7 dead stubs on the clear trunk. The plates sit where the grown tree\'s own crown is, and the cone normal is applied in the shader')
     },
-    note: `${id} model, variant ${variant}${spec.kind === 'conifer' ? ` (from Poly Haven ${spec.pack})` : ''}`
+    note: `${id} model, variant ${variant}${spec.kind === 'conifer' ? ', grown from the same tree as its sprites' : ''}`
   });
 }
 
@@ -285,13 +278,6 @@ async function fetchSources() {
     const dest = path.join(CACHE, 'bark', `${id}.jpg`);
     await mkdir(path.dirname(dest), { recursive: true });
     await sharp(src).jpeg({ quality: 94 }).toFile(dest);
-  }
-  for (const spec of Object.values(SPECIES)) {
-    if (spec.kind !== 'conifer') continue;
-    await phAsset(spec.pack, { kind: 'gltf', res: '1k' });
-    const { extraTexture } = await import('./lib/polyhaven.mjs');
-    await extraTexture(spec.pack, 'Diffuse', { prefer: ['png'] });
-    await extraTexture(spec.pack, 'Alpha', { prefer: ['png'] });
   }
 }
 
@@ -339,7 +325,8 @@ async function column(dir, kind) {
     for (let i = 0; i < 6; i++) put(path.join(dir, `clump${i}.png`), CLUMPS[i]);
     put(path.join(dir, 'bark.png'), BARK);
   } else {
-    for (let i = 0; i < 3; i++) put(path.join(dir, `whorl${i}.png`), WHORLS[i]);
+    put(path.join(dir, 'tree.png'), WHOLE);
+    put(path.join(dir, 'star.png'), STAR);
     put(path.join(dir, 'branch.png'), BRANCH);
     put(path.join(dir, 'bark.png'), BARK);
   }
@@ -397,11 +384,10 @@ async function renderSpeciesSeason(id, spec, season, { force }) {
       await blender(['clumps', dir, id, season], `${id} ${season}: crown modules`);
     }
     await clumpComposite(dir);
-  } else if (force || !(await exists(path.join(dir, 'impostor_normal.png')))) {
-    // a conifer has no whole-tree sprite: its column is whorl slices, its model
-    // is stacked fans, and both its impostors come from the full CC0 tree
-    await blender(['conifer', dir, id, season, `${spec.pack}|${spec.tree}`],
-                  `${id} ${season}: whorls + impostors`);
+  } else if (force || !(await exists(path.join(dir, 'impostor_albedo.png')))) {
+    // one grown conifer per species-season: the whole-tree sprite, the top-down
+    // star its fans sample, the side branch and the impostor row, all from it
+    await blender(['conifer', dir, id, season], `${id} ${season}: sprite cells + impostors`);
   }
   for (const f of ['bark.png', 'bark_n.png']) await copyIfAny(path.join(barkDir, f), path.join(dir, f));
   if (force || !(await exists(path.join(dir, `tree_${id}_0.glb`)))) {
@@ -514,11 +500,16 @@ async function assembleTreeAtlas(group, season, columns, normals) {
   } else {
     // Colour and alpha stay in separate maps: a consumer that alphaTests does not
     // need the alpha in the colour texture, and a greyscale map compresses better.
-    await sharp(await sharp(atlas).removeAlpha().png().toBuffer())
-      .webp({ quality: 84, effort: 6 })
+    // The RGB is dilated *before* the split, because bilinear filtering samples the
+    // colour map at a cutout's edge whether or not the alpha map calls it cut: an
+    // undilated transparent black is a black fringe, the same rule the deciduous
+    // atlas has always followed and this one had not.
+    const bleed = dilateRGB(await loadImage(atlas, { ch: 4 }), { iterations: 10 });
+    const tmp = path.join(CACHE, 'trees', 'conifer_atlas_dilated.png');
+    await savePng(bleed, tmp);
+    await sharp(tmp).removeAlpha().webp({ quality: 84, effort: 6 })
       .toFile(path.join(OUTDIR, `trees_conifer_${season}_m.webp`));
-    await sharp(await sharp(atlas).extractChannel('alpha').png().toBuffer())
-      .webp({ quality: 88, effort: 6 })
+    await sharp(tmp).extractChannel('alpha').webp({ quality: 88, effort: 6 })
       .toFile(path.join(OUTDIR, `trees_conifer_${season}_a.webp`));
     console.log(`    trees_conifer_${season}_m/_a.webp`);
   }

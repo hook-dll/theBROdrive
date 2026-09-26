@@ -23,18 +23,19 @@ node tools/look/cmp.mjs conifer           # comparison sheets, /tmp/omp-shots/ve
 `--only` still writes the metadata for **all** groups, so a partial rebuild never
 drops another group's entries from the manifest.
 
-A cold cache rebuild needs network (about 1.4 GB of source downloads, mostly the
-two Poly Haven tree packs) and Blender at
+A cold cache rebuild needs network (about 1.3 GB of source downloads: the Poly
+Haven grass and bush packs, the ambientCG bark, leaf and ground sheets) and Blender at
 `/Applications/Blender.app/Contents/MacOS/Blender`. Blender runs go through
 `nice -n 15` and use 6 threads, so a rebuild beside a running game is possible.
 The cache lives in `tools/look/.cache` and is gitignored; **the outputs are
 committed**, so the game does not need the cache or Blender.
 
 Typical times on an M2 Pro: `--only noise,ground,road grass bush` under a minute
-each; the tree group is ~35 minutes (about 300 Cycles renders plus the decimated
-stump and log models) — a deciduous species-season is about a minute, a conifer
-one 1.5-3 minutes, since one impostor row is sixteen copies of a 0.6-2.6 M vertex
-model in a single 4096 x 256 pass.
+each; the tree group is ~25 minutes (about 300 Cycles renders plus the decimated
+stump and log models) — a deciduous species-season is about a minute, a conifer one
+half a minute to a minute, since one impostor row is sixteen copies of a 0.4-1.2 M
+vertex tree in a single 4096 x 256 pass, and a conifer's normal row is baked once
+and shared by the four seasons.
 
 ## Layout
 
@@ -84,39 +85,57 @@ provider, id, exact URL and the outputs they became.
   `manifest.json`, because that is what a shader author sees with three.js'
   default `flipY = true`. GLB UVs follow glTF (v from the top) and land in the
   same place through `GLTFLoader`'s `flipY = false`.
+* **Every model UV comes from the layout constants that write the manifest.** A
+  GLB is the one asset the manifest cannot describe after the fact, so its UVs are
+  derived from the same cell rects (`cell_uv`) and shifted into the species' column
+  by the exporter. Two things follow and both have been got wrong here: a repeating
+  bark strip is put on a trunk as *pieces* of one repeat each (`bark_chunks`,
+  `_model_trunk`), never as one long quad — a `%` inside a quad sweeps backwards
+  across the seam — and the strip's `v` is its own band (`cell_uv(BARK)`), not the
+  whole column. Checked by sampling: `glbcheck` reads each GLB's triangle centres,
+  maps them through the manifest's cells and requires the atlas' cutout to be
+  opaque there — the 16 deciduous models at 100 %, the pine at 89 %, the spruce at
+  68–74 % (its remaining centres land in the needle gaps of the star cell itself).
 * **Cells have world sizes.** A sprite cell is documented in metres so the
   consumer makes a quad of that size and needs no vertex-side cropping. Grass
   cells each have their own frame (0.28–1.30 m), bushes share 1.6 m, tree clump
   cells are 3.2 m, the whole-tree cell is 8.0 × 12.0 m, impostor cells are 12.4 m
   with the base on the cell's bottom edge.
 * **A pack's parts keep their own textures, per material slot.** `plants.kit()`
-  picks the base-colour image of every material *slot* of every object: the conifer
-  meshes carry bark, trunk and twig as separate slots, and one image for the whole
-  pack painted every needle with whichever sheet was scanned last (an orange-brown
-  bark), which is what made the first conifer impostors look dead; one image per
-  object still painted the trunk with the twig sheet. It also disables the
-  black-background `gate` for geometry: keying on luminance eats dark needles.
-* **A conifer is rendered at the species' own height, and the slice is where the
-  tree is as wide as the cell.** The three top-down conifer cells used to be sliced
-  at fixed fractions of the height, which for a spruce landed in the gaps between
-  whorl tiers and produced nearly empty stars; the slice is now chosen from the
-  tree's own radius profile, taking the widest tier for the biggest cell and
-  progressively higher — narrower — ones for the two small cells, and scaled so the
-  star fills its frame. Two metres of the tree pass the clip planes (`_WHORL_SLAB`),
-  not one tier, so the star is a needle mass rather than a ring of spokes; the star
-  is centred on the **trunk axis at that height**, not on the bounding box, because
-  a scanned fir leans and the fan it is mapped onto does not. Every conifer render
-  also carries `species height / pack height` on the object transform: the CC0 fir
-  is 14.5 m and the game's spruce is 11.6 m, and a 14.5 m tree in a 12.4 m impostor
-  cell would hand a size change over to the model.
-* **The conifer pack is chosen for its crown, not its detail count.** `fir_tree_01`
-  is a *forest* fir: its crown starts at 7 m of its 14.5 m, so at the species'
-  height its impostor was a bare pole with a tuft, while the game model is a cone
-  with whorls from 1.4 m. The spruce uses `fir_sapling` instead — a fir with its
-  branches to the ground — and the 9× blow-up puts its needles four texels across
-  the impostor cell, where a scan of real 2 cm needles at 20.6 px/m is sub-texel
-  speckle. The pine keeps `pine_sapling_medium`, which is already 229 vertices per
-  metre.
+  picks the base-colour image of every material *slot* of every object. (This is a
+  grass-and-bush rule now: the conifers are no longer cut out of Poly Haven packs at
+  all — see the next two bullets — but a kit pack still ships bark, trunk and twig
+  as separate slots, and one image for the whole pack painted every part with
+  whichever sheet was scanned last.) It also disables the black-background `gate`
+  for geometry: keying on luminance eats dark needles.
+* **A conifer is grown, not sliced.** A spruce and a pine are the *same* machinery a
+  deciduous tree uses: a deterministic skeleton grown from (species, seed) — a
+  straight trunk and regular whorls, each whorl branch as long as the crown's own
+  cone radius at its height, ascending near the leader and drooping with hanging
+  branchlets lower down — then a needle card per drawable shoot, the same per-card
+  occlusion bake, the same quad, and the same render passes. The game model is grown
+  from that tree as well (a spruce's fans are its own whorls; a pine's crossed crown
+  cards sit where its own crown is), so the model→sprite hand-over is a change of
+  drawing and not a change of tree. Everything before this pass cut a CC0 fir and a
+  pine out of their packs with camera clip planes, and the two were different trees:
+  flat olive silhouettes, whorl cells aimed at the gaps between tiers, a hexagon of
+  trunk through the middle of a star and a bare pole where the crown should have
+  been. The three top-down cells are now **one** star per species, a real view from
+  directly above the tree's own widest whorl and the two tiers either side of it —
+  whole whorls, so it cannot land between tiers — centred on the trunk axis (where a
+  fan's centre vertex is, not where a leaning scan's bounding box is) and scaled so
+  it fills 94 % of the cell.
+* **A needle card carries a *drawn* shoot.** A photograph cannot fill one: a spruce
+  needle is 1.5–2 cm, which is one texel at the whole-tree cell's 64 px/m and a third
+  of a texel at an impostor cell's 20.6 px/m, so a scan of real needles is speckle —
+  which is what "flat olive silhouette" was. `trees.py`'s `needle_sheet()` draws four
+  shoots per species on transparent instead, at the scale the card is *seen* at (a
+  twig with ~30 strands raked off it, 2–4 px wide on a 256 px cell, dark at the twig
+  and lighter at the tips): the same reasoning that makes `plants.py` draw its umbel
+  heads, and the same rule as a deciduous leaf card, which carries a *cluster* and
+  not one blade. Card sizes follow from it — 20–30 cm of spruce shoot, 28–40 cm of
+  pine tuft — and a card is never one flat colour: its tip end is brighter than its
+  base, and its `Col` carries the per-card brightness and occlusion.
 * **The bark strip is the trunk unrolled, and its pattern lives in uv metres.** The
   strip used to be a photograph of a vertical cylinder, which put the visible 0.6 m
   of trunk in the middle 30 % of a 2 m cell and mapped the circumference through an
@@ -132,7 +151,20 @@ provider, id, exact URL and the outputs they became.
   ambientCG sheet with dark diamond leaf scars. "Darker toward the base" cannot be
   baked into a tiling strip, so it lives where the trunk's height is known: the
   `_bark_ao` term in the wood's `Col` attribute, which darkens the root collar of
-  the model *and* of the sprite.
+  the model *and* of the sprite. A **conifer's** two cells differ, and for a reason:
+  a spruce's repeats every 2 m at 512 px/m both ways (a thin grey-brown scale mosaic
+  off the ambientCG scan, with synthesised cracks and a trace of lichen); a pine's
+  cell is its *whole trunk*, 11.6 m along u by 2.9 m around v, so the cell's 4:1
+  pixels come out at 88 px/m on both axes. That is the only way one sheet can hold
+  the two zones a Scots pine is known by — grey-brown furrowed bark to 40 % of the
+  height, orange-red flaky plates above — since a 2 m tile cannot have an upper and
+  a lower half. Both species' trunks are sampled by *height* (u = z/height), their
+  limbs stay in the flaky zone by distance along the branch, and their dead stubs
+  sit in the grey, so the model wears the bark its sprite shows. Wood that a crown
+  surrounds is darkened by a second term beside `_bark_ao`: `_wood_ao` knows the
+  crown's radius at that height, so a whorl branch is bright at its tip and dark
+  where it leaves the trunk, and a spruce — which carries its crown to the ground —
+  has no bright trunk through its needles.
 * **Sprites come from full-detail geometry, never from the game model.** A tree
   sprite is a render of the *grown* tree — trunk, four branch orders, and every
   leaf as its own quad — not a photograph of the ~170-vertex model the game swaps
@@ -142,7 +174,10 @@ provider, id, exact URL and the outputs they became.
   whole-tree cell's width (aspen the narrowest, birch and lime the fullest) and
   52–61 % of the 12.4 m impostor cell's, against slowroads' 61–65 % — and its leaf
   cloud reaches down to a fifth of the tree's height, so no bare trunk with a tuft
-  on top.
+  on top. The conifers are held to the same three bars and a fourth of their own:
+  the spruce's crown runs to the ground in its 8 m cell (84 % of the width, 94 % of
+  the height) and the pine's starts at two thirds of its height with its plates
+  spread to 91 % of the cell.
 * **A tree's shading is baked as per-leaf occlusion, not simulated.** A
   ray-traced sun would double-light against the game's Lambert pass, so each leaf
   carries the part Lambert cannot know — how boxed-in it is — in the `Col`
@@ -175,14 +210,19 @@ expression layer) rather than Blender's `Mix` node, whose sockets are duplicated
 per data type and rename between versions.
 
 `trees.py` grows a tree deterministically from (species, seed) — a recursive
-skeleton of four branch orders with species habits, then leaves scattered along
-the terminal twigs — and renders every deciduous sprite from it: the six crown
-modules are subtrees of that same tree, the whole-tree sprite is the whole tree,
-and the impostor row is sixteen copies of it in one render, one material per view.
-Conifers are drawn from the Poly Haven models directly, with the top-down whorl
-slices the game's fan model samples. Normals are baked analytically (crown
-capsule for deciduous, cone for conifers, flattened outward for bark) because that
-is what the game shader reconstructs, and the two have to agree or the
+skeleton of four branch orders with species habits, then leaves scattered along the
+terminal twigs — and renders every sprite from it: the six crown modules are
+subtrees of that same tree, the whole-tree sprite is the whole tree, and the
+impostor row is sixteen copies of it in one render, one material per view. A
+conifer is grown by the same recursion with a whorled habit — trunk, whorls, then
+needle cards along the shoots, `sprig_out()` where a deciduous tree has
+`leaf_out()` — and its four cells are four views of that one tree: the whole-tree
+sprite, the top-down star (its own widest whorl and the tiers either side, seen from
+directly above, `sel`-ed by whorl rather than clipped), the side cell (one whole
+branch, `sel`-ed by its subtree) and the impostor row. Normals are baked
+analytically (crown capsule for deciduous, cone for conifers — the outward direction
+tilted 0.30 up at the skirt and 0.75 at the leader — flattened outward for bark)
+because that is what the game shader reconstructs, and the two have to agree or the
 model→impostor swap shows.
 
 `plants.py` builds each grass and bush cell as a *scene* of many CC0 plants sized
@@ -236,8 +276,17 @@ signed off with:
 | deciduous impostor, crown width | 61 % of the cell (birch) | 61–65 % |
 | deciduous impostor, cell height | 88–93 % | 91–96 % |
 | deciduous impostor, mean alpha of the cell | 0.19–0.24 | 0.29–0.39 |
-| conifer impostor, mean alpha of the cell | 0.10 (pine) | 0.14–0.23 |
-| whole-tree sprite, crown width | 90–95 % of the 8 m cell | — |
+| conifer impostor, cell height | 91 % (spruce), 95 % (pine) | 99 % (spruce), 95 % (pine) |
+| conifer impostor, coverage inside the bbox | 0.50 (spruce), 0.29 (pine) | 0.33 (spruce), 0.38 (pine) |
+| conifer impostor, bbox width of the cell | 54 % (spruce), 57 % (pine) | 54 % (spruce), 49 % (pine) |
+| conifer star cell, mean alpha | 0.27 | 0.29 |
+| whole-tree sprite, crown width | 90–95 % of the 8 m cell (deciduous), 84 % (spruce), 91 % (pine) | — |
+| whole-tree sprite, coverage inside the bbox | 0.50 (spruce), 0.29 (pine) | — |
+
+(The conifer impostor cells are 256 x 256 px in our atlas and 256 x 512 px in
+slowroads' — a 12.4 m cell against 24.8 m — so the mean alpha of the two cells is
+not comparable and the coverage inside the sprite's own bounding box is what the
+comparison rests on.)
 
 A tree sprite must clear three bars, because those are the three ways the first
 set failed:
