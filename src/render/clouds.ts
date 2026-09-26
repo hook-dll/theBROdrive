@@ -325,7 +325,7 @@ void buildPuffs() {
       put( cx, y + H * 0.012, ( h11( s * 26.9 + i ) - 0.5 ) * 0.9 * D, r * ( 0.94 + 0.06 * j ) );
       put( cx + r * 0.45, y + H * 0.004, ( h11( s * 31.7 + i ) - 0.5 ) * 0.9 * D, r * ( 0.92 + 0.08 * j ) );
     }
-    row( 3.0, 0.42, H * 0.95, 0.3, 0.6 * D, 0.0, s * 41.3 );
+    row( 3.0, 0.2, H * 0.9, 0.28, 0.5 * D, 0.0, s * 41.3 );
   } else if ( f == ${FRACTUS} ) {
     // Torn shreds: no flat base and no tower, only a strand of puffs, thin enough for the
     // sky to show through. Ragged is the edge, not the middle: every puff lies well
@@ -343,6 +343,36 @@ void buildPuffs() {
     row( 6.0, 0.80, H * 0.62, 0.26, 0.55 * D, 0.5 * D, s * 11.9 );
     row( 7.0, 0.88, H * 0.12, 0.29, 0.6 * D, -0.55 * D, s * 17.3 );
     row( 5.0, 0.74, H * 0.86, 0.22, 0.4 * D, 0.45 * D, s * 23.9 );
+  }
+}
+/**
+ * Fit the cell. The builders fill the cell and overshoot it here and there — a row whose
+ * spread plus its puffs' visible radius reaches past the side, a tower whose top puff
+ * stands above the crown, a clump laid further down the footprint than the cell is deep.
+ * The marcher's box then cuts that overshoot off FLAT, and a flat top with straight
+ * flanks is a silhouette no cloud has: the owner saw exactly that trapezoid lying over
+ * the wide shapes. It also bleeds into the neighbouring cell's texels, which the draw
+ * samples bilinearly. So the shape is scaled, as a whole, into the cell with a margin —
+ * x and z together, so a puff stays round, and y on its own. A builder no longer has to
+ * have its spreads tuned by hand to the puff radius.
+ */
+void fitCell() {
+  vec3 lo = vec3( 1e9 ), hi = vec3( -1e9 );
+  for ( int i = 0; i < puffCount; i++ ) {
+    vec4 q = puffs[ i ];
+    float vx = 0.59 * q.w;
+    float vy = vx / ( q.y < 0.12 * shapeH ? shapeFlatten * 1.3 : shapeFlatten );
+    vec3 c = vec3( q.x, q.y / shapeH, q.z );
+    vec3 e = vec3( vx, vy / shapeH, vx );
+    lo = min( lo, c - e );
+    hi = max( hi, c + e );
+  }
+  float sc = min( min( 1.0, 0.94 / max( max( -lo.x, hi.x ), 1e-3 ) ),
+                  min( 1.0, 0.94 * shapeDepth / max( max( -lo.z, hi.z ), 1e-3 ) ) );
+  float sy = min( 1.0, 0.94 / max( hi.y, 1e-3 ) );
+  for ( int i = 0; i < puffCount; i++ ) {
+    vec4 q = puffs[ i ];
+    puffs[ i ] = vec4( q.x * sc, ( q.y / shapeH ) * sy * shapeH, q.z * sc, q.w * sc );
   }
 }
 /**
@@ -413,8 +443,10 @@ float lightT( vec3 p, vec3 l ) {
 }
 /** The box every builder fills, plus the noise's own reach: the ray's span inside it. */
 bool slab( vec3 ro, vec3 rd, out float t0, out float t1 ) {
-  vec3 lo = vec3( -1.0, -0.03, -shapeDepth - 0.02 );
-  vec3 hi = vec3( 1.0, 1.03, shapeDepth + 0.02 );
+  // The box the ray is clipped to. fitCell keeps the mass inside the cell, so this is
+  // generous to the point that nothing can ever be cut flat by it.
+  vec3 lo = vec3( -1.06, -0.06, -shapeDepth - 0.14 );
+  vec3 hi = vec3( 1.06, 1.06, shapeDepth + 0.14 );
   vec3 a = ( lo - ro ) / rd, b = ( hi - ro ) / rd;
   vec3 mn = min( a, b ), mx = max( a, b );
   t0 = max( max( mn.x, mn.y ), max( mn.z, 0.0 ) );
@@ -433,6 +465,7 @@ void main() {
   shapeDepth = uFamA[ shapeFam ].y;
   shapeFlatten = uFamB[ shapeFam ].z;
   buildPuffs();
+  fitCell();
   vec3 ro, rd;
   if ( below ) {
     // From under the base, straight up: the cell's v runs across z, so the flat quad
