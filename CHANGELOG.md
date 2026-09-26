@@ -60,6 +60,27 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE COUNTRYSIDE HAS BOTH COUNTRIES IN IT (`docs/research-2026-09-26-landscape.md`). A
+  long drive read as "кругом только лес с редкими прогалинами", and the measurement
+  agreed with the drive rather than with the land share: over 60 km of road the strip
+  14-400 m out was 29% wood but 58% of the azimuths out of the windscreen met a wood
+  inside 600 m, only 12% were still open at 2.5 km, and a crop field was in view on 47%
+  of the drive with a twenty-kilometre stretch of none at all. The cause was in the
+  parameters, not in the planting: the wooded threshold stood 57% of woodland above the
+  bar (a wall with slits, not a wood with glades), farmland still carried 15-17% wood
+  (so a field was never more than four hundred metres deep), the field itself began 30 m
+  from the centreline instead of 10-12 (СН 467-74 puts a field's edge 7-10 m past the
+  asphalt) and only read as a field where farming passed 0.5, which half the country
+  never reaches. Now the wooded districts keep their mass with the glades grown to
+  200-600 m, a field district is fields with the belts, copses, lone oaks and ravine
+  scrub standing in it as landmarks, the crop starts at 14 m, and the plot is a field
+  wherever farming reaches a third of the way up. Measured, 6 seeds × 60 km: strip wood
+  29→20%, field 19→40%; azimuths walled inside 600 m 58→43%, open past 2.5 km 12→26%;
+  field in view 47→65%; trees 18 719→13 611 per km² (−27%) and tile build time unchanged
+  (13.5-14.5 ms). Cost: no new noise sample, no new call — thresholds and one curve.
+  The belts were raised to 0.5/0.35 for a round and put back at 0.4/0.25: полезащитные
+  лесополосы are a steppe feature, and a belt every other plot line read as the steppe.
+
 - NOTHING APPEARS AT ONCE. Far trees leave their reach each at its own distance over
   the last 30% of it and fade over their own 12% by coverage (they switched whole);
   woods are requested two tiles earlier, so a tile's trees are in before they are in

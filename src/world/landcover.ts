@@ -148,11 +148,36 @@ const CROP_TOTAL = CROP_WEIGHTS.reduce((a, b) => a + b, 0);
 // Geometry of the cover
 // ---------------------------------------------------------------------------
 
-const FARMLAND_WAVELENGTH = 5200;
+/**
+ * The size of a COUNTRY, not of a field. 5.2 km made the landscape flicker between
+ * wood and field every couple of kilometres, so a drive never crossed a district, it
+ * crossed a texture. Measured (`tools/landscape-census.ts`, 60 km of road, seeds 1337
+ * and 777): half the azimuths out of the windscreen met a wood inside 600 m and only
+ * 15% were still open at 2.5 km — which is what "кругом только лес" is.
+ */
+const FARMLAND_WAVELENGTH = 5000;
 const FOREST_WAVELENGTH = 820;
-/** Forest threshold in wooded country and in farmland. Higher = less wood. */
-const FOREST_THRESHOLD_WOODED = -0.08;
-const FOREST_THRESHOLD_FARMLAND = 0.3;
+/**
+ * Forest threshold in wooded country and in farmland. Higher = less wood.
+ *
+ * The complaint the owner brought back from a long drive is about these two numbers,
+ * so they are set from the measurement and not from taste.
+ *
+ * WOODED DISTRICTS (`farm < 0.3`, 39-48% of the land). At -0.08 the fractal stood
+ * above the threshold 57% of the time: a wall of wood whose clearings were the gaps.
+ * At 0.02 the same district is about half wood and half clearing, and a clearing is
+ * hundreds of metres across instead of the width of the road cut.
+ *
+ * FARMLAND (`farm` near 1). At 0.3, one point in six was still wood, and a wood
+ * ANYWHERE inside a field district closes the horizon from the road — the field was
+ * never more than four hundred metres deep. At 0.62 a field district is fields. What
+ * stands in it is put there on purpose by other systems and reads as a landmark
+ * rather than as weather: the shelter belts along the plot lines (`beltAt`), the
+ * copses out in the open (`copseAt`), the lone oaks at the corners, and the scrub and
+ * alder of the ravines.
+ */
+const FOREST_THRESHOLD_WOODED = -0.05;
+const FOREST_THRESHOLD_FARMLAND = 0.42;
 /** Width of the fractal band over which a wood's edge goes from none to closed. */
 const FOREST_EDGE = 0.045;
 const BIRCH_WAVELENGTH = 340;
@@ -166,8 +191,16 @@ const CLEAR_NEAR = 11;
 const CLEAR_FAR = 62;
 const CLEAR_WAVELENGTH = 700;
 const CLEAR_BAYS = 12;
-/** Fields do not run right up to the road: a meadow strip and the ditch come first. */
-const FIELD_CLEAR = 30;
+/**
+ * Fields do not run right up to the road: the verge, the ditch and a strip of meadow
+ * come first. Measured against the road itself rather than guessed — the ditch spans
+ * 4.2 to 8.8 m past the asphalt edge (`terrain.ts`, DITCH_FROM + DITCH_WIDTH), which
+ * is 8 to 13 m from the centreline — so 30 m parked a grass ribbon wider than the
+ * road's whole cross-section in front of every field, and from the car a district of
+ * fields looked like a district of meadows with a wood behind it. Fourteen puts the
+ * crop just past the ditch, which is where it is in the middle belt.
+ */
+const FIELD_CLEAR = 14;
 
 const PLOT_REGION = 2400;
 const PLOT_MIN = 150;
@@ -197,9 +230,20 @@ export class LandCover {
     this.edgeNoise = new Noise2D(seed ^ 0x1f83d9ab);
   }
 
-  /** 0..1: how much of a farming district this is. */
+  /**
+   * 0..1: how much of a farming district this is.
+   *
+   * The ramp is deliberately lopsided. A symmetric one made "wooded" and "farmland"
+   * equally likely, and a route could then spend forty kilometres of its sixty in
+   * country with no field in it at all — measured on seed 1337 with the census, the
+   * square it samples was 64% wooded district and 0% field. The middle belt is not
+   * like that: forest tracts are real and big, but fields are the rule and the wood is
+   * what interrupts them. So the low end is pulled down to a sixth of the land and the
+   * high end is reached early, which leaves the long, mixed middle — farmland with
+   * wood standing in it — as the common case.
+   */
   farmlandAt(x: number, z: number): number {
-    return smoothstep(-0.15, 0.25, this.farmland.fbm(x / FARMLAND_WAVELENGTH, z / FARMLAND_WAVELENGTH, 2, 2, 0.5));
+    return smoothstep(-0.3, 0.18, this.farmland.fbm(x / FARMLAND_WAVELENGTH, z / FARMLAND_WAVELENGTH, 2, 2, 0.5));
   }
 
   /**
@@ -263,6 +307,15 @@ export class LandCover {
     // Belts run along whole grid lines: the choice is per line, not per plot. Two or
     // three rows wide, about 14 m: narrower than the planting grid's two cells and a
     // belt came out as a dotted line of lone trees.
+    //
+    // The odds stay below a half, and that is a fact about the region and not a taste:
+    // полезащитные лесополосы are planted in the STEPPE and forest-steppe (БСЭ,
+    // полезащитное лесоразведение: belts 7.5-15 m wide, 350-600 m apart, and the
+    // article places them in the south), and in the forest zone a field's edge is
+    // normally the wood, a copse or a ravine rather than a planted row. They were
+    // raised to 0.5/0.35 for one measurement round and put back: a field district now
+    // reads as Russian field country through its SIZE and its open horizon, and a belt
+    // every other plot line made it read as the steppe.
     if (hashUnit3(this.seed ^ 0x61, b.rx * 131 + b.rz, b.iu) < 0.4) {
       w = Math.max(w, 1 - smoothstep(5, 9, Math.min(b.fu, b.su - b.fu)));
     }
@@ -331,13 +384,27 @@ export class LandCover {
     let b = (pal.meadowDry[2] + (pal.meadowLush[2] - pal.meadowDry[2]) * lush) * mottle;
     out.kind = CoverKind.Meadow;
 
-    if (farm > 0.05 && roadDist > FIELD_CLEAR && forest < 0.5) {
+    // The share of a plot that is under crop, as opposed to the share of the DISTRICT
+    // that is farmland. They are not the same curve, and using `farm` for both is what
+    // made "где поля?" a fair question: a plot only read as a field past `farm = 0.5`,
+    // and `farm` sits between 0.3 and 0.7 across most of the world, so measured
+    // (`FIELD IN VIEW` in the census) a 60 km drive had a twenty-kilometre stretch with
+    // no field in sight on a seed whose 12 km square was two thirds field.
+    //
+    // Farming reaches a plot early and loses it late: a third of the way up `farm` the
+    // plot is half crop, and the wood above it has already thinned. What is left in a
+    // wooded district is the plot the plough never reaches — meadow, hay, fallow — and
+    // that is what makes the clearing in a wood a clearing and not a lawn.
+    const fieldShare = smoothstep(0.05, 0.5, farm);
+
+    if (fieldShare > 0 && roadDist > FIELD_CLEAR && forest < 0.5) {
       const plot = this.plotAt(x, z);
       if (plot.crop >= 0) {
         const c = pal.crops[plot.crop]!;
         // A shelter belt takes its strip out of the crop, so the plough stops short of it.
         const belt = this.beltAt(x, z);
-        const inside = plot.inside * (1 - belt) * farm * smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
+        const inside =
+          plot.inside * (1 - belt) * fieldShare * smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
         // Margin grass between plots, then the crop.
         r += (pal.margin[0] - r) * farm;
         g += (pal.margin[1] - g) * farm;
