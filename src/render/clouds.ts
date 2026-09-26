@@ -420,7 +420,11 @@ float density( vec3 p, bool fine ) {
     float fray = worley( s * 8.6 + shapeSeed * 1.7 );
     carve += A.w * ( 1.0 - 0.7 * up ) * ( 1.0 - fray );
   }
-  float d = cov - min( carve, 0.42 );
+  // The carve is tapered where the coverage is thin. Biting the full amount out of a
+  // barely-there crown (or a shred's last wisp) punched a hole clean through the mass —
+  // two mediocris variants came out with a window in the top of them. Tapered, the bays
+  // and lobes still come out of the silhouette while a thin place can only be thinned.
+  float d = cov - min( carve, 0.42 ) * smoothstep( 0.05, 0.45, cov );
   d = clamp( d, 0.0, 1.0 ) * B.x;
   // The condensation level: a flat base, cut sharp for the families that have one and
   // left ragged for fractus.
@@ -588,9 +592,13 @@ void main() {
     vRight = vec3( vFwd.z, 0.0, -vFwd.x );
     p = centre + vRight * position.x * w + vFwd * position.y * w * aLook.y;
   }
-  // The hand-over between the views, by the cloud's elevation in the view.
-  float up = smoothstep( ${VIEW_FADE_LOW}, ${VIEW_FADE_HIGH}, centre.y / length( centre ) );
-  vShow *= aView < 0.5 ? 1.0 - up : up;
+  // The hand-over between the views, by the cloud's elevation in the view. The upright
+  // card goes out over 20..44 degrees, the flat one does not come in until 27 and is not
+  // full until 51: a footprint seen half edge-on squashes into a petal, and the two
+  // ranges still overlap, so the hand-over has no gap in it.
+  float elevSin = centre.y / length( centre );
+  float up = smoothstep( ${VIEW_FADE_LOW}, ${VIEW_FADE_HIGH}, elevSin );
+  vShow *= aView < 0.5 ? 1.0 - up : smoothstep( 0.45, 0.78, elevSin );
   vDir = p;
   vElev = normalize( p ).y;
   vUv = ( vec2( aShape.x, aLook.w + aView * ${VIEW_ROWS}.0 ) + vec2( position.x * ( aView < 0.5 ? mir : 1.0 ) + 0.5, position.y + 0.5 ) ) / vec2( ${ATLAS_COLS}.0, ${ATLAS_ROWS}.0 );
