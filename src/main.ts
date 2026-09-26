@@ -418,7 +418,7 @@ async function boot(): Promise<void> {
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   const weather = newWeatherState();
-  const precipitation = new Precipitation(renderer.scene);
+  const precipitation = new Precipitation(renderer.scene, renderer.renderer);
   const wetGlints = new WetGlints(renderer.scene);
   let seasonEpoch = '';
   let seasonStartDay = 0;

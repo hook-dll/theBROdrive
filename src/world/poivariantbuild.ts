@@ -43,6 +43,7 @@
  */
 
 import * as THREE from 'three';
+import { markShelter } from '../render/rainocclusion';
 import type { PoiSwitchField } from './poiswitches';
 import {
   BULB_EMISSIVE_INTENSITY,
@@ -420,6 +421,10 @@ export function createVariantInstance(index: number): VariantInstance {
     Object.assign(mesh.userData, part.userData);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    // Every building in the game — the homestead, the villages, the POIs — comes out of
+    // this catalogue, so this is the one place a roof is declared a roof: rain and snow
+    // stop at it (render/rainocclusion.ts).
+    markShelter(mesh);
     group.add(mesh);
   }
 

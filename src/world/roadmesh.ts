@@ -5,6 +5,7 @@ import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyComicShading, applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { markShelter } from '../render/rainocclusion';
 import { GRAVEL_TILE_M, gravelTexture } from '../render/gravelpaint';
 import { applySnowCover, applyWetness } from '../render/season';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
@@ -930,6 +931,9 @@ export class RoadMeshProvider implements ChunkProvider {
         disposables.push(crossings.geometry);
         const crossingMesh = new THREE.Mesh(crossings.geometry, STREAM_CROSSING_MATERIAL);
         crossingMesh.receiveShadow = true;
+        // A deck and its parapets are a roof over the water: rain and snow stop at them
+        // (render/rainocclusion.ts), which is what standing under a bridge should be.
+        markShelter(crossingMesh);
         group.add(crossingMesh);
         // The parapets are solid and nothing else is: a car that leaves the road on a
         // bridge hits a wall, and a culvert's headwall is eight metres out in the verge

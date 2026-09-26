@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+import { SHELTER_MAP_VERTEX_PARS, ShelterMap } from './rainocclusion';
 import type { WeatherState } from '../world/weather';
 
 /**
@@ -34,6 +35,11 @@ import type { WeatherState } from '../world/weather';
  *  - a second, dense box of drops close round the eye (`NEAR`), faded only inside
  *    0.35 m, so there are always drops streaking past at arm's length;
  *  - drizzle falls slower than a downpour: small drops, low terminal speed.
+ *
+ * And a drop under a roof is not drawn at all: the weather is outdoors, and a shower in
+ * the garage was the one thing the boxes could not know. The height of the sheltering
+ * surface over each patch of ground comes from a depth map drawn round the eye — see
+ * render/rainocclusion.ts for the map, why it is a layer, and what it costs.
  */
 
 /** A shutter the eye stands in for: long enough to read as a streak, not a smear. */
@@ -75,6 +81,8 @@ uniform float uFall;
 uniform float uViewH;
 uniform vec3 uBox; // half width, height, near fade
 uniform float uSeed;
+// The roofs over this drop, and where to find them (render/rainocclusion.ts).
+${SHELTER_MAP_VERTEX_PARS}
 varying vec2 vCorner;
 varying float vFade;
 float h1( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }
@@ -118,6 +126,8 @@ void main() {
   vCorner = aCorner;
   vFade *= mix( thin, 1.0, uSnow );
   vFade *= smoothstep( uBox.z, uBox.z * 2.5, dist ) * ( 1.0 - smoothstep( B * 0.35, B * 0.5, length( rel ) ) );
+  // Under a roof — a garage, a village porch, a bridge deck — the drop is indoors.
+  vFade *= shelterFade( at );
   gl_Position = projectionMatrix * viewMatrix * vec4( p, 1.0 );
 }
 `;
@@ -144,11 +154,14 @@ const scratchColor = new THREE.Color();
 
 export class Precipitation {
   private readonly layers: { layer: Layer; mesh: THREE.Mesh; geometry: THREE.InstancedBufferGeometry; material: THREE.ShaderMaterial }[] = [];
+  /** The roofs over the camera, drawn from the scene's sheltering meshes. */
+  private readonly shelter: ShelterMap;
   private time = 0;
   private readonly camVel = new THREE.Vector3();
   private readonly lastAbs = new THREE.Vector3(Number.NaN, 0, 0);
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, private readonly renderer: THREE.WebGLRenderer) {
+    this.shelter = new ShelterMap(scene);
     const shared = {
       uCam: { value: new THREE.Vector3() },
       uCamVel: { value: this.camVel },
@@ -159,6 +172,8 @@ export class Precipitation {
       uViewH: { value: 1080 },
       uColor: { value: new THREE.Color() },
       uAlpha: { value: 0 },
+      // Written by `shelter`, never by a layer: both boxes stand under the same roofs.
+      ...this.shelter.uniforms,
     };
     [FAR, NEAR].forEach((layer, k) => {
       const geometry = new THREE.InstancedBufferGeometry();
@@ -235,5 +250,8 @@ export class Precipitation {
     (u.uColor!.value as THREE.Color).copy(scratchColor);
     // Rain's alpha is for a streak at full width; the thin-wire scaling dims far drops.
     u.uAlpha!.value = (0.45 + 0.43 * weather.snowing) * Math.min(1, weather.precip * 1.5);
+    // The roofs over the camera, redrawn only when they may have changed, and not at all
+    // while it is dry. Snow shelters under exactly the same ones.
+    this.shelter.advance(this.renderer, camera, absX, absZ, dt, share > 0);
   }
 }

@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import { hashUnit3 } from '../core/rng';
 import { applyComicShading } from '../render/comic';
+import { markShelter } from '../render/rainocclusion';
 import type { WorldOrigin } from './origin';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
@@ -224,6 +225,10 @@ export class Landmarks {
       mesh.frustumCulled = false;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      // A church roof, a water tower's tank, an elevator, a mast, a pylon: the eye can
+      // stand under these, and rain and snow stop at whatever part of them is overhead
+      // (render/rainocclusion.ts) — a lattice tower only where a member is above the drop.
+      markShelter(mesh);
       this.scene.add(mesh);
       this.meshes.set(key, mesh);
     };
