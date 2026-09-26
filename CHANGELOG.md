@@ -483,6 +483,34 @@ res.
   draw and keeps it when the buffer is replaced, so once the impostor buffer grew, 95% of
   the trees planted out to 2 km were stored and never shown — the land stood empty past
   about a kilometre and filled in only as the player drove up to it.
+- A 40 M WALL IN THE ROAD at every ridge-district border: the ridge direction was picked
+  per 9 km cell with no blend, so the ground and the road on it jumped by up to twice the
+  ridge's height in one node (grades of 900-1000 % on every seed; autopilot traffic piled
+  up at the foot). Directions now hand over across 1.8 km; worst grade 12-20 %.
+- THE ROAD HEADING BUILT WHOLE VILLAGES ON EVERY SAMPLE. The village bend looked villages
+  up by constructing them — houses, pond and all — inside the hottest function in the
+  world: the spine build was 35x slower (a ~75 s freeze on a new seed), `heightAt` 24x.
+  A non-allocating span lookup; the spine cache format moves to 8 so stale spines rebuild.
+- EACH VILLAGE WAS BUILT TWO TO FOUR TIMES, once per chunk its street crossed: duplicate
+  houses, colliders, loot and light switches that fought over one id. Each house is now
+  built by the chunk that owns it.
+- THE IMPOSTOR STORE UPLOADED THE SPAN BETWEEN ITS WRITES: 6 MB per flush, 97 % of every
+  byte the frame uploaded and the 50-290 ms frames of a drive. Only the rows written go up.
+- FROZEN FRAMES AROUND LAKES: a hintless road projection scanned the whole 40 000 km table
+  (0.5 ms a call, 32 calls for one basin rim = a 19 ms first touch). It now starts from a
+  bound on the monotone axis: 37x faster, identical answers.
+- TREE IMPOSTORS COULD FAIL TO LOAD: the atlas was 2016x9024, past the 8192 limit of many
+  GPUs. It is now sized to the device limit and the screen (142 MiB at 4K, a few on a
+  phone). Undergrowth is no longer baked.
+- A lake's water vanished near a village pond, and a lake next to a pond had a 20 m cliff
+  between them: basins are now dug and drawn together. Stream crossings on a chunk seam
+  were built twice in halves. Houses no longer stand in a village pond or a stream bed;
+  pond water no longer stands above the road. Overgrown plots are planted as woods. Grass
+  stays in front of cloud cards. The trunk collider follows the tree's own girth.
+- Wet-road glints were fogged with the wrong density and grounded on the player's road
+  position; the shelter pass rebuilt every lit material's light state on each redraw;
+  stream water had no UVs; the vista and the birds re-uploaded buffers the GPU may still
+  have been reading.
 
 #### Removed
 
