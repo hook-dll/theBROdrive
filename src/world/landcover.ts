@@ -375,7 +375,20 @@ export class LandCover {
   sample(x: number, z: number, roadDist: number, out: CoverSample): CoverSample {
     const pal = PALETTES[this.season];
     const farm = this.farmlandAt(x, z);
-    const forest = this.rawForest(x, z, farm) * this.clearing(x, z, roadDist);
+    const rawForestCleared = this.rawForest(x, z, farm) * this.clearing(x, z, roadDist);
+    // An abandoned plot goes back to wood at its own pace, and PAST A POINT IT IS A WOOD:
+    // the tiles paint its floor, the canopy rises over it and the planting fills it with
+    // birch and aspen, exactly as it does for a wood the ice left. Nothing else in the
+    // world has to know — it is the same `forest` field, made in a different way.
+    // One plot sample for the whole cover: the overgrowth below and the crop further down
+    // are the same cell of the same grid, and `plotAt` is two hashes and a rotation.
+    const plot = this.plotAt(x, z);
+    const overgrown =
+      plot.crop < 0 || plot.crop === Crop.Fallow
+        ? smoothstep(0.45, 0.95, plot.age) * (1 - this.streams.at(x, z).flood)
+        : 0;
+    const forest = Math.max(rawForestCleared, overgrown * 0.95);
+    const flood = this.streams.at(x, z).flood;
     // A bor is pine with barely a birch in it, whatever the birch field says.
     const bor = forest > 0 ? smoothstep(0.35, 0.65, this.pineAt(x, z)) : 0;
     const birch = this.birchAt(x, z) * (1 - bor);
@@ -408,9 +421,7 @@ export class LandCover {
     // that is what makes the clearing in a wood a clearing and not a lawn.
     const fieldShare = smoothstep(0.05, 0.5, farm);
 
-    const flood = this.streams.at(x, z).flood;
     if (fieldShare > 0 && roadDist > FIELD_CLEAR && forest < 0.5 && flood < 1) {
-      const plot = this.plotAt(x, z);
       if (plot.crop >= 0) {
         const c = pal.crops[plot.crop]!;
         // A shelter belt takes its strip out of the crop, so the plough stops short of it.
@@ -464,19 +475,26 @@ export class LandCover {
     out[at + 2] = (pal.canopySpruce[2] + (pal.canopyBirch[2] - pal.canopySpruce[2]) * birch) * v;
   }
 
-  private readonly plotScratch = { crop: -1, inside: 0 };
+  private readonly plotScratch = { crop: -1, inside: 0, age: 0 };
 
   /**
    * The plot at a point: which crop, and how far inside the plot (0 in the margin).
    * Plots are cells of a grid rotated per region; the cell size is hashed per column
    * and row so fields are not all one size.
    */
-  private plotAt(x: number, z: number): { crop: number; inside: number } {
+  private plotAt(x: number, z: number): { crop: number; inside: number; age: number } {
     const out = this.plotScratch;
     const { rx, rz, iu, iv, fu, fv, su, sv } = this.plotFrame(x, z);
     const edge = Math.min(fu, su - fu, fv, sv - fv);
     // Some cells are not fields at all: meadow, or left for the wood to take.
     const pickT = hashUnit3(this.seed ^ 0x54, iu * 7919 + rx, iv * 104729 + rz);
+    // ЗАРАСТАНИЕ, and it is the single most characteristic thing about this country's
+    // farmland: a third of the arable was abandoned between 1990 and 2000 (Prishchepov
+    // 2013), and a field nobody ploughs is birch in twenty years. `age` is how long this
+    // plot has stood idle, 0 (a working field) to 1 (a wood with a field's straight
+    // edges) — and it is a second hash rather than a share of `pickT`, because otherwise
+    // every abandoned field would be a small one.
+    out.age = hashUnit3(this.seed ^ 0x55, iu * 7919 + rx, iv * 104729 + rz);
     if (pickT < 0.18) {
       out.crop = -1;
       out.inside = 0;

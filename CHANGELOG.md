@@ -60,6 +60,61 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- VILLAGES, AND THE FIELDS GOING BACK TO BIRCH (`docs/research-2026-09-26-landscape.md`,
+  sections 11 and 12). The owner said yes to villages, and the recorded decision in
+  docs/country.md now says so. A village is a SCHEDULE and not a field, because it is a
+  decision somebody made about a piece of road rather than something the ground has to
+  agree with: slots of 8.5 km with the village jittered inside one, eight slots in ten
+  occupied, 5-20 houses along a street 19-32 m apart (most of them on one side), a shop in
+  about half of them, a fence around each kitchen garden, and three poles carrying the line
+  down off the road to the street. Its POND is the same dug basin the lakes use — the pond
+  schedule now carries one per village, and the rim and the blend scale with the basin, or
+  a fifty-metre pond would be ringed by a twenty-four metre rampart. Measured: 6 villages
+  per 60 km (one every 10.0 km), 83-92 houses, streets 365-453 m long, 3-6 shops, a dug
+  pond at every one. The houses are the catalogue's own, built by the same `buildVariantPoi`
+  that stands a lone house on the ground — a village is a rhythm, and the rhythm is the only
+  new thing. And the fields are going back to birch, which is the most characteristic thing
+  about this country's farmland: a third of the arable was abandoned between 1990 and 2000
+  and a field nobody ploughs is birch in twenty years, so every plot now carries an AGE and
+  an abandoned one fades into wood — the same `forest` field, made a different way, which
+  means the canopy, the floor colour and the planting all follow it with no new generators.
+  Measured: sparse wood (forest 0.05-0.5) 1.4% -> 5.3-5.8% of the ground (the thickening
+  fallow, neither field nor wood), strip wood 18.2 -> 25.0%, and a field still in view on
+  52.6-84.3% of the drive.
+- THE COUNTRY HAS A GRAIN (`docs/research-2026-09-26-landscape.md`, section 10). Every
+  relief band was isotropic, so the ground had no axis — hills that could be anywhere.
+  The middle belt's most recognisable relief is directional: end moraines and kames lying
+  in one direction across a whole district and at another angle in the next. The lattice
+  coordinates are now ROTATED per district before the band is read (along stretched to
+  3.2 km, across short at 800 m, 20 m of amplitude, the direction hashed out of eight per
+  9 km cell — a cosine table and not trigonometry, because this runs per band sample
+  everywhere in the world), gated by a 14 km field so some districts are ridged and some
+  are plain. This is also where the КОСОГОР comes from: a road crossing a ridge at an
+  angle rides its flank for a kilometre. Measured: relief within 600 m of the road p50
+  16.8-19.9 m and p90 33-47.5 m; lateral slope at 200 m p90 13.1-16.2%; road grade p99
+  7.9-9.6%, inside the 6-10% regional roads are built to; the verge falling more than
+  0.6 m across the road on 6.9-12.1% of the drive, up from 6.0-6.5%. MAX_SLOPE 22.3 ->
+  27.3%, budgeted in landscape.ts.
+- RAVINES HAVE HEADS, TRIBUTARIES AND BALKAS NOW, AND THE LOW GROUND IS BOG
+  (`docs/research-2026-09-26-landscape.md`, sections 8 and 9). A ravine was one noise
+  field's zero set: straight bands of one width and one depth with neither a head nor a
+  mouth. It is a SYSTEM in two ages now, because that is what it is: овраг is young (a
+  rounded V, 3-8 m, bare flanks) and балка is the same cut a few centuries older (a flat
+  grassed floor, eased sides), so a maturity field along the line sets both the depth
+  (28% at a head, full at the mouth) and the SHAPE of the profile, and a second shorter
+  field read at the same warped position hangs tributaries off the trunks. Measured: a
+  ravine within 120 m of the road on 37-46% of the drive, ravine points in the transect
+  4.1-5.2% (was 2.7-3.2%), the deepest cut 9.9-10.2 m across. Bogs are new and are what
+  a болото here is: a flat pan 300 m to 2 km across in some districts and not others,
+  sunk 1.1 m and undulating +/-0.55 m over 34 m tussocks, so the water level at 55% of
+  the pan's depth comes out as hollows (мочажины) with no shoreline to author; dwarf
+  pine, stunted birch, willow and juniper stand on it, no fern and no timber, no grass
+  cards at all, and the ground is painted peat. Measured: wet ground on 10.5-16.4% of the
+  transect, against 4.5-7.0% before (the research puts bogs at 1-10% of the area).
+  Both fields are memoised on the point like the streams are, because the ground, the
+  wetness, the tile colour, the planting and the grass all ask about one vertex in a row;
+  without it the ravine field alone cost two milliseconds a tile. Tile build is
+  13.5-14.7 -> 16.6-18.3 ms together with the water.
 - PONDS AND LAKES YOU CAN ACTUALLY SEE (`docs/research-2026-09-26-landscape.md`, section 7).
   A village pond in this country is a dam across a brook in a balka, so a pond is a
   feature OF THE WATERCOURSE and not a site on a list: a slow 340 m field gates a reach

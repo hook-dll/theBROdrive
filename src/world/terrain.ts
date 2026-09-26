@@ -67,13 +67,63 @@ const DITCH_DEPTH = 0.85;
  */
 const RAVINE_WAVELENGTH = 420;
 const RAVINE_HALF_WIDTH = 0.045;
-const RAVINE_DEPTH = 6;
+/** The tributary lines (отвершки) hanging off them, and how deep they cut, as a share. */
+const RAVINE_TRIB_WAVELENGTH = 185;
+const RAVINE_TRIB_HALF_WIDTH = 0.05;
+const RAVINE_TRIB_SHARE = 0.55;
+const RAVINE_DEPTH = 7;
 const RAVINE_WARP = 70;
 const RAVINE_CLEAR = 14;
 /** Metres over which a ravine deepens once it has started. */
 const RAVINE_ONSET = 45;
 const RAVINE_PATCH_WAVELENGTH = 2600;
-const RAVINE_PATCH_THRESHOLD = -0.1;
+const RAVINE_PATCH_THRESHOLD = -0.15;
+/**
+ * How far along its own length a ravine's maturity runs, metres, and what it does.
+ *
+ * THIS IS THE DIFFERENCE BETWEEN AN OVRAG AND A BALKA, and it is the reason the two are
+ * one system here instead of two generators. A ravine in the middle belt is YOUNG: a
+ * fresh V-cut off the side of a valley or the edge of a field, 3-8 m deep, steep, with
+ * bare flanks. A balka is the same thing a few centuries older: a flat, wide, grassed
+ * floor 10-30 m down, mown for hay, with the sides eased off. A maturity field that runs
+ * along the line (the ravine's own length scale, ~1.1 km) gives a system whose heads are
+ * V-cuts and whose lower reaches are balki — which is what a walk up any of them shows.
+ */
+const RAVINE_MATURITY_WAVELENGTH = 1100;
+/** Depth at a ravine's head and at its mouth, as shares of `RAVINE_DEPTH`. */
+const RAVINE_HEAD_SHARE = 0.28;
+
+/** How much deeper than the stream's own bed a dammed reach is dug, metres. */
+const POND_DEPTH_M = 1.5;
+
+/**
+ * BOGS. A болото in this country is a FLAT one: a lowland or a saddle where the water has
+ * nowhere to go, so the peat lies in a shallow pan with its own surface — sphagnum,
+ * tussocks, dwarf pine, and pools of open water in the hollows between them. Measured
+ * against the land fund, bogs are 1-10% of the region (7-10% in Тверская, over 3% in
+ * Ярославская), which is far too much of the world to make all of it visible scenery: what
+ * this generates is the BOG ITSELF — a pan 300 m to 2 km across, in some districts and not
+ * in others — and what a road passes is the edge of one, which is what a road passes.
+ */
+const BOG_WAVELENGTH = 1500;
+/** The patch field's own scale: whole districts where the ground is flat and wet. */
+const BOG_PATCH_WAVELENGTH = 5200;
+const BOG_PATCH_THRESHOLD = 0.3;
+/** How far the pan is sunk below the country, metres, and how much it undulates. */
+const BOG_DEPTH_M = 1.1;
+const BOG_UNDULATION = 0.55;
+/** Wavelength of the hummocks and hollows across the pan, metres. */
+const BOG_TUSSOCK_WAVELENGTH = 34;
+
+/**
+ * Peat, linear rgb: what the ground of a bog is painted, over the top of whatever cover
+ * was there. Dark, warm and almost without green — a bog seen from a road is a brown-black
+ * flat with grey-green pines on it, and it must read as a different GROUND and not as a
+ * darker meadow.
+ */
+export const PEAT: readonly [number, number, number] = [0.052, 0.043, 0.03];
+/** The bog's weight above which its hollows stand water. */
+const BOG_POOL_LEVEL = 1.18;
 
 /** Width of the loose verge outside the asphalt, in metres. */
 const VERGE_WIDTH = 3.5;
@@ -339,6 +389,15 @@ function beltRockThreshold(belt: number): number {
   return OUTCROP_THRESHOLD + (OUTCROP_BELT_THRESHOLD - OUTCROP_THRESHOLD) * belt;
 }
 
+/** One ravine sample: the cross-section's weight, the cut's depth and the profile shape. */
+interface RavineSample {
+  x: number;
+  z: number;
+  weight: number;
+  depth: number;
+  profile: number;
+}
+
 export class Terrain {
   private readonly duneNoise: Noise2D;
   private readonly rippleNoise: Noise2D;
@@ -421,11 +480,9 @@ export class Terrain {
     // Ravines (ovragi): narrow, meandering V-cuts where the zero set of a warped
     // noise field runs. `patch` switches whole districts of them on and off, so
     // some country is dissected and some is not.
-    const ravine = this.ravineAt(x, z);
-    if (ravine > 0) {
-      // `t * t * (3 - 2t)` rounds the lip and the floor; the flanks stay steep.
-      h -= ravine * ravine * (3 - 2 * ravine) * RAVINE_DEPTH *
-        smoothstep01((dist - inner - RAVINE_CLEAR) / RAVINE_ONSET);
+    const ravine = this.ravineSample(x, z);
+    if (ravine.weight > 0) {
+      h -= ravine.profile * ravine.depth * smoothstep01((dist - inner - RAVINE_CLEAR) / RAVINE_ONSET);
     }
 
     // THE STREAM BED (`world/streams.ts`), and the one term here that is NOT faded
@@ -437,6 +494,18 @@ export class Terrain {
     // fills it and `roadmesh.ts` puts a pipe in the face of the embankment.
     const stream = this.road.landscape.streams.at(x, z);
     if (stream.bed > 0) h -= stream.bed * stream.bedDepth;
+    // A POND IS THE SAME GROUND, DUG OUT. The dammed reach is a hollow 30-60 m across,
+    // and the water stands in it a hand's breadth below the ground that holds it
+    // (world/streams.ts, `waterSurface`), so a pond needs no surface of its own: it is a
+    // bowl and a level, and the tiles draw the water wherever the bowl is below the level.
+    if (stream.bowl > 0) h -= stream.bowl * POND_DEPTH_M;
+
+    // THE BOG PAN. Sunk below the country and UNDULATING across itself: the ground moves
+    // around the water level by half a metre over thirty-metre tussocks, so the sheet
+    // breaks into hollows and the ridges between them stay above it. Without the
+    // undulation a pan this size is a lake with a different name.
+    const bog = this.bogAt(x, z);
+    if (bog > 0) h -= bog * BOG_DEPTH_M;
 
     // Lowlands: broad shallow hollows where water stands in spring. Kept from the
     // desert's washes, which were the same shape for a different reason.
@@ -450,18 +519,100 @@ export class Terrain {
   }
 
   /**
+   * How much of a bog a point is, 0..1, with the pan's own undulation folded in — the
+   * tussocks stand a little proud and the hollows lie a little lower, which is what makes
+   * the water stand in patches instead of as one sheet.
+   *
+   * Public because the planting, the grass and the tile colours all read it: a bog has its
+   * own plants (dwarf pine, birch, willow, juniper) and no grass at all.
+   */
+  bogAt(x: number, z: number): number {
+    // Memoised on the exact point like the ravines and the streams: the ground, the
+    // wetness, the water level, the tile colour, the planting and the grass all ask about
+    // one vertex in a row.
+    if (x === this.bogMemoX && z === this.bogMemoZ) return this.bogMemoValue;
+    this.bogMemoX = x;
+    this.bogMemoZ = z;
+    let value = 0;
+    const patch = this.washNoise.at(x / BOG_PATCH_WAVELENGTH + 613, z / BOG_PATCH_WAVELENGTH - 811);
+    if (patch > BOG_PATCH_THRESHOLD) {
+      const pan = smoothstep01((patch - BOG_PATCH_THRESHOLD) / 0.22);
+      // A PAN, not a contour: the pan's own field has to be high INSIDE it, and a small
+      // |value| is a LINE, not a blob — the first version gated on |field| < 0.1 and
+      // produced strips a hundred metres wide along the noise's zero contours, which read
+      // as flooded ditches rather than as bogs.
+      const bowl = this.scoopNoise.at(x / BOG_WAVELENGTH, z / BOG_WAVELENGTH);
+      const weight = pan * smoothstep01((bowl - 0.2) / 0.32);
+      if (weight > 0) {
+        const tussock = this.chopNoise.at(x / BOG_TUSSOCK_WAVELENGTH, z / BOG_TUSSOCK_WAVELENGTH);
+        value = weight * (1 + tussock * BOG_UNDULATION);
+      }
+    }
+    this.bogMemoValue = value;
+    return value;
+  }
+
+  private bogMemoX = Number.NaN;
+  private bogMemoZ = Number.NaN;
+  private bogMemoValue = 0;
+  private readonly ravineMemo: RavineSample = { x: Number.NaN, z: Number.NaN, weight: 0, depth: 0, profile: 0 };
+
+  /**
    * How deep into a ravine a point is, 0 (none, or outside its lip) .. 1 (its floor),
    * before the road-clearance fade. Public because the planting reads it: a ravine is
    * where the scrub and the alder grow.
    */
   ravineAt(x: number, z: number): number {
+    return this.ravineSample(x, z).weight;
+  }
+
+  /**
+   * The ravine at a point: its cross-section weight, its depth and the SHAPE of its
+   * profile, all from one set of noise reads.
+   *
+   * One entry memoised on the exact point, like `Streams.at` and for the same reason: the
+   * ground, the wetness, the tile colours, the planting and the grass all ask about the
+   * same vertex in a row, and this field is the most expensive thing in `relief` — a patch
+   * gate, two warps, two line fields and a maturity read. Unmemoised it was read five times
+   * a vertex, which measured as two milliseconds a tile.
+   */
+  private ravineSample(x: number, z: number): RavineSample {
+    const s = this.ravineMemo;
+    if (x === s.x && z === s.z) return s;
+    s.x = x;
+    s.z = z;
+    s.weight = 0;
+    s.depth = 0;
+    s.profile = 0;
     const patch = this.washNoise.at(x / RAVINE_PATCH_WAVELENGTH, z / RAVINE_PATCH_WAVELENGTH);
-    if (patch <= RAVINE_PATCH_THRESHOLD) return 0;
+    if (patch <= RAVINE_PATCH_THRESHOLD) return s;
+    const gate = smoothstep01((patch - RAVINE_PATCH_THRESHOLD) / 0.15);
     const wx = x + this.rippleNoise.at(x / 380, z / 380) * RAVINE_WARP;
     const wz = z + this.rippleNoise.at(z / 380 + 17, x / 380 - 9) * RAVINE_WARP;
     const line = Math.abs(this.chopNoise.fbm(wx / RAVINE_WAVELENGTH, wz / RAVINE_WAVELENGTH, 2, 2.2, 0.35));
-    if (line >= RAVINE_HALF_WIDTH) return 0;
-    return (1 - line / RAVINE_HALF_WIDTH) * smoothstep01((patch - RAVINE_PATCH_THRESHOLD) / 0.15);
+    let weight = 0;
+    if (line < RAVINE_HALF_WIDTH) weight = 1 - line / RAVINE_HALF_WIDTH;
+    // Отвершки: a second, shorter set of lines hung off the first. Read at the SAME
+    // warped position, so a tributary runs into its trunk instead of wandering across it.
+    const trib = Math.abs(
+      this.chopNoise.fbm(wx / RAVINE_TRIB_WAVELENGTH + 5.5, wz / RAVINE_TRIB_WAVELENGTH - 3.25, 2, 2.1, 0.4),
+    );
+    if (trib < RAVINE_TRIB_HALF_WIDTH) {
+      weight = Math.max(weight, (1 - trib / RAVINE_TRIB_HALF_WIDTH) * RAVINE_TRIB_SHARE);
+    }
+    if (weight <= 0) return s;
+    s.weight = weight * gate;
+    const maturity = smoothstep01(
+      0.5 + this.chopNoise.at(x / RAVINE_MATURITY_WAVELENGTH + 41, z / RAVINE_MATURITY_WAVELENGTH - 17),
+    );
+    s.depth = RAVINE_DEPTH * (RAVINE_HEAD_SHARE + (1 - RAVINE_HEAD_SHARE) * maturity);
+    const v = weight * weight * (3 - 2 * weight);
+    // A balka's floor is FLAT across its middle third and its flanks fall away steeply;
+    // a young ravine is a rounded V. The maturity is the same read that set the depth, so
+    // a cut is never half-V and half-U along its own length.
+    const u = weight >= 0.66 ? 1 : smoothstep01(weight / 0.66);
+    s.profile = v + (u - v) * maturity;
+    return s;
   }
 
   /**
@@ -535,14 +686,16 @@ export class Terrain {
   /**
    * What is left of wheel-scale relief at a point: nothing in a stream bed.
    *
-   * A bed is the one place in this world that is genuinely smooth under a wheel and
-   * under water. Corrugation, chop, hummocks and the ditch are all metres-scale bumps,
-   * and a bump in a bed either pokes through the water surface in patches or makes the
-   * surface patchy as the tile boundary crosses it.
+   * A bed — and a pond's bowl, which is the same ground dug deeper — is the one place in
+   * this world that is genuinely smooth under a wheel and under water. Corrugation, chop,
+   * hummocks and the ditch are all metres-scale bumps, and a bump in a bed either pokes
+   * through the water surface in patches or makes the surface patchy as the tile boundary
+   * crosses it.
    */
   private detailKeep(x: number, z: number): number {
-    const bed = this.road.landscape.streams.at(x, z).bed;
-    return bed <= 0 ? 1 : 1 - bed;
+    const stream = this.road.landscape.streams.at(x, z);
+    const dug = Math.max(stream.bed, stream.bowl);
+    return dug <= 0 ? 1 : 1 - dug;
   }
 
   /** Fine band and corridor landform for the player-centred tile lattice. */
@@ -845,6 +998,19 @@ export class Terrain {
   waterLevelAt(x: number, z: number): number {
     const streams = this.road.landscape.streams;
     const sample = streams.at(x, z);
+    // A BOG stands water between its tussocks. The level is the pan's own floor plus a
+    // hand's breadth, so the hollows are pools and the ridges are not, with no shoreline
+    // to author: `bogAt` already carries the undulation.
+    const bog = this.bogAt(x, z);
+    // Only the HOLLOWS between the tussocks stand water (`bog > 1` is a tussock below the
+    // pan's own level), and the surface is quantised: a bog pool is flat, and on a 3 m
+    // lattice a level that follows the ground by centimetres per quad draws itself as a
+    // staircase of dark seams.
+    if (bog > BOG_POOL_LEVEL) {
+      const panFloor = this.road.landscape.heightAt(x, z) - BOG_DEPTH_M;
+      const level = panFloor + BOG_DEPTH_M * 0.55 + (bog - 1) * BOG_DEPTH_M * 0.5;
+      return Math.round(level * 12) / 12;
+    }
     // NaN, not 0, for "no water" — and this is the whole difference between a stream and
     // a flood. The world's heights run to -200 m, so 0 is a perfectly ordinary surface
     // height: using it as the sentinel made every tile of ground that happened to lie
@@ -876,6 +1042,9 @@ export class Terrain {
     // damp ground: the bed's own weight is the share of it.
     const bed = this.road.landscape.streams.at(x, z).bed;
     if (bed > 0) w = Math.max(w, 0.3 + bed * 0.5);
+    // A bog is wet everywhere, and its low tussocks are under water.
+    const bog = this.bogAt(x, z);
+    if (bog > 0) w = Math.max(w, Math.min(1, 0.45 + bog * 0.5));
     return Math.min(1, w);
   }
 

@@ -251,6 +251,43 @@ function sumOverBands(tempo: number, per: (b: Band, tempo: number) => number): n
 }
 
 /**
+ * THE RIDGES, and the reason the country has a GRAIN.
+ *
+ * Every band above is isotropic: a swell is the same in all directions, so the ground it
+ * makes has no axis. The middle belt has one, and it is the most recognisable thing about
+ * its relief — the end moraines and kames left by the ice sheet are RIDGES, kilometres
+ * long and tens of metres high, lying in one direction across a whole district while the
+ * next district's run at another angle. Driving across them is a rhythm of long parallel
+ * swells; driving along one is a straight run on a crest. A generator without this axis
+ * produces hills that could be anywhere, which is exactly what the isotropic bands do.
+ *
+ * HOW IT IS BUILT. The lattice's coordinates are ROTATED per district before the band is
+ * read: `along` is stretched (a ridge runs kilometres) and `across` is short (a crest
+ * every 1.8 km). The district is a 9 km cell with a hashed direction out of eight — a
+ * LOOKUP, not trigonometry, because this runs once per band sample everywhere in the
+ * world, and `cos`/`sin` per call is the whole cost of the feature. The gate is its own
+ * slow field, so whole districts have ridges and whole districts are plain.
+ *
+ * AND THIS IS ALSO THE КОСОГОР. A road crossing a ridge at an angle rides its flank: the
+ * ground falls away on one side and rises on the other for a kilometre at a time, which is
+ * what the word means and what the corridor's 30 m of grading cannot flatten away.
+ */
+const RIDGE_ALONG = 3200;
+const RIDGE_ACROSS = 800;
+const RIDGE_AMPLITUDE = 20;
+const RIDGE_DIRECTION_CELL = 9000;
+const RIDGE_DIRECTIONS = 8;
+/** The gate's own field, metres: a district of ridges twice the size of the direction. */
+const RIDGE_GATE_WAVELENGTH = 14_000;
+/** `cos`/`sin` for the eight directions, so the sample is arithmetic and never a `cos`. */
+const RIDGE_COS: readonly number[] = Array.from({ length: RIDGE_DIRECTIONS }, (_, i) =>
+  Math.cos((i / RIDGE_DIRECTIONS) * Math.PI),
+);
+const RIDGE_SIN: readonly number[] = Array.from({ length: RIDGE_DIRECTIONS }, (_, i) =>
+  Math.sin((i / RIDGE_DIRECTIONS) * Math.PI),
+);
+
+/**
  * The steepest this field can be, as a fraction: the worst tempo's band sum plus the
  * homestead ramp's own contribution plus the river valleys.
  *
@@ -262,7 +299,8 @@ function sumOverBands(tempo: number, per: (b: Band, tempo: number) => number): n
 export const MAX_SLOPE =
   Math.max(sumOverBands(0, slopeAtTempo), sumOverBands(1, slopeAtTempo)) +
   (BANDS.reduce((sum, b) => sum + (b.home ? b.amplitude : 0), 0) * FADE_PEAK_SLOPE) / HOME_RAMP +
-  MAX_VALLEY_SLOPE;
+  MAX_VALLEY_SLOPE +
+  (RIDGE_AMPLITUDE * 2 * FADE_PEAK_SLOPE) / RIDGE_ACROSS;
 
 /** Total half-range of the field, metres, in the tempo that reaches highest. */
 export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(1, reliefAtTempo));
@@ -350,6 +388,10 @@ export class Landscape {
   private readonly hillTag: number;
   private readonly tempoTag: number;
   private readonly mountainTags: readonly number[];
+  /** Ridge chain: the crest field, the district's direction and the district's gate. */
+  private readonly ridgeTag: number;
+  private readonly ridgeAxisTag: number;
+  private readonly ridgeGateTag: number;
   /**
    * The waterways, which are the landscape's own term but not a band: their valleys are
    * lines rather than a swell (world/streams.ts). Shared with `Terrain` through this
@@ -370,6 +412,9 @@ export class Landscape {
     this.shortTags = BANDS.map((_, i) => (base ^ 0x5bf03635) + i * 0x9e3779b9);
     this.tempoTag = base ^ 0x27d4eb2f;
     this.mountainTags = MOUNTAIN_BANDS.map((_, i) => (base ^ 0x2545f491) + i * 0x85ebca6b);
+    this.ridgeTag = base ^ 0x3d1f2a77;
+    this.ridgeAxisTag = base ^ 0x6c8e9cf5;
+    this.ridgeGateTag = base ^ 0x1a2b3c4d;
     this.datum = 0;
     this.datum = this.heightAt(0, 0);
   }
@@ -391,6 +436,34 @@ export class Landscape {
       h += b.amplitude * smoothstep01((n - MOUNTAIN_THRESHOLD) / (1 - MOUNTAIN_THRESHOLD));
     }
     return h;
+  }
+
+  /**
+   * The ridge field at a point, metres: the moraine's own grain, rotated per district.
+   *
+   * Read in `heightAt` and nowhere else. The direction is a lookup on a 9 km cell (eight
+   * directions, so a district's ridges lie at a consistent angle) and the gate is a 14 km
+   * swell that fades whole districts of them in and out, which keeps the grain a thing
+   * you notice in some country and not in others.
+   */
+  ridgeAt(x: number, z: number): number {
+    const gateN = band(this.ridgeGateTag, x / RIDGE_GATE_WAVELENGTH, z / RIDGE_GATE_WAVELENGTH);
+    if (gateN <= -0.1) return 0;
+    const gate = smoothstep01((gateN + 0.1) / 0.5);
+    if (gate <= 0) return 0;
+    const cellX = Math.floor(x / RIDGE_DIRECTION_CELL);
+    const cellZ = Math.floor(z / RIDGE_DIRECTION_CELL);
+    const direction = Math.min(
+      RIDGE_DIRECTIONS - 1,
+      Math.floor(hashUnit3(this.ridgeAxisTag, cellX, cellZ) * RIDGE_DIRECTIONS),
+    );
+    const ca = RIDGE_COS[direction]!;
+    const sa = RIDGE_SIN[direction]!;
+    const along = x * ca + z * sa;
+    const across = z * ca - x * sa;
+    return (
+      RIDGE_AMPLITUDE * gate * band(this.ridgeTag, along / RIDGE_ALONG, across / RIDGE_ACROSS)
+    );
   }
 
   /**
@@ -453,9 +526,10 @@ export class Landscape {
       }
       h += b.amplitude * band(this.tags[i]!, x / b.wavelength, z / b.wavelength) * weight;
     }
-    // The river valleys, on the same homestead ramp as the felt bands: a stream running
-    // through the concrete pad would tilt it, and the pad is the one place in the world
-    // that is authored flat.
+    // The ridges (the country's grain) and the river valleys, both on the same homestead
+    // ramp as the felt bands: a ridge running through the concrete pad would tilt it, and
+    // the pad is the one place in the world that is authored flat.
+    h += this.ridgeAt(x, z) * home;
     h -= this.streams.at(x, z).valley * home;
     return h - this.datum;
   }

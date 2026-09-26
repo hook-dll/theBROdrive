@@ -49,6 +49,25 @@ import { Noise2D } from '../core/rng';
 export const LINE_WAVELENGTH = 2600;
 /** Wavelength of the size field, metres: how far you drive between a brook and a river. */
 const SIZE_WAVELENGTH = 4200;
+/**
+ * Wavelength of the pond field, metres, and how big a pond is.
+ *
+ * VILLAGE PONDS ARE THE WATER YOU ACTUALLY SEE in this country. A lake is one per fifty
+ * square kilometres and a river is mostly hidden under its own banks; a pond is 30-60 m
+ * of open water at the foot of a dam, in the dip beside a road, and there is one in most
+ * villages and at many a farm. So they are a feature OF THE WATERCOURSE: a reach that has
+ * been dammed, which is what almost every pond here is — a dam across a brook in a balka.
+ *
+ * The wavelength is the length of a ponded stretch; the field is sampled across the
+ * channel rather than along it, and at this scale the difference across 30 m of bed is
+ * nothing, so the pool comes out level with itself.
+ */
+const POND_WAVELENGTH = 340;
+const POND_HALF = 0.013;
+/** How much deeper the dammed reach is dug than the stream's own bed, metres. */
+const POND_DEPTH_M = 1.5;
+/** Freeboard: the pool stands this far below the ground that holds it. */
+const POND_FREEBOARD_M = 0.18;
 
 /**
  * Half-widths in FIELD UNITS, so metres are these times `LINE_WAVELENGTH`:
@@ -138,6 +157,10 @@ export interface StreamSample {
    * because it is under water every spring.
    */
   flood: number;
+  /** How dammed this reach is, 0..1: the pond in the dip by the road. */
+  pond: number;
+  /** The dug hollow that holds a pond, 0..1, at this point. */
+  bowl: number;
 }
 
 function smoothstep(a: number, b: number, x: number): number {
@@ -153,6 +176,7 @@ function smoothstep01(t: number): number {
 export class Streams {
   private readonly lineNoise: Noise2D;
   private readonly sizeNoise: Noise2D;
+  private readonly pondNoise: Noise2D;
   private readonly scratch: StreamSample = {
     d: RIM_HALF,
     size: 0,
@@ -162,6 +186,8 @@ export class Streams {
     span: 0,
     water: 0,
     flood: 0,
+    pond: 0,
+    bowl: 0,
   };
   /**
    * One-entry memo on the last (x, z).
@@ -181,6 +207,7 @@ export class Streams {
     this.seed = base;
     this.lineNoise = new Noise2D(base ^ 0x7a4d3b19);
     this.sizeNoise = new Noise2D(base ^ 0x2f9e5c71);
+    this.pondNoise = new Noise2D(base ^ 0x6d2b79f5);
   }
 
   /**
@@ -205,6 +232,8 @@ export class Streams {
       s.span = 0;
       s.water = 0;
       s.flood = 0;
+      s.pond = 0;
+      s.bowl = 0;
       return s;
     }
     // A LINEAR ramp, not a smoothstep. A smoothstep on a value-noise swell saturates:
@@ -221,6 +250,14 @@ export class Streams {
     s.span = smoothstep01((s.size - (SIZE_BRIDGE - 0.12)) / 0.18) * s.bed;
     s.water = smoothstep01((s.size - (SIZE_WATER - 0.08)) / 0.16);
     s.flood = 1 - smoothstep(FLOOR_HALF * 0.45, FLOOR_HALF, s.d);
+    // A pond is a SMALL watercourse that somebody has dammed: a river is not ponded, and
+    // a reach with no water in it has nothing to hold back.
+    s.pond =
+      s.water *
+      (1 - smoothstep(0.55, 0.85, s.size)) *
+      smoothstep01((this.pondNoise.at(x / POND_WAVELENGTH, z / POND_WAVELENGTH) - 0.34) / 0.2);
+    const bowlT = s.d / POND_HALF;
+    s.bowl = s.pond * (bowlT >= 1 ? 0 : 1 - bowlT * bowlT);
     return s;
   }
 
@@ -269,7 +306,12 @@ export class Streams {
    * stream water a kilometre from the stream.
    */
   waterSurface(floorY: number, sample: StreamSample): number {
-    if (sample.water <= 0 || sample.bed <= 0) return Number.NaN;
-    return floorY - (1 - WATER_FILL) * sample.bedDepth;
+    if (sample.water <= 0 || (sample.bed <= 0 && sample.bowl <= 0)) return Number.NaN;
+    // Two surfaces, blended: a stream stands a share of its own depth up its bed, and a
+    // dammed reach stands just below the ground that holds it — which is what makes a
+    // pond a sheet of open water 30-60 m across instead of a fuller channel.
+    const stream = floorY - (1 - WATER_FILL) * sample.bedDepth;
+    const pond = floorY - POND_FREEBOARD_M;
+    return stream + (pond - stream) * sample.pond;
   }
 }

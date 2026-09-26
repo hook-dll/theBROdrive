@@ -1,5 +1,6 @@
 import { hashUnit3 } from '../core/rng';
 import type { Road } from './road';
+import { villagesAlongRoad } from './village';
 
 /**
  * Where the desert HAS a lake, and the bowl it stands in.
@@ -41,16 +42,26 @@ const HOME_LAKE_S = 1_500;
  */
 const HOME_LAKE_LATERAL = 620;
 
-/** Arclength between the rare ones after it. A genuine curiosity, not a landmark. */
-const MIN_GAP_M = 200_000;
-const GAP_RANGE_M = 100_000;
+/**
+ * Arclength between the rolled sites, and how far out they sit.
+ *
+ * The lakes themselves are rare — 8-21 of over a hectare per 1000 km2, and two per
+ * 100 km2 even in lake-rich Тверская — so most of what a driver passes is not a lake at
+ * all: it is the ponds (`world/streams.ts`), which belong to the watercourses. What the
+ * gap here buys is the LAKE: one every thirty to fifty kilometres of road, near enough
+ * laterally to be seen from it (research: docs/research-2026-09-26-landscape.md, 1.5).
+ * The previous 200-300 km put one in a long day's drive, which is why nobody ever saw
+ * one.
+ */
+const MIN_GAP_M = 32_000;
+const GAP_RANGE_M = 22_000;
 /**
  * Lateral band for a rolled site. The near edge clears `RELIEF_FULL` (200 m,
  * terrain.ts) by a wide margin, which keeps every basin out of the road corridor and
  * keeps the whole search window "far from the road" in the tile sampler's sense.
  */
-const LATERAL_MIN_M = 520;
-const LATERAL_RANGE_M = 420;
+const LATERAL_MIN_M = 300;
+const LATERAL_RANGE_M = 350;
 
 /** How wrong a caller's arclength hint may be before a basin could be missed. */
 const HINT_SLACK_M = 400;
@@ -102,8 +113,14 @@ function smoothstep01(t: number): number {
 }
 
 /**
- * Every lake on a road, in arclength order: the authored one at the house, then a
- * rolled site every 200-300 km. Pure in the seed, like every other schedule.
+ * Every basin on a road, in arclength order: the authored lake at the house, the rolled
+ * lakes, and a POND IN EVERY VILLAGE.
+ *
+ * The village ponds are why this schedule is not just the lakes. A lake is rare — one per
+ * thirty to fifty kilometres of road — but a pond is where the country's water actually
+ * is: by a village, dammed across a brook or dug in the dip beside the street, and the
+ * same dug-basin machinery digs both. They come from `world/village.ts`, so a pond stands
+ * in the village it belongs to and not in a field of its own.
  */
 export function lakeSites(seed: number, roadLength: number): readonly LakeSite[] {
   const sites: LakeSite[] = [
@@ -131,6 +148,17 @@ export function lakeSites(seed: number, roadLength: number): readonly LakeSite[]
     s += MIN_GAP_M + hashUnit3(seed, index, SALT_GAP) * GAP_RANGE_M;
     index++;
   }
+  for (const village of villagesAlongRoad(seed, roadLength)) {
+    sites.push({
+      index: index++,
+      s: village.pond.s,
+      lateral: village.pond.lateral,
+      radius: village.pond.radius,
+      depth: village.pond.depth,
+    });
+  }
+  // The lookup is a binary search on arclength, so the list has to be ordered.
+  sites.sort((a, b) => a.s - b.s);
   return sites;
 }
 
@@ -197,9 +225,14 @@ export class LakeBasins {
     const placed = this.place(site);
     const r = Math.hypot(x - placed.x, z - placed.z);
 
+    // A pond and a lake are the same shape at different sizes: the rim and the blend scale
+    // with the basin, or a fifty-metre pond would be ringed by a twenty-four metre rampart
+    // and leave a crater two hundred metres wide around itself.
     const inner = site.radius;
-    const rimAt = inner + RIM_WIDTH_M;
-    const outer = rimAt + BLEND_WIDTH_M;
+    const rimWidth = Math.max(RIM_WIDTH_M * 0.5, inner * 0.12);
+    const blendWidth = Math.max(RIM_WIDTH_M * 2, inner);
+    const rimAt = inner + rimWidth;
+    const outer = rimAt + blendWidth;
     if (r >= outer) return open;
 
     // THE LIP IS SET BY THE LOWEST GROUND AROUND THE BASIN, NOT BY THE CENTRE.
@@ -215,7 +248,7 @@ export class LakeBasins {
     const floor = lip - site.depth;
     const bowl = 1 - smoothstep01(r / inner);
     const target = r <= inner ? floor + (lip - floor) * (1 - bowl) : lip;
-    const blend = 1 - smoothstep01((r - rimAt) / BLEND_WIDTH_M);
+    const blend = 1 - smoothstep01((r - rimAt) / blendWidth);
     return open + (target - open) * blend;
   }
 

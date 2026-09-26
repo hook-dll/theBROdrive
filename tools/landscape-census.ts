@@ -39,6 +39,7 @@ import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import { varietyEventsBetween, varietyKinds } from '../src/world/director';
+import { SHOP_VARIANTS, villagesBetween } from '../src/world/village';
 
 const SEEDS = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n));
 const RUN_SEEDS = SEEDS.length ? SEEDS : [1337, 777];
@@ -58,6 +59,11 @@ interface Tally {
   wet: number;
   ravine: number;
   total: number;
+}
+
+function roadOffset(road: Road, s: number, lateral: number): [number, number] {
+  const p = road.offsetPoint(s, lateral);
+  return [p.x, p.z];
 }
 
 function pct(n: number, total: number): string {
@@ -357,6 +363,163 @@ for (const seed of RUN_SEEDS) {
     console.log(
       `  valley cut at a crossing: median ${quant(depths, 0.5).toFixed(1)} m  p10 ${quant(depths, 0.1).toFixed(1)}  p90 ${quant(depths, 0.9).toFixed(1)}` +
         `  |  worst grade within 220 m of a crossing ${(worstGradeNearCrossing * 100).toFixed(2)}%`,
+    );
+  }
+
+  // RAVINES AND KOSOGORS. How many ravines the road passes and how deep they are, and how
+  // often the road is riding a side-slope — the verge half a metre higher on one side
+  // than the other, which is what a косогор looks like from the cab.
+  {
+    let ravines = 0;
+    let ravineStations = 0;
+    let stations = 0;
+    let inRavine = false;
+    let deepest = 0;
+    const crossSlopes: number[] = [];
+    for (let s = 0; s < LENGTH_M; s += 10) {
+      const near = terrain.ravineAt(...roadOffset(road, s, 0));
+      let hit = 0;
+      let hitLat = 0;
+      for (let lat = -120; lat <= 120; lat += 12) {
+        const p = road.offsetPoint(s, lat);
+        const r = terrain.ravineAt(p.x, p.z);
+        if (r > hit) {
+          hit = r;
+          hitLat = lat;
+        }
+      }
+      stations++;
+      if (hit > 0.3) {
+        ravineStations++;
+        if (!inRavine) ravines++;
+        inRavine = true;
+        // How deep the cut is, measured across it: the ground on its centreline against
+        // the ground forty metres further out on the same side.
+        const centre = road.offsetPoint(s, hitLat);
+        const shoulder = road.offsetPoint(s, hitLat + (hitLat < 0 ? -40 : 40));
+        deepest = Math.max(
+          deepest,
+          terrain.heightAt(shoulder.x, shoulder.z, s) - terrain.heightAt(centre.x, centre.z, s),
+        );
+      } else inRavine = false;
+      void near;
+      const left = road.offsetPoint(s, 14);
+      const right = road.offsetPoint(s, -14);
+      const hl = terrain.heightAt(left.x, left.z, s);
+      const hr = terrain.heightAt(right.x, right.z, s);
+      crossSlopes.push(Math.abs(hl - hr));
+    }
+    crossSlopes.sort((a, b) => a - b);
+    // How much relief stands inside the driver's own window: the height range within
+    // 600 m of the road. A ridge field is worth nothing if the ground beside the road
+    // still reads as flat.
+    const reliefWindow: number[] = [];
+    for (let s = 0; s < LENGTH_M; s += 200) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let lat = -600; lat <= 600; lat += 50) {
+        const p = road.offsetPoint(s, lat);
+        const y = terrain.heightAt(p.x, p.z, s);
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
+      reliefWindow.push(hi - lo);
+    }
+    reliefWindow.sort((a, b) => a - b);
+    console.log(
+      `RELIEF IN VIEW: height range within 600 m of the road: p50 ${quant(reliefWindow, 0.5).toFixed(1)} m, p90 ${quant(reliefWindow, 0.9).toFixed(1)} m, max ${reliefWindow[reliefWindow.length - 1]?.toFixed(1)} m`,
+    );
+    const tilted = crossSlopes.filter((v) => v > 0.6).length;
+    console.log(
+      `RAVINES: a ravine within 120 m on ${pct(ravineStations, stations)} of the drive (${ravines} separate runs)` +
+        `  |  deepest cut seen ${deepest.toFixed(1)} m`,
+    );
+    console.log(
+      `KOSOGOR: ground 14 m either side of the road differs by p50 ${quant(crossSlopes, 0.5).toFixed(2)} m, p90 ${quant(crossSlopes, 0.9).toFixed(2)} m` +
+        `  |  more than 0.6 m on ${pct(tilted, crossSlopes.length)} of the drive`,
+    );
+  }
+
+  // VILLAGES: how often a place is inhabited, how many houses it has and how long its
+  // street is. The research puts a village every 6-11 km of road.
+  {
+    let villages = 0;
+    let houses = 0;
+    let shops = 0;
+    const lengths: number[] = [];
+    const sizes: number[] = [];
+    let withPond = 0;
+    for (const village of villagesBetween(seed, 0, LENGTH_M)) {
+      villages++;
+      houses += village.houses.length;
+      sizes.push(village.houses.length);
+      lengths.push(village.to - village.from);
+      for (const house of village.houses) if (SHOP_VARIANTS.includes(house.variant)) shops++;
+      // The pond is a DUG BASIN (world/lakes.ts), so its water comes from the basin
+      // renderer and not from `waterLevelAt` — what is checked here is that the basin
+      // schedule has a site at the village's own arclength.
+      const site = terrain.basins.nearest(village.pond.s);
+      if (site !== null && Math.abs(site.s - village.pond.s) < 1) withPond++;
+    }
+    console.log(
+      `VILLAGES: ${villages} over ${LENGTH_M / 1000} km = one every ${(LENGTH_M / Math.max(1, villages) / 1000).toFixed(2)} km` +
+        `  |  ${houses} houses (median ${quant(sizes, 0.5)}, ${quant(sizes, 0.1)}-${quant(sizes, 0.9)}), street ${quant(lengths, 0.5)} m long` +
+        `  |  ${shops} shops, ${withPond} dug ponds`,
+    );
+  }
+
+  // PONDS: the water a driver actually sees, and how wide it is where it is seen. A pond
+  // is a dammed reach of the stream network, so it is found the same way a crossing is —
+  // by the bowl — but it is looked for to the SIDE, where the eye is.
+  {
+    let ponds = 0;
+    let inPond = false;
+    let widest = 0;
+    let pondS = -1;
+    for (let s = 0; s < LENGTH_M; s += 10) {
+      let wet = false;
+      let width = 0;
+      for (let lat = 0; lat <= 400; lat += 12) {
+        for (const side of lat === 0 ? [1] : [1, -1]) {
+          const p = road.offsetPoint(s, side * lat);
+          const v = road.landscape.streams.at(p.x, p.z);
+          if (v.bowl <= 0.2) continue;
+          const level = terrain.waterLevelAt(p.x, p.z);
+          if (!Number.isFinite(level)) continue;
+          if (terrain.heightAt(p.x, p.z, s) < level - 0.02) {
+            wet = true;
+            width = lat;
+          }
+        }
+        if (!wet && lat > 60) break;
+      }
+      if (wet) {
+        if (!inPond) {
+          ponds++;
+          pondS = s;
+        }
+        if (width > widest) widest = width;
+      }
+      inPond = wet;
+      void pondS;
+    }
+    // The pond's own size, measured across the road: the run of dug bowl. (Water in a
+    // lateral scan is a longer number and not the pond's: where the road runs ALONGSIDE
+    // a stream the scan crosses two hundred metres of it.)
+    let widestBowl = 0;
+    for (let s = 0; s < LENGTH_M; s += 20) {
+      let run = 0;
+      for (let lat = -300; lat <= 300; lat += 4) {
+        const p = road.offsetPoint(s, lat);
+        if (road.landscape.streams.at(p.x, p.z).bowl > 0.15) {
+          run += 4;
+          if (run > widestBowl) widestBowl = run;
+        } else run = 0;
+      }
+    }
+    console.log(
+      `PONDS: ${ponds} with open water visible from the road inside 400 m over ${LENGTH_M / 1000} km = one every ${(LENGTH_M / Math.max(1, ponds) / 1000).toFixed(2)} km` +
+        `  |  furthest of it ${widest} m out  |  widest pond hollow ${widestBowl} m across`,
     );
   }
 

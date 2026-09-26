@@ -5,7 +5,7 @@ import { CoverKind, Crop, MUD, newCoverSample, writeGroundWeights, type CoverSam
 import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
-import { CORRIDOR_OUTER, type Terrain } from './terrain';
+import { CORRIDOR_OUTER, PEAT, type Terrain } from './terrain';
 import { terminusWeight } from './terminus';
 import { TRACK_HALF_WIDTH_M, TRACK_MAX_LENGTH_M, trackAt, trackPossibleNear, type TrackSample } from './tracks';
 
@@ -339,6 +339,15 @@ export function generateDesertTileData(
         coverSample.g += (MUD[1] - coverSample.g) * m;
         coverSample.b += (MUD[2] - coverSample.b) * m;
       }
+      // A bog's ground is PEAT, and it is not a tuft of anything: the colour goes to the
+      // peat's own, over the top of the meadow the cover field painted.
+      const bog = context.terrain.bogAt(worldX, worldZ);
+      if (bog > 0) {
+        const m = Math.min(1, bog * 0.9);
+        coverSample.r += (PEAT[0] - coverSample.r) * m;
+        coverSample.g += (PEAT[1] - coverSample.g) * m;
+        coverSample.b += (PEAT[2] - coverSample.b) * m;
+      }
       writeGroundWeights(coverSample, wet, groundPaint, vi * 4);
       colors[vi * 3] = coverSample.r;
       colors[vi * 3 + 1] = coverSample.g;
@@ -630,12 +639,27 @@ export function plantTrees(
       // gravel, and a birch growing out of the middle of a stream is the kind of thing
       // that reads as a bug rather than as a river.
       const stream = context.road.landscape.streams.at(x, z);
-      if (stream.bed > 0) continue;
+      if (stream.bed > 0 || stream.bowl > 0.15) continue;
+      // A BOG HAS ITS OWN PLANTS, and almost nothing else: dwarf pine and stunted birch on
+      // the tussocks, willow and juniper between them, no fern, and no timber — a wood
+      // cannot stand in a mire, and the trees that are there are the ones a walker uses to
+      // cross it.
+      const bog = terrain.bogAt(x, z);
       const r = hash01(seed, TREE_TAG, gx, gz, 3);
       const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
       const r3 = hash01(seed, TREE_TAG, gx, gz, 7);
       const r4 = hash01(seed, TREE_TAG, gx, gz, 8);
       const r5 = hash01(seed, TREE_TAG, gx, gz, 9);
+
+      if (bog > 0.35) {
+        if (r < Math.min(0.5, bog * 0.5)) {
+          const kind =
+            r2 < 0.3 ? TreeKind.Pine : r2 < 0.58 ? TreeKind.Birch : r2 < 0.78 ? TreeKind.Willow : TreeKind.Juniper;
+          // Small and slow: a pine on a bog is a third the height of one on sand.
+          put(x, z, kind, (kind === TreeKind.Pine ? 0.34 : 0.42) + 0.22 * r3, key);
+        }
+        continue;
+      }
 
       // Woods.
       const forest = land.forestAt(x, z, roadDist);
@@ -796,7 +820,8 @@ export function plantTrees(
       if (roadDist < TREE_ROAD_KEEP) continue;
       if (terminusWeight(x, z) > 0) continue;
       if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 0.6)) continue;
-      if (context.road.landscape.streams.at(x, z).bed > 0) continue;
+      const dug = context.road.landscape.streams.at(x, z);
+      if (dug.bed > 0 || dug.bowl > 0.15) continue;
       const forest = land.forestAt(x, z, roadDist);
       const r2 = hash01(seed, UNDER_TAG, gx, gz, 4);
       const r3 = hash01(seed, UNDER_TAG, gx, gz, 7);

@@ -18,6 +18,8 @@ import {
 } from '../render/carmodel';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
+import { villagesBetween, type Village } from './village';
+import { box, C } from './poi/kit';
 import type { LoosePartField } from '../parts/loose';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
@@ -806,6 +808,160 @@ function buildVariantPoi(
   }
 }
 
+/**
+ * Loot indices for village houses live in their own space, above every ordinary POI
+ * index: a POI's index is its arclength slot along a forty-thousand-kilometre road, which
+ * tops out around thirty-three thousand, and a village house has no slot of its own.
+ */
+const VILLAGE_LOOT_BASE = 2_000_000;
+
+/** Post spacing of a garden fence's rails, metres, and its own size. */
+const FENCE_PLANK_M = 0.07;
+const FENCE_HEIGHT_M = 0.95;
+/** How far behind a house its garden starts and ends, metres. */
+const GARDEN_FROM_M = 9;
+const GARDEN_TO_M = 24;
+const GARDEN_HALF_WIDTH_M = 7;
+/** The drop: poles between the road's own line and the village's street. */
+const DROP_POLE_HEIGHT_M = 7.4;
+const DROP_POLE_GAP_M = 9;
+const DROP_POLE_COUNT = 3;
+
+/**
+ * ONE VILLAGE, built from the same catalogue the lone houses come from.
+ *
+ * The houses go through `buildVariantPoi`, so they are fitted to the ground, tilted onto
+ * their own site plane, sunk by its residual, given their lamps and their door clearances
+ * and collided exactly as a lone house is; a village is a rhythm, and the rhythm is the
+ * only new thing in it. The pond is already dug by the time this runs — it is a basin in
+ * `world/lakes.ts`, scheduled at this village's own arclength — so the houses simply stand
+ * beside water.
+ *
+ * The furniture is what makes it read as inhabited rather than as six houses in a field:
+ * a plank fence behind each house (the kitchen garden), and a short run of poles carrying
+ * the line down from the road to the street.
+ */
+function buildVillage(
+  ctx: ChunkContext,
+  village: Village,
+  group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+  loose: LoosePartField,
+  trailers: TrailerField,
+  wreckTrunks: WreckTrunkField,
+  switches: PoiSwitchField,
+  registeredWrecks: string[],
+  registeredSwitches: string[],
+  deferredVisuals: Array<() => void>,
+): void {
+  const counter: LootCounter = { sub: 0 };
+  for (const house of village.houses) {
+    const poi: Poi = {
+      index: VILLAGE_LOOT_BASE + village.index * 64 + house.number,
+      s: house.s,
+      lateral: house.lateral,
+      variant: house.variant,
+      variantSeed: house.variantSeed,
+    };
+    const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
+    buildVariantPoi(
+      ctx,
+      poi,
+      group,
+      bodies,
+      colliders,
+      loose,
+      trailers,
+      wreckTrunks,
+      switches,
+      registeredWrecks,
+      registeredSwitches,
+      deferredVisuals,
+      counter,
+      shouldLoot,
+    );
+    if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
+    buildGardenFence(ctx, village, house.s, house.lateral, group);
+  }
+  buildPowerDrop(ctx, village, group);
+}
+
+/** The kitchen garden behind one house: three sides of a plank fence, no collider. */
+function buildGardenFence(
+  ctx: ChunkContext,
+  village: Village,
+  s: number,
+  lateral: number,
+  group: THREE.Group,
+): void {
+  const road = ctx.road;
+  const outward = lateral < 0 ? -1 : 1;
+  const near = Math.abs(lateral) + GARDEN_FROM_M;
+  const far = Math.abs(lateral) + GARDEN_TO_M;
+  const mid = (near + far) / 2;
+  const heading = road.sampleAt(s).heading;
+  const centre = road.offsetPoint(s, outward * mid);
+  const y = ctx.terrain.heightAt(centre.x, centre.z, s);
+  const back = road.offsetPoint(s, outward * far);
+  const backY = ctx.terrain.heightAt(back.x, back.z, s);
+  const paint = (x: number, z: number, size: readonly [number, number, number], yaw: number, baseY: number): void => {
+    box(
+      group,
+      [size[0], size[1], size[2]],
+      [x - ctx.originX, baseY + size[1] / 2, z - ctx.originZ],
+      C.darkTimber,
+      [0, yaw, 0],
+    );
+  };
+  const length = far - near;
+  // The two side walls run out from the house, the back one closes them.
+  for (const side of [-1, 1]) {
+    const p = road.offsetPoint(s + side * GARDEN_HALF_WIDTH_M, outward * mid);
+    paint(p.x, p.z, [FENCE_PLANK_M, FENCE_HEIGHT_M, length], heading, y);
+  }
+  paint(back.x, back.z, [GARDEN_HALF_WIDTH_M * 2, FENCE_HEIGHT_M, FENCE_PLANK_M], heading, backY);
+}
+
+/** Three poles and their wire, from the road's verge to the village's houses. */
+function buildPowerDrop(ctx: ChunkContext, village: Village, group: THREE.Group): void {
+  const road = ctx.road;
+  const s0 = village.s - (DROP_POLE_COUNT * DROP_POLE_GAP_M) / 2;
+  let previous: { x: number; y: number; z: number } | null = null;
+  for (let i = 0; i < DROP_POLE_COUNT; i++) {
+    const s = s0 + i * DROP_POLE_GAP_M;
+    const lateral = village.side * (9 + i * 7);
+    const p = road.offsetPoint(s, lateral);
+    const inward = road.offsetPoint(s, lateral - village.side * 7);
+    // The pole stands on whichever side of the verge is lower, so its foot is never in
+    // the air on a cross-slope.
+    const baseY = Math.min(
+      ctx.terrain.heightAt(p.x, p.z, s),
+      ctx.terrain.heightAt(inward.x, inward.z, s),
+    );
+    box(
+      group,
+      [0.18, DROP_POLE_HEIGHT_M, 0.18],
+      [p.x - ctx.originX, baseY + DROP_POLE_HEIGHT_M / 2, p.z - ctx.originZ],
+      C.timber,
+    );
+    const top = baseY + DROP_POLE_HEIGHT_M - 0.5;
+    if (previous) {
+      const dx = p.x - previous.x;
+      const dz = p.z - previous.z;
+      const span = Math.hypot(dx, dz);
+      box(
+        group,
+        [0.05, 0.05, span],
+        [(p.x + previous.x) / 2 - ctx.originX, (top + previous.y) / 2, (p.z + previous.z) / 2 - ctx.originZ],
+        C.darkMetal,
+        [0, Math.atan2(dx, dz), 0],
+      );
+    }
+    previous = { x: p.x, y: top, z: p.z };
+  }
+}
+
 function buildPoi(
   ctx: ChunkContext,
   poi: Poi,
@@ -1292,12 +1448,13 @@ export class PoiProvider implements ChunkProvider {
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
+    const villages = villagesBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
     const pois = poisBetween(
       ctx.world.seed,
       ctx.sStart,
       ctx.sEnd,
       ctx.world.state.settings.poiSpacingMetres,
-    );
+    ).filter((poi) => !villages.some((village) => poi.s >= village.from && poi.s <= village.to));
 
     const group = new THREE.Group();
     group.name = 'poi';
@@ -1322,6 +1479,22 @@ export class PoiProvider implements ChunkProvider {
         this.switches,
         registeredWrecks,
         registeredSwitches,
+      );
+    }
+    for (const village of villages) {
+      buildVillage(
+        ctx,
+        village,
+        group,
+        bodies,
+        colliders,
+        this.loose,
+        this.trailers,
+        this.wreckTrunks,
+        this.switches,
+        registeredWrecks,
+        registeredSwitches,
+        deferredVisuals,
       );
     }
     for (const stop of couriersBetween(
