@@ -12,6 +12,7 @@
     "preview:dev": "vite preview --port 5173",
     "check": "tsc --noEmit",
     "package:local": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-local.ps1",
+    "look:assets": "node tools/look/build.mjs",
     "bench:reality": "bun tools/reality.ts",
     "bench": "bun tools/reality.ts && bun tools/handling-cli.ts && bun tools/climb-sweep.ts && bun tools/cooling.ts && bun tools/autopilot-bench.ts && bun tools/traffic-bench.ts && bun tools/part-mesh-coverage.ts"
   },
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@gltf-transform/cli": "^4.5.0",
     "@types/three": "^0.185.0",
+    "sharp": "^0.35.4",
     "typescript": "^5.9.2",
     "vite": "^8.2.2"
   }

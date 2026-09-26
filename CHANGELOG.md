@@ -59,7 +59,38 @@ questions live in `docs/country.md`.
   tracts, almost pure and with next to no undergrowth, never as a lone tree or mixed
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
+- THE LOOK'S ASSETS ARE BUILT, NOT PAINTED (2026-09-26). `tools/look/**` is a CC0
+  asset pipeline with one command (`node tools/look/build.mjs`) behind
+  `public/look/**`: ground and road tiles, grass, bushes and trees, all from
+  ambientCG and Poly Haven sources plus our own Blender 5.2 renders, nothing copied
+  from slowroads. Every file is described once in its module's `outputs`, from which
+  `public/look/manifest.json` (size, channels, atlas cell layout in pixels and in
+  metres, tiling period, what each cell holds) and `public/look/LICENSES.md` are
+  generated, so an asset cannot arrive undocumented. Ground tiles carry their height
+  in alpha, grey tiles are grey because the shader tints them
+  (`docs/slowroads-steam/notes/SrGround.md` §1), sprites are dilated so no filter
+  pulls a black fringe in, and normal maps are written with the sRGB transfer
+  pre-compensated — otherwise the neutral channel lands on 187 instead of 128 and
+  every normal is tilted. Trees: six species, six crown-clump sprites and a whole
+  tree per species column, sixteen-view impostor rows whose rows are the species,
+  four GLB variants each, crown normals baked analytically with the same
+  capsule/cone the shader reconstructs. Rebuild needs network and Blender; the game
+  needs neither. Numbers, layout and honest gaps in `docs/renderer-v2-log.md`.
+
 #### Changed
+
+- ЭТАП 2 РЕНДЕРА МИРА: земля. Один шейдер на тайлы и даль
+  (`render/look/groundmaterial.ts`) вместо комикс-шейдинга, процедурной живописи и
+  CPU-цвета из данных покрова: атрибуты вершин теперь говорят, ЧТО здесь за земля
+  (покров, плотность леса, класс культуры, кадр поля, сырость, торф, ил, камень,
+  гравий обочины — `world/groundattrs.ts`), а цвет собирает шейдер из общей функции
+  (`render/look/groundcolor.glsl.ts`) по таблице красок. Слои — луг, поле, подстилка
+  под лесом по сезону, торф, ил, камень, гравий, снег, одеяло крон; края вмешиваются
+  по каналу высоты каждой текстуры. `render/groundpaint.ts` удалён, комикс с земли
+  снят, мезы и `desertPaletteAt` из дали убраны, `TERRAIN_COLLIDER_SURFACE` переехал
+  в `core/surfaces.ts`. Условия контрактов (высоты, `groundHeightAt`,
+  `tileSurfaceSampler`, `sampleGroundHeight`, швы, rebase, вода) не менялись.
+  Кадры и разбор — `docs/renderer-v2-log.md`, «Этап 2».
 - THE AIR, THE SKY AND THE CLOUDS ARE ONE SYSTEM NOW (`docs/renderer-v2.md`, stage 1;
   `docs/renderer-v2-log.md`). Three atmospheres that did not know about each other — an
   exponential `FogExp2`, a height haze spliced into three's fog chunk and an aerial veil

@@ -48,6 +48,24 @@ export const enum SurfaceType {
 }
 
 /**
+ * The one surface every ground collider registers, and the only place in the world
+ * that registers it.
+ *
+ * An open-ground collider spans turf, ploughland, litter and gravel verge, but it is
+ * ONE heightfield, so the registry can only hold one answer for it. Meadow is that
+ * answer — the countryside is mostly grass — and anything that needs the real material
+ * at a point asks `Terrain.surfaceFromFrame` instead. The wheel spray does exactly
+ * that, and it recognises "this contact is ground, not road or scenery" by comparing
+ * against this constant: register it anywhere else and the spray treats that collider
+ * as open meadow.
+ *
+ * It lives here, beside the surface type it names, rather than in the module that
+ * builds the ground MESH: physics, props and the spray all read it, and none of them
+ * should have to import a renderer to learn what they are standing on.
+ */
+export const TERRAIN_COLLIDER_SURFACE = SurfaceType.Grass;
+
+/**
  * ONE SURFACE, ONE SET OF REAL COEFFICIENTS.
  *
  * These two fields used to be different animals sharing a name. `frictionSlip` was a

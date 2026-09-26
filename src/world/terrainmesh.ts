@@ -1,11 +1,9 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { SurfaceType } from '../core/surfaces';
-import { applyComicShading } from '../render/comic';
-import { applyCloudShadow } from '../render/cloudshadow';
-import { applyWorldLighting } from '../render/look/lighting';
-import { applyGroundPaint, SEASON_GROUND_MARK } from '../render/groundpaint';
-import { applyWetness } from '../render/season';
+import { TERRAIN_COLLIDER_SURFACE } from '../core/surfaces';
+import { GROUND_ATTRIBUTES, GROUND_TILE_MATERIAL } from '../render/look/groundmaterial';
+import { GROUND_AUX_STRIDE, GROUND_COVER_STRIDE, GROUND_FIELD_STRIDE, GROUND_ROAD_STRIDE, GroundAttributes, groundRockWeight } from './groundattrs';
+import { newCoverSample } from './landcover';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import {
@@ -17,9 +15,7 @@ import {
   type Terrain,
 } from './terrain';
 import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
-import { desertPaletteAt } from './gradient';
 import { CANOPY_FROM_M, CANOPY_FULL_M } from './vistaground';
-import { DESERT_TILE_SIZE } from './deserttiledata';
 
 /**
  * Desert either side of the road.
@@ -108,20 +104,6 @@ const TERRAIN_INNER = CORRIDOR_INNER - ROAD_SEAM_OVERLAP;
 const ROAD_SEAM_DROP = 0.015;
 
 /**
- * The one surface every terrain collider registers, and the only place in the world
- * that registers it.
- *
- * A chunk's fan spans gravel verge, sand and rock outcrops, but it is ONE trimesh, so
- * the registry can only hold one answer for it. Sand is that answer, and the desert
- * is mostly sand, so traction is right almost everywhere. Anything that needs the
- * real material at a point asks `Terrain.surfaceFromFrame` instead — the wheel spray
- * does exactly that, and it recognises "this contact is terrain, not road or scenery"
- * by comparing against this constant. Register it anywhere else and the spray will
- * treat that collider as open desert.
- */
-export const TERRAIN_COLLIDER_SURFACE = SurfaceType.Grass;
-
-/**
  * Ring spacing across the berm's face, metres. It climbs its 22 m over 70 m of lateral
  * distance, so this puts three rings on the face; at the unconstrained geometric spacing
  * out there the whole thing would be one facet and a 31-degree wall would draw as a
@@ -188,14 +170,6 @@ const WORLD_HEIGHT_FULL = 60;
 const DIST_LATTICE = 50;
 
 /**
- * Palette scratch colours, reused for every arclength row so a palette lookup
- * never allocates. The desert's sand, rock and gravel albedos come from
- * `desertPaletteAt` rather than the static `SURFACES` table, so they track the
- * colour cycle; asphalt, cracked asphalt and concrete never appear on terrain.
- */
-const sandLinear = new THREE.Color();
-
-/**
  * One arclength row's road frame: the centreline point, and the unit vector a lateral
  * offset is measured along. Reused per row, so no row allocates.
  *
@@ -246,91 +220,6 @@ function bilinear(
   const far = positions[farInner]! + (positions[farOuter]! - positions[farInner]!) * across;
   return near + (far - near) * along;
 }
-
-/**
- * Shared near/far desert material. Physical normals and the live key light choose the
- * lee side; a restrained relief re-ramp keeps broad dune shading visible after sky fill,
- * haze and tone mapping without a terrain shadow map or another draw.
- * The player-centred tiles use the same authored material with one extra distance
- * transition. They arrive as a square worker-streamed window while the vista is a
- * camera-centred disc; the tile shader removes only its small-scale height detail
- * between these radii. The opaque base terrain remains intact, so distant objects
- * can never show through the transition.
- */
-export const DESERT_TILE_FADE_FULL = 300;
-export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
-function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial {
-  // Cloud shadow is the OUTERMOST wrap, so it also finds the detail-fade patch installed
-  // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
-  // decides only which patch runs first, never whether one is lost.
-  // The world lighting patch is the OUTERMOST wrap, so it also sees the cloud shade
-  // installed below it: it lifts the ambient fill under a wood and boosts the direct
-  // light on what the sun does reach. Its baked shade is the ground's own forest weight
-  // for now — stage 2 bakes a proper one into the vertices and this line changes to
-  // read it.
-  const material = applyWorldLighting(applyCloudShadow(
-    applyGroundPaint(applyComicShading(
-      new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.93,
-        metalness: 0,
-        // The ground takes no environment: it is rough, it faces up, and a hemisphere of
-        // bright sky used as a reflection paints the fields rather than lighting them.
-        // What reflects the sky is car paint and a wet road, and both keep their maps.
-        envMapIntensity: 0,
-      }),
-      {
-        lightingStrength: 0,
-        shadowWarmth: 0,
-        reliefShadeStrength: 0.28,
-        // The desert's ink dots said "sand"; on a meadow they read as pits. The
-        // country's ground is flat colour: the grass and the light carry it.
-        stippleStrength: 0,
-        spotlightNormals: 'smooth',
-      },
-      // The vista's colours are made for the season on the CPU; the tiles' in here.
-    ), { season: detailFade }),
-  ), { shade: 'vGround.z' });
-  // Wet ground is darker: tiles only, the vista is too far to tell.
-  if (detailFade) applyWetness(material, 0.22, null);
-  if (!detailFade) return material;
-
-  const compileComic = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    compileComic.call(material, shader, renderer);
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        '#include <common>\nattribute float aTerrainDetail;\nattribute vec4 aCanopy;\n',
-      )
-      // The canopy blanket (world/vistaground.ts): past the near trees the wood is the
-      // ground raised to the crowns and painted their colour. `color_vertex` runs
-      // before `begin_vertex`, so the ramp is worked out here and reused below. After
-      // the season's ground colour, and with the season's own canopy colour.
-      .replace(
-        SEASON_GROUND_MARK,
-        `${SEASON_GROUND_MARK}
-float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
-float canopyRamp = smoothstep( ${CANOPY_FROM_M.toFixed(1)}, ${CANOPY_FULL_M.toFixed(1)}, tileDistance );
-#ifdef USE_COLOR
-vColor.rgb = mix( vColor.rgb, seasonCanopy( aCanopy.rgb ), canopyRamp );
-#endif`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `vec3 transformed = vec3( position );
-float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
-transformed.y -= aTerrainDetail * detailFade;
-transformed.y += aCanopy.w * canopyRamp;`,
-      );
-  };
-  const comicProgramKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v3`;
-  return material;
-}
-export const TERRAIN_MATERIAL = createTerrainMaterial(false);
-/** Fine player-centred tiles whose small-scale height relaxes into the vista base. */
-export const DESERT_TILE_MATERIAL = createTerrainMaterial(true);
 
 /**
  * One chunk's terrain, as two grids sharing one vertex buffer: the sparse FIELD
@@ -614,16 +503,17 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     const vertexCount = fieldCount + fineRows * fineCount;
     const positions = new Float32Array(vertexCount * 3);
-    const colors = new Float32Array(vertexCount * 3);
     const lateralOf = new Float32Array(vertexCount);
+    // The look's own attributes (world/groundattrs.ts), so this mesh shades with the same
+    // material and the same ground as the streamed tiles do and the road lab shows what
+    // the game shows. The fine height detail is zero: this fan has no detail attribute,
+    // because it has no use for the tile shader's distance hand-over.
+    const attributes = new GroundAttributes(vertexCount);
+    const detail = new Float32Array(vertexCount);
+    const coverSample = newCoverSample();
 
     for (let si = 0; si < sCount; si++) {
       const s = sStart + si * S_STEP;
-      // Palette colour is a function of arclength alone, so sample it once per
-      // row and reuse it across every lateral column. Neighbouring chunks share
-      // the seam row's colour, and a chunk rebuilt after unloading is identical.
-      const palette = desertPaletteAt(s);
-      sandLinear.setHex(palette.sand);
       setRowFrame(road, s);
       const originX = rowFrame.x;
       const originZ = rowFrame.z;
@@ -642,12 +532,18 @@ export class TerrainMeshProvider implements ChunkProvider {
         positions[vi * 3 + 2] = pz - oz;
         lateralOf[vi] = lateral;
 
-        // Visual desert is one consistently lit sand colour. Surface classification
-        // remains in Terrain for tyre grip and spray, but painting gravel verges and
-        // outcrops darker made them read as the shadow patches reported in play.
-        colors[vi * 3] = sandLinear.r;
-        colors[vi * 3 + 1] = sandLinear.g;
-        colors[vi * 3 + 2] = sandLinear.b;
+        // The cover, exactly as the streamed tiles measure it. No basins: this fan is the
+        // road lab's surface and the height tools' reference, and a lake draws its own shore.
+        const roadDist = this.roadDistance.distAt(px, pz, DIST_LATTICE);
+        terrain.cover.sample(px, pz, roadDist, coverSample);
+        attributes.write(
+          vi,
+          coverSample,
+          terrain.wetnessAt(px, pz),
+          terrain.bogAt(px, pz),
+          Number.POSITIVE_INFINITY,
+          roadDist - road.halfWidthAt(s),
+        );
       }
     }
 
@@ -758,8 +654,6 @@ export class TerrainMeshProvider implements ChunkProvider {
     // span is invisible and was never in the coarse mesh either.
     for (let j = 0; j < fineRows; j++) {
       const frameS = sStart + j * FINE_STEP;
-      const palette = desertPaletteAt(frameS);
-      sandLinear.setHex(palette.sand);
       const nearRow = rowLow[j]! * latCount;
       const farRow = nearRow + latCount;
       const alongWeight = rowWeight[j]!;
@@ -790,9 +684,16 @@ export class TerrainMeshProvider implements ChunkProvider {
         positions[vi * 3 + 2] = z;
         lateralOf[vi] = lateral;
 
-        colors[vi * 3] = sandLinear.r;
-        colors[vi * 3 + 1] = sandLinear.g;
-        colors[vi * 3 + 2] = sandLinear.b;
+        const roadDist = this.roadDistance.distAt(px, pz, DIST_LATTICE);
+        terrain.cover.sample(px, pz, roadDist, coverSample);
+        attributes.write(
+          vi,
+          coverSample,
+          terrain.wetnessAt(px, pz),
+          terrain.bogAt(px, pz),
+          Number.POSITIVE_INFINITY,
+          roadDist - road.halfWidthAt(frameS),
+        );
       }
     }
 
@@ -849,13 +750,22 @@ export class TerrainMeshProvider implements ChunkProvider {
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute(GROUND_ATTRIBUTES.cover, new THREE.BufferAttribute(attributes.cover, GROUND_COVER_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.aux, new THREE.BufferAttribute(attributes.aux, GROUND_AUX_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.field, new THREE.BufferAttribute(attributes.field, GROUND_FIELD_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.road, new THREE.BufferAttribute(attributes.road, GROUND_ROAD_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.detail, new THREE.BufferAttribute(detail, 1));
     geometry.setIndex(new THREE.BufferAttribute(drawn, 1));
     // Real slope normals are necessary for broad dunes to retain their volume once
     // their silhouette is below the horizon. The mesh does not cast or receive the
     // sun shadow map, so these normals produce only honest directional lighting.
     geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, TERRAIN_MATERIAL);
+    // Rock comes off the slope, so it is written once the normals exist.
+    const normalAttribute = geometry.getAttribute('normal') as THREE.BufferAttribute;
+    for (let vi = 0; vi < vertexCount; vi++) {
+      attributes.aux[vi * GROUND_AUX_STRIDE + 3] = groundRockWeight(normalAttribute.getY(vi));
+    }
+    const mesh = new THREE.Mesh(geometry, GROUND_TILE_MATERIAL);
     // The shadow-map frustum moves with the camera. Receiving it made its edge read
     // as kilometre-scale dark plates across otherwise sunlit sand, so terrain uses
     // its direct/hemisphere light uniformly instead.

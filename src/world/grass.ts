@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 import { applyCloudShadow } from '../render/cloudshadow';
-import { applyComicShading } from '../render/comic';
-import { FOREST_SHADE, groundVary } from '../render/groundpaint';
+import { groundTextures, groundVaryTexture } from '../render/look/groundtextures';
+import { applyWorldLighting } from '../render/look/lighting';
 import { injectSeason } from '../render/season';
 import { TUFT_KINDS, TUFT_VARIANTS, tuftAtlas } from '../render/tuftpaint';
 import { CoverKind, Crop, MUD, newCoverSample } from './landcover';
@@ -69,6 +69,13 @@ const RING_BLEND_M = 8;
 const RINGS: readonly [number, number, number, number][] = [
   [0, RADIUS_M, 0.6, 1],
 ];
+/**
+ * How much a closed wood darkens the tufts that grow in it, baked into the root colour.
+ * The ground gets the same number as a light-term shade from its own vertex attribute now
+ * (render/look/lighting.ts); a tuft has no such attribute, so it is painted here, and the
+ * two agree because it is the same wood.
+ */
+const FOREST_SHADE = 0.34;
 /** Seconds for flattened grass to stand back up. */
 const RECOVER_S = 25;
 /** Texels re-sampled per frame while a strip or a tile is pending. */
@@ -172,12 +179,12 @@ export class GrassField {
     // Lit EXACTLY as the ground (world/terrainmesh.ts), cloud shadow included: a tuft
     // is the ground's own surface with height, and any difference in the light shows
     // up as a band where the grass ends.
-    const material = applyCloudShadow(
-      applyComicShading(
-        new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, side: THREE.DoubleSide, depthWrite: false }),
-        { lightingStrength: 0, shadowWarmth: 0, reliefShadeStrength: 0, contourStrength: 0, stippleStrength: 0, spotlightNormals: 'smooth' },
-      ),
-    );
+    // Lit EXACTLY as the ground (render/look/groundmaterial.ts): the same grazing sheen,
+    // the same radiance term on the sunlit part. A tuft is the ground's own surface with
+    // height, and any difference in the light shows up as a band where the grass ends.
+    const material = applyWorldLighting(applyCloudShadow(
+      new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, side: THREE.DoubleSide, depthWrite: false }),
+    ), { shade: '0.0' });
     material.alphaToCoverage = true;
     const u = this.uniforms;
     const local = {
@@ -189,10 +196,13 @@ export class GrassField {
     material.onBeforeCompile = (shader, renderer) => {
       compileComic.call(material, shader, renderer);
       injectSeason(shader);
-      const vary = groundVary();
+      const vary = groundVaryTexture();
       Object.assign(shader.uniforms, u, local, {
         uTuft: { value: tuftAtlas() },
         uGroundVary: { value: vary.texture },
+        // The ground's own 500 m detail mask, so a tuft carries the same macro variation
+        // as the ground it stands in instead of reading as a lighter patch on it.
+        uGroundDetail: { value: groundTextures().detailFar },
       });
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -203,6 +213,7 @@ uniform sampler2D uGrassHeight;
 uniform sampler2D uGrassColour;
 uniform sampler2D uGrassParams;
 uniform sampler2D uGroundVary;
+uniform sampler2D uGroundDetail;
 uniform vec2 uOriginMod;
 uniform vec2 uCamRel;
 uniform vec2 uCamFwd;
@@ -248,9 +259,10 @@ float gDist = length( gTo );
 vec4 gParam = texelFetch( uGrassParams, gTexel( gRel ), 0 );
 vec4 gCache = texelFetch( uGrassColour, gTexel( gRel ), 0 );
 vec3 gGround = pow( gCache.rgb, vec3( 2.2 ) );
-// Mottled exactly as the ground paint mottles the ground (render/groundpaint.ts).
+// Mottled as the ground's own macro noise mottles the ground (render/look/groundcolor.glsl.ts).
 vec4 gVary = textureLod( uGroundVary, gRel / ${vary.metres.toFixed(1)}, 0.0 );
 gGround *= 0.88 + 0.24 * gVary.r;
+gGround *= 1.0 - ( 1.0 - textureLod( uGroundDetail, gRel / 500.0, 0.0 ).r ) * 0.7;
 float gWarm = ( gVary.g - 0.5 ) * 2.0;
 gGround *= mix( vec3( 1.0 ), gWarm > 0.0 ? vec3( 1.06, 1.01, 0.86 ) : vec3( 0.93, 1.02, 1.02 ), abs( gWarm ) * 0.6 );
 float gRand = gHash( gIndex + 3.1 );
@@ -293,7 +305,7 @@ vTuftAccent = gKind > 2.5 ? vec3( 0.78, 0.6, 0.24 )
   : gHue < 0.8 ? vec3( 0.88, 0.68, 0.08 )
   : vec3( 0.28, 0.36, 0.85 );
 // Autumn: the wheat is cut to stubble and the flowers are over. Winter: under the snow,
-// patch by patch as the ground takes it (render/groundpaint.ts).
+// patch by patch as the ground takes it (render/look/groundmaterial.ts).
 gTall *= 1.0 - 0.6 * uSeasonDry * gWheat;
 gTall *= 1.0 - seasonSnowAt( 0.0, seasonPatch( gRel ) );
 vTuftAccent = mix( vTuftAccent, vTuftTip * 0.8, uSeasonDry * 0.85 );

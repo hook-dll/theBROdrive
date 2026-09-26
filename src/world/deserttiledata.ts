@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
-import { CoverKind, Crop, MUD, newCoverSample, writeGroundWeights, type CoverSample } from './landcover';
+import { CoverKind, Crop, newCoverSample, type CoverSample } from './landcover';
 import { canopyHeight } from './vistaground';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
-import { CORRIDOR_OUTER, PEAT, type Terrain } from './terrain';
+import { CORRIDOR_OUTER, type Terrain } from './terrain';
 import { BASIN_OUTER_M, type BasinFootprint } from './lakes';
 import { terminusWeight } from './terminus';
+import { GROUND_AUX_STRIDE, GROUND_COVER_STRIDE, GroundAttributes, groundRockWeight } from './groundattrs';
 import { WAVE_TILE_METRES } from '../render/watermaterial';
 import { TRACK_HALF_WIDTH_M, TRACK_MAX_LENGTH_M, trackAt, trackPossibleNear, type TrackSample } from './tracks';
 
@@ -160,19 +161,19 @@ export interface DesertTileData {
   /** Fine relief removed by the tile shader as the vista takes over. */
   readonly detailOffsets: Float32Array;
   readonly normals: Float32Array;
-  readonly colors: Float32Array;
   readonly indices: Uint32Array;
   readonly propSurfaces: Uint8Array;
   /**
-   * Canopy blanket per vertex: linear rgb of the crowns, then their height over the
-   * ground (world/vistaground.ts). The tile shader raises it past `CANOPY_FROM_M`.
+   * The ground's render attributes (world/groundattrs.ts): what the shader needs to
+   * describe this vertex — cover, wetness, the plot's own frame, the verge. They replace
+   * the linear colour, the canopy blanket and the four paint weights the cover used to
+   * bake here, and they are why the ground's colour follows the season now: a vertex
+   * states WHAT the ground is and the shader decides what it looks like.
+   *
+   * No canopy: the tile window is 850 m across and the blanket only rises past 4.2 km,
+   * so on the tiles it was four floats of zero on every vertex.
    */
-  readonly canopy: Float32Array;
-  /**
-   * Ground paint weights per vertex: meadow, crop, forest floor, bare earth
-   * (render/groundpaint.ts).
-   */
-  readonly ground: Float32Array;
+  readonly attributes: GroundAttributes;
   /** `treeCount` trees of `TREE_STRIDE` floats each: see `TreeField`. */
   readonly trees: Float32Array;
   readonly treeCount: number;
@@ -355,7 +356,7 @@ export function sampleGroundHeight(
   out.height = context.terrain.baseFromFrame(x, z, projection.lateral, projection.s) + detail - underRoad;
   // `detail` carries the corridor landform (world/corridorshape.ts) as well as the
   // fine band, because everything that draws the corridor has to get it. What the
-  // shader is allowed to fade out past DESERT_TILE_FADE_FULL is the SMALL-SCALE half
+  // shader is allowed to fade out past GROUND_DETAIL_FADE_FULL is the SMALL-SCALE half
   // of that: fading a five-metre embankment away would lift the far tile surface
   // above the trough the near terrain mesh is drawing, and the tile would sink
   // through it as the player closed. Landform stays in the height and out of here.
@@ -410,9 +411,12 @@ export function generateDesertTileData(
   const positions = fit(into?.positions, vertexCount * 3, Float32Array);
   const detailOffsets = fit(into?.detailOffsets, vertexCount, Float32Array);
   const normals = fit(into?.normals, vertexCount * 3, Float32Array);
-  const colors = fit(into?.colors, vertexCount * 3, Float32Array);
-  const canopy = fit(into?.canopy, vertexCount * 4, Float32Array);
-  const groundPaint = fit(into?.ground, vertexCount * 4, Float32Array);
+  // Reused across tiles like every other buffer here: the attribute blocks are 340 KB a
+  // tile, and a tile boundary is not a place to stop for the collector.
+  const attributes = into?.attributes !== undefined
+    && into.attributes.cover.length === vertexCount * GROUND_COVER_STRIDE
+    ? into.attributes
+    : new GroundAttributes(vertexCount);
   const ground = { height: 0, detail: 0, water: 0 };
   const paletteDistance = farFromRoad
     ? Math.abs(centreZ)
@@ -439,64 +443,32 @@ export function generateDesertTileData(
       positions[vi * 3] = worldX - centreX;
       positions[vi * 3 + 1] = y;
       positions[vi * 3 + 2] = worldZ - centreZ;
-      // Ground colour is the land cover's. The road distance is the shared lattice
-      // interpolation: a colour needs to be right to a metre, not to a centimetre.
+      // WHAT KIND OF GROUND THIS IS, rather than what colour it paints itself: the land
+      // cover, the wetness of the hollow it stands in, the peat of a mire, the silt of a
+      // shore, how far the asphalt is. The road distance is the shared lattice
+      // interpolation — a verge weight needs the edge to a metre, not to a centimetre.
       const roadDist = farFromRoad ? 1e6 : context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE);
       cover.sample(worldX, worldZ, roadDist, coverSample);
-      // Wet ground darkens toward mud, fully where it is mud underfoot.
       const wet = roadDist < 7 ? 0 : context.terrain.wetnessAt(worldX, worldZ);
-      if (wet > 0) {
-        const m = Math.min(1, wet * 1.4) * 0.85;
-        coverSample.r += (MUD[0] - coverSample.r) * m;
-        coverSample.g += (MUD[1] - coverSample.g) * m;
-        coverSample.b += (MUD[2] - coverSample.b) * m;
-      }
       // The tile's basins, resolved on the distance this vertex has already asked for: see
       // `fillTileBasins`. Before this, the planting and the grass fill it themselves.
       if (basinTile !== tileKeyOf(tx, tz)) {
         basinTile = tileKeyOf(tx, tz);
         fillTileBasins(context, worldX, worldZ);
       }
-      // A basin's bottom is SILT while the water is over it, and it takes precedence over
-      // the bog's peat: a mire's peat under a lake is a black hole seen through the sheet.
+      // How far OUTSIDE a basin's waterline this point stands, in metres: the shore's silt
+      // is a band past the water, and the peat of a mire does not reach into it (a lake with
+      // peat under it is a black hole seen through the sheet).
       const shore = shoreMargin(worldX, worldZ);
-      if (shore > SHORE_BAND_M - SILT_BAND_M) {
-        const m = Math.min(1, (shore - (SHORE_BAND_M - SILT_BAND_M)) / SILT_BAND_M + 0.35);
-        coverSample.r += (SILT[0] - coverSample.r) * m;
-        coverSample.g += (SILT[1] - coverSample.g) * m;
-        coverSample.b += (SILT[2] - coverSample.b) * m;
-      }
-      // A bog's ground is PEAT, and it is not a tuft of anything: the colour goes to the
-      // peat's own, over the top of the meadow the cover field painted.
+      const fromWater = shore > 0 ? SHORE_BAND_M - shore : Number.POSITIVE_INFINITY;
       const bog = shore > 0 ? 0 : context.terrain.bogAt(worldX, worldZ);
-      if (bog > 0) {
-        const m = Math.min(1, bog * 0.9);
-        coverSample.r += (PEAT[0] - coverSample.r) * m;
-        coverSample.g += (PEAT[1] - coverSample.g) * m;
-        coverSample.b += (PEAT[2] - coverSample.b) * m;
-      }
-      writeGroundWeights(coverSample, wet, groundPaint, vi * 4);
-      colors[vi * 3] = coverSample.r;
-      colors[vi * 3 + 1] = coverSample.g;
-      colors[vi * 3 + 2] = coverSample.b;
-      // A WOOD DOES NOT STAND ON A MIRE OR IN A LAKE. The canopy height and colour are what
-      // make a wood read as a mass from a distance, and they were painted wherever the cover
-      // said forest — over the peat this very pass paints for a bog, and over a basin's water.
-      // Up close the planting puts nothing woody inside a basin and only sparse, small trees
-      // on a bog (`bog > 0.35`), so the wood OPENED on arrival: the far picture and the near
-      // one were different places, which is the mirage the bog's peat was added for. Same
-      // mask as the planting, applied to the mass.
-      const overWater = shore > SHORE_BAND_M - BASIN_KEEP_M;
-      const canopyForest = overWater ? 0 : coverSample.forest * (1 - Math.min(1, bog * 0.9));
-      if (canopyForest > 0) {
-        cover.canopyColour(worldX, worldZ, coverSample.birch, canopy, vi * 4);
-        canopy[vi * 4 + 3] = canopyHeight(worldX, worldZ, canopyForest, coverSample.birch);
-      } else {
-        canopy[vi * 4] = coverSample.r;
-        canopy[vi * 4 + 1] = coverSample.g;
-        canopy[vi * 4 + 2] = coverSample.b;
-        canopy[vi * 4 + 3] = 0;
-      }
+      // The verge's own distance past the asphalt edge. `roadDist` is zero a hundred metres
+      // from the road (the lattice carries no information there), which is also where a
+      // verge cannot be, so the subtraction is only made where it means something.
+      const pastEdge = farFromRoad || roadDist > 80
+        ? Number.POSITIVE_INFINITY
+        : roadDist - context.road.halfWidthAt(context.roadDistance.ownerAt(worldX, worldZ, DIST_LATTICE));
+      attributes.write(vi, coverSample, wet, bog, fromWater, pastEdge);
     }
   }
 
@@ -517,6 +489,8 @@ export function generateDesertTileData(
       normals[ni] = -dhx / length;
       normals[ni + 1] = 1 / length;
       normals[ni + 2] = -dhz / length;
+      // Rock comes off the slope, so it is written here, where the slope first exists.
+      attributes.aux[(ix * DESERT_TILE_VERTS + iz) * GROUND_AUX_STRIDE + 3] = groundRockWeight(normals[ni + 1]!);
     }
   }
 
@@ -661,11 +635,9 @@ export function generateDesertTileData(
     positions,
     detailOffsets,
     normals,
-    colors,
     indices,
     propSurfaces,
-    canopy,
-    ground: groundPaint,
+    attributes,
     trees,
     treeCount,
     water,
@@ -1108,11 +1080,12 @@ export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
     data.positions.buffer as ArrayBuffer,
     data.detailOffsets.buffer as ArrayBuffer,
     data.normals.buffer as ArrayBuffer,
-    data.colors.buffer as ArrayBuffer,
     data.indices.buffer as ArrayBuffer,
     data.propSurfaces.buffer as ArrayBuffer,
-    data.canopy.buffer as ArrayBuffer,
-    data.ground.buffer as ArrayBuffer,
+    data.attributes.cover.buffer as ArrayBuffer,
+    data.attributes.aux.buffer as ArrayBuffer,
+    data.attributes.field.buffer as ArrayBuffer,
+    data.attributes.road.buffer as ArrayBuffer,
     data.trees.buffer as ArrayBuffer,
   ];
 }

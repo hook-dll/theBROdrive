@@ -1,7 +1,7 @@
+import { GroundAttributes } from '../world/groundattrs';
 import { Road } from '../world/road';
 import type { RoadSpine } from '../world/roadspine';
 import { Terrain } from '../world/terrain';
-import type { SeasonState } from '../world/season';
 import { vistaGroundAt } from '../world/vistaground';
 
 /**
@@ -40,8 +40,6 @@ export interface VistaWorkerSampleRequest {
   readonly cornerZ: number;
   readonly originX: number;
   readonly originZ: number;
-  /** The season to colour for (world/season.ts). */
-  readonly season: SeasonState;
 }
 
 export type VistaWorkerRequest =
@@ -63,8 +61,16 @@ export interface VistaWorkerSampleResult {
   readonly originZ: number;
   /** Raw field values per disc vertex; the main thread shapes them into a sample. */
   readonly horizon: ArrayBuffer;
-  /** Linear ground colour per disc vertex, three floats each (world/vistaground.ts). */
-  readonly colors: ArrayBuffer;
+  /**
+   * The ground's render attributes per disc vertex (world/groundattrs.ts), and the canopy
+   * blanket's colour and height. After the season moved into the shader these are what the
+   * vista's geometry carries: what the ground IS, not what colour it was when sampled.
+   */
+  readonly cover: ArrayBuffer;
+  readonly aux: ArrayBuffer;
+  readonly field: ArrayBuffer;
+  readonly road: ArrayBuffer;
+  readonly canopy: ArrayBuffer;
 }
 
 export type VistaWorkerResponse = VistaWorkerReady | VistaWorkerSampleResult;
@@ -117,8 +123,10 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
   if (request.layoutId !== layoutId) return;
 
   const rings = radii.length;
-  const horizon = new Float32Array(rings * SECTORS);
-  const colors = new Float32Array(rings * SECTORS * 3);
+  const vertexCount = rings * SECTORS;
+  const horizon = new Float32Array(vertexCount);
+  const attributes = new GroundAttributes(vertexCount);
+  const canopy = new Float32Array(vertexCount * 4);
   for (let r = 0; r < rings; r++) {
     const radius = radii[r]!;
     const reliefWeight =
@@ -128,7 +136,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
       const vi = i * 3;
       const absoluteX = request.cornerX + positions[vi]! + request.originX;
       const absoluteZ = request.cornerZ + positions[vi + 2]! + request.originZ;
-      horizon[i] = vistaGroundAt(terrain, absoluteX, absoluteZ, radius, reliefWeight, colors, vi, request.season);
+      horizon[i] = vistaGroundAt(terrain, absoluteX, absoluteZ, radius, reliefWeight, attributes, i, canopy);
     }
   }
 
@@ -141,7 +149,11 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
     originX: request.originX,
     originZ: request.originZ,
     horizon: horizon.buffer,
-    colors: colors.buffer,
+    cover: attributes.cover.buffer as ArrayBuffer,
+    aux: attributes.aux.buffer as ArrayBuffer,
+    field: attributes.field.buffer as ArrayBuffer,
+    road: attributes.road.buffer as ArrayBuffer,
+    canopy: canopy.buffer as ArrayBuffer,
   };
-  scope.postMessage(response, [response.horizon, response.colors]);
+  scope.postMessage(response, [response.horizon, response.cover, response.aux, response.field, response.road, response.canopy]);
 };

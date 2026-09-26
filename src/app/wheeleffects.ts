@@ -6,12 +6,11 @@
  * reference to the boot closure it was lifted out of.
  */
 
-import { SURFACES, type SurfaceType } from '../core/surfaces';
+import { SURFACES, TERRAIN_COLLIDER_SURFACE, type SurfaceType } from '../core/surfaces';
 import type { WheelSpray } from '../render/wheelspray';
 import type { SandTyreTracks } from '../render/tyretracks';
 import type { Vehicle, WheelSprayState } from '../vehicle/vehicle';
 import type { TrailerField } from '../vehicle/trailer';
-import { TERRAIN_COLLIDER_SURFACE } from '../world/terrainmesh';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 

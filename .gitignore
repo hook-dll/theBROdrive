@@ -64,3 +64,7 @@ pnpm-debug.log*
 /glass-window-options.png
 /prbr*.jpg
 /prbr*.png
+
+# Look-asset pipeline: downloaded CC0 sources and raw Blender renders. The
+# finished textures under public/look/ are committed; this is the rebuild cache.
+/tools/look/.cache/

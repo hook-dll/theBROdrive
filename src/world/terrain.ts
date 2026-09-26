@@ -219,7 +219,7 @@ const RIPPLE_FULL = 55;
  *     actually looks like. Hillshading the field at a low sun shows corduroy.
  *
  *     MEASURED, and worth knowing before tuning it: in the game's own renderer it is
- *     invisible either way. `TERRAIN_MATERIAL` runs the comic ground shading over a
+ *     invisible either way. `GROUND_TILE_MATERIAL` runs the comic ground shading over a
  *     hemisphere plus one direct light, and a 2% slope over ten metres does not move
  *     that shading at any hour — screenshots at 09:00 and 17:40 are indistinguishable
  *     from the flat desert. So the ripple layout buys insurance rather than beauty,

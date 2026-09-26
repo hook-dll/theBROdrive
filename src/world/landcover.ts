@@ -1,5 +1,6 @@
 import { hashUnit3, Noise2D } from '../core/rng';
 import type { Streams } from './streams';
+import { COVER_COLOURS } from './look/palette';
 import { CANOPY } from './season';
 
 /**
@@ -60,6 +61,16 @@ export interface CoverSample {
   plot: number;
   /** 0..1 lushness of meadow grass: 0 is dry and straw-coloured, 1 deep green. */
   lush: number;
+  /**
+   * The plot's own frame, in metres: `fieldU` runs ALONG the furrows and `fieldV` across
+   * them, so a stripe pattern is a function of `fieldV` alone. Both are continuous inside
+   * one plot and jump at its margin, where the crop is already gone — which is why the
+   * shader can use them as a coordinate rather than as a distance. Zero outside a plot.
+   */
+  fieldU: number;
+  fieldV: number;
+  /** One random value per plot, -1..1: two fields of the same crop are two fields. */
+  fieldTint: number;
   /** Linear ground colour. */
   r: number;
   g: number;
@@ -67,79 +78,34 @@ export interface CoverSample {
 }
 
 export function newCoverSample(): CoverSample {
-  return { kind: CoverKind.Meadow, forest: 0, birch: 0, crop: -1, plot: 0, lush: 0, r: 0, g: 0, b: 0 };
+  return {
+    kind: CoverKind.Meadow, forest: 0, birch: 0, crop: -1, plot: 0, lush: 0,
+    fieldU: 0, fieldV: 0, fieldTint: 0, r: 0, g: 0, b: 0,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Palette
 // ---------------------------------------------------------------------------
 
+/**
+ * The cover's own colours are the look's table, not a second copy of it: the meadow and
+ * the crops are the summer row of `world/look/palette.ts`, and the margins, the two
+ * forest floors and the mud are declared beside it (see `COVER_COLOURS`). A colour that
+ * changes with the season belongs to the palette, and the ground shader now builds the
+ * meadow from the palette directly; what is left here is what a caller that wants an rgb
+ * rather than a cover class gets.
+ */
+const pal = COVER_COLOURS;
+
+/** The tuple form of a colour, for the callers that index rather than read a field. */
 type Rgb = readonly [number, number, number];
 
-function srgbToLinear(c: number): number {
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-
-function hex(v: number): Rgb {
-  return [
-    srgbToLinear(((v >> 16) & 255) / 255),
-    srgbToLinear(((v >> 8) & 255) / 255),
-    srgbToLinear((v & 255) / 255),
-  ];
-}
-
-interface Palette {
-  readonly meadowDry: Rgb;
-  readonly meadowLush: Rgb;
-  readonly margin: Rgb;
-  readonly forestFloor: Rgb;
-  readonly borFloor: Rgb;
-  /** Canopy as seen from afar: spruce and birch ends. */
-  readonly canopySpruce: Rgb;
-  readonly canopyBirch: Rgb;
-  readonly crops: readonly Rgb[];
-}
-
 /**
- * Late summer. Chosen by looking against the comic ground shading, which lifts
- * nothing and bands the light, so these are the colours the eye should read: a
- * meadow that is green but has started to straw, fields in their August state, and a
- * wood that is darker than anything around it.
+ * Wet clay, linear rgb: the ground where it is mud underfoot, for the callers that paint
+ * a colour rather than resolve a cover class.
  */
-const SUMMER: Palette = {
-  // Straw going over, not lemon: 0xbdb67c read acid yellow under a noon sun.
-  // Quieter than it was: at 0xa8a670 a sunlit meadow read lemon beside Shishkin's
-  // olive (docs/shishkin.md).
-  meadowDry: hex(0x9e9a6a),
-  meadowLush: hex(0x869658),
-  margin: hex(0x959962),
-  // Needle and leaf litter: brown under the green, as the painted woods have it.
-  forestFloor: hex(0x86785a),
-  borFloor: hex(0xa89670),
-  // A wood seen as a mass is darker than any field: its crowns shade one another. At
-  // the birch's own leaf colour (0x8dab53) a birch wood two kilometres out was the
-  // meadow's colour and vanished; only spruce woods showed on the horizon.
-  canopySpruce: CANOPY.spruce,
-  canopyBirch: CANOPY.birch,
-  crops: [
-    hex(0xe8cf7a), // wheat, ripe
-    hex(0xd9c98f), // rye, greyer
-    hex(0xe3d8a8), // stubble, pale
-    hex(0xa98a67), // ploughed
-    hex(0x9dbd5f), // oats / potatoes, still green
-    hex(0xadb46f), // fallow, going back to meadow
-    hex(0xc8c27f), // hay meadow, mown
-  ],
-};
-
-const PALETTES: Record<Season, Palette> = { summer: SUMMER };
-
-/**
- * Wet clay, linear rgb: the ground where it is mud underfoot, for the tiles and the
- * grass alike. Darker and warmer than ploughland, but a colour, not a hole: at sRGB
- * 0x4a3d2e the wet hollows read as black pits in a sunny meadow.
- */
-export const MUD: Rgb = hex(0x7d6a55);
+export const MUD: Rgb = [pal.mud.r, pal.mud.g, pal.mud.b];
 
 /** Relative frequency of each crop, same order as `Crop`. */
 const CROP_WEIGHTS = [5, 2, 3, 3, 3, 3, 2];
@@ -220,7 +186,6 @@ export class LandCover {
   private readonly lushNoise: Noise2D;
   private readonly edgeNoise: Noise2D;
   private readonly seed: number;
-  season: Season = 'summer';
 
   constructor(
     seed: number,
@@ -336,10 +301,10 @@ export class LandCover {
     return w * smoothstep(0.3, 0.5, farm);
   }
 
-  private readonly frameScratch = { rx: 0, rz: 0, iu: 0, iv: 0, fu: 0, fv: 0, su: 1, sv: 1 };
+  private readonly frameScratch = { rx: 0, rz: 0, iu: 0, iv: 0, fu: 0, fv: 0, su: 1, sv: 1, u: 0, v: 0 };
 
   /** The plot grid at a point: region, cell, position inside the cell, cell size. */
-  private plotFrame(x: number, z: number): { rx: number; rz: number; iu: number; iv: number; fu: number; fv: number; su: number; sv: number } {
+  private plotFrame(x: number, z: number): typeof this.frameScratch {
     const f = this.frameScratch;
     f.rx = Math.floor(x / PLOT_REGION);
     f.rz = Math.floor(z / PLOT_REGION);
@@ -348,6 +313,8 @@ export class LandCover {
     const sa = Math.sin(angle);
     const u = x * ca - z * sa;
     const v = x * sa + z * ca;
+    f.u = u;
+    f.v = v;
     f.su = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x52, f.rx, f.rz);
     f.sv = PLOT_MIN + (PLOT_MAX - PLOT_MIN) * hashUnit3(this.seed ^ 0x53, f.rx, f.rz) * 0.7;
     f.iu = Math.floor(u / f.su);
@@ -390,7 +357,6 @@ export class LandCover {
    * metres; far-off callers may pass anything large.
    */
   sample(x: number, z: number, roadDist: number, out: CoverSample): CoverSample {
-    const pal = PALETTES[this.season];
     const farm = this.farmlandAt(x, z);
     const rawForestCleared = this.rawForest(x, z, farm) * this.clearing(x, z, roadDist);
     // An abandoned plot goes back to wood at its own pace, and PAST A POINT IT IS A WOOD:
@@ -411,14 +377,17 @@ export class LandCover {
     out.lush = lush;
     out.crop = -1;
     out.plot = 0;
+    out.fieldU = plot.u;
+    out.fieldV = plot.v;
+    out.fieldTint = plot.tint;
 
     // Meadow first; everything else is blended over it.
     // Mottling: a meadow is never one colour. Patches of a few tens of metres, lighter
     // and darker, so the ground reads as grass seen from a car rather than as felt.
     const mottle = 0.9 + 0.2 * this.lushNoise.at(x / 13 + 31, z / 13 - 17);
-    let r = (pal.meadowDry[0] + (pal.meadowLush[0] - pal.meadowDry[0]) * lush) * mottle;
-    let g = (pal.meadowDry[1] + (pal.meadowLush[1] - pal.meadowDry[1]) * lush) * mottle;
-    let b = (pal.meadowDry[2] + (pal.meadowLush[2] - pal.meadowDry[2]) * lush) * mottle;
+    let r = (pal.meadowDry.r + (pal.meadowLush.r - pal.meadowDry.r) * lush) * mottle;
+    let g = (pal.meadowDry.g + (pal.meadowLush.g - pal.meadowDry.g) * lush) * mottle;
+    let b = (pal.meadowDry.b + (pal.meadowLush.b - pal.meadowDry.b) * lush) * mottle;
     out.kind = CoverKind.Meadow;
 
     // The share of a plot that is under crop, as opposed to the share of the DISTRICT
@@ -446,12 +415,12 @@ export class LandCover {
           fieldShare *
           smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
         // Margin grass between plots, then the crop.
-        r += (pal.margin[0] - r) * farm;
-        g += (pal.margin[1] - g) * farm;
-        b += (pal.margin[2] - b) * farm;
-        r += (c[0] - r) * inside;
-        g += (c[1] - g) * inside;
-        b += (c[2] - b) * inside;
+        r += (pal.margin.r - r) * farm;
+        g += (pal.margin.g - g) * farm;
+        b += (pal.margin.b - b) * farm;
+        r += (c.r - r) * inside;
+        g += (c.g - g) * inside;
+        b += (c.b - b) * inside;
         if (inside > 0.5) {
           out.kind = CoverKind.Field;
           out.crop = plot.crop;
@@ -462,9 +431,9 @@ export class LandCover {
 
     if (forest > 0) {
       // A bor's floor is dry sand under moss and lichen: paler than a spruce wood's.
-      const fr = pal.forestFloor[0] + (pal.borFloor[0] - pal.forestFloor[0]) * bor;
-      const fg = pal.forestFloor[1] + (pal.borFloor[1] - pal.forestFloor[1]) * bor;
-      const fb = pal.forestFloor[2] + (pal.borFloor[2] - pal.forestFloor[2]) * bor;
+      const fr = pal.forestFloor.r + (pal.borFloor.r - pal.forestFloor.r) * bor;
+      const fg = pal.forestFloor.g + (pal.borFloor.g - pal.forestFloor.g) * bor;
+      const fb = pal.forestFloor.b + (pal.borFloor.b - pal.forestFloor.b) * bor;
       r += (fr - r) * forest;
       g += (fg - g) * forest;
       b += (fb - b) * forest;
@@ -481,24 +450,28 @@ export class LandCover {
    * Varies with the birch share and a little per-crown noise.
    */
   canopyColour(x: number, z: number, birch: number, out: Float32Array | number[], at = 0): void {
-    const pal = PALETTES[this.season];
     const v = 0.88 + 0.24 * hashUnit3(this.seed ^ 0x77, Math.floor(x / 9), Math.floor(z / 9));
-    out[at] = (pal.canopySpruce[0] + (pal.canopyBirch[0] - pal.canopySpruce[0]) * birch) * v;
-    out[at + 1] = (pal.canopySpruce[1] + (pal.canopyBirch[1] - pal.canopySpruce[1]) * birch) * v;
-    out[at + 2] = (pal.canopySpruce[2] + (pal.canopyBirch[2] - pal.canopySpruce[2]) * birch) * v;
+    out[at] = (CANOPY.spruce[0] + (CANOPY.birch[0] - CANOPY.spruce[0]) * birch) * v;
+    out[at + 1] = (CANOPY.spruce[1] + (CANOPY.birch[1] - CANOPY.spruce[1]) * birch) * v;
+    out[at + 2] = (CANOPY.spruce[2] + (CANOPY.birch[2] - CANOPY.spruce[2]) * birch) * v;
   }
 
-  private readonly plotScratch = { crop: -1, inside: 0, age: 0 };
+  private readonly plotScratch = { crop: -1, inside: 0, age: 0, u: 0, v: 0, tint: 0 };
 
   /**
    * The plot at a point: which crop, and how far inside the plot (0 in the margin).
    * Plots are cells of a grid rotated per region; the cell size is hashed per column
    * and row so fields are not all one size.
    */
-  private plotAt(x: number, z: number): { crop: number; inside: number; age: number } {
+  private plotAt(x: number, z: number): { crop: number; inside: number; age: number; u: number; v: number; tint: number } {
     const out = this.plotScratch;
-    const { rx, rz, iu, iv, fu, fv, su, sv } = this.plotFrame(x, z);
+    const { rx, rz, iu, iv, fu, fv, su, sv, v } = this.plotFrame(x, z);
     const edge = Math.min(fu, su - fu, fv, sv - fv);
+    // The plot's own frame, for the furrows and the tint: the furrows run along the cell's
+    // v axis, so the stripe coordinate is how far across the u axis the point stands.
+    out.u = v;
+    out.v = fu;
+    out.tint = hashUnit3(this.seed ^ 0x56, iu * 7919 + rx, iv * 104729 + rz) * 2 - 1;
     // Some cells are not fields at all: meadow, or left for the wood to take.
     const pickT = hashUnit3(this.seed ^ 0x54, iu * 7919 + rx, iv * 104729 + rz);
     // ЗАРАСТАНИЕ, and it is the single most characteristic thing about this country's
@@ -523,25 +496,4 @@ export class LandCover {
     out.inside = smoothstep(MARGIN_M * 0.5, MARGIN_M * 1.5, edge);
     return out;
   }
-}
-
-/**
- * Which painted ground a vertex shows (render/groundpaint.ts), as weights of meadow,
- * standing crop, forest floor and bare earth. Stubble reads as crop; ploughland and
- * mud as earth; hay and fallow as the meadow they are going back to.
- */
-export function writeGroundWeights(cover: CoverSample, wet: number, out: Float32Array, at: number): void {
-  let crop = 0;
-  let earth = 0;
-  if (cover.crop >= 0) {
-    if (cover.crop === Crop.Ploughed) earth = cover.plot;
-    else if (cover.crop !== Crop.Hay && cover.crop !== Crop.Fallow) crop = cover.plot;
-  }
-  earth = Math.max(earth, Math.min(1, wet * 1.4));
-  const forest = cover.forest * (1 - earth);
-  crop *= 1 - earth;
-  out[at] = Math.max(0, 1 - crop - forest - earth);
-  out[at + 1] = crop;
-  out[at + 2] = forest;
-  out[at + 3] = earth;
 }

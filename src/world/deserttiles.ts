@@ -3,7 +3,7 @@ import * as THREE from 'three';
 
 import type { PhysicsWorld } from '../core/physics';
 import { hash01 } from '../core/rng';
-import { SurfaceType } from '../core/surfaces';
+import { SurfaceType, TERRAIN_COLLIDER_SURFACE } from '../core/surfaces';
 import { advanceStreamWater, STREAM_WATER } from '../render/streamwater';
 import { freezeStaticSubtree } from './chunks';
 import type { WorldOrigin } from './origin';
@@ -35,12 +35,8 @@ import type {
   DesertTileWorkerResponse,
 } from './deserttileworker';
 import type { WorldWorkScheduler } from './workqueue';
-import {
-  DESERT_TILE_FADE_FULL,
-  DESERT_TILE_FADE_GONE,
-  DESERT_TILE_MATERIAL,
-  TERRAIN_COLLIDER_SURFACE,
-} from './terrainmesh';
+import { GROUND_DETAIL_FADE_FULL, GROUND_DETAIL_FADE_GONE, GROUND_TILE_MATERIAL, GROUND_ATTRIBUTES } from '../render/look/groundmaterial';
+import { GROUND_AUX_STRIDE, GROUND_COVER_STRIDE, GROUND_FIELD_STRIDE, GROUND_ROAD_STRIDE } from './groundattrs';
 
 /**
  * Player-centred open desert.
@@ -506,16 +502,17 @@ export class DesertTileStreamer {
     const centreZ = (tz + 0.5) * DESERT_TILE_SIZE;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-    geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(data.detailOffsets, 1));
+    geometry.setAttribute(GROUND_ATTRIBUTES.detail, new THREE.BufferAttribute(data.detailOffsets, 1));
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
-    geometry.setAttribute('aCanopy', new THREE.BufferAttribute(data.canopy, 4));
-    geometry.setAttribute('aGround', new THREE.BufferAttribute(data.ground, 4));
+    geometry.setAttribute(GROUND_ATTRIBUTES.cover, new THREE.BufferAttribute(data.attributes.cover, GROUND_COVER_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.aux, new THREE.BufferAttribute(data.attributes.aux, GROUND_AUX_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.field, new THREE.BufferAttribute(data.attributes.field, GROUND_FIELD_STRIDE));
+    geometry.setAttribute(GROUND_ATTRIBUTES.road, new THREE.BufferAttribute(data.attributes.road, GROUND_ROAD_STRIDE));
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const group = new THREE.Group();
     group.position.set(centreX - this.origin.x, 0, centreZ - this.origin.z);
-    const mesh = new THREE.Mesh(geometry, DESERT_TILE_MATERIAL);
+    const mesh = new THREE.Mesh(geometry, GROUND_TILE_MATERIAL);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     group.add(mesh);
@@ -687,14 +684,14 @@ export class DesertTileStreamer {
    * remain zero rather than being resurrected by this visual update.
    */
   private syncPropFades(cameraX: number, cameraZ: number): void {
-    const fadeSpan = DESERT_TILE_FADE_GONE - DESERT_TILE_FADE_FULL;
+    const fadeSpan = GROUND_DETAIL_FADE_GONE - GROUND_DETAIL_FADE_FULL;
     for (const tile of this.tiles.values()) {
       for (const prop of tile.props) {
         if (!prop.mesh) continue;
         const dx = tile.centreX + prop.x - cameraX;
         const dz = tile.centreZ + prop.z - cameraZ;
         const distance = Math.hypot(dx, dz);
-        const t = Math.min(1, Math.max(0, (distance - DESERT_TILE_FADE_FULL) / fadeSpan));
+        const t = Math.min(1, Math.max(0, (distance - GROUND_DETAIL_FADE_FULL) / fadeSpan));
         const smooth = t * t * (3 - 2 * t);
         const broken = propPieces(prop.form.id) && this.breakables?.isBroken(prop.id);
         const fade = broken ? 0 : 1 - smooth;

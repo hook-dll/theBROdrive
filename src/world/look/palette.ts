@@ -123,6 +123,45 @@ export interface LookPalette {
   peakB: Rgb;
   fieldTint: Rgb;
   treeTint: Rgb;
+  /**
+   * THE GROUND'S LAYER TINTS (stage 2, render/look/groundmaterial.ts). Linear light.
+   *
+   * Every one of them MULTIPLIES a greyscale or a photographed albedo — `soil.webp`,
+   * `peat.webp`, the forest floor of the season — so white leaves the photograph as it
+   * was taken and a tint only moves it with the season. That is the whole reason the
+   * ground is a stack of photographs with one shared colour function on top instead of
+   * a season repaint per texture: the palette says how October differs from July, and
+   * the four ground colours say what a field of grass is at all.
+   */
+  groundSoil: Rgb;
+  groundStubble: Rgb;
+  groundPeat: Rgb;
+  groundSilt: Rgb;
+  groundGravel: Rgb;
+  groundRock: Rgb;
+  groundMud: Rgb;
+  groundForest: Rgb;
+  /**
+   * The seven crop tints, three floats each, in `landcover.ts`'s `Crop` order. A
+   * standing crop has no photograph of its own: it is the grass tile's luminance under
+   * a colour of its own, which is exactly how the meadow is built and why a field of
+   * rye reads at four hundred metres.
+   */
+  groundCrops: Float32Array;
+  /**
+   * WHICH TWO FOREST-FLOOR PHOTOGRAPHS ARE IN PLAY, and how far between them: 0 spring,
+   * 1 summer, 2 autumn, 3 winter, with `groundForestMix` the weight of the second.
+   *
+   * The floor is four photographs and the season is one continuous channel, so in
+   * principle three or four of them can be partly present. Sampling four to blend them
+   * costs three fetches a fragment for a difference nobody can see, so the palette names
+   * the two heaviest and the shader fetches exactly those; the material binds the two
+   * samplers once a frame from these numbers. On a settled season both are the same
+   * photograph and the shader skips the second fetch altogether.
+   */
+  groundForestA: number;
+  groundForestB: number;
+  groundForestMix: number;
 }
 
 const colour = (): Rgb => ({ r: 0, g: 0, b: 0 });
@@ -157,6 +196,18 @@ export function newLookPalette(): LookPalette {
     peakB: colour(),
     fieldTint: colour(),
     treeTint: colour(),
+    groundSoil: colour(),
+    groundStubble: colour(),
+    groundPeat: colour(),
+    groundSilt: colour(),
+    groundGravel: colour(),
+    groundRock: colour(),
+    groundMud: colour(),
+    groundForest: colour(),
+    groundCrops: new Float32Array(CROP_COUNT * 3),
+    groundForestA: 1,
+    groundForestB: 1,
+    groundForestMix: 0,
   };
 }
 
@@ -459,6 +510,9 @@ function seasonBlendWeights(season: SeasonState): void {
 // Season
 // ---------------------------------------------------------------------------
 
+/** How many crop tints a season row carries: `landcover.ts`'s `Crop` enum. */
+const CROP_COUNT = 7;
+
 /** How one season moves the air and paints the ground, in sRGB hex. */
 interface SeasonRow {
   /** Multipliers on the light's colours: warm autumn, cold winter. */
@@ -473,56 +527,135 @@ interface SeasonRow {
   readonly peakB: number;
   readonly field: number;
   readonly tree: number;
+  /** Ground layer tints, all multipliers on photographs (see `LookPalette`). */
+  readonly soil: number;
+  readonly stubble: number;
+  readonly peat: number;
+  readonly silt: number;
+  readonly gravel: number;
+  readonly rock: number;
+  readonly mud: number;
+  readonly forest: number;
+  /** One tint per crop, in `Crop` order: wheat, rye, stubble, plough, green, fallow, hay. */
+  readonly crops: readonly number[];
 }
 
 type SeasonName = 'spring' | 'summer' | 'autumn' | 'winter';
+
+/** The order the forest-floor pair is indexed in: `SEASON_ORDER`. */
+const SEASON_INDEX: Record<SeasonName, number> = { spring: 0, summer: 1, autumn: 2, winter: 3 };
 
 const SEASONS: Record<SeasonName, SeasonRow> = {
   spring: {
     lightTint: 0xfff6f4,
     fogTint: 0xfff2f0,
     paleness: 0.2,
-    grassA: 0x7d9a4e,
-    grassB: 0xa9b46a,
-    peakA: 0xcdc691,
-    peakB: 0xe6d9a2,
-    field: 0xa8a06a,
+    grassA: 0x97ba63,
+    grassB: 0xcfcb8c,
+    peakA: 0xf4ecb3,
+    peakB: 0xfffbc9,
+    field: 0xc0bc84,
     tree: 0xb6c98a,
+    soil: 0xf8f4ea,
+    stubble: 0xfaf6ea,
+    peat: 0xeeeadf,
+    silt: 0xf4f6f0,
+    gravel: 0xf6f7f3,
+    rock: 0xf6f6f2,
+    mud: 0xf4f0e4,
+    forest: 0xeef4e4,
+    crops: [0xf4ecc4, 0xece4c4, 0xf4eede, 0xcdb79a, 0xa8c86e, 0xccca8a, 0xe2deb0],
   },
   summer: {
     lightTint: 0xffffff,
     fogTint: 0xffffff,
     paleness: 0,
-    grassA: 0x869658,
-    grassB: 0x9e9a6a,
-    peakA: 0xbdb67c,
-    peakB: 0xe3d8a8,
-    field: 0xc8c27f,
+    grassA: 0x8db05a,
+    grassB: 0xbcb77a,
+    peakA: 0xe2d9a0,
+    peakB: 0xfffbd4,
+    field: 0xd2cc90,
     tree: 0xffffff,
+    soil: 0xf6eee4,
+    stubble: 0xfaf4e8,
+    peat: 0xefeee6,
+    silt: 0xf6f1e8,
+    gravel: 0xf5f3ee,
+    rock: 0xf7f4f0,
+    mud: 0xf6ecdf,
+    forest: 0xffffff,
+    crops: [0xf0d888, 0xe4d69c, 0xecdfb4, 0xc0a284, 0xa8c868, 0xbcc084, 0xd6d090],
   },
   autumn: {
     lightTint: 0xffefd6,
     fogTint: 0xf6e2c6,
     paleness: 0.12,
-    grassA: 0x9d9468,
-    grassB: 0xb6a877,
-    peakA: 0xc2ad7c,
-    peakB: 0xd8b87c,
-    field: 0xc2a877,
+    // LATE SEPTEMBER IS STILL GREEN. The first pass made an autumn meadow khaki-brown and
+    // the frames read as straw everywhere; slowroads' own autumn pair is a green base
+    // (#4A7D4D) against a khaki second tone (#BEAF79), and the owner's photographs of the
+    // same week show green herbs with dry patches. So the FIRST colour stays a green and
+    // the second carries the season, which is what the noise blend then reads as a country
+    // of green meadows with mown and drying patches.
+    grassA: 0x90b05d,
+    grassB: 0xcfc585,
+    peakA: 0xede0a5,
+    peakB: 0xffe7a3,
+    field: 0xd0b98a,
     tree: 0xd8b878,
+    soil: 0xf2e8d8,
+    stubble: 0xf8eeda,
+    peat: 0xe8ded0,
+    silt: 0xf0e6d6,
+    gravel: 0xf4eee4,
+    rock: 0xf4eee4,
+    mud: 0xf0e4d2,
+    forest: 0xfaf0dc,
+    crops: [0xe8cc84, 0xdcc890, 0xe8dab8, 0xc39d79, 0xacc466, 0xc4b47c, 0xded0a0],
   },
   winter: {
     lightTint: 0xeff4ff,
     fogTint: 0xeef4ff,
     paleness: 0.42,
-    grassA: 0x8e8f88,
-    grassB: 0xa9a89e,
-    peakA: 0xcfd2d8,
-    peakB: 0xe8ebf0,
-    field: 0xb9bcc0,
+    grassA: 0xcbcabe,
+    grassB: 0xe7e7db,
+    peakA: 0xffffff,
+    peakB: 0xffffff,
+    field: 0xd4d6da,
     tree: 0x8f9aa4,
+    soil: 0xe6ebf2,
+    stubble: 0xeaf0f6,
+    peat: 0xdee4ec,
+    silt: 0xecf0f5,
+    gravel: 0xeef2f7,
+    rock: 0xe8eef4,
+    mud: 0xe4eaf1,
+    forest: 0xe6ecf2,
+    crops: [0xe2e6ec, 0xdee2e8, 0xe6eaf0, 0xccd0d4, 0xd2d6da, 0xd8dce0, 0xdee2e6],
   },
 };
+
+/**
+ * THE LAND COVER'S OWN COLOURS, in linear rgb.
+ *
+ * `world/landcover.ts` still hands out a colour alongside the cover class, for the
+ * callers that want a colour and nothing else — the tools, and the grass cache. The
+ * meadow and the seven crops are the SUMMER ROW of the table above rather than a second
+ * copy of it, so a season's grass and a season's field cannot drift from the colours the
+ * ground shader starts from; only the margins, the two forest floors and the mud are the
+ * cover's own, because nothing else needs to know them.
+ */
+export const COVER_COLOURS = {
+  /** Dry ground between plots: the strip a plough turns at. */
+  margin: surface(0x959962),
+  /** Needle and leaf litter under a spruce wood, and the paler floor of a bor. */
+  forestFloor: surface(0x86785a),
+  borFloor: surface(0xa89670),
+  /** Wet clay underfoot. A colour, not a hole: darker and warmer than ploughland. */
+  mud: surface(0x7d6a55),
+  meadowLush: surface(SEASONS.summer.grassA),
+  meadowDry: surface(SEASONS.summer.grassB),
+  crops: SEASONS.summer.crops.map((c) => surface(c)),
+} as const;
 
 /**
  * The Moon's own light, linear: the colour the key carries while the Moon is the key.
@@ -538,15 +671,22 @@ const SNOW_GROUND = surface(0xdde3ec);
 const BARE_TREES = surface(0x8d8a88);
 
 type SeasonLinear = { lightTint: Rgb; fogTint: Rgb; paleness: number } & Record<
-  'grassA' | 'grassB' | 'peakA' | 'peakB' | 'field' | 'tree',
+  'grassA' | 'grassB' | 'peakA' | 'peakB' | 'field' | 'tree' | 'soil' | 'stubble' | 'peat' | 'silt' | 'gravel' | 'rock' | 'mud' | 'forest',
   Rgb
->;
+> & { crops: Float32Array };
 
 /** The same rows in the space the row mix works in, so nothing allocates per frame. */
 const SEASON_LINEAR: Record<SeasonName, SeasonLinear> = (() => {
   const out = {} as Record<SeasonName, SeasonLinear>;
   for (const name of ['spring', 'summer', 'autumn', 'winter'] as const) {
     const authored = SEASONS[name];
+    const crops = new Float32Array(CROP_COUNT * 3);
+    for (let i = 0; i < CROP_COUNT; i++) {
+      const c = surface(authored.crops[i] ?? 0xffffff);
+      crops[i * 3] = c.r;
+      crops[i * 3 + 1] = c.g;
+      crops[i * 3 + 2] = c.b;
+    }
     out[name] = {
       lightTint: surface(authored.lightTint),
       fogTint: surface(authored.fogTint),
@@ -557,6 +697,15 @@ const SEASON_LINEAR: Record<SeasonName, SeasonLinear> = (() => {
       peakB: surface(authored.peakB),
       field: surface(authored.field),
       tree: surface(authored.tree),
+      soil: surface(authored.soil),
+      stubble: surface(authored.stubble),
+      peat: surface(authored.peat),
+      silt: surface(authored.silt),
+      gravel: surface(authored.gravel),
+      rock: surface(authored.rock),
+      mud: surface(authored.mud),
+      forest: surface(authored.forest),
+      crops,
     };
   }
   return out;
@@ -572,10 +721,23 @@ const season = {
   peakB: surface(0xffffff),
   field: surface(0xffffff),
   tree: surface(0xffffff),
+  soil: surface(0xffffff),
+  stubble: surface(0xffffff),
+  peat: surface(0xffffff),
+  silt: surface(0xffffff),
+  gravel: surface(0xffffff),
+  rock: surface(0xffffff),
+  mud: surface(0xffffff),
+  forest: surface(0xffffff),
+  crops: new Float32Array(CROP_COUNT * 3),
+  forestA: SEASON_INDEX.summer,
+  forestB: SEASON_INDEX.summer,
+  forestMix: 0,
 };
 
 const SEASON_FIELDS = [
   'lightTint', 'fogTint', 'grassA', 'grassB', 'peakA', 'peakB', 'field', 'tree',
+  'soil', 'stubble', 'peat', 'silt', 'gravel', 'rock', 'mud', 'forest',
 ] as const;
 
 const SEASON_ORDER = ['spring', 'summer', 'autumn', 'winter'] as const;
@@ -594,8 +756,27 @@ function blendSeasons(): void {
       out.b += c.b * w;
     }
   }
+  for (let i = 0; i < CROP_COUNT * 3; i++) {
+    let v = 0;
+    for (const name of SEASON_ORDER) v += SEASON_LINEAR[name].crops[i]! * seasonWeights[name];
+    season.crops[i] = v;
+  }
   season.paleness = 0;
   for (const name of SEASON_ORDER) season.paleness += SEASON_LINEAR[name].paleness * seasonWeights[name];
+
+  // The two woods in play, heaviest first. A settled season names itself twice, which the
+  // shader reads as "one fetch, no blend".
+  const weights = SEASON_ORDER.map((name) => seasonWeights[name]);
+  let first = 0;
+  for (let i = 1; i < weights.length; i++) if (weights[i]! > weights[first]!) first = i;
+  let second = first;
+  for (let i = 0; i < weights.length; i++) {
+    if (i !== first && weights[i]! > weights[second]!) second = i;
+  }
+  const total = weights[first]! + weights[second]!;
+  season.forestA = first;
+  season.forestB = second;
+  season.forestMix = second === first || total < 1e-4 ? 0 : weights[second]! / total;
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +846,27 @@ function writePalette(out: LookPalette): void {
   out.peakB.r = row.peakBr; out.peakB.g = row.peakBg; out.peakB.b = row.peakBb;
   out.fieldTint.r = row.fieldR; out.fieldTint.g = row.fieldG; out.fieldTint.b = row.fieldB;
   out.treeTint.r = row.treeR; out.treeTint.g = row.treeG; out.treeTint.b = row.treeB;
+  // The ground's layer tints are the season's own, written straight from the blend: they
+  // are multipliers on photographs rather than functions of the hour, and the same
+  // argument that keeps the grass colours out of the row applies to them.
+  writeRgb(out.groundSoil, season.soil);
+  writeRgb(out.groundStubble, season.stubble);
+  writeRgb(out.groundPeat, season.peat);
+  writeRgb(out.groundSilt, season.silt);
+  writeRgb(out.groundGravel, season.gravel);
+  writeRgb(out.groundRock, season.rock);
+  writeRgb(out.groundMud, season.mud);
+  writeRgb(out.groundForest, season.forest);
+  out.groundCrops.set(season.crops);
+  out.groundForestA = season.forestA;
+  out.groundForestB = season.forestB;
+  out.groundForestMix = season.forestMix;
+}
+
+function writeRgb(out: Rgb, src: Rgb): void {
+  out.r = src.r;
+  out.g = src.g;
+  out.b = src.b;
 }
 
 /**

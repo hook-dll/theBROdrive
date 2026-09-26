@@ -122,7 +122,7 @@ export function luma(c: Rgb | Float32Array | number[]): number {
 }
 
 /**
- * THE AUTUMN GROUND, per painted layer (render/groundpaint.ts: meadow, crop, forest
+ * THE AUTUMN GROUND, per painted layer (render/look/groundmaterial.ts: meadow, crop, forest
  * floor, earth). Each is paired with the summer colour it replaces, and the summer
  * ground is recoloured by brightness against that reference: a lush patch and a dry
  * one, a mottle and a wet hollow keep their light and dark, only the colour changes.

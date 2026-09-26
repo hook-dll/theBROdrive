@@ -48,7 +48,7 @@ import { shadowsFor, type GraphicsQuality } from '../game/settings';
  *     leave together at dusk.
  *
  * WHY THE STATE IS MODULE-LEVEL rather than an instance's. The ground materials are
- * themselves module-level singletons (`TERRAIN_MATERIAL`, the road ribbon's
+ * themselves module-level singletons (the ground materials, the road ribbon's
  * `roadMaterial`, the vista's `MESA_MATERIAL`), created at import time, long before
  * anything in `main.ts` runs. One shared uniform block is therefore the only thing
  * they can all be bound to, and one shared block is also what makes the per-frame

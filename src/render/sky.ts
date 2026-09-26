@@ -8,6 +8,7 @@ import { newWeatherState, type WeatherState } from '../world/weather';
 import { newSeasonState, type SeasonState } from '../world/season';
 import { MOONLIGHT, newLookPalette, paletteAt, type LookPalette } from '../world/look/palette';
 import { fogMaterialUniforms, FOG_PARS_GLSL, FOG_SKY_GRADIENT_GLSL, writeFog } from './look/fog';
+import { setGroundLook } from './look/groundmaterial';
 import { setWorldLighting } from './look/lighting';
 import { AstronomySystem } from './astronomy';
 import { Clouds } from './clouds';
@@ -525,6 +526,9 @@ export class Sky {
     // is painted with, and the light colours the world uses.
     writeFog(this.palette, this.fogFar, this.fog);
     setWorldLighting(this.palette);
+    // The ground's own colours, from the same table: the meadow's four tones, the season's
+    // layer tints and the crop colours, written once for every ground material there is.
+    setGroundLook(this.palette);
 
     // --- Dome ------------------------------------------------------------------
     this.uSunDir.copy(celestial.sun.direction);
