@@ -10,6 +10,7 @@ import { MOONLIGHT, newLookPalette, paletteAt, type LookPalette } from '../world
 import { fogMaterialUniforms, FOG_PARS_GLSL, FOG_SKY_GRADIENT_GLSL, writeFog } from './look/fog';
 import { setGroundLook } from './look/groundmaterial';
 import { setBushLook } from './look/bushmaterial';
+import { setTreeLook } from './look/treeglsl';
 import { setWorldLighting } from './look/lighting';
 import { AstronomySystem } from './astronomy';
 import { Clouds } from './clouds';
@@ -533,6 +534,9 @@ export class Sky {
     // The bushes' two atlases and the mix between them, off the ground's own season pair,
     // so a bush changes season on the frame its ground does.
     setBushLook(this.palette);
+    // The trees' two seasonal atlases, off the same season pair the ground uses, so a wood
+    // and the floor under it turn on the same frame.
+    setTreeLook(this.palette);
 
     // --- Dome ------------------------------------------------------------------
     this.uSunDir.copy(celestial.sun.direction);
@@ -738,14 +742,28 @@ export class Sky {
     this.didBakeEnvironment = true;
   }
 
-  /** Applies the rendering tier: the star field's depth and the deck's own size. */
-  setQuality(quality: GraphicsQuality, mobilePresentation = false): void {
+  /**
+   * Applies the rendering tier: the star field's depth and the deck's own size.
+   *
+   * `horizonMetres` is the presentation's own draw distance when the settings model has
+   * one — the rung's authored horizon scaled by the player's distance axis — and absent
+   * when the rung's number is the answer. It is passed rather than re-derived because the
+   * fog's whole scale IS the distance the world ends at, and a second derivation here is
+   * how a menu setting and the air the player looks through drift apart.
+   */
+  setQuality(
+    quality: GraphicsQuality,
+    mobilePresentation = false,
+    horizonMetres?: number,
+  ): void {
     this.starField.setQuality(quality, mobilePresentation);
     this.clouds.setQuality(quality);
     // The fog's whole scale is the presentation's far plane — the distance the world
     // actually ends at — so a short draw distance fogs a short world and the sky is fully
     // fogged at exactly the distance the last hill dissolves at.
-    this.fogFar = farPlaneForViewDistance(viewDistanceFor(quality, mobilePresentation));
+    this.fogFar = farPlaneForViewDistance(
+      horizonMetres ?? viewDistanceFor(quality, mobilePresentation),
+    );
     this.clouds.setFarPlane(this.fogFar);
   }
 

@@ -769,9 +769,16 @@ def _bark_ao(z, species):
     return ao * base
 
 
-def wood_parts(segs, species, *, max_level=99, trims=None):
+def wood_parts(segs, species, *, max_level=99, trims=None, radius_scale=None):
     """Tubes for the woody skeleton. Five or six sides on the trunk, four on a
-    limb, three on a twig, which is what keeps a full 200-twig skeleton small."""
+    limb, three on a twig, which is what keeps a full 200-twig skeleton small.
+
+    `radius_scale` fatens the thin orders for the winter pass, where the twigs
+    *are* the crown: a 5 mm twiglet is a third of a pixel at the whole-tree cell's
+    64 px/m, so at its true width a bare crown comes out as a nearly invisible
+    tracery (3 % coverage inside its own bbox) against the reference's 10 %. The
+    reason is the same one that makes a sprite leaf a cluster and not one blade —
+    what cannot be drawn at its true size is drawn at the size it reads at."""
     verts, faces, uvs, cols, slots = [], [], [], [], []
     for seg in segs:
         if seg['level'] > max_level:
@@ -785,6 +792,10 @@ def wood_parts(segs, species, *, max_level=99, trims=None):
         else:
             s = 3
         pts, radii = seg['pts'], seg['radii']
+        if radius_scale:
+            k = radius_scale.get(seg['level'], 1.0)
+            if k != 1.0:
+                radii = [r * k for r in radii]
         frac = (trims or {}).get(seg['level'])
         if frac is not None:
             lengths = [0.0]
@@ -810,14 +821,39 @@ def wood_parts(segs, species, *, max_level=99, trims=None):
     return verts, faces, uvs, cols, slots
 
 
-def build_leafy(name, species, seed, mats):
-    """The full-detail tree: the woody skeleton plus every leaf as its own quad."""
+# How much thicker the thin orders are drawn in the winter pass (level -> factor):
+# level 0 is a limb and keeps its size, the last order nearly triples, and what the
+# camera sees is the same twig mass the reference sprite shows.
+WINTER_TWIGS = {0: 1.0, 1: 1.7, 2: 2.8, 3: 3.4}
+
+
+def is_bare(season, species):
+    """Winter is the same grown skeleton with the leaves off it.
+
+    A deciduous tree in winter is not a green crown graded grey: it is the tree's
+    own wood down to the twigs, in the species' bark colour. The first winter
+    atlas was exactly that leafy render with a grey-green grade (LEAF_GRADES'
+    winter tint), which reads as a leafy tree at any distance — the defect is in
+    the *geometry*, not in the grade. So the leaves are not built at all, and the
+    wood is built to its last order and untrimmed: with the leaves gone the twigs
+    *are* the crown, and a 5 mm twiglet is a third of a pixel at 64 px/m while a
+    few thousand of them are the soft brown haze a bare crown has."""
+    return season == 'winter' and species['kind'] == 'deciduous'
+
+
+def build_leafy(name, species, seed, mats, *, leaves=True):
+    """The full-detail tree: the woody skeleton plus every leaf as its own quad —
+    or, in winter, the skeleton alone."""
     tree = grow(species, seed)
-    verts, faces, uvs, cols, slots = wood_parts(tree.segs, species, max_level=1,
-                                                trims={0: 0.92, 1: 0.80})
+    if leaves:
+        verts, faces, uvs, cols, slots = wood_parts(tree.segs, species, max_level=1,
+                                                   trims={0: 0.92, 1: 0.80})
+    else:
+        verts, faces, uvs, cols, slots = wood_parts(tree.segs, species, max_level=3,
+                                                   radius_scale=WINTER_TWIGS)
     uvs2 = [(0.5, 0.5)] * len(verts)
     n_wood = len(verts)
-    for lf in tree.leaves:
+    for lf in (tree.leaves if leaves else []):
         lv, luv = _leaf_quad(lf)
         base = len(verts)
         verts.extend(lv)
@@ -879,7 +915,7 @@ def _bark_uv(tree, species):
     uv is the one frame both share, so one pattern lands on both unchanged. A
     spruce's strip repeats every 2 m; a pine's is the whole trunk, so its u is a
     height and the two-tone of the species falls out of the pattern itself."""
-    (bu, bv) = species['bark_m']
+    (bu, bv) = species.get('bark_m', BARK_M)
     uv = tree.nodes.new('ShaderNodeUVMap')
     uv.uv_map = 'UVMap'
     sep = tree.nodes.new('ShaderNodeSeparateXYZ')
@@ -993,7 +1029,7 @@ def pine_bark(tree, emit, tex, species):
     u, v = _bark_uv(tree, species)
     photo = L.Vec(tree, tex.outputs['Color'])
     lum = photo.dot(L.vec_const(tree, 0.2126, 0.7152, 0.0722))
-    (bu, _bv) = species['bark_m']
+    (bu, _bv) = species.get('bark_m', BARK_M)
     t = L.clamp01((u - 0.22 * bu) / (0.15 * bu))
     grey = L.mix_vec(photo, L.vec_const(tree, 0.070, 0.058, 0.045), 0.42)
     grey = grey.scale(0.52 + 0.85 * lum)
@@ -1019,7 +1055,9 @@ def _bark_photo_uv(tree, image, species):
     samples the sheet once per repeat; a pine's strip is 11.6 m of trunk in one
     cell, so it has to sample the sheet just under six times along the trunk or
     the flakes would be stretched with the cell itself."""
-    (bu, bv) = species['bark_m']
+    # a deciduous species has no `bark_m` of its own: its strip is the shared
+    # 2.0 x 0.5 m one, which is what the photograph already is
+    (bu, bv) = species.get('bark_m', BARK_M)
     if abs(bu - BARK_M[0]) < 1e-6 and abs(bv - BARK_M[1]) < 1e-6:
         return
     uv = tree.nodes.new('ShaderNodeUVMap')
@@ -1264,13 +1302,16 @@ class _ClumpXform:
                        (v.z - self.box.z) * self.z))
 
 
-def build_clump(species, module, mats):
+def build_clump(species, module, mats, *, leaves=True):
     xf = _ClumpXform(module)
     aomax = max([lf['ao'] for lf in module['leaves']] or [1.0])
     verts, faces, uvs, cols, slots = [], [], [], [], []
     for seg in module['segs']:
         s = 3 if seg['level'] >= 2 else 4
         pts, radii = seg['pts'], seg['radii']
+        if not leaves:
+            k = WINTER_TWIGS.get(seg['level'], 1.0)
+            radii = [r * k for r in radii]
         ln = sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
         v, f, u = L.taper_tube(pts, radii, sides=s,
                                uv_u_scale=ln / BARK_M[0], v_span=(0.0, 1.0))
@@ -1281,7 +1322,7 @@ def build_clump(species, module, mats):
         slots.extend([0] * len(f))
         cols.extend([(1.0, 1.0, 0.50)] * len(v))
     uvs2 = [(0.5, 0.5)] * len(verts)
-    for lf in module['leaves']:
+    for lf in (module['leaves'] if leaves else []):
         lv, luv = _leaf_quad(lf)
         base = len(verts)
         verts.extend([tuple(xf @ Vector(p)) for p in lv])
@@ -1454,7 +1495,7 @@ def build_conifer_model(species, seed, variant=0):
     rng = random.Random(seed + variant * 131)
     verts, faces, uvs, cols, slots, uvs2 = [], [], [], [], [], []
     h = species['height']
-    (bu, bv) = species['bark_m']
+    (bu, bv) = species.get('bark_m', BARK_M)
     bark = cell_uv(BARK)
     sides = species['sides']
 
@@ -1608,27 +1649,29 @@ def _cell(species, season, w, h, frame_w, frame_h, samples, centre):
 def render_clumps(species, season, out_dir, *, seed=101):
     tree = grow(species, seed)
     modules = clump_modules(tree, species, 6)
-    mats = leaf_mats(species, season)
+    bare = is_bare(season, species)
+    mats = [bark_material(species)] if bare else leaf_mats(species, season)
     for module in modules:
         i = module['index']
         _cell(species, season, 256, 256, CLUMP_M, CLUMP_M, 32, (0.0, 0.0, 0.0))
-        build_clump(species, module, mats)
+        build_clump(species, module, mats, leaves=not bare)
         L.render_to(os.path.join(out_dir, f'clump{i}.png'))
         _cell(species, season, 256, 256, CLUMP_M, CLUMP_M, 16, (0.0, 0.0, 0.0))
-        build_clump(species, module, [crown_normal_material('deciduous')])
+        build_clump(species, module, [crown_normal_material('deciduous')], leaves=not bare)
         L.render_to(os.path.join(out_dir, f'clump{i}_n.png'))
-        L.log('clump', i, len(module['leaves']), 'leaves')
+        L.log('clump', i, len(module['leaves']) if not bare else 0, 'leaves')
 
 
 def render_whole_tree(species, season, out_dir, *, seed=101):
-    mats = leaf_mats(species, season)
+    bare = is_bare(season, species)
+    mats = [bark_material(species)] if bare else leaf_mats(species, season)
     _cell(species, season, WHOLE['w'], WHOLE['h'], WHOLE_M[0], WHOLE_M[1], 32,
           (0.0, 0.0, WHOLE_M[1] * 0.5))
-    build_leafy('tree', species, seed, mats)[0]
+    build_leafy('tree', species, seed, mats, leaves=not bare)[0]
     L.render_to(os.path.join(out_dir, 'tree.png'))
     _cell(species, season, WHOLE['w'], WHOLE['h'], WHOLE_M[0], WHOLE_M[1], 16,
           (0.0, 0.0, WHOLE_M[1] * 0.5))
-    build_leafy('tree', species, seed, [crown_normal_material('deciduous')])
+    build_leafy('tree', species, seed, [crown_normal_material('deciduous')], leaves=not bare)
     L.render_to(os.path.join(out_dir, 'tree_n.png'))
 
 
@@ -1639,14 +1682,16 @@ def render_impostors(species, season, out_dir, *, seed=101, views=IMPOSTOR_VIEWS
     the object-level material override, so the mesh is built once) and carries
     that view's rotation inside the baked normal."""
     cell = IMPOSTOR_CELL_M
-    mats = leaf_mats(species, season)
+    bare = is_bare(season, species)
+    mats = [bark_material(species)] if bare else leaf_mats(species, season)
     for pass_name, normal in (('albedo', False), ('normal', True)):
         L.configure(views * 256, 256, samples=24 if not normal else 16)
         L.clear_objects()
         L.ortho_camera(views * cell, views * cell, cell, centre=(0.0, 0.0, cell * 0.5))
         obj, _, n_wood = build_leafy(
             'imp', species, seed,
-            [mats[0], mats[1]] if not normal else [crown_normal_material('deciduous')])
+            mats if not normal else [crown_normal_material('deciduous')],
+            leaves=not bare)
         mesh = obj.data
         for view in range(views):
             yaw = (view / views) * math.tau
@@ -1693,7 +1738,7 @@ def render_bark(species, out_dir):
     2.9 m around v: the cell's 4:1 pixels then cover both axes at 88 px/m, the way
     the cell's aspect wants, and a pine's own trunk (a 0.26 m one, 1.6 m round)
     shows the first 56 % of that."""
-    span = species['bark_m']
+    span = species.get('bark_m', BARK_M)
     for pass_name, normal in (('', False), ('_n', True)):
         L.configure(BARK['w'], BARK['h'], samples=24 if not normal else 8)
         L.clear_objects()
@@ -1896,7 +1941,7 @@ def _wood_uv(species, seg, dist, z, v):
     limbs sample the flaky part by distance along the branch, and the dead stubs
     below the crown sit in the grey. That is the only difference between the two,
     and it is why a pine's clear trunk reads as a pine."""
-    (bu, _bv) = species['bark_m']
+    (bu, _bv) = species.get('bark_m', BARK_M)
     if species['bark_style'] == 'pine':
         if seg['level'] < 0:
             return (min(0.999, max(0.0, z / bu)), v)
@@ -1951,7 +1996,7 @@ def conifer_mesh(tree, species, *, sel=None, xf=None, max_level=1, trims=None):
         # the strip's v is one wrap of the trunk it was authored for; a twig is not
         # that thick, so its own circumference is what it gets, or a 3 cm twig
         # would wear the whole trunk's bark stretched round it
-        span = min(1.0, 2.0 * math.pi * max(0.004, radii[0]) / max(0.05, species['bark_m'][1]))
+        span = min(1.0, 2.0 * math.pi * max(0.004, radii[0]) / max(0.05, species.get('bark_m', BARK_M)[1]))
         v, f, u = L.taper_tube(pts, radii, sides=s, uv_u_scale=1.0, v_span=(0.0, span))
         off = len(verts)
         for i, (frac, vv) in enumerate(u):

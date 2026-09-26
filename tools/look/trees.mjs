@@ -160,7 +160,7 @@ for (const season of SEASONS) {
         height_m: Object.fromEntries(Object.entries(SPECIES).filter(([, v]) => v.group === 'deciduous').map(([k, v]) => [k, v.height_m])),
         autumn_colour: Object.fromEntries(Object.entries(SPECIES).filter(([, v]) => v.group === 'deciduous').map(([k, v]) => [k, v.autumn]))
       },
-      note: `birch, aspen, oak, lime: whole tree, six crown modules and a bark strip per column, ${season}. Every sprite is rendered from the same full-detail tree (bark, a few thousand leaves on the terminal twigs, each leaf 10-17 cm of leaf cluster); the 3D model is never used for a sprite.`
+      note: `birch, aspen, oak, lime: whole tree, six crown modules and a bark strip per column, ${season}. Every sprite is rendered from the same full-detail tree — bark, every branch order, and (spring/summer/autumn) a few thousand leaves on the terminal twigs, each 10-17 cm of leaf cluster; the 3D model is never used for a sprite. In winter that tree is grown with the leaves left off (trees.py's is_bare): the whole-tree cell, the crown modules and the impostor row are the bare skeleton down to its last twig order, through the species' bark material, so a winter crown is twigs and bark colour and not a grey-green leafy tree.`
     },
     {
       file: `trees_deciduous_${season}_n.webp`,

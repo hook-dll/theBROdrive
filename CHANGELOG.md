@@ -77,6 +77,73 @@ questions live in `docs/country.md`.
   capsule/cone the shader reconstructs. Rebuild needs network and Blender; the game
   needs neither. Numbers, layout and honest gaps in `docs/renderer-v2-log.md`.
 
+#### Stage 8 — menus, settings and interface (2026-09-26)
+
+- THE INTERFACE IS A DRIVER'S PAPERWORK, NOT A CONTROL PANEL (`src/ui/tokens.css`,
+  `menu.css`, `i18n.ts`, `settingsschema.ts`, `src/ui/menu.ts`). A first pass in slowroads'
+  own visual language (pills, frosted cards, a centred column) was rejected by the owner as
+  too close to the reference, so the language was redone whole while every flow, schema,
+  storage rule and contract was kept: paper on the bonnet — a waybill, a service book, a
+  page of the road atlas. Two materials decide everything: the WORLD, read through a dark
+  ground as bone on graphite (the instrument cluster lives here), and PAPER, read at rest —
+  two tints of old stock, six steps of ink, one red stamp, no glass and no blur anywhere.
+- FORMS, NOT PANELS. A sheet has one corner cut off, a hairline inside its edge and a shadow
+  because it lies on something. A field is a printed uppercase label, a DOTTED LEADER and an
+  underlined value; a choice is a word on a rule with the current one CIRCLED in pencil; a
+  checkbox is a box whose cross is drawn in two strokes; a slider is a RULER with
+  graduations and a thin marker; a keycap is a square typewriter key. One action per screen
+  is STAMPED — red, 1.2° crooked, grain-textured and pressed rather than printed — and only
+  one. Corners are cut or square; there are no round corners in the interface.
+- ASYMMETRY INSTEAD OF A CENTRED COLUMN: form to the left, the plate (form number and issue
+  date, in the stencil mono) above it, and a tear-off MARGIN STRIP down the right edge of
+  every screen carrying `FORM 12-A · WAYBILL · <date>` (in the pause, the mileage and the
+  in-game date). The settings pages index themselves down the left margin as a numbered card
+  (1. GAMEPLAY, 2. PICTURE, …), which folds into a row on a small screen.
+- TWO QUALITY AXES AND A RENDER SCALE (`Settings.viewDistance`, `Settings.detail`): the rung
+  still owns what a machine either affords or does not (pixels, shadows, lamp budget, star
+  depth); the distance axis multiplies the rung's authored horizon (0.6 / 1 / 1.5, bounded
+  0.9–32 km) for the machine that can afford the pixels but not the reach, and the detail axis
+  takes the neighbouring rung for grass and tree models. `Sky.setQuality` takes an optional
+  horizon so fog, far plane and vista stay one number. The launch's own auto-detect survives
+  and the page says who picked what, with `measure this machine` to ask again.
+- FIRST RUN, A MAIN MENU OVER A DRIFTING STILL, A NEW-DRIVE SHEET, SAVES, A LOGBOOK, A PAUSE
+  OVER THE FROZEN FRAME, SAVE CODES AND EVERY DEV SCREEN: one screen flow in `MainMenu`, and
+  the still behind the title is a frame of THIS world (`public/menu/*.jpg`, chosen by the
+  month) rather than the old desert backdrop, which is deleted with the asset.
+- SETTINGS ARE SCHEMA-DRIVEN AND STORED PER CATEGORY (`src/game/settings.ts`,
+  `src/ui/settingsschema.ts`): six pages, four kinds of row (enum, toggle, slider, key list)
+  rendered once each, one hint line, per-section reset, key rebinding with collision refusal,
+  `brodrive-settings-v2:<category>` keys merged over the defaults, a one-shot migration of the
+  old single `brodrive-settings-v1` blob, and a guard (`brodrive-loading-v1`) that puts the
+  picture level and the view distance back to their defaults when a launch never reached the
+  road, telling the player so once.
+- THE INTERFACE SOUNDS LIKE THE MACHINE IT IS (`src/audio/uisounds.ts`,
+  `Settings.uiVolume`): its own bus and nine synthesised voices — a typewriter key striking,
+  a rubber stamp coming down, a sheet being slid — retuned from the first pass's marimba
+  family. The first click of a session is a menu click, which is why the bank is not the
+  game's mixer.
+- WEATHER, UNITS AND LANGUAGE BECOME PLAYER CHOICES (`Settings.weather`, `.units`,
+  `.language`): the road's own weather spells by default, or one of clear / overcast / rain
+  held (snow is left to the season, which decides rain against snow); km or miles everywhere
+  a distance or a speed is written; and a full Russian/English string table whose English side
+  is the type of the Russian one, so a missing translation is a compile error.
+- TWO OPEN-LICENCE FONTS WITH CYRILLIC ARE SHIPPED (`public/fonts/`, `src/ui/fonts.css`,
+  `public/fonts/LICENSES.md`): JetBrains Mono 100–800 for everything printed — labels, values,
+  keycaps, the plate — and Rubik 300–900 for the one line of prose a screen is allowed. Both
+  OFL 1.1, split per Unicode subset and preloaded. Slashed zero is on globally.
+- THE HUD GAINS THE NUMBERS AND THE PAPER'S QUIET COUSIN: a digital reading under the dials
+  (speed large, the car's own odometer small, in the display face) with the player's units,
+  prompts and toasts as dark pills on the same tokens, instrument digits in the stencil face.
+- THE AUTOMATION CONTRACT IS KEPT: the first screen always carries a seed input and a button
+  whose DOM text contains `NEW DRIVE`, whatever language is on screen, so the screenshot and
+  smoke tooling can still start a drive.
+- THE LOAD MARK IS TIMESTAMPED (`LOAD_MARK_GRACE_MS`): a mark younger than forty-five seconds
+  is an ordinary reload during the boot — a file save in development, F5 in play — and is
+  cleared without repairing anything, while a mark older than that is a launch that never
+  reached the road and still puts the picture level and the view distance back. Printed type
+  also grew: no form label below 12 px on a desktop root, and every small label moved from
+  the rule grey to the ink grey for contrast on paper.
+
 #### Changed
 
 - THE VERGE IS GRASS AND THE UNDERGROWTH IS BUSHES (2026-09-26, renderer v2 stage 3).
@@ -3024,3 +3091,25 @@ res.
 - Autopilot obstacle passing, recovery, lane holding, and following remain stable across curves, grades, hazards, parked vehicles, and opposing traffic.
 - Mirage placement, wreck spacing, sandstone-city readability, sky fill, and distant transition behaviour were corrected.
 - Delivered cargo cannot mint a second reward, and cancelled or invalid sticker placement cannot consume its envelope.
+
+#### Trees (stage 4 of the world render)
+
+Drawn from assets now: a model per species and variant (about 170 vertices, cut out of a
+seasonal atlas and shaded by an analytic crown capsule), an impostor quad per far tree off a
+16-view atlas, and the two seasons in play blended from the palette's own season pair.
+`world/props/trees.ts` and `render/leafpaint.ts` are gone; the trunk collider contract
+(`treeShape`, `treeVariantCount`, `trunkColliderRadius`, the habit girths) moved to
+`world/treeshape.ts`, with the collider positions and radii verified identical against the
+previous renderer (three tiles, eighteen cylinders, exact match). Draw calls at the forest
+road fell from 360 to about 225, and the trees are assets rather than procedural meshes.
+
+THE TREE ATLASES ARE READ TOP-DOWN (`flipY = false`), because a model's uv comes from a
+glTF file and glTF measures v from the top of the image; with three's default the sheet was
+mirrored and every crown card sampled the bark strip. The bark band and the impostor rows
+are derived from the manifest's own px rectangles in that same convention.
+
+KNOWN ASSET DEFECT, not fixable here: `trees_deciduous_winter.webp` is a green leafy render,
+not the bare-branch winter sprite the asset log describes (measured: the birch sprite region
+averages (87,104,58) against summer's (84,112,42), same coverage; the atlas shows green
+crowns). Deciduous trees therefore keep their leaves under snow until the pipeline re-renders
+that season.

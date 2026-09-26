@@ -12,12 +12,13 @@ import type { GameLoop } from '../core/loop';
 import type { Renderer } from '../core/renderer';
 import {
   GRAPHICS_TIERS,
+  horizonMetresFor,
   presentationFpsFor,
   storeSettings,
-  viewDistanceFor,
   type GraphicsQuality,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
+import { t } from '../ui/i18n';
 import type { Sky } from '../render/sky';
 import type { VistaMesh } from '../render/vista';
 import type { ChunkStreamer } from '../world/chunks';
@@ -125,8 +126,10 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
           sandWindow.ready >= sandWindow.wanted;
         if (label) {
           label.textContent = complete
-            ? 'the road is ready'
-            : `building the world — ${Math.min(99, Math.floor((built / total) * 100))}%`;
+            ? t(ctx.world.state.settings.language, 'boot.ready')
+            : t(ctx.world.state.settings.language, 'boot.building', {
+                percent: Math.min(99, Math.floor((built / total) * 100)),
+              });
         }
         if (complete || performance.now() >= deadline) return;
         await new Promise<void>((resolve) => {
@@ -181,7 +184,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       return;
     }
     const label = ctx.loading.querySelector<HTMLElement>('.launch-loading-text');
-    if (label) label.textContent = 'settling the picture';
+    if (label) label.textContent = t(ctx.world.state.settings.language, 'boot.settling');
     const deadline = performance.now() + SETTLE_MAX_MS;
     for (let frame = 0; performance.now() < deadline; frame++) {
       const discard = frame < SETTLE_DISCARD_FRAMES;
@@ -241,8 +244,11 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       ctx.world.apply({ t: 'settings', settings });
       ctx.renderer.setMsaa(settings.msaa);
       ctx.renderer.setQuality(tier);
-      ctx.sky.setQuality(tier, ctx.mobilePresentation);
-      const horizon = viewDistanceFor(tier, ctx.mobilePresentation);
+      // The horizon is the rung's authored pair scaled by the distance axis, and every
+      // consumer of it is handed the same number: the sky's fog scale, the far plane and
+      // the vista. See `horizonMetresFor`.
+      const horizon = horizonMetresFor(tier, ctx.mobilePresentation, settings.viewDistance);
+      ctx.sky.setQuality(tier, ctx.mobilePresentation, horizon);
       ctx.renderer.setViewDistance(horizon);
       ctx.vista.setViewDistance(horizon);
       ctx.loop.setRenderFps(presentationFpsFor(ctx.world.state.settings.frameRateLimit));

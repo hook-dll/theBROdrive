@@ -1,0 +1,176 @@
+/* ------------------------------------------------------------------ *
+ *  the BRO drive — design tokens                                     *
+ *                                                                     *
+ *  The interface is a driver's paperwork, laid on the bonnet: a       *
+ *  waybill, a service book, a page of the road atlas. Paper with      *
+ *  ink on it, form fields with printed labels, ruled lines,           *
+ *  numbered sections, rubber stamps, serial numbers and map grid.     *
+ *  Not a control panel, and not glass: nothing in this interface is   *
+ *  a pill, a chip or a floating card.                                 *
+ *                                                                     *
+ *  Two materials, and the whole look follows from them:               *
+ *     1. The WORLD, seen through a dark ground: bone marks on         *
+ *        graphite. The instrument cluster lives here.                 *
+ *     2. PAPER, which is read at rest: aged stock, ink, one red       *
+ *        stamp. Menus, settings, forms.                               *
+ *                                                                     *
+ *  One place for every colour, size, rule, shadow and duration. A      *
+ *  component that needs a new value adds it here first.               *
+ * ------------------------------------------------------------------ */
+
+:root {
+  /* --- Paper ---------------------------------------------------------
+     Two tints and a ladder of alphas: a form is white-ish paper, and a
+     carbon copy — the block you keep — is one step darker. Aged rather
+     than new: yellowed at the edges, never pure white. */
+  --paper: #e4dabe;
+  --paper-2: #d6c9a7;
+  --paper-90: rgba(228, 218, 190, 0.9);
+  --paper-70: rgba(228, 218, 190, 0.7);
+  --paper-40: rgba(228, 218, 190, 0.4);
+  --paper-15: rgba(228, 218, 190, 0.15);
+
+  /* --- Ink -----------------------------------------------------------
+     What is printed on the paper. Six steps, and nothing else: a form
+     has printed text, filled-in text and a faint rule, and no third
+     kind of emphasis. */
+  --ink: #241e15;
+  --ink-90: rgba(36, 30, 21, 0.9);
+  --ink-70: rgba(36, 30, 21, 0.7);
+  --ink-45: rgba(36, 30, 21, 0.45);
+  --ink-25: rgba(36, 30, 21, 0.25);
+  --ink-12: rgba(36, 30, 21, 0.12);
+
+  /* --- The stamp -----------------------------------------------------
+     One red, for one action per screen: the rubber stamp that says the
+     form is approved. It is the only colour in the interface, which is
+     what makes it read as a stamp rather than as a highlight. */
+  --stamp: #9c2b1f;
+  --stamp-deep: #78201a;
+  --stamp-pale: rgba(156, 43, 31, 0.14);
+
+  /* --- The world -----------------------------------------------------
+     The instrument cluster is read against the road, not against paper:
+     warm bone on graphite, the palette it has always had. Kept in the
+     same ladder discipline so the dash and the documents cannot drift
+     into two different games. */
+  --bone: #efe6d1;
+  --bone-90: rgba(239, 230, 209, 0.9);
+  --bone-75: rgba(239, 230, 209, 0.75);
+  --bone-60: rgba(239, 230, 209, 0.6);
+  --bone-50: rgba(239, 230, 209, 0.5);
+  --bone-25: rgba(239, 230, 209, 0.25);
+  --bone-12: rgba(239, 230, 209, 0.12);
+  --bone-06: rgba(239, 230, 209, 0.06);
+  --bone-00: rgba(239, 230, 209, 0);
+
+  --graphite: #16140f;
+  --graphite-90: rgba(22, 20, 15, 0.9);
+  --graphite-75: rgba(22, 20, 15, 0.75);
+  --graphite-50: rgba(22, 20, 15, 0.5);
+  --graphite-35: rgba(22, 20, 15, 0.35);
+  --graphite-25: rgba(22, 20, 15, 0.25);
+  --graphite-00: rgba(22, 20, 15, 0);
+
+  --rust: #d9744a;
+  --rust-deep: #a8401d;
+  --diesel: #c9a227;
+
+  /* --- Type ----------------------------------------------------------
+     JetBrains Mono is the typewriter: every printed word, every filled
+     value, every keycap. Rubik is the human voice, and appears only
+     where a person would write a sentence — the explanatory line under
+     a heading. Nothing else is allowed to be prose. */
+  --font-display: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-body: 'Rubik', system-ui, 'Segoe UI', 'Helvetica Neue', sans-serif;
+
+  /* A form is read at a glance, standing up: nothing printed is smaller than 12 px on a
+     desktop root, and the labels are the size a printed form uses for them. */
+  --text-print: 0.75rem;   /* printed form labels, section numbers, codes */
+  --text-value: 0.9rem;    /* what has been filled in */
+  --text-prose: 0.85rem;   /* the explanatory line */
+  --text-head: 1.15rem;    /* a section heading */
+  --text-plate: 2.6rem;    /* the stamped wordmark */
+  --text-number: 1.9rem;   /* a figure worth reading twice */
+
+  --track-print: 0.14em;
+  --track-value: 0.02em;
+  --track-plate: 0.22em;
+  --track-stamp: 0.18em;
+
+  --weight-print: 700;
+  --weight-value: 400;
+  --weight-prose: 300;
+
+  /* --- Space, on a 4-pixel grid -------------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* --- The cut corner and the rules ----------------------------------
+     Every sheet has one corner cut off, the way a form has a corner
+     clipped for filing, and one heavy rule under its heading. Everything
+     else is a hairline or a dotted leader. */
+  --cut: 1.5rem;
+  --rule-hair: 1px solid var(--ink-25);
+  --rule-dot: 1px dotted var(--ink-25);
+  --rule-heavy: 2px solid var(--ink-70);
+  --page-width: 48rem;
+  --strip-width: 1.6rem;
+
+  /* --- Depth ---------------------------------------------------------
+     Paper casts a shadow because it is lying on something, and the
+     ground behind it is the world, ruled like a map. There is no frost,
+     no glass and no blur anywhere in the documents. */
+  --shadow-sheet: 0 1.4rem 2.4rem rgba(6, 5, 3, 0.45);
+  --shadow-stamp: 0.1rem 0.1rem 0 rgba(36, 30, 21, 0.28);
+  --grid: rgba(239, 230, 209, 0.05);
+
+  /* --- Motion --------------------------------------------------------
+     Everything the machine does: a key strikes, a carriage returns, a
+     stamp comes down. Short, and never a fade — a form does not fade in,
+     it is placed on the desk. */
+  --t-press: 0.08s;
+  --t-carriage: 0.22s;
+  --t-draw: 0.3s;
+  --ease-press: cubic-bezier(0.3, 0, 0.2, 1);
+  --ease-draw: cubic-bezier(0.16, 0.84, 0.24, 1);
+
+  /* --- Compatibility with the instrument cluster ---------------------
+     The HUD was written against its own names before this file existed.
+     They are kept, and they now mean steps of the ladder above. */
+  --hud-fg: var(--bone);
+  --hud-fg-dim: var(--bone-60);
+  --hud-panel: var(--graphite-75);
+  --hud-panel-strong: var(--graphite-90);
+  --hud-panel-soft: var(--graphite-50);
+  --hud-border: var(--bone-25);
+  --hud-alarm: var(--rust);
+  --hud-alarm-strong: var(--rust-deep);
+  --hud-diesel: var(--diesel);
+  --hud-font: var(--font-body);
+}
+
+/* Everything is in rem, so the whole interface scales from this one number: 16 on a
+   desktop, 14 on a small laptop, 12 on a phone in landscape, where a 16-pixel label
+   would leave room for five fields of a form and nothing else. */
+html {
+  font-size: 16px;
+}
+
+@media (max-width: 1180px) {
+  html {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  html {
+    font-size: 12px;
+  }
+}

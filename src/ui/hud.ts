@@ -3,6 +3,9 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
+import type { Language, Units } from '../game/settings';
+import { t } from './i18n';
+import { distanceUnitKey, formattedDistance, formattedSpeed, speedUnitKey } from './units';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -13,6 +16,13 @@ import type { AutopilotMode } from '../vehicle/autopilot';
 
 export interface DrivingReadout {
   speedKmh: number;
+  /**
+   * The CAR's own odometer, metres since it was built.
+   *
+   * Not the road distance, which the pause screen prints: this is the number a machine
+   * accumulates, and the one the numeric reading under the dials is about.
+   */
+  odometerMetres: number;
   rpm: number;
   gearLabel: string;
   fuelLitres: number;
@@ -270,6 +280,18 @@ export class Hud {
   private readonly tachNeedle: SVGLineElement;
   private readonly speedNeedle: SVGLineElement;
   private readonly gearEl: HTMLElement;
+  /** The numeric reading under the dials: speed and the car's own odometer. */
+  private readonly readoutSpeed: HTMLElement;
+  private readonly readoutSpeedUnit: HTMLElement;
+  private readonly readoutOdometer: HTMLElement;
+  private readonly readoutOdometerLabel: HTMLElement;
+  private readonly readoutDistanceUnit: HTMLElement;
+  /** Last text written to each, so a steady drive writes nothing. */
+  private readoutSpeedText = '';
+  private readoutOdometerText = '';
+  /** The player's readout preferences; applied by `setUnits`. */
+  private units: Units = 'km';
+  private language: Language = 'ru';
   /** Front-left, front-right, rear-left, rear-right. */
   private readonly tyreDots: HTMLElement[];
   private readonly tyreColours: string[] = ['', '', '', ''];
@@ -405,8 +427,40 @@ export class Hud {
     const gaugeRow = el('div', 'hud-gauge-row');
     gaugeRow.append(tach.svg, centreBlock, speed.svg);
 
+    /**
+     * THE READING, under the dials.
+     *
+     * The needle says how fast; it cannot say 87. The cluster is an instrument and a needle
+     * is the right instrument for a rate, but a driver who wants the number — to hold a
+     * limit, to report a trip — was reading a dial to the nearest five. Both numbers are
+     * already known here, they cost one text node each, and neither changes what the dials
+     * do.
+     *
+     * The odometer is the car's own, not the road's: it is the number a machine accumulates
+     * and the one a logbook entry is about.
+     */
+    this.readoutSpeed = el('span', 'hud-readout-value');
+    const speedUnit = el('span', 'hud-readout-unit');
+    this.readoutSpeedUnit = speedUnit;
+    const speedBlock = el('div', 'hud-readout-speed');
+    speedBlock.append(this.readoutSpeed, speedUnit);
+
+    this.readoutOdometer = el('span', 'hud-readout-value');
+    const odometerUnit = el('span', 'hud-readout-unit');
+    this.readoutDistanceUnit = odometerUnit;
+    this.readoutOdometerLabel = el('span', 'hud-readout-label');
+    const odometerBlock = el('div', 'hud-readout-odo');
+    odometerBlock.append(
+      this.readoutOdometerLabel,
+      this.readoutOdometer,
+      odometerUnit,
+    );
+
+    const readout = el('div', 'hud-readout');
+    readout.append(speedBlock, odometerBlock);
+
     const dashboard = el('div', 'hud-dashboard-shell');
-    dashboard.append(gaugeRow);
+    dashboard.append(gaugeRow, readout);
     this.drivingCluster.append(dashboard);
 
     this.invMassEl = el('div', 'hud-inv-mass');
@@ -428,6 +482,10 @@ export class Hud {
       this.toastEl,
       this.gumBubbleEl,
     ];
+    // The readout's unit labels are settings-driven, so they are written here rather than
+    // baked into the markup: a HUD that shipped with "km/h" in it would be wrong in miles
+    // until the first settings change, which is exactly the bug a one-shot default hides.
+    this.paintReadoutLabels();
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
     root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
@@ -676,6 +734,7 @@ export class Hud {
       this.speedDeg,
       this.speedNeedle,
     );
+    this.updateNumericReadout(readout.speedKmh, readout.odometerMetres);
 
     this.setText(this.gearEl, readout.gearLabel);
     this.updateTyreDots(readout.tyres);
@@ -1003,6 +1062,45 @@ export class Hud {
         if (i >= 0) this.toasts.splice(i, 1);
       }, TOAST_LEAVE_MS);
     }, TOAST_DURATION_MS);
+  }
+
+  /**
+   * The player's readout preferences: which units every number is in, and which language the
+   * labels under them are written in.
+   *
+   * The simulation never sees this — metres and km/h stay the model's own — so this is the
+   * one place the two meet, and it is a formatting decision rather than a conversion. The
+   * cached text is cleared so the next frame rewrites the numbers in the new unit rather than
+   * leaving a kilometre reading under a mile label.
+   */
+  setUnits(units: Units, language: Language): void {
+    if (units === this.units && language === this.language) return;
+    this.units = units;
+    this.language = language;
+    this.paintReadoutLabels();
+    this.readoutSpeedText = '';
+    this.readoutOdometerText = '';
+  }
+
+  /** The labels that only change when the settings do. */
+  private paintReadoutLabels(): void {
+    this.readoutOdometerLabel.textContent = t(this.language, 'hud.odometer');
+    this.readoutSpeedUnit.textContent = t(this.language, speedUnitKey(this.units));
+    this.readoutDistanceUnit.textContent = t(this.language, distanceUnitKey(this.units));
+  }
+
+  /** Speed and odometer, written only when the text actually changes. */
+  private updateNumericReadout(speedKmh: number, odometerMetres: number): void {
+    const speedText = formattedSpeed(Math.abs(speedKmh), this.units);
+    if (speedText !== this.readoutSpeedText) {
+      this.readoutSpeedText = speedText;
+      this.readoutSpeed.textContent = speedText;
+    }
+    const odometerText = formattedDistance(odometerMetres, this.units, 1);
+    if (odometerText !== this.readoutOdometerText) {
+      this.readoutOdometerText = odometerText;
+      this.readoutOdometer.textContent = odometerText;
+    }
   }
 
   dispose(): void {

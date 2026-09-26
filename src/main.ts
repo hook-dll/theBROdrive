@@ -11,15 +11,21 @@ import { parseCalendarEpoch } from './game/calendar';
 import {
   DEFAULT_INK_STRENGTH,
   DEFAULT_PHONE_FRAME_RATE,
+  DEFAULT_SETTINGS,
   TIME_OF_DAY_PRESETS,
+  WEATHER_FORCE_CHANNELS,
+  detailRungFor,
+  horizonMetresFor,
   loadStoredSettings,
+  markLoadFinished,
+  markLoadStarted,
   presentationFpsFor,
   shadowsFor,
   starMagnitudeFor,
   storeSettings,
   streetLightSlotsFor,
+  takeGraphicsResetNotice,
   vehicleLightSlotsFor,
-  viewDistanceFor,
 } from './game/settings';
 import { warmVariantAssets } from './world/poivariantbuild';
 import {
@@ -102,6 +108,8 @@ import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
+import { UiSounds } from './audio/uisounds';
+import { t } from './ui/i18n';
 import { autosaveNow, IndexedDbSaves, installVehicleAutosave } from './save/save';
 import {
   claimResumeSlot,
@@ -175,6 +183,28 @@ const MEDICINE_USE_SECONDS = 2;
 /** The lid leaves the held mesh here and continues as a world rigid body. */
 const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
 
+/**
+ * The launch cover's words, in the language the player last read the interface in.
+ *
+ * The cover is static markup so the first paint is never empty, but its stage word and its
+ * line of verse are the interface's own — a Russian player should not watch an English
+ * loading screen. `bootwarmup` rewrites the stage word afterwards from the live settings,
+ * which is the same answer by a longer route.
+ */
+function installLaunchCoverText(): void {
+  const language = loadStoredSettings()?.language ?? DEFAULT_SETTINGS.language;
+  const stage = document.querySelector('.launch-loading-text');
+  if (stage !== null) stage.textContent = t(language, 'boot.loading');
+  const poem = document.querySelector('.launch-poem');
+  if (poem !== null) {
+    poem.textContent = [
+      t(language, 'boot.poem.line1'),
+      t(language, 'boot.poem.line2'),
+      t(language, 'boot.poem.line3'),
+    ].join('\n');
+  }
+}
+
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
   const uiRoot = document.getElementById('ui');
@@ -187,10 +217,14 @@ async function boot(): Promise<void> {
     throw new Error('index.html is missing #game, #ui or #launch-loading');
   }
   installScreenWakeLock();
+  installLaunchCoverText();
 
   const mobilePresentation = prefersMobilePresentation();
 
   const saves = new IndexedDbSaves();
+  // Interface sounds live for the session and belong to the MENU's own bus: the first click
+  // of a session is a menu click, which happens before any car exists. See audio/uisounds.ts.
+  const uiSounds = new UiSounds();
   const menu = new MainMenu(uiRoot, loading);
 
   /**
@@ -214,10 +248,22 @@ async function boot(): Promise<void> {
   // lands instead there is nothing to show, so the cover simply stays until boot ends.
   const chosen = resumedState !== null
     ? { seed: resumedState.seed, state: resumedState }
-    : await menu.show(saves);
+    : await menu.show(saves, {
+        // The title screen can change the language, the units and the weather before any
+        // world exists, so its changes go straight to storage and the boot below reads them
+        // back exactly as it reads a previous session's.
+        settings: () => loadStoredSettings() ?? DEFAULT_SETTINGS,
+        store: storeSettings,
+        sounds: uiSounds,
+      });
 
   const loadedFromSave = chosen.state !== null;
-  const world = new GameWorld(chosen.state ?? newWorldState(chosen.seed));
+  const world = new GameWorld(
+    // A new drive may carry its own first day — the season the player opened on — which is
+    // spread over the fresh state rather than applied as a delta: `calendarEpoch` is the
+    // world's own birthday and nothing about it changes afterwards.
+    chosen.state ?? { ...newWorldState(chosen.seed), ...(chosen.start ?? {}) },
+  );
 
   // Machine preferences outrank whatever the save carried. Graphics quality and view
   // distance describe the GPU in front of the player, not the drive, so a save made on
@@ -264,6 +310,19 @@ async function boot(): Promise<void> {
     tierUndetected =
       world.state.settings.graphicsQualitySource === 'default' && !mobilePresentation;
   }
+  uiSounds.setVolume(world.state.settings.uiVolume);
+
+  /**
+   * THE GUARD AGAINST A LAUNCH THAT NEVER ARRIVES.
+   *
+   * Set here, with the drive committed and the world about to be built, and cleared when
+   * the loading cover lifts. If a launch dies in between — a horizon this machine cannot
+   * rebuild a cell inside, a worker that never answers — the next boot finds the mark still
+   * standing and puts the graphics choices back to their defaults, which is the only thing
+   * that can rescue it. Sitting at the title screen will never set it: a menu is not a
+   * launch. See `markLoadStarted` in game/settings.ts.
+   */
+  markLoadStarted();
 
   // The spine (checkpoints + coarse index) is what makes a long road affordable: it
   // is awaited here so the ten-million-step centreline walk never lands on the main
@@ -347,6 +406,7 @@ async function boot(): Promise<void> {
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   const hud = new Hud(uiRoot);
+  hud.setUnits(world.state.settings.units, world.state.settings.language);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -435,11 +495,17 @@ async function boot(): Promise<void> {
     origin,
   );
   // A save carries the tier it was played at, so apply it before the first frame
-  // rather than waiting for someone to open the pause menu.
+  // rather than waiting for someone to open the pause menu. The horizon is the rung's
+  // authored pair SCALED by the distance axis: one number, read by the far plane, the
+  // vista and the sky's fog, so the world ends in the fog exactly where it is drawn.
   {
-    const metres = viewDistanceFor(world.state.settings.graphicsQuality, mobilePresentation);
-    renderer.setViewDistance(metres);
-    vista.setViewDistance(metres);
+    const horizon = horizonMetresFor(
+      world.state.settings.graphicsQuality,
+      mobilePresentation,
+      world.state.settings.viewDistance,
+    );
+    renderer.setViewDistance(horizon);
+    vista.setViewDistance(horizon);
   }
   // One streaming unit per rendered frame prevents road and desert attachment from
   // stacking into the periodic 3-4 ms main-thread spikes visible on fast displays.
@@ -457,6 +523,13 @@ async function boot(): Promise<void> {
     worldWork,
   );
   desert.forest.attachRenderer(renderer.renderer);
+  // How far a tree is a model rather than a quad comes from the DETAIL axis: 130 / 190 /
+  // 280 m on the rung, one step either side of it on request. The machine's rung keeps the
+  // things a machine either affords or does not — pixels, shadows, lamps — and this keeps
+  // how much world is in the picture.
+  desert.forest.setQuality(
+    detailRungFor(world.state.settings.graphicsQuality, world.state.settings.detail),
+  );
   // POI yards are kept clear of trees: the forest plants blind in its workers, and the
   // stop layout depends on a player setting, so the clearing is applied here.
   desert.forest.clearings = (x, z, half) => {
@@ -2007,7 +2080,15 @@ async function boot(): Promise<void> {
     setSeasonUniforms(vista.season);
     // The weather along the road (world/weather.ts): sky, light, fog, rain, wet ground.
     weatherAt(world.seed, activeS, seasonStartDay, vista.season, weather);
+    // The road's own weather, unless the player asked for one sky: the choice is a standing
+    // override rather than a setting of the weather model, because the model's whole value
+    // is the spells it brings and `auto` must leave it exactly as it was. `snowing` is
+    // deliberately NOT forced — whether what falls is rain or snow is the season's, and
+    // forcing rain in January would be a lie the rest of the picture tells the truth about.
     if (WEATHER_OVERRIDE.state) Object.assign(weather, WEATHER_OVERRIDE.state);
+    else if (world.state.settings.weather !== 'auto') {
+      Object.assign(weather, WEATHER_FORCE_CHANNELS[world.state.settings.weather]);
+    }
     setWeatherWet(weather.wet);
     sky.setWeather(weather);
     // The season the sky tints its air with is the same object the ground is coloured
@@ -2106,6 +2187,9 @@ async function boot(): Promise<void> {
       const checkEngine = requiredFuel === null || wrongFuel || (car?.oilLitres ?? 0) <= 0;
       hud.setDriving({
         speedKmh: driving.speedKmh,
+        // The car's own odometer, not the road's: the number under the dials is about the
+        // machine, and it is the one a logbook entry remembers.
+        odometerMetres: car?.odometer ?? 0,
         rpm: driving.rpm,
         gearLabel: driving.gearLabel,
         fuelLitres: car?.fuelLitres ?? 0,
@@ -2335,6 +2419,7 @@ async function boot(): Promise<void> {
       renderer.setMsaa(world.state.settings.msaa);
       renderer.setRenderScale(world.state.settings.renderScale);
       camera.setFieldOfView(world.state.settings.fieldOfView);
+      hud.setUnits(world.state.settings.units, world.state.settings.language);
       // The tier owns six things and five of them apply in place: the pixel ceiling,
       // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista
       // disc), and the presentation cap. The sixth — the visible-light count — cannot,
@@ -2342,12 +2427,23 @@ async function boot(): Promise<void> {
       // would recompile the world's shaders mid-session. That one waits for the next
       // load, and the menu says so.
       const tier = world.state.settings.graphicsQuality;
+      const detailRung = detailRungFor(tier, world.state.settings.detail);
       renderer.setQuality(tier);
-      sky.setQuality(tier, mobilePresentation);
-      grass.setQuality(tier);
-      const horizon = viewDistanceFor(tier, mobilePresentation);
+      sky.setQuality(
+        tier,
+        mobilePresentation,
+        horizonMetresFor(tier, mobilePresentation, world.state.settings.viewDistance),
+      );
+      grass.setQuality(detailRung);
+      desert.forest.setQuality(detailRung);
+      const horizon = horizonMetresFor(
+        tier,
+        mobilePresentation,
+        world.state.settings.viewDistance,
+      );
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
+      uiSounds.setVolume(world.state.settings.uiVolume);
       loop.setRenderFps(
         presentationFpsFor(world.state.settings.frameRateLimit),
       );
@@ -2356,6 +2452,7 @@ async function boot(): Promise<void> {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
     exportState: stateForSave,
+    sounds: uiSounds,
     // Dev only, all seven of them, and behind one fold: `devTools` is `null` unless
     // `import.meta.env.DEV`, which is a compile-time constant, so a production build
     // drops the module, these hooks, and the pause screen's buttons for them together.
@@ -2392,7 +2489,14 @@ async function boot(): Promise<void> {
     audio.setPaused(true);
     void (async () => {
       const s = world.state;
-      const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
+      const action = await menu.showPause(
+        {
+          seed: s.seed,
+          km: s.player.s / 1000,
+          clock: { epoch: s.calendarEpoch, dayIndex: s.dayIndex, timeOfDay: s.timeOfDay },
+        },
+        pauseHooks,
+      );
       menu.hidePause();
       // Do this in the menu gesture's microtask, before an IndexedDB save can
       // consume transient user activation required by requestPointerLock.
@@ -2465,6 +2569,14 @@ async function boot(): Promise<void> {
       return undetected;
     },
   });
+  // The road is under the car and the cover is down: this launch arrived, so the mark that
+  // says one is in progress goes with it. If the PREVIOUS one never arrived, the guard
+  // repaired what could have caused it — and says so, once, on the first frame: a silently
+  // changed graphics level is the kind of thing a player reports as a bug in the game.
+  markLoadFinished();
+  if (takeGraphicsResetNotice()) {
+    hud.setToast(t(world.state.settings.language, 'set.guard.notice'));
+  }
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
   loop.start();

@@ -14,18 +14,35 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>the BRO drive</title>
+    <!-- The two faces the whole interface is built from, fetched before the stylesheets so
+         the first painted word is already in them. Their own file is `public/fonts/`, and
+         the licences are in `public/fonts/LICENSES.md`. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/jetbrains-mono-latin.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/jetbrains-mono-cyrillic.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rubik-latin.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rubik-cyrillic.woff2" />
+    <!-- Order matters: tokens define the vocabulary, hud.css the instruments and the launch
+         cover, menu.css the screens, and both consume the tokens. -->
+    <link rel="stylesheet" href="/src/ui/fonts.css" />
+    <link rel="stylesheet" href="/src/ui/tokens.css" />
     <link rel="stylesheet" href="/src/ui/hud.css" />
+    <link rel="stylesheet" href="/src/ui/menu.css" />
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
     <!-- Immediate launch cover: visible before the module graph or 3D assets load.
-         MainMenu hides it for the title form and restores it after a drive is chosen. -->
+         MainMenu hides it for the title screen and restores it after a drive is chosen,
+         so this is the first and the last thing the player sees of the boot. -->
     <div id="launch-loading" class="launch-loading" role="status" aria-label="Loading game">
       <div class="launch-wheel" aria-hidden="true">
         <div class="launch-wheel-rim"></div>
       </div>
       <div class="launch-loading-text">loading the road</div>
+      <div class="launch-rule" aria-hidden="true"><span></span></div>
+      <!-- The words are set from the interface's own table as soon as the bundle runs; this
+           is the English they are replaced from. -->
+      <p class="launch-poem"></p>
     </div>
     <!-- Shown by CSS alone, on touch devices in portrait (see hud.css). Markup lives
          here rather than in JS so it is on screen before the bundle has parsed: the

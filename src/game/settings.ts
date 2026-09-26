@@ -46,6 +46,48 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
 
 /**
+ * HOW FAR THE WORLD REACHES, as a second axis beside the rung.
+ *
+ * The rung answers "what can this machine afford" in one verdict — pixels, the shadow
+ * pass, the lamp budget, the horizon and the sky all move together. This axis answers the
+ * one question that verdict cannot: how much of the world the player wants to see, given
+ * what he has. A cell rebuild costs 13.0 ms at 1.5 km and 32.8 ms at 25 km, so the reach
+ * is the expensive half of the picture and the half that a machine can be told to spend
+ * differently — a workstation on battery, a laptop on a desk, a monitor that is suddenly
+ * 4K. It SCALES the rung's authored horizon rather than replacing it, so every step is
+ * still a distance the vista, the fog and the far plane were tuned at together.
+ */
+export type ViewDistanceAxis = 'near' | 'auto' | 'far';
+export const VIEW_DISTANCE_AXES = ['near', 'auto', 'far'] as const;
+/** `auto` is the rung's own authored pair; the other two are steps around it. */
+const VIEW_DISTANCE_SCALES: Record<ViewDistanceAxis, number> = { near: 0.6, auto: 1, far: 1.5 };
+/** Hard bounds on the scaled horizon, metres: below is a hallway, above is a rebuild storm. */
+const HORIZON_MIN_M = 900;
+const HORIZON_MAX_M = 32_000;
+
+/**
+ * HOW MUCH OF THE WORLD IS IN IT, as a third axis: the grass band and the reach of the
+ * tree models.
+ *
+ * One step either side of the rung, clamped at the ends. Nothing here invents a number:
+ * the vegetation tiers are authored per rung (`GRASS_TIERS`, the forest's own), and this
+ * axis says which of them to use, so a machine that can afford its rung's pixels but not
+ * its grass can have one without the other. The shadow pass stays with the rung, because
+ * it is a whole second render of the world and a machine either affords it or does not.
+ */
+export type DetailAxis = 'low' | 'auto' | 'high';
+export const DETAIL_AXES = ['low', 'auto', 'high'] as const;
+
+/** The rung whose vegetation the detail axis asks for: one step either side, clamped. */
+export function detailRungFor(quality: GraphicsQuality, detail: DetailAxis): GraphicsQuality {
+  if (detail === 'auto') return quality;
+  const ladder: readonly GraphicsQuality[] = ['acceptable', 'standard', 'blessing'];
+  const step = detail === 'low' ? -1 : 1;
+  const index = Math.min(ladder.length - 1, Math.max(0, ladder.indexOf(quality) + step));
+  return ladder[index]!;
+}
+
+/**
  * One rung. Every number here is a consequence of the same question — what can this
  * machine afford — which is what makes it a tier rather than a collection of switches.
  */
@@ -247,6 +289,23 @@ export function viewDistanceFor(quality: GraphicsQuality, mobilePresentation: bo
   return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].horizonM;
 }
 
+/**
+ * The horizon the PLAYER asked for: the rung's authored pair, scaled by the distance axis.
+ *
+ * Every caller that turns a horizon into metres — the renderer's far plane, the vista's
+ * reach, the sky's fog scale and the launch's own quality walk — goes through here, so the
+ * four can never disagree about where the world ends. `viewDistanceFor` remains the
+ * authored number, which is what a rung MEANS.
+ */
+export function horizonMetresFor(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+  axis: ViewDistanceAxis,
+): number {
+  const scaled = viewDistanceFor(quality, mobilePresentation) * VIEW_DISTANCE_SCALES[axis];
+  return Math.round(Math.min(HORIZON_MAX_M, Math.max(HORIZON_MIN_M, scaled)));
+}
+
 /** Spotlight budget for vehicle lamps, as this presentation will compile it. */
 export function vehicleLightSlotsFor(
   quality: GraphicsQuality,
@@ -354,6 +413,64 @@ export function renderScaleFrom(raw: unknown): RenderScale {
  */
 export type GraphicsQualitySource = 'default' | 'device' | 'measured' | 'chosen';
 
+/**
+ * The languages the interface is written in.
+ *
+ * Russian because the road is Russian — the region, the signposts, the cars — and English
+ * because that is how everyone else reads a driving game. Nothing else is offered: a third
+ * language would be a third set of strings nobody in this project can proofread, and a
+ * half-checked translation is worse than an honest menu in two tongues.
+ */
+export type Language = 'ru' | 'en';
+export const LANGUAGES = ['ru', 'en'] as const;
+
+/**
+ * Units for every distance and speed the player reads.
+ *
+ * The simulation is always metres and km/h — this is a readout preference, and the only
+ * place it lives is the formatting at the edge: the HUD's odometer and speed, the pause
+ * screen's travelled distance, the save list. `mi` also takes the odometer to miles, which
+ * is why it is a pair of factors rather than a label.
+ */
+export type Units = 'km' | 'mi';
+export const UNITS = ['km', 'mi'] as const;
+export const KILOMETRES_PER_MILE = 1.609344;
+/** Distance readout factor: metres → the chosen unit. */
+export const DISTANCE_UNITS_PER_METRE: Record<Units, number> = {
+  km: 1 / 1000,
+  mi: 1 / (1000 * KILOMETRES_PER_MILE),
+};
+/** Speed readout factor: km/h → the chosen unit. */
+export const SPEED_UNITS_PER_KMH: Record<Units, number> = {
+  km: 1,
+  mi: 1 / KILOMETRES_PER_MILE,
+};
+
+/**
+ * A weather to hold the sky at instead of the road's own spells, or `auto`.
+ *
+ * `auto` is the world's weather: spells of 6-22 km that the season decides (see
+ * world/weather.ts), and the reason a drive across a hundred kilometres has weather in it
+ * at all. The three fixed answers exist because "start me in the rain" is a thing a player
+ * wants once and cannot get from a spell he has not driven into yet. They are the same
+ * heights the world's own spell kinds use, so a forced sky is a sky the palette was
+ * authored for. Snow is deliberately NOT offered: whether what falls is rain or snow is
+ * the season's (`WeatherState.snowing`), and forcing snow in July would be a lie the rest
+ * of the picture tells the truth about.
+ */
+export type WeatherForce = 'auto' | 'clear' | 'overcast' | 'rain';
+export const WEATHER_FORCES = ['auto', 'clear', 'overcast', 'rain'] as const;
+
+/** The channels a forced weather writes: `world/weather.ts`'s own spell heights. */
+export const WEATHER_FORCE_CHANNELS: Record<
+  Exclude<WeatherForce, 'auto'>,
+  { overcast: number; precip: number; fog: number; wet: number }
+> = {
+  clear: { overcast: 0, precip: 0, fog: 0, wet: 0 },
+  overcast: { overcast: 0.9, precip: 0, fog: 0.15, wet: 0 },
+  rain: { overcast: 1, precip: 0.85, fog: 0.25, wet: 0.9 },
+};
+
 export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
@@ -431,6 +548,24 @@ export interface Settings {
    * whether this is on or off. Off by default; nobody should be surprised by it.
    */
   bouncyCars: boolean;
+  /** Language of the menus, the settings and the HUD text the interface owns. */
+  language: Language;
+  /** Units for every distance and speed the player reads. */
+  units: Units;
+  /**
+   * Volume of the interface sound bank, 0..1.
+   *
+   * Its own bus, because the menus exist before the car does: a click is the first sound
+   * of a session, and somebody who has muted the engine has not necessarily asked for the
+   * menus to go quiet — and the other way round.
+   */
+  uiVolume: number;
+  /** A weather to hold the sky at, or `auto` for the road's own spells. */
+  weather: WeatherForce;
+  /** The rung's authored horizon, scaled. See `horizonMetresFor`. */
+  viewDistance: ViewDistanceAxis;
+  /** Grass band and tree-model reach, one step either side of the rung. */
+  detail: DetailAxis;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
@@ -442,6 +577,14 @@ export const DEFAULT_POI_SPACING_METRES = GAMEPLAY_CONFIG.poiSpacingMetres;
 
 export const DEFAULT_MASTER_VOLUME = GAMEPLAY_CONFIG.defaultMasterVolume;
 export const DEFAULT_RADIO_VOLUME = GAMEPLAY_CONFIG.defaultRadioVolume;
+/**
+ * Interface sounds start quieter than the game's own mix.
+ *
+ * A click is closer to the ear than an engine is, it happens while nothing else is
+ * sounding, and it happens dozens of times in a row while somebody walks a settings page —
+ * so the same number that suits a car would make the menu shout.
+ */
+export const DEFAULT_UI_VOLUME = 0.55;
 export const DEFAULT_INK_STRENGTH = GAMEPLAY_CONFIG.defaultInkStrength;
 export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity;
 export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
@@ -501,6 +644,18 @@ export const DEFAULT_SETTINGS: Settings = {
   preciseSteering: false,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
+  // Russian, because the road is: the region, the villages, the cars and the signs are all
+  // Russian, and a menu in the language of the place is the most honest default this game
+  // has. English is one pill away on the first-run card and in the settings.
+  language: 'ru',
+  units: 'km',
+  uiVolume: DEFAULT_UI_VOLUME,
+  // The road's own weather. See `WeatherForce`.
+  weather: 'auto',
+  // The rung's authored horizon. The axis exists for the machine that can afford a rung's
+  // pixels but not its reach, and only its owner can say so.
+  viewDistance: 'auto',
+  detail: 'auto',
 };
 
 /**
@@ -562,6 +717,10 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? Math.min(1, Math.max(0, value))
       : fallback;
 
+  /** An offered value of a closed list, or the fallback. */
+  const oneOf = <T extends string>(value: unknown, offered: readonly T[], fallback: T): T =>
+    offered.find((option) => option === value) ?? fallback;
+
   const settings: Settings = {
     // Anything that is not exactly the automatic string is manual: the
     // historical mode, and the safe fallback for garbage input.
@@ -621,6 +780,15 @@ export function sanitizeSettings(raw: unknown): Settings {
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
     bouncyCars: obj.bouncyCars === true,
+    // Every one of these is a closed list, so an unreadable value degrades to the authored
+    // default rather than to whatever the string happened to be. `oneOf` rather than a
+    // condition per field: an added option is then one entry in the list and nothing here.
+    language: oneOf(obj.language, LANGUAGES, DEFAULT_SETTINGS.language),
+    units: oneOf(obj.units, UNITS, DEFAULT_SETTINGS.units),
+    uiVolume: unitInterval(obj.uiVolume, DEFAULT_UI_VOLUME),
+    weather: oneOf(obj.weather, WEATHER_FORCES, DEFAULT_SETTINGS.weather),
+    viewDistance: oneOf(obj.viewDistance, VIEW_DISTANCE_AXES, DEFAULT_SETTINGS.viewDistance),
+    detail: oneOf(obj.detail, DETAIL_AXES, DEFAULT_SETTINGS.detail),
   };
 
   const rawBindings = obj.keyBindings;
@@ -653,30 +821,289 @@ export function sanitizeSettings(raw: unknown): Settings {
  * changed since the last session and the save may be years old or from another
  * computer entirely.
  *
+ * ONE KEY PER CATEGORY, and the categories are the settings pages. A single blob
+ * meant a page could not be written, reset or discarded on its own: the crash guard
+ * below has to drop the graphics choices and leave the rest alone, and a player who
+ * resets one section must not lose his key bindings to the same write. Each category
+ * is merged over `DEFAULT_SETTINGS` on the way in, so a field added to the schema
+ * simply is not there in an existing store and the authored default applies — which is
+ * what makes this format survive its own growth.
+ *
  * Everything goes through `sanitizeSettings` on the way out, which already accepts
  * arbitrary JSON — so a corrupted or hand-edited entry degrades to defaults instead
  * of breaking the boot. Nothing here throws: a browser with storage disabled or a
  * full quota simply gets the old per-save behaviour back.
  */
-const SETTINGS_KEY = 'brodrive-settings-v1';
+export type SettingsCategory =
+  | 'graphics'
+  | 'display'
+  | 'gameplay'
+  | 'audio'
+  | 'controls'
+  | 'system';
 
-/** The stored preferences, or null if there are none or they cannot be read. */
-export function loadStoredSettings(): Settings | null {
+export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
+  'gameplay',
+  'graphics',
+  'display',
+  'audio',
+  'controls',
+  'system',
+];
+
+/**
+ * Which fields each category owns, and therefore stores, merges and resets.
+ *
+ * Every field of `Settings` appears exactly once — the type assertion below refuses to
+ * compile if one does not — because a field owned by no page would be invisible: it would
+ * never be written, so it would come back as its default on the next launch, and the bug
+ * would look like a setting that "does not stick".
+ */
+export const SETTINGS_CATEGORY_KEYS: Record<SettingsCategory, readonly (keyof Settings)[]> = {
+  graphics: [
+    'graphicsQuality',
+    'graphicsQualitySource',
+    'viewDistance',
+    'detail',
+    'renderScale',
+    'msaa',
+    'frameRateLimit',
+  ],
+  display: ['fieldOfView', 'mouseSensitivity', 'preciseSteering'],
+  gameplay: ['gearboxMode', 'dayCycleMinutes', 'poiSpacingMetres', 'weather', 'bouncyCars'],
+  audio: ['masterVolume', 'radioVolume', 'uiVolume'],
+  controls: ['keyBindings'],
+  system: ['language', 'units'],
+};
+
+/** A settings field that no category stores, which must not exist. */
+type AssertNever<T extends never> = T;
+export type EverySettingIsStored = AssertNever<
+  Exclude<keyof Settings, (typeof SETTINGS_CATEGORY_KEYS)[SettingsCategory][number]>
+>;
+
+const SETTINGS_KEY_PREFIX = 'brodrive-settings-v2:';
+/** The one-blob format this replaces. Read once, rewritten per category, then dropped. */
+const LEGACY_SETTINGS_KEY = 'brodrive-settings-v1';
+/**
+ * Set when a drive starts booting, cleared when it reaches the road.
+ *
+ * The guard against a launch that never finishes. A settings value cannot usually break a
+ * boot — but a horizon can: `far` on a machine that cannot rebuild a cell inside a frame
+ * turns every cell crossing into a hitch, and the boot's own warm-up window is built at the
+ * same scale, so a launch can spend its whole budget and never arrive. If this mark is
+ * still standing when the next launch reads its preferences, the machine never got there,
+ * and the one category that can cause that is dropped back to its defaults.
+ */
+const LOAD_MARK_KEY = 'brodrive-loading-v1';
+/**
+ * How long a load mark may stand before it is believed.
+ *
+ * The mark carries the moment the boot began, because a mark with no age cannot tell a
+ * machine that never arrived from an ordinary reload: in development every file save
+ * reloads the page mid-boot, and in play a player pressing F5 during the loading screen
+ * looked exactly like a hang. Forty-five seconds is longer than any honest launch on the
+ * slowest machine this game runs on and shorter than somebody sitting at a frozen screen,
+ * so a young mark is simply cleared and an old one is acted on.
+ */
+const LOAD_MARK_GRACE_MS = 45_000;
+/** Raised when the guard above fires, so the menu can say so once instead of silently. */
+const GRAPHICS_RESET_KEY = 'brodrive-graphics-reset-v1';
+
+/**
+ * Marks a boot as begun. Called once the player has committed to a drive, never at the
+ * title screen: sitting in a menu is not a launch, and it must not be read as a failed one.
+ */
+export function markLoadStarted(): void {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw === null) return null;
-    return sanitizeSettings(JSON.parse(raw));
+    localStorage.setItem(LOAD_MARK_KEY, String(Date.now()));
   } catch {
+    // No storage: no guard, and no way to have stored a setting that needed one either.
+  }
+}
+
+/** Marks the boot as arrived: the road is under the car and the cover has lifted. */
+export function markLoadFinished(): void {
+  try {
+    localStorage.removeItem(LOAD_MARK_KEY);
+  } catch {
+    // See above.
+  }
+}
+
+/** Whether the guard fired on this launch, reported once. */
+export function takeGraphicsResetNotice(): boolean {
+  try {
+    const raised = localStorage.getItem(GRAPHICS_RESET_KEY) !== null;
+    if (raised) localStorage.removeItem(GRAPHICS_RESET_KEY);
+    return raised;
+  } catch {
+    return false;
+  }
+}
+
+/** One category's stored fields, or null when that category has never been written. */
+function readCategory(category: SettingsCategory): Record<string, unknown> | null {
+  let json: string | null;
+  try {
+    json = localStorage.getItem(SETTINGS_KEY_PREFIX + category);
+  } catch {
+    return null;
+  }
+  if (json === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    // A corrupted category costs that category its choices and nothing else. The keys are
+    // dropped rather than left to fail again on every launch.
+    try {
+      localStorage.removeItem(SETTINGS_KEY_PREFIX + category);
+    } catch {
+      // Nothing to do; the read below is already the fallback.
+    }
     return null;
   }
 }
 
+/** The stored preferences, or null if there are none or they cannot be read. */
+export function loadStoredSettings(): Settings | null {
+  const stored: Partial<Record<SettingsCategory, Record<string, unknown>>> = {};
+  let storedCount = 0;
+  for (const category of SETTINGS_CATEGORIES) {
+    const fields = readCategory(category);
+    if (fields === null) continue;
+    stored[category] = fields;
+    storedCount += 1;
+  }
+
+  let legacy: Record<string, unknown> | null = null;
+  try {
+    const json = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (json !== null) legacy = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    legacy = null;
+  }
+
+  // A legacy blob is read only into categories this browser has never written: once one
+  // per-category key exists, that format is the truth and the old blob is stale.
+  if (legacy !== null) {
+    for (const category of SETTINGS_CATEGORIES) {
+      if (stored[category] !== undefined) continue;
+      const fields: Record<string, unknown> = {};
+      for (const key of SETTINGS_CATEGORY_KEYS[category]) {
+        if (key in legacy) fields[key] = legacy[key];
+      }
+      if (Object.keys(fields).length > 0) {
+        stored[category] = fields;
+        storedCount += 1;
+      }
+    }
+  }
+
+  let markAgeMs: number | null = null;
+  try {
+    const mark = localStorage.getItem(LOAD_MARK_KEY);
+    if (mark !== null) {
+      const startedAt = Number(mark);
+      // A mark from a build that wrote a bare `1` has no age and is treated as old: it is
+      // the one case where the guard cannot tell, and the failure it exists for is worse
+      // than one spurious reset.
+      markAgeMs = Number.isFinite(startedAt) ? Date.now() - startedAt : Number.POSITIVE_INFINITY;
+    }
+  } catch {
+    markAgeMs = null;
+  }
+  const abandoned = markAgeMs !== null && markAgeMs > LOAD_MARK_GRACE_MS;
+  if (storedCount === 0 && !abandoned) {
+    // A young mark is a reload, not a failure: it is cleared so the next launch is judged on
+    // its own, and nothing is repaired.
+    if (markAgeMs !== null) {
+      try {
+        localStorage.removeItem(LOAD_MARK_KEY);
+      } catch {
+        // No storage, no guard, nothing to clear.
+      }
+    }
+    return null;
+  }
+
+  if (abandoned) {
+    // The previous launch never reached the road. The two choices that can cause that are the
+    // rung and the reach — a rung this machine cannot afford, or a horizon it cannot rebuild a
+    // cell inside — so those two go back to their defaults, which also re-arms the launch's own
+    // measurement. Sharpness, smooth edges and the frame cap STAY: they cannot hang a boot,
+    // they may have taken a player a while to get right, and a rescue that costs more than the
+    // failure is not a rescue. The mark goes, so the next boot is judged on its own.
+    const graphics = stored.graphics ?? {};
+    graphics.graphicsQuality = DEFAULT_SETTINGS.graphicsQuality;
+    // Explicitly `default` rather than absent: a missing source is read as `chosen` (that is
+    // what an existing player's stored preferences mean), which would leave the launch with
+    // no permission to measure this machine again — the one thing that can find a rung that
+    // fits after the rung that did not.
+    graphics.graphicsQualitySource = 'default';
+    delete graphics.viewDistance;
+    stored.graphics = graphics;
+    try {
+      localStorage.setItem(SETTINGS_KEY_PREFIX + 'graphics', JSON.stringify(graphics));
+      localStorage.removeItem(LOAD_MARK_KEY);
+      localStorage.setItem(GRAPHICS_RESET_KEY, '1');
+    } catch {
+      // No storage: the launched-for-this-session defaults still apply below.
+    }
+  }
+
+  const raw: Record<string, unknown> = {};
+  for (const category of SETTINGS_CATEGORIES) {
+    const fields = stored[category];
+    if (fields !== undefined) Object.assign(raw, fields);
+  }
+  const settings = sanitizeSettings(raw);
+
+  // One write of the new format, then the old key goes: the migration happens once, and
+  // the two copies cannot drift apart afterwards.
+  if (legacy !== null) {
+    storeSettings(settings);
+    try {
+      localStorage.removeItem(LEGACY_SETTINGS_KEY);
+    } catch {
+      // Left in place, it is simply ignored from now on: the per-category keys exist.
+    }
+  }
+  return settings;
+}
+
 /** Mirrors preferences to browser storage. Called on every settings change. */
 export function storeSettings(settings: Settings): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    // Storage disabled or full. Preferences still apply for this session; they
-    // just will not outlive it, which is exactly the old behaviour.
+  for (const category of SETTINGS_CATEGORIES) {
+    const fields: Record<string, unknown> = {};
+    for (const key of SETTINGS_CATEGORY_KEYS[category]) fields[key] = settings[key];
+    try {
+      localStorage.setItem(SETTINGS_KEY_PREFIX + category, JSON.stringify(fields));
+    } catch {
+      // Storage disabled or full. Preferences still apply for this session; they
+      // just will not outlive it, which is exactly the old behaviour.
+    }
   }
+}
+
+/**
+ * One category back to its authored defaults.
+ *
+ * The keys and the LANGUAGE stay: a player resetting the graphics page has not asked to be
+ * spoken to in another tongue, and losing every binding with the volumes would make the
+ * button one nobody dares press twice.
+ */
+export function resetSettingsCategory(
+  settings: Settings,
+  category: SettingsCategory,
+): Settings {
+  const next: Settings = { ...settings, keyBindings: { ...settings.keyBindings } };
+  for (const key of SETTINGS_CATEGORY_KEYS[category]) {
+    if (key === 'language' || key === 'keyBindings') continue;
+    (next as unknown as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
+  }
+  return next;
 }

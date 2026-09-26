@@ -2,9 +2,6 @@ import type * as THREE from 'three';
 
 import {
   AUTUMN_GROUND,
-  AUTUMN_LEAVES,
-  BARE_TWIG,
-  BARE_TWIGS,
   CANOPY,
   CANOPY_SNOW,
   canopyTurn,
@@ -47,27 +44,22 @@ export function setSeasonUniforms(season: SeasonState): void {
 }
 
 const v3 = (c: Rgb): string => `vec3( ${c.map((x) => x.toFixed(5)).join(', ')} )`;
-const arr = (cs: readonly Rgb[]): string => `vec3[${cs.length}]( ${cs.map(v3).join(', ')} )`;
-const farr = (fs: readonly number[]): string => `float[${fs.length}]( ${fs.map((f) => f.toFixed(4)).join(', ')} )`;
-
 const G = AUTUMN_GROUND;
-const L = AUTUMN_LEAVES;
 
 /**
  * Declarations and functions, for both shader stages:
  *
  *   seasonGround( col, w )        linear summer ground colour, w = ground paint weights
- *   seasonCanopy( col )           a far wood's canopy colour
- *   seasonLeafTurn( kind, rnd )   how far one tree's leaves have turned, 0..1
- *   seasonLeafTarget( kind, rnd ) its autumn colour per unit of summer brightness
- *   seasonLeaf( col, kind, rnd )  a leaf colour, recoloured for that tree
- *   seasonLeafBare( kind, rnd )   how far that tree has dropped its leaves
- *   seasonLeafKeep( bare, shade ) whether one painted leaf is still on
- *   seasonEvergreenSnow( kind, up ) snow on a conifer's upper side
  *   seasonSnowAt( forest, spot )  how much snow lies on the ground
+ *   seasonCanopy( col )           a far wood's canopy colour
  *   seasonPatch( xz )             a world noise for snow's patches
  *
- * `rnd` is the tree's own random 0..1, the same value for its model and its impostor.
+ * A TREE'S OWN SEASON IS NOT HERE ANY MORE. Stage 4 draws trees from four seasonal
+ * atlases instead of recolouring leaves in the shader, so the leaf functions
+ * (`seasonLeafTurn`, `seasonLeaf`, `seasonLeafBare`, ...) and the per-kind autumn table
+ * they read went with the procedural trees they were written for; the two atlases a
+ * month lies between are chosen by `render/look/treeglsl.ts` from the same palette the
+ * ground uses.
  */
 export const SEASON_GLSL = /* glsl */ `
 uniform float uSeasonTurn;
@@ -140,57 +132,10 @@ vec3 seasonCanopy( vec3 col ) {
   vec3 v = col * ( now / summer );
   return mix( v, ${v3(SNOW)} * 0.8, uSeasonSnow * ${CANOPY_SNOW.toFixed(3)} );
 }
-const vec3 SEASON_LEAF_A[${L.length}] = ${arr(L.map((l) => l.a))};
-const vec3 SEASON_LEAF_B[${L.length}] = ${arr(L.map((l) => l.b))};
-const float SEASON_LEAF_REF[${L.length}] = ${farr(L.map((l) => luma(l.ref)))};
-const float SEASON_LEAF_LATE[${L.length}] = ${farr(L.map((l) => l.late))};
-const float SEASON_LEAF_TURNS[${L.length}] = ${farr(L.map((l) => l.turns))};
-float seasonLeafTurn( int kind, float rnd ) {
-  // Each tree turns over its own stretch of the channel: a few early, most with the
-  // rest, some late. The kind's lateness moves the whole kind.
-  float from = SEASON_LEAF_LATE[ kind ] + rnd * 0.4;
-  return SEASON_LEAF_TURNS[ kind ] * smoothstep( from, from + 0.3, uSeasonTurn );
-}
-// The tree's autumn colour per unit of summer brightness: a leaf of brightness l turns
-// to seasonLeafTarget * l, so its light and shade survive the change of colour.
-vec3 seasonLeafTarget( int kind, float rnd ) {
-  return mix( SEASON_LEAF_A[ kind ], SEASON_LEAF_B[ kind ], fract( rnd * 7.31 ) ) / SEASON_LEAF_REF[ kind ];
-}
-vec3 seasonLeaf( vec3 col, int kind, float rnd ) {
-  float t = seasonLeafTurn( kind, rnd );
-  if ( t <= 0.0 ) return col;
-  return mix( col, seasonLeafTarget( kind, rnd ) * seasonLuma( col ), t );
-}
-/**
- * How far one tree has dropped its leaves, 0..1: each broad-leaved tree at its own
- * point of the \`bare\` channel, conifers never.
- */
-float seasonLeafBare( int kind, float rnd ) {
-  float from = fract( rnd * 3.7 ) * 0.5;
-  return SEASON_LEAF_TURNS[ kind ] * smoothstep( from, from + 0.4, uSeasonBare );
-}
-/**
- * Whether one painted leaf is still on the tree, as coverage: leaves go one by one,
- * each at its own point, picked by its painted shade (every leaf of the atlas is one
- * flat shade), so a thinning crown loses leaves, not opacity.
- */
-float seasonLeafKeep( float bare, float leafShade ) {
-  if ( bare <= 0.0 ) return 1.0;
-  return step( bare * ${(1 - BARE_TWIGS).toFixed(3)}, fract( leafShade * 37.0 ) * 0.98 + 0.01 );
-}
-/** What is left of a bare crown reads as twigs: its colour, by how bare the tree is. */
-vec3 seasonTwigs( vec3 col, float bare ) {
-  return mix( col, ${v3(BARE_TWIG)}, smoothstep( 0.2, 0.9, bare ) );
-}
-/** 1 for an evergreen (conifer, juniper, moss), 0 for a broad-leaved kind. */
-float seasonIsEvergreen( int kind ) {
-  return 1.0 - SEASON_LEAF_TURNS[ kind ];
-}
-/** Snow on an evergreen's upper side (\`up\` its normal's y) and on moss: 0..1. */
-float seasonEvergreenSnow( int kind, float up ) {
-  return ( 1.0 - SEASON_LEAF_TURNS[ kind ] ) * uSeasonSnow * smoothstep( 0.15, 0.7, up ) * 0.8;
-}
 `;
+
+/** The snow colour as a GLSL literal. */
+export const SNOW_GLSL = v3(SNOW);
 
 /** Adds the season uniforms to a compiling shader and its functions after `#include <common>` in both stages. */
 export function injectSeason(shader: THREE.WebGLProgramParametersWithUniforms): void {
@@ -200,15 +145,6 @@ export function injectSeason(shader: THREE.WebGLProgramParametersWithUniforms): 
   shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\n${SEASON_GLSL}`);
   shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>\n${SEASON_GLSL}`);
 }
-
-/**
- * A tree's own random 0..1 from its tint, which both its model (instance colour) and
- * its impostor carry as the same float (world/forest.ts).
- */
-/** The snow colour as a GLSL literal. */
-export const SNOW_GLSL = v3(SNOW);
-
-export const SEASON_TREE_RANDOM_GLSL = 'fract( abs( tint ) * 91.7 )';
 
 /**
  * Covers a material with snow as the \`snow\` channel rises: \`amount\` how much of

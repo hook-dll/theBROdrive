@@ -14,14 +14,18 @@
  * and a second hand-written stub would drift the moment a painter calls one more
  * context method.
  *
- * IMPORT IT FIRST. One module still resolves a painted texture while it is being
- * evaluated rather than on first use (`world/props/trees.ts` builds the leaf atlas;
- * `world/roadmesh.ts` the shoulder's gravel map, `world/trackmesh.ts` the track's and
- * `render/stickers.ts` the star are all resolved on first use now), and an import list
- * is evaluated in source order. A tool whose `src/` imports come before this one
- * therefore dies at module scope with `document is not defined` before its own first
- * statement runs — which is what `roadside-solid.ts` and `long-drive-soak.ts` did. The
- * shim installs itself on import so the only rule left is the order.
+ * IMPORT IT FIRST. A module that resolves a painted texture while it is being evaluated
+ * reaches a canvas before any tool statement runs (`world/roadmesh.ts` builds the
+ * shoulder's gravel map, `world/trackmesh.ts` the track's, `render/stickers.ts` the star
+ * and `render/partmesh.ts` the car's relief, and an import list is evaluated in source
+ * order). A tool whose `src/` imports come before this one therefore dies at module scope
+ * with `document is not defined` — which is what `roadside-solid.ts` and
+ * `long-drive-soak.ts` did. The shim installs itself on import so the only rule left is
+ * the order.
+ *
+ * The tree renderer's leaf atlas, which stage 4 deleted, was the one module that painted
+ * at import and could not be made lazy: the trees are assets now, and nothing paints a
+ * tree.
  *
  * Nothing here is part of the game bundle.
  */
@@ -55,7 +59,7 @@ interface ShimCanvasContext {
   restore(): void;
   translate(x: number, y: number): void;
   fillRect(x: number, y: number, width: number, height: number): void;
-  // The leaf atlas (render/leafpaint.ts), which props/trees.ts paints at import.
+  // A canvas the asset painters use at import time.
   rect(x: number, y: number, width: number, height: number): void;
   clip(): void;
   closePath(): void;

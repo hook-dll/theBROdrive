@@ -165,6 +165,16 @@ provider, id, exact URL and the outputs they became.
   crown's radius at that height, so a whorl branch is bright at its tip and dark
   where it leaves the trunk, and a spruce — which carries its crown to the ground —
   has no bright trunk through its needles.
+* **Winter deciduous is the same tree with the leaves off.** `is_bare()` drops the
+  leaf quads for a deciduous species in winter, builds the wood to its last order
+  untrimmed and fattened (`WINTER_TWIGS`: a limb keeps its size, the last order is
+  drawn 3.4x, because a 5 mm twiglet is a third of a pixel at 64 px/m and at its true
+  width a bare crown is an invisible tracery — 0.018 cell alpha against the
+  reference's 0.102), and renders the pass through the species' bark
+  material. A grey-green
+  grade over the summer geometry was the first attempt and it reads as a leafy tree
+  at any distance; the leaves have to be *absent* — the twigs are what a bare crown
+  is, and a few thousand sub-pixel twiglets are the soft brown haze one has.
 * **Sprites come from full-detail geometry, never from the game model.** A tree
   sprite is a render of the *grown* tree — trunk, four branch orders, and every
   leaf as its own quad — not a photograph of the ~170-vertex model the game swaps

@@ -1,0 +1,1460 @@
+/* ------------------------------------------------------------------ *
+ *  the BRO drive — menus, settings and screens, as paperwork          *
+ *                                                                     *
+ *  A driver's documents, laid on the bonnet over the road: the        *
+ *  waybill you fill in before a trip, the service book you write in   *
+ *  at every stop, a page of the atlas. Paper with ink on it.          *
+ *                                                                     *
+ *  The rules that keep it coherent:                                   *
+ *  - A surface is PAPER: two tints, grain, one cut corner, a hairline  *
+ *    inside it. Nothing is glass, frosted or blurred.                 *
+ *  - Text is the typewriter: printed labels are small, uppercase,      *
+ *    bold and tracked; values are the same face, quiet. Prose is the   *
+ *    human voice and appears once per screen at most.                 *
+ *  - A field is a printed label, a DOTTED LEADER and a value. A choice *
+ *    is a word on a rule, and the chosen one is CIRCLED in pencil.     *
+ *  - A checkbox is a box with a cross in it, and it takes a moment to  *
+ *    draw.                                                            *
+ *  - ONE action per screen is stamped: red ink, slightly crooked, and  *
+ *    it presses down when you hit it.                                 *
+ *  - Rules, not borders: hairlines, dotted leaders, one heavy rule     *
+ *    under a heading. Corners are cut or square, never round.          *
+ *  - The ground is the world, ruled like a map, and it is never        *
+ *    covered by a sheet that does not need to be read.                 *
+ * ------------------------------------------------------------------ */
+
+.ui-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  color: var(--ink);
+  font-family: var(--font-display);
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* ---------------------------------------------------------------- ground */
+
+/* The world, drifting, at the size of the window: the desk the paperwork lies on. */
+.ui-backdrop {
+  position: absolute;
+  inset: -6%;
+  z-index: -2;
+  background-position: center 46%;
+  background-size: cover;
+  filter: saturate(0.86) brightness(0.7);
+  animation: ui-drift 96s ease-in-out infinite alternate;
+}
+
+@keyframes ui-drift {
+  from {
+    transform: scale(1.04) translate3d(-1.2%, -0.8%, 0);
+  }
+  to {
+    transform: scale(1.12) translate3d(1.2%, 1%, 0);
+  }
+}
+
+/* The map grid: a fine rule every 24 pixels over a vignette, the way an atlas page
+   repeats its kilometre grid through everything printed on it. */
+.ui-veil {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 24px),
+    radial-gradient(125% 90% at 50% 40%, rgba(8, 7, 5, 0.12), rgba(6, 5, 3, 0.86));
+}
+
+/* ---------------------------------------------------------------- screens */
+
+.ui-screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6) calc(var(--strip-width) + var(--space-6)) var(--space-5) var(--space-7);
+  animation: ui-carriage var(--t-carriage) var(--ease-draw) both;
+}
+
+/* A carriage return, not a fade: the page arrives from the side, the way a platen
+   throws the next sheet into place. */
+@keyframes ui-carriage {
+  from {
+    opacity: 0;
+    transform: translate3d(-1.1rem, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ui-screen-title {
+  align-items: flex-start;
+  padding-bottom: var(--space-8);
+  /* From the top, not centred: with the first-run card up the column is taller than a
+     900-pixel window, and a centred column pushes its own last field off the bottom. */
+  justify-content: flex-start;
+  gap: var(--space-5);
+  overflow-y: auto;
+}
+
+/* ---------------------------------------------------------------- the strip */
+
+/* The strip down the right edge of every screen: the form's own identification, printed
+   on the margin the way a tear-off strip carries the serial number. */
+.ui-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--strip-width);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper-2);
+  border-left: var(--rule-hair);
+  color: var(--ink-70);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.35);
+}
+
+/* ---------------------------------------------------------------- sheets */
+
+/* A sheet is paper: grain, one cut corner, a hairline inside the edge, and a shadow
+   because it is lying on something. */
+.ui-sheet {
+  position: relative;
+  box-sizing: border-box;
+  width: min(94vw, 40rem);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(rgba(36, 30, 21, 0.055) 0.5px, transparent 0.7px),
+    repeating-linear-gradient(0deg, rgba(36, 30, 21, 0.03) 0 1px, transparent 1px 4px),
+    linear-gradient(158deg, rgba(255, 255, 255, 0.4), rgba(36, 30, 21, 0.07));
+  background-size: 4px 4px, 100% 4px, 100% 100%;
+  box-shadow:
+    inset 0 0 0 1px var(--ink-25),
+    var(--shadow-sheet);
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
+}
+
+/* The carbon copy: the block you keep, one tint darker and with no cut corner. */
+.ui-sheet.is-copy {
+  background-color: var(--paper-2);
+  clip-path: none;
+}
+
+.ui-sheet-first {
+  width: min(94vw, 38rem);
+}
+
+.ui-sheet-title {
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--rule-heavy);
+  font-size: var(--text-head);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+}
+
+.ui-sheet-lead {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-body);
+  font-size: var(--text-prose);
+  font-weight: var(--weight-prose);
+  line-height: 1.5;
+  color: var(--ink-70);
+}
+
+.ui-sheet-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
+  border-top: var(--rule-hair);
+}
+
+/* ---------------------------------------------------------------- the plate */
+
+/* The wordmark, as a marking stencilled onto the sheet and stamped: heavy typewriter
+   capitals, tracked out, over a form code and a heavy rule. */
+.ui-plate {
+  margin: 0;
+  padding: var(--space-2) 0 var(--space-3);
+  border-bottom: var(--rule-heavy);
+  font-size: var(--text-plate);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-plate);
+  text-transform: uppercase;
+  /* Room for the stencil's own weight: at 1.05 the plate's top edge clipped the capitals,
+     which reads as a broken font rather than as a tight heading. */
+  line-height: 1.25;
+  color: var(--ink);
+  /* The edge of a stencil: a faint dark halo rather than a glow, which is what ink
+     does where the paper drinks it. */
+  text-shadow: 0.5px 0.5px 0 rgba(36, 30, 21, 0.18);
+}
+
+.ui-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  max-width: var(--page-width);
+}
+
+/* The line above a plate or a heading: the form's own number and the date it was issued. */
+.ui-code {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+.ui-tagline {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-body);
+  font-size: var(--text-prose);
+  font-weight: var(--weight-prose);
+  letter-spacing: 0.02em;
+  color: var(--ink-70);
+}
+
+/* ---------------------------------------------------------------- actions */
+
+/* An action is a printed word on a rule, not a bubble. The stamp is the one exception,
+   and there is at most one per screen. */
+.ui-acts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.ui-act {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-height: 1.9rem;
+  padding: 0.25rem 0;
+  border: none;
+  border-bottom: 1px dashed var(--ink-25);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  font-weight: var(--weight-value);
+  letter-spacing: var(--track-value);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-press) var(--ease-press), color var(--t-press) var(--ease-press);
+}
+
+.ui-act:hover:not(:disabled) {
+  border-bottom-color: var(--ink);
+  border-bottom-style: solid;
+}
+
+.ui-act:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.ui-act:active:not(:disabled) {
+  transform: translate3d(0, 1px, 0);
+}
+
+.ui-act:disabled {
+  color: var(--ink-25);
+  border-bottom-color: var(--ink-12);
+  pointer-events: none;
+}
+
+.ui-act.is-plain {
+  color: var(--ink-70);
+  border-bottom-style: dotted;
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+}
+
+.ui-act.is-plain:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* THE STAMP. Two red rules and crooked type, the way a rubber stamp lands: never quite
+   level, and pressed rather than printed. */
+.ui-act.is-stamp {
+  padding: var(--space-2) var(--space-4);
+  border: 2px solid var(--stamp);
+  border-bottom-width: 3px;
+  color: var(--stamp);
+  font-size: var(--text-head);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-stamp);
+  text-transform: uppercase;
+  transform: rotate(-1.2deg);
+  box-shadow: inset 0 0 0 1px rgba(156, 43, 31, 0.25);
+  background-image:
+    repeating-linear-gradient(58deg, rgba(156, 43, 31, 0.07) 0 2px, transparent 2px 5px),
+    repeating-linear-gradient(-46deg, rgba(156, 43, 31, 0.05) 0 1px, transparent 1px 4px);
+  transition: transform var(--t-press) var(--ease-press), background-color var(--t-press) linear;
+}
+
+.ui-act.is-stamp:hover:not(:disabled) {
+  background-color: var(--stamp-pale);
+}
+
+.ui-act.is-stamp:active:not(:disabled) {
+  transform: rotate(-1.2deg) scale(0.97) translate3d(0, 1px, 0);
+}
+
+.ui-act.is-stamp.is-large {
+  font-size: 1.35rem;
+  padding: var(--space-3) var(--space-6);
+}
+
+.ui-act.is-void {
+  color: var(--ink-45);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.ui-act.is-void:hover:not(:disabled) {
+  color: var(--stamp-deep);
+}
+
+/* ---------------------------------------------------------------- fields */
+
+/* A field is a printed label, a dotted leader and whatever has been filled in — the
+   shape a form uses to take you from the question to the answer across the page. */
+.ui-field {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-height: 2.2rem;
+  padding: var(--space-1) 0;
+  border-bottom: var(--rule-dot);
+}
+
+.ui-field:last-child {
+  border-bottom: none;
+}
+
+.ui-field-label {
+  display: flex;
+  align-items: baseline;
+  flex: 0 1 auto;
+  max-width: 45%;
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The leader: the run of dots that carries the eye from the label to the value. */
+.ui-field-label::after {
+  content: '';
+  flex: 1 0 var(--space-4);
+  min-width: var(--space-4);
+  margin: 0 var(--space-3) 0.15em;
+  border-bottom: var(--rule-dot);
+}
+
+.ui-field-control {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ui-field-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* A field with state of its own puts it on the line below, indented to the label's
+   column, the way a form adds a remark under a question. */
+.ui-field.has-note {
+  flex-wrap: wrap;
+}
+
+.ui-field.has-note .ui-field-note {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+  padding-top: var(--space-1);
+}
+
+.ui-field.has-note .ui-act.is-plain {
+  border-bottom-style: solid;
+}
+
+.ui-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+
+/* A filled-in value: the typewriter, underlined because it was written on a rule. */
+.ui-value {
+  min-width: 0;
+  padding: 0 var(--space-1);
+  border-bottom: 1px solid var(--ink-45);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  font-weight: var(--weight-value);
+  letter-spacing: var(--track-value);
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ui-chip {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-45);
+}
+
+/* ---------------------------------------------------------------- input */
+
+.ui-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 1.9rem;
+  padding: 0 var(--space-2);
+  border: none;
+  border-bottom: 1px solid var(--ink-45);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  letter-spacing: var(--track-value);
+  -webkit-user-select: text;
+  user-select: text;
+  transition: border-color var(--t-press) linear;
+}
+
+.ui-input::placeholder {
+  color: var(--ink-25);
+}
+
+.ui-input:focus {
+  outline: none;
+  border-bottom: 2px solid var(--ink);
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ---------------------------------------------------------------- choices */
+
+/* A choice is a word sitting on a rule; the one that stands is CIRCLED in pencil. The
+   circle is deliberately not a circle — two radii and a degree of rotation make it read
+   as a hand, which is the whole point of the marking. */
+.ui-choice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.ui-choice-opt {
+  appearance: none;
+  position: relative;
+  padding: 0 var(--space-2) 0.15rem;
+  border: none;
+  border-bottom: 1px solid var(--ink-25);
+  background: none;
+  color: var(--ink-45);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  font-weight: var(--weight-value);
+  letter-spacing: var(--track-value);
+  cursor: pointer;
+  transition: color var(--t-press) linear, border-color var(--t-press) linear;
+}
+
+.ui-choice-opt:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink-45);
+}
+
+.ui-choice-opt.is-selected {
+  color: var(--ink);
+  font-weight: var(--weight-print);
+  border-bottom-color: transparent;
+}
+
+.ui-choice-opt.is-selected::after {
+  content: '';
+  position: absolute;
+  inset: -0.25rem -0.5rem -0.3rem -0.5rem;
+  border: 1px solid var(--ink-70);
+  border-radius: 62% 38% 55% 45% / 48% 58% 42% 52%;
+  transform: rotate(-1.5deg);
+  pointer-events: none;
+}
+
+.ui-choice-opt:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 4px;
+}
+
+/* ---------------------------------------------------------------- checkbox */
+
+/* A box with a cross drawn in it. The cross is drawn rather than typed, in two strokes,
+   which is what lets it arrive as a mark rather than appear as a character. */
+.ui-check {
+  appearance: none;
+  position: relative;
+  width: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+  border: 1px solid var(--ink-70);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+}
+
+.ui-check::before,
+.ui-check::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: calc(50% - 0.5px);
+  height: 1.5px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--t-draw) var(--ease-draw);
+}
+
+.ui-check::before {
+  rotate: 42deg;
+}
+
+.ui-check::after {
+  rotate: -45deg;
+  transition-delay: 0.06s;
+}
+
+.ui-check.is-on::before,
+.ui-check.is-on::after {
+  transform: scaleX(1);
+}
+
+.ui-check:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* The state word, in the margin of the checkbox field. */
+.ui-check-word {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+/* ---------------------------------------------------------------- pager */
+
+/* A value with a long list behind it: the arrows walk the list and the current entry
+   sits underlined between them. */
+.ui-pager {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.ui-pager .ui-value {
+  min-width: 7rem;
+  text-align: center;
+}
+
+.ui-arrow {
+  appearance: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--ink-45);
+  border-radius: 0;
+  background: none;
+  color: var(--ink-70);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--t-press) linear, transform var(--t-press) var(--ease-press);
+}
+
+.ui-arrow:hover {
+  color: var(--ink);
+  transform: translate3d(0, -1px, 0);
+}
+
+.ui-arrow:active {
+  transform: translate3d(0, 1px, 0);
+}
+
+.ui-arrow:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- ruler */
+
+/* A slider is a RULER: a rule with graduations, and a marker that slides along it. */
+.ui-slider {
+  appearance: none;
+  flex: 1;
+  min-width: 8rem;
+  height: 1.6rem;
+  background:
+    repeating-linear-gradient(
+      to right,
+      var(--ink-25) 0 1px,
+      transparent 1px 0.5rem
+    )
+    bottom left / 100% 0.42rem no-repeat;
+  cursor: pointer;
+}
+
+.ui-slider::-webkit-slider-runnable-track {
+  height: 0.42rem;
+  border-bottom: 1px solid var(--ink-45);
+  border-radius: 0;
+  background: linear-gradient(
+    to right,
+    var(--ink-45) 0 var(--fill),
+    transparent var(--fill) 100%
+  );
+}
+
+.ui-slider::-moz-range-track {
+  height: 0.42rem;
+  border-bottom: 1px solid var(--ink-45);
+  border-radius: 0;
+  background: linear-gradient(
+    to right,
+    var(--ink-45) 0 var(--fill),
+    transparent var(--fill) 100%
+  );
+}
+
+.ui-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.15rem;
+  height: 1.1rem;
+  margin-top: -0.75rem;
+  border: none;
+  border-radius: 0;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--paper-70);
+}
+
+.ui-slider::-moz-range-thumb {
+  width: 0.15rem;
+  height: 1.1rem;
+  border: none;
+  border-radius: 0;
+  background: var(--ink);
+}
+
+.ui-slider:focus-visible {
+  outline: none;
+}
+
+.ui-slider-value {
+  min-width: 3.6rem;
+  text-align: right;
+  border-bottom: 1px solid var(--ink-45);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  letter-spacing: var(--track-value);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- sections */
+
+.ui-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--rule-heavy);
+}
+
+.ui-head-title {
+  font-size: var(--text-head);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- rail */
+
+/* The form's sections, down the left margin and numbered, the way a document lists its
+   own parts. The one being read carries a heavy rule in the margin. */
+.ui-screen-page {
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.ui-page-body {
+  display: flex;
+  gap: var(--space-5);
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* The index is a card of its own, not loose type floating over the road: over a bright
+   field, bone-on-photograph is unreadable, and a form's index is printed on paper like
+   everything else in it. */
+.ui-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 0 0 11.5rem;
+  align-self: flex-start;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-4);
+  background-color: var(--paper-2);
+  background-image:
+    radial-gradient(rgba(36, 30, 21, 0.05) 0.5px, transparent 0.7px),
+    linear-gradient(158deg, rgba(255, 255, 255, 0.35), rgba(36, 30, 21, 0.06));
+  background-size: 4px 4px, 100% 100%;
+  box-shadow:
+    inset 0 0 0 1px var(--ink-25),
+    var(--shadow-sheet);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%);
+}
+
+.ui-rail-title {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: var(--rule-hair);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-45);
+}
+
+.ui-rail-btn {
+  appearance: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-70);
+  font-family: var(--font-display);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--t-press) linear, border-color var(--t-press) linear;
+}
+
+.ui-rail-btn:hover {
+  color: var(--ink);
+}
+
+.ui-rail-btn.is-selected {
+  border-left-color: var(--ink);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.ui-rail-btn:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ui-rail-num {
+  color: var(--ink-25);
+  font-weight: var(--weight-value);
+}
+
+.ui-rail-btn.is-selected .ui-rail-num {
+  color: var(--ink-45);
+}
+
+.ui-desk {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--bone-25) transparent;
+}
+
+.ui-desk::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ui-desk::-webkit-scrollbar-thumb {
+  background: var(--bone-25);
+}
+
+.ui-bar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--page-width);
+}
+
+.ui-bar-title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-head);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--bone);
+}
+
+.ui-bar-tools {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.ui-bar .ui-act,
+.ui-bar .ui-act.is-plain {
+  color: var(--bone-70, rgba(239, 230, 209, 0.7));
+  border-bottom-color: var(--bone-25);
+}
+
+.ui-bar .ui-act:hover {
+  color: var(--bone);
+  border-bottom-color: var(--bone-50);
+}
+
+/* ---------------------------------------------------------------- hints */
+
+/* The one line of prose on a screen: written by a person, under the form. */
+.ui-hint {
+  width: min(94vw, var(--page-width));
+  min-height: 2.4em;
+  font-family: var(--font-body);
+  font-size: var(--text-prose);
+  font-weight: var(--weight-prose);
+  line-height: 1.5;
+  color: var(--bone-60);
+  transition: color var(--t-press) linear;
+}
+
+.ui-hint.is-alarm {
+  color: var(--rust);
+}
+
+.ui-note {
+  font-family: var(--font-body);
+  font-size: var(--text-prose);
+  font-weight: var(--weight-prose);
+  color: var(--ink-70);
+}
+
+/* ---------------------------------------------------------------- lists */
+
+.ui-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ui-list-group {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-45);
+  border-bottom: 1px solid var(--ink-12);
+}
+
+.ui-list-row {
+  appearance: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-1) 0;
+  border: none;
+  border-bottom: var(--rule-dot);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-press) linear;
+}
+
+.ui-list-row:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ui-list-row.is-selected {
+  font-weight: var(--weight-print);
+}
+
+.ui-list-row.is-selected::before {
+  content: '\2023';
+  margin-right: var(--space-1);
+}
+
+.ui-list-row:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ui-list-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-list-row .ui-list-label::after {
+  content: '';
+  flex: 1;
+}
+
+.ui-list-note {
+  margin-left: auto;
+  color: var(--ink-45);
+  font-size: var(--text-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ui-list-badge {
+  padding: 0 0.3rem;
+  border: 1px solid var(--ink-70);
+  color: var(--ink-70);
+  font-size: var(--text-print);
+  letter-spacing: var(--track-print);
+}
+
+/* ---------------------------------------------------------------- saves */
+
+.ui-save {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--rule-dot);
+}
+
+.ui-save-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.ui-save-name {
+  font-size: var(--text-value);
+  font-weight: var(--weight-value);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-save-meta {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+.ui-save-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* ---------------------------------------------------------------- figures */
+
+.ui-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  padding: var(--space-3) 0 var(--space-4);
+  border-bottom: var(--rule-hair);
+}
+
+.ui-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 6rem;
+}
+
+.ui-stat-value {
+  font-size: var(--text-number);
+  font-weight: var(--weight-print);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.ui-stat-unit {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+.ui-stat-label {
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+/* ---------------------------------------------------------------- keys */
+
+.ui-keys {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ui-key-row {
+  appearance: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-1) 0;
+  border: none;
+  border-bottom: var(--rule-dot);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--text-value);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-press) linear;
+}
+
+.ui-key-row:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ui-key-row.is-capturing {
+  background: var(--stamp-pale);
+}
+
+.ui-key-row:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ui-key-row-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-key-row-keys {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* A keycap: a typewriter key, square, with the stem drawn under it. */
+.ui-keycap {
+  display: inline-block;
+  min-width: 1.6rem;
+  padding: 0.05rem 0.3rem 0.15rem;
+  border: 1px solid var(--ink-45);
+  border-bottom-width: 2px;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.35);
+  font-family: var(--font-display);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.ui-keycap.is-waiting {
+  border-style: dashed;
+  color: var(--stamp);
+  border-color: var(--stamp);
+  text-transform: uppercase;
+  letter-spacing: var(--track-print);
+}
+
+/* ---------------------------------------------------------------- fold */
+
+.ui-fold {
+  width: 100%;
+  max-width: var(--page-width);
+}
+
+.ui-fold-head {
+  appearance: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) 0;
+  border: none;
+  border-bottom: 1px dashed var(--bone-25);
+  border-radius: 0;
+  background: none;
+  color: var(--bone-50);
+  font-family: var(--font-display);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--t-press) linear;
+}
+
+.ui-fold-head:hover {
+  color: var(--bone);
+}
+
+.ui-fold-head:focus-visible {
+  outline: 1px solid var(--bone-50);
+  outline-offset: 2px;
+}
+
+.ui-fold-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding-top: var(--space-2);
+}
+
+.ui-fold-body .ui-act {
+  color: var(--bone-60);
+  border-bottom-color: var(--bone-12);
+}
+
+.ui-fold-body .ui-act:hover {
+  color: var(--bone);
+  border-bottom-color: var(--bone-50);
+}
+
+/* ---------------------------------------------------------------- pause */
+
+/* The pause is a waybill laid over the frozen frame: the paperwork you sign at a stop. */
+.ui-screen-pause {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.ui-sheet.is-pause {
+  width: min(94vw, 26rem);
+}
+
+.ui-pause-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-head);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--rule-heavy);
+}
+
+.ui-pause-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.ui-pause-seed {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: var(--rule-hair);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-45);
+}
+
+/* ---------------------------------------------------------------- perf */
+
+.ui-perf {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--ink-25);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: var(--text-print);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---------------------------------------------------------------- meta */
+
+/* The small print in the corners: what this document is and what it cost. */
+.ui-meta {
+  position: absolute;
+  bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--bone-25);
+  pointer-events: none;
+}
+
+.ui-meta-left {
+  left: var(--space-6);
+  align-items: flex-start;
+}
+
+.ui-meta-right {
+  right: calc(var(--strip-width) + var(--space-4));
+  align-items: flex-end;
+}
+
+.ui-meta strong {
+  font-weight: var(--weight-print);
+  color: var(--bone-50);
+}
+
+/* The automation contract: the drive button must be findable by a headless tool that looks
+   for a button reading "NEW DRIVE" on the first screen, whatever the language is saying.
+   Off screen rather than display:none, so it stays in the layout and the accessibility tree. */
+.ui-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- hiding the HUD */
+
+/* A document owns the screen. The cluster and the prompts go rather than fading: paper
+   does not fade in, and a form lying on the desk hides what is under it. */
+#ui.is-menu-open > :not(.ui-layer):not(.hud-damage-vignette):not(.hud-death-fade) {
+  opacity: 0;
+  transition: opacity var(--t-carriage) linear;
+}
+
+
+/* ---------------------------------------------------------------- the folded waybill */
+
+/* A folded sheet is what the menu itself is printed on: the actions are a list of
+   undertakings, and undertakings are written on paper. Loose type over the sky is not a
+   form, and it is not readable either. */
+.ui-sheet-fold {
+  width: min(94vw, 30rem);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+.ui-sheet-fold .ui-acts {
+  width: 100%;
+  gap: var(--space-3);
+}
+
+.ui-sheet-fold .ui-act {
+  width: 100%;
+  font-size: var(--text-value);
+}
+
+.ui-sheet-fold .ui-hint,
+.ui-sheet .ui-hint,
+.ui-desk > .ui-hint {
+  width: 100%;
+  max-width: 100%;
+  color: var(--ink-70);
+  overflow-wrap: anywhere;
+}
+
+/* The seed, as its own full-width row of the form: the label above it, the field across
+   the rest of the line, and the die beside it. */
+.ui-quickstart {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 100%;
+}
+
+.ui-quickstart .ui-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ui-quickstart-label {
+  flex: 0 0 auto;
+  font-size: var(--text-print);
+  font-weight: var(--weight-print);
+  letter-spacing: var(--track-print);
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+/* ---------------------------------------------------------------- the sheet a page is */
+
+/* A page — the new-drive form, the list of drives, the logbook, the dev lists — is ONE
+   sheet of paper on the desk, not cards floating on the world: the desk itself is the
+   paper, and the screen's own furniture (the heading, the lists, the fields) is printed
+   on it. The settings screen is the exception and keeps its sheets separate, because its
+   index runs down the margin beside them. */
+.ui-screen-page > .ui-desk {
+  position: relative;
+  box-sizing: border-box;
+  width: min(100%, var(--page-width));
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(rgba(36, 30, 21, 0.055) 0.5px, transparent 0.7px),
+    repeating-linear-gradient(0deg, rgba(36, 30, 21, 0.03) 0 1px, transparent 1px 4px),
+    linear-gradient(158deg, rgba(255, 255, 255, 0.4), rgba(36, 30, 21, 0.07));
+  background-size: 4px 4px, 100% 4px, 100% 100%;
+  box-shadow:
+    inset 0 0 0 1px var(--ink-25),
+    var(--shadow-sheet);
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
+}
+
+.ui-screen-page > .ui-desk > * {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.ui-sheet .ui-hint,
+.ui-desk > .ui-hint {
+  color: var(--ink-70);
+}
+
+.ui-field-note .ui-value,
+.ui-field-note .ui-act {
+  border-bottom-style: solid;
+}
+
+/* ---------------------------------------------------------------- small screens */
+
+@media (max-width: 900px) {
+  .ui-screen {
+    padding: var(--space-4) var(--space-4) var(--space-4);
+  }
+
+  .ui-page-body {
+    flex-direction: column;
+  }
+
+  .ui-rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+    padding-top: 0;
+  }
+
+  .ui-rail-btn {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+
+  .ui-rail-btn.is-selected {
+    border-left-color: transparent;
+    border-bottom-color: var(--bone);
+  }
+
+  .ui-meta {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-backdrop,
+  .ui-screen {
+    animation: none;
+  }
+
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

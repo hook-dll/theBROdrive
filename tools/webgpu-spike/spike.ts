@@ -11,7 +11,7 @@ import { mrt, output, pass, velocity } from 'three/tsl';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 
-import { loadTreeVariants } from '../../src/world/props/trees';
+import { treeLayout, treeModels } from '../../src/render/look/treeassets';
 
 const q = new URLSearchParams(location.search);
 const mode = q.get('r') === 'webgpu' ? 'webgpu' : 'webgl';
@@ -57,9 +57,13 @@ async function main(): Promise<void> {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // The wood: every CELL a tree, kinds in patches, levels by distance from the camera.
-  const variants = await loadTreeVariants();
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+  // The wood: every CELL a tree, species in patches, levels by distance from the camera.
+  // The trees are the game's own assets (stage 4): six species, four variants each, whose
+  // material the bench does not need — it measures the geometry the game draws.
+  const layout = await treeLayout();
+  const models = layout ? await treeModels(layout) : null;
+  const wood = models?.tree ?? [];
+  const material = new THREE.MeshStandardMaterial({ color: 0x9aa86a, roughness: 0.95 });
   type Key = string;
   const buckets = new Map<Key, { geometry: THREE.BufferGeometry; matrices: THREE.Matrix4[]; shadow: boolean; foliage: boolean }>();
   const m = new THREE.Matrix4();
@@ -75,20 +79,19 @@ async function main(): Promise<void> {
       if (d > FAR_M || Math.abs(x) < 7) continue; // a road down the middle
       if (hash(i, j, 3) > 0.93) continue;
       const patch = Math.floor(x / 90) * 7 + Math.floor(z / 90) * 13;
-      const kind = Math.floor(hash(patch, 0, 4) * variants.length + hash(i, j, 5) * 2) % variants.length;
-      const kv = variants[kind]!;
-      const v = Math.floor(hash(i, j, 6) * kv.length);
+      if (wood.length === 0) continue;
+      const species = Math.floor(hash(patch, 0, 4) * wood.length + hash(i, j, 5) * 2) % wood.length;
+      const variants = wood[species]!;
+      if (variants.length === 0) continue;
+      const v = Math.floor(hash(i, j, 6) * variants.length);
       const level = d < NEAR_M ? 0 : d < SHADOW_M ? 1 : 2;
-      const parts = level === 0 ? kv[v]!.near : kv[v]!.far;
       quat.setFromAxisAngle(up, hash(i, j, 7) * 6.28);
       const s = 0.8 + 0.4 * hash(i, j, 8);
-      m.compose(new THREE.Vector3(x, -0.15, z), quat, new THREE.Vector3(s, s, s));
-      parts.forEach((part, p) => {
-        const key = `${kind}:${v}:${level}:${p}`;
-        let b = buckets.get(key);
-        if (!b) buckets.set(key, (b = { geometry: part.geometry, matrices: [], shadow: level < 2, foliage: part.foliage }));
-        b.matrices.push(m.clone());
-      });
+      m.compose(new THREE.Vector3(x, -0.15, z), quat, new THREE.Vector3(s * 1.45, s * 1.45, s * 1.45));
+      const key = `${species}:${v}:${level}`;
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, (b = { geometry: variants[v]!, matrices: [], shadow: level < 2, foliage: false }));
+      b.matrices.push(m.clone());
       trees++;
     }
   }

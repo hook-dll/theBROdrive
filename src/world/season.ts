@@ -143,49 +143,6 @@ export const AUTUMN_GROUND = {
 } as const;
 
 /**
- * AUTUMN LEAVES, per tree kind (world/deserttiledata.ts `TreeKind` order). Two
- * colours a kind: each tree takes its own point between them. `ref` is the summer
- * leaf colour the brightness is measured against (the middle shade of the kind's
- * summer palette, world/props/trees.ts). `late` delays a kind's turn, as a share of
- * the `turn` channel: birch goes first, oak last. The conifers never turn.
- */
-export interface AutumnLeaf {
-  readonly a: Rgb;
-  readonly b: Rgb;
-  readonly ref: Rgb;
-  readonly late: number;
-  /** 0 for a conifer: it stays as it is. */
-  readonly turns: number;
-}
-
-const leaf = (a: number, b: number, ref: number, late: number, turns = 1): AutumnLeaf => ({
-  a: linearHex(a),
-  b: linearHex(b),
-  ref: linearHex(ref),
-  late,
-  turns,
-});
-
-export const AUTUMN_LEAVES: readonly AutumnLeaf[] = [
-  leaf(0xcfa645, 0xc4b25c, 0xa3a962, 0.0), // birch: gold to straw
-  leaf(0x557552, 0x557552, 0x557552, 0, 0), // spruce
-  leaf(0xb39447, 0x96683a, 0x7a8a4f, 0.1), // bush: hazel yellow, willow rust
-  leaf(0xc4a446, 0xa99243, 0x829a52, 0.12), // lime
-  leaf(0x61744a, 0x61744a, 0x61744a, 0, 0), // pine
-  leaf(0xcf8f3c, 0xb0553a, 0x9ba673, 0.05), // aspen: amber to brick
-  leaf(0x9a7a3c, 0x827a45, 0x68803f, 0.3), // oak: ochre, olive brown, and late
-  leaf(0xd08236, 0xb34e33, 0x92a64e, 0.08), // maple: orange to brick red
-  leaf(0x6f8243, 0x7f7f40, 0x5e7644, 0.25), // alder: drops its leaves nearly green
-  leaf(0xb8b274, 0xa9a064, 0xabb18e, 0.2), // willow: yellowing silver
-  leaf(0xc2663a, 0xa44536, 0x8a9e55, 0.02), // rowan: rust to brick
-  leaf(0xb07a3c, 0x9a6634, 0x7d9448, 0.3), // fern: bracken goes rust
-  leaf(0x55684c, 0x55684c, 0x55684c, 0, 0), // juniper
-  leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // stump: moss does not turn
-  leaf(0x6e7a46, 0x6e7a46, 0x6e7a46, 0, 0), // log
-  leaf(0x61744a, 0x61744a, 0x61744a, 0, 0), // field pine
-];
-
-/**
  * A wood's canopy from far off (world/landcover.ts `canopyColour`): its spruce and
  * birch ends in summer, and what the birch end becomes. The birch share of a canopy
  * colour is recovered from its chromaticity, so the blanket needs no extra attribute.
@@ -203,13 +160,6 @@ export const CANOPY = {
  * lit side reads white and the shade blue, as in Shishkin's "Winter".
  */
 export const SNOW = linearHex(0xcfd6df);
-/**
- * A leafless crown: its twigs, grey-brown. A bare tree keeps this much of its crown's
- * cards as twig mass (\`BARE_TWIGS\`): from any distance a winter birch is a fine grey
- * haze round its limbs, not a dead fork.
- */
-export const BARE_TWIG = linearHex(0x6f655f);
-export const BARE_TWIGS = 0.35;
 /**
  * Late autumn's ground, when the leaves are down: the meadow's straw gone dull brown,
  * as it lies under the snow and comes out of it in spring.

@@ -83,6 +83,10 @@ body.is-cinematic #ui {
   font-family: var(--hud-font);
   color: var(--hud-fg);
   user-select: none;
+  /* Every digit in this interface is read as a number — a gear, an odometer, a clock, a
+     thread temperature — so the slashed zero is on everywhere rather than on the instrument
+     that happened to need it first. */
+  font-variant-numeric: slashed-zero;
 }
 
 .is-hidden {
@@ -93,6 +97,10 @@ body.is-cinematic #ui {
  *  Launch cover                                                      *
  * ------------------------------------------------------------------ */
 
+/* The launch cover is the first thing on screen and the last thing before the road: a
+   graphite field, one stage word and a hairline. No photograph, because the world it is
+   about to show is the one being built behind it — a still from the old renderer would be
+   a promise this build no longer keeps. */
 .launch-loading {
   position: fixed;
   inset: 0;
@@ -101,106 +109,136 @@ body.is-cinematic #ui {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
+  gap: var(--space-5);
   overflow: hidden;
   isolation: isolate;
-  color: var(--hud-fg);
-  font-family: var(--hud-font);
+  background: var(--graphite);
+  color: var(--bone);
+  font-family: var(--font-body);
 }
 
-/* The title form and loading cover share one art-directed still. The oversized
-   pseudo-element gives the blur room to breathe without exposing soft edges. */
-.menu-title-screen::before,
+/* The field it stands on: the same faint ruling as the menus, and a vignette that pulls the
+   eye to the middle where the one word is. */
 .launch-loading::before {
-  content: '';
-  position: absolute;
-  inset: -14px;
-  z-index: -2;
-  background: url('../../optimized_bg.webp') center 48% / cover no-repeat;
-  filter: blur(5px);
-  transform: scale(1.025);
-}
-
-.menu-title-screen::after,
-.launch-loading::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(90% 75% at 50% 43%, rgba(10, 8, 5, 0.18), rgba(4, 3, 2, 0.66)),
-    linear-gradient(rgba(11, 9, 6, 0.18), rgba(11, 9, 6, 0.42));
+    repeating-linear-gradient(
+      to bottom,
+      rgba(239, 230, 209, 0.012) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(120% 90% at 50% 50%, rgba(239, 230, 209, 0.05), rgba(8, 7, 5, 0.9) 70%);
 }
 
-/* A cheap instant stand-in for the trailer's real mesh: black cross-ply tyre,
-   five steel spokes and an off-centre valve so rotation remains readable. */
+/* The trailer's wheel, drawn in hairlines rather than in pixels: a cross-ply tyre read at
+   the width of one bone line, turning slowly enough to be a heartbeat rather than a
+   progress bar. */
 .launch-wheel {
   position: relative;
-  width: 92px;
-  height: 92px;
-  border: 12px solid #17130f;
+  width: 76px;
+  height: 76px;
+  border: 2px solid var(--bone-25);
   border-radius: 50%;
   background:
     repeating-conic-gradient(
       from 3deg,
-      #342c22 0deg 7deg,
-      #17130f 7deg 14deg
+      var(--bone-12) 0deg 6deg,
+      transparent 6deg 14deg
     );
-  box-shadow:
-    inset 0 0 0 2px rgba(236, 223, 194, 0.15),
-    0 8px 22px rgba(0, 0, 0, 0.52);
-  animation: launch-wheel-spin 0.9s linear infinite;
+  animation: launch-wheel-spin 2.6s linear infinite;
 }
 
 .launch-wheel-rim {
   position: absolute;
-  inset: 7px;
-  border: 3px solid #9d927d;
+  inset: 9px;
+  border: 1px solid var(--bone-50);
   border-radius: 50%;
   background:
     repeating-conic-gradient(
       from 8deg,
-      #aaa08a 0deg 9deg,
-      transparent 9deg 63deg,
-      #aaa08a 63deg 72deg
-    ),
-    #302a22;
-  box-shadow: inset 0 0 0 5px #1d1914;
+      var(--bone-25) 0deg 7deg,
+      transparent 7deg 60deg,
+      var(--bone-25) 60deg 67deg
+    );
 }
 
 .launch-wheel-rim::before {
   content: '';
   position: absolute;
-  width: 17px;
-  height: 17px;
+  width: 9px;
+  height: 9px;
   left: 50%;
   top: 50%;
-  border: 3px solid #c0b49a;
+  border: 1px solid var(--bone-60);
   border-radius: 50%;
-  background: #27221b;
   transform: translate(-50%, -50%);
 }
 
 .launch-wheel-rim::after {
   content: '';
   position: absolute;
-  width: 4px;
-  height: 11px;
+  width: 1px;
+  height: 9px;
   left: 50%;
-  top: -8px;
-  border-radius: 1px;
-  background: #d0c3a5;
+  top: -7px;
+  background: var(--bone-50);
 }
 
+/* The stage word: one line, in the display face, tracked out the way a section head is.
+   `warmUpBoot` rewrites this text as the work moves on — building the world, settling the
+   picture — so it is a stage and not a progress claim. */
 .launch-loading-text {
   position: relative;
   z-index: 1;
-  font-family: 'Courier New', ui-monospace, 'DejaVu Sans Mono', monospace;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.24em;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-hair);
+  letter-spacing: var(--track-lg);
   text-transform: uppercase;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  color: var(--bone-90);
+  text-shadow: var(--glow-text);
+}
+
+/* One hairline, with a lit segment travelling along it. An indeterminate bar rather than a
+   percentage: the boot's stages do not know how long they will take, and a bar that lies
+   about that is worse than a bar that admits it. */
+.launch-rule {
+  position: relative;
+  width: min(20rem, 60vw);
+  height: 1px;
+  overflow: hidden;
+  background: var(--bone-12);
+}
+
+.launch-rule span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, var(--bone-00), var(--bone-75), var(--bone-00));
+  animation: launch-rule-sweep 2.4s var(--ease-in-out) infinite;
+}
+
+/* A line of verse, for the launch nobody is watching yet — the same idea slowroads uses to
+   fill the first seven seconds, in our own words and our own place. */
+.launch-poem {
+  position: relative;
+  z-index: 1;
+  max-width: 26rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  line-height: 1.55;
+  letter-spacing: var(--track-sm);
+  text-align: center;
+  color: var(--bone-50);
+}
+
+@keyframes launch-rule-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(320%); }
 }
 
 @keyframes launch-wheel-spin {
@@ -235,12 +273,16 @@ body.is-cinematic #ui {
   top: calc(50% + 16px);
   transform: translateX(-50%);
   text-align: center;
-  font-size: 14px;
-  letter-spacing: 0.04em;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  letter-spacing: var(--track-sm);
+  line-height: 1.4;
   color: var(--hud-fg);
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
-  padding: 7px 14px;
+  background: var(--graphite-50);
+  border: 1px solid var(--bone-12);
+  border-radius: var(--radius-pill);
+  padding: 8px 18px;
+  backdrop-filter: blur(var(--blur-tile));
   pointer-events: none;
 }
 
@@ -286,6 +328,61 @@ body.is-cinematic #ui {
   padding: 6px 10px 0;
   background: var(--hud-panel);
   border: 1px solid var(--hud-border);
+  backdrop-filter: blur(var(--blur-panel));
+}
+
+/* The numeric reading under the dials. The needle is the instrument; these are the two
+   numbers a driver repeats out loud — how fast, and how far this car has been. The speed is
+   the larger because it is the one being watched, and the odometer is dim because nobody
+   reads it twice in a minute. */
+.hud-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 22px;
+  padding: 2px 4px 6px;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--hud-fg);
+}
+
+.hud-readout-speed,
+.hud-readout-odo {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.hud-readout-value {
+  font-weight: var(--weight-hair);
+  line-height: 1;
+}
+
+.hud-readout-speed .hud-readout-value {
+  font-size: 27px;
+  letter-spacing: var(--track-sm);
+  text-shadow: var(--glow-text);
+}
+
+.hud-readout-odo .hud-readout-value {
+  font-size: 13px;
+  color: var(--hud-fg-dim);
+}
+
+.hud-readout-unit {
+  font-size: 9px;
+  font-weight: var(--weight-label);
+  letter-spacing: var(--track-md);
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+}
+
+.hud-readout-label {
+  font-size: 8px;
+  font-weight: var(--weight-hair);
+  letter-spacing: var(--track-md);
+  text-transform: uppercase;
+  color: var(--hud-fg-dim);
+  opacity: 0.75;
 }
 
 .hud-gauge-row {
@@ -489,7 +586,8 @@ body.is-cinematic #ui {
   color: var(--hud-fg);
   background: rgba(31, 29, 25, 0.82);
   border: 1px inset rgba(232, 221, 196, 0.24);
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-weight: var(--weight-strong);
   line-height: 18px;
   text-align: center;
 }
@@ -703,12 +801,14 @@ body.is-cinematic #ui {
 }
 
 .hud-inv-slot {
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
+  background: var(--graphite-50);
+  border: 1px solid var(--bone-12);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(var(--blur-tile));
   color: var(--hud-fg-dim);
   padding: 5px 10px;
-  font-size: 12px;
-  letter-spacing: 0.03em;
+  font-size: var(--text-xs);
+  letter-spacing: var(--track-sm);
 }
 
 .hud-inv-slot.is-selected {
@@ -723,9 +823,10 @@ body.is-cinematic #ui {
   min-width: 11px;
   margin-right: 6px;
   text-align: center;
+  font-family: var(--font-display);
   font-size: 10px;
   opacity: 0.55;
-  border: 1px solid var(--hud-border);
+  border: 1px solid var(--bone-25);
   border-radius: 2px;
   padding: 0 2px;
 }
@@ -766,14 +867,17 @@ body.is-cinematic #ui {
 }
 
 .hud-toast {
-  background: var(--hud-panel);
+  background: var(--graphite-50);
   color: var(--hud-fg);
-  border: 1px solid var(--hud-border);
-  padding: 8px 16px;
-  font-size: 14px;
-  letter-spacing: 0.04em;
+  border: 1px solid var(--bone-12);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(var(--blur-tile));
+  padding: 8px 18px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  letter-spacing: var(--track-sm);
   opacity: 1;
-  transition: opacity 0.3s ease;
+  transition: opacity var(--t-slow) var(--ease-out);
 }
 
 .hud-toast-leaving {
@@ -845,908 +949,6 @@ body.is-cinematic #ui {
 #ui.is-death-sequence > :not(.hud-damage-vignette):not(.hud-death-fade) {
   visibility: hidden !important;
   pointer-events: none !important;
-}
-
-/* ------------------------------------------------------------------ *
- *  Menu (title screen and pause overlay)                             *
- * ------------------------------------------------------------------ */
-
-/* The menu is not the HUD, and it is not a dark-glass panel either.
- *
- * It is the workshop manual for the car you are driving — but printed on CARBON
- * stock, not bone: white paper over a night desert is a lamp in the face, and this
- * game is played in the dark half the time. So the language is a printed document
- * (monospace stencil heads, hairline rules, numbered sections, dotted leaders,
- * stamped keycaps, cut corners, ruler scales) executed in warm bone marks on near
- * black. It shares the HUD's palette exactly, so it belongs to this game, while the
- * document grammar keeps it from looking like every other dark panel.
- *
- * The rules that keep it coherent:
- *  - Structure is monospace, uppercase, widely tracked. Prose is the HUD sans.
- *  - Selection is a STAMP: the mark colour fills the cell and the text knocks out
- *    of it, with a rust rule under. Never a glow, never a tint.
- *  - One heavy frame per sheet; everything inside is a hairline or a dotted rule.
- *  - Nothing is rounded — corners are cut, like a stamped plate.
- *  - Body text is bone on near-black (about 13:1). Nothing readable is dim.
- *
- * Sizes are deliberately generous: this is a driving game played at a desk, the
- * overlay owns the screen while it is up, and there is no reason for a 460 px
- * column with 11 px labels when a 1040 px sheet reads at a glance.
- */
-
-.menu {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background:
-    radial-gradient(120% 90% at 50% 45%, rgba(10, 8, 5, 0.55), rgba(4, 3, 2, 0.88));
-  font-family: var(--hud-font);
-  color: var(--menu-ink);
-  --menu-stock: #191410;
-  --menu-stock-2: #221b14;
-  --menu-ink: #ecdfc2;
-  /* Only ever used for LABELS, never for anything you have to read as a sentence.
-     ~6.5:1 on the stock, so it is quiet without being grey mush. */
-  --menu-ink-dim: #b3a488;
-  --menu-rule: rgba(236, 223, 194, 0.24);
-  --menu-accent: #e2703a;
-  --menu-mono: 'Courier New', ui-monospace, 'DejaVu Sans Mono', monospace;
-}
-
-.menu-title-screen {
-  overflow: hidden;
-  isolation: isolate;
-  background: none;
-}
-
-.menu-panel {
-  position: relative;
-  box-sizing: border-box;
-  background-color: var(--menu-stock);
-  /* Paper tooth, not a dot pattern: bone specks at 4% on a 5 px grid, plus a slow
-     diagonal shading so the sheet is not a flat swatch. */
-  background-image:
-    radial-gradient(rgba(236, 223, 194, 0.05) 0.6px, transparent 0.7px),
-    linear-gradient(168deg, rgba(236, 223, 194, 0.05), rgba(0, 0, 0, 0.22));
-  background-size: 5px 5px, 100% 100%;
-  border: 1px solid rgba(236, 223, 194, 0.55);
-  box-shadow:
-    inset 0 0 0 1px rgba(236, 223, 194, 0.1),
-    0 24px 60px rgba(0, 0, 0, 0.6);
-  clip-path: polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px);
-  padding: 34px 40px 28px;
-  width: 92vw;
-  max-width: 560px;
-  max-height: 92vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-
-/* Sheet number, in the bottom margin. Decoration with a job: it says "page". */
-.menu-panel::after {
-  content: 'FORM 12-A';
-  position: absolute;
-  left: 40px;
-  bottom: 8px;
-  font-family: var(--menu-mono);
-  font-size: 10px;
-  letter-spacing: 0.28em;
-  color: rgba(236, 223, 194, 0.28);
-  pointer-events: none;
-}
-
-.menu-title {
-  font-family: var(--menu-mono);
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  text-align: left;
-  color: var(--menu-ink);
-  margin: 0;
-  padding-bottom: 12px;
-  border-bottom: 3px double var(--menu-ink);
-}
-
-.menu-field {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.menu-label {
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--menu-ink-dim);
-}
-
-/* Form field, not a text box: a ruled line you type on. */
-.menu-input {
-  pointer-events: auto;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--menu-ink);
-  color: var(--menu-ink);
-  font-family: var(--menu-mono);
-  font-size: 18px;
-  letter-spacing: 0.08em;
-  padding: 9px 4px;
-  outline: none;
-}
-
-.menu-input::placeholder {
-  color: rgba(236, 223, 194, 0.35);
-  font-style: italic;
-}
-
-.menu-input:focus {
-  border-bottom-width: 2px;
-  border-bottom-color: var(--menu-accent);
-  background: rgba(236, 223, 194, 0.06);
-}
-
-/* Stamped plate: outline at rest, filled when it is the thing you want. */
-.menu-button {
-  pointer-events: auto;
-  background: transparent;
-  border: 1px solid var(--menu-ink);
-  color: var(--menu-ink);
-  font-family: var(--menu-mono);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  padding: 13px 18px;
-  cursor: pointer;
-  transition: background-color 90ms linear, color 90ms linear;
-}
-
-.menu-button:hover,
-.menu-button:focus {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-  outline: none;
-}
-
-.menu-button:focus-visible {
-  outline: 1px solid var(--menu-accent);
-  outline-offset: 3px;
-}
-
-.menu-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.menu-button:disabled:hover {
-  background: transparent;
-  color: var(--menu-ink);
-}
-
-.menu-button.menu-primary {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-  font-size: 15px;
-  padding: 15px 18px;
-}
-
-.menu-button.menu-primary:hover,
-.menu-button.menu-primary:focus {
-  background: var(--menu-accent);
-  border-color: var(--menu-accent);
-  color: var(--menu-stock);
-}
-
-.menu-button.is-selected {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-}
-
-.menu-saves,
-.menu-code {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.menu-heading {
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--menu-ink-dim);
-  border-bottom: 1px solid var(--menu-rule);
-  padding-bottom: 6px;
-}
-
-.menu-saves-list {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Contents-page row: name, then figures, on a dotted leader. */
-.menu-save {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px dotted var(--menu-rule);
-}
-
-.menu-save-name {
-  font-family: var(--menu-mono);
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: 0.05em;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.menu-save-meta {
-  flex: 1;
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  color: var(--menu-ink-dim);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.menu-save-load,
-.menu-save-delete {
-  padding: 6px 10px;
-  font-size: 11px;
-}
-
-.menu-save-delete {
-  color: var(--menu-accent);
-  border-color: var(--menu-accent);
-}
-
-.menu-save-delete:hover,
-.menu-save-delete:focus {
-  background: var(--menu-accent);
-  color: var(--menu-stock);
-}
-
-.menu-save-empty {
-  font-size: 14px;
-  color: var(--menu-ink-dim);
-  font-style: italic;
-  padding: 6px 0;
-}
-
-.menu-code-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-.menu-code-row .menu-input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Rejected, in the accent, in the margin voice. */
-.menu-error {
-  font-family: var(--menu-mono);
-  font-size: 13px;
-  letter-spacing: 0.05em;
-  color: var(--menu-accent);
-  border-left: 2px solid var(--menu-accent);
-  padding-left: 10px;
-}
-
-.menu-seed-display {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  border-bottom: 1px dotted var(--menu-rule);
-  padding-bottom: 8px;
-}
-
-.menu-seed-label {
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--menu-ink-dim);
-}
-
-.menu-seed-value {
-  flex: 1;
-  font-family: var(--menu-mono);
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  font-variant-numeric: tabular-nums;
-}
-
-.menu-pause-km {
-  font-family: var(--menu-mono);
-  font-size: 13px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--menu-ink-dim);
-  text-align: left;
-}
-
-.menu-pause .menu-panel {
-  max-width: 440px;
-}
-
-/* Sub-screens (spawn vehicle, fluids) need more room than the pause column. */
-.menu-pause .menu-panel.menu-panel-wide {
-  max-width: 680px;
-}
-
-/* Settings fills the available viewport; its active pane scrolls independently. */
-.menu-pause .menu-panel.menu-panel-settings {
-  width: min(1040px, calc(100vw - 24px));
-  height: min(760px, calc(100dvh - 24px));
-  max-width: 1040px;
-  max-height: calc(100dvh - 24px);
-  overflow: hidden;
-  padding: clamp(18px, 4vh, 34px) clamp(18px, 4vw, 40px) 28px;
-  gap: clamp(12px, 2.5vh, 22px);
-}
-
-/* ---------------------------------------------------------------------------
-   Settings: numbered rail + section pane + one hint line.
-   --------------------------------------------------------------------------- */
-
-.menu-settings-head {
-  display: flex;
-  align-items: stretch;
-  gap: 18px;
-  border-bottom: 3px double var(--menu-ink);
-  padding-bottom: 12px;
-}
-
-.menu-settings-head .menu-title {
-  flex: 1;
-  border-bottom: none;
-  padding-bottom: 0;
-  align-self: flex-end;
-}
-
-.menu-button.menu-back {
-  flex: 0 0 auto;
-  padding: 9px 16px;
-  font-size: 12px;
-}
-
-.menu-settings {
-  display: grid;
-  grid-template-columns: minmax(160px, 236px) minmax(0, 1fr);
-  gap: clamp(16px, 3vw, 36px);
-  align-items: stretch;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Table of contents, numbered by CSS so the markup carries no numbering. */
-.menu-rail {
-  counter-reset: menu-section;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--menu-ink);
-  padding-right: 22px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.menu-rail-btn {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: transparent;
-  border: none;
-  border-bottom: 1px dotted var(--menu-rule);
-  color: var(--menu-ink-dim);
-  font-family: var(--menu-mono);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  text-align: left;
-  padding: 16px 12px;
-  cursor: pointer;
-}
-
-.menu-rail-btn::before {
-  counter-increment: menu-section;
-  content: counter(menu-section, decimal-leading-zero);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  opacity: 0.6;
-}
-
-.menu-rail-btn:hover,
-.menu-rail-btn:focus-visible {
-  color: var(--menu-ink);
-  background: rgba(236, 223, 194, 0.08);
-  outline: none;
-}
-
-/* The current section is stamped, and carries a rust tab into the pane. */
-.menu-rail-btn.is-selected {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-  box-shadow: inset -4px 0 0 var(--menu-accent);
-}
-
-.menu-rail-btn .menu-icon {
-  width: 20px;
-  height: 20px;
-}
-
-.menu-rail-label {
-  min-width: 0;
-}
-
-/* The development frame readout: monospace and preformatted, because it is a table
-   of numbers that has to line up to be readable, and it is copied by eye.
-
-   `pre-wrap`, NOT `pre`. This is read on a phone in landscape, where a long line runs
-   past the panel and `overflow-x: auto` scrolls it away silently — the frame budget line
-   was written, rendered, and never seen, which is the worst possible outcome for a
-   readout that exists to be read on that exact device. Wrapping keeps the aligned summary
-   table aligned and lets the prose lines reach the eye. */
-.menu-perf {
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  overflow-x: auto;
-  color: var(--menu-text, #e8dcc4);
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid var(--menu-rule);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.menu-pane {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(14px, 3vh, 26px);
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 8px;
-}
-
-/* Label, and whatever belongs on the same line as it: a value, a Reset. */
-.menu-field-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--menu-rule);
-  padding-bottom: 5px;
-}
-
-.menu-field-head .menu-label {
-  flex: 1;
-  min-width: 0;
-}
-
-.menu-icon {
-  flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Figures, in the accent: the one thing on the row that is a measurement. */
-.menu-chip {
-  flex: 0 0 auto;
-  min-width: 68px;
-  text-align: right;
-  font-family: var(--menu-mono);
-  font-size: 17px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.05em;
-  color: var(--menu-accent);
-}
-
-.menu-button.menu-reset {
-  flex: 0 0 auto;
-  padding: 5px 11px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-}
-
-/* Switch bank: one hairline box, hairline dividers, and the live position
-   stamped. No gaps — it reads as one instrument, not three buttons. */
-.menu-seg {
-  display: flex;
-  border: 1px solid var(--menu-ink);
-}
-
-.menu-seg-btn {
-  pointer-events: auto;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 9px;
-  background: transparent;
-  border: none;
-  border-left: 1px solid var(--menu-rule);
-  color: var(--menu-ink-dim);
-  font-family: var(--menu-mono);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 18px 10px 15px;
-  cursor: pointer;
-}
-
-.menu-seg-btn .menu-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.menu-seg-btn:first-child {
-  border-left: none;
-}
-
-.menu-seg-btn:hover,
-.menu-seg-btn:focus-visible {
-  color: var(--menu-ink);
-  background: rgba(236, 223, 194, 0.08);
-  outline: none;
-}
-
-.menu-seg-btn.is-selected {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-  box-shadow: inset 0 -4px 0 var(--menu-accent);
-}
-
-.menu-seg-label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-@media (max-width: 640px) {
-  .menu-pause .menu-panel.menu-panel-settings {
-    width: calc(100vw - 12px);
-    height: calc(100dvh - 12px);
-    max-height: calc(100dvh - 12px);
-    padding: 14px 14px 24px;
-  }
-
-  .menu-settings {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .menu-rail {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    border-right: none;
-    border-bottom: 1px solid var(--menu-ink);
-    padding-right: 0;
-  }
-
-  .menu-rail-btn {
-    flex: 0 0 auto;
-    padding: 10px;
-  }
-}
-
-/* Marginal note: one line, fixed height, hanging off a rule. Prose, so this is
-   the one place that uses the sans — and it is full brightness, not dim. */
-.menu-hint {
-  min-height: 3em;
-  border-top: 1px solid var(--menu-ink);
-  padding-top: 12px;
-}
-
-.menu-note {
-  font-size: 15px;
-  letter-spacing: 0.01em;
-  color: var(--menu-ink);
-  line-height: 1.45;
-}
-
-.menu-note::before {
-  content: '— ';
-  color: var(--menu-ink-dim);
-}
-
-.menu-note.is-alarm {
-  color: var(--menu-accent);
-  font-weight: 700;
-}
-
-/* Measuring scale, not a slider: ticks along a ruled baseline, ink pointer. */
-.menu-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 30px;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-}
-
-.menu-slider::-webkit-slider-runnable-track {
-  height: 30px;
-  background:
-    repeating-linear-gradient(90deg, var(--menu-rule) 0 1px, transparent 1px 12px)
-      left bottom / 100% 11px no-repeat,
-    linear-gradient(var(--menu-ink), var(--menu-ink)) left bottom / 100% 1px no-repeat;
-}
-
-.menu-slider::-moz-range-track {
-  height: 30px;
-  background:
-    repeating-linear-gradient(90deg, var(--menu-rule) 0 1px, transparent 1px 12px)
-      left bottom / 100% 11px no-repeat,
-    linear-gradient(var(--menu-ink), var(--menu-ink)) left bottom / 100% 1px no-repeat;
-}
-
-.menu-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 27px;
-  margin-top: 1px;
-  border: none;
-  background: var(--menu-ink);
-  /* Downward pointer: it indicates a place on the scale, not a knob riding it. */
-  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
-}
-
-.menu-slider::-moz-range-thumb {
-  width: 14px;
-  height: 27px;
-  border: none;
-  border-radius: 0;
-  background: var(--menu-ink);
-  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
-}
-
-.menu-slider:hover::-webkit-slider-thumb,
-.menu-slider:focus-visible::-webkit-slider-thumb {
-  background: var(--menu-accent);
-}
-
-.menu-slider:hover::-moz-range-thumb,
-.menu-slider:focus-visible::-moz-range-thumb {
-  background: var(--menu-accent);
-}
-
-/* Key bindings: a two-column index, dotted leaders, stamped caps. */
-.menu-bindings {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 32px;
-  max-height: 336px;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-
-.menu-binding {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-bottom: 1px dotted var(--menu-rule);
-  color: var(--menu-ink);
-  padding: 9px 4px;
-  font-family: inherit;
-  font-size: 14px;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-}
-
-.menu-binding:hover,
-.menu-binding:focus-visible {
-  background: rgba(236, 223, 194, 0.08);
-  outline: none;
-}
-
-.menu-binding.is-capturing {
-  background: rgba(226, 112, 58, 0.16);
-  box-shadow: inset 3px 0 0 var(--menu-accent);
-}
-
-.menu-binding-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.menu-binding-keys {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-}
-
-/* Stamped cap: bone outline, heavier bottom rule, raised stock inside. */
-.menu-keycap {
-  display: inline-block;
-  min-width: 26px;
-  padding: 3px 7px;
-  border: 1px solid var(--menu-ink);
-  border-bottom-width: 3px;
-  background: var(--menu-stock-2);
-  color: var(--menu-ink);
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-.menu-keycap.is-waiting {
-  color: var(--menu-accent);
-  border-color: var(--menu-accent);
-  background: transparent;
-  font-style: italic;
-  font-weight: 400;
-  text-transform: none;
-}
-
-/* Legacy toggle row, still used by the dev spawn screens. */
-.menu-toggle-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.menu-toggle-row .menu-button {
-  flex: 1;
-  min-width: 96px;
-}
-
-
-/* Spawn vehicle screen: parts-catalogue rows and paint chips. */
-.menu-body-list {
-  display: flex;
-  flex-direction: column;
-  max-height: 300px;
-  overflow-y: auto;
-  border-top: 1px solid var(--menu-rule);
-}
-
-.menu-body-group {
-  padding: 14px 2px 4px;
-  color: var(--menu-ink-dim);
-  font-family: var(--menu-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.menu-body {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-bottom: 1px dotted var(--menu-rule);
-  color: var(--menu-ink);
-  padding: 10px 4px;
-  font-size: 15px;
-  letter-spacing: 0.01em;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.menu-body:hover,
-.menu-body:focus-visible {
-  background: rgba(236, 223, 194, 0.08);
-  outline: none;
-}
-
-.menu-body.is-selected {
-  background: var(--menu-ink);
-  color: var(--menu-stock);
-}
-
-.menu-body-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.menu-body-class {
-  font-family: var(--menu-mono);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--menu-ink-dim);
-  border: 1px solid var(--menu-rule);
-  padding: 2px 7px;
-}
-
-.menu-body.is-selected .menu-body-class {
-  color: var(--menu-stock);
-  border-color: var(--menu-stock);
-}
-
-/* Diesel badge: the one thing in the row that changes which cans you can pour,
-   so it is filled while its neighbour is outlined. */
-.menu-body-fuel {
-  flex: 0 0 auto;
-  min-width: 18px;
-  text-align: center;
-  font-family: var(--menu-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #1d1810;
-  background: var(--hud-diesel);
-  border: 1px solid var(--hud-diesel);
-  padding: 2px 5px;
-}
-
-.menu-paints {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.menu-paint {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid var(--menu-ink);
-  cursor: pointer;
-  outline: none;
-}
-
-.menu-paint:hover {
-  box-shadow: inset 0 0 0 2px var(--menu-stock);
-}
-
-.menu-paint:focus-visible {
-  outline: 1px solid var(--menu-accent);
-  outline-offset: 3px;
-}
-
-.menu-paint.is-selected {
-  box-shadow:
-    inset 0 0 0 2px var(--menu-stock),
-    0 0 0 2px var(--menu-accent);
 }
 
 /* ------------------------------------------------------------------ *

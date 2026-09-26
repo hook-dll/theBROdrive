@@ -28,8 +28,8 @@ import {
   WATER_VERTEX_STRIDE,
   type DesertTileData,
 } from './deserttiledata';
-import { treeVariantCount, trunkColliderRadius } from './props/trees';
-import { clearTrees, ForestRenderer, treeShape } from './forest';
+import { clearTrees, ForestRenderer } from './forest';
+import { treeShape, treeVariantCount, trunkColliderRadius } from './treeshape';
 import type {
   DesertTileWorkerRequest,
   DesertTileWorkerResponse,

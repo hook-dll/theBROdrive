@@ -191,7 +191,7 @@ export interface DesertTileData {
 /**
  * Kinds of planted thing, stored as a float in a tree record. The trees of the central
  * Russian belt: what grows where is `plantTrees`' business, how each looks is
- * world/props/trees.ts'.
+ * world/treeshape.ts'.
  */
 export const enum TreeKind {
   Birch = 0,
@@ -240,7 +240,7 @@ export const TREE_KINDS: readonly TreeKind[] = [
 
 /**
  * Kinds from this one to `UNDERGROWTH_KIND_TO` are undergrowth and floor: fern, juniper,
- * stump, log. They live here rather than with the geometry (`world/props/trees.ts`)
+ * stump, log. They live here rather than with the drawing (`world/treeshape.ts`)
  * because the far forest's worker needs them, and that module builds every tree.
  */
 export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
