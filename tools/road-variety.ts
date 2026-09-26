@@ -162,6 +162,102 @@ console.log('');
     const k = percentile(curvature, q);
     return k > 1e-5 ? `${(1 / k).toFixed(0)} m` : 'inf';
   };
+  // THE CURVE CENSUS, and it is the number the owner's complaint is about. A radius
+  // percentile over every sample is dominated by the STRAIGHTS — which is why the road
+  // read as straight while its corners were fine — so the geometry is measured the way a
+  // road survey measures it: runs of curvature, their peak radius, their length, and the
+  // turning they accumulate per kilometre.
+  //
+  // The reference is real secondary roads, measured from a national GIS (Czech ROCA,
+  // 9 980 km, 42 752 curves) and from laser scanning (Norway, 63 969 curves): a curve
+  // every 200-250 m, peak radii mostly 50-250 m, curve length about 100 m, 36-43% of the
+  // length inside a curve, and 94 degrees of turning per kilometre (median). Sources in
+  // docs/research-2026-09-26-landscape.md.
+  {
+    const CURVE_K = 1 / 1200;
+    const runs: number[][] = [];
+    const peaks: number[] = [];
+    let run: number[] = [];
+    let inCurve = false;
+    const sampled: number[] = [];
+    for (let s = 0; s < driveM; s += STEP_M) {
+      const k = Math.abs(road.curvatureAt(s));
+      sampled.push(k);
+      if (k > CURVE_K) {
+        run.push(k);
+        inCurve = true;
+      } else if (inCurve) {
+        runs.push(run);
+        peaks.push(Math.max(...run));
+        run = [];
+        inCurve = false;
+      }
+    }
+    if (inCurve) {
+      runs.push(run);
+      peaks.push(Math.max(...run));
+    }
+    const km = driveM / 1000;
+    const curveLength = runs.reduce((sum, r) => sum + r.length * STEP_M, 0);
+    // Peak RADII, tightest first: a higher curvature percentile is a SMALLER radius, so
+    // the list is inverted before it is read.
+    const peakRadii = peaks.map((k) => 1 / k).sort((a, b) => a - b);
+    const peakRadius = (q: number): string =>
+      peakRadii.length ? `${peakRadii[Math.min(peakRadii.length - 1, Math.round(q * (peakRadii.length - 1)))]!.toFixed(0)} m` : '-';
+    // Turning per kilometre, integrated at the node spacing: at 25 m the sampler skips
+    // whole transitions and reports a tenth of the real turning.
+    let turning = 0;
+    let previousHeading = road.sampleAt(0).heading;
+    for (let s = 4; s < driveM; s += 4) {
+      const nextHeading = road.sampleAt(s).heading;
+      turning += Math.abs(nextHeading - previousHeading);
+      previousHeading = nextHeading;
+    }
+    turning = (turning * 180) / Math.PI;
+    const meanCurve = runs.length ? curveLength / runs.length : 0;
+    const straightBetween = runs.length > 1 ? (driveM - curveLength) / runs.length : 0;
+    console.log(
+      `curve census: ${(runs.length / km).toFixed(2)} curves per km  |  ${((100 * curveLength) / driveM).toFixed(0)}% of the length in a curve` +
+        `  |  curve length mean ${meanCurve.toFixed(0)} m, straight between ${straightBetween.toFixed(0)} m`,
+    );
+    // A HEADING STEP IS NOT A CORNER, and it is the failure this sequence can make
+    // silently: the largest change of bearing between two nodes four metres apart. A real
+    // 100 m corner turns 2.3 degrees in four metres; anything past ten is a kink.
+    let worstStep = 0;
+    let worstStepS = 0;
+    let previous = road.sampleAt(0).heading;
+    for (let s = 4; s < driveM; s += 4) {
+      const here = road.sampleAt(s).heading;
+      const step = Math.abs(here - previous);
+      if (step > worstStep) {
+        worstStep = step;
+        worstStepS = s;
+      }
+      previous = here;
+    }
+    console.log(
+      `  worst heading step ${((worstStep * 180) / Math.PI).toFixed(1)} deg in 4 m at s=${Math.round(worstStepS)}` +
+        `  |  ${worstStep > 0.09 ? 'FAIL: the heading jumps' : 'ok'}`,
+    );
+    let tightest = 0;
+    let tightestS = 0;
+    for (let s = 0; s < driveM; s += 4) {
+      const k = Math.abs(road.curvatureAt(s));
+      if (k > tightest) {
+        tightest = k;
+        tightestS = s;
+      }
+    }
+    characterAt(SEED, tightestS, character);
+    console.log(
+      `  tightest corner ${(1 / tightest).toFixed(0)} m at s=${Math.round(tightestS)} (${character.name})`,
+    );
+    console.log(
+      `  peak radius: p10 ${peakRadius(0.1)}, median ${peakRadius(0.5)}, p90 ${peakRadius(0.9)}` +
+        `  |  turning ${(turning / km).toFixed(0)} deg/km` +
+        `  |  [real secondary roads: 4-5 curves/km, 36-43% in curves, curves ~100 m, 94 deg/km, peak radii mostly 50-250 m]`,
+    );
+  }
   console.log('whole drive');
   console.log(
     `  radius: p1 ${radius(0.99)}  p10 ${radius(0.9)}  median ${radius(0.5)}`,

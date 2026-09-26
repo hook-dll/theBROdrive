@@ -60,6 +60,36 @@ questions live in `docs/country.md`.
   through other woods. A wood's edge is birch and aspen; spruce fills the interior.
 
 #### Changed
+- THE ROAD IS A ПРОСЁЛОК THAT WINDS NOW (`docs/research-2026-09-26-landscape.md`, section 13).
+  The owner drove it: "дорога стала значительно более прямой и не петляет так, как в
+  пустыне". He was right, and by an order of magnitude: the whole-drive median radius was
+  3-4.4 km, every drive OPENED with 28-36 km of the 'pan' character (12.6 km median
+  radius) because the home district is CHARACTERS[0] and pan stood first, and pan plus
+  highway weighed 44% of the deck. The country now has four kinds and no desert ones —
+  proselok (a bend every 190 m, radii 170-320 m), field (220 m), wood (160 m) and region
+  (620 m with long sweeps) — with the home district winding, so a drive starts on a
+  winding road. New `signRun` lets a kind hold ONE direction across several sections,
+  which is what a real long curve is and what the self-cross bench requires (a 1.5 km
+  one-way run). And a real defect in the turn sequence is fixed: when a section could not
+  hold its transition the ANGLE was scaled down while the next section still started from
+  the unscaled bearing, so the heading STEPPED — 37 degrees in four metres, a six-metre
+  radius corner, measured at s = 42 868. A section always reaches its bearing now and the
+  RADIUS gives way instead (bisection over both the geometric and the lateral-jerk
+  requirement). Measured over 300 km: curves per km 1.19 -> 3.38, curve length 249 -> 110 m,
+  straight between curves 593 -> 186 m, peak radius p10/median 117/183 -> 87/103 m, total
+  turning 74 -> 133 deg/km, worst heading step 37 -> 3.1 degrees, tightest corner 6 -> 73 m.
+  The reference is the two large measured surveys that exist (Czech ROCA, 9 980 km and
+  42 752 curves; Norwegian laser scan, 63 969 curves): 4-5 curves/km, 36-43% of the length
+  in curves, curves about 100 m, straights 90-130 m, turning 94 deg/km median. SPINE_FORMAT
+  6 -> 7, so a cached spine rebuilds. tools/road-variety.ts gained the curve census and a
+  heading-step guard; tools/landscape-census.ts gained a worst-grade check and a
+  step-versus-slope test on the ground — which is how the ravine bug below was caught.
+- RAVINES NO LONGER CLIFF AT A DISTRICT EDGE. A ravine district's fade was used only as a
+  `> 0` switch while the cross-section and the DEPTH were built from the ungated weight, so
+  the first metre inside a ravine district got a full seven-metre cut: a cliff in the ground
+  beside the road. The gate multiplies the section again, and the tributaries are wider and
+  shallower (300 m wavelength, 0.4 share) because an 18 m gully with a 4 m cut is three
+  cells of tile lattice and arrives as a notch rather than as a landform.
 - VILLAGES, AND THE FIELDS GOING BACK TO BIRCH (`docs/research-2026-09-26-landscape.md`,
   sections 11 and 12). The owner said yes to villages, and the recorded decision in
   docs/country.md now says so. A village is a SCHEDULE and not a field, because it is a

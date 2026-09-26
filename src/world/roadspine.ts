@@ -38,8 +38,12 @@ export const COARSE_SPACING = 200;
  *
  * 5: replace gated corner noise with guaranteed, seeded turn sequences.
  * 6: shorten turn sections and their entry window for more frequent curves.
+ * 7: the country's own characters — no pan, a winding home district, and four kinds
+ *    built to real secondary-road proportions (a bend every 200-340 m). Every section
+ *    now reaches its bearing, so the heading no longer steps where a transition did not
+ *    fit; the radius tightens instead.
  */
-export const SPINE_FORMAT = 6;
+export const SPINE_FORMAT = 7;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

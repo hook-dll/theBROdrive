@@ -366,6 +366,81 @@ for (const seed of RUN_SEEDS) {
     );
   }
 
+  // THE WORST GRADE AND THE WORST STEP ON THE ROAD, and this check exists because a
+  // percentile hid a metre-and-a-half cliff: a per-cell hashed choice in the relief
+  // (a ridge direction, in that case) jumped at every 9 km cell border, which is thirty
+  // samples in sixty kilometres — under the p99 of fifteen thousand. A percentile cannot
+  // see a fault, only a distribution.
+  //
+  // A STEP IS NOT A SLOPE, so the same difference is measured at two spacings: a slope's
+  // rise shrinks with the spacing and a discontinuity's does not.
+  {
+    let worstGrade = 0;
+    let worstGradeAt = 0;
+    let worstNodeRise = 0;
+    let worstNodeRiseAt = 0;
+    for (let s = 0; s < LENGTH_M; s += 1) {
+      const grade = Math.abs(road.sampleAt(s).grade);
+      if (grade > worstGrade) {
+        worstGrade = grade;
+        worstGradeAt = s;
+      }
+      const rise = Math.abs(road.sampleAt(s + 4).y - road.sampleAt(s).y) / 4;
+      if (rise > worstNodeRise) {
+        worstNodeRise = rise;
+        worstNodeRiseAt = s;
+      }
+    }
+    const atWorst = road.sampleAt(worstNodeRiseAt);
+    console.log(
+      `ROAD WORST: grade ${(worstGrade * 100).toFixed(1)}% at s=${Math.round(worstGradeAt)}` +
+        `  |  largest 4 m rise ${(worstNodeRise * 100).toFixed(1)}% at s=${Math.round(worstNodeRiseAt)} (y=${atWorst.y.toFixed(1)})` +
+        `  |  ${worstGrade > 0.35 ? 'FAIL: a wall in the road' : 'ok'}`,
+    );
+  }
+
+  // THE GROUND'S OWN STEPS, anywhere near the road. The road check above sees a wall when
+  // the road is on it; this one sees a wall in the terrain, which is what a per-cell
+  // choice in the RELIEF does — a hashed district angle, a lattice of anything that feeds
+  // a height. The tile lattice is 3 m, so a rise of 3 m in 3 m is a vertical face and no
+  // slope in this world reaches halfway to it.
+  {
+    let worstRise = 0;
+    let worstRiseAt = 0;
+    let worstRiseLat = 0;
+    for (let s = 0; s < LENGTH_M; s += 25) {
+      for (let lat = 0; lat <= 600; lat += 3) {
+        const a = road.offsetPoint(s, lat);
+        const b = road.offsetPoint(s, lat + 3);
+        const rise = Math.abs(terrain.heightAt(b.x, b.z, s) - terrain.heightAt(a.x, a.z, s)) / 3;
+        if (rise > worstRise) {
+          worstRise = rise;
+          worstRiseAt = s;
+          worstRiseLat = lat;
+        }
+      }
+    }
+    // A STEP IS NOT A SLOPE, and the difference is the whole value of this check: a
+    // ravine flank 60 degrees steep is a landform, while a hashed per-cell choice that
+    // steps the ground by metres is a fault. So the worst place is measured again over a
+    // quarter of a metre — a slope's rise shrinks by the ratio of the spacings (a
+    // twelfth), a face keeps it — and the verdict is that ratio, not the steepness.
+    const fine = 0.25;
+    let fineRise = 0;
+    for (let d = -2; d <= 2; d += fine) {
+      const a = road.offsetPoint(worstRiseAt, worstRiseLat + d);
+      const b = road.offsetPoint(worstRiseAt, worstRiseLat + d + fine);
+      const rise = Math.abs(terrain.heightAt(b.x, b.z, worstRiseAt) - terrain.heightAt(a.x, a.z, worstRiseAt));
+      if (rise > fineRise) fineRise = rise;
+    }
+    const ratio = fineRise / (worstRise * 3);
+    console.log(
+      `TERRAIN STEP: worst 3 m rise ${(worstRise * 100).toFixed(0)}% at s=${Math.round(worstRiseAt)} lat ${worstRiseLat}` +
+        `  |  over 0.25 m ${(fineRise * 4 * 100).toFixed(0)}%, ratio ${ratio.toFixed(2)}` +
+        `  |  ${ratio > 0.34 ? 'FAIL: a face in the ground' : 'ok (a steep slope, not a step)'}`,
+    );
+  }
+
   // RAVINES AND KOSOGORS. How many ravines the road passes and how deep they are, and how
   // often the road is riding a side-slope — the verge half a metre higher on one side
   // than the other, which is what a косогор looks like from the cab.

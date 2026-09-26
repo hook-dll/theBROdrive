@@ -67,10 +67,20 @@ const DITCH_DEPTH = 0.85;
  */
 const RAVINE_WAVELENGTH = 420;
 const RAVINE_HALF_WIDTH = 0.045;
-/** The tributary lines (отвершки) hanging off them, and how deep they cut, as a share. */
-const RAVINE_TRIB_WAVELENGTH = 185;
-const RAVINE_TRIB_HALF_WIDTH = 0.05;
-const RAVINE_TRIB_SHARE = 0.55;
+/**
+ * The tributary lines (отвершки) hanging off them, and how deep they cut, as a share.
+ *
+ * A tributary's real width is `RAVINE_TRIB_HALF_WIDTH * RAVINE_TRIB_WAVELENGTH` metres,
+ * and that number is bounded below by the ground's own resolution: the tile lattice is
+ * 3 m, so a gully 18 m across with a 4 m cut is three cells wide and arrives as a notch
+ * rather than as a landform — measured, the flank came out at 150-200% and the guard in
+ * `tools/landscape-census.ts` caught it as a face in the ground. 300 m and a shallower
+ * share put the flanks at about 25%, which is a gully a walker steps across and a mesh
+ * can draw.
+ */
+const RAVINE_TRIB_WAVELENGTH = 300;
+const RAVINE_TRIB_HALF_WIDTH = 0.055;
+const RAVINE_TRIB_SHARE = 0.4;
 const RAVINE_DEPTH = 7;
 const RAVINE_WARP = 70;
 const RAVINE_CLEAR = 14;
@@ -601,16 +611,23 @@ export class Terrain {
       weight = Math.max(weight, (1 - trib / RAVINE_TRIB_HALF_WIDTH) * RAVINE_TRIB_SHARE);
     }
     if (weight <= 0) return s;
-    s.weight = weight * gate;
+    // THE GATE IS PART OF THE CROSS-SECTION, not a switch. `gate` fades whole districts of
+    // ravines in and out, and it was used here only as `> 0` while the profile and the
+    // DEPTH were built from the ungated weight — so the first metre inside a ravine
+    // district got a full seven-metre cut, which is a cliff in the ground beside the road.
+    // It has to multiply the section, exactly as it did when the profile was computed from
+    // the published weight.
+    const gated = weight * gate;
+    s.weight = gated;
     const maturity = smoothstep01(
       0.5 + this.chopNoise.at(x / RAVINE_MATURITY_WAVELENGTH + 41, z / RAVINE_MATURITY_WAVELENGTH - 17),
     );
     s.depth = RAVINE_DEPTH * (RAVINE_HEAD_SHARE + (1 - RAVINE_HEAD_SHARE) * maturity);
-    const v = weight * weight * (3 - 2 * weight);
+    const v = gated * gated * (3 - 2 * gated);
     // A balka's floor is FLAT across its middle third and its flanks fall away steeply;
     // a young ravine is a rounded V. The maturity is the same read that set the depth, so
     // a cut is never half-V and half-U along its own length.
-    const u = weight >= 0.66 ? 1 : smoothstep01(weight / 0.66);
+    const u = gated >= 0.66 ? 1 : smoothstep01(gated / 0.66);
     s.profile = v + (u - v) * maturity;
     return s;
   }

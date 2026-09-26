@@ -74,6 +74,18 @@ export interface RoadCharacter {
    */
   readonly straightShare: number;
   /**
+   * Consecutive sections that turn the SAME way, 1 or more.
+   *
+   * Alternating every section is a ribbon of bends and nothing else — which is what a
+   * country road is, so 1 is the common value. But a road following a valley flank or
+   * skirting an upland runs ONE way for a kilometre or more, and a generator that can
+   * only alternate has no such thing in it: `tools/road-selfcross.ts` requires the
+   * longest one-way run of a drive to be at least 1.5 km, and with every kind at 1 the
+   * best any seed managed was 580 m. A regional road is where that belongs, and 4-6
+   * sections of it is a sweep you feel.
+   */
+  readonly signRun: number;
+  /**
    * How much superelevation this road was built with, as a share of the design
    * figure. A maintained highway is fully banked; a desert pan road is nearly flat
    * whatever its corners ask for, and that is a real difference to drive.
@@ -103,128 +115,110 @@ export interface RoadCharacter {
 }
 
 /**
- * The six kinds, and they are deliberately far apart. A set whose members differ by
- * twenty per cent is one character with noise on it; these differ by a factor of
- * twenty in corner radius and a factor of eight in cadence, so a district announces
- * itself within a few hundred metres of entering it.
+ * THE FOUR KINDS, and they are what a middle-belt road is instead of what a desert was.
  *
- * THE ONE HARD CONSTRAINT IS THE NO-CROSSING BOUND. Total heading is the route wander
- * plus the corner bearing, and forward progress along the road is only strictly
+ * The old set had a 'pan' (a horizon-to-horizon straight, 12.6 km median radius) and a
+ * 'highway' (2.2 km), and those two were 44% of the deck; every drive also OPENED with
+ * 28-36 km of pan, because the home district is `CHARACTERS[0]`. Measured on the owner's
+ * drive, the whole-road median radius was 3-4 km. A road like that is not a Russian
+ * просёлок, and the owner said so: "дорога стала значительно более прямой и не петляет
+ * так, как в пустыне".
+ *
+ * WHAT A REAL ONE MEASURES. No Russian GIS survey of road curvature could be found, so
+ * the reference is the two large measured sets that do exist: the Czech national survey
+ * of secondary roads (9 980 km, 42 752 curves, ROCA toolbox) and a Norwegian laser-scan
+ * survey of rural two-lane roads (63 969 curves). They agree closely:
+ *
+ *   curves                     4-5 per km
+ *   share of length in curves  36-43%
+ *   curve length               about 100 m (mean 98 m)
+ *   straight between curves    mean 90-130 m
+ *   peak radius                mostly 50-250 m; >40% of curves under 200 m
+ *   turning                    94 deg/km median, 224 deg/km mean
+ *   radius of the designed new road  >= 3000 m (SP 34.13330.2021) -> which is why a
+ *                                    REBUILT road is straight and an old one is not
+ *
+ * So a bend every 200-340 m, 100-140 m of it turning, and 15-25 degrees of heading per
+ * bend. That is 3.5-5 curves per kilometre, which is the number this table is built to
+ * and `tools/road-variety.ts` measures.
+ *
+ * THE ONE HARD CONSTRAINT IS STILL THE NO-CROSSING BOUND. Total heading is the route
+ * wander plus the corner bearing, and forward progress along the road is only strictly
  * positive while that stays under 90 degrees — the road must never double back on
- * itself, or the spine self-intersects and `project` has two answers. So every
- * character below keeps `deviation + headingMax <= 1.45 rad` (83 degrees), which is
- * the budget the single old character used. Switchbacks spend theirs on the corner
- * and leave the wander small; a pan road spends almost nothing on either.
+ * itself, or the spine self-intersects and `project` has two answers. Every kind below
+ * keeps `deviation + headingMax <= 1.45 rad` (83 degrees), which was the old budget
+ * exactly; what changed is how the budget is SPENT. A straight road spends almost none
+ * of it, and the corners here are tighter and far more frequent, so the spend per
+ * kilometre is what went up.
  */
 export const CHARACTERS: readonly RoadCharacter[] = [
   {
-    // The pan: a horizon-to-horizon straight with a kink every few kilometres. This is
-    // the one that makes the others mean something.
-    name: 'pan',
-    weight: 0.22,
-    designSpeedKmh: 110,
-    cornerSpacing: 4_000,
-    radiusMin: 600,
-    radiusMax: 1_400,
-    headingMin: 0.1,
-    headingMax: 0.28,
-    deviation: 0.25,
-    straightShare: 0.82,
-    bankShare: 0.2,
+    // ПРОСЁЛОК: the country road itself, and the FIRST kind — which makes it the home
+    // district, so the drive leaves the house on a road that winds. 220 m a bend, 130 m
+    // of it turning, a 150-300 m radius: 4.5 curves per kilometre.
+    name: 'proselok',
+    weight: 0.34,
+    designSpeedKmh: 70,
+    cornerSpacing: 190,
+    radiusMin: 170,
+    radiusMax: 320,
+    headingMin: 0.26,
+    headingMax: 0.44,
+    deviation: 0.8,
+    straightShare: 0.35,
+    signRun: 2,
+    bankShare: 0.7,
   },
   {
-    // Open highway: long fast sweepers, the pace a catalogue saloon is happiest at.
-    name: 'highway',
-    weight: 0.22,
-    designSpeedKmh: 110,
-    cornerSpacing: 2_200,
-    radiusMin: 320,
-    radiusMax: 800,
-    headingMin: 0.18,
-    headingMax: 0.45,
-    deviation: 0.55,
-    straightShare: 0.6,
+    // РЕГИОНАЛЬНАЯ: the maintained one — a bend every 340 m with a longer radius, and
+    // half the section on the new bearing. Still nothing like the old 'highway': a
+    // designed regional road straightens to kilometres, and this is a road that has been
+    // resurfaced, not re-cut.
+    name: 'region',
+    weight: 0.16,
+    designSpeedKmh: 90,
+    cornerSpacing: 620,
+    radiusMin: 300,
+    radiusMax: 700,
+    headingMin: 0.16,
+    headingMax: 0.3,
+    deviation: 0.5,
+    straightShare: 0.45,
+    signRun: 5,
     bankShare: 1,
   },
   {
-    // Rolling country: the old default, kept because it is a good road — a corner a
-    // kilometre at a radius that asks for a lift rather than a brake.
-    name: 'rolling',
-    weight: 0.24,
-    designSpeedKmh: 80,
-    cornerSpacing: 1_100,
-    radiusMin: 140,
-    radiusMax: 320,
-    headingMin: 0.22,
-    headingMax: 0.52,
-    deviation: 0.93,
-    straightShare: 0.45,
-    bankShare: 0.75,
-  },
-  {
-    // Switchbacks: mountain road. The tightest, most relentless district, and the
-    // only one where a catalogue saloon works through the gears on the flat.
-    //
-    // THE RADII ARE THE CONTROLLER'S ENVELOPE, NOT THE MOUNTAIN'S. 60-120 m at a
-    // corner every 300 m was built and measured first, and the stream cannot drive it:
-    // on seed 1337 the ego made 13 km/h of a 82 km/h road with 67% of its time off the
-    // asphalt, the stream took 11 contacts, two bodies were thrown out of the world and
-    // the longest stop was 92 s. Curve widening recovered most of the excursions (zero
-    // ejections, zero ego contacts, 25 km/h) but not the pace: a stream of ordinary
-    // saloons queues and jams in continuous 90 m bends.
-    //
-    // What holds up is the envelope the lane-keeping was proven on. 110-200 m is still
-    // a district nobody mistakes for any other — it is half the radius of the esses and
-    // a sixth of the highway's — and the tighter road becomes available the day the
-    // corner-speed calibration on loose surfaces is done, which is the AI work this
-    // measurement names.
-    name: 'switchback',
-    weight: 0.1,
-    designSpeedKmh: 55,
-    // A corner every 380 m is nearly back-to-back: the transition a 155 m radius
-    // through 0.85 rad needs is about 250 m, so the straight between corners is a
-    // breath rather than a rest.
-    cornerSpacing: 380,
-    radiusMin: 110,
-    radiusMax: 200,
-    headingMin: 0.45,
-    headingMax: 0.85,
-    deviation: 0.45,
-    straightShare: 0.2,
-    bankShare: 0.9,
-  },
-  {
-    // Esses: a rhythm rather than a sequence of events — alternating medium corners
-    // with almost no straight between them.
-    name: 'esses',
-    weight: 0.14,
-    designSpeedKmh: 70,
-    // One size up from the switchbacks and with less angle: a 200 m radius through
-    // 0.8 rad winds on over about 300 m, so 500 m of section is a continuous rhythm
-    // rather than a sequence of events.
-    cornerSpacing: 500,
+    // ПОЛЕВАЯ: the road that turns with the field edges — a bend every 260 m, tighter
+    // than the просёлок and through a larger angle, which is what a dogleg round a plot
+    // corner is.
+    name: 'field',
+    weight: 0.22,
+    designSpeedKmh: 72,
+    cornerSpacing: 220,
     radiusMin: 150,
-    radiusMax: 260,
-    headingMin: 0.35,
-    headingMax: 0.6,
+    radiusMax: 280,
+    headingMin: 0.28,
+    headingMax: 0.52,
     deviation: 0.7,
-    straightShare: 0.15,
-    bankShare: 0.85,
+    straightShare: 0.34,
+    signRun: 1,
+    bankShare: 0.65,
   },
   {
-    // Derelict: a road that was never surveyed, only bulldozed. Sharp kinks joined by
-    // long crooked straights, and no banking at all.
-    name: 'derelict',
-    weight: 0.08,
-    designSpeedKmh: 60,
-    cornerSpacing: 1_600,
-    radiusMin: 80,
-    radiusMax: 180,
-    headingMin: 0.4,
-    headingMax: 0.8,
-    deviation: 0.6,
-    straightShare: 0.55,
-    bankShare: 0,
+    // ЛЕСНАЯ: through woodland, where the road threads between the trunks and there is
+    // no straight at all — a bend every 180 m with almost no bearing held.
+    name: 'wood',
+    weight: 0.28,
+    designSpeedKmh: 70,
+    cornerSpacing: 160,
+    radiusMin: 160,
+    radiusMax: 300,
+    headingMin: 0.22,
+    headingMax: 0.42,
+    deviation: 0.85,
+    straightShare: 0.22,
+    signRun: 1,
+    bankShare: 0.6,
   },
 ];
 

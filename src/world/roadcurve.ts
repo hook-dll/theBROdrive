@@ -91,7 +91,7 @@ export const MIN_CORNER_RADIUS = 85;
  * corners.
  */
 const ROUTE_DEVIATION = 0.95;
-const ROUTE_WAVELENGTH = 1600;
+const ROUTE_WAVELENGTH = 3600;
 const ROUTE_OCTAVES = 2;
 const ROUTE_GAIN = 0.25;
 
@@ -240,7 +240,11 @@ export class RoadHeading {
       c.headingMin +
       (c.headingMax - c.headingMin) *
         hashUnit3(this.turnMagnitudeSeed, district, index);
-    return ((district + index + this.turnParity) & 1) === 0 ? magnitude : -magnitude;
+    // The sign holds for `signRun` sections and then turns over, so a kind can be a
+    // ribbon of bends (1) or a road that sweeps one way for a kilometre (5).
+    const run = Math.max(1, c.signRun);
+    const step = Math.floor(index / run) + district;
+    return (step + this.turnParity) % 2 === 0 ? magnitude : -magnitude;
   }
 
   private sectionsIn(start: number, end: number, spacing: number): number {
@@ -271,20 +275,36 @@ export class RoadHeading {
     // holds its bearing for four fifths of four kilometres; an esses district gives its
     // corner almost the whole 700 m and reads as one continuous rhythm.
     const room = sectionLength * (1 - c.straightShare);
-    // WHEN THE ROOM IS SHORT, THE ANGLE GIVES WAY — NOT THE RADIUS.
+    // WHEN THE ROOM IS SHORT, THE RADIUS GIVES WAY — NOT THE ANGLE, AND NOT THE
+    // CONTINUITY.
     //
-    // Both are authored, but only one can be honoured in a section that cannot hold the
-    // whole transition, and they fail differently: a clamped LENGTH makes the corner
-    // tighter than the character asked for, so a pan road would quietly acquire 700 m
-    // hairpins, while a reduced ANGLE makes it a kink instead of a corner — which is
-    // what a pan road's corners are. So the heading change is scaled to fit and the
-    // peak radius stays true by construction.
+    // It used to be the other way round: the heading change was scaled down to fit the
+    // room while the NEXT section still started from the section's UNSCALED target. So a
+    // section whose transition did not fit never reached its bearing, the following
+    // section began at a bearing nobody had arrived at, and the heading STEPPED. Measured
+    // on seed 1337 with the country's own cadence: a 37-degree step in four metres at
+    // s = 42 868, a six-metre radius corner, and a road that is not a road.
+    //
+    // A section ALWAYS reaches its target now. What gives is the corner, and only ever
+    // by tightening it: the radius is solved for the largest value whose transition fits
+    // the room, by bisection because both requirements (the geometry and the lateral
+    // jerk) fall with the radius and so do not cross twice. The floor is the tightest
+    // corner this world builds, so the worst a short section can do is a bend as tight as
+    // the catalogue's own `MIN_CORNER_RADIUS` — which is a bend, and not a cliff in the
+    // heading field.
     let change = drawn - from;
-    let length = transitionLength(radius, Math.abs(change));
-    if (length > room && room > 0) {
-      change *= room / length;
-      length = Math.min(room, transitionLength(radius, Math.abs(change)));
+    let fitted = radius;
+    if (room > 0 && transitionLength(radius, Math.abs(change)) > room) {
+      let lo = MIN_CORNER_RADIUS;
+      let hi = radius;
+      for (let i = 0; i < 6; i++) {
+        const mid = (lo + hi) / 2;
+        if (transitionLength(mid, Math.abs(change)) > room) lo = mid;
+        else hi = mid;
+      }
+      fitted = hi;
     }
+    const length = Math.min(room > 0 ? room : transitionLength(fitted, Math.abs(change)), transitionLength(fitted, Math.abs(change)));
     const start = Math.min(
       Math.max(0, sectionLength - length),
       TURN_START_MIN +
