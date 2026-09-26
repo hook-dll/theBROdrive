@@ -548,19 +548,10 @@ async function boot(): Promise<void> {
   // Far anchors for the eye: churches, water towers, elevators, masts, power lines.
   const landmarks = new Landmarks(renderer.scene, origin, terrain, roadDistance, world.seed);
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__landmarks'] = landmarks;
-  // The verge: the band of tufts either side of the road, stood on the tiles' own surface.
-  // Its band, pitch and reach are the rung's (see `GRASS_TIERS`), so the rung is passed in
-  // and follows the settings from `applySettings` below.
-  const grass = new GrassField(
-    renderer.scene,
-    origin,
-    terrain,
-    road,
-    roadDistance,
-    (x, z) => desert.groundHeightAt(x, z),
-    world.state.settings.graphicsQuality,
+  // Grass within a few tens of metres of the camera, stood on the tiles' own surface.
+  const grass = new GrassField(renderer.scene, origin, terrain, road, roadDistance, (x, z) =>
+    desert.groundHeightAt(x, z),
   );
-  if (import.meta.env.DEV) (window as unknown as Record<string, unknown>)['__grass'] = grass;
   // The bushes: the woods' undergrowth, handed over by the forest renderer, plus the
   // road ditch's own weeds (see `world/bushes.ts`).
   const bushes = new BushField(
@@ -2434,7 +2425,6 @@ async function boot(): Promise<void> {
         mobilePresentation,
         horizonMetresFor(tier, mobilePresentation, world.state.settings.viewDistance),
       );
-      grass.setQuality(detailRung);
       desert.forest.setQuality(detailRung);
       const horizon = horizonMetresFor(
         tier,

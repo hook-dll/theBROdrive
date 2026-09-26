@@ -15,11 +15,11 @@
 
 import type { GraphicsQuality } from '../game/settings';
 
-/** Metres of grass band each side of the road. `world/grass.ts`, `GRASS_TIERS`. */
+/** Metres of grass round the camera. `world/grass.ts`, `RADIUS_M`: the same on every rung. */
 export const GRASS_BAND_M: Record<GraphicsQuality, number> = {
-  acceptable: 6,
-  standard: 20,
-  blessing: 28,
+  acceptable: 70,
+  standard: 70,
+  blessing: 70,
 };
 
 /** Metres a tree is a model rather than a quad. `world/forest.ts`, `MODEL_RANGE_M`. */
