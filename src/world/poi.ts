@@ -252,7 +252,10 @@ function siteAt(
     z: anchor.z,
     yaw,
     lift,
-    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s),
+    // Five samples an axis rather than three: `tools/poi-placement.ts` probes the ground on a
+    // five-by-five grid over the same rectangle, so this is the resolution the residual has to
+    // be measured at for the seating to be proved rather than hoped for.
+    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s, 5),
   };
 }
 
@@ -733,8 +736,15 @@ function buildVariantPoi(
   // measured at 0.22-0.44 m across the catalogue — which is by definition the most any
   // point of ground under it can rise above the plane. So no wall can ever stand on air,
   // and none of it stands on anything man-made.
-  const halfX = instance.halfExtentX;
-  const halfZ = instance.halfExtentZ;
+  // THE FITTED FOOTPRINT IS THE BUILDING'S OWN, not the catalogue's nominal half extents: a
+  // porch, a canopy or a roof overhang reaches past them, and the residual that seats the
+  // building is measured over the rectangle it covers. `tools/poi-placement.ts` probes the
+  // mesh's own bounds, and it is right to: measured on the starter homestead, the ground
+  // under the MESH's rectangle spreads 1.25 m where the fitted rectangle's residual is
+  // 0.38 m, and the difference is 0.40 m of daylight under a wall.
+  const bounds = new THREE.Box3().setFromObject(instance.group);
+  const halfX = Math.max(instance.halfExtentX, (bounds.max.x - bounds.min.x) / 2);
+  const halfZ = Math.max(instance.halfExtentZ, (bounds.max.z - bounds.min.z) / 2);
   const site = siteAt(ctx, poi, a, yaw, halfX, halfZ);
   const seatY = site.plane.centreY - site.plane.residual - SEAT_BURY_MARGIN;
 

@@ -235,7 +235,16 @@ const MAX_RESIDUAL_M = 0.6;
   });
   check(building.containsPoint(new THREE.Vector3(car.x, car.y + 0.8, car.z)),
     'the starter car does not stand inside the building footprint');
-  check(carBounds.min.y > 0, `the car spawns below ground at y=${car.y}`);
+  // AGAINST THE GROUND, NOT AGAINST ZERO. This compared the car's box with the world's y = 0
+  // plane, and the world's heights run to -200 m: the homestead stands on ground between
+  // -1.67 m and 0.03 m, so the car was reported as "below ground" while sitting a metre and a
+  // half ABOVE the sand under it. The assertion is worth keeping — a car spawned inside the
+  // ground is a real fault — so it is made against the terrain the car actually stands on.
+  const groundUnderCar = terrain.heightAt(car.x, car.z, HOMESTEAD_S);
+  check(
+    carBounds.min.y > groundUnderCar,
+    `the car spawns ${(groundUnderCar - carBounds.min.y).toFixed(2)} m into the ground`,
+  );
 
   // The spawn is a FEET position and must stand ON THE FLOOR.
   //
@@ -780,6 +789,7 @@ const MAX_RESIDUAL_M = 0.6;
   // the gap it cannot see is the one between its own samples.
   let worstGap = 0;
   let worstGapId = '';
+  let worstGapPoint = '';
   const inverse = new THREE.Matrix4();
   const probe = new THREE.Vector3();
   for (const { object: building, s: nearS } of placed) {
@@ -804,14 +814,15 @@ const MAX_RESIDUAL_M = 0.6;
         if (gap > worstGap) {
           worstGap = gap;
           worstGapId = String(building.userData.poiVariant);
+          worstGapPoint = `local (${lx.toFixed(1)}, ${lz.toFixed(1)}) of (${footX.toFixed(1)} x ${footZ.toFixed(1)})`;
         }
       }
     }
   }
   check(
     worstGap < 0.05,
-    `the worst building (${worstGapId}) stands ${worstGap.toFixed(2)} m above its ground — ` +
-      'there is daylight under a wall',
+    `the worst building (${worstGapId}) stands ${worstGap.toFixed(2)} m above its ground at ` +
+      `${worstGapPoint} — there is daylight under a wall`,
   );
 
   // EACH SWITCH, ON ITS OWN. A total that falls after every switch is pressed is satisfied

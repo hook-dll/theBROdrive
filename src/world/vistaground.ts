@@ -75,12 +75,21 @@ export function vistaGroundAt(
     g += (PEAT[1] - g) * m;
     b += (PEAT[2] - b) * m;
   }
-  if (sample.forest > 0) {
+  // A WOOD DOES NOT STAND ON A MIRE. The peat above makes the far bog the same place as the
+  // near one, and then this block lerped the very same ground to the canopy colour and
+  // raised a seventeen-metre canopy blanket over it wherever the cover said forest — so in a
+  // wooded district a bog still read as wood from the horizon and opened up on arrival, which
+  // is the appearance-at-a-distance the peat was added to remove. The planting puts only
+  // sparse, small trees on a bog (`bog > 0.35`), so the mass is masked the same way.
+  // (A LAKE BASIN is masked in the tiles' own canopy, `world/deserttiledata.ts`; this disc
+  // has no arclength to look a basin up with, and a basin sits within 650 m of the road.)
+  const canopyForest = bog > 0 ? sample.forest * (1 - Math.min(1, bog * 0.9)) : sample.forest;
+  if (canopyForest > 0) {
     const ramp = radius <= CANOPY_FROM_M ? 0 : Math.min(1, (radius - CANOPY_FROM_M) / (CANOPY_FULL_M - CANOPY_FROM_M));
-    h += canopyHeight(x, z, sample.forest, sample.birch) * ramp;
+    h += canopyHeight(x, z, canopyForest, sample.birch) * ramp;
     terrain.cover.canopyColour(x, z, sample.birch, canopy);
     seasonCanopy(canopy, 0, sample.birch, season);
-    const w = sample.forest * ramp;
+    const w = canopyForest * ramp;
     r += (canopy[0]! - r) * w;
     g += (canopy[1]! - g) * w;
     b += (canopy[2]! - b) * w;

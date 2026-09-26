@@ -117,9 +117,27 @@ const GARAGE_CENTRE_V = VARIANT_V + 8.68;
  * The variant's own extent, MEASURED rather than taken from its declared footprint: a
  * porch, a balcony and a garage wing all project past the declared box. These are the
  * same numbers the world's POI placement measures for this variant.
+ *
+ * AND THEY HAVE TO COVER THE MESH, because the rectangle built from them below is what the
+ * compound's single ground plane is fitted to, and the residual of that fit is what the whole
+ * building is sunk by (`homesteadLayout`). A rectangle narrower or shorter than the building
+ * leaves ground the fit never sampled, and the building FLOATS there: measured by
+ * `tools/poi-placement.ts`, the mesh is 29.0 x 19.0 m across and at 13.7/7.8 the ground at its
+ * own edge fell 0.36 m below the seated floor — 'daylight under a wall'. At 14.5 and 10 the
+ * rectangle contains the footprint whatever the axis pairing, and a residual over a rectangle
+ * that contains the footprint cannot leave it floating.
  */
-const VARIANT_HALF_X = 13.7;
-const VARIANT_HALF_Z = 7.8;
+const VARIANT_HALF_X = 14.5;
+/**
+ * Half the building's extent ACROSS the driveway, and it has to COVER THE MESH: the pad is
+ * the rectangle the one ground plane is fitted to, a fit measures only the ground it covers,
+ * and the residual it reports is the whole basis of the seating — the building is sunk by
+ * exactly that. At 7.8 the mesh's own edge (9.5 m) fell outside the fitted rectangle, so the
+ * ground there was never sampled and stood ABOVE the seated floor: measured by
+ * `tools/poi-placement.ts` at the building's local (3.6, 9.5) of (29.0 x 19.0), 0.36 m of
+ * daylight under a wall. A hand's breadth past the mesh, because the seam is where it shows.
+ */
+const VARIANT_HALF_Z = 10;
 /** Yard in front of the garage, beyond the building, for the junk and the fuel can. */
 const YARD_M = 3.2;
 
@@ -223,6 +241,13 @@ export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
   const uc = (PAD_U0 + PAD_U1) / 2;
   const vc = (PAD_V0 + PAD_V1) / 2;
   const [cx, cz] = toWorld(uc, vc);
+  // SEVENTEEN SAMPLES AN AXIS, and the resolution is the point: this plane's `residual` is
+  // what the whole compound is sunk by, and a residual measured on a coarse grid under-states
+  // the ground that rises BETWEEN the nodes. At nine (2-4 m spacing over this rectangle) the
+  // ground at the mesh's own edge stood 0.36 m above the seated floor — measured by
+  // `tools/poi-placement.ts`, 'the worst building (starter-homestead) stands 0.36 m above its
+  // ground at local (3.6, 9.5)'. At seventeen the spacing is 0.6-1 m, which bounds the ground
+  // the placement bench probes. 289 samples, once, on a building that is built once.
   const plane = fitGround(
     terrain,
     cx,
@@ -231,7 +256,7 @@ export function homesteadLayout(road: Road, terrain: Terrain): HomesteadLayout {
     (PAD_V1 - PAD_V0) / 2,
     (PAD_U1 - PAD_U0) / 2,
     HOMESTEAD_S,
-    9,
+    17,
   );
   const seatY = plane.centreY - plane.residual - SEAT_BURY_MARGIN;
   // The floor is the SAME rigid tilted plane everywhere, so any point on it is
@@ -599,9 +624,23 @@ export function createStartingCar(world: GameWorld): CarState {
   const [cx, cz] = L.toWorld(GARAGE_CENTRE_U, GARAGE_CENTRE_V);
   // Ground under the car's own spot, for the same reason `homesteadSpawn` uses
   // bare ground rather than `L.floorYAt`.
-  const carY = carSpawnYAboveGround(measure, terrain.heightAt(cx, cz, HOMESTEAD_S), GARAGE_CAR_DROP_METRES);
+  // THE HIGHEST GROUND UNDER THE CAR, not the ground at its centre: the car is 2 x 5 m and
+  // the compound's ground rises about a quarter of a metre over that, so a spawn from the
+  // centre sample stood below the sand at one corner of its own footprint (`tools/poi-
+  // placement.ts`, 'the car spawns below ground'). Four corners and the centre, and the car
+  // starts on the highest of them.
+  const carYaw = Math.atan2(-L.ax, -L.az);
+  let carGround = terrain.heightAt(cx, cz, HOMESTEAD_S);
+  for (const across of [-1, 1]) {
+    for (const along of [-2.5, 2.5]) {
+      const px = cx + Math.cos(carYaw) * across + Math.sin(carYaw) * along;
+      const pz = cz - Math.sin(carYaw) * across + Math.cos(carYaw) * along;
+      carGround = Math.max(carGround, terrain.heightAt(px, pz, HOMESTEAD_S));
+    }
+  }
+  const carY = carSpawnYAboveGround(measure, carGround, GARAGE_CAR_DROP_METRES);
   // Face the door: body +Z -> "toward the road" (-away), i.e. world +X here.
-  const yaw = Math.atan2(-L.ax, -L.az);
+  const yaw = carYaw;
   const half = yaw / 2;
 
   return {

@@ -321,12 +321,28 @@ export function buildStreamCrossings(
     }
   };
 
-  // The crossings themselves, found in the chunk's own arclength range: the bed's
-  // presence at the centreline, which is the same test the ground was shaped from.
+  // The crossings themselves, found at the bed's presence on the centreline, which is the
+  // same test the ground was shaped from.
+  //
+  // ONE CROSSING, ONE EMIT, BY THE CHUNK ITS OWN START FALLS IN. The scan used to be the
+  // chunk's own range and a bed cut by a seam became two partial crossings: the first half
+  // ran to `sEnd` and the second began at `sStart`, so a bridge got about seven metres of
+  // coplanar duplicated parapet (z-fighting, and duplicate parapet colliders), a culvert got
+  // two headwall pairs, and `maxSpan` was read per half, so one half could come out a bridge
+  // and the other a culvert. The window is therefore opened either side of the chunk — a
+  // crossing is 10-32 m along the road — and a crossing is emitted only by the chunk that
+  // contains its START, drawn whole even where that reaches into the next chunk. A reach the
+  // road runs ALONG (the docs' kilometre-long deck) extends the window until the bed closes,
+  // bounded, because otherwise the deck would stop dead at the seam.
+  const CROSSING_WINDOW_M = 96;
+  const MAX_CROSSING_M = 1_500;
+  const from = Math.max(0, sStart - CROSSING_WINDOW_M);
+  const hardEnd = sEnd + MAX_CROSSING_M;
+  const covered = sEnd + CROSSING_WINDOW_M;
   let inBed = false;
-  let bedFrom = sStart;
+  let bedFrom = from;
   let maxSpan = 0;
-  for (let s = sStart; s <= sEnd; s += 2) {
+  for (let s = from; s <= hardEnd; s += 2) {
     road.offsetPoint(s, 0, probe);
     const stream = streams.at(probe.x, probe.z);
     const over = stream.bed > 0.02;
@@ -337,14 +353,13 @@ export function buildStreamCrossings(
         maxSpan = 0;
       }
       if (stream.span > maxSpan) maxSpan = stream.span;
-      continue;
-    }
-    if (inBed) {
+    } else if (inBed) {
       inBed = false;
-      emit(bedFrom, s - 2, maxSpan);
+      if (bedFrom >= sStart && bedFrom < sEnd) emit(bedFrom, s - 2, maxSpan);
     }
+    if (s >= covered && !inBed) break;
   }
-  if (inBed) emit(bedFrom, sEnd, maxSpan);
+  if (inBed && bedFrom >= sStart && bedFrom < sEnd) emit(bedFrom, hardEnd, maxSpan);
 
   if (parts.count === 0) return null;
   const geometry = new THREE.BufferGeometry();

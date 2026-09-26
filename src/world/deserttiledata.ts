@@ -8,6 +8,7 @@ import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, PEAT, type Terrain } from './terrain';
 import { BASIN_OUTER_M, type BasinFootprint } from './lakes';
 import { terminusWeight } from './terminus';
+import { WAVE_TILE_METRES } from '../render/watermaterial';
 import { TRACK_HALF_WIDTH_M, TRACK_MAX_LENGTH_M, trackAt, trackPossibleNear, type TrackSample } from './tracks';
 
 
@@ -22,8 +23,19 @@ const EXACT_DISTANCE_GATE = Math.max(CORRIDOR_OUTER, ROAD_MAX_HALF_WIDTH) + DIST
 const FULL_RELIEF_DISTANCE = 200;
 const PROP_TAG = 0x44535254;
 const MAX_TILE_PROPS = 5;
-/** Floats per water-surface vertex: x, y, z, then the rgba the shoreline is baked in. */
-export const WATER_VERTEX_STRIDE = 7;
+/**
+ * Floats per water-surface vertex: x, y, z, the rgba the shoreline is baked in, then the
+ * wave-field uv.
+ *
+ * THE UV IS NOT DECORATION. `STREAM_WATER` is `createWaterMaterial()` — a scrolled
+ * `normalMap` over the surface (render/watermaterial.ts) — and a mesh with no `uv`
+ * attribute samples texel (0,0) for every fragment, where the tangent frame built from
+ * the derivatives has determinant zero and `perturbNormal` returns the unperturbed
+ * normal. The scroll was invisible and every stream rendered as a flat mirror. It is
+ * ABSOLUTE world position over the wave tile, as the lake's is, so the pattern neither
+ * seams at tile edges nor slides when the floating origin moves.
+ */
+export const WATER_VERTEX_STRIDE = 9;
 /**
  * Water's own colours, linear rgb, shallow and deep.
  *
@@ -224,6 +236,28 @@ export const TREE_KINDS: readonly TreeKind[] = [
   TreeKind.Log,
   TreeKind.FieldPine,
 ];
+
+/**
+ * Kinds from this one to `UNDERGROWTH_KIND_TO` are undergrowth and floor: fern, juniper,
+ * stump, log. They live here rather than with the geometry (`world/props/trees.ts`)
+ * because the far forest's worker needs them, and that module builds every tree.
+ */
+export const UNDERGROWTH_KIND_FROM = TreeKind.Fern;
+export const UNDERGROWTH_KIND_TO = TreeKind.Log;
+
+/**
+ * Whether a kind is ever drawn as an impostor.
+ *
+ * The undergrowth is not, and never was meant to be: its models dissolve between 50 and
+ * 110 m (`world/forest.ts`) and it is gone past that, while an impostor only appears from
+ * 135 m — so the two never meet, and the sheet was baked with 240 cells of fern, juniper,
+ * stump and log that nothing could ever sample as a tree. They were drawn all the same,
+ * because the far forest plants every kind: a quarter of the atlas, and a quarter of the
+ * far trees' quads, spent on floor plants that had already been faded out.
+ */
+export function isImpostorKind(kind: number): boolean {
+  return !(kind >= UNDERGROWTH_KIND_FROM && kind <= UNDERGROWTH_KIND_TO);
+}
 
 
 /**
@@ -445,9 +479,18 @@ export function generateDesertTileData(
       colors[vi * 3] = coverSample.r;
       colors[vi * 3 + 1] = coverSample.g;
       colors[vi * 3 + 2] = coverSample.b;
-      if (coverSample.forest > 0) {
+      // A WOOD DOES NOT STAND ON A MIRE OR IN A LAKE. The canopy height and colour are what
+      // make a wood read as a mass from a distance, and they were painted wherever the cover
+      // said forest — over the peat this very pass paints for a bog, and over a basin's water.
+      // Up close the planting puts nothing woody inside a basin and only sparse, small trees
+      // on a bog (`bog > 0.35`), so the wood OPENED on arrival: the far picture and the near
+      // one were different places, which is the mirage the bog's peat was added for. Same
+      // mask as the planting, applied to the mass.
+      const overWater = shore > SHORE_BAND_M - BASIN_KEEP_M;
+      const canopyForest = overWater ? 0 : coverSample.forest * (1 - Math.min(1, bog * 0.9));
+      if (canopyForest > 0) {
         cover.canopyColour(worldX, worldZ, coverSample.birch, canopy, vi * 4);
-        canopy[vi * 4 + 3] = canopyHeight(worldX, worldZ, coverSample.forest, coverSample.birch);
+        canopy[vi * 4 + 3] = canopyHeight(worldX, worldZ, canopyForest, coverSample.birch);
       } else {
         canopy[vi * 4] = coverSample.r;
         canopy[vi * 4 + 1] = coverSample.g;
@@ -568,6 +611,10 @@ export function generateDesertTileData(
           water[wp + 4] = WATER_SHALLOW[1] + (WATER_DEEP[1] - WATER_SHALLOW[1]) * deep;
           water[wp + 5] = WATER_SHALLOW[2] + (WATER_DEEP[2] - WATER_SHALLOW[2]) * deep;
           water[wp + 6] = shore * (0.45 + 0.5 * deep);
+          // Absolute world x/z over the wave tile, so the scrolled normal map is
+          // continuous across tiles and does not slide when the origin moves.
+          water[wp + 7] = (startX + cix * DESERT_TILE_STEP - DESERT_TILE_SIZE * 0.5) / WAVE_TILE_METRES;
+          water[wp + 8] = (startZ + ciz * DESERT_TILE_STEP - DESERT_TILE_SIZE * 0.5) / WAVE_TILE_METRES;
           wp += WATER_VERTEX_STRIDE;
         }
         // Same winding as the ground lattice, so the sheet faces the same way up.
