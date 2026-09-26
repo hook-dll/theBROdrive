@@ -75,7 +75,7 @@ interface ForestWorkerScope {
 
 const scope = self as unknown as ForestWorkerScope;
 let context: DesertTileGenerationContext | null = null;
-const ground: GroundHeightSample = { height: 0, detail: 0 };
+const ground: GroundHeightSample = { height: 0, detail: 0, water: 0 };
 const cover = newCoverSample();
 const scratch = new Float32Array(MAX_TILE_TREES * TREE_STRIDE);
 

@@ -13,6 +13,7 @@ import { ROAD_HALF_WIDTH, type Road } from './road';
 import { tileSurfaceSampler } from './deserttiledata';
 import type { RoadDistance } from './roaddistance';
 import { shoulderWidthAt } from './shoulder';
+import { buildStreamCrossings, STREAM_CROSSING_MATERIAL } from './streamcrossings';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
@@ -915,6 +916,26 @@ export class RoadMeshProvider implements ChunkProvider {
         // Solid: the wheels ride the strip they see, not the sunk ground under it.
         if (hasPhysics) {
           const collider = physics.addStaticTrimesh(shoulder.vertices, shoulder.indices, SurfaceType.Gravel);
+          collider.setEnabled(false);
+          colliders.push(collider);
+          const body = collider.parent();
+          if (body) bodies.push(body);
+        }
+      }
+      // Bridges and culverts (world/streamcrossings.ts): the structure the ground half
+      // of the crossing leaves to be built. One merged geometry for the whole chunk,
+      // and only on the chunks that stand over water.
+      const crossings = buildStreamCrossings(road, this.field, sStart, sEnd, ox, oz);
+      if (crossings) {
+        disposables.push(crossings.geometry);
+        const crossingMesh = new THREE.Mesh(crossings.geometry, STREAM_CROSSING_MATERIAL);
+        crossingMesh.receiveShadow = true;
+        group.add(crossingMesh);
+        // The parapets are solid and nothing else is: a car that leaves the road on a
+        // bridge hits a wall, and a culvert's headwall is eight metres out in the verge
+        // where nothing is expected to arrive at speed anyway.
+        if (hasPhysics && crossings.solidIndices.length > 0) {
+          const collider = physics.addStaticTrimesh(crossings.solidVertices, crossings.solidIndices, SurfaceType.Concrete);
           collider.setEnabled(false);
           colliders.push(collider);
           const body = collider.parent();

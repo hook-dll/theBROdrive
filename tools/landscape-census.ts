@@ -310,6 +310,112 @@ for (const seed of RUN_SEEDS) {
       `  |  no wood in 4 km: ${pct(azSamples.filter((d) => !Number.isFinite(d)).length, azTotal)}`,
   );
 
+  // WATERCOURSES: what the road crosses, and what crossing costs it in grade. The
+  // targets are from the research (one watercourse every 2.5-8 km, a bridge every
+  // 15-18.5 km, a descent of 15-30 m into the valley), so this is the number the
+  // watercourse schedule is set by.
+  {
+    let crossings = 0;
+    let wetCrossings = 0;
+    let bridgeCrossings = 0;
+    let inBed = false;
+    // Deepest and wettest point of the crossing, not its rim: the entry sample is the
+    // valley's edge, where every one of these numbers is still zero.
+    let deepest = 0;
+    let wettest = 0;
+    let spannest = 0;
+    const depths: number[] = [];
+    let worstGradeNearCrossing = 0;
+    let crossingS = -1e9;
+    for (let s = 0; s < LENGTH_M; s += 4) {
+      const c = road.sampleAt(s);
+      const st = road.landscape.streams.at(c.x, c.z);
+      const over = st.bed > 0.02;
+      if (over) {
+        deepest = Math.max(deepest, st.valley);
+        wettest = Math.max(wettest, st.water);
+        spannest = Math.max(spannest, st.span);
+      } else if (inBed) {
+        crossings++;
+        if (wettest > 0.5) wetCrossings++;
+        if (spannest > 0.5) bridgeCrossings++;
+        depths.push(deepest);
+        deepest = 0;
+        wettest = 0;
+        spannest = 0;
+      }
+      inBed = over;
+      if (Math.abs(s - crossingS) < 220) worstGradeNearCrossing = Math.max(worstGradeNearCrossing, Math.abs(c.grade));
+      if (over) crossingS = s;
+    }
+    depths.sort((a, b) => a - b);
+    console.log(
+      `WATERCOURSES over ${LENGTH_M / 1000} km: ${crossings} crossings = one every ${(LENGTH_M / Math.max(1, crossings) / 1000).toFixed(2)} km` +
+        `  |  with water ${wetCrossings} (one every ${(LENGTH_M / Math.max(1, wetCrossings) / 1000).toFixed(2)} km)` +
+        `  |  bridges ${bridgeCrossings} (one every ${(LENGTH_M / Math.max(1, bridgeCrossings) / 1000).toFixed(2)} km)`,
+    );
+    console.log(
+      `  valley cut at a crossing: median ${quant(depths, 0.5).toFixed(1)} m  p10 ${quant(depths, 0.1).toFixed(1)}  p90 ${quant(depths, 0.9).toFixed(1)}` +
+        `  |  worst grade within 220 m of a crossing ${(worstGradeNearCrossing * 100).toFixed(2)}%`,
+    );
+  }
+
+  // WHAT THE ROAD DOES AT EACH CROSSING, in the ground itself: at a bridge the bed is
+  // open under the asphalt — the deck hangs over water — and at a culvert the graded
+  // embankment fills it. This is the check that the two are actually different in the
+  // terrain and not only in the naming, and it is measured at the road's own centreline,
+  // which is where the deck is.
+  {
+    let inBed = false;
+    let maxSpan = 0;
+    let minGap = Infinity;
+    let hasWater = false;
+    const spanned: number[] = [];
+    const culverted: number[] = [];
+    const closeCrossing = (): void => {
+      if (maxSpan > 0.9 && hasWater) spanned.push(minGap);
+      if (maxSpan < 0.5) culverted.push(minGap);
+    };
+    for (let s = 0; s < LENGTH_M; s += 2) {
+      const c = road.sampleAt(s);
+      const st = road.landscape.streams.at(c.x, c.z);
+      if (st.bed > 0.02) {
+        if (!inBed) {
+          maxSpan = 0;
+          minGap = Infinity;
+          hasWater = false;
+        }
+        inBed = true;
+        if (st.span > maxSpan) maxSpan = st.span;
+        if (st.water > 0.5) hasWater = true;
+        // Gate on the reach carrying water, NOT on the level being positive: a world
+        // height is negative wherever the country is.
+        if (st.water > 0) {
+          const level = terrain.waterLevelAt(c.x, c.z);
+          if (Number.isFinite(level)) {
+            minGap = Math.min(minGap, terrain.heightAt(c.x, c.z, s) - level);
+          }
+        }
+        continue;
+      }
+      if (inBed) closeCrossing();
+      inBed = false;
+    }
+    if (inBed) closeCrossing();
+    spanned.sort((a, b) => a - b);
+    culverted.sort((a, b) => a - b);
+    const opened = spanned.filter((g) => g < -0.2).length;
+    const blocked = culverted.filter((g) => g > 0.2).length;
+    console.log(
+      `CROSSING GROUND: ${spanned.length} spanned crossings, bed open (ground > 20 cm below the water) under ${opened}` +
+        `  |  deck clearance at the centreline: median ${quant(spanned, 0.5).toFixed(2)} m (negative is open), worst ${quant(spanned, 0.99).toFixed(2)}`,
+    );
+    console.log(
+      `  ${culverted.length} culverted crossings, embankment above the water in ${blocked}` +
+        `  |  depth of the ditch left at the centreline: median ${quant(culverted, 0.5).toFixed(2)} m (positive is blocked)`,
+    );
+  }
+
   // IN THE WOOD: how much of the drive has a wood inside 300 m on BOTH sides, and the
   // longest such stretch. A wood on one side is a picture; a wood on both is a tunnel,
   // and the tunnel is what "кругом только лес" means.
@@ -453,12 +559,20 @@ for (const seed of RUN_SEEDS) {
     const byKind = new Array<number>(16).fill(0);
     let trees = 0;
     let area = 0;
+    let waterTiles = 0;
+    let waterVerts = 0;
+    const waterPerTile: number[] = [];
     const started = performance.now();
     for (let tx = tx0; tx < tx0 + TILES; tx++) {
       for (let tz = tz0; tz < tz0 + TILES; tz++) {
         const data = generateDesertTileData(context, tx, tz, false);
         area += (240 * 240) / 1e6;
         trees += data.treeCount;
+        if (data.waterVertexCount > 0) {
+          waterTiles++;
+          waterVerts += data.waterVertexCount;
+          waterPerTile.push(data.waterVertexCount);
+        }
         for (let i = 0; i < data.treeCount; i++) byKind[data.trees[i * 7 + 5]!]!++;
       }
     }
@@ -470,6 +584,12 @@ for (const seed of RUN_SEEDS) {
     );
     console.log(
       `  ${byKind.map((n, i) => `${NAME[i]}:${(100 * n / trees).toFixed(1)}%`).filter((_, i) => byKind[i]! > 0).join('  ')}`,
+    );
+    const sortedWater = [...waterPerTile].sort((a, b) => a - b);
+    console.log(
+      `  stream surfaces: ${waterTiles} of ${TILES * TILES} tiles carry water` +
+        `  (${(100 * waterTiles) / (TILES * TILES)}% of tiles, median ${quant(sortedWater, 0.5)} vertices, p90 ${quant(sortedWater, 0.9)}, worst ${sortedWater[sortedWater.length - 1] ?? 0})` +
+        `  |  across the visible 13x13 window: ${((waterVerts / (TILES * TILES)) * 169).toFixed(0)} vertices, ${((waterTiles / (TILES * TILES)) * 169).toFixed(0)} draw calls`,
     );
   }
 

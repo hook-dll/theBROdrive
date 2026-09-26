@@ -1,4 +1,5 @@
 import { hashUnit3 } from '../core/rng';
+import { MAX_VALLEY_SLOPE, Streams } from './streams';
 
 /**
  * The landscape: the ground's own elevation, as a function of world position and
@@ -251,11 +252,17 @@ function sumOverBands(tempo: number, per: (b: Band, tempo: number) => number): n
 
 /**
  * The steepest this field can be, as a fraction: the worst tempo's band sum plus the
- * homestead ramp's own contribution.
+ * homestead ramp's own contribution plus the river valleys.
+ *
+ * The valleys are the one term that is not a band: they are LINES (world/streams.ts),
+ * so their slope is set by the steepness of a valley flank rather than by a lattice.
+ * They are added into the same budget because the road rides the sum of everything, and
+ * a car climbing out of a river valley climbs the bands and the flank together.
  */
 export const MAX_SLOPE =
   Math.max(sumOverBands(0, slopeAtTempo), sumOverBands(1, slopeAtTempo)) +
-  (BANDS.reduce((sum, b) => sum + (b.home ? b.amplitude : 0), 0) * FADE_PEAK_SLOPE) / HOME_RAMP;
+  (BANDS.reduce((sum, b) => sum + (b.home ? b.amplitude : 0), 0) * FADE_PEAK_SLOPE) / HOME_RAMP +
+  MAX_VALLEY_SLOPE;
 
 /** Total half-range of the field, metres, in the tempo that reaches highest. */
 export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(1, reliefAtTempo));
@@ -343,11 +350,18 @@ export class Landscape {
   private readonly hillTag: number;
   private readonly tempoTag: number;
   private readonly mountainTags: readonly number[];
+  /**
+   * The waterways, which are the landscape's own term but not a band: their valleys are
+   * lines rather than a swell (world/streams.ts). Shared with `Terrain` through this
+   * object, so the ground the road rides and the bed the water stands in are one field.
+   */
+  readonly streams: Streams;
   /** Field value at the origin, subtracted so the homestead sits at y = 0. */
   private readonly datum: number;
 
   constructor(seed: number) {
     const base = seed >>> 0;
+    this.streams = new Streams(base);
     this.tags = BANDS.map((_, i) => (base ^ 0x7f4a7c15) + i * 0x9e3779b9);
     this.hillTag = base ^ 0x1b873593;
     // The short tempo is its OWN noise stream, not the long one resampled: sharing a
@@ -411,17 +425,16 @@ export class Landscape {
 
   /** Ground elevation at a world position, metres, relative to the homestead. */
   heightAt(x: number, z: number): number {
+    // Hoisted out of the loop because the valleys below need it too: one read of the
+    // distance from the homestead rather than two, and the same ramp either way.
+    const home = smoothstep01((Math.sqrt(x * x + z * z) - HOME_FLAT_RADIUS) / HOME_RAMP);
     let hilliness = -1;
     let tempo = -1;
-    let home = -1;
     let h = 0;
     for (let i = 0; i < BANDS.length; i++) {
       const b = BANDS[i]!;
       let weight = 1;
       if (b.home) {
-        if (home < 0) {
-          home = smoothstep01((Math.sqrt(x * x + z * z) - HOME_FLAT_RADIUS) / HOME_RAMP);
-        }
         weight = home;
       }
       if (b.hilliness) {
@@ -440,6 +453,10 @@ export class Landscape {
       }
       h += b.amplitude * band(this.tags[i]!, x / b.wavelength, z / b.wavelength) * weight;
     }
+    // The river valleys, on the same homestead ramp as the felt bands: a stream running
+    // through the concrete pad would tilt it, and the pad is the one place in the world
+    // that is authored flat.
+    h -= this.streams.at(x, z).valley * home;
     return h - this.datum;
   }
 }

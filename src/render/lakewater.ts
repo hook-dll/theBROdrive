@@ -342,7 +342,7 @@ export class LakeWater {
   private wetCells = 0;
   private wetRadius = 0;
   private opacity = 0;
-  private readonly ground: GroundHeightSample = { height: 0, detail: 0 };
+  private readonly ground: GroundHeightSample = { height: 0, detail: 0, water: 0 };
 
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 import { hash01 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
+import { advanceStreamWater, STREAM_WATER } from '../render/streamwater';
 import { freezeStaticSubtree } from './chunks';
 import type { WorldOrigin } from './origin';
 import {
@@ -24,6 +25,7 @@ import {
   desertTileDataTransfers,
   generateDesertTileData,
   TREE_STRIDE,
+  WATER_VERTEX_STRIDE,
   type DesertTileData,
 } from './deserttiledata';
 import { TREE_TRUNK_RADIUS } from './props/trees';
@@ -151,6 +153,8 @@ interface DesertTile {
   readonly centreZ: number;
   readonly group: THREE.Group;
   readonly geometry: THREE.BufferGeometry;
+  /** The tile's watercourse surfaces, when it has any. */
+  readonly waterGeometry: THREE.BufferGeometry | null;
   readonly meshes: readonly THREE.InstancedMesh[];
   readonly heights: Float32Array;
   /**
@@ -234,6 +238,8 @@ export class DesertTileStreamer {
   private lastZ = Number.NaN;
   private farFromRoad = false;
   private disposed = false;
+  /** Wall clock of the last frame, for the stream surfaces' wave scroll. */
+  private waterClock = 0;
   /**
    * Tile buffers reclaimed from torn-down tiles, waiting to be written over.
    *
@@ -324,6 +330,13 @@ export class DesertTileStreamer {
    */
   update(x: number, z: number, roadLateral: number, frameId: number): void {
     if (this.disposed) return;
+    // The stream surfaces scroll like the lakes do. The clock is taken here rather than
+    // passed in because this update is the tiles' own frame, and a still sheet of water
+    // is the one thing that would make a stream read as painted ground.
+    const now = performance.now();
+    const dt = this.waterClock === 0 ? 0 : Math.min(0.1, (now - this.waterClock) / 1000);
+    this.waterClock = now;
+    advanceStreamWater(dt);
     const nextFarFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
     const modeChanged = nextFarFromRoad !== this.farFromRoad;
     this.farFromRoad = nextFarFromRoad;
@@ -505,6 +518,25 @@ export class DesertTileStreamer {
     mesh.castShadow = false;
     group.add(mesh);
 
+    // The watercourses' surfaces, if this tile has any (world/streams.ts). One
+    // interleaved buffer carries position and the rgba the shoreline is baked into, so
+    // a stream costs one small geometry and one draw call per tile that has one —
+    // and no draw call at all on the great majority of tiles, which is why this is not
+    // an extra material pass over the whole grid.
+    let waterGeometry: THREE.BufferGeometry | null = null;
+    if (data.waterIndexCount > 0) {
+      waterGeometry = new THREE.BufferGeometry();
+      const interleaved = new THREE.InterleavedBuffer(data.water, WATER_VERTEX_STRIDE);
+      waterGeometry.setAttribute('position', new THREE.InterleavedBufferAttribute(interleaved, 3, 0));
+      waterGeometry.setAttribute('color', new THREE.InterleavedBufferAttribute(interleaved, 4, 3));
+      waterGeometry.setIndex(new THREE.BufferAttribute(data.waterIndices, 1));
+      const waterMesh = new THREE.Mesh(waterGeometry, STREAM_WATER.material);
+      waterMesh.receiveShadow = false;
+      waterMesh.castShadow = false;
+      waterMesh.renderOrder = 1;
+      group.add(waterMesh);
+    }
+
     const { props, meshes: propMeshes } = this.buildProps(
       tx,
       tz,
@@ -526,6 +558,7 @@ export class DesertTileStreamer {
       centreZ,
       group,
       geometry,
+      waterGeometry,
       meshes,
       heights: data.heights,
       data,
@@ -1149,6 +1182,7 @@ export class DesertTileStreamer {
     this.scene.remove(tile.group);
     this.forest.removeTile(tile.key);
     tile.geometry.dispose();
+    tile.waterGeometry?.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
     // Every caller drops the tile from `tiles` around this call, and the geometry
     // above is gone, so nothing can read these buffers again: they are free to be

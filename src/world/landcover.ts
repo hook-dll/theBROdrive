@@ -1,4 +1,5 @@
 import { hashUnit3, Noise2D } from '../core/rng';
+import type { Streams } from './streams';
 import { CANOPY } from './season';
 
 /**
@@ -221,7 +222,17 @@ export class LandCover {
   private readonly seed: number;
   season: Season = 'summer';
 
-  constructor(seed: number) {
+  constructor(
+    seed: number,
+    /**
+     * The watercourses (world/streams.ts). Held for one reason: the floodplain is not
+     * ploughed. A valley floor is under water every spring, so what grows on it is hay
+     * grass and willow, and a field district stops at the foot of the valley side —
+     * which is also what keeps the country's fields out of the one place a stream would
+     * have to be seen through them.
+     */
+    private readonly streams: Streams,
+  ) {
     this.seed = seed >>> 0;
     this.farmland = new Noise2D(seed ^ 0x3c6ef372);
     this.forestNoise = new Noise2D(seed ^ 0xa54ff53a);
@@ -397,14 +408,19 @@ export class LandCover {
     // that is what makes the clearing in a wood a clearing and not a lawn.
     const fieldShare = smoothstep(0.05, 0.5, farm);
 
-    if (fieldShare > 0 && roadDist > FIELD_CLEAR && forest < 0.5) {
+    const flood = this.streams.at(x, z).flood;
+    if (fieldShare > 0 && roadDist > FIELD_CLEAR && forest < 0.5 && flood < 1) {
       const plot = this.plotAt(x, z);
       if (plot.crop >= 0) {
         const c = pal.crops[plot.crop]!;
         // A shelter belt takes its strip out of the crop, so the plough stops short of it.
         const belt = this.beltAt(x, z);
         const inside =
-          plot.inside * (1 - belt) * fieldShare * smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
+          plot.inside *
+          (1 - belt) *
+          (1 - flood) *
+          fieldShare *
+          smoothstep(FIELD_CLEAR, FIELD_CLEAR + 8, roadDist);
         // Margin grass between plots, then the crop.
         r += (pal.margin[0] - r) * farm;
         g += (pal.margin[1] - g) * farm;

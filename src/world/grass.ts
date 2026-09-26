@@ -643,9 +643,13 @@ varying vec3 vTuftAccent;`,
       flowers = 0;
       density *= 0.4;
     }
+    // Nothing grows in a watercourse's bed (world/streams.ts): it is water and gravel,
+    // and a bed of grass tufts standing in the water is the one thing that would make a
+    // stream read as a damp ditch.
+    if (this.terrain.road.landscape.streams.at(x, z).bed > 0) height = 0;
     // Off the bare shoulder (world/shoulder.ts), and thin and short just past it, where
     // the grass is taking the gravel back.
-    if (toEdge < shoulder + 0.35) height = 0;
+    else if (toEdge < shoulder + 0.35) height = 0;
     else if (toEdge < shoulder + 1.2) {
       density *= 0.45;
       height *= 0.7;

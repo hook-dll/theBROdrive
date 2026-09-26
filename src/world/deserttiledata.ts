@@ -21,6 +21,31 @@ const EXACT_DISTANCE_GATE = Math.max(CORRIDOR_OUTER, ROAD_MAX_HALF_WIDTH) + DIST
 const FULL_RELIEF_DISTANCE = 200;
 const PROP_TAG = 0x44535254;
 const MAX_TILE_PROPS = 5;
+/** Floats per water-surface vertex: x, y, z, then the rgba the shoreline is baked in. */
+export const WATER_VERTEX_STRIDE = 7;
+/**
+ * Water's own colours, linear rgb, shallow and deep.
+ *
+ * Dark and green, not blue: a stream in this country runs under alder and willow, and
+ * the sky only reaches it in patches. The deep tone clears the brightest ground there
+ * is (a stubble field) by value, so a stream reads as water and not as wet earth.
+ */
+const WATER_SHALLOW: readonly [number, number, number] = [0.1, 0.145, 0.115];
+const WATER_DEEP: readonly [number, number, number] = [0.028, 0.05, 0.046];
+/** Depth over which the surface goes from translucent to nearly opaque, metres. */
+const WATER_DEEP_FULL_M = 1.2;
+/**
+ * How deep the ground has to stand under a water surface before the surface is drawn
+ * there. Shallow enough to keep the whole channel, deep enough that the few centimetres
+ * of a bank the lattice rounds off do not become water.
+ */
+const WATER_MIN_DEPTH = 0.03;
+/**
+ * Per-vertex water level for the tile being built. One buffer reused by every tile in
+ * the worker: the generator is synchronous and single-threaded, and a tile is 6561
+ * vertices.
+ */
+const waterLevels = new Float32Array(DESERT_TILE_VERTS * DESERT_TILE_VERTS);
 
 /**
  * The non-rendering inputs to an absolute tile build. The worker creates equivalent
@@ -61,6 +86,15 @@ export interface DesertTileData {
   /** `treeCount` trees of `TREE_STRIDE` floats each: see `TreeField`. */
   readonly trees: Float32Array;
   readonly treeCount: number;
+  /**
+   * The watercourses' surfaces for this tile: `waterVertexCount` vertices of
+   * `[x, y, z, depth]` (metres above the bed, for the shoreline fade) and
+   * `waterIndexCount` triangle indices. Empty on the great majority of tiles.
+   */
+  readonly water: Float32Array;
+  readonly waterIndices: Uint32Array;
+  readonly waterVertexCount: number;
+  readonly waterIndexCount: number;
 }
 
 /**
@@ -125,6 +159,12 @@ const TREE_CELLS = Math.floor(DESERT_TILE_SIZE / TREE_CELL);
 /** A candidate can yield one tree and one bush. */
 export const MAX_TILE_TREES = TREE_CELLS * TREE_CELLS * 3;
 const TREE_TAG = 0x54524545;
+/**
+ * Half-width of the willow band along a watercourse, in field units of the stream line
+ * (`LINE_WAVELENGTH` 2600 m), so 0.014 is about 36 m from the centreline. The bed itself
+ * is 9-33 m wide, so this is one thicket deep on each bank.
+ */
+const BANK_WILLOW_HALF = 0.014;
 const UNDER_TAG = 0x554e4452;
 /** Nothing is planted closer than this to the road's centreline: verge and ditch. */
 const TREE_ROAD_KEEP = 9.5;
@@ -137,6 +177,14 @@ const TREE_EXACT_GATE = TREE_ROAD_KEEP + DIST_LATTICE * 1.5;
 export interface GroundHeightSample {
   height: number;
   detail: number;
+  /**
+   * Height of a watercourse's surface at this point, or NaN where there is none and
+   * where the reach is dry (world/streams.ts). The tile builder draws a water quad
+   * wherever the ground stands below this, so the stream is a surface standing in a bed
+   * that `Terrain` dug, and never a sheet laid over a field. NaN and not 0: the world's
+   * heights run to -200 m, so 0 is an ordinary surface height.
+   */
+  water: number;
 }
 
 /**
@@ -168,6 +216,7 @@ export function sampleGroundHeight(
     const detail = context.terrain.explorationDetailAt(x, z, FULL_RELIEF_DISTANCE, hintS);
     out.height = context.terrain.openBase(x, z, FULL_RELIEF_DISTANCE, hintS) + detail;
     out.detail = detail;
+    out.water = context.terrain.waterLevelAt(x, z);
     return;
   }
   const approximate = context.roadDistance.distAt(x, z, DIST_LATTICE);
@@ -176,6 +225,7 @@ export function sampleGroundHeight(
     const detail = context.terrain.explorationDetailAt(x, z, approximate, s);
     out.height = context.terrain.openBase(x, z, approximate, s) + detail;
     out.detail = detail;
+    out.water = context.terrain.waterLevelAt(x, z);
     return;
   }
 
@@ -198,6 +248,7 @@ export function sampleGroundHeight(
   // above the trough the near terrain mesh is drawing, and the tile would sink
   // through it as the player closed. Landform stays in the height and out of here.
   out.detail = detail - context.terrain.corridorShapeAt(x, z, dist, projection.s);
+  out.water = context.terrain.waterLevelAt(x, z);
 }
 
 /**
@@ -208,6 +259,11 @@ export function sampleGroundHeight(
  * makes that safe rather than assumed: a mismatched buffer is dropped, never
  * partially filled.
  */
+function smoothstepNumber(a: number, b: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
 function fit<T extends Float32Array | Uint32Array | Uint8Array>(
   existing: T | undefined,
   length: number,
@@ -245,7 +301,7 @@ export function generateDesertTileData(
   const colors = fit(into?.colors, vertexCount * 3, Float32Array);
   const canopy = fit(into?.canopy, vertexCount * 4, Float32Array);
   const groundPaint = fit(into?.ground, vertexCount * 4, Float32Array);
-  const ground = { height: 0, detail: 0 };
+  const ground = { height: 0, detail: 0, water: 0 };
   const paletteDistance = farFromRoad
     ? Math.abs(centreZ)
     : context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
@@ -266,6 +322,7 @@ export function generateDesertTileData(
       sampleGroundHeight(context, worldX, worldZ, farFromRoad, ground, tileHintS);
       const y = ground.height;
       heights[vi] = y;
+      waterLevels[vi] = ground.water;
       detailOffsets[vi] = ground.detail;
       positions[vi * 3] = worldX - centreX;
       positions[vi * 3 + 1] = y;
@@ -335,6 +392,93 @@ export function generateDesertTileData(
     }
   }
 
+  // THE WATERCOURSES' SURFACES (`world/streams.ts`). A stream is water standing in a
+  // bed, not a sheet laid on the ground, so the surface only exists where the ground
+  // the tiles just built stands below the water level — which is what makes a culvert
+  // read as a culvert: the graded embankment fills the bed, the ground rises above the
+  // water, and the stream stops at the face of it and picks up on the far side.
+  //
+  // The vertices carry their own DEPTH, and the shoreline fades out on it. That is what
+  // hides the lattice: the bed is only 3 m wide per cell, and a hard-edged sheet on a
+  // 3 m lattice would be a staircase. Fading over the shallows costs nothing and reads
+  // as a soft bank.
+  let waterCells = 0;
+  for (let ix = 0; ix < DESERT_TILE_CELLS; ix++) {
+    for (let iz = 0; iz < DESERT_TILE_CELLS; iz++) {
+      const a = ix * DESERT_TILE_VERTS + iz;
+      const b = (ix + 1) * DESERT_TILE_VERTS + iz;
+      const c = a + 1;
+      const d = b + 1;
+      if (
+        waterLevels[a]! - heights[a]! > WATER_MIN_DEPTH ||
+        waterLevels[b]! - heights[b]! > WATER_MIN_DEPTH ||
+        waterLevels[c]! - heights[c]! > WATER_MIN_DEPTH ||
+        waterLevels[d]! - heights[d]! > WATER_MIN_DEPTH
+      ) {
+        waterCells++;
+      }
+    }
+  }
+  const water = fit(into?.water, waterCells * 4 * WATER_VERTEX_STRIDE, Float32Array);
+  const waterIndices = fit(into?.waterIndices, waterCells * 6, Uint32Array);
+  let wp = 0;
+  let wi = 0;
+  if (waterCells > 0) {
+    for (let ix = 0; ix < DESERT_TILE_CELLS; ix++) {
+      for (let iz = 0; iz < DESERT_TILE_CELLS; iz++) {
+        const corners = [
+          ix * DESERT_TILE_VERTS + iz,
+          (ix + 1) * DESERT_TILE_VERTS + iz,
+          ix * DESERT_TILE_VERTS + iz + 1,
+          (ix + 1) * DESERT_TILE_VERTS + iz + 1,
+        ];
+        // One level for the whole quad: the surface of a stream is flat across its own
+        // section, and taking each corner's own level would tilt the sheet with the
+        // noise instead. Seeded from -Infinity and NOT from 0, because 0 is a real
+        // surface height in a world that reaches -200 m: with 0 as the seed the max
+        // never rises above it and every sheet is drawn at sea level.
+        let level = -Infinity;
+        let deep = 0;
+        for (const vi of corners) {
+          if (waterLevels[vi]! > level) level = waterLevels[vi]!;
+          const dpt = waterLevels[vi]! - heights[vi]!;
+          if (dpt > deep) deep = dpt;
+        }
+        if (deep <= WATER_MIN_DEPTH || level === -Infinity) continue;
+        const base = wp / WATER_VERTEX_STRIDE;
+        for (let k = 0; k < 4; k++) {
+          const vi = corners[k]!;
+          const cix = vi / DESERT_TILE_VERTS | 0;
+          const ciz = vi % DESERT_TILE_VERTS;
+          const dpt = waterLevels[vi]! - heights[vi]!;
+          const depth = dpt > 0 ? dpt : 0;
+          // The shoreline fade lives in the vertex alpha: the bed is a few cells wide,
+          // and a sheet with a hard edge on a 3 m lattice is a staircase.
+          const deep = smoothstepNumber(0, WATER_DEEP_FULL_M, depth);
+          const shore = smoothstepNumber(0.03, 0.3, depth);
+          // Tile-CENTRE relative, like the ground's own positions: the tile's group
+          // stands at the tile centre, and a sheet written in corner coordinates lands
+          // half a tile away from its own bed.
+          water[wp] = cix * DESERT_TILE_STEP - DESERT_TILE_SIZE * 0.5;
+          water[wp + 1] = level;
+          water[wp + 2] = ciz * DESERT_TILE_STEP - DESERT_TILE_SIZE * 0.5;
+          water[wp + 3] = WATER_SHALLOW[0] + (WATER_DEEP[0] - WATER_SHALLOW[0]) * deep;
+          water[wp + 4] = WATER_SHALLOW[1] + (WATER_DEEP[1] - WATER_SHALLOW[1]) * deep;
+          water[wp + 5] = WATER_SHALLOW[2] + (WATER_DEEP[2] - WATER_SHALLOW[2]) * deep;
+          water[wp + 6] = shore * (0.45 + 0.5 * deep);
+          wp += WATER_VERTEX_STRIDE;
+        }
+        // Same winding as the ground lattice, so the sheet faces the same way up.
+        waterIndices[wi++] = base;
+        waterIndices[wi++] = base + 2;
+        waterIndices[wi++] = base + 1;
+        waterIndices[wi++] = base + 1;
+        waterIndices[wi++] = base + 2;
+        waterIndices[wi++] = base + 3;
+      }
+    }
+  }
+
   const propSurfaces = fit(into?.propSurfaces, MAX_TILE_PROPS, Uint8Array);
   propSurfaces.fill(0);
   const requested = 2 + Math.floor(hash01(context.seed, PROP_TAG, tx, tz) * 4);
@@ -363,7 +507,23 @@ export function generateDesertTileData(
     coverSample,
   );
 
-  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces, canopy, ground: groundPaint, trees, treeCount };
+  return {
+    heights,
+    positions,
+    detailOffsets,
+    normals,
+    colors,
+    indices,
+    propSurfaces,
+    canopy,
+    ground: groundPaint,
+    trees,
+    treeCount,
+    water,
+    waterIndices,
+    waterVertexCount: waterCells * 4,
+    waterIndexCount: waterCells * 6,
+  };
 }
 
 /**
@@ -466,6 +626,11 @@ export function plantTrees(
       if (roadDist < TREE_ROAD_KEEP) continue;
       // A track is cut through the wood: the trees keep a lane either side of it.
       if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 2.2)) continue;
+      // Nothing stands IN a watercourse's bed (world/streams.ts). It is water and
+      // gravel, and a birch growing out of the middle of a stream is the kind of thing
+      // that reads as a bug rather than as a river.
+      const stream = context.road.landscape.streams.at(x, z);
+      if (stream.bed > 0) continue;
       const r = hash01(seed, TREE_TAG, gx, gz, 3);
       const r2 = hash01(seed, TREE_TAG, gx, gz, 4);
       const r3 = hash01(seed, TREE_TAG, gx, gz, 7);
@@ -506,6 +671,18 @@ export function plantTrees(
           else put(x, z, TreeKind.Bush, 0.6 + 0.7 * r3, key);
           continue;
         }
+        continue;
+      }
+
+      // THE WATERCOURSE'S BANKS. The damp strip just outside the bed carries the
+      // willows — rakita in clumps with the white willow standing out of them — and
+      // alder behind, which is the band a bridge looks down into and the thing that says
+      // "there is water down there" from three hundred metres when the water itself is
+      // under the bank.
+      if (stream.flood > 0.5 && stream.d < BANK_WILLOW_HALF && r < 0.42) {
+        const kind =
+          r2 < 0.42 ? TreeKind.Willow : r2 < 0.68 ? TreeKind.Bush : r2 < 0.9 ? TreeKind.Alder : TreeKind.Birch;
+        put(x, z, kind, 0.55 + 0.55 * r3, key);
         continue;
       }
 
@@ -619,6 +796,7 @@ export function plantTrees(
       if (roadDist < TREE_ROAD_KEEP) continue;
       if (terminusWeight(x, z) > 0) continue;
       if (onTrack(x, z, roadDist, TRACK_HALF_WIDTH_M + 0.6)) continue;
+      if (context.road.landscape.streams.at(x, z).bed > 0) continue;
       const forest = land.forestAt(x, z, roadDist);
       const r2 = hash01(seed, UNDER_TAG, gx, gz, 4);
       const r3 = hash01(seed, UNDER_TAG, gx, gz, 7);
@@ -681,7 +859,7 @@ export function plantTrees(
  */
 export function tileSurfaceSampler(context: DesertTileGenerationContext): (x: number, z: number) => number {
   const nodes = new Map<number, number>();
-  const sample: GroundHeightSample = { height: 0, detail: 0 };
+  const sample: GroundHeightSample = { height: 0, detail: 0, water: 0 };
   const node = (i: number, j: number): number => {
     const key = i * 1_000_003 + j;
     let h = nodes.get(key);
@@ -726,6 +904,8 @@ function tileHeightAt(heights: Float32Array, localX: number, localZ: number): nu
 /** Buffers are moved from the worker; the main thread builds BufferAttributes over them. */
 export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
   return [
+    data.water.buffer as ArrayBuffer,
+    data.waterIndices.buffer as ArrayBuffer,
     data.heights.buffer as ArrayBuffer,
     data.positions.buffer as ArrayBuffer,
     data.detailOffsets.buffer as ArrayBuffer,

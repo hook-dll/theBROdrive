@@ -359,7 +359,13 @@ export class Terrain {
 
   constructor(
     seed: number,
-    private readonly road: Road,
+    /**
+     * Public because the watercourses are a field the whole world shares: the planting
+     * (`deserttiledata.plantTrees`) and the grass (`grass.ts`) both have to know where
+     * the bed is to keep out of it, and `road.landscape.streams` is the one instance
+     * they must agree on.
+     */
+    readonly road: Road,
   ) {
     this.seed = seed;
     this.duneNoise = new Noise2D(seed ^ 0xc2b2ae35);
@@ -372,7 +378,7 @@ export class Terrain {
     this.outcropNoise = new Noise2D(seed ^ 0xd3a2646c);
     this.washNoise = new Noise2D(seed ^ 0x94d049bb);
     this.field = new SurfaceField(seed);
-    this.cover = new LandCover(seed);
+    this.cover = new LandCover(seed, this.road.landscape.streams);
     this.basins = new LakeBasins(road, seed);
     // The grade a basin is cut into is the open desert at its centre, which is this
     // object's own height function minus the basins themselves. Handing it over
@@ -421,6 +427,16 @@ export class Terrain {
       h -= ravine * ravine * (3 - 2 * ravine) * RAVINE_DEPTH *
         smoothstep01((dist - inner - RAVINE_CLEAR) / RAVINE_ONSET);
     }
+
+    // THE STREAM BED (`world/streams.ts`), and the one term here that is NOT faded
+    // from the corridor. Every other landform keeps clear of the road because the road
+    // is graded through it; a watercourse cannot, because the road goes OVER it. So the
+    // bed is cut right through the corridor, and the corridor grading itself decides
+    // what that means: where the reach is a bridge (`spanAt`) the grading steps aside
+    // and the bed stays open under the asphalt, and where it is a culvert the grading
+    // fills it and `roadmesh.ts` puts a pipe in the face of the embankment.
+    const stream = this.road.landscape.streams.at(x, z);
+    if (stream.bed > 0) h -= stream.bed * stream.bedDepth;
 
     // Lowlands: broad shallow hollows where water stands in spring. Kept from the
     // desert's washes, which were the same shape for a different reason.
@@ -510,8 +526,23 @@ export class Terrain {
     // seven-metre crest by it would have thinned the crest over exactly the twenty
     // metres it is supposed to climb, and cut its outer flank off at 62 m mid-air.
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (1 - paved) *
+      this.detailKeep(x, z)
     );
+  }
+
+  /**
+   * What is left of wheel-scale relief at a point: nothing in a stream bed.
+   *
+   * A bed is the one place in this world that is genuinely smooth under a wheel and
+   * under water. Corrugation, chop, hummocks and the ditch are all metres-scale bumps,
+   * and a bump in a bed either pokes through the water surface in patches or makes the
+   * surface patchy as the tile boundary crosses it.
+   */
+  private detailKeep(x: number, z: number): number {
+    const bed = this.road.landscape.streams.at(x, z).bed;
+    return bed <= 0 ? 1 : 1 - bed;
   }
 
   /** Fine band and corridor landform for the player-centred tile lattice. */
@@ -524,7 +555,9 @@ export class Terrain {
     if (paved >= 1) return 0;
     const fade = smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner));
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (1 - paved) *
+      this.detailKeep(x, z)
     );
   }
 
@@ -616,14 +649,31 @@ export class Terrain {
    * Past `CORRIDOR_OUTER` this returns the open field directly. That skips a
    * `roadEdgeHeight` sample which would otherwise be computed and discarded.
    */
-  private gradedBase(x: number, z: number, dist: number, s: number, side: number): number {
+  private gradedBase(x: number, z: number, dist: number, s: number, lateral: number): number {
     const open = this.openBase(x, z, dist, s);
-    if (dist >= CORRIDOR_OUTER) return open;
     const innerWidth = this.road.halfWidthAt(s);
+    // A BRIDGE STEPS ASIDE (world/streams.ts, `span`). `span` is nonzero only where the
+    // road actually stands over its own bed — 10-30 m of it, or a kilometre if the road
+    // runs along the stream — and there the ground is the OPEN ground: the bed, however
+    // deep it has been cut. Everywhere else the grading stands, and at a culvert the
+    // embankment fills the bed and the stream goes through a pipe.
+    //
+    // This has to happen INSIDE the carriageway as well, and that is the whole
+    // difficulty: inside the asphalt the ground is the road surface by definition
+    // (`roadSurfaceY`), which is what keeps the ribbon and the terrain flush. Without
+    // the carve below, a bridge would be a road lying on its own stream bed with a
+    // different hat on.
+    const span = this.road.landscape.streams.at(x, z).span;
+    if (dist <= innerWidth) {
+      const deck = roadSurfaceY(this.road, this.field, s, lateral, x, z);
+      return span <= 0 ? deck : deck + (open - deck) * span;
+    }
+    if (dist >= CORRIDOR_OUTER) return open;
     const t0 = (dist - innerWidth) / (CORRIDOR_OUTER - innerWidth);
-    const t = t0 * t0 * (3 - 2 * t0);
-    const inner = this.roadEdgeHeight(s, side);
-    return inner + (open - inner) * t;
+    let t = t0 * t0 * (3 - 2 * t0);
+    if (span > t) t = span;
+    const edge = this.roadEdgeHeight(s, lateral < 0 ? -1 : 1);
+    return edge + (open - edge) * t;
   }
 
   /**
@@ -651,10 +701,7 @@ export class Terrain {
   heightAt(x: number, z: number, hintS?: number): number {
     const p = this.road.project(x, z, hintS);
     const dist = Math.abs(p.lateral);
-    const base =
-      dist <= this.road.halfWidthAt(p.s)
-        ? roadSurfaceY(this.road, this.field, p.s, p.lateral, x, z)
-        : this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral));
+    const base = this.gradedBase(x, z, dist, p.s, p.lateral);
     return this.levelForTerminus(x, z, base) + this.explorationDetailAt(x, z, dist, p.s);
   }
 
@@ -672,10 +719,7 @@ export class Terrain {
    */
   baseFromFrame(x: number, z: number, lateral: number, s: number): number {
     const dist = Math.abs(lateral);
-    const base =
-      dist <= this.road.halfWidthAt(s)
-        ? roadSurfaceY(this.road, this.field, s, lateral, x, z)
-        : this.gradedBase(x, z, dist, s, Math.sign(lateral));
+    const base = this.gradedBase(x, z, dist, s, lateral);
     return this.levelForTerminus(x, z, base);
   }
 
@@ -786,6 +830,39 @@ export class Terrain {
    * hollows where the water stands after rain. Past `MUD_WETNESS` it is mud underfoot,
    * and the ground is painted with it (world/deserttiledata.ts).
    */
+  /**
+   * Height of the water surface of a watercourse at a point, or NaN where there is no
+   * watercourse or the reach is dry.
+   *
+   * The floodplain it stands on is the LANDSCAPE's own elevation, because the valley
+   * that holds the stream is a term of that field (world/streams.ts). Reading it from
+   * the final ground instead would put the water wherever a moraine hummock happened
+   * to be, and a surface that follows the bumps is not a surface water has.
+   *
+   * Public because the tile builder needs it: every vertex it draws gets the water
+   * level, and the water the mesh emits is the quads where the ground stands below it.
+   */
+  waterLevelAt(x: number, z: number): number {
+    const streams = this.road.landscape.streams;
+    const sample = streams.at(x, z);
+    // NaN, not 0, for "no water" — and this is the whole difference between a stream and
+    // a flood. The world's heights run to -200 m, so 0 is a perfectly ordinary surface
+    // height: using it as the sentinel made every tile of ground that happened to lie
+    // below sea level read as standing under water at y = 0, which is exactly what the
+    // first version of the tile water did (it drew sheets across half the sky).
+    if (sample.water <= 0 || sample.bed <= 0) return Number.NaN;
+    // Read the floor at the stream's OWN centreline, not here: the level is flat across
+    // the section and the ground is not (see `Streams.thalwegInto`).
+    streams.thalwegInto(x, z, this.thalwegPoint);
+    return streams.waterSurface(
+      this.road.landscape.heightAt(this.thalwegPoint.x, this.thalwegPoint.z),
+      sample,
+    );
+  }
+
+  /** Scratch for `waterLevelAt`'s projection onto the stream's centreline. */
+  private readonly thalwegPoint = { x: 0, z: 0 };
+
   wetnessAt(x: number, z: number): number {
     let w = 0;
     const wash = this.washNoise.fbm(x / WASH_WAVELENGTH_X, z / WASH_WAVELENGTH_Z, 2, 1.8, 0.55);
@@ -795,6 +872,10 @@ export class Terrain {
     // Puddled hollows: a sparse, blotchy field of a few tens of metres.
     const hollow = this.scoopNoise.fbm(x / 60 + 11, z / 60 - 7, 2, 2.1, 0.5);
     if (hollow > 0.52) w = Math.max(w, (hollow - 0.52) / 0.18);
+    // A stream bed is wet underfoot whatever the weather has done, and its banks are
+    // damp ground: the bed's own weight is the share of it.
+    const bed = this.road.landscape.streams.at(x, z).bed;
+    if (bed > 0) w = Math.max(w, 0.3 + bed * 0.5);
     return Math.min(1, w);
   }
 
