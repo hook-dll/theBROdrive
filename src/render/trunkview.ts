@@ -18,6 +18,14 @@ const CELL_INSET = 0.9;
 const ITEM_FIT = 0.68;
 const ITEM_FORWARD = 0.045;
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
+/**
+ * Display pose inside a holder whose +Z points at the eye (Euler XYZ). The generic
+ * pose is the three-quarter view the trunk always showed from behind the car, now
+ * kept for every viewpoint; flat items (photograph, pocket watch) keep their
+ * authored +Z face square-ish to the eye instead.
+ */
+const POSE_GENERIC = new THREE.Euler(0.22, 0.52 - Math.PI, 0.08);
+const POSE_FLAT = new THREE.Euler(0.22, 0.52, 0.08);
 
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
@@ -75,6 +83,10 @@ export class TrunkView {
     scene.add(this.root);
   }
 
+  /**
+   * @param eye World-space camera position. Every item turns inside its cell to face
+   *   it, so the contents read the same from behind, beside or above the car.
+   */
   update(
     view: TrunkViewState | null,
     vehicle: Vehicle | null,
@@ -83,6 +95,7 @@ export class TrunkView {
     origin: WorldOrigin,
     timeOfDay: number,
     dayFactor: number,
+    eye: THREE.Vector3,
   ): void {
     if (!view) {
       this.root.visible = false;
@@ -138,6 +151,10 @@ export class TrunkView {
     for (const watch of this.pocketWatches) {
       setPocketWatchState(watch, timeOfDay, dayFactor);
     }
+    // `lookAt` resolves the parent's world transform itself, so a holder under the
+    // tilted car still aims straight at the eye with world up kept up.
+    this.root.updateMatrixWorld();
+    for (const holder of this.itemHolders) holder.lookAt(eye);
   }
 
   private layout(
@@ -169,13 +186,8 @@ export class TrunkView {
       if (!item) continue;
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);
-      mesh.rotation.set(-0.22, 0.52, 0.08);
-      // Flat-faced items otherwise show their backs in the storage preview:
-      // their authored front is +Z, while this common holder pose points it away
-      // from the player. Turn only the photograph and pocket watch around.
-      if (item.type === 'photograph' || item.type === 'pocket_watch') {
-        mesh.rotation.y += Math.PI;
-      }
+      const flat = item.type === 'photograph' || item.type === 'pocket_watch';
+      mesh.rotation.copy(flat ? POSE_FLAT : POSE_GENERIC);
       if (item.type === 'pocket_watch') this.pocketWatches.push(mesh);
       _box.setFromObject(mesh).getSize(_size);
       _box.getCenter(_centre);

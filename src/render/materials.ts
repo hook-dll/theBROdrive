@@ -727,6 +727,22 @@ export function makeConditionMaterial(
 }
 
 /**
+ * The one window tint in the game: car glass and house windows are the same
+ * opaque sky mirror, so the scene probe supplies sky, cirrus and Sun and nothing
+ * behind the pane is ever modelled. The restrained blue and reflection strength
+ * keep it glass-like without turning every window into a chrome-blue panel.
+ * Owners build their own instance from these numbers (see `carGlassMaterial` in
+ * render/carmodel.ts and the dwellings' glass) so disposing one never frees the
+ * other.
+ */
+export const TINTED_GLASS = {
+  color: 0x203746,
+  roughness: 0.11,
+  metalness: 0.35,
+  envMapIntensity: 1.7,
+} as const;
+
+/**
  * Plain MeshStandardMaterial for scenery and non-condition surfaces. Shared + cached.
  *
  * Banded like the ground (render/comic.ts), with the ground's contours and stipple

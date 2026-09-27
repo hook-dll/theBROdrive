@@ -650,19 +650,6 @@ export function counter(parent: THREE.Object3D, x: number, z: number, width: num
   box(group, [width + 0.12, 0.1, 0.74], [0, 0.87, 0], C.darkTimber);
 }
 
-export function cashRegister(parent: THREE.Object3D, x: number, z: number, yaw = 0): void {
-  const group = new THREE.Group();
-  group.position.set(x, 0, z);
-  group.rotation.y = yaw;
-  parent.add(group);
-  markDoorObstacle(group, 'cash register');
-  // Furniture scale: see `FURNITURE_SCALE`. Scaling the group rather than every box
-  // keeps a piece in proportion and keeps whatever stands on it standing on it.
-  group.scale.setScalar(FURNITURE_SCALE);
-  box(group, [0.52, 0.26, 0.42], [0, 1.08, 0], C.darkMetal);
-  box(group, [0.36, 0.18, 0.06], [0, 1.25, -0.2], C.fadedGreen, [-0.25, 0, 0]);
-}
-
 export function crate(parent: THREE.Object3D, x: number, z: number, yaw = 0, size = 0.7, baseY = 0): void {
   const group = new THREE.Group();
   group.position.set(x, baseY, z);
@@ -803,26 +790,4 @@ export function roomLight(
   switchYaw = 0,
 ): void {
   roomLights(parent, [[x, z]], ceilingY, switchPosition, switchYaw);
-}
-
-export function torus(
-  parent: THREE.Object3D,
-  major: number,
-  tube: number,
-  position: V3,
-  color: number,
-  rotation: V3 = [0, 0, 0],
-): THREE.Mesh {
-  const key = `torus:${major}:${tube}`;
-  let geometry = geometryCache.get(key);
-  if (!geometry) {
-    geometry = new THREE.TorusGeometry(major, tube, 7, 18);
-    geometryCache.set(key, geometry);
-  }
-  const mesh = new THREE.Mesh(geometry, material(color));
-  mesh.position.set(position[0], position[1], position[2]);
-  mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
-  mesh.castShadow = true;
-  parent.add(mesh);
-  return mesh;
 }

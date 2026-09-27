@@ -35,37 +35,78 @@ import {
 } from './couriers';
 import { fitGround, type GroundPlane } from './footprint';
 import { halfWidthAt } from './roadprofile';
-import {
-  createVariantInstance,
-  registerPlacedSwitches,
-  variantCount,
-  variantDef,
-  type PoiCategory,
-  type VariantInstance,
-} from './poivariantbuild';
+import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
+import type { RoadDistance } from './roaddistance';
+import { registerPlacedSwitches, type VariantInstance } from './poivariantbuild';
+import { createStructureInstance, structureCount, structureDef } from './poistructures';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
 /**
- * Points of interest: the roadside stops that give the drive a reason to continue.
+ * Points of interest: the buildings that give the drive a reason to continue.
  *
- * POIs are pure functions of the integer seed. A POI at km 300 is computed from its
+ * Two populations, one model. ROADSIDE stops stand on slots every `POI_SPACING` metres
+ * of arclength, just past the verge and facing the road. DESERT ones stand on slots half
+ * a spacing off those, one per side, anywhere from 70 m to the better part of a
+ * kilometre out and facing wherever they were left facing: a house you only find by
+ * leaving the asphalt.
+ *
+ * Both are pure functions of the integer seed. A POI at km 300 is computed from its
  * slot index alone — never by walking the 249 slots before it — so chunk streaming
  * can materialise any stretch of road in any order and a save always restores the
  * exact same stop.
  *
- * Loot is materialised exactly once, keyed by the POI's slot index. `poi_looted`
- * is the idempotency guard: on any later rebuild the generation below is skipped
- * entirely, survivors live in `world.state.looseParts` / `looseItems`, and anything
- * the player already took is simply absent.
+ * WHAT STANDS THERE AND WHAT IT HOLDS ARE TWO ROLLS. The building is drawn from
+ * `POI_STRUCTURES` (world/poistructures.ts); what is left outside it — fuel, tools,
+ * medicine, a salvage field — is its `PoiStock`, rolled separately, so the world's
+ * rewards do not depend on which houses the catalogue happens to contain.
+ *
+ * Loot is materialised exactly once, keyed by `Poi.index`. `poi_looted` is the
+ * idempotency guard: on any later rebuild the generation below is skipped entirely,
+ * survivors live in `world.state.looseParts` / `looseItems`, and anything the player
+ * already took is simply absent.
  */
 
 /** Default metres of arclength between POI slots. */
 export const POI_SPACING = DEFAULT_POI_SPACING_METRES;
-/** Fraction of slots that contain a POI; the rest read as empty desert. */
+/** Fraction of roadside slots that contain a POI; the rest read as empty desert. */
 const POI_OCCUPANCY = 0.55;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
 const POI_DOMAIN = 0x504f4931; // 'POI1'
+/** Domain tag for the desert slots. */
+const DESERT_DOMAIN = 0x44534b31; // 'DSK1'
+/** Chance that one side of one desert slot has a building on it. */
+const DESERT_OCCUPANCY = 0.36;
+/** Nearest a desert building's centre stands beyond the asphalt edge and its own half size. */
+const DESERT_NEAR_M = 70;
+/** How much further out it may stand; drawn squared, so most are within sight of the road. */
+const DESERT_SPAN_M = 560;
+/**
+ * Clear ground between a desert building and ANY pass of the road's asphalt, metres.
+ *
+ * Its lateral is measured from the road at its own arclength, and the road doubles back:
+ * 600 m out on the inside of a hairpin can be on the asphalt of the next leg. The
+ * provider therefore measures the placed building against the nearest pass of the whole
+ * road and drops it when it is closer than this. 48 m is past the farthest wall of any
+ * roadside stop (a 22 m verge plus the widest building, 25 m), so a desert building can
+ * never stand in a roadside one on some other leg either.
+ */
+const DESERT_ROAD_CLEARANCE_M = 48;
+/** Clear ground between two desert buildings, on top of both their half sizes, metres. */
+const DESERT_NEIGHBOUR_CLEARANCE_M = 12;
+/** No desert buildings round the homestead or the road's far end. */
+const DESERT_END_CLEARANCE_M = 2_500;
+
+/**
+ * Where the two populations' identities live in `lootedPois`.
+ *
+ * Both are offset past anything a save written before the dwellings could hold: those
+ * saves recorded the old buildings' slot indices, and the loot they left behind was laid
+ * INSIDE buildings that now stand as closed shells. A fresh index gives every stop in an
+ * old save its loot again, outside, instead of none.
+ */
+const ROADSIDE_INDEX_BASE = 50_000_000;
+const DESERT_INDEX_BASE = 60_000_000;
 
 /**
  * Clear verge between the ASPHALT EDGE and a building's nearest wall, metres.
@@ -79,43 +120,105 @@ const POI_DOMAIN = 0x504f4931; // 'POI1'
 const VARIANT_SETBACK_MIN_M = 10;
 const VARIANT_SETBACK_SPAN_M = 12;
 
+/**
+ * What a stop leaves outside for the player, in the terms the world used when every
+ * building was one of them: a forecourt's `fuel`, a shop's `store` of tools, a `home`'s
+ * medicine, a scrapyard's `salvage` field of cars, a wreck's `scrap` and a mast's
+ * maintenance kit.
+ */
+export type PoiStock = 'fuel' | 'store' | 'home' | 'salvage' | 'scrap' | 'mast';
+
+/**
+ * A dwelling's stock, by weight. The weights are the old catalogue's building counts
+ * per kind — five petrol stations, five shops, six houses, three container yards, four
+ * wrecks — so a stop pays out, on average, exactly what a stop paid out before the
+ * buildings were replaced. Masts keep the mast stock.
+ */
+const DWELLING_STOCK: readonly { readonly stock: PoiStock; readonly weight: number }[] = [
+  { stock: 'fuel', weight: 5 },
+  { stock: 'store', weight: 5 },
+  { stock: 'home', weight: 6 },
+  { stock: 'salvage', weight: 3 },
+  { stock: 'scrap', weight: 4 },
+];
+const DWELLING_STOCK_TOTAL = DWELLING_STOCK.reduce((sum, entry) => sum + entry.weight, 0);
+
 export interface Poi {
-  /** Slot index; equals the POI's identity in `WorldState.lootedPois`. Stable forever. */
+  /** Identity in `WorldState.lootedPois` and in every generated item id. Stable forever. */
   readonly index: number;
   /** Arclength of the stop, metres from the house. */
   readonly s: number;
   /** Signed lateral offset from the centreline; negative is left of travel. */
   readonly lateral: number;
-  /** Index into `POI_VARIANTS`: the building that stands here. */
-  readonly variant: number;
+  /** Index into `POI_STRUCTURES`: the building that stands here. */
+  readonly structure: number;
+  readonly stock: PoiStock;
+  /** Out in the desert rather than at the verge: faces anywhere, and has no courier. */
+  readonly desert: boolean;
   /** Deterministic per-POI variation seed for shape and loot. */
   readonly variantSeed: number;
 }
 
-/**
- * How far out a slot sits: what this PARTICULAR building needs.
- *
- * A kiosk belongs at the verge and a parts warehouse does not, and one offset for both
- * puts either a building in the road or a shed in the middle of nowhere. So the offset
- * is the asphalt half width at this arclength, plus a verge, plus the building's own
- * half-extent. The AUTHORED footprint is used rather than a measured one because this
- * function is pure and cheap by contract — `poisBetween` resolves a stretch of road
- * without building a single triangle — and a measured extent would be wrong here for
- * the same reason: measuring means building.
- */
-function variantLateral(seed: number, index: number, s: number, variant: number): number {
-  const def = variantDef(variant);
-  const halfBuilding = Math.max(def.footprint[0], def.footprint[1]) / 2;
-  const side = hash01(seed, POI_DOMAIN, index, 2) < 0.5 ? -1 : 1;
-  const verge =
-    VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, index, 3) * VARIANT_SETBACK_SPAN_M;
-  return side * (halfWidthAt(seed, s) + verge + halfBuilding);
+function halfStructure(structure: number): number {
+  const footprint = structureDef(structure).footprint;
+  return Math.max(footprint[0], footprint[1]) / 2;
+}
+
+/** A desert building faces anywhere, so it is kept clear by its corner, not its side. */
+function radiusStructure(structure: number): number {
+  const footprint = structureDef(structure).footprint;
+  return Math.hypot(footprint[0], footprint[1]) / 2;
 }
 
 /**
- * POIs whose slot falls in [fromS, toS). `index` is the slot index itself, so it is
- * stable across sessions and directly usable as a `lootedPois` entry. Pure and
- * order-independent: no road or terrain sampling happens here.
+ * Which building, and what it holds. There is deliberately no progression to learn:
+ * both are hashes of the slot, so having seen fuel outside one izba tells a player
+ * nothing about the next one.
+ */
+function rollStructure(seed: number, domain: number, key: number): { structure: number; stock: PoiStock } {
+  const structure = Math.min(
+    structureCount() - 1,
+    Math.floor(hash01(seed, domain, key, 1) * structureCount()),
+  );
+  if (structureDef(structure).kind === 'mast') return { structure, stock: 'mast' };
+  let cursor = hash01(seed, domain, key, 5) * DWELLING_STOCK_TOTAL;
+  for (const entry of DWELLING_STOCK) {
+    cursor -= entry.weight;
+    if (cursor < 0) return { structure, stock: entry.stock };
+  }
+  return { structure, stock: DWELLING_STOCK[DWELLING_STOCK.length - 1]!.stock };
+}
+
+/**
+ * One roadside slot, resolved: null when it is empty desert. A courier slot always
+ * has a building, because the courier parks beside it.
+ *
+ * The offset is what this PARTICULAR building needs: the asphalt half width at this
+ * arclength, plus a verge, plus the building's own half-extent. The AUTHORED footprint
+ * is used rather than a measured one because this is pure and cheap by contract —
+ * `poisBetween` resolves a stretch of road without building a single triangle.
+ */
+function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
+  const s = slot * spacing;
+  if (slot < 1 || s > ROAD_LENGTH) return null;
+  if (hash01(seed, POI_DOMAIN, slot) >= POI_OCCUPANCY && !isCourierPoiSlot(seed, slot, spacing)) return null;
+  const { structure, stock } = rollStructure(seed, POI_DOMAIN, slot);
+  const side = hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1;
+  const verge = VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, slot, 3) * VARIANT_SETBACK_SPAN_M;
+  return {
+    index: ROADSIDE_INDEX_BASE + slot,
+    s,
+    lateral: side * (halfWidthAt(seed, s) + verge + halfStructure(structure)),
+    structure,
+    stock,
+    desert: false,
+    variantSeed: hash(seed, POI_DOMAIN, slot, 4),
+  };
+}
+
+/**
+ * Roadside POIs whose slot falls in [fromS, toS). Pure and order-independent: no road
+ * or terrain sampling happens here.
  */
 export function poisBetween(
   seed: number,
@@ -124,69 +227,123 @@ export function poisBetween(
   spacing = POI_SPACING,
 ): Poi[] {
   const result: Poi[] = [];
-  const firstIndex = Math.max(1, Math.ceil(fromS / spacing));
+  const firstSlot = Math.max(1, Math.ceil(fromS / spacing));
   // `toS - 1e-6` keeps a POI exactly on the upper boundary in the next chunk.
-  const lastIndex = Math.floor((toS - 1e-6) / spacing);
-
-  for (let i = firstIndex; i <= lastIndex; i++) {
-    const s = i * spacing;
-    if (s <= 0 || s > ROAD_LENGTH) continue;
-
-    if (
-      hash01(seed, POI_DOMAIN, i) >= POI_OCCUPANCY
-      && !isCourierPoiSlot(seed, i, spacing)
-    ) continue;
-
-    // WHICH BUILDING STANDS HERE, and there is deliberately no progression to learn:
-    // the variant is one hash of the slot, so having seen a petrol station tells a
-    // player nothing about the next one. That is the whole feel this is after — the
-    // drive becomes a sequence of surprises rather than a route whose landmarks are
-    // known in advance.
-    const variant = Math.min(
-      variantCount() - 1,
-      Math.floor(hash01(seed, POI_DOMAIN, i, 1) * variantCount()),
-    );
-    const lateral = variantLateral(seed, i, s, variant);
-
-    result.push({
-      index: i,
-      s,
-      lateral,
-      variant,
-      variantSeed: hash(seed, POI_DOMAIN, i, 4),
-    });
+  const lastSlot = Math.floor((toS - 1e-6) / spacing);
+  for (let slot = firstSlot; slot <= lastSlot; slot++) {
+    const poi = roadsidePoi(seed, slot, spacing);
+    if (poi) result.push(poi);
   }
   return result;
 }
 
 /**
- * The POI at a given slot, or null when that slot is empty desert. Same rolls as
- * `poisBetween`, factored out so one slot can be resolved without sampling a whole
- * stretch of road — `tools/wreck-spacing.ts` reads a field that way.
+ * The roadside POI at a slot, or null when that slot is empty desert. Same rolls as
+ * `poisBetween`, so one slot can be resolved without sampling a whole stretch of road —
+ * `tools/wreck-spacing.ts` reads a field that way.
  */
-export function poiAt(seed: number, index: number, spacing = POI_SPACING): Poi | null {
-  if (index < 1) return null;
-  const s = index * spacing;
-  if (s <= 0 || s > ROAD_LENGTH) return null;
-  if (hash01(seed, POI_DOMAIN, index) >= POI_OCCUPANCY) return null;
-
-  // Must stay roll-for-roll identical to `poisBetween`, or a bench reading one slot
-  // measures a POI the world will never build.
-  const variant = Math.min(
-    variantCount() - 1,
-    Math.floor(hash01(seed, POI_DOMAIN, index, 1) * variantCount()),
-  );
-  const lateral = variantLateral(seed, index, s, variant);
-
-  return {
-    index,
-    s,
-    lateral,
-    variant,
-    variantSeed: hash(seed, POI_DOMAIN, index, 4),
-  };
+export function poiAt(seed: number, slot: number, spacing = POI_SPACING): Poi | null {
+  return roadsidePoi(seed, slot, spacing);
 }
 
+const lakeCache = new Map<number, readonly LakeSite[]>();
+function lakesOf(seed: number): readonly LakeSite[] {
+  let sites = lakeCache.get(seed);
+  if (!sites) {
+    sites = lakeSites(seed, ROAD_LENGTH);
+    lakeCache.set(seed, sites);
+  }
+  return sites;
+}
+
+/** Whether a desert spot, in road coordinates, falls in or on the rim of a lake basin. */
+function inLakeBasin(seed: number, s: number, lateral: number, half: number): boolean {
+  const reach = BASIN_OUTER_M + half + 20;
+  for (const site of lakesOf(seed)) {
+    if (Math.abs(site.s - s) > reach) continue;
+    if (Math.hypot(site.s - s, site.lateral - lateral) < reach) return true;
+  }
+  return false;
+}
+
+/**
+ * Desert POIs whose slot's arclength falls in [fromS, toS).
+ *
+ * A desert slot sits half a spacing off the roadside grid and carries one candidate on
+ * each side, each moved up to 40% of a spacing along the road so the two sides do not
+ * pair up. Its arclength decides which chunk builds it, exactly as a roadside one's does.
+ * What this cannot know without the road's geometry is whether another pass of the road
+ * runs past the spot; `PoiProvider` checks that where it has the road.
+ */
+export function desertPoisBetween(
+  seed: number,
+  fromS: number,
+  toS: number,
+  spacing = POI_SPACING,
+): Poi[] {
+  const result: Poi[] = [];
+  // One slot either side of the range: a jittered slot can land inside it from next door.
+  const firstSlot = Math.max(0, Math.floor(fromS / spacing) - 1);
+  const lastSlot = Math.ceil(toS / spacing) + 1;
+  for (let slot = firstSlot; slot <= lastSlot; slot++) {
+    for (const side of [-1, 1] as const) {
+      const key = slot * 2 + (side > 0 ? 1 : 0);
+      if (hash01(seed, DESERT_DOMAIN, key) >= DESERT_OCCUPANCY) continue;
+      const s = (slot + 0.5 + (hash01(seed, DESERT_DOMAIN, key, 2) - 0.5) * 0.8) * spacing;
+      if (s < fromS || s >= toS) continue;
+      if (s < DESERT_END_CLEARANCE_M || s > ROAD_LENGTH - DESERT_END_CLEARANCE_M) continue;
+      const { structure, stock } = rollStructure(seed, DESERT_DOMAIN, key);
+      const half = halfStructure(structure);
+      const out = hash01(seed, DESERT_DOMAIN, key, 3);
+      const lateral = side * (halfWidthAt(seed, s) + DESERT_NEAR_M + half + out * out * DESERT_SPAN_M);
+      if (inLakeBasin(seed, s, lateral, half)) continue;
+      result.push({
+        index: DESERT_INDEX_BASE + key,
+        s,
+        lateral,
+        structure,
+        stock,
+        desert: true,
+        variantSeed: hash(seed, DESERT_DOMAIN, key, 4),
+      });
+    }
+  }
+  return result;
+}
+
+/** The lattice the terrain mesh already resolves road ownership on (world/terrainmesh.ts). */
+const DESERT_OWNER_LATTICE_M = 50;
+
+/**
+ * Whether a desert POI's spot stays clear of every pass of the road. Its own lateral
+ * already clears the road at its own arclength; this finds the pass nearest the spot,
+ * wherever along the road that is, and measures against it exactly.
+ */
+export function desertPoiClearOfRoad(poi: Poi, road: Road, roadDistance: RoadDistance): boolean {
+  const point = road.offsetPoint(poi.s, poi.lateral);
+  const owner = roadDistance.ownerAt(point.x, point.z, DESERT_OWNER_LATTICE_M);
+  const nearest = road.project(point.x, point.z, owner);
+  const clearance = Math.abs(nearest.lateral) - road.halfWidthAt(nearest.s) - radiusStructure(poi.structure);
+  return clearance >= DESERT_ROAD_CLEARANCE_M;
+}
+
+/**
+ * Whether no other desert building stands where this one would. Slots are hundreds of
+ * metres apart along the road, but out at 600 m on the inside of a tight bend the
+ * laterals of neighbouring slots converge. Of two that meet, the one with the lower
+ * index stands and the other is dropped — whichever chunk is asking, the same one wins.
+ */
+function desertPoiClearOfNeighbours(poi: Poi, seed: number, spacing: number, road: Road): boolean {
+  const here = road.offsetPoint(poi.s, poi.lateral);
+  const reach = 3 * spacing;
+  for (const other of desertPoisBetween(seed, poi.s - reach, poi.s + reach, spacing)) {
+    if (other.index >= poi.index) continue;
+    const there = road.offsetPoint(other.s, other.lateral);
+    const needed = radiusStructure(poi.structure) + radiusStructure(other.structure) + DESERT_NEIGHBOUR_CLEARANCE_M;
+    if (Math.hypot(here.x - there.x, here.z - there.z) < needed) return false;
+  }
+  return true;
+}
 
 /** Running sub-index so every generated part/item in a POI gets a distinct id. */
 interface LootCounter {
@@ -250,7 +407,10 @@ function siteAt(
     z: anchor.z,
     yaw,
     lift,
-    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s),
+    // Five by five, not the default three: the residual is only as honest as the samples
+    // it is taken over, and a 30 m mast compound on the berm's curve hid 0.14 m of daylight
+    // under a wall between the nine a 3x3 grid takes. Once per building, 25 road samples.
+    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s, 5),
   };
 }
 
@@ -458,16 +618,45 @@ const TOOL_KINDS: readonly ToolKind[] = ['brush', 'sponge', 'wrench'];
 // ---------------------------------------------------------------------------
 
 /**
- * Fuel cans on a forecourt or in a shop, part-used rather than factory-sealed.
+ * The strip of ground in front of a building, where everything it gives away is left.
  *
- * The same stock the old gas stop carried, so a player who knew where fuel came from
- * still finds it where they expect: this is a redistribution of the world's rewards
- * across the new buildings, not a change to what the world pays out.
+ * None of the buildings can be entered, and loot laid "in the middle of the site" would
+ * now be inside a closed shell's collider. So it goes where a person leaves things at a
+ * house: by the front, between the wall and the road for a roadside stop. `across` runs
+ * -1..1 along the front, `out` is metres beyond the front wall, and the height is the
+ * sand itself — the site's plane is fitted under the building, not out here.
+ */
+interface Yard {
+  readonly site: Site;
+  readonly halfX: number;
+  readonly halfZ: number;
+}
+
+/**
+ * Deepest the yard reaches beyond the front wall, metres. The wreck field keeps clear
+ * of it, and it stops short of where a courier parks: the nearest verge is 10 m, and a
+ * courier's flank stands about 10.4 m from the centreline.
+ */
+const YARD_DEPTH_M = 2.4;
+
+function yardPoint(ctx: ChunkContext, poi: Poi, yard: Yard, across: number, out: number): { x: number; y: number; z: number } {
+  const width = Math.min(yard.halfX, 4.5);
+  const o = rotateXZ(across * width, -(yard.halfZ + out), yard.site.yaw);
+  const x = yard.site.x + o.x;
+  const z = yard.site.z + o.z;
+  return { x, y: ctx.terrain.heightAt(x, z, poi.s), z };
+}
+
+/**
+ * Fuel cans part-used rather than factory-sealed, stood in a row by the front wall.
+ *
+ * The same stock the old gas stop carried: this is where the world's fuel comes from, and
+ * the stock roll keeps it coming from as many stops as it ever did.
  */
 function stockFluidCans(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   loose: LoosePartField,
   counter: LootCounter,
   count: number,
@@ -478,28 +667,23 @@ function stockFluidCans(
     const litres =
       Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
     const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
-    const c = sitePoint(
-      site,
-      (hash01(poi.variantSeed, 33, i) - 0.5) * 4,
-      (hash01(poi.variantSeed, 34, i) - 0.5) * 3 - 0.4,
-    );
+    const c = yardPoint(ctx, poi, yard, -0.95 + i * 0.22, 0.7 + hash01(poi.variantSeed, 34, i) * 0.5);
     loose.spawnItem(can, c.x, c.y + 0.2, c.z);
   }
 }
 
 /**
- * One sealed five-piece gum pack. The roadside-only rescue resource: it was one per
- * gas stop, and there is still one per stop that stocks anything, so the supply of
- * the thing that gets a car unstuck is unchanged by the new buildings.
+ * One sealed five-piece gum pack. The roadside rescue resource: one per stop that stocks
+ * anything a shop would, left on the step.
  */
 function stockGum(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   loose: LoosePartField,
   counter: LootCounter,
 ): void {
-  const spot = sitePoint(site, 2.6, -0.7);
+  const spot = yardPoint(ctx, poi, yard, 0.32, 1.0);
   const sub = counter.sub++;
   loose.spawnItem(
     {
@@ -514,29 +698,33 @@ function stockGum(
 }
 
 /**
- * A trailer left on the forecourt. Take one, leave one: they are never owned, so this
+ * A trailer left beside the house. Take one, leave one: they are never owned, so this
  * records a world object rather than giving the player a possession, and `shouldLoot`
  * is what stops a stop growing a new one every reload.
  */
 function stockTrailer(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   trailers: TrailerField,
-  yaw: number,
 ): void {
   if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) >= TRAILER_STOP_CHANCE) return;
-  const spot = sitePoint(site, 6.4, -1.2);
+  // Alongside the right-hand wall, drawbar to the front: clear of the building, of the
+  // loot by the front wall, and pointing the way a car would come to take it.
+  const o = rotateXZ(yard.halfX + 2.4, -yard.halfZ * 0.4, yard.site.yaw);
+  const x = yard.site.x + o.x;
+  const z = yard.site.z + o.z;
+  const yaw = yard.site.yaw + Math.PI;
   const half = yaw / 2;
   trailers.spawn({
     id: `trailer:${poi.index}`,
     hitchedTo: null,
     cargoKg: 0,
-    x: spot.x,
+    x,
     // Clear of the ground so it drops onto its own suspension rather than starting
     // inside the terrain trimesh.
-    y: spot.y + 0.9,
-    z: spot.z,
+    y: ctx.terrain.heightAt(x, z, poi.s) + 0.9,
+    z,
     qx: 0,
     qy: Math.sin(half),
     qz: 0,
@@ -544,11 +732,11 @@ function stockTrailer(
   });
 }
 
-/** Tools, scattered around a site's middle. */
+/** Tools, left about the front of the house. */
 function stockTools(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   loose: LoosePartField,
   counter: LootCounter,
   count: number,
@@ -556,24 +744,26 @@ function stockTools(
   for (let i = 0; i < count; i++) {
     const tool = pick(TOOL_KINDS, poi.variantSeed, 98 + i);
     const item = makeTool(ctx.world, poi, tool, counter);
-    const tp = sitePoint(
-      site,
-      (hash01(poi.variantSeed, 99, i) - 0.5) * 3,
-      (hash01(poi.variantSeed, 100, i) - 0.5) * 3,
+    const tp = yardPoint(
+      ctx,
+      poi,
+      yard,
+      0.5 + hash01(poi.variantSeed, 99, i) * 0.45,
+      0.8 + hash01(poi.variantSeed, 100, i) * (YARD_DEPTH_M - 0.8),
     );
     loose.spawnItem(item, tp.x, tp.y + 0.25, tp.z);
   }
 }
 
-/** A medicine pack, for the buildings that read as somebody's home. */
+/** A medicine pack, left on the step of somebody's home. */
 function stockMedicine(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   loose: LoosePartField,
   counter: LootCounter,
 ): void {
-  const spot = sitePoint(site, -1.8, 1.4);
+  const spot = yardPoint(ctx, poi, yard, -0.25, 0.9);
   const sub = counter.sub++;
   loose.spawnItem(
     { type: 'medicine', id: ctx.world.generatedPartId('poi_item', poi.index, sub) },
@@ -584,77 +774,53 @@ function stockMedicine(
 }
 
 /**
- * What a building pays out, by its CATEGORY.
- *
- * The old world tied rewards to four hand-built kinds, so "what is this place" and
- * "what does it give me" were the same question. They are not any more: there are
- * twenty-six buildings and six things they are for, and the category is what carries
- * the meaning. The mapping is chosen so the supply of each resource stays close to what
- * it was — fuel still comes from forecourts, tools still come from anywhere with a
- * workbench in it — and the salvageable car field that used to BE the wreck stop now
- * lives with the containers, which is where a scrapyard's worth of cars belongs.
+ * What a stop pays out, by its STOCK. The counts and chances are the ones each kind of
+ * building paid out when the building and the payout were the same thing, so the
+ * supply of each resource is what it was: fuel from `fuel` stops, tools from anywhere
+ * with a bench, the car field from `salvage`.
  */
-function grantCategoryLoot(
-  category: PoiCategory,
+function grantStockLoot(
   ctx: ChunkContext,
   poi: Poi,
-  site: Site,
+  yard: Yard,
   loose: LoosePartField,
   trailers: TrailerField,
   counter: LootCounter,
-  yaw: number,
 ): void {
-  switch (category) {
-    case 'gas':
-      // Fuel is the whole point of a petrol station, and a forecourt carries the engine
-      // fluids too: the stop that gets you moving is where you top up. 3-6 cans, the
-      // gum pack, and a trailer better than half the time.
-      stockFluidCans(
-        ctx,
-        poi,
-        site,
-        loose,
-        counter,
-        3 + Math.floor(hash01(poi.variantSeed, 30) * 4),
-      );
-      stockGum(ctx, poi, site, loose, counter);
-      stockTrailer(ctx, poi, site, trailers, yaw);
+  switch (poi.stock) {
+    case 'fuel':
+      // The stop that gets you moving is where you top up: 3-6 cans of fuel and engine
+      // fluids, the gum pack, and a trailer better than half the time.
+      stockFluidCans(ctx, poi, yard, loose, counter, 3 + Math.floor(hash01(poi.variantSeed, 30) * 4));
+      stockGum(ctx, poi, yard, loose, counter);
+      stockTrailer(ctx, poi, yard, trailers);
       break;
-    case 'shop':
-      // A shop is where the tools are, and every shop keeps the gum behind the counter.
-      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 96) * 3));
-      stockGum(ctx, poi, site, loose, counter);
-      // A bigger store also has fluids out the back.
+    case 'store':
+      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 96) * 3));
+      stockGum(ctx, poi, yard, loose, counter);
       if (hash01(poi.variantSeed, 97) < 0.5) {
-        stockFluidCans(
-          ctx,
-          poi,
-          site,
-          loose,
-          counter,
-          1 + Math.floor(hash01(poi.variantSeed, 95) * 2),
-        );
+        stockFluidCans(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 95) * 2));
       }
       break;
-    case 'house':
+    case 'home':
       // Somebody lived here: a medicine pack, a tool they left out, sometimes a can.
-      stockMedicine(ctx, poi, site, loose, counter);
-      if (hash01(poi.variantSeed, 94) < 0.6) stockTools(ctx, poi, site, loose, counter, 1);
-      if (hash01(poi.variantSeed, 93) < 0.35) stockFluidCans(ctx, poi, site, loose, counter, 1);
+      stockMedicine(ctx, poi, yard, loose, counter);
+      if (hash01(poi.variantSeed, 94) < 0.6) stockTools(ctx, poi, yard, loose, counter, 1);
+      if (hash01(poi.variantSeed, 93) < 0.35) stockFluidCans(ctx, poi, yard, loose, counter, 1);
       break;
-    case 'container':
-      // The salvage stop. Cars are broken down here and their trunks are worth opening.
-      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 92) * 2));
-      if (hash01(poi.variantSeed, 91) < 0.4) stockFluidCans(ctx, poi, site, loose, counter, 1);
+    case 'salvage':
+      // Cars are broken down here and their trunks are worth opening; the field itself is
+      // laid out by `buildWrecks`.
+      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 92) * 2));
+      if (hash01(poi.variantSeed, 91) < 0.4) stockFluidCans(ctx, poi, yard, loose, counter, 1);
       break;
-    case 'tower':
+    case 'mast':
       // A maintenance site: tools, and the fuel for whatever got you up there.
-      stockTools(ctx, poi, site, loose, counter, 1);
-      if (hash01(poi.variantSeed, 90) < 0.5) stockFluidCans(ctx, poi, site, loose, counter, 1);
+      stockTools(ctx, poi, yard, loose, counter, 1);
+      if (hash01(poi.variantSeed, 90) < 0.5) stockFluidCans(ctx, poi, yard, loose, counter, 1);
       break;
-    case 'wreck':
-      // A wrecked vessel or aircraft pays out in what can be salvaged from it.
-      stockTools(ctx, poi, site, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 89) * 2));
+    case 'scrap':
+      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 89) * 2));
       break;
   }
 }
@@ -676,6 +842,16 @@ export function faceRoadYaw(heading: number, lateral: number, variantSeed: numbe
   return outward + Math.PI + (hash01(variantSeed, 7) - 0.5) * 0.16;
 }
 
+/**
+ * Which way a POI's building faces: toward the road for a roadside stop, and anywhere at
+ * all for one out in the desert, which nobody built with the road in mind.
+ */
+export function poiYaw(poi: Poi, heading: number): number {
+  return poi.desert
+    ? hash01(poi.variantSeed, 7) * Math.PI * 2
+    : faceRoadYaw(heading, poi.lateral, poi.variantSeed);
+}
+
 /** Intensity of a building's authored lamps, as handed to the light budget. */
 const VARIANT_LAMP_INTENSITY = 0.55;
 
@@ -689,15 +865,9 @@ const VARIANT_LAMP_INTENSITY = 0.55;
 const SEAT_BURY_MARGIN = 0.08;
 
 /**
- * One stop: a gallery building on a fitted apron, its collider, and its rewards.
- *
- * The apron is what makes the catalogue usable in a real world. Its slab top IS the
- * fitted ground plane, so a building placed on it stands on ONE plane instead of taking
- * a terrain sample per part — the same fix the old gas forecourt used, applied to every
- * building at once. Without it a 30 m storefront on the 9-10% ground this world is made
- * of stands on air at one corner and buries its front door at the other.
+ * One stop: a building on the sand, its collider, and its rewards.
  */
-function buildVariantPoi(
+function buildStructurePoi(
   ctx: ChunkContext,
   poi: Poi,
   group: THREE.Group,
@@ -713,9 +883,9 @@ function buildVariantPoi(
   counter: LootCounter,
   shouldLoot: boolean,
 ): void {
-  const instance = createVariantInstance(poi.variant);
+  const instance: VariantInstance = createStructureInstance(poi.structure);
   const a = anchorXZ(ctx, poi);
-  const yaw = faceRoadYaw(a.heading, poi.lateral, poi.variantSeed);
+  const yaw = poiYaw(poi, a.heading);
 
   // NO APRON. A building stands on the sand, pushed in far enough that the sand meets
   // its walls wherever the ground rises.
@@ -733,7 +903,10 @@ function buildVariantPoi(
   // and none of it stands on anything man-made.
   const halfX = instance.halfExtentX;
   const halfZ = instance.halfExtentZ;
-  const site = siteAt(ctx, poi, a, yaw, halfX, halfZ);
+  // Fitted over the larger of the measured bounds and the authored footprint: a mast
+  // compound's measured bounds stop at its masts, and the guy anchors, the hut's step and
+  // the cable runs past them still have to meet the sand.
+  const site = siteAt(ctx, poi, a, yaw, Math.max(halfX, instance.footprint[0] / 2), Math.max(halfZ, instance.footprint[1] / 2));
   const seatY = site.plane.centreY - site.plane.residual - SEAT_BURY_MARGIN;
 
   const at = sitePoint(site, 0, 0);
@@ -788,22 +961,32 @@ function buildVariantPoi(
     }
   }
 
-  // The salvageable car field stayed with the containers. `buildWrecks` places its cars
-  // around the POI's own anchor, which is exactly where this building stands, so it is
-  // handed the footprint to lay out around.
-  if (instance.category === 'container') {
-    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals, {
-      x: a.x,
-      z: a.z,
-      yaw,
-      halfX,
-      halfZ,
-    });
+  // The salvageable car field. `buildWrecks` places its cars around the POI's own
+  // anchor, which is exactly where this building stands, so it is handed the footprint
+  // to lay out around.
+  if (poi.stock === 'salvage') {
+    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals, salvageKeepOut(poi, ctx.road, instance));
   }
 
   if (shouldLoot) {
-    grantCategoryLoot(instance.category, ctx, poi, site, loose, trailers, counter, yaw);
+    grantStockLoot(ctx, poi, { site, halfX, halfZ }, loose, trailers, counter);
   }
+}
+
+/**
+ * The rectangle a salvage stop's car field lays out around: the building where it
+ * stands, deepened by the yard so no car is parked on the loot. Exported so
+ * `tools/wreck-spacing.ts` measures the very keep-out the world uses.
+ */
+export function salvageKeepOut(poi: Poi, road: Road, instance: VariantInstance): WreckKeepOut {
+  const centre = road.offsetPoint(poi.s, poi.lateral);
+  return {
+    x: centre.x,
+    z: centre.z,
+    yaw: poiYaw(poi, road.sampleAt(poi.s).heading),
+    halfX: instance.halfExtentX,
+    halfZ: instance.halfExtentZ + YARD_DEPTH_M,
+  };
 }
 
 function buildPoi(
@@ -823,7 +1006,7 @@ function buildPoi(
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
 
-  buildVariantPoi(
+  buildStructurePoi(
     ctx,
     poi,
     group,
@@ -1037,7 +1220,12 @@ function makeWorkingCar(
  * depend on whether an earlier working car has already been driven away.
  */
 const WRECK_CLEARANCE_M = 1.4;
-/** Metres of road the field is strung along, and its lateral spread. */
+/**
+ * Metres of road the field is strung along, and its lateral spread, round an empty
+ * anchor. With a building on the anchor the field is lengthened along the road by the
+ * building's own size, so the cars stand beside it rather than being asked to fit in a
+ * 26 m window a 25 m house already fills.
+ */
 const WRECK_S_SPREAD = 26;
 const WRECK_LAT_SPREAD = 12;
 /** Candidate draws per slot before the lattice takes over. */
@@ -1073,6 +1261,7 @@ export interface WreckKeepOut {
 }
 
 export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): WreckSlot[] {
+  const sSpread = WRECK_S_SPREAD + (keepOut ? 2 * Math.max(keepOut.halfX, keepOut.halfZ) : 0);
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
   const slots: WreckSlot[] = [];
 
@@ -1112,7 +1301,7 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
 
     let chosen = { sDelta: 0, latDelta: 0, margin: -Infinity };
     for (let attempt = 0; attempt < WRECK_PLACEMENT_ATTEMPTS; attempt++) {
-      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * WRECK_S_SPREAD;
+      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * sSpread;
       const latDelta = (hash01(poi.variantSeed, w, 12, attempt) - 0.5) * WRECK_LAT_SPREAD;
       const margin = marginAt(sDelta, latDelta);
       if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
@@ -1124,8 +1313,8 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
     if (chosen.margin < WRECK_CLEARANCE_M) {
       let settled = false;
       for (
-        let sDelta = -WRECK_S_SPREAD / 2;
-        sDelta <= WRECK_S_SPREAD / 2 && !settled;
+        let sDelta = -sSpread / 2;
+        sDelta <= sSpread / 2 && !settled;
         sDelta += WRECK_LATTICE_STEP_M
       ) {
         for (
@@ -1271,14 +1460,15 @@ function buildWrecks(
   }
 }
 
-/** Fraction of gas stops with a trailer standing on the forecourt. */
+/** Fraction of fuel stops with a trailer left beside the house. */
 const TRAILER_STOP_CHANCE = 0.45;
 /** Domain tag for the trailer roll. */
 const TRAILER_DOMAIN = 0x54524c31; // 'TRL1'
 
 /**
- * Builds ordinary stops plus the sparse courier network. Static trunk registries
- * exist only for the live physics band; their edited contents remain in WorldState.
+ * Builds roadside and desert stops plus the sparse courier network. Static trunk
+ * registries exist only for the live physics band; their edited contents remain in
+ * WorldState.
  */
 export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
@@ -1289,14 +1479,16 @@ export class PoiProvider implements ChunkProvider {
     private readonly wreckTrunks: WreckTrunkField,
     private readonly switches: PoiSwitchField,
     private readonly couriers: CourierField,
+    private readonly roadDistance: RoadDistance,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
-    const pois = poisBetween(
-      ctx.world.seed,
-      ctx.sStart,
-      ctx.sEnd,
-      ctx.world.state.settings.poiSpacingMetres,
+    const spacing = ctx.world.state.settings.poiSpacingMetres;
+    const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing);
+    const desert = desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing).filter(
+      (poi) =>
+        desertPoiClearOfRoad(poi, ctx.road, this.roadDistance) &&
+        desertPoiClearOfNeighbours(poi, ctx.world.seed, spacing, ctx.road),
     );
 
     const group = new THREE.Group();
@@ -1308,7 +1500,7 @@ export class PoiProvider implements ChunkProvider {
     const registeredSwitches: string[] = [];
     const registeredCouriers: string[] = [];
 
-    for (const poi of pois) {
+    for (const poi of [...pois, ...desert]) {
       buildPoi(
         ctx,
         poi,

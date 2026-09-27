@@ -58,9 +58,10 @@ export interface DrivingReadout {
    * The instrument faces carry it. Who is steering is the single most important thing
    * a driver can be unsure about — a black dash is the player's own car, and a coloured
    * one is a car going somewhere without him — and the mode matters as much as the fact,
-   * because `frantic` and `sleeper` differ by roughly half the cornering speed. It is on
-   * the FACES rather than in a lamp for the same reason the steering strip exists: it is
-   * read from the corner of the eye, without looking for it.
+   * because `sleeper` keeps its lane well inside the tyres and `frantic` races the whole
+   * road at their limit. It is on the FACES rather than in a lamp for the same reason
+   * the steering strip exists: it is read from the corner of the eye, without looking
+   * for it.
    */
   autopilotMode: AutopilotMode | null;
 }

@@ -10,9 +10,9 @@
  * both clear the asphalt by a verge — where a single fixed offset either put the
  * storefront in the lane or the kiosk in the middle of nowhere.
  *
- * NO CATEGORY IS A RARITY. Twenty-six buildings drawn from one hash means the mix is
- * a property of the seed, not a guarantee; over a long enough stretch every variant
- * must actually appear, or some of the catalogue is content nobody will ever see.
+ * NO STRUCTURE IS A RARITY. Fifty-three buildings drawn from one hash means the mix is
+ * a property of the seed, not a guarantee; over a long enough stretch every one must
+ * actually appear, or some of the catalogue is content nobody will ever see.
  *
  * THE HOMESTEAD IS WHERE IT SAYS IT IS. The building is tilted onto its own fitted
  * ground plane, the starter car stands inside the garage rather than beside it, the
@@ -27,17 +27,20 @@ import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { Interaction } from '../src/player/interaction';
-import { PoiProvider, poisBetween } from '../src/world/poi';
+import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';
 import { PoiSwitchField } from '../src/world/poiswitches';
+import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
-  createVariantInstance,
-  variantCount,
-  variantDef,
-  warmVariantAssets,
-} from '../src/world/poivariantbuild';
+  POI_STRUCTURES,
+  createStructureInstance,
+  structureCount,
+  structureDef,
+  warmPoiStructures,
+} from '../src/world/poistructures';
+import { RoadDistance } from '../src/world/roaddistance';
 import { SHELF_PLANK_TOP } from '../src/world/poi/kit';
 import { STARTER_GARAGE_SHELF } from '../src/world/poi/starter';
-import { createPoiVariant, mergePoiStatics } from '../src/world/poi-variants';
+import { createPoiVariant, mergePoiStatics, poiVariantIndex } from '../src/world/poi-variants';
 import {
   HOMESTEAD_FOOTPRINT,
   HomesteadProvider,
@@ -61,6 +64,7 @@ function check(condition: boolean, message: string): void {
 const world = new GameWorld(newWorldState(SEED));
 const road = new Road(SEED);
 const terrain = new Terrain(SEED, road);
+const roadDistance = new RoadDistance(road);
 
 /** The verge the placement promises between the asphalt edge and the nearest wall. */
 const MIN_VERGE_M = 10;
@@ -85,7 +89,7 @@ const MAX_RESIDUAL_M = 0.6;
     const pois = poisBetween(SEED, s - 1, s + 1, world.state.settings.poiSpacingMetres);
     const poi = pois[0];
     if (!poi) continue;
-    const def = variantDef(poi.variant);
+    const def = structureDef(poi.structure);
     const halfBuilding = Math.max(def.footprint[0], def.footprint[1]) / 2;
     const edge = halfWidthAt(SEED, poi.s);
     const clearance = Math.abs(poi.lateral) - edge - halfBuilding;
@@ -108,30 +112,71 @@ const MAX_RESIDUAL_M = 0.6;
   console.log(
     `  ${checked} slots placed, tightest verge ${worstVerge.toFixed(1)} m (${tightest})`,
   );
+
+  // THE AUTHORED FOOTPRINT IS THE MEASURED ONE. Placement never builds a house to learn
+  // its size, so a footprint smaller than the house is a wall nearer the road than the
+  // verge promises. The extent toward the road is the measured half depth, which is
+  // symmetric about the anchor and so covers whichever side faces the road.
+  let worstShortfall = 0;
+  let shortest = '';
+  for (let index = 0; index < structureCount(); index++) {
+    const instance = createStructureInstance(index);
+    const def = structureDef(index);
+    const half = Math.max(def.footprint[0], def.footprint[1]) / 2;
+    const shortfall = Math.max(instance.halfExtentX, instance.halfExtentZ) - half;
+    if (shortfall > worstShortfall) {
+      worstShortfall = shortfall;
+      shortest = def.id;
+    }
+  }
+  check(
+    worstShortfall <= 0.35,
+    `${shortest} measures ${worstShortfall.toFixed(2)} m larger than its authored footprint`,
+  );
+
+  // DESERT BUILDINGS STAND OUT IN THE DESERT, clear of every pass of the road and not in
+  // one another: the lateral alone cannot promise that where the road doubles back.
+  const spacing = world.state.settings.poiSpacingMetres;
+  const desert = desertPoisBetween(SEED, 0, 400 * spacing, spacing);
+  const standing = desert.filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance));
+  let nearestRoad = Infinity;
+  for (const poi of standing) {
+    const point = road.offsetPoint(poi.s, poi.lateral);
+    const nearest = road.project(point.x, point.z, roadDistance.ownerAt(point.x, point.z, 50));
+    const def = structureDef(poi.structure);
+    const gap = Math.abs(nearest.lateral) - road.halfWidthAt(nearest.s) - Math.max(...def.footprint) / 2;
+    nearestRoad = Math.min(nearestRoad, gap);
+  }
+  check(standing.length > 100, `only ${standing.length} desert buildings over ${(400 * spacing) / 1000} km`);
+  check(nearestRoad >= 48 - 1e-6, `a desert building stands ${nearestRoad.toFixed(1)} m from the asphalt`);
+  console.log(
+    `  ${standing.length} desert buildings (${desert.length - standing.length} dropped near another pass), ` +
+      `nearest ${nearestRoad.toFixed(0)} m from any asphalt; largest footprint shortfall ` +
+      `${worstShortfall.toFixed(2)} m (${shortest || 'none'})`,
+  );
 }
 
 // --- 2. the whole catalogue is reachable -------------------------------------
 {
   const seen = new Set<number>();
-  const perCategory = new Map<string, number>();
+  const perStock = new Map<PoiStock, number>();
   for (let index = 1; index <= 4000; index++) {
     const spacing = world.state.settings.poiSpacingMetres;
     const pois = poisBetween(SEED, index * spacing - 1, index * spacing + 1, spacing);
     const poi = pois[0];
     if (!poi) continue;
-    seen.add(poi.variant);
-    const category = variantDef(poi.variant).category;
-    perCategory.set(category, (perCategory.get(category) ?? 0) + 1);
+    seen.add(poi.structure);
+    perStock.set(poi.stock, (perStock.get(poi.stock) ?? 0) + 1);
   }
   check(
-    seen.size === variantCount(),
-    `only ${seen.size} of ${variantCount()} variants ever appear over 4,800 km`,
+    seen.size === structureCount(),
+    `only ${seen.size} of ${structureCount()} structures ever appear over 4,800 km`,
   );
-  const mix = [...perCategory.entries()]
+  const mix = [...perStock.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => `${name} ${count}`)
     .join(', ');
-  console.log(`  ${seen.size}/${variantCount()} variants reachable; ${mix}`);
+  console.log(`  ${seen.size}/${structureCount()} structures reachable; ${mix}`);
 }
 
 // --- 3. the homestead holds together -----------------------------------------
@@ -405,13 +450,13 @@ const MAX_RESIDUAL_M = 0.6;
 {
   const STREAM_BUDGET_MS = 3;
   // Warm first, exactly as the game does at boot.
-  warmVariantAssets();
+  warmPoiStructures();
   const samples: number[] = [];
   const rounds = 6;
   for (let r = 0; r < rounds; r++) {
-    for (let index = 0; index < variantCount(); index++) {
+    for (let index = 0; index < structureCount(); index++) {
       const t0 = process.hrtime.bigint();
-      createVariantInstance(index);
+      createStructureInstance(index);
       samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
     }
   }
@@ -509,7 +554,7 @@ const MAX_RESIDUAL_M = 0.6;
     );
   }
   console.log(
-    `  26 variants match the gallery to within ${worst.toFixed(3)} m (worst: ${worstId})`,
+    `  ${variantCount()} kit variants match the gallery to within ${worst.toFixed(3)} m (worst: ${worstId})`,
   );
 }
 
@@ -531,6 +576,10 @@ const MAX_RESIDUAL_M = 0.6;
 // is enough is a question about the ground under the walls — which is what is measured
 // here, directly, rather than inferred from the height of one point.
 {
+  // Switches only live in the relay station now, one structure in fifty-three, so the
+  // walk is long enough to meet several.
+  const WALK_CHUNKS = 1500;
+  const walkKm = (WALK_CHUNKS * CHUNK_LENGTH) / 1000;
   const switches = new PoiSwitchField();
   const provider = new PoiProvider(
     { spawnItem: () => {}, spawnPart: () => {}, forget: () => {} } as never,
@@ -538,6 +587,7 @@ const MAX_RESIDUAL_M = 0.6;
     { register: () => {}, forget: () => {} } as never,
     switches,
     { register: () => {}, forget: () => {} } as never,
+    roadDistance,
   );
 
   /**
@@ -560,7 +610,7 @@ const MAX_RESIDUAL_M = 0.6;
   const built: THREE.Object3D[] = [];
   const buildings: THREE.Object3D[] = [];
   const placed: { readonly object: THREE.Object3D; readonly s: number }[] = [];
-  for (let chunk = 0; chunk < 100; chunk++) {
+  for (let chunk = 0; chunk < WALK_CHUNKS; chunk++) {
     const sStart = chunk * CHUNK_LENGTH;
     const ctx = {
       chunkIndex: chunk,
@@ -581,7 +631,7 @@ const MAX_RESIDUAL_M = 0.6;
     built.push(content.group);
     const nearS = sStart + CHUNK_LENGTH / 2;
     content.group.traverse((object) => {
-      if (typeof object.userData.poiVariant !== 'string') return;
+      if (typeof object.userData.poiStructure !== 'string') return;
       buildings.push(object);
       placed.push({ object, s: nearS });
     });
@@ -601,8 +651,8 @@ const MAX_RESIDUAL_M = 0.6;
   };
 
   const registered = [...switches.values()];
-  check(registered.length > 0, 'not one light switch was registered in 20 km of road');
-  check(buildings.length > 0, 'not one building was placed in 20 km of road');
+  check(registered.length > 0, `not one light switch was registered in ${walkKm} km of road`);
+  check(buildings.length > 0, `not one building was placed in ${walkKm} km of road`);
 
   // A REGISTRY IS IN ABSOLUTE COORDINATES, and the geometry is not.
   //
@@ -627,8 +677,9 @@ const MAX_RESIDUAL_M = 0.6;
         { register: () => {}, forget: () => {} } as never,
         field,
         { register: () => {}, forget: () => {} } as never,
+        roadDistance,
       );
-      for (let chunk = 0; chunk < 100; chunk++) {
+      for (let chunk = 0; chunk < WALK_CHUNKS; chunk++) {
         const sStart = chunk * CHUNK_LENGTH;
         const content = shifted.build({
           chunkIndex: chunk,
@@ -755,10 +806,9 @@ const MAX_RESIDUAL_M = 0.6;
       strays++;
       continue;
     }
-    const index = Array.from({ length: variantCount() }, (_, i) => i).find(
-      (i) => variantDef(i).id === host!.userData.poiVariant,
-    );
-    if (index === undefined) continue;
+    const structureId = String(host.userData.poiStructure);
+    if (structureDef(POI_STRUCTURES.findIndex((s) => s.id === structureId)).kind !== 'mast') continue;
+    const index = poiVariantIndex(structureId);
     const matches = createVariantInstance(index).switches.some((spec) => {
       want.copy(spec.centre).applyMatrix4(host!.matrixWorld);
       return want.distanceTo(new THREE.Vector3(entry.x, entry.y, entry.z)) < 0.01;
@@ -783,11 +833,9 @@ const MAX_RESIDUAL_M = 0.6;
   const inverse = new THREE.Matrix4();
   const probe = new THREE.Vector3();
   for (const { object: building, s: nearS } of placed) {
-    const index = Array.from({ length: variantCount() }, (_, i) => i).find(
-      (i) => variantDef(i).id === building.userData.poiVariant,
-    );
-    if (index === undefined) continue;
-    const [footX, footZ] = variantDef(index).footprint;
+    const structure = POI_STRUCTURES.find((s) => s.id === building.userData.poiStructure);
+    if (structure === undefined) continue;
+    const [footX, footZ] = structure.footprint;
     inverse.copy(building.matrixWorld).invert();
     const steps = 8;
     for (let i = 0; i <= steps; i++) {
@@ -803,7 +851,7 @@ const MAX_RESIDUAL_M = 0.6;
         const gap = -probe.y;
         if (gap > worstGap) {
           worstGap = gap;
-          worstGapId = String(building.userData.poiVariant);
+          worstGapId = String(building.userData.poiStructure);
         }
       }
     }
@@ -851,7 +899,7 @@ const MAX_RESIDUAL_M = 0.6;
   );
 
   console.log(
-    `  ${buildings.length} buildings and ${flipped} switches over 20 km: pressing every ` +
+    `  ${buildings.length} buildings and ${flipped} switches over ${walkKm} km: pressing every ` +
       `switch takes ${before} lit sources to ${allOff}; worst gap under a wall ` +
       `${worstGap.toFixed(3)} m`,
   );

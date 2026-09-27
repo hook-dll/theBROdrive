@@ -23,8 +23,9 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { PoiProvider, poisBetween, type PoiCategory } from '../src/world/poi';
-import { variantDef } from '../src/world/poivariantbuild';
+import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import { structureDef, type PoiStructureKind } from '../src/world/poistructures';
+import { RoadDistance } from '../src/world/roaddistance';
 import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
 import type { WreckTrunkField } from '../src/world/wrecktrunks';
@@ -51,7 +52,8 @@ const noWreckTrunks = { register: () => {}, forget: () => {} } as unknown as Wre
 const noCouriers = { register: () => {}, forget: () => {} } as unknown as CourierField;
 const switches = new PoiSwitchField();
 
-const provider = new PoiProvider(noLoose, noTrailers, noWreckTrunks, switches, noCouriers);
+const roadDistance = new RoadDistance(road);
+const provider = new PoiProvider(noLoose, noTrailers, noWreckTrunks, switches, noCouriers, roadDistance);
 
 interface Piece {
   readonly minX: number;
@@ -102,8 +104,8 @@ interface KindStat {
   worstS: number;
 }
 
-const stats = new Map<PoiCategory | 'courier', KindStat>();
-function statFor(kind: PoiCategory | 'courier'): KindStat {
+const stats = new Map<PoiStructureKind | 'courier', KindStat>();
+function statFor(kind: PoiStructureKind | 'courier'): KindStat {
   let stat = stats.get(kind);
   if (!stat) {
     stat = { pieces: 0, floating: 0, shortMembers: 0, worstGap: 0, worstS: 0 };
@@ -116,7 +118,11 @@ let stops = 0;
 for (let chunk = 0; chunk < CHUNKS; chunk++) {
   const sStart = chunk * CHUNK_LENGTH;
   const sEnd = sStart + CHUNK_LENGTH;
-  const pois = poisBetween(SEED, sStart, sEnd, world.state.settings.poiSpacingMetres);
+  const spacing = world.state.settings.poiSpacingMetres;
+  const pois = [
+    ...poisBetween(SEED, sStart, sEnd, spacing),
+    ...desertPoisBetween(SEED, sStart, sEnd, spacing).filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance)),
+  ];
   if (pois.length === 0) continue;
 
   const ctx = {
@@ -151,7 +157,7 @@ for (let chunk = 0; chunk < CHUNKS; chunk++) {
       const cz = (piece.minZ + piece.maxZ) / 2 - anchor.z;
       if (cx * cx + cz * cz < 30 * 30) owned.push(i);
     }
-    const stat = statFor(variantDef(poi.variant).category);
+    const stat = statFor(structureDef(poi.structure).kind);
     for (const i of owned) {
       const piece = pieces[i]!;
       stat.pieces++;

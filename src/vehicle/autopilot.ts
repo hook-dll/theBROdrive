@@ -9,6 +9,7 @@ import { type HazardField, type RoadHazard } from '../world/hazards';
 import type { Vehicle } from './vehicle';
 import { evaluateCorridorLine, planCorridor, type CorridorObstacle } from './corridor';
 import type { TrafficField, TrafficNeighbour } from './trafficfield';
+import { RacingLine, type RacingLineBand } from './racingline';
 
 /**
  * How far ahead the corridor is planned: three seconds of travel, bounded so a
@@ -18,6 +19,47 @@ import type { TrafficField, TrafficNeighbour } from './trafficfield';
 const CORRIDOR_HORIZON_SECONDS = 3;
 const CORRIDOR_MIN_HORIZON_M = 60;
 const CORRIDOR_MAX_HORIZON_M = 220;
+/**
+ * THE RACING LINE'S TERMS (see `ModeConfig.racingLine` and `vehicle/racingline.ts`).
+ *
+ * The window is six seconds of road plus a base, so the line always reaches past the
+ * braking zone of the next bend it will have to plan for.
+ */
+const RACING_WINDOW_SECONDS = 6;
+const RACING_WINDOW_BASE_M = 120;
+const RACING_WINDOW_MIN_M = 200;
+const RACING_WINDOW_MAX_M = 600;
+/** Body kept this far inside the asphalt edge, and off the crown when the far half is not free. */
+const RACING_EDGE_MARGIN_M = 0.2;
+const RACING_CROWN_MARGIN_M = 0.3;
+/**
+ * THE OTHER HALF OF THE ROAD IS USED ONLY WHERE THE DRIVER CAN VOUCH FOR IT: in
+ * sight, clear of anything standing in it, and left again with this many seconds in
+ * hand before anything coming the other way could arrive there. Beyond that the line
+ * is back on its own side `RACING_CROWN_RETURN_M` before the road it cannot vouch for.
+ */
+const RACING_ONCOMING_MARGIN_S = 3;
+const RACING_CROWN_RETURN_M = 40;
+/** Below this there are no lines, only manoeuvres. */
+const RACING_MIN_SPEED_MPS = 10;
+/** How close to its home lane the planner's own line must be for the racing line to replace it. */
+const RACING_HOME_TOLERANCE_M = 0.3;
+/** Seconds of plain cruising, in its own lane, before a racing line is taken up again. */
+const RACING_REARM_S = 1.5;
+/**
+ * The racing driver's sight rule: the slowest traffic it expects to find moving, the
+ * furthest it looks, and the share of its braking it plans a sighting on.
+ */
+const RACING_UNSEEN_TRAFFIC_MPS = 12;
+const RACING_SIGHT_LIMIT_M = 500;
+const RACING_SIGHT_BRAKE_SHARE = 0.4;
+/**
+ * Cornering load, as a share of the tyres' capacity, below which a racing driver's
+ * throttle is not limited at all, and the least it keeps at the limit so a bend still
+ * holds its speed. See the friction-circle cap on the pedal.
+ */
+const RACING_THROTTLE_FREE_SHARE = 0.6;
+const RACING_THROTTLE_MIN = 0.12;
 /**
  * What the opposing lane costs a driver that is willing to use it, before its
  * mode's `passNerve` scales it. This single number replaces the old page of
@@ -144,6 +186,37 @@ interface ModeConfig {
    * bound (0.72 x 0.7 = 0.50) for the only character that had earned it.
    */
   readonly looseSurfacePace: number;
+  /**
+   * Shares of the tyres this driver plans on: of their cornering capacity, of their
+   * braking capacity, and of the geometric distance a braking zone needs.
+   *
+   * The careful drivers keep a reserve on all three — transient load and steering
+   * correction below the stable peak, and a braking zone begun at two and a half times
+   * the distance it needs, so the bend is set up before it arrives. A racing driver's
+   * whole skill is to not keep that reserve: measured on a flat plane, the catalogue
+   * cars actually corner at 0.84-1.0 of `estimatedLateralAccel`, so 0.8 of it is the
+   * limit less the margin a controller needs to still be steering, not sliding.
+   */
+  readonly gripReserve: number;
+  readonly brakeReserve: number;
+  readonly brakingDistanceShare: number;
+  /**
+   * Drives the least-curved line through a bend (`vehicle/racingline.ts`) instead of
+   * the lane's own arc, using the whole asphalt where the opposing half is seen to be
+   * clear, and plans every corner's speed on that line's curvature.
+   */
+  readonly racingLine: boolean;
+  /**
+   * Rate, per second, at which a standing curvature shortfall is trimmed out of the
+   * steering. The feed-forward (`steeringGain`) is one number for every car and speed;
+   * at the limit a car answers the wheel with less yaw than it answered on the way
+   * there, and a proportional controller then sits outside its line — measured on the
+   * playground's 320 m downhill sweeper at 170 km/h, 0.5 m/s² short and drifting a
+   * metre in three seconds until it left the road. The trim integrates commanded minus
+   * actual yaw curvature and adds it back, so the line is held at any understeer the
+   * car happens to have. Zero is no trim: the careful drivers never go near the limit.
+   */
+  readonly curvatureTrim: number;
 }
 
 /**
@@ -151,13 +224,12 @@ interface ModeConfig {
  *
  * `sleeper` is the character asleep at the wheel of his own life: 80 km/h, its own
  * lane, a cornering budget under half of what the tyres have, gentle pedals, and it
- * `frantic` is the same car driven by somebody who is out of time: 130 km/h, twice
- * the cornering budget, pedals used as switches, and it will take the oncoming lane
- * to get past traffic when it can see far enough to do it. Its corner entries are
- * deliberately less exact — half the chord correction — so it clips lines rather
- * than tracing them. Its number is left alone because the CAR runs out first: a
- * catalogue saloon measures 108 km/h flat out on this road's asphalt and 55 on its
- * gravel, so asking for more would only make its corner entries worse.
+ * `frantic` is somebody out of time who can drive: no cruising speed of its own — the
+ * car's power and the road's bends are the only limits — the tyres used to within a
+ * fifth of what they have, braking zones begun at the last useful metre, and a racing
+ * line through every bend: outside, apex, outside, across the whole road where it can
+ * see that the other half is empty. It takes the oncoming lane to get past traffic
+ * when it can see far enough to do it, and it signals nothing while it is on its line.
  *
  * Both hold the RIGHT-HAND LANE. That is the change with the widest reach: a car on
  * the centreline meets oncoming traffic head-on and has nowhere to put a swerve,
@@ -186,6 +258,11 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     passCurvature: 0.012,
     passNerve: 1,
     looseSurfacePace: 1,
+    gripReserve: 0.72,
+    brakeReserve: 0.82,
+    brakingDistanceShare: 0.4,
+    racingLine: false,
+    curvatureTrim: 0,
   },
   /**
    * The driver with somewhere to be and a licence to keep. 105 km/h, a cornering
@@ -216,19 +293,32 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     passCurvature: 0.010,
     passNerve: 0.88,
     looseSurfacePace: 1,
+    gripReserve: 0.72,
+    brakeReserve: 0.82,
+    brakingDistanceShare: 0.4,
+    racingLine: false,
+    curvatureTrim: 0,
   },
   frantic: {
-    cruiseMps: 130 / 3.6,
-    lateralAccel: 6.8,
-    brakeAccel: 7.2,
+    // No cruising speed of its own: the car's power runs out first on every straight.
+    cruiseMps: 200 / 3.6,
+    // No budget of its own either: `gripReserve` of what the tyres have is the limit.
+    lateralAccel: 14,
+    brakeAccel: 14,
     lookaheadBase: 9,
     lookaheadSpeed: 1.0,
     brakeLead: 7,
-    curveLead: 24,
-    chordGain: 0.45,
+    curveLead: 10,
+    // A racing driver traces its line; the old half correction clipped every apex.
+    chordGain: 0.9,
     steeringGain: 1.45,
-    holdSeconds: 0.85,
-    holdShare: 0.35,
+    // A line is something it holds, not something it lives near: measured on the
+    // playground at the limit, the old 0.85 s over a third of the budget traced the
+    // racing line to 0.47 m RMS and 1.64 m at worst; this is 0.31 and 1.24. Tighter
+    // still (0.55 s over 0.6) traced it better and set a GAZ-21 weaving at its 130 km/h
+    // top speed: the slowest chassis sets the limit, as it does for LANE_HOLD_LEAD_S.
+    holdSeconds: 0.62,
+    holdShare: 0.55,
     throttleBand: 1.2,
     brakeBand: 1.8,
     brakeCeiling: 1,
@@ -252,6 +342,14 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     // from the brake, so this mode spends a loose surface's whole ratio like the
     // careful ones.
     looseSurfacePace: 1,
+    // The same share of the tyres as the careful drivers — but of the tyres, not of a
+    // budget of its own, which is what frantic's old 6.8 m/s² was: 55% of a rally
+    // Zhiguli. 0.76 already left the road on the playground's downhill esses.
+    gripReserve: 0.72,
+    brakeReserve: 0.9,
+    brakingDistanceShare: 0.8,
+    racingLine: true,
+    curvatureTrim: 1,
   },
 };
 
@@ -272,9 +370,6 @@ const MIN_PURSUIT_DISTANCE_SQ = 9;
  */
 const LOOKAHEAD_ARC_RAD = 0.5;
 const MIN_LOOKAHEAD_M = 6;
-/** Planner reserves transient tyre load and steering correction below the stable peak. */
-const LATERAL_GRIP_RESERVE = 0.72;
-const BRAKE_GRIP_RESERVE = 0.82;
 /**
  * ONE SET OF TYRES CANNOT BRAKE AND CORNER AT THE SAME TIME, AND THE PEDAL HAS TO
  * KNOW IT.
@@ -309,8 +404,8 @@ const GRAVITY = 9.81;
  * These are COMFORT factors and nothing else. Every limit that grip actually
  * decides is computed from the real per-surface physics a few lines below — the
  * corner speed from `lateralAccel` against the sampled curvature, the approach from
- * `vehicle.estimatedBrakeDecel(surface)`, both reserved again by
- * LATERAL_GRIP_RESERVE and BRAKE_GRIP_RESERVE. So a factor low enough to be a grip
+ * `vehicle.estimatedBrakeDecel(surface)`, both reserved again by each mode's
+ * `gripReserve` and `brakeReserve`. So a factor low enough to be a grip
  * model is charging the car twice, and gravel's 0.45 was exactly that: measured on
  * seed 1337, 46% of this road is graded gravel and 50% is cracked asphalt, with 4%
  * of clean surface in total, so 0.45 was not an occasional loose district but the
@@ -407,8 +502,10 @@ export function roadPaceCeiling(
 const MIN_PLANNED_BRAKE_MPS2 = 0.75;
 /** Chassis yaw feedback removes weave energy without weakening steady cornering. */
 const YAW_RATE_DAMPING = 0.8;
-/** Use only this share of geometric stopping distance, so setup finishes before a bend. */
-const BRAKING_DISTANCE_RESERVE = 0.4;
+/** Curvature trim bounds and leak, per second; see `ModeConfig.curvatureTrim`. */
+const CURVATURE_TRIM_SHARE = 0.4;
+const CURVATURE_TRIM_FLOOR = 0.0015;
+const CURVATURE_TRIM_LEAK = 0.3;
 /**
  * Half the widest catalogue body, metres, plus a little. Used only to decide whether
  * a hazard is in this car's corridor; a per-model figure would make the decision
@@ -466,6 +563,24 @@ const INDEXED_RAY_MATCH_M = 4;
  */
 const LANE_HOLD_MIN_DISTANCE_M = 11;
 const LANE_HOLD_CURVATURE_MAX = 0.03;
+/**
+ * Seconds ahead the cross-track error is taken at: the hold steers on where the car
+ * WILL be relative to its line, `e + (line rate − lateral rate) · lead`, not where it is.
+ *
+ * Without it the hold was a pure spring on position, and a spring on a laggy mass
+ * rings. The chassis answers the wheel late — a GAZ-21 on cross-plies and 0.95 Hz
+ * springs reaches 63% of a step's yaw in 0.27-0.37 s against 0.12-0.17 s for a
+ * Zhiguli — and past a point that lag alone turns the spring into an oscillator:
+ * measured on the bench road in `sleeper`, the Volga swung ±1 m across its lane every
+ * 2.5 s, growing with speed and never settling (32 zero crossings per km, 0.37 m RMS),
+ * and `hurried` was worse. The rate term is the damper that spring was missing: 0.2 s
+ * already stopped it, and at 0.4 s the Volga holds its lane to 0.07 m RMS with under
+ * one crossing per km, while every other car tracked the same or better and settled
+ * sooner. It is not a per-car constant because nothing about it is: the slowest
+ * chassis sets how much damping is enough, and more than enough costs the quick ones
+ * nothing measurable.
+ */
+const LANE_HOLD_LEAD_S = 0.4;
 const ROAD_PROFILE_SAMPLES = 10;
 const TURN_COAST_CURVATURE = 0.004;
 const TURN_COAST_STEER = 0.12;
@@ -929,7 +1044,7 @@ const HOLD_BRAKE = 0.6;
  * loose half of this road it is not, because a locked-front deceleration is exactly what
  * gives up the steering. Frantic was already measured doing it: it arrived at a bend
  * too fast, stood on the brake inside it, lost the front on the loose surface and ran
- * 1.2 m past the asphalt before recovering (see `LATERAL_GRIP_RESERVE`).
+ * 1.2 m past the asphalt before recovering (see `ModeConfig.gripReserve`).
  *
  * A HALF IS NOT A HALF OF THE DECELERATION, and that is why it still stops. The planner
  * brakes on `brakeAccel` — 4.0 m/s² for a sleeper — which is already well under what the
@@ -1137,6 +1252,57 @@ export class Autopilot {
   private corridorLaneBlockSpeed = 0;
   /** Road width at this tick's projection, shared with hazard callbacks. */
   private asphaltHalfWidth = 0;
+  /** Steering curvature trim, rad/m; see `ModeConfig.curvatureTrim`. */
+  private curvatureTrim = 0;
+  /** The least-curved line a racing driver is on; see `ModeConfig.racingLine`. */
+  private readonly racingLine = new RacingLine();
+  private racingActive = false;
+  /** This step's racing band terms, read by `racingBand` for every sample it solves. */
+  private racingCrownClearM = 0;
+  private racingHazardM = Number.POSITIVE_INFINITY;
+  private racingOwnSign = -1;
+  private racingBodyHalfWidth = CAR_HALF_WIDTH_M;
+  private racingHomeLane = 0;
+  private racingOwnCarriageway = false;
+  /** Seconds of plain cruising since anything else; see `RACING_REARM_S`. */
+  private racingQuietFor = 0;
+  /**
+   * The usable band at a sample: the whole asphalt where the far half is vouched for,
+   * the driver's own half (or its whole carriageway on a road with two lanes a side and
+   * nobody else in them) elsewhere, and the home lane alone from the first thing
+   * standing on the road, so the line is home before the planner has to go round it.
+   */
+  private readonly racingBand: RacingLineBand = (s, distance, out) => {
+    const lanes = this.road.lanesPerSideAt(s);
+    const home = this.road.laneCentreAt(s, Math.min(this.racingHomeLane, lanes - 1));
+    out[2] = home;
+    const edge = Math.max(0, this.road.halfWidthAt(s) - this.racingBodyHalfWidth - RACING_EDGE_MARGIN_M);
+    const crown = this.racingBodyHalfWidth + RACING_CROWN_MARGIN_M;
+    if (distance >= this.racingHazardM || edge <= crown) {
+      out[0] = home;
+      out[1] = home;
+      return;
+    }
+    if (lanes === 1 && distance <= this.racingCrownClearM) {
+      out[0] = -edge;
+      out[1] = edge;
+      return;
+    }
+    if (lanes > 1 && !this.racingOwnCarriageway) {
+      out[0] = home;
+      out[1] = home;
+      return;
+    }
+    out[0] = this.racingOwnSign * edge;
+    out[1] = this.racingOwnSign * crown;
+  };
+  private readonly visitRacingHazard = (hazard: RoadHazard): void => {
+    if (Math.abs(hazard.lateral) - hazard.radius >= this.asphaltHalfWidth) return;
+    this.racingHazardM = Math.min(
+      this.racingHazardM,
+      hazard.s - hazard.radius - CAR_HALF_LENGTH_M - this.hintS,
+    );
+  };
   /** Scratch lane centres: avoids rebuilding the planner's candidate list per tick. */
   private readonly laneCentres: number[] = [];
   private planUsesOncomingLane = false;
@@ -1386,6 +1552,21 @@ export class Autopilot {
     this.crossingLineBlocked = false;
     this.hazards.forEachAhead(this.hintS + from, distance, this.visitCrossingHazard);
     return !this.crossingLineBlocked;
+  }
+  /**
+   * Anything that makes a racing line the wrong instrument: something standing on the
+   * asphalt anywhere ahead within the corridor horizon, or something going OUR way on
+   * either side of the crown — a car out in the opposing lane passing somebody is still
+   * a car this driver is about to catch. Traffic coming the other way is not here; it
+   * narrows the band instead (`racingCrownClearM`).
+   */
+  private racingObstructed(obstacles: readonly CorridorObstacle[]): boolean {
+    for (const obstacle of obstacles) {
+      if (obstacle.abeam || obstacle.s < 0) continue;
+      if (Math.abs(obstacle.lateral) - obstacle.halfWidth >= this.asphaltHalfWidth) continue;
+      if (obstacle.speed > -CRAWL_SPEED_MPS) return true;
+    }
+    return false;
   }
   /**
    * WOULD ENTERING THIS LANE FORCE SOMEBODY BEHIND TO BRAKE HARDER THAN A DRIVER MAY
@@ -1776,6 +1957,8 @@ export class Autopilot {
     }
   }
   get engaged(): boolean { return this.engagedValue; }
+  /** True while a racing driver is on its racing line rather than its lane. */
+  get onRacingLine(): boolean { return this.racingActive; }
   /** Rate-limited line being steered to, metres of road lateral. */
   get commandedLine(): number { return this.appliedLateral; }
   /** Distance to the nearest dynamic body in the corridor, metres, or Infinity. */
@@ -2051,7 +2234,7 @@ export class Autopilot {
     const currentPhysicalBrake = vehicle.estimatedBrakeDecel(currentSurface);
     const currentBrakeAccel = Math.max(
       MIN_PLANNED_BRAKE_MPS2,
-      Math.min(config.brakeAccel, currentPhysicalBrake * BRAKE_GRIP_RESERVE) +
+      Math.min(config.brakeAccel, currentPhysicalBrake * config.brakeReserve) +
         currentRoad.grade * GRAVITY,
     );
     const gradeLoad = Math.min(
@@ -2082,7 +2265,7 @@ export class Autopilot {
     );
     const currentLateralAccel = Math.min(
       config.lateralAccel,
-      physicalLateralAccel * LATERAL_GRIP_RESERVE,
+      physicalLateralAccel * config.gripReserve,
     );
     const rotation = vehicle.chassis.rotation();
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
@@ -2867,6 +3050,77 @@ export class Autopilot {
     this.corridorBlockSpeed = plan.blockSpeed;
     this.corridorLaneBlockDistance = plan.laneBlockDistance;
     this.corridorLaneBlockSpeed = plan.laneBlockSpeed;
+    // THE RACING LINE REPLACES THE LANE ONLY ON AN EMPTY ROAD. The planner has to want
+    // the home lane, nothing may be followed, and nothing may stand on the asphalt on
+    // this side within the corridor horizon — the planner, not the line, goes round
+    // things. Traffic coming the other way does not stop it; it only takes the far
+    // half away (`racingCrownClearM`).
+    this.racingQuietFor = this.activityValue === 'cruise' ? this.racingQuietFor + dt : 0;
+    const racingEligible =
+      config.racingLine &&
+      !offRoad &&
+      !recovering &&
+      this.travelled >= this.recoveryBiasUntil &&
+      plan.admissible &&
+      plan.feasible &&
+      speed > RACING_MIN_SPEED_MPS &&
+      Math.abs(desiredLine - ownLaneOffset) < RACING_HOME_TOLERANCE_M &&
+      this.corridorBlockDistance === Number.POSITIVE_INFINITY &&
+      !this.racingObstructed(obstacles) &&
+      // A racing line is picked up from the driver's own lane, after a spell of plain
+      // cruising — never as the continuation of a pass it has just come back from.
+      // Taken up straight out of one, the line began in the opposing half, the next
+      // car re-opened the pass, and the two traded the car between them at 150 km/h.
+      (this.racingActive ||
+        (this.racingQuietFor >= RACING_REARM_S &&
+          Math.abs(this.appliedLateral - ownLaneOffset) < RACING_HOME_TOLERANCE_M));
+    if (racingEligible) {
+      const window = clamp(
+        RACING_WINDOW_BASE_M + speed * RACING_WINDOW_SECONDS,
+        RACING_WINDOW_MIN_M,
+        RACING_WINDOW_MAX_M,
+      );
+      this.racingOwnSign = Math.sign(ownLaneOffset) || -1;
+      this.racingBodyHalfWidth = vehicle.modelMeasure.halfExtents[0];
+      this.racingHomeLane = homeLane;
+      this.racingOwnCarriageway = true;
+      for (const obstacle of obstacles) {
+        if (obstacle.abeam || obstacle.lateral * this.racingOwnSign > 0) {
+          this.racingOwnCarriageway = false;
+          break;
+        }
+      }
+      this.racingHazardM = Number.POSITIVE_INFINITY;
+      this.hazards.forEachAhead(this.hintS, window, this.visitRacingHazard);
+      // The far half: in sight, clear of props, and vacated before anything coming
+      // the other way can be there. An unseen car is assumed just past the corridor
+      // horizon, doing the speed every unseen car is assumed to do.
+      let crownClear = 0;
+      if (lanesPerSide === 1 && this.passingEnabled && config.overtakes && crossingRearClear) {
+        const gap = Math.min(crossingOncomingGap, horizon);
+        const closing = crossingOncomingSpeed;
+        const meet = (gap - closing * RACING_ONCOMING_MARGIN_S) / (1 + closing / Math.max(speed, 1));
+        crownClear = Math.min(this.road.sightDistanceAt(this.hintS, window), meet) - RACING_CROWN_RETURN_M;
+        for (const obstacle of obstacles) {
+          if (!obstacle.abeam && obstacle.s >= 0 && obstacle.lateral * this.racingOwnSign < 0) {
+            crownClear = Math.min(crownClear, obstacle.s - RACING_CROWN_RETURN_M);
+          }
+        }
+        if (crownClear > 0 && !this.crossingLineClear(-ownLaneOffset, 0, crownClear + RACING_CROWN_RETURN_M)) {
+          crownClear = 0;
+        }
+      }
+      this.racingCrownClearM = Math.max(0, crownClear);
+      const startOffset = this.racingActive ? this.racingLine.offsetAt(this.hintS) : this.appliedLateral;
+      const startSlope = this.racingActive
+        ? this.racingLine.slopeAt(this.hintS)
+        : this.lineSlewRate / Math.max(speed, 1);
+      this.racingLine.solve(this.road, this.hintS, window, startOffset, startSlope, this.racingBand);
+      this.racingActive = true;
+    } else if (this.racingActive) {
+      this.racingActive = false;
+      this.racingLine.reset();
+    }
     // Wanting another lane and not having it yet is the state a driver tucks in from;
     // being out there already is the state it must not lift off in.
     //
@@ -2916,8 +3170,9 @@ export class Autopilot {
     const indicatorDelta = desiredLine - projection.lateral;
     const indicatorOn = vehicle.indicator !== 'off';
     const threshold = indicatorOn ? INDICATOR_RELEASE_M : INDICATOR_DEADBAND_M;
+    // A car on its racing line is not changing lanes, however far it moves across.
     vehicle.setIndicator(
-      Math.abs(indicatorDelta) < threshold
+      this.racingActive || Math.abs(indicatorDelta) < threshold
         ? 'off'
         : indicatorDelta > 0
           ? 'left'
@@ -2979,11 +3234,22 @@ export class Autopilot {
     // Never past the line: the braking curve above is what makes that possible, and
     // this is what makes a target that jumps to the other side stop the line rather
     // than sail through it while the rate reverses.
+    const appliedBefore = this.appliedLateral;
     this.appliedLateral += clamp(
       this.lineSlewRate * Math.max(dt, 0),
       Math.min(0, lineError),
       Math.max(0, lineError),
     );
+    // What the line actually did this step. `lineSlewRate` is only the rate it was
+    // allowed; clamped at its target, the line stops while that rate is still winding
+    // down, and leading on it steered the car on past a line that had already stopped.
+    let appliedLineRate = dt > 0 ? (this.appliedLateral - appliedBefore) / dt : 0;
+    // On the racing line the line is the line, at this arclength, moving at its slope.
+    if (this.racingActive) {
+      this.appliedLateral = this.racingLine.offsetAt(this.hintS);
+      appliedLineRate = this.racingLine.slopeAt(this.hintS) * speed;
+      this.lineSlewRate = appliedLineRate;
+    }
     // Pure pursuit through a point ON the lane still cuts the bend: the chord to a
     // point `d` along an arc of curvature k passes k·d²/8 inside it, which in the
     // 110 m esses is a metre and a half — the car left its lane, and on the real road
@@ -2991,7 +3257,9 @@ export class Autopilot {
     // Moving the aim point OUTWARD by that sagitta makes the commanded arc the
     // lane's own arc, so the mode follows the corner instead of straightening it.
     // Curvature is taken mid-preview, where the chord error is generated.
-    const previewCurvature = this.road.curvatureAt(this.hintS + lookahead * 0.5);
+    const previewCurvature = this.racingActive
+      ? this.racingLine.pathCurvatureAt(this.hintS + lookahead * 0.5)
+      : this.road.curvatureAt(this.hintS + lookahead * 0.5);
     const chordShift =
       -previewCurvature *
       lookahead *
@@ -3000,7 +3268,7 @@ export class Autopilot {
       config.chordGain;
     const lateralLimit = this.planUsesShoulder ? staticAvoidEdge : passingEdge;
     const targetLateral = clamp(
-      this.appliedLateral + chordShift,
+      (this.racingActive ? this.racingLine.offsetAt(this.hintS + lookahead) : this.appliedLateral) + chordShift,
       -lateralLimit,
       lateralLimit,
     );
@@ -3033,8 +3301,14 @@ export class Autopilot {
       LANE_HOLD_CURVATURE_MAX,
       (config.holdShare * currentLateralAccel) / Math.max(speed * speed, 1),
     );
+    // Road-frame lateral velocity: the lateral axis is (cos h, −sin h), see `offsetPoint`.
+    const lateralRate = velocity.x * roadForwardZ - velocity.z * roadForwardX;
+    const holdError =
+      this.appliedLateral -
+      projection.lateral +
+      (appliedLineRate - lateralRate) * LANE_HOLD_LEAD_S;
     const holdCurvature = clamp(
-      (2 * (this.appliedLateral - projection.lateral)) / (holdDistance * holdDistance),
+      (2 * holdError) / (holdDistance * holdDistance),
       -holdCap,
       holdCap,
     );
@@ -3043,9 +3317,25 @@ export class Autopilot {
     // second term is zero in a settled turn but opposes residual yaw after a lane
     // change, preventing the delayed tyres from amplifying a weave into a spin.
     const actualYawCurvature = vehicle.chassis.angvel().y / Math.max(speed, 3);
+    // See `ModeConfig.curvatureTrim`. It leaks, so a trim earned in one bend does not
+    // steer the next, and it is bounded to a share of the curvature being asked for.
+    if (config.curvatureTrim > 0 && speed > 5 && !offRoad && !recovering) {
+      const trimLimit = CURVATURE_TRIM_SHARE * Math.abs(pathCurvature) + CURVATURE_TRIM_FLOOR;
+      this.curvatureTrim = clamp(
+        this.curvatureTrim +
+          (config.curvatureTrim * (pathCurvature - actualYawCurvature) -
+            CURVATURE_TRIM_LEAK * this.curvatureTrim) *
+            dt,
+        -trimLimit,
+        trimLimit,
+      );
+    } else {
+      this.curvatureTrim = 0;
+    }
     const controlledCurvature =
       pathCurvature * config.steeringGain +
-      YAW_RATE_DAMPING * (pathCurvature - actualYawCurvature);
+      YAW_RATE_DAMPING * (pathCurvature - actualYawCurvature) +
+      this.curvatureTrim;
     const wheelAngle = Math.atan(wheelbaseOf(vehicle) * controlledCurvature);
     out.steer = vehicle.steeringInputForWheelAngle(wheelAngle, speed);
 
@@ -3106,10 +3396,15 @@ export class Autopilot {
         Math.min(
           config.lateralAccel,
           vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
-            LATERAL_GRIP_RESERVE *
+            config.gripReserve *
             Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad)),
         ) * manoeuvreShare;
-      const curvature = Math.abs(sample.curvature);
+      // On the racing line a bend is taken at the LINE's curvature, which is the
+      // whole point of it; past the solved window, at the road's.
+      const curvature =
+        this.racingActive && this.racingLine.covers(sample.s)
+          ? Math.abs(this.racingLine.pathCurvatureAt(sample.s))
+          : Math.abs(sample.curvature);
       upcomingCurvature = Math.max(upcomingCurvature, curvature);
       // THE CORNER IS BANKED, AND THE BANK IS LATERAL ACCELERATION THE TYRES DO NOT
       // HAVE TO FIND.
@@ -3128,11 +3423,11 @@ export class Autopilot {
       );
       const sampleBrake = Math.max(
         MIN_PLANNED_BRAKE_MPS2,
-        Math.min(config.brakeAccel, physicalBrake * BRAKE_GRIP_RESERVE) +
+        Math.min(config.brakeAccel, physicalBrake * config.brakeReserve) +
           sample.grade * GRAVITY,
       );
       const brakingDistance =
-        Math.max(0, distance - config.curveLead) * BRAKING_DISTANCE_RESERVE;
+        Math.max(0, distance - config.curveLead) * config.brakingDistanceShare;
       targetSpeed = Math.min(
         targetSpeed,
         Math.sqrt(localLimit * localLimit + 2 * sampleBrake * brakingDistance),
@@ -3159,6 +3454,24 @@ export class Autopilot {
     // It becomes the right rule the moment the road has geometry worth hiding things
     // behind — real crests and bends, with the profile smooth enough that the march
     // measures the crest rather than the gravel. That is the road work, not this file.
+    // …EXCEPT FOR A DRIVER WHO GOES FAST ENOUGH FOR IT TO MATTER. At a racing driver's
+    // pace a crest hides a car that cannot be lost in the road that is left: measured
+    // on the playground, 150 km/h over a blind crest on a 25% descent found a car doing
+    // 53 at 80 m, and the only braking that could avoid it put the car off the road.
+    // So it never goes faster than it could slow to the slowest moving traffic in what
+    // it can see — vertically, and as far round the bend as the lane probe reaches —
+    // on a share of its brakes that leaves the tyres something for the bend.
+    if (config.racingLine) {
+      const sight = Math.min(
+        this.road.sightDistanceAt(this.hintS, RACING_SIGHT_LIMIT_M),
+        this.probeReach(this.hintS),
+      );
+      const sightBrake = Math.max(MIN_PLANNED_BRAKE_MPS2, currentBrakeAccel * RACING_SIGHT_BRAKE_SHARE);
+      targetSpeed = Math.min(
+        targetSpeed,
+        RACING_UNSEEN_TRAFFIC_MPS + Math.sqrt(2 * sightBrake * Math.max(0, sight - FOLLOW_STANDOFF_M)),
+      );
+    }
     targetSpeed = Math.max(3, targetSpeed);
     // THE SPEED PLAN FOLLOWS THE CORRIDOR THAT WAS CHOSEN, AND NOTHING ELSE.
     //
@@ -3470,6 +3783,19 @@ export class Autopilot {
       speedError > 0
         ? clamp(speedError / (offRoad ? OFFROAD_THROTTLE_BAND : config.throttleBand), floor, 1)
         : 0;
+    // A RACING DRIVER FEEDS THE THROTTLE IN AS THE CAR STRAIGHTENS. At the limit of
+    // the tyres there is no longitudinal grip left for the driven wheels; the pedals-as-
+    // switches habit put full power down at the apex of an uphill bend and spun the
+    // rear-driven car round (measured on the playground esses at 0.8 of the tyres).
+    // The pedal is capped by what the friction circle leaves: full once the cornering
+    // load falls below `RACING_THROTTLE_FREE_SHARE` of the tyres, nothing at the limit.
+    if (config.racingLine) {
+      const cornering = Math.min(1, (Math.abs(vehicle.chassis.angvel().y) * speed) / physicalLateralAccel);
+      out.throttle = Math.min(
+        out.throttle,
+        clamp((1 - cornering * cornering) / (1 - RACING_THROTTLE_FREE_SHARE ** 2), RACING_THROTTLE_MIN, 1),
+      );
+    }
     // BRAKING FOR SOMETHING IN THE WAY IS NOT DONE AT FULL PEDAL. The mode's ceiling is
     // a personality and stays the cap for braking at the road itself — a bend, a surface,
     // a limit — but an obstacle gets the mode's ceiling reduced to OBSTACLE_BRAKE_MAX.
@@ -3487,8 +3813,18 @@ export class Autopilot {
         Math.max(0, 1 - Math.min(1, (lateralUse / physicalLateralAccel) ** 2)),
       ),
     );
+    // …UNLESS HALF A PEDAL CANNOT LOSE THE SPEED IN THE ROOM THERE IS. Behind a MOVING
+    // car that is not a decision about the road any more, it is the only way not to
+    // hit it: a racing driver arriving at 146 km/h on a car doing 53 it found 81 m off
+    // over a blind crest braked at 0.44 of the pedal, all the cap allowed, and hit it.
+    // Something standing still keeps the cap — that is the littered road it exists for.
+    const followRoom = Math.max(1, this.corridorBlockDistance - FOLLOW_STANDOFF_M);
+    const followNeed =
+      this.corridorBlockDistance < Infinity && this.corridorBlockSpeed > CRAWL_SPEED_MPS
+        ? (speed * speed - this.corridorBlockSpeed * this.corridorBlockSpeed) / (2 * followRoom)
+        : 0;
     const brakeCeiling =
-      (obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON
+      (obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON && followNeed <= obstacleBrakeAccel
         ? Math.min(config.brakeCeiling, OBSTACLE_BRAKE_MAX)
         : config.brakeCeiling) * bendBrakeShare;
     out.brake = speedError < 0 ? clamp(-speedError / config.brakeBand, 0, brakeCeiling) : 0;

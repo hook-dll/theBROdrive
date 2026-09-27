@@ -22,7 +22,7 @@ import {
   viewDistanceFogScaleFor,
   viewDistanceFor,
 } from './game/settings';
-import { warmVariantAssets } from './world/poivariantbuild';
+import { warmPoiStructures } from './world/poistructures';
 import {
   Inventory,
   type CameraItem,
@@ -51,6 +51,7 @@ import { loadStarField } from './render/starcatalog';
 import { VistaMesh } from './render/vista';
 import { DistantMirage } from './render/mirage';
 import { MirageTableau } from './render/mirage-tableau';
+import { MirageSchedule } from './render/mirage-schedule';
 import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
@@ -357,8 +358,8 @@ async function boot(): Promise<void> {
   // And warm every POI building, for the same reason: building one costs 3.7 ms on a
   // 5950X — more than the whole 3 ms streaming budget — and a first use happens while
   // the player is driving past. Paid here, once, behind the loading cover, later
-  // placements are Object3D wrapping at 0.06 ms. See world/poivariantbuild.ts.
-  warmVariantAssets();
+  // placements are Object3D wrapping. See world/poistructures.ts.
+  warmPoiStructures();
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
   // at any moment carries what the player is holding. Registered before anything can
@@ -407,8 +408,10 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
-  const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin);
-  const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin);
+  // One deck for both mirage systems, so vessels and tableaus take turns on the road.
+  const mirageSchedule = new MirageSchedule(world.seed, road.length);
+  const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
+  const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
   // Heat-haze inputs: surface heat and the ground the view is grazing.
   const heatHaze = new HeatHaze(terrain, road);
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
@@ -479,7 +482,7 @@ async function boot(): Promise<void> {
   // its own arclength and disposed with the chunk that owns it.
   streamer.register(new WeatherProvider());
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers));
+  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers, roadDistance));
 
   // Point lights are budgeted per frame (see LightBudget); constructed before the
   // first chunk build so the budget's first scan sees chunk 0's lamps.
@@ -2082,6 +2085,7 @@ async function boot(): Promise<void> {
       origin,
       s.timeOfDay,
       sky.dayFactor,
+      renderer.camera.position,
     );
     hud.setInventory(
       inventory.all,

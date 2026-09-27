@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
+import type { MirageSchedule } from './mirage-schedule';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -9,9 +10,9 @@ import type { Terrain } from '../world/terrain';
  *
  * It is deliberately not world content: there is no collider, reward, marker, or
  * close model. The player can see it for roughly half a minute, but it dissolves
- * before the road can bring them near enough to inspect it. One encounter is placed
- * early enough to make the experiment testable; after that every three 12 km slots
- * contain exactly one seeded vessel, keeping them sparse without unbounded droughts.
+ * before the road can bring them near enough to inspect it. When it appears and which
+ * vessel it is are `render/mirage-schedule.ts`'s to say: the vessels take their turn
+ * in the same shuffled deck as the tableaus, one apparition at a time.
  *
  * WHAT IT SHOWS, AND WHY IT IS ONLY POTTERY.
  *
@@ -33,10 +34,6 @@ import type { Terrain } from '../world/terrain';
  * the radio, or either audio bus.
  */
 
-const SLOT_SPACING = 12_000;
-const SLOTS_PER_ENCOUNTER_BLOCK = 3;
-const FIRST_ENCOUNTER_S = 2_600;
-
 /** Longitudinal visibility window ahead of the player, in road metres. */
 const APPEAR_AHEAD = 1_500;
 const FULLY_VISIBLE_AHEAD = 1_150;
@@ -50,11 +47,8 @@ const LATERAL_RANGE = 180;
 /** Handles, lids and feet. Four is the most any vessel here asks for. */
 const MAX_RINGS = 4;
 
-const SALT_OCCUPIED_SLOT = 0x4d17;
-const SALT_POSITION = 0x6a21;
 const SALT_SIDE = 0x83c9;
 const SALT_LATERAL = 0xa14f;
-const SALT_FORM = 0xc237;
 const SALT_SHAPE = 0xd46b;
 
 /**
@@ -377,7 +371,7 @@ export class DistantMirage {
   private readonly colour = new THREE.Color();
   private ringCount = 0;
 
-  private activeSlot = Number.MIN_SAFE_INTEGER;
+  private activeEncounter = -1;
   private eventS = -Infinity;
   private eventX = 0;
   private eventY = 0;
@@ -392,6 +386,7 @@ export class DistantMirage {
     private readonly terrain: Terrain,
     private readonly seed: number,
     private readonly origin: WorldOrigin,
+    private readonly schedule: MirageSchedule,
   ) {
     // UNLIT, AND AUTHORED IN DISPLAY SPACE.
     //
@@ -436,12 +431,12 @@ export class DistantMirage {
 
   /** Updates presentation only. `dayFactor` comes from Sky but is never fed back into it. */
   update(playerS: number, dayFactor: number): void {
-    const slot = this.findVisibleSlot(playerS);
-    if (slot === null || dayFactor <= 0.12) {
+    const index = this.findVisibleEncounter(playerS);
+    if (index < 0 || dayFactor <= 0.12) {
       this.root.visible = false;
       return;
     }
-    if (slot !== this.activeSlot) this.place(slot);
+    if (index !== this.activeEncounter) this.place(index);
 
     const ahead = this.eventS - playerS;
     const arrivalFade = smoothstep(GONE_AHEAD, DISSOLVE_START_AHEAD, ahead);
@@ -470,7 +465,7 @@ export class DistantMirage {
     variation: number,
   ): void {
     this.previewActive = true;
-    this.activeSlot = Number.MIN_SAFE_INTEGER;
+    this.activeEncounter = -1;
     this.eventS = eventS;
     const point = this.road.offsetPoint(eventS, lateral);
     this.eventX = point.x;
@@ -500,48 +495,27 @@ export class DistantMirage {
     this.root.visible = false;
   }
 
-  private findVisibleSlot(playerS: number): number | null {
-    // At most two slots can overlap the 1.5 km visibility window at a 12 km cadence.
-    // Check the current slot and the next one because the seeded offset may put either
-    // candidate ahead of the player.
-    const base = Math.max(0, Math.floor(playerS / SLOT_SPACING));
-    for (let slot = base; slot <= base + 1; slot++) {
-      if (!this.slotExists(slot)) continue;
-      const s = this.slotS(slot);
-      const ahead = s - playerS;
-      if (ahead >= GONE_AHEAD && ahead <= APPEAR_AHEAD) return slot;
-    }
-    return null;
+  /**
+   * The vessel encounter in view at `playerS`, or -1. The vessel stands `APPEAR_AHEAD`
+   * past its encounter's start, so it is in view for the first kilometre after it:
+   * encounters are at least 3 km apart, so only the latest one can be.
+   */
+  private findVisibleEncounter(playerS: number): number {
+    const index = this.schedule.lastStartingBy(playerS);
+    if (index < 0) return -1;
+    const encounter = this.schedule.encounters[index]!;
+    if (encounter.apparition.system !== 'distant') return -1;
+    return playerS <= encounter.startS + APPEAR_AHEAD - GONE_AHEAD ? index : -1;
   }
 
-  private slotExists(slot: number): boolean {
-    if (slot === 0) return true;
-    // Independent 28% rolls had the right average but no upper bound: seed 1337
-    // placed nothing between 2.6 km and 104.6 km, and valid seeds produced gaps over
-    // 300 km. Pick one slot in each three-slot block instead. Random position within
-    // each slot remains, so the cadence does not become a visible metronome; the
-    // longest possible spatial gap is now 68 km.
-    const block = Math.floor((slot - 1) / SLOTS_PER_ENCOUNTER_BLOCK);
-    const firstSlot = block * SLOTS_PER_ENCOUNTER_BLOCK + 1;
-    const occupied =
-      firstSlot +
-      Math.floor(
-        hash01(this.seed, block, SALT_OCCUPIED_SLOT) * SLOTS_PER_ENCOUNTER_BLOCK,
-      );
-    return slot === occupied;
-  }
-
-  private slotS(slot: number): number {
-    if (slot === 0) return FIRST_ENCOUNTER_S;
-    const inset = 2_000 + hash01(this.seed, slot, SALT_POSITION) * (SLOT_SPACING - 4_000);
-    return slot * SLOT_SPACING + inset;
-  }
-
-  private place(slot: number): void {
-    this.activeSlot = slot;
-    this.eventS = this.slotS(slot);
-    const side = hash01(this.seed, slot, SALT_SIDE) < 0.5 ? -1 : 1;
-    const lateral = side * (LATERAL_MIN + hash01(this.seed, slot, SALT_LATERAL) * LATERAL_RANGE);
+  private place(index: number): void {
+    this.activeEncounter = index;
+    const encounter = this.schedule.encounters[index]!;
+    if (encounter.apparition.system !== 'distant') throw new Error(`Mirage encounter ${index} is not a vessel`);
+    const family = encounter.apparition.family;
+    this.eventS = encounter.startS + APPEAR_AHEAD;
+    const side = hash01(this.seed, index, SALT_SIDE) < 0.5 ? -1 : 1;
+    const lateral = side * (LATERAL_MIN + hash01(this.seed, index, SALT_LATERAL) * LATERAL_RANGE);
     const point = this.road.offsetPoint(this.eventS, lateral);
     this.eventX = point.x;
     this.eventZ = point.z;
@@ -552,27 +526,22 @@ export class DistantMirage {
     const approach = this.road.sampleAt(this.eventS - FULLY_VISIBLE_AHEAD);
     this.root.rotation.y = Math.atan2(approach.x - point.x, approach.z - point.z);
     this.root.scale.setScalar(1);
-    this.build(slot);
+    this.build(index, VESSELS.findIndex((vessel) => vessel.name === family));
   }
 
   /**
    * Shows one vessel and hangs its handles.
    *
-   * The seed picks the shape and then varies its height and its stoutness. It is
+   * The schedule picks the shape; `key` varies its height and its stoutness. It is
    * deliberately allowed no more than that: a profile squashed or stretched past about
    * a fifth stops being the vessel it was drawn as, and one recognisable jar is worth
    * more than twenty ambiguous ones.
    */
-  private build(slot: number, formOverride?: number): void {
-    const index =
-      formOverride !== undefined && formOverride >= 0
-        ? formOverride
-        : Math.floor(hash01(this.seed, slot, SALT_FORM) * VESSELS.length);
-    const vessel = VESSELS[Math.min(VESSELS.length - 1, index)]!;
+  private build(key: number, index: number): void {
+    const vessel = VESSELS[Math.min(VESSELS.length - 1, Math.max(0, index))]!;
 
-    const height = vessel.height * (0.82 + this.shapeRandom(slot, 0) * 0.42);
-    const girth = height * vessel.girth * (0.92 + this.shapeRandom(slot, 1) * 0.16);
-
+    const height = vessel.height * (0.82 + this.shapeRandom(key, 0) * 0.42);
+    const girth = height * vessel.girth * (0.92 + this.shapeRandom(key, 1) * 0.16);
     for (let i = 0; i < this.vessels.length; i++) {
       const mesh = this.vessels[i]!;
       mesh.visible = i === index;

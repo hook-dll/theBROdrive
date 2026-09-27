@@ -396,9 +396,10 @@ body.is-cinematic #ui {
 /* AUTOPILOT FACES. One class per mode on the driving cluster, each rewriting the face
    and its ink together: the two pale modes need dark ink to keep a needle readable, and
    frantic's crimson is dark enough to keep the authored light one. The mode is worth the
-   whole face rather than a lamp because `sleeper` and `frantic` differ by roughly half
-   the cornering speed, and a driver about to take the wheel back needs to know which
-   one he is interrupting before he looks for an indicator. */
+   whole face rather than a lamp because `sleeper` keeps its lane well inside the tyres
+   and `frantic` races the whole road at their limit, and a driver about to take the
+   wheel back needs to know which one he is interrupting before he looks for an
+   indicator. */
 .hud-driving.is-autopilot-sleeper {
   --hud-dial-face: #fffdd0;
   --hud-aux-dial-face: #fffdd0;

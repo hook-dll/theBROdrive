@@ -2,34 +2,17 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import type { DoorClearance } from './poi/kit';
-import {
-  buildAutoPartsStore,
-  buildCottage,
-  buildCourtyardHouse,
-  buildGeneralStore,
-  buildKiosk,
-  buildLongHouse,
-  buildMarket,
-  buildPorchHouse,
-  buildRoadCafe,
-  buildWorkshopHome,
-} from './poi/houses';
-import { buildButterflyGas, buildHighwayGas, buildMushroomGas, buildPavilionGas, buildUfoGas } from './poi/gas';
 import { buildStarterHome } from './poi/starter';
-import { buildBrokenPlane, buildFishingWreck, buildPlaneFuselage, buildTugboat } from './poi/wrecks';
-import {
-  buildBuriedContainer,
-  buildContainerStack,
-  buildFallenTower,
-  buildOpenContainer,
-  buildRelayCluster,
-  buildStandingTower,
-} from './poi/towers';
+import { buildFallenTower, buildRelayCluster, buildStandingTower } from './poi/towers';
 
+/**
+ * The kit-built buildings: the three masts the world still places, and the starter
+ * homestead (world/house.ts). Everything else the world places is a dwelling
+ * (world/dwellings); see world/poistructures.ts for the list the world draws from.
+ */
 export interface PoiVariantDefinition {
   readonly id: string;
   readonly name: string;
-  readonly category: 'house' | 'shop' | 'gas' | 'wreck' | 'tower' | 'container';
   readonly footprint: readonly [number, number];
   readonly build: (root: THREE.Group) => void;
 }
@@ -150,33 +133,18 @@ export function mergePoiStatics(root: THREE.Group): void {
 }
 
 export const POI_VARIANTS: readonly PoiVariantDefinition[] = [
-  { id: 'two-room-cottage', name: 'Двухкомнатный домик', category: 'house', footprint: [8.5, 6.5], build: buildCottage },
-  { id: 'porch-house', name: 'Дом с верандой', category: 'house', footprint: [11.2, 9.2], build: buildPorchHouse },
-  { id: 'long-house', name: 'Длинный трёхкомнатный дом', category: 'house', footprint: [12.5, 5.8], build: buildLongHouse },
-  { id: 'spacious-veranda-house', name: 'Просторный дом с верандой', category: 'house', footprint: [20, 15], build: buildCourtyardHouse },
-  { id: 'two-storey-country-house', name: 'Просторный двухэтажный дом', category: 'house', footprint: [18, 16], build: buildWorkshopHome },
-  { id: 'road-kiosk', name: 'Придорожный киоск', category: 'shop', footprint: [5.8, 5.3], build: buildKiosk },
-  { id: 'road-cafe', name: 'Небольшое кафе', category: 'shop', footprint: [10.5, 8.2], build: buildRoadCafe },
-  { id: 'general-store', name: 'Сельский магазин', category: 'shop', footprint: [12, 9], build: buildGeneralStore },
-  { id: 'large-village-market', name: 'Большой сельский универсам', category: 'shop', footprint: [27, 20], build: buildMarket },
-  { id: 'parts-warehouse-store', name: 'Большой магазин-склад автозапчастей', category: 'shop', footprint: [30, 22], build: buildAutoPartsStore },
-  { id: 'tugboat-wreck', name: 'Остов буксира', category: 'wreck', footprint: [18, 9], build: buildTugboat },
-  { id: 'fishing-boat-wreck', name: 'Рыбацкий кораблик', category: 'wreck', footprint: [14, 9], build: buildFishingWreck },
-  { id: 'plane-fuselage', name: 'Крупный разбитый самолёт', category: 'wreck', footprint: [27, 24], build: buildPlaneFuselage },
-  { id: 'scattered-plane', name: 'Крупные обломки самолёта', category: 'wreck', footprint: [34, 28], build: buildBrokenPlane },
-  { id: 'standing-tower', name: 'Стоящая вышка', category: 'tower', footprint: [10, 10], build: buildStandingTower },
-  { id: 'fallen-tower', name: 'Упавшая вышка', category: 'tower', footprint: [32, 10], build: buildFallenTower },
-  { id: 'relay-cluster', name: 'Узел связи', category: 'tower', footprint: [23, 16], build: buildRelayCluster },
-  { id: 'open-container', name: 'Открытый контейнер', category: 'container', footprint: [5, 8], build: buildOpenContainer },
-  { id: 'container-stack', name: 'Склад контейнеров', category: 'container', footprint: [12, 10], build: buildContainerStack },
-  { id: 'buried-container', name: 'Занесённое убежище', category: 'container', footprint: [10, 10], build: buildBuriedContainer },
-  { id: 'mushroom-gas-station', name: 'АЗС с навесами-грибками', category: 'gas', footprint: [30, 20], build: buildMushroomGas },
-  { id: 'butterfly-gas-station', name: 'АЗС «Крыло»', category: 'gas', footprint: [30, 19], build: buildButterflyGas },
-  { id: 'pavilion-gas-station', name: 'АЗС-павильон 1950-х', category: 'gas', footprint: [30, 19], build: buildPavilionGas },
-  { id: 'ufo-gas-station', name: 'Футуристическая АЗС', category: 'gas', footprint: [32, 22], build: buildUfoGas },
-  { id: 'highway-gas-station', name: 'Двухпоточная трассовая АЗС', category: 'gas', footprint: [35, 23], build: buildHighwayGas },
-  { id: 'starter-homestead', name: 'Стартовый двухэтажный дом', category: 'house', footprint: [29, 19], build: buildStarterHome },
+  { id: 'standing-tower', name: 'Стоящая вышка', footprint: [10, 10], build: buildStandingTower },
+  { id: 'fallen-tower', name: 'Упавшая вышка', footprint: [32, 10], build: buildFallenTower },
+  { id: 'relay-cluster', name: 'Узел связи', footprint: [23, 16], build: buildRelayCluster },
+  { id: 'starter-homestead', name: 'Стартовый двухэтажный дом', footprint: [29, 19], build: buildStarterHome },
 ];
+
+/** A variant's index by id; throws on a typo so a caller never builds the wrong thing. */
+export function poiVariantIndex(id: string): number {
+  const index = POI_VARIANTS.findIndex((definition) => definition.id === id);
+  if (index < 0) throw new Error(`Unknown POI variant "${id}"`);
+  return index;
+}
 
 export function createPoiVariant(index: number): THREE.Group {
   const definition = POI_VARIANTS[index];

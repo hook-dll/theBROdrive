@@ -2,12 +2,40 @@ import * as THREE from 'three';
 import { primeMaxAnisotropy } from './render/texturequality';
 import { AdaptiveResolutionController } from './core/adaptivequality';
 import { makeFlatMaterial } from './render/materials';
-import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './world/poi-variants';
+import { createPoiVariant, mergePoiStatics, poiVariantIndex } from './world/poi-variants';
+import { createStructureInstance, POI_STRUCTURES } from './world/poistructures';
+import { dwellingGlassMaterial } from './world/dwellings/builder';
 
-const GRID_COLUMNS = 5;
+/**
+ * What the gallery shows: exactly the buildings the world scatters, in the order the
+ * world numbers them (world/poistructures.ts). Masts are built from the kit with their
+ * real lights and switches, so a room light can be tried here; dwellings are the very
+ * instances the world places.
+ */
+interface GallerySource {
+  readonly name: string;
+  /** Second line in the list: who built this, where and when. */
+  readonly note: string;
+  readonly build: () => THREE.Group;
+}
+
+const SOURCES: readonly GallerySource[] = POI_STRUCTURES.map((structure, index): GallerySource => ({
+  name: structure.name,
+  note: structure.note,
+  build:
+    structure.kind === 'mast'
+      ? () => {
+          const root = createPoiVariant(poiVariantIndex(structure.id));
+          mergePoiStatics(root);
+          return root;
+        }
+      : () => createStructureInstance(index).group,
+}));
+
+const GRID_COLUMNS = 8;
 const CELL_X = 38;
 const CELL_Z = 32;
-const GRID_ROWS = Math.ceil(POI_VARIANTS.length / GRID_COLUMNS);
+const GRID_ROWS = Math.ceil(SOURCES.length / GRID_COLUMNS);
 const OVERVIEW_Y = Math.max(72, GRID_ROWS * 18);
 const OVERVIEW_Z = Math.max(120, GRID_ROWS * 27);
 const WALK_SPEED = 8;
@@ -22,10 +50,47 @@ function pixelRatio(): number {
 }
 
 interface GalleryEntry {
-  readonly definition: (typeof POI_VARIANTS)[number];
+  readonly name: string;
+  readonly note: string;
   readonly root: THREE.Group;
+  /** How far in front of it the focus view stands, from its measured bounds. */
+  readonly viewDistance: number;
   readonly x: number;
   readonly z: number;
+}
+
+/**
+ * A sky-gradient environment. Window glass is the car tint, an opaque sky mirror
+ * that the game's sky probe feeds; without an environment here it would render as
+ * flat dark paint and the gallery would misrepresent every window.
+ */
+function skyEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const scene = new THREE.Scene();
+  const material = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    vertexShader: /* glsl */ `
+      varying vec3 vDirection;
+      void main() {
+        vDirection = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec3 vDirection;
+      void main() {
+        float h = vDirection.y;
+        vec3 zenith = vec3(0.2, 0.38, 0.7);
+        vec3 horizon = vec3(0.82, 0.8, 0.74);
+        vec3 ground = vec3(0.42, 0.33, 0.22);
+        vec3 colour = h > 0.0 ? mix(horizon, zenith, pow(h, 0.55)) : mix(horizon, ground, pow(-h, 0.4));
+        gl_FragColor = vec4(colour, 1.0);
+      }`,
+  });
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), material));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const texture = pmrem.fromScene(scene, 0).texture;
+  pmrem.dispose();
+  material.dispose();
+  return texture;
 }
 
 function makeLabel(index: number, name: string): THREE.Sprite {
@@ -54,7 +119,9 @@ function makeLabel(index: number, name: string): THREE.Sprite {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  // Depth-tested: at eye level among low houses, every far label drawn on top of
+  // the house in front of you hid the facade being inspected.
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
   sprite.scale.set(10.7, 4.0, 1);
   sprite.renderOrder = 20;
   return sprite;
@@ -73,6 +140,7 @@ function createInterface(entries: readonly GalleryEntry[], focus: (index: number
       .poi-gallery-list button, .poi-gallery-actions button { min-height:31px; border:1px solid rgba(234,223,202,.24); background:#2b251b; color:#eadfca; padding:6px 9px; text-align:left; cursor:pointer; font:12px "Segoe UI",sans-serif; }
       .poi-gallery-list button:hover, .poi-gallery-list button.is-active, .poi-gallery-actions button:hover { background:#5c4930; border-color:#d7bd89; }
       .poi-gallery-list b { display:inline-block; width:25px; color:#d7bd89; }
+      .poi-gallery-list small { display:block; margin-left:25px; color:#a99d86; font-size:11px; }
       .poi-gallery-actions { position:absolute; left:18px; bottom:18px; display:flex; gap:7px; pointer-events:auto; }
       .poi-gallery-actions button { text-align:center; padding:8px 13px; }
       .poi-gallery-status { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); padding:8px 12px; background:rgba(20,17,12,.8); color:#d7bd89; }
@@ -104,11 +172,11 @@ function createInterface(entries: readonly GalleryEntry[], focus: (index: number
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.index = String(index);
-    button.innerHTML = `<b>${String(index + 1).padStart(2, '0')}</b>${entry.definition.name}`;
+    button.innerHTML = `<b>${String(index + 1).padStart(2, '0')}</b>${entry.name}<small>${entry.note}</small>`;
     button.addEventListener('click', () => {
       focus(index);
       list.querySelectorAll('button').forEach((peer) => peer.classList.toggle('is-active', peer === button));
-      status.textContent = `${String(index + 1).padStart(2, '0')} · ${entry.definition.name}`;
+      status.textContent = `${String(index + 1).padStart(2, '0')} · ${entry.name} · ${entry.note}`;
     });
     list.appendChild(button);
   });
@@ -160,7 +228,11 @@ export function bootPoiGallery(): void {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9eb3bd);
-  scene.fog = new THREE.FogExp2(0xb8ad93, 0.0042);
+  // Thin enough that the far rows of a 53-cell grid still read from the overview.
+  scene.fog = new THREE.FogExp2(0xb8ad93, 0.0024);
+  // On the glass only: the rest of the gallery is balanced for its two lights, and
+  // a scene-wide probe on top of them washed every wall out.
+  dwellingGlassMaterial().envMap = skyEnvironment(renderer);
 
   const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.08, 700);
   camera.rotation.order = 'YXZ';
@@ -171,11 +243,11 @@ export function bootPoiGallery(): void {
   const sun = new THREE.DirectionalLight(0xffe0b1, 2.8);
   sun.position.set(-55, 85, -38);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -150;
-  sun.shadow.camera.right = 150;
-  sun.shadow.camera.top = 150;
-  sun.shadow.camera.bottom = -150;
+  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.camera.left = -180;
+  sun.shadow.camera.right = 180;
+  sun.shadow.camera.top = 180;
+  sun.shadow.camera.bottom = -180;
   sun.shadow.camera.near = 5;
   sun.shadow.camera.far = 300;
   sun.shadow.bias = -0.00008;
@@ -190,7 +262,7 @@ export function bootPoiGallery(): void {
   scene.add(ground);
 
   const entries: GalleryEntry[] = [];
-  POI_VARIANTS.forEach((definition, index) => {
+  SOURCES.forEach((source, index) => {
     const column = index % GRID_COLUMNS;
     const row = Math.floor(index / GRID_COLUMNS);
     const x = (column - (GRID_COLUMNS - 1) / 2) * CELL_X;
@@ -201,15 +273,16 @@ export function bootPoiGallery(): void {
     pad.receiveShadow = true;
     scene.add(pad);
 
-    const root = createPoiVariant(index);
-    mergePoiStatics(root);
+    const root = source.build();
     root.position.set(x, 0.02, z);
     scene.add(root);
     const bounds = new THREE.Box3().setFromObject(root);
-    const label = makeLabel(index, definition.name);
+    const label = makeLabel(index, source.name);
     label.position.set(x, Math.max(4.8, bounds.max.y + 2.4), z);
     scene.add(label);
-    entries.push({ definition, root, x, z });
+    const size = bounds.getSize(new THREE.Vector3());
+    const viewDistance = size.z / 2 + Math.max(6, size.x * 0.8, size.y * 1.5);
+    entries.push({ name: source.name, note: source.note, root, viewDistance, x, z });
   });
 
   for (let column = 0; column <= GRID_COLUMNS; column++) {
@@ -361,9 +434,9 @@ export function bootPoiGallery(): void {
   const focus = (index: number): void => {
     const entry = entries[index];
     if (!entry) return;
-    camera.position.set(entry.x, EYE_HEIGHT, entry.z - Math.max(8, entry.definition.footprint[1] / 2 + 5));
+    camera.position.set(entry.x, EYE_HEIGHT, entry.z - entry.viewDistance);
     yaw = Math.PI;
-    pitch = -0.04;
+    pitch = 0.06;
     applyLook();
   };
   const toggleRoofs = (): boolean => {

@@ -23,18 +23,29 @@ export const CHUNK_LENGTH = 200;
 
 /** Chunks of scenery kept alive either side of the player. */
 const VISUAL_RADIUS = 6;
-/** Chunks that carry physics colliders either side of the player. */
+/**
+ * Chunks that MUST carry physics colliders either side of the player.
+ *
+ * Not the chunks that do: while the player is on the road every chunk is built with
+ * its colliders from the start, the whole visual window, so steady travel never has
+ * to turn a finished visual-only chunk into a physical one. That conversion is a full
+ * synchronous rebuild — no provider can add just its colliders — and it cost 35-50 ms
+ * of main thread twice per 200 m chunk (one chunk gaining physics ahead, one losing it
+ * behind): measured in a browser trace as every stutter of a 60 fps drive. This band
+ * is now only the floor that is repaired on the spot when it is ever found without
+ * physics — after a return from the open desert, or a teleport.
+ */
 const PHYSICS_RADIUS = 2;
 /**
  * Road arclength either side of the player that is GUARANTEED to carry collision.
  *
- * The live physics set is `playerChunk ± PHYSICS_RADIUS`, so the supported reach
+ * The guaranteed set is `playerChunk ± PHYSICS_RADIUS`, so the supported reach
  * runs from `CHUNK_LENGTH * PHYSICS_RADIUS` (player at a chunk boundary) to one
  * chunk more (player at its far edge). Anything that needs ground under it at a
  * distance — traffic spawning, in particular — must use the guaranteed figure.
  */
 export const PHYSICS_REACH_M = CHUNK_LENGTH * PHYSICS_RADIUS;
-/** Past this lateral distance road content carries no physics or prop colliders. */
+/** Past this lateral distance NEW road content is built without physics or prop colliders. */
 const ROAD_PHYSICS_REACH = 1200;
 
 /**
@@ -279,35 +290,37 @@ export class ChunkStreamer {
       this.travelDirection === 0 ? null : playerChunk + this.travelDirection * (VISUAL_RADIUS + 1);
 
     // Tear down anything that left the visual window and is not the one directional
-    // lookahead. A chunk that is still wanted but whose physics status no longer
-    // matches its distance is rebuilt IN PLACE, synchronously, rather than deleted
-    // and left to the incremental buildQueue below.
+    // lookahead.
     //
+    // PHYSICS ONLY EVER GOES ON IN PLACE, NEVER OFF. On the road every chunk is built
+    // physical (see PHYSICS_RADIUS), so a physical chunk keeps its colliders until it
+    // leaves the window, and the player walking off into the desert leaves them where
+    // they are rather than rebuilding thirteen chunks to take them away.
+    //
+    // A chunk inside the guaranteed band that is still visual-only — built while the
+    // player was out in the desert, or before a teleport — is rebuilt IN PLACE,
+    // synchronously, rather than deleted and left to the incremental buildQueue below.
     // Every provider's content differs from `hasPhysics` only in whether it also
-    // carries colliders (see ChunkContext.hasPhysics), so redoing it in full is not
-    // wasted work — it is the only way to add or drop those colliders, since none of
-    // the providers expose a narrower "just the physics" rebuild. Left to the
-    // ordinary per-frame budget (one provider step at a time), a chunk regaining
-    // physics exactly where the player is headed — which happens once every
-    // CHUNK_LENGTH of travel, at the PHYSICS_RADIUS boundary ahead — went missing for
-    // as many frames as it has providers: reported from play as the road and its
-    // scenery blinking out for about half a second every few seconds while driving.
-    // `prime()` already relies on the same synchronous drain for chunk 0 at boot;
-    // this is that same drain for one in-flight chunk, on the one frame it changes.
+    // carries colliders (see ChunkContext.hasPhysics), so redoing it in full is the only
+    // way to add them, since none of the providers expose a narrower "just the physics"
+    // rebuild. Left to the ordinary per-frame budget (one provider step at a time), such
+    // a chunk went missing for as many frames as it has providers: reported from play
+    // as the road and its scenery blinking out for about half a second. `prime()`
+    // already relies on the same synchronous drain for chunk 0 at boot; this is that
+    // same drain for one chunk, on the one frame it is found.
+    const onRoad = Math.abs(playerLateral) < ROAD_PHYSICS_REACH;
     for (const [index, chunk] of this.built) {
       const wanted = (index >= min && index <= max) || index === prefetch;
-      const needsPhysics =
-        Math.abs(playerLateral) < ROAD_PHYSICS_REACH &&
-        Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
+      const needsPhysics = onRoad && Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
       if (!wanted) {
         if (this.teardown(chunk)) this.lightRevision++;
         this.built.delete(index);
-      } else if (chunk.hasPhysics !== needsPhysics) {
+      } else if (needsPhysics && !chunk.hasPhysics) {
         if (chunk.complete) {
-          this.buildChunkSync(index, needsPhysics);
+          this.buildChunkSync(index, true);
         } else {
-          // Still mid-build when its physics need changed: no completed content to
-          // redo in place, so cancel and let the normal queue restart it below.
+          // Still mid-build without physics: no completed content to redo in place,
+          // so cancel and let the normal queue restart it below, physical this time.
           if (this.teardown(chunk)) this.lightRevision++;
           this.built.delete(index);
         }
@@ -356,14 +369,12 @@ export class ChunkStreamer {
         break;
       }
     }
-    const hasPhysics =
-      index !== null &&
-      Math.abs(playerLateral) < ROAD_PHYSICS_REACH &&
-      Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
-    // A live collider takes precedence over cosmetic refresh work. The road mesh is
-    // the first provider, so this also gets a newly physical chunk back under the
-    // player as soon as the shared frame budget admits a unit.
-    const refresh = hasPhysics ? null : this.nextRefresh();
+    const hasPhysics = index !== null && onRoad;
+    // A collider the player is about to need takes precedence over cosmetic refresh
+    // work. The road mesh is the first provider, so this also gets a newly physical
+    // chunk back under the player as soon as the shared frame budget admits a unit.
+    const urgent = index !== null && onRoad && Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
+    const refresh = urgent ? null : this.nextRefresh();
     if (refresh) {
       this.scheduler.tryRun(frameId, `road:refresh:${refresh.index}:${refresh.providerId}`, () => {
         this.runRefresh(refresh);

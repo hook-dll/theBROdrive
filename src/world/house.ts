@@ -21,6 +21,7 @@ import { Road, ROAD_HALF_WIDTH } from './road';
 import { Terrain } from './terrain';
 import { fitGround, type GroundPlane } from './footprint';
 import { createVariantInstance, registerPlacedSwitches } from './poivariantbuild';
+import { poiVariantIndex } from './poi-variants';
 import { poseMatrix, geometryToTrimesh } from './poi';
 import type { PoiSwitchField } from './poiswitches';
 import { SHELF_PLANK_TOP } from './poi/kit';
@@ -96,7 +97,7 @@ const DRIVE_V1 = 5.1;
 
 
 /**
- * The gallery variant this homestead is built from: `starter-homestead`, index 25.
+ * The kit variant this homestead is built from: `starter-homestead`.
  *
  * It is placed by its own local frame rather than by editing its geometry: local x
  * runs FORWARD along the road and local z runs AWAY from it, so the variant's front
@@ -105,7 +106,7 @@ const DRIVE_V1 = 5.1;
  * building — the compound is not mirrored — and it is how the house and garage end up
  * side by side facing the drive, exactly as the hand-built version was arranged.
  */
-const VARIANT_INDEX = 25;
+const VARIANT_INDEX = poiVariantIndex('starter-homestead');
 /** The variant's local origin, in (u, v). Its garage door lands on the drive. */
 const VARIANT_U = GARAGE_DOOR_U + 5;
 const VARIANT_V = (DRIVE_V0 + DRIVE_V1) / 2 - 8.68;

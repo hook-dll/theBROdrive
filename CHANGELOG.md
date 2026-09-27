@@ -2,8 +2,94 @@
 
 ## Unreleased
 
+### Added
+
+- FIFTY DWELLINGS IN THE POI GALLERY, AND ONLY THE TOWERS KEPT BESIDE THEM. `?poi-gallery`
+  now shows the standing tower, the fallen tower and the relay station, then fifty
+  exterior-only houses from Europe, the Americas, Africa, the Middle East and Asia:
+  an izba and its sagging ruin, a Soviet dacha and an abandoned barrack, a Tudor
+  cottage, trulli, a pueblo, a tipi, a Queen Anne and its haunted twin, a Dust Bowl farm,
+  a Quonset hut, an Airstream, a Djenné mud house, a Sana'a tower house, a minka, a
+  tongkonan, a Futuro and the rest. None is taller than two storeys and none can be
+  entered: doors and passages are painted panels, windows are the car glass tint
+  (`TINTED_GLASS`, now shared with `carGlassMaterial`) and nothing stands behind them.
+  No textures: form and vertex colour only, with abandoned houses faded, patchy and
+  splashed with sand in the colour itself. Each house is two draws (one comic-banded
+  body, one glass). The catalogue is `world/dwellings/`.
+- TWENTY ODD MIRAGES JOIN THE PALMS, TREES, CACTI, CITY AND FLEET. Bowling pins the height
+  of a house, a chess game left on the sand, rubber ducks trailing ducklings, a tea set,
+  beach parasols, ice-cream cones, lighthouses, Dutch windmills, dice, roadworks cones,
+  snowmen, hot-air balloons, matryoshkas, rockets, toadstools, moai, pencils, a domino
+  run toppling, flamingos and garden gnomes. They are unlit solids with one baked light
+  direction, in the city's pale palette, one to six instanced draws per encounter, and
+  they fade off the asphalt exactly like the rest. The schedule now deals all 25 forms
+  from one shuffled deck, so each run of 25 encounters shows each once.
+
+### Changed
+
+- THE WORLD'S STOPS ARE THE GALLERY'S FIFTY-THREE BUILDINGS, BESIDE THE ROAD AND OUT IN
+  THE DESERT. Every roadside stop is now one of the three masts or fifty dwellings
+  (`world/poistructures.ts`), and a second, sparser scatter stands 70–650 m out in the
+  sand at a random bearing, clear of every pass of the road and of each other; couriers
+  still stop only at the roadside. What a stop stands as and what it gives out are
+  separate rolls, so fuel, shop goods, home stores, salvage and scrap come from as many
+  stops as before, and because no building can be entered they are left in a yard in
+  front of it. A salvage stop's wrecks stand beside the house, never in it. Stops use
+  fresh loot indices, so an old save finds them stocked. The starter homestead is
+  unchanged.
+- FIVE MIRAGES REDONE. The chess game is a Staunton set — pawn, rook with a crenellated
+  parapet, knight, mitred bishop, coroneted queen, king with a cross — standing on a
+  level walnut board in one of three real positions, with the taken pieces lined up
+  beside it. The dice are rounded, with round pips, and come to rest on any of their six
+  faces, in throws of two or three. The matryoshkas are one smooth turned outline with
+  the face, hair, scarf and apron painted on it along clean ovals, a rose on the apron,
+  and some sets opened, the eldest standing in two halves with the bare wood inside.
+  The teapot's handle and spout and the cups' handles are single swept tubes sunk into
+  the body, and the flamingo's neck is one tapering S from the breast to a head with a
+  bent, black-tipped beak.
+- THE MIRAGE FLEET IS SHIPS. The one stretched hull is replaced by three vessels built at
+  their own size and scaled only uniformly (`render/mirage-ships.ts`): a 36 m side
+  trawler with its wheelhouse, raked funnel, gallows and stern A-frame; a 64 m freighter
+  with a black hull, three-deck white accommodation aft, bridge wings, hatches and
+  derricks; and a 42 m barque with a gunport band, bowsprit, shrouds, square yards and
+  ragged topsails. Each hull is a smooth loft with sheer, flare, a raked stem and an
+  overhanging stern, painted in bottom, boot-top, topside and sheer-strake bands with
+  rust runs under the rail. Wrecks now lie within 35° of the road so they are seen from
+  the side, list about the keel instead of standing bow-up, sit a fifth or more deep in
+  the sand, and are drawn at 0.95 of the tableau's alpha instead of 0.74.
+- MIRAGES TAKE TURNS. The distant vessels and the roadside tableaus no longer keep two
+  private cadences (a tableau every 3–8 km, a vessel once in ~36 km, free to land inside
+  a fleet): both read one schedule (`render/mirage-schedule.ts`) that deals all 35
+  apparitions — ten vessels, twenty-five tableaus — from one seeded, shuffled deck, 3–8 km
+  apart, one at a time. Every round of 35 shows each once, the same one never comes twice
+  running, and a vessel now turns up about every 19 km instead of 36, a tableau about
+  every 7.5 km instead of 5.5.
+- ITEMS IN A TRUNK OR UNDER A BONNET TURN TO FACE YOU. Each miniature keeps its display
+  pose but now aims it at the eye every frame, so the contents read the same from
+  behind the car, beside it or leaning over it.
+- FRANTIC DRIVES LIKE A RACING DRIVER. It no longer has a personality speed cap: its pace
+  is the car's and the road's. It plans a least-curvature racing line over the next six
+  seconds of road (`vehicle/racingline.ts`) — outside, apex, outside — across the whole
+  asphalt where it can see the far half is clear and nobody could arrive there in
+  time, inside its own lane where it cannot; it plans its corner speeds on that line's
+  radius, corners at 0.72 of the tyres, brakes late at 0.9 of them, balances the
+  throttle against the cornering load and holds no more speed than it could stop in
+  what it can see. Behind a car or in a pass it is the old driver with its lane and
+  its indicators. On the playground circuit its laps went from 105.7/102.0 s to
+  96.5/92.4 s, its mean from 95 to 104 km/h and its peak from 130 to 172 km/h, still
+  on the asphalt and with no contact in traffic.
+
 ### Fixed
 
+- NOTHING IN A MIRAGE STANDS IN ANYTHING ELSE. Each odd form is tested as an oriented
+  box against everything already placed and moved or dropped when it would enter it, and
+  a group — a board, a row of dolls, a domino snake — stands whole or not at all. Palms,
+  trees and cacti now keep their measured reach apart as the wrecked fleet already did,
+  and city blocks each take a lot of their own. A toppled pin, a die on its side or a
+  lying lid no longer shows an open bottom.
+- THE ADOBE RUIN, THE NUBIAN HOUSE, THE LEBANESE HOUSE AND THE IZBA RUIN NO LONGER
+  FLICKER. Their walls, painted bands and re-roofed slabs shared planes with each other;
+  each is now one solid or stands clear.
 - NOTHING BEHIND THE WHEEL AUTOSAVES ANY MORE: THE SLOT KEEPS THE DRIVE AS IT WAS AT
   ENTRY. A dent booked its own save the moment it was recorded, so a fatal crash was
   written before the death sequence began and the reload put the player back into the
@@ -12,9 +98,26 @@
   only for the same reason: Quit and F5 both hide the page, and saving there would write
   a wrecked car over the drive the player reloads to get back. The cost is that a phone
   that sleeps mid-drive resumes at the point where the player got in.
+- THE DRIVE NO LONGER HITCHES EVERY 200 M. Each road chunk was built twice on the main
+  thread — once without colliders, then again synchronously when the car came within
+  the physics radius — a 35–50 ms frame each time. Road chunks are now built with their
+  colliders from the start and never rebuilt in place. The vista's ground and mesa
+  normals are computed straight over typed arrays (4 → 1.1 ms and 2 → 0.4 ms), and a
+  new traffic model compiles only its own materials, one clone per frame, instead of
+  the whole scene (20 ms). Measured on one seed at hurried pace: main-thread tasks
+  over 16 ms went from five to none, the worst left is a 10 ms vista rebuild.
+- THE GAZ-21 HOLDS ITS LANE UNDER THE AUTOPILOT. Its body answers the wheel about twice
+  as slowly as a Zhiguli's, and a lane hold that corrected only where the car was, not
+  where it was heading, fed that lag back as a weave it never settled out of: sleeper
+  crossed its line 32 times a kilometre with 0.37 m RMS. The hold now leads its error
+  by 0.4 s of lateral velocity; the same drive is 0.9 crossings a kilometre and
+  0.064 m, and every other car holds as well or better.
 
 ### Removed
 
+- THE OLD KIT-BUILT STOPS. The gas station, the kit houses, the wreck yard and the
+  container stops are gone from the world and from the code; the towers and the starter
+  homestead are all that is still built from the kit.
 - BODY DENTS ARE GONE. Damage the game cannot do well is worse than none: 20 of the 21
   catalogue bodies are 1,900–20,000 triangles with edges of 22–95 cm at the 90th
   percentile, so a vertex dent drew a wedge through a Zhiguli's grille or a rubbery bowl

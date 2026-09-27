@@ -1,0 +1,128 @@
+{
+  "id": "gaz31029",
+  "label": "GAZ-31029 Volga",
+  "work": "build/vehicles/gaz31029",
+  "photos": [
+    {"name": "front34-right", "file": "00-references/photo-31029-front-three-quarter.jpg",
+     "location": [-2.3, -5.4, 1.5], "target": [0.64, -2.88, 0.5], "lens": 26,
+     "points": [
+       {"px": [530, 818], "xyz": [-0.76, -1.566, 0.345]},
+       {"px": [279, 686], "xyz": [-0.72, 1.247, 0.345]},
+       {"px": [584, 738], "xyz": [-0.875, -2.40, 0.495]},
+       {"px": [1228, 720], "xyz": [0.875, -2.40, 0.495]},
+       {"px": [456, 373], "xyz": [-0.665, -0.46, 1.42]},
+       {"px": [857, 367], "xyz": [0.665, -0.46, 1.42]},
+       {"px": [811, 637], "xyz": [-0.36, -2.39, 0.72]},
+       {"px": [1120, 631], "xyz": [0.36, -2.39, 0.72]}
+     ]},
+    {"name": "rear34-right", "file": "00-references/photo-31029-rear.jpg",
+     "location": [-2.4, 5.6, 1.6], "target": [0.0, 1.0, 0.6], "lens": 26,
+     "points": [
+       {"px": [1390, 876], "xyz": [-0.72, 1.247, 0.345]},
+       {"px": [1632, 692], "xyz": [-0.75, -1.566, 0.345]},
+       {"px": [471, 755], "xyz": [0.875, 2.41, 0.485]},
+       {"px": [1280, 845], "xyz": [-0.875, 2.41, 0.485]},
+       {"px": [857, 364], "xyz": [0.665, 1.04, 1.40]},
+       {"px": [1371, 389], "xyz": [-0.665, 1.04, 1.40]},
+       {"px": [808, 502], "xyz": [0.69, 1.49, 0.99]},
+       {"px": [1353, 545], "xyz": [-0.69, 1.49, 0.99]}
+     ]},
+    {"name": "side-left", "file": "00-references/photo-31029-side-profile-police.jpg",
+     "location": [6.0, -0.2, 1.3], "target": [0.0, -0.2, 0.6], "lens": 35}
+  ],
+  "factory": {
+    "lengthM": 4.885,
+    "widthM": 1.8,
+    "heightM": 1.476,
+    "wheelbaseM": 2.8,
+    "frontTrackM": 1.495,
+    "rearTrackM": 1.425,
+    "clearanceM": 0.156,
+    "tyre": "205/70 R14",
+    "sources": [
+      "https://www.drom.ru/catalog/gaz/31029_volga/specs/dimensions/ (4885 x 1795 x 1488)",
+      "https://en.wikipedia.org/wiki/GAZ-31029 (4885 x 1800 x 1476, wheelbase 2800)",
+      "the-blueprints.com GAZ-31029 drawing callouts: 4885, 2800, 1476, 1820 over mirrors",
+      "conflicts: width 1800/1795, height 1476/1488; the drawing's 1476 is used so its views agree"
+    ]
+  },
+  "references": {
+    "bp-31029-vector-full.jpg": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/gaz-31029_volga_1992.jpg (watermarked preview; licence unknown; reference only, never shipped)",
+    "photo-31029-front-three-quarter.jpg": "https://commons.wikimedia.org/wiki/File:GAZ-31029_%22Volga%22_(front_view).jpg (CC BY-SA 4.0)",
+    "photo-31029-rear.jpg": "https://commons.wikimedia.org/wiki/File:GAZ-31029_%22Volga%22_(rear_view).jpg (CC BY-SA 4.0)",
+    "photo-31029-side-profile-police.jpg": "https://commons.wikimedia.org/wiki/File:Volga_31029_politia_01.jpg (public domain)"
+  },
+  "body": {
+    "tyreGapM": 0.012,
+    "yRange": [-2.38, 2.39],
+    "wheels": [
+      {"y": -1.5664, "z": 0.345, "radius": 0.345, "archHalfSpanM": 0.45, "wellDepthM": 0.3},
+      {"y": 1.2474, "z": 0.345, "radius": 0.345, "archHalfSpanM": 0.45, "wellDepthM": 0.3}
+    ],
+    "floor": [[-2.38, 0.34], [-2.05, 0.33], [-1.05, 0.235], [0.8, 0.235], [1.75, 0.33], [2.39, 0.36]],
+    "parts": [
+      {"name": "bumper_front", "material": "car_trim",
+       "side": [[-2.435, 0.40], [-2.40, 0.40], [-2.0, 0.40], [-2.0, 0.495], [-2.40, 0.495], [-2.435, 0.495]],
+       "plan": [[-2.435, 0.82], [-2.40, 0.875], [-2.0, 0.895]]},
+      {"name": "bumper_rear", "material": "car_trim",
+       "side": [[2.17, 0.38], [2.41, 0.38], [2.45, 0.38], [2.45, 0.485], [2.41, 0.485], [2.17, 0.485]],
+       "plan": [[2.17, 0.895], [2.41, 0.875], [2.45, 0.82]]}
+    ],
+    "lines": {
+      "waist": {
+        "plan": [[-2.38, 0.83], [-2.3, 0.855], [-2.0, 0.875], [-1.0, 0.88], [1.0, 0.88],
+                 [2.0, 0.875], [2.3, 0.855], [2.39, 0.83]],
+        "side": [[-2.38, 0.66], [2.39, 0.66]]
+      },
+      "sill": {"planFrom": "waist", "planOffsetM": -0.035, "sideFrom": "bottom"},
+      "shoulder": {
+        "planFrom": "waist", "planOffsetM": -0.03,
+        "side": [[-2.38, 0.84], [-1.9, 0.87], [-1.2, 0.93], [-0.95, 0.955], [-0.8, 0.96],
+                 [1.4, 0.96], [1.6, 0.955], [2.2, 0.93], [2.39, 0.895]]
+      },
+      "rail": {
+        "plan": [[-2.38, 0.66], [-1.2, 0.67], [-0.95, 0.70], [-0.46, 0.665], [0.3, 0.685],
+                 [1.04, 0.665], [1.49, 0.69], [1.7, 0.67], [2.39, 0.665]],
+        "side": [[-2.38, 0.85], [-1.9, 0.89], [-1.2, 0.985], [-0.99, 1.0], [-0.47, 1.42],
+                 [0.3, 1.43], [1.04, 1.40], [1.49, 0.99], [1.8, 0.955], [2.2, 0.935], [2.39, 0.905]]
+      }
+    },
+    "ring": ["floorCentre", "sill", "waist", "shoulder", "rail", "topCentre"],
+    "panels": [
+      {"n": 1, "bulge": 0.0},
+      {"n": 2, "bulge": 0.1},
+      {"n": 2, "bulge": 0.03},
+      {"n": 2, "bulge": 0.02},
+      {"n": 3, "bulge": 0.04}
+    ],
+    "glass": [
+      {"panel": "shoulder-rail", "y": [-0.82, 0.02]},
+      {"panel": "shoulder-rail", "y": [0.11, 0.91]},
+      {"panel": "rail-topCentre", "y": [-0.97, -0.46]},
+      {"panel": "rail-topCentre", "y": [1.05, 1.47]}
+    ]
+  },
+  "views": {
+    "side": {
+      "image": "00-references/bp-31029-vector-full.jpg",
+      "crop": [4, 68, 858, 336],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006,
+      "wheelCentresPx": [[160, 272], [645, 272]]
+    },
+    "top": {
+      "image": "00-references/bp-31029-vector-full.jpg",
+      "crop": [4, 462, 858, 792],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    },
+    "front": {
+      "image": "00-references/bp-31029-vector-full.jpg",
+      "crop": [878, 70, 1226, 336],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    },
+    "rear": {
+      "image": "00-references/bp-31029-vector-full.jpg",
+      "crop": [878, 488, 1226, 736],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    }
+  }
+}

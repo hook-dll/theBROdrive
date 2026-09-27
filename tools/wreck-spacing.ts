@@ -35,13 +35,13 @@ import { installAssetShim } from './assetshim';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import {
   POI_SPACING,
-  faceRoadYaw,
   layOutWreckField,
   poiAt,
+  salvageKeepOut,
   type WreckKeepOut,
   type WreckSlot,
 } from '../src/world/poi';
-import { createVariantInstance, variantDef } from '../src/world/poivariantbuild';
+import { createStructureInstance } from '../src/world/poistructures';
 import { Road } from '../src/world/road';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import { hash01, pick } from '../src/core/rng';
@@ -189,22 +189,13 @@ for (const seed of SEEDS) {
   const road = new Road(seed);
   for (let index = 1; index <= SLOTS; index++) {
     const poi = poiAt(seed >>> 0, index);
-    // The car field is granted to the container category now, so that is where a
-    // wreck layout is actually built.
-    if (poi === null || variantDef(poi.variant).category !== 'container') continue;
+    // The car field belongs to the salvage stock, so that is where a wreck layout is
+    // actually built.
+    if (poi === null || poi.stock !== 'salvage') continue;
 
-    const instance = createVariantInstance(poi.variant);
-    const centre = road.offsetPoint(poi.s, poi.lateral);
-    const building: WreckKeepOut = {
-      x: centre.x,
-      z: centre.z,
-      yaw: faceRoadYaw(road.sampleAt(poi.s).heading, poi.lateral, poi.variantSeed),
-      // The measured bounds of everything above ground, which CONTAIN the merged solid
-      // the collider is cut from — roofs widen the bounds and are excluded from the
-      // trimesh — so a body that clears these clears the wall the player hits.
-      halfX: instance.halfExtentX,
-      halfZ: instance.halfExtentZ,
-    };
+    // The very keep-out the world lays the field out around: the building's measured
+    // bounds, which CONTAIN the solid the collider is cut from, plus the yard.
+    const building: WreckKeepOut = salvageKeepOut(poi, road, createStructureInstance(poi.structure));
     sites.push(building);
 
     const inWorld = (slots: readonly WreckSlot[]): WorldPlaced[] =>

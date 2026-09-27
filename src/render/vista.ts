@@ -299,9 +299,6 @@ export class VistaMesh {
   private readonly mesaMesh: THREE.Mesh;
   private geometry: THREE.BufferGeometry | null = null;
   private mesaGeometry: THREE.BufferGeometry | null = null;
-  /** Reused scratch geometry for normal generation; cell loads must not allocate it. */
-  private normalGeometry: THREE.BufferGeometry | null = null;
-  private normalPositions: Float32Array | null = null;
   private groundLocalPositions: Float32Array | null = null;
   private groundSamples: GroundCellSamples | null = null;
   private readonly groundSampleCache = new Map<string, GroundSample>();
@@ -711,36 +708,71 @@ export class VistaMesh {
     if (colorChanged) color.needsUpdate = true;
   }
 
-
+  /**
+   * Flat face normals, then each quad's two triangles given their shared normal so a
+   * ledge reads as one face. Written over the typed arrays: through `computeVertexNormals`
+   * and `getX`/`setXYZ` this was 2 ms of every 250 m cell crossing for 18k vertices,
+   * and it runs in the same frame as the mesa rebuild.
+   */
   private refreshMesaNormals(): void {
     if (!this.mesaGeometry) return;
-    this.mesaGeometry.computeVertexNormals();
     const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
-    const normal = this.mesaGeometry.getAttribute('normal') as THREE.BufferAttribute;
+    const p = position.array as Float32Array;
+    let normal = this.mesaGeometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
+    if (!normal || normal.count !== position.count) {
+      normal = new THREE.BufferAttribute(new Float32Array(p.length), 3);
+      this.mesaGeometry.setAttribute('normal', normal);
+    }
+    const n = normal.array as Float32Array;
+    // Face normals, the arithmetic `computeVertexNormals` uses on a non-indexed buffer.
+    for (let v = 0; v + 8 < p.length; v += 9) {
+      const bx = p[v + 3]!;
+      const by = p[v + 4]!;
+      const bz = p[v + 5]!;
+      const cbx = p[v + 6]! - bx;
+      const cby = p[v + 7]! - by;
+      const cbz = p[v + 8]! - bz;
+      const abx = p[v]! - bx;
+      const aby = p[v + 1]! - by;
+      const abz = p[v + 2]! - bz;
+      let nx = cby * abz - cbz * aby;
+      let ny = cbz * abx - cbx * abz;
+      let nz = cbx * aby - cby * abx;
+      const length = Math.hypot(nx, ny, nz) || 1;
+      nx /= length;
+      ny /= length;
+      nz /= length;
+      for (let k = v; k < v + 9; k += 3) {
+        n[k] = nx;
+        n[k + 1] = ny;
+        n[k + 2] = nz;
+      }
+    }
     for (let i = 0; i + 5 < position.count; i += 6) {
-      const bx = position.getX(i + 1);
-      const by = position.getY(i + 1);
-      const bz = position.getZ(i + 1);
-      const cx = position.getX(i + 2);
-      const cy = position.getY(i + 2);
-      const cz = position.getZ(i + 2);
+      const o = i * 3;
+      const bx = p[o + 3]!;
+      const by = p[o + 4]!;
+      const bz = p[o + 5]!;
+      const cx = p[o + 6]!;
+      const cy = p[o + 7]!;
+      const cz = p[o + 8]!;
       if (
-        Math.abs(cx - position.getX(i + 3)) > 1e-4 ||
-        Math.abs(cy - position.getY(i + 3)) > 1e-4 ||
-        Math.abs(cz - position.getZ(i + 3)) > 1e-4 ||
-        Math.abs(bx - position.getX(i + 4)) > 1e-4 ||
-        Math.abs(by - position.getY(i + 4)) > 1e-4 ||
-        Math.abs(bz - position.getZ(i + 4)) > 1e-4
+        Math.abs(cx - p[o + 9]!) > 1e-4 ||
+        Math.abs(cy - p[o + 10]!) > 1e-4 ||
+        Math.abs(cz - p[o + 11]!) > 1e-4 ||
+        Math.abs(bx - p[o + 12]!) > 1e-4 ||
+        Math.abs(by - p[o + 13]!) > 1e-4 ||
+        Math.abs(bz - p[o + 14]!) > 1e-4
       ) {
         continue;
       }
 
-      const ax = position.getX(i);
-      const ay = position.getY(i);
-      const az = position.getZ(i);
-      const dx = position.getX(i + 5);
-      const dy = position.getY(i + 5);
-      const dz = position.getZ(i + 5);
+      const ax = p[o]!;
+      const ay = p[o + 1]!;
+      const az = p[o + 2]!;
+      const dx = p[o + 15]!;
+      const dy = p[o + 16]!;
+      const dz = p[o + 17]!;
       const abx = bx - ax;
       const aby = by - ay;
       const abz = bz - az;
@@ -771,8 +803,10 @@ export class VistaMesh {
       const ny = ny1 + ny2;
       const nz = nz1 + nz2;
       const length = Math.hypot(nx, ny, nz) || 1;
-      for (let vertex = i; vertex < i + 6; vertex++) {
-        normal.setXYZ(vertex, nx / length, ny / length, nz / length);
+      for (let k = o; k < o + 18; k += 3) {
+        n[k] = nx / length;
+        n[k + 1] = ny / length;
+        n[k + 2] = nz / length;
       }
     }
     normal.needsUpdate = true;
@@ -1085,27 +1119,56 @@ export class VistaMesh {
     }
   }
 
+  /**
+   * Smooth normals of the disc at these heights: the area-weighted face normals summed
+   * per vertex and normalised, the same arithmetic as `computeVertexNormals`, written
+   * over the typed arrays directly.
+   *
+   * It runs on the main thread once per sampled cell corner — every worker result and
+   * every synchronous fallback — and through a scratch `BufferGeometry` it cost 4 ms of
+   * a frame for the 14.5k-vertex disc, almost all of it `Vector3` traffic: measured in
+   * a browser trace as nine tenths of accepting a worker result, which lands several
+   * times per 250 m cell crossing.
+   */
   private groundNormalsFor(heights: Float32Array): Float32Array {
     invariantLocalPositions(this.groundLocalPositions);
     if (!this.geometry) throw new Error('vista ground geometry is not initialized');
-    const positionCount = this.groundLocalPositions.length;
-    if (this.normalGeometry === null || this.normalPositions?.length !== positionCount) {
-      this.normalPositions = new Float32Array(positionCount);
-      this.normalGeometry?.dispose();
-      this.normalGeometry = new THREE.BufferGeometry();
-      this.normalGeometry.setAttribute(
-        'position',
-        new THREE.BufferAttribute(this.normalPositions, 3),
-      );
-      this.normalGeometry.setIndex(this.geometry.getIndex()!);
+    const local = this.groundLocalPositions;
+    const index = this.geometry.getIndex()!.array;
+    const normals = new Float32Array(local.length);
+    for (let t = 0; t < index.length; t += 3) {
+      const a = index[t]!;
+      const b = index[t + 1]!;
+      const c = index[t + 2]!;
+      const bx = local[b * 3]!;
+      const by = heights[b]!;
+      const bz = local[b * 3 + 2]!;
+      const cbx = local[c * 3]! - bx;
+      const cby = heights[c]! - by;
+      const cbz = local[c * 3 + 2]! - bz;
+      const abx = local[a * 3]! - bx;
+      const aby = heights[a]! - by;
+      const abz = local[a * 3 + 2]! - bz;
+      const nx = cby * abz - cbz * aby;
+      const ny = cbz * abx - cbx * abz;
+      const nz = cbx * aby - cby * abx;
+      normals[a * 3] += nx;
+      normals[a * 3 + 1] += ny;
+      normals[a * 3 + 2] += nz;
+      normals[b * 3] += nx;
+      normals[b * 3 + 1] += ny;
+      normals[b * 3 + 2] += nz;
+      normals[c * 3] += nx;
+      normals[c * 3 + 1] += ny;
+      normals[c * 3 + 2] += nz;
     }
-    this.normalPositions.set(this.groundLocalPositions);
-    for (let i = 0; i < heights.length; i++) this.normalPositions[i * 3 + 1] = heights[i]!;
-    const position = this.normalGeometry.getAttribute('position') as THREE.BufferAttribute;
-    position.needsUpdate = true;
-    this.normalGeometry.computeVertexNormals();
-    const normal = this.normalGeometry.getAttribute('normal') as THREE.BufferAttribute;
-    return new Float32Array(normal.array as Float32Array);
+    for (let v = 0; v < normals.length; v += 3) {
+      const length = Math.hypot(normals[v]!, normals[v + 1]!, normals[v + 2]!) || 1;
+      normals[v] = normals[v]! / length;
+      normals[v + 1] = normals[v + 1]! / length;
+      normals[v + 2] = normals[v + 2]! / length;
+    }
+    return normals;
   }
 
   /**
@@ -1391,11 +1454,8 @@ export class VistaMesh {
     this.scene.remove(this.mesaMesh);
     this.geometry?.dispose();
     this.mesaGeometry?.dispose();
-    this.normalGeometry?.dispose();
     this.geometry = null;
     this.mesaGeometry = null;
-    this.normalGeometry = null;
-    this.normalPositions = null;
     this.groundLocalPositions = null;
     this.groundSamples = null;
     this.groundSampleCache.clear();

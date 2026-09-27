@@ -23,6 +23,7 @@ import {
   setCarBodyCondition,
   setCarBodyPalettePaint,
   weatherStaticCarPaint,
+  TINTED_GLASS,
   type CarBodyFrame,
   type CarSurfaceFinish,
 } from './materials';
@@ -670,14 +671,9 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
 function carGlassMaterial(): THREE.MeshStandardMaterial {
   glassMaterial ??= new THREE.MeshStandardMaterial({
     name: 'car-glass',
-    // Opaque sky mirror: the scene probe supplies sky, cirrus and Sun without
-    // revealing the unmodelled cabin. The restrained blue and reflection strength
-    // keep it glass-like without turning every window into a chrome-blue panel.
-    color: 0x203746,
+    // Opaque sky mirror; the tint is shared with house windows (see TINTED_GLASS).
+    ...TINTED_GLASS,
     transparent: false,
-    roughness: 0.11,
-    metalness: 0.35,
-    envMapIntensity: 1.7,
     side: THREE.DoubleSide,
   });
   return glassMaterial;
@@ -1287,20 +1283,65 @@ async function loadPalette(url: string): Promise<THREE.Texture> {
   return load;
 }
 
+/**
+ * Resolves after the next presented frame, so the work on either side of it lands in
+ * different frames — or after `FRAME_WAIT_CEILING_MS` if no frame comes. A page whose
+ * frames have stopped (an occluded window, a bench with no document) must still finish
+ * loading its cars: waiting on the frame alone hung the loading screen for good in a
+ * browser tab that was not being painted.
+ */
+function nextFrame(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  if (typeof requestAnimationFrame !== 'function') {
+    setTimeout(resolve, 0);
+    return promise;
+  }
+  requestAnimationFrame(() => resolve());
+  setTimeout(resolve, FRAME_WAIT_CEILING_MS);
+  return promise;
+}
+const FRAME_WAIT_CEILING_MS = 50;
+
+/** Tail of the per-frame queue `onOwnFrame` appends to. */
+let frameSlots: Promise<void> = Promise.resolve();
+
+/**
+ * Runs `work` on a frame of its own, after every earlier call's work has had its own.
+ *
+ * One model request can bring several with it (a wheel-set pool, a pack loaded at
+ * once), and their loads resolve together: a bare `nextFrame()` per step only moved
+ * all of them onto the same next frame, measured as one 40 ms task building four
+ * templates back to back.
+ */
+function onOwnFrame<T>(work: () => T): Promise<T> {
+  const run = frameSlots.then(nextFrame).then(work);
+  frameSlots = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 function loadModel(def: CarModelDef): Promise<void> {
   if (templates.has(def.id)) return Promise.resolve();
   const pending = modelLoads.get(def.id);
   if (pending) return pending;
 
+  // A traffic model is loaded mid-drive the first time the stream draws it. Parsing
+  // the file, preparing its materials and measuring its body are each several
+  // milliseconds of main thread and used to run as one task — a single dropped frame
+  // of 25-40 ms per new model — so each step after the parse takes a frame of its own.
   const load = (async () => {
     if (def.textureFile) await loadPalette(def.textureFile);
     const scene = await loadScene(def.file);
-    if (def.textureFile) {
-      applyTexture(scene, paletteTextures.get(def.textureFile)!);
-    }
-    tuneMaps(scene);
-    unifyCarMaterials(scene, def);
-    templates.set(def.id, buildTemplate(def, scene));
+    await onOwnFrame(() => {
+      if (def.textureFile) {
+        applyTexture(scene, paletteTextures.get(def.textureFile)!);
+      }
+      tuneMaps(scene);
+      unifyCarMaterials(scene, def);
+    });
+    templates.set(def.id, await onOwnFrame(() => buildTemplate(def, scene)));
   })().catch((error) => {
     modelLoads.delete(def.id);
     throw error;
@@ -1480,21 +1521,30 @@ export async function warmCarModelInstances(
   const compileGroup = new THREE.Group();
   const drivingBodies: THREE.Object3D[] = [];
   compileGroup.position.z = -20;
-  scene.add(compileGroup);
   for (const def of CAR_MODELS) {
     if (!templates.has(def.id) || warmDrivingInstances.has(def.id)) continue;
-    const drivingModel = cloneDrivingModel(template(def.id));
-    warmDrivingInstances.set(def.id, drivingModel);
-    drivingBodies.push(drivingModel.body);
-    compileGroup.add(drivingModel.body);
-    const staticModel = cloneStaticModel(def.id);
-    staticModel.model.traverse((object) => {
-      object.frustumCulled = false;
+    // Two clones of a whole car are several milliseconds; a pack that arrived at once
+    // must not clone all its cars in one frame (see `onOwnFrame`).
+    await onOwnFrame(() => {
+      if (warmDrivingInstances.has(def.id)) return;
+      const drivingModel = cloneDrivingModel(template(def.id));
+      warmDrivingInstances.set(def.id, drivingModel);
+      drivingBodies.push(drivingModel.body);
+      compileGroup.add(drivingModel.body);
+      const staticModel = cloneStaticModel(def.id);
+      staticModel.model.traverse((object) => {
+        object.frustumCulled = false;
+      });
+      warmStaticInstances.set(def.id, staticModel);
+      compileGroup.add(staticModel.model);
     });
-    warmStaticInstances.set(def.id, staticModel);
-    compileGroup.add(staticModel.model);
   }
-  await renderer.compileAsync(scene, camera);
+  scene.add(compileGroup);
+  // Only the new instances, against the live scene's lights and fog. Passed the
+  // scene itself, `compileAsync` walks and re-prepares every object in the world —
+  // measured at 20 ms of main thread per model mid-drive, where it is called once
+  // for each traffic model the session meets.
+  await renderer.compileAsync(compileGroup, camera, scene);
   scene.remove(compileGroup);
   for (const instance of warmStaticInstances.values()) compileGroup.remove(instance.model);
   for (const body of drivingBodies) compileGroup.remove(body);

@@ -4,9 +4,11 @@ import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { fitGround } from '../world/footprint';
+import { NOVELTY_KINDS, NoveltyField } from './mirage-novelties';
+import { SHIP_FORMS, shipFormAt } from './mirage-ships';
+import { BoxOccupancy, CircleOccupancy } from './mirage-occupancy';
+import type { MirageSchedule } from './mirage-schedule';
 
-const MIN_GAP_M = 3_000;
-const GAP_RANGE_M = 5_000;
 const APPROACH_M = 900;
 const RETREAT_M = 260;
 /**
@@ -29,12 +31,13 @@ const MAX_CITY_ROOFS = 192;
 const MAX_CITY_STREETS = 192;
 /** Metres a roof cone is buried in the block it caps, so their faces never coincide. */
 const ROOF_SINK_M = 0.3;
-const MAX_SHIPS = 240;
+/** Per ship form; a fleet deals at most 55 hulls across all three. */
+const MAX_SHIPS = 64;
 
 /**
  * Nearest a wreck may ground itself to the asphalt, and how far the field reaches out.
  *
- * A hull is seventy metres of ship. Sat at the verge like a palm it is a wall the
+ * A hull is up to seventy metres of ship. Sat at the verge like a palm it is a wall the
  * road runs along, and the eye cannot take in a shape it cannot see the ends of, so
  * the fleet alone stands well back: sixty metres is far enough that the nearest wreck
  * fits in the windscreen whole.
@@ -43,15 +46,24 @@ const SHIP_NEAR_M = 60;
 const SHIP_SPREAD_M = 210;
 /** Placement attempts per wreck before the slot is left empty. */
 const SHIP_ATTEMPTS = 10;
+/** Placement attempts per plant before the slot is left empty. */
+const PLANT_ATTEMPTS = 8;
+/** Placement attempts per city block before the slot is left empty. */
+const BLOCK_ATTEMPTS = 8;
+/** The local origin, where a city lot's footprint box is centred. */
+const ORIGIN = new THREE.Vector3();
 
-const SALT_GAP = 0x31a7;
-const SALT_LENGTH = 0x42b9;
 const SALT_VARIANT = 0x53cb;
 const SALT_PLACEMENT = 0x64dd;
 const SALT_SHAPE = 0x75ef;
 const SALT_COLOUR = 0x8711;
 
-export const MIRAGE_TABLEAU_KINDS = ['palms', 'trees', 'cacti', 'city', 'ships'] as const;
+/**
+ * The five landscapes the tableau began with, then the twenty odd apparitions of
+ * render/mirage-novelties.ts. `render/mirage-schedule.ts` deals them, together with
+ * the distant vessels, from one shuffled deck.
+ */
+export const MIRAGE_TABLEAU_KINDS = ['palms', 'trees', 'cacti', 'city', 'ships', ...NOVELTY_KINDS] as const;
 export type MirageKind = (typeof MIRAGE_TABLEAU_KINDS)[number];
 
 interface Encounter {
@@ -377,219 +389,6 @@ function cactusGeometry(): THREE.BufferGeometry {
     triangle(0.28, 0.91, 0.36, 0.91, 0.32, 0.97, bloom, -0.004);
   });
 }
-/**
- * A beached freighter, listing, with its plating gone amidships.
- *
- * THREE THINGS MAKE A HULL READ AS A HULL and the earlier version had none of them.
- * It LISTS: the whole wreck leans, which is the difference between a ship aground and a
- * box on sand. It has SHEER: the deck line curves up toward the bow instead of running
- * level, which is the one curve the eye uses to tell a ship from a shed. And it is lit
- * from one side, in four rust tones plus a bleached deck, so the flank has a top, a
- * middle and a shadowed turn of the bilge.
- *
- * The hold is open to the sky — a dark interior with frames standing in it — and sand
- * has drifted against the low side. Authored one unit tall like every other card, so an
- * instance's height scales the whole wreck.
- */
-/**
- * A wreck with VOLUME, not a drawn silhouette.
- *
- * The fleet used to be flat cards, and a card is the wrong instrument for a seventy-metre
- * hull. It was two perpendicular copies of one hand-drawn profile, which is a trick that
- * works for a palm — a small form needs a second plane or it vanishes when you look down
- * its edge — and is nonsense for a ship, where the second copy is a whole second vessel at
- * right angles. Measured on the shipped geometry: half of every vertex had a perpendicular
- * twin, the extent was the full length along BOTH axes, and of its 109 edges 83 were open
- * boundary — two shells with two normals between them. From the road that is literally an
- * X, and the player reported exactly an X.
- *
- * So the hull is built as a solid. A station list runs from stern to bow, each station
- * carrying its own half-beam and its own keel and deck heights, and consecutive stations
- * are lofted into a closed ring. That is the cheapest way to make a recognisable ship:
- * the sheer line rising to the bow, the plan narrowing forward, the bilge turning — all of
- * it falls out of two one-dimensional tables rather than being drawn face by face.
- *
- * The winding is settled by the geometry itself rather than by hand. A closed surface's
- * signed volume is positive when its normals face out, so the sign is measured and the
- * triangles are flipped if it comes back negative. That is what lets the material drop to
- * single-sided: a solid does not need its own inside drawn, and the old DoubleSide setting
- * was the other half of why these read as planes.
- *
- * Colour is still the same painted palette, indexed by height up the hull, so the banding
- * that made the flat ones legible survives the change to real form.
- */
-function shipGeometry(): THREE.BufferGeometry {
-  const hullLit = displayColour(0xcf7a4e);
-  const hull = displayColour(0xb35f3c);
-  const bilge = displayColour(0x7d4029);
-  const rust = displayColour(0xe6a05c);
-  const deck = displayColour(0xd9c19c);
-  const dark = displayColour(0x4a2a1d);
-  const drift = displayColour(0xd9ab74);
-
-  const positions: number[] = [];
-  const colours: number[] = [];
-  type P3 = readonly [number, number, number];
-  const tri = (a: P3, b: P3, c: P3, colour: THREE.Color): void => {
-    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-    for (let i = 0; i < 3; i++) colours.push(colour.r, colour.g, colour.b);
-  };
-  const quad = (a: P3, b: P3, c: P3, d: P3, colour: THREE.Color): void => {
-    tri(a, b, c, colour);
-    tri(a, c, d, colour);
-  };
-
-  /**
-   * Stations, stern to bow. `halfBeam` is the plan, `keelY` the bottom and `deckY` the
-   * deck edge: the sheer climbs forward and the plan narrows to a raked stem.
-   */
-  const stations: readonly { x: number; halfBeam: number; keelY: number; deckY: number }[] = [
-    { x: -0.58, halfBeam: 0.055, keelY: 0.16, deckY: 0.32 },
-    { x: -0.44, halfBeam: 0.068, keelY: 0.10, deckY: 0.36 },
-    { x: -0.26, halfBeam: 0.074, keelY: 0.06, deckY: 0.4 },
-    { x: -0.08, halfBeam: 0.076, keelY: 0.04, deckY: 0.43 },
-    { x: 0.1, halfBeam: 0.073, keelY: 0.04, deckY: 0.45 },
-    { x: 0.28, halfBeam: 0.065, keelY: 0.05, deckY: 0.46 },
-    { x: 0.44, halfBeam: 0.051, keelY: 0.07, deckY: 0.47 },
-    { x: 0.6, halfBeam: 0.032, keelY: 0.11, deckY: 0.5 },
-    { x: 0.72, halfBeam: 0.016, keelY: 0.15, deckY: 0.54 },
-    { x: 0.78, halfBeam: 0.007, keelY: 0.19, deckY: 0.58 },
-  ];
-
-  /** One station's closed cross-section, keel round the starboard side to the keel again. */
-  const ring = (s: (typeof stations)[number]): P3[] => {
-    const depth = s.deckY - s.keelY;
-    const w = s.halfBeam;
-    const at = (h: number, z: number): P3 => [s.x, s.keelY + depth * h, z];
-    return [
-      at(0, 0),
-      at(0.3, w * 0.78),
-      at(0.72, w),
-      at(1, w * 0.82),
-      at(1, 0),
-      at(1, -w * 0.82),
-      at(0.72, -w),
-      at(0.3, -w * 0.78),
-    ];
-  };
-  const bandColour = (s: (typeof stations)[number], y: number): THREE.Color => {
-    const h = (y - s.keelY) / Math.max(1e-6, s.deckY - s.keelY);
-    if (h >= 0.999) return deck;
-    if (h < 0.3) return bilge;
-    if (h < 0.78) return hull;
-    return hullLit;
-  };
-
-  const rings = stations.map(ring);
-  for (let i = 0; i + 1 < stations.length; i++) {
-    const a = rings[i]!;
-    const b = rings[i + 1]!;
-    for (let k = 0; k < a.length; k++) {
-      const k2 = (k + 1) % a.length;
-      const y = (a[k]![1] + a[k2]![1] + b[k]![1] + b[k2]![1]) * 0.25;
-      quad(a[k]!, a[k2]!, b[k2]!, b[k]!, bandColour(stations[i]!, y));
-    }
-  }
-  // Both ends closed, so the solid is watertight and needs no second side.
-  for (const [index, end] of [stations[0]!, stations[stations.length - 1]!].entries()) {
-    const r = rings[index === 0 ? 0 : rings.length - 1]!;
-    for (let k = 1; k + 1 < r.length; k++) {
-      tri(r[0]!, r[k]!, r[k + 1]!, index === 0 ? bilge : hull);
-    }
-  }
-
-  /**
-   * A solid box, for everything that stands on the deck. Six faces, twelve triangles, and
-   * it shares the ship's lean so the whole wreck lists together.
-   */
-  const box = (
-    cx: number,
-    cy: number,
-    cz: number,
-    hx: number,
-    hy: number,
-    hz: number,
-    lean: number,
-    colour: THREE.Color,
-    top: THREE.Color = colour,
-  ): void => {
-    const lift = (x: number, y: number, z: number): P3 => [x, y + (x - cx) * lean, z];
-    const x0 = cx - hx;
-    const x1 = cx + hx;
-    const y0 = cy - hy;
-    const y1 = cy + hy;
-    const z0 = cz - hz;
-    const z1 = cz + hz;
-    const v = (x: number, y: number, z: number): P3 => lift(x, y, z);
-    quad(v(x0, y1, z0), v(x1, y1, z0), v(x1, y1, z1), v(x0, y1, z1), top);
-    quad(v(x0, y0, z1), v(x1, y0, z1), v(x1, y0, z0), v(x0, y0, z0), colour);
-    quad(v(x0, y0, z0), v(x1, y0, z0), v(x1, y1, z0), v(x0, y1, z0), colour);
-    quad(v(x0, y1, z1), v(x1, y1, z1), v(x1, y0, z1), v(x0, y0, z1), colour);
-    quad(v(x0, y0, z1), v(x0, y1, z1), v(x0, y1, z0), v(x0, y0, z0), colour);
-    quad(v(x1, y0, z0), v(x1, y1, z0), v(x1, y1, z1), v(x1, y0, z1), colour);
-  };
-  /** The wreck's own lean: bow down to starboard by about seven degrees. */
-  const LEAN = -0.12;
-
-  // Deckhouse aft: three tiers, each set back, with a dark window band on the middle one.
-  box(-0.42, 0.38, 0, 0.075, 0.045, 0.052, LEAN, hull);
-  box(-0.41, 0.47, 0, 0.058, 0.045, 0.042, LEAN, hullLit);
-  box(-0.4, 0.545, 0, 0.042, 0.03, 0.03, LEAN, hull);
-  box(-0.41, 0.47, 0.043, 0.05, 0.02, 0.002, LEAN, dark);
-  box(-0.41, 0.47, -0.043, 0.05, 0.02, 0.002, LEAN, dark);
-  // Funnel, raked aft, with its band.
-  box(-0.2, 0.62, 0, 0.045, 0.09, 0.032, LEAN, hull);
-  box(-0.2, 0.665, 0, 0.046, 0.018, 0.033, LEAN, dark);
-  // Mast and boom forward, still standing; the boom is a slim box, not a line.
-  box(0.32, 0.62, 0, 0.011, 0.17, 0.011, LEAN, hull);
-  box(0.3, 0.66, 0, 0.09, 0.008, 0.008, LEAN, hull);
-  // Boot stripe along the old waterline, a thin proud box rather than a painted face.
-  box(0.05, 0.09, 0, 0.6, 0.006, 0.078, LEAN, rust);
-
-  // Debris on the sand: two plates and a drift of sand, which remain flat because they
-  // are lying on the ground and a plate has no third dimension to lose.
-  quad(
-    [-0.86, 0.01, -0.06], [-0.66, 0.01, 0.02], [-0.68, 0.05, 0.06], [-0.9, 0.05, -0.02],
-    bilge,
-  );
-  quad(
-    [-0.7, 0.005, 0.1], [-0.52, 0.005, 0.09], [-0.53, 0.055, 0.13], [-0.69, 0.055, 0.14],
-    drift,
-  );
-
-  // WINDING BY MEASUREMENT, not by hand: a closed surface encloses a positive signed
-  // volume, so the sign is read off the geometry and the triangles flipped when it comes
-  // back negative. Getting the loft's triangle order right on paper is not worth the
-  // effort when the answer is one sum away.
-  let volume = 0;
-  for (let i = 0; i < positions.length; i += 9) {
-    const ax = positions[i]!;
-    const ay = positions[i + 1]!;
-    const az = positions[i + 2]!;
-    const bx = positions[i + 3]!;
-    const by = positions[i + 4]!;
-    const bz = positions[i + 5]!;
-    const cx = positions[i + 6]!;
-    const cy = positions[i + 7]!;
-    const cz = positions[i + 8]!;
-    volume += (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6;
-  }
-  if (volume < 0) {
-    for (let i = 0; i < positions.length; i += 9) {
-      for (let k = 0; k < 3; k++) {
-        const t = positions[i + 3 + k]!;
-        positions[i + 3 + k] = positions[i + 6 + k]!;
-        positions[i + 6 + k] = t;
-      }
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
 
 /** A solid needs its outside drawn and nothing else. */
 function hullMaterial(): THREE.MeshBasicMaterial {
@@ -735,10 +534,11 @@ function pickPaint(paints: readonly CityPaint[], unit: number): CityPaint {
  * Rare render-only tableaus around the road.
  *
  * Every encounter is deterministic, starts 3–8 km after the previous one, and draws
- * from a shuffled set of five forms so each group of five contains every form once.
- * Only the active encounter owns instance matrices. Nothing enters physics, streaming,
- * saves, terrain, or shadow passes. Each tableau uses a handful of instanced draws,
- * preserving local coordinates around the encounter anchor at any road distance.
+ * from a shuffled deck of every form, so each run through the deck shows each form
+ * once. Only the active encounter owns instance matrices. Nothing enters physics,
+ * streaming, saves, terrain, or shadow passes. Each tableau uses a handful of
+ * instanced draws, preserving local coordinates around the encounter anchor at any
+ * road distance.
  */
 export class MirageTableau {
   private readonly root = new THREE.Group();
@@ -751,9 +551,10 @@ export class MirageTableau {
   private readonly cityAccents: THREE.InstancedMesh;
   private readonly cityRoofs: THREE.InstancedMesh;
   private readonly cityStreets: THREE.InstancedMesh;
-  private readonly ships: THREE.InstancedMesh;
+  /** One instanced mesh per ship form (render/mirage-ships.ts); a hull picks its form by hash. */
+  private readonly ships: readonly THREE.InstancedMesh[];
+  private readonly novelties: NoveltyField;
   private readonly materials: readonly THREE.MeshBasicMaterial[];
-  private readonly encounters: readonly Encounter[];
 
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
@@ -761,10 +562,15 @@ export class MirageTableau {
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3();
   private readonly colour = new THREE.Color();
-  /** Accepted wreck centres and their footprint radii, so a new hulk can dodge them. */
-  private readonly shipX = new Float32Array(MAX_SHIPS);
-  private readonly shipZ = new Float32Array(MAX_SHIPS);
-  private readonly shipRadius = new Float32Array(MAX_SHIPS);
+  /**
+   * Ground circles of what the active grove or fleet has stood so far, so the next
+   * palm or hulk can dodge them; and the boxes of the city's blocks, for the same.
+   */
+  private readonly footprints = new CircleOccupancy();
+  private readonly blockRoom = new BoxOccupancy();
+  private readonly lotHalf = new THREE.Vector3();
+  /** How far each plant card reaches from its root, per unit of scale (`planarReach`). */
+  private readonly plantReach = new Map<THREE.InstancedMesh, number>();
 
   private activeEncounter = -1;
   private anchorX = 0;
@@ -773,18 +579,11 @@ export class MirageTableau {
   private densityScale = 1;
   private sizeScale = 1;
   /**
-   * How far a wreck reaches from its own origin per unit of length scale, MEASURED
-   * off the geometry rather than guessed.
-   *
-   * Two hand-written constants in a row got this wrong and the fleet kept crossing.
-   * A hull is not centred on its origin: the bow runs to 0.78 of the length while the
-   * stern stops at 0.58, and the debris reaches further still, so its footprint is
-   * neither a half-length nor a circle about the middle. It is the furthest vertex in
-   * the XZ plane, and only the geometry knows where that is. What this guards against
-   * is hulls INTERSECTING; the crossing the player reported was the silhouette itself,
-   * which is a separate fault and is fixed in `shipGeometry`.
+   * How far each ship form reaches from its own origin in the ground plane, per unit
+   * of scale, MEASURED off the geometry: the bowsprit and the overhangs make it
+   * neither a half-length nor anything a hand-written constant got right.
    */
-  private readonly shipReach: number;
+  private readonly shipReach: readonly number[];
   private setbackM = 0;
   private previewActive = false;
   private previewOpacity = 0;
@@ -795,6 +594,7 @@ export class MirageTableau {
     private readonly terrain: Terrain,
     private readonly seed: number,
     private readonly origin: WorldOrigin,
+    private readonly schedule: MirageSchedule,
   ) {
     const palmMaterial = cardMaterial();
     const treeMaterial = cardMaterial();
@@ -832,9 +632,10 @@ export class MirageTableau {
       MAX_CITY_ROOFS,
     );
     this.cityStreets = new THREE.InstancedMesh(box, streetMaterial, MAX_CITY_STREETS);
-    const hull = shipGeometry();
-    this.shipReach = planarReach(hull);
-    this.ships = new THREE.InstancedMesh(hull, shipMaterial, MAX_SHIPS);
+    const shipGeometries = SHIP_FORMS.map((form) => form.build());
+    this.shipReach = shipGeometries.map(planarReach);
+    this.ships = shipGeometries.map((geometry) => new THREE.InstancedMesh(geometry, shipMaterial, MAX_SHIPS));
+    for (const plant of [...this.palms, this.trees, this.cacti]) this.plantReach.set(plant, planarReach(plant.geometry));
 
     for (const mesh of this.meshes) {
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -845,9 +646,10 @@ export class MirageTableau {
       mesh.receiveShadow = false;
       this.root.add(mesh);
     }
+    this.novelties = new NoveltyField(road, terrain, seed);
+    this.root.add(this.novelties.group);
     this.root.visible = false;
     scene.add(this.root);
-    this.encounters = this.buildSchedule();
   }
 
   update(playerS: number, playerLateral: number, dayFactor: number): void {
@@ -858,7 +660,7 @@ export class MirageTableau {
     }
     if (encounterIndex !== this.activeEncounter) this.activate(encounterIndex);
 
-    const encounter = this.encounters[encounterIndex]!;
+    const encounter = this.schedule.encounters[encounterIndex]!;
     const roadFade = 1 - smoothstep(FADE_FROM_ROAD_M, GONE_FROM_ROAD_M, Math.abs(playerLateral));
     const approachFade = smoothstep(encounter.startS - APPROACH_M, encounter.startS - 420, playerS);
     const retreatFade = 1 - smoothstep(
@@ -941,75 +743,42 @@ export class MirageTableau {
       this.cityAccents,
       this.cityRoofs,
       this.cityStreets,
-      this.ships,
+      ...this.ships,
     ];
   }
 
   private setMaterialOpacity(opacity: number): void {
     for (const material of this.materials) material.opacity = opacity;
-    // Ships are broader and warmer; a little less alpha keeps them in the same
-    // atmospheric distance as the plants without becoming a flat orange wall.
-    this.materials[4]!.opacity = opacity * 0.74;
+    // Ships are solids drawn translucent, so every point of alpha shows the hull's own
+    // far side through its near one. They take nearly the full alpha: a fleet at 0.74
+    // read as pale wireframes of ships rather than as ships.
+    this.materials[4]!.opacity = opacity * 0.95;
     this.materials[5]!.opacity = opacity * 0.9;
     this.materials[6]!.opacity = opacity * 0.82;
     this.materials[7]!.opacity = opacity * 0.86;
     this.materials[8]!.opacity = opacity * 0.58;
+    // The odd ones are solids in the city's pale palette, and take its alpha.
+    this.novelties.material.opacity = opacity * 0.88;
   }
 
-  private buildSchedule(): readonly Encounter[] {
-    const encounters: Encounter[] = [];
-    let startS = MIN_GAP_M + hashUnit3(this.seed, -1, SALT_GAP) * GAP_RANGE_M;
-    let index = 0;
-    let permutation: MirageKind[] = [];
-    while (startS < this.road.length) {
-      if (index % 5 === 0) {
-        permutation = ['palms', 'trees', 'cacti', 'city', 'ships'];
-        const block = Math.floor(index / 5);
-        for (let i = permutation.length - 1; i > 0; i--) {
-          const j = Math.floor(hashUnit3(this.seed, block * 8 + i, SALT_VARIANT) * (i + 1));
-          const swap = permutation[i]!;
-          permutation[i] = permutation[j]!;
-          permutation[j] = swap;
-        }
-      }
-      const kind = permutation[index % 5]!;
-      encounters.push({
-        index,
-        startS,
-        // A fleet is the one tableau read as a LANDSCAPE rather than as a verge: it
-        // needs to arrive, surround and leave, and 700 m of it goes by in half a
-        // minute. It also has to spread its hulls out, and the length is the only
-        // axis with room to do that, because their distance from the road is fixed.
-        length:
-          kind === 'ships'
-            ? 1_400 + hashUnit3(this.seed, index, SALT_LENGTH) * 260
-            : 680 + hashUnit3(this.seed, index, SALT_LENGTH) * 520,
-        kind,
-      });
-      startS += MIN_GAP_M + hashUnit3(this.seed, index, SALT_GAP) * GAP_RANGE_M;
-      index++;
-    }
-    return encounters;
+  private tableauEncounter(index: number): Encounter {
+    const encounter = this.schedule.encounters[index]!;
+    if (encounter.apparition.system !== 'tableau') throw new Error(`Mirage encounter ${index} is not a tableau`);
+    return { index, startS: encounter.startS, length: encounter.length, kind: encounter.apparition.kind };
   }
 
+  /** The tableau encounter in view at `playerS`, or -1: a vessel's turn is nobody's here. */
   private findEncounter(playerS: number): number {
-    const target = playerS + APPROACH_M;
-    let lo = 0;
-    let hi = this.encounters.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (this.encounters[mid]!.startS <= target) lo = mid + 1;
-      else hi = mid;
-    }
-    const candidate = lo - 1;
+    const candidate = this.schedule.lastStartingBy(playerS + APPROACH_M);
     if (candidate < 0) return -1;
-    const encounter = this.encounters[candidate]!;
+    const encounter = this.schedule.encounters[candidate]!;
+    if (encounter.apparition.system !== 'tableau') return -1;
     return playerS <= encounter.startS + encounter.length + RETREAT_M ? candidate : -1;
   }
 
   private activate(index: number): void {
     this.activeEncounter = index;
-    const encounter = this.encounters[index]!;
+    const encounter = this.tableauEncounter(index);
     // Palms are the one grove worth seeing as ARCHITECTURE rather than as vegetation:
     // a thin stand of giants reads as an oasis somebody could walk into, while three
     // hundred ordinary ones are a hedge along the road. Tenfold fewer at three times
@@ -1036,6 +805,7 @@ export class MirageTableau {
       mesh.count = 0;
       mesh.visible = false;
     }
+    this.novelties.clear();
     const anchor = this.road.sampleAt(encounter.startS);
     this.anchorX = anchor.x;
     this.anchorY = anchor.y;
@@ -1056,6 +826,8 @@ export class MirageTableau {
       case 'ships':
         this.buildShips(encounter);
         break;
+      default:
+        this.novelties.build(encounter.kind, encounter, anchor, this.densityScale, this.sizeScale, this.setbackM);
     }
   }
 
@@ -1065,6 +837,10 @@ export class MirageTableau {
    * `forms` is a set of interchangeable silhouettes sharing one material: an instance
    * picks one by hash and lands in that form's own buffer, so a grove of three palms
    * costs three draws instead of one and never repeats the same tree twice in a row.
+   *
+   * No plant stands in another: each has to clear the ones already down by the sum of
+   * their measured reaches, and one that finds no room in `PLANT_ATTEMPTS` looks is
+   * left out — the grove thins where it was thickest instead of growing through itself.
    */
   private buildPlants(
     forms: readonly THREE.InstancedMesh[],
@@ -1078,15 +854,9 @@ export class MirageTableau {
   ): void {
     const instanceCount = Math.max(1, Math.round(count * this.densityScale));
     const used = new Array<number>(forms.length).fill(0);
+    this.footprints.clear();
     for (let i = 0; i < instanceCount; i++) {
       const key = encounter.index * MAX_PLANTS + i;
-      const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
-      const s = encounter.startS + 8 + along * along * (encounter.length - 16);
-      const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
-      const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
-      const lateral = side * (this.setbackM + lateralMin + depth * depth * (lateralMax - lateralMin));
-      const point = this.road.offsetPoint(s, lateral);
-      const ground = this.terrain.heightAt(point.x, point.z, s);
       const height = (heightMin + hashUnit3(this.seed, key, SALT_SHAPE) * (heightMax - heightMin)) * this.sizeScale;
       const widthScale = 0.82 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 0.36;
       const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI;
@@ -1098,7 +868,25 @@ export class MirageTableau {
       const mesh = forms[form]!;
       const slot = used[form]!;
       if (slot >= MAX_PLANTS) continue;
+      const radius = this.plantReach.get(mesh)! * height * widthScale;
+
+      let point: { x: number; z: number } | null = null;
+      let s = 0;
+      let depth = 0;
+      for (let attempt = 0; attempt < PLANT_ATTEMPTS && !point; attempt++) {
+        const salt = SALT_PLACEMENT + attempt * 3;
+        const along = hashUnit3(this.seed, key, salt);
+        s = encounter.startS + 8 + along * along * (encounter.length - 16);
+        const side = hashUnit3(this.seed, key, salt + 1) < 0.5 ? -1 : 1;
+        depth = hashUnit3(this.seed, key, salt + 2);
+        const lateral = side * (this.setbackM + lateralMin + depth * depth * (lateralMax - lateralMin));
+        const candidate = this.road.offsetPoint(s, lateral);
+        if (this.footprints.fits(candidate.x, candidate.z, radius)) point = candidate;
+      }
+      if (!point) continue;
+      this.footprints.add(point.x, point.z, radius);
       used[form] = slot + 1;
+      const ground = this.terrain.heightAt(point.x, point.z, s);
 
       this.setTransform(mesh, slot, point.x - this.anchorX, ground - this.anchorY, point.z - this.anchorZ, height * widthScale, height, height * widthScale, yaw);
       // The instance colour MULTIPLIES the card palette, so it is a haze tint near
@@ -1124,6 +912,10 @@ export class MirageTableau {
    * A compact skyline rather than a pile of anonymous boxes:
    * warm masonry blocks, cool window rhythm, balconies, roof caps and the dark
    * strips of streets between them. Everything remains instanced and render-only.
+   *
+   * Each block takes a lot of its own first: its footprint — the block with its
+   * balconies, cornice and street strip — has to clear every lot already taken, and a
+   * block that finds none in `BLOCK_ATTEMPTS` looks is not built.
    */
   private buildCity(encounter: Encounter): void {
     let count = 0;
@@ -1143,18 +935,36 @@ export class MirageTableau {
       z: point.z - Math.sin(heading) * localX + Math.cos(heading) * localZ - this.anchorZ,
     });
 
+    this.blockRoom.clear();
     for (let i = 0; i < buildings; i++) {
       const key = encounter.index * MAX_BLOCKS + i;
-      const along = hashUnit3(this.seed, key, SALT_PLACEMENT);
-      const s = encounter.startS + 10 + along * along * (encounter.length - 20);
-      const side = hashUnit3(this.seed, key, SALT_PLACEMENT + 1) < 0.5 ? -1 : 1;
-      const depth = hashUnit3(this.seed, key, SALT_PLACEMENT + 2);
-      const lateral = side * (this.setbackM + 18 + depth * depth * 127);
-      const point = this.road.offsetPoint(s, lateral);
-      const heading = this.road.sampleAt(s).heading;
       const width = (5 + hashUnit3(this.seed, key, SALT_SHAPE) * 9) * this.sizeScale;
       const buildingDepth =
         (5 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 9) * this.sizeScale;
+      // Along the street strip (1.45 wide) by the balconies and cornice (0.21 m and
+      // 1.08 deep) round the block: everything of it that stands on the ground.
+      this.lotHalf.set(width * 0.725, 1_000, Math.max(buildingDepth * 0.54, buildingDepth * 0.5 + 0.21));
+      let point: { x: number; z: number } | null = null;
+      let s = 0;
+      let depth = 0;
+      let heading = 0;
+      for (let attempt = 0; attempt < BLOCK_ATTEMPTS && !point; attempt++) {
+        // The first look is the lot the city always had; `SALT_PLACEMENT + 5` is taken.
+        const salt = attempt === 0 ? SALT_PLACEMENT : SALT_PLACEMENT + 16 + attempt * 3;
+        const along = hashUnit3(this.seed, key, salt);
+        s = encounter.startS + 10 + along * along * (encounter.length - 20);
+        const side = hashUnit3(this.seed, key, salt + 1) < 0.5 ? -1 : 1;
+        depth = hashUnit3(this.seed, key, salt + 2);
+        const lateral = side * (this.setbackM + 18 + depth * depth * 127);
+        const candidate = this.road.offsetPoint(s, lateral);
+        heading = this.road.sampleAt(s).heading;
+        this.position.set(candidate.x, 0, candidate.z);
+        this.euler.set(0, heading, 0, 'YXZ');
+        this.quaternion.setFromEuler(this.euler);
+        this.matrix.compose(this.position, this.quaternion, this.scale.set(1, 1, 1));
+        if (this.blockRoom.tryAdd(this.matrix, ORIGIN, this.lotHalf)) point = candidate;
+      }
+      if (!point) continue;
       const tower = hashUnit3(this.seed, key, SALT_SHAPE + 6) > 0.92;
       const height = (
         tower
@@ -1386,32 +1196,39 @@ export class MirageTableau {
   /**
    * A drowned fleet the sea left behind, each hulk grounded at its own angle.
    *
-   * A wreck is a card up to seventy metres long, so placing them by hash alone piled
-   * them into each other: the field read as a scrapyard of intersecting planes. Each
-   * candidate has to clear the hulls already down by the sum of their footprint radii,
-   * and a slot that cannot find room after `SHIP_ATTEMPTS` tries is simply left
-   * empty — the fleet thins out instead of overlapping.
+   * Hulls are placed by hash, so each candidate has to clear the ones already down by
+   * the sum of their measured reaches, and a slot that cannot find room after
+   * `SHIP_ATTEMPTS` tries is simply left empty — the fleet thins out instead of
+   * overlapping.
    *
-   * THE FOOTPRINT IS A SQUARE'S DIAGONAL, NOT A HALF-LENGTH. A wreck is two
-   * perpendicular cards, so it reaches its full length along X AND along Z: a circle
-   * sized to half the hull left the corners of one pair free to sit inside the other,
-   * and the wrecks that crossed were the ones lying at right angles to each other.
-   * The card runs -0.72 to 0.78 of its length, so the honest radius is 0.78 times the
-   * root of two.
+   * A HULL IS SEEN FROM ITS SIDE. The sheer, the house on a long low hull and the
+   * masts are what make a ship, and every one of them is a side view; bow-on, the
+   * best hull there is reads as a white box. So a wreck lies roughly along the road,
+   * either way round, within thirty-five degrees of it.
+   *
+   * IT LISTS, IT DOES NOT PITCH. The keel takes the ground's own tilt and the derelict
+   * lean is added about the LONG axis. It used to be added about the beam, which stood
+   * bows up out of the sand at fifteen degrees like a launching ramp.
+   *
+   * And it is BURIED: the sand stands a fifth of the way up the hull or more, so the
+   * bottom paint is half gone and no hull sits on its keel like a model on a table.
    */
   private buildShips(encounter: Encounter): void {
     // Half the fleet it was. The count was set against a 700 m encounter; over 1.5 km
     // the same hulls would read as a breaker's yard rather than as a stranded fleet,
     // and the clearance test would spend its attempts refusing them.
     const slots = Math.max(1, Math.round(55 * this.densityScale));
-    let placed = 0;
+    const used = new Array<number>(this.ships.length).fill(0);
+    this.footprints.clear();
     for (let i = 0; i < slots; i++) {
       const key = encounter.index * MAX_SHIPS + i;
-      // A freighter is long, so the card is scaled well past its height; the list
-      // ranges from a coaster to something that took a dock to build.
-      const height = (6 + hashUnit3(this.seed, key, SALT_SHAPE) * 15) * this.sizeScale;
-      const length = height * (2.2 + hashUnit3(this.seed, key, SALT_SHAPE + 1) * 1.3);
-      const radius = length * this.shipReach;
+      const formIndex = shipFormAt(hashUnit3(this.seed, key, SALT_VARIANT));
+      const form = SHIP_FORMS[formIndex]!;
+      const mesh = this.ships[formIndex]!;
+      const slot = used[formIndex]!;
+      if (slot >= MAX_SHIPS) continue;
+      const scale = (0.82 + hashUnit3(this.seed, key, SALT_SHAPE) * 0.36) * this.sizeScale;
+      const radius = this.shipReach[formIndex]! * scale;
       let x = 0;
       let z = 0;
       let hintS = 0;
@@ -1426,16 +1243,7 @@ export class MirageTableau {
         const lateral =
           side * (this.setbackM + SHIP_NEAR_M + candidateDepth * candidateDepth * SHIP_SPREAD_M);
         const point = this.road.offsetPoint(s, lateral);
-        room = true;
-        for (let other = 0; other < placed; other++) {
-          const dx = point.x - this.shipX[other]!;
-          const dz = point.z - this.shipZ[other]!;
-          const clearance = radius + this.shipRadius[other]!;
-          if (dx * dx + dz * dz < clearance * clearance) {
-            room = false;
-            break;
-          }
-        }
+        room = this.footprints.fits(point.x, point.z, radius);
         if (!room) continue;
         x = point.x;
         z = point.z;
@@ -1443,44 +1251,45 @@ export class MirageTableau {
         depth = candidateDepth;
       }
       if (!room) continue;
-      const yaw = hashUnit3(this.seed, key, SALT_SHAPE + 2) * Math.PI * 2;
-      // A hull lies ALONG the dune it stranded on: the keel takes the ground's own
-      // tilt, and the derelict lean is added to that rather than used instead of it.
-      // The footprint the ground fit is taken over: half a LENGTH along the hull, but
-      // half a BEAM across it. These were equal while a wreck was a square card, and
-      // they are not any more — the hull is 0.14 of its length in beam, so fitting a
-      // square sampled ground the ship does not stand on and tilted it for terrain it
-      // never touches.
-      const plane = fitGround(this.terrain, x, z, yaw, length * 0.5, length * 0.07, hintS, 2);
-      const roll = plane.roll + (hashUnit3(this.seed, key, SALT_SHAPE + 3) - 0.5) * 0.5;
+      // Local +X is the bow; forward along the road is (sin h, cos h), which a yaw of
+      // h - PI/2 turns +X onto.
+      const reversed = hashUnit3(this.seed, key, SALT_SHAPE + 1) < 0.5 ? Math.PI : 0;
+      const yaw =
+        this.road.sampleAt(hintS).heading - Math.PI / 2 + reversed +
+        (hashUnit3(this.seed, key, SALT_SHAPE + 2) - 0.5) * 1.2;
+      const plane = fitGround(
+        this.terrain, x, z, yaw, form.length * scale * 0.5, form.beam * scale * 0.5, hintS, 3,
+      );
+      const listing = hashUnit3(this.seed, key, SALT_SHAPE + 3);
+      const list = (listing < 0.5 ? -1 : 1) * (0.04 + 0.14 * Math.abs(listing * 2 - 1));
+      const buried = (0.18 + 0.14 * hashUnit3(this.seed, key, SALT_SHAPE + 4)) * form.depth * scale;
       this.setTransform(
-        this.ships,
-        placed,
+        mesh,
+        slot,
         x - this.anchorX,
-        plane.centreY - this.anchorY,
+        plane.centreY - buried - this.anchorY,
         z - this.anchorZ,
-        length,
-        height,
-        length,
+        scale,
+        scale,
+        scale,
         yaw,
-        roll,
-        plane.pitch,
+        plane.roll,
+        plane.pitch + list,
       );
       const lift =
-        (0.86 + depth * 0.32) *
-        (0.9 + hashUnit3(this.seed, key, SALT_COLOUR) * 0.2);
+        (0.94 + depth * 0.18) *
+        (0.95 + hashUnit3(this.seed, key, SALT_COLOUR) * 0.1);
       this.colour.copy(SHIP_TINT).multiplyScalar(lift);
-      this.ships.setColorAt(placed, this.colour);
-      this.shipX[placed] = x;
-      this.shipZ[placed] = z;
-      this.shipRadius[placed] = radius;
-      placed++;
-      if (placed >= MAX_SHIPS) break;
+      mesh.setColorAt(slot, this.colour);
+      this.footprints.add(x, z, radius);
+      used[formIndex] = slot + 1;
     }
-    this.ships.count = placed;
-    this.ships.visible = true;
-    this.ships.instanceMatrix.needsUpdate = true;
-    if (this.ships.instanceColor) this.ships.instanceColor.needsUpdate = true;
+    for (const [index, mesh] of this.ships.entries()) {
+      mesh.count = used[index]!;
+      mesh.visible = mesh.count > 0;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   private addBox(

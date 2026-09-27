@@ -234,10 +234,11 @@ function forEachDelineator(
  * a wall.
  *
  * The cost is bounded by the streaming radii and nothing else. Colliders are built
- * only where `ctx.hasPhysics` is true — the player's chunk and its two neighbours,
- * a kilometre of road — so a 40-60 m spacing puts eight to twenty-four of them in
- * the world at once, against the hundreds the scatter field carries over the same
- * kilometre. A run outside that window is instanced scenery and nothing more.
+ * only where `ctx.hasPhysics` is true — on the road, the whole 2.6 km streamed
+ * window (see PHYSICS_RADIUS in world/chunks.ts) — so a 40-60 m spacing puts at most
+ * a few dozen of them in the world at once, against the hundreds the scatter field
+ * carries over the same road. A run built out of that window is instanced scenery and
+ * nothing more.
  */
 export class DelineatorProvider implements ChunkProvider {
   readonly id = 'delineators';

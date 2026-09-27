@@ -20,7 +20,90 @@ import {
   table,
   type ShellLayout,
 } from './kit';
-import { staircase, stairwellRailing, upperFloorWithStairwell } from './houses';
+import { beamBetween } from './towers';
+
+function upperFloorWithStairwell(
+  parent: THREE.Object3D,
+  width: number,
+  depth: number,
+  y: number,
+  hole: readonly [x0: number, x1: number, z0: number, z1: number],
+): void {
+  const [x0, x1, z0, z1] = hole;
+  registerDoorClearance(
+    parent,
+    new THREE.Box3(
+      new THREE.Vector3(x0 + 0.08, y - 0.05, z0 + 0.08),
+      new THREE.Vector3(x1 - 0.08, y + 2.15, z1 - 0.08),
+    ),
+    'stairwell landing',
+  );
+  const thickness = 0.18;
+  box(parent, [x0 + width / 2, thickness, depth], [(-width / 2 + x0) / 2, y - thickness / 2, 0], C.floor, [0, 0, 0], true);
+  box(parent, [width / 2 - x1, thickness, depth], [(x1 + width / 2) / 2, y - thickness / 2, 0], C.floor, [0, 0, 0], true);
+  box(parent, [x1 - x0, thickness, z0 + depth / 2], [(x0 + x1) / 2, y - thickness / 2, (-depth / 2 + z0) / 2], C.floor, [0, 0, 0], true);
+  box(parent, [x1 - x0, thickness, depth / 2 - z1], [(x0 + x1) / 2, y - thickness / 2, (z1 + depth / 2) / 2], C.floor, [0, 0, 0], true);
+}
+
+function staircase(
+  parent: THREE.Object3D,
+  x: number,
+  z: number,
+  yaw: number,
+  floorHeight: number,
+  width: number,
+  hole: readonly [x0: number, x1: number, z0: number, z1: number],
+): void {
+  const stairs = new THREE.Group();
+  stairs.position.set(x, 0, z);
+  stairs.rotation.y = yaw;
+  parent.add(stairs);
+  const steps = 16;
+  const run = 0.29;
+  const rise = floorHeight / steps;
+  for (let step = 0; step < steps; step++) {
+    const top = rise * (step + 1);
+    const travel = step * run + run / 2;
+    const centerX = x + Math.sin(yaw) * travel;
+    const centerZ = z + Math.cos(yaw) * travel;
+    const halfX = Math.abs(Math.cos(yaw)) * width / 2 + Math.abs(Math.sin(yaw)) * run / 2;
+    const halfZ = Math.abs(Math.sin(yaw)) * width / 2 + Math.abs(Math.cos(yaw)) * run / 2;
+    if (
+      top + 1.9 > floorHeight
+      && (centerX - halfX < hole[0] || centerX + halfX > hole[1] || centerZ - halfZ < hole[2] || centerZ + halfZ > hole[3])
+    ) {
+      throw new Error(`Stair step ${step + 1} has less than 1.9 m of headroom`);
+    }
+    box(stairs, [width, top, run + 0.015], [0, top / 2, travel], C.timber);
+  }
+  for (const side of [-1, 1]) {
+    for (let step = 1; step < steps; step += 3) {
+      const y = rise * (step + 1);
+      const zPos = step * run;
+      box(stairs, [0.07, 0.85, 0.07], [side * (width / 2 - 0.04), y + 0.42, zPos], C.darkTimber);
+    }
+    beamBetween(
+      stairs,
+      new THREE.Vector3(side * (width / 2 - 0.04), rise + 0.85, run),
+      new THREE.Vector3(side * (width / 2 - 0.04), floorHeight + 0.85, steps * run),
+      0.08,
+      C.darkTimber,
+    );
+  }
+}
+
+function stairwellRailing(
+  parent: THREE.Object3D,
+  y: number,
+  hole: readonly [x0: number, x1: number, z0: number, z1: number],
+): void {
+  const [x0, x1, z0, z1] = hole;
+  for (const x of [x0, x1]) {
+    for (const z of [z0, z1]) box(parent, [0.08, 0.9, 0.08], [x, y + 0.45, z], C.darkTimber);
+    box(parent, [0.08, 0.08, z1 - z0], [x, y + 0.88, (z0 + z1) / 2], C.darkTimber);
+  }
+  box(parent, [x1 - x0, 0.08, 0.08], [(x0 + x1) / 2, y + 0.88, z1], C.darkTimber);
+}
 
 /** The garage wing's offset from the variant's origin, metres. */
 const GARAGE_WING_X = 8.68;

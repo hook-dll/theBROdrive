@@ -1,0 +1,108 @@
+{
+  "id": "gaz31022",
+  "label": "GAZ-31022 Volga",
+  "work": "build/vehicles/gaz31022",
+  "factory": {
+    "lengthM": 4.885,
+    "widthM": 1.8,
+    "heightM": 1.549,
+    "wheelbaseM": 2.8,
+    "sources": [
+      "the-blueprints.com GAZ-31022 drawing callouts: 4885, 2800, 1549 (over roof rails), 1820 over mirrors"
+    ]
+  },
+  "references": {
+    "bp-31022-vector-full.jpg": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/gaz-31022_volga_1992.jpg (watermarked preview; licence unknown; reference only)",
+    "31022.jpg": "paper-model nets, Paper Car Tuning / LadaPaper (vk.com/paper_car_tuning); licence unknown; reference only",
+    "43_GAZ-31022.jpg": "same nets, 1:43 sheet"
+  },
+  "body": {
+    "endView": "front",
+    "tyreGapM": 0.012,
+    "yRange": [-2.37, 2.39],
+    "wheels": [
+      {"y": -1.5611, "z": 0.3507, "radius": 0.35, "archHalfSpanM": 0.45, "wellDepthM": 0.3},
+      {"y": 1.2558, "z": 0.3507, "radius": 0.35, "archHalfSpanM": 0.45, "wellDepthM": 0.3}
+    ],
+    "floor": [[-2.37, 0.33], [-2.0, 0.33], [-1.1, 0.26], [0.9, 0.255], [1.7, 0.37], [2.3, 0.42], [2.39, 0.45]],
+    "parts": [
+      {"name": "bumper_front", "material": "car_trim",
+       "side": [[-2.434, 0.425], [-2.40, 0.425], [-2.0, 0.425], [-2.0, 0.517], [-2.40, 0.517], [-2.434, 0.517]],
+       "plan": [[-2.434, 0.82], [-2.40, 0.87], [-2.0, 0.895]]},
+      {"name": "bumper_rear", "material": "car_trim",
+       "side": [[2.10, 0.483], [2.39, 0.483], [2.425, 0.483], [2.425, 0.575], [2.39, 0.575], [2.10, 0.575]],
+       "plan": [[2.10, 0.895], [2.39, 0.87], [2.425, 0.82]]},
+      {"name": "grille", "material": "car_trim",
+       "box": {"x": [-0.442, 0.442], "y": [-2.385, -2.36], "z": [0.55, 0.767]}},
+      {"name": "headlights", "material": "Headlights", "mirror": true,
+       "box": {"x": [0.45, 0.717], "y": [-2.385, -2.36], "z": [0.583, 0.75]}},
+      {"name": "front_blinker_left", "material": "IndicatorLights",
+       "box": {"x": [0.717, 0.81], "y": [-2.38, -2.35], "z": [0.583, 0.75]}},
+      {"name": "front_blinker_right", "material": "IndicatorLights",
+       "box": {"x": [-0.81, -0.717], "y": [-2.38, -2.35], "z": [0.583, 0.75]}},
+      {"name": "taillights", "material": "TailLights", "mirror": true,
+       "box": {"x": [0.683, 0.775], "y": [2.33, 2.40], "z": [0.625, 0.842]}}
+    ],
+    "lines": {
+      "topCentre": {"side": [[-2.37, 0.87], [-2.30, 0.90], [-2.0, 0.955], [-1.6, 1.017], [-1.12, 1.07],
+                             [-0.99, 1.09], [-0.51, 1.46], [-0.4, 1.50], [1.8, 1.50], [2.0, 1.47],
+                             [2.17, 1.20], [2.27, 1.0], [2.35, 0.87], [2.39, 0.62]]},
+      "waist": {
+        "plan": [[-2.37, 0.80], [-2.28, 0.845], [-2.0, 0.875], [-1.0, 0.89], [1.5, 0.89],
+                 [2.0, 0.875], [2.30, 0.855], [2.39, 0.82]],
+        "side": [[-2.37, 0.775], [2.39, 0.775]]
+      },
+      "sill": {"planFrom": "waist", "planOffsetM": -0.04, "sideFrom": "bottom"},
+      "shoulder": {
+        "planFrom": "waist", "planOffsetM": -0.03,
+        "side": [[-2.37, 0.86], [-2.0, 0.93], [-1.6, 0.975], [-1.1, 1.02], [-0.85, 1.0],
+                 [2.0, 0.98], [2.39, 0.96]]
+      },
+      "rail": {
+        "plan": [[-2.37, 0.66], [-1.0, 0.683], [-0.85, 0.717], [-0.45, 0.66], [0.0, 0.70],
+                 [1.8, 0.69], [2.0, 0.64], [2.2, 0.62], [2.39, 0.62]],
+        "side": [[-2.37, 0.865], [-2.0, 0.94], [-1.6, 1.0], [-1.1, 1.05], [-0.95, 1.07],
+                 [-0.47, 1.44], [0.0, 1.45], [1.8, 1.45], [2.0, 1.43], [2.17, 1.18],
+                 [2.27, 0.99], [2.35, 0.86], [2.39, 0.72]]
+      }
+    },
+    "ring": ["floorCentre", "sill", "waist", "shoulder", "rail", "topCentre"],
+    "panels": [
+      {"n": 1, "bulge": 0.0},
+      {"n": 2, "bulge": 0.08},
+      {"n": 2, "bulge": 0.03},
+      {"n": 2, "bulge": 0.02},
+      {"n": 3, "bulge": 0.04}
+    ],
+    "glass": [
+      {"panel": "shoulder-rail", "outline": [[-0.83, 1.0], [0.02, 1.0], [0.02, 1.39], [-0.50, 1.39]]},
+      {"panel": "shoulder-rail", "outline": [[0.125, 1.0], [0.89, 1.0], [0.89, 1.39], [0.125, 1.39]]},
+      {"panel": "shoulder-rail", "outline": [[0.95, 0.985], [2.04, 0.975], [1.83, 1.358], [0.95, 1.36]]},
+      {"panel": "rail-topCentre", "y": [-0.97, -0.52]},
+      {"panel": "rail-topCentre", "y": [2.02, 2.30]}
+    ]
+  },
+  "views": {
+    "side": {
+      "image": "00-references/bp-31022-vector-full.jpg",
+      "crop": [4, 62, 866, 336],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006,
+      "wheelCentresPx": [[168, 273], [657, 273]]
+    },
+    "top": {
+      "image": "00-references/bp-31022-vector-full.jpg",
+      "crop": [4, 462, 866, 792],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    },
+    "front": {
+      "image": "00-references/bp-31022-vector-full.jpg",
+      "crop": [878, 64, 1228, 336],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    },
+    "rear": {
+      "image": "00-references/bp-31022-vector-full.jpg",
+      "crop": [878, 488, 1228, 750],
+      "mode": "filled", "paper": 0.8, "paperSat": 0.006
+    }
+  }
+}

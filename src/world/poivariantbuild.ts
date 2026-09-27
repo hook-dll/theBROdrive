@@ -54,9 +54,11 @@ import {
 } from './poi/kit';
 import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './poi-variants';
 
-export type PoiCategory = 'house' | 'shop' | 'gas' | 'wreck' | 'tower' | 'container';
-
-/** Authored metadata the world cares about after the merge. */
+/**
+ * What the world needs from any building it places: a visual group, one collider
+ * geometry, measured extents, and its lamps and switches. Kit-built variants and
+ * dwellings both produce one (see world/poistructures.ts).
+ */
 export interface VariantInstance {
   /** Merged visual group. Local origin is the building's ground centre. */
   readonly group: THREE.Group;
@@ -73,7 +75,6 @@ export interface VariantInstance {
   readonly halfExtentZ: number;
   /** Authored footprint, `[x, z]`, for reference. */
   readonly footprint: readonly [number, number];
-  readonly category: PoiCategory;
   readonly id: string;
   /** Invisible light markers handed to `LightBudget`. */
   readonly lightSources: readonly THREE.PointLight[];
@@ -391,7 +392,7 @@ function assetsFor(index: number): VariantAssets {
  * Builds every variant's assets up front.
  *
  * Called during loading rather than left to first use, because first use happens while
- * the player is driving: without this, the first time each of the 26 buildings appears
+ * the player is driving: without this, the first time each kit building appears
  * it costs a full build inside a 3 ms streaming budget. Warmed, every later placement is
  * only Object3D wrapping.
  */
@@ -486,7 +487,6 @@ export function createVariantInstance(index: number): VariantInstance {
     halfExtentX: assets.halfExtentX,
     halfExtentZ: assets.halfExtentZ,
     footprint: assets.def.footprint,
-    category: assets.def.category,
     id: assets.def.id,
     lightSources,
     switches,

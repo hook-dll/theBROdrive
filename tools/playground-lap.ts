@@ -68,17 +68,24 @@ const MODEL_ID = 'sv_vaz2105r';
 const TRAFFIC_MODEL_ID = 'sv_vaz2105r';
 const LAPS = Math.max(1, Number(process.argv[2] ?? 2));
 /**
- * Lane-keeping bounds, metres of cross-track error, per mode.
+ * Line-keeping bounds, metres between the body and the line the driver is steering
+ * to, per mode.
  *
- * These are the numbers the modes are FOR. Sleeper is asked to hold its lane to a
+ * These are the numbers the modes are FOR. Sleeper's line is its lane, held to a
  * quarter of a metre because that is what "careful" means when the lane is 2.9 m
- * wide and the car is 2.1; frantic is allowed half a metre and a bigger worst case,
- * because at 130 km/h a firm correction is a swerve and clipping a line is the
- * character. Both were measured at 0.26 and 0.43 RMS with the tuning in
- * `AUTOPILOT_MODES`, so a regression of a third of a metre trips them.
+ * wide and the car is 2.1. Frantic's line is a racing line across the whole road,
+ * which moves under it at every bend, so it is allowed a little more — but it is a
+ * line it chose, and tracing it is the whole of the character now: the old half-metre
+ * of "clipping a line" is gone with the half chord correction it came from.
  */
-const LANE_RMS_BOUND: Record<AutopilotMode, number> = { sleeper: 0.4, frantic: 0.6 };
-const LANE_WORST_BOUND: Record<AutopilotMode, number> = { sleeper: 1.2, frantic: 1.6 };
+const LANE_RMS_BOUND: Record<AutopilotMode, number> = { sleeper: 0.4, hurried: 0.5, frantic: 0.5 };
+const LANE_WORST_BOUND: Record<AutopilotMode, number> = { sleeper: 1.2, hurried: 1.4, frantic: 1.4 };
+/**
+ * The pace frantic had to beat to be called a racing driver: its old personality cap.
+ * Its own cruise is set out of reach, so its peak is the car's, and a lap whose peak
+ * is still under this is a lap still driven to a habit.
+ */
+const OLD_FRANTIC_CAP_MPS = 130 / 3.6;
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -303,6 +310,8 @@ interface LapMetrics {
   impacts: number;
   passes: number;
   indicatorSeconds: number;
+  /** Seconds the driver spent on its racing line rather than its lane. */
+  racingSeconds: number;
   progress: number;
   sectors: SectorMetrics[];
 }
@@ -320,7 +329,6 @@ async function measure(
   seconds: number,
 ): Promise<LapMetrics> {
   const rig = await makeRig(options);
-  const lane = CIRCUIT_LANE;
   const position = { x: 0, y: 0, z: 0 };
   const other = { x: 0, y: 0, z: 0 };
   const sectors = new Map<string, SectorMetrics & { samples: number }>();
@@ -374,6 +382,7 @@ async function measure(
   let passes = 0;
   let passing = false;
   let indicatorSeconds = 0;
+  let racingSeconds = 0;
 
   while (elapsed < seconds && lapSeconds.length < laps) {
     rig.autopilot.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
@@ -404,7 +413,7 @@ async function measure(
     worstLateral = Math.max(worstLateral, lateral);
     minSigned = Math.min(minSigned, projection.lateral);
     maxSigned = Math.max(maxSigned, projection.lateral);
-    const laneError = projection.lateral - lane;
+    const laneError = projection.lateral - rig.autopilot.commandedLine;
     sumLaneErrorSq += laneError * laneError;
     laneErrorWorst = Math.max(laneErrorWorst, Math.abs(laneError));
     if (lateral > CIRCUIT_HALF_WIDTH) offAsphalt += FIXED_DT;
@@ -433,6 +442,7 @@ async function measure(
     if (nowPassing && !passing) passes++;
     passing = nowPassing;
     if (rig.vehicle.indicator !== 'off') indicatorSeconds += FIXED_DT;
+    if (rig.autopilot.onRacingLine) racingSeconds += FIXED_DT;
     // Impacts are the honest collision test: the vehicle reports a velocity change
     // its own tyres cannot explain, at the threshold that scratches paint.
     const impact = rig.vehicle.lastImpact;
@@ -498,6 +508,7 @@ async function measure(
     impacts,
     passes,
     indicatorSeconds,
+    racingSeconds,
     progress: travelled,
     sectors: finished,
   };
@@ -526,25 +537,38 @@ for (const mode of ['sleeper', 'frantic'] as const) {
     metrics.worstLateral <= CIRCUIT_HALF_WIDTH,
     `worst |lateral| ${metrics.worstLateral.toFixed(2)} m against a ${CIRCUIT_HALF_WIDTH.toFixed(1)} m edge, ${metrics.offAsphaltSeconds.toFixed(1)} s beyond it`,
   );
-  // Alone on the circuit there is never a reason to put a wheel over the centreline,
-  // so `maxSignedLateral` is the real test of the lane-keeping change: measured at
-  // +1.6 m before it, which is the oncoming lane.
+  // Alone on the circuit a lane-holding driver never puts a wheel over the centreline,
+  // so `maxSignedLateral` is the real test of its lane keeping: measured at +1.6 m
+  // before it, which is the oncoming lane. A racing driver alone on the lap has the
+  // whole road by right, and uses it.
   check(
-    `${mode}: holds its own lane`,
+    `${mode}: holds its line`,
     metrics.laneErrorRms <= LANE_RMS_BOUND[mode] &&
       metrics.laneErrorWorst <= LANE_WORST_BOUND[mode] &&
-      metrics.maxSignedLateral <= 0.4,
-    `lane error RMS ${metrics.laneErrorRms.toFixed(2)} m (bound ${LANE_RMS_BOUND[mode].toFixed(2)}), ` +
+      (config.racingLine || metrics.maxSignedLateral <= 0.4),
+    `line error RMS ${metrics.laneErrorRms.toFixed(2)} m (bound ${LANE_RMS_BOUND[mode].toFixed(2)}), ` +
       `worst ${metrics.laneErrorWorst.toFixed(2)} m (bound ${LANE_WORST_BOUND[mode].toFixed(2)}), ` +
       `lateral ${metrics.minSignedLateral.toFixed(2)}..${metrics.maxSignedLateral.toFixed(2)} m about a ${CIRCUIT_LANE.toFixed(2)} m lane`,
   );
+  // A racing driver alone on the lap has nothing to be but on its line, and a line that
+  // never leaves the lane is the old driver with a new name: it has to spend most of
+  // the lap on it and use the far half of the road at least somewhere.
+  if (config.racingLine) {
+    const share = metrics.racingSeconds / Math.max(1e-6, metrics.lapSeconds.reduce((a, b) => a + b, 0));
+    check(
+      `${mode}: drives a racing line across the road`,
+      share >= 0.6 && metrics.maxSignedLateral >= 1,
+      `${(share * 100).toFixed(0)}% of the lap on its line, out to ${metrics.maxSignedLateral.toFixed(2)} m on the far half`,
+    );
+  }
   // A cap nobody reaches is a comment, not a character: the lower bound is what says
-  // the lap can actually deliver the mode's speed.
+  // the lap can actually deliver the mode's speed. A racing driver has no cap to
+  // reach; what it has to show is that the car, not a habit, is what stopped it.
+  const envelopeFloor = config.racingLine ? OLD_FRANTIC_CAP_MPS * 1.1 : config.cruiseMps * 0.9;
   check(
     `${mode}: drives to its speed envelope`,
-    metrics.peakSpeed <= config.cruiseMps * 1.1 &&
-      metrics.peakSpeed >= config.cruiseMps * 0.9,
-    `peak ${(metrics.peakSpeed * 3.6).toFixed(0)} km/h against a ${(config.cruiseMps * 3.6).toFixed(0)} km/h cruise, mean ${(metrics.meanSpeed * 3.6).toFixed(1)} km/h`,
+    metrics.peakSpeed <= config.cruiseMps * 1.1 && metrics.peakSpeed >= envelopeFloor,
+    `peak ${(metrics.peakSpeed * 3.6).toFixed(0)} km/h against a ${(envelopeFloor * 3.6).toFixed(0)} km/h floor, mean ${(metrics.meanSpeed * 3.6).toFixed(1)} km/h`,
   );
   check(
     `${mode}: never gets stuck or reverses`,

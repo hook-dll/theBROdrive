@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { C, barrel, bed, box, buildingShell, crate, cylinder, roomLight, shelf, type V3 } from './kit';
+import { C, barrel, box, buildingShell, cylinder, roomLight, shelf, type V3 } from './kit';
 
 export function beamBetween(parent: THREE.Object3D, a: THREE.Vector3, b: THREE.Vector3, width: number, color: number): void {
   const direction = new THREE.Vector3().subVectors(b, a);
@@ -122,59 +122,4 @@ export function buildRelayCluster(root: THREE.Group): void {
   cylinder(root, 0.34, 0.34, 1.4, 10, [10.5, 0.7, 6.0], C.darkMetal, [Math.PI / 2, 0, 0]);
   for (let i = 0; i < 5; i++) box(root, [0.1, 0.1, 7.2], [-5.5 + i * 2.7, 0.08, 0.5], C.darkMetal, [0, 0.12 * i, 0]);
   barrel(root, 9.5, 4.5, C.rust);
-}
-
-function shippingContainer(parent: THREE.Object3D, color: number, open = true): THREE.Group {
-  const group = new THREE.Group();
-  parent.add(group);
-  const w = 2.45;
-  const h = 2.6;
-  const d = 6.05;
-  box(group, [w, 0.13, d], [0, 0.065, 0], C.darkMetal);
-  box(group, [w, 0.13, d], [0, h, 0], color, [0, 0, 0], true);
-  box(group, [0.12, h, d], [-w / 2, h / 2, 0], color);
-  box(group, [0.12, h, d], [w / 2, h / 2, 0], color);
-  box(group, [w, h, 0.12], [0, h / 2, d / 2], color);
-  if (!open) box(group, [w, h, 0.12], [0, h / 2, -d / 2], color);
-  for (let i = -4; i <= 4; i++) {
-    const z = i * 0.58;
-    box(group, [0.08, h - 0.22, 0.07], [-w / 2 - 0.065, h / 2, z], C.rustDark);
-    box(group, [0.08, h - 0.22, 0.07], [w / 2 + 0.065, h / 2, z], C.rustDark);
-  }
-  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2]) box(group, [0.16, h + 0.08, 0.16], [x, h / 2, z], C.darkMetal);
-  return group;
-}
-
-export function buildOpenContainer(root: THREE.Group): void {
-  const container = shippingContainer(root, C.fadedBlue, true);
-  container.rotation.y = 0.08;
-  crate(container, -0.45, 1.25, 0.3, 0.58);
-  crate(container, 0.48, 1.7, -0.2, 0.52);
-  barrel(container, 0.35, 2.55, C.rust);
-}
-
-export function buildContainerStack(root: THREE.Group): void {
-  const first = shippingContainer(root, C.fadedRed, true);
-  first.position.set(-2.0, 0, -1.0);
-  first.rotation.y = -0.08;
-  const second = shippingContainer(root, C.fadedGreen, false);
-  second.position.set(2.1, 0, 1.1);
-  second.rotation.y = 0.12;
-  const top = shippingContainer(root, C.ochre, true);
-  top.position.set(0.25, 2.72, 0.4);
-  top.rotation.set(0, 0.04, -0.035);
-  crate(root, -4.0, 2.8, 0.3);
-  barrel(root, 4.0, -2.0, C.fadedBlue, 0.08);
-}
-
-export function buildBuriedContainer(root: THREE.Group): void {
-  const container = shippingContainer(root, C.rust, true);
-  container.position.set(0, -0.72, 0.45);
-  container.rotation.set(0.03, -0.18, -0.06);
-  box(root, [5.7, 0.7, 4.0], [-0.4, 0.05, 2.1], C.sandDark, [0.02, -0.12, 0.06]);
-  box(root, [5.0, 0.5, 3.0], [0.7, -0.05, -1.9], C.sandDark, [-0.04, 0.15, -0.04]);
-  bed(container, 0.25, 0.9, 0, C.fabric);
-  shelf(container, -0.82, 1.8, 1.5, Math.PI / 2, false);
-  box(root, [4.8, 0.16, 2.0], [0, 1.95, -3.6], C.roofTin, [-0.13, -0.18, 0], true);
-  for (const x of [-1.8, 1.8]) box(root, [0.13, 2.0, 0.13], [x, 0.95, -3.1], C.darkTimber, [0.08, 0, x * 0.02]);
 }

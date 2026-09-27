@@ -6,7 +6,8 @@
  * Builds the REAL `ScatterProvider` over a span of chunks and counts what comes out:
  * how many of each form, where they sit laterally, how many triangles they add per
  * chunk and across the streamer's whole visual window, and how many static colliders
- * the physics chunks carry. Physics is captured rather than simulated, so this runs in
+ * that window carries (on the road every streamed chunk is physical; see
+ * PHYSICS_RADIUS in chunks.ts). Physics is captured rather than simulated, so this runs in
  * Node with no wasm.
  *
  *   npx tsx tools/scatter-census.ts
@@ -26,8 +27,6 @@ import { ScatterProvider } from '../src/world/props/scatter';
 
 /** Chunks kept alive either side of the player, from chunks.ts VISUAL_RADIUS. */
 const VISUAL_RADIUS = 6;
-/** Chunks carrying colliders, from chunks.ts PHYSICS_RADIUS. */
-const PHYSICS_RADIUS = 2;
 
 const FROM_CHUNK = 120;
 const TO_CHUNK = 139;
@@ -240,7 +239,6 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
 }
 
 const visualChunks = VISUAL_RADIUS * 2 + 1;
-const physicsChunks = PHYSICS_RADIUS * 2 + 1;
 
 console.log(`scatter census over ${chunks} chunks (seed 1337)`);
 console.log(
@@ -251,7 +249,7 @@ console.log(
 console.log(
   `  streamer totals: ${Math.round((totalInstances / chunks) * visualChunks)} props and ` +
     `${Math.round((totalTriangles / chunks) * visualChunks)} triangles over ${visualChunks} visual chunks; ` +
-    `${Math.round((colliderCount / chunks) * physicsChunks)} static colliders over ${physicsChunks} physics chunks`,
+    `${Math.round((colliderCount / chunks) * visualChunks)} static colliders over the same window`,
 );
 console.log('  props by lateral distance from the centreline:');
 for (const bucket of [...lateralHistogram.keys()].sort((a, b) => a - b)) {

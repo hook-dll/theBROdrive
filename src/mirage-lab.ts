@@ -26,6 +26,7 @@ import {
   MirageTableau,
   type MirageKind,
 } from './render/mirage-tableau';
+import { MirageSchedule } from './render/mirage-schedule';
 import { HeatHaze } from './render/heathaze';
 import { DEFAULT_HEAT_MIRAGE, type HeatMirageParameters } from './render/hazeshader';
 import { Sky } from './render/sky';
@@ -371,8 +372,10 @@ export async function bootMirageLab(): Promise<void> {
   ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
-  const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin);
-  const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin);
+  // The lab drives both systems by preview only; the schedule is the game's own.
+  const schedule = new MirageSchedule(SEED, road.length);
+  const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin, schedule);
+  const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin, schedule);
   const heatHaze = new HeatHaze(terrain, road);
   const landscape = makeLandscape(road, terrain);
   const roadMesh = makeRoad(road);
