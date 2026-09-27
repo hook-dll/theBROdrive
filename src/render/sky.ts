@@ -10,6 +10,7 @@ import { StarField } from './starcatalog';
 import { PlanetField } from './planetfield';
 import { weather } from '../world/weather';
 import { SandColor } from './desertdust';
+import { setAirFogExtinction } from './airfog';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -108,8 +109,26 @@ const MOON_RADIANCE_DAY = 0.75;
 const MOON_RADIANCE_NIGHT = 1.15;
 /** The enlarged disc is three times the physical angular radius: twice its prior size. */
 const SUN_VISUAL_SCALE = 3;
-/** Matches renderer.ts's starting density; the gradient's haze multiplies it. */
-const BASE_FOG_DENSITY = 0.00035;
+/**
+ * Meteorological visibility of the clear desert air, metres: the distance at which a
+ * dark ridge keeps 2 % of its contrast (Koschmieder, beta = 3.912 / V).
+ *
+ * Dry desert air runs to 100-200 km. At 120 a ridge ten kilometres out keeps about
+ * 70 % of its own colour — a little bluer and flatter, which is what distance looks
+ * like — and the land only gives itself up to the sky near the edge of the drawn world
+ * (render/airfog.ts). The old base fog was a visibility of a few kilometres under a
+ * clear sky: on the top tier a mesa ten kilometres off came out exactly the horizon's
+ * pale cyan, the same pixel as the sky band beside it, over dark ground in front.
+ */
+const CLEAR_AIR_VISIBILITY_M = 120_000;
+/**
+ * How strongly the gradient's regional `haze` (1..3.2) thickens the clear air, as an
+ * exponent. Linear gave the haziest stretch 37 km of sight under the same clean blue
+ * sky — a milky skyline no weather accounts for. At 0.5 it is about 67 km: softer
+ * distance, still the land's own colour. A real veil belongs to the weather (mgla),
+ * which also bleaches the sky it hangs in.
+ */
+const REGIONAL_HAZE_POWER = 0.5;
 
 /**
  * Total display-referred light the key and the sky bounce are exposed to between
@@ -211,10 +230,10 @@ const C_CLEAR_HORIZON = new THREE.Color().setStyle('#c4e2f4');
 const C_FLASH = new THREE.Color().setStyle('#dfe2ff');
 
 /**
- * Fog density each weather adds, per metre, ON TOP of the view-distance-scaled
- * base. Additive on purpose: the base is divided down on the far draw distances so
- * a 25 km range still fades, and a haboob that faded over 25 km would be no haboob.
- * FogExp2 is 1 - exp(-(d·k)²), so these read as: haze eats the land by ~900 m, rain
+ * Fog density each weather adds, per metre, ON TOP of the clear air and the draw
+ * distance's edge fade (render/airfog.ts), neither of which it knows about: a haboob
+ * is a haboob whatever range the player has chosen. They are the scene's whole
+ * `FogExp2` density. FogExp2 is 1 - exp(-(d·k)²), so these read as: haze eats the land by ~900 m, rain
  * greys it by ~1.4 km, and a dust storm leaves ~150 m of sight.
  */
 const FOG_HAZE = 0.0019;
@@ -1219,8 +1238,10 @@ export class Sky {
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     // ...at the land's own light level once the sun is low (see LAND_FOG_NIGHT).
     this.fog.color.copy(this._horizon).multiplyScalar(LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day);
-    this.fog.density =
-      BASE_FOG_DENSITY * g.haze * (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust));
+    setAirFogExtinction(
+      (3.912 / CLEAR_AIR_VISIBILITY_M) * g.haze ** REGIONAL_HAZE_POWER *
+        (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust)),
+    );
     this.dustFog = FOG_DUST * Math.max(weather.dust, 0.2 * smoothstep(0.88, 1, weather.front));
     this.weatherFog =
       FOG_HAZE * weather.haze +

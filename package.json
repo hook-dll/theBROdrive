@@ -23,6 +23,7 @@
   "devDependencies": {
     "@gltf-transform/cli": "^4.5.0",
     "@types/three": "^0.185.0",
+    "puppeteer-core": "^25.12.0",
     "typescript": "^5.9.2",
     "vite": "^8.2.2"
   }

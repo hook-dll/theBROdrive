@@ -133,6 +133,12 @@ export interface DevTools {
 }
 
 /**
+ * Metres right of the centreline `jumpTo` sets the car down: the middle of the
+ * right-hand lane on an ordinary two-lane road.
+ */
+const DEV_JUMP_LATERAL = -1.9;
+
+/**
  * Builds the dev surface and installs the `window.__bro` console handle.
  */
 export function installDevTools(ctx: DevToolsContext): DevTools {
@@ -432,7 +438,55 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.hud.setToast('seated in the nearest car');
   };
 
+  /**
+   * `__bro.jumpTo(km)`: puts the player (and the driven car) on the road at an
+   * arclength, and HOLDS them there until the world under them has streamed.
+   *
+   * Every scripted look at a far stretch used to rebuild this from `rescueTo` and a
+   * fixed sleep, and got it wrong the same ways each time: the car fell through ground
+   * that was still in the worker, the vista kept the old kilometre's palette, the
+   * shots came out of a half-built world. The hold is re-applied every frame by
+   * `updateLakeSeek`'s loop until `settled()` — every wanted visual tile attached and
+   * no streaming job pending — so a caller only waits on that one flag.
+   */
+  let jumpHold: { s: number; frames: number } | null = null;
+  const placeAtJump = (s: number): void => {
+    const sample = ctx.road.sampleAt(s);
+    const at = ctx.road.offsetPoint(s, DEV_JUMP_LATERAL);
+    const y = Math.max(sample.y, ctx.terrain.heightAt(at.x, at.z, s));
+    const drivingId = ctx.world.state.player.drivingCarId;
+    const driven = drivingId ? ctx.vehicles.get(drivingId) : undefined;
+    if (driven) {
+      driven.rescueTo(at.x, y + 0.6 - driven.contactPlaneLocalY, at.z, sample.heading, 0);
+      driven.pushTransform();
+    }
+    ctx.player.teleport(at.x, y + 1.5, at.z, s);
+    ctx.player.pushState();
+  };
+  const devJumpTo = (km: number): void => {
+    const s = Math.min(ctx.road.length - 1000, Math.max(0, km * 1000));
+    jumpHold = { s, frames: 0 };
+    placeAtJump(s);
+  };
+  const jumpSettled = (): boolean => {
+    if (jumpHold) return false;
+    const { ready, wanted } = ctx.desert.readiness;
+    return ready === wanted && !ctx.worldWork.hasPending;
+  };
+  const updateJump = (): void => {
+    if (!jumpHold) return;
+    placeAtJump(jumpHold.s);
+    // A few frames first: the streamers only learn the new position on their next
+    // update, and until then their queues look empty.
+    jumpHold.frames++;
+    const { ready, wanted } = ctx.desert.readiness;
+    if (jumpHold.frames > 10 && wanted > 0 && ready === wanted && !ctx.worldWork.hasPending) {
+      jumpHold = null;
+    }
+  };
+
   const updateLakeSeek = (activeS: number): void => {
+    updateJump();
     // A site is only an attempt, and about two in three windows hold no hollow worth
     // filling. Rather than make a tester press the button until one does, the dev jump
     // leaves a marker and this walks it forward until a site comes up wet — then sets
@@ -487,6 +541,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     lakeWater: ctx.lakeWater,
     // Same shortcut as the pause-menu button, for a console or a scripted session.
     jumpToLake: (index = 0) => devJumpToLake(index),
+    // `jumpTo(480)` then poll `settled()`; see devJumpTo.
+    jumpTo: devJumpTo,
+    settled: jumpSettled,
     tumbleweeds: ctx.tumbleweeds,
     traffic: ctx.traffic,
     vitals: ctx.vitals,

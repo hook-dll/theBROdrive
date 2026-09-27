@@ -19,7 +19,6 @@ import {
   storeSettings,
   streetLightSlotsFor,
   vehicleLightSlotsFor,
-  viewDistanceFogScaleFor,
   viewDistanceFor,
 } from './game/settings';
 import { warmPoiStructures } from './world/poistructures';
@@ -141,6 +140,12 @@ import { createWheelEffects } from './app/wheeleffects';
  * offer.
  */
 const CONTACT_PATCH_RANGE_M = 90;
+/**
+ * A frame-to-frame displacement past which the road projection is redone from scratch
+ * rather than descended from last frame's arclength. A car at 300 km/h through a
+ * one-second hitch covers 83 m; nothing but a teleport covers this.
+ */
+const JUMP_REPROJECT_M = 250;
 /**
  * Objects enter the active physics/render world at the smaller radius and leave at
  * the larger one. The gap prevents lifetime churn at the streaming boundary.
@@ -1104,6 +1109,9 @@ async function boot(): Promise<void> {
   let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
   let activeS = initialProjection.s;
+  /** Where `activeS` was last projected from, absolute XZ; see JUMP_REPROJECT_M. */
+  let projectedX = Number.NaN;
+  let projectedZ = Number.NaN;
   /** Lateral offset of the active player from the road centre, maintained with activeS. */
   let activeLateral = initialProjection.lateral;
   let gumActive = false;
@@ -1658,6 +1666,12 @@ async function boot(): Promise<void> {
     // projection is therefore the complete answer during continuous driving; the
     // expensive unhinted sweep this used to fall back to existed only to arbitrate
     // self-overlapping passes.
+    //
+    // Except after a jump. A teleport (a dev jump, a rescue) lands hundreds of
+    // kilometres from the hint, and the local descent from the old `activeS` never
+    // gets there: the vista, the palette and everything else keyed on `activeS` stayed
+    // at the old kilometre while the tiles (which find their own owner) moved on. Any
+    // displacement no car covers in one frame asks the hintless coarse table instead.
     let desertX: number;
     let desertZ: number;
     let desertLateral: number;
@@ -1665,18 +1679,20 @@ async function boot(): Promise<void> {
       // Absolute: the road and desert tile keys both live in world space while the
       // chassis is relative to the floating origin.
       const t = driving.absoluteTranslation(originAnchor);
-      const projection = road.project(t.x, t.z, activeS);
-      activeS = projection.s;
       desertX = t.x;
       desertZ = t.z;
-      desertLateral = projection.lateral;
     } else {
       const p = player.absolutePosition;
-      const projection = road.project(p.x, p.z, player.s);
-      activeS = projection.s;
       desertX = p.x;
       desertZ = p.z;
+    }
+    {
+      const jumped = !(Math.hypot(desertX - projectedX, desertZ - projectedZ) < JUMP_REPROJECT_M);
+      const projection = road.project(desertX, desertZ, jumped ? undefined : driving ? activeS : player.s);
+      activeS = projection.s;
       desertLateral = projection.lateral;
+      projectedX = desertX;
+      projectedZ = desertZ;
     }
     activeLateral = desertLateral;
     // Fairly alternate first access to the one-job frame budget. Road remains first
@@ -1925,14 +1941,10 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
-    // Then thin the whole thing for the chosen draw distance. The exponential fog is
-    // tuned so the world dissolves around 1.5 km, which is exactly right when 1.5 km
-    // is all there is and hides the vista completely when there is more: at the 'vast'
-    // scale factor a 25 km range still fades, it just fades over 25 km.
-    renderer.fog.density *= viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
-    // Weather's own thickness goes on AFTER the draw-distance scale: a dust storm is a
-    // hundred metres of sight whatever range the player has chosen.
-    renderer.fog.density += sky.weatherFogDensity;
+    // The scene fog is the weather's alone: a dust storm is a hundred metres of sight
+    // whatever range the player has chosen. The clear air and the fade at the edge of
+    // the draw distance are render/airfog.ts.
+    renderer.fog.density = sky.weatherFogDensity;
     renderer.setWeather({
       wallM: weather.frontM,
       windX: weather.windX,

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SandColor } from '../render/desertdust';
 import '../render/lightshader';
+import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import {
   advanceHazePhase,
@@ -31,9 +32,9 @@ import type { ShadeTint } from '../items/items';
  * Renderer, scene and camera ownership.
  *
  * The far plane and fog are set up for the desert vista: the horizon runs to a few
- * kilometres and must still resolve, so the far plane is 4 km and fog is exponential
- * rather than linear. Linear fog over that range either erases the middle distance
- * or leaves the horizon looking like a flat card.
+ * kilometres and must still resolve, so the far plane is 4 km. The air's own veil and
+ * the fade at the edge of the drawn world live in render/airfog.ts; the scene's
+ * `FogExp2` carries only the weather.
  */
 
 /**
@@ -473,8 +474,9 @@ export class Renderer {
       CAMERA_FAR,
     );
 
-    // Density is retuned per frame from the sky gradient's haze value.
-    this.fog = new THREE.FogExp2(0xd8c39a, 0.00035);
+    // Weather's share only, retuned per frame (render/airfog.ts has the clear air).
+    this.fog = new THREE.FogExp2(0xd8c39a, 0);
+    setAirFogEdge(CAMERA_FAR);
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
@@ -1199,5 +1201,7 @@ export class Renderer {
     this.camera.far = far;
     this.camera.near = nearPlaneForFarPlane(far);
     this.camera.updateProjectionMatrix();
+    // The vista's outer ring is this same far plane (render/vista.ts).
+    setAirFogEdge(far);
   }
 }
