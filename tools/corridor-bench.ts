@@ -326,5 +326,75 @@ check(
   `pending ${pendingCrossing.manoeuvreSpeed} m/s, refused=${pendingCrossing.crossingRefused}; clear admissible=${clearCrossing.admissible}`,
 );
 
+// A body already across the crown whose permission is withdrawn — the retry bar its
+// own abort sets, a crest coming into view — must still have a line to stand on while
+// the car it was passing is beside it. Refused outright, nothing was admissible and the
+// fallback was a full stop in the oncoming lane.
+const ACROSS = -LANE;
+const abeamLeader: CorridorObstacle = {
+  s: 0,
+  lateral: LANE,
+  halfWidth: CAR_HALF_WIDTH_M + 0.4,
+  speed: 16,
+  abeam: true,
+  level: true,
+  movable: true,
+};
+const withdrawnBeside = planCorridor(request({
+  ownLateral: ACROSS,
+  previousLine: ACROSS,
+  mayCrossCrown: false,
+  obstacles: [abeamLeader],
+}));
+const withdrawnClear = planCorridor(request({
+  ownLateral: ACROSS,
+  previousLine: ACROSS,
+  mayCrossCrown: false,
+}));
+check(
+  'a withdrawn crossing keeps its line while boxed in, and goes home when it can',
+  withdrawnBeside.admissible && withdrawnBeside.usesOncomingLane && withdrawnBeside.crossingAbandoned
+    && withdrawnClear.admissible && !withdrawnClear.usesOncomingLane && !withdrawnClear.crossingAbandoned,
+  `beside line ${withdrawnBeside.line.toFixed(2)} abandoned=${withdrawnBeside.crossingAbandoned}; ` +
+    `clear line ${withdrawnClear.line.toFixed(2)}`,
+);
+
+// A pass measured on the car that will drive it: six seconds and 130 m to a slot. The
+// kickdown sum, at a crossing speed the car does not have, would call 250 m of
+// oncoming room plenty; the measured one needs 250 m plus a second of closing.
+const measuredBase = {
+  obstacles: [{ ...car(20, LANE, 16), movable: true }],
+  crossingSpeed: 76,
+  desiredSpeed: 55,
+  oncomingSpeed: 20,
+  passSeconds: 6,
+  passTravel: 130,
+  passMarginS: 1,
+};
+const kickdownOnly = planCorridor(request({ ...measuredBase, passSeconds: undefined, oncomingGap: 250 }));
+const measuredShort = planCorridor(request({ ...measuredBase, oncomingGap: 250 }));
+const measuredRoomy = planCorridor(request({ ...measuredBase, oncomingGap: 320 }));
+const noSlot = planCorridor(request({ ...measuredBase, passSeconds: Number.POSITIVE_INFINITY }));
+check(
+  'a measured pass takes only the window its own car can use',
+  kickdownOnly.usesOncomingLane && !measuredShort.usesOncomingLane && measuredShort.crossingRefused
+    && measuredRoomy.usesOncomingLane && !noSlot.usesOncomingLane && noSlot.crossingRefused,
+  `kickdown ${kickdownOnly.line.toFixed(2)}, short ${measuredShort.line.toFixed(2)}, ` +
+    `roomy ${measuredRoomy.line.toFixed(2)}, no slot ${noSlot.line.toFixed(2)}`,
+);
+
+// Re-measured under way: out there already, the pass no longer fits before the car
+// coming the other way. The line home wins; boxed in, the crossing stays but is marked.
+const overrun = { ...measuredBase, ownLateral: ACROSS, previousLine: ACROSS, oncomingGap: 150 };
+const overrunHome = planCorridor(request(overrun));
+const overrunBoxed = planCorridor(request({ ...overrun, obstacles: [abeamLeader] }));
+check(
+  'a measured pass that stops fitting goes home, or drops back when boxed in',
+  !overrunHome.usesOncomingLane && overrunHome.admissible
+    && overrunBoxed.usesOncomingLane && overrunBoxed.crossingAbandoned,
+  `home line ${overrunHome.line.toFixed(2)}; boxed line ${overrunBoxed.line.toFixed(2)} ` +
+    `abandoned=${overrunBoxed.crossingAbandoned}`,
+);
+
 console.log(failures === 0 ? '\nall corridor checks passed' : `\n${failures} corridor check(s) FAILED`);
 if (failures) process.exitCode = 1;

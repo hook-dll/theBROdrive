@@ -179,6 +179,26 @@ export interface CorridorRequest {
    */
   readonly crossingSpeed: number;
   /**
+   * THE PASS AS THIS DRIVER'S OWN CAR WILL DRIVE IT, when the caller has measured it:
+   * seconds until the body is back in its own lane in a slot it fits, and the road the
+   * body covers meanwhile. Infinity when no slot is reachable at all.
+   *
+   * `crossingSpeed` is a wish, and the closing-speed sum below prices a pass on it as if
+   * the car could have it at once. For the racer that wish was 276 km/h: a pass begun at
+   * 64 km/h behind a car doing 58 was priced at under a second and took eleven, and the
+   * car it had measured 107 m of room against arrived in the middle of it. Measured on
+   * the real road at seed 545124 as a head-on at 7 km/h after braking to a stop beside
+   * the car being passed. Undefined keeps the old sum for the drivers that use it.
+   */
+  readonly passSeconds?: number;
+  readonly passTravel?: number;
+  /**
+   * Seconds of closing speed kept between the end of a measured pass and the car coming
+   * the other way. Replaces `PASS_ENTRY_MARGIN` for a measured pass: a margin on a number
+   * that is right is a nerve, not an error bar.
+   */
+  readonly passMarginS?: number;
+  /**
    * Is the opposing lane clear BEHIND us? Pulling out in front of something already
    * overtaking is a rear-end, and the corridor search has no rearward obstacles.
    */
@@ -208,6 +228,14 @@ export interface CorridorPlan {
    * dead stop astride the centre line instead of an aborted pass.
    */
   readonly crossingRefused: boolean;
+  /**
+   * The chosen line is across the crown for a MEASURED pass that no longer fits: the
+   * car coming the other way will arrive before this one can be back in its lane.
+   * The line is still admissible — the body is out there and has to be allowed to stay
+   * while it gets back — but it is priced as a wall, so any line home wins the moment it
+   * exists, and the caller drops back behind the car it was passing to make one.
+   */
+  readonly crossingAbandoned: boolean;
   /** Nearest thing in the chosen corridor and how fast it is going, or Infinity. */
   readonly blockDistance: number;
   readonly blockSpeed: number;
@@ -416,7 +444,11 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     obstacles,
     mayCrossCrown,
     lineAllowed,
+    passSeconds,
+    passTravel = 0,
+    passMarginS = 0,
   } = request;
+  const passMeasured = passSeconds !== undefined;
   let bestLine = laneOffset;
   let bestCost = Number.POSITIVE_INFINITY;
   let bestBlockDistance = Number.POSITIVE_INFINITY;
@@ -430,6 +462,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
    * see the rear-clearance gate.
    */
   const alreadyAcross = (ownLateral - oncomingBoundary) * ownSide < -halfWidth * 0.5;
+  let bestAbandoned = false;
   let bestFeasible = false;
   let bestAdmissible = false;
   // What blocks the driver's OWN lane, once, for every candidate to reason about:
@@ -469,11 +502,21 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
   const evaluate = (line: number, captureRejected = false): void => {
     const crossesCentre =
       (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
+    // THE PERMISSION TO CROSS IS AN ENTRY RULE TOO. A body already out there is always
+    // allowed to stay across while it gets back: withdrawn from under it — by the retry
+    // bar an abort itself sets, or by a crest that has just come into view — nothing
+    // is admissible, and the answer to that is a full stop in the oncoming lane beside
+    // the car being passed. Measured on the real road at seed 545124, from 71 km/h to
+    // standstill with the car coming the other way 54 m off, and hit by it.
+    //
+    // Withdrawn permission still means "go home", so such a line is ABANDONED: priced
+    // as a wall below, taken only while nothing on this side is admissible yet.
     let admissible =
       Math.abs(line) <= edgeLimit &&
       Math.abs(line - laneOffset) <= lateralFreedom &&
-      (!crossesCentre || mayCrossCrown) &&
+      (!crossesCentre || mayCrossCrown || alreadyAcross) &&
       (lineAllowed?.(line) ?? true);
+    let abandoned = crossesCentre && !mayCrossCrown;
     if (!admissible && !captureRejected) return;
     const shift = Math.abs(line - ownLateral);
     // Road covered while the line is being moved there, from the manoeuvre's own arc.
@@ -623,7 +666,19 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
             Math.max(MIN_ADVANTAGE_MPS, crossingSpeed - leaderSpeed)
           : (Math.min(ownLaneBlock, horizon) + STILL_CLEAR_M) /
             Math.max(MIN_ADVANTAGE_MPS, passSpeed);
-      const roomNeeded = (Math.max(speed, passSpeed) + oncomingSpeed) * manoeuvreSeconds;
+      let roomNeeded = (Math.max(speed, passSpeed) + oncomingSpeed) * manoeuvreSeconds;
+      let entryRoom = roomNeeded * PASS_ENTRY_MARGIN;
+      // A MEASURED PASS IS PRICED ON THE CAR THAT WILL DRIVE IT. See `passSeconds`.
+      const measuredOvertake = passMeasured && leaderSpeed > SHOULDER_BYPASS_MAX_SPEED;
+      if (measuredOvertake) {
+        // No reachable slot is no window at all, whatever is or is not coming.
+        roomNeeded = Number.isFinite(passSeconds)
+          ? passTravel + oncomingSpeed * passSeconds
+          : Number.POSITIVE_INFINITY;
+        entryRoom = Number.isFinite(roomNeeded)
+          ? roomNeeded + passMarginS * (passTravel / Math.max(passSeconds, 1e-3) + oncomingSpeed)
+          : Number.POSITIVE_INFINITY;
+      }
       // ONE OBSTRUCTION, TWO DIRECTIONS, AND SOMEBODY HAS TO GO FIRST.
       //
       // A wreck wide enough to close both lanes is a bottleneck: the corridor past it
@@ -669,11 +724,22 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       // here. So a FRESH decision to cross is priced at `PASS_ENTRY_MARGIN` over the
       // bare minimum and may simply wait for a fatter window; a crossing already
       // under way is not re-litigated on the same shrinking estimate.
-      if (!alreadyAcross && !firstToTheGap && oncomingGap < roomNeeded * PASS_ENTRY_MARGIN) {
+      // A pass with no slot to finish in is not a window, even on an empty road: the
+      // comparison below alone would read Infinity against Infinity as room.
+      const noSlot = measuredOvertake && !Number.isFinite(roomNeeded);
+      if (!alreadyAcross && !firstToTheGap && (noSlot || oncomingGap < entryRoom)) {
         crossingRefused = true;
         if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
         admissible = false;
         if (!captureRejected) return;
+      }
+      // …BUT A MEASURED PASS IS RE-MEASURED EVERY STEP, AND ONE THAT NO LONGER FITS IS
+      // OVER. Not refused — see the permission above — but priced as a wall, so the
+      // lane home wins the moment it exists. The opposing lane is borrowed to go fast;
+      // a pass that has stopped going fast enough to finish before the car coming the
+      // other way is a car parked in somebody else's lane.
+      if (alreadyAcross && measuredOvertake && (noSlot || oncomingGap < roomNeeded)) {
+        abandoned = true;
       }
       // A CROSSING REFUSED BECAUSE SOMETHING IS COMING IS NOT A DEAD END.
       //
@@ -721,6 +787,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
         cost +=
           Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
       }
+      if (abandoned) cost += BLOCK_COST;
       if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;
     }
     // FEASIBLE MEANS "NOTHING IMMOVABLE IN IT WITHIN STOPPING DISTANCE".
@@ -742,6 +809,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     bestManoeuvreSpeed = manoeuvreSpeed;
     bestFeasible = feasible;
     bestAdmissible = admissible;
+    bestAbandoned = abandoned;
   };
 
   // Exact centres matter: the quarter-metre avoidance lattice would otherwise shave
@@ -770,6 +838,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     feasible: bestFeasible,
     waitingForOncoming: waitingForOncoming && !bestFeasible,
     crossingRefused,
+    crossingAbandoned: bestAbandoned && bestAdmissible,
     blockDistance: bestBlockDistance,
     blockSpeed: bestBlockSpeed,
     manoeuvreSpeed: bestManoeuvreSpeed,

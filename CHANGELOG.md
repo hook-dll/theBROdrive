@@ -78,6 +78,30 @@
   its indicators. On the playground circuit its laps went from 105.7/102.0 s to
   96.5/92.4 s, its mean from 95 to 104 km/h and its peak from 130 to 172 km/h, still
   on the asphalt and with no contact in traffic.
+- FRANTIC RACES THROUGH TRAFFIC, NOT BY THE BOOK. It used to overtake by every rule of
+  the road and size each pass on a dream: its crossing speed was `desired·(1 +
+  0.25/passNerve)`, 276 km/h, so a pass it priced under a second took eleven and the
+  oncoming car it had measured 107 m against arrived mid-pass. Now it sizes each pass
+  on its own car (`sizePass`): power at the wheels less drag and grade, capped by grip,
+  with the share of peak power measured on every full-throttle step, run forward
+  against the whole queue from `TrafficField` until it is a car length ahead of the
+  one it passes with a real slot in front. It goes the moment that fits, pulls out
+  from where it would otherwise start braking, cuts back in close and re-measures the
+  pass every step; a pass that stops fitting is abandoned (`crossingAbandoned`) — home
+  at once, or dropped behind the car it was passing. The six-second sight and
+  commitment rules, the 60 m retry and the indicators are gone for it; grip, brakes,
+  the swept and abeam vetoes and the emergency reflex stay. For every mode, a body
+  already over the centre line keeps a legal line there (a revoked permission used to
+  leave the planner nothing and it stopped dead beside the car it was passing, head-on
+  at 545124), and a return from the oncoming lane is a brisk swerve below 29 km/h,
+  blending into the ordinary lane change by 58 km/h. On `traffic-road.ts --ego
+  frantic` over six seeds: time under 2 s from a head-on 63 s → 12–26 s, ego contacts
+  6 → 0–2, pace 35 → 41–48 km/h, overtakes 30 → 32–46.
+- `tools/traffic-road.ts` takes `--ego sleeper|hurried|frantic` and `--ego-log`, and
+  judges the ego as a racer: overtakes made and suffered, longest follow and why,
+  time over the centre line, head-on time-to-contact, sideslip and excursions, with
+  the ego's history up to the closest head-on, the furthest excursion and the worst
+  slide under `--trace`.
 
 ### Fixed
 

@@ -28,7 +28,8 @@
  *   - a jam is car-seconds lost below walking pace, and the longest single stop.
  *
  * Usage:
- *   bun tools/traffic-road.ts [seed] [--minutes N] [--start S] [--trace]
+ *   bun tools/traffic-road.ts [seed] [--minutes N] [--start S] [--trace] [--solo]
+ *                             [--ego sleeper|hurried|frantic] [--ego-log]
  */
 
 import * as THREE from 'three';
@@ -87,15 +88,31 @@ const START_S = flag('start', 40_000);
 /** Minutes of measured traffic; the warm-up before it is not measured. */
 const MEASURE_S = flag('minutes', 10) * 60;
 const WARMUP_S = flag('warmup', 90);
-const TRACE = args.includes('--trace');
+/** `--ego-log` reads the same per-step history, so it implies `--trace`. */
+const TRACE = args.includes('--trace') || args.includes('--ego-log');
 /**
  * Diagnostic: run the ego driver down the same real stretch, with the same real props,
  * and NO stream at all. What is left is the road; what the stream adds is the
  * difference between the two runs.
  */
 const SOLO = args.includes('--solo');
-/** The ego driver's character. It is the player's own autopilot, at its middle setting. */
-const EGO_MODE: AutopilotMode = 'hurried';
+/** Print the ego's own state every half second of the measured run. */
+const EGO_LOG = args.includes('--ego-log');
+let egoLogTicks = 0;
+/**
+ * The ego driver's character. It is the player's own autopilot, at its middle setting
+ * unless `--ego` asks for another one — `frantic` is the racer the player races against,
+ * and the `racer:` line below is what it is judged on.
+ */
+const EGO_MODE: AutopilotMode = (() => {
+  const index = args.indexOf('--ego');
+  const value = index >= 0 ? args[index + 1] : undefined;
+  if (value === undefined) return 'hurried';
+  if (value !== 'sleeper' && value !== 'hurried' && value !== 'frantic') {
+    throw new Error(`--ego must be sleeper, hurried or frantic, not ${value}`);
+  }
+  return value;
+})();
 const EGO_MODEL = 'sv_vaz2105r';
 /** Room the ribbon keeps past the widest carriageway, for verges and excursions. */
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH * 2 + 4;
@@ -179,7 +196,7 @@ function settle(): void {
  */
 const REACH_M = Math.min(
   road.length - CHUNK_LENGTH - START_S - 400,
-  (MEASURE_S + WARMUP_S) * 28 + 2_000,
+  (MEASURE_S + WARMUP_S) * (EGO_MODE === 'frantic' ? 38 : 28) + 2_000,
 );
 const lastS = START_S + REACH_M;
 
@@ -440,6 +457,114 @@ const passedTheLine = new Set<string>();
 const PASS_LINE_M = EGO_START_S + 1_500;
 const history = new Map<string, string[]>();
 
+/**
+ * THE RACER'S OWN ACCOUNT. The stream numbers above judge traffic; a racing ego is
+ * judged on what the player would see from behind it: how many cars it actually got
+ * past, how long it sat in a queue, how close it came to meeting somebody head-on,
+ * and whether the car ever stepped out from under it.
+ *
+ * Order is read from arclength with a few metres of hysteresis, and only across a
+ * continuous change: a car despawned behind and respawned ahead under the same id is
+ * not an overtake.
+ */
+const ORDER_HYSTERESIS_M = 3;
+const ORDER_CONTINUITY_M = 25;
+/** Bodies closer than this laterally meet if nobody moves. */
+const HEAD_ON_LATERAL_M = 1.9;
+const HEAD_ON_SCARE_TTC_S = 2;
+/** Sideslip is only a control question at road speed. */
+const SLIP_MIN_SPEED_MPS = 8;
+const SLIP_SCARE_DEG = 8;
+const egoOrder = new Map<string, { side: number; rel: number }>();
+let egoOvertakes = 0;
+let egoOvertakenBy = 0;
+let egoMinHeadOnTtc = Infinity;
+let egoHeadOnScareSeconds = 0;
+let egoWorstHeadOn = '';
+/** The ego's own trace up to its furthest excursion past the asphalt, under `--trace`. */
+let egoWorstOffRoadTrace = '';
+/** The same, up to the worst sideslip past `SLIP_SCARE_DEG`. */
+let egoWorstSlipTrace = '';
+let egoMaxSlipDeg = 0;
+let egoSlipScareSeconds = 0;
+let egoFollowSpell = 0;
+let egoLongestFollow = 0;
+let egoOncomingSeconds = 0;
+/**
+ * WHY THE RACER IS FOLLOWING, second by second: not held up enough to want a pass, the
+ * crown closed to it, no slot in the queue it could finish in, or a pass that fits but
+ * not before whatever is coming the other way.
+ */
+const egoFollowWhy = new Map<string, number>();
+function followReason(): string {
+  const inner = egoAutopilot as unknown as {
+    passUrgeValue: boolean;
+    lastMayCross: boolean;
+    passSecondsValue: number;
+    lastCrossingRefused: boolean;
+    lastRearClear: boolean;
+  };
+  if (!inner.passUrgeValue) return 'no urge';
+  if (!inner.lastMayCross) return 'crown closed';
+  if (!Number.isFinite(inner.passSecondsValue)) return 'no slot';
+  if (!inner.lastRearClear) return 'rear';
+  if (inner.lastCrossingRefused) return 'oncoming';
+  return 'not chosen';
+}
+function measureRacer(): void {
+  const egoSpeed = ego.speedKmh / 3.6;
+  let minTtc = Infinity;
+  for (const car of cars) {
+    if (car.settleFor > 0 || tracks.get(car.id)?.ejected === true) continue;
+    const rel = car.forwardS - egoS;
+    if (car.direction === 1) {
+      const side = rel > ORDER_HYSTERESIS_M ? 1 : rel < -ORDER_HYSTERESIS_M ? -1 : 0;
+      const previous = egoOrder.get(car.id);
+      if (side === 0) continue;
+      if (previous && Math.abs(rel - previous.rel) < ORDER_CONTINUITY_M) {
+        if (previous.side === 1 && side === -1) egoOvertakes++;
+        if (previous.side === -1 && side === 1) egoOvertakenBy++;
+      }
+      egoOrder.set(car.id, { side, rel });
+      continue;
+    }
+    if (Math.abs(car.roadLateral - egoLateral) >= HEAD_ON_LATERAL_M) continue;
+    const gap = rel - BODY_LENGTH_M;
+    if (gap <= 0) continue;
+    const ttc = gap / Math.max(0.1, egoSpeed + car.vehicle.speedKmh / 3.6);
+    if (ttc < minTtc) {
+      minTtc = ttc;
+      if (ttc < egoMinHeadOnTtc) {
+        egoWorstHeadOn =
+          `s ${(egoS - START_S).toFixed(0)}, ego lateral ${egoLateral.toFixed(1)} at ` +
+          `${ego.speedKmh.toFixed(0)} km/h ${egoAutopilot.activity}, ${car.id} (${car.style}) lateral ` +
+          `${car.roadLateral.toFixed(1)} at ${car.vehicle.speedKmh.toFixed(0)} km/h ${car.autopilot.activity}, gap ${gap.toFixed(0)} m`;
+      }
+    }
+  }
+  egoMinHeadOnTtc = Math.min(egoMinHeadOnTtc, minTtc);
+  if (minTtc < HEAD_ON_SCARE_TTC_S) egoHeadOnScareSeconds += FIXED_DT;
+  if (egoSpeed > SLIP_MIN_SPEED_MPS) {
+    const velocity = ego.chassis.linvel();
+    const heading = bodyHeading(ego);
+    const forward = velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
+    const across = velocity.x * Math.cos(heading) - velocity.z * Math.sin(heading);
+    const slipDeg = (Math.atan2(Math.abs(across), Math.max(forward, 0.1)) * 180) / Math.PI;
+    if (slipDeg > egoMaxSlipDeg && slipDeg > SLIP_SCARE_DEG) {
+      egoWorstSlipTrace = (history.get('ego') ?? []).filter((_, i, all) => (all.length - 1 - i) % 20 === 0).join(' | ');
+    }
+    egoMaxSlipDeg = Math.max(egoMaxSlipDeg, slipDeg);
+    if (slipDeg > SLIP_SCARE_DEG) egoSlipScareSeconds += FIXED_DT;
+  }
+  egoFollowSpell = egoAutopilot.activity === 'follow' ? egoFollowSpell + FIXED_DT : 0;
+  if (egoAutopilot.activity === 'follow') {
+    const why = followReason();
+    egoFollowWhy.set(why, (egoFollowWhy.get(why) ?? 0) + FIXED_DT);
+  }
+  egoLongestFollow = Math.max(egoLongestFollow, egoFollowSpell);
+  if (egoLateral > 0.55) egoOncomingSeconds += FIXED_DT;
+}
+
 const position = { x: 0, y: 0, z: 0 };
 
 function wrapAngle(angle: number): number {
@@ -549,11 +674,12 @@ function sampleCar(
   // two opposite verdicts on the same change, on two seeds, both of them noise. So an
   // ejected body is latched as such and reported on its own line. It is a real defect
   // and stays visible; it is simply not a traffic-AI defect.
+  // The ego is exempt from the speed test: a racer on a descent can genuinely pass it.
   const offAsphalt = Math.abs(baseLateral) - road.halfWidthAt(s);
   if (
     !track.ejected &&
     ((offAsphalt > EJECTED_LATERAL_M && speedKmh > EJECTED_SPEED_KMH) ||
-      speedKmh > IMPOSSIBLE_SPEED_KMH)
+      (id !== 'ego' && speedKmh > IMPOSSIBLE_SPEED_KMH))
   ) {
     track.ejected = true;
     track.ejectedWhy =
@@ -646,16 +772,37 @@ function sampleCar(
       planLine: number;
       appliedLateral: number;
       corridorFeasible: boolean;
+      lastMayCross: boolean;
+      lastOncomingGap: number;
+      targetSpeedValue: number;
+      oncomingGap: number;
+      oncomingFieldGap: number;
     };
     log.push(
-      `s${(s - START_S).toFixed(0)} lat${localLateral.toFixed(1)} v${speedKmh.toFixed(0)} ` +
+      `s${(s - START_S).toFixed(0)} lat${localLateral.toFixed(1)} v${speedKmh.toFixed(0)}` +
+        `>${(inner.targetSpeedValue * 3.6).toFixed(0)} ` +
         `${activity} gap${autopilot.obstacleGap === Infinity ? '-' : autopilot.obstacleGap.toFixed(0)}` +
         `@${(autopilot.obstacleSpeed * 3.6).toFixed(0)}` +
         ` blk${inner.corridorBlockDistance === Infinity ? '-' : inner.corridorBlockDistance.toFixed(0)}` +
         `@${(inner.corridorBlockSpeed * 3.6).toFixed(0)}` +
         ` ln${inner.planLine.toFixed(1)}/${inner.appliedLateral.toFixed(1)}` +
+        ` onc${inner.lastOncomingGap === Infinity ? '-' : inner.lastOncomingGap.toFixed(0)}` +
+        `[${inner.oncomingGap === Infinity ? '-' : inner.oncomingGap.toFixed(0)}` +
+        `/${inner.oncomingFieldGap === Infinity ? '-' : inner.oncomingFieldGap.toFixed(0)}]` +
+        `${inner.lastMayCross ? '' : ' nox'}` +
         `${inner.corridorFeasible ? '' : ' NOWAY'}`,
     );
+    if (EGO_LOG && id === 'ego' && egoLogTicks++ % 30 === 0) {
+      const pass = autopilot as unknown as {
+        passSecondsValue: number;
+        passTravelValue: number;
+        powerShare: number;
+      };
+      console.log(
+        `  ego-log ${log[log.length - 1]} ${followReason()}` +
+          ` T${pass.passSecondsValue.toFixed(1)}/${pass.passTravelValue.toFixed(0)}m ps${pass.powerShare.toFixed(2)}`,
+      );
+    }
     if (log.length > 360) log.shift();
   }
   // A CONTACT IS THE ONE EVENT WORTH A SENTENCE OF ITS OWN.
@@ -693,6 +840,9 @@ function sampleCar(
   if (!track.ejected && offAsphalt > track.worstOffRoad) {
     track.worstOffRoad = offAsphalt;
     track.worstOffRoadWhy = `${activity} at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
+    if (id === 'ego' && offAsphalt > 1) {
+      egoWorstOffRoadTrace = (history.get(id) ?? []).filter((_, i, all) => (all.length - 1 - i) % 20 === 0).join(' | ');
+    }
   }
   speedByCarSecond.push(speedKmh);
   // Over the crown, in this car's own sense: positive local lateral is to its left.
@@ -730,6 +880,7 @@ async function run(seconds: number, record: boolean): Promise<void> {
     measuredSeconds += FIXED_DT;
     liveSamples.push(cars.length);
     sampleCar('ego', 'ego', EGO_MODEL, 1, 0, ego, egoAutopilot, egoS, egoLateral);
+    if (!SOLO) measureRacer();
 
     let nearestAhead = Infinity;
     let nearestSameAhead = Infinity;
@@ -818,7 +969,7 @@ function roadAllows(mode: AutopilotMode): number {
   return per(ceilings, 0.5);
 }
 const streamCeilingKmh = roadAllows('sleeper');
-const egoCeilingKmh = roadAllows('hurried');
+const egoCeilingKmh = roadAllows(EGO_MODE);
 /** A car's own mean pace over its life: km/h of road actually covered. */
 const paceByCar = measured.map((t) => (t.progress / Math.max(t.seconds, 1e-3)) * 3.6);
 const holdKm = measured.reduce((sum, t) => sum + t.holdProgress, 0) / 1000;
@@ -878,7 +1029,7 @@ console.log(
   `  pace/car, km/h: p10 ${per(paceByCar, 0.1).toFixed(0)}  p25 ${per(paceByCar, 0.25).toFixed(0)}` +
     `  median ${per(paceByCar, 0.5).toFixed(0)}  p75 ${per(paceByCar, 0.75).toFixed(0)}` +
     `  p90 ${per(paceByCar, 0.9).toFixed(0)}` +
-    `  (road allows ${streamCeilingKmh.toFixed(0)} sleeper / ${egoCeilingKmh.toFixed(0)} hurried)`,
+    `  (road allows ${streamCeilingKmh.toFixed(0)} sleeper / ${egoCeilingKmh.toFixed(0)} ${EGO_MODE})`,
 );
 for (const [style, list] of [...paceByStyle].sort()) {
   console.log(
@@ -938,6 +1089,39 @@ console.log(
       .map(([name, seconds]) => `${name} ${((seconds / Math.max(egoTrack.seconds, 1e-3)) * 100).toFixed(0)}%`)
       .join(' '),
 );
+if (!SOLO) {
+  const egoMinutes = Math.max(egoTrack.seconds / 60, 1e-3);
+  console.log(
+    `  racer:     ${egoOvertakes} overtakes (${(egoOvertakes / egoMinutes).toFixed(1)}/min), ` +
+      `overtaken ${egoOvertakenBy}, longest follow ${egoLongestFollow.toFixed(1)} s, ` +
+      `oncoming lane ${((egoOncomingSeconds / Math.max(egoTrack.seconds, 1e-3)) * 100).toFixed(1)}%, ` +
+      `head-on ttc min ${egoMinHeadOnTtc === Infinity ? '-' : egoMinHeadOnTtc.toFixed(2)} s ` +
+      `(${egoHeadOnScareSeconds.toFixed(1)} s under ${HEAD_ON_SCARE_TTC_S}), ` +
+      `slip max ${egoMaxSlipDeg.toFixed(1)}deg (${egoSlipScareSeconds.toFixed(1)} s over ${SLIP_SCARE_DEG}), ` +
+      `past the edge ${egoTrack.worstOffRoad.toFixed(2)} m (${egoTrack.worstOffRoadWhy || '-'}), ` +
+      `${egoImpacts} contacts`,
+  );
+  if (egoWorstHeadOn) console.log(`  closest:   ${egoWorstHeadOn}`);
+  if (egoWorstOffRoadTrace) console.log(`  off-road:  ${egoWorstOffRoadTrace}`);
+  if (egoWorstSlipTrace) console.log(`  slide:     ${egoWorstSlipTrace}`);
+  console.log(
+    `  following: ` +
+      ([...egoFollowWhy]
+        .sort((a, b) => b[1] - a[1])
+        .map(([why, seconds]) => `${why} ${seconds.toFixed(0)} s`)
+        .join(', ') || '-'),
+  );
+  let printed = 0;
+  for (let i = 0; i < contacts.length && printed < 6; i++) {
+    if (!contacts[i]!.startsWith('ego ')) continue;
+    printed++;
+    console.log(`      ${contacts[i]}`);
+    const history = contacts[i + 1];
+    if (history?.trimStart().startsWith('before it:')) {
+      console.log(`        ${history.trim().split(' | ').slice(-8).join(' | ')}`);
+    }
+  }
+}
 console.log(`  warm-up left ${afterWarmup.live} live of ${afterWarmup.target} target`);
 
 if (TRACE) {

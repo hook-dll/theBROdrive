@@ -217,6 +217,24 @@ interface ModeConfig {
    * car happens to have. Zero is no trim: the careful drivers never go near the limit.
    */
   readonly curvatureTrim: number;
+  /**
+   * THE RACER: a driver who breaks every rule of the road and none of physics.
+   *
+   * The careful drivers overtake the way road design says to: only over road they can
+   * see six seconds of, never again for sixty metres after giving a pass up, signalling
+   * every move. A racer reads the traffic instead of the rules — the stream tells it
+   * exactly where every car is — and sizes each pass on its OWN car: its measured
+   * acceleration, the speed the road allows, every car of the queue in front and the
+   * first gap in it the car fits. It goes the moment that pass fits before whatever is
+   * coming the other way, cuts back in a car length ahead of the one it passed, and
+   * re-measures the pass every step: one that stops fitting is given up at once, by
+   * dropping back and diving in behind. It does not signal.
+   *
+   * What it keeps is everything that is not a rule: the tyres' grip, the brakes'
+   * reach, the swept-path and abeam vetoes, the emergency reflex, and the rear check
+   * that stops it pulling out into somebody already overtaking.
+   */
+  readonly racer: boolean;
 }
 
 /**
@@ -228,8 +246,9 @@ interface ModeConfig {
  * car's power and the road's bends are the only limits — the tyres used to within a
  * fifth of what they have, braking zones begun at the last useful metre, and a racing
  * line through every bend: outside, apex, outside, across the whole road where it can
- * see that the other half is empty. It takes the oncoming lane to get past traffic
- * when it can see far enough to do it, and it signals nothing while it is on its line.
+ * see that the other half is empty. It is a RACER (`ModeConfig.racer`): it takes the
+ * oncoming lane the moment a pass measured on its own car fits before whatever is
+ * coming, gives it back the moment it stops fitting, and signals nothing at all.
  *
  * Both hold the RIGHT-HAND LANE. That is the change with the widest reach: a car on
  * the centreline meets oncoming traffic head-on and has nowhere to put a swerve,
@@ -263,6 +282,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.4,
     racingLine: false,
     curvatureTrim: 0,
+    racer: false,
   },
   /**
    * The driver with somewhere to be and a licence to keep. 105 km/h, a cornering
@@ -298,6 +318,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.4,
     racingLine: false,
     curvatureTrim: 0,
+    racer: false,
   },
   frantic: {
     // No cruising speed of its own: the car's power runs out first on every straight.
@@ -350,6 +371,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.8,
     racingLine: true,
     curvatureTrim: 1,
+    racer: true,
   },
 };
 
@@ -981,6 +1003,74 @@ const PASS_ABORT_MIN_M = 14;
 const PASS_RETRY_DELAY_S = 5;
 /** No physical overtake may own a lane indefinitely after traffic has stopped. */
 const PASS_MAX_HOLD_S = 20;
+/**
+ * THE RACER'S PASS, sized on its own car (`ModeConfig.racer`, `sizePass`).
+ *
+ * It cuts back in with its tail this far past the nose of the car it passed — rude by
+ * any standard but a racer's — and needs a slot in front of the next car of the queue
+ * no bigger than this plus a third of a second of its own speed.
+ */
+const RACER_CUT_IN_M = 2.5;
+const RACER_SLOT_M = 3;
+const RACER_SLOT_SECONDS = 0.3;
+/** Seconds of closing kept between a finished pass and the car coming the other way. */
+const RACER_PASS_MARGIN_S = 1;
+/** Opposing line that has to be clear of props beyond the pass itself. */
+const RACER_CROSSING_CLEAR_M = 30;
+/** Road after a given-up pass before a racer tries again; see `CROSSING_RETRY_METRES`. */
+const RACER_CROSSING_RETRY_M = 20;
+/** Step of the pass simulation, and how far up the road the queue is looked for. */
+const PASS_SIZING_STEP_S = 0.1;
+const PASS_QUEUE_LOOK_M = 400;
+/**
+ * A pass given up while the car being passed is still level: drop this far below its
+ * speed until it is ahead of the abeam window, then take the lane behind it.
+ */
+const ABANDON_DROP_BACK_MPS = 4;
+/**
+ * WHAT THE CAR CAN DO, which a pass cannot be sized without.
+ *
+ * Acceleration is power over momentum, less drag and rolling resistance, less the
+ * grade: `a = share·P/(m·v) − ½ρ·CdA·v²/m − roll − g·grade`, capped at what the
+ * driven wheels can put down from rest. `share` is what a flat-out run actually gets of
+ * the engine's peak power once gearing, shifts and the power band are paid for. It
+ * starts at a prior and is then MEASURED: every step of full throttle on a straight
+ * reports the share it implied, and the driver keeps a running average of it — so a
+ * worn engine, a loaded boot or a gravel district is what the next pass is sized on.
+ */
+const HALF_AIR_DENSITY = 0.6;
+const ROLLING_DECEL_MPS2 = 0.12;
+const POWER_SHARE_PRIOR = 0.6;
+const POWER_SHARE_MIN = 0.2;
+const POWER_SHARE_MAX = 1;
+const POWER_SHARE_TAU_S = 2;
+const POWER_SAMPLE_MIN_SPEED_MPS = 6;
+/** Straight enough, as lateral acceleration, for the throttle to be all longitudinal. */
+const POWER_SAMPLE_MAX_LATERAL_MPS2 = 1.5;
+const TRACTION_ACCEL_CAP_MPS2 = 3;
+/**
+ * GIVING THE OPPOSING LANE BACK.
+ *
+ * The opposing lane is borrowed to go fast. Coming back from a long pass at road speed
+ * is a lane change, taken at the ordinary manoeuvre rate so the car is not set weaving
+ * at 120 km/h. Coming back from a pass that stalled, a poke out that met something, or
+ * a slow bypass is not a lane change but getting out of somebody's way, and at those
+ * speeds the ordinary rate was the danger: its heading ceiling is 0.09 m of lateral per
+ * metre of road, so at walking pace a car took seven seconds to cross back — measured
+ * as long enough to be hit head-on at 8 km/h by traffic doing 70.
+ *
+ * So the return is brisk below `RETURN_BRISK_BELOW_MPS` — up to `RETURN_HEADING_SLOPE`
+ * of lateral per metre and `RETURN_GRIP_SHARE` of the cornering budget, which is a
+ * decisive swerve at those speeds and nowhere near the tyres — and blends into the
+ * ordinary rate by `RETURN_SMOOTH_ABOVE_MPS`. The band ends low on purpose: blended up
+ * to 90 km/h, the return from a finished pass at 70 put the body 0.8 m past its lane,
+ * the edge-stability brake answered that on a loose surface, and the swing grew until
+ * the car left the road (seed 1337 at s 62 040).
+ */
+const RETURN_BRISK_BELOW_MPS = 8;
+const RETURN_SMOOTH_ABOVE_MPS = 16;
+const RETURN_HEADING_SLOPE = 0.3;
+const RETURN_GRIP_SHARE = 0.7;
 
 /**
  * BEING STUCK, and getting out of it.
@@ -1351,6 +1441,7 @@ export class Autopilot {
   private lastOncomingGap = Infinity;
   private lastRearClear = false;
   private lastMayCross = false;
+  private lastCrossingRefused = false;
   private yielding = false;
   private groundlessFor = 0;
   /** Granted by the traffic coordinator to exactly one head of an opposing queue. */
@@ -1627,6 +1718,164 @@ export class Autopilot {
     this.oncomingFieldGap = neighbour.s;
     this.oncomingFieldSpeed = neighbour.speed;
   };
+  /**
+   * THE QUEUE A RACER IS ABOUT TO PASS: every car in its own lane going its way, from
+   * the one level with it to `PASS_QUEUE_LOOK_M` up the road, nearest first, as centres
+   * and speeds in this driver's frame. Rebuilt from the field on every step it matters;
+   * the buffers are kept so that costs no allocation.
+   */
+  private readonly queueCentre: number[] = [];
+  private readonly queueSpeed: number[] = [];
+  private readonly queueHalfLength: number[] = [];
+  private queueLaneOffset = 0;
+  private queueBackLimit = 0;
+  private readonly visitQueue = (neighbour: TrafficNeighbour): void => {
+    if (neighbour.speed < -CRAWL_SPEED_MPS) return;
+    if (Math.abs(neighbour.lateral - this.queueLaneOffset) > neighbour.halfWidth + CAR_HALF_WIDTH_M) {
+      return;
+    }
+    // The field reports the near face. A body overlapping ours is placed as far ahead
+    // as it can be, which is the pessimistic answer for a pass.
+    const halfLength = neighbour.halfLength;
+    const centre = neighbour.s > 0
+      ? neighbour.s + halfLength
+      : neighbour.s < 0 ? neighbour.s - halfLength : halfLength;
+    if (centre + halfLength <= this.queueBackLimit) return;
+    const centres = this.queueCentre;
+    let index = centres.length;
+    centres.push(centre);
+    this.queueSpeed.push(neighbour.speed);
+    this.queueHalfLength.push(halfLength);
+    while (index > 0 && centres[index - 1]! > centre) {
+      centres[index] = centres[index - 1]!;
+      this.queueSpeed[index] = this.queueSpeed[index - 1]!;
+      this.queueHalfLength[index] = this.queueHalfLength[index - 1]!;
+      index--;
+    }
+    centres[index] = centre;
+    this.queueSpeed[index] = neighbour.speed;
+    this.queueHalfLength[index] = halfLength;
+  };
+  /** The racer's measured pass, seconds and metres; see `sizePass`. */
+  private passSecondsValue = Number.POSITIVE_INFINITY;
+  private passTravelValue = 0;
+  /** Last step's road-limited speed: the ceiling a pass is sized against. */
+  private roadLimitValue = Number.POSITIVE_INFINITY;
+  /** Measured share of peak power a flat-out run delivers; see `POWER_SHARE_PRIOR`. */
+  private powerShare = POWER_SHARE_PRIOR;
+  private powerSampleSpeed = -1;
+  /**
+   * HOW LONG THIS PASS REALLY TAKES, AND HOW MUCH ROAD IT USES.
+   *
+   * The car is driven forward in tenth-of-a-second steps on its own acceleration
+   * (`accelerationAt`) up to the speed the road allows, against every car of the queue
+   * moving at its own speed. The pass is over when the tail is `RACER_CUT_IN_M` past a
+   * car's nose AND there is a slot in front of that car it fits — the next car of the
+   * queue still far enough ahead — or nothing further up the road at all. Half a lane
+   * change is added for the body to leave the opposing lane. A pass that finds no slot
+   * within `PASS_MAX_SECONDS` is Infinity: no window, whatever is coming.
+   *
+   * Returns false when nothing in the driver's own lane is going its way, which is not
+   * an overtake and keeps the corridor's own sum for going round stopped things.
+   */
+  private sizePass(
+    vehicle: Vehicle,
+    speed: number,
+    laneOffset: number,
+    grade: number,
+    topSpeed: number,
+    returnSeconds: number,
+  ): boolean {
+    this.queueCentre.length = 0;
+    this.queueSpeed.length = 0;
+    this.queueHalfLength.length = 0;
+    const field = this.trafficField;
+    if (!field) return false;
+    const ownHalfLength = vehicle.modelMeasure.halfExtents[2];
+    this.queueLaneOffset = laneOffset;
+    this.queueBackLimit = -ownHalfLength;
+    field.forEachNear(PASS_QUEUE_LOOK_M, ownHalfLength * 2, this.visitQueue);
+    const count = this.queueCentre.length;
+    if (count === 0) return false;
+    let v = speed;
+    let travel = 0;
+    let seconds = 0;
+    let finished = false;
+    while (seconds < PASS_MAX_SECONDS) {
+      v = v > topSpeed
+        ? Math.max(topSpeed, v - MIN_PLANNED_BRAKE_MPS2 * PASS_SIZING_STEP_S)
+        : Math.min(topSpeed, Math.max(0, v + this.accelerationAt(vehicle, v, grade) * PASS_SIZING_STEP_S));
+      travel += v * PASS_SIZING_STEP_S;
+      seconds += PASS_SIZING_STEP_S;
+      const tail = travel - ownHalfLength - RACER_CUT_IN_M;
+      let cleared = 0;
+      while (
+        cleared < count &&
+        tail >= this.queueCentre[cleared]! + this.queueSpeed[cleared]! * seconds + this.queueHalfLength[cleared]!
+      ) {
+        cleared++;
+      }
+      if (cleared === 0) continue;
+      if (
+        cleared === count ||
+        this.queueCentre[cleared]! + this.queueSpeed[cleared]! * seconds - this.queueHalfLength[cleared]! >=
+          travel + ownHalfLength + RACER_SLOT_M + RACER_SLOT_SECONDS * v
+      ) {
+        finished = true;
+        break;
+      }
+    }
+    this.passSecondsValue = finished ? seconds + returnSeconds : Number.POSITIVE_INFINITY;
+    this.passTravelValue = travel + v * returnSeconds;
+    return true;
+  }
+  /** Straight-line acceleration available at `speed` on `grade`; see `POWER_SHARE_PRIOR`. */
+  private accelerationAt(vehicle: Vehicle, speed: number, grade: number): number {
+    if (!vehicle.engineRunning) return -ROLLING_DECEL_MPS2 - GRAVITY * grade;
+    const mass = vehicle.stats.mass;
+    const drive = Math.min(
+      TRACTION_ACCEL_CAP_MPS2,
+      (this.powerShare * vehicle.stats.engine.peakPowerKw * 1000) / (mass * Math.max(speed, 1)),
+    );
+    return drive - this.resistanceAt(vehicle, speed) - GRAVITY * grade;
+  }
+  private resistanceAt(vehicle: Vehicle, speed: number): number {
+    const dragArea = vehicle.modelDef.dragArea ?? 1;
+    return (HALF_AIR_DENSITY * dragArea * speed * speed) / vehicle.stats.mass + ROLLING_DECEL_MPS2;
+  }
+  /**
+   * One step of full throttle on a straight is one measurement of the power share. Only
+   * where the power, not the tyres, is the limit — below that the traction cap decides
+   * and the step says nothing about the engine.
+   */
+  private updatePowerShare(vehicle: Vehicle, speed: number, grade: number, lateralAccel: number, dt: number): void {
+    const previous = this.powerSampleSpeed;
+    this.powerSampleSpeed = speed;
+    if (previous < 0 || dt <= 0) return;
+    const audio = vehicle.audio;
+    const mass = vehicle.stats.mass;
+    const peakWatts = vehicle.stats.engine.peakPowerKw * 1000;
+    if (
+      audio.throttle < 0.95 ||
+      vehicle.brakeCommand > 0 ||
+      audio.wheelContactFraction < 1 ||
+      speed < POWER_SAMPLE_MIN_SPEED_MPS ||
+      lateralAccel > POWER_SAMPLE_MAX_LATERAL_MPS2 ||
+      (this.powerShare * peakWatts) / (mass * speed) >= TRACTION_ACCEL_CAP_MPS2
+    ) {
+      return;
+    }
+    const measured = (speed - previous) / dt;
+    // A step that is not one step — the first after re-engaging, say — is not a sample.
+    if (Math.abs(measured) > TRACTION_ACCEL_CAP_MPS2 * 2) return;
+    const implied =
+      ((measured + this.resistanceAt(vehicle, speed) + GRAVITY * grade) * mass * speed) / peakWatts;
+    this.powerShare = clamp(
+      this.powerShare + (implied - this.powerShare) * Math.min(1, dt / POWER_SHARE_TAU_S),
+      POWER_SHARE_MIN,
+      POWER_SHARE_MAX,
+    );
+  }
   /** Supplies the coordinator's road-frame view of the other traffic; see `TrafficField`. */
   setTrafficField(field: TrafficField | null): void {
     this.trafficField = field;
@@ -1757,6 +2006,15 @@ export class Autopilot {
     headOn: boolean,
     /** Outermost line the road allows HERE. A latched one was planned somewhere else. */
     edgeLimit: number,
+    /**
+     * How far back a racer starts a pass the planner has already approved: from where
+     * a follower would begin to brake, not from the leader's bumper. Carrying its own
+     * speed out is the whole of a momentum pass; measured on seed 545124, waiting for
+     * the ordinary trigger turned an approach at 90 km/h on a car doing 57, with the
+     * opposing lane empty, into two hundred metres of braking to its speed first. Zero
+     * keeps the trigger the move itself decides.
+     */
+    passReach: number,
   ): number {
     // COMING HOME IS A MANOEUVRE TOO, so it goes through the search rather than round it.
     //
@@ -1812,6 +2070,7 @@ export class Autopilot {
     const manoeuvreClosing = Math.max(speed - Math.max(0, laneBlockSpeed), MIN_CLOSING_MPS);
     const manoeuvreRoom = Math.max(
       DETOUR_TRIGGER_FLOOR_M,
+      passReach,
       manoeuvreClosing * 2 * Math.sqrt(manoeuvreShift / Math.max(lineAccel, 1e-3)) +
         CAR_HALF_LENGTH_M * 2,
     );
@@ -1880,7 +2139,8 @@ export class Autopilot {
       // and each flicker was a fresh crossing, a fresh commitment and a fresh
       // indicator. Measured on the overtake bench: eighty indicator changes in one
       // manoeuvre where the driver should have signalled twice.
-      this.crossingBarredUntil = this.travelled + CROSSING_RETRY_METRES;
+      this.crossingBarredUntil =
+        this.travelled + (MODES[this.modeValue].racer ? RACER_CROSSING_RETRY_M : CROSSING_RETRY_METRES);
       return held;
     }
     // COMING BACK IS "THE LANE I LEFT IS NO LONGER HOLDING ME UP", NOT "IT IS EMPTY
@@ -2271,6 +2531,13 @@ export class Autopilot {
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
     const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
     const forwardSpeed = velocity.x * forwardX + velocity.z * forwardZ;
+    this.updatePowerShare(
+      vehicle,
+      speed,
+      currentRoad.grade,
+      Math.abs(vehicle.chassis.angvel().y) * speed,
+      dt,
+    );
     let pedestrianGap = Infinity;
     let pedestrianLateral = 0;
     let pedestrianSpeed = 0;
@@ -2733,13 +3000,19 @@ export class Autopilot {
       moveRoom > 0.5 && moveRoom < Number.POSITIVE_INFINITY
         ? (4 * LANE_SHIFT_REFERENCE_M * moveClosing * moveClosing) / (moveRoom * moveRoom)
         : 0;
-    const lineAccel = this.corridorFeasible
-      ? clamp(
+    // A racer does not ease out to pass: a pass is taken at the manoeuvre's own share of
+    // the tyres. Eased, a pass begun from the tail of a car doing nearly the same speed
+    // asked for 0.6 m/s² and spent four and a half seconds straddling the crown before
+    // it was out — measured on seed 545124. Going round something STANDING keeps the
+    // gentle rate: the rate is also what the planner sizes the speed of a bypass on
+    // (`manoeuvreSpeed`), and a brisker one only means taking the loose verge faster.
+    const lineAccel = (config.racer && passUrge) || !this.corridorFeasible
+      ? manoeuvreLateralAccel
+      : clamp(
           neededLateralAccel,
           Math.min(manoeuvreLateralAccel, LANE_CHANGE_LATERAL_ACCEL),
           manoeuvreLateralAccel,
-        )
-      : manoeuvreLateralAccel;
+        );
     /**
      * AND WHETHER IT IS ENTITLED TO LEAVE ITS LANE AT ALL. See `lateralFreedom`.
      *
@@ -2828,6 +3101,24 @@ export class Autopilot {
     // the full design figure: the gate below still prices the oncoming traffic it can
     // actually see, and asking for a textbook 580 m on a road whose corners are 90 m
     // would simply forbid overtaking everywhere.
+    //
+    // …EXCEPT FOR THE RACER, which sizes its own pass (`ModeConfig.racer`). The stream
+    // tells it where every car is, crest or no crest, so it needs neither the textbook
+    // sight nor the six-second commitment: only the road its own pass will use, plus a
+    // return, clear of props. It is sized while the driver is held up or already out
+    // there, because a pass under way is re-measured every step — see the corridor.
+    const passSized =
+      config.racer &&
+      lanesPerSide === 1 &&
+      (passUrge || this.planUsesOncomingLane) &&
+      this.sizePass(
+        vehicle,
+        speed,
+        ownLaneOffset,
+        currentRoad.grade,
+        Math.min(this.roadLimitValue, crossingSpeed),
+        Math.sqrt(LANE_SHIFT_REFERENCE_M / Math.max(lineAccel, 1e-3)),
+      );
     const mayCrossCrown =
       this.passingEnabled &&
       lanesPerSide === 1 &&
@@ -2835,8 +3126,16 @@ export class Autopilot {
       (config.overtakes || stillBlocker) &&
       (stillBlocker ||
         !this.corridorFeasible ||
-        (this.crossingLineClear(oncomingLine, 0, crossingCommitM) &&
-          this.road.sightDistanceAt(this.hintS, crossingCommitM) >= crossingCommitM));
+        (config.racer
+          ? this.crossingLineClear(
+              oncomingLine,
+              0,
+              passSized && Number.isFinite(this.passSecondsValue)
+                ? this.passTravelValue + RACER_CROSSING_CLEAR_M
+                : crossingCommitM,
+            )
+          : this.crossingLineClear(oncomingLine, 0, crossingCommitM) &&
+            this.road.sightDistanceAt(this.hintS, crossingCommitM) >= crossingCommitM));
     if (mayCrossCrown) this.laneCentres.push(oncomingLine);
     // HOW FAR AWAY IS SOMETHING COMING THE OTHER WAY, AND HOW FAST IS IT REALLY?
     //
@@ -2877,6 +3176,14 @@ export class Autopilot {
     // crown finds a stationary bumper within twenty metres, and the crossing that
     // would clear the obstruction is refused on both sides for good. Measured on the
     // real road: a four-minute standstill with the way past open the whole time.
+    //
+    // Nor, for a racer, is a car that has just gone PAST us the other way: it is behind
+    // us in that lane and leaving at its own speed plus ours. Read by magnitude, the
+    // tail of every oncoming car closed the crown for another second after it had gone,
+    // which is the exact second a window behind it opens — measured on seed 545124 as a
+    // racer refused the lane behind car after car of a steady oncoming stream. The
+    // careful drivers keep the magnitude: their windows are sized on a kickdown they may
+    // not have, and that second is margin they spend.
     const rearProbe = this.laneProbe(
       vehicle,
       oncomingLine,
@@ -2886,7 +3193,8 @@ export class Autopilot {
       -1,
     );
     const crossingRearClear =
-      rearProbe >= ONCOMING_REAR_GAP_M || Math.abs(this.probeHitSpeed) <= CRAWL_SPEED_MPS;
+      rearProbe >= ONCOMING_REAR_GAP_M ||
+      (config.racer ? this.probeHitSpeed : Math.abs(this.probeHitSpeed)) <= CRAWL_SPEED_MPS;
     this.lastOncomingGap = crossingOncomingGap;
     this.lastRearClear = crossingRearClear;
     this.lastMayCross = mayCrossCrown;
@@ -2930,6 +3238,10 @@ export class Autopilot {
       // in the real-road bench was this, in both directions at once.
       manoeuvreFloorSpeed: AVOIDANCE_CRAWL_MPS,
       crossingSpeed,
+      // The racer's own pass, measured on its own car; see `sizePass`.
+      passSeconds: passSized ? this.passSecondsValue : undefined,
+      passTravel: this.passTravelValue,
+      passMarginS: RACER_PASS_MARGIN_S,
       // Nothing already coming up the opposing lane behind us: the search only ever
       // looks forward, so this is the one rearward fact it needs.
       crossingRearClear: crossingRearClear,
@@ -2937,6 +3249,7 @@ export class Autopilot {
       obstacles,
     };
     const proposal = planCorridor(corridorRequest);
+    this.lastCrossingRefused = proposal.crossingRefused;
     // EVERYBODY SEES THE LOG, NOT ONLY THE LANE IT IS LYING IN.
     //
     // Indexed hazards are in the ROAD frame, so a driver in the clear lane already
@@ -2997,9 +3310,12 @@ export class Autopilot {
       desiredSpeed,
       speed,
       lineAccel,
-      proposal.crossingRefused || !mayCrossCrown,
+      proposal.crossingRefused || proposal.crossingAbandoned || !mayCrossCrown,
       headOn,
       staticAvoidLine,
+      config.racer && passUrge
+        ? PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS)
+        : 0,
     );
     // An escape that has already failed here is allowed off the asphalt, a rung at a
     // time: the ordinary clamp is the asphalt, which is also the width the thing it
@@ -3170,9 +3486,10 @@ export class Autopilot {
     const indicatorDelta = desiredLine - projection.lateral;
     const indicatorOn = vehicle.indicator !== 'off';
     const threshold = indicatorOn ? INDICATOR_RELEASE_M : INDICATOR_DEADBAND_M;
-    // A car on its racing line is not changing lanes, however far it moves across.
+    // A car on its racing line is not changing lanes, however far it moves across; and
+    // a racer tells nobody anything.
     vehicle.setIndicator(
-      this.racingActive || Math.abs(indicatorDelta) < threshold
+      config.racer || this.racingActive || Math.abs(indicatorDelta) < threshold
         ? 'off'
         : indicatorDelta > 0
           ? 'left'
@@ -3221,15 +3538,34 @@ export class Autopilot {
     const onWrongSide =
       projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     const lineError = desiredLine - this.appliedLateral;
+    // GIVING THE OPPOSING LANE BACK (see `RETURN_BRISK_BELOW_MPS`): the line or the body
+    // is past the crown and the line is on its way home.
+    const ownSign = Math.sign(ownLaneOffset || -1);
+    const comingHome =
+      (onWrongSide || this.appliedLateral * ownSign < 0) && lineError * ownSign > 0;
+    const smoothReturn = clamp(
+      (speed - RETURN_BRISK_BELOW_MPS) / (RETURN_SMOOTH_ABOVE_MPS - RETURN_BRISK_BELOW_MPS),
+      0,
+      1,
+    );
+    const slewAccel = comingHome
+      ? Math.max(
+          lineAccel,
+          currentLateralAccel * RETURN_GRIP_SHARE * (1 - smoothReturn) + lineAccel * smoothReturn,
+        )
+      : lineAccel;
+    const headingCeiling = comingHome
+      ? RETURN_HEADING_SLOPE + (LINE_SHIFT_PER_METRE - RETURN_HEADING_SLOPE) * smoothReturn
+      : LINE_SHIFT_PER_METRE;
     const lineRateCeiling = Math.max(
-      LINE_SHIFT_PER_METRE * speed,
+      headingCeiling * speed,
       LINE_SLEW_AT_REST_MPS,
       onWrongSide && headOn ? LINE_SLEW_ESCAPE_MPS : 0,
     );
     const lineRateTarget =
       Math.sign(lineError) *
-      Math.min(lineRateCeiling, Math.sqrt(2 * lineAccel * Math.abs(lineError)));
-    const lineRateStep = lineAccel * Math.max(dt, 0);
+      Math.min(lineRateCeiling, Math.sqrt(2 * slewAccel * Math.abs(lineError)));
+    const lineRateStep = slewAccel * Math.max(dt, 0);
     this.lineSlewRate += clamp(lineRateTarget - this.lineSlewRate, -lineRateStep, lineRateStep);
     // Never past the line: the braking curve above is what makes that possible, and
     // this is what makes a target that jumps to the other side stop the line rather
@@ -3348,7 +3684,10 @@ export class Autopilot {
     // there; spending it on the APPROACH as well simply arrives at the back of a queue
     // 4 m/s faster, and the rear-end that follows is what launched bodies below the
     // road in the real-road bench — 65 km/h into a car doing 3.
+    // A crossing the planner has given up (`crossingAbandoned`) is not a pass any more,
+    // and gets no kickdown: see the drop-back below.
     const usingPassingLine = plan.admissible &&
+      !plan.crossingAbandoned &&
       Math.abs(plan.line - ownLaneOffset) >= DETOUR_MIN_M &&
       (plan.usesOncomingLane || (passAttempt && !plan.usesShoulder));
     const clearRoadSpeed = usingPassingLine ? crossingSpeed : desiredSpeed;
@@ -3489,11 +3828,33 @@ export class Autopilot {
     // the pedal section can tell braking for an obstacle from braking for a bend: they
     // are capped differently, and only the former was locking fronts on loose surfaces.
     const roadLimitSpeed = targetSpeed;
-    // The speed the way round the obstruction can actually be taken at, and the speed
-    // that lets the car beside us come across. Both are braking for something in the
-    // way, so they belong on THIS side of `roadLimitSpeed`: the pedal that serves them
-    // is the capped obstacle brake, not the mode's full ceiling for a bend.
-    targetSpeed = Math.min(targetSpeed, plan.manoeuvreSpeed, mergeYieldSpeed);
+    this.roadLimitValue = roadLimitSpeed;
+    // A PASS GIVEN UP IS GIVEN UP BEHIND THE CAR IT WAS PASSING.
+    //
+    // While that car is still level the way home is vetoed (the abeam rule), and the
+    // crossing line is the only admissible one — so without this the speed plan drove
+    // it at the pass's own pace, alongside, until the car coming the other way arrived.
+    // Dropping a little under its speed opens the lane behind it in a second or two,
+    // and the planner takes it the moment it opens.
+    let dropBackSpeed = Number.POSITIVE_INFINITY;
+    if (plan.crossingAbandoned) {
+      for (const obstacle of obstacles) {
+        if (!obstacle.abeam || obstacle.trailing || obstacle.speed <= CRAWL_SPEED_MPS) continue;
+        if (Math.abs(obstacle.lateral - ownLaneOffset) >= obstacle.halfWidth + CAR_HALF_WIDTH_M) continue;
+        dropBackSpeed = Math.min(dropBackSpeed, obstacle.speed - ABANDON_DROP_BACK_MPS);
+      }
+    }
+    // The speed the way round the obstruction can actually be taken at, the speed that
+    // lets the car beside us come across, and the drop-back. All are braking for
+    // something in the way, so they belong on THIS side of `roadLimitSpeed`: the pedal
+    // that serves them is the capped obstacle brake, not the mode's full ceiling for a
+    // bend.
+    targetSpeed = Math.min(
+      targetSpeed,
+      plan.manoeuvreSpeed,
+      mergeYieldSpeed,
+      Math.max(AVOIDANCE_CRAWL_MPS, dropBackSpeed),
+    );
     // One question now: what is in the corridor this car is actually going to
     // occupy? A stone the corridor passes is scenery. A car in it is followed. A
     // stopped thing in it is braked to a crawl and then gone round — and once the
