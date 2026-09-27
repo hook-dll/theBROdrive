@@ -9,7 +9,9 @@
  * and it moves. From the bonnet seat all of it arrives through a CABIN: a steel shell
  * that takes the top off everything outside (low-pass), booms at its own low
  * resonance, and makes the engine bay — a firewall away — louder relative to the
- * exhaust than it is from the street.
+ * exhaust than it is from the street. Outside, the car stands on a road with verges,
+ * a ditch and a body of its own, and a few early reflections off them are what put
+ * it in the air instead of inside the listener's head.
  *
  * VOICES
  *  - Engine: the per-firing worklet (engine-worklet.ts), tailpipe and bay separately.
@@ -143,6 +145,10 @@ const GEAR_WHINE: Record<string, number> = { R: 1, N: 0, '1': 0.55, '2': 0.34, '
 const CABIN_LP_HZ = 2300;
 const OUTSIDE_LP_HZ = 16000;
 const CABIN_BOOM_DB = 5;
+/** Early reflections off the road, verges and body, heard from outside only. */
+/** Reflection level against the direct sound: about -8 dB, a car in the open. */
+const SPACE_SEND = 0.4;
+const SPACE_SECONDS = 0.22;
 
 /**
  * Cooling metal. `exhaustHeat` (0..1) is how much heat the pipes hold: it builds over
@@ -170,6 +176,7 @@ export class VehicleAudio {
   private readonly out: GainNode;
   private readonly cabinLowpass: BiquadFilterNode;
   private readonly cabinBoom: BiquadFilterNode;
+  private readonly spaceSend: GainNode;
   private readonly nose: PannerNode;
   private readonly body: PannerNode;
   private readonly tail: PannerNode;
@@ -229,6 +236,10 @@ export class VehicleAudio {
   private nextCrackM = 8;
   private lastBumpAt = 0;
   private gustPhase = Math.random() * 100;
+  /** Road texture under the tyres: no stretch of tarmac is as coarse as the last. */
+  private texture = 1;
+  private textureTarget = 1;
+  private textureLeftM = 10;
   private squealWander = 0;
 
   constructor(private readonly mixer: AudioMixer) {
@@ -246,7 +257,13 @@ export class VehicleAudio {
     this.cabinBoom.frequency.value = 78;
     this.cabinBoom.Q.value = 1.1;
     this.cabinBoom.gain.value = 0;
-    this.out.connect(this.cabinLowpass).connect(this.cabinBoom).connect(mixer.sfx);
+    this.out.connect(this.cabinLowpass).connect(this.cabinBoom).connect(mixer.car);
+    this.spaceSend = ctx.createGain();
+    this.spaceSend.gain.value = SPACE_SEND;
+    const space = ctx.createConvolver();
+    space.normalize = false;
+    space.buffer = this.buildSpaceImpulse();
+    this.out.connect(this.spaceSend).connect(space).connect(mixer.car);
 
     const panner = (): PannerNode => {
       const p = new PannerNode(ctx, {
@@ -482,6 +499,53 @@ export class VehicleAudio {
     const cabin = perspective === 'cabin';
     this.cabinLowpass.frequency.setTargetAtTime(cabin ? CABIN_LP_HZ : OUTSIDE_LP_HZ, now, 0.08);
     this.cabinBoom.gain.setTargetAtTime(cabin ? CABIN_BOOM_DB : 0, now, 0.08);
+    this.spaceSend.gain.setTargetAtTime(cabin ? 0 : SPACE_SEND, now, 0.08);
+  }
+
+  /**
+   * A car on an open road: the tarmac under it answers within a few milliseconds, the
+   * verges and ditch banks within a few tens, darker each time, and a thin diffuse
+   * tail follows. Left and right are different surfaces, so they are independent.
+   */
+  private buildSpaceImpulse(): AudioBuffer {
+    const ctx = this.mixer.ctx;
+    const sr = ctx.sampleRate;
+    const length = Math.floor(sr * SPACE_SECONDS);
+    const buffer = ctx.createBuffer(2, length, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch);
+      let seed = 0x2545f491 + ch * 0x9e3779b9;
+      const rand = (): number => {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        return ((seed >>> 0) / 0xffffffff) * 2 - 1;
+      };
+      // Discrete early reflections, each a short smeared blob rather than a click.
+      const taps = 9;
+      for (let r = 0; r < taps; r++) {
+        const at = 0.003 + (r / taps) ** 1.4 * 0.06 + rand() * 0.002;
+        const level = 0.55 * Math.exp(-at / 0.03) * (0.6 + 0.4 * Math.abs(rand()));
+        const start = Math.floor(at * sr);
+        const smear = Math.floor(sr * (0.0006 + 0.0012 * (r / taps)));
+        for (let i = 0; i < smear * 3 && start + i < length; i++) {
+          data[start + i] = data[start + i]! + level * Math.exp(-i / smear) * (i === 0 ? 1 : rand() * 0.6);
+        }
+      }
+      // Diffuse tail, darkening as it goes.
+      let lp = 0;
+      for (let i = Math.floor(sr * 0.02); i < length; i++) {
+        const t = i / sr;
+        lp += (rand() - lp) * (0.5 * Math.exp(-t * 18) + 0.08);
+        data[i] = data[i]! + lp * 0.1 * Math.exp(-t / 0.045) * Math.min(1, (t - 0.02) / 0.01);
+      }
+      // Unit energy, so SPACE_SEND alone says how loud the reflections are.
+      let energy = 0;
+      for (let i = 0; i < length; i++) energy += data[i]! * data[i]!;
+      const norm = 1 / Math.sqrt(energy || 1);
+      for (let i = 0; i < length; i++) data[i] = data[i]! * norm;
+    }
+    return buffer;
   }
 
   /** One update per rendered frame. */
@@ -541,14 +605,22 @@ export class VehicleAudio {
     const contact = state.wheelContactFraction;
     const rough = clamp01(state.surfaceRoughness / ROUGHNESS_FULL);
     const rollT = clamp01(speed / TYRE_FULL_MPS);
+    // A new patch of surface every few to few tens of metres: a shade coarser or
+    // smoother, gliding in as the tyres roll onto it.
+    this.textureLeftM -= speed * dt;
+    if (this.textureLeftM <= 0) {
+      this.textureLeftM = 4 + Math.random() * 26;
+      this.textureTarget = 0.72 + Math.random() * 0.56;
+    }
+    this.texture += (this.textureTarget - this.texture) * clamp01((speed * dt) / 3);
     ramp(
       this.roarGain.gain,
-      TYRE_GAIN * 0.9 * rollT ** 1.3 * voice.roar * (0.7 + 0.6 * rough) * contact * (cabin ? 1.3 : 1),
+      TYRE_GAIN * 0.9 * rollT ** 1.3 * voice.roar * (0.7 + 0.6 * rough) * contact * (cabin ? 1.3 : 1) * this.texture,
       now,
       0.09,
     );
-    this.hissFilter.frequency.setTargetAtTime(voice.hissHz * (0.8 + 0.4 * rollT), now, 0.1);
-    ramp(this.hissGain.gain, TYRE_GAIN * 0.8 * rollT * rollT * voice.hiss * contact, now, 0.09);
+    this.hissFilter.frequency.setTargetAtTime(voice.hissHz * (0.8 + 0.4 * rollT) * (0.9 + 0.1 * this.texture), now, 0.1);
+    ramp(this.hissGain.gain, TYRE_GAIN * 0.8 * rollT * rollT * voice.hiss * contact * (0.6 + 0.4 * this.texture), now, 0.09);
     // Grain density and brightness both follow speed: the stones come faster.
     // Played slower than recorded, the grains are longer and duller as well as fewer.
     this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);

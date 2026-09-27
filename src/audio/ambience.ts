@@ -81,7 +81,7 @@ export class Ambience {
     const ctx = mixer.ctx;
     const master = ctx.createGain();
     master.gain.value = AMBIENCE_GAIN;
-    master.connect(mixer.sfx);
+    master.connect(mixer.world);
 
     this.world = ctx.createGain();
     this.worldLowpass = ctx.createBiquadFilter();

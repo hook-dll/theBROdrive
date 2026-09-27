@@ -44,7 +44,7 @@ export class TrafficAudio {
     const ctx = mixer.ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 0;
-    this.out.connect(mixer.sfx);
+    this.out.connect(mixer.world);
 
     this.panner = new PannerNode(ctx, {
       panningModel: 'HRTF',

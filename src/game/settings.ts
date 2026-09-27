@@ -363,6 +363,16 @@ export interface Settings {
    * station mastered it and balancing it against the car is a taste decision.
    */
   masterVolume: number;
+  /**
+   * Share of the game sound given to the car being driven (engine, tyres, wind over
+   * the body, its knocks and clunks), 0..1. Scaled by `masterVolume`.
+   */
+  carVolume: number;
+  /**
+   * Share of the game sound given to the world (air, weather, thunder, animals,
+   * other traffic), 0..1. Scaled by `masterVolume`.
+   */
+  worldVolume: number;
   /** Car-radio volume, 0..1. */
   radioVolume: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
@@ -434,6 +444,9 @@ export const DEFAULT_POI_SPACING_METRES = GAMEPLAY_CONFIG.poiSpacingMetres;
 
 export const DEFAULT_MASTER_VOLUME = GAMEPLAY_CONFIG.defaultMasterVolume;
 export const DEFAULT_RADIO_VOLUME = GAMEPLAY_CONFIG.defaultRadioVolume;
+/** The mix is balanced at full share; the two sliders only ever take away. */
+export const DEFAULT_CAR_VOLUME = 1;
+export const DEFAULT_WORLD_VOLUME = 1;
 export const DEFAULT_INK_STRENGTH = GAMEPLAY_CONFIG.defaultInkStrength;
 export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity;
 export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
@@ -468,6 +481,8 @@ export const DEFAULT_SETTINGS: Settings = {
   poiSpacingMetres: DEFAULT_POI_SPACING_METRES,
   mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
   masterVolume: DEFAULT_MASTER_VOLUME,
+  carVolume: DEFAULT_CAR_VOLUME,
+  worldVolume: DEFAULT_WORLD_VOLUME,
   radioVolume: DEFAULT_RADIO_VOLUME,
   // Absent entries mean "use the default binding", so the empty record is the
   // correct default: it can never diverge from BINDABLE_ACTIONS. Shared by
@@ -566,6 +581,8 @@ export function sanitizeSettings(raw: unknown): Settings {
       ) * POI_SPACING_STEP_METRES,
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
+    carVolume: unitInterval(obj.carVolume, DEFAULT_CAR_VOLUME),
+    worldVolume: unitInterval(obj.worldVolume, DEFAULT_WORLD_VOLUME),
     radioVolume: unitInterval(obj.radioVolume, DEFAULT_RADIO_VOLUME),
     keyBindings: {},
     // Anything unrecognised is standard, so an old save (which has no such field)

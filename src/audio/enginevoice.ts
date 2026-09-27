@@ -72,8 +72,10 @@ export class EngineVoice {
     p.running.setValueAtTime(state.engineRunning ? 1 : 0, now);
     p.pitch.setTargetAtTime(pitch, now, 0.05);
     p.destroyed.setValueAtTime(state.engineDestroyed ? 1 : 0, now);
-    p.idleRpm.setValueAtTime(state.idleRpm, now);
-    p.redlineRpm.setValueAtTime(state.redlineRpm, now);
+    // A car with no engine fitted reports a redline of 1; keep the params in range
+    // rather than have the browser warn about it every frame.
+    p.idleRpm.setValueAtTime(Math.min(5000, Math.max(0, state.idleRpm)), now);
+    p.redlineRpm.setValueAtTime(Math.min(12000, Math.max(100, state.redlineRpm)), now);
   }
 
   /** Runs the starter and the first catching cycles. */

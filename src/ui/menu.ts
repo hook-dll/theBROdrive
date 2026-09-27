@@ -140,6 +140,8 @@ const ICONS: Record<string, readonly string[]> = {
   evening: ['M15 15a3 3 0 1 0-6 0', 'M3 18h18', 'M12 10V7M10.5 8.5 12 10l1.5-1.5'],
   midnight: ['M15 3a8 8 0 1 0 5.6 9.6A6.4 6.4 0 0 1 15 3z'],
   clock: ['M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z', 'M12 7.5V12l3 2'],
+  /** Hills under a sun, for the world's own sound. */
+  world: ['M2 19l6-7 4 4 3-3 7 6z', 'M17.5 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0z'],
   radio: ['M3 10h18v9H3z', 'M8 6.5l9-2.5', 'M7 14h4', 'M17 14h.01'],
   /** A bouncing wave, for the Yaris-mode toggle. */
   bounce: ['M3 18c2-8 4-8 6 0s4-8 6 0 4-8 6 0'],
@@ -515,6 +517,8 @@ export class MainMenu {
         poiSpacingMetres: base.poiSpacingMetres,
         mouseSensitivity: base.mouseSensitivity,
         masterVolume: base.masterVolume,
+        carVolume: base.carVolume,
+        worldVolume: base.worldVolume,
         radioVolume: base.radioVolume,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
@@ -533,6 +537,8 @@ export class MainMenu {
           poiSpacingMetres: settings.poiSpacingMetres,
           mouseSensitivity: settings.mouseSensitivity,
           masterVolume: settings.masterVolume,
+          carVolume: settings.carVolume,
+          worldVolume: settings.worldVolume,
           radioVolume: settings.radioVolume,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
@@ -1359,7 +1365,7 @@ export class MainMenu {
             sliderField(
               'Game Sound',
               'sound',
-              'Engine, wind, tyres and foley. The radio has its own.',
+              'Everything the game makes: the car, the world and your own footsteps. The radio has its own.',
               0,
               1,
               0.01,
@@ -1367,6 +1373,32 @@ export class MainMenu {
               (value) => `${Math.round(value * 100)}%`,
               (value) => {
                 settings.masterVolume = value;
+              },
+            ),
+            sliderField(
+              'Car',
+              'drive',
+              'Your car: engine, gearbox, tyres, wind over the body, knocks and clunks.',
+              0,
+              1,
+              0.01,
+              () => settings.carVolume,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.carVolume = value;
+              },
+            ),
+            sliderField(
+              'World',
+              'world',
+              'Everything around you: air, rain, thunder, birds and insects, other traffic.',
+              0,
+              1,
+              0.01,
+              () => settings.worldVolume,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.worldVolume = value;
               },
             ),
             sliderField(

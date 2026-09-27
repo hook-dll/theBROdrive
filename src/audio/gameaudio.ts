@@ -60,6 +60,7 @@ export class GameAudio {
 
   applySettings(settings: Settings): void {
     this.mixer.setVolume(settings.masterVolume);
+    this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume);
     this.radioVolume = settings.radioVolume;
     for (const radio of this.radios.values()) radio.setVolume(this.radioVolume);
   }

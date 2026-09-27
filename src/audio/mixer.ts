@@ -51,6 +51,10 @@ export class AudioMixer {
   readonly ctx: AudioContext;
   /** Procedural game audio (engine, wind, tyres, foley). The radio bypasses this. */
   readonly sfx: GainNode;
+  /** The car being driven. Its own share of `sfx`, set by the Car volume. */
+  readonly car: GainNode;
+  /** Air, weather, animals and other traffic. Its own share, set by the World volume. */
+  readonly world: GainNode;
   /**
    * Send into the shared world reverb. Voices that happen OUT in the world (thunder,
    * a gunshot, a crash, a bird) send a little here; the car's own drone does not.
@@ -85,6 +89,10 @@ export class AudioMixer {
     this.sfx = this.ctx.createGain();
     this.sfx.gain.value = 1;
     this.sfx.connect(this.master);
+    this.car = this.ctx.createGain();
+    this.car.connect(this.sfx);
+    this.world = this.ctx.createGain();
+    this.world.connect(this.sfx);
 
     this.reverb = this.ctx.createGain();
     this.reverb.gain.value = 1;
@@ -93,7 +101,8 @@ export class AudioMixer {
     convolver.buffer = this.buildReverbImpulse();
     const reverbReturn = this.ctx.createGain();
     reverbReturn.gain.value = 0.55;
-    this.reverb.connect(convolver).connect(reverbReturn).connect(this.sfx);
+    // The reverb is the open country itself, so it answers to the World volume.
+    this.reverb.connect(convolver).connect(reverbReturn).connect(this.world);
 
     void this.ctx.audioWorklet
       .addModule(engineWorkletUrl)
@@ -139,6 +148,15 @@ export class AudioMixer {
   setVolume(volume: number): void {
     this.volume = Math.min(1, Math.max(0, volume));
     this.applyMasterGain();
+  }
+
+  /** 0..1 shares of the car and of the world within the game sound. */
+  setBusVolumes(car: number, world: number): void {
+    if (this.disposed) return;
+    const clamp = (v: number): number => Math.min(1, Math.max(0, v));
+    // Squared: a slider feels even in loudness, not in amplitude.
+    this.car.gain.setTargetAtTime(clamp(car) ** 2, this.now, MASTER_RAMP);
+    this.world.gain.setTargetAtTime(clamp(world) ** 2, this.now, MASTER_RAMP);
   }
 
   /** Silences the graph while the pause menu is up, without tearing voices down. */
