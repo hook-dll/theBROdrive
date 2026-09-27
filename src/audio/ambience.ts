@@ -161,21 +161,29 @@ export class Ambience {
     this.cricketGain = ctx.createGain();
     this.cricketGain.gain.value = 0;
     this.cricketGain.connect(this.world);
-    const crickets: [number, number, number][] = [
-      [4300, 0.47, -0.7],
-      [4650, 0.61, 0.15],
-      [4050, 0.53, 0.8],
+    // A meadow, not a transformer: a few singers at different distances, each with
+    // its own pitch, tempo and bouts of silence. The far ones are quiet and mostly
+    // reverb, so the near one or two carry the rhythm and the rest is space.
+    const cricketSend = ctx.createGain();
+    cricketSend.gain.value = 0.45;
+    this.cricketGain.connect(cricketSend).connect(mixer.reverb);
+    const crickets: [carrier: number, period: number, pan: number, level: number][] = [
+      [3900, 0.52, -0.55, 1],
+      [4250, 0.66, 0.4, 0.7],
+      [3650, 0.58, 0.85, 0.4],
+      [4100, 0.74, -0.9, 0.3],
+      [3500, 0.61, 0.1, 0.22],
     ];
-    crickets.forEach(([carrier, period, pan], i) => {
+    crickets.forEach(([carrier, period, pan, gain], i) => {
       const src = ctx.createBufferSource();
       src.buffer = this.cricketBuffer(carrier, period, 0x3c6ef372 + i * 977);
       src.loop = true;
-      src.playbackRate.value = 0.97 + Math.random() * 0.06;
+      src.playbackRate.value = 0.98 + Math.random() * 0.04;
       const panner = new StereoPannerNode(ctx, { pan });
       const level = ctx.createGain();
-      level.gain.value = 0.6 + 0.4 * Math.random();
+      level.gain.value = gain * (0.85 + 0.3 * Math.random());
       src.connect(level).connect(panner).connect(this.cricketGain);
-      src.start(0, Math.random() * 2);
+      src.start(0, Math.random() * 10);
       this.sources.push(src);
     });
 
@@ -238,7 +246,7 @@ export class Ambience {
     // Animals go quiet in rain and hard wind.
     const shelter = (1 - clamp01(rain * 2)) * (1 - clamp01((windT - 0.35) * 2));
     const night = 1 - clamp01(f.dayFactor * 1.6);
-    ramp(this.cricketGain.gain, WILDLIFE_GAIN * 0.05 * night * shelter, now, 1.5);
+    ramp(this.cricketGain.gain, WILDLIFE_GAIN * 0.032 * night * shelter, now, 1.5);
     const hot = clamp01((f.dayFactor - 0.6) * 2.5) * (0.35 + 0.65 * f.heat);
     ramp(this.cicadaGain.gain, WILDLIFE_GAIN * 0.035 * hot * shelter, now, 1.5);
 
@@ -437,13 +445,17 @@ export class Ambience {
   }
 
   /**
-   * A field cricket: a carrier near 4.5 kHz switched on in pulses of ~15 ms, three
-   * or four to a chirp, one chirp every `period` seconds, rendered to a loop.
+   * A field cricket: three or four syllables of ~15 ms, one chirp every `period`
+   * seconds, sung in bouts with pauses between. Each syllable is a tone near 4 kHz
+   * that glides down a little as the wing's file runs out, with its own level and
+   * timing error — a steady, identical pulse train is what an electric hum is.
+   * Rendered at a low sample rate (the song has nothing above 5 kHz) to keep a long,
+   * non-repeating loop cheap.
    */
   private cricketBuffer(carrier: number, period: number, seed: number): AudioBuffer {
-    const sr = this.mixer.ctx.sampleRate;
-    const chirps = 4;
-    const length = Math.floor(sr * period * chirps);
+    const sr = 22050;
+    const seconds = 17 + (seed % 7);
+    const length = Math.floor(sr * seconds);
     const buffer = this.mixer.ctx.createBuffer(1, length, sr);
     const data = buffer.getChannelData(0);
     let s = seed >>> 0;
@@ -453,17 +465,37 @@ export class Ambience {
       s ^= s << 5;
       return (s >>> 0) / 0xffffffff;
     };
-    for (let c = 0; c < chirps; c++) {
-      const start = Math.floor(sr * (c * period + rand() * 0.03));
-      const pulses = 3 + (rand() < 0.4 ? 1 : 0);
-      for (let p = 0; p < pulses; p++) {
-        const pStart = start + Math.floor(sr * p * 0.034);
-        const pLen = Math.floor(sr * 0.016);
-        for (let i = 0; i < pLen && pStart + i < length; i++) {
-          const env = Math.sin((Math.PI * i) / pLen) ** 2;
-          data[pStart + i] = Math.sin((2 * Math.PI * carrier * i) / sr) * env * 0.8;
+    let t = rand() * 1.5;
+    while (t < seconds - 1) {
+      // A bout: a few seconds of song, the tempo drifting, then a rest.
+      const boutEnd = Math.min(seconds - 1, t + 3 + rand() * 6);
+      const tempo = period * (0.92 + 0.16 * rand());
+      const pitch = carrier * (0.98 + 0.04 * rand());
+      let boutLevel = 0.25;
+      while (t < boutEnd) {
+        // Starts soft and settles into the song.
+        boutLevel = Math.min(1, boutLevel + 0.25);
+        const syllables = 3 + (rand() < 0.35 ? 1 : 0);
+        let at = t;
+        for (let p = 0; p < syllables; p++) {
+          const len = 0.013 + 0.004 * rand();
+          const start = Math.floor(sr * at);
+          const n = Math.floor(sr * len);
+          const amp = boutLevel * (0.65 + 0.35 * rand()) * (p === syllables - 1 ? 0.75 : 1);
+          let phase = 0;
+          for (let i = 0; i < n && start + i < length; i++) {
+            const u = i / n;
+            // Quick attack, longer fall; the pitch sags ~4% across the syllable.
+            const env = Math.sin(Math.PI * Math.min(1, u * 1.6) * 0.5) ** 2 * (1 - u) ** 0.7;
+            phase += (2 * Math.PI * pitch * (1.02 - 0.04 * u)) / sr;
+            // A trace of the second harmonic: a wing, not a sine generator.
+            data[start + i] = (Math.sin(phase) + 0.08 * Math.sin(2 * phase)) * env * amp * 0.8;
+          }
+          at += len + 0.017 + 0.006 * rand();
         }
+        t += tempo * (0.95 + 0.1 * rand());
       }
+      t += 1.2 + rand() * 4;
     }
     return buffer;
   }

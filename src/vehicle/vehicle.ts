@@ -344,6 +344,10 @@ export interface VehicleAudioState {
   forwardMps: number;
   engineRunning: boolean;
   engineDestroyed: boolean;
+  /** Coolant temperature, degrees C: a hot block ticks as it cools, a cooked one boils. */
+  engineTempC: number;
+  /** Stalled by overheating: the radiator is boiling over. */
+  overheatStalled: boolean;
   gearLabel: string;
   /** Wheels on the ground / total wheels. */
   wheelContactFraction: number;
@@ -781,6 +785,8 @@ export class Vehicle implements Rebasable {
     forwardMps: 0,
     engineRunning: false,
     engineDestroyed: false,
+    engineTempC: 20,
+    overheatStalled: false,
     gearLabel: 'N',
     wheelContactFraction: 0,
     surfaceRoughness: 0,
@@ -2566,6 +2572,8 @@ export class Vehicle implements Rebasable {
     audio.forwardMps = fwd;
     audio.engineRunning = this.engineRunning;
     audio.engineDestroyed = this.engineDestroyed;
+    audio.engineTempC = this.localTemp;
+    audio.overheatStalled = this.overheatStalled;
     audio.gearLabel = this.drivetrain.gearLabel;
     audio.wheelContactFraction = wheelCount > 0 ? contactCount / wheelCount : 0;
     audio.surfaceRoughness = contactCount > 0 ? roughnessSum / contactCount : 0;

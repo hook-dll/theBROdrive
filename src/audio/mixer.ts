@@ -408,6 +408,9 @@ export function ramp(param: AudioParam, value: number, now: number, tau = 0.05):
   param.setTargetAtTime(value, now, tau);
 }
 
+/** A source that moves further than this between two updates is snapped, not glided. */
+const PANNER_SNAP_M = 40;
+
 /**
  * Sets a spatial node's position, using the per-axis AudioParams every current
  * desktop and mobile browser ships and falling back to the deprecated
@@ -427,6 +430,17 @@ export function setPannerPosition(
   tau: number,
 ): void {
   if (panner.positionX) {
+    // A jump no body makes in one frame is the world origin rebasing (or a
+    // teleport). The listener snaps with it, so the source must too: gliding the
+    // 1000 m back, the car would sit a kilometre from the ear and fall silent.
+    const jump = Math.hypot(x - panner.positionX.value, y - panner.positionY.value, z - panner.positionZ.value);
+    if (jump > PANNER_SNAP_M) {
+      for (const [param, v] of [[panner.positionX, x], [panner.positionY, y], [panner.positionZ, z]] as const) {
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(v, now);
+      }
+      return;
+    }
     panner.positionX.setTargetAtTime(x, now, tau);
     panner.positionY.setTargetAtTime(y, now, tau);
     panner.positionZ.setTargetAtTime(z, now, tau);

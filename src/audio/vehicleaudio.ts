@@ -27,6 +27,10 @@
  *  - Brakes: a low-mid pad rub pulsed once per wheel revolution (see below).
  *
  * One-shots: gear change, suspension jolts, landings, collisions, the starter.
+ *
+ * After the engine stops: the exhaust and manifold tick and ping as they cool and
+ * contract, often at first and more sparsely for minutes after a hard run; an engine
+ * that stalled from overheating hisses steam and gurgles at the radiator.
  */
 
 import { AUDIO_CONFIG } from '../config';
@@ -92,11 +96,11 @@ interface SurfaceVoice {
 const SURFACE_VOICES: Record<SurfaceType, SurfaceVoice> = {
   [SurfaceType.Asphalt]: { roar: 1, hiss: 1, hissHz: 1000, grit: 0, gritHz: 2500, squeal: true, joints: null },
   [SurfaceType.CrackedAsphalt]: { roar: 1.25, hiss: 0.9, hissHz: 850, grit: 0.12, gritHz: 2200, squeal: true, joints: 'crack' },
-  [SurfaceType.Gravel]: { roar: 1.1, hiss: 0.6, hissHz: 650, grit: 1, gritHz: 2600, squeal: false, joints: null },
+  [SurfaceType.Gravel]: { roar: 1.2, hiss: 0.55, hissHz: 420, grit: 0.8, gritHz: 1050, squeal: false, joints: null },
   [SurfaceType.Sand]: { roar: 0.55, hiss: 0.8, hissHz: 420, grit: 0.25, gritHz: 1300, squeal: false, joints: null },
   [SurfaceType.Rock]: { roar: 1.5, hiss: 0.5, hissHz: 700, grit: 0.55, gritHz: 1700, squeal: true, joints: null },
   [SurfaceType.Concrete]: { roar: 1.1, hiss: 1.15, hissHz: 1250, grit: 0, gritHz: 2500, squeal: true, joints: 'slab' },
-  [SurfaceType.LooseShoulder]: { roar: 1.2, hiss: 0.5, hissHz: 600, grit: 1.3, gritHz: 2300, squeal: false, joints: null },
+  [SurfaceType.LooseShoulder]: { roar: 1.25, hiss: 0.5, hissHz: 400, grit: 1, gritHz: 950, squeal: false, joints: null },
 };
 
 /** Concrete slab length, metres: the ta-dum, ta-dum period. */
@@ -139,6 +143,20 @@ const GEAR_WHINE: Record<string, number> = { R: 1, N: 0, '1': 0.55, '2': 0.34, '
 const CABIN_LP_HZ = 2300;
 const OUTSIDE_LP_HZ = 16000;
 const CABIN_BOOM_DB = 5;
+
+/**
+ * Cooling metal. `exhaustHeat` (0..1) is how much heat the pipes hold: it builds over
+ * tens of seconds of hard running and leaks away over minutes once stopped.
+ */
+const HEAT_RISE_S = 40;
+const HEAT_FALL_RUNNING_S = 150;
+const HEAT_FALL_STOPPED_S = 110;
+/** Ticks per second from a fully heat-soaked exhaust the moment it stops. */
+const TICK_RATE_MAX = 3.2;
+/** The first ticks wait for the metal to begin shrinking. */
+const TICK_DELAY_S = 1.2;
+const TICK_GAIN = 0.05;
+const BOIL_GAIN = 0.07;
 
 /** Source offsets along the car, metres from the root. */
 const NOSE_M = 1.4;
@@ -194,6 +212,15 @@ export class VehicleAudio {
 
   private readonly sources: AudioBufferSourceNode[] = [];
 
+  /** One-shots placed at the manifold (nose) and the silencer (tail). */
+  private readonly noseFx: GainNode;
+  private readonly tailFx: GainNode;
+  private readonly steamFilter: BiquadFilterNode;
+  private readonly steamGain: GainNode;
+  private exhaustHeat = 0;
+  private stoppedFor = 0;
+  private boil = 0;
+
   private lastGearLabel = '';
   private wasRunning = false;
   private active = false;
@@ -237,6 +264,18 @@ export class VehicleAudio {
     this.tail = panner();
     this.impacts = ctx.createGain();
     this.impacts.connect(this.body);
+    this.noseFx = ctx.createGain();
+    this.noseFx.connect(this.nose);
+    this.tailFx = ctx.createGain();
+    this.tailFx.connect(this.tail);
+
+    // Steam from a boiling radiator: a fluttering high hiss under the bonnet.
+    this.steamFilter = ctx.createBiquadFilter();
+    this.steamFilter.type = 'bandpass';
+    this.steamFilter.frequency.value = 4200;
+    this.steamFilter.Q.value = 0.9;
+    this.steamGain = ctx.createGain();
+    this.steamGain.gain.value = 0;
 
     // --- engine -----------------------------------------------------------------
     this.engine = new EngineVoice(mixer);
@@ -328,10 +367,16 @@ export class VehicleAudio {
     this.gritFilter = ctx.createBiquadFilter();
     this.gritFilter.type = 'bandpass';
     this.gritFilter.frequency.value = 2500;
-    this.gritFilter.Q.value = 0.9;
+    this.gritFilter.Q.value = 0.7;
+    // The grains are sub-millisecond clicks; without a top cut, stones under a tyre
+    // are a Geiger counter. What a gravel road makes is a soft, low crunching rustle.
+    const gritSoft = ctx.createBiquadFilter();
+    gritSoft.type = 'lowpass';
+    gritSoft.frequency.value = 1900;
+    gritSoft.Q.value = 0.5;
     this.gritGain = ctx.createGain();
     this.gritGain.gain.value = 0;
-    this.gritSource.connect(this.gritFilter).connect(this.gritGain).connect(this.body);
+    this.gritSource.connect(this.gritFilter).connect(gritSoft).connect(this.gritGain).connect(this.body);
 
     const sprayHigh = ctx.createBiquadFilter();
     sprayHigh.type = 'highpass';
@@ -407,6 +452,9 @@ export class VehicleAudio {
     this.addNoise('white', this.rubFilter);
     this.rubFilter.connect(rubTremolo).connect(this.rubGain).connect(brakeLowpass);
     this.rotorLfo.start();
+
+    this.addNoise('white', this.steamFilter);
+    this.steamFilter.connect(this.steamGain).connect(this.nose);
   }
 
   private addNoise(colour: 'white' | 'pink' | 'brown', destination: AudioNode): void {
@@ -502,8 +550,9 @@ export class VehicleAudio {
     this.hissFilter.frequency.setTargetAtTime(voice.hissHz * (0.8 + 0.4 * rollT), now, 0.1);
     ramp(this.hissGain.gain, TYRE_GAIN * 0.8 * rollT * rollT * voice.hiss * contact, now, 0.09);
     // Grain density and brightness both follow speed: the stones come faster.
-    this.gritSource.playbackRate.setTargetAtTime(0.35 + speed / 9, now, 0.1);
-    this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.3 * rollT), now, 0.1);
+    // Played slower than recorded, the grains are longer and duller as well as fewer.
+    this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);
+    this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
     ramp(this.gritGain.gain, TYRE_GAIN * 1.4 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
     // Spray: a wet road is a hiss that swamps everything else the tyre does.
     const wetRoad = voice.squeal ? pose.wet : pose.wet * 0.4;
@@ -534,6 +583,8 @@ export class VehicleAudio {
     this.rubFilter.frequency.setTargetAtTime(RUB_FREQ_SLOW + (RUB_FREQ_FAST - RUB_FREQ_SLOW) * moving, now, 0.1);
     ramp(this.rubGain.gain, brake * moving * (1 - lockT) * contact * RUB_GAIN, now, 0.06);
 
+    this.cooling(state, load, dt, now);
+
     // --- one-shots --------------------------------------------------------------
     if (state.gearLabel !== this.lastGearLabel) {
       if (this.lastGearLabel !== '') this.shiftClunk();
@@ -552,6 +603,69 @@ export class VehicleAudio {
     setPannerPosition(this.nose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
     setPannerPosition(this.body, x, y, z, now, 0.02);
     setPannerPosition(this.tail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
+  }
+
+  /** Hot metal ticking as it cools, and a boiling radiator after an overheat. */
+  private cooling(state: VehicleAudioState, load: number, dt: number, now: number): void {
+    const running = state.engineRunning;
+    if (running) {
+      const target = 0.25 + 0.75 * load * clamp01((state.rpm / Math.max(1, state.redlineRpm)) * 1.4);
+      const tau = target > this.exhaustHeat ? HEAT_RISE_S : HEAT_FALL_RUNNING_S;
+      this.exhaustHeat += (target - this.exhaustHeat) * Math.min(1, dt / tau);
+      this.stoppedFor = 0;
+    } else {
+      this.exhaustHeat -= this.exhaustHeat * Math.min(1, dt / HEAT_FALL_STOPPED_S);
+      this.stoppedFor += dt;
+    }
+    // A block that never got warm has nothing to give back.
+    const warm = clamp01((state.engineTempC - 45) / 40);
+    const heat = this.exhaustHeat * warm;
+    if (!running && this.stoppedFor > TICK_DELAY_S) {
+      // Starts gently, peaks a few seconds in, then thins out with the heat.
+      const onset = clamp01((this.stoppedFor - TICK_DELAY_S) / 4);
+      if (Math.random() < TICK_RATE_MAX * heat * heat * onset * dt) this.coolingTick(heat);
+    }
+
+    this.boil += ((state.overheatStalled ? 1 : 0) - this.boil) * Math.min(1, dt / 1.5);
+    const flutter = 0.65 + 0.35 * Math.random();
+    this.steamFilter.frequency.setTargetAtTime(3600 + 1600 * Math.random(), now, 0.05);
+    ramp(this.steamGain.gain, BOIL_GAIN * this.boil * flutter, now, 0.05);
+    if (this.boil > 0.2 && Math.random() < 1.8 * this.boil * dt) {
+      // Coolant gurgling up the filler neck: a few wet low bubbles.
+      const bubbles = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < bubbles; i++) {
+        this.mixer.burst(this.noseFx, {
+          gain: TICK_GAIN * 1.4 * this.boil * (0.5 + 0.5 * Math.random()),
+          frequency: 260 + Math.random() * 320,
+          endFrequency: 420 + Math.random() * 400,
+          q: 4,
+          attack: 0.004,
+          decay: 0.04 + Math.random() * 0.05,
+          delay: i * (0.05 + Math.random() * 0.07),
+        });
+      }
+    }
+  }
+
+  /**
+   * One tick of contracting steel: a hard, bright click with a short inharmonic ring.
+   * The pipe and silencer tick high and dry; the heat shield over them now and then
+   * answers with a lower, longer "tonk".
+   */
+  private coolingTick(heat: number): void {
+    const atManifold = Math.random() < 0.4;
+    const dest = atManifold ? this.noseFx : this.tailFx;
+    const level = TICK_GAIN * (0.35 + 0.65 * heat) * (0.4 + 0.6 * Math.random());
+    this.mixer.burst(dest, { gain: level * 0.9, frequency: 6500, q: 1.5, attack: 0.0005, decay: 0.005 });
+    if (Math.random() < 0.18) {
+      const f = 650 + Math.random() * 450;
+      this.mixer.blip(dest, { gain: level * 0.7, frequency: f, endFrequency: f * 0.995, decay: 0.16, type: 'sine' });
+      this.mixer.blip(dest, { gain: level * 0.3, frequency: f * 2.41, endFrequency: f * 2.4, decay: 0.09, type: 'sine' });
+    } else {
+      const f = 2000 + Math.random() * 2600;
+      this.mixer.blip(dest, { gain: level * 0.55, frequency: f, endFrequency: f * 0.997, decay: 0.035 + Math.random() * 0.04, type: 'sine' });
+      this.mixer.blip(dest, { gain: level * 0.25, frequency: f * 2.76, decay: 0.02, type: 'sine' });
+    }
   }
 
   /** Slab joints and cracks: distance-driven, one thump per axle. */
