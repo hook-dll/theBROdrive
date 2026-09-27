@@ -7,6 +7,7 @@
  * Nothing here owns game state; chunk content is a derived view of the seed.
  */
 
+import { applyGroundFade } from '../../render/groundfade';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -39,7 +40,7 @@ import {
 //    sun down one side instead of as a smooth tube. The barrel form gets its own dry
 //    khaki, because at 0.8-1.7 scale it is a low round blob, and in green it reads as
 //    a lawn shrub that wandered into the desert.
-const matCactus = new THREE.MeshStandardMaterial({
+const matCactus = applyGroundFade(new THREE.MeshStandardMaterial({
   // Set against the RUNNING GAME, not a swatch: the desert sun here is bright enough
   // that a colour picked off a photograph comes out neon — brighter than the sand the
   // plant stands on, which the eye reads as signage rather than as a plant. The sample
@@ -49,21 +50,21 @@ const matCactus = new THREE.MeshStandardMaterial({
   roughness: 0.95,
   metalness: 0,
   flatShading: true,
-});
-const matScrub = new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 });
-export const matDeadStick = new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 });
-export const matRock = new THREE.MeshStandardMaterial({
+}));
+const matScrub = applyGroundFade(new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 }));
+export const matDeadStick = applyGroundFade(new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 }));
+export const matRock = applyGroundFade(new THREE.MeshStandardMaterial({
   color: 0x815f42,
   roughness: 0.98,
   metalness: 0,
-});
+}));
 
 /**
  * The two trees carry their bark and their canopy in VERTEX COLOURS on one material,
  * so a tree is one instanced draw call instead of two. Everything else in this file
  * is a single flat colour and does not need it.
  */
-const matPlant = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+const matPlant = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
 
 // ===========================================================================
 // Scatter: cacti and rocks

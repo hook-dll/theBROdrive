@@ -90,6 +90,7 @@ import { advanceCloudShadows } from './render/cloudshadow';
 import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
+import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -1667,6 +1668,9 @@ async function boot(): Promise<void> {
     // on one frame and desert on the next; an idle subsystem consumes nothing, so
     // the other still proceeds without delay.
     frameProfiler?.begin('streaming');
+    // Props dissolve at the edge of the fine tile window, past which the only ground
+    // is the coarser vista (render/groundfade.ts).
+    setGroundFadeWindow(desertX, desertZ, origin.x, origin.z);
     if ((frameId & 1) === 0) {
       streamer.update(activeS, frameId, desertLateral);
       desert.update(desertX, desertZ, desertLateral, frameId);

@@ -6,6 +6,7 @@ import { applyComicShading } from './comic';
 
 import { DESERT_TILE_SIZE } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
+import { outsideGroundWindow } from './groundfade';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -53,6 +54,16 @@ const ROAD_SAMPLE_CAPACITY = Math.ceil((ROAD_UNDERLAY_RADIUS * 2) / ROAD_SAMPLE_
 const ROAD_UNDERLAY_CORE = 45;
 const ROAD_UNDERLAY_FADE = 150;
 const ROAD_UNDERLAY_DROP = 0.75;
+/**
+ * Past the fine tiles the vista is the only ground under the streamed road, and its
+ * interpolated heights can sit metres BELOW the ribbon, which then hangs in the air on
+ * the skyline. Outside the tile window it is pulled UP to the road as well as down;
+ * inside, the tiles own the ground and it must stay under them. Applied only in the
+ * per-frame pass, never baked into the cached cell samples, because the window moves.
+ */
+function roadRaiseAt(absX: number, absZ: number): number {
+  return smoothstep01((outsideGroundWindow(absX, absZ) + 10) / 60);
+}
 /**
  * Vertices per ring. At 25 km this is a 980 m arc, so the mountain silhouette remains
  * deliberately faceted around the horizon; the radial spacing above is the dimension
@@ -591,12 +602,9 @@ export class VistaMesh {
         const bias =
           INNER_BIAS *
           (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
-        y = this.beneathRoad(
-          cameraX + this.groundLocalPositions![vi]! + this.origin.x,
-          cameraZ + this.groundLocalPositions![vi + 2]! + this.origin.z,
-          y,
-          bias,
-        );
+        const absX = cameraX + this.groundLocalPositions![vi]! + this.origin.x;
+        const absZ = cameraZ + this.groundLocalPositions![vi + 2]! + this.origin.z;
+        y = this.beneathRoad(absX, absZ, y, bias, roadRaiseAt(absX, absZ));
       }
       xyz[vi + 1] = y;
       const nxLower =
@@ -837,7 +845,7 @@ export class VistaMesh {
    * distance matters here: lowering isolated vertices around isolated samples makes
    * long triangles whose sides read as disappearing cones.
    */
-  private beneathRoad(x: number, z: number, openY: number, bias: number): number {
+  private beneathRoad(x: number, z: number, openY: number, bias: number, raise: number): number {
     const coarseStride = 4;
     let closestSample = 0;
     let closestSampleDistanceSq = Infinity;
@@ -880,11 +888,16 @@ export class VistaMesh {
     }
     if (closestDistanceSq >= ROAD_UNDERLAY_FADE * ROAD_UNDERLAY_FADE) return openY;
     const belowRoad = closestRoadY - bias - ROAD_UNDERLAY_DROP;
-    if (belowRoad >= openY) return openY;
     const distance = Math.sqrt(closestDistanceSq);
     const fade = smoothstep01(
       (distance - ROAD_UNDERLAY_CORE) / (ROAD_UNDERLAY_FADE - ROAD_UNDERLAY_CORE),
     );
+    if (belowRoad >= openY) {
+      // The vista sits BELOW the road here. Past the tiles it is the only ground, so it
+      // is raised to the road rather than leave the ribbon hanging in the air — but
+      // only once the fine tiles have ended, or it would poke up through them.
+      return openY + (belowRoad - openY) * raise * (1 - fade);
+    }
     return belowRoad + (openY - belowRoad) * fade;
   }
 
@@ -1061,7 +1074,7 @@ export class VistaMesh {
         if (radius <= ROAD_UNDERLAY_RADIUS) {
           const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
           const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-          heights[i] = this.beneathRoad(absoluteX, absoluteZ, horizonY - bias, bias);
+          heights[i] = this.beneathRoad(absoluteX, absoluteZ, horizonY - bias, bias, 0);
         } else {
           heights[i] = horizonY - bias;
         }
