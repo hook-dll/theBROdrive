@@ -186,6 +186,15 @@ import {
   unsprungMass,
 } from './vehicletuning';
 import { VehicleLamps, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
+import { weather, weatherGrip, weatherSoftness } from '../world/weather';
+
+/**
+ * Side-force coefficient of a saloon's flank in a crosswind. Wind-tunnel figures for
+ * boxy cars sit around 0.8-1.0 per unit side area at small yaw.
+ */
+const SIDE_WIND_CY = 0.85;
+/** Most the wind may ever push, in g: about a quarter of what a dry tyre holds. */
+const WIND_FORCE_MAX_G = 0.18;
 
 interface WheelVisual {
   index: number;
@@ -536,6 +545,12 @@ export class Vehicle implements Rebasable {
    */
 
   private readonly dragCoeff: number;
+  /**
+   * Crosswind coefficient, ½·ρ·Cy·(side area − frontal box), N per (m/s)². The
+   * frontal part of a crosswind is already in `dragCoeff` once drag is taken against
+   * the air rather than the ground; this is what the long flank adds on top.
+   */
+  private readonly sideWindCoeff: number;
 
   // Axle bookkeeping for torque splitting and the drivetrain input.
   private frontWheelCount = 0;
@@ -653,6 +668,7 @@ export class Vehicle implements Rebasable {
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly windRightScratch = { x: 0, y: 0, z: 0 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
@@ -805,6 +821,8 @@ export class Vehicle implements Rebasable {
     // fallback was calibrated on; everything boxier than that came out too slippery.
     const dragArea = this.model.dragArea ?? DRAG_CD * (4 * half[0] * half[1]);
     this.dragCoeff = 0.5 * AIR_DENSITY * dragArea;
+    this.sideWindCoeff =
+      0.5 * AIR_DENSITY * SIDE_WIND_CY * Math.max(0, 4 * half[1] * half[2] - 4 * half[0] * half[1]);
 
     // `carState.x/z` are absolute (from the save); Rapier holds relative positions.
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -999,6 +1017,7 @@ export class Vehicle implements Rebasable {
     return (
       GRAVITY *
       SURFACES[surfaceType].lateralMu *
+      weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
       this.statsValue.wheelGrip *
       Math.pow(GRIP_REFERENCE_MASS / this.statsValue.mass, GRIP_MASS_EXPONENT) *
@@ -1026,6 +1045,7 @@ export class Vehicle implements Rebasable {
       FOOT_BRAKE_MAX_DECEL,
       FOOT_BRAKE_GRIP_RATIO *
         SURFACES[surfaceType].longitudinalMu *
+        weatherGrip(surfaceType) *
         longitudinalGrip *
         compound.grip *
         GRAVITY,
@@ -1886,8 +1906,7 @@ export class Vehicle implements Rebasable {
     // is its only driver: everything it needs about the car this tick is the four
     // numbers below, so it can be exercised without a physics world.
     //
-    // Ambient comes from the game clock rather than a weather system, which does not
-    // exist; `ambientAirC` documents why a cosine is enough.
+    // Ambient is the game clock's daily curve moved by the weather; see `ambientAirC`.
     this.cooling.setWater(this.localWater);
     this.cooling.update(dt, {
       load: throttle,
@@ -2095,6 +2114,7 @@ export class Vehicle implements Rebasable {
       if (!w.grounded) continue;
       brakeCapacityN +=
         SURFACES[w.groundSurface].longitudinalMu *
+        weatherGrip(w.groundSurface) *
         longitudinalGrip *
         tyreGrip *
         w.loadN;
@@ -2249,7 +2269,8 @@ export class Vehicle implements Rebasable {
         LOAD_SENSITIVITY_MAX,
       );
 
-      const frictionSlip = surface.longitudinalMu * gripBudgetFactor * loadFactor;
+      const frictionSlip =
+        surface.longitudinalMu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       // ZERO. Rapier's lateral channel is a velocity-cancelling constraint scaled by
       // this gain, and a constraint is a ceiling with no curve under it: side force
@@ -2260,6 +2281,7 @@ export class Vehicle implements Rebasable {
       w.tyreGrip = tyreTemperatureGrip(w.tyreTempC);
       w.lateralCapacityN =
         surface.lateralMu *
+        weatherGrip(surfaceType) *
         lateralCarFactor *
         compound.side *
         w.tyreGrip *
@@ -2483,6 +2505,7 @@ export class Vehicle implements Rebasable {
       this.forceScratch.z = -impulse * this.linvel.z * inv;
       this.chassisBody.applyImpulse(this.forceScratch, false);
     }
+    this.applyWind(dt, contactCount);
 
     // Audio telemetry. Written after the vehicle step and the roll couple, so the
     // slip and contact numbers describe the tick that just ran; `localVelScratch`
@@ -3007,7 +3030,8 @@ export class Vehicle implements Rebasable {
           LOAD_SENSITIVITY_MIN,
           LOAD_SENSITIVITY_MAX,
         );
-        let longitudinalMu = surface.longitudinalMu * wheelGrip * tyreGrip * loadFactor;
+        let longitudinalMu =
+          surface.longitudinalMu * weatherGrip(surfaceType) * wheelGrip * tyreGrip * loadFactor;
         // THE DIG — see the block comment on `DIG_FIRM_MU`. Sand only, and driven wheels
         // only: on a car with a driven front axle the dig firms both, which is the same
         // concession applied to the wheels doing the work.
@@ -3221,7 +3245,8 @@ export class Vehicle implements Rebasable {
         // Apply it at the real contact patch rather than the COM-height point above.
         // The low application point is the trip mechanism of a broadside sand skid:
         // the vehicle sheds energy quickly and the body can carry on over the tyres.
-        const deformationDrag = SURFACES[w.groundSurface].deformationDrag;
+        const deformationDrag =
+          SURFACES[w.groundSurface].deformationDrag * weatherSoftness(w.groundSurface);
         if (deformationDrag > 0 && magnitude < stopImpulse) {
           const deformationT = clamp(
             (Math.abs(w.lateralSpeed) - DEFORMATION_DRAG_START_MPS) /
@@ -3673,6 +3698,52 @@ export class Vehicle implements Rebasable {
    * controller. An axle with a wheel in the air contributes nothing — a bar needs both
    * ends on the ground to have a difference worth resisting.
    */
+  /**
+   * The weather's wind on the body (world/weather.ts).
+   *
+   * Drag above is taken against the GROUND, which is right in still air. In wind the
+   * body moves through air that is itself moving, so the difference between the two
+   * — ½ρCdA·(|u|u + |v|v) with u = wind − velocity — is applied here: a headwind
+   * costs top speed, a tailwind gives a little back, and a crosswind leans on the
+   * frontal area. The long flank then adds its own side force on the crosswind
+   * component relative to the body. Horizontal only, at the centre of mass: the push
+   * a driver corrects with a small steady input, never a yaw kick.
+   *
+   * Only with a wheel on the ground: an airborne car in a gust is not a thing this
+   * game needs to model, and it would only ever read as a physics bug.
+   */
+  private applyWind(dt: number, contactCount: number): void {
+    const speed = weather.windMps;
+    if (speed < 0.5 || contactCount === 0) return;
+    const mass = this.chassisBody.mass();
+    this.chassisBody.linvel(this.linvel);
+    const ux = weather.windX * speed - this.linvel.x;
+    const uz = weather.windZ * speed - this.linvel.z;
+    const u = Math.hypot(ux, uz);
+    const v = Math.hypot(this.linvel.x, this.linvel.z);
+    let fx = this.dragCoeff * (u * ux + v * this.linvel.x);
+    let fz = this.dragCoeff * (u * uz + v * this.linvel.z);
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.windRightScratch, this.rotationScratch, 1, 0, 0);
+    const rx = this.windRightScratch.x;
+    const rz = this.windRightScratch.z;
+    const rl = Math.hypot(rx, rz);
+    if (rl > 1e-3) {
+      const across = (ux * rx + uz * rz) / rl;
+      const side = this.sideWindCoeff * Math.abs(across) * across;
+      fx += (side * rx) / rl;
+      fz += (side * rz) / rl;
+    }
+    // Bounded: a gust front is felt, never a shove the tyres cannot answer.
+    const f = Math.hypot(fx, fz);
+    const cap = WIND_FORCE_MAX_G * GRAVITY * mass;
+    const k = f > cap ? cap / f : 1;
+    this.forceScratch.x = fx * k * dt;
+    this.forceScratch.y = 0;
+    this.forceScratch.z = fz * k * dt;
+    this.chassisBody.applyImpulse(this.forceScratch, true);
+  }
+
   private applyAntiRollBars(dt: number): void {
     for (let axle = 0; axle < 2; axle++) {
       const front = axle === 0;

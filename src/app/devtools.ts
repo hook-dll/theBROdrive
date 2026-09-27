@@ -48,6 +48,7 @@ import type { Road } from '../world/road';
 import type { RoadTraffic } from '../world/traffic';
 import type { Terrain } from '../world/terrain';
 import type { WorldWorkScheduler } from '../world/workqueue';
+import { forceWeather, weather } from '../world/weather';
 
 /**
  * Gap between the player and the NEAR END of a spawned vehicle, metres.
@@ -490,6 +491,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     traffic: ctx.traffic,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
+    // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands
+    // the sky back to the schedule.
+    weather: { force: forceWeather, now: weather },
     state: () => ctx.world.state,
     view: () => ({
       eye: ctx.camera.eyePosition,

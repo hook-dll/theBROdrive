@@ -228,7 +228,7 @@ function buildScrub(): THREE.BufferGeometry {
  * one material.
  *
  * The hex is a DISPLAY colour, set through `LinearSRGBColorSpace` — the convention
- * `render/mirage-tableau.ts` and `world/weatherfx.ts` already use for their
+ * `render/mirage-tableau.ts` already uses for its
  * vertex-coloured geometry, because the renderer writes the working colour space
  * straight to the canvas (see the two-pass note in `core/renderer.ts`). Authored any
  * other way a tree comes out a gamma darker than the props standing beside it.

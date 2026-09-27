@@ -116,7 +116,7 @@ const KINDS: readonly KindDef[] = [
   { kind: 'embankment', channel: VarietyChannel.Horizon, weight: 0.3, minLength: 200, maxLength: 500, ramp: 80 },
   /** A belt where the rock shelves crowd in to the corridor instead of staying out in the open. */
   { kind: 'outcrop', channel: VarietyChannel.Horizon, weight: 0.25, minLength: 250, maxLength: 600, ramp: 120 },
-  /** Something far out doing something: virga, a dust wall, a smoke column. */
+  /** A quiet stretch: nothing on the horizon. (Weather is no longer an object out here; see world/weather.ts.) */
   { kind: 'weather', channel: VarietyChannel.Horizon, weight: 0.15, minLength: 900, maxLength: 1200, ramp: 300 },
 
   // -- Verge -----------------------------------------------------------------

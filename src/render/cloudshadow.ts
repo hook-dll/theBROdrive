@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { hashUnit2 } from '../core/rng';
 import { shadowsFor, type GraphicsQuality } from '../game/settings';
+import { weather } from '../world/weather';
 
 /**
  * CLOUD SHADOWS: the only thing in this desert that changes without the player
@@ -351,7 +352,11 @@ uniform vec2 uCloudPan;
 uniform float uCloudSalt;
 uniform float uCloudDetail;
 uniform float uCloudStrength;
+uniform float uCloudBias;
+uniform float uWet;
+uniform vec2 uGroundPan;
 varying float vCloudShade;
+varying float vWetMask;
 
 float cloudHash( float cx, float cz, float salt ) {
 	float hx = fract( cx * 0.1031 );
@@ -393,7 +398,7 @@ float cloudShade( vec2 scene ) {
 			uCloudSalt + ${CLOUD_DETAIL_SALT.toFixed(1)}
 		) - 0.5 ) * ${CLOUD_DETAIL_AMPLITUDE.toFixed(2)};
 	}
-	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)}, ${CLOUD_EDGE_HIGH.toFixed(2)}, field );
+	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)} - uCloudBias, ${CLOUD_EDGE_HIGH.toFixed(2)} - uCloudBias, field );
 }
 `;
 
@@ -408,7 +413,9 @@ float cloudShade( vec2 scene ) {
  */
 const CLOUD_FRAGMENT_PARS = /* glsl */ `
 varying float vCloudShade;
+varying float vWetMask;
 uniform float uCloudStrength;
+uniform float uWet;
 `;
 
 /**
@@ -439,7 +446,15 @@ uniform float uCloudStrength;
 const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
 	vCloudShade = uCloudStrength > 0.0
 		? cloudShade( ( modelMatrix * vec4( transformed, 1.0 ) ).xz )
-		: 0.0;`;
+		: 0.0;
+	// Wet ground dries in patches, not as one sheet: a nine-metre noise decides which
+	// ground holds its water longest (the hollows, the ruts), evaluated per vertex for
+	// the same reason as the cloud field above, and only while anything is wet.
+	vWetMask = 0.0;
+	if ( uWet > 0.0 ) {
+		float held = cloudNoise( ( ( modelMatrix * vec4( transformed, 1.0 ) ).xz + uGroundPan ) / 9.0, 4096.0, uCloudSalt + 7.0 );
+		vWetMask = smoothstep( 0.0, 0.35, uWet - held * 0.65 + 0.3 );
+	}`;
 
 /**
  * Applied to `outgoingLight`, which is the lit surface colour before fog and tone
@@ -456,7 +471,24 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 	if ( uCloudStrength > 0.0 ) {
 		outgoingLight *= 1.0 - vCloudShade * uCloudStrength;
 	}
+	if ( uWet > 0.0 ) {
+		// Water darkens anything porous by filling the air gaps that scattered light
+		// back out: damp sand and wet asphalt both lose about a third of their light.
+		outgoingLight *= 1.0 - 0.36 * vWetMask;
+		#if defined( WET_SHEEN ) && defined( USE_FOG )
+		// A wet road is a dim mirror at grazing angles: what it shows ahead is the sky
+		// at the horizon, which is the fog colour. Schlick's Fresnel on the shaded
+		// normal, so the aggregate's relief still breaks the sheen up.
+		float wetNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
+		float wetFresnel = 0.03 + 0.97 * pow( 1.0 - wetNdv, 5.0 );
+		outgoingLight = mix( outgoingLight, fogColor * 1.08, wetFresnel * vWetMask * 0.9 );
+		#endif
+	}
 #include <opaque_fragment>`;
+
+/** A wet road also goes glossy: the sun and headlamps draw a glint along it. */
+const WET_ROUGHNESS_HOOK = /* glsl */ `#include <roughnessmap_fragment>
+	roughnessFactor = mix( roughnessFactor, 0.34, uWet * vWetMask );`;
 
 /** Suffix, so a patched material never shares a program with an unpatched one. */
 const CLOUD_PROGRAM_KEY = 'cloud-shadow-v2';
@@ -471,19 +503,28 @@ const uniforms = {
   uCloudSalt: { value: 0 },
   uCloudStrength: { value: 0 },
   uCloudDetail: { value: 0 },
+  /** Lowers the shade band: more of the ground under cloud while a storm builds. */
+  uCloudBias: { value: 0 },
+  /** Ground wetness from world/weather.ts, 0..1. */
+  uWet: { value: 0 },
+  /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
+  uGroundPan: { value: new THREE.Vector2() },
 };
 
 /** Materials already carrying the injection, so a second call cannot double it. */
 const injected = new WeakSet<THREE.Material>();
 
-function patchCloudShader(shader: WebGLProgramParametersWithUniforms): void {
+function patchCloudShader(shader: WebGLProgramParametersWithUniforms, sheen: boolean): void {
   for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', `#include <common>\n${CLOUD_VERTEX_PARS}`)
     .replace('#include <worldpos_vertex>', CLOUD_VERTEX_HOOK);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', `#include <common>\n${CLOUD_FRAGMENT_PARS}`)
+    .replace('#include <common>', `#include <common>\n${sheen ? '#define WET_SHEEN\n' : ''}${CLOUD_FRAGMENT_PARS}`)
     .replace('#include <opaque_fragment>', CLOUD_FRAGMENT_HOOK);
+  if (sheen) {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>', WET_ROUGHNESS_HOOK);
+  }
 }
 
 /**
@@ -499,17 +540,22 @@ function patchCloudShader(shader: WebGLProgramParametersWithUniforms): void {
  * has to be a no-op rather than a second copy of the GLSL (which would not compile:
  * `vCloudShade` would be declared twice).
  */
-export function applyCloudShadow(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+export function applyCloudShadow(
+  material: THREE.MeshStandardMaterial,
+  options: { wetSheen?: boolean } = {},
+): THREE.MeshStandardMaterial {
   if (injected.has(material)) return material;
   injected.add(material);
+  const sheen = options.wetSheen === true;
 
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     previousCompile.call(material, shader, renderer);
-    patchCloudShader(shader);
+    patchCloudShader(shader, sheen);
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${previousKey.call(material)}:${CLOUD_PROGRAM_KEY}`;
+  material.customProgramCacheKey = () =>
+    `${previousKey.call(material)}:${CLOUD_PROGRAM_KEY}${sheen ? ':wet-sheen' : ''}`;
   return material;
 }
 
@@ -545,9 +591,29 @@ export function advanceCloudShadows(
   cloudShadowPan(seed, elapsed, originX, originZ, pan);
   uniforms.uCloudPan.value.set(pan.x, pan.z);
   uniforms.uCloudSalt.value = cloudShadowSalt(seed);
-  uniforms.uCloudStrength.value = cloudShadowStrength(dayFactor);
+  // Weather on the shade: a building storm puts more ground under deeper, bigger
+  // shade; once the deck has closed the sun is gone and so are the patches (the
+  // lights carry the gloom). Haze and dust scatter the sun into a flat light that
+  // casts no patch at all.
+  const w = weather;
+  const building = w.cloud * (1 - w.cloud) * 4;
+  uniforms.uCloudStrength.value =
+    cloudShadowStrength(dayFactor) *
+    (1 + 0.25 * building + 0.15 * w.cells) *
+    (1 - 0.9 * Math.max(0, w.cloud - 0.6) / 0.4) *
+    (1 - 0.6 * w.haze) *
+    (1 - w.dust);
+  uniforms.uCloudBias.value = 0.16 * Math.min(1, w.cloud * 1.6 + w.cells * 0.4);
   uniforms.uCloudDetail.value = shadowsFor(quality, mobilePresentation) ? 1 : 0;
+  uniforms.uWet.value = w.wet;
+  uniforms.uGroundPan.value.set(
+    originX - WET_PERIOD_M * Math.floor(originX / WET_PERIOD_M),
+    originZ - WET_PERIOD_M * Math.floor(originZ / WET_PERIOD_M),
+  );
 }
+
+/** Period of the wet-patch lattice: 4096 cells of 9 m. */
+const WET_PERIOD_M = 9 * 4096;
 
 /** The frame's uniform values, read back by `tools/sky-variety.ts`. */
 export function cloudShadowFrame(): {

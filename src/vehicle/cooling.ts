@@ -34,6 +34,7 @@
 
 import type { EngineHeatSpec, EngineSpec, RadiatorClass, RadiatorSpec } from '../parts/registry';
 import { engineHeat } from '../parts/registry';
+import { weather } from '../world/weather';
 
 /**
  * Temperature bands. The names are what the dashboard paints and what the rest of
@@ -100,8 +101,8 @@ export interface CoolingState {
 /**
  * Desert air, degrees Celsius, from the game clock alone.
  *
- * A full weather system is not in this game and this feature does not justify one.
- * What the model actually needs from the outside world is a number that is brutal
+ * The daily curve is the clear-sky baseline; the weather (world/weather.ts) moves
+ * it by a few degrees either way. What the model actually needs from the outside world is a number that is brutal
  * in the afternoon and kind before dawn, because that is what makes "wait for the
  * cool of the morning" a real decision on a marginal radiator. A single cosine
  * about the daily mean gives exactly that, lagged three hours past noon so the
@@ -131,7 +132,9 @@ export function ambientAirC(timeOfDay: number, dayLength: number): number {
   const peak = AIR_PEAK_HOUR / 24;
   // PLUS: the cosine is 1 at `AIR_PEAK_HOUR`, so that hour must be the hottest.
   // Subtracting made mid-afternoon the coldest hour of the day.
-  return AIR_MEAN_C + AIR_SWING_C * Math.cos((dayFraction - peak) * Math.PI * 2);
+  // The weather moves the whole curve (world/weather.ts): a heat wave is seven
+  // degrees on top of it, rain takes nine off. Zero wherever no weather runs.
+  return AIR_MEAN_C + AIR_SWING_C * Math.cos((dayFraction - peak) * Math.PI * 2) + weather.airOffsetC;
 }
 
 /**

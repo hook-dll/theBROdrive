@@ -8,6 +8,8 @@ import { hash01 } from '../core/rng';
 import { AstronomySystem } from './astronomy';
 import { StarField } from './starcatalog';
 import { PlanetField } from './planetfield';
+import { weather } from '../world/weather';
+import { SandColor } from './desertdust';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -178,6 +180,50 @@ const DAY_SKY_FILL_BOOST = 1.5;
 const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
 const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
 const NIGHT_FILL_INTENSITY = 0.09;
+
+// ---------------------------------------------------------------------------
+// Weather palettes (world/weather.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * The dust colours are authored against the starting sand and carried round the
+ * palette with it (render/desertdust.ts): a violet desert raises a violet storm.
+ *
+ * Each weather owns a zenith and a horizon it pulls the sky toward, in daylight; at
+ * night every one of them is simply darker air, so the pull is weighted by `day`.
+ * The horizon doubles as the fog colour, which is what makes each of these a change
+ * of the WHOLE picture rather than of the sky: the far desert dissolves into it.
+ */
+/** Mgla: bleached beige at the horizon, a washed grey-blue overhead. */
+const C_HAZE_HORIZON = new SandColor(new THREE.Color().setStyle('#d8c6a2')).value;
+const C_HAZE_ZENITH = new THREE.Color().setStyle('#9fb0ba');
+/** Inside a haboob: burnt orange dusk at noon. */
+const C_DUST_HORIZON = new SandColor(new THREE.Color().setStyle('#bf7a3e')).value;
+const C_DUST_ZENITH = new SandColor(new THREE.Color().setStyle('#a0622f')).value;
+const C_DUST_NIGHT = new THREE.Color().setStyle('#140e09');
+/** Under a storm deck: cool slate, lighter at the skyline where the deck thins. */
+const C_STORM_HORIZON = new THREE.Color().setStyle('#838d95');
+const C_STORM_ZENITH = new THREE.Color().setStyle('#4c5764');
+/** Scrubbed air: a deeper blue overhead and a cleaner, bluer skyline. */
+const C_CLEAR_ZENITH = new THREE.Color().setStyle('#2c6fd2');
+const C_CLEAR_HORIZON = new THREE.Color().setStyle('#c4e2f4');
+/** Lightning's colour on the fill: violet-white. */
+const C_FLASH = new THREE.Color().setStyle('#dfe2ff');
+
+/**
+ * Fog density each weather adds, per metre, ON TOP of the view-distance-scaled
+ * base. Additive on purpose: the base is divided down on the far draw distances so
+ * a 25 km range still fades, and a haboob that faded over 25 km would be no haboob.
+ * FogExp2 is 1 - exp(-(d·k)²), so these read as: haze eats the land by ~900 m, rain
+ * greys it by ~1.4 km, and a dust storm leaves ~150 m of sight.
+ */
+const FOG_HAZE = 0.0019;
+const FOG_DUST = 0.0125;
+const FOG_RAIN = 0.0011;
+const FOG_STORM = 0.0006;
+
+/** The 22-degree halo radius, and how the sun dogs move off it as the sun climbs. */
+const HALO_RADIUS = 0.384;
 
 // ---------------------------------------------------------------------------
 // Twilight moods
@@ -361,6 +407,34 @@ uniform float uCloudAmount;
 /** Seconds, wrapped. Drifts the deck downwind. */
 uniform float uCloudTime;
 
+// --- Weather (world/weather.ts). Every term below is gated on its own uniform, so a
+// clear sky pays for five comparisons and nothing else. ---
+/**
+ * How far the dome is flattened to its horizon colour, 0..1. Inside dust, a thick
+ * haze or heavy rain the sky overhead is the same murk the land dissolves into; left
+ * as a gradient, a fully fogged ridge would stand out as a pale silhouette against
+ * the darker sky just above it — the one thing thick air must never show.
+ */
+uniform float uDomeFlat;
+/** Storm deck: the cirrus becomes a grey convective overcast with darker bases. */
+uniform float uStorm;
+/** Towering cells on the horizon, 0..1, and the bearing they stand on. */
+uniform float uCells;
+uniform float uCellsAz;
+/** Cirrostratus optics: the 22-degree halo and the two sun dogs. */
+uniform float uHalo;
+uniform vec3 uDogA;
+uniform vec3 uDogAOut;
+uniform vec3 uDogB;
+uniform vec3 uDogBOut;
+/** Rainbow strength: rain in the air with the sun shining behind the eye. */
+uniform float uRainbow;
+/** Lightning: the flash, and the bolt's bearing, top elevation and shape seed. */
+uniform float uFlash;
+uniform float uBoltAz;
+uniform float uBoltTop;
+uniform float uBoltSeed;
+
 varying vec3 vDir;
 
 /**
@@ -443,7 +517,7 @@ void main() {
   float h = clamp(dir.y, 0.0, 1.0);
 
   // Zenith-to-horizon gradient; the pow keeps most of the blue band high.
-  vec3 col = mix(uHorizon, uZenith, pow(h, 0.62));
+  vec3 col = mix(uHorizon, uZenith, pow(h, 0.62) * (1.0 - uDomeFlat));
 
   float sd = dot(dir, uSunDir);
 
@@ -521,7 +595,154 @@ void main() {
   // low sun and go gold at dusk, with no second palette to author or keep in step.
   float lit = 0.45 + 0.55 * max(sd, 0.0);
   vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
+  if (uStorm > 0.0) {
+    // A convective deck is not ice: it is thick, grey, and darkest where it is
+    // thickest, so the same noise that places the puffs now shades them — dense
+    // cores sink toward a slate base, thin edges stay the pale horizon grey. The
+    // cover grows from the cirrus threshold (uCloudCover rises with the storm), so
+    // the sky closes in from the existing wisps rather than fading in everywhere.
+    float thick = smoothstep(0.08, 0.42, n);
+    vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
+    stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
+    cloudCol = mix(cloudCol, stormCol, uStorm);
+  }
   col = mix(col, cloudCol, deck);
+
+  float sunUp = smoothstep(-0.02, 0.06, uSunDir.y);
+
+  // --- Storm cells on the horizon -------------------------------------------
+  //
+  // Cumulonimbus seen from forty kilometres: a ragged wall of towers standing on the
+  // skyline on one bearing, sunlit on top, slate at the base, with the grey smear of
+  // rain shafts hanging under it. In direction space, like everything on the dome:
+  // azimuth and elevation, a height profile along the azimuth and a billowed edge.
+  if (uCells > 0.0) {
+    float az = atan(dir.x, dir.z);
+    float da = mod(az - uCellsAz + 3.14159265, 6.28318531) - 3.14159265;
+    float e = asin(clamp(dir.y, -1.0, 1.0));
+    // A storm complex: a broad low base with a cluster of towers rising out of it,
+    // each a dome of its own width and height. Placing them explicitly is what makes
+    // them towers — a noise profile only ever made a ridge — and overlapping several
+    // is what makes the skyline lumpy instead of one egg.
+    float skirt = 0.09 * smoothstep(0.9, 0.2, abs(da));
+    float top = skirt;
+    for (int k = 0; k < 11; k++) {
+      float fk = float(k);
+      // Clustered and overlapping: the tall ones near the middle of the complex,
+      // smaller ones crowding their flanks, so the skyline is one lumpy mass.
+      float spread = cloudHash(vec2(fk, 3.0)) - 0.5;
+      float centre = spread * 0.8;
+      float width = 0.1 + 0.16 * cloudHash(vec2(fk, 5.0));
+      float height = (0.1 + 0.26 * cloudHash(vec2(fk, 9.0))) * (1.0 - abs(spread) * 1.1);
+      float x = (da - centre) / width;
+      top = max(top, height * pow(max(0.0, 1.0 - x * x), 0.4));
+    }
+    top *= uCells;
+    // Cauliflower: two octaves of billows in (bearing, elevation), the edge crisp.
+    float billow = cloudFbm(vec2(da * 18.0, e * 18.0 - uCloudTime * 0.0015));
+    float fine = cloudNoise(vec2(da * 70.0, e * 70.0));
+    float bubbles = 1.0 - abs(2.0 * cloudNoise(vec2(da * 40.0, e * 40.0 - uCloudTime * 0.001)) - 1.0);
+    float edge = top + (0.04 * (billow - 0.5) + 0.018 * (bubbles - 0.5)) * smoothstep(0.0, 0.08, top) + 0.006 * (fine - 0.5);
+    float body = smoothstep(edge + 0.002, edge - 0.005, e);
+    body *= smoothstep(0.0, 0.01, e) * step(0.001, top);
+    if (body > 0.0) {
+      float rise = clamp(e / max(top, 0.02), 0.0, 1.0);
+      vec3 flatDir = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-4, 0.0, 0.0));
+      vec3 flatSun = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(1e-4, 0.0, 0.0));
+      float facing = dot(flatDir, flatSun);
+      // Each billow is a little dome: brighter on its upper half, shadowed below.
+      float lower = cloudFbm(vec2(da * 26.0, e * 26.0 + 0.9 - uCloudTime * 0.0015));
+      float bulge = smoothstep(0.35, 0.7, billow) - 0.6 * smoothstep(0.5, 0.85, lower);
+      vec3 sunTint = uSunColor / max(0.05, max(uSunColor.r, max(uSunColor.g, uSunColor.b)));
+      // Sunlit from our side: brilliant white crowns. Backlit: a darker body with a
+      // silver edge, which is how a storm looks with the sun behind it.
+      float lit = mix(0.62, 1.1, smoothstep(-0.6, 0.6, facing));
+      vec3 crown = vec3(1.0, 0.98, 0.95) * mix(vec3(1.0), sunTint, 0.35) * lit * (0.92 + 0.25 * bulge);
+      vec3 base = mix(uZenith, vec3(0.24, 0.27, 0.32), 0.55);
+      vec3 cellCol = mix(base, crown, smoothstep(0.1, 0.7, pow(rise, 0.75) + 0.2 * bulge));
+      float silver = (1.0 - smoothstep(-0.2, 0.3, facing)) * smoothstep(edge - 0.01, edge, e);
+      cellCol += vec3(1.0, 0.95, 0.85) * silver * 0.35;
+      // Air between here and there, and the night: silhouettes against the last light.
+      cellCol = mix(cellCol, uHorizon, 0.25 * (1.0 - rise));
+      cellCol = mix(uHorizon * 0.75, cellCol, sunUp * 0.85 + 0.15);
+      col = mix(col, cellCol, body);
+    }
+    // Rain shafts: grey streaks hanging under the towers, fading into the horizon.
+    float shaft = smoothstep(0.45, 0.8, cloudNoise(vec2(da * 34.0, 0.5)))
+      * (1.0 - smoothstep(0.0, max(top, 0.02) * 0.4, e)) * step(0.001, top);
+    col = mix(col, mix(uZenith, vec3(0.3, 0.33, 0.38), 0.5), shaft * 0.35 * (1.0 - body * 0.6) * smoothstep(0.0, 0.008, e));
+  }
+
+  // --- Cirrostratus optics --------------------------------------------------
+  if (uHalo > 0.0) {
+    float ang = acos(clamp(sd, -1.0, 1.0));
+    // A thin milky veil is what makes a halo: the whole sky pales toward the sun.
+    col = mix(col, uHorizon * 1.02, uHalo * 0.28 * (0.5 + 0.5 * max(sd, 0.0)));
+    // The 22-degree ring: a sharp reddish inner edge, a soft white outer skirt, and a
+    // sky slightly darker inside it than out, as the real one has.
+    float ring = exp(-pow((ang - 0.384) / 0.009, 2.0));
+    float skirt = smoothstep(0.384, 0.40, ang) * (1.0 - smoothstep(0.40, 0.5, ang));
+    vec3 ringCol = mix(vec3(1.0, 0.62, 0.42), vec3(0.95, 0.97, 1.0), smoothstep(0.378, 0.395, ang));
+    float inside = smoothstep(0.1, 0.36, ang) * (1.0 - smoothstep(0.37, 0.384, ang));
+    col *= 1.0 - inside * 0.06 * uHalo * sunUp;
+    col += (ringCol * ring * 0.22 + vec3(0.9, 0.93, 1.0) * skirt * 0.035) * uHalo * sunUp;
+    // Sun dogs: a bright spot on each side at the sun's own elevation, red toward the
+    // sun, trailing a white tail away from it.
+    for (int i = 0; i < 2; i++) {
+      vec3 dogD = i == 0 ? uDogA : uDogB;
+      vec3 dogO = i == 0 ? uDogAOut : uDogBOut;
+      vec3 v = dir - dogD;
+      float x = dot(v, dogO);
+      float y = v.y;
+      float spot = exp(-pow(y / 0.012, 2.0)) * (x < 0.0 ? exp(-pow(x / 0.008, 2.0)) : exp(-x / 0.05));
+      vec3 dogCol = x < 0.0 ? vec3(1.0, 0.58, 0.4) : mix(vec3(1.0, 0.93, 0.8), vec3(0.9, 0.95, 1.0), smoothstep(0.0, 0.04, x));
+      col += dogCol * spot * 0.32 * uHalo * sunUp * step(0.0, dot(dir, dogD));
+    }
+  }
+
+  // --- Rainbow --------------------------------------------------------------
+  // 42 degrees round the antisolar point, red outside, violet inside, with the faint
+  // reversed secondary at 51 and the darker Alexander band between. Only where rain
+  // is falling in front of the eye and the sun is behind it, which the uniform says.
+  if (uRainbow > 0.0 && dir.y > 0.0) {
+    float anti = acos(clamp(-sd, -1.0, 1.0));
+    // Primary 40.5-42.5 degrees, violet inside; secondary 50-53.5, reversed and dimmer.
+    float p = (anti - 0.706) / 0.036;
+    float q = (0.935 - anti) / 0.06;
+    vec3 bow = vec3(0.0);
+    if (p > 0.0 && p < 1.0) {
+      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - p)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      bow += mix(hue, vec3(1.0), 0.3) * sin(3.14159 * p);
+    }
+    if (q > 0.0 && q < 1.0) {
+      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - q)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      bow += 0.3 * mix(hue, vec3(1.0), 0.35) * sin(3.14159 * q);
+    }
+    // Brighter sky inside the primary, darker Alexander's band between the two.
+    float inner = 1.0 - smoothstep(0.55, 0.705, anti);
+    float alexander = smoothstep(0.745, 0.77, anti) * (1.0 - smoothstep(0.85, 0.875, anti));
+    float foot = smoothstep(0.0, 0.08, dir.y);
+    col += (bow * 0.13 + inner * 0.03) * uRainbow * foot;
+    col *= 1.0 - alexander * 0.06 * uRainbow * foot;
+  }
+
+  // --- Lightning ------------------------------------------------------------
+  if (uFlash > 0.001) {
+    // The whole deck lights from inside; clear sky only a little.
+    col += vec3(0.78, 0.8, 1.0) * uFlash * (0.12 + 0.55 * deck * uStorm);
+    // The channel: a jagged line from the cloud base to the ground on one bearing.
+    float az = atan(dir.x, dir.z);
+    float da = mod(az - uBoltAz + 3.14159265, 6.28318531) - 3.14159265;
+    float e = asin(clamp(dir.y, -1.0, 1.0));
+    float h = clamp(e / max(uBoltTop, 0.01), 0.0, 1.0);
+    float jag = (cloudNoise(vec2(h * 9.0, uBoltSeed * 50.0)) - 0.5) * 0.03
+      + (cloudNoise(vec2(h * 31.0, uBoltSeed * 50.0 + 7.0)) - 0.5) * 0.009;
+    float width = 0.0009 + 0.0005 * (1.0 - h);
+    float core = exp(-pow((da - jag * uBoltTop * 4.0) / width, 2.0));
+    float glow = exp(-abs(da - jag * uBoltTop * 4.0) / (width * 8.0));
+    float span = step(0.0, e) * step(e, uBoltTop);
+    col += vec3(0.85, 0.87, 1.0) * (core * 2.0 + glow * 0.25) * span * uFlash;
+  }
 
   // Disc edges are one-pixel derivative transitions. The old fixed dot-product
   // width was wider than the Moon itself and mixed its dark limb into nearby sky.
@@ -700,6 +921,26 @@ export class Sky {
   private readonly uCloudAmount = { value: 0 };
   /** Deck drift clock, seconds, wrapped well inside float precision. */
   private readonly uCloudTime = { value: 0 };
+  // --- Weather (see the SKY_FRAGMENT weather block) ---
+  private readonly uDomeFlat = { value: 0 };
+  private readonly uStorm = { value: 0 };
+  private readonly uCells = { value: 0 };
+  private readonly uCellsAz = { value: 0 };
+  private readonly uHalo = { value: 0 };
+  private readonly uDogA = new THREE.Vector3();
+  private readonly uDogAOut = new THREE.Vector3();
+  private readonly uDogB = new THREE.Vector3();
+  private readonly uDogBOut = new THREE.Vector3();
+  private readonly uRainbow = { value: 0 };
+  private readonly uFlash = { value: 0 };
+  private readonly uBoltAz = { value: 0 };
+  private readonly uBoltTop = { value: 0.1 };
+  private readonly uBoltSeed = { value: 0 };
+  /** Fog density the weather adds on top of the scaled base (see FOG_HAZE). */
+  private weatherFog = 0;
+  /** The dust storm's share of it: what a haboob throws ahead of its own wall. */
+  private dustFog = 0;
+  private readonly _weatherTint = new THREE.Color();
 
 
   // --- Scratch state, reused every frame (no allocation in the hot path) ---
@@ -777,6 +1018,20 @@ export class Sky {
         uCloudCover: this.uCloudCover,
         uCloudAmount: this.uCloudAmount,
         uCloudTime: this.uCloudTime,
+        uDomeFlat: this.uDomeFlat,
+        uStorm: this.uStorm,
+        uCells: this.uCells,
+        uCellsAz: this.uCellsAz,
+        uHalo: this.uHalo,
+        uDogA: { value: this.uDogA },
+        uDogAOut: { value: this.uDogAOut },
+        uDogB: { value: this.uDogB },
+        uDogBOut: { value: this.uDogBOut },
+        uRainbow: this.uRainbow,
+        uFlash: this.uFlash,
+        uBoltAz: this.uBoltAz,
+        uBoltTop: this.uBoltTop,
+        uBoltSeed: this.uBoltSeed,
       },
       side: THREE.BackSide,
       // The sky is the backdrop: draw first, never write depth, never test it,
@@ -905,8 +1160,35 @@ export class Sky {
     this._horizon.lerp(this._moodHorizon, sunset * (0.45 + 0.55 * g.dust));
     this._horizon.lerp(C_TURBID, g.dust * 0.35 * day);
 
+    // --- Weather pulls ---
+    // Order matters only where two overlap: scrubbed air first (it is the baseline
+    // the others darken), then the veil, the deck and the dust, heaviest last.
+    const w = weather;
+    this._zenith.lerp(C_CLEAR_ZENITH, w.clarity * 0.6 * day);
+    this._horizon.lerp(C_CLEAR_HORIZON, w.clarity * 0.45 * day);
+    this._zenith.lerp(C_HAZE_ZENITH, w.haze * 0.75 * day);
+    this._horizon.lerp(C_HAZE_HORIZON, w.haze * 0.85 * day);
+    this._zenith.lerp(this._weatherTint.copy(C_HAZE_HORIZON).lerp(C_DUST_ZENITH, 0.3), w.halo * 0.18 * day);
+    this._zenith.lerp(C_STORM_ZENITH, w.cloud * 0.9 * day);
+    this._horizon.lerp(C_STORM_HORIZON, w.cloud * 0.8 * day);
+    // At night a storm deck still hides the last blue of the sky: darker, not grey.
+    this._zenith.multiplyScalar(1 - 0.5 * w.cloud * night);
+    this._horizon.multiplyScalar(1 - 0.35 * w.cloud * night);
+    this._weatherTint.copy(C_DUST_HORIZON).lerp(C_DUST_NIGHT, night);
+    // Ahead of a haboob the air is already carrying its outflow: the horizon, and so
+    // the fog the land dissolves into, browns as the wall comes, instead of leaving
+    // the far ridges as pale blue ghosts in front of it.
+    this._horizon.lerp(this._weatherTint, Math.max(w.dust * 0.95, w.front ** 4 * 0.55));
+    this._weatherTint.copy(C_DUST_ZENITH).lerp(C_DUST_NIGHT, night);
+    this._zenith.lerp(this._weatherTint, Math.max(w.dust * 0.97, w.front ** 8 * 0.6));
+
     // Sun disc: warm at low angle, white overhead.
     this._sunColor.copy(C_SUN_LOW).lerp(C_SUN_HIGH, smoothstep(0.0, 0.55, this.sunElevation));
+    // What reaches the eye through the weather. Haze turns the disc into the pale,
+    // flat coin you can look straight at; a storm deck or a dust storm takes it away.
+    const sunThrough =
+      (1 - 0.6 * weather.haze) * (1 - 0.97 * weather.dust) * (1 - 0.94 * weather.cloud);
+    this._sunColor.lerp(C_SUN_LOW, weather.haze * 0.35).multiplyScalar(sunThrough);
     // Twilight owns the halo colour only near the horizon. A high Sun blooms
     // toward its own warm-white disc instead of carrying a sunset mood overhead.
     this._sunGlow.copy(this._sunColor).lerp(this._moodGlow, sunset);
@@ -918,10 +1200,17 @@ export class Sky {
     const sunGlowIntensity = Math.max(
       authoredSunGlow,
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
-    );
+    ) * sunThrough * (1 + 0.8 * weather.haze * (1 - weather.dust));
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
     this.fog.color.copy(this._horizon);
-    this.fog.density = BASE_FOG_DENSITY * g.haze;
+    this.fog.density =
+      BASE_FOG_DENSITY * g.haze * (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust));
+    this.dustFog = FOG_DUST * Math.max(weather.dust, 0.2 * smoothstep(0.88, 1, weather.front));
+    this.weatherFog =
+      FOG_HAZE * weather.haze +
+      this.dustFog +
+      FOG_RAIN * weather.rain +
+      FOG_STORM * weather.cloud;
 
     // --- Dome uniforms ---
     this.uSunDir.copy(celestial.sun.direction);
@@ -947,9 +1236,18 @@ export class Sky {
     // held through dusk — a lit deck at sunset is the best the sky ever looks — and
     // gone by the time `night` reaches 1, past nautical dusk, because the dome cannot
     // occlude a star.
-    this.uCloudCover.value = g.cloudCover;
-    this.uCloudAmount.value = 1 - night;
+    this.uCloudCover.value = Math.max(
+      g.cloudCover * (1 - weather.clarity * 0.5),
+      0.5 + 0.5 * weather.cloud,
+      g.cloudCover + weather.halo * 0.25,
+    );
+    // A storm deck stays visible after dark (it is lit by the town-less desert's
+    // nothing, and by lightning), so it does not fade with the night like cirrus.
+    // Haze and dust swallow the high cloud: the sky above a mgla is one milky veil.
+    this.uCloudAmount.value =
+      Math.max(1 - night, weather.cloud * 0.9) * (1 - 0.85 * weather.haze) * (1 - weather.dust);
     this.uCloudTime.value = (performance.now() * 0.001) % 3600;
+    this.updateWeatherOptics(celestial.sun.direction);
 
     // --- Photometric exposure and real catalogue stars ---
     //
@@ -978,7 +1276,10 @@ export class Sky {
       1,
       (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
     );
-    const starVisibility = smoothstep(0.12, -0.12, this.sunElevation);
+    // Cloud, dust and a thick haze put out the stars and the Moon they would hide.
+    const overcast = Math.max(weather.cloud, weather.dust, weather.haze * 0.75);
+    const starVisibility = smoothstep(0.12, -0.12, this.sunElevation) * (1 - 0.97 * overcast);
+    this.uMoonAmount.value *= 1 - 0.92 * overcast;
     this.starField.update(
       celestial.equatorialToWorld,
       celestialExposure / 18_000,
@@ -992,8 +1293,15 @@ export class Sky {
     // exposes the same blend for colour, so the horizon hand-off cannot step.
     this._lightDir.copy(celestial.keyDirection);
     this._lightColor.copy(C_MOON).lerp(this._sunColor, celestial.keySunWeight);
-    this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure;
+    // The key through the weather. Not the disc's `sunThrough`: the eye adapts to
+    // a dimmer day, so the ground loses far less than the disc does. What is taken
+    // from the key is partly handed to the fill below, which is what makes overcast
+    // light flat instead of merely dark.
+    const keyThrough =
+      (1 - 0.5 * weather.haze) * (1 - 0.88 * weather.dust) * (1 - 0.82 * weather.cloud ** 1.6);
+    this.sunLight.intensity = (celestial.keyIlluminanceLux / 40_000) * this.exposure * keyThrough;
     this.sunLight.color.copy(this._lightColor);
+    if (weather.dust > 0) this.sunLight.color.lerp(C_DUST_HORIZON, weather.dust * 0.6);
 
     // Diffuse sky/ground bounce retains real day-to-night ratios by day, and floors
     // at an authored moonlit fill by night (see NIGHT_FILL_INTENSITY): photometric
@@ -1020,6 +1328,16 @@ export class Sky {
       photometricFill,
       NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,
     );
+    // Weather on the fill: overcast and haze scatter the lost key into the sky, so
+    // the fill grows and takes the sky's own colour; dust is dimmer and orange.
+    this.hemiLight.color.lerp(this._horizon, Math.min(1, weather.cloud * 0.7 + weather.haze * 0.5 + weather.dust * 0.8));
+    this.hemiLight.groundColor.lerp(this._horizon, weather.dust * 0.5 + weather.cloud * 0.3);
+    this.hemiLight.intensity *=
+      (1 + 0.35 * weather.haze + 0.45 * weather.cloud * day) * (1 - 0.35 * weather.dust);
+    if (weather.flash > 0) {
+      this.hemiLight.color.lerp(C_FLASH, Math.min(1, weather.flash));
+      this.hemiLight.intensity += weather.flash * 2.2 * GRAPHICS_CONFIG.hemisphereIntensityScale;
+    }
 
     this.refreshEnvironment();
 
@@ -1078,7 +1396,8 @@ export class Sky {
     const keyShare = key / Math.max(1e-9, key + this.hemiLight.intensity);
     const shadowStrength =
       smoothstep(0, SHADOW_FADE_ELEVATION, elevation) *
-      smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare);
+      smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare) *
+      (1 - 0.45 * weather.haze) * (1 - 0.9 * weather.dust) * (1 - 0.75 * weather.cloud);
     this.sunLight.shadow.intensity = shadowStrength;
     // A zero-strength shadow is never drawn again until it returns. Freezing the map
     // rather than clearing `castShadow` is the point: `castShadow` is compiled into
@@ -1094,6 +1413,68 @@ export class Sky {
     shadow.autoUpdate = shadowStrength > 0 || shadow.map === null;
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
+  }
+
+  /**
+   * The dome's weather uniforms: deck, cells, halo and sun dogs, rainbow, lightning.
+   * Geometry is worked out here once a frame so the fragment shader only compares.
+   */
+  private updateWeatherOptics(sun: THREE.Vector3): void {
+    const w = weather;
+    this.uStorm.value = w.cloud;
+    this.uDomeFlat.value = Math.min(0.97, w.dust * 0.97 + w.haze * 0.55 + w.rain * 0.35 + w.front ** 8 * 0.55);
+    this.uCells.value = w.cells;
+    // Cells stand upwind: the storm is coming from where the wind comes from.
+    this.uCellsAz.value = Math.atan2(-w.windX, -w.windZ);
+    this.uHalo.value = w.halo;
+    if (w.halo > 0) {
+      // Sun dogs sit at the sun's own elevation, on a circle that widens off the
+      // 22-degree ring as the sun climbs (about 1 degree at 20, 4 at 40).
+      const h = Math.asin(Math.min(1, Math.max(-1, sun.y)));
+      const sep = HALO_RADIUS + 0.2 * h * h;
+      const ch = Math.cos(h);
+      const cosDa = Math.min(1, Math.max(-1, (Math.cos(sep) - sun.y * sun.y) / Math.max(1e-4, ch * ch)));
+      const da = Math.acos(cosDa);
+      const az = Math.atan2(sun.x, sun.z);
+      for (const [dog, out, sign] of [
+        [this.uDogA, this.uDogAOut, 1],
+        [this.uDogB, this.uDogBOut, -1],
+      ] as const) {
+        const a = az + sign * da;
+        dog.set(Math.sin(a) * ch, sun.y, Math.cos(a) * ch);
+        out.set(Math.cos(a) * sign, 0, -Math.sin(a) * sign);
+      }
+    }
+    // A rainbow wants rain in the air, the sun out, and the sun below 42 degrees.
+    const sunOut = 1 - smoothstep(0.35, 0.85, w.cloud);
+    this.uRainbow.value =
+      smoothstep(0.01, 0.12, w.rain) * sunOut * smoothstep(0.02, 0.1, sun.y) *
+      (1 - smoothstep(0.62, 0.72, sun.y)) * (1 - w.dust);
+    this.uFlash.value = w.flash;
+    this.uBoltAz.value = w.boltAzimuth;
+    // A cloud base about 2.5 km up, seen from the stroke's distance.
+    this.uBoltTop.value = Math.atan2(2500, w.boltDistance);
+    this.uBoltSeed.value = w.boltSeed;
+  }
+
+  /** The sun's display colour as the dome draws it this frame. Live — do not retain. */
+  get sunColor(): THREE.Color {
+    return this._sunColor;
+  }
+
+  /** The horizon band (and fog) colour this frame. Live — do not retain. */
+  get horizonColor(): THREE.Color {
+    return this._horizon;
+  }
+
+  /** The dust storm's share of `weatherFogDensity`, per metre. */
+  get dustFogDensity(): number {
+    return this.dustFog;
+  }
+
+  /** Fog density the weather adds on top of the draw-distance-scaled base, per metre. */
+  get weatherFogDensity(): number {
+    return this.weatherFog;
   }
 
   /**
@@ -1185,7 +1566,17 @@ export class Sky {
    * equally visible against roughly 100,000 lux of daylight.
    */
   get artificialLightFactor(): number {
-    return 1 - this.dayFactor * 0.995;
+    return 1 - this.seeingLight * 0.995;
+  }
+
+  /**
+   * How much daylight there is to SEE by, 0..1: the day factor with the weather's
+   * gloom taken off. A haboob or a storm deck is dusk at noon, so beams read again
+   * and drivers switch their lamps on (world/traffic.ts reads this).
+   */
+  get seeingLight(): number {
+    const gloom = Math.min(1, weather.dust * 0.9 + weather.cloud * 0.45 + weather.haze * 0.15);
+    return this.dayFactor * (1 - gloom * 0.8);
   }
 
 

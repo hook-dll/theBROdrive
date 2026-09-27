@@ -429,6 +429,36 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float MIRAGE_CRITICAL_RAD;
   uniform float MIRAGE_BLEND;
 
+  // --- Weather (world/weather.ts) ---
+  /** Distance to an approaching haboob wall, metres upwind; negative when none. */
+  uniform float uWallM;
+  /** Unit horizontal direction the wind blows toward (world x, z). */
+  uniform vec2 uWindDir;
+  /** The camera's absolute position along the wall, reduced to one noise period. */
+  uniform float uWallPan;
+  uniform float uWallTime;
+  /** Direction to the sun, world space; the sun's display colour; the sky's horizon. */
+  uniform vec3 uSunDirW;
+  uniform vec3 uSunCol;
+  uniform vec3 uWallAir;
+  /** The dust's own colour: the sand here, carried round the palette (render/desertdust.ts). */
+  uniform vec3 uDustAlbedo;
+  /** The thin horizon sand veil's colour, following the sand the same way. */
+  uniform vec3 uSandVeil;
+  /** How thick the air is (dust, heavy haze), 0..1. */
+  uniform float uAirThick;
+  /** The FogExp2 density the dust storm adds this frame (sky.dustFogDensity). */
+  uniform float uFogDensity;
+  /** Colour separation of the grade: >1 scrubbed air, <1 haze and dust. */
+  uniform float uGradeSat;
+  /**
+   * Suspended haze from the first tens of metres out. The scene fog is exponential-
+   * squared, which is right for distance and leaves the near world spotless; real
+   * mgla or rain takes the contrast off the NEAR ground too, and that flat, milky
+   * foreground is most of what makes it read as weather rather than as far fog.
+   */
+  uniform float uVeil;
+
   varying vec2 vUv;
 
   /** Strata the lattice repeats at vertically; see HAZE_PHASE_PERIOD. */
@@ -544,6 +574,81 @@ export const HAZE_FRAGMENT = /* glsl */ `
       (1.0 - broadShare) * broad - broadShare * fine,
       broadShare * broad + (1.0 - broadShare) * fine
     );
+  }
+
+  /** Value noise for the dust wall. Arguments stay within a few hundred cells. */
+  float wallNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 w = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(strataHash(i), strataHash(i + vec2(1.0, 0.0)), w.x),
+      mix(strataHash(i + vec2(0.0, 1.0)), strataHash(i + vec2(1.0, 1.0)), w.x),
+      w.y
+    );
+  }
+
+  float wallFbm(vec2 p) {
+    return wallNoise(p) * 0.55 + wallNoise(p * 2.13 + 17.0) * 0.3 + wallNoise(p * 4.37 + 41.0) * 0.15;
+  }
+
+  /**
+   * THE HABOOB WALL, as what it is: a slab of dust standing on a line across the wind,
+   * a kilometre high, marching downwind. Every pixel's ray is intersected with the
+   * wall's face; if it enters the dust before it reaches the surface the pixel shows,
+   * the rest of the ray inside the dust is what hides that surface. So the wall rises
+   * behind the dunes and in front of the sky, swallows the road as it comes, and when
+   * it is fifty metres away the whole world beyond fifty metres is inside it — with
+   * no geometry, no sorting and one branch nobody pays for on a clear day.
+   *
+   * Returns rgb and opacity.
+   */
+  vec4 dustWall(vec3 dir, float sceneDistance) {
+    float toward = -dot(dir.xz, uWindDir);
+    // Cut exactly where the distance fade below reaches zero, never before it.
+    if (toward * 22000.0 <= uWallM) return vec4(0.0);
+    float entry = uWallM / toward;
+    if (entry >= sceneDistance) return vec4(0.0);
+    vec3 at = dir * entry;
+    float height = at.y + uEyeAbove;
+    float along = dot(at.xz, vec2(-uWindDir.y, uWindDir.x)) + uWallPan;
+    // Seen along its own length the wall recedes for tens of kilometres; there its
+    // fine billows would be sub-pixel noise, so detail gives way to the broad shape.
+    float far = smoothstep(2500.0, 14000.0, entry);
+    // Crest: towers up to a kilometre and a half along a ragged line, rolling up and
+    // over as they come. The billow is advected upward in height, which is how the
+    // leading edge of a density current actually churns.
+    float crest = mix(mix(560.0, 1450.0, wallFbm(vec2(along / 1300.0, 3.1))), 950.0, far);
+    float billow = mix(wallFbm(vec2(along / 210.0, height / 180.0 - uWallTime * 0.05)), 0.5, far);
+    float edge = crest + (billow - 0.5) * 520.0;
+    float body = smoothstep(edge + 25.0, edge - 150.0, height);
+    float path = min(sceneDistance, 60000.0) - entry;
+    // Far along its own length the wall thins into the air instead of ending.
+    float opacity = body * (1.0 - exp(-path / 40.0)) * (1.0 - smoothstep(6000.0, 22000.0, entry));
+    // Light. The face we see points downwind; it is lit when the sun is on our side
+    // of it and a silhouette with a burning crest when the sun is behind it.
+    vec2 sunFlat = uSunDirW.xz / max(1e-3, length(uSunDirW.xz));
+    float frontLit = clamp(0.5 + 0.5 * dot(uWindDir, sunFlat), 0.0, 1.0);
+    float rise = clamp(height / max(edge, 1.0), 0.0, 1.0);
+    // The face is not a curtain: lobes of denser dust bulge out of it and catch the
+    // light, with darker hollows between, and it is streaked where it drags the ground.
+    float lobes = mix(wallFbm(vec2(along / 320.0, height / 140.0 - uWallTime * 0.03) + 5.0), 0.5, far);
+    float puff = smoothstep(0.25, 0.8, billow) * 0.5 + smoothstep(0.3, 0.75, lobes) * 0.5;
+    vec3 albedo = uDustAlbedo;
+    vec3 lit = uSunCol * (0.15 + 0.8 * frontLit) * mix(0.25, 0.95, pow(rise, 1.3)) * (0.75 + 0.4 * puff);
+    vec3 col = albedo * (uWallAir * 0.45 * (0.85 + 0.25 * puff) + lit);
+    // Crest rim when the sun is behind: a thin bright fringe along the edge.
+    float rim = smoothstep(edge - 140.0, edge - 10.0, height) * (1.0 - frontLit);
+    col += uSunCol * vec3(1.0, 0.72, 0.42) * rim * 0.45;
+    // Aerial perspective: tens of kilometres of air turn it into a stain.
+    // Aerial perspective: the dust the storm itself has thrown ahead of the wall, by
+    // the same law the scene's fog applies to the land, so near arrival a ridge and
+    // the wall behind it fade together instead of the ridge standing as a pale
+    // cut-out. The clear-air base fog is left out: in clean air a haboob is seen from
+    // tens of kilometres, far more sharply than the land in front of it.
+    float fogged = 1.0 - exp(-uFogDensity * uFogDensity * entry * entry);
+    col = mix(col, uWallAir, max(fogged, 1.0 - exp(-entry / 16000.0)));
+    return vec4(col, opacity);
   }
 
   /**
@@ -678,6 +783,13 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // it compiles the real pass with this one define and the rest skipped.
     #ifndef HAZE_MEASURE_SOURCE
 
+    if (uWallM >= 0.0) {
+      vec3 wallView = cameraRay(vUv);
+      float sceneD = -ownViewZ >= uCameraFar * 0.999 ? 1e7 : rayDistance(ownViewZ, wallView);
+      vec4 wall = dustWall(normalize(uCameraRotation * wallView), sceneD);
+      color.rgb = mix(color.rgb, wall.rgb, wall.a);
+    }
+
     // ACES' toe is intentionally cinematic, but in a sunlit desert it crushed
     // backlit paint and props into the same near-black. A small display-space
     // expansion restores separation inside dark colours without lifting true
@@ -696,7 +808,11 @@ export const HAZE_FRAGMENT = /* glsl */ `
       1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, vUv.y);
     float sandVeil =
       smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
-    color.rgb = mix(color.rgb, vec3(0.78, 0.69, 0.56), sandVeil);
+    // In thick air the veil is that air, or it draws a pale band along the skyline.
+    color.rgb = mix(color.rgb, mix(uSandVeil, uWallAir, uAirThick), sandVeil);
+    if (uVeil > 0.0 && airDistance < uCameraFar * 0.999) {
+      color.rgb = mix(color.rgb, uWallAir, uVeil * (1.0 - exp(-airDistance / 320.0)));
+    }
 
 
     // ACES has already supplied the filmic shoulder and soft contrast in the scene
@@ -705,7 +821,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // cooler shadows. It enriches the desert palette without installing a second
     // tone mapper or clipping the shoulder ACES just made.
     float gradeLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    color.rgb = mix(vec3(gradeLum), color.rgb, 1.055);
+    color.rgb = mix(vec3(gradeLum), color.rgb, 1.055 * uGradeSat);
     float highlightWarmth = smoothstep(0.16, 0.82, gradeLum);
     color.rgb *= mix(
       vec3(0.993, 0.998, 1.006),

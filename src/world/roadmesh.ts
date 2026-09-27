@@ -327,6 +327,7 @@ const roadMaterial = applyCloudShadow(
       metalness: 0,
     }),
   ),
+  { wetSheen: true },
 );
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyCloudShadow(
@@ -380,6 +381,7 @@ const markingMaterial = applyCloudShadow(
       polygonOffsetUnits: -1,
     }),
   ),
+  { wetSheen: true },
 );
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */

@@ -8,6 +8,7 @@
 
 import { SURFACES, type SurfaceType } from '../core/surfaces';
 import type { WheelSpray } from '../render/wheelspray';
+import { weather } from '../world/weather';
 import type { SandTyreTracks } from '../render/tyretracks';
 import type { Vehicle, WheelSprayState } from '../vehicle/vehicle';
 import type { TrailerField } from '../vehicle/trailer';
@@ -98,7 +99,10 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
     // zero during a held burnout (wheels spinning, car stationary), so floor it at
     // the slip speed: slip ratio is (ωr − v)/ref, so ωr ≈ v + slip·ref.
     const speed = Math.max(Math.abs(ws.forwardSpeed), slip * SPRAY_REF_SPEED);
-    const raise = props.dust + props.smoke * SPRAY_SMOKE_YIELD;
+    // A wet road does not smoke a tyre and wet sand does not fly (world/weather.ts).
+    const dry = 1 - weather.wet;
+    const smoke = props.smoke * dry;
+    const raise = props.dust * (1 - 0.8 * weather.wet) + smoke * SPRAY_SMOKE_YIELD;
     const strength = raise * slip * speed;
     if (strength <= 0) return;
     ctx.spray.emit(
@@ -108,7 +112,7 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
       ws.forwardX,
       ws.forwardZ,
       strength,
-      (props.smoke * SPRAY_SMOKE_YIELD) / raise,
+      (smoke * SPRAY_SMOKE_YIELD) / raise,
       frameDt,
     );
   };

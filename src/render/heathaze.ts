@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import { ambientAirC } from '../vehicle/cooling';
 import type { Road } from '../world/road';
+import { weather } from '../world/weather';
 import type { Terrain } from '../world/terrain';
 import { CLOUD_DARKEN_MAX, cloudShadowFrame, cloudShadowShadeAt } from './cloudshadow';
 import type { HeatHazeFrame } from './hazeshader';
@@ -199,8 +200,12 @@ export class HeatHaze {
           ) * (clouds.strength / CLOUD_DARKEN_MAX)
         : 0;
     const flat = 1 - smoothstep(FLAT_RMS_M, ROUGH_RMS_M, rms);
-    this.frame.shimmer = heat * (1 - (1 - SHADED_SHIMMER) * shade);
-    this.frame.mirage = heat * (1 - shade) * flat;
+    // Weather: a heat wave stokes the layer; wet ground, a closed deck, dust or a
+    // thick haze take the sun off the sand and the boil with it (world/weather.ts).
+    const quench = 1 - Math.max(weather.cloud * 0.9, weather.wet, weather.dust, weather.haze * 0.6);
+    const stoke = 1 + 0.7 * weather.heat;
+    this.frame.shimmer = Math.min(1, heat * (1 - (1 - SHADED_SHIMMER) * shade) * stoke) * quench;
+    this.frame.mirage = Math.min(1, heat * (1 - shade) * flat * (stoke + 0.3 * weather.heat)) * quench;
     return this.frame;
   }
 }

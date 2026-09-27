@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SandColor } from '../render/desertdust';
 import '../render/lightshader';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import {
@@ -40,6 +41,11 @@ import type { ShadeTint } from '../items/items';
  * needs at least this much reach, so `setViewDistance` never drops below it: the
  * drawn horizon may shrink, but the dome must keep resolving.
  */
+/** Albedo of a haboob wall, authored against the starting sand. */
+const WALL_DUST = new SandColor(new THREE.Color(0.72, 0.42, 0.2));
+/** The distant sand veil over the horizon, likewise. */
+const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
+
 export const CAMERA_FAR = 4000;
 /**
  * Near-plane floor in metres. The hood camera sits a hand's width off the bonnet,
@@ -366,6 +372,8 @@ export class Renderer {
   private daylight = 0;
   private shimmerStrength = 0;
   private mirageStrength = 0;
+  /** A haboob wall is being drawn, which needs the resolved depth. */
+  private wallActive = false;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -515,6 +523,19 @@ export class Renderer {
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
         uCameraViewfinder: { value: 0 },
+        uWallM: { value: -1 },
+        uWindDir: { value: new THREE.Vector2(1, 0) },
+        uWallPan: { value: 0 },
+        uWallTime: { value: 0 },
+        uSunDirW: { value: new THREE.Vector3(0, 1, 0) },
+        uSunCol: { value: new THREE.Color(1, 1, 1) },
+        uWallAir: { value: new THREE.Color(1, 1, 1) },
+        uGradeSat: { value: 1 },
+        uVeil: { value: 0 },
+        uDustAlbedo: { value: WALL_DUST.value },
+        uSandVeil: { value: SAND_VEIL.value },
+        uAirThick: { value: 0 },
+        uFogDensity: { value: 0 },
       },
     });
     this.hazeGeometry = new THREE.BufferGeometry();
@@ -861,6 +882,46 @@ export class Renderer {
     this.updateDepthResolve();
   }
 
+  /**
+   * The weather's share of the finishing pass: the approaching dust wall and the
+   * grade's colour separation (world/weather.ts). `wallAlongM` is the camera's
+   * absolute position across the wind, so the wall's crest stays put in the world.
+   */
+  setWeather(frame: {
+    wallM: number;
+    windX: number;
+    windZ: number;
+    wallAlongM: number;
+    timeS: number;
+    sunDirection: { x: number; y: number; z: number };
+    sunColor: THREE.Color;
+    air: THREE.Color;
+    saturation: number;
+    veil: number;
+    airThick: number;
+    /** The dust storm's own fog density (sky.dustFogDensity). */
+    weatherFog: number;
+  }): void {
+    const u = this.hazeMaterial.uniforms;
+    u.uWallM.value = frame.wallM;
+    const wallWas = this.wallActive;
+    this.wallActive = frame.wallM >= 0;
+    if (wallWas !== this.wallActive) this.updateDepthResolve();
+    (u.uWindDir.value as THREE.Vector2).set(frame.windX, frame.windZ);
+    // One period of the crest noise (1100 m cells, 48 of them) so the uniform never
+    // carries a road-sized number into f32.
+    const period = 1100 * 48;
+    u.uWallPan.value = frame.wallAlongM - period * Math.floor(frame.wallAlongM / period);
+    u.uWallTime.value = frame.timeS % 2000;
+    (u.uSunDirW.value as THREE.Vector3).set(frame.sunDirection.x, frame.sunDirection.y, frame.sunDirection.z);
+    (u.uSunCol.value as THREE.Color).copy(frame.sunColor);
+    (u.uWallAir.value as THREE.Color).copy(frame.air);
+    u.uGradeSat.value = frame.saturation;
+    u.uVeil.value = frame.veil;
+    u.uAirThick.value = frame.airThick;
+    u.uFogDensity.value = frame.weatherFog;
+  }
+
   private updateDepthResolve(): void {
     // THE WARP IS NOT THE ONLY THING THAT SAMPLES DEPTH, which is what this line
     // used to assume. `tDepth` also decides where the sand veil begins and — far
@@ -876,7 +937,11 @@ export class Renderer {
     // The resolve is skipped only when nothing in the pass reads depth at all.
     const ink = this.hazeMaterial.uniforms.uInkStrength.value as number;
     this.hazeTarget.resolveDepthBuffer =
-      this.shimmerStrength > 0 || this.mirageStrength > 0 || ink > 0 || this.daylight > 0;
+      this.shimmerStrength > 0 ||
+      this.mirageStrength > 0 ||
+      ink > 0 ||
+      this.daylight > 0 ||
+      this.wallActive;
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */

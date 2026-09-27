@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { MATERIALS_CONFIG } from '../config';
 import { applyComicShading } from './comic';
+import { SandColor } from './desertdust';
 
 /** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
@@ -82,6 +83,21 @@ function flatKey(color: number, roughness: number): string {
 }
 
 /** Stable program cache key for every condition material. */
+/**
+ * The dust a car collects, authored against the sand the drive starts on and carried
+ * round the palette with it (render/desertdust.ts): a lighter settled film, a darker
+ * packed crust, and the pale film a bare part gathers. Shared by every program.
+ */
+const DUST_LIGHT = new SandColor(new THREE.Color(0.58, 0.46, 0.3));
+const DUST_CRUST = new SandColor(new THREE.Color(0.4, 0.29, 0.16));
+const DUST_FILM = new SandColor(new THREE.Color(0.72, 0.66, 0.55));
+
+function bindDesertDust(shader: WebGLProgramParametersWithUniforms): void {
+  shader.uniforms.uDustLight = { value: DUST_LIGHT.value };
+  shader.uniforms.uDustCrust = { value: DUST_CRUST.value };
+  shader.uniforms.uDustFilm = { value: DUST_FILM.value };
+}
+
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v2';
 
 /**
@@ -159,6 +175,9 @@ float condNoise( vec3 p ) {
 
 const CONDITION_PARS = `
 uniform float uDirt;
+uniform vec3 uDustLight;
+uniform vec3 uDustCrust;
+uniform vec3 uDustFilm;
 uniform float uRust;
 ${CONDITION_NOISE}
 
@@ -216,6 +235,9 @@ vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
  */
 const CAR_BODY_PARS = `#include <common>
 uniform float uDirt;
+uniform vec3 uDustLight;
+uniform vec3 uDustCrust;
+uniform vec3 uDustFilm;
 uniform float uScratch;
 uniform vec3 uCarFieldOrigin;
 uniform vec3 uCarBodyHalf;
@@ -361,7 +383,7 @@ if ( uDirt + uScratch > 0.0005 ) {
     float carUp = saturate( ( vec4( normal, 0.0 ) * viewMatrix ).y );
     float film = uDirt * ( 0.22 + 0.33 * carUp ) * ( 0.65 + 0.7 * mottle );
     float cover = saturate( max( crust, film ) );
-    vec3 dust = mix( vec3( 0.58, 0.46, 0.3 ), vec3( 0.4, 0.29, 0.16 ), crust );
+    vec3 dust = mix( uDustLight, uDustCrust, crust );
     diffuseColor.rgb = mix( diffuseColor.rgb, dust, cover * ( 0.6 + 0.35 * crust ) );
     roughnessFactor = mix( roughnessFactor, 0.96, cover );
     metalnessFactor = mix( metalnessFactor, 0.0, cover );
@@ -393,7 +415,7 @@ const CONDITION_BODY = `
   float condPit = 1.0 - smoothstep( 0.2, 0.9, condR.y );
   float dustMask = uDirt * ( 0.3 + 0.7 * condUp ) * ( 0.45 + 0.55 * condPit );
   float condLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-  vec3 dustColor = mix( vec3( condLum ), vec3( 0.72, 0.66, 0.55 ), 0.5 );
+  vec3 dustColor = mix( vec3( condLum ), uDustFilm, 0.5 );
   diffuseColor.rgb = mix( diffuseColor.rgb, dustColor, dustMask * 0.75 );
   roughnessFactor = mix( roughnessFactor, 0.92, dustMask );
 }`;
@@ -444,6 +466,7 @@ if ( uRust > 0.001 ) {
 function patchConditionShader(shader: WebGLProgramParametersWithUniforms, uniforms: ConditionUniforms): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uRust = uniforms.rust;
+  bindDesertDust(shader);
   shader.uniforms.uCondFieldOrigin = uniforms.fieldOrigin;
 
   shader.vertexShader = shader.vertexShader
@@ -465,6 +488,7 @@ function patchCarBodyShader(
 ): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uScratch = uniforms.scratches;
+  bindDesertDust(shader);
   shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
   shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
   shader.uniforms.uCarAxles = uniforms.axles;
@@ -922,7 +946,7 @@ export function setCarBodyCondition(
 }
 
 /** The condition shader's own sand, so a weathered wreck reads as the same dust. */
-const STATIC_DUST_COLOR = new THREE.Color(0.58, 0.46, 0.3);
+const STATIC_DUST_COLOR = DUST_LIGHT.value;
 
 /**
  * Weathers a static shell's paint at no per-frame cost: its colour is pulled toward the

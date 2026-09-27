@@ -80,7 +80,7 @@ import { MonumentProvider } from './world/props/monuments';
 import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider } from './world/sidetrack';
-import { setWeatherFrame, WeatherProvider } from './world/weatherfx';
+import { updateWeather, weather } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
@@ -88,6 +88,8 @@ import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
 import { HeatHaze } from './render/heathaze';
+import { WeatherParticles } from './render/weatherparticles';
+import { setDesertDustArclength } from './render/desertdust';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
 import { CourierField } from './world/couriers';
@@ -414,6 +416,9 @@ async function boot(): Promise<void> {
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
   // Heat-haze inputs: surface heat and the ground the view is grazing.
   const heatHaze = new HeatHaze(terrain, road);
+  // Rain, flying dust and blown sand: three instanced draws, each off in fair weather.
+  const weatherParticles = new WeatherParticles(renderer.scene, world.seed);
+  const drawSize = new THREE.Vector2();
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -477,10 +482,6 @@ async function boot(): Promise<void> {
   // one breakable registry for the whole world, not one per provider.
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
-  // Distant weather: alpha sheets 600-1800 m out, no physics and no colliders. It
-  // streams like everything else so a virga shaft is built off the road frame at
-  // its own arclength and disposed with the chunk that owns it.
-  streamer.register(new WeatherProvider());
   streamer.register(new MonumentProvider());
   streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers, roadDistance));
 
@@ -1287,7 +1288,7 @@ async function boot(): Promise<void> {
     } else {
       traffic.clearPedestrianObstacle();
     }
-    traffic.setDaylightFactor(sky.dayFactor);
+    traffic.setDaylightFactor(sky.seeingLight);
     playerFieldSeat.forwardS = activeS;
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
@@ -1316,7 +1317,7 @@ async function boot(): Promise<void> {
         );
       }
       autopilot.setLightingConditions(
-        sky.dayFactor,
+        sky.seeingLight,
         traffic.nearestOncomingDistance(activeS, 1),
       );
       if (autopilot.engaged) {
@@ -1826,6 +1827,11 @@ async function boot(): Promise<void> {
 
     const cam = renderer.camera.position;
     frameProfiler?.begin('sky');
+    // Weather first: the sky, the fog, the lights and the ground all read it this
+    // frame (world/weather.ts). A function of played time, so it needs no saving.
+    updateWeather(world.seed, s.playedSeconds, frameDt);
+    // Every dust colour follows the sand the road has reached (render/desertdust.ts).
+    setDesertDustArclength(activeS);
     sky.update(
       s.calendarEpoch,
       s.timeOfDay,
@@ -1904,6 +1910,27 @@ async function boot(): Promise<void> {
     // is all there is and hides the vista completely when there is more: at the 'vast'
     // scale factor a 25 km range still fades, it just fades over 25 km.
     renderer.fog.density *= viewDistanceFogScaleFor(s.settings.graphicsQuality, mobilePresentation);
+    // Weather's own thickness goes on AFTER the draw-distance scale: a dust storm is a
+    // hundred metres of sight whatever range the player has chosen.
+    renderer.fog.density += sky.weatherFogDensity;
+    renderer.setWeather({
+      wallM: weather.frontM,
+      windX: weather.windX,
+      windZ: weather.windZ,
+      wallAlongM: (cam.x + origin.x) * -weather.windZ + (cam.z + origin.z) * weather.windX,
+      timeS: s.playedSeconds,
+      sunDirection: sky.sunDirection,
+      sunColor: sky.sunColor,
+      air: sky.horizonColor,
+      saturation:
+        (1 + 0.1 * weather.clarity) *
+        (1 - 0.2 * weather.haze) *
+        (1 - 0.12 * weather.dust) *
+        (1 - 0.18 * weather.cloud),
+      veil: Math.min(0.6, 0.45 * weather.haze + 0.3 * weather.rain + 0.12 * weather.cloud) * (1 - weather.dust),
+      weatherFog: sky.dustFogDensity,
+      airThick: Math.min(1, weather.dust + weather.haze * 0.6 + weather.front * weather.front * 0.7),
+    });
 
     // Render-only illusions: neither one owns physics, terrain, streamed props, or
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
@@ -1936,10 +1963,18 @@ async function boot(): Promise<void> {
         seed: world.seed,
       }),
     );
-    // The streamed distant weather fades on the same twilight band as the mirage
-    // above, and on an ABSOLUTE camera: its anchors are kept in f64 world metres so
-    // that a rebase cannot move them.
-    setWeatherFrame(sky.dayFactor, cam.x + origin.x, cam.z + origin.z);
+    renderer.renderer.getDrawingBufferSize(drawSize);
+    weatherParticles.update(
+      frameDt,
+      renderer.camera,
+      origin.x,
+      origin.z,
+      terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS),
+      drawSize.y,
+      renderer.fog,
+      sky.dayFactor,
+      sky.horizonColor,
+    );
     // Water in a basin. Fades by APPROACH, not by leaving the road, so it needs the
     // absolute player position; the bake is sliced through the streaming budget the
     // terrain tiles use.

@@ -2,8 +2,8 @@
  * tools/sky-variety.ts
  *
  * The two things that are supposed to make the light and the horizon stop standing
- * still: the drifting cloud shade on the ground, and the distant weather the variety
- * director schedules. Both are driven here as the game drives them.
+ * still: the drifting cloud shade on the ground, and the weather schedule
+ * (world/weather.ts). Both are driven here as the game drives them.
  *
  * WHAT A HEADLESS BENCH CAN AND CANNOT SETTLE. There is no GPU, so nothing here
  * looks at a pixel. What it can do is better than a screenshot anyway, because every
@@ -24,9 +24,8 @@
  *    when the material has already been patched twice by other systems. A shader
  *    that fails to compile is invisible in a tool that only samples functions, so
  *    the real injection is run against the real `ShaderLib` source and counted.
- *  - the weather provider builds where the director says and nowhere else, on the
- *    right side, in the right lateral band, with no physics, and disposes every
- *    geometry and material it made.
+ *  - the weather schedule is a pure function of seed and clock, stays in range,
+ *    is present for most of a drive, and never cuts one episode into the next.
  *
  *   npx tsx tools/sky-variety.ts
  *
@@ -51,62 +50,13 @@ import {
   CLOUD_DRIFT_MPS,
   CLOUD_PERIOD_M,
 } from '../src/render/cloudshadow';
-import type { ChunkContent, ChunkContext } from '../src/world/chunks';
-import { CHUNK_LENGTH } from '../src/world/chunks';
-import {
-  VarietyChannel,
-  varietyEventOfWindow,
-  varietyWindowAt,
-  varietyWindowLength,
-} from '../src/world/director';
-import { Road } from '../src/world/road';
-import { Terrain } from '../src/world/terrain';
-import {
-  setWeatherFrame,
-  weatherFamilyFor,
-  weatherLateralFor,
-  weatherOpacity,
-  WeatherProvider,
-  WEATHER_FAMILIES,
-  WEATHER_LATERAL_MIN,
-  WEATHER_LATERAL_SPAN,
-  WEATHER_NEAR_FULL,
-  WEATHER_NEAR_GONE,
-  type WeatherFamily,
-} from '../src/world/weatherfx';
+import { weatherAt, weatherKindOfSlot, WEATHER_SLOT_S, type WeatherChannels } from '../src/world/weather';
 
 const SEEDS = [1, 7, 42, 1337];
 /** Where the road gets to at 40 000 km: the f32 precision case, in metres. */
 const FAR_FROM_CENTRE = 386_000;
 /** Shade above which ground counts as "in shadow" for the run-length census. */
 const IN_SHADOW = 0.5;
-/**
- * Closest the road comes to a phenomenon WHILE IT IS ON SCREEN, against the top of
- * the proximity dissolve — which is the band the game itself will fade it with, so
- * the two are checked against each other rather than against a number typed twice.
- *
- * NOT its distance to the nearest asphalt anywhere, which is a different and
- * useless question: this road random-walks 40 000 km and comes back past its own
- * neighbourhood, so a phenomenon 900 m off one arclength can be 230 m from a
- * stretch three kilometres further on — and that stretch has its own chunks, which
- * means the phenomenon is not built, not drawn and nowhere near the player when he
- * drives it. What must hold is the local statement: over the road the fade keeps it
- * visible from, it never comes inside the dissolve, or it would fade out while the
- * player was looking straight at it. This is the check that caught the dissolve
- * ceiling being set 200 m too high.
- */
-const NEAREST_ROAD_MIN = WEATHER_NEAR_FULL;
-/**
- * The floating origin every census chunk is built under, deliberately not zero: a
- * provider must subtract it from everything it puts in the scene while sampling the
- * road and the terrain at absolute coordinates, and an origin of zero cannot tell
- * the two apart.
- */
-const CENSUS_ORIGIN_X = 128_000;
-const CENSUS_ORIGIN_Z = -64_000;
-/** Arclength either side of the event over which it can be seen; see weatherfx.ts. */
-const VISIBLE_REACH_M = 1150;
-
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
@@ -500,303 +450,57 @@ console.log('cloud shadow field');
 }
 
 // ---------------------------------------------------------------------------
-// 2. distant weather
+// 2. the weather schedule
 // ---------------------------------------------------------------------------
 
-console.log('\ndistant weather');
-
-/** A chunk build context with no physics: the provider asks for none. */
-function contextFor(
-  seed: number,
-  road: Road,
-  terrain: Terrain,
-  chunkIndex: number,
-  originX: number,
-  originZ: number,
-): ChunkContext {
-  return {
-    chunkIndex,
-    sStart: chunkIndex * CHUNK_LENGTH,
-    sEnd: (chunkIndex + 1) * CHUNK_LENGTH,
-    road,
-    terrain,
-    world: { seed },
-    hasPhysics: false,
-    originX,
-    originZ,
-  } as unknown as ChunkContext;
-}
-
+console.log('\nweather schedule');
 {
-  const provider = new WeatherProvider();
-  const CHUNKS = 2000; // 400 km of road per seed
-  const familyCount: Record<WeatherFamily, number> = { virga: 0, dustWall: 0, smokeColumn: 0 };
-  let built = 0;
-  let wrongChunk = 0;
-  let missed = 0;
-  let wrongSide = 0;
-  let outOfBand = 0;
-  let withPhysics = 0;
-  let placementMismatch = 0;
-  let tooCloseToRoad = 0;
-  let nearestToRoad = Infinity;
-  let created = 0;
-  let disposed = 0;
-  let emptySheets = 0;
-  const contents: { content: ChunkContent; index: number }[] = [];
-
+  const channels = (): WeatherChannels => ({
+    haze: 0, dust: 0, front: 0, cloud: 0, cells: 0, rain: 0, wet: 0,
+    wind: 0, drift: 0, heat: 0, halo: 0, clarity: 0,
+  });
+  const a = channels();
+  const b = channels();
+  let impure = 0;
+  let outOfRange = 0;
+  let active = 0;
+  let samples = 0;
+  let repeats = 0;
+  const kinds: Record<string, number> = {};
   for (const seed of SEEDS) {
-    const road = new Road(seed);
-    const terrain = new Terrain(seed, road);
-    const originX = CENSUS_ORIGIN_X;
-    const originZ = CENSUS_ORIGIN_Z;
-
-    for (let index = 0; index < CHUNKS; index++) {
-      const ctx = contextFor(seed, road, terrain, index, originX, originZ);
-      const content = provider.build(ctx);
-
-      // What the director itself says about this chunk, asked independently.
-      const window = varietyWindowAt(VarietyChannel.Horizon, ctx.sStart);
-      const event = varietyEventOfWindow(seed, VarietyChannel.Horizon, window);
-      const owns =
-        event.kind === 'weather' && event.s >= ctx.sStart && event.s < ctx.sEnd;
-
-      if (content === null) {
-        if (owns) missed++;
-        continue;
+    for (let t = 0; t < 6 * 3600; t += 7.3) {
+      weatherAt(seed, t, a);
+      weatherAt(seed, t, b);
+      samples++;
+      let any = 0;
+      for (const k of Object.keys(a) as (keyof WeatherChannels)[]) {
+        if (a[k] !== b[k]) impure++;
+        if (!(a[k] >= 0 && a[k] <= 1)) outOfRange++;
+        any = Math.max(any, a[k]);
       }
-      if (!owns) {
-        wrongChunk++;
-        continue;
-      }
-      built++;
-
-      const family = weatherFamilyFor(event.draw);
-      familyCount[family]++;
-      if (content.bodies.length > 0 || content.colliders.length > 0) withPhysics++;
-
-      // Where it ended up, read back off the built group rather than recomputed.
-      //
-      // MEASURED IN THE EVENT'S OWN ROAD FRAME, which is the frame the placement is
-      // expressed in, and not with `road.project`: the nearest point of a curving
-      // road to something 1800 m out in the desert can be hundreds of metres from
-      // the arclength it was placed off, so the projection's own lateral
-      // understates the offset by tens of metres on a bend. Both numbers matter, so
-      // both are taken — the frame offset against the authored band, and the
-      // closest the road comes over the stretch it is visible from.
-      const absX = content.group.position.x + originX;
-      const absZ = content.group.position.z + originZ;
-      const centre = road.sampleAt(event.s);
-      const lateral =
-        (absX - centre.x) * Math.cos(centre.heading) -
-        (absZ - centre.z) * Math.sin(centre.heading);
-      if (Math.sign(lateral) !== event.side) wrongSide++;
-      const out = Math.abs(lateral);
-      if (out < WEATHER_LATERAL_MIN || out > WEATHER_LATERAL_MIN + WEATHER_LATERAL_SPAN) {
-        outOfBand++;
-      }
-      if (Math.abs(weatherLateralFor(seed, event) - lateral) > 0.01) placementMismatch++;
-      // Swept, not projected: `project` answers for the whole 40 000 km road, and
-      // the answer wanted here is local to the road this thing is co-visible with.
-      // THE DISTANCE THAT MATTERS IS TO THE SHEETS, NOT TO THE ANCHOR, and measuring
-      // the anchor is why a 1600 m haboob stood over the road with the census
-      // reporting 600 m of clearance. The footprint is the span axis of the built
-      // group, taken from its own geometry, so the check reads the thing that is
-      // actually in the scene.
-      const yaw = content.group.rotation.y;
-      const spanX = Math.cos(yaw);
-      const spanZ = -Math.sin(yaw);
-      let halfSpan = 0;
-      content.group.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const position = mesh.geometry.getAttribute('position');
-        for (let v = 0; v < position.count; v++) {
-          halfSpan = Math.max(halfSpan, Math.abs(position.getX(v)));
-        }
-      });
-      halfSpan *= content.group.scale.x;
-      let toRoad = Infinity;
-      for (let s = event.s - VISIBLE_REACH_M; s <= event.s + VISIBLE_REACH_M; s += 10) {
-        const at = road.sampleAt(s);
-        const dx = at.x - absX;
-        const dz = at.z - absZ;
-        const alongSpan = Math.max(-halfSpan, Math.min(halfSpan, dx * spanX + dz * spanZ));
-        const d = Math.hypot(dx - alongSpan * spanX, dz - alongSpan * spanZ);
-        if (d < toRoad) toRoad = d;
-      }
-      if (toRoad < NEAREST_ROAD_MIN) tooCloseToRoad++;
-      if (toRoad < nearestToRoad) nearestToRoad = toRoad;
-
-      let sheets = 0;
-      content.group.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        sheets++;
-        created += 2; // one geometry, one material reference
-        mesh.geometry.addEventListener('dispose', () => {
-          disposed++;
-        });
-        (mesh.material as THREE.Material).addEventListener('dispose', () => {
-          disposed++;
-        });
-      });
-      if (sheets === 0) emptySheets++;
-      contents.push({ content, index });
+      if (any > 0.05) active++;
+    }
+    for (let slot = 0; slot < 400; slot++) {
+      const kind = weatherKindOfSlot(seed, slot);
+      kinds[kind] = (kinds[kind] ?? 0) + 1;
+      if (kind !== 'clear' && kind === weatherKindOfSlot(seed, slot - 1)) repeats++;
     }
   }
-
-  console.log(
-    `  ${built} phenomena over ${((CHUNKS * CHUNK_LENGTH * SEEDS.length) / 1000).toFixed(0)} km ` +
-      `of road (one every ${(
-        (CHUNKS * CHUNK_LENGTH * SEEDS.length) /
-        1000 /
-        Math.max(1, built)
-      ).toFixed(1)} km)`,
-  );
-  for (const family of WEATHER_FAMILIES) {
-    console.log(`    ${family.padEnd(13)} ${String(familyCount[family]).padStart(3)}`);
-  }
-  console.log(
-    `  a weather window is ${(varietyWindowLength(VarietyChannel.Horizon) / 1000).toFixed(1)} km long\n`,
-  );
-
-  check('it builds where the director says', missed === 0, `${missed} events with nothing built`);
-  check(
-    'and nowhere else',
-    wrongChunk === 0,
-    `${wrongChunk} chunks built something they do not own`,
-  );
-  check(
-    'every family does appear',
-    WEATHER_FAMILIES.every((f) => familyCount[f] > 0),
-    WEATHER_FAMILIES.map((f) => `${f} ${familyCount[f]}`).join(', '),
-  );
-  check('each stands on the event\'s own side', wrongSide === 0, `${wrongSide} on the wrong side`);
-  check(
-    'each stands in the lateral band',
-    outOfBand === 0,
-    `${outOfBand} outside ${WEATHER_LATERAL_MIN}-${WEATHER_LATERAL_MIN + WEATHER_LATERAL_SPAN} m`,
-  );
-  check(
-    'the placement is the pure function of the event',
-    placementMismatch === 0,
-    `${placementMismatch} disagreed with weatherLateralFor`,
-  );
-  check(
-    'none of it ends up near the asphalt',
-    tooCloseToRoad === 0,
-    `nearest road distance ${nearestToRoad.toFixed(0)} m, floor ${NEAREST_ROAD_MIN} m`,
-  );
-  check('nothing distant carries physics', withPhysics === 0, `${withPhysics} chunks with bodies or colliders`);
-  check('every phenomenon has sheets', emptySheets === 0, `${emptySheets} empty groups`);
-
-  // A known seed, spelled out, so a change to family selection or placement shows up
-  // as a diff here rather than as a different sky nobody remembers seeing.
-  {
-    const windows = 200_000 / varietyWindowLength(VarietyChannel.Horizon);
-    for (let window = 0; window < windows; window++) {
-      const event = varietyEventOfWindow(42, VarietyChannel.Horizon, window);
-      if (event.kind !== 'weather') continue;
-      console.log(
-        `\n  seed 42, first weather at ${(event.s / 1000).toFixed(2)} km ` +
-          `(horizon window ${event.index}): ${weatherFamilyFor(event.draw)}, ` +
-          `${weatherLateralFor(42, event).toFixed(0)} m ${event.side < 0 ? 'right' : 'left'} ` +
-          `of travel, draw ${event.draw.toFixed(3)}`,
-      );
-      break;
-    }
-    check(
-      'a known draw picks a known family',
-      weatherFamilyFor(0.1) === 'virga' &&
-        weatherFamilyFor(0.5) === 'dustWall' &&
-        weatherFamilyFor(0.9) === 'smokeColumn',
-      'thirds of draw select virga, dustWall, smokeColumn',
-    );
-  }
-
-  // The live set, both ways round. Showing it FIRST is what makes the disposal
-  // check mean anything: an unregistered phenomenon is invisible for free, so a
-  // "not visible after dispose" assertion on its own passes whether or not the
-  // dispose ever removed it.
-  const last = contents[contents.length - 1]!;
-  const anchorX = last.content.group.position.x + CENSUS_ORIGIN_X;
-  const anchorZ = last.content.group.position.z + CENSUS_ORIGIN_Z;
-  let shown = false;
-  let camX = anchorX;
-  let camZ = anchorZ;
-  for (let i = 0; i < 16 && !shown; i++) {
-    // A bearing at a time, at a distance inside the along fade and outside the
-    // proximity dissolve, until one of them is a place the thing can be seen from.
-    const angle = (i / 16) * Math.PI * 2;
-    camX = anchorX + Math.cos(angle) * 700;
-    camZ = anchorZ + Math.sin(angle) * 700;
-    setWeatherFrame(1, camX, camZ);
-    shown = last.content.group.visible;
-  }
-  const sheetMaterial = (last.content.group.children[0] as THREE.Mesh | undefined)
-    ?.material as THREE.Material | undefined;
-  check(
-    'a streamed phenomenon is shown from the road',
-    shown,
-    `${last.content.group.children.length} sheets at ` +
-      `${((sheetMaterial?.opacity ?? 0) * 100).toFixed(0)}% opacity from 700 m`,
-  );
-
-  // Dispose everything and count. The streamer disposes via `dispose`, so this is
-  // the same call path a chunk leaving range takes.
-  for (const entry of contents) entry.content.dispose?.();
-  check(
-    'every geometry and material is released',
-    created > 0 && disposed === created,
-    `${disposed} of ${created} disposed across ${contents.length} chunks`,
-  );
-
-  // Same phenomenon after disposal, from a camera that WOULD have changed it: the
-  // sentinel survives only if the live set let go of it, and the group has been put
-  // to sleep rather than left in whatever state the last frame wrote.
-  const SENTINEL = 0.5;
-  if (sheetMaterial) sheetMaterial.opacity = SENTINEL;
-  setWeatherFrame(1, camX + 40_000, camZ + 40_000);
-  check(
-    'a disposed phenomenon leaves the frame',
-    !last.content.group.visible && sheetMaterial?.opacity === SENTINEL,
-    'hidden by dispose, and no longer written to',
-  );
-}
-
-// -- the fade envelope --------------------------------------------------------
-
-{
-  check(
-    'it is gone before its chunk unloads',
-    weatherOpacity(1, 1150, 1000) === 0 && weatherOpacity(1, 3000, 1000) === 0,
-    'zero by 1150 m along, inside the 1200 m visual radius',
-  );
-  check(
-    'it is up while the event spans the road',
-    weatherOpacity(1, 0, 1000) > 0.98 && weatherOpacity(1, 600, 1000) > 0.98,
-    `${(weatherOpacity(1, 600, 1000) * 100).toFixed(0)}% at 600 m along`,
-  );
-  check(
-    'it dissolves before it can be reached',
-    weatherOpacity(1, 0, WEATHER_NEAR_GONE) === 0 &&
-      weatherOpacity(1, 0, (WEATHER_NEAR_GONE + WEATHER_NEAR_FULL) / 2) < 0.6,
-    `zero inside ${WEATHER_NEAR_GONE} m, half faded at ` +
-      `${((WEATHER_NEAR_GONE + WEATHER_NEAR_FULL) / 2).toFixed(0)} m`,
-  );
-  check(
-    'it is suppressed at night, like the mirage',
-    weatherOpacity(0, 0, 1000) === 0 && weatherOpacity(0.11, 0, 1000) === 0,
-    'zero below the same twilight band',
-  );
-  let monotone = true;
-  for (let along = 0; along < 1400; along += 10) {
-    if (weatherOpacity(1, along + 10, 1000) > weatherOpacity(1, along, 1000) + 1e-12) {
-      monotone = false;
+  check('pure function of seed and clock', impure === 0, `${impure} disagreements`);
+  check('every channel inside 0..1', outOfRange === 0, `${outOfRange} out of range`);
+  const share = active / samples;
+  check('weather present most of the time', share > 0.45 && share < 0.85, `${(share * 100).toFixed(0)}% of play`);
+  check('never the same episode twice running', repeats === 0, `${repeats} repeats`);
+  console.log(`        kinds over ${SEEDS.length * 400} slots: ${JSON.stringify(kinds)}`);
+  // Slot edges are clear sky, so neighbouring episodes never cut into each other.
+  let edge = 0;
+  for (const seed of SEEDS) {
+    for (let slot = 0; slot < 200; slot++) {
+      weatherAt(seed, slot * WEATHER_SLOT_S + 1e-3, a);
+      for (const k of Object.keys(a) as (keyof WeatherChannels)[]) edge = Math.max(edge, a[k]);
     }
   }
-  check('nothing pops on the way out', monotone, 'opacity never rises as it recedes');
+  check('slot boundaries are clear sky', edge < 1e-6, `max channel ${edge.toExponential(1)}`);
 }
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} CHECK(S) FAILED`);
