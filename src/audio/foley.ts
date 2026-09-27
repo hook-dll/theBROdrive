@@ -275,8 +275,10 @@ export class Foley {
 
   /** A shot: muzzle crack over a body thump, plus the action working. */
   gunshot(): void {
-    this.mixer.burst(this.out, { gain: 0.55, frequency: 1800, q: 0.6, decay: 0.09 });
-    this.mixer.burst(this.out, { gain: 0.4, frequency: 180, q: 0.7, decay: 0.22, type: 'lowpass' });
+    // Out in the open a shot comes back off the ground and the distance: the reverb
+    // send is the echo, the body thump is brown noise for weight.
+    this.mixer.burst(this.out, { gain: 0.55, frequency: 1800, q: 0.6, decay: 0.09, send: 0.5 });
+    this.mixer.burst(this.out, { gain: 0.4, frequency: 180, q: 0.7, decay: 0.22, type: 'lowpass', colour: 'brown', send: 0.4 });
     this.mixer.blip(this.out, { gain: 0.1, frequency: 3200, endFrequency: 900, decay: 0.07 });
   }
 

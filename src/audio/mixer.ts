@@ -1,46 +1,109 @@
 /**
  * The audio device, and nothing else.
  *
- * Every sound in the game is synthesised at runtime (see vehicleaudio.ts and
- * foley.ts): there is not a single sample file in the project, and the whole
- * soundscape costs a handful of oscillators and one shared noise buffer. That is
- * deliberate — a car engine is a pitch-and-load problem, not a loop-crossfade
- * problem, and a synthesised one tracks rpm exactly instead of stepping between
- * recorded bands.
+ * Every sound in the game is synthesised at runtime (see vehicleaudio.ts, foley.ts,
+ * ambience.ts and the engine worklet): there is not a single sample file in the
+ * project. That is deliberate — a car engine is a pitch-and-load problem, not a
+ * loop-crossfade problem, and a synthesised one tracks rpm exactly instead of
+ * stepping between recorded bands.
  *
  * Browsers refuse to start an AudioContext without a user gesture, so the context
  * is created suspended and resumed by the first click/keypress; until then every
  * voice runs into a muted graph rather than being conditionally absent, which
  * keeps the voices free of "is audio up yet" branches.
+ *
+ * NOISE. Every noise voice used to loop the SAME two-second white buffer, all started
+ * on the same sample — so wind, tyres, skid and brakes were literally one signal
+ * through different filters. Correlated layers do not add up to a richer sound, they
+ * collapse into one, and a two-second loop is short enough to hear breathe. Now there
+ * are three colours (white, pink, brown) of eight seconds each, and every source
+ * starts at its own random offset and runs at its own slightly different rate, so no
+ * two voices ever line up and the loop never repeats in phase with anything.
  */
+
+import engineWorkletUrl from './engine-worklet.ts?worker&url';
 
 /** Master ramp time for volume/pause changes, seconds. Short enough to feel instant. */
 const MASTER_RAMP = 0.08;
-/** Length of the shared white-noise loop, seconds. Long enough to hide the seam. */
-const NOISE_SECONDS = 2;
+/** Length of each shared noise loop, seconds. */
+const NOISE_SECONDS = 8;
+/** Length of the crackle (sparse grain) loop, seconds. */
+const CRACKLE_SECONDS = 4;
+/** Grains per second in the crackle loop at playback rate 1. */
+const CRACKLE_DENSITY = 260;
+/** World reverb tail, seconds: open country, a few reflections and a long sky. */
+const REVERB_SECONDS = 2.6;
+
+export type NoiseColour = 'white' | 'pink' | 'brown';
+
+/** Deterministic xorshift32, so the noise floor is the same between runs. */
+function xorshift(seed: number): () => number {
+  let state = seed >>> 0 || 0x9e3779b9;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return ((state >>> 0) / 0xffffffff) * 2 - 1;
+  };
+}
 
 export class AudioMixer {
   readonly ctx: AudioContext;
   /** Procedural game audio (engine, wind, tyres, foley). The radio bypasses this. */
   readonly sfx: GainNode;
+  /**
+   * Send into the shared world reverb. Voices that happen OUT in the world (thunder,
+   * a gunshot, a crash, a bird) send a little here; the car's own drone does not.
+   */
+  readonly reverb: GainNode;
 
   private readonly master: GainNode;
-  private noiseBufferValue: AudioBuffer | null = null;
+  private readonly noiseBuffers = new Map<NoiseColour, AudioBuffer>();
+  private crackleBufferValue: AudioBuffer | null = null;
   private volume = 1;
   private suspendedByPause = false;
   private started = false;
   private disposed = false;
+  private engineWorkletReady = false;
+  private readonly engineWorkletWaiters: (() => void)[] = [];
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
 
     this.master = this.ctx.createGain();
     this.master.gain.value = 0;
-    this.master.connect(this.ctx.destination);
+    // A gentle safety limiter: a crash under thunder with the engine at the redline
+    // is a dozen layers at once, and clipping is the one artefact nobody forgives.
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -9;
+    limiter.knee.value = 8;
+    limiter.ratio.value = 5;
+    limiter.attack.value = 0.004;
+    limiter.release.value = 0.22;
+    this.master.connect(limiter).connect(this.ctx.destination);
 
     this.sfx = this.ctx.createGain();
     this.sfx.gain.value = 1;
     this.sfx.connect(this.master);
+
+    this.reverb = this.ctx.createGain();
+    this.reverb.gain.value = 1;
+    const convolver = this.ctx.createConvolver();
+    convolver.normalize = true;
+    convolver.buffer = this.buildReverbImpulse();
+    const reverbReturn = this.ctx.createGain();
+    reverbReturn.gain.value = 0.55;
+    this.reverb.connect(convolver).connect(reverbReturn).connect(this.sfx);
+
+    void this.ctx.audioWorklet
+      .addModule(engineWorkletUrl)
+      .then(() => {
+        this.engineWorkletReady = true;
+        for (const waiter of this.engineWorkletWaiters.splice(0)) waiter();
+      })
+      .catch((error: unknown) => {
+        console.warn('engine audio worklet failed to load; engines will be silent', error);
+      });
 
     window.addEventListener('pointerdown', this.unlock);
     window.addEventListener('keydown', this.unlock);
@@ -66,6 +129,12 @@ export class AudioMixer {
     return this.started && this.ctx.state === 'running';
   }
 
+  /** Runs `callback` once the engine worklet module is loaded (immediately if it is). */
+  whenEngineReady(callback: () => void): void {
+    if (this.engineWorkletReady) callback();
+    else this.engineWorkletWaiters.push(callback);
+  }
+
   /** 0..1 master volume for everything on the sfx bus. */
   setVolume(volume: number): void {
     this.volume = Math.min(1, Math.max(0, volume));
@@ -88,40 +157,158 @@ export class AudioMixer {
   }
 
   /**
-   * The one white-noise buffer every noise voice loops. Tyres, wind, footsteps and
-   * impacts all want band-limited noise, and they differ only in their filters and
-   * envelopes — sharing the source keeps the memory cost at a single 2 s buffer.
+   * The shared noise loop of one colour. White is flat; pink (-3 dB/octave) is what
+   * wind, rain and road roar actually measure as; brown (-6 dB/octave) is rumble —
+   * thunder, buffeting, the cabin's low road roar.
    */
-  noiseBuffer(): AudioBuffer {
-    if (this.noiseBufferValue) return this.noiseBufferValue;
+  noiseBuffer(colour: NoiseColour = 'white'): AudioBuffer {
+    const cached = this.noiseBuffers.get(colour);
+    if (cached) return cached;
     const length = Math.floor(this.ctx.sampleRate * NOISE_SECONDS);
     const buffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
-    // Deterministic (xorshift) rather than Math.random: the noise floor is part of
-    // how the game sounds, and it should not differ between runs.
-    let state = 0x9e3779b9;
-    for (let i = 0; i < length; i++) {
-      state ^= state << 13;
-      state ^= state >>> 17;
-      state ^= state << 5;
-      data[i] = ((state >>> 0) / 0xffffffff) * 2 - 1;
+    const rand = xorshift(colour === 'white' ? 0x9e3779b9 : colour === 'pink' ? 0x85ebca6b : 0xc2b2ae35);
+    if (colour === 'white') {
+      for (let i = 0; i < length; i++) data[i] = rand();
+    } else if (colour === 'pink') {
+      // Paul Kellet's economy pink filter: three poles, within 0.5 dB of -3 dB/oct.
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+      for (let i = 0; i < length; i++) {
+        const w = rand();
+        b0 = 0.99765 * b0 + w * 0.099046;
+        b1 = 0.963 * b1 + w * 0.2965164;
+        b2 = 0.57 * b2 + w * 1.0526913;
+        data[i] = (b0 + b1 + b2 + w * 0.1848) * 0.22;
+      }
+    } else {
+      // Leaky integrator: brown noise that cannot wander off to DC.
+      let y = 0;
+      for (let i = 0; i < length; i++) {
+        y = 0.996 * y + rand() * 0.06;
+        data[i] = y * 1.9;
+      }
     }
-    this.noiseBufferValue = buffer;
+    // Remove the loop seam's step so the wrap does not click.
+    const fade = Math.floor(this.ctx.sampleRate * 0.01);
+    for (let i = 0; i < fade; i++) {
+      const t = i / fade;
+      data[length - fade + i] = data[length - fade + i]! * (1 - t) + data[i]! * t;
+    }
+    this.noiseBuffers.set(colour, buffer);
     return buffer;
   }
 
-  /** A looping noise source, already started. Callers own the returned node. */
-  noiseSource(): AudioBufferSourceNode {
+  /**
+   * Sparse grains: a stone flicked against the arch, a raindrop on the roof. Each
+   * grain is a sub-millisecond click with its own heavy-tailed amplitude, so most
+   * are small and a few are loud, the way real impacts distribute. Played faster
+   * it gets denser AND brighter together, which is what a car speeding up on
+   * gravel does.
+   */
+  crackleBuffer(): AudioBuffer {
+    if (this.crackleBufferValue) return this.crackleBufferValue;
+    const sr = this.ctx.sampleRate;
+    const length = Math.floor(sr * CRACKLE_SECONDS);
+    const buffer = this.ctx.createBuffer(1, length, sr);
+    const data = buffer.getChannelData(0);
+    const rand = xorshift(0x27d4eb2f);
+    const grains = Math.floor(CRACKLE_SECONDS * CRACKLE_DENSITY);
+    for (let g = 0; g < grains; g++) {
+      const start = Math.floor(((rand() + 1) / 2) * (length - sr * 0.008));
+      const u = (rand() + 1) / 2;
+      const amp = 0.08 + 0.92 * u ** 4;
+      const decay = sr * (0.00025 + 0.0012 * ((rand() + 1) / 2));
+      const len = Math.floor(decay * 5);
+      for (let i = 0; i < len; i++) {
+        data[start + i] = data[start + i]! + rand() * amp * Math.exp(-i / decay);
+      }
+    }
+    this.crackleBufferValue = buffer;
+    return buffer;
+  }
+
+  /**
+   * A looping noise source, already started, decorrelated from every other one: its
+   * own start offset and its own rate within ±6%. Callers own the returned node.
+   */
+  noiseSource(colour: NoiseColour = 'white'): AudioBufferSourceNode {
     const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer();
+    src.buffer = this.noiseBuffer(colour);
     src.loop = true;
-    src.start();
+    src.playbackRate.value = 0.94 + Math.random() * 0.12;
+    src.start(0, Math.random() * NOISE_SECONDS);
+    return src;
+  }
+
+  /** A looping crackle source, already started; `playbackRate` sets grain density. */
+  crackleSource(): AudioBufferSourceNode {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.crackleBuffer();
+    src.loop = true;
+    src.start(0, Math.random() * CRACKLE_SECONDS);
     return src;
   }
 
   /**
+   * Two independent noise loops merged into one stereo signal: a sound that surrounds
+   * the listener (wind, rain) instead of sitting as one point between the ears.
+   */
+  stereoNoise(colour: NoiseColour, sources: AudioBufferSourceNode[]): AudioNode {
+    const merger = this.ctx.createChannelMerger(2);
+    const left = this.noiseSource(colour);
+    const right = this.noiseSource(colour);
+    left.connect(merger, 0, 0);
+    right.connect(merger, 0, 1);
+    sources.push(left, right);
+    return merger;
+  }
+
+  /** Stereo crackle, the same idea as `stereoNoise`. */
+  stereoCrackle(sources: AudioBufferSourceNode[]): AudioNode {
+    const merger = this.ctx.createChannelMerger(2);
+    const left = this.crackleSource();
+    const right = this.crackleSource();
+    left.connect(merger, 0, 0);
+    right.connect(merger, 0, 1);
+    sources.push(left, right);
+    return merger;
+  }
+
+  /**
+   * Open-air impulse response: a sparse cluster of early reflections (ground, a
+   * nearby bank) and a diffuse tail that darkens as it decays, because air eats
+   * high frequencies with distance. Stereo channels are independent noise.
+   */
+  private buildReverbImpulse(): AudioBuffer {
+    const sr = this.ctx.sampleRate;
+    const length = Math.floor(sr * REVERB_SECONDS);
+    const buffer = this.ctx.createBuffer(2, length, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch);
+      const rand = xorshift(0x165667b1 + ch * 0x1000193);
+      let lp = 0;
+      for (let i = 0; i < length; i++) {
+        const t = i / sr;
+        // Low-pass coefficient closes over the tail: bright early, dull late.
+        const k = 0.75 * Math.exp(-t * 1.6) + 0.05;
+        lp += (rand() - lp) * k;
+        const envelope = Math.exp(-t * 2.4) * Math.min(1, t / 0.012);
+        data[i] = lp * envelope;
+      }
+      for (let r = 0; r < 7; r++) {
+        const at = Math.floor(sr * (0.018 + ((rand() + 1) / 2) * 0.16));
+        data[at] = data[at]! + rand() * 0.6 * Math.exp(-at / sr / 0.12);
+      }
+    }
+    return buffer;
+  }
+
+  /**
    * A one-shot noise burst: the workhorse behind every impact, footstep, clunk and
-   * gunshot. `attack`/`decay` shape it, the band-pass places it in the spectrum.
+   * gunshot. `attack`/`decay` shape it, the band-pass places it in the spectrum,
+   * `delay` starts it later (for layered events), `send` feeds the world reverb.
    */
   burst(
     destination: AudioNode,
@@ -132,39 +319,61 @@ export class AudioMixer {
       attack?: number;
       decay: number;
       type?: BiquadFilterType;
+      colour?: NoiseColour;
+      delay?: number;
+      /** End frequency of the filter, swept exponentially over the decay. */
+      endFrequency?: number;
+      send?: number;
     },
   ): void {
     if (!this.running || options.gain <= 0) return;
-    const t = this.now;
+    const t = this.now + (options.delay ?? 0);
+    const buffer = this.noiseBuffer(options.colour);
     const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer();
+    src.buffer = buffer;
     // Random start offset so repeated bursts (footsteps, gravel) never phase-lock
     // into an audible pattern.
-    const offset = Math.random() * (this.noiseBuffer().duration - options.decay - 0.05);
+    const attack = options.attack ?? 0.002;
+    const offset = Math.random() * (buffer.duration - attack - options.decay - 0.1);
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = options.type ?? 'bandpass';
-    filter.frequency.value = options.frequency;
+    filter.frequency.setValueAtTime(options.frequency, t);
+    if (options.endFrequency !== undefined) {
+      filter.frequency.exponentialRampToValueAtTime(Math.max(20, options.endFrequency), t + attack + options.decay);
+    }
     filter.Q.value = options.q ?? 1;
 
     const env = this.ctx.createGain();
-    const attack = options.attack ?? 0.002;
     env.gain.setValueAtTime(0.0001, t);
     env.gain.linearRampToValueAtTime(options.gain, t + attack);
     env.gain.exponentialRampToValueAtTime(0.0001, t + attack + options.decay);
 
     src.connect(filter).connect(env).connect(destination);
+    if (options.send) {
+      const send = this.ctx.createGain();
+      send.gain.value = options.send;
+      env.connect(send).connect(this.reverb);
+    }
     src.start(t, Math.max(0, offset), attack + options.decay + 0.02);
     src.stop(t + attack + options.decay + 0.05);
   }
 
-  /** A one-shot pitched blip: mechanical clicks, gear engagement, dry-fire. */
+  /** A one-shot pitched blip: mechanical clicks, gear engagement, dry-fire, ringing metal. */
   blip(
     destination: AudioNode,
-    options: { gain: number; frequency: number; endFrequency?: number; decay: number; type?: OscillatorType },
+    options: {
+      gain: number;
+      frequency: number;
+      endFrequency?: number;
+      decay: number;
+      type?: OscillatorType;
+      delay?: number;
+      send?: number;
+    },
   ): void {
     if (!this.running || options.gain <= 0) return;
-    const t = this.now;
+    const t = this.now + (options.delay ?? 0);
     const osc = this.ctx.createOscillator();
     osc.type = options.type ?? 'triangle';
     osc.frequency.setValueAtTime(options.frequency, t);
@@ -176,6 +385,11 @@ export class AudioMixer {
     env.gain.linearRampToValueAtTime(options.gain, t + 0.004);
     env.gain.exponentialRampToValueAtTime(0.0001, t + options.decay);
     osc.connect(env).connect(destination);
+    if (options.send) {
+      const send = this.ctx.createGain();
+      send.gain.value = options.send;
+      env.connect(send).connect(this.reverb);
+    }
     osc.start(t);
     osc.stop(t + options.decay + 0.05);
   }

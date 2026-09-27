@@ -27,6 +27,7 @@ import {
   variant,
   type CarStats,
   type EngineSpec,
+  type FuelType,
 } from '../parts/registry';
 import { itemMass } from '../items/items';
 import {
@@ -359,6 +360,32 @@ export interface VehicleAudioState {
    */
   frontLockT: number;
   rearLockT: number;
+
+  // --- engine character: what the engine IS, for the voice to be built from ---
+  fuel: FuelType;
+  /**
+   * Swept volume estimate, litres. Not in the catalogue, so it is read off the torque:
+   * a naturally aspirated petrol makes ~85 Nm a litre, a diesel ~57, a turbo diesel
+   * ~107. Only the audio uses it, to size the exhaust and the pulse.
+   */
+  displacementL: number;
+  /** Factory turbo, or a turbocharger fitted under the bonnet. */
+  turbo: boolean;
+  /** Stable per-engine number, 0..1: every copy of one engine sounds the same. */
+  engineSeed: number;
+
+  // --- ground ---
+  /** The surface under most of the loaded wheels. */
+  surface: SurfaceType;
+
+  // --- events, ACCUMULATED: the largest since the audio layer last consumed them ---
+  /**
+   * Fastest suspension compression since last consumed, m/s. A pothole, a joint, a
+   * rock: the chassis jolts through the springs. The audio layer zeroes it on read.
+   */
+  bumpMps: number;
+  /** Largest unexplained horizontal speed loss (a collision), m/s. Zeroed on read. */
+  impactMps: number;
 }
 
 /**
@@ -761,7 +788,16 @@ export class Vehicle implements Rebasable {
     landingImpactMps: 0,
     frontLockT: 0,
     rearLockT: 0,
+    fuel: 'petrol',
+    displacementL: 1.5,
+    turbo: false,
+    engineSeed: 0,
+    surface: SurfaceType.Asphalt,
+    bumpMps: 0,
+    impactMps: 0,
   };
+  /** Per-surface loaded-wheel count for the step, for `audioState.surface`. */
+  private readonly surfaceVotes = new Uint8Array(8);
   /** Previous step's vertical velocity, for detecting a landing. */
   private prevVerticalVel = 0;
   // Render-frame scratch.
@@ -2144,6 +2180,7 @@ export class Vehicle implements Rebasable {
     let rollingResistanceSum = 0;
     let roughnessSum = 0;
     let contactCount = 0;
+    this.surfaceVotes.fill(0);
     let drivenContactCount = 0;
     // Same for every wheel. `gripBudgetFactor` sizes Rapier's own cone, which now
     // bounds nothing it applies — its lateral and longitudinal channels are both
@@ -2383,6 +2420,7 @@ export class Vehicle implements Rebasable {
           surface.rollingResistance -
           (surface.rollingResistance - DIG_FIRM_RR) * this.digWeightCar;
         roughnessSum += surface.roughness;
+        this.surfaceVotes[surfaceType]++;
         if (driven) drivenContactCount++;
       }
     }
@@ -2533,9 +2571,28 @@ export class Vehicle implements Rebasable {
     audio.surfaceRoughness = contactCount > 0 ? roughnessSum / contactCount : 0;
     audio.lateralSlipMps = Math.abs(this.localVelScratch.x);
     const vy = this.linvel.y;
-    audio.landingImpactMps =
-      contactCount > 0 ? Math.max(0, -this.prevVerticalVel - Math.max(0, -vy)) : 0;
+    // Accumulated rather than overwritten: a render frame can see several fixed steps
+    // or none, and the audio layer zeroes it once voiced, so a landing is heard once.
+    audio.landingImpactMps = Math.max(
+      audio.landingImpactMps,
+      contactCount > 0 ? Math.max(0, -this.prevVerticalVel - Math.max(0, -vy)) : 0,
+    );
     this.prevVerticalVel = vy;
+    if (engine) {
+      audio.fuel = engine.fuel;
+      const nmPerLitre = engine.fuel === 'diesel' ? (engine.turbo ? 107 : 57) : 85;
+      audio.displacementL = Math.max(0.5, engine.peakTorqueNm / nmPerLitre);
+      audio.turbo = engine.turbo === true || bonnetPart(this.car.bonnet, 1) !== null;
+      audio.engineSeed =
+        ((engine.peakTorqueNm * 7919 + engine.idleRpm * 104729 + engine.redlineRpm * 31) % 1000) / 1000;
+    }
+    let bestVotes = 0;
+    for (let i = 0; i < this.surfaceVotes.length; i++) {
+      if (this.surfaceVotes[i]! > bestVotes) {
+        bestVotes = this.surfaceVotes[i]!;
+        audio.surface = i as SurfaceType;
+      }
+    }
 
     // What hit the car, derived rather than asked for: Rapier has no event queue here
     // (see core/physics.ts), and the vertical channel above already shows that a
@@ -2575,6 +2632,7 @@ export class Vehicle implements Rebasable {
           -deltaZ / deltaMps,
         );
         this.impactState.severityMps = severityMps;
+        audio.impactMps = Math.max(audio.impactMps, severityMps);
         this.impactState.localX = this.localVelScratch.x;
         this.impactState.localY = this.localVelScratch.y;
         this.impactState.localZ = this.localVelScratch.z;
@@ -3330,7 +3388,15 @@ export class Vehicle implements Rebasable {
       // BUMP_STOP_FRACTION). Without it the soft springs this car now runs would hand
       // every big hit to the solver as a step.
       const length = controller.wheelSuspensionLength(w.index) ?? w.restLengthM;
+      const previousCompressionM = w.compressionM;
       w.compressionM = w.restLengthM - length;
+      // The jolt the audio hears: compression speed while the tyre stayed on the
+      // ground. A landing is the other channel's; the first contact after air is not
+      // a bump, and neither is the settle from the zero a fresh wheel starts at.
+      if (inContact && previousCompressionM > 0 && dt > 0) {
+        const joltMps = (w.compressionM - previousCompressionM) / dt;
+        if (joltMps > this.audioState.bumpMps) this.audioState.bumpMps = joltMps;
+      }
       // The stop lives in the BUMP travel — the compression available past static sag
       // — and not in the total. Measured against the total it sat below the sag of
       // every soft car in the catalogue, so a parked Zhiguli rested on its bump stops

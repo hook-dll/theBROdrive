@@ -1,14 +1,22 @@
 {
+  "engineGain": 1.15,
+  "gearWhineGain": 0.022,
   "windFullMps": 45,
-  "windGain": 0.16,
+  "windGain": 0.2,
   "tyreFullMps": 30,
   "tyreGain": 0.34,
   "skidStartMps": 1.6,
   "skidFullMps": 7,
-  "skidGain": 0.42,
+  "skidGain": 0.4,
   "rubGain": 0.055,
-  "engineGainIdle": 0.11,
-  "engineGainLoad": 0.2,
-  "destroyedMetalGain": 0.16,
-  "landingFullMps": 6
+  "landingFullMps": 6,
+  "bumpStartMps": 0.45,
+  "bumpFullMps": 2.6,
+  "bumpGain": 0.32,
+  "impactGain": 0.75,
+  "trafficGain": 1,
+  "ambienceGain": 1,
+  "rainGain": 0.3,
+  "thunderGain": 0.8,
+  "wildlifeGain": 0.5
 }

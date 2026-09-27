@@ -116,7 +116,7 @@ import {
 } from './vehicle/trailer';
 import { Vehicle } from './vehicle/vehicle';
 import type { TrunkViewState } from './vehicle/trunk';
-import { GameAudio, type RadioSpatialState } from './audio/gameaudio';
+import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } from './audio/gameaudio';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
 import { createPlayerImpacts } from './app/playerimpacts';
@@ -1214,6 +1214,21 @@ async function boot(): Promise<void> {
     listenerQz: 0,
     listenerQw: 1,
   };
+  // Per-frame audio inputs, written in place.
+  const carAudioPose: CarPose = { x: 0, y: 0, z: 0, forwardX: 0, forwardZ: 1, airMps: 0, wet: 0 };
+  const ambienceFrame: AmbienceFrame = {
+    windMps: 0,
+    rain: 0,
+    drift: 0,
+    dust: 0,
+    heat: 0,
+    dayFactor: 1,
+    cabin: false,
+    boltSeed: 0,
+    boltAge: 99,
+    boltDistance: 5000,
+    boltAzimuth: 0,
+  };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
   const fixedUpdate = (dt: number): void => {
@@ -1681,6 +1696,7 @@ async function boot(): Promise<void> {
     frameProfiler?.end('streaming');
     frameProfiler?.begin('agents');
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
+    for (const t of birds.takeoffs) audio.flockTakeoff(t.x, t.y, t.z, t.count, t.large);
     frameProfiler?.end('agents');
 
     // Props that come apart. The car is the only thing heavy enough to do it, so the
@@ -2093,11 +2109,47 @@ async function boot(): Promise<void> {
     radioSpatial.listenerQy = renderer.camera.quaternion.y;
     radioSpatial.listenerQz = renderer.camera.quaternion.z;
     radioSpatial.listenerQw = renderer.camera.quaternion.w;
+    const cabinView = driving !== null && camera.mode === 'hood';
+    if (driving) {
+      // Chassis local +Z is forward.
+      const q = driving.root.quaternion;
+      let fx = 2 * (q.x * q.z + q.w * q.y);
+      let fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+      const fl = Math.hypot(fx, fz) || 1;
+      fx /= fl;
+      fz /= fl;
+      const roadMps = driving.audio.forwardMps;
+      carAudioPose.x = driving.root.position.x;
+      carAudioPose.y = driving.root.position.y;
+      carAudioPose.z = driving.root.position.z;
+      carAudioPose.forwardX = fx;
+      carAudioPose.forwardZ = fz;
+      carAudioPose.airMps = Math.hypot(
+        weather.windX * weather.windMps - fx * roadMps,
+        weather.windZ * weather.windMps - fz * roadMps,
+      );
+      carAudioPose.wet = weather.wet;
+    }
     audio.updateDriving(
       driving ? driving.audio : null,
       radioSpatial,
       driving ? drivingId! : null,
+      driving ? carAudioPose : null,
+      cabinView,
+      frameDt,
     );
+    ambienceFrame.windMps = weather.windMps;
+    ambienceFrame.rain = weather.rain;
+    ambienceFrame.drift = weather.drift;
+    ambienceFrame.dust = weather.dust;
+    ambienceFrame.heat = weather.heat;
+    ambienceFrame.dayFactor = sky.dayFactor;
+    ambienceFrame.cabin = cabinView;
+    ambienceFrame.boltSeed = weather.boltSeed;
+    ambienceFrame.boltAge = weather.boltAge;
+    ambienceFrame.boltDistance = weather.boltDistance;
+    ambienceFrame.boltAzimuth = weather.boltAzimuth;
+    audio.updateAmbience(ambienceFrame, frameDt);
     audio.beginTrafficFrame();
     traffic.forEachVehicle((id, vehicle) => {
       audio.updateTrafficVehicle(
@@ -2108,7 +2160,7 @@ async function boot(): Promise<void> {
         vehicle.root.position.z,
       );
     });
-    audio.endTrafficFrame();
+    audio.endTrafficFrame(frameDt);
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);

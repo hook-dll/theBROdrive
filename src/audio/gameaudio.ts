@@ -12,19 +12,38 @@ import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer, setListenerPose } from './mixer';
-import { VehicleAudio } from './vehicleaudio';
-import { TrafficEngineAudio } from './trafficengine';
+import { VehicleAudio, type CarPose } from './vehicleaudio';
+import { TrafficAudio } from './trafficaudio';
+import { Ambience, type AmbienceFrame } from './ambience';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio, type RadioSpatialState } from './radio';
 export type { RadioSpatialState } from './radio';
+export type { CarPose } from './vehicleaudio';
+export type { AmbienceFrame } from './ambience';
+
+/** Traffic cars given a voice at once: the nearest few are all anyone can pick out. */
+const TRAFFIC_VOICES = 6;
+/** Beyond this a traffic car is not voiced at all, metres. */
+const TRAFFIC_HEAR_M = 380;
+
+interface TrafficCandidate {
+  id: string;
+  state: VehicleAudioState;
+  x: number;
+  y: number;
+  z: number;
+  d2: number;
+}
 
 export class GameAudio {
   private readonly mixer = new AudioMixer();
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
+  private readonly ambience = new Ambience(this.mixer);
   private readonly radios = new Map<string, Radio>();
-  private readonly trafficVoices = new Map<string, { voice: TrafficEngineAudio; lastFrame: number }>();
-  private trafficFrame = 0;
+  private readonly trafficVoices = new Map<string, TrafficAudio>();
+  private readonly trafficCandidates: TrafficCandidate[] = [];
+  private trafficCandidateCount = 0;
   private activeRadioId: string | null = null;
   private radioVolume = 1;
   /** Last pose written to the context listener; NaN so the first frame always writes. */
@@ -35,6 +54,9 @@ export class GameAudio {
   private listenerQy = Number.NaN;
   private listenerQz = Number.NaN;
   private listenerQw = Number.NaN;
+  /** Listener's horizontal right vector, for panning world directions (thunder). */
+  private listenerRightX = 1;
+  private listenerRightZ = 0;
 
   applySettings(settings: Settings): void {
     this.mixer.setVolume(settings.masterVolume);
@@ -50,19 +72,22 @@ export class GameAudio {
   /**
    * Per-frame car audio. Every entered car owns its own radio stream; inactive
    * radios remain spatial sources while the listener walks around the world.
+   * `pose` places the car's sound sources; `cabin` is the bonnet-seat view.
    */
   updateDriving(
     state: VehicleAudioState | null,
     radioSpatial: RadioSpatialState,
     radioCarId: string | null,
+    pose: CarPose | null,
+    cabin: boolean,
+    dt: number,
   ): void {
-    this.vehicle.setActive(state !== null);
-    if (state) this.vehicle.update(state);
-    this.activeRadioId = radioCarId;
-    // One AudioListener exists per context, so its pose belongs here rather than in
-    // each radio: writing it per radio meant every entered car in the session paid
-    // ten AudioParam writes a frame to set the same nine values.
+    // The listener first: the car's panners are placed against it this frame.
     this.writeListener(radioSpatial);
+    this.vehicle.setActive(state !== null && pose !== null);
+    this.vehicle.setPerspective(cabin ? 'cabin' : 'outside');
+    if (state && pose) this.vehicle.update(state, pose, dt);
+    this.activeRadioId = radioCarId;
 
     for (const [id, radio] of this.radios) {
       if (id === radioCarId) {
@@ -83,10 +108,22 @@ export class GameAudio {
       }
     }
   }
-  beginTrafficFrame(): void {
-    this.trafficFrame++;
+
+  /** Per-frame world ambience: air, weather, thunder, animals. */
+  updateAmbience(frame: AmbienceFrame, dt: number): void {
+    this.ambience.update(frame, dt, this.listenerRightX, this.listenerRightZ);
   }
 
+  /** A flock taking off at a (relative) world position. */
+  flockTakeoff(x: number, y: number, z: number, count: number, large: boolean): void {
+    this.ambience.flockTakeoff(x, y, z, count, large);
+  }
+
+  beginTrafficFrame(): void {
+    this.trafficCandidateCount = 0;
+  }
+
+  /** Offers one traffic car for a voice this frame; the nearest few get one. */
   updateTrafficVehicle(
     id: string,
     state: VehicleAudioState,
@@ -94,24 +131,58 @@ export class GameAudio {
     y: number,
     z: number,
   ): void {
-    let entry = this.trafficVoices.get(id);
-    if (!entry) {
-      entry = { voice: new TrafficEngineAudio(this.mixer), lastFrame: this.trafficFrame };
-      this.trafficVoices.set(id, entry);
+    const dx = x - this.listenerX;
+    const dy = y - this.listenerY;
+    const dz = z - this.listenerZ;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    let c = this.trafficCandidates[this.trafficCandidateCount];
+    if (!c) {
+      c = { id, state, x, y, z, d2 };
+      this.trafficCandidates.push(c);
+    } else {
+      c.id = id;
+      c.state = state;
+      c.x = x;
+      c.y = y;
+      c.z = z;
+      c.d2 = d2;
     }
-    entry.lastFrame = this.trafficFrame;
-    entry.voice.update(state, x, y, z);
+    this.trafficCandidateCount++;
   }
 
-  endTrafficFrame(): void {
-    for (const [id, entry] of this.trafficVoices) {
-      if (entry.lastFrame !== this.trafficFrame) {
-        entry.voice.dispose();
+  endTrafficFrame(dt: number): void {
+    const list = this.trafficCandidates;
+    const count = this.trafficCandidateCount;
+    // Partial selection of the nearest TRAFFIC_VOICES; the list is a dozen long.
+    for (let i = 0; i < Math.min(count, TRAFFIC_VOICES); i++) {
+      let best = i;
+      for (let j = i + 1; j < count; j++) if (list[j]!.d2 < list[best]!.d2) best = j;
+      if (best !== i) {
+        const tmp = list[i]!;
+        list[i] = list[best]!;
+        list[best] = tmp;
+      }
+    }
+    const hearD2 = TRAFFIC_HEAR_M * TRAFFIC_HEAR_M;
+    const keep = new Set<string>();
+    for (let i = 0; i < Math.min(count, TRAFFIC_VOICES); i++) {
+      const c = list[i]!;
+      if (c.d2 > hearD2) break;
+      keep.add(c.id);
+      let voice = this.trafficVoices.get(c.id);
+      if (!voice) {
+        voice = new TrafficAudio(this.mixer);
+        this.trafficVoices.set(c.id, voice);
+      }
+      voice.update(c.state, c.x, c.y, c.z, this.listenerX, this.listenerY, this.listenerZ, dt);
+    }
+    for (const [id, voice] of this.trafficVoices) {
+      if (!keep.has(id)) {
+        voice.release();
         this.trafficVoices.delete(id);
       }
     }
   }
-
 
   /**
    * Pose of the single AudioListener. Traffic engines need the same listener even
@@ -138,6 +209,13 @@ export class GameAudio {
     this.listenerQy = y;
     this.listenerQz = z;
     this.listenerQw = w;
+
+    // Camera local +X, flattened: the ear-to-ear axis for panning world bearings.
+    const rightX = 1 - 2 * (y * y + z * z);
+    const rightZ = 2 * (x * z - y * w);
+    const rightLength = Math.hypot(rightX, rightZ) || 1;
+    this.listenerRightX = rightX / rightLength;
+    this.listenerRightZ = rightZ / rightLength;
 
     setListenerPose(
       this.mixer.ctx.listener,
@@ -221,9 +299,10 @@ export class GameAudio {
   dispose(): void {
     this.vehicle.dispose();
     this.foleyVoices.dispose();
+    this.ambience.dispose();
     for (const radio of this.radios.values()) radio.dispose();
     this.radios.clear();
-    for (const entry of this.trafficVoices.values()) entry.voice.dispose();
+    for (const voice of this.trafficVoices.values()) voice.dispose();
     this.trafficVoices.clear();
     this.mixer.dispose();
   }

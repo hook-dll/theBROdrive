@@ -102,6 +102,17 @@ const PERCH_STAND = 0.04;
 // Species
 // ---------------------------------------------------------------------------
 
+/** A flock leaving the ground, for the audio. */
+export interface BirdTakeoff {
+  group: number;
+  x: number;
+  y: number;
+  z: number;
+  count: number;
+  /** Crow-sized or bigger: slow, deep wingbeats. */
+  large: boolean;
+}
+
 type BirdState = 'perched' | 'alerted' | 'takeoff' | 'flying' | 'landing';
 
 interface SpeciesDef {
@@ -286,6 +297,11 @@ export class BirdFlock {
   private readonly col = new THREE.Color();
   private readonly scratchPerch = { x: 0, y: 0, z: 0 };
 
+  /**
+   * Flocks that left the ground this frame, one entry per group, for the audio's
+   * wingbeat flutter. Cleared at the start of every `update`; read with `takeoffs`.
+   */
+  private readonly takeoffList: BirdTakeoff[] = [];
   private lastPx = 0;
   private lastPy = 0;
   private lastPz = 0;
@@ -434,7 +450,13 @@ export class BirdFlock {
     this.lastPz -= shift.dz;
   }
 
+  /** Groups that took off during the last `update` (relative positions). */
+  get takeoffs(): readonly BirdTakeoff[] {
+    return this.takeoffList;
+  }
+
   update(dt: number, playerS: number, px: number, py: number, pz: number): void {
+    this.takeoffList.length = 0;
     // Player speed estimate drives the alert radius (foot vs car).
     if (this.hasLastPlayer && dt > 0) {
       const dx = px - this.lastPx;
@@ -768,6 +790,11 @@ export class BirdFlock {
   }
 
   private beginTakeoff(b: Bird, px: number, pz: number): void {
+    const same = this.takeoffList.find((t) => t.group === b.group);
+    if (same) same.count++;
+    else {
+      this.takeoffList.push({ group: b.group, x: b.x, y: b.y, z: b.z, count: 1, large: b.species.mass > 0.3 });
+    }
     let ax = b.x - px;
     let az = b.z - pz;
     const len = Math.hypot(ax, az);

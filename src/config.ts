@@ -34,6 +34,8 @@ export interface GameplayConfig {
 }
 
 export interface AudioConfig {
+  readonly engineGain: number;
+  readonly gearWhineGain: number;
   readonly windFullMps: number;
   readonly windGain: number;
   readonly tyreFullMps: number;
@@ -42,10 +44,16 @@ export interface AudioConfig {
   readonly skidFullMps: number;
   readonly skidGain: number;
   readonly rubGain: number;
-  readonly engineGainIdle: number;
-  readonly engineGainLoad: number;
-  readonly destroyedMetalGain: number;
   readonly landingFullMps: number;
+  readonly bumpStartMps: number;
+  readonly bumpFullMps: number;
+  readonly bumpGain: number;
+  readonly impactGain: number;
+  readonly trafficGain: number;
+  readonly ambienceGain: number;
+  readonly rainGain: number;
+  readonly thunderGain: number;
+  readonly wildlifeGain: number;
 }
 
 export interface GraphicsConfig {
@@ -95,6 +103,8 @@ const GAMEPLAY_FIELDS: Fields<GameplayConfig> = {
 };
 
 const AUDIO_FIELDS: Fields<AudioConfig> = {
+  engineGain: true,
+  gearWhineGain: true,
   windFullMps: true,
   windGain: true,
   tyreFullMps: true,
@@ -103,10 +113,16 @@ const AUDIO_FIELDS: Fields<AudioConfig> = {
   skidFullMps: true,
   skidGain: true,
   rubGain: true,
-  engineGainIdle: true,
-  engineGainLoad: true,
-  destroyedMetalGain: true,
   landingFullMps: true,
+  bumpStartMps: true,
+  bumpFullMps: true,
+  bumpGain: true,
+  impactGain: true,
+  trafficGain: true,
+  ambienceGain: true,
+  rainGain: true,
+  thunderGain: true,
+  wildlifeGain: true,
 };
 
 const GRAPHICS_FIELDS: Fields<GraphicsConfig> = {

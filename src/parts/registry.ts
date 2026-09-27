@@ -61,6 +61,11 @@ export interface EngineSpec {
   readonly brakingCoeff: number;
   readonly cylinders: number;
   /**
+   * Exhaust-driven turbocharger. Only the audio reads it (the spool whistle); the
+   * factory figures above already include what the turbo does for power.
+   */
+  readonly turbo?: boolean;
+  /**
    * Cooling profile overrides. Anything omitted is derived by `engineHeat`, so an
    * engine only states what makes it unusual (a lazy Volga four that runs cool, a
    * truck diesel with a big water jacket).
@@ -332,6 +337,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
       bsfc: 0.22,
       brakingCoeff: 0.33,
       cylinders: 6,
+      turbo: true,
     },
   },
 ];
