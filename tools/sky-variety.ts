@@ -398,7 +398,7 @@ console.log('cloud shadow field');
   check(
     'the field is evaluated per VERTEX, never per fragment',
     count(shader.vertexShader, 'float cloudShade(') === 1 &&
-      count(shader.vertexShader, '? cloudShade( ( modelMatrix') === 1 &&
+      count(shader.vertexShader, '? cloudShade( cloudWorld.xz') === 1 &&
       count(shader.fragmentShader, 'cloudShade(') === 0 &&
       count(shader.fragmentShader, 'cloudHash(') === 0 &&
       count(shader.fragmentShader, 'vCloudShade * uCloudStrength') === 1 &&
@@ -407,7 +407,7 @@ console.log('cloud shadow field');
   );
   check(
     'the splice points still exist in three ' + THREE.REVISION,
-    shader.vertexShader.includes('? cloudShade( ( modelMatrix') &&
+    shader.vertexShader.includes('? cloudShade( cloudWorld.xz') &&
       count(shader.fragmentShader, '#include <opaque_fragment>') === 1,
     'worldpos_vertex and opaque_fragment both found',
   );

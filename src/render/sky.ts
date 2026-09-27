@@ -222,6 +222,21 @@ const FOG_DUST = 0.0125;
 const FOG_RAIN = 0.0011;
 const FOG_STORM = 0.0006;
 
+/**
+ * How bright the far LAND's fog is against the sky's own horizon band, at night (by
+ * day it is 1: the land dissolves into exactly the band behind it).
+ *
+ * `fog.color` used to be the horizon band itself at every hour. That is right at noon
+ * and wrong from sunset on: the band is sky, lit from above the horizon by a sun the
+ * ground has already lost, while the land in front of it is lit only by the fill. So
+ * the far ridges took the full glow of a rose or gold twilight and stood out as flat
+ * pink and tan cut-outs BRIGHTER than the sky above them, over a foreground already
+ * gone black — which reads as an overexposed photograph, not as dusk. Real ridges at
+ * twilight are silhouettes: the air in front of them adds some of the sky's colour,
+ * never all of its light. Follows `day`, so the hand-over is as smooth as the palette.
+ */
+const LAND_FOG_NIGHT = 0.35;
+
 /** The 22-degree halo radius, and how the sun dogs move off it as the sun climbs. */
 const HALO_RADIUS = 0.384;
 
@@ -1202,7 +1217,8 @@ export class Sky {
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
     ) * sunThrough * (1 + 0.8 * weather.haze * (1 - weather.dust));
     // --- Fog tracks the horizon so distant terrain melts into the sky ---
-    this.fog.color.copy(this._horizon);
+    // ...at the land's own light level once the sun is low (see LAND_FOG_NIGHT).
+    this.fog.color.copy(this._horizon).multiplyScalar(LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day);
     this.fog.density =
       BASE_FOG_DENSITY * g.haze * (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust));
     this.dustFog = FOG_DUST * Math.max(weather.dust, 0.2 * smoothstep(0.88, 1, weather.front));

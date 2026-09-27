@@ -671,6 +671,49 @@ const SPRAY_LIGHT_LIFT = 0.45;
  */
 const WARM_FALLOFF_POWER = 6;
 
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function linearToSrgb(c: number): number {
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055;
+}
+
+/** Relative luminance (linear, Rec. 709) of a packed 0xRRGGBB. */
+function hexLuminance(hex: number): number {
+  return 0.2126 * srgbToLinear(((hex >> 16) & 255) / 255) +
+         0.7152 * srgbToLinear(((hex >> 8) & 255) / 255) +
+         0.0722 * srgbToLinear((hex & 255) / 255);
+}
+
+/** Scales a packed 0xRRGGBB in LINEAR light: same chromaticity, less of it. */
+function scaleHexLight(hex: number, k: number): number {
+  if (k >= 1) return hex;
+  const channel = (shift: number): number =>
+    Math.round(linearToSrgb(srgbToLinear(((hex >> shift) & 255) / 255) * k) * 255);
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
+
+/**
+ * THE GROUND MAY NOT OUTSHINE THE SAND IT STARTED AS.
+ *
+ * HSL lightness is not brightness: at the same lightness a yellow-green is half again
+ * as luminous as the ochre the drive opens on. With the pastel phases at lightness
+ * 0.71 the ground from 100 to 1000 km carried 40-65 % more light than kilometre zero,
+ * and under the same noon sun — which is exposed for the ochre — it blew out to a
+ * near-white mint that hurt to drive across. So every phase is capped at this much of
+ * the opening sand's luminance, by scaling its LINEAR light: hue and chroma are kept,
+ * only the amount of light comes down. Solving HSL lightness down to the cap was tried
+ * first and it went the other way — a darker HSL colour at the same saturation is a
+ * MORE saturated one, and the pale greens came out mustard and olive.
+ *
+ * Only a ceiling: the rose and brick phases near the end of the cycle are already
+ * below it and stay as they were. Rock, gravel and spray take the same factor as the
+ * sand, so every contrast against the ground is unchanged.
+ */
+const SAND_LUMINANCE_CAP =
+  hexLuminance(hslToHex(PALETTE_START_HUE, SAND_WARM_SAT, SAND_WARM_LIGHT)) * 1.12;
+
 /**
  * The desert's colour at a distance. Pure, C1 in `s`, exact period PALETTE_CYCLE_M.
  *
@@ -720,11 +763,15 @@ export function desertPaletteAt(s: number): DesertPalette {
   const sandSat = SAND_COOL_SAT + (SAND_WARM_SAT - SAND_COOL_SAT) * warmth + satMod;
   const sandLight = SAND_COOL_LIGHT + (SAND_WARM_LIGHT - SAND_COOL_LIGHT) * warmth + lightMod;
 
+  const sand = hslToHex(hue, sandSat, sandLight);
+  // See SAND_LUMINANCE_CAP. Exactly 1 at the opening, so s = 0 stays `#d29459`.
+  const light = Math.min(1, SAND_LUMINANCE_CAP / hexLuminance(sand));
+
   return {
-    sand: hslToHex(hue, sandSat, sandLight),
-    rock: hslToHex(hue, sandSat * ROCK_SAT_RATIO, sandLight - ROCK_LIGHT_DROP),
-    gravel: hslToHex(hue, sandSat * GRAVEL_SAT_RATIO, sandLight - GRAVEL_LIGHT_DROP),
-    spray: hslToHex(hue, sandSat, sandLight + (1 - sandLight) * SPRAY_LIGHT_LIFT),
+    sand: scaleHexLight(sand, light),
+    rock: scaleHexLight(hslToHex(hue, sandSat * ROCK_SAT_RATIO, sandLight - ROCK_LIGHT_DROP), light),
+    gravel: scaleHexLight(hslToHex(hue, sandSat * GRAVEL_SAT_RATIO, sandLight - GRAVEL_LIGHT_DROP), light),
+    spray: scaleHexLight(hslToHex(hue, sandSat, sandLight + (1 - sandLight) * SPRAY_LIGHT_LIFT), light),
   };
 }
 

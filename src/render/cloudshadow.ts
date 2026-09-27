@@ -71,6 +71,22 @@ import { weather } from '../world/weather';
  * a few seconds to drive through — the thing a cumulus field actually does.
  */
 export const CLOUD_CELL_M = 420;
+/**
+ * Where the patches give way to their mean, metres from the eye.
+ *
+ * The field is evaluated per vertex (see CLOUD_VERTEX_HOOK), and the vista that
+ * carries the far ground is a camera-centred polar mesh of 160 sectors: its vertices
+ * are 4 % of their radius apart round each ring — 120 m at 3 km, 390 m at 10 km — and
+ * they travel with the camera. A 420 m patch on that mesh does not band, it JUMPS:
+ * every rebuild moves every sample to an unrelated point of the field, and whole
+ * hillsides blinked light and dark, worst after rain, when a thinning storm deck puts
+ * the most shade on the ground. The detail octave is half the size, so it goes first.
+ */
+const CLOUD_FAR_START_M = 1800;
+const CLOUD_FAR_END_M = 3200;
+const CLOUD_DETAIL_FAR_START_M = 900;
+const CLOUD_DETAIL_FAR_END_M = 1800;
+
 /** Second octave: ragged edges at half the patch scale, not a second field. */
 export const CLOUD_DETAIL_CELL_M = 210;
 /**
@@ -388,11 +404,15 @@ float cloudNoise( vec2 p, float cells, float salt ) {
 	return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );
 }
 
-float cloudShade( vec2 scene ) {
+float cloudShade( vec2 scene, float dist ) {
 	vec2 at = scene + uCloudPan;
 	float field = cloudNoise( at / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt );
-	if ( uCloudDetail > 0.0 ) {
-		field += uCloudDetail * ( cloudNoise(
+	// See CLOUD_FAR_*: out where the mesh is too coarse for them, the patches give way
+	// to the field's own mean, so distant land keeps its average shade without blinking.
+	field = mix( field, 0.5, smoothstep( ${CLOUD_FAR_START_M.toFixed(1)}, ${CLOUD_FAR_END_M.toFixed(1)}, dist ) );
+	float detail = uCloudDetail * ( 1.0 - smoothstep( ${CLOUD_DETAIL_FAR_START_M.toFixed(1)}, ${CLOUD_DETAIL_FAR_END_M.toFixed(1)}, dist ) );
+	if ( detail > 0.0 ) {
+		field += detail * ( cloudNoise(
 			at / ${CLOUD_DETAIL_CELL_M.toFixed(1)},
 			${CLOUD_DETAIL_PERIOD_CELLS.toFixed(1)},
 			uCloudSalt + ${CLOUD_DETAIL_SALT.toFixed(1)}
@@ -444,15 +464,23 @@ uniform float uWet;
  * is to leave `render/vista.ts`'s two materials unpatched, which is one line.
  */
 const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
-	vCloudShade = uCloudStrength > 0.0
-		? cloudShade( ( modelMatrix * vec4( transformed, 1.0 ) ).xz )
-		: 0.0;
+	vec3 cloudWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+	float cloudDist = distance( cloudWorld, cameraPosition );
+	vCloudShade = uCloudStrength > 0.0 ? cloudShade( cloudWorld.xz, cloudDist ) : 0.0;
 	// Wet ground dries in patches, not as one sheet: a nine-metre noise decides which
 	// ground holds its water longest (the hollows, the ruts), evaluated per vertex for
 	// the same reason as the cloud field above, and only while anything is wet.
+	//
+	// Only where the mesh can carry it. The vista's vertices are up to 360 m apart and
+	// its rings follow the camera, so a nine-metre noise sampled on them is pure
+	// aliasing: every vertex lands on an unrelated cell, and every rebuild re-rolls
+	// them — whole hillsides blinked dark and light after rain. With distance the
+	// noise gives way to its own mean, so far ground is evenly damp; the near tiles
+	// are 2.67 m and keep every patch.
 	vWetMask = 0.0;
 	if ( uWet > 0.0 ) {
-		float held = cloudNoise( ( ( modelMatrix * vec4( transformed, 1.0 ) ).xz + uGroundPan ) / 9.0, 4096.0, uCloudSalt + 7.0 );
+		float held = cloudNoise( ( cloudWorld.xz + uGroundPan ) / 9.0, 4096.0, uCloudSalt + 7.0 );
+		held = mix( held, 0.5, smoothstep( 180.0, 420.0, cloudDist ) );
 		vWetMask = smoothstep( 0.0, 0.35, uWet - held * 0.65 + 0.3 );
 	}`;
 
