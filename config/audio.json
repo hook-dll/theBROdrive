@@ -1,5 +1,5 @@
 {
-  "engineGain": 1.15,
+  "engineGain": 0.95,
   "gearWhineGain": 0.022,
   "windFullMps": 45,
   "windGain": 0.2,

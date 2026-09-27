@@ -21,7 +21,9 @@
  *  - Wind: stereo pink noise with gusts, against the car's AIR speed (the weather's
  *    wind included), plus low buffeting and, inside, a door-seal whistle.
  *  - Tyres: a low road roar with the tyre-cavity resonance (~220 Hz, the hum every
- *    driver knows), a tread hiss, and surface texture: stones and grit as sparse
+ *    driver knows), the tread slapping the road as dense grains rather than smooth
+ *    noise (smooth noise in that band is wind, and a car on tarmac then sounds like a
+ *    blizzard), a little hiss, and surface texture: stones and grit as sparse
  *    grains on loose ground, slab joints thumping front-then-rear on concrete, cracks
  *    on broken asphalt, a hiss of spray on a wet road.
  *  - Skid: on a hard surface a pitched, chirping squeal; on loose ground no squeal at
@@ -202,6 +204,8 @@ export class VehicleAudio {
   private readonly roarGain: GainNode;
   private readonly hissFilter: BiquadFilterNode;
   private readonly hissGain: GainNode;
+  private readonly treadSource: AudioBufferSourceNode;
+  private readonly treadGain: GainNode;
   private readonly gritSource: AudioBufferSourceNode;
   private readonly gritFilter: BiquadFilterNode;
   private readonly gritGain: GainNode;
@@ -378,6 +382,21 @@ export class VehicleAudio {
     this.hissGain.gain.value = 0;
     this.addNoise('pink', this.hissFilter);
     this.hissFilter.connect(this.hissGain).connect(this.body);
+
+    // Tread blocks meeting the road: thousands of tiny impacts a second, low-mid.
+    this.treadSource = mixer.crackleSource();
+    this.sources.push(this.treadSource);
+    const treadBand = ctx.createBiquadFilter();
+    treadBand.type = 'bandpass';
+    treadBand.frequency.value = 650;
+    treadBand.Q.value = 0.8;
+    const treadSoft = ctx.createBiquadFilter();
+    treadSoft.type = 'lowpass';
+    treadSoft.frequency.value = 1400;
+    treadSoft.Q.value = 0.5;
+    this.treadGain = ctx.createGain();
+    this.treadGain.gain.value = 0;
+    this.treadSource.connect(treadBand).connect(treadSoft).connect(this.treadGain).connect(this.body);
 
     this.gritSource = mixer.crackleSource();
     this.sources.push(this.gritSource);
@@ -610,7 +629,7 @@ export class VehicleAudio {
     this.textureLeftM -= speed * dt;
     if (this.textureLeftM <= 0) {
       this.textureLeftM = 4 + Math.random() * 26;
-      this.textureTarget = 0.72 + Math.random() * 0.56;
+      this.textureTarget = 0.9 + Math.random() * 0.2;
     }
     this.texture += (this.textureTarget - this.texture) * clamp01((speed * dt) / 3);
     ramp(
@@ -620,7 +639,9 @@ export class VehicleAudio {
       0.09,
     );
     this.hissFilter.frequency.setTargetAtTime(voice.hissHz * (0.8 + 0.4 * rollT) * (0.9 + 0.1 * this.texture), now, 0.1);
-    ramp(this.hissGain.gain, TYRE_GAIN * 0.8 * rollT * rollT * voice.hiss * contact * (0.6 + 0.4 * this.texture), now, 0.09);
+    ramp(this.hissGain.gain, TYRE_GAIN * 0.25 * rollT * rollT * voice.hiss * contact * this.texture, now, 0.09);
+    this.treadSource.playbackRate.setTargetAtTime(1 + speed / 5, now, 0.1);
+    ramp(this.treadGain.gain, TYRE_GAIN * 1.1 * rollT ** 1.4 * voice.hiss * contact * this.texture, now, 0.09);
     // Grain density and brightness both follow speed: the stones come faster.
     // Played slower than recorded, the grains are longer and duller as well as fewer.
     this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);

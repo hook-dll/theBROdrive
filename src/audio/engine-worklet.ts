@@ -73,7 +73,7 @@ export interface EngineCharacter {
 const C_EXHAUST_COOL = 400;
 const C_EXHAUST_HOT = 560;
 /** Blowdown rise time as a fraction of the pulse's decay. */
-const PULSE_RISE = 0.12;
+const PULSE_RISE = 0.3;
 const TWO_PI = Math.PI * 2;
 
 /** Fixed-size delay line with a fractional read. */
@@ -349,18 +349,19 @@ class EngineProcessor extends AudioWorkletProcessor {
       return;
     }
     if (this.fCombustion > 0 && this.fIdleness > 0.5 && this.rand01() < 0.003 * this.roughness) amp *= 0.3;
-    if (this.fOverrun && this.rand01() < 0.02) {
-      amp *= 2.4;
-      this.popEnv = 1;
+    // A stock carburettor car with a silencer only now and then burbles on a lift.
+    if (this.fOverrun && this.rand01() < 0.004) {
+      amp *= 1.6;
+      this.popEnv = 0.35;
     }
     this.kicks[k] = this.kicks[k]! + amp;
     // The crank answers the firing: a strong one hurries the next, a weak one
     // delays it. Only noticeable where the flywheel has little speed to hide it in.
-    if (this.fBase > 0) this.speedDev += (amp / this.fBase - 1) * (0.006 + 0.05 * this.fIdleness) * this.fCombustion;
+    if (this.fBase > 0) this.speedDev += (amp / this.fBase - 1) * (0.004 + 0.03 * this.fIdleness) * this.fCombustion;
     this.kickIntake += (0.25 + 0.75 * this.fLoad) * (0.8 + 0.4 * this.rand01());
     const block = this.ch.diesel
       ? (1 - 0.55 * this.fRev) * (0.6 + 0.4 * this.fLoad)
-      : 0.16 * (0.2 + 0.8 * this.fLoad) * (0.5 + 0.5 * this.fRev);
+      : 0.07 * (0.2 + 0.8 * this.fLoad) * (0.5 + 0.5 * this.fRev);
     this.kickClatter += this.fCombustion * block * (0.7 + 0.6 * this.rand01());
   }
 
@@ -507,12 +508,12 @@ class EngineProcessor extends AudioWorkletProcessor {
     // rasp off — an exhaust that opens to 4 kHz is a straight pipe, and a straight
     // four is then a light aircraft, not a Zhiguli.
     const open = diesel ? 0.35 + 0.5 * rev + 0.15 * load : 0.25 * rev + 0.75 * load;
-    const muffHz = (620 + 1500 * open * open + 300 * open) * pitch;
+    const muffHz = (420 + 850 * open * open + 200 * open) * pitch;
     this.muffler.set(muffHz, 0.7);
-    this.muffler2.set(muffHz * 3.4, 0.5);
+    this.muffler2.set(muffHz * 2.8, 0.5);
     // Gas leaving the tailpipe hisses in proportion to the flow through it.
     const flow = combustion > 0 ? (effRpm / redlineRpm) * (0.25 + 0.75 * load) : 0.1 * Math.min(1, effRpm / idleRpm);
-    const jetAmt = 0.05 + 0.3 * flow;
+    const jetAmt = 0.02 + 0.09 * flow;
     this.shell.set(this.shellHz * pitch, 45);
 
     // A carburettor's air filter hums; it does not chop. A wide noise band pulsed per
@@ -530,7 +531,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     else base = combustion * (overrun ? 0.16 : 0.26 + 0.74 * load) + (1 - combustion) * 0.1;
     const cov = (0.035 + 0.1 * idleness + (overrun ? 0.12 : 0)) * this.roughness;
     // Turbulence inside the pulse is the exhaust's grit; a silenced car has little.
-    const noiseAmt = 0.16 + 0.3 * load;
+    const noiseAmt = 0.1 + 0.14 * load;
     this.fBase = base;
     this.fCov = cov;
     this.fLoad = load;
@@ -557,7 +558,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const fanAmp = 0.22 * Math.min(1, (effRpm / 4200) ** 2);
     this.altWobble += (this.gauss() * 0.4 - this.altWobble) * Math.min(1, blockSeconds * 4);
     const altHz = shaftHz * 2.05 * 36 * (1 + 0.002 * this.altWobble);
-    const altAmp = effRpm > 200 ? 0.0028 * (0.5 + 0.5 * Math.min(1, effRpm / 3000)) : 0;
+    const altAmp = effRpm > 200 ? 0.0007 : 0;
     // Crank speed deviation settles within a firing interval or two.
     const speedDecay = Math.exp(-blockSeconds * fireHz * 0.7);
     const valvesPerCycle = n * 2;
@@ -603,7 +604,7 @@ class EngineProcessor extends AudioWorkletProcessor {
         const runner = this.runners[k]!;
         const back = runner.read(this.runnerLen[k]! * runnerSamples);
         this.runnerLp[k] = this.runnerLp[k]! + (back - this.runnerLp[k]!) * loopK;
-        const y = pulse * (1 + noiseAmt * white) - 0.3 * this.runnerLp[k]!;
+        const y = pulse * (1 + noiseAmt * white) - 0.2 * this.runnerLp[k]!;
         runner.push(y);
         x += y;
       }
@@ -640,7 +641,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.jetLp2 += (this.jetLp - this.jetLp2) * 0.28;
       ex += this.jetLp2 * this.jetEnv * jetAmt;
       // Soft saturation: a hard-worked exhaust gets gritty, a quiet one stays clean.
-      const drive = 1.1 + 0.9 * load;
+      const drive = 1 + 0.35 * load;
       ex = Math.tanh(ex * drive) / drive;
       exhaustOut[i] = ex * 0.9;
 
@@ -648,13 +649,13 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.intakeEnv = this.intakeEnv * 0.9965 + intakeKick;
       const induction = this.airbox.tick(white * this.intakeEnv) * 1.5 + this.airbox2.tick(white * this.intakeEnv) * 0.3;
       this.hissLp += (white - this.hissLp) * 0.35;
-      const hiss = (white - this.hissLp) * load * rev * 0.035;
+      const hiss = (white - this.hissLp) * load * rev * 0.01;
 
       this.clatterEnv = this.clatterEnv * 0.985 + clatterKick;
       const clat = this.clatter.tick(white * this.clatterEnv) * 0.9;
 
       this.tickEnv *= 0.93;
-      const ticks = this.valve.tick(white * this.tickEnv) * 0.08 * (0.3 + rev) * running01(combustion, this.spinDown);
+      const ticks = this.valve.tick(white * this.tickEnv) * 0.05 * (0.3 + rev) * running01(combustion, this.spinDown);
 
       this.knockEnv *= 0.992;
       const knock = this.knock.tick(white * this.knockEnv) * 1.6;
