@@ -120,6 +120,11 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  * three-plus rare, and never runaway.
  */
 const PLATOON_CHANCE = 0.32;
+/**
+ * Share of ambient drivers drawn FRANTIC (`drawDriver`). One in twenty-five: on a road
+ * holding a dozen cars that is a frantic driver every few minutes, not a pack of them.
+ */
+const FRANTIC_TRAFFIC_SHARE = 0.04;
 /** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
 const PLATOON_MAX_CHAIN = 4;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
@@ -244,7 +249,7 @@ export interface FieldOwner {
 }
 
 type TrafficDirection = 1 | -1;
-export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried';
+export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried' | 'frantic';
 
 
 interface TrafficCar {
@@ -1258,6 +1263,8 @@ export class RoadTraffic {
    */
   private queuePlatoonMate(leader: TrafficCar, chainRemaining: number): void {
     if (chainRemaining <= 0) return;
+    // Nobody rides in convoy behind a frantic driver: it is gone in a minute.
+    if (leader.style === 'frantic') return;
     if (this.pending !== null) return;
     if (this.carList.length >= this.desiredCount) return;
     if (this.random() >= PLATOON_CHANCE) return;
@@ -1381,7 +1388,7 @@ export class RoadTraffic {
   private pickSpawnLane(s: number, style: TrafficDriverStyle): number {
     const lanes = this.road.lanesPerSideAt(s);
     if (lanes === 1) return 0;
-    return style === 'hurried' ? 0 : lanes - 1;
+    return style === 'hurried' || style === 'frantic' ? 0 : lanes - 1;
   }
 
   private spawnSiteClear(
@@ -1500,10 +1507,21 @@ export class RoadTraffic {
         pace: 0.68 + this.random() * 0.1,
       };
     }
-    // One car in five is in a hurry, and it drives the HURRIED mode, not frantic:
-    // ambient traffic that overtakes into windows it would take itself. Frantic —
-    // the smaller gap, the shorter patience — belongs to the player's own autopilot,
-    // where somebody is watching the road it is taking.
+    // A few are out of time: the FRANTIC mode, the player's own fastest autopilot —
+    // the smaller gap, the racing line, the pass on the shoulder when the opposing
+    // lane is taken. Rare on purpose: one of them is an event on the road, a stream of
+    // them is a race. Never the second car of a direction, which is the hurried one.
+    if (directionCount !== 2 && styleRoll >= 1 - FRANTIC_TRAFFIC_SHARE) {
+      return {
+        style: 'frantic',
+        headwayS: 0.9 + this.random() * 0.4,
+        mode: 'frantic',
+        speedCap: (125 + this.random() * 35) / 3.6,
+        pace: 1,
+      };
+    }
+    // One car in five is in a hurry, and it drives the HURRIED mode: ambient traffic
+    // that overtakes into windows it would take itself.
     if (directionCount === 2 || styleRoll >= 0.8) {
       return {
         style: 'hurried',

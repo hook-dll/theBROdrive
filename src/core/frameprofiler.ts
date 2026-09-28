@@ -50,6 +50,9 @@ const SECTIONS: readonly FrameSection[] = [
 /** Frames kept for the report. About two seconds at 120 FPS, eight at 30. */
 const WINDOW_FRAMES = 240;
 
+/** A presented-frame gap longer than this is recorded as a hitch. */
+const SPIKE_MS = 100;
+
 /** Sections under this many milliseconds per second are noise, not findings. */
 const REPORT_FLOOR_MS_PER_SECOND = 1;
 
@@ -93,6 +96,17 @@ export class FrameProfiler {
   private renderStart = 0;
   private windowStartMs = 0;
   private windowFrames = 0;
+  private lastEndMs = 0;
+
+  /**
+   * Hitches: presented frames whose gap from the previous one passed `SPIKE_MS`, with the
+   * sections of the frame that closed the gap. The rolling percentiles average a single
+   * one-second freeze away; this keeps each one. Read from the console as `__broSpikes`.
+   */
+  readonly spikes: { atMs: number; gapMs: number; sections: Record<string, number>; note?: string }[] = [];
+
+  /** Anything the caller can say about the frame a hitch landed on (new shader programs). */
+  spikeNote: (() => string | undefined) | null = null;
 
   /** Length of the current window, seconds. The divisor for every per-second figure. */
   private elapsedSeconds = 0;
@@ -132,6 +146,15 @@ export class FrameProfiler {
     // The render call itself, so that whatever the named sections do not cover is
     // still accounted for instead of looking like free time.
     this.current.set('renderWall', this.clock() - this.renderStart);
+    const endMs = this.clock();
+    if (this.lastEndMs > 0 && endMs - this.lastEndMs > SPIKE_MS) {
+      const sections: Record<string, number> = {};
+      for (const [section, ms] of this.current) if (ms >= 1) sections[section] = Math.round(ms);
+      const note = this.spikeNote?.();
+      this.spikes.push({ atMs: Math.round(endMs), gapMs: Math.round(endMs - this.lastEndMs), sections, note });
+      if (this.spikes.length > 64) this.spikes.shift();
+    }
+    this.lastEndMs = endMs;
     // All sections share the presented-frame denominator, including frames before a
     // section first appears. Keeping their zeros also makes p95 a per-frame percentile.
     for (const [section, list] of this.samples) {

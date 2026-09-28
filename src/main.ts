@@ -507,6 +507,8 @@ async function boot(): Promise<void> {
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
   const loadingModels = new Set<string>();
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
+  if (frameProfiler) (window as unknown as { __broSpikes: unknown }).__broSpikes = frameProfiler.spikes;
+  let knownPrograms = 0;
 
   /**
    * The frame cost readout, as text, for the pause menu's development screen.
@@ -2271,6 +2273,13 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('draw');
     renderer.render();
     frameProfiler?.end('draw');
+    if (frameProfiler) {
+      // Programs linked this frame: the usual cause of a hitch inside `draw`.
+      const programs = renderer.renderer.info.programs ?? [];
+      const fresh = programs.slice(knownPrograms).map((p) => p.name || String(p.id));
+      knownPrograms = programs.length;
+      frameProfiler.spikeNote = () => (fresh.length ? `new programs: ${fresh.join(', ')}` : undefined);
+    }
     frameProfiler?.endFrame();
   };
 

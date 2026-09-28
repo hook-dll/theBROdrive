@@ -27,8 +27,8 @@
  *
  * Kill the dev server when done: the user runs their own.
  */
-import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
+import { bootIntoCar, launch, sleep, until } from './boot.mjs';
 
 const [out, list] = process.argv.slice(2);
 if (!out || !list) {
@@ -40,77 +40,12 @@ const W = +(process.env.W ?? 1280);
 const H = +(process.env.H ?? 600);
 const URL = process.env.URL ?? 'http://localhost:5199/';
 const PITCH = +(process.env.PITCH ?? 0.12);
-const HORIZON_M = { acceptable: 1500, standard: 8000, blessing: 25000 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(page, fn, arg, timeoutMs, what) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await page.evaluate(fn, arg)) return;
-    await sleep(250);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
-const browser = await puppeteer.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new',
-  args: ['--use-angle=metal', '--ignore-gpu-blocklist', '--enable-gpu', `--window-size=${W},${H}`],
-});
+const browser = await launch({ W, H });
 try {
-  const page = await browser.newPage();
-  await page.setViewport({ width: W, height: H, deviceScaleFactor: +(process.env.DPR ?? 1) });
-  page.on('pageerror', (e) => console.log('pageerror: ' + e.message));
-  page.on('console', (m) => {
-    const t = m.text();
-    if (/error|shader/i.test(t)) console.log('console: ' + t.slice(0, 800));
+  const page = await bootIntoCar(browser, {
+    URL, W, H, DPR: +(process.env.DPR ?? 1), SEED: process.env.SEED ?? 'flick', TIER: process.env.TIER,
   });
-  await page.goto(URL, { waitUntil: 'load', timeout: 60000 });
-
-  const hasNewDrive = () => [...document.querySelectorAll('button')].some((b) => b.textContent === 'New Drive');
-  await until(page, hasNewDrive, null, 30000, 'the menu');
-  const seedInput = await page.$('input[placeholder^="blank = random"]');
-  if (seedInput) {
-    await seedInput.click({ clickCount: 3 });
-    await seedInput.type(process.env.SEED ?? 'flick');
-  }
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'New Drive')?.click());
-  await until(page, () => !!window.__bro, null, 60000, 'the game');
-  // The boot cover measures the GPU and may still change the tier underneath; nothing
-  // is set until it has gone (app/bootwarmup.ts hides it last).
-  await until(
-    page,
-    () => document.getElementById('launch-loading')?.classList.contains('is-hidden') ?? true,
-    null,
-    90000,
-    'the boot cover',
-  );
-  await until(page, () => window.__bro.settled(), null, 60000, 'the opening world');
-
-  // Into the nearest car: the chase camera is what the player looks through.
-  await page.evaluate(() => {
-    const b = window.__bro;
-    const p = b.player.position;
-    let best = null;
-    let bestD = Infinity;
-    for (const [id, v] of b.vehicles) {
-      const t = v.chassis.translation();
-      const d = (t.x - p.x) ** 2 + (t.z - p.z) ** 2;
-      if (d < bestD) { bestD = d; best = id; }
-    }
-    if (best) b.world.apply({ t: 'enter_car', carId: best });
-  });
-
-  if (process.env.TIER) {
-    const metres = HORIZON_M[process.env.TIER];
-    if (!metres) throw new Error(`unknown TIER ${process.env.TIER}`);
-    await page.evaluate(([tier, m]) => {
-      const b = window.__bro;
-      b.world.apply({ t: 'settings', settings: { ...b.world.state.settings, graphicsQuality: tier } });
-      b.renderer.setViewDistance(m);
-      b.vista.setViewDistance(m);
-    }, [process.env.TIER, metres]);
-  }
 
   for (const item of list.split(',')) {
     const [km, hour, look = 'road'] = item.split(':');

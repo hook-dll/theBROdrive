@@ -1169,6 +1169,148 @@ async function checkOvertake(): Promise<void> {
 }
 
 /**
+ * PASSING ON THE RIGHT WHEN THE OPPOSING LANE IS TAKEN: the frantic driver on a
+ * narrow, straight, paved stretch behind a slower car, with a car always coming the
+ * other way. It must neither cross the crown nor sit behind for good: out onto the
+ * verge with the left wheels near the asphalt edge, past at a modest advantage,
+ * clear of the passed car's flank, and back into its lane.
+ */
+async function checkShoulderPass(): Promise<void> {
+  const leadAhead = 40;
+  const leadCap = 14;
+  const seconds = 30;
+  const road = new Road(42);
+  let startS = -1;
+  for (let s = START_S; s < START_S + 60_000 && startS < 0; s += 50) {
+    let fits = true;
+    for (let x = s - 40; x <= s + 900; x += 10) {
+      if (road.lanesPerSideAt(x) > 1 || Math.abs(road.curvatureAt(x)) > 0.004) {
+        fits = false;
+        break;
+      }
+    }
+    if (fits) startS = s;
+  }
+  if (startS < 0) {
+    check('frantic passes on the right with the opposing lane taken', false, 'no straight narrow stretch on seed 42');
+    return;
+  }
+  const physics = await PhysicsWorld.create();
+  addRoadCollider(physics, road, startS - 60, startS + 1_200);
+  const world = new GameWorld(newWorldState(42));
+  const scene = new THREE.Scene();
+  const origin = new WorldOrigin();
+  const hazards = new HazardIndex();
+  const lane = -ROAD_HALF_WIDTH / 2;
+  const chaserState = { ...carState(road, startS, lane), id: 'shoulder-chaser' };
+  const leadState = { ...carState(road, startS + leadAhead, lane), id: 'shoulder-lead' };
+  world.state.cars[chaserState.id] = chaserState;
+  world.state.cars[leadState.id] = leadState;
+  const chaser = new Vehicle(physics, world, chaserState, scene, origin);
+  const lead = new Vehicle(physics, world, leadState, scene, origin);
+  const chaserPilot = new Autopilot(road, hazards, physics);
+  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserInput = emptyInput();
+  const leadInput = emptyInput();
+  chaserInput.handbrake = true;
+  leadInput.handbrake = true;
+  for (let i = 0; i < 180; i++) {
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+  }
+  chaserInput.handbrake = false;
+  leadInput.handbrake = false;
+  const chaserPosition = new THREE.Vector3();
+  const leadPosition = new THREE.Vector3();
+  const halfWidth = lead.modelMeasure.halfExtents[0];
+  // The traffic field as the coordinator gives it: the real lead car, plus a car that
+  // is always 45 m up the opposing lane and coming at 20 m/s, so the crown never opens.
+  chaserPilot.setTrafficField({
+    forEachNear(ahead, behind, visit) {
+      const c = road.project(chaserPosition.x, chaserPosition.z);
+      const l = road.project(leadPosition.x, leadPosition.z);
+      const along = l.s - c.s;
+      const s = Math.sign(along) * Math.max(0, Math.abs(along) - 2.3);
+      if (s <= ahead && s >= -behind) {
+        visit({ s, lateral: l.lateral, speed: lead.chassis.linvel().z * Math.cos(road.sampleAt(l.s).heading) + lead.chassis.linvel().x * Math.sin(road.sampleAt(l.s).heading), halfWidth, halfLength: 2.3 });
+      }
+      if (45 <= ahead) visit({ s: 45, lateral: -lane, speed: -20, halfWidth: 0.9, halfLength: 2.3 });
+    },
+  });
+  chaserPilot.setMode('frantic');
+  leadPilot.setMode('sleeper');
+  chaserPilot.setEngaged(true);
+  leadPilot.setEngaged(true);
+  let crossed = false;
+  let completed = false;
+  let wentOut = false;
+  let maxOverhang = 0;
+  let clearanceWhileLevel = Infinity;
+  let fastestAdvantage = -Infinity;
+  let offroad = false;
+  let backHome = false;
+  let leadCruise = 0;
+  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
+    chaser.absoluteTranslation(chaserPosition);
+    lead.absoluteTranslation(leadPosition);
+    leadPilot.setSpeedCap(leadCap);
+    chaserPilot.drive(FIXED_DT, chaser, chaserInput, 0, 0);
+    leadPilot.drive(FIXED_DT, lead, leadInput, 0, 0);
+    chaser.fixedUpdate(FIXED_DT, chaserInput);
+    lead.fixedUpdate(FIXED_DT, leadInput);
+    physics.step();
+    chaser.postStep();
+    lead.postStep();
+    chaser.absoluteTranslation(chaserPosition);
+    lead.absoluteTranslation(leadPosition);
+    const c = road.project(chaserPosition.x, chaserPosition.z);
+    const l = road.project(leadPosition.x, leadPosition.z);
+    const along = l.s - c.s;
+    if (along > 12) leadCruise = speed(lead);
+    const edge = road.halfWidthAt(c.s);
+    if (c.lateral > 0) crossed = true;
+    if (process.env.TRACE_SHOULDER && i % 15 === 0) {
+      console.log(`    t=${(i * FIXED_DT).toFixed(1)} lat=${c.lateral.toFixed(2)} along=${along.toFixed(1)} v=${speed(chaser).toFixed(1)} lead=${speed(lead).toFixed(1)} ${chaserPilot.activity} line=${chaserPilot.commandedLine.toFixed(2)} ` + (() => { const a = chaserPilot as unknown as Record<string, unknown>; return `grant=${a.shoulderPassAllowed} on=${a.shoulderPassing} urge=${a.passUrgeValue} det=${a.detouring} lbd=${(a.corridorLaneBlockDistance as number).toFixed(1)} lbs=${(a.corridorLaneBlockSpeed as number).toFixed(1)} ldr=${(a.shoulderLeaderGap as number).toFixed(1)}`; })());
+    }
+    if (chaserPilot.activity === 'offroad') offroad = true;
+    // The inner (left) tyre's outer edge past the asphalt edge: 0 while it is on it.
+    const innerTyre = -c.lateral - WHEEL_HALF_TRACK_M;
+    maxOverhang = Math.max(maxOverhang, innerTyre - edge);
+    if (-c.lateral + halfWidth > edge + 0.3) wentOut = true;
+    if (Math.abs(along) < 4.6) {
+      clearanceWhileLevel = Math.min(clearanceWhileLevel, Math.abs(c.lateral - l.lateral) - 2 * halfWidth);
+      // Against the passed car's cruise, not its momentary speed: a driver with a car
+      // coming up on its verge lifts, and that is not the passer going faster.
+      fastestAdvantage = Math.max(fastestAdvantage, speed(chaser) - leadCruise);
+    }
+    if (along < -8) completed = true;
+    if (completed && Math.abs(c.lateral - lane) < 0.5) backHome = true;
+  }
+  check(
+    'frantic passes on the right with the opposing lane taken',
+    wentOut && completed && backHome && !crossed,
+    `out on the verge=${wentOut}, cleared by 8 m=${completed}, back in lane=${backHome}, crossed the crown=${crossed}`,
+  );
+  check(
+    'a pass on the right keeps the left wheels at the edge',
+    maxOverhang <= 0.35 && !offroad,
+    `left tyre at most ${maxOverhang.toFixed(2)} m past the asphalt, road departure=${offroad}`,
+  );
+  check(
+    'a pass on the right keeps its distance and its pace',
+    clearanceWhileLevel >= 0.3 && fastestAdvantage <= 6 + 1.5,
+    `${Number.isFinite(clearanceWhileLevel) ? clearanceWhileLevel.toFixed(2) + ' m' : 'never level'} between bodies while level, ` +
+      `${fastestAdvantage.toFixed(1)} m/s over the passed car's cruise`,
+  );
+  chaser.dispose();
+  lead.dispose();
+  physics.world.free();
+}
+
+/**
  * GETTING PAST A SLOWER CAR WITHOUT CROSSING THE CROWN, on a stretch with two lanes
  * each way.
  *
@@ -1674,6 +1816,14 @@ async function run(): Promise<void> {
   checkHandover();
   await checkAutomaticLights();
   await checkPassingSafety();
+  if (typeof process !== 'undefined' && process.argv.includes('--passes')) {
+    await checkOvertake();
+    await checkShoulderPass();
+    await checkLanePass();
+    await checkSideBySide();
+    if (failures) process.exitCode = 1;
+    return;
+  }
   if (typeof process !== 'undefined' && process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
     await checkHazards();
@@ -1754,6 +1904,7 @@ async function run(): Promise<void> {
   await checkLitteredRoad();
   await checkWedgedOffRoad();
   await checkOvertake();
+  await checkShoulderPass();
   await checkLanePass();
   await checkSideBySide();
   await checkBoxedInHazard();

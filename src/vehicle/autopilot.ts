@@ -178,8 +178,8 @@ interface ModeConfig {
    * FRANTIC driver needed: at 0.72 on gravel it arrived at a bend, stood on the brake
    * inside it, lost the front and ran 1.2 m past the asphalt, so gravel came down to
    * 0.50. That is a bound on the controller, not on the surface — and charging every
-   * driver the same 0.50 made the whole ambient stream crawl, because the stream has no
-   * frantic drivers in it at all (see the traffic driver draw: sleeper and hurried only).
+   * driver the same 0.50 made the whole ambient stream crawl, because the stream was
+   * almost entirely careful drivers (see the traffic driver draw: frantic is rare).
    *
    * So the strict bound is the frantic driver's, and this is the dial that says so. 1
    * spends the surface's whole grip ratio; frantic's 0.7 reproduces the measured grave
@@ -708,6 +708,39 @@ const HEAD_ON_MARGIN_MPS = 4;
  * (world/terrain.ts) so a pass costs nothing but grip.
  */
 const PASSING_VERGE_M = 1.2;
+/**
+ * PASSING ON THE RIGHT, the frantic driver's answer to a two-lane road whose opposing
+ * lane is taken: ease out onto the verge beside the car it is held up by — the left
+ * wheels may stay on the asphalt — go by at a modest speed advantage, and come back in.
+ *
+ * It is not a licence the corridor gives by default. The sand is for things that are
+ * not going anywhere (`SHOULDER_BYPASS_MAX_SPEED` in the corridor), and only a racer on
+ * a paved, nearly straight, one-lane-each-way stretch with the verge clear of props is
+ * granted it, one step at a time (`shoulderPassAllowed`). The crossing stays cheaper, so
+ * with the opposing lane free the pass is still taken there.
+ *
+ * `OVERHANG` is how far the body's outer edge may pass the asphalt edge: 1.8 m puts the
+ * centre of a Zhiguli about 0.75 m out, its left wheels on the white line.
+ * `GAP` is the room kept to the passed car's real flank, on top of the planner's own
+ * body margin. The speed is the leader's plus `ADVANTAGE`, never above `MAX`: a pass
+ * on the verge is a squeeze, not a sprint.
+ */
+const SHOULDER_PASS_OVERHANG_M = 1.8;
+const SHOULDER_PASS_GAP_M = 0.25;
+const SHOULDER_PASS_ADVANTAGE_MPS = 6;
+const SHOULDER_PASS_MAX_MPS = 100 / 3.6;
+/** Verge proven clear of props ahead: this many seconds of travel, within bounds. */
+const SHOULDER_PASS_SIGHT_S = 5;
+const SHOULDER_PASS_SIGHT_MIN_M = 60;
+const SHOULDER_PASS_SIGHT_MAX_M = 220;
+/** A passed body's assumed half width when only a collider is known (abeam query). */
+const SHOULDER_PASS_BODY_HALF_M = 0.9;
+/**
+ * The pass line sits this far outside the exact touching line: on the exact one the
+ * strict band test calls the passed car IN the corridor, and the driver follows it
+ * along the verge instead of passing it.
+ */
+const SHOULDER_PASS_LINE_SLACK_M = 0.05;
 /**
  * THE VERGE IS NOT A LANE, AND FOUR METRES OF IT IS THE DESERT.
  *
@@ -1495,6 +1528,37 @@ export class Autopilot {
    * one that is merely following does not. See `followHeadwayS`.
    */
   private passShopping = false;
+  /** This step's grant of the verge for passing a moving car; see SHOULDER_PASS_*. */
+  private shoulderPassAllowed = false;
+  /** The chosen line is that pass, on the verge beside a moving car. */
+  private shoulderPassing = false;
+  /** Road-frame lateral and half width of the car being passed, from the field. */
+  private shoulderLeaderLateral = 0;
+  private shoulderLeaderHalfWidth = 0;
+  private shoulderLeaderGap = Infinity;
+  private shoulderLeaderSpeed = 0;
+  /** Speed of the car being passed on the verge, held while it is alongside. */
+  private shoulderPassSpeed = 0;
+  private shoulderLaneOffset = 0;
+  private shoulderSideSign = -1;
+  private shoulderVergeBlocked = false;
+  private readonly visitShoulderLeader = (neighbour: TrafficNeighbour): void => {
+    if (neighbour.s < 0 || neighbour.s >= this.shoulderLeaderGap) return;
+    if (neighbour.speed <= CRAWL_SPEED_MPS) return;
+    if (Math.abs(neighbour.lateral - this.shoulderLaneOffset) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
+    this.shoulderLeaderGap = neighbour.s;
+    this.shoulderLeaderSpeed = neighbour.speed;
+    this.shoulderLeaderLateral = neighbour.lateral;
+    this.shoulderLeaderHalfWidth = neighbour.halfWidth;
+  };
+  /** Any prop on this side beyond the asphalt, out to where the pass would put the body. */
+  private readonly visitShoulderHazard = (hazard: RoadHazard): void => {
+    const outward = hazard.lateral * this.shoulderSideSign;
+    const edge = this.asphaltHalfWidth;
+    if (outward + hazard.radius < edge - CAR_HALF_WIDTH_M) return;
+    if (outward - hazard.radius > edge + SHOULDER_PASS_OVERHANG_M + AVOID_HYSTERESIS_M) return;
+    this.shoulderVergeBlocked = true;
+  };
   /**
    * DEV TELEMETRY ONLY, and nothing in the controller reads any of it back.
    *
@@ -2843,6 +2907,60 @@ export class Autopilot {
      */
     const passAttempt = passUrge && this.passShopping;
     this.passUrgeValue = passUrge;
+    // MAY THIS DRIVER PASS ON THE RIGHT THIS STEP? See SHOULDER_PASS_OVERHANG_M.
+    this.shoulderPassAllowed = false;
+    if (
+      config.racer &&
+      lanesPerSide === 1 &&
+      this.passingEnabled &&
+      !offRoad &&
+      !recovering &&
+      (passUrge || this.shoulderPassing) &&
+      currentSurface !== SurfaceType.Gravel &&
+      currentSurface !== SurfaceType.Sand &&
+      currentSurface !== SurfaceType.Rock &&
+      this.trafficField
+    ) {
+      this.shoulderLaneOffset = ownLaneOffset;
+      this.shoulderSideSign = Math.sign(ownLaneOffset) || -1;
+      this.shoulderLeaderGap = Infinity;
+      this.trafficField.forEachNear(horizon, 0, this.visitShoulderLeader);
+      const sightM = clamp(
+        speed * SHOULDER_PASS_SIGHT_S,
+        SHOULDER_PASS_SIGHT_MIN_M,
+        SHOULDER_PASS_SIGHT_MAX_M,
+      );
+      // The line that clears the leader's real flank must fit inside the overhang.
+      const passLine =
+        this.shoulderLeaderLateral +
+        this.shoulderSideSign *
+          (this.shoulderLeaderHalfWidth + SHOULDER_PASS_GAP_M + CAR_HALF_WIDTH_M + SHOULDER_PASS_LINE_SLACK_M);
+      const overhang = Math.abs(passLine) + CAR_HALF_WIDTH_M - this.asphaltHalfWidth;
+      if (
+        this.shoulderLeaderGap < Infinity &&
+        overhang <= SHOULDER_PASS_OVERHANG_M &&
+        this.straightAhead(this.hintS, sightM, config.passCurvature)
+      ) {
+        this.shoulderVergeBlocked = false;
+        this.hazards.forEachAhead(this.hintS, sightM, this.visitShoulderHazard);
+        this.shoulderPassAllowed = !this.shoulderVergeBlocked;
+        // The exact line, as a candidate of its own: the search's quarter-metre lattice
+        // rounds it outward by up to 0.25 m, which on a road this narrow is the
+        // difference between the left wheels on the paint and past the overhang.
+        if (this.shoulderPassAllowed) this.laneCentres.push(passLine);
+      }
+    }
+    if (this.shoulderPassAllowed) {
+      // The planner measures the verge pass against the car's REAL flank, not the
+      // lane-wide band a probe hit is otherwise given: that band alone is wider than
+      // the room there is.
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i]!;
+        if (!o.abeam || o.speed <= CRAWL_SPEED_MPS) continue;
+        if ((o.lateral - projection.lateral) * this.shoulderSideSign >= 0) continue;
+        obstacles[i] = { ...o, halfWidth: SHOULDER_PASS_BODY_HALF_M + SHOULDER_PASS_GAP_M };
+      }
+    }
     /**
      * The kickdown, and it is the SAME number the crossing gate sizes the manoeuvre
      * with and the speed plan asks the pedal for: a pass committed to at a speed the
@@ -2888,10 +3006,14 @@ export class Autopilot {
     // Each fixed-lane observation carries its own hit speed; another lane's nearer
     // body must not lend this leader its velocity.
     if (ownLaneGap < Infinity) {
+      const leaderMeasured =
+        this.shoulderPassAllowed && Math.abs(this.shoulderLeaderGap - ownLaneGap) < CAR_HALF_LENGTH_M * 2;
       obstacles.push({
         s: ownLaneGap,
-        lateral: ownLaneOffset,
-        halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
+        lateral: leaderMeasured ? this.shoulderLeaderLateral : ownLaneOffset,
+        halfWidth: leaderMeasured
+          ? this.shoulderLeaderHalfWidth + SHOULDER_PASS_GAP_M
+          : CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
         speed: ownLaneProbeSpeed,
         movable: true,
       });
@@ -3220,6 +3342,7 @@ export class Autopilot {
       edgeLimit: staticAvoidLine,
       lateralFreedom,
       mayCrossCrown,
+      shoulderPassOverhang: this.shoulderPassAllowed ? SHOULDER_PASS_OVERHANG_M : 0,
       lineAllowed: this.lineEntryAllowed,
       // The mode's whole appetite for the opposing lane, in one number — and a
       // dearer one for a driver that is only there because something is parked in
@@ -3313,7 +3436,9 @@ export class Autopilot {
       proposal.crossingRefused || proposal.crossingAbandoned || !mayCrossCrown,
       headOn,
       staticAvoidLine,
-      config.racer && passUrge
+      // A pass on the verge closes up first: it is a squeeze past the car, not a
+      // momentum pass begun from where a follower would brake.
+      config.racer && passUrge && !proposal.usesShoulder
         ? PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS)
         : 0,
     );
@@ -3459,6 +3584,23 @@ export class Autopilot {
       plan.usesOncomingLane &&
       (projection.lateral - 0) * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     this.planUsesShoulder = !offRoad && !recovering && plan.usesShoulder;
+    // The pass lasts until the passed car is behind, not until the forward probe
+    // loses it: alongside, only the abeam query still sees it, and the pace cap below
+    // has to hold there most of all.
+    let passedAlongside = Number.POSITIVE_INFINITY;
+    for (const obstacle of obstacles) {
+      if (!obstacle.abeam || obstacle.speed <= CRAWL_SPEED_MPS) continue;
+      if ((obstacle.lateral - projection.lateral) * this.shoulderSideSign >= 0) continue;
+      passedAlongside = Math.min(passedAlongside, obstacle.speed);
+    }
+    if (this.shoulderPassAllowed && plan.laneBlockSpeed > CRAWL_SPEED_MPS && this.planUsesShoulder) {
+      this.shoulderPassing = true;
+      this.shoulderPassSpeed = plan.laneBlockSpeed;
+    } else if (this.shoulderPassing && this.planUsesShoulder && passedAlongside < Infinity) {
+      this.shoulderPassSpeed = passedAlongside;
+    } else {
+      this.shoulderPassing = false;
+    }
     // Anything the corridor clears by only its hysteresis margin is squeezed past at
     // walking pace rather than at road speed.
     this.corridorSqueezeDistance = Number.POSITIVE_INFINITY;
@@ -3975,6 +4117,14 @@ export class Autopilot {
               obstacleBrakeAccel *
               Math.max(0, this.corridorSqueezeDistance - config.brakeLead),
         ),
+      );
+    }
+    // A pass on the verge is a squeeze past a moving car, taken at a modest advantage.
+    if (this.shoulderPassing) {
+      targetSpeed = Math.min(
+        targetSpeed,
+        SHOULDER_PASS_MAX_MPS,
+        this.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
       );
     }
     if (!plan.admissible) targetSpeed = 0;

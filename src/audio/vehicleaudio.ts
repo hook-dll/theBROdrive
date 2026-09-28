@@ -179,6 +179,22 @@ export class VehicleAudio {
   private readonly cabinLowpass: BiquadFilterNode;
   private readonly cabinBoom: BiquadFilterNode;
   private readonly spaceSend: GainNode;
+  /**
+   * THE ENGINE HAS ITS OWN SHELL, AND IT IS VOICED THE OTHER WAY ROUND.
+   *
+   * By ear (the player's, 2026-09-28): the engine heard from the bonnet camera and the
+   * engine heard from the chase camera sounded swapped. The bonnet camera sits ON the
+   * bay, in the open air, not behind a firewall; the chase camera hears the car as a
+   * whole shut box going by. So the engine — exhaust and bay, nothing else — goes
+   * through its own filter pair driven by the opposite perspective (`engineHeardAs`),
+   * while tyres, wind and the body keep the cabin/outside voicing they had.
+   */
+  private readonly engineOut: GainNode;
+  private readonly engineLowpass: BiquadFilterNode;
+  private readonly engineBoom: BiquadFilterNode;
+  private readonly engineSpaceSend: GainNode;
+  private readonly engineNose: PannerNode;
+  private readonly engineTail: PannerNode;
   private readonly nose: PannerNode;
   private readonly body: PannerNode;
   private readonly tail: PannerNode;
@@ -268,8 +284,23 @@ export class VehicleAudio {
     space.normalize = false;
     space.buffer = this.buildSpaceImpulse();
     this.out.connect(this.spaceSend).connect(space).connect(mixer.car);
+    this.engineOut = ctx.createGain();
+    this.engineOut.gain.value = 0;
+    this.engineLowpass = ctx.createBiquadFilter();
+    this.engineLowpass.type = 'lowpass';
+    this.engineLowpass.frequency.value = CABIN_LP_HZ;
+    this.engineLowpass.Q.value = 0.6;
+    this.engineBoom = ctx.createBiquadFilter();
+    this.engineBoom.type = 'peaking';
+    this.engineBoom.frequency.value = 78;
+    this.engineBoom.Q.value = 1.1;
+    this.engineBoom.gain.value = CABIN_BOOM_DB;
+    this.engineOut.connect(this.engineLowpass).connect(this.engineBoom).connect(mixer.car);
+    this.engineSpaceSend = ctx.createGain();
+    this.engineSpaceSend.gain.value = 0;
+    this.engineOut.connect(this.engineSpaceSend).connect(space);
 
-    const panner = (): PannerNode => {
+    const panner = (bus: AudioNode = this.out): PannerNode => {
       const p = new PannerNode(ctx, {
         panningModel: 'equalpower',
         distanceModel: 'inverse',
@@ -277,9 +308,11 @@ export class VehicleAudio {
         rolloffFactor: 1,
         maxDistance: 400,
       });
-      p.connect(this.out);
+      p.connect(bus);
       return p;
     };
+    this.engineNose = panner(this.engineOut);
+    this.engineTail = panner(this.engineOut);
     this.nose = panner();
     this.body = panner();
     this.tail = panner();
@@ -304,8 +337,8 @@ export class VehicleAudio {
     this.exhaustGain.gain.value = 0;
     this.bayGain = ctx.createGain();
     this.bayGain.gain.value = 0;
-    this.engine.exhaust.connect(this.exhaustGain).connect(this.tail);
-    this.engine.bay.connect(this.bayGain).connect(this.nose);
+    this.engine.exhaust.connect(this.exhaustGain).connect(this.engineTail);
+    this.engine.bay.connect(this.bayGain).connect(this.engineNose);
 
     // --- gearbox ----------------------------------------------------------------
     // A mesh whine is not a pure sine: a little second harmonic and a slow flutter
@@ -507,6 +540,7 @@ export class VehicleAudio {
     if (this.active === active) return;
     this.active = active;
     ramp(this.out.gain, active ? 1 : 0, this.mixer.now, 0.12);
+    ramp(this.engineOut.gain, active ? 1 : 0, this.mixer.now, 0.12);
     if (!active) this.wasRunning = false;
   }
 
@@ -519,6 +553,15 @@ export class VehicleAudio {
     this.cabinLowpass.frequency.setTargetAtTime(cabin ? CABIN_LP_HZ : OUTSIDE_LP_HZ, now, 0.08);
     this.cabinBoom.gain.setTargetAtTime(cabin ? CABIN_BOOM_DB : 0, now, 0.08);
     this.spaceSend.gain.setTargetAtTime(cabin ? 0 : SPACE_SEND, now, 0.08);
+    const engineCabin = this.engineHeardAs === 'cabin';
+    this.engineLowpass.frequency.setTargetAtTime(engineCabin ? CABIN_LP_HZ : OUTSIDE_LP_HZ, now, 0.08);
+    this.engineBoom.gain.setTargetAtTime(engineCabin ? CABIN_BOOM_DB : 0, now, 0.08);
+    this.engineSpaceSend.gain.setTargetAtTime(engineCabin ? 0 : SPACE_SEND, now, 0.08);
+  }
+
+  /** The perspective the ENGINE is voiced from: the camera's, swapped. See `engineOut`. */
+  private get engineHeardAs(): CarPerspective {
+    return this.perspective === 'cabin' ? 'outside' : 'cabin';
   }
 
   /**
@@ -588,8 +631,9 @@ export class VehicleAudio {
     this.wasRunning = state.engineRunning;
     // Through the cabin the bay is a firewall away and the tailpipe three metres
     // behind a closed boot; from outside the tailpipe dominates.
-    ramp(this.exhaustGain.gain, ENGINE_GAIN * (cabin ? 0.75 : 1), now, 0.08);
-    ramp(this.bayGain.gain, ENGINE_GAIN * (cabin ? 1.3 : 0.65), now, 0.08);
+    const engineCabin = this.engineHeardAs === 'cabin';
+    ramp(this.exhaustGain.gain, ENGINE_GAIN * (engineCabin ? 0.75 : 1), now, 0.08);
+    ramp(this.bayGain.gain, ENGINE_GAIN * (engineCabin ? 1.3 : 0.65), now, 0.08);
 
     const speed = Math.abs(state.forwardMps);
     const load = clamp01(state.throttle);
@@ -696,6 +740,8 @@ export class VehicleAudio {
     setPannerPosition(this.nose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
     setPannerPosition(this.body, x, y, z, now, 0.02);
     setPannerPosition(this.tail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
+    setPannerPosition(this.engineNose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
+    setPannerPosition(this.engineTail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
   }
 
   /** Hot metal ticking as it cools, and a boiling radiator after an overheat. */
@@ -914,5 +960,6 @@ export class VehicleAudio {
     this.diffOsc.stop();
     this.rotorLfo.stop();
     this.out.disconnect();
+    this.engineOut.disconnect();
   }
 }

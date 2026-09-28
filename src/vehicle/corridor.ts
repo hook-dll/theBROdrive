@@ -152,6 +152,14 @@ export interface CorridorRequest {
   readonly lateralFreedom?: number;
   /** Hard permission to occupy a line across the crown, independent of its price. */
   readonly mayCrossCrown: boolean;
+  /**
+   * How far past the asphalt the body's edge may go on THIS driver's side to pass a
+   * MOVING car on the right, metres; 0 (the default) is no such pass. The caller grants
+   * it only where the verge is fit for it — see `SHOULDER_PASS_OVERHANG_M` in the
+   * autopilot. It is priced at `SHOULDER_PASS_COST_PER_M`, so a crossing that is open
+   * stays the cheaper way past.
+   */
+  readonly shoulderPassOverhang?: number;
   /** Hard permission for the entire transition to a line, not only its destination. */
   readonly lineAllowed?: (line: number) => boolean;
   /**
@@ -319,6 +327,14 @@ const PASS_ENTRY_MARGIN = 1.3;
  */
 const SHOULDER_BYPASS_MAX_SPEED = 2;
 /**
+ * Cost per metre of body past the asphalt on a GRANTED pass on the right
+ * (`shoulderPassOverhang`), in place of `SHOULDER_COST_PER_M`. The full verge price is
+ * a bogging deterrent; a granted verge is paved-road-side and short. At the full
+ * overhang this is dearer than a frantic crossing (16 x 0.66 plus a lane), so an open
+ * opposing lane still wins.
+ */
+const SHOULDER_PASS_COST_PER_M = 8;
+/**
  * Cost of going round an immovable thing on its LEFT rather than its right.
  *
  * Passing obstacles on the right is what lets two opposing streams go round the
@@ -443,6 +459,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     crossingRearClear,
     obstacles,
     mayCrossCrown,
+    shoulderPassOverhang = 0,
     lineAllowed,
     passSeconds,
     passTravel = 0,
@@ -768,13 +785,20 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     // The sand is for getting round something that is not going anywhere. Left
     // unpriced, the planner undertook moving traffic on the shoulder because sand
     // was cheaper than losing pace.
-    if (leavesAsphalt && !laneBlockIsStill) admissible = false;
+    const shoulderPass =
+      leavesAsphalt &&
+      !laneBlockIsStill &&
+      shoulderPassOverhang > 0 &&
+      (line - oncomingBoundary) * ownSide > 0 &&
+      bodyEdge - asphaltLimit <= shoulderPassOverhang;
+    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass) admissible = false;
     if (!admissible && !captureRejected) return;
     let cost = Number.POSITIVE_INFINITY;
     if (admissible) {
       cost =
         Math.abs(line - laneOffset) * LANE_COST_PER_M +
-        Math.max(0, bodyEdge - asphaltLimit) * SHOULDER_COST_PER_M +
+        Math.max(0, bodyEdge - asphaltLimit) *
+          (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M) +
         (crossesCentre ? oncomingLaneCost : 0);
       // Immovable things are passed on the right, so that two opposing streams go
       // round the same one and still clear each other.
