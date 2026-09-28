@@ -10,7 +10,7 @@ import { StarField } from './starcatalog';
 import { PlanetField } from './planetfield';
 import { weather } from '../world/weather';
 import { SandColor } from './desertdust';
-import { setAirFogExtinction } from './airfog';
+import { setAirFogExtinction, setAirFogSky, setAirFogSun } from './airfog';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -230,16 +230,25 @@ const C_CLEAR_HORIZON = new THREE.Color().setStyle('#c4e2f4');
 const C_FLASH = new THREE.Color().setStyle('#dfe2ff');
 
 /**
- * Fog density each weather adds, per metre, ON TOP of the clear air and the draw
- * distance's edge fade (render/airfog.ts), neither of which it knows about: a haboob
- * is a haboob whatever range the player has chosen. They are the scene's whole
- * `FogExp2` density. FogExp2 is 1 - exp(-(d·k)²), so these read as: haze eats the land by ~900 m, rain
- * greys it by ~1.4 km, and a dust storm leaves ~150 m of sight.
+ * What each weather does to sight, as a meteorological visibility at full strength
+ * (Koschmieder, beta = 3.912 / V), added to the clear air's extinction. This is the
+ * same exponential law as the clear air, so a light veil is light: haze at a fifth of
+ * its strength leaves a mesa five kilometres out about 45 % of its own colour.
+ *
+ * These used to be the scene's `FogExp2` density, 1 - exp(-(d·k)²). Squared distance
+ * is spotless near and total a little further on: the trace of haze a windy or a hot
+ * day carries (0.14-0.23) put 81 % fog on the land at 3 km and 99 % at 5 km, so every
+ * mesa on the skyline came out one flat pale cut-out under a blue sky.
  */
-const FOG_HAZE = 0.0019;
+const HAZE_VISIBILITY_M = 2_500;
+const RAIN_VISIBILITY_M = 4_000;
+const STORM_VISIBILITY_M = 8_000;
+/**
+ * The dust storm keeps the scene's `FogExp2`, and is its only density: a haboob IS a
+ * wall, clear up to it and blind inside, and the wall pass (render/hazeshader.ts)
+ * shares this law. 1 - exp(-(d·k)²) leaves ~150 m of sight.
+ */
 const FOG_DUST = 0.0125;
-const FOG_RAIN = 0.0011;
-const FOG_STORM = 0.0006;
 
 /**
  * How bright the far LAND's fog is against the sky's own horizon band, at night (by
@@ -970,11 +979,11 @@ export class Sky {
   private readonly uBoltAz = { value: 0 };
   private readonly uBoltTop = { value: 0.1 };
   private readonly uBoltSeed = { value: 0 };
-  /** Fog density the weather adds on top of the scaled base (see FOG_HAZE). */
-  private weatherFog = 0;
-  /** The dust storm's share of it: what a haboob throws ahead of its own wall. */
+  /** A haboob's FogExp2 density, the scene fog's only one (see FOG_DUST). */
   private dustFog = 0;
   private readonly _weatherTint = new THREE.Color();
+  private readonly _airSky = new THREE.Color();
+  private readonly _airDusk = new THREE.Color();
 
 
   // --- Scratch state, reused every frame (no allocation in the hot path) ---
@@ -1235,19 +1244,31 @@ export class Sky {
       authoredSunGlow,
       smoothstep(-0.01, 0.08, this.sunElevation) * 0.45,
     ) * sunThrough * (1 + 0.8 * weather.haze * (1 - weather.dust));
-    // --- Fog tracks the horizon so distant terrain melts into the sky ---
-    // ...at the land's own light level once the sun is low (see LAND_FOG_NIGHT).
-    this.fog.color.copy(this._horizon).multiplyScalar(LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day);
+    // --- Fog tracks the dome so distant terrain melts into the sky behind it ---
+    // ...at the land's own light level once the sun is low (see LAND_FOG_NIGHT). The
+    // gradient's top is the dome's own, `mix(uHorizon, uZenith, 1 - uDomeFlat)`, so the
+    // land fog climbs with elevation exactly as the sky does (render/airfog.ts).
+    const landFog = LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day;
+    this.fog.color.copy(this._horizon).multiplyScalar(landFog);
+    setAirFogSky(
+      this._airSky.copy(this._horizon).lerp(this._zenith, 1 - this.uDomeFlat.value).multiplyScalar(landFog),
+    );
+    // The dome's anti-solar darkening, set here so the land's fog reads the same value.
+    this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
+    setAirFogSun(
+      celestial.sun.direction,
+      this.uAntiSolar.value,
+      this._airDusk.copy(this._zenith).multiplyScalar(0.55 * landFog),
+    );
     setAirFogExtinction(
       (3.912 / CLEAR_AIR_VISIBILITY_M) * g.haze ** REGIONAL_HAZE_POWER *
-        (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust)),
+        (1 - 0.55 * weather.clarity) * (1 - 0.6 * weather.front * (1 - weather.dust)) +
+        3.912 *
+          (weather.haze / HAZE_VISIBILITY_M +
+            weather.rain / RAIN_VISIBILITY_M +
+            weather.cloud / STORM_VISIBILITY_M),
     );
     this.dustFog = FOG_DUST * Math.max(weather.dust, 0.2 * smoothstep(0.88, 1, weather.front));
-    this.weatherFog =
-      FOG_HAZE * weather.haze +
-      this.dustFog +
-      FOG_RAIN * weather.rain +
-      FOG_STORM * weather.cloud;
 
     // --- Dome uniforms ---
     this.uSunDir.copy(celestial.sun.direction);
@@ -1266,7 +1287,6 @@ export class Sky {
     this.uSunGlowColor.copy(this._sunGlow);
     this.uSunGlowIntensity.value = sunGlowIntensity;
     this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y);
-    this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
 
     // --- Cirrus deck ---
     // Cover comes from the sky gradient (weather, on a 400 km cycle). Visibility is
@@ -1504,14 +1524,9 @@ export class Sky {
     return this._horizon;
   }
 
-  /** The dust storm's share of `weatherFogDensity`, per metre. */
+  /** The dust storm's FogExp2 density, per metre: all the scene fog carries. */
   get dustFogDensity(): number {
     return this.dustFog;
-  }
-
-  /** Fog density the weather adds on top of the draw-distance-scaled base, per metre. */
-  get weatherFogDensity(): number {
-    return this.weatherFog;
   }
 
   /**

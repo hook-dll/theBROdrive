@@ -127,6 +127,22 @@
 
 ### Fixed
 
+- A TRACE OF HAZE NO LONGER TURNS THE SKYLINE INTO PAPER. Mgla, rain and a storm deck
+  were the scene's `FogExp2`, 1 - exp(-(d·k)²): spotless near, total a little further
+  on. The haze a windy or hot day carries (0.14-0.23) put 81 % fog on the land at 3 km
+  and 99 % at 5 km, so under a blue sky every mesa came out one flat pale cut-out, the
+  same pixel as the plain before it. They are now visibilities added to the clear air's
+  exponential extinction (full haze 2.5 km, rain 4 km, storm deck 8 km), and the
+  squared fog carries only a haboob, which is a wall. Measured on High at km 250 in
+  `wind`: near ground Y 0.27, far plain 0.33, a mesa 0.37 — graded, not one flat step.
+  The land's fog colour also climbs the dome's own gradient with the sight line's
+  elevation (`airSky` in `render/airfog.ts`) instead of stopping at the h = 0 band, so
+  fully fogged land now vanishes into the sky behind it rather than standing in front
+  of it as a brighter silhouette: in `wind` a far mesa reads Y 0.34 under a sky of 0.37.
+  At dawn and dusk it also takes the dome's anti-solar darkening (`airSun`): facing away
+  from a setting sun, fully fogged land is 12,8,47 under a low sky of 51,36,106, and
+  keeps the warmer 58,42,50 only off to the sides, where the dome's own pull is weak.
+
 - NOTHING IN A MIRAGE STANDS IN ANYTHING ELSE. Each odd form is tested as an oriented
   box against everything already placed and moved or dropped when it would enter it, and
   a group — a board, a row of dolls, a domino snake — stands whole or not at all. Palms,

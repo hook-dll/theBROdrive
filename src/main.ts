@@ -1948,10 +1948,10 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
-    // The scene fog is the weather's alone: a dust storm is a hundred metres of sight
-    // whatever range the player has chosen. The clear air and the fade at the edge of
-    // the draw distance are render/airfog.ts.
-    renderer.fog.density = sky.weatherFogDensity;
+    // The scene fog is the dust storm's alone: a hundred metres of sight whatever range
+    // the player has chosen. The clear air, the lighter weathers' veil and the fade at
+    // the edge of the draw distance are render/airfog.ts's exponential term.
+    renderer.fog.density = sky.dustFogDensity;
     renderer.setWeather({
       wallM: weather.frontM,
       windX: weather.windX,
