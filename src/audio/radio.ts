@@ -125,24 +125,25 @@ export class Radio {
     return `RADIO ${this.station.label}${suffix}`;
   }
 
-  /** Switches the radio on or off. Returns the new on/off state. */
-  toggle(): boolean {
-    this.on = !this.on;
-    this.resetBackoff();
-    this.sync();
-    return this.on;
-  }
-
-  /** Next station, switching the radio on if it was off. Returns the station. */
-  next(): RadioStation {
-    if (this.on) this.stationIndex = (this.stationIndex + 1) % RADIO_STATIONS.length;
-    else this.on = true;
+  /**
+   * One button: off → first station → … → last station → off. Returns the station
+   * now playing, or null when the step switched the radio off.
+   */
+  cycle(): RadioStation | null {
+    if (!this.on) {
+      this.on = true;
+      this.stationIndex = 0;
+    } else if (this.stationIndex < RADIO_STATIONS.length - 1) {
+      this.stationIndex++;
+    } else {
+      this.on = false;
+    }
     // A station change is a new source, so the current one must be dropped.
     this.element.pause();
     this.element.removeAttribute('src');
     this.resetBackoff();
     this.sync();
-    return this.station;
+    return this.on ? this.station : null;
   }
 
   /** Updates dashboard state; leaving the car does not stop its radio. */

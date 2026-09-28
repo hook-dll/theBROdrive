@@ -1639,8 +1639,7 @@ async function boot(): Promise<void> {
 
     // Radio: a car fitting, so the keys only do anything from the seat.
     if (driving) {
-      if (f.radioToggle) hud.setToast(audio.toggleRadio(drivingId!));
-      if (f.radioNext) hud.setToast(audio.nextStation(drivingId!));
+      if (f.radioCycle) hud.setToast(audio.cycleRadio(drivingId!));
     }
 
     // Shooting: the held item decides. A kill only enters the inventory if it fits,

@@ -295,16 +295,10 @@ export class GameAudio {
     this.foleyVoices.reload();
   }
 
-  /** Toggles the radio in the specified car; returns the line to toast. */
-  toggleRadio(carId: string): string {
-    const radio = this.radioFor(carId);
-    return radio.toggle() ? `radio on — ${radio.station.label}` : 'radio off';
-  }
-
-  /** Next station in the specified car; returns the line to toast. */
-  nextStation(carId: string): string {
-    const radio = this.radioFor(carId);
-    return `radio — ${radio.next().label}`;
+  /** Steps the radio in the specified car (off → stations → off); returns the line to toast. */
+  cycleRadio(carId: string): string {
+    const station = this.radioFor(carId).cycle();
+    return station ? `radio — ${station.label}` : 'radio off';
   }
 
   /** HUD line for the active car's radio, or null outside a car. */

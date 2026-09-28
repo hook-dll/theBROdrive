@@ -77,7 +77,7 @@ try {
         setTimeout(() => b.audio.thunder(900, -1), 200);
         setTimeout(() => b.audio.thunder(4000, 2), 16000);
       }
-      if (name === 'radio') b.audio.toggleRadio(b.world.state.player.drivingCarId);
+      if (name === 'radio') b.audio.cycleRadio(b.world.state.player.drivingCarId);
     }, name);
     await sleep(name === 'storm' ? 8000 : name === 'thunder' ? 0 : 4000);
     const r = await sample(page, name === 'storm' || name === 'thunder' ? 30 : 12);
@@ -88,7 +88,7 @@ try {
     });
     console.log(`\n[${name}] ${kmh} km/h${name === 'radio' ? ' ' + (await page.evaluate(() => window.__bro.audio.radioReadout)) : ''}`);
     for (const [bus, line] of Object.entries(r)) console.log(`  ${bus.padEnd(6)} ${line}`);
-    if (name === 'radio') await page.evaluate(() => window.__bro.audio.toggleRadio(window.__bro.world.state.player.drivingCarId));
+    if (name === 'radio') await page.evaluate(() => window.__bro.audio.cycleRadio(window.__bro.world.state.player.drivingCarId));
   }
 } finally {
   await browser.close();

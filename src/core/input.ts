@@ -27,9 +27,8 @@ export interface InputFrame {
   toggleRightIndicator: boolean;
   cycleCamera: boolean;
   cycleTyres: boolean;
-  /** Switch the car radio on/off, and step to the next station: taps, consumed by audio. */
-  radioToggle: boolean;
-  radioNext: boolean;
+  /** Step the car radio: off → station 1 → station 2 → off. Tap, consumed by audio. */
+  radioCycle: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
   recenterCamera: boolean;
   /** Enter/exit the car (entry needs an open or removed door): tap, consumed once by interaction. */
@@ -81,8 +80,7 @@ export function emptyInput(): InputFrame {
     toggleRightIndicator: false,
     cycleCamera: false,
     cycleTyres: false,
-    radioToggle: false,
-    radioNext: false,
+    radioCycle: false,
     recenterCamera: false,
     interact: false,
     mount: false,
@@ -138,8 +136,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'camera', label: 'Toggle hood / chase camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
-  { id: 'radio', label: 'Radio on/off', defaultKeys: ['KeyR'] },
-  { id: 'radioStation', label: 'Radio station', defaultKeys: ['KeyT'] },
+  { id: 'radio', label: 'Radio: station 1 / station 2 / off', defaultKeys: ['KeyR'] },
   { id: 'autopilot', label: 'Autopilot: sleeper / hurried / frantic / off', defaultKeys: ['KeyP'] },
   { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
   { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
@@ -511,8 +508,7 @@ export class InputReader {
       this.anyPressed(this.keys.autopilot) || taps?.autopilot === true;
     f.recenterCamera =
       this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
-    f.radioToggle = this.anyPressed(this.keys.radio);
-    f.radioNext = this.anyPressed(this.keys.radioStation);
+    f.radioCycle = this.anyPressed(this.keys.radio);
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
     f.useHeld = this.anyPressed(this.keys.useHeld) || taps?.useHeld === true;
